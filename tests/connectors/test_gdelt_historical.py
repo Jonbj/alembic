@@ -1,6 +1,6 @@
 """Tests for GDELTConnector.fetch_historical."""
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -16,6 +16,7 @@ SAMPLE_ARTICLE = {
 def make_mock_resp(articles: list[dict]) -> AsyncMock:
     resp = AsyncMock()
     resp.json = AsyncMock(return_value={"articles": articles})
+    resp.raise_for_status = MagicMock()  # synchronous in real aiohttp
     resp.__aenter__ = AsyncMock(return_value=resp)
     resp.__aexit__ = AsyncMock(return_value=None)
     return resp
