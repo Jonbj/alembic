@@ -1,0 +1,35 @@
+# LLM Trading System - Dependencies
+
+# Core
+pydantic>=2.0
+numpy>=1.24
+scipy>=1.10
+
+# Database
+psycopg2-binary>=2.9
+redis>=5.0
+
+# Async
+asyncio>=3.4
+
+# HTTP
+httpx>=0.25
+
+# API
+fastapi>=0.104
+uvicorn>=0.24
+
+# Worker
+celery>=5.4
+
+# Testing
+pytest>=7.4
+pytest-asyncio>=0.21
+
+# Text processing
+transformers>=4.40
+torch>=2.0
+tqdm>=4.66
+
+# Finance
+yfinance>=0.2.40

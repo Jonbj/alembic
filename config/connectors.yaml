@@ -1,0 +1,26 @@
+# RSS Feed Connectors Configuration
+rss_feeds:
+  - url: "https://feeds.reuters.com/reuters/businessNews"
+    source: "reuters"
+    asset_tags: ["SPY", "QQQ"]
+    poll_interval_seconds: 60
+
+  - url: "https://feeds.marketwatch.com/marketwatch/topstories/"
+    source: "marketwatch"
+    asset_tags: ["SPY"]
+    poll_interval_seconds: 60
+
+  - url: "https://www.cnbc.com/id/100003114/device/rss/rss.html"
+    source: "cnbc"
+    asset_tags: ["SPY", "QQQ", "DIA"]
+    poll_interval_seconds: 60
+
+# GDELT Connector Configuration
+gdelt:
+  poll_interval_seconds: 900
+  max_articles_per_poll: 50
+
+# SEC EDGAR Connector Configuration
+sec_edgar:
+  form_types: ["8-K", "10-Q", "10-K"]
+  poll_interval_seconds: 300

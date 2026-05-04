@@ -1,0 +1,51 @@
+# Worker Configuration
+# Loaded by ConfigLoader at startup
+
+sentiment:
+  # Ensemble thresholds
+  min_confidence: 0.4
+  divergence_std: 0.30
+
+  # Staleness filter
+  max_news_age_minutes: 30
+
+  # Retry settings
+  max_retries: 3
+  retry_delay_seconds: 0.5
+
+performance:
+  # IC calculation window
+  ic_window_days: 30
+  ic_step_days: 5
+
+  # Drift detection thresholds
+  psi_yellow: 0.10
+  psi_red: 0.25
+  psi_12m_threshold: 0.10
+
+  # Weight update smoothing
+  weight_alpha: 0.25
+  weight_min: 0.10
+  weight_max: 0.70
+  weight_change_max: 0.10
+
+  # Circuit breaker
+  consecutive_negative_ic_threshold: 5
+  vix_spike_threshold: 40.0
+  vix_1d_change_threshold: 0.30
+  max_drawdown_threshold: 0.05
+
+budget:
+  daily_limit_usd: 50.0
+  alert_threshold_percent: 80
+
+fallback:
+  max_consecutive: 3
+  qc_sizing_multiplier: 0.5
+  reset_hours: 24
+
+notifications:
+  enabled: true
+  # Telegram credentials should be in environment:
+  # TELEGRAM_BOT_TOKEN
+  # TELEGRAM_CHAT_ID
