@@ -228,3 +228,50 @@ def format_performance_report(
         + f"\nWeights:\n{weights_str}\n\n"
         f"PSI(90d): {psi_90d:.4f}"
     )
+
+
+def format_auto_apply_message(
+    new_weights: dict[str, float],
+    current_weights: dict[str, float],
+    guardrail_values: dict[str, float],
+    next_review_date,
+) -> str:
+    """Format Telegram message for successful auto-apply."""
+    lines = ["✅ <b>Pesi aggiornati automaticamente</b>\n", "📊 <b>Nuovi pesi:</b>"]
+    for model, w in sorted(new_weights.items()):
+        old_w = current_weights.get(model, 0.0)
+        delta = w - old_w
+        delta_str = f" ({delta:+.0%})" if abs(delta) >= 0.005 else " (=)"
+        lines.append(f"  {model}: {w:.0%}{delta_str}")
+
+    lines.append("\n🛡️ <b>Guardrail superati:</b>")
+    if "vix" in guardrail_values:
+        lines.append(f"  VIX: {guardrail_values['vix']:.1f}")
+    if "ic_variance" in guardrail_values:
+        lines.append(f"  IC variance: {guardrail_values['ic_variance']:.3f}")
+    if "weight_delta_max" in guardrail_values:
+        lines.append(f"  Δmax peso: {guardrail_values['weight_delta_max']:.0%}")
+
+    lines.append(f"\n🕐 Prossima revisione: {next_review_date}")
+    return "\n".join(lines)
+
+
+def format_freeze_message(
+    suggested_weights: dict[str, float],
+    current_weights: dict[str, float],
+    freeze_reason: str,
+) -> str:
+    """Format Telegram message for frozen auto-apply."""
+    lines = [
+        "⚠️ <b>Auto-apply bloccato — approvazione manuale richiesta</b>\n",
+        f"🚫 <b>Guardrail fallito:</b> {freeze_reason}\n",
+        "📊 <b>Pesi suggeriti (NON applicati):</b>",
+    ]
+    for model, w in sorted(suggested_weights.items()):
+        old_w = current_weights.get(model, 0.0)
+        delta = w - old_w
+        delta_str = f" ({delta:+.0%})" if abs(delta) >= 0.005 else " (=)"
+        lines.append(f"  {model}: {w:.0%}{delta_str}")
+
+    lines.append("\n👉 Approva manualmente: POST /api/weights/approve")
+    return "\n".join(lines)
