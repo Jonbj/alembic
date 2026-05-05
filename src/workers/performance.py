@@ -18,7 +18,14 @@ import psycopg2
 
 from src.config import config
 from src.models.performance import PerformanceReport, PostMortem
-from src.notifications.telegram import TelegramNotifier, format_auto_apply_message, format_freeze_message
+import hashlib
+
+from src.notifications.telegram import (
+    TelegramNotifier,
+    format_auto_apply_message,
+    format_freeze_message,
+    format_freeze_message_with_keyboard,
+)
 from src.performance.drift import (
     CircuitBreakerContext,
     check_circuit_breakers,
@@ -729,8 +736,15 @@ def check_and_apply_weights():
             note=f"Auto-apply blocked: {freeze_reason}",
             approved_by="system",
         )
-        msg = format_freeze_message(suggested_weights, current_weights, freeze_reason)
-        asyncio.run(notifier.send_alert(msg, level="warning"))
+        # Send freeze message with inline keyboard for approval
+        computed_at = suggestion.get("computed_at", datetime.now(timezone.utc).isoformat())
+        token = hashlib.sha256(computed_at.encode()).hexdigest()[:8]
+        msg, keyboard = format_freeze_message_with_keyboard(
+            suggested_weights, current_weights, freeze_reason, token
+        )
+        message_id = asyncio.run(notifier.send_message_with_keyboard(msg, keyboard))
+        if message_id:
+            log.info("Freeze message sent with keyboard: message_id=%d", message_id)
         log.info("Auto-apply frozen: %s", freeze_reason)
     else:
         redis.set_ensemble_weights(suggested_weights, source="auto_apply")
