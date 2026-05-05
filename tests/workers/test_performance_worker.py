@@ -797,7 +797,7 @@ class TestCheckAndApplyWeights:
             from src.workers.performance import check_and_apply_weights
             check_and_apply_weights()
 
-        redis._r.delete.assert_called_once_with("ensemble:weights:suggestion:snapshot")
+        redis.delete_suggestion_snapshot.assert_called_once()
 
     def test_g3_missing_purified_icir_freezes(self):
         """G3: empty purified_icir → freeze with 'missing' reason."""

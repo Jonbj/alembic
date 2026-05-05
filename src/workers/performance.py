@@ -643,7 +643,7 @@ def _get_vix(redis: RedisStore) -> float | None:
         )
         redis.set_vix_cached(vix, ttl=config.AUTO_APPLY_VIX_REDIS_TTL_SECONDS)
         return vix
-    except (httpx.HTTPError, ValueError, TimeoutError) as e:
+    except (httpx.HTTPError, httpx.RequestError, ValueError) as e:
         log.warning("Failed to fetch VIX from FRED: %s", e)
         return None
 
@@ -676,6 +676,12 @@ def check_and_apply_weights():
     purified_icir = suggestion.get("purified_icir", {})
 
     freeze_reason = None
+    ic_variance: float | None = None
+    max_delta: float | None = None
+
+    # Fetch current weights once — used in G4 and in both audit/notify branches
+    stored = redis.get_current_weights_stored()
+    current_weights = (stored or {}).get("weights", {})
 
     # G2: VIX
     vix = _get_vix(redis)
@@ -697,11 +703,9 @@ def check_and_apply_weights():
 
     # G4: weight delta
     if freeze_reason is None:
-        stored = redis.get_current_weights_stored()
         if stored is None:
             freeze_reason = "current weights unavailable (fail-safe)"
         else:
-            current_weights = stored.get("weights", {})
             all_models = set(suggested_weights) | set(current_weights)
             max_delta = max(
                 abs(suggested_weights.get(m, 0.0) - current_weights.get(m, 0.0))
@@ -711,10 +715,6 @@ def check_and_apply_weights():
                 freeze_reason = (
                     f"max weight delta = {max_delta:.3f} >= {config.AUTO_APPLY_WEIGHT_DELTA_MAX}"
                 )
-
-    # Extract current weights once (used in both branches)
-    stored = redis.get_current_weights_stored()
-    current_weights = (stored or {}).get("weights", {})
 
     pg = PostgreSQLStore()
     notifier = TelegramNotifier()
@@ -733,15 +733,8 @@ def check_and_apply_weights():
         asyncio.run(notifier.send_alert(msg, level="warning"))
         log.info("Auto-apply frozen: %s", freeze_reason)
     else:
-        ic_variance = float(np.std(list(purified_icir.values())))
-        all_models = set(suggested_weights) | set(current_weights)
-        max_delta = max(
-            abs(suggested_weights.get(m, 0.0) - current_weights.get(m, 0.0))
-            for m in all_models
-        )
-
         redis.set_ensemble_weights(suggested_weights, source="auto_apply")
-        redis._r.delete("ensemble:weights:suggestion:snapshot")
+        redis.delete_suggestion_snapshot()
 
         pg.log_weight_update(
             source="auto_apply",

@@ -274,7 +274,7 @@ def format_freeze_message(
     for model, w in sorted(suggested_weights.items()):
         old_w = current_weights.get(model, 0.0)
         delta = w - old_w
-        delta_str = f" ({delta:+.0%})" if abs(delta) >= 0.005 else " (=)"
+        delta_str = f" ({delta:+.0%})" if abs(delta) >= _DELTA_DISPLAY_THRESHOLD else " (=)"
         lines.append(f"  {model}: {w:.0%}{delta_str}")
 
     lines.append("\n👉 Approva manualmente: POST /api/weights/approve")

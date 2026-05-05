@@ -356,6 +356,10 @@ class RedisStore:
         """Cache VIX value in Redis with TTL in seconds."""
         self._r.setex("macro:vix:latest", ttl, str(value))
 
+    def delete_suggestion_snapshot(self) -> None:
+        """Delete the weight suggestion snapshot key."""
+        self._r.delete("ensemble:weights:suggestion:snapshot")
+
     # =========================================================================
     # OPERATING MODE
     # =========================================================================
