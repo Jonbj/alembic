@@ -395,6 +395,47 @@ class TestRegimeRedis:
         mock_redis.setex.assert_called_once_with("qc:sizing_multiplier", 90000, "1.0")
 
 
+class TestTelegramPollerOffset:
+    """Tests for RedisStore.get_offset() and set_offset()."""
+
+    def test_get_offset_returns_int_when_key_exists(self):
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = b"12345"
+
+        store = RedisStore(redis_client=mock_redis)
+        result = store.get_offset()
+
+        assert result == 12345
+        mock_redis.get.assert_called_once_with("telegram:poller:offset")
+
+    def test_get_offset_returns_none_when_absent(self):
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = None
+
+        store = RedisStore(redis_client=mock_redis)
+        assert store.get_offset() is None
+
+    def test_set_offset_stores_value(self):
+        mock_redis = MagicMock()
+
+        store = RedisStore(redis_client=mock_redis)
+        store.set_offset(12345)
+
+        mock_redis.set.assert_called_once_with("telegram:poller:offset", 12345)
+
+
+class TestDeleteWeightSuggestion:
+    """Tests for RedisStore.delete_weight_suggestion()."""
+
+    def test_deletes_suggestion_key(self):
+        mock_redis = MagicMock()
+
+        store = RedisStore(redis_client=mock_redis)
+        store.delete_weight_suggestion()
+
+        mock_redis.delete.assert_called_once_with("ensemble:weights:suggestion")
+
+
 class TestDepsInitClose:
     """Test deps.init_redis() / deps.close_redis() lifecycle helpers."""
 

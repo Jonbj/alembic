@@ -361,6 +361,23 @@ class RedisStore:
         self._r.delete("ensemble:weights:suggestion:snapshot")
 
     # =========================================================================
+    # TELEGRAM POLLER OFFSET
+    # =========================================================================
+
+    def get_offset(self) -> int | None:
+        """Get stored Telegram update offset. Returns None if not set."""
+        raw = self._r.get("telegram:poller:offset")
+        return int(raw) if raw else None
+
+    def set_offset(self, offset: int) -> None:
+        """Store Telegram update offset."""
+        self._r.set("telegram:poller:offset", offset)
+
+    def delete_weight_suggestion(self) -> None:
+        """Delete the weight suggestion key after approval/rejection."""
+        self._r.delete("ensemble:weights:suggestion")
+
+    # =========================================================================
     # REGIME DETECTION
     # =========================================================================
 
