@@ -284,6 +284,35 @@ class TestGetCurrentWeightsStored:
         assert store.get_current_weights_stored() is None
 
 
+class TestVixCache:
+    """Tests for RedisStore.get_vix_cached() and set_vix_cached()."""
+
+    def test_get_returns_float_when_key_exists(self):
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = b"18.45"
+
+        store = RedisStore(redis_client=mock_redis)
+        result = store.get_vix_cached()
+
+        assert result == pytest.approx(18.45)
+        mock_redis.get.assert_called_once_with("macro:vix:latest")
+
+    def test_get_returns_none_when_absent(self):
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = None
+
+        store = RedisStore(redis_client=mock_redis)
+        assert store.get_vix_cached() is None
+
+    def test_set_stores_with_ttl(self):
+        mock_redis = MagicMock()
+
+        store = RedisStore(redis_client=mock_redis)
+        store.set_vix_cached(18.45, ttl=3600)
+
+        mock_redis.setex.assert_called_once_with("macro:vix:latest", 3600, "18.45")
+
+
 class TestDepsInitClose:
     """Test deps.init_redis() / deps.close_redis() lifecycle helpers."""
 

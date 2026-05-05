@@ -340,6 +340,17 @@ class RedisStore:
             return None
         return json.loads(raw)
 
+    def get_vix_cached(self) -> float | None:
+        """Get cached VIX value from Redis. Returns None if absent."""
+        raw = self._r.get("macro:vix:latest")
+        if raw is None:
+            return None
+        return float(raw)
+
+    def set_vix_cached(self, value: float, ttl: int = 3600) -> None:
+        """Cache VIX value in Redis with TTL in seconds."""
+        self._r.setex("macro:vix:latest", ttl, str(value))
+
     # =========================================================================
     # OPERATING MODE
     # =========================================================================
