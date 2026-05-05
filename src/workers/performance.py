@@ -416,6 +416,9 @@ def run_weekly_weights():
 
         log.info(f"Weekly weights computed. Suggestion stored in Redis.")
 
+        # Chain: trigger guardrail check 5s after suggestion is stored in Redis
+        check_and_apply_weights.apply_async(countdown=5)
+
     except Exception as e:
         log.exception(f"Weekly weight computation failed: {e}")
         raise

@@ -318,12 +318,13 @@ class TestRunDailyReport:
 class TestRunWeeklyWeights:
     """Tests for run_weekly_weights Celery task."""
 
+    @patch("src.workers.performance.check_and_apply_weights")
     @patch("src.workers.performance.compute_purified_icir")
     @patch("src.workers.performance._fetch_all_signals_for_ic")
     @patch("src.workers.performance.RedisStore")
     @patch("src.workers.performance.TelegramNotifier")
     def test_run_weekly_weights_observational(
-        self, mock_notifier_cls, mock_redis_cls, mock_fetch_cls, mock_purified_cls
+        self, mock_notifier_cls, mock_redis_cls, mock_fetch_cls, mock_purified_cls, mock_apply_task
     ):
         """Test weekly weights computation is observational (no auto-apply)."""
         # Mock _fetch_all_signals_for_ic directly to return aggregated rows
@@ -361,6 +362,9 @@ class TestRunWeeklyWeights:
 
         # Verify Telegram alert was sent
         mock_notifier.send_alert.assert_called()
+
+        # Verify check_and_apply_weights was chained
+        mock_apply_task.apply_async.assert_called_once_with(countdown=5)
 
     @patch("src.workers.performance._fetch_all_signals_for_ic")
     @patch("src.workers.performance.RedisStore")
