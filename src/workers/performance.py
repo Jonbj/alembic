@@ -621,3 +621,142 @@ def check_suggestion_expiry():
 
     # Clean up snapshot
     redis._r.delete("ensemble:weights:suggestion:snapshot")
+
+
+def _get_vix(redis: "RedisStore") -> float | None:
+    """Return VIX from Redis cache, fetching from FRED on cache miss.
+
+    Returns None if both cache and FRED are unavailable (caller treats as fail-safe freeze).
+    """
+    cached = redis.get_vix_cached()
+    if cached is not None:
+        return cached
+    try:
+        from src.connectors.macro import fetch_vix_from_fred
+        vix = fetch_vix_from_fred(
+            series_id=config.AUTO_APPLY_VIX_FRED_SERIES,
+            api_key=config.FRED_API_KEY,
+        )
+        redis.set_vix_cached(vix, ttl=config.AUTO_APPLY_VIX_REDIS_TTL_SECONDS)
+        return vix
+    except Exception as e:
+        log.warning("Failed to fetch VIX from FRED: %s", e)
+        return None
+
+
+@app.task(name="src.workers.performance.check_and_apply_weights")
+def check_and_apply_weights():
+    """Apply suggested ensemble weights if all guardrails pass.
+
+    Guardrails evaluated in sequence — first failure stops evaluation:
+      G1: AUTO_APPLY_ENABLED flag (silent exit if disabled)
+      G2: VIX < vix_threshold (FRED via Redis cache; fail-safe freeze if unavailable)
+      G3: std(purified_icir) < ic_variance_threshold
+      G4: max(|Δweight|) < weight_delta_max vs current weights
+
+    On pass: applies weights, logs source='auto_apply', sends Telegram ✅
+    On fail: no change, logs source='freeze', sends Telegram ⚠️
+    On no suggestion: silent exit
+    """
+    redis = RedisStore()
+
+    suggestion = redis.get_weight_suggestion()
+    if suggestion is None:
+        return
+
+    # G1: toggle (silent exit — disabled is a normal operational state)
+    if not config.AUTO_APPLY_ENABLED:
+        return
+
+    suggested_weights = suggestion.get("suggested_weights", {})
+    purified_icir = suggestion.get("purified_icir", {})
+
+    freeze_reason = None
+
+    # G2: VIX
+    vix = _get_vix(redis)
+    if vix is None:
+        freeze_reason = "VIX data unavailable (fail-safe)"
+    elif vix >= config.AUTO_APPLY_VIX_THRESHOLD:
+        freeze_reason = f"VIX = {vix:.1f} >= {config.AUTO_APPLY_VIX_THRESHOLD}"
+
+    # G3: IC variance
+    if freeze_reason is None:
+        if not purified_icir:
+            freeze_reason = "purified_icir missing from suggestion"
+        else:
+            ic_variance = float(np.std(list(purified_icir.values())))
+            if ic_variance >= config.AUTO_APPLY_IC_VARIANCE_THRESHOLD:
+                freeze_reason = (
+                    f"IC variance = {ic_variance:.3f} >= {config.AUTO_APPLY_IC_VARIANCE_THRESHOLD}"
+                )
+
+    # G4: weight delta
+    if freeze_reason is None:
+        stored = redis.get_current_weights_stored()
+        if stored is None:
+            freeze_reason = "current weights unavailable (fail-safe)"
+        else:
+            current_weights = stored.get("weights", {})
+            all_models = set(suggested_weights) | set(current_weights)
+            max_delta = max(
+                abs(suggested_weights.get(m, 0.0) - current_weights.get(m, 0.0))
+                for m in all_models
+            )
+            if max_delta >= config.AUTO_APPLY_WEIGHT_DELTA_MAX:
+                freeze_reason = (
+                    f"max weight delta = {max_delta:.3f} >= {config.AUTO_APPLY_WEIGHT_DELTA_MAX}"
+                )
+
+    pg = PostgreSQLStore()
+    notifier = TelegramNotifier()
+
+    if freeze_reason:
+        stored = redis.get_current_weights_stored()
+        current_weights = (stored or {}).get("weights", {})
+        pg.log_weight_update(
+            source="freeze",
+            applied_weights=current_weights,
+            suggested_weights=suggested_weights,
+            purified_icir=purified_icir,
+            freeze_reason=freeze_reason,
+            note=f"Auto-apply blocked: {freeze_reason}",
+            approved_by="system",
+        )
+        from src.notifications.telegram import format_freeze_message
+        msg = format_freeze_message(suggested_weights, current_weights, freeze_reason)
+        asyncio.run(notifier.send_alert(msg, level="warning"))
+        log.info("Auto-apply frozen: %s", freeze_reason)
+    else:
+        stored = redis.get_current_weights_stored()
+        current_weights = (stored or {}).get("weights", {})
+        ic_variance = float(np.std(list(purified_icir.values())))
+        all_models = set(suggested_weights) | set(current_weights)
+        max_delta = max(
+            abs(suggested_weights.get(m, 0.0) - current_weights.get(m, 0.0))
+            for m in all_models
+        )
+
+        redis.set_ensemble_weights(suggested_weights, source="auto_apply")
+        redis._r.delete("ensemble:weights:suggestion:snapshot")
+
+        pg.log_weight_update(
+            source="auto_apply",
+            applied_weights=suggested_weights,
+            suggested_weights=suggested_weights,
+            purified_icir=purified_icir,
+            freeze_reason=None,
+            note=json.dumps({"vix": vix, "ic_variance": ic_variance, "max_delta": max_delta}),
+            approved_by="system",
+        )
+
+        from datetime import timedelta
+        from src.notifications.telegram import format_auto_apply_message
+        next_review = (datetime.now(timezone.utc) + timedelta(days=7)).date()
+        msg = format_auto_apply_message(
+            suggested_weights, current_weights,
+            {"vix": vix, "ic_variance": ic_variance, "weight_delta_max": max_delta},
+            next_review,
+        )
+        asyncio.run(notifier.send_alert(msg, level="info"))
+        log.info("Weights auto-applied successfully")

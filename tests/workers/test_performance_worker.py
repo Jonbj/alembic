@@ -586,3 +586,211 @@ class TestCheckSuggestionExpiry:
         mock_pg.log_weight_update.assert_not_called()
         # Should delete invalid snapshot
         mock_redis_client.delete.assert_called_once_with("ensemble:weights:suggestion:snapshot")
+
+
+class TestCheckAndApplyWeights:
+    """Tests for check_and_apply_weights Celery task."""
+
+    SUGGESTION = {
+        "suggested_weights": {
+            "opus": 0.45,
+            "qwen3.5:cloud": 0.35,
+            "deepseek-v4-pro:cloud": 0.20,
+        },
+        "purified_icir": {
+            "opus": 0.31,
+            "qwen3.5:cloud": 0.18,
+            "deepseek-v4-pro:cloud": 0.09,
+        },
+        "freeze_reason": "",
+        "computed_at": "2026-05-04T08:00:00+00:00",
+    }
+    CURRENT = {"weights": {"opus": 0.34, "qwen3.5:cloud": 0.33, "deepseek-v4-pro:cloud": 0.33}, "source": "suggestion"}
+
+    def _make_redis(self, suggestion=None, current=None, vix_cached=None):
+        mock = MagicMock()
+        mock.get_weight_suggestion.return_value = suggestion if suggestion is not None else self.SUGGESTION
+        mock.get_current_weights_stored.return_value = current if current is not None else self.CURRENT
+        mock.get_vix_cached.return_value = vix_cached
+        mock.set_vix_cached = MagicMock()
+        mock.set_ensemble_weights = MagicMock()
+        mock._r = MagicMock()
+        return mock
+
+    def _make_config(self, enabled=True, vix_threshold=30.0, ic_var_threshold=0.15, delta_max=0.15):
+        from src.config import Config
+        return Config(
+            ADMIN_API_KEY="test-api-key-for-testing-only-12345678",
+            DATABASE_URL="postgresql://localhost:5432/test",
+            AUTO_APPLY_ENABLED=enabled,
+            AUTO_APPLY_VIX_THRESHOLD=vix_threshold,
+            AUTO_APPLY_IC_VARIANCE_THRESHOLD=ic_var_threshold,
+            AUTO_APPLY_WEIGHT_DELTA_MAX=delta_max,
+            AUTO_APPLY_VIX_REDIS_TTL_SECONDS=3600,
+            AUTO_APPLY_VIX_FRED_SERIES="VIXCLS",
+        )
+
+    def test_all_guardrails_pass_applies_weights(self):
+        """All guardrails pass → weights applied, log source='auto_apply', Telegram ✅."""
+        redis = self._make_redis(vix_cached=18.4)
+        pg = MagicMock()
+        notifier = MagicMock()
+        notifier.send_alert = AsyncMock()
+        cfg = self._make_config()
+
+        with patch("src.workers.performance.RedisStore", return_value=redis), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=pg), \
+             patch("src.workers.performance.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.performance.config", cfg):
+            from src.workers.performance import check_and_apply_weights
+            check_and_apply_weights()
+
+        redis.set_ensemble_weights.assert_called_once_with(
+            self.SUGGESTION["suggested_weights"], source="auto_apply"
+        )
+        pg.log_weight_update.assert_called_once()
+        assert pg.log_weight_update.call_args.kwargs["source"] == "auto_apply"
+        assert pg.log_weight_update.call_args.kwargs["approved_by"] == "system"
+        notifier.send_alert.assert_called_once()
+        assert "✅" in notifier.send_alert.call_args[0][0]
+
+    def test_g1_disabled_exits_silently(self):
+        """G1: auto_apply_enabled=False → silent exit, no log, no Telegram."""
+        redis = self._make_redis(vix_cached=18.4)
+        pg = MagicMock()
+        notifier = MagicMock()
+        cfg = self._make_config(enabled=False)
+
+        with patch("src.workers.performance.RedisStore", return_value=redis), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=pg), \
+             patch("src.workers.performance.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.performance.config", cfg):
+            from src.workers.performance import check_and_apply_weights
+            check_and_apply_weights()
+
+        pg.log_weight_update.assert_not_called()
+        notifier.send_alert.assert_not_called()
+        redis.set_ensemble_weights.assert_not_called()
+
+    def test_g2_vix_too_high_freezes(self):
+        """G2: VIX >= threshold → freeze, log source='freeze', Telegram ⚠️."""
+        redis = self._make_redis(vix_cached=38.5)
+        pg = MagicMock()
+        notifier = MagicMock()
+        notifier.send_alert = AsyncMock()
+        cfg = self._make_config(vix_threshold=30.0)
+
+        with patch("src.workers.performance.RedisStore", return_value=redis), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=pg), \
+             patch("src.workers.performance.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.performance.config", cfg):
+            from src.workers.performance import check_and_apply_weights
+            check_and_apply_weights()
+
+        redis.set_ensemble_weights.assert_not_called()
+        assert pg.log_weight_update.call_args.kwargs["source"] == "freeze"
+        assert "VIX" in pg.log_weight_update.call_args.kwargs["note"]
+        assert "⚠️" in notifier.send_alert.call_args[0][0]
+
+    def test_g2_fred_unavailable_freezes(self):
+        """G2: FRED fetch fails → guardrail fails (fail-safe) → freeze."""
+        redis = self._make_redis(vix_cached=None)  # cache miss
+        pg = MagicMock()
+        notifier = MagicMock()
+        notifier.send_alert = AsyncMock()
+        cfg = self._make_config()
+
+        with patch("src.workers.performance.RedisStore", return_value=redis), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=pg), \
+             patch("src.workers.performance.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.performance.config", cfg), \
+             patch("src.workers.performance._get_vix", return_value=None):
+            from src.workers.performance import check_and_apply_weights
+            check_and_apply_weights()
+
+        redis.set_ensemble_weights.assert_not_called()
+        assert pg.log_weight_update.call_args.kwargs["source"] == "freeze"
+
+    def test_g3_ic_variance_too_high_freezes(self):
+        """G3: std(purified_icir) >= threshold → freeze."""
+        # Large spread across IC values → high variance
+        high_var_suggestion = {
+            **self.SUGGESTION,
+            "purified_icir": {"opus": 2.0, "qwen3.5:cloud": 0.01, "deepseek-v4-pro:cloud": 0.01},
+        }
+        redis = self._make_redis(suggestion=high_var_suggestion, vix_cached=18.4)
+        pg = MagicMock()
+        notifier = MagicMock()
+        notifier.send_alert = AsyncMock()
+        cfg = self._make_config(ic_var_threshold=0.15)
+
+        with patch("src.workers.performance.RedisStore", return_value=redis), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=pg), \
+             patch("src.workers.performance.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.performance.config", cfg):
+            from src.workers.performance import check_and_apply_weights
+            check_and_apply_weights()
+
+        redis.set_ensemble_weights.assert_not_called()
+        assert pg.log_weight_update.call_args.kwargs["source"] == "freeze"
+
+    def test_g4_weight_delta_too_large_freezes(self):
+        """G4: max weight delta >= threshold → freeze."""
+        big_delta_suggestion = {
+            **self.SUGGESTION,
+            "suggested_weights": {
+                "opus": 0.90,  # +56pp vs current 0.34
+                "qwen3.5:cloud": 0.05,
+                "deepseek-v4-pro:cloud": 0.05,
+            },
+        }
+        redis = self._make_redis(suggestion=big_delta_suggestion, vix_cached=18.4)
+        pg = MagicMock()
+        notifier = MagicMock()
+        notifier.send_alert = AsyncMock()
+        cfg = self._make_config(delta_max=0.15)
+
+        with patch("src.workers.performance.RedisStore", return_value=redis), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=pg), \
+             patch("src.workers.performance.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.performance.config", cfg):
+            from src.workers.performance import check_and_apply_weights
+            check_and_apply_weights()
+
+        redis.set_ensemble_weights.assert_not_called()
+        assert pg.log_weight_update.call_args.kwargs["source"] == "freeze"
+
+    def test_no_suggestion_exits_silently(self):
+        """No suggestion in Redis → silent exit, no log, no Telegram."""
+        redis = self._make_redis(suggestion=None)
+        redis.get_weight_suggestion.return_value = None
+        pg = MagicMock()
+        notifier = MagicMock()
+        cfg = self._make_config()
+
+        with patch("src.workers.performance.RedisStore", return_value=redis), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=pg), \
+             patch("src.workers.performance.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.performance.config", cfg):
+            from src.workers.performance import check_and_apply_weights
+            check_and_apply_weights()
+
+        pg.log_weight_update.assert_not_called()
+        notifier.send_alert.assert_not_called()
+
+    def test_apply_deletes_snapshot_key(self):
+        """Successful apply deletes ensemble:weights:suggestion:snapshot from Redis."""
+        redis = self._make_redis(vix_cached=18.4)
+        pg = MagicMock()
+        notifier = MagicMock()
+        notifier.send_alert = AsyncMock()
+        cfg = self._make_config()
+
+        with patch("src.workers.performance.RedisStore", return_value=redis), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=pg), \
+             patch("src.workers.performance.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.performance.config", cfg):
+            from src.workers.performance import check_and_apply_weights
+            check_and_apply_weights()
+
+        redis._r.delete.assert_called_once_with("ensemble:weights:suggestion:snapshot")
