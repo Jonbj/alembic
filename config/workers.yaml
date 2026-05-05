@@ -58,3 +58,14 @@ auto_apply:
   weight_delta_max: 0.15         # block if any weight changes by >= 15pp
   vix_redis_ttl_seconds: 3600    # cache VIX in Redis for 1 hour
   vix_fred_series: "VIXCLS"      # FRED series ID for daily VIX
+
+regime:
+  schedule: "0 7 * * 1-5"     # 07:00 UTC, Mon-Fri (pre-market US)
+  llm_model_1: opus            # override with REGIME_LLM_MODEL_1 env var
+  llm_model_2: qwen3.5:cloud   # override with REGIME_LLM_MODEL_2 env var
+  multipliers:
+    bull: 1.0
+    sideways: 0.7
+    bear: 0.4
+    high_vol: 0.2
+  redis_ttl_seconds: 90000     # 25h

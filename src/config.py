@@ -96,6 +96,29 @@ class Config(BaseModel):
         default_factory=lambda: os.environ.get("AUTO_APPLY_VIX_FRED_SERIES", "VIXCLS")
     )  # FRED series ID for daily VIX data
 
+    # Regime detection
+    REGIME_LLM_MODEL_1: str = Field(
+        default_factory=lambda: os.environ.get("REGIME_LLM_MODEL_1", "opus")
+    )
+    REGIME_LLM_MODEL_2: str = Field(
+        default_factory=lambda: os.environ.get("REGIME_LLM_MODEL_2", "qwen3.5:cloud")
+    )
+    REGIME_MULTIPLIER_BULL: float = Field(
+        default_factory=lambda: float(os.environ.get("REGIME_MULTIPLIER_BULL", "1.0"))
+    )
+    REGIME_MULTIPLIER_SIDEWAYS: float = Field(
+        default_factory=lambda: float(os.environ.get("REGIME_MULTIPLIER_SIDEWAYS", "0.7"))
+    )
+    REGIME_MULTIPLIER_BEAR: float = Field(
+        default_factory=lambda: float(os.environ.get("REGIME_MULTIPLIER_BEAR", "0.4"))
+    )
+    REGIME_MULTIPLIER_HIGH_VOL: float = Field(
+        default_factory=lambda: float(os.environ.get("REGIME_MULTIPLIER_HIGH_VOL", "0.2"))
+    )
+    REGIME_REDIS_TTL_SECONDS: int = Field(
+        default_factory=lambda: int(os.environ.get("REGIME_REDIS_TTL_SECONDS", "90000"))
+    )  # 25h — slightly more than 24h so regime doesn't expire before next run
+
     @field_validator("ADMIN_API_KEY")
     @classmethod
     def validate_api_key(cls, v: str) -> str:
