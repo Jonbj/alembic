@@ -279,3 +279,39 @@ def format_freeze_message(
 
     lines.append("\n👉 Approva manualmente: POST /api/weights/approve")
     return "\n".join(lines)
+
+
+def format_regime_message(
+    state: "RegimeState",
+    previous_regime: str | None,
+    disagreement: bool,
+) -> str:
+    """Format Telegram message for a regime change notification."""
+    from src.models.regime import RegimeState  # type: ignore[name-defined]
+
+    regime_upper = state.regime.upper()
+    mult = state.multiplier
+
+    if previous_regime:
+        header = f"📊 <b>Regime: {previous_regime.upper()} → {regime_upper}</b> (×{mult})"
+    else:
+        header = f"📊 <b>Regime iniziale: {regime_upper}</b> (×{mult})"
+
+    snap = state.macro_snapshot
+    data_line = (
+        f"VIX: {snap.vix:.1f} | T10Y2Y: {snap.yield_curve:.2f}% | SPY 20d: {snap.spy_momentum_20d:+.1f}%"
+    )
+
+    lines = [header, data_line]
+
+    if state.llm_outputs:
+        reasoning = state.llm_outputs[0].get("reasoning", "")
+        if reasoning:
+            lines.append(f"Reasoning: {reasoning}")
+
+    if disagreement and len(state.llm_outputs) >= 2:
+        r1 = state.llm_outputs[0].get("regime", "?")
+        r2 = state.llm_outputs[1].get("regime", "?")
+        lines.append(f"⚠️ Disaccordo LLM: {r1} vs {r2} → applico {state.regime}")
+
+    return "\n".join(lines)

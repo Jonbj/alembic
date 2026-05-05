@@ -1,6 +1,6 @@
 """Tests for Telegram notification formatters."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -85,3 +85,56 @@ class TestFormatFreezeMessage:
             freeze_reason="IC variance too high",
         )
         assert "/api/weights/approve" in msg
+
+
+class TestFormatRegimeMessage:
+    def _make_state(self, regime="bear", disagreement=False, prev_regime_in_outputs=None):
+        from src.models.regime import MacroSnapshot, RegimeState
+        outputs = [
+            {"regime": prev_regime_in_outputs or regime, "reasoning": "Inverted curve"},
+            {"regime": regime, "reasoning": "Selloff"},
+        ]
+        return RegimeState(
+            regime=regime,
+            multiplier={"bull": 1.0, "sideways": 0.7, "bear": 0.4, "high_vol": 0.2}[regime],
+            macro_snapshot=MacroSnapshot(vix=28.4, yield_curve=-0.6, spy_momentum_20d=-7.1),
+            llm_outputs=outputs,
+            disagreement=disagreement,
+            detected_at=datetime(2026, 5, 5, 7, 0, 0, tzinfo=timezone.utc),
+        )
+
+    def test_regime_change_shows_arrow(self):
+        from src.notifications.telegram import format_regime_message
+        state = self._make_state("bear")
+        msg = format_regime_message(state, previous_regime="bull", disagreement=False)
+        assert "BULL" in msg
+        assert "BEAR" in msg
+        assert "→" in msg
+        assert "0.4" in msg
+
+    def test_first_run_no_arrow(self):
+        from src.notifications.telegram import format_regime_message
+        state = self._make_state("bull")
+        msg = format_regime_message(state, previous_regime=None, disagreement=False)
+        assert "→" not in msg
+        assert "BULL" in msg
+
+    def test_disagreement_note_included(self):
+        from src.notifications.telegram import format_regime_message
+        state = self._make_state("bear", disagreement=True, prev_regime_in_outputs="bull")
+        msg = format_regime_message(state, previous_regime="sideways", disagreement=True)
+        assert "Disaccordo" in msg
+
+    def test_macro_data_shown(self):
+        from src.notifications.telegram import format_regime_message
+        state = self._make_state("bear")
+        msg = format_regime_message(state, previous_regime=None, disagreement=False)
+        assert "28.4" in msg
+        assert "-0.60" in msg or "-0.6" in msg
+        assert "-7.1" in msg
+
+    def test_reasoning_included(self):
+        from src.notifications.telegram import format_regime_message
+        state = self._make_state("bear")
+        msg = format_regime_message(state, previous_regime=None, disagreement=False)
+        assert "Inverted curve" in msg
