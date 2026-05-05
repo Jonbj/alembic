@@ -9,7 +9,7 @@ from src.models.regime import MacroSnapshot, RegimeOutput, RegimeState
 
 
 class TestDetectRegime:
-    """8 scenarios covering all consensus branches including invalid regime."""
+    """10 scenarios covering all consensus branches, validation, and edge cases."""
 
     BULL = RegimeOutput(regime="bull", confidence=0.85, reasoning="uptrend", data_quality="complete")
     BEAR = RegimeOutput(regime="bear", confidence=0.78, reasoning="downturn", data_quality="complete")
@@ -107,6 +107,44 @@ class TestDetectRegime:
              patch("src.workers.regime._make_llm_client", return_value=MagicMock()), \
              patch("src.workers.regime.config", cfg), \
              patch("src.workers.regime.fetch_vix_from_fred", return_value=18.4), \
+             patch("src.workers.regime.fetch_yield_curve", return_value=0.3), \
+             patch("src.workers.regime.fetch_spy_momentum_20d", return_value=4.2):
+            from src.workers.regime import detect_regime
+            detect_regime()
+
+        redis.set_regime.assert_not_called()
+        redis.set_qc_sizing_multiplier.assert_not_called()
+        notifier.send_alert.assert_called_once()
+        msg = notifier.send_alert.call_args[0][0]
+        assert "🚨" in msg
+
+    # 9. One LLM fails, other has partial data → Redis unchanged, Telegram ⚠️
+    def test_one_llm_fails_other_partial_no_redis_write(self):
+        partial_output = RegimeOutput(regime="bull", confidence=0.5, reasoning="x", data_quality="partial")
+        redis = self._make_redis()
+        notifier = MagicMock()
+        notifier.send_alert = AsyncMock()
+        cfg = self._make_config()
+
+        self._run((None, partial_output), redis, notifier, cfg)
+
+        redis.set_regime.assert_not_called()
+        redis.set_qc_sizing_multiplier.assert_not_called()
+        notifier.send_alert.assert_called_once()
+        msg = notifier.send_alert.call_args[0][0]
+        assert "⚠️" in msg
+
+    # 10. VIX out of range → Redis unchanged, Telegram 🚨
+    def test_vix_out_of_range_no_redis_write(self):
+        redis = self._make_redis()
+        notifier = MagicMock()
+        notifier.send_alert = AsyncMock()
+        cfg = self._make_config()
+
+        with patch("src.workers.regime.RedisStore", return_value=redis), \
+             patch("src.workers.regime.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.regime.config", cfg), \
+             patch("src.workers.regime.fetch_vix_from_fred", return_value=3.0), \
              patch("src.workers.regime.fetch_yield_curve", return_value=0.3), \
              patch("src.workers.regime.fetch_spy_momentum_20d", return_value=4.2):
             from src.workers.regime import detect_regime

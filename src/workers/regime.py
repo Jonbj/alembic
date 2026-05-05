@@ -132,6 +132,38 @@ def detect_regime() -> None:
             log.exception("Failed to send Telegram alert for macro fetch failure")
         return
 
+    # 1b. Validate macro data ranges
+    if not (5.0 <= vix <= 100.0):
+        log.error("VIX out of reasonable range: %.1f", vix)
+        try:
+            asyncio.run(notifier.send_alert(
+                f"🚨 RegimeDetector: VIX fuori range ({vix:.1f}). Regime invariato.",
+                level="error",
+            ))
+        except Exception:
+            log.exception("Failed to send Telegram alert for VIX validation")
+        return
+    if not (-5.0 <= yield_curve <= 5.0):
+        log.error("Yield curve out of reasonable range: %.2f%%", yield_curve)
+        try:
+            asyncio.run(notifier.send_alert(
+                f"🚨 RegimeDetector: yield curve fuori range ({yield_curve:.2f}%). Regime invariato.",
+                level="error",
+            ))
+        except Exception:
+            log.exception("Failed to send Telegram alert for yield curve validation")
+        return
+    if not (-50.0 <= spy_momentum <= 50.0):
+        log.error("SPY momentum out of reasonable range: %.1f%%", spy_momentum)
+        try:
+            asyncio.run(notifier.send_alert(
+                f"🚨 RegimeDetector: SPY momentum fuori range ({spy_momentum:+.1f}%). Regime invariato.",
+                level="error",
+            ))
+        except Exception:
+            log.exception("Failed to send Telegram alert for SPY momentum validation")
+        return
+
     # 2. Run 2 LLMs in parallel
     prompt = _build_prompt(vix, yield_curve, spy_momentum)
     client1 = _make_llm_client(config.REGIME_LLM_MODEL_1)
@@ -152,11 +184,33 @@ def detect_regime() -> None:
 
     # CASO 2: one fails — use the other for both
     if r1 is None:
+        # LLM-1 failed, check if LLM-2 has partial data
+        if r2.data_quality == "partial":
+            log.warning("LLM-1 failed, LLM-2 has partial data quality — skipping Redis write")
+            try:
+                asyncio.run(notifier.send_alert(
+                    "⚠️ RegimeDetector: dati macro incompleti — regime invariato.",
+                    level="warning",
+                ))
+            except Exception:
+                log.exception("Failed to send Telegram alert for partial data quality")
+            return
         r1 = r2
     elif r2 is None:
+        # LLM-2 failed, check if LLM-1 has partial data
+        if r1.data_quality == "partial":
+            log.warning("LLM-2 failed, LLM-1 has partial data quality — skipping Redis write")
+            try:
+                asyncio.run(notifier.send_alert(
+                    "⚠️ RegimeDetector: dati macro incompleti — regime invariato.",
+                    level="warning",
+                ))
+            except Exception:
+                log.exception("Failed to send Telegram alert for partial data quality")
+            return
         r2 = r1
 
-    # CASO 3: partial data quality — check BEFORE duplicating outputs
+    # CASO 3: partial data quality
     if r1.data_quality == "partial" or r2.data_quality == "partial":
         log.warning("Partial data quality in regime detection — skipping Redis write")
         try:
