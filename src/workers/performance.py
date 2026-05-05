@@ -10,14 +10,15 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
+import httpx
 import numpy as np
 import psycopg2
 
 from src.config import config
 from src.models.performance import PerformanceReport, PostMortem
-from src.notifications.telegram import TelegramNotifier
+from src.notifications.telegram import TelegramNotifier, format_auto_apply_message, format_freeze_message
 from src.performance.drift import (
     CircuitBreakerContext,
     check_circuit_breakers,
@@ -626,7 +627,7 @@ def check_suggestion_expiry():
     redis._r.delete("ensemble:weights:suggestion:snapshot")
 
 
-def _get_vix(redis: "RedisStore") -> float | None:
+def _get_vix(redis: RedisStore) -> float | None:
     """Return VIX from Redis cache, fetching from FRED on cache miss.
 
     Returns None if both cache and FRED are unavailable (caller treats as fail-safe freeze).
@@ -642,7 +643,7 @@ def _get_vix(redis: "RedisStore") -> float | None:
         )
         redis.set_vix_cached(vix, ttl=config.AUTO_APPLY_VIX_REDIS_TTL_SECONDS)
         return vix
-    except Exception as e:
+    except (httpx.HTTPError, ValueError, TimeoutError) as e:
         log.warning("Failed to fetch VIX from FRED: %s", e)
         return None
 
@@ -711,12 +712,14 @@ def check_and_apply_weights():
                     f"max weight delta = {max_delta:.3f} >= {config.AUTO_APPLY_WEIGHT_DELTA_MAX}"
                 )
 
+    # Extract current weights once (used in both branches)
+    stored = redis.get_current_weights_stored()
+    current_weights = (stored or {}).get("weights", {})
+
     pg = PostgreSQLStore()
     notifier = TelegramNotifier()
 
     if freeze_reason:
-        stored = redis.get_current_weights_stored()
-        current_weights = (stored or {}).get("weights", {})
         pg.log_weight_update(
             source="freeze",
             applied_weights=current_weights,
@@ -726,13 +729,10 @@ def check_and_apply_weights():
             note=f"Auto-apply blocked: {freeze_reason}",
             approved_by="system",
         )
-        from src.notifications.telegram import format_freeze_message
         msg = format_freeze_message(suggested_weights, current_weights, freeze_reason)
         asyncio.run(notifier.send_alert(msg, level="warning"))
         log.info("Auto-apply frozen: %s", freeze_reason)
     else:
-        stored = redis.get_current_weights_stored()
-        current_weights = (stored or {}).get("weights", {})
         ic_variance = float(np.std(list(purified_icir.values())))
         all_models = set(suggested_weights) | set(current_weights)
         max_delta = max(
@@ -753,8 +753,6 @@ def check_and_apply_weights():
             approved_by="system",
         )
 
-        from datetime import timedelta
-        from src.notifications.telegram import format_auto_apply_message
         next_review = (datetime.now(timezone.utc) + timedelta(days=7)).date()
         msg = format_auto_apply_message(
             suggested_weights, current_weights,

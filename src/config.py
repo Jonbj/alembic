@@ -79,22 +79,22 @@ class Config(BaseModel):
     # Auto-apply ensemble weights guardrails
     AUTO_APPLY_ENABLED: bool = Field(
         default_factory=lambda: os.environ.get("AUTO_APPLY_ENABLED", "true").lower() == "true"
-    )
+    )  # Toggle: set false to disable auto-apply without deploy
     AUTO_APPLY_VIX_THRESHOLD: float = Field(
         default_factory=lambda: float(os.environ.get("AUTO_APPLY_VIX_THRESHOLD", "30.0"))
-    )
+    )  # Block auto-apply if VIX >= threshold (high volatility = freeze)
     AUTO_APPLY_IC_VARIANCE_THRESHOLD: float = Field(
         default_factory=lambda: float(os.environ.get("AUTO_APPLY_IC_VARIANCE_THRESHOLD", "0.15"))
-    )
+    )  # Block if std(purified_icir) >= threshold (model disagreement)
     AUTO_APPLY_WEIGHT_DELTA_MAX: float = Field(
         default_factory=lambda: float(os.environ.get("AUTO_APPLY_WEIGHT_DELTA_MAX", "0.15"))
-    )
+    )  # Block if any weight changes by >= 15 percentage points
     AUTO_APPLY_VIX_REDIS_TTL_SECONDS: int = Field(
         default_factory=lambda: int(os.environ.get("AUTO_APPLY_VIX_REDIS_TTL_SECONDS", "3600"))
-    )
+    )  # Cache VIX in Redis for 1 hour to reduce FRED API calls
     AUTO_APPLY_VIX_FRED_SERIES: str = Field(
         default_factory=lambda: os.environ.get("AUTO_APPLY_VIX_FRED_SERIES", "VIXCLS")
-    )
+    )  # FRED series ID for daily VIX data
 
     @field_validator("ADMIN_API_KEY")
     @classmethod

@@ -341,11 +341,16 @@ class RedisStore:
         return json.loads(raw)
 
     def get_vix_cached(self) -> float | None:
-        """Get cached VIX value from Redis. Returns None if absent."""
+        """Get cached VIX value from Redis. Returns None if absent or corrupted."""
         raw = self._r.get("macro:vix:latest")
         if raw is None:
             return None
-        return float(raw)
+        try:
+            return float(raw)
+        except ValueError:
+            # Corrupted data in Redis - log and return None
+            print(f"RedisStore: Corrupted VIX data in cache: {raw!r}")
+            return None
 
     def set_vix_cached(self, value: float, ttl: int = 3600) -> None:
         """Cache VIX value in Redis with TTL in seconds."""

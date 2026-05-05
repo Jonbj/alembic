@@ -798,3 +798,26 @@ class TestCheckAndApplyWeights:
             check_and_apply_weights()
 
         redis._r.delete.assert_called_once_with("ensemble:weights:suggestion:snapshot")
+
+    def test_g3_missing_purified_icir_freezes(self):
+        """G3: empty purified_icir → freeze with 'missing' reason."""
+        empty_icir_suggestion = {
+            **self.SUGGESTION,
+            "purified_icir": {},
+        }
+        redis = self._make_redis(suggestion=empty_icir_suggestion, vix_cached=18.4)
+        pg = MagicMock()
+        notifier = MagicMock()
+        notifier.send_alert = AsyncMock()
+        cfg = self._make_config()
+
+        with patch("src.workers.performance.RedisStore", return_value=redis), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=pg), \
+             patch("src.workers.performance.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.performance.config", cfg):
+            from src.workers.performance import check_and_apply_weights
+            check_and_apply_weights()
+
+        redis.set_ensemble_weights.assert_not_called()
+        assert pg.log_weight_update.call_args.kwargs["source"] == "freeze"
+        assert "purified_icir missing" in pg.log_weight_update.call_args.kwargs["note"]

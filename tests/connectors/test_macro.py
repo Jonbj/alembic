@@ -50,3 +50,36 @@ class TestFetchVixFromFred:
             from src.connectors.macro import fetch_vix_from_fred
             with pytest.raises(httpx.HTTPStatusError):
                 fetch_vix_from_fred(series_id="VIXCLS", api_key="test-key")
+
+    def test_raises_on_empty_observations(self):
+        """Raises ValueError when FRED returns no observations."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"observations": []}
+
+        with patch("httpx.get", return_value=mock_resp):
+            from src.connectors.macro import fetch_vix_from_fred
+            with pytest.raises(ValueError, match="no observations"):
+                fetch_vix_from_fred(series_id="VIXCLS", api_key="test-key")
+
+    def test_raises_on_malformed_csv(self):
+        """Raises ValueError when CSV response is malformed."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.text = "DATE,VIXCLS\n"  # Only header, no data
+
+        with patch("httpx.get", return_value=mock_resp):
+            from src.connectors.macro import fetch_vix_from_fred
+            with pytest.raises(ValueError, match="insufficient lines"):
+                fetch_vix_from_fred(series_id="VIXCLS", api_key="")
+
+    def test_raises_on_csv_single_column(self):
+        """Raises ValueError when CSV last line has only one column."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.text = "DATE,VIXCLS\n2026-05-02"  # Missing value
+
+        with patch("httpx.get", return_value=mock_resp):
+            from src.connectors.macro import fetch_vix_from_fred
+            with pytest.raises(ValueError, match="malformed"):
+                fetch_vix_from_fred(series_id="VIXCLS", api_key="")

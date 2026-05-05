@@ -1,7 +1,7 @@
 """Telegram notifications for trading system alerts."""
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import httpx
 
@@ -230,18 +230,22 @@ def format_performance_report(
     )
 
 
+# Threshold for displaying weight delta as percentage vs "= "
+_DELTA_DISPLAY_THRESHOLD = 0.005  # 0.5%
+
+
 def format_auto_apply_message(
     new_weights: dict[str, float],
     current_weights: dict[str, float],
     guardrail_values: dict[str, float],
-    next_review_date,
+    next_review_date: date,
 ) -> str:
     """Format Telegram message for successful auto-apply."""
     lines = ["✅ <b>Pesi aggiornati automaticamente</b>\n", "📊 <b>Nuovi pesi:</b>"]
     for model, w in sorted(new_weights.items()):
         old_w = current_weights.get(model, 0.0)
         delta = w - old_w
-        delta_str = f" ({delta:+.0%})" if abs(delta) >= 0.005 else " (=)"
+        delta_str = f" ({delta:+.0%})" if abs(delta) >= _DELTA_DISPLAY_THRESHOLD else " (=)"
         lines.append(f"  {model}: {w:.0%}{delta_str}")
 
     lines.append("\n🛡️ <b>Guardrail superati:</b>")

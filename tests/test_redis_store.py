@@ -312,6 +312,16 @@ class TestVixCache:
 
         mock_redis.setex.assert_called_once_with("macro:vix:latest", 3600, "18.45")
 
+    def test_get_returns_none_on_corrupted_data(self):
+        """Returns None when cached VIX data is not a valid float."""
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = b"not-a-number"
+
+        store = RedisStore(redis_client=mock_redis)
+        result = store.get_vix_cached()
+
+        assert result is None
+
 
 class TestDepsInitClose:
     """Test deps.init_redis() / deps.close_redis() lifecycle helpers."""
