@@ -206,15 +206,32 @@ class TelegramNotifier:
         parse_mode: str = "HTML",
     ) -> int | None:
         """
-        Send message with InlineKeyboardMarkup.
+        Send Telegram message with InlineKeyboardMarkup (inline buttons).
+
+        Used for the approval flow: when guardrails block auto-apply of new
+        ensemble weights, this sends a freeze notification with ✅/❌ buttons.
+
+        Keyboard format (Telegram InlineKeyboardMarkup):
+            [
+                [{"text": "✅ Approva", "callback_data": "approve:abc12345"}],
+                [{"text": "❌ Rifiuta", "callback_data": "reject:abc12345"}]
+            ]
+
+        Each inner list is a row. callback_data is echoed back in callback_query
+        when user taps — it's validated by telegram_poller.py.
 
         Args:
-            message: Message text (supports HTML markup)
-            keyboard: Inline keyboard layout [[{"text": "Btn", "callback_data": "data"}]]
-            parse_mode: Parse mode ("HTML" or "Markdown")
+            message: Message text (supports HTML markup if parse_mode="HTML")
+            keyboard: Inline keyboard layout — list of rows, each row is list of buttons
+            parse_mode: "HTML" (default) or "Markdown"
 
         Returns:
-            message_id if sent successfully, None if disabled or failed
+            message_id (int) if sent successfully — needed for later editing
+            None if disabled (no bot_token/chat_id) or HTTP error
+
+        Note:
+            The message_id is NOT persisted. The poller retrieves it from
+            callback_query["message"]["message_id"] when user taps a button.
         """
         if not self._enabled:
             print(f"TelegramNotifier: Disabled (no bot_token/chat_id)")
@@ -247,15 +264,27 @@ class TelegramNotifier:
         keyboard: list[list[dict]] | None = None,
     ) -> bool:
         """
-        Edit reply markup of an existing message.
+        Edit reply markup (inline keyboard) of an existing Telegram message.
+
+        Used after processing an approve/reject tap to remove the keyboard,
+        preventing double-taps and confusion.
+
+        Telegram API: editMessageReplyMarkup
+        - chat_id: Channel or user ID where message was sent
+        - message_id: ID of message to edit
+        - keyboard: None removes all buttons; pass new keyboard to replace
 
         Args:
-            chat_id: Channel or user ID
+            chat_id: Channel or user ID (string or int)
             message_id: Message ID to edit
-            keyboard: New inline keyboard. None removes the keyboard entirely.
+            keyboard: New inline keyboard, or None to remove entirely
 
         Returns:
-            True if successful, False otherwise
+            True if successful, False if disabled or HTTP error
+
+        Note:
+            This is an async method. In sync Celery tasks, wrap with:
+                asyncio.run(notifier.edit_message_reply_markup(...))
         """
         if not self._enabled:
             return False
@@ -268,6 +297,7 @@ class TelegramNotifier:
         }
         if keyboard is not None:
             payload["reply_markup"] = {"inline_keyboard": keyboard}
+        # keyboard=None → no reply_markup key → Telegram removes existing keyboard
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -367,16 +397,42 @@ def format_freeze_message_with_keyboard(
     suggestion_token: str,
 ) -> tuple[str, list[list[dict]]]:
     """
-    Format Telegram freeze message with inline keyboard.
+    Format Telegram freeze message with inline keyboard for approval/rejection.
+
+    This function is called by check_and_apply_weights() in performance.py when
+    guardrails block automatic weight updates. It generates:
+
+    1. A formatted message showing:
+       - Warning header (⚠️ Auto-apply bloccato)
+       - Which guardrail failed (VIX, IC variance, weight delta)
+       - Suggested weights vs current weights (with delta %)
+
+    2. An inline keyboard with two buttons:
+       - ✅ Approva → callback_data: "approve:<token>"
+       - ❌ Rifiuta → callback_data: "reject:<token>"
+
+    The token is validated by telegram_poller.py to prevent replay attacks.
+
+    Design decision: Unlike format_freeze_message(), this does NOT include
+    the "👉 Approva manualmente: POST /api/weights/approve" hint because
+    the inline keyboard provides direct action.
 
     Args:
-        suggested_weights: New weights suggested by performance worker
-        current_weights: Current active weights
-        freeze_reason: Which guardrail blocked auto-apply
-        suggestion_token: SHA256(computed_at)[:8] for callback validation
+        suggested_weights: Dict of {model_id: weight} proposed by performance worker
+        current_weights: Dict of {model_id: weight} currently active in Redis
+        freeze_reason: Human-readable guardrail failure reason (e.g., "VIX = 38.2 >= 30.0")
+        suggestion_token: 8-char SHA256 hash of computed_at timestamp for anti-replay
 
     Returns:
-        (message_text, inline_keyboard) tuple
+        Tuple of (message_text, keyboard_layout):
+        - message_text: str with HTML formatting for Telegram
+        - keyboard_layout: list of rows, each row is list of button dicts
+
+    Example keyboard output:
+        [
+            [{"text": "✅ Approva", "callback_data": "approve:abc12345"}],
+            [{"text": "❌ Rifiuta", "callback_data": "reject:abc12345"}]
+        ]
     """
     lines = [
         "⚠️ <b>Auto-apply bloccato — approvazione manuale richiesta</b>\n",

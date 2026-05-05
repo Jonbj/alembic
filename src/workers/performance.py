@@ -727,24 +727,47 @@ def check_and_apply_weights():
     notifier = TelegramNotifier()
 
     if freeze_reason:
+        # Log the freeze event to PostgreSQL for audit trail
+        # source="freeze" indicates guardrail blocked auto-apply
         pg.log_weight_update(
             source="freeze",
-            applied_weights=current_weights,
-            suggested_weights=suggested_weights,
-            purified_icir=purified_icir,
-            freeze_reason=freeze_reason,
+            applied_weights=current_weights,  # No change — weights frozen
+            suggested_weights=suggested_weights,  # What was proposed
+            purified_icir=purified_icir,  # Context for review
+            freeze_reason=freeze_reason,  # Which guardrail failed
             note=f"Auto-apply blocked: {freeze_reason}",
-            approved_by="system",
+            approved_by="system",  # No human approval yet
         )
-        # Send freeze message with inline keyboard for approval
+
+        # =====================================================================
+        # TELEGRAM APPROVAL FOW (Feature C)
+        # =====================================================================
+        # Send freeze message with inline keyboard (✅ Approva / ❌ Rifiuta).
+        # The operator can tap to approve or reject without using the API.
+        #
+        # Token generation:
+        #   SHA256(computed_at)[:8] — anti-replay validation
+        #   - Prevents double-tap (second tap finds deleted suggestion)
+        #   - Prevents stale taps (new suggestion = new token)
+        #
+        # The poll_telegram_updates task (Celery beat, 5s) processes taps:
+        #   - Valid approve → set_ensemble_weights(source="telegram")
+        #   - Valid reject → delete suggestion, log source="rejected_via_telegram"
+        # =====================================================================
         computed_at = suggestion.get("computed_at", datetime.now(timezone.utc).isoformat())
         token = hashlib.sha256(computed_at.encode()).hexdigest()[:8]
+
+        # Generate message text and keyboard layout
         msg, keyboard = format_freeze_message_with_keyboard(
             suggested_weights, current_weights, freeze_reason, token
         )
+
+        # Send message to Telegram. Returns message_id (not persisted — poller
+        # retrieves it from callback_query["message"]["message_id"]).
         message_id = asyncio.run(notifier.send_message_with_keyboard(msg, keyboard))
         if message_id:
             log.info("Freeze message sent with keyboard: message_id=%d", message_id)
+
         log.info("Auto-apply frozen: %s", freeze_reason)
     else:
         redis.set_ensemble_weights(suggested_weights, source="auto_apply")

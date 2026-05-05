@@ -363,18 +363,55 @@ class RedisStore:
     # =========================================================================
     # TELEGRAM POLLER OFFSET
     # =========================================================================
+    #
+    # These methods support the Telegram approval flow (Feature C).
+    # The poll_telegram_updates task stores its progress in Redis to avoid
+    # reprocessing the same callbacks on every run.
+    #
+    # Key: telegram:poller:offset
+    # Value: Integer (last update_id + 1)
+    # TTL: None — must survive restarts to maintain polling continuity
+    #
+    # =========================================================================
 
     def get_offset(self) -> int | None:
-        """Get stored Telegram update offset. Returns None if not set."""
+        """
+        Get stored Telegram update offset from Redis.
+
+        Returns:
+            Integer offset if set, None if not yet initialized.
+            The poller treats None as 0 (start from beginning).
+        """
         raw = self._r.get("telegram:poller:offset")
         return int(raw) if raw else None
 
     def set_offset(self, offset: int) -> None:
-        """Store Telegram update offset."""
+        """
+        Store Telegram update offset in Redis.
+
+        Called after successfully processing a batch of updates.
+        On error during processing, this is NOT called, so the next
+        run retries the same updates (idempotent retry).
+
+        Args:
+            offset: The next update_id to fetch (last_processed + 1)
+        """
         self._r.set("telegram:poller:offset", offset)
 
     def delete_weight_suggestion(self) -> None:
-        """Delete the weight suggestion key after approval/rejection."""
+        """
+        Delete the weight suggestion key after approval or rejection.
+
+        Called by both _handle_approve and _handle_reject in telegram_poller.py.
+        Deleting the suggestion:
+        - Prevents double-processing (second tap finds None → "Già processata")
+        - Cleans up Redis memory
+        - Invalidates any old keyboard messages (stale token guard)
+
+        Note: This only deletes ensemble:weights:suggestion.
+        The snapshot key (ensemble:weights:suggestion:snapshot) is deleted
+        separately by check_suggestion_expiry or on successful approval.
+        """
         self._r.delete("ensemble:weights:suggestion")
 
     # =========================================================================
