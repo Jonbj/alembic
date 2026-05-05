@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from src.config import config
 from src.connectors.macro import fetch_spy_momentum_20d, fetch_vix_from_fred, fetch_yield_curve
+from src.llm.client import DeepseekClient, OpusClient, Qwen35Client
 from src.models.regime import MacroSnapshot, RegimeLabel, RegimeOutput, RegimeState
 from src.notifications.telegram import TelegramNotifier, format_regime_message
 from src.store.redis_store import RedisStore
@@ -63,11 +64,9 @@ def _build_prompt(vix: float, yield_curve: float, spy_momentum: float) -> str:
     )
 
 
-def _make_llm_client(model_id: str):
+def _make_llm_client(model_id: str) -> OpusClient | Qwen35Client | DeepseekClient:
     """Instantiate an LLM client by model_id string."""
-    from src.llm.client import DeepseekClient, OpusClient, Qwen35Client
-
-    registry = {
+    registry: dict[str, type[OpusClient | Qwen35Client | DeepseekClient]] = {
         "opus": OpusClient,
         "qwen3.5:cloud": Qwen35Client,
         "deepseek-v4-pro:cloud": DeepseekClient,
@@ -81,7 +80,9 @@ def _make_llm_client(model_id: str):
 
 
 async def _run_llm_pair(
-    prompt: str, client1, client2
+    prompt: str,
+    client1: OpusClient | Qwen35Client | DeepseekClient,
+    client2: OpusClient | Qwen35Client | DeepseekClient,
 ) -> tuple[RegimeOutput | None, RegimeOutput | None]:
     """Run two LLM clients in parallel. Returns None for any that fail."""
     results = await asyncio.gather(
@@ -122,10 +123,13 @@ def detect_regime() -> None:
         spy_momentum = fetch_spy_momentum_20d()
     except Exception as e:
         log.error("Failed to fetch macro data for regime detection: %s", e)
-        asyncio.run(notifier.send_alert(
-            "🚨 RegimeDetector fallito — dati macro non disponibili. Regime invariato.",
-            level="error",
-        ))
+        try:
+            asyncio.run(notifier.send_alert(
+                "🚨 RegimeDetector fallito — dati macro non disponibili. Regime invariato.",
+                level="error",
+            ))
+        except Exception:
+            log.exception("Failed to send Telegram alert for macro fetch failure")
         return
 
     # 2. Run 2 LLMs in parallel
@@ -137,10 +141,13 @@ def detect_regime() -> None:
     # CASO 1: both fail
     if r1 is None and r2 is None:
         log.error("Both LLMs failed in detect_regime")
-        asyncio.run(notifier.send_alert(
-            "🚨 RegimeDetector fallito — regime invariato. Controllare i log.",
-            level="error",
-        ))
+        try:
+            asyncio.run(notifier.send_alert(
+                "🚨 RegimeDetector fallito — regime invariato. Controllare i log.",
+                level="error",
+            ))
+        except Exception:
+            log.exception("Failed to send Telegram alert for both LLMs failure")
         return
 
     # CASO 2: one fails — use the other for both
@@ -149,26 +156,62 @@ def detect_regime() -> None:
     elif r2 is None:
         r2 = r1
 
-    # CASO 3: partial data quality
+    # CASO 3: partial data quality — check BEFORE duplicating outputs
     if r1.data_quality == "partial" or r2.data_quality == "partial":
         log.warning("Partial data quality in regime detection — skipping Redis write")
-        asyncio.run(notifier.send_alert(
-            "⚠️ RegimeDetector: dati macro incompleti — regime invariato.",
-            level="warning",
-        ))
+        try:
+            asyncio.run(notifier.send_alert(
+                "⚠️ RegimeDetector: dati macro incompleti — regime invariato.",
+                level="warning",
+            ))
+        except Exception:
+            log.exception("Failed to send Telegram alert for partial data quality")
         return
 
     # CASO 4/5: build multiplier map and apply consensus
-    multipliers: dict[str, float] = {
+    multipliers: dict[RegimeLabel, float] = {
         "bull": config.REGIME_MULTIPLIER_BULL,
         "sideways": config.REGIME_MULTIPLIER_SIDEWAYS,
         "bear": config.REGIME_MULTIPLIER_BEAR,
         "high_vol": config.REGIME_MULTIPLIER_HIGH_VOL,
     }
 
+    # Validate regime labels from LLM outputs
+    valid_regimes = set(multipliers.keys())
+    if r1.regime not in valid_regimes:
+        log.error("LLM-1 returned invalid regime: %s", r1.regime)
+        try:
+            asyncio.run(notifier.send_alert(
+                f"🚨 RegimeDetector: LLM-1 ha ritornato regime invalido ({r1.regime}). Regime invariato.",
+                level="error",
+            ))
+        except Exception:
+            log.exception("Failed to send Telegram alert for invalid regime")
+        return
+    if r2.regime not in valid_regimes:
+        log.error("LLM-2 returned invalid regime: %s", r2.regime)
+        try:
+            asyncio.run(notifier.send_alert(
+                f"🚨 RegimeDetector: LLM-2 ha ritornato regime invalido ({r2.regime}). Regime invariato.",
+                level="error",
+            ))
+        except Exception:
+            log.exception("Failed to send Telegram alert for invalid regime")
+        return
+
     disagreement = r1.regime != r2.regime
     if disagreement:
-        regime: RegimeLabel = min(r1.regime, r2.regime, key=lambda r: multipliers[r])
+        # Select the most conservative regime (lowest multiplier)
+        # Explicit comparison to avoid min() key function issues
+        regime: RegimeLabel = (
+            r1.regime if multipliers[r1.regime] <= multipliers[r2.regime] else r2.regime
+        )
+        log.info(
+            "LLM disagreement resolved: %s(×%.1f) vs %s(×%.1f) → selected %s",
+            r1.regime, multipliers[r1.regime],
+            r2.regime, multipliers[r2.regime],
+            regime,
+        )
     else:
         regime = r1.regime
 

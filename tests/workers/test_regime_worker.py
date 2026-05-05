@@ -9,11 +9,12 @@ from src.models.regime import MacroSnapshot, RegimeOutput, RegimeState
 
 
 class TestDetectRegime:
-    """7 scenarios covering all consensus branches."""
+    """8 scenarios covering all consensus branches including invalid regime."""
 
     BULL = RegimeOutput(regime="bull", confidence=0.85, reasoning="uptrend", data_quality="complete")
     BEAR = RegimeOutput(regime="bear", confidence=0.78, reasoning="downturn", data_quality="complete")
     PARTIAL = RegimeOutput(regime="bull", confidence=0.5, reasoning="x", data_quality="partial")
+    # Invalid regime for testing validation
 
     def _make_redis(self, current_regime=None):
         mock = MagicMock()
@@ -84,6 +85,38 @@ class TestDetectRegime:
         notifier.send_alert.assert_called_once()
         msg = notifier.send_alert.call_args[0][0]
         assert "Disaccordo" in msg or "bear" in msg.lower()
+
+    # 8. Invalid regime from LLM → Redis unchanged, Telegram 🚨
+    def test_invalid_regime_from_llm_no_redis_write(self):
+        # Create an output with valid structure but we'll mock it to return invalid regime
+        from unittest.mock import Mock
+        invalid_output = Mock(spec=RegimeOutput)
+        invalid_output.regime = "crash"  # Invalid regime
+        invalid_output.data_quality = "complete"
+        invalid_output.model_dump.return_value = {"regime": "crash", "confidence": 0.9}
+
+        redis = self._make_redis()
+        notifier = MagicMock()
+        notifier.send_alert = AsyncMock()
+        cfg = self._make_config()
+
+        # Patch _run_llm_pair to return our mock with invalid regime
+        with patch("src.workers.regime.RedisStore", return_value=redis), \
+             patch("src.workers.regime.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.regime._run_llm_pair", new=AsyncMock(return_value=(invalid_output, self.BULL))), \
+             patch("src.workers.regime._make_llm_client", return_value=MagicMock()), \
+             patch("src.workers.regime.config", cfg), \
+             patch("src.workers.regime.fetch_vix_from_fred", return_value=18.4), \
+             patch("src.workers.regime.fetch_yield_curve", return_value=0.3), \
+             patch("src.workers.regime.fetch_spy_momentum_20d", return_value=4.2):
+            from src.workers.regime import detect_regime
+            detect_regime()
+
+        redis.set_regime.assert_not_called()
+        redis.set_qc_sizing_multiplier.assert_not_called()
+        notifier.send_alert.assert_called_once()
+        msg = notifier.send_alert.call_args[0][0]
+        assert "🚨" in msg
 
     # 3. LLM-1 fails → use LLM-2
     def test_one_llm_failure_uses_other(self):
