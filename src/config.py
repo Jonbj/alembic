@@ -63,6 +63,13 @@ class Config(BaseModel):
     # Telegram notifications
     TELEGRAM_BOT_TOKEN: str = Field(default_factory=lambda: os.environ.get("TELEGRAM_BOT_TOKEN", ""))
     TELEGRAM_CHAT_ID: str = Field(default_factory=lambda: os.environ.get("TELEGRAM_CHAT_ID", ""))
+    TELEGRAM_ALLOWED_USER_IDS: list[str] = Field(
+        default_factory=lambda: [
+            uid.strip()
+            for uid in os.environ.get("TELEGRAM_ALLOWED_USER_IDS", "").split(",")
+            if uid.strip()
+        ]
+    )
 
     # Ensemble thresholds
     ENSEMBLE_MIN_CONFIDENCE: float = Field(default=0.4)
