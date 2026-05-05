@@ -82,7 +82,15 @@ async def get_weight_suggestion(
     suggestion = redis.get_weight_suggestion()
     if suggestion is None:
         raise HTTPException(status_code=404, detail="No weight suggestion available")
-    computed_at = datetime.fromisoformat(suggestion["computed_at"])
+
+    try:
+        computed_at = datetime.fromisoformat(suggestion["computed_at"])
+    except (KeyError, ValueError) as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid computed_at format: {suggestion.get('computed_at', 'missing')}"
+        )
+
     suggestion["expires_at"] = (computed_at + timedelta(days=7)).isoformat()
     return suggestion
 

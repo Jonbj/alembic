@@ -213,3 +213,31 @@ async def test_approve_no_suggestion_returns_404():
     app.dependency_overrides.clear()
 
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_get_suggestion_invalid_computed_at_format():
+    """GET /weights/suggestion returns 400 when computed_at is malformed."""
+    bad_suggestion = {**SAMPLE_SUGGESTION, "computed_at": "not-an-iso-format"}
+    redis = make_redis_mock(suggestion=bad_suggestion)
+    app.dependency_overrides[get_redis_store] = lambda: redis
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/api/weights/suggestion")
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 400
+    assert "Invalid computed_at" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_get_suggestion_missing_computed_at():
+    """GET /weights/suggestion returns 400 when computed_at is missing."""
+    bad_suggestion = {k: v for k, v in SAMPLE_SUGGESTION.items() if k != "computed_at"}
+    redis = make_redis_mock(suggestion=bad_suggestion)
+    app.dependency_overrides[get_redis_store] = lambda: redis
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.get("/api/weights/suggestion")
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 400
+    assert "computed_at" in resp.json()["detail"]

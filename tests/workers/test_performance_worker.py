@@ -540,3 +540,49 @@ class TestCheckSuggestionExpiry:
             check_suggestion_expiry()
 
         mock_pg.log_weight_update.assert_not_called()
+
+    def test_handles_corrupted_json_snapshot(self):
+        """If snapshot JSON is corrupted, log error and delete snapshot without crashing."""
+        mock_redis_client = MagicMock()
+        mock_redis_client.get.side_effect = lambda key: (
+            b"not-valid-json{{{" if key == "ensemble:weights:suggestion:snapshot"
+            else None
+        )
+
+        mock_redis_store = MagicMock()
+        mock_redis_store._r = mock_redis_client
+
+        mock_pg = MagicMock()
+
+        with patch("src.workers.performance.RedisStore", return_value=mock_redis_store), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=mock_pg):
+            from src.workers.performance import check_suggestion_expiry
+            check_suggestion_expiry()
+
+        # Should NOT log (corrupted data)
+        mock_pg.log_weight_update.assert_not_called()
+        # Should delete corrupted snapshot
+        mock_redis_client.delete.assert_called_once_with("ensemble:weights:suggestion:snapshot")
+
+    def test_handles_non_dict_snapshot(self):
+        """If snapshot is not a dict, delete it without crashing."""
+        mock_redis_client = MagicMock()
+        mock_redis_client.get.side_effect = lambda key: (
+            b"['not', 'a', 'dict']" if key == "ensemble:weights:suggestion:snapshot"
+            else None
+        )
+
+        mock_redis_store = MagicMock()
+        mock_redis_store._r = mock_redis_client
+
+        mock_pg = MagicMock()
+
+        with patch("src.workers.performance.RedisStore", return_value=mock_redis_store), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=mock_pg):
+            from src.workers.performance import check_suggestion_expiry
+            check_suggestion_expiry()
+
+        # Should NOT log (invalid structure)
+        mock_pg.log_weight_update.assert_not_called()
+        # Should delete invalid snapshot
+        mock_redis_client.delete.assert_called_once_with("ensemble:weights:suggestion:snapshot")

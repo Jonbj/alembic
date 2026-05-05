@@ -22,13 +22,25 @@ class Config(BaseModel):
     LLM_DAILY_BUDGET_USD: float = Field(default=50.0)
 
     # Model costs (per 1M tokens) - should be loaded from config YAML in production
+    # All 14 models from models.md (8 general purpose + 6 coding specialized)
     MODEL_COSTS: dict[str, tuple[float, float]] = Field(
         default={
-            "opus": (15.0, 75.0),  # (input, output)
+            # General purpose models
+            "opus": (15.0, 75.0),  # (input, output) USD per 1M tokens
             "sonnet": (3.0, 15.0),
             "haiku": (0.25, 1.25),
             "qwen3.5:cloud": (2.0, 6.0),
             "deepseek-v4-pro:cloud": (4.0, 12.0),
+            "glm-5.1:cloud": (1.5, 4.5),  # Estimated based on GLM pricing tier
+            "kimi-k2.6:cloud": (2.5, 7.5),  # Estimated based on Moonshot AI pricing
+            "gemma4:31b-cloud": (1.0, 3.0),  # Estimated based on Gemma open pricing
+            # Coding specialized models
+            "qwen3-coder-next:cloud": (3.0, 9.0),  # Premium coding model
+            "devstral-small-2:24b-cloud": (1.5, 4.5),  # 24B params, mid-tier
+            "devstral-2:123b-cloud": (6.0, 18.0),  # 123B params, high-tier
+            "minimax-m2.1:cloud": (2.0, 6.0),  # Coding specialist
+            "qwen3-coder:480b-cloud": (10.0, 30.0),  # 480B params, flagship coding
+            "minimax-m2:cloud": (1.5, 4.5),  # Previous gen coding
         }
     )
 

@@ -598,7 +598,17 @@ def check_suggestion_expiry():
         return  # suggestion still active, nothing to do
 
     # suggestion key gone + snapshot present → expired without approval
-    snapshot = json.loads(snapshot_raw)
+    try:
+        snapshot = json.loads(snapshot_raw)
+        if not isinstance(snapshot, dict):
+            print(f"Expiry check: snapshot is not a dict, deleting corrupted data")
+            redis._r.delete("ensemble:weights:suggestion:snapshot")
+            return
+    except json.JSONDecodeError as e:
+        print(f"Expiry check: corrupted JSON in snapshot: {e}")
+        redis._r.delete("ensemble:weights:suggestion:snapshot")
+        return
+
     pg = PostgreSQLStore()
     pg.log_weight_update(
         source="expired",
