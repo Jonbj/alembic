@@ -1,10 +1,16 @@
 """Tests for Telegram notification formatters."""
 
 from datetime import date, datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.notifications.telegram import format_auto_apply_message, format_freeze_message
+from src.notifications.telegram import (
+    TelegramNotifier,
+    format_auto_apply_message,
+    format_freeze_message,
+    format_freeze_message_with_keyboard,
+)
 
 
 class TestFormatAutoApplyMessage:
@@ -138,3 +144,158 @@ class TestFormatRegimeMessage:
         state = self._make_state("bear")
         msg = format_regime_message(state, previous_regime=None, disagreement=False)
         assert "Inverted curve" in msg
+
+
+class TestFormatFreezeMessageWithKeyboard:
+    """Tests for format_freeze_message_with_keyboard()."""
+
+    def test_returns_tuple_with_text_and_keyboard(self):
+        text, keyboard = format_freeze_message_with_keyboard(
+            suggested_weights={"opus": 0.45},
+            current_weights={"opus": 0.34},
+            freeze_reason="VIX = 38.2 >= 30.0",
+            suggestion_token="abc12345",
+        )
+        assert isinstance(text, str)
+        assert isinstance(keyboard, list)
+        assert "⚠️" in text
+        assert "bloccato" in text
+
+    def test_keyboard_has_approve_button(self):
+        _, keyboard = format_freeze_message_with_keyboard(
+            suggested_weights={"opus": 0.45},
+            current_weights={"opus": 0.34},
+            freeze_reason="VIX too high",
+            suggestion_token="abc12345",
+        )
+        assert len(keyboard) == 2  # Two rows
+        approve_btn = keyboard[0][0]
+        assert approve_btn["text"] == "✅ Approva"
+        assert approve_btn["callback_data"] == "approve:abc12345"
+
+    def test_keyboard_has_reject_button(self):
+        _, keyboard = format_freeze_message_with_keyboard(
+            suggested_weights={"opus": 0.45},
+            current_weights={"opus": 0.34},
+            freeze_reason="VIX too high",
+            suggestion_token="xyz789",
+        )
+        reject_btn = keyboard[1][0]
+        assert reject_btn["text"] == "❌ Rifiuta"
+        assert reject_btn["callback_data"] == "reject:xyz789"
+
+    def test_shows_suggested_weights(self):
+        text, _ = format_freeze_message_with_keyboard(
+            suggested_weights={"opus": 0.45},
+            current_weights={"opus": 0.34},
+            freeze_reason="IC variance",
+            suggestion_token="token123",
+        )
+        assert "45%" in text
+        assert "NON applicati" in text
+
+
+class TestTelegramNotifierWithKeyboard:
+    """Tests for TelegramNotifier.send_message_with_keyboard() and edit_message_reply_markup()."""
+
+    def _make_notifier(self, token="test-bot-token", chat_id="123456"):
+        return TelegramNotifier(bot_token=token, chat_id=chat_id)
+
+    @pytest.mark.asyncio
+    async def test_send_message_with_keyboard_returns_message_id(self):
+        notifier = self._make_notifier()
+        keyboard = [[{"text": "Btn", "callback_data": "data"}]]
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_response.json.return_value = {"result": {"message_id": 42}}
+
+            # Properly mock async context manager and async post method
+            mock_async_context = AsyncMock()
+            mock_async_context.__aenter__.return_value.post = AsyncMock(return_value=mock_response)
+            mock_client.return_value = mock_async_context
+
+            message_id = await notifier.send_message_with_keyboard("Test", keyboard)
+
+            assert message_id == 42
+
+    @pytest.mark.asyncio
+    async def test_send_message_with_keyboard_returns_none_on_failure(self):
+        notifier = self._make_notifier()
+        keyboard = [[{"text": "Btn", "callback_data": "data"}]]
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_async_context = AsyncMock()
+            mock_async_context.__aenter__.return_value.post.side_effect = Exception("Network error")
+            mock_client.return_value = mock_async_context
+
+            message_id = await notifier.send_message_with_keyboard("Test", keyboard)
+
+            assert message_id is None
+
+    @pytest.mark.asyncio
+    async def test_send_message_with_keyboard_disabled(self):
+        notifier = TelegramNotifier(bot_token="", chat_id="")
+        keyboard = [[{"text": "Btn", "callback_data": "data"}]]
+
+        message_id = await notifier.send_message_with_keyboard("Test", keyboard)
+
+        assert message_id is None
+
+    @pytest.mark.asyncio
+    async def test_edit_message_reply_markup_success(self):
+        notifier = self._make_notifier()
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+
+            mock_async_context = AsyncMock()
+            mock_async_context.__aenter__.return_value.post.return_value = mock_response
+            mock_client.return_value = mock_async_context
+
+            result = await notifier.edit_message_reply_markup(chat_id="123456", message_id=42, keyboard=None)
+
+            assert result is True
+
+    @pytest.mark.asyncio
+    async def test_edit_message_reply_markup_with_keyboard(self):
+        notifier = self._make_notifier()
+        keyboard = [[{"text": "Btn", "callback_data": "data"}]]
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+
+            mock_async_context = AsyncMock()
+            mock_async_context.__aenter__.return_value.post.return_value = mock_response
+            mock_client.return_value = mock_async_context
+
+            result = await notifier.edit_message_reply_markup(chat_id="123456", message_id=42, keyboard=keyboard)
+
+            assert result is True
+            # Verify the payload included reply_markup
+            call_args = mock_async_context.__aenter__.return_value.post.call_args
+            assert "reply_markup" in call_args[1]["json"]
+
+    @pytest.mark.asyncio
+    async def test_edit_message_reply_markup_failure(self):
+        notifier = self._make_notifier()
+
+        with patch("httpx.AsyncClient") as mock_client:
+            mock_async_context = AsyncMock()
+            mock_async_context.__aenter__.return_value.post.side_effect = Exception("Network error")
+            mock_client.return_value = mock_async_context
+
+            result = await notifier.edit_message_reply_markup(chat_id="123456", message_id=42)
+
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_edit_message_reply_markup_disabled(self):
+        notifier = TelegramNotifier(bot_token="", chat_id="")
+
+        result = await notifier.edit_message_reply_markup(chat_id="123456", message_id=42)
+
+        assert result is False

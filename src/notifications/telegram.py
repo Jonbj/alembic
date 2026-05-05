@@ -199,6 +199,85 @@ class TelegramNotifier:
         )
         return await self.send_alert(message, level="info")
 
+    async def send_message_with_keyboard(
+        self,
+        message: str,
+        keyboard: list[list[dict]],
+        parse_mode: str = "HTML",
+    ) -> int | None:
+        """
+        Send message with InlineKeyboardMarkup.
+
+        Args:
+            message: Message text (supports HTML markup)
+            keyboard: Inline keyboard layout [[{"text": "Btn", "callback_data": "data"}]]
+            parse_mode: Parse mode ("HTML" or "Markdown")
+
+        Returns:
+            message_id if sent successfully, None if disabled or failed
+        """
+        if not self._enabled:
+            print(f"TelegramNotifier: Disabled (no bot_token/chat_id)")
+            return None
+
+        url = f"https://api.telegram.org/bot{self._bot_token}/sendMessage"
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    url,
+                    json={
+                        "chat_id": self._chat_id,
+                        "text": message,
+                        "parse_mode": parse_mode,
+                        "reply_markup": {"inline_keyboard": keyboard},
+                    },
+                )
+                response.raise_for_status()
+                result = response.json()
+                return result.get("result", {}).get("message_id")
+        except Exception as e:
+            print(f"TelegramNotifier: Failed to send message with keyboard: {e}")
+            return None
+
+    async def edit_message_reply_markup(
+        self,
+        chat_id: str,
+        message_id: int,
+        keyboard: list[list[dict]] | None = None,
+    ) -> bool:
+        """
+        Edit reply markup of an existing message.
+
+        Args:
+            chat_id: Channel or user ID
+            message_id: Message ID to edit
+            keyboard: New inline keyboard. None removes the keyboard entirely.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self._enabled:
+            return False
+
+        url = f"https://api.telegram.org/bot{self._bot_token}/editMessageReplyMarkup"
+
+        payload: dict = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+        }
+        if keyboard is not None:
+            payload["reply_markup"] = {"inline_keyboard": keyboard}
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                return True
+        except Exception as e:
+            print(f"TelegramNotifier: Failed to edit reply markup: {e}")
+            return False
+
 
 def format_fallback_alert(count: int) -> str:
     """Format fallback alert message for Telegram."""
@@ -279,6 +358,43 @@ def format_freeze_message(
 
     lines.append("\n👉 Approva manualmente: POST /api/weights/approve")
     return "\n".join(lines)
+
+
+def format_freeze_message_with_keyboard(
+    suggested_weights: dict[str, float],
+    current_weights: dict[str, float],
+    freeze_reason: str,
+    suggestion_token: str,
+) -> tuple[str, list[list[dict]]]:
+    """
+    Format Telegram freeze message with inline keyboard.
+
+    Args:
+        suggested_weights: New weights suggested by performance worker
+        current_weights: Current active weights
+        freeze_reason: Which guardrail blocked auto-apply
+        suggestion_token: SHA256(computed_at)[:8] for callback validation
+
+    Returns:
+        (message_text, inline_keyboard) tuple
+    """
+    lines = [
+        "⚠️ <b>Auto-apply bloccato — approvazione manuale richiesta</b>\n",
+        f"🚫 <b>Guardrail fallito:</b> {freeze_reason}\n",
+        "📊 <b>Pesi suggeriti (NON applicati):</b>",
+    ]
+    for model, w in sorted(suggested_weights.items()):
+        old_w = current_weights.get(model, 0.0)
+        delta = w - old_w
+        delta_str = f" ({delta:+.0%})" if abs(delta) >= _DELTA_DISPLAY_THRESHOLD else " (=)"
+        lines.append(f"  {model}: {w:.0%}{delta_str}")
+
+    keyboard = [
+        [{"text": "✅ Approva", "callback_data": f"approve:{suggestion_token}"}],
+        [{"text": "❌ Rifiuta", "callback_data": f"reject:{suggestion_token}"}],
+    ]
+
+    return "\n".join(lines), keyboard
 
 
 def format_regime_message(
