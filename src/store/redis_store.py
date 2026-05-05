@@ -326,6 +326,20 @@ class RedisStore:
         except json.JSONDecodeError:
             return None
 
+    def get_current_weights_stored(self) -> dict | None:
+        """Get stored ensemble weights from Redis. Returns None if not set."""
+        raw = self._r.get("ensemble:weights:current")
+        if raw is None:
+            return None
+        return json.loads(raw)
+
+    def get_performance_report(self) -> dict | None:
+        """Get latest performance report from Redis. Returns None if not available."""
+        raw = self._r.get("performance:latest_report")
+        if raw is None:
+            return None
+        return json.loads(raw)
+
     # =========================================================================
     # OPERATING MODE
     # =========================================================================

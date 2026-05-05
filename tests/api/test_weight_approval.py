@@ -1,7 +1,6 @@
 """Tests for GET /api/weights/suggestion and POST /api/weights/approve."""
 
 import hashlib
-import json
 import os
 from unittest.mock import MagicMock
 
@@ -31,6 +30,13 @@ SAMPLE_SUGGESTION = {
 }
 
 
+@pytest.fixture(autouse=True)
+def clear_dependency_overrides():
+    """Guarantee dependency_overrides are cleared even if a test assertion fails."""
+    yield
+    app.dependency_overrides.clear()
+
+
 def make_redis_mock(suggestion=SAMPLE_SUGGESTION):
     store = MagicMock()
     store.get_weight_suggestion.return_value = suggestion
@@ -52,7 +58,6 @@ async def test_get_suggestion_ok():
     app.dependency_overrides[get_redis_store] = lambda: redis
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get("/api/weights/suggestion")
-    app.dependency_overrides.clear()
 
     assert resp.status_code == 200
     data = resp.json()
@@ -68,7 +73,6 @@ async def test_get_suggestion_not_found():
     app.dependency_overrides[get_redis_store] = lambda: redis
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get("/api/weights/suggestion")
-    app.dependency_overrides.clear()
 
     assert resp.status_code == 404
 
@@ -82,7 +86,6 @@ async def test_approve_from_suggestion():
     app.dependency_overrides[get_pg_store] = lambda: pg
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post("/api/weights/approve", json={}, headers={"X-API-Key": API_KEY})
-    app.dependency_overrides.clear()
 
     assert resp.status_code == 200
     data = resp.json()
@@ -103,7 +106,6 @@ async def test_approve_frozen_returns_403():
     app.dependency_overrides[get_redis_store] = lambda: redis
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post("/api/weights/approve", json={}, headers={"X-API-Key": API_KEY})
-    app.dependency_overrides.clear()
 
     assert resp.status_code == 403
     assert "VIX > 40" in resp.json()["detail"]
@@ -124,7 +126,6 @@ async def test_approve_override_bypasses_freeze():
             json={"override_weights": override},
             headers={"X-API-Key": API_KEY},
         )
-    app.dependency_overrides.clear()
 
     assert resp.status_code == 200
     assert resp.json()["source"] == "override"
@@ -143,7 +144,6 @@ async def test_approve_override_invalid_sum():
             json={"override_weights": bad},
             headers={"X-API-Key": API_KEY},
         )
-    app.dependency_overrides.clear()
 
     assert resp.status_code == 422
     assert "sum to 1.0" in resp.json()["detail"]
@@ -161,7 +161,6 @@ async def test_approve_override_cap_exceeded():
             json={"override_weights": bad},
             headers={"X-API-Key": API_KEY},
         )
-    app.dependency_overrides.clear()
 
     assert resp.status_code == 422
     assert "cap" in resp.json()["detail"]
@@ -179,7 +178,6 @@ async def test_approve_unknown_model():
             json={"override_weights": bad},
             headers={"X-API-Key": API_KEY},
         )
-    app.dependency_overrides.clear()
 
     assert resp.status_code == 422
     assert "gpt5" in resp.json()["detail"]
@@ -194,7 +192,6 @@ async def test_approve_logs_approved_by_hash():
     app.dependency_overrides[get_pg_store] = lambda: pg
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post("/api/weights/approve", json={}, headers={"X-API-Key": API_KEY})
-    app.dependency_overrides.clear()
 
     assert resp.status_code == 200
     call_kwargs = pg.log_weight_update.call_args.kwargs
@@ -210,7 +207,6 @@ async def test_approve_no_suggestion_returns_404():
     app.dependency_overrides[get_redis_store] = lambda: redis
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post("/api/weights/approve", json={}, headers={"X-API-Key": API_KEY})
-    app.dependency_overrides.clear()
 
     assert resp.status_code == 404
 
@@ -223,7 +219,6 @@ async def test_get_suggestion_invalid_computed_at_format():
     app.dependency_overrides[get_redis_store] = lambda: redis
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get("/api/weights/suggestion")
-    app.dependency_overrides.clear()
 
     assert resp.status_code == 400
     assert "Invalid computed_at" in resp.json()["detail"]
@@ -237,7 +232,6 @@ async def test_get_suggestion_missing_computed_at():
     app.dependency_overrides[get_redis_store] = lambda: redis
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.get("/api/weights/suggestion")
-    app.dependency_overrides.clear()
 
     assert resp.status_code == 400
     assert "computed_at" in resp.json()["detail"]

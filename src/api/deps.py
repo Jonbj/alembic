@@ -8,6 +8,20 @@ from redis import Redis
 _redis_client: Optional[Redis] = None
 
 
+def init_redis(client: Redis) -> None:
+    """Store the app-lifecycle Redis client (called from lifespan startup)."""
+    global _redis_client
+    _redis_client = client
+
+
+def close_redis() -> None:
+    """Close the Redis client and clear the reference (called from lifespan shutdown)."""
+    global _redis_client
+    if _redis_client is not None:
+        _redis_client.close()
+        _redis_client = None
+
+
 def get_redis_store():
     """FastAPI dependency: RedisStore backed by the app-lifecycle Redis client."""
     from src.store.redis_store import RedisStore

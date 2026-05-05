@@ -1,6 +1,7 @@
 """Tests for PostgreSQL store - SQL injection fix verification."""
 
 import pytest
+from unittest.mock import MagicMock
 
 from src.store.pg_store import PostgreSQLStore
 
@@ -85,8 +86,6 @@ class TestLogWeightUpdate:
 
     def test_log_weight_update_returns_id(self):
         """log_weight_update executes INSERT RETURNING id and returns it."""
-        from unittest.mock import MagicMock
-
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
@@ -116,8 +115,6 @@ class TestLogWeightUpdate:
 
     def test_log_weight_update_rollback_on_error(self):
         """log_weight_update rolls back on exception."""
-        from unittest.mock import MagicMock
-
         mock_conn = MagicMock()
         mock_cursor = MagicMock()
         mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)

@@ -6,21 +6,16 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from redis import Redis
 
-from src.api import deps
+from src.api.deps import close_redis, get_pg_store, get_redis_store, init_redis  # noqa: F401
 from src.config import config
-
-# Re-export dependency functions so existing tests can still do:
-#   from src.api.main import app, get_redis_store, get_pg_store
-from src.api.deps import get_pg_store, get_redis_store  # noqa: F401
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Open Redis connection on startup, close on shutdown."""
-    deps._redis_client = Redis.from_url(config.REDIS_URL)
+    init_redis(Redis.from_url(config.REDIS_URL))
     yield
-    deps._redis_client.close()
-    deps._redis_client = None
+    close_redis()
 
 
 app = FastAPI(

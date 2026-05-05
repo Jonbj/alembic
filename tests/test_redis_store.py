@@ -1,5 +1,6 @@
 """Tests for Redis store - fallback counter verification."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -237,6 +238,90 @@ class TestGetWeightSuggestion:
 
         store = RedisStore(redis_client=mock_redis)
         assert store.get_weight_suggestion() is None
+
+
+class TestGetPerformanceReport:
+    """Test RedisStore.get_performance_report()."""
+
+    def test_returns_dict_when_key_exists(self):
+        payload = {"generated_at": "2026-05-05T10:00:00", "model_scores": {}}
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = json.dumps(payload).encode()
+
+        store = RedisStore(redis_client=mock_redis)
+        result = store.get_performance_report()
+
+        assert result == payload
+        mock_redis.get.assert_called_once_with("performance:latest_report")
+
+    def test_returns_none_when_absent(self):
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = None
+
+        store = RedisStore(redis_client=mock_redis)
+        assert store.get_performance_report() is None
+
+
+class TestGetCurrentWeightsStored:
+    """Test RedisStore.get_current_weights_stored()."""
+
+    def test_returns_dict_when_key_exists(self):
+        payload = {"weights": {"opus": 0.34}, "source": "suggestion"}
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = json.dumps(payload).encode()
+
+        store = RedisStore(redis_client=mock_redis)
+        result = store.get_current_weights_stored()
+
+        assert result == payload
+        mock_redis.get.assert_called_once_with("ensemble:weights:current")
+
+    def test_returns_none_when_absent(self):
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = None
+
+        store = RedisStore(redis_client=mock_redis)
+        assert store.get_current_weights_stored() is None
+
+
+class TestDepsInitClose:
+    """Test deps.init_redis() / deps.close_redis() lifecycle helpers."""
+
+    def test_get_redis_store_raises_503_before_init(self):
+        import src.api.deps as deps
+        original = deps._redis_client
+        deps._redis_client = None
+        try:
+            from fastapi import HTTPException
+            with pytest.raises(HTTPException) as exc_info:
+                deps.get_redis_store()
+            assert exc_info.value.status_code == 503
+        finally:
+            deps._redis_client = original
+
+    def test_init_redis_makes_get_redis_store_return_store(self):
+        import src.api.deps as deps
+        original = deps._redis_client
+        mock_redis = MagicMock()
+        try:
+            deps.init_redis(mock_redis)
+            store = deps.get_redis_store()
+            from src.store.redis_store import RedisStore
+            assert isinstance(store, RedisStore)
+        finally:
+            deps._redis_client = original
+
+    def test_close_redis_clears_client(self):
+        import src.api.deps as deps
+        original = deps._redis_client
+        mock_redis = MagicMock()
+        try:
+            deps.init_redis(mock_redis)
+            deps.close_redis()
+            assert deps._redis_client is None
+            mock_redis.close.assert_called_once()
+        finally:
+            deps._redis_client = original
 
 
 if __name__ == "__main__":
