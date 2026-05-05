@@ -1,6 +1,7 @@
 """Tests for Redis store - fallback counter verification."""
 
 import json
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -321,6 +322,77 @@ class TestVixCache:
         result = store.get_vix_cached()
 
         assert result is None
+
+
+class TestRegimeRedis:
+    """Tests for RegimeState persistence and set_qc_sizing_multiplier."""
+
+    def _make_state(self, regime="bear"):
+        from src.models.regime import MacroSnapshot, RegimeState
+        return RegimeState(
+            regime=regime,
+            multiplier=0.4,
+            macro_snapshot=MacroSnapshot(vix=28.4, yield_curve=-0.6, spy_momentum_20d=-7.1),
+            llm_outputs=[{"regime": regime, "reasoning": "test"}],
+            detected_at=datetime(2026, 5, 5, 7, 0, 0, tzinfo=timezone.utc),
+        )
+
+    def test_set_regime_calls_setex(self):
+        mock_redis = MagicMock()
+        store = RedisStore(redis_client=mock_redis)
+        state = self._make_state()
+
+        store.set_regime(state, ttl=90000)
+
+        mock_redis.setex.assert_called_once()
+        key, ttl, value = mock_redis.setex.call_args[0]
+        assert key == "regime:current"
+        assert ttl == 90000
+        assert "bear" in value
+
+    def test_get_regime_roundtrip(self):
+        mock_redis = MagicMock()
+        state = self._make_state()
+        mock_redis.get.return_value = state.model_dump_json().encode()
+
+        store = RedisStore(redis_client=mock_redis)
+        result = store.get_regime()
+
+        assert result is not None
+        assert result.regime == "bear"
+        assert result.multiplier == pytest.approx(0.4)
+        assert result.macro_snapshot.vix == pytest.approx(28.4)
+        mock_redis.get.assert_called_once_with("regime:current")
+
+    def test_get_regime_returns_none_when_absent(self):
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = None
+
+        store = RedisStore(redis_client=mock_redis)
+        assert store.get_regime() is None
+
+    def test_get_regime_returns_none_on_corrupted_data(self):
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = b"not-valid-json"
+
+        store = RedisStore(redis_client=mock_redis)
+        assert store.get_regime() is None
+
+    def test_set_qc_sizing_multiplier(self):
+        mock_redis = MagicMock()
+        store = RedisStore(redis_client=mock_redis)
+
+        store.set_qc_sizing_multiplier(0.4, ttl=90000)
+
+        mock_redis.setex.assert_called_once_with("qc:sizing_multiplier", 90000, "0.4")
+
+    def test_set_qc_sizing_multiplier_bull(self):
+        mock_redis = MagicMock()
+        store = RedisStore(redis_client=mock_redis)
+
+        store.set_qc_sizing_multiplier(1.0, ttl=90000)
+
+        mock_redis.setex.assert_called_once_with("qc:sizing_multiplier", 90000, "1.0")
 
 
 class TestDepsInitClose:

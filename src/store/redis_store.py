@@ -361,6 +361,30 @@ class RedisStore:
         self._r.delete("ensemble:weights:suggestion:snapshot")
 
     # =========================================================================
+    # REGIME DETECTION
+    # =========================================================================
+
+    def set_regime(self, state: "RegimeState", ttl: int) -> None:  # type: ignore[name-defined]
+        """Persist RegimeState JSON in Redis with TTL."""
+        from src.models.regime import RegimeState  # local import to avoid circular
+        self._r.setex("regime:current", ttl, state.model_dump_json())
+
+    def get_regime(self) -> "RegimeState | None":  # type: ignore[name-defined]
+        """Read RegimeState from Redis. Returns None if absent or corrupted."""
+        from src.models.regime import RegimeState
+        raw = self._r.get("regime:current")
+        if raw is None:
+            return None
+        try:
+            return RegimeState.model_validate_json(raw)
+        except Exception:
+            return None
+
+    def set_qc_sizing_multiplier(self, value: float, ttl: int) -> None:
+        """Write qc:sizing_multiplier with TTL. Overwrites existing value."""
+        self._r.setex("qc:sizing_multiplier", ttl, str(value))
+
+    # =========================================================================
     # OPERATING MODE
     # =========================================================================
 
