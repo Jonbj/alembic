@@ -15,6 +15,7 @@ from src.workers.performance import (
     _fetch_all_signals_for_ic,
     _suggest_threshold,
     build_performance_report,
+    check_suggestion_expiry,
     run_daily_report,
     run_drift_detection,
     run_weekly_weights,
@@ -353,8 +354,10 @@ class TestRunWeeklyWeights:
 
         # Verify suggestion was stored (not applied)
         mock_redis._r.setex.assert_called()
-        call_args = mock_redis._r.setex.call_args
-        assert call_args[0][0] == "ensemble:weights:suggestion"
+        # Check that both suggestion and snapshot keys were set
+        setex_calls = mock_redis._r.setex.call_args_list
+        assert any(call[0][0] == "ensemble:weights:suggestion" for call in setex_calls)
+        assert any(call[0][0] == "ensemble:weights:suggestion:snapshot" for call in setex_calls)
 
         # Verify Telegram alert was sent
         mock_notifier.send_alert.assert_called()
@@ -460,3 +463,80 @@ class TestRunDriftDetection:
 
         # Should send alert for drift
         mock_notifier.send_alert.assert_called()
+
+
+class TestCheckSuggestionExpiry:
+    """Tests for check_suggestion_expiry Celery task."""
+
+    def test_logs_expired_when_suggestion_gone_and_snapshot_present(self):
+        """If snapshot exists but suggestion key is gone, logs source='expired'."""
+        from unittest.mock import MagicMock, patch
+
+        snapshot = {
+            "suggested_weights": {"opus": 0.45, "qwen3.5:cloud": 0.35, "deepseek-v4-pro:cloud": 0.20},
+            "purified_icir": {"opus": 0.31},
+            "freeze_reason": "",
+            "computed_at": "2026-05-04T08:00:00+00:00",
+        }
+
+        mock_redis_client = MagicMock()
+        mock_redis_client.get.side_effect = lambda key: (
+            json.dumps(snapshot).encode() if key == "ensemble:weights:suggestion:snapshot"
+            else None  # suggestion key is gone (expired)
+        )
+
+        mock_redis_store = MagicMock()
+        mock_redis_store._r = mock_redis_client
+
+        mock_pg = MagicMock()
+
+        with patch("src.workers.performance.RedisStore", return_value=mock_redis_store), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=mock_pg):
+            from src.workers.performance import check_suggestion_expiry
+            check_suggestion_expiry()
+
+        mock_pg.log_weight_update.assert_called_once()
+        call_kwargs = mock_pg.log_weight_update.call_args.kwargs
+        assert call_kwargs["source"] == "expired"
+        assert call_kwargs["note"] == "Suggestion expired without approval"
+        mock_redis_client.delete.assert_called_once_with("ensemble:weights:suggestion:snapshot")
+
+    def test_does_nothing_when_no_snapshot(self):
+        """If no snapshot exists, task exits silently."""
+        from unittest.mock import MagicMock, patch
+
+        mock_redis_client = MagicMock()
+        mock_redis_client.get.return_value = None
+
+        mock_redis_store = MagicMock()
+        mock_redis_store._r = mock_redis_client
+
+        mock_pg = MagicMock()
+
+        with patch("src.workers.performance.RedisStore", return_value=mock_redis_store), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=mock_pg):
+            from src.workers.performance import check_suggestion_expiry
+            check_suggestion_expiry()
+
+        mock_pg.log_weight_update.assert_not_called()
+
+    def test_does_nothing_when_suggestion_still_active(self):
+        """If both snapshot and suggestion exist, suggestion hasn't expired yet."""
+        from unittest.mock import MagicMock, patch
+
+        snapshot = {"suggested_weights": {}, "purified_icir": {}, "freeze_reason": "", "computed_at": "2026-05-04T08:00:00+00:00"}
+
+        mock_redis_client = MagicMock()
+        mock_redis_client.get.return_value = json.dumps(snapshot).encode()  # both keys exist
+
+        mock_redis_store = MagicMock()
+        mock_redis_store._r = mock_redis_client
+
+        mock_pg = MagicMock()
+
+        with patch("src.workers.performance.RedisStore", return_value=mock_redis_store), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=mock_pg):
+            from src.workers.performance import check_suggestion_expiry
+            check_suggestion_expiry()
+
+        mock_pg.log_weight_update.assert_not_called()

@@ -400,6 +400,15 @@ def run_weekly_weights():
             json.dumps(suggestion),
         )
 
+        # Snapshot key: 9d TTL (2d buffer) — read by check_suggestion_expiry
+        # if the 7d suggestion key expires before being approved.
+        # Deleted by POST /api/weights/approve on successful approval.
+        redis._r.setex(
+            "ensemble:weights:suggestion:snapshot",
+            86400 * 9,
+            json.dumps(suggestion),
+        )
+
         # Send Telegram alert with suggestions
         notifier = TelegramNotifier()
         message = _format_weights_telegram_message(new_weights, current_weights, freeze_reason)
@@ -567,3 +576,38 @@ def _format_weights_telegram_message(
     lines.append("Note: Fase 1 = observational only (no auto-update)")
 
     return "\n".join(lines)
+
+
+@app.task(name="src.workers.performance.check_suggestion_expiry")
+def check_suggestion_expiry():
+    """Daily: log weight suggestions that expired without being approved.
+
+    Checks for the snapshot key (9d TTL) left by run_weekly_weights. If the
+    snapshot exists but the original suggestion key (7d TTL) is gone, the
+    suggestion expired without an admin approving it. Log source='expired'.
+    The snapshot is also deleted by POST /api/weights/approve on success, so
+    if we reach here the suggestion was never approved.
+    """
+    redis = RedisStore()
+
+    snapshot_raw = redis._r.get("ensemble:weights:suggestion:snapshot")
+    if snapshot_raw is None:
+        return  # no pending suggestion
+
+    if redis._r.get("ensemble:weights:suggestion") is not None:
+        return  # suggestion still active, nothing to do
+
+    # suggestion key gone + snapshot present → expired without approval
+    snapshot = json.loads(snapshot_raw)
+    pg = PostgreSQLStore()
+    pg.log_weight_update(
+        source="expired",
+        applied_weights=snapshot.get("suggested_weights", {}),
+        suggested_weights=snapshot.get("suggested_weights"),
+        purified_icir=snapshot.get("purified_icir"),
+        freeze_reason=snapshot.get("freeze_reason") or None,
+        note="Suggestion expired without approval",
+    )
+
+    # Clean up snapshot
+    redis._r.delete("ensemble:weights:suggestion:snapshot")

@@ -46,6 +46,11 @@ app.conf.beat_schedule = {
         "task": "src.workers.performance.run_drift_detection",
         "schedule": crontab(hour=4, minute=30, day_of_week=0),
     },
+    # Check suggestion expiry daily at 05:00 UTC
+    "check-suggestion-expiry": {
+        "task": "src.workers.performance.check_suggestion_expiry",
+        "schedule": crontab(hour=5, minute=0),
+    },
 }
 
 # Auto-discover tasks in the workers package
