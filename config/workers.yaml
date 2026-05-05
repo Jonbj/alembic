@@ -49,3 +49,12 @@ notifications:
   # Telegram credentials should be in environment:
   # TELEGRAM_BOT_TOKEN
   # TELEGRAM_CHAT_ID
+
+auto_apply:
+  # Toggle: set AUTO_APPLY_ENABLED=false env var to disable without deploy
+  enabled: true
+  vix_threshold: 30.0            # block if VIX >= threshold
+  ic_variance_threshold: 0.15    # block if std(purified_icir.values()) >= threshold
+  weight_delta_max: 0.15         # block if any weight changes by >= 15pp
+  vix_redis_ttl_seconds: 3600    # cache VIX in Redis for 1 hour
+  vix_fred_series: "VIXCLS"      # FRED series ID for daily VIX

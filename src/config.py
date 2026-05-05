@@ -71,6 +71,31 @@ class Config(BaseModel):
     # Fallback settings
     MAX_CONSECUTIVE_FALLBACKS: int = Field(default=3)
 
+    # FRED API
+    FRED_API_KEY: str = Field(
+        default_factory=lambda: os.environ.get("FRED_API_KEY", "")
+    )
+
+    # Auto-apply ensemble weights guardrails
+    AUTO_APPLY_ENABLED: bool = Field(
+        default_factory=lambda: os.environ.get("AUTO_APPLY_ENABLED", "true").lower() == "true"
+    )
+    AUTO_APPLY_VIX_THRESHOLD: float = Field(
+        default_factory=lambda: float(os.environ.get("AUTO_APPLY_VIX_THRESHOLD", "30.0"))
+    )
+    AUTO_APPLY_IC_VARIANCE_THRESHOLD: float = Field(
+        default_factory=lambda: float(os.environ.get("AUTO_APPLY_IC_VARIANCE_THRESHOLD", "0.15"))
+    )
+    AUTO_APPLY_WEIGHT_DELTA_MAX: float = Field(
+        default_factory=lambda: float(os.environ.get("AUTO_APPLY_WEIGHT_DELTA_MAX", "0.15"))
+    )
+    AUTO_APPLY_VIX_REDIS_TTL_SECONDS: int = Field(
+        default_factory=lambda: int(os.environ.get("AUTO_APPLY_VIX_REDIS_TTL_SECONDS", "3600"))
+    )
+    AUTO_APPLY_VIX_FRED_SERIES: str = Field(
+        default_factory=lambda: os.environ.get("AUTO_APPLY_VIX_FRED_SERIES", "VIXCLS")
+    )
+
     @field_validator("ADMIN_API_KEY")
     @classmethod
     def validate_api_key(cls, v: str) -> str:
