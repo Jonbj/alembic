@@ -33,7 +33,7 @@
 **Files:**
 - Create: `migrations/003_extend_source_check.sql`
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 Create `migrations/003_extend_source_check.sql`:
 
@@ -49,13 +49,13 @@ ALTER TABLE weight_update_log
   CHECK (source IN ('suggestion', 'override', 'expired', 'auto_apply', 'freeze'));
 ```
 
-- [ ] **Step 2: Verify SQL syntax**
+- [x] **Step 2: Verify SQL syntax**
 
 Run: `psql $DATABASE_URL -f migrations/003_extend_source_check.sql`
 
 Expected: No errors. Skip if `DATABASE_URL` is not set locally.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add migrations/003_extend_source_check.sql
@@ -70,7 +70,7 @@ git commit -m "feat: extend weight_update_log source CHECK for auto_apply and fr
 - Modify: `src/config.py`
 - Modify: `config/workers.yaml`
 
-- [ ] **Step 1: Add fields to Config**
+- [x] **Step 1: Add fields to Config**
 
 In `src/config.py`, inside the `Config` class after the `MAX_CONSECUTIVE_FALLBACKS` field and before the validators, add:
 
@@ -101,7 +101,7 @@ In `src/config.py`, inside the `Config` class after the `MAX_CONSECUTIVE_FALLBAC
     )
 ```
 
-- [ ] **Step 2: Update workers.yaml**
+- [x] **Step 2: Update workers.yaml**
 
 Append to `config/workers.yaml`:
 
@@ -117,13 +117,13 @@ auto_apply:
   vix_fred_series: "VIXCLS"      # FRED series ID for daily VIX
 ```
 
-- [ ] **Step 3: Run tests to verify no regressions**
+- [x] **Step 3: Run tests to verify no regressions**
 
 Run: `pytest tests/ -v --tb=short -q`
 
 Expected: All tests pass.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/config.py config/workers.yaml
@@ -140,7 +140,7 @@ git commit -m "feat: add AUTO_APPLY_* config fields and FRED_API_KEY"
 - Modify: `src/store/redis_store.py`
 - Modify: `tests/test_redis_store.py`
 
-- [ ] **Step 1: Write failing tests for fetch_vix_from_fred()**
+- [x] **Step 1: Write failing tests for fetch_vix_from_fred()**
 
 Create `tests/connectors/test_macro.py`:
 
@@ -205,7 +205,7 @@ Run: `pytest tests/connectors/test_macro.py -v`
 
 Expected: FAIL — `ModuleNotFoundError: No module named 'src.connectors.macro'`
 
-- [ ] **Step 3: Create src/connectors/macro.py**
+- [x] **Step 3: Create src/connectors/macro.py**
 
 ```python
 """Macro data connector — FRED API for VIX and other macro indicators."""
@@ -251,7 +251,7 @@ Run: `pytest tests/connectors/test_macro.py -v`
 
 Expected: 3 tests PASS.
 
-- [ ] **Step 5: Write failing tests for RedisStore VIX cache**
+- [x] **Step 5: Write failing tests for RedisStore VIX cache**
 
 Append to `tests/test_redis_store.py`:
 
@@ -285,13 +285,13 @@ class TestVixCache:
         mock_redis.setex.assert_called_once_with("macro:vix:latest", 3600, "18.45")
 ```
 
-- [ ] **Step 6: Run tests to verify they fail**
+- [x] **Step 6: Run tests to verify they fail**
 
 Run: `pytest tests/test_redis_store.py::TestVixCache -v`
 
 Expected: FAIL — `AttributeError: 'RedisStore' object has no attribute 'get_vix_cached'`
 
-- [ ] **Step 7: Add VIX cache methods to RedisStore**
+- [x] **Step 7: Add VIX cache methods to RedisStore**
 
 In `src/store/redis_store.py`, add after `get_performance_report()`:
 
@@ -308,19 +308,19 @@ In `src/store/redis_store.py`, add after `get_performance_report()`:
         self._r.setex("macro:vix:latest", ttl, str(value))
 ```
 
-- [ ] **Step 8: Run tests to verify they pass**
+- [x] **Step 8: Run tests to verify they pass**
 
 Run: `pytest tests/test_redis_store.py::TestVixCache -v`
 
 Expected: 3 tests PASS.
 
-- [ ] **Step 9: Run full test suite for regressions**
+- [x] **Step 9: Run full test suite for regressions**
 
 Run: `pytest tests/ -q --tb=short`
 
 Expected: All tests pass.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add src/connectors/macro.py src/store/redis_store.py \
@@ -336,7 +336,7 @@ git commit -m "feat: add fetch_vix_from_fred and RedisStore VIX cache"
 - Modify: `src/notifications/telegram.py`
 - Create: `tests/notifications/test_telegram.py`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Create `tests/notifications/__init__.py` (empty file).
 
@@ -432,13 +432,13 @@ class TestFormatFreezeMessage:
         assert "/api/weights/approve" in msg
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/notifications/test_telegram.py -v`
 
 Expected: FAIL — `ImportError: cannot import name 'format_auto_apply_message'`
 
-- [ ] **Step 3: Add formatters to telegram.py**
+- [x] **Step 3: Add formatters to telegram.py**
 
 Append to `src/notifications/telegram.py`:
 
@@ -490,19 +490,19 @@ def format_freeze_message(
     return "\n".join(lines)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `pytest tests/notifications/test_telegram.py -v`
 
 Expected: 8 tests PASS.
 
-- [ ] **Step 5: Run full test suite for regressions**
+- [x] **Step 5: Run full test suite for regressions**
 
 Run: `pytest tests/ -q --tb=short`
 
 Expected: All tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/notifications/telegram.py \
@@ -519,7 +519,7 @@ git commit -m "feat: add format_auto_apply_message and format_freeze_message to 
 - Modify: `src/workers/performance.py`
 - Modify: `tests/workers/test_performance_worker.py`
 
-- [ ] **Step 1: Write all 8 failing tests**
+- [x] **Step 1: Write all 8 failing tests**
 
 Append to `tests/workers/test_performance_worker.py`:
 
@@ -732,13 +732,13 @@ class TestCheckAndApplyWeights:
         redis._r.delete.assert_called_once_with("ensemble:weights:suggestion:snapshot")
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pytest tests/workers/test_performance_worker.py::TestCheckAndApplyWeights -v`
 
 Expected: FAIL — `ImportError` or `AttributeError` for `check_and_apply_weights`
 
-- [ ] **Step 3: Add _get_vix helper to performance.py**
+- [x] **Step 3: Add _get_vix helper to performance.py**
 
 In `src/workers/performance.py`, add after the imports and before the first task function:
 
@@ -764,7 +764,7 @@ def _get_vix(redis: "RedisStore") -> float | None:
         return None
 ```
 
-- [ ] **Step 4: Add check_and_apply_weights task to performance.py**
+- [x] **Step 4: Add check_and_apply_weights task to performance.py**
 
 Append to `src/workers/performance.py` (after `check_suggestion_expiry`):
 
@@ -887,19 +887,19 @@ def check_and_apply_weights():
         log.info("Weights auto-applied successfully")
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 Run: `pytest tests/workers/test_performance_worker.py::TestCheckAndApplyWeights -v`
 
 Expected: 8 tests PASS.
 
-- [ ] **Step 6: Run full worker test suite for regressions**
+- [x] **Step 6: Run full worker test suite for regressions**
 
 Run: `pytest tests/workers/ -v --tb=short`
 
 Expected: All tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/workers/performance.py tests/workers/test_performance_worker.py
@@ -914,7 +914,7 @@ git commit -m "feat: add check_and_apply_weights task with VIX/IC/delta guardrai
 - Modify: `src/workers/performance.py` (add chain call)
 - Modify: `tests/workers/test_performance_worker.py` (update weekly test)
 
-- [ ] **Step 1: Add chain call to run_weekly_weights**
+- [x] **Step 1: Add chain call to run_weekly_weights**
 
 In `src/workers/performance.py`, inside `run_weekly_weights()`, after the Telegram alert block (after `asyncio.run(notifier.send_alert(...))`):
 
@@ -923,7 +923,7 @@ In `src/workers/performance.py`, inside `run_weekly_weights()`, after the Telegr
         check_and_apply_weights.apply_async(countdown=5)
 ```
 
-- [ ] **Step 2: Update the weekly weights test to assert chain is triggered**
+- [x] **Step 2: Update the weekly weights test to assert chain is triggered**
 
 In `tests/workers/test_performance_worker.py`, inside `TestRunWeeklyWeights.test_run_weekly_weights_observational`, add after the existing assertions:
 
@@ -983,19 +983,19 @@ Rewrite `test_run_weekly_weights_observational` to add the chain patch:
         mock_apply_task.apply_async.assert_called_once_with(countdown=5)
 ```
 
-- [ ] **Step 3: Run the updated test**
+- [x] **Step 3: Run the updated test**
 
 Run: `pytest tests/workers/test_performance_worker.py::TestRunWeeklyWeights -v`
 
 Expected: Both tests PASS.
 
-- [ ] **Step 4: Run full test suite**
+- [x] **Step 4: Run full test suite**
 
 Run: `pytest -v --tb=short 2>&1 | tail -20`
 
 Expected: All tests pass, 0 failures.
 
-- [ ] **Step 5: Verify beat schedule still has 5 tasks**
+- [x] **Step 5: Verify beat schedule still has 5 tasks**
 
 Run:
 ```bash
@@ -1017,7 +1017,7 @@ check-suggestion-expiry
 
 (`check_and_apply_weights` is NOT in the beat schedule — it is only triggered via chain from `run_weekly_weights`, not on its own schedule.)
 
-- [ ] **Step 6: Final commit**
+- [x] **Step 6: Final commit**
 
 ```bash
 git add src/workers/performance.py tests/workers/test_performance_worker.py
