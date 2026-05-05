@@ -1,5 +1,6 @@
 """PostgreSQL store for sentiment signals and performance metrics."""
 
+import json
 from datetime import timedelta
 from typing import Any
 
@@ -66,6 +67,14 @@ class PostgreSQLStore:
             model_id = EXCLUDED.model_id,
             ensemble_std = EXCLUDED.ensemble_std,
             fallback_used = EXCLUDED.fallback_used
+    """
+
+    _INSERT_WEIGHT_LOG = """
+        INSERT INTO weight_update_log (
+            source, applied_weights, suggested_weights,
+            purified_icir, freeze_reason, note, approved_by
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
     """
 
     def __init__(
@@ -210,6 +219,39 @@ class PostgreSQLStore:
                 (forward_return, signal_id),
             )
         conn.commit()
+
+    def log_weight_update(
+        self,
+        source: str,
+        applied_weights: dict,
+        suggested_weights: dict | None = None,
+        purified_icir: dict | None = None,
+        freeze_reason: str | None = None,
+        note: str | None = None,
+        approved_by: str | None = None,
+    ) -> int:
+        """Write a row to weight_update_log and return the generated id."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    self._INSERT_WEIGHT_LOG,
+                    (
+                        source,
+                        json.dumps(applied_weights),
+                        json.dumps(suggested_weights) if suggested_weights is not None else None,
+                        json.dumps(purified_icir) if purified_icir is not None else None,
+                        freeze_reason,
+                        note,
+                        approved_by,
+                    ),
+                )
+                log_id: int = cur.fetchone()[0]
+            conn.commit()
+            return log_id
+        except Exception:
+            conn.rollback()
+            raise
 
     def __enter__(self) -> "PostgreSQLStore":
         return self
