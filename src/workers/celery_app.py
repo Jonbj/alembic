@@ -56,6 +56,11 @@ app.conf.beat_schedule = {
         "task": "src.workers.regime.detect_regime",
         "schedule": crontab(hour=7, minute=0, day_of_week="1-5"),
     },
+    # Telegram poller every 5 seconds for inline keyboard approval flow
+    "poll-telegram-updates": {
+        "task": "src.workers.telegram_poller.poll_telegram_updates",
+        "schedule": 5.0,  # 5 seconds
+    },
 }
 
 # Auto-discover tasks in the workers package
