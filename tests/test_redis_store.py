@@ -209,5 +209,35 @@ class TestRedisOOMHandling:
         store.write_sentiment(result)
 
 
+class TestGetWeightSuggestion:
+    """Test RedisStore.get_weight_suggestion()."""
+
+    def test_returns_dict_when_key_exists(self):
+        import json
+        payload = {"suggested_weights": {"opus": 0.45}, "freeze_reason": ""}
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = json.dumps(payload).encode()
+
+        store = RedisStore(redis_client=mock_redis)
+        result = store.get_weight_suggestion()
+
+        assert result == payload
+        mock_redis.get.assert_called_once_with("ensemble:weights:suggestion")
+
+    def test_returns_none_when_key_absent(self):
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = None
+
+        store = RedisStore(redis_client=mock_redis)
+        assert store.get_weight_suggestion() is None
+
+    def test_returns_none_on_corrupted_json(self):
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = b"not-valid-json"
+
+        store = RedisStore(redis_client=mock_redis)
+        assert store.get_weight_suggestion() is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -316,6 +316,16 @@ class RedisStore:
         data = json.dumps({"weights": weights, "source": source})
         self._r.setex("ensemble:weights:current", 86400 * 30, data)
 
+    def get_weight_suggestion(self) -> dict | None:
+        """Get current weight suggestion from Redis. Returns None if absent or corrupted."""
+        raw = self._r.get("ensemble:weights:suggestion")
+        if raw is None:
+            return None
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+
     # =========================================================================
     # OPERATING MODE
     # =========================================================================
