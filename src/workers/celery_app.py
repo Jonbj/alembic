@@ -51,6 +51,11 @@ app.conf.beat_schedule = {
         "task": "src.workers.performance.check_suggestion_expiry",
         "schedule": crontab(hour=5, minute=0),
     },
+    # Regime detection daily at 07:00 UTC Mon-Fri (pre-market US)
+    "regime-detector": {
+        "task": "src.workers.regime.detect_regime",
+        "schedule": crontab(hour=7, minute=0, day_of_week="1-5"),
+    },
 }
 
 # Auto-discover tasks in the workers package
