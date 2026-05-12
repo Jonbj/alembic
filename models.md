@@ -19,7 +19,7 @@
 | `glm-5.1:cloud` | GLM | Cloud — USATO per analisi |
 | `kimi-k2.6:cloud` | Kimi | Cloud — USATO per analisi |
 | `gemma4:31b-cloud` | Gemma | Cloud — USATO per analisi |
-| `ministral-3:cloud` | Ministral | Cloud — Testato OK |
+| `ministral-3:14b-cloud` | Ministral | Cloud — Testato OK |
 | `nemotron-3-super:cloud` | NVIDIA | Cloud — Testato OK |
 | `gemini-3-flash-preview:cloud` | Gemini | Cloud — Testato OK |
 
