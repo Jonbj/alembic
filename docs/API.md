@@ -1,8 +1,8 @@
 # API Reference — LLM Trading System
 
 **FastAPI REST Endpoints**  
-**Versione:** 1.0.0  
-**Data:** 2026-05-04
+**Versione:** 2.0.0  
+**Data:** 2026-05-12
 
 ---
 
@@ -345,8 +345,8 @@ Restituisce i pesi ensemble correnti.
 | Campo | Tipo | Descrizione |
 |-------|------|-------------|
 | `weights` | object | Mappa model_id → weight |
-| `source` | string | Origine pesi ("auto", "manual_approval", "default") |
-| `updated_at` | datetime | Ultimo aggiornamento |
+| `source` | string | Origine pesi: `auto_apply`, `telegram`, `suggestion`, `override`, `default` |
+| `updated_at` | datetime | Ultimo aggiornamento (non presente nel default) |
 
 #### Default Fallback
 
@@ -371,6 +371,58 @@ curl http://localhost:8000/api/weights/current
 
 ---
 
+### GET `/api/weights/suggestion`
+
+Restituisce il suggerimento pesi corrente calcolato da LOO ICIR, se presente.
+
+#### Auth Required
+
+❌ No
+
+#### Response 200 OK
+
+```json
+{
+  "suggested_weights": {
+    "opus": 0.38,
+    "qwen3.5:cloud": 0.32,
+    "deepseek-v4-pro:cloud": 0.30
+  },
+  "purified_icir": {
+    "opus": 1.15,
+    "qwen3.5:cloud": 0.97,
+    "deepseek-v4-pro:cloud": 1.08
+  },
+  "freeze_reason": "VIX = 32.4 >= 30.0",
+  "computed_at": "2026-05-12T04:00:12Z",
+  "expires_at": "2026-05-19T04:00:12Z"
+}
+```
+
+| Campo | Tipo | Descrizione |
+|-------|------|-------------|
+| `suggested_weights` | object | Nuovi pesi proposti (model_id → weight) |
+| `purified_icir` | object | ICIR purificato per modello (LOO cross-validation) |
+| `freeze_reason` | string | Guardrail che ha bloccato auto-apply (vuoto se nessuno) |
+| `computed_at` | datetime | Timestamp calcolo suggerimento |
+| `expires_at` | datetime | Scadenza suggerimento (7 giorni da computed_at) |
+
+#### Response 404 Not Found
+
+```json
+{
+  "detail": "No weight suggestion available"
+}
+```
+
+#### Esempio
+
+```bash
+curl http://localhost:8000/api/weights/suggestion
+```
+
+---
+
 ### POST `/api/weights/approve`
 
 Approva manualmente e imposta nuovi pesi ensemble.
@@ -383,54 +435,92 @@ Approva manualmente e imposta nuovi pesi ensemble.
 
 ```json
 {
-  "weights": {
-    "opus": 0.30,
-    "qwen3.5:cloud": 0.40,
-    "deepseek-v4-pro:cloud": 0.30
-  }
+  "override_weights": null,
+  "note": "Approvazione manuale post-earnings NVDA"
 }
 ```
 
-#### Validazione
+| Campo | Tipo | Descrizione |
+|-------|------|-------------|
+| `override_weights` | object o null | Se null: approva i pesi suggeriti. Se fornito: sovrascrive con pesi custom |
+| `note` | string o null | Nota audit opzionale |
 
-- I pesi devono sommare a ~1.0 (tolleranza ±0.05)
-- Ogni peso deve essere in [0.0, 1.0]
-- Tutti i modelli configurati devono essere presenti
+**Comportamento con `override_weights`:**
+- `null` → approva il suggerimento Redis corrente (source="suggestion")
+- Se il suggerimento ha `freeze_reason` e `override_weights` è null → HTTP 403
+- `{...}` → forza pesi custom (source="override"); validi anche se guardrail fallito
+
+**Validazione `override_weights`:**
+- Ogni peso deve essere in `[0.10, 0.70]` (floor e cap da config)
+- I pesi devono sommare esattamente a 1.0 (tolleranza ±0.001)
+- Ogni model_id deve essere in MODEL_COSTS
 
 #### Response 200 OK
 
 ```json
 {
-  "approved": {
+  "applied_weights": {
     "opus": 0.30,
     "qwen3.5:cloud": 0.40,
     "deepseek-v4-pro:cloud": 0.30
   },
-  "source": "manual_approval",
-  "approved_at": "2026-05-04T15:00:00Z"
+  "source": "suggestion",
+  "log_id": 42
 }
 ```
 
-#### Response 400 Bad Request
+| Campo | Tipo | Descrizione |
+|-------|------|-------------|
+| `applied_weights` | object | Pesi effettivamente applicati |
+| `source` | string | `"suggestion"` (da LOO ICIR) o `"override"` (custom) |
+| `log_id` | integer | ID riga PostgreSQL weight_update_log |
+
+#### Response 403 Forbidden (freeze senza override)
 
 ```json
 {
-  "detail": "Weights must sum to 1.0 (±0.05). Current sum: 0.85"
+  "detail": "Weight update frozen: VIX = 32.4 >= 30.0"
 }
 ```
 
-#### Esempio
+#### Response 404 Not Found (nessun suggerimento)
+
+```json
+{
+  "detail": "No weight suggestion available"
+}
+```
+
+#### Response 422 Unprocessable Entity (validazione pesi)
+
+```json
+{
+  "detail": "Weights must sum to 1.0 (got 0.8500)"
+}
+```
+
+#### Esempio — approva suggerimento
+
+```bash
+curl -X POST http://localhost:8000/api/weights/approve \
+  -H "X-API-Key: tua-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"override_weights": null}'
+```
+
+#### Esempio — forza pesi custom (override freeze)
 
 ```bash
 curl -X POST http://localhost:8000/api/weights/approve \
   -H "X-API-Key: tua-api-key" \
   -H "Content-Type: application/json" \
   -d '{
-    "weights": {
+    "override_weights": {
       "opus": 0.30,
       "qwen3.5:cloud": 0.40,
       "deepseek-v4-pro:cloud": 0.30
-    }
+    },
+    "note": "Override manuale - VIX falso positivo"
   }'
 ```
 
@@ -618,4 +708,5 @@ curl -X POST http://localhost:8000/api/admin/mode \
 
 | Versione | Data | Cambiamenti |
 |----------|------|-------------|
+| 2.0.0 | 2026-05-12 | Aggiunto GET /api/weights/suggestion; aggiornato POST /api/weights/approve (override_weights + source values); corretti source values in GET /api/weights/current |
 | 1.0.0 | 2026-05-04 | Initial release |

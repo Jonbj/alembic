@@ -1,4 +1,15 @@
-"""Regime detection Pydantic models."""
+"""Pydantic models for macro regime detection.
+
+Used by:
+    src/workers/regime.py  — detect_regime() writes RegimeState to Redis
+    src/store/redis_store.py — set_regime() / get_regime() serialization
+    src/notifications/telegram.py — format_regime_message() reads RegimeState
+
+Data flow:
+    MacroSnapshot (raw FRED + yfinance data)
+        → LLM prompt → RegimeOutput (one per LLM)
+        → Consensus logic → RegimeState (persisted to Redis, TTL 25h)
+"""
 
 from datetime import datetime
 from typing import Literal

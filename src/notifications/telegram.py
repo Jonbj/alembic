@@ -1,4 +1,16 @@
-"""Telegram notifications for trading system alerts."""
+"""Telegram notifications for trading system alerts.
+
+Module-level format helpers (pure functions, return str or tuple[str, list]):
+    format_fallback_alert(count)
+    format_performance_report(daily_ic, icir, model_weights, psi_90d, pnl_today)
+    format_auto_apply_message(new_weights, current_weights, guardrail_values, next_review_date)
+    format_freeze_message(suggested_weights, current_weights, freeze_reason)
+    format_freeze_message_with_keyboard(suggested_weights, current_weights, freeze_reason, token)
+        → (message_text, keyboard_layout)  # used by check_and_apply_weights()
+    format_regime_message(state, previous_regime, disagreement)
+
+TelegramNotifier class: async HTTP client wrapping the Telegram Bot API.
+"""
 
 import json
 from datetime import date, datetime, timezone
@@ -10,18 +22,38 @@ from src.config import config
 
 class TelegramNotifier:
     """
-    Send alerts to Telegram channel.
+    Async Telegram client for all system notifications.
 
-    Used for:
-    - Kill-switch activation
-    - Budget exhaustion
-    - Consecutive fallback alerts (3+ → QC sizing ×0.5)
-    - Drift detection (RED/YELLOW)
-    - Performance reports
+    Alert methods (all async, return True on success):
+        send_alert(message, level)     — generic alert with level prefix emoji
+        send_fallback_alert(count)     — ensemble fallback circuit breaker reached
+        send_killswitch_alert(reason)  — kill-switch activated
+        send_budget_alert(spent, limit)— LLM daily budget exhausted
+        send_drift_alert(level, psi)   — PSI/CUSUM drift detected
+        send_performance_report(...)   — daily IC/ICIR/weights summary
+
+    Inline keyboard methods (for Telegram approval flow):
+        send_message_with_keyboard(message, keyboard) → message_id | None
+            Sends message with InlineKeyboardMarkup (✅/❌ buttons).
+            Returns message_id needed for later editMessageReplyMarkup.
+
+        edit_message_reply_markup(chat_id, message_id, keyboard=None) → bool
+            Removes or replaces inline keyboard after user taps a button.
+            Pass keyboard=None to remove all buttons.
 
     Usage:
         notifier = TelegramNotifier()
-        await notifier.send_alert("Kill-switch activated: VIX spike detected")
+
+        # Simple alert
+        await notifier.send_alert("Kill-switch activated: VIX spike detected", level="critical")
+
+        # Freeze notification with approval buttons
+        msg, keyboard = format_freeze_message_with_keyboard(weights, current, reason, token)
+        message_id = await notifier.send_message_with_keyboard(msg, keyboard)
+
+    Note:
+        All methods silently return False/None if bot_token or chat_id are not configured,
+        making Telegram optional in development environments.
     """
 
     def __init__(
@@ -297,7 +329,8 @@ class TelegramNotifier:
         }
         if keyboard is not None:
             payload["reply_markup"] = {"inline_keyboard": keyboard}
-        # keyboard=None → no reply_markup key → Telegram removes existing keyboard
+        else:
+            payload["reply_markup"] = {}  # empty object signals Telegram to remove keyboard
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -459,8 +492,6 @@ def format_regime_message(
     disagreement: bool,
 ) -> str:
     """Format Telegram message for a regime change notification."""
-    from src.models.regime import RegimeState  # type: ignore[name-defined]
-
     regime_upper = state.regime.upper()
     mult = state.multiplier
 

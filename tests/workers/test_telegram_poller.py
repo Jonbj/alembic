@@ -111,7 +111,7 @@ class TestTelegramPoller:
         """Stale token (suggestion changed) → no action, 'Già processata' response."""
         redis = MagicMock()
         redis.get_offset.return_value = 100
-        # Suggestion in Redis has different computed_at
+        # Suggestion in Redis has different computed_at → token mismatch
         stale_suggestion = suggestion.copy()
         stale_suggestion["computed_at"] = "2026-05-05T11:00:00Z"
         redis.get_weight_suggestion.return_value = stale_suggestion
@@ -142,7 +142,9 @@ class TestTelegramPoller:
             mock_response = MagicMock()
             mock_response.raise_for_status = MagicMock()
             mock_response.json.return_value = {"ok": True, "result": [update]}
-            mock_client.return_value.__enter__.return_value.get.return_value = mock_response
+            mock_http_client = mock_client.return_value.__enter__.return_value
+            mock_http_client.get.return_value = mock_response
+            mock_http_client.post.return_value = MagicMock(raise_for_status=MagicMock())
 
             from src.workers.telegram_poller import poll_telegram_updates
             poll_telegram_updates()
@@ -150,6 +152,62 @@ class TestTelegramPoller:
         redis.set_ensemble_weights.assert_not_called()
         redis.delete_weight_suggestion.assert_not_called()
         pg.log_weight_update.assert_not_called()
+        # Verify the user received "Già processata" via answerCallbackQuery
+        post_calls = mock_http_client.post.call_args_list
+        answer_calls = [c for c in post_calls if "answerCallbackQuery" in str(c)]
+        assert len(answer_calls) == 1
+        payload = answer_calls[0][1]["json"]
+        assert payload["text"] == "Già processata"
+
+    def test_double_tap_idempotent(self, suggestion, token):
+        """Second tap after suggestion already processed → 'Già processata', no side effects."""
+        redis = MagicMock()
+        redis.get_offset.return_value = 100
+        # Suggestion already gone (deleted by first tap)
+        redis.get_weight_suggestion.return_value = None
+
+        pg = MagicMock()
+        notifier = MagicMock()
+        notifier.edit_message_reply_markup = AsyncMock(return_value=True)
+
+        update = {
+            "update_id": 102,
+            "callback_query": {
+                "id": "cb456",
+                "from": {"id": 123456},
+                "message": {"message_id": 42},
+                "data": f"approve:{token}",
+            },
+        }
+
+        with patch("src.workers.telegram_poller.httpx.Client") as mock_client, \
+             patch("src.workers.telegram_poller.RedisStore", return_value=redis), \
+             patch("src.workers.telegram_poller.PostgreSQLStore", return_value=pg), \
+             patch("src.workers.telegram_poller.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.telegram_poller.config") as mock_config:
+            mock_config.TELEGRAM_ALLOWED_USER_IDS = ["123456"]
+            mock_config.TELEGRAM_BOT_TOKEN = "test-bot-token"
+
+            mock_response = MagicMock()
+            mock_response.raise_for_status = MagicMock()
+            mock_response.json.return_value = {"ok": True, "result": [update]}
+            mock_http_client = mock_client.return_value.__enter__.return_value
+            mock_http_client.get.return_value = mock_response
+            mock_http_client.post.return_value = MagicMock(raise_for_status=MagicMock())
+
+            from src.workers.telegram_poller import poll_telegram_updates
+            poll_telegram_updates()
+
+        # No state changes
+        redis.set_ensemble_weights.assert_not_called()
+        redis.delete_weight_suggestion.assert_not_called()
+        pg.log_weight_update.assert_not_called()
+        # User receives "Già processata" via answerCallbackQuery
+        post_calls = mock_http_client.post.call_args_list
+        answer_calls = [c for c in post_calls if "answerCallbackQuery" in str(c)]
+        assert len(answer_calls) == 1
+        payload = answer_calls[0][1]["json"]
+        assert payload["text"] == "Già processata"
 
     def test_user_not_in_allowlist(self, suggestion, token):
         """User not in TELEGRAM_ALLOWED_USER_IDS → no action, silent rejection."""

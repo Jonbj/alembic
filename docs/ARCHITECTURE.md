@@ -1,9 +1,9 @@
 # Architettura del Sistema — LLM Trading System
 
 **Documento di Architettura Tecnica**  
-**Versione:** 1.0.0  
-**Data:** 2026-05-04  
-**Stato:** Fase 1 Completata
+**Versione:** 2.0.0  
+**Data:** 2026-05-12  
+**Stato:** Fase 2 Completata (433 test passing)
 
 ---
 
@@ -29,21 +29,51 @@ Questo sistema implementa il paradigma **"Alpha Miner"** per l'integrazione di L
 │                                              ▼                               │
 │                                     ┌─────────────────────┐                  │
 │                                     │ PostgreSQL (Audit)  │                  │
-│                                     │ - Tutti i segnali   │                  │
-│                                     │ - Forward returns   │                  │
-│                                     │ - Spending records  │                  │
+│                                     │ - sentiment_signals │                  │
+│                                     │ - llm_spending      │                  │
+│                                     │ - weight_update_log │                  │
 │                                     └─────────────────────┘                  │
 └──────────────────────────────────────────────────────────────────────────────┘
-                                      │
-                                      │ Lettura a ogni tick
-                                      ▼
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                       REGIME DETECTION PIPELINE (Fase 2)                     │
+│                                                                              │
+│   ┌──────────────┐     ┌─────────────────────┐     ┌─────────────────────┐  │
+│   │ FRED API     │────▶│ detect_regime()     │────▶│ Redis               │  │
+│   │ - VIX(CXLS) │     │ 07:00 UTC Lun-Ven   │     │ - regime:current    │  │
+│   │ - T10Y2Y    │     │ 2 LLMs in parallel  │     │ - qc:sizing_mult.   │  │
+│   ├──────────────┤     │ (Opus + Qwen3.5)    │     └─────────────────────┘  │
+│   │ yfinance     │     │ Consensus/min mult. │                               │
+│   │ - SPY 20d   │     └─────────────────────┘                               │
+│   └──────────────┘                                                           │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                 WEIGHT AUTO-APPLY + TELEGRAM APPROVAL FLOW (Fase 2)          │
+│                                                                              │
+│   run_weekly_weights()  ──────────────▶  check_and_apply_weights()           │
+│   Lunedì 04:00 UTC          (5s)         G1: AUTO_APPLY_ENABLED?             │
+│   LOO ICIR → new weights                 G2: VIX < 30?                       │
+│   → Redis suggestion                     G3: std(ICIR) < 0.15?               │
+│                                          G4: max(Δpeso) < 15%?               │
+│                                               │          │                   │
+│                                            PASS        FAIL                  │
+│                                               │          │                   │
+│                                       auto_apply   Telegram ⚠️ + keyboard    │
+│                                                         │                    │
+│                                          poll_telegram_updates() [5s]        │
+│                                          ✅ approve / ❌ reject               │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+                    ↓ (segnali + regime multiplier a ogni tick)
+
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │                         EXECUTION ENGINE (QuantConnect)                      │
 │                                                                              │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
 │   │ OnData() - Ogni tick (1ms - 1min)                                    │  │
 │   │   1. Leggi segnale da Redis (O(1), locale)                           │  │
-│   │   2. Calcola position sizing (QC multiplier da Redis)                │  │
+│   │   2. Leggi qc:sizing_multiplier (regime + fallback circuit breaker)  │  │
 │   │   3. Verifica kill-switch                                            │  │
 │   │   4. Esegui ordine se segnale valido                                 │  │
 │   │                                                                      │  │
@@ -239,18 +269,28 @@ async def process_news_item(item: NewsItem):
 
 | Key Pattern | Tipo | TTL | Descrizione |
 |-------------|------|-----|-------------|
-| `signal:{symbol}:sentiment` | String | 4h | Ultimo segnale per simbolo |
-| `killswitch_active` | String | — | "1" = attivo, "0" = inattivo |
-| `killswitch_reason` | String | — | JSON con reason e timestamp |
-| `fallback:consecutive:count` | Counter | 24h | Fallback counter (circuit breaker) |
-| `fallback:alert_sent` | String | 24h | Dedup flag per alert |
-| `qc:sizing_multiplier` | String | 24h | "1.0" o "0.5" (dopo 3 fallback) |
-| `budget:exhausted` | String | ~24h | "1" = budget exhausted |
-| `ensemble:weights:current` | String | 30gg | JSON con weights e source |
-| `ensemble:divergence:log` | List | 24h | Log delle divergenze (max 1000) |
-| `performance:latest_report` | String | 7gg | JSON performance report |
-| `performance:neg_ic_streak` | String | 30gg | Counter giorni IC negativo |
-| `system:mode` | String | 30gg | "backtest", "paper", "full_auto", "halted" |
+| `signal:{symbol}:sentiment` | String | 4h | Ultimo segnale LLM per simbolo |
+| `killswitch_active` | String | — | "1" = trading haltato |
+| `killswitch_reason` | String | — | JSON con reason e timestamp attivazione |
+| `fallback:consecutive:count` | Counter | 24h | Fallback consecutivi (circuit breaker, reset al successo) |
+| `fallback:alert_sent` | String | 24h | Dedup flag per alert Telegram fallback |
+| `qc:sizing_multiplier` | String | 24h o regime TTL | "1.0"/"0.5" (fallback CB) oppure regime multiplier |
+| `budget:exhausted` | String | fino a mezzanotte+1h | "1" = LLM budget esaurito per oggi |
+| `ensemble:weights:current` | String | 30gg | JSON `{"weights": {...}, "source": "auto_apply\|telegram\|..."}` |
+| `ensemble:weights:suggestion` | String | 7gg | Pesi proposti da LOO ICIR, in attesa di approvazione |
+| `ensemble:weights:suggestion:snapshot` | String | 9gg | Backup snapshot per rilevare expiry senza approvazione |
+| `ensemble:divergence:log` | List | 24h | Log divergenze ensemble (max 1000 entries) |
+| `performance:latest_report` | String | 7gg | JSON PerformanceReport completo |
+| `performance:neg_ic_streak` | Counter | 30gg | Giorni consecutivi con IC < 0 (circuit breaker) |
+| `system:mode` | String | 30gg | `backtest\|paper\|semi_auto\|full_auto\|halted` |
+| `regime:current` | String | 25h | JSON RegimeState (regime, multiplier, macro_snapshot, llm_outputs) |
+| `macro:vix:latest` | String | 1h | VIX float cached da FRED API (riduce chiamate API) |
+| `telegram:poller:offset` | Integer | — | Ultimo update_id Telegram (+1), no TTL — persiste tra riavvii |
+| `drift:alert:{model}` | String | 7gg | JSON drift alert per modello (PSI, CUSUM, livello) |
+| `market:vix` | String | — | VIX per circuit breaker (scritto da QuantConnect/cron) |
+| `portfolio:drawdown` | String | — | Drawdown portfolio attuale (scritto da QuantConnect) |
+| `portfolio:earnings_pct` | String | — | % portfolio in titoli con earnings imminenti |
+| `market:cross_corr` | String | — | Correlazione cross-asset (scritto da QuantConnect) |
 
 #### OOM Handling Pattern
 
@@ -654,6 +694,152 @@ redis-cli --bigkeys
 
 ---
 
+## 6b. RegimeDetector
+
+### 6b.1 Architettura
+
+Il `detect_regime` task viene eseguito ogni giorno lavorativo alle **07:00 UTC** (pre-market US) da Celery beat.
+
+```
+FRED API ──┐
+           ├──▶ fetch_vix_from_fred()    → vix: float
+           └──▶ fetch_yield_curve()      → T10Y2Y: float (negative = inverted)
+yfinance ──────▶ fetch_spy_momentum_20d() → % return su 20 trading days
+
+Prompt DK-CoT ──▶ asyncio.gather(LLM1, LLM2)
+                         │
+                    r1, r2: RegimeOutput
+                         │
+              ┌──────────┴──────────┐
+            consensus           disagreement
+              │                     │
+           regime = r1        regime = min multiplier
+                                 (più conservativo)
+              │
+   MacroSnapshot + RegimeState
+              │
+         Redis: regime:current (TTL 25h)
+         Redis: qc:sizing_multiplier (TTL 25h)
+              │
+     Telegram alert (solo se regime cambia)
+```
+
+### 6b.2 Regimi e Moltiplicatori
+
+| Regime | Condizioni indicative | Moltiplicatore |
+|--------|----------------------|----------------|
+| `bull` | VIX < 20, SPY > +3%, T10Y2Y > 0 | 1.0× |
+| `sideways` | VIX 15-25, SPY ∈ [-3%, +3%] | 0.7× |
+| `bear` | SPY < -8% o T10Y2Y < -0.5% | 0.4× |
+| `high_vol` | VIX > 30 | 0.2× |
+
+Il regime viene risolto con **priorità**: `high_vol > bear > sideways > bull`.
+
+### 6b.3 Guardrail Cascade
+
+```
+1. Dati macro fuori range → skip, alert 🚨, Redis non aggiornato
+   - VIX ∉ [5, 100]
+   - T10Y2Y ∉ [-5%, +5%]
+   - SPY momentum ∉ [-50%, +50%]
+
+2. Entrambi i LLM falliscono → skip, alert 🚨
+
+3. data_quality="partial" (uno o entrambi) → skip, alert ⚠️
+
+4. Regime label invalido (non in valid_regimes) → skip, alert 🚨
+
+5. Disaccordo → moltiplicatore più conservativo, alert ⚠️ al cambio
+
+6. Consenso → applica regime, alert 📊 solo se regime cambia
+```
+
+---
+
+## 6c. Auto-Apply Weights + Telegram Approval Flow
+
+### 6c.1 Flusso Completo
+
+```
+Lunedì 04:00 UTC
+run_weekly_weights()
+  1. Fetch signals da PG (30 giorni, no fallback)
+  2. compute_purified_icir() — Leave-One-Out cross-validation
+  3. compute_new_weights() — smoothing 0.75×old + 0.25×new + guardrails
+  4. Store Redis: ensemble:weights:suggestion (7d TTL)
+  5. Store Redis: ensemble:weights:suggestion:snapshot (9d TTL)
+  6. Send Telegram informativo (osservazionale)
+  7. Trigger: check_and_apply_weights.apply_async(countdown=5)
+
+check_and_apply_weights()  [triggered 5s dopo]
+  G1: AUTO_APPLY_ENABLED? → False → exit silenzioso
+  G2: VIX < 30? → fetch FRED (Redis cache 1h), None → fail-safe freeze
+  G3: std(purified_icir) < 0.15? → alta varianza → freeze
+  G4: max(|Δpeso|) < 0.15? → cambio troppo brusco → freeze
+
+  [PASS] → set_ensemble_weights(source="auto_apply")
+          → delete snapshot
+          → log PG: source="auto_apply", note={vix, ic_variance, max_delta}
+          → Telegram ✅ con nuovi pesi e delta
+
+  [FAIL] → log PG: source="freeze", freeze_reason=<guardrail>
+          → Genera token = SHA256(computed_at)[:8]  [anti-replay]
+          → Send Telegram ⚠️ con inline keyboard:
+              [✅ Approva | approve:<token>]
+              [❌ Rifiuta | reject:<token>]
+
+poll_telegram_updates()  [ogni 5s via Celery beat]
+  → GET /getUpdates?offset=<redis_offset>&timeout=1
+  → Per ogni callback_query:
+      1. user_id ∈ TELEGRAM_ALLOWED_USER_IDS? → no → skip silenzioso
+      2. parse action + token da callback_data
+      3. get_weight_suggestion() → None → "Già processata"
+      4. token == SHA256(suggestion.computed_at)[:8]? → no → "Già processata"
+      5. action="approve" → _handle_approve()
+         - set_ensemble_weights(source="telegram")
+         - delete_weight_suggestion()
+         - log PG: source="telegram"
+         - answerCallbackQuery "✅ Pesi applicati"
+         - editMessageReplyMarkup (rimuovi keyboard)
+      6. action="reject" → _handle_reject()
+         - delete_weight_suggestion()
+         - log PG: source="rejected_via_telegram", applied_weights={}
+         - answerCallbackQuery "❌ Suggestion rifiutata"
+         - editMessageReplyMarkup (rimuovi keyboard)
+  → Aggiorna offset = last_update_id + 1
+    (solo se nessun errore — garanzia idempotency)
+
+check_suggestion_expiry()  [giornaliero 05:00 UTC]
+  → snapshot presente + suggestion assente → expired senza approvazione
+  → log PG: source="expired"
+  → delete snapshot
+```
+
+### 6c.2 Proprietà di Idempotency
+
+| Scenario | Comportamento |
+|----------|---------------|
+| Double-tap (stesso utente tappa due volte) | Prima tap elaborata, seconda trova suggestion=None → "Già processata" |
+| Stale tap (nuovo giro di pesi calcolato) | Token cambia con nuovo computed_at → mismatch → "Già processata" |
+| Redis down durante approve | Exception rilanciata, offset NON aggiornato → retry a 5s |
+| Telegram API down | HTTPError caught, offset NON aggiornato → retry a 5s |
+
+### 6c.3 Audit Trail PostgreSQL
+
+Ogni evento nel ciclo pesi viene loggato in `weight_update_log`:
+
+| source | Significato |
+|--------|-------------|
+| `auto_apply` | Guardrails passati, pesi applicati automaticamente |
+| `freeze` | Guardrail fallito, nessun cambio |
+| `telegram` | Operatore ha approvato via Telegram |
+| `rejected_via_telegram` | Operatore ha rifiutato via Telegram |
+| `suggestion` | Approvato via POST /api/weights/approve con pesi suggeriti |
+| `override` | Approvato via POST /api/weights/approve con pesi custom |
+| `expired` | Suggestion scaduta (7d TTL) senza approvazione |
+
+---
+
 ## 8. Decision Log
 
 ### 8.1 Perché Celery e non asyncio puro?
@@ -695,6 +881,34 @@ redis-cli --bigkeys
 
 ---
 
+### 8.4 Perché 2 LLM (non 3) per RegimeDetector?
+
+**Decisione:** Solo 2 LLM per la classificazione del regime.
+
+**Motivazione:**
+- Il regime è una classificazione categorica (4 valori) non un segnale continuo
+- Con 2 LLM, il tiebreak è deterministico: regime col moltiplicatore più basso (più conservativo)
+- Con 3 LLM ci sarebbe 2-vs-1: più costoso, non aggiunge garanzie di sicurezza
+- Il costo del terzo LLM non giustifica il margine di sicurezza extra (dato il fail-safe)
+
+**Trade-off:** Con 2 LLM, se uno fallisce si usa solo l'altro con data_quality check.
+
+---
+
+### 8.5 Perché token SHA256(computed_at)[:8] per l'anti-replay?
+
+**Decisione:** Token derivato dal timestamp della suggestion anziché da un UUID random.
+
+**Motivazione:**
+- Il token viene generato due volte (in `check_and_apply_weights` e `_compute_suggestion_token`) senza doversi passare lo stato
+- Se viene calcolata una nuova suggestion, il token cambia automaticamente (computed_at cambia)
+- Il poller ricomputa il token da Redis ogni volta → sempre in sync con la suggestion attuale
+- 8 hex chars = 32 bit di entropia — sufficiente per prevenire replay in questo contesto
+
+**Trade-off:** Il token è prevedibile se si conosce computed_at, ma l'attaccante dovrebbe anche essere nell'allowlist.
+
+---
+
 ## 9. Appendix
 
 ### 9.1 Glossario
@@ -702,6 +916,12 @@ redis-cli --bigkeys
 | Termine | Definizione |
 |---------|-------------|
 | **IC** | Information Coefficient: correlazione tra segnale e return |
+| **Regime** | Classificazione macro del mercato: bull / sideways / bear / high_vol |
+| **LOO ICIR** | Leave-One-Out IC Information Ratio: cross-validation per stabilità dei pesi |
+| **Auto-apply** | Applicazione automatica di nuovi pesi ensemble quando tutti i guardrail passano |
+| **Freeze** | Blocco auto-apply per guardrail fallito; richiede approvazione manuale |
+| **Token anti-replay** | SHA256(computed_at)[:8] che identifica univocamente una suggestion |
+| **Callback Query** | Evento Telegram generato dal tap su un bottone inline keyboard |
 | **ICIR** | IC / IC std: risk-adjusted IC |
 | **PSI** | Population Stability Index: drift detection |
 | **CUSUM** | Cumulative Sum: change point detection |

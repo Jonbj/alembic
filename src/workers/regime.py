@@ -1,4 +1,38 @@
-"""RegimeDetector Celery task — daily macro regime classification."""
+"""RegimeDetector Celery task — daily macro regime classification.
+
+Single task: detect_regime()
+Celery beat schedule: 07:00 UTC Mon-Fri (pre-market US hours)
+
+Architecture:
+    FRED API + yfinance → MacroSnapshot (VIX, T10Y2Y, SPY 20d)
+    → 2 LLM clients in parallel (asyncio.gather) → RegimeOutput × 2
+    → Consensus or conservative (min multiplier) on disagreement
+    → Redis: regime:current + qc:sizing_multiplier
+    → Telegram alert (only when regime changes)
+
+Regime labels and position-sizing multipliers (configurable via env vars):
+    bull      → ×1.0  (VIX < 20, SPY > +3%, T10Y2Y > 0)
+    sideways  → ×0.7  (VIX 15-25, SPY ∈ [-3%, +3%])
+    bear      → ×0.4  (SPY < -8% or T10Y2Y < -0.5%)
+    high_vol  → ×0.2  (VIX > 30, panic regime)
+
+Resolution priority on disagreement: high_vol > bear > sideways > bull
+(always picks the regime with the lowest multiplier = most conservative)
+
+Guardrail cascade (stops at first failure, does NOT update Redis):
+    1. Macro data fetch failure → alert 🚨
+    2. Macro data out of range (VIX ∉ [5,100], etc.) → alert 🚨
+    3. Both LLMs fail → alert 🚨
+    4. One LLM fails, other has data_quality="partial" → alert ⚠️
+    5. Either LLM has data_quality="partial" → alert ⚠️
+    6. Either LLM returns invalid regime label → alert 🚨
+    7. Disagreement → conservative choice, alert ⚠️ on change
+    8. Consensus → apply, alert 📊 only if regime changed
+
+The qc:sizing_multiplier key is read by QuantConnect's OnData() to scale
+position sizes. It is shared with the fallback circuit breaker, which can
+set it to 0.5 independently (see RedisStore._on_fallback_threshold_reached).
+"""
 
 import asyncio
 import logging

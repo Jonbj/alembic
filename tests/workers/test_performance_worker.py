@@ -682,6 +682,7 @@ class TestCheckAndApplyWeights:
         pg = MagicMock()
         notifier = MagicMock()
         notifier.send_alert = AsyncMock()
+        notifier.send_message_with_keyboard = AsyncMock(return_value=None)
         cfg = self._make_config(vix_threshold=30.0)
 
         with patch("src.workers.performance.RedisStore", return_value=redis), \
@@ -694,7 +695,7 @@ class TestCheckAndApplyWeights:
         redis.set_ensemble_weights.assert_not_called()
         assert pg.log_weight_update.call_args.kwargs["source"] == "freeze"
         assert "VIX" in pg.log_weight_update.call_args.kwargs["note"]
-        assert "⚠️" in notifier.send_alert.call_args[0][0]
+        assert "⚠️" in notifier.send_message_with_keyboard.call_args[0][0]
 
     def test_g2_fred_unavailable_freezes(self):
         """G2: FRED fetch fails → guardrail fails (fail-safe) → freeze."""
@@ -702,6 +703,7 @@ class TestCheckAndApplyWeights:
         pg = MagicMock()
         notifier = MagicMock()
         notifier.send_alert = AsyncMock()
+        notifier.send_message_with_keyboard = AsyncMock(return_value=None)
         cfg = self._make_config()
 
         with patch("src.workers.performance.RedisStore", return_value=redis), \
@@ -726,6 +728,7 @@ class TestCheckAndApplyWeights:
         pg = MagicMock()
         notifier = MagicMock()
         notifier.send_alert = AsyncMock()
+        notifier.send_message_with_keyboard = AsyncMock(return_value=None)
         cfg = self._make_config(ic_var_threshold=0.15)
 
         with patch("src.workers.performance.RedisStore", return_value=redis), \
@@ -752,6 +755,7 @@ class TestCheckAndApplyWeights:
         pg = MagicMock()
         notifier = MagicMock()
         notifier.send_alert = AsyncMock()
+        notifier.send_message_with_keyboard = AsyncMock(return_value=None)
         cfg = self._make_config(delta_max=0.15)
 
         with patch("src.workers.performance.RedisStore", return_value=redis), \
@@ -809,6 +813,7 @@ class TestCheckAndApplyWeights:
         pg = MagicMock()
         notifier = MagicMock()
         notifier.send_alert = AsyncMock()
+        notifier.send_message_with_keyboard = AsyncMock(return_value=None)
         cfg = self._make_config()
 
         with patch("src.workers.performance.RedisStore", return_value=redis), \

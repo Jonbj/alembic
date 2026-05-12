@@ -1,4 +1,19 @@
-"""Celery application configuration for LLM Trading System."""
+"""Celery application configuration for LLM Trading System.
+
+Creates the `app` Celery instance used by all workers. Beat schedule:
+
+    sentiment-worker          every 15 min, Mon-Fri 14:00-21:00 UTC
+    performance-daily         daily 03:00 UTC
+    performance-weekly        Monday 04:00 UTC
+    drift-detection           Sunday 04:30 UTC
+    check-suggestion-expiry   daily 05:00 UTC
+    regime-detector           daily Mon-Fri 07:00 UTC
+    poll-telegram-updates     every 5 seconds (always active)
+
+To run workers:
+    celery -A src.workers.celery_app worker --loglevel=info
+    celery -A src.workers.celery_app beat   --loglevel=info
+"""
 
 from celery import Celery
 from celery.schedules import crontab

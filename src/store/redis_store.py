@@ -12,14 +12,47 @@ from src.models.signals import SentimentResult
 
 class RedisStore:
     """
-    Redis storage for trading system state.
+    Redis storage for all trading system state.
 
-    Features:
-    - Signal caching (4 hour TTL)
-    - Kill-switch activation
-    - Consecutive fallback counter (circuit breaker)
-    - Divergence logging
-    - Budget exhaustion tracking
+    Grouped by domain:
+
+    Signals:
+        write_sentiment / read_sentiment — sentiment signals with 4h TTL
+
+    Kill-switch:
+        activate_killswitch / deactivate_killswitch / is_killswitch_active
+        get_killswitch_reason
+
+    Fallback circuit breaker:
+        increment_fallback_counter / reset_fallback_counter / get_fallback_count
+        is_fallback_alert_sent / reset_fallback_alert_flag
+        get_qc_sizing_multiplier / set_qc_sizing_multiplier
+
+    Divergence log:
+        log_divergence / get_recent_divergences — list of last 1000 events
+
+    Budget tracking:
+        set_budget_exhausted / is_budget_exhausted / reset_budget_status
+
+    Ensemble weights:
+        get_ensemble_weights / set_ensemble_weights
+        get_weight_suggestion / get_current_weights_stored
+        delete_weight_suggestion / delete_suggestion_snapshot
+
+    Performance:
+        get_performance_report
+
+    Regime detection:
+        set_regime / get_regime — RegimeState JSON with TTL
+
+    VIX cache:
+        get_vix_cached / set_vix_cached — reduces FRED API calls
+
+    Telegram poller:
+        get_offset / set_offset — polling continuity across restarts (no TTL)
+
+    Operating mode:
+        set_mode / get_mode — backtest | paper | semi_auto | full_auto | halted
     """
 
     def __init__(
@@ -398,7 +431,7 @@ class RedisStore:
         """
         self._r.set("telegram:poller:offset", offset)
 
-    def delete_weight_suggestion(self) -> None:
+    def delete_weight_suggestion(self) -> bool:
         """
         Delete the weight suggestion key after approval or rejection.
 
@@ -411,8 +444,11 @@ class RedisStore:
         Note: This only deletes ensemble:weights:suggestion.
         The snapshot key (ensemble:weights:suggestion:snapshot) is deleted
         separately by check_suggestion_expiry or on successful approval.
+
+        Returns:
+            True if the suggestion was present and deleted, False if already absent.
         """
-        self._r.delete("ensemble:weights:suggestion")
+        return bool(self._r.delete("ensemble:weights:suggestion"))
 
     # =========================================================================
     # REGIME DETECTION

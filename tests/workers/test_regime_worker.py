@@ -84,7 +84,7 @@ class TestDetectRegime:
         assert state.disagreement is True
         notifier.send_alert.assert_called_once()
         msg = notifier.send_alert.call_args[0][0]
-        assert "Disaccordo" in msg or "bear" in msg.lower()
+        assert "Disaccordo" in msg
 
     # 8. Invalid regime from LLM → Redis unchanged, Telegram 🚨
     def test_invalid_regime_from_llm_no_redis_write(self):
@@ -215,6 +215,29 @@ class TestDetectRegime:
         self._run((self.BULL, self.BULL), redis, notifier, cfg)
 
         redis.set_regime.assert_called_once()
+        notifier.send_alert.assert_not_called()
+
+    # 11. Disagreement but regime unchanged from previous → no Telegram
+    def test_disagreement_regime_unchanged_no_telegram(self):
+        """When LLMs disagree but conservative regime equals previous, no Telegram is sent."""
+        previous = RegimeState(
+            regime="bear",
+            multiplier=0.4,
+            macro_snapshot=MacroSnapshot(vix=25.0, yield_curve=-0.3, spy_momentum_20d=-5.0),
+            llm_outputs=[],
+            detected_at=datetime(2026, 5, 4, 7, 0, 0, tzinfo=timezone.utc),
+        )
+        redis = self._make_redis(current_regime=previous)
+        notifier = MagicMock()
+        notifier.send_alert = AsyncMock()
+        cfg = self._make_config()
+
+        # bull vs bear → conservative = bear; bear == previous.regime → no Telegram
+        self._run((self.BULL, self.BEAR), redis, notifier, cfg)
+
+        state = redis.set_regime.call_args[0][0]
+        assert state.regime == "bear"
+        assert state.disagreement is True
         notifier.send_alert.assert_not_called()
 
     # 7. Macro data fetch fails → Redis unchanged, Telegram 🚨

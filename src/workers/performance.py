@@ -1,9 +1,29 @@
 """PerformanceWorker Celery tasks for LLM Trading System.
 
-Implements:
-- run_daily_report: Daily IC report with Telegram alert
-- run_weekly_weights: Weekly LOO ICIR weight computation (observational in Fase 1)
-- run_drift_detection: Weekly PSI + CUSUM drift detection
+Implements five Celery tasks, all scheduled via celery_app.py beat schedule:
+
+- run_daily_report (03:00 UTC daily):
+    Composite IC + ICIR over last 30 days. Sends Telegram performance report.
+    Stores PerformanceReport JSON in Redis for GET /api/performance/latest.
+
+- run_weekly_weights (Monday 04:00 UTC):
+    LOO ICIR computation → compute_new_weights() with smoothing + guardrails.
+    Stores suggestion in Redis. Triggers check_and_apply_weights after 5s.
+
+- run_drift_detection (Sunday 04:30 UTC):
+    PSI + CUSUM drift detection per model comparing 7d vs 90d/12m baselines.
+    Sends Telegram alert if drift detected (YELLOW/RED).
+
+- check_suggestion_expiry (05:00 UTC daily):
+    Detects weight suggestions that expired (7d TTL) without being approved.
+    Logs source="expired" to PostgreSQL weight_update_log. Cleans up snapshot.
+
+- check_and_apply_weights (triggered by run_weekly_weights, countdown=5s):
+    Guardrail cascade (G1-G4) decides auto-apply vs freeze.
+    On freeze: sends Telegram ⚠️ with inline keyboard (✅ Approva / ❌ Rifiuta).
+    On pass: applies weights to Redis, logs to PostgreSQL.
+
+See docs/ARCHITECTURE.md §6c for the full weight approval flow diagram.
 """
 
 import asyncio
@@ -23,7 +43,6 @@ import hashlib
 from src.notifications.telegram import (
     TelegramNotifier,
     format_auto_apply_message,
-    format_freeze_message,
     format_freeze_message_with_keyboard,
 )
 from src.performance.drift import (
@@ -740,7 +759,7 @@ def check_and_apply_weights():
         )
 
         # =====================================================================
-        # TELEGRAM APPROVAL FOW (Feature C)
+        # TELEGRAM APPROVAL FLOW (Feature C)
         # =====================================================================
         # Send freeze message with inline keyboard (✅ Approva / ❌ Rifiuta).
         # The operator can tap to approve or reject without using the API.
