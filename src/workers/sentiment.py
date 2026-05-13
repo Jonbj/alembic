@@ -36,6 +36,90 @@ Respond ONLY with valid JSON matching this schema:
 {{"polarity": <float -1.0 to 1.0>, "confidence": <float 0.0 to 1.0>, "reasoning": "<bull/bear analysis in one sentence>"}}"""
 
 
+async def run_inference(
+    item: NewsItem,
+    clients: list[LLMClient],
+    aggregator: EnsembleAggregator,
+    finbert: FinBERTClient,
+    budget_tracker: LLMBudgetTracker,
+) -> SentimentResult | None:
+    """Core LLM inference — no store writes. Callable from live worker and backtest.
+
+    Flow:
+    1. Check budget BEFORE calling LLM ensemble
+    2. If budget exhausted, fall back to FinBERT immediately
+    3. Run ensemble query (models in parallel)
+    4. Aggregate; if divergence (aggregate returns None), fall back to FinBERT
+    5. Record spending for successful LLM calls
+    6. Return SentimentResult (no Redis/PG writes)
+    """
+    symbol = item.asset_tags[0] if item.asset_tags else "UNKNOWN"
+    prompt = _DK_COT_PROMPT.format(text=item.body[:2000], symbol=symbol)
+
+    try:
+        await budget_tracker.check_budget()
+
+        raw_outputs = await run_ensemble_query(
+            prompt=prompt,
+            clients=clients,
+            response_schema=LLMSentimentOutput,
+            symbol=symbol,
+        )
+
+        aggregated = aggregator.aggregate(raw_outputs) if raw_outputs else None
+
+        if aggregated is None:
+            log.info(f"Ensemble diverged for {symbol}, using FinBERT fallback")
+            fb_result = finbert.analyze(item.body[:512])
+            return SentimentResult(
+                symbol=symbol,
+                score=fb_result.polarity * fb_result.confidence,
+                confidence=fb_result.confidence,
+                reasoning="FinBERT fallback (ensemble divergence)",
+                model_id="finbert",
+                fallback_used=True,
+            )
+
+        score = aggregated.polarity * aggregated.confidence
+        input_tokens = len(prompt) // 4
+        output_tokens = len(aggregated.reasoning) // 4
+        for model_id in aggregated.model_ids:
+            try:
+                await budget_tracker.record_spending(
+                    model_id=model_id,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
+            except Exception as e:
+                log.warning(f"Failed to record spending for {model_id}: {e}")
+
+        return SentimentResult(
+            symbol=symbol,
+            score=max(-1.0, min(1.0, score)),
+            confidence=aggregated.confidence,
+            reasoning=aggregated.reasoning,
+            model_id=f"ensemble:{'+'.join(aggregated.model_ids)}",
+            ensemble_std=aggregated.ensemble_std,
+            fallback_used=False,
+        )
+
+    except LLMBudgetExhaustedError:
+        log.info(f"Budget exhausted for {symbol}, using FinBERT fallback")
+        fb_result = finbert.analyze(item.body[:512])
+        return SentimentResult(
+            symbol=symbol,
+            score=fb_result.polarity * fb_result.confidence,
+            confidence=fb_result.confidence,
+            reasoning="FinBERT fallback (budget exhausted)",
+            model_id="finbert",
+            fallback_used=True,
+        )
+
+    except Exception as e:
+        log.error(f"Error processing news item for {symbol}: {e}")
+        return None
+
+
 async def process_news_item(
     item: NewsItem,
     clients: list[LLMClient],
@@ -45,130 +129,19 @@ async def process_news_item(
     redis_store: RedisStore,
     pg_store: PostgreSQLStore,
 ) -> SentimentResult | None:
-    """
-    Process a single news item through the LLM ensemble pipeline.
+    """Process a single news item: infer, update fallback counters, write to stores."""
+    result = await run_inference(item, clients, aggregator, finbert, budget_tracker)
 
-    Flow:
-    1. Check budget BEFORE calling LLM ensemble
-    2. If budget exhausted, fall back to FinBERT immediately
-    3. Run ensemble query (3 models in parallel)
-    4. Aggregate results with Consensus Gate
-    5. If divergence (aggregator returns None), fall back to FinBERT
-    6. Record spending for successful LLM calls
-    7. Write result to Redis cache and PostgreSQL audit
-
-    Args:
-        item: News item to process
-        clients: List of LLM clients for ensemble
-        aggregator: Ensemble aggregator
-        finbert: FinBERT fallback client
-        budget_tracker: Budget tracker for cost enforcement
-        redis_store: Redis store for signal caching
-        pg_store: PostgreSQL store for audit
-
-    Returns:
-        SentimentResult if successful, None if all paths failed
-    """
-    # Extract symbol from asset tags
-    symbol = item.asset_tags[0] if item.asset_tags else "UNKNOWN"
-
-    # Prepare prompt with DK-CoT
-    prompt = _DK_COT_PROMPT.format(text=item.body[:2000], symbol=symbol)
-
-    result: SentimentResult | None = None
-
-    try:
-        # STEP 1: Check budget BEFORE calling LLM ensemble
-        await budget_tracker.check_budget()
-
-        # STEP 2: Run ensemble query (3 models in parallel)
-        raw_outputs = await run_ensemble_query(
-            prompt=prompt,
-            clients=clients,
-            response_schema=LLMSentimentOutput,
-            symbol=symbol,
-        )
-
-        # STEP 3: Aggregate results
-        aggregated = aggregator.aggregate(raw_outputs) if raw_outputs else None
-
-        if aggregated is None:
-            # Divergence or no eligible models -> FinBERT fallback
-            log.info(f"Ensemble diverged for {symbol}, using FinBERT fallback")
-            fb_result = finbert.analyze(item.body[:512])
-
-            result = SentimentResult(
-                symbol=symbol,
-                score=fb_result.polarity * fb_result.confidence,
-                confidence=fb_result.confidence,
-                reasoning="FinBERT fallback (ensemble divergence)",
-                model_id="finbert",
-                fallback_used=True,
-            )
-
-            # Increment fallback counter for circuit breaker
-            redis_store.increment_fallback_counter()
-        else:
-            # Successful ensemble aggregation
-            score = aggregated.polarity * aggregated.confidence
-
-            result = SentimentResult(
-                symbol=symbol,
-                score=max(-1.0, min(1.0, score)),
-                confidence=aggregated.confidence,
-                reasoning=aggregated.reasoning,
-                model_id=f"ensemble:{'+'.join(aggregated.model_ids)}",
-                ensemble_std=aggregated.ensemble_std,
-                fallback_used=False,
-            )
-
-            # Reset fallback counter on successful ensemble
-            redis_store.reset_fallback_counter()
-
-            # STEP 4: Record spending for each model in the ensemble
-            # Estimate tokens based on prompt/response size (rough estimate)
-            input_tokens = len(prompt) // 4  # ~4 chars per token
-            output_tokens = len(aggregated.reasoning) // 4
-
-            for model_id in aggregated.model_ids:
-                try:
-                    await budget_tracker.record_spending(
-                        model_id=model_id,
-                        input_tokens=input_tokens,
-                        output_tokens=output_tokens,
-                    )
-                except Exception as e:
-                    log.warning(f"Failed to record spending for {model_id}: {e}")
-
-    except LLMBudgetExhaustedError:
-        # Budget exhausted -> FinBERT fallback (no budget check needed)
-        log.info(f"Budget exhausted for {symbol}, using FinBERT fallback")
-        fb_result = finbert.analyze(item.body[:512])
-
-        result = SentimentResult(
-            symbol=symbol,
-            score=fb_result.polarity * fb_result.confidence,
-            confidence=fb_result.confidence,
-            reasoning="FinBERT fallback (budget exhausted)",
-            model_id="finbert",
-            fallback_used=True,
-        )
-
-        # Increment fallback counter
-        redis_store.increment_fallback_counter()
-
-    except Exception as e:
-        # Unexpected error - log and return None
-        log.error(f"Error processing news item for {symbol}: {e}")
-        return None
-
-    # STEP 5: Write result to stores
     if result is not None:
         try:
+            if result.fallback_used:
+                redis_store.increment_fallback_counter()
+            else:
+                redis_store.reset_fallback_counter()
             redis_store.write_sentiment(result)
             pg_store.write_signal(result)
         except Exception as e:
-            log.error(f"Failed to write signal for {symbol}: {e}")
+            log.error(f"Failed to write signal for {result.symbol}: {e}")
 
     return result
 

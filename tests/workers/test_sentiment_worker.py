@@ -17,6 +17,7 @@ from src.workers.sentiment import (
     _DK_COT_PROMPT,
     process_news_batch,
     process_news_item,
+    run_inference,
 )
 
 
@@ -277,6 +278,126 @@ class TestProcessNewsItem:
         assert result is not None
         assert result.fallback_used is True
         assert result.model_id == "finbert"
+
+
+class TestRunInference:
+    """Tests for run_inference — pure inference without store writes."""
+
+    @pytest.mark.asyncio
+    async def test_run_inference_ensemble_success(self):
+        """run_inference returns SentimentResult without touching any store."""
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+        mock_aggregator.aggregate.return_value = MagicMock(
+            polarity=0.8,
+            confidence=0.9,
+            reasoning="Bullish on earnings",
+            model_ids=["opus"],
+            ensemble_std=0.05,
+        )
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock()
+        mock_budget.record_spending = AsyncMock()
+        mock_finbert = MagicMock(spec=FinBERTClient)
+
+        item = make_news_item("AAPL", 0)
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock) as mock_eq:
+            mock_eq.return_value = [MagicMock()]
+            result = await run_inference(
+                item=item,
+                clients=[],
+                aggregator=mock_aggregator,
+                finbert=mock_finbert,
+                budget_tracker=mock_budget,
+            )
+
+        assert result is not None
+        assert result.symbol == "AAPL"
+        assert result.fallback_used is False
+        assert abs(result.score) <= 1.0
+        mock_budget.check_budget.assert_called_once()
+        mock_finbert.analyze.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_run_inference_divergence_uses_finbert(self):
+        """run_inference uses FinBERT when ensemble diverges (aggregate returns None)."""
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+        mock_aggregator.aggregate.return_value = None  # divergence
+
+        mock_finbert = MagicMock(spec=FinBERTClient)
+        mock_finbert.analyze.return_value = MagicMock(polarity=0.3, confidence=0.7)
+
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock()
+
+        item = make_news_item("MSFT", 1)
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock, return_value=[MagicMock()]):
+            result = await run_inference(
+                item=item,
+                clients=[],
+                aggregator=mock_aggregator,
+                finbert=mock_finbert,
+                budget_tracker=mock_budget,
+            )
+
+        assert result is not None
+        assert result.fallback_used is True
+        assert result.model_id == "finbert"
+        mock_finbert.analyze.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_inference_budget_exhausted_uses_finbert(self):
+        """run_inference uses FinBERT when budget is exhausted."""
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock(
+            side_effect=LLMBudgetExhaustedError("exhausted")
+        )
+        mock_finbert = MagicMock(spec=FinBERTClient)
+        mock_finbert.analyze.return_value = MagicMock(polarity=-0.2, confidence=0.6)
+
+        item = make_news_item("SPY", 2)
+
+        result = await run_inference(
+            item=item,
+            clients=[],
+            aggregator=MagicMock(spec=EnsembleAggregator),
+            finbert=mock_finbert,
+            budget_tracker=mock_budget,
+        )
+
+        assert result is not None
+        assert result.fallback_used is True
+        assert "budget exhausted" in result.reasoning
+
+    @pytest.mark.asyncio
+    async def test_run_inference_no_store_writes(self):
+        """run_inference never writes to Redis or PostgreSQL."""
+        mock_redis = MagicMock()
+        mock_pg = MagicMock()
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+        mock_aggregator.aggregate.return_value = MagicMock(
+            polarity=0.5, confidence=0.8, reasoning="ok",
+            model_ids=["opus"], ensemble_std=0.0,
+        )
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock()
+        mock_budget.record_spending = AsyncMock()
+
+        item = make_news_item("NVDA", 3)
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock, return_value=[MagicMock()]):
+            await run_inference(
+                item=item, clients=[], aggregator=mock_aggregator,
+                finbert=MagicMock(), budget_tracker=mock_budget,
+            )
+
+        # run_inference must NOT touch any store
+        mock_redis.write_sentiment.assert_not_called()
+        mock_pg.write_signal.assert_not_called()
 
 
 class TestProcessNewsBatch:
