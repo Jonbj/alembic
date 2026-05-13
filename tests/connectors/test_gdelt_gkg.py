@@ -153,7 +153,83 @@ def test_is_financial_row_false_for_short_row():
 
 
 # ---------------------------------------------------------------------------
-# _download_csv  (Task 2 — leave empty for now)
+# _download_csv
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_download_csv_returns_parsed_rows():
+    """HTTP 200 with valid zip → list of TSV row lists."""
+    connector = GDELTGKGConnector()
+    rows = [make_csv_row(), make_csv_row(url="https://reuters.com/article/2")]
+    zip_bytes = make_zip_bytes(rows)
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.read = AsyncMock(return_value=zip_bytes)
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=None)
+
+    mock_session = MagicMock()
+    mock_session.get.return_value = mock_resp
+
+    result = await connector._download_csv(mock_session, "http://data.gdeltproject.org/gdeltv2/test.gkg.csv.zip")
+    assert len(result) == 2
+    assert result[0][4] == "https://reuters.com/article/1"
+
+
+@pytest.mark.asyncio
+async def test_download_csv_returns_empty_on_404():
+    """HTTP 404 (holiday/gap) → empty list, no exception."""
+    connector = GDELTGKGConnector()
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 404
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=None)
+
+    mock_session = MagicMock()
+    mock_session.get.return_value = mock_resp
+
+    result = await connector._download_csv(mock_session, "http://data.gdeltproject.org/gdeltv2/missing.gkg.csv.zip")
+    assert result == []
+
+
+@pytest.mark.asyncio
+async def test_download_csv_retries_on_429():
+    """HTTP 429 on first attempt → sleeps → succeeds on second attempt."""
+    connector = GDELTGKGConnector()
+    rows = [make_csv_row()]
+    zip_bytes = make_zip_bytes(rows)
+
+    rate_limited = AsyncMock()
+    rate_limited.status = 429
+    rate_limited.__aenter__ = AsyncMock(return_value=rate_limited)
+    rate_limited.__aexit__ = AsyncMock(return_value=None)
+
+    ok_resp = AsyncMock()
+    ok_resp.status = 200
+    ok_resp.raise_for_status = MagicMock()
+    ok_resp.read = AsyncMock(return_value=zip_bytes)
+    ok_resp.__aenter__ = AsyncMock(return_value=ok_resp)
+    ok_resp.__aexit__ = AsyncMock(return_value=None)
+
+    call_count = [0]
+    def side_effect(*args, **kwargs):
+        call_count[0] += 1
+        return rate_limited if call_count[0] == 1 else ok_resp
+
+    mock_session = MagicMock()
+    mock_session.get.side_effect = side_effect
+
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        result = await connector._download_csv(mock_session, "http://data.gdeltproject.org/gdeltv2/test.gkg.csv.zip")
+
+    assert len(result) == 1
+    assert call_count[0] == 2
+
+
+# ---------------------------------------------------------------------------
 # fetch()        (Task 3 — leave empty for now)
 # fetch_historical() (Task 4 — leave empty for now)
 # ---------------------------------------------------------------------------
