@@ -1,205 +1,258 @@
-"""GDELT GKG v2 connector — live news ingestion with entity extraction.
+"""GDELT GKG v2 connector — news ingestion via bulk CSV downloads.
 
-This connector queries the GDELT Global Knowledge Graph (GKG) v2 API in "gkg"
-mode, which returns structured records with pre-disambiguated organisation names
-in the `V2Organizations` field. It is the **discovery engine** of the news-driven
-pipeline: instead of receiving a fixed watchlist, it scans broad financial news
-and extracts the companies mentioned, handing them off to `TickerExtractor` for
-ticker resolution.
+Why bulk CSV instead of the GDELT API?
+  The GDELT GKG v2 data with V2.1Organizations (pre-disambiguated company names)
+  is only accessible via the GDELT bulk CSV files published every 15 minutes at
+  http://data.gdeltproject.org/gdeltv2/. The REST API endpoint previously used
+  (api.gdeltproject.org/api/v2/gkg/gkg) does not exist.
 
-Why GKG instead of the legacy artlist endpoint?
-  - artlist returns article titles only, with no entity metadata.
-  - GKG returns `V2Organizations`, a semicolon-separated list of company names
-    already normalised by GDELT (e.g. "Apple Inc;Microsoft Corporation").
-    This avoids brittle NER in our own code and leverages GDELT's
-    disambiguation pipeline.
+Live ingestion (fetch()):
+  Downloads the latest 15-minute GKG CSV discovered via lastupdate.txt.
 
-Query scope:
-  - English-only (`sourcelang:english`).
-  - Financial themes: stock market, earnings, M&A, bankruptcy.
-  - `timespan=15min` aligns with the Celery beat schedule so each run covers
-    the gap since the previous run.
+Historical backfill (fetch_historical()):
+  Downloads one CSV file per sample_interval_minutes across the requested range.
+  Default: 1 file/hour (sample_interval_minutes=60) → ~840 files for 6 months
+  of market hours.
 
-Output:
-  - Yields `GKGNewsItem` instances with `org_names` populated.
-  - `asset_tags` is intentionally left empty; `NewsIngestionWorker` fills it
-    after ticker extraction so the connector remains decoupled from the DB.
+CSV format: tab-separated, 27 columns. Key columns (0-indexed):
+  1=DATE, 4=DocumentIdentifier, 7=V1Themes, 14=V2.1Organizations, 26=V2ExtrasXML
 """
 
 import asyncio
-import json
+import io
 import logging
+import re
+import zipfile
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 
 import aiohttp
 
 from src.connectors.base import NewsConnector
-from src.connectors.gdelt_base import _GDELTBaseConnector
+from src.connectors.gdelt_base import (
+    _GDELTBaseConnector,
+    _GDELT_BACKOFF_BASE,
+    _GDELT_BACKOFF_MAX,
+    _GDELT_MAX_RETRIES,
+)
 from src.models.news import GKGNewsItem
 from src.text.sanitizer import sanitize_text
 
 logger = logging.getLogger(__name__)
 
-_GDELT_GKG_URL = "https://api.gdeltproject.org/api/v2/gkg/gkg"
-_GDELT_GKG_QUERY = (
-    "sourcelang:english "
-    "(theme:ECON_STOCKMARKET OR theme:COMPANY_EARNINGS "
-    "OR theme:ECON_MERGE OR theme:ECON_BANKRUPTCY)"
-)
+_GDELT_LASTUPDATE_URL = "http://data.gdeltproject.org/gdeltv2/lastupdate.txt"
+_GDELT_BULK_BASE = "http://data.gdeltproject.org/gdeltv2/"
+
+_FINANCIAL_THEMES = frozenset([
+    "ECON_STOCKMARKET",
+    "COMPANY_EARNINGS",
+    "ECON_MERGE",
+    "ECON_BANKRUPTCY",
+])
+
+_COL_DATE = 1
+_COL_URL = 4
+_COL_V1THEMES = 7
+_COL_ORGS = 14
+_COL_EXTRAS = 26
+_MIN_COLS = 27
 
 
 class GDELTGKGConnector(_GDELTBaseConnector, NewsConnector):
-    """Fetches broad financial news from GDELT GKG v2 API.
+    """Fetches financial news from GDELT GKG v2 bulk CSV files.
 
-    Returns GKGNewsItem objects with org_names populated from V2Organizations.
-    asset_tags is left empty — caller (NewsIngestionWorker) fills it via TickerExtractor.
+    Yields GKGNewsItem objects with org_names populated from the V2.1Organizations
+    column — the same field the live pipeline uses for TickerExtractor input.
+    asset_tags is always left empty; NewsIngestionWorker fills it via TickerExtractor.
     """
 
     def __init__(self, max_records: int = 250, timespan: str = "15min") -> None:
         self.max_records = max_records
+        # timespan kept for interface compatibility; not used in CSV mode.
         self.timespan = timespan
 
-    async def fetch(self) -> AsyncIterator[GKGNewsItem]:  # type: ignore[override]
-        """Fetch recent GKG records and yield parsed GKGNewsItem objects.
+    async def fetch(self) -> AsyncIterator[GKGNewsItem]:
+        """Fetch the latest 15-minute GKG file and yield financial news items.
 
         Steps:
-          1. Build query parameters (mode=gkg, maxrecords, timespan).
-          2. Open aiohttp session and call `_fetch_with_backoff` (inherited).
-          3. Iterate over `data["gkg"]` and parse each record.
-          4. Skip records with missing URL or unparseable timestamp
-             (look-ahead bias prevention).
-
-        Yields:
-            GKGNewsItem instances, one per GDELT record.
+          1. Download lastupdate.txt to discover the latest GKG CSV URL.
+          2. Download and decompress the CSV zip via _download_csv().
+          3. Filter rows by _is_financial_row() (V1Themes).
+          4. Parse and yield up to max_records GKGNewsItem objects.
         """
-        params = {
-            "query": _GDELT_GKG_QUERY,
-            "mode": "gkg",
-            "maxrecords": self.max_records,
-            "format": "json",
-            "timespan": self.timespan,
-        }
         async with aiohttp.ClientSession() as session:
-            data = await self._fetch_with_backoff(session, params, url=_GDELT_GKG_URL)
+            try:
+                async with session.get(_GDELT_LASTUPDATE_URL) as resp:
+                    resp.raise_for_status()
+                    text = await resp.text()
+            except Exception as e:
+                logger.warning("Failed to fetch GDELT lastupdate.txt: %s", e)
+                return
 
-        if data is None:
-            return
+            gkg_url = None
+            for line in text.strip().splitlines():
+                if ".gkg.csv.zip" in line:
+                    gkg_url = line.strip().split()[-1]
+                    break
 
-        for record in data.get("gkg", []):
-            item = self._parse_record(record)
-            if item is not None:
-                yield item
+            if not gkg_url:
+                logger.warning("No GKG file URL found in lastupdate.txt")
+                return
+
+            rows = await self._download_csv(session, gkg_url)
+            count = 0
+            for row in rows:
+                if count >= self.max_records:
+                    break
+                if not self._is_financial_row(row):
+                    continue
+                item = self._parse_csv_row(row)
+                if item is not None:
+                    count += 1
+                    yield item
 
     async def fetch_historical(
         self,
         start_date: datetime,
         end_date: datetime,
-        max_records_per_chunk: int = 250,
+        max_records_per_file: int = 250,
+        sample_interval_minutes: int = 60,
     ) -> AsyncIterator[GKGNewsItem]:
-        """Fetch GKG records in [start_date, end_date] chunked by calendar month.
+        """Fetch historical GKG records from GDELT bulk CSV files.
 
-        One API call per month. Inherits exponential backoff from _GDELTBaseConnector.
-        Sleeps 1s between chunks to respect GDELT rate limits.
-        Records with missing URL or invalid timestamp are skipped (same as fetch()).
+        Snaps start_date to the nearest prior 15-minute boundary, then
+        downloads one file every sample_interval_minutes until end_date.
+        404 responses (holiday/gap) are silently skipped. Sleeps 0.5s
+        between files to be polite to GDELT's data server.
 
-        Why monthly chunks?
-          GDELT GKG API accepts STARTDATETIME/ENDDATETIME. A 6-month range in one
-          call risks hitting maxrecords (250) and dropping data. Monthly chunks
-          guarantee we capture up to 250 records per month — for financial news
-          this is well above typical monthly volume.
-
-        Why normalize to day=1 at start?
-          Ensures the first chunk boundary is clean (e.g. 2025-10-01 00:00:00)
-          regardless of the exact start_date hour passed by the caller.
+        Args:
+            start_date: Start of the date range (inclusive).
+            end_date: End of the date range (inclusive).
+            max_records_per_file: Max financial articles to yield per file.
+            sample_interval_minutes: Minutes between file downloads.
+                15 = every file, 60 = hourly (default), 120 = every 2h.
         """
-        current = start_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        snapped = start_date.replace(
+            minute=(start_date.minute // 15) * 15,
+            second=0,
+            microsecond=0,
+        )
+        step = timedelta(minutes=max(15, (sample_interval_minutes // 15) * 15))
 
         async with aiohttp.ClientSession() as session:
+            current = snapped
             while current <= end_date:
-                # Compute next month boundary. Handles December → January rollover.
-                if current.month == 12:
-                    next_month = current.replace(year=current.year + 1, month=1, day=1)
-                else:
-                    next_month = current.replace(month=current.month + 1, day=1)
-
-                # chunk_end = last second of current month, or end_date if earlier.
-                chunk_end = min(next_month - timedelta(seconds=1), end_date)
-
-                params = {
-                    "query": _GDELT_GKG_QUERY,
-                    "mode": "gkg",
-                    "maxrecords": max_records_per_chunk,
-                    "format": "json",
-                    "STARTDATETIME": current.strftime("%Y%m%d%H%M%S"),
-                    "ENDDATETIME": chunk_end.strftime("%Y%m%d%H%M%S"),
-                }
-
-                data = await self._fetch_with_backoff(session, params, url=_GDELT_GKG_URL)
-                for record in (data or {}).get("gkg", []):
-                    item = self._parse_record(record)
+                url = f"{_GDELT_BULK_BASE}{current.strftime('%Y%m%d%H%M%S')}.gkg.csv.zip"
+                rows = await self._download_csv(session, url)
+                count = 0
+                for row in rows:
+                    if count >= max_records_per_file:
+                        break
+                    if not self._is_financial_row(row):
+                        continue
+                    item = self._parse_csv_row(row)
                     if item is not None:
+                        count += 1
                         yield item
+                current += step
+                await asyncio.sleep(0.5)
 
-                current = next_month
-                await asyncio.sleep(1.0)
+    def _is_financial_row(self, row: list[str]) -> bool:
+        """Return True if V1Themes column (index 7) contains any financial theme."""
+        if len(row) <= _COL_V1THEMES:
+            return False
+        themes = set(row[_COL_V1THEMES].split("|"))
+        return bool(themes & _FINANCIAL_THEMES)
 
-    def _parse_record(self, record: dict) -> GKGNewsItem | None:
-        """Parse a single raw GDELT GKG record into a GKGNewsItem.
+    def _parse_csv_row(self, row: list[str]) -> GKGNewsItem | None:
+        """Parse a GDELT GKG v2 TSV row into a GKGNewsItem.
 
-        Fields consumed:
-          - V2DocumentIdentifier → item.url (also item.id). Empty → skip.
-          - date                → item.timestamp. Format "%Y%m%d%H%M%S".
-                                  Invalid → skip (prevents look-ahead bias).
-          - V2Organizations     → semicolon-split, stripped, empty removed.
-          - extras.PageTitle    → item.title (sanitised). Fallback to empty.
-
-        Returns:
-            GKGNewsItem on success, None if the record should be discarded.
+        Returns None and logs a warning for rows with missing URL or
+        unparseable DATE (both would corrupt backtest signals).
         """
-        # --- URL validation --------------------------------------------------
-        url = record.get("V2DocumentIdentifier", "").strip()
-        if not url:
-            # Without a URL we cannot build a stable item.id, and we cannot
-            # deduplicate. Skip silently — GDELT occasionally returns records
-            # with empty identifiers.
+        if len(row) < _MIN_COLS:
             return None
 
-        # --- Timestamp parsing ----------------------------------------------
-        raw_date = record.get("date", "")
+        url = row[_COL_URL].strip()
+        if not url:
+            return None
+
+        raw_date = row[_COL_DATE].strip()
         try:
             ts = datetime.strptime(raw_date, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
         except (ValueError, TypeError):
-            # Invalid timestamps would corrupt backtests (look-ahead bias).
-            # We never guess or use datetime.now() as a fallback.
             logger.warning("Invalid GKG timestamp %r, skipping %s", raw_date, url)
             return None
 
-        # --- Organisation extraction -----------------------------------------
-        raw_orgs = record.get("V2Organizations", "")
-        # GDELT separates organisations with ";". Empty tokens (trailing ";")
-        # are filtered out to avoid downstream noise.
-        org_names = [o.strip() for o in raw_orgs.split(";") if o.strip()]
+        # V2.1Organizations: "ORGNAME,charOffset;ORGNAME2,charOffset2"
+        raw_orgs = row[_COL_ORGS].strip()
+        org_names = []
+        for entry in raw_orgs.split(";"):
+            entry = entry.strip()
+            if not entry:
+                continue
+            name = entry.rsplit(",", 1)[0].strip()
+            if name:
+                org_names.append(name)
 
-        # --- Title extraction ------------------------------------------------
-        extras_str = record.get("extras", "{}")
-        try:
-            extras = json.loads(extras_str) if extras_str else {}
-        except (json.JSONDecodeError, ValueError):
-            # Malformed JSON in extras is non-fatal; treat as empty dict.
-            extras = {}
-        # Sanitise before entering the pipeline (CLAUDE.md requirement).
-        title = sanitize_text(extras.get("PageTitle", ""))
+        # Extract PageTitle from V2ExtrasXML: <PAGE_TITLE>...</PAGE_TITLE>
+        extras_xml = row[_COL_EXTRAS].strip()
+        match = re.search(r"<PAGE_TITLE>(.*?)</PAGE_TITLE>", extras_xml, re.IGNORECASE)
+        title = sanitize_text(match.group(1).strip() if match else "")
 
-        # --- Build GKGNewsItem -----------------------------------------------
         return GKGNewsItem(
             id=url,
             source="gdelt_gkg",
             timestamp=ts,
             title=title,
-            body=title,  # GKG mode has no article body; title is best proxy.
+            body=title,
             url=url,
             language="en",
-            asset_tags=[],  # Will be populated by NewsIngestionWorker → TickerExtractor.
+            asset_tags=[],
             org_names=org_names,
         )
+
+    async def _download_csv(
+        self,
+        session: aiohttp.ClientSession,
+        url: str,
+    ) -> list[list[str]]:
+        """Download a GDELT GKG CSV zip file and return parsed TSV rows.
+
+        Returns [] on 404 (holiday/gap in GDELT data) or after max retries.
+        HTTP 429 triggers exponential backoff (same parameters as _fetch_with_backoff).
+        """
+        for attempt in range(_GDELT_MAX_RETRIES):
+            try:
+                async with session.get(url) as resp:
+                    if resp.status == 429:
+                        wait = min(_GDELT_BACKOFF_BASE * (2**attempt), _GDELT_BACKOFF_MAX)
+                        logger.warning("GDELT rate limited on CSV, waiting %.1fs", wait)
+                        await asyncio.sleep(wait)
+                        continue
+                    if resp.status == 404:
+                        return []
+                    resp.raise_for_status()
+                    data = await resp.read()
+            except aiohttp.ClientResponseError as e:
+                if e.status == 429 and attempt < _GDELT_MAX_RETRIES - 1:
+                    wait = min(_GDELT_BACKOFF_BASE * (2**attempt), _GDELT_BACKOFF_MAX)
+                    await asyncio.sleep(wait)
+                    continue
+                logger.warning("GDELT CSV download error %s: %s", e.status, e.message)
+                return []
+            except Exception as e:
+                logger.warning("GDELT CSV download failed: %s", e)
+                return []
+
+            try:
+                with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                    csv_name = next(n for n in zf.namelist() if n.endswith(".csv"))
+                    content = zf.read(csv_name).decode("utf-8", errors="replace")
+                return [line.split("\t") for line in content.splitlines() if line]
+            except Exception as e:
+                logger.warning("Failed to parse GDELT CSV zip from %s: %s", url, e)
+                return []
+
+        logger.warning("GDELT: max retries exceeded for %s", url)
+        return []
