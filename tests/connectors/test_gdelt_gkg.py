@@ -337,5 +337,96 @@ async def test_fetch_returns_empty_when_no_gkg_in_lastupdate():
 
 
 # ---------------------------------------------------------------------------
-# fetch_historical() (Task 4 — leave empty for now)
+# fetch_historical()
 # ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_fetch_historical_downloads_at_sample_interval():
+    """fetch_historical with 60-min interval over 2h range → 2 CSV downloads."""
+    connector = GDELTGKGConnector()
+    start = datetime(2025, 11, 1, 14, 0, tzinfo=timezone.utc)
+    end   = datetime(2025, 11, 1, 15, 0, tzinfo=timezone.utc)
+
+    downloaded_urls = []
+
+    async def mock_download(session, url):
+        downloaded_urls.append(url)
+        return [make_csv_row()]
+
+    with patch.object(connector, "_download_csv", side_effect=mock_download):
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            items = [item async for item in connector.fetch_historical(
+                start, end, sample_interval_minutes=60
+            )]
+
+    assert len(downloaded_urls) == 2
+    assert "20251101140000" in downloaded_urls[0]
+    assert "20251101150000" in downloaded_urls[1]
+    assert len(items) == 2
+
+
+@pytest.mark.asyncio
+async def test_fetch_historical_snaps_start_to_15min_boundary():
+    """start_date 14:07 UTC → snapped to 14:00 UTC for the first file URL."""
+    connector = GDELTGKGConnector()
+    start = datetime(2025, 11, 1, 14, 7, tzinfo=timezone.utc)
+    end   = datetime(2025, 11, 1, 14, 7, tzinfo=timezone.utc)
+
+    downloaded_urls = []
+
+    async def mock_download(session, url):
+        downloaded_urls.append(url)
+        return []
+
+    with patch.object(connector, "_download_csv", side_effect=mock_download):
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            _ = [item async for item in connector.fetch_historical(start, end)]
+
+    assert len(downloaded_urls) == 1
+    assert "20251101140000" in downloaded_urls[0]
+
+
+@pytest.mark.asyncio
+async def test_fetch_historical_skips_404_files():
+    """404 from _download_csv (empty list) → no items yielded, loop continues."""
+    connector = GDELTGKGConnector()
+    start = datetime(2025, 11, 1, 14, 0, tzinfo=timezone.utc)
+    end   = datetime(2025, 11, 1, 15, 0, tzinfo=timezone.utc)
+
+    responses = [[], [make_csv_row()]]
+    call_idx = [0]
+
+    async def mock_download(session, url):
+        r = responses[call_idx[0]]
+        call_idx[0] += 1
+        return r
+
+    with patch.object(connector, "_download_csv", side_effect=mock_download):
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            items = [item async for item in connector.fetch_historical(
+                start, end, sample_interval_minutes=60
+            )]
+
+    assert len(items) == 1
+
+
+@pytest.mark.asyncio
+async def test_fetch_historical_sleeps_between_files():
+    """fetch_historical sleeps 0.5s after each file download."""
+    connector = GDELTGKGConnector()
+    start = datetime(2025, 11, 1, 14, 0, tzinfo=timezone.utc)
+    end   = datetime(2025, 11, 1, 15, 0, tzinfo=timezone.utc)
+
+    sleep_calls = []
+
+    async def mock_sleep(seconds):
+        sleep_calls.append(seconds)
+
+    with patch.object(connector, "_download_csv", return_value=[]):
+        with patch("asyncio.sleep", side_effect=mock_sleep):
+            _ = [item async for item in connector.fetch_historical(
+                start, end, sample_interval_minutes=60
+            )]
+
+    assert len(sleep_calls) == 2
+    assert all(s == 0.5 for s in sleep_calls)
