@@ -31,6 +31,10 @@ class ForwardReturnCalculator:
       - 24h: (next_day_close) / (current_day_close) - 1
     Returns None for any horizon where the required bar is missing (weekend, holiday,
     post-market). No interpolation — never guess prices.
+
+    Why batch download instead of per-signal?
+      yfinance is network-heavy. Downloading once per ticker for the whole period
+      and slicing in-memory is ~100x faster than N API calls.
     """
 
     def __init__(self, pg_conn) -> None:
@@ -39,7 +43,15 @@ class ForwardReturnCalculator:
     def populate(self, run_id: str, start_date: datetime, end_date: datetime) -> int:
         """Populate forward_return_1h/4h/24h for all scored rows in run_id.
 
-        Returns the number of rows updated.
+        Pipeline:
+          1. SELECT all scored rows for this run_id from backtest_signals.
+          2. Determine unique tickers.
+          3. Download hourly + daily close prices once per ticker (vectorized).
+          4. For each signal row, compute three forward returns via _compute_returns.
+          5. Batch UPDATE all rows in a single executemany call.
+
+        Returns:
+            Number of rows updated (should equal number of scored rows).
         """
         rows = self._fetch_scored_rows(run_id)
         if not rows:
@@ -76,6 +88,12 @@ class ForwardReturnCalculator:
         return len(updates)
 
     def _fetch_scored_rows(self, run_id: str) -> list[dict]:
+        """Fetch scored rows from backtest_signals for a given run_id.
+
+        Filters: score IS NOT NULL (ensures LLM inference completed).
+        Ordering: generated_at ascending (not required for correctness, but
+        makes logs and debugging deterministic).
+        """
         with self._conn.cursor() as cur:
             cur.execute(
                 "SELECT id, symbol, generated_at "
@@ -96,7 +114,17 @@ class ForwardReturnCalculator:
         end: datetime,
         interval: str,
     ) -> dict[str, pd.Series]:
-        """Download close prices for each ticker. Returns dict ticker → pd.Series."""
+        """Download close prices for each ticker. Returns dict ticker → pd.Series.
+
+        Edge-case handling:
+          - start_date expanded by -1 day, end_date by +2 days to cover signals
+            near the period boundary (we need forward bars *after* the signal).
+          - Empty DataFrame → log warning, skip ticker (all returns will be None).
+          - Any Exception (network, invalid ticker, delisted) → log warning, skip.
+            We do NOT fail the entire backtest because one ticker is bad.
+          - auto_adjust=True to use adjusted close (splits/dividends corrected).
+          - progress=False to silence yfinance console spam.
+        """
         result: dict[str, pd.Series] = {}
         dl_start = (start - timedelta(days=1)).strftime("%Y-%m-%d")
         dl_end = (end + timedelta(days=2)).strftime("%Y-%m-%d")
@@ -125,7 +153,28 @@ class ForwardReturnCalculator:
         hourly: pd.Series | None,
         daily: pd.Series | None,
     ) -> ForwardReturns:
-        """Compute 1h, 4h, 24h forward returns for a single signal at timestamp ts."""
+        """Compute 1h, 4h, 24h forward returns for a single signal at timestamp ts.
+
+        Algorithm for 1h/4h:
+          1. Convert ts to UTC pd.Timestamp (handles naive datetimes safely).
+          2. Find first hourly bar at or after ts via searchsorted (O(log N)).
+          3. If no such bar exists → all None (signal after last price).
+          4. Anchor price = price at that bar.
+          5. For +1h / +4h: look for bar at target time. Accept within 30 minutes
+             to absorb DST shifts and market-open irregularities.
+          6. If target bar missing → None (weekend, holiday, post-market).
+
+        Algorithm for 24h:
+          1. Normalize ts to midnight → trading day.
+          2. Find that day's close in daily series via searchsorted.
+          3. Next day's close = daily[d_idx + 1].
+          4. If either missing → None.
+
+        Why no interpolation?
+          Interpolating missing bars would introduce look-ahead bias
+          (we'd be using future information not available at signal time).
+          None returns are dropped from IC calculation, not imputed.
+        """
         if hourly is None:
             return ForwardReturns(None, None, None)
 

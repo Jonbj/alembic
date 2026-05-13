@@ -45,6 +45,12 @@ async def run_inference(
 ) -> SentimentResult | None:
     """Core LLM inference — no store writes. Callable from live worker and backtest.
 
+    Why extracted as a standalone function?
+      The live SentimentWorker (Celery) and the backtest CLI both need the exact
+      same inference logic (ensemble → aggregate → fallback). By extracting
+      run_inference(), we guarantee the backtest validates the *production*
+      pipeline, not a simplified version.
+
     Flow:
     1. Check budget BEFORE calling LLM ensemble
     2. If budget exhausted, fall back to FinBERT immediately
@@ -52,6 +58,11 @@ async def run_inference(
     4. Aggregate; if divergence (aggregate returns None), fall back to FinBERT
     5. Record spending for successful LLM calls
     6. Return SentimentResult (no Redis/PG writes)
+
+    Why no store writes here?
+      The live worker writes to Redis + PostgreSQL after receiving the result.
+      The backtest CLI writes to backtest_signals via UPDATE. Keeping store
+      logic outside run_inference makes it reusable for both contexts.
     """
     symbol = item.asset_tags[0] if item.asset_tags else "UNKNOWN"
     prompt = _DK_COT_PROMPT.format(text=item.body[:2000], symbol=symbol)
@@ -81,6 +92,7 @@ async def run_inference(
             )
 
         score = aggregated.polarity * aggregated.confidence
+        # Rough token estimate: ~4 chars per token (English text average).
         input_tokens = len(prompt) // 4
         output_tokens = len(aggregated.reasoning) // 4
         for model_id in aggregated.model_ids:

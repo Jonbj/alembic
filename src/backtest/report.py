@@ -80,13 +80,37 @@ class BacktestReport:
 
 
 class BacktestReportBuilder:
-    """Reads backtest_signals for a run_id and computes IC/ICIR at three horizons."""
+    """Reads backtest_signals for a run_id and computes IC/ICIR at three horizons.
+
+    Why three horizons?
+      - 1h validates the signal's immediate directional accuracy.
+      - 4h aligns with the intraday_strategy.py execution window.
+      - 24h produces daily IC comparable to the live PerformanceWorker output.
+      Comparing across horizons reveals the signal's decay profile.
+
+    Why exclude fallback_used rows?
+      FinBERT fallback signals are a *different* signal source (deterministic
+      model, not LLM ensemble). Including them would dilute the IC measurement
+      of the ensemble specifically.
+    """
 
     def __init__(self, pg_conn) -> None:
         self._conn = pg_conn
 
     def build(self, run_id: str) -> BacktestReport:
-        """Fetch rows and compute IC/ICIR report for all three horizons."""
+        """Fetch rows and compute IC/ICIR report for all three horizons.
+
+        Steps:
+          1. COUNT total scored rows for run_id.
+          2. SELECT all scored rows with forward returns.
+          3. For each horizon (1h=idx0, 4h=idx1, 24h=idx2):
+             - Filter out rows where return is None or fallback_used=True.
+             - If < _MIN_SAMPLES (30), IC/ICIR = None (insufficient data).
+             - Else call compute_composite_ic and compute_icir.
+          4. Build per-model breakdown for the 24h horizon (most stable).
+          5. signals_with_returns = max count across horizons (each horizon
+             may have a different number of non-None returns).
+        """
         with self._conn.cursor() as cur:
             cur.execute(_COUNT_TOTAL, (run_id,))
             total = cur.fetchone()[0]
@@ -97,7 +121,11 @@ class BacktestReportBuilder:
         # rows columns: model_id, score, confidence, fallback_used,
         #               forward_return_1h, forward_return_4h, forward_return_24h
         def _extract(horizon_idx: int):
-            """Extract (scores, returns, confs) for a horizon, skipping None returns."""
+            """Extract (scores, returns, confs) for a horizon, skipping None returns.
+
+            Why skip fallback_used?
+              See class docstring — FinBERT is a different signal class.
+            """
             scores, returns, confs = [], [], []
             for model_id, score, conf, fallback, r1h, r4h, r24h in rows:
                 ret = [r1h, r4h, r24h][horizon_idx]
@@ -109,6 +137,7 @@ class BacktestReportBuilder:
             return scores, returns, confs
 
         def _ic_icir(scores, returns, confs):
+            """Compute IC and ICIR if enough samples, else None."""
             if len(scores) < _MIN_SAMPLES:
                 return None, None
             return (
@@ -124,9 +153,10 @@ class BacktestReportBuilder:
         ic_4h, icir_4h = _ic_icir(s4, r4, c4)
         ic_24h, icir_24h = _ic_icir(s24, r24, c24)
 
+        # Max across horizons because each may have different missing-bar counts.
         signals_with_returns = max(len(s1), len(s4), len(s24))
 
-        # Per-model breakdown (24h horizon)
+        # Per-model breakdown (24h horizon) — helps identify which models drive IC.
         by_model: dict[str, dict] = {}
         model_ids = list({row[0] for row in rows})
         for mid in model_ids:

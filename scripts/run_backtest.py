@@ -71,7 +71,17 @@ _DRY_RUN_UPDATE = """
 
 
 def _estimate_cost(pending_count: int) -> float:
-    """Estimate inference cost: 3 models × ~300 input + ~100 output tokens × Opus rates."""
+    """Estimate inference cost: 3 models × ~300 input + ~100 output tokens × Opus rates.
+
+    Why this estimate is conservative (upper bound):
+      - Uses Opus pricing ($15/1M input, $75/1M output) even though the ensemble
+        mixes Opus, Qwen35, and DeepSeek (cheaper models). This over-estimates
+        to avoid surprise bills.
+      - Assumes all rows require full ensemble; in practice some may be deduplicated
+        or discarded by the TickerExtractor.
+      - Prompts a human confirmation if estimate > $10 to prevent accidental
+        large spends during long backtest periods.
+    """
     # Opus: $15/1M input, $75/1M output (upper bound for the ensemble)
     cost_per_call = (300 * 15.0 + 100 * 75.0) / 1_000_000
     return pending_count * 3 * cost_per_call
@@ -86,7 +96,18 @@ def phase1_fetch(
     end: datetime,
     max_per_chunk: int,
 ) -> int:
-    """Phase 1: fetch GKG historical news, extract tickers, write pending rows."""
+    """Phase 1: fetch GKG historical news, extract tickers, write pending rows.
+
+    Why async → sync bridge via asyncio.run?
+      The connector is async (aiohttp), but the CLI is synchronous for simplicity.
+      We collect all GKG items into a list before entering the synchronous
+      PostgreSQL loop. For 6 months × 250 records this is ~1500 items — negligible
+      memory footprint.
+
+    Why INSERT … ON CONFLICT DO NOTHING?
+      Re-running the same backtest period with the same run_id should be idempotent.
+      The unique index (run_id, symbol, article_url, generated_at) prevents duplicates.
+    """
     log.info("Phase 1: fetching GKG news from %s to %s", start.date(), end.date())
 
     async def _fetch():
@@ -111,7 +132,26 @@ def phase1_fetch(
 
 
 def phase2_infer(pg_conn, run_id: str, dry_run: bool) -> int:
-    """Phase 2: run LLM inference on pending rows. Skips rows with score IS NOT NULL."""
+    """Phase 2: run LLM inference on pending rows. Skips rows with score IS NOT NULL.
+
+    Checkpoint / resume semantics:
+      - SELECT filters `score IS NULL`. If Phase 2 crashes after processing 500
+        of 1000 rows, the 500 scored rows remain in the DB. On restart, the
+        SELECT skips them automatically — no extra state file needed.
+
+    Dry-run mode:
+      - Writes score=0.0, confidence=0.5 without any LLM call.
+      - Useful for testing the pipeline end-to-end without API costs.
+      - Still requires a FinBERTClient instance (no-op, not called for dry-run).
+
+    Cost guardrail:
+      - Calls _estimate_cost() before inference. If > $10, prompts user for
+        confirmation. Prevents accidental 6-month full-ensemble runs.
+
+    Why instantiate clients inside phase2_infer (not main)?
+      Keeps client lifecycle scoped to the phase that actually uses them.
+      If Phase 2 is skipped (all rows already scored), no clients are created.
+    """
     with pg_conn.cursor() as cur:
         cur.execute(_SELECT_PENDING, (run_id,))
         rows = cur.fetchall()
@@ -147,6 +187,8 @@ def phase2_infer(pg_conn, run_id: str, dry_run: bool) -> int:
                 processed += 1
                 continue
 
+            # Reconstruct a minimal NewsItem from DB columns.
+            # Body = title (GKG only stores title, no full article text).
             item = NewsItem(
                 id=f"{article_url}:{symbol}",
                 body=article_title or "",
@@ -172,7 +214,11 @@ def phase2_infer(pg_conn, run_id: str, dry_run: bool) -> int:
 
 
 def phase3_forward_returns(pg_conn, run_id: str, start: datetime, end: datetime) -> int:
-    """Phase 3: populate forward_return_1h/4h/24h from yfinance."""
+    """Phase 3: populate forward_return_1h/4h/24h from yfinance.
+
+    Delegates entirely to ForwardReturnCalculator.populate().
+    See src/backtest/forward_returns.py for the vectorized download logic.
+    """
     log.info("Phase 3: computing forward returns for run_id=%s", run_id)
     calc = ForwardReturnCalculator(pg_conn)
     updated = calc.populate(run_id, start, end)
@@ -181,7 +227,12 @@ def phase3_forward_returns(pg_conn, run_id: str, start: datetime, end: datetime)
 
 
 def phase4_report(pg_conn, run_id: str) -> None:
-    """Phase 4: build and print IC/ICIR report, save to reports/ directory."""
+    """Phase 4: build and print IC/ICIR report, save to reports/ directory.
+
+    Output:
+      - stdout: human-readable summary (horizons + per-model 24h IC).
+      - JSON:   reports/backtest_{run_id}.json (machine-readable for CI / dashboards).
+    """
     log.info("Phase 4: building report for run_id=%s", run_id)
     builder = BacktestReportBuilder(pg_conn)
     report = builder.build(run_id)

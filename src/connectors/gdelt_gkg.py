@@ -102,16 +102,28 @@ class GDELTGKGConnector(_GDELTBaseConnector, NewsConnector):
         One API call per month. Inherits exponential backoff from _GDELTBaseConnector.
         Sleeps 1s between chunks to respect GDELT rate limits.
         Records with missing URL or invalid timestamp are skipped (same as fetch()).
+
+        Why monthly chunks?
+          GDELT GKG API accepts STARTDATETIME/ENDDATETIME. A 6-month range in one
+          call risks hitting maxrecords (250) and dropping data. Monthly chunks
+          guarantee we capture up to 250 records per month — for financial news
+          this is well above typical monthly volume.
+
+        Why normalize to day=1 at start?
+          Ensures the first chunk boundary is clean (e.g. 2025-10-01 00:00:00)
+          regardless of the exact start_date hour passed by the caller.
         """
         current = start_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
         async with aiohttp.ClientSession() as session:
             while current <= end_date:
+                # Compute next month boundary. Handles December → January rollover.
                 if current.month == 12:
                     next_month = current.replace(year=current.year + 1, month=1, day=1)
                 else:
                     next_month = current.replace(month=current.month + 1, day=1)
 
+                # chunk_end = last second of current month, or end_date if earlier.
                 chunk_end = min(next_month - timedelta(seconds=1), end_date)
 
                 params = {
