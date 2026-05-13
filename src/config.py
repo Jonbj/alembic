@@ -6,6 +6,18 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+import yaml
+
+
+def _load_trading_yaml() -> dict:
+    """Load trading configuration from config/trading.yaml."""
+    path = Path(__file__).parent.parent / "config" / "trading.yaml"
+    if path.exists():
+        with path.open() as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
 class Config(BaseModel):
     """Application configuration with validation."""
 
@@ -77,6 +89,11 @@ class Config(BaseModel):
 
     # Fallback settings
     MAX_CONSECUTIVE_FALLBACKS: int = Field(default=3)
+
+    # Symbol universe for performance calculations and watchlist filtering
+    WATCHLIST_SYMBOLS: list[str] = Field(
+        default_factory=lambda: _load_trading_yaml().get("symbols", {}).get("watchlist", [])
+    )
 
     # FRED API
     FRED_API_KEY: str = Field(
