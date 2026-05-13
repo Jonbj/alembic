@@ -1,4 +1,13 @@
-"""News and LLM output models."""
+"""News and LLM output models.
+
+This module defines the Pydantic models used throughout the news ingestion
+and sentiment pipeline.
+
+NewsItem is the canonical representation of a news article entering the
+sentiment worker. GKGNewsItem extends it with organisation names extracted
+from GDELT GKG — these names are used upstream by TickerExtractor to resolve
+tickers before the item reaches the sentiment queue.
+"""
 
 from datetime import datetime, timezone
 
@@ -6,7 +15,19 @@ from pydantic import BaseModel, Field
 
 
 class NewsItem(BaseModel):
-    """A news item to be processed for sentiment."""
+    """A news item to be processed for sentiment.
+
+    Fields:
+        id: Unique identifier. For GKG-derived items, this is often
+            a composite key "{url}:{ticker}" to support multi-ticker articles.
+        body: Article body or content to analyse.
+        title: Article headline (used as body proxy when body is unavailable).
+        timestamp: UTC datetime when the article was published.
+        source: Connector name (e.g. "gdelt", "gdelt_gkg", "rss").
+        asset_tags: List of ticker symbols mentioned in the article.
+        url: Original article URL.
+        language: ISO 639-1 language code (default "en").
+    """
 
     id: str
     body: str
@@ -19,13 +40,31 @@ class NewsItem(BaseModel):
 
 
 class GKGNewsItem(NewsItem):
-    """NewsItem enriched with GDELT GKG organisation names."""
+    """NewsItem enriched with GDELT GKG organisation names.
+
+    This subclass is produced by GDELTGKGConnector and consumed by
+    NewsIngestionWorker._process_gkg_items. The org_names field contains
+    the raw organisation names extracted by GDELT (e.g. "Apple Inc"),
+    which are then mapped to tickers via TickerExtractor.
+
+    Why a subclass instead of adding org_names to NewsItem?
+      - Keeps the downstream SentimentWorker contract unchanged.
+      - The sentiment pipeline only cares about asset_tags; org_names
+        is an ingestion-time concern.
+      - Avoids polluting the Redis queue with extra fields that the
+        SentimentWorker does not need.
+    """
 
     org_names: list[str] = Field(default_factory=list)
 
 
 class LLMSentimentOutput(BaseModel):
-    """Structured output from LLM sentiment analysis."""
+    """Structured output from LLM sentiment analysis.
+
+    Produced by the SentimentWorker after calling the LLM API.
+    Follows the DK-CoT (Domain Knowledge Chain-of-Thought) format
+    required by CLAUDE.md.
+    """
 
     polarity: float = Field(ge=-1.0, le=1.0, description="Sentiment polarity [-1, +1]")
     confidence: float = Field(ge=0.0, le=1.0, description="Model confidence [0, 1]")

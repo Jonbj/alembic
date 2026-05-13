@@ -71,7 +71,11 @@ app.conf.beat_schedule = {
         "task": "src.workers.regime.detect_regime",
         "schedule": crontab(hour=7, minute=0, day_of_week="1-5"),
     },
-    # News ingestion every 15 min Mon-Fri during market hours — feeds news:queue
+    # News ingestion every 15 min Mon-Fri during market hours (14:00-21:00 UTC).
+    # This task queries GDELT GKG, extracts tickers via PostgreSQL lookup, and
+    # pushes annotated NewsItems to the Redis news:queue for the SentimentWorker.
+    # The schedule aligns with the sentiment-worker to ensure the queue is
+    # consistently fed.
     "run-news-ingestion": {
         "task": "src.workers.ingestion.run_news_ingestion_worker",
         "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),

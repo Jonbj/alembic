@@ -73,8 +73,9 @@ def _fetch_all_signals_for_ic(
 
     Returns list of (score, confidence, forward_return, generated_at, model_id, fallback_used) tuples.
     """
-    # We need to fetch signals for each symbol separately
-    # For now, fetch from a representative set of symbols
+    # We need to fetch signals for each symbol separately.
+    # Use the configurable watchlist from config instead of a hardcoded list
+    # so that the performance worker stays in sync with the ingestion pipeline.
     symbols = config.WATCHLIST_SYMBOLS
     all_rows = []
 

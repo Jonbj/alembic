@@ -90,7 +90,11 @@ class Config(BaseModel):
     # Fallback settings
     MAX_CONSECUTIVE_FALLBACKS: int = Field(default=3)
 
-    # Symbol universe for performance calculations and watchlist filtering
+    # Symbol universe for performance calculations and watchlist filtering.
+    # Loaded from config/trading.yaml under the `symbols.watchlist` key.
+    # This replaces the previously hardcoded list in performance.py and
+    # allows the news-driven pipeline to know which tickers the execution
+    # engine monitors without coupling ingestion to a fixed watchlist.
     WATCHLIST_SYMBOLS: list[str] = Field(
         default_factory=lambda: _load_trading_yaml().get("symbols", {}).get("watchlist", [])
     )
