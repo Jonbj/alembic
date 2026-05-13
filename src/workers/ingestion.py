@@ -91,6 +91,7 @@ def _process_gkg_items(
             # Logged at DEBUG, not WARNING, because this is expected for many
             # generic financial news items (e.g. "Federal Reserve" has no ticker).
             stats["discarded"] += 1
+            log.debug("No ticker found for %s (org_names=%s), discarding", gkg_item.url, gkg_item.org_names)
             continue
 
         stats["tickers_found"] += len(tickers)

@@ -1,9 +1,9 @@
 # Architettura del Sistema — LLM Trading System
 
 **Documento di Architettura Tecnica**  
-**Versione:** 2.0.0  
-**Data:** 2026-05-12  
-**Stato:** Fase 2 Completata (433 test passing)
+**Versione:** 3.0.0  
+**Data:** 2026-05-13  
+**Stato:** Fase 3 Completata (464 test passing)
 
 ---
 
@@ -33,6 +33,24 @@ Questo sistema implementa il paradigma **"Alpha Miner"** per l'integrazione di L
 │                                     │ - llm_spending      │                  │
 │                                     │ - weight_update_log │                  │
 │                                     └─────────────────────┘                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    NEWS-DRIVEN INGESTION PIPELINE (Fase 3)                   │
+│                                                                              │
+│   ┌──────────────┐     ┌─────────────────────┐     ┌─────────────────────┐  │
+│   │ GDELT GKG v2 │────▶│ NewsIngestionWorker │────▶│ Redis news:queue    │  │
+│   │ (15min beat) │     │ (Celery task)       │     │ (annotated items)   │  │
+│   │ V2Organiz.   │     │ - GDELTGKGConnector │     └──────────┬──────────┘  │
+│   │ (org names)  │     │ - TickerExtractor   │                │             │
+│   └──────────────┘     │   (PG lookup)       │                ▼             │
+│                        │ - Deduplicator      │     ┌─────────────────────┐  │
+│   ┌──────────────┐     │   (Redis SET NX)    │     │ SentimentWorker     │  │
+│   │ PostgreSQL   │────▶│                     │     │ (existing, Fase 1)  │  │
+│   │ ticker_lookup│     └─────────────────────┘     └─────────────────────┘  │
+│   │ (company →   │                                                           │
+│   │  ticker map) │     Stats returned per run:                               │
+│   └──────────────┘     fetched / tickers_found / discarded / queued / dupes  │
 └──────────────────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
@@ -263,7 +281,57 @@ async def process_news_item(item: NewsItem):
 
 ---
 
-### 2.4 RedisStore
+### 2.4 NewsIngestionWorker (Fase 3)
+
+#### Ruolo nel Sistema
+
+Il `NewsIngestionWorker` sostituisce il modello a **watchlist fissa** con un approccio **symbol-free**: invece di ricevere una lista predefinita di ticker, scansiona le notizie finanziarie globali e risolve automaticamente le aziende menzionate a ticker.
+
+```
+GDELT GKG v2  →  GDELTGKGConnector  →  GKGNewsItem (org_names=[…])
+                                              │
+                                    TickerExtractor.extract()
+                                         PG lookup
+                                              │
+                                    ticker = ["AAPL", "MSFT", …]
+                                              │
+                                    ┌─────────┴────────┐
+                                    │                  │
+                              NewsItem               NewsItem
+                            id="url:AAPL"         id="url:MSFT"
+                            asset_tags=["AAPL"]   asset_tags=["MSFT"]
+                                    │                  │
+                            is_duplicate_by_id?  is_duplicate_by_id?
+                                    │                  │
+                              rpush news:queue    rpush news:queue
+```
+
+#### Deduplicazione
+
+Due strategie coesistono nel `Deduplicator`:
+
+| Metodo | Chiave Redis | Quando usarlo |
+|--------|-------------|---------------|
+| `is_duplicate()` | `dedup:{sha256(title+body)}` | SentimentWorker (stesso articolo, content-based) |
+| `is_duplicate_by_id()` | `dedup:id:{sha256(item.id)}` | NewsIngestionWorker (stesso url×ticker, id-based) |
+
+`is_duplicate_by_id()` è necessario perché lo stesso articolo genera più `NewsItem` con `id="{url}:{ticker}"`. Il content hash sarebbe identico per tutti i ticker — usarlo deduplicherebbe erroneamente il secondo ticker.
+
+#### Espansione Multi-Ticker
+
+Un articolo che menziona Apple + Microsoft genera **due** `NewsItem` separati:
+
+```python
+# Entrambi hanno lo stesso title/body
+item_aapl = NewsItem(id="https://…:AAPL", asset_tags=["AAPL"], ...)
+item_msft = NewsItem(id="https://…:MSFT", asset_tags=["MSFT"], ...)
+```
+
+Il `SentimentWorker` downstream legge `asset_tags[0]` — invariato rispetto a Fase 1.
+
+---
+
+### 2.5 RedisStore
 
 #### Keys e Strutture Dati
 
@@ -291,6 +359,9 @@ async def process_news_item(item: NewsItem):
 | `portfolio:drawdown` | String | — | Drawdown portfolio attuale (scritto da QuantConnect) |
 | `portfolio:earnings_pct` | String | — | % portfolio in titoli con earnings imminenti |
 | `market:cross_corr` | String | — | Correlazione cross-asset (scritto da QuantConnect) |
+| `news:queue` | List | — | Coda FIFO di NewsItem JSON (RPUSH da NewsIngestionWorker, LPOP da SentimentWorker) |
+| `dedup:{sha256}` | String | 2h | Content-hash dedup per SentimentWorker (`is_duplicate`) |
+| `dedup:id:{sha256}` | String | 2h | ID-hash dedup per NewsIngestionWorker (`is_duplicate_by_id`) |
 
 #### OOM Handling Pattern
 
@@ -314,7 +385,7 @@ def write_sentiment(self, result: SentimentResult) -> None:
 
 ---
 
-### 2.5 PostgreSQLStore
+### 2.6 PostgreSQLStore
 
 #### Schema Database
 
@@ -930,6 +1001,8 @@ Ogni evento nel ciclo pesi viene loggato in `weight_update_log`:
 
 ### 9.2 Riferimenti
 
-- [Design Spec](docs/superpowers/specs/2026-05-03-trading-system-design.md)
+- [Design Spec (Fase 1)](docs/superpowers/specs/2026-05-03-trading-system-design.md)
 - [Fase 1 Plan](docs/superpowers/plans/FASE1-START.md)
+- [Multi-Asset News-Driven Design Spec (Fase 3)](docs/superpowers/specs/2026-05-13-multi-asset-news-driven-design.md)
+- [Multi-Asset News-Driven Plan (Fase 3)](docs/superpowers/plans/2026-05-13-multi-asset-news-driven.md)
 - [API Docs](docs/API.md)

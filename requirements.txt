@@ -33,3 +33,6 @@ tqdm>=4.66
 
 # Finance
 yfinance>=0.2.40
+
+# Config
+pyyaml>=6.0

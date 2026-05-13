@@ -2,7 +2,7 @@
 
 **FastAPI REST Endpoints**  
 **Versione:** 2.0.0  
-**Data:** 2026-05-12
+**Data:** 2026-05-13
 
 ---
 

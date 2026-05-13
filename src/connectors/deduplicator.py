@@ -85,7 +85,7 @@ class Deduplicator:
 
         **Why this method exists:**
         In the news-driven pipeline, a single article (e.g. "Apple and Microsoft
-ernings") generates two NewsItem objects with the SAME title and body but
+        earnings") generates two NewsItem objects with the SAME title and body but
         DIFFERENT ids ("url:AAPL" and "url:MSFT"). `is_duplicate()` would see
         the identical content hash and incorrectly drop the second item.
 
