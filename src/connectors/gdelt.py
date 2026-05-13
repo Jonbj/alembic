@@ -1,4 +1,4 @@
-"""GDELT news connector."""
+"""GDELT news connector (artlist mode) — used for historical backfill."""
 
 import asyncio
 import logging
@@ -8,18 +8,16 @@ from datetime import datetime, timedelta, timezone
 import aiohttp
 
 from src.connectors.base import NewsConnector
+from src.connectors.gdelt_base import _GDELTBaseConnector
 from src.models.news import NewsItem
 from src.text.sanitizer import sanitize_text
 
 logger = logging.getLogger(__name__)
 
 _GDELT_DOC2_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
-_GDELT_BACKOFF_BASE = 2.0  # seconds for exponential backoff
-_GDELT_BACKOFF_MAX = 60.0  # max wait between retries
-_GDELT_MAX_RETRIES = 5
 
 
-class GDELTConnector(NewsConnector):
+class GDELTConnector(_GDELTBaseConnector, NewsConnector):
     """GDELT API connector for news ingestion.
 
     Fetches news articles from GDELT 2.0 API, sanitizes content, and yields
@@ -88,7 +86,7 @@ class GDELTConnector(NewsConnector):
                 }
 
                 try:
-                    data = await self._fetch_with_backoff(session, params)
+                    data = await self._fetch_with_backoff(session, params, url=_GDELT_DOC2_URL)
                     if data is not None:
                         async for item in self._parse_articles(data.get("articles", [])):
                             yield item
@@ -97,30 +95,6 @@ class GDELTConnector(NewsConnector):
 
                 current = next_month
                 await asyncio.sleep(1.0)
-
-    async def _fetch_with_backoff(
-        self,
-        session: aiohttp.ClientSession,
-        params: dict,
-    ) -> dict | None:
-        """Fetch GDELT API with exponential backoff for rate limiting (HTTP 429)."""
-        for attempt in range(_GDELT_MAX_RETRIES):
-            try:
-                async with session.get(_GDELT_DOC2_URL, params=params) as resp:
-                    if resp.status == 429:
-                        wait_time = min(_GDELT_BACKOFF_BASE * (2 ** attempt), _GDELT_BACKOFF_MAX)
-                        logger.warning("GDELT rate limited, waiting %.1fs before retry", wait_time)
-                        await asyncio.sleep(wait_time)
-                        continue
-                    resp.raise_for_status()
-                    return await resp.json()
-            except aiohttp.ClientResponseError as e:
-                if e.status == 429 and attempt < _GDELT_MAX_RETRIES - 1:
-                    continue  # Will retry with backoff
-                logger.warning("GDELT HTTP error %s: %s", e.status, e.message)
-                return None
-        logger.warning("GDELT: Max retries exceeded after rate limiting")
-        return None
 
     async def _parse_articles(self, articles: list[dict]) -> AsyncIterator[NewsItem]:
         """Parse raw GDELT article dicts into sanitized NewsItem objects.
