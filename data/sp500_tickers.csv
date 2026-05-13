@@ -1,0 +1,58 @@
+company_name,ticker,source,aliases
+Apple Inc,AAPL,sp500,Apple Computer|Apple Incorporated
+Microsoft Corporation,MSFT,sp500,Microsoft Corp
+Alphabet Inc,GOOGL,sp500,Google LLC|Google Inc
+Amazon.com Inc,AMZN,sp500,Amazon Inc|Amazon.com
+NVIDIA Corporation,NVDA,sp500,NVIDIA Corp
+Meta Platforms Inc,META,sp500,Facebook Inc|Meta Platforms
+Tesla Inc,TSLA,sp500,Tesla Motors
+Berkshire Hathaway Inc,BRK.B,sp500,Berkshire Hathaway
+JPMorgan Chase & Co,JPM,sp500,JPMorgan Chase
+Johnson & Johnson,JNJ,sp500,
+Visa Inc,V,sp500,Visa International
+Mastercard Inc,MA,sp500,Mastercard International
+Procter & Gamble Co,PG,sp500,Procter & Gamble
+UnitedHealth Group Inc,UNH,sp500,UnitedHealth Group
+Exxon Mobil Corporation,XOM,sp500,ExxonMobil|Exxon Mobil Corp
+Chevron Corporation,CVX,sp500,Chevron Corp
+Home Depot Inc,HD,sp500,The Home Depot
+Merck & Co Inc,MRK,sp500,Merck & Co
+AbbVie Inc,ABBV,sp500,
+Pfizer Inc,PFE,sp500,
+Costco Wholesale Corporation,COST,sp500,Costco Wholesale Corp
+Salesforce Inc,CRM,sp500,Salesforce.com Inc
+Adobe Inc,ADBE,sp500,Adobe Systems
+Netflix Inc,NFLX,sp500,
+Intel Corporation,INTC,sp500,Intel Corp
+Broadcom Inc,AVGO,sp500,Broadcom Corporation
+Qualcomm Inc,QCOM,sp500,QUALCOMM Inc
+Texas Instruments Inc,TXN,sp500,Texas Instruments
+Walmart Inc,WMT,sp500,Wal-Mart Stores
+Walt Disney Co,DIS,sp500,The Walt Disney Company|Disney
+Comcast Corporation,CMCSA,sp500,Comcast Corp
+Cisco Systems Inc,CSCO,sp500,Cisco Systems
+Oracle Corporation,ORCL,sp500,Oracle Corp
+International Business Machines Corporation,IBM,sp500,IBM Corporation|IBM Corp
+Goldman Sachs Group Inc,GS,sp500,Goldman Sachs
+Bank of America Corporation,BAC,sp500,Bank of America Corp
+Wells Fargo & Company,WFC,sp500,Wells Fargo Bank
+Morgan Stanley,MS,sp500,
+Citigroup Inc,C,sp500,Citibank|Citi
+American Express Company,AXP,sp500,American Express
+Boeing Co,BA,sp500,The Boeing Company|Boeing Company
+Caterpillar Inc,CAT,sp500,Caterpillar
+3M Co,MMM,sp500,3M Company|Minnesota Mining and Manufacturing
+General Electric Co,GE,sp500,GE Aerospace
+Ford Motor Company,F,sp500,Ford Motor Co
+General Motors Company,GM,sp500,General Motors Corp
+AT&T Inc,T,sp500,AT&T Corporation
+Verizon Communications Inc,VZ,sp500,Verizon Communications
+T-Mobile US Inc,TMUS,sp500,T-Mobile US
+Starbucks Corporation,SBUX,sp500,Starbucks Corp
+McDonald's Corporation,MCD,sp500,McDonald's Corp
+Nike Inc,NKE,sp500,Nike
+SPDR S&P 500 ETF Trust,SPY,etf,SPDR S&P 500 ETF
+Invesco QQQ Trust,QQQ,etf,Invesco QQQ|PowerShares QQQ
+iShares Russell 2000 ETF,IWM,etf,
+Financial Select Sector SPDR Fund,XLF,etf,
+Technology Select Sector SPDR Fund,XLK,etf,
