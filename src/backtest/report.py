@@ -1,6 +1,5 @@
 """BacktestReportBuilder — builds IC/ICIR report from backtest_signals."""
 
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -12,22 +11,30 @@ log = logging.getLogger(__name__)
 
 _MIN_SAMPLES = 30
 
+_COUNT_TOTAL = """
+    SELECT COUNT(*) FROM backtest_signals WHERE run_id = %s AND score IS NOT NULL
+"""
+
+_FETCH_BOUNDS = """
+    SELECT MIN(generated_at), MAX(generated_at)
+    FROM backtest_signals
+    WHERE run_id = %s AND score IS NOT NULL
+"""
+
 _FETCH_ROWS = """
-    SELECT model_id, score, confidence, fallback_used,
+    SELECT symbol, model_id, score, confidence, fallback_used,
            forward_return_1h, forward_return_4h, forward_return_24h
     FROM backtest_signals
     WHERE run_id = %s AND score IS NOT NULL
     ORDER BY generated_at
 """
 
-_COUNT_TOTAL = """
-    SELECT COUNT(*) FROM backtest_signals WHERE run_id = %s AND score IS NOT NULL
-"""
-
 
 @dataclass
 class BacktestReport:
     run_id: str
+    period_start: datetime | None
+    period_end: datetime | None
     total_signals: int
     signals_with_returns: int
     ic_1h: ICResult | None
@@ -37,6 +44,7 @@ class BacktestReport:
     icir_4h: ICIRResult | None
     icir_24h: ICIRResult | None
     by_model: dict[str, dict[str, Any]] = field(default_factory=dict)
+    by_symbol: dict[str, dict[str, Any]] = field(default_factory=dict)
     generated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> dict:
@@ -66,6 +74,8 @@ class BacktestReport:
 
         return {
             "run_id": self.run_id,
+            "period_start": self.period_start.isoformat() if self.period_start else None,
+            "period_end": self.period_end.isoformat() if self.period_end else None,
             "total_signals": self.total_signals,
             "signals_with_returns": self.signals_with_returns,
             "ic_1h": _ic(self.ic_1h),
@@ -75,6 +85,7 @@ class BacktestReport:
             "icir_4h": _icir(self.icir_4h),
             "icir_24h": _icir(self.icir_24h),
             "by_model": self.by_model,
+            "by_symbol": self.by_symbol,
             "generated_at": self.generated_at.isoformat(),
         }
 
@@ -102,32 +113,41 @@ class BacktestReportBuilder:
 
         Steps:
           1. COUNT total scored rows for run_id.
-          2. SELECT all scored rows with forward returns.
-          3. For each horizon (1h=idx0, 4h=idx1, 24h=idx2):
+          2. SELECT MIN/MAX generated_at to derive period bounds.
+          3. SELECT all scored rows with forward returns (includes symbol column).
+          4. For each horizon (1h=idx0, 4h=idx1, 24h=idx2):
              - Filter out rows where return is None or fallback_used=True.
              - If < _MIN_SAMPLES (30), IC/ICIR = None (insufficient data).
              - Else call compute_composite_ic and compute_icir.
-          4. Build per-model breakdown for the 24h horizon (most stable).
-          5. signals_with_returns = max count across horizons (each horizon
-             may have a different number of non-None returns).
+          5. Build per-model breakdown at all three horizons.
+          6. Build per-symbol 24h IC breakdown (for debugging weak tickers).
+          7. signals_with_returns = count of non-fallback rows with at least
+             one non-None return across any horizon.
         """
         with self._conn.cursor() as cur:
             cur.execute(_COUNT_TOTAL, (run_id,))
             total = cur.fetchone()[0]
 
+            cur.execute(_FETCH_BOUNDS, (run_id,))
+            bounds = cur.fetchone()
+            period_start = bounds[0] if bounds else None
+            period_end = bounds[1] if bounds else None
+
             cur.execute(_FETCH_ROWS, (run_id,))
             rows = cur.fetchall()
 
-        # rows columns: model_id, score, confidence, fallback_used,
+        # rows columns: symbol, model_id, score, confidence, fallback_used,
         #               forward_return_1h, forward_return_4h, forward_return_24h
-        def _extract(horizon_idx: int):
+
+        def _extract(horizon_idx: int, filter_rows=None):
             """Extract (scores, returns, confs) for a horizon, skipping None returns.
 
             Why skip fallback_used?
               See class docstring — FinBERT is a different signal class.
             """
+            source = filter_rows if filter_rows is not None else rows
             scores, returns, confs = [], [], []
-            for model_id, score, conf, fallback, r1h, r4h, r24h in rows:
+            for _sym, _model_id, score, conf, fallback, r1h, r4h, r24h in source:
                 ret = [r1h, r4h, r24h][horizon_idx]
                 if ret is None or fallback:
                     continue
@@ -153,30 +173,52 @@ class BacktestReportBuilder:
         ic_4h, icir_4h = _ic_icir(s4, r4, c4)
         ic_24h, icir_24h = _ic_icir(s24, r24, c24)
 
-        # Max across horizons because each may have different missing-bar counts.
-        signals_with_returns = max(len(s1), len(s4), len(s24))
+        # Count rows that have at least one non-None return (excluding fallback)
+        signals_with_returns = sum(
+            1 for _s, _m, _sc, _co, fallback, r1h, r4h, r24h in rows
+            if not fallback and any(r is not None for r in (r1h, r4h, r24h))
+        )
 
-        # Per-model breakdown (24h horizon) — helps identify which models drive IC.
+        # Per-model breakdown at all three horizons
         by_model: dict[str, dict] = {}
-        model_ids = list({row[0] for row in rows})
-        for mid in model_ids:
-            model_rows = [r for r in rows if r[0] == mid and not r[3]]
-            ms = [r[1] for r in model_rows if r[6] is not None]
-            mr = [r[6] for r in model_rows if r[6] is not None]
-            mc = [r[2] for r in model_rows if r[6] is not None]
-            if len(ms) >= _MIN_SAMPLES:
-                mic = compute_composite_ic(ms, mr, mc)
-                micir = compute_icir(ms, mr, mc, min_samples=_MIN_SAMPLES)
-                by_model[mid] = {
-                    "ic_24h": mic.composite_ic,
-                    "icir_24h": micir.icir,
-                    "sample_count": len(ms),
+        for mid in {row[1] for row in rows}:
+            model_rows = [r for r in rows if r[1] == mid]
+            by_model[mid] = {}
+            sample_count_24h = 0
+            for h_idx, h_key in enumerate(("1h", "4h", "24h")):
+                ms, mr, mc = _extract(h_idx, filter_rows=model_rows)
+                if h_idx == 2:
+                    sample_count_24h = len(ms)
+                if len(ms) >= _MIN_SAMPLES:
+                    mic = compute_composite_ic(ms, mr, mc)
+                    micir = compute_icir(ms, mr, mc, min_samples=_MIN_SAMPLES)
+                    by_model[mid][f"ic_{h_key}"] = mic.composite_ic
+                    by_model[mid][f"icir_{h_key}"] = micir.icir
+                else:
+                    by_model[mid][f"ic_{h_key}"] = None
+                    by_model[mid][f"icir_{h_key}"] = None
+            by_model[mid]["sample_count"] = sample_count_24h
+
+        # Per-symbol 24h IC (for debugging weak tickers)
+        by_symbol: dict[str, dict] = {}
+        for sym in {row[0] for row in rows}:
+            sym_rows = [r for r in rows if r[0] == sym]
+            ss, sr, sc = _extract(2, filter_rows=sym_rows)
+            if len(ss) >= _MIN_SAMPLES:
+                sic = compute_composite_ic(ss, sr, sc)
+                sicir = compute_icir(ss, sr, sc, min_samples=_MIN_SAMPLES)
+                by_symbol[sym] = {
+                    "ic_24h": sic.composite_ic,
+                    "icir_24h": sicir.icir,
+                    "sample_count": len(ss),
                 }
             else:
-                by_model[mid] = {"ic_24h": None, "icir_24h": None, "sample_count": len(ms)}
+                by_symbol[sym] = {"ic_24h": None, "icir_24h": None, "sample_count": len(ss)}
 
         return BacktestReport(
             run_id=run_id,
+            period_start=period_start,
+            period_end=period_end,
             total_signals=total,
             signals_with_returns=signals_with_returns,
             ic_1h=ic_1h,
@@ -186,4 +228,5 @@ class BacktestReportBuilder:
             icir_4h=icir_4h,
             icir_24h=icir_24h,
             by_model=by_model,
+            by_symbol=by_symbol,
         )

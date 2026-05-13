@@ -105,6 +105,36 @@ def test_forward_returns_none_when_no_price_data():
     assert result == ForwardReturns(None, None, None)
 
 
+def test_forward_returns_within_30min_tolerance():
+    """Bar within 30 minutes of target offset is accepted."""
+    calc = make_calculator()
+    # bar at 14:00 (anchor) and 15:25 (25 min past 15:00 target — within tolerance)
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2025-10-01 14:00", tz="UTC"),
+        pd.Timestamp("2025-10-01 15:25", tz="UTC"),
+    ])
+    prices = pd.Series([100.0, 103.0], index=idx)
+    ts = datetime(2025, 10, 1, 14, 0, tzinfo=timezone.utc)
+    result = calc._compute_returns("AAPL", ts, prices, None)
+
+    assert result.return_1h == pytest.approx((103.0 - 100.0) / 100.0)
+
+
+def test_forward_returns_outside_30min_tolerance():
+    """Bar more than 30 minutes past target offset is rejected (returns None)."""
+    calc = make_calculator()
+    # bar at 14:00 (anchor) and 15:35 (35 min past 15:00 target — beyond tolerance)
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2025-10-01 14:00", tz="UTC"),
+        pd.Timestamp("2025-10-01 15:35", tz="UTC"),
+    ])
+    prices = pd.Series([100.0, 103.0], index=idx)
+    ts = datetime(2025, 10, 1, 14, 0, tzinfo=timezone.utc)
+    result = calc._compute_returns("AAPL", ts, prices, None)
+
+    assert result.return_1h is None
+
+
 def test_populate_calls_db_update(monkeypatch):
     """populate() fetches pending rows, downloads prices, and updates the DB."""
     mock_conn = MagicMock()

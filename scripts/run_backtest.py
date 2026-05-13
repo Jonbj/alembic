@@ -240,6 +240,8 @@ def phase4_report(pg_conn, run_id: str) -> None:
     print("\n" + "=" * 60)
     print(f"BACKTEST REPORT — {run_id}")
     print("=" * 60)
+    if report.period_start and report.period_end:
+        print(f"Period:                 {report.period_start.date()} → {report.period_end.date()}")
     print(f"Total signals:          {report.total_signals}")
     print(f"Signals with returns:   {report.signals_with_returns}")
     for horizon, ic, icir in [
@@ -254,12 +256,13 @@ def phase4_report(pg_conn, run_id: str) -> None:
             print(f"  ICIR:          {icir.icir:.4f}" if icir else "  ICIR: n/a")
         else:
             print(f"\nHorizon {horizon}: insufficient samples (<30)")
-    print("\nPer-model IC (24h):")
+    print("\nPer-model IC (all horizons):")
     for model, stats in report.by_model.items():
-        if stats["ic_24h"] is not None:
-            print(f"  {model}: IC={stats['ic_24h']:.4f}, n={stats['sample_count']}")
-        else:
-            print(f"  {model}: insufficient samples (n={stats['sample_count']})")
+        parts = []
+        for h in ("1h", "4h", "24h"):
+            v = stats.get(f"ic_{h}")
+            parts.append(f"{h}={'n/a' if v is None else f'{v:.4f}'}")
+        print(f"  {model}: {', '.join(parts)}, n={stats['sample_count']}")
 
     Path("reports").mkdir(exist_ok=True)
     out_path = Path(f"reports/backtest_{run_id}.json")
