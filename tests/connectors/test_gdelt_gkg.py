@@ -230,6 +230,112 @@ async def test_download_csv_retries_on_429():
 
 
 # ---------------------------------------------------------------------------
-# fetch()        (Task 3 — leave empty for now)
+# fetch()
+# ---------------------------------------------------------------------------
+
+LASTUPDATE_TXT = (
+    "12345 abc123 http://data.gdeltproject.org/gdeltv2/20251101140000.export.CSV.zip\n"
+    "23456 def456 http://data.gdeltproject.org/gdeltv2/20251101140000.mentions.CSV.zip\n"
+    "34567 ghi789 http://data.gdeltproject.org/gdeltv2/20251101140000.gkg.csv.zip\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_fetch_yields_financial_items():
+    """fetch() yields GKGNewsItem objects for rows with financial themes."""
+    connector = GDELTGKGConnector()
+    financial_row = make_csv_row()
+    zip_bytes = make_zip_bytes([financial_row])
+
+    def mock_get(url, **kwargs):
+        resp = AsyncMock()
+        resp.__aenter__ = AsyncMock(return_value=resp)
+        resp.__aexit__ = AsyncMock(return_value=None)
+        if "lastupdate" in url:
+            resp.status = 200
+            resp.raise_for_status = MagicMock()
+            resp.text = AsyncMock(return_value=LASTUPDATE_TXT)
+        else:
+            resp.status = 200
+            resp.raise_for_status = MagicMock()
+            resp.read = AsyncMock(return_value=zip_bytes)
+        return resp
+
+    with patch("aiohttp.ClientSession.get", side_effect=mock_get):
+        items = [item async for item in connector.fetch()]
+
+    assert len(items) == 1
+    assert items[0].url == "https://reuters.com/article/1"
+    assert "APPLE INC" in items[0].org_names
+
+
+@pytest.mark.asyncio
+async def test_fetch_skips_non_financial_rows():
+    """fetch() skips rows where V1Themes has no financial theme."""
+    connector = GDELTGKGConnector()
+    non_financial = make_csv_row(v1themes="POLITICS|CRIME")
+    zip_bytes = make_zip_bytes([non_financial])
+
+    def mock_get(url, **kwargs):
+        resp = AsyncMock()
+        resp.__aenter__ = AsyncMock(return_value=resp)
+        resp.__aexit__ = AsyncMock(return_value=None)
+        if "lastupdate" in url:
+            resp.status = 200
+            resp.raise_for_status = MagicMock()
+            resp.text = AsyncMock(return_value=LASTUPDATE_TXT)
+        else:
+            resp.status = 200
+            resp.raise_for_status = MagicMock()
+            resp.read = AsyncMock(return_value=zip_bytes)
+        return resp
+
+    with patch("aiohttp.ClientSession.get", side_effect=mock_get):
+        items = [item async for item in connector.fetch()]
+
+    assert items == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_returns_empty_on_lastupdate_error():
+    """fetch() yields nothing when lastupdate.txt download fails."""
+    connector = GDELTGKGConnector()
+
+    def mock_get(url, **kwargs):
+        resp = AsyncMock()
+        resp.__aenter__ = AsyncMock(return_value=resp)
+        resp.__aexit__ = AsyncMock(return_value=None)
+        resp.raise_for_status.side_effect = aiohttp.ClientResponseError(
+            MagicMock(), MagicMock(), status=500
+        )
+        return resp
+
+    with patch("aiohttp.ClientSession.get", side_effect=mock_get):
+        items = [item async for item in connector.fetch()]
+
+    assert items == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_returns_empty_when_no_gkg_in_lastupdate():
+    """fetch() yields nothing when lastupdate.txt contains no .gkg.csv.zip line."""
+    connector = GDELTGKGConnector()
+
+    def mock_get(url, **kwargs):
+        resp = AsyncMock()
+        resp.__aenter__ = AsyncMock(return_value=resp)
+        resp.__aexit__ = AsyncMock(return_value=None)
+        resp.status = 200
+        resp.raise_for_status = MagicMock()
+        resp.text = AsyncMock(return_value="12345 abc http://example.com/events.zip\n")
+        return resp
+
+    with patch("aiohttp.ClientSession.get", side_effect=mock_get):
+        items = [item async for item in connector.fetch()]
+
+    assert items == []
+
+
+# ---------------------------------------------------------------------------
 # fetch_historical() (Task 4 — leave empty for now)
 # ---------------------------------------------------------------------------
