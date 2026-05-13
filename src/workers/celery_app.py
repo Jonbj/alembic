@@ -71,6 +71,11 @@ app.conf.beat_schedule = {
         "task": "src.workers.regime.detect_regime",
         "schedule": crontab(hour=7, minute=0, day_of_week="1-5"),
     },
+    # News ingestion every 15 min Mon-Fri during market hours — feeds news:queue
+    "run-news-ingestion": {
+        "task": "src.workers.ingestion.run_news_ingestion_worker",
+        "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
+    },
     # Telegram poller every 5 seconds for inline keyboard approval flow
     "poll-telegram-updates": {
         "task": "src.workers.telegram_poller.poll_telegram_updates",

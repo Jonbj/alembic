@@ -257,6 +257,20 @@ class TestFetchAllSignalsForIC:
         assert mock_pg.fetch_signals_for_ic.call_count >= 1
         assert isinstance(rows, list)
 
+    def test_fetch_all_signals_uses_watchlist_symbols(self):
+        """_fetch_all_signals_for_ic uses config.WATCHLIST_SYMBOLS, not hardcoded list."""
+        from src.workers.performance import _fetch_all_signals_for_ic
+        from src.config import config
+
+        mock_pg = MagicMock()
+        mock_pg.fetch_signals_for_ic.return_value = []
+
+        _fetch_all_signals_for_ic(mock_pg, days=30)
+
+        called_symbols = [call[0][0] for call in mock_pg.fetch_signals_for_ic.call_args_list]
+        for symbol in config.WATCHLIST_SYMBOLS:
+            assert symbol in called_symbols
+
 
 class TestRunDailyReport:
     """Tests for run_daily_report Celery task."""

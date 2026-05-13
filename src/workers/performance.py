@@ -75,7 +75,7 @@ def _fetch_all_signals_for_ic(
     """
     # We need to fetch signals for each symbol separately
     # For now, fetch from a representative set of symbols
-    symbols = ["AAPL", "MSFT", "GOOGL", "NVDA", "SPY", "QQQ"]
+    symbols = config.WATCHLIST_SYMBOLS
     all_rows = []
 
     for symbol in symbols:
