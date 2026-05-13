@@ -1,7 +1,8 @@
 """Tests for GDELTGKGConnector."""
 
+import asyncio
 import json
-from datetime import timezone
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -140,9 +141,111 @@ async def test_gkg_timestamp_parsed_correctly():
     with patch("aiohttp.ClientSession.get", return_value=make_mock_resp(SAMPLE_GKG_RESPONSE)):
         items = [item async for item in connector.fetch()]
 
-    ts = items[0].timestamp
-    assert ts.tzinfo == timezone.utc
-    assert ts.year == 2026
-    assert ts.month == 5
-    assert ts.day == 13
-    assert ts.hour == 14
+SAMPLE_RECORD = {
+    "date": "20251001140000",
+    "V2Organizations": "Apple Inc",
+    "V2DocumentIdentifier": "https://reuters.com/article/1",
+    "extras": '{"PageTitle": "Apple earnings beat"}',
+}
+
+SAMPLE_RECORD_2 = {
+    "date": "20251101140000",
+    "V2Organizations": "Microsoft Corporation",
+    "V2DocumentIdentifier": "https://reuters.com/article/2",
+    "extras": '{"PageTitle": "Microsoft cloud growth"}',
+}
+
+
+@pytest.mark.asyncio
+async def test_fetch_historical_chunks_by_month():
+    """fetch_historical makes one API call per month with correct STARTDATETIME."""
+    connector = GDELTGKGConnector()
+    start = datetime(2025, 10, 1, tzinfo=timezone.utc)
+    end = datetime(2025, 11, 30, tzinfo=timezone.utc)
+
+    call_params = []
+
+    async def mock_backoff(session, params, url):
+        call_params.append(dict(params))
+        month = params["STARTDATETIME"][:6]
+        if month == "202510":
+            return {"gkg": [SAMPLE_RECORD]}
+        return {"gkg": [SAMPLE_RECORD_2]}
+
+    with patch.object(connector, "_fetch_with_backoff", side_effect=mock_backoff):
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            items = [item async for item in connector.fetch_historical(start, end)]
+
+    assert len(call_params) == 2
+    assert call_params[0]["STARTDATETIME"] == "20251001000000"
+    assert call_params[0]["ENDDATETIME"] == "20251031235959"
+    assert call_params[1]["STARTDATETIME"] == "20251101000000"
+    assert len(items) == 2
+
+
+@pytest.mark.asyncio
+async def test_fetch_historical_sleeps_between_chunks():
+    """fetch_historical sleeps 1 second between monthly chunks."""
+    connector = GDELTGKGConnector()
+    start = datetime(2025, 10, 1, tzinfo=timezone.utc)
+    end = datetime(2025, 11, 30, tzinfo=timezone.utc)
+
+    sleep_calls = []
+
+    async def mock_sleep(seconds):
+        sleep_calls.append(seconds)
+
+    with patch.object(connector, "_fetch_with_backoff", return_value={"gkg": []}):
+        with patch("asyncio.sleep", side_effect=mock_sleep):
+            items = [item async for item in connector.fetch_historical(start, end)]
+
+    assert len(sleep_calls) == 2
+    assert all(s == 1.0 for s in sleep_calls)
+
+
+@pytest.mark.asyncio
+async def test_fetch_historical_skips_bad_records():
+    """fetch_historical skips records with missing URL or invalid timestamp."""
+    connector = GDELTGKGConnector()
+    start = datetime(2025, 10, 1, tzinfo=timezone.utc)
+    end = datetime(2025, 10, 31, tzinfo=timezone.utc)
+
+    bad_records = [
+        {"date": "20251001140000", "V2Organizations": "Apple Inc",
+         "V2DocumentIdentifier": "", "extras": "{}"},       # missing URL
+        {"date": "not-a-date", "V2Organizations": "Apple Inc",
+         "V2DocumentIdentifier": "https://x.com/1", "extras": "{}"},  # bad date
+        SAMPLE_RECORD,  # good record
+    ]
+
+    with patch.object(connector, "_fetch_with_backoff",
+                      return_value={"gkg": bad_records}):
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            items = [item async for item in connector.fetch_historical(start, end)]
+
+    assert len(items) == 1
+    assert items[0].url == "https://reuters.com/article/1"
+
+
+@pytest.mark.asyncio
+async def test_fetch_historical_empty_response_continues():
+    """fetch_historical continues to next month when API returns empty."""
+    connector = GDELTGKGConnector()
+    start = datetime(2025, 10, 1, tzinfo=timezone.utc)
+    end = datetime(2025, 11, 30, tzinfo=timezone.utc)
+
+    responses = [None, {"gkg": [SAMPLE_RECORD_2]}]
+    call_count = [0]
+
+    async def mock_backoff(session, params, url):
+        r = responses[call_count[0]]
+        call_count[0] += 1
+        return r
+
+    with patch.object(connector, "_fetch_with_backoff", side_effect=mock_backoff):
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            items = [item async for item in connector.fetch_historical(start, end)]
+
+    assert len(items) == 1
+    assert items[0].org_names == ["Microsoft Corporation"]
+

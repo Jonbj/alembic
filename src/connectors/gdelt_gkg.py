@@ -26,10 +26,11 @@ Output:
     after ticker extraction so the connector remains decoupled from the DB.
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import aiohttp
 
@@ -89,6 +90,47 @@ class GDELTGKGConnector(_GDELTBaseConnector, NewsConnector):
             item = self._parse_record(record)
             if item is not None:
                 yield item
+
+    async def fetch_historical(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        max_records_per_chunk: int = 250,
+    ) -> AsyncIterator[GKGNewsItem]:
+        """Fetch GKG records in [start_date, end_date] chunked by calendar month.
+
+        One API call per month. Inherits exponential backoff from _GDELTBaseConnector.
+        Sleeps 1s between chunks to respect GDELT rate limits.
+        Records with missing URL or invalid timestamp are skipped (same as fetch()).
+        """
+        current = start_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        async with aiohttp.ClientSession() as session:
+            while current <= end_date:
+                if current.month == 12:
+                    next_month = current.replace(year=current.year + 1, month=1, day=1)
+                else:
+                    next_month = current.replace(month=current.month + 1, day=1)
+
+                chunk_end = min(next_month - timedelta(seconds=1), end_date)
+
+                params = {
+                    "query": _GDELT_GKG_QUERY,
+                    "mode": "gkg",
+                    "maxrecords": max_records_per_chunk,
+                    "format": "json",
+                    "STARTDATETIME": current.strftime("%Y%m%d%H%M%S"),
+                    "ENDDATETIME": chunk_end.strftime("%Y%m%d%H%M%S"),
+                }
+
+                data = await self._fetch_with_backoff(session, params, url=_GDELT_GKG_URL)
+                for record in (data or {}).get("gkg", []):
+                    item = self._parse_record(record)
+                    if item is not None:
+                        yield item
+
+                current = next_month
+                await asyncio.sleep(1.0)
 
     def _parse_record(self, record: dict) -> GKGNewsItem | None:
         """Parse a single raw GDELT GKG record into a GKGNewsItem.
