@@ -54,3 +54,16 @@ class Deduplicator:
         # SET NX returns True on first insert, None if key exists
         result = self._r.set(key, 1, ex=_DEDUP_TTL_SECONDS, nx=True)
         return result is None
+
+    def is_duplicate_by_id(self, item: NewsItem) -> bool:
+        """Check if item is a duplicate by item.id.
+
+        Used by the ingestion worker for multi-ticker deduplication:
+        two items from the same article but different tickers have the
+        same title+body hash but different IDs, so is_duplicate() would
+        incorrectly drop the second. This method deduplicates by ID instead.
+        """
+        key = f"dedup:id:{hashlib.sha256(item.id.encode()).hexdigest()}"
+        result = self._r.set(key, 1, ex=_DEDUP_TTL_SECONDS, nx=True)
+        return result is None
+

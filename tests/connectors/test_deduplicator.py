@@ -54,3 +54,51 @@ def test_deduplicator_second_seen_returns_true():
     dedup = Deduplicator(mock_redis)
     item = make_item("title", "body")
     assert dedup.is_duplicate(item) is True
+
+
+def test_is_duplicate_by_id_first_seen_returns_false():
+    """First occurrence by ID returns False."""
+    mock_redis = MagicMock()
+    mock_redis.set.return_value = True
+    dedup = Deduplicator(mock_redis)
+    item = make_item("same title", "same body")
+    assert dedup.is_duplicate_by_id(item) is False
+
+
+def test_is_duplicate_by_id_second_seen_returns_true():
+    """Second occurrence by ID returns True."""
+    mock_redis = MagicMock()
+    mock_redis.set.return_value = None
+    dedup = Deduplicator(mock_redis)
+    item = make_item("same title", "same body")
+    assert dedup.is_duplicate_by_id(item) is True
+
+
+def test_same_content_different_id_not_duplicate():
+    """Two items with same title/body but different IDs are not duplicates via is_duplicate_by_id."""
+    calls = {}
+
+    def fake_set(key, val, ex, nx):
+        if key not in calls:
+            calls[key] = True
+            return True  # first time
+        return None  # subsequent
+
+    mock_redis = MagicMock()
+    mock_redis.set.side_effect = fake_set
+    dedup = Deduplicator(mock_redis)
+
+    item_aapl = NewsItem(
+        id="https://example.com/article:AAPL",
+        source="test", timestamp=datetime.now(timezone.utc),
+        title="Apple and Microsoft earnings", body="Apple and Microsoft earnings",
+        url="https://example.com/article", language="en", asset_tags=["AAPL"],
+    )
+    item_msft = NewsItem(
+        id="https://example.com/article:MSFT",
+        source="test", timestamp=datetime.now(timezone.utc),
+        title="Apple and Microsoft earnings", body="Apple and Microsoft earnings",
+        url="https://example.com/article", language="en", asset_tags=["MSFT"],
+    )
+    assert dedup.is_duplicate_by_id(item_aapl) is False
+    assert dedup.is_duplicate_by_id(item_msft) is False

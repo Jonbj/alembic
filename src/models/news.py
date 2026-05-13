@@ -18,6 +18,12 @@ class NewsItem(BaseModel):
     language: str = "en"
 
 
+class GKGNewsItem(NewsItem):
+    """NewsItem enriched with GDELT GKG organisation names."""
+
+    org_names: list[str] = Field(default_factory=list)
+
+
 class LLMSentimentOutput(BaseModel):
     """Structured output from LLM sentiment analysis."""
 
