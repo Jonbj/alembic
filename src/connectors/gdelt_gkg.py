@@ -248,6 +248,13 @@ class GDELTGKGConnector(_GDELTBaseConnector, NewsConnector):
             try:
                 with zipfile.ZipFile(io.BytesIO(data)) as zf:
                     csv_name = next(n for n in zf.namelist() if n.endswith(".csv"))
+                    info = zf.getinfo(csv_name)
+                    if info.file_size > 200 * 1024 * 1024:
+                        logger.warning(
+                            "GDELT CSV file unusually large (%d bytes), skipping %s",
+                            info.file_size, url,
+                        )
+                        return []
                     content = zf.read(csv_name).decode("utf-8", errors="replace")
                 return [line.split("\t") for line in content.splitlines() if line]
             except Exception as e:
