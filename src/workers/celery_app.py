@@ -93,6 +93,12 @@ app.conf.beat_schedule = {
         "task": "src.workers.ingestion.run_alpaca_ingestion_worker",
         "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
     },
+    # Execution worker every 15 min Mon-Fri during market hours.
+    # Reads LLM signals from Redis and places orders via Alpaca paper/live.
+    "run-execution": {
+        "task": "src.workers.execution.run_execution_worker",
+        "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
+    },
     # Telegram poller every 5 seconds for inline keyboard approval flow
     "poll-telegram-updates": {
         "task": "src.workers.telegram_poller.poll_telegram_updates",
