@@ -1,0 +1,38 @@
+{
+    "algorithm-language": "Python",
+    "algorithm-location": "quantconnect/intraday_strategy.py",
+    "algorithm-class-name": "LLMIntradayStrategy",
+    "parameters": {
+        "alpaca-paper": "true"
+    },
+
+    "environments": {
+        "backtesting": {
+            "live-mode": false
+        },
+
+        "paper-alpaca": {
+            "live-mode": true,
+            "live-mode-brokerage": "AlpacaBrokerage",
+            "alpaca-access-token": "${ALPACA_API_KEY}",
+            "alpaca-secret-key": "${ALPACA_SECRET_KEY}",
+            "alpaca-paper-trading": true,
+            "data-queue-handler": "AlpacaDataQueueHandler",
+            "parameters": {
+                "alpaca-paper": "true"
+            }
+        },
+
+        "live-alpaca": {
+            "live-mode": true,
+            "live-mode-brokerage": "AlpacaBrokerage",
+            "alpaca-access-token": "${ALPACA_API_KEY}",
+            "alpaca-secret-key": "${ALPACA_SECRET_KEY}",
+            "alpaca-paper-trading": false,
+            "data-queue-handler": "AlpacaDataQueueHandler",
+            "parameters": {
+                "alpaca-paper": "false"
+            }
+        }
+    }
+}

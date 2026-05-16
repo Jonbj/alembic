@@ -4,6 +4,10 @@ Entry: sentiment_score > ENTRY_THRESHOLD and EMA momentum confirmed.
 Risk: 2% stop-loss, max 10% position size, rate limit 10 orders/min.
 Kill-switch: checked via Redis at every OnData() call.
 
+Brokerage: Alpaca Markets (paper or live).
+  - Paper: set algorithm parameter "alpaca-paper" = "true" (default)
+  - Live:  set "alpaca-paper" = "false" in lean.json environment
+
 CRITICAL: This strategy NEVER calls LLM APIs synchronously.
 All signals are read from pre-computed Redis cache via LLMSignalData.
 """
@@ -40,12 +44,17 @@ class LLMIntradayStrategy(QCAlgorithm):
     - Price above 20-period EMA (momentum confirmation)
     - Signal is fresh (generated within 30 minutes)
     - Kill-switch not active
+    - No existing position on the ticker (idempotent — no pyramiding)
 
     Risk Management:
     - Stop-loss at 2% below entry price
     - Maximum 10% portfolio value per position
     - Rate limit: 10 orders per minute per symbol
     - Kill-switch via Redis kills all positions immediately
+
+    Brokerage: Alpaca Markets.
+    - Paper trading by default ("alpaca-paper" parameter = "true").
+    - Commission-free model; slippage applied by QC default model.
     """
 
     def Initialize(self):
@@ -53,7 +62,12 @@ class LLMIntradayStrategy(QCAlgorithm):
         self.SetStartDate(2022, 1, 1)
         self.SetEndDate(2024, 12, 31)
         self.SetCash(100_000)
-        self.SetBrokerageModel(BrokerageName.InteractiveBrokersBrokerage)
+
+        # Alpaca brokerage — paper by default, live when "alpaca-paper"="false"
+        is_paper = (self.GetParameter("alpaca-paper") or "true").lower() != "false"
+        account_type = AccountType.Cash if is_paper else AccountType.Margin
+        self.SetBrokerageModel(BrokerageName.Alpaca, account_type)
+        self.Debug(f"Brokerage: Alpaca ({'paper' if is_paper else 'live'}, {account_type})")
 
         # Redis connection for kill-switch check
         # Note: In QC cloud, Redis may not be available; kill-switch
@@ -135,7 +149,7 @@ class LLMIntradayStrategy(QCAlgorithm):
             price = self.Securities[sym].Price
             holding = self.Portfolio[sym]
 
-            # ENTRY LOGIC
+            # ENTRY LOGIC — idempotent: skip if already in position
             if not holding.Invested and score > ENTRY_THRESHOLD:
                 momentum_ok = price > ema.Current.Value
                 if momentum_ok and self._can_place_order():
