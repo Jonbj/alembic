@@ -270,3 +270,22 @@ class LLMBudgetTracker:
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
+
+
+class NoOpBudgetTracker(LLMBudgetTracker):
+    """Budget tracker that does nothing — for backtests where no DB budget table exists."""
+
+    def __init__(self) -> None:  # noqa: D107
+        pass
+
+    async def check_budget(self) -> Literal["ok", "exhausted"]:
+        return "ok"
+
+    async def record_spending(self, model_id: str, input_tokens: int, output_tokens: int) -> float:
+        return 0.0
+
+    async def get_remaining_budget(self) -> float:
+        return float("inf")
+
+    def close(self) -> None:
+        pass

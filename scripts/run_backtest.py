@@ -32,7 +32,7 @@ from src.backtest.report import BacktestReportBuilder
 from src.config import config
 from src.connectors.gdelt_gkg import GDELTGKGConnector
 from src.connectors.ticker_extractor import TickerExtractor
-from src.llm.budget import LLMBudgetTracker
+from src.llm.budget import NoOpBudgetTracker
 from src.llm.client import OllamaDeepseekClient, OllamaGlmClient, OllamaKimiClient, OllamaQwen35Client
 from src.llm.ensemble import EnsembleAggregator
 from src.llm.finbert import FinBERTClient
@@ -158,7 +158,7 @@ def phase2_infer(pg_conn, run_id: str, dry_run: bool) -> int:
 
     if not dry_run:
         est = _estimate_cost(len(rows))
-        print(f"\nEstimated inference cost: ${est:.2f} for {len(rows)} articles × 3 models")
+        print(f"\nEstimated inference cost: ${est:.2f} for {len(rows)} articles × 4 models")
         if est > 10.0:
             answer = input("Continue? [y/N] ").strip().lower()
             if answer != "y":
@@ -171,16 +171,18 @@ def phase2_infer(pg_conn, run_id: str, dry_run: bool) -> int:
         divergence_threshold=config.ENSEMBLE_DIVERGENCE_STD,
     )
     finbert = FinBERTClient()
-    budget_tracker = LLMBudgetTracker(conn=pg_conn)
+    budget_tracker = NoOpBudgetTracker()
 
     processed = 0
     with pg_conn.cursor() as cur:
-        for row_id, symbol, generated_at, article_url, article_title in tqdm(
+        for i, (row_id, symbol, generated_at, article_url, article_title) in enumerate(tqdm(
             rows, desc="Phase 2: inference"
-        ):
+        )):
             if dry_run:
                 cur.execute(_DRY_RUN_UPDATE, (row_id,))
                 processed += 1
+                if processed % 50 == 0:
+                    pg_conn.commit()
                 continue
 
             # Reconstruct a minimal NewsItem from DB columns.
@@ -203,6 +205,11 @@ def phase2_infer(pg_conn, run_id: str, dry_run: bool) -> int:
                     row_id,
                 ))
                 processed += 1
+
+            # Commit every 50 rows so progress survives a crash.
+            if (i + 1) % 50 == 0:
+                pg_conn.commit()
+                log.info("Phase 2 checkpoint: %d/%d scored", processed, len(rows))
 
     pg_conn.commit()
     log.info("Phase 2 complete: %d rows scored", processed)
@@ -266,6 +273,13 @@ def phase4_report(pg_conn, run_id: str) -> None:
     print(f"\nReport saved to {out_path}")
 
 
+def _has_existing_rows(pg_conn, run_id: str) -> int:
+    """Return total row count for run_id (0 = Phase 1 never ran)."""
+    with pg_conn.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM backtest_signals WHERE run_id = %s", (run_id,))
+        return cur.fetchone()[0]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run GKG historical backtest")
     parser.add_argument("--start", required=True, help="Start date YYYY-MM-DD")
@@ -275,6 +289,10 @@ def main() -> None:
                         help="Skip LLM inference; write score=0.0 for testing")
     parser.add_argument("--max-per-chunk", type=int, default=250,
                         help="Max GKG records per monthly chunk (default 250)")
+    parser.add_argument("--skip-phase1", action="store_true",
+                        help="Skip GDELT fetch (reuse existing rows for this run-id)")
+    parser.add_argument("--phase1-only", action="store_true",
+                        help="Only run Phase 1 (GDELT fetch + ticker extraction), then stop")
     args = parser.parse_args()
 
     start = datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc)
@@ -282,11 +300,22 @@ def main() -> None:
 
     pg_conn = psycopg2.connect(config.DATABASE_URL)
     try:
-        connector = GDELTGKGConnector(max_records=args.max_per_chunk)
-        extractor = TickerExtractor(pg_conn)
+        existing = _has_existing_rows(pg_conn, args.run_id)
+        if args.skip_phase1 or existing > 0:
+            if existing > 0:
+                log.info("Phase 1: skipped — %d rows already exist for run_id=%s", existing, args.run_id)
+            else:
+                log.info("Phase 1: skipped via --skip-phase1")
+        else:
+            connector = GDELTGKGConnector(max_records=args.max_per_chunk)
+            extractor = TickerExtractor(pg_conn)
+            phase1_fetch(connector, extractor, pg_conn, args.run_id, start, end,
+                         args.max_per_chunk)
 
-        phase1_fetch(connector, extractor, pg_conn, args.run_id, start, end,
-                     args.max_per_chunk)
+        if args.phase1_only:
+            log.info("--phase1-only: stopping after Phase 1")
+            return
+
         phase2_infer(pg_conn, args.run_id, dry_run=args.dry_run)
         phase3_forward_returns(pg_conn, args.run_id, start, end)
         phase4_report(pg_conn, args.run_id)

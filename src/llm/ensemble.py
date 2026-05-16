@@ -304,33 +304,25 @@ async def run_ensemble_query(
         print("Ensemble: No clients configured - returning empty results")
         return []
 
-    # Create tasks and build a direct mapping from Task -> model_id
-    tasks = [
-        asyncio.create_task(client.complete(prompt, response_schema))
-        for client in clients
-    ]
-    task_to_model_id = {task: client.model_id for task, client in zip(tasks, clients)}
+    # gather preserves order → model_id association is trivial (index-based)
+    results = await asyncio.gather(
+        *[client.complete(prompt, response_schema) for client in clients],
+        return_exceptions=True,
+    )
 
     raw_outputs: list[ModelOutput] = []
-
-    # as_completed returns tasks in completion order - use dict for O(1) lookup
-    for task in asyncio.as_completed(tasks):
-        try:
-            out = await task
-            model_id = task_to_model_id[task]  # Direct lookup, no iteration needed
-
-            raw_outputs.append(
-                ModelOutput(
-                    symbol=symbol,
-                    polarity=out.polarity,
-                    confidence=out.confidence,
-                    reasoning=out.reasoning,
-                    model_id=model_id,
-                )
+    for client, result in zip(clients, results):
+        if isinstance(result, BaseException):
+            print(f"Ensemble: Model {client.model_id} failed: {result}")
+            continue
+        raw_outputs.append(
+            ModelOutput(
+                symbol=symbol,
+                polarity=result.polarity,
+                confidence=result.confidence,
+                reasoning=result.reasoning,
+                model_id=client.model_id,
             )
-        except Exception as e:
-            # Log failure with model_id for debugging
-            model_id = task_to_model_id.get(task, "<unknown>")
-            print(f"Ensemble: Model {model_id} failed: {e}")
+        )
 
     return raw_outputs

@@ -76,7 +76,7 @@ class FinBERTClient:
             self._pipe = pipeline(
                 "text-classification",
                 model=self._MODEL_NAME,
-                return_all_scores=True,
+                top_k=None,  # return all class scores (replaces deprecated return_all_scores=True)
                 device=-1,  # CPU
             )
         return self._pipe
@@ -92,8 +92,10 @@ class FinBERTClient:
             FinBERTResult with polarity, confidence, and worker_type
         """
         pipe = self._get_pipeline()
-        scores_list = pipe(text[: self._MAX_TOKENS])
-        scores = {item["label"]: item["score"] for item in scores_list[0]}
+        raw = pipe(text[: self._MAX_TOKENS])
+        # raw is either [[{label, score}, ...]] (old) or [{label, score}, ...] (new top_k=None)
+        inner = raw[0] if isinstance(raw[0], list) else raw
+        scores = {item["label"]: item["score"] for item in inner}
 
         # Extract probabilities for each class
         probs = [

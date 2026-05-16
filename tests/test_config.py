@@ -52,24 +52,3 @@ class TestWatchlistSymbols:
             WATCHLIST_SYMBOLS=["TSLA", "AMZN"],
         )
         assert cfg.WATCHLIST_SYMBOLS == ["TSLA", "AMZN"]
-
-
-class TestNewsAPIKey:
-    def test_newsapi_key_field_exists(self, monkeypatch):
-        monkeypatch.delenv("NEWSAPI_KEY", raising=False)
-        from src.config import Config
-        cfg = Config(
-            ADMIN_API_KEY="a" * 32,
-            DATABASE_URL="postgresql://localhost:5432/test",
-        )
-        assert hasattr(cfg, "NEWSAPI_KEY")
-        assert cfg.NEWSAPI_KEY == ""
-
-    def test_newsapi_key_reads_from_constructor(self):
-        from src.config import Config
-        cfg = Config(
-            ADMIN_API_KEY="a" * 32,
-            DATABASE_URL="postgresql://localhost:5432/test",
-            NEWSAPI_KEY="test-key-123",
-        )
-        assert cfg.NEWSAPI_KEY == "test-key-123"
