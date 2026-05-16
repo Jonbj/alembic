@@ -6,7 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.llm.client import GlmClient, OpusClient, Qwen35Client
+from src.llm.client import (
+    GlmClient, OpusClient, Qwen35Client,
+    OllamaGlmClient, OllamaQwen35Client, OllamaDeepseekClient,
+)
 from src.llm.ensemble import EnsembleAggregator, ModelOutput, run_ensemble_query
 from src.models.news import LLMSentimentOutput
 
@@ -77,6 +80,70 @@ class TestGlmClient:
         """_validate_model_id passes for glm-5.1:cloud."""
         client = GlmClient()
         client._validate_model_id(client.model_id)  # must not raise
+
+
+class TestOllamaCloudClients:
+    """Test Ollama HTTP clients: model IDs, allowlist, and HTTP call logic."""
+
+    def test_ollama_glm_model_id(self):
+        assert OllamaGlmClient().model_id == "glm-5.1:cloud"
+
+    def test_ollama_qwen35_model_id(self):
+        assert OllamaQwen35Client().model_id == "qwen3.5:cloud"
+
+    def test_ollama_deepseek_model_id(self):
+        assert OllamaDeepseekClient().model_id == "deepseek-v4-pro:cloud"
+
+    def test_ollama_model_ids_in_allowlist(self):
+        from src.llm.client import ALLOWED_MODEL_IDS
+        for client_cls in (OllamaGlmClient, OllamaQwen35Client, OllamaDeepseekClient):
+            assert client_cls().model_id in ALLOWED_MODEL_IDS
+
+    @pytest.mark.asyncio
+    async def test_ollama_client_raises_without_api_key(self, monkeypatch):
+        """complete() raises RuntimeError when OLLAMA_API_KEY is empty."""
+        from src.llm import client as client_mod
+        from unittest.mock import patch
+        import src.config as cfg_mod
+
+        # Patch config so OLLAMA_API_KEY is empty
+        patched_config = cfg_mod.config.model_copy(update={"OLLAMA_API_KEY": ""})
+        monkeypatch.setattr(client_mod, "config", patched_config)
+
+        from src.models.news import LLMSentimentOutput
+        with pytest.raises(RuntimeError, match="OLLAMA_API_KEY"):
+            await OllamaGlmClient().complete("test", LLMSentimentOutput)
+
+    @pytest.mark.asyncio
+    async def test_ollama_client_parses_response(self, monkeypatch):
+        """complete() extracts content from Ollama response and parses JSON."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        import src.llm.client as client_mod
+        import src.config as cfg_mod
+
+        patched_config = cfg_mod.config.model_copy(update={"OLLAMA_API_KEY": "test-key"})
+        monkeypatch.setattr(client_mod, "config", patched_config)
+
+        fake_response_data = {
+            "message": {"content": '{"polarity": 0.7, "confidence": 0.8, "reasoning": "bullish"}'}
+        }
+        mock_resp = AsyncMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json = AsyncMock(return_value=fake_response_data)
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.post = MagicMock(return_value=mock_resp)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        from src.models.news import LLMSentimentOutput
+        with patch("src.llm.client.aiohttp.ClientSession", return_value=mock_session):
+            result = await OllamaGlmClient().complete("test", LLMSentimentOutput)
+
+        assert result.polarity == pytest.approx(0.7)
+        assert result.confidence == pytest.approx(0.8)
 
 
 class TestEnsembleAggregator:

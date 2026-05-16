@@ -72,6 +72,10 @@ class Config(BaseModel):
     # API - REQUIRED secret
     ADMIN_API_KEY: str = Field(default_factory=lambda: os.environ.get("ADMIN_API_KEY", ""))
 
+    # Ollama cloud API
+    OLLAMA_API_KEY: str = Field(default_factory=lambda: os.environ.get("OLLAMA_API_KEY", ""))
+    OLLAMA_BASE_URL: str = Field(default_factory=lambda: os.environ.get("OLLAMA_BASE_URL", "https://ollama.com"))
+
     # Telegram notifications
     TELEGRAM_BOT_TOKEN: str = Field(default_factory=lambda: os.environ.get("TELEGRAM_BOT_TOKEN", ""))
     TELEGRAM_CHAT_ID: str = Field(default_factory=lambda: os.environ.get("TELEGRAM_CHAT_ID", ""))

@@ -40,6 +40,7 @@ import subprocess
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
+import aiohttp
 from pydantic import BaseModel, ValidationError
 
 from src.config import config
@@ -599,3 +600,79 @@ class GlmClient(LLMClient):
                 await asyncio.sleep(0.5 * (attempt + 1))
 
         raise RuntimeError("Exhausted retries for GlmClient")
+
+
+# ---------------------------------------------------------------------------
+# Ollama Cloud HTTP clients
+# ---------------------------------------------------------------------------
+
+class OllamaCloudClient(LLMClient):
+    """Base class for Ollama cloud models accessed via HTTP API.
+
+    Calls https://ollama.com/api/chat directly using aiohttp.
+    Authentication: OLLAMA_API_KEY env var → Authorization: Bearer header.
+    Response format: data["message"]["content"] contains the text.
+
+    Unlike the CLI-based clients above, this does NOT use the claude CLI —
+    it's a direct HTTP call to Ollama's cloud inference endpoint.
+    """
+
+    model_id: str = ""
+    model_name: str = ""
+
+    async def complete(self, prompt: str, response_schema: type[T]) -> T:
+        """POST to Ollama /api/chat and parse the response as JSON schema."""
+        if not config.OLLAMA_API_KEY:
+            raise RuntimeError("OLLAMA_API_KEY is not set")
+        self._validate_model_id(self.model_id)
+
+        url = f"{config.OLLAMA_BASE_URL}/api/chat"
+        headers = {
+            "Authorization": f"Bearer {config.OLLAMA_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.model_id,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+        }
+        timeout = aiohttp.ClientTimeout(total=self.timeout)
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+                    async with session.post(url, json=payload) as resp:
+                        resp.raise_for_status()
+                        data = await resp.json()
+                raw = data["message"]["content"]
+                json_str = self.parse_json_response(raw)
+                return response_schema.model_validate_json(json_str)
+            except (ValidationError, json.JSONDecodeError, ValueError, KeyError):
+                if attempt == self.max_retries:
+                    raise
+                await asyncio.sleep(0.5 * (attempt + 1))
+            except aiohttp.ClientResponseError as e:
+                if e.status == 429 and attempt < self.max_retries:
+                    await asyncio.sleep(2.0 * (attempt + 1))
+                    continue
+                raise RuntimeError(f"Ollama API error {e.status}: {e.message}") from e
+
+        raise RuntimeError(f"Exhausted retries for {self.__class__.__name__}")
+
+
+class OllamaGlmClient(OllamaCloudClient):
+    """GLM-5.1 via Ollama cloud HTTP API."""
+    model_id = "glm-5.1:cloud"
+    model_name = "GLM 5.1 (Ollama)"
+
+
+class OllamaQwen35Client(OllamaCloudClient):
+    """Qwen3.5 via Ollama cloud HTTP API."""
+    model_id = "qwen3.5:cloud"
+    model_name = "Qwen 3.5 (Ollama)"
+
+
+class OllamaDeepseekClient(OllamaCloudClient):
+    """DeepSeek V4 Pro via Ollama cloud HTTP API."""
+    model_id = "deepseek-v4-pro:cloud"
+    model_name = "DeepSeek V4 Pro (Ollama)"
