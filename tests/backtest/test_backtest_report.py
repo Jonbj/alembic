@@ -18,14 +18,16 @@ def make_rows(
     score: float = 0.5,
     confidence: float = 0.8,
     fallback_used: bool = False,
+    news_source: str = "gdelt",
 ) -> list[tuple]:
     """Generate n fake scored rows with forward returns."""
     return [
-        (symbol, model_id, score, confidence, fallback_used, return_1h, return_4h, return_24h)
+        (symbol, model_id, score, confidence, fallback_used,
+         return_1h, return_4h, return_24h, news_source)
         for _ in range(n)
     ]
     # columns: symbol, model_id, score, confidence, fallback_used,
-    #          forward_return_1h, forward_return_4h, forward_return_24h
+    #          forward_return_1h, forward_return_4h, forward_return_24h, news_source
 
 
 def make_builder_with_rows(rows: list[tuple]) -> BacktestReportBuilder:
@@ -100,7 +102,7 @@ def test_report_by_symbol_populated():
 def test_report_excludes_none_returns():
     """build() counts only rows where at least one forward_return is not None."""
     rows_with = make_rows(40)
-    rows_without = [("AAPL", "ensemble:opus", 0.5, 0.8, False, None, None, None)] * 10
+    rows_without = [("AAPL", "ensemble:opus", 0.5, 0.8, False, None, None, None, "gdelt")] * 10
     builder = make_builder_with_rows(rows_with + rows_without)
     report = builder.build("test-run")
 
@@ -117,6 +119,48 @@ def test_report_excludes_fallback_rows():
     assert report.ic_4h is None
     assert report.ic_24h is None
     assert report.signals_with_returns == 0
+
+
+def test_report_by_source_populated():
+    """build() groups IC results by news_source."""
+    rows = make_rows(50, news_source="gdelt") + make_rows(50, news_source="marketaux")
+    builder = make_builder_with_rows(rows)
+    report = builder.build("test-run")
+
+    assert "gdelt" in report.by_source
+    assert "marketaux" in report.by_source
+
+
+def test_report_by_source_all_three_horizons():
+    """build() computes IC/ICIR at all three horizons per news_source."""
+    rows = make_rows(50, news_source="marketaux")
+    builder = make_builder_with_rows(rows)
+    report = builder.build("test-run")
+
+    stats = report.by_source["marketaux"]
+    for key in ("ic_1h", "ic_4h", "ic_24h", "icir_1h", "icir_4h", "icir_24h", "sample_count"):
+        assert key in stats, f"Missing key '{key}' in by_source stats"
+
+
+def test_report_by_source_none_when_insufficient_samples():
+    """by_source IC is None when a source has fewer than 30 scored rows."""
+    rows = make_rows(10, news_source="alpaca_benzinga")
+    builder = make_builder_with_rows(rows)
+    report = builder.build("test-run")
+
+    assert report.by_source["alpaca_benzinga"]["ic_24h"] is None
+    assert report.by_source["alpaca_benzinga"]["sample_count"] == 10
+
+
+def test_report_by_source_in_serialized_json():
+    """by_source appears in the JSON output."""
+    rows = make_rows(50, news_source="marketaux")
+    builder = make_builder_with_rows(rows)
+    report = builder.build("test-run")
+
+    data = report.to_dict()
+    assert "by_source" in data
+    assert "marketaux" in data["by_source"]
 
 
 def test_report_serializes_to_json():

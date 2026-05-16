@@ -43,8 +43,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger(__name__)
 
 _INSERT_PENDING = """
-    INSERT INTO backtest_signals (run_id, symbol, article_title, article_url, generated_at)
-    VALUES (%s, %s, %s, %s, %s)
+    INSERT INTO backtest_signals (run_id, symbol, article_title, article_url, generated_at, news_source)
+    VALUES (%s, %s, %s, %s, %s, %s)
     ON CONFLICT (run_id, symbol, article_url, generated_at) DO NOTHING
 """
 
@@ -118,7 +118,7 @@ def phase1_fetch(
             tickers = extractor.extract(item.org_names)
             for ticker in tickers:
                 cur.execute(_INSERT_PENDING, (
-                    run_id, ticker, item.title or "", item.url, item.timestamp
+                    run_id, ticker, item.title or "", item.url, item.timestamp, "gdelt"
                 ))
                 if cur.rowcount > 0:
                     inserted += 1
