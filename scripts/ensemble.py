@@ -28,6 +28,27 @@ from typing import Any
 
 import httpx
 
+# Mapping modelli interni (models.md) → ID OpenRouter
+# Aggiornato: 2026-05-16
+OPENROUTER_MODEL_MAP = {
+    "sonnet": "anthropic/claude-sonnet-4-7",
+    "opus": "anthropic/claude-opus-4-7",
+    "haiku": "anthropic/claude-haiku-4-5",
+    "qwen3.5:cloud": "qwen/qwen3-235b",
+    "deepseek-v4-pro:cloud": "deepseek/deepseek-chat-v3-0324",
+    "glm-5.1:cloud": "thudm/glm-4-9b",
+    "kimi-k2.6:cloud": "moonshotai/kimi-k2",
+    "gemma4:31b-cloud": "google/gemma-4-27b",
+    "ministral-3:14b-cloud": "mistralai/ministral-3b",
+    "nemotron-3-super:cloud": "nvidia/llama-3.1-nemotron-70b",
+    "gemini-3-flash-preview:cloud": "google/gemini-2.5-flash",
+    "qwen3-coder-next:cloud": "qwen/qwen3-235b",
+    "devstral-2:123b-cloud": "mistralai/devstral-123b",
+    "minimax-m2.7:cloud": "minimax/minimax-m1",
+    "qwen3-coder:480b-cloud": "qwen/qwen3-235b",
+    "minimax-m2:cloud": "minimax/minimax-m1",
+}
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -109,6 +130,9 @@ async def _query_openrouter(
     OpenRouter supporta decine di modelli cloud (Claude, GPT, Qwen, DeepSeek,
     Mistral, Gemini, ecc.) tramite un unico endpoint e una sola API key.
     """
+    # Applica mapping models.md → OpenRouter
+    or_model = OPENROUTER_MODEL_MAP.get(model, model)
+
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -117,7 +141,7 @@ async def _query_openrouter(
         "X-Title": "Ensemble Runner",
     }
     payload = {
-        "model": model,
+        "model": or_model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7,
     }
@@ -284,7 +308,11 @@ def main() -> int:
 
     print(f"[ensemble] Modelli selezionati: {len(models)}")
     for m in models:
-        print(f"  → {m}")
+        mapped = OPENROUTER_MODEL_MAP.get(m, m) if args.backend == "openrouter" else m
+        if mapped != m:
+            print(f"  → {m}  (OpenRouter: {mapped})")
+        else:
+            print(f"  → {m}")
     print(f"[ensemble] Backend: {args.backend}")
     print(f"[ensemble] Prompt: {args.prompt[:80]}{'...' if len(args.prompt) > 80 else ''}")
     print("-" * 60)
