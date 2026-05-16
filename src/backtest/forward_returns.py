@@ -139,7 +139,9 @@ class ForwardReturnCalculator:
                     progress=False,
                 )
                 if not df.empty:
-                    result[ticker] = df["Close"]
+                    close = df["Close"]
+                    # yfinance >= 0.2 returns MultiIndex DataFrame even for single tickers
+                    result[ticker] = close.squeeze() if isinstance(close, pd.DataFrame) else close
                 else:
                     log.warning("yfinance returned empty data for %s (%s)", ticker, interval)
             except Exception as e:
@@ -205,6 +207,9 @@ class ForwardReturnCalculator:
         return_24h: float | None = None
         if daily is not None:
             day_ts = ts_utc.normalize()
+            # yfinance daily index may be tz-naive; strip tz if so
+            if daily.index.tzinfo is None:
+                day_ts = day_ts.tz_localize(None)
             d_idx = daily.index.searchsorted(day_ts)
             if d_idx + 1 < len(daily.index):
                 close_today = float(daily.iloc[d_idx])

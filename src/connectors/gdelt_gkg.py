@@ -161,7 +161,7 @@ class GDELTGKGConnector(_GDELTBaseConnector, NewsConnector):
         """Return True if V1Themes column (index 7) contains any financial theme."""
         if len(row) <= _COL_V1THEMES:
             return False
-        themes = set(row[_COL_V1THEMES].split("|"))
+        themes = set(row[_COL_V1THEMES].split(";"))
         return bool(themes & _FINANCIAL_THEMES)
 
     def _parse_csv_row(self, row: list[str]) -> GKGNewsItem | None:

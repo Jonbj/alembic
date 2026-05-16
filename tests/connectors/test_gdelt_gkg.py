@@ -128,7 +128,7 @@ def test_parse_csv_row_timestamp_utc():
 def test_is_financial_row_true_for_stockmarket():
     """Row with ECON_STOCKMARKET in V1Themes → True."""
     connector = GDELTGKGConnector()
-    row = make_csv_row(v1themes="ECON_STOCKMARKET|POLITICS")
+    row = make_csv_row(v1themes="ECON_STOCKMARKET;POLITICS")
     assert connector._is_financial_row(row) is True
 
 
@@ -142,7 +142,7 @@ def test_is_financial_row_true_for_earnings():
 def test_is_financial_row_false_for_non_financial():
     """Row without any financial theme → False."""
     connector = GDELTGKGConnector()
-    row = make_csv_row(v1themes="POLITICS|CRIME|WEATHER")
+    row = make_csv_row(v1themes="POLITICS;CRIME;WEATHER")
     assert connector._is_financial_row(row) is False
 
 
