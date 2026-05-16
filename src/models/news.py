@@ -58,6 +58,23 @@ class GKGNewsItem(NewsItem):
     org_names: list[str] = Field(default_factory=list)
 
 
+class MarketAuxNewsItem(NewsItem):
+    """NewsItem enriched with MarketAux pre-computed entity sentiment.
+
+    The sentiment_score (-1 to +1) is computed by MarketAux per entity
+    (ticker) and can be used to pre-filter articles before LLM inference:
+    articles near 0 (neutral) may not be worth the token cost.
+
+    Why a subclass instead of adding to NewsItem?
+      - Keeps the downstream SentimentWorker contract unchanged.
+      - Pre-computed sentiment is an ingestion-time concern; the LLM worker
+        only needs body text.
+      - Follows the GKGNewsItem pattern already in use.
+    """
+
+    marketaux_sentiment: float | None = None
+
+
 class LLMSentimentOutput(BaseModel):
     """Structured output from LLM sentiment analysis.
 

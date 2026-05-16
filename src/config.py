@@ -76,6 +76,16 @@ class Config(BaseModel):
     OLLAMA_API_KEY: str = Field(default_factory=lambda: os.environ.get("OLLAMA_API_KEY", ""))
     OLLAMA_BASE_URL: str = Field(default_factory=lambda: os.environ.get("OLLAMA_BASE_URL", "https://ollama.com"))
 
+    # MarketAux news API (primary live news source)
+    MARKETAUX_API_KEY: str = Field(default_factory=lambda: os.environ.get("MARKETAUX_API_KEY", ""))
+
+    # Alpaca Markets (execution + news via Benzinga)
+    ALPACA_API_KEY: str = Field(default_factory=lambda: os.environ.get("ALPACA_API_KEY", ""))
+    ALPACA_SECRET_KEY: str = Field(default_factory=lambda: os.environ.get("ALPACA_SECRET_KEY", ""))
+    ALPACA_BASE_URL: str = Field(
+        default_factory=lambda: os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+    )
+
     # Telegram notifications
     TELEGRAM_BOT_TOKEN: str = Field(default_factory=lambda: os.environ.get("TELEGRAM_BOT_TOKEN", ""))
     TELEGRAM_CHAT_ID: str = Field(default_factory=lambda: os.environ.get("TELEGRAM_CHAT_ID", ""))
