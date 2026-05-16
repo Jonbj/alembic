@@ -33,12 +33,15 @@ Version: 1.0.0
 
 import asyncio
 import json
+import logging
 import os
 import re
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
+
+logger = logging.getLogger(__name__)
 
 import aiohttp
 from pydantic import BaseModel, ValidationError
@@ -652,8 +655,18 @@ class OllamaCloudClient(LLMClient):
                     raise
                 await asyncio.sleep(0.5 * (attempt + 1))
             except aiohttp.ClientResponseError as e:
-                if e.status == 429 and attempt < self.max_retries:
-                    await asyncio.sleep(2.0 * (attempt + 1))
+                if e.status == 429:
+                    if attempt >= self.max_retries:
+                        raise RuntimeError(
+                            f"Ollama rate limit (429) on {self.model_id}: exhausted retries"
+                        ) from e
+                    # Exponential backoff: 60s, 120s, 180s — pause until limit resets
+                    wait = 60.0 * (attempt + 1)
+                    logger.warning(
+                        "Ollama rate limit 429 on %s (attempt %d/%d) — pausing %.0fs",
+                        self.model_id, attempt + 1, self.max_retries + 1, wait,
+                    )
+                    await asyncio.sleep(wait)
                     continue
                 raise RuntimeError(f"Ollama API error {e.status}: {e.message}") from e
 

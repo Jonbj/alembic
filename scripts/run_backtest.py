@@ -33,7 +33,7 @@ from src.config import config
 from src.connectors.gdelt_gkg import GDELTGKGConnector
 from src.connectors.ticker_extractor import TickerExtractor
 from src.llm.budget import LLMBudgetTracker
-from src.llm.client import OllamaDeepseekClient, OllamaKimiClient, OllamaQwen35Client
+from src.llm.client import OllamaDeepseekClient, OllamaGlmClient, OllamaKimiClient, OllamaQwen35Client
 from src.llm.ensemble import EnsembleAggregator
 from src.llm.finbert import FinBERTClient
 from src.models.news import NewsItem
@@ -78,9 +78,9 @@ def _estimate_cost(pending_count: int) -> float:
     Actual Ollama cloud rates are typically lower; this prevents surprise bills.
     Prompts a human confirmation if estimate > $10.
     """
-    # Conservative upper bound for Ollama :cloud models
+    # Conservative upper bound for Ollama :cloud models (4 models in ensemble)
     cost_per_call = (300 * 2.0 + 100 * 6.0) / 1_000_000
-    return pending_count * 3 * cost_per_call
+    return pending_count * 4 * cost_per_call
 
 
 def phase1_fetch(
@@ -165,7 +165,7 @@ def phase2_infer(pg_conn, run_id: str, dry_run: bool) -> int:
                 print("Aborted.")
                 sys.exit(0)
 
-    clients = [] if dry_run else [OllamaKimiClient(), OllamaQwen35Client(), OllamaDeepseekClient()]
+    clients = [] if dry_run else [OllamaKimiClient(), OllamaQwen35Client(), OllamaDeepseekClient(), OllamaGlmClient()]
     aggregator = EnsembleAggregator(
         min_confidence=config.ENSEMBLE_MIN_CONFIDENCE,
         divergence_threshold=config.ENSEMBLE_DIVERGENCE_STD,
