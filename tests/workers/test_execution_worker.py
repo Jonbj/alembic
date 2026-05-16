@@ -182,3 +182,81 @@ def test_account_fetch_error_returns_early():
     stats = run_execution_cycle(["AAPL", "MSFT"], redis, client)
     assert stats["errors"] == 1
     assert stats["orders_placed"] == 0
+
+
+# --- EMA momentum filter ---
+
+def _make_data_client(cache_override: dict | None = None):
+    """Return a mock data_client that feeds _build_market_cache via patching."""
+    return MagicMock()
+
+
+def _run_with_ema(symbol: str, ema: float | None, price: float | None, score: float = 0.6):
+    """Helper: run one symbol through execution with a pre-built market cache."""
+    from src.workers.execution import run_execution_cycle
+
+    redis = _make_redis(signal=_signal(score=score))
+    client = _make_client(portfolio_value=100_000)
+    data_client = _make_data_client()
+
+    cache = {symbol: {"ema": ema, "price": price}}
+    with patch("src.workers.execution._build_market_cache", return_value=cache):
+        stats = run_execution_cycle([symbol], redis, client, data_client=data_client)
+    return stats, client
+
+
+def test_ema_price_above_ema_places_order():
+    stats, client = _run_with_ema("AAPL", ema=150.0, price=155.0)
+    assert stats["orders_placed"] == 1
+    assert stats["skipped_momentum"] == 0
+    client.submit_order.assert_called_once()
+
+
+def test_ema_price_below_ema_skips_entry():
+    stats, client = _run_with_ema("AAPL", ema=160.0, price=155.0)
+    assert stats["orders_placed"] == 0
+    assert stats["skipped_momentum"] == 1
+    client.submit_order.assert_not_called()
+
+
+def test_ema_price_equal_to_ema_skips_entry():
+    stats, client = _run_with_ema("AAPL", ema=155.0, price=155.0)
+    assert stats["orders_placed"] == 0
+    assert stats["skipped_momentum"] == 1
+
+
+def test_ema_unavailable_skips_entry():
+    stats, client = _run_with_ema("AAPL", ema=None, price=155.0)
+    assert stats["orders_placed"] == 0
+    assert stats["skipped_momentum"] == 1
+
+
+def test_ema_price_unavailable_skips_entry():
+    stats, client = _run_with_ema("AAPL", ema=150.0, price=None)
+    assert stats["orders_placed"] == 0
+    assert stats["skipped_momentum"] == 1
+
+
+def test_no_data_client_skips_ema_filter():
+    """When data_client=None, EMA filter is disabled and order is placed."""
+    redis = _make_redis(signal=_signal(score=0.6))
+    client = _make_client(portfolio_value=100_000)
+    stats = run_execution_cycle(["AAPL"], redis, client, data_client=None)
+    assert stats["orders_placed"] == 1
+    assert stats["skipped_momentum"] == 0
+
+
+def test_stop_loss_checked_regardless_of_ema():
+    """Stop-loss on existing positions must fire even if EMA data is absent."""
+    entry = 100.0
+    current = entry * (1 - STOP_LOSS_PCT - 0.01)
+    pos = _make_position("AAPL", avg_entry=entry, current=current)
+    client = _make_client(positions={"AAPL": pos})
+    redis = _make_redis(signal=_signal(score=0.8))
+    data_client = _make_data_client()
+
+    with patch("src.workers.execution._build_market_cache", return_value={"AAPL": {"ema": None, "price": None}}):
+        stats = run_execution_cycle(["AAPL"], redis, client, data_client=data_client)
+
+    assert stats["stop_losses_triggered"] == 1
+    client.close_position.assert_called_once_with("AAPL")

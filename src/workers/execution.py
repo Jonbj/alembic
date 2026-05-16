@@ -4,12 +4,14 @@ Runs as a Celery beat task every 15 min during market hours. For each symbol
 in WATCHLIST_SYMBOLS:
 
   1. Check kill-switch (halt immediately if active).
-  2. Read signal from Redis (signal:{symbol}:sentiment, TTL 4h).
-  3. Skip if signal is stale (> SIGNAL_MAX_AGE_MIN minutes old).
-  4. Check existing position — idempotent, no pyramiding.
-  5. If score > ENTRY_THRESHOLD and no position: place market order.
+  2. Build EMA cache: fetch last 30 hourly bars via Alpaca data API,
+     compute 20-period EMA for each symbol.
+  3. Read signal from Redis (signal:{symbol}:sentiment, TTL 4h).
+  4. Skip if signal is stale (> SIGNAL_MAX_AGE_MIN minutes old).
+  5. Check existing position — idempotent, no pyramiding.
+  6. If score > ENTRY_THRESHOLD and price > EMA20: place market order.
      Position size = portfolio_value × MAX_POSITION_PCT × regime_multiplier.
-  6. Check stop-loss on all open positions.
+  7. Check stop-loss on all open positions.
 
 Why Celery task instead of QC Lean?
   QC Lean requires historical price data and a QC account. For paper trading
@@ -17,7 +19,6 @@ Why Celery task instead of QC Lean?
   and runs entirely within the existing stack.
 """
 
-import json
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -33,6 +34,8 @@ ENTRY_THRESHOLD = 0.3
 MAX_POSITION_PCT = 0.10
 STOP_LOSS_PCT = 0.02
 SIGNAL_MAX_AGE_MIN = 30
+EMA_PERIOD = 20
+_EMA_BARS_FETCH = EMA_PERIOD + 10  # extra bars to warm up EMA
 
 
 def _is_fresh(signal: dict) -> bool:
@@ -50,6 +53,59 @@ def _is_fresh(signal: dict) -> bool:
         return False
 
 
+def _build_market_cache(symbols: list[str], data_client) -> dict[str, dict]:
+    """Fetch hourly bars and compute 20-period EMA for all symbols in one batch.
+
+    Returns:
+        {symbol: {"ema": float | None, "price": float | None}}
+        ema/price are None when insufficient bars or API error.
+
+    Why one batch call?
+      Alpaca's StockBarsRequest accepts a list of symbols, returning a single
+      MultiIndex DataFrame. This avoids N sequential HTTP calls per symbol.
+
+    Why fail to None (not raise)?
+      A transient data API error should not block stop-loss checks on existing
+      positions. Only new entries are skipped when EMA is unavailable.
+    """
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+
+    cache: dict[str, dict] = {s: {"ema": None, "price": None} for s in symbols}
+
+    try:
+        end = datetime.now(timezone.utc)
+        # Fetch enough hours to cover weekends/holidays (3× buffer)
+        start = end - timedelta(hours=_EMA_BARS_FETCH * 3)
+
+        request = StockBarsRequest(
+            symbol_or_symbols=symbols,
+            timeframe=TimeFrame.Hour,
+            start=start,
+            end=end,
+            limit=_EMA_BARS_FETCH,
+        )
+        bars_df = data_client.get_stock_bars(request).df
+
+        for symbol in symbols:
+            try:
+                sym_bars = bars_df.loc[symbol]
+                if len(sym_bars) < EMA_PERIOD:
+                    log.debug("Insufficient bars for EMA on %s (%d/%d)", symbol, len(sym_bars), EMA_PERIOD)
+                    continue
+                closes = sym_bars["close"]
+                ema = float(closes.ewm(span=EMA_PERIOD, adjust=False).mean().iloc[-1])
+                price = float(closes.iloc[-1])
+                cache[symbol] = {"ema": ema, "price": price}
+            except KeyError:
+                log.debug("No bars returned for %s", symbol)
+
+    except Exception as e:
+        log.warning("Failed to fetch bars for EMA cache: %s — EMA filter disabled", e)
+
+    return cache
+
+
 def _regime_multiplier(redis_store: RedisStore) -> float:
     """Return regime multiplier from Redis (default 1.0 if absent)."""
     regime = redis_store.get_regime()
@@ -62,6 +118,7 @@ def run_execution_cycle(
     symbols: list[str],
     redis_store: RedisStore,
     trading_client,
+    data_client=None,
 ) -> dict:
     """Core execution logic — separated for testability.
 
@@ -69,10 +126,12 @@ def run_execution_cycle(
         symbols:        List of ticker symbols to evaluate.
         redis_store:    RedisStore instance (connected).
         trading_client: Alpaca TradingClient instance.
+        data_client:    Alpaca StockHistoricalDataClient for EMA bars.
+                        If None, EMA momentum filter is skipped.
 
     Returns:
         Stats dict: checked, skipped_stale, skipped_killswitch, skipped_position,
-                    orders_placed, stop_losses_triggered, errors.
+                    skipped_momentum, orders_placed, stop_losses_triggered, errors.
     """
     from alpaca.trading.enums import OrderSide, TimeInForce
     from alpaca.trading.requests import MarketOrderRequest
@@ -82,6 +141,7 @@ def run_execution_cycle(
         "skipped_stale": 0,
         "skipped_killswitch": 0,
         "skipped_position": 0,
+        "skipped_momentum": 0,
         "orders_placed": 0,
         "stop_losses_triggered": 0,
         "errors": 0,
@@ -94,6 +154,9 @@ def run_execution_cycle(
         return stats
 
     regime_mult = _regime_multiplier(redis_store)
+
+    # Build EMA cache once for all symbols (one batch API call)
+    market_cache = _build_market_cache(symbols, data_client) if data_client else {}
 
     # Fetch current account + positions once (not per symbol)
     try:
@@ -151,6 +214,23 @@ def run_execution_cycle(
                 log.debug("Signal below threshold for %s (score=%.3f)", symbol, score)
                 continue
 
+            # --- EMA momentum filter ---
+            if data_client:
+                cached = market_cache.get(symbol, {})
+                ema = cached.get("ema")
+                price = cached.get("price")
+                if ema is None or price is None:
+                    log.debug("No EMA data for %s — skipping entry", symbol)
+                    stats["skipped_momentum"] += 1
+                    continue
+                if price <= ema:
+                    log.debug(
+                        "Price below EMA20 for %s (price=%.2f ema=%.2f) — bearish, skip",
+                        symbol, price, ema,
+                    )
+                    stats["skipped_momentum"] += 1
+                    continue
+
             # Position sizing: portfolio × max_pct × regime_multiplier
             notional = portfolio_value * MAX_POSITION_PCT * regime_mult
 
@@ -188,6 +268,7 @@ def run_execution_worker() -> dict:
         Stats dict from run_execution_cycle, or {"skipped": True} if
         Alpaca credentials are not configured.
     """
+    from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.trading.client import TradingClient
 
     if not config.ALPACA_API_KEY or not config.ALPACA_SECRET_KEY:
@@ -197,12 +278,15 @@ def run_execution_worker() -> dict:
     redis_client = Redis.from_url(config.REDIS_URL)
     redis_store = RedisStore(redis_client)
 
-    # paper=True uses paper-api.alpaca.markets automatically
     paper = "paper-api" in config.ALPACA_BASE_URL
     trading_client = TradingClient(
         api_key=config.ALPACA_API_KEY,
         secret_key=config.ALPACA_SECRET_KEY,
         paper=paper,
+    )
+    data_client = StockHistoricalDataClient(
+        api_key=config.ALPACA_API_KEY,
+        secret_key=config.ALPACA_SECRET_KEY,
     )
 
     try:
@@ -210,6 +294,7 @@ def run_execution_worker() -> dict:
             symbols=config.WATCHLIST_SYMBOLS or [],
             redis_store=redis_store,
             trading_client=trading_client,
+            data_client=data_client,
         )
         log.info("Execution stats: %s", stats)
         return stats
