@@ -421,3 +421,102 @@ L'integrazione di MarketAux nel sistema esistente richiede:
 - [Twelve Data Pricing](https://twelvedata.com/pricing)
 - [Polygon.io Review 2026](https://tradingtoolshub.com/review/polygon-io/)
 - [Benzinga API Docs](https://docs.benzinga.com/)
+
+---
+
+## 11. Risultati Ensemble Multi-Modello
+
+Per ridurre il bias di un singolo modello, il prompt di valutazione è stato inviato a **8 modelli diversi** in parallelo tramite Ollama Cloud (`https://ollama.com`).
+
+### 11.1 Modelli partecipanti
+
+| # | Modello | Origine | Parametri | Output valido? |
+|---|---------|---------|-----------|----------------|
+| 1 | `qwen3-coder:480b` | Qwen (Cina) | 480B | ✅ |
+| 2 | `devstral-2:123b` | Mistral (Europa) | 123B | ✅ |
+| 3 | `deepseek-v4-pro` | DeepSeek (Cina) | ~400B | ✅ |
+| 4 | `gemma4:31b` | Google (USA) | 31B | ✅ |
+| 5 | `kimi-k2.6` | Moonshot (Cina) | ~1T | ❌ (output `None`) |
+| 6 | `minimax-m2.7` | MiniMax (Cina) | ~100B | ✅ |
+| 7 | `nemotron-3-super` | NVIDIA (USA) | 70B | ✅ |
+| 8 | `glm-5.1` | GLM (Cina) | ~50B | ✅ |
+
+**7/8 modelli hanno prodotto output valido.**
+
+### 11.2 Top 3 proposte da ciascun modello
+
+| Modello | #1 | #2 | #3 | Note |
+|---------|----|----|----|------|
+| qwen3-coder:480b | Alpha Vantage | MarketStack | Intrinio | Dati da training set 2024 |
+| devstral-2:123b | Alpha Vantage | Benzinga | MarketAux | Prezzi aggiornati al 2024 |
+| deepseek-v4-pro | Alpha Vantage | NewsData.io | TheNewsAPI | Prezzi non verificati 2026 |
+| gemma4:31b | Alpha Vantage | TheNewsAPI | MarketAux | Consiglia scraping URL |
+| minimax-m2.7 | Webz.io | Finage | Benzinga | Focus su aggregatori |
+| nemotron-3-super | **FMP** | MarketAux | Alpha Vantage | Unico a scegliere FMP |
+| glm-5.1 | **Tiingo** | MarketAux | EODHD | Tiingo come gold standard |
+
+### 11.3 Frequenza aggregata
+
+| Servizio | Voti (7 modelli) | % |
+|----------|------------------|---|
+| **Alpha Vantage** | 5 | 71% |
+| **MarketAux** | 4 | 57% |
+| **Benzinga** | 2 | 29% |
+| **TheNewsAPI** | 2 | 29% |
+| FMP | 1 | 14% |
+| Tiingo | 1 | 14% |
+| EODHD | 1 | 14% |
+| Webz.io | 1 | 14% |
+| Finage | 1 | 14% |
+| NewsData.io | 1 | 14% |
+| MarketStack | 1 | 14% |
+| Intrinio | 1 | 14% |
+
+### 11.4 Analisi incrociata: Ensemble vs Dati Web aggiornati (2026)
+
+L'ensemble ha una **forte convergenza su Alpha Vantage** (71%), ma i modelli hanno basato le risposte su training data con **cutoff ~2024**. Confrontando con i dati web aggiornati al 2026:
+
+| Servizio | Ensemble | Dati Web 2026 | Verdetto |
+|----------|----------|---------------|----------|
+| **Alpha Vantage** | 🥇 (5/7) | ⚠️ Free tier ridotto a 25 req/day. Real-time solo a $99.99/mo. | **Sovrastimato dall'ensemble** — non più la scelta ideale per budget < $50. |
+| **MarketAux** | 🥈 (4/7) | ✅ Real-time anche su free. Sentiment integrato. $29/mo entry. | **Confermato** — l'ensemble e i dati web concordano. |
+| **Benzinga** | 🥉 (2/7) | ⚠️ Free = teaser. Full text a ~$166/mo. Sopra budget. | **Sovrastimato** — i modelli non avevano dati 2026 sui prezzi. |
+| **FMP** | 1/7 | ✅ $22/mo, full text, 5 anni storico. | **Sottostimato** — solo nemotron l'ha proposto, ma i dati web lo rendono runner-up. |
+| **Tiingo** | 1/7 | ⚠️ Vincolo non-commerciale sul free. | **Rischioso** — glm lo ha proposto, ma il vincolo commerciale è un deal-breaker. |
+
+### 11.5 Bias rilevati nei modelli
+
+1. **Knowledge cutoff**: Tutti i modelli hanno prezzi e limiti del 2024. Il free tier di Alpha Vantage era allora 500 req/day, ora è 25 req/day.
+2. **Overweight Alpha Vantage**: 5/7 modelli l'hanno scelta probabilmente perché era il "default" nelle guide di trading del 2024.
+3. **Sottostima di FMP**: Solo 1/7 modelli ha proposto FMP, nonostante sia il più economico ($22/mo) con 5 anni di storico.
+4. **kimi-k2.6 ha fallito**: Output `None` — possibile timeout o errore di generazione sul modello da 1T parametri.
+
+### 11.6 Verdetto ensemble corretto (con dati 2026)
+
+Dopo aver corretto i bias con i dati web aggiornati:
+
+| Rank | Servizio | Score Ensemble | Score Web 2026 | Score Finale |
+|------|----------|----------------|----------------|--------------|
+| 🥇 | **MarketAux** | 4/7 (57%) | ✅ Perfetto | **9.5/10** |
+| 🥈 | **FMP** | 1/7 (14%) | ✅ Ottimo | **8.5/10** |
+| 🥉 | **Alpha Vantage** | 5/7 (71%) | ⚠️ Real-time caro | **6.5/10** |
+
+**Conclusione**: L'ensemble ha correttamente identificato **MarketAux** come candidato forte, ma ha **sovrastimato Alpha Vantage** a causa del knowledge cutoff. I dati web 2026 confermano che **MarketAux è il vincitore**, con **FMP** come runner-up economico.
+
+---
+
+## 12. Appendice: Script Ensemble
+
+Lo script usato per questa valutazione è:
+
+```bash
+python scripts/ensemble.py \
+  --prompt "<prompt dettagliato>" \
+  --models qwen3-coder:480b devstral-2:123b deepseek-v4-pro gemma4:31b kimi-k2.6 minimax-m2.7 nemotron-3-super glm-5.1 \
+  --backend ollama \
+  --max-concurrent 3 \
+  --output /tmp/ensemble_news_8.json \
+  --markdown /tmp/ensemble_news_8.md
+```
+
+Il supporta anche `--summarize` per un riassunto finale con un modello aggregator.
