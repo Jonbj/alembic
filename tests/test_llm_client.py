@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.llm.client import OpusClient, Qwen35Client
+from src.llm.client import GlmClient, OpusClient, Qwen35Client
 from src.llm.ensemble import EnsembleAggregator, ModelOutput, run_ensemble_query
 from src.models.news import LLMSentimentOutput
 
@@ -58,6 +58,25 @@ class TestLLMClientParsing:
         response = "This is not JSON at all"
         with pytest.raises(ValueError, match="Unable to extract valid JSON"):
             OpusClient.parse_json_response(response)
+
+
+class TestGlmClient:
+    """Test GlmClient model_id and allowlist membership."""
+
+    def test_glm_client_model_id(self):
+        """GlmClient uses glm-5.1:cloud model identifier."""
+        client = GlmClient()
+        assert client.model_id == "glm-5.1:cloud"
+
+    def test_glm_client_model_id_in_allowlist(self):
+        """glm-5.1:cloud is in ALLOWED_MODEL_IDS (security allowlist)."""
+        from src.llm.client import ALLOWED_MODEL_IDS
+        assert "glm-5.1:cloud" in ALLOWED_MODEL_IDS
+
+    def test_glm_client_validate_does_not_raise(self):
+        """_validate_model_id passes for glm-5.1:cloud."""
+        client = GlmClient()
+        client._validate_model_id(client.model_id)  # must not raise
 
 
 class TestEnsembleAggregator:

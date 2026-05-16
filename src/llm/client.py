@@ -566,3 +566,36 @@ class DeepseekClient(LLMClient):
                 await asyncio.sleep(0.5 * (attempt + 1))
 
         raise RuntimeError("Exhausted retries for DeepseekClient")
+
+
+class GlmClient(LLMClient):
+    """GLM-5.1 client for financial sentiment with chain-of-thought reasoning.
+
+    GLM-5.1 (Zhipu AI) is a thinking model that excels at:
+    - Step-by-step reasoning (maps well to DK-CoT prompts)
+    - Financial domain knowledge (Zhipu AI focuses heavily on finance)
+    - Nuanced sentiment detection
+
+    Accessed via claude CLI with --model glm-5.1:cloud (Ollama cloud).
+    """
+
+    model_id = "glm-5.1:cloud"
+    model_name = "GLM 5.1"
+
+    async def complete(self, prompt: str, response_schema: type[T]) -> T:
+        """Call GLM-5.1 and parse response."""
+        loop = asyncio.get_running_loop()
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                result = await loop.run_in_executor(
+                    None, self._call_cli, prompt, self.model_id
+                )
+                raw = self.parse_json_response(result)
+                return response_schema.model_validate_json(raw)
+            except (ValidationError, json.JSONDecodeError, ValueError):
+                if attempt == self.max_retries:
+                    raise
+                await asyncio.sleep(0.5 * (attempt + 1))
+
+        raise RuntimeError("Exhausted retries for GlmClient")

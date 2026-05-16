@@ -33,7 +33,7 @@ from src.config import config
 from src.connectors.gdelt_gkg import GDELTGKGConnector
 from src.connectors.ticker_extractor import TickerExtractor
 from src.llm.budget import LLMBudgetTracker
-from src.llm.client import DeepseekClient, OpusClient, Qwen35Client
+from src.llm.client import DeepseekClient, GlmClient, Qwen35Client
 from src.llm.ensemble import EnsembleAggregator
 from src.llm.finbert import FinBERTClient
 from src.models.news import NewsItem
@@ -71,19 +71,15 @@ _DRY_RUN_UPDATE = """
 
 
 def _estimate_cost(pending_count: int) -> float:
-    """Estimate inference cost: 3 models × ~300 input + ~100 output tokens × Opus rates.
+    """Estimate inference cost: 3 models × ~300 input + ~100 output tokens × cloud rates.
 
-    Why this estimate is conservative (upper bound):
-      - Uses Opus pricing ($15/1M input, $75/1M output) even though the ensemble
-        mixes Opus, Qwen35, and DeepSeek (cheaper models). This over-estimates
-        to avoid surprise bills.
-      - Assumes all rows require full ensemble; in practice some may be deduplicated
-        or discarded by the TickerExtractor.
-      - Prompts a human confirmation if estimate > $10 to prevent accidental
-        large spends during long backtest periods.
+    Uses conservative cloud model pricing ($2/1M input, $6/1M output) — an upper
+    bound for GLM-5.1, Qwen3.5, and DeepSeek-V4-Pro accessed via Ollama cloud.
+    Actual Ollama cloud rates are typically lower; this prevents surprise bills.
+    Prompts a human confirmation if estimate > $10.
     """
-    # Opus: $15/1M input, $75/1M output (upper bound for the ensemble)
-    cost_per_call = (300 * 15.0 + 100 * 75.0) / 1_000_000
+    # Conservative upper bound for Ollama :cloud models
+    cost_per_call = (300 * 2.0 + 100 * 6.0) / 1_000_000
     return pending_count * 3 * cost_per_call
 
 
@@ -169,7 +165,7 @@ def phase2_infer(pg_conn, run_id: str, dry_run: bool) -> int:
                 print("Aborted.")
                 sys.exit(0)
 
-    clients = [] if dry_run else [OpusClient(), Qwen35Client(), DeepseekClient()]
+    clients = [] if dry_run else [GlmClient(), Qwen35Client(), DeepseekClient()]
     aggregator = EnsembleAggregator(
         min_confidence=config.ENSEMBLE_MIN_CONFIDENCE,
         divergence_threshold=config.ENSEMBLE_DIVERGENCE_STD,
