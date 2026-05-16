@@ -85,10 +85,18 @@ async def _query_ollama(
     model: str,
     prompt: str,
     host: str = "http://localhost:11434",
+    api_key: str | None = None,
     timeout: float = 120.0,
 ) -> dict[str, Any]:
-    """Chiama Ollama /api/generate."""
+    """Chiama Ollama /api/generate.
+
+    Supporta istanze Ollama self-hosted o cloud con autenticazione
+    via OLLAMA_API_KEY.
+    """
     url = f"{host.rstrip('/')}/api/generate"
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     payload = {
         "model": model,
         "prompt": prompt,
@@ -96,7 +104,7 @@ async def _query_ollama(
         "options": {"temperature": 0.7},
     }
     try:
-        resp = await client.post(url, json=payload, timeout=timeout)
+        resp = await client.post(url, json=payload, headers=headers, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
         return {
@@ -189,7 +197,7 @@ async def run_ensemble(
             async with httpx.AsyncClient(follow_redirects=True) as client:
                 if backend == "ollama":
                     return await _query_ollama(
-                        client, model, prompt, host or "http://localhost:11434", timeout
+                        client, model, prompt, host or "http://localhost:11434", api_key, timeout
                     )
                 elif backend == "openrouter":
                     if not api_key:
@@ -281,8 +289,8 @@ def main() -> int:
     parser.add_argument("--models", nargs="+", help="Lista esplicita di modelli (sovrascrive --models-file)")
     parser.add_argument("--models-file", "-m", default="models.md", help="File markdown con lista modelli")
     parser.add_argument("--backend", choices=["ollama", "openrouter"], default="ollama", help="Backend API")
-    parser.add_argument("--host", default="http://localhost:11434", help="Host Ollama (solo backend=ollama)")
-    parser.add_argument("--api-key", default=os.environ.get("OPENROUTER_API_KEY", ""), help="API key OpenRouter")
+    parser.add_argument("--host", default=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"), help="Host Ollama (default da env OLLAMA_BASE_URL)")
+    parser.add_argument("--api-key", default=os.environ.get("OPENROUTER_API_KEY", os.environ.get("OLLAMA_API_KEY", "")), help="API key (OPENROUTER_API_KEY o OLLAMA_API_KEY)")
     parser.add_argument("--max-models", type=int, default=0, help="Max modelli da usare (0 = tutti)")
     parser.add_argument("--max-concurrent", type=int, default=5, help="Chiamate parallele massime")
     parser.add_argument("--timeout", type=float, default=120.0, help="Timeout per chiamata (secondi)")

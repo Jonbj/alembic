@@ -191,6 +191,86 @@ async def test_uses_symbols_as_query_param():
     assert captured_params["symbols"] == "AAPL,MSFT,GS"
 
 
+def _make_mock_session(fake_response: dict):
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json = AsyncMock(return_value=fake_response)
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=False)
+    mock_session = AsyncMock()
+    mock_session.get = MagicMock(return_value=mock_resp)
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+    return mock_session
+
+
+@pytest.mark.asyncio
+async def test_filters_out_non_us_tickers():
+    """asset_tags contains only symbols without a dot (US exchange)."""
+    fake_response = {
+        "meta": {"found": 1, "returned": 1, "limit": 3, "page": 1},
+        "data": [
+            {
+                "uuid": "multi-exchange",
+                "title": "NVIDIA surges on AI demand",
+                "description": "Nvidia shares hit record.",
+                "snippet": "AI spending accelerating.",
+                "url": "https://example.com/nvda",
+                "published_at": "2025-11-05T14:00:00Z",
+                "source": "reuters.com",
+                "entities": [
+                    {"symbol": "NVDA",    "sentiment_score": 0.81},
+                    {"symbol": "NVD.DE",  "sentiment_score": 0.80},
+                    {"symbol": "NVDA.BA", "sentiment_score": 0.79},
+                    {"symbol": "NVDA.MX", "sentiment_score": 0.78},
+                ],
+            }
+        ],
+    }
+    conn = MarketAuxConnector(api_key="test-key", symbols=["NVDA"])
+    start = datetime(2025, 11, 1, tzinfo=timezone.utc)
+    end = datetime(2025, 11, 30, tzinfo=timezone.utc)
+
+    with patch("src.connectors.marketaux.aiohttp.ClientSession", return_value=_make_mock_session(fake_response)):
+        items = [item async for item in conn.fetch_historical(start, end)]
+
+    assert len(items) == 1
+    assert items[0].asset_tags == ["NVDA"]
+    assert items[0].marketaux_sentiment == pytest.approx(0.81)
+
+
+@pytest.mark.asyncio
+async def test_skips_article_with_only_non_us_entities():
+    """Articles whose entities are all non-US tickers are skipped entirely."""
+    fake_response = {
+        "meta": {"found": 1, "returned": 1, "limit": 3, "page": 1},
+        "data": [
+            {
+                "uuid": "foreign-only",
+                "title": "SAP quarterly results",
+                "description": "SAP beats estimates.",
+                "snippet": "Revenue up.",
+                "url": "https://example.com/sap",
+                "published_at": "2025-11-05T14:00:00Z",
+                "source": "reuters.com",
+                "entities": [
+                    {"symbol": "SAP.DE", "sentiment_score": 0.60},
+                    {"symbol": "SAP.MX", "sentiment_score": 0.55},
+                ],
+            }
+        ],
+    }
+    conn = MarketAuxConnector(api_key="test-key", symbols=["SAP"])
+    start = datetime(2025, 11, 1, tzinfo=timezone.utc)
+    end = datetime(2025, 11, 30, tzinfo=timezone.utc)
+
+    with patch("src.connectors.marketaux.aiohttp.ClientSession", return_value=_make_mock_session(fake_response)):
+        items = [item async for item in conn.fetch_historical(start, end)]
+
+    assert items == []
+
+
 @pytest.mark.asyncio
 async def test_sentiment_is_none_when_no_matching_entity():
     """marketaux_sentiment is None when no entity matches the article's symbols."""

@@ -182,13 +182,19 @@ class MarketAuxConnector(NewsConnector):
         except (ValueError, AttributeError):
             ts = datetime.now(timezone.utc)
 
-        # Extract ticker symbols and sentiment from entities
+        # Extract US-only ticker symbols (no exchange suffix like .DE, .BA, .MX)
         entities = article.get("entities") or []
-        asset_tags = [e["symbol"] for e in entities if e.get("symbol")]
+        us_entities = [e for e in entities if e.get("symbol") and "." not in e["symbol"]]
+        asset_tags = [e["symbol"] for e in us_entities]
 
-        # Use the sentiment of the first matching entity (highest confidence)
+        # If no US entities, fall back to configured symbols (article matched by keyword)
+        # but skip entirely if we have entity data and none are US
+        if entities and not us_entities:
+            return None
+
+        # Use the sentiment of the first US entity (highest confidence)
         sentiment: float | None = None
-        for entity in entities:
+        for entity in us_entities:
             score = entity.get("sentiment_score")
             if score is not None:
                 sentiment = float(score)
