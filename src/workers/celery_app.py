@@ -71,13 +71,26 @@ app.conf.beat_schedule = {
         "task": "src.workers.regime.detect_regime",
         "schedule": crontab(hour=7, minute=0, day_of_week="1-5"),
     },
-    # News ingestion every 15 min Mon-Fri during market hours (14:00-21:00 UTC).
-    # This task queries GDELT GKG, extracts tickers via PostgreSQL lookup, and
-    # pushes annotated NewsItems to the Redis news:queue for the SentimentWorker.
-    # The schedule aligns with the sentiment-worker to ensure the queue is
-    # consistently fed.
+    # GDELT GKG ingestion every 15 min Mon-Fri during market hours (14:00-21:00 UTC).
+    # Queries GDELT GKG, extracts tickers via PostgreSQL lookup, and pushes
+    # annotated NewsItems to news:queue for the SentimentWorker.
     "run-news-ingestion": {
         "task": "src.workers.ingestion.run_news_ingestion_worker",
+        "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
+    },
+    # MarketAux ingestion every 15 min Mon-Fri during market hours.
+    # 28 calls/market session — well within the 100 req/day free-tier limit.
+    # Pushes MarketAuxNewsItems (with pre-computed sentiment) to news:queue.
+    # The SentimentWorker skips articles with |sentiment| < 0.2 before LLM.
+    "run-marketaux-ingestion": {
+        "task": "src.workers.ingestion.run_marketaux_ingestion_worker",
+        "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
+    },
+    # Alpaca/Benzinga news ingestion every 15 min Mon-Fri during market hours.
+    # Zero marginal cost — reuses the same Alpaca broker credentials.
+    # Benzinga is a premium financial news source with full article text.
+    "run-alpaca-ingestion": {
+        "task": "src.workers.ingestion.run_alpaca_ingestion_worker",
         "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
     },
     # Telegram poller every 5 seconds for inline keyboard approval flow

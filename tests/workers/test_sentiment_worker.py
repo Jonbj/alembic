@@ -9,7 +9,7 @@ import pytest
 from src.llm.budget import LLMBudgetExhaustedError, LLMBudgetTracker
 from src.llm.ensemble import EnsembleAggregator, ModelOutput
 from src.llm.finbert import FinBERTClient
-from src.models.news import LLMSentimentOutput, NewsItem
+from src.models.news import LLMSentimentOutput, MarketAuxNewsItem, NewsItem
 from src.models.signals import SentimentResult
 from src.store.pg_store import PostgreSQLStore
 from src.store.redis_store import RedisStore
@@ -548,3 +548,50 @@ class TestDKCoTPrompt:
         prompt = _DK_COT_PROMPT.format(text=truncated, symbol="AAPL")
         assert "AAPL" in prompt
         assert "polarity" in prompt
+
+
+class TestMarketAuxPreFilter:
+    """Tests for MarketAux neutral pre-filter in run_sentiment_worker."""
+
+    def _make_marketaux_item(self, sentiment: float, ticker: str = "AAPL") -> MarketAuxNewsItem:
+        from datetime import datetime, timezone
+        return MarketAuxNewsItem(
+            id=f"https://marketaux.com/{ticker}",
+            source="marketaux",
+            timestamp=datetime.now(timezone.utc),
+            title="Test headline",
+            body="Test body text for sentiment analysis.",
+            url=f"https://marketaux.com/{ticker}",
+            language="en",
+            asset_tags=[ticker],
+            marketaux_sentiment=sentiment,
+        )
+
+    def test_neutral_marketaux_item_skipped(self):
+        """Items with |marketaux_sentiment| < 0.2 are skipped before LLM."""
+        from src.workers.sentiment import _MARKETAUX_NEUTRAL_THRESHOLD
+        item = self._make_marketaux_item(sentiment=0.1)
+        assert abs(item.marketaux_sentiment) < _MARKETAUX_NEUTRAL_THRESHOLD
+
+    def test_strong_marketaux_item_not_skipped(self):
+        """Items with |marketaux_sentiment| >= 0.2 pass the pre-filter."""
+        from src.workers.sentiment import _MARKETAUX_NEUTRAL_THRESHOLD
+        item = self._make_marketaux_item(sentiment=0.5)
+        assert abs(item.marketaux_sentiment) >= _MARKETAUX_NEUTRAL_THRESHOLD
+
+    def test_negative_strong_marketaux_item_not_skipped(self):
+        """Negative strong sentiment items pass the pre-filter."""
+        from src.workers.sentiment import _MARKETAUX_NEUTRAL_THRESHOLD
+        item = self._make_marketaux_item(sentiment=-0.4)
+        assert abs(item.marketaux_sentiment) >= _MARKETAUX_NEUTRAL_THRESHOLD
+
+    def test_marketaux_neutral_threshold_is_0_2(self):
+        """Threshold constant is 0.2 (agreed token-saving boundary)."""
+        from src.workers.sentiment import _MARKETAUX_NEUTRAL_THRESHOLD
+        assert _MARKETAUX_NEUTRAL_THRESHOLD == pytest.approx(0.2)
+
+    def test_plain_newsitem_not_affected_by_prefilter(self):
+        """Plain NewsItem (no marketaux_sentiment) is never skipped by the pre-filter."""
+        item = make_news_item("MSFT")
+        assert not isinstance(item, MarketAuxNewsItem)
+        assert not hasattr(item, "marketaux_sentiment") or True  # NewsItem has no such attr

@@ -1,4 +1,4 @@
-"""Tests for NewsIngestionWorker."""
+"""Tests for NewsIngestionWorker (GDELT) and MarketAuxIngestionWorker."""
 
 import json
 from datetime import datetime, timezone
@@ -6,7 +6,26 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.models.news import GKGNewsItem, NewsItem
+from src.models.news import GKGNewsItem, MarketAuxNewsItem, NewsItem
+
+
+def make_marketaux_item(
+    url: str,
+    tickers: list[str],
+    sentiment: float | None = 0.5,
+    title: str = "Market news",
+) -> MarketAuxNewsItem:
+    return MarketAuxNewsItem(
+        id=url,
+        source="marketaux",
+        timestamp=datetime.now(timezone.utc),
+        title=title,
+        body=title,
+        url=url,
+        language="en",
+        asset_tags=tickers,
+        marketaux_sentiment=sentiment,
+    )
 
 
 def make_gkg_item(url: str, org_names: list[str], title: str = "Tech news") -> GKGNewsItem:
@@ -132,3 +151,165 @@ def test_ingestion_worker_returns_correct_stats():
     assert stats["discarded"] == 1
     assert stats["queued"] == 1
     assert stats["duplicates"] == 0
+
+
+# --- MarketAux ingestion ---
+
+def test_marketaux_process_queues_per_ticker():
+    """Multi-ticker MarketAux item creates one queue entry per ticker."""
+    from src.workers.ingestion import _process_marketaux_items
+
+    items = [make_marketaux_item("https://ma.com/1", ["NVDA", "AMD"], sentiment=0.7)]
+    mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_by_id.return_value = False
+    mock_redis = MagicMock()
+
+    stats = _process_marketaux_items(items, mock_dedup, mock_redis)
+
+    assert stats["queued"] == 2
+    assert stats["tickers_found"] == 2
+    ids = [json.loads(c[0][1])["id"] for c in mock_redis.rpush.call_args_list]
+    assert "https://ma.com/1:NVDA" in ids
+    assert "https://ma.com/1:AMD" in ids
+
+
+def test_marketaux_process_preserves_sentiment_per_ticker():
+    """Each per-ticker item retains the article-level marketaux_sentiment."""
+    from src.workers.ingestion import _process_marketaux_items
+
+    items = [make_marketaux_item("https://ma.com/2", ["AAPL"], sentiment=0.65)]
+    mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_by_id.return_value = False
+    mock_redis = MagicMock()
+
+    _process_marketaux_items(items, mock_dedup, mock_redis)
+
+    pushed = json.loads(mock_redis.rpush.call_args[0][1])
+    assert pushed["marketaux_sentiment"] == pytest.approx(0.65)
+    assert pushed["asset_tags"] == ["AAPL"]
+
+
+def test_marketaux_process_dedup():
+    """Duplicate MarketAux items are not queued twice."""
+    from src.workers.ingestion import _process_marketaux_items
+
+    items = [
+        make_marketaux_item("https://ma.com/3", ["MSFT"]),
+        make_marketaux_item("https://ma.com/3", ["MSFT"]),
+    ]
+    call_count = {"n": 0}
+
+    def dedup_side(item):
+        call_count["n"] += 1
+        return call_count["n"] > 1
+
+    mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_by_id.side_effect = dedup_side
+    mock_redis = MagicMock()
+
+    stats = _process_marketaux_items(items, mock_dedup, mock_redis)
+
+    assert stats["queued"] == 1
+    assert stats["duplicates"] == 1
+
+
+def test_marketaux_process_skips_no_tickers():
+    """Items with empty asset_tags are silently skipped."""
+    from src.workers.ingestion import _process_marketaux_items
+
+    items = [make_marketaux_item("https://ma.com/4", [], sentiment=0.8)]
+    mock_dedup = MagicMock()
+    mock_redis = MagicMock()
+
+    stats = _process_marketaux_items(items, mock_dedup, mock_redis)
+
+    assert stats["queued"] == 0
+    mock_redis.rpush.assert_not_called()
+
+
+# --- Alpaca ingestion ---
+
+def make_alpaca_item(url: str, tickers: list[str], title: str = "Benzinga news") -> NewsItem:
+    return NewsItem(
+        id=f"alpaca:{url}",
+        source="alpaca_benzinga",
+        timestamp=datetime.now(timezone.utc),
+        title=title,
+        body=title,
+        url=url,
+        language="en",
+        asset_tags=tickers,
+    )
+
+
+def test_alpaca_process_queues_per_ticker():
+    """Multi-ticker Alpaca item creates one queue entry per ticker."""
+    from src.workers.ingestion import _process_alpaca_items
+
+    items = [make_alpaca_item("https://bz.com/1", ["AAPL", "MSFT"])]
+    mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_by_id.return_value = False
+    mock_redis = MagicMock()
+
+    stats = _process_alpaca_items(items, mock_dedup, mock_redis)
+
+    assert stats["queued"] == 2
+    assert stats["tickers_found"] == 2
+    ids = [json.loads(c[0][1])["id"] for c in mock_redis.rpush.call_args_list]
+    assert "alpaca:https://bz.com/1:AAPL" in ids
+    assert "alpaca:https://bz.com/1:MSFT" in ids
+
+
+def test_alpaca_process_single_ticker_per_item():
+    """Each per-ticker item has asset_tags=[ticker] and correct source."""
+    from src.workers.ingestion import _process_alpaca_items
+
+    items = [make_alpaca_item("https://bz.com/2", ["NVDA"])]
+    mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_by_id.return_value = False
+    mock_redis = MagicMock()
+
+    _process_alpaca_items(items, mock_dedup, mock_redis)
+
+    pushed = json.loads(mock_redis.rpush.call_args[0][1])
+    assert pushed["asset_tags"] == ["NVDA"]
+    assert pushed["source"] == "alpaca_benzinga"
+    assert "marketaux_sentiment" not in pushed
+
+
+def test_alpaca_process_dedup():
+    """Duplicate Alpaca items are not queued twice."""
+    from src.workers.ingestion import _process_alpaca_items
+
+    items = [
+        make_alpaca_item("https://bz.com/3", ["TSLA"]),
+        make_alpaca_item("https://bz.com/3", ["TSLA"]),
+    ]
+    call_count = {"n": 0}
+
+    def dedup_side(item):
+        call_count["n"] += 1
+        return call_count["n"] > 1
+
+    mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_by_id.side_effect = dedup_side
+    mock_redis = MagicMock()
+
+    stats = _process_alpaca_items(items, mock_dedup, mock_redis)
+
+    assert stats["queued"] == 1
+    assert stats["duplicates"] == 1
+
+
+def test_alpaca_process_skips_no_tickers():
+    """Alpaca items with empty asset_tags are silently skipped."""
+    from src.workers.ingestion import _process_alpaca_items
+
+    items = [make_alpaca_item("https://bz.com/4", [])]
+    mock_dedup = MagicMock()
+    mock_redis = MagicMock()
+
+    stats = _process_alpaca_items(items, mock_dedup, mock_redis)
+
+    assert stats["queued"] == 0
+    mock_redis.rpush.assert_not_called()

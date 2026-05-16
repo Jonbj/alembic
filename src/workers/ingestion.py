@@ -34,10 +34,12 @@ import psycopg2
 from redis import Redis
 
 from src.config import config
+from src.connectors.alpaca_news import AlpacaNewsConnector
 from src.connectors.deduplicator import Deduplicator
 from src.connectors.gdelt_gkg import GDELTGKGConnector
+from src.connectors.marketaux import MarketAuxConnector
 from src.connectors.ticker_extractor import TickerExtractor
-from src.models.news import GKGNewsItem, NewsItem
+from src.models.news import GKGNewsItem, MarketAuxNewsItem, NewsItem
 from src.workers.celery_app import app
 
 log = logging.getLogger(__name__)
@@ -119,6 +121,183 @@ def _process_gkg_items(
             stats["queued"] += 1
 
     return stats
+
+
+async def _fetch_marketaux_items(connector: MarketAuxConnector) -> list[MarketAuxNewsItem]:
+    """Drain the async MarketAux iterator into a concrete list."""
+    return [item async for item in connector.fetch()]
+
+
+def _process_marketaux_items(
+    items: list[MarketAuxNewsItem],
+    deduplicator: Deduplicator,
+    redis_client: Redis,
+) -> dict:
+    """Expand per-ticker, deduplicate, and push MarketAuxNewsItems to news:queue.
+
+    Why expand per-ticker?
+      Same reason as GDELT: an article mentioning AAPL + MSFT generates two
+      independent SentimentWorker jobs so each ticker gets its own score.
+      Each per-ticker item carries the article-level marketaux_sentiment so
+      the SentimentWorker can apply the neutral pre-filter independently.
+    """
+    stats = {"fetched": 0, "tickers_found": 0, "queued": 0, "duplicates": 0}
+
+    for item in items:
+        stats["fetched"] += 1
+
+        if not item.asset_tags:
+            continue
+
+        stats["tickers_found"] += len(item.asset_tags)
+
+        for ticker in item.asset_tags:
+            per_ticker = MarketAuxNewsItem(
+                id=f"{item.url}:{ticker}",
+                source=item.source,
+                timestamp=item.timestamp,
+                title=item.title,
+                body=item.body,
+                url=item.url,
+                language=item.language,
+                asset_tags=[ticker],
+                marketaux_sentiment=item.marketaux_sentiment,
+            )
+
+            if deduplicator.is_duplicate_by_id(per_ticker):
+                stats["duplicates"] += 1
+                continue
+
+            redis_client.rpush("news:queue", per_ticker.model_dump_json())
+            stats["queued"] += 1
+
+    return stats
+
+
+@app.task(name="src.workers.ingestion.run_marketaux_ingestion_worker")
+def run_marketaux_ingestion_worker() -> dict:
+    """Celery entry-point for MarketAux news ingestion.
+
+    Fetches recent articles for WATCHLIST_SYMBOLS from MarketAux, expands
+    per-ticker, deduplicates, and pushes MarketAuxNewsItems to news:queue.
+
+    Scheduling:
+      - Celery beat: every 15 min, Mon–Fri 14:00–21:00 UTC
+      - 28 calls/market session — well within the 100 req/day free-tier limit.
+
+    Returns:
+        Stats dict: fetched, tickers_found, queued, duplicates.
+        Returns {"skipped": True} if MARKETAUX_API_KEY is not configured.
+    """
+    redis_client = Redis.from_url(config.REDIS_URL)
+
+    if not config.MARKETAUX_API_KEY:
+        log.warning("MARKETAUX_API_KEY not configured — skipping MarketAux ingestion")
+        redis_client.close()
+        return {"skipped": True, "reason": "no_api_key"}
+
+    try:
+        connector = MarketAuxConnector(
+            api_key=config.MARKETAUX_API_KEY,
+            symbols=config.WATCHLIST_SYMBOLS or [],
+        )
+        deduplicator = Deduplicator(redis_client)
+
+        items = asyncio.run(_fetch_marketaux_items(connector))
+        stats = _process_marketaux_items(items, deduplicator, redis_client)
+
+        log.info("MarketAux ingestion stats: %s", stats)
+        return stats
+
+    finally:
+        redis_client.close()
+
+
+async def _fetch_alpaca_items(connector: AlpacaNewsConnector) -> list[NewsItem]:
+    """Drain the async Alpaca News iterator into a concrete list."""
+    return [item async for item in connector.fetch()]
+
+
+def _process_alpaca_items(
+    items: list[NewsItem],
+    deduplicator: Deduplicator,
+    redis_client: Redis,
+) -> dict:
+    """Expand per-ticker, deduplicate, and push Alpaca NewsItems to news:queue.
+
+    Alpaca articles already contain US ticker symbols in asset_tags (from
+    Benzinga metadata). No TickerExtractor needed.
+    """
+    stats = {"fetched": 0, "tickers_found": 0, "queued": 0, "duplicates": 0}
+
+    for item in items:
+        stats["fetched"] += 1
+
+        if not item.asset_tags:
+            continue
+
+        stats["tickers_found"] += len(item.asset_tags)
+
+        for ticker in item.asset_tags:
+            per_ticker = NewsItem(
+                id=f"{item.id}:{ticker}",
+                source=item.source,
+                timestamp=item.timestamp,
+                title=item.title,
+                body=item.body,
+                url=item.url,
+                language=item.language,
+                asset_tags=[ticker],
+            )
+
+            if deduplicator.is_duplicate_by_id(per_ticker):
+                stats["duplicates"] += 1
+                continue
+
+            redis_client.rpush("news:queue", per_ticker.model_dump_json())
+            stats["queued"] += 1
+
+    return stats
+
+
+@app.task(name="src.workers.ingestion.run_alpaca_ingestion_worker")
+def run_alpaca_ingestion_worker() -> dict:
+    """Celery entry-point for Alpaca/Benzinga news ingestion.
+
+    Fetches recent Benzinga articles for WATCHLIST_SYMBOLS via Alpaca News API,
+    expands per-ticker, deduplicates, and pushes NewsItems to news:queue.
+
+    Scheduling:
+      - Celery beat: every 15 min, Mon–Fri 14:00–21:00 UTC (aligned with
+        GDELT and MarketAux ingestion tasks).
+
+    Returns:
+        Stats dict: fetched, tickers_found, queued, duplicates.
+        Returns {"skipped": True} if Alpaca credentials are not configured.
+    """
+    redis_client = Redis.from_url(config.REDIS_URL)
+
+    if not config.ALPACA_API_KEY or not config.ALPACA_SECRET_KEY:
+        log.warning("ALPACA_API_KEY/SECRET not configured — skipping Alpaca ingestion")
+        redis_client.close()
+        return {"skipped": True, "reason": "no_credentials"}
+
+    try:
+        connector = AlpacaNewsConnector(
+            api_key=config.ALPACA_API_KEY,
+            api_secret=config.ALPACA_SECRET_KEY,
+            symbols=config.WATCHLIST_SYMBOLS or [],
+        )
+        deduplicator = Deduplicator(redis_client)
+
+        items = asyncio.run(_fetch_alpaca_items(connector))
+        stats = _process_alpaca_items(items, deduplicator, redis_client)
+
+        log.info("Alpaca ingestion stats: %s", stats)
+        return stats
+
+    finally:
+        redis_client.close()
 
 
 @app.task(name="src.workers.ingestion.run_news_ingestion_worker")

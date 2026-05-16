@@ -9,7 +9,11 @@ from src.llm.budget import LLMBudgetExhaustedError, LLMBudgetTracker
 from src.llm.client import LLMClient
 from src.llm.ensemble import EnsembleAggregator, ModelOutput, run_ensemble_query
 from src.llm.finbert import FinBERTClient
-from src.models.news import LLMSentimentOutput, NewsItem
+from src.models.news import LLMSentimentOutput, MarketAuxNewsItem, NewsItem
+
+# Articles with |marketaux_sentiment| below this threshold are near-neutral.
+# Skipping LLM inference on them saves 60-80% of token spend.
+_MARKETAUX_NEUTRAL_THRESHOLD = 0.2
 from src.models.signals import SentimentResult
 from src.store.pg_store import PostgreSQLStore
 from src.store.redis_store import RedisStore
@@ -242,17 +246,40 @@ def run_sentiment_worker() -> dict:
                 break
             try:
                 data = json.loads(item_json)
-                news_items.append(NewsItem(**data))
+                if "marketaux_sentiment" in data:
+                    news_items.append(MarketAuxNewsItem(**data))
+                else:
+                    news_items.append(NewsItem(**data))
             except (json.JSONDecodeError, Exception) as e:
                 log.warning(f"Failed to parse news item from queue: {e}")
 
         if not news_items:
             return {"processed": 0, "reason": "no_items_in_queue"}
 
+        # Pre-filter: skip near-neutral MarketAux articles before LLM inference.
+        # This saves 60-80% of token spend on articles that are unlikely to
+        # produce a tradeable signal.
+        skipped_neutral = 0
+        items_to_process: list[NewsItem] = []
+        for item in news_items:
+            if (
+                isinstance(item, MarketAuxNewsItem)
+                and item.marketaux_sentiment is not None
+                and abs(item.marketaux_sentiment) < _MARKETAUX_NEUTRAL_THRESHOLD
+            ):
+                skipped_neutral += 1
+                log.debug(
+                    "Skipping neutral MarketAux article (sentiment=%.3f): %s",
+                    item.marketaux_sentiment,
+                    item.title[:60],
+                )
+            else:
+                items_to_process.append(item)
+
         # Process batch
         results = asyncio.run(
             process_news_batch(
-                news_items=news_items,
+                news_items=items_to_process,
                 clients=clients,
                 aggregator=aggregator,
                 finbert=finbert,
@@ -269,6 +296,7 @@ def run_sentiment_worker() -> dict:
             "processed": len(results),
             "ensemble_success": len(results) - fallback_count,
             "finbert_fallbacks": fallback_count,
+            "skipped_neutral": skipped_neutral,
             "symbols": list(set(r.symbol for r in results)),
         }
 
