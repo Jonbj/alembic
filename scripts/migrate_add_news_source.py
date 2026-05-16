@@ -13,11 +13,25 @@ from src.config import config
 
 def run() -> None:
     pg = psycopg2.connect(config.DATABASE_URL)
+    pg.autocommit = True  # DDL fuori da transazione esplicita
     try:
         with pg.cursor() as cur:
-            cur.execute(
-                "ALTER TABLE backtest_signals ADD COLUMN IF NOT EXISTS news_source VARCHAR"
-            )
+            # lock_timeout=0 → fallisce subito se non riesce ad acquisire il lock
+            # invece di entrare in coda e bloccare il backtest attivo
+            cur.execute("SET lock_timeout = '2s'")
+            try:
+                cur.execute(
+                    "ALTER TABLE backtest_signals ADD COLUMN IF NOT EXISTS news_source VARCHAR"
+                )
+            except Exception as e:
+                print(f"ALTER TABLE fallita (backtest attivo?): {e}")
+                print("Riesegui la migrazione dopo che il backtest ha completato.")
+                return
+
+            cur.execute("SET lock_timeout = 0")  # reset per gli UPDATE
+
+        pg.autocommit = False
+        with pg.cursor() as cur:
             cur.execute(
                 "UPDATE backtest_signals SET news_source = 'gdelt' "
                 "WHERE news_source IS NULL AND run_id LIKE 'gkg-%'"
