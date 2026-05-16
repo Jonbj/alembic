@@ -1,6 +1,6 @@
 """Tests for NewsAPIConnector."""
 import pytest
-from src.connectors.newsapi import NewsAPIConnector, NewsAPIAuthError, NewsAPIRateLimitError
+from src.connectors.newsapi import NewsAPIAuthError, NewsAPIConnector, NewsAPIPaidPlanError, NewsAPIRateLimitError
 
 
 def test_connector_instantiates():
@@ -112,6 +112,29 @@ async def test_raises_rate_limit_error_at_budget():
     with pytest.raises(NewsAPIRateLimitError):
         async for _ in conn.fetch_historical("GS", "Goldman Sachs", start, end):
             pass
+
+
+@pytest.mark.asyncio
+async def test_raises_paid_plan_error_on_426():
+    """Raises NewsAPIPaidPlanError when API returns 426 (free plan restriction)."""
+    mock_resp = AsyncMock()
+    mock_resp.status = 426
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+    mock_session = AsyncMock()
+    mock_session.get = MagicMock(return_value=mock_resp)
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    conn = NewsAPIConnector(api_key="test-key")
+    start = datetime(2025, 11, 1, tzinfo=timezone.utc)
+    end = datetime(2025, 11, 30, tzinfo=timezone.utc)
+
+    with patch("src.connectors.newsapi.aiohttp.ClientSession", return_value=mock_session):
+        with pytest.raises(NewsAPIPaidPlanError):
+            async for _ in conn.fetch_historical("GS", "Goldman Sachs", start, end):
+                pass
 
 
 @pytest.mark.asyncio

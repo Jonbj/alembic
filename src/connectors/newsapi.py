@@ -23,6 +23,14 @@ class NewsAPIRateLimitError(Exception):
     """Raised when the daily request budget is exhausted."""
 
 
+class NewsAPIPaidPlanError(Exception):
+    """Raised when the query requires a paid NewsAPI plan (HTTP 426).
+
+    The free plan only allows articles from the past month. Historical
+    queries (>30 days ago) require the Developer plan or higher.
+    """
+
+
 class NewsAPIConnector(NewsConnector):
     """Fetch articles from NewsAPI v2 /everything endpoint.
 
@@ -88,6 +96,11 @@ class NewsAPIConnector(NewsConnector):
 
                 if resp.status == 401:
                     raise NewsAPIAuthError("NewsAPI returned 401 — check NEWSAPI_KEY")
+                if resp.status == 426:
+                    raise NewsAPIPaidPlanError(
+                        "NewsAPI returned 426 — free plan only allows articles from the past "
+                        "month. Upgrade to Developer plan for historical data."
+                    )
                 if resp.status == 429:
                     raise NewsAPIRateLimitError("NewsAPI returned 429 — daily limit reached")
                 if resp.status >= 500:
