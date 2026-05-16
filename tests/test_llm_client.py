@@ -8,7 +8,7 @@ import pytest
 
 from src.llm.client import (
     GlmClient, OpusClient, Qwen35Client,
-    OllamaGlmClient, OllamaQwen35Client, OllamaDeepseekClient,
+    OllamaKimiClient, OllamaGlmClient, OllamaQwen35Client, OllamaDeepseekClient,
 )
 from src.llm.ensemble import EnsembleAggregator, ModelOutput, run_ensemble_query
 from src.models.news import LLMSentimentOutput
@@ -96,7 +96,7 @@ class TestOllamaCloudClients:
 
     def test_ollama_model_ids_in_allowlist(self):
         from src.llm.client import ALLOWED_MODEL_IDS
-        for client_cls in (OllamaGlmClient, OllamaQwen35Client, OllamaDeepseekClient):
+        for client_cls in (OllamaKimiClient, OllamaGlmClient, OllamaQwen35Client, OllamaDeepseekClient):
             assert client_cls().model_id in ALLOWED_MODEL_IDS
 
     @pytest.mark.asyncio

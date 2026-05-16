@@ -660,6 +660,12 @@ class OllamaCloudClient(LLMClient):
         raise RuntimeError(f"Exhausted retries for {self.__class__.__name__}")
 
 
+class OllamaKimiClient(OllamaCloudClient):
+    """Kimi-k2.6 via Ollama cloud HTTP API — thinking model, long context."""
+    model_id = "kimi-k2.6:cloud"
+    model_name = "Kimi k2.6 (Ollama)"
+
+
 class OllamaGlmClient(OllamaCloudClient):
     """GLM-5.1 via Ollama cloud HTTP API."""
     model_id = "glm-5.1:cloud"
