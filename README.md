@@ -20,6 +20,8 @@ Alembic follows the **Alpha Miner paradigm**: all LLM inference happens offline,
 
 The system runs as five loosely-coupled phases, each driven by a separate Celery worker:
 
+![Architecture](img/alembic_architecture.jpeg)
+
 ```
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║  PHASE 1 — NEWS INGESTION  (every 15 min, Mon–Fri market hours)             ║
