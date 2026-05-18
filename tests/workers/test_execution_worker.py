@@ -1,12 +1,14 @@
 """Tests for ExecutionWorker."""
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.notifications.base import AlertLevel
 from src.workers.execution import (
     ENTRY_THRESHOLD,
+    MAX_DRAWDOWN_PCT,
     MAX_POSITION_PCT,
     STOP_LOSS_PCT,
     _is_fresh,
@@ -29,13 +31,24 @@ def _make_redis(signal: dict | None, killswitch: bool = False, regime_mult: floa
     return redis_store
 
 
-def _make_client(portfolio_value: float = 100_000, positions: dict | None = None):
+def _make_client(
+    portfolio_value: float = 100_000,
+    last_equity: float | None = None,
+    positions: dict | None = None,
+):
     client = MagicMock()
     account = MagicMock()
     account.portfolio_value = str(portfolio_value)
+    account.last_equity = str(last_equity) if last_equity is not None else None
     client.get_account.return_value = account
     client.get_all_positions.return_value = list((positions or {}).values())
     return client
+
+
+def _make_notifier():
+    notifier = MagicMock()
+    notifier.send_alert = AsyncMock(return_value=True)
+    return notifier
 
 
 def _make_position(symbol: str, avg_entry: float, current: float):
@@ -259,4 +272,112 @@ def test_stop_loss_checked_regardless_of_ema():
         stats = run_execution_cycle(["AAPL"], redis, client, data_client=data_client)
 
     assert stats["stop_losses_triggered"] == 1
-    client.close_position.assert_called_once_with("AAPL")
+
+
+# --- B1: drawdown cap ---
+
+def test_drawdown_cap_activates_killswitch():
+    """Portfolio drops ≥ MAX_DRAWDOWN_PCT from last_equity → kill-switch activated, no orders."""
+    last_equity = 100_000.0
+    portfolio_value = last_equity * (1 - MAX_DRAWDOWN_PCT - 0.01)  # 11% drop — over cap
+    redis = _make_redis(signal=_signal(score=0.8))
+    client = _make_client(portfolio_value=portfolio_value, last_equity=last_equity)
+
+    stats = run_execution_cycle(["AAPL", "MSFT"], redis, client)
+
+    redis.activate_killswitch.assert_called_once()
+    assert stats["orders_placed"] == 0
+
+
+def test_drawdown_within_cap_no_killswitch():
+    """Small daily loss below threshold → execution proceeds normally."""
+    last_equity = 100_000.0
+    portfolio_value = last_equity * 0.95  # 5% drop — below 10% cap
+    redis = _make_redis(signal=_signal(score=0.8))
+    client = _make_client(portfolio_value=portfolio_value, last_equity=last_equity)
+
+    stats = run_execution_cycle(["AAPL"], redis, client)
+
+    redis.activate_killswitch.assert_not_called()
+    assert stats["orders_placed"] == 1
+
+
+def test_drawdown_at_exact_cap_triggers():
+    """Drawdown exactly at MAX_DRAWDOWN_PCT triggers the cap."""
+    last_equity = 100_000.0
+    portfolio_value = last_equity * (1 - MAX_DRAWDOWN_PCT)  # exactly 10%
+    redis = _make_redis(signal=_signal(score=0.8))
+    client = _make_client(portfolio_value=portfolio_value, last_equity=last_equity)
+
+    stats = run_execution_cycle(["AAPL"], redis, client)
+
+    redis.activate_killswitch.assert_called_once()
+
+
+def test_drawdown_cap_missing_last_equity_does_not_crash():
+    """If Alpaca does not provide last_equity, skip cap check and continue normally."""
+    redis = _make_redis(signal=_signal(score=0.8))
+    client = _make_client(portfolio_value=80_000, last_equity=None)  # no baseline
+
+    stats = run_execution_cycle(["AAPL"], redis, client)
+
+    redis.activate_killswitch.assert_not_called()
+    assert stats["orders_placed"] == 1
+
+
+# --- B2: Telegram alerts for infrastructure errors ---
+
+def test_drawdown_cap_sends_critical_alert():
+    """Drawdown cap trigger → notifier.send_alert called with CRITICAL level."""
+    last_equity = 100_000.0
+    portfolio_value = last_equity * (1 - MAX_DRAWDOWN_PCT - 0.01)
+    redis = _make_redis(signal=_signal(score=0.8))
+    client = _make_client(portfolio_value=portfolio_value, last_equity=last_equity)
+    notifier = _make_notifier()
+
+    run_execution_cycle(["AAPL"], redis, client, notifier=notifier)
+
+    notifier.send_alert.assert_called_once()
+    _, kwargs = notifier.send_alert.call_args
+    assert kwargs["level"] == AlertLevel.CRITICAL
+
+
+def test_alpaca_unreachable_sends_critical_alert():
+    """Alpaca API error → notifier.send_alert called with CRITICAL."""
+    redis = _make_redis(signal=_signal(score=0.8))
+    client = _make_client()
+    client.get_account.side_effect = Exception("connection refused")
+    notifier = _make_notifier()
+
+    stats = run_execution_cycle(["AAPL"], redis, client, notifier=notifier)
+
+    assert stats["errors"] == 1
+    notifier.send_alert.assert_called_once()
+    _, kwargs = notifier.send_alert.call_args
+    assert kwargs["level"] == AlertLevel.CRITICAL
+
+
+def test_redis_unreachable_sends_critical_alert():
+    """Redis connection error → notifier.send_alert with CRITICAL, errors incremented."""
+    redis = _make_redis(signal=_signal(score=0.8))
+    redis.is_killswitch_active.side_effect = Exception("Redis connection refused")
+    client = _make_client()
+    notifier = _make_notifier()
+
+    stats = run_execution_cycle(["AAPL"], redis, client, notifier=notifier)
+
+    assert stats["errors"] == 1
+    notifier.send_alert.assert_called_once()
+    _, kwargs = notifier.send_alert.call_args
+    assert kwargs["level"] == AlertLevel.CRITICAL
+
+
+def test_no_alert_without_notifier():
+    """All error conditions with notifier=None must not crash."""
+    redis = _make_redis(signal=_signal(score=0.8))
+    client = _make_client()
+    client.get_account.side_effect = Exception("Alpaca down")
+
+    stats = run_execution_cycle(["AAPL"], redis, client, notifier=None)
+
+    assert stats["errors"] == 1

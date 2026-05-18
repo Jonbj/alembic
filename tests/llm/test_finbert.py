@@ -1,9 +1,16 @@
 """Tests for FinBERT fallback with entropic confidence mapping."""
 
 import pytest
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from src.llm.finbert import FinBERTClient, FinBERTResult, entropic_confidence
+from src.models.news import NewsItem
+
+
+def _make_article(title: str, ts: datetime | None = None) -> NewsItem:
+    ts = ts or datetime.now(timezone.utc)
+    return NewsItem(id="test", source="gdelt", timestamp=ts, title=title, body=title)
 
 
 class TestEntropicConfidence:
@@ -170,3 +177,64 @@ class TestFinBERTClient:
         assert hasattr(result, "confidence")
         assert hasattr(result, "worker_type")
         assert result.worker_type == "finbert"
+
+
+class TestFinBERTClientScoreArticles:
+    """Tests for the batch score_articles method."""
+
+    def test_score_formula_polarity_times_confidence(self):
+        articles = [_make_article("Earnings beat")]
+        client = FinBERTClient()
+        with patch.object(client, "analyze", return_value=FinBERTResult(polarity=0.6, confidence=0.8)):
+            results = client.score_articles(articles, min_confidence=0.0)
+        assert len(results) == 1
+        _, score = results[0]
+        assert score == pytest.approx(0.6 * 0.8)
+
+    def test_returns_article_date(self):
+        ts = datetime(2025, 11, 15, tzinfo=timezone.utc)
+        articles = [_make_article("Test", ts=ts)]
+        client = FinBERTClient()
+        with patch.object(client, "analyze", return_value=FinBERTResult(polarity=0.4, confidence=0.7)):
+            results = client.score_articles(articles, min_confidence=0.0)
+        assert results[0][0] == ts.date()
+
+    def test_filters_below_min_confidence(self):
+        articles = [_make_article("High conf"), _make_article("Low conf")]
+        client = FinBERTClient()
+
+        def mock_analyze(text):
+            if "High" in text:
+                return FinBERTResult(polarity=0.75, confidence=0.85)
+            return FinBERTResult(polarity=0.0, confidence=0.10)
+
+        with patch.object(client, "analyze", side_effect=mock_analyze):
+            results = client.score_articles(articles, min_confidence=0.3)
+        assert len(results) == 1
+        assert results[0][1] == pytest.approx(0.75 * 0.85)
+
+    def test_empty_list_returns_empty(self):
+        client = FinBERTClient()
+        assert client.score_articles([], min_confidence=0.3) == []
+
+    def test_skips_article_with_no_text(self):
+        article = NewsItem(id="x", source="gdelt", timestamp=datetime.now(timezone.utc), body="", title="")
+        client = FinBERTClient()
+        with patch.object(client, "analyze") as mock_analyze:
+            results = client.score_articles([article], min_confidence=0.0)
+        mock_analyze.assert_not_called()
+        assert results == []
+
+    def test_exception_in_analyze_skips_article_and_continues(self):
+        articles = [_make_article("Good article"), _make_article("Bad article")]
+        client = FinBERTClient()
+
+        def mock_analyze(text):
+            if "Bad" in text:
+                raise RuntimeError("model error")
+            return FinBERTResult(polarity=0.5, confidence=0.9)
+
+        with patch.object(client, "analyze", side_effect=mock_analyze):
+            results = client.score_articles(articles, min_confidence=0.0)
+        assert len(results) == 1
+        assert results[0][1] == pytest.approx(0.5 * 0.9)

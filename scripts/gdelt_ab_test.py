@@ -12,7 +12,7 @@ import numpy as np
 import yfinance as yf
 
 from src.analysis.backtest import run_ab_comparison
-from src.analysis.finbert import score_articles
+from src.llm.finbert import FinBERTClient
 from src.connectors.gdelt import GDELTConnector
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -79,8 +79,9 @@ async def _process_symbol(
 
     # 2. Score with FinBERT → list of (date, score)
     # CPU-bound operation: run in executor to avoid blocking event loop
+    client = FinBERTClient()
     dated_scores = await loop.run_in_executor(
-        None, score_articles, articles, min_confidence
+        None, client.score_articles, articles, min_confidence
     )
 
     # 3. Aggregate to daily mean scores

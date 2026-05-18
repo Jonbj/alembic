@@ -1,94 +1,112 @@
-# LLM Trading System — Alpha Miner Architecture
+<div align="center">
+  <img src="img/alembic.png" alt="Alembic" width="180"/>
 
-Sistema di trading algoritmico basato su LLM che segue il paradigma **"Alpha Miner"**: i modelli LLM operano come motore **offline** di generazione segnali, **mai nel loop critico di esecuzione**.
+  # Alembic — Open Source Finance
 
-## Panoramica Architetturale
+  **LLM-Based Algorithmic Trading System**
+
+  *Alpha Miner paradigm: LLMs run offline, execution reads pre-computed signals from Redis*
+
+  ![Tests](https://img.shields.io/badge/tests-594%20passing-brightgreen)
+  ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+  ![License](https://img.shields.io/badge/license-MIT-lightgrey)
+</div>
+
+---
+
+## Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    OFFLINE SENTIMENT PIPELINE                           │
 │                                                                         │
-│  [News/GDELT/RSS] → [Celery SentimentWorker] → [Redis TTL 4h]          │
+│  [News/GDELT/RSS/Alpaca] → [Celery SentimentWorker] → [Redis TTL 4h]   │
 │                                          │                              │
 │                                          ↓                              │
 │                                   [PostgreSQL Audit]                    │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
-                                    ↓ (lettura a ogni tick)
+                                    ↓ (every 15 min, market hours)
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    EXECUTION ENGINE (QuantConnect Lean)                 │
+│                    EXECUTION ENGINE (Alpaca ExecutionWorker)            │
 │                                                                         │
-│  Legge segnali pre-calcolati da Redis → Calcola position sizing         │
-│  → Applica moltiplicatore regime → Esegue ordini su broker             │
+│  Kill-switch → EMA cache → Drawdown cap → Per-symbol signal read        │
+│  → Stop-loss check → score > 0.3 + price > EMA20 → Market BUY order   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Principi Chiave
+### Core Principles
 
-| Principio | Descrizione |
+| Principle | Description |
 |-----------|-------------|
-| **LLM Offline** | Nessun LLM viene chiamato sincronamente dentro `OnData()` o loop di trading |
-| **Signal Caching** | Segnali cached in Redis con TTL 4 ore |
-| **Audit Trail** | Tutti i segnali scritti su PostgreSQL per backtest e IC calculation |
-| **Graceful Degradation** | Redis OOM gestito, fallback a FinBERT, circuit breaker |
-| **Regime-Aware Sizing** | QuantConnect legge `qc:sizing_multiplier` da Redis (1.0×, 0.7×, 0.4×, 0.2×) |
-| **Human-in-the-Loop** | Approvazione pesi via Telegram inline keyboard prima dell'auto-apply |
+| **LLM Offline** | No LLM is ever called synchronously inside the trading loop |
+| **Signal Caching** | Signals cached in Redis with 4-hour TTL |
+| **Audit Trail** | All signals written to PostgreSQL for backtest and IC calculation |
+| **Graceful Degradation** | Redis OOM handled, FinBERT fallback, circuit breakers |
+| **Regime-Aware Sizing** | `regime_multiplier` (1.0×, 0.7×, 0.4×, 0.2×) applied to position size |
+| **Human-in-the-Loop** | Weight updates require Telegram approval when guardrails fail |
+| **Drawdown Cap** | Daily loss ≥ 10% auto-activates kill-switch + Telegram CRITICAL alert |
 
 ---
 
 ## Tech Stack
 
-| Componente | Tecnologia | Scopo |
-|------------|------------|-------|
-| **LLM Ensemble** | Opus, Qwen3.5, DeepSeek-V4 | Sentiment analysis con DK-CoT |
-| **Fallback Model** | FinBERT | Fallback quando ensemble diverge o budget exhausted |
-| **Message Queue** | Celery + Redis | Background task processing |
-| **Cache** | Redis | Signal caching (TTL 4h), kill-switch, counters, regime state |
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **LLM Ensemble** | Opus, Qwen3.5, DeepSeek-V4 | Sentiment analysis with DK-CoT |
+| **Fallback Model** | FinBERT | Fallback when ensemble diverges or budget exhausted |
+| **Task Queue** | Celery + Redis | Background task processing |
+| **Cache** | Redis | Signal caching, kill-switch, counters, regime state |
 | **Database** | PostgreSQL | Audit trail, performance metrics, weight change log |
-| **API** | FastAPI | Endpoints per segnali, admin, performance, pesi |
-| **Execution** | QuantConnect Lean | Backtesting e live trading |
-| **Notifications** | Telegram Bot | Alert, report giornalieri, approvazione pesi via keyboard |
-| **Macro Data** | FRED API + yfinance | VIX, T10Y2Y yield curve, SPY momentum 20d |
+| **API** | FastAPI | Signals, admin, performance, and weights endpoints |
+| **Execution** | Alpaca SDK (paper + live) | Order placement, stop-loss, drawdown cap |
+| **Notifications** | Telegram Bot | Alerts, daily reports, weight approval via inline keyboard |
+| **Macro Data** | FRED API + yfinance | VIX, T10Y2Y yield curve, SPY 20d momentum |
 
 ---
 
-## Struttura del Progetto
+## Project Structure
 
 ```
-trading/
+Alembic/
 ├── src/
-│   ├── config.py              # Configurazione centralizzata (Pydantic) — env vars, guardrails
+│   ├── config.py              # Centralised config (Pydantic) — env vars, guardrails
 │   ├── models/
 │   │   ├── signals.py         # SentimentResult, LLMSentimentOutput
-│   │   ├── news.py            # NewsItem, LLMBudgetTracker
+│   │   ├── news.py            # NewsItem
 │   │   ├── performance.py     # PerformanceReport, PostMortem
 │   │   └── regime.py          # RegimeState, RegimeOutput, MacroSnapshot, RegimeLabel
 │   ├── llm/
 │   │   ├── client.py          # LLMClient ABC + OpusClient, Qwen35Client, DeepseekClient
 │   │   ├── ensemble.py        # EnsembleAggregator, run_ensemble_query
-│   │   ├── finbert.py         # FinBERT fallback + entropic confidence mapping
+│   │   ├── finbert.py         # FinBERT fallback + entropic confidence mapping + score_articles()
 │   │   └── budget.py          # LLMBudgetTracker (daily budget enforcement)
 │   ├── connectors/
 │   │   ├── base.py            # NewsConnector ABC
 │   │   ├── deduplicator.py    # Redis hash-based deduplication
-│   │   ├── rss.py             # RSS feed connector
+│   │   ├── gdelt_gkg.py       # GDELT GKG v2 bulk connector
 │   │   ├── gdelt.py           # GDELT news connector
+│   │   ├── marketaux.py       # MarketAux news connector
+│   │   ├── alpaca_news.py     # Alpaca news connector
 │   │   ├── macro.py           # FRED API: VIX, yield curve, SPY momentum
+│   │   ├── ticker_extractor.py# Company name → ticker (PostgreSQL lookup)
 │   │   └── sec_edgar.py       # SEC EDGAR 8-K/10-Q filing connector
 │   ├── store/
-│   │   ├── redis_store.py     # RedisStore: signals, kill-switch, weights, regime, offset
+│   │   ├── redis_store.py     # RedisStore: signals, kill-switch, weights, regime
 │   │   └── pg_store.py        # PostgreSQLStore: audit, IC data, weight update log
 │   ├── performance/
 │   │   ├── ic.py              # Composite IC B4 + Newey-West HAC correction
 │   │   ├── weights.py         # LOO ICIR + smoothing + guardrails
 │   │   ├── drift.py           # PSI + CUSUM + circuit breakers
-│   │   ├── postmortem.py      # Trigger logic + diagnosi
+│   │   ├── postmortem.py      # Trigger logic + diagnostics
 │   │   └── threshold.py       # Bucket IC + threshold suggester
 │   ├── workers/
-│   │   ├── celery_app.py      # Celery configuration + beat schedule (7 task registrations)
+│   │   ├── celery_app.py      # Celery config + beat schedule (8 registered tasks)
 │   │   ├── sentiment.py       # SentimentWorker: news → LLM → Redis/PG
-│   │   ├── performance.py     # PerformanceWorker: IC, pesi, drift, auto-apply
+│   │   ├── execution.py       # ExecutionWorker: signals → Alpaca orders + drawdown cap
+│   │   ├── performance.py     # PerformanceWorker: IC, weights, drift, auto-apply
 │   │   ├── regime.py          # RegimeDetector: macro → LLM pair → regime → Redis
+│   │   ├── ingestion.py       # NewsIngestionWorker: GDELT/MarketAux/Alpaca → Redis queue
 │   │   └── telegram_poller.py # TelegramPoller: /getUpdates → approve/reject weights
 │   ├── api/
 │   │   ├── main.py            # FastAPI application
@@ -99,363 +117,117 @@ trading/
 │   │       ├── admin.py       # POST /api/admin/killswitch, /mode
 │   │       └── performance.py # GET/POST /api/performance/*, /weights/*
 │   ├── notifications/
-│   │   └── telegram.py        # TelegramNotifier + format helpers per ogni alert type
+│   │   ├── base.py            # AlertLevel enum + Notifier Protocol
+│   │   └── telegram.py        # TelegramNotifier + format helpers
+│   ├── analysis/
+│   │   └── backtest.py        # A/B comparison: GDELT+FinBERT vs buy-and-hold
 │   └── text/
-│       └── sanitizer.py       # sanitize_text(): BiDi, emoji, NFKC normalization
-├── quantconnect/
-│   ├── signal_data.py         # LLMSignalData (PythonData feed)
-│   └── intraday_strategy.py   # Intraday 1h strategy
-├── tests/
-│   ├── llm/                   # LLM client, ensemble, finbert tests
-│   ├── performance/           # IC, weights, drift, postmortem tests
-│   ├── workers/               # SentimentWorker, PerformanceWorker, RegimeWorker, TelegramPoller
-│   ├── api/                   # FastAPI route tests, weight approval tests
-│   ├── connectors/            # RSS, GDELT, macro, deduplicator tests
-│   ├── models/                # Regime, performance model tests
-│   ├── notifications/         # Telegram format functions tests
-│   ├── quantconnect/          # QuantConnect signal data tests
-│   └── test_*.py              # Security fixes, budget, stores tests
+│       └── sanitizer.py       # sanitize_text(): BiDi, emoji, NFKC normalisation
+├── scripts/
+│   ├── run_backtest.py        # GKG backtest runner (multi-month, checkpoint every 50 rows)
+│   └── gdelt_ab_test.py       # GDELT A/B test CLI
+├── tests/                     # 594 tests — mirrors src/ structure
 ├── migrations/
-│   └── 001_initial.sql        # Database schema (sentiment_signals, llm_spending, weight_update_log)
+│   └── 001_initial.sql        # DB schema: sentiment_signals, llm_spending, weight_update_log
 ├── config/
-│   └── workers.yaml           # Soglie operative (ic_window, psi, ensemble thresholds, ecc.)
+│   └── workers.yaml           # Operational thresholds (IC window, PSI, ensemble, ecc.)
+├── img/
+│   └── alembic.png            # Application logo
 ├── docs/
-│   ├── superpowers/
-│   │   ├── specs/             # Specifiche tecniche dettagliate per ogni feature
-│   │   └── plans/             # Piani di implementazione Fase 1, 1b, 2
-│   ├── ARCHITECTURE.md        # Documentazione architetturale completa
-│   └── API.md                 # API reference completa con esempi
+│   ├── ARCHITECTURE.md        # Full technical architecture documentation
+│   └── API.md                 # API reference with examples
 └── pyproject.toml             # Project metadata + dependencies
 ```
 
 ---
 
-## Setup e Installazione
+## Setup
 
-### Prerequisiti
+### Prerequisites
 
 - Python 3.11+
 - Redis 7+
 - PostgreSQL 15+
-- Celery 5+
+- Docker (for local Redis + PG)
 
-### Installazione
+### Installation
 
 ```bash
-# Clona il repository
-git clone https://github.com/your-org/trading.git
-cd trading
+git clone https://github.com/your-org/Alembic.git
+cd Alembic
 
-# Installa dipendenze
 pip install -e ".[dev]"
-
-# Copia ambiente
 cp .env.example .env
-
-# Modifica .env con le tue credenziali
-# ADMIN_API_KEY, DATABASE_URL, REDIS_URL, TELEGRAM_BOT_TOKEN, FRED_API_KEY, ecc.
+# Edit .env with your credentials
 ```
 
-### Avvio Servizi (Development)
+### Start Services (Development)
 
 ```bash
-# Avvia Redis e PostgreSQL
-docker-compose up -d redis postgres
+# Redis + PostgreSQL
+docker-compose up -d
 
-# Avvia Celery worker (elabora tutti i task)
+# Celery worker
 celery -A src.workers.celery_app worker --loglevel=info
 
-# Avvia Celery beat (scheduler — trig ga i task periodici)
+# Celery beat (scheduler)
 celery -A src.workers.celery_app beat --loglevel=info
 
-# Avvia FastAPI
+# FastAPI
 uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ---
 
-## Configurazione
+## Configuration
 
-### Variabili d'Ambiente
+### Environment Variables
 
-| Variabile | Obbligatoria | Default | Descrizione |
-|-----------|--------------|---------|-------------|
-| `ADMIN_API_KEY` | ✅ | — | API key per endpoint admin (min 32 char) |
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ADMIN_API_KEY` | ✅ | — | API key for admin endpoints (min 32 chars) |
 | `DATABASE_URL` | ✅ | — | PostgreSQL connection string |
 | `REDIS_URL` | ✅ | `redis://localhost:6379/0` | Redis connection string |
-| `TELEGRAM_BOT_TOKEN` | ❌ | — | Token bot Telegram (da @BotFather) |
-| `TELEGRAM_CHAT_ID` | ❌ | — | Chat ID canale Telegram per alert |
-| `TELEGRAM_ALLOWED_USER_IDS` | ❌ | — | ID Telegram autorizzati ad approvare pesi (comma-separated) |
-| `FRED_API_KEY` | ❌ | — | API key FRED per VIX e yield curve (cade su CSV pubblico se assente) |
-| `LLM_DAILY_BUDGET_USD` | ❌ | `50.0` | Budget giornaliero LLM in USD |
-| `CLAUDE_CLI_PATH` | ❌ | `claude` | Path per Claude CLI binary |
-| **Auto-apply guardrails** | | | |
-| `AUTO_APPLY_ENABLED` | ❌ | `true` | Toggle auto-apply pesi (false = sempre freeze) |
-| `AUTO_APPLY_VIX_THRESHOLD` | ❌ | `30.0` | Blocca auto-apply se VIX >= soglia |
-| `AUTO_APPLY_IC_VARIANCE_THRESHOLD` | ❌ | `0.15` | Blocca se std(purified_icir) >= soglia |
-| `AUTO_APPLY_WEIGHT_DELTA_MAX` | ❌ | `0.15` | Blocca se max(|Δpeso|) >= soglia |
-| `AUTO_APPLY_VIX_REDIS_TTL_SECONDS` | ❌ | `3600` | Cache VIX in Redis per N secondi |
-| `AUTO_APPLY_VIX_FRED_SERIES` | ❌ | `VIXCLS` | Serie FRED per VIX giornaliero |
-| **Regime detection** | | | |
-| `REGIME_LLM_MODEL_1` | ❌ | `opus` | Primo LLM per classificazione regime |
-| `REGIME_LLM_MODEL_2` | ❌ | `qwen3.5:cloud` | Secondo LLM per classificazione regime |
-| `REGIME_MULTIPLIER_BULL` | ❌ | `1.0` | Moltiplicatore QC sizing in regime bull |
-| `REGIME_MULTIPLIER_SIDEWAYS` | ❌ | `0.7` | Moltiplicatore QC sizing in regime sideways |
-| `REGIME_MULTIPLIER_BEAR` | ❌ | `0.4` | Moltiplicatore QC sizing in regime bear |
-| `REGIME_MULTIPLIER_HIGH_VOL` | ❌ | `0.2` | Moltiplicatore QC sizing in regime high_vol |
-| `REGIME_REDIS_TTL_SECONDS` | ❌ | `90000` | TTL regime in Redis (25h — sopravvive al gap notturno) |
+| `ALPACA_API_KEY` | ✅ | — | Alpaca API key |
+| `ALPACA_SECRET_KEY` | ✅ | — | Alpaca secret key |
+| `ALPACA_BASE_URL` | ❌ | paper URL | `https://paper-api.alpaca.markets` for paper trading |
+| `TELEGRAM_BOT_TOKEN` | ❌ | — | Telegram bot token (from @BotFather) |
+| `TELEGRAM_CHAT_ID` | ❌ | — | Channel or group ID for alerts |
+| `TELEGRAM_ALLOWED_USER_IDS` | ❌ | — | Comma-separated Telegram user IDs for weight approval |
+| `FRED_API_KEY` | ❌ | — | FRED API key for VIX and yield curve |
+| `LLM_DAILY_BUDGET_USD` | ❌ | `50.0` | Daily LLM budget in USD |
+| `WATCHLIST_SYMBOLS` | ❌ | — | Comma-separated symbols for ExecutionWorker |
+| `AUTO_APPLY_ENABLED` | ❌ | `true` | Toggle auto-apply weights |
+| `AUTO_APPLY_VIX_THRESHOLD` | ❌ | `30.0` | Block auto-apply if VIX ≥ threshold |
 
-### Soglie Operative (`config/workers.yaml`)
+### Operational Thresholds (`config/workers.yaml`)
 
 ```yaml
-# Ensemble thresholds
-ensemble_min_confidence: 0.4      # Minima confidence per modello
-ensemble_divergence_std: 0.30     # Std max per consenso
-
-# Fallback settings
-max_consecutive_fallbacks: 3      # Fallback → alert + QC sizing 50%
-
-# Performance tracking
-ic_window_days: 30                # Window per IC calculation
-psi_yellow_threshold: 0.10        # Moderate drift
-psi_red_threshold: 0.25           # Severe drift
-
-# Weight update guardrails
-weight_floor: 0.10                # Minima weight per modello
-weight_cap: 0.70                  # Massima weight per modello
-weight_max_delta: 0.10            # Max change per update
+ensemble_min_confidence: 0.4      # Min confidence per model
+ensemble_divergence_std: 0.30     # Max std for consensus
+max_consecutive_fallbacks: 3      # Fallbacks → alert + sizing 50%
+ic_window_days: 30
+psi_yellow_threshold: 0.10
+psi_red_threshold: 0.25
+weight_floor: 0.10
+weight_cap: 0.70
 ```
 
 ---
 
 ## Celery Beat Schedule
 
-| Task | Frequenza | Orario | Descrizione |
-|------|-----------|--------|-------------|
-| `sentiment-worker` | Ogni 15 min | Lun-Ven 14:00-21:00 UTC | News → LLM sentiment → Redis/PG |
-| `performance-daily` | Giornaliero | 03:00 UTC | IC report + alert Telegram |
-| `performance-weekly` | Settimanale | Lunedì 04:00 UTC | LOO ICIR → suggerimento pesi |
-| `drift-detection` | Settimanale | Domenica 04:30 UTC | PSI + CUSUM drift detection |
-| `check-suggestion-expiry` | Giornaliero | 05:00 UTC | Log pesi scaduti senza approvazione |
-| `regime-detector` | Giornaliero | Lun-Ven 07:00 UTC | Macro → LLM pair → regime → Redis |
-| `poll-telegram-updates` | Ogni 5 secondi | Sempre attivo | Processa tap approve/reject su keyboard |
-
----
-
-## Componenti Principali
-
-### 1. LLM Ensemble
-
-L'ensemble interroga **3 modelli in parallelo** (Opus, Qwen3.5, DeepSeek) e aggrega i risultati con **confidence-weighted average**.
-
-```python
-from src.llm.client import OpusClient, Qwen35Client, DeepseekClient
-from src.llm.ensemble import EnsembleAggregator, run_ensemble_query
-from src.models.news import LLMSentimentOutput
-
-clients = [OpusClient(), Qwen35Client(), DeepseekClient()]
-aggregator = EnsembleAggregator(
-    min_confidence=0.4,
-    divergence_threshold=0.30
-)
-
-outputs = await run_ensemble_query(
-    prompt="Analyze this news...",
-    clients=clients,
-    response_schema=LLMSentimentOutput,
-    symbol="AAPL"
-)
-
-result = aggregator.aggregate(outputs)
-# result = None se divergence o no eligible models → trigger FinBERT fallback
-```
-
-#### Signal Intensity Formula
-
-```
-signal_intensity = 0.60 * confidence + 0.40 * sentiment_polarity
-```
-
-### 2. FinBERT Fallback
-
-Quando l'ensemble **diverge** (std ≥ 0.30) o **nessun modello** supera la confidence threshold, il sistema fallback a FinBERT.
-
-```python
-from src.llm.finbert import FinBERTClient
-
-finbert = FinBERTClient()
-result = finbert.analyze(text="Fed raises rates...", symbol="SPY")
-
-# Entropic confidence mapping
-# confidence = 1 - H(p)/H_max (normalized Shannon entropy)
-```
-
-### 3. Budget Tracker
-
-Il budget tracker enforce il **budget giornaliero LLM** e blocca le chiamate quando exhausted.
-
-```python
-from src.llm.budget import LLMBudgetTracker, LLMBudgetExhaustedError
-
-tracker = LLMBudgetTracker(conn)
-
-try:
-    await tracker.check_budget()  # Raise LLMBudgetExhaustedError se exhausted
-    await tracker.record_spending(
-        model_id="opus",
-        input_tokens=1500,
-        output_tokens=500
-    )
-except LLMBudgetExhaustedError:
-    # Fallback a FinBERT (gratis)
-    pass
-```
-
-### 4. RegimeDetector
-
-Il `detect_regime` task (Celery beat, Lun-Ven 07:00 UTC) classifica il regime macro giornaliero e aggiorna il moltiplicatore di position sizing.
-
-```
-Flusso:
-  FRED API + yfinance → VIX, T10Y2Y, SPY_20d
-  → LLM pair (Opus + Qwen3.5) in parallelo via asyncio.gather
-  → Consensus (o regime più conservativo in caso di disaccordo)
-  → Redis: regime:current, qc:sizing_multiplier
-  → Telegram alert (solo se regime cambia)
-
-Regimi:
-  bull      → ×1.0 (full position sizing)
-  sideways  → ×0.7
-  bear      → ×0.4
-  high_vol  → ×0.2 (massima riduzione del rischio)
-
-Guardrails:
-  - Dati macro fuori range (VIX ∉ [5,100]) → skip, alert 🚨
-  - Entrambi i LLM falliscono → skip, alert 🚨
-  - data_quality="partial" → skip, alert ⚠️
-  - Disaccordo LLM → regime più conservativo, alert ⚠️ se cambia
-```
-
-```python
-from src.models.regime import RegimeState
-from src.store.redis_store import RedisStore
-
-redis = RedisStore()
-state: RegimeState | None = redis.get_regime()
-if state:
-    print(f"Regime: {state.regime} (×{state.multiplier})")
-    print(f"VIX: {state.macro_snapshot.vix:.1f}")
-```
-
-### 5. Performance Worker
-
-Il PerformanceWorker (5 task totali) calcola giornalmente/settimanalmente:
-- **Composite IC B4** (0.5×Spearman + 0.3×hit_rate + 0.2×(1−Brier))
-- **ICIR** con Newey-West HAC correction
-- **PSI** e **CUSUM** per drift detection
-- **LOO ICIR** per suggerimento pesi
-- **Auto-apply guardrails** (G1-G4) con fallback a Telegram approval
-
-```python
-from src.performance.ic import compute_composite_ic, compute_icir
-
-# Composite IC
-ic_result = compute_composite_ic(scores, returns, confidences)
-# ic_result.composite_ic, .spearman, .hit_rate, .brier
-
-# ICIR with Newey-West HAC
-icir_result = compute_icir(scores, returns, confidences)
-# icir_result.icir, .newey_west_std
-```
-
-### 6. Auto-Apply Weights con Telegram Approval Flow
-
-Quando il PerformanceWorker calcola nuovi pesi:
-
-```
-run_weekly_weights()
-  → compute LOO ICIR → compute_new_weights()
-  → store Redis: ensemble:weights:suggestion (7d TTL)
-  → trigger: check_and_apply_weights.apply_async(countdown=5)
-
-check_and_apply_weights()
-  G1: AUTO_APPLY_ENABLED? → no → exit silenzioso
-  G2: VIX < 30? → fetch da FRED (cache Redis 1h), fail-safe freeze
-  G3: std(ICIR) < 0.15? → troppa varianza modelli → freeze
-  G4: max(|Δpeso|) < 15%? → cambio troppo brusco → freeze
-
-  Se PASS → set_ensemble_weights(source="auto_apply") + Telegram ✅
-  Se FAIL → log PostgreSQL source="freeze"
-           + Telegram ⚠️ con inline keyboard (✅ Approva / ❌ Rifiuta)
-
-poll_telegram_updates() [ogni 5s via Celery beat]
-  → GET /getUpdates
-  → verifica user_id ∈ TELEGRAM_ALLOWED_USER_IDS
-  → verifica token SHA256(computed_at)[:8] anti-replay
-  → approve → set_ensemble_weights(source="telegram") + log PG
-  → reject  → delete suggestion + log PG source="rejected_via_telegram"
-```
-
-### 7. RedisStore
-
-Redis memorizza:
-- **Segnali** (TTL 4 ore)
-- **Kill-switch state** (no TTL)
-- **Fallback counter** (circuit breaker, TTL 24h)
-- **Budget exhausted flag** (TTL fino a mezzanotte)
-- **Ensemble weights** correnti (TTL 30gg)
-- **Weight suggestion** pendente (TTL 7gg) + snapshot (TTL 9gg)
-- **Regime state** (TTL 25h)
-- **VIX cached** (TTL 1h)
-- **Telegram poller offset** (no TTL — persiste tra riavvii)
-
-```python
-from src.store.redis_store import RedisStore
-
-store = RedisStore()
-
-# Signal
-store.write_sentiment(result)
-signal = store.read_sentiment("AAPL")
-
-# Kill-switch
-store.activate_killswitch(reason="VIX spike > 40")
-if store.is_killswitch_active():
-    halt_trading()
-
-# Regime
-state = store.get_regime()
-# state.regime, state.multiplier, state.macro_snapshot
-
-# Weights
-store.set_ensemble_weights({"opus": 0.4, "qwen3.5:cloud": 0.3, ...}, source="auto_apply")
-```
-
-### 8. PostgreSQLStore
-
-PostgreSQL memorizza:
-- **Audit trail** di tutti i segnali sentiment
-- **Forward returns** per IC calculation
-- **Spending records** per budget tracking
-- **Weight update log** (ogni cambio pesi: source, before, after, freeze_reason)
-
-```python
-from src.store.pg_store import PostgreSQLStore
-
-pg = PostgreSQLStore()
-
-# Fetch for IC calculation
-rows = pg.fetch_signals_for_ic(symbol="AAPL", days=30)
-# [(score, forward_return, generated_at, model_id, fallback_used), ...]
-
-# Log weight update
-pg.log_weight_update(
-    source="telegram",         # auto_apply | freeze | telegram | rejected_via_telegram | expired
-    applied_weights={"opus": 0.4, ...},
-    previous_weights={"opus": 0.34, ...},
-    suggestion_data=suggestion,
-)
-```
+| Task | Frequency | Time (UTC) | Description |
+|------|-----------|------------|-------------|
+| `execution-worker` | Every 15 min | Mon–Fri 14:00–21:00 | Signals → Alpaca orders + drawdown cap |
+| `sentiment-worker` | Every 15 min | Mon–Fri 14:00–21:00 | News → LLM sentiment → Redis/PG |
+| `ingestion-gdelt` | Every 15 min | Mon–Fri 14:00–21:00 | GDELT GKG → news queue |
+| `ingestion-marketaux` | Every 15 min | Mon–Fri 14:00–21:00 | MarketAux → news queue |
+| `ingestion-alpaca` | Every 15 min | Mon–Fri 14:00–21:00 | Alpaca news → news queue |
+| `performance-daily` | Daily | 03:00 | IC report + Telegram alert |
+| `performance-weekly` | Weekly | Mon 04:00 | LOO ICIR → weight suggestion |
+| `regime-detector` | Daily | Mon–Fri 07:00 | Macro → LLM pair → regime → Redis |
+| `poll-telegram-updates` | Every 5s | Always | Process approve/reject taps |
 
 ---
 
@@ -463,165 +235,97 @@ pg.log_weight_update(
 
 ### Signal Endpoints
 
-| Endpoint | Method | Auth | Descrizione |
+| Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
-| `/api/signals/{symbol}` | GET | No | Ultimo segnale per simbolo |
-| `/api/signals/history` | GET | No | Storia segnali (paginata) |
+| `/api/signals/{symbol}` | GET | — | Latest signal for symbol |
+| `/api/signals/history` | GET | — | Paginated signal history |
 
 ### Admin Endpoints
 
-| Endpoint | Method | Auth | Descrizione |
+| Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
-| `/api/admin/killswitch` | POST | ✅ | Attiva kill-switch (halt trading) |
-| `/api/admin/mode` | POST | ✅ | Set operating mode |
+| `/api/admin/killswitch` | POST | ✅ | Activate kill-switch (halt all trading) |
+| `/api/admin/mode` | POST | ✅ | Set operating mode: `paper` / `semi_auto` / `full_auto` |
 
 ### Performance & Weights Endpoints
 
-| Endpoint | Method | Auth | Descrizione |
+| Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
-| `/api/performance/latest` | GET | No | Ultimo performance report |
-| `/api/weights/current` | GET | No | Pesi ensemble correnti |
-| `/api/weights/suggestion` | GET | No | Suggerimento pesi pendente (con expiry) |
-| `/api/weights/approve` | POST | ✅ | Approva pesi suggeriti o forza pesi custom |
+| `/api/performance/latest` | GET | — | Latest performance report |
+| `/api/weights/current` | GET | — | Current ensemble weights |
+| `/api/weights/suggestion` | GET | — | Pending weight suggestion (with expiry) |
+| `/api/weights/approve` | POST | ✅ | Approve suggested or force custom weights |
 
 ---
 
 ## Testing
 
 ```bash
-# Run all tests
 python -m pytest tests/ -v
-
-# Run specific category
-python -m pytest tests/llm/ -v
-python -m pytest tests/performance/ -v
 python -m pytest tests/workers/ -v
-python -m pytest tests/test_security_fixes.py -v
-
-# Run with coverage
 python -m pytest tests/ --cov=src --cov-report=html
 ```
 
-### Test Coverage Attuale
+### Test Coverage
 
-| Categoria | Test Count | Status |
-|-----------|------------|--------|
-| LLM (client, ensemble, finbert) | 17 | ✅ |
-| Performance (IC, weights, drift, postmortem, threshold) | 89 | ✅ |
-| Workers (sentiment, performance, regime, telegram_poller) | 52 | ✅ |
-| API (routes, auth, weight approval) | 12 | ✅ |
-| Connectors (RSS, GDELT, macro, deduplicator) | 20 | ✅ |
-| Models (regime, performance) | 8 | ✅ |
-| Notifications (telegram format functions) | 15 | ✅ |
-| QuantConnect (signal data) | 6 | ✅ |
-| Security fixes | 15 | ✅ |
-| Stores (Redis, Postgres, budget tracker) | 60 | ✅ |
-| Config | 5 | ✅ |
-| Analysis (backtest, finbert, GDELT AB) | 16 | ✅ |
-| **TOTALE** | **433** | **✅** |
-
----
-
-## Security
-
-### Fix Implementati (P0)
-
-| Vulnerabilità | Fix |
-|---------------|-----|
-| Command injection (subprocess) | `ALLOWED_MODEL_IDS` frozenset whitelist |
-| CLI path non validato | `shutil.which()` + existence check |
-| SQL injection (INTERVAL) | Parametrized query con `|| ' days'::interval` |
-| BiDi override characters | Rimozione in `sanitize_text()` |
-| Emoji nel JSON | Regex removal in `sanitize_text()` |
-| Redis OOM | Try/except in tutte le write operations |
-| ZeroDivisionError ensemble | Check `if total_conf == 0` |
-| Connection leak PostgreSQL | Rollback su eccezione in `pg_store` |
-| Telegram replay attack | Token SHA256(computed_at)[:8] per ogni suggestion |
-| Telegram unauthorized tap | Allowlist TELEGRAM_ALLOWED_USER_IDS |
-
----
-
-## Monitoraggio e Alerting
-
-### Telegram Alerts
-
-Il sistema invia alert per:
-- **Kill-switch activation** (VIX spike, drawdown) → livello critical 🚨
-- **Budget exhausted** (LLM daily limit raggiunto) → livello warning ⚠️
-- **Fallback threshold** (3+ consecutivi → QC sizing 50%) → livello warning ⚠️
-- **Drift detection** (PSI > 0.10 yellow, > 0.25 red) → livello warning/critical
-- **Performance report** (giornaliero 03:00 UTC) → livello info 📊
-- **Weight auto-apply** (successo guardrails) → livello info ✅
-- **Weight freeze** (guardrail fallito) → con inline keyboard ✅/❌
-- **Regime change** (solo al cambio, pre-market 07:00 UTC) → livello info/warning
-
-### Redis Keys
-
-| Key | Tipo | TTL | Descrizione |
-|-----|------|-----|-------------|
-| `signal:{symbol}:sentiment` | String | 4h | Ultimo segnale LLM per simbolo |
-| `killswitch_active` | String | — | "1" = trading haltato |
-| `killswitch_reason` | String | — | JSON con reason e timestamp |
-| `fallback:consecutive:count` | Counter | 24h | Fallback counter (circuit breaker) |
-| `fallback:alert_sent` | String | 24h | Flag dedup alert Telegram |
-| `qc:sizing_multiplier` | String | 24h o regime TTL | Position sizing (1.0 / 0.5 / da regime) |
-| `budget:exhausted` | String | fino a mezzanotte+1h | Flag budget LLM esaurito |
-| `ensemble:weights:current` | String | 30gg | JSON pesi attivi + source |
-| `ensemble:weights:suggestion` | String | 7gg | Suggerimento pesi pendente |
-| `ensemble:weights:suggestion:snapshot` | String | 9gg | Backup snapshot (per expiry tracking) |
-| `ensemble:divergence:log` | List | 24h | Log divergenze ensemble (max 1000) |
-| `performance:latest_report` | String | 7gg | Ultimo JSON performance report |
-| `performance:neg_ic_streak` | Counter | 30gg | Giorni consecutivi con IC negativo |
-| `system:mode` | String | 30gg | Modalità operativa del sistema |
-| `regime:current` | String | 25h | JSON RegimeState (regime + multiplier + snapshot LLM) |
-| `macro:vix:latest` | String | 1h | VIX cached da FRED API |
-| `telegram:poller:offset` | Integer | — | Ultimo update_id Telegram processato (no TTL) |
-| `drift:alert:{model}` | String | 7gg | Alert drift per modello (PSI/CUSUM) |
-| `market:vix` | String | — | VIX per circuit breaker (scritto da QuantConnect) |
-| `portfolio:drawdown` | String | — | Drawdown portfolio (scritto da QuantConnect) |
-| `portfolio:earnings_pct` | String | — | % portfolio in titoli con earnings imminenti |
-| `market:cross_corr` | String | — | Correlazione cross-asset (scritto da QuantConnect) |
+| Category | Tests |
+|----------|-------|
+| Workers (sentiment, execution, performance, regime, poller) | 82 |
+| Performance (IC, weights, drift, postmortem, threshold) | 89 |
+| Stores (Redis, Postgres, budget) | 60 |
+| LLM (client, ensemble, finbert) | 27 |
+| API (routes, auth, weight approval) | 12 |
+| Connectors (GDELT, MarketAux, macro, deduplicator) | 20 |
+| Notifications (base protocol, telegram formatters) | 25 |
+| Analysis (backtest, GDELT A/B) | 16 |
+| Security, config, models | 28 |
+| QuantConnect | 6 |
+| **Total** | **594** |
 
 ---
 
 ## Roadmap
 
-### Fase 1 (Completata) ✅
-- [x] LLM ensemble + FinBERT fallback
-- [x] Budget tracker
-- [x] Redis/PostgreSQL stores
-- [x] SentimentWorker + PerformanceWorker
-- [x] Composite IC + Newey-West HAC
-- [x] PSI + CUSUM drift detection
-- [x] FastAPI endpoints
-- [x] QuantConnect integration
-- [x] 281 test passing
+### Completed ✅
+- LLM ensemble + FinBERT fallback with entropic confidence
+- Budget tracker (daily limit, per-model costs)
+- Redis/PostgreSQL dual persistence
+- SentimentWorker + PerformanceWorker (Composite IC B4, Newey-West HAC, PSI, CUSUM)
+- RegimeDetector (bull/sideways/bear/high_vol → position multiplier)
+- Auto-apply weights with Telegram inline keyboard approval
+- NewsIngestionWorker (GDELT GKG v2, MarketAux, Alpaca news, ticker extraction)
+- ExecutionWorker (Alpaca paper/live, EMA momentum filter, stop-loss, drawdown cap)
+- Infrastructure alerting: Redis unreachable, Alpaca unreachable, drawdown cap (B2)
+- `Notifier` Protocol + `AlertLevel` enum for dependency injection
+- GDELT GKG backtest pipeline (multi-month, checkpoint, IC/ICIR validation)
 
-### Fase 2 (Completata) ✅
-- [x] LOO ICIR weight computation
-- [x] Weight smoothing (0.75 old + 0.25 new)
-- [x] Auto-apply guardrails (VIX, IC variance, weight delta)
-- [x] Telegram approval flow (inline keyboard ✅/❌)
-- [x] Audit trail weight changes (PostgreSQL weight_update_log)
-- [x] RegimeDetector (bull/sideways/bear/high_vol → qc:sizing_multiplier)
-- [x] Macro data connector (FRED API + yfinance)
-- [x] 433 test passing
+### In Progress 🔄
+- Phase A: Paper trading validation (3–5 weeks, needs host deployment)
+- GKG backtest Nov 2025 → IC/ICIR results pending
 
-### Fase 1b (Scalability — In Progress)
-- [ ] Redis connection pooling
-- [ ] Celery worker autoscaling
-- [ ] Structured logging (JSON)
-- [ ] Health check endpoints espansi
-- [ ] Backup script PostgreSQL
+### Planned 📋
+- Phase B: Drawdown alerting, `semi_auto` Telegram approval per-order, daily report verification, credential rotation
+- Phase C: Alpaca live account go-live
+- Zeygos Signal Connector (pre-interpreted BUY/SELL signals via Telegram)
+- QuantConnect Lean integration for institutional multi-asset backtesting
 
-### Fase 3 (Planned)
-- [ ] Multi-asset pipeline (ticker extraction da news)
-- [ ] GDELT A/B test infrastructure
-- [ ] Backtest framework integration (QuantConnect cloud)
-- [ ] Position sizing adattivo basato su IC rolling
+---
+
+## Security
+
+| Vulnerability | Fix |
+|---------------|-----|
+| Command injection (subprocess) | `ALLOWED_MODEL_IDS` frozenset allowlist |
+| SQL injection (INTERVAL) | Parameterised query with `|| ' days'::interval` |
+| BiDi override characters | Stripped in `sanitize_text()` |
+| Redis OOM | Try/except on all write operations |
+| ZeroDivisionError ensemble | `if total_conf == 0` guard |
+| PostgreSQL connection leak | Rollback on exception in `pg_store` |
+| Telegram replay attack | Token `SHA256(computed_at)[:8]` per suggestion |
+| Telegram unauthorised tap | `TELEGRAM_ALLOWED_USER_IDS` allowlist |
 
 ---
 
 ## License
 
-MIT License — vedere file `LICENSE` per dettagli.
+MIT License — see `LICENSE` for details.

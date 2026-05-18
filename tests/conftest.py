@@ -1,5 +1,12 @@
 # tests/conftest.py
+import os
+
 import pytest
+
+# Set env vars before any src.* import so src.config reads correct values
+# regardless of test collection order.
+os.environ.setdefault("ADMIN_API_KEY", "test-api-key-for-testing-only-12345678")
+os.environ.setdefault("DATABASE_URL", "postgresql://localhost:5432/test_db")
 
 
 @pytest.fixture

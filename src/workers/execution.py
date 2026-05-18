@@ -1,38 +1,52 @@
 """ExecutionWorker — reads LLM signals from Redis and places orders via Alpaca.
 
-Runs as a Celery beat task every 15 min during market hours. For each symbol
-in WATCHLIST_SYMBOLS:
+Runs as a Celery beat task every 15 min during market hours. Per every cycle:
 
-  1. Check kill-switch (halt immediately if active).
-  2. Build EMA cache: fetch last 30 hourly bars via Alpaca data API,
-     compute 20-period EMA for each symbol.
-  3. Read signal from Redis (signal:{symbol}:sentiment, TTL 4h).
-  4. Skip if signal is stale (> SIGNAL_MAX_AGE_MIN minutes old).
-  5. Check existing position — idempotent, no pyramiding.
-  6. If score > ENTRY_THRESHOLD and price > EMA20: place market order.
-     Position size = portfolio_value × MAX_POSITION_PCT × regime_multiplier.
-  7. Check stop-loss on all open positions.
+  1. Check Redis kill-switch (halt immediately if active). Redis unreachable → CRITICAL alert.
+  2. Build EMA cache: one batch Alpaca data API call for all symbols, compute 20-period EMA.
+  3. Fetch Alpaca account + all open positions (one call, shared across symbols).
+     Alpaca unreachable → CRITICAL alert.
+  4. Drawdown cap: if daily loss ≥ MAX_DRAWDOWN_PCT, activate kill-switch → CRITICAL alert.
+  5. Per symbol:
+       a. Read signal from Redis (signal:{symbol}:sentiment, TTL 4h).
+       b. Skip if signal is stale (> SIGNAL_MAX_AGE_MIN min) or fallback-only.
+       c. If position already open: check stop-loss (2% below entry) or skip (no pyramiding).
+       d. If score > ENTRY_THRESHOLD and price > EMA20: place market BUY order.
+          Notional = portfolio_value × MAX_POSITION_PCT × regime_multiplier.
 
-Why Celery task instead of QC Lean?
+Why Alpaca direct instead of QC Lean?
   QC Lean requires historical price data and a QC account. For paper trading
   validation during development, a direct Alpaca SDK integration is simpler
-  and runs entirely within the existing stack.
+  and runs entirely within the existing stack. QC remains the target for
+  multi-asset institutional backtesting (Phase C+).
+
+Infrastructure alerts (B2): Redis unreachable, Alpaca unreachable, and drawdown cap
+activation all send a CRITICAL Telegram alert via the injected Notifier. Pass
+notifier=TelegramNotifier() from the Celery task entry-point; leave None in tests
+that don't need alert assertions.
 """
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
 
 from redis import Redis
 
 from src.config import config
+from src.notifications.base import AlertLevel
 from src.store.redis_store import RedisStore
 from src.workers.celery_app import app
+
+if TYPE_CHECKING:
+    from src.notifications.base import Notifier
 
 log = logging.getLogger(__name__)
 
 ENTRY_THRESHOLD = 0.3
 MAX_POSITION_PCT = 0.10
 STOP_LOSS_PCT = 0.02
+MAX_DRAWDOWN_PCT = 0.10
 SIGNAL_MAX_AGE_MIN = 30
 EMA_PERIOD = 20
 _EMA_BARS_FETCH = EMA_PERIOD + 10  # extra bars to warm up EMA
@@ -106,6 +120,16 @@ def _build_market_cache(symbols: list[str], data_client) -> dict[str, dict]:
     return cache
 
 
+def _fire_alert(notifier: "Notifier | None", message: str, level: AlertLevel) -> None:
+    """Send alert via notifier; silently swallows send failures."""
+    if notifier is None:
+        return
+    try:
+        asyncio.run(notifier.send_alert(message, level=level))
+    except Exception as exc:
+        log.warning("Alert send failed: %s", exc)
+
+
 def _regime_multiplier(redis_store: RedisStore) -> float:
     """Return regime multiplier from Redis (default 1.0 if absent)."""
     regime = redis_store.get_regime()
@@ -119,6 +143,7 @@ def run_execution_cycle(
     redis_store: RedisStore,
     trading_client,
     data_client=None,
+    notifier: "Notifier | None" = None,
 ) -> dict:
     """Core execution logic — separated for testability.
 
@@ -128,6 +153,7 @@ def run_execution_cycle(
         trading_client: Alpaca TradingClient instance.
         data_client:    Alpaca StockHistoricalDataClient for EMA bars.
                         If None, EMA momentum filter is skipped.
+        notifier:       Optional Notifier for critical infrastructure alerts.
 
     Returns:
         Stats dict: checked, skipped_stale, skipped_killswitch, skipped_position,
@@ -148,9 +174,15 @@ def run_execution_cycle(
     }
 
     # Kill-switch check — halt all trading if active
-    if redis_store.is_killswitch_active():
-        log.warning("Kill-switch active — execution worker halted")
-        stats["skipped_killswitch"] = len(symbols)
+    try:
+        if redis_store.is_killswitch_active():
+            log.warning("Kill-switch active — execution worker halted")
+            stats["skipped_killswitch"] = len(symbols)
+            return stats
+    except Exception as e:
+        log.error("Redis unreachable: %s", e)
+        _fire_alert(notifier, f"Redis non raggiungibile: {e}", AlertLevel.CRITICAL)
+        stats["errors"] += 1
         return stats
 
     regime_mult = _regime_multiplier(redis_store)
@@ -167,8 +199,24 @@ def run_execution_cycle(
         }
     except Exception as e:
         log.error("Failed to fetch account/positions from Alpaca: %s", e)
+        _fire_alert(notifier, f"Alpaca API non raggiungibile: {e}", AlertLevel.CRITICAL)
         stats["errors"] += 1
         return stats
+
+    # Drawdown cap — activate kill-switch if daily loss exceeds MAX_DRAWDOWN_PCT
+    try:
+        last_equity = float(account.last_equity)
+        if last_equity > 0:
+            drawdown = (last_equity - portfolio_value) / last_equity
+            if drawdown >= MAX_DRAWDOWN_PCT:
+                reason = f"Daily drawdown {drawdown:.1%} >= {MAX_DRAWDOWN_PCT:.0%} cap"
+                redis_store.activate_killswitch(reason)
+                log.critical("DRAWDOWN CAP: %s — kill-switch activated", reason)
+                _fire_alert(notifier, f"Drawdown cap attivato: {reason}", AlertLevel.CRITICAL)
+                stats["skipped_killswitch"] = len(symbols)
+                return stats
+    except (ValueError, TypeError):
+        pass  # last_equity unavailable — skip cap check
 
     for symbol in symbols:
         stats["checked"] += 1
@@ -289,12 +337,16 @@ def run_execution_worker() -> dict:
         secret_key=config.ALPACA_SECRET_KEY,
     )
 
+    from src.notifications.telegram import TelegramNotifier
+    notifier = TelegramNotifier()
+
     try:
         stats = run_execution_cycle(
             symbols=config.WATCHLIST_SYMBOLS or [],
             redis_store=redis_store,
             trading_client=trading_client,
             data_client=data_client,
+            notifier=notifier,
         )
         log.info("Execution stats: %s", stats)
         return stats

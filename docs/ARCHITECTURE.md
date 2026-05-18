@@ -1,9 +1,13 @@
-# Architettura del Sistema — LLM Trading System
+<div align="center">
+  <img src="../img/alembic.png" alt="Alembic" width="140"/>
+</div>
+
+# Alembic — Architettura del Sistema
 
 **Documento di Architettura Tecnica**  
-**Versione:** 3.0.0  
-**Data:** 2026-05-13  
-**Stato:** Fase 3 Completata (464 test passing)
+**Versione:** 3.1.0  
+**Data:** 2026-05-18  
+**Stato:** Fase 3 Completata + ExecutionWorker + Phase B1/B2 (594 test passing)
 
 ---
 
@@ -83,22 +87,32 @@ Questo sistema implementa il paradigma **"Alpha Miner"** per l'integrazione di L
 │                                          ✅ approve / ❌ reject               │
 └──────────────────────────────────────────────────────────────────────────────┘
 
-                    ↓ (segnali + regime multiplier a ogni tick)
+                    ↓ (segnali + regime multiplier ogni 15 min)
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                         EXECUTION ENGINE (QuantConnect)                      │
+│                   EXECUTION ENGINE (Alpaca ExecutionWorker)                  │
 │                                                                              │
 │   ┌──────────────────────────────────────────────────────────────────────┐  │
-│   │ OnData() - Ogni tick (1ms - 1min)                                    │  │
-│   │   1. Leggi segnale da Redis (O(1), locale)                           │  │
-│   │   2. Leggi qc:sizing_multiplier (regime + fallback circuit breaker)  │  │
-│   │   3. Verifica kill-switch                                            │  │
-│   │   4. Esegui ordine se segnale valido                                 │  │
+│   │ run_execution_cycle() - Celery beat ogni 15 min (market hours)       │  │
+│   │   1. Kill-switch Redis check → halt se attivo                        │  │
+│   │   2. Batch EMA cache: fetch hourly bars, calcola 20-period EMA       │  │
+│   │   3. Fetch account Alpaca + open positions (una chiamata)            │  │
+│   │   4. Drawdown cap: se daily loss ≥ 10% → kill-switch + CRITICAL alert│  │
+│   │   5. Per simbolo:                                                    │  │
+│   │       a. Leggi signal da Redis (TTL 4h, max 30 min stale)            │  │
+│   │       b. Posizione aperta → stop-loss o skip (no pyramiding)         │  │
+│   │       c. score > 0.3 e price > EMA20 → market BUY order             │  │
+│   │          Notional = portfolio × 10% × regime_multiplier             │  │
 │   │                                                                      │  │
 │   │   ❌ NO chiamate API LLM                                             │  │
-│   │   ❌ NO attese I/O                                                   │  │
-│   │   ❌ NO serializzazione JSON                                         │  │
+│   │   ❌ NO attese I/O nel loop per-simbolo                              │  │
+│   │   ✅ Alert CRITICAL Telegram se Redis/Alpaca irraggiungibili         │  │
 │   └──────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│   Nota: QuantConnect Lean è il target per Phase C+ (backtesting             │
+│   istituzionale multi-asset). Per paper trading validation (Phase A),       │
+│   l'integrazione Alpaca diretta è più semplice e gira nello stack           │
+│   esistente senza richiedere un account QC.                                  │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -355,10 +369,9 @@ Il `SentimentWorker` downstream legge `asset_tags[0]` — invariato rispetto a F
 | `macro:vix:latest` | String | 1h | VIX float cached da FRED API (riduce chiamate API) |
 | `telegram:poller:offset` | Integer | — | Ultimo update_id Telegram (+1), no TTL — persiste tra riavvii |
 | `drift:alert:{model}` | String | 7gg | JSON drift alert per modello (PSI, CUSUM, livello) |
-| `market:vix` | String | — | VIX per circuit breaker (scritto da QuantConnect/cron) |
-| `portfolio:drawdown` | String | — | Drawdown portfolio attuale (scritto da QuantConnect) |
-| `portfolio:earnings_pct` | String | — | % portfolio in titoli con earnings imminenti |
-| `market:cross_corr` | String | — | Correlazione cross-asset (scritto da QuantConnect) |
+| `market:vix` | String | — | VIX per circuit breaker (reserved — non ancora scritto) |
+| `portfolio:earnings_pct` | String | — | % portfolio in titoli con earnings imminenti (reserved) |
+| `market:cross_corr` | String | — | Correlazione cross-asset (reserved) |
 | `news:queue` | List | — | Coda FIFO di NewsItem JSON (RPUSH da NewsIngestionWorker, LPOP da SentimentWorker) |
 | `dedup:{sha256}` | String | 2h | Content-hash dedup per SentimentWorker (`is_duplicate`) |
 | `dedup:id:{sha256}` | String | 2h | ID-hash dedup per NewsIngestionWorker (`is_duplicate_by_id`) |
@@ -453,6 +466,44 @@ def write_signal(self, result: SentimentResult) -> None:
         conn.rollback()  # CRITICAL: Rollback su errore
         raise
 ```
+
+---
+
+### 2.7 Notifier Protocol
+
+`src/notifications/base.py` definisce il contratto astratto per tutti gli alert di sistema.
+
+```python
+class AlertLevel(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+@runtime_checkable
+class Notifier(Protocol):
+    async def send_alert(self, message: str, level: AlertLevel = AlertLevel.INFO) -> bool: ...
+```
+
+**Perché Protocol e non ABC?** `Protocol` di Python usa structural subtyping: qualsiasi classe con il metodo `send_alert` compatibile è automaticamente un `Notifier`, senza ereditare esplicitamente. Questo permette di iniettare mock nei test senza importare `TelegramNotifier`.
+
+**`AlertLevel` come `str, Enum`:** I valori `"info"`, `"warning"`, `"critical"` sono identici agli string literal usati prima dell'introduzione dell'enum. I caller esistenti che passano `level="warning"` continuano a funzionare invariati.
+
+**Pattern di utilizzo nei worker:**
+
+```python
+# In Celery task entry-point (production):
+from src.notifications.telegram import TelegramNotifier
+notifier = TelegramNotifier()
+run_execution_cycle(..., notifier=notifier)
+
+# In test (nessun alert, asserzione esplicita):
+notifier = MagicMock()
+notifier.send_alert = AsyncMock(return_value=True)
+run_execution_cycle(..., notifier=notifier)
+notifier.send_alert.assert_called_once()
+```
+
+**Worker che usano `TelegramNotifier` direttamente** (regime.py, performance.py): migrazione pianificata per Phase B quando si aggiungono i nuovi tipi di alert. Non è urgente finché i worker non richiedono dependency injection per il testing.
 
 ---
 
@@ -581,33 +632,45 @@ Dove:
 
 ## 4. Circuit Breakers
 
-### 4.1 Hard Breakers (Trading Halt)
+### 4.1 Drawdown Cap — ExecutionWorker (Implementato)
+
+Il controllo più importante è in `src/workers/execution.py`. A ogni ciclo, **prima** di qualsiasi ordine:
+
+```python
+MAX_DRAWDOWN_PCT = 0.10  # 10% — configurabile via costante
+
+last_equity = float(account.last_equity)   # equity di chiusura del giorno precedente (Alpaca)
+drawdown = (last_equity - portfolio_value) / last_equity
+
+if drawdown >= MAX_DRAWDOWN_PCT:
+    redis_store.activate_killswitch(reason)   # nessun ordine fino a reset manuale
+    _fire_alert(notifier, reason, AlertLevel.CRITICAL)
+    return stats                              # ciclo interrotto
+```
+
+**Perché `last_equity` e non un valore configurato?** Alpaca restituisce nativamente l'equity di chiusura del giorno precedente. È la base naturale per il drawdown giornaliero senza richiedere uno stato esterno.
+
+**Reset:** solo manuale via `DELETE /api/admin/killswitch`.
+
+### 4.2 Hard Breakers — PerformanceWorker (Piano)
+
+Guardrail pianificati per Phase B, non ancora implementati:
 
 ```python
 HARD_BREAKERS = {
     "vix_spike": lambda ctx: ctx.vix > 40 or ctx.vix_1d_change > 0.30,
-    # VIX > 40 = panico di mercato
-    # VIX +30% in 1 giorno = spike improvviso
-    
-    "system_drawdown": lambda ctx: ctx.portfolio_drawdown > 0.05,
-    # Drawdown > 5% = perdita significativa
-    
     "ic_negative_run": lambda ctx: ctx.consecutive_negative_ic_days >= 5,
-    # 5 giorni consecutivi con IC negativo = modello rotto
 }
 ```
 
-**Azione:** Freeze weight update + alert critico + possibile halt trading.
+**Azione pianificata:** Freeze weight update + alert critico + halt trading.
 
-### 4.2 Soft Warnings (Monitoraggio)
+### 4.3 Soft Warnings — PerformanceWorker (Piano)
 
 ```python
 SOFT_WARNINGS = {
     "earnings_concentration": lambda ctx: ctx.portfolio_earnings_pct > 0.50,
-    # >50% portfolio in aziende che riportano earnings = rischio concentrazione
-    
     "cross_asset_correlation": lambda ctx: ctx.cross_asset_correlation > 0.90,
-    # Correlazione >90% = mercato direzionale, alpha difficile
 }
 ```
 
@@ -911,6 +974,76 @@ Ogni evento nel ciclo pesi viene loggato in `weight_update_log`:
 
 ---
 
+## 6d. ExecutionWorker (Alpaca)
+
+### 6d.1 Architettura
+
+Il `run_execution_worker` task viene eseguito ogni **15 minuti** durante gli orari di mercato US (Lun–Ven 14:00–21:00 UTC) da Celery beat.
+
+```
+Redis ──▶ kill-switch check ──▶ halt se attivo
+           │
+           ▼
+Alpaca Data API ──▶ _build_market_cache()
+  batch: tutti i simboli         20-period EMA + last price
+  una sola chiamata HTTP         per ogni simbolo
+           │
+           ▼
+Alpaca Trading API ──▶ get_account() + get_all_positions()
+  portfolio_value                una sola chiamata HTTP
+  last_equity (giorno prec.)
+  open_positions dict
+           │
+           ▼
+Drawdown cap ─── (last_equity - portfolio_value) / last_equity ≥ 10%?
+  Sì → activate_killswitch() + CRITICAL alert → return
+  No → continua
+           │
+           ▼
+Per ogni simbolo in WATCHLIST_SYMBOLS:
+  read_sentiment(symbol) → stale o fallback? → skip
+  symbol in open_positions?
+    ├─ price < stop_price (entry × 0.98)? → close_position()
+    └─ altrimenti → skip (idempotent, no pyramiding)
+  score > 0.3 e price > EMA20?
+    └─ submit_order(MarketOrderRequest, notional=ptf × 10% × regime_mult)
+```
+
+### 6d.2 Costanti Operative
+
+| Costante | Valore | Descrizione |
+|---|---|---|
+| `ENTRY_THRESHOLD` | 0.30 | Score minimo per entry |
+| `MAX_POSITION_PCT` | 0.10 | Max % portfolio per posizione |
+| `STOP_LOSS_PCT` | 0.02 | Stop-loss: 2% sotto entry |
+| `MAX_DRAWDOWN_PCT` | 0.10 | Drawdown giornaliero max prima del kill-switch |
+| `SIGNAL_MAX_AGE_MIN` | 30 | Segnale accettato se non più vecchio di 30 min |
+| `EMA_PERIOD` | 20 | EMA a 20 barre orarie |
+
+### 6d.3 Modalità Operative (in roadmap)
+
+| Modalità | Comportamento esecuzione ordini |
+|---|---|
+| `paper` | Automatica — Alpaca paper account (soldi finti) |
+| `semi_auto` | **Da implementare**: Telegram approval per-ordine con timeout 5 min |
+| `full_auto` | Automatica — Alpaca live account (soldi reali) |
+
+La modalità `paper` è quella attiva per Phase A (paper trading validation). `semi_auto` è il prerequisito per Phase C (live). L'infrastruttura per leggere `system:mode` da Redis esiste già in `RedisStore.get_mode()` ma `run_execution_cycle` non la consulta ancora.
+
+### 6d.4 Infrastructure Alerting (B2)
+
+Tre eventi inviano un alert `CRITICAL` via `Notifier`:
+
+| Evento | Messaggio |
+|---|---|
+| Redis irraggiungibile | "Redis non raggiungibile: \<exc\>" |
+| Alpaca API irraggiungibile | "Alpaca API non raggiungibile: \<exc\>" |
+| Drawdown cap scattato | "Drawdown cap attivato: daily drawdown X% ≥ 10%" |
+
+Il `Notifier` è iniettato dal Celery task (`TelegramNotifier()`) e opzionale nei test.
+
+---
+
 ## 8. Decision Log
 
 ### 8.1 Perché Celery e non asyncio puro?
@@ -966,7 +1099,20 @@ Ogni evento nel ciclo pesi viene loggato in `weight_update_log`:
 
 ---
 
-### 8.5 Perché token SHA256(computed_at)[:8] per l'anti-replay?
+### 8.5 Perché Alpaca direct e non QuantConnect per l'execution?
+
+**Decisione:** `ExecutionWorker` chiama direttamente Alpaca SDK per paper trading (Phase A/B).
+
+**Motivazione:**
+- QC Lean richiede un account QC, file di dati storici e un ambiente Docker dedicato
+- Per validare che la logica di esecuzione (kill-switch, stop-loss, drawdown cap) funzioni correttamente su infrastruttura reale, Alpaca paper è sufficiente e più semplice da debuggare
+- Alpaca paper e live differiscono solo per l'URL (`paper-api.alpaca.markets` vs `api.alpaca.markets`) — il passaggio a live è una riga nel `.env`
+
+**Trade-off:** QC Lean offre backtesting istituzionale multi-asset con dati storici completi. Resta il target per Phase C+ quando i volumi e la complessità lo giustificheranno.
+
+---
+
+### 8.6 Perché token SHA256(computed_at)[:8] per l'anti-replay?
 
 **Decisione:** Token derivato dal timestamp della suggestion anziché da un UUID random.
 

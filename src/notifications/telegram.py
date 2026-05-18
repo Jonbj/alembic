@@ -18,6 +18,7 @@ from datetime import date, datetime, timezone
 import httpx
 
 from src.config import config
+from src.notifications.base import AlertLevel
 
 
 class TelegramNotifier:
@@ -74,7 +75,7 @@ class TelegramNotifier:
     async def send_alert(
         self,
         message: str,
-        level: str = "info",
+        level: AlertLevel | str = AlertLevel.INFO,
         parse_mode: str = "HTML",
     ) -> bool:
         """

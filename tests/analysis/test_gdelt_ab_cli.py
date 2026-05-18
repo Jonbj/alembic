@@ -35,7 +35,10 @@ class TestRunABTest:
                 for _ in range(50)
             ]
 
-        with patch("scripts.gdelt_ab_test.score_articles", side_effect=mock_score_articles), \
+        mock_client = MagicMock()
+        mock_client.score_articles.side_effect = mock_score_articles
+
+        with patch("scripts.gdelt_ab_test.FinBERTClient", return_value=mock_client), \
              patch("scripts.gdelt_ab_test.GDELTConnector") as mock_gdelt_cls, \
              patch("scripts.gdelt_ab_test.yf.Ticker") as mock_ticker_cls:
 
@@ -66,7 +69,10 @@ class TestRunABTest:
         """Zero GDELT articles → no edge → gate should fail (delta_Sharpe < 0.1)."""
         price_df = make_price_df()
 
-        with patch("scripts.gdelt_ab_test.score_articles", return_value=[]), \
+        mock_client = MagicMock()
+        mock_client.score_articles.return_value = []
+
+        with patch("scripts.gdelt_ab_test.FinBERTClient", return_value=mock_client), \
              patch("scripts.gdelt_ab_test.GDELTConnector") as mock_gdelt_cls, \
              patch("scripts.gdelt_ab_test.yf.Ticker") as mock_ticker_cls:
 
@@ -95,7 +101,10 @@ class TestRunABTest:
         """Output dict matches the JSON schema from the spec."""
         price_df = make_price_df()
 
-        with patch("scripts.gdelt_ab_test.score_articles", return_value=[]), \
+        mock_client = MagicMock()
+        mock_client.score_articles.return_value = []
+
+        with patch("scripts.gdelt_ab_test.FinBERTClient", return_value=mock_client), \
              patch("scripts.gdelt_ab_test.GDELTConnector") as mock_gdelt_cls, \
              patch("scripts.gdelt_ab_test.yf.Ticker") as mock_ticker_cls:
 

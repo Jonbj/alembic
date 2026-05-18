@@ -7,9 +7,16 @@ Confidence is derived from 1 - normalized_entropy, so a peaked distribution
 Polarity maps the positive/negative balance accounting for neutral dampening.
 """
 
+import logging
 import math
 from dataclasses import dataclass
-from typing import Literal
+from datetime import date
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from src.models.news import NewsItem
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -116,3 +123,28 @@ class FinBERTClient:
         polarity = max(-1.0, min(1.0, polarity))
 
         return FinBERTResult(polarity=polarity, confidence=confidence)
+
+    def score_articles(
+        self,
+        articles: "list[NewsItem]",
+        min_confidence: float = 0.3,
+    ) -> list[tuple[date, float]]:
+        """Score a list of articles, returning (article_date, score) pairs.
+
+        score = polarity × confidence (using entropic confidence formula).
+        Articles below min_confidence or with no text are excluded.
+        Exceptions from analyze() are logged and skipped.
+        """
+        results = []
+        for article in articles:
+            text = article.body or article.title
+            if not text:
+                continue
+            try:
+                result = self.analyze(text)
+            except Exception as exc:
+                logger.warning("FinBERT failed for %s: %s", article.id, exc)
+                continue
+            if result.confidence >= min_confidence:
+                results.append((article.timestamp.date(), result.polarity * result.confidence))
+        return results
