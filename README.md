@@ -16,23 +16,81 @@
 
 ## Architecture Overview
 
+Alembic follows the **Alpha Miner paradigm**: all LLM inference happens offline, asynchronously, well before any trade decision. The execution engine never calls an LLM — it reads pre-computed signals from Redis. This decoupling means latency, LLM API outages, and budget exhaustion never block order placement.
+
+The system runs as five loosely-coupled phases, each driven by a separate Celery worker:
+
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    OFFLINE SENTIMENT PIPELINE                           │
-│                                                                         │
-│  [News/GDELT/RSS/Alpaca] → [Celery SentimentWorker] → [Redis TTL 4h]   │
-│                                          │                              │
-│                                          ↓                              │
-│                                   [PostgreSQL Audit]                    │
-└─────────────────────────────────────────────────────────────────────────┘
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  PHASE 1 — NEWS INGESTION  (every 15 min, Mon–Fri market hours)             ║
+║                                                                              ║
+║  GDELT GKG v2 ──┐                                                            ║
+║  MarketAux ─────┼──► NewsIngestionWorker ──► Redis news queue               ║
+║  Alpaca News ───┘         (dedup via SHA-256 hash, TTL 4 h)                 ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+                                    │ (consumed as fast as produced)
+                                    ▼
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  PHASE 2 — SENTIMENT PIPELINE  (every 15 min, Mon–Fri market hours)         ║
+║                                                                              ║
+║  Redis news queue ──► SentimentWorker                                        ║
+║                           │                                                  ║
+║                           ├──► LLM Ensemble (Opus + Qwen3.5 + DeepSeek)     ║
+║                           │       DK-CoT prompting, budget-gated             ║
+║                           │       divergence check (std > 0.30)              ║
+║                           │                                                  ║
+║                           └──► FinBERT fallback (divergence / budget OOM)   ║
+║                                                                              ║
+║                      polarity score [-1, +1] + confidence                   ║
+║                           │                   │                              ║
+║                           ▼                   ▼                              ║
+║                    Redis (TTL 4h)       PostgreSQL audit                     ║
+║                  sentiment:signal:{sym}  sentiment_signals table             ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+                                                                               
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  PHASE 3 — REGIME DETECTION  (daily, Mon–Fri 07:00 UTC)                     ║
+║                                                                              ║
+║  FRED API ─────────────┐                                                     ║
+║  (VIX, T10Y2Y spread)  ├──► MacroSnapshot ──► LLM pair (Opus + DeepSeek)   ║
+║  yfinance (SPY 20d) ───┘       consensus vote → RegimeLabel                 ║
+║                                                                              ║
+║  RegimeLabel ──► regime_multiplier written to Redis                          ║
+║    bull=1.0×  │  sideways=0.7×  │  bear=0.4×  │  high_vol=0.2×             ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+                   │                    │
+                   │ multiplier         │ signals
+                   ▼                    ▼
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  PHASE 4 — EXECUTION ENGINE  (every 15 min, Mon–Fri 14:00–21:00 UTC)       ║
+║                                                                              ║
+║  ExecutionWorker per tick:                                                   ║
+║    1. Kill-switch check   → abort if active                                  ║
+║    2. EMA20 cache refresh → SPY + watchlist prices (yfinance)                ║
+║    3. Drawdown cap check  → halt + alert if daily loss ≥ 10%                ║
+║    4. For each symbol:                                                        ║
+║         a. Read sentiment signal from Redis (freshness ≤ 30 min)            ║
+║         b. Stop-loss check (if open position and price ≤ stop)               ║
+║         c. BUY gate: score > 0.3 AND price > EMA20                          ║
+║         d. Position size = base × regime_multiplier                          ║
+║         e. Place market order via Alpaca SDK                                 ║
+╚══════════════════════════════════════════════════════════════════════════════╝
                                     │
-                                    ↓ (every 15 min, market hours)
-┌─────────────────────────────────────────────────────────────────────────┐
-│                    EXECUTION ENGINE (Alpaca ExecutionWorker)            │
-│                                                                         │
-│  Kill-switch → EMA cache → Drawdown cap → Per-symbol signal read        │
-│  → Stop-loss check → score > 0.3 + price > EMA20 → Market BUY order   │
-└─────────────────────────────────────────────────────────────────────────┘
+                                    ▼ (daily + weekly async)
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  PHASE 5 — PERFORMANCE & WEIGHT OPTIMISATION LOOP                          ║
+║                                                                              ║
+║  Daily (03:00 UTC):  PerformanceWorker                                       ║
+║    • Composite IC B4 + Newey-West HAC → IC report                           ║
+║    • PSI + CUSUM drift detection → circuit breaker if regime shift          ║
+║    • Post-mortem diagnostics → Telegram daily digest                        ║
+║                                                                              ║
+║  Weekly (Mon 04:00): LOO ICIR per model ──► weight suggestion               ║
+║    • Guardrails: VIX < 30, no active freeze, weights in [0.10, 0.70]        ║
+║    • Auto-apply if all guardrails pass                                       ║
+║    • Otherwise → Telegram inline keyboard: [✅ Approve] [❌ Reject]         ║
+║      Human approves → weights written to Redis → applied next tick          ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 ```
 
 ### Core Principles
@@ -40,12 +98,13 @@
 | Principle | Description |
 |-----------|-------------|
 | **LLM Offline** | No LLM is ever called synchronously inside the trading loop |
-| **Signal Caching** | Signals cached in Redis with 4-hour TTL |
-| **Audit Trail** | All signals written to PostgreSQL for backtest and IC calculation |
-| **Graceful Degradation** | Redis OOM handled, FinBERT fallback, circuit breakers |
-| **Regime-Aware Sizing** | `regime_multiplier` (1.0×, 0.7×, 0.4×, 0.2×) applied to position size |
-| **Human-in-the-Loop** | Weight updates require Telegram approval when guardrails fail |
-| **Drawdown Cap** | Daily loss ≥ 10% auto-activates kill-switch + Telegram CRITICAL alert |
+| **Signal Caching** | Signals cached in Redis with 4-hour TTL; stale signals are skipped, not used |
+| **Audit Trail** | Every signal written to PostgreSQL — the foundation for IC/ICIR calculation and backtesting |
+| **Graceful Degradation** | Redis OOM handled silently, FinBERT fallback on ensemble divergence, circuit breakers on drift |
+| **Regime-Aware Sizing** | `regime_multiplier` (1.0×, 0.7×, 0.4×, 0.2×) applied to position size based on macro conditions |
+| **Human-in-the-Loop** | Weight updates require Telegram approval when guardrails (VIX, drawdown, freeze) trigger |
+| **Drawdown Cap** | Daily loss ≥ 10% auto-activates kill-switch + sends Telegram CRITICAL alert |
+| **Budget Enforcement** | Daily LLM spend is tracked per-model; ensemble falls back to FinBERT when budget is exhausted |
 
 ---
 
