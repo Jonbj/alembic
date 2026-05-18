@@ -37,7 +37,8 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 ║                                                                              ║
 ║  Redis news queue ──► SentimentWorker                                        ║
 ║                           │                                                  ║
-║                           ├──► LLM Ensemble (Opus + Qwen3.5 + DeepSeek)     ║
+║                           ├──► LLM Ensemble (Kimi K2.6 + Qwen3.5 +          ║
+║                           │    DeepSeek-V4-Pro + GLM-5.1, Ollama cloud)      ║
 ║                           │       DK-CoT prompting, budget-gated             ║
 ║                           │       divergence check (std > 0.30)              ║
 ║                           │                                                  ║
@@ -54,7 +55,7 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 ║  PHASE 3 — REGIME DETECTION  (daily, Mon–Fri 07:00 UTC)                     ║
 ║                                                                              ║
 ║  FRED API ─────────────┐                                                     ║
-║  (VIX, T10Y2Y spread)  ├──► MacroSnapshot ──► LLM pair (Opus + DeepSeek)   ║
+║  (VIX, T10Y2Y spread)  ├──► MacroSnapshot ──► LLM pair (Kimi K2.6 + Qwen3.5)║
 ║  yfinance (SPY 20d) ───┘       consensus vote → RegimeLabel                 ║
 ║                                                                              ║
 ║  RegimeLabel ──► regime_multiplier written to Redis                          ║
@@ -114,7 +115,7 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| **LLM Ensemble** | Opus, Qwen3.5, DeepSeek-V4 | Sentiment analysis with DK-CoT |
+| **LLM Ensemble** | Kimi K2.6, Qwen3.5, DeepSeek-V4-Pro, GLM-5.1 (via Ollama cloud) | Sentiment analysis with DK-CoT |
 | **Fallback Model** | FinBERT | Fallback when ensemble diverges or budget exhausted |
 | **Task Queue** | Celery + Redis | Background task processing |
 | **Cache** | Redis | Signal caching, kill-switch, counters, regime state |
@@ -138,7 +139,7 @@ Alembic/
 │   │   ├── performance.py     # PerformanceReport, PostMortem
 │   │   └── regime.py          # RegimeState, RegimeOutput, MacroSnapshot, RegimeLabel
 │   ├── llm/
-│   │   ├── client.py          # LLMClient ABC + OpusClient, Qwen35Client, DeepseekClient
+│   │   ├── client.py          # LLMClient ABC + OllamaKimiClient, OllamaQwen35Client, OllamaDeepseekClient, OllamaGlmClient
 │   │   ├── ensemble.py        # EnsembleAggregator, run_ensemble_query
 │   │   ├── finbert.py         # FinBERT fallback + entropic confidence mapping + score_articles()
 │   │   └── budget.py          # LLMBudgetTracker (daily budget enforcement)
