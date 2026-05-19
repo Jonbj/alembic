@@ -98,23 +98,104 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 
 ### Phase 1 — News Ingestion
 
-Every 15 minutes during US market hours, Alembic pulls financial news from three independent sources: **GDELT GKG v2** (a free global news graph covering thousands of outlets), **MarketAux** (a paid API with pre-tagged ticker mentions), and **Alpaca News** (broker-native news feed). Each article is deduplicated via SHA-256 hash before being pushed to a Redis queue — so the same story from multiple sources is only processed once. The queue acts as a buffer between ingestion and inference, decoupling their speeds.
+Every 15 minutes during US market hours, Alembic pulls financial news from three independent sources, each chosen for a different reason:
+
+- **GDELT GKG v2** — a free, open global news graph that ingests tens of thousands of outlets worldwide. Alembic fetches the bulk CSV files published every 15 minutes, filters for English-language financial themes, and extracts article URLs, tone scores, and entity mentions. Because GDELT is a secondary index (not a primary publisher), articles can appear with a short lag, but the breadth is unmatched for zero cost.
+- **MarketAux** — a paid news API that pre-tags articles with ticker symbols. Using pre-tagged data reduces the number of LLM tokens needed for ticker extraction and increases precision: MarketAux has already resolved "Apple" → `AAPL` before the article reaches the sentiment pipeline.
+- **Alpaca News** — the broker's own news feed, surfaced via the same SDK used for order placement. Being broker-native means the latency between article publication and ingestion is minimal, and there is no additional authentication surface.
+
+Each article is fingerprinted with a **SHA-256 hash of its URL** before being pushed to a Redis list. If the hash already exists in a Redis set (TTL: 4 hours), the article is silently dropped — so the same story arriving from two sources in the same 15-minute window is processed exactly once. This deduplication is critical: without it, a major earnings announcement covered by 50 outlets would trigger 50 redundant LLM inference calls and inflate the daily budget.
+
+For SEC regulatory filings (8-K, 10-Q), a separate `SecEdgarConnector` polls the EDGAR RSS feed and pushes filings into the same Redis queue. Filings go through an identical dedup-then-enqueue flow but are tagged with `source=sec_edgar` so downstream consumers can apply different prompt templates optimised for structured financial disclosures.
+
+Company names that appear in GDELT entity fields — but are not pre-tagged with a ticker — are resolved to exchange symbols via a **PostgreSQL lookup table** (`ticker_extractor.py`). Unknown names fall through gracefully: the article is enqueued with an empty `asset_tags` list and the sentiment pipeline assigns it to a "market-wide" bucket rather than a specific symbol.
 
 ### Phase 2 — Sentiment Pipeline
 
-The `SentimentWorker` consumes articles from the queue and runs them through a **4-model LLM ensemble** (Kimi K2.6, Qwen3.5, DeepSeek-V4-Pro, GLM-5.1) accessed via Ollama cloud. Each model uses **DK-CoT prompting** (Deliberate Knowledge Chain-of-Thought), which forces the model to reason step-by-step before producing a structured JSON output with polarity (−1 to +1) and confidence (0 to 1). If the models disagree too much (standard deviation > 0.30) or the daily LLM budget is exhausted, the system falls back to **FinBERT**, a finance-domain BERT model that runs locally at zero marginal cost. The resulting signal is cached in Redis with a 4-hour TTL for the execution engine, and written to PostgreSQL for permanent audit and backtest replay.
+The `SentimentWorker` is the core intelligence of Alembic. It consumes articles from the Redis queue and produces a numeric signal for each ticker mentioned.
+
+**Scoring formula.** Every LLM response is reduced to two numbers: `polarity` ∈ [−1, +1] (directional sentiment) and `confidence` ∈ [0, 1] (model certainty). The tradeable signal is their product:
+
+```
+score = polarity × confidence
+```
+
+This formula correctly handles uncertainty: a strong positive call with low confidence yields a small score, while a moderate positive call with high confidence yields a larger one. A model that says "slightly bullish, very certain" outranks one that says "extremely bullish, almost guessing."
+
+**LLM ensemble.** Four models are queried in parallel via Ollama cloud: Kimi K2.6, Qwen3.5, DeepSeek-V4-Pro, and GLM-5.1. Each receives the same article text after passing through `sanitize_text()` — a pre-processing step that strips BiDi override characters, Unicode homoglyphs, and hidden sentiment-inverting injections that could corrupt NER or flip the model's conclusion. Every prompt uses **DK-CoT** (Domain Knowledge Chain-of-Thought): the model is instructed to act as a buy-side analyst, reason through cash flows and competition before reaching a verdict, provide explicit bull and bear cases, and return a structured JSON object. Forcing structured output makes parsing deterministic and eliminates the need for regex heuristics on free-form text.
+
+**Divergence check.** After all four scores arrive, the worker computes the standard deviation of the ensemble. If `std > 0.30`, the models have reached meaningfully different conclusions about the same article — which is itself a signal of ambiguity. Rather than averaging a high-variance ensemble into a false consensus, the worker discards the LLM results and falls back to FinBERT.
+
+**Budget enforcement.** The `LLMBudgetTracker` keeps a Redis counter of spend per model per calendar day, estimated from token counts and per-model cost rates. When a model's daily budget is exhausted, it is excluded from the ensemble for the remainder of the day. If all four models are excluded, the system falls back to FinBERT automatically — inference never blocks.
+
+**FinBERT fallback.** FinBERT is a BERT model fine-tuned on financial text that runs locally (no API call, no marginal cost). Its output probabilities (positive / negative / neutral) are mapped to a confidence score using **entropic confidence**: `1 − H(p) / log(3)`, where H(p) is the Shannon entropy of the three-class distribution. A peaked distribution (confident prediction) gives high confidence; a flat distribution (model is unsure) gives low confidence and a near-zero score.
+
+**Persistence.** The final signal is written to two stores simultaneously: Redis (`sentiment:signal:{sym}`, TTL 4 hours) for the execution engine to read in real time, and PostgreSQL (`sentiment_signals` table) as a permanent audit record. Individual per-model outputs are also persisted to `llm_responses`, enabling post-hoc analysis of which models were most predictive and backtesting of alternative ensemble weighting strategies.
 
 ### Phase 3 — Regime Detection
 
-Once per trading day (07:00 UTC), Alembic reads macro indicators from FRED (VIX volatility index, 10Y–2Y yield curve spread) and yfinance (SPY 20-day price momentum) and feeds them to a two-model LLM pair. The pair votes independently and the consensus determines the current **market regime**: bull, sideways, bear, or high_vol. Each regime maps to a **position-size multiplier** stored in Redis (1.0×, 0.7×, 0.4×, 0.2× respectively). This multiplier is applied to every order in Phase 4, automatically cutting exposure when macro conditions deteriorate — without any manual intervention.
+Market regime determines how aggressively Alembic sizes positions. Even a strongly positive sentiment signal should result in a small order when the broader macro environment is deteriorating — because in a bear market or volatility spike, even fundamentally sound companies get sold off indiscriminately.
+
+Once per trading day at **07:00 UTC** (before US pre-market), a `RegimeDetector` worker fetches three macro indicators:
+
+- **VIX** (CBOE Volatility Index) from FRED — measures implied volatility of S&P 500 options; spikes signal fear and systemic risk
+- **T10Y2Y spread** (10-year minus 2-year Treasury yield) from FRED — a negative spread (yield curve inversion) is historically associated with recessions
+- **SPY 20-day price momentum** from yfinance — whether the broad market has been trending up or down over the past month
+
+These indicators are packaged into a `MacroSnapshot` and sent to a **two-model LLM pair** (Kimi K2.6 + Qwen3.5). Each model is asked to independently classify the current regime as one of four labels:
+
+| Label | Multiplier | Typical conditions |
+|-------|-----------|-------------------|
+| `bull` | 1.0× | Low VIX, positive spread, SPY trending up |
+| `sideways` | 0.7× | Moderate VIX, flat spread, SPY range-bound |
+| `bear` | 0.4× | Elevated VIX, negative spread, SPY declining |
+| `high_vol` | 0.2× | VIX spike (>30), extreme moves in either direction |
+
+If both models agree, the consensus label is used. If they disagree, the system defaults to the more conservative label. The resulting `regime_multiplier` is written to Redis under a key that the execution engine reads before every order — no code change or restart is required for the new multiplier to take effect.
+
+Running regime detection daily rather than per-tick is an intentional design choice: macro conditions evolve over days and weeks, not minutes. Running it intraday would introduce noise without adding signal, and would double the LLM cost without a corresponding improvement in regime accuracy.
 
 ### Phase 4 — Execution Engine
 
-Every 15 minutes during market hours (14:00–21:00 UTC, Mon–Fri), the `ExecutionWorker` runs a sequential safety checklist before placing any order. It first checks the **kill-switch** (a Redis flag that operators or alerts can set to halt all trading instantly), then verifies the **daily drawdown cap** (if the portfolio is down ≥ 10% on the day, trading halts automatically and a CRITICAL alert fires on Telegram). For each symbol in the watchlist, it reads the pre-computed sentiment signal from Redis — if the signal is stale (older than 30 minutes), it is skipped entirely. A BUY order is placed only if the sentiment score exceeds 0.3 **and** the current price is above the 20-day EMA (a basic momentum filter). Position size is scaled by the regime multiplier from Phase 3. Stop-loss checks run on existing positions before any new entry is considered.
+The `ExecutionWorker` is intentionally the dumbest component in the system. By the time it runs, all the complex reasoning has already been done by the LLM ensemble (Phase 2) and the regime detector (Phase 3). The execution engine simply reads pre-computed numbers and applies a sequential safety checklist before placing any order via the Alpaca SDK.
+
+The checklist runs in strict order every 15 minutes during market hours (14:00–21:00 UTC, Mon–Fri). Each step is a gate: if it fails, the entire tick is aborted.
+
+**1. Kill-switch check.** A Redis flag (`kill_switch`) can be set by an operator, by an automated alert, or by the drawdown cap logic. If the flag is active, the worker logs the skip and exits immediately. No orders are placed, no positions are modified. This provides a single point of control for emergencies.
+
+**2. EMA20 cache refresh.** The worker fetches the latest prices for SPY and the watchlist from yfinance, computes the 20-day exponential moving average, and writes the result to a local in-process cache. This cache is used in the BUY gate below to filter out entries against the trend.
+
+**3. Drawdown cap check.** The worker queries the Alpaca portfolio history API for today's equity curve. If the portfolio is down ≥ 10% from the day's opening value, it sets the kill-switch, sends a CRITICAL Telegram alert, and halts. This cap prevents a runaway sequence of losing trades from compounding into a catastrophic loss within a single session.
+
+**4. Per-symbol loop.** For each symbol in the configured watchlist:
+
+- **Signal freshness**: reads the sentiment signal from Redis. If the signal's timestamp is older than 30 minutes, it is treated as stale and the symbol is skipped for this tick. A stale signal means the sentiment pipeline has not processed any new articles for this symbol recently — trading on old information is worse than not trading at all.
+- **Stop-loss check**: if an open position exists and the current price has fallen to or below the stop-loss level (set at order time), a market SELL is issued immediately, before any BUY logic runs.
+- **BUY gate**: a new long entry is opened only if `score > 0.3` (the sentiment signal is meaningfully positive) **and** `price > EMA20` (price is above the 20-day moving average, confirming the stock is in an uptrend). Both conditions must hold simultaneously. The score threshold of 0.3 filters out weak or near-neutral signals; the EMA filter prevents buying into a downtrend on sentiment alone.
+- **Position sizing**: `order_notional = base_position_size × regime_multiplier`. The base size is configured per account; the multiplier (0.2× to 1.0×) is applied from Phase 3. An existing open position on a symbol is not added to — the system is idempotent and never pyramids into a winning trade.
 
 ### Phase 5 — Performance & Weight Optimisation
 
-The `PerformanceWorker` runs two scheduled jobs. **Daily at 03:00 UTC**: it computes the **Information Coefficient (IC)** — the correlation between yesterday's signals and today's price moves — using a composite B4 estimator with Newey-West HAC correction for autocorrelation. It also runs PSI and CUSUM drift tests to detect if the signal distribution has shifted. Results are sent as a Telegram digest. **Weekly on Monday at 04:00 UTC**: it computes per-model **ICIR** (IC / volatility of IC) using Leave-One-Out cross-validation, then proposes updated ensemble weights. If all guardrails pass (VIX below threshold, no active freeze, weight changes within bounds), the new weights are auto-applied. Otherwise, the operator receives a Telegram message with inline [✅ Approve] / [❌ Reject] buttons — human approval is required before the weights go live.
+Phase 5 closes the feedback loop. It answers two questions on a recurring schedule: "Is the signal still working?" and "Should the ensemble weights change?"
+
+**Daily IC report (03:00 UTC).** The `PerformanceWorker` computes the **Information Coefficient (IC)** for the previous trading day — the Spearman rank correlation between each symbol's sentiment score at market open and its forward return by close. A positive IC means the signal predicted direction correctly on average; IC near zero means the signal has no predictive value; negative IC means it was systematically wrong.
+
+To correct for the autocorrelation in financial returns (yesterday's return predicts today's), IC is computed using the **composite B4 estimator** with **Newey-West HAC** (Heteroskedasticity and Autocorrelation Consistent) standard errors. This gives a statistically honest confidence interval around the IC estimate rather than overstating its significance.
+
+The IC report is sent as a Telegram digest. An IC below a configurable threshold for N consecutive days triggers an automatic circuit breaker and a CRITICAL alert — the system pauses new entries until an operator reviews.
+
+**Drift detection.** Alongside the IC, the worker runs two statistical tests on the signal distribution:
+
+- **PSI** (Population Stability Index) compares the current distribution of scores against the historical baseline. PSI > 0.10 is a yellow flag (regime shift likely); PSI > 0.25 is a red flag that triggers the circuit breaker.
+- **CUSUM** (Cumulative Sum Control Chart) detects sustained directional drift — a gradual shift in mean score that PSI might miss if the shape of the distribution stays constant.
+
+If either test fires at the red threshold, new entries are halted and the operator receives a diagnostic post-mortem report via Telegram.
+
+**Weekly weight optimisation (Monday 04:00 UTC).** The worker computes the **ICIR** (IC Information Ratio = mean IC / standard deviation of IC) for each model in the ensemble, using Leave-One-Out cross-validation over a 30-day rolling window. Models with a higher ICIR have been more consistently predictive and should receive a larger share of the ensemble vote.
+
+New weights are proposed subject to guardrails: no single model can exceed 70% weight (`weight_cap`), no model can drop below 10% (`weight_floor`), and rebalancing is blocked if VIX is above threshold or a drawdown freeze is active. These guardrails prevent the optimiser from concentrating entirely on a model that happened to be lucky in a specific regime.
+
+If all guardrails pass, the weights are **auto-applied** and written to Redis instantly — the next tick runs with the updated ensemble. If any guardrail trips, the operator receives a Telegram message with inline **[✅ Approve] / [❌ Reject]** buttons. Approval writes the weights to Redis immediately; rejection discards the proposal. This human-in-the-loop mechanism ensures that automated rebalancing cannot happen during volatile or anomalous market conditions without explicit operator sign-off.
 
 ### Core Principles
 
