@@ -10,6 +10,7 @@ import LLM from '@/pages/LLM'
 import Config from '@/pages/Config'
 import Admin from '@/pages/Admin'
 import AutoImprove from '@/pages/AutoImprove'
+import Backtest from '@/pages/Backtest'
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 3, retryDelay: (n) => Math.min(1000 * 2 ** n, 30000) } },
@@ -25,6 +26,7 @@ export default function App() {
             <Route path="/signals"      element={<Signals />} />
             <Route path="/trading"      element={<Trading />} />
             <Route path="/performance"  element={<Performance />} />
+            <Route path="/backtest"     element={<Backtest />} />
             <Route path="/news"         element={<News />} />
             <Route path="/llm"          element={<LLM />} />
             <Route path="/config"       element={<Config />} />
