@@ -189,7 +189,7 @@ class EnsembleAggregator:
         self.min_confidence = min_confidence
         self.divergence_threshold = divergence_threshold
 
-    def aggregate(self, outputs: list[ModelOutput]) -> AggregatedResult | None:
+    def aggregate(self, outputs: list[ModelOutput], weights: dict[str, float] | None = None) -> AggregatedResult | None:
         """
         Aggregate model outputs into a single consensus result.
 
@@ -243,20 +243,21 @@ class EnsembleAggregator:
         if not eligible:
             return None
 
-        # If only one model is eligible, still compute std for logging
-        # but don't reject based on divergence (single model = no divergence possible)
-        # Use ddof=1 for sample standard deviation (unbiased estimator)
         std = float(np.std([o.polarity for o in eligible], ddof=1)) if len(eligible) > 1 else 0.0
 
-        # Divergence check: only reject if multiple models disagree
         if len(eligible) > 1 and std >= self.divergence_threshold:
             return None
 
-        total_conf = sum(o.confidence for o in eligible)
-        if total_conf == 0:
-            return None  # Avoid ZeroDivisionError
-        weighted_polarity = sum(o.polarity * o.confidence for o in eligible) / total_conf
-        mean_confidence = total_conf / len(eligible)
+        # Weight each model by confidence × per-model weight (from Redis LOO ICIR rebalancing).
+        # Falls back to confidence-only when weights are not available.
+        def _w(o: ModelOutput) -> float:
+            return o.confidence * (weights.get(o.model_id, 1.0) if weights else 1.0)
+
+        total_weight = sum(_w(o) for o in eligible)
+        if total_weight == 0:
+            return None
+        weighted_polarity = sum(o.polarity * _w(o) for o in eligible) / total_weight
+        mean_confidence = sum(o.confidence for o in eligible) / len(eligible)
 
         # Use reasoning from highest-confidence model
         best = max(eligible, key=lambda o: o.confidence)

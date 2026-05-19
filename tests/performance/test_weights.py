@@ -48,7 +48,7 @@ class TestComputeRollingIc:
 
 
 class TestComputePurifiedIcir:
-    """Tests for Leave-One-Out ICIR computation."""
+    """Tests for per-model ICIR computation used in weight rebalancing."""
 
     @pytest.fixture
     def sample_data(self):
@@ -60,24 +60,32 @@ class TestComputePurifiedIcir:
         model_a = np.random.randn(n) * 0.5
         # Model B: moderate correlation
         model_b = np.random.randn(n) * 0.3
-        # Model C: weak/negative correlation
+        # Model C: weak correlation
         model_c = np.random.randn(n) * 0.1
 
-        # Returns partially driven by model signals
-        returns = 0.6 * model_a + 0.3 * model_b + 0.1 * model_c + np.random.randn(n) * 0.2
+        # Each model's returns: partially driven by its own signal
+        returns_a = 0.8 * model_a + np.random.randn(n) * 0.2
+        returns_b = 0.5 * model_b + np.random.randn(n) * 0.3
+        returns_c = 0.2 * model_c + np.random.randn(n) * 0.4
 
-        return {
+        model_signals = {
             "model_a": model_a.tolist(),
             "model_b": model_b.tolist(),
             "model_c": model_c.tolist(),
-        }, returns.tolist()
+        }
+        model_returns = {
+            "model_a": returns_a.tolist(),
+            "model_b": returns_b.tolist(),
+            "model_c": returns_c.tolist(),
+        }
+        return model_signals, model_returns
 
     def test_purified_icir_returns_dict(self, sample_data):
         """Should return a dictionary with ICIR for each model."""
-        model_signals, returns = sample_data
+        model_signals, model_returns = sample_data
         current_weights = {"model_a": 0.4, "model_b": 0.35, "model_c": 0.25}
 
-        result = compute_purified_icir(model_signals, returns, current_weights)
+        result = compute_purified_icir(model_signals, model_returns, current_weights)
 
         assert isinstance(result, dict)
         assert set(result.keys()) == {"model_a", "model_b", "model_c"}
@@ -86,38 +94,34 @@ class TestComputePurifiedIcir:
 
     def test_purified_icir_empty_input(self):
         """Should return empty dict for empty input."""
-        assert compute_purified_icir({}, [], {}) == {}
+        assert compute_purified_icir({}, {}, {}) == {}
 
     def test_purified_icir_single_model(self):
-        """Should handle single model (no LOO possible)."""
+        """Should handle single model."""
         np.random.seed(42)
         signals = np.random.randn(100).tolist()
         returns = (0.5 * np.array(signals) + np.random.randn(100) * 0.3).tolist()
 
         result = compute_purified_icir(
-            {"single": signals}, returns, {"single": 1.0}
+            {"single": signals}, {"single": returns}, {"single": 1.0}
         )
 
         assert "single" in result
         assert isinstance(result["single"], float)
 
-    def test_purified_icir_better_model_has_lower_loo_icir(self, sample_data):
-        """
-        Model with stronger signal should have LOWER LOO ICIR.
+    def test_purified_icir_better_model_has_higher_icir(self, sample_data):
+        """Stronger model (higher signal/return correlation) gets higher ICIR.
 
-        This is counter-intuitive but correct: LOO ICIR measures the ensemble
-        performance WITHOUT that model. Removing a strong model hurts the
-        ensemble more, resulting in lower ICIR. A weak model's removal has
-        less impact, so the LOO ICIR stays higher.
+        Higher ICIR → higher weight via compute_new_weights, which is correct.
         """
-        model_signals, returns = sample_data
+        model_signals, model_returns = sample_data
         current_weights = {"model_a": 0.4, "model_b": 0.35, "model_c": 0.25}
 
-        result = compute_purified_icir(model_signals, returns, current_weights)
+        result = compute_purified_icir(model_signals, model_returns, current_weights)
 
-        # Model A (strongest) when removed hurts ensemble most → lowest LOO ICIR
-        # Model C (weakest) when removed barely affects ensemble → highest LOO ICIR
-        assert result["model_a"] < result["model_c"]
+        # model_a has strongest signal/return correlation → highest ICIR
+        # model_c has weakest correlation → lowest ICIR
+        assert result["model_a"] > result["model_c"]
 
 
 class TestComputeNewWeights:
@@ -224,42 +228,43 @@ class TestIntegration:
     """Integration tests for the full weight update pipeline."""
 
     def test_full_pipeline(self):
-        """Test complete LOO ICIR → new weights pipeline."""
+        """Test complete per-model ICIR → new weights pipeline."""
         np.random.seed(42)
         n = 300
 
         # Simulate three models with different predictive power
-        base = np.random.randn(n)
-        model_a = base * 0.8 + np.random.randn(n) * 0.2  # Strong
-        model_b = base * 0.5 + np.random.randn(n) * 0.3  # Medium
-        model_c = base * 0.2 + np.random.randn(n) * 0.4  # Weak
+        model_a = np.random.randn(n)  # Strong
+        model_b = np.random.randn(n)  # Medium
+        model_c = np.random.randn(n)  # Weak
 
-        # Returns driven by base signal
-        returns = base * 0.6 + np.random.randn(n) * 0.2
+        # Each model's returns: proportional to its signal strength
+        returns_a = 0.8 * model_a + np.random.randn(n) * 0.2
+        returns_b = 0.5 * model_b + np.random.randn(n) * 0.3
+        returns_c = 0.2 * model_c + np.random.randn(n) * 0.5
 
         model_signals = {
             "strong": model_a.tolist(),
             "medium": model_b.tolist(),
             "weak": model_c.tolist(),
         }
+        model_returns = {
+            "strong": returns_a.tolist(),
+            "medium": returns_b.tolist(),
+            "weak": returns_c.tolist(),
+        }
 
         current_weights = {"strong": 0.34, "medium": 0.33, "weak": 0.33}
 
-        # Step 1: Compute purified ICIR
-        icir = compute_purified_icir(model_signals, returns, current_weights)
+        # Step 1: Compute per-model ICIR
+        icir = compute_purified_icir(model_signals, model_returns, current_weights)
 
-        # Strong model when removed hurts ensemble most → LOWER LOO ICIR
-        # (LOO ICIR measures ensemble performance WITHOUT that model)
-        assert icir["strong"] < icir["weak"]
+        # Strong model has highest IC with its own returns → highest ICIR
+        assert icir["strong"] > icir["weak"]
 
-        # Step 2: Compute new weights
+        # Step 2: Compute new weights — higher ICIR → higher weight (correct)
         new_weights = compute_new_weights(icir, current_weights)
 
-        # Note: Per spec formula max(0, icir), higher ICIR gets higher weight.
-        # Since weak model has higher LOO ICIR (ensemble does fine without it),
-        # the spec formula rewards it. This is counter-intuitive but follows spec.
-        # (Production may want to invert: use -ICIR for "essential model" logic)
-        assert new_weights["weak"] >= new_weights["strong"]
+        assert new_weights["strong"] >= new_weights["weak"]
 
         # Weights must sum to 1
         assert sum(new_weights.values()) == pytest.approx(1.0)

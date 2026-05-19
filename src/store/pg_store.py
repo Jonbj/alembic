@@ -104,9 +104,10 @@ class PostgreSQLStore:
             return self._conn
 
         if self._use_pool:
-            # Get connection from pool with timeout handling
+            # Get connection from pool — store in self._conn so close() can return it
             try:
-                return _get_pool().getconn()
+                self._conn = _get_pool().getconn()
+                return self._conn
             except psycopg2.pool.PoolError:
                 self._conn = psycopg2.connect(config.DATABASE_URL)
                 self._owns_connection = True

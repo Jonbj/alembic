@@ -159,8 +159,8 @@ def run_execution_cycle(
         Stats dict: checked, skipped_stale, skipped_killswitch, skipped_position,
                     skipped_momentum, orders_placed, stop_losses_triggered, errors.
     """
-    from alpaca.trading.enums import OrderSide, TimeInForce
-    from alpaca.trading.requests import MarketOrderRequest
+    from alpaca.trading.enums import OrderSide, QueryOrderStatus, TimeInForce
+    from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
 
     stats = {
         "checked": 0,
@@ -202,6 +202,20 @@ def run_execution_cycle(
         _fire_alert(notifier, f"Alpaca API non raggiungibile: {e}", AlertLevel.CRITICAL)
         stats["errors"] += 1
         return stats
+
+    # Fetch pending (not-yet-filled) orders to prevent duplicate BUY.
+    # get_all_positions() only returns filled positions; a pending order
+    # would not appear there, causing a second BUY on the next cycle.
+    try:
+        pending_orders: set[str] = {
+            o.symbol
+            for o in trading_client.get_orders(
+                GetOrdersRequest(status=QueryOrderStatus.OPEN)
+            )
+        }
+    except Exception as e:
+        log.warning("Failed to fetch open orders: %s — skipping duplicate BUY check", e)
+        pending_orders = set()
 
     # Drawdown cap — activate kill-switch if daily loss exceeds MAX_DRAWDOWN_PCT
     try:
@@ -258,6 +272,11 @@ def run_execution_cycle(
                 continue
 
             # --- Entry logic ---
+            if symbol in pending_orders:
+                log.debug("Pending order exists for %s — skip to avoid duplicate BUY", symbol)
+                stats["skipped_position"] += 1
+                continue
+
             if score <= ENTRY_THRESHOLD:
                 log.debug("Signal below threshold for %s (score=%.3f)", symbol, score)
                 continue

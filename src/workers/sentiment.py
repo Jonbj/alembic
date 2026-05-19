@@ -46,6 +46,7 @@ async def run_inference(
     aggregator: EnsembleAggregator,
     finbert: FinBERTClient,
     budget_tracker: LLMBudgetTracker,
+    weights: dict[str, float] | None = None,
 ) -> tuple[SentimentResult, list[ModelOutput]] | None:
     """Core LLM inference — no store writes. Callable from live worker and backtest.
 
@@ -81,7 +82,7 @@ async def run_inference(
             symbol=symbol,
         )
 
-        aggregated = aggregator.aggregate(raw_outputs) if raw_outputs else None
+        aggregated = aggregator.aggregate(raw_outputs, weights=weights) if raw_outputs else None
 
         if aggregated is None:
             log.info(f"Ensemble diverged for {symbol}, using FinBERT fallback")
@@ -144,9 +145,10 @@ async def process_news_item(
     budget_tracker: LLMBudgetTracker,
     redis_store: RedisStore,
     pg_store: PostgreSQLStore,
+    weights: dict[str, float] | None = None,
 ) -> SentimentResult | None:
     """Process a single news item: infer, update fallback counters, write to stores."""
-    inference_result = await run_inference(item, clients, aggregator, finbert, budget_tracker)
+    inference_result = await run_inference(item, clients, aggregator, finbert, budget_tracker, weights=weights)
     if inference_result is None:
         return None
     result, raw_outputs = inference_result
@@ -174,6 +176,7 @@ async def process_news_batch(
     budget_tracker: LLMBudgetTracker,
     redis_store: RedisStore,
     pg_store: PostgreSQLStore,
+    weights: dict[str, float] | None = None,
 ) -> list[SentimentResult]:
     """
     Process a batch of news items through the sentiment pipeline.
@@ -186,6 +189,7 @@ async def process_news_batch(
         budget_tracker: Budget tracker for cost enforcement
         redis_store: Redis store for signal caching
         pg_store: PostgreSQL store for audit
+        weights: Per-model weights from Redis (LOO ICIR rebalancing). None = confidence-only.
 
     Returns:
         List of SentimentResult objects
@@ -201,6 +205,7 @@ async def process_news_batch(
             budget_tracker=budget_tracker,
             redis_store=redis_store,
             pg_store=pg_store,
+            weights=weights,
         )
         if result is not None:
             results.append(result)
@@ -240,6 +245,13 @@ def run_sentiment_worker() -> dict:
     budget_tracker = LLMBudgetTracker(conn=pg_conn)
     redis_store = RedisStore(redis_client)
     pg_store = PostgreSQLStore(conn=pg_conn)
+
+    # Read per-model weights from Redis (set by weekly LOO ICIR rebalancing).
+    # Falls back to None → confidence-only weighting if not yet computed.
+    _raw_weights = redis_store.get_ensemble_weights()
+    model_weights: dict[str, float] | None = (
+        json.loads(_raw_weights).get("weights") if _raw_weights else None
+    )
 
     try:
         # Pull batch from Redis queue (up to 10 items)
@@ -290,6 +302,7 @@ def run_sentiment_worker() -> dict:
                 budget_tracker=budget_tracker,
                 redis_store=redis_store,
                 pg_store=pg_store,
+                weights=model_weights,
             )
         )
 

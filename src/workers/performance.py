@@ -383,16 +383,15 @@ def run_weekly_weights():
 
         # Group by model
         model_signals, model_returns, _ = _compute_model_metrics(rows)
-        all_returns = [r[2] for r in rows]
 
         if len(model_signals) < 2:
-            log.warning("Not enough models for LOO ICIR computation")
+            log.warning("Not enough models for ICIR computation")
             return
 
-        # Compute purified ICIR (Leave-One-Out)
+        # Compute per-model ICIR: model_returns[m] is aligned with model_signals[m]
         purified_icir = compute_purified_icir(
             model_signals=model_signals,
-            forward_returns=all_returns,
+            model_returns=model_returns,
             current_weights=current_weights,
             window_size=30,
             step_size=5,

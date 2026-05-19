@@ -12,87 +12,55 @@ from typing import Dict, List, Tuple
 
 def compute_purified_icir(
     model_signals: Dict[str, List[float]],
-    forward_returns: List[float],
+    model_returns: Dict[str, List[float]],
     current_weights: Dict[str, float],
     window_size: int = 30,
     step_size: int = 5,
 ) -> Dict[str, float]:
     """
-    Compute Leave-One-Out ICIR for each model in the ensemble.
+    Compute per-model rolling ICIR for use in ensemble weight rebalancing.
 
-    The LOO approach prevents chicken-and-egg bias: for each target model,
-    we compute the IC of an ensemble that EXCLUDES that model, then measure
-    how much the target model's inclusion would improve predictive power.
+    For each model, computes ICIR on that model's own signals and forward
+    returns. Higher ICIR → model is more predictive → gets more weight via
+    compute_new_weights().
 
     Parameters
     ----------
     model_signals : Dict[str, List[float]]
-        Dictionary mapping model_id to list of signal scores over time.
-        All models must have the same length (len(forward_returns)).
-    forward_returns : List[float]
-        List of forward returns aligned with signals.
+        model_id → list of signal scores.
+    model_returns : Dict[str, List[float]]
+        model_id → list of forward returns aligned with model_signals[model_id].
     current_weights : Dict[str, float]
-        Current ensemble weights for each model.
+        Current ensemble weights (unused here, kept for API compatibility).
     window_size : int, default=30
-        Rolling window size for IC calculation (min samples per window).
+        Rolling window size for IC calculation.
     step_size : int, default=5
-        Step size for rolling window (stride between windows).
+        Step size between windows.
 
     Returns
     -------
     Dict[str, float]
-        Dictionary mapping model_id to purified ICIR (IC mean / IC std).
-
-    Notes
-    -----
-    Based on design spec Section 4, PW-Q1:
-    - For each target model, compute ensemble scores excluding that model
-    - Calculate rolling IC over windows of `window_size` samples
-    - ICIR = mean(IC_series) / std(IC_series)
+        model_id → ICIR (mean IC / std IC). Higher = better.
     """
     if not model_signals:
         return {}
 
-    # Convert to list if numpy array
-    if hasattr(forward_returns, 'tolist'):
-        forward_returns = forward_returns.tolist()
+    purified_icir: Dict[str, float] = {}
 
-    if not forward_returns:
-        return {}
+    for model, signals in model_signals.items():
+        returns = model_returns.get(model, [])
+        if len(signals) != len(returns) or len(signals) < window_size:
+            purified_icir[model] = 0.0
+            continue
 
-    n_samples = len(forward_returns)
-    purified_icir = {}
+        ic_series = _compute_rolling_ic(signals, returns, window_size, step_size)
+        if not ic_series:
+            purified_icir[model] = 0.0
+            continue
 
-    for target_model, target_signals in model_signals.items():
-        # Build ensemble excluding target model
-        other_models = [m for m in model_signals.keys() if m != target_model]
-
-        if not other_models:
-            # Only one model — cannot compute LOO
-            # Fall back to simple ICIR for the single model
-            ic_series = _compute_rolling_ic(
-                target_signals, forward_returns, window_size, step_size
-            )
-        else:
-            # Compute LOO ensemble scores: weighted sum of other models
-            loo_scores = []
-            for i in range(n_samples):
-                score = sum(
-                    model_signals[m][i] * current_weights[m] for m in other_models
-                )
-                loo_scores.append(score)
-
-            # Compute rolling IC between LOO ensemble and forward returns
-            ic_series = _compute_rolling_ic(
-                loo_scores, forward_returns, window_size, step_size
-            )
-
-        # ICIR = mean(IC) / std(IC)
         ic_array = np.array(ic_series)
-        ic_mean = np.mean(ic_array)
-        ic_std = np.std(ic_array) + 1e-8  # epsilon to avoid division by zero
-
-        purified_icir[target_model] = float(ic_mean / ic_std)
+        ic_std = float(np.std(ic_array)) + 1e-8
+        purified_icir[model] = float(np.mean(ic_array) / ic_std)
 
     return purified_icir
 
