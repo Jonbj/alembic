@@ -45,7 +45,7 @@ def get_summary(
     """
     conn = pg._get_connection()
     with conn.cursor() as cur:
-        # Spearman IC via rank-based Pearson in SQL
+        # Spearman IC: compute ranks first in CTE, then corr() in outer query
         cur.execute("""
             WITH ranked AS (
                 SELECT
@@ -57,19 +57,6 @@ def get_summary(
                 WHERE run_id = %s
                   AND score IS NOT NULL
                   AND forward_return_24h IS NOT NULL
-            ),
-            ic_weekly AS (
-                SELECT
-                    date_trunc('week', bs.generated_at)            AS week,
-                    corr(
-                        percent_rank() OVER (PARTITION BY date_trunc('week', bs.generated_at) ORDER BY bs.score),
-                        percent_rank() OVER (PARTITION BY date_trunc('week', bs.generated_at) ORDER BY bs.forward_return_24h)
-                    )                                               AS weekly_ic
-                FROM backtest_signals bs
-                WHERE bs.run_id = %s
-                  AND bs.score IS NOT NULL
-                  AND bs.forward_return_24h IS NOT NULL
-                GROUP BY week, bs.generated_at, bs.score, bs.forward_return_24h
             )
             SELECT
                 corr(r.r_score, r.r_ret)                         AS ic,
@@ -80,24 +67,26 @@ def get_summary(
                          THEN 1.0 ELSE 0.0 END)                  AS hit_rate,
                 COUNT(*)                                          AS n
             FROM ranked r
-        """, (run_id, run_id))
+        """, (run_id,))
         row = cur.fetchone()
         ic, avg_long, avg_short, hit_rate, n = row
 
-        # ICIR: need std of weekly ICs
+        # ICIR: ranks first, then weekly corr(), then stddev across weeks
         cur.execute("""
-            WITH weekly AS (
+            WITH ranked_weekly AS (
                 SELECT
-                    date_trunc('week', generated_at) AS week,
-                    corr(
-                        percent_rank() OVER (PARTITION BY date_trunc('week', generated_at) ORDER BY score),
-                        percent_rank() OVER (PARTITION BY date_trunc('week', generated_at) ORDER BY forward_return_24h)
-                    ) AS wic
+                    date_trunc('week', generated_at)                                                           AS week,
+                    percent_rank() OVER (PARTITION BY date_trunc('week', generated_at) ORDER BY score)              AS rs,
+                    percent_rank() OVER (PARTITION BY date_trunc('week', generated_at) ORDER BY forward_return_24h) AS rr
                 FROM backtest_signals
                 WHERE run_id = %s
                   AND score IS NOT NULL
                   AND forward_return_24h IS NOT NULL
-                GROUP BY week, generated_at, score, forward_return_24h
+            ),
+            weekly AS (
+                SELECT week, corr(rs, rr) AS wic
+                FROM ranked_weekly
+                GROUP BY week
             )
             SELECT AVG(wic), STDDEV(wic), COUNT(DISTINCT week)
             FROM weekly
@@ -168,26 +157,6 @@ def get_model_ic(
     conn = pg._get_connection()
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT
-                model_id,
-                COUNT(*)                                            AS n,
-                corr(
-                    percent_rank() OVER (PARTITION BY model_id ORDER BY score),
-                    percent_rank() OVER (PARTITION BY model_id ORDER BY forward_return_24h)
-                )                                                   AS ic,
-                AVG(CASE WHEN (score > 0 AND forward_return_24h > 0)
-                              OR (score < 0 AND forward_return_24h < 0)
-                         THEN 1.0 ELSE 0.0 END)                    AS hit_rate,
-                AVG(forward_return_24h)                             AS avg_return
-            FROM backtest_signals
-            WHERE run_id = %s
-              AND score IS NOT NULL
-              AND forward_return_24h IS NOT NULL
-            GROUP BY model_id, score, forward_return_24h
-        """, (run_id,))
-        # Aggregate per model_id (corr needs all rows; group by model only for aggregates)
-        # Re-run with proper aggregation
-        cur.execute("""
             WITH per_model AS (
                 SELECT
                     model_id,
@@ -210,7 +179,7 @@ def get_model_ic(
                 AVG(forward_return_24h)    AS avg_return
             FROM per_model
             GROUP BY model_id
-            ORDER BY corr(rs, rr) DESC NULLS LAST
+            ORDER BY ic DESC NULLS LAST
         """, (run_id,))
         cols = [d[0] for d in cur.description]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
