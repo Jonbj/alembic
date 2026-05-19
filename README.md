@@ -467,8 +467,26 @@ python -m pytest tests/ --cov=src --cov-report=html
 - GKG backtest Nov 2025 → IC/ICIR results pending
 
 ### Planned 📋
-- Phase B: Drawdown alerting, `semi_auto` Telegram approval per-order, daily report verification, credential rotation
-- Phase C: Alpaca live account go-live
+
+**Phase B — Paper trading hardening (1–2 weeks)**
+- Drawdown alerting, `semi_auto` Telegram approval per-order, daily report verification, credential rotation
+
+**Phase C — Live go-live**
+- Alpaca live account go-live
+
+**Signal quality improvements**
+- Exponential time-decay on sentiment signals: `score_adj = score × e^(−λt)` where `t` is minutes since signal generation — replaces the current binary 30-min validity cutoff with a continuous degradation that reduces position size as the news ages
+- IC forward return from signal timestamp: fix the Performance Worker to measure return from `generated_at` (signal time) rather than market open, eliminating contamination from pre-signal price moves and making PSI/CUSUM statistically valid
+
+**Regime Detection refactor**
+- Replace LLM pair in Phase 3 with a deterministic classifier (threshold rules or Hidden Markov Model) — VIX, T10Y2Y spread and SPY EMA are purely numerical inputs; using an LLM for this is non-deterministic, expensive, and hallucination-prone. A rule-based model is instantaneous, free, and recalculable intraday if VIX spikes mid-session
+
+**Execution improvements**
+- Exit logic: Chandelier Exit (ATR-based trailing stop) or trailing stop dynamique — current stop-loss only approach leaves unrealised profit on the table in high-momentum moves triggered by sentiment
+- EMA20 filter replacement/augmentation: add ADX confirmation or Keltner Channel to reduce whipsaw entries on exhausted intraday price spikes
+
+**Architecture — Phase D**
+- Event-driven ingestion and execution: replace 15-min polling with Alpaca News WebSocket + Redis Pub/Sub so the execution engine reacts to a new signal within milliseconds of LLM output rather than at the next cron tick
 - Zeygos Signal Connector (pre-interpreted BUY/SELL signals via Telegram)
 - QuantConnect Lean integration for institutional multi-asset backtesting
 
