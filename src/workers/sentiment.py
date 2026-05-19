@@ -46,7 +46,7 @@ async def run_inference(
     aggregator: EnsembleAggregator,
     finbert: FinBERTClient,
     budget_tracker: LLMBudgetTracker,
-) -> SentimentResult | None:
+) -> tuple[SentimentResult, list[ModelOutput]] | None:
     """Core LLM inference — no store writes. Callable from live worker and backtest.
 
     Why extracted as a standalone function?
@@ -61,7 +61,7 @@ async def run_inference(
     3. Run ensemble query (models in parallel)
     4. Aggregate; if divergence (aggregate returns None), fall back to FinBERT
     5. Record spending for successful LLM calls
-    6. Return SentimentResult (no Redis/PG writes)
+    6. Return SentimentResult + raw_outputs (no Redis/PG writes)
 
     Why no store writes here?
       The live worker writes to Redis + PostgreSQL after receiving the result.
@@ -93,7 +93,7 @@ async def run_inference(
                 reasoning="FinBERT fallback (ensemble divergence)",
                 model_id="finbert",
                 fallback_used=True,
-            )
+            ), []
 
         score = aggregated.polarity * aggregated.confidence
         # Rough token estimate: ~4 chars per token (English text average).
@@ -117,7 +117,7 @@ async def run_inference(
             model_id=f"ensemble:{'+'.join(aggregated.model_ids)}",
             ensemble_std=aggregated.ensemble_std,
             fallback_used=False,
-        )
+        ), raw_outputs
 
     except LLMBudgetExhaustedError:
         log.info(f"Budget exhausted for {symbol}, using FinBERT fallback")
@@ -129,7 +129,7 @@ async def run_inference(
             reasoning="FinBERT fallback (budget exhausted)",
             model_id="finbert",
             fallback_used=True,
-        )
+        ), []
 
     except Exception as e:
         log.error(f"Error processing news item for {symbol}: {e}")
@@ -146,19 +146,23 @@ async def process_news_item(
     pg_store: PostgreSQLStore,
 ) -> SentimentResult | None:
     """Process a single news item: infer, update fallback counters, write to stores."""
-    result = await run_inference(item, clients, aggregator, finbert, budget_tracker)
-
-    if result is not None:
-        try:
-            if result.fallback_used:
-                redis_store.increment_fallback_counter()
-            else:
-                redis_store.reset_fallback_counter()
-            redis_store.write_sentiment(result)
-            pg_store.write_signal(result)
-        except Exception as e:
-            log.error(f"Failed to write signal for {result.symbol}: {e}")
-
+    inference_result = await run_inference(item, clients, aggregator, finbert, budget_tracker)
+    if inference_result is None:
+        return None
+    result, raw_outputs = inference_result
+    try:
+        ticker = result.symbol
+        if result.fallback_used:
+            redis_store.increment_fallback_counter()
+        else:
+            redis_store.reset_fallback_counter()
+        redis_store.write_sentiment(result)
+        signal_id = pg_store.write_signal(result)
+        pg_store.log_news_item(item=item, ticker=ticker)
+        if raw_outputs:
+            pg_store.log_llm_responses(signal_id=signal_id, outputs=raw_outputs)
+    except Exception as e:
+        log.error(f"Failed to write signal for {result.symbol}: {e}")
     return result
 
 
@@ -220,14 +224,14 @@ def run_sentiment_worker() -> dict:
     import psycopg2
     from redis import Redis
 
-    from src.llm.client import DeepseekClient, OpusClient, Qwen35Client
+    from src.llm.client import OllamaDeepseekClient, OllamaGlmClient, OllamaKimiClient, OllamaQwen35Client
 
     # Initialize connections
     redis_client = Redis.from_url(config.REDIS_URL)
     pg_conn = psycopg2.connect(config.DATABASE_URL)
 
     # Initialize components
-    clients = [OpusClient(), Qwen35Client(), DeepseekClient()]
+    clients = [OllamaKimiClient(), OllamaQwen35Client(), OllamaDeepseekClient(), OllamaGlmClient()]
     aggregator = EnsembleAggregator(
         min_confidence=config.ENSEMBLE_MIN_CONFIDENCE,
         divergence_threshold=config.ENSEMBLE_DIVERGENCE_STD,

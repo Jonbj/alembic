@@ -140,7 +140,7 @@ class Config(BaseModel):
 
     # Regime detection
     REGIME_LLM_MODEL_1: str = Field(
-        default_factory=lambda: os.environ.get("REGIME_LLM_MODEL_1", "opus")
+        default_factory=lambda: os.environ.get("REGIME_LLM_MODEL_1", "kimi-k2.6:cloud")
     )
     REGIME_LLM_MODEL_2: str = Field(
         default_factory=lambda: os.environ.get("REGIME_LLM_MODEL_2", "qwen3.5:cloud")

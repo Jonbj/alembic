@@ -312,7 +312,7 @@ def run_daily_report():
         if raw_weights:
             current_weights = json.loads(raw_weights).get("weights", {})
         else:
-            current_weights = {"opus": 0.34, "qwen3.5:cloud": 0.33, "deepseek-v4-pro:cloud": 0.33}
+            current_weights = {"kimi-k2.6:cloud": 0.25, "qwen3.5:cloud": 0.25, "deepseek-v4-pro:cloud": 0.25, "glm-5.1:cloud": 0.25}
 
         # Build report
         report = build_performance_report(pg, current_weights, period_days=30)
@@ -371,7 +371,7 @@ def run_weekly_weights():
         if raw_weights:
             current_weights = json.loads(raw_weights).get("weights", {})
         else:
-            current_weights = {"opus": 0.34, "qwen3.5:cloud": 0.33, "deepseek-v4-pro:cloud": 0.33}
+            current_weights = {"kimi-k2.6:cloud": 0.25, "qwen3.5:cloud": 0.25, "deepseek-v4-pro:cloud": 0.25, "glm-5.1:cloud": 0.25}
 
         # Fetch signals for LOO ICIR computation
         rows = _fetch_all_signals_for_ic(pg, days=30)

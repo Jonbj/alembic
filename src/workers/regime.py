@@ -40,7 +40,7 @@ from datetime import datetime, timezone
 
 from src.config import config
 from src.connectors.macro import fetch_spy_momentum_20d, fetch_vix_from_fred, fetch_yield_curve
-from src.llm.client import DeepseekClient, OpusClient, Qwen35Client
+from src.llm.client import OllamaDeepseekClient, OllamaGlmClient, OllamaKimiClient, OllamaQwen35Client
 from src.models.regime import MacroSnapshot, RegimeLabel, RegimeOutput, RegimeState
 from src.notifications.telegram import TelegramNotifier, format_regime_message
 from src.store.redis_store import RedisStore
@@ -98,12 +98,13 @@ def _build_prompt(vix: float, yield_curve: float, spy_momentum: float) -> str:
     )
 
 
-def _make_llm_client(model_id: str) -> OpusClient | Qwen35Client | DeepseekClient:
+def _make_llm_client(model_id: str) -> OllamaKimiClient | OllamaQwen35Client | OllamaDeepseekClient | OllamaGlmClient:
     """Instantiate an LLM client by model_id string."""
-    registry: dict[str, type[OpusClient | Qwen35Client | DeepseekClient]] = {
-        "opus": OpusClient,
-        "qwen3.5:cloud": Qwen35Client,
-        "deepseek-v4-pro:cloud": DeepseekClient,
+    registry: dict[str, type[OllamaKimiClient | OllamaQwen35Client | OllamaDeepseekClient | OllamaGlmClient]] = {
+        "kimi-k2.6:cloud": OllamaKimiClient,
+        "qwen3.5:cloud": OllamaQwen35Client,
+        "deepseek-v4-pro:cloud": OllamaDeepseekClient,
+        "glm-5.1:cloud": OllamaGlmClient,
     }
     cls = registry.get(model_id)
     if cls is None:
@@ -115,8 +116,8 @@ def _make_llm_client(model_id: str) -> OpusClient | Qwen35Client | DeepseekClien
 
 async def _run_llm_pair(
     prompt: str,
-    client1: OpusClient | Qwen35Client | DeepseekClient,
-    client2: OpusClient | Qwen35Client | DeepseekClient,
+    client1: OllamaKimiClient | OllamaQwen35Client | OllamaDeepseekClient | OllamaGlmClient,
+    client2: OllamaKimiClient | OllamaQwen35Client | OllamaDeepseekClient | OllamaGlmClient,
 ) -> tuple[RegimeOutput | None, RegimeOutput | None]:
     """Run two LLM clients in parallel. Returns None for any that fail."""
     results = await asyncio.gather(

@@ -1,14 +1,15 @@
 """Performance and weights endpoints."""
 
 import hashlib
-from datetime import datetime, timedelta
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from src.api.auth import require_api_key
-from src.api.deps import get_pg_store, get_redis_store
+from src.api.deps import get_alpaca_trading_client, get_pg_store, get_redis_store
 from src.config import config
 from src.store.pg_store import PostgreSQLStore
 from src.store.redis_store import RedisStore
@@ -20,9 +21,10 @@ _WEIGHT_MAX = 0.70
 
 _DEFAULT_WEIGHTS = {
     "weights": {
-        "opus": 0.34,
-        "qwen3.5:cloud": 0.33,
-        "deepseek-v4-pro:cloud": 0.33,
+        "kimi-k2.6:cloud": 0.25,
+        "qwen3.5:cloud": 0.25,
+        "deepseek-v4-pro:cloud": 0.25,
+        "glm-5.1:cloud": 0.25,
     },
     "source": "default",
 }
@@ -135,3 +137,37 @@ async def approve_weights(
     )
 
     return {"applied_weights": weights, "source": source, "log_id": log_id}
+
+
+@router.get("/performance/pnl")
+def get_pnl(
+    client: Annotated[object, Depends(get_alpaca_trading_client)],
+    period: str = "6M",
+) -> dict:
+    """Return portfolio P&L history from Alpaca (daily + monthly aggregate)."""
+    from alpaca.trading.requests import GetPortfolioHistoryRequest
+
+    history = client.get_portfolio_history(
+        GetPortfolioHistoryRequest(period=period, timeframe="1D")
+    )
+
+    daily = []
+    monthly: dict[str, float] = defaultdict(float)
+
+    timestamps = history.timestamp or []
+    profit_loss = history.profit_loss or []
+    equities = history.equity or []
+
+    for ts, pl, eq in zip(timestamps, profit_loss, equities):
+        if ts is None:
+            continue
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        date_str = dt.strftime("%Y-%m-%d")
+        month_str = dt.strftime("%Y-%m")
+        daily.append({"date": date_str, "equity": eq, "profit_loss": pl or 0.0})
+        monthly[month_str] += pl or 0.0
+
+    return {
+        "daily": daily,
+        "monthly": [{"month": k, "pnl": round(v, 2)} for k, v in sorted(monthly.items())],
+    }
