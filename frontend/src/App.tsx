@@ -1,8 +1,10 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Layout } from '@/components/layout/Layout'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { fetchMode } from '@/api/admin'
+import { useStore } from '@/store'
 
 const Overview    = lazy(() => import('@/pages/Overview'))
 const Signals     = lazy(() => import('@/pages/Signals'))
@@ -23,10 +25,23 @@ const PageFallback = () => (
   <div style={{ padding: 40, color: 'var(--text-muted)', textAlign: 'center' }}>Loading...</div>
 )
 
+// Syncs the persisted mode from sessionStorage with the backend's current mode.
+// Prevents frontend showing 'paper' after a backend emergency halt.
+function ModeSync() {
+  const setMode = useStore((s) => s.setMode)
+  useEffect(() => {
+    fetchMode()
+      .then(({ mode }) => setMode(mode as Parameters<typeof setMode>[0]))
+      .catch(() => { /* backend unreachable — keep persisted mode */ })
+  }, [setMode])
+  return null
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={qc}>
       <BrowserRouter>
+        <ModeSync />
         <ErrorBoundary>
           <Suspense fallback={<PageFallback />}>
             <Routes>

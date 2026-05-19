@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchKillswitchStatus, activateKillswitch, deactivateKillswitch, fetchMode, setMode } from '@/api/admin'
 import { useStore } from '@/store'
@@ -31,10 +31,14 @@ export default function Admin() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['killswitch'] }),
   })
 
+  type Mode = Parameters<typeof setStoreMode>[0]
+
   const modeMutation = useMutation({
-    mutationFn: (m: string) => setMode(m),
-    onSuccess: (_, m) => { qc.invalidateQueries({ queryKey: ['mode'] }); setStoreMode(m as any) },
+    mutationFn: (m: Mode) => setMode(m),
+    onSuccess: (_, m) => { qc.invalidateQueries({ queryKey: ['mode'] }); setStoreMode(m) },
   })
+
+  const handleModeChange = useCallback((m: Mode) => modeMutation.mutate(m), [modeMutation])
 
   const ksActive = ks?.active ?? false
 
@@ -82,7 +86,7 @@ export default function Admin() {
                   name="mode"
                   value={m}
                   checked={modeData?.mode === m}
-                  onChange={() => modeMutation.mutate(m)}
+                  onChange={() => handleModeChange(m)}
                   style={{ marginTop: 2 }}
                 />
                 <div>

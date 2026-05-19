@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchNews, type NewsItem } from '@/api/news'
 
@@ -20,6 +20,10 @@ export default function News() {
     queryFn: () => fetchNews({ limit: 200, ticker: ticker || undefined, source: source || undefined }),
     refetchInterval: 300000,
   })
+
+  const toggleExpanded = useCallback((id: number) => {
+    setExpanded((prev) => (prev === id ? null : id))
+  }, [])
 
   function sentimentBadge(raw: number | null) {
     if (raw === null) return <span className="badge badge-grey">—</span>
@@ -55,7 +59,7 @@ export default function News() {
             {news.map((item: NewsItem) => (
               <Fragment key={item.id}>
                 <tr
-                  onClick={() => setExpanded(expanded === item.id ? null : item.id)}
+                  onClick={() => toggleExpanded(item.id)}
                   style={{ cursor: 'pointer' }}
                 >
                   <td>
