@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { ModeBadge } from './ModeBadge'
 import { ApiKeyModal } from './ApiKeyModal'
+import alembicLogo from '@/assets/alembic.png'
 
 const NAV = [
   { to: '/',            label: 'Overview',    icon: '⊞' },
@@ -30,7 +31,7 @@ export function Sidebar() {
         top: 0,
       }}>
         <div style={{ padding: '16px 12px 12px', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid #334155', marginBottom: 4 }}>
-          <img src="/alembic.png" alt="Alembic" style={{ width: 32, height: 32, borderRadius: 6, objectFit: 'cover' }} />
+          <img src={alembicLogo} alt="Alembic" style={{ width: 32, height: 32, borderRadius: 6, objectFit: 'cover' }} />
           <div>
             <div style={{ color: 'white', fontWeight: 700, fontSize: 14, letterSpacing: '-0.3px', lineHeight: 1.1 }}>Alembic</div>
             <div style={{ color: '#64748b', fontSize: 10, fontWeight: 500, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Open Source Finance</div>
