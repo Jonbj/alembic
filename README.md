@@ -96,6 +96,26 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
 
+### Phase 1 — News Ingestion
+
+Every 15 minutes during US market hours, Alembic pulls financial news from three independent sources: **GDELT GKG v2** (a free global news graph covering thousands of outlets), **MarketAux** (a paid API with pre-tagged ticker mentions), and **Alpaca News** (broker-native news feed). Each article is deduplicated via SHA-256 hash before being pushed to a Redis queue — so the same story from multiple sources is only processed once. The queue acts as a buffer between ingestion and inference, decoupling their speeds.
+
+### Phase 2 — Sentiment Pipeline
+
+The `SentimentWorker` consumes articles from the queue and runs them through a **4-model LLM ensemble** (Kimi K2.6, Qwen3.5, DeepSeek-V4-Pro, GLM-5.1) accessed via Ollama cloud. Each model uses **DK-CoT prompting** (Deliberate Knowledge Chain-of-Thought), which forces the model to reason step-by-step before producing a structured JSON output with polarity (−1 to +1) and confidence (0 to 1). If the models disagree too much (standard deviation > 0.30) or the daily LLM budget is exhausted, the system falls back to **FinBERT**, a finance-domain BERT model that runs locally at zero marginal cost. The resulting signal is cached in Redis with a 4-hour TTL for the execution engine, and written to PostgreSQL for permanent audit and backtest replay.
+
+### Phase 3 — Regime Detection
+
+Once per trading day (07:00 UTC), Alembic reads macro indicators from FRED (VIX volatility index, 10Y–2Y yield curve spread) and yfinance (SPY 20-day price momentum) and feeds them to a two-model LLM pair. The pair votes independently and the consensus determines the current **market regime**: bull, sideways, bear, or high_vol. Each regime maps to a **position-size multiplier** stored in Redis (1.0×, 0.7×, 0.4×, 0.2× respectively). This multiplier is applied to every order in Phase 4, automatically cutting exposure when macro conditions deteriorate — without any manual intervention.
+
+### Phase 4 — Execution Engine
+
+Every 15 minutes during market hours (14:00–21:00 UTC, Mon–Fri), the `ExecutionWorker` runs a sequential safety checklist before placing any order. It first checks the **kill-switch** (a Redis flag that operators or alerts can set to halt all trading instantly), then verifies the **daily drawdown cap** (if the portfolio is down ≥ 10% on the day, trading halts automatically and a CRITICAL alert fires on Telegram). For each symbol in the watchlist, it reads the pre-computed sentiment signal from Redis — if the signal is stale (older than 30 minutes), it is skipped entirely. A BUY order is placed only if the sentiment score exceeds 0.3 **and** the current price is above the 20-day EMA (a basic momentum filter). Position size is scaled by the regime multiplier from Phase 3. Stop-loss checks run on existing positions before any new entry is considered.
+
+### Phase 5 — Performance & Weight Optimisation
+
+The `PerformanceWorker` runs two scheduled jobs. **Daily at 03:00 UTC**: it computes the **Information Coefficient (IC)** — the correlation between yesterday's signals and today's price moves — using a composite B4 estimator with Newey-West HAC correction for autocorrelation. It also runs PSI and CUSUM drift tests to detect if the signal distribution has shifted. Results are sent as a Telegram digest. **Weekly on Monday at 04:00 UTC**: it computes per-model **ICIR** (IC / volatility of IC) using Leave-One-Out cross-validation, then proposes updated ensemble weights. If all guardrails pass (VIX below threshold, no active freeze, weight changes within bounds), the new weights are auto-applied. Otherwise, the operator receives a Telegram message with inline [✅ Approve] / [❌ Reject] buttons — human approval is required before the weights go live.
+
 ### Core Principles
 
 | Principle | Description |
