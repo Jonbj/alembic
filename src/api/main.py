@@ -40,3 +40,10 @@ app.include_router(trading.router)
 app.include_router(news_routes.router)
 app.include_router(llm_routes.router)
 app.include_router(config_routes.router)
+
+import os  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+
+_frontend_dist = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")
+if os.path.isdir(_frontend_dist):
+    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="frontend")
