@@ -18,7 +18,7 @@ class TestAllowedModelIds:
     def test_allowed_model_ids_contains_expected_models(self):
         """Verify key models are in allowlist."""
         assert "opus" in ALLOWED_MODEL_IDS
-        assert "qwen3.5:cloud" in ALLOWED_MODEL_IDS
+        assert "qwen3.5:397b" in ALLOWED_MODEL_IDS
         assert "deepseek-v4-pro:cloud" in ALLOWED_MODEL_IDS
 
     def test_invalid_model_id_rejected(self):
@@ -222,7 +222,7 @@ class TestModelIDConsistency:
         """Model IDs used as fallback weights in performance worker must be in ALLOWED_MODEL_IDS."""
         # These are the hardcoded defaults in src/workers/performance.py
         # If this test fails, there is a typo in the performance worker fallback weights.
-        default_weight_model_ids = {"kimi-k2.6:cloud", "qwen3.5:cloud", "deepseek-v4-pro:cloud", "glm-5.1:cloud"}
+        default_weight_model_ids = {"kimi-k2.6:cloud", "qwen3.5:397b", "deepseek-v4-pro:cloud", "glm-5.1:cloud"}
         assert default_weight_model_ids.issubset(ALLOWED_MODEL_IDS), (
             f"Model IDs in performance worker fallback weights not in ALLOWED_MODEL_IDS: "
             f"{default_weight_model_ids - ALLOWED_MODEL_IDS}"

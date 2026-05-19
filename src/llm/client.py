@@ -65,7 +65,7 @@ ALLOWED_MODEL_IDS = frozenset({
     # Claude aliases (general purpose)
     "opus", "sonnet", "haiku",
     # General purpose cloud
-    "qwen3.5:cloud", "deepseek-v4-pro:cloud",
+    "qwen3.5:397b", "deepseek-v4-pro:cloud",
     "glm-5.1:cloud", "kimi-k2.6:cloud", "gemma4:31b-cloud",
     # Coding specialized
     "qwen3-coder-next:cloud", "devstral-small-2:24b-cloud",
@@ -687,7 +687,7 @@ class OllamaGlmClient(OllamaCloudClient):
 
 class OllamaQwen35Client(OllamaCloudClient):
     """Qwen3.5 via Ollama cloud HTTP API."""
-    model_id = "qwen3.5:cloud"
+    model_id = "qwen3.5:397b"
     model_name = "Qwen 3.5 (Ollama)"
 
 

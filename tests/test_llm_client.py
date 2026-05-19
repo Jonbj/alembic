@@ -89,7 +89,7 @@ class TestOllamaCloudClients:
         assert OllamaGlmClient().model_id == "glm-5.1:cloud"
 
     def test_ollama_qwen35_model_id(self):
-        assert OllamaQwen35Client().model_id == "qwen3.5:cloud"
+        assert OllamaQwen35Client().model_id == "qwen3.5:397b"
 
     def test_ollama_deepseek_model_id(self):
         assert OllamaDeepseekClient().model_id == "deepseek-v4-pro:cloud"
@@ -243,21 +243,21 @@ class TestEnsembleTaskTracking:
         # Create model outputs simulating what run_ensemble_query would produce
         outputs = [
             ModelOutput(symbol="AAPL", polarity=0.5, confidence=0.8, reasoning="Opus", model_id="opus"),
-            ModelOutput(symbol="AAPL", polarity=0.6, confidence=0.7, reasoning="Qwen", model_id="qwen3.5:cloud"),
+            ModelOutput(symbol="AAPL", polarity=0.6, confidence=0.7, reasoning="Qwen", model_id="qwen3.5:397b"),
             ModelOutput(symbol="AAPL", polarity=0.4, confidence=0.6, reasoning="Deepseek", model_id="deepseek-v4-pro:cloud"),
         ]
 
         # Verify each output has correct model_id
         model_ids = {o.model_id for o in outputs}
         assert "opus" in model_ids
-        assert "qwen3.5:cloud" in model_ids
+        assert "qwen3.5:397b" in model_ids
         assert "deepseek-v4-pro:cloud" in model_ids
 
         # Verify polarities match expected values per model
         opus_output = next(o for o in outputs if o.model_id == "opus")
         assert opus_output.polarity == 0.5
 
-        qwen_output = next(o for o in outputs if o.model_id == "qwen3.5:cloud")
+        qwen_output = next(o for o in outputs if o.model_id == "qwen3.5:397b")
         assert qwen_output.polarity == 0.6
 
         deepseek_output = next(o for o in outputs if o.model_id == "deepseek-v4-pro:cloud")
@@ -269,7 +269,7 @@ class TestEnsembleTaskTracking:
 
         outputs = [
             ModelOutput(symbol="AAPL", polarity=0.5, confidence=0.8, reasoning="Opus", model_id="opus"),
-            ModelOutput(symbol="AAPL", polarity=0.6, confidence=0.7, reasoning="Qwen", model_id="qwen3.5:cloud"),
+            ModelOutput(symbol="AAPL", polarity=0.6, confidence=0.7, reasoning="Qwen", model_id="qwen3.5:397b"),
             ModelOutput(symbol="AAPL", polarity=0.4, confidence=0.6, reasoning="Deepseek", model_id="deepseek-v4-pro:cloud"),
         ]
 
@@ -277,5 +277,5 @@ class TestEnsembleTaskTracking:
         assert result is not None
         assert len(result.model_ids) == 3
         assert "opus" in result.model_ids
-        assert "qwen3.5:cloud" in result.model_ids
+        assert "qwen3.5:397b" in result.model_ids
         assert "deepseek-v4-pro:cloud" in result.model_ids
