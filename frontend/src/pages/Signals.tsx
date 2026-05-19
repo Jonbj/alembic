@@ -1,12 +1,7 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchSignals, type Signal } from '@/api/signals'
-
-function directionBadge(score: number) {
-  if (score > 0.1) return <span className="badge badge-green">BUY ▲</span>
-  if (score < -0.1) return <span className="badge badge-red">SELL ▼</span>
-  return <span className="badge badge-grey">HOLD —</span>
-}
+import { DirectionBadge } from '@/components/shared/DirectionBadge'
 
 export default function Signals() {
   const [ticker, setTicker] = useState('')
@@ -18,13 +13,16 @@ export default function Signals() {
     refetchInterval: 60000,
   })
 
-  const filtered = signals.filter((s: Signal) => {
-    if (ticker && !s.symbol.toLowerCase().includes(ticker.toLowerCase())) return false
-    if (direction === 'BUY' && s.score <= 0.1) return false
-    if (direction === 'SELL' && s.score >= -0.1) return false
-    if (direction === 'HOLD' && Math.abs(s.score) > 0.1) return false
-    return true
-  })
+  const filtered = useMemo(() =>
+    signals.filter((s: Signal) => {
+      if (ticker && !s.symbol.toLowerCase().includes(ticker.toLowerCase())) return false
+      if (direction === 'BUY' && s.score <= 0.1) return false
+      if (direction === 'SELL' && s.score >= -0.1) return false
+      if (direction === 'HOLD' && Math.abs(s.score) > 0.1) return false
+      return true
+    }),
+    [signals, ticker, direction]
+  )
 
   return (
     <div>
@@ -60,7 +58,7 @@ export default function Signals() {
             {filtered.map((s, i) => (
               <tr key={i}>
                 <td><strong>{s.symbol}</strong></td>
-                <td>{directionBadge(s.score)}</td>
+                <td><DirectionBadge score={s.score} /></td>
                 <td style={{ fontVariantNumeric: 'tabular-nums' }}>{s.score.toFixed(4)}</td>
                 <td>{(s.confidence * 100).toFixed(1)}%</td>
                 <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{s.model_id}</td>

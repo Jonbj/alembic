@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -20,12 +20,13 @@ export default function Performance() {
   const daily = pnl?.daily ?? []
   const monthly = pnl?.monthly ?? []
 
-  // Compute cumulative P&L from daily
-  let cumPnL = 0
-  const cumulativeData = daily.map((d) => {
-    cumPnL += d.profit_loss ?? 0
-    return { date: d.date, cumulative: parseFloat(cumPnL.toFixed(2)), equity: d.equity }
-  })
+  const cumulativeData = useMemo(() => {
+    let cumPnL = 0
+    return daily.map((d) => {
+      cumPnL += d.profit_loss ?? 0
+      return { date: d.date, cumulative: parseFloat(cumPnL.toFixed(2)), equity: d.equity }
+    })
+  }, [daily])
 
   return (
     <div>

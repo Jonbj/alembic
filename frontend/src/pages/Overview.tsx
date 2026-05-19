@@ -3,22 +3,8 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 import { fetchSignals } from '@/api/signals'
 import { fetchPositions } from '@/api/positions'
 import { fetchPnL } from '@/api/performance'
-
-function KPICard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="card" style={{ flex: 1, minWidth: 160 }}>
-      <div style={{ color: 'var(--text-muted)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
-      <div style={{ fontSize: 26, fontWeight: 700, margin: '6px 0 2px' }}>{value}</div>
-      {sub && <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{sub}</div>}
-    </div>
-  )
-}
-
-function directionBadge(score: number) {
-  if (score > 0.1) return <span className="badge badge-green">BUY ▲</span>
-  if (score < -0.1) return <span className="badge badge-red">SELL ▼</span>
-  return <span className="badge badge-grey">HOLD —</span>
-}
+import { KPICard } from '@/components/shared/KPICard'
+import { DirectionBadge } from '@/components/shared/DirectionBadge'
 
 export default function Overview() {
   const { data: signals = [] } = useQuery({ queryKey: ['signals'], queryFn: () => fetchSignals(), refetchInterval: 60000 })
@@ -29,7 +15,7 @@ export default function Overview() {
   const sells = signals.filter((s) => s.score < -0.1).length
   const holds = signals.length - buys - sells
 
-  const totalUnrealized = positions.reduce((acc, p) => acc + parseFloat(p.unrealized_pl || '0'), 0)
+  const totalUnrealized = positions.reduce((acc, p) => acc + (p.unrealized_pl || 0), 0)
   const monthlyPnL = pnl?.monthly ?? []
   const currentMonthPnL = monthlyPnL[monthlyPnL.length - 1]?.pnl ?? 0
 
@@ -73,10 +59,10 @@ export default function Overview() {
                   <tr key={p.symbol}>
                     <td><strong>{p.symbol}</strong></td>
                     <td>{p.qty}</td>
-                    <td style={{ color: parseFloat(p.unrealized_pl) >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                      ${parseFloat(p.unrealized_pl).toFixed(2)}
+                    <td style={{ color: p.unrealized_pl >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                      ${p.unrealized_pl.toFixed(2)}
                     </td>
-                    <td>{(parseFloat(p.unrealized_plpc) * 100).toFixed(2)}%</td>
+                    <td>{(p.unrealized_plpc * 100).toFixed(2)}%</td>
                   </tr>
                 ))}
               </tbody>
@@ -93,7 +79,7 @@ export default function Overview() {
             {signals.slice(0, 10).map((s, i) => (
               <tr key={i}>
                 <td><strong>{s.symbol}</strong></td>
-                <td>{directionBadge(s.score)}</td>
+                <td><DirectionBadge score={s.score} /></td>
                 <td>{s.score.toFixed(3)}</td>
                 <td>{(s.confidence * 100).toFixed(0)}%</td>
                 <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{s.model_id}</td>

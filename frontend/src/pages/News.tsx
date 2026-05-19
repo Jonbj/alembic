@@ -1,6 +1,14 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchNews, type NewsItem } from '@/api/news'
+
+function safeUrl(url: string): string | undefined {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') return url
+  } catch {}
+  return undefined
+}
 
 export default function News() {
   const [ticker, setTicker] = useState('')
@@ -45,9 +53,8 @@ export default function News() {
           </thead>
           <tbody>
             {news.map((item: NewsItem) => (
-              <>
+              <Fragment key={item.id}>
                 <tr
-                  key={item.id}
                   onClick={() => setExpanded(expanded === item.id ? null : item.id)}
                   style={{ cursor: 'pointer' }}
                 >
@@ -65,11 +72,14 @@ export default function News() {
                   </td>
                 </tr>
                 {expanded === item.id && (
-                  <tr key={`${item.id}-detail`}>
+                  <tr>
                     <td colSpan={5} style={{ background: '#f8fafc', padding: '12px 16px' }}>
-                      <a href={item.url} target="_blank" rel="noreferrer" style={{ color: 'var(--blue)', fontSize: 12 }}>
-                        {item.url}
-                      </a>
+                      {(() => {
+                        const href = safeUrl(item.url)
+                        return href
+                          ? <a href={href} target="_blank" rel="noreferrer" style={{ color: 'var(--blue)', fontSize: 12 }}>{item.url}</a>
+                          : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.url}</span>
+                      })()}
                       {item.raw_sentiment !== null && (
                         <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>
                           Raw sentiment score: {item.raw_sentiment?.toFixed(4)}
@@ -78,7 +88,7 @@ export default function News() {
                     </td>
                   </tr>
                 )}
-              </>
+              </Fragment>
             ))}
             {news.length === 0 && !isLoading && (
               <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No news</td></tr>

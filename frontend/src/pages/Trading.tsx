@@ -46,24 +46,20 @@ export default function Trading() {
               <tr><th>Ticker</th><th>Qty</th><th>Avg Price</th><th>Market Value</th><th>Unrealized P&L</th><th>P&L %</th></tr>
             </thead>
             <tbody>
-              {positions.map((p) => {
-                const pl = parseFloat(p.unrealized_pl)
-                const plc = parseFloat(p.unrealized_plpc)
-                return (
-                  <tr key={p.symbol}>
-                    <td><strong>{p.symbol}</strong></td>
-                    <td>{p.qty}</td>
-                    <td>${parseFloat(p.avg_entry_price).toFixed(2)}</td>
-                    <td>${parseFloat(p.market_value).toFixed(2)}</td>
-                    <td style={{ color: pl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
-                      {pl >= 0 ? '+' : ''}${pl.toFixed(2)}
-                    </td>
-                    <td style={{ color: plc >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                      {(plc * 100).toFixed(2)}%
-                    </td>
-                  </tr>
-                )
-              })}
+              {positions.map((p) => (
+                <tr key={p.symbol}>
+                  <td><strong>{p.symbol}</strong></td>
+                  <td>{p.qty}</td>
+                  <td>${p.avg_entry_price.toFixed(2)}</td>
+                  <td>${p.market_value.toFixed(2)}</td>
+                  <td style={{ color: p.unrealized_pl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+                    {p.unrealized_pl >= 0 ? '+' : ''}${p.unrealized_pl.toFixed(2)}
+                  </td>
+                  <td style={{ color: p.unrealized_plpc >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                    {(p.unrealized_plpc * 100).toFixed(2)}%
+                  </td>
+                </tr>
+              ))}
               {positions.length === 0 && !posLoading && (
                 <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No open positions</td></tr>
               )}

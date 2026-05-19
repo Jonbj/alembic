@@ -9,5 +9,9 @@ export interface Signal {
   generated_at: string
 }
 
-export const fetchSignals = (symbol?: string) =>
-  apiFetch<Signal[]>(`/api/signals${symbol ? `?symbol=${symbol}` : ''}`)
+export const fetchSignals = (symbol?: string) => {
+  const params = new URLSearchParams()
+  if (symbol) params.set('symbol', symbol)
+  const qs = params.toString()
+  return apiFetch<Signal[]>(`/api/signals${qs ? `?${qs}` : ''}`)
+}

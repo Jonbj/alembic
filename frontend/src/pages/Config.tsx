@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { fetchConfig, updateConfig } from '@/api/config'
+import { fetchConfig, updateConfig, type ConfigResponse } from '@/api/config'
 
 export default function Config() {
   const qc = useQueryClient()
-  const { data: cfg, isLoading } = useQuery({ queryKey: ['config'], queryFn: fetchConfig })
+  const { data: cfg, isLoading } = useQuery<ConfigResponse>({ queryKey: ['config'], queryFn: fetchConfig })
 
   const [watchlist, setWatchlist] = useState<string[]>([])
   const [drawdown, setDrawdown] = useState(10)
@@ -13,10 +13,9 @@ export default function Config() {
 
   useEffect(() => {
     if (!cfg) return
-    const symbols = (cfg as any)?.symbols?.watchlist ?? []
-    setWatchlist(symbols)
-    setDrawdown(((cfg as any)?.risk?.portfolio_drawdown ?? 0.1) * 100)
-    setStopLoss((cfg as any)?.risk?.stop_loss ?? 0.05)
+    setWatchlist(cfg.symbols?.watchlist ?? [])
+    setDrawdown((cfg.risk?.portfolio_drawdown ?? 0.1) * 100)
+    setStopLoss(cfg.risk?.stop_loss ?? 0.05)
   }, [cfg])
 
   const saveMutation = useMutation({
