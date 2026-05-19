@@ -554,6 +554,25 @@ Every number below was chosen heuristically and has not been validated against h
 - Phase A: Paper trading validation (3–5 weeks, needs host deployment)
 - GKG backtest Nov 2025 → IC/ICIR results pending
 
+### Pre-Live Blockers 🚨
+
+These bugs must be fixed before going live on a real account. Each was identified by static architecture review against live-trading failure scenarios.
+
+**CRITICAL — System correctness**
+- `pg_store.py`: Fix PostgreSQL connection lifecycle — `_get_connection()` in pool mode leaks a handle on every call because `_release_connection()` is never called on the happy path; pool exhausts after ~20 writes, halting all signal persistence mid-session (`src/store/pg_store.py:103`)
+- `ensemble.py` + `redis_store.py`: Wire ensemble weights into aggregator — weekly LOO ICIR → Telegram approve → `ensemble:weights:current` is written to Redis but `EnsembleAggregator.aggregate()` never reads it; every order sizes as if weights are uniform regardless of approval (`src/llm/ensemble.py:192`)
+- `performance.py` + `pg_store.py`: Fix weight optimisation data source — LOO ICIR groups `sentiment_signals` by `model_id`, which stores an aggregate ensemble string, not individual model IDs; per-model ICIR is never computed; fix by joining `llm_responses` against `sentiment_signals.forward_return` (`src/workers/performance.py:101`)
+- `execution.py`: Execution idempotency — in-flight Alpaca orders (status `accepted`/`pending_new`/`partially_filled`) are not returned by `get_all_positions()`, so the BUY gate re-fires on the next tick and a second market order is placed for the same symbol; fix by calling `get_orders(status=OPEN)` per tick and treating any open order as "engaged" (`src/workers/execution.py:197`)
+
+**HIGH — Risk controls**
+- `redis_store.py` + `execution.py`: Kill-switch lifecycle — drawdown-triggered halt writes `killswitch_active=1` with no TTL; system stays halted at next session open until manual operator intervention; add auto-clear at session start with a separate `halted_by_operator` flag for manual halts that must not auto-clear (`src/store/redis_store.py:122`)
+- `execution.py` + `regime.py`: Regime default fail-conservative — missing `regime_multiplier` Redis key (e.g. FRED outage at 07:00) defaults to `1.0` (bull, full size); should default to `0.2` or retain `last_known` regime via a longer-TTL fallback key (`src/workers/execution.py:133`)
+- `execution.py`: Portfolio concentration cap — all watchlist symbols can receive simultaneous BUY signals in one macro shock; no cap on total gross notional deployed per tick; add `cumulative_notional_this_tick ≤ portfolio_value × MAX_GROSS_PCT` guard (e.g. 50%) (`src/workers/execution.py:283`)
+- `execution.py`: Broker-side stop-loss — current stop is evaluated in-loop at 15-min cadence; a tape-bomb drop between ticks produces 2× the intended slippage; replace with Alpaca bracket order submitted at entry time (`src/workers/execution.py:241`)
+- `api/routes/*`: API authentication — `/api/positions`, `/api/orders`, `/api/signals/{symbol}`, `/api/performance/pnl`, `/api/llm/feedback`, `/api/weights/current`, `/api/config` (GET) are all unauthenticated; an external reader can mirror the live strategy in real time; apply `require_api_key` globally at router level, exempt only `/api/health`
+- `sentiment.py` + `celery_app.py`: SentimentWorker in-flight queue — bulk `lpop` before LLM inference is irrevocable; if `task_time_limit` fires mid-batch, popped items are lost with no retry and no audit row; replace with `LMOVE` into an in-flight list, acknowledge only after successful PG write (`src/workers/sentiment.py:244`)
+- `performance.py`: Weight guardrail mean-ICIR floor — G3 (IC variance) passes when all models unanimously agree on negative ICIR (ensemble anti-predictive but homogeneous); add G3.5: freeze auto-apply if `mean(purified_icir.values()) < MIN_ABS_ICIR` (`src/workers/performance.py:721`)
+
 ### Planned 📋
 
 **Phase B — Paper trading hardening (1–2 weeks)**
@@ -565,12 +584,21 @@ Every number below was chosen heuristically and has not been validated against h
 **Signal quality improvements**
 - Exponential time-decay on sentiment signals: `score_adj = score × e^(−λt)` where `t` is minutes since signal generation — replaces the current binary 30-min validity cutoff with a continuous degradation that reduces position size as the news ages
 - IC forward return from signal timestamp: fix the Performance Worker to measure return from `generated_at` (signal time) rather than market open, eliminating contamination from pre-signal price moves and making PSI/CUSUM statistically valid
+- Signal store: bounded top-K per symbol (Redis ZSET scored by `|signal_score|`) instead of single last-write-wins `setex`; prevents a weak follow-up article from masking a high-conviction earlier signal within the same 15-min window (`src/store/redis_store.py:84`)
+- SentimentWorker: content-hash dedup pre-inference — the same article arriving from GDELT, MarketAux, and Alpaca has three different URLs; all three pass URL-based dedup and trigger three separate LLM calls; add content-hash check in SentimentWorker before inference (`src/connectors/deduplicator.py:83`)
+- SentimentWorker: skip items with empty `asset_tags` before LLM inference — currently processes to `symbol="UNKNOWN"`, wastes budget and pollutes audit data (`src/workers/sentiment.py:71`)
+- Dedup TTL: reconcile code value (2 h in `deduplicator.py:22`) with architecture docs (4 h); make configurable via env var
 
 **Regime Detection refactor**
 - Replace LLM pair in Phase 3 with a deterministic classifier (threshold rules or Hidden Markov Model) — VIX, T10Y2Y spread and SPY EMA are purely numerical inputs; using an LLM for this is non-deterministic, expensive, and hallucination-prone. A rule-based model is instantaneous, free, and recalculable intraday if VIX spikes mid-session
 
 **Execution improvements**
-- Exit logic: Chandelier Exit (ATR-based trailing stop) or trailing stop dynamique — current stop-loss only approach leaves unrealised profit on the table in high-momentum moves triggered by sentiment
+- Drawdown cap: anchor to session-open equity captured at first tick of each trading day written to Redis, not `account.last_equity` (overnight close); a gap-up day inflates the reference, a gap-down day over-triggers the cap (`src/workers/execution.py:208`)
+- Sentiment-based exit: close position when new ensemble score falls below `−ENTRY_THRESHOLD`, independent of stop-loss; current logic only listens to price on held positions, discarding bearish signals entirely (`src/workers/execution.py:240`)
+- Sequence Celery beat: stagger ingestion/sentiment/execution by 2–5 min so execution reads a signal generated this tick rather than the previous one; all five tasks currently share the same cron minute (`src/workers/celery_app.py:43`)
+- `compute_new_weights`: enforce floor/cap invariant after final renormalisation via iterative projection — current clip→renorm→clip-delta→renorm sequence can push one model above `weight_cap` after the final step (`src/performance/weights.py:200`)
+- Shared-bias detector: track hit-rate of low-std high-agreement ensemble signals month-over-month; freeze new entries when empirical hit-rate falls below baseline — divergence check catches model disagreement but not shared training-data bias across all four models
+- Exit logic: Chandelier Exit (ATR-based trailing stop) — current stop-loss only approach leaves unrealised profit on the table in high-momentum moves triggered by sentiment
 - EMA20 filter replacement/augmentation: add ADX confirmation or Keltner Channel to reduce whipsaw entries on exhausted intraday price spikes
 
 **Architecture — Phase D**
