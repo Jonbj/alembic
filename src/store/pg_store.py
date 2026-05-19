@@ -1,8 +1,10 @@
 """PostgreSQL store for sentiment signals and performance metrics."""
 
+from __future__ import annotations
+
 import json
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import psycopg2
 from psycopg2 import pool
@@ -10,6 +12,10 @@ from psycopg2.extras import RealDictCursor
 
 from src.config import config
 from src.models.signals import SentimentResult
+
+if TYPE_CHECKING:
+    from src.models.news import NewsItem
+    from src.llm.ensemble import ModelOutput
 
 # Global connection pool - lazy initialized
 _db_pool: pool.ThreadedConnectionPool | None = None
@@ -67,6 +73,7 @@ class PostgreSQLStore:
             model_id = EXCLUDED.model_id,
             ensemble_std = EXCLUDED.ensemble_std,
             fallback_used = EXCLUDED.fallback_used
+        RETURNING id
     """
 
     _INSERT_WEIGHT_LOG = """
@@ -126,8 +133,8 @@ class PostgreSQLStore:
             self._release_connection(self._conn)
             self._conn = None
 
-    def write_signal(self, result: SentimentResult) -> None:
-        """Write sentiment signal to database."""
+    def write_signal(self, result: SentimentResult) -> int:
+        """Write sentiment signal to database. Returns the inserted/updated row id."""
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
@@ -144,10 +151,135 @@ class PostgreSQLStore:
                         result.generated_at,
                     ),
                 )
+                row = cur.fetchone()
+                signal_id: int = row[0]
+            conn.commit()
+            return signal_id
+        except Exception:
+            conn.rollback()
+            raise
+
+    _INSERT_NEWS_LOG = """
+        INSERT INTO news_log (title, url, source, ticker, body_snippet, raw_sentiment, fetched_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT DO NOTHING
+    """
+
+    _INSERT_LLM_RESPONSE = """
+        INSERT INTO llm_responses (signal_id, model_id, polarity, confidence, reasoning, eligible, generated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, now())
+    """
+
+    def log_news_item(self, item: NewsItem, ticker: str) -> None:
+        """Write article metadata to news_log. Skips silently on conflict."""
+        from src.models.news import MarketAuxNewsItem
+
+        raw_sentiment = item.marketaux_sentiment if isinstance(item, MarketAuxNewsItem) else None
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    self._INSERT_NEWS_LOG,
+                    (
+                        item.title[:500] if item.title else "",
+                        item.url[:1000] if item.url else "",
+                        item.source,
+                        ticker,
+                        item.body[:500] if item.body else None,
+                        raw_sentiment,
+                        item.timestamp,
+                    ),
+                )
             conn.commit()
         except Exception:
             conn.rollback()
             raise
+
+    def log_llm_responses(self, signal_id: int, outputs: list[ModelOutput]) -> None:
+        """Write per-model outputs to llm_responses. No-op for empty list."""
+        if not outputs:
+            return
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                for out in outputs:
+                    cur.execute(
+                        self._INSERT_LLM_RESPONSE,
+                        (
+                            signal_id,
+                            out.model_id,
+                            out.polarity,
+                            out.confidence,
+                            out.reasoning,
+                            True,
+                        ),
+                    )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    def get_news_recent(
+        self,
+        limit: int = 100,
+        ticker: str | None = None,
+        source: str | None = None,
+    ) -> list[dict]:
+        """Return recent news_log rows as dicts, newest first."""
+        filters = []
+        params: list = []
+        if ticker:
+            filters.append("ticker = %s")
+            params.append(ticker)
+        if source:
+            filters.append("source = %s")
+            params.append(source)
+        where = ("WHERE " + " AND ".join(filters)) if filters else ""
+        params.append(limit)
+        conn = self._get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT id, title, url, source, ticker, raw_sentiment, fetched_at "
+                f"FROM news_log {where} ORDER BY fetched_at DESC LIMIT %s",
+                params,
+            )
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
+
+    def get_llm_feedback(
+        self,
+        limit: int = 50,
+        ticker: str | None = None,
+        model_id: str | None = None,
+    ) -> list[dict]:
+        """Return recent llm_responses joined with sentiment_signals, newest first."""
+        filters = []
+        params: list = []
+        if ticker:
+            filters.append("s.symbol = %s")
+            params.append(ticker)
+        if model_id:
+            filters.append("r.model_id = %s")
+            params.append(model_id)
+        where = ("WHERE " + " AND ".join(filters)) if filters else ""
+        params.append(limit)
+        conn = self._get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT r.id, r.signal_id, s.symbol, r.model_id, r.polarity,
+                       r.confidence, r.reasoning, r.eligible, r.generated_at,
+                       s.fallback_used, s.ensemble_std
+                FROM llm_responses r
+                JOIN sentiment_signals s ON s.id = r.signal_id
+                {where}
+                ORDER BY r.generated_at DESC
+                LIMIT %s
+                """,
+                params,
+            )
+            cols = [d[0] for d in cur.description]
+            return [dict(zip(cols, row)) for row in cur.fetchall()]
 
     # FIX: Use timedelta from Python instead of string interpolation
     # Original vulnerable code:
@@ -249,6 +381,38 @@ class PostgreSQLStore:
                 log_id: int = cur.fetchone()[0]
             conn.commit()
             return log_id
+        except Exception:
+            conn.rollback()
+            raise
+
+    def delete_old_news_log(self, older_than_days: int) -> int:
+        """Delete news_log rows older than given days. Returns deleted count."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM news_log WHERE fetched_at < now() - (%s || ' days')::interval",
+                    (str(older_than_days),),
+                )
+                deleted = cur.rowcount
+            conn.commit()
+            return deleted
+        except Exception:
+            conn.rollback()
+            raise
+
+    def delete_old_llm_responses(self, older_than_days: int) -> int:
+        """Delete llm_responses rows older than given days. Returns deleted count."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM llm_responses WHERE generated_at < now() - (%s || ' days')::interval",
+                    (str(older_than_days),),
+                )
+                deleted = cur.rowcount
+            conn.commit()
+            return deleted
         except Exception:
             conn.rollback()
             raise

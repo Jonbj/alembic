@@ -107,7 +107,7 @@ class TestProcessNewsItem:
         ) as mock_run_ensemble:
             mock_run_ensemble.return_value = mock_outputs
 
-            result = await process_news_item(
+            await process_news_item(
                 item=news_item,
                 clients=[],  # Not used when mocking run_ensemble_query
                 aggregator=mock_aggregator,
@@ -116,12 +116,6 @@ class TestProcessNewsItem:
                 redis_store=mock_redis,
                 pg_store=mock_pg,
             )
-
-        # Verify result
-        assert result is not None
-        assert result.symbol == "AAPL"
-        assert result.fallback_used is False
-        assert result.score > 0
 
         # Verify budget was checked
         mock_budget.check_budget.assert_called_once()
@@ -132,6 +126,8 @@ class TestProcessNewsItem:
         # Verify stores were called
         mock_redis.write_sentiment.assert_called_once()
         mock_pg.write_signal.assert_called_once()
+        mock_pg.log_news_item.assert_called_once()
+        mock_pg.log_llm_responses.assert_called_once()
 
         # Verify spending was recorded
         assert mock_budget.record_spending.call_count >= 1
@@ -160,7 +156,7 @@ class TestProcessNewsItem:
 
         news_item = make_news_item("AAPL", 0)
 
-        result = await process_news_item(
+        await process_news_item(
             item=news_item,
             clients=[],  # No clients needed since budget exhausted
             aggregator=mock_aggregator,
@@ -170,11 +166,6 @@ class TestProcessNewsItem:
             pg_store=mock_pg,
         )
 
-        # Verify result uses FinBERT fallback
-        assert result is not None
-        assert result.fallback_used is True
-        assert result.model_id == "finbert"
-
         # Verify budget was checked
         mock_budget.check_budget.assert_called_once()
 
@@ -183,6 +174,10 @@ class TestProcessNewsItem:
 
         # Verify fallback counter was incremented
         mock_redis.increment_fallback_counter.assert_called_once()
+        mock_pg.write_signal.assert_called_once()
+        mock_pg.log_news_item.assert_called_once()
+        # No LLM responses on fallback
+        mock_pg.log_llm_responses.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_ensemble_divergence_uses_finbert_fallback(self):
@@ -219,7 +214,7 @@ class TestProcessNewsItem:
         ) as mock_run_ensemble:
             mock_run_ensemble.return_value = mock_outputs
 
-            result = await process_news_item(
+            await process_news_item(
                 item=news_item,
                 clients=[],
                 aggregator=mock_aggregator,
@@ -229,13 +224,11 @@ class TestProcessNewsItem:
                 pg_store=mock_pg,
             )
 
-        # Verify result uses FinBERT fallback
-        assert result is not None
-        assert result.fallback_used is True
-        assert result.model_id == "finbert"
-
         # Verify fallback counter was incremented
         mock_redis.increment_fallback_counter.assert_called_once()
+        mock_pg.write_signal.assert_called_once()
+        mock_pg.log_news_item.assert_called_once()
+        mock_pg.log_llm_responses.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_empty_ensemble_outputs_uses_finbert(self):
@@ -264,7 +257,7 @@ class TestProcessNewsItem:
         ) as mock_run_ensemble:
             mock_run_ensemble.return_value = []
 
-            result = await process_news_item(
+            await process_news_item(
                 item=news_item,
                 clients=[],
                 aggregator=mock_aggregator,
@@ -274,10 +267,12 @@ class TestProcessNewsItem:
                 pg_store=mock_pg,
             )
 
-        # Verify result uses FinBERT fallback
-        assert result is not None
-        assert result.fallback_used is True
-        assert result.model_id == "finbert"
+        # Verify FinBERT fallback was used
+        mock_finbert.analyze.assert_called_once()
+        mock_redis.increment_fallback_counter.assert_called_once()
+        mock_pg.write_signal.assert_called_once()
+        mock_pg.log_news_item.assert_called_once()
+        mock_pg.log_llm_responses.assert_not_called()
 
 
 class TestRunInference:
@@ -286,6 +281,10 @@ class TestRunInference:
     @pytest.mark.asyncio
     async def test_run_inference_ensemble_success(self):
         """run_inference returns SentimentResult without touching any store."""
+        mock_raw_output = ModelOutput(
+            symbol="AAPL", polarity=0.8, confidence=0.9,
+            reasoning="Bullish on earnings", model_id="opus",
+        )
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
         mock_aggregator.aggregate.return_value = MagicMock(
             polarity=0.8,
@@ -303,8 +302,8 @@ class TestRunInference:
 
         with patch("src.workers.sentiment.run_ensemble_query",
                    new_callable=AsyncMock) as mock_eq:
-            mock_eq.return_value = [MagicMock()]
-            result = await run_inference(
+            mock_eq.return_value = [mock_raw_output]
+            inference_result = await run_inference(
                 item=item,
                 clients=[],
                 aggregator=mock_aggregator,
@@ -312,10 +311,14 @@ class TestRunInference:
                 budget_tracker=mock_budget,
             )
 
-        assert result is not None
+        assert inference_result is not None
+        result, raw_outputs = inference_result
         assert result.symbol == "AAPL"
         assert result.fallback_used is False
         assert abs(result.score) <= 1.0
+        assert isinstance(raw_outputs, list)
+        assert len(raw_outputs) > 0
+        assert raw_outputs[0].model_id == "opus"
         mock_budget.check_budget.assert_called_once()
         mock_finbert.analyze.assert_not_called()
 
@@ -335,7 +338,7 @@ class TestRunInference:
 
         with patch("src.workers.sentiment.run_ensemble_query",
                    new_callable=AsyncMock, return_value=[MagicMock()]):
-            result = await run_inference(
+            inference_result = await run_inference(
                 item=item,
                 clients=[],
                 aggregator=mock_aggregator,
@@ -343,9 +346,11 @@ class TestRunInference:
                 budget_tracker=mock_budget,
             )
 
-        assert result is not None
+        assert inference_result is not None
+        result, raw_outputs = inference_result
         assert result.fallback_used is True
         assert result.model_id == "finbert"
+        assert raw_outputs == []  # no outputs on fallback
         mock_finbert.analyze.assert_called_once()
 
     @pytest.mark.asyncio
@@ -360,7 +365,7 @@ class TestRunInference:
 
         item = make_news_item("SPY", 2)
 
-        result = await run_inference(
+        inference_result = await run_inference(
             item=item,
             clients=[],
             aggregator=MagicMock(spec=EnsembleAggregator),
@@ -368,15 +373,15 @@ class TestRunInference:
             budget_tracker=mock_budget,
         )
 
-        assert result is not None
+        assert inference_result is not None
+        result, raw_outputs = inference_result
         assert result.fallback_used is True
         assert "budget exhausted" in result.reasoning
+        assert raw_outputs == []
 
     @pytest.mark.asyncio
     async def test_run_inference_no_store_writes(self):
         """run_inference never writes to Redis or PostgreSQL."""
-        mock_redis = MagicMock()
-        mock_pg = MagicMock()
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
         mock_aggregator.aggregate.return_value = MagicMock(
             polarity=0.5, confidence=0.8, reasoning="ok",
@@ -390,14 +395,15 @@ class TestRunInference:
 
         with patch("src.workers.sentiment.run_ensemble_query",
                    new_callable=AsyncMock, return_value=[MagicMock()]):
-            await run_inference(
+            inference_result = await run_inference(
                 item=item, clients=[], aggregator=mock_aggregator,
                 finbert=MagicMock(), budget_tracker=mock_budget,
             )
 
-        # run_inference must NOT touch any store
-        mock_redis.write_sentiment.assert_not_called()
-        mock_pg.write_signal.assert_not_called()
+        assert inference_result is not None
+        result, raw_outputs = inference_result
+        assert result is not None
+        # run_inference must NOT touch any store (verified by absence of store mocks)
 
 
 class TestProcessNewsBatch:

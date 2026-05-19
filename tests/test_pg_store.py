@@ -81,6 +81,41 @@ class TestPostgreSQLStoreInterface:
         # Days should be a parameter, not interpolated into SQL
 
 
+class TestWriteSignalReturnsId:
+    """Test that write_signal returns the inserted/updated signal id."""
+
+    def test_write_signal_returns_signal_id(self):
+        """write_signal must return the integer id of the inserted row."""
+        from datetime import datetime, timezone
+        from src.models.signals import SentimentResult
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchone.return_value = (42,)
+        mock_conn.cursor.return_value = mock_cursor
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+
+        sample_signal = SentimentResult(
+            symbol="AAPL",
+            score=0.7,
+            confidence=0.85,
+            reasoning="Positive sentiment",
+            model_id="ensemble",
+            ensemble_std=0.1,
+            fallback_used=False,
+            generated_at=datetime.now(timezone.utc),
+        )
+
+        signal_id = store.write_signal(sample_signal)
+
+        assert isinstance(signal_id, int)
+        assert signal_id == 42
+        mock_cursor.fetchone.assert_called_once()
+
+
 class TestLogWeightUpdate:
     """Test PostgreSQLStore.log_weight_update()."""
 

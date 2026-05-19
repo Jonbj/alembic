@@ -37,3 +37,7 @@ schedule:
   sentiment_worker_minutes: 15
   performance_worker_daily: "0 22 * * *"  # 22:00 UTC
   budget_reset_cron: "0 0 * * *"  # Midnight UTC
+
+retention:
+  news_log_days: 180      # delete news_log rows older than N days
+  llm_responses_days: 365 # delete llm_responses rows older than N days

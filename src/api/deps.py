@@ -35,3 +35,14 @@ def get_pg_store():
     """FastAPI dependency: PostgreSQLStore (new connection from pool per request)."""
     from src.store.pg_store import PostgreSQLStore
     return PostgreSQLStore()
+
+
+def get_alpaca_trading_client():
+    """FastAPI dependency: Alpaca TradingClient from app config."""
+    from alpaca.trading.client import TradingClient
+    from src.config import config
+    return TradingClient(
+        api_key=config.ALPACA_API_KEY,
+        secret_key=config.ALPACA_SECRET_KEY,
+        paper=config.ALPACA_BASE_URL.startswith("https://paper"),
+    )

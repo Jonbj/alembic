@@ -195,10 +195,11 @@ def phase2_infer(pg_conn, run_id: str, dry_run: bool) -> int:
                 url=article_url,
                 timestamp=generated_at,
             )
-            result = asyncio.run(
+            inference_result = asyncio.run(
                 run_inference(item, clients, aggregator, finbert, budget_tracker)
             )
-            if result is not None:
+            if inference_result is not None:
+                result, _ = inference_result
                 cur.execute(_UPDATE_SCORED, (
                     result.score, result.confidence, result.reasoning,
                     result.model_id, result.ensemble_std, result.fallback_used,

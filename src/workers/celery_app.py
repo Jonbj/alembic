@@ -104,6 +104,11 @@ app.conf.beat_schedule = {
         "task": "src.workers.telegram_poller.poll_telegram_updates",
         "schedule": 5.0,  # 5 seconds
     },
+    # Nightly retention sweep at 03:30 UTC
+    "run-retention-sweep": {
+        "task": "src.workers.retention.run_retention_sweep",
+        "schedule": crontab(hour=3, minute=30),
+    },
 }
 
 # Auto-discover tasks in the workers package
