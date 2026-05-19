@@ -447,6 +447,94 @@ python -m pytest tests/ --cov=src --cov-report=html
 
 ---
 
+## Known Limitations & Review Areas
+
+This section is the canonical list of known gaps, uncalibrated parameters, and open engineering questions. It exists to help code reviewers — human or AI — focus effort where uncertainty is highest. Items marked **⚠️** are unvalidated assumptions that could affect live trading outcomes.
+
+### Uncalibrated Parameters
+
+Every number below was chosen heuristically and has not been validated against historical data. They are the first place to look if the system underperforms.
+
+| Parameter | Current value | Location | Risk if wrong |
+|-----------|--------------|----------|---------------|
+| BUY score threshold | `> 0.3` | `execution.py` | Too low → excessive entries on weak signals; too high → misses valid signals |
+| Signal staleness window | `30 min` | `execution.py` | Too wide → trades on stale information; too narrow → skips valid signals |
+| EMA period | `20 days` | `execution.py` | Not validated for news-driven intraday signals; standard technical indicator only |
+| Ensemble divergence std | `> 0.30` | `workers.yaml` | Too tight → excessive FinBERT fallbacks; too loose → noisy ensemble consensus |
+| Min model confidence | `0.40` | `workers.yaml` | Rejects models that are systematically cautious on all articles |
+| Daily drawdown cap | `10%` | `execution.py` | Not calibrated to strategy volatility; could halt unnecessarily in high-volatility regimes |
+| Regime multipliers | `1.0 / 0.7 / 0.4 / 0.2` | `regime.py` | Values not derived from historical portfolio data; purely heuristic |
+| IC rolling window | `30 days` | `workers.yaml` | Too short → noisy IC; too long → slow drift detection |
+| PSI yellow threshold | `0.10` | `workers.yaml` | Standard PSI bounds, not tuned to this signal distribution |
+| PSI red threshold | `0.25` | `workers.yaml` | Same — may fire too early or too late for this strategy |
+| LOO ICIR window | `30 days` | `weights.py` | Same window as IC — regime changes shorter than 30d are invisible |
+| Weight floor / cap | `0.10 / 0.70` | `workers.yaml` | Bounds prevent concentration but also prevent a dominant model from expressing full edge |
+| Exponential decay λ | not yet chosen | planned | Will determine how fast signal value degrades post-publication |
+
+### Engineering Gaps
+
+**Startup state reconciliation.** If the system restarts while Alpaca positions are open, the `ExecutionWorker` starts fresh with no knowledge of open positions. Stop-loss monitoring does not apply to positions opened before the restart until the next signal is received for that symbol. In a live account, this is a critical gap.
+
+**Partial fill handling.** `place_order()` issues a market order and does not verify fill status. A partially filled order (possible on illiquid tickers) is not tracked. The position tracker treats the order as either fully filled or not filled — no in-between state.
+
+**Celery worker concurrency — duplicate orders.** The idempotency guard ("do not pyramid into an existing position") is checked in-process. If two Celery worker processes receive the same `execution-worker` beat tick simultaneously, both will check Redis, both will see no open position (before either has placed an order), and both may place an order. Celery does not guarantee single-instance execution per beat tick across multiple workers.
+
+**Celery task overlap.** If an `ExecutionWorker` run takes longer than 15 minutes (e.g., due to Alpaca API slowness), the next tick starts before the first finishes. Two instances may run simultaneously without any coordination.
+
+**Redis flush / restart resets kill-switch.** The kill-switch is a Redis key with no TTL. If Redis is flushed or restarted (data loss), the kill-switch silently resets to `off`. The system will resume trading immediately with no operator confirmation.
+
+**Concurrent signal writes — last-write-wins.** `SentimentWorker` uses `SET key value EX ttl` to write signals. If two workers process two different articles for the same symbol in the same 15-min window, the second write silently overwrites the first. There is no merge strategy (e.g., weighted average or max-confidence selection).
+
+**Budget tracker TOCTOU race.** The check-then-increment pattern in `LLMBudgetTracker` (`if remaining > cost → call LLM → INCRBY`) is not atomic as a unit. Under concurrent workers, two processes could both pass the check before either increments, resulting in slightly over-budget LLM calls.
+
+**Telegram poller duplicate processing.** `poll-telegram-updates` runs every 5 seconds as a Celery task. If two poll tasks run concurrently, both may process the same `callback_query_id` (approve/reject tap) and attempt to write weights twice. The token hash check mitigates but does not guarantee idempotency.
+
+**API rate limiting absent.** The public endpoints `/api/signals/history`, `/api/news/recent`, and `/api/llm/feedback` have no rate limiting. A client could exhaust the PostgreSQL connection pool with a burst of requests.
+
+**PostgreSQL connection pool release.** `_get_connection()` returns a connection from `ThreadedConnectionPool`. If a method raises an exception before the connection is returned via `putconn()`, the connection is leaked. Under sustained errors, the pool is exhausted and all subsequent operations fail.
+
+**FinBERT cold-start latency.** FinBERT loads from disk on first invocation in a new worker process. In scenarios where ensemble divergence is high (frequent fallbacks), each new Celery worker process incurs this cold-start cost. No pre-warming mechanism exists.
+
+**No market halt / corporate action handling.** If a symbol is halted by the exchange, Alpaca will reject the order with an error. The system logs the error but does not distinguish a halt from a transient API failure, and may retry unnecessarily. Stock splits and dividends are not adjusted in historical signal data, making stop-loss levels for pre-split positions incorrect.
+
+**yfinance reliability.** Yahoo Finance has documented data quality issues: stale prices, incorrect split adjustments, and intermittent availability. The `EMA20` calculation and drawdown cap check both depend on yfinance. A stale price could silently trigger a false stop-loss or suppress a real one.
+
+### Backtesting Methodology Risks
+
+**Look-ahead bias in weight replay.** `run_backtest.py` replays GKG articles using the current ensemble model weights. If those weights were optimised on data that includes the backtest period, the backtest overstates historical performance (in-sample data snooping).
+
+**Survivorship bias.** `WATCHLIST_SYMBOLS` contains currently active tickers. Backtesting against the current watchlist excludes companies that were delisted, acquired, or went bankrupt during the test period, overstating signal quality by removing the worst outcomes.
+
+**No transaction costs.** IC calculation and backtest returns do not subtract bid-ask spread, broker commission, or market impact. For small-cap or illiquid tickers, this understatement of cost could make an unprofitable strategy appear marginally positive.
+
+**IC horizon / holding period mismatch.** IC is measured over 1 trading day (open-to-close). The execution engine holds positions for potentially multiple days (until stop-loss or sentiment reversal). The measurement horizon does not match the actual holding period; IC measured at 1d may not predict strategy P&L correctly.
+
+**IC T0 contamination.** ⚠️ **Active methodological bug**: IC currently uses market open as T0 for forward return calculation. Signals generated at 16:30 UTC (after market open) are correlated against a return that includes price movement from 14:00–16:30 UTC — before the signal existed. This inflates IC estimates and invalidates PSI/CUSUM drift detection over time. See roadmap: "IC forward return from signal timestamp".
+
+**No slippage model.** Market orders on news events fill at the prevailing ask price, which can be significantly above the last price during high-volatility announcements. The system assumes zero slippage in all performance calculations.
+
+### Data Quality & External Dependencies
+
+**GDELT article age.** GDELT is a secondary aggregator. Articles it references may be 1–6 hours old at the time Alembic fetches the 15-min bulk CSV. The `fetched_at` field in `news_log` records when Alembic fetched the entry, not when the article was originally published. Downstream IC analysis that uses `fetched_at` as T0 may understate signal latency.
+
+**MarketAux ticker false positives.** Pre-tagged tickers from MarketAux can include false positives — an article about "Apple cider" may be tagged as `AAPL`. The system does not validate ticker relevance before running LLM inference; it relies on the LLM to produce a near-zero polarity for irrelevant text. This works in practice but inflates token usage and budget consumption.
+
+**FRED API single point of failure.** `RegimeDetector` fetches VIX and T10Y2Y from the FRED API. If FRED is unavailable (the service has had outages), regime detection silently fails. There is no cached fallback (e.g., previous day's regime label retained) — the behaviour on FRED unavailability should be verified in `src/connectors/macro.py`.
+
+**Ollama cloud rate limits.** Four ensemble models are queried concurrently per article. If multiple Celery workers run simultaneously, the aggregate request rate to Ollama cloud could exceed per-model rate limits. The budget tracker monitors cost but not request frequency; rate limit errors from Ollama are treated as general LLM failures and trigger the FinBERT fallback.
+
+### Security Gaps Not Covered in the Security Table
+
+**No input length validation before LLM.** Article text is sanitized (`sanitize_text()`) but not truncated to a maximum token length before being sent to the LLM ensemble. A very long article (or a deliberately crafted adversarial payload) could inflate token usage far beyond the per-article budget assumption.
+
+**`config/trading.yaml` path not validated.** `config_routes.py` reads and writes a hardcoded `_CONFIG_PATH`. If the path is ever made configurable (e.g., via a query parameter in a future refactor), it would introduce a path traversal vulnerability. The current implementation is safe, but the pattern is fragile.
+
+**Admin API key timing attack.** `auth.py` compares the incoming `X-API-Key` header against `config.ADMIN_API_KEY`. If this comparison is not constant-time (i.e., not using `hmac.compare_digest`), it is vulnerable to a timing oracle attack that could allow an attacker to enumerate the key byte by byte. Check `src/api/auth.py` for use of `==` vs `secrets.compare_digest`.
+
+**Telegram bot token not rotated.** The system has no mechanism for rotating the Telegram bot token. If the token is leaked (e.g., in a log line), the attacker can send arbitrary approve/reject commands to the weight system. The `TELEGRAM_ALLOWED_USER_IDS` allowlist limits blast radius but does not prevent replay of captured callbacks.
+
+---
+
 ## Roadmap
 
 ### Completed ✅
