@@ -32,10 +32,8 @@ def _get_pool() -> pool.ThreadedConnectionPool:
                 minconn=2,
                 maxconn=20,
                 dsn=config.DATABASE_URL,
-                timeout=30,  # CRITICAL FIX: Prevent hang on pool exhaustion
             )
         except psycopg2.OperationalError as e:
-            # Pool initialization failed (e.g., DB not reachable)
             raise RuntimeError(f"Failed to initialize database connection pool: {e}")
     return _db_pool
 
@@ -109,8 +107,7 @@ class PostgreSQLStore:
             # Get connection from pool with timeout handling
             try:
                 return _get_pool().getconn()
-            except psycopg2.pool.PoolTimeout:
-                # Fallback: create temporary dedicated connection
+            except psycopg2.pool.PoolError:
                 self._conn = psycopg2.connect(config.DATABASE_URL)
                 self._owns_connection = True
                 return self._conn
