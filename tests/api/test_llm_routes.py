@@ -3,7 +3,10 @@
 from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from src.api.main import app
+from src.api.auth import require_api_key
 from src.api.deps import get_pg_store
+
+_skip_auth = lambda: "test-key"
 
 
 def test_get_llm_feedback_returns_list():
@@ -14,6 +17,7 @@ def test_get_llm_feedback_returns_list():
          "polarity": 0.7, "confidence": 0.85, "reasoning": "Good."}
     ]
     app.dependency_overrides[get_pg_store] = lambda: mock_pg
+    app.dependency_overrides[require_api_key] = _skip_auth
     tc = TestClient(app)
     resp = tc.get("/api/llm/feedback")
     app.dependency_overrides.clear()
@@ -26,6 +30,7 @@ def test_get_llm_feedback_passes_ticker_filter():
     mock_pg = MagicMock()
     mock_pg.get_llm_feedback.return_value = []
     app.dependency_overrides[get_pg_store] = lambda: mock_pg
+    app.dependency_overrides[require_api_key] = _skip_auth
     tc = TestClient(app)
     tc.get("/api/llm/feedback?ticker=AAPL")
     app.dependency_overrides.clear()
@@ -37,6 +42,7 @@ def test_get_llm_feedback_passes_model_filter():
     mock_pg = MagicMock()
     mock_pg.get_llm_feedback.return_value = []
     app.dependency_overrides[get_pg_store] = lambda: mock_pg
+    app.dependency_overrides[require_api_key] = _skip_auth
     tc = TestClient(app)
     tc.get("/api/llm/feedback?model_id=opus")
     app.dependency_overrides.clear()
@@ -48,6 +54,7 @@ def test_get_llm_feedback_caps_limit():
     mock_pg = MagicMock()
     mock_pg.get_llm_feedback.return_value = []
     app.dependency_overrides[get_pg_store] = lambda: mock_pg
+    app.dependency_overrides[require_api_key] = _skip_auth
     tc = TestClient(app)
     tc.get("/api/llm/feedback?limit=500")
     app.dependency_overrides.clear()

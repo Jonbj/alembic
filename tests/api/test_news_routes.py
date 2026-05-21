@@ -3,7 +3,10 @@
 from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from src.api.main import app
+from src.api.auth import require_api_key
 from src.api.deps import get_pg_store
+
+_skip_auth = lambda: "test-key"
 
 
 def test_get_news_recent_returns_list():
@@ -14,6 +17,7 @@ def test_get_news_recent_returns_list():
          "source": "gdelt_gkg", "fetched_at": "2026-05-18T14:00:00+00:00"}
     ]
     app.dependency_overrides[get_pg_store] = lambda: mock_pg
+    app.dependency_overrides[require_api_key] = _skip_auth
     tc = TestClient(app)
     resp = tc.get("/api/news/recent")
     app.dependency_overrides.clear()
@@ -28,6 +32,7 @@ def test_get_news_recent_passes_ticker_filter():
     mock_pg = MagicMock()
     mock_pg.get_news_recent.return_value = []
     app.dependency_overrides[get_pg_store] = lambda: mock_pg
+    app.dependency_overrides[require_api_key] = _skip_auth
     tc = TestClient(app)
     tc.get("/api/news/recent?ticker=MSFT&limit=20")
     app.dependency_overrides.clear()
@@ -39,6 +44,7 @@ def test_get_news_recent_passes_source_filter():
     mock_pg = MagicMock()
     mock_pg.get_news_recent.return_value = []
     app.dependency_overrides[get_pg_store] = lambda: mock_pg
+    app.dependency_overrides[require_api_key] = _skip_auth
     tc = TestClient(app)
     tc.get("/api/news/recent?source=gdelt_gkg")
     app.dependency_overrides.clear()
@@ -50,6 +56,7 @@ def test_get_news_recent_caps_limit():
     mock_pg = MagicMock()
     mock_pg.get_news_recent.return_value = []
     app.dependency_overrides[get_pg_store] = lambda: mock_pg
+    app.dependency_overrides[require_api_key] = _skip_auth
     tc = TestClient(app)
     tc.get("/api/news/recent?limit=1000")
     app.dependency_overrides.clear()

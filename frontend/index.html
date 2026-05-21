@@ -5,6 +5,19 @@
     <link rel="icon" type="image/png" href="/alembic.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Alembic</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+      try {
+        const s = JSON.parse(sessionStorage.getItem('alembic-store') || '{}')
+        const theme = s.theme === 'light' ? 'light' : 'dark'
+        document.documentElement.setAttribute('data-theme', theme)
+        document.documentElement.style.background = theme === 'light'
+          ? 'oklch(0.985 0.003 250)'
+          : 'oklch(0.165 0.005 250)'
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

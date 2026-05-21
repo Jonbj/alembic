@@ -413,6 +413,16 @@ def run_weekly_weights():
         cb_result = check_circuit_breakers(ctx)
         freeze_reason = cb_result.reason if cb_result.freeze_weight_update else ""
 
+        # Extra guardrail: if every model has negative ICIR, the ensemble is
+        # unanimously underperforming. Force a freeze regardless of circuit breakers.
+        if purified_icir and all(v <= 0 for v in purified_icir.values()):
+            all_neg_msg = (
+                f"All models ICIR ≤ 0 ({', '.join(f'{m}={v:.3f}' for m, v in purified_icir.items())}) "
+                "— weight update frozen until ensemble recovers"
+            )
+            log.warning(all_neg_msg)
+            freeze_reason = all_neg_msg if not freeze_reason else f"{freeze_reason}; {all_neg_msg}"
+
         # Fase 1: OBSERVATIONAL - store as suggestion, do NOT auto-apply
         suggestion = {
             "suggested_weights": new_weights,

@@ -36,3 +36,6 @@ yfinance>=0.2.40
 
 # Config
 pyyaml>=6.0
+
+# Broker
+alpaca-py>=0.38

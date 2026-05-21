@@ -3,7 +3,10 @@
 from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from src.api.main import app
+from src.api.auth import require_api_key
 from src.api.deps import get_alpaca_trading_client
+
+_skip_auth = lambda: "test-key"
 
 
 def test_get_positions_returns_list():
@@ -20,6 +23,7 @@ def test_get_positions_returns_list():
     mock_client = MagicMock()
     mock_client.get_all_positions.return_value = [mock_pos]
     app.dependency_overrides[get_alpaca_trading_client] = lambda: mock_client
+    app.dependency_overrides[require_api_key] = _skip_auth
 
     tc = TestClient(app)
     resp = tc.get("/api/positions")
@@ -49,6 +53,7 @@ def test_get_orders_returns_list():
     mock_client = MagicMock()
     mock_client.get_orders.return_value = [mock_order]
     app.dependency_overrides[get_alpaca_trading_client] = lambda: mock_client
+    app.dependency_overrides[require_api_key] = _skip_auth
 
     tc = TestClient(app)
     resp = tc.get("/api/orders")
@@ -67,6 +72,7 @@ def test_get_orders_with_limit():
     mock_client = MagicMock()
     mock_client.get_orders.return_value = []
     app.dependency_overrides[get_alpaca_trading_client] = lambda: mock_client
+    app.dependency_overrides[require_api_key] = _skip_auth
 
     tc = TestClient(app)
     tc.get("/api/orders?limit=100")

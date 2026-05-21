@@ -37,11 +37,20 @@ function ModeSync() {
   return null
 }
 
+function ThemeSync() {
+  const theme = useStore((s) => s.theme)
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+  }, [theme])
+  return null
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={qc}>
       <BrowserRouter>
         <ModeSync />
+        <ThemeSync />
         <ErrorBoundary>
           <Suspense fallback={<PageFallback />}>
             <Routes>

@@ -254,12 +254,28 @@ def run_sentiment_worker() -> dict:
     )
 
     try:
-        # Pull batch from Redis queue (up to 10 items)
+        # Crash recovery: restore items from processing queue left by a previous crash.
+        # LMOVE is atomic so partial crashes leave items in news:processing, not lost.
+        stuck = redis_client.lrange("news:processing", 0, -1)
+        if stuck:
+            log.warning("Recovering %d stuck items from news:processing into news:queue", len(stuck))
+            pipe = redis_client.pipeline()
+            for item in stuck:
+                pipe.rpush("news:queue", item)
+            pipe.delete("news:processing")
+            pipe.execute()
+
+        # Pull batch using LMOVE (atomic: src LEFT → dst RIGHT).
+        # Items are in news:processing until successfully written to stores,
+        # so a crash does not lose them — next run's recovery block above re-queues them.
         news_items: list[NewsItem] = []
+        raw_items: list[bytes] = []
+        failed_raw: list[bytes] = []
         for _ in range(10):
-            item_json = redis_client.lpop("news:queue")
+            item_json = redis_client.lmove("news:queue", "news:processing", "LEFT", "RIGHT")
             if item_json is None:
                 break
+            raw_items.append(item_json)
             try:
                 data = json.loads(item_json)
                 if "marketaux_sentiment" in data:
@@ -268,6 +284,17 @@ def run_sentiment_worker() -> dict:
                     news_items.append(NewsItem(**data))
             except (json.JSONDecodeError, Exception) as e:
                 log.warning(f"Failed to parse news item from queue: {e}")
+                failed_raw.append(item_json)
+
+        # Move unparseable items to dead-letter queue — prevents infinite retry loop
+        # where the recovery block keeps re-queuing corrupt items on every invocation.
+        if failed_raw:
+            pipe = redis_client.pipeline()
+            for item in failed_raw:
+                pipe.lrem("news:processing", 1, item)
+                pipe.rpush("news:dead-letter", item)
+            pipe.execute()
+            log.warning("Moved %d unparseable items to news:dead-letter", len(failed_raw))
 
         if not news_items:
             return {"processed": 0, "reason": "no_items_in_queue"}
@@ -308,6 +335,10 @@ def run_sentiment_worker() -> dict:
 
         # Count fallbacks
         fallback_count = sum(1 for r in results if r.fallback_used)
+
+        # All items processed successfully — clear from processing queue
+        if raw_items:
+            redis_client.delete("news:processing")
 
         return {
             "processed": len(results),

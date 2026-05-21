@@ -32,9 +32,13 @@ def get_redis_store():
 
 
 def get_pg_store():
-    """FastAPI dependency: PostgreSQLStore (new connection from pool per request)."""
+    """FastAPI dependency: yields PostgreSQLStore and returns connection to pool on request end."""
     from src.store.pg_store import PostgreSQLStore
-    return PostgreSQLStore()
+    pg = PostgreSQLStore()
+    try:
+        yield pg
+    finally:
+        pg.close()
 
 
 def get_alpaca_trading_client():

@@ -45,6 +45,7 @@ log = logging.getLogger(__name__)
 
 ENTRY_THRESHOLD = 0.3
 MAX_POSITION_PCT = 0.10
+MAX_CYCLE_NOTIONAL_PCT = 0.20  # cap total notional placed per execution cycle
 STOP_LOSS_PCT = 0.02
 MAX_DRAWDOWN_PCT = 0.10
 SIGNAL_MAX_AGE_MIN = 30
@@ -131,10 +132,10 @@ def _fire_alert(notifier: "Notifier | None", message: str, level: AlertLevel) ->
 
 
 def _regime_multiplier(redis_store: RedisStore) -> float:
-    """Return regime multiplier from Redis (default 1.0 if absent)."""
+    """Return regime multiplier from Redis (conservative 0.5 fallback if absent)."""
     regime = redis_store.get_regime()
     if regime is None:
-        return 1.0
+        return 0.5
     return float(regime.multiplier)
 
 
@@ -157,10 +158,10 @@ def run_execution_cycle(
 
     Returns:
         Stats dict: checked, skipped_stale, skipped_killswitch, skipped_position,
-                    skipped_momentum, orders_placed, stop_losses_triggered, errors.
+                    skipped_momentum, skipped_cycle_cap, orders_placed, stop_losses_triggered, errors.
     """
-    from alpaca.trading.enums import OrderSide, QueryOrderStatus, TimeInForce
-    from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest
+    from alpaca.trading.enums import OrderClass, OrderSide, QueryOrderStatus, TimeInForce
+    from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest, StopLossRequest
 
     stats = {
         "checked": 0,
@@ -168,6 +169,7 @@ def run_execution_cycle(
         "skipped_killswitch": 0,
         "skipped_position": 0,
         "skipped_momentum": 0,
+        "skipped_cycle_cap": 0,
         "orders_placed": 0,
         "stop_losses_triggered": 0,
         "errors": 0,
@@ -224,13 +226,16 @@ def run_execution_cycle(
             drawdown = (last_equity - portfolio_value) / last_equity
             if drawdown >= MAX_DRAWDOWN_PCT:
                 reason = f"Daily drawdown {drawdown:.1%} >= {MAX_DRAWDOWN_PCT:.0%} cap"
-                redis_store.activate_killswitch(reason)
+                redis_store.activate_killswitch(reason, ttl=86400)
                 log.critical("DRAWDOWN CAP: %s — kill-switch activated", reason)
                 _fire_alert(notifier, f"Drawdown cap attivato: {reason}", AlertLevel.CRITICAL)
                 stats["skipped_killswitch"] = len(symbols)
                 return stats
     except (ValueError, TypeError):
         pass  # last_equity unavailable — skip cap check
+
+    cycle_notional = 0.0
+    cycle_cap = portfolio_value * MAX_CYCLE_NOTIONAL_PCT
 
     for symbol in symbols:
         stats["checked"] += 1
@@ -301,17 +306,44 @@ def run_execution_cycle(
             # Position sizing: portfolio × max_pct × regime_multiplier
             notional = portfolio_value * MAX_POSITION_PCT * regime_mult
 
-            order = MarketOrderRequest(
-                symbol=symbol,
-                notional=round(notional, 2),
-                side=OrderSide.BUY,
-                time_in_force=TimeInForce.DAY,
-            )
+            # Per-cycle allocation cap: don't deploy more than MAX_CYCLE_NOTIONAL_PCT in one cycle
+            if cycle_notional + notional > cycle_cap:
+                log.info(
+                    "Cycle cap reached (%.2f/%.2f) — skipping %s",
+                    cycle_notional, cycle_cap, symbol,
+                )
+                stats["skipped_cycle_cap"] += 1
+                continue
+
+            # Broker-side stop order: use OTO class when price is available from EMA cache.
+            # Avoids relying solely on the 15-min software poll for stop-loss enforcement.
+            cached = market_cache.get(symbol, {})
+            price = cached.get("price")
+
+            if price is not None:
+                qty = round(notional / price, 4)
+                stop_price = round(price * (1 - STOP_LOSS_PCT), 2)
+                order = MarketOrderRequest(
+                    symbol=symbol,
+                    qty=qty,
+                    side=OrderSide.BUY,
+                    time_in_force=TimeInForce.DAY,
+                    order_class=OrderClass.OTO,
+                    stop_loss=StopLossRequest(stop_price=stop_price),
+                )
+            else:
+                order = MarketOrderRequest(
+                    symbol=symbol,
+                    notional=round(notional, 2),
+                    side=OrderSide.BUY,
+                    time_in_force=TimeInForce.DAY,
+                )
             trading_client.submit_order(order)
+            cycle_notional += notional
             stats["orders_placed"] += 1
             log.info(
-                "BUY %s: score=%.3f regime=%.2f notional=%.2f",
-                symbol, score, regime_mult, notional,
+                "BUY %s: score=%.3f regime=%.2f notional=%.2f broker_stop=%s",
+                symbol, score, regime_mult, notional, price is not None,
             )
 
         except Exception as e:

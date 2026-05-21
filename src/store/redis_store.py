@@ -119,24 +119,39 @@ class RedisStore:
             print(f"RedisStore: Corrupted JSON for {symbol}")
             return None
 
-    def activate_killswitch(self, reason: str = "") -> None:
+    def activate_killswitch(self, reason: str = "", ttl: int | None = None) -> None:
         """
         Activate the kill-switch to halt trading.
 
         Args:
             reason: Optional reason for activation
+            ttl: Optional TTL in seconds. None = permanent (manual deactivation required).
+                 Pass 86400 for auto-drawdown triggers (auto-expires after 24h).
         """
         pipe = self._r.pipeline()
-        pipe.set("killswitch_active", 1)
-        pipe.set(
-            "killswitch_reason",
-            json.dumps(
-                {
-                    "reason": reason,
-                    "activated_at": datetime.now(timezone.utc).isoformat(),
-                }
-            ),
-        )
+        if ttl is not None:
+            pipe.setex("killswitch_active", ttl, 1)
+            pipe.setex(
+                "killswitch_reason",
+                ttl,
+                json.dumps(
+                    {
+                        "reason": reason,
+                        "activated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                ),
+            )
+        else:
+            pipe.set("killswitch_active", 1)
+            pipe.set(
+                "killswitch_reason",
+                json.dumps(
+                    {
+                        "reason": reason,
+                        "activated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                ),
+            )
         try:
             pipe.execute()
         except Exception as e:

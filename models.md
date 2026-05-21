@@ -11,9 +11,6 @@
 
 | Modello | Tipo | Note |
 |---|---|---|
-| `sonnet` | Claude | Alias Anthropic — USATO per analisi |
-| `opus` | Claude | Alias Anthropic — USATO per analisi |
-| `haiku` | Claude | Alias Anthropic — Testato OK |
 | `qwen3.5:cloud` | Qwen | Cloud — USATO per analisi |
 | `deepseek-v4-pro:cloud` | DeepSeek | Cloud — Testato OK |
 | `glm-5.1:cloud` | GLM | Cloud — USATO per analisi |
@@ -41,10 +38,10 @@
 
 | Categoria | Count |
 |---|---|
-| **Modelli funzionanti (general)** | 11 |
+| **Modelli funzionanti (general)** | 8 |
 | **Modelli funzionanti (coding)** | 5 |
 
-**Totale modelli utilizzabili:** 16 (11 general + 5 coding)
+**Totale modelli utilizzabili:** 13 (8 general + 5 coding)
 
 ---
 

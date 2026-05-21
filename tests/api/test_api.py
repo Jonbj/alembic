@@ -50,11 +50,26 @@ async def test_get_signal_returns_sentiment(mock_redis_store):
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
-        resp = await client.get("/api/signals/AAPL")
+        resp = await client.get(
+            "/api/signals/AAPL",
+            headers={"X-API-Key": "test-api-key-for-testing-only-12345678"},
+        )
     assert resp.status_code == 200
     data = resp.json()
     assert data["symbol"] == "AAPL"
     assert data["score"] == pytest.approx(0.48)
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_get_signal_requires_api_key(mock_redis_store):
+    """Test GET /api/signals/{symbol} returns 403 without API key."""
+    app.dependency_overrides[get_redis_store] = lambda: mock_redis_store
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/api/signals/AAPL")
+    assert resp.status_code == 403
     app.dependency_overrides.clear()
 
 
@@ -66,7 +81,10 @@ async def test_get_signal_404_when_missing(mock_redis_store):
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
-        resp = await client.get("/api/signals/UNKN")
+        resp = await client.get(
+            "/api/signals/UNKN",
+            headers={"X-API-Key": "test-api-key-for-testing-only-12345678"},
+        )
     assert resp.status_code == 404
     app.dependency_overrides.clear()
 

@@ -47,6 +47,17 @@ async def set_mode(
     return {"mode": req.mode, "status": "ok"}
 
 
+@router.get("/status")
+async def get_status(
+    store: Annotated[RedisStore, Depends(get_redis_store)],
+) -> dict:
+    """System status — killswitch state and operating mode. Read-only, no auth required."""
+    return {
+        "killswitch": store.is_killswitch_active(),
+        "mode": store.get_mode() or "unknown",
+    }
+
+
 @router.post("/killswitch")
 async def activate_killswitch(
     store: Annotated[RedisStore, Depends(get_redis_store)],

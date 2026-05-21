@@ -142,6 +142,18 @@ def test_order_notional_uses_portfolio_and_regime():
     assert call_args.notional == pytest.approx(expected_notional)
 
 
+def test_regime_absent_uses_conservative_fallback():
+    """When no regime is published to Redis, execution uses 0.5× notional (conservative fallback)."""
+    redis = _make_redis(signal=_signal(score=0.6))
+    redis.get_regime.return_value = None  # simulate Redis cold / regime worker not yet run
+    client = _make_client(portfolio_value=100_000)
+    run_execution_cycle(["AAPL"], redis, client)
+
+    call_args = client.submit_order.call_args[0][0]
+    expected_notional = round(100_000 * MAX_POSITION_PCT * 0.5, 2)
+    assert call_args.notional == pytest.approx(expected_notional)
+
+
 # --- idempotency / no pyramiding ---
 
 def test_existing_position_no_new_order():
