@@ -270,6 +270,11 @@ def run_execution_cycle(
                         "STOP-LOSS %s: entry=%.2f current=%.2f stop=%.2f",
                         symbol, entry_price, current_price, stop_price,
                     )
+                    _fire_alert(
+                        notifier,
+                        f"🔴 STOP-LOSS {symbol}: entry={entry_price:.2f} current={current_price:.2f} (−{STOP_LOSS_PCT*100:.0f}%)",
+                        AlertLevel.WARNING,
+                    )
                 else:
                     # Position open and healthy — idempotent, no pyramiding
                     stats["skipped_position"] += 1
@@ -343,6 +348,11 @@ def run_execution_cycle(
             log.info(
                 "BUY %s: score=%.3f regime=%.2f notional=%.2f broker_stop=%s",
                 symbol, score, regime_mult, notional, price is not None,
+            )
+            _fire_alert(
+                notifier,
+                f"🟢 BUY {symbol}: score={score:.2f} notional=${notional:.0f} regime={regime_mult:.2f}×",
+                AlertLevel.INFO,
             )
 
         except Exception as e:
