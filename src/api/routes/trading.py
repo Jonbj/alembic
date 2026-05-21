@@ -47,10 +47,10 @@ def get_orders(
         {
             "id": str(o.id),
             "symbol": o.symbol,
-            "side": o.side.value,
+            "side": o.side.value if o.side else None,
             "qty": str(o.qty),
             "filled_avg_price": str(o.filled_avg_price) if o.filled_avg_price else None,
-            "status": o.status.value,
+            "status": o.status.value if o.status else None,
             "filled_at": o.filled_at.isoformat() if o.filled_at else None,
             "submitted_at": o.submitted_at.isoformat() if o.submitted_at else None,
         }
