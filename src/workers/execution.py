@@ -292,10 +292,9 @@ def run_execution_cycle(
                 ema = cached.get("ema")
                 price = cached.get("price")
                 if ema is None or price is None:
-                    log.debug("No EMA data for %s — skipping entry", symbol)
-                    stats["skipped_momentum"] += 1
-                    continue
-                if price <= ema:
+                    # Market data unavailable — EMA filter skipped, allow trade
+                    pass
+                elif price <= ema:
                     log.debug(
                         "Price below EMA20 for %s (price=%.2f ema=%.2f) — bearish, skip",
                         symbol, price, ema,

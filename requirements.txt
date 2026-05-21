@@ -39,3 +39,4 @@ pyyaml>=6.0
 
 # Broker
 alpaca-py>=0.38
+aiohttp>=3.9

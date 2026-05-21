@@ -25,6 +25,15 @@ app = Celery(
     "trading",
     broker=config.REDIS_URL,
     backend=config.REDIS_URL,
+    include=[
+        "src.workers.execution",
+        "src.workers.ingestion",
+        "src.workers.performance",
+        "src.workers.regime",
+        "src.workers.retention",
+        "src.workers.sentiment",
+        "src.workers.telegram_poller",
+    ],
 )
 
 # Configure Celery
@@ -111,5 +120,3 @@ app.conf.beat_schedule = {
     },
 }
 
-# Auto-discover tasks in the workers package
-app.autodiscover_tasks(["src.workers"])
