@@ -70,3 +70,12 @@ def test_phase2_infer_sql_filters_by_run_id(monkeypatch):
 
     select_call = mock_cur.execute.call_args_list[0]
     assert "specific-run-id" in select_call[0][1]
+
+
+def test_estimate_cost_uses_two_models():
+    """_estimate_cost must reflect 2-model ensemble (not 4)."""
+    cost_1 = _estimate_cost(1)
+    cost_2 = _estimate_cost(2)
+    assert cost_2 == pytest.approx(cost_1 * 2)
+    cost_per_call = (300 * 2.0 + 100 * 6.0) / 1_000_000
+    assert cost_1 == pytest.approx(2 * cost_per_call)

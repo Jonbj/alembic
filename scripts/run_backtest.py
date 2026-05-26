@@ -33,7 +33,7 @@ from src.config import config
 from src.connectors.gdelt_gkg import GDELTGKGConnector
 from src.connectors.ticker_extractor import TickerExtractor
 from src.llm.budget import NoOpBudgetTracker
-from src.llm.client import OllamaDeepseekClient, OllamaGlmClient, OllamaKimiClient, OllamaQwen35Client
+from src.llm.client import OllamaKimiClient, OllamaQwen35Client
 from src.llm.ensemble import EnsembleAggregator
 from src.llm.finbert import FinBERTClient
 from src.models.news import NewsItem
@@ -71,16 +71,15 @@ _DRY_RUN_UPDATE = """
 
 
 def _estimate_cost(pending_count: int) -> float:
-    """Estimate inference cost: 3 models × ~300 input + ~100 output tokens × cloud rates.
+    """Estimate inference cost: 2 models × ~300 input + ~100 output tokens × cloud rates.
 
     Uses conservative cloud model pricing ($2/1M input, $6/1M output) — an upper
-    bound for GLM-5.1, Qwen3.5, and DeepSeek-V4-Pro accessed via Ollama cloud.
+    bound for Kimi and Qwen3.5 accessed via Ollama cloud.
     Actual Ollama cloud rates are typically lower; this prevents surprise bills.
     Prompts a human confirmation if estimate > $10.
     """
-    # Conservative upper bound for Ollama :cloud models (4 models in ensemble)
     cost_per_call = (300 * 2.0 + 100 * 6.0) / 1_000_000
-    return pending_count * 4 * cost_per_call
+    return pending_count * 2 * cost_per_call
 
 
 def phase1_fetch(
@@ -158,14 +157,14 @@ def phase2_infer(pg_conn, run_id: str, dry_run: bool) -> int:
 
     if not dry_run:
         est = _estimate_cost(len(rows))
-        print(f"\nEstimated inference cost: ${est:.2f} for {len(rows)} articles × 4 models")
+        print(f"\nEstimated inference cost: ${est:.2f} for {len(rows)} articles × 2 models")
         if est > 10.0:
             answer = input("Continue? [y/N] ").strip().lower()
             if answer != "y":
                 print("Aborted.")
                 sys.exit(0)
 
-    clients = [] if dry_run else [OllamaKimiClient(), OllamaQwen35Client(), OllamaDeepseekClient(), OllamaGlmClient()]
+    clients = [] if dry_run else [OllamaKimiClient(), OllamaQwen35Client()]
     aggregator = EnsembleAggregator(
         min_confidence=config.ENSEMBLE_MIN_CONFIDENCE,
         divergence_threshold=config.ENSEMBLE_DIVERGENCE_STD,
