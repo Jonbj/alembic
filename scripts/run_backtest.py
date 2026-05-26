@@ -7,11 +7,13 @@ Usage:
         --end   2026-04-30 \\
         --run-id gkg-6m-v1 \\
         [--dry-run] \\
-        [--max-per-chunk 250]
+        [--max-per-chunk 250] \\
+        [--concurrency 5]
 
 Phases:
     1. Fetch GKG historical news → TickerExtractor → write pending rows
     2. LLM inference (checkpoint/resume; skips score IS NOT NULL rows)
+       Runs articles in parallel batches (--concurrency, default 5).
     3. ForwardReturnCalculator: populate 1h/4h/24h from yfinance
     4. BacktestReportBuilder: compute IC/ICIR, print + save JSON
 """
@@ -310,6 +312,8 @@ def main() -> None:
                         help="Skip GDELT fetch (reuse existing rows for this run-id)")
     parser.add_argument("--phase1-only", action="store_true",
                         help="Only run Phase 1 (GDELT fetch + ticker extraction), then stop")
+    parser.add_argument("--concurrency", type=int, default=5,
+                        help="Number of articles to infer in parallel per batch (default 5)")
     args = parser.parse_args()
 
     start = datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc)
@@ -333,7 +337,7 @@ def main() -> None:
             log.info("--phase1-only: stopping after Phase 1")
             return
 
-        phase2_infer(pg_conn, args.run_id, dry_run=args.dry_run)
+        phase2_infer(pg_conn, args.run_id, dry_run=args.dry_run, concurrency=args.concurrency)
         phase3_forward_returns(pg_conn, args.run_id, start, end)
         phase4_report(pg_conn, args.run_id)
     finally:
