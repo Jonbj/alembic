@@ -350,6 +350,58 @@ class PostgreSQLStore:
             )
         conn.commit()
 
+    def fetch_signals_pending_forward_return(
+        self, days_back: int = 60
+    ) -> list[tuple]:
+        """Fetch signals that need a forward return populated.
+
+        Returns (id, symbol, generated_at) for non-fallback signals that:
+          - Have no forward_return yet
+          - Are older than 1 day (need next trading day to have closed)
+          - Are within days_back days (avoid re-processing old history)
+
+        Args:
+            days_back: Maximum lookback window in days (default 60).
+        """
+        conn = self._get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, symbol, generated_at
+                FROM sentiment_signals
+                WHERE forward_return IS NULL
+                  AND fallback_used = false
+                  AND generated_at < NOW() - INTERVAL '1 day'
+                  AND generated_at > NOW() - INTERVAL '1 day' * %s
+                ORDER BY symbol, generated_at
+                """,
+                (days_back,),
+            )
+            return cur.fetchall()
+
+    def bulk_add_forward_returns(
+        self, updates: list[tuple[int, float]]
+    ) -> int:
+        """Update forward_return for multiple signals in a single transaction.
+
+        Args:
+            updates: List of (signal_id, forward_return) tuples.
+
+        Returns:
+            Number of rows updated.
+        """
+        if not updates:
+            return 0
+        conn = self._get_connection()
+        with conn.cursor() as cur:
+            cur.executemany(
+                "UPDATE sentiment_signals SET forward_return = %s WHERE id = %s",
+                [(ret, sid) for sid, ret in updates],
+            )
+            updated = cur.rowcount
+        conn.commit()
+        return updated
+
     def log_weight_update(
         self,
         source: str,

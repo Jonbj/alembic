@@ -3,7 +3,9 @@
 
 symbols:
   # Equity USA + ETF monitorati in Fase 1
+  # Allineato a ticker_lookup (57 simboli base) + 14 high-alpha aggiunti in 009_expand_ticker_lookup.sql
   watchlist:
+    # --- Mega-cap tech ---
     - AAPL
     - MSFT
     - GOOGL
@@ -11,8 +13,81 @@ symbols:
     - NVDA
     - META
     - TSLA
+    # --- Semiconductors / AI hardware ---
+    - AMD
+    - AVGO
+    - QCOM
+    - TXN
+    - INTC
+    - MU
+    - ASML
+    - ARM
+    - AMAT
+    - TSM
+    # --- Cloud / SaaS / Networking ---
+    - CRM
+    - ADBE
+    - ORCL
+    - NOW
+    - SNOW
+    - CSCO
+    # --- Finance ---
+    - JPM
+    - BAC
+    - GS
+    - MS
+    - WFC
+    - C
+    - AXP
+    - MA
+    - V
+    - BRK.B
+    # --- Consumer ---
+    - WMT
+    - COST
+    - MCD
+    - SBUX
+    - NKE
+    - DIS
+    - CMCSA
+    - HD
+    - NFLX
+    # --- Healthcare / Pharma ---
+    - JNJ
+    - PFE
+    - MRK
+    - UNH
+    - ABBV
+    - LLY
+    - NVO
+    - PG
+    # --- Industrial / Energy ---
+    - BA
+    - GE
+    - GM
+    - F
+    - CAT
+    - MMM
+    - CVX
+    - XOM
+    # --- Telecom ---
+    - T
+    - VZ
+    - TMUS
+    # --- AI / Defense / High-growth ---
+    - PLTR
+    - PANW
+    - IBM
+    # --- Broad-market ETF ---
     - SPY
     - QQQ
+    - IWM
+    # --- Sector ETF ---
+    - XLF
+    - XLK
+    - XLE
+    - XLV
+    - SOXX
 
 execution:
   # QuantConnect integration

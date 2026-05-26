@@ -55,6 +55,12 @@ app.conf.beat_schedule = {
         "task": "src.workers.sentiment.run_sentiment_worker",
         "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
     },
+    # Forward return worker at 22:00 UTC daily (after US market close).
+    # Populates sentiment_signals.forward_return needed for IC / ICIR.
+    "forward-return-worker": {
+        "task": "src.workers.performance.run_forward_return_worker",
+        "schedule": crontab(hour=22, minute=0),
+    },
     # Performance daily report at 03:00 UTC
     "performance-daily": {
         "task": "src.workers.performance.run_daily_report",

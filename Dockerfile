@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install CPU-only torch first to avoid pulling the GPU variant via requirements.txt
 RUN pip install --no-cache-dir \
-    torch==2.3.1+cpu \
+    torch==2.6.0+cpu \
     --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements.txt .

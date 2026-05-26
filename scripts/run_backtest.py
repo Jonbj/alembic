@@ -33,7 +33,7 @@ from src.config import config
 from src.connectors.gdelt_gkg import GDELTGKGConnector
 from src.connectors.ticker_extractor import TickerExtractor
 from src.llm.budget import NoOpBudgetTracker
-from src.llm.client import OllamaKimiClient, OllamaQwen35Client
+from src.llm.client import OllamaDeepseekClient, OllamaGlmClient
 from src.llm.ensemble import EnsembleAggregator
 from src.llm.finbert import FinBERTClient
 from src.models.news import NewsItem
@@ -182,7 +182,7 @@ def phase2_infer(pg_conn, run_id: str, dry_run: bool, concurrency: int = 5) -> i
                 print("Aborted.")
                 sys.exit(0)
 
-    clients = [] if dry_run else [OllamaKimiClient(), OllamaQwen35Client()]
+    clients = [] if dry_run else [OllamaGlmClient(), OllamaDeepseekClient()]
     aggregator = EnsembleAggregator(
         min_confidence=config.ENSEMBLE_MIN_CONFIDENCE,
         divergence_threshold=config.ENSEMBLE_DIVERGENCE_STD,

@@ -9,10 +9,12 @@ interface AppState {
   theme: Theme
   killswitchActive: boolean
   apiKey: string
+  llmModels: string  // "all" = full ensemble, "glm" = savings mode
   setMode: (mode: Mode) => void
   setTheme: (theme: Theme) => void
   setKillswitch: (active: boolean) => void
   setApiKey: (key: string) => void
+  setLlmModels: (models: string) => void
 }
 
 export const useStore = create<AppState>()(
@@ -23,10 +25,12 @@ export const useStore = create<AppState>()(
         theme: 'dark',
         killswitchActive: false,
         apiKey: '',
+        llmModels: 'all',
         setMode: (mode) => set({ mode }),
         setTheme: (theme) => set({ theme }),
         setKillswitch: (killswitchActive) => set({ killswitchActive }),
         setApiKey: (apiKey) => set({ apiKey }),
+        setLlmModels: (llmModels) => set({ llmModels }),
       }),
       {
         name: 'alembic-store',

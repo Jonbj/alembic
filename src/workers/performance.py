@@ -23,6 +23,11 @@ Implements five Celery tasks, all scheduled via celery_app.py beat schedule:
     On freeze: sends Telegram ⚠️ with inline keyboard (✅ Approva / ❌ Rifiuta).
     On pass: applies weights to Redis, logs to PostgreSQL.
 
+- run_forward_return_worker (22:00 UTC daily):
+    Populates forward_return on sentiment_signals rows that are >= 1 day old.
+    Uses Alpaca daily bars: fwd_ret = (close_T+1 - close_T) / close_T.
+    Required for IC / ICIR computation in run_daily_report.
+
 See docs/ARCHITECTURE.md §6c for the full weight approval flow diagram.
 """
 
@@ -820,3 +825,139 @@ def check_and_apply_weights():
         )
         asyncio.run(notifier.send_alert(msg, level="info"))
         log.info("Weights auto-applied successfully")
+
+
+@app.task(name="src.workers.performance.run_forward_return_worker")
+def run_forward_return_worker() -> dict:
+    """Populate forward_return for sentiment signals that are at least 1 day old.
+
+    Scheduled daily at 22:00 UTC (6pm ET, after US market close + settlement).
+    Uses Alpaca StockHistoricalDataClient to fetch daily bars.
+
+    Forward return definition:
+        fwd_ret = (close_{T+1} - close_T) / close_T
+
+    Where T = trading day of the signal and T+1 = next trading day.
+    Signals generated after market close (>= 21:00 UTC / 4pm ET) are treated
+    as belonging to the NEXT trading day, so their T+1 is T+2 calendar days.
+
+    Skips symbols without available daily bars (ETFs, ADRs, delisted tickers).
+
+    Returns:
+        Dict with: updated (int), skipped_no_data (int), errors (int).
+    """
+    from collections import defaultdict
+
+    import psycopg2
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+
+    stats = {"updated": 0, "skipped_no_data": 0, "errors": 0}
+
+    if not config.ALPACA_API_KEY or not config.ALPACA_SECRET_KEY:
+        log.warning("Alpaca credentials not configured — skipping forward return worker")
+        return {**stats, "skipped": True, "reason": "no_credentials"}
+
+    pg_conn = psycopg2.connect(config.DATABASE_URL)
+    pg = PostgreSQLStore(conn=pg_conn)
+
+    try:
+        rows = pg.fetch_signals_pending_forward_return(days_back=60)
+        if not rows:
+            log.info("No signals pending forward return")
+            return stats
+
+        log.info("Forward return worker: %d signals to process", len(rows))
+
+        # Group by symbol to minimise Alpaca API calls (one batch per symbol).
+        by_symbol: dict[str, list[tuple]] = defaultdict(list)
+        for sid, symbol, generated_at in rows:
+            by_symbol[symbol].append((sid, generated_at))
+
+        data_client = StockHistoricalDataClient(
+            api_key=config.ALPACA_API_KEY,
+            secret_key=config.ALPACA_SECRET_KEY,
+        )
+
+        updates: list[tuple[int, float]] = []
+
+        for symbol, signals in by_symbol.items():
+            try:
+                # Determine date range: earliest signal date minus 1 day buffer,
+                # latest signal date plus 3 days (covers weekends / holidays for T+1).
+                dates = [ts for _, ts in signals]
+                start = min(dates) - timedelta(days=2)
+                end = max(dates) + timedelta(days=4)
+
+                req = StockBarsRequest(
+                    symbol_or_symbols=symbol,
+                    timeframe=TimeFrame.Day,
+                    start=start,
+                    end=end,
+                )
+                bars_df = data_client.get_stock_bars(req).df
+
+                # Flatten multi-index if present (symbol, timestamp) → just timestamp.
+                if hasattr(bars_df.index, "levels"):
+                    bars_df = bars_df.loc[symbol] if symbol in bars_df.index.get_level_values(0) else bars_df
+                bars_df = bars_df.sort_index()
+
+                if bars_df.empty or len(bars_df) < 2:
+                    log.debug("Insufficient daily bars for %s — skipping", symbol)
+                    stats["skipped_no_data"] += len(signals)
+                    continue
+
+                # Build a date → close price lookup from available bars.
+                close_by_date: dict[date, float] = {
+                    idx.date() if hasattr(idx, "date") else idx: float(row["close"])
+                    for idx, row in bars_df.iterrows()
+                }
+                trading_dates = sorted(close_by_date.keys())
+
+                for sid, generated_at in signals:
+                    try:
+                        # Signals after 21:00 UTC (4pm ET close) belong to next session.
+                        if generated_at.tzinfo is None:
+                            generated_at = generated_at.replace(tzinfo=timezone.utc)
+                        signal_date = generated_at.date()
+                        if generated_at.hour >= 21:
+                            signal_date += timedelta(days=1)
+
+                        # Find T: the first trading day on or after signal_date.
+                        t_dates = [d for d in trading_dates if d >= signal_date]
+                        if len(t_dates) < 2:
+                            stats["skipped_no_data"] += 1
+                            continue
+
+                        t0, t1 = t_dates[0], t_dates[1]
+                        close_t0 = close_by_date[t0]
+                        close_t1 = close_by_date[t1]
+
+                        if close_t0 == 0:
+                            stats["skipped_no_data"] += 1
+                            continue
+
+                        fwd_ret = (close_t1 - close_t0) / close_t0
+                        updates.append((sid, fwd_ret))
+
+                    except Exception as e:
+                        log.debug("Error computing fwd return for signal %d (%s): %s", sid, symbol, e)
+                        stats["errors"] += 1
+
+            except Exception as e:
+                log.warning("Failed to fetch bars for %s: %s — skipping", symbol, e)
+                stats["skipped_no_data"] += len(signals)
+
+        # Bulk-write all computed forward returns in one transaction.
+        if updates:
+            stats["updated"] = pg.bulk_add_forward_returns(updates)
+            log.info(
+                "Forward return worker complete: updated=%d skipped=%d errors=%d",
+                stats["updated"], stats["skipped_no_data"], stats["errors"],
+            )
+
+    finally:
+        pg_conn.close()
+
+    return stats

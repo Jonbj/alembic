@@ -513,6 +513,26 @@ class RedisStore:
         """Get current system operating mode."""
         return self._r.get("system:mode")
 
+    # =========================================================================
+    # LLM MODEL SELECTION (token-budget override)
+    # =========================================================================
+
+    def set_llm_models(self, models: str) -> None:
+        """Persist LLM model selection override.
+
+        Args:
+            models: Comma-separated subset of {kimi, qwen, deepseek, glm} or "all".
+                    "all"  → full 4-model ensemble (normal operation)
+                    "glm"  → single cheapest model, saves 75% Ollama quota
+        """
+        self._r.set("config:sentiment_llm_models", models)
+        self._r.expire("config:sentiment_llm_models", 86400 * 7)
+
+    def get_llm_models(self) -> str | None:
+        """Return LLM model selection override, or None if not set (use env/default)."""
+        raw = self._r.get("config:sentiment_llm_models")
+        return raw.decode() if isinstance(raw, bytes) else raw
+
     def __enter__(self) -> "RedisStore":
         return self
 

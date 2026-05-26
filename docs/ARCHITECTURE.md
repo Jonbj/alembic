@@ -5,9 +5,9 @@
 # Alembic — Architettura del Sistema
 
 **Documento di Architettura Tecnica**  
-**Versione:** 3.1.0  
-**Data:** 2026-05-18  
-**Stato:** Fase 3 Completata + ExecutionWorker + Phase B1/B2 (594 test passing)
+**Versione:** 3.2.0  
+**Data:** 2026-05-26  
+**Stato:** Fase 3 Completata + ExecutionWorker + Phase B1/B2 + ForwardReturnWorker + Backtest Docker
 
 ---
 
@@ -537,6 +537,13 @@ forward_return_h = (price_t+h - price_t) / price_t
 # Per live: usa return realizzato effettivo
 ```
 
+#### `run_forward_return_worker` (Celery task, 22:00 UTC)
+
+Popola il campo `forward_return` su `sentiment_signals` per segnali live >= 1 giorno old.
+Usa Alpaca daily bars: `fwd_ret = (close_{T+1} - close_T) / close_T`.
+I segnali post-market (>= 21:00 UTC) vengono trattati come appartenenti al giorno successivo.
+Richiesto da `run_daily_report` per il calcolo IC/ICIR live.
+
 ---
 
 ### 3.2 Newey-West HAC Correction
@@ -758,7 +765,7 @@ def sanitize_text(text: str) -> str:
 ### 6.1 Development
 
 ```bash
-# Docker Compose (Redis + PostgreSQL)
+# Docker Compose (Redis + PostgreSQL + API + Worker + Beat + Frontend)
 docker-compose up -d
 
 # Celery worker
@@ -770,6 +777,26 @@ celery -A src.workers.celery_app beat --loglevel=info
 # FastAPI
 uvicorn src.api.main:app --reload
 ```
+
+#### Backtest Docker (profilo isolato)
+
+Il servizio `backtest` usa `profiles: [backtest]` e **non si avvia** con `docker compose up`.
+Usa la stessa immagine Python 3.11 del worker ma con `torch==2.6.0+cpu` e `transformers>=4.40,<5.0`.
+
+```bash
+# Avvia backtest (log su logs/backtest_YYYYMMDD_HHMMSS.log)
+./scripts/backtest.sh --start 2025-12-01 --end 2025-12-31 --run-id gkg-dec25-v1
+
+# Con concurrency personalizzata
+./scripts/backtest.sh --start 2025-12-01 --end 2025-12-31 --run-id gkg-dec25-v1 --concurrency 5
+
+# Rebuild dopo modifiche a Dockerfile o requirements.txt
+docker compose build backtest
+```
+
+**Modelli backtest:** `OllamaGlmClient` (glm-5.1:cloud) + `OllamaDeepseekClient` (deepseek-v4-pro:cloud) via HTTP su `https://ollama.com/api/chat`. L'ensemble a 2 modelli ha fallback FinBERT (CPU-only).
+
+**Checkpoint/resume:** Il runner rilancia da dove si è interrotto — le righe con `score IS NOT NULL` vengono saltate. Per riprendere un run interrotto basta rieseguire lo stesso comando con lo stesso `--run-id`.
 
 ### 6.2 Production
 

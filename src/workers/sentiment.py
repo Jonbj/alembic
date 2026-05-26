@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timezone
 
 from src.config import config
@@ -70,7 +71,10 @@ async def run_inference(
       logic outside run_inference makes it reusable for both contexts.
     """
     symbol = item.asset_tags[0] if item.asset_tags else "UNKNOWN"
-    prompt = _DK_COT_PROMPT.format(text=item.body[:2000], symbol=symbol)
+    # Body truncation: SENTIMENT_LLM_BODY_CHARS controls input length (default 600).
+    # 600 chars captures headline + lede; 2000 was generous. Reduces input tokens ~70%.
+    _body_limit = int(os.environ.get("SENTIMENT_LLM_BODY_CHARS", "600"))
+    prompt = _DK_COT_PROMPT.format(text=item.body[:_body_limit], symbol=symbol)
 
     try:
         await budget_tracker.check_budget()
@@ -234,17 +238,33 @@ def run_sentiment_worker() -> dict:
     # Initialize connections
     redis_client = Redis.from_url(config.REDIS_URL)
     pg_conn = psycopg2.connect(config.DATABASE_URL)
+    redis_store = RedisStore(redis_client)
+    pg_store = PostgreSQLStore(conn=pg_conn)
 
-    # Initialize components
-    clients = [OllamaKimiClient(), OllamaQwen35Client(), OllamaDeepseekClient(), OllamaGlmClient()]
+    # Initialize components — model selection read from Redis (set by UI toggle),
+    # falling back to SENTIMENT_LLM_MODELS env var, then "all".
+    # Accepted values (comma-separated subset of: kimi, qwen, deepseek, glm):
+    #   "all"   → full 4-model ensemble (default, best quality)
+    #   "glm"   → single cheapest model, saves 75% Ollama quota, valid non-fallback signal
+    #   "glm,qwen" → 2-model ensemble, saves 50%, keeps divergence detection
+    _redis_model_sel = redis_store.get_llm_models()
+    _model_selection = (_redis_model_sel or os.environ.get("SENTIMENT_LLM_MODELS", "all")).lower().split(",")
+    _all_clients = {
+        "kimi": OllamaKimiClient(),
+        "qwen": OllamaQwen35Client(),
+        "deepseek": OllamaDeepseekClient(),
+        "glm": OllamaGlmClient(),
+    }
+    if "all" in _model_selection:
+        clients = list(_all_clients.values())
+    else:
+        clients = [_all_clients[k] for k in _model_selection if k in _all_clients] or list(_all_clients.values())
     aggregator = EnsembleAggregator(
         min_confidence=config.ENSEMBLE_MIN_CONFIDENCE,
         divergence_threshold=config.ENSEMBLE_DIVERGENCE_STD,
     )
     finbert = FinBERTClient()
     budget_tracker = LLMBudgetTracker(conn=pg_conn)
-    redis_store = RedisStore(redis_client)
-    pg_store = PostgreSQLStore(conn=pg_conn)
 
     # Read per-model weights from Redis (set by weekly LOO ICIR rebalancing).
     # Falls back to None → confidence-only weighting if not yet computed.

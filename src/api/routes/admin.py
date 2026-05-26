@@ -12,6 +12,7 @@ from src.api.main import get_redis_store
 router = APIRouter(prefix="/api/admin")
 
 _VALID_MODES = frozenset({"backtest", "paper", "semi_auto", "full_auto", "halted"})
+_VALID_LLM_MODELS = frozenset({"all", "kimi", "qwen", "deepseek", "glm"})
 
 
 class ModeRequest(BaseModel):
@@ -51,11 +52,39 @@ async def set_mode(
 async def get_status(
     store: Annotated[RedisStore, Depends(get_redis_store)],
 ) -> dict:
-    """System status — killswitch state and operating mode. Read-only, no auth required."""
+    """System status — killswitch state, operating mode, and LLM model selection. No auth."""
     return {
         "killswitch": store.is_killswitch_active(),
         "mode": store.get_mode() or "unknown",
+        "llm_models": store.get_llm_models() or "all",
     }
+
+
+class LLMModelsRequest(BaseModel):
+    """Request body for setting LLM model selection."""
+    models: str
+
+
+@router.post("/llm-models")
+async def set_llm_models(
+    req: LLMModelsRequest,
+    store: Annotated[RedisStore, Depends(get_redis_store)],
+    _: Annotated[str, Depends(require_api_key)],
+) -> dict:
+    """Set LLM model selection for token-budget savings.
+
+    Args:
+        models: "all" (full ensemble) or comma-separated subset: kimi, qwen, deepseek, glm
+    """
+    selections = [m.strip() for m in req.models.lower().split(",")]
+    invalid = [m for m in selections if m not in _VALID_LLM_MODELS]
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid model(s): {invalid}. Valid: {sorted(_VALID_LLM_MODELS)}",
+        )
+    store.set_llm_models(req.models.lower())
+    return {"llm_models": req.models.lower(), "status": "ok"}
 
 
 @router.post("/killswitch")

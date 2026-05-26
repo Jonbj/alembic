@@ -656,18 +656,14 @@ class OllamaCloudClient(LLMClient):
                 await asyncio.sleep(0.5 * (attempt + 1))
             except aiohttp.ClientResponseError as e:
                 if e.status == 429:
-                    if attempt >= self.max_retries:
-                        raise RuntimeError(
-                            f"Ollama rate limit (429) on {self.model_id}: exhausted retries"
-                        ) from e
-                    # Exponential backoff: 60s, 120s, 180s — pause until limit resets
-                    wait = 60.0 * (attempt + 1)
-                    logger.warning(
-                        "Ollama rate limit 429 on %s (attempt %d/%d) — pausing %.0fs",
-                        self.model_id, attempt + 1, self.max_retries + 1, wait,
-                    )
-                    await asyncio.sleep(wait)
-                    continue
+                    # Fail fast on 429: weekly quota exhaustion means retries are futile.
+                    # asyncio.gather(return_exceptions=True) catches this and skips the
+                    # model; EnsembleAggregator falls back to FinBERT when all models fail.
+                    # Long sleeps (60s–180s per attempt) would exceed the Celery task
+                    # soft limit (240s) and kill the task before fallback can run.
+                    raise RuntimeError(
+                        f"Ollama rate limit (429) on {self.model_id}: quota exhausted"
+                    ) from e
                 raise RuntimeError(f"Ollama API error {e.status}: {e.message}") from e
 
         raise RuntimeError(f"Exhausted retries for {self.__class__.__name__}")
