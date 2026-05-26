@@ -74,5 +74,19 @@ services:
       api: { condition: service_healthy }
     restart: unless-stopped
 
+  backtest:
+    build: .
+    profiles: [backtest]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/trading
+    volumes:
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+    depends_on:
+      postgres: { condition: service_healthy }
+    stdin_open: true
+    tty: true
+
 volumes:
   pgdata:

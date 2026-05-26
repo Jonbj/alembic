@@ -56,3 +56,6 @@ logs/
 .ipynb_checkpoints/
 *.ipynb
 .worktrees/
+
+# Backtest venv (host-side, not needed with Docker)
+.venv-backtest/
