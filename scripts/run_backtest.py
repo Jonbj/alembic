@@ -70,6 +70,36 @@ _DRY_RUN_UPDATE = """
 """
 
 
+async def _infer_batch(
+    rows: list[tuple],
+    clients: list,
+    aggregator: "EnsembleAggregator",
+    finbert,
+    budget_tracker,
+) -> list:
+    """Run inference on a batch of DB rows in parallel via asyncio.gather.
+
+    Each row is (row_id, symbol, generated_at, article_url, article_title).
+    Returns list where each element is (row_id, inference_result) or a
+    BaseException if that row's coroutine raised. Callers must check
+    isinstance(item, BaseException) before unpacking.
+    """
+    async def _single(row):
+        row_id, symbol, generated_at, article_url, article_title = row
+        item = NewsItem(
+            id=f"{article_url}:{symbol}",
+            body=article_title or "",
+            title=article_title or "",
+            asset_tags=[symbol],
+            url=article_url,
+            timestamp=generated_at,
+        )
+        result = await run_inference(item, clients, aggregator, finbert, budget_tracker)
+        return row_id, result
+
+    return await asyncio.gather(*[_single(row) for row in rows], return_exceptions=True)
+
+
 def _estimate_cost(pending_count: int) -> float:
     """Estimate inference cost: 2 models × ~300 input + ~100 output tokens × cloud rates.
 

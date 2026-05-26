@@ -72,6 +72,35 @@ def test_phase2_infer_sql_filters_by_run_id(monkeypatch):
     assert "specific-run-id" in select_call[0][1]
 
 
+@pytest.mark.asyncio
+async def test_infer_batch_returns_result_per_row():
+    """_infer_batch returns one (row_id, result) tuple per input row."""
+    from scripts.run_backtest import _infer_batch
+
+    rows = [
+        (42, "AAPL", datetime(2025, 12, 1, tzinfo=timezone.utc), "https://x.com/1", "Apple profit up"),
+        (43, "MSFT", datetime(2025, 12, 1, tzinfo=timezone.utc), "https://x.com/2", "Microsoft beats"),
+    ]
+
+    mock_result = MagicMock()
+    mock_result.score = 0.5
+    mock_result.confidence = 0.8
+    mock_result.reasoning = "bullish"
+    mock_result.model_id = "ensemble:kimi+qwen"
+    mock_result.ensemble_std = 0.05
+    mock_result.fallback_used = False
+
+    mock_run_inference = AsyncMock(return_value=(mock_result, []))
+
+    with patch("scripts.run_backtest.run_inference", mock_run_inference):
+        results = await _infer_batch(rows, clients=[], aggregator=MagicMock(),
+                                     finbert=MagicMock(), budget_tracker=MagicMock())
+
+    assert len(results) == 2
+    assert results[0] == (42, (mock_result, []))
+    assert results[1] == (43, (mock_result, []))
+
+
 def test_estimate_cost_uses_two_models():
     """_estimate_cost must reflect 2-model ensemble (not 4)."""
     cost_1 = _estimate_cost(1)
