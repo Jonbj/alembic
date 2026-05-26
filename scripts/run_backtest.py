@@ -27,8 +27,6 @@ from pathlib import Path
 import psycopg2
 from tqdm import tqdm
 
-from src.backtest.forward_returns import ForwardReturnCalculator
-from src.backtest.report import BacktestReportBuilder
 from src.config import config
 from src.connectors.gdelt_gkg import GDELTGKGConnector
 from src.connectors.ticker_extractor import TickerExtractor
@@ -156,26 +154,14 @@ def phase1_fetch(
     return inserted
 
 
-def phase2_infer(pg_conn, run_id: str, dry_run: bool) -> int:
+def phase2_infer(pg_conn, run_id: str, dry_run: bool, concurrency: int = 5) -> int:
     """Phase 2: run LLM inference on pending rows. Skips rows with score IS NOT NULL.
 
-    Checkpoint / resume semantics:
-      - SELECT filters `score IS NULL`. If Phase 2 crashes after processing 500
-        of 1000 rows, the 500 scored rows remain in the DB. On restart, the
-        SELECT skips them automatically — no extra state file needed.
-
-    Dry-run mode:
-      - Writes score=0.0, confidence=0.5 without any LLM call.
-      - Useful for testing the pipeline end-to-end without API costs.
-      - Still requires a FinBERTClient instance (no-op, not called for dry-run).
-
-    Cost guardrail:
-      - Calls _estimate_cost() before inference. If > $10, prompts user for
-        confirmation. Prevents accidental 6-month full-ensemble runs.
-
-    Why instantiate clients inside phase2_infer (not main)?
-      Keeps client lifecycle scoped to the phase that actually uses them.
-      If Phase 2 is skipped (all rows already scored), no clients are created.
+    Checkpoint / resume: SELECT filters `score IS NULL`; scored rows survive crashes.
+    Dry-run: writes score=0.0 without any LLM call.
+    Batch parallelism: articles are processed in batches of `concurrency` via asyncio.gather.
+      DB writes remain synchronous after each batch (psycopg2 safety).
+    Cost guardrail: prompts confirmation if estimated cost > $10.
     """
     with pg_conn.cursor() as cur:
         cur.execute(_SELECT_PENDING, (run_id,))
@@ -202,44 +188,43 @@ def phase2_infer(pg_conn, run_id: str, dry_run: bool) -> int:
     finbert = FinBERTClient()
     budget_tracker = NoOpBudgetTracker()
 
+    total = len(rows)
     processed = 0
-    with pg_conn.cursor() as cur:
-        for i, (row_id, symbol, generated_at, article_url, article_title) in enumerate(tqdm(
-            rows, desc="Phase 2: inference"
-        )):
+    last_checkpoint = 0
+
+    with pg_conn.cursor() as cur, tqdm(total=total, desc="Phase 2: inference") as pbar:
+        for batch_start in range(0, total, concurrency):
+            batch = rows[batch_start : batch_start + concurrency]
+
             if dry_run:
-                cur.execute(_DRY_RUN_UPDATE, (row_id,))
-                processed += 1
-                if processed % 50 == 0:
-                    pg_conn.commit()
-                continue
+                for (row_id, *_) in batch:
+                    cur.execute(_DRY_RUN_UPDATE, (row_id,))
+                    processed += 1
+            else:
+                batch_results = asyncio.run(
+                    _infer_batch(batch, clients, aggregator, finbert, budget_tracker)
+                )
+                for item in batch_results:
+                    if isinstance(item, BaseException):
+                        log.warning("Batch item failed: %s", item)
+                        continue
+                    row_id, inference_result = item
+                    if inference_result is not None:
+                        result, _ = inference_result
+                        cur.execute(_UPDATE_SCORED, (
+                            result.score, result.confidence, result.reasoning,
+                            result.model_id, result.ensemble_std, result.fallback_used,
+                            row_id,
+                        ))
+                        processed += 1
 
-            # Reconstruct a minimal NewsItem from DB columns.
-            # Body = title (GKG only stores title, no full article text).
-            item = NewsItem(
-                id=f"{article_url}:{symbol}",
-                body=article_title or "",
-                title=article_title or "",
-                asset_tags=[symbol],
-                url=article_url,
-                timestamp=generated_at,
-            )
-            inference_result = asyncio.run(
-                run_inference(item, clients, aggregator, finbert, budget_tracker)
-            )
-            if inference_result is not None:
-                result, _ = inference_result
-                cur.execute(_UPDATE_SCORED, (
-                    result.score, result.confidence, result.reasoning,
-                    result.model_id, result.ensemble_std, result.fallback_used,
-                    row_id,
-                ))
-                processed += 1
+            pbar.update(len(batch))
 
-            # Commit every 50 rows so progress survives a crash.
-            if (i + 1) % 50 == 0:
+            # Commit and log checkpoint every ~50 rows.
+            if processed - last_checkpoint >= 50 or batch_start + len(batch) >= total:
                 pg_conn.commit()
-                log.info("Phase 2 checkpoint: %d/%d scored", processed, len(rows))
+                log.info("Phase 2 checkpoint: %d/%d scored", processed, total)
+                last_checkpoint = processed
 
     pg_conn.commit()
     log.info("Phase 2 complete: %d rows scored", processed)
@@ -252,6 +237,7 @@ def phase3_forward_returns(pg_conn, run_id: str, start: datetime, end: datetime)
     Delegates entirely to ForwardReturnCalculator.populate().
     See src/backtest/forward_returns.py for the vectorized download logic.
     """
+    from src.backtest.forward_returns import ForwardReturnCalculator  # lazy: pandas/numpy only needed at runtime
     log.info("Phase 3: computing forward returns for run_id=%s", run_id)
     calc = ForwardReturnCalculator(pg_conn)
     updated = calc.populate(run_id, start, end)
@@ -266,6 +252,7 @@ def phase4_report(pg_conn, run_id: str) -> None:
       - stdout: human-readable summary (horizons + per-model 24h IC).
       - JSON:   reports/backtest_{run_id}.json (machine-readable for CI / dashboards).
     """
+    from src.backtest.report import BacktestReportBuilder  # lazy: scipy/pandas only needed at runtime
     log.info("Phase 4: building report for run_id=%s", run_id)
     builder = BacktestReportBuilder(pg_conn)
     report = builder.build(run_id)

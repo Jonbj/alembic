@@ -101,6 +101,36 @@ async def test_infer_batch_returns_result_per_row():
     assert results[1] == (43, (mock_result, []))
 
 
+def test_phase2_infer_concurrency_param_accepted():
+    """phase2_infer accepts a concurrency parameter without error."""
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cur)
+    mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=None)
+    mock_cur.fetchall.return_value = []
+
+    result = phase2_infer(mock_conn, run_id="test", dry_run=True, concurrency=3)
+    assert result == 0
+
+
+def test_phase2_infer_dry_run_batch_processes_all_rows():
+    """dry_run with concurrency=2 still processes all rows."""
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cur)
+    mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=None)
+
+    pending_rows = [
+        (i, "AAPL", datetime(2025, 12, 1, tzinfo=timezone.utc), f"https://x.com/{i}", f"title {i}")
+        for i in range(1, 6)
+    ]
+    mock_cur.fetchall.return_value = pending_rows
+
+    processed = phase2_infer(mock_conn, run_id="test", dry_run=True, concurrency=2)
+
+    assert processed == 5
+
+
 def test_estimate_cost_uses_two_models():
     """_estimate_cost must reflect 2-model ensemble (not 4)."""
     cost_1 = _estimate_cost(1)
