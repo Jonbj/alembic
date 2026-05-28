@@ -306,6 +306,33 @@ class PostgreSQLStore:
             cur.execute(self._FETCH_FOR_IC, (symbol, str(days)))
             return cur.fetchall()
 
+    _FETCH_PER_MODEL_FOR_IC = """
+        SELECT r.model_id,
+               r.polarity * r.confidence AS score,
+               s.forward_return
+        FROM llm_responses r
+        JOIN sentiment_signals s ON s.id = r.signal_id
+        WHERE s.symbol = %s
+          AND s.generated_at >= now() - (%s || ' days')::interval
+          AND s.forward_return IS NOT NULL
+          AND s.fallback_used = FALSE
+          AND r.eligible = TRUE
+        ORDER BY s.generated_at ASC
+    """
+
+    def fetch_per_model_signals_for_ic(self, symbol: str, days: int) -> list[tuple]:
+        """Fetch per-model (model_id, score, forward_return) for LOO ICIR.
+
+        Queries llm_responses joined with sentiment_signals so each individual
+        model output is aligned with the parent signal's forward return.
+        sentiment_signals.model_id stores a compound ensemble ID and cannot be
+        used for per-model grouping; this method uses the correct source.
+        """
+        conn = self._get_connection()
+        with conn.cursor() as cur:
+            cur.execute(self._FETCH_PER_MODEL_FOR_IC, (symbol, str(days)))
+            return cur.fetchall()
+
     def fetch_signals_for_backtest(
         self, symbol: str, start_date: str, end_date: str
     ) -> list[dict[str, Any]]:
@@ -467,12 +494,20 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def __del__(self) -> None:
+        """Return pooled connection to pool on GC if close() was not called."""
+        try:
+            if self._conn is not None:
+                self._release_connection(self._conn)
+                self._conn = None
+        except Exception:
+            pass
+
     def __enter__(self) -> "PostgreSQLStore":
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit context manager, rolling back on exception if connection owned."""
         if exc_type is not None and self._conn is not None:
-            # Rollback on exception
             self._conn.rollback()
         self.close()

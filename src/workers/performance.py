@@ -70,6 +70,24 @@ _MIN_SAMPLES = 300
 _MIN_SAMPLES_PER_MODEL = 30
 
 
+def _fetch_all_per_model_signals_for_loo(
+    pg: PostgreSQLStore,
+    days: int,
+) -> list[tuple]:
+    """Fetch per-model (model_id, score, forward_return) from llm_responses for LOO ICIR.
+
+    Uses llm_responses instead of sentiment_signals because sentiment_signals.model_id
+    stores a compound ensemble ID (e.g. "ensemble:kimi+qwen+deepseek+glm"), which
+    collapses all models into one bucket and prevents per-model ICIR computation.
+    """
+    symbols = config.WATCHLIST_SYMBOLS
+    all_rows: list[tuple] = []
+    for symbol in symbols:
+        rows = pg.fetch_per_model_signals_for_ic(symbol, days)
+        all_rows.extend(rows)
+    return all_rows
+
+
 def _fetch_all_signals_for_ic(
     pg: PostgreSQLStore,
     days: int,
@@ -308,6 +326,7 @@ def run_daily_report():
     """
     log.info("Starting daily performance report...")
 
+    pg = None
     try:
         pg = PostgreSQLStore()
         redis = RedisStore()
@@ -356,6 +375,9 @@ def run_daily_report():
     except Exception as e:
         log.exception(f"Daily performance report failed: {e}")
         raise
+    finally:
+        if pg is not None:
+            pg.close()
 
 
 @app.task(name="src.workers.performance.run_weekly_weights")
@@ -367,6 +389,7 @@ def run_weekly_weights():
     """
     log.info("Starting weekly weight computation (observational)...")
 
+    pg = None
     try:
         pg = PostgreSQLStore()
         redis = RedisStore()
@@ -378,19 +401,26 @@ def run_weekly_weights():
         else:
             current_weights = {"kimi-k2.6:cloud": 0.25, "qwen3.5:397b": 0.25, "deepseek-v4-pro:cloud": 0.25, "glm-5.1:cloud": 0.25}
 
-        # Fetch signals for LOO ICIR computation
-        rows = _fetch_all_signals_for_ic(pg, days=30)
-        rows = [(s, c, r, d, m, f) for (s, c, r, d, m, f) in rows if r is not None and not f]
+        # Fetch per-model signals from llm_responses for LOO ICIR.
+        # sentiment_signals.model_id stores the compound ensemble ID so
+        # grouping by it yields one bucket; llm_responses has one row per
+        # model per inference, which is what per-model ICIR requires.
+        per_model_rows = _fetch_all_per_model_signals_for_loo(pg, days=30)
 
-        if len(rows) < _MIN_SAMPLES:
-            log.info(f"Insufficient samples for weight update: {len(rows)} < {_MIN_SAMPLES}")
+        if not per_model_rows:
+            log.info("No per-model samples available for weight update")
             return
 
-        # Group by model
-        model_signals, model_returns, _ = _compute_model_metrics(rows)
+        lloo_signals: dict[str, list[float]] = defaultdict(list)
+        lloo_returns: dict[str, list[float]] = defaultdict(list)
+        for m_id, score, fwd_ret in per_model_rows:
+            lloo_signals[m_id].append(float(score))
+            lloo_returns[m_id].append(float(fwd_ret))
+        model_signals = dict(lloo_signals)
+        model_returns = dict(lloo_returns)
 
         if len(model_signals) < 2:
-            log.warning("Not enough models for ICIR computation")
+            log.warning("Not enough distinct models for ICIR computation")
             return
 
         # Compute per-model ICIR: model_returns[m] is aligned with model_signals[m]
@@ -464,6 +494,9 @@ def run_weekly_weights():
     except Exception as e:
         log.exception(f"Weekly weight computation failed: {e}")
         raise
+    finally:
+        if pg is not None:
+            pg.close()
 
 
 @app.task(name="src.workers.performance.run_drift_detection")
@@ -478,6 +511,7 @@ def run_drift_detection():
     """
     log.info("Starting weekly drift detection...")
 
+    pg = None
     try:
         pg = PostgreSQLStore()
         redis = RedisStore()
@@ -554,6 +588,9 @@ def run_drift_detection():
     except Exception as e:
         log.exception(f"Drift detection failed: {e}")
         raise
+    finally:
+        if pg is not None:
+            pg.close()
 
 
 def _format_performance_telegram_message(
@@ -655,14 +692,17 @@ def check_suggestion_expiry():
         return
 
     pg = PostgreSQLStore()
-    pg.log_weight_update(
-        source="expired",
-        applied_weights=snapshot.get("suggested_weights", {}),
-        suggested_weights=snapshot.get("suggested_weights"),
-        purified_icir=snapshot.get("purified_icir"),
-        freeze_reason=snapshot.get("freeze_reason") or None,
-        note="Suggestion expired without approval",
-    )
+    try:
+        pg.log_weight_update(
+            source="expired",
+            applied_weights=snapshot.get("suggested_weights", {}),
+            suggested_weights=snapshot.get("suggested_weights"),
+            purified_icir=snapshot.get("purified_icir"),
+            freeze_reason=snapshot.get("freeze_reason") or None,
+            note="Suggestion expired without approval",
+        )
+    finally:
+        pg.close()
 
     # Clean up snapshot
     redis._r.delete("ensemble:weights:suggestion:snapshot")
@@ -760,7 +800,8 @@ def check_and_apply_weights():
     pg = PostgreSQLStore()
     notifier = TelegramNotifier()
 
-    if freeze_reason:
+    try:
+      if freeze_reason:
         # Log the freeze event to PostgreSQL for audit trail
         # source="freeze" indicates guardrail blocked auto-apply
         pg.log_weight_update(
@@ -803,7 +844,7 @@ def check_and_apply_weights():
             log.info("Freeze message sent with keyboard: message_id=%d", message_id)
 
         log.info("Auto-apply frozen: %s", freeze_reason)
-    else:
+      else:
         redis.set_ensemble_weights(suggested_weights, source="auto_apply")
         redis.delete_suggestion_snapshot()
 
@@ -825,6 +866,8 @@ def check_and_apply_weights():
         )
         asyncio.run(notifier.send_alert(msg, level="info"))
         log.info("Weights auto-applied successfully")
+    finally:
+        pg.close()
 
 
 @app.task(name="src.workers.performance.run_forward_return_worker")

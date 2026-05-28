@@ -393,3 +393,55 @@ def test_no_alert_without_notifier():
     stats = run_execution_cycle(["AAPL"], redis, client, notifier=None)
 
     assert stats["errors"] == 1
+
+
+# --- pending orders / duplicate BUY guard ---
+
+def test_pending_order_prevents_duplicate_buy():
+    """Symbol with pending Alpaca order must not receive a second BUY."""
+    pending = MagicMock()
+    pending.symbol = "AAPL"
+
+    redis = _make_redis(signal=_signal(score=0.8))
+    client = _make_client(portfolio_value=100_000)
+    client.get_orders.return_value = [pending]
+
+    stats = run_execution_cycle(["AAPL"], redis, client)
+
+    assert stats["orders_placed"] == 0
+    assert stats["skipped_position"] == 1
+    client.submit_order.assert_not_called()
+
+
+def test_pending_orders_api_failure_blocks_new_entries():
+    """If get_orders() raises, no new BUY is placed this cycle (fail-safe)."""
+    redis = _make_redis(signal=_signal(score=0.8))
+    client = _make_client(portfolio_value=100_000)
+    client.get_orders.side_effect = Exception("Alpaca API error")
+    notifier = _make_notifier()
+
+    stats = run_execution_cycle(["AAPL"], redis, client, notifier=notifier)
+
+    assert stats["orders_placed"] == 0
+    assert stats["skipped_position"] == 1
+    client.submit_order.assert_not_called()
+    # Should fire a CRITICAL alert when the orders endpoint is unreachable
+    notifier.send_alert.assert_called_once()
+    _, kwargs = notifier.send_alert.call_args
+    assert kwargs["level"] == AlertLevel.CRITICAL
+
+
+def test_pending_orders_failure_does_not_block_stop_loss():
+    """Even when get_orders() fails, stop-loss on open positions must still fire."""
+    entry = 100.0
+    current = entry * (1 - STOP_LOSS_PCT - 0.01)
+    pos = _make_position("AAPL", avg_entry=entry, current=current)
+    client = _make_client(positions={"AAPL": pos})
+    client.get_orders.side_effect = Exception("Alpaca API error")
+
+    redis = _make_redis(signal=_signal(score=0.8))
+
+    stats = run_execution_cycle(["AAPL"], redis, client)
+
+    assert stats["stop_losses_triggered"] == 1
+    client.close_position.assert_called_once_with("AAPL")

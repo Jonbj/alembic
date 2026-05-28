@@ -208,16 +208,20 @@ def run_execution_cycle(
     # Fetch pending (not-yet-filled) orders to prevent duplicate BUY.
     # get_all_positions() only returns filled positions; a pending order
     # would not appear there, causing a second BUY on the next cycle.
+    # Failure to fetch is treated as fail-safe: pending_orders=None blocks
+    # all new entries that cycle rather than risking a duplicate BUY.
+    pending_orders: set[str] | None
     try:
-        pending_orders: set[str] = {
+        pending_orders = {
             o.symbol
             for o in trading_client.get_orders(
                 GetOrdersRequest(status=QueryOrderStatus.OPEN)
             )
         }
     except Exception as e:
-        log.warning("Failed to fetch open orders: %s — skipping duplicate BUY check", e)
-        pending_orders = set()
+        log.error("Failed to fetch open orders from Alpaca: %s — blocking new entries this cycle", e)
+        _fire_alert(notifier, f"Alpaca (open orders) non raggiungibile: {e}", AlertLevel.CRITICAL)
+        pending_orders = None
 
     # Drawdown cap — activate kill-switch if daily loss exceeds MAX_DRAWDOWN_PCT
     try:
@@ -282,8 +286,8 @@ def run_execution_cycle(
                 continue
 
             # --- Entry logic ---
-            if symbol in pending_orders:
-                log.debug("Pending order exists for %s — skip to avoid duplicate BUY", symbol)
+            if pending_orders is None or symbol in pending_orders:
+                log.debug("Pending order check unavailable or order exists for %s — skip", symbol)
                 stats["skipped_position"] += 1
                 continue
 

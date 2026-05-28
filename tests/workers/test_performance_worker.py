@@ -12,6 +12,7 @@ from src.store.pg_store import PostgreSQLStore
 from src.store.redis_store import RedisStore
 from src.workers.performance import (
     _compute_bucket_ic,
+    _fetch_all_per_model_signals_for_loo,
     _fetch_all_signals_for_ic,
     _suggest_threshold,
     build_performance_report,
@@ -334,17 +335,17 @@ class TestRunWeeklyWeights:
 
     @patch("src.workers.performance.check_and_apply_weights")
     @patch("src.workers.performance.compute_purified_icir")
-    @patch("src.workers.performance._fetch_all_signals_for_ic")
+    @patch("src.workers.performance._fetch_all_per_model_signals_for_loo")
     @patch("src.workers.performance.RedisStore")
     @patch("src.workers.performance.TelegramNotifier")
     def test_run_weekly_weights_observational(
         self, mock_notifier_cls, mock_redis_cls, mock_fetch_cls, mock_purified_cls, mock_apply_task
     ):
         """Test weekly weights computation is observational (no auto-apply)."""
-        # Mock _fetch_all_signals_for_ic directly to return aggregated rows
+        # Per-model rows: (model_id, score, forward_return)
         mock_fetch_cls.return_value = (
-            generate_signal_rows(300, "opus", return_correlation=0.3) +
-            generate_signal_rows(300, "qwen3.5:cloud", return_correlation=0.2)
+            [("opus", 0.3, 0.02)] * 300 +
+            [("qwen3.5:cloud", 0.2, 0.01)] * 300
         )
 
         # Mock compute_purified_icir to return valid ICIR values
@@ -380,16 +381,14 @@ class TestRunWeeklyWeights:
         # Verify check_and_apply_weights was chained
         mock_apply_task.apply_async.assert_called_once_with(countdown=5)
 
-    @patch("src.workers.performance._fetch_all_signals_for_ic")
+    @patch("src.workers.performance._fetch_all_per_model_signals_for_loo")
     @patch("src.workers.performance.RedisStore")
     def test_run_weekly_weights_insufficient_samples(
         self, mock_redis_cls, mock_fetch_cls
     ):
         """Test weekly weights skips computation with insufficient samples."""
-        # Return insufficient samples
-        mock_fetch_cls.return_value = [
-            make_signal_row(0.5, 0.02) for _ in range(50)
-        ]
+        # Empty per-model rows → no data → early return
+        mock_fetch_cls.return_value = []
 
         # Mock Redis with proper structure
         mock_redis = MagicMock()
