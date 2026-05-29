@@ -1,0 +1,33 @@
+version: "0.1.0"
+last_modified: "2026-05-29"
+changelog:
+  - "0.1.0: initial version"
+
+# Universe per Strategia 1 (Time-Series Momentum)
+s1_universe:
+  description: "Cross-asset ETF universe for trend following"
+  tickers:
+    - { symbol: SPY, asset_class: US_EQUITY_LARGE, inception: "1993-01-22" }
+    - { symbol: QQQ, asset_class: US_EQUITY_TECH, inception: "1999-03-10" }
+    - { symbol: IWM, asset_class: US_EQUITY_SMALL, inception: "2000-05-22" }
+    - { symbol: VEA, asset_class: INTL_DEV_EQUITY, inception: "2007-07-20" }
+    - { symbol: VWO, asset_class: EM_EQUITY, inception: "2005-03-04" }
+    - { symbol: EWJ, asset_class: JAPAN_EQUITY, inception: "1996-03-12" }
+    - { symbol: TLT, asset_class: UST_LONG, inception: "2002-07-22" }
+    - { symbol: IEF, asset_class: UST_INTERMEDIATE, inception: "2002-07-22" }
+    - { symbol: SHY, asset_class: UST_SHORT, inception: "2002-07-22" }
+    - { symbol: LQD, asset_class: IG_CREDIT, inception: "2002-07-22" }
+    - { symbol: HYG, asset_class: HY_CREDIT, inception: "2007-04-04" }
+    - { symbol: TIP, asset_class: TIPS, inception: "2003-12-04" }
+    - { symbol: GLD, asset_class: GOLD, inception: "2004-11-18" }
+    - { symbol: DBC, asset_class: BROAD_COMMODITY, inception: "2006-02-03" }
+    - { symbol: VNQ, asset_class: US_REITS, inception: "2004-09-23" }
+
+# Universe per Strategia 3 (Cross-Sectional Equity)
+s3_universe:
+  description: "US large/mid cap equity universe (from v1)"
+  source: "data/sp500_tickers.csv"
+  filters:
+    min_market_cap_usd: 2000000000
+    min_adv_usd: 10000000
+    min_price_usd: 5
