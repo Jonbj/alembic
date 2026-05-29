@@ -1,0 +1,14 @@
+{
+  "current_task": "T-002",
+  "session_id": "ses_001",
+  "tasks": {
+    "T-001": {
+      "status": "DONE",
+      "commit": "b1209a2",
+      "notes": "ParquetCache + DataLoader + Universe. 20 tests, 85% cov, ruff clean. pyproject.toml build-backend fixed. uv run used in place of poetry run (DECISIONS.md)."
+    },
+    "T-002": {
+      "status": "IN_PROGRESS"
+    }
+  }
+}
