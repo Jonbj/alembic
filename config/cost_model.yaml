@@ -1,0 +1,32 @@
+version: "0.1.0"
+last_modified: "2026-05-29"
+changelog:
+  - "0.1.0: initial version"
+
+equity:
+  spread_tiers:
+    tier_a:
+      description: "Mega-cap, very liquid ETF"
+      symbols: [SPY, QQQ, IWM, VOO, VTI, GLD, TLT, IEF, SHY]
+      spread_bps: 1.5
+    tier_b:
+      description: "Large-cap equity, liquid sector ETF"
+      symbols: [VEA, VWO, EWJ, LQD, HYG, TIP, DBC, VNQ, XLF, XLK, XLE, XLV]
+      spread_bps: 5.0
+    tier_c:
+      description: "Mid-cap, niche ETF, less liquid"
+      symbols: []
+      spread_bps: 10.0
+    tier_d:
+      description: "Default: small-cap, illiquid"
+      default: true
+      spread_bps: 20.0
+  impact_k: 10.0
+  commission_per_share: 0.0
+  sec_fee_per_share_sale: 0.0000229
+  finra_taf_per_share_sale: 0.000145
+
+options:
+  spread_pct_of_mid: 0.05
+  commission_per_contract: 0.65
+  exercise_fee: 0.0

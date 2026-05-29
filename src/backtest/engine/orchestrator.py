@@ -2,14 +2,18 @@
 from dataclasses import dataclass
 from datetime import datetime
 import logging
-from typing import Callable
+from pathlib import Path
+from typing import Callable, Protocol
 
 import pandas as pd
 
 from src.backtest.engine.data_replay import DataReplay
-from src.backtest.engine.order_simulation import SimpleCostModel
 from src.backtest.engine.portfolio import VirtualPortfolio
 from src.backtest.engine.types import Fill, MarketSnapshot, Order, PortfolioSnapshot
+
+
+class CostModel(Protocol):
+    def simulate_fill(self, order: Order, market: MarketSnapshot) -> Fill: ...
 
 
 log = logging.getLogger(__name__)
@@ -18,8 +22,9 @@ log = logging.getLogger(__name__)
 @dataclass
 class BacktestConfig:
     initial_capital: float = 100_000.0
-    spread_bps: float = 5.0
-    commission_per_share: float = 0.0
+    spread_bps: float = 5.0            # used only when cost_model is SimpleCostModel
+    commission_per_share: float = 0.0  # used only when cost_model is SimpleCostModel
+    cost_model_path: Path = Path("config/cost_model.yaml")
 
 
 @dataclass
@@ -49,12 +54,17 @@ StrategyCallable = Callable[
 class BacktestOrchestrator:
     """Main event loop for backtesting."""
 
-    def __init__(self, config: BacktestConfig) -> None:
+    def __init__(
+        self,
+        config: BacktestConfig,
+        cost_model: CostModel | None = None,
+    ) -> None:
         self.config = config
-        self.cost_model = SimpleCostModel(
-            spread_bps=config.spread_bps,
-            commission_per_share=config.commission_per_share,
-        )
+        if cost_model is not None:
+            self.cost_model: CostModel = cost_model
+        else:
+            from src.backtest.costs.realistic import RealisticCostModel
+            self.cost_model = RealisticCostModel(config_path=config.cost_model_path)
 
     def run(
         self,
