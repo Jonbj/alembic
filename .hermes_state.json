@@ -1,5 +1,5 @@
 {
-  "current_task": "T-201",
+  "current_task": "T-202",
   "session_id": null,
   "milestone_a": "DONE",
   "tasks": {
@@ -62,6 +62,11 @@
       "status": "DONE",
       "commit": "0360eaf",
       "notes": "S1 sensitivity analysis. Grid search lookback/vol/threshold. 6 tests. | Milestone B gate fixes committed 16335ea"
+    },
+    "T-201": {
+      "status": "DONE",
+      "commit": "bcf1619",
+      "notes": "S3 universe + liquidity filter. 19 tests passing. Point-in-time filter, no survivorship bias, 50-65 typical universe size."
     }
   },
   "milestone_b": "PASS"
