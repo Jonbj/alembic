@@ -1,7 +1,9 @@
 {
-  "current_task": "T-202",
+  "current_task": "T-203",
   "session_id": null,
   "milestone_a": "DONE",
+  "milestone_b": "PASS",
+  "milestone_c": "PENDING_REAL_DATA",
   "tasks": {
     "T-001": {
       "status": "DONE",
@@ -56,18 +58,27 @@
     "T-104": {
       "status": "DONE",
       "commit": "d4a0727",
-      "notes": "S1 backtest + gate run. Walk-forward + 5 gates + perturbation. 11 tests. Synthetic OOS Sharpe pending real data."
+      "notes": "S1 backtest + gate run. Walk-forward + 5 gates + perturbation. 11 tests."
     },
     "T-105": {
       "status": "DONE",
       "commit": "0360eaf",
-      "notes": "S1 sensitivity analysis. Grid search lookback/vol/threshold. 6 tests. | Milestone B gate fixes committed 16335ea"
+      "notes": "S1 sensitivity analysis. Grid search lookback/vol/threshold. 6 tests."
     },
     "T-201": {
       "status": "DONE",
       "commit": "bcf1619",
       "notes": "S3 universe + liquidity filter. 19 tests passing. Point-in-time filter, no survivorship bias, 50-65 typical universe size."
+    },
+    "T-202": {
+      "status": "DONE",
+      "commit": "4b4033e",
+      "notes": "S3 residual momentum signal. compute_beta, compute_residual_momentum, compute_cross_sectional_ranks, generate_s3_signals. 24 tests passing."
+    },
+    "T-203": {
+      "status": "DONE",
+      "commit": "5db3e21",
+      "notes": "S3 strategy module + backtest + gate run. S3Config, CrossSectionalMomentum. run_s3_backtest_from_prices with walk-forward + 5 gates. 32 tests passing. Milestone C gating on real data OOS Sharpe."
     }
-  },
-  "milestone_b": "PASS"
+  }
 }
