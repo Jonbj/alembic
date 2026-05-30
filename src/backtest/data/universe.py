@@ -1,10 +1,15 @@
 """Universe management: load, filter, point-in-time queries."""
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import yaml
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 @dataclass(frozen=True)
@@ -40,6 +45,31 @@ class Universe:
             if a.symbol == symbol:
                 return a
         return None
+
+    def screen(
+        self,
+        data: dict[str, "pd.DataFrame"],
+        min_history_days: int = 252,
+        max_nan_fraction: float = 0.05,
+    ) -> "Universe":
+        """Return a new Universe keeping only assets that pass data quality thresholds.
+
+        Assets not present in `data` or with fewer than `min_history_days` trading
+        rows or NaN density above `max_nan_fraction` are excluded.
+        """
+        passing = []
+        for asset in self.assets:
+            if asset.symbol not in data:
+                continue
+            df = data[asset.symbol]
+            if len(df) < min_history_days:
+                continue
+            price_col = "Adj Close" if "Adj Close" in df.columns else "Close"
+            if df[price_col].isna().mean() > max_nan_fraction:
+                continue
+            passing.append(asset)
+
+        return Universe(self.universe_id, self.description, tuple(passing))
 
 
 def load_universe(
