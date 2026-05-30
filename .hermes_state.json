@@ -1,5 +1,5 @@
 {
-  "current_task": "T-102",
+  "current_task": "T-103",
   "session_id": null,
   "milestone_a": "DONE",
   "tasks": {
@@ -44,8 +44,9 @@
       "notes": "Universe definition + data pipeline. Validator, screening, download script. 28 tests passing."
     },
     "T-102": {
-      "status": "TODO",
-      "notes": "S1 signal computation."
+      "status": "DONE",
+      "commit": "e278b7c",
+      "notes": "S1 signal computation + vol sizing. 19 tests passing."
     },
     "T-103": {
       "status": "TODO",
