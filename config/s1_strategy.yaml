@@ -1,0 +1,11 @@
+version: "0.1.0"
+last_modified: "2026-05-30"
+
+strategy_id: "S1"
+lookbacks: [21, 63, 126, 252]
+vol_window_signal: 63
+vol_window_sizing: 60
+target_vol: 0.10
+max_weight: 0.20
+signal_threshold: 0.0
+rebalance_frequency: MONTHLY
