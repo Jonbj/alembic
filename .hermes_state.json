@@ -1,5 +1,5 @@
 {
-  "current_task": "T-105",
+  "current_task": "COMPLETED_B",
   "session_id": null,
   "milestone_a": "DONE",
   "tasks": {
@@ -59,8 +59,10 @@
       "notes": "S1 backtest + gate run. Walk-forward + 5 gates + perturbation. 11 tests. Synthetic OOS Sharpe pending real data."
     },
     "T-105": {
-      "status": "TODO",
-      "notes": "S1 sensitivity analysis."
+      "status": "DONE",
+      "commit": "0360eaf",
+      "notes": "S1 sensitivity analysis. Grid search lookback/vol/threshold. 6 tests."
     }
-  }
+  },
+  "milestone_b": "CODE_DONE_PENDING_REAL_DATA"
 }
