@@ -31,7 +31,7 @@ async def health() -> dict[str, str]:
     return {"status": "ok", "mode": "backtest"}
 
 
-from src.api.routes import admin, backtest, config_routes, llm_routes, news_routes, performance, signals, trading  # noqa: E402
+from src.api.routes import admin, backtest, config_routes, llm_routes, news_routes, performance, signals, strategies, trading  # noqa: E402
 
 app.include_router(signals.router)
 app.include_router(admin.router)
@@ -41,6 +41,7 @@ app.include_router(news_routes.router)
 app.include_router(llm_routes.router)
 app.include_router(config_routes.router)
 app.include_router(backtest.router)
+app.include_router(strategies.router)
 
 import os  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402

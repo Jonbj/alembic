@@ -14,6 +14,7 @@ const LLM         = lazy(() => import('@/pages/LLM'))
 const Config      = lazy(() => import('@/pages/Config'))
 const Admin       = lazy(() => import('@/pages/Admin'))
 const AutoImprove = lazy(() => import('@/pages/AutoImprove'))
+const Strategies  = lazy(() => import('@/pages/Strategies'))
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 3, retryDelay: (n) => Math.min(1000 * 2 ** n, 30000) } },
@@ -35,6 +36,7 @@ export default function App() {
                 <Route path="/signals"      element={<Signals />} />
                 <Route path="/trading"      element={<Trading />} />
                 <Route path="/performance"  element={<Performance />} />
+                <Route path="/strategies"   element={<Strategies />} />
                 <Route path="/backtest"     element={<Backtest />} />
                 <Route path="/news"         element={<News />} />
                 <Route path="/llm"          element={<LLM />} />
