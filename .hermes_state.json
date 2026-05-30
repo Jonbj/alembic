@@ -1,5 +1,5 @@
 {
-  "current_task": "T-104",
+  "current_task": "T-105",
   "session_id": null,
   "milestone_a": "DONE",
   "tasks": {
@@ -54,8 +54,9 @@
       "notes": "S1 strategy module. TimeSeriesMomentum with StrategyCallable. 21 tests."
     },
     "T-104": {
-      "status": "TODO",
-      "notes": "S1 backtest + gate run."
+      "status": "DONE",
+      "commit": "d4a0727",
+      "notes": "S1 backtest + gate run. Walk-forward + 5 gates + perturbation. 11 tests. Synthetic OOS Sharpe pending real data."
     },
     "T-105": {
       "status": "TODO",
