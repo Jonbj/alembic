@@ -1,41 +1,63 @@
 {
-  "current_task": "T-007",
-  "session_id": "ac3be942-f41c-4fb4-9a84-c6f9be6a8034",
+  "current_task": "T-102",
+  "session_id": null,
+  "milestone_a": "DONE",
   "tasks": {
     "T-001": {
       "status": "DONE",
       "commit": "b1209a2",
-      "notes": "ParquetCache + DataLoader + Universe. 20 tests, 85% cov, ruff clean."
+      "notes": "ParquetCache + DataLoader + Universe. 20 tests, 85% cov."
     },
     "T-002": {
       "status": "DONE",
       "commit": "223e78e",
-      "notes": "Engine types, VirtualPortfolio, DataReplay, SimpleCostModel, Orchestrator. 36 tests, 97% cov. Sanity: SPY 2010-2019 +233.7%."
+      "notes": "Engine types, VirtualPortfolio, DataReplay, SimpleCostModel, Orchestrator. 36 tests."
     },
     "T-003": {
       "status": "DONE",
       "commit": "770ce8a",
-      "notes": "RealisticCostModel: tier-based spread, sqrt impact (k=10), SEC/FINRA fees. CostModel protocol in orchestrator. 16 tests. Sanity: SPY 96k \u2192 2.33 bps."
+      "notes": "RealisticCostModel: tier-based spread, sqrt impact, SEC/FINRA fees. 16 tests."
     },
     "T-004": {
       "status": "DONE",
       "commit": "75dbf05",
-      "notes": "Sentinel-based anti-look-ahead suite. 10 tests. Ruff clean."
+      "notes": "Sentinel-based anti-look-ahead suite. 10 tests."
     },
     "T-005": {
       "status": "DONE",
       "commit": "e1b3391",
-      "notes": "WalkForwardRunner, WalkForwardAggregator, WalkForwardHTMLReport. 37 tests, 2.1s. Ruff clean."
+      "notes": "WalkForwardRunner + Aggregator + HTMLReport. 37 tests."
     },
     "T-006": {
       "status": "DONE",
       "commit": "09f6b56",
-      "notes": "5 modules: performance, risk, signal_quality, attribution, report. 142 tests. 9/9 empyrical validations exact."
+      "notes": "5 analytics modules, 142 tests, 9/9 empyrical validations."
     },
     "T-007": {
       "status": "DONE",
       "commit": "cc736b8",
-      "notes": "5 validation gates + runner + types. 21 tests (random fails all, SPY passes 1,2,5 fails 3,4). Ruff clean."
+      "notes": "5 validation gates + runner + types. 21 tests."
+    },
+    "T-101": {
+      "status": "DONE",
+      "commit": "414495f",
+      "notes": "Universe definition + data pipeline. Validator, screening, download script. 28 tests passing."
+    },
+    "T-102": {
+      "status": "TODO",
+      "notes": "S1 signal computation."
+    },
+    "T-103": {
+      "status": "TODO",
+      "notes": "S1 strategy module."
+    },
+    "T-104": {
+      "status": "TODO",
+      "notes": "S1 backtest + gate run."
+    },
+    "T-105": {
+      "status": "TODO",
+      "notes": "S1 sensitivity analysis."
     }
   }
 }
