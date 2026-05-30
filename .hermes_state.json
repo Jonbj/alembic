@@ -1,5 +1,5 @@
 {
-  "current_task": "T-103",
+  "current_task": "T-104",
   "session_id": null,
   "milestone_a": "DONE",
   "tasks": {
@@ -49,8 +49,9 @@
       "notes": "S1 signal computation + vol sizing. 19 tests passing."
     },
     "T-103": {
-      "status": "TODO",
-      "notes": "S1 strategy module."
+      "status": "DONE",
+      "commit": "ac349c1",
+      "notes": "S1 strategy module. TimeSeriesMomentum with StrategyCallable. 21 tests."
     },
     "T-104": {
       "status": "TODO",
