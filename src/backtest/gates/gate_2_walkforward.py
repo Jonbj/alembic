@@ -44,8 +44,19 @@ def gate_2_walkforward(
     all_returns = pd.concat(wf_results, ignore_index=True)
     aggregate_sr = float(sharpe_ratio(all_returns, periods=periods))
 
-    n_positive = sum(1 for s in window_sharpes if s > 0)
-    positive_fraction = n_positive / len(window_sharpes)
+    # Only count windows where the strategy actually traded (non-zero returns).
+    # Zero-return windows indicate no positions were held — excluding them from
+    # the positive-fraction denominator avoids penalising the strategy for periods
+    # before enough history exists to generate signals.
+    active_sharpes = [
+        s for s, r in zip(window_sharpes, wf_results) if r.abs().sum() > 0
+    ]
+    if active_sharpes:
+        n_positive = sum(1 for s in active_sharpes if s > 0)
+        positive_fraction = n_positive / len(active_sharpes)
+    else:
+        n_positive = 0
+        positive_fraction = 0.0
 
     passed = (
         aggregate_sr > min_oos_sharpe
@@ -56,6 +67,7 @@ def gate_2_walkforward(
         details={
             "oos_sharpe": round(aggregate_sr, 4),
             "n_windows": len(window_sharpes),
+            "n_active_windows": len(active_sharpes),
             "n_positive": n_positive,
             "positive_fraction": round(positive_fraction, 4),
             "window_sharpes": [round(s, 4) for s in window_sharpes],

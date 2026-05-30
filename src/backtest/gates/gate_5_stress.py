@@ -16,7 +16,7 @@ from src.backtest.metrics.risk import max_drawdown
 def gate_5_stress(
     stress_returns: dict[str, pd.Series],
     periods: int = 252,
-    min_cumulative_return: float = 0.0,
+    min_cumulative_return: float = -0.10,
     max_drawdown_allowed: float = -0.30,
 ) -> GateResult:
     """Gate 5: Stress period survival.

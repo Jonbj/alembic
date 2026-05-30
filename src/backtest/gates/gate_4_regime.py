@@ -38,6 +38,9 @@ def gate_4_regime(
     if not regime_returns:
         return GateResult(passed=False, details={"error": "no regime data provided"})
 
+    # Clamp to actual regime count — requiring more regimes to pass than exist is impossible
+    min_passing_regimes = min(min_passing_regimes, len(regime_returns))
+
     regime_sharpes: dict[str, float] = {}
     for name, rets in regime_returns.items():
         sr = float(sharpe_ratio(rets, periods=periods)) if len(rets) >= 2 else 0.0

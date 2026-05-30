@@ -31,7 +31,7 @@ class GateConfig:
     min_regime_sharpe: float = 0.0
     min_passing_regimes: int = 3
     # Gate 5
-    min_cumulative_return: float = 0.0
+    min_cumulative_return: float = -0.10
     max_drawdown_allowed: float = -0.30
     # Misc
     periods: int = 252

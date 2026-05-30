@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from src.backtest.data.loader import DataLoader
+from src.backtest.metrics.performance import sharpe_ratio
 from src.backtest.data.universe import load_universe
 from src.backtest.engine.data_replay import DataReplay
 from src.backtest.engine.orchestrator import BacktestConfig
@@ -45,7 +46,6 @@ def run_s1_backtest_from_prices(
     wf_result = wf_runner.run(data_replay, strategy)
 
     aggregate = wf_result.aggregate_metrics
-    oos_sharpe = float(aggregate.get("mean_sharpe", 0.0))
 
     oos_nav = aggregate.get("oos_nav_series", pd.Series(dtype=float))
     oos_returns = oos_nav.pct_change().dropna() if len(oos_nav) > 1 else pd.Series(dtype=float)
@@ -61,6 +61,14 @@ def run_s1_backtest_from_prices(
                 index=[s.timestamp for s in oos_snaps],
             )
             wf_window_returns.append(window_nav.pct_change().dropna())
+
+    # OOS Sharpe from concatenated window returns — unbiased vs mean of per-window Sharpes,
+    # which is skewed when early no-trade windows (Sharpe=0) lower the arithmetic mean.
+    if wf_window_returns:
+        all_oos = pd.concat(wf_window_returns, ignore_index=True)
+        oos_sharpe = float(sharpe_ratio(all_oos, periods=252))
+    else:
+        oos_sharpe = float(aggregate.get("mean_sharpe", 0.0))
 
     perturbed_sharpes = None
     if run_robustness and len(oos_returns) > 20:
@@ -85,7 +93,7 @@ def run_s1_backtest_from_prices(
         config=gate_config,
     )
 
-    milestone_b_pass = oos_sharpe >= 0.5
+    milestone_b_pass = oos_sharpe >= 0.5 and gate_report.overall_passed
 
     gate_dict = {name: {"passed": g.passed, "details": g.details} for name, g in gate_report.gate_results.items()}
     summary = {
