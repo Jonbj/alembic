@@ -215,7 +215,9 @@ def run_s3_backtest_full(
     tickers = list(active[:50])  # cap at 50 for tractable backtest
 
     all_tickers = ["SPY"] + [t for t in tickers if t != "SPY"]
-    prices_wide = loader.get_aligned_prices(all_tickers, start=start, end=end)
+    # Use pre-downloaded price data from S3Universe (load_s3_universe_with_data already fetched it)
+    prices_wide = s3_universe.close[all_tickers].dropna(axis=1, how="all")
+    prices_wide = prices_wide.loc[prices_wide.index >= pd.Timestamp(start)]
 
     # Ensure SPY is present
     if "SPY" not in prices_wide.columns:
