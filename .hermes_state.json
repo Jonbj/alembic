@@ -3,7 +3,7 @@
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
-  "milestone_c": "PENDING_REAL_DATA",
+  "milestone_c": "FAIL",
   "tasks": {
     "T-001": {
       "status": "DONE",
@@ -78,7 +78,20 @@
     "T-203": {
       "status": "DONE",
       "commit": "5db3e21",
-      "notes": "S3 strategy module + backtest + gate run. S3Config, CrossSectionalMomentum. run_s3_backtest_from_prices with walk-forward + 5 gates. 32 tests passing. Milestone C gating on real data OOS Sharpe."
+      "notes": "S3 strategy module + backtest + gate run. S3Config, CrossSectionalMomentum. run_s3_backtest_from_prices with walk-forward + 5 gates. 32 tests passing. Milestone C gating on real data OOS Sharpe. Real data backtest: OOS Sharpe=0.1483, gates 3&5 FAIL. Bug fix: dd52897 (S3Universe.close instead of get_aligned_prices)."
     }
+  },
+  "milestone_c_details": {
+    "oos_sharpe": 0.1483,
+    "gate_1_significance": "PASS",
+    "gate_2_walkforward": "PASS",
+    "gate_3_robustness": "FAIL",
+    "gate_4_regime": "PASS",
+    "gate_5_stress": "FAIL",
+    "fail_reasons": [
+      "gate_3: CV=2.0543 >> max_cv=0.5 (strategy not robust to parameter perturbations)",
+      "gate_5: cumulative_return=-10.07% < threshold=-10% (barely fails)"
+    ],
+    "bug_fix_commit": "dd52897"
   }
 }
