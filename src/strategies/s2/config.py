@@ -1,7 +1,7 @@
 """S2 strategy configuration."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -21,3 +21,12 @@ class S2Config:
     underlying_stop_loss_pct: float = 0.05
     min_dte_exit: int = 7
     force_close_dte: int = 2
+    # Regime modulation: position scale per regime label
+    regime_scales: dict[str, float] = field(
+        default_factory=lambda: {
+            "bull": 1.0,
+            "sideways": 0.75,
+            "bear": 0.25,
+            "high_vol": 0.0,
+        }
+    )
