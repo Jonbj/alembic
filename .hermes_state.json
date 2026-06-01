@@ -1,5 +1,5 @@
 {
-  "current_task": "T-301",
+  "current_task": "T-302",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -103,9 +103,9 @@
       "notes": "S3 strategy module + backtest + gate run. S3Config, CrossSectionalMomentum. 32 tests passing. Milestone C gating: OOS Sharpe=0.1483, FAIL on gates 3&5. S3 demoted to R&D sleeve."
     },
     "T-301": {
-      "status": "IN_PROGRESS",
-      "commit": null,
-      "notes": "IBKR API setup - starting"
+      "status": "DONE",
+      "commit": "d3453e1",
+      "notes": "IBKR adapter: BrokerAdapter ABC + ib_insync implementation. connect/disconnect, auto-reconnect, account summary, submit/cancel orders, option chain retrieval. 18 tests passing (all mocked)."
     }
   },
   "milestone_b_details": {
