@@ -5,7 +5,19 @@ import { fetchSignals, type Signal } from '@/api/signals'
 import { DirectionBadge } from '@/components/shared/DirectionBadge'
 import { HelpButton } from '@/components/shared/HelpButton'
 
-const ROW_H = 40   // px per row — used for virtualizer estimate and tbody height
+const ROW_H = 40
+
+const COLS = [
+  { label: 'Ticker',     pct: 10 },
+  { label: 'Direction',  pct: 12 },
+  { label: 'Score',      pct: 11 },
+  { label: 'Confidence', pct: 11 },
+  { label: 'Model',      pct: 28 },
+  { label: 'Fallback',   pct: 8 },
+  { label: 'Time',       pct: 20 },
+]
+
+const GRID_TEMPLATE = COLS.map(c => `${c.pct}%`).join(' ')
 
 export default function Signals() {
   const [ticker, setTicker] = useState('')
@@ -70,76 +82,64 @@ export default function Signals() {
         {isLoading && <p style={{ padding: 16, color: 'var(--text-muted)' }}>Loading...</p>}
         {error && <p style={{ padding: 16, color: 'var(--red)' }}>Error loading signals</p>}
 
-        {/* Fixed-layout table so column widths are stable with absolute-positioned rows */}
-        <table style={{ tableLayout: 'fixed', width: '100%', borderCollapse: 'collapse' }}>
-          <colgroup>
-            <col style={{ width: '10%' }} />
-            <col style={{ width: '12%' }} />
-            <col style={{ width: '11%' }} />
-            <col style={{ width: '11%' }} />
-            <col style={{ width: '28%' }} />
-            <col style={{ width: '8%' }} />
-            <col style={{ width: '20%' }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <th>Ticker</th>
-              <th>Direction</th>
-              <th>Score</th>
-              <th>Confidence</th>
-              <th>Model</th>
-              <th>Fallback</th>
-              <th>Time</th>
-            </tr>
-          </thead>
-        </table>
-
-        {/* Scroll container — virtualizer attaches here */}
+        {/* Single scroll container — header is sticky inside it */}
         <div
           ref={scrollRef}
           style={{ maxHeight: 520, overflowY: 'auto' }}
         >
-          <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
-            <table style={{ tableLayout: 'fixed', width: '100%', borderCollapse: 'collapse' }}>
-              <colgroup>
-                <col style={{ width: '10%' }} />
-                <col style={{ width: '12%' }} />
-                <col style={{ width: '11%' }} />
-                <col style={{ width: '11%' }} />
-                <col style={{ width: '28%' }} />
-                <col style={{ width: '8%' }} />
-                <col style={{ width: '20%' }} />
-              </colgroup>
-              <tbody style={{ display: 'block', position: 'relative', height: virtualizer.getTotalSize() }}>
-                {virtualItems.map((vr) => {
-                  const s = filtered[vr.index]
-                  return (
-                    <tr
-                      key={vr.key}
-                      data-index={vr.index}
-                      ref={virtualizer.measureElement}
-                      style={{
-                        display: 'table',
-                        tableLayout: 'fixed',
-                        width: '100%',
-                        position: 'absolute',
-                        top: 0,
-                        transform: `translateY(${vr.start}px)`,
-                        height: ROW_H,
-                      }}
-                    >
-                      <td style={{ width: '10%' }}><strong>{s.symbol}</strong></td>
-                      <td style={{ width: '12%' }}><DirectionBadge score={s.score} /></td>
-                      <td style={{ width: '11%', fontVariantNumeric: 'tabular-nums' }}>{s.score.toFixed(4)}</td>
-                      <td style={{ width: '11%' }}>{(s.confidence * 100).toFixed(1)}%</td>
-                      <td style={{ width: '28%', color: 'var(--text-muted)', fontSize: 12 }}>{s.model_id}</td>
-                      <td style={{ width: '8%' }}>{s.fallback_used ? <span className="badge badge-yellow">FB</span> : '—'}</td>
-                      <td style={{ width: '20%', color: 'var(--text-muted)', fontSize: 12 }}>{new Date(s.generated_at).toLocaleString()}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+          {/* Sticky header */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: GRID_TEMPLATE,
+              padding: '0 12px',
+              fontWeight: 600,
+              fontSize: 11,
+              textTransform: 'uppercase',
+              letterSpacing: 0.5,
+              color: 'var(--text-muted)',
+              borderBottom: '1px solid var(--border)',
+              position: 'sticky',
+              top: 0,
+              background: 'var(--bg-primary, #0f172a)',
+              zIndex: 2,
+            }}
+          >
+            {COLS.map(c => <div key={c.label}>{c.label}</div>)}
+          </div>
+
+          {/* Virtualized rows — width: 100% is CRITICAL for absolute-positioned grid children */}
+          <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+            {virtualItems.map((vr) => {
+              const s = filtered[vr.index]
+              return (
+                <div
+                  key={vr.key}
+                  data-index={vr.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: GRID_TEMPLATE,
+                    padding: '0 12px',
+                    alignItems: 'center',
+                    height: ROW_H,
+                    borderBottom: '1px solid var(--border)',
+                    position: 'absolute',
+                    top: 0,
+                    width: '100%',
+                    transform: `translateY(${vr.start}px)`,
+                  }}
+                >
+                  <div><strong>{s.symbol}</strong></div>
+                  <div><DirectionBadge score={s.score} /></div>
+                  <div style={{ fontVariantNumeric: 'tabular-nums' }}>{s.score.toFixed(4)}</div>
+                  <div>{(s.confidence * 100).toFixed(1)}%</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{s.model_id}</div>
+                  <div>{s.fallback_used ? <span className="badge badge-yellow">FB</span> : '—'}</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{new Date(s.generated_at).toLocaleString()}</div>
+                </div>
+              )
+            })}
           </div>
           {filtered.length === 0 && !isLoading && (
             <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)' }}>No signals</div>
