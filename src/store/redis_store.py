@@ -526,7 +526,6 @@ class RedisStore:
                     "glm"  → single cheapest model, saves 75% Ollama quota
         """
         self._r.set("config:sentiment_llm_models", models)
-        self._r.expire("config:sentiment_llm_models", 86400 * 7)
 
     def get_llm_models(self) -> str | None:
         """Return LLM model selection override, or None if not set (use env/default)."""
