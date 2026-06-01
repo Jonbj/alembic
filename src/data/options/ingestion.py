@@ -17,6 +17,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
+from src.options.pricing import black_scholes_price, compute_greeks  # noqa: F401
+
 if TYPE_CHECKING:
     import psycopg2.extensions
 
@@ -25,97 +27,6 @@ log = logging.getLogger(__name__)
 _RISK_FREE_RATE_DEFAULT = 0.05
 _BASE_IV_DEFAULT = 0.18
 _MULTIPLIER = 100
-
-# ---------------------------------------------------------------------------
-# Black-Scholes primitives
-# ---------------------------------------------------------------------------
-
-def black_scholes_price(
-    S: float,
-    K: float,
-    T: float,
-    r: float,
-    sigma: float,
-    right: str,
-) -> float:
-    """Price a European option using Black-Scholes.
-
-    Args:
-        S:     underlying price
-        K:     strike price
-        T:     time to expiry in years (0 = expired at this instant)
-        r:     continuously compounded risk-free rate (e.g. 0.05)
-        sigma: implied volatility (e.g. 0.20)
-        right: 'C' for call, 'P' for put
-
-    Returns:
-        Option price >= 0.
-    """
-    if T <= 0:
-        if right == "C":
-            return max(S - K, 0.0)
-        return max(K - S, 0.0)
-
-    sqrt_T = math.sqrt(T)
-    d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * sqrt_T)
-    d2 = d1 - sigma * sqrt_T
-    disc = math.exp(-r * T)
-
-    from scipy.special import ndtr  # standard normal CDF, faster than scipy.stats.norm
-
-    if right == "C":
-        return S * ndtr(d1) - K * disc * ndtr(d2)
-    return K * disc * ndtr(-d2) - S * ndtr(-d1)
-
-
-def compute_greeks(
-    S: float,
-    K: float,
-    T: float,
-    r: float,
-    sigma: float,
-    right: str,
-) -> dict[str, float]:
-    """Compute first-order Greeks (delta, gamma, theta, vega).
-
-    Args:
-        S, K, T, r, sigma, right: same as black_scholes_price
-
-    Returns:
-        Dict with keys: delta, gamma, theta, vega
-        theta is per calendar day.
-        vega is per 1% change in implied vol.
-    """
-    if T <= 0:
-        if right == "C":
-            delta = 1.0 if S > K else 0.0
-        else:
-            delta = -1.0 if S < K else 0.0
-        return {"delta": delta, "gamma": 0.0, "theta": 0.0, "vega": 0.0}
-
-    sqrt_T = math.sqrt(T)
-    d1 = (math.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * sqrt_T)
-    d2 = d1 - sigma * sqrt_T
-
-    from scipy.special import ndtr
-
-    # Standard normal pdf at d1
-    phi_d1 = math.exp(-0.5 * d1 * d1) / math.sqrt(2 * math.pi)
-    disc = math.exp(-r * T)
-
-    delta = ndtr(d1) if right == "C" else ndtr(d1) - 1.0
-    gamma = phi_d1 / (S * sigma * sqrt_T)
-
-    theta_base = -(S * phi_d1 * sigma) / (2 * sqrt_T)
-    if right == "C":
-        theta = (theta_base - r * K * disc * ndtr(d2)) / 365
-    else:
-        theta = (theta_base + r * K * disc * ndtr(-d2)) / 365
-
-    # Vega: per 1% change in vol
-    vega = S * phi_d1 * sqrt_T / 100
-
-    return {"delta": delta, "gamma": gamma, "theta": theta, "vega": vega}
 
 
 # ---------------------------------------------------------------------------
