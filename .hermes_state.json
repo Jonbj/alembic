@@ -1,5 +1,5 @@
 {
-  "current_task": "T-304",
+  "current_task": "T-305",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -116,6 +116,11 @@
       "status": "DONE",
       "commit": "966c9ec",
       "notes": "Black-Scholes pricing + greeks + implied vol solver. Standalone src/options/pricing.py with black_scholes_price(), compute_greeks(), implied_vol(). Refactored ingestion.py to import from pricing. 40 pricing tests + all existing tests pass."
+    },
+    "T-304": {
+      "status": "DONE",
+      "commit": "7be819e",
+      "notes": "S2 signal: select_put_to_sell() with delta filter, DTE filter, liquidity filter, collateral-cap sizing, VRP entry threshold. 34 tests passing. Orchestrator committed (Claude hit max_turns)."
     }
   },
   "milestone_b_details": {
