@@ -30,3 +30,7 @@ class S2Config:
             "high_vol": 0.0,
         }
     )
+    # Event filter
+    sentiment_block_threshold: float = -0.5
+    pre_event_block_days: int = 1
+    event_filter_enabled: bool = True
