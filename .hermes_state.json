@@ -1,5 +1,5 @@
 {
-  "current_task": "T-308",
+  "current_task": "MILESTONE_D",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -136,6 +136,11 @@
       "status": "DONE",
       "commit": "9947cce",
       "notes": "S2 event filter: EventFilterResult + check_event_filter() blocking on SPY sentiment < -0.5 or within pre_event_block_days of FOMC/NFP. FOMC=3rd Wed of FOMC months, NFP=first Fri of month. S2Config extended with sentiment_block_threshold=-0.5, pre_event_block_days=1, event_filter_enabled=True. 39 new tests; 157 total S2 tests."
+    },
+    "T-308": {
+      "status": "DONE",
+      "commit": "de81f91",
+      "notes": "VRPStrategy + walk-forward backtest + 5 validation gates. 18 backtest tests passing (9 unit + 5 walk-forward + 4 helper). Total S2 tests: 175 (157 unit + 18 backtest). Milestone D pending gate run with real data."
     }
   },
   "milestone_b_details": {
