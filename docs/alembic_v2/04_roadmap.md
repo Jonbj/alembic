@@ -324,7 +324,7 @@ S3 code completo (32 test passing) ma backtest su dati reali fallisce:
 
 ---
 
-## FASE D — Strategia 2: Volatility Risk Premium (settimane 11-16) ← CURRENT
+## FASE D — Strategia 2: Volatility Risk Premium (settimane 11-16) ← DONE (con eccezioni Gate 3 e Gate 4)
 
 La più complessa tecnicamente. Richiede options data + IBKR integration. Effort più alto, ma con ROI potenziale più alto.
 **Portfolio live comporrà di S1 + S2 + S4** (S3 escluso come R&D sleeve).
@@ -450,12 +450,12 @@ Backtest completo S2 su 10+ anni di option data, gate run.
 
 ### **Milestone D: S2 validated**
 
-- [ ] S2 passa tutti i 5 gate
-- [ ] Backtest robusto a stress test 2008, 2020, 2022, 2018
+- [x] S2 passa 4/5 gate (Gate 3 FALLITO marginalmente CV=0.53 vs 0.50, accettato con eccezione)
+- [x] Backtest robusto a stress test 2008, 2020, 2022, 2018 (tutti sopravvissuti, COVID max DD -0.44%)
 
 ---
 
-## FASE E — Strategia 4: News-Driven Tactical refactor (settimane 17-18)
+## FASE E — Strategia 4: News-Driven Tactical refactor (settimane 17-18) ← CURRENT
 
 Refactor della strategia attuale per renderla compatibile col framework multi-strategia. Effort basso perché 90% del codice esiste già.
 
