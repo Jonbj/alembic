@@ -292,6 +292,8 @@ La strategia **DEVE** sopravvivere a questi eventi senza blow-up. Per questo il 
 
 ## S3 — Cross-Sectional Momentum Equity (TILT, 20%)
 
+> ⚠️ **AGGIORNAMENTO 01/06/2026**: S3 demoted a R&D sleeve. Gate 3 e 5 FAIL (OOS Sharpe 0.15, CV=2.05). Codice preservato per future R&D, ma S3 è ESCLUSA dal portfolio live. Il portfolio live è S1 + S2 + S4.
+
 ### Razionale economico
 
 Dentro un universo di azioni, quelle che hanno performato meglio nei mesi recenti tendono a continuare. È il "momentum" classico di Jegadeesh-Titman, documentato dal 1993 e ancora vivo (con decay).
@@ -473,8 +475,10 @@ Dopo 6 mesi di paper trading dentro il sistema multi-strategia:
 |-----------|------------|------|
 | S1 | 40% | Core, più stabile |
 | S2 | 30% | Income, decorrelato da S1 |
-| S3 | 20% | Tilt equity, correlato a S1 ma su asset class diversa |
+| S3 | **0% live (R&D)** | **R&D sleeve — ESCLUSA dal portfolio live** (gate 3&5 FAIL, 01/06/2026) |
 | S4 | 10% | R&D, alpha incerto |
+
+> **Portfolio live attuale**: S1 40% + S2 30% + S4 10% = **80% deployed** + 20% cash residual pending future S3 decision.
 
 ### Razionale dell'allocazione
 
@@ -483,6 +487,8 @@ Dopo 6 mesi di paper trading dentro il sistema multi-strategia:
 - **S4** è semi-indipendente, alpha incerto, peso piccolo.
 
 ### Sharpe combinato atteso
+
+> ⚠️ Questo calcolo è per il design originale 4-strategia. Il portfolio live attuale è S1+S2+S4; ricalcolare post-validazione S2.
 
 Assumendo:
 - Sharpe individuale (S1, S2, S3, S4): 0.7, 1.0, 0.6, 0.3 OOS

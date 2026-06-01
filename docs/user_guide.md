@@ -11,7 +11,7 @@
 2. [Il flusso di utilizzo corretto](#2-il-flusso-di-utilizzo-corretto)
 3. [Le pagine della dashboard](#3-le-pagine-della-dashboard)
 4. [Le metriche: come leggerle](#4-le-metriche-come-leggerle)
-5. [Le 5 strategie](#5-le-5-strategie)
+5. [Le strategie](#5-le-strategie)
 6. [I validation gates](#6-i-validation-gates)
 7. [Il sistema di score e segnali](#7-il-sistema-di-score-e-segnali)
 8. [Glossario](#8-glossario)
@@ -203,7 +203,7 @@ La dashboard è accessibile all'indirizzo **http://192.168.178.144:3000** ed è 
 
 **A cosa serve**: Ispezionare ogni strategia del v2 framework — parametri, validation gate, equity curve e sensitivity.
 
-**Cosa trofi per ogni strategia:**
+**Cosa trovi per ogni strategia:**
 
 | Sezione | Cosa mostra |
 |---------|------------|
@@ -219,7 +219,7 @@ La dashboard è accessibile all'indirizzo **http://192.168.178.144:3000** ed è 
 1. Seleziona la strategia dal menu a tendina
 2. Controlla prima i **KPI** — OOS Sharpe ≥ 0.5 è il minimo per entrare nel portfolio
 3. Poi controlla i **gates** — devono essere tutti PASS (o con eccezioni documentate)
-4. La **sensitivity**告诉你 se la strategia è robusta o se funziona solo con parametri perfetti
+4. La **sensitivity** ti dice se la strategia è robusta o se funziona solo con parametri perfetti
 
 ---
 
@@ -227,7 +227,7 @@ La dashboard è accessibile all'indirizzo **http://192.168.178.144:3000** ed è 
 
 **A cosa serve**: Analizzare la qualità predittiva dei segnali LLM su dati storici.
 
-**Cosa trofi:**
+**Cosa trovi:**
 
 | Sezione | Significato |
 |---------|------------|
@@ -259,7 +259,7 @@ Se il grafico è **monotonamente crescente** (da sinistra a destra), il modello 
 
 **A cosa serve**: Vedere le notizie finanziarie che alimentano il sistema di sentiment.
 
-**Cosa trofi:**
+**Cosa trovi:**
 
 | Colonna | Significato |
 |---------|------------|
@@ -423,9 +423,9 @@ Se un modello ha IC negativo o N=0, non significa necessariamente che è rotto. 
 - Normalizza per volatilità — assegna meno peso agli asset più volatili
 - Ribilancia mensilmente
 
-**Parametri**: Lookback lungo 120gg, corto 20gg, vol_window 30gg, vol_target 10%
+**Parametri**: Lookback lungo 252gg, corto 21gg, vol_window 60gg, vol_target 10%
 
-**Universe**: 15 ETF cross-asset (SPY, EFA, EEM, AGG, LQD, TLT, DBC, GLD, VNQ, IYR, XLF, XLE, XLI, XLK, XLV)
+**Universe**: 15 ETF cross-asset (SPY, QQQ, IWM, VEA, VWO, EWJ, TLT, IEF, SHY, LQD, HYG, TIP, GLD, DBC, VNQ)
 
 **Stato**:VALIDATA — Sharpe OOS 0.51, 5/5 gate passati
 

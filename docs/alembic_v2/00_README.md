@@ -11,7 +11,7 @@
 
 Alembic viene riposizionato da "robo-advisor LLM-driven" a **sistema quant multi-strategia personale**, costruito sul codice esistente, con questi obiettivi:
 
-- **Edge reale e difendibile**: combinazione di 4 strategie indipendenti, ognuna con base accademica solida e implementazione rigorosa
+- **Edge reale e difendibile**: combinazione di 3 strategie nel portfolio live (S1+S2+S4) + 1 R&D sleeve (S3, gate run completato ma demoted), ognuna con base accademica solida e implementazione rigorosa
 - **Riuso massivo del codice esistente** (LLM ensemble, regime classifier, drift detection, risk monitor, Celery infra)
 - **Capacity adeguata a capitale singolo**: nessun vincolo di scala, funziona da 10k a 5M
 - **Sharpe target combinato OOS**: 1.0-1.5 (vs 0.5-0.6 di un 60/40 buy-and-hold)
@@ -38,7 +38,7 @@ Alembic v2 prende l'approccio dei CTA professionali (AQR, Man AHL, Winton): **po
 |----|------|--------------------------|--------------------| ---------------------|
 | S1 | Time-series momentum multi-asset | 0.6-0.8 | 40% | Altissima |
 | S2 | Volatility risk premium harvesting | 0.8-1.2 | 30% | Altissima |
-| S3 | Cross-sectional momentum equity | 0.5-0.7 | 20% | Altissima |
+| S3 | Cross-sectional momentum equity | 0.5-0.7 | **0% live (R&D)** ⚠️ R&D sleeve — gate 3&5 FAIL, OOS Sharpe 0.15, esclusa dal live | Altissima |
 | S4 | News-driven tactical (refactor) | 0.0-0.5 | 10% | Bassa (R&D) |
 
 Dettagli in `01_strategy_design.md`.
@@ -121,7 +121,7 @@ Sei un developer singolo. Questo ha implicazioni:
 3. **Backtest correctness > speed**. Meglio backtest che gira in 1 ora correttamente che 1 minuto con look-ahead.
 4. **Config over code**. Strategy parameters in YAML versionati, mai magic numbers.
 5. **Paper before live, walk-forward before paper**. Nessuna eccezione.
-6. **Una strategia alla volta**. Validi S1, poi S2, poi S3, poi S4, poi combiner. Non parallelizzare.
+6. **Una strategia alla volta**. Validi S1, poi S2, poi S4, poi combiner. S3 ha completato il gate run come R&D sleeve (Fase C). Non parallelizzare.
 
 ---
 
@@ -129,8 +129,8 @@ Sei un developer singolo. Questo ha implicazioni:
 
 Il progetto è "fatto" quando:
 
-- [ ] Tutte e 4 le strategie implementate, ciascuna validata OOS individualmente
-- [ ] Portfolio combiner aggrega le 4 con risk parity overlay
+- [ ] S1, S2, S4 implementate e validate OOS individualmente; S3 completata come R&D sleeve con gate run documentato (gate 3&5 FAIL)
+- [ ] Portfolio combiner aggrega S1+S2+S4 con risk parity overlay (S3 esclusa come R&D sleeve)
 - [ ] Walk-forward sull'intero sistema su 10+ anni storici mostra Sharpe ≥ 1.0 OOS netto costi
 - [ ] 90+ giorni paper trading consecutivi senza crash di sistema, con performance entro l'1σ del backtest
 - [ ] Decay monitoring attivo su ciascuna strategia

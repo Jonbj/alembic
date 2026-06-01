@@ -296,10 +296,10 @@ monitoring:
     drawdown_warning: -0.10
     drawdown_critical: -0.25
     
-  s3_xs_momentum:
-    sharpe_30d_warning: -0.3
-    drawdown_warning: -0.15
-    drawdown_critical: -0.30  # momentum crashes brutali, tolleriamo
+  # s3_xs_momentum:  # S3 not active — R&D sleeve. Enable only if S3 re-enters portfolio.
+  #   sharpe_30d_warning: -0.3
+  #   drawdown_warning: -0.15
+  #   drawdown_critical: -0.30  # momentum crashes brutali, tolleriamo
     
   s4_news_tactical:
     # S4 è R&D, soglie tolleranti

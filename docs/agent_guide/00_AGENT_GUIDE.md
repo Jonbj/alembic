@@ -154,7 +154,8 @@ PHASE C — S3 Cross-Sectional Momentum (settimane 8-10)
 ├── T-201: Universe + liquidity
 ├── T-202: S3 signal
 └── T-203: S3 module + backtest
-                                       ← MILESTONE C — S3 validated
+                                       ← MILESTONE C — S3 R&D SLEEVE (gates 3&5 FAIL, OOS Sharpe 0.15)
+                                       ← Portfolio live = S1 + S2 + S4. S3 esclusa. Continua con PHASE D.
 
 PHASE D — S2 Volatility Risk Premium (settimane 11-16)
 ├── T-301: IBKR setup                  ← HUMAN_GATE: serve IBKR account

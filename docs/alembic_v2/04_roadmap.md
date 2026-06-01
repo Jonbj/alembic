@@ -552,7 +552,7 @@ Vol targeting finale sul portfolio combinato.
 
 **Priorità**: P0 | **Effort**: M | **Dipendenze**: T-501-T-504
 
-Backtest combinato finale, 4 strategie + combiner.
+Backtest combinato finale, 3 strategie attive (S1+S2+S4) + combiner (S3 esclusa come R&D sleeve).
 
 **Acceptance**:
 - [ ] OOS Sharpe combinato ≥ 0.8 net of costs (atteso 1.0-1.2)
@@ -694,7 +694,7 @@ Quando uno di questi anti-goals diventa interessante, va in `FASE H` o oltre, **
 
 **Capitale**: nessuno (backtest + paper only) durante tutta la roadmap. Decisione live dopo Milestone G.
 
-**Broker**: Alpaca paper (S1, S3, S4) + IBKR paper (S2). No live broker in roadmap.
+**Broker**: Alpaca paper (S1, S4) + IBKR paper (S2). S3 non in paper trading (R&D sleeve). No live broker in roadmap.
 
 **Mercati**: US-listed only. Italian/EU markets out of scope.
 

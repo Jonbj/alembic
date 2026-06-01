@@ -10,13 +10,13 @@ Il sistema si organizza in **strategy modules indipendenti** + **shared infrastr
 │  Data ingestion · Broker adapters · Risk · Monitoring · Storage    │
 └──────────────┬────────────────┬─────────────────┬────────┬─────────┘
                │                │                 │        │
-        ┌──────▼─────┐  ┌──────▼─────┐  ┌────────▼───┐  ┌─▼──────┐
-        │  S1: TSM   │  │ S2: VRP    │  │ S3: XSM    │  │ S4: NWS │
-        │  (40%)     │  │  (30%)     │  │  (20%)     │  │  (10%)  │
-        └──────┬─────┘  └──────┬─────┘  └────────┬───┘  └─┬──────┘
-               │                │                 │        │
-               │ target_weights │ target_weights  │        │
-               └────────────────┴─────────────────┴────────┘
+        ┌──────▼─────┐  ┌──────▼─────┐  ┌─▼──────┐   ╔════════════╗
+        │  S1: TSM   │  │ S2: VRP    │  │ S4: NWS │   ║ S3: XSM   ║
+        │  (40%)     │  │  (30%)     │  │  (10%)  │   ║ [R&D sleeve║
+        └──────┬─────┘  └──────┬─────┘  └─┬──────┘   ║  gates FAIL║
+               │                │          │          ╚════════════╝
+               │ target_weights │          │
+               └────────────────┴──────────┘
                                     │
                           ┌─────────▼──────────┐
                           │ PORTFOLIO COMBINER │
@@ -495,8 +495,8 @@ version: "2.0.0"
 
 active_strategies:
   - s1_ts_momentum
-  - s2_vrp  
-  - s3_xs_momentum
+  - s2_vrp
+  # - s3_xs_momentum  # S3 demoted to R&D sleeve 01/06/2026 — gates 3&5 FAIL
   - s4_news_tactical
 
 portfolio:
