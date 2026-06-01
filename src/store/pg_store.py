@@ -405,6 +405,37 @@ class PostgreSQLStore:
                 (days_back,),
             )
             return cur.fetchall()
+    def fetch_latest_signals(self, symbols: list[str]) -> list[dict]:
+        """Fetch the latest signal for each symbol from PostgreSQL.
+        
+        Used as fallback when Redis cache has expired.
+        Returns list of dicts matching the Redis sentiment signal format.
+        """
+        if not symbols:
+            return []
+        conn = self._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                placeholders = ", ".join(["%s"] * len(symbols))
+                cur.execute(
+                    "SELECT DISTINCT ON (symbol) "
+                    "  symbol, score, confidence, reasoning, "
+                    "  model_id, ensemble_std, fallback_used, generated_at "
+                    "FROM sentiment_signals "
+                    "WHERE symbol IN (" + placeholders + ") "
+                    "ORDER BY symbol, generated_at DESC",
+                    tuple(symbols)
+                )
+                rows = cur.fetchall()
+                results = []
+                for row in rows:
+                    d = dict(row)
+                    if d.get("generated_at") is not None:
+                        d["generated_at"] = d["generated_at"].isoformat()
+                    results.append(d)
+                return results
+        finally:
+            self._release_connection(conn)
 
     def bulk_add_forward_returns(
         self, updates: list[tuple[int, float]]
