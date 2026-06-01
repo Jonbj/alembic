@@ -1,5 +1,5 @@
 {
-  "current_task": "T-303",
+  "current_task": "T-304",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -111,6 +111,11 @@
       "status": "DONE",
       "commit": "46d3039",
       "notes": "OptionChainDataLoader with Black-Scholes pricing, vol surface, strike grid, synthetic volume/OI, bid/ask spreads. store_chain/fetch_chain for Postgres. ingest_from_ibkr for live. Migration 011_add_option_chains.sql. 53 tests passing."
+    },
+    "T-303": {
+      "status": "DONE",
+      "commit": "966c9ec",
+      "notes": "Black-Scholes pricing + greeks + implied vol solver. Standalone src/options/pricing.py with black_scholes_price(), compute_greeks(), implied_vol(). Refactored ingestion.py to import from pricing. 40 pricing tests + all existing tests pass."
     }
   },
   "milestone_b_details": {
