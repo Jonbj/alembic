@@ -1,5 +1,5 @@
 {
-  "current_task": "T-402",
+  "current_task": "T-501",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -145,7 +145,17 @@
     "T-401": {
       "status": "DONE",
       "commit": "617d625",
-      "notes": "S4 cross-sectional ranking module. CrossSectionalRanker reads SentimentResult signals, computes effective_strength=score×confidence, returns top-N tickers with equal weights (bucket_pct/n_top). Long-only, min_stocks guard, deduplication by generated_at. 19 tests passing."
+      "notes": "S4 cross-sectional ranking module. CrossSectionalRanker reads SentimentResult signals, computes effective_strength=score\u00d7confidence, returns top-N tickers with equal weights (bucket_pct/n_top). Long-only, min_stocks guard, deduplication by generated_at. 19 tests passing."
+    },
+    "T-402": {
+      "status": "DONE",
+      "commit": "00c253b",
+      "notes": "S4 strategy module. NewsDrivenTactical implements StrategyCallable interface. Accepts signals DataFrame for backtesting (time-filtered by generated_at). Weekly rebalance, equal-weight top-N bucket, BUY/SELL order generation with strategy_id tracking. 24 tests passing; 350 total."
+    },
+    "T-403": {
+      "status": "DONE",
+      "commit": "d90aa6e",
+      "notes": "S4 walk-forward backtest + validation gates. 20 backtest tests + 63 total S4 tests passing. Walk-forward with synthetic prices + signals, gate 1-5 report, perturbation, regime, stress tests."
     }
   },
   "milestone_b_details": {
