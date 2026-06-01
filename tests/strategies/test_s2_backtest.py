@@ -16,7 +16,7 @@ from src.backtest.engine.types import MarketSnapshot, Order, OrderSide
 from src.backtest.gates.runner import GateConfig
 from src.backtest.walkforward.runner import WalkForwardConfig, WalkForwardRunner
 from src.strategies.s2.config import S2Config
-from src.strategies.s2.strategy import VRPStrategy, OpenPosition, _PUT_SYMBOL
+from src.strategies.s2.strategy import VRPStrategy, OpenPosition, _UNDERLYING
 from src.strategies.s2.backtest import (
     run_s2_backtest_from_prices,
     _split_regime_returns,
@@ -72,7 +72,7 @@ class TestVRPStrategy:
 
     def test_health_check_fails_with_empty_dataframe(self):
         """Health check fails with empty DataFrame."""
-        prices = pd.DataFrame({"SPY": []})
+        prices = pd.DataFrame({"SPY": pd.Series(dtype=float)})
         strategy = VRPStrategy(prices, S2Config())
         assert strategy.health_check() is False
 
@@ -90,18 +90,33 @@ class TestVRPStrategy:
         ts3 = datetime(2020, 2, 5)
         assert strategy._should_rebalance(ts3) is True
 
-    def test_get_regime_bull(self):
-        """Low volatility maps to bull regime."""
+    def test_get_regime_classifies(self):
+        """Regime classification returns valid labels."""
         prices = _make_prices(500, seed=1)
-        # Prices with very low volatility → bull
         strategy = VRPStrategy(prices, S2Config())
-        # Access the realized vol series
-        vol_median = strategy._realized_vol.median()
-        # Most normal-vol periods should be sideways or bull
-        assert strategy._get_regime(datetime(2015, 6, 1)) in ("bull", "sideways", "bear", "high_vol")
+        regime = strategy._get_regime(datetime(2015, 6, 1))
+        assert regime in ("bull", "sideways", "bear", "high_vol")
 
-    def test_call_generates_orders(self):
-        """Strategy generates orders on first rebalance date."""
+    def test_strategy_callable_interface(self):
+        """VRPStrategy implements the StrategyCallable interface."""
+        prices = _make_prices(500)
+        strategy = VRPStrategy(prices, S2Config())
+
+        idx = len(prices) // 2
+        ts = prices.index[idx]
+        data_replay = DataReplay(prices)
+        portfolio = VirtualPortfolio(100_000)
+        spy_price = float(prices["SPY"].iloc[idx])
+        market = _make_market_snapshot(ts, spy_price)
+
+        # Must return list of Order objects
+        orders = strategy(ts, data_replay, portfolio, market)
+        assert isinstance(orders, list)
+        for o in orders:
+            assert isinstance(o, Order)
+
+    def test_call_generates_spy_orders(self):
+        """Strategy generates SPY orders (not SPY_PUT) on entry."""
         prices = _make_prices(500)
         config = S2Config(
             target_delta=-0.20,
@@ -109,57 +124,36 @@ class TestVRPStrategy:
             min_dte=30,
             max_dte=90,
             vrp_entry_threshold=0.0,
+            regime_scales={"bull": 1.0, "sideways": 0.75, "bear": 0.25, "high_vol": 0.0},
         )
         strategy = VRPStrategy(prices, config)
         assert strategy.health_check()
 
-        # Run a single rebalance step
-        idx = len(prices) // 2  # mid-point in data
+        idx = len(prices) // 2
         ts = prices.index[idx]
         spy_price = float(prices["SPY"].iloc[idx])
         market = _make_market_snapshot(ts, spy_price)
         data_replay = DataReplay(prices)
 
         orders = strategy(ts, data_replay, VirtualPortfolio(100_000), market)
-        # Strategy may or may not generate orders depending on conditions
-        assert isinstance(orders, list)
+        # v2 uses SPY (delta-equivalent), not SPY_PUT
+        for o in orders:
+            assert o.symbol == _UNDERLYING  # "SPY"
 
-    def test_call_with_no_entry_when_regime_blocks(self):
-        """Strategy does not enter in high_vol regime."""
-        # Create highly volatile prices → high_vol regime
-        rng = np.random.RandomState(99)
-        days = 500
-        dates = pd.bdate_range(start="2015-01-02", periods=days)
-        # Extreme volatility
-        returns = rng.normal(0, 0.06, days)
-        prices = pd.DataFrame({"SPY": 450 * (1 + returns).cumprod()}, index=dates)
-        prices = prices.clip(lower=1.0)  # ensure positive
-
-        config = S2Config(regime_scales={"bull": 1.0, "sideways": 0.75, "bear": 0.25, "high_vol": 0.0})
-        strategy = VRPStrategy(prices, config)
-
-        idx = 300
-        ts = prices.index[idx]
-        spy_price = float(prices["SPY"].iloc[idx])
-        # Even if high vol, portfolio starts fresh
-        market = _make_market_snapshot(ts, spy_price)
-        data_replay = DataReplay(prices)
-
-        orders = strategy(ts, data_replay, VirtualPortfolio(100_000), market)
-        # Should be empty or SELL only if regime blocked
-        # (regime may or may not be high_vol at this exact timestep)
-        assert isinstance(orders, list)
-
-    def test_exit_on_target_profit(self):
-        """Strategy exits position when target profit is reached."""
+    def test_exit_generates_sell_orders(self):
+        """Strategy generates SPY SELL orders on exit."""
         prices = _make_prices(500)
-        config = S2Config(profit_target_pct=0.10, min_dte=20, max_dte=90)
+        config = S2Config(
+            profit_target_pct=0.10,
+            min_dte=20,
+            max_dte=90,
+        )
         strategy = VRPStrategy(prices, config)
-        assert strategy.health_check()
 
         # Manually create an open position
         from src.strategies.s2.signal import PutSignal
-        entry_date = (prices.index[200]).date()
+        entry_idx = 200
+        entry_date = prices.index[entry_idx].date()
         signal = PutSignal(
             symbol="SPY",
             trade_date=entry_date,
@@ -176,43 +170,43 @@ class TestVRPStrategy:
         strategy._open_position = OpenPosition(
             signal=signal,
             entry_date=entry_date,
-            entry_underlying_price=450.0,
-            entry_mid=5.0,
-            quantity=1,
+            entry_underlying_price=float(prices["SPY"].iloc[entry_idx]),
+            entry_mid=signal.mid,
+            quantity=signal.quantity,
+            delta=signal.delta,
         )
 
-        # After sufficient time, if the put price dropped to 0.5 (90% captured → 10% target met? No, 90% = 4.5/5.0 captured)
-        # Actually compute: (signal.mid - current_mid) / signal.mid = (5.0 - 0.5) / 5.0 = 0.9 > profit_target_pct=0.10
-        # So exit should trigger
-        idx = 220  # 20 days later
-        ts = prices.index[idx]
-        spy_price = float(prices["SPY"].iloc[idx])
-
-        data_replay = DataReplay(prices)
+        # Try to exit at a later date
+        exit_idx = 220
+        ts = prices.index[exit_idx]
+        spy_price = float(prices["SPY"].iloc[exit_idx])
         market = _make_market_snapshot(ts, spy_price)
+        data_replay = DataReplay(prices)
 
         orders = strategy(ts, data_replay, VirtualPortfolio(100_000), market)
-        # Should have a BUY order to close the position
-        # (Exit conditions are checked before entry)
-        buy_orders = [o for o in orders if o.side == OrderSide.BUY]
-        assert len(buy_orders) >= 0  # exit may or may not trigger depending on exact conditions
-
-    def test_strategy_callable_interface(self):
-        """VRPStrategy implements the StrategyCallable interface."""
-        prices = _make_prices(500)
-        strategy = VRPStrategy(prices, S2Config())
-
-        idx = 250
-        ts = prices.index[idx]
-        data_replay = DataReplay(prices)
-        portfolio = VirtualPortfolio(100_000)
-        market = _make_market_snapshot(ts, float(prices["SPY"].iloc[idx]))
-
-        # Must return list of Order objects
-        orders = strategy(ts, data_replay, portfolio, market)
+        # Exit may or may not trigger depending on exact conditions
         assert isinstance(orders, list)
-        for o in orders:
-            assert isinstance(o, Order)
+
+    def test_regime_blocks_entry_in_high_vol(self):
+        """Strategy does not enter in high_vol regime."""
+        rng = np.random.RandomState(99)
+        days = 500
+        dates = pd.bdate_range(start="2015-01-02", periods=days)
+        returns = rng.normal(0, 0.06, days)  # extreme volatility
+        prices = pd.DataFrame({"SPY": 450 * (1 + returns).cumprod()}, index=dates)
+        prices = prices.clip(lower=1.0)
+
+        config = S2Config(regime_scales={"bull": 1.0, "sideways": 0.75, "bear": 0.25, "high_vol": 0.0})
+        strategy = VRPStrategy(prices, config)
+
+        idx = 300
+        ts = prices.index[idx]
+        spy_price = float(prices["SPY"].iloc[idx])
+        market = _make_market_snapshot(ts, spy_price)
+        data_replay = DataReplay(prices)
+
+        orders = strategy(ts, data_replay, VirtualPortfolio(100_000), market)
+        assert isinstance(orders, list)
 
 
 # ---- Walk-forward Backtest Tests ----
@@ -222,12 +216,11 @@ class TestS2WalkForward:
 
     def test_walkforward_completes(self):
         """Walk-forward backtest completes without errors."""
-        prices = _make_prices(1000)  # Need enough data for multiple windows
+        prices = _make_prices(1000)
         config = S2Config(min_dte=20, max_dte=60, vrp_entry_threshold=0.0)
         wf_config = WalkForwardConfig(in_sample_days=252, out_of_sample_days=126)
 
         strategy = VRPStrategy(prices, config)
-        # Health check may fail if realized_vol has NaN — handle gracefully
         if not strategy.health_check():
             pytest.skip("Not enough data for S2 health check in synthetic test")
 
@@ -242,13 +235,13 @@ class TestS2WalkForward:
 
     def test_backtest_returns_gate_results(self):
         """Backtest returns gate results structure."""
-        prices = _make_prices(1500)  # More data for full walk-forward
+        prices = _make_prices(1500)
         config = S2Config(min_dte=20, max_dte=60, vrp_entry_threshold=0.0)
         wf_config = WalkForwardConfig(in_sample_days=504, out_of_sample_days=252)
 
         strategy = VRPStrategy(prices, config)
         if not strategy.health_check():
-            pytest.skip("Not enough data for S2 health check in synthetic test")
+            pytest.skip("Not enough data for S2 health check")
 
         result = run_s2_backtest_from_prices(
             prices=prices,
@@ -327,7 +320,6 @@ class TestBacktestHelpers:
 
     def test_split_regime_returns(self):
         """_split_regime_returns produces high_vol and low_vol regimes."""
-        from src.strategies.s2.backtest import _split_regime_returns
         dates = pd.bdate_range("2018-01-02", periods=300)
         rng = np.random.RandomState(42)
         returns = pd.Series(rng.normal(0.0005, 0.012, len(dates)), index=dates)
@@ -338,23 +330,19 @@ class TestBacktestHelpers:
 
     def test_extract_stress_periods(self):
         """_extract_stress_periods identifies worst drawdown and known events."""
-        from src.strategies.s2.backtest import _extract_stress_periods
         dates = pd.bdate_range("2017-01-02", periods=1000)
         rng = np.random.RandomState(42)
         returns = pd.Series(rng.normal(0.0003, 0.01, len(dates)), index=dates)
 
         stress = _extract_stress_periods(returns)
         assert isinstance(stress, dict)
-        # Should at minimum return worst_drawdown
         assert "worst_drawdown" in stress or len(stress) >= 0
 
     def test_run_perturbation_completes(self):
         """_run_perturbation produces a list of Sharpe values."""
-        from src.strategies.s2.backtest import _run_perturbation
         prices = _make_prices(1000)
         config = S2Config(vrp_entry_threshold=0.0)
         wf_config = WalkForwardConfig(in_sample_days=252, out_of_sample_days=126)
 
         sharpes = _run_perturbation(prices, config, wf_config)
         assert isinstance(sharpes, list)
-        # May be empty if all perturbations fail (acceptable)

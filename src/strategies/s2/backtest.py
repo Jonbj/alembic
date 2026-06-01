@@ -261,7 +261,7 @@ def run_s2_backtest_full(
     """Full production run: download real SPY data, run S2 backtest + gates.
 
     Uses S1 universe (which includes SPY) as the price source.
-    The S2 strategy only trades SPY-related instruments (SPY_PUT).
+    The S2 strategy trades SPY with delta-equivalent position sizing.
     """
     from datetime import date
 

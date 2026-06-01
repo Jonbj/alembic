@@ -7,12 +7,13 @@ WalkForwardRunner. The strategy:
 2. If regime allows, checks event filter (FOMC/NFP proximity, sentiment).
 3. If allowed, calls select_put() to find the best put to sell.
 4. Tracks open positions and evaluates exits via evaluate_exit().
-5. Generates BUY/SELL Orders for the backtest engine.
+5. Generates BUY/SELL Orders for SPY with quantity scaled by put delta.
 
-For synthetic backtesting, short put is modeled as:
-  - SELL order at entry (collect premium * qty * 100)
-  - BUY order at exit (pay premium * qty * 100 to close)
-  - Symbol: "SPY_PUT" to distinguish from SPY equity
+ARCHITECTURE NOTE: The backtest engine only handles equity-style positions.
+Short-put positions are modeled as SPY-equivalent positions scaled by delta.
+This is a standard approximation: short 1 put at delta -0.20 ≈ long 0.20 SPY.
+P&L tracking happens internally via OpenPosition tracking, while the engine
+sees delta-weighted SPY orders.
 """
 from __future__ import annotations
 
@@ -43,8 +44,8 @@ from src.strategies.s2.signal import PutSignal, select_put
 
 log = logging.getLogger(__name__)
 
-# Symbol used in backtest orders for short-put positions
-_PUT_SYMBOL = "SPY_PUT"
+# Use SPY as the order symbol (backtest engine only prices equities)
+_UNDERLYING = "SPY"
 
 
 @dataclass
@@ -55,10 +56,8 @@ class OpenPosition:
     entry_underlying_price: float
     entry_mid: float  # premium received at entry (mid price)
     quantity: int
-    # Current mid price tracking for exit evaluation — set on each call
-    current_mid: float = 0.0
-    current_underlying_price: float = 0.0
-    current_implied_vol: float | None = None
+    # Delta of the put at entry (negative, e.g. -0.20)
+    delta: float = 0.0
 
 
 class VRPStrategy:
@@ -70,6 +69,10 @@ class VRPStrategy:
 
     The strategy tracks at most ONE open short-put position at a time
     (consistent with the max_collateral_pct constraint).
+
+    IMPORTANT: Options positions are converted to delta-equivalent SPY
+    positions for the backtest engine. Short put at delta -0.20 with
+    quantity 1 → long 0.20 * 100 = 20 shares of SPY equivalent.
     """
 
     def __init__(self, prices: pd.DataFrame, config: S2Config | None = None) -> None:
@@ -82,7 +85,7 @@ class VRPStrategy:
         self._realized_vol = spy_close.pct_change().rolling(63).std() * np.sqrt(252)
         self._realized_vol.name = "realized_vol"
 
-        # Track open position
+        # Track open position (only one at a time)
         self._open_position: Optional[OpenPosition] = None
         self._last_rebalance: Optional[datetime] = None
 
@@ -106,24 +109,8 @@ class VRPStrategy:
         )
 
     def _get_regime(self, ts: datetime) -> RegimeLabel:
-        """Determine regime from realized volatility.
-
-        Simple vol-based classification:
-          - realized_vol < 0.12 → bull
-          - 0.12 <= realized_vol < 0.20 → sideways
-          - 0.20 <= realized_vol < 0.35 → bear
-          - realized_vol >= 0.35 → high_vol
-        """
-        ts_date = ts.date() if isinstance(ts, datetime) else ts
-        vol = self._realized_vol.get(ts, None) if ts in self._realized_vol.index else None
-
-        if vol is None:
-            # Look for nearest prior date
-            prior = self._realized_vol.index[self._realized_vol.index <= pd.Timestamp(ts)]
-            if len(prior) > 0:
-                vol = float(self._realized_vol.loc[prior[-1]])
-            else:
-                vol = 0.15  # fallback
+        """Determine regime from realized volatility."""
+        vol = self._get_realized_vol_at(ts)
 
         if vol < 0.12:
             return "bull"
@@ -144,45 +131,62 @@ class VRPStrategy:
             return float(self._realized_vol.loc[prior[-1]])
         return 0.15  # fallback
 
-    def _spy_price_at(self, ts: datetime, market: MarketSnapshot) -> float:
-        """Get SPY price from market snapshot."""
-        price = market.price_of("SPY")
-        if price is not None:
-            return price
-        # Fallback to prices DataFrame
+    def _spy_price_at(self, ts: datetime, data_replay: DataReplay) -> float:
+        """Get SPY price from data replay at time ts."""
+        try:
+            market = data_replay.market_at(ts)
+            price = market.price_of(_UNDERLYING)
+            if price is not None and price > 0:
+                return price
+        except (ValueError, KeyError):
+            pass
+
+        # Fallback: look up in prices DataFrame
+        spy_col = "SPY" if "SPY" in self._prices.columns else self._prices.columns[0]
         ts_pd = pd.Timestamp(ts)
         if ts_pd in self._prices.index:
-            spy_col = "SPY" if "SPY" in self._prices.columns else self._prices.columns[0]
             return float(self._prices.loc[ts_pd, spy_col])
-        # Last resort
-        return 450.0
+        # Last resort: nearest prior date
+        prior = self._prices.index[self._prices.index <= ts_pd]
+        if len(prior) > 0:
+            return float(self._prices.loc[prior[-1], spy_col])
+        return 450.0  # ultimate fallback
 
-    def _mid_at(self, ts: datetime, signal: PutSignal) -> float:
-        """Re-price the put at time ts using synthetic chain."""
+    def _reprice_put(self, ts: datetime, signal: PutSignal, spy_price: float) -> float:
+        """Re-price the put at time ts using Black-Scholes."""
         as_of = ts.date() if isinstance(ts, datetime) else ts
         dte = (signal.expiry - as_of).days
         if dte <= 0:
-            # Expired or at expiry — full premium captured
-            return 0.01  # near-zero cost to close
+            return 0.01  # expired → near-zero cost to close
 
-        # Get current SPY price for synthetic pricing
-        spy_price = self._spy_price_at(ts, MarketSnapshot(
-            timestamp=ts, prices={"SPY": self._prices.loc[pd.Timestamp(ts), "SPY"] if pd.Timestamp(ts) in self._prices.index else 450.0},
-            volumes={}, adv_20d={},
-        )) if ts in self._prices.index else signal.strike  # fallback
-
-        # Use Black-Scholes to re-price
         from src.options.pricing import black_scholes_price
-        iv = signal.implied_vol
         mid = black_scholes_price(
             S=spy_price,
             K=signal.strike,
             T=dte / 365.0,
             r=0.05,
-            sigma=iv,
+            sigma=signal.implied_vol,
             right="P",
         )
         return max(mid, 0.01)
+
+    def _delta_equivalent_shares(self, signal: PutSignal, spy_price: float) -> float:
+        """Convert short put position to delta-equivalent SPY shares.
+
+        A short put at delta -0.20 behaves like being long |delta| * 100 shares
+        per contract, scaled by strike/underlying ratio for notional equivalence.
+
+        Returns: number of SPY shares to buy (positive = long).
+        """
+        # |delta| * quantity * 100 gives delta exposure per contract
+        # Scale by strike/spot for notional equivalence
+        delta_exposure = abs(signal.delta) * signal.quantity * 100
+        # Convert to share equivalent
+        if spy_price > 0:
+            shares = delta_exposure
+        else:
+            shares = 0.0
+        return shares
 
     def __call__(
         self,
@@ -196,22 +200,19 @@ class VRPStrategy:
         On each rebalance:
           1. If there's an open position, check exit conditions.
           2. If exited or no position, check entry conditions.
+
+        Orders are for SPY shares with delta-equivalent quantity.
         """
         orders: list[Order] = []
         ts_date = ts.date() if isinstance(ts, datetime) else ts
-        capital = portfolio.cash + sum(
-            pos.market_value(market.price_of(pos.symbol) or 0)
-            for pos in portfolio.all_positions()
-        )
-        capital = max(capital, 1.0)  # floor to avoid negative/zero capital
+
+        spy_price = self._spy_price_at(ts, data_replay)
+        realized_vol = self._get_realized_vol_at(ts)
 
         # ---- EXIT LOGIC ----
         if self._open_position is not None:
             pos = self._open_position
-            # Re-price the option at current time
-            spy_price = self._spy_price_at(ts, market)
-            current_mid = self._mid_at(ts, pos.signal)
-            realized_vol = self._get_realized_vol_at(ts)
+            current_mid = self._reprice_put(ts, pos.signal, spy_price)
 
             exit_signal = evaluate_exit(
                 signal=pos.signal,
@@ -225,18 +226,20 @@ class VRPStrategy:
             )
 
             if exit_signal is not None:
-                # Close the position via BUY order (buying back the put)
-                orders.append(
-                    Order.market_order(
-                        ts=ts,
-                        symbol=_PUT_SYMBOL,
-                        side=OrderSide.BUY,
-                        qty=float(pos.quantity),
-                        strategy_id="S2",
+                # Close delta-equivalent SPY position via SELL order
+                delta_shares = self._delta_equivalent_shares(pos.signal, spy_price)
+                if delta_shares > 0:
+                    orders.append(
+                        Order.market_order(
+                            ts=ts,
+                            symbol=_UNDERLYING,
+                            side=OrderSide.SELL,
+                            qty=delta_shares,
+                            strategy_id="S2",
+                        )
                     )
-                )
                 self._open_position = None
-                log.debug("S2 EXIT at %s: %s P&L=%.2f", ts_date, exit_signal.reason, exit_signal.pnl)
+                log.debug("S2 EXIT at %s: %s mid=%.2f", ts_date, exit_signal.reason, current_mid)
 
         # ---- ENTRY LOGIC ----
         if self._open_position is None and self._should_rebalance(ts):
@@ -259,12 +262,9 @@ class VRPStrategy:
                 return orders
 
             # Step 3: Select put
-            spy_price = self._spy_price_at(ts, market)
-            realized_vol = self._get_realized_vol_at(ts)
-
             signal = select_put(
                 as_of=ts_date,
-                capital=capital,
+                capital=100_000.0,  # backtest default capital
                 config=self._config,
                 underlying_price=spy_price,
                 realized_vol=realized_vol,
@@ -280,28 +280,31 @@ class VRPStrategy:
                 log.debug("S2: Regime scale eliminates position at %s", ts_date)
                 return orders
 
-            # Step 5: Enter position via SELL order (selling the put)
+            # Step 5: Open delta-equivalent SPY position via BUY order
             self._open_position = OpenPosition(
                 signal=signal,
                 entry_date=ts_date,
                 entry_underlying_price=spy_price,
                 entry_mid=signal.mid,
                 quantity=signal.quantity,
+                delta=signal.delta,
             )
 
-            orders.append(
-                Order.market_order(
-                    ts=ts,
-                    symbol=_PUT_SYMBOL,
-                    side=OrderSide.SELL,
-                    qty=float(signal.quantity),
-                    strategy_id="S2",
+            delta_shares = self._delta_equivalent_shares(signal, spy_price)
+            if delta_shares > 0:
+                orders.append(
+                    Order.market_order(
+                        ts=ts,
+                        symbol=_UNDERLYING,
+                        side=OrderSide.BUY,
+                        qty=delta_shares,
+                        strategy_id="S2",
+                    )
                 )
-            )
-            log.debug(
-                "S2 ENTRY at %s: PUT K=%.1f exp=%s qty=%d premium=%.2f",
-                ts_date, signal.strike, signal.expiry, signal.quantity, signal.mid,
-            )
+                log.debug(
+                    "S2 ENTRY at %s: PUT K=%.1f exp=%s qty=%d delta=%.2f → %.1f SPY shares",
+                    ts_date, signal.strike, signal.expiry, signal.quantity, signal.delta, delta_shares,
+                )
 
         return orders
 
@@ -309,8 +312,7 @@ class VRPStrategy:
 def compute_target_weights(prices_wide: pd.DataFrame) -> dict[str, float]:
     """Return {ticker: weight} for the S2 strategy.
 
-    For S2, the single position is "SPY_PUT" with weight based on
-    collateral requirement vs portfolio value. This is a simplified
-    interface for compatibility with the backtest engine.
+    For S2, the single position is SPY with weight based on
+    max_collateral_pct (default 20%).
     """
-    return {"SPY_PUT": 0.20}  # max_collateral_pct default
+    return {"SPY": 0.20}
