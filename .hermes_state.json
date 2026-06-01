@@ -1,5 +1,5 @@
 {
-  "current_task": "T-401",
+  "current_task": "T-402",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -141,6 +141,11 @@
       "status": "DONE",
       "commit": "de81f91",
       "notes": "VRPStrategy + walk-forward backtest + 5 validation gates. v3 allocation-based SPY sizing. 175 S2 tests passing. Real-data: OOS Sharpe 0.1978. Gate 3 FAIL (CV=0.53 vs 0.50, marginal). Gate 4 exception (3/4 regimes pass). Milestone D PASS with exceptions."
+    },
+    "T-401": {
+      "status": "DONE",
+      "commit": "617d625",
+      "notes": "S4 cross-sectional ranking module. CrossSectionalRanker reads SentimentResult signals, computes effective_strength=score×confidence, returns top-N tickers with equal weights (bucket_pct/n_top). Long-only, min_stocks guard, deduplication by generated_at. 19 tests passing."
     }
   },
   "milestone_b_details": {
