@@ -140,7 +140,7 @@
     "T-308": {
       "status": "DONE",
       "commit": "de81f91",
-      "notes": "VRPStrategy + walk-forward backtest + 5 validation gates. 18 backtest tests passing (9 unit + 5 walk-forward + 4 helper). Total S2 tests: 175 (157 unit + 18 backtest). Milestone D pending gate run with real data."
+      "notes": "VRPStrategy + walk-forward backtest + 5 validation gates. 18 backtest tests passing. v3 allocation-based SPY sizing (20% NAV). Real-data backtest: OOS Sharpe 0.1978. Gates: 1(PASS), 2(PASS), 3(FAIL, CV=0.53 vs 0.50), 4(PASS, 3/4), 5(PASS, all 4 stress). Gate 3 marginal fail. Milestone D incomplete - OOS Sharpe below 0.7 target, Gate 3 CV marginal fail."
     }
   },
   "milestone_b_details": {
