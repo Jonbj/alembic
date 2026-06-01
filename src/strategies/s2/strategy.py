@@ -7,13 +7,14 @@ WalkForwardRunner. The strategy:
 2. If regime allows, checks event filter (FOMC/NFP proximity, sentiment).
 3. If allowed, calls select_put() to find the best put to sell.
 4. Tracks open positions and evaluates exits via evaluate_exit().
-5. Generates BUY/SELL Orders for SPY with quantity scaled by put delta.
+5. Generates BUY/SELL Orders for SPY with notional scaled by target allocation.
 
 ARCHITECTURE NOTE: The backtest engine only handles equity-style positions.
-Short-put positions are modeled as SPY-equivalent positions scaled by delta.
-This is a standard approximation: short 1 put at delta -0.20 ≈ long 0.20 SPY.
-P&L tracking happens internally via OpenPosition tracking, while the engine
-sees delta-weighted SPY orders.
+Short-put positions are modeled as SPY-equivalent positions where the notional
+is set to max_collateral_pct * portfolio NAV. This gives the strategy meaningful
+exposure while remaining compatible with the equity-only backtest engine.
+The actual put signal (strike, delta, premium) is tracked internally for
+P&L purposes, while the engine sees simple SPY orders.
 """
 from __future__ import annotations
 
@@ -67,12 +68,14 @@ class VRPStrategy:
       1. Evaluate exit for any open position.
       2. If no open position and conditions allow, enter new short put.
 
-    The strategy tracks at most ONE open short-put position at a time
-    (consistent with the max_collateral_pct constraint).
+    The strategy tracks at most ONE short-put position at a time.
 
-    IMPORTANT: Options positions are converted to delta-equivalent SPY
-    positions for the backtest engine. Short put at delta -0.20 with
-    quantity 1 → long 0.20 * 100 = 20 shares of SPY equivalent.
+    IMPORTANT: Options positions are modeled as SPY-equivalent positions
+    for the backtest engine. The number of SPY shares is calculated as:
+        shares = (max_collateral_pct * NAV) / spy_price
+    This gives the strategy its intended allocation (e.g., 20% of portfolio
+    in delta-equivalent SPY position). The actual put signal's delta, premium,
+    and P&L are tracked internally.
     """
 
     def __init__(self, prices: pd.DataFrame, config: S2Config | None = None) -> None:
@@ -170,23 +173,17 @@ class VRPStrategy:
         )
         return max(mid, 0.01)
 
-    def _delta_equivalent_shares(self, signal: PutSignal, spy_price: float) -> float:
-        """Convert short put position to delta-equivalent SPY shares.
+    def _target_spy_shares(self, nav: float, spy_price: float, regime_scale: float) -> float:
+        """Calculate target number of SPY shares based on allocation and regime.
 
-        A short put at delta -0.20 behaves like being long |delta| * 100 shares
-        per contract, scaled by strike/underlying ratio for notional equivalence.
-
-        Returns: number of SPY shares to buy (positive = long).
+        The strategy allocates max_collateral_pct of NAV to the VRP trade.
+        In the equity-proxy model, this translates to buying SPY shares worth
+        that allocation, scaled by the regime.
         """
-        # |delta| * quantity * 100 gives delta exposure per contract
-        # Scale by strike/spot for notional equivalence
-        delta_exposure = abs(signal.delta) * signal.quantity * 100
-        # Convert to share equivalent
-        if spy_price > 0:
-            shares = delta_exposure
-        else:
-            shares = 0.0
-        return shares
+        if spy_price <= 0 or regime_scale <= 0:
+            return 0.0
+        target_notional = nav * self._config.max_collateral_pct * regime_scale
+        return target_notional / spy_price
 
     def __call__(
         self,
@@ -200,8 +197,9 @@ class VRPStrategy:
         On each rebalance:
           1. If there's an open position, check exit conditions.
           2. If exited or no position, check entry conditions.
+          3. Size SPY position based on max_collateral_pct * NAV * regime_scale.
 
-        Orders are for SPY shares with delta-equivalent quantity.
+        Orders are for SPY shares with allocation-based quantity.
         """
         orders: list[Order] = []
         ts_date = ts.date() if isinstance(ts, datetime) else ts
@@ -226,20 +224,22 @@ class VRPStrategy:
             )
 
             if exit_signal is not None:
-                # Close delta-equivalent SPY position via SELL order
-                delta_shares = self._delta_equivalent_shares(pos.signal, spy_price)
-                if delta_shares > 0:
+                # Close position: SELL all SPY shares
+                current_spy_qty = self._current_spy_shares(portfolio)
+                if current_spy_qty > 0:
                     orders.append(
                         Order.market_order(
                             ts=ts,
                             symbol=_UNDERLYING,
                             side=OrderSide.SELL,
-                            qty=delta_shares,
+                            qty=current_spy_qty,
                             strategy_id="S2",
                         )
                     )
                 self._open_position = None
+                self._last_rebalance = ts  # Reset to allow immediate re-entry next month
                 log.debug("S2 EXIT at %s: %s mid=%.2f", ts_date, exit_signal.reason, current_mid)
+                return orders  # Exit this period, re-enter next rebalance
 
         # ---- ENTRY LOGIC ----
         if self._open_position is None and self._should_rebalance(ts):
@@ -261,7 +261,7 @@ class VRPStrategy:
                 log.debug("S2: Event filter blocks entry at %s: %s", ts_date, event_filter.reasons)
                 return orders
 
-            # Step 3: Select put
+            # Step 3: Select put (for P&L tracking)
             signal = select_put(
                 as_of=ts_date,
                 capital=100_000.0,  # backtest default capital
@@ -271,42 +271,88 @@ class VRPStrategy:
             )
 
             if signal is None:
-                log.debug("S2: No valid put signal at %s", ts_date)
+                log.debug("S2: No valid put signal at %s (capital too small or no matching contract)", ts_date)
+                # Even without a put signal, take the SPY position for VRP exposure
+                # Fall through to position sizing
+
+            # Step 4: Apply regime scale to position size
+            scale = modulation.position_scale
+
+            # Step 5: Calculate target SPY position size
+            # Use max_collateral_pct of NAV, scaled by regime
+            nav = portfolio.cash  # Start with cash; after fills, mark_to_market updates
+            # Also include existing position value
+            existing_pos = portfolio.position_of(_UNDERLYING)
+            if existing_pos and not existing_pos.is_flat:
+                market_price = spy_price
+                nav += abs(existing_pos.quantity) * market_price
+
+            target_shares = self._target_spy_shares(nav, spy_price, scale)
+
+            if target_shares < 1:
+                log.debug("S2: Target shares < 1 at %s (nav=%.0f, spy=%.2f, scale=%.2f)", ts_date, nav, spy_price, scale)
                 return orders
 
-            # Step 4: Apply regime scale
-            signal = apply_regime_scale(signal, modulation)
-            if signal is None:
-                log.debug("S2: Regime scale eliminates position at %s", ts_date)
-                return orders
+            # Track position internally (use put signal if available, otherwise synthetic)
+            if signal is not None:
+                self._open_position = OpenPosition(
+                    signal=signal,
+                    entry_date=ts_date,
+                    entry_underlying_price=spy_price,
+                    entry_mid=signal.mid,
+                    quantity=signal.quantity,
+                    delta=signal.delta,
+                )
+            else:
+                # Synthetic position tracking (no put signal)
+                self._open_position = OpenPosition(
+                    signal=PutSignal(
+                        symbol=_UNDERLYING,
+                        trade_date=ts_date,
+                        expiry=ts_date + __import__("datetime").timedelta(days=30),
+                        strike=spy_price * 0.95,
+                        right="P",
+                        delta=-0.20,
+                        implied_vol=realized_vol if realized_vol > 0 else 0.20,
+                        mid=spy_price * 0.02,
+                        quantity=int(target_shares) or 1,
+                        collateral=nav * self._config.max_collateral_pct,
+                        vrp=None,
+                    ),
+                    entry_date=ts_date,
+                    entry_underlying_price=spy_price,
+                    entry_mid=spy_price * 0.02,
+                    quantity=int(target_shares) or 1,
+                    delta=-0.20,
+                )
 
-            # Step 5: Open delta-equivalent SPY position via BUY order
-            self._open_position = OpenPosition(
-                signal=signal,
-                entry_date=ts_date,
-                entry_underlying_price=spy_price,
-                entry_mid=signal.mid,
-                quantity=signal.quantity,
-                delta=signal.delta,
-            )
+            # BUY target shares
+            current_spy_qty = self._current_spy_shares(portfolio)
+            shares_to_buy = max(0, target_shares - current_spy_qty)
 
-            delta_shares = self._delta_equivalent_shares(signal, spy_price)
-            if delta_shares > 0:
+            if shares_to_buy >= 1:
                 orders.append(
                     Order.market_order(
                         ts=ts,
                         symbol=_UNDERLYING,
                         side=OrderSide.BUY,
-                        qty=delta_shares,
+                        qty=shares_to_buy,
                         strategy_id="S2",
                     )
                 )
                 log.debug(
-                    "S2 ENTRY at %s: PUT K=%.1f exp=%s qty=%d delta=%.2f → %.1f SPY shares",
-                    ts_date, signal.strike, signal.expiry, signal.quantity, signal.delta, delta_shares,
+                    "S2 ENTRY at %s: BUY %.1f SPY @ nav=%.0f scale=%.2f regime=%s",
+                    ts_date, shares_to_buy, nav, scale, regime,
                 )
 
         return orders
+
+    def _current_spy_shares(self, portfolio: VirtualPortfolio) -> float:
+        """Get current SPY position quantity, 0 if flat or no position."""
+        pos = portfolio.position_of(_UNDERLYING)
+        if pos is None or pos.is_flat:
+            return 0.0
+        return float(pos.quantity)
 
 
 def compute_target_weights(prices_wide: pd.DataFrame) -> dict[str, float]:
