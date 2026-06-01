@@ -1,5 +1,5 @@
 {
-  "current_task": "T-307",
+  "current_task": "T-308",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -131,6 +131,11 @@
       "status": "DONE",
       "commit": "d8a576b",
       "notes": "S2 regime modulation: modulate_by_regime() with bull=1.0/sideways=0.75/bear=0.25/high_vol=0.0 scaling. apply_regime_scale() to scale position size. RegimeModulation dataclass. Custom regime_scales in S2Config. 34 regime tests. 118 total S2 tests."
+    },
+    "T-307": {
+      "status": "DONE",
+      "commit": "9947cce",
+      "notes": "S2 event filter: EventFilterResult + check_event_filter() blocking on SPY sentiment < -0.5 or within pre_event_block_days of FOMC/NFP. FOMC=3rd Wed of FOMC months, NFP=first Fri of month. S2Config extended with sentiment_block_threshold=-0.5, pre_event_block_days=1, event_filter_enabled=True. 39 new tests; 157 total S2 tests."
     }
   },
   "milestone_b_details": {
