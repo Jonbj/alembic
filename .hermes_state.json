@@ -1,5 +1,5 @@
 {
-  "current_task": "T-305",
+  "current_task": "T-307",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -121,6 +121,16 @@
       "status": "DONE",
       "commit": "7be819e",
       "notes": "S2 signal: select_put_to_sell() with delta filter, DTE filter, liquidity filter, collateral-cap sizing, VRP entry threshold. 34 tests passing. Orchestrator committed (Claude hit max_turns)."
+    },
+    "T-305": {
+      "status": "DONE",
+      "commit": "0e21b60",
+      "notes": "S2 exit logic: ExitReason enum (5 reasons), ExitSignal dataclass, compute_pnl(), evaluate_exit() with priority EXPIRY > STOP_LOSS > TARGET_PROFIT > TIME_DECAY > SIGNAL_FLIP. S2Config extended with 5 exit fields. 50 tests passing."
+    },
+    "T-306": {
+      "status": "DONE",
+      "commit": "d8a576b",
+      "notes": "S2 regime modulation: modulate_by_regime() with bull=1.0/sideways=0.75/bear=0.25/high_vol=0.0 scaling. apply_regime_scale() to scale position size. RegimeModulation dataclass. Custom regime_scales in S2Config. 34 regime tests. 118 total S2 tests."
     }
   },
   "milestone_b_details": {
