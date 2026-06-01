@@ -1,0 +1,179 @@
+"""S4 News-Driven Tactical strategy module."""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Optional, Sequence
+
+import pandas as pd
+
+from src.backtest.engine.data_replay import DataReplay
+from src.backtest.engine.portfolio import VirtualPortfolio
+from src.backtest.engine.types import (
+    MarketSnapshot,
+    Order,
+    OrderSide,
+    RebalanceFrequency,
+)
+from src.models.signals import SentimentResult
+from src.strategies.s4.config import S4Config
+from src.strategies.s4.ranking import CrossSectionalRanker
+
+
+class NewsDrivenTactical:
+    """S4: News-Driven Tactical strategy, compatible with BacktestOrchestrator.
+
+    Reads pre-computed sentiment signals (SentimentResult), ranks them
+    cross-sectionally via CrossSectionalRanker, and allocates to the top-N
+    bucket with equal weights.  Rebalances weekly by default.
+
+    Args:
+        config: S4Config with n_top, bucket_pct, filters, and rebalance_frequency.
+        signals: Optional DataFrame with columns [symbol, score, confidence,
+                 reasoning, model_id, generated_at] pre-loaded for backtesting.
+                 If None, __call__ will produce no orders (live mode: inject
+                 signals externally before calling).
+    """
+
+    def __init__(
+        self,
+        config: S4Config,
+        signals: pd.DataFrame | None = None,
+    ) -> None:
+        self._config = config
+        self._ranker = CrossSectionalRanker(config)
+        self._signals_df = signals
+        self._last_rebalance: Optional[datetime] = None
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def compute_target_weights(
+        self,
+        signals: Sequence[SentimentResult],
+        as_of: datetime | None = None,
+    ) -> dict[str, float]:
+        """Return {ticker: weight} for top-ranked tickers from given signals."""
+        result = self._ranker.rank(signals, as_of=as_of)
+        return result.weights
+
+    def health_check(self) -> bool:
+        return True
+
+    def __call__(
+        self,
+        ts: datetime,
+        data_replay: DataReplay,
+        portfolio: VirtualPortfolio,
+        market: MarketSnapshot,
+    ) -> list[Order]:
+        if not self._should_rebalance(ts):
+            return []
+
+        self._last_rebalance = ts
+        signals = self._signals_as_of(ts)
+        target_weights = self.compute_target_weights(signals, as_of=ts)
+        nav = self._nav(portfolio, market)
+        orders: list[Order] = []
+
+        # Exit: close positions absent from target
+        for pos in portfolio.all_positions():
+            if pos.symbol not in target_weights:
+                price = market.price_of(pos.symbol)
+                if price is not None and pos.quantity > 0:
+                    orders.append(
+                        Order.market_order(
+                            ts=ts,
+                            symbol=pos.symbol,
+                            side=OrderSide.SELL,
+                            qty=pos.quantity,
+                            strategy_id=self._config.strategy_id,
+                        )
+                    )
+
+        # Entry / rebalance: move toward target weights
+        for ticker, target_wt in target_weights.items():
+            price = market.price_of(ticker)
+            if price is None or price <= 0:
+                continue
+            target_qty = (nav * target_wt) / price
+            current_pos = portfolio.position_of(ticker)
+            current_qty = current_pos.quantity if current_pos is not None else 0.0
+            delta = target_qty - current_qty
+
+            if abs(delta) < 1e-4:
+                continue
+
+            if delta > 0:
+                orders.append(
+                    Order.market_order(
+                        ts=ts,
+                        symbol=ticker,
+                        side=OrderSide.BUY,
+                        qty=delta,
+                        strategy_id=self._config.strategy_id,
+                    )
+                )
+            else:
+                orders.append(
+                    Order.market_order(
+                        ts=ts,
+                        symbol=ticker,
+                        side=OrderSide.SELL,
+                        qty=-delta,
+                        strategy_id=self._config.strategy_id,
+                    )
+                )
+
+        return orders
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _signals_as_of(self, ts: datetime) -> list[SentimentResult]:
+        """Return SentimentResult objects with generated_at <= ts."""
+        if self._signals_df is None or self._signals_df.empty:
+            return []
+        df = self._signals_df
+        if "generated_at" in df.columns:
+            df = df[df["generated_at"] <= ts]
+        results: list[SentimentResult] = []
+        for _, row in df.iterrows():
+            results.append(
+                SentimentResult(
+                    symbol=str(row["symbol"]),
+                    score=float(row["score"]),
+                    confidence=float(row["confidence"]),
+                    reasoning=str(row.get("reasoning", "")),
+                    model_id=str(row.get("model_id", "unknown")),
+                    ensemble_std=float(row.get("ensemble_std", 0.0)),
+                    fallback_used=bool(row.get("fallback_used", False)),
+                    generated_at=row["generated_at"] if "generated_at" in row.index else ts,
+                )
+            )
+        return results
+
+    def _should_rebalance(self, ts: datetime) -> bool:
+        if self._config.rebalance_frequency == RebalanceFrequency.DAILY:
+            return True
+        if self._last_rebalance is None:
+            return True
+        if self._config.rebalance_frequency == RebalanceFrequency.WEEKLY:
+            return (
+                ts.isocalendar().week != self._last_rebalance.isocalendar().week
+                or ts.year != self._last_rebalance.year
+            )
+        # MONTHLY
+        return (
+            ts.month != self._last_rebalance.month
+            or ts.year != self._last_rebalance.year
+        )
+
+    def _nav(self, portfolio: VirtualPortfolio, market: MarketSnapshot) -> float:
+        nav = portfolio.cash
+        for pos in portfolio.all_positions():
+            price = market.price_of(pos.symbol)
+            if price is not None:
+                nav += pos.market_value(price)
+        return nav
