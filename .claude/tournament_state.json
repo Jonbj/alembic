@@ -1,0 +1,94 @@
+{
+  "started_at": "2026-05-19T10:49:42.688803",
+  "base_branch": "feat/frontend",
+  "plan_file": "docs/frontend-review-plan.md",
+  "models": {
+    "qwen3.5:cloud": {
+      "branch": "tournament-qwen3.5-cloud",
+      "worktree": ".worktrees/tournament-qwen3.5-cloud",
+      "status": "completed",
+      "metrics": {
+        "passed": 628,
+        "errors": 0,
+        "total": 628,
+        "commits": 123,
+        "new_commits": 0,
+        "files_changed": 0,
+        "collected_at": "2026-05-19T10:52:09.854501"
+      },
+      "test_output": "........................................................................ [ 11%]\n........................................................................ [ 22%]\n........................................................................ [ 34%]\n........................................................................ [ 45%]\n........................................................................ [ 57%]\n........................................................................ [ 68%]\n........................................................................ [ 80%]\n........................................................................ [ 91%]\n....................................................                     [100%]\n=============================== warnings summary ===============================\ntests/api/test_performance_pnl.py::test_get_pnl_returns_monthly_list\n  /home/stefano/.local/lib/python3.13/site-packages/websockets/legacy/__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions\n    warnings.warn(  # deprecated in 14.0 - 2024-11-09\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n628 passed, 1 warning in 3.12s\n\n"
+    },
+    "deepseek-v4-pro:cloud": {
+      "branch": "tournament-deepseek-v4-pro-cloud",
+      "worktree": ".worktrees/tournament-deepseek-v4-pro-cloud",
+      "status": "pending",
+      "metrics": {}
+    },
+    "glm-5.1:cloud": {
+      "branch": "tournament-glm-5.1-cloud",
+      "worktree": ".worktrees/tournament-glm-5.1-cloud",
+      "status": "pending",
+      "metrics": {}
+    },
+    "kimi-k2.6:cloud": {
+      "branch": "tournament-kimi-k2.6-cloud",
+      "worktree": ".worktrees/tournament-kimi-k2.6-cloud",
+      "status": "pending",
+      "metrics": {}
+    },
+    "gemma4:31b-cloud": {
+      "branch": "tournament-gemma4-31b-cloud",
+      "worktree": ".worktrees/tournament-gemma4-31b-cloud",
+      "status": "pending",
+      "metrics": {}
+    },
+    "ministral-3:14b-cloud": {
+      "branch": "tournament-ministral-3-14b-cloud",
+      "worktree": ".worktrees/tournament-ministral-3-14b-cloud",
+      "status": "pending",
+      "metrics": {}
+    },
+    "nemotron-3-super:cloud": {
+      "branch": "tournament-nemotron-3-super-cloud",
+      "worktree": ".worktrees/tournament-nemotron-3-super-cloud",
+      "status": "pending",
+      "metrics": {}
+    },
+    "gemini-3-flash-preview:cloud": {
+      "branch": "tournament-gemini-3-flash-preview-cloud",
+      "worktree": ".worktrees/tournament-gemini-3-flash-preview-cloud",
+      "status": "pending",
+      "metrics": {}
+    },
+    "qwen3-coder-next:cloud": {
+      "branch": "tournament-qwen3-coder-next-cloud",
+      "worktree": ".worktrees/tournament-qwen3-coder-next-cloud",
+      "status": "pending",
+      "metrics": {}
+    },
+    "devstral-2:123b-cloud": {
+      "branch": "tournament-devstral-2-123b-cloud",
+      "worktree": ".worktrees/tournament-devstral-2-123b-cloud",
+      "status": "pending",
+      "metrics": {}
+    },
+    "minimax-m2.7:cloud": {
+      "branch": "tournament-minimax-m2.7-cloud",
+      "worktree": ".worktrees/tournament-minimax-m2.7-cloud",
+      "status": "pending",
+      "metrics": {}
+    },
+    "qwen3-coder:480b-cloud": {
+      "branch": "tournament-qwen3-coder-480b-cloud",
+      "worktree": ".worktrees/tournament-qwen3-coder-480b-cloud",
+      "status": "pending",
+      "metrics": {}
+    },
+    "minimax-m2:cloud": {
+      "branch": "tournament-minimax-m2-cloud",
+      "worktree": ".worktrees/tournament-minimax-m2-cloud",
+      "status": "pending",
+      "metrics": {}
+    }
+  }
+}

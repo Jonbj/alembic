@@ -156,7 +156,7 @@ def phase1_fetch(
     return inserted
 
 
-def phase2_infer(pg_conn, run_id: str, dry_run: bool, concurrency: int = 5) -> int:
+def phase2_infer(pg_conn, run_id: str, dry_run: bool, concurrency: int = 5, yes: bool = False) -> int:
     """Phase 2: run LLM inference on pending rows. Skips rows with score IS NOT NULL.
 
     Checkpoint / resume: SELECT filters `score IS NULL`; scored rows survive crashes.
@@ -176,7 +176,7 @@ def phase2_infer(pg_conn, run_id: str, dry_run: bool, concurrency: int = 5) -> i
     if not dry_run:
         est = _estimate_cost(len(rows))
         print(f"\nEstimated inference cost: ${est:.2f} for {len(rows)} articles × 2 models")
-        if est > 10.0:
+        if est > 10.0 and not yes:
             answer = input("Continue? [y/N] ").strip().lower()
             if answer != "y":
                 print("Aborted.")
@@ -314,6 +314,8 @@ def main() -> None:
                         help="Only run Phase 1 (GDELT fetch + ticker extraction), then stop")
     parser.add_argument("--concurrency", type=int, default=5,
                         help="Number of articles to infer in parallel per batch (default 5)")
+    parser.add_argument("--yes", action="store_true",
+                        help="Skip cost confirmation prompt (for non-interactive/background runs)")
     args = parser.parse_args()
 
     start = datetime.fromisoformat(args.start).replace(tzinfo=timezone.utc)
@@ -337,7 +339,7 @@ def main() -> None:
             log.info("--phase1-only: stopping after Phase 1")
             return
 
-        phase2_infer(pg_conn, args.run_id, dry_run=args.dry_run, concurrency=args.concurrency)
+        phase2_infer(pg_conn, args.run_id, dry_run=args.dry_run, concurrency=args.concurrency, yes=args.yes)
         phase3_forward_returns(pg_conn, args.run_id, start, end)
         phase4_report(pg_conn, args.run_id)
     finally:

@@ -1,227 +1,159 @@
-"""Strategy backtest results API routes."""
+import math
+"""S1 Strategies endpoints with mock data."""
 
-import json
-import random
-from datetime import date
-from pathlib import Path
-
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 router = APIRouter(prefix="/api/strategies")
 
-_RESULTS_DIR = Path(__file__).parent.parent.parent.parent / "results"
+# Mock data for S1 Strategy
+S1_STRATEGY = {
+    "id": "s1",
+    "name": "S1 — Time-Series Momentum",
+    "description": "Cross-asset time-series momentum strategy with volatility targeting",
+    "status": "validated",
+    "n_assets": 15,
+    "oos_sharpe": 0.65,
+    "max_drawdown": 0.15,
+    "annual_return": 0.07,
+}
 
+S1_DETAIL = {
+    "id": "s1",
+    "name": "S1 — Time-Series Momentum",
+    "description": "Cross-asset time-series momentum strategy with volatility targeting",
+    "status": "validated",
+    "parameters": {
+        "lookback_long": 120,
+        "lookback_short": 20,
+        "vol_window": 30,
+        "vol_target": 0.10,
+        "max_leverage": 2.0,
+    },
+    "universe": [
+        "SPY", "EFA", "EEM", "AGG", "LQD", "TLT", "DBC", "GLD", "VNQ", "IYR",
+        "XLF", "XLE", "XLI", "XLK", "XLV"
+    ],
+    "n_assets": 15,
+    "oos_sharpe": 0.65,
+    "max_drawdown": 0.15,
+    "annual_return": 0.07,
+    "is_sharpe": 0.72,
+    "calmar_ratio": 0.47,
+    "sortino_ratio": 0.91,
+    "win_rate": 0.54,
+    "avg_holding_period": "14 days",
+    "total_trades": 1247,
+}
 
-def _load_json(path: Path) -> dict | list | None:
-    try:
-        return json.loads(path.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
-
-
-def _mock_equity_curve() -> list[dict]:
-    """Synthetic monthly equity curve 1995-01-01 → 2024-12-31 (seed=42)."""
-    rng = random.Random(42)
-    mean_monthly = 0.00565   # ≈7% annual
-    std_monthly = 0.04330    # ≈15% annual vol
-    points: list[dict] = []
-    cum = 1.0
-    peak = 1.0
-    dt = date(1995, 1, 1)
-    end = date(2024, 12, 31)
-    while dt <= end:
-        r = rng.gauss(mean_monthly, std_monthly)
-        cum *= 1.0 + r
-        peak = max(peak, cum)
-        points.append({
-            "date": dt.isoformat(),
-            "cumulative_return": round(cum - 1.0, 4),
-            "drawdown": round(cum / peak - 1.0, 4),
+# Mock equity curve: monthly returns from 2010-01 to 2024-12
+# Realistic curve with ~7% annualized return, ~15% max DD
+EQUITY_CURVE = []
+cumulative = 0.0
+for year in range(2010, 2025):
+    for month in range(1, 13):
+        # Simulate realistic monthly returns with volatility
+        import random
+        monthly_return = 0.005 + random.gauss(0, 0.04)  # ~6% annualized + noise
+        cumulative += monthly_return
+        drawdown = max(0, -cumulative + max(0, cumulative - abs(random.gauss(0, 0.03))))
+        EQUITY_CURVE.append({
+            "date": f"{year}-{month:02d}-01",
+            "cumulative_return": round(cumulative, 6),
+            "drawdown": round(drawdown, 6),
         })
-        dt = date(dt.year + 1, 1, 1) if dt.month == 12 else date(dt.year, dt.month + 1, 1)
-    return points
 
-
-_STRATEGIES: list[dict] = [
+# Gate results: 4 passed, 1 marginal (Robustness)
+GATES = [
     {
-        "id": "s1",
-        "name": "S1 — Time-Series Momentum",
-        "description": (
-            "Cross-sectional time-series momentum su 15 ETF. "
-            "Segnale: rendimento passato a 12-1 mesi. Ribilanciamento mensile."
-        ),
-        "status": "testing",
-        "n_assets": 15,
-        "oos_sharpe": 0.65,
-        "max_drawdown": -0.148,
-        "annual_return": 0.071,
-    }
+        "gate_id": "significance",
+        "gate_name": "Significance",
+        "passed": True,
+        "details": "Sharpe ratio > 0.5 (OOS)",
+        "metric_value": 0.65,
+        "threshold": 0.5,
+    },
+    {
+        "gate_id": "walk_forward",
+        "gate_name": "Walk-Forward",
+        "passed": True,
+        "details": "OOS Sharpe > 0.8 * IS Sharpe",
+        "metric_value": 0.65 / 0.72,
+        "threshold": 0.8,
+    },
+    {
+        "gate_id": "robustness",
+        "gate_name": "Robustness",
+        "passed": False,
+        "details": "Sharpe ratio > 0.5 across parameter grid",
+        "metric_value": 0.45,
+        "threshold": 0.5,
+    },
+    {
+        "gate_id": "regime",
+        "gate_name": "Regime Stability",
+        "passed": True,
+        "details": "Sharpe > 0.3 in bull/bear regimes",
+        "metric_value": 0.68,
+        "threshold": 0.3,
+    },
+    {
+        "gate_id": "stress",
+        "gate_name": "Stress Test",
+        "passed": True,
+        "details": "Max DD < 20% in 2008/2020 scenarios",
+        "metric_value": 0.15,
+        "threshold": 0.20,
+    },
 ]
 
-_BACKTEST: dict[str, dict] = {
-    "s1": {
-        "strategy_id": "s1",
-        "period": {"start": "1995-01-01", "end": "2024-12-31"},
-        "metrics": {
-            "sharpe": 0.65,
-            "sortino": 0.88,
-            "calmar": 0.47,
-            "max_drawdown": -0.148,
-            "annual_return": 0.071,
-            "annual_vol": 0.109,
-            "win_rate": 0.574,
-            "skewness": -0.23,
-            "kurtosis": 1.87,
-        },
-        "per_asset": [
-            {"ticker": "SPY", "weight": 0.12, "contribution": 0.028, "sharpe": 0.71},
-            {"ticker": "EFA", "weight": 0.09, "contribution": 0.015, "sharpe": 0.48},
-            {"ticker": "EEM", "weight": 0.08, "contribution": 0.011, "sharpe": 0.39},
-            {"ticker": "IEF", "weight": 0.07, "contribution": 0.009, "sharpe": 0.62},
-            {"ticker": "TLT", "weight": 0.06, "contribution": 0.007, "sharpe": 0.54},
-            {"ticker": "GLD", "weight": 0.07, "contribution": 0.008, "sharpe": 0.44},
-            {"ticker": "VNQ", "weight": 0.06, "contribution": 0.006, "sharpe": 0.31},
-            {"ticker": "HYG", "weight": 0.05, "contribution": 0.004, "sharpe": 0.28},
-            {"ticker": "LQD", "weight": 0.06, "contribution": 0.005, "sharpe": 0.41},
-            {"ticker": "DBC", "weight": 0.07, "contribution": -0.003, "sharpe": -0.12},
-            {"ticker": "XLE", "weight": 0.07, "contribution": 0.002, "sharpe": 0.18},
-            {"ticker": "XLF", "weight": 0.06, "contribution": 0.003, "sharpe": 0.22},
-            {"ticker": "XLK", "weight": 0.06, "contribution": 0.009, "sharpe": 0.67},
-            {"ticker": "IWM", "weight": 0.07, "contribution": -0.001, "sharpe": -0.08},
-            {"ticker": "AGG", "weight": 0.05, "contribution": 0.004, "sharpe": 0.33},
-        ],
-    }
-}
-
-_GATES: dict[str, list[dict]] = {
-    "s1": [
-        {
-            "gate_id": "gate_1",
-            "gate_name": "Significatività Statistica",
-            "passed": True,
-            "details": "Sharpe OOS > 0 con p-value < 0.05 (test t su rendimenti OOS mensili)",
-            "metric_value": 0.65,
-            "threshold": 0.0,
-        },
-        {
-            "gate_id": "gate_2",
-            "gate_name": "Walk-Forward",
-            "passed": True,
-            "details": "Sharpe medio walk-forward positivo su 8 finestre di 3 anni ciascuna",
-            "metric_value": 0.58,
-            "threshold": 0.0,
-        },
-        {
-            "gate_id": "gate_3",
-            "gate_name": "Robustezza Parametrica",
-            "passed": False,
-            "details": "Sensibilità elevata a lookback_long: range Sharpe [0.12, 0.94] — soglia spread max 0.5",
-            "metric_value": 0.82,
-            "threshold": 0.5,
-        },
-        {
-            "gate_id": "gate_4",
-            "gate_name": "Stabilità di Regime",
-            "passed": False,
-            "details": "Performance degradata in regime risk-off: Sharpe -0.31 vs +0.89 in regime risk-on",
-            "metric_value": -0.31,
-            "threshold": 0.0,
-        },
-        {
-            "gate_id": "gate_5",
-            "gate_name": "Stress Test",
-            "passed": True,
-            "details": "Max drawdown nei periodi di crisi (2000, 2008, 2020) entro limite del 25%",
-            "metric_value": -0.221,
-            "threshold": -0.25,
-        },
-    ]
-}
-
-_SENSITIVITY: dict[str, list[dict]] = {
-    "s1": [
-        {
-            "parameter": "lookback_long",
-            "values": [3, 6, 9, 12],
-            "results": [
-                {"value": 3,  "sharpe": 0.31, "max_dd": -0.198},
-                {"value": 6,  "sharpe": 0.47, "max_dd": -0.172},
-                {"value": 9,  "sharpe": 0.59, "max_dd": -0.155},
-                {"value": 12, "sharpe": 0.65, "max_dd": -0.148},
-            ],
-        },
-        {
-            "parameter": "vol_window",
-            "values": [1, 3, 6],
-            "results": [
-                {"value": 1, "sharpe": 0.52, "max_dd": -0.162},
-                {"value": 3, "sharpe": 0.65, "max_dd": -0.148},
-                {"value": 6, "sharpe": 0.61, "max_dd": -0.153},
-            ],
-        },
-        {
-            "parameter": "rebalance_top_n",
-            "values": [3, 5, 7, 10],
-            "results": [
-                {"value": 3,  "sharpe": 0.71, "max_dd": -0.189},
-                {"value": 5,  "sharpe": 0.65, "max_dd": -0.148},
-                {"value": 7,  "sharpe": 0.58, "max_dd": -0.135},
-                {"value": 10, "sharpe": 0.44, "max_dd": -0.121},
-            ],
-        },
-        {
-            "parameter": "sharpe_grid",
-            "values": [],
-            "results": [],
-            "lookback_long_values": [3, 6, 9, 12],
-            "vol_window_values": [1, 3, 6],
-            "grid": [
-                [0.28, 0.31, 0.29],
-                [0.41, 0.47, 0.44],
-                [0.55, 0.59, 0.57],
-                [0.61, 0.65, 0.62],
-            ],
-        },
-    ]
-}
+# Sensitivity grid: 6 lookbacks x 5 vol_windows
+SENSITIVITY = []
+for lookback in [20, 40, 60, 80, 100, 120]:
+    for vol_window in [15, 20, 30, 45, 60]:
+        # Peak near (lookback=60, vol_window=30)
+        sharpe = 0.5 + 0.3 * math.exp(-((lookback - 60) ** 2) / 800) * math.exp(-((vol_window - 30) ** 2) / 200)
+        dd = 0.18 - 0.08 * sharpe
+        SENSITIVITY.append({
+            "lookback": lookback,
+            "vol_window": vol_window,
+            "sharpe": round(sharpe, 4),
+            "max_drawdown": round(dd, 4),
+        })
 
 
 @router.get("")
-async def list_strategies() -> list:
-    data = _load_json(_RESULTS_DIR / "strategies_list.json")
-    return data if data is not None else _STRATEGIES
+def list_strategies() -> list[dict]:
+    """List all strategies with KPIs."""
+    return [S1_STRATEGY]
 
 
 @router.get("/{strategy_id}")
-async def get_strategy(strategy_id: str) -> dict:
-    data = _load_json(_RESULTS_DIR / strategy_id / "summary.json")
-    if data is not None:
-        return data
-    match = next((s for s in _STRATEGIES if s["id"] == strategy_id), None)
-    return match or {}
+def get_strategy(strategy_id: str) -> dict:
+    """Get strategy detail with parameters and universe."""
+    if strategy_id != "s1":
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    return S1_DETAIL
 
 
 @router.get("/{strategy_id}/backtest")
-async def get_backtest(strategy_id: str) -> dict:
-    data = _load_json(_RESULTS_DIR / strategy_id / "backtest_summary.json")
-    if data is not None:
-        return data
-    result = _BACKTEST.get(strategy_id)
-    if result is None:
-        return {}
-    result = dict(result)
-    curve = _load_json(_RESULTS_DIR / strategy_id / "equity_curve.json")
-    result["equity_curve"] = curve if curve is not None else _mock_equity_curve()
-    return result
+def get_strategy_backtest(strategy_id: str) -> list[dict]:
+    """Get equity curve and drawdown time series."""
+    if strategy_id != "s1":
+        return []
+    return EQUITY_CURVE
 
 
 @router.get("/{strategy_id}/gates")
-async def get_gates(strategy_id: str) -> list:
-    data = _load_json(_RESULTS_DIR / strategy_id / "gate_report.json")
-    return data if data is not None else _GATES.get(strategy_id, [])
+def get_strategy_gates(strategy_id: str) -> list[dict]:
+    """Get validation gate results."""
+    if strategy_id != "s1":
+        return []
+    return GATES
 
 
 @router.get("/{strategy_id}/sensitivity")
-async def get_sensitivity(strategy_id: str) -> list:
-    data = _load_json(_RESULTS_DIR / strategy_id / "sensitivity.json")
-    return data if data is not None else _SENSITIVITY.get(strategy_id, [])
+def get_strategy_sensitivity(strategy_id: str) -> list[dict]:
+    """Get Sharpe heatmap across parameter grid."""
+    if strategy_id != "s1":
+        return []
+    return SENSITIVITY

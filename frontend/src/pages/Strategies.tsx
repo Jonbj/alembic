@@ -1,28 +1,28 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  ComposedChart, Line, Area,
-  BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  BarChart, Bar, LineChart, Line,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, ResponsiveContainer,
+  Cell,
 } from 'recharts'
 import { strategiesApi } from '@/api/strategies'
-import type { GateResult, SensitivityResult } from '@/api/strategies'
+import type { Strategy, GateResult, SensitivityPoint } from '@/api/strategies'
 
-function fmt(v: number | null | undefined, decimals = 2): string {
+function fmt(v: number | null | undefined, decimals = 4): string {
   if (v == null) return '—'
   return Number(v).toFixed(decimals)
 }
 
 function pct(v: number | null | undefined): string {
   if (v == null) return '—'
-  return (Number(v) * 100).toFixed(1) + '%'
+  return (Number(v) * 100).toFixed(2) + '%'
 }
 
 function KpiCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div style={{
       background: '#1e293b', borderRadius: 8, padding: '14px 18px',
-      border: '1px solid #334155', minWidth: 130, flex: '1 1 130px',
+      border: '1px solid #334155', minWidth: 120,
     }}>
       <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</div>
       <div style={{ color: 'white', fontSize: 22, fontWeight: 700 }}>{value}</div>
@@ -31,361 +31,286 @@ function KpiCard({ label, value, sub }: { label: string; value: string; sub?: st
   )
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const MAP: Record<string, { fg: string; bg: string; label: string }> = {
-    validated: { fg: '#22c55e', bg: '#14532d', label: '🟢 Validata' },
-    testing:   { fg: '#f59e0b', bg: '#78350f', label: '🟡 In Test' },
-    building:  { fg: '#ef4444', bg: '#7f1d1d', label: '🔴 In Costruzione' },
-  }
-  const c = MAP[status] ?? MAP.building
+function GateBadge({ passed }: { passed: boolean }) {
   return (
     <span style={{
-      background: c.bg, color: c.fg, border: `1px solid ${c.fg}`,
-      borderRadius: 6, padding: '3px 12px', fontSize: 12, fontWeight: 600,
-    }}>{c.label}</span>
-  )
-}
-
-function GateCard({ gate }: { gate: GateResult }) {
-  const ok = gate.passed
-  return (
-    <div style={{
-      background: '#1e293b', borderRadius: 8, border: `1px solid ${ok ? '#166534' : '#7f1d1d'}`,
-      padding: '14px 16px', flex: '1 1 180px',
+      display: 'inline-block',
+      padding: '2px 8px',
+      borderRadius: 4,
+      fontSize: 11,
+      fontWeight: 600,
+      background: passed ? '#059669' : '#ef4444',
+      color: 'white',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <span style={{ color: '#94a3b8', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          {gate.gate_id.replace('_', ' ').toUpperCase()}
-        </span>
-        <span style={{
-          background: ok ? '#14532d' : '#7f1d1d', color: ok ? '#22c55e' : '#ef4444',
-          borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700,
-        }}>
-          {ok ? '✅ PASS' : '❌ FAIL'}
-        </span>
-      </div>
-      <div style={{ color: 'white', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>{gate.gate_name}</div>
-      <div style={{ color: '#94a3b8', fontSize: 11, lineHeight: 1.4, marginBottom: 8 }}>{gate.details}</div>
-      {gate.metric_value != null && gate.threshold != null && (
-        <div style={{ display: 'flex', gap: 16, fontSize: 11 }}>
-          <span>
-            <span style={{ color: '#64748b' }}>Valore: </span>
-            <span style={{ color: ok ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
-              {fmt(gate.metric_value, 3)}
-            </span>
-          </span>
-          <span>
-            <span style={{ color: '#64748b' }}>Soglia: </span>
-            <span style={{ color: '#94a3b8' }}>{fmt(gate.threshold, 3)}</span>
-          </span>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function SensitivityChart({ item }: { item: SensitivityResult }) {
-  const data = item.results.map(r => ({ name: String(r.value), Sharpe: r.sharpe, MaxDD: -r.max_dd }))
-  return (
-    <div style={{ background: '#1e293b', borderRadius: 8, border: '1px solid #334155', padding: 16 }}>
-      <div style={{ color: 'white', fontWeight: 600, fontSize: 13, marginBottom: 12 }}>
-        Sensibilità: <span style={{ color: '#94a3b8' }}>{item.parameter}</span>
-      </div>
-      <ResponsiveContainer width="100%" height={180}>
-        <BarChart data={data} margin={{ top: 0, right: 0, left: -10, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-          <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-          <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} />
-          <Tooltip
-            contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6 }}
-            formatter={(v: unknown) => [fmt(v as number, 3)]}
-          />
-          <Legend wrapperStyle={{ color: '#94a3b8', fontSize: 11 }} />
-          <Bar dataKey="Sharpe" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-          <Bar dataKey="MaxDD" fill="#ef4444" radius={[3, 3, 0, 0]} name="|Max DD|" />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  )
-}
-
-function SharpeGrid({ item }: { item: SensitivityResult }) {
-  const rows = item.lookback_long_values ?? []
-  const cols = item.vol_window_values ?? []
-  const grid = item.grid ?? []
-
-  function cellColor(v: number) {
-    if (v >= 0.6) return { bg: '#14532d', fg: '#22c55e' }
-    if (v >= 0.4) return { bg: '#78350f', fg: '#fcd34d' }
-    return { bg: '#7f1d1d', fg: '#fca5a5' }
-  }
-
-  return (
-    <div style={{ background: '#1e293b', borderRadius: 8, border: '1px solid #334155', padding: 16 }}>
-      <div style={{ color: 'white', fontWeight: 600, fontSize: 13, marginBottom: 12 }}>
-        Sharpe Surface — lookback_long × vol_window
-      </div>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ borderCollapse: 'collapse', fontSize: 13 }}>
-          <thead>
-            <tr>
-              <th style={{ padding: '6px 16px', color: '#64748b', fontWeight: 500, textAlign: 'left' }}>
-                lookback \ vol_win
-              </th>
-              {cols.map(c => (
-                <th key={c} style={{ padding: '6px 16px', color: '#94a3b8', fontWeight: 600, textAlign: 'center' }}>
-                  {c}m
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, ri) => (
-              <tr key={row}>
-                <td style={{ padding: '6px 16px', color: '#94a3b8', fontWeight: 600 }}>{row}m</td>
-                {(grid[ri] ?? []).map((v, ci) => {
-                  const { bg, fg } = cellColor(v)
-                  return (
-                    <td key={ci} style={{
-                      padding: '8px 16px', textAlign: 'center',
-                      background: bg, color: fg, fontWeight: 700,
-                      border: '2px solid #0f172a', borderRadius: 4,
-                    }}>
-                      {fmt(v, 2)}
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
-        {[
-          { bg: '#14532d', fg: '#22c55e', label: '≥ 0.60' },
-          { bg: '#78350f', fg: '#fcd34d', label: '0.40 – 0.60' },
-          { bg: '#7f1d1d', fg: '#fca5a5', label: '< 0.40' },
-        ].map(({ bg, fg, label }) => (
-          <span key={label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#94a3b8' }}>
-            <span style={{ width: 12, height: 12, background: bg, border: `1px solid ${fg}`, borderRadius: 2, display: 'inline-block' }} />
-            {label}
-          </span>
-        ))}
-      </div>
-    </div>
+      {passed ? 'PASS' : 'FAIL'}
+    </span>
   )
 }
 
 export default function Strategies() {
-  const [selectedId, setSelectedId] = useState('s1')
-
-  const { data: strategies } = useQuery({
-    queryKey: ['strategies-list'],
+  const { data: strategies, isLoading: strategiesLoading, error: strategiesError } = useQuery({
+    queryKey: ['strategies'],
     queryFn: strategiesApi.list,
     staleTime: 60_000,
   })
 
-  const { data: backtest, isLoading } = useQuery({
-    queryKey: ['strategies-backtest', selectedId],
-    queryFn: () => strategiesApi.backtest(selectedId),
-    enabled: !!selectedId,
+  const [selectedId, setSelectedId] = useState<string>('s1')
+
+  // Select first strategy once loaded
+  const id = selectedId || (strategies && strategies.length > 0 ? strategies[0].id : '')
+
+  const { data: detail } = useQuery({
+    queryKey: ['strategy-detail', id],
+    queryFn: () => strategiesApi.detail(id),
+    enabled: !!id,
+    staleTime: 60_000,
+  })
+
+  const { data: backtestData } = useQuery({
+    queryKey: ['strategy-backtest', id],
+    queryFn: () => strategiesApi.backtest(id),
+    enabled: !!id,
     staleTime: 60_000,
   })
 
   const { data: gates } = useQuery({
-    queryKey: ['strategies-gates', selectedId],
-    queryFn: () => strategiesApi.gates(selectedId),
-    enabled: !!selectedId,
+    queryKey: ['strategy-gates', id],
+    queryFn: () => strategiesApi.gates(id),
+    enabled: !!id,
     staleTime: 60_000,
   })
 
   const { data: sensitivity } = useQuery({
-    queryKey: ['strategies-sensitivity', selectedId],
-    queryFn: () => strategiesApi.sensitivity(selectedId),
-    enabled: !!selectedId,
+    queryKey: ['strategy-sensitivity', id],
+    queryFn: () => strategiesApi.sensitivity(id),
+    enabled: !!id,
     staleTime: 60_000,
   })
 
-  const selected = strategies?.find(s => s.id === selectedId)
-  const m = backtest?.metrics
+  if (strategiesLoading) return <div style={{ color: '#94a3b8', padding: 24 }}>Loading strategies…</div>
+  if (strategiesError) return <div style={{ color: '#ef4444', padding: 24 }}>Failed to load strategies: {String(strategiesError)}</div>
+  if (!strategies || strategies.length === 0) return <div style={{ color: '#94a3b8', padding: 24 }}>No strategies found.</div>
 
-  const equityCurveData = (backtest?.equity_curve ?? []).filter((_, i) => i % 3 === 0)
-
-  const sensitivityItems = (sensitivity ?? []).filter(s => s.parameter !== 'sharpe_grid')
-  const gridItem = (sensitivity ?? []).find(s => s.parameter === 'sharpe_grid')
+  const currentStrategy = strategies.find(s => s.id === id)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-
-      {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'white' }}>Strategie</h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ color: '#94a3b8', fontSize: 13 }}>Strategia:</span>
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'white' }}>Strategies</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ color: '#94a3b8', fontSize: 13 }}>Strategy:</span>
           <select
-            value={selectedId}
+            value={id}
             onChange={e => setSelectedId(e.target.value)}
             style={{
               background: '#1e293b', color: 'white', border: '1px solid #334155',
               borderRadius: 6, padding: '6px 12px', fontSize: 13, cursor: 'pointer',
             }}
           >
-            {(strategies ?? [{ id: 's1', name: 'S1 — Time-Series Momentum' }]).map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
+            {strategies.map(s => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
             ))}
           </select>
-          {selected && <StatusBadge status={selected.status} />}
         </div>
       </div>
 
-      {selected?.description && (
-        <div style={{ color: '#64748b', fontSize: 12 }}>{selected.description}</div>
+      {currentStrategy && (
+        <div style={{ color: '#64748b', fontSize: 12 }}>
+          {currentStrategy.n_assets} assets · {currentStrategy.status.toUpperCase()} · {currentStrategy.oos_sharpe} OOS Sharpe
+        </div>
       )}
-
-      {isLoading && <div style={{ color: '#94a3b8', padding: 12 }}>Caricamento dati strategia…</div>}
 
       {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <KpiCard label="Sharpe OOS" value={fmt(m?.sharpe)} sub="Out-of-sample" />
-        <KpiCard label="Rendimento Annuo" value={pct(m?.annual_return)} sub="CAGR" />
-        <KpiCard label="Drawdown Massimo" value={pct(m?.max_drawdown)} sub="Peak-to-trough" />
-        <KpiCard label="Sortino" value={fmt(m?.sortino)} sub="Downside risk adj." />
-        <KpiCard label="Win Rate" value={pct(m?.win_rate)} sub="Mesi positivi" />
-        <KpiCard label="N Asset" value={String(selected?.n_assets ?? '—')} sub="Universo ETF" />
+        <KpiCard
+          label="OOS Sharpe"
+          value={fmt(detail?.oos_sharpe)}
+          sub="Out-of-Sample Performance"
+        />
+        <KpiCard
+          label="Max Drawdown"
+          value={pct(detail?.max_drawdown)}
+          sub="Worst drawdown"
+        />
+        <KpiCard
+          label="Annual Return"
+          value={pct(detail?.annual_return)}
+          sub="Historical annualized"
+        />
+        <KpiCard
+          label="Total Trades"
+          value={detail?.total_trades?.toLocaleString() ?? '—'}
+          sub="Lifetime activity"
+        />
       </div>
 
-      {/* Equity Curve + Drawdown */}
-      {equityCurveData.length > 0 && (
-        <div style={{ background: '#1e293b', borderRadius: 8, border: '1px solid #334155', padding: 20 }}>
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ color: 'white', fontWeight: 600, fontSize: 15 }}>Curva Equity e Drawdown</div>
-            <div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>
-              {backtest?.period.start?.slice(0, 7)} → {backtest?.period.end?.slice(0, 7)} · rendimento cumulativo mensile
-            </div>
-          </div>
-          <ResponsiveContainer width="100%" height={300}>
-            <ComposedChart data={equityCurveData} margin={{ top: 0, right: 40, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-              <XAxis
-                dataKey="date"
-                tick={{ fill: '#94a3b8', fontSize: 10 }}
-                tickFormatter={d => d.slice(0, 4)}
-                interval={35}
-              />
-              <YAxis
-                yAxisId="return"
-                tickFormatter={v => (Number(v) * 100).toFixed(0) + '%'}
-                tick={{ fill: '#94a3b8', fontSize: 11 }}
-              />
-              <YAxis
-                yAxisId="dd"
-                orientation="right"
-                tickFormatter={v => (Number(v) * 100).toFixed(0) + '%'}
-                tick={{ fill: '#94a3b8', fontSize: 11 }}
-                domain={[-0.3, 0]}
-              />
+      {/* Equity Curve */}
+      <div style={{ background: '#1e293b', borderRadius: 8, padding: 16, border: '1px solid #334155' }}>
+        <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 600, color: 'white' }}>Equity Curve</h3>
+        <div style={{ height: 300, width: '100%' }}>
+          <ResponsiveContainer>
+            <LineChart data={backtestData}>
+              <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
+              <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 10 }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} tickLine={false} axisLine={false} />
               <Tooltip
-                contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6 }}
-                formatter={(v, name) => [
-                  (Number(v) * 100).toFixed(1) + '%',
-                  String(name ?? ''),
-                ]}
-                labelFormatter={l => String(l)}
+                contentStyle={{ background: '#0f172a', border: '1px solid #334155', color: 'white', borderRadius: 6 }}
+                itemStyle={{ color: '#60a5fa' }}
               />
-              <Legend wrapperStyle={{ color: '#94a3b8', fontSize: 12 }} />
+              <Legend />
               <Line
-                yAxisId="return"
                 type="monotone"
                 dataKey="cumulative_return"
-                stroke="#22c55e"
+                name="Cumulative Return"
+                stroke="#60a5fa"
+                strokeWidth={2}
                 dot={false}
-                strokeWidth={1.5}
-                name="Rendimento Cumulativo"
               />
-              <Area
-                yAxisId="dd"
+              <Line
                 type="monotone"
                 dataKey="drawdown"
-                fill="#ef444440"
-                stroke="#ef4444"
-                strokeWidth={1}
-                dot={false}
                 name="Drawdown"
+                stroke="#f43f5e"
+                strokeWidth={2}
+                dot={false}
               />
-            </ComposedChart>
+            </LineChart>
           </ResponsiveContainer>
         </div>
-      )}
+      </div>
 
-      {/* Validation Gates */}
-      {gates && gates.length > 0 && (
-        <div style={{ background: '#1e293b', borderRadius: 8, border: '1px solid #334155', padding: 20 }}>
-          <div style={{ color: 'white', fontWeight: 600, fontSize: 15, marginBottom: 4 }}>Gate di Validazione</div>
-          <div style={{ color: '#64748b', fontSize: 12, marginBottom: 16 }}>
-            {gates.filter(g => g.passed).length}/{gates.length} gate superati
-          </div>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            {gates.map(g => <GateCard key={g.gate_id} gate={g} />)}
-          </div>
-        </div>
-      )}
-
-      {/* Per-Asset Contribution */}
-      {backtest?.per_asset && backtest.per_asset.length > 0 && (
-        <div style={{ background: '#1e293b', borderRadius: 8, border: '1px solid #334155', padding: 20 }}>
-          <div style={{ color: 'white', fontWeight: 600, fontSize: 15, marginBottom: 14 }}>Contributo per Asset</div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ color: '#64748b', textAlign: 'left', borderBottom: '1px solid #334155' }}>
-                  <th style={{ padding: '6px 12px', fontWeight: 500 }}>Ticker</th>
-                  <th style={{ padding: '6px 12px', fontWeight: 500 }}>Peso (%)</th>
-                  <th style={{ padding: '6px 12px', fontWeight: 500 }}>Contributo (%)</th>
-                  <th style={{ padding: '6px 12px', fontWeight: 500 }}>Sharpe</th>
+      {/* Gates */}
+      <div style={{ background: '#1e293b', borderRadius: 8, padding: 16, border: '1px solid #334155' }}>
+        <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 600, color: 'white' }}>Validation Gates</h3>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid #334155', color: '#94a3b8', fontSize: 11 }}>
+                  Gate
+                </th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid #334155', color: '#94a3b8', fontSize: 11 }}>
+                  Result
+                </th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid #334155', color: '#94a3b8', fontSize: 11 }}>
+                  Metric
+                </th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid #334155', color: '#94a3b8', fontSize: 11 }}>
+                  Threshold
+                </th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid #334155', color: '#94a3b8', fontSize: 11 }}>
+                  Details
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {gates?.map((gate: GateResult) => (
+                <tr key={gate.gate_id}>
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #334155', color: 'white', fontSize: 13 }}>
+                    {gate.gate_name}
+                  </td>
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #334155' }}>
+                    <GateBadge passed={gate.passed} />
+                  </td>
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #334155', color: 'white', fontSize: 13 }}>
+                    {fmt(gate.metric_value)}
+                  </td>
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #334155', color: 'white', fontSize: 13 }}>
+                    {fmt(gate.threshold)}
+                  </td>
+                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #334155', color: '#94a3b8', fontSize: 12 }}>
+                    {gate.details}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {backtest.per_asset.map(row => (
-                  <tr key={row.ticker} style={{ borderBottom: '1px solid #1e293b', color: '#e2e8f0' }}>
-                    <td style={{ padding: '7px 12px', fontWeight: 600 }}>{row.ticker}</td>
-                    <td style={{ padding: '7px 12px' }}>{pct(row.weight)}</td>
-                    <td style={{
-                      padding: '7px 12px',
-                      color: row.contribution > 0 ? '#22c55e' : '#ef4444',
-                    }}>
-                      {pct(row.contribution)}
-                    </td>
-                    <td style={{
-                      padding: '7px 12px',
-                      color: row.sharpe > 0.3 ? '#22c55e' : row.sharpe > 0 ? '#f59e0b' : '#ef4444',
-                    }}>
-                      {fmt(row.sharpe)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
 
-      {/* Sensitivity Analysis */}
-      {(sensitivityItems.length > 0 || gridItem) && (
-        <div style={{ background: '#1e293b', borderRadius: 8, border: '1px solid #334155', padding: 20 }}>
-          <div style={{ color: 'white', fontWeight: 600, fontSize: 15, marginBottom: 4 }}>Analisi di Sensibilità</div>
-          <div style={{ color: '#64748b', fontSize: 12, marginBottom: 16 }}>
-            Impatto dei parametri sul Sharpe ratio OOS
-          </div>
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: gridItem ? 20 : 0 }}>
-            {sensitivityItems.map(item => (
-              <div key={item.parameter} style={{ flex: '1 1 280px' }}>
-                <SensitivityChart item={item} />
-              </div>
-            ))}
-          </div>
-          {gridItem && <SharpeGrid item={gridItem} />}
+      {/* Sensitivity Heatmap */}
+      <div style={{ background: '#1e293b', borderRadius: 8, padding: 16, border: '1px solid #334155' }}>
+        <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 600, color: 'white' }}>Parameter Sensitivity (Sharpe)</h3>
+        <div style={{ height: 300, width: '100%' }}>
+          <ResponsiveContainer>
+            <BarChart
+              data={sensitivity}
+              margin={{ top: 20, right: 30, left: 20, bottom: 50 }}
+            >
+              <CartesianGrid stroke="#334155" strokeDasharray="3 3" />
+              <XAxis dataKey="lookback" tick={{ fill: '#94a3b8', fontSize: 10 }} tickLine={false} axisLine={false} />
+              <YAxis dataKey="vol_window" tick={{ fill: '#94a3b8', fontSize: 10 }} tickLine={false} axisLine={false} />
+              <Tooltip
+                contentStyle={{ background: '#0f172a', border: '1px solid #334155', color: 'white', borderRadius: 6 }}
+              />
+              <Legend />
+              <Bar dataKey="sharpe" name="Sharpe Ratio">
+                {sensitivity?.map((entry: SensitivityPoint, index: number) => (
+                  <Cell
+                    key={`cell-${index}`}
+                    fill={entry.sharpe > 0.6 ? '#10b981' : entry.sharpe > 0.4 ? '#f59e0b' : '#ef4444'}
+                    opacity={0.8}
+                  />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
         </div>
-      )}
+        <div style={{ marginTop: 12, fontSize: 12, color: '#64748b' }}>
+          Peak Sharpe near (lookback=60, vol_window=30)
+        </div>
+      </div>
+
+      {/* Strategy Details */}
+      <div style={{ background: '#1e293b', borderRadius: 8, padding: 16, border: '1px solid #334155' }}>
+        <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 600, color: 'white' }}>Strategy Parameters</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
+          <div style={{ background: '#0f172a', padding: 12, borderRadius: 6 }}>
+            <div style={{ color: '#64748b', fontSize: 11 }}>Lookback Long</div>
+            <div style={{ color: 'white', fontSize: 14, fontWeight: 600 }}>{detail?.parameters.lookback_long}</div>
+          </div>
+          <div style={{ background: '#0f172a', padding: 12, borderRadius: 6 }}>
+            <div style={{ color: '#64748b', fontSize: 11 }}>Lookback Short</div>
+            <div style={{ color: 'white', fontSize: 14, fontWeight: 600 }}>{detail?.parameters.lookback_short}</div>
+          </div>
+          <div style={{ background: '#0f172a', padding: 12, borderRadius: 6 }}>
+            <div style={{ color: '#64748b', fontSize: 11 }}>Vol Window</div>
+            <div style={{ color: 'white', fontSize: 14, fontWeight: 600 }}>{detail?.parameters.vol_window}</div>
+          </div>
+          <div style={{ background: '#0f172a', padding: 12, borderRadius: 6 }}>
+            <div style={{ color: '#64748b', fontSize: 11 }}>Vol Target</div>
+            <div style={{ color: 'white', fontSize: 14, fontWeight: 600 }}>{(detail?.parameters.vol_target ?? 0) * 100}%</div>
+          </div>
+          <div style={{ background: '#0f172a', padding: 12, borderRadius: 6 }}>
+            <div style={{ color: '#64748b', fontSize: 11 }}>Max Leverage</div>
+            <div style={{ color: 'white', fontSize: 14, fontWeight: 600 }}>{detail?.parameters.max_leverage}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Universe */}
+      <div style={{ background: '#1e293b', borderRadius: 8, padding: 16, border: '1px solid #334155' }}>
+        <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 600, color: 'white' }}>Universe ({detail?.universe.length} ETFs)</h3>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {detail?.universe.map(ticker => (
+            <span
+              key={ticker}
+              style={{
+                background: '#334155',
+                color: 'white',
+                padding: '4px 10px',
+                borderRadius: 4,
+                fontSize: 12,
+                fontWeight: 500,
+              }}
+            >
+              {ticker}
+            </span>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

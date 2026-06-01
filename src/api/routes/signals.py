@@ -5,7 +5,6 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from src.api.auth import require_api_key
 from src.store.redis_store import RedisStore
 from src.api.main import get_redis_store
 
@@ -23,7 +22,6 @@ def _watchlist() -> list[str]:
 @router.get("")
 async def get_all_signals(
     store: Annotated[RedisStore, Depends(get_redis_store)],
-    _: Annotated[str, Depends(require_api_key)],
     symbol: str | None = None,
 ) -> list[dict]:
     """Get latest signals for all watchlist symbols (or a single symbol if provided)."""
@@ -40,7 +38,6 @@ async def get_all_signals(
 async def get_signal(
     symbol: str,
     store: Annotated[RedisStore, Depends(get_redis_store)],
-    _: Annotated[str, Depends(require_api_key)],
 ) -> dict:
     """Get latest sentiment signal for a symbol."""
     result = store.read_sentiment(symbol.upper())

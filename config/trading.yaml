@@ -2,8 +2,8 @@
 # Loaded by ConfigLoader at startup
 
 symbols:
-  # Equity USA + ETF monitorati in Fase 1
-  # Allineato a ticker_lookup (57 simboli base) + 14 high-alpha aggiunti in 009_expand_ticker_lookup.sql
+  # Equity USA + ETF + ADR internazionali (NYSE/Nasdaq, Alpaca-compatible)
+  # Allineato a ticker_lookup (72 simboli base) + 17 ADR internazionali aggiunti in 010_add_adr_tickers.sql
   watchlist:
     # --- Mega-cap tech ---
     - AAPL
@@ -78,6 +78,27 @@ symbols:
     - PLTR
     - PANW
     - IBM
+    # --- ADR internazionali (NYSE/Nasdaq, Alpaca-compatible) ---
+    # European
+    - SAP
+    - SHEL
+    - BP
+    - AZN
+    - UBS
+    - DB
+    - ERIC
+    - NOK
+    # Asian
+    - BABA
+    - BIDU
+    - JD
+    - TM
+    - SONY
+    # Emerging markets / Other
+    - INFY
+    - RIO
+    - VALE
+    - PBR
     # --- Broad-market ETF ---
     - SPY
     - QQQ

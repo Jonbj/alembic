@@ -1,32 +1,45 @@
 import { apiFetch } from './client'
 
-export interface StrategySummary {
+export interface Strategy {
   id: string
   name: string
   description: string
-  status: 'validated' | 'testing' | 'building'
+  status: string
   n_assets: number
-  oos_sharpe: number | null
-  max_drawdown: number | null
-  annual_return: number | null
+  oos_sharpe: number
+  max_drawdown: number
+  annual_return: number
 }
 
-export interface BacktestResult {
-  strategy_id: string
-  period: { start: string; end: string }
-  metrics: {
-    sharpe: number
-    sortino: number
-    calmar: number
-    max_drawdown: number
-    annual_return: number
-    annual_vol: number
-    win_rate: number
-    skewness: number
-    kurtosis: number
+export interface StrategyDetail {
+  id: string
+  name: string
+  description: string
+  status: string
+  parameters: {
+    lookback_long: number
+    lookback_short: number
+    vol_window: number
+    vol_target: number
+    max_leverage: number
   }
-  equity_curve: { date: string; cumulative_return: number; drawdown: number }[]
-  per_asset: { ticker: string; weight: number; contribution: number; sharpe: number }[]
+  universe: string[]
+  n_assets: number
+  oos_sharpe: number
+  max_drawdown: number
+  annual_return: number
+  is_sharpe: number
+  calmar_ratio: number
+  sortino_ratio: number
+  win_rate: number
+  avg_holding_period: string
+  total_trades: number
+}
+
+export interface EquityPoint {
+  date: string
+  cumulative_return: number
+  drawdown: number
 }
 
 export interface GateResult {
@@ -34,24 +47,21 @@ export interface GateResult {
   gate_name: string
   passed: boolean
   details: string
-  metric_value: number | null
-  threshold: number | null
+  metric_value: number
+  threshold: number
 }
 
-export interface SensitivityResult {
-  parameter: string
-  values: number[]
-  results: { value: number; sharpe: number; max_dd: number }[]
-  // 2-D Sharpe grid (parameter === "sharpe_grid")
-  lookback_long_values?: number[]
-  vol_window_values?: number[]
-  grid?: number[][]
+export interface SensitivityPoint {
+  lookback: number
+  vol_window: number
+  sharpe: number
+  max_drawdown: number
 }
 
 export const strategiesApi = {
-  list: () => apiFetch<StrategySummary[]>('/api/strategies'),
-  detail: (id: string) => apiFetch<StrategySummary>(`/api/strategies/${id}`),
-  backtest: (id: string) => apiFetch<BacktestResult>(`/api/strategies/${id}/backtest`),
+  list: () => apiFetch<Strategy[]>('/api/strategies'),
+  detail: (id: string) => apiFetch<StrategyDetail>(`/api/strategies/${id}`),
+  backtest: (id: string) => apiFetch<EquityPoint[]>(`/api/strategies/${id}/backtest`),
   gates: (id: string) => apiFetch<GateResult[]>(`/api/strategies/${id}/gates`),
-  sensitivity: (id: string) => apiFetch<SensitivityResult[]>(`/api/strategies/${id}/sensitivity`),
+  sensitivity: (id: string) => apiFetch<SensitivityPoint[]>(`/api/strategies/${id}/sensitivity`),
 }
