@@ -39,10 +39,10 @@ export default function Overview() {
       ]} />
 
       <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
-        <KPICard label="Net P&L (month)" value={`$${currentMonthPnL.toFixed(2)}`} sub="current month" />
-        <KPICard label="Open positions" value={String(positions.length)} sub={positions.map((p) => p.symbol).join(', ') || '—'} />
-        <KPICard label="Unrealized P&L" value={`$${totalUnrealized.toFixed(2)}`} />
-        <KPICard label="Signals today" value={`${buys}B / ${sells}S / ${holds}H`} sub={`${signals.length} total`} />
+        <KPICard label="Net P&L (month)" value={`$${currentMonthPnL.toFixed(2)}`} sub="current month" tooltip="Profitto/perdita netto del mese corrente." />
+        <KPICard label="Open positions" value={String(positions.length)} sub={positions.map((p) => p.symbol).join(', ') || '—'} tooltip="Numero di posizioni attualmente aperte e relativi ticker." />
+        <KPICard label="Unrealized P&L" value={`$${totalUnrealized.toFixed(2)}`} tooltip="Profitto/perdita fluttuante delle posizioni ancora aperte." />
+        <KPICard label="Signals today" value={`${buys}B / ${sells}S / ${holds}H`} sub={`${signals.length} total`} tooltip="Segnali odierni: B (buy, score > 0.1), S (sell, score < -0.1), H (hold)." />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>

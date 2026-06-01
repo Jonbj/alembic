@@ -6,6 +6,7 @@ import {
 } from 'recharts'
 import { backtestApi } from '@/api/backtest'
 import { HelpButton } from '@/components/shared/HelpButton'
+import { KPICard } from '@/components/shared/KPICard'
 import type { BacktestRun } from '@/api/backtest'
 
 function fmt(v: number | null | undefined, decimals = 4): string {
@@ -16,19 +17,6 @@ function fmt(v: number | null | undefined, decimals = 4): string {
 function pct(v: number | null | undefined): string {
   if (v == null) return '—'
   return (Number(v) * 100).toFixed(2) + '%'
-}
-
-function KpiCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div style={{
-      background: '#1e293b', borderRadius: 8, padding: '14px 18px',
-      border: '1px solid #334155', minWidth: 120,
-    }}>
-      <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</div>
-      <div style={{ color: 'white', fontSize: 22, fontWeight: 700 }}>{value}</div>
-      {sub && <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 2 }}>{sub}</div>}
-    </div>
-  )
 }
 
 function RunSelector({ runs, selected, onChange }: {
@@ -145,35 +133,41 @@ export default function Backtest() {
 
       {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <KpiCard
+        <KPICard
           label="IC (Spearman)"
           value={fmt(summary?.ic)}
           sub="Information Coefficient"
+          tooltip="Correlazione tra predizione del modello e rendimento reale. IC > 0.05 = utile, > 0.1 = ottimo."
         />
-        <KpiCard
+        <KPICard
           label="ICIR"
           value={fmt(summary?.icir)}
           sub={`${summary?.n_weeks ?? 0} weeks`}
+          tooltip="IC diviso per la deviazione standard. ICIR > 0.3 = segnale consistente nel tempo."
         />
-        <KpiCard
+        <KPICard
           label="Hit Rate"
           value={pct(summary?.hit_rate)}
           sub="Directional accuracy"
+          tooltip="Percentuale di volte che la direzione del segnale era corretta."
         />
-        <KpiCard
+        <KPICard
           label="Avg Long Return"
           value={pct(summary?.avg_long_return)}
           sub="score > 0.05"
+          tooltip="Rendimento medio delle posizioni long (segnali con score > 0.05)."
         />
-        <KpiCard
+        <KPICard
           label="Avg Short Return"
           value={pct(summary?.avg_short_return)}
           sub="score < -0.05 (as short)"
+          tooltip="Rendimento medio delle posizioni short (segnali con score < -0.05)."
         />
-        <KpiCard
+        <KPICard
           label="N Scored"
           value={(summary?.n_scored ?? 0).toLocaleString()}
           sub="Signals with forward return"
+          tooltip="Numero di segnali con rendimento forward disponibile nel periodo di backtest."
         />
       </div>
 

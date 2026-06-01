@@ -7,6 +7,7 @@ import {
 } from 'recharts'
 import { strategiesApi } from '@/api/strategies'
 import { HelpButton } from '@/components/shared/HelpButton'
+import { KPICard } from '@/components/shared/KPICard'
 import type { Strategy, GateResult, SensitivityPoint } from '@/api/strategies'
 
 function fmt(v: number | null | undefined, decimals = 4): string {
@@ -17,19 +18,6 @@ function fmt(v: number | null | undefined, decimals = 4): string {
 function pct(v: number | null | undefined): string {
   if (v == null) return '—'
   return (Number(v) * 100).toFixed(2) + '%'
-}
-
-function KpiCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div style={{
-      background: '#1e293b', borderRadius: 8, padding: '14px 18px',
-      border: '1px solid #334155', minWidth: 120,
-    }}>
-      <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{label}</div>
-      <div style={{ color: 'white', fontSize: 22, fontWeight: 700 }}>{value}</div>
-      {sub && <div style={{ color: '#94a3b8', fontSize: 11, marginTop: 2 }}>{sub}</div>}
-    </div>
-  )
 }
 
 function GateBadge({ passed }: { passed: boolean }) {
@@ -139,25 +127,29 @@ export default function Strategies() {
 
       {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <KpiCard
+        <KPICard
           label="OOS Sharpe"
           value={fmt(detail?.oos_sharpe)}
           sub="Out-of-Sample Performance"
+          tooltip="Sharpe ratio calcolato su dati out-of-sample. > 0.5 = buona, > 1.0 = eccellente."
         />
-        <KpiCard
+        <KPICard
           label="Max Drawdown"
           value={pct(detail?.max_drawdown)}
           sub="Worst drawdown"
+          tooltip="Massima perdita dal picco storico. < 20% = accettabile."
         />
-        <KpiCard
+        <KPICard
           label="Annual Return"
           value={pct(detail?.annual_return)}
           sub="Historical annualized"
+          tooltip="Rendimento annualizzato storico della strategia."
         />
-        <KpiCard
+        <KPICard
           label="Total Trades"
           value={detail?.total_trades?.toLocaleString() ?? '—'}
           sub="Lifetime activity"
+          tooltip="Numero totale di trade eseguiti dalla strategia nel periodo di backtest."
         />
       </div>
 
