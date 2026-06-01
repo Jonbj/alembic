@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchPositions, fetchOrders } from '@/api/positions'
+import { HelpButton } from '@/components/shared/HelpButton'
 
 type Tab = 'positions' | 'orders'
 
@@ -30,8 +31,22 @@ export default function Trading() {
   })
 
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
       <h2 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>Trading</h2>
+      <HelpButton title="Trading — Posizioni e Ordini" sections={[
+        {
+          heading: "Posizioni aperte",
+          content: "Mostra le posizioni correntemente attive. **Unrealized P&L** è il profitto/perdita non realizzato. Se il P&L è negativo, la riga è in rosso. I dati si aggiornano ogni 60 secondi.",
+        },
+        {
+          heading: "Storico ordini",
+          content: "Tutti gli ordini eseguiti: BUY/SELL con prezzo medio di esecuzione e stato. In paper trading, gli ordini sono simulati — nessun capitale reale è coinvolto.",
+        },
+        {
+          heading: "Collegamento con i segnali",
+          content: "Il sistema esegue automaticamente ordini basati sui segnali LLM, rispettando i parametri di rischio configurati (stop-loss 2%, max drawdown 10%, max esposizione 50%). Vedi Config per modificare i parametri.",
+        },
+      ]} />
 
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: 20 }}>
         <button style={tabStyle('positions')} onClick={() => setTab('positions')}>Posizioni aperte ({positions.length})</button>

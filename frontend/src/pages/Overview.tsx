@@ -5,6 +5,7 @@ import { fetchPositions } from '@/api/positions'
 import { fetchPnL } from '@/api/performance'
 import { KPICard } from '@/components/shared/KPICard'
 import { DirectionBadge } from '@/components/shared/DirectionBadge'
+import { HelpButton } from '@/components/shared/HelpButton'
 
 export default function Overview() {
   const { data: signals = [] } = useQuery({ queryKey: ['signals'], queryFn: () => fetchSignals(), refetchInterval: 60000 })
@@ -20,8 +21,22 @@ export default function Overview() {
   const currentMonthPnL = monthlyPnL[monthlyPnL.length - 1]?.pnl ?? 0
 
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
       <h2 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>Overview</h2>
+      <HelpButton title="Overview — Dashboard" sections={[
+        {
+          heading: "Cos'è questa pagina",
+          content: "La dashboard riassume lo stato attuale del sistema: P&L mensile, posizioni aperte, P&L non realizzato e segnali recenti. I dati si aggiornano automaticamente ogni 60 secondi.",
+        },
+        {
+          heading: "Come leggere i dati",
+          content: "**Net P&L (month)**: il profitto/perdita netto del mese corrente. Si basa sulle posizioni chiuse nel periodo.\n\n**Open positions**: quante posizioni sono aperte ora e su quali ticker.\n\n**Unrealized P&L**: profitto/perdita fluttuante delle posizioni ancora aperte.\n\n**Signals**: contatore dei segnali odierna — B (buy), S (sell), H (hold). Un segnale con |score| < 0.1 è considerato HOLD.",
+        },
+        {
+          heading: "Flusso consigliato",
+          content: "1. Controlla Overview per il quadro generale\n2. Vai su Signals per i dettagli dei segnali\n3. Verifica su Trading le posizioni e gli ordini\n4. Su Strategies controlla lo stato delle strategie validate",
+        },
+      ]} />
 
       <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
         <KPICard label="Net P&L (month)" value={`$${currentMonthPnL.toFixed(2)}`} sub="current month" />

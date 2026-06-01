@@ -5,6 +5,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, ResponsiveContainer,
 } from 'recharts'
 import { backtestApi } from '@/api/backtest'
+import { HelpButton } from '@/components/shared/HelpButton'
 import type { BacktestRun } from '@/api/backtest'
 
 function fmt(v: number | null | undefined, decimals = 4): string {
@@ -112,7 +113,21 @@ export default function Backtest() {
   const currentRun = runs.find(r => r.run_id === runId)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, position: 'relative' }}>
+      <HelpButton title="Backtest — Test Storici" sections={[
+        {
+          heading: "Cosa sono i backtest",
+          content: "I backtest eseguono le strategie su dati storici per verificarne la validità predittiva. Ogni run processa un dataset di notizie e produce metriche di performance.",
+        },
+        {
+          heading: "Come leggere i risultati",
+          content: "**IC (Information Coefficient)**: correlazione tra predizione e rendimento reale. IC > 0.05 è buono, > 0.1 è ottimo.\n\n**ICIR**: IC diviso per la deviazione standard dell'IC. ICIR > 0.3 indica segnale consistente nel tempo.\n\n**Bucket analysis**: divide i segnali in decili per forza. Un modello buono ha i decili estremi (1 e 10) con rendimenti differenziati rispetto al centro.",
+        },
+        {
+          heading: "Selezionare un run",
+          content: "Usa il dropdown per scegliere tra i run disponibili. Il numero indica quanti articoli sono stati processati (scored) e il totale.",
+        },
+      ]} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'white' }}>Backtest Analysis</h1>
         <RunSelector

@@ -6,6 +6,7 @@ import {
   Cell,
 } from 'recharts'
 import { strategiesApi } from '@/api/strategies'
+import { HelpButton } from '@/components/shared/HelpButton'
 import type { Strategy, GateResult, SensitivityPoint } from '@/api/strategies'
 
 function fmt(v: number | null | undefined, decimals = 4): string {
@@ -94,7 +95,21 @@ export default function Strategies() {
   const currentStrategy = strategies.find(s => s.id === id)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, position: 'relative' }}>
+      <HelpButton title="Strategies — Validazione Strategie" sections={[
+        {
+          heading: "Le strategie",
+          content: "Alembic usa un portfolio multi-strategia. Ogni strategia è validata independently con 5 validation gates.\n\n**S1 — Time-Series Momentum**: strategia cross-asset trend-following con volatility targeting. VALIDATA (OOS Sharpe 0.51, 5/5 gate passati).\n\n**S3 — Cross-Sectional Momentum**: strategia equity residual momentum. R&D SLEEVE — gate 3 (robustness) e 5 (stress) FALLITI. OOS Sharpe 0.15. NON nel portfolio live.\n\nS2 (VRP) e S4 (News) sono in sviluppo.",
+        },
+        {
+          heading: "I 5 validation gates",
+          content: "1. **Significance**: OOS Sharpe > 0.5 — la strategia batte il caso?\n2. **Walk-Forward**: OOS Sharpe > 0.8 × IS Sharpe — il rendimento regge out-of-sample?\n3. **Robustness**: Sharpe stabile attraverso perturbazioni parametriche (CV < 0.5)\n4. **Regime Stability**: performa in diversi regimi di mercato (bull, bear, stress, goldilocks)\n5. **Stress Test**: non collassa in scenari estremi (2008, COVID 2020)",
+        },
+        {
+          heading: "Sensitivity",
+          content: "La griglia di sensitivity mostra lo Sharpe ratio per combinazioni di parametri (lookback × vol_window). Colori: verde (Sharpe > 0.6), giallo (0.4-0.6), rosso (< 0.4). Una strategia robusta ha un picco largo, non un singolo punto verde. Peak Sharpe near (lookback=126, vol_window=60).",
+        },
+      ]} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'white' }}>Strategies</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchLLMFeedback, fetchWeights, approveWeights } from '@/api/llm'
+import { HelpButton } from '@/components/shared/HelpButton'
 
 type Tab = 'feedback' | 'weights'
 
@@ -41,8 +42,18 @@ export default function LLM() {
   }
 
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
       <h2 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>LLM</h2>
+      <HelpButton title="LLM — Modelli e Pesi" sections={[
+        {
+          heading: "Feedback modelli",
+          content: "Mostra il feedback per ogni segnale generato: polarity (-1 a +1), confidence, divergenza tra modelli (σ), e il reasoning del modello.\n\n**Fallback (FB)**: se il modello primario fallisce, si usa un modello di fallback. Il badge giallo indica quando questo accade.",
+        },
+        {
+          heading: "Pesi ensemble",
+          content: "Il sistema calcola automaticamente i pesi ottimali per l'ensemble di modelli basandosi sulla performance storica.\n\n- **Current**: pesi attualmente in uso\n- **Suggested**: pesi raccomandati dal sistema\n- **Δ**: differenza tra suggested e current\n\nClicca 'Approve Weights' per accettare i pesi suggeriti. Serve API key.",
+        },
+      ]} />
 
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: 20 }}>
         <button style={tabStyle('feedback')} onClick={() => setTab('feedback')}>Feedback modelli</button>

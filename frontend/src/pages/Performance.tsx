@@ -5,6 +5,7 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import { fetchPnL } from '@/api/performance'
+import { HelpButton } from '@/components/shared/HelpButton'
 
 const PERIODS = ['1M', '3M', '6M', '1Y'] as const
 type Period = typeof PERIODS[number]
@@ -29,7 +30,21 @@ export default function Performance() {
   }, [daily])
 
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
+      <HelpButton title="Performance — Rendimento" sections={[
+        {
+          heading: "Come leggere i grafici",
+          content: "**Cumulative P&L**: il profitto/perdita cumulativo nel periodo selezionato. Linea blu che sale = profitto, che scende = perdita.\n\n**Portfolio Equity**: il valore totale del portafoglio nel tempo. Linea verde.",
+        },
+        {
+          heading: "Periodi disponibili",
+          content: "1M, 3M, 6M, 1Y. I dati vengono dal worker di performance che gira ogni giorno alle 22:00 UTC. Se non vedi dati, potrebbe non esserci ancora un ciclo completo.",
+        },
+        {
+          heading: "Monthly P&L Summary",
+          content: "La tabella in basso mostra P&L mensile aggregato. ▲ Gain = mese positivo, ▼ Loss = mese negativo. Utile per verificare la consistenza del rendimento.",
+        },
+      ]} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Performance</h2>
         <div style={{ display: 'flex', gap: 4 }}>

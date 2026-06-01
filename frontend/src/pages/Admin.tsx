@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchKillswitchStatus, activateKillswitch, deactivateKillswitch, fetchMode, setMode } from '@/api/admin'
+import { HelpButton } from '@/components/shared/HelpButton'
 import { useStore } from '@/store'
 
 const MODES = ['backtest', 'paper', 'semi_auto', 'full_auto', 'halted'] as const
@@ -43,8 +44,22 @@ export default function Admin() {
   const ksActive = ks?.active ?? false
 
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
       <h2 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>Admin</h2>
+      <HelpButton title="Admin — Amministrazione" sections={[
+        {
+          heading: "Kill Switch",
+          content: "Il kill switch ferma TUTTA l'esecuzione di ordini immediatamente. Usalo solo in emergenza. Quando è attivo (rosso), nessun ordine viene eseguito. Per disattivarlo, clicca 'Deactivate'.",
+        },
+        {
+          heading: "Operating Mode",
+          content: "- **Backtest**: simulazione storica, nessun ordine reale\n- **Paper**: trading simulato con Alpaca paper, nessun capitale reale\n- **Semi-auto**: ogni ordine richiede conferma via Telegram\n- **Full-auto**: esecuzione completamente automatica\n- **Halted**: tutto fermo\n\nIl mode corrente è mostrato nel sidebar.",
+        },
+        {
+          heading: "⚠️ Attenzione",
+          content: "La pagina Admin richiede API key per le operazioni di scrittura. Passare a full-auto senza aver prima testato in paper è pericoloso.",
+        },
+      ]} />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
         <div className="card" style={{ textAlign: 'center' }}>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchConfig, updateConfig, type ConfigResponse } from '@/api/config'
+import { HelpButton } from '@/components/shared/HelpButton'
 
 export default function Config() {
   const qc = useQueryClient()
@@ -29,8 +30,22 @@ export default function Config() {
   if (isLoading) return <p style={{ color: 'var(--text-muted)' }}>Loading config...</p>
 
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
       <h2 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>Config</h2>
+      <HelpButton title="Config — Configurazione" sections={[
+        {
+          heading: "Watchlist",
+          content: "I ticker nel watchlist sono quelli monitorati dal sistema per generare segnali. Aggiungi con il campo di testo (premi Enter o clicca Add), rimuovi cliccando la × sul badge.",
+        },
+        {
+          heading: "Risk Parameters",
+          content: "**Max Drawdown**: soglia percentuale di drawdown del portafoglio. Se superata, il killswitch si attiva automaticamente. Valore tipico: 10-20%.\n\n**Stop Loss**: la perdita massima per singola posizione. Quando il P&L scende sotto questa soglia, la posizione viene chiusa automaticamente. Valore tipico: 2-5%.",
+        },
+        {
+          heading: "Salvataggio",
+          content: "Le modifiche sono permanenti. Clicca 'Save Config' per applicare (serve API key). Le modifiche alla watchlist influenzano il prossimo ciclo di generazione segnali (ogni 15 minuti).",
+        },
+      ]} />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
         <div className="card">

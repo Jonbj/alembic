@@ -1,6 +1,7 @@
 import { Fragment, useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchNews, type NewsItem } from '@/api/news'
+import { HelpButton } from '@/components/shared/HelpButton'
 
 function safeUrl(url: string): string | undefined {
   try {
@@ -33,8 +34,22 @@ export default function News() {
   }
 
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
       <h2 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>News</h2>
+      <HelpButton title="News — Notizie" sections={[
+        {
+          heading: "Fonti dati",
+          content: "Le notizie provengono da tre fonti:\n\n- **GDELT GKG**: global knowledge graph con entities e sentiment automatizzato\n- **MarketAux**: notizie finanziarie con metadata aziendale\n- **Alpaca**: notizie dal broker direttamente",
+        },
+        {
+          heading: "Sentiment",
+          content: "Ogni articolo ha un sentiment grezzo (raw_sentiment): positivo > 0.1, negativo < -0.1, neutro altrimenti. Il sentiment viene calcolato dal modello LLM e alimentato nel sistema di segnali.",
+        },
+        {
+          heading: "Filtraggio",
+          content: "Filtra per ticker (es. SPY) o per fonte. Clicca su una riga per espandere e vedere l'URL dell'articolo e il sentiment score dettagliato.",
+        },
+      ]} />
 
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
         <input placeholder="Filter ticker..." value={ticker} onChange={(e) => setTicker(e.target.value)} style={{ width: 160 }} />
