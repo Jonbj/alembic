@@ -218,3 +218,275 @@ def test_multiple_violations_all_recorded(unit_market, std_allocations):
     constraint_names = [v.constraint_name for v in violations]
     assert "MAX_SINGLE_ASSET_PCT" in constraint_names
     assert "MAX_STRATEGY_EXPOSURE" in constraint_names
+
+
+# ── MAX_SECTOR_EXPOSURE ────────────────────────────────────────────────────────
+
+def test_sector_exposure_reduces_orders_when_sector_exceeds_25pct(unit_market, std_allocations):
+    # tech: A0(150) + A1(150) = 300 > 25%*1000=250 → scale to 250
+    sector_map = {"A0": "tech", "A1": "tech"}
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0, sector_map=sector_map,
+    )
+    orders = [
+        _combined("A0", OrderSide.BUY, 150.0, "S1", 0.5),
+        _combined("A1", OrderSide.BUY, 150.0, "S1", 0.5),
+    ]
+    result, _ = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    total_qty = sum(o.quantity for o in result)
+    assert total_qty == pytest.approx(250.0)
+
+
+def test_sector_exposure_at_limit_no_violation(unit_market, std_allocations):
+    # tech: 125 + 125 = 250 = exactly 25% → no sector violation
+    sector_map = {"A0": "tech", "A1": "tech"}
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0, sector_map=sector_map,
+    )
+    orders = [
+        _combined("A0", OrderSide.BUY, 125.0, "S1", 0.5),
+        _combined("A1", OrderSide.BUY, 125.0, "S1", 0.5),
+    ]
+    _, violations = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    assert not any(v.constraint_name == "MAX_SECTOR_EXPOSURE" for v in violations)
+
+
+def test_sector_exposure_records_constraint_name(unit_market, std_allocations):
+    sector_map = {"A0": "tech", "A1": "tech"}
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0, sector_map=sector_map,
+    )
+    orders = [
+        _combined("A0", OrderSide.BUY, 150.0, "S1", 0.5),
+        _combined("A1", OrderSide.BUY, 150.0, "S1", 0.5),
+    ]
+    _, violations = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    assert any(v.constraint_name == "MAX_SECTOR_EXPOSURE" for v in violations)
+
+
+def test_sector_exposure_violation_carries_strategy_id(unit_market, std_allocations):
+    sector_map = {"A0": "tech", "A1": "tech"}
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0, sector_map=sector_map,
+    )
+    orders = [
+        _combined("A0", OrderSide.BUY, 150.0, "S1", 0.5),
+        _combined("A1", OrderSide.BUY, 150.0, "S1", 0.5),
+    ]
+    _, violations = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    sector_v = [v for v in violations if v.constraint_name == "MAX_SECTOR_EXPOSURE"]
+    assert sector_v
+    assert all(v.strategy_id != "" for v in sector_v)
+
+
+def test_sector_exposure_sell_orders_not_constrained(unit_market, std_allocations):
+    sector_map = {"A0": "tech"}
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0, sector_map=sector_map,
+    )
+    orders = [_combined("A0", OrderSide.SELL, 500.0, "S1", 0.5)]
+    result, violations = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    assert not any(v.constraint_name == "MAX_SECTOR_EXPOSURE" for v in violations)
+    assert result[0].quantity == pytest.approx(500.0)
+
+
+def test_sector_exposure_only_violating_sector_reduced(unit_market, std_allocations):
+    # tech violates (300 > 250), energy does not (50 < 250)
+    sector_map = {"A0": "tech", "A1": "tech", "A2": "energy"}
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0, sector_map=sector_map,
+    )
+    orders = [
+        _combined("A0", OrderSide.BUY, 150.0, "S1", 0.5),
+        _combined("A1", OrderSide.BUY, 150.0, "S1", 0.5),
+        _combined("A2", OrderSide.BUY, 50.0, "S2", 0.3),
+    ]
+    result, _ = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    energy_order = next(o for o in result if o.symbol == "A2")
+    assert energy_order.quantity == pytest.approx(50.0)
+
+
+def test_sector_exposure_none_map_disables_constraint(unit_market, std_allocations):
+    # No sector_map → sector constraint not applied even if exposure > 25%
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0,
+    )
+    orders = [
+        _combined("A0", OrderSide.BUY, 150.0, "S1", 0.5),
+        _combined("A1", OrderSide.BUY, 150.0, "S1", 0.5),
+    ]
+    _, violations = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    assert not any(v.constraint_name == "MAX_SECTOR_EXPOSURE" for v in violations)
+
+
+def test_sector_exposure_unknown_sector_tickers_grouped(unit_market, std_allocations):
+    # empty sector_map → A0 and A1 both → "unknown" sector; total 300 > 250 → reduced
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0, sector_map={},
+    )
+    orders = [
+        _combined("A0", OrderSide.BUY, 150.0, "S1", 0.5),
+        _combined("A1", OrderSide.BUY, 150.0, "S1", 0.5),
+    ]
+    result, _ = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    total_qty = sum(o.quantity for o in result)
+    assert total_qty == pytest.approx(250.0)
+
+
+# ── MAX_CORRELATION_CLUSTER ────────────────────────────────────────────────────
+
+# S2 returns = 2×S1 → perfect correlation, higher volatility
+_S1_RETURNS = [0.01, 0.02, 0.03, 0.04, 0.05]
+_S2_RETURNS = [0.02, 0.04, 0.06, 0.08, 0.10]
+# Low correlation with S1 (computed corr ≈ -0.31)
+_S3_UNCORR = [0.05, -0.03, 0.04, -0.02, 0.01]
+
+
+def test_correlation_reduces_higher_vol_strategy(unit_market, std_allocations):
+    # S2 perfectly correlated with S1 and has higher std dev → S2 reduced
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0,
+        strategy_returns={"S1": _S1_RETURNS, "S2": _S2_RETURNS},
+    )
+    orders = [
+        _combined("A0", OrderSide.BUY, 100.0, "S1", 0.5),
+        _combined("A1", OrderSide.BUY, 100.0, "S2", 0.3),
+    ]
+    result, _ = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    s1_order = next(o for o in result if o.strategy_id == "S1")
+    s2_order = next(o for o in result if o.strategy_id == "S2")
+    assert s1_order.quantity == pytest.approx(100.0)
+    assert s2_order.quantity < 100.0
+
+
+def test_correlation_reduces_by_exactly_20_percent(unit_market, std_allocations):
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0,
+        strategy_returns={"S1": _S1_RETURNS, "S2": _S2_RETURNS},
+    )
+    orders = [
+        _combined("A0", OrderSide.BUY, 100.0, "S1", 0.5),
+        _combined("A1", OrderSide.BUY, 100.0, "S2", 0.3),
+    ]
+    result, _ = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    s2_order = next(o for o in result if o.strategy_id == "S2")
+    assert s2_order.quantity == pytest.approx(80.0)
+
+
+def test_correlation_below_threshold_no_reduction(unit_market, std_allocations):
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0,
+        strategy_returns={"S1": _S1_RETURNS, "S2": _S3_UNCORR},
+    )
+    orders = [
+        _combined("A0", OrderSide.BUY, 100.0, "S1", 0.5),
+        _combined("A1", OrderSide.BUY, 100.0, "S2", 0.3),
+    ]
+    result, violations = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    assert not any(v.constraint_name == "MAX_CORRELATION_CLUSTER" for v in violations)
+    assert all(o.quantity == pytest.approx(100.0) for o in result)
+
+
+def test_correlation_violation_records_constraint_name(unit_market, std_allocations):
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0,
+        strategy_returns={"S1": _S1_RETURNS, "S2": _S2_RETURNS},
+    )
+    orders = [
+        _combined("A0", OrderSide.BUY, 100.0, "S1", 0.5),
+        _combined("A1", OrderSide.BUY, 100.0, "S2", 0.3),
+    ]
+    _, violations = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    assert any(v.constraint_name == "MAX_CORRELATION_CLUSTER" for v in violations)
+
+
+def test_correlation_violation_carries_strategy_id(unit_market, std_allocations):
+    # S2 is the higher-vol strategy → violation strategy_id = "S2"
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0,
+        strategy_returns={"S1": _S1_RETURNS, "S2": _S2_RETURNS},
+    )
+    orders = [
+        _combined("A0", OrderSide.BUY, 100.0, "S1", 0.5),
+        _combined("A1", OrderSide.BUY, 100.0, "S2", 0.3),
+    ]
+    _, violations = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    corr_v = [v for v in violations if v.constraint_name == "MAX_CORRELATION_CLUSTER"]
+    assert corr_v
+    assert corr_v[0].strategy_id == "S2"
+
+
+def test_correlation_empty_returns_no_constraint(unit_market, std_allocations):
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0, strategy_returns={},
+    )
+    orders = [
+        _combined("A0", OrderSide.BUY, 100.0, "S1", 0.5),
+        _combined("A1", OrderSide.BUY, 100.0, "S2", 0.3),
+    ]
+    result, violations = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    assert not any(v.constraint_name == "MAX_CORRELATION_CLUSTER" for v in violations)
+    assert all(o.quantity == pytest.approx(100.0) for o in result)
+
+
+def test_correlation_insufficient_data_no_constraint(unit_market, std_allocations):
+    # Only 1 data point per strategy → can't compute meaningful correlation
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0,
+        strategy_returns={"S1": [0.05], "S2": [0.05]},
+    )
+    orders = [
+        _combined("A0", OrderSide.BUY, 100.0, "S1", 0.5),
+        _combined("A1", OrderSide.BUY, 100.0, "S2", 0.3),
+    ]
+    result, violations = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    assert not any(v.constraint_name == "MAX_CORRELATION_CLUSTER" for v in violations)
+
+
+# ── Iterative resolution ───────────────────────────────────────────────────────
+
+def test_iterative_resolution_converges(std_allocations):
+    # A0 and A1 each 200, single_asset cap=15% (150), sector=tech (cap=25%=250)
+    # Pass 1: single_asset reduces each to 150; sector reduces to 125 each (300→250)
+    # Pass 2: 125 ≤ 150 and 250 ≤ 250 → no violations → exits early
+    market = _market({"A0": 1.0, "A1": 1.0})
+    sector_map = {"A0": "tech", "A1": "tech"}
+    enforcer = ConstraintEnforcer(
+        max_single_asset_pct=0.15, max_portfolio_exposure=10.0,
+        max_strategy_overshoot=100.0, sector_map=sector_map,
+    )
+    orders = [
+        _combined("A0", OrderSide.BUY, 200.0, "S1", 0.5),
+        _combined("A1", OrderSide.BUY, 200.0, "S1", 0.5),
+    ]
+    result, violations = enforcer.enforce(orders, market, nav=1000.0, allocations=std_allocations)
+    assert any(v.constraint_name == "MAX_SINGLE_ASSET_PCT" for v in violations)
+    assert any(v.constraint_name == "MAX_SECTOR_EXPOSURE" for v in violations)
+    for o in result:
+        assert o.quantity * 1.0 <= 0.15 * 1000.0 + 1e-9
+    tech_total = sum(o.quantity for o in result if o.side == OrderSide.BUY)
+    assert tech_total <= 0.25 * 1000.0 + 1e-9
+
+
+def test_iterative_no_violations_completes_without_error(unit_market, std_allocations):
+    # Clean scenario: no constraints fired → exits after first pass with no violations
+    enforcer = ConstraintEnforcer()
+    orders = [_combined(f"A{i}", OrderSide.BUY, 10.0, "S1", 0.5) for i in range(5)]
+    result, violations = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
+    assert violations == []
+    assert all(o.quantity == pytest.approx(10.0) for o in result)
