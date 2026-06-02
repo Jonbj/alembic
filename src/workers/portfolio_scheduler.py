@@ -176,11 +176,10 @@ def _run_cycle_inner() -> dict:
         log.warning("Could not read system:mode from Redis: %s — proceeding with submission", exc)
         operating_mode = None
 
-    if operating_mode == "dry_run":
-        log.info("Skipping order submission - dry_run mode")
+    if operating_mode in ("dry_run", "halted"):
+        log.info("Skipping order submission - %s mode", operating_mode)
         submitted = 0
     else:
-        # Submit orders and persist
         submitted = _submit_portfolio_orders(result.final_orders, trading_client, market)
     _persist_cycle_result({
         "timestamp": end,

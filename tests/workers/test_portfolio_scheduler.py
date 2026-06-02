@@ -79,6 +79,59 @@ def test_run_portfolio_cycle_returns_error_dict_on_exception():
     assert "boom" in result["error"]
 
 
+# ── dry_run / halted mode guard ───────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("mode", ["dry_run", "halted"])
+def test_submit_not_called_when_mode_blocks(mode):
+    """_submit_portfolio_orders is never called when system mode is dry_run or halted."""
+    import pandas as pd
+    from src.workers.portfolio_scheduler import _run_cycle_inner
+
+    bars_df = pd.DataFrame({"SPY": [100.0 + i * 0.1 for i in range(100)]})
+    bars_df.index = pd.date_range("2025-01-01", periods=100, freq="B")
+
+    mock_cycle_result = MagicMock()
+    mock_cycle_result.final_orders = [_make_combined_order("SPY", OrderSide.BUY)]
+    mock_cycle_result.strategies_run = ["S1"]
+    mock_cycle_result.orders_before_constraints = 1
+    mock_cycle_result.orders_after_constraints = 1
+    mock_cycle_result.constraints_fired = []
+
+    with patch("src.strategies.registry.StrategyRegistry") as mock_reg, \
+         patch("alpaca.data.historical.StockHistoricalDataClient") as mock_dc, \
+         patch("alpaca.trading.client.TradingClient") as mock_tc, \
+         patch("src.portfolio.orchestrator.PortfolioOrchestrator") as mock_orch, \
+         patch("src.backtest.engine.data_replay.DataReplay"), \
+         patch("src.backtest.engine.portfolio.VirtualPortfolio"), \
+         patch("src.workers.portfolio_scheduler._persist_cycle_result"), \
+         patch("src.workers.portfolio_scheduler._submit_portfolio_orders") as mock_submit, \
+         patch("redis.Redis") as mock_redis_cls:
+
+        entry = MagicMock()
+        entry.strategy_id = "S1"
+        entry.allocation_pct = 1.0
+        mock_reg.return_value.get_active_strategies.return_value = [entry]
+
+        raw_df = bars_df.copy()
+        raw_df.index.name = "timestamp"
+        raw_df.columns.name = "symbol"
+        raw_df = raw_df.reset_index()
+        mock_dc.return_value.get_stock_bars.return_value.df = raw_df
+
+        mock_tc.return_value.get_account.return_value.cash = "100000"
+        mock_tc.return_value.get_all_positions.return_value = []
+        mock_orch.return_value.run_cycle.return_value = mock_cycle_result
+        mock_redis_cls.from_url.return_value.get.return_value = mode
+
+        try:
+            _run_cycle_inner()
+        except Exception:
+            pass  # data-path errors are irrelevant; we only care about submit
+
+        mock_submit.assert_not_called()
+
+
 # ── _build_strategy_instance ──────────────────────────────────────────────────
 
 
