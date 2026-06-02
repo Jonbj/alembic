@@ -138,8 +138,8 @@ def _store_decay_report(pg, report) -> int:
         raise
 
 
-@app.task(name="src.workers.decay_monitor_task.run_decay_monitor")
-def run_decay_monitor() -> dict:
+@app.task(name="src.workers.decay_monitor_task.run_decay_check")
+def run_decay_check() -> dict:
     """Monthly decay monitoring: compare actual vs baseline performance.
 
     Returns:

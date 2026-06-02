@@ -134,7 +134,7 @@ app.conf.beat_schedule = {
     },
     # Decay monitor: 1st of month at 23:00 UTC
     "decay-monitor": {
-        "task": "src.workers.decay_monitor_task.run_decay_monitor",
+        "task": "src.workers.decay_monitor_task.run_decay_check",
         "schedule": crontab(minute=0, hour=23, day_of_month="1"),
     },
     # Risk monitor daily at 22:30 UTC (after forward-return worker at 22:00)

@@ -191,8 +191,8 @@ class TestDecayMonitor:
 
 
 class TestDecayMonitorTask:
-    def test_run_decay_monitor_returns_results_dict(self):
-        from src.workers.decay_monitor_task import run_decay_monitor
+    def test_run_decay_check_returns_results_dict(self):
+        from src.workers.decay_monitor_task import run_decay_check
 
         mock_pg = MagicMock()
         mock_cur = MagicMock()
@@ -208,14 +208,14 @@ class TestDecayMonitorTask:
 
         with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_pg):
             with patch("src.workers.decay_monitor_task._store_decay_report", return_value=1):
-                result = run_decay_monitor.run()
+                result = run_decay_check.run()
 
         assert "strategies" in result
         assert "total_alerts" in result
         assert len(result["strategies"]) == 3  # S1, S2, S4
 
-    def test_run_decay_monitor_critical_decay_logs_critical(self):
-        from src.workers.decay_monitor_task import run_decay_monitor
+    def test_run_decay_check_critical_decay_logs_critical(self):
+        from src.workers.decay_monitor_task import run_decay_check
 
         mock_pg = MagicMock()
         mock_cur = MagicMock()
@@ -230,7 +230,7 @@ class TestDecayMonitorTask:
 
         with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_pg):
             with patch("src.workers.decay_monitor_task._store_decay_report", return_value=1):
-                result = run_decay_monitor.run()
+                result = run_decay_check.run()
 
         # Should have alerts due to degradation
         assert result["total_alerts"] >= 0
