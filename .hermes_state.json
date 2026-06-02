@@ -1,5 +1,5 @@
 {
-  "current_task": "T-505",
+  "current_task": "T-601",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -176,6 +176,11 @@
       "status": "DONE",
       "commit": "e6dd00e",
       "notes": "PortfolioVolTargeter: EWMA vol estimation (span=60), scaling factor target_vol/estimated_vol, clamped 0.5-2.0. PortfolioCombiner extended with vol_targeting_mode. 28 new tests; 117 total portfolio tests passing."
+    },
+    "T-505": {
+      "status": "DONE",
+      "commit": "f147d06",
+      "notes": "MultiStrategyBacktester: walk-forward multi-strategy backtesting with PortfolioCombiner, ConstraintEnforcer, individual strategy tracking, diversification ratio. 23 integration tests passing. 140 total portfolio tests passing."
     }
   },
   "milestone_b_details": {
