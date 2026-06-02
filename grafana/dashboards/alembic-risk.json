@@ -3,12 +3,18 @@
   "uid": "alembic-risk",
   "title": "Alembic - Risk Monitor",
   "description": "Multi-strategy risk exposure, weights, confidence, and alerts",
-  "tags": ["alembic", "risk"],
+  "tags": [
+    "alembic",
+    "risk"
+  ],
   "timezone": "browser",
   "schemaVersion": 38,
   "version": 1,
   "refresh": "1m",
-  "time": { "from": "now-7d", "to": "now" },
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
   "timepicker": {},
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -21,18 +27,32 @@
       "icon": "dashboard"
     }
   ],
-  "annotations": { "list": [] },
-  "templating": { "list": [] },
+  "annotations": {
+    "list": []
+  },
+  "templating": {
+    "list": []
+  },
   "panels": [
     {
       "id": 1,
       "type": "timeseries",
       "title": "Portfolio Risk Exposure",
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
-      "datasource": { "type": "grafana-postgresql-datasource", "uid": "alembic-postgres" },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "alembic-postgres"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "drawStyle": "line",
             "lineInterpolation": "linear",
@@ -50,22 +70,54 @@
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Herfindahl Index" },
-            "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }]
+            "matcher": {
+              "id": "byName",
+              "options": "Herfindahl Index"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "yellow",
+                  "mode": "fixed"
+                }
+              }
+            ]
           },
           {
-            "matcher": { "id": "byName", "options": "Combined Drawdown" },
-            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+            "matcher": {
+              "id": "byName",
+              "options": "Combined Drawdown"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
           }
         ]
       },
       "options": {
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
-          "datasource": { "type": "grafana-postgresql-datasource", "uid": "alembic-postgres" },
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "alembic-postgres"
+          },
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
@@ -78,12 +130,22 @@
     {
       "id": 2,
       "type": "timeseries",
-      "title": "Strategy Weights Over Time",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
-      "datasource": { "type": "grafana-postgresql-datasource", "uid": "alembic-postgres" },
+      "title": "LLM Model Weights Over Time",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "alembic-postgres"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "drawStyle": "line",
             "lineInterpolation": "stepAfter",
@@ -100,16 +162,26 @@
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
-        "tooltip": { "mode": "multi", "sort": "desc" }
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
       },
       "targets": [
         {
-          "datasource": { "type": "grafana-postgresql-datasource", "uid": "alembic-postgres" },
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "alembic-postgres"
+          },
           "editorMode": "code",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT\n  applied_at AS time,\n  COALESCE((applied_weights->>'S1')::numeric, 0) AS \"S1 Weight\",\n  COALESCE((applied_weights->>'S2')::numeric, 0) AS \"S2 Weight\",\n  COALESCE((applied_weights->>'S4')::numeric, 0) AS \"S4 Weight\"\nFROM weight_update_log\nWHERE $__timeFilter(applied_at)\nORDER BY applied_at",
+          "rawSql": "SELECT\n  applied_at AS time,\n  COALESCE((applied_weights->>'qwen3.5:397b')::numeric, 0) AS \"Qwen3.5\",\n  COALESCE((applied_weights->>'glm-5.1:cloud')::numeric, 0) AS \"GLM-5.1\",\n  COALESCE((applied_weights->>'kimi-k2.6:cloud')::numeric, 0) AS \"Kimi-K2\",\n  COALESCE((applied_weights->>'deepseek-v4-pro:cloud')::numeric, 0) AS \"DeepSeek-V4\"\nFROM weight_update_log\nWHERE (applied_at)\nORDER BY applied_at",
           "refId": "A",
           "sql": {}
         }
@@ -119,15 +191,29 @@
       "id": 3,
       "type": "barchart",
       "title": "Signal Confidence by Model",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
-      "datasource": { "type": "grafana-postgresql-datasource", "uid": "alembic-postgres" },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "alembic-postgres"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "palette-classic" },
+          "color": {
+            "mode": "palette-classic"
+          },
           "custom": {
             "fillOpacity": 75,
             "lineWidth": 1,
-            "hideFrom": { "legend": false, "tooltip": false, "viz": false }
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
           },
           "unit": "none",
           "min": 0,
@@ -140,16 +226,26 @@
         "barRadius": 0.05,
         "barWidth": 0.7,
         "groupWidth": 0.7,
-        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
         "orientation": "vertical",
         "showValue": "always",
         "stacking": "none",
-        "tooltip": { "mode": "single", "sort": "none" },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
         "xTickLabelRotation": -20
       },
       "targets": [
         {
-          "datasource": { "type": "grafana-postgresql-datasource", "uid": "alembic-postgres" },
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "alembic-postgres"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
@@ -163,72 +259,140 @@
       "id": 4,
       "type": "table",
       "title": "Recent Risk Reports",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 17 },
-      "datasource": { "type": "grafana-postgresql-datasource", "uid": "alembic-postgres" },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "alembic-postgres"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": { "mode": "thresholds" },
+          "color": {
+            "mode": "thresholds"
+          },
           "custom": {
             "align": "auto",
-            "cellOptions": { "type": "auto" },
+            "cellOptions": {
+              "type": "auto"
+            },
             "inspect": false
           },
           "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "Alert Count" },
+            "matcher": {
+              "id": "byName",
+              "options": "Alert Count"
+            },
             "properties": [
               {
                 "id": "custom.cellOptions",
-                "value": { "type": "color-background", "mode": "basic" }
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
               },
               {
                 "id": "thresholds",
                 "value": {
                   "mode": "absolute",
                   "steps": [
-                    { "color": "green", "value": null },
-                    { "color": "yellow", "value": 1 },
-                    { "color": "red", "value": 3 }
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 3
+                    }
                   ]
                 }
               }
             ]
           },
           {
-            "matcher": { "id": "byName", "options": "Combined Drawdown" },
+            "matcher": {
+              "id": "byName",
+              "options": "Combined Drawdown"
+            },
             "properties": [
               {
                 "id": "custom.cellOptions",
-                "value": { "type": "color-background", "mode": "basic" }
+                "value": {
+                  "type": "color-background",
+                  "mode": "basic"
+                }
               },
               {
                 "id": "thresholds",
                 "value": {
                   "mode": "absolute",
                   "steps": [
-                    { "color": "green", "value": null },
-                    { "color": "yellow", "value": -0.05 },
-                    { "color": "red", "value": -0.1 }
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": -0.05
+                    },
+                    {
+                      "color": "red",
+                      "value": -0.1
+                    }
                   ]
                 }
               },
-              { "id": "unit", "value": "percentunit" }
+              {
+                "id": "unit",
+                "value": "percentunit"
+              }
             ]
           }
         ]
       },
       "options": {
         "cellHeight": "sm",
-        "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false },
+        "footer": {
+          "countRows": false,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
         "showHeader": true,
-        "sortBy": [{ "desc": true, "displayName": "Time" }]
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Time"
+          }
+        ]
       },
       "targets": [
         {
-          "datasource": { "type": "grafana-postgresql-datasource", "uid": "alembic-postgres" },
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "alembic-postgres"
+          },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
