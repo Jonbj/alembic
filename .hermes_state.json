@@ -1,5 +1,5 @@
 {
-  "current_task": "T-602",
+  "current_task": "T-603",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -186,6 +186,11 @@
       "status": "DONE",
       "commit": "37b70c8",
       "notes": "StrategyRegistry (21 tests) + PortfolioOrchestrator (20 tests) + Celery portfolio_scheduler task. Full cycle: strategies \u2192 combiner \u2192 constraints \u2192 vol targeting \u2192 orders. 41 new tests."
+    },
+    "T-602": {
+      "status": "DONE",
+      "commit": "203a2eb",
+      "notes": "PortfolioRiskMonitor: per-strategy drawdown/Sharpe/vol, combined exposure, Herfindahl index, correlation drift. Alert thresholds: drawdown >10%, combined >15%, weight drift >5%, corr >0.8, exposure >50%. Celery risk_monitor_task daily at 22:05 UTC. Migration 012_risk_reports. 31 tests."
     }
   },
   "milestone_b_details": {
