@@ -104,14 +104,16 @@ def test_build_strategy_instance_s1_returns_instance_with_enough_bars():
     assert isinstance(result, TimeSeriesMomentum)
 
 
-def test_build_strategy_instance_s2_returns_none_without_spy():
-    """S2 requires SPY in bars_df; returns None when absent."""
+def test_build_strategy_instance_s2_creates_instance_without_spy():
+    """S2 falls back to first column when SPY is absent — still returns instance."""
+    from src.strategies.s2.strategy import VRPStrategy
     from src.workers.portfolio_scheduler import _build_strategy_instance
 
     entry = MagicMock()
     entry.strategy_id = "S2"
     bars_df = _make_bars_df(n=100, symbols=["QQQ", "GLD"])
-    assert _build_strategy_instance(entry, bars_df) is None
+    result = _build_strategy_instance(entry, bars_df)
+    assert isinstance(result, VRPStrategy)
 
 
 def test_build_strategy_instance_s2_returns_none_with_too_few_bars():
@@ -167,8 +169,8 @@ def test_submit_portfolio_orders_places_buy_orders():
     assert submitted_calls[0][0] == "SPY"
 
 
-def test_submit_portfolio_orders_skips_sell_orders():
-    """SELL-side orders are not submitted (paper portfolio only buys for now)."""
+def test_submit_portfolio_orders_submits_sell_orders():
+    """SELL-side orders are submitted to Alpaca like BUY orders."""
     from src.workers.portfolio_scheduler import _submit_portfolio_orders
 
     orders = [_make_combined_order("SPY", OrderSide.SELL, qty=10.0)]
@@ -176,7 +178,7 @@ def test_submit_portfolio_orders_skips_sell_orders():
     market = _make_market()
 
     submitted = _submit_portfolio_orders(orders, trading_client, market, _submit_fn=lambda o, n, c: None)
-    assert submitted == 0
+    assert submitted == 1
 
 
 def test_submit_portfolio_orders_returns_zero_for_empty_list():
@@ -213,7 +215,7 @@ def test_submit_portfolio_orders_continues_after_single_failure():
 
 
 def test_submit_portfolio_orders_mixed_buy_sell():
-    """Only BUY orders are submitted; SELL orders are skipped."""
+    """Both BUY and SELL orders are submitted."""
     from src.workers.portfolio_scheduler import _submit_portfolio_orders
 
     orders = [
@@ -225,12 +227,12 @@ def test_submit_portfolio_orders_mixed_buy_sell():
     market = _make_market(prices={"SPY": 100.0, "QQQ": 100.0, "GLD": 100.0})
 
     submitted_syms = []
-    def mock_submit(order, notional, client):
+    def mock_submit(order, notional_or_qty, client):
         submitted_syms.append(order.symbol)
 
     submitted = _submit_portfolio_orders(orders, trading_client, market, _submit_fn=mock_submit)
-    assert submitted == 2
-    assert submitted_syms == ["SPY", "GLD"]
+    assert submitted == 3
+    assert submitted_syms == ["SPY", "QQQ", "GLD"]
 
 
 # ── _persist_cycle_result ─────────────────────────────────────────────────────
