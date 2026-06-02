@@ -194,7 +194,8 @@
     },
     "T-603": {
       "status": "DONE",
-      "notes": "Grafana monitoring dashboard: grafana/grafana:latest on port 3001, auto-provisioned PostgreSQL datasource, two dashboards (alembic-overview: sentiment scores/distribution/IC/recent signals/budget/news; alembic-risk: exposure/weights/confidence/alerts). React /dashboard route with tab-switching iframe embed. No tests (infrastructure only)."
+      "commit": "a52ab88",
+      "notes": "Grafana 12.4.2 on :3001, provisioned with PostgreSQL datasource. 2 dashboards: Overview (6 panels: sentiment scores, signal distribution, IC/ICIR, recent signals, LLM spend, news volume) + Risk Monitor (4 panels: risk exposure, strategy weights, model confidence, risk reports). React /dashboard page with iframe embed. Anonymous viewer access enabled."
     }
   },
   "milestone_b_details": {
