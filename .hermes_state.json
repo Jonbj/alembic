@@ -1,5 +1,5 @@
 {
-  "current_task": "T-605",
+  "current_task": "T-605 DONE",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -239,5 +239,12 @@
       "S4"
     ],
     "notes": "S2 accepted with Gate 3 exception (marginal CV fail) and Gate 4 exception (documented for VRP). Low standalone Sharpe (0.20) is expected for VRP diversification strategy. Strategy provides excellent tail-risk protection (COVID max DD -0.44%)."
+  },
+  "fase_g": {
+    "T-601": "DONE",
+    "T-602": "DONE",
+    "T-603": "DONE",
+    "T-604": "DONE",
+    "T-605": "DONE"
   }
 }
