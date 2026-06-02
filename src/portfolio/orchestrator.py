@@ -1,15 +1,15 @@
 """PortfolioOrchestrator: run a full portfolio cycle across all active strategies.
 
 Each cycle:
-    1. Calls each active strategy's callable → list[Order]
-    2. Tags orders with allocation_weight from registry
-    3. Applies ConstraintEnforcer (position size, exposure, sector, correlation)
-    4. Optionally applies PortfolioVolTargeter when strategy_returns provided
-    5. Returns CycleResult with per-strategy counts, constraint violations, final orders
+    1. Collects target weights from each strategy, scaled by allocation_pct.
+    2. Merges target weights across strategies (weighted average).
+    3. Computes delta orders (BUY/SELL) from current portfolio to merged target.
+    4. Applies ConstraintEnforcer.
+    5. Optionally applies PortfolioVolTargeter when strategy_returns provided.
+    6. Returns CycleResult with per-strategy counts, constraint violations, final orders.
 
-Usage (Celery task):
-    result = orchestrator.run_cycle(ts, data_replay, portfolio, market, strategy_returns)
-    # submit result.final_orders to execution worker
+This approach avoids the double-counting bug where each strategy independently
+generates full-portfolio orders, which when merged additively produce 2x quantities.
 """
 from __future__ import annotations
 
@@ -45,6 +45,9 @@ class CycleResult:
 class PortfolioOrchestrator:
     """Orchestrate multi-strategy order generation with constraint enforcement.
 
+    Uses weight-then-order approach: strategies output target weights,
+    which are merged by allocation_pct before computing a single set of delta orders.
+
     Args:
         registry:            StrategyRegistry providing active entries + allocations.
         strategy_instances:  Mapping of strategy_id → initialized callable.
@@ -75,6 +78,10 @@ class PortfolioOrchestrator:
     ) -> CycleResult:
         """Execute one portfolio cycle.
 
+        The key insight: each strategy produces target *weights* (not orders).
+        We merge weights by allocation_pct, then compute delta orders ONCE
+        from the combined target vs current portfolio.
+
         Args:
             ts:               Current timestamp.
             data_replay:      Historical price data for strategy signal computation.
@@ -85,15 +92,18 @@ class PortfolioOrchestrator:
         Returns:
             CycleResult with strategies run, order counts, constraint violations, orders.
         """
+        from uuid import uuid4
+
         active = self._registry.get_active_strategies()
         allocations = {e.strategy_id: e.allocation_pct for e in active}
 
         strategies_run: list[str] = []
         orders_per_strategy: dict[str, int] = {}
-        combined: list[CombinedOrder] = []
+        merged_weights: dict[str, float] = {}
 
         nav = self._compute_nav(portfolio, market)
 
+        # Step 1: Collect target weights from each strategy
         for entry in active:
             callable_fn = self._instances.get(entry.strategy_id)
             if callable_fn is None:
@@ -104,20 +114,90 @@ class PortfolioOrchestrator:
                 continue
 
             try:
-                orders = callable_fn(ts, data_replay, portfolio, market)
+                # Strategy returns a list[Order], but we need target weights.
+                # Strategies that have compute_target_weights() — use those directly.
+                # For strategies that only return orders, we extract implied weights.
+                tw = self._extract_target_weights(
+                    entry.strategy_id, callable_fn, ts, data_replay, portfolio, market, nav
+                )
                 strategies_run.append(entry.strategy_id)
-                orders_per_strategy[entry.strategy_id] = len(orders)
+                orders_per_strategy[entry.strategy_id] = len(tw)
 
-                for order in orders:
-                    combined.append(
-                        CombinedOrder.from_order(order, allocation_weight=entry.allocation_pct)
-                    )
+                # Merge: each strategy's weights scaled by its allocation_pct
+                alloc = entry.allocation_pct
+                for sym, wt in tw.items():
+                    merged_weights[sym] = merged_weights.get(sym, 0.0) + wt * alloc
+
             except Exception as exc:
                 log.error(
                     "Strategy %s raised an exception — skipping: %s",
                     entry.strategy_id,
                     exc,
+                    exc_info=True,
                 )
+
+        # Step 2: Build delta orders from merged target weights
+        combined: list[CombinedOrder] = []
+        for sym, target_wt in merged_weights.items():
+            if target_wt <= 0:
+                # If weight is 0 or negative → full SELL
+                pos = portfolio.position_of(sym)
+                if pos is not None and pos.quantity > 0:
+                    combined.append(CombinedOrder(
+                        order_id=str(uuid4()),
+                        timestamp=ts,
+                        symbol=sym,
+                        side=OrderSide.SELL,
+                        quantity=pos.quantity,
+                        order_type="MARKET",
+                        limit_price=None,
+                        strategy_id="merged",
+                        allocation_weight=1.0,
+                    ))
+                continue
+
+            price = market.price_of(sym)
+            if price is None or price <= 0:
+                continue
+
+            target_qty = (nav * target_wt) / price
+            pos = portfolio.position_of(sym)
+            current_qty = pos.quantity if pos is not None else 0.0
+            delta = target_qty - current_qty
+
+            if abs(delta) < 1e-4:
+                continue
+
+            side = OrderSide.BUY if delta > 0 else OrderSide.SELL
+            qty = abs(delta)
+            combined.append(CombinedOrder(
+                order_id=str(uuid4()),
+                timestamp=ts,
+                symbol=sym,
+                side=side,
+                quantity=qty,
+                order_type="MARKET",
+                limit_price=None,
+                strategy_id="merged",
+                allocation_weight=target_wt,
+            ))
+
+        # Also sell positions not in merged targets
+        for pos in portfolio.all_positions():
+            if pos.symbol not in merged_weights:
+                price = market.price_of(pos.symbol)
+                if price is not None and pos.quantity > 0:
+                    combined.append(CombinedOrder(
+                        order_id=str(uuid4()),
+                        timestamp=ts,
+                        symbol=pos.symbol,
+                        side=OrderSide.SELL,
+                        quantity=pos.quantity,
+                        order_type="MARKET",
+                        limit_price=None,
+                        strategy_id="merged",
+                        allocation_weight=0.0,
+                    ))
 
         orders_before = len(combined)
         violations: list[ConstraintViolation] = []
@@ -133,9 +213,10 @@ class PortfolioOrchestrator:
             combined = self._vol_targeter.scale_orders(combined, scale)
 
         log.info(
-            "Portfolio cycle complete: strategies=%s orders_before=%d "
-            "orders_after=%d constraints=%d",
+            "Portfolio cycle complete: strategies=%s merged_weights=%d symbols "
+            "orders_before=%d orders_after=%d constraints=%d",
             strategies_run,
+            len(merged_weights),
             orders_before,
             len(combined),
             len(violations),
@@ -151,6 +232,41 @@ class PortfolioOrchestrator:
         )
 
     # ── Private ────────────────────────────────────────────────────────────────
+
+    def _extract_target_weights(
+        self, strategy_id: str, callable_fn, ts, data_replay, portfolio, market, nav
+    ) -> dict[str, float]:
+        """Extract target weights from a strategy.
+
+        Strategies that expose compute_target_weights() → call that.
+        Otherwise, run the callable to get orders → infer weights from order values.
+        """
+        # S1 and S4 have compute_target_weights (takes prices or signals)
+        if hasattr(callable_fn, 'compute_target_weights'):
+            if strategy_id == "S1":
+                prices = data_replay.prices_until(ts)
+                return callable_fn.compute_target_weights(prices)
+            elif strategy_id == "S4":
+                signals = getattr(callable_fn, '_signals_as_of', lambda t: None)(ts)
+                return callable_fn.compute_target_weights(signals, as_of=ts)
+
+        # S2 returns orders → infer weights
+        orders = callable_fn(ts, data_replay, portfolio, market)
+        if not orders:
+            return {}
+
+        # Convert orders to implied weights
+        weights: dict[str, float] = {}
+        for order in orders:
+            price = market.price_of(order.symbol)
+            if price is None or price <= 0 or nav <= 0:
+                continue
+            value = price * order.quantity
+            wt = value / nav
+            sign = 1.0 if order.side == OrderSide.BUY else -1.0
+            weights[order.symbol] = weights.get(order.symbol, 0.0) + sign * wt
+
+        return weights
 
     def _compute_nav(self, portfolio: VirtualPortfolio, market: MarketSnapshot) -> float:
         nav = portfolio.cash

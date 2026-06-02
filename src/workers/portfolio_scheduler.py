@@ -223,34 +223,56 @@ def _build_strategy_instance(entry, bars_df):
 
 
 def _submit_portfolio_orders(orders, trading_client, market, _submit_fn=None) -> int:
-    """Submit BUY combined orders to Alpaca. SELL orders are skipped.
+    """Submit BUY and SELL orders to Alpaca.
 
     Args:
         orders: List of CombinedOrder to submit.
         trading_client: Alpaca TradingClient instance.
         market: MarketSnapshot with current prices.
-        _submit_fn: Optional override for testing (receives order, notional, trading_client).
+        _submit_fn: Optional override for testing (receives order, qty_or_notional, trading_client).
+            For BUY: receives (order, notional, trading_client).
+            For SELL: receives (order, qty, trading_client).
+
+    Returns:
+        Number of orders successfully submitted.
     """
     from src.backtest.engine.types import OrderSide
 
     submitted = 0
     for order in orders:
-        if order.side != OrderSide.BUY:
-            continue
         try:
-            price = market.prices.get(order.symbol, 100.0)
-            notional = round(price * order.quantity, 2)
-            if _submit_fn is not None:
-                _submit_fn(order, notional, trading_client)
+            if order.side == OrderSide.BUY:
+                price = market.prices.get(order.symbol, 100.0)
+                notional = round(price * order.quantity, 2)
+                if _submit_fn is not None:
+                    _submit_fn(order, notional, trading_client)
+                else:
+                    from alpaca.trading.requests import MarketOrderRequest
+                    req = MarketOrderRequest(
+                        symbol=order.symbol,
+                        notional=notional,
+                        side="buy",
+                        time_in_force="day",
+                    )
+                    trading_client.submit_order(req)
+            elif order.side == OrderSide.SELL:
+                qty = abs(order.quantity)
+                if qty < 1e-6:
+                    continue
+                if _submit_fn is not None:
+                    _submit_fn(order, qty, trading_client)
+                else:
+                    from alpaca.trading.requests import MarketOrderRequest
+                    req = MarketOrderRequest(
+                        symbol=order.symbol,
+                        qty=qty,
+                        side="sell",
+                        time_in_force="day",
+                    )
+                    trading_client.submit_order(req)
             else:
-                from alpaca.trading.requests import MarketOrderRequest
-                req = MarketOrderRequest(
-                    symbol=order.symbol,
-                    notional=notional,
-                    side="buy",
-                    time_in_force="day",
-                )
-                trading_client.submit_order(req)
+                log.warning("Unknown order side %s for %s — skipping", order.side, order.symbol)
+                continue
             submitted += 1
         except Exception as exc:
             log.warning("Failed to submit order for %s: %s", order.symbol, exc)
