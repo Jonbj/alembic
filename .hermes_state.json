@@ -1,5 +1,5 @@
 {
-  "current_task": "T-501",
+  "current_task": "T-502",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -156,6 +156,11 @@
       "status": "DONE",
       "commit": "d90aa6e",
       "notes": "S4 walk-forward backtest + validation gates. 20 backtest tests + 63 total S4 tests passing. Walk-forward with synthetic prices + signals, gate 1-5 report, perturbation, regime, stress tests."
+    },
+    "T-501": {
+      "status": "DONE",
+      "commit": "8925718",
+      "notes": "PortfolioCombiner + ConstraintEnforcer. types.py: CombinedOrder, ConstraintViolation, PortfolioState. combiner.py: aggregate() calls S1/S2/S4, tags orders with strategy_id+allocation_weight, tracks notional exposure. constraints.py: sequential MAX_SINGLE_ASSET_PCT(10%), MAX_STRATEGY_EXPOSURE(alloc×1.5), MAX_PORTFOLIO_EXPOSURE(50%) with proportional reduction. 47 tests passing."
     }
   },
   "milestone_b_details": {
