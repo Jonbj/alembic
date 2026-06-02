@@ -1,5 +1,5 @@
 {
-  "current_task": "T-601",
+  "current_task": "T-602",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -181,6 +181,11 @@
       "status": "DONE",
       "commit": "f147d06",
       "notes": "MultiStrategyBacktester: walk-forward multi-strategy backtesting with PortfolioCombiner, ConstraintEnforcer, individual strategy tracking, diversification ratio. 23 integration tests passing. 140 total portfolio tests passing."
+    },
+    "T-601": {
+      "status": "DONE",
+      "commit": "37b70c8",
+      "notes": "StrategyRegistry (21 tests) + PortfolioOrchestrator (20 tests) + Celery portfolio_scheduler task. Full cycle: strategies \u2192 combiner \u2192 constraints \u2192 vol targeting \u2192 orders. 41 new tests."
     }
   },
   "milestone_b_details": {
