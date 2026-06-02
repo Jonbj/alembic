@@ -31,6 +31,7 @@ app = Celery(
         "src.workers.performance",
         "src.workers.regime",
         "src.workers.retention",
+        "src.workers.risk_monitor_task",
         "src.workers.sentiment",
         "src.workers.telegram_poller",
     ],
@@ -123,6 +124,11 @@ app.conf.beat_schedule = {
     "run-retention-sweep": {
         "task": "src.workers.retention.run_retention_sweep",
         "schedule": crontab(hour=3, minute=30),
+    },
+    # Risk monitor daily at 22:30 UTC (after forward-return worker at 22:00)
+    "risk-monitor": {
+        "task": "src.workers.risk_monitor_task.compute_risk_report",
+        "schedule": crontab(hour=22, minute=30),
     },
 }
 
