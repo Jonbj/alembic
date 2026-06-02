@@ -525,6 +525,55 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+
+    def get_last_portfolio_cycle(self) -> dict | None:
+        """Return the most recent portfolio cycle, or None if no cycles exist."""
+        conn = self._ensure_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT timestamp, strategies_run, orders_count, constraints_fired, final_orders "
+                    "FROM portfolio_cycles ORDER BY timestamp DESC LIMIT 1"
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                return {
+                    "timestamp": row[0].isoformat() if row[0] else None,
+                    "strategies_run": row[1] if isinstance(row[1], list) else [],
+                    "orders_count": row[2] or 0,
+                    "constraints_fired": row[3] if isinstance(row[3], list) else [],
+                    "final_orders": row[4] if isinstance(row[4], list) else [],
+                }
+        except Exception:
+            conn.rollback()
+            return None
+
+    def get_portfolio_cycle_history(self, limit: int = 30) -> list[dict]:
+        """Return the last N portfolio cycles, newest first."""
+        conn = self._ensure_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT timestamp, strategies_run, orders_count, constraints_fired, final_orders "
+                    "FROM portfolio_cycles ORDER BY timestamp DESC LIMIT %s",
+                    (limit,)
+                )
+                rows = cur.fetchall()
+                result = []
+                for row in rows:
+                    result.append({
+                        "timestamp": row[0].isoformat() if row[0] else None,
+                        "strategies_run": row[1] if isinstance(row[1], list) else [],
+                        "orders_count": row[2] or 0,
+                        "constraints_fired": row[3] if isinstance(row[3], list) else [],
+                        "final_orders": row[4] if isinstance(row[4], list) else [],
+                    })
+                return result
+        except Exception:
+            conn.rollback()
+            return []
+
     def __del__(self) -> None:
         """Return pooled connection to pool on GC if close() was not called."""
         try:

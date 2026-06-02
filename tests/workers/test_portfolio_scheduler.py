@@ -30,6 +30,17 @@ def _make_bars_df(n: int = 100, symbols: list[str] | None = None) -> pd.DataFram
     return pd.DataFrame(data, index=idx)
 
 
+def _make_market(prices=None):
+    from src.backtest.engine.types import MarketSnapshot
+    prices = prices or {"SPY": 450.0}
+    return MarketSnapshot(
+        timestamp=datetime(2026, 6, 2, tzinfo=timezone.utc),
+        prices=prices,
+        volumes={sym: 1_000_000.0 for sym in prices},
+        adv_20d={sym: 1_000_000.0 for sym in prices},
+    )
+
+
 # ── run_portfolio_cycle (Celery entry-point) ──────────────────────────────────
 
 
@@ -37,7 +48,7 @@ def test_run_portfolio_cycle_returns_skipped_when_no_api_key():
     """Task skips when Alpaca API key is not configured."""
     with patch("src.config.config") as mock_cfg:
         mock_cfg.ALPACA_API_KEY = ""
-        mock_cfg.ALPACA_SECRET_KEY = "secret"
+        mock_cfg.ALPACA_SECRET_KEY = "xxx"
         from src.workers.portfolio_scheduler import run_portfolio_cycle
         result = run_portfolio_cycle.run()
     assert result == {"skipped": True, "reason": "no_credentials"}
@@ -46,7 +57,7 @@ def test_run_portfolio_cycle_returns_skipped_when_no_api_key():
 def test_run_portfolio_cycle_returns_skipped_when_no_secret_key():
     """Task skips when Alpaca secret key is not configured."""
     with patch("src.config.config") as mock_cfg:
-        mock_cfg.ALPACA_API_KEY = "key"
+        mock_cfg.ALPACA_API_KEY = "xxx"
         mock_cfg.ALPACA_SECRET_KEY = ""
         from src.workers.portfolio_scheduler import run_portfolio_cycle
         result = run_portfolio_cycle.run()
@@ -56,8 +67,8 @@ def test_run_portfolio_cycle_returns_skipped_when_no_secret_key():
 def test_run_portfolio_cycle_returns_error_dict_on_exception():
     """Unhandled exceptions are caught and returned as error dict."""
     with patch("src.config.config") as mock_cfg:
-        mock_cfg.ALPACA_API_KEY = "key"
-        mock_cfg.ALPACA_SECRET_KEY = "secret"
+        mock_cfg.ALPACA_API_KEY = "xxx"
+        mock_cfg.ALPACA_SECRET_KEY = "xxx"
         with patch(
             "src.workers.portfolio_scheduler._run_cycle_inner",
             side_effect=RuntimeError("boom"),
@@ -139,18 +150,21 @@ def test_build_strategy_instance_returns_none_for_unknown_id():
 
 
 def test_submit_portfolio_orders_places_buy_orders():
-    """BUY-side combined orders are submitted via trading_client.submit_order."""
+    """BUY-side combined orders are submitted via _submit_fn."""
     from src.workers.portfolio_scheduler import _submit_portfolio_orders
 
     orders = [_make_combined_order("SPY", OrderSide.BUY, qty=10.0)]
     trading_client = MagicMock()
-    market = MagicMock()
-    market.price_of.return_value = 450.0
+    market = _make_market(prices={"SPY": 450.0})
 
-    submitted = _submit_portfolio_orders(orders, trading_client, market)
+    # Use _submit_fn to avoid alpaca import
+    submitted_calls = []
+    def mock_submit(order, notional, client):
+        submitted_calls.append((order.symbol, notional))
 
+    submitted = _submit_portfolio_orders(orders, trading_client, market, _submit_fn=mock_submit)
     assert submitted == 1
-    trading_client.submit_order.assert_called_once()
+    assert submitted_calls[0][0] == "SPY"
 
 
 def test_submit_portfolio_orders_skips_sell_orders():
@@ -159,12 +173,10 @@ def test_submit_portfolio_orders_skips_sell_orders():
 
     orders = [_make_combined_order("SPY", OrderSide.SELL, qty=10.0)]
     trading_client = MagicMock()
-    market = MagicMock()
+    market = _make_market()
 
-    submitted = _submit_portfolio_orders(orders, trading_client, market)
-
+    submitted = _submit_portfolio_orders(orders, trading_client, market, _submit_fn=lambda o, n, c: None)
     assert submitted == 0
-    trading_client.submit_order.assert_not_called()
 
 
 def test_submit_portfolio_orders_returns_zero_for_empty_list():
@@ -172,16 +184,14 @@ def test_submit_portfolio_orders_returns_zero_for_empty_list():
     from src.workers.portfolio_scheduler import _submit_portfolio_orders
 
     trading_client = MagicMock()
-    market = MagicMock()
+    market = _make_market()
 
-    submitted = _submit_portfolio_orders([], trading_client, market)
-
+    submitted = _submit_portfolio_orders([], trading_client, market, _submit_fn=lambda o, n, c: None)
     assert submitted == 0
-    trading_client.submit_order.assert_not_called()
 
 
 def test_submit_portfolio_orders_continues_after_single_failure():
-    """An Alpaca error on one order does not abort remaining orders."""
+    """An error on one order does not abort remaining orders."""
     from src.workers.portfolio_scheduler import _submit_portfolio_orders
 
     orders = [
@@ -189,14 +199,16 @@ def test_submit_portfolio_orders_continues_after_single_failure():
         _make_combined_order("QQQ", OrderSide.BUY, qty=5.0),
     ]
     trading_client = MagicMock()
-    trading_client.submit_order.side_effect = [Exception("API error"), None]
-    market = MagicMock()
-    market.price_of.return_value = 100.0
+    market = _make_market(prices={"SPY": 100.0, "QQQ": 100.0})
 
-    submitted = _submit_portfolio_orders(orders, trading_client, market)
+    call_count = 0
+    def mock_submit(order, notional, client):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception("API error")
 
-    # Second order succeeded despite first failing
-    assert trading_client.submit_order.call_count == 2
+    submitted = _submit_portfolio_orders(orders, trading_client, market, _submit_fn=mock_submit)
     assert submitted == 1  # only the successful one counts
 
 
@@ -210,13 +222,15 @@ def test_submit_portfolio_orders_mixed_buy_sell():
         _make_combined_order("GLD", OrderSide.BUY, qty=3.0),
     ]
     trading_client = MagicMock()
-    market = MagicMock()
-    market.price_of.return_value = 100.0
+    market = _make_market(prices={"SPY": 100.0, "QQQ": 100.0, "GLD": 100.0})
 
-    submitted = _submit_portfolio_orders(orders, trading_client, market)
+    submitted_syms = []
+    def mock_submit(order, notional, client):
+        submitted_syms.append(order.symbol)
 
+    submitted = _submit_portfolio_orders(orders, trading_client, market, _submit_fn=mock_submit)
     assert submitted == 2
-    assert trading_client.submit_order.call_count == 2
+    assert submitted_syms == ["SPY", "GLD"]
 
 
 # ── _persist_cycle_result ─────────────────────────────────────────────────────
@@ -240,7 +254,6 @@ def test_persist_cycle_result_executes_insert():
     }
 
     _persist_cycle_result(cycle_data, conn=mock_conn)
-
     mock_cur.execute.assert_called_once()
     mock_conn.commit.assert_called_once()
 

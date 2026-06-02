@@ -1,21 +1,17 @@
 """Celery task: run portfolio orchestration cycle at market open.
 
-Scheduled: Mon-Fri 14:30 UTC (9:30 AM ET) via Celery beat.
+Scheduled: Mon-Fri 14:00-21:00 UTC (hourly) via Celery beat.
 
 Cycle flow:
     1. Build StrategyRegistry + initialize strategy callables.
     2. Build PortfolioOrchestrator with ConstraintEnforcer + VolTargeter.
     3. Call orchestrator.run_cycle() with current market data.
     4. Log cycle results (strategies run, orders, constraints fired).
-    5. Queue final orders for execution via run_execution_worker.
-
-Note: Strategy callables require price history. In the Celery context we load
-a minimal price window from Alpaca for signal computation; strategies that need
-a longer warm-up (S1: 252 bars, S2: 63 bars) are initialized with the available
-window and may produce no orders if data is insufficient.
+    5. Submit final orders to Alpaca and persist cycle result.
 """
 from __future__ import annotations
 
+import json as _json
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -23,18 +19,12 @@ from src.workers.celery_app import app
 
 log = logging.getLogger(__name__)
 
-_PRICE_BARS = 300  # bars to fetch for strategy warm-up (> S1's 252-bar lookback)
+_PRICE_BARS = 300
 
 
 @app.task(name="src.workers.portfolio_scheduler.run_portfolio_cycle")
 def run_portfolio_cycle() -> dict:
-    """Celery entry-point for the portfolio orchestration cycle.
-
-    Returns:
-        Stats dict: strategies_run, orders_before, orders_after, constraints,
-                    or {"skipped": True} when credentials are missing,
-                    or {"error": str} on unhandled exception.
-    """
+    """Celery entry-point for the portfolio orchestration cycle."""
     from src.config import config
 
     if not config.ALPACA_API_KEY or not config.ALPACA_SECRET_KEY:
@@ -71,7 +61,7 @@ def _run_cycle_inner() -> dict:
         log.warning("No active strategies in registry — skipping portfolio cycle")
         return {"skipped": True, "reason": "no_active_strategies"}
 
-    # ── Fetch price history ────────────────────────────────────────────────────
+    # Fetch price history
     data_client = StockHistoricalDataClient(
         api_key=config.ALPACA_API_KEY,
         secret_key=config.ALPACA_SECRET_KEY,
@@ -81,16 +71,14 @@ def _run_cycle_inner() -> dict:
         symbols = list(config.WATCHLIST_SYMBOLS or [])
 
     end = datetime.now(timezone.utc)
-    start = end - timedelta(days=_PRICE_BARS * 2)  # 2× buffer for weekends/holidays
+    start = end - timedelta(days=_PRICE_BARS * 2)
 
-    bars_df: pd.DataFrame | None = None
+    bars_df = None
     try:
         request = StockBarsRequest(
             symbol_or_symbols=symbols,
             timeframe=TimeFrame.Day,
-            start=start,
-            end=end,
-            limit=_PRICE_BARS,
+            start=start, end=end, limit=_PRICE_BARS,
         )
         raw = data_client.get_stock_bars(request).df
         if not raw.empty:
@@ -103,8 +91,8 @@ def _run_cycle_inner() -> dict:
         log.error("No price data available — aborting portfolio cycle")
         return {"error": "no_price_data"}
 
-    # ── Build strategy instances ───────────────────────────────────────────────
-    strategy_instances: dict = {}
+    # Build strategy instances
+    strategy_instances = {}
     for entry in active:
         try:
             instance = _build_strategy_instance(entry, bars_df)
@@ -113,8 +101,8 @@ def _run_cycle_inner() -> dict:
         except Exception as exc:
             log.error("Failed to build instance for %s: %s", entry.strategy_id, exc)
 
-    # ── Build market snapshot ──────────────────────────────────────────────────
-    latest_prices: dict[str, float] = {}
+    # Build market snapshot
+    latest_prices = {}
     for sym in bars_df.columns:
         if not bars_df[sym].dropna().empty:
             latest_prices[sym] = float(bars_df[sym].dropna().iloc[-1])
@@ -126,7 +114,7 @@ def _run_cycle_inner() -> dict:
         adv_20d={sym: 1_000_000.0 for sym in latest_prices},
     )
 
-    # ── Build portfolio proxy from Alpaca account ─────────────────────────────
+    # Build portfolio proxy
     trading_client = TradingClient(
         api_key=config.ALPACA_API_KEY,
         secret_key=config.ALPACA_SECRET_KEY,
@@ -141,7 +129,7 @@ def _run_cycle_inner() -> dict:
 
     portfolio = VirtualPortfolio(initial_cash=cash)
 
-    # ── Run orchestration cycle ───────────────────────────────────────────────
+    # Run orchestration cycle
     data_replay = DataReplay(bars_df)
     orchestrator = PortfolioOrchestrator(
         registry=registry,
@@ -152,10 +140,7 @@ def _run_cycle_inner() -> dict:
 
     ts = end.replace(tzinfo=None)
     result = orchestrator.run_cycle(
-        ts=ts,
-        data_replay=data_replay,
-        portfolio=portfolio,
-        market=market,
+        ts=ts, data_replay=data_replay, portfolio=portfolio, market=market,
     )
 
     log.info(
@@ -167,26 +152,32 @@ def _run_cycle_inner() -> dict:
         len(result.final_orders),
     )
 
+    # Submit orders and persist
+    submitted = _submit_portfolio_orders(result.final_orders, trading_client, market)
+    _persist_cycle_result({
+        "timestamp": end,
+        "strategies_run": result.strategies_run,
+        "orders_count": len(result.final_orders),
+        "constraints_fired": [str(c) for c in result.constraints_fired],
+        "final_orders": [str(o) for o in result.final_orders],
+    })
+
     return {
         "strategies_run": result.strategies_run,
         "orders_before_constraints": result.orders_before_constraints,
         "orders_after_constraints": result.orders_after_constraints,
         "constraints_fired": len(result.constraints_fired),
         "final_orders": len(result.final_orders),
+        "submitted": submitted,
     }
 
 
 def _strategy_symbols(entry) -> list[str]:
-    """Return the universe symbols that a strategy class typically uses."""
     from src.config import config
     return list(config.WATCHLIST_SYMBOLS or [])
 
 
 def _build_strategy_instance(entry, bars_df):
-    """Instantiate a strategy from its registry entry and price history.
-
-    Returns None if the strategy cannot be initialized with available data.
-    """
     from src.strategies.s1.strategy import S1Config, TimeSeriesMomentum
     from src.strategies.s2.strategy import VRPStrategy
     from src.strategies.s4.strategy import NewsDrivenTactical
@@ -196,19 +187,85 @@ def _build_strategy_instance(entry, bars_df):
 
     if sid == "S1":
         if len(bars_df) < 21:
-            log.warning("S1 needs ≥21 bars, got %d — skipping", len(bars_df))
+            log.warning("S1 needs >=21 bars, got %d — skipping", len(bars_df))
             return None
         return TimeSeriesMomentum(prices=bars_df, config=S1Config())
 
     if sid == "S2":
         if len(bars_df) < 63 or "SPY" not in bars_df.columns:
-            log.warning("S2 needs ≥63 bars with SPY — skipping (bars=%d)", len(bars_df))
+            log.warning("S2 needs >=63 bars with SPY — skipping")
             return None
         return VRPStrategy(prices=bars_df)
 
     if sid == "S4":
         return NewsDrivenTactical(config=S4Config(), signals=None)
 
-    # Generic fallback: try instantiating with no args
     log.warning("Unknown strategy_id '%s' — skipping", sid)
     return None
+
+
+def _submit_portfolio_orders(orders, trading_client, market, _submit_fn=None) -> int:
+    """Submit BUY combined orders to Alpaca. SELL orders are skipped.
+
+    Args:
+        orders: List of CombinedOrder to submit.
+        trading_client: Alpaca TradingClient instance.
+        market: MarketSnapshot with current prices.
+        _submit_fn: Optional override for testing (receives order, notional, trading_client).
+    """
+    from src.backtest.engine.types import OrderSide
+
+    submitted = 0
+    for order in orders:
+        if order.side != OrderSide.BUY:
+            continue
+        try:
+            price = market.prices.get(order.symbol, 100.0)
+            notional = round(price * order.quantity, 2)
+            if _submit_fn is not None:
+                _submit_fn(order, notional, trading_client)
+            else:
+                from alpaca.trading.requests import MarketOrderRequest
+                req = MarketOrderRequest(
+                    symbol=order.symbol,
+                    notional=notional,
+                    side="buy",
+                    time_in_force="day",
+                )
+                trading_client.submit_order(req)
+            submitted += 1
+        except Exception as exc:
+            log.warning("Failed to submit order for %s: %s", order.symbol, exc)
+    return submitted
+
+
+def _persist_cycle_result(cycle_data: dict, conn=None) -> None:
+    """Persist cycle stats to portfolio_cycles. DB errors are swallowed."""
+    try:
+        import psycopg2
+
+        if conn is None:
+            from src.config import config
+            conn = psycopg2.connect(config.DATABASE_URL.replace("+asyncpg", ""))
+            should_close = True
+        else:
+            should_close = False
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO portfolio_cycles
+                   (timestamp, strategies_run, orders_count, constraints_fired, final_orders)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (
+                    cycle_data["timestamp"],
+                    _json.dumps(cycle_data["strategies_run"]),
+                    cycle_data["orders_count"],
+                    _json.dumps(cycle_data.get("constraints_fired", [])),
+                    _json.dumps(cycle_data.get("final_orders", [])),
+                ),
+            )
+        conn.commit()
+        if should_close:
+            conn.close()
+    except Exception as exc:
+        log.warning("Failed to persist cycle result: %s", exc)

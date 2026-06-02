@@ -32,6 +32,7 @@ app = Celery(
         "src.workers.regime",
         "src.workers.retention",
         "src.workers.risk_monitor_task",
+    "src.workers.portfolio_scheduler",
         "src.workers.sentiment",
         "src.workers.telegram_poller",
     ],
@@ -124,6 +125,11 @@ app.conf.beat_schedule = {
     "run-retention-sweep": {
         "task": "src.workers.retention.run_retention_sweep",
         "schedule": crontab(hour=3, minute=30),
+    },
+    # Portfolio orchestration cycle every hour during market hours (Mon-Fri 14:00-21:00 UTC)
+    "portfolio-cycle": {
+        "task": "src.workers.portfolio_scheduler.run_portfolio_cycle",
+        "schedule": crontab(minute=0, hour="14-21", day_of_week="1-5"),
     },
     # Risk monitor daily at 22:30 UTC (after forward-return worker at 22:00)
     "risk-monitor": {
