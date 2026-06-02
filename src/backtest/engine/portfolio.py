@@ -26,6 +26,15 @@ class VirtualPortfolio:
     def cash(self) -> float:
         return self._cash
 
+    def load_position(self, symbol: str, quantity: float, avg_cost: float) -> None:
+        """Inject an existing position (e.g. from Alpaca) without touching cash."""
+        if abs(quantity) > 1e-9:
+            self._positions[symbol] = Position(
+                symbol=symbol,
+                quantity=quantity,
+                avg_cost=avg_cost,
+            )
+
     def position_of(self, symbol: str) -> Position | None:
         return self._positions.get(symbol)
 

@@ -131,6 +131,19 @@ def _run_cycle_inner() -> dict:
 
     portfolio = VirtualPortfolio(initial_cash=cash)
 
+    # Load existing Alpaca positions so delta-orders are computed correctly.
+    # Without this, the VirtualPortfolio is empty → nav ≈ 0 when account.cash ≈ 0
+    # (all equity already invested) → all target quantities ≈ 0 → 0 orders.
+    try:
+        alpaca_positions = trading_client.get_all_positions()
+        for ap in alpaca_positions:
+            qty = float(ap.qty)
+            avg_cost = float(ap.avg_entry_price)
+            portfolio.load_position(symbol=ap.symbol, quantity=qty, avg_cost=avg_cost)
+        log.info("Loaded %d existing Alpaca positions into VirtualPortfolio", len(alpaca_positions))
+    except Exception as exc:
+        log.warning("Could not load Alpaca positions: %s — VirtualPortfolio starts empty", exc)
+
     # Run orchestration cycle
     data_replay = DataReplay(bars_df)
     orchestrator = PortfolioOrchestrator(

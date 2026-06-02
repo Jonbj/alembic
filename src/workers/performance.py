@@ -411,6 +411,15 @@ def run_weekly_weights():
             log.info("No per-model samples available for weight update")
             return
 
+        _MIN_SAMPLES = 10
+        if len(per_model_rows) < _MIN_SAMPLES:
+            log.info(
+                "Insufficient per-model samples for ICIR: %d < %d — skipping weight update",
+                len(per_model_rows),
+                _MIN_SAMPLES,
+            )
+            return {"status": "insufficient_data", "n_samples": len(per_model_rows)}
+
         lloo_signals: dict[str, list[float]] = defaultdict(list)
         lloo_returns: dict[str, list[float]] = defaultdict(list)
         for m_id, score, fwd_ret in per_model_rows:

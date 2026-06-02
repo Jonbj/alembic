@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from src.store.redis_store import RedisStore
 from src.store.pg_store import PostgreSQLStore
+from src.api.auth import require_api_key
 from src.api.deps import get_redis_store, get_pg_store
 
 router = APIRouter(prefix="/api/signals")
@@ -67,6 +68,7 @@ async def get_all_signals(
 @router.get("/{symbol}")
 async def get_signal(
     symbol: str,
+    api_key: Annotated[str, Depends(require_api_key)],
     redis_store: Annotated[RedisStore, Depends(get_redis_store)],
     pg_store: Annotated[PostgreSQLStore, Depends(get_pg_store)],
 ) -> dict:
