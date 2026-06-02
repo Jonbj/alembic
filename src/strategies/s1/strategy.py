@@ -90,6 +90,11 @@ class TimeSeriesMomentum:
             return {}
 
         as_of = prices_wide.index[-1]
+        # Ensure timezone compatibility for comparison
+        if hasattr(as_of, "tzinfo") and as_of.tzinfo is not None and self._signal_wide.index.tz is None:
+            as_of = as_of.tz_localize(None)
+        elif hasattr(as_of, "tzinfo") and as_of.tzinfo is None and self._signal_wide.index.tz is not None:
+            as_of = as_of.tz_localize(self._signal_wide.index.tz)
         valid_dates = self._signal_wide.index[self._signal_wide.index <= as_of]
         if len(valid_dates) == 0:
             return {}
@@ -128,15 +133,18 @@ class TimeSeriesMomentum:
             return True
         if self._last_rebalance is None:
             return True
+        # Compare only calendar parts to avoid tz-aware vs naive mismatch
+        ts_naive = ts.replace(tzinfo=None) if hasattr(ts, "tzinfo") and ts.tzinfo else ts
+        lb_naive = self._last_rebalance.replace(tzinfo=None) if hasattr(self._last_rebalance, "tzinfo") and self._last_rebalance.tzinfo else self._last_rebalance
         if self._config.rebalance_frequency == RebalanceFrequency.WEEKLY:
             return (
-                ts.isocalendar().week != self._last_rebalance.isocalendar().week
-                or ts.year != self._last_rebalance.year
+                ts_naive.isocalendar().week != lb_naive.isocalendar().week
+                or ts_naive.year != lb_naive.year
             )
         # MONTHLY
         return (
-            ts.month != self._last_rebalance.month
-            or ts.year != self._last_rebalance.year
+            ts_naive.month != lb_naive.month
+            or ts_naive.year != lb_naive.year
         )
 
     def _nav(self, portfolio: VirtualPortfolio, market: MarketSnapshot) -> float:

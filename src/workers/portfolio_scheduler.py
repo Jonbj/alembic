@@ -41,6 +41,7 @@ def run_portfolio_cycle() -> dict:
 def _run_cycle_inner() -> dict:
     """Inner cycle logic, separated for testability."""
     import pandas as pd
+    from alpaca.data.enums import DataFeed
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
@@ -78,7 +79,8 @@ def _run_cycle_inner() -> dict:
         request = StockBarsRequest(
             symbol_or_symbols=symbols,
             timeframe=TimeFrame.Day,
-            start=start, end=end, limit=_PRICE_BARS,
+            start=start, end=end,
+            feed=DataFeed.IEX,
         )
         raw = data_client.get_stock_bars(request).df
         if not raw.empty:
@@ -138,7 +140,7 @@ def _run_cycle_inner() -> dict:
         vol_targeter=PortfolioVolTargeter(target_vol=0.10),
     )
 
-    ts = end.replace(tzinfo=None)
+    ts = end
     result = orchestrator.run_cycle(
         ts=ts, data_replay=data_replay, portfolio=portfolio, market=market,
     )
@@ -174,7 +176,10 @@ def _run_cycle_inner() -> dict:
 
 def _strategy_symbols(entry) -> list[str]:
     from src.config import config
-    return list(config.WATCHLIST_SYMBOLS or [])
+    syms = list(config.WATCHLIST_SYMBOLS or [])
+    if entry.strategy_id == "S2" and "SPY" not in syms:
+        syms.append("SPY")
+    return syms
 
 
 def _build_strategy_instance(entry, bars_df):
@@ -192,8 +197,8 @@ def _build_strategy_instance(entry, bars_df):
         return TimeSeriesMomentum(prices=bars_df, config=S1Config())
 
     if sid == "S2":
-        if len(bars_df) < 63 or "SPY" not in bars_df.columns:
-            log.warning("S2 needs >=63 bars with SPY — skipping")
+        if len(bars_df) < 63:
+            log.warning("S2 needs >=63 bars, got %d — skipping", len(bars_df))
             return None
         return VRPStrategy(prices=bars_df)
 
