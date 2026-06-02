@@ -20,6 +20,14 @@ class ModeRequest(BaseModel):
     mode: str
 
 
+
+@router.get("/mode")
+async def get_mode(
+    store: Annotated[RedisStore, Depends(get_redis_store)],
+) -> dict:
+    """Get current operating mode."""
+    return {"mode": store.get_mode() or "unknown"}
+
 @router.post("/mode")
 async def set_mode(
     req: ModeRequest,
