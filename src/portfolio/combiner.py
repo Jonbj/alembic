@@ -11,6 +11,7 @@ from src.portfolio.types import CombinedOrder, PortfolioState
 
 if TYPE_CHECKING:
     from src.portfolio.risk_parity import RiskParityAllocator
+    from src.portfolio.vol_targeting import PortfolioVolTargeter
 
 # (strategy_callable, allocation_pct)
 _StrategyEntry = tuple[Callable, float]
@@ -26,6 +27,11 @@ class PortfolioCombiner:
                           fixed allocation_pct values
         risk_parity_allocator: RiskParityAllocator instance; required when
                                risk_parity_mode=True
+        vol_targeting_mode: when True, scale BUY quantities after aggregation
+                            so portfolio vol ≈ vol_targeter.target_vol
+        vol_targeter: PortfolioVolTargeter instance; required when
+                      vol_targeting_mode=True
+        strategy_returns: per-strategy daily return series used by vol_targeter
     """
 
     def __init__(
@@ -33,10 +39,16 @@ class PortfolioCombiner:
         strategies: dict[str, _StrategyEntry],
         risk_parity_mode: bool = False,
         risk_parity_allocator: "RiskParityAllocator | None" = None,
+        vol_targeting_mode: bool = False,
+        vol_targeter: "PortfolioVolTargeter | None" = None,
+        strategy_returns: "dict[str, list[float]] | None" = None,
     ) -> None:
         self._strategies = strategies
         self._risk_parity_mode = risk_parity_mode
         self._risk_parity_allocator = risk_parity_allocator
+        self._vol_targeting_mode = vol_targeting_mode
+        self._vol_targeter = vol_targeter
+        self._strategy_returns = strategy_returns or {}
 
     def aggregate(
         self,
@@ -75,6 +87,12 @@ class PortfolioCombiner:
             total_exposure=total_exposure,
             constraint_violations=[],
         )
+
+        if self._vol_targeting_mode and self._vol_targeter is not None:
+            estimated_vol = self._vol_targeter.estimate_vol(self._strategy_returns)
+            scale = self._vol_targeter.compute_scale(estimated_vol)
+            combined = self._vol_targeter.scale_orders(combined, scale)
+
         return combined, state
 
     # ------------------------------------------------------------------
