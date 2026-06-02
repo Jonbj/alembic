@@ -3,6 +3,7 @@ import { useState } from 'react'
 const TABS = [
   { id: 'alembic-overview', label: 'Overview' },
   { id: 'alembic-risk',     label: 'Risk Monitor' },
+  { id: 'alembic-decay',    label: 'Decay Monitor' },
 ] as const
 
 type TabId = typeof TABS[number]['id']

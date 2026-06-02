@@ -33,6 +33,7 @@ app = Celery(
         "src.workers.retention",
         "src.workers.risk_monitor_task",
     "src.workers.portfolio_scheduler",
+    "src.workers.decay_monitor_task",
         "src.workers.sentiment",
         "src.workers.telegram_poller",
     ],
@@ -130,6 +131,11 @@ app.conf.beat_schedule = {
     "portfolio-cycle": {
         "task": "src.workers.portfolio_scheduler.run_portfolio_cycle",
         "schedule": crontab(minute=0, hour="14-21", day_of_week="1-5"),
+    },
+    # Decay monitor: 1st of month at 23:00 UTC
+    "decay-monitor": {
+        "task": "src.workers.decay_monitor_task.run_decay_monitor",
+        "schedule": crontab(minute=0, hour=23, day_of_month="1"),
     },
     # Risk monitor daily at 22:30 UTC (after forward-return worker at 22:00)
     "risk-monitor": {

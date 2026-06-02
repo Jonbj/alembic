@@ -1,0 +1,169 @@
+{
+  "id": null,
+  "uid": "alembic-decay",
+  "title": "Alembic - Decay Monitor",
+  "tags": [
+    "alembic"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 16,
+  "version": 0,
+  "refresh": "1h",
+  "panels": [
+    {
+      "id": 1,
+      "title": "IC Decay Score by Strategy",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "alembic-pg"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT timestamp AS time, decay_score AS \"IC decay\", strategy_id AS metric FROM decay_reports WHERE metric = 'ic' ORDER BY 1",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 0.8
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Hit Rate: Baseline vs Actual",
+      "type": "barchart",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "alembic-pg"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT strategy_id, baseline_value AS baseline, actual_value AS actual FROM decay_reports WHERE metric = 'hit_rate' AND timestamp = (SELECT MAX(timestamp) FROM decay_reports)",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Sharpe Ratio Decay",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "alembic-pg"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT timestamp AS time, decay_score AS \"Sharpe decay\", strategy_id AS metric FROM decay_reports WHERE metric = 'sharpe' ORDER BY 1",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 0.8
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Max Drawdown Excess",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 8
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "alembic-pg"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT timestamp AS time, decay_score AS \"DD decay\", strategy_id AS metric FROM decay_reports WHERE metric = 'max_drawdown' ORDER BY 1",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Latest Decay Reports",
+      "type": "table",
+      "gridPos": {
+        "h": 8,
+        "w": 18,
+        "x": 0,
+        "y": 16
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "alembic-pg"
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT timestamp, strategy_id, metric, ROUND(baseline_value::numeric, 4) AS baseline, ROUND(actual_value::numeric, 4) AS actual, ROUND(decay_score::numeric, 3) AS decay, alert_level FROM decay_reports ORDER BY timestamp DESC LIMIT 20",
+          "format": "table"
+        }
+      ]
+    }
+  ]
+}
