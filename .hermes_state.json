@@ -1,5 +1,5 @@
 {
-  "current_task": "T-503",
+  "current_task": "T-504",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -160,12 +160,17 @@
     "T-501": {
       "status": "DONE",
       "commit": "8925718",
-      "notes": "PortfolioCombiner + ConstraintEnforcer. types.py: CombinedOrder, ConstraintViolation, PortfolioState. combiner.py: aggregate() calls S1/S2/S4, tags orders with strategy_id+allocation_weight, tracks notional exposure. constraints.py: sequential MAX_SINGLE_ASSET_PCT(10%), MAX_STRATEGY_EXPOSURE(alloc×1.5), MAX_PORTFOLIO_EXPOSURE(50%) with proportional reduction. 47 tests passing."
+      "notes": "PortfolioCombiner + ConstraintEnforcer. types.py: CombinedOrder, ConstraintViolation, PortfolioState. combiner.py: aggregate() calls S1/S2/S4, tags orders with strategy_id+allocation_weight, tracks notional exposure. constraints.py: sequential MAX_SINGLE_ASSET_PCT(10%), MAX_STRATEGY_EXPOSURE(alloc\u00d71.5), MAX_PORTFOLIO_EXPOSURE(50%) with proportional reduction. 47 tests passing."
     },
     "T-502": {
       "status": "DONE",
       "commit": "b410b4e",
       "notes": "RiskParityAllocator: inverse-vol weights with water-filling min/max constraint projection (min=10%, max=60%). compute_weights() with zero-vol fallback to equal weights. compare_vs_equal() DataFrame with capital_allocation and risk_contribution columns. PortfolioCombiner extended with risk_parity_mode=True flag and risk_parity_allocator param. 25 new tests; 72 total portfolio tests passing."
+    },
+    "T-503": {
+      "status": "DONE",
+      "commit": "fb83d1c",
+      "notes": "Extended ConstraintEnforcer with MAX_SECTOR_EXPOSURE (25% NAV per sector), MAX_CORRELATION_CLUSTER (>0.7 corr reduces higher-vol strategy by 20%), iterative enforcement (max 10 passes) with deduplication of correlation reductions. 89 portfolio tests passing."
     }
   },
   "milestone_b_details": {
