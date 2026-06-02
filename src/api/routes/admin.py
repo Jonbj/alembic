@@ -11,7 +11,7 @@ from src.api.main import get_redis_store
 
 router = APIRouter(prefix="/api/admin")
 
-_VALID_MODES = frozenset({"backtest", "paper", "semi_auto", "full_auto", "halted"})
+_VALID_MODES = frozenset({"backtest", "paper", "semi_auto", "full_auto", "halted", "dry_run"})
 _VALID_LLM_MODELS = frozenset({"all", "kimi", "qwen", "deepseek", "glm"})
 
 

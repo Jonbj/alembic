@@ -167,8 +167,21 @@ def _run_cycle_inner() -> dict:
         len(result.final_orders),
     )
 
-    # Submit orders and persist
-    submitted = _submit_portfolio_orders(result.final_orders, trading_client, market)
+    # Check operating mode before submitting orders
+    try:
+        from redis import Redis as _Redis
+        _r = _Redis.from_url(config.REDIS_URL, decode_responses=True)
+        operating_mode = _r.get("system:mode")
+    except Exception as exc:
+        log.warning("Could not read system:mode from Redis: %s — proceeding with submission", exc)
+        operating_mode = None
+
+    if operating_mode == "dry_run":
+        log.info("Skipping order submission - dry_run mode")
+        submitted = 0
+    else:
+        # Submit orders and persist
+        submitted = _submit_portfolio_orders(result.final_orders, trading_client, market)
     _persist_cycle_result({
         "timestamp": end,
         "strategies_run": result.strategies_run,
