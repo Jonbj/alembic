@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from src.backtest.engine.data_replay import DataReplay
 from src.backtest.engine.portfolio import VirtualPortfolio
 from src.backtest.engine.types import MarketSnapshot, Order, OrderSide
 from src.portfolio.types import CombinedOrder, PortfolioState
+
+if TYPE_CHECKING:
+    from src.portfolio.risk_parity import RiskParityAllocator
 
 # (strategy_callable, allocation_pct)
 _StrategyEntry = tuple[Callable, float]
@@ -19,10 +22,21 @@ class PortfolioCombiner:
     Args:
         strategies: mapping of strategy_id → (callable, allocation_pct)
                     e.g. {"S1": (s1_instance, 0.50), "S2": (s2_instance, 0.20)}
+        risk_parity_mode: when True, use risk_parity_allocator weights instead of
+                          fixed allocation_pct values
+        risk_parity_allocator: RiskParityAllocator instance; required when
+                               risk_parity_mode=True
     """
 
-    def __init__(self, strategies: dict[str, _StrategyEntry]) -> None:
+    def __init__(
+        self,
+        strategies: dict[str, _StrategyEntry],
+        risk_parity_mode: bool = False,
+        risk_parity_allocator: "RiskParityAllocator | None" = None,
+    ) -> None:
         self._strategies = strategies
+        self._risk_parity_mode = risk_parity_mode
+        self._risk_parity_allocator = risk_parity_allocator
 
     def aggregate(
         self,
@@ -36,12 +50,17 @@ class PortfolioCombiner:
         combined: list[CombinedOrder] = []
         per_strategy_exposure: dict[str, float] = {}
 
+        dynamic_weights: dict[str, float] | None = None
+        if self._risk_parity_mode and self._risk_parity_allocator is not None:
+            dynamic_weights = self._risk_parity_allocator.compute_weights()
+
         for strategy_id, (strategy, alloc_pct) in self._strategies.items():
+            weight = dynamic_weights[strategy_id] if dynamic_weights is not None else alloc_pct
             orders: list[Order] = strategy(ts, data_replay, portfolio, market)
             exposure = 0.0
 
             for order in orders:
-                combined.append(CombinedOrder.from_order(order, allocation_weight=alloc_pct))
+                combined.append(CombinedOrder.from_order(order, allocation_weight=weight))
                 if order.side == OrderSide.BUY:
                     price = market.price_of(order.symbol)
                     if price is not None:
