@@ -74,6 +74,24 @@ services:
       api: { condition: service_healthy }
     restart: unless-stopped
 
+  grafana:
+    image: grafana/grafana:latest
+    ports: ["3001:3000"]
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ALLOW_EMBEDDING: "true"
+      GF_PANELS_DISABLE_SANDBOX: "true"
+      GF_SECURITY_ADMIN_PASSWORD: alembic123
+      GF_DEFAULT_THEME: dark
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
   backtest:
     build: .
     profiles: [backtest]
@@ -91,3 +109,4 @@ services:
 
 volumes:
   pgdata:
+  grafana-storage:

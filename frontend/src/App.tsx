@@ -16,6 +16,7 @@ const Admin       = lazy(() => import('@/pages/Admin'))
 const AutoImprove = lazy(() => import('@/pages/AutoImprove'))
 const Strategies  = lazy(() => import('@/pages/Strategies'))
 const Docs        = lazy(() => import('@/pages/Docs'))
+const Dashboard   = lazy(() => import('@/pages/DashboardPage'))
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 3, retryDelay: (n) => Math.min(1000 * 2 ** n, 30000) } },
@@ -44,7 +45,8 @@ export default function App() {
                 <Route path="/config"       element={<Config />} />
                 <Route path="/admin"        element={<Admin />} />
                 <Route path="/auto-improve" element={<AutoImprove />} />
-                <Route path="/docs" element={<Docs />} />
+                <Route path="/docs"      element={<Docs />} />
+                <Route path="/dashboard" element={<Dashboard />} />
               </Route>
             </Routes>
           </Suspense>

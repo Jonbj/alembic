@@ -17,6 +17,7 @@ const NAV = [
   { to: '/config',      label: 'Config',      icon: '⚙' },
   { to: '/admin',       label: 'Admin',       icon: '🔒' },
   { to: '/docs',        label: 'Docs',        icon: '📖' },
+  { to: '/dashboard',  label: 'Dashboard',   icon: '📡' },
 ]
 
 export function Sidebar() {

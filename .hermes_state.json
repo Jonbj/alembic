@@ -1,5 +1,5 @@
 {
-  "current_task": "T-603",
+  "current_task": "T-604",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -191,6 +191,10 @@
       "status": "DONE",
       "commit": "203a2eb",
       "notes": "PortfolioRiskMonitor: per-strategy drawdown/Sharpe/vol, combined exposure, Herfindahl index, correlation drift. Alert thresholds: drawdown >10%, combined >15%, weight drift >5%, corr >0.8, exposure >50%. Celery risk_monitor_task daily at 22:05 UTC. Migration 012_risk_reports. 31 tests."
+    },
+    "T-603": {
+      "status": "DONE",
+      "notes": "Grafana monitoring dashboard: grafana/grafana:latest on port 3001, auto-provisioned PostgreSQL datasource, two dashboards (alembic-overview: sentiment scores/distribution/IC/recent signals/budget/news; alembic-risk: exposure/weights/confidence/alerts). React /dashboard route with tab-switching iframe embed. No tests (infrastructure only)."
     }
   },
   "milestone_b_details": {
