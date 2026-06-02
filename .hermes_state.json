@@ -1,5 +1,5 @@
 {
-  "current_task": "T-504",
+  "current_task": "T-505",
   "session_id": null,
   "milestone_a": "DONE",
   "milestone_b": "PASS",
@@ -171,6 +171,11 @@
       "status": "DONE",
       "commit": "fb83d1c",
       "notes": "Extended ConstraintEnforcer with MAX_SECTOR_EXPOSURE (25% NAV per sector), MAX_CORRELATION_CLUSTER (>0.7 corr reduces higher-vol strategy by 20%), iterative enforcement (max 10 passes) with deduplication of correlation reductions. 89 portfolio tests passing."
+    },
+    "T-504": {
+      "status": "DONE",
+      "commit": "e6dd00e",
+      "notes": "PortfolioVolTargeter: EWMA vol estimation (span=60), scaling factor target_vol/estimated_vol, clamped 0.5-2.0. PortfolioCombiner extended with vol_targeting_mode. 28 new tests; 117 total portfolio tests passing."
     }
   },
   "milestone_b_details": {
