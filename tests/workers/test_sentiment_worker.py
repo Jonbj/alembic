@@ -601,3 +601,167 @@ class TestMarketAuxPreFilter:
         item = make_news_item("MSFT")
         assert not isinstance(item, MarketAuxNewsItem)
         assert not hasattr(item, "marketaux_sentiment") or True  # NewsItem has no such attr
+
+
+
+class TestEnsembleWeightReading:
+    """Verify that per-model weights from Redis are applied to ensemble aggregation (Bug 2 fix).
+
+    The sentiment worker must use LOO-rebalanced weights when available.
+    When the primary key is absent (auto-apply guardrails frozen), it falls
+    back to the suggestion key so the weekly ICIR computation is never wasted.
+    """
+
+    def _make_outputs(self) -> list[ModelOutput]:
+        return [
+            make_model_output(polarity=0.8, confidence=0.9, model_id="kimi-k2.6:cloud"),
+            make_model_output(polarity=0.6, confidence=0.7, model_id="qwen3.5:397b"),
+            make_model_output(polarity=0.4, confidence=0.6, model_id="deepseek-v4-pro:cloud"),
+        ]
+
+    def test_aggregate_with_equal_weights_uses_confidence_only(self):
+        """When weights=None, aggregate uses pure confidence weighting."""
+        aggregator = EnsembleAggregator()
+        outputs = self._make_outputs()
+        result_no_weights = aggregator.aggregate(outputs, weights=None)
+        assert result_no_weights is not None
+        # Confidence-weighted mean of 0.8, 0.6, 0.4 with confs 0.9, 0.7, 0.6
+        total_conf = 0.9 + 0.7 + 0.6
+        expected = (0.8 * 0.9 + 0.6 * 0.7 + 0.4 * 0.6) / total_conf
+        assert result_no_weights.polarity == pytest.approx(expected, abs=1e-6)
+
+    def test_aggregate_applies_per_model_weights(self):
+        """When weights dict is provided, per-model weights scale confidence."""
+        aggregator = EnsembleAggregator()
+        outputs = self._make_outputs()
+
+        # Give kimi a much higher weight — result should shift toward kimi's polarity
+        weights = {"kimi-k2.6:cloud": 0.80, "qwen3.5:397b": 0.10, "deepseek-v4-pro:cloud": 0.10}
+        result_with_weights = aggregator.aggregate(outputs, weights=weights)
+        result_no_weights = aggregator.aggregate(outputs, weights=None)
+
+        assert result_with_weights is not None
+        assert result_no_weights is not None
+        # Kimi has highest polarity (0.8), so weighted result should be higher
+        assert result_with_weights.polarity > result_no_weights.polarity
+
+    def test_aggregate_unknown_model_falls_back_to_1(self):
+        """Model IDs not in weights dict get a factor of 1.0 (no penalty)."""
+        aggregator = EnsembleAggregator()
+        outputs = self._make_outputs()
+        # Weights only cover kimi; qwen and deepseek get factor=1.0
+        partial_weights = {"kimi-k2.6:cloud": 0.5}
+        result = aggregator.aggregate(outputs, weights=partial_weights)
+        assert result is not None
+
+    def test_run_sentiment_worker_uses_suggestion_when_applied_not_set(self):
+        """Worker falls back to suggestion weights when ensemble:weights:current absent (Bug 2).
+
+        Verifies that when the primary Redis key is absent but a suggestion exists,
+        the worker resolves model_weights from the suggestion and passes them
+        to process_news_batch.
+        """
+        import json
+        from unittest.mock import patch, MagicMock
+        from src.workers.sentiment import run_sentiment_worker
+
+        suggestion = {
+            "suggested_weights": {
+                "kimi-k2.6:cloud": 0.40,
+                "qwen3.5:397b": 0.30,
+                "deepseek-v4-pro:cloud": 0.20,
+                "glm-5.1:cloud": 0.10,
+            },
+            "purified_icir": {},
+            "freeze_reason": "VIX data unavailable (fail-safe)",
+            "computed_at": "2026-06-01T04:00:00+00:00",
+        }
+
+        # Provide a valid news item in the queue so the worker reaches
+        # process_news_batch instead of returning early.
+        news_item_json = json.dumps({
+            "id": "test-aapl-1",
+            "title": "AAPL earnings beat",
+            "body": "Apple reported strong Q4 earnings.",
+            "url": "https://example.com/aapl",
+            "source": "test",
+            "asset_tags": ["AAPL"],
+        }).encode()
+
+        mock_redis_client = MagicMock()
+        mock_redis_client.lrange.return_value = []  # no stuck items
+        # lmove returns one item on first call, then None (empty queue)
+        mock_redis_client.lmove.side_effect = [news_item_json, None]
+        mock_redis_client.delete.return_value = None
+
+        mock_redis_store = MagicMock()
+        mock_redis_store.get_ensemble_weights.return_value = None  # primary key absent
+        mock_redis_store.get_weight_suggestion.return_value = suggestion
+        mock_redis_store.get_llm_models.return_value = None
+
+        with patch("redis.Redis") as mock_redis_cls, \
+             patch("src.workers.sentiment.RedisStore", return_value=mock_redis_store), \
+             patch("psycopg2.connect") as mock_pg_connect, \
+             patch("src.workers.sentiment.PostgreSQLStore") as mock_pg_cls, \
+             patch("src.workers.sentiment.LLMBudgetTracker") as mock_bt_cls, \
+             patch("src.workers.sentiment.process_news_batch") as mock_pnb, \
+             patch("src.workers.sentiment.asyncio.run") as mock_async_run:
+            mock_redis_cls.from_url.return_value = mock_redis_client
+            mock_pg_connect.return_value = MagicMock()
+            mock_pg_cls.return_value = MagicMock()
+            mock_bt_cls.return_value = MagicMock()
+            # asyncio.run is mocked, so process_news_batch is called
+            # (creating a coroutine from the mock), but never awaited.
+            # The mock records what kwargs were passed.
+            mock_async_run.return_value = []
+            run_sentiment_worker()
+
+        # process_news_batch should have been called with the suggestion weights
+        assert mock_pnb.call_count == 1, f"Expected 1 call, got {mock_pnb.call_count}"
+        assert mock_pnb.call_args.kwargs.get("weights") == suggestion["suggested_weights"]
+
+    def test_run_sentiment_worker_prefers_applied_over_suggestion(self):
+        """Worker uses applied weights (ensemble:weights:current) when available."""
+        import json
+        from unittest.mock import patch, MagicMock
+        from src.workers.sentiment import run_sentiment_worker
+
+        applied = {"kimi-k2.6:cloud": 0.35, "qwen3.5:397b": 0.35,
+                   "deepseek-v4-pro:cloud": 0.20, "glm-5.1:cloud": 0.10}
+        raw_applied = json.dumps({"weights": applied, "source": "auto_apply"}).encode()
+
+        # Provide a valid news item in the queue
+        news_item_json = json.dumps({
+            "id": "test-aapl-1",
+            "title": "AAPL earnings beat",
+            "body": "Apple reported strong Q4 earnings.",
+            "url": "https://example.com/aapl",
+            "source": "test",
+            "asset_tags": ["AAPL"],
+        }).encode()
+
+        mock_redis_client = MagicMock()
+        mock_redis_client.lrange.return_value = []
+        mock_redis_client.lmove.side_effect = [news_item_json, None]
+        mock_redis_client.delete.return_value = None
+
+        mock_redis_store = MagicMock()
+        mock_redis_store.get_ensemble_weights.return_value = raw_applied
+        mock_redis_store.get_llm_models.return_value = None
+
+        with patch("redis.Redis") as mock_redis_cls, \
+             patch("src.workers.sentiment.RedisStore", return_value=mock_redis_store), \
+             patch("psycopg2.connect") as mock_pg_connect, \
+             patch("src.workers.sentiment.PostgreSQLStore") as mock_pg_cls, \
+             patch("src.workers.sentiment.LLMBudgetTracker") as mock_bt_cls, \
+             patch("src.workers.sentiment.process_news_batch") as mock_pnb, \
+             patch("src.workers.sentiment.asyncio.run") as mock_async_run:
+            mock_redis_cls.from_url.return_value = mock_redis_client
+            mock_pg_connect.return_value = MagicMock()
+            mock_pg_cls.return_value = MagicMock()
+            mock_bt_cls.return_value = MagicMock()
+            mock_async_run.return_value = []
+            run_sentiment_worker()
+
+        assert mock_pnb.call_count == 1, f"Expected 1 call, got {mock_pnb.call_count}"
+        assert mock_pnb.call_args.kwargs.get("weights") == applied

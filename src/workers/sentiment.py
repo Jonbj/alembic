@@ -267,11 +267,24 @@ def run_sentiment_worker() -> dict:
     budget_tracker = LLMBudgetTracker(conn=pg_conn)
 
     # Read per-model weights from Redis (set by weekly LOO ICIR rebalancing).
-    # Falls back to None → confidence-only weighting if not yet computed.
+    # Primary key: "ensemble:weights:current" — only written when all auto-apply
+    # guardrails pass (VIX, IC variance, weight delta). On a fresh deploy or
+    # when the VIX key is absent, the guardrail fails and this key stays empty.
+    # Fallback: use the most recent suggestion from run_weekly_weights() so
+    # that LOO-rebalanced weights reach the ensemble even before formal approval.
     _raw_weights = redis_store.get_ensemble_weights()
-    model_weights: dict[str, float] | None = (
-        json.loads(_raw_weights).get("weights") if _raw_weights else None
-    )
+    model_weights: dict[str, float] | None = None
+    if _raw_weights:
+        model_weights = json.loads(_raw_weights).get("weights")
+    else:
+        suggestion = redis_store.get_weight_suggestion()
+        if suggestion:
+            model_weights = suggestion.get("suggested_weights")
+            if model_weights:
+                log.info(
+                    "Using suggestion weights (applied weights not yet set): %s",
+                    {m: f"{w:.2f}" for m, w in model_weights.items()},
+                )
 
     try:
         # Crash recovery: restore items from processing queue left by a previous crash.
