@@ -6,9 +6,9 @@ export interface Strategy {
   description: string
   status: string
   n_assets: number
-  oos_sharpe: number
-  max_drawdown: number
-  annual_return: number
+  oos_sharpe: number | null
+  max_drawdown: number | null
+  annual_return: number | null
 }
 
 export interface StrategyDetail {
@@ -16,24 +16,18 @@ export interface StrategyDetail {
   name: string
   description: string
   status: string
-  parameters: {
-    lookback_long: number
-    lookback_short: number
-    vol_window: number
-    vol_target: number
-    max_leverage: number
-  }
-  universe: string[]
+  parameters: Record<string, any>
+  universe: string[] | string
   n_assets: number
-  oos_sharpe: number
-  max_drawdown: number
-  annual_return: number
-  is_sharpe: number
-  calmar_ratio: number
-  sortino_ratio: number
-  win_rate: number
-  avg_holding_period: string
-  total_trades: number
+  oos_sharpe: number | null
+  max_drawdown: number | null
+  annual_return: number | null
+  is_sharpe?: number | null
+  calmar_ratio?: number | null
+  sortino_ratio?: number | null
+  win_rate?: number | null
+  avg_holding_period?: string | null
+  total_trades?: number | null
 }
 
 export interface EquityPoint {

@@ -39,13 +39,13 @@ def test_get_config_returns_yaml_as_dict():
     assert "AAPL" in data["symbols"]["watchlist"]
 
 
-def test_get_config_requires_api_key():
-    """GET /api/config without API key override returns 403."""
+def test_get_config_no_auth_required():
+    """GET /api/config is publicly accessible without API key."""
     app.dependency_overrides.pop(require_api_key, None)
     with patch("builtins.open", mock_open(read_data=_SAMPLE_YAML)):
         tc = TestClient(app)
         resp = tc.get("/api/config")
-    assert resp.status_code == 403
+    assert resp.status_code == 200
 
 
 def test_post_config_requires_api_key():

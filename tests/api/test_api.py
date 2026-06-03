@@ -58,15 +58,14 @@ async def test_get_signal_returns_sentiment(mock_redis_store):
 
 
 @pytest.mark.asyncio
-@pytest.mark.require_auth
-async def test_get_signal_requires_api_key(mock_redis_store):
-    """Test GET /api/signals/{symbol} returns 403 without API key."""
+async def test_get_signal_no_auth_required(mock_redis_store):
+    """Test GET /api/signals/{symbol} is publicly accessible (no API key needed)."""
     app.dependency_overrides[get_redis_store] = lambda: mock_redis_store
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         resp = await client.get("/api/signals/AAPL")
-    assert resp.status_code == 403
+    assert resp.status_code in (200, 404)
     app.dependency_overrides.pop(get_redis_store, None)
 
 

@@ -274,48 +274,42 @@ export default function Strategies() {
       <div style={{ background: '#1e293b', borderRadius: 8, padding: 16, border: '1px solid #334155' }}>
         <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 600, color: 'white' }}>Strategy Parameters</h3>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
-          <div style={{ background: '#0f172a', padding: 12, borderRadius: 6 }}>
-            <div style={{ color: '#64748b', fontSize: 11 }}>Lookback Long</div>
-            <div style={{ color: 'white', fontSize: 14, fontWeight: 600 }}>{detail?.parameters.lookback_long}</div>
-          </div>
-          <div style={{ background: '#0f172a', padding: 12, borderRadius: 6 }}>
-            <div style={{ color: '#64748b', fontSize: 11 }}>Lookback Short</div>
-            <div style={{ color: 'white', fontSize: 14, fontWeight: 600 }}>{detail?.parameters.lookback_short}</div>
-          </div>
-          <div style={{ background: '#0f172a', padding: 12, borderRadius: 6 }}>
-            <div style={{ color: '#64748b', fontSize: 11 }}>Vol Window</div>
-            <div style={{ color: 'white', fontSize: 14, fontWeight: 600 }}>{detail?.parameters.vol_window}</div>
-          </div>
-          <div style={{ background: '#0f172a', padding: 12, borderRadius: 6 }}>
-            <div style={{ color: '#64748b', fontSize: 11 }}>Vol Target</div>
-            <div style={{ color: 'white', fontSize: 14, fontWeight: 600 }}>{(detail?.parameters.vol_target ?? 0) * 100}%</div>
-          </div>
-          <div style={{ background: '#0f172a', padding: 12, borderRadius: 6 }}>
-            <div style={{ color: '#64748b', fontSize: 11 }}>Max Leverage</div>
-            <div style={{ color: 'white', fontSize: 14, fontWeight: 600 }}>{detail?.parameters.max_leverage}</div>
-          </div>
+          {detail && Object.entries(detail.parameters).map(([key, val]) => (
+            <div key={key} style={{ background: '#0f172a', padding: 12, borderRadius: 6 }}>
+              <div style={{ color: '#64748b', fontSize: 11 }}>{key.replace(/_/g, ' ')}</div>
+              <div style={{ color: 'white', fontSize: 14, fontWeight: 600 }}>
+                {Array.isArray(val) ? val.join(', ') : (val ?? '—')}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
       {/* Universe */}
       <div style={{ background: '#1e293b', borderRadius: 8, padding: 16, border: '1px solid #334155' }}>
-        <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 600, color: 'white' }}>Universe ({detail?.universe.length} ETFs)</h3>
+        <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 600, color: 'white' }}>
+          Universe ({Array.isArray(detail?.universe) ? `${detail.universe.length} ETFs` : 'Dynamic'})
+        </h3>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {detail?.universe.map(ticker => (
-            <span
-              key={ticker}
-              style={{
-                background: '#334155',
-                color: 'white',
-                padding: '4px 10px',
-                borderRadius: 4,
-                fontSize: 12,
-                fontWeight: 500,
-              }}
-            >
-              {ticker}
-            </span>
-          ))}
+          {Array.isArray(detail?.universe) ? (
+            detail.universe.map((ticker: string) => (
+              <span
+                key={ticker}
+                style={{
+                  background: '#334155',
+                  color: 'white',
+                  padding: '4px 10px',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontWeight: 500,
+                }}
+              >
+                {ticker}
+              </span>
+            ))
+          ) : (
+            <span style={{ color: '#94a3b8', fontSize: 13 }}>{detail?.universe ?? '—'}</span>
+          )}
         </div>
       </div>
     </div>
