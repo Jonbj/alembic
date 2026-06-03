@@ -79,7 +79,7 @@ class PortfolioOrchestrator:
         """Execute one portfolio cycle.
 
         The key insight: each strategy produces target *weights* (not orders).
-        We merge weights by allocation_pct, then compute delta orders ONCE
+        We compute allocation-weighted-average weights across strategies, then compute delta orders ONCE
         from the combined target vs current portfolio.
 
         Args:
@@ -100,6 +100,7 @@ class PortfolioOrchestrator:
         strategies_run: list[str] = []
         orders_per_strategy: dict[str, int] = {}
         merged_weights: dict[str, float] = {}
+        _weight_alloc_sum: dict[str, float] = {}
 
         nav = self._compute_nav(portfolio, market)
 
@@ -123,10 +124,14 @@ class PortfolioOrchestrator:
                 strategies_run.append(entry.strategy_id)
                 orders_per_strategy[entry.strategy_id] = len(tw)
 
-                # Merge: each strategy's weights scaled by its allocation_pct
+                # Merge: allocation-weighted average (NOT sum).
+                # Summing was the root cause of Bug 4 - two strategies each
+                # targeting AAPL at 50% would produce 100%+ allocation instead
+                # of the correct ~50% (weighted by each strategy's allocation).
                 alloc = entry.allocation_pct
                 for sym, wt in tw.items():
                     merged_weights[sym] = merged_weights.get(sym, 0.0) + wt * alloc
+                    _weight_alloc_sum[sym] = _weight_alloc_sum.get(sym, 0.0) + alloc
 
             except Exception as exc:
                 log.error(
@@ -135,6 +140,14 @@ class PortfolioOrchestrator:
                     exc,
                     exc_info=True,
                 )
+
+        # Normalize: convert cumulative (wt * alloc) to allocation-weighted average.
+        # Without this, two strategies targeting the same symbol would have
+        # their contributions summed, potentially exceeding 100% (Bug 4).
+        for sym in list(merged_weights.keys()):
+            total_alloc = _weight_alloc_sum.get(sym, 0.0)
+            if total_alloc > 0:
+                merged_weights[sym] = merged_weights[sym] / total_alloc
 
         # Step 2: Build delta orders from merged target weights
         combined: list[CombinedOrder] = []

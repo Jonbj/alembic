@@ -18,20 +18,28 @@ def compute_purified_icir(
     step_size: int = 5,
 ) -> Dict[str, float]:
     """
-    Compute per-model rolling ICIR for use in ensemble weight rebalancing.
+    Compute per-model LOO (Leave-One-Out) ICIR for ensemble weight rebalancing.
 
-    For each model, computes ICIR on that model's own signals and forward
-    returns. Higher ICIR → model is more predictive → gets more weight via
-    compute_new_weights().
+    For each model M:
+    1. Compute baseline ensemble ICIR using all models' signals
+    2. Compute ensemble ICIR after leaving out model M
+    3. purified_icir[M] = baseline_ICIR - ICIR_without_M
+
+    A positive purified ICIR means the model adds predictive value to the
+    ensemble (removing it degrades performance). A negative value means
+    the model hurts the ensemble.
+
+    If only one model is available, falls back to its standalone ICIR
+    (mean IC / std IC over a rolling window).
 
     Parameters
     ----------
     model_signals : Dict[str, List[float]]
-        model_id → list of signal scores.
+        model_id -> list of signal scores.
     model_returns : Dict[str, List[float]]
-        model_id → list of forward returns aligned with model_signals[model_id].
+        model_id -> list of forward returns aligned with model_signals[model_id].
     current_weights : Dict[str, float]
-        Current ensemble weights (unused here, kept for API compatibility).
+        Current ensemble weights (used to weight each model in baseline IC computation).
     window_size : int, default=30
         Rolling window size for IC calculation.
     step_size : int, default=5
@@ -40,29 +48,104 @@ def compute_purified_icir(
     Returns
     -------
     Dict[str, float]
-        model_id → ICIR (mean IC / std IC). Higher = better.
+        model_id -> LOO ICIR. Positive = model helps the ensemble.
     """
     if not model_signals:
         return {}
 
-    purified_icir: Dict[str, float] = {}
+    models = list(model_signals.keys())
 
-    for model, signals in model_signals.items():
+    # Single model: fall back to standalone ICIR
+    if len(models) < 2:
+        model = models[0]
+        signals = model_signals[model]
         returns = model_returns.get(model, [])
         if len(signals) != len(returns) or len(signals) < window_size:
-            purified_icir[model] = 0.0
-            continue
-
+            return {model: 0.0}
         ic_series = _compute_rolling_ic(signals, returns, window_size, step_size)
         if not ic_series:
-            purified_icir[model] = 0.0
-            continue
-
+            return {model: 0.0}
         ic_array = np.array(ic_series)
         ic_std = float(np.std(ic_array)) + 1e-8
-        purified_icir[model] = float(np.mean(ic_array) / ic_std)
+        return {model: float(np.mean(ic_array) / ic_std)}
+
+    # Build aligned time-series for the ensemble.
+    # Each model may have a different number of signals; we take the minimum
+    # length across all models as the common evaluation window.
+    min_len = min(len(model_signals[m]) for m in models)
+    if min_len < window_size:
+        # Not enough data for any LOO computation
+        return {m: 0.0 for m in models}
+
+    # Compute baseline ensemble ICIR using weighted-average signals
+    baseline_icir = _compute_ensemble_icir(
+        model_signals, model_returns, current_weights,
+        exclude=None, window_size=window_size, step_size=step_size,
+    )
+
+    # LOO: compute ICIR with each model excluded
+    purified_icir: Dict[str, float] = {}
+    for model in models:
+        loo_icir = _compute_ensemble_icir(
+            model_signals, model_returns, current_weights,
+            exclude=model, window_size=window_size, step_size=step_size,
+        )
+        # Positive = removing model degrades ensemble -> model adds value
+        purified_icir[model] = baseline_icir - loo_icir
 
     return purified_icir
+
+
+def _compute_ensemble_icir(
+    model_signals: Dict[str, List[float]],
+    model_returns: Dict[str, List[float]],
+    current_weights: Dict[str, float],
+    exclude: str | None = None,
+    window_size: int = 30,
+    step_size: int = 5,
+) -> float:
+    """Compute ICIR for the ensemble, optionally excluding one model.
+
+    The ensemble signal at each time step is the weighted average of
+    individual model signals, using current_weights. The forward return
+    is the weighted average of model returns (or equivalently, the common
+    forward return if all models predict the same underlying asset).
+
+    ICIR = mean(rolling IC) / std(rolling IC).
+    """
+    models = [m for m in model_signals if m != exclude] if exclude else list(model_signals.keys())
+
+    if not models:
+        return 0.0
+
+    # Normalize weights for the included models
+    raw_weights = {m: current_weights.get(m, 1.0 / len(model_signals)) for m in models}
+    total_w = sum(raw_weights.values())
+    if total_w <= 0:
+        return 0.0
+    norm_weights = {m: w / total_w for m, w in raw_weights.items()}
+
+    # Compute weighted-average ensemble signal and return at each time step.
+    # All models must have the same length for alignment.
+    min_len = min(len(model_signals[m]) for m in models)
+    if min_len < window_size:
+        return 0.0
+
+    ensemble_signals = []
+    ensemble_returns = []
+    for i in range(min_len):
+        sig = sum(model_signals[m][i] * norm_weights[m] for m in models)
+        ret = sum(model_returns.get(m, [0.0] * min_len)[i] * norm_weights[m] for m in models)
+        ensemble_signals.append(sig)
+        ensemble_returns.append(ret)
+
+    ic_series = _compute_rolling_ic(ensemble_signals, ensemble_returns, window_size, step_size)
+    if not ic_series:
+        return 0.0
+
+    ic_array = np.array(ic_series)
+    ic_std = float(np.std(ic_array)) + 1e-8
+    return float(np.mean(ic_array) / ic_std)
 
 
 def _compute_rolling_ic(
@@ -144,7 +227,7 @@ def compute_new_weights(
     Notes
     -----
     Based on design spec Section 4, PW-Q1 and PW-Q2:
-    - Raw weights = max(0, ICIR) — negative ICIR models get zero
+    - Raw weights = max(0, ICIR) -- negative ICIR models get zero
     - Normalize to sum to 1.0 (softmax-like)
     - Smoothing: blended = 0.75*old + 0.25*target
     - Guardrails: floor 10%, cap 70%, max delta 10%
@@ -153,7 +236,7 @@ def compute_new_weights(
     if not purified_icir:
         return current_weights.copy()
 
-    # Step 1: Raw weights from ICIR (negative ICIR → 0)
+    # Step 1: Raw weights from ICIR (negative ICIR -> 0)
     # Per design spec Section 4, PW-Q1: raw = max(0, ICIR)
     raw = {m: max(0.0, icir) for m, icir in purified_icir.items()}
     total = sum(raw.values())
@@ -162,10 +245,10 @@ def compute_new_weights(
     if total > 0:
         target = {m: v / total for m, v in raw.items()}
     else:
-        # All ICIR negative — keep current weights unchanged
+        # All ICIR negative -- keep current weights unchanged
         return current_weights.copy()
 
-    # Step 3: Smoothing — 75% old + 25% new
+    # Step 3: Smoothing -- 75% old + 25% new
     blended = {}
     for model in target.keys():
         old_w = current_weights.get(model, 1.0 / len(target))
