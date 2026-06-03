@@ -7,7 +7,7 @@
 
   *Alpha Miner paradigm: LLMs run offline, execution reads pre-computed signals from Redis*
 
-  ![Tests](https://img.shields.io/badge/tests-594%20passing-brightgreen)
+  ![Tests](https://img.shields.io/badge/tests-1714%20passing-brightgreen)
   ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
   ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 </div>
@@ -197,6 +197,22 @@ New weights are proposed subject to guardrails: no single model can exceed 70% w
 
 If all guardrails pass, the weights are **auto-applied** and written to Redis instantly — the next tick runs with the updated ensemble. If any guardrail trips, the operator receives a Telegram message with inline **[✅ Approve] / [❌ Reject]** buttons. Approval writes the weights to Redis immediately; rejection discards the proposal. This human-in-the-loop mechanism ensures that automated rebalancing cannot happen during volatile or anomalous market conditions without explicit operator sign-off.
 
+### Phase G — Portfolio Orchestration (Multi-Strategy)
+
+The `PortfolioOrchestrator` runs hourly during market hours and coordinates all active strategies using a **weight-then-order** architecture. Instead of each strategy independently generating full-portfolio orders (which causes double-counting when merged), strategies output **target weights**; the orchestrator merges them by allocation percentage, then computes a single set of delta orders.
+
+**Cycle:**
+1. Each active strategy (`S1`, `S2`, `S4`) produces target weights (fractions of NAV) scaled by its `allocation_pct`
+2. Weights are merged across strategies: `merged[sym] += strategy_weight[sym] × alloc_pct`
+3. Delta orders are computed: `target_qty - current_qty` per symbol
+4. `ConstraintEnforcer` applies five sequential constraints (per-asset, per-strategy, portfolio, sector, correlation)
+5. Optional `PortfolioVolTargeter` scales BUY quantities so the portfolio hits 10% annualised vol
+6. Orders are submitted to Alpaca; cycle result is persisted to `portfolio_cycles`
+
+**Monitoring:**
+- `DecayMonitor` (monthly): compares IC/hit-rate/Sharpe against backtest baselines
+- `PortfolioRiskMonitor` (daily): computes Herfindahl index, correlation matrix, drawdown per strategy
+
 ### Core Principles
 
 | Principle | Description |
@@ -263,13 +279,30 @@ Alembic/
 │   │   ├── drift.py           # PSI + CUSUM + circuit breakers
 │   │   ├── postmortem.py      # Trigger logic + diagnostics
 │   │   └── threshold.py       # Bucket IC + threshold suggester
+│   ├── portfolio/
+│   │   ├── orchestrator.py    # PortfolioOrchestrator: weight-then-order multi-strategy cycle
+│   │   ├── constraints.py     # ConstraintEnforcer: 5-pass risk constraint application
+│   │   ├── vol_targeting.py   # PortfolioVolTargeter: EWMA vol estimation + order scaling
+│   │   ├── decay_monitor.py   # DecayMonitor: actual vs backtest baseline comparison
+│   │   ├── risk_monitor.py    # PortfolioRiskMonitor: drawdown + correlation + HHI alerts
+│   │   ├── combiner.py        # Signal combiner (cross-sectional aggregation)
+│   │   ├── risk_parity.py     # Risk parity weight allocation
+│   │   └── types.py           # CombinedOrder, ConstraintViolation, PortfolioState
+│   ├── strategies/
+│   │   ├── s1/                # Time-Series Momentum (Moskowitz et al.)
+│   │   ├── s2/                # Volatility Risk Premium (VRP) overnight strategy
+│   │   ├── s3/                # Cross-Sectional Momentum (R&D sleeve)
+│   │   └── s4/                # News-Driven Tactical (LLM ensemble signals)
 │   ├── workers/
-│   │   ├── celery_app.py      # Celery config + beat schedule (8 registered tasks)
+│   │   ├── celery_app.py      # Celery config + beat schedule
 │   │   ├── sentiment.py       # SentimentWorker: news → LLM → Redis/PG
 │   │   ├── execution.py       # ExecutionWorker: signals → Alpaca orders + drawdown cap
 │   │   ├── performance.py     # PerformanceWorker: IC, weights, drift, auto-apply
 │   │   ├── regime.py          # RegimeDetector: macro → LLM pair → regime → Redis
 │   │   ├── ingestion.py       # NewsIngestionWorker: GDELT/MarketAux/Alpaca → Redis queue
+│   │   ├── portfolio_scheduler.py # PortfolioCycleTask: hourly multi-strategy orchestration
+│   │   ├── decay_monitor_task.py  # DecayMonitorTask: monthly baseline comparison
+│   │   ├── risk_monitor_task.py   # RiskMonitorTask: daily risk metrics
 │   │   └── telegram_poller.py # TelegramPoller: /getUpdates → approve/reject weights
 │   ├── api/
 │   │   ├── main.py            # FastAPI application
@@ -390,6 +423,9 @@ weight_cap: 0.70
 | `performance-daily` | Daily | 03:00 | IC report + Telegram alert |
 | `performance-weekly` | Weekly | Mon 04:00 | LOO ICIR → weight suggestion |
 | `regime-detector` | Daily | Mon–Fri 07:00 | Macro → LLM pair → regime → Redis |
+| `portfolio-cycle` | Hourly | Mon–Fri 14:00–21:00 | Multi-strategy weight-then-order cycle |
+| `risk-monitor` | Daily | 22:30 | Per-strategy + combined risk metrics |
+| `decay-monitor` | Monthly | 1st 23:00 | Actual vs backtest baseline decay check |
 | `poll-telegram-updates` | Every 5s | Always | Process approve/reject taps |
 
 ---
@@ -433,17 +469,20 @@ python -m pytest tests/ --cov=src --cov-report=html
 
 | Category | Tests |
 |----------|-------|
-| Workers (sentiment, execution, performance, regime, poller) | 82 |
-| Performance (IC, weights, drift, postmortem, threshold) | 89 |
-| Stores (Redis, Postgres, budget) | 60 |
-| LLM (client, ensemble, finbert) | 27 |
-| API (routes, auth, weight approval) | 12 |
-| Connectors (GDELT, MarketAux, macro, deduplicator) | 20 |
-| Notifications (base protocol, telegram formatters) | 25 |
-| Analysis (backtest, GDELT A/B) | 16 |
-| Security, config, models | 28 |
-| QuantConnect | 6 |
-| **Total** | **594** |
+| Workers (sentiment, execution, performance, regime, poller, portfolio) | ~120 |
+| Performance (IC, weights, drift, postmortem, threshold) | ~89 |
+| Portfolio (orchestrator, constraints, vol-targeting, risk-monitor, decay) | ~90 |
+| Strategies (S1, S2, S3, S4) | ~200 |
+| Backtest (engine, walkforward, metrics, gates, costs) | ~400 |
+| Stores (Redis, Postgres, budget) | ~60 |
+| LLM (client, ensemble, finbert) | ~27 |
+| API (routes, auth, weight approval) | ~80 |
+| Connectors (GDELT, MarketAux, macro, deduplicator) | ~20 |
+| Notifications (base protocol, telegram formatters) | ~25 |
+| Analysis (backtest, GDELT A/B) | ~16 |
+| Security, config, models | ~28 |
+| Frontend (React components) | ~559 |
+| **Total** | **~1714** |
 
 ---
 

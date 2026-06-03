@@ -50,6 +50,11 @@ class ConstraintEnforcer:
 
     When violated, orders for the affected scope are scaled down proportionally.
     SELL orders are never constrained. Passes repeat until no violations or limit reached.
+
+    Constraints are applied iteratively because reducing one order can push another
+    constraint into violation (e.g., scaling a high-NAV order down may suddenly make
+    a correlated-cluster constraint fire). Up to 10 passes guarantees convergence
+    without infinite loops.
     """
 
     def __init__(

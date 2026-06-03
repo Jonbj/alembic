@@ -182,7 +182,10 @@ class PortfolioOrchestrator:
                 allocation_weight=target_wt,
             ))
 
-        # Also sell positions not in merged targets
+        # Sell any positions whose symbol dropped out of the merged target entirely.
+        # This handles the case where a strategy that previously held a position
+        # no longer recommends it — without this loop, exited symbols would persist
+        # indefinitely in the portfolio.
         for pos in portfolio.all_positions():
             if pos.symbol not in merged_weights:
                 price = market.price_of(pos.symbol)
@@ -241,7 +244,9 @@ class PortfolioOrchestrator:
         Strategies that expose compute_target_weights() → call that.
         Otherwise, run the callable to get orders → infer weights from order values.
         """
-        # S1 and S4 have compute_target_weights (takes prices or signals)
+        # S1 and S4 have a compute_target_weights() method that maps directly to
+        # the weight-then-order contract. S2 returns Order objects (it's position-
+        # based, not weight-based), so we infer weights from order notional values.
         if hasattr(callable_fn, 'compute_target_weights'):
             if strategy_id == "S1":
                 prices = data_replay.prices_until(ts)

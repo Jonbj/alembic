@@ -1,5 +1,5 @@
-import math
 """Strategy endpoints with accurate data from backtest results and config."""
+import math
 
 from fastapi import APIRouter, HTTPException
 

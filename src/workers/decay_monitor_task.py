@@ -15,7 +15,9 @@ log = logging.getLogger(__name__)
 
 
 # ── Known backtest baselines ──────────────────────────────────────────────────
-
+# Baseline metrics established from GKG backtest (gkg-6m-v1, Nov 2025 – Apr 2026).
+# These are NOT live-validated — they are best-effort estimates. Update after
+# first 90 days of paper trading with actual measured metrics.
 _BASELINES: dict[str, dict[str, float]] = {
     "S1": {
         "ic": 0.035,

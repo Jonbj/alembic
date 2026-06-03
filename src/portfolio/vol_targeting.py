@@ -56,6 +56,10 @@ class PortfolioVolTargeter:
         if estimated_vol <= 0.0:
             return 1.0  # unknown vol → no-op (neutral), not max leverage
         raw = self.target_vol / estimated_vol
+        # Clamp scale to [0.5, 2.0] to prevent extreme de-leveraging or over-leveraging.
+        # Without a floor, a vol spike could scale all orders to near-zero (fully
+        # exiting all positions). Without a cap, a low-vol period could push leverage
+        # to 2× or more, violating broker margin requirements.
         return max(_CLAMP_LOW, min(_CLAMP_HIGH, raw))
 
     def scale_orders(
