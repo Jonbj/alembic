@@ -253,3 +253,88 @@ class TestTelegramPoller:
         redis.set_ensemble_weights.assert_not_called()
         redis.delete_weight_suggestion.assert_not_called()
         pg.log_weight_update.assert_not_called()
+
+
+class TestConnectionCleanup:
+    """Bug 1 regression: pg.close() must be called on every poll_telegram_updates()
+    invocation — success or failure — to prevent PostgreSQL pool exhaustion.
+
+    The task runs every 5 s; without the finally block, each call leaked one pool
+    connection and the 20-connection pool was exhausted in ~100 seconds.
+    """
+
+    def _run_poller_with_pg(self, mock_response_json, pg=None):
+        if pg is None:
+            pg = MagicMock()
+        redis = MagicMock()
+        redis.get_offset.return_value = 0
+        notifier = MagicMock()
+
+        with patch("src.workers.telegram_poller.httpx.Client") as mock_client, \
+             patch("src.workers.telegram_poller.RedisStore", return_value=redis), \
+             patch("src.workers.telegram_poller.PostgreSQLStore", return_value=pg), \
+             patch("src.workers.telegram_poller.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.telegram_poller.config") as mock_config:
+            mock_config.TELEGRAM_ALLOWED_USER_IDS = ["123"]
+            mock_config.TELEGRAM_BOT_TOKEN = "token"
+
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = mock_response_json
+            mock_client.return_value.__enter__.return_value.get.return_value = mock_resp
+
+            from src.workers.telegram_poller import poll_telegram_updates
+            poll_telegram_updates()
+
+        return pg
+
+    def test_pg_close_called_on_success(self):
+        """pg.close() must be called when poll completes normally (no updates)."""
+        pg = self._run_poller_with_pg({"ok": True, "result": []})
+        pg.close.assert_called_once()
+
+    def test_pg_close_called_on_http_error(self):
+        """pg.close() must be called even when Telegram API raises HTTPError."""
+        pg = MagicMock()
+        redis = MagicMock()
+        redis.get_offset.return_value = 0
+        notifier = MagicMock()
+
+        import httpx
+
+        with patch("src.workers.telegram_poller.httpx.Client") as mock_client, \
+             patch("src.workers.telegram_poller.RedisStore", return_value=redis), \
+             patch("src.workers.telegram_poller.PostgreSQLStore", return_value=pg), \
+             patch("src.workers.telegram_poller.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.telegram_poller.config") as mock_config:
+            mock_config.TELEGRAM_ALLOWED_USER_IDS = ["123"]
+            mock_config.TELEGRAM_BOT_TOKEN = "token"
+
+            mock_client.return_value.__enter__.return_value.get.side_effect = httpx.HTTPError("timeout")
+
+            from src.workers.telegram_poller import poll_telegram_updates
+            poll_telegram_updates()
+
+        pg.close.assert_called_once()
+
+    def test_pg_close_called_on_unexpected_exception(self):
+        """pg.close() must be called even when an unexpected exception is raised."""
+        pg = MagicMock()
+        redis = MagicMock()
+        redis.get_offset.return_value = 0
+        notifier = MagicMock()
+
+        with patch("src.workers.telegram_poller.httpx.Client") as mock_client, \
+             patch("src.workers.telegram_poller.RedisStore", return_value=redis), \
+             patch("src.workers.telegram_poller.PostgreSQLStore", return_value=pg), \
+             patch("src.workers.telegram_poller.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.telegram_poller.config") as mock_config:
+            mock_config.TELEGRAM_ALLOWED_USER_IDS = ["123"]
+            mock_config.TELEGRAM_BOT_TOKEN = "token"
+
+            mock_client.return_value.__enter__.return_value.get.side_effect = RuntimeError("Redis down")
+
+            from src.workers.telegram_poller import poll_telegram_updates
+            poll_telegram_updates()
+
+        pg.close.assert_called_once()

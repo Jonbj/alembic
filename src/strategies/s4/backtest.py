@@ -249,12 +249,12 @@ def _load_sentiment_signals(prices: pd.DataFrame, start, end) -> pd.DataFrame:
     try:
         from src.store.pg_store import PostgreSQLStore
 
-        store = PostgreSQLStore()
-        tickers = [c for c in prices.columns if c != "SPY"]
-        rows: list[dict] = []
-        for ticker in tickers:
-            records = store.fetch_signals_for_backtest(ticker, str(start), str(end))
-            rows.extend(records)
+        with PostgreSQLStore() as store:
+            tickers = [c for c in prices.columns if c != "SPY"]
+            rows: list[dict] = []
+            for ticker in tickers:
+                records = store.fetch_signals_for_backtest(ticker, str(start), str(end))
+                rows.extend(records)
         if rows:
             df = pd.DataFrame(rows)
             if "generated_at" not in df.columns:

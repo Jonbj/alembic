@@ -191,6 +191,8 @@ def poll_telegram_updates() -> None:
         # Don't update offset — retry same updates on next run
         # This ensures no callback is lost due to transient failures
         log.exception("poll_telegram_updates error: %s", e)
+    finally:
+        pg.close()
 
 
 def _answer_callback(client: httpx.Client, callback_id: str, text: str) -> None:
