@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-# Set API key before importing app
 os.environ["ADMIN_API_KEY"] = "test-api-key-for-testing-only-12345678"
 
 from src.api.main import app, get_redis_store
@@ -50,18 +49,16 @@ async def test_get_signal_returns_sentiment(mock_redis_store):
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
-        resp = await client.get(
-            "/api/signals/AAPL",
-            headers={"X-API-Key": "test-api-key-for-testing-only-12345678"},
-        )
+        resp = await client.get("/api/signals/AAPL")
     assert resp.status_code == 200
     data = resp.json()
     assert data["symbol"] == "AAPL"
     assert data["score"] == pytest.approx(0.48)
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_redis_store, None)
 
 
 @pytest.mark.asyncio
+@pytest.mark.require_auth
 async def test_get_signal_requires_api_key(mock_redis_store):
     """Test GET /api/signals/{symbol} returns 403 without API key."""
     app.dependency_overrides[get_redis_store] = lambda: mock_redis_store
@@ -70,7 +67,7 @@ async def test_get_signal_requires_api_key(mock_redis_store):
     ) as client:
         resp = await client.get("/api/signals/AAPL")
     assert resp.status_code == 403
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_redis_store, None)
 
 
 @pytest.mark.asyncio
@@ -81,15 +78,13 @@ async def test_get_signal_404_when_missing(mock_redis_store):
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
-        resp = await client.get(
-            "/api/signals/UNKN",
-            headers={"X-API-Key": "test-api-key-for-testing-only-12345678"},
-        )
+        resp = await client.get("/api/signals/UNKN")
     assert resp.status_code == 404
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_redis_store, None)
 
 
 @pytest.mark.asyncio
+@pytest.mark.require_auth
 async def test_admin_mode_requires_api_key(mock_redis_store):
     """Test POST /api/admin/mode requires valid API key."""
     app.dependency_overrides[get_redis_store] = lambda: mock_redis_store
@@ -98,7 +93,7 @@ async def test_admin_mode_requires_api_key(mock_redis_store):
     ) as client:
         resp = await client.post("/api/admin/mode", json={"mode": "paper"})
     assert resp.status_code == 403
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_redis_store, None)
 
 
 @pytest.mark.asyncio
@@ -111,13 +106,12 @@ async def test_admin_mode_with_valid_key(mock_redis_store):
         resp = await client.post(
             "/api/admin/mode",
             json={"mode": "paper"},
-            headers={"X-API-Key": "test-api-key-for-testing-only-12345678"},
         )
     assert resp.status_code == 200
     data = resp.json()
     assert data["mode"] == "paper"
     assert data["status"] == "ok"
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_redis_store, None)
 
 
 @pytest.mark.asyncio
@@ -133,6 +127,7 @@ async def test_health_endpoint():
 
 
 @pytest.mark.asyncio
+@pytest.mark.require_auth
 async def test_killswitch_requires_api_key(mock_redis_store):
     """Test POST /api/admin/killswitch requires valid API key."""
     app.dependency_overrides[get_redis_store] = lambda: mock_redis_store
@@ -141,7 +136,7 @@ async def test_killswitch_requires_api_key(mock_redis_store):
     ) as client:
         resp = await client.post("/api/admin/killswitch")
     assert resp.status_code == 403
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_redis_store, None)
 
 
 @pytest.mark.asyncio
@@ -151,15 +146,12 @@ async def test_killswitch_with_valid_key(mock_redis_store):
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
-        resp = await client.post(
-            "/api/admin/killswitch",
-            headers={"X-API-Key": "test-api-key-for-testing-only-12345678"},
-        )
+        resp = await client.post("/api/admin/killswitch")
     assert resp.status_code == 200
     data = resp.json()
     assert data["killswitch"] == "activated"
     assert data["mode"] == "halted"
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_redis_store, None)
 
 
 @pytest.mark.asyncio
@@ -172,7 +164,6 @@ async def test_admin_mode_invalid_mode(mock_redis_store):
         resp = await client.post(
             "/api/admin/mode",
             json={"mode": "invalid_mode"},
-            headers={"X-API-Key": "test-api-key-for-testing-only-12345678"},
         )
     assert resp.status_code == 400
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_redis_store, None)
