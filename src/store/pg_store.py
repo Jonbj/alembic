@@ -235,14 +235,18 @@ class PostgreSQLStore:
         where = ("WHERE " + " AND ".join(filters)) if filters else ""
         params.append(limit)
         conn = self._get_connection()
-        with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT id, title, url, source, ticker, raw_sentiment, created_at AS fetched_at "
-                f"FROM news_log {where} ORDER BY created_at DESC LIMIT %s",
-                params,
-            )
-            cols = [d[0] for d in cur.description]
-            return [dict(zip(cols, row)) for row in cur.fetchall()]
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT id, title, url, source, ticker, raw_sentiment, created_at AS fetched_at "
+                    f"FROM news_log {where} ORDER BY created_at DESC LIMIT %s",
+                    params,
+                )
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception:
+            conn.rollback()
+            raise
 
     def get_llm_feedback(
         self,
@@ -262,22 +266,26 @@ class PostgreSQLStore:
         where = ("WHERE " + " AND ".join(filters)) if filters else ""
         params.append(limit)
         conn = self._get_connection()
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT r.id, r.signal_id, s.symbol, r.model_id, r.polarity,
-                       r.confidence, r.reasoning, r.eligible, r.generated_at,
-                       s.fallback_used, s.ensemble_std
-                FROM llm_responses r
-                JOIN sentiment_signals s ON s.id = r.signal_id
-                {where}
-                ORDER BY r.generated_at DESC
-                LIMIT %s
-                """,
-                params,
-            )
-            cols = [d[0] for d in cur.description]
-            return [dict(zip(cols, row)) for row in cur.fetchall()]
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT r.id, r.signal_id, s.symbol, r.model_id, r.polarity,
+                           r.confidence, r.reasoning, r.eligible, r.generated_at,
+                           s.fallback_used, s.ensemble_std
+                    FROM llm_responses r
+                    JOIN sentiment_signals s ON s.id = r.signal_id
+                    {where}
+                    ORDER BY r.generated_at DESC
+                    LIMIT %s
+                    """,
+                    params,
+                )
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception:
+            conn.rollback()
+            raise
 
     # FIX: Use timedelta from Python instead of string interpolation
     # Original vulnerable code:
@@ -299,12 +307,13 @@ class PostgreSQLStore:
             List of (score, confidence, forward_return, generated_at, model_id, fallback_used) tuples
         """
         conn = self._get_connection()
-        with conn.cursor() as cur:
-            # FIX: Pass days as string parameter for interval arithmetic
-            # This prevents SQL injection that was possible with:
-            #   f"INTERVAL '{days} days'"
-            cur.execute(self._FETCH_FOR_IC, (symbol, str(days)))
-            return cur.fetchall()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_FOR_IC, (symbol, str(days)))
+                return cur.fetchall()
+        except Exception:
+            conn.rollback()
+            raise
 
     _FETCH_PER_MODEL_FOR_IC = """
         SELECT r.model_id,
@@ -329,9 +338,13 @@ class PostgreSQLStore:
         used for per-model grouping; this method uses the correct source.
         """
         conn = self._get_connection()
-        with conn.cursor() as cur:
-            cur.execute(self._FETCH_PER_MODEL_FOR_IC, (symbol, str(days)))
-            return cur.fetchall()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_PER_MODEL_FOR_IC, (symbol, str(days)))
+                return cur.fetchall()
+        except Exception:
+            conn.rollback()
+            raise
 
     def fetch_signals_for_backtest(
         self, symbol: str, start_date: str, end_date: str
@@ -348,34 +361,42 @@ class PostgreSQLStore:
             List of signal dictionaries
         """
         conn = self._get_connection()
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                """
-                SELECT symbol, score, confidence, reasoning, model_id,
-                       ensemble_std, fallback_used, generated_at
-                FROM sentiment_signals
-                WHERE symbol = %s
-                  AND generated_at >= %s
-                  AND generated_at <= %s
-                ORDER BY generated_at ASC
-                """,
-                (symbol, start_date, end_date),
-            )
-            return [dict(row) for row in cur.fetchall()]
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT symbol, score, confidence, reasoning, model_id,
+                           ensemble_std, fallback_used, generated_at
+                    FROM sentiment_signals
+                    WHERE symbol = %s
+                      AND generated_at >= %s
+                      AND generated_at <= %s
+                    ORDER BY generated_at ASC
+                    """,
+                    (symbol, start_date, end_date),
+                )
+                return [dict(row) for row in cur.fetchall()]
+        except Exception:
+            conn.rollback()
+            raise
 
     def add_forward_return(self, signal_id: int, forward_return: float) -> None:
         """Add forward return to a signal (called by performance worker)."""
         conn = self._get_connection()
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE sentiment_signals
-                SET forward_return = %s
-                WHERE id = %s
-                """,
-                (forward_return, signal_id),
-            )
-        conn.commit()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE sentiment_signals
+                    SET forward_return = %s
+                    WHERE id = %s
+                    """,
+                    (forward_return, signal_id),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
     def fetch_signals_pending_forward_return(
         self, days_back: int = 60
@@ -391,48 +412,56 @@ class PostgreSQLStore:
             days_back: Maximum lookback window in days (default 60).
         """
         conn = self._get_connection()
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id, symbol, generated_at
-                FROM sentiment_signals
-                WHERE forward_return IS NULL
-                  AND fallback_used = false
-                  AND generated_at < NOW() - INTERVAL '1 day'
-                  AND generated_at > NOW() - INTERVAL '1 day' * %s
-                ORDER BY symbol, generated_at
-                """,
-                (days_back,),
-            )
-            return cur.fetchall()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, symbol, generated_at
+                    FROM sentiment_signals
+                    WHERE forward_return IS NULL
+                      AND fallback_used = false
+                      AND generated_at < NOW() - INTERVAL '1 day'
+                      AND generated_at > NOW() - INTERVAL '1 day' * %s
+                    ORDER BY symbol, generated_at
+                    """,
+                    (days_back,),
+                )
+                return cur.fetchall()
+        except Exception:
+            conn.rollback()
+            raise
     def fetch_latest_signals(self, symbols: list[str]) -> list[dict]:
         """Fetch the latest signal for each symbol from PostgreSQL.
-        
+
         Used as fallback when Redis cache has expired.
         Returns list of dicts matching the Redis sentiment signal format.
         """
         if not symbols:
             return []
         conn = self._get_connection()
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            placeholders = ", ".join(["%s"] * len(symbols))
-            cur.execute(
-                "SELECT DISTINCT ON (symbol) "
-                "  symbol, score, confidence, reasoning, "
-                "  model_id, ensemble_std, fallback_used, generated_at "
-                "FROM sentiment_signals "
-                "WHERE symbol IN (" + placeholders + ") "
-                "ORDER BY symbol, generated_at DESC",
-                tuple(symbols)
-            )
-            rows = cur.fetchall()
-            results = []
-            for row in rows:
-                d = dict(row)
-                if d.get("generated_at") is not None:
-                    d["generated_at"] = d["generated_at"].isoformat()
-                results.append(d)
-            return results
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                placeholders = ", ".join(["%s"] * len(symbols))
+                cur.execute(
+                    "SELECT DISTINCT ON (symbol) "
+                    "  symbol, score, confidence, reasoning, "
+                    "  model_id, ensemble_std, fallback_used, generated_at "
+                    "FROM sentiment_signals "
+                    "WHERE symbol IN (" + placeholders + ") "
+                    "ORDER BY symbol, generated_at DESC",
+                    tuple(symbols)
+                )
+                rows = cur.fetchall()
+                results = []
+                for row in rows:
+                    d = dict(row)
+                    if d.get("generated_at") is not None:
+                        d["generated_at"] = d["generated_at"].isoformat()
+                    results.append(d)
+                return results
+        except Exception:
+            conn.rollback()
+            raise
 
     def bulk_add_forward_returns(
         self, updates: list[tuple[int, float]]
@@ -448,14 +477,18 @@ class PostgreSQLStore:
         if not updates:
             return 0
         conn = self._get_connection()
-        with conn.cursor() as cur:
-            cur.executemany(
-                "UPDATE sentiment_signals SET forward_return = %s WHERE id = %s",
-                [(ret, sid) for sid, ret in updates],
-            )
-            updated = cur.rowcount
-        conn.commit()
-        return updated
+        try:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "UPDATE sentiment_signals SET forward_return = %s WHERE id = %s",
+                    [(ret, sid) for sid, ret in updates],
+                )
+                updated = cur.rowcount
+            conn.commit()
+            return updated
+        except Exception:
+            conn.rollback()
+            raise
 
     def log_weight_update(
         self,

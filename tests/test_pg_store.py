@@ -167,5 +167,101 @@ class TestLogWeightUpdate:
         mock_conn.rollback.assert_called_once()
 
 
+class TestConnectionPoolSafety:
+    """Verify that all read/write methods roll back on error (Bug 1 fix).
+
+    If a query fails, the connection must be rolled back before the exception
+    propagates. Without rollback, psycopg2 leaves the connection in
+    'InFailedSqlTransaction' state. Returning that connection to the pool
+    corrupts it — the next thread gets a broken connection.
+    """
+
+    def _make_store_with_failing_cursor(self, error: str = "DB error"):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_cursor.execute.side_effect = Exception(error)
+        mock_conn.cursor.return_value = mock_cursor
+        return PostgreSQLStore(conn=mock_conn, use_pool=False), mock_conn
+
+    def test_get_news_recent_rollback_on_error(self):
+        store, mock_conn = self._make_store_with_failing_cursor()
+        with pytest.raises(Exception):
+            store.get_news_recent()
+        mock_conn.rollback.assert_called_once()
+
+    def test_get_llm_feedback_rollback_on_error(self):
+        store, mock_conn = self._make_store_with_failing_cursor()
+        with pytest.raises(Exception):
+            store.get_llm_feedback()
+        mock_conn.rollback.assert_called_once()
+
+    def test_fetch_signals_for_ic_rollback_on_error(self):
+        store, mock_conn = self._make_store_with_failing_cursor()
+        with pytest.raises(Exception):
+            store.fetch_signals_for_ic("AAPL", 30)
+        mock_conn.rollback.assert_called_once()
+
+    def test_fetch_per_model_signals_for_ic_rollback_on_error(self):
+        store, mock_conn = self._make_store_with_failing_cursor()
+        with pytest.raises(Exception):
+            store.fetch_per_model_signals_for_ic("AAPL", 30)
+        mock_conn.rollback.assert_called_once()
+
+    def test_fetch_signals_for_backtest_rollback_on_error(self):
+        store, mock_conn = self._make_store_with_failing_cursor()
+        with pytest.raises(Exception):
+            store.fetch_signals_for_backtest("AAPL", "2026-01-01", "2026-06-01")
+        mock_conn.rollback.assert_called_once()
+
+    def test_add_forward_return_rollback_on_commit_error(self):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_conn.cursor.return_value = mock_cursor
+        mock_conn.commit.side_effect = Exception("commit failed")
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        with pytest.raises(Exception, match="commit failed"):
+            store.add_forward_return(signal_id=1, forward_return=0.02)
+        mock_conn.rollback.assert_called_once()
+
+    def test_fetch_signals_pending_forward_return_rollback_on_error(self):
+        store, mock_conn = self._make_store_with_failing_cursor()
+        with pytest.raises(Exception):
+            store.fetch_signals_pending_forward_return()
+        mock_conn.rollback.assert_called_once()
+
+    def test_fetch_latest_signals_rollback_on_error(self):
+        store, mock_conn = self._make_store_with_failing_cursor()
+        with pytest.raises(Exception):
+            store.fetch_latest_signals(["AAPL", "MSFT"])
+        mock_conn.rollback.assert_called_once()
+
+    def test_bulk_add_forward_returns_rollback_on_commit_error(self):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_conn.cursor.return_value = mock_cursor
+        mock_conn.commit.side_effect = Exception("commit failed")
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        with pytest.raises(Exception, match="commit failed"):
+            store.bulk_add_forward_returns([(1, 0.02), (2, -0.01)])
+        mock_conn.rollback.assert_called_once()
+
+    def test_close_does_not_double_release_after_exception(self):
+        """Connection released exactly once even when method raised."""
+        store, mock_conn = self._make_store_with_failing_cursor()
+        try:
+            store.fetch_signals_for_ic("AAPL", 30)
+        except Exception:
+            pass
+        store.close()
+        # _release_connection called once (in close()), rollback called once (in method)
+        mock_conn.rollback.assert_called_once()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
