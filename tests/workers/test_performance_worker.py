@@ -85,13 +85,15 @@ class TestBuildPerformanceReport:
     def test_insufficient_samples_returns_empty_report(self):
         """Test that insufficient samples returns empty report."""
         mock_pg = MagicMock(spec=PostgreSQLStore)
-        # Return only 10 rows (below 300 minimum)
-        mock_pg.fetch_signals_for_ic.return_value = [
-            make_signal_row(0.5, 0.02, "opus") for _ in range(10)
-        ]
 
         current_weights = {"opus": 1.0}
-        report = build_performance_report(mock_pg, current_weights, period_days=30)
+        # Patch _fetch_all_signals_for_ic to return exactly 10 rows total (below
+        # the module-level _MIN_SAMPLES=300 threshold).  Mocking fetch_signals_for_ic
+        # alone would return 10 rows per symbol (89 symbols × 10 = 890 rows), which
+        # bypasses the guard entirely.
+        with patch("src.workers.performance._fetch_all_signals_for_ic") as mock_fetch:
+            mock_fetch.return_value = [make_signal_row(0.5, 0.02, "opus") for _ in range(10)]
+            report = build_performance_report(mock_pg, current_weights, period_days=30)
 
         assert isinstance(report, PerformanceReport)
         assert report.overall_ic == 0.0
