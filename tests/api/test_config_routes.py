@@ -16,14 +16,27 @@ risk:
 
 
 def test_get_config_returns_yaml_as_dict():
-    """GET /api/config returns trading.yaml as a dict."""
-    with patch("builtins.open", mock_open(read_data=_SAMPLE_YAML)):
+    """GET /api/config with API key returns trading.yaml as a dict."""
+    import secrets
+
+    def mock_compare(a, b):
+        return a == b
+
+    with patch("builtins.open", mock_open(read_data=_SAMPLE_YAML)), \
+         patch.object(secrets, "compare_digest", mock_compare):
         tc = TestClient(app)
-        resp = tc.get("/api/config")
+        resp = tc.get("/api/config", headers={"X-API-Key": "test-api-key-for-testing-only-12345678"})
     assert resp.status_code == 200
     data = resp.json()
     assert "symbols" in data
     assert "AAPL" in data["symbols"]["watchlist"]
+
+
+def test_get_config_requires_api_key():
+    """GET /api/config without API key returns 403."""
+    tc = TestClient(app)
+    resp = tc.get("/api/config")
+    assert resp.status_code == 403
 
 
 def test_post_config_requires_api_key():

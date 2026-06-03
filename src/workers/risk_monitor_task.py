@@ -83,7 +83,8 @@ def _fetch_strategy_data(pg) -> tuple[dict[str, list[float]], dict[str, float], 
         nav = float(row_nav or 0.0)
         total_exposure = float(row_exp or 0.0)
 
-    # Fetch rolling 60d history for richer metrics
+    # Fetch rolling 60d history for richer metrics; only replace single-day data
+    # if the history query actually returns rows (empty history → keep what we have).
     try:
         conn = pg._get_connection()
         with conn.cursor() as cur:
@@ -96,9 +97,10 @@ def _fetch_strategy_data(pg) -> tuple[dict[str, list[float]], dict[str, float], 
                 """
             )
             history_rows = cur.fetchall()
-        strategy_returns = {}
-        for sid, daily_ret in history_rows:
-            strategy_returns.setdefault(sid, []).append(float(daily_ret or 0.0))
+        if history_rows:
+            strategy_returns = {}
+            for sid, daily_ret in history_rows:
+                strategy_returns.setdefault(sid, []).append(float(daily_ret or 0.0))
     except Exception as e:
         log.debug("Could not fetch rolling history: %s", e)
 

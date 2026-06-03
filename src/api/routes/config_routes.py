@@ -20,7 +20,9 @@ def _read_config() -> dict:
 
 
 @router.get("/config")
-def get_config() -> dict:
+def get_config(
+    api_key: Annotated[str, Depends(require_api_key)],
+) -> dict:
     """Return the current trading.yaml as a JSON object."""
     return _read_config()
 

@@ -3,6 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
+from src.api.auth import require_api_key
 from src.api.deps import get_alpaca_trading_client
 
 router = APIRouter(prefix="/api")
@@ -11,6 +12,7 @@ router = APIRouter(prefix="/api")
 @router.get("/positions")
 def get_positions(
     client: Annotated[object, Depends(get_alpaca_trading_client)],
+    _: Annotated[str, Depends(require_api_key)],
 ) -> list[dict]:
     """Return all open positions from Alpaca."""
     positions = client.get_all_positions()
@@ -31,6 +33,7 @@ def get_positions(
 @router.get("/orders")
 def get_orders(
     client: Annotated[object, Depends(get_alpaca_trading_client)],
+    _: Annotated[str, Depends(require_api_key)],
     limit: int = 50,
 ) -> list[dict]:
     """Return order history from Alpaca (filled + cancelled)."""

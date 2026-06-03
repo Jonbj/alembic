@@ -54,7 +54,7 @@ class PortfolioVolTargeter:
     def compute_scale(self, estimated_vol: float) -> float:
         """Return the vol-targeting scale factor, clamped to [0.5, 2.0]."""
         if estimated_vol <= 0.0:
-            return _CLAMP_HIGH
+            return 1.0  # unknown vol → no-op (neutral), not max leverage
         raw = self.target_vol / estimated_vol
         return max(_CLAMP_LOW, min(_CLAMP_HIGH, raw))
 

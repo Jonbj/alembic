@@ -168,13 +168,16 @@ def _run_cycle_inner() -> dict:
     )
 
     # Check operating mode before submitting orders
+    operating_mode = None
     try:
         from redis import Redis as _Redis
         _r = _Redis.from_url(config.REDIS_URL, decode_responses=True)
-        operating_mode = _r.get("system:mode")
+        try:
+            operating_mode = _r.get("system:mode")
+        finally:
+            _r.close()
     except Exception as exc:
         log.warning("Could not read system:mode from Redis: %s — proceeding with submission", exc)
-        operating_mode = None
 
     if operating_mode in ("dry_run", "halted"):
         log.info("Skipping order submission - %s mode", operating_mode)
@@ -254,7 +257,10 @@ def _submit_portfolio_orders(orders, trading_client, market, _submit_fn=None) ->
     for order in orders:
         try:
             if order.side == OrderSide.BUY:
-                price = market.prices.get(order.symbol, 100.0)
+                price = market.prices.get(order.symbol)
+                if price is None or price <= 0:
+                    log.warning("No market price for %s — skipping BUY order", order.symbol)
+                    continue
                 notional = round(price * order.quantity, 2)
                 if _submit_fn is not None:
                     _submit_fn(order, notional, trading_client)
@@ -293,15 +299,16 @@ def _submit_portfolio_orders(orders, trading_client, market, _submit_fn=None) ->
 
 def _persist_cycle_result(cycle_data: dict, conn=None) -> None:
     """Persist cycle stats to portfolio_cycles. DB errors are swallowed."""
-    try:
-        import psycopg2
+    import psycopg2
 
+    _local_conn = None
+    should_close = False
+    try:
         if conn is None:
             from src.config import config
-            conn = psycopg2.connect(config.DATABASE_URL.replace("+asyncpg", ""))
+            _local_conn = psycopg2.connect(config.DATABASE_URL.replace("+asyncpg", ""))
+            conn = _local_conn
             should_close = True
-        else:
-            should_close = False
 
         with conn.cursor() as cur:
             cur.execute(
@@ -317,7 +324,8 @@ def _persist_cycle_result(cycle_data: dict, conn=None) -> None:
                 ),
             )
         conn.commit()
-        if should_close:
-            conn.close()
     except Exception as exc:
         log.warning("Failed to persist cycle result: %s", exc)
+    finally:
+        if should_close and _local_conn is not None:
+            _local_conn.close()

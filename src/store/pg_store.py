@@ -528,7 +528,7 @@ class PostgreSQLStore:
 
     def get_last_portfolio_cycle(self) -> dict | None:
         """Return the most recent portfolio cycle, or None if no cycles exist."""
-        conn = self._ensure_connection()
+        conn = self._get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(
@@ -551,7 +551,7 @@ class PostgreSQLStore:
 
     def get_portfolio_cycle_history(self, limit: int = 30) -> list[dict]:
         """Return the last N portfolio cycles, newest first."""
-        conn = self._ensure_connection()
+        conn = self._get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(

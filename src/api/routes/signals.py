@@ -25,6 +25,7 @@ def _watchlist() -> list[str]:
 async def get_all_signals(
     redis_store: Annotated[RedisStore, Depends(get_redis_store)],
     pg_store: Annotated[PostgreSQLStore, Depends(get_pg_store)],
+    _: Annotated[str, Depends(require_api_key)],
     symbol: str | None = None,
 ) -> list[dict]:
     """Get latest signals for all watchlist symbols (or a single symbol if provided).

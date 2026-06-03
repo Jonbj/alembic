@@ -106,10 +106,14 @@ def _fetch_actual_metrics(strategy_id: str, pg) -> dict[str, float]:
 
 
 def _store_decay_report(pg, report) -> int:
-    """Store DecayReport to decay_reports table, return inserted id."""
+    """Store DecayReport to decay_reports table, return inserted id of last row."""
     from src.portfolio.decay_monitor import DecayLevel
 
+    if not report.metrics:
+        return -1
+
     conn = pg._get_connection()
+    row_id = -1
     try:
         with conn.cursor() as cur:
             for metric in report.metrics:

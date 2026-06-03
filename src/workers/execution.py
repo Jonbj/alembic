@@ -268,17 +268,26 @@ def run_execution_cycle(
                 stop_price = entry_price * (1 - STOP_LOSS_PCT)
 
                 if current_price < stop_price:
-                    trading_client.close_position(symbol)
-                    stats["stop_losses_triggered"] += 1
-                    log.info(
-                        "STOP-LOSS %s: entry=%.2f current=%.2f stop=%.2f",
-                        symbol, entry_price, current_price, stop_price,
-                    )
-                    _fire_alert(
-                        notifier,
-                        f"🔴 STOP-LOSS {symbol}: entry={entry_price:.2f} current={current_price:.2f} (−{STOP_LOSS_PCT*100:.0f}%)",
-                        AlertLevel.WARNING,
-                    )
+                    try:
+                        trading_client.close_position(symbol)
+                        stats["stop_losses_triggered"] += 1
+                        log.info(
+                            "STOP-LOSS %s: entry=%.2f current=%.2f stop=%.2f",
+                            symbol, entry_price, current_price, stop_price,
+                        )
+                        _fire_alert(
+                            notifier,
+                            f"🔴 STOP-LOSS {symbol}: entry={entry_price:.2f} current={current_price:.2f} (−{STOP_LOSS_PCT*100:.0f}%)",
+                            AlertLevel.WARNING,
+                        )
+                    except Exception as stop_exc:
+                        log.error("Failed to close stop-loss position for %s: %s", symbol, stop_exc)
+                        _fire_alert(
+                            notifier,
+                            f"🚨 STOP-LOSS FAILED {symbol}: could not close position — {stop_exc}",
+                            AlertLevel.CRITICAL,
+                        )
+                        stats["errors"] += 1
                 else:
                     # Position open and healthy — idempotent, no pyramiding
                     stats["skipped_position"] += 1
@@ -301,8 +310,9 @@ def run_execution_cycle(
                 ema = cached.get("ema")
                 price = cached.get("price")
                 if ema is None or price is None:
-                    # Market data unavailable — EMA filter skipped, allow trade
-                    pass
+                    log.debug("EMA/price unavailable for %s — skipping entry (fail-safe)", symbol)
+                    stats["skipped_momentum"] += 1
+                    continue
                 elif price <= ema:
                     log.debug(
                         "Price below EMA20 for %s (price=%.2f ema=%.2f) — bearish, skip",

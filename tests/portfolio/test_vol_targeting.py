@@ -132,10 +132,11 @@ class TestScaleFactor:
         scale = targeter.compute_scale(0.01)
         assert scale == pytest.approx(2.0)
 
-    def test_zero_vol_returns_upper_clamp(self):
+    def test_zero_vol_returns_neutral_scale(self):
+        # Unknown vol → 1.0 (no-op), not 2.0 (max leverage)
         targeter = PortfolioVolTargeter(target_vol=0.10)
         scale = targeter.compute_scale(0.0)
-        assert scale == pytest.approx(2.0)
+        assert scale == pytest.approx(1.0)
 
     def test_custom_target_vol_scales_correctly(self):
         targeter = PortfolioVolTargeter(target_vol=0.15)
