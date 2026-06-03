@@ -9,6 +9,7 @@ Creates the `app` Celery instance used by all workers. Beat schedule:
     check-suggestion-expiry   daily 05:00 UTC
     regime-detector           daily Mon-Fri 07:00 UTC
     poll-telegram-updates     every 5 seconds (always active)
+    decay-monitor             daily 21:00 UTC (paper trading phase; revert to 1st-of-month post-live)
 
 To run workers:
     celery -A src.workers.celery_app worker --loglevel=info
@@ -132,10 +133,11 @@ app.conf.beat_schedule = {
         "task": "src.workers.portfolio_scheduler.run_portfolio_cycle",
         "schedule": crontab(minute=0, hour="14-21", day_of_week="1-5"),
     },
-    # Decay monitor: 1st of month at 23:00 UTC
+    # Decay monitor: daily at 21:00 UTC (market close + buffer) for paper trading validation.
+    # Change back to crontab(minute=0, hour=23, day_of_month="1") after paper trading phase.
     "decay-monitor": {
         "task": "src.workers.decay_monitor_task.run_decay_check",
-        "schedule": crontab(minute=0, hour=23, day_of_month="1"),
+        "schedule": crontab(hour=21, minute=0),
     },
     # Risk monitor daily at 22:30 UTC (after forward-return worker at 22:00)
     "risk-monitor": {

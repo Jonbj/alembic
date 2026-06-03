@@ -36,6 +36,50 @@ function GateBadge({ passed }: { passed: boolean }) {
   )
 }
 
+/**
+ * Badge indicating whether the displayed metrics come from live portfolio
+ * execution or from static backtest results.
+ *
+ * - LIVE   (green)  — the strategy has run in at least one portfolio cycle
+ * - BACKTEST (amber) — only static backtest data is available
+ */
+function DataSourceBadge({ source }: { source: 'LIVE' | 'BACKTEST' | undefined }) {
+  if (!source) return null
+  const isLive = source === 'LIVE'
+  return (
+    <span
+      title={
+        isLive
+          ? 'Metrics reflect live portfolio execution data'
+          : 'Metrics are from static backtest results only — no live runs recorded'
+      }
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        padding: '2px 8px',
+        borderRadius: 4,
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: '0.04em',
+        background: isLive ? '#065f46' : '#78350f',
+        color: isLive ? '#6ee7b7' : '#fcd34d',
+        border: `1px solid ${isLive ? '#059669' : '#d97706'}`,
+        userSelect: 'none',
+      }}
+    >
+      <span style={{
+        width: 6,
+        height: 6,
+        borderRadius: '50%',
+        background: isLive ? '#34d399' : '#fbbf24',
+        flexShrink: 0,
+      }} />
+      {isLive ? 'LIVE' : 'BACKTEST'}
+    </span>
+  )
+}
+
 export default function Strategies() {
   const { data: strategies, isLoading: strategiesLoading, error: strategiesError } = useQuery({
     queryKey: ['strategies'],
@@ -120,12 +164,20 @@ export default function Strategies() {
       </div>
 
       {currentStrategy && (
-        <div style={{ color: '#64748b', fontSize: 12 }}>
-          {currentStrategy.n_assets} assets · {currentStrategy.status.toUpperCase()} · {currentStrategy.oos_sharpe} OOS Sharpe
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ color: '#64748b', fontSize: 12 }}>
+            {currentStrategy.n_assets} assets · {currentStrategy.status.toUpperCase()} · {currentStrategy.oos_sharpe} OOS Sharpe
+          </span>
+          <DataSourceBadge source={currentStrategy.data_source} />
         </div>
       )}
 
       {/* KPI Cards */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ color: '#94a3b8', fontSize: 12, fontWeight: 500 }}>Performance Metrics</span>
+          <DataSourceBadge source={detail?.data_source ?? currentStrategy?.data_source} />
+        </div>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <KPICard
           label="OOS Sharpe"

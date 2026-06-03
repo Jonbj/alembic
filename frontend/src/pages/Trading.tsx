@@ -58,7 +58,7 @@ export default function Trading() {
           {posLoading && <p style={{ padding: 16, color: 'var(--text-muted)' }}>Loading...</p>}
           <table>
             <thead>
-              <tr><th>Ticker</th><th>Qty</th><th>Avg Price</th><th>Market Value</th><th>Unrealized P&L</th><th>P&L %</th></tr>
+              <tr><th>Ticker</th><th>Qty</th><th>Entry Price</th><th>Market Price</th><th>Market Value</th><th>Unrealized P&L</th><th>P&L %</th></tr>
             </thead>
             <tbody>
               {positions.map((p) => (
@@ -66,6 +66,7 @@ export default function Trading() {
                   <td><strong>{p.symbol}</strong></td>
                   <td>{p.qty}</td>
                   <td>${p.avg_entry_price.toFixed(2)}</td>
+                  <td>{p.current_price != null ? `$${parseFloat(String(p.current_price)).toFixed(2)}` : '—'}</td>
                   <td>${p.market_value.toFixed(2)}</td>
                   <td style={{ color: p.unrealized_pl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
                     {p.unrealized_pl >= 0 ? '+' : ''}${p.unrealized_pl.toFixed(2)}
@@ -76,7 +77,7 @@ export default function Trading() {
                 </tr>
               ))}
               {positions.length === 0 && !posLoading && (
-                <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No open positions</td></tr>
+                <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No open positions</td></tr>
               )}
             </tbody>
           </table>
@@ -96,7 +97,7 @@ export default function Trading() {
                   <td><strong>{o.symbol}</strong></td>
                   <td>
                     <span className={`badge ${o.side === 'buy' ? 'badge-green' : 'badge-red'}`}>
-                      {o.side.toUpperCase()}
+                      {o.side ? o.side.toUpperCase() : '—'}
                     </span>
                   </td>
                   <td>{o.qty}</td>

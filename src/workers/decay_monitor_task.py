@@ -1,6 +1,7 @@
 """Decay monitor Celery task (T-605).
 
-Scheduled monthly (1st of month at 23:00 UTC). Fetches recent actual performance
+Scheduled daily at 21:00 UTC during paper trading validation phase (was: 1st of
+month at 23:00 UTC — revert after go-live). Fetches recent actual performance
 from PostgreSQL, compares against backtest baselines, and stores decay reports.
 """
 from __future__ import annotations

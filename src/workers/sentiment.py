@@ -164,7 +164,7 @@ async def process_news_item(
             redis_store.reset_fallback_counter()
         redis_store.write_sentiment(result)
         signal_id = pg_store.write_signal(result)
-        pg_store.log_news_item(item=item, ticker=ticker)
+        pg_store.log_news_item(item=item, ticker=ticker, computed_sentiment=result.score)
         if raw_outputs:
             pg_store.log_llm_responses(signal_id=signal_id, outputs=raw_outputs)
     except Exception as e:

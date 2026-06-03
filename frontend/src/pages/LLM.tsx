@@ -51,7 +51,7 @@ export default function LLM() {
         },
         {
           heading: "Pesi ensemble",
-          content: "Il sistema calcola automaticamente i pesi ottimali per l'ensemble di modelli basandosi sulla performance storica.\n\n- **Current**: pesi attualmente in uso\n- **Suggested**: pesi raccomandati dal sistema\n- **Δ**: differenza tra suggested e current\n\nClicca 'Approve Weights' per accettare i pesi suggeriti. Serve API key.",
+          content: "Il sistema calcola automaticamente i pesi ottimali per l'ensemble di modelli basandosi sulla performance storica.\n\n- **Active Weights**: pesi attualmente in uso — applicati ad ogni segnale live.\n- **Proposed Weights**: pesi calcolati dal sistema, in attesa di approvazione. Finché non vengono approvati, non hanno effetto.\n- **vs Active (Δ)**: differenza tra i pesi proposti e quelli attivi.\n\nClicca 'Approve' per attivare i pesi proposti. Richiede API key.",
         },
       ]} />
 
@@ -93,7 +93,10 @@ export default function LLM() {
       {tab === 'weights' && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
           <div className="card">
-            <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 600 }}>Current Weights</h3>
+            <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 600 }}>Active Weights</h3>
+            <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--text-muted)' }}>
+              These weights are currently live and applied to every ensemble signal.
+            </p>
             {wLoading && <p style={{ color: 'var(--text-muted)' }}>Loading...</p>}
             {weights?.current && (
               <table>
@@ -115,12 +118,20 @@ export default function LLM() {
             )}
           </div>
 
-          <div className="card">
-            <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 600 }}>Suggested Weights</h3>
+          <div className="card" style={{ border: weights?.suggested ? '1px solid var(--yellow, #f59e0b)' : undefined, background: weights?.suggested ? 'rgba(245,158,11,0.04)' : undefined }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>Proposed Weights</h3>
+              {weights?.suggested && (
+                <span className="badge badge-yellow" style={{ fontSize: 11, padding: '2px 7px' }}>PENDING APPROVAL</span>
+              )}
+            </div>
+            <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--text-muted)' }}>
+              Auto-computed by the system based on historical performance. Not yet active — click "Approve" to apply.
+            </p>
             {weights?.suggested ? (
               <>
                 <table>
-                  <thead><tr><th>Model</th><th>Suggested</th><th>Δ vs Current</th></tr></thead>
+                  <thead><tr><th>Model</th><th>Proposed</th><th>vs Active</th></tr></thead>
                   <tbody>
                     {Object.entries(weights.suggested).map(([model, w]) => {
                       const curr = (weights.current?.[model] ?? 0) as number
@@ -150,13 +161,13 @@ export default function LLM() {
                     onClick={() => approveMutation.mutate()}
                     disabled={approveMutation.isPending}
                   >
-                    {approveMutation.isPending ? 'Approving...' : '✓ Approve Weights'}
+                    {approveMutation.isPending ? 'Approving...' : 'Approve — apply these weights'}
                   </button>
                   {approveMutation.isError && <p style={{ color: 'var(--red)', fontSize: 12 }}>Error — check API key</p>}
                 </div>
               </>
             ) : (
-              <p style={{ color: 'var(--text-muted)' }}>No pending suggestion</p>
+              <p style={{ color: 'var(--text-muted)' }}>No pending proposal — weights are up to date.</p>
             )}
           </div>
         </div>

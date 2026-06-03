@@ -168,11 +168,30 @@ class PostgreSQLStore:
         VALUES (%s, %s, %s, %s, %s, %s, now())
     """
 
-    def log_news_item(self, item: NewsItem, ticker: str) -> None:
-        """Write article metadata to news_log. Skips silently on conflict."""
+    def log_news_item(
+        self,
+        item: NewsItem,
+        ticker: str,
+        computed_sentiment: float | None = None,
+    ) -> None:
+        """Write article metadata to news_log. Skips silently on conflict.
+
+        Args:
+            item: The news article to log.
+            ticker: Ticker symbol associated with this article.
+            computed_sentiment: LLM/FinBERT score (polarity × confidence) computed
+                by the sentiment worker. When provided this takes precedence over
+                the article-level MarketAux sentiment so the stored value always
+                reflects the actual signal used for trading decisions. When None,
+                falls back to MarketAux article-level sentiment (or NULL for
+                GDELT/Alpaca articles that lack a pre-computed score).
+        """
         from src.models.news import MarketAuxNewsItem
 
-        raw_sentiment = item.marketaux_sentiment if isinstance(item, MarketAuxNewsItem) else None
+        if computed_sentiment is not None:
+            raw_sentiment = computed_sentiment
+        else:
+            raw_sentiment = item.marketaux_sentiment if isinstance(item, MarketAuxNewsItem) else None
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:

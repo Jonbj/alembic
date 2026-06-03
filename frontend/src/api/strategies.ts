@@ -9,6 +9,8 @@ export interface Strategy {
   oos_sharpe: number | null
   max_drawdown: number | null
   annual_return: number | null
+  /** "LIVE" when the strategy has run in at least one portfolio cycle; "BACKTEST" otherwise. */
+  data_source?: 'LIVE' | 'BACKTEST'
 }
 
 export interface StrategyDetail {
@@ -28,6 +30,8 @@ export interface StrategyDetail {
   win_rate?: number | null
   avg_holding_period?: string | null
   total_trades?: number | null
+  /** "LIVE" when the strategy has run in at least one portfolio cycle; "BACKTEST" otherwise. */
+  data_source?: 'LIVE' | 'BACKTEST'
 }
 
 export interface EquityPoint {

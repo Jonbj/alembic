@@ -1,9 +1,41 @@
 """Strategy endpoints with accurate data from backtest results and config."""
+import logging
 import math
 
 from fastapi import APIRouter, HTTPException
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/strategies")
+
+
+def _check_live_data(strategy_id: str) -> bool:
+    """Return True if at least one portfolio_cycles row has run this strategy.
+
+    The portfolio_scheduler stores strategy IDs as uppercase (e.g. "S1"),
+    while the API uses lowercase (e.g. "s1").  We match case-insensitively.
+    Returns False on any DB error so the caller can fall back gracefully.
+    """
+    try:
+        from src.store.pg_store import PostgreSQLStore
+
+        with PostgreSQLStore() as store:
+            conn = store._get_connection()
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM portfolio_cycles
+                    WHERE strategies_run @> %s::jsonb
+                    LIMIT 1
+                    """,
+                    # strategies_run is a JSON array of uppercase IDs like ["S1"]
+                    (f'["{strategy_id.upper()}"]',),
+                )
+                return cur.fetchone() is not None
+    except Exception as exc:
+        log.debug("Could not query portfolio_cycles for %s: %s", strategy_id, exc)
+        return False
 
 # ─── S1 — Time-Series Momentum (VALIDATED) ───────────────────────────────────
 # Source: config/s1_strategy.yaml + reports/s1_backtest/summary.json
@@ -234,16 +266,33 @@ STRATEGIES = {
 
 @router.get("")
 def list_strategies() -> list[dict]:
-    """List all strategies with KPIs."""
-    return [v["summary"] for v in STRATEGIES.values()]
+    """List all strategies with KPIs.
+
+    Each entry includes a ``data_source`` field:
+      - ``"LIVE"``     — the strategy has run at least once in a live portfolio cycle.
+      - ``"BACKTEST"`` — only static backtest data is available.
+    """
+    result = []
+    for strategy_id, v in STRATEGIES.items():
+        summary = dict(v["summary"])
+        summary["data_source"] = "LIVE" if _check_live_data(strategy_id) else "BACKTEST"
+        result.append(summary)
+    return result
 
 
 @router.get("/{strategy_id}")
 def get_strategy(strategy_id: str) -> dict:
-    """Get strategy detail with parameters and universe."""
+    """Get strategy detail with parameters and universe.
+
+    Includes a ``data_source`` field (``"LIVE"`` or ``"BACKTEST"``) so the
+    frontend can display whether the metrics come from live execution or
+    static backtest results.
+    """
     if strategy_id not in STRATEGIES:
         raise HTTPException(status_code=404, detail="Strategy not found")
-    return STRATEGIES[strategy_id]["detail"]
+    detail = dict(STRATEGIES[strategy_id]["detail"])
+    detail["data_source"] = "LIVE" if _check_live_data(strategy_id) else "BACKTEST"
+    return detail
 
 
 @router.get("/{strategy_id}/backtest")
