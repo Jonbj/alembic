@@ -414,28 +414,25 @@ class PostgreSQLStore:
         if not symbols:
             return []
         conn = self._get_connection()
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                placeholders = ", ".join(["%s"] * len(symbols))
-                cur.execute(
-                    "SELECT DISTINCT ON (symbol) "
-                    "  symbol, score, confidence, reasoning, "
-                    "  model_id, ensemble_std, fallback_used, generated_at "
-                    "FROM sentiment_signals "
-                    "WHERE symbol IN (" + placeholders + ") "
-                    "ORDER BY symbol, generated_at DESC",
-                    tuple(symbols)
-                )
-                rows = cur.fetchall()
-                results = []
-                for row in rows:
-                    d = dict(row)
-                    if d.get("generated_at") is not None:
-                        d["generated_at"] = d["generated_at"].isoformat()
-                    results.append(d)
-                return results
-        finally:
-            self._release_connection(conn)
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            placeholders = ", ".join(["%s"] * len(symbols))
+            cur.execute(
+                "SELECT DISTINCT ON (symbol) "
+                "  symbol, score, confidence, reasoning, "
+                "  model_id, ensemble_std, fallback_used, generated_at "
+                "FROM sentiment_signals "
+                "WHERE symbol IN (" + placeholders + ") "
+                "ORDER BY symbol, generated_at DESC",
+                tuple(symbols)
+            )
+            rows = cur.fetchall()
+            results = []
+            for row in rows:
+                d = dict(row)
+                if d.get("generated_at") is not None:
+                    d["generated_at"] = d["generated_at"].isoformat()
+                results.append(d)
+            return results
 
     def bulk_add_forward_returns(
         self, updates: list[tuple[int, float]]
