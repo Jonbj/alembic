@@ -109,7 +109,11 @@ class PostgreSQLStore:
                 self._conn = _get_pool().getconn()
                 return self._conn
             except psycopg2.pool.PoolError:
+                # Pool exhausted — fall back to a direct connection.
+                # Must clear _use_pool so _release_connection() calls conn.close()
+                # instead of putconn() on a connection that was never in the pool.
                 self._conn = psycopg2.connect(config.DATABASE_URL)
+                self._use_pool = False
                 self._owns_connection = True
                 return self._conn
 

@@ -262,6 +262,56 @@ class TestConnectionPoolSafety:
         # _release_connection called once (in close()), rollback called once (in method)
         mock_conn.rollback.assert_called_once()
 
+    def test_get_last_portfolio_cycle_rollback_on_error(self):
+        """get_last_portfolio_cycle rolls back on error and returns None."""
+        store, mock_conn = self._make_store_with_failing_cursor()
+        result = store.get_last_portfolio_cycle()
+        assert result is None
+        mock_conn.rollback.assert_called_once()
+
+    def test_get_portfolio_cycle_history_rollback_on_error(self):
+        """get_portfolio_cycle_history rolls back on error and returns empty list."""
+        store, mock_conn = self._make_store_with_failing_cursor()
+        result = store.get_portfolio_cycle_history()
+        assert result == []
+        mock_conn.rollback.assert_called_once()
+
+
+class TestPoolFallbackConnection:
+    """Verify the pool-exhaustion fallback path cleans up correctly (Bug 1 fix).
+
+    When the ThreadedConnectionPool is exhausted and raises PoolError,
+    _get_connection() falls back to a direct psycopg2.connect(). After the
+    fix, _use_pool is set to False so that _release_connection() calls
+    conn.close() instead of putconn() (which would raise PoolError on a
+    non-pool connection and leave the connection leaked).
+    """
+
+    def test_fallback_connection_close_on_pool_error(self):
+        """When pool raises PoolError, fallback conn is closed (not put back to pool)."""
+        from unittest.mock import patch, MagicMock
+        import psycopg2.pool
+
+        mock_direct_conn = MagicMock()
+        mock_pool = MagicMock()
+        mock_pool.getconn.side_effect = psycopg2.pool.PoolError("pool exhausted")
+
+        with patch("src.store.pg_store._get_pool", return_value=mock_pool):
+            with patch("src.store.pg_store.psycopg2.connect", return_value=mock_direct_conn):
+                store = PostgreSQLStore(use_pool=True)
+                conn = store._get_connection()
+
+                # After fallback: use_pool must be False so _release_connection
+                # calls conn.close() instead of putconn()
+                assert store._use_pool is False
+                assert store._owns_connection is True
+                assert conn is mock_direct_conn
+
+                store.close()
+                # Must call close() on the direct connection, not putconn() on pool
+                mock_direct_conn.close.assert_called_once()
+                mock_pool.putconn.assert_not_called()
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
