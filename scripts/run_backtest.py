@@ -228,7 +228,6 @@ def phase2_infer(pg_conn, run_id: str, dry_run: bool, concurrency: int = 5, yes:
                 log.info("Phase 2 checkpoint: %d/%d scored", processed, total)
                 last_checkpoint = processed
 
-    pg_conn.commit()
     log.info("Phase 2 complete: %d rows scored", processed)
     return processed
 
