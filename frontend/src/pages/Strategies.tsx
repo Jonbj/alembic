@@ -204,6 +204,7 @@ export default function Strategies() {
           tooltip="Numero totale di trade eseguiti dalla strategia nel periodo di backtest."
         />
       </div>
+      </div>
 
       {/* Equity Curve */}
       <div style={{ background: '#1e293b', borderRadius: 8, padding: 16, border: '1px solid #334155' }}>
