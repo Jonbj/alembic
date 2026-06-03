@@ -20,7 +20,7 @@ class TestBudgetTracker:
         tracker = LLMBudgetTracker(conn=mock_conn)
 
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(tracker.check_budget())
+        result = asyncio.run(tracker.check_budget())
 
         assert result == "ok"
 
@@ -35,7 +35,7 @@ class TestBudgetTracker:
         tracker._daily_limit = 50.0
 
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(tracker.check_budget())
+        result = asyncio.run(tracker.check_budget())
 
         assert result == "ok"
 
@@ -50,7 +50,7 @@ class TestBudgetTracker:
 
         import asyncio
         with pytest.raises(LLMBudgetExhaustedError):
-            asyncio.get_event_loop().run_until_complete(tracker.check_budget())
+            asyncio.run(tracker.check_budget())
 
     def test_check_budget_over_limit(self):
         """Test check_budget when over limit."""
@@ -64,7 +64,7 @@ class TestBudgetTracker:
 
         import asyncio
         with pytest.raises(LLMBudgetExhaustedError):
-            asyncio.get_event_loop().run_until_complete(tracker.check_budget())
+            asyncio.run(tracker.check_budget())
 
     def test_record_spending(self):
         """Test recording spending."""
@@ -76,7 +76,7 @@ class TestBudgetTracker:
         tracker = LLMBudgetTracker(conn=mock_conn)
 
         import asyncio
-        spent = asyncio.get_event_loop().run_until_complete(
+        spent = asyncio.run(
             tracker.record_spending("opus", input_tokens=1000, output_tokens=500)
         )
 
@@ -95,7 +95,7 @@ class TestBudgetTracker:
         tracker._daily_limit = 50.0
 
         import asyncio
-        remaining = asyncio.get_event_loop().run_until_complete(tracker.get_remaining_budget())
+        remaining = asyncio.run(tracker.get_remaining_budget())
 
         assert remaining == 30.0
 
@@ -110,7 +110,7 @@ class TestBudgetTracker:
         tracker._daily_limit = 50.0
 
         import asyncio
-        remaining = asyncio.get_event_loop().run_until_complete(tracker.get_remaining_budget())
+        remaining = asyncio.run(tracker.get_remaining_budget())
 
         assert remaining == 50.0
 
