@@ -24,6 +24,8 @@ symbols:
     - ARM
     - AMAT
     - TSM
+    - MRVL
+    - DELL
     # --- Cloud / SaaS / Networking ---
     - CRM
     - ADBE
