@@ -1,0 +1,144 @@
+{
+  "run_id": "alpaca-smallmid-2506",
+  "period_start": "2026-03-06T17:07:44+00:00",
+  "period_end": "2026-06-04T15:58:28+00:00",
+  "total_signals": 2219,
+  "signals_with_returns": 1002,
+  "ic_1h": {
+    "composite_ic": 0.2946580740203447,
+    "spearman_ic": 0.015719785249351158,
+    "weighted_hit_rate": 0.4735635510601999,
+    "brier_score": 0.2763544196119542,
+    "sample_count": 939
+  },
+  "ic_4h": {
+    "composite_ic": 0.291744563643237,
+    "spearman_ic": 0.0024208695666805098,
+    "weighted_hit_rate": 0.48126234814410024,
+    "brier_score": 0.26922287791666666,
+    "sample_count": 675
+  },
+  "ic_24h": {
+    "composite_ic": 0.29423091326146544,
+    "spearman_ic": 0.02182281804691977,
+    "weighted_hit_rate": 0.4659377208070743,
+    "brier_score": 0.2823090600205838,
+    "sample_count": 1002
+  },
+  "icir_1h": {
+    "icir": 13.061124506834494,
+    "ic_mean": 0.27762790183218133,
+    "ic_std": 0.13292131075396219,
+    "newey_west_std": 0.021256048947922285,
+    "lag": 3,
+    "sample_count": 939
+  },
+  "icir_4h": {
+    "icir": 13.004501175449498,
+    "ic_mean": 0.2903392791302916,
+    "ic_std": 0.1223764809374145,
+    "newey_west_std": 0.022326060431937796,
+    "lag": 3,
+    "sample_count": 675
+  },
+  "icir_24h": {
+    "icir": 19.539535421311335,
+    "ic_mean": 0.29497349588699245,
+    "ic_std": 0.11277260225118305,
+    "newey_west_std": 0.015096238959974015,
+    "lag": 3,
+    "sample_count": 1002
+  },
+  "by_model": {
+    "finbert": {
+      "ic_1h": null,
+      "icir_1h": null,
+      "ic_4h": null,
+      "icir_4h": null,
+      "ic_24h": null,
+      "icir_24h": null,
+      "sample_count": 0
+    },
+    "ensemble:glm-5.1:cloud+deepseek-v4-pro:cloud": {
+      "ic_1h": 0.29635881521395524,
+      "icir_1h": 12.146319074200997,
+      "ic_4h": 0.31085036654230314,
+      "icir_4h": 12.945825448229714,
+      "ic_24h": 0.3067898832999877,
+      "icir_24h": 17.23969133770753,
+      "sample_count": 821
+    },
+    "ensemble:glm-5.1:cloud": {
+      "ic_1h": 0.3008732305855437,
+      "icir_1h": 7.409093875149451,
+      "ic_4h": 0.283435301187134,
+      "icir_4h": 16.770296455087173,
+      "ic_24h": 0.22280092605182644,
+      "icir_24h": 10.49323130183591,
+      "sample_count": 90
+    },
+    "ensemble:deepseek-v4-pro:cloud": {
+      "ic_1h": 0.35495648116644823,
+      "icir_1h": 57.407633673081904,
+      "ic_4h": 0.13287038054095768,
+      "icir_4h": 4.190924530809684,
+      "ic_24h": 0.24328504316669136,
+      "icir_24h": 14.205060502121379,
+      "sample_count": 91
+    }
+  },
+  "by_symbol": {
+    "INTC": {
+      "ic_24h": 0.3942216712654647,
+      "icir_24h": 13.469065428789285,
+      "sample_count": 148
+    },
+    "CRDO": {
+      "ic_24h": null,
+      "icir_24h": null,
+      "sample_count": 13
+    },
+    "MU": {
+      "ic_24h": 0.37347430304153373,
+      "icir_24h": 7.227210295293284,
+      "sample_count": 137
+    },
+    "ALAB": {
+      "ic_24h": null,
+      "icir_24h": null,
+      "sample_count": 21
+    },
+    "NVDA": {
+      "ic_24h": 0.27689640608659094,
+      "icir_24h": 8.778868293879974,
+      "sample_count": 536
+    },
+    "GFS": {
+      "ic_24h": null,
+      "icir_24h": null,
+      "sample_count": 6
+    },
+    "ADI": {
+      "ic_24h": null,
+      "icir_24h": null,
+      "sample_count": 1
+    },
+    "AMD": {
+      "ic_24h": 0.2409379237780164,
+      "icir_24h": 7.16631665496069,
+      "sample_count": 140
+    }
+  },
+  "by_source": {
+    "alpaca_benzinga": {
+      "ic_1h": 0.2946580740203447,
+      "icir_1h": 13.061124506834494,
+      "ic_4h": 0.291744563643237,
+      "icir_4h": 13.004501175449498,
+      "ic_24h": 0.29423091326146544,
+      "icir_24h": 19.539535421311335,
+      "sample_count": 1002
+    }
+  },
+  "generated_at": "2026-06-04T19:36:11.355898+00:00"
+}
