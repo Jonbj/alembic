@@ -187,8 +187,81 @@ def test_build_strategy_instance_s4_returns_instance():
     entry = MagicMock()
     entry.strategy_id = "S4"
     bars_df = _make_bars_df(n=5, symbols=["SPY"])
-    result = _build_strategy_instance(entry, bars_df)
+    mock_store = MagicMock()
+    mock_store.fetch_signals_for_cycle.return_value = []
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_store):
+        result = _build_strategy_instance(entry, bars_df)
     assert isinstance(result, NewsDrivenTactical)
+
+
+def test_build_strategy_instance_s4_loads_signals_from_db():
+    """S4 loads signals from DB and passes them as a DataFrame to NewsDrivenTactical."""
+    from src.models.signals import SentimentResult
+    from src.strategies.s4.strategy import NewsDrivenTactical
+    from src.workers.portfolio_scheduler import _build_strategy_instance
+
+    entry = MagicMock()
+    entry.strategy_id = "S4"
+    bars_df = _make_bars_df(n=5, symbols=["SPY"])
+
+    mock_signals = [
+        SentimentResult(
+            symbol="NVDA", score=0.8, confidence=0.9, reasoning="Positive",
+            model_id="test", generated_at=datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc),
+        ),
+        SentimentResult(
+            symbol="MSFT", score=0.6, confidence=0.7, reasoning="Neutral",
+            model_id="test", generated_at=datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc),
+        ),
+    ]
+    mock_store = MagicMock()
+    mock_store.fetch_signals_for_cycle.return_value = mock_signals
+
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_store):
+        result = _build_strategy_instance(entry, bars_df)
+
+    assert isinstance(result, NewsDrivenTactical)
+    assert result._signals_df is not None
+    assert len(result._signals_df) == 2
+    assert set(result._signals_df["symbol"]) == {"NVDA", "MSFT"}
+
+
+def test_build_strategy_instance_s4_handles_db_error_gracefully():
+    """S4 DB failure returns NewsDrivenTactical with signals=None — never crashes."""
+    from src.strategies.s4.strategy import NewsDrivenTactical
+    from src.workers.portfolio_scheduler import _build_strategy_instance
+
+    entry = MagicMock()
+    entry.strategy_id = "S4"
+    bars_df = _make_bars_df(n=5, symbols=["SPY"])
+
+    mock_store = MagicMock()
+    mock_store.fetch_signals_for_cycle.side_effect = RuntimeError("DB down")
+
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_store):
+        result = _build_strategy_instance(entry, bars_df)
+
+    assert isinstance(result, NewsDrivenTactical)
+    assert result._signals_df is None
+
+
+def test_build_strategy_instance_s4_no_signals_in_db():
+    """S4 with empty DB result returns NewsDrivenTactical with signals=None."""
+    from src.strategies.s4.strategy import NewsDrivenTactical
+    from src.workers.portfolio_scheduler import _build_strategy_instance
+
+    entry = MagicMock()
+    entry.strategy_id = "S4"
+    bars_df = _make_bars_df(n=5, symbols=["SPY"])
+
+    mock_store = MagicMock()
+    mock_store.fetch_signals_for_cycle.return_value = []
+
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_store):
+        result = _build_strategy_instance(entry, bars_df)
+
+    assert isinstance(result, NewsDrivenTactical)
+    assert result._signals_df is None
 
 
 def test_build_strategy_instance_returns_none_for_unknown_id():

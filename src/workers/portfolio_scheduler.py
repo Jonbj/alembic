@@ -231,7 +231,37 @@ def _build_strategy_instance(entry, bars_df):
         return VRPStrategy(prices=bars_df)
 
     if sid == "S4":
-        return NewsDrivenTactical(config=S4Config(), signals=None)
+        from src.store.pg_store import PostgreSQLStore
+        s4_config = S4Config()
+        signals_df = None
+        store = None
+        try:
+            store = PostgreSQLStore()
+            signals = store.fetch_signals_for_cycle(hours=s4_config.signals_lookback_hours)
+            if signals:
+                import pandas as pd
+                signals_df = pd.DataFrame([{
+                    "symbol": s.symbol,
+                    "score": s.score,
+                    "confidence": s.confidence,
+                    "reasoning": s.reasoning,
+                    "model_id": s.model_id,
+                    "ensemble_std": s.ensemble_std,
+                    "fallback_used": s.fallback_used,
+                    "generated_at": s.generated_at,
+                } for s in signals])
+                log.info("S4: loaded %d signals from DB (last %d h)", len(signals), s4_config.signals_lookback_hours)
+            else:
+                log.warning(
+                    "S4: no signals in DB for last %d hours — strategy will produce no orders",
+                    s4_config.signals_lookback_hours,
+                )
+        except Exception as exc:
+            log.warning("S4: failed to load signals from DB: %s — strategy will produce no orders", exc)
+        finally:
+            if store is not None:
+                store.close()
+        return NewsDrivenTactical(config=s4_config, signals=signals_df)
 
     log.warning("Unknown strategy_id '%s' — skipping", sid)
     return None

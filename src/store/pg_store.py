@@ -388,6 +388,52 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    _FETCH_SIGNALS_FOR_CYCLE = """
+        SELECT DISTINCT ON (symbol)
+            symbol, score, confidence,
+            COALESCE(reasoning, '') AS reasoning,
+            model_id, ensemble_std, fallback_used, generated_at
+        FROM sentiment_signals
+        WHERE generated_at >= NOW() - (%s || ' hours')::interval
+        ORDER BY symbol, generated_at DESC
+    """
+
+    def fetch_signals_for_cycle(self, hours: int = 4) -> list[SentimentResult]:
+        """Fetch the latest signal per symbol from the last N hours.
+
+        Used by the live portfolio cycle to load fresh signals for S4.
+        Returns SentimentResult objects with timezone-aware generated_at.
+        """
+        from datetime import timezone as _tz
+
+        conn = self._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(self._FETCH_SIGNALS_FOR_CYCLE, (str(hours),))
+                rows = cur.fetchall()
+        except Exception:
+            conn.rollback()
+            raise
+
+        results = []
+        for row in rows:
+            generated_at = row["generated_at"]
+            if generated_at is not None and generated_at.tzinfo is None:
+                generated_at = generated_at.replace(tzinfo=_tz.utc)
+            results.append(
+                SentimentResult(
+                    symbol=row["symbol"],
+                    score=float(row["score"]),
+                    confidence=float(row["confidence"]),
+                    reasoning=row.get("reasoning") or "",
+                    model_id=row.get("model_id") or "unknown",
+                    ensemble_std=float(row.get("ensemble_std") or 0.0),
+                    fallback_used=bool(row.get("fallback_used", False)),
+                    generated_at=generated_at,
+                )
+            )
+        return results
+
     def fetch_signals_for_backtest(
         self, symbol: str, start_date: str, end_date: str
     ) -> list[dict[str, Any]]:
