@@ -205,14 +205,16 @@ def phase2_infer(pg_conn, run_id: str, dry_run: bool, concurrency: int = 5, yes:
                         log.warning("Batch item failed: %s", item)
                         continue
                     row_id, inference_result = item
-                    if inference_result is not None:
-                        result, _ = inference_result
-                        cur.execute(_UPDATE_SCORED, (
-                            result.score, result.confidence, result.reasoning,
-                            result.model_id, result.ensemble_std, result.fallback_used,
-                            row_id,
-                        ))
-                        processed += 1
+                    if inference_result is None:
+                        log.debug("Inference returned None for row_id=%s — skipping", row_id)
+                        continue
+                    result, _ = inference_result
+                    cur.execute(_UPDATE_SCORED, (
+                        result.score, result.confidence, result.reasoning,
+                        result.model_id, result.ensemble_std, result.fallback_used,
+                        row_id,
+                    ))
+                    processed += 1
 
             pbar.update(len(batch))
             if processed - last_checkpoint >= 50:
