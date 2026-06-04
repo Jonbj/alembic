@@ -193,20 +193,29 @@ def build_performance_report(
     # Hit rate: percentage of signals with correct sign
     hit_rate = float(np.mean([np.sign(s) == np.sign(r) for s, r in zip(all_scores, all_returns)]))
 
-    # Per-model IC/ICIR
-    model_signals, model_returns, model_confs = _compute_model_metrics(rows)
+    # Per-model IC/ICIR — must use llm_responses (individual model IDs).
+    # sentiment_signals.model_id stores the compound ensemble ID
+    # (e.g. "ensemble:kimi+qwen+deepseek+glm"), so grouping it yields one
+    # bucket and the per-model lookup against current_weights.keys() always
+    # returns [].  llm_responses has one row per model per inference with the
+    # correct individual model_id (e.g. "kimi-k2.6:cloud").
+    per_model_raw = _fetch_all_per_model_signals_for_loo(pg, period_days)
+    pm_signals: dict[str, list[float]] = defaultdict(list)
+    pm_returns: dict[str, list[float]] = defaultdict(list)
+    for m_id, score, fwd_ret in per_model_raw:
+        pm_signals[m_id].append(float(score))
+        pm_returns[m_id].append(float(fwd_ret))
 
     model_ic: dict[str, float] = {}
     model_icir: dict[str, float] = {}
 
     for model in current_weights.keys():
-        ms = model_signals.get(model, [])
-        mr = model_returns.get(model, [])
-        mc = model_confs.get(model, [])
+        ms = pm_signals.get(model, [])
+        mr = pm_returns.get(model, [])
 
         if len(ms) >= _MIN_SAMPLES_PER_MODEL:
-            mic = compute_composite_ic(ms, mr, mc)
-            micir = compute_icir(ms, mr, mc, min_samples=10)
+            mic = compute_composite_ic(ms, mr)
+            micir = compute_icir(ms, mr, min_samples=10)
             model_ic[model] = mic.composite_ic
             model_icir[model] = micir.icir
         else:

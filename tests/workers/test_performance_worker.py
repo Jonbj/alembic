@@ -110,7 +110,9 @@ class TestBuildPerformanceReport:
         mock_pg.fetch_signals_for_ic.return_value = rows
 
         current_weights = {"opus": 1.0}
-        report = build_performance_report(mock_pg, current_weights, period_days=30)
+        with patch("src.workers.performance._fetch_all_per_model_signals_for_loo") as mock_pm:
+            mock_pm.return_value = []
+            report = build_performance_report(mock_pg, current_weights, period_days=30)
 
         assert isinstance(report, PerformanceReport)
         assert -1.0 <= report.overall_ic <= 1.0
@@ -122,25 +124,38 @@ class TestBuildPerformanceReport:
         """Test report with multiple models in ensemble."""
         mock_pg = MagicMock(spec=PostgreSQLStore)
 
-        # Generate rows for 3 models
-        rng = np.random.default_rng(42)
+        # Generate rows for overall IC (model_id here is the compound ensemble ID
+        # as written to sentiment_signals — irrelevant for per-model IC after the fix)
         rows = []
-
-        # Opus: good predictive power
         rows.extend(generate_signal_rows(150, "opus", return_correlation=0.4))
-        # Qwen: moderate predictive power
         rows.extend(generate_signal_rows(150, "qwen3.5:cloud", return_correlation=0.2))
-        # Deepseek: weak predictive power
         rows.extend(generate_signal_rows(150, "deepseek-v4-pro:cloud", return_correlation=0.1))
-
         mock_pg.fetch_signals_for_ic.return_value = rows
 
+        # Per-model rows from llm_responses (individual model IDs).
+        # Opus has strong signal-return correlation; deepseek is uncorrelated.
+        rng = np.random.default_rng(42)
+        n = 50
+        opus_sig = rng.normal(0, 0.5, n)
+        opus_ret = opus_sig * 0.10 + rng.normal(0, 0.01, n)
+        qwen_sig = rng.normal(0, 0.5, n)
+        qwen_ret = qwen_sig * 0.04 + rng.normal(0, 0.01, n)
+        ds_sig = rng.normal(0, 0.5, n)
+        ds_ret = rng.normal(0, 0.02, n)   # no correlation with signal
+        pm_rows = (
+            [("opus", float(s), float(r)) for s, r in zip(opus_sig, opus_ret)] +
+            [("qwen3.5:cloud", float(s), float(r)) for s, r in zip(qwen_sig, qwen_ret)] +
+            [("deepseek-v4-pro:cloud", float(s), float(r)) for s, r in zip(ds_sig, ds_ret)]
+        )
+
         current_weights = {"opus": 0.34, "qwen3.5:cloud": 0.33, "deepseek-v4-pro:cloud": 0.33}
-        report = build_performance_report(mock_pg, current_weights, period_days=30)
+        with patch("src.workers.performance._fetch_all_per_model_signals_for_loo") as mock_pm:
+            mock_pm.return_value = pm_rows
+            report = build_performance_report(mock_pg, current_weights, period_days=30)
 
         assert isinstance(report, PerformanceReport)
         assert set(report.model_ic.keys()) == set(current_weights.keys())
-        # Opus should have highest IC
+        # Opus (strong correlation) should have higher IC than deepseek (no correlation)
         assert report.model_ic["opus"] > report.model_ic["deepseek-v4-pro:cloud"]
 
     def test_report_excludes_fallback_rows(self):
@@ -155,12 +170,53 @@ class TestBuildPerformanceReport:
         mock_pg.fetch_signals_for_ic.return_value = rows
 
         current_weights = {"opus": 1.0}
-        report = build_performance_report(mock_pg, current_weights, period_days=30)
+        with patch("src.workers.performance._fetch_all_per_model_signals_for_loo") as mock_pm:
+            mock_pm.return_value = []
+            report = build_performance_report(mock_pg, current_weights, period_days=30)
 
         # Should only use ensemble rows (fallback excluded)
         assert isinstance(report, PerformanceReport)
         # FinBERT should not appear in model_ic since fallbacks are excluded
         assert "finbert" not in report.model_ic
+
+
+    def test_per_model_ic_uses_individual_model_ids_not_compound(self):
+        """Regression: per-model IC must come from llm_responses (individual IDs).
+
+        Bug: sentiment_signals.model_id stores compound IDs like
+        'ensemble:kimi+qwen+deepseek+glm'.  Grouping by that key and then
+        looking up 'kimi-k2.6:cloud' always returns [] → model_ic always 0.
+        Fix: source per-model IC from _fetch_all_per_model_signals_for_loo()
+        which queries llm_responses and stores the correct individual model_id.
+        """
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+
+        # Overall rows use a compound model_id (as written to sentiment_signals
+        # in production — should NOT affect per-model IC lookup)
+        compound_rows = generate_signal_rows(
+            350, model_id="ensemble:kimi+qwen+deepseek+glm", return_correlation=0.5
+        )
+        mock_pg.fetch_signals_for_ic.return_value = compound_rows
+
+        # Per-model rows from llm_responses with an individual model ID
+        rng = np.random.default_rng(7)
+        n = 50
+        signals = rng.normal(0, 0.5, n)
+        returns = signals * 0.08 + rng.normal(0, 0.01, n)
+        pm_rows = [("kimi-k2.6:cloud", float(s), float(r)) for s, r in zip(signals, returns)]
+
+        current_weights = {"kimi-k2.6:cloud": 0.5, "glm-5.1:cloud": 0.5}
+
+        with patch("src.workers.performance._fetch_all_per_model_signals_for_loo") as mock_pm:
+            mock_pm.return_value = pm_rows
+            report = build_performance_report(mock_pg, current_weights, period_days=30)
+
+        # kimi-k2.6:cloud has 50 per-model rows → non-zero IC from llm_responses
+        assert report.model_ic["kimi-k2.6:cloud"] != 0.0, (
+            "model_ic should be non-zero when llm_responses has data for the model"
+        )
+        # glm-5.1:cloud has no per-model rows → defaults to 0
+        assert report.model_ic["glm-5.1:cloud"] == 0.0
 
 
 class TestComputeBucketIC:
@@ -292,6 +348,7 @@ class TestRunDailyReport:
         # Generate sufficient samples
         rows = generate_signal_rows(350, "opus", return_correlation=0.3)
         mock_pg.fetch_signals_for_ic.return_value = rows
+        mock_pg.fetch_per_model_signals_for_ic.return_value = []
 
         # Mock Redis with proper get_ensemble_weights method
         mock_redis = MagicMock(spec=RedisStore)
