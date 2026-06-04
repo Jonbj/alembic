@@ -83,6 +83,7 @@ def _build_market_cache(symbols: list[str], data_client) -> dict[str, dict]:
       A transient data API error should not block stop-loss checks on existing
       positions. Only new entries are skipped when EMA is unavailable.
     """
+    from alpaca.data.enums import DataFeed
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
 
@@ -99,6 +100,7 @@ def _build_market_cache(symbols: list[str], data_client) -> dict[str, dict]:
             start=start,
             end=end,
             limit=_EMA_BARS_FETCH,
+            feed=DataFeed.IEX,
         )
         bars_df = data_client.get_stock_bars(request).df
 
