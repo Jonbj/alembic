@@ -406,3 +406,122 @@ def test_persist_cycle_result_does_not_raise_on_db_error():
 
     # Must not raise
     _persist_cycle_result(cycle_data, conn=mock_conn)
+
+
+# ── end-to-end: S4 signals → multi-symbol orders ──────────────────────────────
+
+
+def test_portfolio_cycle_s4_signals_produce_multi_symbol_orders():
+    """End-to-end: full _run_cycle_inner() with mocked S4 DB signals.
+
+    Verifies the complete S4 integration path:
+    1. _build_strategy_instance("S4") loads signals from mocked DB
+    2. NewsDrivenTactical converts signals to target weights for 5 symbols
+    3. PortfolioOrchestrator merges S1+S2+S4 weights and builds delta orders
+    4. Final combined orders include symbols other than SPY
+
+    External deps mocked: Alpaca data, Alpaca trading, PostgreSQLStore,
+    Redis (system mode), and _persist_cycle_result.
+    """
+    from src.models.signals import SentimentResult
+    from src.workers.portfolio_scheduler import _run_cycle_inner
+
+    S4_SYMBOLS = ["NVDA", "MSFT", "AAPL", "AMZN", "GOOGL"]
+    ALL_SYMBOLS = ["SPY"] + S4_SYMBOLS
+    N_BARS = 260  # ≥ 252 for S1's max lookback; ≥ 63 for S2
+
+    # Gently uptrending prices (S1 will see positive momentum for all symbols)
+    dates = pd.date_range("2024-07-01", periods=N_BARS, freq="B", tz="UTC")
+    bars_data = {
+        sym: [100.0 + j * 20 + i * 0.1 for i in range(N_BARS)]
+        for j, sym in enumerate(ALL_SYMBOLS)
+    }
+    bars_df_local = pd.DataFrame(bars_data, index=dates)
+
+    # Build Alpaca-format MultiIndex (symbol, timestamp) df with a "close" column.
+    # The live code does: raw.reset_index() then raw.pivot(index="timestamp", columns="symbol", values="close")
+    rows = []
+    for ts_bar in dates:
+        for sym in ALL_SYMBOLS:
+            rows.append({
+                "timestamp": ts_bar,
+                "symbol": sym,
+                "close": bars_df_local.loc[ts_bar, sym],
+            })
+    raw_alpaca_df = pd.DataFrame(rows).set_index(["symbol", "timestamp"])
+
+    # Signals generated yesterday evening — guaranteed to pass _signals_as_of(ts) filter
+    signal_time = datetime(2026, 6, 3, 20, 0, tzinfo=timezone.utc)
+    mock_db_signals = [
+        SentimentResult(
+            symbol=sym,
+            score=0.75,
+            confidence=0.85,
+            reasoning=f"{sym} strong positive sentiment",
+            model_id="ensemble",
+            generated_at=signal_time,
+        )
+        for sym in S4_SYMBOLS
+    ]
+
+    mock_store = MagicMock()
+    mock_store.fetch_signals_for_cycle.return_value = mock_db_signals
+
+    # Capture orders that would be submitted to Alpaca
+    captured_orders = []
+
+    def capture_submit(orders, trading_client, market, _submit_fn=None):
+        captured_orders.extend(orders)
+        return len(orders)
+
+    with patch("src.config.config") as mock_cfg, \
+         patch("alpaca.data.historical.StockHistoricalDataClient") as mock_dc, \
+         patch("alpaca.trading.client.TradingClient") as mock_tc, \
+         patch("src.store.pg_store.PostgreSQLStore", return_value=mock_store), \
+         patch("src.workers.portfolio_scheduler._persist_cycle_result"), \
+         patch("src.workers.portfolio_scheduler._submit_portfolio_orders",
+               side_effect=capture_submit), \
+         patch("redis.Redis") as mock_redis_cls:
+
+        mock_cfg.ALPACA_API_KEY = "test-key"
+        mock_cfg.ALPACA_SECRET_KEY = "test-secret"
+        mock_cfg.ALPACA_BASE_URL = "https://paper-api.alpaca.markets"
+        mock_cfg.WATCHLIST_SYMBOLS = ALL_SYMBOLS
+        mock_cfg.REDIS_URL = "redis://localhost:6379"
+        mock_cfg.DATABASE_URL = "postgresql://test:test@localhost/test"
+
+        mock_dc.return_value.get_stock_bars.return_value.df = raw_alpaca_df
+        mock_tc.return_value.get_account.return_value.cash = "100000"
+        mock_tc.return_value.get_all_positions.return_value = []
+        # mode=None → not dry_run/halted → orders are submitted
+        mock_redis_cls.from_url.return_value.get.return_value = None
+
+        result = _run_cycle_inner()
+
+    # S4's DB fetch must have been triggered (signal loading path exercised)
+    mock_store.fetch_signals_for_cycle.assert_called_once()
+
+    # S4 must have contributed to the cycle
+    assert "S4" in result["strategies_run"], (
+        f"S4 missing from strategies_run={result['strategies_run']}"
+    )
+
+    # At least some orders must have been generated
+    assert len(captured_orders) > 0, (
+        f"No orders produced. result={result}"
+    )
+
+    # Distinct symbols in orders must exceed 1 (not only SPY)
+    distinct_symbols = {o.symbol for o in captured_orders}
+    assert len(distinct_symbols) > 1, (
+        f"Expected orders for >1 symbol, got only: {distinct_symbols}"
+    )
+
+    # At least one of S4's signal symbols must appear in the orders
+    s4_in_orders = distinct_symbols & set(S4_SYMBOLS)
+    assert s4_in_orders, (
+        f"None of S4's symbols (NVDA/MSFT/AAPL/AMZN/GOOGL) appeared in orders. "
+        f"Final symbols: {distinct_symbols}. "
+        f"S4 has 30% allocation and bucket_pct=0.10, which should produce "
+        f"non-zero BUY orders on a $100k portfolio."
+    )
