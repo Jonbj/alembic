@@ -369,6 +369,25 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    _FETCH_RECENT_SIGNALS = """
+        SELECT score, model_id
+        FROM sentiment_signals
+        WHERE generated_at >= now() - (%s || ' hours')::interval
+          AND fallback_used = FALSE
+        ORDER BY generated_at ASC
+    """
+
+    def fetch_signals_last_hours(self, hours: int) -> list[tuple]:
+        """Fetch (score, model_id) for all non-fallback signals in the last N hours."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_RECENT_SIGNALS, (str(hours),))
+                return cur.fetchall()
+        except Exception:
+            conn.rollback()
+            raise
+
     def fetch_signals_for_backtest(
         self, symbol: str, start_date: str, end_date: str
     ) -> list[dict[str, Any]]:

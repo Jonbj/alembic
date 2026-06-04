@@ -62,6 +62,7 @@ from src.performance.weights import compute_new_weights, compute_purified_icir
 from src.store.pg_store import PostgreSQLStore
 from src.store.redis_store import RedisStore
 from src.workers.celery_app import app
+from src.workers.execution import ENTRY_THRESHOLD
 
 log = logging.getLogger(__name__)
 
@@ -374,9 +375,14 @@ def run_daily_report():
         # Check circuit breakers for soft warnings
         cb_result = check_circuit_breakers(ctx)
 
+        # Build signal distribution for last 24h (visibility into why portfolio is cash)
+        signal_distribution = _build_signal_distribution(pg, lookback_hours=24)
+
         # Send Telegram alert
         notifier = TelegramNotifier()
-        message = _format_performance_telegram_message(report, cb_result.soft_warnings_triggered)
+        message = _format_performance_telegram_message(
+            report, cb_result.soft_warnings_triggered, signal_distribution
+        )
         asyncio.run(notifier.send_alert(message, level="info"))
 
         log.info(f"Daily report sent. Overall IC: {report.overall_ic:.4f}, ICIR: {report.icir:.3f}")
@@ -611,9 +617,44 @@ def run_drift_detection():
             pg.close()
 
 
+def _build_signal_distribution(
+    pg: PostgreSQLStore,
+    lookback_hours: int = 24,
+) -> dict[str, dict]:
+    """Build per-model signal score distribution stats for the last N hours.
+
+    Returns:
+        Dict mapping model_id to stats: count, mean, median, p25, p75,
+        above_threshold (score > ENTRY_THRESHOLD), near_threshold (half..threshold].
+    """
+    rows = pg.fetch_signals_last_hours(lookback_hours)
+    if not rows:
+        return {}
+
+    half_threshold = ENTRY_THRESHOLD / 2
+    by_model: dict[str, list[float]] = defaultdict(list)
+    for score, model_id in rows:
+        by_model[model_id].append(float(score))
+
+    result = {}
+    for model_id, scores in by_model.items():
+        arr = np.array(scores)
+        result[model_id] = {
+            "count": len(arr),
+            "mean": float(np.mean(arr)),
+            "median": float(np.median(arr)),
+            "p25": float(np.percentile(arr, 25)),
+            "p75": float(np.percentile(arr, 75)),
+            "above_threshold": int(np.sum(arr > ENTRY_THRESHOLD)),
+            "near_threshold": int(np.sum((arr > half_threshold) & (arr <= ENTRY_THRESHOLD))),
+        }
+    return result
+
+
 def _format_performance_telegram_message(
     report: PerformanceReport,
     soft_warnings: list[str],
+    signal_distribution: dict | None = None,
 ) -> str:
     """Format performance report for Telegram message."""
     lines = [
@@ -638,6 +679,18 @@ def _format_performance_telegram_message(
     if report.threshold_suggestion:
         lines.append("")
         lines.append(f"Threshold suggestion: {report.threshold_suggestion:.2f} (vs current 0.30)")
+
+    if signal_distribution:
+        lines.append("")
+        lines.append(f"Signal Distribution (last 24h, threshold={ENTRY_THRESHOLD}):")
+        for model_id, stats in sorted(signal_distribution.items()):
+            lines.append(
+                f"  {model_id}: n={stats['count']}"
+                f" mean={stats['mean']:.3f}"
+                f" p25/p75={stats['p25']:.3f}/{stats['p75']:.3f}"
+                f" above={stats['above_threshold']}"
+                f" near={stats['near_threshold']}"
+            )
 
     if soft_warnings:
         lines.append("")

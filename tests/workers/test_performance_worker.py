@@ -11,9 +11,11 @@ from src.models.performance import PerformanceReport
 from src.store.pg_store import PostgreSQLStore
 from src.store.redis_store import RedisStore
 from src.workers.performance import (
+    _build_signal_distribution,
     _compute_bucket_ic,
     _fetch_all_per_model_signals_for_loo,
     _fetch_all_signals_for_ic,
+    _format_performance_telegram_message,
     _suggest_threshold,
     build_performance_report,
     check_suggestion_expiry,
@@ -898,3 +900,136 @@ class TestCheckAndApplyWeights:
         redis.set_ensemble_weights.assert_not_called()
         assert pg.log_weight_update.call_args.kwargs["source"] == "freeze"
         assert "purified_icir missing" in pg.log_weight_update.call_args.kwargs["note"]
+
+
+class TestBuildSignalDistribution:
+    """Tests for _build_signal_distribution function."""
+
+    def test_empty_rows_returns_empty_dict(self):
+        """No recent signals → empty distribution dict."""
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        mock_pg.fetch_signals_last_hours.return_value = []
+
+        result = _build_signal_distribution(mock_pg, lookback_hours=24)
+
+        assert result == {}
+
+    def test_groups_by_model_id(self):
+        """Signals from two model_ids produce two keys in result."""
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        mock_pg.fetch_signals_last_hours.return_value = [
+            (0.4, "ensemble:kimi+qwen"),
+            (0.2, "ensemble:kimi+qwen"),
+            (0.5, "deepseek:cloud"),
+        ]
+
+        result = _build_signal_distribution(mock_pg, lookback_hours=24)
+
+        assert set(result.keys()) == {"ensemble:kimi+qwen", "deepseek:cloud"}
+
+    def test_computes_count_and_percentiles(self):
+        """Distribution stats include count, mean, median, p25, p75."""
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        scores = [0.1, 0.2, 0.3, 0.4, 0.5]
+        mock_pg.fetch_signals_last_hours.return_value = [(s, "m1") for s in scores]
+
+        result = _build_signal_distribution(mock_pg, lookback_hours=24)
+
+        stats = result["m1"]
+        assert stats["count"] == 5
+        assert abs(stats["mean"] - np.mean(scores)) < 1e-9
+        assert abs(stats["median"] - np.median(scores)) < 1e-9
+        assert abs(stats["p25"] - np.percentile(scores, 25)) < 1e-9
+        assert abs(stats["p75"] - np.percentile(scores, 75)) < 1e-9
+
+    def test_counts_above_threshold(self):
+        """Signals with score > 0.3 are counted in above_threshold."""
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        # 2 above 0.3, 3 at or below 0.3
+        scores = [0.35, 0.40, 0.10, 0.20, 0.30]
+        mock_pg.fetch_signals_last_hours.return_value = [(s, "m1") for s in scores]
+
+        result = _build_signal_distribution(mock_pg, lookback_hours=24)
+
+        assert result["m1"]["above_threshold"] == 2
+
+    def test_counts_near_threshold(self):
+        """Signals in (0.15, 0.30] are counted in near_threshold."""
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        # 0.20 and 0.28 are near (0.15, 0.30]; 0.10 is below; 0.40 is above
+        scores = [0.10, 0.20, 0.28, 0.40]
+        mock_pg.fetch_signals_last_hours.return_value = [(s, "m1") for s in scores]
+
+        result = _build_signal_distribution(mock_pg, lookback_hours=24)
+
+        assert result["m1"]["near_threshold"] == 2
+
+    def test_calls_fetch_with_correct_hours(self):
+        """Passes lookback_hours to fetch_signals_last_hours."""
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        mock_pg.fetch_signals_last_hours.return_value = []
+
+        _build_signal_distribution(mock_pg, lookback_hours=48)
+
+        mock_pg.fetch_signals_last_hours.assert_called_once_with(48)
+
+
+class TestFormatPerformanceTelegramMessageWithDistribution:
+    """Tests that _format_performance_telegram_message includes signal distribution."""
+
+    def _make_report(self) -> PerformanceReport:
+        return PerformanceReport(
+            period_start=date(2026, 5, 1),
+            period_end=date(2026, 5, 31),
+            overall_ic=0.05,
+            icir=0.4,
+            hit_rate=0.52,
+            model_ic={"m1": 0.05},
+            model_icir={"m1": 0.4},
+            recommended_weights={"m1": 1.0},
+            weight_change_applied=False,
+            threshold_analysis={},
+            threshold_suggestion=None,
+            drift_alerts=[],
+            post_mortems=[],
+            generated_at=datetime(2026, 5, 31, 3, 0, tzinfo=timezone.utc),
+            report_version="1.0",
+        )
+
+    def test_message_includes_signal_distribution_section(self):
+        """When distribution is provided, message contains Signal Distribution header."""
+        report = self._make_report()
+        distribution = {
+            "ensemble:kimi+qwen": {
+                "count": 10,
+                "mean": 0.18,
+                "median": 0.17,
+                "p25": 0.12,
+                "p75": 0.24,
+                "above_threshold": 1,
+                "near_threshold": 4,
+            }
+        }
+
+        msg = _format_performance_telegram_message(report, soft_warnings=[], signal_distribution=distribution)
+
+        assert "Signal Distribution" in msg
+        assert "above_threshold" in msg or "above" in msg.lower()
+        assert "ensemble:kimi+qwen" in msg
+
+    def test_message_without_distribution_omits_section(self):
+        """When distribution is None, Signal Distribution section is absent."""
+        report = self._make_report()
+
+        msg = _format_performance_telegram_message(report, soft_warnings=[], signal_distribution=None)
+
+        assert "Signal Distribution" not in msg
+
+    def test_message_backward_compat_no_distribution_kwarg(self):
+        """Calling with two positional args (old API) still works."""
+        report = self._make_report()
+
+        msg = _format_performance_telegram_message(report, [])
+
+        assert isinstance(msg, str)
+        assert "Signal Distribution" not in msg
