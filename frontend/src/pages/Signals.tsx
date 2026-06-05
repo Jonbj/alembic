@@ -2,6 +2,7 @@ import { useState, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { fetchSignals, type Signal } from '@/api/signals'
+import { fetchDecisions, type Decision } from '@/api/trades'
 import { DirectionBadge } from '@/components/shared/DirectionBadge'
 import { HelpButton } from '@/components/shared/HelpButton'
 
@@ -22,10 +23,18 @@ const GRID_TEMPLATE = COLS.map(c => `${c.pct}%`).join(' ')
 export default function Signals() {
   const [ticker, setTicker] = useState('')
   const [direction, setDirection] = useState('')
+  const [tab, setTab] = useState<'signals' | 'decisions'>('signals')
 
   const { data: signals = [], isLoading, error } = useQuery({
     queryKey: ['signals'],
     queryFn: () => fetchSignals(),
+    refetchInterval: 60000,
+  })
+
+  const { data: decisions = [], isLoading: decisionsLoading } = useQuery({
+    queryKey: ['decisions', ticker],
+    queryFn: () => fetchDecisions(ticker || undefined, 100),
+    enabled: tab === 'decisions',
     refetchInterval: 60000,
   })
 
@@ -49,9 +58,83 @@ export default function Signals() {
   })
   const virtualItems = virtualizer.getVirtualItems()
 
+  const DECISION_LABELS: Record<string, string> = {
+    BUY: 'BUY',
+    SKIP_EMA: 'Skip — below EMA',
+    SKIP_CAP: 'Skip — cycle cap',
+    SKIP_POSITION: 'Skip — position open',
+  }
+
   return (
     <div style={{ position: 'relative' }}>
       <h2 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>Signals</h2>
+
+      <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid #334155' }}>
+        {(['signals', 'decisions'] as const).map(t => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            style={{
+              padding: '8px 20px', border: 'none', cursor: 'pointer',
+              background: 'transparent',
+              color: tab === t ? '#3b82f6' : '#64748b',
+              borderBottom: tab === t ? '2px solid #3b82f6' : '2px solid transparent',
+              fontWeight: tab === t ? 600 : 400, fontSize: 14,
+              textTransform: 'capitalize',
+            }}
+          >{t === 'signals' ? 'Signals' : 'Decision Log'}</button>
+        ))}
+      </div>
+
+      {tab === 'decisions' && (
+        <div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <input
+              value={ticker}
+              onChange={e => setTicker(e.target.value)}
+              placeholder="Filter symbol…"
+              style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #334155', background: '#0f172a', color: 'white', fontSize: 13, width: 140 }}
+            />
+          </div>
+          {decisionsLoading ? (
+            <div style={{ color: '#64748b', padding: 20 }}>Loading…</div>
+          ) : (
+            <div style={{ background: '#1e293b', borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{
+                display: 'grid', gridTemplateColumns: '15% 10% 9% 9% 7% 22% 28%',
+                padding: '8px 12px', background: '#0f172a',
+                fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase',
+              }}>
+                {['Tick Time', 'Symbol', 'Score', 'Regime', 'EMA', 'Decision', 'Order ID'].map(h => (
+                  <span key={h}>{h}</span>
+                ))}
+              </div>
+              {(decisions as Decision[]).map((d: Decision) => (
+                <div key={d.id} style={{
+                  display: 'grid', gridTemplateColumns: '15% 10% 9% 9% 7% 22% 28%',
+                  padding: '8px 12px', fontSize: 13, borderTop: '1px solid #0f172a',
+                }}>
+                  <span style={{ color: '#94a3b8' }}>{d.tick_time.slice(0, 16).replace('T', ' ')}</span>
+                  <span style={{ fontWeight: 600 }}>{d.symbol}</span>
+                  <span>{d.score.toFixed(2)}</span>
+                  <span>{d.regime_mult.toFixed(2)}×</span>
+                  <span>{d.ema_pass ? '✓' : '✗'}</span>
+                  <span style={{
+                    color: d.decision === 'BUY' ? '#22c55e' : '#94a3b8',
+                    fontWeight: d.decision === 'BUY' ? 600 : 400,
+                  }}>{DECISION_LABELS[d.decision] ?? d.decision}</span>
+                  <span style={{ color: '#64748b', fontSize: 11 }}>{d.order_id ?? '—'}</span>
+                </div>
+              ))}
+              {(decisions as Decision[]).length === 0 && (
+                <div style={{ padding: 20, color: '#64748b', textAlign: 'center' }}>No decisions logged yet.</div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === 'signals' && (
       <HelpButton title="Signals — Segnali" sections={[
         {
           heading: "Cosa sono i segnali",
@@ -146,6 +229,7 @@ export default function Signals() {
           )}
         </div>
       </div>
+      )}
     </div>
   )
 }
