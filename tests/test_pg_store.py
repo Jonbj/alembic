@@ -330,5 +330,62 @@ class TestPoolFallbackConnection:
                 mock_pool.putconn.assert_not_called()
 
 
+class TestLogNewsItemReturnsId:
+    """log_news_item must return the inserted row id (RETURNING id)."""
+
+    def test_log_news_item_returns_int_on_insert(self):
+        """When INSERT succeeds (not a conflict), returns the new id."""
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (42,)
+
+        store = PostgreSQLStore(conn=mock_conn)
+        from src.models.news import NewsItem
+        item = NewsItem(
+            id="http://example.com:AAPL",
+            title="Test", url="http://example.com", source="gdelt",
+            body="body", asset_tags=["AAPL"],
+            timestamp=__import__('datetime').datetime(2026, 6, 1, tzinfo=__import__('datetime').timezone.utc),
+        )
+        result = store.log_news_item(item=item, ticker="AAPL", computed_sentiment=0.5)
+        assert result == 42
+
+    def test_log_news_item_returns_none_on_conflict(self):
+        """ON CONFLICT DO NOTHING returns no row; method returns None."""
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = None  # DO NOTHING yields no row
+
+        store = PostgreSQLStore(conn=mock_conn)
+        from src.models.news import NewsItem
+        item = NewsItem(
+            id="http://example.com:AAPL",
+            title="Test", url="http://example.com", source="gdelt",
+            body="body", asset_tags=["AAPL"],
+            timestamp=__import__('datetime').datetime(2026, 6, 1, tzinfo=__import__('datetime').timezone.utc),
+        )
+        result = store.log_news_item(item=item, ticker="AAPL")
+        assert result is None
+
+
+class TestLinkSignalToNews:
+    """link_signal_to_news issues UPDATE sentiment_signals SET news_log_id = %s WHERE id = %s."""
+
+    def test_link_issues_update(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+        store = PostgreSQLStore(conn=mock_conn)
+        store.link_signal_to_news(signal_id=7, news_log_id=42)
+
+        sql_called = mock_cur.execute.call_args[0][0]
+        assert "UPDATE sentiment_signals" in sql_called
+        assert "news_log_id" in sql_called
+        mock_conn.commit.assert_called_once()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

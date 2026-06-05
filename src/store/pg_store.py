@@ -165,6 +165,7 @@ class PostgreSQLStore:
         INSERT INTO news_log (title, url, source, ticker, body_snippet, raw_sentiment, fetched_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (url, ticker) DO NOTHING
+        RETURNING id
     """
 
     _INSERT_LLM_RESPONSE = """
@@ -177,7 +178,7 @@ class PostgreSQLStore:
         item: NewsItem,
         ticker: str,
         computed_sentiment: float | None = None,
-    ) -> None:
+    ) -> int | None:
         """Write article metadata to news_log. Skips silently on conflict.
 
         Args:
@@ -189,6 +190,9 @@ class PostgreSQLStore:
                 reflects the actual signal used for trading decisions. When None,
                 falls back to MarketAux article-level sentiment (or NULL for
                 GDELT/Alpaca articles that lack a pre-computed score).
+
+        Returns:
+            The inserted row id, or None if the row already existed (ON CONFLICT DO NOTHING).
         """
         from src.models.news import MarketAuxNewsItem
 
@@ -211,6 +215,23 @@ class PostgreSQLStore:
                         item.timestamp,
                     ),
                 )
+                row = cur.fetchone()
+            conn.commit()
+            return int(row[0]) if row else None
+        except Exception:
+            conn.rollback()
+            raise
+
+    _LINK_SIGNAL_TO_NEWS = """
+        UPDATE sentiment_signals SET news_log_id = %s WHERE id = %s
+    """
+
+    def link_signal_to_news(self, signal_id: int, news_log_id: int) -> None:
+        """Set news_log_id on an already-written sentiment_signals row."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._LINK_SIGNAL_TO_NEWS, (news_log_id, signal_id))
             conn.commit()
         except Exception:
             conn.rollback()
