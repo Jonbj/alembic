@@ -237,6 +237,68 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    _INSERT_DECISION = """
+        INSERT INTO execution_decisions
+            (tick_time, symbol, signal_id, score, regime_mult, ema_pass, decision, order_id)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+    """
+
+    def write_execution_decision(
+        self,
+        tick_time,
+        symbol: str,
+        signal_id: int | None,
+        score: float,
+        regime_mult: float,
+        ema_pass: bool,
+        decision: str,
+        order_id: str | None = None,
+    ) -> int:
+        """Insert one execution decision row. Returns the new id."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    self._INSERT_DECISION,
+                    (tick_time, symbol, signal_id, score, regime_mult, ema_pass, decision, order_id),
+                )
+                row = cur.fetchone()
+            conn.commit()
+            return int(row[0])
+        except Exception:
+            conn.rollback()
+            raise
+
+    def fetch_decisions(
+        self,
+        symbol: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """Return decision log rows, most-recent first."""
+        filters = []
+        params: list = []
+        if symbol:
+            filters.append("symbol = %s")
+            params.append(symbol)
+        where = ("WHERE " + " AND ".join(filters)) if filters else ""
+        params.append(limit)
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT id, tick_time, symbol, signal_id, score, regime_mult,
+                               ema_pass, decision, order_id, created_at
+                        FROM execution_decisions {where}
+                        ORDER BY tick_time DESC LIMIT %s""",
+                    params,
+                )
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception:
+            conn.rollback()
+            raise
+
     def log_llm_responses(self, signal_id: int, outputs: list[ModelOutput]) -> None:
         """Write per-model outputs to llm_responses. No-op for empty list."""
         if not outputs:

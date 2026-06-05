@@ -387,5 +387,74 @@ class TestLinkSignalToNews:
         mock_conn.commit.assert_called_once()
 
 
+class TestWriteExecutionDecision:
+    """write_execution_decision must INSERT a row and return the new id."""
+
+    def test_returns_decision_id(self):
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (55,)
+
+        store = PostgreSQLStore(conn=mock_conn)
+        decision_id = store.write_execution_decision(
+            tick_time=datetime(2026, 6, 5, 15, tzinfo=timezone.utc),
+            symbol="NVDA",
+            signal_id=7,
+            score=0.55,
+            regime_mult=1.0,
+            ema_pass=True,
+            decision="BUY",
+            order_id="abc-123",
+        )
+        assert decision_id == 55
+        mock_conn.commit.assert_called_once()
+
+    def test_order_id_optional(self):
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (56,)
+
+        store = PostgreSQLStore(conn=mock_conn)
+        decision_id = store.write_execution_decision(
+            tick_time=datetime(2026, 6, 5, 15, tzinfo=timezone.utc),
+            symbol="AAPL",
+            signal_id=None,
+            score=0.35,
+            regime_mult=0.7,
+            ema_pass=False,
+            decision="SKIP_EMA",
+        )
+        assert decision_id == 56
+
+
+class TestFetchDecisions:
+    """fetch_decisions returns list of dicts, most-recent first."""
+
+    def test_fetch_all_decisions(self):
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.description = [
+            ("id",), ("tick_time",), ("symbol",), ("signal_id",),
+            ("score",), ("regime_mult",), ("ema_pass",), ("decision",),
+            ("order_id",), ("created_at",),
+        ]
+        now = datetime(2026, 6, 5, 15, tzinfo=timezone.utc)
+        mock_cur.fetchall.return_value = [
+            (1, now, "AAPL", 7, 0.55, 1.0, True, "BUY", "abc-123", now),
+        ]
+
+        store = PostgreSQLStore(conn=mock_conn)
+        rows = store.fetch_decisions(limit=10)
+        assert len(rows) == 1
+        assert rows[0]["symbol"] == "AAPL"
+        assert rows[0]["decision"] == "BUY"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
