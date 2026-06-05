@@ -81,16 +81,20 @@ class RedisStore:
         if self._owns_client:
             self._r.close()
 
-    def write_sentiment(self, result: SentimentResult) -> None:
-        """
-        Write sentiment signal to Redis cache.
+    def write_sentiment(self, result: SentimentResult, signal_id: int | None = None) -> None:
+        """Write sentiment signal to Redis cache.
 
         Args:
             result: Sentiment result to cache
+            signal_id: DB row id from pg_store.write_signal(), embedded so execution worker
+                       can read it without a DB round-trip.
         """
         key = f"signal:{result.symbol}:sentiment"
+        payload = json.loads(result.model_dump_json())
+        if signal_id is not None:
+            payload["signal_id"] = signal_id
         try:
-            self._r.setex(key, self._signal_ttl, result.model_dump_json())
+            self._r.setex(key, self._signal_ttl, json.dumps(payload))
         except Exception as e:
             error_msg = str(e)
             if "OOM" in error_msg or "out of memory" in error_msg.lower():

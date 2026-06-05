@@ -505,5 +505,51 @@ class TestDepsInitClose:
             deps._redis_client = original
 
 
+class TestWriteSentimentSignalId:
+    """write_sentiment(result, signal_id=N) must embed signal_id in the Redis value."""
+
+    def test_write_sentiment_includes_signal_id(self):
+        import json
+        from unittest.mock import MagicMock
+        from src.store.redis_store import RedisStore
+        from src.models.signals import SentimentResult
+        from datetime import datetime, timezone
+
+        mock_redis = MagicMock()
+        store = RedisStore(redis_client=mock_redis)
+
+        result = SentimentResult(
+            symbol="AAPL", score=0.5, confidence=0.8,
+            reasoning="bullish", model_id="ensemble:glm",
+            generated_at=datetime(2026, 6, 5, 12, tzinfo=timezone.utc),
+        )
+        store.write_sentiment(result, signal_id=99)
+
+        _, args, _ = mock_redis.setex.mock_calls[0]
+        payload = json.loads(args[2])
+        assert payload["signal_id"] == 99
+
+    def test_write_sentiment_without_signal_id_omits_key(self):
+        import json
+        from unittest.mock import MagicMock
+        from src.store.redis_store import RedisStore
+        from src.models.signals import SentimentResult
+        from datetime import datetime, timezone
+
+        mock_redis = MagicMock()
+        store = RedisStore(redis_client=mock_redis)
+
+        result = SentimentResult(
+            symbol="MSFT", score=0.3, confidence=0.7,
+            reasoning="ok", model_id="finbert",
+            generated_at=datetime(2026, 6, 5, 12, tzinfo=timezone.utc),
+        )
+        store.write_sentiment(result)
+
+        _, args, _ = mock_redis.setex.mock_calls[0]
+        payload = json.loads(args[2])
+        assert "signal_id" not in payload
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
