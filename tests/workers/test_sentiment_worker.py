@@ -765,3 +765,100 @@ class TestEnsembleWeightReading:
 
         assert mock_pnb.call_count == 1, f"Expected 1 call, got {mock_pnb.call_count}"
         assert mock_pnb.call_args.kwargs.get("weights") == applied
+
+
+class TestProcessNewsItemCorrelation:
+    """process_news_item must write signal first, then link to news_log row."""
+
+    @pytest.mark.asyncio
+    async def test_news_log_id_linked_after_write(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from src.workers.sentiment import process_news_item
+        from src.models.signals import SentimentResult
+        from src.models.news import NewsItem
+        from datetime import datetime, timezone
+
+        item = NewsItem(
+            id="http://u.com:AAPL",
+            title="T", url="http://u.com", source="gdelt",
+            body="b", asset_tags=["AAPL"],
+            timestamp=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        )
+        result = SentimentResult(
+            symbol="AAPL", score=0.6, confidence=0.9,
+            reasoning="r", model_id="ensemble:glm",
+        )
+
+        mock_pg = MagicMock()
+        mock_pg.write_signal.return_value = 7       # signal_id = 7
+        mock_pg.log_news_item.return_value = 42     # news_log_id = 42
+
+        mock_redis = MagicMock()
+        mock_clients = []
+        mock_aggregator = MagicMock()
+        mock_finbert = MagicMock()
+        mock_budget = MagicMock()
+        mock_budget.check_budget = AsyncMock()
+
+        with patch(
+            "src.workers.sentiment.run_inference",
+            new=AsyncMock(return_value=(result, [])),
+        ):
+            await process_news_item(
+                item=item,
+                clients=mock_clients,
+                aggregator=mock_aggregator,
+                finbert=mock_finbert,
+                budget_tracker=mock_budget,
+                redis_store=mock_redis,
+                pg_store=mock_pg,
+            )
+
+        # signal written first
+        mock_pg.write_signal.assert_called_once()
+        # Redis write called with signal_id=7
+        mock_redis.write_sentiment.assert_called_once()
+        call_kwargs = mock_redis.write_sentiment.call_args
+        assert call_kwargs[1].get("signal_id") == 7 or (
+            len(call_kwargs[0]) > 1 and call_kwargs[0][1] == 7
+        )
+        # news_log_id linked
+        mock_pg.link_signal_to_news.assert_called_once_with(signal_id=7, news_log_id=42)
+
+    @pytest.mark.asyncio
+    async def test_news_log_conflict_skips_link(self):
+        """When log_news_item returns None (duplicate), link_signal_to_news is NOT called."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from src.workers.sentiment import process_news_item
+        from src.models.signals import SentimentResult
+        from src.models.news import NewsItem
+        from datetime import datetime, timezone
+
+        item = NewsItem(
+            id="http://u.com:AAPL",
+            title="T", url="http://u.com", source="gdelt",
+            body="b", asset_tags=["AAPL"],
+            timestamp=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        )
+        result = SentimentResult(
+            symbol="AAPL", score=0.6, confidence=0.9,
+            reasoning="r", model_id="ensemble:glm",
+        )
+
+        mock_pg = MagicMock()
+        mock_pg.write_signal.return_value = 7
+        mock_pg.log_news_item.return_value = None   # conflict → no id
+
+        mock_redis = MagicMock()
+
+        with patch(
+            "src.workers.sentiment.run_inference",
+            new=AsyncMock(return_value=(result, [])),
+        ):
+            await process_news_item(
+                item=item, clients=[], aggregator=MagicMock(),
+                finbert=MagicMock(), budget_tracker=MagicMock(),
+                redis_store=mock_redis, pg_store=mock_pg,
+            )
+
+        mock_pg.link_signal_to_news.assert_not_called()
