@@ -1,5 +1,6 @@
 """Tests for trading routes (Alpaca positions and orders)."""
 
+import pytest
 from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from src.api.main import app
@@ -79,3 +80,70 @@ def test_get_orders_with_limit():
     app.dependency_overrides.clear()
 
     mock_client.get_orders.assert_called_once()
+
+
+class TestTradesEndpoints:
+    def test_get_trades_returns_list(self):
+        from src.api.deps import get_pg_store
+        mock_pg = MagicMock()
+        mock_pg.fetch_trades.return_value = [
+            {"id": 1, "symbol": "AAPL", "entry_time": "2026-06-05T10:00:00+00:00",
+             "net_pnl": 12.5, "exit_time": None}
+        ]
+        app.dependency_overrides[get_pg_store] = lambda: mock_pg
+        app.dependency_overrides[require_api_key] = lambda: "test-key"
+
+        tc = TestClient(app)
+        resp = tc.get("/api/trades")
+        app.dependency_overrides.clear()
+
+        assert resp.status_code == 200
+        assert resp.json()[0]["symbol"] == "AAPL"
+
+    def test_get_trades_summary(self):
+        from src.api.deps import get_pg_store
+        mock_pg = MagicMock()
+        mock_pg.fetch_trade_summary.return_value = {
+            "total_trades": 5, "win_rate": 0.6, "avg_net_pnl": 14.0,
+            "total_net_pnl": 70.0, "trades_per_week": 5.0,
+            "avg_gross_pnl": 15.0, "avg_slippage_est": 1.0,
+            "total_gross_pnl": 75.0, "total_notional": 3000.0,
+            "avg_hold_minutes": 40.0, "return_on_notional": 0.023,
+            "slippage_pct_of_gross": 0.07,
+        }
+        app.dependency_overrides[get_pg_store] = lambda: mock_pg
+        app.dependency_overrides[require_api_key] = lambda: "test-key"
+
+        tc = TestClient(app)
+        resp = tc.get("/api/trades/summary?days=7")
+        app.dependency_overrides.clear()
+
+        assert resp.status_code == 200
+        assert resp.json()["total_trades"] == 5
+
+    def test_get_decisions_returns_list(self):
+        from src.api.deps import get_pg_store
+        mock_pg = MagicMock()
+        mock_pg.fetch_decisions.return_value = [
+            {"id": 1, "tick_time": "2026-06-05T10:00:00+00:00",
+             "symbol": "NVDA", "score": 0.55, "decision": "BUY", "order_id": "x"}
+        ]
+        app.dependency_overrides[get_pg_store] = lambda: mock_pg
+        app.dependency_overrides[require_api_key] = lambda: "test-key"
+
+        tc = TestClient(app)
+        resp = tc.get("/api/decisions")
+        app.dependency_overrides.clear()
+
+        assert resp.status_code == 200
+        assert resp.json()[0]["decision"] == "BUY"
+
+    @pytest.mark.require_auth
+    def test_trades_requires_auth(self):
+        from src.api.deps import get_pg_store
+        # Override pg_store so DB connection doesn't mask the auth error.
+        app.dependency_overrides[get_pg_store] = lambda: MagicMock()
+        tc = TestClient(app)
+        resp = tc.get("/api/trades")
+        app.dependency_overrides.clear()
+        assert resp.status_code == 403

@@ -1,10 +1,10 @@
 """Alpaca positions and order history endpoints."""
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from src.api.auth import require_api_key
-from src.api.deps import get_alpaca_trading_client
+from src.api.deps import get_alpaca_trading_client, get_pg_store
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
 
@@ -54,3 +54,33 @@ def get_orders(
         }
         for o in orders
     ]
+
+
+@router.get("/trades")
+def get_trades(
+    pg: Annotated[object, Depends(get_pg_store)],
+    symbol: str | None = None,
+    status: str = Query(default="all", pattern="^(open|closed|all)$"),
+    limit: int = Query(default=50, ge=1, le=500),
+) -> list[dict]:
+    """List trades with optional symbol/status filter."""
+    return pg.fetch_trades(symbol=symbol, status=status, limit=limit)
+
+
+@router.get("/trades/summary")
+def get_trades_summary(
+    pg: Annotated[object, Depends(get_pg_store)],
+    days: int = Query(default=7, ge=1, le=90),
+) -> dict:
+    """Aggregated P&L metrics for closed trades."""
+    return pg.fetch_trade_summary(days=days)
+
+
+@router.get("/decisions")
+def get_decisions(
+    pg: Annotated[object, Depends(get_pg_store)],
+    symbol: str | None = None,
+    limit: int = Query(default=20, ge=1, le=200),
+) -> list[dict]:
+    """Execution decision log (score > threshold candidates only)."""
+    return pg.fetch_decisions(symbol=symbol, limit=limit)
