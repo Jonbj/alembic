@@ -81,19 +81,21 @@ class TestPostgreSQLStoreInterface:
         # Days should be a parameter, not interpolated into SQL
 
     def test_fetch_signals_for_cycle_query_structure(self):
-        """fetch_signals_for_cycle uses DISTINCT ON, parameterized interval, returns one row per symbol."""
+        """fetch_signals_for_cycle uses DISTINCT ON, parameterized interval, watchlist filter."""
         query = PostgreSQLStore._FETCH_SIGNALS_FOR_CYCLE
         assert "DISTINCT ON (symbol)" in query
         assert "INTERVAL '%s'" not in query
         assert "(%s || ' hours')::interval" in query or "%s || ' hours'" in query
         assert "ORDER BY symbol, generated_at DESC" in query
+        assert "ANY(%s)" in query
 
     def test_fetch_signals_for_cycle_signature(self):
-        """fetch_signals_for_cycle accepts hours as a separate parameter."""
+        """fetch_signals_for_cycle accepts hours and symbols parameters."""
         import inspect
         sig = inspect.signature(PostgreSQLStore.fetch_signals_for_cycle)
         params = list(sig.parameters.keys())
         assert "hours" in params
+        assert "symbols" in params
 
 
 class TestWriteSignalReturnsId:

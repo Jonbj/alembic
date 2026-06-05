@@ -237,7 +237,11 @@ def _build_strategy_instance(entry, bars_df):
         store = None
         try:
             store = PostgreSQLStore()
-            signals = store.fetch_signals_for_cycle(hours=s4_config.signals_lookback_hours)
+            from src.config import config as _cfg
+            signals = store.fetch_signals_for_cycle(
+                hours=s4_config.signals_lookback_hours,
+                symbols=list(_cfg.WATCHLIST_SYMBOLS or []),
+            )
             if signals:
                 import pandas as pd
                 signals_df = pd.DataFrame([{

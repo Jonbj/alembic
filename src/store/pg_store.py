@@ -164,7 +164,7 @@ class PostgreSQLStore:
     _INSERT_NEWS_LOG = """
         INSERT INTO news_log (title, url, source, ticker, body_snippet, raw_sentiment, fetched_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT DO NOTHING
+        ON CONFLICT (url, ticker) DO NOTHING
     """
 
     _INSERT_LLM_RESPONSE = """
@@ -395,21 +395,29 @@ class PostgreSQLStore:
             model_id, ensemble_std, fallback_used, generated_at
         FROM sentiment_signals
         WHERE generated_at >= NOW() - (%s || ' hours')::interval
+          AND symbol = ANY(%s)
         ORDER BY symbol, generated_at DESC
     """
 
-    def fetch_signals_for_cycle(self, hours: int = 4) -> list[SentimentResult]:
+    def fetch_signals_for_cycle(
+        self, hours: int = 4, symbols: list[str] | None = None
+    ) -> list[SentimentResult]:
         """Fetch the latest signal per symbol from the last N hours.
 
         Used by the live portfolio cycle to load fresh signals for S4.
+        Only returns signals for symbols in the provided list (watchlist) so
+        that off-watchlist tickers don't consume ranking slots in S4 and then
+        get silently dropped when no market price is available.
+
         Returns SentimentResult objects with timezone-aware generated_at.
         """
         from datetime import timezone as _tz
 
+        watchlist = symbols or []
         conn = self._get_connection()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(self._FETCH_SIGNALS_FOR_CYCLE, (str(hours),))
+                cur.execute(self._FETCH_SIGNALS_FOR_CYCLE, (str(hours), watchlist))
                 rows = cur.fetchall()
         except Exception:
             conn.rollback()
