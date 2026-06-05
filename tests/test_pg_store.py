@@ -494,6 +494,27 @@ class TestCloseTrade:
             exit_price=205.0,
             exit_time=datetime(2026, 6, 5, 16, tzinfo=timezone.utc),
             exit_reason="stop_loss",
+            entry_price=200.0,
+        )
+        sql = mock_cur.execute.call_args[0][0]
+        assert "UPDATE trades" in sql
+        assert "exit_time IS NULL" in sql
+        assert "COALESCE" in sql
+        mock_conn.commit.assert_called_once()
+
+    def test_close_trade_without_entry_price(self):
+        """entry_price defaults to None — backward-compatible call still works."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+        store = PostgreSQLStore(conn=mock_conn)
+        store.close_trade(
+            symbol="AAPL",
+            exit_price=180.0,
+            exit_time=datetime(2026, 6, 5, 16, tzinfo=timezone.utc),
+            exit_reason="take_profit",
         )
         sql = mock_cur.execute.call_args[0][0]
         assert "UPDATE trades" in sql
@@ -555,7 +576,7 @@ class TestFetchTradeSummary:
         assert "trades_per_week" in summary
 
 
-class TestReconcileTraideFills:
+class TestReconcileTradesFills:
     """reconcile_trade_fills queries Alpaca for fills on trades where entry_price IS NULL."""
 
     def test_updates_entry_price_and_qty(self):

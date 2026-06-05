@@ -334,6 +334,7 @@ def run_execution_cycle(
                                     exit_price=current_price,
                                     exit_time=tick_time,
                                     exit_reason="stop_loss",
+                                    entry_price=entry_price,
                                 )
                             except Exception as trade_exc:
                                 log.warning("Failed to close trade record for %s: %s", symbol, trade_exc)

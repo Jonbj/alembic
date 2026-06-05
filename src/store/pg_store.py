@@ -314,9 +314,10 @@ class PostgreSQLStore:
             exit_price   = %s,
             exit_time    = %s,
             exit_reason  = %s,
-            gross_pnl    = (%s - entry_price) * qty,
+            entry_price  = COALESCE(entry_price, %s),
+            gross_pnl    = (%s - COALESCE(entry_price, %s)) * qty,
             slippage_est = entry_notional * 0.0005,
-            net_pnl      = ((%s - entry_price) * qty) - (entry_notional * 0.0005)
+            net_pnl      = ((%s - COALESCE(entry_price, %s)) * qty) - (entry_notional * 0.0005)
         WHERE symbol = %s AND exit_time IS NULL
     """
 
@@ -352,15 +353,33 @@ class PostgreSQLStore:
         exit_price: float,
         exit_time,
         exit_reason: str,
+        entry_price: float | None = None,
     ) -> None:
-        """Update the open trade row for symbol with exit data and compute P&L."""
+        """Update the open trade row for symbol with exit data and compute P&L.
+
+        Args:
+            symbol:      Ticker symbol of the trade to close.
+            exit_price:  Fill price at which the position was exited.
+            exit_time:   Timestamp of the exit.
+            exit_reason: Why the trade was closed (e.g. "stop_loss").
+            entry_price: Optional fill price from the Alpaca position object.
+                         When provided, COALESCE(entry_price, %s) fills in the
+                         DB column if it is still NULL (intra-day stop-loss before
+                         reconcile_trade_fills has run).  When absent (None),
+                         COALESCE falls back to whatever is already in the DB
+                         column — preserving the original behavior for callers
+                         that do not have the entry price readily available.
+        """
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(
                     self._CLOSE_TRADE,
                     (exit_price, exit_time, exit_reason,
-                     exit_price, exit_price, symbol),
+                     entry_price,
+                     exit_price, entry_price,
+                     exit_price, entry_price,
+                     symbol),
                 )
             conn.commit()
         except Exception:
