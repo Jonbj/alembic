@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
+
+log = logging.getLogger(__name__)
 
 import psycopg2
 from psycopg2 import pool
@@ -454,6 +457,42 @@ class PostgreSQLStore:
                 "return_on_notional": round(return_on_notional, 4),
                 "slippage_pct_of_gross": round(slippage_pct, 4),
             }
+        except Exception:
+            conn.rollback()
+            raise
+
+    def reconcile_trade_fills(self, trading_client) -> int:
+        """Fetch fill prices from Alpaca for trades where entry_price IS NULL.
+
+        Called daily (run_daily_report). Returns the count of rows updated.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT id, entry_order_id FROM trades
+                       WHERE entry_price IS NULL
+                         AND entry_time > now() - '24 hours'::interval"""
+                )
+                rows = cur.fetchall()
+            updated = 0
+            for trade_id, order_id in rows:
+                try:
+                    order = trading_client.get_order_by_id(order_id)
+                    if order.filled_avg_price is None:
+                        continue
+                    fill_price = float(order.filled_avg_price)
+                    fill_qty = float(order.filled_qty) if order.filled_qty else None
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "UPDATE trades SET entry_price = %s, qty = %s WHERE id = %s",
+                            (fill_price, fill_qty, trade_id),
+                        )
+                    updated += 1
+                except Exception as e:
+                    log.warning("Failed to reconcile order %s: %s", order_id, e)
+            conn.commit()
+            return updated
         except Exception:
             conn.rollback()
             raise

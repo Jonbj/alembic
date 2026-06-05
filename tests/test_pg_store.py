@@ -555,5 +555,48 @@ class TestFetchTradeSummary:
         assert "trades_per_week" in summary
 
 
+class TestReconcileTraideFills:
+    """reconcile_trade_fills queries Alpaca for fills on trades where entry_price IS NULL."""
+
+    def test_updates_entry_price_and_qty(self):
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchall.return_value = [(1, "order-abc")]
+
+        mock_order = MagicMock()
+        mock_order.filled_avg_price = "201.50"
+        mock_order.filled_qty = "2.5"
+
+        mock_trading = MagicMock()
+        mock_trading.get_order_by_id.return_value = mock_order
+
+        store = PostgreSQLStore(conn=mock_conn)
+        updated = store.reconcile_trade_fills(mock_trading)
+
+        assert updated == 1
+        update_sql = mock_cur.execute.call_args_list[-1][0][0]
+        assert "UPDATE trades" in update_sql
+        assert "entry_price" in update_sql
+
+    def test_skips_unfilled_order(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchall.return_value = [(1, "order-abc")]
+
+        mock_order = MagicMock()
+        mock_order.filled_avg_price = None  # not yet filled
+
+        mock_trading = MagicMock()
+        mock_trading.get_order_by_id.return_value = mock_order
+
+        store = PostgreSQLStore(conn=mock_conn)
+        updated = store.reconcile_trade_fills(mock_trading)
+
+        assert updated == 0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
