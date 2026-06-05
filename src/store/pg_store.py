@@ -299,6 +299,165 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    _INSERT_TRADE = """
+        INSERT INTO trades
+            (symbol, signal_id, decision_id, entry_order_id,
+             entry_time, entry_notional, score, regime_mult, qty)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """
+
+    _CLOSE_TRADE = """
+        UPDATE trades SET
+            exit_price   = %s,
+            exit_time    = %s,
+            exit_reason  = %s,
+            gross_pnl    = (%s - entry_price) * qty,
+            slippage_est = entry_notional * 0.0005,
+            net_pnl      = ((%s - entry_price) * qty) - (entry_notional * 0.0005)
+        WHERE symbol = %s AND exit_time IS NULL
+    """
+
+    def open_trade(
+        self,
+        symbol: str,
+        signal_id: int | None,
+        decision_id: int | None,
+        entry_order_id: str,
+        entry_time,
+        entry_notional: float,
+        score: float,
+        regime_mult: float,
+        qty: float | None = None,
+    ) -> None:
+        """Insert an open trade row (entry_price populated later by reconcile)."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    self._INSERT_TRADE,
+                    (symbol, signal_id, decision_id, entry_order_id,
+                     entry_time, entry_notional, score, regime_mult, qty),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    def close_trade(
+        self,
+        symbol: str,
+        exit_price: float,
+        exit_time,
+        exit_reason: str,
+    ) -> None:
+        """Update the open trade row for symbol with exit data and compute P&L."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    self._CLOSE_TRADE,
+                    (exit_price, exit_time, exit_reason,
+                     exit_price, exit_price, symbol),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    def fetch_trades(
+        self,
+        symbol: str | None = None,
+        status: str = "all",
+        limit: int = 50,
+    ) -> list[dict]:
+        """Return trades, most-recent first. status: 'open' | 'closed' | 'all'."""
+        filters = []
+        params: list = []
+        if symbol:
+            filters.append("symbol = %s")
+            params.append(symbol)
+        if status == "open":
+            filters.append("exit_time IS NULL")
+        elif status == "closed":
+            filters.append("exit_time IS NOT NULL")
+        where = ("WHERE " + " AND ".join(filters)) if filters else ""
+        params.append(limit)
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""SELECT id, symbol, signal_id, decision_id, entry_order_id,
+                               entry_price, entry_time, entry_notional, score, regime_mult,
+                               exit_price, exit_time, exit_reason, qty,
+                               gross_pnl, slippage_est, net_pnl, created_at
+                        FROM trades {where}
+                        ORDER BY entry_time DESC LIMIT %s""",
+                    params,
+                )
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception:
+            conn.rollback()
+            raise
+
+    _TRADE_SUMMARY_SQL = """
+        SELECT
+            COUNT(*) AS total_trades,
+            SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END) AS wins,
+            COALESCE(AVG(gross_pnl), 0) AS avg_gross_pnl,
+            COALESCE(AVG(slippage_est), 0) AS avg_slippage_est,
+            COALESCE(AVG(net_pnl), 0) AS avg_net_pnl,
+            COALESCE(SUM(gross_pnl), 0) AS total_gross_pnl,
+            COALESCE(SUM(net_pnl), 0) AS total_net_pnl,
+            COALESCE(SUM(entry_notional), 0) AS total_notional,
+            COALESCE(
+                AVG(EXTRACT(EPOCH FROM (exit_time - entry_time)) / 60), 0
+            ) AS avg_hold_minutes
+        FROM trades
+        WHERE exit_time IS NOT NULL
+          AND exit_time >= now() - (%s || ' days')::interval
+    """
+
+    def fetch_trade_summary(self, days: int = 7) -> dict:
+        """Return aggregated P&L metrics for closed trades in the last `days` days."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._TRADE_SUMMARY_SQL, (str(days),))
+                row = cur.fetchone()
+            if not row:
+                return {k: 0 for k in [
+                    "total_trades", "win_rate", "avg_gross_pnl", "avg_slippage_est",
+                    "avg_net_pnl", "total_gross_pnl", "total_net_pnl",
+                    "total_notional", "avg_hold_minutes", "trades_per_week",
+                    "return_on_notional", "slippage_pct_of_gross",
+                ]}
+            (total, wins, avg_gross, avg_slip, avg_net,
+             total_gross, total_net, total_notional, avg_hold) = row
+            total = int(total)
+            wins = int(wins or 0)
+            win_rate = (wins / total) if total > 0 else 0.0
+            trades_per_week = (total / days) * 7
+            return_on_notional = (float(total_net) / float(total_notional)) if total_notional else 0.0
+            slippage_pct = (float(avg_slip) / float(avg_gross)) if avg_gross else 0.0
+            return {
+                "total_trades": total,
+                "win_rate": round(win_rate, 4),
+                "avg_gross_pnl": round(float(avg_gross), 2),
+                "avg_slippage_est": round(float(avg_slip), 2),
+                "avg_net_pnl": round(float(avg_net), 2),
+                "total_gross_pnl": round(float(total_gross), 2),
+                "total_net_pnl": round(float(total_net), 2),
+                "total_notional": round(float(total_notional), 2),
+                "avg_hold_minutes": round(float(avg_hold), 1),
+                "trades_per_week": round(trades_per_week, 1),
+                "return_on_notional": round(return_on_notional, 4),
+                "slippage_pct_of_gross": round(slippage_pct, 4),
+            }
+        except Exception:
+            conn.rollback()
+            raise
+
     def log_llm_responses(self, signal_id: int, outputs: list[ModelOutput]) -> None:
         """Write per-model outputs to llm_responses. No-op for empty list."""
         if not outputs:

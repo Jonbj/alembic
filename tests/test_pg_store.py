@@ -456,5 +456,104 @@ class TestFetchDecisions:
         assert rows[0]["decision"] == "BUY"
 
 
+class TestOpenTrade:
+    def test_open_trade_inserts_row(self):
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+        store = PostgreSQLStore(conn=mock_conn)
+        store.open_trade(
+            symbol="TSLA",
+            signal_id=7,
+            decision_id=55,
+            entry_order_id="order-abc",
+            entry_time=datetime(2026, 6, 5, 15, tzinfo=timezone.utc),
+            entry_notional=500.0,
+            score=0.55,
+            regime_mult=1.0,
+            qty=2.5,
+        )
+        mock_cur.execute.assert_called_once()
+        sql = mock_cur.execute.call_args[0][0]
+        assert "INSERT INTO trades" in sql
+        mock_conn.commit.assert_called_once()
+
+
+class TestCloseTrade:
+    def test_close_trade_updates_open_row(self):
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+        store = PostgreSQLStore(conn=mock_conn)
+        store.close_trade(
+            symbol="TSLA",
+            exit_price=205.0,
+            exit_time=datetime(2026, 6, 5, 16, tzinfo=timezone.utc),
+            exit_reason="stop_loss",
+        )
+        sql = mock_cur.execute.call_args[0][0]
+        assert "UPDATE trades" in sql
+        assert "exit_time IS NULL" in sql
+        mock_conn.commit.assert_called_once()
+
+
+class TestFetchTrades:
+    def test_fetch_all_trades(self):
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        now = datetime(2026, 6, 5, tzinfo=timezone.utc)
+        mock_cur.description = [("id",), ("symbol",), ("entry_time",), ("net_pnl",)]
+        mock_cur.fetchall.return_value = [(1, "TSLA", now, 12.5)]
+
+        store = PostgreSQLStore(conn=mock_conn)
+        rows = store.fetch_trades(limit=10)
+        assert rows[0]["symbol"] == "TSLA"
+
+    def test_fetch_open_trades_filters_exit_time(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.description = [("id",), ("symbol",), ("entry_time",), ("net_pnl",)]
+        mock_cur.fetchall.return_value = []
+
+        store = PostgreSQLStore(conn=mock_conn)
+        store.fetch_trades(status="open", limit=5)
+        sql = mock_cur.execute.call_args[0][0]
+        assert "exit_time IS NULL" in sql
+
+    def test_fetch_closed_trades_filters_exit_time(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.description = [("id",), ("symbol",), ("entry_time",), ("net_pnl",)]
+        mock_cur.fetchall.return_value = []
+
+        store = PostgreSQLStore(conn=mock_conn)
+        store.fetch_trades(status="closed", limit=5)
+        sql = mock_cur.execute.call_args[0][0]
+        assert "exit_time IS NOT NULL" in sql
+
+
+class TestFetchTradeSummary:
+    def test_returns_expected_keys(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (10, 6, 15.0, 0.5, 14.5, 150.0, 145.0, 5000.0, 30.0)
+
+        store = PostgreSQLStore(conn=mock_conn)
+        summary = store.fetch_trade_summary(days=7)
+        assert summary["total_trades"] == 10
+        assert summary["win_rate"] == 0.6
+        assert "avg_net_pnl" in summary
+        assert "trades_per_week" in summary
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
