@@ -7,12 +7,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
 
+from src.api.auth import require_api_key
 from src.api.deps import get_pg_store
 from src.strategies.registry import StrategyRegistry
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/portfolio", tags=["portfolio"])
+router = APIRouter(prefix="/portfolio", tags=["portfolio"], dependencies=[Depends(require_api_key)])
 
 
 @router.get("/status")

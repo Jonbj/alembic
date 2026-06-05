@@ -3,10 +3,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
+from src.api.auth import require_api_key
 from src.api.deps import get_pg_store
 from src.store.pg_store import PostgreSQLStore
 
-router = APIRouter(prefix="/api/news")
+router = APIRouter(prefix="/api/news", dependencies=[Depends(require_api_key)])
 
 
 @router.get("/recent")

@@ -133,11 +133,20 @@ def _fire_alert(notifier: "Notifier | None", message: str, level: AlertLevel) ->
         log.warning("Alert send failed: %s", exc)
 
 
-def _regime_multiplier(redis_store: RedisStore) -> float:
-    """Return regime multiplier from Redis (conservative 0.5 fallback if absent)."""
+def _regime_multiplier(redis_store: RedisStore, notifier: "Notifier | None" = None) -> float:
+    """Return regime multiplier from Redis.
+
+    Falls back to 0.2 (high_vol multiplier) when the key is absent — e.g. on first
+    startup or after a regime worker failure. Fail-conservative rather than fail-open.
+    """
     regime = redis_store.get_regime()
     if regime is None:
-        return 0.5
+        _fire_alert(
+            notifier,
+            "Regime key absent in Redis — using high_vol fallback (×0.2). Check regime worker.",
+            AlertLevel.WARNING,
+        )
+        return 0.2
     return float(regime.multiplier)
 
 
@@ -189,7 +198,7 @@ def run_execution_cycle(
         stats["errors"] += 1
         return stats
 
-    regime_mult = _regime_multiplier(redis_store)
+    regime_mult = _regime_multiplier(redis_store, notifier)
 
     # Build EMA cache once for all symbols (one batch API call)
     market_cache = _build_market_cache(symbols, data_client) if data_client else {}
@@ -232,7 +241,7 @@ def run_execution_cycle(
             drawdown = (last_equity - portfolio_value) / last_equity
             if drawdown >= MAX_DRAWDOWN_PCT:
                 reason = f"Daily drawdown {drawdown:.1%} >= {MAX_DRAWDOWN_PCT:.0%} cap"
-                redis_store.activate_killswitch(reason, ttl=86400)
+                redis_store.activate_killswitch(reason, ttl=64800)
                 log.critical("DRAWDOWN CAP: %s — kill-switch activated", reason)
                 _fire_alert(notifier, f"Drawdown cap attivato: {reason}", AlertLevel.CRITICAL)
                 stats["skipped_killswitch"] = len(symbols)

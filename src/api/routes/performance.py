@@ -14,7 +14,7 @@ from src.config import config
 from src.store.pg_store import PostgreSQLStore
 from src.store.redis_store import RedisStore
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
 
 _WEIGHT_MIN = 0.10
 _WEIGHT_MAX = 0.70

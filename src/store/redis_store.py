@@ -161,13 +161,40 @@ class RedisStore:
             else:
                 raise
 
+    def activate_operator_halt(self, reason: str = "manual operator halt") -> None:
+        """Activate a permanent operator-initiated halt using a separate key.
+
+        Unlike drawdown-triggered halts (which use killswitch_active with a TTL),
+        this key has no TTL and must be explicitly cleared with deactivate_operator_halt().
+        A Redis restart will lose this state — configure Redis persistence (appendonly yes)
+        for production deployments.
+        """
+        pipe = self._r.pipeline()
+        pipe.set("system:halted_by_operator", 1)
+        pipe.set(
+            "system:halted_by_operator_reason",
+            json.dumps({"reason": reason, "activated_at": datetime.now(timezone.utc).isoformat()}),
+        )
+        try:
+            pipe.execute()
+        except Exception as e:
+            error_msg = str(e)
+            if "OOM" in error_msg or "out of memory" in error_msg.lower():
+                print(f"RedisStore: Redis OOM - failed to activate operator halt (reason: {reason})")
+            else:
+                raise
+
+    def deactivate_operator_halt(self) -> None:
+        """Clear the operator-initiated halt."""
+        self._r.delete("system:halted_by_operator", "system:halted_by_operator_reason")
+
     def deactivate_killswitch(self) -> None:
-        """Deactivate the kill-switch."""
+        """Deactivate the drawdown-triggered kill-switch (TTL-based)."""
         self._r.delete("killswitch_active", "killswitch_reason")
 
     def is_killswitch_active(self) -> bool:
-        """Check if kill-switch is active."""
-        return bool(self._r.get("killswitch_active"))
+        """Check if any kill-switch is active (drawdown-triggered OR operator halt)."""
+        return bool(self._r.get("killswitch_active")) or bool(self._r.get("system:halted_by_operator"))
 
     def get_killswitch_reason(self) -> dict | None:
         """Get kill-switch activation reason."""

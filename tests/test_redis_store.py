@@ -91,21 +91,50 @@ class TestKillSwitch:
         pipe.set.assert_any_call("killswitch_active", 1)
         pipe.execute.assert_called()
 
-    def test_is_killswitch_active(self):
-        """Test checking kill-switch status."""
+    def test_is_killswitch_active_drawdown_key(self):
+        """is_killswitch_active returns True when the drawdown key is set."""
         mock_redis = MagicMock()
-        mock_redis.get.return_value = b"1"
+        mock_redis.get.side_effect = lambda key: b"1" if key == "killswitch_active" else None
+
+        store = RedisStore(redis_client=mock_redis)
+        assert store.is_killswitch_active() is True
+
+    def test_is_killswitch_active_operator_key(self):
+        """is_killswitch_active returns True when the operator halt key is set."""
+        mock_redis = MagicMock()
+        mock_redis.get.side_effect = lambda key: b"1" if key == "system:halted_by_operator" else None
 
         store = RedisStore(redis_client=mock_redis)
         assert store.is_killswitch_active() is True
 
     def test_is_killswitch_inactive(self):
-        """Test checking kill-switch status when inactive."""
+        """Test checking kill-switch status when both keys are absent."""
         mock_redis = MagicMock()
         mock_redis.get.return_value = None
 
         store = RedisStore(redis_client=mock_redis)
         assert store.is_killswitch_active() is False
+
+    def test_activate_operator_halt(self):
+        """activate_operator_halt writes to the operator-specific key with no TTL."""
+        mock_redis = MagicMock()
+        mock_redis.pipeline.return_value = MagicMock()
+
+        store = RedisStore(redis_client=mock_redis)
+        store.activate_operator_halt("manual test halt")
+
+        pipe = mock_redis.pipeline.return_value
+        pipe.set.assert_any_call("system:halted_by_operator", 1)
+        pipe.execute.assert_called()
+
+    def test_deactivate_operator_halt(self):
+        """deactivate_operator_halt clears the operator-specific key."""
+        mock_redis = MagicMock()
+        store = RedisStore(redis_client=mock_redis)
+        store.deactivate_operator_halt()
+        mock_redis.delete.assert_called_once_with(
+            "system:halted_by_operator", "system:halted_by_operator_reason"
+        )
 
 
 class TestDivergenceLogging:

@@ -3,10 +3,11 @@
 from fastapi import APIRouter, Depends
 from typing import Annotated
 
+from src.api.auth import require_api_key
 from src.api.deps import get_pg_store
 from src.store.pg_store import PostgreSQLStore
 
-router = APIRouter(prefix="/api/backtest")
+router = APIRouter(prefix="/api/backtest", dependencies=[Depends(require_api_key)])
 
 
 @router.get("/runs")

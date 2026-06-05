@@ -5,12 +5,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from src.api.auth import require_api_key
 from src.store.redis_store import RedisStore
 from src.store.pg_store import PostgreSQLStore
 from src.api.deps import get_redis_store, get_pg_store
 
 
-router = APIRouter(prefix="/api/signals")
+router = APIRouter(prefix="/api/signals", dependencies=[Depends(require_api_key)])
 
 
 def _watchlist() -> list[str]:

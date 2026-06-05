@@ -24,6 +24,7 @@ class ModeRequest(BaseModel):
 @router.get("/mode")
 async def get_mode(
     store: Annotated[RedisStore, Depends(get_redis_store)],
+    _: Annotated[str, Depends(require_api_key)],
 ) -> dict:
     """Get current operating mode."""
     return {"mode": store.get_mode() or "unknown"}
@@ -113,6 +114,6 @@ async def activate_killswitch(
     Returns:
         Confirmation of killswitch activation
     """
-    store.activate_killswitch()
+    store.activate_operator_halt("manual operator halt via API")
     store.set_mode("halted")
     return {"killswitch": "activated", "mode": "halted"}

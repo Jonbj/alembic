@@ -3,9 +3,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
+from src.api.auth import require_api_key
 from src.api.deps import get_alpaca_trading_client
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
 
 
 @router.get("/positions")
