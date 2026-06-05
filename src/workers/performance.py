@@ -70,6 +70,7 @@ log = logging.getLogger(__name__)
 _MIN_SAMPLES = 300
 _MIN_SAMPLES_PER_MODEL = 30
 _MIN_ABS_MEAN_ICIR = 0.05  # G3.5: freeze if mean ICIR < -this (ensemble anti-predictive)
+_SLIPPAGE_WARN_PCT = 0.30   # ⚠️ if estimated slippage > 30% of gross P&L
 
 
 def _fetch_all_per_model_signals_for_loo(
@@ -328,6 +329,47 @@ def _suggest_threshold(
     return None
 
 
+def _format_trade_metrics_section(trades_summary: dict) -> str:
+    """Format the trade P&L section for the weekly Telegram report."""
+    from src.config import config
+
+    total = trades_summary.get("total_trades", 0)
+    if total == 0:
+        return "\n📊 *Trade P&L (last 7d)*\nNo closed trades in period."
+
+    win_pct = trades_summary.get("win_rate", 0) * 100
+    avg_net = trades_summary.get("avg_net_pnl", 0)
+    avg_gross = trades_summary.get("avg_gross_pnl", 0)
+    avg_slip = trades_summary.get("avg_slippage_est", 0)
+    total_net = trades_summary.get("total_net_pnl", 0)
+    total_gross = trades_summary.get("total_gross_pnl", 0)
+    total_notional = trades_summary.get("total_notional", 0)
+    tpw = trades_summary.get("trades_per_week", 0)
+    avg_hold = trades_summary.get("avg_hold_minutes", 0)
+    slip_pct = trades_summary.get("slippage_pct_of_gross", 0)
+    ron = trades_summary.get("return_on_notional", 0) * 100
+
+    warnings = []
+    if avg_net < config.MIN_TRADE_PNL_THRESHOLD:
+        warnings.append(f"⚠️ avg net P&L ${avg_net:.2f} < ${config.MIN_TRADE_PNL_THRESHOLD:.2f} threshold")
+    if slip_pct > _SLIPPAGE_WARN_PCT:
+        warnings.append(f"⚠️ slippage {slip_pct*100:.1f}% of gross — consider raising ENTRY_THRESHOLD")
+
+    warn_str = "\n" + "\n".join(warnings) if warnings else ""
+
+    return (
+        f"\n📊 *Trade P&L (last 7d)*\n"
+        f"Trades: {total} | Win rate: {win_pct:.1f}%\n"
+        f"Avg gross P&L: ${avg_gross:.2f} | Avg slippage: ${avg_slip:.2f} | Avg net: ${avg_net:.2f}\n"
+        f"Total gross: ${total_gross:.2f} | Total net: ${total_net:.2f}\n"
+        f"\n📈 *Frequency vs Margin*\n"
+        f"Trades/week: {tpw:.1f} | Total notional: ${total_notional:.0f}\n"
+        f"Return on notional: {ron:.2f}% | Avg hold: {avg_hold:.0f}min\n"
+        f"Est. slippage: {slip_pct*100:.1f}% of gross P&L"
+        f"{warn_str}"
+    )
+
+
 @app.task(name="src.workers.performance.run_daily_report")
 def run_daily_report():
     """Daily performance report task.
@@ -387,6 +429,20 @@ def run_daily_report():
         asyncio.run(notifier.send_alert(message, level="info"))
 
         log.info(f"Daily report sent. Overall IC: {report.overall_ic:.4f}, ICIR: {report.icir:.3f}")
+
+        # Reconcile fill prices from Alpaca for trades placed in last 24h
+        if config.ALPACA_API_KEY and config.ALPACA_SECRET_KEY:
+            try:
+                from alpaca.trading.client import TradingClient
+                tc = TradingClient(
+                    api_key=config.ALPACA_API_KEY,
+                    secret_key=config.ALPACA_SECRET_KEY,
+                    paper="paper-api" in config.ALPACA_BASE_URL,
+                )
+                updated = pg.reconcile_trade_fills(tc)
+                log.info("Reconciled %d trade fill(s) from Alpaca", updated)
+            except Exception as e:
+                log.warning("Fill reconciliation failed: %s", e)
 
     except Exception as e:
         log.exception(f"Daily performance report failed: {e}")
@@ -513,6 +569,14 @@ def run_weekly_weights():
         # Send Telegram alert with suggestions
         notifier = TelegramNotifier()
         message = _format_weights_telegram_message(new_weights, current_weights, freeze_reason)
+
+        # Append trade P&L section
+        try:
+            trade_summary = pg.fetch_trade_summary(days=7)
+            message += _format_trade_metrics_section(trade_summary)
+        except Exception as e:
+            log.warning("Failed to fetch trade summary for weekly report: %s", e)
+
         asyncio.run(notifier.send_alert(message, level="info"))
 
         log.info(f"Weekly weights computed. Suggestion stored in Redis.")

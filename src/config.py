@@ -137,6 +137,11 @@ class Config(BaseModel):
     AUTO_APPLY_VIX_FRED_SERIES: str = Field(
         default_factory=lambda: os.environ.get("AUTO_APPLY_VIX_FRED_SERIES", "VIXCLS")
     )  # FRED series ID for daily VIX data
+    MIN_TRADE_PNL_THRESHOLD: float = Field(
+        default_factory=lambda: float(
+            _load_trading_yaml().get("risk", {}).get("min_trade_pnl_threshold", 5.0)
+        )
+    )
 
     # Regime detection
     REGIME_LLM_MODEL_1: str = Field(

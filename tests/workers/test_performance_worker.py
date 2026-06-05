@@ -1088,3 +1088,66 @@ class TestFormatPerformanceTelegramMessageWithDistribution:
 
         assert isinstance(msg, str)
         assert "Signal Distribution" not in msg
+
+
+class TestFormatTradeMetrics:
+    """_format_trade_metrics_section produces expected Telegram-ready text."""
+
+    def test_all_metrics_present(self):
+        from src.workers.performance import _format_trade_metrics_section
+        summary = {
+            "total_trades": 12,
+            "win_rate": 0.583,
+            "avg_gross_pnl": 18.5,
+            "avg_slippage_est": 0.8,
+            "avg_net_pnl": 17.7,
+            "total_gross_pnl": 222.0,
+            "total_net_pnl": 212.4,
+            "total_notional": 6000.0,
+            "trades_per_week": 12.0,
+            "return_on_notional": 0.0354,
+            "avg_hold_minutes": 45.0,
+            "slippage_pct_of_gross": 0.043,
+        }
+        text = _format_trade_metrics_section(summary)
+        assert "58.3%" in text  # win rate
+        assert "12" in text     # total trades
+        assert "17.70" in text  # avg net pnl
+
+    def test_high_slippage_triggers_warning(self):
+        from src.workers.performance import _format_trade_metrics_section
+        summary = {
+            "total_trades": 5,
+            "win_rate": 0.4,
+            "avg_gross_pnl": 10.0,
+            "avg_slippage_est": 4.0,
+            "avg_net_pnl": 6.0,
+            "total_gross_pnl": 50.0,
+            "total_net_pnl": 30.0,
+            "total_notional": 2500.0,
+            "trades_per_week": 5.0,
+            "return_on_notional": 0.012,
+            "avg_hold_minutes": 30.0,
+            "slippage_pct_of_gross": 0.40,  # 40% > 30% threshold
+        }
+        text = _format_trade_metrics_section(summary)
+        assert "⚠️" in text
+
+    def test_low_avg_net_pnl_triggers_warning(self):
+        from src.workers.performance import _format_trade_metrics_section
+        summary = {
+            "total_trades": 5,
+            "win_rate": 0.4,
+            "avg_gross_pnl": 3.0,
+            "avg_slippage_est": 0.5,
+            "avg_net_pnl": 2.5,  # below $5.0 threshold
+            "total_gross_pnl": 15.0,
+            "total_net_pnl": 12.5,
+            "total_notional": 2500.0,
+            "trades_per_week": 5.0,
+            "return_on_notional": 0.005,
+            "avg_hold_minutes": 25.0,
+            "slippage_pct_of_gross": 0.17,
+        }
+        text = _format_trade_metrics_section(summary)
+        assert "⚠️" in text

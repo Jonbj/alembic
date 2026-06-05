@@ -130,6 +130,8 @@ risk:
   max_position_pct: 0.10
   max_portfolio_exposure: 0.50
 
+  min_trade_pnl_threshold: 5.0   # $ min avg net P&L per trade before ⚠️ alert in weekly report
+
 schedule:
   # Celery beat intervals
   sentiment_worker_minutes: 15
