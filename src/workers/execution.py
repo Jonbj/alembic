@@ -133,6 +133,36 @@ def _fire_alert(notifier: "Notifier | None", message: str, level: AlertLevel) ->
         log.warning("Alert send failed: %s", exc)
 
 
+def _write_decision(
+    pg_store,
+    tick_time,
+    symbol: str,
+    signal_id: "int | None",
+    score: float,
+    regime_mult: float,
+    ema_pass: bool,
+    decision: str,
+    order_id: "str | None" = None,
+) -> "int | None":
+    """Write one execution decision row. Returns decision_id or None on failure/no-store."""
+    if pg_store is None:
+        return None
+    try:
+        return pg_store.write_execution_decision(
+            tick_time=tick_time,
+            symbol=symbol,
+            signal_id=signal_id,
+            score=score,
+            regime_mult=regime_mult,
+            ema_pass=ema_pass,
+            decision=decision,
+            order_id=order_id,
+        )
+    except Exception as e:
+        log.warning("Failed to write execution decision for %s: %s", symbol, e)
+        return None
+
+
 def _regime_multiplier(redis_store: RedisStore, notifier: "Notifier | None" = None) -> float:
     """Return regime multiplier from Redis.
 
@@ -156,6 +186,7 @@ def run_execution_cycle(
     trading_client,
     data_client=None,
     notifier: "Notifier | None" = None,
+    pg_store=None,
 ) -> dict:
     """Core execution logic — separated for testability.
 
@@ -166,6 +197,8 @@ def run_execution_cycle(
         data_client:    Alpaca StockHistoricalDataClient for EMA bars.
                         If None, EMA momentum filter is skipped.
         notifier:       Optional Notifier for critical infrastructure alerts.
+        pg_store:       Optional PostgreSQLStore for decision + trade lifecycle logging.
+                        If None, all observability writes are silently skipped.
 
     Returns:
         Stats dict: checked, skipped_stale, skipped_killswitch, skipped_position,
@@ -255,6 +288,8 @@ def run_execution_cycle(
     for symbol in symbols:
         stats["checked"] += 1
         try:
+            tick_time = datetime.now(timezone.utc)
+
             # --- Signal read ---
             signal = redis_store.read_sentiment(symbol)
             if signal is None or not _is_fresh(signal):
@@ -264,6 +299,7 @@ def run_execution_cycle(
 
             score = float(signal.get("score", 0.0))
             fallback_used = bool(signal.get("fallback_used", False))
+            signal_id: "int | None" = signal.get("signal_id")
 
             # Skip FinBERT fallback signals — lower quality, not ensemble
             if fallback_used:
@@ -291,6 +327,16 @@ def run_execution_cycle(
                             f"🔴 STOP-LOSS {symbol}: entry={entry_price:.2f} current={current_price:.2f} (−{STOP_LOSS_PCT*100:.0f}%)",
                             AlertLevel.WARNING,
                         )
+                        if pg_store is not None:
+                            try:
+                                pg_store.close_trade(
+                                    symbol=symbol,
+                                    exit_price=current_price,
+                                    exit_time=tick_time,
+                                    exit_reason="stop_loss",
+                                )
+                            except Exception as trade_exc:
+                                log.warning("Failed to close trade record for %s: %s", symbol, trade_exc)
                     except Exception as stop_exc:
                         log.error("Failed to close stop-loss position for %s: %s", symbol, stop_exc)
                         _fire_alert(
@@ -303,12 +349,18 @@ def run_execution_cycle(
                     # Position open and healthy — idempotent, no pyramiding
                     stats["skipped_position"] += 1
                     log.debug("Position already open for %s — skipping entry", symbol)
+                    if score > ENTRY_THRESHOLD:
+                        _write_decision(pg_store, tick_time, symbol, signal_id, score, regime_mult,
+                                        ema_pass=True, decision="SKIP_POSITION")
                 continue
 
             # --- Entry logic ---
             if pending_orders is None or symbol in pending_orders:
                 log.debug("Pending order check unavailable or order exists for %s — skip", symbol)
                 stats["skipped_position"] += 1
+                if score > ENTRY_THRESHOLD:
+                    _write_decision(pg_store, tick_time, symbol, signal_id, score, regime_mult,
+                                    ema_pass=True, decision="SKIP_POSITION")
                 continue
 
             if score <= ENTRY_THRESHOLD:
@@ -323,6 +375,8 @@ def run_execution_cycle(
                 if ema is None or price is None:
                     log.debug("EMA/price unavailable for %s — skipping entry (fail-safe)", symbol)
                     stats["skipped_momentum"] += 1
+                    _write_decision(pg_store, tick_time, symbol, signal_id, score, regime_mult,
+                                    ema_pass=False, decision="SKIP_EMA")
                     continue
                 elif price <= ema:
                     log.debug(
@@ -330,6 +384,8 @@ def run_execution_cycle(
                         symbol, price, ema,
                     )
                     stats["skipped_momentum"] += 1
+                    _write_decision(pg_store, tick_time, symbol, signal_id, score, regime_mult,
+                                    ema_pass=False, decision="SKIP_EMA")
                     continue
 
             # Position sizing: portfolio × max_pct × regime_multiplier
@@ -342,10 +398,13 @@ def run_execution_cycle(
                     cycle_notional, cycle_cap, symbol,
                 )
                 stats["skipped_cycle_cap"] += 1
+                _write_decision(pg_store, tick_time, symbol, signal_id, score, regime_mult,
+                                ema_pass=True, decision="SKIP_CAP")
                 continue
 
             # Broker-side stop order: use OTO class when price is available from EMA cache.
             # Avoids relying solely on the 15-min software poll for stop-loss enforcement.
+            qty: "float | None" = None
             cached = market_cache.get(symbol, {})
             price = cached.get("price")
 
@@ -367,7 +426,8 @@ def run_execution_cycle(
                     side=OrderSide.BUY,
                     time_in_force=TimeInForce.DAY,
                 )
-            trading_client.submit_order(order)
+            submitted_order = trading_client.submit_order(order)
+            order_id_str = str(submitted_order.id)
             cycle_notional += notional
             stats["orders_placed"] += 1
             log.info(
@@ -379,6 +439,25 @@ def run_execution_cycle(
                 f"🟢 BUY {symbol}: score={score:.2f} notional=${notional:.0f} regime={regime_mult:.2f}×",
                 AlertLevel.INFO,
             )
+            decision_id = _write_decision(
+                pg_store, tick_time, symbol, signal_id, score, regime_mult,
+                ema_pass=True, decision="BUY", order_id=order_id_str,
+            )
+            if pg_store is not None:
+                try:
+                    pg_store.open_trade(
+                        symbol=symbol,
+                        signal_id=signal_id,
+                        decision_id=decision_id,
+                        entry_order_id=order_id_str,
+                        entry_time=tick_time,
+                        entry_notional=notional,
+                        score=score,
+                        regime_mult=regime_mult,
+                        qty=qty,
+                    )
+                except Exception as trade_exc:
+                    log.warning("Failed to open trade record for %s: %s", symbol, trade_exc)
 
         except Exception as e:
             log.error("Error processing %s: %s", symbol, e)
@@ -425,6 +504,11 @@ def run_execution_worker() -> dict:
     from src.notifications.telegram import TelegramNotifier
     notifier = TelegramNotifier()
 
+    import psycopg2
+    from src.store.pg_store import PostgreSQLStore
+    pg_conn = psycopg2.connect(config.DATABASE_URL.replace("+asyncpg", ""))
+    pg_store = PostgreSQLStore(conn=pg_conn)
+
     try:
         stats = run_execution_cycle(
             symbols=config.WATCHLIST_SYMBOLS or [],
@@ -432,9 +516,12 @@ def run_execution_worker() -> dict:
             trading_client=trading_client,
             data_client=data_client,
             notifier=notifier,
+            pg_store=pg_store,
         )
         log.info("Execution stats: %s", stats)
         return stats
     finally:
         redis_store.close()
         redis_client.close()
+        pg_store.close()
+        pg_conn.close()

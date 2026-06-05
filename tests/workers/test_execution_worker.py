@@ -445,3 +445,141 @@ def test_pending_orders_failure_does_not_block_stop_loss():
 
     assert stats["stop_losses_triggered"] == 1
     client.close_position.assert_called_once_with("AAPL")
+
+
+class TestDecisionLogging:
+    """run_execution_cycle writes execution decisions for candidates (score > threshold)."""
+
+    def _make_signal(self, score=0.5, fallback=False, signal_id=7):
+        from datetime import datetime, timezone
+        return {
+            "score": score, "fallback_used": fallback, "signal_id": signal_id,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def _make_account(self, portfolio_value=10000.0):
+        account = MagicMock()
+        account.portfolio_value = str(portfolio_value)
+        account.last_equity = str(portfolio_value)
+        return account
+
+    def test_buy_writes_decision_and_opens_trade(self):
+        from unittest.mock import MagicMock
+        from src.workers.execution import run_execution_cycle
+        from src.store.redis_store import RedisStore
+
+        mock_redis = MagicMock(spec=RedisStore)
+        mock_redis.is_killswitch_active.return_value = False
+        mock_redis.get_regime.return_value = MagicMock(multiplier=1.0)
+        mock_redis.read_sentiment.return_value = self._make_signal(score=0.5)
+
+        mock_trading = MagicMock()
+        mock_trading.get_account.return_value = self._make_account()
+        mock_trading.get_all_positions.return_value = []
+        mock_trading.get_orders.return_value = []
+        submitted = MagicMock()
+        submitted.id = "order-uuid-1"
+        mock_trading.submit_order.return_value = submitted
+
+        mock_pg = MagicMock()
+        mock_pg.write_execution_decision.return_value = 99
+
+        stats = run_execution_cycle(
+            symbols=["AAPL"],
+            redis_store=mock_redis,
+            trading_client=mock_trading,
+            pg_store=mock_pg,
+        )
+
+        assert stats["orders_placed"] == 1
+        mock_pg.write_execution_decision.assert_called_once()
+        call_kwargs = mock_pg.write_execution_decision.call_args[1]
+        assert call_kwargs["decision"] == "BUY"
+        assert call_kwargs["order_id"] == "order-uuid-1"
+        mock_pg.open_trade.assert_called_once()
+
+    def test_below_threshold_no_decision_written(self):
+        from unittest.mock import MagicMock
+        from src.workers.execution import run_execution_cycle
+        from src.store.redis_store import RedisStore
+
+        mock_redis = MagicMock(spec=RedisStore)
+        mock_redis.is_killswitch_active.return_value = False
+        mock_redis.get_regime.return_value = MagicMock(multiplier=1.0)
+        mock_redis.read_sentiment.return_value = self._make_signal(score=0.1)  # below threshold
+
+        mock_trading = MagicMock()
+        mock_trading.get_account.return_value = self._make_account()
+        mock_trading.get_all_positions.return_value = []
+        mock_trading.get_orders.return_value = []
+
+        mock_pg = MagicMock()
+
+        run_execution_cycle(
+            symbols=["AAPL"],
+            redis_store=mock_redis,
+            trading_client=mock_trading,
+            pg_store=mock_pg,
+        )
+
+        mock_pg.write_execution_decision.assert_not_called()
+
+    def test_stop_loss_writes_close_trade(self):
+        from unittest.mock import MagicMock, patch
+        from src.workers.execution import run_execution_cycle
+        from src.store.redis_store import RedisStore
+
+        mock_redis = MagicMock(spec=RedisStore)
+        mock_redis.is_killswitch_active.return_value = False
+        mock_redis.get_regime.return_value = MagicMock(multiplier=1.0)
+        mock_redis.read_sentiment.return_value = self._make_signal(score=0.5)
+
+        pos = MagicMock()
+        pos.symbol = "AAPL"
+        pos.avg_entry_price = "200.0"
+        pos.current_price = "190.0"  # 5% drop — triggers 2% stop
+
+        mock_trading = MagicMock()
+        mock_trading.get_account.return_value = self._make_account()
+        mock_trading.get_all_positions.return_value = [pos]
+        mock_trading.get_orders.return_value = []
+
+        mock_pg = MagicMock()
+
+        stats = run_execution_cycle(
+            symbols=["AAPL"],
+            redis_store=mock_redis,
+            trading_client=mock_trading,
+            pg_store=mock_pg,
+        )
+
+        assert stats["stop_losses_triggered"] == 1
+        mock_pg.close_trade.assert_called_once()
+        call_kwargs = mock_pg.close_trade.call_args[1]
+        assert call_kwargs["symbol"] == "AAPL"
+        assert call_kwargs["exit_reason"] == "stop_loss"
+
+    def test_no_pg_store_still_places_order(self):
+        """pg_store=None → decisions/trades silently skipped, order still placed."""
+        from unittest.mock import MagicMock
+        from src.workers.execution import run_execution_cycle
+        from src.store.redis_store import RedisStore
+
+        mock_redis = MagicMock(spec=RedisStore)
+        mock_redis.is_killswitch_active.return_value = False
+        mock_redis.get_regime.return_value = MagicMock(multiplier=1.0)
+        mock_redis.read_sentiment.return_value = self._make_signal(score=0.5)
+
+        mock_trading = MagicMock()
+        mock_trading.get_account.return_value = self._make_account()
+        mock_trading.get_all_positions.return_value = []
+        mock_trading.get_orders.return_value = []
+        mock_trading.submit_order.return_value = MagicMock(id="x")
+
+        stats = run_execution_cycle(
+            symbols=["AAPL"],
+            redis_store=mock_redis,
+            trading_client=mock_trading,
+            pg_store=None,
+        )
+        assert stats["orders_placed"] == 1
