@@ -69,6 +69,7 @@ log = logging.getLogger(__name__)
 # Minimum samples required for meaningful IC computation
 _MIN_SAMPLES = 300
 _MIN_SAMPLES_PER_MODEL = 30
+_MIN_ABS_MEAN_ICIR = 0.05  # G3.5: freeze if mean ICIR < -this (ensemble anti-predictive)
 
 
 def _fetch_all_per_model_signals_for_loo(
@@ -472,15 +473,19 @@ def run_weekly_weights():
         cb_result = check_circuit_breakers(ctx)
         freeze_reason = cb_result.reason if cb_result.freeze_weight_update else ""
 
-        # Extra guardrail: if every model has negative ICIR, the ensemble is
-        # unanimously underperforming. Force a freeze regardless of circuit breakers.
-        if purified_icir and all(v <= 0 for v in purified_icir.values()):
-            all_neg_msg = (
-                f"All models ICIR ≤ 0 ({', '.join(f'{m}={v:.3f}' for m, v in purified_icir.items())}) "
-                "— weight update frozen until ensemble recovers"
-            )
-            log.warning(all_neg_msg)
-            freeze_reason = all_neg_msg if not freeze_reason else f"{freeze_reason}; {all_neg_msg}"
+        # G3.5: if mean ICIR is strongly negative, the ensemble is anti-predictive.
+        # This catches cases where most models are significantly negative but one is
+        # marginally positive — not caught by all(v <= 0) or by the variance check.
+        if purified_icir:
+            mean_icir = sum(purified_icir.values()) / len(purified_icir)
+            if mean_icir < -_MIN_ABS_MEAN_ICIR:
+                anti_msg = (
+                    f"ensemble anti-predictive: mean ICIR = {mean_icir:.3f} < -{_MIN_ABS_MEAN_ICIR} "
+                    f"({', '.join(f'{m}={v:.3f}' for m, v in purified_icir.items())}) "
+                    "— weight update frozen until ensemble recovers"
+                )
+                log.warning(anti_msg)
+                freeze_reason = anti_msg if not freeze_reason else f"{freeze_reason}; {anti_msg}"
 
         # Fase 1: OBSERVATIONAL - store as suggestion, do NOT auto-apply
         suggestion = {
@@ -852,6 +857,14 @@ def check_and_apply_weights():
                 freeze_reason = (
                     f"IC variance = {ic_variance:.3f} >= {config.AUTO_APPLY_IC_VARIANCE_THRESHOLD}"
                 )
+
+    # G3.5: anti-predictive ensemble guard
+    if freeze_reason is None and purified_icir:
+        mean_icir = sum(purified_icir.values()) / len(purified_icir)
+        if mean_icir < -_MIN_ABS_MEAN_ICIR:
+            freeze_reason = (
+                f"ensemble anti-predictive: mean ICIR = {mean_icir:.3f} < -{_MIN_ABS_MEAN_ICIR}"
+            )
 
     # G4: weight delta
     if freeze_reason is None:

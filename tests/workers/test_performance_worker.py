@@ -901,6 +901,61 @@ class TestCheckAndApplyWeights:
         assert pg.log_weight_update.call_args.kwargs["source"] == "freeze"
         assert "purified_icir missing" in pg.log_weight_update.call_args.kwargs["note"]
 
+    def test_g35_anti_predictive_ensemble_freezes(self):
+        """G3.5: mean(purified_icir) < -0.05 → freeze even when all other guardrails pass."""
+        anti_predictive_suggestion = {
+            **self.SUGGESTION,
+            "purified_icir": {
+                "kimi": -1.0,
+                "qwen3.5:cloud": -0.95,
+                "deepseek-v4-pro:cloud": -1.05,
+                "glm": -1.0,
+            },
+        }
+        redis = self._make_redis(suggestion=anti_predictive_suggestion, vix_cached=18.4)
+        pg = MagicMock()
+        notifier = MagicMock()
+        notifier.send_alert = AsyncMock()
+        notifier.send_message_with_keyboard = AsyncMock(return_value=None)
+        cfg = self._make_config(ic_var_threshold=0.15)  # std ≈ 0.04, passes G3
+
+        with patch("src.workers.performance.RedisStore", return_value=redis), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=pg), \
+             patch("src.workers.performance.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.performance.config", cfg):
+            from src.workers.performance import check_and_apply_weights
+            check_and_apply_weights()
+
+        redis.set_ensemble_weights.assert_not_called()
+        assert pg.log_weight_update.call_args.kwargs["source"] == "freeze"
+        assert "anti-predictive" in pg.log_weight_update.call_args.kwargs["freeze_reason"]
+
+    def test_g35_marginally_positive_mean_does_not_freeze(self):
+        """G3.5: mean ICIR = -0.03 (above threshold) → not frozen by G3.5 alone."""
+        weak_suggestion = {
+            **self.SUGGESTION,
+            "purified_icir": {
+                "kimi": -0.04,
+                "qwen3.5:cloud": -0.02,
+                "deepseek-v4-pro:cloud": -0.03,
+                "glm": -0.04,
+            },  # mean = -0.0325, above -0.05 threshold
+        }
+        redis = self._make_redis(suggestion=weak_suggestion, vix_cached=18.4)
+        pg = MagicMock()
+        notifier = MagicMock()
+        notifier.send_alert = AsyncMock()
+        cfg = self._make_config()
+
+        with patch("src.workers.performance.RedisStore", return_value=redis), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=pg), \
+             patch("src.workers.performance.TelegramNotifier", return_value=notifier), \
+             patch("src.workers.performance.config", cfg):
+            from src.workers.performance import check_and_apply_weights
+            check_and_apply_weights()
+
+        redis.set_ensemble_weights.assert_called_once()
+
 
 class TestBuildSignalDistribution:
     """Tests for _build_signal_distribution function."""

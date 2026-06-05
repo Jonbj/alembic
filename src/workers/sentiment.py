@@ -217,7 +217,7 @@ async def process_news_batch(
     return results
 
 
-@app.task(name="src.workers.sentiment.run_sentiment_worker")
+@app.task(name="src.workers.sentiment.run_sentiment_worker", acks_late=True)
 def run_sentiment_worker() -> dict:
     """
     Celery entry-point for SentimentWorker.
