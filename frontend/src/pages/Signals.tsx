@@ -135,6 +135,7 @@ export default function Signals() {
       )}
 
       {tab === 'signals' && (
+      <>
       <HelpButton title="Signals — Segnali" sections={[
         {
           heading: "Cosa sono i segnali",
@@ -229,6 +230,7 @@ export default function Signals() {
           )}
         </div>
       </div>
+      </>
       )}
     </div>
   )

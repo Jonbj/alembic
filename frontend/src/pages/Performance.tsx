@@ -160,7 +160,7 @@ export default function Performance() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                   <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 10 }} />
                   <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} tickFormatter={v => `$${v}`} />
-                  <Tooltip formatter={(v: number) => [`$${v.toFixed(2)}`]} />
+                  <Tooltip formatter={(v) => [`$${Number(v).toFixed(2)}`]} />
                   <Bar dataKey="value" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>

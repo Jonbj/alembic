@@ -100,7 +100,7 @@ export default function Trades() {
               <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
               <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} />
               <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => `$${v}`} />
-              <Tooltip formatter={(v: number) => [`$${v.toFixed(2)}`, 'Cumulative']} />
+              <Tooltip formatter={(v) => [`$${Number(v).toFixed(2)}`, 'Cumulative']} />
               <Line type="monotone" dataKey="cumulative" stroke={lineColor} dot={false} strokeWidth={2} />
             </LineChart>
           </ResponsiveContainer>
