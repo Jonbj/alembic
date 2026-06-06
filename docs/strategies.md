@@ -4,43 +4,51 @@ This document describes each trading strategy, its signal logic, sizing rules, a
 
 ---
 
-## S1 — Time-Series Momentum
+## S1 — Multi-Lookback Relative Momentum
 
 **Type:** Trend-following long-only
 **File:** `src/strategies/s1/`
-**Allocation:** Configurable via `StrategyRegistry`
+**Allocation:** 50% (see `config/strategies.yaml`)
+**Status:** Live/paper core — OOS Sharpe ~0.51, all gates passed
 
 ### Signal Logic
 
-Implements the Moskowitz, Ooi & Pedersen (2012) time-series momentum signal:
+Computes a multi-lookback, vol-normalised momentum signal with cross-sectional z-scoring:
 
 ```
-signal = sign(total_return_{t-12, t-1}) × annualised_sharpe_ratio
+For each lookback lb in {21, 63, 126, 252} trading days:
+    raw_lb = price / price.shift(lb) - 1          (raw return)
+    norm_lb = raw_lb / rolling_vol(63d)            (vol-normalised)
+
+signal_raw = weighted_sum(norm_lb, weights)         # exponential: longer lb → more weight
+signal = cross_sectional_z_score(signal_raw)        # z-score across all symbols at each date
 ```
 
-- **Lookback:** 12 months, skip the most recent month (avoids short-term reversal)
-- **Entry:** Long when signal > 0, skip when signal ≤ 0 (long-only in this implementation)
-- **EMA filter:** Price must be above EMA20 to enter (confirms trend direction)
+- **Lookbacks:** 1M (21d), 3M (63d), 6M (126d), 12M (252d) — captures momentum at multiple horizons
+- **Weighting:** Exponential (longer lookbacks weighted more: 1×, e×, e²×, e³×, normalised)
+- **Cross-sectional z-score:** Standardises signals across the universe at each date; a symbol ranks relative to peers, not on absolute return level
+- **Long-only:** Negative signals produce zero weight; no shorting
+
+> **Note:** This is _not_ the canonical Moskowitz et al. 12-1 TSMOM. It is best described as "Multi-Lookback Relative Momentum" — the cross-sectional z-score makes it a hybrid time-series/cross-sectional approach.
 
 ### Sizing
 
 `src/strategies/s1/sizing.py`:
-- `base_weight = 1 / N_symbols` (equal-weight across positive signals)
-- `vol_scaled_weight = base_weight × (target_vol / realised_vol)` using EWMA vol (60-day span)
-- Output: dict of `{symbol: target_weight}` passed to PortfolioOrchestrator
+- `raw_weight ∝ signal × (target_vol / realised_vol)` — inverse-vol sizing
+- Normalised to sum ≤ 1.0 across all long positions (sleeve-local weights)
+- Output: `{symbol: sleeve_weight}` — orchestrator scales by `allocation_pct=0.50`
 
 ### Key Parameters (`S1Config`)
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `lookback_months` | 12 | Return lookback window |
-| `skip_months` | 1 | Short-term reversal skip |
-| `ema_period` | 20 | Trend filter EMA days |
-| `target_vol` | 0.15 | Annualised vol target |
+| `lookbacks` | (21, 63, 126, 252) | Lookback windows in trading days |
+| `vol_window_signal` | 63 | Rolling vol for return normalisation |
+| `target_vol` | 0.15 | Annualised vol target for sizing |
 
 ### Integration
 
-S1 exposes `compute_target_weights(prices: pd.DataFrame) → dict[str, float]`. The orchestrator calls this directly when S1 is active.
+S1 exposes `compute_target_weights(prices: pd.DataFrame) → dict[str, float]`. The orchestrator calls this directly when `strategy_id == "S1"` in `_extract_target_weights()`.
 
 ---
 
@@ -48,15 +56,20 @@ S1 exposes `compute_target_weights(prices: pd.DataFrame) → dict[str, float]`. 
 
 **Type:** Mean-reversion, overnight gap
 **File:** `src/strategies/s2/`
-**Allocation:** Configurable via `StrategyRegistry`
+**Allocation:** 0% — **disabled by default**
+**Status:** Research only — OOS Sharpe −0.55, all backtest gates (1–4) failed
 
-### Signal Logic
+> ⚠️ S2 is **not active** in paper or live trading. It is registered in `StrategyRegistry` with `enabled=False, allocation_pct=0.00`. To activate it, you must manually edit `config/strategies.yaml` — doing so is explicitly flagged as requiring research milestone gates to pass first.
 
-Exploits the **volatility risk premium**: implied vol (VIX) tends to exceed realised vol, meaning the market over-pays for fear. When VRP (VIX / realised_vol_20d - 1) is high, mean-reversion is more likely.
+### Economic Rationale
 
-- **VRP threshold:** `vrp > 0.20` (20% implied premium over realised)
-- **Entry:** At market close (hold overnight, exit at next open)
-- **Direction:** Long SPY when VRP is elevated (expect overnight gap up)
+Implied vol (VIX) systematically exceeds realised vol by ~3–4 vol points annualised. Selling that premium (via short puts or long SPY overnight) captures a structural income edge.
+
+### Current Implementation (Proxy)
+
+The current `S2ProxyStrategy` is an equity proxy — it does **not** use options. It goes long SPY at close when VRP (VIX / realised_vol_20d - 1) exceeds a threshold and exits at the next open.
+
+This is a simplified stand-in. The intended S2 design (cash-secured short put on SPY at delta −0.20, DTE 30–45d) requires options data, greeks pricing, margin modeling, and an IBKR adapter (Phase D).
 
 ### Parameters
 
@@ -68,7 +81,7 @@ Exploits the **volatility risk premium**: implied vol (VIX) tends to exceed real
 
 ### Integration
 
-S2 runs as a callable `(ts, data_replay, portfolio, market) → list[Order]`. The orchestrator converts orders to implied weights for merging with weight-based strategies.
+S2 runs as `(ts, data_replay, portfolio, market) → list[Order]`. The orchestrator converts orders to implied weights. Currently inactive — all cycles skip S2 since it is disabled in `config/strategies.yaml`.
 
 ---
 
@@ -155,22 +168,34 @@ Ranks all universe securities by 12-1 month return. Goes long top quintile (Q5),
 
 ## Portfolio Orchestration
 
-All active strategies flow through the `PortfolioOrchestrator` using a **weight-then-order** architecture:
+All active strategies flow through the `PortfolioOrchestrator` using a **weight-then-order** architecture.
 
-```
-S1.compute_target_weights(prices)    → {AAPL: 0.05, NVDA: 0.03, ...}
-S2(ts, data_replay, ...)            → orders → implied weights
-S4.compute_target_weights(signals)   → {AAPL: 0.02, MSFT: 0.01, ...}
+### Sleeve-Local Allocation
+
+Strategies produce **sleeve-local weights** — fractions of their own capital sleeve, not the whole portfolio. The orchestrator scales each by `allocation_pct` and sums to get portfolio-level targets:
+
+```python
+# Current active allocations (from config/strategies.yaml):
+#   S1: allocation_pct=0.50  (50% of portfolio)
+#   S2: disabled             (0% — OOS gates not passed)
+#   S4: allocation_pct=0.10  (10% of portfolio, paper overlay)
+# Remaining 40% = implicit cash residual
+
+S1.compute_target_weights(prices)   → {AAPL: 0.40, NVDA: 0.20, ...}  # sleeve-local
+S4.compute_target_weights(signals)  → {MSFT: 0.30, TSLA: 0.20, ...}  # sleeve-local
 
 merged = {}
-for strategy, alloc_pct in [(S1, 0.50), (S2, 0.30), (S4, 0.20)]:
+for strategy, alloc_pct in [(S1, 0.50), (S4, 0.10)]:
     for sym, wt in strategy_weights.items():
         merged[sym] = merged.get(sym, 0) + wt * alloc_pct
+# → AAPL: 0.40×0.50 = 0.20 (20% of portfolio)
+# → NVDA: 0.20×0.50 = 0.10
+# → MSFT: 0.30×0.10 = 0.03
 
-delta_orders = [BUY/SELL target_qty - current_qty for each sym in merged]
+delta_orders = [BUY/SELL (target_qty - current_qty) for sym in merged]
 ```
 
-This eliminates the double-counting problem where independent strategies each submit full-portfolio orders that would be additively merged.
+Allocation config is in `config/strategies.yaml` — that file is the **single source of truth**. `StrategyRegistry` reads it at startup with startup validation (sum ≤ 1.0, S4 ≤ 10%, S2 enabled requires explicit override).
 
 ### Constraint Enforcement
 

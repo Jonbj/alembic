@@ -2,6 +2,20 @@
 
 Specifiche dettagliate delle 4 strategie. Ogni strategia ha: razionale economico, letteratura di riferimento, definizione precisa del signal, sizing, edge atteso, modalità di degradazione, parametri.
 
+> **Stato deployment attuale (2026-06-06):**
+> Le allocazioni in questo documento (`S1=40%, S2=30%, S4=10%`) rappresentano il disegno target originale.
+> Le allocazioni **operative** sono in `config/strategies.yaml` e differiscono:
+>
+> | Strategia | Design doc | Config operativo | Motivo |
+> |-----------|-----------|-----------------|--------|
+> | S1 | 40% | **50%** | Unica strategia con gate passati |
+> | S2 | 30% | **0% — disabilitata** | OOS Sharpe −0.55; tutti i gate (1–4) falliti |
+> | S3 | 0% | 0% — disabilitata | Gate falliti, possibile lookahead nel sizing |
+> | S4 | 10% | **10% — paper only** | Nessun gate report dedicato; cap al 10% |
+>
+> Per modificare le allocazioni: editare `config/strategies.yaml`.
+> Il registry (`src/strategies/registry.py`) legge da quel file all'avvio.
+
 ---
 
 ## S1 — Time-Series Momentum Multi-Asset (CORE, 40%)

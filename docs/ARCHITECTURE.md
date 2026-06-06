@@ -5,9 +5,9 @@
 # Alembic — Technical Architecture
 
 **Technical Architecture Document**
-**Version:** 5.0.0
+**Version:** 6.0.0
 **Date:** 2026-06-06
-**Status:** Phase A Analytics Complete — Trade Observability + Multi-Dimensional P&L Analytics Live
+**Status:** Phase A + Portfolio Governance — Sleeve-Local Allocation, Single Engine, Strategy Config
 
 ---
 
@@ -131,24 +131,35 @@ Regime multipliers applied to position sizes:
 | Component | File | Role |
 |-----------|------|------|
 | `PortfolioOrchestrator` | `src/portfolio/orchestrator.py` | Weight-then-order multi-strategy cycle |
-| `StrategyRegistry` | `src/strategies/registry.py` | Active strategy entries + allocation percentages |
+| `StrategyRegistry` | `src/strategies/registry.py` | Active strategy entries; reads `config/strategies.yaml` |
 | `ConstraintEnforcer` | `src/portfolio/constraints.py` | 5-pass risk constraint enforcement |
 | `PortfolioVolTargeter` | `src/portfolio/vol_targeting.py` | EWMA vol estimation + BUY order scaling |
 | `PortfolioRiskMonitor` | `src/portfolio/risk_monitor.py` | Daily HHI, correlation, drawdown alerts |
 | `DecayMonitor` | `src/portfolio/decay_monitor.py` | Monthly actual vs backtest baseline |
 | `run_portfolio_cycle` | `src/workers/portfolio_scheduler.py` | Celery task: fetch prices → orchestrate → submit to Alpaca |
 
-**Weight-then-order design rationale:**
-Each strategy outputs target weights (fractions of NAV). These are merged with `merged[sym] += weight × alloc_pct`. Delta orders are then computed once against the current portfolio. This prevents the double-counting bug where independent strategies each generate full-portfolio orders that are then naively merged.
+**Sleeve-local allocation contract:**
+Strategies produce sleeve-local weights: fractions of their own sleeve, not the whole portfolio. The orchestrator scales each by `allocation_pct` before summing: `merged[sym] += sleeve_weight × alloc_pct`. This means `allocation_pct` is the sole lever for capital governance — halving S4's `allocation_pct` halves its real capital regardless of what signals it produces.
+
+**Strategy config source of truth:**
+`config/strategies.yaml` — allocations, enabled flags, mode labels. `StrategyRegistry` reads this at startup. Startup validation warns on: total enabled allocation > 1.0, S4 > 10%, S2 enabled without milestone gates.
+
+**Execution engine flag:**
+`config/trading.yaml` → `execution.engine` controls which worker sends orders:
+- `portfolio` (default): only `portfolio-cycle` submits orders; `run-execution` returns early
+- `legacy_sentiment`: only `run-execution` submits orders; `portfolio-cycle` returns early
+- `disabled`: neither worker submits orders
 
 ### 2.5 Strategies
 
-| ID | Name | Logic |
-|----|------|-------|
-| **S1** | Time-Series Momentum | 12-1 month total return signal (Moskowitz et al.), EMA filter, vol-scaled sizing |
-| **S2** | Volatility Risk Premium | Overnight gap on low-VRP days (implied > realised vol → mean-reversion) |
-| **S3** | Cross-Sectional Momentum | R&D sleeve: cross-sectional rank of 1-12 month returns |
-| **S4** | News-Driven Tactical | LLM ensemble sentiment → BUY gate: score > 0.3 AND price > EMA20 |
+| ID | Name | Allocation | Status | Logic |
+|----|------|-----------|--------|-------|
+| **S1** | Multi-Lookback Relative Momentum | 50% | Live/paper core | Multi-lookback (1M/3M/6M/12M) vol-normalised returns, cross-sectional z-score across universe; inverse-vol sizing |
+| **S2** | Volatility Risk Premium | 0% | **Disabled** (research) | Proxy: overnight gap on low-VRP days. OOS Sharpe −0.55; all gates failed. Needs options infrastructure for v2 |
+| **S3** | Cross-Sectional Residual Momentum | 0% | Research | Cross-sectional rank of residual 1-12M returns; possible sizing lookahead; gate 3/5 failed |
+| **S4** | News-Driven Tactical | 10% | Paper overlay | LLM ensemble sentiment → BUY gate: score > 0.3 AND price > EMA20; capped at 10% until dedicated gate report |
+
+Allocation and enabled/disabled state are configured in `config/strategies.yaml`. See that file for authoritative values.
 
 ### 2.6 Execution Engine
 
@@ -161,13 +172,14 @@ Each strategy outputs target weights (fractions of NAV). These are merged with `
 | `_regime_label` | `src/workers/execution.py` | Convert numeric `regime_mult` to string label for `TradeContext` |
 
 Execution checklist (per tick):
-1. Kill-switch check (abort if active)
-2. EMA20 cache refresh (yfinance, IEX feed on paper tier)
-3. Daily drawdown cap check (≥10% → set kill-switch)
-4. Per-symbol: freshness check → stop-loss → BUY gate → position size × regime multiplier
-5. Write `execution_decisions` row for every symbol that clears `ENTRY_THRESHOLD`
-6. `open_trade()` on BUY fill; `close_trade()` on stop-loss (returns trade id)
-7. `_maybe_postmortem()` after stop-loss close if loss ≥ 3% (or ≥ 2% with low confidence / high std)
+1. Engine guard: check `execution.engine` in `trading.yaml`; return early unless `engine=legacy_sentiment`
+2. Kill-switch check (abort if active)
+3. EMA20 cache refresh (yfinance, IEX feed on paper tier)
+4. Daily drawdown cap check (≥ `risk.portfolio_drawdown` from `trading.yaml`, default 5% → set kill-switch)
+5. Per-symbol: freshness check → stop-loss → BUY gate → position size × regime multiplier
+6. Write `execution_decisions` row for every symbol that clears `ENTRY_THRESHOLD`
+7. `open_trade()` on BUY fill; `close_trade()` on stop-loss (returns trade id)
+8. `_maybe_postmortem()` after stop-loss close if loss ≥ 3% (or ≥ 2% with low confidence / high std)
 
 ### 2.7 Performance & Monitoring
 
@@ -267,7 +279,7 @@ SentimentWorker (BLPOP news:queue)
     └── INSERT sentiment_signals (PostgreSQL, permanent)
     │
     ▼
-ExecutionWorker (every 15 min)
+ExecutionWorker (every 15 min, active only when execution.engine=legacy_sentiment)
     ├── GET killswitch_active
     ├── GET regime_multiplier
     ├── For each symbol in watchlist:
@@ -281,14 +293,15 @@ ExecutionWorker (every 15 min)
     └── Alpaca SDK market order
     │
     ▼
-PortfolioOrchestrator (hourly)
-    ├── S1.compute_target_weights(prices)
-    ├── S2(ts, data_replay, portfolio, market) → orders → implied weights
-    ├── S4.compute_target_weights(signals, as_of=ts)
-    ├── merge: merged[sym] += wt × alloc_pct
+PortfolioOrchestrator (hourly, active only when execution.engine=portfolio)
+    ├── StrategyRegistry → active entries from config/strategies.yaml
+    │   currently: S1 (alloc=0.50) + S4 (alloc=0.10); S2 disabled
+    ├── S1.compute_target_weights(prices) → sleeve-local weights
+    ├── S4.compute_target_weights(signals, as_of=ts) → sleeve-local weights
+    ├── merge: merged[sym] += sleeve_weight × alloc_pct  (weighted sum, NOT average)
     ├── delta orders: target_qty - current_qty
     ├── ConstraintEnforcer (5 passes)
-    ├── PortfolioVolTargeter (scale to 10% annual vol)
+    ├── PortfolioVolTargeter (instantiated but inactive — strategy_returns not wired)
     └── Alpaca SDK market orders
 ```
 
@@ -398,8 +411,8 @@ CREATE TABLE decay_reports (
 | `run-marketaux-ingestion` | */15 14-21 Mon-Fri | MarketAux → news queue |
 | `run-alpaca-ingestion` | */15 14-21 Mon-Fri | Alpaca/Benzinga → news queue |
 | `sentiment-worker` | */15 14-21 Mon-Fri | news queue → LLM → Redis/PG |
-| `run-execution` | */15 14-21 Mon-Fri | signals → Alpaca orders |
-| `portfolio-cycle` | 0 14-21 Mon-Fri | Weight-then-order multi-strategy |
+| `run-execution` | */15 14-21 Mon-Fri | signals → Alpaca orders (active only when `execution.engine=legacy_sentiment`) |
+| `portfolio-cycle` | 0 14-21 Mon-Fri | Weight-then-order multi-strategy (active only when `execution.engine=portfolio`) |
 | `regime-detector` | 7:00 Mon-Fri | FRED/yfinance → LLM → Redis |
 | `forward-return-worker` | 22:00 daily | Populate forward returns from yfinance |
 | `risk-monitor` | 22:30 daily | HHI + correlation + drawdown |
@@ -430,13 +443,16 @@ CREATE TABLE decay_reports (
 
 ## 8. Known Gaps (Pre-Live)
 
-See `README.md` → *Pre-Live Blockers* section for the authoritative list of critical bugs
-(pool leak, weights never read from Redis, LOO ICIR data source, duplicate BUY orders).
+See `README.md` → *Pre-Live Blockers* section for the authoritative list of critical bugs.
 
-### Phase A Known Limitations
+### Phase A + Governance Known Limitations
 
 | Gap | Description | Planned |
 |-----|-------------|---------|
 | NULL P&L on notional orders | `qty` can be NULL at stop-loss close if fill hasn't been reconciled; `reconcile_trade_fills` window is 24h | Phase B: use Alpaca position qty at close |
-| Strategies data placeholder | `GET /api/strategies` equity curves are generated with `random.gauss()` at import time; gate `passed` values don't derive from actual metrics | Phase C / separate sprint |
-| Analytics tab empty on fresh deploy | All analytics charts show "No data yet" until closed trades accumulate in the `trades` table | Operational — populates naturally |
+| Vol targeting not active | `PortfolioVolTargeter` is instantiated in `portfolio_scheduler.py` but `strategy_returns` is not passed to `run_cycle()` — vol scaling branch never executes | Phase B/C: wire strategy returns from DB |
+| Strategies API placeholder | `GET /api/strategies` equity curves use `random.gauss()`; gate `passed` values are not from actual metrics | Phase C |
+| Analytics tab empty on fresh deploy | All analytics charts show "No data yet" until closed trades accumulate in the `trades` table | Operational |
+| S4 no dedicated gate report | `reports/s4_backtest/` does not exist; S4 allocation capped at 10% until this is produced | Phase B/C research |
+| S2 proxy vs real options | Current S2 is an equity proxy (overnight gap); actual cash-secured short put needs options chain data + IBKR adapter | Phase D |
+| ConstraintEnforcer loses sleeve provenance | Final merged orders have `strategy_id="merged"`; per-sleeve exposure constraints cannot be enforced | Future |
