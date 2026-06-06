@@ -1,4 +1,29 @@
-"""SentimentWorker - Celery task for LLM ensemble sentiment analysis."""
+"""SentimentWorker — Celery task for LLM ensemble sentiment analysis.
+
+Consumes news items from the Redis queue (news:queue) and produces sentiment
+signals written to both Redis (TTL 4 h) and PostgreSQL for audit.
+
+Pipeline per batch (up to 10 items pulled atomically via LMOVE):
+  1. Crash recovery — re-queue any items stranded in news:processing from a
+     previous crash (LMOVE is atomic; items are never lost, only delayed).
+  2. Pre-filter — skip near-neutral MarketAux articles
+     (|marketaux_sentiment| < 0.20) to save 60-80% of token spend.
+  3. LLM ensemble — query Kimi K2.6, Qwen3.5, DeepSeek-V4-Pro, GLM-5.1 in
+     parallel using DK-CoT prompting; aggregate with LOO ICIR weights if
+     available, else confidence-weighted mean.
+  4. Divergence fallback — if ensemble std > 0.30 (models disagree strongly)
+     or budget is exhausted, fall back to FinBERT (local, zero cost).
+  5. Store writes — signal → PostgreSQL (audit) and Redis (live cache);
+     per-model LLM responses logged for LOO weight recalculation.
+  6. Dead-letter — unparseable queue items moved to news:dead-letter to
+     prevent infinite retry loops.
+
+Exported public API (used by backtest CLI):
+  run_inference()        Pure inference: no store writes, reusable in backtest.
+  process_news_item()    Single item: inference + store writes.
+  process_news_batch()   Batch: runs process_news_item() concurrently.
+  run_sentiment_worker() Celery task entry point.
+"""
 
 import asyncio
 import logging

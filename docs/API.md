@@ -1,7 +1,7 @@
 # API Reference — Alembic LLM Trading System
 
 **FastAPI REST API**
-**Version:** 4.0.0
+**Version:** 5.0.0
 **Updated:** 2026-06-06
 
 ---
@@ -400,6 +400,90 @@ Full trade row joined with signal fields. Used to surface postmortem diagnosis d
 
 ---
 
+## Feedback Loop Endpoint (Phase B)
+
+Requires `X-API-Key` header.
+
+### `GET /api/feedback/status`
+
+Returns the current loss-feedback adjustments active in Redis. If no adjustment is active, returns baseline values.
+
+**Response 200:**
+```json
+{
+  "entry_threshold": 0.35,
+  "entry_threshold_baseline": 0.30,
+  "regime_scale": 0.80,
+  "adjustment_active": true,
+  "last_adjustment_ts": "2026-06-06T15:00:00Z",
+  "last_reason": "3 consecutive losses",
+  "consecutive_losses": 3,
+  "rolling_net_pnl": -42.50
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `entry_threshold` | float | Effective entry threshold (baseline or Redis override) |
+| `entry_threshold_baseline` | float | Module constant baseline (default 0.30) |
+| `regime_scale` | float | Regime multiplier scaling factor (1.0 = no adjustment) |
+| `adjustment_active` | bool | True if any Redis override is currently set |
+| `last_adjustment_ts` | string\|null | ISO-8601 timestamp of last adjustment |
+| `last_reason` | string\|null | Human-readable trigger description |
+| `consecutive_losses` | int\|null | Loss streak that triggered the adjustment |
+| `rolling_net_pnl` | float\|null | Rolling net P&L (last N trades) at trigger time |
+
+When `adjustment_active = false` all values reflect the static module defaults.
+
+---
+
+## Counterfactual Analytics Endpoint (Phase C)
+
+Requires `X-API-Key` header.
+
+### `GET /api/trades/analytics/counterfactual`
+
+Aggregate opportunity-cost statistics for skipped signals. Returns one row per skip decision type with 1-hour forward return stats computed nightly.
+
+**Query parameters:** `days` (int, default 7, range 1–90)
+
+**Response 200:**
+```json
+[
+  {
+    "decision": "SKIP_EMA",
+    "total_skips": 42,
+    "computed": 38,
+    "avg_return": 0.0031,
+    "pct_profitable": 0.526,
+    "sum_positive_returns": 0.142
+  },
+  {
+    "decision": "SKIP_CAP",
+    "total_skips": 15,
+    "computed": 15,
+    "avg_return": -0.0008,
+    "pct_profitable": 0.467,
+    "sum_positive_returns": 0.038
+  }
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `decision` | string | `SKIP_EMA` or `SKIP_CAP` |
+| `total_skips` | int | Total skipped signals in the window |
+| `computed` | int | Skips with a 1h return computed (Alpaca bars available) |
+| `avg_return` | float | Mean 1-hour return if entry had been taken |
+| `pct_profitable` | float | Fraction of skips where 1h return > 0 |
+| `sum_positive_returns` | float | Sum of all positive 1h returns (upside missed) |
+
+`SKIP_POSITION` (already in position) is excluded — it is not a missed opportunity.
+
+Returns `[]` until the first nightly `counterfactual-worker` run at 22:45 UTC.
+
+---
+
 ## Decisions Endpoint
 
 Requires `X-API-Key` header.
@@ -455,6 +539,7 @@ Returns 503 if any dependency is unreachable.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 5.0.0 | 2026-06-06 | Phase B: GET /api/feedback/status; Phase C: GET /api/trades/analytics/counterfactual |
 | 4.0.0 | 2026-06-06 | Phase A analytics: trades, decisions, analytics/by-symbol, analytics/by-dimension, postmortem endpoints; kill switch GET+DELETE; trades/decisions require auth |
 | 3.0.0 | 2026-06-03 | Full English rewrite; Phase G portfolio, risk, decay endpoints; new admin/llm-models, config endpoints |
 | 2.0.0 | 2026-05-12 | Added GET /api/weights/suggestion; updated POST /api/weights/approve |

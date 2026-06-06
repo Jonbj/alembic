@@ -1,7 +1,7 @@
 # Alembic — Guida Utente
 
 > **Ultimo aggiornamento**: Giugno 2026  
-> **Versione**: v2 (Fase D in corso)
+> **Versione**: v3 (Phase A/B/C — Trade Analytics, Feedback Loop, Counterfactual)
 
 ---
 
@@ -48,34 +48,43 @@ Il sistema è attualmente in **modalità backtest/paper**. Nessun capitale reale
 
 ```
 Mattina (9:00)
-├── Dai un'occhiata alla pagina Overview
-│   └── Controlla il P&L del mese e le posizioni aperte
+├── Overview
+│   └── Controlla P&L del mese e posizioni aperte
 │
-├── Vai su Performance
-│   └── Verifica l'andamento dell'equity negli ultimi mesi
+├── Auto-Improve → card Phase B
+│   └── Il feedback loop è attivo? (threshold > 0.30 o scale < 1.0×)
+│   └── Se attivo da >24h → vai su Signals e verifica confidence
 │
-├── Controlla Signals
+├── Signals
 │   └── Ci sono segnali estremi (>0.6 o <-0.6)?
 │   └── Il modello è concorde (bassa ensemble_std)?
 │
 Giorno per giorno
-├── Se qualcosa sembra anomalo → Pagina LLM → tab Feedback
-│   └── Controlla se un modello sta "impazzendo" (troppi fallback)
+├── Trades → tab Analytics (dopo ≥20 trade nel periodo)
+│   └── Quale simbolo/ora/score bucket sta trainando o drenando il P&L?
+│   └── Win rate in calo? → controlla segnale per quei ticker
 │
-├── Se i pesi dell'ensemble sono cambiati → Pagina LLM → tab Pesi
-│   └── Approva o rifiuta il suggerimento
+├── Se anomalie → LLM → tab Feedback
+│   └── Controlla se un modello sta generando troppi fallback
 │
-├── Se vuoi capire perché un segnale → Pagina News
+├── LLM → tab Pesi (se cambiati)
+│   └── Approva o rifiuta il suggerimento di ribilanciamento
+│
+├── Se vuoi capire un segnale → News
 │   └── Filtra per ticker e vedi le notizie che l'hanno generato
 │
 Settimanalmente
-├── Pagina Backtest
-│   └── Controlla IC, ICIR, hit rate — la qualità predittiva si mantiene?
+├── Auto-Improve → tabella Phase C
+│   └── SKIP_EMA ha avg_return positivo su ≥30 obs? Valuta abbassare il filtro EMA
+│   └── SKIP_CAP con upside missed alto? Valuta alzare il cap di allocazione
 │
-├── Pagina Strategies
+├── Backtest
+│   └── IC, ICIR, hit rate — la qualità predittiva si mantiene?
+│
+├── Strategies
 │   └── I gate sono ancora tutti PASS? La sensitivity è stabile?
 │
-├── Pagina Admin
+├── Admin
 │   └── Verifica che il sistema sia in modalità corretta
 ```
 
@@ -177,6 +186,79 @@ La dashboard è accessibile all'indirizzo **http://192.168.178.144:3000** ed è 
 | **Submitted** | Data/ora di sottomissione |
 
 **Nota**: In modalità `backtest` non ci sono posizioni reali. Le posizioni appaiono solo in modalità `paper` o superiore.
+
+---
+
+### 3.3b Trades 💰
+
+**A cosa serve**: Analisi completa dei trade chiusi e valutazione multidimensionale dell'edge del sistema. È la principale pagina di diagnosi post-trade.
+
+**Due tab:**
+
+**Tab Trades**
+
+Storico di tutti i trade con filtri per simbolo e status (open/closed/all). Le metriche sommario in cima mostrano:
+
+| Metrica | Interpretazione |
+|---------|----------------|
+| **Total Trades** | Numero chiusure nel periodo (7/30/90 gg) |
+| **Win Rate** | Target realistico S4: >52%. Sotto il 48% segnala deterioramento del segnale |
+| **Avg Net P&L** | Media per trade dopo slippage stimato. Positivo ma vicino a zero indica edge sottile |
+| **Total Net P&L** | P&L cumulativo. Verde = sistema in profitto netto |
+
+Il **grafico cumulativo** mostra l'equity curve del sistema. Una slope positiva costante indica edge stabile; un drawdown accentuato attiva automaticamente Phase B (feedback loop).
+
+Clicca una riga per espandere i dettagli: signal_id, order ID, notional, slippage stimato, gross P&L, e **badge postmortem** se disponibile.
+
+**Badge postmortem**: diagnosi automatica della causa di perdita — `ADVERSE_MOVE`, `HIGH_SPREAD`, `STALENESS`, `REGIME_SHIFT`. Usato per classificare sistematicamente le perdite senza revisione manuale.
+
+**Tab Analytics (Phase A)**
+
+Cinque grafici che rispondo alla domanda: *dove guadagna e perde il sistema?*
+
+| Grafico | Come leggerlo | Azione se negativo |
+|---------|--------------|-------------------|
+| **Per Simbolo** | P&L totale per ticker | Rimuovere i ticker sistematicamente negativi dalla watchlist |
+| **Per Regime** | P&L medio per regime_mult bucket | Se perde solo in regime basso, il filtro funziona — non intervenire |
+| **Per Ora** | P&L medio per ora di apertura (EST) | Aggiungere filtro orario per le fasce negative |
+| **Per Score LLM** | P&L per bucket di score | Se bucket alti non battono quelli bassi, il segnale non ha edge discriminante |
+| **Per Durata** | P&L per durata di detenzione | Trade <15min soffrono di spread; >2h il segnale è stantio |
+
+Cambia il periodo (7/30/90 gg) per bilanciare freschezza e volume statistico. Con meno di 30 trade i grafici hanno bassa significatività.
+
+---
+
+### 3.3c Auto-Improve 🔧
+
+**A cosa serve**: Monitorare il sistema di auto-correzione in tre fasi. Nessun intervento manuale richiesto in condizioni normali — il sistema si aggiusta da solo.
+
+**Card: Phase B — Loss Feedback Loop**
+
+Il sistema controlla le perdite ogni 30 minuti durante gli orari di mercato e alza le soglie di ingresso automaticamente.
+
+| Stato | Significato | Azione |
+|-------|------------|--------|
+| Entry Threshold = 0.30, Scale = 1.0× | Baseline, nessuna perdita recente | Nessuna |
+| Threshold > 0.30 | Feedback attivo dopo perdite consecutive | Monitorare — normale in mercati difficili |
+| Scale < 1.0× | Sizing ridotto — protezione in contesto avverso | Monitorare |
+| Attivo da >24h senza recovery | Mercato persistentemente avverso | Verificare Signals, Overview, considerare Halted |
+
+**Trigger** (logica OR): 3 perdite consecutive, oppure P&L rolling negativo sugli ultimi 10 trade.
+**Recovery**: 5 vincite consecutive riportano ai valori baseline.
+**TTL**: ogni aggiustamento scade automaticamente dopo 48 ore.
+
+**Card: Phase C — Opportunity Cost (tabella)**
+
+Analisi retrospettiva dei trade filtrati. Il `counterfactual-worker` calcola nightly (22:45 UTC) il ritorno a 1h per ogni segnale saltato.
+
+| Tipo | Causa del filtro | Quando preoccuparsi |
+|------|-----------------|---------------------|
+| **SKIP_EMA** | Prezzo sotto EMA20 al momento del segnale | avg_return >+0.5% e % profitable >55% su ≥30 obs |
+| **SKIP_CAP** | Limite di allocazione per ciclo raggiunto | upside missed alto e ricorrente |
+
+**Regola decisionale**: agisci su un filtro solo se *avg_return > +0.5%* e *% profitable > 55%* su almeno 30 osservazioni. Sotto questa soglia i dati sono statisticamente rumorosi.
+
+I dati del giorno corrente appariranno il giorno successivo. La tabella è vuota nei primi giorni di paper trading.
 
 ---
 

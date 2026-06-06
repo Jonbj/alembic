@@ -81,7 +81,7 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
                                     │
                                     ▼ (daily + weekly async)
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║  PHASE 5 — PERFORMANCE & WEIGHT OPTIMISATION LOOP                          ║
+║  PHASE 5 — PERFORMANCE, FEEDBACK & WEIGHT OPTIMISATION                      ║
 ║                                                                              ║
 ║  Daily (03:00 UTC):  PerformanceWorker                                       ║
 ║    • Composite IC B4 + Newey-West HAC → IC report                           ║
@@ -93,6 +93,22 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 ║    • Auto-apply if all guardrails pass                                       ║
 ║    • Otherwise → Telegram inline keyboard: [✅ Approve] [❌ Reject]         ║
 ║      Human approves → weights written to Redis → applied next tick          ║
+║                                                                              ║
+║  Phase A — Trade Analytics Engine (always on)                                ║
+║    • Multi-dimensional P&L breakdown: by symbol, regime, hour, score, hold  ║
+║    • Postmortem diagnosis per losing trade                                   ║
+║    • Surfaces via /api/trades/analytics/* endpoints and Trades → Analytics  ║
+║                                                                              ║
+║  Phase B — Loss Feedback Loop (every 30 min, market hours)                  ║
+║    • Detects 3 consecutive losses or negative rolling P&L (last 10 trades)  ║
+║    • Raises ENTRY_THRESHOLD (up to 0.60) and reduces regime_scale (→ 0.80×) ║
+║    • Redis TTL 48h; recovery after 5 consecutive wins                        ║
+║    • Surfaces via /api/feedback/status and Auto-Improve page                 ║
+║                                                                              ║
+║  Phase C — Counterfactual / Opportunity Cost (nightly 22:45 UTC)            ║
+║    • Computes 1h forward return for each SKIP_EMA / SKIP_CAP decision        ║
+║    • Answers: "was the filter correct, or did we miss real alpha?"           ║
+║    • Surfaces via /api/trades/analytics/counterfactual and Auto-Improve      ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -424,6 +440,8 @@ weight_cap: 0.70
 | `performance-weekly` | Weekly | Mon 04:00 | LOO ICIR → weight suggestion |
 | `regime-detector` | Daily | Mon–Fri 07:00 | Macro → LLM pair → regime → Redis |
 | `portfolio-cycle` | Hourly | Mon–Fri 14:00–21:00 | Multi-strategy weight-then-order cycle |
+| `loss-feedback-check` | Every 30 min | Mon–Fri 14:00–21:00 | Phase B: detect losses → adjust threshold/scale in Redis |
+| `counterfactual-worker` | Daily | 22:45 | Phase C: compute 1h forward returns for SKIP_EMA/SKIP_CAP |
 | `risk-monitor` | Daily | 22:30 | Per-strategy + combined risk metrics |
 | `decay-monitor` | Monthly | 1st 23:00 | Actual vs backtest baseline decay check |
 | `poll-telegram-updates` | Every 5s | Always | Process approve/reject taps |
