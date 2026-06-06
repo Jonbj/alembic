@@ -1098,6 +1098,8 @@ class PostgreSQLStore:
                     "UPDATE trades SET postmortem_diagnosis = %s WHERE id = %s",
                     (diagnosis, trade_id),
                 )
+                if cur.rowcount == 0:
+                    log.warning("write_postmortem: no trade row found for id=%s", trade_id)
             conn.commit()
         except Exception:
             conn.rollback()
