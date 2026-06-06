@@ -1,0 +1,36 @@
+# Strategy allocation configuration — source of truth for StrategyRegistry.
+#
+# Semantics: allocation_pct is the fraction of total portfolio capital assigned
+# to this strategy's sleeve. Weights produced by compute_target_weights() are
+# sleeve-local (sum ≤ 1.0 within the sleeve); the orchestrator scales them by
+# allocation_pct to obtain portfolio-level contributions.
+#
+# Invariants enforced at startup:
+#   - sum(enabled allocation_pct) <= 1.0
+#   - S4 allocation_pct <= 0.10 (research overlay, no dedicated gate report yet)
+#   - S2 enabled requires explicit override (OOS gates not passed)
+
+strategies:
+  S1:
+    enabled: true
+    allocation_pct: 0.50
+    mode: live
+    note: only validated core sleeve (OOS Sharpe ~0.51, all gates passed)
+
+  S2:
+    enabled: false
+    allocation_pct: 0.00
+    mode: research
+    note: proxy implementation; OOS Sharpe -0.55, all gates failed — do not promote to live
+
+  S3:
+    enabled: false
+    allocation_pct: 0.00
+    mode: research
+    note: excluded from live; gate 3/5 failed, possible sizing lookahead
+
+  S4:
+    enabled: true
+    allocation_pct: 0.10
+    mode: paper
+    note: tactical overlay; capped at 10% until dedicated gate report passes

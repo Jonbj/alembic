@@ -1,8 +1,8 @@
 """PortfolioOrchestrator: run a full portfolio cycle across all active strategies.
 
 Each cycle:
-    1. Collects target weights from each strategy, scaled by allocation_pct.
-    2. Merges target weights across strategies (weighted average).
+    1. Collects sleeve-local target weights from each strategy.
+    2. Merges weights as weighted sum (each multiplied by allocation_pct).
     3. Computes delta orders (BUY/SELL) from current portfolio to merged target.
     4. Applies ConstraintEnforcer.
     5. Optionally applies PortfolioVolTargeter when strategy_returns provided.
@@ -45,8 +45,8 @@ class CycleResult:
 class PortfolioOrchestrator:
     """Orchestrate multi-strategy order generation with constraint enforcement.
 
-    Uses weight-then-order approach: strategies output target weights,
-    which are merged by allocation_pct before computing a single set of delta orders.
+    Uses weight-then-order approach: strategies output sleeve-local target weights,
+    which are scaled by allocation_pct and summed before computing a single set of delta orders.
 
     Args:
         registry:            StrategyRegistry providing active entries + allocations.
@@ -78,8 +78,8 @@ class PortfolioOrchestrator:
     ) -> CycleResult:
         """Execute one portfolio cycle.
 
-        The key insight: each strategy produces target *weights* (not orders).
-        We compute allocation-weighted-average weights across strategies, then compute delta orders ONCE
+        The key insight: each strategy produces sleeve-local target *weights* (not orders).
+        We compute allocation-weighted-sum weights across strategies, then compute delta orders ONCE
         from the combined target vs current portfolio.
 
         Args:
@@ -100,7 +100,6 @@ class PortfolioOrchestrator:
         strategies_run: list[str] = []
         orders_per_strategy: dict[str, int] = {}
         merged_weights: dict[str, float] = {}
-        _weight_alloc_sum: dict[str, float] = {}
 
         nav = self._compute_nav(portfolio, market)
 
@@ -124,14 +123,14 @@ class PortfolioOrchestrator:
                 strategies_run.append(entry.strategy_id)
                 orders_per_strategy[entry.strategy_id] = len(tw)
 
-                # Merge: allocation-weighted average (NOT sum).
-                # Summing was the root cause of Bug 4 - two strategies each
-                # targeting AAPL at 50% would produce 100%+ allocation instead
-                # of the correct ~50% (weighted by each strategy's allocation).
+                # Merge: weighted sum (sleeve-local semantics).
+                # Strategies produce sleeve-local weights (fraction of their own sleeve).
+                # Multiplying by allocation_pct gives portfolio-level contribution.
+                # Two strategies both holding a symbol correctly ADD their contributions —
+                # that symbol genuinely receives combined capital from both sleeves.
                 alloc = entry.allocation_pct
                 for sym, wt in tw.items():
                     merged_weights[sym] = merged_weights.get(sym, 0.0) + wt * alloc
-                    _weight_alloc_sum[sym] = _weight_alloc_sum.get(sym, 0.0) + alloc
 
             except Exception as exc:
                 log.error(
@@ -140,14 +139,6 @@ class PortfolioOrchestrator:
                     exc,
                     exc_info=True,
                 )
-
-        # Normalize: convert cumulative (wt * alloc) to allocation-weighted average.
-        # Without this, two strategies targeting the same symbol would have
-        # their contributions summed, potentially exceeding 100% (Bug 4).
-        for sym in list(merged_weights.keys()):
-            total_alloc = _weight_alloc_sum.get(sym, 0.0)
-            if total_alloc > 0:
-                merged_weights[sym] = merged_weights[sym] / total_alloc
 
         # Step 2: Build delta orders from merged target weights
         combined: list[CombinedOrder] = []

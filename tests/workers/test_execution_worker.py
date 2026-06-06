@@ -304,7 +304,7 @@ def test_drawdown_cap_activates_killswitch():
 def test_drawdown_within_cap_no_killswitch():
     """Small daily loss below threshold → execution proceeds normally."""
     last_equity = 100_000.0
-    portfolio_value = last_equity * 0.95  # 5% drop — below 10% cap
+    portfolio_value = last_equity * 0.98  # 2% drop — well below the 5% YAML cap
     redis = _make_redis(signal=_signal(score=0.8))
     client = _make_client(portfolio_value=portfolio_value, last_equity=last_equity)
 

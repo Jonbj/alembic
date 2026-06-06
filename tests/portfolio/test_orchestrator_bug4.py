@@ -51,27 +51,20 @@ class _FixedStrategy:
 
 
 class TestDuplicateBuyBug4:
-    """Bug 4 regression: two strategies targeting the same symbol should NOT
-    produce double-counted (summed) weights.
+    """Bug 4 regression: two strategies targeting the same symbol must produce
+    exactly one merged order, not two separate orders for the same symbol.
 
-    With the Bug 4 fix, when S1 alloc=0.5 says AAPL=0.30 and S2 alloc=0.5 says
-    AAPL=0.30, the merged weight should be 0.30 (weighted average), NOT 0.30
-    (0.30*0.5 + 0.30*0.5 = 0.30 which happened to be correct for equal
-    allocations at 50/50). With unequal allocations, e.g. S1 alloc=0.6 and
-    S2 alloc=0.4, the old bug would give 0.30*0.6 + 0.30*0.4 = 0.30 which
-    is identical to the weighted average — so we must test with different
-    target weights per strategy.
-    
-    The real bug manifests when: both strategies target AAPL at high weights
-    and the sum exceeds 1.0. E.g. S1 says AAPL=0.60, S2 says AAPL=0.60 with
-    equal allocations → old: 0.60*0.5 + 0.60*0.5 = 0.60 = correct (weighted avg).
-    But if weights represent % of strategy allocation, and allocations sum < 1.0,
-    then: S1 alloc=0.5 says AAPL=0.80, S2 alloc=0.3 says AAPL=0.60
-    old: 0.80*0.5 + 0.60*0.3 = 0.58 (ok)
-    new: weighted avg = (0.80*0.5 + 0.60*0.3) / (0.5 + 0.3) = 0.58/0.8 = 0.725
-    
-    The key difference: with normalization, even if weights sum to > alloc sum,
-    we get the correct portfolio fraction.
+    Merge semantics (sleeve-local weighted sum):
+      Each strategy produces sleeve-local weights. The orchestrator multiplies
+      each weight by allocation_pct and sums contributions across strategies.
+
+      S1 alloc=0.5 implies AAPL at w1, S2 alloc=0.5 implies AAPL at w2:
+        merged_weight(AAPL) = w1 * 0.5 + w2 * 0.5  → single delta order
+
+      When allocations sum to 1.0 (as in these tests), weighted sum == weighted
+      average, so the numeric results are identical to the old normalized path.
+      The difference matters when allocations sum < 1.0 (e.g., S1=50%, S4=10%):
+        single strategy on AAPL at w: merged = w * 0.50  (not w * 0.50 / 0.50)
     """
 
     def test_no_duplicate_symbol_in_orders(self):

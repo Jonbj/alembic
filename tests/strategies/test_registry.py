@@ -75,30 +75,44 @@ def test_s1_allocation_pct():
 
 def test_s2_allocation_pct():
     registry = StrategyRegistry()
-    assert registry.get_strategy("S2").allocation_pct == pytest.approx(0.20)
+    assert registry.get_strategy("S2").allocation_pct == pytest.approx(0.00)
 
 
 def test_s4_allocation_pct():
     registry = StrategyRegistry()
-    assert registry.get_strategy("S4").allocation_pct == pytest.approx(0.30)
+    assert registry.get_strategy("S4").allocation_pct == pytest.approx(0.10)
 
 
-def test_default_allocations_sum_to_one():
+def test_default_allocations_do_not_exceed_one():
     registry = StrategyRegistry()
     total = sum(e.allocation_pct for e in registry.get_active_strategies())
-    assert total == pytest.approx(1.0)
+    assert total <= 1.0
 
 
-def test_get_active_strategies_returns_three_by_default():
+def test_default_active_allocation_sum():
+    """S1=50% + S4=10% = 60% deployed; 40% cash residual."""
+    registry = StrategyRegistry()
+    total = sum(e.allocation_pct for e in registry.get_active_strategies())
+    assert total == pytest.approx(0.60)
+
+
+def test_get_active_strategies_returns_two_by_default():
+    """S1 and S4 are enabled; S2 is disabled (gates not passed)."""
     registry = StrategyRegistry()
     active = registry.get_active_strategies()
-    assert len(active) == 3
+    assert len(active) == 2
 
 
-def test_all_default_strategies_enabled():
+def test_s1_and_s4_enabled_by_default():
     registry = StrategyRegistry()
-    for entry in registry.get_active_strategies():
-        assert entry.enabled is True
+    assert registry.get_strategy("S1").enabled is True
+    assert registry.get_strategy("S4").enabled is True
+
+
+def test_s2_disabled_by_default():
+    """S2 is disabled: OOS Sharpe -0.55, all backtest gates failed."""
+    registry = StrategyRegistry()
+    assert registry.get_strategy("S2").enabled is False
 
 
 def test_all_entries_have_non_empty_schedule():
@@ -173,10 +187,12 @@ def test_disabled_strategy_not_in_active():
 
 
 def test_get_active_strategies_returns_only_enabled():
+    """Disabling S4 leaves only S1 active (S2 is already disabled by default)."""
     registry = StrategyRegistry()
     registry.set_enabled("S4", False)
     active = registry.get_active_strategies()
-    assert len(active) == 2
+    assert len(active) == 1
+    assert active[0].strategy_id == "S1"
 
 
 def test_re_enable_strategy():
@@ -189,12 +205,13 @@ def test_re_enable_strategy():
 
 # ── reload ────────────────────────────────────────────────────────────────────
 
-def test_reload_restores_disabled_strategies():
+def test_reload_reverts_manual_override():
+    """reload() reverts to YAML/safe defaults, undoing manual set_enabled calls."""
     registry = StrategyRegistry()
-    registry.set_enabled("S2", False)
+    registry.set_enabled("S4", False)
+    assert registry.get_strategy("S4").enabled is False
     registry.reload()
-    active_ids = [e.strategy_id for e in registry.get_active_strategies()]
-    assert "S2" in active_ids
+    assert registry.get_strategy("S4").enabled is True
 
 
 def test_reload_removes_custom_registrations():

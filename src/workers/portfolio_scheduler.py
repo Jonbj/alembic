@@ -15,17 +15,37 @@ import json as _json
 import logging
 from datetime import datetime, timedelta, timezone
 
+from pathlib import Path
+
 from src.workers.celery_app import app
 
 log = logging.getLogger(__name__)
 
 _PRICE_BARS = 300
+_TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
+
+
+def _load_execution_engine() -> str:
+    """Return execution.engine from trading.yaml; defaults to 'portfolio'."""
+    try:
+        import yaml
+        with open(_TRADING_YAML) as f:
+            cfg = yaml.safe_load(f)
+        return cfg.get("execution", {}).get("engine", "portfolio")
+    except Exception as exc:
+        log.warning("Could not load execution.engine (%s) — defaulting to portfolio", exc)
+        return "portfolio"
 
 
 @app.task(name="src.workers.portfolio_scheduler.run_portfolio_cycle")
 def run_portfolio_cycle() -> dict:
     """Celery entry-point for the portfolio orchestration cycle."""
     from src.config import config
+
+    engine = _load_execution_engine()
+    if engine not in ("portfolio",):
+        log.info("execution.engine=%s — portfolio cycle inactive", engine)
+        return {"skipped": True, "reason": f"engine={engine}"}
 
     if not config.ALPACA_API_KEY or not config.ALPACA_SECRET_KEY:
         log.warning("Alpaca credentials not configured — skipping portfolio cycle")

@@ -54,6 +54,18 @@ STOP_LOSS_PCT = 0.02
 MAX_DRAWDOWN_PCT = 0.10
 
 
+def _load_execution_engine() -> str:
+    """Return execution.engine from trading.yaml; defaults to 'legacy_sentiment'."""
+    try:
+        import yaml
+        with open(_TRADING_YAML) as f:
+            cfg = yaml.safe_load(f)
+        return cfg.get("execution", {}).get("engine", "legacy_sentiment")
+    except Exception as exc:
+        log.warning("Could not load execution.engine from %s (%s) — defaulting to legacy_sentiment", _TRADING_YAML, exc)
+        return "legacy_sentiment"
+
+
 def _load_risk_params() -> tuple[float, float]:
     """Return (stop_loss_pct, max_drawdown_pct) from trading.yaml, falling back to module defaults."""
     try:
@@ -577,6 +589,11 @@ def run_execution_worker() -> dict:
     """
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.trading.client import TradingClient
+
+    engine = _load_execution_engine()
+    if engine not in ("legacy_sentiment",):
+        log.info("execution.engine=%s — legacy execution worker inactive", engine)
+        return {"skipped": True, "reason": f"engine={engine}"}
 
     if not config.ALPACA_API_KEY or not config.ALPACA_SECRET_KEY:
         log.warning("Alpaca credentials not configured — skipping execution")

@@ -113,6 +113,12 @@ symbols:
     - SOXX
 
 execution:
+  # Authoritative execution engine.
+  # portfolio         → only portfolio-cycle (orchestrator) sends orders
+  # legacy_sentiment  → only run-execution (direct S4-like) sends orders
+  # disabled          → neither engine sends orders
+  engine: portfolio
+
   # QuantConnect integration
   qc_sizing_base: 1.0
   qc_sizing_multiplier_key: "qc:sizing_multiplier"  # Redis key
