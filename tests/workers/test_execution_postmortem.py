@@ -82,8 +82,12 @@ class TestMaybePostmortem:
 class TestRegimeLabel:
     def test_regime_label_mapping(self):
         from src.workers.execution import _regime_label
+        assert _regime_label(0.2) == "high_vol"
+        assert _regime_label(0.3) == "high_vol"   # boundary
         assert _regime_label(0.5) == "risk_off"
+        assert _regime_label(0.6) == "risk_off"   # boundary
         assert _regime_label(0.75) == "uncertain"
+        assert _regime_label(0.9) == "uncertain"  # boundary
         assert _regime_label(1.0) == "risk_on"
         assert _regime_label(1.2) == "risk_on"
         assert _regime_label(1.5) == "risk_on"

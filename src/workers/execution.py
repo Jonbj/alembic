@@ -166,6 +166,8 @@ def _write_decision(
 
 def _regime_label(regime_mult: float) -> str:
     """Convert a numeric regime multiplier to the string label expected by TradeContext."""
+    if regime_mult <= 0.3:
+        return "high_vol"
     if regime_mult <= 0.6:
         return "risk_off"
     if regime_mult <= 0.9:
@@ -199,10 +201,9 @@ def _maybe_postmortem(
     generated_at = signal.get("generated_at")
     if generated_at:
         try:
-            from datetime import timezone as _tz
             sig_dt = datetime.fromisoformat(str(generated_at).replace("Z", "+00:00"))
             if sig_dt.tzinfo is None:
-                sig_dt = sig_dt.replace(tzinfo=_tz.utc)
+                sig_dt = sig_dt.replace(tzinfo=timezone.utc)
             signal_age_min = (tick_time - sig_dt).total_seconds() / 60
         except Exception:
             pass
