@@ -1061,6 +1061,48 @@ class PostgreSQLStore:
         """Return P&L metrics grouped by hold duration bucket."""
         return self._fetch_analytics(self._ANALYTICS_BY_HOLD_TIME, limit_days)
 
+    _FETCH_TRADE_WITH_SIGNAL = """
+        SELECT
+            t.id, t.symbol, t.entry_time, t.exit_time,
+            t.entry_price, t.exit_price, t.net_pnl,
+            t.score, t.regime_mult, t.exit_reason,
+            ss.confidence, ss.ensemble_std,
+            ss.generated_at AS signal_generated_at,
+            t.postmortem_diagnosis
+        FROM trades t
+        LEFT JOIN sentiment_signals ss ON ss.id = t.signal_id
+        WHERE t.id = %s
+    """
+
+    def fetch_trade_with_signal(self, trade_id: int) -> dict | None:
+        """Return a trade row joined with its signal's confidence/ensemble_std."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_TRADE_WITH_SIGNAL, (trade_id,))
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                cols = [d[0] for d in cur.description]
+                return dict(zip(cols, row))
+        except Exception:
+            conn.rollback()
+            raise
+
+    def write_postmortem(self, trade_id: int, diagnosis: str) -> None:
+        """Store postmortem diagnosis for a closed trade."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE trades SET postmortem_diagnosis = %s WHERE id = %s",
+                    (diagnosis, trade_id),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
     def log_weight_update(
         self,
         source: str,

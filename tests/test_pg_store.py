@@ -736,5 +736,72 @@ class TestFetchAnalyticsByDimension:
         mock_conn.rollback.assert_called_once()
 
 
+class TestFetchTradeWithSignal:
+    def test_returns_dict_with_signal_fields(self):
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        now = datetime(2026, 6, 5, 15, tzinfo=timezone.utc)
+        mock_cur.description = [
+            ("id",), ("symbol",), ("entry_time",), ("exit_time",),
+            ("entry_price",), ("exit_price",), ("net_pnl",),
+            ("score",), ("regime_mult",), ("exit_reason",),
+            ("confidence",), ("ensemble_std",), ("signal_generated_at",),
+            ("postmortem_diagnosis",),
+        ]
+        mock_cur.fetchone.return_value = (
+            7, "NVDA", now, now, 200.0, 195.0, -5.0,
+            0.45, 1.0, "stop_loss",
+            0.6, 0.1, now, None,
+        )
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        result = store.fetch_trade_with_signal(trade_id=7)
+        assert result is not None
+        assert result["symbol"] == "NVDA"
+        assert result["confidence"] == 0.6
+        assert result["postmortem_diagnosis"] is None
+
+    def test_returns_none_when_not_found(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = None
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        result = store.fetch_trade_with_signal(trade_id=999)
+        assert result is None
+
+
+class TestWritePostmortem:
+    def test_issues_update_with_diagnosis(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        store.write_postmortem(trade_id=7, diagnosis="low_confidence_passed")
+
+        sql = mock_cur.execute.call_args[0][0]
+        params = mock_cur.execute.call_args[0][1]
+        assert "UPDATE trades" in sql
+        assert "postmortem_diagnosis" in sql
+        assert params[0] == "low_confidence_passed"
+        assert params[1] == 7
+        mock_conn.commit.assert_called_once()
+
+    def test_rollback_on_error(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.execute.side_effect = Exception("DB error")
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        with pytest.raises(Exception):
+            store.write_postmortem(trade_id=7, diagnosis="unknown")
+        mock_conn.rollback.assert_called_once()
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
