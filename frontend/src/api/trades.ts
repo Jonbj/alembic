@@ -18,6 +18,7 @@ export interface Trade {
   gross_pnl: number | null
   slippage_est: number | null
   net_pnl: number | null
+  postmortem_diagnosis: string | null
   created_at: string
 }
 

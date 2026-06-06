@@ -522,6 +522,45 @@ class TestCloseTrade:
         mock_conn.commit.assert_called_once()
 
 
+class TestCloseTradeReturnsId:
+    def test_close_trade_returns_trade_id(self):
+        """close_trade must return the id of the updated row (RETURNING id)."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (99,)
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        result = store.close_trade(
+            symbol="TSLA",
+            exit_price=205.0,
+            exit_time=datetime(2026, 6, 5, 16, tzinfo=timezone.utc),
+            exit_reason="stop_loss",
+            entry_price=200.0,
+        )
+        assert result == 99
+        sql = mock_cur.execute.call_args[0][0]
+        assert "RETURNING id" in sql
+
+    def test_close_trade_returns_none_when_no_open_trade(self):
+        """Returns None if no open trade row matched (fetchone returns None)."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = None
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        result = store.close_trade(
+            symbol="AAPL",
+            exit_price=180.0,
+            exit_time=datetime(2026, 6, 5, 16, tzinfo=timezone.utc),
+            exit_reason="take_profit",
+        )
+        assert result is None
+
+
 class TestFetchTrades:
     def test_fetch_all_trades(self):
         from datetime import datetime, timezone

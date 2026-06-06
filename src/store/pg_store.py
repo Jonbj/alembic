@@ -319,6 +319,7 @@ class PostgreSQLStore:
             slippage_est = entry_notional * 0.0005,
             net_pnl      = ((%s - COALESCE(entry_price, %s)) * qty) - (entry_notional * 0.0005)
         WHERE symbol = %s AND exit_time IS NULL
+        RETURNING id
     """
 
     def open_trade(
@@ -354,21 +355,10 @@ class PostgreSQLStore:
         exit_time,
         exit_reason: str,
         entry_price: float | None = None,
-    ) -> None:
+    ) -> int | None:
         """Update the open trade row for symbol with exit data and compute P&L.
 
-        Args:
-            symbol:      Ticker symbol of the trade to close.
-            exit_price:  Fill price at which the position was exited.
-            exit_time:   Timestamp of the exit.
-            exit_reason: Why the trade was closed (e.g. "stop_loss").
-            entry_price: Optional fill price from the Alpaca position object.
-                         When provided, COALESCE(entry_price, %s) fills in the
-                         DB column if it is still NULL (intra-day stop-loss before
-                         reconcile_trade_fills has run).  When absent (None),
-                         COALESCE falls back to whatever is already in the DB
-                         column — preserving the original behavior for callers
-                         that do not have the entry price readily available.
+        Returns the id of the updated row, or None if no open trade was found.
         """
         conn = self._get_connection()
         try:
@@ -381,7 +371,9 @@ class PostgreSQLStore:
                      exit_price, entry_price,
                      symbol),
                 )
+                row = cur.fetchone()
             conn.commit()
+            return int(row[0]) if row else None
         except Exception:
             conn.rollback()
             raise
@@ -411,7 +403,7 @@ class PostgreSQLStore:
                     f"""SELECT id, symbol, signal_id, decision_id, entry_order_id,
                                entry_price, entry_time, entry_notional, score, regime_mult,
                                exit_price, exit_time, exit_reason, qty,
-                               gross_pnl, slippage_est, net_pnl, created_at
+                               gross_pnl, slippage_est, net_pnl, postmortem_diagnosis, created_at
                         FROM trades {where}
                         ORDER BY entry_time DESC LIMIT %s""",
                     params,
