@@ -96,6 +96,8 @@ export default function Docs() {
           <li><strong>Overview</strong> — Quadro generale: P&L mensile, posizioni aperte, segnali recenti</li>
           <li><strong>Signals</strong> — Segnali LLM per ticker: score, direzione, confidence, modelli</li>
           <li><strong>Trading</strong> — Posizioni aperte, storico ordini, P&L non realizzato</li>
+          <li><strong>Trades</strong> — Storico trade chiusi, cumulative P&L, analisi multidimensionale (tab Analytics)</li>
+          <li><strong>Auto-Improve</strong> — Stato feedback loop (Phase B) e opportunità mancate (Phase C)</li>
           <li><strong>Strategies</strong> — Stato di validazione delle strategie (gates, sensitivity, equity curve)</li>
           <li><strong>Backtest</strong> — Risultati storici: IC, ICIR, bucket analysis, drawdown</li>
           <li><strong>Performance</strong> — Rendimento cumulativo e mensile del portfolio</li>
@@ -261,6 +263,8 @@ export default function Docs() {
           <li><strong>news-ingestion</strong> — ogni 15 min (Lun-Ven, 14:00-21:00 UTC): ingestione GDELT/MarketAux/Alpaca</li>
           <li><strong>sentiment-worker</strong> — elaborazione continua coda Redis, LLM inference</li>
           <li><strong>portfolio-cycle</strong> — ogni ora (Lun-Ven, 14:00-21:00 UTC): ciclo completo di orchestrazione</li>
+          <li><strong>loss-feedback-check</strong> — ogni 30 min (Lun-Ven, 14:00-21:00 UTC): Phase B — aggiusta threshold/scale se perdite recenti</li>
+          <li><strong>counterfactual-worker</strong> — ogni notte alle 22:45 UTC: Phase C — calcola ritorni a 1h per i trade saltati</li>
           <li><strong>risk-monitor</strong> — giornaliero alle 22:30 UTC: monitoraggio esposizione e HHI</li>
           <li><strong>decay-monitor</strong> — mensile (1° del mese, 23:00 UTC): walk-forward decay detection</li>
         </ul>
@@ -450,7 +454,75 @@ export default function Docs() {
         ))}
       </div>
 
-      {/* 11 — AIUTO CONTESTUALE */}
+      {/* 11 — PERFORMANCE & AUTO-IMPROVE */}
+      <div style={cardStyle}>
+        <h2 style={h2Style}>📉 Performance & Auto-Improve</h2>
+        <p style={pStyle}>
+          Il sistema valuta la propria performance in tre fasi distinte e usa i risultati per auto-correggersi continuamente.
+        </p>
+
+        <h3 style={h3Style}>Phase A — Trade Analytics (pagina Trades → tab Analytics)</h3>
+        <p style={pStyle}>
+          Analisi retrospettiva multidimensionale dei trade chiusi. Risponde alla domanda: <em>dove guadagna e perde il sistema?</em>
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10, marginBottom: 16 }}>
+          {[
+            { dim: 'Per Simbolo', use: 'Identifica ticker con edge positivo e ticker che drenano. Un simbolo sistematicamente negativo va rimosso dalla watchlist.' },
+            { dim: 'Per Regime', use: 'Verifica che il sistema guadagni nei regimi attesi (bullish). Se guadagna anche in regime basso, valuta di abbassare la soglia minima di regime.' },
+            { dim: 'Per Ora', use: 'Individua le fasce orarie redditizie. Le prime 30 minuti di mercato (9:30–10:00 EST) spesso hanno spread alti — se negativi, aggiungi un filtro orario.' },
+            { dim: 'Per Score LLM', use: 'Verifica che bucket di score alto → P&L alto. Se la correlazione è assente, il segnale LLM non ha edge — rivaluta i pesi dei modelli.' },
+            { dim: 'Per Durata', use: 'Trova la finestra di holding ottimale. Trade <15 min soffrono di spread; trade >2h rischiano staleness del segnale.' },
+          ].map((r) => (
+            <div key={r.dim} style={metricCardStyle}>
+              <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>{r.dim}</div>
+              <div style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.5 }}>{r.use}</div>
+            </div>
+          ))}
+        </div>
+
+        <h3 style={h3Style}>Phase B — Loss Feedback Loop (pagina Auto-Improve)</h3>
+        <p style={pStyle}>
+          Aggiustamento automatico delle soglie in risposta a perdite recenti. Opera <strong>ogni 30 minuti</strong> durante gli orari di mercato.
+        </p>
+        <ul style={listStyle}>
+          <li><strong>Trigger OR</strong>: 3 perdite consecutive oppure P&L rolling negativo sugli ultimi 10 trade</li>
+          <li><strong>Effetto Entry Threshold</strong>: alzata da 0.30 fino a 0.60 (step +0.05 per aggiustamento) — sistema più selettivo</li>
+          <li><strong>Effetto Regime Scale</strong>: ridotta a 0.80× — position sizing ridotto del 20%</li>
+          <li><strong>Cooldown</strong>: 4 ore tra aggiustamenti; <strong>Recovery</strong>: 5 vincite consecutive per tornare al baseline</li>
+          <li><strong>TTL</strong>: ogni aggiustamento scade automaticamente dopo 48 ore</li>
+        </ul>
+        <div style={{ ...metricCardStyle, marginBottom: 0 }}>
+          <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Come interpretare lo stato</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {[
+              { label: 'Entry Threshold = 0.30, Scale = 1.0×', meaning: 'Baseline — sistema normale, nessuna perdita recente' },
+              { label: 'Entry Threshold > 0.30', meaning: 'Feedback attivo — filtra i segnali deboli dopo perdite' },
+              { label: 'Scale < 1.0×', meaning: 'Sizing ridotto — il sistema si protegge in un contesto difficile' },
+              { label: 'Attivo da >24h senza recovery', meaning: 'Mercato avverso — analizza Signals e considera Halted' },
+            ].map((s) => (
+              <div key={s.label} style={{ background: 'var(--bg)', borderRadius: 6, padding: '8px 10px' }}>
+                <div style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--blue)', marginBottom: 2 }}>{s.label}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{s.meaning}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <h3 style={h3Style}>Phase C — Counterfactual Analysis (pagina Auto-Improve)</h3>
+        <p style={pStyle}>
+          Valutazione retrospettiva delle opportunità filtrate. Il sistema registra ogni trade saltato (<strong>SKIP_EMA</strong>, <strong>SKIP_CAP</strong>) e il giorno dopo calcola cosa sarebbe successo se fosse stato eseguito (ritorno a 1h tramite dati Alpaca 1-minuto).
+        </p>
+        <ul style={listStyle}>
+          <li><strong>SKIP_EMA</strong>: prezzo sotto la EMA20 al momento del segnale — filtro trend-following</li>
+          <li><strong>SKIP_CAP</strong>: limite di allocazione per ciclo raggiunto — filtro di concentrazione</li>
+          <li><strong>SKIP_POSITION</strong>: ticker già in portafoglio — escluso dall'analisi (no pyramiding by design)</li>
+        </ul>
+        <p style={pStyle}>
+          <strong>Regola decisionale</strong>: agisci su un filtro solo se <em>avg_return &gt; +0.5%</em> e <em>% profitable &gt; 55%</em> su almeno 30 osservazioni. Sotto questa soglia i dati sono statisticamente rumorosi. Aggiornamento: nightly alle 22:45 UTC.
+        </p>
+      </div>
+
+      {/* 12 — AIUTO CONTESTUALE */}
       <div style={cardStyle}>
         <h2 style={h2Style}>❓ Aiuto Contestuale</h2>
         <p style={pStyle}>

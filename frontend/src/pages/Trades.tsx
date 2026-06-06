@@ -6,6 +6,7 @@ import {
 } from 'recharts'
 import { fetchTrades, fetchTradesSummary, type Trade, type TradeStatus, type SummaryPeriod } from '@/api/trades'
 import { fetchAnalyticsBySymbol, fetchAnalyticsByDimension, type DimensionRow } from '@/api/analytics'
+import { HelpButton } from '@/components/shared/HelpButton'
 
 const PERIODS: SummaryPeriod[] = [7, 30, 90]
 
@@ -158,6 +159,48 @@ export default function Trades() {
   return (
     <div style={{ position: 'relative' }}>
       <h2 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>Trades</h2>
+      <HelpButton title="Trades — Guida alla Lettura" sections={[
+        {
+          heading: 'Metriche Sommario',
+          content: '**Total Trades**: numero di posizioni chiuse nel periodo selezionato.\n**Win Rate**: percentuale di trade con net P&L positivo. Target realistico per S4: >52%. Sotto il 48% segnala deterioramento del segnale.\n**Avg Net P&L**: media per trade dopo slippage stimato. Valore positivo ma vicino a zero indica edge sottile — analizza i costi.\n**Total Net P&L**: P&L cumulativo del periodo. Verde = sistema in profitto netto.',
+        },
+        {
+          heading: 'Grafico P&L Cumulativo',
+          content: 'Ogni punto corrisponde alla chiusura di un trade. La linea mostra l\'accumulo progressivo.\n\n**Linea verde con slope costante**: sistema stabile con edge consistente.\n**Oscillazioni frequenti con recupero**: alta volatilità, normale per intraday news-driven.\n**Piattezza prolungata**: pochi trade o segnali deboli — controlla la pagina Signals.\n**Drawdown accentuato**: la pagina Auto-Improve mostrerà se il feedback loop si è attivato.',
+        },
+        {
+          heading: 'Tab Analytics — Perché usarla',
+          content: 'La tab Analytics risponde alla domanda: **dove guadagna e perde il sistema?**\n\nCambia il periodo (7/30/90 giorni) per bilanciare freschezza e volume statistico. Con meno di 30 trade i grafici hanno bassa significatività — usa 30 o 90 giorni per decisioni strutturali.',
+        },
+        {
+          heading: 'Analytics — Per Simbolo',
+          content: 'P&L totale aggregato per ticker. Identifica i ticker che trainano i guadagni (barre verdi alte) e quelli che drenano (barre rosse profonde).\n\n**Azione**: un ticker sistematicamente negativo va esaminato — segnale LLM su quel settore è scarso? Spread troppo ampio? Considera di rimuoverlo dalla watchlist in Config.',
+        },
+        {
+          heading: 'Analytics — Per Regime',
+          content: 'P&L medio per bucket di **regime_mult** (moltiplicatore applicato al position sizing in base al sentiment di mercato).\n\n**regime_mult < 0.5**: mercato difensivo — il sistema riduce l\'esposizione.\n**regime_mult > 1.0**: mercato favorevole — posizionamento aggressivo.\n\nSe il sistema guadagna solo con regime alto e perde con regime basso, il filtro funziona. Se guadagna anche con regime basso, valuta di alzare la soglia minima.',
+        },
+        {
+          heading: 'Analytics — Per Ora',
+          content: 'P&L medio per ora di apertura del trade (EST).\n\n**9:30–10:00**: prima mezz\'ora, alta volatilità e spread ampi — spesso la fascia più rischiosa.\n**10:30–12:00**: fascia con spread normalizzati, liquidità buona.\n**15:00–16:00**: chiusura di mercato, gap di liquidità possibili.\n\nSe ore specifiche sono sistematicamente negative, considera un filtro orario in Config.',
+        },
+        {
+          heading: 'Analytics — Per Score LLM',
+          content: 'P&L medio per bucket di score LLM (polarity × confidence).\n\n**Bucket alti (>0.5) con P&L alto**: il segnale ha edge discriminante — alza la soglia entry per filtrare i bucket bassi.\n**Nessuna correlazione score → P&L**: il segnale non ha potere predittivo sufficiente. Rivaluta la qualità delle notizie in ingresso o i pesi dei modelli LLM.\n\nIl valore di **Entry Threshold** nella pagina Auto-Improve controlla il minimo score accettato.',
+        },
+        {
+          heading: 'Analytics — Per Durata',
+          content: 'P&L medio per durata di detenzione del trade.\n\n**<15 min**: trade fulminei — spesso vittima di spread e latenza.\n**15–60 min**: range tipico per S4 (news-driven intraday).\n**>2 ore**: il segnale LLM è probabilmente stantio; il move di prezzo ha già incorporato la notizia.\n\nIl bucket ottimale identifica la finestra di holding ideale per S4.',
+        },
+        {
+          heading: 'Colonne della Tabella Trade',
+          content: '**Score**: valore LLM al momento dell\'entry (0–1). Più alto = segnale più forte.\n**Regime**: moltiplicatore regime applicato al sizing.\n**Hold**: durata di detenzione (m = minuti, h = ore).\n**Exit Reason**: motivo di chiusura — stop_loss, take_profit, ema_exit, time_exit, manual.\n**Decision**: ID del record execution_decisions associato (per tracciabilità).\n\nClicca una riga per espandere i dettagli: signal_id, order ID, notional, slippage stimato, gross P&L, e diagnosi postmortem se disponibile.',
+        },
+        {
+          heading: 'Badge Postmortem',
+          content: 'Il badge arancione nella riga espansa contiene la diagnosi automatica della causa di perdita.\n\n**ADVERSE_MOVE**: il prezzo si è mosso contro il segnale LLM — movimento imprevedibile o segnale errato.\n**HIGH_SPREAD**: lo spread bid/ask ha eroso il P&L — considera filtro su spread massimo.\n**STALENESS**: il segnale era vecchio al momento dell\'esecuzione — ridurre il delay tra segnale e ordine.\n**REGIME_SHIFT**: cambio di regime durante la detenzione.',
+        },
+      ]} />
 
       <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
         {PERIODS.map(p => (

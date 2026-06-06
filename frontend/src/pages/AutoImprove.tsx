@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchFeedbackStatus, fetchCounterfactualSummary } from '@/api/trades'
+import { HelpButton } from '@/components/shared/HelpButton'
 
 const fmt = (v: number | null | undefined, digits = 2) =>
   v == null ? '—' : v.toFixed(digits)
@@ -70,11 +71,41 @@ export default function AutoImprove() {
   })
 
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
       <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700 }}>Auto-Improve</h2>
       <p style={{ margin: '0 0 24px', color: 'var(--text-muted)', fontSize: 14 }}>
         Automatic strategy adjustments triggered by live performance.
       </p>
+      <HelpButton title="Auto-Improve — Guida alla Lettura" sections={[
+        {
+          heading: "Cos'è Auto-Improve",
+          content: 'Il sistema si auto-corregge in tre fasi:\n\n**Phase A** (tab Analytics in Trades): analizza il passato — dove guadagna e perde il sistema per dimensione.\n**Phase B** (questa pagina, card sopra): reagisce alle perdite in tempo reale — alza le soglie di ingresso e riduce l\'esposizione quando il sistema sta perdendo.\n**Phase C** (questa pagina, tabella sotto): valuta le opportunità mancate — analizza retrospettivamente i trade filtrati per capire se i filtri sono troppo restrittivi.\n\nNessun intervento manuale richiesto: Phase B e C operano automaticamente.',
+        },
+        {
+          heading: 'Phase B — Valori da Monitorare',
+          content: '**Entry Threshold** (baseline 0.30): il sistema entra in posizione solo se lo score LLM supera questa soglia. Quando il feedback è attivo, può salire fino a 0.60 — il sistema diventa più selettivo (meno trade, ma filtrati meglio).\n\n**Regime Scale** (normale 1.0×): moltiplica il regime_mult di ogni ciclo. Con scale=0.80, un regime_mult di 1.20 diventa effettivamente 0.96 — position sizing ridotto del 20%.\n\nEsempio pratico: se threshold=0.45 e scale=0.80, solo segnali forti entrano in posizione e con sizing ridotto.',
+        },
+        {
+          heading: 'Phase B — Trigger e Recovery',
+          content: '**Trigger automatico** (OR logic):\n• 3 perdite consecutive, OPPURE\n• P&L rolling negativo sugli ultimi 10 trade\n\n**Cooldown**: 4 ore tra un aggiustamento e il successivo — evita che il sistema stringa troppo in una singola sessione.\n\n**Recovery**: 5 vincite consecutive riportano threshold e scale ai valori baseline.\n\n**Scadenza automatica**: ogni aggiustamento ha un TTL di 48 ore. Se il sistema non esegue abbastanza trade per la recovery, l\'aggiustamento scade da solo.',
+        },
+        {
+          heading: 'Phase B — Cosa Fare Quando è Attivo',
+          content: 'Se l\'aggiustamento è attivo **da più di 24 ore senza recovery**, valuta:\n\n1. **Pagina Signals** — confidence bassa sui segnali? I modelli LLM concordano poco?\n2. **Pagina Overview** — regime di mercato ribassista? HHI elevato (portfolio concentrato)?\n3. **Pagina News** — notizie macro avverse nel watchlist (es. earnings season, eventi Fed)?\n4. **Analytics tab in Trades** — quale ora o simbolo sta generando le perdite?\n\nSe il contesto è chiaramente avverso (mercato in sell-off, VIX elevato), considera di attivare manualmente la modalità Halted dalla pagina Admin.',
+        },
+        {
+          heading: 'Phase C — Come Leggere la Tabella',
+          content: '**SKIP_EMA**: trade saltati perché il prezzo era sotto la EMA20 (filtro trend-following). La EMA evita di comprare in downtrend.\n**SKIP_CAP**: trade saltati perché il limite di allocazione del ciclo era stato raggiunto (troppi trade in un singolo ciclo orario).\n\n**Colonne chiave**:\n• **Skips**: quante volte il filtro ha bloccato un trade nel periodo\n• **Computed**: quanti skip hanno un ritorno a 1h calcolato (dipende dalla disponibilità di dati Alpaca)\n• **Avg 1h return**: ritorno medio se avessimo aperto la posizione\n• **% Profitable**: percentuale di skip che sarebbero stati profittevoli\n• **Upside missed**: somma dei ritorni positivi — opportunità economica persa',
+        },
+        {
+          heading: 'Phase C — Interpretazione e Azioni',
+          content: '**Avg 1h return verde + % profitable >50%** → il filtro sta bloccando trade profittevoli. Considera:\n• Per SKIP_EMA: abbassare o disabilitare il filtro EMA (parametro in Config).\n• Per SKIP_CAP: aumentare il cap di allocazione per ciclo.\n\n**Avg 1h return rosso** → il filtro funziona correttamente, stai evitando perdite. Non intervenire.\n\n**Upside missed alto con pochi skip** → possibilmente rumore statistico. Aspetta almeno 2 settimane di dati (>50 skip per tipo) prima di modificare i parametri.\n\n**Regola pratica**: agisci solo se avg_return >+0.5% e % profitable >55% su almeno 30 osservazioni.',
+        },
+        {
+          heading: 'Phase C — Tempistica e Aggiornamento Dati',
+          content: 'I ritorni a 1h vengono calcolati **nightly alle 22:45 UTC** dal task `counterfactual-worker`.\n\nI dati del giorno corrente appariranno il giorno successivo. Se la tabella è vuota, è normale nei primi giorni di paper trading.\n\n**Finestra temporale consigliata**:\n• 7 giorni: valutazione recente, ma statisticamente limitata\n• 30 giorni: trend affidabili per decisioni strutturali\n\nLa tabella si aggiorna ogni 5 minuti nell\'interfaccia.',
+        },
+      ]} />
 
       {/* Phase B: Loss Feedback */}
       <Card title="Phase B — Loss Feedback Loop">
