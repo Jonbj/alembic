@@ -67,3 +67,31 @@ export const fetchDecisions = (symbol?: string, limit = 20) => {
   if (symbol) params.set('symbol', symbol)
   return apiFetch<Decision[]>(`/api/decisions?${params}`)
 }
+
+// Phase B: feedback loop status
+export interface FeedbackStatus {
+  entry_threshold: number
+  entry_threshold_baseline: number
+  regime_scale: number
+  adjustment_active: boolean
+  last_adjustment_ts: string | null
+  last_reason: string | null
+  consecutive_losses: number | null
+  rolling_net_pnl: number | null
+}
+
+export const fetchFeedbackStatus = () =>
+  apiFetch<FeedbackStatus>('/api/feedback/status')
+
+// Phase C: counterfactual opportunity cost
+export interface CounterfactualRow {
+  decision: string
+  total_skips: number
+  computed: number
+  avg_return: number
+  pct_profitable: number
+  sum_positive_returns: number
+}
+
+export const fetchCounterfactualSummary = (days = 7) =>
+  apiFetch<CounterfactualRow[]>(`/api/trades/analytics/counterfactual?days=${days}`)

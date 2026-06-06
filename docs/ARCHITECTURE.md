@@ -5,9 +5,9 @@
 # Alembic — Technical Architecture
 
 **Technical Architecture Document**
-**Version:** 6.0.0
+**Version:** 7.0.0
 **Date:** 2026-06-06
-**Status:** Phase A + Portfolio Governance — Sleeve-Local Allocation, Single Engine, Strategy Config
+**Status:** Phase A (Trade Analytics) + Phase B (Loss Feedback Loop) + Phase C (Counterfactual Analysis) + Portfolio Governance
 
 ---
 
@@ -61,6 +61,7 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 │              PERFORMANCE & MONITORING LOOP                        │
 │                                                                   │
 │  Daily 22:00: ForwardReturnWorker → populate sentiment_signals   │
+│  Daily 22:45: CounterfactualWorker → 1h return for SKIP rows     │
 │  Daily 03:00: PerformanceWorker → IC + drift + Telegram digest   │
 │  Daily 22:30: RiskMonitor → HHI + correlation + drawdown alerts  │
 │  Mon  04:00: WeightOptimiser → LOO ICIR → auto-apply / Telegram  │
@@ -68,17 +69,37 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 └──────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
-│              TRADE OBSERVABILITY & ANALYTICS (Phase A)            │
+│         TRADE OBSERVABILITY, ANALYTICS & AUTO-IMPROVE             │
 │                                                                   │
-│  ExecutionWorker                                                  │
+│  Phase A — Trade Analytics Engine                                 │
+│    ExecutionWorker                                                │
 │    ├── write_execution_decision() → execution_decisions table    │
 │    ├── open_trade() / close_trade() → trades table               │
 │    └── on stop-loss: _maybe_postmortem() → diagnose_loss()       │
 │                           → trades.postmortem_diagnosis           │
-│                                                                   │
-│  Analytics API (on-read, no materialization)                     │
+│    Analytics API (on-read, no materialization)                   │
 │    └── 5 GROUP BY queries over trades + sentiment_signals        │
 │        (by symbol, regime, hour-of-day, score bucket, hold time) │
+│                                                                   │
+│  Phase B — Loss Feedback Loop (every 30 min, market hours)       │
+│    LossFeedbackCheck                                              │
+│    ├── fetch last N closed trades from PostgreSQL                │
+│    ├── detect: N consecutive losses OR negative rolling P&L      │
+│    ├── on trigger: raise ENTRY_THRESHOLD (Redis, 48h TTL)        │
+│    │              reduce regime_scale (Redis, 48h TTL)           │
+│    │              send Telegram ⚠️ alert                          │
+│    ├── recovery: consecutive wins → step back toward baseline    │
+│    └── cooldown: max 1 adjustment per 4h                         │
+│    ExecutionWorker reads Redis keys at each cycle start           │
+│                                                                   │
+│  Phase C — Counterfactual / Opportunity Cost (daily 22:45 UTC)   │
+│    CounterfactualWorker                                           │
+│    ├── fetch SKIP_EMA + SKIP_CAP rows without counterfactual     │
+│    ├── fetch 1-min Alpaca bars per symbol                        │
+│    ├── compute return = (price_T+1h - price_T) / price_T         │
+│    └── bulk-write counterfactual_return_1h to execution_decisions│
+│    API: GET /api/trades/analytics/counterfactual                 │
+│    Frontend: /auto-improve → "Phase C — Opportunity Cost" card   │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -187,6 +208,8 @@ Execution checklist (per tick):
 |-----------|------|------|
 | `PerformanceWorker` | `src/workers/performance.py` | IC (B4 + Newey-West HAC), drift (PSI + CUSUM), auto-weights |
 | `ForwardReturnWorker` | `src/workers/performance.py` | Populates `sentiment_signals.forward_return` at market close |
+| `LossFeedbackCheck` | `src/workers/performance.py` | Phase B: detects loss patterns, adjusts threshold + regime scale |
+| `CounterfactualWorker` | `src/workers/performance.py` | Phase C: computes 1h return for every skipped trade |
 | `ICCalculator` | `src/performance/ic.py` | Composite IC B4 with Newey-West HAC standard errors |
 | `WeightOptimiser` | `src/performance/weights.py` | LOO ICIR with guardrails (VIX, drawdown, floor/cap) |
 | `DriftDetector` | `src/performance/drift.py` | PSI + CUSUM signal distribution drift |
@@ -207,51 +230,90 @@ Analytics are computed **on-read** via SQL GROUP BY — no materialized tables. 
 | By Score Bucket | `FLOOR(ss.score * 10)` 0.1-wide bins | score range label (0.3–0.4, etc.) |
 | By Hold Time | `exit_time - entry_time` CASE bucket | `<1h` / `1-4h` / `4-8h` / `extended` / `overnight` |
 
-### 2.9 Storage
+### 2.9 Loss Feedback Loop (Phase B)
+
+Configured in `config/trading.yaml` under `loss_feedback:`.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `consecutive_loss_trigger` | 3 | N consecutive losses → raise threshold |
+| `rolling_pnl_window` | 10 | trades summed for rolling P&L trigger |
+| `threshold_step` | 0.05 | ENTRY_THRESHOLD raised by this amount per trigger |
+| `threshold_max` | 0.60 | ceiling for raised threshold |
+| `threshold_baseline` | 0.30 | target for recovery |
+| `regime_scale_factor` | 0.80 | regime_mult multiplied by this on trigger |
+| `regime_min_scale` | 0.20 | floor for regime scale |
+| `cooldown_hours` | 4 | minimum hours between adjustments |
+| `recovery_win_streak` | 5 | consecutive wins → step threshold back down |
+| `feedback_ttl_hours` | 48 | Redis TTL — adjustments expire automatically |
+
+**Redis keys written:** `feedback:entry_threshold`, `feedback:regime_scale`, `feedback:state` (audit JSON). All have 48h TTL, so adjustments cannot persist indefinitely through system restarts.
+
+**ExecutionWorker reads** `feedback:entry_threshold` and `feedback:regime_scale` at the start of every 15-min cycle via `_load_entry_threshold()` and `_load_feedback_regime_scale()`. If the Redis keys are absent (no active adjustment), the module-level constant `ENTRY_THRESHOLD=0.30` and scale `1.0` are used.
+
+### 2.10 Counterfactual Analysis (Phase C)
+
+Answers: *"For each trade we skipped, what would the 1-hour return have been?"*
+
+- Only `SKIP_EMA` and `SKIP_CAP` decisions are analysed. `SKIP_POSITION` is excluded (position was already open — it's not a missed opportunity).
+- Runs nightly at 22:45 UTC. Processes SKIP decisions from the last 7 days that don't have a counterfactual yet (`counterfactual_computed_at IS NULL`).
+- Fetches 1-minute Alpaca bars per symbol. Computes: `return = (close_{T+60min} − close_T) / close_T`.
+- Stores result in `execution_decisions.counterfactual_return_1h`.
+- `GET /api/trades/analytics/counterfactual` aggregates by decision type: avg return, % profitable, total upside missed.
+
+**Interpretation:**
+- `SKIP_EMA` with high `avg_return` → EMA filter is too conservative; consider relaxing or removing it in strong-trend regimes.
+- `SKIP_CAP` with high `sum_positive_returns` → cycle allocation cap is too tight; consider raising `MAX_CYCLE_NOTIONAL_PCT`.
+
+### 2.11 Storage
 
 | Store | Technology | Schema |
 |-------|------------|--------|
-| `RedisStore` | Redis 7 | `sentiment:signal:{sym}` TTL 4h; `killswitch_active`; `regime_multiplier`; `ensemble:weights:current`; `system:mode` |
+| `RedisStore` | Redis 7 | `sentiment:signal:{sym}` TTL 4h; `killswitch_active`; `regime_multiplier`; `ensemble:weights:current`; `system:mode`; `feedback:entry_threshold`; `feedback:regime_scale`; `feedback:state` |
 | `PostgreSQLStore` | PostgreSQL 16 | `sentiment_signals`, `llm_responses`, `news_log`, `weight_update_log`, `backtest_signals`, `portfolio_cycles`, `risk_reports`, `decay_reports`, `execution_decisions`, `trades` |
 
-**New tables (migration 016–017):**
+**Tables added by migrations 016–018:**
 
 ```sql
--- execution_decisions: one row per symbol per tick (only symbols above ENTRY_THRESHOLD)
+-- execution_decisions (016): one row per symbol per tick, score > ENTRY_THRESHOLD
+-- Added by migration 018: counterfactual columns
 CREATE TABLE execution_decisions (
-    id          BIGSERIAL PRIMARY KEY,
-    tick_time   TIMESTAMPTZ NOT NULL,
-    symbol      VARCHAR(20) NOT NULL,
-    signal_id   BIGINT REFERENCES sentiment_signals(id),
-    score       DOUBLE PRECISION NOT NULL,
-    regime_mult DOUBLE PRECISION NOT NULL,
-    ema_pass    BOOLEAN NOT NULL,
-    decision    VARCHAR(20) NOT NULL,   -- BUY, SKIP_EMA, SKIP_CAP, SKIP_POSITION, STOP_LOSS
-    order_id    TEXT,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                       BIGSERIAL PRIMARY KEY,
+    tick_time                TIMESTAMPTZ NOT NULL,
+    symbol                   VARCHAR(20) NOT NULL,
+    signal_id                BIGINT REFERENCES sentiment_signals(id),
+    score                    DOUBLE PRECISION NOT NULL,
+    regime_mult              DOUBLE PRECISION NOT NULL,
+    ema_pass                 BOOLEAN NOT NULL,
+    decision                 VARCHAR(20) NOT NULL,  -- BUY | SKIP_EMA | SKIP_CAP | SKIP_POSITION
+    order_id                 TEXT,
+    counterfactual_return_1h DOUBLE PRECISION,      -- Phase C: NULL until computed nightly
+    counterfactual_computed_at TIMESTAMPTZ,
+    created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- trades: one row per round-trip (open → close)
+-- trades (016): one row per round-trip (open → close)
+-- Added by migration 017: postmortem_diagnosis
 CREATE TABLE trades (
-    id               BIGSERIAL PRIMARY KEY,
-    symbol           VARCHAR(20) NOT NULL,
-    signal_id        BIGINT REFERENCES sentiment_signals(id),
-    decision_id      BIGINT REFERENCES execution_decisions(id),
-    entry_order_id   TEXT NOT NULL,
-    entry_price      DOUBLE PRECISION,
-    entry_time       TIMESTAMPTZ NOT NULL,
-    entry_notional   DOUBLE PRECISION NOT NULL,
-    score            DOUBLE PRECISION NOT NULL,
-    regime_mult      DOUBLE PRECISION NOT NULL,
-    exit_price       DOUBLE PRECISION,
-    exit_time        TIMESTAMPTZ,
-    exit_reason      VARCHAR(20),       -- stop_loss, take_profit, manual
-    qty              DOUBLE PRECISION,
-    gross_pnl        DOUBLE PRECISION,
-    slippage_est     DOUBLE PRECISION,
-    net_pnl          DOUBLE PRECISION,
-    postmortem_diagnosis TEXT,          -- added migration 017; NULL if no postmortem triggered
-    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                   BIGSERIAL PRIMARY KEY,
+    symbol               VARCHAR(20) NOT NULL,
+    signal_id            BIGINT REFERENCES sentiment_signals(id),
+    decision_id          BIGINT REFERENCES execution_decisions(id),
+    entry_order_id       TEXT NOT NULL,
+    entry_price          DOUBLE PRECISION,
+    entry_time           TIMESTAMPTZ NOT NULL,
+    entry_notional       DOUBLE PRECISION NOT NULL,
+    score                DOUBLE PRECISION NOT NULL,
+    regime_mult          DOUBLE PRECISION NOT NULL,
+    exit_price           DOUBLE PRECISION,
+    exit_time            TIMESTAMPTZ,
+    exit_reason          VARCHAR(20),               -- stop_loss | take_profit | manual
+    qty                  DOUBLE PRECISION,
+    gross_pnl            DOUBLE PRECISION,
+    slippage_est         DOUBLE PRECISION,
+    net_pnl              DOUBLE PRECISION,
+    postmortem_diagnosis TEXT,                      -- Phase A: NULL if no postmortem triggered
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```
 
@@ -281,13 +343,14 @@ SentimentWorker (BLPOP news:queue)
     ▼
 ExecutionWorker (every 15 min, active only when execution.engine=legacy_sentiment)
     ├── GET killswitch_active
-    ├── GET regime_multiplier
+    ├── GET regime_multiplier × GET feedback:regime_scale  (Phase B)
+    ├── GET feedback:entry_threshold (or default 0.30)      (Phase B)
     ├── For each symbol in watchlist:
     │   ├── GET sentiment:signal:{sym}
     │   ├── freshness check (< 30 min)
     │   ├── stop-loss check → close_trade() → _maybe_postmortem()
-    │   ├── BUY gate: score > 0.3 AND price > EMA20
-    │   ├── order_notional = base × regime_multiplier
+    │   ├── BUY gate: score > entry_threshold AND price > EMA20
+    │   ├── order_notional = base × (regime_mult × feedback_scale)
     │   └── write_execution_decision() (one row per scored symbol)
     ├── open_trade() on BUY fill
     └── Alpaca SDK market order
@@ -423,6 +486,8 @@ CREATE TABLE decay_reports (
 | `run-retention-sweep` | 3:30 daily | Nightly old data cleanup |
 | `decay-monitor` | 23:00 1st of month | Actual vs backtest baseline |
 | `poll-telegram-updates` | every 5 seconds | Weight approve/reject keyboard |
+| `loss-feedback-check` | */30 14-21 Mon-Fri | Phase B: detect loss patterns → adjust threshold/regime scale |
+| `counterfactual-worker` | 22:45 daily | Phase C: compute 1h counterfactual returns for SKIP rows |
 
 ---
 
@@ -445,14 +510,16 @@ CREATE TABLE decay_reports (
 
 See `README.md` → *Pre-Live Blockers* section for the authoritative list of critical bugs.
 
-### Phase A + Governance Known Limitations
+### Phase A + B + C Known Limitations
 
 | Gap | Description | Planned |
 |-----|-------------|---------|
-| NULL P&L on notional orders | `qty` can be NULL at stop-loss close if fill hasn't been reconciled; `reconcile_trade_fills` window is 24h | Phase B: use Alpaca position qty at close |
-| Vol targeting not active | `PortfolioVolTargeter` is instantiated in `portfolio_scheduler.py` but `strategy_returns` is not passed to `run_cycle()` — vol scaling branch never executes | Phase B/C: wire strategy returns from DB |
-| Strategies API placeholder | `GET /api/strategies` equity curves use `random.gauss()`; gate `passed` values are not from actual metrics | Phase C |
+| NULL P&L on notional orders | `qty` can be NULL at stop-loss close if fill hasn't been reconciled; `reconcile_trade_fills` window is 24h | Wire Alpaca position qty at close |
+| Vol targeting not active | `PortfolioVolTargeter` is instantiated in `portfolio_scheduler.py` but `strategy_returns` is not passed to `run_cycle()` — vol scaling branch never executes | Wire strategy returns from DB |
+| Strategies API placeholder | `GET /api/strategies` equity curves use `random.gauss()`; gate `passed` values are not from actual metrics | Phase D |
 | Analytics tab empty on fresh deploy | All analytics charts show "No data yet" until closed trades accumulate in the `trades` table | Operational |
-| S4 no dedicated gate report | `reports/s4_backtest/` does not exist; S4 allocation capped at 10% until this is produced | Phase B/C research |
+| Auto-Improve counterfactual empty | Phase C data requires at least one nightly run of `counterfactual-worker` after SKIP decisions are recorded | Operational |
+| S4 no dedicated gate report | `reports/s4_backtest/` does not exist; S4 allocation capped at 10% until this is produced | Research |
 | S2 proxy vs real options | Current S2 is an equity proxy (overnight gap); actual cash-secured short put needs options chain data + IBKR adapter | Phase D |
 | ConstraintEnforcer loses sleeve provenance | Final merged orders have `strategy_id="merged"`; per-sleeve exposure constraints cannot be enforced | Future |
+| Feedback loop blind to S1 | `run_loss_feedback_check` reads `trades` table which today is populated only by `run-execution` (S4 flow). Portfolio-cycle trades not yet written to `trades`. | Wire portfolio_scheduler to open/close_trade |

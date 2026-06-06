@@ -1,10 +1,23 @@
-"""Alpaca positions and order history endpoints."""
+"""Alpaca positions, order history, and trade analytics endpoints.
+
+Route prefix: /api
+
+Trade analytics (Phase A):
+  GET /api/trades/analytics/by-symbol
+  GET /api/trades/analytics/by-dimension?dim=regime|hour|score|holdtime
+
+Feedback loop (Phase B):
+  GET /api/feedback/status   — current Redis-adjusted threshold + regime scale
+
+Counterfactual (Phase C):
+  GET /api/trades/analytics/counterfactual   — aggregate opportunity cost stats
+"""
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.api.auth import require_api_key
-from src.api.deps import get_alpaca_trading_client, get_pg_store
+from src.api.deps import get_alpaca_trading_client, get_pg_store, get_redis_store
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
 
@@ -114,6 +127,48 @@ def get_analytics_by_dimension(
         "holdtime": pg.fetch_analytics_by_hold_time,
     }
     return dispatch[dim](limit_days=days)
+
+
+@router.get("/trades/analytics/counterfactual")
+def get_counterfactual_summary(
+    pg: Annotated[object, Depends(get_pg_store)],
+    days: int = Query(default=7, ge=1, le=90),
+) -> list[dict]:
+    """Aggregate counterfactual (opportunity cost) stats per decision type.
+
+    Returns one row per decision type (SKIP_EMA, SKIP_CAP) with:
+      - total_skips: how many decisions were skipped
+      - computed: how many have a 1h forward return computed
+      - avg_return: average 1h return if we had entered
+      - pct_profitable: fraction of skips that would have been profitable
+      - sum_positive_returns: total upside we missed
+    """
+    return pg.fetch_counterfactual_summary(days=days)
+
+
+@router.get("/feedback/status")
+def get_feedback_status(
+    redis: Annotated[object, Depends(get_redis_store)],
+) -> dict:
+    """Current loss-feedback adjustments active in Redis (Phase B).
+
+    Returns the live threshold override and regime scale factor.
+    If no adjustment is active, returns baseline defaults.
+    """
+    from src.workers.execution import ENTRY_THRESHOLD
+    threshold = redis.get_feedback_entry_threshold()
+    scale = redis.get_feedback_regime_scale()
+    state = redis.get_feedback_state() or {}
+    return {
+        "entry_threshold": threshold if threshold is not None else ENTRY_THRESHOLD,
+        "entry_threshold_baseline": ENTRY_THRESHOLD,
+        "regime_scale": scale if scale is not None else 1.0,
+        "adjustment_active": threshold is not None or scale is not None,
+        "last_adjustment_ts": state.get("last_adjustment_ts"),
+        "last_reason": state.get("reason"),
+        "consecutive_losses": state.get("consecutive_losses"),
+        "rolling_net_pnl": state.get("rolling_net_pnl"),
+    }
 
 
 @router.get("/trades/postmortem/{trade_id}")
