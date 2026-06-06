@@ -302,6 +302,104 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    # --- Counterfactual (Phase C) ---
+
+    def fetch_skip_decisions_without_counterfactual(
+        self,
+        days_back: int = 7,
+        limit: int = 500,
+    ) -> list[dict]:
+        """Return SKIP_EMA and SKIP_CAP rows from the last N days that have no counterfactual yet."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT id, tick_time, symbol, score, regime_mult, decision
+                       FROM execution_decisions
+                       WHERE decision IN ('SKIP_EMA', 'SKIP_CAP')
+                         AND counterfactual_computed_at IS NULL
+                         AND tick_time >= now() - (%s || ' days')::interval
+                       ORDER BY tick_time DESC
+                       LIMIT %s""",
+                    (str(days_back), limit),
+                )
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception:
+            conn.rollback()
+            raise
+
+    def bulk_set_counterfactual(
+        self,
+        updates: list[tuple],
+    ) -> int:
+        """Bulk-write counterfactual_return_1h and counterfactual_computed_at.
+
+        Args:
+            updates: list of (decision_id, return_1h_or_None, computed_at)
+        Returns:
+            Number of rows updated.
+        """
+        if not updates:
+            return 0
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    """UPDATE execution_decisions
+                       SET counterfactual_return_1h = %s,
+                           counterfactual_computed_at = %s
+                       WHERE id = %s""",
+                    [(ret, ts, did) for did, ret, ts in updates],
+                )
+                count = cur.rowcount
+            conn.commit()
+            return count
+        except Exception:
+            conn.rollback()
+            raise
+
+    _COUNTERFACTUAL_SUMMARY_SQL = """
+        SELECT
+            decision,
+            COUNT(*) AS total_skips,
+            COUNT(counterfactual_return_1h) AS computed,
+            COALESCE(AVG(counterfactual_return_1h), 0) AS avg_return,
+            COALESCE(
+                SUM(CASE WHEN counterfactual_return_1h > 0 THEN 1 ELSE 0 END)::float
+                / NULLIF(COUNT(counterfactual_return_1h), 0),
+                0
+            ) AS pct_profitable,
+            COALESCE(SUM(CASE WHEN counterfactual_return_1h > 0 THEN counterfactual_return_1h ELSE 0 END), 0)
+                AS sum_positive_returns
+        FROM execution_decisions
+        WHERE decision IN ('SKIP_EMA', 'SKIP_CAP')
+          AND tick_time >= now() - (%s || ' days')::interval
+        GROUP BY decision
+        ORDER BY decision
+    """
+
+    def fetch_counterfactual_summary(self, days: int = 7) -> list[dict]:
+        """Return aggregate counterfactual stats per decision type."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._COUNTERFACTUAL_SUMMARY_SQL, (str(days),))
+                cols = [d[0] for d in cur.description]
+                rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+            return [
+                {
+                    **row,
+                    "avg_return": round(float(row["avg_return"]), 4),
+                    "pct_profitable": round(float(row["pct_profitable"]), 4),
+                    "sum_positive_returns": round(float(row["sum_positive_returns"]), 4),
+                }
+                for row in rows
+            ]
+        except Exception:
+            conn.rollback()
+            raise
+
     _INSERT_TRADE = """
         INSERT INTO trades
             (symbol, signal_id, decision_id, entry_order_id,

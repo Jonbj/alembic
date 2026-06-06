@@ -1375,3 +1375,167 @@ def run_loss_feedback_check() -> dict:
                     log.warning("Telegram alert failed for feedback recovery: %s", exc)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Counterfactual / Opportunity Cost — Phase C
+# ---------------------------------------------------------------------------
+
+_COUNTERFACTUAL_HORIZON_MIN = 60  # forward window in minutes
+
+
+def _compute_1h_return(
+    bars_by_minute: dict,
+    tick_time: datetime,
+    horizon_min: int = _COUNTERFACTUAL_HORIZON_MIN,
+) -> float | None:
+    """Compute (price_at_T+horizon - price_at_T) / price_at_T from a minute-bar dict.
+
+    Args:
+        bars_by_minute: {truncated_minute_utc: close_price}
+        tick_time: decision timestamp (UTC)
+        horizon_min: forward window in minutes
+
+    Returns:
+        Float return, or None if bars unavailable at T or T+horizon.
+    """
+    def _floor_minute(ts: datetime) -> datetime:
+        return ts.replace(second=0, microsecond=0)
+
+    entry_key = _floor_minute(tick_time)
+    exit_key = _floor_minute(tick_time + timedelta(minutes=horizon_min))
+
+    entry_price = bars_by_minute.get(entry_key)
+    exit_price = bars_by_minute.get(exit_key)
+
+    if entry_price is None or exit_price is None or entry_price == 0:
+        return None
+    return (exit_price - entry_price) / entry_price
+
+
+@app.task(name="src.workers.performance.run_counterfactual_worker")
+def run_counterfactual_worker() -> dict:
+    """Compute 1-hour counterfactual returns for SKIP_EMA and SKIP_CAP decisions.
+
+    For each skipped decision, answers: "if we had entered at tick_time,
+    what would the 1-hour return have been?"
+
+    Scheduled daily at 22:45 UTC (after market close and forward-return worker).
+    Only processes decisions from the last 7 days with no counterfactual yet.
+
+    Returns:
+        Dict: updated, skipped_no_data, errors, total_decisions.
+    """
+    import psycopg2
+    from collections import defaultdict
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+
+    stats: dict = {"updated": 0, "skipped_no_data": 0, "errors": 0, "total_decisions": 0}
+
+    if not config.ALPACA_API_KEY or not config.ALPACA_SECRET_KEY:
+        log.warning("Alpaca credentials not configured — skipping counterfactual worker")
+        return {**stats, "skipped": True, "reason": "no_credentials"}
+
+    pg_conn = psycopg2.connect(config.DATABASE_URL)
+    pg = PostgreSQLStore(conn=pg_conn)
+
+    try:
+        rows = pg.fetch_skip_decisions_without_counterfactual(days_back=7, limit=500)
+        if not rows:
+            log.info("No SKIP decisions pending counterfactual")
+            return stats
+
+        stats["total_decisions"] = len(rows)
+        log.info("Counterfactual worker: %d decisions to process", len(rows))
+
+        # Group by symbol to minimise Alpaca API calls.
+        by_symbol: dict[str, list[dict]] = defaultdict(list)
+        for row in rows:
+            by_symbol[row["symbol"]].append(row)
+
+        data_client = StockHistoricalDataClient(
+            api_key=config.ALPACA_API_KEY,
+            secret_key=config.ALPACA_SECRET_KEY,
+        )
+
+        computed_at = datetime.now(timezone.utc)
+        updates: list[tuple] = []  # (decision_id, return_1h_or_None, computed_at)
+
+        for symbol, decisions in by_symbol.items():
+            try:
+                tick_times = [
+                    d["tick_time"] if d["tick_time"].tzinfo is not None
+                    else d["tick_time"].replace(tzinfo=timezone.utc)
+                    for d in decisions
+                ]
+                start = min(tick_times) - timedelta(minutes=5)
+                end = max(tick_times) + timedelta(minutes=_COUNTERFACTUAL_HORIZON_MIN + 10)
+
+                req = StockBarsRequest(
+                    symbol_or_symbols=symbol,
+                    timeframe=TimeFrame.Minute,
+                    start=start,
+                    end=end,
+                )
+                bars_df = data_client.get_stock_bars(req).df
+
+                if bars_df.empty:
+                    log.debug("No 1-min bars for %s — marking as no_data", symbol)
+                    for d in decisions:
+                        updates.append((d["id"], None, computed_at))
+                    stats["skipped_no_data"] += len(decisions)
+                    continue
+
+                # Flatten multi-index (symbol, timestamp) → timestamp only.
+                if hasattr(bars_df.index, "levels"):
+                    sym_vals = bars_df.index.get_level_values(0)
+                    if symbol in sym_vals:
+                        bars_df = bars_df.loc[symbol]
+                    else:
+                        for d in decisions:
+                            updates.append((d["id"], None, computed_at))
+                        stats["skipped_no_data"] += len(decisions)
+                        continue
+
+                bars_df = bars_df.sort_index()
+
+                # Build minute → close lookup with UTC-normalised keys.
+                bars_by_minute: dict[datetime, float] = {}
+                for idx, row in bars_df.iterrows():
+                    ts = idx if hasattr(idx, "tzinfo") else idx.to_pydatetime()
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                    key = ts.replace(second=0, microsecond=0)
+                    bars_by_minute[key] = float(row["close"])
+
+                for d in decisions:
+                    tick = d["tick_time"]
+                    if tick.tzinfo is None:
+                        tick = tick.replace(tzinfo=timezone.utc)
+                    ret = _compute_1h_return(bars_by_minute, tick)
+                    updates.append((d["id"], ret, computed_at))
+                    if ret is None:
+                        stats["skipped_no_data"] += 1
+                    else:
+                        stats["updated"] += 1
+
+            except Exception as e:
+                log.warning("Counterfactual: failed to fetch bars for %s — %s", symbol, e)
+                for d in decisions:
+                    updates.append((d["id"], None, computed_at))
+                stats["errors"] += len(decisions)
+
+        if updates:
+            pg.bulk_set_counterfactual(updates)
+
+        log.info(
+            "Counterfactual worker complete: updated=%d skipped=%d errors=%d",
+            stats["updated"], stats["skipped_no_data"], stats["errors"],
+        )
+
+    finally:
+        pg_conn.close()
+
+    return stats

@@ -151,5 +151,11 @@ app.conf.beat_schedule = {
         "task": "src.workers.performance.run_loss_feedback_check",
         "schedule": crontab(minute="*/30", hour="14-21", day_of_week="1-5"),
     },
+    # Counterfactual worker at 22:45 UTC daily (after risk monitor at 22:30).
+    # Computes 1-hour forward return for SKIP_EMA and SKIP_CAP decisions.
+    "counterfactual-worker": {
+        "task": "src.workers.performance.run_counterfactual_worker",
+        "schedule": crontab(hour=22, minute=45),
+    },
 }
 
