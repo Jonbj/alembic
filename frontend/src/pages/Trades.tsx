@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  LineChart, Line, BarChart, Bar, Cell,
+  LineChart, Line, BarChart, Bar,
   XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
 } from 'recharts'
 import { fetchTrades, fetchTradesSummary, type Trade, type TradeStatus, type SummaryPeriod } from '@/api/trades'
@@ -38,6 +38,11 @@ function AnalyticsChart({ title, data, dataKey = 'avg_net_pnl', colorBySign = tr
   dataKey?: keyof DimensionRow
   colorBySign?: boolean
 }) {
+  const coloredData = data.map(row => ({
+    ...row,
+    fill: !colorBySign || Number(row[dataKey]) >= 0 ? '#22c55e' : '#ef4444',
+  }))
+
   if (!data.length) {
     return (
       <div style={{ background: '#1e293b', borderRadius: 8, padding: 16 }}>
@@ -50,19 +55,12 @@ function AnalyticsChart({ title, data, dataKey = 'avg_net_pnl', colorBySign = tr
     <div style={{ background: '#1e293b', borderRadius: 8, padding: 16 }}>
       <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>{title}</div>
       <ResponsiveContainer width="100%" height={180}>
-        <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+        <BarChart data={coloredData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
           <XAxis dataKey="label" tick={{ fill: '#94a3b8', fontSize: 11 }} />
           <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => `$${v}`} />
           <Tooltip formatter={(v) => [`$${Number(v).toFixed(2)}`, String(dataKey)]} />
-          <Bar dataKey={String(dataKey)}>
-            {data.map((row, i) => (
-              <Cell
-                key={i}
-                fill={!colorBySign || Number(row[dataKey]) >= 0 ? '#22c55e' : '#ef4444'}
-              />
-            ))}
-          </Bar>
+          <Bar dataKey={String(dataKey)} />
         </BarChart>
       </ResponsiveContainer>
     </div>
