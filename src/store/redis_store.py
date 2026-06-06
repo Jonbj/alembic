@@ -522,6 +522,54 @@ class RedisStore:
         self._r.setex("qc:sizing_multiplier", ttl, str(value))
 
     # =========================================================================
+    # LOSS FEEDBACK ADJUSTMENTS
+    # =========================================================================
+
+    def set_feedback_entry_threshold(self, value: float, ttl: int) -> None:
+        """Override ENTRY_THRESHOLD in Redis. Execution worker reads this at cycle start."""
+        self._r.setex("feedback:entry_threshold", ttl, str(value))
+
+    def get_feedback_entry_threshold(self) -> float | None:
+        """Return feedback-adjusted entry threshold, or None if not set."""
+        raw = self._r.get("feedback:entry_threshold")
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (ValueError, TypeError):
+            return None
+
+    def set_feedback_regime_scale(self, value: float, ttl: int) -> None:
+        """Override regime multiplier scale factor in Redis (0.0–1.0)."""
+        self._r.setex("feedback:regime_scale", ttl, str(value))
+
+    def get_feedback_regime_scale(self) -> float | None:
+        """Return feedback regime scale factor, or None if not set (default 1.0)."""
+        raw = self._r.get("feedback:regime_scale")
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (ValueError, TypeError):
+            return None
+
+    def set_feedback_state(self, state: dict, ttl: int) -> None:
+        """Persist full feedback audit state (consecutive_losses, rolling_pnl, timestamp)."""
+        import json
+        self._r.setex("feedback:state", ttl, json.dumps(state))
+
+    def get_feedback_state(self) -> dict | None:
+        """Return last feedback audit state, or None if absent."""
+        import json
+        raw = self._r.get("feedback:state")
+        if raw is None:
+            return None
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+
+    # =========================================================================
     # OPERATING MODE
     # =========================================================================
 

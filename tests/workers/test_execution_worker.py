@@ -28,6 +28,9 @@ def _make_redis(signal: dict | None, killswitch: bool = False, regime_mult: floa
     regime = MagicMock()
     regime.multiplier = regime_mult
     redis_store.get_regime.return_value = regime
+    # Feedback keys: None means use defaults (no active adjustment)
+    redis_store.get_feedback_entry_threshold.return_value = None
+    redis_store.get_feedback_regime_scale.return_value = None
     return redis_store
 
 
@@ -472,6 +475,8 @@ class TestDecisionLogging:
         mock_redis.is_killswitch_active.return_value = False
         mock_redis.get_regime.return_value = MagicMock(multiplier=1.0)
         mock_redis.read_sentiment.return_value = self._make_signal(score=0.5)
+        mock_redis.get_feedback_entry_threshold.return_value = None
+        mock_redis.get_feedback_regime_scale.return_value = None
 
         mock_trading = MagicMock()
         mock_trading.get_account.return_value = self._make_account()
@@ -569,6 +574,8 @@ class TestDecisionLogging:
         mock_redis.is_killswitch_active.return_value = False
         mock_redis.get_regime.return_value = MagicMock(multiplier=1.0)
         mock_redis.read_sentiment.return_value = self._make_signal(score=0.5)
+        mock_redis.get_feedback_entry_threshold.return_value = None
+        mock_redis.get_feedback_regime_scale.return_value = None
 
         mock_trading = MagicMock()
         mock_trading.get_account.return_value = self._make_account()

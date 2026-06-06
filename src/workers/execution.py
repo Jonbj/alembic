@@ -47,7 +47,7 @@ log = logging.getLogger(__name__)
 
 _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
 
-ENTRY_THRESHOLD = 0.3
+ENTRY_THRESHOLD = 0.3           # module-level baseline; overridable via Redis feedback keys
 MAX_POSITION_PCT = 0.10
 MAX_CYCLE_NOTIONAL_PCT = 0.20  # cap total notional placed per execution cycle
 STOP_LOSS_PCT = 0.02
@@ -79,6 +79,29 @@ def _load_risk_params() -> tuple[float, float]:
     except Exception as exc:
         log.warning("Could not load risk params from %s (%s) — using defaults", _TRADING_YAML, exc)
         return STOP_LOSS_PCT, MAX_DRAWDOWN_PCT
+def _load_entry_threshold(redis_store: "RedisStore") -> float:
+    """Return effective entry threshold: Redis feedback override, else module constant."""
+    try:
+        value = redis_store.get_feedback_entry_threshold()
+        if value is not None:
+            log.debug("Using feedback-adjusted ENTRY_THRESHOLD=%.3f from Redis", value)
+            return value
+    except Exception as exc:
+        log.warning("Could not read feedback:entry_threshold (%s) — using default", exc)
+    return ENTRY_THRESHOLD
+
+
+def _load_feedback_regime_scale(redis_store: "RedisStore") -> float:
+    """Return feedback regime scale factor (0.0–1.0); defaults to 1.0 (no adjustment)."""
+    try:
+        value = redis_store.get_feedback_regime_scale()
+        if value is not None:
+            return float(value)
+    except Exception as exc:
+        log.warning("Could not read feedback:regime_scale (%s) — using 1.0", exc)
+    return 1.0
+
+
 SIGNAL_MAX_AGE_MIN = 30
 EMA_PERIOD = 20
 _EMA_BARS_FETCH = EMA_PERIOD + 10  # extra bars to warm up EMA
@@ -325,6 +348,9 @@ def run_execution_cycle(
         return stats
 
     regime_mult = _regime_multiplier(redis_store, notifier)
+    feedback_scale = _load_feedback_regime_scale(redis_store)
+    regime_mult = regime_mult * feedback_scale
+    entry_threshold = _load_entry_threshold(redis_store)
 
     # Build EMA cache once for all symbols (one batch API call)
     market_cache = _build_market_cache(symbols, data_client) if data_client else {}
@@ -456,7 +482,7 @@ def run_execution_cycle(
                     # Position open and healthy — idempotent, no pyramiding
                     stats["skipped_position"] += 1
                     log.debug("Position already open for %s — skipping entry", symbol)
-                    if score > ENTRY_THRESHOLD:
+                    if score > entry_threshold:
                         _write_decision(pg_store, tick_time, symbol, signal_id, score, regime_mult,
                                         ema_pass=True, decision="SKIP_POSITION")
                 continue
@@ -465,12 +491,12 @@ def run_execution_cycle(
             if pending_orders is None or symbol in pending_orders:
                 log.debug("Pending order check unavailable or order exists for %s — skip", symbol)
                 stats["skipped_position"] += 1
-                if score > ENTRY_THRESHOLD:
+                if score > entry_threshold:
                     _write_decision(pg_store, tick_time, symbol, signal_id, score, regime_mult,
                                     ema_pass=True, decision="SKIP_POSITION")
                 continue
 
-            if score <= ENTRY_THRESHOLD:
+            if score <= entry_threshold:
                 log.debug("Signal below threshold for %s (score=%.3f)", symbol, score)
                 continue
 

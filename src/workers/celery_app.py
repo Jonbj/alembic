@@ -144,5 +144,12 @@ app.conf.beat_schedule = {
         "task": "src.workers.risk_monitor_task.compute_risk_report",
         "schedule": crontab(hour=22, minute=30),
     },
+    # Loss feedback check every 30 min during market hours (Mon-Fri 14:00-21:00 UTC).
+    # Detects N consecutive losses or negative rolling P&L → raises ENTRY_THRESHOLD,
+    # reduces regime scale, sends Telegram alert. Respects 4h cooldown internally.
+    "loss-feedback-check": {
+        "task": "src.workers.performance.run_loss_feedback_check",
+        "schedule": crontab(minute="*/30", hour="14-21", day_of_week="1-5"),
+    },
 }
 

@@ -147,6 +147,19 @@ schedule:
   performance_worker_daily: "0 22 * * *"  # 22:00 UTC
   budget_reset_cron: "0 0 * * *"  # Midnight UTC
 
+loss_feedback:
+  enabled: true
+  consecutive_loss_trigger: 3    # N consecutive losses → raise threshold
+  rolling_pnl_window: 10         # trades to sum for rolling P&L check
+  threshold_step: 0.05           # amount to raise ENTRY_THRESHOLD per trigger
+  threshold_max: 0.60            # ceiling for raised threshold
+  threshold_baseline: 0.30       # baseline to recover toward
+  regime_scale_factor: 0.80      # multiply regime scale by this on trigger
+  regime_min_scale: 0.20         # floor for regime scale
+  cooldown_hours: 4              # minimum hours between adjustments
+  recovery_win_streak: 5         # consecutive wins → step threshold back down
+  feedback_ttl_hours: 48         # Redis TTL for feedback keys
+
 retention:
   news_log_days: 180      # delete news_log rows older than N days
   llm_responses_days: 365 # delete llm_responses rows older than N days
