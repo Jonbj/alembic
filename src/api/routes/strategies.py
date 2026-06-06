@@ -1,12 +1,15 @@
 """Strategy endpoints with accurate data from backtest results and config."""
 import logging
 import math
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from src.api.auth import require_api_key
 
 log = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/strategies")
+router = APIRouter(prefix="/api/strategies", dependencies=[Depends(require_api_key)])
 
 
 def _check_live_data(strategy_id: str) -> bool:

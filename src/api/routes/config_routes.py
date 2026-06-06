@@ -1,4 +1,5 @@
 """Runtime config read/write via config/trading.yaml."""
+from pathlib import Path
 from typing import Annotated
 
 import yaml
@@ -8,7 +9,7 @@ from src.api.auth import require_api_key
 
 router = APIRouter(prefix="/api")
 
-_CONFIG_PATH = "config/trading.yaml"
+_CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "trading.yaml"
 
 
 def _read_config() -> dict:
@@ -16,7 +17,7 @@ def _read_config() -> dict:
         with open(_CONFIG_PATH) as f:
             return yaml.safe_load(f) or {}
     except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="config/trading.yaml not found")
+        raise HTTPException(status_code=500, detail=f"{_CONFIG_PATH} not found")
 
 
 @router.get("/config")

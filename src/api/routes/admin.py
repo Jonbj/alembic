@@ -96,24 +96,45 @@ async def set_llm_models(
     return {"llm_models": req.models.lower(), "status": "ok"}
 
 
+class KillswitchRequest(BaseModel):
+    """Optional body for POST /killswitch."""
+    reason: str = "manual operator halt via API"
+
+
+@router.get("/killswitch")
+async def get_killswitch(
+    store: Annotated[RedisStore, Depends(get_redis_store)],
+    _: Annotated[str, Depends(require_api_key)],
+) -> dict:
+    """Return current kill-switch state, activation time, and reason."""
+    active = store.is_killswitch_active()
+    detail = store.get_killswitch_reason()
+    return {
+        "active": active,
+        "activated_at": detail.get("activated_at") if detail else None,
+        "reason": detail.get("reason") if detail else None,
+    }
+
+
 @router.post("/killswitch")
 async def activate_killswitch(
     store: Annotated[RedisStore, Depends(get_redis_store)],
-    api_key: Annotated[str, Depends(require_api_key)]
+    _: Annotated[str, Depends(require_api_key)],
+    req: KillswitchRequest = KillswitchRequest(),
 ) -> dict:
-    """Activate the emergency killswitch.
-
-    Immediately halts all trading activity by:
-    1. Setting killswitch_active flag in Redis
-    2. Setting mode to 'halted'
-
-    Args:
-        store: RedisStore dependency
-        api_key: Validated API key
-
-    Returns:
-        Confirmation of killswitch activation
-    """
-    store.activate_operator_halt("manual operator halt via API")
+    """Activate the emergency kill-switch with an optional operator-supplied reason."""
+    store.activate_operator_halt(req.reason)
     store.set_mode("halted")
-    return {"killswitch": "activated", "mode": "halted"}
+    return {"killswitch": "activated", "mode": "halted", "reason": req.reason}
+
+
+@router.delete("/killswitch")
+async def deactivate_killswitch(
+    store: Annotated[RedisStore, Depends(get_redis_store)],
+    _: Annotated[str, Depends(require_api_key)],
+) -> dict:
+    """Deactivate the kill-switch (both drawdown-triggered and operator halt)."""
+    store.deactivate_killswitch()
+    store.deactivate_operator_halt()
+    store.set_mode("paper")
+    return {"killswitch": "deactivated", "mode": "paper"}

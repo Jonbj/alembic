@@ -5,6 +5,7 @@ Runs daily at 03:30 UTC via Celery beat. Default thresholds from config/trading.
   - llm_responses: 365 days
 """
 import logging
+from pathlib import Path
 
 import psycopg2
 
@@ -13,6 +14,8 @@ from src.store.pg_store import PostgreSQLStore
 from src.workers.celery_app import app
 
 log = logging.getLogger(__name__)
+
+_TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
 
 _DEFAULT_NEWS_DAYS = 180
 _DEFAULT_LLM_DAYS = 365
@@ -43,7 +46,8 @@ def run_retention_sweep() -> dict:
 def _load_retention_config() -> dict:
     try:
         import yaml
-        with open("config/trading.yaml") as f:
+        with open(_TRADING_YAML) as f:
             return yaml.safe_load(f).get("retention", {})
     except Exception:
+        log.warning("Could not load retention config from %s — using defaults", _TRADING_YAML)
         return {}

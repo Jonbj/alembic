@@ -5,9 +5,9 @@
 # Alembic — Technical Architecture
 
 **Technical Architecture Document**
-**Version:** 4.0.0
-**Date:** 2026-06-03
-**Status:** Phase G Complete — Portfolio Orchestrator + Paper Trading Live
+**Version:** 5.0.0
+**Date:** 2026-06-06
+**Status:** Phase A Analytics Complete — Trade Observability + Multi-Dimensional P&L Analytics Live
 
 ---
 
@@ -65,6 +65,20 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 │  Daily 22:30: RiskMonitor → HHI + correlation + drawdown alerts  │
 │  Mon  04:00: WeightOptimiser → LOO ICIR → auto-apply / Telegram  │
 │  Monthly 1st: DecayMonitor → actual vs backtest baseline         │
+└──────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────┐
+│              TRADE OBSERVABILITY & ANALYTICS (Phase A)            │
+│                                                                   │
+│  ExecutionWorker                                                  │
+│    ├── write_execution_decision() → execution_decisions table    │
+│    ├── open_trade() / close_trade() → trades table               │
+│    └── on stop-loss: _maybe_postmortem() → diagnose_loss()       │
+│                           → trades.postmortem_diagnosis           │
+│                                                                   │
+│  Analytics API (on-read, no materialization)                     │
+│    └── 5 GROUP BY queries over trades + sentiment_signals        │
+│        (by symbol, regime, hour-of-day, score bucket, hold time) │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -142,12 +156,18 @@ Each strategy outputs target weights (fractions of NAV). These are merged with `
 |-----------|------|------|
 | `ExecutionWorker` | `src/workers/execution.py` | Sequential safety checklist → Alpaca orders |
 | `AlpacaBroker` | `src/brokers/ibkr_adapter.py` | Order placement adapter |
+| `_write_decision` | `src/workers/execution.py` | Log each scored symbol's outcome to `execution_decisions` |
+| `_maybe_postmortem` | `src/workers/execution.py` | On stop-loss close: gate → diagnose → write `postmortem_diagnosis` |
+| `_regime_label` | `src/workers/execution.py` | Convert numeric `regime_mult` to string label for `TradeContext` |
 
 Execution checklist (per tick):
 1. Kill-switch check (abort if active)
-2. EMA20 cache refresh (yfinance)
+2. EMA20 cache refresh (yfinance, IEX feed on paper tier)
 3. Daily drawdown cap check (≥10% → set kill-switch)
 4. Per-symbol: freshness check → stop-loss → BUY gate → position size × regime multiplier
+5. Write `execution_decisions` row for every symbol that clears `ENTRY_THRESHOLD`
+6. `open_trade()` on BUY fill; `close_trade()` on stop-loss (returns trade id)
+7. `_maybe_postmortem()` after stop-loss close if loss ≥ 3% (or ≥ 2% with low confidence / high std)
 
 ### 2.7 Performance & Monitoring
 
@@ -158,14 +178,70 @@ Execution checklist (per tick):
 | `ICCalculator` | `src/performance/ic.py` | Composite IC B4 with Newey-West HAC standard errors |
 | `WeightOptimiser` | `src/performance/weights.py` | LOO ICIR with guardrails (VIX, drawdown, floor/cap) |
 | `DriftDetector` | `src/performance/drift.py` | PSI + CUSUM signal distribution drift |
-| `PostMortem` | `src/performance/postmortem.py` | Diagnostic on significant drawdown days |
+| `diagnose_loss` | `src/performance/postmortem.py` | 10-category loss diagnosis; called by `_maybe_postmortem` after each stop-loss |
+| `should_trigger_postmortem` | `src/performance/postmortem.py` | Gate: loss ≥ 3%, or loss ≥ 2% with low confidence or high ensemble_std |
 
-### 2.8 Storage
+**Postmortem diagnosis categories:** `LOW_SCORE_ENTRY`, `LOW_CONFIDENCE_PASSED`, `ADVERSE_REGIME`, `HIGH_VOLATILITY_EXIT`, `SIGNAL_TOO_OLD`, `HIGH_ENSEMBLE_DIVERGENCE`, `RISK_OFF_REGIME`, `STOP_LOSS_TIGHT`, `OVERNIGHT_RISK`, `UNKNOWN`
+
+### 2.8 Trade Analytics Engine (Phase A)
+
+Analytics are computed **on-read** via SQL GROUP BY — no materialized tables. All five queries run over `trades` (and `sentiment_signals` for score-bucket dimension) filtered by `exit_time >= now() - N days`.
+
+| Dimension | Grouping | Output |
+|-----------|----------|--------|
+| By Symbol | `trades.symbol` | `label, trade_count, win_rate, avg_net_pnl, total_net_pnl` |
+| By Regime | `regime_mult` CASE bucket | same + regime label (bear/caution/neutral/bull/strong_bull) |
+| By Hour | `EXTRACT(HOUR FROM entry_time AT TIME ZONE 'America/New_York')` | hour 9–16 EST |
+| By Score Bucket | `FLOOR(ss.score * 10)` 0.1-wide bins | score range label (0.3–0.4, etc.) |
+| By Hold Time | `exit_time - entry_time` CASE bucket | `<1h` / `1-4h` / `4-8h` / `extended` / `overnight` |
+
+### 2.9 Storage
 
 | Store | Technology | Schema |
 |-------|------------|--------|
 | `RedisStore` | Redis 7 | `sentiment:signal:{sym}` TTL 4h; `killswitch_active`; `regime_multiplier`; `ensemble:weights:current`; `system:mode` |
-| `PostgreSQLStore` | PostgreSQL 16 | `sentiment_signals`, `llm_responses`, `news_log`, `weight_update_log`, `backtest_signals`, `portfolio_cycles`, `risk_reports`, `decay_reports` |
+| `PostgreSQLStore` | PostgreSQL 16 | `sentiment_signals`, `llm_responses`, `news_log`, `weight_update_log`, `backtest_signals`, `portfolio_cycles`, `risk_reports`, `decay_reports`, `execution_decisions`, `trades` |
+
+**New tables (migration 016–017):**
+
+```sql
+-- execution_decisions: one row per symbol per tick (only symbols above ENTRY_THRESHOLD)
+CREATE TABLE execution_decisions (
+    id          BIGSERIAL PRIMARY KEY,
+    tick_time   TIMESTAMPTZ NOT NULL,
+    symbol      VARCHAR(20) NOT NULL,
+    signal_id   BIGINT REFERENCES sentiment_signals(id),
+    score       DOUBLE PRECISION NOT NULL,
+    regime_mult DOUBLE PRECISION NOT NULL,
+    ema_pass    BOOLEAN NOT NULL,
+    decision    VARCHAR(20) NOT NULL,   -- BUY, SKIP_EMA, SKIP_CAP, SKIP_POSITION, STOP_LOSS
+    order_id    TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- trades: one row per round-trip (open → close)
+CREATE TABLE trades (
+    id               BIGSERIAL PRIMARY KEY,
+    symbol           VARCHAR(20) NOT NULL,
+    signal_id        BIGINT REFERENCES sentiment_signals(id),
+    decision_id      BIGINT REFERENCES execution_decisions(id),
+    entry_order_id   TEXT NOT NULL,
+    entry_price      DOUBLE PRECISION,
+    entry_time       TIMESTAMPTZ NOT NULL,
+    entry_notional   DOUBLE PRECISION NOT NULL,
+    score            DOUBLE PRECISION NOT NULL,
+    regime_mult      DOUBLE PRECISION NOT NULL,
+    exit_price       DOUBLE PRECISION,
+    exit_time        TIMESTAMPTZ,
+    exit_reason      VARCHAR(20),       -- stop_loss, take_profit, manual
+    qty              DOUBLE PRECISION,
+    gross_pnl        DOUBLE PRECISION,
+    slippage_est     DOUBLE PRECISION,
+    net_pnl          DOUBLE PRECISION,
+    postmortem_diagnosis TEXT,          -- added migration 017; NULL if no postmortem triggered
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
 
 ---
 
@@ -197,8 +273,11 @@ ExecutionWorker (every 15 min)
     ├── For each symbol in watchlist:
     │   ├── GET sentiment:signal:{sym}
     │   ├── freshness check (< 30 min)
+    │   ├── stop-loss check → close_trade() → _maybe_postmortem()
     │   ├── BUY gate: score > 0.3 AND price > EMA20
-    │   └── order_notional = base × regime_multiplier
+    │   ├── order_notional = base × regime_multiplier
+    │   └── write_execution_decision() (one row per scored symbol)
+    ├── open_trade() on BUY fill
     └── Alpaca SDK market order
     │
     ▼
@@ -353,3 +432,11 @@ CREATE TABLE decay_reports (
 
 See `README.md` → *Pre-Live Blockers* section for the authoritative list of critical bugs
 (pool leak, weights never read from Redis, LOO ICIR data source, duplicate BUY orders).
+
+### Phase A Known Limitations
+
+| Gap | Description | Planned |
+|-----|-------------|---------|
+| NULL P&L on notional orders | `qty` can be NULL at stop-loss close if fill hasn't been reconciled; `reconcile_trade_fills` window is 24h | Phase B: use Alpaca position qty at close |
+| Strategies data placeholder | `GET /api/strategies` equity curves are generated with `random.gauss()` at import time; gate `passed` values don't derive from actual metrics | Phase C / separate sprint |
+| Analytics tab empty on fresh deploy | All analytics charts show "No data yet" until closed trades accumulate in the `trades` table | Operational — populates naturally |

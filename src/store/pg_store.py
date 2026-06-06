@@ -568,8 +568,8 @@ class PostgreSQLStore:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT id, title, url, source, ticker, raw_sentiment, created_at AS fetched_at "
-                    f"FROM news_log {where} ORDER BY created_at DESC LIMIT %s",
+                    f"SELECT id, title, url, source, ticker, raw_sentiment, fetched_at "
+                    f"FROM news_log {where} ORDER BY fetched_at DESC LIMIT %s",
                     params,
                 )
                 cols = [d[0] for d in cur.description]

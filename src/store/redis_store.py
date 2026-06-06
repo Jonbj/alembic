@@ -201,14 +201,15 @@ class RedisStore:
         return bool(self._r.get("killswitch_active")) or bool(self._r.get("system:halted_by_operator"))
 
     def get_killswitch_reason(self) -> dict | None:
-        """Get kill-switch activation reason."""
-        data = self._r.get("killswitch_reason")
-        if data is None:
-            return None
-        try:
-            return json.loads(data)
-        except json.JSONDecodeError:
-            return None
+        """Get kill-switch activation reason (drawdown-triggered or operator halt)."""
+        for key in ("system:halted_by_operator_reason", "killswitch_reason"):
+            data = self._r.get(key)
+            if data is not None:
+                try:
+                    return json.loads(data)
+                except json.JSONDecodeError:
+                    pass
+        return None
 
     # =========================================================================
     # FALLBACK COUNTER (Circuit Breaker)

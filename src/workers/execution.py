@@ -29,6 +29,7 @@ that don't need alert assertions.
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from redis import Redis
@@ -44,11 +45,28 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+_TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
+
 ENTRY_THRESHOLD = 0.3
 MAX_POSITION_PCT = 0.10
 MAX_CYCLE_NOTIONAL_PCT = 0.20  # cap total notional placed per execution cycle
 STOP_LOSS_PCT = 0.02
 MAX_DRAWDOWN_PCT = 0.10
+
+
+def _load_risk_params() -> tuple[float, float]:
+    """Return (stop_loss_pct, max_drawdown_pct) from trading.yaml, falling back to module defaults."""
+    try:
+        import yaml
+        with open(_TRADING_YAML) as f:
+            cfg = yaml.safe_load(f)
+        risk = cfg.get("risk", {})
+        stop_loss = float(risk.get("stop_loss", STOP_LOSS_PCT))
+        drawdown = float(risk.get("portfolio_drawdown", MAX_DRAWDOWN_PCT))
+        return stop_loss, drawdown
+    except Exception as exc:
+        log.warning("Could not load risk params from %s (%s) — using defaults", _TRADING_YAML, exc)
+        return STOP_LOSS_PCT, MAX_DRAWDOWN_PCT
 SIGNAL_MAX_AGE_MIN = 30
 EMA_PERIOD = 20
 _EMA_BARS_FETCH = EMA_PERIOD + 10  # extra bars to warm up EMA
@@ -280,6 +298,8 @@ def run_execution_cycle(
         "errors": 0,
     }
 
+    stop_loss_pct, max_drawdown_pct = _load_risk_params()
+
     # Kill-switch check — halt all trading if active
     try:
         if redis_store.is_killswitch_active():
@@ -333,8 +353,8 @@ def run_execution_cycle(
         last_equity = float(account.last_equity)
         if last_equity > 0:
             drawdown = (last_equity - portfolio_value) / last_equity
-            if drawdown >= MAX_DRAWDOWN_PCT:
-                reason = f"Daily drawdown {drawdown:.1%} >= {MAX_DRAWDOWN_PCT:.0%} cap"
+            if drawdown >= max_drawdown_pct:
+                reason = f"Daily drawdown {drawdown:.1%} >= {max_drawdown_pct:.0%} cap"
                 redis_store.activate_killswitch(reason, ttl=64800)
                 log.critical("DRAWDOWN CAP: %s — kill-switch activated", reason)
                 _fire_alert(notifier, f"Drawdown cap attivato: {reason}", AlertLevel.CRITICAL)
@@ -373,7 +393,7 @@ def run_execution_cycle(
                 pos = open_positions[symbol]
                 entry_price = float(pos.avg_entry_price)
                 current_price = float(pos.current_price)
-                stop_price = entry_price * (1 - STOP_LOSS_PCT)
+                stop_price = entry_price * (1 - stop_loss_pct)
 
                 if current_price < stop_price:
                     try:
@@ -385,7 +405,7 @@ def run_execution_cycle(
                         )
                         _fire_alert(
                             notifier,
-                            f"🔴 STOP-LOSS {symbol}: entry={entry_price:.2f} current={current_price:.2f} (−{STOP_LOSS_PCT*100:.0f}%)",
+                            f"🔴 STOP-LOSS {symbol}: entry={entry_price:.2f} current={current_price:.2f} (−{stop_loss_pct*100:.0f}%)",
                             AlertLevel.WARNING,
                         )
                         trade_id: "int | None" = None
@@ -485,7 +505,7 @@ def run_execution_cycle(
 
             if price is not None:
                 qty = round(notional / price, 4)
-                stop_price = round(price * (1 - STOP_LOSS_PCT), 2)
+                stop_price = round(price * (1 - stop_loss_pct), 2)
                 order = MarketOrderRequest(
                     symbol=symbol,
                     qty=qty,

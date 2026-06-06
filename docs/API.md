@@ -1,8 +1,8 @@
 # API Reference — Alembic LLM Trading System
 
 **FastAPI REST API**
-**Version:** 3.0.0
-**Updated:** 2026-06-03
+**Version:** 4.0.0
+**Updated:** 2026-06-06
 
 ---
 
@@ -31,6 +31,8 @@ Production:   https://api.your-domain.com
 | `/api/weights/current`, `/api/weights/suggestion` | No | — |
 | `/api/weights/approve` | **Yes** | `X-API-Key` |
 | `/api/admin/*` | **Yes** | `X-API-Key` |
+| `/api/trades/*` | **Yes** | `X-API-Key` |
+| `/api/decisions` | **Yes** | `X-API-Key` |
 | `/api/health` | No | — |
 
 Generate an API key (minimum 32 characters):
@@ -284,6 +286,151 @@ All errors return `{"detail": "..."}`.
 
 ---
 
+---
+
+## Trades & Analytics Endpoints
+
+All require `X-API-Key` header.
+
+### `GET /api/trades`
+
+List closed and/or open trades.
+
+**Query parameters:** `symbol` (optional), `status` (`all` | `open` | `closed`, default `all`), `limit` (default 100, max 500)
+
+**Response 200:**
+```json
+[
+  {
+    "id": 7,
+    "symbol": "NVDA",
+    "signal_id": 42,
+    "decision_id": 18,
+    "entry_order_id": "abc123",
+    "entry_price": 200.0,
+    "entry_time": "2026-06-05T14:30:00Z",
+    "entry_notional": 1000.0,
+    "score": 0.45,
+    "regime_mult": 1.0,
+    "exit_price": 196.0,
+    "exit_time": "2026-06-05T16:00:00Z",
+    "exit_reason": "stop_loss",
+    "qty": 5.0,
+    "gross_pnl": -20.0,
+    "slippage_est": 0.5,
+    "net_pnl": -20.5,
+    "postmortem_diagnosis": "LOW_CONFIDENCE_PASSED",
+    "created_at": "2026-06-05T14:30:01Z"
+  }
+]
+```
+
+### `GET /api/trades/summary`
+
+Aggregated trade statistics for a rolling window.
+
+**Query parameters:** `days` (default 30, max 365)
+
+**Response 200:**
+```json
+{
+  "total_trades": 12,
+  "win_rate": 0.583,
+  "avg_gross_pnl": 8.20,
+  "avg_slippage_est": 0.50,
+  "avg_net_pnl": 7.70,
+  "total_gross_pnl": 98.4,
+  "total_net_pnl": 92.4,
+  "total_notional": 12000.0,
+  "avg_hold_minutes": 87.5,
+  "trades_per_week": 2.8,
+  "return_on_notional": 0.0077,
+  "slippage_pct_of_gross": 0.061
+}
+```
+
+### `GET /api/trades/analytics/by-symbol`
+
+P&L aggregated by symbol. Analytics-on-read (SQL GROUP BY, no cache).
+
+**Query parameters:** `days` (default 90, 1–365)
+
+**Response 200:**
+```json
+[
+  {"label": "NVDA", "trade_count": 5, "win_rate": 0.6, "avg_net_pnl": 12.5, "total_net_pnl": 62.5}
+]
+```
+
+### `GET /api/trades/analytics/by-dimension`
+
+P&L aggregated by the requested dimension.
+
+**Query parameters:** `dim` (required: `regime` | `hour` | `score` | `holdtime`), `days` (default 90)
+
+| `dim` value | Grouping |
+|-------------|----------|
+| `regime` | regime_mult bucket: bear/caution/neutral/bull/strong_bull |
+| `hour` | hour of day 9–16 EST |
+| `score` | LLM score 0.1-wide bins (0.3–0.4, 0.4–0.5, …) |
+| `holdtime` | hold duration: `<1h` / `1-4h` / `4-8h` / `extended` / `overnight` |
+
+**Response 200:** same shape as `by-symbol` — `[{label, trade_count, win_rate, avg_net_pnl, total_net_pnl}]`
+
+**Response 422:** invalid `dim` value.
+
+### `GET /api/trades/postmortem/{trade_id}`
+
+Full trade row joined with signal fields. Used to surface postmortem diagnosis detail.
+
+**Response 200:**
+```json
+{
+  "id": 7, "symbol": "NVDA",
+  "entry_time": "2026-06-05T14:30:00Z", "exit_time": "2026-06-05T16:00:00Z",
+  "entry_price": 200.0, "exit_price": 196.0, "net_pnl": -20.5,
+  "score": 0.45, "regime_mult": 1.0, "exit_reason": "stop_loss",
+  "confidence": 0.35, "ensemble_std": 0.08,
+  "signal_generated_at": "2026-06-05T14:00:00Z",
+  "postmortem_diagnosis": "LOW_CONFIDENCE_PASSED"
+}
+```
+
+**Response 404:** trade not found.
+
+---
+
+## Decisions Endpoint
+
+Requires `X-API-Key` header.
+
+### `GET /api/decisions`
+
+Execution decision log — one row per symbol per tick for every symbol that cleared `ENTRY_THRESHOLD`.
+
+**Query parameters:** `limit` (default 100, max 500)
+
+**Response 200:**
+```json
+[
+  {
+    "id": 18,
+    "tick_time": "2026-06-05T14:30:00Z",
+    "symbol": "NVDA",
+    "score": 0.45,
+    "regime_mult": 1.0,
+    "ema_pass": true,
+    "decision": "BUY",
+    "order_id": "abc123",
+    "created_at": "2026-06-05T14:30:01Z"
+  }
+]
+```
+
+Decision labels: `BUY`, `SKIP_EMA` (price below EMA20), `SKIP_CAP` (position cap reached), `SKIP_POSITION` (already in position), `STOP_LOSS` (stop triggered).
+
+---
+
 ## Health Check
 
 ### `GET /api/health`
@@ -308,6 +455,7 @@ Returns 503 if any dependency is unreachable.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 4.0.0 | 2026-06-06 | Phase A analytics: trades, decisions, analytics/by-symbol, analytics/by-dimension, postmortem endpoints; kill switch GET+DELETE; trades/decisions require auth |
 | 3.0.0 | 2026-06-03 | Full English rewrite; Phase G portfolio, risk, decay endpoints; new admin/llm-models, config endpoints |
 | 2.0.0 | 2026-05-12 | Added GET /api/weights/suggestion; updated POST /api/weights/approve |
 | 1.0.0 | 2026-05-04 | Initial release |

@@ -1,24 +1,30 @@
 """Signal retrieval endpoints."""
 
-import yaml
+import logging
+from pathlib import Path
 from typing import Annotated
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException
+
+log = logging.getLogger(__name__)
 
 from src.api.auth import require_api_key
 from src.store.redis_store import RedisStore
 from src.store.pg_store import PostgreSQLStore
 from src.api.deps import get_redis_store, get_pg_store
 
+_TRADING_YAML = Path(__file__).resolve().parents[3] / "config" / "trading.yaml"
 
 router = APIRouter(prefix="/api/signals", dependencies=[Depends(require_api_key)])
 
 
 def _watchlist() -> list[str]:
     try:
-        with open("config/trading.yaml") as f:
+        with open(_TRADING_YAML) as f:
             return yaml.safe_load(f).get("symbols", {}).get("watchlist", [])
     except Exception:
+        log.warning("Could not load watchlist from %s — returning empty list", _TRADING_YAML)
         return []
 
 

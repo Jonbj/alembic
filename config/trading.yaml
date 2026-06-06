@@ -126,6 +126,9 @@ risk:
   vix_1d_change: 0.30
   portfolio_drawdown: 0.05
 
+  # Execution risk (read by ExecutionWorker at cycle start)
+  stop_loss: 0.02
+
   # Position limits
   max_position_pct: 0.10
   max_portfolio_exposure: 0.50
