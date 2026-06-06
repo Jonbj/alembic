@@ -658,5 +658,71 @@ class TestReconcileTradesFills:
         assert updated == 0
 
 
+class TestFetchAnalyticsBySymbol:
+    def test_returns_list_of_dicts_with_expected_keys(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.description = [
+            ("label",), ("trade_count",), ("win_rate",),
+            ("avg_net_pnl",), ("total_net_pnl",),
+        ]
+        mock_cur.fetchall.return_value = [("NVDA", 5, 0.6, 12.5, 62.5)]
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        rows = store.fetch_analytics_by_symbol(limit_days=90)
+        assert isinstance(rows, list)
+        assert rows[0]["label"] == "NVDA"
+        assert rows[0]["trade_count"] == 5
+        assert "win_rate" in rows[0]
+        assert "avg_net_pnl" in rows[0]
+        assert "total_net_pnl" in rows[0]
+
+    def test_rollback_on_error(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.execute.side_effect = Exception("DB error")
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        with pytest.raises(Exception):
+            store.fetch_analytics_by_symbol()
+        mock_conn.rollback.assert_called_once()
+
+
+class TestFetchAnalyticsByDimension:
+    """Smoke-tests for the four dimension-based analytics methods."""
+
+    def _make_store(self, rows):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.description = [
+            ("label",), ("trade_count",), ("win_rate",), ("avg_net_pnl",), ("total_net_pnl",),
+        ]
+        mock_cur.fetchall.return_value = rows
+        return PostgreSQLStore(conn=mock_conn, use_pool=False)
+
+    def test_fetch_analytics_by_regime(self):
+        store = self._make_store([("neutral", 3, 0.67, 8.0, 24.0)])
+        rows = store.fetch_analytics_by_regime()
+        assert rows[0]["label"] == "neutral"
+
+    def test_fetch_analytics_by_hour(self):
+        store = self._make_store([("10", 2, 0.5, 5.0, 10.0)])
+        rows = store.fetch_analytics_by_hour()
+        assert rows[0]["label"] == "10"
+
+    def test_fetch_analytics_by_score_bucket(self):
+        store = self._make_store([("0.3–0.4", 4, 0.75, 11.0, 44.0)])
+        rows = store.fetch_analytics_by_score_bucket()
+        assert rows[0]["label"] == "0.3–0.4"
+
+    def test_fetch_analytics_by_hold_time(self):
+        store = self._make_store([("<1h", 6, 0.5, 7.0, 42.0)])
+        rows = store.fetch_analytics_by_hold_time()
+        assert rows[0]["label"] == "<1h"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

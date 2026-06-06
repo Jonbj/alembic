@@ -893,6 +893,157 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    # -------------------------------------------------------------------------
+    # Trade analytics (Phase A)
+    # -------------------------------------------------------------------------
+
+    _ANALYTICS_BY_SYMBOL = """
+        SELECT
+            symbol AS label,
+            COUNT(*) AS trade_count,
+            ROUND(
+                COALESCE(
+                    SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END)::numeric
+                    / NULLIF(COUNT(*)::numeric, 0), 0
+                ), 4
+            ) AS win_rate,
+            ROUND(COALESCE(AVG(net_pnl), 0)::numeric, 2) AS avg_net_pnl,
+            ROUND(COALESCE(SUM(net_pnl), 0)::numeric, 2) AS total_net_pnl
+        FROM trades
+        WHERE exit_time IS NOT NULL
+          AND exit_time >= now() - (%s || ' days')::interval
+        GROUP BY symbol
+        ORDER BY total_net_pnl DESC
+    """
+
+    _ANALYTICS_BY_REGIME = """
+        SELECT
+            CASE
+                WHEN regime_mult <= 0.6  THEN 'bear'
+                WHEN regime_mult <= 0.9  THEN 'caution'
+                WHEN regime_mult <= 1.1  THEN 'neutral'
+                WHEN regime_mult <= 1.35 THEN 'bull'
+                ELSE 'strong_bull'
+            END AS label,
+            COUNT(*) AS trade_count,
+            ROUND(
+                COALESCE(
+                    SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END)::numeric
+                    / NULLIF(COUNT(*)::numeric, 0), 0
+                ), 4
+            ) AS win_rate,
+            ROUND(COALESCE(AVG(net_pnl), 0)::numeric, 2) AS avg_net_pnl,
+            ROUND(COALESCE(SUM(net_pnl), 0)::numeric, 2) AS total_net_pnl
+        FROM trades
+        WHERE exit_time IS NOT NULL
+          AND exit_time >= now() - (%s || ' days')::interval
+        GROUP BY label
+        ORDER BY avg_net_pnl DESC
+    """
+
+    _ANALYTICS_BY_HOUR = """
+        SELECT
+            EXTRACT(HOUR FROM entry_time AT TIME ZONE 'America/New_York')::int::text AS label,
+            COUNT(*) AS trade_count,
+            ROUND(
+                COALESCE(
+                    SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END)::numeric
+                    / NULLIF(COUNT(*)::numeric, 0), 0
+                ), 4
+            ) AS win_rate,
+            ROUND(COALESCE(AVG(net_pnl), 0)::numeric, 2) AS avg_net_pnl,
+            ROUND(COALESCE(SUM(net_pnl), 0)::numeric, 2) AS total_net_pnl
+        FROM trades
+        WHERE exit_time IS NOT NULL
+          AND exit_time >= now() - (%s || ' days')::interval
+        GROUP BY label
+        ORDER BY label::int
+    """
+
+    _ANALYTICS_BY_SCORE_BUCKET = """
+        SELECT
+            TO_CHAR(FLOOR(ss.score * 10) * 0.1::numeric, 'FM0.0') || '–' ||
+            TO_CHAR((FLOOR(ss.score * 10) * 0.1::numeric + 0.1), 'FM0.0') AS label,
+            COUNT(*) AS trade_count,
+            ROUND(
+                COALESCE(
+                    SUM(CASE WHEN t.net_pnl > 0 THEN 1 ELSE 0 END)::numeric
+                    / NULLIF(COUNT(*)::numeric, 0), 0
+                ), 4
+            ) AS win_rate,
+            ROUND(COALESCE(AVG(t.net_pnl), 0)::numeric, 2) AS avg_net_pnl,
+            ROUND(COALESCE(SUM(t.net_pnl), 0)::numeric, 2) AS total_net_pnl
+        FROM trades t
+        JOIN sentiment_signals ss ON ss.id = t.signal_id
+        WHERE t.exit_time IS NOT NULL
+          AND t.exit_time >= now() - (%s || ' days')::interval
+          AND t.signal_id IS NOT NULL
+        GROUP BY FLOOR(ss.score * 10)
+        ORDER BY FLOOR(ss.score * 10)
+    """
+
+    _ANALYTICS_BY_HOLD_TIME = """
+        SELECT
+            CASE
+                WHEN EXTRACT(EPOCH FROM (exit_time - entry_time)) < 3600
+                    THEN '<1h'
+                WHEN EXTRACT(EPOCH FROM (exit_time - entry_time)) < 14400
+                    THEN '1-4h'
+                WHEN EXTRACT(EPOCH FROM (exit_time - entry_time)) < 28800
+                    THEN '4-8h'
+                WHEN DATE(exit_time AT TIME ZONE 'America/New_York')
+                   > DATE(entry_time AT TIME ZONE 'America/New_York')
+                    THEN 'overnight'
+                ELSE 'extended'
+            END AS label,
+            COUNT(*) AS trade_count,
+            ROUND(
+                COALESCE(
+                    SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END)::numeric
+                    / NULLIF(COUNT(*)::numeric, 0), 0
+                ), 4
+            ) AS win_rate,
+            ROUND(COALESCE(AVG(net_pnl), 0)::numeric, 2) AS avg_net_pnl,
+            ROUND(COALESCE(SUM(net_pnl), 0)::numeric, 2) AS total_net_pnl
+        FROM trades
+        WHERE exit_time IS NOT NULL
+          AND exit_time >= now() - (%s || ' days')::interval
+        GROUP BY label
+        ORDER BY avg_net_pnl DESC
+    """
+
+    def _fetch_analytics(self, sql: str, limit_days: int) -> list[dict]:
+        """Shared executor for all analytics queries."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(sql, (str(limit_days),))
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception:
+            conn.rollback()
+            raise
+
+    def fetch_analytics_by_symbol(self, limit_days: int = 90) -> list[dict]:
+        """Return P&L metrics grouped by symbol."""
+        return self._fetch_analytics(self._ANALYTICS_BY_SYMBOL, limit_days)
+
+    def fetch_analytics_by_regime(self, limit_days: int = 90) -> list[dict]:
+        """Return P&L metrics grouped by regime multiplier bucket."""
+        return self._fetch_analytics(self._ANALYTICS_BY_REGIME, limit_days)
+
+    def fetch_analytics_by_hour(self, limit_days: int = 90) -> list[dict]:
+        """Return P&L metrics grouped by hour of day (EST, 9-16)."""
+        return self._fetch_analytics(self._ANALYTICS_BY_HOUR, limit_days)
+
+    def fetch_analytics_by_score_bucket(self, limit_days: int = 90) -> list[dict]:
+        """Return P&L metrics grouped by 0.1-wide LLM score bins."""
+        return self._fetch_analytics(self._ANALYTICS_BY_SCORE_BUCKET, limit_days)
+
+    def fetch_analytics_by_hold_time(self, limit_days: int = 90) -> list[dict]:
+        """Return P&L metrics grouped by hold duration bucket."""
+        return self._fetch_analytics(self._ANALYTICS_BY_HOLD_TIME, limit_days)
+
     def log_weight_update(
         self,
         source: str,
