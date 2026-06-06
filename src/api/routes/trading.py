@@ -1,7 +1,7 @@
 """Alpaca positions and order history endpoints."""
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.api.auth import require_api_key
 from src.api.deps import get_alpaca_trading_client, get_pg_store
@@ -84,3 +84,43 @@ def get_decisions(
 ) -> list[dict]:
     """Execution decision log (score > threshold candidates only)."""
     return pg.fetch_decisions(symbol=symbol, limit=limit)
+
+
+@router.get("/trades/analytics/by-symbol")
+def get_analytics_by_symbol(
+    pg: Annotated[object, Depends(get_pg_store)],
+    days: int = Query(default=90, ge=1, le=365),
+) -> list[dict]:
+    """P&L metrics grouped by symbol."""
+    return pg.fetch_analytics_by_symbol(limit_days=days)
+
+
+@router.get("/trades/analytics/by-dimension")
+def get_analytics_by_dimension(
+    pg: Annotated[object, Depends(get_pg_store)],
+    dim: str = Query(pattern="^(regime|hour|score|holdtime)$"),
+    days: int = Query(default=90, ge=1, le=365),
+) -> list[dict]:
+    """P&L metrics grouped by the requested dimension."""
+    dispatch = {
+        "regime":   pg.fetch_analytics_by_regime,
+        "hour":     pg.fetch_analytics_by_hour,
+        "score":    pg.fetch_analytics_by_score_bucket,
+        "holdtime": pg.fetch_analytics_by_hold_time,
+    }
+    return dispatch[dim](limit_days=days)
+
+
+@router.get("/trades/postmortem/{trade_id}")
+def get_postmortem(
+    trade_id: int,
+    pg: Annotated[object, Depends(get_pg_store)],
+) -> dict:
+    """Return trade detail with postmortem_diagnosis (or null if not computed)."""
+    row = pg.fetch_trade_with_signal(trade_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    for key in ("entry_time", "exit_time", "signal_generated_at"):
+        if row.get(key) is not None and hasattr(row[key], "isoformat"):
+            row[key] = row[key].isoformat()
+    return row

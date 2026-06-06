@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from src.api.main import app
 from src.api.auth import require_api_key
-from src.api.deps import get_alpaca_trading_client
+from src.api.deps import get_alpaca_trading_client, get_pg_store
 
 _skip_auth = lambda: "test-key"
 
@@ -147,3 +147,70 @@ class TestTradesEndpoints:
         resp = tc.get("/api/trades")
         app.dependency_overrides.clear()
         assert resp.status_code == 403
+
+
+class TestAnalyticsRoutes:
+    def setup_method(self):
+        app.dependency_overrides[require_api_key] = lambda: "test-key"
+
+    def teardown_method(self):
+        app.dependency_overrides.clear()
+
+    def test_get_analytics_by_symbol(self):
+        mock_pg = MagicMock()
+        mock_pg.fetch_analytics_by_symbol.return_value = [
+            {"label": "NVDA", "trade_count": 3, "win_rate": 0.67,
+             "avg_net_pnl": 12.5, "total_net_pnl": 37.5}
+        ]
+        app.dependency_overrides[get_pg_store] = lambda: mock_pg
+
+        tc = TestClient(app)
+        resp = tc.get("/api/trades/analytics/by-symbol?days=90")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data[0]["label"] == "NVDA"
+
+    def test_get_analytics_by_dimension_regime(self):
+        mock_pg = MagicMock()
+        mock_pg.fetch_analytics_by_regime.return_value = [
+            {"label": "neutral", "trade_count": 2, "win_rate": 0.5,
+             "avg_net_pnl": 5.0, "total_net_pnl": 10.0}
+        ]
+        app.dependency_overrides[get_pg_store] = lambda: mock_pg
+
+        tc = TestClient(app)
+        resp = tc.get("/api/trades/analytics/by-dimension?dim=regime")
+        assert resp.status_code == 200
+        assert resp.json()[0]["label"] == "neutral"
+
+    def test_get_analytics_by_dimension_invalid_dim(self):
+        app.dependency_overrides[get_pg_store] = lambda: MagicMock()
+
+        tc = TestClient(app)
+        resp = tc.get("/api/trades/analytics/by-dimension?dim=unknown")
+        assert resp.status_code == 422
+
+    def test_get_postmortem_returns_trade_dict(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 6, 5, 15, tzinfo=timezone.utc)
+        mock_pg = MagicMock()
+        mock_pg.fetch_trade_with_signal.return_value = {
+            "id": 7, "symbol": "NVDA", "net_pnl": -5.0,
+            "postmortem_diagnosis": "low_confidence_passed",
+            "entry_time": now, "exit_time": now, "signal_generated_at": now,
+        }
+        app.dependency_overrides[get_pg_store] = lambda: mock_pg
+
+        tc = TestClient(app)
+        resp = tc.get("/api/trades/postmortem/7")
+        assert resp.status_code == 200
+        assert resp.json()["postmortem_diagnosis"] == "low_confidence_passed"
+
+    def test_get_postmortem_404_when_not_found(self):
+        mock_pg = MagicMock()
+        mock_pg.fetch_trade_with_signal.return_value = None
+        app.dependency_overrides[get_pg_store] = lambda: mock_pg
+
+        tc = TestClient(app)
+        resp = tc.get("/api/trades/postmortem/999")
+        assert resp.status_code == 404
