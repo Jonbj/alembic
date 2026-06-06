@@ -723,6 +723,18 @@ class TestFetchAnalyticsByDimension:
         rows = store.fetch_analytics_by_hold_time()
         assert rows[0]["label"] == "<1h"
 
+    def test_rollback_on_error_shared_helper(self):
+        """_fetch_analytics rolls back on exception regardless of which public method is called."""
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.execute.side_effect = Exception("DB error")
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        with pytest.raises(Exception):
+            store.fetch_analytics_by_regime()
+        mock_conn.rollback.assert_called_once()
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

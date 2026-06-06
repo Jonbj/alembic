@@ -937,7 +937,13 @@ class PostgreSQLStore:
         FROM trades
         WHERE exit_time IS NOT NULL
           AND exit_time >= now() - (%s || ' days')::interval
-        GROUP BY label
+        GROUP BY CASE
+            WHEN regime_mult <= 0.6  THEN 'bear'
+            WHEN regime_mult <= 0.9  THEN 'caution'
+            WHEN regime_mult <= 1.1  THEN 'neutral'
+            WHEN regime_mult <= 1.35 THEN 'bull'
+            ELSE 'strong_bull'
+        END
         ORDER BY avg_net_pnl DESC
     """
 
@@ -956,8 +962,8 @@ class PostgreSQLStore:
         FROM trades
         WHERE exit_time IS NOT NULL
           AND exit_time >= now() - (%s || ' days')::interval
-        GROUP BY label
-        ORDER BY label::int
+        GROUP BY EXTRACT(HOUR FROM entry_time AT TIME ZONE 'America/New_York')::int
+        ORDER BY EXTRACT(HOUR FROM entry_time AT TIME ZONE 'America/New_York')::int
     """
 
     _ANALYTICS_BY_SCORE_BUCKET = """
@@ -1008,7 +1014,18 @@ class PostgreSQLStore:
         FROM trades
         WHERE exit_time IS NOT NULL
           AND exit_time >= now() - (%s || ' days')::interval
-        GROUP BY label
+        GROUP BY CASE
+            WHEN EXTRACT(EPOCH FROM (exit_time - entry_time)) < 3600
+                THEN '<1h'
+            WHEN EXTRACT(EPOCH FROM (exit_time - entry_time)) < 14400
+                THEN '1-4h'
+            WHEN EXTRACT(EPOCH FROM (exit_time - entry_time)) < 28800
+                THEN '4-8h'
+            WHEN DATE(exit_time AT TIME ZONE 'America/New_York')
+               > DATE(entry_time AT TIME ZONE 'America/New_York')
+                THEN 'overnight'
+            ELSE 'extended'
+        END
         ORDER BY avg_net_pnl DESC
     """
 
