@@ -35,6 +35,7 @@ from redis import Redis
 
 from src.config import config
 from src.notifications.base import AlertLevel
+from src.performance.postmortem import TradeContext, diagnose_loss, should_trigger_postmortem
 from src.store.redis_store import RedisStore
 from src.workers.celery_app import app
 
@@ -161,6 +162,65 @@ def _write_decision(
     except Exception as e:
         log.warning("Failed to write execution decision for %s: %s", symbol, e)
         return None
+
+
+def _regime_label(regime_mult: float) -> str:
+    """Convert a numeric regime multiplier to the string label expected by TradeContext."""
+    if regime_mult <= 0.6:
+        return "risk_off"
+    if regime_mult <= 0.9:
+        return "uncertain"
+    return "risk_on"
+
+
+def _maybe_postmortem(
+    pg_store,
+    trade_id: int,
+    signal: dict,
+    score: float,
+    regime_mult: float,
+    entry_price: float,
+    exit_price: float,
+    tick_time,
+) -> None:
+    """Run postmortem diagnosis on a losing trade and persist the result.
+
+    Silently skips if the loss is below the trigger thresholds to avoid
+    writing a diagnosis for every tiny dip.
+    """
+    loss_pct = (entry_price - exit_price) / entry_price if entry_price > 0 else 0.0
+    confidence = float(signal.get("confidence", 0.5))
+    ensemble_std = float(signal.get("ensemble_std", 0.0))
+
+    if not should_trigger_postmortem(loss_pct, score, ensemble_std):
+        return
+
+    signal_age_min = 0.0
+    generated_at = signal.get("generated_at")
+    if generated_at:
+        try:
+            from datetime import timezone as _tz
+            sig_dt = datetime.fromisoformat(str(generated_at).replace("Z", "+00:00"))
+            if sig_dt.tzinfo is None:
+                sig_dt = sig_dt.replace(tzinfo=_tz.utc)
+            signal_age_min = (tick_time - sig_dt).total_seconds() / 60
+        except Exception:
+            pass
+
+    ctx = TradeContext(
+        loss_pct=loss_pct,
+        signal_score=score,
+        signal_confidence=confidence,
+        ensemble_std=ensemble_std,
+        regime=_regime_label(regime_mult),
+        reasoning_summary="",
+        signal_age_minutes=signal_age_min,
+    )
+    diagnosis = diagnose_loss(ctx)
+    try:
+        pg_store.write_postmortem(trade_id, diagnosis)
+    except Exception as pm_exc:
+        log.warning("Failed to write postmortem for trade %s: %s", trade_id, pm_exc)
 
 
 def _regime_multiplier(redis_store: RedisStore, notifier: "Notifier | None" = None) -> float:
@@ -327,9 +387,10 @@ def run_execution_cycle(
                             f"🔴 STOP-LOSS {symbol}: entry={entry_price:.2f} current={current_price:.2f} (−{STOP_LOSS_PCT*100:.0f}%)",
                             AlertLevel.WARNING,
                         )
+                        trade_id: "int | None" = None
                         if pg_store is not None:
                             try:
-                                pg_store.close_trade(
+                                trade_id = pg_store.close_trade(
                                     symbol=symbol,
                                     exit_price=current_price,
                                     exit_time=tick_time,
@@ -338,6 +399,18 @@ def run_execution_cycle(
                                 )
                             except Exception as trade_exc:
                                 log.warning("Failed to close trade record for %s: %s", symbol, trade_exc)
+
+                        if trade_id is not None and pg_store is not None:
+                            _maybe_postmortem(
+                                pg_store=pg_store,
+                                trade_id=trade_id,
+                                signal=signal,
+                                score=score,
+                                regime_mult=regime_mult,
+                                entry_price=entry_price,
+                                exit_price=current_price,
+                                tick_time=tick_time,
+                            )
                     except Exception as stop_exc:
                         log.error("Failed to close stop-loss position for %s: %s", symbol, stop_exc)
                         _fire_alert(
