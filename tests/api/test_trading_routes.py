@@ -156,6 +156,16 @@ class TestAnalyticsRoutes:
     def teardown_method(self):
         app.dependency_overrides.clear()
 
+    def test_analytics_requires_auth(self):
+        """Analytics endpoints must reject unauthenticated requests with 403."""
+        # Clear setup_method's auth override so the real auth check runs.
+        app.dependency_overrides.clear()
+        app.dependency_overrides[get_pg_store] = lambda: MagicMock()
+        tc = TestClient(app)
+        resp = tc.get("/api/trades/analytics/by-symbol")
+        app.dependency_overrides.clear()
+        assert resp.status_code == 403
+
     def test_get_analytics_by_symbol(self):
         mock_pg = MagicMock()
         mock_pg.fetch_analytics_by_symbol.return_value = [

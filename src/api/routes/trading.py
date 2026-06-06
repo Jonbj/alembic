@@ -8,6 +8,11 @@ from src.api.deps import get_alpaca_trading_client, get_pg_store
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
 
+# NOTE: FastAPI matches routes in declaration order. The specific paths
+# (/api/trades/summary, /api/trades/analytics/*, /api/trades/postmortem/*)
+# must be declared before any parameterised path like /api/trades/{id}
+# to prevent shadowing.
+
 
 @router.get("/positions")
 def get_positions(
