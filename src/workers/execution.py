@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 from redis import Redis
 
 from src.config import config
+from src.costs.calculator import TradeCostCalculator
 from src.notifications.base import AlertLevel
 from src.performance.postmortem import TradeContext, diagnose_loss, should_trigger_postmortem
 from src.store.redis_store import RedisStore
@@ -301,6 +302,7 @@ def run_execution_cycle(
     data_client=None,
     notifier: "Notifier | None" = None,
     pg_store=None,
+    cost_calc: "TradeCostCalculator | None" = None,
 ) -> dict:
     """Core execution logic — separated for testability.
 
@@ -333,7 +335,10 @@ def run_execution_cycle(
         "errors": 0,
     }
 
-    stop_loss_pct, max_drawdown_pct = _load_risk_params()
+    _cost_calc = cost_calc or TradeCostCalculator()
+    _yaml_stop_loss, max_drawdown_pct = _load_risk_params()
+    # _yaml_stop_loss retained for drawdown cap reference only;
+    # per-symbol stop-loss is tier-based via _cost_calc.stop_loss_pct().
 
     # Kill-switch check — halt all trading if active
     try:
@@ -431,7 +436,8 @@ def run_execution_cycle(
                 pos = open_positions[symbol]
                 entry_price = float(pos.avg_entry_price)
                 current_price = float(pos.current_price)
-                stop_price = entry_price * (1 - stop_loss_pct)
+                sym_stop_pct = _cost_calc.stop_loss_pct(symbol)
+                stop_price = entry_price * (1 - sym_stop_pct)
 
                 if current_price < stop_price:
                     try:
@@ -443,7 +449,7 @@ def run_execution_cycle(
                         )
                         _fire_alert(
                             notifier,
-                            f"🔴 STOP-LOSS {symbol}: entry={entry_price:.2f} current={current_price:.2f} (−{stop_loss_pct*100:.0f}%)",
+                            f"🔴 STOP-LOSS {symbol}: entry={entry_price:.2f} current={current_price:.2f} (−{sym_stop_pct*100:.0f}%)",
                             AlertLevel.WARNING,
                         )
                         trade_id: "int | None" = None
@@ -455,6 +461,8 @@ def run_execution_cycle(
                                     exit_time=tick_time,
                                     exit_reason="stop_loss",
                                     entry_price=entry_price,
+                                    entry_notional=float(pos.avg_entry_price) * float(pos.qty),
+                                    qty=float(pos.qty),
                                 )
                             except Exception as trade_exc:
                                 log.warning("Failed to close trade record for %s: %s", symbol, trade_exc)
@@ -543,7 +551,8 @@ def run_execution_cycle(
 
             if price is not None:
                 qty = round(notional / price, 4)
-                stop_price = round(price * (1 - stop_loss_pct), 2)
+                sym_stop_pct = _cost_calc.stop_loss_pct(symbol)
+                stop_price = round(price * (1 - sym_stop_pct), 2)
                 order = MarketOrderRequest(
                     symbol=symbol,
                     qty=qty,
@@ -655,6 +664,7 @@ def run_execution_worker() -> dict:
             data_client=data_client,
             notifier=notifier,
             pg_store=pg_store,
+            cost_calc=TradeCostCalculator(),
         )
         log.info("Execution stats: %s", stats)
         return stats
