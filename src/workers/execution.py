@@ -336,8 +336,7 @@ def run_execution_cycle(
     }
 
     _cost_calc = cost_calc or TradeCostCalculator()
-    _yaml_stop_loss, max_drawdown_pct = _load_risk_params()
-    # _yaml_stop_loss retained for drawdown cap reference only;
+    _, max_drawdown_pct = _load_risk_params()
     # per-symbol stop-loss is tier-based via _cost_calc.stop_loss_pct().
 
     # Kill-switch check — halt all trading if active
