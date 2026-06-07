@@ -21,7 +21,12 @@ class CostBreakdown:
     total_cost_usd: float        # (total_cost_bps / 10_000 × notional) + regulatory
 
 
-_DEFAULT_ADV_USD = 20_000_000_000.0  # fallback ADV (USD) when live data unavailable — ~20B/day (conservative liquid-market baseline)
+# Conservative ADV fallback (~$20B/day, realistic for large liquid markets).
+# At this scale, impact on typical position sizes ($10k-$50k) is 1-2 bps — small
+# but non-zero. For IC normalization (notional=1.0) impact is effectively zero,
+# which is the intended behaviour for cost-adjusted IC computation.
+# Callers with real ADV data should always pass adv_usd explicitly.
+_DEFAULT_ADV_USD = 20_000_000_000.0
 
 
 class TradeCostCalculator:
@@ -53,7 +58,7 @@ class TradeCostCalculator:
 
     def stop_loss_pct(self, symbol: str) -> float:
         """Return stop-loss percentage for symbol based on liquidity tier."""
-        return float(self._tier(symbol).get("stop_loss_pct", 0.02))
+        return float(self._tier(symbol).get("stop_loss_pct", 0.05))
 
     def compute(
         self,
@@ -64,7 +69,20 @@ class TradeCostCalculator:
         side: str,
         adv_usd: float | None = None,
     ) -> CostBreakdown:
-        """Compute full cost breakdown for a trade."""
+        """Compute full cost breakdown for a trade.
+
+        Args:
+            symbol:     Ticker symbol (case-insensitive tier lookup).
+            notional:   Trade notional in USD (qty × price).
+            qty:        Number of shares.
+            fill_price: Execution price per share.
+            side:       "BUY" or "SELL". Regulatory fees only apply to SELL.
+            adv_usd:    20-day average daily volume in USD. Pass None to use
+                        the conservative default (_DEFAULT_ADV_USD ≈ 20B),
+                        which makes impact negligible — correct for IC
+                        normalization (notional=1.0) but underestimates
+                        impact for real trades. Pass actual ADV when available.
+        """
         tier = self._tier(symbol)
         spread_bps = float(tier.get("spread_bps", 20.0))
 

@@ -7,8 +7,9 @@ equity:
   spread_tiers:
     tier_a:
       description: "Mega-cap, very liquid ETF"
-      symbols: [SPY, QQQ, IWM, VOO, VTI, GLD, TLT, IEF, SHY]
+      symbols: [SPY, QQQ, IWM, VOO, VTI, GLD, TLT, IEF, SHY, NVDA]
       spread_bps: 1.5
+      stop_loss_pct: 0.020
     tier_b:
       description: "Large-cap equity, liquid sector ETF"
       symbols: [VEA, VWO, EWJ, LQD, HYG, TIP, DBC, VNQ, XLF, XLK, XLE, XLV, INTC]
