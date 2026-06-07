@@ -1,6 +1,7 @@
 """Performance and weights endpoints."""
 
 import hashlib
+import json
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
@@ -66,6 +67,17 @@ async def get_latest_performance(
     if report is None:
         raise HTTPException(status_code=404, detail="No performance report available yet")
     return report
+
+
+@router.get("/performance/weekly")
+async def get_weekly_report(
+    redis: Annotated[RedisStore, Depends(get_redis_store)],
+) -> dict:
+    """Return latest structured weekly report (computed Monday 04:00 UTC, TTL 9d)."""
+    raw = redis._r.get("performance:weekly_report")
+    if raw is None:
+        raise HTTPException(status_code=404, detail="No weekly report available yet")
+    return json.loads(raw)
 
 
 @router.get("/weights/current")
