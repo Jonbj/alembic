@@ -27,6 +27,7 @@ that don't need alert assertions.
 """
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -80,6 +81,97 @@ def _load_risk_params() -> tuple[float, float]:
     except Exception as exc:
         log.warning("Could not load risk params from %s (%s) — using defaults", _TRADING_YAML, exc)
         return STOP_LOSS_PCT, MAX_DRAWDOWN_PCT
+
+
+def _load_killswitch_recovery_config() -> dict:
+    """Return killswitch_recovery section from trading.yaml with safe defaults."""
+    defaults = {
+        "enabled": True,
+        "min_hold_hours": 2.0,
+        "recovery_drawdown_pct": 0.025,
+        "require_non_panic_regime": True,
+    }
+    try:
+        import yaml
+        with open(_TRADING_YAML) as f:
+            cfg = yaml.safe_load(f) or {}
+        return {**defaults, **cfg.get("risk", {}).get("killswitch_recovery", {})}
+    except Exception as exc:
+        log.warning("Could not load killswitch_recovery config (%s) — using defaults", exc)
+        return defaults
+
+
+def _try_killswitch_recovery(
+    redis_store: RedisStore,
+    portfolio_value: float,
+    last_equity: float,
+    regime_mult: float,
+    notifier: "Notifier | None",
+) -> bool:
+    """Attempt condition-based recovery from a drawdown-triggered kill-switch.
+
+    Only acts on the drawdown-triggered kill-switch (killswitch_active key).
+    Operator halts (system:halted_by_operator) are never auto-cleared.
+
+    Returns True if the kill-switch was deactivated, False otherwise.
+    """
+    cfg = _load_killswitch_recovery_config()
+    if not cfg["enabled"]:
+        return False
+
+    # Only auto-recover drawdown-triggered freezes, never operator halts
+    if not redis_store._r.get("killswitch_active"):
+        return False
+    if redis_store._r.get("system:halted_by_operator"):
+        return False
+
+    # Check minimum hold time
+    reason_raw = redis_store._r.get("killswitch_reason")
+    if reason_raw:
+        try:
+            reason_data = json.loads(reason_raw)
+            activated_at = datetime.fromisoformat(reason_data.get("activated_at", ""))
+            if activated_at.tzinfo is None:
+                activated_at = activated_at.replace(tzinfo=timezone.utc)
+            hours_held = (datetime.now(timezone.utc) - activated_at).total_seconds() / 3600
+            if hours_held < cfg["min_hold_hours"]:
+                log.debug(
+                    "Kill-switch recovery: %.1fh held < %.1fh minimum — not yet eligible",
+                    hours_held, cfg["min_hold_hours"],
+                )
+                return False
+        except Exception:
+            return False  # malformed timestamp — conservative: stay locked
+
+    # Check current drawdown has recovered enough
+    if last_equity <= 0:
+        return False
+    current_drawdown = (last_equity - portfolio_value) / last_equity
+    if current_drawdown >= cfg["recovery_drawdown_pct"]:
+        log.debug(
+            "Kill-switch recovery: drawdown %.2f%% >= threshold %.2f%% — not recovered",
+            current_drawdown * 100, cfg["recovery_drawdown_pct"] * 100,
+        )
+        return False
+
+    # Check regime is not high_vol (panic)
+    if cfg["require_non_panic_regime"] and regime_mult <= 0.25:
+        log.debug("Kill-switch recovery: regime multiplier %.2f (panic) — not recovering", regime_mult)
+        return False
+
+    # All conditions met — deactivate
+    redis_store.deactivate_killswitch()
+    log.warning(
+        "Kill-switch auto-recovered: drawdown=%.2f%% < %.2f%% threshold, regime=%.2f",
+        current_drawdown * 100, cfg["recovery_drawdown_pct"] * 100, regime_mult,
+    )
+    msg = (
+        f"✅ *Kill-switch auto-deactivato*\n"
+        f"Drawdown rientrato a {current_drawdown:.1%} (soglia: {cfg['recovery_drawdown_pct']:.1%})\n"
+        f"Regime multiplier: {regime_mult:.2f} — trading ripreso"
+    )
+    _fire_alert(notifier, msg, AlertLevel.WARNING)
+    return True
 def _load_entry_threshold(redis_store: "RedisStore") -> float:
     """Return effective entry threshold: Redis feedback override, else module constant."""
     try:
@@ -352,7 +444,37 @@ def run_execution_cycle(
     _, max_drawdown_pct = _load_risk_params()
     # per-symbol stop-loss is tier-based via _cost_calc.stop_loss_pct().
 
-    # Kill-switch check — halt all trading if active
+    # --- Account fetch (always runs, even during kill-switch freeze) ---
+    # Keeps portfolio:value fresh in Redis for recovery checks and reporting.
+    # Open positions are fetched later, only when not frozen.
+    try:
+        account = trading_client.get_account()
+        portfolio_value = float(account.portfolio_value)
+        redis_store._r.setex("portfolio:value", 86400, str(portfolio_value))
+    except Exception as e:
+        log.error("Failed to fetch account from Alpaca: %s", e)
+        _fire_alert(notifier, f"Alpaca API non raggiungibile: {e}", AlertLevel.CRITICAL)
+        stats["errors"] += 1
+        return stats
+
+    # --- Regime (needed for recovery check and position sizing) ---
+    regime_mult = _regime_multiplier(redis_store, notifier)
+    feedback_scale = _load_feedback_regime_scale(redis_store)
+    regime_mult = regime_mult * feedback_scale
+
+    # --- Condition-based kill-switch recovery ---
+    # Attempts to auto-deactivate a drawdown-triggered freeze when the drawdown
+    # has recovered enough and the regime is no longer in panic mode.
+    try:
+        last_equity_for_recovery = float(account.last_equity)
+    except (ValueError, TypeError):
+        last_equity_for_recovery = 0.0
+    try:
+        _try_killswitch_recovery(redis_store, portfolio_value, last_equity_for_recovery, regime_mult, notifier)
+    except Exception as rec_exc:
+        log.warning("Kill-switch recovery check failed: %s", rec_exc)
+
+    # --- Kill-switch gate — halt all trading if still active ---
     try:
         if redis_store.is_killswitch_active():
             log.warning("Kill-switch active — execution worker halted")
@@ -364,25 +486,18 @@ def run_execution_cycle(
         stats["errors"] += 1
         return stats
 
-    regime_mult = _regime_multiplier(redis_store, notifier)
-    feedback_scale = _load_feedback_regime_scale(redis_store)
-    regime_mult = regime_mult * feedback_scale
     entry_threshold = _load_entry_threshold(redis_store)
 
     # Build EMA cache once for all symbols (one batch API call)
     market_cache = _build_market_cache(symbols, data_client) if data_client else {}
 
-    # Fetch current account + positions once (not per symbol)
+    # Fetch open positions + pending orders (only when not frozen)
     try:
-        account = trading_client.get_account()
-        portfolio_value = float(account.portfolio_value)
         open_positions = {
             p.symbol: p for p in trading_client.get_all_positions()
         }
-        # Persist for cash-drag reporting in weekly performance report (24h TTL)
-        redis_store._r.setex("portfolio:value", 86400, str(portfolio_value))
     except Exception as e:
-        log.error("Failed to fetch account/positions from Alpaca: %s", e)
+        log.error("Failed to fetch positions from Alpaca: %s", e)
         _fire_alert(notifier, f"Alpaca API non raggiungibile: {e}", AlertLevel.CRITICAL)
         stats["errors"] += 1
         return stats

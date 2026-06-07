@@ -49,10 +49,11 @@ if "numpy" not in sys.modules:
 # src.config: stub only if not already loaded (pydantic not available in CI)
 _config_freshly_stubbed = False
 if "src.config" not in sys.modules:
-    _cfg_mod = MagicMock()
-    _cfg_mod.config.MIN_TRADE_PNL_THRESHOLD = 0.0
-    sys.modules["src.config"] = _cfg_mod
+    sys.modules["src.config"] = MagicMock()
     _config_freshly_stubbed = True
+# Always ensure MIN_TRADE_PNL_THRESHOLD is a real float — another test file may have
+# installed src.config without this attribute, leaving it as a MagicMock.
+sys.modules["src.config"].config.MIN_TRADE_PNL_THRESHOLD = 0.0
 
 from src.workers.performance import _format_trade_metrics_section as _format_trade_pnl_section  # noqa: E402
 

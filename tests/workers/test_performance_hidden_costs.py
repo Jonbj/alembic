@@ -44,11 +44,11 @@ if "numpy" not in sys.modules:
 
 _config_freshly_stubbed = False
 if "src.config" not in sys.modules:
-    _cfg_mod = MagicMock()
-    _cfg_mod.config.MIN_TRADE_PNL_THRESHOLD = 0.0
-    _cfg_mod.config.LLM_DAILY_BUDGET_USD = 5.0
-    sys.modules["src.config"] = _cfg_mod
+    sys.modules["src.config"] = MagicMock()
     _config_freshly_stubbed = True
+# Always set required attributes as real values regardless of who installed the stub.
+sys.modules["src.config"].config.MIN_TRADE_PNL_THRESHOLD = 0.0
+sys.modules["src.config"].config.LLM_DAILY_BUDGET_USD = 5.0
 
 from src.workers.performance import (  # noqa: E402
     _format_capital_efficiency_section,

@@ -141,6 +141,13 @@ risk:
 
   min_trade_pnl_threshold: 5.0   # $ min avg net P&L per trade before ⚠️ alert in weekly report
 
+  # Condition-based kill-switch recovery (drawdown-triggered only; operator halt is never auto-cleared)
+  killswitch_recovery:
+    enabled: true
+    min_hold_hours: 2.0           # minimum freeze duration before checking recovery
+    recovery_drawdown_pct: 0.025  # unlock when drawdown drops below this (half of trigger)
+    require_non_panic_regime: true # do not unlock while regime == high_vol
+
 schedule:
   # Celery beat intervals
   sentiment_worker_minutes: 15
