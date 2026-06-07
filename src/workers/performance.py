@@ -357,6 +357,25 @@ def _format_trade_metrics_section(trades_summary: dict) -> str:
 
     warn_str = "\n" + "\n".join(warnings) if warnings else ""
 
+    # Cost analysis section
+    avg_cost_bps = trades_summary.get("avg_cost_bps", 0.0)
+    total_cost_usd = trades_summary.get("total_cost_usd", 0.0)
+    avg_spread_bps = trades_summary.get("avg_spread_cost_bps", 0.0)
+    avg_impact_bps = trades_summary.get("avg_impact_cost_bps", 0.0)
+    cost_drag_pct = trades_summary.get("cost_drag_pct", 0.0)
+
+    if avg_cost_bps > 0:
+        annualized_drag_bps = cost_drag_pct * 252 * 10_000 if cost_drag_pct else 0.0
+        cost_section = (
+            f"\n💸 *Cost Analysis*\n"
+            f"Avg cost/trade: {avg_cost_bps:.1f} bps "
+            f"(spread {avg_spread_bps:.1f} + impact {avg_impact_bps:.1f})\n"
+            f"Total cost: ${total_cost_usd:.2f} | Cost drag: {cost_drag_pct*100:.3f}%\n"
+            f"Annualised drag: ~{annualized_drag_bps:.0f} bps/yr"
+        )
+    else:
+        cost_section = "\n💸 *Cost Analysis*\nNo cost data yet (pre-migration trades)"
+
     return (
         f"\n📊 *Trade P&L (last 7d)*\n"
         f"Trades: {total} | Win rate: {win_pct:.1f}%\n"
@@ -366,6 +385,7 @@ def _format_trade_metrics_section(trades_summary: dict) -> str:
         f"Trades/week: {tpw:.1f} | Total notional: ${total_notional:.0f}\n"
         f"Return on notional: {ron:.2f}% | Avg hold: {avg_hold:.0f}min\n"
         f"Est. slippage: {slip_pct*100:.1f}% of gross P&L"
+        f"{cost_section}"
         f"{warn_str}"
     )
 
