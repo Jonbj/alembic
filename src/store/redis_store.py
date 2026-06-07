@@ -420,6 +420,16 @@ class RedisStore:
             return None
         return json.loads(raw)
 
+    def get_weekly_report(self) -> dict | None:
+        """Get latest weekly report from Redis. Returns None if not available or corrupted."""
+        raw = self._r.get("performance:weekly_report")
+        if raw is None:
+            return None
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return None
+
     def get_vix_cached(self) -> float | None:
         """Get cached VIX value from Redis. Returns None if absent or corrupted."""
         raw = self._r.get("macro:vix:latest")

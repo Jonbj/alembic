@@ -1,536 +1,424 @@
 import { HelpButton } from '@/components/shared/HelpButton'
 
 export default function Docs() {
-  const h2Style: React.CSSProperties = {
-    fontSize: 17,
-    fontWeight: 700,
-    margin: '0 0 14px',
-    paddingBottom: 10,
-    borderBottom: '1px solid var(--border)',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
+  const h2: React.CSSProperties = {
+    fontSize: 17, fontWeight: 700, margin: '0 0 14px',
+    paddingBottom: 10, borderBottom: '1px solid var(--border)',
+    display: 'flex', alignItems: 'center', gap: 8,
   }
-
-  const h3Style: React.CSSProperties = {
-    fontSize: 13,
-    fontWeight: 600,
-    margin: '16px 0 6px',
-    color: 'var(--blue)',
+  const h3: React.CSSProperties = { fontSize: 13, fontWeight: 600, margin: '16px 0 6px', color: 'var(--blue)' }
+  const card: React.CSSProperties = {
+    background: 'var(--card)', border: '1px solid var(--border)',
+    borderRadius: 8, padding: '20px 24px', marginBottom: 20,
   }
-
-  const pStyle: React.CSSProperties = {
-    margin: '0 0 10px',
-    lineHeight: 1.7,
-    color: 'var(--text-muted)',
-    fontSize: 13,
+  const inner: React.CSSProperties = {
+    background: 'var(--bg)', border: '1px solid var(--border)',
+    borderRadius: 6, padding: '12px 14px', marginBottom: 10,
   }
-
-  const cardStyle: React.CSSProperties = {
-    background: 'var(--card)',
-    border: '1px solid var(--border)',
-    borderRadius: 8,
-    padding: '20px 24px',
-    marginBottom: 20,
+  const p: React.CSSProperties = { margin: '0 0 10px', lineHeight: 1.7, color: 'var(--text-muted)', fontSize: 13 }
+  const ul: React.CSSProperties = { margin: '0 0 10px', paddingLeft: 20, lineHeight: 2, color: 'var(--text-muted)', fontSize: 13 }
+  const mono: React.CSSProperties = {
+    background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
+    padding: '14px 18px', fontFamily: 'monospace', fontSize: 12,
+    color: 'var(--text-muted)', lineHeight: 2, overflowX: 'auto', whiteSpace: 'pre',
+    marginBottom: 10,
   }
-
-  const listStyle: React.CSSProperties = {
-    margin: '0 0 10px',
-    paddingLeft: 20,
-    lineHeight: 2,
-    color: 'var(--text-muted)',
-    fontSize: 13,
-  }
-
-  const metricCardStyle: React.CSSProperties = {
-    background: 'var(--bg)',
-    border: '1px solid var(--border)',
-    borderRadius: 6,
-    padding: '12px 14px',
-  }
-
-  const pipelineBoxStyle: React.CSSProperties = {
-    background: 'var(--bg)',
-    border: '1px solid var(--border)',
-    borderRadius: 6,
-    padding: '14px 18px',
-    fontFamily: 'monospace',
-    fontSize: 12,
-    color: 'var(--text-muted)',
-    lineHeight: 2,
-    overflowX: 'auto',
-    whiteSpace: 'pre',
-  }
-
-  const badgeStyle = (color: string, bg: string): React.CSSProperties => ({
-    display: 'inline-flex',
-    alignItems: 'center',
-    padding: '2px 8px',
-    borderRadius: 9999,
-    fontSize: 11,
-    fontWeight: 600,
-    color,
-    background: bg,
-    marginLeft: 8,
+  const badge = (color: string, bg: string): React.CSSProperties => ({
+    display: 'inline-block', marginLeft: 8, padding: '1px 8px',
+    borderRadius: 99, fontSize: 11, fontWeight: 600, color, background: bg, border: `1px solid ${color}`,
   })
+  const stag: React.CSSProperties = {
+    background: 'var(--blue)', color: 'white', borderRadius: 6,
+    padding: '3px 9px', fontWeight: 700, fontSize: 12, flexShrink: 0, marginTop: 1,
+  }
+  const rowFlex: React.CSSProperties = { display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 8 }
+  const tableRow: React.CSSProperties = { borderBottom: '1px solid #1e293b' }
+  const td: React.CSSProperties = { padding: '6px 10px', color: '#94a3b8', fontSize: 13 }
+  const th: React.CSSProperties = { textAlign: 'left' as const, padding: '6px 10px', color: '#64748b', fontWeight: 600, fontSize: 12 }
 
   return (
-    <div style={{ position: 'relative' }}>
-      <h2 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>Guida Alembic</h2>
+    <div style={{ maxWidth: 860, margin: '0 auto', padding: '0 0 40px' }}>
       <HelpButton title="Guida Alembic" sections={[
         {
-          heading: "Cos'è questa pagina",
-          content: "Documentazione completa del sistema Alembic: architettura, strategie, pipeline, parametri di rischio e modalità operative.",
+          heading: "Cos'è Alembic",
+          content: "Alembic è un sistema di trading algoritmico guidato da LLM. L'intelligenza artificiale lavora offline come motore di ricerca: produce segnali di sentiment che vengono letti dal motore di esecuzione in modo asincrono. Nessun LLM viene chiamato in tempo reale durante un ordine.",
         },
         {
-          heading: "Come usarla",
-          content: "Ogni sezione copre un aspetto del sistema. Usa questa pagina come riferimento quando hai dubbi su metriche, parametri o comportamenti del sistema.",
+          heading: "Le strategie in breve",
+          content: "**S1 (50%)**: momentum multi-lookback su ETF/azionario — usa solo prezzi storici, nessun LLM.\n\n**S4 (10%)**: news sentiment via LLM ensemble — legge segnali pre-calcolati da Redis, filtra con EMA e regime.\n\n**S2**: DISABILITATA (OOS Sharpe −0.55, tutti i gate falliti).\n\n**S3**: R&D sleeve, non in produzione.",
+        },
+        {
+          heading: "Dove guardare",
+          content: "• **Overview** — P&L live, segnali recenti, IC\n• **Signals** — segnali LLM per ticker\n• **Trades → Analytics** — P&L per regime/simbolo/durata\n• **Performance → Weekly Report** — costi, cash drag, infrastruttura\n• **Strategies** — gate di validazione OOS\n• **Auto-Improve** — feedback loop e counterfactual\n• **LLM** — pesi ensemble e ICIR per modello",
         },
       ]} />
 
-      {/* 1 — FLUSSO DI UTILIZZO */}
-      <div style={cardStyle}>
-        <h2 style={h2Style}>🗺️ Il Flusso di Utilizzo</h2>
-        <p style={pStyle}>Ordine consigliato per la revisione quotidiana del sistema:</p>
-        <ol style={listStyle}>
-          <li><strong>Overview</strong> — Quadro generale: P&L mensile, posizioni aperte, segnali recenti</li>
-          <li><strong>Signals</strong> — Segnali LLM per ticker: score, direzione, confidence, modelli</li>
-          <li><strong>Trading</strong> — Posizioni aperte, storico ordini, P&L non realizzato</li>
-          <li><strong>Trades</strong> — Storico trade chiusi, cumulative P&L, analisi multidimensionale (tab Analytics)</li>
-          <li><strong>Auto-Improve</strong> — Stato feedback loop (Phase B) e opportunità mancate (Phase C)</li>
-          <li><strong>Strategies</strong> — Stato di validazione delle strategie (gates, sensitivity, equity curve)</li>
-          <li><strong>Backtest</strong> — Risultati storici: IC, ICIR, bucket analysis, drawdown</li>
-          <li><strong>Performance</strong> — Rendimento cumulativo e mensile del portfolio</li>
-          <li><strong>News</strong> — Notizie che alimentano il sistema di sentiment (GDELT, MarketAux, Alpaca)</li>
-          <li><strong>LLM</strong> — Pesi dei modelli, feedback per segnale, costo inference</li>
-          <li><strong>Config</strong> — Watchlist e parametri di rischio personalizzabili</li>
-          <li><strong>Admin</strong> — Kill switch, cambio modalità operativa, log di sistema</li>
-        </ol>
-      </div>
+      <h1 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>Guida Alembic</h1>
 
-      {/* 2 — ARCHITETTURA */}
-      <div style={cardStyle}>
-        <h2 style={h2Style}>🏗️ Architettura del Sistema</h2>
-        <p style={pStyle}>
-          Il sistema segue il paradigma <strong>Alpha Miner</strong>: i modelli LLM operano <em>offline</em> come motori di ricerca e generazione segnali, mai nel hot path di esecuzione.
+      {/* 1. COS'È ALEMBIC */}
+      <div style={card}>
+        <h2 style={h2}>🧭 Cos'è Alembic e come funziona</h2>
+        <p style={p}>
+          Alembic è un sistema di trading algoritmico che usa LLM (Large Language Models) come motore di ricerca e generazione di segnali, mai come esecutore in tempo reale. Il principio architetturale fondamentale è: <strong>gli LLM lavorano offline, l'execution engine legge segnali pre-calcolati</strong>.
         </p>
-        <div style={pipelineBoxStyle}>
-{`[Frontend React :3000]
-        │
-        ▼
-[FastAPI :8001] ────────── [PostgreSQL]
-        │                       │
-        ▼                       ▼
-[Redis Queue] ◄──── [Celery Workers] ──── [Beat Scheduler]
-                         │
-          ┌──────────────┼──────────────┐
-          ▼              ▼              ▼
-   [News Ingestion] [LLM Ensemble] [Portfolio Scheduler]
-   GDELT/MarketAux   kimi/qwen/      S1+S2+S4 merge
-   Alpaca News       deepseek/glm    → Risk Check
-                                     → Alpaca Paper API
+        <div style={mono}>{`[News: GDELT / MarketAux / Alpaca]
+         ↓  ogni 15 min (ore di mercato)
+[LLM Ensemble Worker] ──→ Redis: signal:{symbol}:sentiment
+         ↑ offline, asincrono
 
-[Grafana :3001] ── Overview / Risk / Decay dashboards`}
-        </div>
-
-        <h3 style={h3Style}>Componenti Chiave (Fase G)</h3>
-        <ul style={listStyle}>
-          <li><strong>Strategy Registry</strong> — Registro centrale per S1, S2, S4 con interfaccia standard</li>
-          <li><strong>Portfolio Orchestrator</strong> — Unisce i segnali delle strategie attive, applica pesi di allocazione</li>
-          <li><strong>Risk Monitor</strong> — Esposizione totale, concentrazione HHI, peso massimo per asset, killswitch</li>
-          <li><strong>Decay Monitor</strong> — Walk-forward: confronta metriche recenti vs baseline; alert giallo/rosso</li>
-          <li><strong>Portfolio Scheduler</strong> — Task Celery oraria: fetch segnali → orchestrate → risk check → ordini</li>
-        </ul>
+[Portfolio Scheduler] ──→ legge segnali da Redis (ogni ora)
+         ↓
+[Risk Constraints] ──→ [Alpaca Paper/Live API]`}</div>
+        <p style={p}>
+          Questo design garantisce che un eventuale timeout o rallentamento del modello LLM non blocchi mai l'esecuzione di un ordine. Il motore di esecuzione ha sempre un segnale già pronto in Redis.
+        </p>
       </div>
 
-      {/* 3 — STRATEGIE */}
-      <div style={cardStyle}>
-        <h2 style={h2Style}>📊 Strategie Validate</h2>
+      {/* 2. STRATEGIE */}
+      <div style={card}>
+        <h2 style={h2}>📊 Le Strategie</h2>
+        <p style={{ ...p, marginBottom: 16 }}>
+          Alembic usa un portfolio multi-strategia con allocazioni fisse configurate in <code>config/strategies.yaml</code>. Le strategie producono <em>pesi sleeve-local</em> (frazioni del proprio capitale), poi l'orchestratore li scala per l'allocazione percentuale.
+        </p>
 
-        {[
-          {
-            tag: 'S1',
-            name: 'Time-Series Momentum Multi-Asset',
-            alloc: '50%',
-            status: 'ATTIVA',
-            statusColor: '#15803d',
-            statusBg: '#dcfce7',
-            details: [
-              'Momentum cross-asset su 15 ETF azionari/obbligazionari/commodity',
-              'Segnale: momentum 12-1 mesi, pesatura inversa-volatilità',
-              'OOS Sharpe: 0.51 — tutti i 5 gate superati',
-            ],
-          },
-          {
-            tag: 'S2',
-            name: 'Volatility Risk Premium',
-            alloc: '20%',
-            status: 'ATTIVA',
-            statusColor: '#15803d',
-            statusBg: '#dcfce7',
-            details: [
-              'Short put su SPY/QQQ nei regimi a bassa volatilità implicita',
-              'Filtro LLM per eventi macro ad alto rischio',
-              'Gate 3 & 4 parzialmente superati — in portfolio',
-            ],
-          },
-          {
-            tag: 'S4',
-            name: 'News-Driven Tactical',
-            alloc: '30%',
-            status: 'ATTIVA',
-            statusColor: '#15803d',
-            statusBg: '#dcfce7',
-            details: [
-              'Ranking cross-sezionale di ticker per sentiment LLM ensemble',
-              '4 modelli: kimi-k2.6, qwen3.5, deepseek-v4-pro, glm-5.1',
-              'Segnale = media pesata (polarity × confidence) per ogni modello',
-            ],
-          },
-          {
-            tag: 'S3',
-            name: 'Cross-Sectional Momentum',
-            alloc: '—',
-            status: 'R&D',
-            statusColor: '#a16207',
-            statusBg: '#fef9c3',
-            details: [
-              'Momentum residuale su azionario USA',
-              'Gate 3 (IC OOS) e Gate 5 (drag da costi) FALLITI',
-              'Non nel portfolio — demoted a sleeve di ricerca',
-            ],
-          },
-        ].map((s) => (
-          <div key={s.tag} style={{
-            ...metricCardStyle,
-            marginBottom: 10,
-            display: 'flex',
-            gap: 14,
-            alignItems: 'flex-start',
-          }}>
-            <div style={{
-              background: 'var(--blue)',
-              color: 'white',
-              borderRadius: 6,
-              padding: '4px 10px',
-              fontWeight: 700,
-              fontSize: 13,
-              flexShrink: 0,
-            }}>{s.tag}</div>
+        {/* S1 */}
+        <div style={inner}>
+          <div style={rowFlex}>
+            <div style={stag}>S1</div>
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
-                {s.name}
-                <span style={badgeStyle(s.statusColor, s.statusBg)}>{s.status}</span>
-                {s.alloc !== '—' && (
-                  <span style={badgeStyle('#1d4ed8', '#dbeafe')}>{s.alloc}</span>
-                )}
+                Multi-Lookback Relative Momentum
+                <span style={badge('#15803d', '#dcfce7')}>LIVE — 50% portafoglio</span>
               </div>
-              <ul style={{ ...listStyle, lineHeight: 1.8, marginBottom: 0 }}>
-                {s.details.map((d, i) => <li key={i}>{d}</li>)}
-              </ul>
+              <h3 style={{ ...h3, margin: '8px 0 4px' }}>Teoria</h3>
+              <p style={p}>
+                Il momentum è una delle anomalie di mercato più documentate (Jegadeesh &amp; Titman, 1993; Moskowitz et al., 2012). Le attività che hanno performato bene negli ultimi mesi tendono a continuare nel breve termine, per ragioni comportamentali (under-reaction, herding) e strutturali (trend-following istituzionale).
+              </p>
+              <p style={p}>
+                S1 usa <strong>quattro finestre di lookback</strong> (1M=21d, 3M=63d, 6M=126d, 12M=252d). Il ritorno grezzo viene normalizzato per la volatilità. Il <strong>z-score cross-sezionale</strong> classifica ogni asset rispetto ai peer — il segnale è il ranking relativo, non il livello assoluto.
+              </p>
+              <h3 style={{ ...h3, margin: '8px 0 4px' }}>Come genera il segnale</h3>
+              <div style={mono}>{`Dati input: prezzi OHLCV storici (~15 ETF + azionario)
+
+Per ogni lookback lb ∈ {21, 63, 126, 252} giorni:
+    raw_lb  = price / price.shift(lb) - 1        # ritorno grezzo
+    norm_lb = raw_lb / rolling_vol(63d)           # normalizzato per vol
+
+signal_raw = weighted_sum(norm_lb, [1×, e×, e²×, e³×] norm.)
+signal     = z_score(signal_raw, cross-sectional)  # ranking vs peer
+
+raw_weight ∝ signal × (target_vol=15% / realised_vol)
+sleeve_weight = normalise(raw_weight, long-only, sum≤1)`}</div>
+              <h3 style={{ ...h3, margin: '8px 0 4px' }}>Come interviene sul portafoglio</h3>
+              <p style={p}>
+                L'orchestratore moltiplica i pesi sleeve S1 per 0.50. Un asset con peso sleeve 0.40 occupa il 20% del portafoglio totale. S1 è <strong>puro price-momentum</strong>: nessun filtro LLM, nessun regime multiplier.
+              </p>
             </div>
           </div>
-        ))}
-      </div>
-
-      {/* 4 — PIPELINE DATI */}
-      <div style={cardStyle}>
-        <h2 style={h2Style}>🔄 Pipeline Dati</h2>
-        <div style={pipelineBoxStyle}>
-{`Sorgenti News (ogni 15 min, ore di mercato)
-  ├── GDELT GKG        — eventi globali, segnali geopolitici
-  ├── MarketAux        — sentiment pre-calcolato, notizie finanziarie
-  └── Alpaca News      — notizie di mercato in tempo reale
-          │
-          ▼
-  Redis Queue  ──►  LLM Ensemble Worker
-                      ├── kimi-k2.6:cloud    (polarity, confidence)
-                      ├── qwen3.5:397b       (polarity, confidence)
-                      ├── deepseek-v4-pro    (polarity, confidence)
-                      └── glm-5.1:cloud      (polarity, confidence)
-          │
-          ▼
-  Score = Σ(weight_i × polarity_i × confidence_i)
-  Score ∈ [-1, +1] — positivo = bullish, negativo = bearish
-          │
-          ▼
-  Signal Aggregation (per strategia)
-  Portfolio Orchestrator  ──►  Risk Check  ──►  Alpaca API`}
         </div>
 
-        <h3 style={h3Style}>Task Celery Pianificati</h3>
-        <ul style={listStyle}>
-          <li><strong>news-ingestion</strong> — ogni 15 min (Lun-Ven, 14:00-21:00 UTC): ingestione GDELT/MarketAux/Alpaca</li>
-          <li><strong>sentiment-worker</strong> — elaborazione continua coda Redis, LLM inference</li>
-          <li><strong>portfolio-cycle</strong> — ogni ora (Lun-Ven, 14:00-21:00 UTC): ciclo completo di orchestrazione</li>
-          <li><strong>loss-feedback-check</strong> — ogni 30 min (Lun-Ven, 14:00-21:00 UTC): Phase B — aggiusta threshold/scale se perdite recenti</li>
-          <li><strong>counterfactual-worker</strong> — ogni notte alle 22:45 UTC: Phase C — calcola ritorni a 1h per i trade saltati</li>
-          <li><strong>risk-monitor</strong> — giornaliero alle 22:30 UTC: monitoraggio esposizione e HHI</li>
-          <li><strong>decay-monitor</strong> — mensile (1° del mese, 23:00 UTC): walk-forward decay detection</li>
-        </ul>
-      </div>
-
-      {/* 5 — MODELLI LLM */}
-      <div style={cardStyle}>
-        <h2 style={h2Style}>🤖 Ensemble LLM</h2>
-        <p style={pStyle}>
-          Ogni notizia viene elaborata da 4 modelli in parallelo. Ogni modello produce una <strong>polarity</strong> (direzione, da -1 a +1) e una <strong>confidence</strong> (certezza, da 0 a 1).
-          Il segnale finale è la media pesata dei prodotti <em>polarity × confidence</em>.
-        </p>
-
-        {[
-          { model: 'kimi-k2.6:cloud', role: 'Modello primario', desc: 'Forte nel ragionamento finanziario e nell\'analisi di report trimestrali e notizie macro.' },
-          { model: 'qwen3.5:397b', role: 'Ragionamento cross-domain', desc: 'Eccellente su analisi cross-settoriale e comprensione di eventi geopolitici complessi.' },
-          { model: 'deepseek-v4-pro:cloud', role: 'Analisi strutturata', desc: 'Ottimo per output strutturato (JSON) e analisi passo-passo di documenti finanziari.' },
-          { model: 'glm-5.1:cloud', role: 'Fallback low-cost', desc: 'Costo inference ridotto. Usato quando i modelli primari sono indisponibili o lenti.' },
-        ].map((m) => (
-          <div key={m.model} style={{ ...metricCardStyle, marginBottom: 10 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{m.model}</span>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>{m.role}</span>
-            </div>
-            <p style={{ ...pStyle, margin: 0, fontSize: 12 }}>{m.desc}</p>
-          </div>
-        ))}
-
-        <h3 style={h3Style}>Prompt Engineering (DK-CoT)</h3>
-        <p style={pStyle}>
-          Tutti i prompt usano <strong>Domain Knowledge Chain-of-Thought</strong>: il modello interpreta il ruolo di un analista buy-side, ragiona su flussi di cassa e competitività prima di emettere il verdetto, e produce output JSON deterministico.
-        </p>
-      </div>
-
-      {/* 6 — MONITORAGGIO */}
-      <div style={cardStyle}>
-        <h2 style={h2Style}>📡 Monitoraggio</h2>
-
-        <h3 style={h3Style}>Risk Monitor</h3>
-        <p style={pStyle}>
-          Controlla continuamente l'esposizione del portfolio. Interrompe l'esecuzione (killswitch) se vengono violati i limiti. Metriche monitorate:
-        </p>
-        <ul style={listStyle}>
-          <li><strong>Esposizione totale</strong> — somma dei pesi assoluti nel portfolio (max 50%)</li>
-          <li><strong>HHI</strong> — Herfindahl-Hirschman Index, misura la concentrazione (evita over-weighting su un singolo asset)</li>
-          <li><strong>Peso massimo per asset</strong> — nessun singolo asset può superare il 10% del portfolio</li>
-          <li><strong>Freshness segnali</strong> — segnali più vecchi di 30 min vengono scartati</li>
-          <li><strong>Killswitch</strong> — arresto di emergenza: blocca tutti gli ordini immediatamente</li>
-        </ul>
-
-        <h3 style={h3Style}>Decay Monitor</h3>
-        <p style={pStyle}>
-          Confronta mensile le metriche recenti (ultimi 3 mesi) con il baseline OOS di ogni strategia. Se la degradazione supera le soglie, emette un alert.
-        </p>
-        <ul style={listStyle}>
-          <li><strong>Metriche monitorate</strong> — IC, Sharpe, hit-rate, max drawdown per strategia</li>
-          <li><strong>Alert giallo</strong> — score ≥ 0.3: degradazione rilevabile, monitorare attentamente</li>
-          <li><strong>Alert rosso</strong> — score ≥ 0.5: degradazione significativa, valutare sospensione strategia</li>
-        </ul>
-
-        <h3 style={h3Style}>Dashboard Grafana (porta 3001)</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10, marginTop: 8 }}>
-          {[
-            { name: 'Overview', items: 'P&L, posizioni, IC, segnali, spesa LLM, volume news' },
-            { name: 'Risk Monitor', items: 'Esposizione totale, pesi strategie, pesi modelli, confidence, alert' },
-            { name: 'Decay Monitor', items: 'IC/Sharpe/hit-rate/drawdown decay per strategia, livelli di alert' },
-          ].map((d) => (
-            <div key={d.name} style={metricCardStyle}>
-              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>📊 {d.name}</div>
-              <div style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.5 }}>{d.items}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* 7 — PARAMETRI DI RISCHIO */}
-      <div style={cardStyle}>
-        <h2 style={h2Style}>⚠️ Parametri di Rischio</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
-          {[
-            { param: 'Stop-loss per posizione', value: '2%', desc: 'Chiusura automatica se la posizione perde il 2%' },
-            { param: 'Max drawdown portfolio', value: '10%', desc: 'Killswitch automatico se il portfolio scende del 10% dal picco' },
-            { param: 'Max esposizione totale', value: '50%', desc: 'Il portfolio non può essere investito per più del 50% del capitale' },
-            { param: 'Max peso per asset', value: '10%', desc: 'Nessun singolo ticker può superare il 10% del NAV' },
-            { param: 'Signal freshness', value: '30 min', desc: 'Segnali più vecchi di 30 minuti vengono ignorati' },
-            { param: 'Allocazione S1', value: '50%', desc: 'Time-Series Momentum Multi-Asset' },
-            { param: 'Allocazione S2', value: '20%', desc: 'Volatility Risk Premium' },
-            { param: 'Allocazione S4', value: '30%', desc: 'News-Driven Tactical' },
-          ].map((r) => (
-            <div key={r.param} style={metricCardStyle}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
-                <span style={{ fontWeight: 600, fontSize: 12 }}>{r.param}</span>
-                <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--blue)' }}>{r.value}</span>
+        {/* S4 */}
+        <div style={inner}>
+          <div style={rowFlex}>
+            <div style={stag}>S4</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
+                News-Driven Tactical (LLM Sentiment)
+                <span style={badge('#1d4ed8', '#dbeafe')}>PAPER — 10% portafoglio</span>
               </div>
-              <div style={{ color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.5 }}>{r.desc}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+              <h3 style={{ ...h3, margin: '8px 0 4px' }}>Teoria</h3>
+              <p style={p}>
+                Le notizie aziendali generano price discovery: il mercato reagisce con ritardo agli eventi positivi/negativi (Tetlock, 2007; Loughran &amp; McDonald, 2011). L'uso di LLM permette di estrarre sentiment più preciso rispetto a dizionari tradizionali, catturando contesto e sfumature.
+              </p>
+              <h3 style={{ ...h3, margin: '8px 0 4px' }}>Come genera il segnale</h3>
+              <div style={mono}>{`Fonti news (ogni 15 min, 14:00-21:00 UTC Lun-Ven):
+  ├── GDELT GKG    — eventi geopolitici globali
+  ├── MarketAux    — news finanziarie con ticker
+  └── Alpaca News  — news real-time
 
-      {/* 8 — GATES DI VALIDAZIONE */}
-      <div style={cardStyle}>
-        <h2 style={h2Style}>✅ Gates di Validazione</h2>
-        <p style={pStyle}>
-          Ogni strategia deve superare 5 gate prima di entrare nel portfolio. Il mancato superamento di un gate demote la strategia al sleeve R&D.
-        </p>
-        {[
-          { gate: 'Gate 1', name: 'Qualità del Codice', desc: 'Documentazione, riproducibilità dei risultati, revisione del codice. Verifica che il backtest sia deterministic e privo di look-ahead bias.' },
-          { gate: 'Gate 2', name: 'Expectation Positiva', desc: 'Backtest single-asset con aspettativa positiva statistica (p-value < 0.05). Esclude strategie con edge casuale.' },
-          { gate: 'Gate 3', name: 'Walk-Forward OOS', desc: 'IC out-of-sample > 0.05 su almeno 3 finestre walk-forward. Verifica che il segnale sia generalizzabile, non overfitted.' },
-          { gate: 'Gate 4', name: 'Sensitivity Analysis', desc: 'Parametri robusti: l\'edge deve persistere con variazioni ±20% dei parametri chiave. Evita strategie eccessivamente ottimizzate.' },
-          { gate: 'Gate 5', name: 'Costi di Transazione', desc: 'Drag da costi (spread + slippage + commissioni) < 50% dell\'alpha lordo. Garantisce che l\'edge sopravviva all\'execution reale.' },
-        ].map((g, i) => (
-          <div key={g.gate} style={{
-            display: 'flex',
-            gap: 14,
-            padding: '12px 0',
-            borderBottom: i < 4 ? '1px solid var(--border)' : 'none',
-          }}>
-            <div style={{
-              background: 'var(--blue)',
-              color: 'white',
-              borderRadius: 6,
-              padding: '4px 10px',
-              fontWeight: 700,
-              fontSize: 12,
-              flexShrink: 0,
-              alignSelf: 'flex-start',
-            }}>{g.gate}</div>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>{g.name}</div>
-              <p style={{ ...pStyle, margin: 0, fontSize: 12 }}>{g.desc}</p>
+LLM Ensemble (4 modelli in parallelo via Ollama cloud):
+  kimi-k2.6   → { polarity ∈ [-1,+1], confidence ∈ [0,1] }
+  qwen3.5     → { polarity, confidence }
+  deepseek    → { polarity, confidence }
+  glm-5.1     → { polarity, confidence }
+
+  score_i = polarity_i × confidence_i
+
+Aggregazione:
+  if std(score_i) > 0.30 → FinBERT locale (fallback)
+  else: score = Σ(weight_i × score_i)
+
+Redis: SET signal:{symbol}:sentiment = { score, ts, model_id }`}</div>
+              <h3 style={{ ...h3, margin: '8px 0 4px' }}>Come S4 interviene sul segnale</h3>
+              <div style={mono}>{`Ogni ciclo portfolio (ogni ora):
+  S4.compute_target_weights(signals):
+
+  [1] Filtro score:     score < 0.30  → SKIP
+  [2] Filtro EMA20:     price < EMA20 → SKIP (downtrend)
+  [3] Filtro staleness: age > 30 min  → SKIP (news obsoleta)
+
+  Se PASS:
+    sleeve_weight = base_size (0.02) × regime_multiplier
+
+  regime_multiplier:
+    bull      → ×1.0  |  sideways → ×0.7
+    bear      → ×0.4  |  high_vol → ×0.2
+
+Portfolio orchestratore:
+  merged[sym] += S4_weight[sym] × 0.10`}</div>
+              <p style={p}>
+                Il <strong>regime multiplier</strong> è il meccanismo più importante: in bear market, anche un segnale fortemente positivo genera solo il 40% della posizione normale. Questo protegge dal bias di conferma dell'LLM in mercati avversi.
+              </p>
             </div>
           </div>
-        ))}
-      </div>
-
-      {/* 9 — METRICHE CHIAVE */}
-      <div style={cardStyle}>
-        <h2 style={h2Style}>📈 Metriche Chiave</h2>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-          {[
-            { name: 'OOS Sharpe', desc: 'Rendimento risk-adjusted out-of-sample. > 0.5 = buona, > 1.0 = eccellente' },
-            { name: 'IC', desc: 'Information Coefficient — correlazione di Spearman tra predizione e rendimento. > 0.05 = segnale utile' },
-            { name: 'ICIR', desc: 'IC Information Ratio: IC / Std(IC). > 0.3 = segnale consistente nel tempo' },
-            { name: 'Max Drawdown', desc: 'Massima perdita dal picco equity. < 20% accettabile, > 30% preoccupante' },
-            { name: 'Confidence', desc: 'Concordanza tra modelli LLM sul segnale. > 0.7 = alta affidabilità del segnale' },
-            { name: 'Hit Rate', desc: 'Percentuale di predizioni corrette (direzione). > 52% indica edge statistico' },
-            { name: 'Polarity', desc: 'Direzione del segnale LLM: +1 = fortemente bullish, -1 = fortemente bearish, 0 = neutro' },
-            { name: 'Score finale', desc: 'polarity × confidence — scala il segnale direzionale per la certezza del modello' },
-          ].map((m) => (
-            <div key={m.name} style={metricCardStyle}>
-              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{m.name}</div>
-              <div style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.5 }}>{m.desc}</div>
-            </div>
-          ))}
         </div>
-      </div>
 
-      {/* 10 — MODALITÀ OPERATIVE */}
-      <div style={cardStyle}>
-        <h2 style={h2Style}>⚙️ Modalità Operative</h2>
-        <p style={pStyle}>La modalità operativa corrente è visibile e modificabile nella pagina <strong>Admin</strong>.</p>
-        {[
-          { mode: 'Backtest', badge: '#475569', badgeBg: '#f1f5f9', desc: 'Simulazione storica. Nessun ordine reale o simulato inviato. Usato per testare strategie su dati passati.' },
-          { mode: 'Paper', badge: '#1d4ed8', badgeBg: '#dbeafe', desc: 'Modalità corrente. Ordini simulati via Alpaca Paper API. Comportamento identico al live, senza rischio capitale reale.' },
-          { mode: 'Semi-auto', badge: '#a16207', badgeBg: '#fef9c3', desc: 'Ogni ordine richiede approvazione manuale via Telegram prima dell\'esecuzione. Utile nella transizione verso il live.' },
-          { mode: 'Full-auto', badge: '#15803d', badgeBg: '#dcfce7', desc: 'Esecuzione completamente automatica senza intervento umano. Richiede piena fiducia nel sistema e nei parametri di rischio.' },
-          { mode: 'Halted', badge: '#b91c1c', badgeBg: '#fee2e2', desc: 'Tutti gli ordini bloccati. Il sistema continua a raccogliere segnali e monitorare, ma non esegue. Attivabile tramite killswitch.' },
-        ].map((m) => (
-          <div key={m.mode} style={{
-            display: 'flex',
-            gap: 14,
-            padding: '12px 0',
-            borderBottom: '1px solid var(--border)',
-          }}>
-            <div style={{
-              ...badgeStyle(m.badge, m.badgeBg),
-              marginLeft: 0,
-              flexShrink: 0,
-              alignSelf: 'flex-start',
-              fontSize: 12,
-              padding: '4px 12px',
-            }}>{m.mode}</div>
-            <p style={{ ...pStyle, margin: 0, fontSize: 13 }}>{m.desc}</p>
+        {/* S2 */}
+        <div style={{ ...inner, opacity: 0.6 }}>
+          <div style={rowFlex}>
+            <div style={{ ...stag, background: '#475569' }}>S2</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
+                Volatility Risk Premium (VRP)
+                <span style={badge('#991b1b', '#fee2e2')}>DISABILITATA — 0% portafoglio</span>
+              </div>
+              <p style={p}>
+                <strong>Teoria:</strong> La volatilità implicita (VIX) eccede sistematicamente la volatilità realizzata di 3–4 punti annualizzati. Vendere questa "assicurazione" cattura un premio strutturale. L'implementazione attuale è un proxy semplificato (long SPY overnight quando VIX/realised_vol_20d {'>'} 0.20) — non usa opzioni reali.
+              </p>
+              <p style={{ ...p, color: '#ef4444', marginBottom: 0 }}>
+                Stato: OOS Sharpe −0.55, tutti i gate (1–4) falliti. Non attiva. Per riattivarla serve superare tutti i gate.
+              </p>
+            </div>
           </div>
-        ))}
-      </div>
-
-      {/* 11 — PERFORMANCE & AUTO-IMPROVE */}
-      <div style={cardStyle}>
-        <h2 style={h2Style}>📉 Performance & Auto-Improve</h2>
-        <p style={pStyle}>
-          Il sistema valuta la propria performance in tre fasi distinte e usa i risultati per auto-correggersi continuamente.
-        </p>
-
-        <h3 style={h3Style}>Phase A — Trade Analytics (pagina Trades → tab Analytics)</h3>
-        <p style={pStyle}>
-          Analisi retrospettiva multidimensionale dei trade chiusi. Risponde alla domanda: <em>dove guadagna e perde il sistema?</em>
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10, marginBottom: 16 }}>
-          {[
-            { dim: 'Per Simbolo', use: 'Identifica ticker con edge positivo e ticker che drenano. Un simbolo sistematicamente negativo va rimosso dalla watchlist.' },
-            { dim: 'Per Regime', use: 'Verifica che il sistema guadagni nei regimi attesi (bullish). Se guadagna anche in regime basso, valuta di abbassare la soglia minima di regime.' },
-            { dim: 'Per Ora', use: 'Individua le fasce orarie redditizie. Le prime 30 minuti di mercato (9:30–10:00 EST) spesso hanno spread alti — se negativi, aggiungi un filtro orario.' },
-            { dim: 'Per Score LLM', use: 'Verifica che bucket di score alto → P&L alto. Se la correlazione è assente, il segnale LLM non ha edge — rivaluta i pesi dei modelli.' },
-            { dim: 'Per Durata', use: 'Trova la finestra di holding ottimale. Trade <15 min soffrono di spread; trade >2h rischiano staleness del segnale.' },
-          ].map((r) => (
-            <div key={r.dim} style={metricCardStyle}>
-              <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>{r.dim}</div>
-              <div style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.5 }}>{r.use}</div>
-            </div>
-          ))}
         </div>
 
-        <h3 style={h3Style}>Phase B — Loss Feedback Loop (pagina Auto-Improve)</h3>
-        <p style={pStyle}>
-          Aggiustamento automatico delle soglie in risposta a perdite recenti. Opera <strong>ogni 30 minuti</strong> durante gli orari di mercato.
-        </p>
-        <ul style={listStyle}>
-          <li><strong>Trigger OR</strong>: 3 perdite consecutive oppure P&L rolling negativo sugli ultimi 10 trade</li>
-          <li><strong>Effetto Entry Threshold</strong>: alzata da 0.30 fino a 0.60 (step +0.05 per aggiustamento) — sistema più selettivo</li>
-          <li><strong>Effetto Regime Scale</strong>: ridotta a 0.80× — position sizing ridotto del 20%</li>
-          <li><strong>Cooldown</strong>: 4 ore tra aggiustamenti; <strong>Recovery</strong>: 5 vincite consecutive per tornare al baseline</li>
-          <li><strong>TTL</strong>: ogni aggiustamento scade automaticamente dopo 48 ore</li>
-        </ul>
-        <div style={{ ...metricCardStyle, marginBottom: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Come interpretare lo stato</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        {/* S3 */}
+        <div style={{ ...inner, opacity: 0.6 }}>
+          <div style={rowFlex}>
+            <div style={{ ...stag, background: '#92400e' }}>S3</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
+                Cross-Sectional Momentum
+                <span style={badge('#a16207', '#fef9c3')}>R&D — 0% portafoglio</span>
+              </div>
+              <p style={p}>
+                <strong>Teoria:</strong> Momentum residuale su azionario US: top quintile per rendimento 12-1 mesi, rebalancing mensile su S&P 500.
+              </p>
+              <p style={{ ...p, color: '#f59e0b', marginBottom: 0 }}>
+                Stato: Gate 3 (IC OOS) e Gate 5 (drag da costi) falliti. Possibile lookahead nel sizing. Non attiva.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. FLUSSO COMPLETO SEGNALE */}
+      <div style={card}>
+        <h2 style={h2}>🔄 Flusso Completo di un Segnale (S4)</h2>
+        <div style={mono}>{`STEP 1 — INGESTION (ogni 15 min, 14:00-21:00 UTC, Lun-Ven)
+  GDELTConnector / MarketAuxConnector / AlpacaNewsConnector
+  → INSERT INTO news_log(ticker, headline, source, fetched_at)
+  → PUSH news_id in Redis queue
+
+STEP 2 — LLM ENSEMBLE
+  Prompt DK-CoT: "Act as buy-side analyst. Reason over cash flows,
+  competition, profitability. Output JSON: {polarity, confidence, reasoning}"
+
+  4 modelli in parallelo → [score_1, score_2, score_3, score_4]
+
+  if std(scores) > 0.30:
+    → FinBERT locale: confidence = 1 - H(softmax) / log(3)
+  else:
+    → score = Σ(weight_i × polarity_i × confidence_i)
+
+  → UPDATE sentiment_signals SET score=...
+  → SET Redis: signal:{ticker}:sentiment = {score, ts, model_id}
+
+STEP 3 — PORTFOLIO CYCLE (ogni ora)
+  S1.compute_target_weights(prices):
+    → {AAPL: 0.35, NVDA: 0.22, ...}  # sleeve-local, no LLM
+
+  S4.compute_target_weights(signals):
+    Per ticker: score < 0.30 → skip | price < EMA20 → skip | age > 30min → skip
+    → {MSFT: 0.02, TSLA: 0.015, ...}  # sleeve-local, scaled by regime
+
+STEP 4 — MERGE + RISK CONSTRAINTS
+  merged[sym] += S1_weight[sym] × 0.50
+  merged[sym] += S4_weight[sym] × 0.10
+
+  Constraints (iterative, 10 pass max):
+    max per-asset 10% NAV | max total 95% | max sector 25% | HHI check
+  Vol overlay: qty × (target_vol=10% / estimated_portfolio_vol) clamped [0.5×, 2×]
+
+STEP 5 — ORDINI
+  delta_qty = target - current
+  → BUY / SELL → Alpaca Paper API → INSERT INTO trades`}</div>
+      </div>
+
+      {/* 4. COME LE STRATEGIE INTERVENGONO */}
+      <div style={card}>
+        <h2 style={h2}>⚙️ Come le Strategie Intervengono sul Segnale</h2>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                <th style={th}>Filtro / Intervento</th>
+                <th style={th}>S1</th>
+                <th style={th}>S4</th>
+                <th style={th}>Dove</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                ['Score threshold (≥0.30)', '—', '✓ blocca entry', 'S4.compute_target_weights()'],
+                ['EMA20 trend filter', '—', '✓ blocca entry in downtrend', 'S4.compute_target_weights()'],
+                ['Signal staleness (≤30 min)', '—', '✓ scarta segnali vecchi', 'S4.compute_target_weights()'],
+                ['Regime multiplier (×0.2–1.0)', '—', '✓ scala la size', 'S4 + RegimeDetector'],
+                ['Vol-normalisation per lookback', '✓', '—', 'S1 signal compute'],
+                ['Cross-sectional z-score', '✓', '—', 'S1 signal compute'],
+                ['Inverse-vol sizing (target 15%)', '✓', '—', 'S1 sizing.py'],
+                ['Allocazione sleeve (50% / 10%)', '✓', '✓', 'PortfolioOrchestrator'],
+                ['Max per-asset 10% NAV', '✓', '✓', 'PortfolioConstraints'],
+                ['Max exposure 95% NAV', '✓', '✓', 'PortfolioConstraints'],
+                ['Max sector 25% NAV', '✓', '✓', 'PortfolioConstraints'],
+                ['Vol overlay (target 10% ptf)', '✓', '✓', 'PortfolioVolTargeter'],
+                ['Kill-switch (blocca tutto)', '✓', '✓', 'ExecutionWorker pre-check'],
+                ['Drawdown cap portafoglio (10%)', '✓', '✓', 'ExecutionWorker pre-check'],
+                ['Feedback: threshold adattivo', '—', '✓ alza soglia score', 'LossFeedbackWorker'],
+              ].map(([filtro, s1, s4, dove]) => (
+                <tr key={filtro as string} style={tableRow}>
+                  <td style={td}>{filtro}</td>
+                  <td style={{ ...td, color: s1 === '—' ? '#334155' : '#22c55e' }}>{s1}</td>
+                  <td style={{ ...td, color: s4 === '—' ? '#334155' : '#60a5fa' }}>{s4}</td>
+                  <td style={{ ...td, color: '#64748b', fontSize: 11 }}>{dove}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <h3 style={h3}>Regime multiplier: effetto pratico su S4</h3>
+        <div style={mono}>{`Regime   Mult   Esempio: MSFT score=0.45 su portafoglio $10k
+────────────────────────────────────────────────────────
+bull     ×1.0   sleeve=2.0% → ptf_weight=0.20% → ordine ~$20
+sideways ×0.7   sleeve=1.4% → ordine ~$14
+bear     ×0.4   sleeve=0.8% → ordine ~$8
+high_vol ×0.2   sleeve=0.4% → ordine ~$4`}</div>
+      </div>
+
+      {/* 5. PARAMETRI DI RISCHIO */}
+      <div style={card}>
+        <h2 style={h2}>⚠️ Parametri di Rischio</h2>
+        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              <th style={th}>Parametro</th>
+              <th style={th}>Default</th>
+              <th style={th}>Descrizione</th>
+            </tr>
+          </thead>
+          <tbody>
             {[
-              { label: 'Entry Threshold = 0.30, Scale = 1.0×', meaning: 'Baseline — sistema normale, nessuna perdita recente' },
-              { label: 'Entry Threshold > 0.30', meaning: 'Feedback attivo — filtra i segnali deboli dopo perdite' },
-              { label: 'Scale < 1.0×', meaning: 'Sizing ridotto — il sistema si protegge in un contesto difficile' },
-              { label: 'Attivo da >24h senza recovery', meaning: 'Mercato avverso — analizza Signals e considera Halted' },
-            ].map((s) => (
-              <div key={s.label} style={{ background: 'var(--bg)', borderRadius: 6, padding: '8px 10px' }}>
-                <div style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--blue)', marginBottom: 2 }}>{s.label}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{s.meaning}</div>
-              </div>
+              ['ENTRY_THRESHOLD (S4)', '0.30', 'Score minimo LLM per BUY. Alzato dal feedback loop in caso di perdite.'],
+              ['Stop-loss S4', '5% (tier A/B: 2%)', 'Chiude se prezzo scende a entry × (1 − stop_loss_pct).'],
+              ['Max posizione per asset', '10% NAV', 'Nessun ticker può superare il 10% del portafoglio.'],
+              ['Max esposizione totale', '95% NAV', 'Il 5% rimane liquido come buffer.'],
+              ['Max esposizione settoriale', '25% NAV', 'Evita concentrazione su singolo settore.'],
+              ['Drawdown cap portafoglio', '10%', 'Se portafoglio scende del 10% dal picco → kill-switch automatico.'],
+              ['Regime multiplier min', '×0.2 (high_vol)', 'In alta volatilità le posizioni S4 si riducono dell\'80%.'],
+              ['Vol target portafoglio', '10% annualizzato', 'Il vol overlay scala le qty per puntare a questo livello.'],
+              ['Max signal age S4', '30 min', 'Segnali più vecchi di 30 min vengono ignorati.'],
+              ['Allocazione S1', '50% NAV', 'Unica strategia con gate completi superati.'],
+              ['Allocazione S4', '10% NAV', 'Cappato al 10% fino a gate dedicati passati.'],
+            ].map(([param, def_, desc]) => (
+              <tr key={param as string} style={tableRow}>
+                <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }}>{param}</td>
+                <td style={{ ...td, color: 'white', fontWeight: 600, whiteSpace: 'nowrap' as const }}>{def_}</td>
+                <td style={{ ...td, color: '#64748b' }}>{desc}</td>
+              </tr>
             ))}
-          </div>
-        </div>
+          </tbody>
+        </table>
+      </div>
 
-        <h3 style={h3Style}>Phase C — Counterfactual Analysis (pagina Auto-Improve)</h3>
-        <p style={pStyle}>
-          Valutazione retrospettiva delle opportunità filtrate. Il sistema registra ogni trade saltato (<strong>SKIP_EMA</strong>, <strong>SKIP_CAP</strong>) e il giorno dopo calcola cosa sarebbe successo se fosse stato eseguito (ritorno a 1h tramite dati Alpaca 1-minuto).
+      {/* 6. GATE DI VALIDAZIONE */}
+      <div style={card}>
+        <h2 style={h2}>✅ Gate di Validazione Strategie</h2>
+        <p style={p}>
+          Ogni strategia deve superare 5 gate prima di entrare nel portfolio live. Il fallimento demote la strategia al sleeve R&D.
         </p>
-        <ul style={listStyle}>
-          <li><strong>SKIP_EMA</strong>: prezzo sotto la EMA20 al momento del segnale — filtro trend-following</li>
-          <li><strong>SKIP_CAP</strong>: limite di allocazione per ciclo raggiunto — filtro di concentrazione</li>
-          <li><strong>SKIP_POSITION</strong>: ticker già in portafoglio — escluso dall'analisi (no pyramiding by design)</li>
+        {[
+          { gate: 'Gate 1', name: 'Significance', desc: 'OOS Sharpe > 0.5. La strategia batte il caso?' },
+          { gate: 'Gate 2', name: 'Walk-Forward OOS', desc: 'OOS Sharpe > 0.8 × IS Sharpe. Il rendimento regge out-of-sample?' },
+          { gate: 'Gate 3', name: 'Robustness', desc: 'IC OOS > 0.05 su ≥3 finestre walk-forward. Segnale generalizzabile?' },
+          { gate: 'Gate 4', name: 'Sensitivity', desc: 'Sharpe stabile con ±20% variazione parametri (CV < 0.5). Nessun overfitting.' },
+          { gate: 'Gate 5', name: 'Stress Test', desc: 'Non collassa in 2008, COVID 2020, 2022 rate shock. Cost drag < gross P&L.' },
+        ].map(({ gate, name, desc }) => (
+          <div key={gate} style={{ ...inner, display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 6 }}>
+            <div style={{ background: '#1d4ed8', color: 'white', borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{gate}</div>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>{name}</div>
+              <div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>{desc}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 7. METRICHE CHIAVE */}
+      <div style={card}>
+        <h2 style={h2}>📈 Metriche Chiave</h2>
+        {[
+          { name: 'IC (Information Coefficient)', desc: 'Correlazione di Spearman tra predizione LLM e rendimento reale. > 0.05 = segnale utile, < 0 = anti-predittivo.' },
+          { name: 'ICIR (IC Information Ratio)', desc: 'IC / Std(IC). > 0.3 = segnale consistente nel tempo. Il LOO-ICIR misura il contributo marginale di ogni modello.' },
+          { name: 'Polarity', desc: 'Direzione del segnale LLM: +1 = fortemente bullish, −1 = fortemente bearish.' },
+          { name: 'Confidence', desc: 'Certezza del modello. Per FinBERT: confidence = 1 − H(softmax) / log(3).' },
+          { name: 'Score finale S4', desc: 'polarity × confidence. Alta polarità + bassa confidenza → score piccolo. Penalizza l\'incertezza.' },
+          { name: 'OOS Sharpe', desc: 'Sharpe ratio out-of-sample. > 0.5 = Gate 1 superato. > 1.0 = eccellente.' },
+          { name: 'Cost drag', desc: 'Frazione di P&L lordo consumata da spread + market impact. Annualizzato = cost_drag_pct × 252.' },
+          { name: 'Cash drag', desc: 'Costo opportunità del capitale non deployato: cash_pct × 4.5% (T-bill proxy) per anno.' },
+          { name: 'Regime multiplier', desc: 'Coefficiente (0.2–1.0) che scala le posizioni S4 in base al regime rilevato da RegimeDetector.' },
+          { name: 'HHI', desc: 'Herfindahl-Hirschman Index: concentrazione del portafoglio. Alto HHI = pochi asset dominanti.' },
+        ].map(({ name, desc }) => (
+          <div key={name} style={{ ...inner, marginBottom: 6 }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 3 }}>{name}</div>
+            <div style={{ color: '#64748b', fontSize: 12 }}>{desc}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* 8. AUTO-IMPROVE */}
+      <div style={card}>
+        <h2 style={h2}>🔧 Auto-Improve (Phase A / B / C)</h2>
+        <h3 style={h3}>Phase A — Trade Analytics (pagina Trades → tab Analytics)</h3>
+        <ul style={ul}>
+          <li><strong>P&L per simbolo</strong> — quali ticker generano alpha, quali distruggono valore</li>
+          <li><strong>P&L per regime</strong> — la strategia funziona meglio in bull o sideways?</li>
+          <li><strong>P&L per score bucket</strong> — segnali con score alto → P&L alto? Se no, il segnale LLM non ha edge</li>
+          <li><strong>P&L per durata holding</strong> — finestra ottimale di holding</li>
         </ul>
-        <p style={pStyle}>
-          <strong>Regola decisionale</strong>: agisci su un filtro solo se <em>avg_return &gt; +0.5%</em> e <em>% profitable &gt; 55%</em> su almeno 30 osservazioni. Sotto questa soglia i dati sono statisticamente rumorosi. Aggiornamento: nightly alle 22:45 UTC.
+        <h3 style={h3}>Phase B — Loss Feedback Loop (pagina Auto-Improve)</h3>
+        <p style={p}>
+          N perdite consecutive o P&L rolling negativo → <code>LossFeedbackWorker</code> alza <code>ENTRY_THRESHOLD</code> e riduce <code>regime_scale</code>. Visibile nel tab Weekly Report della pagina Performance.
+        </p>
+        <h3 style={h3}>Phase C — Counterfactual Analysis (pagina Auto-Improve)</h3>
+        <p style={p}>
+          Per ogni trade saltato (<code>SKIP_EMA</code>, <code>SKIP_CAP</code>, <code>SKIP_POSITION</code>), calcola il rendimento che avrebbe generato. Permette di calibrare i filtri.
         </p>
       </div>
 
-      {/* 12 — AIUTO CONTESTUALE */}
-      <div style={cardStyle}>
-        <h2 style={h2Style}>❓ Aiuto Contestuale</h2>
-        <p style={pStyle}>
-          Ogni pagina ha un pulsante <strong style={{ background: '#3b82f6', color: 'white', borderRadius: '50%', padding: '1px 6px', fontSize: 12 }}>?</strong> in alto a destra. Cliccalo per aprire un pannello laterale con la documentazione specifica di quella pagina: metriche, interpretazione dei dati, e flusso consigliato.
-        </p>
-        <p style={{ ...pStyle, marginBottom: 0 }}>
-          Per domande sul sistema, consultare prima questa pagina. Per problemi tecnici o configurazione avanzata, verificare i log in <strong>Admin</strong> e i task Celery tramite Grafana.
-        </p>
+      {/* 9. MODALITÀ OPERATIVE */}
+      <div style={card}>
+        <h2 style={h2}>⚙️ Modalità Operative</h2>
+        {[
+          { mode: 'Backtest', color: '#475569', bg: '#f1f5f9', desc: 'Simulazione su dati storici. Nessun ordine reale o simulato. Pagina Backtest.' },
+          { mode: 'Paper', color: '#1d4ed8', bg: '#dbeafe', desc: 'Ordini simulati su Alpaca paper account. Denaro fittizio. Stato attuale.' },
+          { mode: 'Live', color: '#15803d', bg: '#dcfce7', desc: 'Ordini reali su Alpaca live. Solo dopo 90 giorni di paper trading validati + go-live checklist.' },
+        ].map(({ mode, color, bg, desc }) => (
+          <div key={mode} style={{ ...inner, display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 6 }}>
+            <div style={badge(color, bg)}>{mode}</div>
+            <div style={{ color: '#94a3b8', fontSize: 13 }}>{desc}</div>
+          </div>
+        ))}
       </div>
     </div>
   )

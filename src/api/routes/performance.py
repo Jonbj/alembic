@@ -68,6 +68,17 @@ async def get_latest_performance(
     return report
 
 
+@router.get("/performance/weekly")
+async def get_weekly_report(
+    redis: Annotated[RedisStore, Depends(get_redis_store)],
+) -> dict:
+    """Return latest structured weekly report (computed Monday 04:00 UTC, TTL 9d)."""
+    report = redis.get_weekly_report()
+    if report is None:
+        raise HTTPException(status_code=404, detail="No weekly report available yet (corrupted or missing)")
+    return report
+
+
 @router.get("/weights/current")
 async def get_current_weights(
     redis: Annotated[RedisStore, Depends(get_redis_store)],
