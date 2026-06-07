@@ -544,6 +544,127 @@ def _format_infrastructure_section(pg: "PostgreSQLStore") -> str:
     )
 
 
+def _build_weekly_structured(
+    new_weights: dict,
+    current_weights: dict,
+    freeze_reason: str,
+    purified_icir: dict,
+    pg: "PostgreSQLStore",
+    redis: "RedisStore",
+) -> dict:
+    """Build structured weekly report dict for the web API (JSON-serializable)."""
+    data: dict = {
+        "computed_at": datetime.now(timezone.utc).isoformat(),
+        "weights": {
+            "current": current_weights,
+            "suggested": new_weights,
+            "purified_icir": purified_icir,
+            "freeze_reason": freeze_reason,
+        },
+        "trade_pnl": {},
+        "capital_efficiency": {},
+        "regime": {},
+        "feedback": {},
+        "infrastructure": {},
+    }
+
+    try:
+        ts = pg.fetch_trade_summary(days=7)
+        data["trade_pnl"] = {k: ts.get(k, 0) for k in [
+            "total_trades", "win_rate", "avg_net_pnl", "avg_gross_pnl",
+            "avg_slippage_est", "total_net_pnl", "total_gross_pnl",
+            "total_notional", "trades_per_week", "avg_hold_minutes",
+            "slippage_pct_of_gross", "return_on_notional",
+            "avg_cost_bps", "total_cost_usd", "avg_spread_cost_bps",
+            "avg_impact_cost_bps", "cost_drag_pct",
+        ]}
+    except Exception as e:
+        log.warning("weekly_structured: trade_pnl fetch failed: %s", e)
+
+    try:
+        open_trades = pg.fetch_trades(status="open", limit=20)
+        pv = float(redis._r.get("portfolio:value") or 0)
+        deployed = sum(float(t.get("entry_notional") or 0) for t in open_trades)
+        n_open = len(open_trades)
+        depl_pct = deployed / pv if pv > 0 else 0.0
+        cash_pct = 1.0 - depl_pct
+        data["capital_efficiency"] = {
+            "portfolio_value_usd": pv,
+            "deployed_notional": deployed,
+            "n_open_positions": n_open,
+            "deployment_pct": depl_pct,
+            "cash_pct": cash_pct,
+            "annual_cash_drag_pct": cash_pct * 0.045 * 100,
+            "efficiency_ratio": (deployed / (pv * 0.50)) if pv > 0 else 0.0,
+        }
+    except Exception as e:
+        log.warning("weekly_structured: capital_efficiency fetch failed: %s", e)
+
+    try:
+        regime_state = redis.get_regime()
+        _MULTS = {"bull": 1.0, "sideways": 0.7, "bear": 0.4, "high_vol": 0.2}
+        label = str(getattr(regime_state, "regime", "unknown") if regime_state else "unknown")
+        mult = float(getattr(regime_state, "multiplier", _MULTS.get(label, 0.2)) if regime_state else 0.2)
+        conf = float(getattr(regime_state, "confidence", 0.0) if regime_state else 0.0)
+        data["regime"] = {
+            "label": label,
+            "multiplier": mult,
+            "confidence": conf,
+            "deployment_ceiling_pct": 0.10 * mult * 5,
+            "regime_discount_pct": (1.0 - mult) * 100,
+        }
+    except Exception as e:
+        log.warning("weekly_structured: regime fetch failed: %s", e)
+
+    try:
+        import yaml
+        from pathlib import Path
+        _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
+        with open(_TRADING_YAML) as f:
+            cfg_yaml = yaml.safe_load(f) or {}
+        fb_cfg = cfg_yaml.get("loss_feedback", {})
+        baseline = float(fb_cfg.get("threshold_baseline", 0.30))
+        recovery_win_streak = int(fb_cfg.get("recovery_win_streak", 5))
+        current_thr = redis.get_feedback_entry_threshold() or baseline
+        current_scale = redis.get_feedback_regime_scale() or 1.0
+        fb_state = redis.get_feedback_state() or {}
+        data["feedback"] = {
+            "threshold_baseline": baseline,
+            "current_threshold": current_thr,
+            "current_scale": current_scale,
+            "is_elevated": current_thr > baseline + 0.001,
+            "consecutive_wins": int(fb_state.get("consecutive_wins") or 0),
+            "recovery_win_streak": recovery_win_streak,
+            "last_adjustment_ts": fb_state.get("last_adjustment_ts", ""),
+        }
+    except Exception as e:
+        log.warning("weekly_structured: feedback fetch failed: %s", e)
+
+    try:
+        import yaml
+        from pathlib import Path
+        _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
+        with open(_TRADING_YAML) as f:
+            cfg_yaml = yaml.safe_load(f) or {}
+        annual_fixed = float(cfg_yaml.get("infrastructure", {}).get("annual_fixed_cost_usd", 1440.0))
+        llm_30d = pg.fetch_llm_budget_period(days=30)
+        monthly_fixed = annual_fixed / 12
+        monthly_llm = float(llm_30d)
+        monthly_total = monthly_fixed + monthly_llm
+        annual_total = annual_fixed + monthly_llm * 12
+        data["infrastructure"] = {
+            "monthly_fixed_usd": monthly_fixed,
+            "monthly_llm_usd": monthly_llm,
+            "monthly_total_usd": monthly_total,
+            "annual_total_usd": annual_total,
+            "breakevens": {str(p): annual_total / (p / 100) for p in [5, 10, 15]},
+        }
+    except Exception as e:
+        log.warning("weekly_structured: infrastructure fetch failed: %s", e)
+
+    return data
+
+
 @app.task(name="src.workers.performance.run_daily_report")
 def run_daily_report():
     """Daily performance report task.
@@ -779,6 +900,24 @@ def run_weekly_weights():
             log.warning("Failed to build infrastructure section: %s", e)
 
         asyncio.run(notifier.send_alert(message, level="info"))
+
+        # Store structured weekly report for web API (TTL 9d, same as snapshot)
+        try:
+            weekly_structured = _build_weekly_structured(
+                new_weights=new_weights,
+                current_weights=current_weights,
+                freeze_reason=freeze_reason,
+                purified_icir=purified_icir,
+                pg=pg,
+                redis=redis,
+            )
+            redis._r.setex(
+                "performance:weekly_report",
+                86400 * 9,
+                json.dumps(weekly_structured),
+            )
+        except Exception as e:
+            log.warning("Failed to store structured weekly report: %s", e)
 
         log.info(f"Weekly weights computed. Suggestion stored in Redis.")
 
