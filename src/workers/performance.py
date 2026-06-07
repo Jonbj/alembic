@@ -568,6 +568,17 @@ def _build_weekly_structured(
         "infrastructure": {},
     }
 
+    # Load trading.yaml once for feedback and infrastructure sections
+    _cfg_yaml: dict = {}
+    try:
+        import yaml
+        from pathlib import Path
+        _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
+        with open(_TRADING_YAML) as f:
+            _cfg_yaml = yaml.safe_load(f) or {}
+    except Exception as e:
+        log.warning("weekly_structured: failed to load trading.yaml: %s", e)
+
     try:
         ts = pg.fetch_trade_summary(days=7)
         data["trade_pnl"] = {k: ts.get(k, 0) for k in [
@@ -617,12 +628,7 @@ def _build_weekly_structured(
         log.warning("weekly_structured: regime fetch failed: %s", e)
 
     try:
-        import yaml
-        from pathlib import Path
-        _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
-        with open(_TRADING_YAML) as f:
-            cfg_yaml = yaml.safe_load(f) or {}
-        fb_cfg = cfg_yaml.get("loss_feedback", {})
+        fb_cfg = _cfg_yaml.get("loss_feedback", {})
         baseline = float(fb_cfg.get("threshold_baseline", 0.30))
         recovery_win_streak = int(fb_cfg.get("recovery_win_streak", 5))
         current_thr = redis.get_feedback_entry_threshold() or baseline
@@ -630,6 +636,7 @@ def _build_weekly_structured(
         fb_state = redis.get_feedback_state() or {}
         data["feedback"] = {
             "threshold_baseline": baseline,
+            "threshold_max": float(fb_cfg.get("threshold_max", 0.60)),
             "current_threshold": current_thr,
             "current_scale": current_scale,
             "is_elevated": current_thr > baseline + 0.001,
@@ -641,12 +648,7 @@ def _build_weekly_structured(
         log.warning("weekly_structured: feedback fetch failed: %s", e)
 
     try:
-        import yaml
-        from pathlib import Path
-        _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
-        with open(_TRADING_YAML) as f:
-            cfg_yaml = yaml.safe_load(f) or {}
-        annual_fixed = float(cfg_yaml.get("infrastructure", {}).get("annual_fixed_cost_usd", 1440.0))
+        annual_fixed = float(_cfg_yaml.get("infrastructure", {}).get("annual_fixed_cost_usd", 1440.0))
         llm_30d = pg.fetch_llm_budget_period(days=30)
         monthly_fixed = annual_fixed / 12
         monthly_llm = float(llm_30d)
