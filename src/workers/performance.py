@@ -472,6 +472,41 @@ def _format_feedback_stall_section(redis: "RedisStore") -> str:
     return f"\n🧠 *Feedback Loop*\n{stall_status}{last_str}"
 
 
+def _format_regime_section(redis: "RedisStore", portfolio_value_usd: float = 0.0) -> str:
+    """Format current regime + deployment ceiling for the weekly report."""
+    _MULTIPLIERS = {"bull": 1.0, "sideways": 0.7, "bear": 0.4, "high_vol": 0.2}
+    _MAX_POSITION_PCT = 0.10
+    _MAX_POSITIONS = 5
+
+    regime_state = redis.get_regime()
+    if regime_state is None:
+        return "\n📡 *Regime*\nNo regime data in Redis (check regime worker)"
+
+    label = getattr(regime_state, "regime", "unknown")
+    multiplier = float(getattr(regime_state, "multiplier", _MULTIPLIERS.get(str(label), 0.2)))
+    confidence = float(getattr(regime_state, "confidence", 0.0))
+
+    bull_ceiling_pct = _MAX_POSITION_PCT * 1.0 * _MAX_POSITIONS
+    current_ceiling_pct = _MAX_POSITION_PCT * multiplier * _MAX_POSITIONS
+    regime_discount_pct = (1.0 - multiplier) * 100
+
+    if portfolio_value_usd > 0:
+        ceiling_str = f"${current_ceiling_pct * portfolio_value_usd:,.0f} ({current_ceiling_pct:.0%} of portfolio)"
+        bull_str = f" vs ${bull_ceiling_pct * portfolio_value_usd:,.0f} in bull"
+    else:
+        ceiling_str = f"{current_ceiling_pct:.0%} of portfolio"
+        bull_str = f" vs {bull_ceiling_pct:.0%} in bull"
+
+    emoji = {"bull": "🟢", "sideways": "🟡", "bear": "🔴", "high_vol": "🚨"}.get(str(label), "⚪")
+
+    return (
+        f"\n📡 *Regime*\n"
+        f"{emoji} {label} ×{multiplier} (confidence {confidence:.0%})\n"
+        f"Deployment ceiling: {ceiling_str}{bull_str}\n"
+        f"Regime discount: {regime_discount_pct:.0f}% of max capital withheld"
+    )
+
+
 def _format_infrastructure_section(pg: "PostgreSQLStore") -> str:
     """Format infrastructure cost / break-even section for the weekly report."""
     import yaml
@@ -723,6 +758,13 @@ def run_weekly_weights():
             message += _format_capital_efficiency_section(open_trades, portfolio_value_usd)
         except Exception as e:
             log.warning("Failed to build capital efficiency section: %s", e)
+
+        # Append regime / deployment-ceiling section
+        try:
+            portfolio_value_usd = float(redis._r.get("portfolio:value") or 0)
+            message += _format_regime_section(redis, portfolio_value_usd)
+        except Exception as e:
+            log.warning("Failed to build regime section: %s", e)
 
         # Append feedback loop / threshold-stall section
         try:

@@ -238,11 +238,15 @@ def _maybe_postmortem(
     entry_price: float,
     exit_price: float,
     tick_time,
+    entry_time=None,
 ) -> None:
     """Run postmortem diagnosis on a losing trade and persist the result.
 
     Silently skips if the loss is below the trigger thresholds to avoid
     writing a diagnosis for every tiny dip.
+
+    entry_time: when provided, used to detect overnight gap risk (tick_time.date()
+    > entry_time.date() means the position was held at least one overnight session).
     """
     loss_pct = (entry_price - exit_price) / entry_price if entry_price > 0 else 0.0
     confidence = float(signal.get("confidence", 0.5))
@@ -262,6 +266,14 @@ def _maybe_postmortem(
         except Exception:
             pass
 
+    was_overnight = False
+    if entry_time is not None:
+        try:
+            et = entry_time if entry_time.tzinfo else entry_time.replace(tzinfo=timezone.utc)
+            was_overnight = tick_time.date() > et.date()
+        except Exception:
+            pass
+
     ctx = TradeContext(
         loss_pct=loss_pct,
         signal_score=score,
@@ -270,6 +282,7 @@ def _maybe_postmortem(
         regime=_regime_label(regime_mult),
         reasoning_summary="",
         signal_age_minutes=signal_age_min,
+        was_overnight_gap=was_overnight,
     )
     diagnosis = diagnose_loss(ctx)
     try:
@@ -454,8 +467,13 @@ def run_execution_cycle(
                             AlertLevel.WARNING,
                         )
                         trade_id: "int | None" = None
+                        trade_entry_time = None
                         if pg_store is not None:
                             try:
+                                # Fetch entry_time before closing for overnight-gap detection
+                                open_rec = pg_store.fetch_trades(symbol=symbol, status="open", limit=1)
+                                if open_rec:
+                                    trade_entry_time = open_rec[0].get("entry_time")
                                 trade_id = pg_store.close_trade(
                                     symbol=symbol,
                                     exit_price=current_price,
@@ -478,6 +496,7 @@ def run_execution_cycle(
                                 entry_price=entry_price,
                                 exit_price=current_price,
                                 tick_time=tick_time,
+                                entry_time=trade_entry_time,
                             )
                     except Exception as stop_exc:
                         log.error("Failed to close stop-loss position for %s: %s", symbol, stop_exc)
@@ -606,7 +625,50 @@ def run_execution_cycle(
             log.error("Error processing %s: %s", symbol, e)
             stats["errors"] += 1
 
+    # Near market close (19:30–20:00 UTC = 15:30–16:00 ET): alert on open positions
+    # that will be held overnight. Fires once per day via a Redis dedup key.
+    _near_close = (tick_time.hour == 19 and tick_time.minute >= 30) or tick_time.hour == 20
+    if _near_close:
+        _alert_overnight_positions(open_positions, portfolio_value, notifier, redis_store, tick_time)
+
     return stats
+
+
+def _alert_overnight_positions(
+    open_positions: dict,
+    portfolio_value: float,
+    notifier: "Notifier | None",
+    redis_store: RedisStore,
+    tick_time,
+) -> None:
+    """Send a Telegram alert if positions are open going into the overnight session.
+
+    Deduped per calendar date so only one alert fires per market day even if
+    multiple execution cycles fall in the 19:30-20:00 UTC window.
+    """
+    if not open_positions:
+        return
+
+    dedup_key = f"overnight_alert:{tick_time.date().isoformat()}"
+    if redis_store._r.get(dedup_key):
+        return  # already alerted today
+    redis_store._r.setex(dedup_key, 86400, "1")
+
+    lines = ["🌙 *Overnight Hold Alert*", f"{len(open_positions)} position(s) going into overnight:"]
+    for sym, pos in open_positions.items():
+        try:
+            entry = float(pos.avg_entry_price)
+            current = float(pos.current_price)
+            notional = entry * float(pos.qty)
+            pnl_pct = (current - entry) / entry * 100 if entry > 0 else 0.0
+            lines.append(f"  • {sym}: ${notional:.0f} notional | P&L {pnl_pct:+.1f}%")
+        except Exception:
+            lines.append(f"  • {sym}")
+
+    lines.append("_Gap risk: stop-loss may fill below trigger at next open._")
+    msg = "\n".join(lines)
+    log.info("Overnight hold alert: %d positions", len(open_positions))
+    _fire_alert(notifier, msg, AlertLevel.WARNING)
 
 
 @app.task(name="src.workers.execution.run_execution_worker")

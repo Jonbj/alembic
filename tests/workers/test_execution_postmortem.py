@@ -78,6 +78,59 @@ class TestMaybePostmortem:
             tick_time=datetime(2026, 6, 5, 15, 30, tzinfo=timezone.utc),
         )
 
+    def test_overnight_gap_detected_when_entry_time_yesterday(self):
+        from src.workers.execution import _maybe_postmortem
+        from src.performance.postmortem import TradeContext
+
+        mock_pg = MagicMock()
+        signal = _make_signal(score=0.55, confidence=0.35, ensemble_std=0.05)
+
+        entry_time = datetime(2026, 6, 4, 19, 0, tzinfo=timezone.utc)   # yesterday
+        tick_time = datetime(2026, 6, 5, 14, 15, tzinfo=timezone.utc)   # today (next morning)
+
+        _maybe_postmortem(
+            pg_store=mock_pg,
+            trade_id=10,
+            signal=signal,
+            score=0.55,
+            regime_mult=1.0,
+            entry_price=100.0,
+            exit_price=92.0,   # 8% gap — triggers postmortem
+            tick_time=tick_time,
+            entry_time=entry_time,
+        )
+
+        mock_pg.write_postmortem.assert_called_once()
+        trade_id_arg, diagnosis_str = mock_pg.write_postmortem.call_args[0]
+        # was_overnight_gap=True should route to "market_gap" diagnosis
+        assert "market_gap" in diagnosis_str
+
+    def test_overnight_gap_not_set_for_same_day_trade(self):
+        from src.workers.execution import _maybe_postmortem
+
+        mock_pg = MagicMock()
+        signal = _make_signal(score=0.55, confidence=0.35, ensemble_std=0.05)
+
+        entry_time = datetime(2026, 6, 5, 14, 0, tzinfo=timezone.utc)   # same day
+        tick_time = datetime(2026, 6, 5, 15, 30, tzinfo=timezone.utc)   # same day
+
+        _maybe_postmortem(
+            pg_store=mock_pg,
+            trade_id=11,
+            signal=signal,
+            score=0.55,
+            regime_mult=1.0,
+            entry_price=100.0,
+            exit_price=96.0,
+            tick_time=tick_time,
+            entry_time=entry_time,
+        )
+
+        mock_pg.write_postmortem.assert_called_once()
+        _, diagnosis_str = mock_pg.write_postmortem.call_args[0]
+        # Same-day trade must NOT be diagnosed as market_gap
+        assert "market_gap" not in diagnosis_str
+
 
 class TestRegimeLabel:
     def test_regime_label_mapping(self):

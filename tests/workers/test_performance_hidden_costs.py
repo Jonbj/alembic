@@ -1,9 +1,10 @@
-"""Tests for the three hidden-cost reporting sections added in the trade-cost-realism feature.
+"""Tests for hidden-cost reporting sections in the weekly performance report.
 
 Covers:
   - _format_capital_efficiency_section  (Point 1: Cash Drag)
   - _format_feedback_stall_section       (Point 2: Feedback Threshold Stall)
   - _format_infrastructure_section       (Point 4: Infrastructure Break-Even)
+  - _format_regime_section               (Point 6: Regime Multiplier Drag)
 """
 import sys
 from unittest.mock import MagicMock
@@ -53,6 +54,7 @@ from src.workers.performance import (  # noqa: E402
     _format_capital_efficiency_section,
     _format_feedback_stall_section,
     _format_infrastructure_section,
+    _format_regime_section,
 )
 
 # Remove freshly-installed stubs so they don't leak into other test modules.
@@ -156,3 +158,44 @@ class TestInfrastructureSection:
         # monthly_fixed = 1440/12 = 120, llm = 100 → total = 220
         result = _format_infrastructure_section(self._make_pg(llm_30d=100.0))
         assert "220" in result
+
+
+# ---------------------------------------------------------------------------
+# Point 6 — Regime Multiplier Drag
+# ---------------------------------------------------------------------------
+class TestRegimeSection:
+    def _make_redis(self, regime="bull", multiplier=1.0, confidence=0.85):
+        state = MagicMock()
+        state.regime = regime
+        state.multiplier = multiplier
+        state.confidence = confidence
+        r = MagicMock()
+        r.get_regime.return_value = state
+        r._r.get.return_value = None
+        return r
+
+    def test_bull_regime_shows_full_deployment(self):
+        result = _format_regime_section(self._make_redis("bull", 1.0))
+        assert "Regime" in result
+        assert "bull" in result
+        assert "×1.0" in result
+
+    def test_high_vol_shows_80pct_discount(self):
+        result = _format_regime_section(self._make_redis("high_vol", 0.2))
+        assert "high_vol" in result
+        assert "×0.2" in result
+        # 80% withheld
+        assert "80%" in result
+
+    def test_no_regime_data_shows_fallback(self):
+        redis = MagicMock()
+        redis.get_regime.return_value = None
+        result = _format_regime_section(redis)
+        assert "No regime data" in result or "regime worker" in result
+
+    def test_portfolio_value_used_for_dollar_ceiling(self):
+        redis = self._make_redis("sideways", 0.7)
+        redis._r.get.return_value = None
+        result = _format_regime_section(redis, portfolio_value_usd=100_000)
+        # ceiling = 0.10 × 0.7 × 5 × 100k = $35,000
+        assert "35,000" in result
