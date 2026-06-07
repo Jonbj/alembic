@@ -98,7 +98,7 @@ function WeeklyReportTab({
             <div style={row}><span style={labelSt}>Cost drag (giornaliero)</span><span style={valueSt}>{pct(tp.cost_drag_pct)}</span></div>
             <div style={row}>
               <span style={labelSt}>Cost drag annualizzato</span>
-              <span style={{ ...valueSt, color: '#f59e0b' }}>~{((tp.cost_drag_pct ?? 0) * 252 * 100).toFixed(0)} bps/anno</span>
+              <span style={{ ...valueSt, color: '#f59e0b' }}>~{((tp.cost_drag_pct ?? 0) * 252 * 10_000).toFixed(0)} bps/anno</span>
             </div>
           </>
         )}
@@ -107,66 +107,90 @@ function WeeklyReportTab({
       {/* Capital Efficiency */}
       <div style={card}>
         <h3 style={h3}>💰 Efficienza Capitale</h3>
-        <div style={row}><span style={labelSt}>Valore portafoglio</span><span style={valueSt}>${(ce.portfolio_value_usd ?? 0).toLocaleString('it-IT', { maximumFractionDigits: 0 })}</span></div>
-        <div style={row}><span style={labelSt}>Capitale deployato</span><span style={valueSt}>{pct(ce.deployment_pct)} ({ce.n_open_positions ?? 0} posizioni)</span></div>
-        <div style={row}><span style={labelSt}>Capitale idle (cash)</span><span style={valueSt}>{pct(ce.cash_pct)}</span></div>
-        <div style={row}><span style={labelSt}>Cash drag annuo stimato</span><span style={{ ...valueSt, color: '#f59e0b' }}>{num(ce.annual_cash_drag_pct, 1)}% (costo opportunità vs T-bill 4.5%)</span></div>
-        <div style={row}><span style={labelSt}>Efficienza deployment</span><span style={valueSt}>{pct(ce.efficiency_ratio)} del teorico max (5 pos × 10%)</span></div>
+        {!ce || ce.portfolio_value_usd == null ? (
+          <div style={{ color: '#64748b', fontSize: 13 }}>Dati non disponibili questa settimana.</div>
+        ) : (
+          <>
+            <div style={row}><span style={labelSt}>Valore portafoglio</span><span style={valueSt}>${(ce.portfolio_value_usd ?? 0).toLocaleString('it-IT', { maximumFractionDigits: 0 })}</span></div>
+            <div style={row}><span style={labelSt}>Capitale deployato</span><span style={valueSt}>{pct(ce.deployment_pct)} ({ce.n_open_positions ?? 0} posizioni)</span></div>
+            <div style={row}><span style={labelSt}>Capitale idle (cash)</span><span style={valueSt}>{pct(ce.cash_pct)}</span></div>
+            <div style={row}><span style={labelSt}>Cash drag annuo stimato</span><span style={{ ...valueSt, color: '#f59e0b' }}>{num(ce.annual_cash_drag_pct, 1)}% (costo opportunità vs T-bill 4.5%)</span></div>
+            <div style={row}><span style={labelSt}>Efficienza deployment</span><span style={valueSt}>{pct(ce.efficiency_ratio)} del teorico max (5 pos × 10%)</span></div>
+          </>
+        )}
       </div>
 
       {/* Regime */}
       <div style={card}>
         <h3 style={h3}>📡 Regime & Deployment Ceiling</h3>
-        <div style={row}>
-          <span style={labelSt}>Regime corrente</span>
-          <span style={{
-            ...valueSt,
-            color: rg.label === 'bull' ? '#22c55e' : rg.label === 'bear' ? '#ef4444' : rg.label === 'high_vol' ? '#f97316' : '#f59e0b',
-          }}>
-            {rg.label ?? '—'} (×{num(rg.multiplier, 1)})
-          </span>
-        </div>
-        <div style={row}><span style={labelSt}>Confidenza</span><span style={valueSt}>{pct(rg.confidence)}</span></div>
-        <div style={row}><span style={labelSt}>Deployment ceiling</span><span style={valueSt}>{pct(rg.deployment_ceiling_pct)}</span></div>
-        <div style={row}><span style={labelSt}>Capitale trattenuto vs bull</span><span style={{ ...valueSt, color: '#f59e0b' }}>{num(rg.regime_discount_pct, 0)}%</span></div>
+        {!rg || rg.label == null ? (
+          <div style={{ color: '#64748b', fontSize: 13 }}>Dati non disponibili questa settimana.</div>
+        ) : (
+          <>
+            <div style={row}>
+              <span style={labelSt}>Regime corrente</span>
+              <span style={{
+                ...valueSt,
+                color: rg.label === 'bull' ? '#22c55e' : rg.label === 'bear' ? '#ef4444' : rg.label === 'high_vol' ? '#f97316' : '#f59e0b',
+              }}>
+                {rg.label ?? '—'} (×{num(rg.multiplier, 1)})
+              </span>
+            </div>
+            <div style={row}><span style={labelSt}>Confidenza</span><span style={valueSt}>{pct(rg.confidence)}</span></div>
+            <div style={row}><span style={labelSt}>Deployment ceiling</span><span style={valueSt}>{pct(rg.deployment_ceiling_pct)}</span></div>
+            <div style={row}><span style={labelSt}>Capitale trattenuto vs bull</span><span style={{ ...valueSt, color: '#f59e0b' }}>{num(rg.regime_discount_pct, 0)}%</span></div>
+          </>
+        )}
       </div>
 
       {/* Feedback Loop */}
       <div style={card}>
         <h3 style={h3}>🧠 Feedback Loop (threshold adattivo)</h3>
-        <div style={row}><span style={labelSt}>Threshold baseline</span><span style={valueSt}>{num(fb.threshold_baseline, 2)}</span></div>
-        <div style={row}>
-          <span style={labelSt}>Threshold corrente</span>
-          <span style={{ ...valueSt, color: fb.is_elevated ? '#ef4444' : '#22c55e' }}>
-            {num(fb.current_threshold, 2)} {fb.is_elevated ? '🔴 ELEVATO' : '✅ Normale'}
-          </span>
-        </div>
-        <div style={row}><span style={labelSt}>Regime scale</span><span style={valueSt}>×{num(fb.current_scale, 2)}</span></div>
-        {fb.is_elevated && (
-          <div style={row}>
-            <span style={labelSt}>Recovery</span>
-            <span style={valueSt}>{fb.consecutive_wins ?? 0}/{fb.recovery_win_streak ?? 5} win consecutivi</span>
-          </div>
-        )}
-        {fb.last_adjustment_ts && (
-          <div style={row}><span style={labelSt}>Ultimo aggiustamento</span><span style={valueSt}>{fb.last_adjustment_ts.slice(0, 10)}</span></div>
+        {!fb || fb.current_threshold == null ? (
+          <div style={{ color: '#64748b', fontSize: 13 }}>Dati non disponibili questa settimana.</div>
+        ) : (
+          <>
+            <div style={row}><span style={labelSt}>Threshold baseline</span><span style={valueSt}>{num(fb.threshold_baseline, 2)}</span></div>
+            <div style={row}>
+              <span style={labelSt}>Threshold corrente</span>
+              <span style={{ ...valueSt, color: fb.is_elevated ? '#ef4444' : '#22c55e' }}>
+                {num(fb.current_threshold, 2)} {fb.is_elevated ? '🔴 ELEVATO' : '✅ Normale'}
+              </span>
+            </div>
+            <div style={row}><span style={labelSt}>Regime scale</span><span style={valueSt}>×{num(fb.current_scale, 2)}</span></div>
+            {fb.is_elevated && (
+              <div style={row}>
+                <span style={labelSt}>Recovery</span>
+                <span style={valueSt}>{fb.consecutive_wins ?? 0}/{fb.recovery_win_streak ?? 5} win consecutivi</span>
+              </div>
+            )}
+            {fb.last_adjustment_ts && (
+              <div style={row}><span style={labelSt}>Ultimo aggiustamento</span><span style={valueSt}>{fb.last_adjustment_ts.slice(0, 10)}</span></div>
+            )}
+          </>
         )}
       </div>
 
       {/* Infrastructure */}
       <div style={card}>
         <h3 style={h3}>🏗️ Costi Infrastruttura & Break-even</h3>
-        <div style={row}><span style={labelSt}>Costo fisso mensile</span><span style={valueSt}>${num(inf.monthly_fixed_usd, 0)}</span></div>
-        <div style={row}><span style={labelSt}>Costo LLM (30d)</span><span style={valueSt}>${num(inf.monthly_llm_usd, 2)}</span></div>
-        <div style={row}><span style={labelSt}>Totale mensile</span><span style={{ ...valueSt, fontWeight: 700 }}>${num(inf.monthly_total_usd, 0)}</span></div>
-        <div style={row}><span style={labelSt}>Stima annuale</span><span style={{ ...valueSt, color: '#f59e0b' }}>${(inf.annual_total_usd ?? 0).toLocaleString('it-IT', { maximumFractionDigits: 0 })}</span></div>
-        <div style={{ marginTop: 12, fontSize: 12, color: '#64748b' }}>Break-even portfolio (per coprire i costi annui):</div>
-        {inf.breakevens && Object.entries(inf.breakevens).map(([pctStr, size]) => (
-          <div key={pctStr} style={row}>
-            <span style={labelSt}>A {pctStr}% rendimento annuo</span>
-            <span style={valueSt}>${(size as number).toLocaleString('it-IT', { maximumFractionDigits: 0 })}</span>
-          </div>
-        ))}
+        {!inf || inf.monthly_total_usd == null ? (
+          <div style={{ color: '#64748b', fontSize: 13 }}>Dati non disponibili questa settimana.</div>
+        ) : (
+          <>
+            <div style={row}><span style={labelSt}>Costo fisso mensile</span><span style={valueSt}>${num(inf.monthly_fixed_usd, 0)}</span></div>
+            <div style={row}><span style={labelSt}>Costo LLM (30d)</span><span style={valueSt}>${num(inf.monthly_llm_usd, 2)}</span></div>
+            <div style={row}><span style={labelSt}>Totale mensile</span><span style={{ ...valueSt, fontWeight: 700 }}>${num(inf.monthly_total_usd, 0)}</span></div>
+            <div style={row}><span style={labelSt}>Stima annuale</span><span style={{ ...valueSt, color: '#f59e0b' }}>${(inf.annual_total_usd ?? 0).toLocaleString('it-IT', { maximumFractionDigits: 0 })}</span></div>
+            <div style={{ marginTop: 12, fontSize: 12, color: '#64748b' }}>Break-even portfolio (per coprire i costi annui):</div>
+            {inf.breakevens && Object.entries(inf.breakevens).map(([pctStr, size]) => (
+              <div key={pctStr} style={row}>
+                <span style={labelSt}>A {pctStr}% rendimento annuo</span>
+                <span style={valueSt}>${(size as number).toLocaleString('it-IT', { maximumFractionDigits: 0 })}</span>
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
       {/* Weights */}
@@ -213,6 +237,7 @@ export default function Performance() {
     queryKey: ['weekly-report'],
     queryFn: fetchWeeklyReport,
     retry: false,
+    staleTime: 1000 * 60 * 60, // 1 hour — weekly report is static for 9 days
   })
 
   const daily = pnl?.daily ?? []
