@@ -487,6 +487,9 @@ class TestCloseTrade:
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        # First fetchone() call: SELECT entry_notional, qty (None = no row found → defaults)
+        # Second fetchone() call: RETURNING id from UPDATE
+        mock_cur.fetchone.side_effect = [None, (77,)]
 
         store = PostgreSQLStore(conn=mock_conn)
         store.close_trade(
@@ -496,6 +499,7 @@ class TestCloseTrade:
             exit_reason="stop_loss",
             entry_price=200.0,
         )
+        # call_args is the last execute call — the UPDATE
         sql = mock_cur.execute.call_args[0][0]
         assert "UPDATE trades" in sql
         assert "exit_time IS NULL" in sql
@@ -508,6 +512,7 @@ class TestCloseTrade:
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.side_effect = [None, None]
 
         store = PostgreSQLStore(conn=mock_conn)
         store.close_trade(
@@ -529,7 +534,9 @@ class TestCloseTradeReturnsId:
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-        mock_cur.fetchone.return_value = (99,)
+        # First fetchone: SELECT entry_notional, qty (None → defaults to 0)
+        # Second fetchone: RETURNING id
+        mock_cur.fetchone.side_effect = [None, (99,)]
 
         store = PostgreSQLStore(conn=mock_conn, use_pool=False)
         result = store.close_trade(
@@ -549,7 +556,8 @@ class TestCloseTradeReturnsId:
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-        mock_cur.fetchone.return_value = None
+        # Both SELECT and UPDATE return None
+        mock_cur.fetchone.side_effect = [None, None]
 
         store = PostgreSQLStore(conn=mock_conn, use_pool=False)
         result = store.close_trade(
@@ -605,7 +613,11 @@ class TestFetchTradeSummary:
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-        mock_cur.fetchone.return_value = (10, 6, 15.0, 0.5, 14.5, 150.0, 145.0, 5000.0, 30.0)
+        # Row now has 13 columns: total, wins, avg_gross, avg_slip, avg_net,
+        # total_gross, total_net, total_notional, avg_hold,
+        # avg_cost_bps, total_cost_usd, avg_spread_bps, avg_impact_bps
+        mock_cur.fetchone.return_value = (10, 6, 15.0, 0.5, 14.5, 150.0, 145.0, 5000.0, 30.0,
+                                          12.5, 6.25, 8.0, 4.5)
 
         store = PostgreSQLStore(conn=mock_conn)
         summary = store.fetch_trade_summary(days=7)
@@ -613,6 +625,9 @@ class TestFetchTradeSummary:
         assert summary["win_rate"] == 0.6
         assert "avg_net_pnl" in summary
         assert "trades_per_week" in summary
+        assert "avg_cost_bps" in summary
+        assert "total_cost_usd" in summary
+        assert "cost_drag_pct" in summary
 
 
 class TestReconcileTradesFills:
@@ -801,6 +816,38 @@ class TestWritePostmortem:
         with pytest.raises(Exception):
             store.write_postmortem(trade_id=7, diagnosis="unknown")
         mock_conn.rollback.assert_called_once()
+
+
+class TestCloseTradeCostBreakdown:
+    """close_trade SQL must include real cost columns, not flat slippage."""
+
+    def test_sql_includes_cost_bps(self):
+        from src.store.pg_store import PostgreSQLStore
+        assert "cost_bps" in PostgreSQLStore._CLOSE_TRADE
+
+    def test_sql_includes_cost_usd(self):
+        from src.store.pg_store import PostgreSQLStore
+        assert "cost_usd" in PostgreSQLStore._CLOSE_TRADE
+
+    def test_sql_includes_spread_cost_bps(self):
+        from src.store.pg_store import PostgreSQLStore
+        assert "spread_cost_bps" in PostgreSQLStore._CLOSE_TRADE
+
+    def test_net_pnl_no_flat_slippage(self):
+        """net_pnl must use cost_usd, not the hardcoded 0.0005 flat rate."""
+        from src.store.pg_store import PostgreSQLStore
+        assert "0.0005" not in PostgreSQLStore._CLOSE_TRADE
+
+    def test_trade_summary_includes_avg_cost_bps(self):
+        from src.store.pg_store import PostgreSQLStore
+        assert "avg_cost_bps" in PostgreSQLStore._TRADE_SUMMARY_SQL
+
+    def test_close_trade_accepts_entry_notional_and_qty(self):
+        import inspect
+        from src.store.pg_store import PostgreSQLStore
+        sig = inspect.signature(PostgreSQLStore.close_trade)
+        assert "entry_notional" in sig.parameters
+        assert "qty" in sig.parameters
 
 
 if __name__ == "__main__":

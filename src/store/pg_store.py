@@ -14,6 +14,7 @@ from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 
 from src.config import config
+from src.costs.calculator import TradeCostCalculator
 from src.models.signals import SentimentResult
 
 if TYPE_CHECKING:
@@ -89,6 +90,7 @@ class PostgreSQLStore:
         self,
         conn: psycopg2.extensions.connection | None = None,
         use_pool: bool = True,
+        cost_calc: TradeCostCalculator | None = None,
     ):
         """Initialize PostgreSQL store.
 
@@ -96,10 +98,13 @@ class PostgreSQLStore:
             conn: Optional existing connection. If None, will use connection pool.
             use_pool: If True, use the global connection pool. If False, create
                       a dedicated connection (useful for tests).
+            cost_calc: Optional TradeCostCalculator instance. If None, a default
+                       instance is created using config/cost_model.yaml.
         """
         self._conn = conn
         self._use_pool = use_pool and conn is None
         self._owns_connection = conn is None and not self._use_pool
+        self._cost_calc = cost_calc or TradeCostCalculator()
 
     def _get_connection(self) -> psycopg2.extensions.connection:
         """Get or create database connection."""
@@ -409,13 +414,18 @@ class PostgreSQLStore:
 
     _CLOSE_TRADE = """
         UPDATE trades SET
-            exit_price   = %s,
-            exit_time    = %s,
-            exit_reason  = %s,
-            entry_price  = COALESCE(entry_price, %s),
-            gross_pnl    = (%s - COALESCE(entry_price, %s)) * qty,
-            slippage_est = entry_notional * 0.0005,
-            net_pnl      = ((%s - COALESCE(entry_price, %s)) * qty) - (entry_notional * 0.0005)
+            exit_price            = %s,
+            exit_time             = %s,
+            exit_reason           = %s,
+            entry_price           = COALESCE(entry_price, %s),
+            gross_pnl             = (%s - COALESCE(entry_price, %s)) * qty,
+            cost_bps              = %s,
+            cost_usd              = %s,
+            spread_cost_bps       = %s,
+            impact_cost_bps       = %s,
+            regulatory_cost_usd   = %s,
+            slippage_est          = %s,
+            net_pnl               = ((%s - COALESCE(entry_price, %s)) * qty) - %s
         WHERE symbol = %s AND exit_time IS NULL
         RETURNING id
     """
@@ -453,21 +463,27 @@ class PostgreSQLStore:
         exit_time,
         exit_reason: str,
         entry_price: float | None = None,
+        entry_notional: float | None = None,
+        qty: float | None = None,
     ) -> int | None:
         """Update the open trade row for symbol with exit data and compute P&L.
 
         Args:
-            symbol:      Ticker symbol of the trade to close.
-            exit_price:  Fill price at which the position was exited.
-            exit_time:   Timestamp of the exit.
-            exit_reason: Why the trade was closed (e.g. "stop_loss").
-            entry_price: Optional fill price from the Alpaca position object.
-                         When provided, COALESCE(entry_price, %s) fills in the
-                         DB column if it is still NULL (intra-day stop-loss before
-                         reconcile_trade_fills has run).  When absent (None),
-                         COALESCE falls back to whatever is already in the DB
-                         column — preserving the original behavior for callers
-                         that do not have the entry price readily available.
+            symbol:          Ticker symbol of the trade to close.
+            exit_price:      Fill price at which the position was exited.
+            exit_time:       Timestamp of the exit.
+            exit_reason:     Why the trade was closed (e.g. "stop_loss").
+            entry_price:     Optional fill price from the Alpaca position object.
+                             When provided, COALESCE(entry_price, %s) fills in the
+                             DB column if it is still NULL (intra-day stop-loss before
+                             reconcile_trade_fills has run).  When absent (None),
+                             COALESCE falls back to whatever is already in the DB
+                             column — preserving the original behavior for callers
+                             that do not have the entry price readily available.
+            entry_notional:  Trade notional in USD for cost calculation.
+                             If None, fetched from the DB row before updating.
+            qty:             Number of shares for cost calculation.
+                             If None, fetched from the DB row before updating.
 
         Returns:
             The id of the updated trade row, or None if no open trade was found
@@ -476,13 +492,46 @@ class PostgreSQLStore:
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
+                # Fetch notional + qty from DB if not provided (e.g. stop-loss path)
+                if entry_notional is None or qty is None:
+                    cur.execute(
+                        "SELECT entry_notional, qty FROM trades WHERE symbol = %s AND exit_time IS NULL",
+                        (symbol,),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        entry_notional = float(row[0]) if row[0] is not None else 0.0
+                        qty = float(row[1]) if row[1] is not None else 0.0
+                    else:
+                        entry_notional = 0.0
+                        qty = 0.0
+
+                costs = self._cost_calc.compute(
+                    symbol=symbol,
+                    notional=entry_notional,
+                    qty=qty,
+                    fill_price=float(exit_price),
+                    side="SELL",
+                )
+
                 cur.execute(
                     self._CLOSE_TRADE,
-                    (exit_price, exit_time, exit_reason,
-                     entry_price,
-                     exit_price, entry_price,
-                     exit_price, entry_price,
-                     symbol),
+                    (
+                        exit_price,                      # exit_price =
+                        exit_time,                       # exit_time =
+                        exit_reason,                     # exit_reason =
+                        entry_price,                     # COALESCE(entry_price, ?)
+                        exit_price, entry_price,         # gross_pnl numerator
+                        costs.total_cost_bps,            # cost_bps =
+                        costs.total_cost_usd,            # cost_usd =
+                        costs.spread_cost_bps,           # spread_cost_bps =
+                        costs.impact_cost_bps,           # impact_cost_bps =
+                        costs.regulatory_cost_usd,       # regulatory_cost_usd =
+                        costs.total_cost_usd,            # slippage_est = (backward compat)
+                        exit_price, entry_price,         # net_pnl numerator
+                        costs.total_cost_usd,            # net_pnl deduction
+                        symbol,                          # WHERE symbol =
+                    ),
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -539,7 +588,11 @@ class PostgreSQLStore:
             COALESCE(SUM(entry_notional), 0) AS total_notional,
             COALESCE(
                 AVG(EXTRACT(EPOCH FROM (exit_time - entry_time)) / 60), 0
-            ) AS avg_hold_minutes
+            ) AS avg_hold_minutes,
+            COALESCE(AVG(cost_bps), 0) AS avg_cost_bps,
+            COALESCE(SUM(cost_usd), 0) AS total_cost_usd,
+            COALESCE(AVG(spread_cost_bps), 0) AS avg_spread_cost_bps,
+            COALESCE(AVG(impact_cost_bps), 0) AS avg_impact_cost_bps
         FROM trades
         WHERE exit_time IS NOT NULL
           AND exit_time >= now() - (%s || ' days')::interval
@@ -558,15 +611,19 @@ class PostgreSQLStore:
                     "avg_net_pnl", "total_gross_pnl", "total_net_pnl",
                     "total_notional", "avg_hold_minutes", "trades_per_week",
                     "return_on_notional", "slippage_pct_of_gross",
+                    "avg_cost_bps", "total_cost_usd", "avg_spread_cost_bps",
+                    "avg_impact_cost_bps", "cost_drag_pct",
                 ]}
             (total, wins, avg_gross, avg_slip, avg_net,
-             total_gross, total_net, total_notional, avg_hold) = row
+             total_gross, total_net, total_notional, avg_hold,
+             avg_cost_bps, total_cost_usd, avg_spread_bps, avg_impact_bps) = row
             total = int(total)
             wins = int(wins or 0)
             win_rate = (wins / total) if total > 0 else 0.0
             trades_per_week = (total / days) * 7
             return_on_notional = (float(total_net) / float(total_notional)) if total_notional else 0.0
             slippage_pct = (float(avg_slip) / float(avg_gross)) if avg_gross else 0.0
+            cost_drag_pct = (float(total_cost_usd) / float(total_notional)) if total_notional else 0.0
             return {
                 "total_trades": total,
                 "win_rate": round(win_rate, 4),
@@ -580,6 +637,11 @@ class PostgreSQLStore:
                 "trades_per_week": round(trades_per_week, 1),
                 "return_on_notional": round(return_on_notional, 4),
                 "slippage_pct_of_gross": round(slippage_pct, 4),
+                "avg_cost_bps": round(float(avg_cost_bps), 2),
+                "total_cost_usd": round(float(total_cost_usd), 2),
+                "avg_spread_cost_bps": round(float(avg_spread_bps), 2),
+                "avg_impact_cost_bps": round(float(avg_impact_bps), 2),
+                "cost_drag_pct": round(cost_drag_pct, 6),
             }
         except Exception:
             conn.rollback()
