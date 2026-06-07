@@ -11,7 +11,7 @@ equity:
       spread_bps: 1.5
     tier_b:
       description: "Large-cap equity, liquid sector ETF"
-      symbols: [VEA, VWO, EWJ, LQD, HYG, TIP, DBC, VNQ, XLF, XLK, XLE, XLV]
+      symbols: [VEA, VWO, EWJ, LQD, HYG, TIP, DBC, VNQ, XLF, XLK, XLE, XLV, INTC]
       spread_bps: 5.0
     tier_c:
       description: "Mid-cap, niche ETF, less liquid"
