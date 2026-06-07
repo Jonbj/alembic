@@ -6,22 +6,37 @@ changelog:
 equity:
   spread_tiers:
     tier_a:
-      description: "Mega-cap, very liquid ETF"
-      symbols: [SPY, QQQ, IWM, VOO, VTI, GLD, TLT, IEF, SHY, NVDA]
+      description: "Mega-cap, very liquid ETF + large individual equity"
+      symbols: [
+        SPY, QQQ, IWM, VOO, VTI, GLD, TLT, IEF, SHY,
+        AAPL, MSFT, GOOGL, AMZN, NVDA, META, TSLA
+      ]
       spread_bps: 1.5
       stop_loss_pct: 0.020
     tier_b:
       description: "Large-cap equity, liquid sector ETF"
-      symbols: [VEA, VWO, EWJ, LQD, HYG, TIP, DBC, VNQ, XLF, XLK, XLE, XLV, INTC]
+      symbols: [
+        VEA, VWO, EWJ, LQD, HYG, TIP, DBC, VNQ, XLF, XLK, XLE, XLV,
+        AMD, AVGO, QCOM, TXN, INTC, MU, ASML, ARM, AMAT, TSM, MRVL, DELL,
+        CRM, ADBE, ORCL, NOW, SNOW, CSCO,
+        JPM, BAC, GS, MS, WFC, C, AXP, MA, V, BRK.B,
+        WMT, COST, MCD, SBUX, NKE, DIS, CMCSA, HD, NFLX,
+        JNJ, PFE, MRK, UNH, ABBV, LLY, NVO, PG,
+        BA, GE, GM, F, CAT, MMM, CVX, XOM,
+        T, VZ, TMUS, PLTR
+      ]
       spread_bps: 5.0
+      stop_loss_pct: 0.035
     tier_c:
       description: "Mid-cap, niche ETF, less liquid"
       symbols: []
       spread_bps: 10.0
+      stop_loss_pct: 0.040
     tier_d:
       description: "Default: small-cap, illiquid"
       default: true
       spread_bps: 20.0
+      stop_loss_pct: 0.050
   impact_k: 10.0
   commission_per_share: 0.0
   sec_fee_per_share_sale: 0.0000229
