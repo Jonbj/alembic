@@ -495,7 +495,7 @@ class PostgreSQLStore:
                 # Fetch notional + qty from DB if not provided (e.g. stop-loss path)
                 if entry_notional is None or qty is None:
                     cur.execute(
-                        "SELECT entry_notional, qty FROM trades WHERE symbol = %s AND exit_time IS NULL",
+                        "SELECT entry_notional, qty FROM trades WHERE symbol = %s AND exit_time IS NULL FOR UPDATE SKIP LOCKED",
                         (symbol,),
                     )
                     row = cur.fetchone()
