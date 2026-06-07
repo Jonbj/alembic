@@ -29,23 +29,43 @@ _PLAIN_STUBS = [
     "src.workers.execution",
     "src.models.performance",
 ]
+# Track which modules we freshly stub so we can remove them after the import,
+# preventing the MagicMock stubs from leaking into subsequent test modules that
+# import these same names for real (e.g. test_execution.py → src.workers.execution).
+_freshly_stubbed: list[str] = []
 for _mod in _PLAIN_STUBS:
     if _mod not in sys.modules:
         sys.modules[_mod] = MagicMock()
+        _freshly_stubbed.append(_mod)
 
 # numpy: stub with bool_ as a real type so pytest.approx doesn't choke
+_numpy_freshly_stubbed = False
 if "numpy" not in sys.modules:
     _np_mock = MagicMock()
     _np_mock.bool_ = bool   # pytest.approx uses isinstance(val, np.bool_)
     sys.modules["numpy"] = _np_mock
+    _numpy_freshly_stubbed = True
 
 # src.config: stub only if not already loaded (pydantic not available in CI)
+_config_freshly_stubbed = False
 if "src.config" not in sys.modules:
     _cfg_mod = MagicMock()
     _cfg_mod.config.MIN_TRADE_PNL_THRESHOLD = 0.0
     sys.modules["src.config"] = _cfg_mod
+    _config_freshly_stubbed = True
 
 from src.workers.performance import _format_trade_metrics_section as _format_trade_pnl_section  # noqa: E402
+
+# Remove the freshly-installed stubs so subsequent test modules in the same
+# pytest session see the real implementations rather than MagicMocks.
+# Exception: src.config stays in sys.modules because _format_trade_metrics_section
+# lazy-imports it inside the function body at call time (not at import time).
+for _mod in _freshly_stubbed:
+    del sys.modules[_mod]
+if _numpy_freshly_stubbed:
+    del sys.modules["numpy"]
+# Do NOT remove src.config — the lazy `from src.config import config` inside
+# _format_trade_metrics_section needs the stub to be present at call time.
 
 
 class TestCostAnalysisSection:

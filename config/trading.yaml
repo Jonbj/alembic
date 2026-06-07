@@ -163,3 +163,9 @@ loss_feedback:
 retention:
   news_log_days: 180      # delete news_log rows older than N days
   llm_responses_days: 365 # delete llm_responses rows older than N days
+
+infrastructure:
+  # Fixed annual operating costs for break-even analysis (shown in weekly report).
+  # Breakdown: hosting/VPS ~$600, LLM API calls ~$840 at current signal volume.
+  # Update when actual billing changes; used only for reporting, not for trade logic.
+  annual_fixed_cost_usd: 1440.0

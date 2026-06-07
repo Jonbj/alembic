@@ -390,6 +390,125 @@ def _format_trade_metrics_section(trades_summary: dict) -> str:
     )
 
 
+def _format_capital_efficiency_section(
+    open_trades: list[dict],
+    portfolio_value_usd: float,
+) -> str:
+    """Format capital deployment / cash-drag section for the weekly report.
+
+    open_trades: rows from pg.fetch_trades(status="open")
+    portfolio_value_usd: last known portfolio value from Redis (0 if unavailable)
+    """
+    deployed_notional = sum(float(t.get("entry_notional") or 0) for t in open_trades)
+    n_open = len(open_trades)
+
+    # MAX_POSITION_PCT=10%, up to 5 positions = 50% theoretical max
+    theoretical_max_pct = 0.50
+
+    if portfolio_value_usd > 0:
+        deployment_pct = deployed_notional / portfolio_value_usd
+        cash_pct = 1.0 - deployment_pct
+        # Cash drag = uninvested capital × assumed risk-free rate (4.5% US T-bill proxy)
+        risk_free_rate = 0.045
+        annual_cash_drag_pct = cash_pct * risk_free_rate * 100
+        pv_str = f"${portfolio_value_usd:,.0f}"
+        deploy_str = f"{deployment_pct:.1%} ({n_open} open pos, ${deployed_notional:,.0f})"
+        cash_str = f"{cash_pct:.1%} idle → ~{annual_cash_drag_pct:.1f}%/yr opportunity cost"
+    else:
+        deploy_str = f"{n_open} open positions (${deployed_notional:,.0f} notional)"
+        cash_str = "portfolio value unavailable — run execution cycle to populate"
+        pv_str = "unknown"
+
+    efficiency_ratio = (deployed_notional / (portfolio_value_usd * theoretical_max_pct)) if portfolio_value_usd > 0 else 0.0
+    efficiency_str = f"{efficiency_ratio:.0%} of theoretical max" if portfolio_value_usd > 0 else "N/A"
+
+    return (
+        f"\n💰 *Capital Efficiency*\n"
+        f"Portfolio: {pv_str} | Deployed: {deploy_str}\n"
+        f"Cash idle: {cash_str}\n"
+        f"Deployment efficiency: {efficiency_str} (max={theoretical_max_pct:.0%} with 5 positions)"
+    )
+
+
+def _format_feedback_stall_section(redis: "RedisStore") -> str:
+    """Format loss-feedback / threshold-stall section for the weekly report."""
+    import yaml
+    from pathlib import Path
+    _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
+    try:
+        with open(_TRADING_YAML) as f:
+            cfg_yaml = yaml.safe_load(f) or {}
+        fb_cfg = cfg_yaml.get("loss_feedback", {})
+    except Exception:
+        fb_cfg = {}
+
+    baseline = float(fb_cfg.get("threshold_baseline", 0.30))
+    threshold_max = float(fb_cfg.get("threshold_max", 0.60))
+    recovery_win_streak = int(fb_cfg.get("recovery_win_streak", 5))
+
+    current_threshold = redis.get_feedback_entry_threshold() or baseline
+    current_scale = redis.get_feedback_regime_scale() or 1.0
+    feedback_state = redis.get_feedback_state() or {}
+
+    is_elevated = current_threshold > baseline + 0.001
+    consecutive_wins = int(feedback_state.get("consecutive_wins") or 0)
+    last_ts = feedback_state.get("last_adjustment_ts", "")
+
+    if is_elevated:
+        wins_needed = max(0, recovery_win_streak - consecutive_wins)
+        # Fraction of signal space filtered: signals between baseline and current
+        # threshold are blocked. Rough proxy: (current - baseline) / (max - baseline)
+        signal_filter_pct = (current_threshold - baseline) / (threshold_max - baseline) * 100
+        stall_status = (
+            f"🔴 ELEVATED: {current_threshold:.2f} (baseline {baseline:.2f})\n"
+            f"~{signal_filter_pct:.0f}% of marginal signals suppressed | "
+            f"Regime scale: {current_scale:.2f}\n"
+            f"Recovery: {consecutive_wins}/{recovery_win_streak} wins ({wins_needed} more needed)"
+        )
+    else:
+        stall_status = f"✅ Normal: threshold {current_threshold:.2f} (baseline {baseline:.2f})"
+
+    last_str = f" | Last trigger: {last_ts[:10]}" if last_ts else ""
+    return f"\n🧠 *Feedback Loop*\n{stall_status}{last_str}"
+
+
+def _format_infrastructure_section(pg: "PostgreSQLStore") -> str:
+    """Format infrastructure cost / break-even section for the weekly report."""
+    import yaml
+    from pathlib import Path
+    _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
+    try:
+        with open(_TRADING_YAML) as f:
+            cfg_yaml = yaml.safe_load(f) or {}
+        annual_fixed = float(cfg_yaml.get("infrastructure", {}).get("annual_fixed_cost_usd", 1440.0))
+    except Exception:
+        annual_fixed = 1440.0
+
+    try:
+        llm_30d = pg.fetch_llm_budget_period(days=30)
+    except Exception:
+        llm_30d = 0.0
+
+    monthly_fixed = annual_fixed / 12
+    monthly_llm = llm_30d
+    monthly_total = monthly_fixed + monthly_llm
+    annual_total = annual_fixed + monthly_llm * 12
+
+    # Break-even portfolio sizes at 5%, 10%, 15% net annual return assumptions
+    breakevens = {
+        pct: annual_total / (pct / 100)
+        for pct in [5, 10, 15]
+    }
+    be_str = " | ".join(f"{p}% return→${v:,.0f}" for p, v in breakevens.items())
+
+    return (
+        f"\n🏗️ *Infrastructure Costs*\n"
+        f"Monthly: ${monthly_total:.0f} (fixed ${monthly_fixed:.0f} + LLM ${monthly_llm:.2f})\n"
+        f"Annual estimate: ${annual_total:,.0f}\n"
+        f"Break-even portfolio: {be_str}"
+    )
+
+
 @app.task(name="src.workers.performance.run_daily_report")
 def run_daily_report():
     """Daily performance report task.
@@ -596,6 +715,26 @@ def run_weekly_weights():
             message += _format_trade_metrics_section(trade_summary)
         except Exception as e:
             log.warning("Failed to fetch trade summary for weekly report: %s", e)
+
+        # Append capital efficiency / cash-drag section
+        try:
+            open_trades = pg.fetch_trades(status="open", limit=20)
+            portfolio_value_usd = float(redis._r.get("portfolio:value") or 0)
+            message += _format_capital_efficiency_section(open_trades, portfolio_value_usd)
+        except Exception as e:
+            log.warning("Failed to build capital efficiency section: %s", e)
+
+        # Append feedback loop / threshold-stall section
+        try:
+            message += _format_feedback_stall_section(redis)
+        except Exception as e:
+            log.warning("Failed to build feedback stall section: %s", e)
+
+        # Append infrastructure cost / break-even section
+        try:
+            message += _format_infrastructure_section(pg)
+        except Exception as e:
+            log.warning("Failed to build infrastructure section: %s", e)
 
         asyncio.run(notifier.send_alert(message, level="info"))
 

@@ -647,6 +647,22 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def fetch_llm_budget_period(self, days: int = 30) -> float:
+        """Return total LLM API spend (USD) over the last `days` days from llm_budget table."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT COALESCE(SUM(total_spent_usd), 0.0) FROM llm_budget"
+                    " WHERE date >= CURRENT_DATE - (%s || ' days')::interval",
+                    (str(days),),
+                )
+                row = cur.fetchone()
+            return float(row[0]) if row else 0.0
+        except Exception:
+            conn.rollback()
+            raise
+
     def reconcile_trade_fills(self, trading_client) -> int:
         """Fetch fill prices from Alpaca for trades where entry_price IS NULL.
 

@@ -366,6 +366,8 @@ def run_execution_cycle(
         open_positions = {
             p.symbol: p for p in trading_client.get_all_positions()
         }
+        # Persist for cash-drag reporting in weekly performance report (24h TTL)
+        redis_store._r.setex("portfolio:value", 86400, str(portfolio_value))
     except Exception as e:
         log.error("Failed to fetch account/positions from Alpaca: %s", e)
         _fire_alert(notifier, f"Alpaca API non raggiungibile: {e}", AlertLevel.CRITICAL)
