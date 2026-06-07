@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from src.costs.calculator import TradeCostCalculator
 from src.performance.ic import ICIRResult, ICResult, compute_composite_ic, compute_icir
 
 log = logging.getLogger(__name__)
@@ -44,6 +45,12 @@ class BacktestReport:
     icir_1h: ICIRResult | None
     icir_4h: ICIRResult | None
     icir_24h: ICIRResult | None
+    ic_1h_net: ICResult | None = None
+    ic_4h_net: ICResult | None = None
+    ic_24h_net: ICResult | None = None
+    icir_1h_net: ICIRResult | None = None
+    icir_4h_net: ICIRResult | None = None
+    icir_24h_net: ICIRResult | None = None
     by_model: dict[str, dict[str, Any]] = field(default_factory=dict)
     by_symbol: dict[str, dict[str, Any]] = field(default_factory=dict)
     by_source: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -86,6 +93,12 @@ class BacktestReport:
             "icir_1h": _icir(self.icir_1h),
             "icir_4h": _icir(self.icir_4h),
             "icir_24h": _icir(self.icir_24h),
+            "ic_1h_net": _ic(self.ic_1h_net),
+            "ic_4h_net": _ic(self.ic_4h_net),
+            "ic_24h_net": _ic(self.ic_24h_net),
+            "icir_1h_net": _icir(self.icir_1h_net),
+            "icir_4h_net": _icir(self.icir_4h_net),
+            "icir_24h_net": _icir(self.icir_24h_net),
             "by_model": self.by_model,
             "by_symbol": self.by_symbol,
             "by_source": self.by_source,
@@ -108,8 +121,9 @@ class BacktestReportBuilder:
       of the ensemble specifically.
     """
 
-    def __init__(self, pg_conn) -> None:
+    def __init__(self, pg_conn, cost_calc: TradeCostCalculator | None = None) -> None:
         self._conn = pg_conn
+        self._cost_calc = cost_calc or TradeCostCalculator()
 
     def build(self, run_id: str) -> BacktestReport:
         """Fetch rows and compute IC/ICIR report for all three horizons.
@@ -177,6 +191,28 @@ class BacktestReportBuilder:
         ic_4h, icir_4h = _ic_icir(s4, r4, c4)
         ic_24h, icir_24h = _ic_icir(s24, r24, c24)
 
+        def _extract_net(horizon_idx: int):
+            scores, net_returns, confs = [], [], []
+            for _sym, _model_id, score, conf, fallback, r1h, r4h, r24h, _src in rows:
+                ret = [r1h, r4h, r24h][horizon_idx]
+                if ret is None or fallback:
+                    continue
+                cost_bps = self._cost_calc.compute(
+                    symbol=_sym, notional=1.0, qty=1.0, fill_price=1.0, side="SELL",
+                ).total_cost_bps
+                scores.append(score)
+                net_returns.append(ret - cost_bps / 10_000)
+                confs.append(conf)
+            return scores, net_returns, confs
+
+        sn1, rn1, cn1 = _extract_net(0)
+        sn4, rn4, cn4 = _extract_net(1)
+        sn24, rn24, cn24 = _extract_net(2)
+
+        ic_1h_net, icir_1h_net = _ic_icir(sn1, rn1, cn1)
+        ic_4h_net, icir_4h_net = _ic_icir(sn4, rn4, cn4)
+        ic_24h_net, icir_24h_net = _ic_icir(sn24, rn24, cn24)
+
         # Count rows that have at least one non-None return (excluding fallback)
         signals_with_returns = sum(
             1 for _s, _m, _sc, _co, fallback, r1h, r4h, r24h, _src in rows
@@ -237,6 +273,12 @@ class BacktestReportBuilder:
             icir_1h=icir_1h,
             icir_4h=icir_4h,
             icir_24h=icir_24h,
+            ic_1h_net=ic_1h_net,
+            ic_4h_net=ic_4h_net,
+            ic_24h_net=ic_24h_net,
+            icir_1h_net=icir_1h_net,
+            icir_4h_net=icir_4h_net,
+            icir_24h_net=icir_24h_net,
             by_model=by_model,
             by_symbol=by_symbol,
             by_source=by_source,
