@@ -128,6 +128,14 @@ class TimeSeriesMomentum:
             return False
         return True
 
+    def should_rebalance(self, ts: datetime) -> bool:
+        """Public gate: returns True if it is time to rebalance at timestamp ts."""
+        return self._should_rebalance(ts)
+
+    def mark_rebalanced(self, ts: datetime) -> None:
+        """Record that a rebalance was performed at ts."""
+        self._last_rebalance = ts
+
     def _should_rebalance(self, ts: datetime) -> bool:
         if self._config.rebalance_frequency == RebalanceFrequency.DAILY:
             return True
