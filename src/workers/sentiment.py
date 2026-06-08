@@ -115,7 +115,8 @@ async def run_inference(
 
         if aggregated is None:
             log.info(f"Ensemble diverged for {symbol}, using FinBERT fallback")
-            fb_result = finbert.analyze(item.body[:512])
+            loop = asyncio.get_running_loop()
+            fb_result = await loop.run_in_executor(None, finbert.analyze, item.body[:512])
             return SentimentResult(
                 symbol=symbol,
                 score=fb_result.polarity * fb_result.confidence,
@@ -151,7 +152,8 @@ async def run_inference(
 
     except LLMBudgetExhaustedError:
         log.info(f"Budget exhausted for {symbol}, using FinBERT fallback")
-        fb_result = finbert.analyze(item.body[:512])
+        loop = asyncio.get_running_loop()
+        fb_result = await loop.run_in_executor(None, finbert.analyze, item.body[:512])
         return SentimentResult(
             symbol=symbol,
             score=fb_result.polarity * fb_result.confidence,
@@ -225,23 +227,23 @@ async def process_news_batch(
     Returns:
         List of SentimentResult objects
     """
-    results: list[SentimentResult] = []
+    sem = asyncio.Semaphore(3)
 
-    for item in news_items:
-        result = await process_news_item(
-            item=item,
-            clients=clients,
-            aggregator=aggregator,
-            finbert=finbert,
-            budget_tracker=budget_tracker,
-            redis_store=redis_store,
-            pg_store=pg_store,
-            weights=weights,
-        )
-        if result is not None:
-            results.append(result)
+    async def _bounded(item):
+        async with sem:
+            return await process_news_item(
+                item=item,
+                clients=clients,
+                aggregator=aggregator,
+                finbert=finbert,
+                budget_tracker=budget_tracker,
+                redis_store=redis_store,
+                pg_store=pg_store,
+                weights=weights,
+            )
 
-    return results
+    gathered = await asyncio.gather(*[_bounded(item) for item in news_items])
+    return [r for r in gathered if r is not None]
 
 
 @app.task(name="src.workers.sentiment.run_sentiment_worker", acks_late=True)
@@ -260,7 +262,7 @@ def run_sentiment_worker() -> dict:
     import psycopg2
     from redis import Redis
 
-    from src.llm.client import OllamaDeepseekClient, OllamaGlmClient, OllamaKimiClient, OllamaQwen35Client
+    from src.llm.client import OllamaKimiClient, OllamaQwen35Client
 
     # Initialize connections
     redis_client = Redis.from_url(config.REDIS_URL)
@@ -270,17 +272,14 @@ def run_sentiment_worker() -> dict:
 
     # Initialize components — model selection read from Redis (set by UI toggle),
     # falling back to SENTIMENT_LLM_MODELS env var, then "all".
-    # Accepted values (comma-separated subset of: kimi, qwen, deepseek, glm):
-    #   "all"   → full 4-model ensemble (default, best quality)
-    #   "glm"   → single cheapest model, saves 75% Ollama quota, valid non-fallback signal
-    #   "glm,qwen" → 2-model ensemble, saves 50%, keeps divergence detection
+    # Accepted values (comma-separated subset of: kimi, qwen):
+    #   "all"   → 2-model ensemble Kimi + Qwen (default, best quality/quota balance)
+    #   "qwen"  → single model, saves 50% Ollama quota
     _redis_model_sel = redis_store.get_llm_models()
     _model_selection = (_redis_model_sel or os.environ.get("SENTIMENT_LLM_MODELS", "all")).lower().split(",")
     _all_clients = {
         "kimi": OllamaKimiClient(),
         "qwen": OllamaQwen35Client(),
-        "deepseek": OllamaDeepseekClient(),
-        "glm": OllamaGlmClient(),
     }
     if "all" in _model_selection:
         clients = list(_all_clients.values())
@@ -331,7 +330,7 @@ def run_sentiment_worker() -> dict:
         news_items: list[NewsItem] = []
         raw_items: list[bytes] = []
         failed_raw: list[bytes] = []
-        for _ in range(10):
+        for _ in range(21):
             item_json = redis_client.lmove("news:queue", "news:processing", "LEFT", "RIGHT")
             if item_json is None:
                 break

@@ -101,29 +101,29 @@ export default function Signals() {
           ) : (
             <div style={{ background: '#1e293b', borderRadius: 8, overflow: 'hidden' }}>
               <div style={{
-                display: 'grid', gridTemplateColumns: '15% 10% 9% 9% 7% 22% 28%',
+                display: 'grid', gridTemplateColumns: '14% 9% 8% 8% 12% auto',
                 padding: '8px 12px', background: '#0f172a',
                 fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase',
               }}>
-                {['Tick Time', 'Symbol', 'Score', 'Regime', 'EMA', 'Decision', 'Order ID'].map(h => (
+                {['Tick Time', 'Symbol', 'Weight', 'Decision', 'Order ID', 'Reason'].map(h => (
                   <span key={h}>{h}</span>
                 ))}
               </div>
               {(decisions as Decision[]).map((d: Decision) => (
                 <div key={d.id} style={{
-                  display: 'grid', gridTemplateColumns: '15% 10% 9% 9% 7% 22% 28%',
+                  display: 'grid', gridTemplateColumns: '14% 9% 8% 8% 12% auto',
                   padding: '8px 12px', fontSize: 13, borderTop: '1px solid #0f172a',
+                  alignItems: 'start',
                 }}>
                   <span style={{ color: '#94a3b8' }}>{d.tick_time.slice(0, 16).replace('T', ' ')}</span>
                   <span style={{ fontWeight: 600 }}>{d.symbol}</span>
-                  <span>{d.score.toFixed(2)}</span>
-                  <span>{d.regime_mult.toFixed(2)}×</span>
-                  <span>{d.ema_pass ? '✓' : '✗'}</span>
+                  <span>{(d.score * 100).toFixed(1)}%</span>
                   <span style={{
-                    color: d.decision === 'BUY' ? '#22c55e' : '#94a3b8',
-                    fontWeight: d.decision === 'BUY' ? 600 : 400,
+                    color: d.decision === 'BUY' ? '#22c55e' : d.decision === 'SELL' ? '#f87171' : '#94a3b8',
+                    fontWeight: ['BUY', 'SELL'].includes(d.decision) ? 600 : 400,
                   }}>{DECISION_LABELS[d.decision] ?? d.decision}</span>
                   <span style={{ color: '#64748b', fontSize: 11 }}>{d.order_id ?? '—'}</span>
+                  <span style={{ color: '#94a3b8', fontSize: 12, lineHeight: 1.4 }}>{d.reason ?? '—'}</span>
                 </div>
               ))}
               {(decisions as Decision[]).length === 0 && (

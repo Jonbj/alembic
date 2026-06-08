@@ -72,8 +72,9 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 │         TRADE OBSERVABILITY, ANALYTICS & AUTO-IMPROVE             │
 │                                                                   │
 │  Phase A — Trade Analytics Engine                                 │
-│    ExecutionWorker                                                │
+│    ExecutionWorker (legacy) / PortfolioScheduler (portfolio mode) │
 │    ├── write_execution_decision() → execution_decisions table    │
+│    │   └── reason TEXT field: LLM reasoning + strategy + weight  │
 │    ├── open_trade() / close_trade() → trades table               │
 │    └── on stop-loss: _maybe_postmortem() → diagnose_loss()       │
 │                           → trades.postmortem_diagnosis           │
@@ -123,7 +124,7 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 | Component | File | Role |
 |-----------|------|------|
 | `SentimentWorker` | `src/workers/sentiment.py` | Consumes `news:queue`, runs ensemble, writes signal |
-| `LLMClient` (ABC) | `src/llm/client.py` | Ollama cloud clients: Kimi K2.6, Qwen3.5, DeepSeek-V4-Pro, GLM-5.1 |
+| `LLMClient` (ABC) | `src/llm/client.py` | Ollama cloud clients: Kimi K2.6, Qwen3.5 (DeepSeek/GLM removed — quota/quality trade-off) |
 | `EnsembleAggregator` | `src/llm/ensemble.py` | Weighted averaging + divergence check (std > 0.30) |
 | `FinBERTClient` | `src/llm/finbert.py` | Local fallback: entropic confidence from 3-class softmax |
 | `LLMBudgetTracker` | `src/llm/budget.py` | Daily spend cap per model via Redis counters |
@@ -277,6 +278,7 @@ Answers: *"For each trade we skipped, what would the 1-hour return have been?"*
 ```sql
 -- execution_decisions (016): one row per symbol per tick, score > ENTRY_THRESHOLD
 -- Added by migration 018: counterfactual columns
+-- Added by migration 020: reason TEXT (human-readable explanation of each decision)
 CREATE TABLE execution_decisions (
     id                       BIGSERIAL PRIMARY KEY,
     tick_time                TIMESTAMPTZ NOT NULL,
@@ -285,8 +287,9 @@ CREATE TABLE execution_decisions (
     score                    DOUBLE PRECISION NOT NULL,
     regime_mult              DOUBLE PRECISION NOT NULL,
     ema_pass                 BOOLEAN NOT NULL,
-    decision                 VARCHAR(20) NOT NULL,  -- BUY | SKIP_EMA | SKIP_CAP | SKIP_POSITION
+    decision                 VARCHAR(20) NOT NULL,  -- BUY | SELL | SKIP_EMA | SKIP_CAP | SKIP_POSITION
     order_id                 TEXT,
+    reason                   TEXT,                  -- human-readable explanation (migration 020)
     counterfactual_return_1h DOUBLE PRECISION,      -- Phase C: NULL until computed nightly
     counterfactual_computed_at TIMESTAMPTZ,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -331,11 +334,11 @@ NewsIngestionWorker
     └── LPUSH news:queue (annotated NewsItem JSON)
     │
     ▼
-SentimentWorker (BLPOP news:queue)
+SentimentWorker (batch 21 items/cycle, semaphore=3 concurrent)
     ├── sanitize_text()
-    ├── LLM Ensemble (4 × Ollama cloud, parallel)
-    │   ├── divergence check (std > 0.30 → FinBERT)
-    │   └── budget check (daily cap → exclude model or FinBERT)
+    ├── LLM Ensemble (2 × Ollama cloud: Kimi K2.6 + Qwen3.5-397B, asyncio.gather)
+    │   ├── divergence check (std > 0.30 → FinBERT via run_in_executor)
+    │   └── budget check (daily cap → FinBERT via run_in_executor)
     ├── score = polarity × confidence
     ├── SET sentiment:signal:{sym} EX 14400 (Redis, TTL 4h)
     └── INSERT sentiment_signals (PostgreSQL, permanent)

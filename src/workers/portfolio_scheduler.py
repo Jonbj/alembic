@@ -187,6 +187,53 @@ def _run_cycle_inner() -> dict:
         len(result.final_orders),
     )
 
+    # Log decisions to execution_decisions so the UI Decision Log tab is populated.
+    try:
+        from src.store.pg_store import PostgreSQLStore
+        _pg = PostgreSQLStore()
+        _s4_symbols = [o.symbol for o in result.final_orders if o.strategy_id == "S4"]
+        _signal_ids = _pg.fetch_latest_signal_ids(_s4_symbols) if _s4_symbols else {}
+        # Load S4 signal details (score + reasoning) for the reason text
+        _s4_signals: dict[str, dict] = {}
+        if _s4_symbols:
+            try:
+                from src.config import config as _cfg
+                _raw_sigs = _pg.fetch_signals_for_cycle(hours=24, symbols=_s4_symbols)
+                _s4_signals = {s.symbol: {"score": s.score, "reasoning": s.reasoning, "model_id": s.model_id} for s in _raw_sigs}
+            except Exception:
+                pass
+        for order in result.final_orders:
+            sid = order.strategy_id
+            wt_pct = f"{order.allocation_weight * 100:.1f}%"
+            if sid == "S4":
+                sig = _s4_signals.get(order.symbol, {})
+                sig_score = sig.get("score", 0.0)
+                sig_model = sig.get("model_id", "unknown")
+                sig_reasoning = (sig.get("reasoning") or "")[:200]
+                reason = (
+                    f"S4 news-driven: sentiment {sig_score:+.3f} ({sig_model}), "
+                    f"portfolio weight {wt_pct}. {sig_reasoning}"
+                ).strip()
+            elif sid == "S1":
+                reason = f"S1 momentum: time-series momentum signal, portfolio weight {wt_pct}."
+            elif sid == "S2":
+                reason = f"S2 VRP: volatility risk premium signal, portfolio weight {wt_pct}."
+            else:
+                reason = f"{sid}: portfolio weight {wt_pct}."
+            _pg.write_execution_decision(
+                tick_time=ts,
+                symbol=order.symbol,
+                signal_id=_signal_ids.get(order.symbol),
+                score=order.allocation_weight,
+                regime_mult=1.0,
+                ema_pass=True,
+                decision=order.side.value,
+                reason=reason,
+            )
+        _pg.close()
+    except Exception as _exc:
+        log.warning("Failed to log portfolio decisions: %s", _exc)
+
     # Check operating mode before submitting orders
     operating_mode = None
     try:

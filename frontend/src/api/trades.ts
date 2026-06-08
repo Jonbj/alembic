@@ -47,6 +47,7 @@ export interface Decision {
   ema_pass: boolean
   decision: string
   order_id: string | null
+  reason: string | null
   created_at: string
 }
 

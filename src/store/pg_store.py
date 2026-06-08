@@ -247,8 +247,8 @@ class PostgreSQLStore:
 
     _INSERT_DECISION = """
         INSERT INTO execution_decisions
-            (tick_time, symbol, signal_id, score, regime_mult, ema_pass, decision, order_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            (tick_time, symbol, signal_id, score, regime_mult, ema_pass, decision, order_id, reason)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
     """
 
@@ -262,6 +262,7 @@ class PostgreSQLStore:
         ema_pass: bool,
         decision: str,
         order_id: str | None = None,
+        reason: str | None = None,
     ) -> int:
         """Insert one execution decision row. Returns the new id."""
         conn = self._get_connection()
@@ -269,7 +270,7 @@ class PostgreSQLStore:
             with conn.cursor() as cur:
                 cur.execute(
                     self._INSERT_DECISION,
-                    (tick_time, symbol, signal_id, score, regime_mult, ema_pass, decision, order_id),
+                    (tick_time, symbol, signal_id, score, regime_mult, ema_pass, decision, order_id, reason),
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -296,7 +297,7 @@ class PostgreSQLStore:
             with conn.cursor() as cur:
                 cur.execute(
                     f"""SELECT id, tick_time, symbol, signal_id, score, regime_mult,
-                               ema_pass, decision, order_id, created_at
+                               ema_pass, decision, order_id, reason, created_at
                         FROM execution_decisions {where}
                         ORDER BY tick_time DESC LIMIT %s""",
                     params,
@@ -924,6 +925,26 @@ class PostgreSQLStore:
                 )
             )
         return results
+
+    def fetch_latest_signal_ids(self, symbols: list[str], hours: int = 24) -> dict[str, int]:
+        """Return {symbol: latest_signal_id} for the given symbols within the last N hours."""
+        if not symbols:
+            return {}
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT DISTINCT ON (symbol) symbol, id
+                       FROM sentiment_signals
+                       WHERE symbol = ANY(%s)
+                         AND generated_at >= now() - (%s || ' hours')::interval
+                       ORDER BY symbol, generated_at DESC""",
+                    (symbols, str(hours)),
+                )
+                return {row[0]: row[1] for row in cur.fetchall()}
+        except Exception:
+            conn.rollback()
+            raise
 
     def fetch_signals_for_backtest(
         self, symbol: str, start_date: str, end_date: str
