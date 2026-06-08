@@ -40,6 +40,7 @@ class CycleResult:
     orders_after_constraints: int
     constraints_fired: list[ConstraintViolation]
     final_orders: list[CombinedOrder]
+    symbol_strategies: dict[str, list[str]] = field(default_factory=dict)
 
 
 class PortfolioOrchestrator:
@@ -100,6 +101,7 @@ class PortfolioOrchestrator:
         strategies_run: list[str] = []
         orders_per_strategy: dict[str, int] = {}
         merged_weights: dict[str, float] = {}
+        symbol_strategies: dict[str, list[str]] = {}
 
         nav = self._compute_nav(portfolio, market)
 
@@ -131,6 +133,7 @@ class PortfolioOrchestrator:
                 alloc = entry.allocation_pct
                 for sym, wt in tw.items():
                     merged_weights[sym] = merged_weights.get(sym, 0.0) + wt * alloc
+                    symbol_strategies.setdefault(sym, []).append(entry.strategy_id)
 
             except Exception as exc:
                 log.error(
@@ -236,6 +239,7 @@ class PortfolioOrchestrator:
             orders_after_constraints=len(combined),
             constraints_fired=violations,
             final_orders=combined,
+            symbol_strategies=symbol_strategies,
         )
 
     # ── Private ────────────────────────────────────────────────────────────────

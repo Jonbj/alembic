@@ -191,35 +191,41 @@ def _run_cycle_inner() -> dict:
     try:
         from src.store.pg_store import PostgreSQLStore
         _pg = PostgreSQLStore()
-        _s4_symbols = [o.symbol for o in result.final_orders if o.strategy_id == "S4"]
+        # symbol_strategies maps each symbol to the list of strategies that contributed
+        # to its merged weight (e.g. {"AAPL": ["S4"], "SPY": ["S2"]}).
+        _sym_strats = result.symbol_strategies
+        _s4_symbols = [sym for sym, strats in _sym_strats.items() if "S4" in strats]
         _signal_ids = _pg.fetch_latest_signal_ids(_s4_symbols) if _s4_symbols else {}
         # Load S4 signal details (score + reasoning) for the reason text
         _s4_signals: dict[str, dict] = {}
         if _s4_symbols:
             try:
-                from src.config import config as _cfg
                 _raw_sigs = _pg.fetch_signals_for_cycle(hours=24, symbols=_s4_symbols)
                 _s4_signals = {s.symbol: {"score": s.score, "reasoning": s.reasoning, "model_id": s.model_id} for s in _raw_sigs}
             except Exception:
                 pass
         for order in result.final_orders:
-            sid = order.strategy_id
+            strats = _sym_strats.get(order.symbol, [])
             wt_pct = f"{order.allocation_weight * 100:.1f}%"
-            if sid == "S4":
+            if "S4" in strats:
                 sig = _s4_signals.get(order.symbol, {})
                 sig_score = sig.get("score", 0.0)
                 sig_model = sig.get("model_id", "unknown")
                 sig_reasoning = (sig.get("reasoning") or "")[:200]
+                other = [s for s in strats if s != "S4"]
+                prefix = f"S4+{'+'.join(other)}" if other else "S4"
                 reason = (
-                    f"S4 news-driven: sentiment {sig_score:+.3f} ({sig_model}), "
+                    f"{prefix} news-driven: sentiment {sig_score:+.3f} ({sig_model}), "
                     f"portfolio weight {wt_pct}. {sig_reasoning}"
                 ).strip()
-            elif sid == "S1":
+            elif "S1" in strats and "S2" not in strats:
                 reason = f"S1 momentum: time-series momentum signal, portfolio weight {wt_pct}."
-            elif sid == "S2":
+            elif "S2" in strats and "S1" not in strats:
                 reason = f"S2 VRP: volatility risk premium signal, portfolio weight {wt_pct}."
+            elif strats:
+                reason = f"{'+'.join(strats)}: merged portfolio weight {wt_pct}."
             else:
-                reason = f"{sid}: portfolio weight {wt_pct}."
+                reason = f"Portfolio rebalance: weight {wt_pct}."
             _pg.write_execution_decision(
                 tick_time=ts,
                 symbol=order.symbol,
