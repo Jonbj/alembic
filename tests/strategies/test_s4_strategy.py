@@ -135,7 +135,7 @@ class TestComputeTargetWeights:
         strat = NewsDrivenTactical(cfg)
         weights = strat.compute_target_weights(signals, as_of=_TS)
         assert len(weights) == 5
-        expected_wt = 0.10 / 5
+        expected_wt = 1.0 / 5  # sleeve-local weights sum to 1.0
         for w in weights.values():
             assert abs(w - expected_wt) < 1e-9
 
@@ -222,7 +222,7 @@ class TestCallBuyOrders:
 
         buy_orders = [o for o in orders if o.side == OrderSide.BUY]
         nav = 100_000.0
-        expected_qty = (nav * (0.10 / 5)) / price
+        expected_qty = (nav * (1.0 / 5)) / price  # sleeve-local weights sum to 1.0
         for o in buy_orders:
             assert abs(o.quantity - expected_qty) < 1e-4
 
@@ -400,3 +400,43 @@ class TestSignalTimeFiltering:
         orders = strat(_TS, _mock_data_replay(), portfolio, market)
         buy_orders = [o for o in orders if o.side == OrderSide.BUY]
         assert len(buy_orders) > 0
+
+
+# ---------------------------------------------------------------------------
+# Public rebalance gate (should_rebalance / mark_rebalanced)
+# ---------------------------------------------------------------------------
+
+
+def test_s4_should_rebalance_true_on_first_call():
+    from src.strategies.s4.strategy import NewsDrivenTactical
+    from src.strategies.s4.config import S4Config
+    from src.backtest.engine.types import RebalanceFrequency
+    from datetime import datetime, timezone
+
+    s4 = NewsDrivenTactical(S4Config(rebalance_frequency=RebalanceFrequency.WEEKLY))
+    ts = datetime(2025, 6, 2, tzinfo=timezone.utc)
+    assert s4.should_rebalance(ts) is True
+
+
+def test_s4_should_rebalance_false_within_same_week():
+    from src.strategies.s4.strategy import NewsDrivenTactical
+    from src.strategies.s4.config import S4Config
+    from src.backtest.engine.types import RebalanceFrequency
+    from datetime import datetime, timezone
+
+    s4 = NewsDrivenTactical(S4Config(rebalance_frequency=RebalanceFrequency.WEEKLY))
+    s4.mark_rebalanced(datetime(2025, 6, 2, tzinfo=timezone.utc))
+    ts = datetime(2025, 6, 4, tzinfo=timezone.utc)
+    assert s4.should_rebalance(ts) is False
+
+
+def test_s4_should_rebalance_true_next_week():
+    from src.strategies.s4.strategy import NewsDrivenTactical
+    from src.strategies.s4.config import S4Config
+    from src.backtest.engine.types import RebalanceFrequency
+    from datetime import datetime, timezone
+
+    s4 = NewsDrivenTactical(S4Config(rebalance_frequency=RebalanceFrequency.WEEKLY))
+    s4.mark_rebalanced(datetime(2025, 6, 2, tzinfo=timezone.utc))
+    ts = datetime(2025, 6, 9, tzinfo=timezone.utc)
+    assert s4.should_rebalance(ts) is True

@@ -85,7 +85,7 @@ def test_equal_weight_calculation():
     ranker = CrossSectionalRanker()
     result = ranker.rank(signals)
 
-    expected_weight = pytest.approx(0.02, rel=1e-9)
+    expected_weight = pytest.approx(1.0 / 5, rel=1e-9)
     for r in result.rankings:
         assert r.weight == expected_weight
 
@@ -103,9 +103,9 @@ def test_custom_bucket_pct():
     ranker = CrossSectionalRanker(S4Config(bucket_pct=0.20))
     result = ranker.rank(signals)
 
-    # 0.20 / 5 = 0.04 each
+    # bucket_pct no longer affects per-ticker weight; weights are 1.0 / n
     for r in result.rankings:
-        assert r.weight == pytest.approx(0.04, rel=1e-9)
+        assert r.weight == pytest.approx(1.0 / 5, rel=1e-9)
 
 
 # ---------------------------------------------------------------------------
@@ -197,7 +197,7 @@ def test_ties_all_selected_equal_weight():
 
     assert result.n_selected == 5
     weights = [r.weight for r in result.rankings]
-    assert all(w == pytest.approx(0.02, rel=1e-9) for w in weights)
+    assert all(w == pytest.approx(1.0 / 5, rel=1e-9) for w in weights)
 
 
 # ---------------------------------------------------------------------------
@@ -212,9 +212,9 @@ def test_fewer_candidates_than_n_top():
 
     # Should select all 4 available (4 >= min_stocks=3)
     assert result.n_selected == 4
-    # weight = 0.10 / 4 = 0.025
+    # weight = 1.0 / 4 = 0.25
     for r in result.rankings:
-        assert r.weight == pytest.approx(0.025, rel=1e-9)
+        assert r.weight == pytest.approx(1.0 / 4, rel=1e-9)
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +259,7 @@ def test_ranking_result_weights_property():
     weights = result.weights
     assert len(weights) == 5
     for v in weights.values():
-        assert v == pytest.approx(0.02, rel=1e-9)
+        assert v == pytest.approx(1.0 / 5, rel=1e-9)
 
 
 # ---------------------------------------------------------------------------
@@ -285,3 +285,30 @@ def test_effective_strength_formula():
     result = ranker.rank([sig])
 
     assert result.rankings[0].effective_strength == pytest.approx(0.6 * 0.8)
+
+
+# ---------------------------------------------------------------------------
+# Sleeve-local weights must sum to 1.0 for correct orchestrator scaling
+# ---------------------------------------------------------------------------
+
+def test_sleeve_local_weights_sum_to_one():
+    """Sleeve-local weights must sum to 1.0 so orchestrator × allocation_pct is correct."""
+    signals = _make_signals(10)
+    ranker = CrossSectionalRanker()
+    result = ranker.rank(signals)
+
+    assert result.n_selected == 5
+    total = sum(result.weights.values())
+    assert total == pytest.approx(1.0, rel=1e-9)
+
+
+def test_orchestrator_scale_gives_correct_portfolio_weight():
+    """With allocation_pct=0.10 and 5 tickers, each ticker's portfolio weight = 0.02."""
+    signals = _make_signals(10)
+    ranker = CrossSectionalRanker()
+    result = ranker.rank(signals)
+
+    allocation_pct = 0.10
+    for weight in result.weights.values():
+        portfolio_weight = weight * allocation_pct
+        assert portfolio_weight == pytest.approx(0.02, rel=1e-9)

@@ -30,13 +30,17 @@ export function Sidebar() {
   const toggleSavings = async () => {
     const next = isSavings ? 'all' : 'glm'
     try {
-      await fetch('/api/admin/llm-models', {
+      const res = await fetch('/api/admin/llm-models', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
         body: JSON.stringify({ models: next }),
       })
-      setLlmModels(next)
-    } catch { /* ignore */ }
+      if (res.ok) {
+        setLlmModels(next)
+      } else {
+        console.warn(`LLM model toggle failed: ${res.status}`)
+      }
+    } catch { /* network error — no state change */ }
   }
 
   return (

@@ -98,7 +98,7 @@ class CrossSectionalRanker:
             )
 
         n = len(selected)
-        per_ticker_weight = cfg.bucket_pct / n
+        per_ticker_weight = 1.0 / n
 
         ranked = tuple(
             RankedTicker(

@@ -68,8 +68,8 @@ def _load_execution_engine() -> str:
         return "legacy_sentiment"
 
 
-def _load_risk_params() -> tuple[float, float]:
-    """Return (stop_loss_pct, max_drawdown_pct) from trading.yaml, falling back to module defaults."""
+def _load_risk_params() -> tuple[float, float, float]:
+    """Return (stop_loss_pct, max_drawdown_pct, max_position_pct) from trading.yaml."""
     try:
         import yaml
         with open(_TRADING_YAML) as f:
@@ -77,10 +77,11 @@ def _load_risk_params() -> tuple[float, float]:
         risk = cfg.get("risk", {})
         stop_loss = float(risk.get("stop_loss", STOP_LOSS_PCT))
         drawdown = float(risk.get("portfolio_drawdown", MAX_DRAWDOWN_PCT))
-        return stop_loss, drawdown
+        max_pos = float(risk.get("max_position_pct", MAX_POSITION_PCT))
+        return stop_loss, drawdown, max_pos
     except Exception as exc:
         log.warning("Could not load risk params from %s (%s) — using defaults", _TRADING_YAML, exc)
-        return STOP_LOSS_PCT, MAX_DRAWDOWN_PCT
+        return STOP_LOSS_PCT, MAX_DRAWDOWN_PCT, MAX_POSITION_PCT
 
 
 def _load_killswitch_recovery_config() -> dict:
@@ -441,7 +442,7 @@ def run_execution_cycle(
     }
 
     _cost_calc = cost_calc or TradeCostCalculator()
-    _, max_drawdown_pct = _load_risk_params()
+    _, max_drawdown_pct, max_position_pct = _load_risk_params()
     # per-symbol stop-loss is tier-based via _cost_calc.stop_loss_pct().
 
     # --- Account fetch (always runs, even during kill-switch freeze) ---
@@ -665,7 +666,7 @@ def run_execution_cycle(
                     continue
 
             # Position sizing: portfolio × max_pct × regime_multiplier
-            notional = portfolio_value * MAX_POSITION_PCT * regime_mult
+            notional = portfolio_value * max_position_pct * regime_mult
 
             # Per-cycle allocation cap: don't deploy more than MAX_CYCLE_NOTIONAL_PCT in one cycle
             if cycle_notional + notional > cycle_cap:

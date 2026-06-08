@@ -245,26 +245,39 @@ class PortfolioOrchestrator:
     ) -> dict[str, float]:
         """Extract target weights from a strategy.
 
+        Strategies that expose should_rebalance(ts) → check the gate first.
+        If the gate returns False, return {} (no rebalance this cycle).
+        After computing weights, call mark_rebalanced(ts) if available.
+
         Strategies that expose compute_target_weights() → call that.
-        Otherwise, run the callable to get orders → infer weights from order values.
+        Otherwise, run the callable to get orders → infer weights from order notional values.
         """
-        # S1 and S4 have a compute_target_weights() method that maps directly to
-        # the weight-then-order contract. S2 returns Order objects (it's position-
-        # based, not weight-based), so we infer weights from order notional values.
+        # Check rebalance gate before computing
+        if hasattr(callable_fn, 'should_rebalance'):
+            if not callable_fn.should_rebalance(ts):
+                log.debug("Strategy %s: rebalance gate blocked — skipping this cycle", strategy_id)
+                return {}
+
         if hasattr(callable_fn, 'compute_target_weights'):
             if strategy_id == "S1":
                 prices = data_replay.prices_until(ts)
-                return callable_fn.compute_target_weights(prices)
+                weights = callable_fn.compute_target_weights(prices)
             elif strategy_id == "S4":
                 signals = getattr(callable_fn, '_signals_as_of', lambda t: None)(ts)
-                return callable_fn.compute_target_weights(signals, as_of=ts)
+                weights = callable_fn.compute_target_weights(signals, as_of=ts)
+            else:
+                weights = {}
+
+            # Mark rebalance time after successful computation
+            if hasattr(callable_fn, 'mark_rebalanced'):
+                callable_fn.mark_rebalanced(ts)
+            return weights
 
         # S2 returns orders → infer weights
         orders = callable_fn(ts, data_replay, portfolio, market)
         if not orders:
             return {}
 
-        # Convert orders to implied weights
         weights: dict[str, float] = {}
         for order in orders:
             price = market.price_of(order.symbol)
