@@ -622,6 +622,10 @@ class OllamaCloudClient(LLMClient):
 
     model_id: str = ""
     model_name: str = ""
+    # Ollama cloud models (Kimi k2.6, Qwen3.5-397B) are large — 45s is enough
+    # for a healthy response; anything slower means the server is throttled and
+    # we should fall back to FinBERT rather than burning the full 120s default.
+    _OLLAMA_TIMEOUT = 45
 
     async def complete(self, prompt: str, response_schema: type[T]) -> T:
         """POST to Ollama /api/chat and parse the response as JSON schema."""
@@ -639,7 +643,7 @@ class OllamaCloudClient(LLMClient):
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
         }
-        timeout = aiohttp.ClientTimeout(total=self.timeout)
+        timeout = aiohttp.ClientTimeout(total=self._OLLAMA_TIMEOUT)
 
         for attempt in range(self.max_retries + 1):
             try:
@@ -656,15 +660,15 @@ class OllamaCloudClient(LLMClient):
                 await asyncio.sleep(0.5 * (attempt + 1))
             except aiohttp.ClientResponseError as e:
                 if e.status == 429:
-                    # Fail fast on 429: weekly quota exhaustion means retries are futile.
-                    # asyncio.gather(return_exceptions=True) catches this and skips the
-                    # model; EnsembleAggregator falls back to FinBERT when all models fail.
-                    # Long sleeps (60s–180s per attempt) would exceed the Celery task
-                    # soft limit (240s) and kill the task before fallback can run.
                     raise RuntimeError(
                         f"Ollama rate limit (429) on {self.model_id}: quota exhausted"
                     ) from e
                 raise RuntimeError(f"Ollama API error {e.status}: {e.message}") from e
+            except (asyncio.TimeoutError, TimeoutError):
+                # Fail fast — don't retry on timeout, the server is too slow right now.
+                raise RuntimeError(
+                    f"Ollama timeout ({self._OLLAMA_TIMEOUT}s) on {self.model_id}"
+                )
 
         raise RuntimeError(f"Exhausted retries for {self.__class__.__name__}")
 

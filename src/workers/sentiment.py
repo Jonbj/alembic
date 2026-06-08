@@ -330,7 +330,7 @@ def run_sentiment_worker() -> dict:
         news_items: list[NewsItem] = []
         raw_items: list[bytes] = []
         failed_raw: list[bytes] = []
-        for _ in range(21):
+        for _ in range(6):
             item_json = redis_client.lmove("news:queue", "news:processing", "LEFT", "RIGHT")
             if item_json is None:
                 break
