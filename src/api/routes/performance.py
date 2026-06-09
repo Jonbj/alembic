@@ -83,6 +83,7 @@ async def get_weekly_report(
     if report is None:
         raise HTTPException(status_code=404, detail="No weekly report available yet (corrupted or missing)")
 
+    # Enrich capital_efficiency with live Alpaca account data.
     try:
         account = client.get_account()
         positions = client.get_all_positions()
@@ -105,6 +106,28 @@ async def get_weekly_report(
         }
     except Exception:
         pass  # fall back to cached value on Alpaca error
+
+    # Enrich regime with live Redis data — the cached snapshot may have been
+    # generated when regime:current was absent (e.g. key expired over the weekend
+    # since the detector only runs Mon-Fri 07:00 UTC with a 25h TTL).
+    try:
+        regime_state = redis.get_regime()
+        if regime_state is not None:
+            label = str(regime_state.regime)
+            mult = float(regime_state.multiplier)
+            # confidence lives inside each llm_output dict, not as a top-level field
+            llm_outputs = regime_state.llm_outputs or []
+            confs = [float(o.get("confidence", 0)) for o in llm_outputs if o.get("confidence") is not None]
+            conf = sum(confs) / len(confs) if confs else 0.0
+            report["regime"] = {
+                "label": label,
+                "multiplier": mult,
+                "confidence": conf,
+                "deployment_ceiling_pct": 0.10 * mult * 5,
+                "regime_discount_pct": (1.0 - mult) * 100,
+            }
+    except Exception:
+        pass  # fall back to cached value on Redis error
 
     return report
 

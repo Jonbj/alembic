@@ -163,8 +163,8 @@ class Config(BaseModel):
         default_factory=lambda: float(os.environ.get("REGIME_MULTIPLIER_HIGH_VOL", "0.2"))
     )
     REGIME_REDIS_TTL_SECONDS: int = Field(
-        default_factory=lambda: int(os.environ.get("REGIME_REDIS_TTL_SECONDS", "90000"))
-    )  # 25h — slightly more than 24h so regime doesn't expire before next run
+        default_factory=lambda: int(os.environ.get("REGIME_REDIS_TTL_SECONDS", "259200"))
+    )  # 72h — covers the Fri→Mon weekend gap (detector runs Mon-Fri only)
 
     @field_validator("ADMIN_API_KEY")
     @classmethod
