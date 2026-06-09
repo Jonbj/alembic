@@ -3,25 +3,43 @@
 Scheduled: Mon-Fri 14:00-21:00 UTC (hourly) via Celery beat.
 
 Cycle flow:
-    1. Build StrategyRegistry + initialize strategy callables.
-    2. Build PortfolioOrchestrator with ConstraintEnforcer + VolTargeter.
-    3. Call orchestrator.run_cycle() with current market data.
-    4. Log cycle results (strategies run, orders, constraints fired).
-    5. Submit final orders to Alpaca and persist cycle result.
+    1. Check kill-switch (halt immediately if active).
+    2. Build StrategyRegistry + initialize strategy callables.
+    3. Build PortfolioOrchestrator with ConstraintEnforcer + VolTargeter.
+    4. Call orchestrator.run_cycle() with current market data.
+    5. Check portfolio drawdown cap — activate kill-switch + Telegram alert if breached.
+    6. Submit final orders to Alpaca and persist cycle result.
+    7. Back-fill Alpaca order_ids on execution_decisions rows.
 """
 from __future__ import annotations
 
+import asyncio
 import json as _json
 import logging
 from datetime import datetime, timedelta, timezone
 
 from pathlib import Path
 
+from src.notifications.base import AlertLevel
 from src.workers.celery_app import app
+
+_MAX_DRAWDOWN_PCT = 0.10  # portfolio-level circuit breaker; mirrors execution.py constant
+_PEAK_EQUITY_KEY = "portfolio:peak_equity"
 
 log = logging.getLogger(__name__)
 
 _PRICE_BARS = 300
+
+
+def _fire_alert(notifier, message: str, level: AlertLevel) -> None:
+    if notifier is None:
+        return
+    try:
+        asyncio.run(notifier.send_alert(message, level=level))
+    except Exception as exc:
+        log.warning("Telegram alert send failed: %s", exc)
+
+
 _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
 
 
@@ -71,10 +89,38 @@ def _run_cycle_inner() -> dict:
     from src.backtest.engine.portfolio import VirtualPortfolio
     from src.backtest.engine.types import MarketSnapshot
     from src.config import config
+    from src.notifications.telegram import TelegramNotifier
     from src.portfolio.constraints import ConstraintEnforcer
     from src.portfolio.orchestrator import PortfolioOrchestrator
     from src.portfolio.vol_targeting import PortfolioVolTargeter
     from src.strategies.registry import StrategyRegistry
+
+    notifier = TelegramNotifier()
+
+    # B2 — Kill-switch check: halt immediately if active (drawdown-triggered or operator).
+    # Uses direct Redis (same pattern as system:mode check below) so tests can mock redis.Redis.
+    try:
+        from redis import Redis as _RedisKS
+        _r_ks = _RedisKS.from_url(config.REDIS_URL, decode_responses=True)
+        try:
+            _ks_active = bool(_r_ks.get("killswitch_active")) or bool(_r_ks.get("system:halted_by_operator"))
+            if _ks_active:
+                _reason_raw = _r_ks.get("killswitch_reason") or _r_ks.get("system:halted_by_operator_reason")
+                try:
+                    import json as _jks
+                    reason = _jks.loads(_reason_raw).get("reason", "unknown") if _reason_raw else "unknown"
+                except Exception:
+                    reason = "unknown"
+                log.warning("Portfolio cycle skipped — kill-switch active: %s", reason)
+                return {"skipped": True, "reason": f"killswitch:{reason}"}
+        finally:
+            _r_ks.close()
+    except Exception as exc:
+        # Redis unreachable — CRITICAL: we cannot check the kill-switch safely.
+        msg = f"🚨 Portfolio cycle: Redis unreachable — cannot verify kill-switch. Aborting cycle.\n<code>{exc}</code>"
+        _fire_alert(notifier, msg, AlertLevel.CRITICAL)
+        log.error("Redis unreachable in portfolio cycle: %s", exc)
+        return {"error": "redis_unreachable"}
 
     registry = StrategyRegistry()
     active = registry.get_active_strategies()
@@ -145,9 +191,45 @@ def _run_cycle_inner() -> dict:
     try:
         account = trading_client.get_account()
         cash = float(account.cash)
+        equity = float(account.equity)
     except Exception as exc:
-        log.warning("Failed to fetch Alpaca account: %s — using default $100k", exc)
-        cash = 100_000.0
+        # B2 — Alpaca unreachable: CRITICAL alert, abort cycle (don't trade blind).
+        msg = f"🚨 Portfolio cycle: Alpaca API unreachable — cycle aborted.\n<code>{exc}</code>"
+        _fire_alert(notifier, msg, AlertLevel.CRITICAL)
+        log.error("Failed to fetch Alpaca account: %s — aborting cycle", exc)
+        return {"error": "alpaca_unreachable"}
+
+    # B1 — Portfolio drawdown cap: update peak equity in Redis, halt if drawdown breached.
+    try:
+        from redis import Redis as _Redis2
+        import json as _jdd
+        _r_dd = _Redis2.from_url(config.REDIS_URL, decode_responses=True)
+        try:
+            _raw_peak = _r_dd.get(_PEAK_EQUITY_KEY)
+            peak_equity = float(_raw_peak) if _raw_peak else equity
+            if equity > peak_equity:
+                _r_dd.set(_PEAK_EQUITY_KEY, str(equity))
+                peak_equity = equity
+
+            drawdown = (peak_equity - equity) / peak_equity if peak_equity > 0 else 0.0
+            if drawdown >= _MAX_DRAWDOWN_PCT:
+                _dd_reason = f"portfolio drawdown {drawdown:.1%} >= {_MAX_DRAWDOWN_PCT:.0%} cap"
+                _dd_payload = _jdd.dumps({"reason": _dd_reason, "activated_at": datetime.now(timezone.utc).isoformat()})
+                _r_dd.pipeline().setex("killswitch_active", 64800, 1).setex("killswitch_reason", 64800, _dd_payload).execute()
+                msg = (
+                    f"🚨 <b>Drawdown cap raggiunto — kill-switch attivato</b>\n\n"
+                    f"Equity attuale: <b>${equity:,.0f}</b>\n"
+                    f"Picco: <b>${peak_equity:,.0f}</b>\n"
+                    f"Drawdown: <b>{drawdown:.1%}</b> (soglia: {_MAX_DRAWDOWN_PCT:.0%})\n\n"
+                    f"Trading sospeso per 18h. Per riprendere: <code>redis-cli DEL killswitch_active</code>"
+                )
+                _fire_alert(notifier, msg, AlertLevel.CRITICAL)
+                log.error("Drawdown cap %.1f%% — kill-switch activated, aborting cycle", drawdown * 100)
+                return {"skipped": True, "reason": f"drawdown_cap:{drawdown:.3f}"}
+        finally:
+            _r_dd.close()
+    except Exception as exc:
+        log.warning("Drawdown cap check failed: %s — proceeding without check", exc)
 
     portfolio = VirtualPortfolio(initial_cash=cash)
 
@@ -266,6 +348,7 @@ def _run_cycle_inner() -> dict:
         submitted_orders = _submit_portfolio_orders(result.final_orders, trading_client, market)
 
     # Write trade entries/exits to DB for P&L tracking.
+    # Also back-fill the Alpaca order_id on execution_decisions rows.
     if submitted_orders:
         try:
             from src.store.pg_store import PostgreSQLStore
@@ -291,6 +374,13 @@ def _run_cycle_inner() -> dict:
                         exit_time=ts,
                         exit_reason="portfolio_sell",
                     )
+                # Back-fill Alpaca order_id on the execution_decisions row.
+                dec_id = dec.get("decision_id")
+                if dec_id is not None:
+                    try:
+                        _pg_trades.update_decision_order_id(dec_id, sub["order_id"])
+                    except Exception as _eid_exc:
+                        log.warning("Could not back-fill order_id on decision %s: %s", dec_id, _eid_exc)
             _pg_trades.close()
         except Exception as _exc:
             log.warning("Failed to write trade fills to DB: %s", _exc)

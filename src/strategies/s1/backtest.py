@@ -106,6 +106,21 @@ def run_s1_backtest_from_prices(
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
     (output_dir / "gate_report.json").write_text(json.dumps(gate_dict, indent=2, default=str))
 
+    if len(oos_returns) > 0 and oos_returns.index.dtype != object:
+        cum = (1 + oos_returns).cumprod() - 1
+        peak = (1 + cum).cummax()
+        dd = ((1 + cum) - peak) / peak
+        equity_curve = [
+            {
+                "date": str(ts.date()),
+                "cumulative_return": round(float(cum[ts]), 6),
+                "drawdown": round(float(dd[ts]), 6),
+            }
+            for ts in oos_returns.index
+        ]
+        (output_dir / "equity_curve.json").write_text(json.dumps(equity_curve))
+        log.info("Saved equity curve: %d data points to %s", len(equity_curve), output_dir / "equity_curve.json")
+
     log.info("S1 backtest complete. OOS Sharpe=%.4f, Milestone B=%s", oos_sharpe, milestone_b_pass)
     log.info(gate_report.summary())
 

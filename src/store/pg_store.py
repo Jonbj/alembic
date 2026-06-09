@@ -279,6 +279,20 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def update_decision_order_id(self, decision_id: int, order_id: str) -> None:
+        """Back-fill the Alpaca order_id on an execution_decisions row after submission."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE execution_decisions SET order_id = %s WHERE id = %s",
+                    (order_id, decision_id),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
     def fetch_decisions(
         self,
         symbol: str | None = None,

@@ -472,7 +472,7 @@ def test_portfolio_cycle_s4_signals_produce_multi_symbol_orders():
 
     def capture_submit(orders, trading_client, market, _submit_fn=None):
         captured_orders.extend(orders)
-        return len(orders)
+        return [{"symbol": o.symbol, "side": o.side.value.lower(), "order_id": f"test-{o.symbol}", "notional": 1000.0} for o in orders]
 
     with patch("src.config.config") as mock_cfg, \
          patch("alpaca.data.historical.StockHistoricalDataClient") as mock_dc, \
@@ -498,8 +498,10 @@ def test_portfolio_cycle_s4_signals_produce_multi_symbol_orders():
 
         result = _run_cycle_inner()
 
-    # S4's DB fetch must have been triggered (signal loading path exercised)
-    mock_store.fetch_signals_for_cycle.assert_called_once()
+    # S4's DB fetch must have been triggered (signal loading path exercised).
+    # Called at least once by _build_strategy_instance(S4); may also be called
+    # by the decision-logging block to enrich reason text (hours=24 window).
+    mock_store.fetch_signals_for_cycle.assert_called()
 
     # S4 must have contributed to the cycle
     assert "S4" in result["strategies_run"], (

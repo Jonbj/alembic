@@ -1,6 +1,8 @@
 """Strategy endpoints with accurate data from backtest results and config."""
+import json
 import logging
 import math
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -205,21 +207,18 @@ GATES_S3 = [
     },
 ]
 
-# ─── Equity curve (mock for S1 — replace with real backtest data later) ───────
+_REPORTS_DIR = Path(__file__).parent.parent.parent.parent / "reports"
 
-EQUITY_CURVE_S1 = []
-cumulative = 0.0
-for year in range(2010, 2025):
-    for month in range(1, 13):
-        import random
-        monthly_return = 0.005 + random.gauss(0, 0.04)
-        cumulative += monthly_return
-        drawdown = max(0, -cumulative + max(0, cumulative - abs(random.gauss(0, 0.03))))
-        EQUITY_CURVE_S1.append({
-            "date": f"{year}-{month:02d}-01",
-            "cumulative_return": round(cumulative, 6),
-            "drawdown": round(drawdown, 6),
-        })
+
+def _load_equity_curve(strategy_id: str) -> list[dict]:
+    path = _REPORTS_DIR / f"{strategy_id}_backtest" / "equity_curve.json"
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text())
+    # Drop the leading flat-zero period (no OOS trades yet in early walk-forward windows).
+    # Keep one zero point as the chart origin so the curve starts cleanly at 0.
+    first_active = next((i for i, d in enumerate(data) if abs(d["cumulative_return"]) > 0.001), 0)
+    return data[max(0, first_active - 1):]
 
 # Sensitivity grid for S1 (accurate parameter ranges from config)
 SENSITIVITY_S1 = []
@@ -255,14 +254,12 @@ STRATEGIES = {
         "detail": S1_DETAIL,
         "gates": GATES_S1,
         "sensitivity": SENSITIVITY_S1,
-        "equity_curve": EQUITY_CURVE_S1,
     },
     "s3": {
         "summary": S3_STRATEGY,
         "detail": S3_DETAIL,
         "gates": GATES_S3,
         "sensitivity": SENSITIVITY_S3,
-        "equity_curve": [],  # S3 not in live portfolio
     },
 }
 
@@ -303,7 +300,7 @@ def get_strategy_backtest(strategy_id: str) -> list[dict]:
     """Get equity curve and drawdown time series."""
     if strategy_id not in STRATEGIES:
         return []
-    return STRATEGIES[strategy_id]["equity_curve"]
+    return _load_equity_curve(strategy_id)
 
 
 @router.get("/{strategy_id}/gates")

@@ -33,6 +33,8 @@ services:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/trading
       REDIS_URL: redis://redis:6379/0
     ports: ["8001:8000"]
+    volumes:
+      - ./reports:/app/reports:ro
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
