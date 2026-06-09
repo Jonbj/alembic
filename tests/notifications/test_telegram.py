@@ -299,3 +299,48 @@ class TestTelegramNotifierWithKeyboard:
         result = await notifier.edit_message_reply_markup(chat_id="123456", message_id=42)
 
         assert result is False
+
+
+# ── Zeygos poller helpers ─────────────────────────────────────────────────────
+
+class TestFormatZeygosSummary:
+    from src.workers.telegram_poller import _format_zeygos_summary
+    from src.connectors.zeygos_parser import ZeygosRow
+    from datetime import date
+
+    def _make_row(self, ticker, market, sector, score):
+        from src.connectors.zeygos_parser import ZeygosRow
+        from datetime import date
+        return ZeygosRow(
+            report_date=date(2026, 4, 30), market=market, sector=sector,
+            rank=1, ticker_refinitiv=ticker + ".N", ticker=ticker,
+            company_name="Test Co", score_analysts=50, score_momentum=50,
+            score_valuation=50, score_solidity=50, score_dividend=0,
+            score_growth=50, score_interest=50, score_finale=score,
+        )
+
+    def test_ok_summary_contains_date(self):
+        from src.workers.telegram_poller import _format_zeygos_summary
+        rows = [self._make_row("NEM", "USA", "Basic Materials", 73.3)]
+        out = _format_zeygos_summary(rows, 1)
+        assert "30 Apr 2026" in out
+
+    def test_ok_summary_shows_active_universe(self):
+        from src.workers.telegram_poller import _format_zeygos_summary
+        rows = [
+            self._make_row("NEM", "USA", "Basic Materials", 73.3),
+            self._make_row("LOW", "USA", "Industrials", 60.0),
+        ]
+        out = _format_zeygos_summary(rows, 2)
+        assert "Universo attivo" in out
+        assert "1 titoli" in out   # only NEM >= 65
+
+    def test_duplicate_note_shown_when_inserted_less_than_total(self):
+        from src.workers.telegram_poller import _format_zeygos_summary
+        rows = [self._make_row("NEM", "USA", "Basic Materials", 73.3)]
+        out = _format_zeygos_summary(rows, 0)   # 0 inserted = duplicate
+        assert "già presenti" in out
+
+    def test_empty_rows_returns_fallback(self):
+        from src.workers.telegram_poller import _format_zeygos_summary
+        assert "0 righe" in _format_zeygos_summary([], 0)

@@ -403,6 +403,29 @@ def _run_cycle_inner() -> dict:
     }
 
 
+def _apply_zeygos_filter(symbols: list[str], pg) -> list[str]:
+    """Intersect symbols with the latest Zeygos universe (score >= 65).
+
+    Fail-open: returns the original list unchanged if no Zeygos data is available
+    or the intersection would be empty.
+    """
+    try:
+        universe = pg.fetch_zeygos_universe()
+        if not universe:
+            return symbols
+        filtered = [s for s in symbols if s in universe]
+        if not filtered:
+            log.warning(
+                "Zeygos filter would eliminate all S4 symbols — skipping filter"
+            )
+            return symbols
+        log.info("Zeygos filter: %d → %d symbols", len(symbols), len(filtered))
+        return filtered
+    except Exception as exc:
+        log.warning("Zeygos filter failed: %s — using unfiltered symbols", exc)
+        return symbols
+
+
 def _strategy_symbols(entry) -> list[str]:
     from src.config import config
     syms = list(config.WATCHLIST_SYMBOLS or [])
@@ -439,9 +462,12 @@ def _build_strategy_instance(entry, bars_df):
         try:
             store = PostgreSQLStore()
             from src.config import config as _cfg
+            s4_symbols = _apply_zeygos_filter(
+                list(_cfg.WATCHLIST_SYMBOLS or []), store
+            )
             signals = store.fetch_signals_for_cycle(
                 hours=s4_config.signals_lookback_hours,
-                symbols=list(_cfg.WATCHLIST_SYMBOLS or []),
+                symbols=s4_symbols,
             )
             if signals:
                 import pandas as pd

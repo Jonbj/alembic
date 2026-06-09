@@ -1,12 +1,17 @@
-"""Telegram poller Celery task — processes inline keyboard callbacks for weight approval.
+"""Telegram poller Celery task — weight approval callbacks + Zeygos PDF ingestion.
 
-This module implements the Telegram approval flow for ensemble weight suggestions.
-When the performance worker calculates new weights but guardrails block auto-apply,
-a freeze notification is sent with inline keyboard buttons (✅ Approva / ❌ Rifiuta).
-This poller runs every 5 seconds via Celery beat to process user taps.
+This module implements two Telegram flows:
+
+1. Weight approval: inline keyboard callbacks (✅ Approva / ❌ Rifiuta) for ensemble
+   weight suggestions blocked by guardrails.
+
+2. Zeygos PDF ingestion: when a user forwards a Zeygos sector report PDF to the bot,
+   the poller parses it, stores scores to zeygos_scores, and replies with OK/KO summary.
 
 Architecture:
-    Celery beat (5s) → poll_telegram_updates() → GET /getUpdates → process callbacks
+    Celery beat (5s) → poll_telegram_updates() → GET /getUpdates → route by update type
+      ├── message.document (.pdf + "zeygos" in name) → _handle_pdf_document()
+      └── callback_query (approve:/reject:)           → _handle_approve/_handle_reject()
 
     - User authorization via TELEGRAM_ALLOWED_USER_IDS allowlist
     - Token-based anti-replay: SHA256(computed_at)[:8] validates callback freshness
@@ -18,7 +23,8 @@ Redis Keys:
     ensemble:weights:suggestion — Current pending suggestion (7d TTL)
 
 PostgreSQL Tables:
-    weight_update_log — Audit trail for all approval/rejection events
+    weight_update_log — Audit trail for approval/rejection events
+    zeygos_scores     — Parsed ticker scores from Zeygos PDF reports
 
 Usage:
     The task is automatically scheduled by Celery beat. No manual invocation needed.
@@ -119,8 +125,13 @@ def poll_telegram_updates() -> None:
 
             # Process each update sequentially
             for update in updates:
-                # Only process callback_query (inline button taps)
-                # Regular messages are ignored — we only care about approve/reject actions
+                # Route: PDF document upload → Zeygos ingestion
+                message = update.get("message", {})
+                if message.get("document"):
+                    _handle_pdf_document(client, pg, update)
+                    continue
+
+                # Route: inline button tap → weight approval flow
                 callback_query = update.get("callback_query")
                 if not callback_query:
                     continue
@@ -193,6 +204,117 @@ def poll_telegram_updates() -> None:
         log.exception("poll_telegram_updates error: %s", e)
     finally:
         pg.close()
+
+
+def _download_telegram_file(client: httpx.Client, file_id: str) -> bytes:
+    """Download a file from Telegram servers and return raw bytes."""
+    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/getFile"
+    resp = client.get(url, params={"file_id": file_id})
+    resp.raise_for_status()
+    file_path = resp.json()["result"]["file_path"]
+    dl_url = f"https://api.telegram.org/file/bot{config.TELEGRAM_BOT_TOKEN}/{file_path}"
+    resp = client.get(dl_url)
+    resp.raise_for_status()
+    return resp.content
+
+
+def _send_reply(
+    client: httpx.Client,
+    chat_id: int,
+    reply_to_message_id: int,
+    text: str,
+) -> None:
+    """Reply to a specific Telegram message."""
+    url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
+    try:
+        resp = client.post(
+            url,
+            json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "reply_to_message_id": reply_to_message_id,
+            },
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError as exc:
+        log.warning("Failed to send Telegram reply: %s", exc)
+
+
+def _format_zeygos_summary(rows: list, inserted: int) -> str:
+    """Format the OK reply body for a successfully ingested Zeygos report."""
+    if not rows:
+        return "0 righe estratte dal PDF"
+
+    usa_rows = [r for r in rows if r.market == "USA"]
+    eu_rows  = [r for r in rows if r.market == "EU"]
+    usa_sectors = len({r.sector for r in usa_rows})
+    eu_sectors  = len({r.sector for r in eu_rows})
+
+    top_usa = sorted(usa_rows, key=lambda r: r.score_finale, reverse=True)[:3]
+    top_eu  = sorted(eu_rows,  key=lambda r: r.score_finale, reverse=True)[:3]
+    top_usa_str = " · ".join(f"{r.ticker} {r.score_finale:.1f}" for r in top_usa)
+    top_eu_str  = " · ".join(f"{r.ticker} {r.score_finale:.1f}" for r in top_eu)
+
+    active = len({r.ticker for r in rows if r.score_finale >= 65.0})
+    report_date = rows[0].report_date.strftime("%d %b %Y")
+
+    lines = [
+        f"Zeygos ingested — {report_date}",
+        "",
+        f"🇺🇸 USA: {len(usa_rows)} titoli, {usa_sectors} settori",
+        f"🇪🇺  EU: {len(eu_rows)} titoli, {eu_sectors} settori",
+        "",
+        f"Top USA: {top_usa_str}",
+        f"Top EU: {top_eu_str}",
+        "",
+        f"Universo attivo (score ≥65): {active} titoli",
+    ]
+    if inserted < len(rows):
+        lines.append(
+            f"ℹ️ {len(rows) - inserted} righe già presenti (report duplicato)"
+        )
+    return "\n".join(lines)
+
+
+def _handle_pdf_document(client: httpx.Client, pg, update: dict) -> None:
+    """Handle an incoming PDF message — Zeygos report ingestion flow.
+
+    Only processes PDFs whose filename contains 'zeygos' (case-insensitive)
+    from users in TELEGRAM_ALLOWED_USER_IDS. Replies to the same message with
+    an OK summary or a KO error description.
+    """
+    message    = update.get("message", {})
+    doc        = message.get("document", {})
+    file_name  = doc.get("file_name", "")
+
+    if not (file_name.lower().endswith(".pdf") and "zeygos" in file_name.lower()):
+        return
+
+    user_id  = str(message.get("from", {}).get("id", ""))
+    if user_id not in config.TELEGRAM_ALLOWED_USER_IDS:
+        log.warning("Unauthorized Zeygos PDF upload from user_id=%s", user_id)
+        return
+
+    chat_id    = message.get("chat", {}).get("id")
+    message_id = message.get("message_id")
+    file_id    = doc.get("file_id")
+
+    try:
+        pdf_bytes = _download_telegram_file(client, file_id)
+
+        from src.connectors.zeygos_parser import ZeygosParseError, parse_zeygos_pdf
+        rows = parse_zeygos_pdf(pdf_bytes)
+        inserted = pg.insert_zeygos_scores(rows)
+
+        reply = "✅ " + _format_zeygos_summary(rows, inserted)
+        log.info("Zeygos PDF ingested: %d rows (%d new) from %s", len(rows), inserted, file_name)
+
+    except Exception as exc:
+        log.exception("Zeygos PDF handling failed for %s: %s", file_name, exc)
+        reply = f"❌ Zeygos parsing fallito\n\n<code>{exc}</code>"
+
+    _send_reply(client, chat_id, message_id, reply)
 
 
 def _answer_callback(client: httpx.Client, callback_id: str, text: str) -> None:

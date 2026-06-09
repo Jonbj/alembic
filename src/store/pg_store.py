@@ -1526,6 +1526,62 @@ class PostgreSQLStore:
         except Exception:
             pass
 
+    # ── Zeygos scores ─────────────────────────────────────────────────────────
+
+    def insert_zeygos_scores(self, rows: list) -> int:
+        """Upsert ZeygosRow list into zeygos_scores. Returns number of new rows."""
+        if not rows:
+            return 0
+        conn = self._get_connection()
+        inserted = 0
+        try:
+            with conn.cursor() as cur:
+                for r in rows:
+                    cur.execute(
+                        """INSERT INTO zeygos_scores
+                           (report_date, market, sector, rank, ticker_refinitiv,
+                            ticker, company_name, score_analysts, score_momentum,
+                            score_valuation, score_solidity, score_dividend,
+                            score_growth, score_interest, score_finale)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                           ON CONFLICT (report_date, ticker_refinitiv) DO NOTHING""",
+                        (
+                            r.report_date, r.market, r.sector, r.rank,
+                            r.ticker_refinitiv, r.ticker, r.company_name,
+                            r.score_analysts, r.score_momentum, r.score_valuation,
+                            r.score_solidity, r.score_dividend, r.score_growth,
+                            r.score_interest, r.score_finale,
+                        ),
+                    )
+                    inserted += cur.rowcount
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        return inserted
+
+    def fetch_zeygos_universe(self, min_score: float = 65.0) -> set[str]:
+        """Return normalized tickers from the latest Zeygos report with score >= min_score.
+
+        Returns empty set (fail-open) on any error or if no data is present.
+        """
+        try:
+            conn = self._get_connection()
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT DISTINCT ticker
+                       FROM zeygos_scores
+                       WHERE report_date = (SELECT MAX(report_date) FROM zeygos_scores)
+                         AND score_finale >= %s""",
+                    (min_score,),
+                )
+                return {row[0] for row in cur.fetchall()}
+        except Exception as exc:
+            log.warning("fetch_zeygos_universe failed: %s — no filter applied", exc)
+            return set()
+
+    # ── context manager ───────────────────────────────────────────────────────
+
     def __enter__(self) -> "PostgreSQLStore":
         return self
 
