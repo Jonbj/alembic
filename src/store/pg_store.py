@@ -541,6 +541,35 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def record_trade_exit(
+        self,
+        symbol: str,
+        exit_order_id: str,
+        exit_time,
+        exit_reason: str,
+    ) -> int | None:
+        """Mark the open trade for symbol as exited; exit_price reconciled later.
+
+        Sets exit_order_id, exit_time, exit_reason. exit_price remains NULL until
+        reconcile_trade_fills fetches the Alpaca fill.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE trades
+                       SET exit_order_id = %s, exit_time = %s, exit_reason = %s
+                       WHERE symbol = %s AND exit_time IS NULL
+                       RETURNING id""",
+                    (exit_order_id, exit_time, exit_reason, symbol),
+                )
+                row = cur.fetchone()
+            conn.commit()
+            return int(row[0]) if row else None
+        except Exception:
+            conn.rollback()
+            raise
+
     def fetch_trades(
         self,
         symbol: str | None = None,
@@ -665,12 +694,17 @@ class PostgreSQLStore:
             raise
 
     def reconcile_trade_fills(self, trading_client) -> int:
-        """Fetch fill prices from Alpaca for trades where entry_price IS NULL.
+        """Fetch fill prices from Alpaca for open entry and exit orders.
 
-        Called daily (run_daily_report). Returns the count of rows updated.
+        Called daily (run_daily_report). Reconciles:
+        - Entry fills: trades where entry_price IS NULL
+        - Exit fills:  trades where exit_order_id IS NOT NULL and exit_price IS NULL
+
+        Returns the total count of rows updated.
         """
         conn = self._get_connection()
         try:
+            # Reconcile entry fills
             with conn.cursor() as cur:
                 cur.execute(
                     """SELECT id, entry_order_id FROM trades
@@ -695,7 +729,60 @@ class PostgreSQLStore:
                 except Exception as e:
                     log.warning("Failed to reconcile order %s: %s", order_id, e)
             conn.commit()
-            return updated
+
+            # Reconcile exit fills — compute P&L once fill price is known
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT id, exit_order_id, entry_price, entry_notional, qty, symbol
+                       FROM trades
+                       WHERE exit_order_id IS NOT NULL
+                         AND exit_price IS NULL
+                         AND exit_time > now() - '48 hours'::interval"""
+                )
+                exit_rows = cur.fetchall()
+            exit_updated = 0
+            for trade_id, exit_order_id, entry_price, entry_notional, qty, symbol in exit_rows:
+                try:
+                    order = trading_client.get_order_by_id(exit_order_id)
+                    if order.filled_avg_price is None:
+                        continue
+                    fill_price = float(order.filled_avg_price)
+                    entry_p = float(entry_price) if entry_price is not None else 0.0
+                    qty_f = float(qty) if qty is not None else 0.0
+                    notional_f = float(entry_notional) if entry_notional is not None else 0.0
+                    costs = self._cost_calc.compute(
+                        symbol=symbol,
+                        notional=notional_f,
+                        qty=qty_f,
+                        fill_price=fill_price,
+                        side="SELL",
+                    )
+                    gross_pnl = (fill_price - entry_p) * qty_f if entry_p else None
+                    net_pnl = (gross_pnl - costs.total_cost_usd) if gross_pnl is not None else None
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """UPDATE trades SET
+                               exit_price = %s,
+                               gross_pnl = %s,
+                               net_pnl = %s,
+                               cost_bps = %s,
+                               cost_usd = %s,
+                               spread_cost_bps = %s,
+                               impact_cost_bps = %s,
+                               regulatory_cost_usd = %s,
+                               slippage_est = %s
+                               WHERE id = %s""",
+                            (fill_price, gross_pnl, net_pnl,
+                             costs.total_cost_bps, costs.total_cost_usd,
+                             costs.spread_cost_bps, costs.impact_cost_bps,
+                             costs.regulatory_cost_usd, costs.total_cost_usd,
+                             trade_id),
+                        )
+                    exit_updated += 1
+                except Exception as e:
+                    log.warning("Failed to reconcile exit order %s: %s", exit_order_id, e)
+            conn.commit()
+            return updated + exit_updated
         except Exception:
             conn.rollback()
             raise

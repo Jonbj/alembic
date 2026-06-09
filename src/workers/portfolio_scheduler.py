@@ -188,6 +188,8 @@ def _run_cycle_inner() -> dict:
     )
 
     # Log decisions to execution_decisions so the UI Decision Log tab is populated.
+    # Also capture decision_ids for later trade DB writes.
+    _symbol_decisions: dict[str, dict] = {}  # {symbol: {decision_id, score, signal_id}}
     try:
         from src.store.pg_store import PostgreSQLStore
         _pg = PostgreSQLStore()
@@ -226,7 +228,7 @@ def _run_cycle_inner() -> dict:
                 reason = f"{'+'.join(strats)}: merged portfolio weight {wt_pct}."
             else:
                 reason = f"Portfolio rebalance: weight {wt_pct}."
-            _pg.write_execution_decision(
+            decision_id = _pg.write_execution_decision(
                 tick_time=ts,
                 symbol=order.symbol,
                 signal_id=_signal_ids.get(order.symbol),
@@ -236,6 +238,11 @@ def _run_cycle_inner() -> dict:
                 decision=order.side.value,
                 reason=reason,
             )
+            _symbol_decisions[order.symbol] = {
+                "decision_id": decision_id,
+                "score": order.allocation_weight,
+                "signal_id": _signal_ids.get(order.symbol),
+            }
         _pg.close()
     except Exception as _exc:
         log.warning("Failed to log portfolio decisions: %s", _exc)
@@ -254,9 +261,40 @@ def _run_cycle_inner() -> dict:
 
     if operating_mode in ("dry_run", "halted"):
         log.info("Skipping order submission - %s mode", operating_mode)
-        submitted = 0
+        submitted_orders: list[dict] = []
     else:
-        submitted = _submit_portfolio_orders(result.final_orders, trading_client, market)
+        submitted_orders = _submit_portfolio_orders(result.final_orders, trading_client, market)
+
+    # Write trade entries/exits to DB for P&L tracking.
+    if submitted_orders:
+        try:
+            from src.store.pg_store import PostgreSQLStore
+            _pg_trades = PostgreSQLStore()
+            for sub in submitted_orders:
+                sym = sub["symbol"]
+                dec = _symbol_decisions.get(sym, {})
+                if sub["side"] == "buy":
+                    _pg_trades.open_trade(
+                        symbol=sym,
+                        signal_id=dec.get("signal_id"),
+                        decision_id=dec.get("decision_id"),
+                        entry_order_id=sub["order_id"],
+                        entry_time=ts,
+                        entry_notional=sub["notional"],
+                        score=dec.get("score", 0.0),
+                        regime_mult=1.0,
+                    )
+                else:
+                    _pg_trades.record_trade_exit(
+                        symbol=sym,
+                        exit_order_id=sub["order_id"],
+                        exit_time=ts,
+                        exit_reason="portfolio_sell",
+                    )
+            _pg_trades.close()
+        except Exception as _exc:
+            log.warning("Failed to write trade fills to DB: %s", _exc)
+
     _persist_cycle_result({
         "timestamp": end,
         "strategies_run": result.strategies_run,
@@ -271,7 +309,7 @@ def _run_cycle_inner() -> dict:
         "orders_after_constraints": result.orders_after_constraints,
         "constraints_fired": len(result.constraints_fired),
         "final_orders": len(result.final_orders),
-        "submitted": submitted,
+        "submitted": len(submitted_orders),
     }
 
 
@@ -344,7 +382,7 @@ def _build_strategy_instance(entry, bars_df):
     return None
 
 
-def _submit_portfolio_orders(orders, trading_client, market, _submit_fn=None) -> int:
+def _submit_portfolio_orders(orders, trading_client, market, _submit_fn=None) -> list[dict]:
     """Submit BUY and SELL orders to Alpaca.
 
     Args:
@@ -356,11 +394,12 @@ def _submit_portfolio_orders(orders, trading_client, market, _submit_fn=None) ->
             For SELL: receives (order, qty, trading_client).
 
     Returns:
-        Number of orders successfully submitted.
+        List of dicts for successfully submitted orders, each containing:
+        symbol, side, order_id, and either notional (BUY) or qty (SELL).
     """
     from src.backtest.engine.types import OrderSide
 
-    submitted = 0
+    submitted = []
     for order in orders:
         try:
             if order.side == OrderSide.BUY:
@@ -371,6 +410,7 @@ def _submit_portfolio_orders(orders, trading_client, market, _submit_fn=None) ->
                 notional = round(price * order.quantity, 2)
                 if _submit_fn is not None:
                     _submit_fn(order, notional, trading_client)
+                    alpaca_id = f"test-{order.symbol}-buy"
                 else:
                     from alpaca.trading.requests import MarketOrderRequest
                     req = MarketOrderRequest(
@@ -379,13 +419,16 @@ def _submit_portfolio_orders(orders, trading_client, market, _submit_fn=None) ->
                         side="buy",
                         time_in_force="day",
                     )
-                    trading_client.submit_order(req)
+                    alpaca_order = trading_client.submit_order(req)
+                    alpaca_id = str(alpaca_order.id)
+                submitted.append({"symbol": order.symbol, "side": "buy", "order_id": alpaca_id, "notional": notional})
             elif order.side == OrderSide.SELL:
                 qty = abs(order.quantity)
                 if qty < 1e-6:
                     continue
                 if _submit_fn is not None:
                     _submit_fn(order, qty, trading_client)
+                    alpaca_id = f"test-{order.symbol}-sell"
                 else:
                     from alpaca.trading.requests import MarketOrderRequest
                     req = MarketOrderRequest(
@@ -394,11 +437,12 @@ def _submit_portfolio_orders(orders, trading_client, market, _submit_fn=None) ->
                         side="sell",
                         time_in_force="day",
                     )
-                    trading_client.submit_order(req)
+                    alpaca_order = trading_client.submit_order(req)
+                    alpaca_id = str(alpaca_order.id)
+                submitted.append({"symbol": order.symbol, "side": "sell", "order_id": alpaca_id, "qty": qty})
             else:
                 log.warning("Unknown order side %s for %s — skipping", order.side, order.symbol)
                 continue
-            submitted += 1
         except Exception as exc:
             log.warning("Failed to submit order for %s: %s", order.symbol, exc)
     return submitted

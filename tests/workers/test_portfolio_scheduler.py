@@ -291,7 +291,7 @@ def test_submit_portfolio_orders_places_buy_orders():
         submitted_calls.append((order.symbol, notional))
 
     submitted = _submit_portfolio_orders(orders, trading_client, market, _submit_fn=mock_submit)
-    assert submitted == 1
+    assert len(submitted) == 1
     assert submitted_calls[0][0] == "SPY"
 
 
@@ -304,7 +304,7 @@ def test_submit_portfolio_orders_submits_sell_orders():
     market = _make_market()
 
     submitted = _submit_portfolio_orders(orders, trading_client, market, _submit_fn=lambda o, n, c: None)
-    assert submitted == 1
+    assert len(submitted) == 1
 
 
 def test_submit_portfolio_orders_returns_zero_for_empty_list():
@@ -315,7 +315,7 @@ def test_submit_portfolio_orders_returns_zero_for_empty_list():
     market = _make_market()
 
     submitted = _submit_portfolio_orders([], trading_client, market, _submit_fn=lambda o, n, c: None)
-    assert submitted == 0
+    assert len(submitted) == 0
 
 
 def test_submit_portfolio_orders_continues_after_single_failure():
@@ -337,7 +337,7 @@ def test_submit_portfolio_orders_continues_after_single_failure():
             raise Exception("API error")
 
     submitted = _submit_portfolio_orders(orders, trading_client, market, _submit_fn=mock_submit)
-    assert submitted == 1  # only the successful one counts
+    assert len(submitted) == 1  # only the successful one counts
 
 
 def test_submit_portfolio_orders_mixed_buy_sell():
@@ -357,7 +357,7 @@ def test_submit_portfolio_orders_mixed_buy_sell():
         submitted_syms.append(order.symbol)
 
     submitted = _submit_portfolio_orders(orders, trading_client, market, _submit_fn=mock_submit)
-    assert submitted == 3
+    assert len(submitted) == 3
     assert submitted_syms == ["SPY", "QQQ", "GLD"]
 
 
