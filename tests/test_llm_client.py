@@ -117,12 +117,19 @@ class TestOllamaCloudClients:
     @pytest.mark.asyncio
     async def test_ollama_client_parses_response(self, monkeypatch):
         """complete() extracts content from Ollama response and parses JSON."""
+        from contextlib import asynccontextmanager
         from unittest.mock import AsyncMock, MagicMock, patch
         import src.llm.client as client_mod
         import src.config as cfg_mod
 
         patched_config = cfg_mod.config.model_copy(update={"OLLAMA_API_KEY": "test-key"})
         monkeypatch.setattr(client_mod, "config", patched_config)
+
+        # Bypass Redis semaphore in unit tests
+        @asynccontextmanager
+        async def _noop_acquire():
+            yield
+        monkeypatch.setattr(client_mod._ollama_sem, "acquire", _noop_acquire)
 
         fake_response_data = {
             "message": {"content": '{"polarity": 0.7, "confidence": 0.8, "reasoning": "bullish"}'}

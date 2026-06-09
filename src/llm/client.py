@@ -32,6 +32,7 @@ Version: 1.0.0
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -609,6 +610,74 @@ class GlmClient(LLMClient):
 # Ollama Cloud HTTP clients
 # ---------------------------------------------------------------------------
 
+# Redis-backed distributed semaphore: serializes all Ollama HTTP calls across
+# every Celery worker process so Ollama never receives concurrent requests.
+#
+# Pattern: Redis list as token pool.
+#   Acquire → BLPOP (blocks until a token is available)
+#   Release → LPUSH (returns the token)
+#
+# Initialization: Lua script pushes N tokens exactly once (SETNX on flag key).
+# Crash recovery: if a worker dies holding the token, run:
+#   redis-cli DEL ollama:sem ollama:sem:init
+#
+_OLLAMA_SEM_KEY = "ollama:sem"
+_OLLAMA_SEM_SLOTS = 1      # 1 = fully serialized
+_OLLAMA_SEM_WAIT_S = 180   # max seconds to wait for a slot (12 workers × ~14s/call)
+
+
+class _OllamaSemaphore:
+    """Cross-process Redis counting semaphore for Ollama calls."""
+
+    _SLOT = "slot"
+
+    def __init__(self, key: str = _OLLAMA_SEM_KEY, slots: int = _OLLAMA_SEM_SLOTS):
+        self._key = key
+        self._init_key = key + ":init"
+        self._slots = slots
+
+    def _connect(self):
+        import redis as _redis
+        return _redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
+
+    def _ensure_slots(self, r) -> None:
+        # SETNX on the init flag guarantees exactly one initialization even
+        # under concurrent first-call races from multiple worker processes.
+        lua = """
+        if redis.call('SETNX', KEYS[2], '1') == 1 then
+            for i = 1, tonumber(ARGV[1]) do
+                redis.call('RPUSH', KEYS[1], ARGV[2])
+            end
+        end
+        return redis.call('LLEN', KEYS[1])
+        """
+        r.eval(lua, 2, self._key, self._init_key, str(self._slots), self._SLOT)
+
+    @contextlib.asynccontextmanager
+    async def acquire(self):
+        loop = asyncio.get_running_loop()
+        r = await loop.run_in_executor(None, self._connect)
+        try:
+            await loop.run_in_executor(None, self._ensure_slots, r)
+            got = await loop.run_in_executor(
+                None, lambda: r.blpop(self._key, timeout=_OLLAMA_SEM_WAIT_S),
+            )
+            if got is None:
+                raise RuntimeError(
+                    f"Ollama semaphore: no slot after {_OLLAMA_SEM_WAIT_S}s — "
+                    "Ollama overloaded; FinBERT fallback will apply"
+                )
+            try:
+                yield
+            finally:
+                await loop.run_in_executor(None, r.lpush, self._key, self._SLOT)
+        finally:
+            r.close()
+
+
+_ollama_sem = _OllamaSemaphore()
+
+
 class OllamaCloudClient(LLMClient):
     """Base class for Ollama cloud models accessed via HTTP API.
 
@@ -628,7 +697,13 @@ class OllamaCloudClient(LLMClient):
     _OLLAMA_TIMEOUT = 45
 
     async def complete(self, prompt: str, response_schema: type[T]) -> T:
-        """POST to Ollama /api/chat and parse the response as JSON schema."""
+        """POST to Ollama /api/chat and parse the response as JSON schema.
+
+        Calls are serialized across all Celery workers via _ollama_sem (Redis
+        BLPOP/LPUSH). The semaphore slot is released as soon as the HTTP body
+        is received, before JSON parsing, so other workers are unblocked at the
+        earliest possible moment.
+        """
         if not config.OLLAMA_API_KEY:
             raise RuntimeError("OLLAMA_API_KEY is not set")
         self._validate_model_id(self.model_id)
@@ -647,10 +722,13 @@ class OllamaCloudClient(LLMClient):
 
         for attempt in range(self.max_retries + 1):
             try:
-                async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
-                    async with session.post(url, json=payload) as resp:
-                        resp.raise_for_status()
-                        data = await resp.json()
+                # Acquire semaphore → HTTP call → release semaphore → parse
+                async with _ollama_sem.acquire():
+                    async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
+                        async with session.post(url, json=payload) as resp:
+                            resp.raise_for_status()
+                            data = await resp.json()
+                # Semaphore released; parse outside the critical section
                 raw = data["message"]["content"]
                 json_str = self.parse_json_response(raw)
                 return response_schema.model_validate_json(json_str)
@@ -665,7 +743,6 @@ class OllamaCloudClient(LLMClient):
                     ) from e
                 raise RuntimeError(f"Ollama API error {e.status}: {e.message}") from e
             except (asyncio.TimeoutError, TimeoutError):
-                # Fail fast — don't retry on timeout, the server is too slow right now.
                 raise RuntimeError(
                     f"Ollama timeout ({self._OLLAMA_TIMEOUT}s) on {self.model_id}"
                 )
