@@ -46,9 +46,13 @@ _config_freshly_stubbed = False
 if "src.config" not in sys.modules:
     sys.modules["src.config"] = MagicMock()
     _config_freshly_stubbed = True
-# Always set required attributes as real values regardless of who installed the stub.
-sys.modules["src.config"].config.MIN_TRADE_PNL_THRESHOLD = 0.0
-sys.modules["src.config"].config.LLM_DAILY_BUDGET_USD = 5.0
+# Set required attributes when we installed a MagicMock stub.
+# Skip when the real (frozen pydantic) Config is already loaded.
+try:
+    sys.modules["src.config"].config.MIN_TRADE_PNL_THRESHOLD = 0.0
+    sys.modules["src.config"].config.LLM_DAILY_BUDGET_USD = 5.0
+except Exception:
+    pass
 
 from src.workers.performance import (  # noqa: E402
     _format_capital_efficiency_section,

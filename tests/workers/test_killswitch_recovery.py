@@ -1,10 +1,12 @@
 """Tests for condition-based kill-switch recovery in the execution worker."""
-import json
 import sys
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
-# Stub heavy system deps so execution.py can be imported without the full stack.
+import pytest
+
+# Modules that must be stubbed so execution.py can be imported without the full stack.
+# Installed inside _apply_module_stubs and removed on teardown — no module-level side effects.
 _STUBS = [
     "redis", "alpaca", "alpaca.trading", "alpaca.trading.client",
     "alpaca.trading.enums", "alpaca.trading.requests",
@@ -16,26 +18,48 @@ _STUBS = [
     "src.costs.calculator", "src.config",
     "celery", "celery.utils.log",
 ]
-_freshly_stubbed = []
-for _mod in _STUBS:
-    if _mod not in sys.modules:
-        sys.modules[_mod] = MagicMock()
-        _freshly_stubbed.append(_mod)
 
-# Redis.from_url must return a MagicMock, not raise
-sys.modules["redis"].Redis = MagicMock
 
-# src.config needs real attributes
-sys.modules["src.config"].config = MagicMock(
-    ALPACA_API_KEY="test", ALPACA_SECRET_KEY="test", REDIS_URL="redis://localhost"
-)
+@pytest.fixture(autouse=True, scope="module")
+def _apply_module_stubs():
+    """Install and restore all stubs for this module, preventing session contamination."""
+    # Install stubs for modules not yet present; track what we freshly add.
+    freshly_stubbed = []
+    for mod in _STUBS:
+        if mod not in sys.modules:
+            sys.modules[mod] = MagicMock()
+            freshly_stubbed.append(mod)
 
-# celery app stub
-sys.modules["src.workers.celery_app"].app = MagicMock()
-sys.modules["src.workers.celery_app"].app.task = lambda *a, **kw: (lambda f: f)
+    redis_mod = sys.modules["redis"]
+    config_mod = sys.modules["src.config"]
+    celery_app_mod = sys.modules["src.workers.celery_app"]
+    cost_mod = sys.modules["src.costs.calculator"]
 
-# TradeCostCalculator stub
-sys.modules["src.costs.calculator"].TradeCostCalculator = MagicMock
+    saved_redis_cls = getattr(redis_mod, "Redis", None)
+    saved_config = getattr(config_mod, "config", None)
+    saved_app = getattr(celery_app_mod, "app", None)
+    saved_cost_calc = getattr(cost_mod, "TradeCostCalculator", None)
+
+    redis_mod.Redis = MagicMock
+    config_mod.config = MagicMock(
+        ALPACA_API_KEY="test", ALPACA_SECRET_KEY="test", REDIS_URL="redis://localhost"
+    )
+    stub_app = MagicMock()
+    stub_app.task = lambda *a, **kw: (lambda f: f)
+    celery_app_mod.app = stub_app
+    cost_mod.TradeCostCalculator = MagicMock
+
+    yield
+
+    # Restore attribute overwrites
+    redis_mod.Redis = saved_redis_cls
+    config_mod.config = saved_config
+    celery_app_mod.app = saved_app
+    cost_mod.TradeCostCalculator = saved_cost_calc
+
+    # Remove freshly-installed module stubs so they don't leak into later test files
+    for mod in freshly_stubbed:
+        sys.modules.pop(mod, None)
 
 
 def _make_redis(
@@ -44,36 +68,26 @@ def _make_redis(
     activated_hours_ago=3.0,
     regime_mult=0.7,
 ):
-    """Build a minimal RedisStore mock for recovery tests."""
+    """Build a minimal RedisStore mock for recovery tests using public methods."""
     redis = MagicMock()
 
-    # killswitch_active key
-    redis._r.get.side_effect = lambda key: _redis_get(
-        key, ks_active, operator_halt, activated_hours_ago
-    )
-    redis._r.delete = MagicMock()
-    redis._r.set = MagicMock()
-    redis._r.setex = MagicMock()
-
-    # is_killswitch_active mirrors both keys
+    redis.is_drawdown_killswitch_active.return_value = ks_active
+    redis.is_operator_halted.return_value = operator_halt
     redis.is_killswitch_active.return_value = ks_active or operator_halt
-    redis.deactivate_killswitch = MagicMock()
-    return redis
 
-
-def _redis_get(key, ks_active, operator_halt, activated_hours_ago):
-    if key == "killswitch_active":
-        return b"1" if ks_active else None
-    if key == "system:halted_by_operator":
-        return b"1" if operator_halt else None
-    if key == "killswitch_reason":
-        if not ks_active:
-            return None
+    if ks_active:
         activated_at = (
             datetime.now(timezone.utc) - timedelta(hours=activated_hours_ago)
         ).isoformat()
-        return json.dumps({"reason": "test", "activated_at": activated_at}).encode()
-    return None
+        redis.get_killswitch_reason.return_value = {
+            "reason": "test",
+            "activated_at": activated_at,
+        }
+    else:
+        redis.get_killswitch_reason.return_value = None
+
+    redis.deactivate_killswitch = MagicMock()
+    return redis
 
 
 class TestTryKillswitchRecovery:

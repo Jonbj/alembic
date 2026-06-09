@@ -638,7 +638,8 @@ class TestReconcileTradesFills:
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-        mock_cur.fetchall.return_value = [(1, "order-abc")]
+        # First fetchall → entry fills (2-tuple); second → exit fills (empty)
+        mock_cur.fetchall.side_effect = [[(1, "order-abc")], []]
 
         mock_order = MagicMock()
         mock_order.filled_avg_price = "201.50"
@@ -651,15 +652,17 @@ class TestReconcileTradesFills:
         updated = store.reconcile_trade_fills(mock_trading)
 
         assert updated == 1
-        update_sql = mock_cur.execute.call_args_list[-1][0][0]
-        assert "UPDATE trades" in update_sql
+        # Find the UPDATE trades statement among all execute calls
+        all_sqls = [c[0][0] for c in mock_cur.execute.call_args_list]
+        update_sql = next(s for s in all_sqls if "UPDATE trades" in s and "entry_price" in s)
         assert "entry_price" in update_sql
 
     def test_skips_unfilled_order(self):
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-        mock_cur.fetchall.return_value = [(1, "order-abc")]
+        # First fetchall → entry fills (2-tuple); second → exit fills (empty)
+        mock_cur.fetchall.side_effect = [[(1, "order-abc")], []]
 
         mock_order = MagicMock()
         mock_order.filled_avg_price = None  # not yet filled

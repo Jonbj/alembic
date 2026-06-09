@@ -51,9 +51,12 @@ _config_freshly_stubbed = False
 if "src.config" not in sys.modules:
     sys.modules["src.config"] = MagicMock()
     _config_freshly_stubbed = True
-# Always ensure MIN_TRADE_PNL_THRESHOLD is a real float — another test file may have
-# installed src.config without this attribute, leaving it as a MagicMock.
-sys.modules["src.config"].config.MIN_TRADE_PNL_THRESHOLD = 0.0
+# Ensure MIN_TRADE_PNL_THRESHOLD is a real float when we installed a MagicMock stub.
+# Skip the assignment when the real (frozen pydantic) Config is already loaded.
+try:
+    sys.modules["src.config"].config.MIN_TRADE_PNL_THRESHOLD = 0.0
+except Exception:
+    pass
 
 from src.workers.performance import _format_trade_metrics_section as _format_trade_pnl_section  # noqa: E402
 

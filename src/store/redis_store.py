@@ -622,6 +622,38 @@ class RedisStore:
         raw = self._r.get("config:sentiment_llm_models")
         return raw.decode() if isinstance(raw, bytes) else raw
 
+    # =========================================================================
+    # PORTFOLIO VALUE
+    # =========================================================================
+
+    def set_portfolio_value(self, equity: float) -> None:
+        """Cache current portfolio equity in Redis (24h TTL)."""
+        self._r.setex("portfolio:value", 86400, str(equity))
+
+    # =========================================================================
+    # OVERNIGHT ALERT DEDUP
+    # =========================================================================
+
+    def is_overnight_alert_sent(self, date_str: str) -> bool:
+        """Return True if the overnight hold alert was already sent for *date_str* (YYYY-MM-DD)."""
+        return bool(self._r.get(f"overnight_alert:{date_str}"))
+
+    def mark_overnight_alert_sent(self, date_str: str) -> None:
+        """Record that the overnight hold alert was sent for *date_str*; expires after 24h."""
+        self._r.setex(f"overnight_alert:{date_str}", 86400, "1")
+
+    # =========================================================================
+    # GRANULAR KILL-SWITCH INSPECTION (for auto-recovery logic)
+    # =========================================================================
+
+    def is_drawdown_killswitch_active(self) -> bool:
+        """Return True if the drawdown-triggered kill-switch key is set (TTL-based)."""
+        return bool(self._r.get("killswitch_active"))
+
+    def is_operator_halted(self) -> bool:
+        """Return True if the permanent operator halt key is set."""
+        return bool(self._r.get("system:halted_by_operator"))
+
     def __enter__(self) -> "RedisStore":
         return self
 

@@ -121,16 +121,15 @@ def _try_killswitch_recovery(
         return False
 
     # Only auto-recover drawdown-triggered freezes, never operator halts
-    if not redis_store._r.get("killswitch_active"):
+    if not redis_store.is_drawdown_killswitch_active():
         return False
-    if redis_store._r.get("system:halted_by_operator"):
+    if redis_store.is_operator_halted():
         return False
 
     # Check minimum hold time
-    reason_raw = redis_store._r.get("killswitch_reason")
-    if reason_raw:
+    reason_data = redis_store.get_killswitch_reason()
+    if reason_data:
         try:
-            reason_data = json.loads(reason_raw)
             activated_at = datetime.fromisoformat(reason_data.get("activated_at", ""))
             if activated_at.tzinfo is None:
                 activated_at = activated_at.replace(tzinfo=timezone.utc)
@@ -451,7 +450,7 @@ def run_execution_cycle(
     try:
         account = trading_client.get_account()
         portfolio_value = float(account.portfolio_value)
-        redis_store._r.setex("portfolio:value", 86400, str(portfolio_value))
+        redis_store.set_portfolio_value(portfolio_value)
     except Exception as e:
         log.error("Failed to fetch account from Alpaca: %s", e)
         _fire_alert(notifier, f"Alpaca API non raggiungibile: {e}", AlertLevel.CRITICAL)
@@ -546,22 +545,8 @@ def run_execution_cycle(
 
             # --- Signal read ---
             signal = redis_store.read_sentiment(symbol)
-            if signal is None or not _is_fresh(signal):
-                stats["skipped_stale"] += 1
-                log.debug("No fresh signal for %s — skipping", symbol)
-                continue
 
-            score = float(signal.get("score", 0.0))
-            fallback_used = bool(signal.get("fallback_used", False))
-            signal_id: "int | None" = signal.get("signal_id")
-
-            # Skip FinBERT fallback signals — lower quality, not ensemble
-            if fallback_used:
-                log.debug("Skipping fallback signal for %s", symbol)
-                stats["skipped_stale"] += 1
-                continue
-
-            # --- Stop-loss check on existing position ---
+            # --- Stop-loss check on existing position (runs regardless of signal freshness) ---
             if symbol in open_positions:
                 pos = open_positions[symbol]
                 entry_price = float(pos.avg_entry_price)
@@ -607,7 +592,7 @@ def run_execution_cycle(
                                 pg_store=pg_store,
                                 trade_id=trade_id,
                                 signal=signal,
-                                score=score,
+                                score=float(signal.get("score", 0.0)) if signal else 0.0,
                                 regime_mult=regime_mult,
                                 entry_price=entry_price,
                                 exit_price=current_price,
@@ -626,9 +611,28 @@ def run_execution_cycle(
                     # Position open and healthy — idempotent, no pyramiding
                     stats["skipped_position"] += 1
                     log.debug("Position already open for %s — skipping entry", symbol)
-                    if score > entry_threshold:
-                        _write_decision(pg_store, tick_time, symbol, signal_id, score, regime_mult,
-                                        ema_pass=True, decision="SKIP_POSITION")
+                    if signal is not None and _is_fresh(signal):
+                        _sig_score = float(signal.get("score", 0.0))
+                        _sig_id = signal.get("signal_id")
+                        if _sig_score > entry_threshold:
+                            _write_decision(pg_store, tick_time, symbol, _sig_id, _sig_score,
+                                            regime_mult, ema_pass=True, decision="SKIP_POSITION")
+                continue
+
+            # --- Signal freshness check (entry candidates only) ---
+            if signal is None or not _is_fresh(signal):
+                stats["skipped_stale"] += 1
+                log.debug("No fresh signal for %s — skipping", symbol)
+                continue
+
+            score = float(signal.get("score", 0.0))
+            fallback_used = bool(signal.get("fallback_used", False))
+            signal_id: "int | None" = signal.get("signal_id")
+
+            # Skip FinBERT fallback signals — lower quality, not ensemble
+            if fallback_used:
+                log.debug("Skipping fallback signal for %s", symbol)
+                stats["skipped_stale"] += 1
                 continue
 
             # --- Entry logic ---
@@ -765,10 +769,10 @@ def _alert_overnight_positions(
     if not open_positions:
         return
 
-    dedup_key = f"overnight_alert:{tick_time.date().isoformat()}"
-    if redis_store._r.get(dedup_key):
+    date_str = tick_time.date().isoformat()
+    if redis_store.is_overnight_alert_sent(date_str):
         return  # already alerted today
-    redis_store._r.setex(dedup_key, 86400, "1")
+    redis_store.mark_overnight_alert_sent(date_str)
 
     lines = ["🌙 *Overnight Hold Alert*", f"{len(open_positions)} position(s) going into overnight:"]
     for sym, pos in open_positions.items():
