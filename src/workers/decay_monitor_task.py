@@ -49,17 +49,21 @@ def _fetch_actual_metrics(strategy_id: str, pg) -> dict[str, float]:
     try:
         conn = pg._get_connection()
         with conn.cursor() as cur:
-            # Try to get recent signal-based metrics
+            # IC and hit-rate from sentiment_signals with populated forward_return.
+            # Metrics are pipeline-global (no strategy_id column in the table).
             cur.execute(
                 """SELECT
-                    AVG(CASE WHEN score > 0 THEN 1.0 ELSE 0.0 END) AS hit_rate,
-                    CORR(score, forward_return_5d) AS ic,
-                    COUNT(*) AS n
+                    COUNT(*) FILTER (
+                        WHERE forward_return IS NOT NULL
+                          AND score * forward_return > 0
+                    )::float
+                    / NULLIF(COUNT(*) FILTER (WHERE forward_return IS NOT NULL), 0)
+                        AS hit_rate,
+                    CORR(score, forward_return)                 AS ic,
+                    COUNT(*) FILTER (WHERE forward_return IS NOT NULL) AS n
                 FROM sentiment_signals
-                WHERE strategy_id = %s
-                  AND created_at >= now() - INTERVAL '30 days'
+                WHERE created_at >= now() - INTERVAL '30 days'
                 """,
-                (strategy_id,),
             )
             row = cur.fetchone()
             if row and row[2] and row[2] >= 10:
@@ -69,15 +73,13 @@ def _fetch_actual_metrics(strategy_id: str, pg) -> dict[str, float]:
                 hit_rate = 0.5
                 ic = 0.0
 
-            # Sharpe approximation from daily returns
+            # Sharpe approximation from daily returns (portfolio_daily_state view).
             cur.execute(
                 """SELECT daily_return
                 FROM portfolio_daily_state
-                WHERE strategy_id = %s
-                  AND snapshot_date >= now() - INTERVAL '30 days'
+                WHERE snapshot_date >= now() - INTERVAL '30 days'
                 ORDER BY snapshot_date ASC
                 """,
-                (strategy_id,),
             )
             returns = [float(r[0]) for r in cur.fetchall()]
             if len(returns) >= 5:
