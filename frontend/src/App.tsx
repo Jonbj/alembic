@@ -15,7 +15,6 @@ const Config      = lazy(() => import('@/pages/Config'))
 const Admin       = lazy(() => import('@/pages/Admin'))
 const AutoImprove = lazy(() => import('@/pages/AutoImprove'))
 const Strategies  = lazy(() => import('@/pages/Strategies'))
-const Trades      = lazy(() => import('@/pages/Trades'))
 const Docs        = lazy(() => import('@/pages/Docs'))
 const Dashboard   = lazy(() => import('@/pages/DashboardPage'))
 
@@ -38,7 +37,6 @@ export default function App() {
                 <Route path="/"             element={<Overview />} />
                 <Route path="/signals"      element={<Signals />} />
                 <Route path="/trading"      element={<Trading />} />
-                <Route path="/trades"       element={<Trades />} />
                 <Route path="/performance"  element={<Performance />} />
                 <Route path="/strategies"   element={<Strategies />} />
                 <Route path="/backtest"     element={<Backtest />} />
