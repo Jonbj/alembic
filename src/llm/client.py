@@ -59,13 +59,13 @@ T = TypeVar("T", bound=BaseModel)
 #
 # Categories:
 # - Claude aliases (general purpose): opus, sonnet, haiku
-# - General purpose cloud: qwen3.5:397b (Ollama), deepseek-v4-pro:cloud, glm-5.1:cloud, kimi-k2.6:cloud
+# - General purpose cloud: qwen3.5:cloud (Ollama), deepseek-v4-pro:cloud, glm-5.1:cloud, kimi-k2.6:cloud
 # - Coding specialized: qwen3-coder-next:cloud, devstral-small-2:24b-cloud, etc.
 ALLOWED_MODEL_IDS = frozenset({
     # Claude aliases (general purpose)
     "opus", "sonnet", "haiku",
     # General purpose cloud
-    "qwen3.5:397b", "deepseek-v4-pro:cloud",
+    "qwen3.5:cloud", "deepseek-v4-pro:cloud",
     "glm-5.1:cloud", "kimi-k2.6:cloud", "gemma4:31b-cloud",
     # Coding specialized
     "qwen3-coder-next:cloud", "devstral-small-2:24b-cloud",
@@ -484,7 +484,7 @@ class Qwen35Client(LLMClient):
     high-volume sentiment analysis with competitive accuracy.
 
     Attributes:
-        model_id: "qwen3.5:397b" - the Ollama model identifier
+        model_id: "qwen3.5:cloud" - the Ollama model identifier
         model_name: "Qwen 3.5" - human-readable name
 
     Usage Example:
@@ -507,7 +507,7 @@ class Qwen35Client(LLMClient):
         - Complex analysis: 3-8 seconds
     """
 
-    model_id = "qwen3.5:397b"
+    model_id = "qwen3.5:cloud"
     model_name = "Qwen 3.5"
 
     async def complete(self, prompt: str, response_schema: type[T]) -> T:
@@ -687,7 +687,7 @@ class OllamaGlmClient(OllamaCloudClient):
 
 class OllamaQwen35Client(OllamaCloudClient):
     """Qwen3.5 via Ollama cloud HTTP API."""
-    model_id = "qwen3.5:397b"
+    model_id = "qwen3.5:cloud"
     model_name = "Qwen 3.5 (Ollama)"
 
 

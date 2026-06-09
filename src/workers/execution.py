@@ -290,6 +290,7 @@ def _write_decision(
     ema_pass: bool,
     decision: str,
     order_id: "str | None" = None,
+    reason: "str | None" = None,
 ) -> "int | None":
     """Write one execution decision row. Returns decision_id or None on failure/no-store."""
     if pg_store is None:
@@ -304,6 +305,7 @@ def _write_decision(
             ema_pass=ema_pass,
             decision=decision,
             order_id=order_id,
+            reason=reason,
         )
     except Exception as e:
         log.warning("Failed to write execution decision for %s: %s", symbol, e)
@@ -620,9 +622,17 @@ def run_execution_cycle(
                 continue
 
             # --- Signal freshness check (entry candidates only) ---
-            if signal is None or not _is_fresh(signal):
+            if signal is None:
                 stats["skipped_stale"] += 1
-                log.debug("No fresh signal for %s — skipping", symbol)
+                log.debug("No signal for %s — skipping", symbol)
+                continue
+            if not _is_fresh(signal):
+                stats["skipped_stale"] += 1
+                log.debug("Stale signal for %s — skipping", symbol)
+                _write_decision(pg_store, tick_time, symbol, signal.get("signal_id"),
+                                float(signal.get("score", 0.0)), regime_mult,
+                                ema_pass=True, decision="SKIP_STALE",
+                                reason=f"signal age > {SIGNAL_MAX_AGE_MIN}min")
                 continue
 
             score = float(signal.get("score", 0.0))
@@ -631,8 +641,11 @@ def run_execution_cycle(
 
             # Skip FinBERT fallback signals — lower quality, not ensemble
             if fallback_used:
-                log.debug("Skipping fallback signal for %s", symbol)
+                log.debug("Skipping fallback signal for %s (score=%.3f)", symbol, score)
                 stats["skipped_stale"] += 1
+                _write_decision(pg_store, tick_time, symbol, signal_id, score, regime_mult,
+                                ema_pass=True, decision="SKIP_FALLBACK",
+                                reason="FinBERT fallback only — no LLM ensemble consensus")
                 continue
 
             # --- Entry logic ---
@@ -645,7 +658,10 @@ def run_execution_cycle(
                 continue
 
             if score <= entry_threshold:
-                log.debug("Signal below threshold for %s (score=%.3f)", symbol, score)
+                log.debug("Signal below threshold for %s (score=%.3f, threshold=%.3f)", symbol, score, entry_threshold)
+                _write_decision(pg_store, tick_time, symbol, signal_id, score, regime_mult,
+                                ema_pass=True, decision="SKIP_SCORE",
+                                reason=f"score {score:.3f} <= threshold {entry_threshold:.3f}")
                 continue
 
             # --- EMA momentum filter ---

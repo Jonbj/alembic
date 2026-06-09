@@ -615,7 +615,7 @@ class TestEnsembleWeightReading:
     def _make_outputs(self) -> list[ModelOutput]:
         return [
             make_model_output(polarity=0.8, confidence=0.9, model_id="kimi-k2.6:cloud"),
-            make_model_output(polarity=0.6, confidence=0.7, model_id="qwen3.5:397b"),
+            make_model_output(polarity=0.6, confidence=0.7, model_id="qwen3.5:cloud"),
             make_model_output(polarity=0.4, confidence=0.6, model_id="deepseek-v4-pro:cloud"),
         ]
 
@@ -636,7 +636,7 @@ class TestEnsembleWeightReading:
         outputs = self._make_outputs()
 
         # Give kimi a much higher weight — result should shift toward kimi's polarity
-        weights = {"kimi-k2.6:cloud": 0.80, "qwen3.5:397b": 0.10, "deepseek-v4-pro:cloud": 0.10}
+        weights = {"kimi-k2.6:cloud": 0.80, "qwen3.5:cloud": 0.10, "deepseek-v4-pro:cloud": 0.10}
         result_with_weights = aggregator.aggregate(outputs, weights=weights)
         result_no_weights = aggregator.aggregate(outputs, weights=None)
 
@@ -668,7 +668,7 @@ class TestEnsembleWeightReading:
         suggestion = {
             "suggested_weights": {
                 "kimi-k2.6:cloud": 0.40,
-                "qwen3.5:397b": 0.30,
+                "qwen3.5:cloud": 0.30,
                 "deepseek-v4-pro:cloud": 0.20,
                 "glm-5.1:cloud": 0.10,
             },
@@ -726,7 +726,7 @@ class TestEnsembleWeightReading:
         from unittest.mock import patch, MagicMock
         from src.workers.sentiment import run_sentiment_worker
 
-        applied = {"kimi-k2.6:cloud": 0.35, "qwen3.5:397b": 0.35,
+        applied = {"kimi-k2.6:cloud": 0.35, "qwen3.5:cloud": 0.35,
                    "deepseek-v4-pro:cloud": 0.20, "glm-5.1:cloud": 0.10}
         raw_applied = json.dumps({"weights": applied, "source": "auto_apply"}).encode()
 
