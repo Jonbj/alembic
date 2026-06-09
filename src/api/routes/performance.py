@@ -71,11 +71,41 @@ async def get_latest_performance(
 @router.get("/performance/weekly")
 async def get_weekly_report(
     redis: Annotated[RedisStore, Depends(get_redis_store)],
+    client: Annotated[object, Depends(get_alpaca_trading_client)],
 ) -> dict:
-    """Return latest structured weekly report (computed Monday 04:00 UTC, TTL 9d)."""
+    """Return latest structured weekly report (computed Monday 04:00 UTC, TTL 9d).
+
+    Capital efficiency is enriched with live Alpaca account + positions data at
+    read time, since the cached snapshot is generated at 04:00 UTC before market
+    open and cannot observe same-day deployed capital.
+    """
     report = redis.get_weekly_report()
     if report is None:
         raise HTTPException(status_code=404, detail="No weekly report available yet (corrupted or missing)")
+
+    try:
+        account = client.get_account()
+        positions = client.get_all_positions()
+
+        portfolio_value = float(account.portfolio_value or 0)
+        deployed_notional = sum(float(p.market_value or 0) for p in positions)
+        n_open = len(positions)
+        depl_pct = deployed_notional / portfolio_value if portfolio_value > 0 else 0.0
+        cash_pct = 1.0 - depl_pct
+        theoretical_max_pct = 0.50  # 5 positions × 10%
+
+        report["capital_efficiency"] = {
+            "portfolio_value_usd": portfolio_value,
+            "deployed_notional": deployed_notional,
+            "n_open_positions": n_open,
+            "deployment_pct": depl_pct,
+            "cash_pct": cash_pct,
+            "annual_cash_drag_pct": cash_pct * 0.045 * 100,
+            "efficiency_ratio": (deployed_notional / (portfolio_value * theoretical_max_pct)) if portfolio_value > 0 else 0.0,
+        }
+    except Exception:
+        pass  # fall back to cached value on Alpaca error
+
     return report
 
 
