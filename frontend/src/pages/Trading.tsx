@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchPositions, fetchOrders, type Position, type Order } from '@/api/positions'
 import { fetchTrades, type Trade } from '@/api/trades'
 import { HelpButton } from '@/components/shared/HelpButton'
+import { DataTable } from '@/components/shared/DataTable'
 
 type Tab = 'positions' | 'orders' | 'fills'
 
@@ -11,16 +12,25 @@ function fmt(v: number | null, prefix = '$') {
   return `${prefix}${v.toFixed(2)}`
 }
 
-function sideColor(side: string | null) {
-  if (side === 'buy' || side === 'portfolio_buy') return '#22c55e'
-  if (side === 'sell' || side === 'portfolio_sell') return '#f87171'
-  return '#94a3b8'
+function sideSpan(side: string | null) {
+  const color = side === 'buy' || side === 'portfolio_buy' ? '#22c55e' : '#f87171'
+  const label = side === 'portfolio_buy' ? 'BUY' : side === 'portfolio_sell' ? 'SELL' : (side ?? '—').toUpperCase()
+  return <span style={{ color, fontWeight: 600 }}>{label}</span>
 }
 
-function fillSide(exitReason: string | null) {
-  if (exitReason === 'portfolio_buy') return 'BUY'
-  if (exitReason === 'portfolio_sell') return 'SELL'
-  return exitReason ?? '—'
+function statusSpan(status: string) {
+  const color = status === 'filled' ? '#22c55e' : status === 'canceled' ? '#f87171' : '#94a3b8'
+  return <span style={{ color, fontSize: 12 }}>{status}</span>
+}
+
+function pnlSpan(v: number) {
+  const color = v >= 0 ? '#22c55e' : '#f87171'
+  return <span style={{ color, fontWeight: 600 }}>{v >= 0 ? '+' : ''}${v.toFixed(2)}</span>
+}
+
+function ts(iso: string | null) {
+  if (!iso) return '—'
+  return <span style={{ color: '#94a3b8', fontSize: 12 }}>{new Date(iso).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}</span>
 }
 
 export default function Trading() {
@@ -45,6 +55,10 @@ export default function Trading() {
     refetchInterval: 60000,
   })
 
+  const filteredPositions = useMemo(() =>
+    (positions as Position[]).filter(p => !symbolFilter || p.symbol.toLowerCase().includes(symbolFilter.toLowerCase()))
+  , [positions, symbolFilter])
+
   const filteredOrders = useMemo(() =>
     (orders as Order[]).filter(o => !symbolFilter || o.symbol.toLowerCase().includes(symbolFilter.toLowerCase()))
   , [orders, symbolFilter])
@@ -53,11 +67,7 @@ export default function Trading() {
     (fills as Trade[]).filter(t => !symbolFilter || t.symbol.toLowerCase().includes(symbolFilter.toLowerCase()))
   , [fills, symbolFilter])
 
-  const filteredPositions = useMemo(() =>
-    (positions as Position[]).filter(p => !symbolFilter || p.symbol.toLowerCase().includes(symbolFilter.toLowerCase()))
-  , [positions, symbolFilter])
-
-  const tabStyle = (t: Tab) => ({
+  const tabStyle = (t: Tab): React.CSSProperties => ({
     padding: '8px 20px',
     color: tab === t ? '#3b82f6' : '#94a3b8',
     fontWeight: tab === t ? 600 : 400,
@@ -66,31 +76,64 @@ export default function Trading() {
     borderBottom: tab === t ? '2px solid #3b82f6' : '2px solid transparent',
     fontSize: 14,
     cursor: 'pointer',
-  } as React.CSSProperties)
+  })
+
+  const posRows = filteredPositions.map(p => ({
+    cells: [
+      <strong>{p.symbol}</strong>,
+      p.qty.toFixed(4),
+      `$${p.avg_entry_price.toFixed(2)}`,
+      p.current_price != null ? `$${parseFloat(String(p.current_price)).toFixed(2)}` : '—',
+      `$${p.market_value.toFixed(2)}`,
+      pnlSpan(p.unrealized_pl),
+      <span style={{ color: p.unrealized_plpc >= 0 ? '#22c55e' : '#f87171' }}>{(p.unrealized_plpc * 100).toFixed(2)}%</span>,
+    ],
+  }))
+
+  const ordRows = filteredOrders.map(o => ({
+    cells: [
+      <strong>{o.symbol}</strong>,
+      sideSpan(o.side),
+      o.qty ?? '—',
+      o.filled_avg_price ? `$${parseFloat(o.filled_avg_price).toFixed(2)}` : '—',
+      statusSpan(o.status),
+      ts(o.submitted_at),
+    ],
+  }))
+
+  const fillRows = filteredFills.map(t => ({
+    cells: [
+      <strong>{t.symbol}</strong>,
+      sideSpan(t.exit_reason),
+      fmt(t.entry_price),
+      t.qty != null ? t.qty.toFixed(4) : '—',
+      fmt(t.entry_notional),
+      ts(t.entry_time),
+    ],
+    expanded: t.entry_order_id
+      ? <span>order_id: {t.entry_order_id}</span>
+      : undefined,
+  }))
 
   return (
     <div style={{ position: 'relative' }}>
       <h2 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>Trading</h2>
       <HelpButton title="Trading — Guida" sections={[
         {
-          heading: 'Posizioni aperte',
-          content: 'Posizioni correntemente attive su Alpaca. **Unrealized P&L** è il profitto/perdita non realizzato. Dati aggiornati ogni 60 secondi.',
+          heading: 'Positions',
+          content: 'Posizioni correntemente attive su Alpaca con unrealized P&L. Aggiornate ogni 60 secondi.',
         },
         {
-          heading: 'Ordini (tutti)',
-          content: 'Storico completo degli ordini: pending, filled, cancelled. Mostra lo stato di ogni ordine inviato dal portfolio scheduler.',
+          heading: 'Orders',
+          content: 'Storico completo degli ordini: pending, filled, cancelled. Verde = filled, rosso = canceled, grigio = pending.',
         },
         {
-          heading: 'Fills (eseguiti)',
-          content: 'Solo gli ordini **filled**: prezzo di esecuzione, quantità, controvalore. In modalità portfolio ogni fill corrisponde a un aggiustamento di posizione (BUY = apertura/incremento, SELL = riduzione/chiusura).',
-        },
-        {
-          heading: 'Paper trading',
-          content: 'Gli ordini sono simulati — nessun capitale reale è coinvolto. I fill avvengono all\'apertura del mercato USA (15:30 IT).',
+          heading: 'Fills',
+          content: 'Solo gli ordini filled: prezzo di esecuzione, quantità, notional. BUY = apertura/incremento posizione, SELL = riduzione/chiusura. Clicca una riga per vedere l\'order ID.',
         },
       ]} />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
         <div style={{ display: 'flex', borderBottom: '1px solid #334155' }}>
           <button style={tabStyle('positions')} onClick={() => setTab('positions')}>
             Positions ({positions.length})
@@ -111,80 +154,52 @@ export default function Trading() {
       </div>
 
       {tab === 'positions' && (
-        <div style={{ background: '#1e293b', borderRadius: 8, overflow: 'hidden' }}>
-          {posLoading && <p style={{ padding: 16, color: '#94a3b8' }}>Loading...</p>}
-          <div style={{ display: 'grid', gridTemplateColumns: '10% 8% 12% 12% 14% 14% 10%', padding: '8px 12px', background: '#0f172a', fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
-            {['Ticker', 'Qty', 'Entry Price', 'Market Price', 'Market Value', 'Unrealized P&L', 'P&L %'].map(h => <span key={h}>{h}</span>)}
-          </div>
-          {filteredPositions.map((p) => (
-            <div key={p.symbol} style={{ display: 'grid', gridTemplateColumns: '10% 8% 12% 12% 14% 14% 10%', padding: '8px 12px', fontSize: 13, borderTop: '1px solid #0f172a', color: '#e2e8f0' }}>
-              <span style={{ fontWeight: 600 }}>{p.symbol}</span>
-              <span>{p.qty.toFixed(4)}</span>
-              <span>${p.avg_entry_price.toFixed(2)}</span>
-              <span>{p.current_price != null ? `$${parseFloat(String(p.current_price)).toFixed(2)}` : '—'}</span>
-              <span>${p.market_value.toFixed(2)}</span>
-              <span style={{ color: p.unrealized_pl >= 0 ? '#22c55e' : '#f87171', fontWeight: 600 }}>
-                {p.unrealized_pl >= 0 ? '+' : ''}${p.unrealized_pl.toFixed(2)}
-              </span>
-              <span style={{ color: p.unrealized_plpc >= 0 ? '#22c55e' : '#f87171' }}>
-                {(p.unrealized_plpc * 100).toFixed(2)}%
-              </span>
-            </div>
-          ))}
-          {filteredPositions.length === 0 && !posLoading && (
-            <div style={{ padding: 20, color: '#64748b', textAlign: 'center' }}>No open positions</div>
-          )}
-        </div>
+        <DataTable
+          loading={posLoading}
+          columns={[
+            { label: 'Ticker',        width: '10%' },
+            { label: 'Qty',           width: '10%' },
+            { label: 'Entry Price',   width: '12%' },
+            { label: 'Market Price',  width: '12%' },
+            { label: 'Market Value',  width: '14%' },
+            { label: 'Unrealized P&L', width: '14%' },
+            { label: 'P&L %',         width: '10%' },
+          ]}
+          rows={posRows}
+          emptyMessage="No open positions"
+        />
       )}
 
       {tab === 'orders' && (
-        <div style={{ background: '#1e293b', borderRadius: 8, overflow: 'hidden' }}>
-          {ordLoading && <p style={{ padding: 16, color: '#94a3b8' }}>Loading...</p>}
-          <div style={{ display: 'grid', gridTemplateColumns: '10% 8% 10% 12% 12% auto', padding: '8px 12px', background: '#0f172a', fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
-            {['Ticker', 'Side', 'Qty', 'Fill Price', 'Status', 'Submitted'].map(h => <span key={h}>{h}</span>)}
-          </div>
-          {filteredOrders.map((o) => (
-            <div key={o.id} style={{ display: 'grid', gridTemplateColumns: '10% 8% 10% 12% 12% auto', padding: '8px 12px', fontSize: 13, borderTop: '1px solid #0f172a', color: '#e2e8f0' }}>
-              <span style={{ fontWeight: 600 }}>{o.symbol}</span>
-              <span style={{ color: sideColor(o.side), fontWeight: 600 }}>{o.side ? o.side.toUpperCase() : '—'}</span>
-              <span>{o.qty ?? '—'}</span>
-              <span>{o.filled_avg_price ? `$${parseFloat(o.filled_avg_price).toFixed(2)}` : '—'}</span>
-              <span style={{ color: o.status === 'filled' ? '#22c55e' : o.status === 'canceled' ? '#f87171' : '#94a3b8', fontSize: 12 }}>{o.status}</span>
-              <span style={{ color: '#64748b', fontSize: 12 }}>
-                {o.submitted_at ? new Date(o.submitted_at).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
-              </span>
-            </div>
-          ))}
-          {filteredOrders.length === 0 && !ordLoading && (
-            <div style={{ padding: 20, color: '#64748b', textAlign: 'center' }}>No orders</div>
-          )}
-        </div>
+        <DataTable
+          loading={ordLoading}
+          columns={[
+            { label: 'Ticker',     width: '10%' },
+            { label: 'Side',       width: '8%' },
+            { label: 'Qty',        width: '10%' },
+            { label: 'Fill Price', width: '12%' },
+            { label: 'Status',     width: '14%' },
+            { label: 'Submitted',  width: 'auto' },
+          ]}
+          rows={ordRows}
+          emptyMessage="No orders"
+        />
       )}
 
       {tab === 'fills' && (
-        <div style={{ background: '#1e293b', borderRadius: 8, overflow: 'hidden' }}>
-          {fillsLoading && <p style={{ padding: 16, color: '#94a3b8' }}>Loading...</p>}
-          <div style={{ display: 'grid', gridTemplateColumns: '10% 8% 14% 12% 14% auto', padding: '8px 12px', background: '#0f172a', fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
-            {['Ticker', 'Side', 'Fill Price', 'Qty', 'Notional', 'Filled At'].map(h => <span key={h}>{h}</span>)}
-          </div>
-          {filteredFills.map((t: Trade) => (
-            <div key={t.id} style={{ display: 'grid', gridTemplateColumns: '10% 8% 14% 12% 14% auto', padding: '8px 12px', fontSize: 13, borderTop: '1px solid #0f172a', color: '#e2e8f0' }}>
-              <span style={{ fontWeight: 600 }}>{t.symbol}</span>
-              <span style={{ color: sideColor(t.exit_reason), fontWeight: 600 }}>{fillSide(t.exit_reason)}</span>
-              <span>{fmt(t.entry_price)}</span>
-              <span>{t.qty != null ? t.qty.toFixed(4) : '—'}</span>
-              <span>{fmt(t.entry_notional)}</span>
-              <span style={{ color: '#64748b', fontSize: 12 }}>
-                {new Date(t.entry_time).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
-              </span>
-            </div>
-          ))}
-          {filteredFills.length === 0 && !fillsLoading && (
-            <div style={{ padding: 20, color: '#64748b', textAlign: 'center' }}>
-              No fills yet — orders execute at market open (15:30 IT).
-            </div>
-          )}
-        </div>
+        <DataTable
+          loading={fillsLoading}
+          columns={[
+            { label: 'Ticker',    width: '10%' },
+            { label: 'Side',      width: '8%' },
+            { label: 'Fill Price', width: '14%' },
+            { label: 'Qty',       width: '12%' },
+            { label: 'Notional',  width: '14%' },
+            { label: 'Filled At', width: 'auto' },
+          ]}
+          rows={fillRows}
+          emptyMessage="No fills yet — orders execute at market open (15:30 IT)."
+        />
       )}
     </div>
   )

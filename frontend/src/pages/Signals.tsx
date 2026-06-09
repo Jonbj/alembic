@@ -5,6 +5,7 @@ import { fetchSignals, type Signal } from '@/api/signals'
 import { fetchDecisions, type Decision } from '@/api/trades'
 import { DirectionBadge } from '@/components/shared/DirectionBadge'
 import { HelpButton } from '@/components/shared/HelpButton'
+import { DataTable } from '@/components/shared/DataTable'
 
 const ROW_H = 40
 
@@ -96,41 +97,31 @@ export default function Signals() {
               style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #334155', background: '#0f172a', color: 'white', fontSize: 13, width: 140 }}
             />
           </div>
-          {decisionsLoading ? (
-            <div style={{ color: '#64748b', padding: 20 }}>Loading…</div>
-          ) : (
-            <div style={{ background: '#1e293b', borderRadius: 8, overflow: 'hidden' }}>
-              <div style={{
-                display: 'grid', gridTemplateColumns: '14% 9% 8% 8% 12% auto',
-                padding: '8px 12px', background: '#0f172a',
-                fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase',
-              }}>
-                {['Tick Time', 'Symbol', 'Weight', 'Decision', 'Order ID', 'Reason'].map(h => (
-                  <span key={h}>{h}</span>
-                ))}
-              </div>
-              {(decisions as Decision[]).map((d: Decision) => (
-                <div key={d.id} style={{
-                  display: 'grid', gridTemplateColumns: '14% 9% 8% 8% 12% auto',
-                  padding: '8px 12px', fontSize: 13, borderTop: '1px solid #0f172a',
-                  alignItems: 'start',
-                }}>
-                  <span style={{ color: '#94a3b8' }}>{d.tick_time.slice(0, 16).replace('T', ' ')}</span>
-                  <span style={{ fontWeight: 600 }}>{d.symbol}</span>
-                  <span>{(d.score * 100).toFixed(1)}%</span>
-                  <span style={{
-                    color: d.decision === 'BUY' ? '#22c55e' : d.decision === 'SELL' ? '#f87171' : '#94a3b8',
-                    fontWeight: ['BUY', 'SELL'].includes(d.decision) ? 600 : 400,
-                  }}>{DECISION_LABELS[d.decision] ?? d.decision}</span>
-                  <span style={{ color: '#64748b', fontSize: 11 }}>{d.order_id ?? '—'}</span>
-                  <span style={{ color: '#94a3b8', fontSize: 12, lineHeight: 1.4 }}>{d.reason ?? '—'}</span>
-                </div>
-              ))}
-              {(decisions as Decision[]).length === 0 && (
-                <div style={{ padding: 20, color: '#64748b', textAlign: 'center' }}>No decisions logged yet.</div>
-              )}
-            </div>
-          )}
+          <DataTable
+            loading={decisionsLoading}
+            columns={[
+              { label: 'Tick Time', width: '14%' },
+              { label: 'Symbol',    width: '9%' },
+              { label: 'Weight',    width: '8%' },
+              { label: 'Decision',  width: '8%' },
+              { label: 'Order ID',  width: '12%' },
+              { label: 'Reason',    width: 'auto' },
+            ]}
+            rows={(decisions as Decision[]).map(d => ({
+              cells: [
+                <span style={{ color: '#94a3b8' }}>{d.tick_time.slice(0, 16).replace('T', ' ')}</span>,
+                <strong>{d.symbol}</strong>,
+                `${(d.score * 100).toFixed(1)}%`,
+                <span style={{
+                  color: d.decision === 'BUY' ? '#22c55e' : d.decision === 'SELL' ? '#f87171' : '#94a3b8',
+                  fontWeight: ['BUY', 'SELL'].includes(d.decision) ? 600 : 400,
+                }}>{DECISION_LABELS[d.decision] ?? d.decision}</span>,
+                <span style={{ color: '#64748b', fontSize: 11 }}>{d.order_id ?? '—'}</span>,
+                <span style={{ color: '#94a3b8', fontSize: 12, lineHeight: 1.4 }}>{d.reason ?? '—'}</span>,
+              ],
+            }))}
+            emptyMessage="No decisions logged yet."
+          />
         </div>
       )}
 
