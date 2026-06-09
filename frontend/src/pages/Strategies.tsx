@@ -7,6 +7,7 @@ import {
 } from 'recharts'
 import { strategiesApi } from '@/api/strategies'
 import { HelpButton } from '@/components/shared/HelpButton'
+import { DataTable } from '@/components/shared/DataTable'
 import { KPICard } from '@/components/shared/KPICard'
 import type { Strategy, GateResult, SensitivityPoint } from '@/api/strategies'
 
@@ -242,52 +243,27 @@ export default function Strategies() {
       </div>
 
       {/* Gates */}
-      <div style={{ background: '#1e293b', borderRadius: 8, padding: 16, border: '1px solid #334155' }}>
-        <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 600, color: 'white' }}>Validation Gates</h3>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid #334155', color: '#94a3b8', fontSize: 11 }}>
-                  Gate
-                </th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid #334155', color: '#94a3b8', fontSize: 11 }}>
-                  Result
-                </th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid #334155', color: '#94a3b8', fontSize: 11 }}>
-                  Metric
-                </th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid #334155', color: '#94a3b8', fontSize: 11 }}>
-                  Threshold
-                </th>
-                <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '1px solid #334155', color: '#94a3b8', fontSize: 11 }}>
-                  Details
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {gates?.map((gate: GateResult) => (
-                <tr key={gate.gate_id}>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #334155', color: 'white', fontSize: 13 }}>
-                    {gate.gate_name}
-                  </td>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #334155' }}>
-                    <GateBadge passed={gate.passed} />
-                  </td>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #334155', color: 'white', fontSize: 13 }}>
-                    {fmt(gate.metric_value)}
-                  </td>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #334155', color: 'white', fontSize: 13 }}>
-                    {fmt(gate.threshold)}
-                  </td>
-                  <td style={{ padding: '8px 12px', borderBottom: '1px solid #334155', color: '#94a3b8', fontSize: 12 }}>
-                    {gate.details}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <div>
+        <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>Validation Gates</h3>
+        <DataTable
+          columns={[
+            { label: 'Gate',      width: '25%' },
+            { label: 'Result',    width: '10%' },
+            { label: 'Metric',    width: '12%' },
+            { label: 'Threshold', width: '12%' },
+            { label: 'Details',   width: 'auto' },
+          ]}
+          rows={(gates ?? []).map((gate: GateResult) => ({
+            cells: [
+              <strong>{gate.gate_name}</strong>,
+              <GateBadge passed={gate.passed} />,
+              fmt(gate.metric_value),
+              fmt(gate.threshold),
+              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{gate.details}</span>,
+            ],
+          }))}
+          emptyMessage="No validation gates available."
+        />
       </div>
 
       {/* Sensitivity Heatmap */}

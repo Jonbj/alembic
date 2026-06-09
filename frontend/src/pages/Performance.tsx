@@ -8,6 +8,7 @@ import { fetchPnL, fetchWeeklyReport } from '@/api/performance'
 import type { WeeklyReport } from '@/api/performance'
 import { fetchTradesSummary } from '@/api/trades'
 import { HelpButton } from '@/components/shared/HelpButton'
+import { DataTable } from '@/components/shared/DataTable'
 
 const PERIODS = ['1M', '3M', '6M', '1Y'] as const
 type Period = typeof PERIODS[number]
@@ -342,29 +343,28 @@ export default function Performance() {
             </div>
           </div>
 
-          <div className="card">
+          <div>
             <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>Monthly P&L Summary</h3>
-            <table>
-              <thead><tr><th>Month</th><th>P&L</th><th>Direction</th></tr></thead>
-              <tbody>
-                {monthly.map((m) => (
-                  <tr key={m.month}>
-                    <td>{m.month}</td>
-                    <td style={{ color: m.pnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
-                      {m.pnl >= 0 ? '+' : ''}${m.pnl.toFixed(2)}
-                    </td>
-                    <td>
-                      <span className={`badge ${m.pnl >= 0 ? 'badge-green' : 'badge-red'}`}>
-                        {m.pnl >= 0 ? '▲ Gain' : '▼ Loss'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-                {monthly.length === 0 && !isLoading && (
-                  <tr><td colSpan={3} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No data</td></tr>
-                )}
-              </tbody>
-            </table>
+            <DataTable
+              loading={isLoading}
+              columns={[
+                { label: 'Month',     width: '40%' },
+                { label: 'P&L',       width: '30%' },
+                { label: 'Direction', width: '30%' },
+              ]}
+              rows={monthly.map((m) => ({
+                cells: [
+                  m.month,
+                  <span style={{ color: m.pnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+                    {m.pnl >= 0 ? '+' : ''}${m.pnl.toFixed(2)}
+                  </span>,
+                  <span className={`badge ${m.pnl >= 0 ? 'badge-green' : 'badge-red'}`}>
+                    {m.pnl >= 0 ? '▲ Gain' : '▼ Loss'}
+                  </span>,
+                ],
+              }))}
+              emptyMessage="No monthly data available."
+            />
           </div>
 
           {tradeSummary && tradeSummary.total_trades > 0 && (
