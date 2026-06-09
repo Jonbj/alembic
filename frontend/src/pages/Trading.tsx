@@ -117,7 +117,7 @@ export default function Trading() {
             {['Ticker', 'Qty', 'Entry Price', 'Market Price', 'Market Value', 'Unrealized P&L', 'P&L %'].map(h => <span key={h}>{h}</span>)}
           </div>
           {filteredPositions.map((p) => (
-            <div key={p.symbol} style={{ display: 'grid', gridTemplateColumns: '10% 8% 12% 12% 14% 14% 10%', padding: '8px 12px', fontSize: 13, borderTop: '1px solid #0f172a' }}>
+            <div key={p.symbol} style={{ display: 'grid', gridTemplateColumns: '10% 8% 12% 12% 14% 14% 10%', padding: '8px 12px', fontSize: 13, borderTop: '1px solid #0f172a', color: '#e2e8f0' }}>
               <span style={{ fontWeight: 600 }}>{p.symbol}</span>
               <span>{p.qty.toFixed(4)}</span>
               <span>${p.avg_entry_price.toFixed(2)}</span>
@@ -144,7 +144,7 @@ export default function Trading() {
             {['Ticker', 'Side', 'Qty', 'Fill Price', 'Status', 'Submitted'].map(h => <span key={h}>{h}</span>)}
           </div>
           {filteredOrders.map((o) => (
-            <div key={o.id} style={{ display: 'grid', gridTemplateColumns: '10% 8% 10% 12% 12% auto', padding: '8px 12px', fontSize: 13, borderTop: '1px solid #0f172a' }}>
+            <div key={o.id} style={{ display: 'grid', gridTemplateColumns: '10% 8% 10% 12% 12% auto', padding: '8px 12px', fontSize: 13, borderTop: '1px solid #0f172a', color: '#e2e8f0' }}>
               <span style={{ fontWeight: 600 }}>{o.symbol}</span>
               <span style={{ color: sideColor(o.side), fontWeight: 600 }}>{o.side ? o.side.toUpperCase() : '—'}</span>
               <span>{o.qty ?? '—'}</span>
@@ -168,7 +168,7 @@ export default function Trading() {
             {['Ticker', 'Side', 'Fill Price', 'Qty', 'Notional', 'Filled At'].map(h => <span key={h}>{h}</span>)}
           </div>
           {filteredFills.map((t: Trade) => (
-            <div key={t.id} style={{ display: 'grid', gridTemplateColumns: '10% 8% 14% 12% 14% auto', padding: '8px 12px', fontSize: 13, borderTop: '1px solid #0f172a' }}>
+            <div key={t.id} style={{ display: 'grid', gridTemplateColumns: '10% 8% 14% 12% 14% auto', padding: '8px 12px', fontSize: 13, borderTop: '1px solid #0f172a', color: '#e2e8f0' }}>
               <span style={{ fontWeight: 600 }}>{t.symbol}</span>
               <span style={{ color: sideColor(t.exit_reason), fontWeight: 600 }}>{fillSide(t.exit_reason)}</span>
               <span>{fmt(t.entry_price)}</span>
