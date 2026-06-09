@@ -74,14 +74,72 @@ def get_orders(
     ]
 
 
+def _execution_engine() -> str:
+    """Return execution.engine from trading.yaml (same logic as execution worker)."""
+    try:
+        import yaml
+        with open("/app/config/trading.yaml") as f:
+            return yaml.safe_load(f).get("execution", {}).get("engine", "legacy_sentiment")
+    except Exception:
+        return "legacy_sentiment"
+
+
+def _alpaca_orders_as_trades(client, symbol: str | None, status: str, limit: int) -> list[dict]:
+    """Fetch Alpaca filled orders and map them to a Trade-shaped dict for the UI."""
+    from alpaca.trading.requests import GetOrdersRequest
+    from alpaca.trading.enums import QueryOrderStatus
+
+    req = GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=min(limit, 500))
+    orders = client.get_orders(req)
+
+    rows = []
+    for o in orders:
+        if o.filled_at is None:
+            continue
+        if symbol and o.symbol.upper() != symbol.upper():
+            continue
+        side = o.side.value if o.side else "buy"
+        filled_price = float(o.filled_avg_price) if o.filled_avg_price else None
+        qty = float(o.filled_qty) if o.filled_qty else None
+        notional = round(filled_price * qty, 2) if filled_price and qty else None
+        trade_status = "open" if side == "buy" else "closed"
+        if status != "all" and trade_status != status:
+            continue
+        rows.append({
+            "id": str(o.id),
+            "symbol": o.symbol,
+            "entry_time": o.filled_at.isoformat(),
+            "entry_price": filled_price,
+            "entry_notional": notional,
+            "entry_order_id": str(o.id),
+            "exit_time": None,
+            "exit_price": None,
+            "exit_reason": f"portfolio_{side}",
+            "qty": qty,
+            "score": 0.0,
+            "regime_mult": 1.0,
+            "gross_pnl": None,
+            "slippage_est": None,
+            "net_pnl": None,
+            "signal_id": None,
+            "decision_id": None,
+            "postmortem_diagnosis": None,
+            "status": trade_status,
+        })
+    return rows[:limit]
+
+
 @router.get("/trades")
 def get_trades(
     pg: Annotated[object, Depends(get_pg_store)],
+    client: Annotated[object, Depends(get_alpaca_trading_client)],
     symbol: str | None = None,
     status: str = Query(default="all", pattern="^(open|closed|all)$"),
     limit: int = Query(default=50, ge=1, le=500),
 ) -> list[dict]:
-    """List trades with optional symbol/status filter."""
+    """List trades. In portfolio mode reads Alpaca filled orders; legacy mode reads DB."""
+    if _execution_engine() == "portfolio":
+        return _alpaca_orders_as_trades(client, symbol, status, limit)
     return pg.fetch_trades(symbol=symbol, status=status, limit=limit)
 
 

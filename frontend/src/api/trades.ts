@@ -1,16 +1,16 @@
 import { apiFetch } from './client'
 
 export interface Trade {
-  id: number
+  id: number | string
   symbol: string
   signal_id: number | null
   decision_id: number | null
-  entry_order_id: string
+  entry_order_id: string | null
   entry_price: number | null
   entry_time: string
-  entry_notional: number
-  score: number
-  regime_mult: number
+  entry_notional: number | null
+  score: number | null
+  regime_mult: number | null
   exit_price: number | null
   exit_time: string | null
   exit_reason: string | null
@@ -19,7 +19,8 @@ export interface Trade {
   slippage_est: number | null
   net_pnl: number | null
   postmortem_diagnosis: string | null
-  created_at: string
+  created_at?: string
+  status?: string
 }
 
 export interface TradesSummary {

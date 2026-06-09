@@ -111,7 +111,7 @@ export default function Trades() {
   const [view, setView] = useState<'trades' | 'analytics'>('trades')
   const [statusFilter, setStatusFilter] = useState<TradeStatus>('all')
   const [symbolFilter, setSymbolFilter] = useState('')
-  const [expandedId, setExpandedId] = useState<number | null>(null)
+  const [expandedId, setExpandedId] = useState<number | string | null>(null)
 
   const { data: summary } = useQuery({
     queryKey: ['trades-summary', period],
@@ -294,8 +294,8 @@ export default function Trades() {
                     <span style={{ fontWeight: 600 }}>{t.symbol}</span>
                     <span style={{ color: '#94a3b8' }}>{t.entry_time.slice(0, 10)}</span>
                     <span style={{ color: '#94a3b8' }}>{t.exit_time?.slice(0, 10) ?? '—'}</span>
-                    <span>{t.score.toFixed(2)}</span>
-                    <span>{t.regime_mult.toFixed(2)}×</span>
+                    <span>{t.score != null ? t.score.toFixed(2) : '—'}</span>
+                    <span>{t.regime_mult != null ? `${t.regime_mult.toFixed(2)}×` : '—'}</span>
                     <span>{fmt(t.entry_price)}</span>
                     <span>{fmt(t.exit_price)}</span>
                     <span>{holdLabel(t.exit_time ? ((new Date(t.exit_time).getTime() - new Date(t.entry_time).getTime()) / 60000) : null)}</span>
