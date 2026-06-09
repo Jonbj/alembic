@@ -109,15 +109,15 @@ export default function Signals() {
             ]}
             rows={(decisions as Decision[]).map(d => ({
               cells: [
-                <span style={{ color: '#94a3b8' }}>{d.tick_time.slice(0, 16).replace('T', ' ')}</span>,
+                <span style={{ color: 'var(--text-muted)' }}>{d.tick_time.slice(0, 16).replace('T', ' ')}</span>,
                 <strong>{d.symbol}</strong>,
                 `${(d.score * 100).toFixed(1)}%`,
                 <span style={{
-                  color: d.decision === 'BUY' ? '#22c55e' : d.decision === 'SELL' ? '#f87171' : '#94a3b8',
+                  color: d.decision === 'BUY' ? 'var(--green)' : d.decision === 'SELL' ? 'var(--red)' : 'var(--text-muted)',
                   fontWeight: ['BUY', 'SELL'].includes(d.decision) ? 600 : 400,
                 }}>{DECISION_LABELS[d.decision] ?? d.decision}</span>,
-                <span style={{ color: '#64748b', fontSize: 11 }}>{d.order_id ?? '—'}</span>,
-                <span style={{ color: '#94a3b8', fontSize: 12, lineHeight: 1.4 }}>{d.reason ?? '—'}</span>,
+                <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{d.order_id ?? '—'}</span>,
+                <span style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.4 }}>{d.reason ?? '—'}</span>,
               ],
             }))}
             emptyMessage="No decisions logged yet."

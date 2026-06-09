@@ -17,49 +17,30 @@ interface Props {
   loading?: boolean
 }
 
-const HEADER: React.CSSProperties = {
-  background: '#0f172a',
-  fontSize: 11,
-  color: '#64748b',
-  fontWeight: 600,
-  textTransform: 'uppercase',
-  padding: '8px 12px',
-  letterSpacing: '0.05em',
-}
-
-const ROW: React.CSSProperties = {
-  fontSize: 13,
-  color: '#e2e8f0',
-  padding: '8px 12px',
-  borderTop: '1px solid #0f172a',
-  cursor: 'pointer',
-}
-
-const ROW_EXPANDED: React.CSSProperties = {
-  ...ROW,
-  background: '#0f172a',
-}
-
-const EXPANDED_DETAIL: React.CSSProperties = {
-  padding: '6px 12px 10px',
-  background: '#0f172a',
-  fontSize: 12,
-  color: '#94a3b8',
-  borderTop: '1px solid #1e293b',
-}
-
 export function DataTable({ columns, rows, emptyMessage = 'No data.', loading = false }: Props) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
   const templateColumns = columns.map(c => c.width).join(' ')
 
   return (
-    <div style={{ background: '#1e293b', borderRadius: 8, overflow: 'hidden' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: templateColumns, ...HEADER }}>
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: templateColumns,
+        padding: '8px 12px',
+        fontSize: 11,
+        fontWeight: 600,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        color: 'var(--text-muted)',
+        borderBottom: '1px solid var(--border)',
+        background: '#f8fafc',
+      }}>
         {columns.map(c => <span key={c.label}>{c.label}</span>)}
       </div>
 
       {loading && (
-        <div style={{ padding: 20, color: '#64748b', textAlign: 'center' }}>Loading…</div>
+        <div style={{ padding: 20, color: 'var(--text-muted)', textAlign: 'center' }}>Loading…</div>
       )}
 
       {!loading && rows.map((row, i) => (
@@ -69,20 +50,35 @@ export function DataTable({ columns, rows, emptyMessage = 'No data.', loading = 
             style={{
               display: 'grid',
               gridTemplateColumns: templateColumns,
-              ...(expandedIdx === i ? ROW_EXPANDED : ROW),
+              padding: '9px 12px',
+              fontSize: 13,
+              color: 'var(--text)',
+              borderBottom: '1px solid var(--border)',
+              background: expandedIdx === i ? '#f1f5f9' : 'white',
               cursor: row.expanded ? 'pointer' : 'default',
+              alignItems: 'center',
             }}
+            onMouseEnter={e => { if (expandedIdx !== i) (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
+            onMouseLeave={e => { if (expandedIdx !== i) (e.currentTarget as HTMLElement).style.background = 'white' }}
           >
             {row.cells.map((cell, j) => <span key={j}>{cell}</span>)}
           </div>
           {expandedIdx === i && row.expanded && (
-            <div style={EXPANDED_DETAIL}>{row.expanded}</div>
+            <div style={{
+              padding: '6px 12px 10px',
+              background: '#f1f5f9',
+              fontSize: 12,
+              color: 'var(--text-muted)',
+              borderBottom: '1px solid var(--border)',
+            }}>
+              {row.expanded}
+            </div>
           )}
         </div>
       ))}
 
       {!loading && rows.length === 0 && (
-        <div style={{ padding: 20, color: '#64748b', textAlign: 'center' }}>{emptyMessage}</div>
+        <div style={{ padding: 20, color: 'var(--text-muted)', textAlign: 'center' }}>{emptyMessage}</div>
       )}
     </div>
   )

@@ -13,24 +13,26 @@ function fmt(v: number | null, prefix = '$') {
 }
 
 function sideSpan(side: string | null) {
-  const color = side === 'buy' || side === 'portfolio_buy' ? '#22c55e' : '#f87171'
+  const isBuy = side === 'buy' || side === 'portfolio_buy'
   const label = side === 'portfolio_buy' ? 'BUY' : side === 'portfolio_sell' ? 'SELL' : (side ?? '—').toUpperCase()
-  return <span style={{ color, fontWeight: 600 }}>{label}</span>
+  return <span className={`badge ${isBuy ? 'badge-green' : 'badge-red'}`}>{label}</span>
 }
 
 function statusSpan(status: string) {
-  const color = status === 'filled' ? '#22c55e' : status === 'canceled' ? '#f87171' : '#94a3b8'
-  return <span style={{ color, fontSize: 12 }}>{status}</span>
+  const cls = status === 'filled' ? 'badge-green' : status === 'canceled' ? 'badge-red' : 'badge-grey'
+  return <span className={`badge ${cls}`}>{status}</span>
 }
 
 function pnlSpan(v: number) {
-  const color = v >= 0 ? '#22c55e' : '#f87171'
+  const color = v >= 0 ? 'var(--green)' : 'var(--red)'
   return <span style={{ color, fontWeight: 600 }}>{v >= 0 ? '+' : ''}${v.toFixed(2)}</span>
 }
 
 function ts(iso: string | null) {
-  if (!iso) return '—'
-  return <span style={{ color: '#94a3b8', fontSize: 12 }}>{new Date(iso).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}</span>
+  if (!iso) return <span style={{ color: 'var(--text-muted)' }}>—</span>
+  return <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+    {new Date(iso).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
+  </span>
 }
 
 export default function Trading() {
@@ -69,11 +71,11 @@ export default function Trading() {
 
   const tabStyle = (t: Tab): React.CSSProperties => ({
     padding: '8px 20px',
-    color: tab === t ? '#3b82f6' : '#94a3b8',
+    color: tab === t ? 'var(--blue)' : 'var(--text-muted)',
     fontWeight: tab === t ? 600 : 400,
     background: 'none',
     border: 'none',
-    borderBottom: tab === t ? '2px solid #3b82f6' : '2px solid transparent',
+    borderBottom: tab === t ? '2px solid var(--blue)' : '2px solid transparent',
     fontSize: 14,
     cursor: 'pointer',
   })
@@ -86,7 +88,9 @@ export default function Trading() {
       p.current_price != null ? `$${parseFloat(String(p.current_price)).toFixed(2)}` : '—',
       `$${p.market_value.toFixed(2)}`,
       pnlSpan(p.unrealized_pl),
-      <span style={{ color: p.unrealized_plpc >= 0 ? '#22c55e' : '#f87171' }}>{(p.unrealized_plpc * 100).toFixed(2)}%</span>,
+      <span style={{ color: p.unrealized_plpc >= 0 ? 'var(--green)' : 'var(--red)' }}>
+        {(p.unrealized_plpc * 100).toFixed(2)}%
+      </span>,
     ],
   }))
 
@@ -134,7 +138,7 @@ export default function Trading() {
       ]} />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
-        <div style={{ display: 'flex', borderBottom: '1px solid #334155' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
           <button style={tabStyle('positions')} onClick={() => setTab('positions')}>
             Positions ({positions.length})
           </button>
@@ -149,7 +153,7 @@ export default function Trading() {
           value={symbolFilter}
           onChange={e => setSymbolFilter(e.target.value)}
           placeholder="Filter symbol…"
-          style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #334155', background: '#0f172a', color: 'white', fontSize: 13, width: 130 }}
+          style={{ width: 130 }}
         />
       </div>
 
@@ -157,13 +161,13 @@ export default function Trading() {
         <DataTable
           loading={posLoading}
           columns={[
-            { label: 'Ticker',        width: '10%' },
-            { label: 'Qty',           width: '10%' },
-            { label: 'Entry Price',   width: '12%' },
-            { label: 'Market Price',  width: '12%' },
-            { label: 'Market Value',  width: '14%' },
+            { label: 'Ticker',         width: '10%' },
+            { label: 'Qty',            width: '10%' },
+            { label: 'Entry Price',    width: '12%' },
+            { label: 'Market Price',   width: '12%' },
+            { label: 'Market Value',   width: '14%' },
             { label: 'Unrealized P&L', width: '14%' },
-            { label: 'P&L %',         width: '10%' },
+            { label: 'P&L %',          width: '10%' },
           ]}
           rows={posRows}
           emptyMessage="No open positions"
@@ -175,7 +179,7 @@ export default function Trading() {
           loading={ordLoading}
           columns={[
             { label: 'Ticker',     width: '10%' },
-            { label: 'Side',       width: '8%' },
+            { label: 'Side',       width: '10%' },
             { label: 'Qty',        width: '10%' },
             { label: 'Fill Price', width: '12%' },
             { label: 'Status',     width: '14%' },
@@ -190,12 +194,12 @@ export default function Trading() {
         <DataTable
           loading={fillsLoading}
           columns={[
-            { label: 'Ticker',    width: '10%' },
-            { label: 'Side',      width: '8%' },
+            { label: 'Ticker',     width: '10%' },
+            { label: 'Side',       width: '10%' },
             { label: 'Fill Price', width: '14%' },
-            { label: 'Qty',       width: '12%' },
-            { label: 'Notional',  width: '14%' },
-            { label: 'Filled At', width: 'auto' },
+            { label: 'Qty',        width: '12%' },
+            { label: 'Notional',   width: '14%' },
+            { label: 'Filled At',  width: 'auto' },
           ]}
           rows={fillRows}
           emptyMessage="No fills yet — orders execute at market open (15:30 IT)."
