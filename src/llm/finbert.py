@@ -9,9 +9,14 @@ Polarity maps the positive/negative balance accounting for neutral dampening.
 
 import logging
 import math
+import threading
 from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING, Literal
+
+from src.text.sanitizer import sanitize_text
+
+from src.text.sanitizer import sanitize_text
 
 if TYPE_CHECKING:
     from src.models.news import NewsItem
@@ -69,6 +74,7 @@ class FinBERTClient:
 
     def __init__(self) -> None:
         self._pipe = None
+        self._lock = threading.Lock()
 
     def _get_pipeline(self):
         """
@@ -76,16 +82,21 @@ class FinBERTClient:
 
         Import transformers inside this method to avoid slow startup
         when FinBERT is not used (e.g., ensemble succeeds).
+
+        Thread-safe: multiple run_in_executor threads can call this
+        concurrently; double-checked locking ensures a single init.
         """
         if self._pipe is None:
-            from transformers import pipeline
+            with self._lock:
+                if self._pipe is None:
+                    from transformers import pipeline
 
-            self._pipe = pipeline(
-                "text-classification",
-                model=self._MODEL_NAME,
-                top_k=None,  # return all class scores (replaces deprecated return_all_scores=True)
-                device=-1,  # CPU
-            )
+                    self._pipe = pipeline(
+                        "text-classification",
+                        model=self._MODEL_NAME,
+                        top_k=None,  # return all class scores (replaces deprecated return_all_scores=True)
+                        device="cpu",  # explicit string avoids meta-device fallback in newer transformers
+                    )
         return self._pipe
 
     def analyze(self, text: str) -> FinBERTResult:
@@ -99,7 +110,8 @@ class FinBERTClient:
             FinBERTResult with polarity, confidence, and worker_type
         """
         pipe = self._get_pipeline()
-        raw = pipe(text[: self._MAX_TOKENS])
+        clean_text = sanitize_text(text)
+        raw = pipe(clean_text[: self._MAX_TOKENS])
         # raw is either [[{label, score}, ...]] (old) or [{label, score}, ...] (new top_k=None)
         inner = raw[0] if isinstance(raw[0], list) else raw
         scores = {item["label"]: item["score"] for item in inner}
@@ -146,5 +158,7 @@ class FinBERTClient:
                 logger.warning("FinBERT failed for %s: %s", article.id, exc)
                 continue
             if result.confidence >= min_confidence:
-                results.append((article.timestamp.date(), result.polarity * result.confidence))
+                results.append(
+                    (article.timestamp.date(), result.polarity * result.confidence)
+                )
         return results

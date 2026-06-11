@@ -36,11 +36,12 @@ from src.llm.client import LLMClient
 from src.llm.ensemble import EnsembleAggregator, ModelOutput, run_ensemble_query
 from src.llm.finbert import FinBERTClient
 from src.models.news import LLMSentimentOutput, MarketAuxNewsItem, NewsItem
+from src.models.signals import SentimentResult
+from src.text.sanitizer import sanitize_text, sanitize_ticker
 
 # Articles with |marketaux_sentiment| below this threshold are near-neutral.
 # Skipping LLM inference on them saves 60-80% of token spend.
 _MARKETAUX_NEUTRAL_THRESHOLD = 0.2
-from src.models.signals import SentimentResult
 from src.store.pg_store import PostgreSQLStore
 from src.store.redis_store import RedisStore
 from src.workers.celery_app import app
@@ -95,11 +96,12 @@ async def run_inference(
       The backtest CLI writes to backtest_signals via UPDATE. Keeping store
       logic outside run_inference makes it reusable for both contexts.
     """
-    symbol = item.asset_tags[0] if item.asset_tags else "UNKNOWN"
-    # Body truncation: SENTIMENT_LLM_BODY_CHARS controls input length (default 600).
-    # 600 chars captures headline + lede; 2000 was generous. Reduces input tokens ~70%.
+    raw_symbol = item.asset_tags[0] if item.asset_tags else ""
+    # Sanitize text BEFORE truncation to ensure proper handling of unicode/homoglyphs
+    clean_body = sanitize_text(item.body or "")
+    clean_symbol = sanitize_ticker(raw_symbol) if raw_symbol else "UNKNOWN"
     _body_limit = int(os.environ.get("SENTIMENT_LLM_BODY_CHARS", "600"))
-    prompt = _DK_COT_PROMPT.format(text=item.body[:_body_limit], symbol=symbol)
+    prompt = _DK_COT_PROMPT.format(text=clean_body[:_body_limit], symbol=clean_symbol)
 
     try:
         await budget_tracker.check_budget()
@@ -111,12 +113,16 @@ async def run_inference(
             symbol=symbol,
         )
 
-        aggregated = aggregator.aggregate(raw_outputs, weights=weights) if raw_outputs else None
+        aggregated = (
+            aggregator.aggregate(raw_outputs, weights=weights) if raw_outputs else None
+        )
 
         if aggregated is None:
             log.info(f"Ensemble diverged for {symbol}, using FinBERT fallback")
             loop = asyncio.get_running_loop()
-            fb_result = await loop.run_in_executor(None, finbert.analyze, item.body[:512])
+            fb_result = await loop.run_in_executor(
+                None, finbert.analyze, item.body[:512]
+            )
             return SentimentResult(
                 symbol=symbol,
                 score=fb_result.polarity * fb_result.confidence,
@@ -179,7 +185,9 @@ async def process_news_item(
     weights: dict[str, float] | None = None,
 ) -> SentimentResult | None:
     """Process a single news item: infer, update fallback counters, write to stores."""
-    inference_result = await run_inference(item, clients, aggregator, finbert, budget_tracker, weights=weights)
+    inference_result = await run_inference(
+        item, clients, aggregator, finbert, budget_tracker, weights=weights
+    )
     if inference_result is None:
         return None
     result, raw_outputs = inference_result
@@ -191,7 +199,9 @@ async def process_news_item(
             redis_store.reset_fallback_counter()
         signal_id = pg_store.write_signal(result)
         redis_store.write_sentiment(result, signal_id=signal_id)
-        news_log_id = pg_store.log_news_item(item=item, ticker=ticker, computed_sentiment=result.score)
+        news_log_id = pg_store.log_news_item(
+            item=item, ticker=ticker, computed_sentiment=result.score
+        )
         if news_log_id is not None:
             pg_store.link_signal_to_news(signal_id=signal_id, news_log_id=news_log_id)
         if raw_outputs:
@@ -276,7 +286,11 @@ def run_sentiment_worker() -> dict:
     #   "all"   → 2-model ensemble Kimi + Qwen (default, best quality/quota balance)
     #   "qwen"  → single model, saves 50% Ollama quota
     _redis_model_sel = redis_store.get_llm_models()
-    _model_selection = (_redis_model_sel or os.environ.get("SENTIMENT_LLM_MODELS", "all")).lower().split(",")
+    _model_selection = (
+        (_redis_model_sel or os.environ.get("SENTIMENT_LLM_MODELS", "all"))
+        .lower()
+        .split(",")
+    )
     _all_clients = {
         "kimi": OllamaKimiClient(),
         "qwen": OllamaQwen35Client(),
@@ -284,12 +298,19 @@ def run_sentiment_worker() -> dict:
     if "all" in _model_selection:
         clients = list(_all_clients.values())
     else:
-        clients = [_all_clients[k] for k in _model_selection if k in _all_clients] or list(_all_clients.values())
+        clients = [
+            _all_clients[k] for k in _model_selection if k in _all_clients
+        ] or list(_all_clients.values())
     aggregator = EnsembleAggregator(
         min_confidence=config.ENSEMBLE_MIN_CONFIDENCE,
         divergence_threshold=config.ENSEMBLE_DIVERGENCE_STD,
     )
     finbert = FinBERTClient()
+    # Warm up the pipeline in this (single-threaded) context before asyncio.run()
+    # dispatches concurrent run_in_executor calls. transformers._LazyModule is not
+    # thread-safe: concurrent 'from transformers import pipeline' calls corrupt the
+    # module state, causing "Device set to use meta" and Tensor.item() failures.
+    finbert._get_pipeline()
     budget_tracker = LLMBudgetTracker(conn=pg_conn)
 
     # Read per-model weights from Redis (set by weekly LOO ICIR rebalancing).
@@ -317,7 +338,10 @@ def run_sentiment_worker() -> dict:
         # LMOVE is atomic so partial crashes leave items in news:processing, not lost.
         stuck = redis_client.lrange("news:processing", 0, -1)
         if stuck:
-            log.warning("Recovering %d stuck items from news:processing into news:queue", len(stuck))
+            log.warning(
+                "Recovering %d stuck items from news:processing into news:queue",
+                len(stuck),
+            )
             pipe = redis_client.pipeline()
             for item in stuck:
                 pipe.rpush("news:queue", item)
@@ -331,7 +355,9 @@ def run_sentiment_worker() -> dict:
         raw_items: list[bytes] = []
         failed_raw: list[bytes] = []
         for _ in range(6):
-            item_json = redis_client.lmove("news:queue", "news:processing", "LEFT", "RIGHT")
+            item_json = redis_client.lmove(
+                "news:queue", "news:processing", "LEFT", "RIGHT"
+            )
             if item_json is None:
                 break
             raw_items.append(item_json)
@@ -353,7 +379,9 @@ def run_sentiment_worker() -> dict:
                 pipe.lrem("news:processing", 1, item)
                 pipe.rpush("news:dead-letter", item)
             pipe.execute()
-            log.warning("Moved %d unparseable items to news:dead-letter", len(failed_raw))
+            log.warning(
+                "Moved %d unparseable items to news:dead-letter", len(failed_raw)
+            )
 
         if not news_items:
             return {"processed": 0, "reason": "no_items_in_queue"}
