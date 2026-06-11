@@ -31,6 +31,44 @@ log = logging.getLogger(__name__)
 _PRICE_BARS = 300
 
 
+def _portfolio_postmortem(
+    pg_store,
+    trade_id: int,
+    signal: dict,
+    score: float,
+    entry_price: float,
+    exit_price: float,
+    tick_time,
+) -> None:
+    """Run postmortem diagnosis on a portfolio-flow exit and persist it.
+
+    Mirrors execution.py's _maybe_postmortem() but without regime lookup
+    (the portfolio cycle doesn't apply regime gating, so regime="risk_on").
+    """
+    from src.performance.postmortem import TradeContext, diagnose_loss, should_trigger_postmortem
+
+    loss_pct = (entry_price - exit_price) / entry_price if entry_price > 0 else 0.0
+    confidence = float(signal.get("confidence", 0.5))
+    ensemble_std = float(signal.get("ensemble_std", 0.0))
+
+    if not should_trigger_postmortem(loss_pct, score, ensemble_std):
+        return
+
+    ctx = TradeContext(
+        loss_pct=loss_pct,
+        signal_score=score,
+        signal_confidence=confidence,
+        ensemble_std=ensemble_std,
+        regime="risk_on",
+        reasoning_summary="",
+    )
+    diagnosis = diagnose_loss(ctx)
+    try:
+        pg_store.write_postmortem(trade_id, diagnosis)
+    except Exception as exc:
+        log.warning("Failed to write postmortem for trade %s: %s", trade_id, exc)
+
+
 def _fire_alert(notifier, message: str, level: AlertLevel) -> None:
     if notifier is None:
         return
@@ -236,12 +274,14 @@ def _run_cycle_inner() -> dict:
     # Load existing Alpaca positions so delta-orders are computed correctly.
     # Without this, the VirtualPortfolio is empty → nav ≈ 0 when account.cash ≈ 0
     # (all equity already invested) → all target quantities ≈ 0 → 0 orders.
+    alpaca_entry_prices: dict[str, float] = {}
     try:
         alpaca_positions = trading_client.get_all_positions()
         for ap in alpaca_positions:
             qty = float(ap.qty)
             avg_cost = float(ap.avg_entry_price)
             portfolio.load_position(symbol=ap.symbol, quantity=qty, avg_cost=avg_cost)
+            alpaca_entry_prices[ap.symbol] = avg_cost
         log.info("Loaded %d existing Alpaca positions into VirtualPortfolio", len(alpaca_positions))
     except Exception as exc:
         log.warning("Could not load Alpaca positions: %s — VirtualPortfolio starts empty", exc)
@@ -256,8 +296,20 @@ def _run_cycle_inner() -> dict:
     )
 
     ts = end
+
+    # Compute equal-weight portfolio daily returns for vol targeting.
+    # Uses all symbols in bars_df so vol estimation reflects the current
+    # market environment, not just the strategy's holdings.
+    _strategy_returns: dict[str, list[float]] | None = None
+    if bars_df is not None and not bars_df.empty and len(bars_df) >= 3:
+        _ret = bars_df.pct_change().dropna(how="all")
+        _port_returns = _ret.mean(axis=1).dropna().tolist()
+        if len(_port_returns) >= 2:
+            _strategy_returns = {"portfolio": _port_returns}
+
     result = orchestrator.run_cycle(
         ts=ts, data_replay=data_replay, portfolio=portfolio, market=market,
+        strategy_returns=_strategy_returns,
     )
 
     log.info(
@@ -368,12 +420,25 @@ def _run_cycle_inner() -> dict:
                         regime_mult=1.0,
                     )
                 else:
-                    _pg_trades.record_trade_exit(
+                    _trade_id = _pg_trades.record_trade_exit(
                         symbol=sym,
                         exit_order_id=sub["order_id"],
                         exit_time=ts,
                         exit_reason="portfolio_sell",
                     )
+                    if _trade_id is not None:
+                        _entry_px = alpaca_entry_prices.get(sym, 0.0)
+                        _exit_px = market.prices.get(sym, 0.0)
+                        _sig = _s4_signals.get(sym, {})
+                        _portfolio_postmortem(
+                            _pg_trades,
+                            _trade_id,
+                            signal=_sig,
+                            score=dec.get("score", 0.0),
+                            entry_price=_entry_px,
+                            exit_price=_exit_px,
+                            tick_time=ts,
+                        )
                 # Back-fill Alpaca order_id on the execution_decisions row.
                 dec_id = dec.get("decision_id")
                 if dec_id is not None:
@@ -462,9 +527,7 @@ def _build_strategy_instance(entry, bars_df):
         try:
             store = PostgreSQLStore()
             from src.config import config as _cfg
-            s4_symbols = _apply_zeygos_filter(
-                list(_cfg.WATCHLIST_SYMBOLS or []), store
-            )
+            s4_symbols = list(_cfg.WATCHLIST_SYMBOLS or [])
             signals = store.fetch_signals_for_cycle(
                 hours=s4_config.signals_lookback_hours,
                 symbols=s4_symbols,
