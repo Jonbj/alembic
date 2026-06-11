@@ -110,7 +110,7 @@ async def run_inference(
             prompt=prompt,
             clients=clients,
             response_schema=LLMSentimentOutput,
-            symbol=symbol,
+            symbol=clean_symbol,
         )
 
         aggregated = (
@@ -118,13 +118,13 @@ async def run_inference(
         )
 
         if aggregated is None:
-            log.info(f"Ensemble diverged for {symbol}, using FinBERT fallback")
+            log.info(f"Ensemble diverged for {clean_symbol}, using FinBERT fallback")
             loop = asyncio.get_running_loop()
             fb_result = await loop.run_in_executor(
                 None, finbert.analyze, item.body[:512]
             )
             return SentimentResult(
-                symbol=symbol,
+                symbol=clean_symbol,
                 score=fb_result.polarity * fb_result.confidence,
                 confidence=fb_result.confidence,
                 reasoning="FinBERT fallback (ensemble divergence)",
@@ -147,7 +147,7 @@ async def run_inference(
                 log.warning(f"Failed to record spending for {model_id}: {e}")
 
         return SentimentResult(
-            symbol=symbol,
+            symbol=clean_symbol,
             score=max(-1.0, min(1.0, score)),
             confidence=aggregated.confidence,
             reasoning=aggregated.reasoning,
@@ -157,11 +157,11 @@ async def run_inference(
         ), raw_outputs
 
     except LLMBudgetExhaustedError:
-        log.info(f"Budget exhausted for {symbol}, using FinBERT fallback")
+        log.info(f"Budget exhausted for {clean_symbol}, using FinBERT fallback")
         loop = asyncio.get_running_loop()
         fb_result = await loop.run_in_executor(None, finbert.analyze, item.body[:512])
         return SentimentResult(
-            symbol=symbol,
+            symbol=clean_symbol,
             score=fb_result.polarity * fb_result.confidence,
             confidence=fb_result.confidence,
             reasoning="FinBERT fallback (budget exhausted)",
@@ -170,7 +170,7 @@ async def run_inference(
         ), []
 
     except Exception as e:
-        log.error(f"Error processing news item for {symbol}: {e}")
+        log.error(f"Error processing news item for {clean_symbol}: {e}")
         return None
 
 

@@ -16,8 +16,6 @@ from typing import TYPE_CHECKING, Literal
 
 from src.text.sanitizer import sanitize_text
 
-from src.text.sanitizer import sanitize_text
-
 if TYPE_CHECKING:
     from src.models.news import NewsItem
 
