@@ -127,6 +127,13 @@ app.conf.beat_schedule = {
         "task": "src.workers.ingestion.run_sec_edgar_ingestion_worker",
         "schedule": crontab(minute="*/30", hour="14-21", day_of_week="1-5"),
     },
+    # RSS news ingestion every 15 min during market hours.
+    # Reuters + CNBC. Lower latency than REST polling (~2-5 min vs 15 min).
+    # Uses watchlist ticker mention extraction (regex, no NLP).
+    "run-rss-ingestion": {
+        "task": "src.workers.ingestion.run_rss_ingestion_worker",
+        "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
+    },
     # Execution worker every 15 min Mon-Fri during market hours.
     # Reads LLM signals from Redis and places orders via Alpaca paper/live.
     "run-execution": {

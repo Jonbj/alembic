@@ -29,6 +29,7 @@ Connection lifecycle:
 
 import asyncio
 import logging
+import re
 
 import psycopg2
 from redis import Redis
@@ -36,6 +37,7 @@ from redis import Redis
 from src.config import config
 from src.connectors.alpaca_news import AlpacaNewsConnector
 from src.connectors.deduplicator import Deduplicator
+from src.connectors.rss import RSSConnector
 from src.connectors.sec_edgar import SECEdgarConnector
 from src.connectors.gdelt_gkg import GDELTGKGConnector
 from src.connectors.marketaux import MarketAuxConnector
@@ -351,6 +353,99 @@ def run_sec_edgar_ingestion_worker() -> dict:
     except Exception as exc:
         log.error("SEC EDGAR ingestion failed: %s", exc, exc_info=True)
         return {"error": str(exc)}
+    finally:
+        redis_client.close()
+
+
+# RSS feeds: stable public URLs, no API key required.
+_RSS_FEEDS = [
+    ("https://feeds.reuters.com/reuters/businessNews", "reuters"),
+    ("https://www.cnbc.com/id/100003114/device/rss/rss.html", "cnbc"),
+]
+
+
+def _extract_tickers_from_text(text: str, watchlist: set) -> list:
+    """Find watchlist tickers mentioned as whole words in text.
+
+    Uses word-boundary regex: 'AAPL' in 'AAPL rose' matches, but 'APP' in
+    'APPS' does not. Simple but fast — no NLP required.
+    """
+    words = set(re.findall(r"\b[A-Z]{1,5}\b", text))
+    return [t for t in watchlist if t in words]
+
+
+async def _fetch_rss_items(connector) -> list:
+    """Drain the async RSS iterator into a concrete list."""
+    return [item async for item in connector.fetch()]
+
+
+def _process_rss_items(
+    items: list,
+    watchlist: set,
+    deduplicator,
+    redis_client,
+    source_name: str,
+) -> dict:
+    """Extract tickers, expand per-ticker, deduplicate, push to news:queue."""
+    stats = {"fetched": 0, "queued": 0, "filtered": 0, "duplicates": 0}
+    for item in items:
+        stats["fetched"] += 1
+        search_text = f"{item.title} {item.body}"
+        tickers = _extract_tickers_from_text(search_text, watchlist)
+        if not tickers:
+            stats["filtered"] += 1
+            continue
+        for ticker in tickers:
+            per_ticker = NewsItem(
+                id=f"{item.id}:{ticker}",
+                source=source_name,
+                timestamp=item.timestamp,
+                title=item.title,
+                body=item.body,
+                url=item.url,
+                language=item.language,
+                asset_tags=[ticker],
+            )
+            if deduplicator.is_duplicate_by_id(per_ticker):
+                stats["duplicates"] += 1
+                continue
+            redis_client.rpush("news:queue", per_ticker.model_dump_json())
+            stats["queued"] += 1
+    return stats
+
+
+@app.task(name="src.workers.ingestion.run_rss_ingestion_worker")
+def run_rss_ingestion_worker() -> dict:
+    """Celery entry-point: fetch RSS feeds, push ticker-tagged articles to news:queue.
+
+    Fetches Reuters + CNBC RSS, extracts watchlist ticker mentions via regex,
+    expands per-ticker, deduplicates, and pushes to news:queue.
+
+    Schedule: every 15 min, Mon-Fri 14:00-21:00 UTC.
+    """
+    redis_client = Redis.from_url(config.REDIS_URL)
+    try:
+        watchlist = set(config.WATCHLIST_SYMBOLS or [])
+        deduplicator = Deduplicator(redis_client)
+        total_stats: dict = {"fetched": 0, "queued": 0, "filtered": 0, "duplicates": 0}
+
+        for feed_url, source_name in _RSS_FEEDS:
+            try:
+                connector = RSSConnector(
+                    feed_url=feed_url,
+                    source_name=source_name,
+                    asset_tags=[],  # asset_tags handled by _process_rss_items per-ticker
+                )
+                items = asyncio.run(_fetch_rss_items(connector))
+                stats = _process_rss_items(items, watchlist, deduplicator, redis_client, source_name)
+                for k, v in stats.items():
+                    total_stats[k] = total_stats.get(k, 0) + v
+                log.info("RSS [%s] stats: %s", source_name, stats)
+            except Exception as exc:
+                log.warning("RSS feed [%s] failed: %s — skipping", source_name, exc)
+
+        log.info("RSS total ingestion stats: %s", total_stats)
+        return total_stats
     finally:
         redis_client.close()
 
