@@ -622,7 +622,7 @@ class GlmClient(LLMClient):
 #   redis-cli DEL ollama:sem ollama:sem:init
 #
 _OLLAMA_SEM_KEY = "ollama:sem"
-_OLLAMA_SEM_SLOTS = 1      # 1 = fully serialized
+_OLLAMA_SEM_SLOTS = 3      # Ollama cloud limit: max 3 concurrent model calls
 _OLLAMA_SEM_WAIT_S = 180   # max seconds to wait for a slot (12 workers × ~14s/call)
 
 
@@ -670,7 +670,12 @@ class _OllamaSemaphore:
             try:
                 yield
             finally:
-                await loop.run_in_executor(None, r.lpush, self._key, self._SLOT)
+                # Synchronous lpush: cannot be interrupted by CancelledError,
+                # preventing slot leaks when Celery kills tasks mid-flight.
+                try:
+                    r.lpush(self._key, self._SLOT)
+                except Exception:
+                    pass
         finally:
             r.close()
 
@@ -691,10 +696,10 @@ class OllamaCloudClient(LLMClient):
 
     model_id: str = ""
     model_name: str = ""
-    # Ollama cloud models (Kimi k2.6, Qwen3.5-397B) are large — 45s is enough
-    # for a healthy response; anything slower means the server is throttled and
-    # we should fall back to FinBERT rather than burning the full 120s default.
-    _OLLAMA_TIMEOUT = 45
+    # Ollama cloud models (Kimi k2.6, Qwen3.5-397B) are large thinking models.
+    # DK-CoT prompts generate 500-1000 tokens of internal reasoning; 90s gives
+    # enough headroom without blocking the batch for too long.
+    _OLLAMA_TIMEOUT = 90
 
     async def complete(self, prompt: str, response_schema: type[T]) -> T:
         """POST to Ollama /api/chat and parse the response as JSON schema.

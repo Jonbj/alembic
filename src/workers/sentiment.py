@@ -237,7 +237,7 @@ async def process_news_batch(
     Returns:
         List of SentimentResult objects
     """
-    sem = asyncio.Semaphore(3)
+    sem = asyncio.Semaphore(1)
 
     async def _bounded(item):
         async with sem:
@@ -354,7 +354,7 @@ def run_sentiment_worker() -> dict:
         news_items: list[NewsItem] = []
         raw_items: list[bytes] = []
         failed_raw: list[bytes] = []
-        for _ in range(6):
+        for _ in range(4):
             item_json = redis_client.lmove(
                 "news:queue", "news:processing", "LEFT", "RIGHT"
             )

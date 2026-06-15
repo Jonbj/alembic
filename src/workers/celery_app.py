@@ -48,8 +48,8 @@ app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
-    task_time_limit=300,  # 5 minute timeout per task
-    task_soft_time_limit=240,  # Soft timeout at 4 minutes
+    task_time_limit=660,  # 11 minutes — 4 articles × 90s Ollama + 43s FinBERT warmup + margin
+    task_soft_time_limit=600,  # 10 minutes soft limit
 )
 
 # Beat schedule for periodic tasks
