@@ -128,12 +128,24 @@ export default function Trading() {
           content: 'Posizioni correntemente attive su Alpaca con unrealized P&L. Aggiornate ogni 60 secondi.',
         },
         {
+          heading: 'Colonne — Positions',
+          content: '**Ticker**: simbolo azionario.\n**Qty**: numero di azioni detenute.\n**Entry Price**: prezzo medio ponderato di ingresso (avg fill price di tutti gli ordini BUY sulla posizione).\n**Market Price**: prezzo corrente di mercato dell\'azione.\n**Market Value**: Qty × Market Price — valore attuale della posizione in USD.\n**Unrealized P&L**: guadagno/perdita non ancora realizzato = Market Value − (Entry Price × Qty). Verde se positivo, rosso se negativo.\n**P&L %**: rendimento percentuale sulla posizione = Unrealized P&L / (Entry Price × Qty) × 100.',
+        },
+        {
           heading: 'Orders',
           content: 'Storico completo degli ordini: pending, filled, cancelled. Verde = filled, rosso = canceled, grigio = pending.',
         },
         {
+          heading: 'Colonne — Orders',
+          content: '**Ticker**: simbolo azionario.\n**Side**: BUY (acquisto) o SELL (vendita).\n**Qty**: quantità ordinata (in azioni).\n**Fill Price**: prezzo medio di esecuzione dell\'ordine. "—" se l\'ordine non è ancora stato eseguito (es. pending o canceled).\n**Status**: stato dell\'ordine — filled (eseguito), partial_fill (parzialmente eseguito), canceled (annullato), pending_new (in attesa di conferma).\n**Submitted**: timestamp di quando l\'ordine è stato inviato ad Alpaca.',
+        },
+        {
           heading: 'Fills',
           content: 'Solo gli ordini filled: prezzo di esecuzione, quantità, notional. BUY = apertura/incremento posizione, SELL = riduzione/chiusura. Clicca una riga per vedere l\'order ID.',
+        },
+        {
+          heading: 'Colonne — Fills',
+          content: '**Ticker**: simbolo azionario.\n**Side**: BUY (apertura/incremento) o SELL (riduzione/chiusura di posizione).\n**Fill Price**: prezzo effettivo di esecuzione — può differire leggermente dal prezzo richiesto per ordini a mercato (slippage).\n**Qty**: numero di azioni effettivamente eseguite.\n**Notional**: controvalore totale dell\'ordine = Fill Price × Qty in USD — rappresenta il capitale impiegato.\n**Filled At**: data e ora di esecuzione dell\'ordine (fuso orario locale).',
         },
       ]} />
 

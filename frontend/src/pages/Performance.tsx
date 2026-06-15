@@ -267,6 +267,22 @@ export default function Performance() {
           heading: "Monthly P&L Summary",
           content: "La tabella in basso mostra P&L mensile aggregato. ▲ Gain = mese positivo, ▼ Loss = mese negativo. Utile per verificare la consistenza del rendimento.",
         },
+        {
+          heading: "Trade Activity — metriche",
+          content: "**Trades**: numero di trade chiusi nel periodo (30 giorni).\n**Trades/week**: frequenza annualizzata — es. 2.0 = 2 trade a settimana in media.\n**Win rate**: % di trade chiusi in profitto netto. >50% = sistema in vantaggio.\n**Avg net P&L**: P&L medio per trade al netto dei costi di transazione.\n**Total net P&L**: P&L cumulativo totale del periodo.\n**Avg hold**: durata media di una posizione in minuti.\n**Slippage % gross**: costi di esecuzione (spread + market impact) come % del P&L lordo — idealmente <20%.",
+        },
+        {
+          heading: "Report Settimanale — Trade P&L",
+          content: "**Win rate**: percentuale di trade chiusi in profitto. Baseline attesa >50%.\n**P&L netto medio**: guadagno/perdita medio per trade dopo aver sottratto i costi di transazione.\n**Return on Notional (RON)**: P&L netto totale / capitale totale impiegato. Misura l'efficienza del capitale: 0.5% = hai guadagnato 50¢ ogni 100$ deployati.\n**Slippage medio**: stima del costo di esecuzione per trade (spread bid-ask + market impact).\n**Trade/settimana**: frequenza di trading annualizzata.",
+        },
+        {
+          heading: "Report Settimanale — Costi & Capital Efficiency",
+          content: "**avg_cost_bps**: costo medio di transazione in basis point (1 bps = 0.01%). Es. 5 bps = 0.05% del notional per trade.\n**Spread cost**: componente bid-ask del costo (sempre presente).\n**Market impact**: effetto che il tuo ordine ha sul prezzo — cresce con la dimensione dell'ordine.\n**Cost drag %**: costi totali / notional impiegato. Annualizzato dà la soglia minima di rendimento necessaria per coprire le spese.\n\n**Deployment %**: capitale investito in posizioni / valore totale del portafoglio. Basso = troppa liquidità inutilizzata.\n**Cash drag annual**: costo opportunità della liquidità non investita, stimato al 4.5% APY (T-bill). Es. 90% cash = perdi 4% l'anno di rendimento risk-free.\n**Efficiency ratio**: deployment reale / deployment teorico ottimale (50%).",
+        },
+        {
+          heading: "Report Settimanale — Regime & Feedback",
+          content: "**Regime**: stato del mercato rilevato dal modello — bear / caution / neutral / bull / strong_bull.\n**Multiplier (×N)**: fattore applicato all'entry threshold. ×0.7 in bear = threshold più alta, meno trade. ×1.3 in bull = threshold più bassa, più trade.\n**Deployment ceiling**: massima % di portafoglio allocabile in questo regime (es. 30% in bear, 90% in bull).\n**Capitale trattenuto vs bull**: quanta liquidità stiamo tenendo rispetto a un regime bull — il costo del regime di cautela.\n\n**Threshold corrente**: soglia minima di score per aprire un trade (baseline 0.30). Si alza automaticamente dopo serie di perdite.\n**Regime scale ×N**: ulteriore moltiplicatore sul capitale allocato per trade. ×0.8 = posizioni più piccole del normale.",
+        },
       ]} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Performance</h2>

@@ -105,15 +105,27 @@ export default function Backtest() {
       <HelpButton title="Backtest — Test Storici" sections={[
         {
           heading: "Cosa sono i backtest",
-          content: "I backtest eseguono le strategie su dati storici per verificarne la validità predittiva. Ogni run processa un dataset di notizie e produce metriche di performance.",
+          content: "I backtest eseguono le strategie su dati storici per verificarne la validità predittiva. Ogni run processa un dataset di notizie, genera i segnali LLM, e misura quanto bene questi segnali predicono i rendimenti reali del giorno successivo (24h forward return).",
         },
         {
-          heading: "Come leggere i risultati",
-          content: "**IC (Information Coefficient)**: correlazione tra predizione e rendimento reale. IC > 0.05 è buono, > 0.1 è ottimo.\n\n**ICIR**: IC diviso per la deviazione standard dell'IC. ICIR > 0.3 indica segnale consistente nel tempo.\n\n**Bucket analysis**: divide i segnali in decili per forza. Un modello buono ha i decili estremi (1 e 10) con rendimenti differenziati rispetto al centro.",
+          heading: "KPI Cards — definizioni",
+          content: "**IC (Information Coefficient)**: correlazione di Spearman tra il rank dello score LLM e il rank del rendimento reale a 24h. Valori: >0.05 = statisticamente significativo, >0.10 = ottimo, >0.15 = eccellente. Un IC di 0 significa predizione casuale.\n\n**ICIR (IC Information Ratio)**: IC medio / deviazione standard IC settimana per settimana. Misura la consistenza nel tempo. >0.3 = segnale stabile, >0.5 = molto consistente.\n\n**Hit Rate**: % di segnali con il segno corretto (score >0 e rendimento >0, oppure entrambi negativi). >50% = edge direzionale, >55% = buono.\n\n**Avg Long Return**: rendimento medio a 24h per i segnali con score >0.05. Dovrebbe essere positivo.\n\n**Avg Short Return**: rendimento medio per i segnali con score <-0.05, espresso come short. Dovrebbe essere positivo (rendimento negativo = short guadagna).\n\n**N Scored**: numero di segnali con rendimento forward disponibile — la dimensione effettiva del campione.",
+        },
+        {
+          heading: "Score Bucket Analysis",
+          content: "I segnali vengono ordinati per score e divisi in N bucket (5, 10, o 20) dal più basso al più alto. Ogni barra mostra il rendimento medio a 24h per quel bucket.\n\nUn modello valido mostra **rendimenti monotonicamente crescenti** da sinistra (score basso/bearish) a destra (score alto/bullish). Se i bucket centrali hanno rendimenti simili agli estremi, il modello non discrimina bene.\n\nPuoi scegliere il numero di bucket con i bottoni 5/10/20.",
+        },
+        {
+          heading: "IC by Model / IC by Symbol",
+          content: "Queste tabelle scompongono le performance per modello LLM e per ticker.\n\n**N**: numero di segnali disponibili per quel modello/ticker.\n**IC**: correlazione Spearman per quel sottoinsieme — modelli/ticker con IC >0 contribuiscono positivamente all'ensemble.\n**Hit Rate**: accuratezza direzionale per quel modello/ticker.\n**Avg Return**: rendimento medio a 24h per i segnali di quel modello/ticker. Utile per identificare quali ticker il modello capisce meglio.",
+        },
+        {
+          heading: "Curva P&L simulata",
+          content: "Simula una strategia long-short equal-weight applicando una soglia (threshold) allo score:\n\n**Long**: entra se score > threshold; **Short**: entra se score < -threshold.\n\n**Threshold**: puoi scegliere 0.02, 0.05 o 0.10. Threshold più alta = meno trade ma più selettivi.\n\n**Cum Long** (verde): P&L cumulativa della strategia solo-long.\n**Cum Short** (giallo): P&L della strategia solo-short.\n**Long-Short** (blu): P&L combinata — la vera misura del valore predittivo del modello.",
         },
         {
           heading: "Selezionare un run",
-          content: "Usa il dropdown per scegliere tra i run disponibili. Il numero indica quanti articoli sono stati processati (scored) e il totale.",
+          content: "Usa il dropdown per scegliere tra i run disponibili. Il formato è: run_id — N scored / N total (es. 1250 scored = 1250 segnali con rendimento forward calcolato).",
         },
       ]} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>

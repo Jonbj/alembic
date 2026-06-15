@@ -29,12 +29,20 @@ export default function Overview() {
           content: "La dashboard riassume lo stato attuale del sistema: P&L mensile, posizioni aperte, P&L non realizzato e segnali recenti. I dati si aggiornano automaticamente ogni 60 secondi.",
         },
         {
-          heading: "Come leggere i dati",
-          content: "**Net P&L (month)**: il profitto/perdita netto del mese corrente. Si basa sulle posizioni chiuse nel periodo.\n\n**Open positions**: quante posizioni sono aperte ora e su quali ticker.\n\n**Unrealized P&L**: profitto/perdita fluttuante delle posizioni ancora aperte.\n\n**Signals**: contatore dei segnali odierna — B (buy), S (sell), H (hold). Un segnale con |score| < 0.1 è considerato HOLD.",
+          heading: "Come leggere le KPI cards",
+          content: "**Net P&L (month)**: il profitto/perdita netto del mese corrente, basato sul P&L giornaliero Alpaca. Aggiornato ogni 5 minuti.\n\n**Open positions**: numero di posizioni attualmente aperte su Alpaca. Il sottotitolo elenca i ticker (es. AVGO, MU, NVDA).\n\n**Unrealized P&L**: profitto/perdita fluttuante totale delle posizioni ancora aperte. Non è un guadagno realizzato finché le posizioni non vengono chiuse.\n\n**Signals today**: formato \"XB / YS / ZH\" — X segnali BUY (score > 0.1), Y SELL (score < -0.1), Z HOLD (|score| ≤ 0.1). Il numero totale include tutti i ticker nel watchlist che hanno un segnale attivo.",
+        },
+        {
+          heading: "Grafico Monthly P&L",
+          content: "Barre mensili del P&L di portafoglio. Verde = mese in profitto, rosso = mese in perdita.\n\nUtile per identificare stagionalità, periodi di drawdown, e la consistenza del rendimento nel tempo. I dati provengono da Alpaca e coprono gli ultimi 6 mesi.",
+        },
+        {
+          heading: "Tabelle Open Positions e Latest Signals",
+          content: "**Open Positions**: lista compatta delle posizioni aperte con qty, P&L assoluto e P&L percentuale.\n\n**Latest Signals**: ultimi 10 segnali LLM generati, con direzione (BUY/SELL/HOLD), score (-1 a +1), confidence (0-100%), modello usato e orario di generazione. Questi segnali guidano le decisioni del portfolio scheduler al ciclo successivo.",
         },
         {
           heading: "Flusso consigliato",
-          content: "1. Controlla Overview per il quadro generale\n2. Vai su Signals per i dettagli dei segnali\n3. Verifica su Trading le posizioni e gli ordini\n4. Su Strategies controlla lo stato delle strategie validate",
+          content: "1. Controlla Overview per il quadro generale\n2. Vai su Signals per i dettagli dei segnali e il Decision Log\n3. Verifica su Trading le posizioni e gli ordini\n4. Su Strategies controlla lo stato delle strategie validate\n5. Su Performance analizza il P&L storico e i costi",
         },
       ]} />
 

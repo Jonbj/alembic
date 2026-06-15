@@ -132,15 +132,23 @@ export default function Strategies() {
       <HelpButton title="Strategies — Validazione Strategie" sections={[
         {
           heading: "Le strategie",
-          content: "Alembic usa un portfolio multi-strategia. Ogni strategia è validata independently con 5 validation gates.\n\n**S1 — Time-Series Momentum**: strategia cross-asset trend-following con volatility targeting. VALIDATA (OOS Sharpe 0.51, 5/5 gate passati).\n\n**S3 — Cross-Sectional Momentum**: strategia equity residual momentum. R&D SLEEVE — gate 3 (robustness) e 5 (stress) FALLITI. OOS Sharpe 0.15. NON nel portfolio live.\n\nS2 (VRP) e S4 (News) sono in sviluppo.",
+          content: "Alembic usa un portfolio multi-strategia. Ogni strategia è validata independently con 5 validation gates.\n\n**S1 — Time-Series Momentum**: strategia cross-asset trend-following con volatility targeting. VALIDATA (OOS Sharpe 0.51, 5/5 gate passati).\n\n**S3 — Cross-Sectional Momentum**: strategia equity residual momentum. R&D SLEEVE — gate 3 (robustness) e 5 (stress) FALLITI. OOS Sharpe 0.15. NON nel portfolio live.\n\n**S4 — News-Driven Tactical**: strategia news/sentiment. In esecuzione live con allocazione 10%.\n\nS2 (VRP) è in sviluppo.",
+        },
+        {
+          heading: "KPI Cards — definizioni",
+          content: "**OOS Sharpe**: Sharpe ratio calcolato esclusivamente su dati out-of-sample (mai visti durante l'ottimizzazione dei parametri). È la metrica più importante perché simula la performance reale futura. >0.5 = accettabile, >0.8 = buono, >1.0 = eccellente.\n\n**Max Drawdown**: perdita massima dal picco storico al punto più basso. Es. -18% significa che il portafoglio è sceso del 18% prima di recuperare. Più negativo = più rischioso. <20% è il target.\n\n**Annual Return**: rendimento annualizzato storico della strategia nel periodo di backtest.\n\n**Total Trades**: numero totale di trade eseguiti nel periodo — utile per valutare quanto è attiva la strategia.",
+        },
+        {
+          heading: "Badge LIVE / BACKTEST",
+          content: "**LIVE** (verde): i dati mostrati riflettono l'esecuzione reale in portafoglio — la strategia ha già girato almeno un ciclo. Sharpe, drawdown e rendimento sono calcolati su trade reali.\n\n**BACKTEST** (giallo): i dati provengono solo dalla simulazione storica — nessun dato live disponibile ancora. Le metriche LIVE sono più attendibili perché non soffrono di overfitting.",
         },
         {
           heading: "I 5 validation gates",
-          content: "1. **Significance**: OOS Sharpe > 0.5 — la strategia batte il caso?\n2. **Walk-Forward**: OOS Sharpe > 0.8 × IS Sharpe — il rendimento regge out-of-sample?\n3. **Robustness**: Sharpe stabile attraverso perturbazioni parametriche (CV < 0.5)\n4. **Regime Stability**: performa in diversi regimi di mercato (bull, bear, stress, goldilocks)\n5. **Stress Test**: non collassa in scenari estremi (2008, COVID 2020)",
+          content: "1. **Significance**: OOS Sharpe > 0.5 — la strategia batte il caso in modo statisticamente significativo?\n2. **Walk-Forward**: OOS Sharpe > 0.8 × IS Sharpe — il rendimento regge su dati mai visti (non si è sovra-adattato al training)?\n3. **Robustness**: Sharpe stabile attraverso perturbazioni parametriche — CV (coefficiente di variazione) < 0.5\n4. **Regime Stability**: la strategia performa in diversi regimi di mercato (bull, bear, stress, goldilocks)\n5. **Stress Test**: non collassa in scenari estremi (es. crisi 2008, COVID 2020)",
         },
         {
-          heading: "Sensitivity",
-          content: "La griglia di sensitivity mostra lo Sharpe ratio per combinazioni di parametri (lookback × vol_window). Colori: verde (Sharpe > 0.6), giallo (0.4-0.6), rosso (< 0.4). Una strategia robusta ha un picco largo, non un singolo punto verde. Peak Sharpe near (lookback=126, vol_window=60).",
+          heading: "Equity Curve e Sensitivity",
+          content: "**Equity Curve**: andamento del rendimento cumulativo (blu) e drawdown (rosso) nel tempo. Una curva blu in costante salita con drawdown rossi contenuti è l'ideale.\n\n**Parameter Sensitivity**: ogni barra mostra lo Sharpe per una combinazione di parametri (lookback × vol_window). Colori: verde >0.6, giallo 0.4–0.6, rosso <0.4. Una strategia robusta ha un'area verde ampia — funziona bene con molte combinazioni di parametri, non solo con quelli ottimali.",
         },
       ]} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>

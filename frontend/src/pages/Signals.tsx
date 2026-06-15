@@ -69,6 +69,28 @@ export default function Signals() {
   return (
     <div style={{ position: 'relative' }}>
       <h2 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>Signals</h2>
+      <HelpButton title="Signals — Guida completa" sections={[
+        {
+          heading: "Cosa sono i segnali",
+          content: "I segnali sono l'output del modello LLM ensemble. Per ogni ticker nel watchlist, i modelli (kimi, qwen e altri) generano un sentiment score da -1 (bearish forte) a +1 (bullish forte), con confidence 0-1. Il sistema aggrega i punteggi ponderati per produrre il segnale finale.",
+        },
+        {
+          heading: "Colonne — Signals",
+          content: "**Ticker**: il simbolo azionario (es. NVDA, AAPL).\n**Direction**: basata sullo score — BUY (score > 0.1), SELL (score < -0.1), HOLD (|score| ≤ 0.1).\n**Score**: valore da -1 a +1. |score| > 0.3 è significativo, > 0.6 è forte.\n**Confidence**: da 0 a 1. Indica quanto è certo il modello. Alta confidence = segnale affidabile.\n**Model**: identificatore del modello LLM che ha generato il segnale (es. ensemble:kimi-k2.6:cloud).\n**FB**: badge giallo = il modello fallback (FinBERT) è stato usato perché il modello primario ha fallito o divergeva troppo.",
+        },
+        {
+          heading: "Decision Log — cosa è",
+          content: "Il Decision Log registra le decisioni prese dal portfolio scheduler ad ogni ciclo (ogni 15 min). Non ogni segnale genera un ordine: il sistema applica filtri aggiuntivi prima di inviare ordini ad Alpaca.",
+        },
+        {
+          heading: "Colonne — Decision Log",
+          content: "**Tick Time**: timestamp del ciclo in cui è stata presa la decisione.\n**Symbol**: ticker azionario.\n**Weight**: peso percentuale assegnato nel portafoglio (es. 2.0% = 2% del NAV).\n**Decision**: esito — BUY (ordine inviato ad Alpaca); SKIP_EMA (prezzo corrente sotto la EMA20 — filtro trend-following); SKIP_CAP (raggiunto il numero massimo di ordini per ciclo); SKIP_POSITION (posizione già aperta su questo ticker).\n**Order ID**: ID dell'ordine Alpaca se la decisione era BUY; vuoto altrimenti.\n**Reason**: testo esplicativo con score, modello usato, e reasoning LLM abbreviato.",
+        },
+        {
+          heading: "Filtri",
+          content: "Usa il campo di testo per filtrare per ticker e il dropdown per direzione (BUY/SELL/HOLD). La lista segnali è virtualizzata per gestire migliaia di segnali senza rallentare.",
+        },
+      ]} />
 
       <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '1px solid #334155' }}>
         {(['signals', 'decisions'] as const).map(t => (
@@ -127,20 +149,6 @@ export default function Signals() {
 
       {tab === 'signals' && (
       <>
-      <HelpButton title="Signals — Segnali" sections={[
-        {
-          heading: "Cosa sono i segnali",
-          content: "I segnali sono l'output del modello LLM ensemble. Per ogni ticker nel watchlist, 4 modelli (kimi, qwen, deepseek, glm) generano un sentiment score da -1 (bearish forte) a +1 (bullish forte), con confidence 0-1. Il sistema aggrega i punteggi ponderati per produrre il segnale finale.",
-        },
-        {
-          heading: "Come leggere i segnali",
-          content: "**Ticker**: il simbolo azionario (es. SPY, QQQ).\n\n**Direction**: basata sullo score — BUY (score > 0.1), SELL (score < -0.1), HOLD (-0.1 ≤ score ≤ 0.1).\n\n**Score**: valore da -1 a +1. |score| > 0.3 è significativo, > 0.6 è forte.\n\n**Confidence**: da 0 a 1. Indica quanto concordano i modelli. Alta confidence = segnale affidabile.\n\n**Model**: quale modello LLM ha generato questo specifico segnale.\n\n**FB**: badge giallo = il modello fallback è stato usato (il modello primario ha fallito).",
-        },
-        {
-          heading: "Filtri",
-          content: "Usa il campo di testo per filtrare per ticker e il dropdown per direzione (BUY/SELL/HOLD). La lista è virtualizzata per gestire migliaia di segnali senza rallentare.",
-        },
-      ]} />
 
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
         <input placeholder="Filter ticker..." value={ticker} onChange={(e) => setTicker(e.target.value)} style={{ width: 160 }} />

@@ -35,15 +35,19 @@ export default function Trades() {
       <HelpButton title="Execution History — Guida" sections={[
         {
           heading: 'Cosa mostra questa pagina',
-          content: 'Lista degli ordini **filled** (eseguiti) su Alpaca in modalità portfolio. Ogni riga corrisponde a un singolo ordine eseguito dal portfolio scheduler.\n\n**BUY**: apertura o incremento di posizione.\n**SELL**: riduzione o chiusura di posizione.',
+          content: 'Lista degli ordini **filled** (eseguiti) su Alpaca in modalità portfolio. Ogni riga corrisponde a un singolo ordine eseguito dal portfolio scheduler al ciclo di 15 minuti.\n\n**BUY**: apertura o incremento di posizione su un ticker.\n**SELL**: riduzione o chiusura di posizione su un ticker.',
         },
         {
           heading: 'Filtri',
-          content: '**Symbol**: filtra per ticker.\n**all**: tutti gli ordini filled.\n**open**: solo BUY fills (posizioni aperte).\n**closed**: solo SELL fills (posizioni ridotte/chiuse).',
+          content: '**Symbol**: campo testo per filtrare per ticker (es. "AVGO" mostra solo ordini su AVGO).\n**all**: tutti gli ordini filled, BUY e SELL.\n**open**: solo BUY fills — corrisponde alle posizioni attualmente aperte.\n**closed**: solo SELL fills — posizioni ridotte o chiuse.',
         },
         {
           heading: 'Colonne',
-          content: '**Side**: BUY o SELL.\n**Fill Price**: prezzo medio di esecuzione.\n**Qty**: quantità eseguita.\n**Notional**: controvalore in dollari.\n**Filled At**: orario di esecuzione.',
+          content: '**Symbol**: ticker azionario.\n**Side**: BUY (apertura/incremento posizione) o SELL (riduzione/chiusura). Colore verde per BUY, rosso per SELL.\n**Fill Price**: prezzo medio di esecuzione effettivo — può differire dal prezzo di mercato al momento dell\'ordine (slippage bid-ask).\n**Qty**: numero di azioni eseguite (fino a 4 decimali per azioni frazionarie).\n**Notional**: controvalore totale in USD = Fill Price × Qty. Rappresenta il capitale effettivamente impiegato nell\'operazione.\n**Filled At**: data e ora di esecuzione dell\'ordine in fuso orario locale (formato IT: GG/MM/AA HH:MM).',
+        },
+        {
+          heading: 'Espansione riga — Order ID',
+          content: 'Clicca su una riga per espanderla e vedere l\'ID dell\'ordine Alpaca (es. "a1b2c3d4-..."). Puoi usare questo ID per cercare l\'ordine direttamente nel pannello Alpaca Paper Trading per verificare l\'esecuzione o vedere i dettagli di fill multipli.',
         },
       ]} />
 

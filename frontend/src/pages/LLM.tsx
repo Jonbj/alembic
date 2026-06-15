@@ -46,12 +46,20 @@ export default function LLM() {
       <h2 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>LLM</h2>
       <HelpButton title="LLM — Modelli e Pesi" sections={[
         {
-          heading: "Feedback modelli",
-          content: "Mostra il feedback per ogni segnale generato: polarity (-1 a +1), confidence, divergenza tra modelli (σ), e il reasoning del modello.\n\n**Fallback (FB)**: se il modello primario fallisce, si usa un modello di fallback. Il badge giallo indica quando questo accade.",
+          heading: "Feedback modelli — cosa è",
+          content: "Mostra l'output grezzo di ogni modello LLM per ogni segnale generato. Ogni riga corrisponde alla risposta di un singolo modello per un ticker specifico, prima dell'aggregazione dell'ensemble.",
         },
         {
-          heading: "Pesi ensemble",
-          content: "Il sistema calcola automaticamente i pesi ottimali per l'ensemble di modelli basandosi sulla performance storica.\n\n- **Active Weights**: pesi attualmente in uso — applicati ad ogni segnale live.\n- **Proposed Weights**: pesi calcolati dal sistema, in attesa di approvazione. Finché non vengono approvati, non hanno effetto.\n- **vs Active (Δ)**: differenza tra i pesi proposti e quelli attivi.\n\nClicca 'Approve' per attivare i pesi proposti. Richiede API key.",
+          heading: "Colonne — Feedback modelli",
+          content: "**Ticker**: simbolo azionario analizzato.\n**Model**: identificatore del modello LLM (es. kimi-k2.6:cloud, qwen3.5:cloud).\n**Polarity**: direzione del sentiment da –1 (fortemente bearish) a +1 (fortemente bullish). Il badge mostra ▲ se >0.1, ▼ se <-0.1, — se neutro.\n**Confidence**: certezza del modello nella sua predizione (0–1). Un modello con polarity=+0.8 e confidence=0.9 è molto bullish e molto sicuro.\n**Divergenza σ**: deviazione standard tra le risposte dei diversi modelli nell'ensemble. Alta σ (>0.3) = i modelli sono in disaccordo → il segnale finale è meno affidabile e potrebbe usare il fallback FinBERT.\n**Fallback (FB)**: badge giallo = il modello primario ha fallito (timeout, errore di rete) o la divergenza era troppo alta → si è usato FinBERT come modello di backup.\n**Reasoning**: estratto del ragionamento del modello (troncato a 240 caratteri). Il testo completo è disponibile nel database.",
+        },
+        {
+          heading: "Pesi ensemble — Active Weights",
+          content: "I pesi attivi determinano quanto contribuisce ogni modello al segnale finale aggregato. Un modello con peso 0.40 (40%) ha il doppio dell'influenza di uno con peso 0.20 (20%).\n\nI pesi di default sono uniformi. Vengono aggiornati dal worker settimanale in base alla performance storica (pIC purificato per modello).",
+        },
+        {
+          heading: "Pesi ensemble — Proposed Weights e approvazione",
+          content: "Ogni lunedì alle 04:00 UTC il worker calcola i pesi ottimali basandosi sull'IC per modello delle ultime settimane. I pesi proposti rimangono in stato 'PENDING APPROVAL' finché non vengono approvati manualmente.\n\n**vs Active (Δ)**: differenza tra il peso proposto e quello corrente — verde se il peso sale, rosso se scende.\n\nClicca 'Approve — apply these weights' per attivare i nuovi pesi. L'approvazione è irreversibile (serve un nuovo ciclo del worker per generare una nuova proposta). Richiede API key valida.",
         },
       ]} />
 
