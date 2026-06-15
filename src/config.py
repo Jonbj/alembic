@@ -33,6 +33,21 @@ class Config(BaseModel):
     LLM_MAX_RETRIES: int = Field(default=3)
     LLM_DAILY_BUDGET_USD: float = Field(default=50.0)
 
+    # Per-model Ollama timeouts (seconds). Override the class default of 90s.
+    # Useful to reduce per-model timeout when a model is known to be rate-limited.
+    OLLAMA_KIMI_TIMEOUT_SECONDS: int = Field(
+        default_factory=lambda: int(os.environ.get("OLLAMA_KIMI_TIMEOUT_SECONDS", "90"))
+    )
+    OLLAMA_QWEN_TIMEOUT_SECONDS: int = Field(
+        default_factory=lambda: int(os.environ.get("OLLAMA_QWEN_TIMEOUT_SECONDS", "90"))
+    )
+    OLLAMA_DEEPSEEK_TIMEOUT_SECONDS: int = Field(
+        default_factory=lambda: int(os.environ.get("OLLAMA_DEEPSEEK_TIMEOUT_SECONDS", "90"))
+    )
+    OLLAMA_GLM_TIMEOUT_SECONDS: int = Field(
+        default_factory=lambda: int(os.environ.get("OLLAMA_GLM_TIMEOUT_SECONDS", "90"))
+    )
+
     # Model costs (per 1M tokens) - should be loaded from config YAML in production
     # All 14 models from models.md (8 general purpose + 6 coding specialized)
     MODEL_COSTS: dict[str, tuple[float, float]] = Field(

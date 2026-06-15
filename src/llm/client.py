@@ -759,21 +759,25 @@ class OllamaKimiClient(OllamaCloudClient):
     """Kimi-k2.6 via Ollama cloud HTTP API — thinking model, long context."""
     model_id = "kimi-k2.6:cloud"
     model_name = "Kimi k2.6 (Ollama)"
+    _OLLAMA_TIMEOUT = config.OLLAMA_KIMI_TIMEOUT_SECONDS
 
 
 class OllamaGlmClient(OllamaCloudClient):
     """GLM-5.1 via Ollama cloud HTTP API."""
     model_id = "glm-5.1:cloud"
     model_name = "GLM 5.1 (Ollama)"
+    _OLLAMA_TIMEOUT = config.OLLAMA_GLM_TIMEOUT_SECONDS
 
 
 class OllamaQwen35Client(OllamaCloudClient):
     """Qwen3.5 via Ollama cloud HTTP API."""
     model_id = "qwen3.5:cloud"
     model_name = "Qwen 3.5 (Ollama)"
+    _OLLAMA_TIMEOUT = config.OLLAMA_QWEN_TIMEOUT_SECONDS
 
 
 class OllamaDeepseekClient(OllamaCloudClient):
     """DeepSeek V4 Pro via Ollama cloud HTTP API."""
     model_id = "deepseek-v4-pro:cloud"
     model_name = "DeepSeek V4 Pro (Ollama)"
+    _OLLAMA_TIMEOUT = config.OLLAMA_DEEPSEEK_TIMEOUT_SECONDS
