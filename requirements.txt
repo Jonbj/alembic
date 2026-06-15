@@ -37,6 +37,9 @@ yfinance>=0.2.40
 # Config
 pyyaml>=6.0
 
+# RSS feeds
+feedparser>=6.0
+
 # Broker
 alpaca-py>=0.38
 aiohttp>=3.9
