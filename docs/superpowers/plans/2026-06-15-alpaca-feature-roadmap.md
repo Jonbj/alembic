@@ -1,9 +1,15 @@
 # Piano: Alpaca Feature Roadmap
 
 **Data creazione:** 2026-06-15  
+**Aggiornato:** 2026-06-16  
 **Sessione:** Alpaca feature discovery, poi implementazione incrementale P0→P3  
 **File principale modificato:** `src/workers/portfolio_scheduler.py`  
-**Stato:** P0 in corso
+**Stato:** P0 ✅ P1 ✅ P2 ✅ (P2-A, P2-D) — P2-B, P2-C, P2-E da fare — P3 non pianificato
+
+## Commit history
+- `a4fc500` feat(alpaca): P0 — bulk cancel, clock check, adjustment=ALL, account flags, fill reconciliation
+- `d4a0005` feat(alpaca): P1 — Snapshot API, fractionable pre-flight  
+- `4ba95e7` feat(alpaca): P2 — bracket orders (opt-in), WebSocket news streaming
 
 ---
 
