@@ -334,8 +334,10 @@ class TestRebalanceFrequency:
         assert len(orders) > 0
 
     def test_same_week_call_returns_no_orders(self) -> None:
+        # Default S4Config is DAILY — use WEEKLY explicitly to test weekly gate.
         df = _make_signals_df([f"T{i:02d}" for i in range(5)])
-        strat = NewsDrivenTactical(S4Config(), signals=df)
+        cfg = S4Config(rebalance_frequency=RebalanceFrequency.WEEKLY)
+        strat = NewsDrivenTactical(cfg, signals=df)
         portfolio = VirtualPortfolio(initial_cash=100_000.0)
         market1 = _mock_market(*[(f"T{i:02d}", 50.0) for i in range(5)])
         market2 = _mock_market(*[(f"T{i:02d}", 50.0) for i in range(5)])
@@ -345,8 +347,10 @@ class TestRebalanceFrequency:
         assert orders == []
 
     def test_next_week_call_rebalances(self) -> None:
+        # Use WEEKLY explicitly so this test is independent of config defaults.
         df = _make_signals_df([f"T{i:02d}" for i in range(5)])
-        strat = NewsDrivenTactical(S4Config(), signals=df)
+        cfg = S4Config(rebalance_frequency=RebalanceFrequency.WEEKLY)
+        strat = NewsDrivenTactical(cfg, signals=df)
         portfolio = VirtualPortfolio(initial_cash=100_000.0)
         market1 = _mock_market(*[(f"T{i:02d}", 50.0) for i in range(5)])
         market2 = _mock_market(*[(f"T{i:02d}", 50.0) for i in range(5)])

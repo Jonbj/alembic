@@ -84,13 +84,14 @@ def test_get_orders_with_limit():
 
 class TestTradesEndpoints:
     def test_get_trades_returns_list(self):
-        from src.api.deps import get_pg_store
+        from src.api.deps import get_alpaca_trading_client, get_pg_store
         mock_pg = MagicMock()
         mock_pg.fetch_trades.return_value = [
             {"id": 1, "symbol": "AAPL", "entry_time": "2026-06-05T10:00:00+00:00",
              "net_pnl": 12.5, "exit_time": None}
         ]
         app.dependency_overrides[get_pg_store] = lambda: mock_pg
+        app.dependency_overrides[get_alpaca_trading_client] = lambda: MagicMock()
         app.dependency_overrides[require_api_key] = lambda: "test-key"
 
         tc = TestClient(app)

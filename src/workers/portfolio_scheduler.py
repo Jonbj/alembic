@@ -78,6 +78,17 @@ def _fire_alert(notifier, message: str, level: AlertLevel) -> None:
         log.warning("Telegram alert send failed: %s", exc)
 
 
+def _emergency_cancel_all(api_key: str, secret_key: str, paper: bool) -> None:
+    """Cancel all pending Alpaca orders. Called from kill-switch path before aborting cycle."""
+    from alpaca.trading.client import TradingClient as _TC
+    try:
+        _tc = _TC(api_key=api_key, secret_key=secret_key, paper=paper)
+        _tc.cancel_orders()
+        log.warning("EMERGENCY: cancelled all pending Alpaca orders (kill-switch active)")
+    except Exception as exc:
+        log.warning("EMERGENCY cancel_orders failed: %s", exc)
+
+
 _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
 
 
@@ -117,7 +128,7 @@ def run_portfolio_cycle() -> dict:
 def _run_cycle_inner() -> dict:
     """Inner cycle logic, separated for testability."""
     import pandas as pd
-    from alpaca.data.enums import DataFeed
+    from alpaca.data.enums import Adjustment, DataFeed
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
@@ -150,6 +161,12 @@ def _run_cycle_inner() -> dict:
                 except Exception:
                     reason = "unknown"
                 log.warning("Portfolio cycle skipped — kill-switch active: %s", reason)
+                # P0-A: Cancel any pending orders to prevent stale fills after kill-switch.
+                _emergency_cancel_all(
+                    api_key=config.ALPACA_API_KEY,
+                    secret_key=config.ALPACA_SECRET_KEY,
+                    paper="paper-api" in config.ALPACA_BASE_URL,
+                )
                 return {"skipped": True, "reason": f"killswitch:{reason}"}
         finally:
             _r_ks.close()
@@ -165,6 +182,45 @@ def _run_cycle_inner() -> dict:
     if not active:
         log.warning("No active strategies in registry — skipping portfolio cycle")
         return {"skipped": True, "reason": "no_active_strategies"}
+
+    # Single TradingClient instance shared across all pre-flight checks and order submission.
+    trading_client = TradingClient(
+        api_key=config.ALPACA_API_KEY,
+        secret_key=config.ALPACA_SECRET_KEY,
+        paper="paper-api" in config.ALPACA_BASE_URL,
+    )
+
+    # P0-B: Market clock pre-flight — skip cycle if NYSE is closed (handles early-close days).
+    try:
+        clock = trading_client.get_clock()
+        if not clock.is_open:
+            log.info("Market closed (next open: %s) — skipping portfolio cycle", clock.next_open)
+            return {"skipped": True, "reason": "market_closed", "next_open": str(clock.next_open)}
+    except Exception as _clk_exc:
+        log.warning("Could not fetch market clock: %s — proceeding anyway", _clk_exc)
+
+    # P0-D: Account pre-flight — abort if Alpaca has blocked the account.
+    try:
+        account = trading_client.get_account()
+        cash = float(account.cash)
+        equity = float(account.equity)
+    except Exception as exc:
+        # B2 — Alpaca unreachable: CRITICAL alert, abort cycle (don't trade blind).
+        msg = f"🚨 Portfolio cycle: Alpaca API unreachable — cycle aborted.\n<code>{exc}</code>"
+        _fire_alert(notifier, msg, AlertLevel.CRITICAL)
+        log.error("Failed to fetch Alpaca account: %s — aborting cycle", exc)
+        return {"error": "alpaca_unreachable"}
+
+    # Use `is True` (not truthy) so MagicMock objects in tests don't trigger this.
+    if account.trading_blocked is True or account.account_blocked is True:
+        msg = "🚨 Portfolio cycle: account bloccato da Alpaca (trading_blocked o account_blocked) — ciclo abortito"
+        _fire_alert(notifier, msg, AlertLevel.CRITICAL)
+        log.error("Alpaca account blocked — aborting cycle (trading_blocked=%s, account_blocked=%s)",
+                  account.trading_blocked, account.account_blocked)
+        return {"skipped": True, "reason": "account_blocked"}
+
+    buying_power = float(account.buying_power) if account.buying_power else cash
+    log.debug("Account: equity=%.2f, cash=%.2f, buying_power=%.2f", equity, cash, buying_power)
 
     # Fetch price history
     data_client = StockHistoricalDataClient(
@@ -185,6 +241,7 @@ def _run_cycle_inner() -> dict:
             timeframe=TimeFrame.Day,
             start=start, end=end,
             feed=DataFeed.IEX,
+            adjustment=Adjustment.ALL,
         )
         raw = data_client.get_stock_bars(request).df
         if not raw.empty:
@@ -219,23 +276,6 @@ def _run_cycle_inner() -> dict:
         volumes={sym: 1_000_000.0 for sym in latest_prices},
         adv_20d={sym: 1_000_000.0 for sym in latest_prices},
     )
-
-    # Build portfolio proxy
-    trading_client = TradingClient(
-        api_key=config.ALPACA_API_KEY,
-        secret_key=config.ALPACA_SECRET_KEY,
-        paper="paper-api" in config.ALPACA_BASE_URL,
-    )
-    try:
-        account = trading_client.get_account()
-        cash = float(account.cash)
-        equity = float(account.equity)
-    except Exception as exc:
-        # B2 — Alpaca unreachable: CRITICAL alert, abort cycle (don't trade blind).
-        msg = f"🚨 Portfolio cycle: Alpaca API unreachable — cycle aborted.\n<code>{exc}</code>"
-        _fire_alert(notifier, msg, AlertLevel.CRITICAL)
-        log.error("Failed to fetch Alpaca account: %s — aborting cycle", exc)
-        return {"error": "alpaca_unreachable"}
 
     # B1 — Portfolio drawdown cap: update peak equity in Redis, halt if drawdown breached.
     try:

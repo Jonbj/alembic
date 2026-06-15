@@ -527,3 +527,174 @@ def test_portfolio_cycle_s4_signals_produce_multi_symbol_orders():
         f"S4 has 30% allocation and bucket_pct=0.10, which should produce "
         f"non-zero BUY orders on a $100k portfolio."
     )
+
+
+# ── P0-A: emergency cancel on kill-switch ────────────────────────────────────
+
+
+def test_emergency_cancel_called_when_killswitch_active():
+    """cancel_orders() is called when kill-switch Redis key is set."""
+    from src.workers.portfolio_scheduler import _run_cycle_inner
+
+    bars_df = _make_bars_df(n=100, symbols=["SPY"])
+    raw_df = bars_df.reset_index().rename(columns={"index": "timestamp"})
+    raw_df.columns.name = "symbol"
+
+    with patch("src.strategies.registry.StrategyRegistry") as mock_reg, \
+         patch("alpaca.data.historical.StockHistoricalDataClient") as mock_dc, \
+         patch("alpaca.trading.client.TradingClient") as mock_tc, \
+         patch("redis.Redis") as mock_redis_cls, \
+         patch("src.workers.portfolio_scheduler._emergency_cancel_all") as mock_cancel:
+
+        entry = MagicMock()
+        entry.strategy_id = "S1"
+        mock_reg.return_value.get_active_strategies.return_value = [entry]
+        mock_dc.return_value.get_stock_bars.return_value.df = raw_df
+
+        redis_inst = MagicMock()
+        redis_inst.get.side_effect = lambda key: "1" if key == "killswitch_active" else None
+        redis_inst.get.return_value = None
+
+        def _redis_get(key):
+            return "1" if key == "killswitch_active" else None
+
+        redis_inst.get.side_effect = _redis_get
+        mock_redis_cls.from_url.return_value = redis_inst
+
+        result = _run_cycle_inner()
+
+    assert result["skipped"] is True
+    assert "killswitch" in result["reason"]
+    mock_cancel.assert_called_once()
+
+
+# ── P0-B: market clock pre-flight ────────────────────────────────────────────
+
+
+def test_cycle_skips_when_market_closed():
+    """Cycle returns market_closed when get_clock().is_open is False."""
+    from src.workers.portfolio_scheduler import _run_cycle_inner
+
+    bars_df = _make_bars_df(n=100, symbols=["SPY"])
+
+    with patch("src.strategies.registry.StrategyRegistry") as mock_reg, \
+         patch("alpaca.data.historical.StockHistoricalDataClient"), \
+         patch("alpaca.trading.client.TradingClient") as mock_tc, \
+         patch("redis.Redis") as mock_redis_cls:
+
+        entry = MagicMock()
+        entry.strategy_id = "S1"
+        mock_reg.return_value.get_active_strategies.return_value = [entry]
+
+        clock = MagicMock()
+        clock.is_open = False
+        clock.next_open = "2026-06-16T13:30:00+00:00"
+        mock_tc.return_value.get_clock.return_value = clock
+
+        redis_inst = MagicMock()
+        redis_inst.get.return_value = None
+        mock_redis_cls.from_url.return_value = redis_inst
+
+        result = _run_cycle_inner()
+
+    assert result == {"skipped": True, "reason": "market_closed",
+                      "next_open": "2026-06-16T13:30:00+00:00"}
+
+
+def test_cycle_proceeds_when_market_open():
+    """Cycle does NOT return market_closed when get_clock().is_open is True."""
+    from src.workers.portfolio_scheduler import _run_cycle_inner
+
+    bars_df = _make_bars_df(n=100, symbols=["SPY"])
+    raw_df = bars_df.copy()
+    raw_df.index.name = "timestamp"
+    raw_df.columns.name = "symbol"
+    raw_df = raw_df.reset_index()
+
+    with patch("src.strategies.registry.StrategyRegistry") as mock_reg, \
+         patch("alpaca.data.historical.StockHistoricalDataClient") as mock_dc, \
+         patch("alpaca.trading.client.TradingClient") as mock_tc, \
+         patch("src.portfolio.orchestrator.PortfolioOrchestrator") as mock_orch, \
+         patch("src.backtest.engine.data_replay.DataReplay"), \
+         patch("src.backtest.engine.portfolio.VirtualPortfolio"), \
+         patch("src.workers.portfolio_scheduler._persist_cycle_result"), \
+         patch("src.workers.portfolio_scheduler._submit_portfolio_orders"), \
+         patch("redis.Redis") as mock_redis_cls:
+
+        entry = MagicMock()
+        entry.strategy_id = "S1"
+        entry.allocation_pct = 1.0
+        mock_reg.return_value.get_active_strategies.return_value = [entry]
+
+        mock_dc.return_value.get_stock_bars.return_value.df = raw_df
+
+        clock = MagicMock()
+        clock.is_open = True
+        account = MagicMock()
+        account.cash = "100000"
+        account.equity = "100000"
+        account.buying_power = "100000"
+        account.trading_blocked = False
+        account.account_blocked = False
+        mock_tc.return_value.get_clock.return_value = clock
+        mock_tc.return_value.get_account.return_value = account
+        mock_tc.return_value.get_all_positions.return_value = []
+
+        mock_cycle_result = MagicMock()
+        mock_cycle_result.final_orders = []
+        mock_cycle_result.strategies_run = ["S1"]
+        mock_cycle_result.orders_before_constraints = 0
+        mock_cycle_result.orders_after_constraints = 0
+        mock_cycle_result.constraints_fired = []
+        mock_orch.return_value.run_cycle.return_value = mock_cycle_result
+
+        redis_inst = MagicMock()
+        redis_inst.get.return_value = None
+        mock_redis_cls.from_url.return_value = redis_inst
+
+        result = _run_cycle_inner()
+
+    assert result.get("reason") != "market_closed"
+
+
+# ── P0-D: account blocking flags ─────────────────────────────────────────────
+
+
+def test_cycle_aborts_when_trading_blocked():
+    """Cycle returns account_blocked when account.trading_blocked is True."""
+    from src.workers.portfolio_scheduler import _run_cycle_inner
+
+    bars_df = _make_bars_df(n=100, symbols=["SPY"])
+    raw_df = bars_df.copy()
+    raw_df.index.name = "timestamp"
+    raw_df.columns.name = "symbol"
+    raw_df = raw_df.reset_index()
+
+    with patch("src.strategies.registry.StrategyRegistry") as mock_reg, \
+         patch("alpaca.data.historical.StockHistoricalDataClient") as mock_dc, \
+         patch("alpaca.trading.client.TradingClient") as mock_tc, \
+         patch("redis.Redis") as mock_redis_cls:
+
+        entry = MagicMock()
+        entry.strategy_id = "S1"
+        mock_reg.return_value.get_active_strategies.return_value = [entry]
+
+        mock_dc.return_value.get_stock_bars.return_value.df = raw_df
+
+        clock = MagicMock()
+        clock.is_open = True
+        account = MagicMock()
+        account.cash = "100000"
+        account.equity = "100000"
+        account.trading_blocked = True   # blocked!
+        account.account_blocked = False
+        mock_tc.return_value.get_clock.return_value = clock
+        mock_tc.return_value.get_account.return_value = account
+
+        redis_inst = MagicMock()
+        redis_inst.get.return_value = None
+        mock_redis_cls.from_url.return_value = redis_inst
+
+        result = _run_cycle_inner()
+
+    assert result == {"skipped": True, "reason": "account_blocked"}

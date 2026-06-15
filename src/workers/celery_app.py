@@ -65,6 +65,13 @@ app.conf.beat_schedule = {
         "task": "src.workers.performance.run_forward_return_worker",
         "schedule": crontab(hour=22, minute=0),
     },
+    # P0-E: Reconcile fill prices same evening (21:30 UTC = ~1h after NYSE close).
+    # run_daily_report at 03:00 UTC already calls reconcile_trade_fills, but trades
+    # placed today stay NULL overnight without this earlier reconciliation pass.
+    "reconcile-fills-evening": {
+        "task": "src.workers.performance.run_daily_report",
+        "schedule": crontab(hour=21, minute=30, day_of_week="1-5"),
+    },
     # Performance daily report at 03:00 UTC
     "performance-daily": {
         "task": "src.workers.performance.run_daily_report",
