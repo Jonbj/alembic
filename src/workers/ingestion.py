@@ -36,6 +36,7 @@ from redis import Redis
 from src.config import config
 from src.connectors.alpaca_news import AlpacaNewsConnector
 from src.connectors.deduplicator import Deduplicator
+from src.connectors.sec_edgar import SECEdgarConnector
 from src.connectors.gdelt_gkg import GDELTGKGConnector
 from src.connectors.marketaux import MarketAuxConnector
 from src.connectors.ticker_extractor import TickerExtractor
@@ -296,6 +297,60 @@ def run_alpaca_ingestion_worker() -> dict:
         log.info("Alpaca ingestion stats: %s", stats)
         return stats
 
+    finally:
+        redis_client.close()
+
+
+async def _fetch_sec_edgar_items(connector) -> list:
+    """Drain the async SEC EDGAR iterator into a concrete list."""
+    return [item async for item in connector.fetch()]
+
+
+def _process_sec_edgar_items(
+    items: list,
+    watchlist: set,
+    deduplicator,
+    redis_client,
+) -> dict:
+    """Filter by watchlist, deduplicate, and push EDGAR NewsItems to news:queue."""
+    stats = {"fetched": 0, "queued": 0, "filtered": 0, "duplicates": 0}
+    for item in items:
+        stats["fetched"] += 1
+        ticker = item.asset_tags[0] if item.asset_tags else None
+        if not ticker or ticker not in watchlist:
+            stats["filtered"] += 1
+            continue
+        if deduplicator.is_duplicate_by_id(item):
+            stats["duplicates"] += 1
+            continue
+        redis_client.rpush("news:queue", item.model_dump_json())
+        stats["queued"] += 1
+    return stats
+
+
+@app.task(name="src.workers.ingestion.run_sec_edgar_ingestion_worker")
+def run_sec_edgar_ingestion_worker() -> dict:
+    """Celery entry-point: fetch SEC 8-K/10-Q/10-K filings, push to news:queue.
+
+    Fetches today's EDGAR filings, filters by WATCHLIST_SYMBOLS, deduplicates,
+    and pushes to news:queue for the SentimentWorker. Zero API cost (public API).
+
+    Schedule: every 30 min, Mon-Fri 14:00-21:00 UTC.
+    """
+    redis_client = Redis.from_url(config.REDIS_URL)
+    try:
+        connector = SECEdgarConnector(form_types=["8-K", "10-Q", "10-K"])
+        watchlist = set(config.WATCHLIST_SYMBOLS or [])
+        deduplicator = Deduplicator(redis_client)
+
+        items = asyncio.run(_fetch_sec_edgar_items(connector))
+        stats = _process_sec_edgar_items(items, watchlist, deduplicator, redis_client)
+
+        log.info("SEC EDGAR ingestion stats: %s", stats)
+        return stats
+    except Exception as exc:
+        log.error("SEC EDGAR ingestion failed: %s", exc, exc_info=True)
+        return {"error": str(exc)}
     finally:
         redis_client.close()
 

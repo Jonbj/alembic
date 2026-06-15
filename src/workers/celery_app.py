@@ -120,6 +120,13 @@ app.conf.beat_schedule = {
         "task": "src.workers.ingestion.run_alpaca_ingestion_worker",
         "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
     },
+    # SEC EDGAR filings every 30 min during market hours.
+    # 8-K filings = earnings, M&A, guidance revision — high signal/noise ratio.
+    # Public API, zero cost. Filters by WATCHLIST_SYMBOLS.
+    "run-sec-edgar-ingestion": {
+        "task": "src.workers.ingestion.run_sec_edgar_ingestion_worker",
+        "schedule": crontab(minute="*/30", hour="14-21", day_of_week="1-5"),
+    },
     # Execution worker every 15 min Mon-Fri during market hours.
     # Reads LLM signals from Redis and places orders via Alpaca paper/live.
     "run-execution": {
