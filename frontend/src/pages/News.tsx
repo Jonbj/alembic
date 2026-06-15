@@ -57,7 +57,7 @@ export default function News() {
           <option value="">All sources</option>
           <option value="gdelt_gkg">GDELT GKG</option>
           <option value="marketaux">MarketAux</option>
-          <option value="alpaca">Alpaca</option>
+          <option value="alpaca_benzinga">Alpaca / Benzinga</option>
         </select>
         <span style={{ color: 'var(--text-muted)', alignSelf: 'center', fontSize: 12 }}>{news.length} articles</span>
       </div>
@@ -93,6 +93,11 @@ export default function News() {
                 {expanded === item.id && (
                   <tr>
                     <td colSpan={5} style={{ background: '#f8fafc', padding: '12px 16px' }}>
+                      {item.body_snippet && (
+                        <p style={{ fontSize: 12, color: 'var(--text)', marginBottom: 8, lineHeight: 1.5 }}>
+                          {item.body_snippet}
+                        </p>
+                      )}
                       {(() => {
                         const href = safeUrl(item.url)
                         return href

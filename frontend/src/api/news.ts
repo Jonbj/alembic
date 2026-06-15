@@ -7,6 +7,7 @@ export interface NewsItem {
   source: string
   ticker: string
   raw_sentiment: number | null
+  body_snippet: string | null
   fetched_at: string
 }
 

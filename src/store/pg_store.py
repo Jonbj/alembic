@@ -846,7 +846,7 @@ class PostgreSQLStore:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT id, title, url, source, ticker, raw_sentiment, fetched_at "
+                    f"SELECT id, title, url, source, ticker, raw_sentiment, body_snippet, fetched_at "
                     f"FROM news_log {where} ORDER BY fetched_at DESC LIMIT %s",
                     params,
                 )
