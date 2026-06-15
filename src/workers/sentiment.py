@@ -199,6 +199,10 @@ async def process_news_item(
             redis_store.reset_fallback_counter()
         signal_id = pg_store.write_signal(result)
         redis_store.write_sentiment(result, signal_id=signal_id)
+        try:
+            redis_store.append_signal_history(result.symbol, result.score)
+        except Exception as _vh_exc:
+            log.debug("Could not append signal history for %s: %s", result.symbol, _vh_exc)
         news_log_id = pg_store.log_news_item(
             item=item, ticker=ticker, computed_sentiment=result.score
         )

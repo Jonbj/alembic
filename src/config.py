@@ -137,6 +137,16 @@ class Config(BaseModel):
         )
     )
 
+    # Signal velocity: rate of change of sentiment score across recent cycles.
+    # velocity = scores[0] - scores[-1] over last 3 history entries.
+    # If |velocity| > threshold, apply ±boost multiplier to S4 scores.
+    SIGNAL_VELOCITY_THRESHOLD: float = Field(
+        default_factory=lambda: float(os.environ.get("SIGNAL_VELOCITY_THRESHOLD", "0.30"))
+    )
+    SIGNAL_VELOCITY_BOOST: float = Field(
+        default_factory=lambda: float(os.environ.get("SIGNAL_VELOCITY_BOOST", "0.20"))
+    )
+
     # Fallback settings
     MAX_CONSECUTIVE_FALLBACKS: int = Field(default=3)
 

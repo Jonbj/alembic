@@ -102,6 +102,30 @@ class RedisStore:
             else:
                 raise
 
+    def append_signal_history(self, symbol: str, score: float) -> None:
+        """Append score to signal history list (max 5 entries, newest first).
+
+        Key: signal:{symbol}:history — Redis list, LPUSH keeps newest at index 0.
+        """
+        key = f"signal:{symbol}:history"
+        self._r.lpush(key, json.dumps({"score": score}))
+        self._r.ltrim(key, 0, 4)  # keep last 5
+
+    def get_signal_history(self, symbol: str, n: int = 3) -> list:
+        """Return the last n sentiment scores for symbol (newest first).
+
+        Returns empty list if no history exists or on any error.
+        """
+        key = f"signal:{symbol}:history"
+        raw_list = self._r.lrange(key, 0, n - 1)
+        scores = []
+        for raw in raw_list:
+            try:
+                scores.append(float(json.loads(raw)["score"]))
+            except (KeyError, ValueError, TypeError):
+                pass
+        return scores
+
     def read_sentiment(self, symbol: str) -> dict | None:
         """
         Read cached sentiment for a symbol.

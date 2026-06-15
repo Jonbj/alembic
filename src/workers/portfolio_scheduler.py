@@ -693,6 +693,33 @@ def _build_strategy_instance(entry, bars_df):
         finally:
             if store is not None:
                 store.close()
+        # Apply signal velocity multiplier to S4 scores before strategy sees them.
+        if signals_df is not None and not signals_df.empty:
+            try:
+                from redis import Redis as _RedisSV
+                from src.config import config as _cfg_sv
+                _r_sv = _RedisSV.from_url(_cfg_sv.REDIS_URL, decode_responses=True)
+                try:
+                    multipliers = {
+                        sym: _compute_signal_velocity(
+                            sym, _r_sv,
+                            threshold=_cfg_sv.SIGNAL_VELOCITY_THRESHOLD,
+                            boost=_cfg_sv.SIGNAL_VELOCITY_BOOST,
+                        )
+                        for sym in signals_df["symbol"].unique()
+                    }
+                finally:
+                    _r_sv.close()
+                signals_df = signals_df.copy()
+                signals_df["score"] = signals_df.apply(
+                    lambda row: row["score"] * multipliers.get(row["symbol"], 1.0),
+                    axis=1,
+                )
+                n_boosted = sum(1 for m in multipliers.values() if m != 1.0)
+                if n_boosted:
+                    log.info("Signal velocity: %d/%d symbols adjusted", n_boosted, len(multipliers))
+            except Exception as exc:
+                log.warning("Signal velocity application failed: %s — using raw scores", exc)
         # Each Celery task creates a fresh instance with _last_rebalance=None.
         # We intentionally do NOT restore last_rebalance from Redis: the daily gate
         # conflicts with intraday 15-min cycling — if S4 runs on a zero-signal
@@ -833,6 +860,40 @@ def _sentiment_reversal_sells(
         except Exception as exc:
             log.debug("Could not read sentiment for %s: %s", pos.symbol, exc)
     return reversal
+
+
+def _compute_signal_velocity(
+    symbol: str,
+    redis_client,
+    threshold: float,
+    boost: float = 0.20,
+) -> float:
+    """Return a score multiplier based on how fast sentiment is changing.
+
+    Reads last 3 entries from signal:{symbol}:history (newest first).
+    velocity = scores[0] - scores[-1]
+    - velocity >  threshold → 1 + boost (accelerating upward)
+    - velocity < -threshold → 1 - boost (accelerating downward)
+    - |velocity| <= threshold → 1.0 (stable, no adjustment)
+
+    Returns 1.0 if fewer than 2 history points exist.
+    """
+    import json as _json
+
+    try:
+        raw_list = redis_client.lrange(f"signal:{symbol}:history", 0, 2)
+        if len(raw_list) < 2:
+            return 1.0
+        scores = [float(_json.loads(r)["score"]) for r in raw_list]
+        velocity = scores[0] - scores[-1]
+        if velocity > threshold:
+            return 1.0 + boost
+        if velocity < -threshold:
+            return 1.0 - boost
+        return 1.0
+    except Exception as exc:
+        log.debug("Signal velocity error for %s: %s", symbol, exc)
+        return 1.0
 
 
 def _persist_cycle_result(cycle_data: dict, conn=None) -> None:
