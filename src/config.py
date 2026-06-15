@@ -128,6 +128,15 @@ class Config(BaseModel):
     ENSEMBLE_MIN_CONFIDENCE: float = Field(default=0.4)
     ENSEMBLE_DIVERGENCE_STD: float = Field(default=0.30)
 
+    # Sentiment reversal exit: if a held position's current LLM score drops below
+    # this threshold, a forced SELL is submitted in the next portfolio cycle.
+    # Default -0.20: clearly negative signal, not just uncertain.
+    SENTIMENT_REVERSAL_EXIT_THRESHOLD: float = Field(
+        default_factory=lambda: float(
+            os.environ.get("SENTIMENT_REVERSAL_EXIT_THRESHOLD", "-0.20")
+        )
+    )
+
     # Fallback settings
     MAX_CONSECUTIVE_FALLBACKS: int = Field(default=3)
 

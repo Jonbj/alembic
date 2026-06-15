@@ -363,6 +363,7 @@ def _run_cycle_inner() -> dict:
     # Without this, the VirtualPortfolio is empty → nav ≈ 0 when account.cash ≈ 0
     # (all equity already invested) → all target quantities ≈ 0 → 0 orders.
     alpaca_entry_prices: dict[str, float] = {}
+    alpaca_positions: list = []
     try:
         alpaca_positions = trading_client.get_all_positions()
         for ap in alpaca_positions:
@@ -373,6 +374,22 @@ def _run_cycle_inner() -> dict:
         log.info("Loaded %d existing Alpaca positions into VirtualPortfolio", len(alpaca_positions))
     except Exception as exc:
         log.warning("Could not load Alpaca positions: %s — VirtualPortfolio starts empty", exc)
+
+    # Sentiment reversal check: find held positions with strongly negative LLM signal.
+    reversal_sell_symbols: set = set()
+    try:
+        from redis import Redis as _RedisRev
+        _r_rev = _RedisRev.from_url(config.REDIS_URL, decode_responses=True)
+        try:
+            reversal_sell_symbols = _sentiment_reversal_sells(
+                alpaca_positions,
+                _r_rev,
+                threshold=config.SENTIMENT_REVERSAL_EXIT_THRESHOLD,
+            )
+        finally:
+            _r_rev.close()
+    except Exception as _rev_exc:
+        log.warning("Sentiment reversal check failed: %s — skipping", _rev_exc)
 
     # Run orchestration cycle
     data_replay = DataReplay(bars_df)
@@ -489,6 +506,36 @@ def _run_cycle_inner() -> dict:
         submitted_orders = _submit_portfolio_orders(
             result.final_orders, trading_client, market, fractionable_symbols=fractionable
         )
+
+    # Submit forced sells for sentiment reversal (symbols not already being sold).
+    if reversal_sell_symbols and operating_mode not in ("dry_run", "halted"):
+        already_selling = {o.symbol for o in result.final_orders if o.side.value == "sell"}
+        to_force_sell = reversal_sell_symbols - already_selling
+        for sym in to_force_sell:
+            try:
+                from alpaca.trading.enums import OrderSide, TimeInForce
+                from alpaca.trading.requests import MarketOrderRequest
+                qty_held = next(
+                    (float(p.qty) for p in alpaca_positions if p.symbol == sym), None
+                )
+                if qty_held and qty_held > 0:
+                    req = MarketOrderRequest(
+                        symbol=sym,
+                        qty=qty_held,
+                        side=OrderSide.SELL,
+                        time_in_force=TimeInForce.DAY,
+                    )
+                    resp = trading_client.submit_order(req)
+                    submitted_orders.append({
+                        "symbol": sym,
+                        "side": "sell",
+                        "order_id": str(resp.id),
+                        "notional": 0.0,
+                        "reason": "sentiment_reversal",
+                    })
+                    log.info("Forced sell submitted for %s (sentiment reversal)", sym)
+            except Exception as _fs_exc:
+                log.warning("Failed to submit forced sell for %s: %s", sym, _fs_exc)
 
     # Write trade entries/exits to DB for P&L tracking.
     # Also back-fill the Alpaca order_id on execution_decisions rows.
@@ -754,6 +801,38 @@ def _submit_portfolio_orders(
         except Exception as exc:
             log.warning("Failed to submit order for %s: %s", order.symbol, exc)
     return submitted
+
+
+def _sentiment_reversal_sells(
+    alpaca_positions: list,
+    redis_client,
+    threshold: float,
+) -> set:
+    """Return symbols held long whose current sentiment score has gone negative.
+
+    Reads signal:{symbol}:sentiment from Redis for each open position.
+    Returns the set of symbols that should be force-sold this cycle.
+    Fail-open: symbols with no signal or unparseable value are NOT sold.
+    """
+    import json as _json
+
+    reversal = set()
+    for pos in alpaca_positions:
+        try:
+            raw = redis_client.get(f"signal:{pos.symbol}:sentiment")
+            if raw is None:
+                continue
+            data = _json.loads(raw)
+            score = float(data.get("score", 0.0))
+            if score < threshold:
+                reversal.add(pos.symbol)
+                log.info(
+                    "Sentiment reversal: %s score=%.3f < threshold=%.2f — forced exit",
+                    pos.symbol, score, threshold,
+                )
+        except Exception as exc:
+            log.debug("Could not read sentiment for %s: %s", pos.symbol, exc)
+    return reversal
 
 
 def _persist_cycle_result(cycle_data: dict, conn=None) -> None:
