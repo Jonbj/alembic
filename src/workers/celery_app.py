@@ -128,11 +128,12 @@ app.conf.beat_schedule = {
         "task": "src.workers.retention.run_retention_sweep",
         "schedule": crontab(hour=3, minute=30),
     },
-    # Portfolio orchestration cycle every 15 min during market hours (Mon-Fri 14:00-21:00 UTC)
-    # Aligned with sentiment pipeline so signals are consumed within 15 min of generation.
+    # Portfolio orchestration cycle every 15 min, offset +7 min after sentiment start.
+    # Sentiment fires at :00/:15/:30/:45 and takes 3-5 min; portfolio at :07/:22/:37/:52
+    # ensures it reads the freshly written signals, not the previous cycle's.
     "portfolio-cycle": {
         "task": "src.workers.portfolio_scheduler.run_portfolio_cycle",
-        "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
+        "schedule": crontab(minute="7,22,37,52", hour="14-21", day_of_week="1-5"),
     },
     # Decay monitor: daily at 21:00 UTC (market close + buffer) for paper trading validation.
     # Change back to crontab(minute=0, hour=23, day_of_month="1") after paper trading phase.
