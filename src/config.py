@@ -86,6 +86,18 @@ class Config(BaseModel):
         default_factory=lambda: os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
     )
 
+    # P2-A: Bracket order parameters. Set ALPACA_BRACKET_ENABLED=true to activate.
+    # Risk/reward 1:2 by default (take_profit at +6%, stop_loss at -3%).
+    ALPACA_BRACKET_ENABLED: bool = Field(
+        default_factory=lambda: os.environ.get("ALPACA_BRACKET_ENABLED", "false").lower() == "true"
+    )
+    ALPACA_TAKE_PROFIT_PCT: float = Field(
+        default_factory=lambda: float(os.environ.get("ALPACA_TAKE_PROFIT_PCT", "0.06"))
+    )
+    ALPACA_STOP_LOSS_PCT: float = Field(
+        default_factory=lambda: float(os.environ.get("ALPACA_STOP_LOSS_PCT", "0.03"))
+    )
+
     # Telegram notifications
     TELEGRAM_BOT_TOKEN: str = Field(default_factory=lambda: os.environ.get("TELEGRAM_BOT_TOKEN", ""))
     TELEGRAM_CHAT_ID: str = Field(default_factory=lambda: os.environ.get("TELEGRAM_CHAT_ID", ""))

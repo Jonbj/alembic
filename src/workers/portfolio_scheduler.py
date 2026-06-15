@@ -695,9 +695,12 @@ def _submit_portfolio_orders(
                     _submit_fn(order, notional, trading_client)
                     alpaca_id = f"test-{order.symbol}-buy"
                 else:
-                    from alpaca.trading.requests import MarketOrderRequest
+                    from alpaca.trading.requests import MarketOrderRequest, StopLossRequest, TakeProfitRequest
+                    from alpaca.trading.enums import OrderClass
+                    from src.config import config as _cfg_order
+
                     if is_fractionable:
-                        req = MarketOrderRequest(
+                        base_kwargs: dict = dict(
                             symbol=order.symbol,
                             notional=notional,
                             side="buy",
@@ -706,12 +709,24 @@ def _submit_portfolio_orders(
                     else:
                         whole_qty = max(1, int(order.quantity))
                         log.info("P1-B: %s not fractionable — using qty=%d instead of notional", order.symbol, whole_qty)
-                        req = MarketOrderRequest(
+                        base_kwargs = dict(
                             symbol=order.symbol,
                             qty=whole_qty,
                             side="buy",
                             time_in_force="day",
                         )
+
+                    # P2-A: Bracket order — attach take-profit and stop-loss legs when enabled.
+                    # Requires a known entry price (use snapshot price, not notional).
+                    if _cfg_order.ALPACA_BRACKET_ENABLED and price and price > 0:
+                        tp_price = round(price * (1 + _cfg_order.ALPACA_TAKE_PROFIT_PCT), 2)
+                        sl_price = round(price * (1 - _cfg_order.ALPACA_STOP_LOSS_PCT), 2)
+                        base_kwargs["order_class"] = OrderClass.BRACKET
+                        base_kwargs["take_profit"] = TakeProfitRequest(limit_price=tp_price)
+                        base_kwargs["stop_loss"] = StopLossRequest(stop_price=sl_price)
+                        log.debug("P2-A bracket %s: tp=%.2f sl=%.2f (entry≈%.2f)", order.symbol, tp_price, sl_price, price)
+
+                    req = MarketOrderRequest(**base_kwargs)
                     alpaca_order = trading_client.submit_order(req)
                     alpaca_id = str(alpaca_order.id)
                 submitted.append({"symbol": order.symbol, "side": "buy", "order_id": alpaca_id, "notional": notional})
