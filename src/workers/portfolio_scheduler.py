@@ -321,6 +321,20 @@ def _run_cycle_inner() -> dict:
         len(result.final_orders),
     )
 
+    # Persist S4 rebalance timestamp so the daily gate survives across cycle instances.
+    # Written regardless of whether weights were non-empty: a run that found no
+    # qualifying signals is still a valid "today's position = cash" decision.
+    if "S4" in result.strategies_run:
+        try:
+            from redis import Redis as _RedisPR
+            _r_pr = _RedisPR.from_url(config.REDIS_URL, decode_responses=True)
+            try:
+                _r_pr.setex("s4:last_rebalance", 86400 * 2, ts.isoformat())
+            finally:
+                _r_pr.close()
+        except Exception as _pr_exc:
+            log.warning("Failed to persist S4 last_rebalance to Redis: %s", _pr_exc)
+
     # Log decisions to execution_decisions so the UI Decision Log tab is populated.
     # Also capture decision_ids for later trade DB writes.
     _symbol_decisions: dict[str, dict] = {}  # {symbol: {decision_id, score, signal_id}}
@@ -555,7 +569,26 @@ def _build_strategy_instance(entry, bars_df):
         finally:
             if store is not None:
                 store.close()
-        return NewsDrivenTactical(config=s4_config, signals=signals_df)
+        instance = NewsDrivenTactical(config=s4_config, signals=signals_df)
+        # Restore last_rebalance from Redis so the daily gate persists across
+        # cycle invocations (each call creates a fresh instance with _last_rebalance=None).
+        try:
+            from redis import Redis as _RedisSR
+            from src.config import config as _cfgsr
+            _r_sr = _RedisSR.from_url(_cfgsr.REDIS_URL, decode_responses=True)
+            try:
+                _raw_lr = _r_sr.get("s4:last_rebalance")
+                if _raw_lr:
+                    _lr_dt = datetime.fromisoformat(_raw_lr)
+                    if _lr_dt.tzinfo is None:
+                        from datetime import timezone as _tz
+                        _lr_dt = _lr_dt.replace(tzinfo=_tz.utc)
+                    instance._last_rebalance = _lr_dt
+            finally:
+                _r_sr.close()
+        except Exception as _lr_exc:
+            log.debug("Could not restore S4 last_rebalance from Redis: %s", _lr_exc)
+        return instance
 
     log.warning("Unknown strategy_id '%s' — skipping", sid)
     return None

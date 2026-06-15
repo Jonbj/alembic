@@ -163,10 +163,10 @@ class NewsDrivenTactical:
         return results
 
     def _should_rebalance(self, ts: datetime) -> bool:
-        if self._config.rebalance_frequency == RebalanceFrequency.DAILY:
-            return True
         if self._last_rebalance is None:
             return True
+        if self._config.rebalance_frequency == RebalanceFrequency.DAILY:
+            return ts.date() != self._last_rebalance.date()
         if self._config.rebalance_frequency == RebalanceFrequency.WEEKLY:
             return (
                 ts.isocalendar().week != self._last_rebalance.isocalendar().week

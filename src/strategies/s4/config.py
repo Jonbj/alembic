@@ -14,7 +14,7 @@ class S4Config:
     min_confidence: float = 0.3
     min_score: float = 0.1
     min_stocks: int = 2
-    signals_lookback_hours: int = 4
+    signals_lookback_hours: int = 24
     rebalance_frequency: RebalanceFrequency = field(
-        default=RebalanceFrequency.WEEKLY
+        default=RebalanceFrequency.DAILY
     )
