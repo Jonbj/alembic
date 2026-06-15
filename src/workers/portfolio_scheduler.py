@@ -30,6 +30,12 @@ log = logging.getLogger(__name__)
 
 _PRICE_BARS = 300
 
+# P1-B: In-memory cache for fractionable asset flags (refreshed every 24h per worker process).
+import time as _time
+_FRACTIONABLE_CACHE: dict[str, bool] = {}
+_FRACTIONABLE_CACHE_TS: float = 0.0
+_FRACTIONABLE_CACHE_TTL: float = 86400.0
+
 
 def _portfolio_postmortem(
     pg_store,
@@ -90,6 +96,28 @@ def _emergency_cancel_all(api_key: str, secret_key: str, paper: bool) -> None:
 
 
 _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
+
+
+def _get_fractionable_symbols(trading_client) -> set[str]:
+    """Return set of symbols that support fractional/notional orders.
+
+    Results are cached in-memory for 24h per worker process to avoid N API
+    calls per cycle. Falls back to treating all symbols as fractionable on error.
+    """
+    global _FRACTIONABLE_CACHE, _FRACTIONABLE_CACHE_TS
+    now = _time.monotonic()
+    if _FRACTIONABLE_CACHE and (now - _FRACTIONABLE_CACHE_TS) < _FRACTIONABLE_CACHE_TTL:
+        return {sym for sym, ok in _FRACTIONABLE_CACHE.items() if ok}
+    try:
+        from alpaca.trading.requests import GetAssetsRequest
+        from alpaca.trading.enums import AssetStatus
+        assets = trading_client.get_all_assets(GetAssetsRequest(status=AssetStatus.ACTIVE))
+        _FRACTIONABLE_CACHE = {a.symbol: bool(a.fractionable) for a in assets if a.symbol}
+        _FRACTIONABLE_CACHE_TS = now
+        log.debug("P1-B: loaded fractionable flags for %d assets", len(_FRACTIONABLE_CACHE))
+    except Exception as exc:
+        log.warning("P1-B: failed to load fractionable assets: %s — assuming all fractionable", exc)
+    return {sym for sym, ok in _FRACTIONABLE_CACHE.items() if ok}
 
 
 def _load_execution_engine() -> str:
@@ -264,11 +292,31 @@ def _run_cycle_inner() -> dict:
         except Exception as exc:
             log.error("Failed to build instance for %s: %s", entry.strategy_id, exc)
 
-    # Build market snapshot
+    # Build market snapshot — seed prices from daily bar closes.
     latest_prices = {}
     for sym in bars_df.columns:
         if not bars_df[sym].dropna().empty:
             latest_prices[sym] = float(bars_df[sym].dropna().iloc[-1])
+
+    # P1-A: Refresh prices from Snapshot API (latest_trade price, then minute_bar close).
+    # This replaces yesterday's close with the current intraday price for order sizing.
+    try:
+        from alpaca.data.requests import StockSnapshotRequest
+        snap_req = StockSnapshotRequest(symbol_or_symbols=symbols, feed=DataFeed.IEX)
+        snapshots = data_client.get_stock_snapshot(snap_req)
+        refreshed = 0
+        for sym, snap in snapshots.items():
+            price = None
+            if snap.latest_trade and snap.latest_trade.price:
+                price = float(snap.latest_trade.price)
+            elif snap.minute_bar and snap.minute_bar.close:
+                price = float(snap.minute_bar.close)
+            if price and price > 0:
+                latest_prices[sym] = price
+                refreshed += 1
+        log.debug("P1-A Snapshot: refreshed %d/%d prices from Alpaca real-time", refreshed, len(symbols))
+    except Exception as _snap_exc:
+        log.warning("Snapshot API failed: %s — using bar closes for pricing", _snap_exc)
 
     market = MarketSnapshot(
         timestamp=end,
@@ -437,7 +485,10 @@ def _run_cycle_inner() -> dict:
         log.info("Skipping order submission - %s mode", operating_mode)
         submitted_orders: list[dict] = []
     else:
-        submitted_orders = _submit_portfolio_orders(result.final_orders, trading_client, market)
+        fractionable = _get_fractionable_symbols(trading_client)
+        submitted_orders = _submit_portfolio_orders(
+            result.final_orders, trading_client, market, fractionable_symbols=fractionable
+        )
 
     # Write trade entries/exits to DB for P&L tracking.
     # Also back-fill the Alpaca order_id on execution_decisions rows.
@@ -607,7 +658,9 @@ def _build_strategy_instance(entry, bars_df):
     return None
 
 
-def _submit_portfolio_orders(orders, trading_client, market, _submit_fn=None) -> list[dict]:
+def _submit_portfolio_orders(
+    orders, trading_client, market, _submit_fn=None, fractionable_symbols: set[str] | None = None
+) -> list[dict]:
     """Submit BUY and SELL orders to Alpaca.
 
     Args:
@@ -617,6 +670,9 @@ def _submit_portfolio_orders(orders, trading_client, market, _submit_fn=None) ->
         _submit_fn: Optional override for testing (receives order, qty_or_notional, trading_client).
             For BUY: receives (order, notional, trading_client).
             For SELL: receives (order, qty, trading_client).
+        fractionable_symbols: Set of symbols that support notional/fractional orders.
+            BUY orders for non-fractionable symbols fall back to whole-share qty.
+            If None, all symbols are treated as fractionable.
 
     Returns:
         List of dicts for successfully submitted orders, each containing:
@@ -633,17 +689,29 @@ def _submit_portfolio_orders(orders, trading_client, market, _submit_fn=None) ->
                     log.warning("No market price for %s — skipping BUY order", order.symbol)
                     continue
                 notional = round(price * order.quantity, 2)
+                # P1-B: Non-fractionable symbols require whole-share qty instead of notional.
+                is_fractionable = (fractionable_symbols is None or order.symbol in fractionable_symbols)
                 if _submit_fn is not None:
                     _submit_fn(order, notional, trading_client)
                     alpaca_id = f"test-{order.symbol}-buy"
                 else:
                     from alpaca.trading.requests import MarketOrderRequest
-                    req = MarketOrderRequest(
-                        symbol=order.symbol,
-                        notional=notional,
-                        side="buy",
-                        time_in_force="day",
-                    )
+                    if is_fractionable:
+                        req = MarketOrderRequest(
+                            symbol=order.symbol,
+                            notional=notional,
+                            side="buy",
+                            time_in_force="day",
+                        )
+                    else:
+                        whole_qty = max(1, int(order.quantity))
+                        log.info("P1-B: %s not fractionable — using qty=%d instead of notional", order.symbol, whole_qty)
+                        req = MarketOrderRequest(
+                            symbol=order.symbol,
+                            qty=whole_qty,
+                            side="buy",
+                            time_in_force="day",
+                        )
                     alpaca_order = trading_client.submit_order(req)
                     alpaca_id = str(alpaca_order.id)
                 submitted.append({"symbol": order.symbol, "side": "buy", "order_id": alpaca_id, "notional": notional})

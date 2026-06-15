@@ -470,7 +470,7 @@ def test_portfolio_cycle_s4_signals_produce_multi_symbol_orders():
     # Capture orders that would be submitted to Alpaca
     captured_orders = []
 
-    def capture_submit(orders, trading_client, market, _submit_fn=None):
+    def capture_submit(orders, trading_client, market, _submit_fn=None, **kwargs):
         captured_orders.extend(orders)
         return [{"symbol": o.symbol, "side": o.side.value.lower(), "order_id": f"test-{o.symbol}", "notional": 1000.0} for o in orders]
 
