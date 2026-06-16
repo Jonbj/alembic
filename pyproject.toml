@@ -35,6 +35,9 @@ dependencies = [
     "empyrical>=0.5.5",
     "alpaca-py>=0.43.4",
     "pdfplumber>=0.11",
+    "python-jose[cryptography]>=3.3",
+    "passlib[bcrypt]>=1.7",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -58,3 +61,8 @@ include = ["src*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

@@ -1,8 +1,9 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Layout } from '@/components/layout/Layout'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { useStore } from '@/store'
 
 const Overview    = lazy(() => import('@/pages/Overview'))
 const Signals     = lazy(() => import('@/pages/Signals'))
@@ -17,6 +18,7 @@ const AutoImprove = lazy(() => import('@/pages/AutoImprove'))
 const Strategies  = lazy(() => import('@/pages/Strategies'))
 const Docs        = lazy(() => import('@/pages/Docs'))
 const Dashboard   = lazy(() => import('@/pages/DashboardPage'))
+const LoginPage   = lazy(() => import('@/pages/LoginPage'))
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 3, retryDelay: (n) => Math.min(1000 * 2 ** n, 30000) } },
@@ -26,6 +28,12 @@ const PageFallback = () => (
   <div style={{ padding: 40, color: 'var(--text-muted)', textAlign: 'center' }}>Loading...</div>
 )
 
+function ProtectedLayout() {
+  const isAuthenticated = useStore((s) => s.isAuthenticated)
+  if (!isAuthenticated) return <Navigate to="/login" replace />
+  return <Layout />
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={qc}>
@@ -33,7 +41,8 @@ export default function App() {
         <ErrorBoundary>
           <Suspense fallback={<PageFallback />}>
             <Routes>
-              <Route element={<Layout />}>
+              <Route path="/login" element={<LoginPage />} />
+              <Route element={<ProtectedLayout />}>
                 <Route path="/"             element={<Overview />} />
                 <Route path="/signals"      element={<Signals />} />
                 <Route path="/trading"      element={<Trading />} />
@@ -45,8 +54,8 @@ export default function App() {
                 <Route path="/config"       element={<Config />} />
                 <Route path="/admin"        element={<Admin />} />
                 <Route path="/auto-improve" element={<AutoImprove />} />
-                <Route path="/docs"      element={<Docs />} />
-                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/docs"         element={<Docs />} />
+                <Route path="/dashboard"    element={<Dashboard />} />
               </Route>
             </Routes>
           </Suspense>

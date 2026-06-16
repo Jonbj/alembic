@@ -31,8 +31,9 @@ async def health() -> dict[str, str]:
     return {"status": "ok", "mode": "backtest"}
 
 
-from src.api.routes import admin, backtest, config_routes, llm_routes, news_routes, performance, portfolio, signals, strategies, trading  # noqa: E402
+from src.api.routes import admin, auth, backtest, config_routes, llm_routes, news_routes, performance, portfolio, signals, strategies, trading  # noqa: E402
 
+app.include_router(auth.router)
 app.include_router(signals.router)
 app.include_router(admin.router)
 app.include_router(performance.router)

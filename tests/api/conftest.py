@@ -12,6 +12,12 @@ def pytest_configure(config):
 # Ensure a known test API key is set BEFORE importing the app
 os.environ["ADMIN_API_KEY"] = "test-api-key-for-testing-only-12345678"
 
+# JWT test credentials — bcrypt hash of "secret"
+os.environ.setdefault("ADMIN_USERNAME", "admin")
+os.environ.setdefault("ADMIN_PASSWORD_HASH", "$2b$12$i6qSOhZRTLWbWoSTukGsw.p2y0hEJEKmEqjHGwjuv3dXqB2Gy2WHO")
+os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret-key-for-testing-only-not-for-prod")
+os.environ.setdefault("JWT_EXPIRE_MINUTES", "60")
+
 from src.api.auth import require_api_key
 from src.api.main import app
 

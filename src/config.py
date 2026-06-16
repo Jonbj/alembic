@@ -84,8 +84,19 @@ class Config(BaseModel):
         )
     )
 
-    # API - REQUIRED secret
+    # API - REQUIRED secret (kept for programmatic / CLI access)
     ADMIN_API_KEY: str = Field(default_factory=lambda: os.environ.get("ADMIN_API_KEY", ""))
+
+    # JWT login system
+    ADMIN_USERNAME: str = Field(default_factory=lambda: os.environ.get("ADMIN_USERNAME", "admin"))
+    # bcrypt hash of the admin password. Generate with: python -c "from passlib.context import CryptContext; print(CryptContext(['bcrypt']).hash('yourpassword'))"
+    ADMIN_PASSWORD_HASH: str = Field(default_factory=lambda: os.environ.get("ADMIN_PASSWORD_HASH", ""))
+    # MUST be set in .env for production. Defaults to ephemeral key (tokens invalid across restarts).
+    JWT_SECRET_KEY: str = Field(default_factory=lambda: os.environ.get("JWT_SECRET_KEY", ""))
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_MINUTES: int = Field(
+        default_factory=lambda: int(os.environ.get("JWT_EXPIRE_MINUTES", "1440"))
+    )
 
     # Ollama cloud API
     OLLAMA_API_KEY: str = Field(default_factory=lambda: os.environ.get("OLLAMA_API_KEY", ""))

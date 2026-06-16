@@ -8,12 +8,14 @@ interface AppState {
   mode: Mode
   theme: Theme
   killswitchActive: boolean
-  apiKey: string
+  token: string
+  isAuthenticated: boolean
   llmModels: string  // "all" = full ensemble, "glm" = savings mode
   setMode: (mode: Mode) => void
   setTheme: (theme: Theme) => void
   setKillswitch: (active: boolean) => void
-  setApiKey: (key: string) => void
+  setToken: (token: string) => void
+  logout: () => void
   setLlmModels: (models: string) => void
 }
 
@@ -24,18 +26,20 @@ export const useStore = create<AppState>()(
         mode: 'paper',
         theme: 'dark',
         killswitchActive: false,
-        apiKey: '',
+        token: '',
+        isAuthenticated: false,
         llmModels: 'all',
         setMode: (mode) => set({ mode }),
         setTheme: (theme) => set({ theme }),
         setKillswitch: (killswitchActive) => set({ killswitchActive }),
-        setApiKey: (apiKey) => set({ apiKey }),
+        setToken: (token) => set({ token, isAuthenticated: !!token }),
+        logout: () => set({ token: '', isAuthenticated: false }),
         setLlmModels: (llmModels) => set({ llmModels }),
       }),
       {
         name: 'alembic-store',
         storage: createJSONStorage(() => sessionStorage),
-        partialize: (s) => ({ apiKey: s.apiKey, mode: s.mode, theme: s.theme }),
+        partialize: (s) => ({ token: s.token, isAuthenticated: s.isAuthenticated, mode: s.mode, theme: s.theme }),
       }
     ),
     { name: 'AlembicStore' }
