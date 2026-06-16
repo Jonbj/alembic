@@ -507,19 +507,19 @@ class PostgreSQLStore:
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
-                # Fetch notional + qty from DB if not provided (e.g. stop-loss path)
+                # Always SELECT FOR UPDATE to hold the row lock for the entire
+                # transaction — prevents two workers from closing the same trade.
+                cur.execute(
+                    "SELECT entry_notional, qty FROM trades WHERE symbol = %s AND exit_time IS NULL FOR UPDATE SKIP LOCKED",
+                    (symbol,),
+                )
+                db_row = cur.fetchone()
+                if db_row is None:
+                    return None  # already closed or locked by another worker
+
                 if entry_notional is None or qty is None:
-                    cur.execute(
-                        "SELECT entry_notional, qty FROM trades WHERE symbol = %s AND exit_time IS NULL FOR UPDATE SKIP LOCKED",
-                        (symbol,),
-                    )
-                    row = cur.fetchone()
-                    if row:
-                        entry_notional = float(row[0]) if row[0] is not None else 0.0
-                        qty = float(row[1]) if row[1] is not None else 0.0
-                    else:
-                        entry_notional = 0.0
-                        qty = 0.0
+                    entry_notional = float(db_row[0]) if db_row[0] is not None else 0.0
+                    qty = float(db_row[1]) if db_row[1] is not None else 0.0
 
                 costs = self._cost_calc.compute(
                     symbol=symbol,
@@ -742,7 +742,6 @@ class PostgreSQLStore:
                     updated += 1
                 except Exception as e:
                     log.warning("Failed to reconcile order %s: %s", order_id, e)
-            conn.commit()
 
             # Reconcile exit fills — compute P&L once fill price is known
             with conn.cursor() as cur:
@@ -808,18 +807,13 @@ class PostgreSQLStore:
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
-                for out in outputs:
-                    cur.execute(
-                        self._INSERT_LLM_RESPONSE,
-                        (
-                            signal_id,
-                            out.model_id,
-                            out.polarity,
-                            out.confidence,
-                            out.reasoning,
-                            True,
-                        ),
-                    )
+                cur.executemany(
+                    self._INSERT_LLM_RESPONSE,
+                    [
+                        (signal_id, out.model_id, out.polarity, out.confidence, out.reasoning, True)
+                        for out in outputs
+                    ],
+                )
             conn.commit()
         except Exception:
             conn.rollback()
@@ -949,6 +943,55 @@ class PostgreSQLStore:
         try:
             with conn.cursor() as cur:
                 cur.execute(self._FETCH_PER_MODEL_FOR_IC, (symbol, str(days)))
+                return cur.fetchall()
+        except Exception:
+            conn.rollback()
+            raise
+
+    _FETCH_ALL_FOR_IC = """
+        SELECT score, confidence, forward_return, generated_at, model_id, fallback_used
+        FROM sentiment_signals
+        WHERE symbol = ANY(%s)
+          AND generated_at >= now() - (%s || ' days')::interval
+          AND fallback_used = FALSE
+        ORDER BY generated_at ASC
+    """
+
+    def fetch_all_signals_for_ic(self, symbols: list[str], days: int) -> list[tuple]:
+        """Batch version of fetch_signals_for_ic — single query for all symbols."""
+        if not symbols:
+            return []
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_ALL_FOR_IC, (symbols, str(days)))
+                return cur.fetchall()
+        except Exception:
+            conn.rollback()
+            raise
+
+    _FETCH_ALL_PER_MODEL_FOR_IC = """
+        SELECT r.model_id,
+               r.polarity * r.confidence AS score,
+               s.forward_return
+        FROM llm_responses r
+        JOIN sentiment_signals s ON s.id = r.signal_id
+        WHERE s.symbol = ANY(%s)
+          AND s.generated_at >= now() - (%s || ' days')::interval
+          AND s.forward_return IS NOT NULL
+          AND s.fallback_used = FALSE
+          AND r.eligible = TRUE
+        ORDER BY s.generated_at ASC
+    """
+
+    def fetch_all_per_model_signals_for_ic(self, symbols: list[str], days: int) -> list[tuple]:
+        """Batch version of fetch_per_model_signals_for_ic — single query for all symbols."""
+        if not symbols:
+            return []
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_ALL_PER_MODEL_FOR_IC, (symbols, str(days)))
                 return cur.fetchall()
         except Exception:
             conn.rollback()
@@ -1533,27 +1576,28 @@ class PostgreSQLStore:
         if not rows:
             return 0
         conn = self._get_connection()
-        inserted = 0
         try:
             with conn.cursor() as cur:
-                for r in rows:
-                    cur.execute(
-                        """INSERT INTO zeygos_scores
-                           (report_date, market, sector, rank, ticker_refinitiv,
-                            ticker, company_name, score_analysts, score_momentum,
-                            score_valuation, score_solidity, score_dividend,
-                            score_growth, score_interest, score_finale)
-                           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                           ON CONFLICT (report_date, ticker_refinitiv) DO NOTHING""",
+                cur.executemany(
+                    """INSERT INTO zeygos_scores
+                       (report_date, market, sector, rank, ticker_refinitiv,
+                        ticker, company_name, score_analysts, score_momentum,
+                        score_valuation, score_solidity, score_dividend,
+                        score_growth, score_interest, score_finale)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                       ON CONFLICT (report_date, ticker_refinitiv) DO NOTHING""",
+                    [
                         (
                             r.report_date, r.market, r.sector, r.rank,
                             r.ticker_refinitiv, r.ticker, r.company_name,
                             r.score_analysts, r.score_momentum, r.score_valuation,
                             r.score_solidity, r.score_dividend, r.score_growth,
                             r.score_interest, r.score_finale,
-                        ),
-                    )
-                    inserted += cur.rowcount
+                        )
+                        for r in rows
+                    ],
+                )
+                inserted = cur.rowcount
             conn.commit()
         except Exception:
             conn.rollback()

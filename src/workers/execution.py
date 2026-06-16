@@ -30,6 +30,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from src.workers._async_utils import run_async
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -275,7 +276,7 @@ def _fire_alert(notifier: "Notifier | None", message: str, level: AlertLevel) ->
     if notifier is None:
         return
     try:
-        asyncio.run(notifier.send_alert(message, level=level))
+        run_async(notifier.send_alert(message, level=level))
     except Exception as exc:
         log.warning("Alert send failed: %s", exc)
 

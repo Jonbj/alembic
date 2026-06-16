@@ -37,6 +37,7 @@ set it to 0.5 independently (see RedisStore._on_fallback_threshold_reached).
 import asyncio
 import logging
 from datetime import datetime, timezone
+from src.workers._async_utils import run_async
 
 from src.config import config
 from src.connectors.macro import fetch_spy_momentum_20d, fetch_vix_from_fred, fetch_yield_curve
@@ -159,7 +160,7 @@ def detect_regime() -> None:
     except Exception as e:
         log.error("Failed to fetch macro data for regime detection: %s", e)
         try:
-            asyncio.run(notifier.send_alert(
+            run_async(notifier.send_alert(
                 "🚨 RegimeDetector fallito — dati macro non disponibili. Regime invariato.",
                 level="error",
             ))
@@ -171,7 +172,7 @@ def detect_regime() -> None:
     if not (5.0 <= vix <= 100.0):
         log.error("VIX out of reasonable range: %.1f", vix)
         try:
-            asyncio.run(notifier.send_alert(
+            run_async(notifier.send_alert(
                 f"🚨 RegimeDetector: VIX fuori range ({vix:.1f}). Regime invariato.",
                 level="error",
             ))
@@ -181,7 +182,7 @@ def detect_regime() -> None:
     if not (-5.0 <= yield_curve <= 5.0):
         log.error("Yield curve out of reasonable range: %.2f%%", yield_curve)
         try:
-            asyncio.run(notifier.send_alert(
+            run_async(notifier.send_alert(
                 f"🚨 RegimeDetector: yield curve fuori range ({yield_curve:.2f}%). Regime invariato.",
                 level="error",
             ))
@@ -191,7 +192,7 @@ def detect_regime() -> None:
     if not (-50.0 <= spy_momentum <= 50.0):
         log.error("SPY momentum out of reasonable range: %.1f%%", spy_momentum)
         try:
-            asyncio.run(notifier.send_alert(
+            run_async(notifier.send_alert(
                 f"🚨 RegimeDetector: SPY momentum fuori range ({spy_momentum:+.1f}%). Regime invariato.",
                 level="error",
             ))
@@ -203,13 +204,13 @@ def detect_regime() -> None:
     prompt = _build_prompt(vix, yield_curve, spy_momentum)
     client1 = _make_llm_client(config.REGIME_LLM_MODEL_1)
     client2 = _make_llm_client(config.REGIME_LLM_MODEL_2)
-    r1, r2 = asyncio.run(_run_llm_pair(prompt, client1, client2))
+    r1, r2 = run_async(_run_llm_pair(prompt, client1, client2))
 
     # CASO 1: both fail
     if r1 is None and r2 is None:
         log.error("Both LLMs failed in detect_regime")
         try:
-            asyncio.run(notifier.send_alert(
+            run_async(notifier.send_alert(
                 "🚨 RegimeDetector fallito — regime invariato. Controllare i log.",
                 level="error",
             ))
@@ -223,7 +224,7 @@ def detect_regime() -> None:
         if r2.data_quality == "partial":
             log.warning("LLM-1 failed, LLM-2 has partial data quality — skipping Redis write")
             try:
-                asyncio.run(notifier.send_alert(
+                run_async(notifier.send_alert(
                     "⚠️ RegimeDetector: dati macro incompleti — regime invariato.",
                     level="warning",
                 ))
@@ -236,7 +237,7 @@ def detect_regime() -> None:
         if r1.data_quality == "partial":
             log.warning("LLM-2 failed, LLM-1 has partial data quality — skipping Redis write")
             try:
-                asyncio.run(notifier.send_alert(
+                run_async(notifier.send_alert(
                     "⚠️ RegimeDetector: dati macro incompleti — regime invariato.",
                     level="warning",
                 ))
@@ -249,7 +250,7 @@ def detect_regime() -> None:
     if r1.data_quality == "partial" or r2.data_quality == "partial":
         log.warning("Partial data quality in regime detection — skipping Redis write")
         try:
-            asyncio.run(notifier.send_alert(
+            run_async(notifier.send_alert(
                 "⚠️ RegimeDetector: dati macro incompleti — regime invariato.",
                 level="warning",
             ))
@@ -270,7 +271,7 @@ def detect_regime() -> None:
     if r1.regime not in valid_regimes:
         log.error("LLM-1 returned invalid regime: %s", r1.regime)
         try:
-            asyncio.run(notifier.send_alert(
+            run_async(notifier.send_alert(
                 f"🚨 RegimeDetector: LLM-1 ha ritornato regime invalido ({r1.regime}). Regime invariato.",
                 level="error",
             ))
@@ -280,7 +281,7 @@ def detect_regime() -> None:
     if r2.regime not in valid_regimes:
         log.error("LLM-2 returned invalid regime: %s", r2.regime)
         try:
-            asyncio.run(notifier.send_alert(
+            run_async(notifier.send_alert(
                 f"🚨 RegimeDetector: LLM-2 ha ritornato regime invalido ({r2.regime}). Regime invariato.",
                 level="error",
             ))
@@ -327,6 +328,7 @@ def detect_regime() -> None:
         prev_label = previous.regime if previous else None
         msg = format_regime_message(state, prev_label, disagreement)
         level = "info" if regime in ("bull", "sideways") else "warning"
-        asyncio.run(notifier.send_alert(msg, level=level))
+        run_async(notifier.send_alert(msg, level=level))
 
     log.info("Regime detected: %s (×%.1f), disagreement=%s", regime, multiplier, disagreement)
+    redis.close()

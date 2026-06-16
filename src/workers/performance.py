@@ -33,6 +33,7 @@ See docs/ARCHITECTURE.md §6c for the full weight approval flow diagram.
 
 import asyncio
 import json
+from src.workers._async_utils import run_async
 import logging
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -83,12 +84,8 @@ def _fetch_all_per_model_signals_for_loo(
     stores a compound ensemble ID (e.g. "ensemble:kimi+qwen+deepseek+glm"), which
     collapses all models into one bucket and prevents per-model ICIR computation.
     """
-    symbols = config.WATCHLIST_SYMBOLS
-    all_rows: list[tuple] = []
-    for symbol in symbols:
-        rows = pg.fetch_per_model_signals_for_ic(symbol, days)
-        all_rows.extend(rows)
-    return all_rows
+    symbols = list(config.WATCHLIST_SYMBOLS or [])
+    return pg.fetch_all_per_model_signals_for_ic(symbols, days)
 
 
 def _fetch_all_signals_for_ic(
@@ -99,17 +96,8 @@ def _fetch_all_signals_for_ic(
 
     Returns list of (score, confidence, forward_return, generated_at, model_id, fallback_used) tuples.
     """
-    # We need to fetch signals for each symbol separately.
-    # Use the configurable watchlist from config instead of a hardcoded list
-    # so that the performance worker stays in sync with the ingestion pipeline.
-    symbols = config.WATCHLIST_SYMBOLS
-    all_rows = []
-
-    for symbol in symbols:
-        rows = pg.fetch_signals_for_ic(symbol, days)
-        all_rows.extend(rows)
-
-    return all_rows
+    symbols = list(config.WATCHLIST_SYMBOLS or [])
+    return pg.fetch_all_signals_for_ic(symbols, days)
 
 
 def _compute_model_metrics(
@@ -677,6 +665,7 @@ def run_daily_report():
     log.info("Starting daily performance report...")
 
     pg = None
+    redis = None
     try:
         pg = PostgreSQLStore()
         redis = RedisStore()
@@ -723,7 +712,7 @@ def run_daily_report():
         message = _format_performance_telegram_message(
             report, cb_result.soft_warnings_triggered, signal_distribution
         )
-        asyncio.run(notifier.send_alert(message, level="info"))
+        run_async(notifier.send_alert(message, level="info"))
 
         log.info(f"Daily report sent. Overall IC: {report.overall_ic:.4f}, ICIR: {report.icir:.3f}")
 
@@ -745,6 +734,8 @@ def run_daily_report():
         log.exception(f"Daily performance report failed: {e}")
         raise
     finally:
+        if redis is not None:
+            redis.close()
         if pg is not None:
             pg.close()
 
@@ -759,6 +750,7 @@ def run_weekly_weights():
     log.info("Starting weekly weight computation (observational)...")
 
     pg = None
+    redis = None
     try:
         pg = PostgreSQLStore()
         redis = RedisStore()
@@ -901,7 +893,7 @@ def run_weekly_weights():
         except Exception as e:
             log.warning("Failed to build infrastructure section: %s", e)
 
-        asyncio.run(notifier.send_alert(message, level="info"))
+        run_async(notifier.send_alert(message, level="info"))
 
         # Store structured weekly report for web API (TTL 9d, same as snapshot)
         try:
@@ -930,6 +922,8 @@ def run_weekly_weights():
         log.exception(f"Weekly weight computation failed: {e}")
         raise
     finally:
+        if redis is not None:
+            redis.close()
         if pg is not None:
             pg.close()
 
@@ -947,6 +941,7 @@ def run_drift_detection():
     log.info("Starting weekly drift detection...")
 
     pg = None
+    redis = None
     try:
         pg = PostgreSQLStore()
         redis = RedisStore()
@@ -1015,7 +1010,7 @@ def run_drift_detection():
             notifier = TelegramNotifier()
             message = "Drift Detection Alert\n\n" + "\n".join(alerts)
             level = "critical" if any("RED" in a for a in alerts) else "warning"
-            asyncio.run(notifier.send_alert(message, level=level))
+            run_async(notifier.send_alert(message, level=level))
             log.warning(f"Drift alerts sent: {len(alerts)}")
         else:
             log.info("No drift detected.")
@@ -1024,6 +1019,8 @@ def run_drift_detection():
         log.exception(f"Drift detection failed: {e}")
         raise
     finally:
+        if redis is not None:
+            redis.close()
         if pg is not None:
             pg.close()
 
@@ -1153,41 +1150,43 @@ def check_suggestion_expiry():
     if we reach here the suggestion was never approved.
     """
     redis = RedisStore()
-
-    snapshot_raw = redis._r.get("ensemble:weights:suggestion:snapshot")
-    if snapshot_raw is None:
-        return  # no pending suggestion
-
-    if redis._r.get("ensemble:weights:suggestion") is not None:
-        return  # suggestion still active, nothing to do
-
-    # suggestion key gone + snapshot present → expired without approval
     try:
-        snapshot = json.loads(snapshot_raw)
-        if not isinstance(snapshot, dict):
-            print(f"Expiry check: snapshot is not a dict, deleting corrupted data")
+        snapshot_raw = redis._r.get("ensemble:weights:suggestion:snapshot")
+        if snapshot_raw is None:
+            return  # no pending suggestion
+
+        if redis._r.get("ensemble:weights:suggestion") is not None:
+            return  # suggestion still active, nothing to do
+
+        # suggestion key gone + snapshot present → expired without approval
+        try:
+            snapshot = json.loads(snapshot_raw)
+            if not isinstance(snapshot, dict):
+                print(f"Expiry check: snapshot is not a dict, deleting corrupted data")
+                redis._r.delete("ensemble:weights:suggestion:snapshot")
+                return
+        except json.JSONDecodeError as e:
+            print(f"Expiry check: corrupted JSON in snapshot: {e}")
             redis._r.delete("ensemble:weights:suggestion:snapshot")
             return
-    except json.JSONDecodeError as e:
-        print(f"Expiry check: corrupted JSON in snapshot: {e}")
+
+        pg = PostgreSQLStore()
+        try:
+            pg.log_weight_update(
+                source="expired",
+                applied_weights=snapshot.get("suggested_weights", {}),
+                suggested_weights=snapshot.get("suggested_weights"),
+                purified_icir=snapshot.get("purified_icir"),
+                freeze_reason=snapshot.get("freeze_reason") or None,
+                note="Suggestion expired without approval",
+            )
+        finally:
+            pg.close()
+
+        # Clean up snapshot
         redis._r.delete("ensemble:weights:suggestion:snapshot")
-        return
-
-    pg = PostgreSQLStore()
-    try:
-        pg.log_weight_update(
-            source="expired",
-            applied_weights=snapshot.get("suggested_weights", {}),
-            suggested_weights=snapshot.get("suggested_weights"),
-            purified_icir=snapshot.get("purified_icir"),
-            freeze_reason=snapshot.get("freeze_reason") or None,
-            note="Suggestion expired without approval",
-        )
     finally:
-        pg.close()
-
-    # Clean up snapshot
-    redis._r.delete("ensemble:weights:suggestion:snapshot")
+        redis.close()
 
 
 def _get_vix(redis: RedisStore) -> float | None:
@@ -1329,7 +1328,7 @@ def check_and_apply_weights():
 
         # Send message to Telegram. Returns message_id (not persisted — poller
         # retrieves it from callback_query["message"]["message_id"]).
-        message_id = asyncio.run(notifier.send_message_with_keyboard(msg, keyboard))
+        message_id = run_async(notifier.send_message_with_keyboard(msg, keyboard))
         if message_id:
             log.info("Freeze message sent with keyboard: message_id=%d", message_id)
 
@@ -1354,7 +1353,7 @@ def check_and_apply_weights():
             {"vix": vix, "ic_variance": ic_variance, "weight_delta_max": max_delta},
             next_review,
         )
-        asyncio.run(notifier.send_alert(msg, level="info"))
+        run_async(notifier.send_alert(msg, level="info"))
         log.info("Weights auto-applied successfully")
     finally:
         pg.close()
@@ -1575,7 +1574,6 @@ def run_loss_feedback_check() -> dict:
 
     redis = RedisStore()
     pg = PostgreSQLStore()
-
     try:
         fetch_n = max(cfg["consecutive_loss_trigger"] + 1, cfg["rolling_pnl_window"])
         trades = pg.fetch_trades(status="closed", limit=fetch_n)
@@ -1583,6 +1581,7 @@ def run_loss_feedback_check() -> dict:
         pg.close()
 
     if not trades:
+        redis.close()
         return {"skipped": True, "reason": "no_closed_trades"}
 
     consecutive_losses = _count_consecutive_losses(trades)
@@ -1672,7 +1671,7 @@ def run_loss_feedback_check() -> dict:
         )
         try:
             notifier = TelegramNotifier()
-            asyncio.run(notifier.send_alert(msg, level="warning"))
+            run_async(notifier.send_alert(msg, level="warning"))
         except Exception as exc:
             log.warning("Telegram alert failed for loss feedback: %s", exc)
 
@@ -1712,10 +1711,11 @@ def run_loss_feedback_check() -> dict:
                 )
                 try:
                     notifier = TelegramNotifier()
-                    asyncio.run(notifier.send_alert(msg, level="info"))
+                    run_async(notifier.send_alert(msg, level="info"))
                 except Exception as exc:
                     log.warning("Telegram alert failed for feedback recovery: %s", exc)
 
+    redis.close()
     return result
 
 
