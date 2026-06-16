@@ -17,7 +17,7 @@
 
 ### P0 — Critici (sicurezza / correttezza finanziaria)
 
-- [ ] **A-01 — Rotazione segreti + purge git history**
+- [x] **A-01 — Rotazione segreti + purge git history**
   - **Problema:** `.env` con segreti reali è tracked in git: `ADMIN_API_KEY`, `OLLAMA_API_KEY`, `NEWSAPI_KEY`, `MARKETAUX_API_KEY`, `FRED_API_KEY`, `DEEPL_API_KEY`, `TELEGRAM_BOT_TOKEN`, `ALPACA_API_KEY`, `ALPACA_SECRET_KEY`.
   - **Fix:**
     1. Aggiungere `.env` a `.gitignore` (già presente ma il file è già stato commitato)
@@ -27,7 +27,7 @@
     5. Force-push su origin dopo purge (richede conferma esplicita utente)
   - **File:** `.env`, `.gitignore`, creare `.env.example`
 
-- [ ] **A-02 — Fix connection lifecycle (resource leak)**
+- [x] **A-02 — Fix connection lifecycle (resource leak)**
   - **Problema:** `RedisStore`, `PostgreSQLStore`, `TradingClient` (Alpaca), `TelegramNotifier` vengono istanziati ma mai chiusi in blocco `finally`. In `portfolio_scheduler.py` vengono creati più client per ciclo e tutti leakano su eccezione.
   - **Pattern corretto da applicare ovunque:**
     ```python
@@ -43,7 +43,7 @@
     - `src/workers/portfolio_scheduler.py` righe 187, 226 (TradingClient, StockHistoricalDataClient); riga 467 (PostgreSQLStore chiuso in try invece di finally); righe 151-172, 302-328, 445-452 (connessioni Redis ephemere per ciclo)
     - `src/workers/regime.py` righe 148, 149 (RedisStore + TelegramNotifier); righe 204-205 (LLM clients)
 
-- [ ] **A-03 — Replace asyncio.run() con pattern Celery async**
+- [x] **A-03 — Replace asyncio.run() con pattern Celery async**
   - **Problema:** `asyncio.run()` chiamato più volte per task in Celery prefork worker. Ogni Telegram alert crea e distrugge un event loop → stato inquinato, inefficiente.
   - **Occorrenze:**
     - `performance.py`: righe 726, 904, 1332, 1357, 1675, 1715
@@ -68,7 +68,7 @@
     Poi sostituire `asyncio.run(coro)` con `run_async(coro)` in tutti i worker.
   - **File:** `src/workers/performance.py`, `src/workers/execution.py`, `src/workers/regime.py` (creare helper in `src/workers/_async_utils.py`)
 
-- [ ] **A-04 — CI/CD pipeline GitHub Actions**
+- [x] **A-04 — CI/CD pipeline GitHub Actions**
   - **Problema:** Zero automazione. Nessun `.github/workflows/`. Ogni push può introdurre regressioni senza detection.
   - **Pipeline da creare:** `.github/workflows/ci.yml`
     ```yaml
@@ -92,7 +92,7 @@
 
 ### P1 — Alta priorità (correttezza dati / sicurezza finanziaria)
 
-- [ ] **A-05 — pg_store.py: race condition in close_trade**
+- [x] **A-05 — pg_store.py: race condition in close_trade**
   - **Problema:** `SELECT ... FOR UPDATE SKIP LOCKED` eseguito dentro cursor che si chiude immediatamente, rilasciando il row lock PRIMA dell'UPDATE successivo. Possibile doppio close su trade.
   - **Righe:** `src/store/pg_store.py` righe 507-556
   - **Fix:** Wrappare SELECT e UPDATE nella stessa transazione con lo stesso cursore aperto:
@@ -106,7 +106,7 @@
             cur.execute("UPDATE trades SET exit_time=... WHERE id = %s", (trade_id,))
     ```
 
-- [ ] **A-06 — pg_store.py: reconcile_trade_fills doppio commit**
+- [x] **A-06 — pg_store.py: reconcile_trade_fills doppio commit**
   - **Problema:** `reconcile_trade_fills` fa commit due volte; se il secondo blocco fallisce il DB è parzialmente riconciliato.
   - **Righe:** `src/store/pg_store.py` righe 710-802
   - **Fix:** Unificare i due blocchi in un'unica transazione con un unico commit finale:
@@ -118,7 +118,7 @@
         # commit implicito all'uscita del with
     ```
 
-- [ ] **A-07 — Unificare dependency management**
+- [x] **A-07 — Unificare dependency management**
   - **Problema:** `requirements.txt` non è allineato con `pyproject.toml`. Il Dockerfile installa da `requirements.txt` stale; `sqlalchemy`, `pydantic-settings`, `feedparser`, `bleach`, `python-telegram-bot`, `pyarrow`, `empyrical`, `pdfplumber` mancanti.
   - **Fix:**
     1. Eliminare `requirements.txt`
@@ -126,7 +126,7 @@
     3. Aggiornare `.dockerignore` se necessario
   - **File:** `requirements.txt` (delete), `Dockerfile`
 
-- [ ] **A-08 — Fix N+1 queries**
+- [x] **A-08 — Fix N+1 queries**
   - **performance.py** (righe 89-91, 108-110, 955-958): loop per-symbol su `WATCHLIST_SYMBOLS` con query PG separate.
     - Fix: una query con `WHERE symbol = ANY(%s)` passando la lista intera
   - **pg_store.py** (righe 1531-1561, 804-826): INSERT row-by-row.
