@@ -68,7 +68,7 @@ def run_s4_backtest_from_prices_and_signals(
 
     # OOS Sharpe from concatenated window returns
     if wf_window_returns:
-        all_oos = pd.concat(wf_window_returns, ignore_index=True)
+        all_oos = pd.concat(wf_window_returns).sort_index()
         if all_oos.std() > 0:
             oos_sharpe = float(sharpe_ratio(all_oos, periods=252))
         else:
@@ -251,10 +251,7 @@ def _load_sentiment_signals(prices: pd.DataFrame, start, end) -> pd.DataFrame:
 
         with PostgreSQLStore() as store:
             tickers = [c for c in prices.columns if c != "SPY"]
-            rows: list[dict] = []
-            for ticker in tickers:
-                records = store.fetch_signals_for_backtest(ticker, str(start), str(end))
-                rows.extend(records)
+            rows: list[dict] = store.fetch_signals_for_backtest_batch(tickers, str(start), str(end))
         if rows:
             df = pd.DataFrame(rows)
             if "generated_at" not in df.columns:

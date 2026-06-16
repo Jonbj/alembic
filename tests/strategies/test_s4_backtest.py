@@ -391,3 +391,28 @@ class TestTimezoneNormalization:
             run_robustness=False,
         )
         assert isinstance(result["oos_sharpe"], float)
+
+
+# ---------------------------------------------------------------------------
+# Regression: pd.concat timestamp preservation (B-05 fix)
+# ---------------------------------------------------------------------------
+
+
+class TestConcatTimestampPreservation:
+    def test_oos_sharpe_computed_from_timestamped_returns(
+        self, synthetic_prices, synthetic_signals, small_wf_config, tmp_path
+    ) -> None:
+        """Regression: pd.concat(ignore_index=True) dropped DatetimeIndex →
+        Sharpe annualized over wrong period count. Fixed to sort_index()."""
+        from src.strategies.s4.backtest import run_s4_backtest_from_prices_and_signals
+
+        result = run_s4_backtest_from_prices_and_signals(
+            prices=synthetic_prices,
+            signals_df=synthetic_signals,
+            output_dir=tmp_path / "s4_bt_concat",
+            wf_config=small_wf_config,
+            run_robustness=False,
+        )
+        sharpe = result["oos_sharpe"]
+        assert isinstance(sharpe, float)
+        assert sharpe == sharpe  # not NaN

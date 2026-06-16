@@ -1124,6 +1124,30 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def fetch_signals_for_backtest_batch(
+        self, symbols: list[str], start_date: str, end_date: str
+    ) -> list[dict[str, Any]]:
+        """Fetch signals for all symbols in a single query (avoids N+1)."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT symbol, score, confidence, reasoning, model_id,
+                           ensemble_std, fallback_used, generated_at
+                    FROM sentiment_signals
+                    WHERE symbol = ANY(%s)
+                      AND generated_at >= %s
+                      AND generated_at <= %s
+                    ORDER BY generated_at ASC
+                    """,
+                    (symbols, start_date, end_date),
+                )
+                return [dict(row) for row in cur.fetchall()]
+        except Exception:
+            conn.rollback()
+            raise
+
     def add_forward_return(self, signal_id: int, forward_return: float) -> None:
         """Add forward return to a signal (called by performance worker)."""
         conn = self._get_connection()

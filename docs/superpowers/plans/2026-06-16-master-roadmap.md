@@ -195,7 +195,7 @@
 
 ## PARTE B — Nuove Strategie
 
-### B-01 — S7: PEAD Earnings Event Strategy [Priorità 1]
+### [x] B-01 — S7: PEAD Earnings Event Strategy [Priorità 1]
 
 **Rationale:** Post-Earnings Announcement Drift è uno degli effetti più documentati in letteratura (Jegadeesh & Titman, Bernard & Thomas 1989). Su positive surprise: drift medio +3-5% nei 20 giorni successivi all'annuncio. Con 115 simboli in watchlist = ~50-60 eventi/trimestre. Il SEC EDGAR connector è già live. L'LLM (già pagato) classifica il surprise dal testo 8-K.
 
@@ -403,7 +403,7 @@ MACRO_ROTATION_REBALANCE_DAY: str = "MON"  # giorno della settimana
 
 ---
 
-### B-05 — S4 Gate Report Completion [Priorità 5]
+### [x] B-05 — S4 Gate Report Completion [Priorità 5]
 
 **Stato attuale:** S4 capped al 10% allocation senza gate report completo. Il gate report sblocca l'aumento a 20-25%.
 
