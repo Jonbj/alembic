@@ -678,6 +678,37 @@ class RedisStore:
         """Return True if the permanent operator halt key is set."""
         return bool(self._r.get("system:halted_by_operator"))
 
+    # ------------------------------------------------------------------
+    # PEAD signals (S7 strategy)
+    # ------------------------------------------------------------------
+
+    def write_pead_signal(self, signal: "SurpriseSignal", ttl: int = 30 * 86400) -> None:  # type: ignore[name-defined]
+        """Store a PEAD SurpriseSignal in Redis with 30-day TTL."""
+        from src.models.pead import SurpriseSignal  # noqa: F401
+        key = f"signal:{signal.symbol}:pead_event"
+        self._r.set(key, signal.model_dump_json(), ex=ttl)
+
+    def read_pead_signal(self, symbol: str) -> "SurpriseSignal | None":  # type: ignore[name-defined]
+        """Retrieve the active PEAD SurpriseSignal for a symbol, or None."""
+        import json
+        from src.models.pead import SurpriseSignal
+
+        raw = self._r.get(f"signal:{symbol}:pead_event")
+        if raw is None:
+            return None
+        try:
+            return SurpriseSignal.model_validate(json.loads(raw))
+        except Exception:
+            return None
+
+    def is_pead_processed(self, filing_id: str) -> bool:
+        """Return True if this filing has already been classified."""
+        return bool(self._r.get(f"pead:processed:{filing_id}"))
+
+    def mark_pead_processed(self, filing_id: str, ttl: int = 30 * 86400) -> None:
+        """Mark a filing as processed to prevent duplicate classification."""
+        self._r.set(f"pead:processed:{filing_id}", "1", ex=ttl)
+
     def __enter__(self) -> "RedisStore":
         return self
 

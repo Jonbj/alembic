@@ -38,6 +38,7 @@ app = Celery(
         "src.workers.decay_monitor_task",
         "src.workers.sentiment",
         "src.workers.telegram_poller",
+        "src.workers.pead_worker",
     ],
 )
 
@@ -180,6 +181,13 @@ app.conf.beat_schedule = {
     "counterfactual-worker": {
         "task": "src.workers.performance.run_counterfactual_worker",
         "schedule": crontab(hour=22, minute=45),
+    },
+    # S7 PEAD: classify 8-K filings every 30 min during market hours.
+    # Offset by 5 min from SEC EDGAR ingestion (:00/:30) to ensure filings
+    # are already in EDGAR before we classify them.
+    "pead-ingestion": {
+        "task": "src.workers.pead_worker.run_pead_ingestion_worker",
+        "schedule": crontab(minute="5,35", hour="14-21", day_of_week="1-5"),
     },
 }
 

@@ -223,6 +223,29 @@ class Config(BaseModel):
         default_factory=lambda: int(os.environ.get("REGIME_REDIS_TTL_SECONDS", "259200"))
     )  # 72h — covers the Fri→Mon weekend gap (detector runs Mon-Fri only)
 
+    # S7 PEAD strategy
+    PEAD_SURPRISE_THRESHOLD: float = Field(
+        default_factory=lambda: float(os.environ.get("PEAD_SURPRISE_THRESHOLD", "0.05"))
+    )
+    PEAD_HOLD_DAYS: int = Field(
+        default_factory=lambda: int(os.environ.get("PEAD_HOLD_DAYS", "20"))
+    )
+    PEAD_MAX_POSITION_PCT: float = Field(
+        default_factory=lambda: float(os.environ.get("PEAD_MAX_POSITION_PCT", "0.05"))
+    )
+    PEAD_MAX_SLEEVE_PCT: float = Field(
+        default_factory=lambda: float(os.environ.get("PEAD_MAX_SLEEVE_PCT", "0.25"))
+    )
+    PEAD_MIN_CONFIDENCE: float = Field(
+        default_factory=lambda: float(os.environ.get("PEAD_MIN_CONFIDENCE", "0.70"))
+    )
+    PEAD_ALLOCATION_PCT: float = Field(
+        default_factory=lambda: float(os.environ.get("PEAD_ALLOCATION_PCT", "0.15"))
+    )
+    PEAD_REDIS_TTL_SECONDS: int = Field(
+        default_factory=lambda: int(os.environ.get("PEAD_REDIS_TTL_SECONDS", str(30 * 86400)))
+    )  # 30 days — matches maximum hold period
+
     @field_validator("ADMIN_API_KEY")
     @classmethod
     def validate_api_key(cls, v: str) -> str:
