@@ -121,7 +121,7 @@ async def run_inference(
             log.info(f"Ensemble diverged for {clean_symbol}, using FinBERT fallback")
             loop = asyncio.get_running_loop()
             fb_result = await loop.run_in_executor(
-                None, finbert.analyze, item.body[:512]
+                None, finbert.analyze, clean_body[:512]
             )
             return SentimentResult(
                 symbol=clean_symbol,
@@ -159,7 +159,7 @@ async def run_inference(
     except LLMBudgetExhaustedError:
         log.info(f"Budget exhausted for {clean_symbol}, using FinBERT fallback")
         loop = asyncio.get_running_loop()
-        fb_result = await loop.run_in_executor(None, finbert.analyze, item.body[:512])
+        fb_result = await loop.run_in_executor(None, finbert.analyze, clean_body[:512])
         return SentimentResult(
             symbol=clean_symbol,
             score=fb_result.polarity * fb_result.confidence,

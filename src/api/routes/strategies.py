@@ -35,7 +35,7 @@ def _check_live_data(strategy_id: str) -> bool:
                     LIMIT 1
                     """,
                     # strategies_run is a JSON array of uppercase IDs like ["S1"]
-                    (f'["{strategy_id.upper()}"]',),
+                    (json.dumps([strategy_id.upper()]),),
                 )
                 return cur.fetchone() is not None
     except Exception as exc:
