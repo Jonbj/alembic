@@ -186,13 +186,8 @@ app.conf.beat_schedule = {
         "task": "src.workers.performance.run_counterfactual_worker",
         "schedule": crontab(hour=22, minute=45),
     },
-    # Daily trading analysis at 21:15 UTC (after market close + fill reconcile window).
-    # Analyses yesterday's buy/sell decisions: roundtrips, duplicates, win rate, P&L.
-    # Sends a Telegram summary to guide next-day tuning.
-    "daily-trading-analysis": {
-        "task": "src.workers.performance.run_daily_trading_analysis",
-        "schedule": crontab(hour=21, minute=15, day_of_week="1-5"),
-    },
+    # daily-trading-analysis removed: replaced by Claude Code scheduled session.
+    # Claude Code runs at 07:00 CEST weekdays via CronCreate (see session config).
     # S7 PEAD: classify 8-K filings every 30 min during market hours.
     # Offset by 5 min from SEC EDGAR ingestion (:00/:30) to ensure filings
     # are already in EDGAR before we classify them.
