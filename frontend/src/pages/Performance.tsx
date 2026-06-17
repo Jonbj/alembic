@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -55,7 +56,7 @@ function WeeklyReportTab({
   const wt = weekly.weights
 
   const computedDate = weekly.computed_at
-    ? new Date(weekly.computed_at).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' })
+    ? fmtDateTime(weekly.computed_at)
     : '—'
 
   return (

@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
 import { fetchTrades, type Trade, type TradeStatus } from '@/api/trades'
 import { HelpButton } from '@/components/shared/HelpButton'
@@ -80,7 +81,7 @@ export default function Trades() {
             t.qty != null ? t.qty.toFixed(4) : '—',
             fmt(t.entry_notional),
             <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-              {new Date(t.entry_time).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
+              {fmtDateTime(t.entry_time)}
             </span>,
           ],
           expanded: t.entry_order_id ? <span>order_id: {t.entry_order_id}</span> : undefined,

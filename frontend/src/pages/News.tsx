@@ -1,4 +1,5 @@
 import { Fragment, useState, useCallback } from 'react'
+import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
 import { fetchNews, type NewsItem } from '@/api/news'
 import { HelpButton } from '@/components/shared/HelpButton'
@@ -39,7 +40,7 @@ export default function News() {
       <HelpButton title="News — Notizie" sections={[
         {
           heading: "Fonti dati",
-          content: "Le notizie provengono da tre fonti:\n\n- **GDELT GKG**: global knowledge graph con entities e sentiment automatizzato\n- **MarketAux**: notizie finanziarie con metadata aziendale\n- **Alpaca**: notizie dal broker direttamente",
+          content: "Le notizie provengono da sei fonti:\n\n- **Reuters RSS**: feed live di Reuters Business News (ogni 30 min)\n- **CNBC RSS**: feed live CNBC Markets (ogni 30 min)\n- **SEC EDGAR**: filing 8-K da SEC (ogni ora, mercato aperto)\n- **GDELT GKG**: global knowledge graph con entities e sentiment automatizzato\n- **MarketAux**: notizie finanziarie con metadata aziendale\n- **Alpaca / Benzinga**: notizie dal broker direttamente",
         },
         {
           heading: "Sentiment",
@@ -55,9 +56,16 @@ export default function News() {
         <input placeholder="Filter ticker..." value={ticker} onChange={(e) => setTicker(e.target.value)} style={{ width: 160 }} />
         <select value={source} onChange={(e) => setSource(e.target.value)}>
           <option value="">All sources</option>
-          <option value="gdelt_gkg">GDELT GKG</option>
-          <option value="marketaux">MarketAux</option>
-          <option value="alpaca_benzinga">Alpaca / Benzinga</option>
+          <optgroup label="Live feeds">
+            <option value="reuters">Reuters RSS</option>
+            <option value="cnbc">CNBC RSS</option>
+            <option value="sec_edgar">SEC EDGAR</option>
+          </optgroup>
+          <optgroup label="Data providers">
+            <option value="gdelt_gkg">GDELT GKG</option>
+            <option value="marketaux">MarketAux</option>
+            <option value="alpaca_benzinga">Alpaca / Benzinga</option>
+          </optgroup>
         </select>
         <span style={{ color: 'var(--text-muted)', alignSelf: 'center', fontSize: 12 }}>{news.length} articles</span>
       </div>
@@ -87,7 +95,7 @@ export default function News() {
                   <td><strong>{item.ticker}</strong></td>
                   <td>{sentimentBadge(item.raw_sentiment)}</td>
                   <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-                    {new Date(item.fetched_at).toLocaleString()}
+                    {fmtDateTime(item.fetched_at)}
                   </td>
                 </tr>
                 {expanded === item.id && (

@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from src.llm.finbert import FinBERTClient, FinBERTResult, entropic_confidence
 from src.models.news import NewsItem
@@ -157,6 +157,38 @@ class TestFinBERTClient:
         # This verifies lazy loading: the expensive transformers import
         # doesn't happen until analyze() is first called
         assert client._pipe is None
+
+    def test_int8_quantization_applied_on_load(self):
+        """quantize_dynamic must be called once on pipeline load with inplace=True."""
+        mock_pipe = MagicMock()
+        mock_pipe.model = MagicMock()
+
+        with (
+            patch("transformers.pipeline", return_value=mock_pipe),
+            patch("torch.quantization.quantize_dynamic") as mock_quantize,
+        ):
+            client = FinBERTClient()
+            client._get_pipeline()
+
+        mock_quantize.assert_called_once()
+        _, kwargs = mock_quantize.call_args
+        # inplace=True is critical: avoids doubling RAM during transition
+        assert kwargs.get("inplace") is True
+
+    def test_int8_quantization_applied_only_once(self):
+        """quantize_dynamic must not be called again on subsequent _get_pipeline calls."""
+        mock_pipe = MagicMock()
+        mock_pipe.model = MagicMock()
+
+        with (
+            patch("transformers.pipeline", return_value=mock_pipe),
+            patch("torch.quantization.quantize_dynamic") as mock_quantize,
+        ):
+            client = FinBERTClient()
+            client._get_pipeline()
+            client._get_pipeline()  # second call — must reuse cached pipeline
+
+        mock_quantize.assert_called_once()
 
     def test_result_type(self):
         """Result should be FinBERTResult dataclass."""

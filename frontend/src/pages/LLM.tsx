@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { fmtDateTime } from '@/utils/format'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchLLMFeedback, fetchWeights, approveWeights } from '@/api/llm'
 import { HelpButton } from '@/components/shared/HelpButton'
@@ -87,7 +88,7 @@ export default function LLM() {
                   <td style={{ maxWidth: 240, fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {f.reasoning}
                   </td>
-                  <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(f.generated_at).toLocaleString()}</td>
+                  <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmtDateTime(f.generated_at)}</td>
                 </tr>
               ))}
               {feedback.length === 0 && !fbLoading && (

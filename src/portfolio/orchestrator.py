@@ -172,7 +172,7 @@ class PortfolioOrchestrator:
             current_qty = pos.quantity if pos is not None else 0.0
             delta = target_qty - current_qty
 
-            if abs(delta) < 1e-4:
+            if abs(delta) < max(1e-4, target_qty * 0.02):
                 continue
 
             side = OrderSide.BUY if delta > 0 else OrderSide.SELL

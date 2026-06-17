@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { fmtDateTime } from '@/utils/format'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchKillswitchStatus, activateKillswitch, deactivateKillswitch, fetchMode, setMode } from '@/api/admin'
 import { HelpButton } from '@/components/shared/HelpButton'
@@ -76,7 +77,7 @@ export default function Admin() {
 
           <p style={{ color: 'var(--text-muted)', margin: '0 0 16px' }}>
             {ksActive
-              ? `ACTIVE — activated at ${ks?.activated_at ? new Date(ks.activated_at).toLocaleString() : '—'}`
+              ? `ACTIVE — activated at ${ks?.activated_at ? fmtDateTime(ks.activated_at) : '—'}`
               : 'Not active — system is running normally'}
           </p>
 

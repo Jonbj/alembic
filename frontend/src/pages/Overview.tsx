@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { fmtDateTime } from '@/utils/format'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { fetchSignals } from '@/api/signals'
 import { fetchPositions } from '@/api/positions'
@@ -106,7 +107,7 @@ export default function Overview() {
                 <td>{s.score.toFixed(3)}</td>
                 <td>{(s.confidence * 100).toFixed(0)}%</td>
                 <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{s.model_id}</td>
-                <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{new Date(s.generated_at).toLocaleTimeString()}</td>
+                <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{fmtDateTime(s.generated_at)}</td>
               </tr>
             ))}
           </tbody>

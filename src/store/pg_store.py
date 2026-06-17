@@ -620,6 +620,26 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def fetch_recently_bought_symbols(self, minutes: int = 30) -> set[str]:
+        """Return symbols with an open trade entered in the last `minutes` minutes.
+
+        Used by the portfolio scheduler to enforce a minimum hold period:
+        positions entered recently must not be sold in the same cycle.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT DISTINCT symbol FROM trades
+                       WHERE entry_time >= now() - (%s || ' minutes')::interval
+                         AND exit_time IS NULL""",
+                    (str(minutes),),
+                )
+                return {row[0] for row in cur.fetchall()}
+        except Exception:
+            conn.rollback()
+            raise
+
     _TRADE_SUMMARY_SQL = """
         SELECT
             COUNT(*) AS total_trades,

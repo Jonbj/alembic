@@ -1881,3 +1881,184 @@ def run_counterfactual_worker() -> dict:
         pg_conn.close()
 
     return stats
+
+
+# ---------------------------------------------------------------------------
+# Daily Trading Analysis — buy/sell quality report
+# ---------------------------------------------------------------------------
+
+@app.task(name="src.workers.performance.run_daily_trading_analysis")
+def run_daily_trading_analysis(target_date: str | None = None) -> dict:
+    """Analyse yesterday's decisions and trades; send a Telegram summary.
+
+    Covers:
+    - Roundtrips (symbol bought and sold same day, hold < 60 min)
+    - Anomalous SELLs (positive sentiment but sold)
+    - Win rate and avg hold by symbol
+    - Duplicate buys (same symbol, multiple open trades entered within 5 min)
+    - Overall P&L for the day (closed trades only)
+
+    Can be triggered manually via: celery call src.workers.performance.run_daily_trading_analysis
+    Or with a specific date: celery call ... --args '["2026-06-16"]'
+    """
+    from datetime import date as _date
+    from collections import defaultdict as _dd
+
+    if target_date:
+        day = datetime.fromisoformat(target_date).date()
+    else:
+        day = (datetime.now(timezone.utc) - timedelta(days=1)).date()
+
+    day_start = datetime(day.year, day.month, day.day, 0, 0, 0, tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+
+    log.info("Daily trading analysis for %s", day)
+
+    pg = PostgreSQLStore()
+    try:
+        conn = pg._get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """SELECT symbol, entry_time, exit_time, entry_notional, gross_pnl,
+                          net_pnl, exit_reason,
+                          EXTRACT(EPOCH FROM (exit_time - entry_time)) / 60 AS hold_min
+                   FROM trades
+                   WHERE entry_time >= %s AND entry_time < %s
+                   ORDER BY entry_time""",
+                (day_start, day_end),
+            )
+            cols = [d[0] for d in cur.description]
+            trades = [dict(zip(cols, row)) for row in cur.fetchall()]
+
+            cur.execute(
+                """SELECT symbol, decision, score, reason, tick_time, order_id
+                   FROM execution_decisions
+                   WHERE tick_time >= %s AND tick_time < %s
+                   ORDER BY tick_time""",
+                (day_start, day_end),
+            )
+            dcols = [d[0] for d in cur.description]
+            decisions = [dict(zip(dcols, row)) for row in cur.fetchall()]
+
+    finally:
+        pg.close()
+
+    closed = [t for t in trades if t["exit_time"] is not None]
+    open_t = [t for t in trades if t["exit_time"] is None]
+
+    total_pnl = sum(t["net_pnl"] or 0 for t in closed)
+    wins = sum(1 for t in closed if (t["net_pnl"] or 0) > 0)
+    win_rate = wins / len(closed) if closed else 0.0
+
+    # Roundtrips: closed trades with hold < 60 min
+    roundtrips = [t for t in closed if t["hold_min"] is not None and t["hold_min"] < 60]
+    roundtrip_pnl = sum(t["net_pnl"] or 0 for t in roundtrips)
+
+    # P&L by symbol
+    pnl_by_sym: dict[str, float] = {}
+    count_by_sym: dict[str, int] = {}
+    for t in closed:
+        sym = t["symbol"]
+        pnl_by_sym[sym] = pnl_by_sym.get(sym, 0.0) + (t["net_pnl"] or 0)
+        count_by_sym[sym] = count_by_sym.get(sym, 0) + 1
+
+    sorted_syms = sorted(pnl_by_sym.items(), key=lambda x: x[1])
+    worst = sorted_syms[:3]
+    best = list(reversed(sorted_syms[-3:]))
+
+    # Duplicate buys: same symbol, multiple entries within 5 min
+    entry_times_by_sym: dict[str, list] = _dd(list)
+    for t in trades:
+        entry_times_by_sym[t["symbol"]].append(t["entry_time"])
+
+    dup_syms = []
+    for sym, times in entry_times_by_sym.items():
+        if len(times) < 2:
+            continue
+        times_s = sorted(t for t in times if t is not None)
+        for i in range(1, len(times_s)):
+            delta = (times_s[i] - times_s[i - 1]).total_seconds()
+            if delta < 300:
+                dup_syms.append(sym)
+                break
+
+    # Anomalous decisions: SELL with score > 0.01 and NOT a plain rebalance
+    anomalous_sells = [
+        d for d in decisions
+        if d["decision"] == "SELL" and (d["score"] or 0) > 0.01
+        and "Portfolio rebalance" not in (d["reason"] or "")
+    ]
+
+    lines = [
+        f"📊 <b>Analisi Trading {day.strftime('%d/%m/%Y')}</b>",
+        "",
+        f"Trade chiusi: <b>{len(closed)}</b> | Aperti: <b>{len(open_t)}</b>",
+        f"Win rate: <b>{win_rate:.0%}</b> | P&amp;L netto: <b>${total_pnl:+.2f}</b>",
+        "",
+    ]
+
+    if roundtrips:
+        lines.append(
+            f"⚠️ Roundtrip (&lt;60min): <b>{len(roundtrips)}</b> trade, "
+            f"P&amp;L cumulativo ${roundtrip_pnl:+.2f}"
+        )
+        for t in roundtrips[:4]:
+            hm = t["hold_min"] or 0
+            lines.append(
+                f"  • {t['symbol']} hold={hm:.0f}min pnl=${t['net_pnl'] or 0:+.2f}"
+            )
+        lines.append("")
+
+    if dup_syms:
+        lines.append(
+            f"🔴 Acquisti duplicati (&lt;5min): {', '.join(sorted(set(dup_syms)))}"
+        )
+        lines.append("")
+
+    if anomalous_sells:
+        lines.append(f"🟡 SELL con sentiment positivo: {len(anomalous_sells)}")
+        for d in anomalous_sells[:3]:
+            lines.append(f"  • {d['symbol']} score={d['score']:.3f}")
+        lines.append("")
+
+    if best:
+        lines.append("🟢 Top performer:")
+        for sym, pnl in best:
+            if pnl > 0:
+                lines.append(f"  • {sym}: ${pnl:+.2f} ({count_by_sym.get(sym, 0)} trade)")
+    if worst:
+        lines.append("🔴 Worst performer:")
+        for sym, pnl in worst:
+            if pnl < 0:
+                lines.append(f"  • {sym}: ${pnl:+.2f} ({count_by_sym.get(sym, 0)} trade)")
+    lines.append("")
+
+    total_dec = len(decisions)
+    buy_dec = sum(1 for d in decisions if d["decision"] == "BUY")
+    sell_dec = sum(1 for d in decisions if d["decision"] == "SELL")
+    no_order = sum(1 for d in decisions if not d["order_id"])
+    lines.append(
+        f"Decisioni: {total_dec} ({buy_dec} BUY, {sell_dec} SELL, {no_order} NO-ORDER)"
+    )
+
+    message = "\n".join(lines)
+    try:
+        notifier = TelegramNotifier()
+        run_async(notifier.send_alert(message, level="info"))
+    except Exception as exc:
+        log.warning("Daily analysis Telegram send failed: %s", exc)
+
+    stats_out = {
+        "date": str(day),
+        "closed_trades": len(closed),
+        "open_trades": len(open_t),
+        "win_rate": round(win_rate, 4),
+        "total_net_pnl": round(total_pnl, 2),
+        "roundtrips": len(roundtrips),
+        "roundtrip_pnl": round(roundtrip_pnl, 2),
+        "duplicate_buy_symbols": sorted(set(dup_syms)),
+        "anomalous_sells": len(anomalous_sells),
+        "total_decisions": total_dec,
+    }
+    log.info("Daily trading analysis complete: %s", stats_out)
+    return stats_out

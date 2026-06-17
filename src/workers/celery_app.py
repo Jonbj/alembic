@@ -57,9 +57,11 @@ app.conf.update(
 # Beat schedule for periodic tasks
 app.conf.beat_schedule = {
     # Sentiment Worker every 15 min during market hours (Mon-Fri 14:00-21:00 UTC = 9am-4pm ET)
+    # Routed to 'inference' queue → handled by worker-inference (concurrency=1, single FinBERT copy).
     "sentiment-worker": {
         "task": "src.workers.sentiment.run_sentiment_worker",
         "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
+        "options": {"queue": "inference"},
     },
     # Forward return worker at 22:00 UTC daily (after US market close).
     # Populates sentiment_signals.forward_return needed for IC / ICIR.
@@ -95,9 +97,11 @@ app.conf.beat_schedule = {
         "schedule": crontab(hour=5, minute=0),
     },
     # Regime detection daily at 07:00 UTC Mon-Fri (pre-market US)
+    # Routed to 'inference' queue — uses Ollama LLM clients.
     "regime-detector": {
         "task": "src.workers.regime.detect_regime",
         "schedule": crontab(hour=7, minute=0, day_of_week="1-5"),
+        "options": {"queue": "inference"},
     },
     # GDELT GKG ingestion every 15 min Mon-Fri during market hours (14:00-21:00 UTC).
     # Queries GDELT GKG, extracts tickers via PostgreSQL lookup, and pushes
@@ -182,12 +186,21 @@ app.conf.beat_schedule = {
         "task": "src.workers.performance.run_counterfactual_worker",
         "schedule": crontab(hour=22, minute=45),
     },
+    # Daily trading analysis at 21:15 UTC (after market close + fill reconcile window).
+    # Analyses yesterday's buy/sell decisions: roundtrips, duplicates, win rate, P&L.
+    # Sends a Telegram summary to guide next-day tuning.
+    "daily-trading-analysis": {
+        "task": "src.workers.performance.run_daily_trading_analysis",
+        "schedule": crontab(hour=21, minute=15, day_of_week="1-5"),
+    },
     # S7 PEAD: classify 8-K filings every 30 min during market hours.
     # Offset by 5 min from SEC EDGAR ingestion (:00/:30) to ensure filings
     # are already in EDGAR before we classify them.
+    # Routed to 'inference' queue — uses Ollama LLM client for 8-K classification.
     "pead-ingestion": {
         "task": "src.workers.pead_worker.run_pead_ingestion_worker",
         "schedule": crontab(minute="5,35", hour="14-21", day_of_week="1-5"),
+        "options": {"queue": "inference"},
     },
 }
 

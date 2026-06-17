@@ -32,6 +32,10 @@ services:
     environment:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/trading
       REDIS_URL: redis://redis:6379/0
+      ADMIN_USERNAME: stefano
+      ADMIN_PASSWORD_HASH: $$2b$$12$$EB.1W2k1jC9DdD7s9VUwbehJd9yOs7x9WztYqIbmulcObeuijNn8C
+      JWT_SECRET_KEY: cambia-questa-chiave-con-qualcosa-di-random-in-produzione
+      JWT_EXPIRE_MINUTES: "1440"
     ports: ["8001:8000"]
     volumes:
       - ./reports:/app/reports:ro
@@ -47,11 +51,29 @@ services:
 
   worker:
     build: .
-    command: celery -A src.workers.celery_app worker --loglevel=info
+    # General tasks: news ingestion, portfolio, execution, performance, etc.
+    # --concurrency 4: enough for I/O-bound tasks, no LLM model loaded here.
+    command: celery -A src.workers.celery_app worker --loglevel=info --concurrency 4 -Q celery --hostname=general@%h
     env_file: .env
     environment:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/trading
       REDIS_URL: redis://redis:6379/0
+      SENTIMENT_REVERSAL_EXIT_THRESHOLD: "-0.35"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+    restart: unless-stopped
+
+  worker-inference:
+    build: .
+    # LLM/FinBERT tasks: sentiment, PEAD, regime. concurrency=1 → single process,
+    # single FinBERT load (~500MB vs N×500MB with prefork).
+    command: celery -A src.workers.celery_app worker --loglevel=info --concurrency 1 -Q inference --hostname=inference@%h
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/trading
+      REDIS_URL: redis://redis:6379/0
+      SENTIMENT_REVERSAL_EXIT_THRESHOLD: "-0.35"
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }

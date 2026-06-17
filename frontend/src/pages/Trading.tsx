@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
 import { fetchPositions, fetchOrders, type Position, type Order } from '@/api/positions'
 import { fetchTrades, type Trade } from '@/api/trades'
@@ -31,7 +32,7 @@ function pnlSpan(v: number) {
 function ts(iso: string | null) {
   if (!iso) return <span style={{ color: 'var(--text-muted)' }}>—</span>
   return <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-    {new Date(iso).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}
+    {fmtDateTime(iso)}
   </span>
 }
 

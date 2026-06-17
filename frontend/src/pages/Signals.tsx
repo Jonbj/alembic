@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef } from 'react'
+import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { fetchSignals, type Signal } from '@/api/signals'
@@ -219,7 +220,7 @@ export default function Signals() {
                   <div>{(s.confidence * 100).toFixed(1)}%</div>
                   <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{s.model_id}</div>
                   <div>{s.fallback_used ? <span className="badge badge-yellow">FB</span> : '—'}</div>
-                  <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{new Date(s.generated_at).toLocaleString()}</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{fmtDateTime(s.generated_at)}</div>
                 </div>
               )
             })}

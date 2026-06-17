@@ -45,11 +45,11 @@ export default function Docs() {
         },
         {
           heading: "Le strategie in breve",
-          content: "**S1 (50%)**: momentum multi-lookback su ETF/azionario — usa solo prezzi storici, nessun LLM.\n\n**S4 (10%)**: news sentiment via LLM ensemble — legge segnali pre-calcolati da Redis, filtra con EMA e regime.\n\n**S2**: DISABILITATA (OOS Sharpe −0.55, tutti i gate falliti).\n\n**S3**: R&D sleeve, non in produzione.",
+          content: "**S1 (50%)**: momentum multi-lookback su ETF/azionario — usa solo prezzi storici, nessun LLM.\n\n**S4 (10%)**: news sentiment via LLM ensemble — legge segnali pre-calcolati da Redis, filtra con EMA e regime.\n\n**S7 (0% — paper)**: PEAD earnings drift — classifica filing 8-K di SEC EDGAR, tiene posizioni 20 giorni su earnings beat.\n\n**S2**: DISABILITATA (OOS Sharpe −0.55, tutti i gate falliti).\n\n**S3**: R&D sleeve, non in produzione.",
         },
         {
           heading: "Dove guardare",
-          content: "• **Overview** — P&L live, segnali recenti, IC\n• **Signals** — segnali LLM per ticker\n• **Trades → Analytics** — P&L per regime/simbolo/durata\n• **Performance → Weekly Report** — costi, cash drag, infrastruttura\n• **Strategies** — gate di validazione OOS\n• **Auto-Improve** — feedback loop e counterfactual\n• **LLM** — pesi ensemble e ICIR per modello",
+          content: "• **Overview** — P&L live, segnali recenti, IC\n• **Signals** — segnali LLM per ticker\n• **Trades → Analytics** — P&L per regime/simbolo/durata\n• **Performance → Weekly Report** — costi, cash drag, infrastruttura\n• **Strategies** — gate di validazione OOS\n• **Auto-Improve** — feedback loop e counterfactual\n• **LLM** — pesi ensemble e ICIR per modello\n• **System** — scheduler status, activity log, segnali PEAD\n• **News** — articoli per fonte (Reuters, CNBC, EDGAR, GDELT…)",
         },
       ]} />
 
@@ -61,14 +61,17 @@ export default function Docs() {
         <p style={p}>
           Alembic è un sistema di trading algoritmico che usa LLM (Large Language Models) come motore di ricerca e generazione di segnali, mai come esecutore in tempo reale. Il principio architetturale fondamentale è: <strong>gli LLM lavorano offline, l'execution engine legge segnali pre-calcolati</strong>.
         </p>
-        <div style={mono}>{`[News: GDELT / MarketAux / Alpaca]
-         ↓  ogni 15 min (ore di mercato)
+        <div style={mono}>{`[News: GDELT / MarketAux / Alpaca / Reuters RSS / CNBC RSS]
+         ↓  ogni 15 min, xx:00 (ore di mercato)
 [LLM Ensemble Worker] ──→ Redis: signal:{symbol}:sentiment
          ↑ offline, asincrono
 
-[Portfolio Scheduler] ──→ legge segnali da Redis (ogni ora)
+[SEC EDGAR 8-K] ──→ [PEAD Worker] ──→ Redis: pead:signal:{symbol}
+         ↑ ogni 30 min (ore di mercato)
+
+[Portfolio Scheduler] ──→ legge segnali da Redis (ogni 15 min, xx:07)
          ↓
-[Risk Constraints] ──→ [Alpaca Paper/Live API]`}</div>
+[Risk Constraints + Vol Targeting] ──→ [Alpaca Paper/Live API]`}</div>
         <p style={p}>
           Questo design garantisce che un eventuale timeout o rallentamento del modello LLM non blocchi mai l'esecuzione di un ordine. Il motore di esecuzione ha sempre un segnale già pronto in Redis.
         </p>
@@ -173,6 +176,48 @@ Portfolio orchestratore:
           </div>
         </div>
 
+        {/* S7 */}
+        <div style={inner}>
+          <div style={rowFlex}>
+            <div style={{ ...stag, background: '#6d28d9' }}>S7</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
+                PEAD — Post-Earnings Announcement Drift
+                <span style={badge('#6d28d9', '#ede9fe')}>PAPER — 0% (in raccolta dati)</span>
+              </div>
+              <h3 style={{ ...h3, margin: '8px 0 4px' }}>Teoria</h3>
+              <p style={p}>
+                Il PEAD (Ball & Brown, 1968; Bernard & Thomas, 1990) è una delle anomalie di mercato più robuste: dopo un earnings beat, le azioni continuano a salire nei 30–60 giorni successivi. Il mercato sotto-reagisce inizialmente, poi aggiusta progressivamente. L'effetto è più forte su aziende small-cap e in periodi di bassa attenzione degli analisti.
+              </p>
+              <h3 style={{ ...h3, margin: '8px 0 4px' }}>Come genera il segnale</h3>
+              <div style={mono}>{`Fonte: SEC EDGAR 8-K filing (ogni 30 min durante mercato)
+
+LLM classificatore (kimi-k2.6):
+  input: testo del filing 8-K
+  output: {
+    direction: "beat" | "miss" | "inline" | "no_eps",
+    surprise_pct: float,   # (actual - consensus) / |consensus|
+    confidence: float,     # 0–1
+    guidance: "revised-up" | "maintained" | "no-guidance"
+  }
+
+Filtri:
+  confidence < 0.70 → skip
+  |surprise_pct| < 5% → skip (non significativo)
+  direction == "inline" → skip
+
+Su beat confermato:
+  SurpriseSignal { hold_until = detected_at + 20 giorni }
+  → SET Redis: pead:signal:{symbol} (TTL 30 giorni)
+  → Visibile in: System → PEAD Signals`}</div>
+              <h3 style={{ ...h3, margin: '8px 0 4px' }}>Posizionamento nel portfolio</h3>
+              <p style={p}>
+                S7 è in fase di raccolta dati. Non è ancora in <code>strategies.yaml</code> con allocazione positiva. Quando il backtest su dati storici supererà i gate, verrà attivata con allocazione massima 5% (max 5% per posizione, max 25% sleeve totale).
+              </p>
+            </div>
+          </div>
+        </div>
+
         {/* S2 */}
         <div style={{ ...inner, opacity: 0.6 }}>
           <div style={rowFlex}>
@@ -215,12 +260,14 @@ Portfolio orchestratore:
       {/* 3. FLUSSO COMPLETO SEGNALE */}
       <div style={card}>
         <h2 style={h2}>🔄 Flusso Completo di un Segnale (S4)</h2>
-        <div style={mono}>{`STEP 1 — INGESTION (ogni 15 min, 14:00-21:00 UTC, Lun-Ven)
+        <div style={mono}>{`STEP 1 — INGESTION (xx:00, ogni 15 min, 14:00-21:00 UTC, Lun-Ven)
   GDELTConnector / MarketAuxConnector / AlpacaNewsConnector
+  RSSConnector (Reuters + CNBC, ogni 30 min)
+  SECEdgarConnector (8-K filing, ogni ora durante mercato)
   → INSERT INTO news_log(ticker, headline, source, fetched_at)
   → PUSH news_id in Redis queue
 
-STEP 2 — LLM ENSEMBLE
+STEP 2 — LLM ENSEMBLE (xx:00, stesso ciclo)
   Prompt DK-CoT: "Act as buy-side analyst. Reason over cash flows,
   competition, profitability. Output JSON: {polarity, confidence, reasoning}"
 
@@ -231,10 +278,15 @@ STEP 2 — LLM ENSEMBLE
   else:
     → score = Σ(weight_i × polarity_i × confidence_i)
 
-  → UPDATE sentiment_signals SET score=...
-  → SET Redis: signal:{ticker}:sentiment = {score, ts, model_id}
+  Signal velocity boost: confronta score con storia recente (Redis list)
+    velocity > threshold → score × 1.20 (momentum bullish accelerante)
+    velocity < -threshold → score × 0.80 (momentum bearish accelerante)
 
-STEP 3 — PORTFOLIO CYCLE (ogni ora)
+  → INSERT INTO sentiment_signals SET score=...
+  → SET Redis: signal:{ticker}:sentiment = {score, ts, model_id}
+  → RPUSH Redis: signal:{ticker}:history
+
+STEP 3 — PORTFOLIO CYCLE (xx:07, ogni 15 min, offset +7 min dopo sentiment)
   S1.compute_target_weights(prices):
     → {AAPL: 0.35, NVDA: 0.22, ...}  # sleeve-local, no LLM
 
@@ -242,9 +294,15 @@ STEP 3 — PORTFOLIO CYCLE (ogni ora)
     Per ticker: score < 0.30 → skip | price < EMA20 → skip | age > 30min → skip
     → {MSFT: 0.02, TSLA: 0.015, ...}  # sleeve-local, scaled by regime
 
+  Sentiment reversal check: posizioni già aperte con nuovo score < -0.35
+    → aggiunge SELL forzato alla lista ordini
+
 STEP 4 — MERGE + RISK CONSTRAINTS
   merged[sym] += S1_weight[sym] × 0.50
   merged[sym] += S4_weight[sym] × 0.10
+
+  Delta ordering con dead zone 2%:
+    if |delta_qty| < max(1e-4, target_qty × 0.02) → skip (evita micro-ribilanciamenti)
 
   Constraints (iterative, 10 pass max):
     max per-asset 10% NAV | max total 95% | max sector 25% | HHI check
@@ -252,7 +310,7 @@ STEP 4 — MERGE + RISK CONSTRAINTS
 
 STEP 5 — ORDINI
   delta_qty = target - current
-  → BUY / SELL → Alpaca Paper API → INSERT INTO trades`}</div>
+  → BUY notionale / SELL qty → Alpaca Paper API → INSERT INTO trades`}</div>
       </div>
 
       {/* 4. COME LE STRATEGIE INTERVENGONO */}
@@ -285,6 +343,9 @@ STEP 5 — ORDINI
                 ['Kill-switch (blocca tutto)', '✓', '✓', 'ExecutionWorker pre-check'],
                 ['Drawdown cap portafoglio (10%)', '✓', '✓', 'ExecutionWorker pre-check'],
                 ['Feedback: threshold adattivo', '—', '✓ alza soglia score', 'LossFeedbackWorker'],
+                ['Sentiment reversal forced exit', '—', '✓ chiude se score < −0.35', 'portfolio_scheduler'],
+                ['Signal velocity boost (±20%)', '—', '✓ amplifica segnali in accelerazione', 'portfolio_scheduler'],
+                ['Dead zone 2% (no micro-ribilanciamento)', '✓', '✓', 'PortfolioOrchestrator'],
               ].map(([filtro, s1, s4, dove]) => (
                 <tr key={filtro as string} style={tableRow}>
                   <td style={td}>{filtro}</td>
@@ -330,6 +391,10 @@ high_vol ×0.2   sleeve=0.4% → ordine ~$4`}</div>
               ['Max signal age S4', '30 min', 'Segnali più vecchi di 30 min vengono ignorati.'],
               ['Allocazione S1', '50% NAV', 'Unica strategia con gate completi superati.'],
               ['Allocazione S4', '10% NAV', 'Cappato al 10% fino a gate dedicati passati.'],
+              ['Allocazione S7 (PEAD)', '0% NAV', 'In raccolta dati. Attivazione dopo gate backtest superati.'],
+              ['SENTIMENT_REVERSAL_EXIT_THRESHOLD', '−0.35', 'Score sotto cui una posizione aperta viene chiusa forzatamente al ciclo successivo.'],
+              ['Delta dead zone (ribilanciamento)', '2% del target qty', 'Evita micro-ordini da variazioni di prezzo inferiori al 2%.'],
+              ['Ciclo portfolio', 'ogni 15 min (xx:07)', 'Offset +7 min rispetto al sentiment worker per leggere segnali freschi.'],
             ].map(([param, def_, desc]) => (
               <tr key={param as string} style={tableRow}>
                 <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }}>{param}</td>
@@ -406,7 +471,45 @@ high_vol ×0.2   sleeve=0.4% → ordine ~$4`}</div>
         </p>
       </div>
 
-      {/* 9. MODALITÀ OPERATIVE */}
+      {/* 9. SCHEDULER E SYSTEM */}
+      <div style={card}>
+        <h2 style={h2}>🖥 Pagina System — Scheduler e Log</h2>
+        <p style={p}>La pagina <strong>System</strong> offre visibilità operativa sull'infrastruttura senza dover accedere ai log Docker.</p>
+        <h3 style={h3}>Tab Scheduler</h3>
+        <p style={p}>Mostra tutti i worker Celery schedulati con la loro frequenza e l'ultimo timestamp di esecuzione (dedotto da DB). Se "Last Run" è molto vecchio o assente, il worker non sta girando correttamente.</p>
+        <div style={{ overflowX: 'auto', marginBottom: 12 }}>
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                <th style={th}>Worker</th><th style={th}>Frequenza</th><th style={th}>Cosa fa</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                ['sentiment-worker', 'xx:00, ogni 15 min, mercato aperto', 'LLM ensemble → segnali S4 in Redis'],
+                ['portfolio-cycle', 'xx:07/22/37/52, ogni 15 min, mercato aperto', 'Orchestratore → ordini Alpaca'],
+                ['rss-ingestion', 'ogni 30 min, sempre', 'Reuters + CNBC RSS → news_log'],
+                ['sec-edgar-ingestion', 'ogni ora, mercato aperto', 'Filing 8-K → news_log'],
+                ['pead-ingestion', 'xx:05/35, ogni 30 min, mercato aperto', 'Classifica 8-K → segnali S7 in Redis'],
+                ['risk-monitor', 'ogni 30 min, mercato aperto', 'Drawdown check + alert Telegram'],
+                ['counterfactual-worker', '22:45 UTC, Lun-Ven', 'Calcola ritorni 1h per trade saltati (Phase C)'],
+              ].map(([task, freq, desc]) => (
+                <tr key={task as string} style={tableRow}>
+                  <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }}>{task}</td>
+                  <td style={{ ...td, color: '#64748b' }}>{freq}</td>
+                  <td style={{ ...td, color: '#94a3b8' }}>{desc}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <h3 style={h3}>Tab Activity Log</h3>
+        <p style={p}>Cronologia degli ultimi 80 eventi di sistema delle ultime 24 ore: cicli portfolio, run sentiment, batch di ingestion, decisioni di trading. Aggiornamento ogni 30 secondi.</p>
+        <h3 style={h3}>Tab PEAD Signals</h3>
+        <p style={p}>Segnali attivi della strategia S7: ticker con earnings beat classificato dall'LLM, surprise%, confidence e giorni rimanenti al termine del hold period di 20 giorni.</p>
+      </div>
+
+      {/* 10. MODALITÀ OPERATIVE */}
       <div style={card}>
         <h2 style={h2}>⚙️ Modalità Operative</h2>
         {[

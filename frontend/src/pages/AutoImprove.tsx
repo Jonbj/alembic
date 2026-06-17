@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { fmtDateTime } from '@/utils/format'
 import { fetchFeedbackStatus, fetchCounterfactualSummary } from '@/api/trades'
 import { HelpButton } from '@/components/shared/HelpButton'
 
@@ -151,7 +152,7 @@ export default function AutoImprove() {
                 {feedback.rolling_net_pnl != null && ` · rolling P&L $${feedback.rolling_net_pnl.toFixed(2)}`}
                 {feedback.last_adjustment_ts && (
                   <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>
-                    ({new Date(feedback.last_adjustment_ts).toLocaleString()})
+                    ({fmtDateTime(feedback.last_adjustment_ts)})
                   </span>
                 )}
               </div>

@@ -132,6 +132,11 @@ def _load_execution_engine() -> str:
         return "portfolio"
 
 
+_CYCLE_LOCK_KEY = "portfolio:cycle:lock"
+_CYCLE_LOCK_TTL = 840  # 14 min — covers worst case; just under the 15-min schedule
+_HOLD_MINIMUM_MINUTES = 30  # don't sell a position entered less than this many minutes ago
+
+
 @app.task(name="src.workers.portfolio_scheduler.run_portfolio_cycle")
 def run_portfolio_cycle() -> dict:
     """Celery entry-point for the portfolio orchestration cycle."""
@@ -146,11 +151,38 @@ def run_portfolio_cycle() -> dict:
         log.warning("Alpaca credentials not configured — skipping portfolio cycle")
         return {"skipped": True, "reason": "no_credentials"}
 
+    # Cycle idempotency lock: prevents duplicate runs when Celery beat fires
+    # multiple tasks before the previous one completes (e.g. worker restart at :30).
+    try:
+        from redis import Redis as _RedisLock
+        _rl = _RedisLock.from_url(config.REDIS_URL, decode_responses=True)
+        try:
+            acquired = _rl.set(_CYCLE_LOCK_KEY, 1, nx=True, ex=_CYCLE_LOCK_TTL)
+            if not acquired:
+                log.info("Portfolio cycle skipped — lock held by a concurrent run")
+                return {"skipped": True, "reason": "cycle_lock"}
+        finally:
+            _rl.close()
+    except Exception as _lock_exc:
+        log.warning("Could not acquire cycle lock: %s — proceeding anyway", _lock_exc)
+
     try:
         return _run_cycle_inner()
     except Exception as exc:
         log.error("Portfolio cycle unhandled error: %s", exc, exc_info=True)
         return {"error": str(exc)}
+    finally:
+        # Release the lock early so the next scheduled cycle can run.
+        try:
+            from redis import Redis as _RedisUnlock
+            from src.config import config as _cfg_ul
+            _ru = _RedisUnlock.from_url(_cfg_ul.REDIS_URL, decode_responses=True)
+            try:
+                _ru.delete(_CYCLE_LOCK_KEY)
+            finally:
+                _ru.close()
+        except Exception as _ul_exc:
+            log.debug("Could not release cycle lock: %s", _ul_exc)
 
 
 def _run_cycle_inner() -> dict:
@@ -425,6 +457,42 @@ def _run_cycle_inner() -> dict:
         len(result.constraints_fired),
         len(result.final_orders),
     )
+
+    # Hold minimum: don't sell positions entered in the last HOLD_MINIMUM_MINUTES.
+    # Prevents buy→sell roundtrips within a single rebalance window (e.g. S4 buys
+    # at 18:07, S1 rebalances at 18:22 and immediately sells the same ticker).
+    try:
+        from src.store.pg_store import PostgreSQLStore as _PGHold
+        _pg_hold = _PGHold()
+        try:
+            _recently_bought = _pg_hold.fetch_recently_bought_symbols(_HOLD_MINIMUM_MINUTES)
+        finally:
+            _pg_hold.close()
+        if _recently_bought:
+            _before_hold = len(result.final_orders)
+            from src.backtest.engine.types import OrderSide as _OSHold
+            result = type(result)(
+                strategies_run=result.strategies_run,
+                orders_per_strategy=result.orders_per_strategy,
+                orders_before_constraints=result.orders_before_constraints,
+                orders_after_constraints=result.orders_after_constraints,
+                constraints_fired=result.constraints_fired,
+                final_orders=[
+                    o for o in result.final_orders
+                    if not (o.side == _OSHold.SELL and o.symbol in _recently_bought)
+                ],
+                symbol_strategies=result.symbol_strategies,
+            )
+            _skipped = _before_hold - len(result.final_orders)
+            if _skipped:
+                log.info(
+                    "Hold minimum (%d min): skipped %d SELL order(s) for recently-bought: %s",
+                    _HOLD_MINIMUM_MINUTES,
+                    _skipped,
+                    sorted(_recently_bought),
+                )
+    except Exception as _hold_exc:
+        log.warning("Hold minimum check failed: %s — proceeding without filter", _hold_exc)
 
     # Log decisions to execution_decisions so the UI Decision Log tab is populated.
     # Also capture decision_ids for later trade DB writes.
