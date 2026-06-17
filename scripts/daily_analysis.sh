@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Daily Alembic trading analysis via Claude Code.
-# Scheduled via system cron: 0 7 * * 1-5
+# Scheduled via system cron: 30 14 * * 1-5  (14:30 CEST = 1h before NYSE open at 15:30)
 # Output logged to: logs/daily_analysis_YYYY-MM-DD.log
 # Sends a Telegram summary after the analysis completes.
 
