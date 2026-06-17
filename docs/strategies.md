@@ -111,8 +111,10 @@ Where `polarity ∈ [-1, +1]` is the direction of sentiment and `confidence ∈ 
 
 ### LLM Ensemble
 
-Four models queried in parallel via Ollama cloud:
-- Kimi K2.6, Qwen3.5, DeepSeek-V4-Pro, GLM-5.1
+Due modelli attivi via Ollama (locale):
+- Kimi K2.6, Qwen3.5
+
+> DeepSeek-V4-Pro e GLM-5.1 rimossi il 2026-06-16 (OOM e IC inferiore rispettivamente). Vedi `docs/llm-config.md`.
 
 Each uses **DK-CoT** (Domain Knowledge Chain-of-Thought) prompting:
 1. Act as buy-side analyst
@@ -212,3 +214,39 @@ Applied iteratively (up to 10 passes) after weight merging:
 ### Volatility Overlay
 
 `PortfolioVolTargeter` computes EWMA portfolio vol from strategy return histories. BUY quantities are scaled by `target_vol / estimated_vol` (clamped to [0.5×, 2.0×]) so the portfolio targets 10% annualised volatility.
+
+---
+
+## S7 — PEAD (Post-Earnings Announcement Drift)
+
+**Type:** Event-driven momentum
+**File:** `src/strategies/s7/`
+**Allocation:** 15% (see `config/strategies.yaml`)
+**Status:** ATTIVO in produzione da 2026-06-07
+
+### Segnale
+
+Classifica gli 8-K filing SEC via LLM (Ollama). Estrae la direzione della sorpresa rispetto alle aspettative di consensus: dopo una sorpresa positiva, le azioni tendono a continuare a salire nei giorni successivi (drift). S7 cattura questo momentum post-annuncio.
+
+**Gate di ingresso:** score LLM > 0.3, filing < 4 ore dalla pubblicazione
+
+### Pipeline
+
+```
+SEC EDGAR API (ogni 30 min) → run_sec_edgar_ingestion_worker
+       ↓
+run_pead_ingestion_worker (+5 min offset) → Ollama LLM classification
+       ↓
+pead_signals table (PostgreSQL)
+       ↓
+Portfolio Orchestrator → weight target S7
+```
+
+### Schedule
+
+`pead-ingestion` Celery beat task: ogni 30 min, 14:05–21:35 UTC, offset +5 min da SEC EDGAR ingestion (:00/:30) per garantire che i filing siano già disponibili prima della classificazione. Queue: `inference`.
+
+**Worker:** `src/workers/pead_worker.py`
+**Routes:** `src/api/routes/pead_routes.py`
+
+Vedi `docs/strategies/s7-pead.md` per la documentazione completa.

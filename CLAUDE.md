@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This project implements an **LLM-based Algorithmic Trading System (ATS)** following the **"Alpha Miner" paradigm**: the LLM operates as an offline research and strategy-generation engine, never in the hot execution path. The document `docs/LLM Trading System Integration.docx` contains the full Italian-language architectural specification.
 
-Target frameworks (choose one or combine): **Freqtrade** (crypto), **Backtrader** (equities/general), **QuantConnect Lean** (multi-asset, institutional grade).
+Target execution: **Alpaca** (paper/live trading via SDK), **Backtrader** (backtesting).
 
 ## Architecture: Core Principle
 
@@ -21,11 +21,10 @@ LLMs are **never called synchronously inside trading loops**. All LLM inference 
 ## Tech Stack
 
 - **Backend async stack**: FastAPI + Celery + Redis (background sentiment pipeline)
-- **Backtesting**: Backtrader (`bt.feeds.PandasData` with custom `lines`) or Freqtrade (vectorized Pandas)
-- **ML/RL**: FreqAI (stable-baselines3 + PyTorch) for Reinforcement Learning integration
-- **LLM models**: FinGPT (LoRA fine-tuned LLaMA/Falcon, open-source), FinBERT (sentiment), GPT-4o/Claude (via API)
-- **Broker integration**: Interactive Brokers via `backtrader_ib_insync`; crypto via Binance/Freqtrade
-- **QuantConnect**: MCP server on port 3001 (Dockerized), interfaced via `mcp.json`
+- **Backtesting**: Backtrader (`bt.feeds.PandasData` with custom `lines`)
+- **LLM models**: FinBERT (local, int8 quantized), Kimi K2.6 + Qwen3.5 via Ollama (ensemble)
+- **Broker integration**: Alpaca SDK (paper/live); Backtrader for backtesting
+- **Workers**: `worker` (concurrency=4, queue `celery`) + `worker-inference` (concurrency=1, queue `inference` — FinBERT/Ollama isolation)
 
 ## Engineering Constraints (Non-Negotiable)
 
@@ -67,16 +66,11 @@ When LLM ensemble variance is high or timeout occurs, fall back to deterministic
 - Order lifecycle: `notify_order()` handles async fill/partial-fill events
 - Live broker: `backtrader_ib_insync` for Interactive Brokers
 
-### Freqtrade / FreqAI
-- Strategies use vectorized Pandas over the full OHLCV DataFrame; avoid per-row Python loops
-- `startup_candle_count` must be set to stabilize indicators at strategy start
-- RL reward function lives in `calculate_reward()`; incorporate trade duration and floating P&L to prevent myopic convergence
-- Minimum ROI and dynamic stoploss configured in strategy JSON config, not hardcoded
-
-### QuantConnect Lean
-- Use MCP server (`project-create`, cloud backtest endpoints) for agent-driven development
-- Known issue: Pydantic `$ref` resolution in MCP JSON schema may show parameters as plain `string` — mitigate by explicitly structuring inputs rather than relying on schema inference
-- ML model artifacts saved to Object Store for fast retrieval in live runs
+### Alpaca (live/paper execution)
+- Use `AlpacaBroker` in `src/brokers/ibkr_adapter.py` for order placement
+- Paper and live trading share the same code path — switch via `config/trading.yaml` → `execution.engine`
+- `execution.engine=portfolio` (default): only `portfolio-cycle` submits orders
+- `execution.engine=legacy_sentiment`: only `run-execution` submits orders
 
 ## Hallucination Mitigation (Required in Production)
 
@@ -87,6 +81,9 @@ When LLM ensemble variance is high or timeout occurs, fall back to deterministic
 ## Key References
 
 - Design specification: `docs/LLM Trading System Integration.docx`
+- Architecture: `docs/ARCHITECTURE.md`
+- Strategy reference: `docs/strategies.md`
+- Operations guide: `docs/operations.md`
+- Roadmap: `docs/superpowers/plans/2026-06-16-master-roadmap.md`
+- LLM config: `docs/llm-config.md`
 - FinGPT (open-source): github.com/AI4Finance-Foundation/FinGPT
-- FinRL (RL for finance): github.com/AI4Finance-Foundation/FinRL
-- QuantConnect MCP: github.com/QuantConnect/mcp-server

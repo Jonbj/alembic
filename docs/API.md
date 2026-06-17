@@ -1,8 +1,8 @@
 # API Reference — Alembic LLM Trading System
 
 **FastAPI REST API**
-**Version:** 5.0.0
-**Updated:** 2026-06-06
+**Version:** 1.0.0
+**Updated:** 2026-06-17
 
 ---
 
@@ -512,6 +512,60 @@ Execution decision log — one row per symbol per tick for every symbol that cle
 ```
 
 Decision labels: `BUY`, `SKIP_EMA` (price below EMA20), `SKIP_CAP` (position cap reached), `SKIP_POSITION` (already in position), `STOP_LOSS` (stop triggered).
+
+---
+
+## PEAD Routes
+
+### `GET /api/pead/signals`
+
+Segnali PEAD recenti (8-K filing classificati). Richiede `X-API-Key`.
+
+**Query parameters:** `limit` (default 50, max 200), `symbol` (optional)
+
+**Response 200:**
+```json
+[
+  {
+    "id": 1,
+    "symbol": "AAPL",
+    "score": 0.72,
+    "direction": "positive",
+    "confidence": 0.72,
+    "category": "earnings_beat",
+    "filing_url": "https://www.sec.gov/...",
+    "classified_at": "2026-06-17T14:35:00Z"
+  }
+]
+```
+
+### `GET /api/pead/events`
+
+Eventi earnings classificati (aggregati per simbolo). Richiede `X-API-Key`.
+
+---
+
+## System Routes
+
+### `GET /api/system/logs`
+
+Log di sistema recenti. Richiede `X-API-Key`.
+
+**Query parameters:** `limit` (default 100), `level` (optional: ERROR, WARNING, INFO)
+
+### `GET /api/system/status`
+
+Stato dei servizi principali (worker, beat, Ollama, FinBERT warmup status).
+
+**Response 200:**
+```json
+{
+  "workers": "healthy",
+  "beat": "healthy",
+  "ollama": "connected",
+  "finbert": "loaded"
+}
+```
 
 ---
 

@@ -11,7 +11,8 @@ Day-to-day operational reference for running, monitoring, and troubleshooting th
 | `postgres` | 5432 | PostgreSQL 16 (trading database) |
 | `redis` | 6379 | Redis 7 (signal cache, task queue) |
 | `api` | 8001→8000 | FastAPI application |
-| `worker` | — | Celery worker (all task queues) |
+| `worker` | — | Celery worker (queue `celery`, concurrency=4 — task generici) |
+| `worker-inference` | — | Celery worker (queue `inference`, concurrency=1 — FinBERT/Ollama/PEAD) |
 | `beat` | — | Celery beat (task scheduler) |
 | `frontend` | 3000→80 | React dashboard (Nginx) |
 | `grafana` | 3001→3000 | Grafana dashboards |
@@ -24,8 +25,8 @@ Day-to-day operational reference for running, monitoring, and troubleshooting th
 docker compose up -d
 
 # Rebuild and restart (after code changes)
-docker compose build api worker beat frontend
-docker compose up -d api worker beat frontend
+docker compose build api worker worker-inference beat frontend
+docker compose up -d api worker worker-inference beat frontend
 
 # View logs (follow)
 docker compose logs -f worker
@@ -83,6 +84,11 @@ Beat schedules are defined in `src/workers/celery_app.py`. All times are UTC.
 | `run-retention-sweep` | 3:30 daily | Old data cleanup |
 | `decay-monitor` | 23:00 1st of month | Actual vs backtest baseline |
 | `poll-telegram-updates` | every 5s | Process approve/reject callbacks |
+| `run-sec-edgar-ingestion` | */30 14-21 Mon-Fri | SEC EDGAR 8-K filings → news queue |
+| `pead-ingestion` | 5,35 14-21 Mon-Fri | Classifica 8-K via Ollama → pead_signals (queue: inference) |
+| `loss-feedback-check` | */30 14-21 Mon-Fri | Phase B: detect loss patterns → adjust threshold/regime scale |
+| `counterfactual-worker` | 22:45 daily | Phase C: compute 1h counterfactual returns for SKIP rows |
+| `reconcile-fills-evening` | 21:30 Mon-Fri | Reconcile fill prices after NYSE close |
 
 ### Manual Task Triggering
 
@@ -101,6 +107,27 @@ docker compose exec worker celery -A src.workers.celery_app call \
 
 # Check scheduled tasks
 docker compose exec beat celery -A src.workers.celery_app inspect scheduled
+```
+
+---
+
+## Script Operativi
+
+### Analisi giornaliera (cron 14:30 CEST, lun-ven)
+
+```bash
+scripts/daily_analysis.sh
+```
+
+Lancia Claude Code in modalità non-interattiva, analizza i dati del giorno precedente (trades, signals, decisions, log docker), invia report su Telegram. Log in `logs/daily_analysis_YYYY-MM-DD.log`.
+
+Richiede `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` in `.env`.
+
+Per aggiungere al crontab:
+```bash
+crontab -e
+# Aggiungere: 30 12 * * 1-5 /path/to/scripts/daily_analysis.sh
+# (12:30 UTC = 14:30 CEST)
 ```
 
 ---

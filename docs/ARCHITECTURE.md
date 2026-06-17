@@ -180,8 +180,27 @@ Strategies produce sleeve-local weights: fractions of their own sleeve, not the 
 | **S2** | Volatility Risk Premium | 0% | **Disabled** (research) | Proxy: overnight gap on low-VRP days. OOS Sharpe −0.55; all gates failed. Needs options infrastructure for v2 |
 | **S3** | Cross-Sectional Residual Momentum | 0% | Research | Cross-sectional rank of residual 1-12M returns; possible sizing lookahead; gate 3/5 failed |
 | **S4** | News-Driven Tactical | 10% | Paper overlay | LLM ensemble sentiment → BUY gate: score > 0.3 AND price > EMA20; capped at 10% until dedicated gate report |
+| **S7** | PEAD (Post-Earnings Announcement Drift) | 15% | Active | Classifica 8-K filing SEC via Ollama (LLM). Weight target basato sulla direzione della sorpresa (positiva/negativa). |
+
+#### S7 — PEAD (Post-Earnings Announcement Drift)
+Classifica gli 8-K filing SEC via Ollama (LLM). Il segnale PEAD alimenta il portfolio orchestrator con weight target basato sulla direzione del filing (sorpresa positiva/negativa). Worker: `src/workers/pead_worker.py`. Routes: `src/api/routes/pead_routes.py`. Schedule: ogni 30 min ore 14:00-21:00 UTC (beat: `pead-ingestion`, queue `inference`). Vedi `docs/strategies/s7-pead.md` per la documentazione completa.
 
 Allocation and enabled/disabled state are configured in `config/strategies.yaml`. See that file for authoritative values.
+
+### 2.5b Worker Split
+
+| Worker | Concurrency | Queue | Handles |
+|--------|-------------|-------|---------|
+| `worker` | 4 | `celery` | Tutti i task tranne FinBERT/Ollama |
+| `worker-inference` | 1 | `inference` | Sentiment (FinBERT+Ollama), Regime, PEAD |
+
+Il `worker-inference` ha concurrency=1 per garantire un singolo processo Python che carica FinBERT una sola volta — con concurrency>1, ogni subprocess allocava una copia del modello causando OOM. I task su queue `inference` sono: `sentiment-worker`, `regime-detector`, `pead-ingestion`.
+
+### 2.5c Portfolio Cycle Safeguards
+
+- **Redis cycle lock**: `SET portfolio:cycle:lock NX EX 840` — previene run concorrenti del portfolio orchestrator. TTL 14 min (appena sotto lo schedule di 15 min). Implementato in `src/workers/portfolio_scheduler.py`.
+- **Hold minimum 30 min**: le SELL su simboli comprati negli ultimi 30 minuti vengono filtrate tramite `fetch_recently_bought_symbols()` in `src/store/pg_store.py`. Previene roundtrip involontari S4→S1 (S4 compra, S1 riequilibra e vende nello stesso ciclo).
+- **FinBERT int8 quantization**: quantizzazione dinamica `torch.qint8` applicata al caricamento del modello in `src/llm/finbert.py` — riduce footprint RAM ~50% senza perdita significativa di accuratezza sul task di sentiment classification.
 
 ### 2.6 Execution Engine
 
