@@ -111,6 +111,13 @@ class Config(BaseModel):
     ALPACA_BASE_URL: str = Field(
         default_factory=lambda: os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
     )
+    # Single source of truth for paper vs live trading mode.
+    # Set ALPACA_PAPER_MODE=false to enable live execution.
+    # Defaults to True (paper) — safe default; must be explicitly disabled to go live.
+    # Workers must read this field; never derive mode from ALPACA_BASE_URL substring.
+    ALPACA_PAPER_MODE: bool = Field(
+        default_factory=lambda: os.environ.get("ALPACA_PAPER_MODE", "true").lower() == "true"
+    )
 
     # P2-A: Bracket order parameters. Set ALPACA_BRACKET_ENABLED=true to activate.
     # Risk/reward 1:2 by default (take_profit at +6%, stop_loss at -3%).

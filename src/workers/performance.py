@@ -723,7 +723,7 @@ def run_daily_report():
                 tc = TradingClient(
                     api_key=config.ALPACA_API_KEY,
                     secret_key=config.ALPACA_SECRET_KEY,
-                    paper="paper-api" in config.ALPACA_BASE_URL,
+                    paper=config.ALPACA_PAPER_MODE,
                 )
                 updated = pg.reconcile_trade_fills(tc)
                 log.info("Reconciled %d trade fill(s) from Alpaca", updated)

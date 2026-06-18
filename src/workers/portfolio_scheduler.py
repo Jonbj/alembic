@@ -226,7 +226,7 @@ def _run_cycle_inner() -> dict:
                 _emergency_cancel_all(
                     api_key=config.ALPACA_API_KEY,
                     secret_key=config.ALPACA_SECRET_KEY,
-                    paper="paper-api" in config.ALPACA_BASE_URL,
+                    paper=config.ALPACA_PAPER_MODE,
                 )
                 return {"skipped": True, "reason": f"killswitch:{reason}"}
         finally:
@@ -248,7 +248,7 @@ def _run_cycle_inner() -> dict:
     trading_client = TradingClient(
         api_key=config.ALPACA_API_KEY,
         secret_key=config.ALPACA_SECRET_KEY,
-        paper="paper-api" in config.ALPACA_BASE_URL,
+        paper=config.ALPACA_PAPER_MODE,
     )
 
     # P0-B: Market clock pre-flight — skip cycle if NYSE is closed (handles early-close days).

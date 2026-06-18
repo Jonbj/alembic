@@ -837,7 +837,8 @@ def run_execution_worker() -> dict:
     redis_client = Redis.from_url(config.REDIS_URL)
     redis_store = RedisStore(redis_client)
 
-    paper = "paper-api" in config.ALPACA_BASE_URL
+    paper = config.ALPACA_PAPER_MODE
+    log.info("Trading mode: %s", "paper" if paper else "LIVE")
     trading_client = TradingClient(
         api_key=config.ALPACA_API_KEY,
         secret_key=config.ALPACA_SECRET_KEY,
