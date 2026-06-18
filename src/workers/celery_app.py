@@ -145,10 +145,13 @@ app.conf.beat_schedule = {
         "task": "src.workers.execution.run_execution_worker",
         "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
     },
-    # Telegram poller every 5 seconds for inline keyboard approval flow
+    # Telegram poller every 5 seconds for inline keyboard approval flow.
+    # Routed to 'inference' queue (concurrency=1) so only one process polls
+    # at a time — prevents 409 Conflict from 4 concurrent ForkPoolWorkers.
     "poll-telegram-updates": {
         "task": "src.workers.telegram_poller.poll_telegram_updates",
         "schedule": 5.0,  # 5 seconds
+        "options": {"queue": "inference"},
     },
     # Nightly retention sweep at 03:30 UTC
     "run-retention-sweep": {

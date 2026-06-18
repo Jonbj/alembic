@@ -92,6 +92,10 @@ def _alpaca_orders_as_trades(client, symbol: str | None, status: str, limit: int
     req = GetOrdersRequest(status=QueryOrderStatus.CLOSED, limit=min(limit, 500))
     orders = client.get_orders(req)
 
+    # Build a lookup: symbol → avg entry price from most recent BUY fill.
+    # Used to compute gross_pnl for SELL orders without a DB join.
+    buy_entry_price: dict[str, float] = {}
+
     rows = []
     for o in orders:
         if o.filled_at is None:
@@ -105,27 +109,59 @@ def _alpaca_orders_as_trades(client, symbol: str | None, status: str, limit: int
         trade_status = "open" if side == "buy" else "closed"
         if status != "all" and trade_status != status:
             continue
-        rows.append({
-            "id": str(o.id),
-            "symbol": o.symbol,
-            "entry_time": o.filled_at.isoformat(),
-            "entry_price": filled_price,
-            "entry_notional": notional,
-            "entry_order_id": str(o.id),
-            "exit_time": None,
-            "exit_price": None,
-            "exit_reason": f"portfolio_{side}",
-            "qty": qty,
-            "score": 0.0,
-            "regime_mult": 1.0,
-            "gross_pnl": None,
-            "slippage_est": None,
-            "net_pnl": None,
-            "signal_id": None,
-            "decision_id": None,
-            "postmortem_diagnosis": None,
-            "status": trade_status,
-        })
+
+        if side == "buy":
+            # Track latest BUY fill price per symbol for P&L computation on SELL.
+            if filled_price and o.symbol:
+                buy_entry_price[o.symbol] = filled_price
+            rows.append({
+                "id": str(o.id),
+                "symbol": o.symbol,
+                "entry_time": o.filled_at.isoformat(),
+                "entry_price": filled_price,
+                "entry_notional": notional,
+                "entry_order_id": str(o.id),
+                "exit_time": None,
+                "exit_price": None,
+                "exit_reason": "portfolio_buy",
+                "qty": qty,
+                "score": 0.0,
+                "regime_mult": 1.0,
+                "gross_pnl": None,
+                "slippage_est": None,
+                "net_pnl": None,
+                "signal_id": None,
+                "decision_id": None,
+                "postmortem_diagnosis": None,
+                "status": "open",
+            })
+        else:
+            # SELL: entry fields are empty, exit fields carry the fill data.
+            entry_px = buy_entry_price.get(o.symbol)
+            gross_pnl = None
+            if entry_px and filled_price and qty:
+                gross_pnl = round((filled_price - entry_px) * qty, 4)
+            rows.append({
+                "id": str(o.id),
+                "symbol": o.symbol,
+                "entry_time": None,
+                "entry_price": entry_px,
+                "entry_notional": notional,
+                "entry_order_id": None,
+                "exit_time": o.filled_at.isoformat(),
+                "exit_price": filled_price,
+                "exit_reason": "portfolio_sell",
+                "qty": qty,
+                "score": 0.0,
+                "regime_mult": 1.0,
+                "gross_pnl": gross_pnl,
+                "slippage_est": None,
+                "net_pnl": gross_pnl,
+                "signal_id": None,
+                "decision_id": None,
+                "postmortem_diagnosis": None,
+                "status": "closed",
+            })
     return rows[:limit]
 
 

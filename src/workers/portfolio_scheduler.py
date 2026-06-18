@@ -135,6 +135,7 @@ def _load_execution_engine() -> str:
 _CYCLE_LOCK_KEY = "portfolio:cycle:lock"
 _CYCLE_LOCK_TTL = 840  # 14 min — covers worst case; just under the 15-min schedule
 _HOLD_MINIMUM_MINUTES = 30  # don't sell a position entered less than this many minutes ago
+_MIN_ORDER_NOTIONAL = 100.0  # skip BUY orders below this USD threshold — prevents $40 micro-rebalancing
 
 
 @app.task(name="src.workers.portfolio_scheduler.run_portfolio_cycle")
@@ -831,6 +832,12 @@ def _submit_portfolio_orders(
                     log.warning("No market price for %s — skipping BUY order", order.symbol)
                     continue
                 notional = round(price * order.quantity, 2)
+                if notional < _MIN_ORDER_NOTIONAL:
+                    log.info(
+                        "Min notional skip: %s BUY $%.2f < $%.0f threshold",
+                        order.symbol, notional, _MIN_ORDER_NOTIONAL,
+                    )
+                    continue
                 # P1-B: Non-fractionable symbols require whole-share qty instead of notional.
                 is_fractionable = (fractionable_symbols is None or order.symbol in fractionable_symbols)
                 if _submit_fn is not None:
