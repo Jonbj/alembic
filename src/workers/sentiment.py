@@ -213,6 +213,12 @@ async def process_news_item(
         )
         if news_log_id is not None:
             pg_store.link_signal_to_news(signal_id=signal_id, news_log_id=news_log_id)
+        else:
+            # ON CONFLICT (url, ticker) DO NOTHING returned None — article already in
+            # news_log from a previous fetch. Signal will have news_log_id = NULL.
+            # High NULL rate breaks signal auditability; monitor with:
+            #   SELECT COUNT(*)-COUNT(news_log_id) FROM sentiment_signals WHERE generated_at > now()-'1h'::interval
+            log.debug("news_log_id NULL for signal %s/%s (url conflict or empty url)", ticker, signal_id)
         if raw_outputs:
             pg_store.log_llm_responses(signal_id=signal_id, outputs=raw_outputs)
     except Exception as e:

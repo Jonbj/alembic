@@ -51,59 +51,43 @@ def _serialize_report(report) -> dict:
 
 
 def _fetch_strategy_data(pg) -> tuple[dict[str, list[float]], dict[str, float], float, float]:
-    """Fetch strategy returns, weights, exposure and NAV from PostgreSQL.
+    """Fetch portfolio returns, weights, exposure and NAV from PostgreSQL.
+
+    The portfolio_daily_state view aggregates all strategies as a single portfolio
+    (columns: snapshot_date, daily_return, net_pnl, n_trades).  We expose it to
+    the risk monitor under the synthetic key "portfolio" so existing metrics
+    (Sharpe, drawdown) are computed at the portfolio level.
 
     Returns (strategy_returns, current_weights, total_exposure, nav).
-    Falls back to empty data if tables don't exist yet.
+    Falls back to empty data if the view is empty or unavailable.
     """
-    try:
-        conn = pg._get_connection()
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT strategy_id, daily_return, weight, nav, total_exposure
-                FROM portfolio_daily_state
-                WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM portfolio_daily_state)
-                ORDER BY strategy_id
-                """
-            )
-            rows = cur.fetchall()
-    except Exception as e:
-        log.warning("Could not fetch portfolio_daily_state: %s — using defaults", e)
-        return {}, {}, 0.0, 0.0
-
     strategy_returns: dict[str, list[float]] = {}
-    current_weights: dict[str, float] = {}
     nav = 0.0
     total_exposure = 0.0
 
-    for sid, daily_ret, weight, row_nav, row_exp in rows:
-        strategy_returns.setdefault(sid, []).append(float(daily_ret or 0.0))
-        current_weights[sid] = float(weight or 0.0)
-        nav = float(row_nav or 0.0)
-        total_exposure = float(row_exp or 0.0)
-
-    # Fetch rolling 60d history for richer metrics; only replace single-day data
-    # if the history query actually returns rows (empty history → keep what we have).
     try:
         conn = pg._get_connection()
         with conn.cursor() as cur:
+            # Rolling 60-day daily returns for Sharpe / drawdown calculation.
             cur.execute(
                 """
-                SELECT strategy_id, daily_return
+                SELECT snapshot_date, daily_return, net_pnl
                 FROM portfolio_daily_state
-                WHERE snapshot_date >= now() - INTERVAL '60 days'
-                ORDER BY strategy_id, snapshot_date ASC
+                WHERE snapshot_date >= now()::date - INTERVAL '60 days'
+                ORDER BY snapshot_date ASC
                 """
             )
-            history_rows = cur.fetchall()
-        if history_rows:
-            strategy_returns = {}
-            for sid, daily_ret in history_rows:
-                strategy_returns.setdefault(sid, []).append(float(daily_ret or 0.0))
+            rows = cur.fetchall()
+        if rows:
+            strategy_returns["portfolio"] = [float(r[1] or 0.0) for r in rows]
+            # Approximate NAV from cumulative net_pnl (no cash tracking in DB yet).
+            nav = sum(float(r[2] or 0.0) for r in rows)
+            total_exposure = 1.0  # full-portfolio exposure placeholder
     except Exception as e:
-        log.debug("Could not fetch rolling history: %s", e)
+        log.warning("Could not fetch portfolio_daily_state: %s — skipping risk report", e)
+        return {}, {}, 0.0, 0.0
 
+    current_weights = {"portfolio": 1.0} if strategy_returns else {}
     return strategy_returns, current_weights, total_exposure, nav
 
 

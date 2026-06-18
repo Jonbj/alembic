@@ -423,8 +423,8 @@ class PostgreSQLStore:
     _INSERT_TRADE = """
         INSERT INTO trades
             (symbol, signal_id, decision_id, entry_order_id,
-             entry_time, entry_notional, score, regime_mult, qty)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+             entry_time, entry_notional, score, regime_mult, qty, signal_score)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
 
     _CLOSE_TRADE = """
@@ -456,15 +456,22 @@ class PostgreSQLStore:
         score: float,
         regime_mult: float,
         qty: float | None = None,
+        signal_score: float | None = None,
     ) -> None:
-        """Insert an open trade row (entry_price populated later by reconcile)."""
+        """Insert an open trade row (entry_price populated later by reconcile).
+
+        Args:
+            score: Portfolio allocation weight (e.g. 0.02 = 2% target weight).
+            signal_score: Actual LLM sentiment score that motivated the trade.
+                Stored separately so IC / score-bucket analytics are meaningful.
+        """
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(
                     self._INSERT_TRADE,
                     (symbol, signal_id, decision_id, entry_order_id,
-                     entry_time, entry_notional, score, regime_mult, qty),
+                     entry_time, entry_notional, score, regime_mult, qty, signal_score),
                 )
             conn.commit()
         except Exception:

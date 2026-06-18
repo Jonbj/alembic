@@ -550,6 +550,8 @@ def _run_cycle_inner() -> dict:
                 "decision_id": decision_id,
                 "score": order.allocation_weight,
                 "signal_id": _signal_ids.get(order.symbol),
+                # LLM sentiment score — distinct from allocation_weight stored in score.
+                "signal_score": _s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
             }
         _pg.close()
     except Exception as _exc:
@@ -625,6 +627,7 @@ def _run_cycle_inner() -> dict:
                         entry_notional=sub["notional"],
                         score=dec.get("score", 0.0),
                         regime_mult=1.0,
+                        signal_score=dec.get("signal_score"),
                     )
                 else:
                     _trade_id = _pg_trades.record_trade_exit(
@@ -777,6 +780,14 @@ def _build_strategy_instance(entry, bars_df):
                         )
                         for sym in signals_df["symbol"].unique()
                     }
+                    # T-01: apply loss-feedback threshold from Redis.
+                    # ENTRY_THRESHOLD in execution.py applies only to legacy mode;
+                    # portfolio mode must enforce it here so the mechanism is not bypassed.
+                    try:
+                        _fb_raw = _r_sv.get("feedback:entry_threshold")
+                        _fb_threshold = float(_fb_raw) if _fb_raw is not None else None
+                    except Exception:
+                        _fb_threshold = None
                 finally:
                     _r_sv.close()
                 signals_df = signals_df.copy()
@@ -787,6 +798,17 @@ def _build_strategy_instance(entry, bars_df):
                 n_boosted = sum(1 for m in multipliers.values() if m != 1.0)
                 if n_boosted:
                     log.info("Signal velocity: %d/%d symbols adjusted", n_boosted, len(multipliers))
+                # Drop signals below the active feedback threshold (absolute value check
+                # so bearish signals are also gated, consistent with BUY-only logic).
+                if _fb_threshold is not None and _fb_threshold > s4_config.min_score:
+                    before = len(signals_df)
+                    signals_df = signals_df[signals_df["score"].abs() >= _fb_threshold]
+                    dropped = before - len(signals_df)
+                    if dropped:
+                        log.info(
+                            "S4 feedback gate: dropped %d/%d signals below threshold %.3f",
+                            dropped, before, _fb_threshold,
+                        )
             except Exception as exc:
                 log.warning("Signal velocity application failed: %s — using raw scores", exc)
         # Each Celery task creates a fresh instance with _last_rebalance=None.
