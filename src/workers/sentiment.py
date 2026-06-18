@@ -48,6 +48,11 @@ from src.workers.celery_app import app
 
 log = logging.getLogger(__name__)
 
+# Module-level FinBERT singleton — survives across task invocations in the same
+# ForkPoolWorker process, eliminating the 108-242s reload on every sentiment run.
+# None until first sentiment task; then persists for the lifetime of the process.
+_finbert_singleton: FinBERTClient | None = None
+
 # Worker version constant
 WORKER_VERSION = "1.0.0"
 
@@ -309,12 +314,15 @@ def run_sentiment_worker() -> dict:
         min_confidence=config.ENSEMBLE_MIN_CONFIDENCE,
         divergence_threshold=config.ENSEMBLE_DIVERGENCE_STD,
     )
-    finbert = FinBERTClient()
-    # Warm up the pipeline in this (single-threaded) context before asyncio.run()
-    # dispatches concurrent run_in_executor calls. transformers._LazyModule is not
-    # thread-safe: concurrent 'from transformers import pipeline' calls corrupt the
-    # module state, causing "Device set to use meta" and Tensor.item() failures.
-    finbert._get_pipeline()
+    global _finbert_singleton
+    if _finbert_singleton is None:
+        # First call in this worker process: create and warm up the pipeline.
+        # Must happen in this single-threaded context before asyncio.run() dispatches
+        # concurrent run_in_executor calls — transformers._LazyModule is not thread-safe.
+        _finbert_singleton = FinBERTClient()
+        _finbert_singleton._get_pipeline()
+        log.info("FinBERT singleton initialized for this worker process")
+    finbert = _finbert_singleton
     budget_tracker = LLMBudgetTracker(conn=pg_conn)
 
     # Read per-model weights from Redis (set by weekly LOO ICIR rebalancing).
