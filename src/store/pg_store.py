@@ -477,6 +477,16 @@ class PostgreSQLStore:
         except Exception:
             conn.rollback()
             raise
+        self.write_audit_log(
+            action="INSERT",
+            table_name="trades",
+            details={
+                "symbol": symbol,
+                "entry_order_id": entry_order_id,
+                "entry_notional": entry_notional,
+                "score": score,
+            },
+        )
 
     def close_trade(
         self,
@@ -745,26 +755,45 @@ class PostgreSQLStore:
         """
         conn = self._get_connection()
         try:
-            # Reconcile entry fills
+            # Reconcile entry fills — also compute entry-side cost estimate so
+            # open trades have a lower-bound cost_usd while the position is held.
+            # (Full round-trip costs are overwritten at close time by the exit reconcile.)
             with conn.cursor() as cur:
                 cur.execute(
-                    """SELECT id, entry_order_id FROM trades
+                    """SELECT id, entry_order_id, symbol, entry_notional FROM trades
                        WHERE entry_price IS NULL
                          AND entry_time > now() - '24 hours'::interval"""
                 )
                 rows = cur.fetchall()
             updated = 0
-            for trade_id, order_id in rows:
+            for trade_id, order_id, symbol, entry_notional_db in rows:
                 try:
                     order = trading_client.get_order_by_id(order_id)
                     if order.filled_avg_price is None:
                         continue
                     fill_price = float(order.filled_avg_price)
                     fill_qty = float(order.filled_qty) if order.filled_qty else None
+                    notional = float(entry_notional_db) if entry_notional_db else (
+                        fill_price * fill_qty if fill_qty else 0.0
+                    )
+                    entry_costs = self._cost_calc.compute(
+                        symbol=symbol or "UNKNOWN",
+                        notional=notional,
+                        qty=fill_qty or 0.0,
+                        fill_price=fill_price,
+                        side="BUY",
+                    )
                     with conn.cursor() as cur:
                         cur.execute(
-                            "UPDATE trades SET entry_price = %s, qty = %s WHERE id = %s",
-                            (fill_price, fill_qty, trade_id),
+                            """UPDATE trades
+                               SET entry_price = %s,
+                                   qty         = %s,
+                                   cost_usd    = %s,
+                                   cost_bps    = %s
+                               WHERE id = %s""",
+                            (fill_price, fill_qty,
+                             entry_costs.total_cost_usd, entry_costs.total_cost_bps,
+                             trade_id),
                         )
                     updated += 1
                 except Exception as e:
@@ -1611,14 +1640,46 @@ class PostgreSQLStore:
             conn.rollback()
             return []
 
-    def __del__(self) -> None:
-        """Return pooled connection to pool on GC if close() was not called."""
+    # ── Audit log ─────────────────────────────────────────────────────────────
+
+    _INSERT_AUDIT_LOG = (
+        "INSERT INTO audit_log (action, table_name, record_id, details) "
+        "VALUES (%s::audit_action_enum, %s, %s, %s)"
+    )
+
+    def write_audit_log(
+        self,
+        action: str,
+        table_name: str | None = None,
+        record_id: int | None = None,
+        details: dict | None = None,
+        user_id: str = "system",
+    ) -> None:
+        """Insert one row into audit_log.
+
+        Args:
+            action:     One of audit_action_enum values (e.g. 'INSERT', 'KILLSWITCH_ACTIVATE').
+            table_name: Affected table, if applicable.
+            record_id:  Primary key of the affected row, if applicable.
+            details:    Arbitrary JSON payload (symbol, qty, reason, …).
+            user_id:    Caller identity; defaults to 'system' for automated paths.
+        """
+        conn = self._get_connection()
         try:
-            if self._conn is not None:
-                self._release_connection(self._conn)
-                self._conn = None
+            with conn.cursor() as cur:
+                cur.execute(
+                    self._INSERT_AUDIT_LOG,
+                    (
+                        action,
+                        table_name,
+                        record_id,
+                        json.dumps(details or {}),
+                    ),
+                )
+            conn.commit()
         except Exception:
-            pass
+            conn.rollback()
+            raise
 
     # ── Zeygos scores ─────────────────────────────────────────────────────────
 

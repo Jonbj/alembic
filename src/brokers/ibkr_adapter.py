@@ -11,7 +11,13 @@ import logging
 import time
 from typing import Any
 
-from ib_insync import IB, Stock
+try:
+    from ib_insync import IB, Stock
+    _IB_INSYNC_AVAILABLE = True
+except ImportError:
+    IB = None  # type: ignore[assignment,misc]
+    Stock = None  # type: ignore[assignment]
+    _IB_INSYNC_AVAILABLE = False
 
 from src.brokers.base import BrokerAdapter
 
@@ -53,6 +59,11 @@ class IBKRAdapter(BrokerAdapter):
         client_id: int = 1,
         account: str = "",
     ) -> None:
+        if IB is None:
+            raise ImportError(
+                "ib_insync is required for IBKRAdapter. "
+                "Install it with: pip install ib_insync"
+            )
         self._host = host
         self._port = port
         self._client_id = client_id

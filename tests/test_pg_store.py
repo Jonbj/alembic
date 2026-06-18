@@ -475,10 +475,11 @@ class TestOpenTrade:
             regime_mult=1.0,
             qty=2.5,
         )
-        mock_cur.execute.assert_called_once()
-        sql = mock_cur.execute.call_args[0][0]
-        assert "INSERT INTO trades" in sql
-        mock_conn.commit.assert_called_once()
+        # open_trade now performs two inserts: trades row + audit_log row (P0-12).
+        executed_sqls = [c[0][0] for c in mock_cur.execute.call_args_list]
+        assert any("INSERT INTO trades" in sql for sql in executed_sqls)
+        assert any("INSERT INTO audit_log" in sql for sql in executed_sqls)
+        assert mock_conn.commit.called
 
 
 class TestCloseTrade:

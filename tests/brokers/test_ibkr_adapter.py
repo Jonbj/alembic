@@ -19,8 +19,13 @@ from src.brokers.ibkr_adapter import (
 
 @pytest.fixture
 def mock_ib():
-    """Patch ib_insync.IB so no live TWS/Gateway connection is made."""
-    with patch("src.brokers.ibkr_adapter.IB") as MockIB:
+    """Patch ib_insync.IB and Stock so no live connection or contract is needed.
+
+    ib_insync may not be installed in the test environment; both names are set
+    to None at module level and must be patched for any test that exercises them.
+    """
+    with patch("src.brokers.ibkr_adapter.IB") as MockIB, \
+         patch("src.brokers.ibkr_adapter.Stock"):
         instance = MockIB.return_value
         yield instance
 
