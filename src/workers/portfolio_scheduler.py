@@ -667,6 +667,7 @@ def _run_cycle_inner() -> dict:
             result.final_orders, trading_client, market,
             fractionable_symbols=fractionable,
             open_trade_symbols=open_db_symbols or None,
+            regime_mult=_regime_mult,
         )
 
     # Submit forced sells for sentiment reversal (symbols not already being sold).
@@ -921,6 +922,7 @@ def _submit_portfolio_orders(
     _submit_fn=None,
     fractionable_symbols: set[str] | None = None,
     open_trade_symbols: set[str] | None = None,
+    regime_mult: float = 1.0,
 ) -> list[dict]:
     """Submit BUY and SELL orders to Alpaca.
 
@@ -937,6 +939,8 @@ def _submit_portfolio_orders(
         open_trade_symbols: Symbols that already have an open trade in the DB.
             BUY orders for these symbols are skipped to prevent pyramiding (P0-05).
             If None, no duplicate guard is applied.
+        regime_mult: Regime multiplier from Redis (P0-09). Scales BUY notional so
+            high-volatility regimes (mult=0.2) result in smaller position sizes.
 
     Returns:
         List of dicts for successfully submitted orders, each containing:
@@ -959,7 +963,7 @@ def _submit_portfolio_orders(
                 if price is None or price <= 0:
                     log.warning("No market price for %s — skipping BUY order", order.symbol)
                     continue
-                notional = round(price * order.quantity, 2)
+                notional = round(price * order.quantity * regime_mult, 2)
                 if notional < _MIN_ORDER_NOTIONAL:
                     log.info(
                         "Min notional skip: %s BUY $%.2f < $%.0f threshold",

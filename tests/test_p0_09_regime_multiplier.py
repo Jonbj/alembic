@@ -120,3 +120,93 @@ class TestRegimeMultiplierRead:
             result = _get_regime_multiplier_from_redis("redis://localhost:6379/0")
 
         assert result == pytest.approx(1.0)
+
+
+class TestRegimeMultiplierAppliedToSizing:
+    """regime_mult must scale BUY order notional in _submit_portfolio_orders (P0-09 follow-up)."""
+
+    def _make_order(self, symbol="AAPL", qty=10.0, side="BUY"):
+        from src.backtest.engine.types import Order, OrderSide
+        from datetime import datetime, timezone
+        side_enum = OrderSide.BUY if side == "BUY" else OrderSide.SELL
+        return Order.market_order(
+            ts=datetime(2026, 6, 19, 14, 0, tzinfo=timezone.utc),
+            symbol=symbol,
+            side=side_enum,
+            qty=qty,
+        )
+
+    def _make_market(self, price=150.0, symbol="AAPL"):
+        from src.backtest.engine.types import MarketSnapshot
+        from datetime import datetime, timezone
+        return MarketSnapshot(
+            timestamp=datetime(2026, 6, 19, 14, 0, tzinfo=timezone.utc),
+            prices={symbol: price},
+            volumes={symbol: 1_000_000.0},
+            adv_20d={symbol: 1_000_000.0},
+        )
+
+    def test_submit_portfolio_orders_accepts_regime_mult(self):
+        """_submit_portfolio_orders must accept a regime_mult parameter."""
+        import inspect
+        from src.workers.portfolio_scheduler import _submit_portfolio_orders
+        sig = inspect.signature(_submit_portfolio_orders)
+        assert "regime_mult" in sig.parameters, (
+            "_submit_portfolio_orders must accept a regime_mult parameter — "
+            "P0-09: the regime multiplier must reduce position size in high-vol regimes"
+        )
+
+    def test_regime_mult_half_halves_notional(self):
+        """regime_mult=0.5 must result in exactly half the notional vs regime_mult=1.0."""
+        from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+        captured_notionals: list[float] = []
+
+        def capture_fn(order, notional_or_qty, _tc):
+            captured_notionals.append(notional_or_qty)
+
+        order = self._make_order("AAPL", qty=10.0)
+        market = self._make_market(price=150.0)
+
+        _submit_portfolio_orders(
+            [order], MagicMock(), market,
+            _submit_fn=capture_fn, regime_mult=0.5,
+        )
+        _submit_portfolio_orders(
+            [order], MagicMock(), market,
+            _submit_fn=capture_fn, regime_mult=1.0,
+        )
+
+        assert len(captured_notionals) == 2, "Expected 2 submitted orders"
+        n_half, n_full = captured_notionals
+        assert pytest.approx(n_half * 2, rel=1e-4) == n_full, (
+            f"regime_mult=0.5 notional ({n_half}) must be exactly half of "
+            f"regime_mult=1.0 notional ({n_full})"
+        )
+
+    def test_regime_mult_zero_point_two_reduces_notional(self):
+        """regime_mult=0.2 (high_vol) must reduce notional to 20% of baseline."""
+        from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+        captured: list[float] = []
+
+        def capture_fn(order, n, _tc):
+            captured.append(n)
+
+        order = self._make_order("AAPL", qty=10.0)
+        market = self._make_market(price=100.0)
+
+        _submit_portfolio_orders(
+            [order], MagicMock(), market,
+            _submit_fn=capture_fn, regime_mult=0.2,
+        )
+        _submit_portfolio_orders(
+            [order], MagicMock(), market,
+            _submit_fn=capture_fn, regime_mult=1.0,
+        )
+
+        n_reduced, n_full = captured
+        assert pytest.approx(n_reduced / n_full, rel=1e-4) == 0.2, (
+            f"regime_mult=0.2 must produce 20% of baseline notional. "
+            f"Got {n_reduced} vs baseline {n_full}"
+        )
