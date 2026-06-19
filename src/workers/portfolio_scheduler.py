@@ -95,6 +95,24 @@ def _emergency_cancel_all(api_key: str, secret_key: str, paper: bool) -> None:
         log.warning("EMERGENCY cancel_orders failed: %s", exc)
 
 
+def _is_ks_active_failclosed(redis_url: str) -> bool:
+    """Return True if kill-switch is active, or if Redis is unreachable (fail-closed, P0-06).
+
+    Used for the pre-submission re-check: if we cannot verify the kill-switch is clear,
+    we assume it is active and skip order submission rather than risk trading while halted.
+    """
+    try:
+        from redis import Redis as _R
+        _r = _R.from_url(redis_url, decode_responses=True)
+        try:
+            return bool(_r.get("killswitch_active")) or bool(_r.get("system:halted_by_operator"))
+        finally:
+            _r.close()
+    except Exception as _ks_exc:
+        log.warning("P0-06: Kill-switch re-check failed (%s) — fail-closed, skipping submission", _ks_exc)
+        return True
+
+
 _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
 
 
@@ -572,6 +590,16 @@ def _run_cycle_inner() -> dict:
     if operating_mode in ("dry_run", "halted"):
         log.info("Skipping order submission - %s mode", operating_mode)
         submitted_orders: list[dict] = []
+    elif _is_ks_active_failclosed(config.REDIS_URL):
+        # P0-06: re-check kill-switch immediately before submission to close the race window.
+        # Kill-switch may have been activated after the B2 check at cycle start.
+        log.warning("P0-06: Kill-switch active at pre-submission re-check — aborting order submission")
+        _emergency_cancel_all(
+            api_key=config.ALPACA_API_KEY,
+            secret_key=config.ALPACA_SECRET_KEY,
+            paper=config.ALPACA_PAPER_MODE,
+        )
+        submitted_orders = []
     else:
         fractionable = _get_fractionable_symbols(trading_client)
         # P0-05: fetch symbols with open DB trades to prevent pyramiding.
