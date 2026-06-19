@@ -26,9 +26,10 @@ class PortfolioCombiner:
     Args:
         strategies: mapping of strategy_id → (callable, allocation_pct)
                     e.g. {"S1": (s1_instance, 0.50), "S2": (s2_instance, 0.20)}
-        net_exposure_cap: maximum total notional as a fraction of NAV (default 1.0 = 100%).
-                          BUY orders that would push gross exposure above this threshold
-                          are dropped and a ConstraintViolation is recorded.
+        net_exposure_cap: maximum total notional as a fraction of NAV.
+                          When set, BUY orders that would push gross exposure above
+                          ``nav * net_exposure_cap`` are dropped and a ConstraintViolation
+                          is recorded. When None (default), no cap is enforced.
         risk_parity_mode: when True, use risk_parity_allocator weights instead of
                           fixed allocation_pct values
         risk_parity_allocator: RiskParityAllocator instance; required when
@@ -43,7 +44,7 @@ class PortfolioCombiner:
     def __init__(
         self,
         strategies: dict[str, _StrategyEntry],
-        net_exposure_cap: float = 1.0,
+        net_exposure_cap: "float | None" = None,
         risk_parity_mode: bool = False,
         risk_parity_allocator: "RiskParityAllocator | None" = None,
         vol_targeting_mode: bool = False,
@@ -132,6 +133,10 @@ class PortfolioCombiner:
         orders = [o for o in orders if o.symbol not in conflicted]
 
         # 2. Net-exposure cap — drop BUY orders that push gross exposure over the cap.
+        #    Skipped when net_exposure_cap is None (opt-in only).
+        if self._net_exposure_cap is None:
+            return orders, violations
+
         cap_notional = nav * self._net_exposure_cap
         running_notional = 0.0
         passed: list[CombinedOrder] = []
@@ -153,7 +158,6 @@ class PortfolioCombiner:
                     running_notional + order_notional,
                     cap_notional,
                 )
-                # Record violation (use the pre-drop total so current_value > threshold)
                 violations.append(
                     ConstraintViolation(
                         strategy_id=order.strategy_id,
@@ -174,16 +178,6 @@ class PortfolioCombiner:
         return {sym for sym, sides in sides_by_symbol.items() if len(sides) > 1}
 
     def _compute_nav(self, portfolio: "VirtualPortfolio", market: MarketSnapshot) -> float:
-        nav = portfolio.cash
-        for pos in portfolio.all_positions():
-            price = market.price_of(pos.symbol)
-            if price is not None:
-                nav += pos.market_value(price)
-        return nav
-
-    # ------------------------------------------------------------------
-
-    def _compute_nav(self, portfolio: VirtualPortfolio, market: MarketSnapshot) -> float:
         nav = portfolio.cash
         for pos in portfolio.all_positions():
             price = market.price_of(pos.symbol)
