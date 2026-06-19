@@ -635,6 +635,16 @@ def _run_cycle_inner() -> dict:
             secret_key=config.ALPACA_SECRET_KEY,
             paper=config.ALPACA_PAPER_MODE,
         )
+        try:
+            from src.store.pg_store import PostgreSQLStore as _PGKsAudit
+            _pg_ks = _PGKsAudit()
+            _pg_ks.write_audit_log(
+                action="KILLSWITCH_ACTIVATE",
+                details={"event": "pre_submission_abort", "source": "portfolio_scheduler"},
+            )
+            _pg_ks.close()
+        except Exception as _ks_audit_exc:
+            log.warning("P0-06: Failed to write KS pre-submission audit row: %s", _ks_audit_exc)
         submitted_orders = []
     else:
         fractionable = _get_fractionable_symbols(trading_client)

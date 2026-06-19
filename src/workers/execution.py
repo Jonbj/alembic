@@ -88,7 +88,7 @@ def _load_risk_params() -> tuple[float, float, float]:
 def _load_killswitch_recovery_config() -> dict:
     """Return killswitch_recovery section from trading.yaml with safe defaults."""
     defaults = {
-        "enabled": True,
+        "enabled": False,  # P0-06: auto-recovery disabled by default; opt-in via trading.yaml
         "min_hold_hours": 2.0,
         "recovery_drawdown_pct": 0.025,
         "require_non_panic_regime": True,
