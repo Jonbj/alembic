@@ -109,7 +109,7 @@ class TestBuildPerformanceReport:
 
         # Generate 350 rows with positive correlation (should yield positive IC)
         rows = generate_signal_rows(350, model_id="opus", return_correlation=0.5)
-        mock_pg.fetch_signals_for_ic.return_value = rows
+        mock_pg.fetch_all_signals_for_ic.return_value = rows
 
         current_weights = {"opus": 1.0}
         with patch("src.workers.performance._fetch_all_per_model_signals_for_loo") as mock_pm:
@@ -132,7 +132,7 @@ class TestBuildPerformanceReport:
         rows.extend(generate_signal_rows(150, "opus", return_correlation=0.4))
         rows.extend(generate_signal_rows(150, "qwen3.5:cloud", return_correlation=0.2))
         rows.extend(generate_signal_rows(150, "deepseek-v4-pro:cloud", return_correlation=0.1))
-        mock_pg.fetch_signals_for_ic.return_value = rows
+        mock_pg.fetch_all_signals_for_ic.return_value = rows
 
         # Per-model rows from llm_responses (individual model IDs).
         # Opus has strong signal-return correlation; deepseek is uncorrelated.
@@ -169,7 +169,7 @@ class TestBuildPerformanceReport:
         rows.extend(generate_signal_rows(200, "opus", return_correlation=0.5, fallback_used=False))
         rows.extend(generate_signal_rows(150, "finbert", return_correlation=0.1, fallback_used=True))
 
-        mock_pg.fetch_signals_for_ic.return_value = rows
+        mock_pg.fetch_all_signals_for_ic.return_value = rows
 
         current_weights = {"opus": 1.0}
         with patch("src.workers.performance._fetch_all_per_model_signals_for_loo") as mock_pm:
@@ -198,7 +198,7 @@ class TestBuildPerformanceReport:
         compound_rows = generate_signal_rows(
             350, model_id="ensemble:kimi+qwen+deepseek+glm", return_correlation=0.5
         )
-        mock_pg.fetch_signals_for_ic.return_value = compound_rows
+        mock_pg.fetch_all_signals_for_ic.return_value = compound_rows
 
         # Per-model rows from llm_responses with an individual model ID
         rng = np.random.default_rng(7)
@@ -306,29 +306,30 @@ class TestFetchAllSignalsForIC:
     """Tests for _fetch_all_signals_for_ic function."""
 
     def test_fetches_from_multiple_symbols(self):
-        """Test fetching signals from multiple symbols."""
+        """Test fetching signals — uses batch fetch_all_signals_for_ic."""
         mock_pg = MagicMock(spec=PostgreSQLStore)
-        mock_pg.fetch_signals_for_ic.return_value = [
+        mock_pg.fetch_all_signals_for_ic.return_value = [
             make_signal_row(0.5, 0.02, "opus")
         ]
 
         rows = _fetch_all_signals_for_ic(mock_pg, days=30)
 
-        # Should call fetch_signals_for_ic for each symbol
-        assert mock_pg.fetch_signals_for_ic.call_count >= 1
+        assert mock_pg.fetch_all_signals_for_ic.call_count >= 1
         assert isinstance(rows, list)
 
     def test_fetch_all_signals_uses_watchlist_symbols(self):
-        """_fetch_all_signals_for_ic uses config.WATCHLIST_SYMBOLS, not hardcoded list."""
+        """_fetch_all_signals_for_ic passes all watchlist symbols to fetch_all_signals_for_ic."""
         from src.workers.performance import _fetch_all_signals_for_ic
         from src.config import config
 
         mock_pg = MagicMock()
-        mock_pg.fetch_signals_for_ic.return_value = []
+        mock_pg.fetch_all_signals_for_ic.return_value = []
 
         _fetch_all_signals_for_ic(mock_pg, days=30)
 
-        called_symbols = [call[0][0] for call in mock_pg.fetch_signals_for_ic.call_args_list]
+        # fetch_all_signals_for_ic is called once with the full symbol list
+        assert mock_pg.fetch_all_signals_for_ic.call_count >= 1
+        called_symbols = mock_pg.fetch_all_signals_for_ic.call_args[0][0]
         for symbol in config.WATCHLIST_SYMBOLS:
             assert symbol in called_symbols
 
@@ -349,7 +350,7 @@ class TestRunDailyReport:
 
         # Generate sufficient samples
         rows = generate_signal_rows(350, "opus", return_correlation=0.3)
-        mock_pg.fetch_signals_for_ic.return_value = rows
+        mock_pg.fetch_all_signals_for_ic.return_value = rows
         mock_pg.fetch_per_model_signals_for_ic.return_value = []
 
         # Mock Redis with proper get_ensemble_weights method
@@ -380,7 +381,7 @@ class TestRunDailyReport:
     ):
         """Test daily report handles exceptions gracefully."""
         mock_pg = MagicMock(spec=PostgreSQLStore)
-        mock_pg.fetch_signals_for_ic.side_effect = Exception("DB error")
+        mock_pg.fetch_all_signals_for_ic.side_effect = Exception("DB error")
         mock_pg_cls.return_value = mock_pg
 
         mock_redis = MagicMock(spec=RedisStore)
@@ -477,7 +478,7 @@ class TestRunDriftDetection:
         # Mock PostgreSQL - return same distribution for all periods
         mock_pg = MagicMock(spec=PostgreSQLStore)
         rows = generate_signal_rows(100, "opus", score_mean=0.0, score_std=0.5)
-        mock_pg.fetch_signals_for_ic.return_value = rows
+        mock_pg.fetch_all_signals_for_ic.return_value = rows
 
         mock_pg_cls.return_value = mock_pg
 
@@ -513,7 +514,7 @@ class TestRunDriftDetection:
         # 90 days: normal
         rows_90d = generate_signal_rows(300, "opus", score_mean=0.0, score_std=0.5)
 
-        def fetch_side_effect(symbol, days):
+        def fetch_side_effect(symbols, days):
             if days == 7:
                 return rows_7d
             elif days == 90:
@@ -522,7 +523,7 @@ class TestRunDriftDetection:
                 return rows_90d
             return []
 
-        mock_pg.fetch_signals_for_ic.side_effect = fetch_side_effect
+        mock_pg.fetch_all_signals_for_ic.side_effect = fetch_side_effect
         mock_pg_cls.return_value = mock_pg
 
         # Mock Redis with proper structure

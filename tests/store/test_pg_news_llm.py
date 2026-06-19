@@ -137,12 +137,14 @@ class TestLogLlmResponses:
         pg_store.log_llm_responses(signal_id=42, outputs=outputs)
 
         mock_cursor = pg_store._conn.cursor.return_value
-        assert mock_cursor.execute.call_count == 2
-
-        calls = mock_cursor.execute.call_args_list
-        assert calls[0][0][1][0] == 42  # signal_id
-        assert calls[0][0][1][1] == "opus"
-        assert calls[1][0][1][1] == "qwen3.5:cloud"
+        # Implementation uses executemany for batch insert — one call, two rows.
+        assert mock_cursor.executemany.call_count == 1
+        _, batch = mock_cursor.executemany.call_args[0]
+        batch = list(batch)
+        assert len(batch) == 2
+        assert batch[0][0] == 42        # signal_id
+        assert batch[0][1] == "opus"
+        assert batch[1][1] == "qwen3.5:cloud"
 
     def test_log_llm_responses_empty_list_is_noop(self, pg_store):
         """log_llm_responses with empty list writes nothing and does not raise."""
@@ -165,7 +167,7 @@ class TestLogLlmResponses:
         ]
 
         mock_cursor = pg_store._conn.cursor.return_value
-        mock_cursor.execute.side_effect = Exception("DB error")
+        mock_cursor.executemany.side_effect = Exception("DB error")
 
         with pytest.raises(Exception, match="DB error"):
             pg_store.log_llm_responses(signal_id=42, outputs=outputs)

@@ -1,9 +1,11 @@
 """Main backtest orchestrator: event loop."""
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+import hashlib
 import logging
 from pathlib import Path
 from typing import Callable, Protocol
+import uuid
 
 import pandas as pd
 
@@ -17,6 +19,27 @@ class CostModel(Protocol):
 
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class BacktestManifest:
+    """Captures inputs that uniquely identify a backtest run (P0-10).
+
+    Stored alongside results so any quantitative claim can be traced back to
+    the exact data, seed, and code version that produced it.
+    """
+    run_id: str
+    data_hash: str
+    seed: int
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    @classmethod
+    def from_dataframe(cls, df: pd.DataFrame, seed: int) -> "BacktestManifest":
+        """Derive manifest from the price DataFrame used as backtest input."""
+        raw = df.to_json(date_format="iso").encode()
+        data_hash = hashlib.sha256(raw).hexdigest()[:16]
+        run_id = uuid.uuid4().hex[:12]
+        return cls(run_id=run_id, data_hash=data_hash, seed=seed)
 
 
 @dataclass

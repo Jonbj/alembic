@@ -488,9 +488,9 @@ class TestCloseTrade:
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-        # First fetchone() call: SELECT entry_notional, qty (None = no row found → defaults)
-        # Second fetchone() call: RETURNING id from UPDATE
-        mock_cur.fetchone.side_effect = [None, (77,)]
+        # First fetchone(): SELECT entry_notional, qty — return a row (trade found)
+        # Second fetchone(): RETURNING id from UPDATE
+        mock_cur.fetchone.side_effect = [(2000.0, 10.0), (77,)]
 
         store = PostgreSQLStore(conn=mock_conn)
         store.close_trade(
@@ -513,7 +513,9 @@ class TestCloseTrade:
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-        mock_cur.fetchone.side_effect = [None, None]
+        # First fetchone(): SELECT entry_notional, qty — return a row (trade found)
+        # Second fetchone(): RETURNING id (None when no RETURNING clause or row gone)
+        mock_cur.fetchone.side_effect = [(1800.0, 5.0), None]
 
         store = PostgreSQLStore(conn=mock_conn)
         store.close_trade(
@@ -535,9 +537,9 @@ class TestCloseTradeReturnsId:
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-        # First fetchone: SELECT entry_notional, qty (None → defaults to 0)
+        # First fetchone: SELECT entry_notional, qty — return a row (trade found)
         # Second fetchone: RETURNING id
-        mock_cur.fetchone.side_effect = [None, (99,)]
+        mock_cur.fetchone.side_effect = [(2000.0, 10.0), (99,)]
 
         store = PostgreSQLStore(conn=mock_conn, use_pool=False)
         result = store.close_trade(
@@ -639,8 +641,9 @@ class TestReconcileTradesFills:
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-        # First fetchall → entry fills (2-tuple); second → exit fills (empty)
-        mock_cur.fetchall.side_effect = [[(1, "order-abc")], []]
+        # First fetchall → entry fills (4-tuple: id, entry_order_id, symbol, entry_notional)
+        # Second → exit fills (empty)
+        mock_cur.fetchall.side_effect = [[(1, "order-abc", "AAPL", 2000.0)], []]
 
         mock_order = MagicMock()
         mock_order.filled_avg_price = "201.50"
@@ -662,8 +665,9 @@ class TestReconcileTradesFills:
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-        # First fetchall → entry fills (2-tuple); second → exit fills (empty)
-        mock_cur.fetchall.side_effect = [[(1, "order-abc")], []]
+        # First fetchall → entry fills (4-tuple: id, entry_order_id, symbol, entry_notional)
+        # Second → exit fills (empty)
+        mock_cur.fetchall.side_effect = [[(1, "order-abc", "AAPL", 2000.0)], []]
 
         mock_order = MagicMock()
         mock_order.filled_avg_price = None  # not yet filled
