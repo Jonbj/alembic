@@ -11,6 +11,37 @@ router = APIRouter(prefix="/api")
 
 _CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "trading.yaml"
 
+# P0-08: conservative hard bounds for risk parameters.
+# Violating these disables safety controls — reject immediately, do not persist.
+_RISK_BOUNDS: dict[str, tuple[float, float]] = {
+    "stop_loss":             (0.001, 0.10),   # 0.1% – 10%
+    "max_position_pct":      (0.01,  0.20),   # 1% – 20%
+    "max_portfolio_exposure":(0.10,  1.0),    # 10% – 100%
+    "vix_spike":             (10.0,  100.0),  # 10–100 VIX points
+    "portfolio_drawdown":    (0.01,  0.20),   # 1% – 20%
+}
+
+
+def _validate_risk_params(updates: dict) -> None:
+    """Raise HTTPException 422 if any risk parameter is outside its safe bound."""
+    risk = updates.get("risk")
+    if not isinstance(risk, dict):
+        return
+    violations: list[str] = []
+    for field, (lo, hi) in _RISK_BOUNDS.items():
+        if field not in risk:
+            continue
+        val = risk[field]
+        if not isinstance(val, (int, float)) or not (lo <= float(val) <= hi):
+            violations.append(
+                f"{field}={val!r} is outside [{lo}, {hi}]"
+            )
+    if violations:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Risk parameter bounds violation: {'; '.join(violations)}",
+        )
+
 
 def _read_config() -> dict:
     try:
@@ -37,6 +68,7 @@ def update_config(
     The running Celery workers read config at task start, so changes take effect
     on the next task invocation without a restart.
     """
+    _validate_risk_params(updates)
     current = _read_config()
     _deep_merge(current, updates)
     with open(_CONFIG_PATH, "w") as f:
