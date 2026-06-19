@@ -58,8 +58,9 @@ class TimeSeriesMomentum:
     eliminating per-tick recomputation.
     """
 
-    def __init__(self, prices: pd.DataFrame, config: S1Config) -> None:
+    def __init__(self, prices: pd.DataFrame, config: S1Config, universe=None) -> None:
         self._config = config
+        self._universe = universe
         self._combined = generate_signals(
             prices,
             lookbacks=config.lookbacks,
@@ -104,6 +105,11 @@ class TimeSeriesMomentum:
         weights_row = self._weight_wide.loc[lookup_date]
         threshold = self._config.signal_threshold
 
+        eligible: set[str] | None = None
+        if self._universe is not None:
+            as_of_date = as_of.date() if hasattr(as_of, "date") else as_of
+            eligible = {a.symbol for a in self._universe.active_at(as_of_date)}
+
         return {
             ticker: float(weights_row[ticker])
             for ticker in signals_row.index
@@ -111,6 +117,7 @@ class TimeSeriesMomentum:
                 pd.notna(signals_row[ticker])
                 and pd.notna(weights_row[ticker])
                 and signals_row[ticker] > threshold
+                and (eligible is None or ticker in eligible)
             )
         }
 
