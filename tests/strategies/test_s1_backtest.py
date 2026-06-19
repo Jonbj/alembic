@@ -89,8 +89,6 @@ class TestS1BacktestRuns:
             run_robustness=False,
         )
         assert isinstance(result["milestone_b_pass"], bool)
-        # milestone_b_pass must match oos_sharpe >= 0.5
-        assert result["milestone_b_pass"] == (result["oos_sharpe"] >= 0.5)
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ from src.backtest.data.universe import load_universe
 from src.backtest.engine.data_replay import DataReplay
 from src.backtest.engine.orchestrator import BacktestConfig
 from src.backtest.gates.gate_types import GateReport
+from src.backtest.gates.historical_stress import extract_historical_stress_periods
 from src.backtest.gates.runner import GateConfig, run_all_gates
 from src.backtest.walkforward.runner import WalkForwardConfig, WalkForwardRunner
 from src.strategies.s1.strategy import S1Config, TimeSeriesMomentum
@@ -29,6 +30,7 @@ def run_s1_backtest_from_prices(
     s1_config: S1Config | None = None,
     gate_config: GateConfig | None = None,
     run_robustness: bool = True,
+    universe=None,
 ) -> dict:
     """Run full walk-forward backtest + validation gates from a wide price DataFrame."""
     output_dir = Path(output_dir)
@@ -37,7 +39,7 @@ def run_s1_backtest_from_prices(
     s1_config = s1_config or S1Config()
     wf_config = wf_config or WalkForwardConfig(in_sample_days=1260, out_of_sample_days=252)
 
-    strategy = TimeSeriesMomentum(prices, s1_config)
+    strategy = TimeSeriesMomentum(prices, s1_config, universe=universe)
     if not strategy.health_check():
         raise RuntimeError("S1 strategy health check failed -- insufficient data or NaN signals")
 
@@ -80,7 +82,8 @@ def run_s1_backtest_from_prices(
 
     stress_returns = None
     if len(oos_returns) > 60:
-        stress_returns = _extract_stress_periods(oos_returns)
+        hist = extract_historical_stress_periods(oos_returns)
+        stress_returns = hist if hist else None
 
     full_returns = oos_returns if len(oos_returns) > 0 else pd.Series(dtype=float)
 
@@ -95,9 +98,18 @@ def run_s1_backtest_from_prices(
 
     milestone_b_pass = oos_sharpe >= 0.5 and gate_report.overall_passed
 
+    degradation_ratio = aggregate.get("is_oos_degradation_ratio")
+    if degradation_ratio is not None and degradation_ratio < 0.5:
+        log.warning(
+            "S1 IS/OOS degradation ratio %.4f < 0.5 — OOS Sharpe is less than half of IS Sharpe; "
+            "possible overfitting",
+            degradation_ratio,
+        )
+
     gate_dict = {name: {"passed": g.passed, "details": g.details} for name, g in gate_report.gate_results.items()}
     summary = {
         "oos_sharpe": oos_sharpe,
+        "is_oos_degradation_ratio": degradation_ratio,
         "milestone_b_pass": milestone_b_pass,
         "wf_aggregate": {k: v for k, v in aggregate.items() if k != "oos_nav_series" and k != "per_window"},
         "gate_report": gate_dict,
@@ -126,6 +138,7 @@ def run_s1_backtest_from_prices(
 
     return {
         "oos_sharpe": oos_sharpe,
+        "is_oos_degradation_ratio": degradation_ratio,
         "wf_aggregate": aggregate,
         "gate_report": gate_dict,
         "milestone_b_pass": milestone_b_pass,
@@ -180,23 +193,6 @@ def _split_regime_returns(oos_returns: pd.Series) -> dict[str, pd.Series]:
     return regimes
 
 
-def _extract_stress_periods(oos_returns: pd.Series) -> dict[str, pd.Series]:
-    """Extract worst drawdown period."""
-    if len(oos_returns) < 63:
-        return {}
-
-    cum_return = (1 + oos_returns).cumprod()
-    peak = cum_return.cummax()
-    drawdown = (cum_return - peak) / peak
-
-    worst_dd_idx = drawdown.idxmin()
-    start = max(worst_dd_idx - pd.Timedelta(days=15), oos_returns.index[0])
-    end = min(worst_dd_idx + pd.Timedelta(days=15), oos_returns.index[-1])
-    stress_mask = (oos_returns.index >= start) & (oos_returns.index <= end)
-
-    return {"worst_drawdown": oos_returns[stress_mask]}
-
-
 def run_s1_backtest_full(
     output_dir: Path | str = Path("reports/s1_backtest"),
     force_refresh: bool = False,
@@ -218,4 +214,5 @@ def run_s1_backtest_full(
     return run_s1_backtest_from_prices(
         prices=prices_wide,
         output_dir=output_dir,
+        universe=universe,
     )

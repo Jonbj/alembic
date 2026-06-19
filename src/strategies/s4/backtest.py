@@ -12,6 +12,7 @@ import pandas as pd
 from src.backtest.data.loader import DataLoader
 from src.backtest.metrics.performance import sharpe_ratio
 from src.backtest.engine.data_replay import DataReplay
+from src.backtest.gates.historical_stress import extract_historical_stress_periods
 from src.backtest.gates.runner import GateConfig, run_all_gates
 from src.backtest.walkforward.runner import WalkForwardConfig, WalkForwardRunner
 from src.strategies.s4.config import S4Config
@@ -90,7 +91,8 @@ def run_s4_backtest_from_prices_and_signals(
 
     stress_returns = None
     if len(oos_returns) > 60:
-        stress_returns = _extract_stress_periods(oos_returns)
+        hist = extract_historical_stress_periods(oos_returns)
+        stress_returns = hist if hist else None
 
     full_returns = oos_returns if len(oos_returns) > 0 else pd.Series(dtype=float)
 
@@ -108,12 +110,21 @@ def run_s4_backtest_from_prices_and_signals(
     g5 = gate_report.gate_results.get("gate_5_stress")
     hard_gates_pass = bool(g1 and g1.passed and g5 and g5.passed)
 
+    degradation_ratio = aggregate.get("is_oos_degradation_ratio")
+    if degradation_ratio is not None and degradation_ratio < 0.5:
+        log.warning(
+            "S4 IS/OOS degradation ratio %.4f < 0.5 — OOS Sharpe is less than half of IS Sharpe; "
+            "possible overfitting",
+            degradation_ratio,
+        )
+
     gate_dict = {
         name: {"passed": g.passed, "details": g.details}
         for name, g in gate_report.gate_results.items()
     }
     summary = {
         "oos_sharpe": oos_sharpe,
+        "is_oos_degradation_ratio": degradation_ratio,
         "hard_gates_pass": hard_gates_pass,
         "all_gates_pass": gate_report.overall_passed,
         "wf_aggregate": {
@@ -139,6 +150,7 @@ def run_s4_backtest_from_prices_and_signals(
 
     return {
         "oos_sharpe": oos_sharpe,
+        "is_oos_degradation_ratio": degradation_ratio,
         "wf_aggregate": aggregate,
         "gate_report": gate_dict,
         "hard_gates_pass": hard_gates_pass,
@@ -199,23 +211,6 @@ def _split_regime_returns(oos_returns: pd.Series) -> dict[str, pd.Series]:
     if low_vol_mask.any():
         regimes["low_vol"] = oos_returns[low_vol_mask.fillna(False)]
     return regimes
-
-
-def _extract_stress_periods(oos_returns: pd.Series) -> dict[str, pd.Series]:
-    """Extract worst drawdown period from OOS returns."""
-    if len(oos_returns) < 63:
-        return {}
-
-    cum_return = (1 + oos_returns).cumprod()
-    peak = cum_return.cummax()
-    drawdown = (cum_return - peak) / peak
-
-    worst_dd_idx = drawdown.idxmin()
-    start = max(worst_dd_idx - pd.Timedelta(days=15), oos_returns.index[0])
-    end = min(worst_dd_idx + pd.Timedelta(days=15), oos_returns.index[-1])
-    stress_mask = (oos_returns.index >= start) & (oos_returns.index <= end)
-
-    return {"worst_drawdown": oos_returns[stress_mask]}
 
 
 def run_s4_backtest_full(

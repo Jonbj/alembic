@@ -318,42 +318,6 @@ class TestRegimeReturns:
 
 
 # ---------------------------------------------------------------------------
-# TestStressPeriods
-# ---------------------------------------------------------------------------
-
-
-class TestStressPeriods:
-    def test_extract_stress_returns_dict(self) -> None:
-        from src.strategies.s4.backtest import _extract_stress_periods
-
-        rng = np.random.default_rng(2)
-        dates = pd.date_range("2015-01-01", periods=200, freq="B")
-        returns = pd.Series(rng.normal(0.001, 0.01, 200), index=dates)
-
-        result = _extract_stress_periods(returns)
-        assert isinstance(result, dict)
-
-    def test_extract_stress_finds_worst_drawdown(self) -> None:
-        from src.strategies.s4.backtest import _extract_stress_periods
-
-        dates = pd.date_range("2015-01-01", periods=200, freq="B")
-        returns = pd.Series(0.001, index=dates, dtype=float)
-        returns.iloc[100:110] = -0.05  # inject a severe drawdown
-
-        result = _extract_stress_periods(returns)
-        assert "worst_drawdown" in result
-        assert len(result["worst_drawdown"]) > 0
-
-    def test_extract_stress_empty_when_too_short(self) -> None:
-        from src.strategies.s4.backtest import _extract_stress_periods
-
-        dates = pd.date_range("2015-01-01", periods=10, freq="B")
-        short_returns = pd.Series(0.001, index=dates, dtype=float)
-        result = _extract_stress_periods(short_returns)
-        assert result == {}
-
-
-# ---------------------------------------------------------------------------
 # TestTimezoneNormalization
 # ---------------------------------------------------------------------------
 
