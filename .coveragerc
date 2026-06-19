@@ -1,0 +1,14 @@
+# coverage configuration — enforces minimum test coverage threshold in CI
+[run]
+source = src
+omit =
+    src/strategies/s4/backtest.py
+    */__init__.py
+
+[report]
+fail_under = 60
+show_missing = true
+skip_covered = false
+
+[html]
+directory = htmlcov
