@@ -112,6 +112,47 @@ class StrategyRegistry:
         self._entries.clear()
         self._load_defaults()
 
+    def load_mode_from_db(self, db_conn) -> None:
+        """Override YAML-loaded mode with values from strategy_lifecycle table.
+
+        Reads the `mode` column for each registered strategy and updates the
+        in-memory StrategyEntry. Fails open: if the DB is unavailable or the
+        table doesn't exist, keeps the YAML-loaded mode unchanged.
+
+        This implements the single-source-of-truth principle: the DB is
+        authoritative for mode; YAML is the bootstrap seed only.
+        """
+        try:
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "SELECT strategy_id, mode FROM strategy_lifecycle "
+                    "WHERE strategy_id = ANY(%s)",
+                    (list(self._entries.keys()),),
+                )
+                rows = cur.fetchall()
+                if hasattr(rows[0] if rows else None, "keys"):
+                    # dict-like rows (RealDictCursor)
+                    db_modes = {row["strategy_id"]: row["mode"] for row in rows}
+                else:
+                    db_modes = {row[0]: row[1] for row in rows}
+        except Exception as exc:
+            log.warning("load_mode_from_db: DB unavailable (%s) — keeping YAML mode", exc)
+            return
+
+        for sid, mode in db_modes.items():
+            if sid in self._entries:
+                e = self._entries[sid]
+                self._entries[sid] = StrategyEntry(
+                    strategy_id=e.strategy_id,
+                    strategy_class=e.strategy_class,
+                    allocation_pct=e.allocation_pct,
+                    schedule=e.schedule,
+                    enabled=e.enabled,
+                    mode=mode,
+                    promotion_blocked=e.promotion_blocked,
+                )
+                log.debug("Strategy %s: mode overridden from DB → %s", sid, mode)
+
     # ── Private ────────────────────────────────────────────────────────────────
 
     def _load_defaults(self) -> None:
