@@ -112,3 +112,75 @@ class TestBacktestRerunDeterministic:
         prices = _make_price_data()
         m = BacktestManifest.from_dataframe(prices, seed=0)
         assert m.run_id and isinstance(m.run_id, str) and len(m.run_id) >= 8
+
+
+class TestBacktestManifestVersionFields:
+    """BacktestManifest must capture model, code, and config version (P0-10 follow-up)."""
+
+    def test_manifest_has_code_version(self):
+        """BacktestManifest must have a code_version field (git commit hash or fallback)."""
+        from src.backtest.engine.orchestrator import BacktestManifest
+
+        prices = _make_price_data()
+        m = BacktestManifest.from_dataframe(prices, seed=42)
+        assert hasattr(m, "code_version"), "BacktestManifest is missing code_version field"
+        assert isinstance(m.code_version, str) and len(m.code_version) > 0, (
+            "code_version must be a non-empty string (git sha or 'unknown')"
+        )
+
+    def test_manifest_has_config_hash(self):
+        """BacktestManifest must capture a hash of trading.yaml at run time."""
+        from src.backtest.engine.orchestrator import BacktestManifest
+
+        prices = _make_price_data()
+        m = BacktestManifest.from_dataframe(prices, seed=42)
+        assert hasattr(m, "config_hash"), "BacktestManifest is missing config_hash field"
+        assert isinstance(m.config_hash, str) and len(m.config_hash) > 0, (
+            "config_hash must be a non-empty string (sha256 prefix of trading.yaml or 'unknown')"
+        )
+
+    def test_manifest_has_model_version(self):
+        """BacktestManifest must record the model/inference stack version."""
+        from src.backtest.engine.orchestrator import BacktestManifest
+
+        prices = _make_price_data()
+        m = BacktestManifest.from_dataframe(prices, seed=42)
+        assert hasattr(m, "model_version"), "BacktestManifest is missing model_version field"
+        assert isinstance(m.model_version, str) and len(m.model_version) > 0, (
+            "model_version must be a non-empty string (e.g. 'finbert-int8+kimi-k2.6')"
+        )
+
+    def test_code_version_is_stable_within_run(self):
+        """Two manifests created in the same process must have the same code_version."""
+        from src.backtest.engine.orchestrator import BacktestManifest
+
+        prices = _make_price_data()
+        m1 = BacktestManifest.from_dataframe(prices, seed=1)
+        m2 = BacktestManifest.from_dataframe(prices, seed=2)
+        assert m1.code_version == m2.code_version, (
+            "code_version must be stable within a process — it reflects the deployed commit"
+        )
+
+    def test_orchestrator_run_accepts_seed(self):
+        """BacktestOrchestrator.run() must accept an optional seed parameter."""
+        import inspect
+        from src.backtest.engine.orchestrator import BacktestOrchestrator
+        sig = inspect.signature(BacktestOrchestrator.run)
+        assert "seed" in sig.parameters, (
+            "BacktestOrchestrator.run() must accept a seed parameter so stochastic "
+            "strategies can be made deterministic across re-runs"
+        )
+
+    def test_orchestrator_run_returns_manifest(self):
+        """BacktestOrchestrator.run() must return a manifest alongside results."""
+        from src.backtest.engine.data_replay import DataReplay
+        from src.backtest.engine.orchestrator import BacktestConfig, BacktestOrchestrator, BacktestManifest
+
+        prices = _make_price_data()
+        replay = DataReplay(prices)
+        orch = BacktestOrchestrator(config=BacktestConfig())
+        result = orch.run(data_replay=replay, strategy_callable=lambda *_: [], seed=42)
+        assert hasattr(result, "manifest"), (
+            "BacktestResult must have a manifest attribute of type BacktestManifest"
+        )
+        assert isinstance(result.manifest, BacktestManifest)

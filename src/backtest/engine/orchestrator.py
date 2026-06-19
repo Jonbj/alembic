@@ -21,16 +21,53 @@ class CostModel(Protocol):
 log = logging.getLogger(__name__)
 
 
+def _resolve_code_version() -> str:
+    """Return the current git commit SHA (short) or 'unknown' if not in a git repo."""
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=3,
+        )
+        sha = result.stdout.strip()
+        return sha if sha else "unknown"
+    except Exception:
+        return "unknown"
+
+
+def _resolve_config_hash() -> str:
+    """Return a sha256 prefix of trading.yaml, or 'unknown' if unavailable."""
+    try:
+        config_path = Path(__file__).resolve().parents[4] / "config" / "trading.yaml"
+        raw = config_path.read_bytes()
+        return hashlib.sha256(raw).hexdigest()[:16]
+    except Exception:
+        return "unknown"
+
+
+# Cached at import time so all manifests within a process share the same values.
+_CODE_VERSION: str = _resolve_code_version()
+_CONFIG_HASH: str = _resolve_config_hash()
+
+# Model version: read from env or fall back to a known string from CLAUDE.md.
+_MODEL_VERSION: str = __import__("os").environ.get(
+    "ALEMBIC_MODEL_VERSION", "finbert-int8+kimi-k2.6+qwen3.5"
+)
+
+
 @dataclass
 class BacktestManifest:
     """Captures inputs that uniquely identify a backtest run (P0-10).
 
     Stored alongside results so any quantitative claim can be traced back to
-    the exact data, seed, and code version that produced it.
+    the exact data, seed, code version, and config that produced it.
     """
     run_id: str
     data_hash: str
     seed: int
+    code_version: str
+    config_hash: str
+    model_version: str
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     @classmethod
@@ -39,7 +76,14 @@ class BacktestManifest:
         raw = df.to_json(date_format="iso").encode()
         data_hash = hashlib.sha256(raw).hexdigest()[:16]
         run_id = uuid.uuid4().hex[:12]
-        return cls(run_id=run_id, data_hash=data_hash, seed=seed)
+        return cls(
+            run_id=run_id,
+            data_hash=data_hash,
+            seed=seed,
+            code_version=_CODE_VERSION,
+            config_hash=_CONFIG_HASH,
+            model_version=_MODEL_VERSION,
+        )
 
 
 @dataclass
@@ -55,6 +99,7 @@ class BacktestResult:
     config: BacktestConfig
     snapshots: tuple[PortfolioSnapshot, ...]
     fills: tuple[Fill, ...]
+    manifest: "BacktestManifest | None" = None
 
     def to_nav_series(self) -> pd.Series:
         return pd.Series(
@@ -93,8 +138,20 @@ class BacktestOrchestrator:
         self,
         data_replay: DataReplay,
         strategy_callable: Callable,
+        seed: int = 0,
     ) -> BacktestResult:
-        """Run backtest end-to-end."""
+        """Run backtest end-to-end.
+
+        Args:
+            seed: Integer seed for stochastic strategies. Seeded into numpy/random
+                  at the start of each run so re-runs with the same seed are identical.
+        """
+        import random
+        import numpy as np
+        random.seed(seed)
+        np.random.seed(seed)
+
+        manifest = BacktestManifest.from_dataframe(data_replay._prices, seed=seed)
         portfolio = VirtualPortfolio(initial_cash=self.config.initial_capital)
 
         timesteps = data_replay.timesteps()
@@ -127,4 +184,5 @@ class BacktestOrchestrator:
             config=self.config,
             snapshots=portfolio.get_snapshots(),
             fills=portfolio.get_fills(),
+            manifest=manifest,
         )
