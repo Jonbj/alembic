@@ -31,6 +31,7 @@ class WindowResult:
     oos_end: datetime
     oos_result: BacktestResult
     oos_metrics: dict = field(default_factory=dict)
+    is_sharpe: float = 0.0
 
 
 @dataclass
@@ -115,6 +116,11 @@ class WalkForwardRunner:
             oos_snapshots = [s for s in full_result.snapshots if s.timestamp >= oos_start]
             oos_metrics = _compute_window_metrics(oos_snapshots)
 
+            # IS Sharpe: snapshots in IS period only
+            is_snapshots = [s for s in full_result.snapshots if s.timestamp < oos_start]
+            is_metrics = _compute_window_metrics(is_snapshots)
+            is_sharpe = float(is_metrics.get("sharpe", 0.0))
+
             windows.append(WindowResult(
                 window_idx=window_idx,
                 is_start=is_start,
@@ -123,6 +129,7 @@ class WalkForwardRunner:
                 oos_end=oos_end,
                 oos_result=full_result,
                 oos_metrics=oos_metrics,
+                is_sharpe=is_sharpe,
             ))
 
             window_idx += 1

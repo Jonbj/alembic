@@ -50,16 +50,26 @@ class WalkForwardAggregator:
 
         pct_positive = sum(1 for r in ann_rets if r > 0) / len(ann_rets)
 
+        is_sharpes = [w.is_sharpe for w in valid]
+        mean_is_sharpe = round(statistics.mean(is_sharpes), 4) if is_sharpes else 0.0
+        mean_oos_sharpe = round(statistics.mean(sharpes), 4)
+        if mean_is_sharpe != 0.0:
+            is_oos_degradation_ratio: float | None = round(mean_oos_sharpe / mean_is_sharpe, 4)
+        else:
+            is_oos_degradation_ratio = None
+
         agg: dict = {
             "n_windows": len(windows),
             "n_valid_windows": len(valid),
-            "mean_sharpe": round(statistics.mean(sharpes), 4),
+            "mean_sharpe": mean_oos_sharpe,
             "median_sharpe": round(statistics.median(sharpes), 4),
             "std_sharpe": round(statistics.stdev(sharpes) if len(sharpes) > 1 else 0.0, 4),
             "mean_annualized_return": round(statistics.mean(ann_rets), 4),
             "mean_max_drawdown": round(statistics.mean(drawdowns), 4),
             "worst_drawdown": round(min(drawdowns), 4),
             "pct_windows_positive": round(pct_positive, 4),
+            "mean_is_sharpe": mean_is_sharpe,
+            "is_oos_degradation_ratio": is_oos_degradation_ratio,
             "per_window": per_window,
         }
 
