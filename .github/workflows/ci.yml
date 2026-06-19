@@ -7,6 +7,54 @@ on:
     branches: ["main"]
 
 jobs:
+  # ── Job 1: static analysis (no services needed, runs in parallel with test) ──
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history required by gitleaks for git-log scanning
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Lint (ruff)
+        run: uv run ruff check src/ tests/ --select E,F,W,I --ignore E501
+
+      - name: Type check (mypy)
+        # continue-on-error: true — mypy is informational until a dedicated
+        # mypy-clean pass is done (P3). Remove continue-on-error after cleanup.
+        continue-on-error: true
+        run: uv run mypy src/ --config-file pyproject.toml
+
+      - name: Dependency audit (pip-audit)
+        # continue-on-error: true — torch/transformers have known CVEs that do
+        # not affect our usage. Track in a separate issue; remove continue-on-error
+        # after each CVE is either patched or explicitly accepted.
+        continue-on-error: true
+        run: uv run pip-audit --strict
+
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        # GITLEAKS_FAIL=false — verify no real secrets exist before enabling hard fail.
+        # Remove and set GITLEAKS_FAIL=true once baseline is clean.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
+          GITLEAKS_ENABLE_SUMMARY: "true"
+          GITLEAKS_FAIL: "false"
+
+  # ── Job 2: full test suite with coverage ──
   test:
     runs-on: ubuntu-latest
 
@@ -56,8 +104,11 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Lint (ruff)
-        run: uv run ruff check src/ tests/ --select E,F,W,I --ignore E501
-
-      - name: Run tests
-        run: uv run pytest tests/ -q --tb=short -x
+      - name: Run tests with coverage
+        # .coveragerc enforces fail_under=60; CI fails if coverage drops below threshold.
+        # -x removed so all tests run and coverage is complete across all modules.
+        run: |
+          uv run pytest tests/ -q --tb=short \
+            --cov=src \
+            --cov-config=.coveragerc \
+            --cov-report=term-missing

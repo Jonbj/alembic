@@ -52,6 +52,7 @@ dev = [
     "mypy>=1.10",
     "types-PyYAML>=6.0",
     "types-python-dateutil>=2.9",
+    "pip-audit>=2.7",
 ]
 
 [tool.setuptools.packages.find]
@@ -62,9 +63,21 @@ include = ["src*"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
+[tool.mypy]
+python_version = "3.11"
+# Third-party packages (torch, transformers, alpaca-py, etc.) lack complete stubs.
+# ignore_missing_imports prevents hundreds of stub-noise errors that drown real bugs.
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_return_any = false
+strict = false
+# Exclude generated/migration directories from type checking
+exclude = ["migrations/", "quantconnect/", "reports/", "data/"]
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=0.23",
+    "pytest-cov>=7.1.0",
     "pytest-mock>=3.14",
 ]

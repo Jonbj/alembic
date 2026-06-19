@@ -1,0 +1,30 @@
+title = "Alembic gitleaks configuration"
+
+# Allow test-only credentials that appear in the CI workflow and test fixtures.
+# These are NOT real secrets — they are used exclusively in the GitHub Actions
+# CI environment with a throwaway Postgres/Redis instance.
+# Review and tighten this allowlist before any production deployment.
+[[allowlist]]
+  description = "CI-only test credentials in workflow file"
+  regexes = [
+    "test-api-key-for-ci-only",
+    "test-jwt-secret-key-for-ci-only",
+  ]
+  paths = [
+    ".github/workflows/ci.yml",
+  ]
+
+[[allowlist]]
+  description = "Bcrypt hash of test password (not a plaintext secret)"
+  regexes = [
+    '''\\$2b\\$12\\$i6qSOhZRTLWbWoSTukGsw''',
+  ]
+  paths = [
+    ".github/workflows/ci.yml",
+  ]
+
+[[allowlist]]
+  description = "Test fixture files may contain synthetic/fake API keys"
+  paths = [
+    "tests/",
+  ]
