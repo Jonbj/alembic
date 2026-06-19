@@ -23,6 +23,19 @@ import pytest
 class TestNoHardcodedSecrets:
     """No plaintext API key literals in tracked scripts."""
 
+    def test_no_dangerously_skip_permissions_in_scripts(self):
+        """scripts/ must not invoke claude --dangerously-skip-permissions."""
+        offenders: list[str] = []
+        for path in sorted(pathlib.Path("scripts").rglob("*")):
+            if path.suffix in (".sh", ".py") and path.is_file():
+                for lineno, line in enumerate(path.read_text().splitlines(), 1):
+                    if "--dangerously-skip-permissions" in line and not line.strip().startswith("#"):
+                        offenders.append(f"{path}:{lineno}: {line.strip()[:80]}")
+        assert not offenders, (
+            "Script invokes claude --dangerously-skip-permissions — replace with "
+            "--allowedTools <whitelist>:\n" + "\n".join(offenders)
+        )
+
     def test_no_hardcoded_api_key_in_scripts(self):
         """scripts/ must not embed API key literals (≥16-char alphanumeric after API_KEY=)."""
         # Match values ≥16 chars that are NOT dunder-bounded placeholders like __FOO__.

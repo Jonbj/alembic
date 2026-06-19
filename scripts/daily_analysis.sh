@@ -106,7 +106,7 @@ PROMPT
 )
 # Inject the API key at runtime (placeholder replaced here, never stored in source).
 _CLAUDE_PROMPT="${_PROMPT_TEMPLATE//__ALEMBIC_API_KEY__/$ALEMBIC_API_KEY}"
-ANALYSIS_OUTPUT=$(claude --dangerously-skip-permissions -p "$_CLAUDE_PROMPT" 2>&1)
+ANALYSIS_OUTPUT=$(claude --allowedTools Bash -p "$_CLAUDE_PROMPT" 2>&1)
 
 echo "$ANALYSIS_OUTPUT" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
