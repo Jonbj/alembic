@@ -276,7 +276,15 @@ def _run_cycle_inner() -> dict:
             log.info("Market closed (next open: %s) — skipping portfolio cycle", clock.next_open)
             return {"skipped": True, "reason": "market_closed", "next_open": str(clock.next_open)}
     except Exception as _clk_exc:
-        log.warning("Could not fetch market clock: %s — proceeding anyway", _clk_exc)
+        # P0-07: fail-closed — if we can't verify market is open, abort rather than risk
+        # submitting orders on a holiday, early-close day, or during an exchange outage.
+        log.error("Could not fetch market clock: %s — aborting cycle (fail-closed)", _clk_exc)
+        _fire_alert(
+            notifier,
+            f"⚠️ Portfolio cycle: Alpaca clock API unreachable — cycle aborted (P0-07 fail-closed).\n<code>{_clk_exc}</code>",
+            AlertLevel.WARNING,
+        )
+        return {"error": "clock_unavailable"}
 
     # P0-D: Account pre-flight — abort if Alpaca has blocked the account.
     try:
