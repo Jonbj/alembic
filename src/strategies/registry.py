@@ -40,12 +40,17 @@ class StrategyEntry:
                         value to yield portfolio-level contributions.
         schedule:       5-field cron expression for Celery beat.
         enabled:        Whether this strategy participates in live cycles.
+        mode:           Governance classification: "live", "supervised_paper", "paper",
+                        "research", or "disabled". Defaults to "paper" (safe default).
+                        Does NOT independently gate order submission — ALPACA_PAPER_MODE
+                        controls that. `mode` is the human-auditable status field.
     """
     strategy_id: str
     strategy_class: Any
     allocation_pct: float
     schedule: str
     enabled: bool = True
+    mode: str = "paper"
 
 
 class StrategyRegistry:
@@ -98,6 +103,7 @@ class StrategyRegistry:
             allocation_pct=entry.allocation_pct,
             schedule=entry.schedule,
             enabled=enabled,
+            mode=entry.mode,
         )
 
     def reload(self) -> None:
@@ -128,6 +134,7 @@ class StrategyRegistry:
                 allocation_pct=cfg["allocation_pct"],
                 schedule=_DEFAULT_SCHEDULE,
                 enabled=cfg["enabled"],
+                mode=cfg.get("mode", "paper"),
             )
 
         _validate_allocations(self._entries)
@@ -151,6 +158,7 @@ def _load_strategies_yaml() -> dict[str, dict]:
             result[sid] = {
                 "enabled": bool(cfg.get("enabled", False)),
                 "allocation_pct": float(cfg.get("allocation_pct", 0.0)),
+                "mode": str(cfg.get("mode", "paper")),
             }
         return result
     except FileNotFoundError:
@@ -162,20 +170,23 @@ def _load_strategies_yaml() -> dict[str, dict]:
 
 
 def _validate_allocations(entries: dict[str, StrategyEntry]) -> None:
-    """Warn on allocation policy violations. Never raises."""
+    """Raise ValueError on allocation policy violations (hard cap, not soft warn)."""
     enabled = [e for e in entries.values() if e.enabled]
     total = sum(e.allocation_pct for e in enabled)
     if total > 1.0:
-        log.warning(
-            "Enabled strategy allocations sum to %.2f > 1.0 — portfolio is over-allocated",
-            total,
+        raise ValueError(
+            f"Enabled strategy allocations sum to {total:.2f} > 1.0 — portfolio is over-allocated. "
+            "Reduce allocation_pct in config/strategies.yaml so the total does not exceed 1.0."
         )
     s4 = entries.get("S4")
     if s4 and s4.enabled and s4.allocation_pct > 0.10:
-        log.warning(
-            "S4 allocation %.0f%% exceeds 10%% cap — no dedicated gate report found",
-            s4.allocation_pct * 100,
+        raise ValueError(
+            f"S4 allocation {s4.allocation_pct:.0%} exceeds 10% hard cap. "
+            "S4 has no dedicated gate report — reduce S4.allocation_pct to ≤ 0.10."
         )
     s2 = entries.get("S2")
     if s2 and s2.enabled:
-        log.warning("S2 is enabled but OOS backtest gates have not passed — consider research mode")
+        raise ValueError(
+            "S2 is enabled but OOS backtest gates have not passed (OOS Sharpe -0.55, all gates failed). "
+            "Set S2.enabled=false in config/strategies.yaml."
+        )
