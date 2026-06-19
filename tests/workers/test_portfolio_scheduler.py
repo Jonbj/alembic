@@ -1,6 +1,6 @@
 """Tests for portfolio_scheduler Celery task (T-604)."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, call, patch
 
 import pandas as pd
@@ -204,14 +204,15 @@ def test_build_strategy_instance_s4_loads_signals_from_db():
     entry.strategy_id = "S4"
     bars_df = _make_bars_df(n=5, symbols=["SPY"])
 
+    _recent = datetime.now(timezone.utc) - timedelta(hours=1)
     mock_signals = [
         SentimentResult(
             symbol="NVDA", score=0.8, confidence=0.9, reasoning="Positive",
-            model_id="test", generated_at=datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc),
+            model_id="test", generated_at=_recent,
         ),
         SentimentResult(
             symbol="MSFT", score=0.6, confidence=0.7, reasoning="Neutral",
-            model_id="test", generated_at=datetime(2026, 6, 4, 12, 0, tzinfo=timezone.utc),
+            model_id="test", generated_at=_recent,
         ),
     ]
     mock_store = MagicMock()

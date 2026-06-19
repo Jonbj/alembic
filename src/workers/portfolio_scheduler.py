@@ -176,6 +176,64 @@ def _load_execution_engine() -> str:
         return "portfolio"
 
 
+_S4_FIRED_SIGNALS_TTL = 108_000  # 30 hours — auto-expires after session date
+
+
+def _filter_stale_signals(
+    signals: list,
+    max_age_hours: int,
+    now_utc,
+) -> tuple[list, list]:
+    """Split signals into (fresh, stale) by comparing generated_at to now_utc.
+
+    Signals with generated_at more than max_age_hours before now_utc are stale.
+    Clock-skew (slightly future generated_at) is treated as age=0 (not stale).
+    """
+    fresh, stale = [], []
+    for sig in signals:
+        age_seconds = (now_utc - sig.generated_at).total_seconds()
+        if age_seconds > max_age_hours * 3600:
+            stale.append(sig)
+        else:
+            fresh.append(sig)
+    return fresh, stale
+
+
+def _get_fired_signal_ids(session_date: str, redis_url: str) -> set[int]:
+    """Return the set of signal_ids already fired today (fail-open on Redis error)."""
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=False)
+        try:
+            raw = r.smembers(f"s4:fired_signals:{session_date}")
+            return {int(v) for v in raw}
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("P1-S4: idempotency Redis unreachable — duplicate signal risk: %s", exc)
+        return set()
+
+
+def _mark_signal_fired(
+    signal_id: int,
+    session_date: str,
+    redis_url: str,
+    ttl_seconds: int = _S4_FIRED_SIGNALS_TTL,
+) -> None:
+    """Add signal_id to the per-session Redis set; set TTL on first write (fail-silent)."""
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=False)
+        try:
+            key = f"s4:fired_signals:{session_date}"
+            r.sadd(key, signal_id)
+            r.expire(key, ttl_seconds)
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("P1-S4: failed to mark signal_id=%s as fired: %s", signal_id, exc)
+
+
 _CYCLE_LOCK_KEY = "portfolio:cycle:lock"
 _CYCLE_LOCK_TTL = 840  # 14 min — covers worst case; just under the 15-min schedule
 _HOLD_MINIMUM_MINUTES = 30  # don't sell a position entered less than this many minutes ago
@@ -560,6 +618,26 @@ def _run_cycle_inner() -> dict:
         _sym_strats = result.symbol_strategies
         _s4_symbols = [sym for sym, strats in _sym_strats.items() if "S4" in strats]
         _signal_ids = _pg.fetch_latest_signal_ids(_s4_symbols) if _s4_symbols else {}
+        # P1-S4-IDEMPOTENCY: skip S4 orders whose signal_id already fired today.
+        _session_date = ts.strftime("%Y-%m-%d")
+        _fired_ids = _get_fired_signal_ids(_session_date, config.REDIS_URL)
+        _idempotency_skip: set[str] = set()
+        for _sym, _sid in _signal_ids.items():
+            if _sid in _fired_ids:
+                _idempotency_skip.add(_sym)
+                log.warning(
+                    "P1-S4: signal_id=%s for %s already fired today — skipping (SIGNAL_DUPLICATE_SKIP)",
+                    _sid, _sym,
+                )
+                try:
+                    _pg.write_audit_log(
+                        action="SIGNAL_DUPLICATE_SKIP",
+                        table_name="sentiment_signals",
+                        record_id=_sid,
+                        details={"symbol": _sym, "signal_id": _sid, "session_date": _session_date},
+                    )
+                except Exception as _ae:
+                    log.warning("P1-S4: duplicate audit write failed: %s", _ae)
         # Load S4 signal details (score + reasoning) for the reason text
         _s4_signals: dict[str, dict] = {}
         if _s4_symbols:
@@ -570,6 +648,9 @@ def _run_cycle_inner() -> dict:
                 pass
         for order in result.final_orders:
             strats = _sym_strats.get(order.symbol, [])
+            # P1-S4-IDEMPOTENCY: skip this order if its signal_id was already fired today.
+            if order.symbol in _idempotency_skip:
+                continue
             wt_pct = f"{order.allocation_weight * 100:.1f}%"
             if "S4" in strats:
                 sig = _s4_signals.get(order.symbol, {})
@@ -607,6 +688,10 @@ def _run_cycle_inner() -> dict:
                 # LLM sentiment score — distinct from allocation_weight stored in score.
                 "signal_score": _s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
             }
+            # P1-S4-IDEMPOTENCY: mark this signal_id as fired for today's session.
+            _fired_sig_id = _signal_ids.get(order.symbol)
+            if _fired_sig_id is not None and "S4" in strats:
+                _mark_signal_fired(_fired_sig_id, _session_date, config.REDIS_URL)
         _pg.close()
     except Exception as _exc:
         log.warning("Failed to log portfolio decisions: %s", _exc)
@@ -835,18 +920,54 @@ def _build_strategy_instance(entry, bars_df):
                 symbols=s4_symbols,
             )
             if signals:
-                import pandas as pd
-                signals_df = pd.DataFrame([{
-                    "symbol": s.symbol,
-                    "score": s.score,
-                    "confidence": s.confidence,
-                    "reasoning": s.reasoning,
-                    "model_id": s.model_id,
-                    "ensemble_std": s.ensemble_std,
-                    "fallback_used": s.fallback_used,
-                    "generated_at": s.generated_at,
-                } for s in signals])
-                log.info("S4: loaded %d signals from DB (last %d h)", len(signals), s4_config.signals_lookback_hours)
+                # P1-S4-FRESHNESS: drop signals older than max_signal_age_hours.
+                _now_utc = datetime.now(timezone.utc)
+                fresh_signals, stale_signals = _filter_stale_signals(
+                    signals, s4_config.max_signal_age_hours, _now_utc
+                )
+                if stale_signals:
+                    log.warning(
+                        "S4: dropped %d/%d stale signals (age > %dh)",
+                        len(stale_signals), len(signals), s4_config.max_signal_age_hours,
+                    )
+                    for _stale in stale_signals:
+                        try:
+                            _age_h = round(
+                                (_now_utc - _stale.generated_at).total_seconds() / 3600, 2
+                            )
+                            store.write_audit_log(
+                                action="SIGNAL_STALE_SKIP",
+                                table_name="sentiment_signals",
+                                details={
+                                    "symbol": _stale.symbol,
+                                    "age_hours": _age_h,
+                                    "max_age_hours": s4_config.max_signal_age_hours,
+                                    "generated_at": _stale.generated_at.isoformat(),
+                                },
+                            )
+                        except Exception as _ae:
+                            log.warning("P1-S4: stale audit write failed: %s", _ae)
+                signals = fresh_signals
+                if signals:
+                    import pandas as pd
+                    signals_df = pd.DataFrame([{
+                        "symbol": s.symbol,
+                        "score": s.score,
+                        "confidence": s.confidence,
+                        "reasoning": s.reasoning,
+                        "model_id": s.model_id,
+                        "ensemble_std": s.ensemble_std,
+                        "fallback_used": s.fallback_used,
+                        "generated_at": s.generated_at,
+                    } for s in signals])
+                    log.info("S4: loaded %d fresh signals (last %dh, max_age=%dh)",
+                             len(signals), s4_config.signals_lookback_hours,
+                             s4_config.max_signal_age_hours)
+                else:
+                    log.warning(
+                        "S4: all %d signals were stale (max_age=%dh) — no orders this cycle",
+                        len(stale_signals), s4_config.max_signal_age_hours,
+                    )
             else:
                 log.warning(
                     "S4: no signals in DB for last %d hours — strategy will produce no orders",
