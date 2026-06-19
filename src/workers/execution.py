@@ -700,31 +700,35 @@ def run_execution_cycle(
                                 ema_pass=True, decision="SKIP_CAP")
                 continue
 
-            # Broker-side stop order: use OTO class when price is available from EMA cache.
-            # Avoids relying solely on the 15-min software poll for stop-loss enforcement.
-            qty: "float | None" = None
+            # Broker-side stop order: every BUY requires a known price to compute the
+            # stop-loss level. If price is unavailable (EMA cache miss or no data_client),
+            # skip the entry — an unprotected BUY (without bracket stop-loss) is not safe.
             cached = market_cache.get(symbol, {})
             price = cached.get("price")
 
-            if price is not None:
-                qty = round(notional / price, 4)
-                sym_stop_pct = _cost_calc.stop_loss_pct(symbol)
-                stop_price = round(price * (1 - sym_stop_pct), 2)
-                order = MarketOrderRequest(
-                    symbol=symbol,
-                    qty=qty,
-                    side=OrderSide.BUY,
-                    time_in_force=TimeInForce.DAY,
-                    order_class=OrderClass.OTO,
-                    stop_loss=StopLossRequest(stop_price=stop_price),
+            if price is None:
+                log.warning(
+                    "No price for %s — skipping BUY (cannot compute stop-loss price)", symbol
                 )
-            else:
-                order = MarketOrderRequest(
-                    symbol=symbol,
-                    notional=round(notional, 2),
-                    side=OrderSide.BUY,
-                    time_in_force=TimeInForce.DAY,
+                stats["skipped_momentum"] += 1
+                _write_decision(
+                    pg_store, tick_time, symbol, signal_id, score, regime_mult,
+                    ema_pass=False, decision="SKIP_NO_PRICE",
+                    reason="price unavailable — cannot compute stop-loss price for bracket",
                 )
+                continue
+
+            qty = round(notional / price, 4)
+            sym_stop_pct = _cost_calc.stop_loss_pct(symbol)
+            stop_price = round(price * (1 - sym_stop_pct), 2)
+            order = MarketOrderRequest(
+                symbol=symbol,
+                qty=qty,
+                side=OrderSide.BUY,
+                time_in_force=TimeInForce.DAY,
+                order_class=OrderClass.OTO,
+                stop_loss=StopLossRequest(stop_price=stop_price),
+            )
             submitted_order = trading_client.submit_order(order)
             order_id_str = str(submitted_order.id)
             cycle_notional += notional

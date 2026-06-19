@@ -122,7 +122,11 @@ def test_fallback_signal_skipped():
 def test_score_above_threshold_places_order():
     redis = _make_redis(signal=_signal(score=0.5))
     client = _make_client(portfolio_value=100_000)
-    stats = run_execution_cycle(["AAPL"], redis, client)
+    # Price must be provided (via data_client+cache) — without price, BUY is blocked
+    # because the stop-loss level cannot be computed.
+    cache = {"AAPL": {"ema": 90.0, "price": 100.0}}
+    with patch("src.workers.execution._build_market_cache", return_value=cache):
+        stats = run_execution_cycle(["AAPL"], redis, client, data_client=MagicMock())
     assert stats["orders_placed"] == 1
     client.submit_order.assert_called_once()
 
@@ -138,11 +142,15 @@ def test_score_below_threshold_no_order():
 def test_order_notional_uses_portfolio_and_regime():
     redis = _make_redis(signal=_signal(score=0.6), regime_mult=0.7)
     client = _make_client(portfolio_value=100_000)
-    run_execution_cycle(["AAPL"], redis, client)
+    # With price=100: qty = round(notional / price, 4) = round(7000 / 100, 4) = 70.0
+    cache = {"AAPL": {"ema": 90.0, "price": 100.0}}
+    with patch("src.workers.execution._build_market_cache", return_value=cache):
+        run_execution_cycle(["AAPL"], redis, client, data_client=MagicMock())
 
     call_args = client.submit_order.call_args[0][0]
-    expected_notional = round(100_000 * MAX_POSITION_PCT * 0.7, 2)
-    assert call_args.notional == pytest.approx(expected_notional)
+    expected_notional = 100_000 * MAX_POSITION_PCT * 0.7   # = 7000
+    expected_qty = round(expected_notional / 100.0, 4)      # = 70.0
+    assert call_args.qty == pytest.approx(expected_qty)
 
 
 def test_regime_absent_uses_conservative_fallback():
@@ -150,11 +158,15 @@ def test_regime_absent_uses_conservative_fallback():
     redis = _make_redis(signal=_signal(score=0.6))
     redis.get_regime.return_value = None  # simulate Redis cold / regime worker not yet run
     client = _make_client(portfolio_value=100_000)
-    run_execution_cycle(["AAPL"], redis, client)
+    # With price=100: qty = round(notional / price) = round(2000 / 100) = 20.0
+    cache = {"AAPL": {"ema": 90.0, "price": 100.0}}
+    with patch("src.workers.execution._build_market_cache", return_value=cache):
+        run_execution_cycle(["AAPL"], redis, client, data_client=MagicMock())
 
     call_args = client.submit_order.call_args[0][0]
-    expected_notional = round(100_000 * MAX_POSITION_PCT * 0.2, 2)
-    assert call_args.notional == pytest.approx(expected_notional)
+    expected_notional = 100_000 * MAX_POSITION_PCT * 0.2    # = 2000
+    expected_qty = round(expected_notional / 100.0, 4)       # = 20.0
+    assert call_args.qty == pytest.approx(expected_qty)
 
 
 # --- idempotency / no pyramiding ---
@@ -199,7 +211,10 @@ def test_alpaca_error_counted_not_raised():
     redis = _make_redis(signal=_signal(score=0.8))
     client = _make_client()
     client.submit_order.side_effect = Exception("Alpaca API error")
-    stats = run_execution_cycle(["AAPL"], redis, client)
+    # Provide price so submit_order is actually reached (and triggers the error)
+    cache = {"AAPL": {"ema": 90.0, "price": 100.0}}
+    with patch("src.workers.execution._build_market_cache", return_value=cache):
+        stats = run_execution_cycle(["AAPL"], redis, client, data_client=MagicMock())
     assert stats["errors"] == 1
 
 
@@ -265,13 +280,17 @@ def test_ema_price_unavailable_skips_entry():
     assert stats["skipped_momentum"] == 1
 
 
-def test_no_data_client_skips_ema_filter():
-    """When data_client=None, EMA filter is disabled and order is placed."""
+def test_no_data_client_blocks_order_no_price():
+    """When data_client=None, price is unavailable so BUY is blocked (no stop-loss level).
+
+    Previously this placed an unprotected order (no bracket). Now it's blocked:
+    we never BUY without a known price to compute the broker-side stop-loss.
+    """
     redis = _make_redis(signal=_signal(score=0.6))
     client = _make_client(portfolio_value=100_000)
     stats = run_execution_cycle(["AAPL"], redis, client, data_client=None)
-    assert stats["orders_placed"] == 1
-    assert stats["skipped_momentum"] == 0
+    assert stats["orders_placed"] == 0
+    assert stats["skipped_momentum"] == 1  # counted as skipped_momentum (fail-safe EMA path)
 
 
 def test_stop_loss_checked_regardless_of_ema():
@@ -310,8 +329,9 @@ def test_drawdown_within_cap_no_killswitch():
     portfolio_value = last_equity * 0.98  # 2% drop — well below the 5% YAML cap
     redis = _make_redis(signal=_signal(score=0.8))
     client = _make_client(portfolio_value=portfolio_value, last_equity=last_equity)
-
-    stats = run_execution_cycle(["AAPL"], redis, client)
+    cache = {"AAPL": {"ema": 90.0, "price": 100.0}}
+    with patch("src.workers.execution._build_market_cache", return_value=cache):
+        stats = run_execution_cycle(["AAPL"], redis, client, data_client=MagicMock())
 
     redis.activate_killswitch.assert_not_called()
     assert stats["orders_placed"] == 1
@@ -333,8 +353,9 @@ def test_drawdown_cap_missing_last_equity_does_not_crash():
     """If Alpaca does not provide last_equity, skip cap check and continue normally."""
     redis = _make_redis(signal=_signal(score=0.8))
     client = _make_client(portfolio_value=80_000, last_equity=None)  # no baseline
-
-    stats = run_execution_cycle(["AAPL"], redis, client)
+    cache = {"AAPL": {"ema": 90.0, "price": 100.0}}
+    with patch("src.workers.execution._build_market_cache", return_value=cache):
+        stats = run_execution_cycle(["AAPL"], redis, client, data_client=MagicMock())
 
     redis.activate_killswitch.assert_not_called()
     assert stats["orders_placed"] == 1
@@ -467,7 +488,7 @@ class TestDecisionLogging:
         return account
 
     def test_buy_writes_decision_and_opens_trade(self):
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
         from src.workers.execution import run_execution_cycle
         from src.store.redis_store import RedisStore
 
@@ -489,12 +510,15 @@ class TestDecisionLogging:
         mock_pg = MagicMock()
         mock_pg.write_execution_decision.return_value = 99
 
-        stats = run_execution_cycle(
-            symbols=["AAPL"],
-            redis_store=mock_redis,
-            trading_client=mock_trading,
-            pg_store=mock_pg,
-        )
+        cache = {"AAPL": {"ema": 90.0, "price": 100.0}}
+        with patch("src.workers.execution._build_market_cache", return_value=cache):
+            stats = run_execution_cycle(
+                symbols=["AAPL"],
+                redis_store=mock_redis,
+                trading_client=mock_trading,
+                pg_store=mock_pg,
+                data_client=MagicMock(),
+            )
 
         assert stats["orders_placed"] == 1
         mock_pg.write_execution_decision.assert_called_once()
@@ -566,7 +590,7 @@ class TestDecisionLogging:
 
     def test_no_pg_store_still_places_order(self):
         """pg_store=None → decisions/trades silently skipped, order still placed."""
-        from unittest.mock import MagicMock
+        from unittest.mock import MagicMock, patch
         from src.workers.execution import run_execution_cycle
         from src.store.redis_store import RedisStore
 
@@ -583,10 +607,13 @@ class TestDecisionLogging:
         mock_trading.get_orders.return_value = []
         mock_trading.submit_order.return_value = MagicMock(id="x")
 
-        stats = run_execution_cycle(
-            symbols=["AAPL"],
-            redis_store=mock_redis,
-            trading_client=mock_trading,
-            pg_store=None,
-        )
+        cache = {"AAPL": {"ema": 90.0, "price": 100.0}}
+        with patch("src.workers.execution._build_market_cache", return_value=cache):
+            stats = run_execution_cycle(
+                symbols=["AAPL"],
+                redis_store=mock_redis,
+                trading_client=mock_trading,
+                pg_store=None,
+                data_client=MagicMock(),
+            )
         assert stats["orders_placed"] == 1
