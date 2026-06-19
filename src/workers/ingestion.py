@@ -35,6 +35,15 @@ import psycopg2
 from redis import Redis
 
 from src.config import config
+
+# Canonical ticker aliases: map non-watchlist symbols → watchlist symbol.
+# MarketAux/Alpaca APIs may return GOOG (Class C shares) while our watchlist
+# uses GOOGL (Class A). BRK.A → BRK.B for the same reason; FB retired 2021.
+_TICKER_ALIASES: dict[str, str] = {
+    "GOOG": "GOOGL",
+    "BRK.A": "BRK.B",
+    "FB": "META",
+}
 from src.connectors.alpaca_news import AlpacaNewsConnector
 from src.connectors.deduplicator import Deduplicator
 from src.connectors.rss import RSSConnector
@@ -64,6 +73,7 @@ def _process_gkg_items(
     extractor: TickerExtractor,
     deduplicator: Deduplicator,
     redis_client: Redis,
+    watchlist: set | None = None,
 ) -> dict:
     """Extract tickers, deduplicate, and push annotated NewsItems to news:queue.
 
@@ -75,16 +85,20 @@ def _process_gkg_items(
         extractor: TickerExtractor instance (with open PG connection).
         deduplicator: Deduplicator instance (with open Redis connection).
         redis_client: Redis client for LPUSH to news:queue.
+        watchlist: Optional set of watchlist ticker symbols. When provided, only
+            tickers in the watchlist are enqueued (~30% LLM quota saving for
+            large ticker_lookup tables).
 
     Returns:
         Stats dict with keys:
-          - fetched:       total GKG records processed
-          - tickers_found:   total ticker symbols extracted (before dedup)
-          - discarded:       articles with zero ticker matches
-          - queued:          items actually pushed to Redis
-          - duplicates:      items skipped because (url, ticker) already seen
+          - fetched:            total GKG records processed
+          - tickers_found:      total ticker symbols extracted (before watchlist filter)
+          - watchlist_filtered: tickers dropped because not in watchlist
+          - discarded:          articles with zero ticker matches
+          - queued:             items actually pushed to Redis
+          - duplicates:         items skipped because (url, ticker) already seen
     """
-    stats = {"fetched": 0, "tickers_found": 0, "discarded": 0, "queued": 0, "duplicates": 0}
+    stats = {"fetched": 0, "tickers_found": 0, "watchlist_filtered": 0, "discarded": 0, "queued": 0, "duplicates": 0}
 
     for gkg_item in gkg_items:
         stats["fetched"] += 1
@@ -101,8 +115,18 @@ def _process_gkg_items(
 
         stats["tickers_found"] += len(tickers)
 
-        # Step 2: expand each ticker into a separate NewsItem
-        for ticker in tickers:
+        # Step 2: apply canonical aliases and watchlist filter
+        normalised = [_TICKER_ALIASES.get(t, t) for t in tickers]
+        if watchlist:
+            before = len(normalised)
+            normalised = [t for t in normalised if t in watchlist]
+            stats["watchlist_filtered"] += before - len(normalised)
+        if not normalised:
+            stats["discarded"] += 1
+            continue
+
+        # Step 3: expand each ticker into a separate NewsItem
+        for ticker in normalised:
             item = NewsItem(
                 id=f"{gkg_item.url}:{ticker}",  # Composite ID for dedup by (url, ticker).
                 source=gkg_item.source,
@@ -114,12 +138,12 @@ def _process_gkg_items(
                 asset_tags=[ticker],  # SentimentWorker consumes asset_tags[0].
             )
 
-            # Step 3: deduplication
+            # Step 4: deduplication
             if deduplicator.is_duplicate_by_id(item):
                 stats["duplicates"] += 1
                 continue
 
-            # Step 4: enqueue to Redis
+            # Step 5: enqueue to Redis
             redis_client.rpush("news:queue", item.model_dump_json())
             stats["queued"] += 1
 
@@ -155,6 +179,7 @@ def _process_marketaux_items(
         stats["tickers_found"] += len(item.asset_tags)
 
         for ticker in item.asset_tags:
+            ticker = _TICKER_ALIASES.get(ticker, ticker)
             per_ticker = MarketAuxNewsItem(
                 id=f"{item.url}:{ticker}",
                 source=item.source,
@@ -242,6 +267,7 @@ def _process_alpaca_items(
         stats["tickers_found"] += len(item.asset_tags)
 
         for ticker in item.asset_tags:
+            ticker = _TICKER_ALIASES.get(ticker, ticker)
             per_ticker = NewsItem(
                 id=f"{item.id}:{ticker}",
                 source=item.source,
@@ -476,7 +502,8 @@ def run_news_ingestion_worker() -> dict:
 
         # Bridge async fetch into sync Celery task
         gkg_items = asyncio.run(_fetch_gkg_items(connector))
-        stats = _process_gkg_items(gkg_items, extractor, deduplicator, redis_client)
+        watchlist = set(config.WATCHLIST_SYMBOLS or [])
+        stats = _process_gkg_items(gkg_items, extractor, deduplicator, redis_client, watchlist=watchlist)
 
         log.info("Ingestion stats: %s", stats)
         return stats

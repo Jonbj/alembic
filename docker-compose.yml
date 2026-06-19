@@ -43,6 +43,11 @@ services:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')\""]
       interval: 10s
@@ -63,6 +68,11 @@ services:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   worker-inference:
     build: .
@@ -78,6 +88,11 @@ services:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   beat:
     build: .
@@ -90,6 +105,11 @@ services:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   frontend:
     build: ./frontend
