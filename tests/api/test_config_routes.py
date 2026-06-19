@@ -88,6 +88,7 @@ risk:
         resp = tc.post(
             "/api/config",
             json={"risk": {"max_position_pct": 0.20}},
+            params={"reason": "test-deep-merge-verified"},
         )
     assert resp.status_code == 200
     content = yaml_file.read_text()
