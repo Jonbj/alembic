@@ -51,6 +51,7 @@ class StrategyEntry:
     schedule: str
     enabled: bool = True
     mode: str = "paper"
+    promotion_blocked: bool = False
 
 
 class StrategyRegistry:
@@ -135,6 +136,7 @@ class StrategyRegistry:
                 schedule=_DEFAULT_SCHEDULE,
                 enabled=cfg["enabled"],
                 mode=cfg.get("mode", "paper"),
+                promotion_blocked=cfg.get("promotion_blocked", False),
             )
 
         _validate_allocations(self._entries)
@@ -159,6 +161,7 @@ def _load_strategies_yaml() -> dict[str, dict]:
                 "enabled": bool(cfg.get("enabled", False)),
                 "allocation_pct": float(cfg.get("allocation_pct", 0.0)),
                 "mode": str(cfg.get("mode", "paper")),
+                "promotion_blocked": bool(cfg.get("promotion_blocked", False)),
             }
         return result
     except FileNotFoundError:
@@ -189,4 +192,10 @@ def _validate_allocations(entries: dict[str, StrategyEntry]) -> None:
         raise ValueError(
             "S2 is enabled but OOS backtest gates have not passed (OOS Sharpe -0.55, all gates failed). "
             "Set S2.enabled=false in config/strategies.yaml."
+        )
+    s4 = entries.get("S4")
+    if s4 and s4.mode == "live":
+        raise ValueError(
+            "S4 mode='live' is not allowed — no gate report exists and IC>placebo has not been confirmed. "
+            "S4 must remain in 'paper' mode until P1-03/04 gates are cleared (P0-13)."
         )

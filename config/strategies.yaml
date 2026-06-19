@@ -39,4 +39,17 @@ strategies:
     enabled: true
     allocation_pct: 0.10
     mode: paper
-    note: tactical overlay; capped at 10% until dedicated gate report passes
+    promotion_blocked: true
+    note: >
+      Tactical news overlay; capped at 10%. PROMOTION BLOCKED (P0-13): no gate report
+      exists and IC>placebo has not been confirmed. Re-promotion to live requires
+      P1-03 (gate fixes + SPA) + P1-04 (gate script runnable) + IC>placebo + 90-day paper.
+
+  S7:
+    enabled: false
+    allocation_pct: 0.00
+    mode: research
+    promotion_blocked: true
+    note: >
+      PEAD alpha — R&D only (P0-13). No PIT data, no gate script, no IC evaluation.
+      Must not appear in operational registry until P1-03/04 + IC>placebo confirmed.
