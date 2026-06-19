@@ -113,6 +113,32 @@ def _is_ks_active_failclosed(redis_url: str) -> bool:
         return True
 
 
+def _get_regime_multiplier_from_redis(redis_url: str) -> float:
+    """Read regime multiplier from Redis key regime:current (P0-09).
+
+    Falls back to 0.2 (high_vol fallback) when the key is absent or Redis is
+    unreachable — fail-conservative, matching execution.py._regime_multiplier().
+    Never returns 1.0 as a default: 1.0 would silently assume a normal regime
+    even when no regime data has been written by the regime worker.
+    """
+    try:
+        import json as _rj
+        from redis import Redis as _R
+        _r = _R.from_url(redis_url, decode_responses=True)
+        try:
+            raw = _r.get("regime:current")
+        finally:
+            _r.close()
+        if raw is None:
+            log.warning("P0-09: regime:current absent — using high_vol fallback (×0.2)")
+            return 0.2
+        data = _rj.loads(raw)
+        return float(data["multiplier"])
+    except Exception as _exc:
+        log.warning("P0-09: Could not read regime multiplier (%s) — using fallback (×0.2)", _exc)
+        return 0.2
+
+
 _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
 
 
@@ -524,6 +550,8 @@ def _run_cycle_inner() -> dict:
     # Log decisions to execution_decisions so the UI Decision Log tab is populated.
     # Also capture decision_ids for later trade DB writes.
     _symbol_decisions: dict[str, dict] = {}  # {symbol: {decision_id, score, signal_id}}
+    # P0-09: read actual regime multiplier once; used in both decisions and trade writes.
+    _regime_mult: float = _get_regime_multiplier_from_redis(config.REDIS_URL)
     try:
         from src.store.pg_store import PostgreSQLStore
         _pg = PostgreSQLStore()
@@ -567,7 +595,7 @@ def _run_cycle_inner() -> dict:
                 symbol=order.symbol,
                 signal_id=_signal_ids.get(order.symbol),
                 score=order.allocation_weight,
-                regime_mult=1.0,
+                regime_mult=_regime_mult,
                 ema_pass=True,
                 decision=order.side.value,
                 reason=reason,
@@ -679,7 +707,7 @@ def _run_cycle_inner() -> dict:
                         entry_time=ts,
                         entry_notional=sub["notional"],
                         score=dec.get("score", 0.0),
-                        regime_mult=1.0,
+                        regime_mult=_regime_mult,
                         signal_score=dec.get("signal_score"),
                     )
                 else:
