@@ -425,6 +425,7 @@ class PostgreSQLStore:
             (symbol, signal_id, decision_id, entry_order_id,
              entry_time, entry_notional, score, regime_mult, qty, signal_score)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
     """
 
     _CLOSE_TRADE = """
@@ -473,20 +474,28 @@ class PostgreSQLStore:
                     (symbol, signal_id, decision_id, entry_order_id,
                      entry_time, entry_notional, score, regime_mult, qty, signal_score),
                 )
+                row = cur.fetchone()
+                trade_id: int | None = row[0] if row else None
+                # P0-12: write audit row in the same transaction so a failed audit
+                # rolls back the trade (no unaudited trades can exist).
+                cur.execute(
+                    self._INSERT_AUDIT_LOG,
+                    (
+                        "INSERT",
+                        "trades",
+                        trade_id,
+                        __import__("json").dumps({
+                            "symbol": symbol,
+                            "entry_order_id": entry_order_id,
+                            "entry_notional": entry_notional,
+                            "score": score,
+                        }),
+                    ),
+                )
             conn.commit()
         except Exception:
             conn.rollback()
             raise
-        self.write_audit_log(
-            action="INSERT",
-            table_name="trades",
-            details={
-                "symbol": symbol,
-                "entry_order_id": entry_order_id,
-                "entry_notional": entry_notional,
-                "score": score,
-            },
-        )
 
     def close_trade(
         self,
