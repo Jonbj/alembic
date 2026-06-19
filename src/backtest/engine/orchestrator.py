@@ -93,6 +93,7 @@ class BacktestConfig:
     commission_per_share: float = 0.0  # used only when cost_model is SimpleCostModel
     cost_model_path: Path = Path("config/cost_model.yaml")
     fill_at_next_open: bool = True     # P1-BACKTEST-TPLUS1-FILL: fill at next bar's open
+    annual_fixed_cost: float = 0.0    # P1-COST-MODEL-REALISM: fixed annual ops cost ($)
 
 
 @dataclass
@@ -111,6 +112,41 @@ class BacktestResult:
     def to_returns_series(self) -> pd.Series:
         nav = self.to_nav_series()
         return nav.pct_change().dropna()
+
+    def net_annualized_return(
+        self,
+        annual_fixed_cost: float = 0.0,
+        capital: float | None = None,
+    ) -> float:
+        """Annualized return net of fixed annual costs (e.g. data subscriptions).
+
+        Fixed cost drag = annual_fixed_cost / capital, subtracted from annualized return.
+        If capital is None, uses config.initial_capital.
+        """
+        from src.backtest.metrics import performance as _perf
+        _cap = capital if capital is not None else self.config.initial_capital
+        gross = _perf.annualized_return(self.to_returns_series())
+        drag = annual_fixed_cost / _cap if _cap > 0 else 0.0
+        return gross - drag
+
+    def net_sharpe(
+        self,
+        risk_free_rate: float = 0.0,
+        annual_fixed_cost: float = 0.0,
+        capital: float | None = None,
+    ) -> float:
+        """Sharpe ratio computed on returns net of fixed annual cost drag.
+
+        Subtracts annual_fixed_cost/capital from annualized return before
+        dividing by annualized volatility.
+        """
+        from src.backtest.metrics import performance as _perf
+        returns = self.to_returns_series()
+        ann_vol = _perf.annualized_volatility(returns)
+        if ann_vol == 0:
+            return 0.0
+        net_ann_ret = self.net_annualized_return(annual_fixed_cost=annual_fixed_cost, capital=capital)
+        return (net_ann_ret - risk_free_rate) / ann_vol
 
 
 # Strategy callable: receives context, returns list of orders for that timestep

@@ -48,7 +48,7 @@ class RealisticCostModel:
 
         # Square-root market impact (adv_20d in shares; convert to USD for participation ratio)
         order_usd = order.quantity * mid_price
-        adv_shares = market.adv_20d.get(order.symbol, 10_000_000.0)
+        adv_shares = market.adv_20d.get(order.symbol, 500_000.0)
         adv_usd = adv_shares * mid_price
         impact_bps = self._impact.impact_bps(order_usd, adv_usd)
 

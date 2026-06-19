@@ -40,8 +40,10 @@ class DataReplay:
         if self._volumes is not None:
             self._adv_20d = self._volumes.rolling(20).mean()
         else:
+            # Conservative fallback: 500K shares/day ≈ realistic mid-cap daily volume.
+            # The previous default (10M) made market impact ≈0 and overstated net performance.
             self._adv_20d = pd.DataFrame(
-                10_000_000.0,
+                500_000.0,
                 index=self._prices.index,
                 columns=self._prices.columns,
             )
@@ -76,7 +78,7 @@ class DataReplay:
 
         adv_row = self._adv_20d.loc[as_of]
         adv_20d = {
-            sym: float(adv_row[sym]) if pd.notna(adv_row[sym]) else 10_000_000.0
+            sym: float(adv_row[sym]) if pd.notna(adv_row[sym]) else 500_000.0
             for sym in prices
         }
 

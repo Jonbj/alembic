@@ -110,7 +110,7 @@ class TestDataReplayMarketAt:
         replay = DataReplay(prices)
 
         market = replay.market_at(prices.index[-1])
-        assert market.adv_20d.get("SPY") == 10_000_000.0
+        assert market.adv_20d.get("SPY") == 500_000.0
 
     def test_market_adv_computed_with_volumes(self) -> None:
         prices = make_prices(25)
