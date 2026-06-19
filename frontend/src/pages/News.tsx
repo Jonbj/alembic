@@ -95,7 +95,14 @@ export default function News() {
                   <td><strong>{item.ticker}</strong></td>
                   <td>{sentimentBadge(item.raw_sentiment)}</td>
                   <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-                    {fmtDateTime(item.fetched_at)}
+                    <span title={`Pubblicato: ${item.published_at ? fmtDateTime(item.published_at) : '—'}`}>
+                      {fmtDateTime(item.fetched_at)}
+                    </span>
+                    {item.published_at && item.published_at !== item.fetched_at && (
+                      <span style={{ display: 'block', fontSize: 10, color: 'var(--text-muted)', opacity: 0.7 }}>
+                        pub. {fmtDateTime(item.published_at)}
+                      </span>
+                    )}
                   </td>
                 </tr>
                 {expanded === item.id && (
