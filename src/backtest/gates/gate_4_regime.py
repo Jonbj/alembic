@@ -38,8 +38,22 @@ def gate_4_regime(
     if not regime_returns:
         return GateResult(passed=False, details={"error": "no regime data provided"})
 
-    # Clamp to actual regime count — requiring more regimes to pass than exist is impossible
-    min_passing_regimes = min(min_passing_regimes, len(regime_returns))
+    # Fail immediately if fewer regime periods are provided than required.
+    # The old code silently clamped min_passing_regimes to len(regime_returns),
+    # allowing a strategy with bear data absent to satisfy a 3-regime requirement
+    # using only 2 regimes. This hides missing coverage.
+    if len(regime_returns) < min_passing_regimes:
+        return GateResult(
+            passed=False,
+            details={
+                "error": "insufficient regime data",
+                "n_total_regimes": len(regime_returns),
+                "thresholds": {
+                    "min_regime_sharpe": min_regime_sharpe,
+                    "min_passing_regimes": min_passing_regimes,
+                },
+            },
+        )
 
     regime_sharpes: dict[str, float] = {}
     for name, rets in regime_returns.items():
