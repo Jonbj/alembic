@@ -68,7 +68,7 @@ class RealisticCostModel:
         return Fill(
             fill_id=str(uuid.uuid4()),
             order_id=order.order_id,
-            timestamp=order.timestamp,
+            timestamp=market.timestamp,  # fill time = when market executed it
             symbol=order.symbol,
             side=order.side,
             quantity=order.quantity,

@@ -92,6 +92,7 @@ class BacktestConfig:
     spread_bps: float = 5.0            # used only when cost_model is SimpleCostModel
     commission_per_share: float = 0.0  # used only when cost_model is SimpleCostModel
     cost_model_path: Path = Path("config/cost_model.yaml")
+    fill_at_next_open: bool = True     # P1-BACKTEST-TPLUS1-FILL: fill at next bar's open
 
 
 @dataclass
@@ -162,6 +163,9 @@ class BacktestOrchestrator:
             timesteps[-1],
         )
 
+        pending: list[Order] = []  # orders deferred to next bar (T+1 fill)
+        last_market = None
+
         for ts in timesteps:
             try:
                 market = data_replay.market_at(ts)
@@ -169,16 +173,49 @@ class BacktestOrchestrator:
                 log.warning("Skip timestep %s: %s", ts, e)
                 continue
 
+            last_market = market
+
+            if self.config.fill_at_next_open and pending:
+                # Fill orders deferred from previous bar at this bar's open price.
+                open_market = data_replay.market_at_open(ts)
+                # Inject the current timestamp so Fill.timestamp reflects when the
+                # order actually executed (this bar), not when the decision was made.
+                open_market_ts = MarketSnapshot(
+                    timestamp=ts,
+                    prices=open_market.prices,
+                    volumes=open_market.volumes,
+                    adv_20d=open_market.adv_20d,
+                )
+                for order in pending:
+                    try:
+                        fill = self.cost_model.simulate_fill(order, open_market_ts)
+                        portfolio.apply_fill(fill)
+                    except ValueError as e:
+                        log.warning("Could not fill pending %s: %s", order, e)
+                pending = []
+
             orders: list[Order] = strategy_callable(ts, data_replay, portfolio, market)
 
-            for order in orders:
-                try:
-                    fill = self.cost_model.simulate_fill(order, market)
-                    portfolio.apply_fill(fill)
-                except ValueError as e:
-                    log.warning("Could not fill %s: %s", order, e)
+            if self.config.fill_at_next_open:
+                pending = list(orders)  # defer to next bar
+            else:
+                for order in orders:
+                    try:
+                        fill = self.cost_model.simulate_fill(order, market)
+                        portfolio.apply_fill(fill)
+                    except ValueError as e:
+                        log.warning("Could not fill %s: %s", order, e)
 
             portfolio.mark_to_market(market)
+
+        # Fill any orders still pending after the last bar (no next bar available).
+        if self.config.fill_at_next_open and pending and last_market is not None:
+            for order in pending:
+                try:
+                    fill = self.cost_model.simulate_fill(order, last_market)
+                    portfolio.apply_fill(fill)
+                except ValueError as e:
+                    log.warning("Could not fill last-bar pending %s: %s", order, e)
 
         return BacktestResult(
             config=self.config,

@@ -28,12 +28,14 @@ class DataReplay:
         self,
         prices: pd.DataFrame,
         volumes: pd.DataFrame | None = None,
+        opens: pd.DataFrame | None = None,
     ) -> None:
         if not isinstance(prices.index, pd.DatetimeIndex):
             raise ValueError("prices must have DatetimeIndex")
 
         self._prices = prices.sort_index()
         self._volumes = volumes.sort_index() if volumes is not None else None
+        self._opens = opens.sort_index() if opens is not None else None
 
         if self._volumes is not None:
             self._adv_20d = self._volumes.rolling(20).mean()
@@ -83,6 +85,35 @@ class DataReplay:
             prices=prices,
             volumes=volumes,
             adv_20d=adv_20d,
+        )
+
+    def market_at_open(self, as_of: datetime) -> MarketSnapshot:
+        """Returns market snapshot using open prices at as_of.
+
+        If no opens DataFrame was provided at construction, falls back to close prices.
+        Volumes and adv_20d are taken from the corresponding close snapshot.
+        """
+        if self._opens is None:
+            log.debug("market_at_open: no opens data — falling back to close prices")
+            return self.market_at(as_of)
+
+        if as_of not in self._opens.index:
+            valid = self._opens.index[self._opens.index <= as_of]
+            if len(valid) == 0:
+                return self.market_at(as_of)
+            as_of_open = valid[-1]
+        else:
+            as_of_open = as_of
+
+        row = self._opens.loc[as_of_open]
+        open_prices = {sym: float(row[sym]) for sym in row.index if pd.notna(row[sym])}
+
+        close_snap = self.market_at(as_of)
+        return MarketSnapshot(
+            timestamp=as_of,
+            prices=open_prices,
+            volumes=close_snap.volumes,
+            adv_20d=close_snap.adv_20d,
         )
 
     def prices_until(self, as_of: datetime) -> pd.DataFrame:
