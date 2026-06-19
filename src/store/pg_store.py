@@ -170,7 +170,7 @@ class PostgreSQLStore:
             raise
 
     _INSERT_NEWS_LOG = """
-        INSERT INTO news_log (title, url, source, ticker, body_snippet, raw_sentiment, fetched_at)
+        INSERT INTO news_log (title, url, source, ticker, body_snippet, raw_sentiment, published_at)
         VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (url, ticker) DO NOTHING
         RETURNING id
@@ -905,7 +905,7 @@ class PostgreSQLStore:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT id, title, url, source, ticker, raw_sentiment, body_snippet, fetched_at "
+                    f"SELECT id, title, url, source, ticker, raw_sentiment, body_snippet, fetched_at, published_at "
                     f"FROM news_log {where} ORDER BY fetched_at DESC LIMIT %s",
                     params,
                 )
