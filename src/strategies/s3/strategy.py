@@ -82,10 +82,10 @@ class CrossSectionalMomentum:
             self._rank_wide = pd.DataFrame()
             self._rm_wide = pd.DataFrame()
 
-        # Precompute per-ticker volatility from prices (excluding SPY)
+        # Precompute per-ticker rolling volatility (full DataFrame for PIT lookup)
         stock_cols = [c for c in prices.columns if c != "SPY"]
         daily_rets = prices[stock_cols].pct_change()
-        self._vol: pd.Series = daily_rets.rolling(config.beta_window).std().iloc[-1] * np.sqrt(252)
+        self._vol_df: pd.DataFrame = daily_rets.rolling(config.beta_window).std() * np.sqrt(252)
 
         self._last_rebalance: Optional[datetime] = None
 
@@ -111,10 +111,17 @@ class CrossSectionalMomentum:
         if cfg.short_decile is not None:
             short_tickers = [t for t in rank_row.index if pd.notna(rank_row[t]) and int(rank_row[t]) == cfg.short_decile]
 
+        # PIT vol: find the last available vol row at or before as_of
+        pit_vol: pd.Series = pd.Series(dtype=float)
+        if not self._vol_df.empty:
+            valid_vol_dates = self._vol_df.index[self._vol_df.index <= as_of]
+            if len(valid_vol_dates) > 0:
+                pit_vol = self._vol_df.loc[valid_vol_dates[-1]]
+
         weights: dict[str, float] = {}
 
         for ticker in long_tickers:
-            vol = self._vol.get(ticker, np.nan) if isinstance(self._vol, pd.Series) else np.nan
+            vol = pit_vol.get(ticker, np.nan) if not pit_vol.empty else np.nan
             if pd.isna(vol) or vol <= 0:
                 raw_w = cfg.target_vol
             else:
@@ -122,7 +129,7 @@ class CrossSectionalMomentum:
             weights[ticker] = min(raw_w, cfg.max_weight)
 
         for ticker in short_tickers:
-            vol = self._vol.get(ticker, np.nan) if isinstance(self._vol, pd.Series) else np.nan
+            vol = pit_vol.get(ticker, np.nan) if not pit_vol.empty else np.nan
             if pd.isna(vol) or vol <= 0:
                 raw_w = cfg.target_vol
             else:
