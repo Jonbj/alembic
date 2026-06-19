@@ -119,10 +119,11 @@ class Config(BaseModel):
         default_factory=lambda: os.environ.get("ALPACA_PAPER_MODE", "true").lower() == "true"
     )
 
-    # P2-A: Bracket order parameters. Set ALPACA_BRACKET_ENABLED=true to activate.
-    # Risk/reward 1:2 by default (take_profit at +6%, stop_loss at -3%).
+    # P0-05: Bracket order with stop-loss is mandatory on all BUY orders.
+    # Default is True (safe: stop-loss always on). Set ALPACA_BRACKET_ENABLED=false
+    # only when deliberately testing without stop-loss (e.g., fractionable-only paper runs).
     ALPACA_BRACKET_ENABLED: bool = Field(
-        default_factory=lambda: os.environ.get("ALPACA_BRACKET_ENABLED", "false").lower() == "true"
+        default_factory=lambda: os.environ.get("ALPACA_BRACKET_ENABLED", "true").lower() == "true"
     )
     ALPACA_TAKE_PROFIT_PCT: float = Field(
         default_factory=lambda: float(os.environ.get("ALPACA_TAKE_PROFIT_PCT", "0.06"))

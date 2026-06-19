@@ -574,8 +574,25 @@ def _run_cycle_inner() -> dict:
         submitted_orders: list[dict] = []
     else:
         fractionable = _get_fractionable_symbols(trading_client)
+        # P0-05: fetch symbols with open DB trades to prevent pyramiding.
+        open_db_symbols: set[str] = set()
+        try:
+            from src.store.pg_store import PostgreSQLStore as _PGGuard
+            _pg_guard = _PGGuard()
+            _open_trades = _pg_guard.fetch_trades(status="open", limit=1000)
+            open_db_symbols = {t["symbol"] for t in _open_trades}
+            _pg_guard.close()
+            if open_db_symbols:
+                log.info("P0-05 pyramiding guard: %d symbols have open DB trades", len(open_db_symbols))
+        except Exception as _guard_exc:
+            log.warning(
+                "P0-05: Could not fetch open DB trades for pyramiding guard: %s — guard disabled for this cycle",
+                _guard_exc,
+            )
         submitted_orders = _submit_portfolio_orders(
-            result.final_orders, trading_client, market, fractionable_symbols=fractionable
+            result.final_orders, trading_client, market,
+            fractionable_symbols=fractionable,
+            open_trade_symbols=open_db_symbols or None,
         )
 
     # Submit forced sells for sentiment reversal (symbols not already being sold).
@@ -824,7 +841,12 @@ def _build_strategy_instance(entry, bars_df):
 
 
 def _submit_portfolio_orders(
-    orders, trading_client, market, _submit_fn=None, fractionable_symbols: set[str] | None = None
+    orders,
+    trading_client,
+    market,
+    _submit_fn=None,
+    fractionable_symbols: set[str] | None = None,
+    open_trade_symbols: set[str] | None = None,
 ) -> list[dict]:
     """Submit BUY and SELL orders to Alpaca.
 
@@ -838,6 +860,9 @@ def _submit_portfolio_orders(
         fractionable_symbols: Set of symbols that support notional/fractional orders.
             BUY orders for non-fractionable symbols fall back to whole-share qty.
             If None, all symbols are treated as fractionable.
+        open_trade_symbols: Symbols that already have an open trade in the DB.
+            BUY orders for these symbols are skipped to prevent pyramiding (P0-05).
+            If None, no duplicate guard is applied.
 
     Returns:
         List of dicts for successfully submitted orders, each containing:
@@ -849,6 +874,13 @@ def _submit_portfolio_orders(
     for order in orders:
         try:
             if order.side == OrderSide.BUY:
+                # P0-05: skip BUY if an open DB trade already exists for this symbol.
+                if open_trade_symbols and order.symbol in open_trade_symbols:
+                    log.warning(
+                        "P0-05 pyramiding guard: skipping BUY for %s — open trade exists in DB",
+                        order.symbol,
+                    )
+                    continue
                 price = market.prices.get(order.symbol)
                 if price is None or price <= 0:
                     log.warning("No market price for %s — skipping BUY order", order.symbol)
