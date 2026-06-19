@@ -6,8 +6,15 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from src.api.auth import require_api_key
+from src.strategies.promotion import (
+    PromotionBlockedError,
+    approve_promotion,
+    demote_strategy,
+    request_promotion,
+)
 
 log = logging.getLogger(__name__)
 
@@ -317,3 +324,129 @@ def get_strategy_sensitivity(strategy_id: str) -> list[dict]:
     if strategy_id not in STRATEGIES:
         return []
     return STRATEGIES[strategy_id]["sensitivity"]
+
+
+# ─── Promotion gate endpoints (P2-02) ────────────────────────────────────────
+
+class PromoteRequest(BaseModel):
+    target_mode: str
+    gate_report_id: str | None = None
+    requested_by: str
+
+
+class ApproveRequest(BaseModel):
+    approved_by: str
+
+
+class DemoteRequest(BaseModel):
+    new_mode: str
+    reason: str
+    demoted_by: str
+
+
+def _get_db_conn():
+    """Open a pg_store connection for promotion endpoints. Raises 503 on failure."""
+    try:
+        from src.store.pg_store import PostgreSQLStore
+        store = PostgreSQLStore()
+        return store, store._get_connection()
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Database unavailable: {exc}") from exc
+
+
+@router.post("/{strategy_id}/promote")
+def promote_strategy_endpoint(strategy_id: str, body: PromoteRequest) -> dict:
+    """Request a mode promotion for a strategy.
+
+    Validates the full promotion gate (sequential transition, gate_report_id
+    present, promotion_blocked=False, live policy). On success, sets
+    target_mode in strategy_lifecycle (pending approval). On failure, returns
+    422 with the gate rejection reason.
+
+    The strategy_id in the path is case-insensitive and mapped to uppercase
+    (S1, S4, etc.) to match strategy_lifecycle convention.
+    """
+    sid = strategy_id.upper()
+    store, db_conn = _get_db_conn()
+    try:
+        request_promotion(
+            strategy_id=sid,
+            target_mode=body.target_mode,
+            gate_report_id=body.gate_report_id,
+            requested_by=body.requested_by,
+            db_conn=db_conn,
+        )
+        log.info("Promotion requested: %s → %s by %s", sid, body.target_mode, body.requested_by)
+        return {"strategy_id": sid, "status": "promotion_requested", "target_mode": body.target_mode}
+    except PromotionBlockedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        log.error("Unexpected error in promote_strategy_endpoint: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        try:
+            store.__exit__(None, None, None)
+        except Exception:
+            pass
+
+
+@router.post("/{strategy_id}/approve")
+def approve_strategy_endpoint(strategy_id: str, body: ApproveRequest) -> dict:
+    """Approve a pending promotion request for a strategy.
+
+    Commits the mode transition from target_mode → mode in strategy_lifecycle
+    and writes an 'approved' audit row. Requires a prior call to /promote.
+    Returns 422 if no pending request exists.
+    """
+    sid = strategy_id.upper()
+    store, db_conn = _get_db_conn()
+    try:
+        approve_promotion(
+            strategy_id=sid,
+            approved_by=body.approved_by,
+            db_conn=db_conn,
+        )
+        log.info("Promotion approved: %s by %s", sid, body.approved_by)
+        return {"strategy_id": sid, "status": "promotion_approved"}
+    except PromotionBlockedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        log.error("Unexpected error in approve_strategy_endpoint: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        try:
+            store.__exit__(None, None, None)
+        except Exception:
+            pass
+
+
+@router.post("/{strategy_id}/demote")
+def demote_strategy_endpoint(strategy_id: str, body: DemoteRequest) -> dict:
+    """Demote a strategy to a less risky mode or to disabled.
+
+    Demotion is always allowed (no gate, no gate_report_id, no approval).
+    Used as a circuit-breaker action. Writes a 'demoted' audit row.
+    Returns 422 if the target mode is not actually a downgrade.
+    """
+    sid = strategy_id.upper()
+    store, db_conn = _get_db_conn()
+    try:
+        demote_strategy(
+            strategy_id=sid,
+            new_mode=body.new_mode,
+            reason=body.reason,
+            demoted_by=body.demoted_by,
+            db_conn=db_conn,
+        )
+        log.info("Strategy demoted: %s → %s by %s (%s)", sid, body.new_mode, body.demoted_by, body.reason)
+        return {"strategy_id": sid, "status": "demoted", "new_mode": body.new_mode}
+    except PromotionBlockedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        log.error("Unexpected error in demote_strategy_endpoint: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    finally:
+        try:
+            store.__exit__(None, None, None)
+        except Exception:
+            pass

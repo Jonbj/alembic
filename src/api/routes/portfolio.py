@@ -16,11 +16,43 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/portfolio", tags=["portfolio"], dependencies=[Depends(require_api_key)])
 
 
+def _fetch_lifecycle_fields(strategy_ids: list[str], pg) -> dict[str, dict]:
+    """Query strategy_lifecycle for mode and approved. Fail-open: returns {} on error."""
+    try:
+        conn = pg._get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT strategy_id, mode, approved FROM strategy_lifecycle "
+                "WHERE strategy_id = ANY(%s)",
+                (strategy_ids,),
+            )
+            rows = cur.fetchall()
+        result: dict[str, dict] = {}
+        for row in rows:
+            # Support both dict-like (RealDictCursor) and tuple rows
+            if hasattr(row, "keys"):
+                sid, mode, approved = row["strategy_id"], row["mode"], row["approved"]
+            else:
+                sid, mode, approved = row[0], row[1], row[2]
+            result[sid] = {"mode": mode, "approved": bool(approved)}
+        return result
+    except Exception as exc:
+        logger.warning("Could not fetch lifecycle fields: %s — mode/approved will be null", exc)
+        return {}
+
+
 @router.get("/status")
 async def portfolio_status(pg=Depends(get_pg_store)):
-    """Return current portfolio status: active strategies, allocations, last cycle."""
+    """Return current portfolio status: active strategies, allocations, last cycle.
+
+    Each strategy entry includes mode and approved from strategy_lifecycle
+    (null if DB unavailable — fail-open so the status endpoint always responds).
+    """
     registry = StrategyRegistry()
     active = registry.get_active_strategies()
+
+    # Fetch governance fields from DB (fail-open: null on error)
+    lifecycle = _fetch_lifecycle_fields([e.strategy_id for e in active], pg)
 
     strategies = [
         {
@@ -28,6 +60,8 @@ async def portfolio_status(pg=Depends(get_pg_store)):
             "allocation_pct": e.allocation_pct,
             "schedule": e.schedule,
             "enabled": e.enabled,
+            "mode": lifecycle.get(e.strategy_id, {}).get("mode"),
+            "approved": lifecycle.get(e.strategy_id, {}).get("approved"),
         }
         for e in active
     ]

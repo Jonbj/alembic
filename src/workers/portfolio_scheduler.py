@@ -75,6 +75,69 @@ def _portfolio_postmortem(
         log.warning("Failed to write postmortem for trade %s: %s", trade_id, exc)
 
 
+def _filter_approved_strategies(
+    entries: list,
+    db_conn,
+) -> list:
+    """Return only the strategies that are operationally approved in strategy_lifecycle.
+
+    Approval semantics:
+    - Row exists + approved=True  → admitted.
+    - Row exists + approved=False → excluded (fail-closed: explicitly not approved).
+    - Row absent (None)           → admitted with warning (fail-open: legacy strategy,
+                                    no lifecycle row seeded yet).
+    - DB error                    → excluded (fail-closed: cannot verify approval state).
+
+    This function is a module-level helper so tests can inject a mock db_conn
+    without triggering the full Celery task infrastructure.
+    """
+    from src.strategies.promotion import is_strategy_operationally_approved
+
+    approved: list = []
+    for entry in entries:
+        try:
+            # Peek at the raw lifecycle row to distinguish "absent" from "approved=False".
+            with db_conn.cursor() as cur:
+                cur.execute(
+                    "SELECT approved FROM strategy_lifecycle WHERE strategy_id = %s",
+                    (entry.strategy_id,),
+                )
+                row = cur.fetchone()
+
+            if row is None:
+                # No lifecycle row — fail-open: legacy strategy, admit with warning.
+                log.warning(
+                    "Strategy %s: no strategy_lifecycle row found — admitted as legacy "
+                    "(fail-open). Seed the lifecycle table to enable promotion gate.",
+                    entry.strategy_id,
+                )
+                approved.append(entry)
+            else:
+                # Support both dict-like (RealDictCursor) and positional tuple rows.
+                try:
+                    approved_val = row["approved"]
+                except (TypeError, KeyError):
+                    approved_val = row[0]
+
+                if approved_val:
+                    # Row present, approved=True.
+                    approved.append(entry)
+                else:
+                    # Row present, approved=False — fail-closed.
+                    log.warning(
+                        "Strategy %s: approved=False in strategy_lifecycle — excluded from cycle. "
+                        "Call approve_promotion() to clear the gate.",
+                        entry.strategy_id,
+                    )
+        except Exception as exc:
+            # DB error — fail-closed: cannot verify, must not admit.
+            log.warning(
+                "Strategy %s: DB error during approval check (%s) — excluded (fail-closed).",
+                entry.strategy_id, exc,
+            )
+    return approved
+
+
 def _fire_alert(notifier, message: str, level: AlertLevel) -> None:
     if notifier is None:
         return
@@ -341,10 +404,36 @@ def _run_cycle_inner() -> dict:
         return {"error": "redis_unreachable"}
 
     registry = StrategyRegistry()
+
+    # P2-02: Override YAML mode with DB source-of-truth (fail-open if DB unavailable).
+    try:
+        from src.store.pg_store import PostgreSQLStore
+        with PostgreSQLStore() as _pg_reg:
+            _reg_conn = _pg_reg._get_connection()
+            registry.load_mode_from_db(_reg_conn)
+    except Exception as _db_exc:
+        log.warning("load_mode_from_db: DB unavailable (%s) — keeping YAML mode", _db_exc)
+
     active = registry.get_active_strategies()
     if not active:
         log.warning("No active strategies in registry — skipping portfolio cycle")
         return {"skipped": True, "reason": "no_active_strategies"}
+
+    # P2-02: Filter out strategies not operationally approved in strategy_lifecycle.
+    try:
+        from src.store.pg_store import PostgreSQLStore
+        with PostgreSQLStore() as _pg_gate:
+            _gate_conn = _pg_gate._get_connection()
+            active = _filter_approved_strategies(active, _gate_conn)
+    except Exception as _gate_exc:
+        log.warning(
+            "Approval gate DB unavailable (%s) — admitting all enabled strategies (fail-open at gate level).",
+            _gate_exc,
+        )
+
+    if not active:
+        log.warning("No operationally approved strategies — skipping portfolio cycle")
+        return {"skipped": True, "reason": "no_approved_strategies"}
 
     # Single TradingClient instance shared across all pre-flight checks and order submission.
     trading_client = TradingClient(
