@@ -1,6 +1,7 @@
 """System status endpoints: scheduler health and activity log."""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -226,3 +227,32 @@ def get_activity_log(
 
     events.sort(key=lambda e: e["time"], reverse=True)
     return events[:limit]
+
+
+@router.get("/readiness")
+def get_readiness(
+    pg: Annotated[PostgreSQLStore, Depends(get_pg_store)],
+    redis: Annotated[RedisStore, Depends(get_redis_store)],
+) -> dict:
+    """Return all operator alert flags aggregated from Redis + DB health checks."""
+    from src.monitoring.cockpit import get_cockpit_alerts
+    return get_cockpit_alerts(pg=pg, redis_client=redis._r)
+
+
+@router.get("/decisions")
+def get_decisions(
+    pg: Annotated[PostgreSQLStore, Depends(get_pg_store)],
+    limit: int = 30,
+) -> list:
+    """Return recent execution decisions from the execution_decisions table."""
+    try:
+        rows = pg.fetch_decisions(limit=limit)
+        result = []
+        for row in rows:
+            serialized = {}
+            for k, v in row.items():
+                serialized[k] = v.isoformat() if isinstance(v, datetime) else v
+            result.append(serialized)
+        return result
+    except Exception:
+        return []

@@ -147,6 +147,32 @@ def _fire_alert(notifier, message: str, level: AlertLevel) -> None:
         log.warning("Telegram alert send failed: %s", exc)
 
 
+def _check_divergence_and_alert(
+    signal_syms: set,
+    order_syms: set,
+    submitted_count: int,
+    final_count: int,
+    notifier,
+) -> None:
+    """Fire Telegram WARNING alerts when signal/execution divergence thresholds are exceeded."""
+    from src.monitoring.alerts import check_signal_divergence, check_execution_divergence
+
+    if check_signal_divergence(signal_syms, order_syms):
+        _fire_alert(
+            notifier,
+            f"Signal/order divergence: signals={sorted(signal_syms)}, orders={sorted(order_syms)}",
+            AlertLevel.WARNING,
+        )
+
+    fill_ratio = submitted_count / final_count if final_count > 0 else 0.0
+    if check_execution_divergence(fill_ratio, 1.0):
+        _fire_alert(
+            notifier,
+            f"Execution fill divergence: {submitted_count}/{final_count} orders submitted",
+            AlertLevel.WARNING,
+        )
+
+
 def _emergency_cancel_all(api_key: str, secret_key: str, paper: bool) -> None:
     """Cancel all pending Alpaca orders. Called from kill-switch path before aborting cycle."""
     from alpaca.trading.client import TradingClient as _TC
@@ -697,6 +723,7 @@ def _run_cycle_inner() -> dict:
     # Log decisions to execution_decisions so the UI Decision Log tab is populated.
     # Also capture decision_ids for later trade DB writes.
     _symbol_decisions: dict[str, dict] = {}  # {symbol: {decision_id, score, signal_id}}
+    _s4_signals: dict[str, dict] = {}
     # P0-09: read actual regime multiplier once; used in both decisions and trade writes.
     _regime_mult: float = _get_regime_multiplier_from_redis(config.REDIS_URL)
     try:
@@ -873,6 +900,15 @@ def _run_cycle_inner() -> dict:
                     log.info("Forced sell submitted for %s (sentiment reversal)", sym)
             except Exception as _fs_exc:
                 log.warning("Failed to submit forced sell for %s: %s", sym, _fs_exc)
+
+    # P2-04: fire divergence alerts if signals and submitted orders don't match.
+    _check_divergence_and_alert(
+        signal_syms=set(_s4_signals.keys()),
+        order_syms={o["symbol"] for o in submitted_orders},
+        submitted_count=len(submitted_orders),
+        final_count=len(result.final_orders),
+        notifier=notifier,
+    )
 
     # Write trade entries/exits to DB for P&L tracking.
     # Also back-fill the Alpaca order_id on execution_decisions rows.
