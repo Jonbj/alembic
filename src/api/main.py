@@ -13,6 +13,13 @@ from src.config import config
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Open Redis connection on startup, close on shutdown."""
+    if not config.JWT_SECRET_KEY:
+        raise RuntimeError(
+            "JWT_SECRET_KEY is not set. Refusing to start with an ephemeral key — "
+            "tokens would differ across workers and be invalidated on every restart. "
+            "Set the JWT_SECRET_KEY environment variable to a strong random secret "
+            "(e.g. `openssl rand -hex 32`)."
+        )
     init_redis(Redis.from_url(config.REDIS_URL))
     yield
     close_redis()

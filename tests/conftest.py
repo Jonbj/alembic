@@ -7,6 +7,16 @@ import pytest
 # regardless of test collection order.
 os.environ.setdefault("ADMIN_API_KEY", "test-api-key-for-testing-only-12345678")
 os.environ.setdefault("DATABASE_URL", "postgresql://localhost:5432/test_db")
+# JWT_SECRET_KEY must be set for the API lifespan to start (P0-02 fail-fast).
+# Tests use a fixed test secret; production must supply a real one via env.
+os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret-do-not-use-in-production-000")
+# Auth credentials needed for TestClient login in test_auth_jwt.py.
+os.environ.setdefault("ADMIN_USERNAME", "admin")
+# bcrypt hash of "secret" — for test login only.
+os.environ.setdefault(
+    "ADMIN_PASSWORD_HASH",
+    "$2b$12$i6qSOhZRTLWbWoSTukGsw.p2y0hEJEKmEqjHGwjuv3dXqB2Gy2WHO",
+)
 
 
 @pytest.fixture

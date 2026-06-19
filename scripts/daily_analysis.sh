@@ -22,6 +22,16 @@ if [[ -f "$PROJECT_DIR/.env" ]]; then
     set +a
 fi
 
+# Load admin API key — ALEMBIC_API_KEY env var takes precedence, then ADMIN_API_KEY from .env.
+# The key is injected into the Claude prompt at runtime; never hardcode it here.
+if [[ -z "${ALEMBIC_API_KEY:-}" ]] && [[ -f "$PROJECT_DIR/.env" ]]; then
+    ALEMBIC_API_KEY=$(grep -E '^ADMIN_API_KEY=' "$PROJECT_DIR/.env" | head -1 | cut -d= -f2- | tr -d '"'"'"' ')
+fi
+if [[ -z "${ALEMBIC_API_KEY:-}" ]]; then
+    echo "ERROR: ALEMBIC_API_KEY env var or ADMIN_API_KEY in .env is required" >&2
+    exit 1
+fi
+
 tg_send() {
     local text="$1"
     if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]]; then
@@ -44,11 +54,12 @@ Claude Code sta analizzando i dati di ieri..."
 cd "$PROJECT_DIR"
 
 # Run Claude Code in non-interactive mode.
-ANALYSIS_OUTPUT=$(claude --dangerously-skip-permissions -p "$(cat <<'PROMPT'
+# The heredoc uses a placeholder so the key is never hardcoded in the file.
+_PROMPT_TEMPLATE=$(cat <<'PROMPT'
 Sei in una sessione autonoma di analisi giornaliera del trading system Alembic.
 Obiettivo: discovery approfondita dei problemi di ieri con analisi ragionata.
 
-API_KEY="eJvMeuHhJS27FPugKIu4qKGgV7roIdLfcv7h20MwuQg"
+API_KEY="__ALEMBIC_API_KEY__"
 BASE="http://localhost:8001/api"
 
 Esegui in parallelo queste chiamate API (filtra al giorno precedente a oggi):
@@ -92,7 +103,10 @@ Fix specifici da fare oggi (con file e funzione se possibile)
 
 Sii conciso ma preciso. Un bug non descritto è un bug che si ripete domani.
 PROMPT
-)" 2>&1)
+)
+# Inject the API key at runtime (placeholder replaced here, never stored in source).
+_CLAUDE_PROMPT="${_PROMPT_TEMPLATE//__ALEMBIC_API_KEY__/$ALEMBIC_API_KEY}"
+ANALYSIS_OUTPUT=$(claude --dangerously-skip-permissions -p "$_CLAUDE_PROMPT" 2>&1)
 
 echo "$ANALYSIS_OUTPUT" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
