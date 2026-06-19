@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -133,6 +134,9 @@ def run_s4_backtest_from_prices_and_signals(
     )
     log.info(gate_report.summary())
 
+    gate_report_id = f"s4-gate-{date.today().isoformat()}"
+    (output_dir / "gate_report_id.txt").write_text(gate_report_id)
+
     return {
         "oos_sharpe": oos_sharpe,
         "wf_aggregate": aggregate,
@@ -140,6 +144,7 @@ def run_s4_backtest_from_prices_and_signals(
         "hard_gates_pass": hard_gates_pass,
         "all_gates_pass": gate_report.overall_passed,
         "report_path": str(output_dir),
+        "gate_report_id": gate_report_id,
     }
 
 
