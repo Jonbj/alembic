@@ -174,8 +174,8 @@ docker compose exec postgres psql -U trading -d trading \
 ```
 
 Expected output for current authorized state:
-- S1: `supervised_paper`, promotion_blocked=false
-- S2: `paper`
+- S1: `supervised_paper`, promotion_blocked=true (demoted P0-01; re-promotion requires PIT backtest + SPA + 90-day paper)
+- S2: `disabled` (migration 025 seed; config: `research`, 0% allocation — options infra not implemented; do not enable)
 - S3: `research`
 - S4: `paper`, promotion_blocked=true
 - S7: `research`
@@ -186,8 +186,8 @@ Expected output for current authorized state:
 
 | Action | Status | Blocker |
 |--------|--------|---------|
-| Live trading | NOT authorized | P2-05 open; Kimi P2 Audit not completed; PO sign-off required |
-| Controlled paper trading | NOT authorized | P2-05 must be resolved first |
+| Live trading | NOT authorized | 90-day supervised_paper period not started; `GLOBAL_LIVE_PROMOTION_ENABLED=False`; PO sign-off required |
+| Controlled paper trading | NOT authorized | P2-05 complete; Kimi P2 Audit complete (`P2_ACCEPTED_WITH_RUNTIME_MONITORING`); end-to-end dry-run and PO sign-off still required |
 | Strategy promotions to `live` | NOT authorized | `GLOBAL_LIVE_PROMOTION_ENABLED = False` |
 | Strategy promotions to `paper` | NOT authorized | No PO sign-off for any strategy currently in research |
 | Setting `GLOBAL_LIVE_PROMOTION_ENABLED=True` | NOT authorized | See above |

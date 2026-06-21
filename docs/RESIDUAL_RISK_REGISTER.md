@@ -54,6 +54,6 @@ These three items are a single implementation ticket (P2-05 Execution Edge Cases
 | CR-10 | Weight guardrail mean-ICIR floor | P0 forensic pass | `c4ab1b6` |
 | CR-11 | S7 accidentally wired in orchestrator | P0-13 | `6d86d3f` |
 | CR-12 | S1 in live mode without 90-day paper period | P0-01 demoted | `cb1d43a` |
-| CR-13 | P2-05-A: idempotency fail-open on Redis down | P2-05 | TBD |
-| CR-14 | P2-05-B: net exposure cap not wired from config | P2-05 | TBD |
-| CR-15 | P2-05-C: VolTargeter re-violates cap after enforce() | P2-05 | TBD |
+| CR-13 | P2-05-A: idempotency fail-open on Redis down | P2-05 | `55cbf56` |
+| CR-14 | P2-05-B: net exposure cap not wired from config | P2-05 | `55cbf56` |
+| CR-15 | P2-05-C: VolTargeter re-violates cap after enforce() | P2-05 | `55cbf56` |

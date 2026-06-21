@@ -49,14 +49,27 @@ def _check_live_data(strategy_id: str) -> bool:
         log.debug("Could not query portfolio_cycles for %s: %s", strategy_id, exc)
         return False
 
-# ─── S1 — Time-Series Momentum (VALIDATED) ───────────────────────────────────
-# Source: config/s1_strategy.yaml + reports/s1_backtest/summary.json
+# ─── S1 — Time-Series Momentum (supervised_paper) ────────────────────────────
+# Source: config/s1_strategy.yaml + reports/s1_backtest/summary.json (2026-05-30 snapshot)
+# Authorization state (2026-06-21): mode=supervised_paper, promotion_blocked=true.
+# Metrics below are a stale historical snapshot — they do NOT authorize promotion.
+
+_S1_DATA_QUALITY_WARNING = (
+    "Backtest metrics are a stale historical snapshot (as of 2026-05-30). "
+    "They do NOT authorize promotion, paper, or live trading. "
+    "Current config: mode=supervised_paper, promotion_blocked=true."
+)
 
 S1_STRATEGY = {
     "id": "s1",
     "name": "S1 — Time-Series Momentum",
     "description": "Cross-asset time-series momentum strategy with volatility targeting",
-    "status": "validated",
+    "status": "supervised_paper",
+    "mode": "supervised_paper",
+    "promotion_blocked": True,
+    "live_authorized": False,
+    "promotion_authorized": False,
+    "data_quality_warning": _S1_DATA_QUALITY_WARNING,
     "n_assets": 15,
     "oos_sharpe": 0.5128,
     "max_drawdown": 0.15,
@@ -67,7 +80,12 @@ S1_DETAIL = {
     "id": "s1",
     "name": "S1 — Time-Series Momentum",
     "description": "Cross-asset time-series momentum strategy with volatility targeting",
-    "status": "validated",
+    "status": "supervised_paper",
+    "mode": "supervised_paper",
+    "promotion_blocked": True,
+    "live_authorized": False,
+    "promotion_authorized": False,
+    "data_quality_warning": _S1_DATA_QUALITY_WARNING,
     "parameters": {
         "lookbacks": [21, 63, 126, 252],
         "lookback_short": 21,

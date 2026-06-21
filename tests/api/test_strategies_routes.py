@@ -120,3 +120,76 @@ def test_get_sensitivity_returns_grid():
     assert len(data) > 0
     assert "sharpe" in data[0]
     assert "lookback" in data[0]
+
+
+# ─── Pre-Controlled-Paper Reconciliation — S1 authorization truth ────────────
+# These tests enforce that the strategy API reflects the real authorization
+# state from config/strategies.yaml (mode=supervised_paper, promotion_blocked=true)
+# and does NOT misrepresent S1 as validated/promotable/live-ready.
+
+class TestS1AuthorizationFields:
+    """Strategy API must accurately report S1 authorization state."""
+
+    def test_s1_status_is_not_validated(self):
+        """GET /api/strategies/s1 must not return status='validated' while config says supervised_paper."""
+        tc = TestClient(app)
+        resp = tc.get("/api/strategies/s1")
+        assert resp.status_code == 200
+        assert resp.json()["status"] != "validated", (
+            "S1 status must not be 'validated' — config says supervised_paper/promotion_blocked"
+        )
+
+    def test_s1_status_is_supervised_paper(self):
+        """GET /api/strategies/s1 must return status='supervised_paper'."""
+        tc = TestClient(app)
+        resp = tc.get("/api/strategies/s1")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "supervised_paper"
+
+    def test_s1_promotion_blocked_is_true(self):
+        """GET /api/strategies/s1 must expose promotion_blocked=true (matches config)."""
+        tc = TestClient(app)
+        resp = tc.get("/api/strategies/s1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "promotion_blocked" in data, "promotion_blocked field must be present"
+        assert data["promotion_blocked"] is True
+
+    def test_s1_live_authorized_is_false(self):
+        """GET /api/strategies/s1 must expose live_authorized=false."""
+        tc = TestClient(app)
+        resp = tc.get("/api/strategies/s1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "live_authorized" in data, "live_authorized field must be present"
+        assert data["live_authorized"] is False
+
+    def test_s1_promotion_authorized_is_false(self):
+        """GET /api/strategies/s1 must expose promotion_authorized=false."""
+        tc = TestClient(app)
+        resp = tc.get("/api/strategies/s1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "promotion_authorized" in data, "promotion_authorized field must be present"
+        assert data["promotion_authorized"] is False
+
+    def test_s1_has_data_quality_warning(self):
+        """GET /api/strategies/s1 must include a non-empty data_quality_warning for stale backtest metrics."""
+        tc = TestClient(app)
+        resp = tc.get("/api/strategies/s1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "data_quality_warning" in data, "data_quality_warning field must be present"
+        assert isinstance(data["data_quality_warning"], str)
+        assert len(data["data_quality_warning"]) > 0
+
+    def test_list_strategies_s1_not_validated(self):
+        """GET /api/strategies list endpoint must not return status='validated' for S1."""
+        tc = TestClient(app)
+        resp = tc.get("/api/strategies")
+        assert resp.status_code == 200
+        s1 = next((s for s in resp.json() if s["id"] == "s1"), None)
+        assert s1 is not None, "S1 must appear in strategy list"
+        assert s1.get("status") != "validated", (
+            "S1 summary status must not be 'validated' in the list endpoint"
+        )

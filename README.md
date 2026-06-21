@@ -7,7 +7,7 @@
 
   *Alpha Miner paradigm: LLMs run offline, execution reads pre-computed signals from Redis*
 
-  ![Tests](https://img.shields.io/badge/tests-2353%20passing-brightgreen)
+  ![Tests](https://img.shields.io/badge/tests-2386%20passing-brightgreen)
   ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
   ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 </div>
@@ -24,9 +24,9 @@
 | P2-02 Promotion Gate Wiring | Complete |
 | P2-03 Validation Truth Wiring | Complete |
 | P2-04 Monitoring / Operator Cockpit | Complete |
-| P2-05 Execution Edge Cases | **Pending** |
-| Kimi P2 Acceptance Audit | **Not yet authorized** (blocked on P2-05) |
-| Controlled Paper Trading | **Not authorized** |
+| P2-05 Execution Edge Cases | **Complete** (commit `55cbf56`) |
+| Kimi P2 Acceptance Audit | **Complete** — Verdict: `P2_ACCEPTED_WITH_RUNTIME_MONITORING` |
+| Controlled Paper Trading | **Not authorized** — PO sign-off + dry-run required |
 | Live Trading | **Not authorized** |
 | Strategy Promotions | **Not authorized** |
 
@@ -236,7 +236,7 @@ If all guardrails pass, the weights are **auto-applied** and written to Redis in
 The `PortfolioOrchestrator` runs hourly during market hours and coordinates all active strategies using a **weight-then-order** architecture. Instead of each strategy independently generating full-portfolio orders (which causes double-counting when merged), strategies output **target weights**; the orchestrator merges them by allocation percentage, then computes a single set of delta orders.
 
 **Cycle:**
-1. Each active strategy (`S1`, `S2`, `S4`) produces target weights (fractions of NAV) scaled by its `allocation_pct`
+1. Each active strategy (`S1`, `S4`) produces target weights (fractions of NAV) scaled by its `allocation_pct` — S2 is disabled (`research` mode, 0% allocation)
 2. Weights are merged across strategies: `merged[sym] += strategy_weight[sym] × alloc_pct`
 3. Delta orders are computed: `target_qty - current_qty` per symbol
 4. `ConstraintEnforcer` applies five sequential constraints (per-asset, per-strategy, portfolio, sector, correlation)
@@ -527,7 +527,8 @@ python -m pytest tests/ --cov=src --cov-report=html
 | Security, config, models | ~28 |
 | Frontend (React components) | ~559 |
 | Monitoring, promotion, P2-04 | ~639 |
-| **Total** | **2353** |
+| P2-05 execution edge cases + pre-paper reconciliation | ~33 |
+| **Total** | **2386** |
 
 ---
 
@@ -657,10 +658,10 @@ These bugs were identified by static architecture review against live-trading fa
 - ✅ `sentiment.py` + `celery_app.py`: In-flight queue — `LMOVE` pattern implemented
 - ✅ `performance.py`: Weight guardrail mean-ICIR floor — G3.5 guard added
 
-**Remaining (P2-05 — NOT YET RESOLVED):**
-- `portfolio_scheduler.py`: Idempotency check `_get_fired_signal_ids()` returns empty set when Redis is down (fail-open, not fail-safe)
-- `portfolio_scheduler.py` + `constraints.py`: `ConstraintEnforcer` instantiated without `net_exposure_cap` — cap not wired
-- `portfolio_scheduler.py` + `vol_targeting.py`: `PortfolioVolTargeter` re-scales after `ConstraintEnforcer.enforce()` — can re-violate the cap
+**P2-05 Execution Edge Cases** ✅ RESOLVED (commit `55cbf56`, 2026-06-21 — Kimi P2 Audit: `P2_ACCEPTED_WITH_RUNTIME_MONITORING`)
+- ✅ `portfolio_scheduler.py`: `_get_fired_signal_ids()` now returns `None` on Redis error (fail-closed); `_apply_idempotency_filter()` skips all S4 BUYs when idempotency unverifiable
+- ✅ `portfolio_scheduler.py` + `constraints.py`: `_load_risk_config()` reads `max_portfolio_exposure` and `max_single_asset_pct` from `config/trading.yaml`; `ConstraintEnforcer` receives both values at each cycle
+- ✅ `orchestrator.py` + `vol_targeting.py`: `PortfolioVolTargeter.scale_orders()` now runs BEFORE `ConstraintEnforcer.enforce()` — enforcer has the final word on risk caps
 
 ### Planned 📋
 

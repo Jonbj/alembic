@@ -615,14 +615,16 @@ See `README.md` → *Pre-Live Blockers* section for the authoritative list of cr
 | ConstraintEnforcer loses sleeve provenance | Final merged orders have `strategy_id="merged"`; per-sleeve exposure constraints cannot be enforced | Future |
 | Feedback loop blind to S1 | `run_loss_feedback_check` reads `trades` table which today is populated only by `run-execution` (S4 flow). Portfolio-cycle trades not yet written to `trades`. | Wire portfolio_scheduler to open/close_trade |
 
-### P2-05 Pending Safety Items (NOT_IMPLEMENTED — blocks Kimi P2 Acceptance Audit)
+### P2-05 Resolved Safety Items (IMPLEMENTED — commit `55cbf56`, 2026-06-21)
 
-Three safety-critical requirements from P2-05-EXECUTION-EDGE-CASES are not yet implemented. These must be resolved before the Kimi P2 Acceptance Audit and before controlled paper trading begins.
+All three P2-05 safety requirements are implemented and test-covered. Kimi P2 Acceptance Audit verdict: **`P2_ACCEPTED_WITH_RUNTIME_MONITORING`**. Controlled paper trading is NOT yet authorized — PO sign-off and a dry-run are still required.
 
-| Gap | Description | Risk |
-|-----|-------------|------|
-| Idempotency fail-open on Redis down | `_get_fired_signal_ids()` in `portfolio_scheduler.py` returns empty set when Redis is unavailable, so signal idempotency check is bypassed — signals can re-fire and duplicate orders can be placed | Duplicate BUY orders during Redis outage |
-| Net exposure cap not wired in scheduler | `ConstraintEnforcer()` is instantiated in `portfolio_scheduler.py` without `net_exposure_cap`; the cap parameter is never passed from config | Portfolio can exceed net exposure limit |
-| VolTargeter re-violates cap | `PortfolioVolTargeter` is applied after `ConstraintEnforcer.enforce()` in the orchestrator; vol-scaling BUY quantities up can push past the enforced cap | Constraint enforcement bypassed by vol scaler |
+| Item | Fix | File |
+|------|-----|------|
+| P2-05-A: Idempotency fail-closed on Redis down | `_get_fired_signal_ids()` returns `None` on any Redis exception; `_apply_idempotency_filter()` skips all S4 BUYs when idempotency cannot be verified | `src/workers/portfolio_scheduler.py:302-335` |
+| P2-05-B: Net exposure cap wired from config | `_load_risk_config()` reads `max_portfolio_exposure` and `max_single_asset_pct` from `config/trading.yaml`; passed to `ConstraintEnforcer` at each cycle | `src/workers/portfolio_scheduler.py:338-352` |
+| P2-05-C: VolTargeter runs before enforcer | `PortfolioVolTargeter.scale_orders()` called before `ConstraintEnforcer.enforce()` — enforcer is the last constraint pass and cannot be re-violated by vol scaling | `src/portfolio/orchestrator.py:218-229` |
 
-See `docs/P2_STATUS_2026-06-21.md` and `docs/RESIDUAL_RISK_REGISTER.md` for tracking status.
+**Runtime monitoring watchlist (R-04 through R-12 remain open):** see `docs/RESIDUAL_RISK_REGISTER.md` for full tracking. Key open items: soft CI gates (mypy/pip-audit/gitleaks), S1 backtest report stale (needs PIT regeneration before promotion discussion), S4/S7 no confirmed IC > placebo.
+
+See `docs/P2_STATUS_2026-06-21.md` and `docs/P2_ACCEPTANCE_AUDIT_2026-06-21.md` for full P2 status.
