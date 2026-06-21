@@ -50,7 +50,7 @@ S7 espone `compute_target_weights(pead_signals) → dict[str, float]`. Il segnal
 ## Stato
 
 - **Introdotto**: 2026-06-07
-- **Stato**: ATTIVO in produzione
+- **Stato**: `research` / R&D/contained — NON nel PortfolioOrchestrator (P0-13, commit `6d86d3f`). Nonostante `allocation_pct=0.15` nel YAML di configurazione, S7 non è wired nell'orchestratore. Promozione bloccata fino al completamento dei gate di validazione sotto.
 - **Beat task**: `pead-ingestion` in `src/workers/celery_app.py`
 - **Worker**: `src/workers/pead_worker.py`
 - **Routes**: `src/api/routes/pead_routes.py`

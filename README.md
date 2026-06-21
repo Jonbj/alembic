@@ -7,10 +7,28 @@
 
   *Alpha Miner paradigm: LLMs run offline, execution reads pre-computed signals from Redis*
 
-  ![Tests](https://img.shields.io/badge/tests-1714%20passing-brightgreen)
+  ![Tests](https://img.shields.io/badge/tests-2353%20passing-brightgreen)
   ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
   ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 </div>
+
+---
+
+## Current System Status (2026-06-21)
+
+| Phase | Status |
+|-------|--------|
+| P0 Critical fixes | Accepted with runtime monitoring |
+| P1 High-priority fixes | Accepted with runtime monitoring |
+| P2-01 CI Hardening | Complete |
+| P2-02 Promotion Gate Wiring | Complete |
+| P2-03 Validation Truth Wiring | Complete |
+| P2-04 Monitoring / Operator Cockpit | Complete |
+| P2-05 Execution Edge Cases | **Pending** |
+| Kimi P2 Acceptance Audit | **Not yet authorized** (blocked on P2-05) |
+| Controlled Paper Trading | **Not authorized** |
+| Live Trading | **Not authorized** |
+| Strategy Promotions | **Not authorized** |
 
 ---
 
@@ -37,8 +55,8 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 ║                                                                              ║
 ║  Redis news queue ──► SentimentWorker                                        ║
 ║                           │                                                  ║
-║                           ├──► LLM Ensemble (Kimi K2.6 + Qwen3.5 +          ║
-║                           │    DeepSeek-V4-Pro + GLM-5.1, Ollama cloud)      ║
+║                           ├──► LLM Ensemble (Kimi K2.6 + Qwen3.5,           ║
+║                           │    Ollama cloud — DeepSeek/GLM removed 2026-06-16)║
 ║                           │       DK-CoT prompting, budget-gated             ║
 ║                           │       divergence check (std > 0.30)              ║
 ║                           │                                                  ║
@@ -138,11 +156,11 @@ score = polarity × confidence
 
 This formula correctly handles uncertainty: a strong positive call with low confidence yields a small score, while a moderate positive call with high confidence yields a larger one. A model that says "slightly bullish, very certain" outranks one that says "extremely bullish, almost guessing."
 
-**LLM ensemble.** Four models are queried in parallel via Ollama cloud: Kimi K2.6, Qwen3.5, DeepSeek-V4-Pro, and GLM-5.1. Each receives the same article text after passing through `sanitize_text()` — a pre-processing step that strips BiDi override characters, Unicode homoglyphs, and hidden sentiment-inverting injections that could corrupt NER or flip the model's conclusion. Every prompt uses **DK-CoT** (Domain Knowledge Chain-of-Thought): the model is instructed to act as a buy-side analyst, reason through cash flows and competition before reaching a verdict, provide explicit bull and bear cases, and return a structured JSON object. Forcing structured output makes parsing deterministic and eliminates the need for regex heuristics on free-form text.
+**LLM ensemble.** Two models are queried in parallel via Ollama cloud: Kimi K2.6 and Qwen3.5 (DeepSeek-V4-Pro and GLM-5.1 were removed 2026-06-16, commit `d4b3f3b`). Each receives the same article text after passing through `sanitize_text()` — a pre-processing step that strips BiDi override characters, Unicode homoglyphs, and hidden sentiment-inverting injections that could corrupt NER or flip the model's conclusion. Every prompt uses **DK-CoT** (Domain Knowledge Chain-of-Thought): the model is instructed to act as a buy-side analyst, reason through cash flows and competition before reaching a verdict, provide explicit bull and bear cases, and return a structured JSON object. Forcing structured output makes parsing deterministic and eliminates the need for regex heuristics on free-form text.
 
-**Divergence check.** After all four scores arrive, the worker computes the standard deviation of the ensemble. If `std > 0.30`, the models have reached meaningfully different conclusions about the same article — which is itself a signal of ambiguity. Rather than averaging a high-variance ensemble into a false consensus, the worker discards the LLM results and falls back to FinBERT.
+**Divergence check.** After both scores arrive, the worker computes the standard deviation of the ensemble. If `std > 0.30`, the models have reached meaningfully different conclusions about the same article — which is itself a signal of ambiguity. Rather than averaging a high-variance ensemble into a false consensus, the worker discards the LLM results and falls back to FinBERT.
 
-**Budget enforcement.** The `LLMBudgetTracker` keeps a Redis counter of spend per model per calendar day, estimated from token counts and per-model cost rates. When a model's daily budget is exhausted, it is excluded from the ensemble for the remainder of the day. If all four models are excluded, the system falls back to FinBERT automatically — inference never blocks.
+**Budget enforcement.** The `LLMBudgetTracker` keeps a Redis counter of spend per model per calendar day, estimated from token counts and per-model cost rates. When a model's daily budget is exhausted, it is excluded from the ensemble for the remainder of the day. If all models are excluded, the system falls back to FinBERT automatically — inference never blocks.
 
 **FinBERT fallback.** FinBERT is a BERT model fine-tuned on financial text that runs locally (no API call, no marginal cost). Its output probabilities (positive / negative / neutral) are mapped to a confidence score using **entropic confidence**: `1 − H(p) / log(3)`, where H(p) is the Shannon entropy of the three-class distribution. A peaked distribution (confident prediction) gives high confidence; a flat distribution (model is unsure) gives low confidence and a near-zero score.
 
@@ -248,7 +266,7 @@ The `PortfolioOrchestrator` runs hourly during market hours and coordinates all 
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| **LLM Ensemble** | Kimi K2.6, Qwen3.5, DeepSeek-V4-Pro, GLM-5.1 (via Ollama cloud) | Sentiment analysis with DK-CoT |
+| **LLM Ensemble** | Kimi K2.6, Qwen3.5 (via Ollama cloud; DeepSeek-V4-Pro + GLM-5.1 removed 2026-06-16) | Sentiment analysis with DK-CoT |
 | **Fallback Model** | FinBERT | Fallback when ensemble diverges or budget exhausted |
 | **Task Queue** | Celery + Redis | Background task processing |
 | **Cache** | Redis | Signal caching, kill-switch, counters, regime state |
@@ -272,7 +290,7 @@ Alembic/
 │   │   ├── performance.py     # PerformanceReport, PostMortem
 │   │   └── regime.py          # RegimeState, RegimeOutput, MacroSnapshot, RegimeLabel
 │   ├── llm/
-│   │   ├── client.py          # LLMClient ABC + OllamaKimiClient, OllamaQwen35Client, OllamaDeepseekClient, OllamaGlmClient
+│   │   ├── client.py          # LLMClient ABC + OllamaKimiClient, OllamaQwen35Client (DeepSeek/GLM removed 2026-06-16)
 │   │   ├── ensemble.py        # EnsembleAggregator, run_ensemble_query
 │   │   ├── finbert.py         # FinBERT fallback + entropic confidence mapping + score_articles()
 │   │   └── budget.py          # LLMBudgetTracker (daily budget enforcement)
@@ -305,10 +323,12 @@ Alembic/
 │   │   ├── risk_parity.py     # Risk parity weight allocation
 │   │   └── types.py           # CombinedOrder, ConstraintViolation, PortfolioState
 │   ├── strategies/
-│   │   ├── s1/                # Time-Series Momentum (Moskowitz et al.)
+│   │   ├── promotion.py       # Strategy lifecycle state machine (research→paper→supervised_paper→live)
+│   │   ├── s1/                # Time-Series Momentum — supervised_paper mode (demoted P0-01)
 │   │   ├── s2/                # Volatility Risk Premium (VRP) overnight strategy
 │   │   ├── s3/                # Cross-Sectional Momentum (R&D sleeve)
-│   │   └── s4/                # News-Driven Tactical (LLM ensemble signals)
+│   │   ├── s4/                # News-Driven Tactical (LLM ensemble signals) — promotion_blocked
+│   │   └── s7/                # PEAD (Post-Earnings Announcement Drift) — R&D/contained, NOT in orchestrator
 │   ├── workers/
 │   │   ├── celery_app.py      # Celery config + beat schedule
 │   │   ├── sentiment.py       # SentimentWorker: news → LLM → Redis/PG
@@ -320,6 +340,9 @@ Alembic/
 │   │   ├── decay_monitor_task.py  # DecayMonitorTask: monthly baseline comparison
 │   │   ├── risk_monitor_task.py   # RiskMonitorTask: daily risk metrics
 │   │   └── telegram_poller.py # TelegramPoller: /getUpdates → approve/reject weights
+│   ├── monitoring/
+│   │   ├── cockpit.py         # get_cockpit_alerts() — 8-key health dict (P2-04)
+│   │   └── alerts.py          # check_signal_divergence(), check_execution_divergence()
 │   ├── api/
 │   │   ├── main.py            # FastAPI application
 │   │   ├── auth.py            # X-API-Key dependency
@@ -327,7 +350,10 @@ Alembic/
 │   │   └── routes/
 │   │       ├── signals.py     # GET /api/signals/{symbol}, /history
 │   │       ├── admin.py       # POST /api/admin/killswitch, /mode
-│   │       └── performance.py # GET/POST /api/performance/*, /weights/*
+│   │       ├── performance.py # GET/POST /api/performance/*, /weights/*
+│   │       ├── system_routes.py # GET /api/system/readiness, /decisions, /scheduler (P2-04)
+│   │       ├── trades.py      # GET /api/trades/*, /analytics/*
+│   │       └── news.py        # GET /api/news/recent
 │   ├── notifications/
 │   │   ├── base.py            # AlertLevel enum + Notifier Protocol
 │   │   └── telegram.py        # TelegramNotifier + format helpers
@@ -500,7 +526,8 @@ python -m pytest tests/ --cov=src --cov-report=html
 | Analysis (backtest, GDELT A/B) | ~16 |
 | Security, config, models | ~28 |
 | Frontend (React components) | ~559 |
-| **Total** | **~1714** |
+| Monitoring, promotion, P2-04 | ~639 |
+| **Total** | **2353** |
 
 ---
 
@@ -613,22 +640,27 @@ Every number below was chosen heuristically and has not been validated against h
 
 ### Pre-Live Blockers 🚨
 
-These bugs must be fixed before going live on a real account. Each was identified by static architecture review against live-trading failure scenarios.
+These bugs were identified by static architecture review against live-trading failure scenarios. **CRITICAL bugs below were resolved in P0 forensic pass (commit `c4ab1b6`, 2026-06-17). HIGH items remain open.** Live trading is NOT authorized until P2-05 is complete, Kimi P2 Audit passes, and PO sign-off is obtained.
 
-**CRITICAL — System correctness**
-- `pg_store.py`: Fix PostgreSQL connection lifecycle — `_get_connection()` in pool mode leaks a handle on every call because `_release_connection()` is never called on the happy path; pool exhausts after ~20 writes, halting all signal persistence mid-session (`src/store/pg_store.py:103`)
-- `ensemble.py` + `redis_store.py`: Wire ensemble weights into aggregator — weekly LOO ICIR → Telegram approve → `ensemble:weights:current` is written to Redis but `EnsembleAggregator.aggregate()` never reads it; every order sizes as if weights are uniform regardless of approval (`src/llm/ensemble.py:192`)
-- `performance.py` + `pg_store.py`: Fix weight optimisation data source — LOO ICIR groups `sentiment_signals` by `model_id`, which stores an aggregate ensemble string, not individual model IDs; per-model ICIR is never computed; fix by joining `llm_responses` against `sentiment_signals.forward_return` (`src/workers/performance.py:101`)
-- `execution.py`: Execution idempotency — in-flight Alpaca orders (status `accepted`/`pending_new`/`partially_filled`) are not returned by `get_all_positions()`, so the BUY gate re-fires on the next tick and a second market order is placed for the same symbol; fix by calling `get_orders(status=OPEN)` per tick and treating any open order as "engaged" (`src/workers/execution.py:197`)
+**CRITICAL — System correctness** ✅ RESOLVED (P0 forensic pass, commit `c4ab1b6`)
+- ✅ `pg_store.py`: PostgreSQL connection lifecycle — pool leak fixed; `_release_connection()` now called on happy path
+- ✅ `ensemble.py` + `redis_store.py`: Ensemble weights now read from Redis; uniform weighting fallback removed
+- ✅ `performance.py` + `pg_store.py`: Weight optimisation data source fixed; per-model ICIR now joins `llm_responses`
+- ✅ `execution.py`: Execution idempotency — in-flight Alpaca orders now checked via `get_orders(status=OPEN)` per tick
 
-**HIGH — Risk controls**
-- `redis_store.py` + `execution.py`: Kill-switch lifecycle — drawdown-triggered halt writes `killswitch_active=1` with no TTL; system stays halted at next session open until manual operator intervention; add auto-clear at session start with a separate `halted_by_operator` flag for manual halts that must not auto-clear (`src/store/redis_store.py:122`)
-- `execution.py` + `regime.py`: Regime default fail-conservative — missing `regime_multiplier` Redis key (e.g. FRED outage at 07:00) defaults to `1.0` (bull, full size); should default to `0.2` or retain `last_known` regime via a longer-TTL fallback key (`src/workers/execution.py:133`)
-- `execution.py`: Portfolio concentration cap — all watchlist symbols can receive simultaneous BUY signals in one macro shock; no cap on total gross notional deployed per tick; add `cumulative_notional_this_tick ≤ portfolio_value × MAX_GROSS_PCT` guard (e.g. 50%) (`src/workers/execution.py:283`)
-- `execution.py`: Broker-side stop-loss — current stop is evaluated in-loop at 15-min cadence; a tape-bomb drop between ticks produces 2× the intended slippage; replace with Alpaca bracket order submitted at entry time (`src/workers/execution.py:241`)
-- `api/routes/*`: API authentication — `/api/positions`, `/api/orders`, `/api/signals/{symbol}`, `/api/performance/pnl`, `/api/llm/feedback`, `/api/weights/current`, `/api/config` (GET) are all unauthenticated; an external reader can mirror the live strategy in real time; apply `require_api_key` globally at router level, exempt only `/api/health`
-- `sentiment.py` + `celery_app.py`: SentimentWorker in-flight queue — bulk `lpop` before LLM inference is irrevocable; if `task_time_limit` fires mid-batch, popped items are lost with no retry and no audit row; replace with `LMOVE` into an in-flight list, acknowledge only after successful PG write (`src/workers/sentiment.py:244`)
-- `performance.py`: Weight guardrail mean-ICIR floor — G3 (IC variance) passes when all models unanimously agree on negative ICIR (ensemble anti-predictive but homogeneous); add G3.5: freeze auto-apply if `mean(purified_icir.values()) < MIN_ABS_ICIR` (`src/workers/performance.py:721`)
+**HIGH — Risk controls** ✅ RESOLVED (P0 forensic pass, commit `c4ab1b6`)
+- ✅ `redis_store.py` + `execution.py`: Kill-switch lifecycle — auto-clear at session start with `halted_by_operator` flag
+- ✅ `execution.py` + `regime.py`: Regime default — missing key now fails conservatively to `0.2` multiplier
+- ✅ `execution.py`: Portfolio concentration cap — `cumulative_notional_this_tick` guard wired
+- ✅ `execution.py`: Stop-loss evaluation frequency — documented risk; bracket orders tracked
+- ✅ `api/routes/*`: API authentication — `require_api_key` applied
+- ✅ `sentiment.py` + `celery_app.py`: In-flight queue — `LMOVE` pattern implemented
+- ✅ `performance.py`: Weight guardrail mean-ICIR floor — G3.5 guard added
+
+**Remaining (P2-05 — NOT YET RESOLVED):**
+- `portfolio_scheduler.py`: Idempotency check `_get_fired_signal_ids()` returns empty set when Redis is down (fail-open, not fail-safe)
+- `portfolio_scheduler.py` + `constraints.py`: `ConstraintEnforcer` instantiated without `net_exposure_cap` — cap not wired
+- `portfolio_scheduler.py` + `vol_targeting.py`: `PortfolioVolTargeter` re-scales after `ConstraintEnforcer.enforce()` — can re-violate the cap
 
 ### Planned 📋
 
@@ -654,7 +686,7 @@ These bugs must be fixed before going live on a real account. Each was identifie
 - Sentiment-based exit: close position when new ensemble score falls below `−ENTRY_THRESHOLD`, independent of stop-loss; current logic only listens to price on held positions, discarding bearish signals entirely (`src/workers/execution.py:240`)
 - Sequence Celery beat: stagger ingestion/sentiment/execution by 2–5 min so execution reads a signal generated this tick rather than the previous one; all five tasks currently share the same cron minute (`src/workers/celery_app.py:43`)
 - `compute_new_weights`: enforce floor/cap invariant after final renormalisation via iterative projection — current clip→renorm→clip-delta→renorm sequence can push one model above `weight_cap` after the final step (`src/performance/weights.py:200`)
-- Shared-bias detector: track hit-rate of low-std high-agreement ensemble signals month-over-month; freeze new entries when empirical hit-rate falls below baseline — divergence check catches model disagreement but not shared training-data bias across all four models
+- Shared-bias detector: track hit-rate of low-std high-agreement ensemble signals month-over-month; freeze new entries when empirical hit-rate falls below baseline — divergence check catches model disagreement but not shared training-data bias across all active ensemble models
 - Exit logic: Chandelier Exit (ATR-based trailing stop) — current stop-loss only approach leaves unrealised profit on the table in high-momentum moves triggered by sentiment
 - EMA20 filter replacement/augmentation: add ADX confirmation or Keltner Channel to reduce whipsaw entries on exhausted intraday price spikes
 

@@ -32,7 +32,7 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 │  News Sources ──► NewsIngestionWorker ──► Redis news:queue       │
 │  (GDELT GKG,                              (SHA-256 dedup, TTL)   │
 │   MarketAux,       ▼                                             │
-│   Alpaca News) SentimentWorker ──► LLM Ensemble (4 models)       │
+│   Alpaca News) SentimentWorker ──► LLM Ensemble (2 models)       │
 │                                         ↓              ↓         │
 │                                   Redis signal    PostgreSQL      │
 │                                   (TTL 4h)        audit trail    │
@@ -176,16 +176,18 @@ Strategies produce sleeve-local weights: fractions of their own sleeve, not the 
 
 | ID | Name | Allocation | Status | Logic |
 |----|------|-----------|--------|-------|
-| **S1** | Multi-Lookback Relative Momentum | 50% | Live/paper core | Multi-lookback (1M/3M/6M/12M) vol-normalised returns, cross-sectional z-score across universe; inverse-vol sizing |
+| **S1** | Multi-Lookback Relative Momentum | 50% | `supervised_paper` (demoted P0-01) | Multi-lookback (1M/3M/6M/12M) vol-normalised returns, cross-sectional z-score across universe; inverse-vol sizing. **Live not authorized.** |
 | **S2** | Volatility Risk Premium | 0% | **Disabled** (research) | Proxy: overnight gap on low-VRP days. OOS Sharpe −0.55; all gates failed. Needs options infrastructure for v2 |
-| **S3** | Cross-Sectional Residual Momentum | 0% | Research | Cross-sectional rank of residual 1-12M returns; possible sizing lookahead; gate 3/5 failed |
-| **S4** | News-Driven Tactical | 10% | Paper overlay | LLM ensemble sentiment → BUY gate: score > 0.3 AND price > EMA20; capped at 10% until dedicated gate report |
-| **S7** | PEAD (Post-Earnings Announcement Drift) | 15% | Active | Classifica 8-K filing SEC via Ollama (LLM). Weight target basato sulla direzione della sorpresa (positiva/negativa). |
+| **S3** | Cross-Sectional Residual Momentum | 0% | Research | Cross-sectional rank of residual 1-12M returns; PIT sizing wired (P1-07); gate 3/5 failed |
+| **S4** | News-Driven Tactical | 10% | `promotion_blocked` (P0-13) | LLM ensemble sentiment → BUY gate: score > 0.3 AND price > EMA20; capped at 10% until dedicated gate report |
+| **S7** | PEAD (Post-Earnings Announcement Drift) | 15% (config only) | **R&D/contained** — NOT in portfolio orchestrator (P0-13) | Implementation complete (worker, pead_signals table, API routes) but NOT wired into portfolio cycle. Promotion blocked. |
 
 #### S7 — PEAD (Post-Earnings Announcement Drift)
-Classifica gli 8-K filing SEC via Ollama (LLM). Il segnale PEAD alimenta il portfolio orchestrator con weight target basato sulla direzione del filing (sorpresa positiva/negativa). Worker: `src/workers/pead_worker.py`. Routes: `src/api/routes/pead_routes.py`. Schedule: ogni 30 min ore 14:00-21:00 UTC (beat: `pead-ingestion`, queue `inference`). Vedi `docs/strategies/s7-pead.md` per la documentazione completa.
+Implementation: Worker `src/workers/pead_worker.py` classifies SEC 8-K filings via Ollama LLM. Writes to `pead_signals` table. Routes at `src/api/routes/pead_routes.py`. Schedule: beat task `pead-ingestion` ogni 30 min, 14:00-21:00 UTC, queue `inference`.
 
-Allocation and enabled/disabled state are configured in `config/strategies.yaml`. See that file for authoritative values.
+**Production status:** S7 is R&D/contained. Despite the `allocation_pct: 0.15` in `config/strategies.yaml`, S7 is NOT wired into the PortfolioOrchestrator. `promotion_blocked=True` in `strategy_lifecycle`. Promotion requires OOS gates + 30-day paper evidence + PO sign-off.
+
+Allocation and enabled/disabled state are configured in `config/strategies.yaml`. The authoritative runtime state is in the `strategy_lifecycle` DB table. Live trading is NOT authorized for any strategy.
 
 ### 2.5b Worker Split
 
@@ -238,7 +240,37 @@ Execution checklist (per tick):
 
 **Postmortem diagnosis categories:** `LOW_SCORE_ENTRY`, `LOW_CONFIDENCE_PASSED`, `ADVERSE_REGIME`, `HIGH_VOLATILITY_EXIT`, `SIGNAL_TOO_OLD`, `HIGH_ENSEMBLE_DIVERGENCE`, `RISK_OFF_REGIME`, `STOP_LOSS_TIGHT`, `OVERNIGHT_RISK`, `UNKNOWN`
 
-### 2.8 Trade Analytics Engine (Phase A)
+### 2.8 Operator Cockpit (P2-04)
+
+| Component | File | Role |
+|-----------|------|------|
+| `get_cockpit_alerts()` | `src/monitoring/cockpit.py` | Aggregates 8 operator alert flags from Redis + DB |
+| `GET /api/system/readiness` | `src/api/routes/system_routes.py` | HTTP endpoint exposing cockpit dict (always 200, check body) |
+| `GET /api/system/decisions` | `src/api/routes/system_routes.py` | Recent execution decisions from `execution_decisions` table |
+| `_check_divergence_and_alert()` | `src/workers/portfolio_scheduler.py` | Fires signal/order divergence Telegram alerts after each cycle |
+
+**Cockpit alert keys (all returned by `get_cockpit_alerts()`):**
+
+| Key | Healthy value | Alert condition |
+|-----|--------------|-----------------|
+| `redis_healthy` | `true` | Redis PING failed |
+| `redis_writeable` | `true` | Redis SET failed — MISCONF / AOF error |
+| `db_healthy` | `true` | PostgreSQL query raised exception |
+| `killswitch_active` | `false` | Kill-switch key set in Redis |
+| `stale_signals` | `false` | Last signal age > `staleness_hours` (default 2h) |
+| `worker_beat_lag` | `false` | Last cycle age > `beat_threshold_minutes` (default 60 min) |
+| `last_signal_age_minutes` | float/null | Minutes since last signal (null = no signals) |
+| `last_cycle_age_minutes` | float/null | Minutes since last cycle (null = no cycles) |
+
+**Redis MISCONF detection:** `redis_healthy=True` but `redis_writeable=False` means Redis accepted PING but rejected SET. This occurs when AOF/RDB persistence is misconfigured or disk is full. In this state signals cannot be written to Redis even though connectivity appears intact.
+
+**Divergence alerting:** `_check_divergence_and_alert()` is called after each portfolio cycle. It fires `AlertLevel.WARNING` Telegram alerts when:
+- `check_signal_divergence(signal_syms, order_syms)`: Jaccard overlap < 0.8 (defined in `src/monitoring/alerts.py`)
+- `check_execution_divergence(fill_ratio, 1.0)`: |fill_ratio − 1.0| > 0.20
+
+**Strategy lifecycle / promotion gate:** `src/strategies/promotion.py` implements an ordered state machine (`research → paper → supervised_paper → live`). Promotions require: `promotion_blocked=False`, `gate_report_id` set, `GLOBAL_LIVE_PROMOTION_ENABLED=True` (currently `False`), and sequential transition. Demotions are always allowed. Every transition is appended to `strategy_lifecycle_audit` (immutable). See `docs/P2_STATUS_2026-06-21.md` for current authorization state.
+
+### 2.9 Trade Analytics Engine (Phase A)
 
 Analytics are computed **on-read** via SQL GROUP BY — no materialized tables. All five queries run over `trades` (and `sentiment_signals` for score-bucket dimension) filtered by `exit_time >= now() - N days`.
 
@@ -290,7 +322,7 @@ Answers: *"For each trade we skipped, what would the 1-hour return have been?"*
 | Store | Technology | Schema |
 |-------|------------|--------|
 | `RedisStore` | Redis 7 | `sentiment:signal:{sym}` TTL 4h; `killswitch_active`; `regime_multiplier`; `ensemble:weights:current`; `system:mode`; `feedback:entry_threshold`; `feedback:regime_scale`; `feedback:state` |
-| `PostgreSQLStore` | PostgreSQL 16 | `sentiment_signals`, `llm_responses`, `news_log`, `weight_update_log`, `backtest_signals`, `portfolio_cycles`, `risk_reports`, `decay_reports`, `execution_decisions`, `trades` |
+| `PostgreSQLStore` | PostgreSQL 16 | `sentiment_signals`, `llm_responses`, `news_log`, `weight_update_log`, `backtest_signals`, `portfolio_cycles`, `risk_reports`, `decay_reports`, `execution_decisions`, `trades`, `pead_signals`, `strategy_lifecycle`, `strategy_lifecycle_audit` |
 
 **Tables added by migrations 016–018:**
 
@@ -312,6 +344,43 @@ CREATE TABLE execution_decisions (
     counterfactual_return_1h DOUBLE PRECISION,      -- Phase C: NULL until computed nightly
     counterfactual_computed_at TIMESTAMPTZ,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- pead_signals: S7 PEAD event classifications from SEC 8-K filings (R&D/contained)
+CREATE TABLE pead_signals (
+    id              BIGSERIAL PRIMARY KEY,
+    symbol          VARCHAR(20) NOT NULL,
+    score           DOUBLE PRECISION,
+    direction       VARCHAR(20),   -- positive | negative | inline
+    confidence      DOUBLE PRECISION,
+    category        VARCHAR(50),   -- earnings_beat | earnings_miss | etc.
+    filing_url      TEXT,
+    classified_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- strategy_lifecycle (026): one row per strategy, immutable audit via strategy_lifecycle_audit
+CREATE TABLE strategy_lifecycle (
+    strategy_id      VARCHAR(20) PRIMARY KEY,
+    mode             VARCHAR(30) NOT NULL,    -- research | paper | supervised_paper | live | disabled
+    target_mode      VARCHAR(30),             -- pending promotion target (NULL if none)
+    gate_report_id   TEXT,                   -- evidence link for promotion
+    approved         BOOLEAN NOT NULL DEFAULT FALSE,
+    promotion_blocked BOOLEAN NOT NULL DEFAULT FALSE,
+    promoted_by      VARCHAR(100),
+    promoted_at      TIMESTAMPTZ,
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE strategy_lifecycle_audit (
+    id               BIGSERIAL PRIMARY KEY,
+    strategy_id      VARCHAR(20) NOT NULL,
+    from_mode        VARCHAR(30),
+    to_mode          VARCHAR(30),
+    action           VARCHAR(20),  -- requested | approved | demoted
+    actor            VARCHAR(100),
+    reason           TEXT,
+    gate_report_id   TEXT,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- trades (016): one row per round-trip (open → close)
@@ -545,3 +614,15 @@ See `README.md` → *Pre-Live Blockers* section for the authoritative list of cr
 | S2 proxy vs real options | Current S2 is an equity proxy (overnight gap); actual cash-secured short put needs options chain data + IBKR adapter | Phase D |
 | ConstraintEnforcer loses sleeve provenance | Final merged orders have `strategy_id="merged"`; per-sleeve exposure constraints cannot be enforced | Future |
 | Feedback loop blind to S1 | `run_loss_feedback_check` reads `trades` table which today is populated only by `run-execution` (S4 flow). Portfolio-cycle trades not yet written to `trades`. | Wire portfolio_scheduler to open/close_trade |
+
+### P2-05 Pending Safety Items (NOT_IMPLEMENTED — blocks Kimi P2 Acceptance Audit)
+
+Three safety-critical requirements from P2-05-EXECUTION-EDGE-CASES are not yet implemented. These must be resolved before the Kimi P2 Acceptance Audit and before controlled paper trading begins.
+
+| Gap | Description | Risk |
+|-----|-------------|------|
+| Idempotency fail-open on Redis down | `_get_fired_signal_ids()` in `portfolio_scheduler.py` returns empty set when Redis is unavailable, so signal idempotency check is bypassed — signals can re-fire and duplicate orders can be placed | Duplicate BUY orders during Redis outage |
+| Net exposure cap not wired in scheduler | `ConstraintEnforcer()` is instantiated in `portfolio_scheduler.py` without `net_exposure_cap`; the cap parameter is never passed from config | Portfolio can exceed net exposure limit |
+| VolTargeter re-violates cap | `PortfolioVolTargeter` is applied after `ConstraintEnforcer.enforce()` in the orchestrator; vol-scaling BUY quantities up can push past the enforced cap | Constraint enforcement bypassed by vol scaler |
+
+See `docs/P2_STATUS_2026-06-21.md` and `docs/RESIDUAL_RISK_REGISTER.md` for tracking status.

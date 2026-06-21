@@ -66,22 +66,29 @@ cp .env.example .env
 | `WATCHLIST_SYMBOLS` | — | Comma-separated symbols for ExecutionWorker (e.g. `AAPL,NVDA,MSFT,GOOGL`) |
 | `AUTO_APPLY_ENABLED` | `true` | Auto-apply weight suggestions when guardrails pass |
 | `AUTO_APPLY_VIX_THRESHOLD` | `30.0` | Block auto-apply when VIX ≥ threshold |
+| `GLOBAL_LIVE_PROMOTION_ENABLED` | `false` | **Must remain `false`.** Controls whether `StrategyRegistry` and `src/strategies/promotion.py` permit any strategy to transition to `live` mode. **Never set to `true` without explicit PO sign-off, P2-05 closure, and Kimi P2 Acceptance Audit completion.** |
 
 ---
 
 ## Database Initialisation
 
-The PostgreSQL schema must be applied before first run:
+The PostgreSQL schema requires all migrations applied in order. The schema has grown through at least migration 026 (P1-10 strategy_lifecycle_audit). Do not apply only `001_initial.sql` — later migrations add required tables and columns.
 
 ```bash
-# Apply migration
+# Apply ALL migrations in order
 docker compose up -d postgres
-docker compose exec postgres psql -U trading -d trading -f /dev/stdin < migrations/001_initial.sql
 
-# Verify tables exist
+for f in $(ls migrations/*.sql | sort); do
+  echo "Applying $f..."
+  docker compose exec postgres psql -U trading -d trading -f /dev/stdin < "$f"
+done
+
+# Verify key tables exist
 docker compose exec postgres psql -U trading -d trading \
-  -c "\dt" | grep -E "sentiment|llm|news|weight|portfolio|risk|decay"
+  -c "\dt" | grep -E "sentiment|llm|news|weight|portfolio|risk|decay|trades|execution_decisions|pead_signals|strategy_lifecycle"
 ```
+
+Current schema includes tables: `sentiment_signals`, `llm_responses`, `news_log`, `weight_update_log`, `backtest_signals`, `portfolio_cycles`, `risk_reports`, `decay_reports`, `execution_decisions`, `trades`, `pead_signals`, `strategy_lifecycle`, `strategy_lifecycle_audit`.
 
 ---
 
@@ -217,3 +224,26 @@ Before going live on a real brokerage account:
 - [ ] Confirm Telegram alerts are received (deploy sends test alert)
 - [ ] Verify drawdown cap: set `10%` as starting threshold, monitor first session
 - [ ] Enable Grafana authentication for production (disable anonymous access)
+- [ ] Verify `GLOBAL_LIVE_PROMOTION_ENABLED=false` in `.env` (must remain `false` until PO sign-off + P2-05 closure + Kimi P2 Audit complete)
+- [ ] Verify `GET /api/system/readiness` returns all-healthy before first session
+- [ ] Apply all migrations 001–026+ (not just `001_initial.sql`)
+
+---
+
+## CI Gates
+
+`.github/workflows/ci.yml` runs on every push and PR to `main`.
+
+| Check | Blocking? | Notes |
+|-------|-----------|-------|
+| `ruff` lint | **Yes** | Failing ruff blocks merge |
+| `pytest` full suite | **Yes** | Failing tests block merge |
+| Coverage (`fail_under=60`) | **Yes** | Coverage below 60% blocks merge |
+| `mypy` type check | No (soft) | `continue-on-error: true` — informational until type-annotation cleanup pass |
+| `pip-audit` dependency audit | No (soft) | `continue-on-error: true` — torch/transformers CVEs tracked separately |
+| `gitleaks` secret scan | No (soft) | `GITLEAKS_FAIL: false` — verify baseline before enabling hard fail |
+
+The three soft gates are **temporary**. They must be made blocking after:
+- `mypy`: after a dedicated type-annotation cleanup pass (P3 scope)
+- `pip-audit`: after each known CVE is patched or explicitly accepted
+- `gitleaks`: after confirming no real secrets exist in git history

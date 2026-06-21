@@ -4,9 +4,12 @@ Each cycle:
     1. Collects sleeve-local target weights from each strategy.
     2. Merges weights as weighted sum (each multiplied by allocation_pct).
     3. Computes delta orders (BUY/SELL) from current portfolio to merged target.
-    4. Applies ConstraintEnforcer.
-    5. Optionally applies PortfolioVolTargeter when strategy_returns provided.
+    4. Optionally applies PortfolioVolTargeter (vol-targeting scale) when strategy_returns provided.
+    5. Applies ConstraintEnforcer last — enforcer is the final word on risk caps.
     6. Returns CycleResult with per-strategy counts, constraint violations, final orders.
+
+Step ordering matters: vol-targeter runs before enforcer so that the cap cannot be
+re-violated by an upward vol scale (P2-05-C).
 
 This approach avoids the double-counting bug where each strategy independently
 generates full-portfolio orders, which when merged additively produce 2x quantities.
@@ -212,15 +215,18 @@ class PortfolioOrchestrator:
         orders_before = len(combined)
         violations: list[ConstraintViolation] = []
 
-        if combined and nav > 0:
-            combined, violations = self._enforcer.enforce(
-                combined, market, nav, allocations
-            )
-
+        # P2-05-C: vol-targeter runs BEFORE enforcer so the enforcer has the final word
+        # on risk caps. Running after would let vol-scaling push quantities above the
+        # cap that enforce() just set (scale can be up to 2.0×).
         if self._vol_targeter is not None and combined and strategy_returns:
             estimated_vol = self._vol_targeter.estimate_vol(strategy_returns)
             scale = self._vol_targeter.compute_scale(estimated_vol)
             combined = self._vol_targeter.scale_orders(combined, scale)
+
+        if combined and nav > 0:
+            combined, violations = self._enforcer.enforce(
+                combined, market, nav, allocations
+            )
 
         log.info(
             "Portfolio cycle complete: strategies=%s merged_weights=%d symbols "

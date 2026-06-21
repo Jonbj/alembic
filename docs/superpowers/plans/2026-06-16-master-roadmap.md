@@ -3,11 +3,18 @@
 **Data creazione:** 2026-06-16  
 **Contesto:** Piano unico di riferimento che aggrega (a) i fix pendenti dalla code review del 2026-06-15 e (b) le nuove strategie emerse dal brainstorming del 2026-06-16. Usare questo file come source-of-truth: spuntare ogni voce quando completata, NON riscrivere il file a ogni sessione.
 
+> **NOTA SUL SIGNIFICATO DI `[x]`** (aggiunto 2026-06-21): Un task `[x]` significa che l'implementazione è **completa e nei test** — NON che la funzionalità è attiva in produzione o in paper trading. In particolare:
+> - `[x]` su fix P0/P1 = codice commitato, test verdi, accettato dal reviewer
+> - `[x]` su strategie (B-01 S7, B-02 S5, ecc.) = logica implementata e testata — la strategia è in stato `research` o `supervised_paper`, NON wired nel portfolio orchestrator
+> - **Live trading NON autorizzato.** `GLOBAL_LIVE_PROMOTION_ENABLED = False`. Nessuna promozione senza PO sign-off + P2-05 chiuso + Kimi P2 Audit completo.
+> - **S7 (PEAD)**: nonostante `[x]`, è R&D/contained — NON nel PortfolioOrchestrator (P0-13, commit `6d86d3f`)
+> - **S1**: in modalità `supervised_paper` dal 2026-06-18 (demoted P0-01, commit `cb1d43a`)
+
 **Stato economico del sistema (da ricordare):**
 - Capitale: < $10.000, tutto paper trading al momento
 - Costi operativi: ~€0 (macchina locale + LLM condiviso con altri usi)
 - Hurdle rate reale: quasi zero → ogni ritorno è profitto netto
-- S1 (50% alloc, OOS Sharpe ~0.51): unico sleeve validato in live
+- S1 (50% alloc, supervised_paper, demoted 2026-06-18): unico sleeve vicino alla promozione
 - S4 (10% alloc, paper): news-driven LLM, capped in attesa di gate report
 - 40% capitale non allocato: priorità massima per le nuove strategie
 

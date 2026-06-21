@@ -193,8 +193,12 @@ class TestS4IdempotencyGate:
         assert _key == "s4:fired_signals:2026-06-19"
         assert 0 < ttl <= 30 * 3600, f"TTL must be ≤ 30h (108000s), got {ttl}"
 
-    def test_idempotency_redis_unreachable_returns_empty_set(self):
-        """When Redis is unreachable, _get_fired_signal_ids returns empty set (fail-open)."""
+    def test_idempotency_redis_unreachable_returns_none(self):
+        """P2-05-A: When Redis is unreachable, _get_fired_signal_ids returns None (fail-closed sentinel).
+
+        None signals the caller to treat all S4 BUY signals as already-fired, preventing
+        duplicate BUYs when idempotency state cannot be verified.
+        """
         from src.workers.portfolio_scheduler import _get_fired_signal_ids
 
         with patch("redis.Redis") as mock_cls:
@@ -202,7 +206,7 @@ class TestS4IdempotencyGate:
 
             fired = _get_fired_signal_ids("2026-06-19", "redis://localhost:6379/0")
 
-        assert fired == set(), "Redis unreachable must return empty set (fail-open, not crash)"
+        assert fired is None, "Redis unreachable must return None (fail-closed), not empty set"
 
     def test_idempotency_redis_unreachable_mark_does_not_raise(self):
         """When Redis is unreachable, _mark_signal_fired must not raise — logs warning only."""

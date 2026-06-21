@@ -2,6 +2,21 @@
 
 This document describes each trading strategy, its signal logic, sizing rules, and integration with the portfolio orchestrator.
 
+> **Governance note (2026-06-21):** Live trading is NOT authorized. Strategy promotions require a passing gate report, an approved `strategy_lifecycle` DB row, and explicit PO sign-off. `GLOBAL_LIVE_PROMOTION_ENABLED` must remain `False`. See `docs/P2_STATUS_2026-06-21.md` for current authorization status.
+
+---
+
+## Strategy Mode Reference
+
+| Mode | Meaning |
+|------|---------|
+| `research` | R&D only — no live capital, no portfolio orchestrator wiring |
+| `paper` | Runs against paper account; observational only |
+| `supervised_paper` | Paper trading with human review required before any promotion |
+| `promotion_blocked` | Implementation complete but gate report missing or explicitly blocked; cannot be promoted |
+| `live` | Real capital — requires `GLOBAL_LIVE_PROMOTION_ENABLED=True` (currently `False`) + PO sign-off |
+| `disabled` | Not active; excluded from `StrategyRegistry.get_active_strategies()` |
+
 ---
 
 ## S1 — Multi-Lookback Relative Momentum
@@ -9,7 +24,9 @@ This document describes each trading strategy, its signal logic, sizing rules, a
 **Type:** Trend-following long-only
 **File:** `src/strategies/s1/`
 **Allocation:** 50% (see `config/strategies.yaml`)
-**Status:** Live/paper core — OOS Sharpe ~0.51, all gates passed
+**Status:** `supervised_paper` — demoted from paper to supervised_paper 2026-06-18 (P0-01, commit `cb1d43a`)
+
+> Live trading is **NOT authorized** for S1. Promotion from `supervised_paper` to `live` requires: (1) 90 days of controlled paper evidence, (2) P2-05 closure, (3) Kimi P2 Acceptance Audit, (4) PO sign-off, (5) `GLOBAL_LIVE_PROMOTION_ENABLED=True` (currently `False`).
 
 ### Signal Logic
 
@@ -90,6 +107,7 @@ S2 runs as `(ts, data_replay, portfolio, market) → list[Order]`. The orchestra
 **Type:** News sentiment momentum
 **File:** `src/strategies/s4/`
 **Allocation:** Configurable via `StrategyRegistry`
+**Status:** `promotion_blocked` — allocation capped until dedicated gate report is produced (P0-13, commit `6d86d3f`)
 
 ### Signal Logic
 
@@ -221,8 +239,10 @@ Applied iteratively (up to 10 passes) after weight merging:
 
 **Type:** Event-driven momentum
 **File:** `src/strategies/s7/`
-**Allocation:** 15% (see `config/strategies.yaml`)
-**Status:** ATTIVO in produzione da 2026-06-07
+**Allocation:** 15% configured in `config/strategies.yaml` (NOT active — see status below)
+**Status:** `research` / R&D/contained — NOT in portfolio orchestrator; promotion blocked (P0-13, commit `6d86d3f`)
+
+> S7 implementation is complete (worker, signal classifier, pead_signals table, API routes) but is **not wired into the portfolio orchestrator**. It is explicitly R&D/contained. Promotion requires: OOS backtest gates (Sharpe > 0.5, hit rate > 55%, max drawdown < 15%), 30 days paper evidence with ≥10 events, gate report, and PO sign-off. Live trading is NOT authorized.
 
 ### Segnale
 

@@ -234,7 +234,12 @@ def get_readiness(
     pg: Annotated[PostgreSQLStore, Depends(get_pg_store)],
     redis: Annotated[RedisStore, Depends(get_redis_store)],
 ) -> dict:
-    """Return all operator alert flags aggregated from Redis + DB health checks."""
+    """Return all operator alert flags aggregated from Redis + DB health checks (P2-04).
+
+    Always returns HTTP 200 — the HTTP status only confirms the endpoint ran.
+    Inspect the body flags to determine whether the system is actually healthy.
+    See get_cockpit_alerts() for full key documentation.
+    """
     from src.monitoring.cockpit import get_cockpit_alerts
     return get_cockpit_alerts(pg=pg, redis_client=redis._r)
 
@@ -244,7 +249,11 @@ def get_decisions(
     pg: Annotated[PostgreSQLStore, Depends(get_pg_store)],
     limit: int = 30,
 ) -> list:
-    """Return recent execution decisions from the execution_decisions table."""
+    """Return recent execution decisions from the execution_decisions table (P2-04).
+
+    Reads from the local DB audit log — not from a live broker.
+    Default limit is 30; increase via ?limit= query param.
+    """
     try:
         rows = pg.fetch_decisions(limit=limit)
         result = []

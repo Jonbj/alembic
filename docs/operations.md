@@ -50,6 +50,16 @@ docker compose --profile backtest run --rm backtest \
 # API health
 curl http://localhost:8001/api/health
 
+# Operator cockpit readiness (8-flag health dict — requires ADMIN_API_KEY)
+curl -H "X-API-Key: $ADMIN_API_KEY" http://localhost:8001/api/system/readiness
+# All-healthy response: {"redis_healthy":true,"redis_writeable":true,"db_healthy":true,
+#   "killswitch_active":false,"stale_signals":false,"worker_beat_lag":false,
+#   "last_signal_age_minutes":12.4,"last_cycle_age_minutes":45.2}
+# Note: HTTP 200 does NOT mean all healthy — always check body flags.
+
+# Recent execution decisions
+curl -H "X-API-Key: $ADMIN_API_KEY" "http://localhost:8001/api/system/decisions?limit=10"
+
 # PostgreSQL readiness
 docker compose exec postgres pg_isready -U trading
 
@@ -338,3 +348,149 @@ yfinance occasionally returns cached or incorrect data. If EMA20 values look wro
 docker compose exec worker celery -A src.workers.celery_app call \
   src.workers.regime.detect_regime
 ```
+
+---
+
+## Operator Cockpit Runbooks
+
+### When to Check
+
+Poll `GET /api/system/readiness` at the start of each trading day and after any incident.
+
+- `redis_healthy`, `redis_writeable`, `db_healthy` should all be `true`
+- `killswitch_active`, `stale_signals`, `worker_beat_lag` should all be `false`
+- During market hours (14:00–21:00 UTC Mon–Fri): `stale_signals=true` or `worker_beat_lag=true` requires immediate investigation
+
+---
+
+### Runbook: Redis Down (`redis_healthy=false`)
+
+**Impact:** Signal cache unavailable. New signals cannot be stored or read by the execution engine.
+
+**Action:**
+1. `docker compose ps redis` — check container status
+2. `docker compose logs redis --tail 50` — look for OOM, crash, config error
+3. `docker compose restart redis` if container is unhealthy
+4. After restart: re-verify `redis_healthy: true` via readiness endpoint
+5. Manually trigger sentiment worker to repopulate signal cache: `docker compose exec worker celery -A src.workers.celery_app call src.workers.sentiment.run_sentiment_worker`
+
+**DO NOT** run execution cycles while Redis is down — the engine will read no signals and may skip all orders or use stale data.
+
+---
+
+### Runbook: Redis MISCONF (`redis_writeable=false`, `redis_healthy=true`)
+
+**Impact:** PING succeeds but SET operations fail. Signals cannot be written. Occurs when AOF/RDB persistence is misconfigured or host disk is full.
+
+**Action:**
+1. `docker compose exec redis redis-cli CONFIG GET appendonly` — check persistence mode
+2. `df -h` on host — check disk space
+3. If disk full: clear old log files or extend the volume
+4. `docker compose exec redis redis-cli BGREWRITEAOF` — compact AOF if fragmented
+5. Verify: `docker compose exec redis redis-cli SET readiness:ping 1 EX 5` should return `OK`
+6. Re-check readiness: `redis_writeable` should return `true`
+
+**DO NOT** disable Redis persistence without understanding the impact on signal durability.
+
+---
+
+### Runbook: Stale Signals (`stale_signals=true`)
+
+**Impact:** Execution engine may trade on signals older than 2 hours.
+
+**During market hours (14:00–21:00 UTC):** Abnormal — investigate immediately.
+**After market close / weekends:** Expected — ignore.
+
+**Action (during market hours):**
+1. `docker compose logs worker | grep "SentimentWorker" | tail -20` — check for LLM errors
+2. `docker compose exec redis redis-cli LLEN news:queue` — check queue depth (should be > 0 during market hours)
+3. If queue empty: `docker compose logs beat | grep "run-news-ingestion"` — verify ingestion is scheduled
+4. If queue non-empty but no signals: budget may be exhausted — `docker compose exec redis redis-cli KEYS "llm:budget:*"` and check values
+5. Manual trigger: `docker compose exec worker celery -A src.workers.celery_app call src.workers.sentiment.run_sentiment_worker`
+
+---
+
+### Runbook: Worker Beat Lag (`worker_beat_lag=true`)
+
+**Impact:** Portfolio orchestration has not run. Positions may drift from targets.
+
+**During market hours:** Investigate immediately.
+
+**Action:**
+1. `docker compose ps beat` — check beat container status
+2. `docker compose logs beat | tail -30` — check for scheduling errors
+3. `docker compose ps worker` — check worker container
+4. `docker compose logs worker | grep "portfolio" | tail -20` — check cycle execution
+5. Check Redis cycle lock: `docker compose exec redis redis-cli TTL portfolio:cycle:lock`
+   - If TTL > 0 (lock held): wait for it to expire (max 840s) or investigate what holds it
+   - If TTL = -1 (no expiry, stuck): `docker compose exec redis redis-cli DEL portfolio:cycle:lock` — only after confirming no cycle is running
+6. `docker compose restart beat worker` if containers appear healthy but tasks are not executing
+
+---
+
+### Runbook: DB Unhealthy (`db_healthy=false`)
+
+**Impact:** Signals not persisted, audit trail unavailable, all analytics broken.
+
+**Action:**
+1. `docker compose exec postgres pg_isready -U trading`
+2. `docker compose logs postgres --tail 30`
+3. `docker compose restart postgres` if container is unhealthy
+4. After restart: verify `db_healthy: true` in readiness response
+
+**DO NOT** manually delete or truncate any tables.
+
+---
+
+### Runbook: Kill-Switch Active (`killswitch_active=true`)
+
+**Impact:** All order submission is halted.
+
+**If activated by drawdown cap:** Normal protective behavior. Review P&L before clearing.
+**If activated manually:** Operator-intentional. Do not auto-clear without investigation.
+
+**Recovery (after investigation):**
+1. `GET /api/admin/status` — see current mode and kill-switch state
+2. `POST /api/admin/killswitch/recover` with OTP (see P0-06 OTP flow)
+3. Verify mode returns to paper: `GET /api/admin/mode`
+4. Monitor first cycle: `GET /api/system/decisions?limit=5`
+
+**DO NOT** clear kill-switch via `redis-cli SET killswitch_active 0` without using the API OTP recovery flow — bypassing it defeats the cooldown and audit trail.
+
+---
+
+### Runbook: Divergence Warning (Telegram or Logs)
+
+**Signal/order divergence:** Jaccard overlap of signal symbols vs submitted order symbols < 0.8.
+**Execution fill divergence:** `submitted_orders / final_orders < 0.8`.
+
+**Action:**
+1. `GET /api/system/decisions?limit=20` — review recent decisions
+2. `GET /api/portfolio/cycles` — inspect `constraints_fired`
+3. If divergence from constraints firing (position cap, exposure cap): expected behavior, no action needed
+4. If divergence from broker rejects / connectivity: investigate worker logs
+5. Document; escalate if pattern repeats across more than 2 consecutive cycles
+
+---
+
+### Runbook: Live Promotion Flag Accidentally Enabled
+
+**`GLOBAL_LIVE_PROMOTION_ENABLED=True` must never be set without explicit PO sign-off.**
+
+**Action:**
+1. Immediately set back to `False` in `.env` and restart all services
+2. Verify `config/strategies.yaml` — no strategy should have `mode: live`
+3. Check `strategy_lifecycle` DB table for unauthorized promotions
+4. Notify PO immediately and document the incident
+
+---
+
+### Governance Reminder
+
+Before any trading session:
+- `GLOBAL_LIVE_PROMOTION_ENABLED` must be `False`
+- No strategy should have `mode: live`
+- P2-05 must be resolved before controlled paper trading begins
+- Kimi P2 Acceptance Audit must complete before controlled paper trading begins
+
+**No live trading, strategy promotions, or P3/P4 work without explicit PO sign-off.**

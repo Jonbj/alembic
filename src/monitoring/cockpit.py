@@ -46,7 +46,10 @@ def get_cockpit_alerts(
     beat_threshold_minutes: float = 60.0,
     staleness_hours: float = 2.0,
 ) -> dict:
-    """Aggregate operator alert flags into a single health dict.
+    """Aggregate operator alert flags into a single health dict (P2-04).
+
+    All checks are fail-open: if a check itself raises an exception the corresponding
+    flag is set to the safe/alarming value (e.g. db_healthy=False, stale_signals=True).
 
     Args:
         pg:                     PostgreSQLStore instance (uses _get_connection()).
@@ -55,8 +58,26 @@ def get_cockpit_alerts(
         staleness_hours:        Flag stale_signals when last signal older than this.
 
     Returns:
-        Dict with redis_healthy, redis_writeable, db_healthy, killswitch_active,
-        stale_signals, worker_beat_lag, last_signal_age_minutes, last_cycle_age_minutes.
+        Dict with 8 keys:
+
+        ``redis_healthy``        — True when PING succeeds. False = Redis down entirely.
+        ``redis_writeable``      — True when a test SET succeeds.  False with
+                                   redis_healthy=True indicates AOF/RDB MISCONF:
+                                   Redis is up but persistence misconfigured; all
+                                   writes from workers will be rejected silently.
+        ``db_healthy``           — True when DB query completes without error.
+        ``killswitch_active``    — True when Redis key ``killswitch_active`` is set.
+        ``stale_signals``        — True when the newest sentiment_signal is older than
+                                   ``staleness_hours`` (default 2 h). Also True if
+                                   DB is unhealthy (no timestamp available).
+        ``worker_beat_lag``      — True when the last portfolio_cycles row is older than
+                                   ``beat_threshold_minutes`` (default 60 min). Also
+                                   True if DB is unhealthy.
+        ``last_signal_age_minutes`` — float minutes since newest signal, or None.
+        ``last_cycle_age_minutes``  — float minutes since newest portfolio cycle, or None.
+
+    HTTP 200 from /api/system/readiness does NOT mean everything is healthy.
+    Always check the body flags — HTTP status only reflects that the endpoint itself ran.
     """
     redis_healthy = False
     redis_writeable = False

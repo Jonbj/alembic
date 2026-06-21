@@ -154,7 +154,18 @@ def _check_divergence_and_alert(
     final_count: int,
     notifier,
 ) -> None:
-    """Fire Telegram WARNING alerts when signal/execution divergence thresholds are exceeded."""
+    """Fire Telegram WARNING alerts when signal/execution divergence thresholds are exceeded (P2-04).
+
+    Two checks:
+    1. Signal/order symbol divergence — Jaccard overlap of signal_syms vs order_syms.
+       Alert fires when overlap < 0.8 (check_signal_divergence threshold).
+    2. Execution fill divergence — |fill_ratio - 1.0| > 0.20 where
+       fill_ratio = submitted_count / final_count.  Alert fires when fewer than
+       80% of intended orders were actually submitted to the broker.
+
+    Both alerts are WARNING level (not CRITICAL) — they indicate anomalies that
+    warrant review but do not automatically halt trading.
+    """
     from src.monitoring.alerts import check_signal_divergence, check_execution_divergence
 
     if check_signal_divergence(signal_syms, order_syms):
@@ -288,8 +299,13 @@ def _filter_stale_signals(
     return fresh, stale
 
 
-def _get_fired_signal_ids(session_date: str, redis_url: str) -> set[int]:
-    """Return the set of signal_ids already fired today (fail-open on Redis error)."""
+def _get_fired_signal_ids(session_date: str, redis_url: str) -> set[int] | None:
+    """Return fired signal_ids for today, or None if Redis is unavailable (P2-05-A fail-closed).
+
+    Returns:
+        set[int]: IDs of signals already fired this session (may be empty on first run).
+        None:     Redis unreachable — caller must treat as fail-closed (skip all S4 BUYs).
+    """
     try:
         import redis as _redis
         r = _redis.Redis.from_url(redis_url, decode_responses=False)
@@ -299,8 +315,41 @@ def _get_fired_signal_ids(session_date: str, redis_url: str) -> set[int]:
         finally:
             r.close()
     except Exception as exc:
-        log.warning("P1-S4: idempotency Redis unreachable — duplicate signal risk: %s", exc)
-        return set()
+        log.warning(
+            "P2-05-A: idempotency Redis unreachable — all S4 BUY signals will be skipped (fail-closed): %s",
+            exc,
+        )
+        return None
+
+
+def _apply_idempotency_filter(orders: list, skip_syms: set[str]) -> list:
+    """Filter S4 BUY orders for symbols in skip_syms (P2-05-A fail-closed safety).
+
+    SELL orders are never filtered — only BUY orders for skipped symbols are excluded.
+    When Redis is unavailable, callers pass all S4 symbols as skip_syms to prevent
+    duplicate BUYs on the assumption that signals may have already fired.
+    """
+    from src.backtest.engine.types import OrderSide as _OS
+    if not skip_syms:
+        return orders
+    return [o for o in orders if not (o.symbol in skip_syms and o.side == _OS.BUY)]
+
+
+def _load_risk_config() -> dict[str, float]:
+    """Return risk limits from trading.yaml; returns safe hardcoded defaults on error (P2-05-B)."""
+    defaults: dict[str, float] = {"max_portfolio_exposure": 0.50, "max_single_asset_pct": 0.10}
+    try:
+        import yaml
+        with open(_TRADING_YAML) as f:
+            cfg = yaml.safe_load(f)
+        risk = cfg.get("risk", {})
+        return {
+            "max_portfolio_exposure": float(risk.get("max_portfolio_exposure", defaults["max_portfolio_exposure"])),
+            "max_single_asset_pct": float(risk.get("max_position_pct", defaults["max_single_asset_pct"])),
+        }
+    except Exception as exc:
+        log.warning("P2-05-B: could not load risk config (%s) — using defaults", exc)
+        return defaults
 
 
 def _mark_signal_fired(
@@ -650,11 +699,17 @@ def _run_cycle_inner() -> dict:
         log.warning("Sentiment reversal check failed: %s — skipping", _rev_exc)
 
     # Run orchestration cycle
+    # P2-05-B: read risk limits from trading.yaml so operator changes to the config
+    # are reflected in the live constraint enforcement (not silently ignored).
+    _risk_cfg = _load_risk_config()
     data_replay = DataReplay(bars_df)
     orchestrator = PortfolioOrchestrator(
         registry=registry,
         strategy_instances=strategy_instances,
-        constraint_enforcer=ConstraintEnforcer(),
+        constraint_enforcer=ConstraintEnforcer(
+            max_portfolio_exposure=_risk_cfg["max_portfolio_exposure"],
+            max_single_asset_pct=_risk_cfg["max_single_asset_pct"],
+        ),
         vol_targeter=PortfolioVolTargeter(target_vol=0.10),
     )
 
@@ -738,22 +793,32 @@ def _run_cycle_inner() -> dict:
         _session_date = ts.strftime("%Y-%m-%d")
         _fired_ids = _get_fired_signal_ids(_session_date, config.REDIS_URL)
         _idempotency_skip: set[str] = set()
-        for _sym, _sid in _signal_ids.items():
-            if _sid in _fired_ids:
-                _idempotency_skip.add(_sym)
-                log.warning(
-                    "P1-S4: signal_id=%s for %s already fired today — skipping (SIGNAL_DUPLICATE_SKIP)",
-                    _sid, _sym,
-                )
-                try:
-                    _pg.write_audit_log(
-                        action="SIGNAL_DUPLICATE_SKIP",
-                        table_name="sentiment_signals",
-                        record_id=_sid,
-                        details={"symbol": _sym, "signal_id": _sid, "session_date": _session_date},
+        if _fired_ids is None:
+            # P2-05-A: Redis unavailable — fail-closed: skip ALL S4 BUY signals this cycle.
+            # We cannot verify whether any signal has already been executed today, so we
+            # conservatively treat all S4 BUY symbols as already-fired.
+            _idempotency_skip = set(_signal_ids.keys())
+            log.warning(
+                "P2-05-A: Redis unavailable for idempotency check — all %d S4 BUY signals skipped (fail-closed)",
+                len(_idempotency_skip),
+            )
+        else:
+            for _sym, _sid in _signal_ids.items():
+                if _sid in _fired_ids:
+                    _idempotency_skip.add(_sym)
+                    log.warning(
+                        "P1-S4: signal_id=%s for %s already fired today — skipping (SIGNAL_DUPLICATE_SKIP)",
+                        _sid, _sym,
                     )
-                except Exception as _ae:
-                    log.warning("P1-S4: duplicate audit write failed: %s", _ae)
+                    try:
+                        _pg.write_audit_log(
+                            action="SIGNAL_DUPLICATE_SKIP",
+                            table_name="sentiment_signals",
+                            record_id=_sid,
+                            details={"symbol": _sym, "signal_id": _sid, "session_date": _session_date},
+                        )
+                    except Exception as _ae:
+                        log.warning("P1-S4: duplicate audit write failed: %s", _ae)
         # Load S4 signal details (score + reasoning) for the reason text
         _s4_signals: dict[str, dict] = {}
         if _s4_symbols:
@@ -864,8 +929,11 @@ def _run_cycle_inner() -> dict:
                 "P0-05: Could not fetch open DB trades for pyramiding guard: %s — guard disabled for this cycle",
                 _guard_exc,
             )
+        # P2-05-A: exclude S4 BUY orders for symbols whose idempotency check was skipped
+        # (Redis unavailable). SELLs and non-S4 orders are not affected.
+        _orders_to_submit = _apply_idempotency_filter(result.final_orders, _idempotency_skip)
         submitted_orders = _submit_portfolio_orders(
-            result.final_orders, trading_client, market,
+            _orders_to_submit, trading_client, market,
             fractionable_symbols=fractionable,
             open_trade_symbols=open_db_symbols or None,
             regime_mult=_regime_mult,
@@ -1169,6 +1237,7 @@ def _submit_portfolio_orders(
     fractionable_symbols: set[str] | None = None,
     open_trade_symbols: set[str] | None = None,
     regime_mult: float = 1.0,
+    _on_broker_reject=None,
 ) -> list[dict]:
     """Submit BUY and SELL orders to Alpaca.
 
@@ -1280,6 +1349,12 @@ def _submit_portfolio_orders(
                 continue
         except Exception as exc:
             log.warning("Failed to submit order for %s: %s", order.symbol, exc)
+            # P2-05-D: notify caller of broker reject so an audit row can be written.
+            if _on_broker_reject is not None:
+                try:
+                    _on_broker_reject(order.symbol, order.side.value, exc)
+                except Exception as _cb_exc:
+                    log.debug("_on_broker_reject callback raised: %s", _cb_exc)
     return submitted
 
 

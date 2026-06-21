@@ -443,3 +443,118 @@ def test_orchestrator_no_vol_targeting_when_returns_none():
         strategy_returns=None,
     )
     assert result.final_orders[0].quantity == pytest.approx(100.0)
+
+
+# ── P2-05-C: vol_targeter must run before enforcer ───────────────────────────
+
+
+def test_vol_targeter_called_before_enforcer(mocker):
+    """P2-05-C: PortfolioVolTargeter.scale_orders must be called BEFORE enforcer.enforce.
+
+    Current (wrong) order: enforce → vol_scale → cap can be violated.
+    Fixed order: vol_scale → enforce → cap is always final word.
+    """
+    buy_order = _make_order(symbol="AAPL", side=OrderSide.BUY, qty=100.0, strategy_id="S1")
+    s1 = _FixedStrategy([buy_order])
+    entries = [StrategyEntry("S1", _FixedStrategy, 1.0, "30 14 * * 1-5")]
+    registry = _make_registry(entries)
+
+    call_order: list[str] = []
+
+    enforcer = ConstraintEnforcer()
+    vol_targeter = PortfolioVolTargeter(target_vol=0.10)
+
+    original_enforce = enforcer.enforce
+    original_scale_orders = vol_targeter.scale_orders
+
+    def recording_enforce(*args, **kwargs):
+        call_order.append("enforce")
+        return original_enforce(*args, **kwargs)
+
+    def recording_scale_orders(*args, **kwargs):
+        call_order.append("scale_orders")
+        return original_scale_orders(*args, **kwargs)
+
+    mocker.patch.object(enforcer, "enforce", side_effect=recording_enforce)
+    mocker.patch.object(vol_targeter, "scale_orders", side_effect=recording_scale_orders)
+
+    orch = PortfolioOrchestrator(
+        registry=registry,
+        strategy_instances={"S1": s1},
+        constraint_enforcer=enforcer,
+        vol_targeter=vol_targeter,
+    )
+    low_vol_returns = [0.001] * 50  # low vol → scale > 1.0
+    orch.run_cycle(
+        ts=datetime(2024, 1, 15),
+        data_replay=_make_data_replay(),
+        portfolio=_make_portfolio(),
+        market=_make_market(),
+        strategy_returns={"S1": low_vol_returns},
+    )
+
+    assert call_order == ["scale_orders", "enforce"], (
+        f"Expected vol_targeter before enforcer, got: {call_order}"
+    )
+
+
+def test_cap_is_final_after_vol_scaling_above_one(mocker):
+    """P2-05-C: when vol scale > 1.0, final orders must not exceed the portfolio cap.
+
+    Setup: 3 BUY orders at $100 each × 10 shares = $3,000 total (30% of $10,000 NAV).
+    Cap = 40% of NAV = $4,000. compute_scale is forced to 2.0 via mock.
+
+    After fix (vol_scale → enforce):
+        vol_scale: 3,000 → 6,000; enforce: 6,000 > 4,000 → clip to 4,000. ✓
+
+    Before fix (enforce → vol_scale):
+        enforce sees 3,000 < 4,000 → no clip; vol_scale: 3,000 × 2 = 6,000 > 4,000. ✗
+    """
+    nav = 10_000.0
+    cap = 0.40
+
+    orders = [
+        _make_order("AAPL", OrderSide.BUY, qty=10.0, strategy_id="S1"),
+        _make_order("SPY",  OrderSide.BUY, qty=10.0, strategy_id="S1"),
+        _make_order("QQQ",  OrderSide.BUY, qty=10.0, strategy_id="S1"),
+    ]
+    s1 = _FixedStrategy(orders)
+    entries = [StrategyEntry("S1", _FixedStrategy, 1.0, "30 14 * * 1-5")]
+    registry = _make_registry(entries)
+
+    market = _make_market(symbols=("AAPL", "SPY", "QQQ"))  # all at $100
+
+    vol_targeter = PortfolioVolTargeter(target_vol=0.10)
+    # Force compute_scale to return 2.0: initial $3,000 × 2 = $6,000 > cap $4,000.
+    mocker.patch.object(vol_targeter, "compute_scale", return_value=2.0)
+
+    orch = PortfolioOrchestrator(
+        registry=registry,
+        strategy_instances={"S1": s1},
+        constraint_enforcer=ConstraintEnforcer(
+            max_portfolio_exposure=cap,
+            max_single_asset_pct=0.20,
+        ),
+        vol_targeter=vol_targeter,
+    )
+
+    low_vol_returns = [0.002, -0.002] * 25  # nonzero → estimate_vol called; scale mocked to 2.0
+
+    portfolio = _make_portfolio(cash=nav)
+
+    result = orch.run_cycle(
+        ts=datetime(2024, 1, 15),
+        data_replay=_make_data_replay(),
+        portfolio=portfolio,
+        market=market,
+        strategy_returns={"S1": low_vol_returns},
+    )
+
+    buy_notional = sum(
+        market.prices[o.symbol] * o.quantity
+        for o in result.final_orders
+        if o.side == OrderSide.BUY
+    )
+    assert buy_notional <= cap * nav + 1e-6, (
+        f"Cap violated: buy_notional={buy_notional:.2f} > cap*nav={cap * nav:.2f}"
+    )

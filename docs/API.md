@@ -32,7 +32,10 @@ Production:   https://api.your-domain.com
 | `/api/weights/approve` | **Yes** | `X-API-Key` |
 | `/api/admin/*` | **Yes** | `X-API-Key` |
 | `/api/trades/*` | **Yes** | `X-API-Key` |
-| `/api/decisions` | **Yes** | `X-API-Key` |
+| `/api/system/decisions` | **Yes** | `X-API-Key` |
+| `/api/system/readiness` | **Yes** | `X-API-Key` |
+| `/api/system/scheduler` | **Yes** | `X-API-Key` |
+| `/api/system/activity` | **Yes** | `X-API-Key` |
 | `/api/health` | No | — |
 
 Generate an API key (minimum 32 characters):
@@ -488,11 +491,11 @@ Returns `[]` until the first nightly `counterfactual-worker` run at 22:45 UTC.
 
 Requires `X-API-Key` header.
 
-### `GET /api/decisions`
+### `GET /api/system/decisions`
 
-Execution decision log — one row per symbol per tick for every symbol that cleared `ENTRY_THRESHOLD`.
+Execution decision log — one row per symbol per tick for every symbol that cleared `ENTRY_THRESHOLD`. Returns data from the `execution_decisions` PostgreSQL table; does NOT call the live broker.
 
-**Query parameters:** `limit` (default 100, max 500)
+**Query parameters:** `limit` (default 30, max 500)
 
 **Response 200:**
 ```json
@@ -506,6 +509,7 @@ Execution decision log — one row per symbol per tick for every symbol that cle
     "ema_pass": true,
     "decision": "BUY",
     "order_id": "abc123",
+    "reason": "S4 sentiment score 0.45 > threshold 0.30; price above EMA20",
     "created_at": "2026-06-05T14:30:01Z"
   }
 ]
@@ -547,25 +551,54 @@ Eventi earnings classificati (aggregati per simbolo). Richiede `X-API-Key`.
 
 ## System Routes
 
-### `GET /api/system/logs`
+All `/api/system/*` endpoints require `X-API-Key` header.
 
-Log di sistema recenti. Richiede `X-API-Key`.
+### `GET /api/system/readiness` *(P2-04)*
 
-**Query parameters:** `limit` (default 100), `level` (optional: ERROR, WARNING, INFO)
-
-### `GET /api/system/status`
-
-Stato dei servizi principali (worker, beat, Ollama, FinBERT warmup status).
+Operator cockpit: aggregates 8 health/alert flags from Redis and PostgreSQL. Always returns HTTP 200 — inspect the body fields to determine health. A 200 response does NOT guarantee all systems are healthy.
 
 **Response 200:**
 ```json
 {
-  "workers": "healthy",
-  "beat": "healthy",
-  "ollama": "connected",
-  "finbert": "loaded"
+  "redis_healthy": true,
+  "redis_writeable": true,
+  "db_healthy": true,
+  "killswitch_active": false,
+  "stale_signals": false,
+  "worker_beat_lag": false,
+  "last_signal_age_minutes": 12.4,
+  "last_cycle_age_minutes": 45.2
 }
 ```
+
+| Field | Healthy value | Meaning when unhealthy |
+|-------|--------------|------------------------|
+| `redis_healthy` | `true` | Redis PING failed — signal cache unreachable |
+| `redis_writeable` | `true` | Redis MISCONF / AOF error — signals cannot be written |
+| `db_healthy` | `true` | PostgreSQL query failed — audit trail unavailable |
+| `killswitch_active` | `false` | Kill-switch is active — all order submission halted |
+| `stale_signals` | `false` | Last sentiment signal older than 2 hours |
+| `worker_beat_lag` | `false` | Last portfolio cycle older than 60 minutes |
+| `last_signal_age_minutes` | any float | Minutes since last signal (null if no signals ever) |
+| `last_cycle_age_minutes` | any float | Minutes since last cycle (null if no cycles ever) |
+
+See `docs/RUNBOOK_OPERATOR_COCKPIT.md` (or `docs/operations.md` Cockpit Runbooks section) for remediation steps.
+
+### `GET /api/system/decisions` *(P2-04)*
+
+Recent execution decisions from `execution_decisions` table. Same data as the Decisions Endpoint above, via system router. Requires `X-API-Key`.
+
+**Query parameters:** `limit` (default 30)
+
+### `GET /api/system/scheduler`
+
+Beat schedule with last-run timestamps from DB. Returns the static Celery beat schedule enriched with the most recent `MAX(timestamp)` from each task's DB table.
+
+### `GET /api/system/activity`
+
+Unified activity log — recent portfolio cycles, sentiment runs, news ingestion events, and trade decisions, sorted by time descending.
+
+**Query parameters:** `limit` (default 60)
 
 ---
 

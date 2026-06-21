@@ -21,8 +21,9 @@ from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
 
-# Module-level flag — set to False in production until explicitly enabled.
-# Tests may patch this directly.
+# Fail-closed gate: any path that cannot confirm this is True must block live
+# promotion.  Never set True without PO sign-off + P2-05 closure + Kimi P2 Audit.
+# Tests may patch this directly via monkeypatch.
 GLOBAL_LIVE_PROMOTION_ENABLED: bool = False
 
 # Ordered risk levels. Higher index = more risk.
