@@ -126,6 +126,11 @@ execution:
   # Freshness check
   signal_freshness_minutes: 30
 
+  # FIX-B anti-churn: minimum minutes to hold a freshly-entered position before a
+  # rebalance cycle may sell it (stop-loss exits bypass this). Must exceed the cycle
+  # cadence (15 min) to prevent buy→sell→buy roundtrips.
+  hold_minimum_minutes: 90
+
 risk:
   # Kill-switch triggers
   vix_spike: 40.0

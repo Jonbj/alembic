@@ -223,13 +223,39 @@ def _is_ks_active_failclosed(redis_url: str) -> bool:
         return True
 
 
+# Deterministic VIX→multiplier fallback used when regime:current is absent.
+# The LLM-derived regime (regime:current) requires both a FRED macro fetch and the
+# Ollama ensemble to succeed; when either is unavailable the key is never written and
+# sizing would otherwise collapse to a flat ×0.2 regardless of actual market calm.
+# This map keeps sizing risk-proportional from VIX alone (no LLM required). The ×0.2
+# floor still applies when even VIX is unknown.
+_REGIME_VIX_FALLBACK: tuple[tuple[float, float], ...] = (
+    (20.0, 1.0),   # VIX < 20  → calm      → ×1.0
+    (30.0, 0.7),   # 20–30     → elevated  → ×0.7
+    (40.0, 0.4),   # 30–40     → stressed  → ×0.4
+)
+_REGIME_VIX_FLOOR = 0.2  # VIX ≥ 40, or VIX unknown → ×0.2 (fail-conservative)
+
+
+def _vix_fallback_multiplier(vix: float | None) -> float:
+    """Map a VIX level to a deterministic sizing multiplier (no LLM required)."""
+    if vix is None:
+        return _REGIME_VIX_FLOOR
+    for threshold, mult in _REGIME_VIX_FALLBACK:
+        if vix < threshold:
+            return mult
+    return _REGIME_VIX_FLOOR
+
+
 def _get_regime_multiplier_from_redis(redis_url: str) -> float:
     """Read regime multiplier from Redis key regime:current (P0-09).
 
-    Falls back to 0.2 (high_vol fallback) when the key is absent or Redis is
-    unreachable — fail-conservative, matching execution.py._regime_multiplier().
-    Never returns 1.0 as a default: 1.0 would silently assume a normal regime
-    even when no regime data has been written by the regime worker.
+    Resolution order:
+      1. regime:current present → use its LLM-derived multiplier.
+      2. regime:current absent  → deterministic VIX fallback from macro:vix:latest.
+      3. VIX also absent / any error → ×0.2 (fail-conservative).
+
+    Never returns 1.0 blindly: ×1.0 only when VIX is present and benign (<20).
     """
     try:
         import json as _rj
@@ -237,13 +263,24 @@ def _get_regime_multiplier_from_redis(redis_url: str) -> float:
         _r = _R.from_url(redis_url, decode_responses=True)
         try:
             raw = _r.get("regime:current")
+            vix_raw = _r.get("macro:vix:latest") if raw is None else None
         finally:
             _r.close()
-        if raw is None:
-            log.warning("P0-09: regime:current absent — using high_vol fallback (×0.2)")
-            return 0.2
-        data = _rj.loads(raw)
-        return float(data["multiplier"])
+        if raw is not None:
+            data = _rj.loads(raw)
+            return float(data["multiplier"])
+        vix: float | None = None
+        if vix_raw is not None:
+            try:
+                vix = float(vix_raw)
+            except (TypeError, ValueError):
+                vix = None
+        mult = _vix_fallback_multiplier(vix)
+        log.warning(
+            "P0-09: regime:current absent — deterministic VIX fallback ×%.2f (vix=%s)",
+            mult, f"{vix:.1f}" if vix is not None else "absent",
+        )
+        return mult
     except Exception as _exc:
         log.warning("P0-09: Could not read regime multiplier (%s) — using fallback (×0.2)", _exc)
         return 0.2
@@ -347,7 +384,11 @@ def _apply_idempotency_filter(orders: list, skip_syms: set[str]) -> list:
 
 def _load_risk_config() -> dict[str, float]:
     """Return risk limits from trading.yaml; returns safe hardcoded defaults on error (P2-05-B)."""
-    defaults: dict[str, float] = {"max_portfolio_exposure": 0.50, "max_single_asset_pct": 0.10}
+    defaults: dict[str, float] = {
+        "max_portfolio_exposure": 0.50,
+        "max_single_asset_pct": 0.10,
+        "stop_loss": 0.02,
+    }
     try:
         import yaml
         with open(_TRADING_YAML) as f:
@@ -356,10 +397,57 @@ def _load_risk_config() -> dict[str, float]:
         return {
             "max_portfolio_exposure": float(risk.get("max_portfolio_exposure", defaults["max_portfolio_exposure"])),
             "max_single_asset_pct": float(risk.get("max_position_pct", defaults["max_single_asset_pct"])),
+            "stop_loss": float(risk.get("stop_loss", defaults["stop_loss"])),
         }
     except Exception as exc:
         log.warning("P2-05-B: could not load risk config (%s) — using defaults", exc)
         return defaults
+
+
+def _stop_loss_breached_symbols(
+    positions: list,
+    entry_prices: dict[str, float],
+    market,
+    stop_loss_pct: float,
+) -> set[str]:
+    """Return symbols whose current price has fallen at/below the stop-loss threshold.
+
+    FIX-C synthetic stop-loss: Alpaca rejects bracket (stop-loss) legs on
+    notional/fractional orders (error 42210000), so positions opened via notional
+    BUYs carry no broker-side stop. This check runs every cycle and force-closes any
+    position trading at or below ``entry × (1 - stop_loss_pct)``.
+
+    Fail-open: positions with no recorded entry price or no current market price are
+    skipped (never force-sold on missing data). Robust to non-numeric inputs.
+    """
+    if stop_loss_pct <= 0:
+        return set()
+    prices = getattr(market, "prices", {}) or {}
+    breached: set[str] = set()
+
+    def _num(v) -> float | None:
+        # Accept only real numbers; reject bool and non-numeric (e.g. MagicMock).
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            return None
+        return float(v)
+
+    for pos in positions:
+        sym = getattr(pos, "symbol", None)
+        if sym is None:
+            continue
+        entry = _num(entry_prices.get(sym))
+        price = _num(prices.get(sym))
+        if entry is None or price is None:
+            continue
+        if entry <= 0 or price <= 0:
+            continue
+        if price <= entry * (1.0 - stop_loss_pct):
+            breached.add(sym)
+            log.warning(
+                "Stop-loss: %s price %.4f <= entry %.4f × (1-%.3f) — forced exit",
+                sym, price, entry, stop_loss_pct,
+            )
+    return breached
 
 
 def _mark_signal_fired(
@@ -384,8 +472,27 @@ def _mark_signal_fired(
 
 _CYCLE_LOCK_KEY = "portfolio:cycle:lock"
 _CYCLE_LOCK_TTL = 840  # 14 min — covers worst case; just under the 15-min schedule
-_HOLD_MINIMUM_MINUTES = 30  # don't sell a position entered less than this many minutes ago
+# FIX-B: raised 30→90 so a freshly-entered position cannot be sold by the next
+# rebalance cycle. With a 15-min cadence, 30 min allowed buy→sell→buy churn every
+# ~2 cycles (Day-1: GS/MU/MS roundtrips). 90 min (≥6 cycles) also subsumes the
+# "S4 just bought it" conflict — an S4 BUY registers as recently-bought.
+_HOLD_MINIMUM_MINUTES = 90  # don't sell a position entered less than this many minutes ago
 _MIN_ORDER_NOTIONAL = 100.0  # skip BUY orders below this USD threshold — prevents $40 micro-rebalancing
+
+
+def _get_hold_minimum_minutes() -> int:
+    """Minimum minutes to hold a freshly-entered position before a rebalance can sell it.
+
+    Read from trading.yaml ``execution.hold_minimum_minutes``; defaults to
+    ``_HOLD_MINIMUM_MINUTES`` (90) on any error. Stop-loss exits bypass this hold.
+    """
+    try:
+        import yaml
+        with open(_TRADING_YAML) as f:
+            cfg = yaml.safe_load(f)
+        return int(cfg.get("execution", {}).get("hold_minimum_minutes", _HOLD_MINIMUM_MINUTES))
+    except Exception:
+        return _HOLD_MINIMUM_MINUTES
 
 
 @app.task(name="src.workers.portfolio_scheduler.run_portfolio_cycle")
@@ -712,6 +819,21 @@ def _run_cycle_inner() -> dict:
     # P2-05-B: read risk limits from trading.yaml so operator changes to the config
     # are reflected in the live constraint enforcement (not silently ignored).
     _risk_cfg = _load_risk_config()
+
+    # FIX-C: synthetic stop-loss. Notional/fractional BUYs cannot carry an Alpaca
+    # bracket, so positions are force-closed here when price breaches the stop.
+    # Computed before the rebalance so breached symbols are dropped from normal
+    # orders and force-sold below (bypassing the hold-minimum hold).
+    stop_loss_sells: set[str] = set()
+    try:
+        stop_loss_sells = _stop_loss_breached_symbols(
+            alpaca_positions, alpaca_entry_prices, market, _risk_cfg.get("stop_loss", 0.02)
+        )
+        if stop_loss_sells:
+            log.warning("FIX-C stop-loss breached: %s", sorted(stop_loss_sells))
+    except Exception as _sl_exc:
+        log.warning("Stop-loss check failed: %s — proceeding without stop-loss", _sl_exc)
+
     data_replay = DataReplay(bars_df)
     orchestrator = PortfolioOrchestrator(
         registry=registry,
@@ -749,14 +871,28 @@ def _run_cycle_inner() -> dict:
         len(result.final_orders),
     )
 
+    # FIX-C: drop any normal orders for stop-loss symbols — they are force-closed
+    # separately below, so the rebalance must not also buy/sell them this cycle.
+    if stop_loss_sells:
+        result = type(result)(
+            strategies_run=result.strategies_run,
+            orders_per_strategy=result.orders_per_strategy,
+            orders_before_constraints=result.orders_before_constraints,
+            orders_after_constraints=result.orders_after_constraints,
+            constraints_fired=result.constraints_fired,
+            final_orders=[o for o in result.final_orders if o.symbol not in stop_loss_sells],
+            symbol_strategies=result.symbol_strategies,
+        )
+
     # Hold minimum: don't sell positions entered in the last HOLD_MINIMUM_MINUTES.
     # Prevents buy→sell roundtrips within a single rebalance window (e.g. S4 buys
     # at 18:07, S1 rebalances at 18:22 and immediately sells the same ticker).
+    _hold_min = _get_hold_minimum_minutes()
     try:
         from src.store.pg_store import PostgreSQLStore as _PGHold
         _pg_hold = _PGHold()
         try:
-            _recently_bought = _pg_hold.fetch_recently_bought_symbols(_HOLD_MINIMUM_MINUTES)
+            _recently_bought = _pg_hold.fetch_recently_bought_symbols(_hold_min)
         finally:
             _pg_hold.close()
         if _recently_bought:
@@ -778,7 +914,7 @@ def _run_cycle_inner() -> dict:
             if _skipped:
                 log.info(
                     "Hold minimum (%d min): skipped %d SELL order(s) for recently-bought: %s",
-                    _HOLD_MINIMUM_MINUTES,
+                    _hold_min,
                     _skipped,
                     sorted(_recently_bought),
                 )
@@ -959,10 +1095,32 @@ def _run_cycle_inner() -> dict:
             regime_mult=_regime_mult,
         )
 
+    # FIX-C: submit synthetic stop-loss exits. Force-close positions that breached the
+    # stop threshold. Runs regardless of the hold-minimum (protection takes priority).
+    if stop_loss_sells and operating_mode not in ("dry_run", "halted"):
+        for sym in sorted(stop_loss_sells):
+            try:
+                from alpaca.trading.enums import OrderSide as _OSsl, TimeInForce as _TIFsl
+                from alpaca.trading.requests import MarketOrderRequest as _MORsl
+                qty_held = next(
+                    (float(p.qty) for p in alpaca_positions if p.symbol == sym), None
+                )
+                if qty_held and qty_held > 0:
+                    resp = trading_client.submit_order(_MORsl(
+                        symbol=sym, qty=qty_held, side=_OSsl.SELL, time_in_force=_TIFsl.DAY,
+                    ))
+                    submitted_orders.append({
+                        "symbol": sym, "side": "sell", "order_id": str(resp.id),
+                        "notional": 0.0, "reason": "stop_loss",
+                    })
+                    log.warning("Stop-loss exit submitted for %s (qty=%s)", sym, qty_held)
+            except Exception as _sl_sub_exc:
+                log.warning("Failed to submit stop-loss exit for %s: %s", sym, _sl_sub_exc)
+
     # Submit forced sells for sentiment reversal (symbols not already being sold).
     if reversal_sell_symbols and operating_mode not in ("dry_run", "halted"):
         already_selling = {o.symbol for o in result.final_orders if o.side.value == "sell"}
-        to_force_sell = reversal_sell_symbols - already_selling
+        to_force_sell = reversal_sell_symbols - already_selling - stop_loss_sells
         for sym in to_force_sell:
             try:
                 from alpaca.trading.enums import OrderSide, TimeInForce
@@ -1024,7 +1182,7 @@ def _run_cycle_inner() -> dict:
                         symbol=sym,
                         exit_order_id=sub["order_id"],
                         exit_time=ts,
-                        exit_reason="portfolio_sell",
+                        exit_reason=sub.get("reason", "portfolio_sell"),
                     )
                     if _trade_id is not None:
                         _entry_px = alpaca_entry_prices.get(sym, 0.0)

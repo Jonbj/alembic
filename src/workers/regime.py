@@ -200,6 +200,16 @@ def detect_regime() -> None:
             log.exception("Failed to send Telegram alert for SPY momentum validation")
         return
 
+    # Cache the validated VIX so position sizing has a deterministic fallback even
+    # when the LLM ensemble is unavailable. The portfolio scheduler reads
+    # macro:vix:latest and sizes from VIX when regime:current is absent (instead of
+    # collapsing to the ×0.2 floor). TTL matches the regime state so it survives the
+    # full trading day between daily regime runs.
+    try:
+        redis.set_vix_cached(vix, ttl=config.REGIME_REDIS_TTL_SECONDS)
+    except Exception as _vc_exc:
+        log.warning("Could not cache VIX for fallback sizing: %s", _vc_exc)
+
     # 2. Run 2 LLMs in parallel
     prompt = _build_prompt(vix, yield_curve, spy_momentum)
     client1 = _make_llm_client(config.REGIME_LLM_MODEL_1)
