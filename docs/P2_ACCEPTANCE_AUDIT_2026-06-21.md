@@ -45,9 +45,9 @@ These are not code safety defects, but they are **operational-readiness defects*
 
 | Document / File | Purpose |
 |-----------------|---------|
-| `docs/ALEMBIC_REMEDIATION_MASTER_PLAN_2026-06-18.md` | P2 scope, taxonomy, acceptance criteria |
-| `docs/P0_ACCEPTANCE_AUDIT_2026-06-19.md` | Prior P0 baseline |
-| `docs/P1_ACCEPTANCE_AUDIT_2026-06-19.md` | Prior P1 baseline |
+| `archive/…/04_remediation_plans/ALEMBIC_REMEDIATION_MASTER_PLAN_2026-06-18.md` | P2 scope, taxonomy, acceptance criteria (archived 2026-06-23) |
+| `archive/…/03_acceptance_audits/P0_ACCEPTANCE_AUDIT_2026-06-18.md` | Prior P0 baseline (archived 2026-06-23) |
+| `archive/…/03_acceptance_audits/P1_RE_ACCEPTANCE_AUDIT_2026-06-19.md` | Prior P1 baseline (archived 2026-06-23) |
 | `docs/P2_STATUS_2026-06-21.md` | P2 self-declaration of completion |
 | `docs/RESIDUAL_RISK_REGISTER.md` | Open/closed residual risks |
 | `docs/ARCHITECTURE.md` | Architecture docs; checked for stale P2-05 status |

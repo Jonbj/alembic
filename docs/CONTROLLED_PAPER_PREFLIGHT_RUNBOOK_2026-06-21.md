@@ -37,10 +37,12 @@ Record the result of each check in the evidence package (Section 13).
 
 ```
 [ ] P0_ACCEPTED_WITH_RUNTIME_MONITORING
-      docs/P0_ACCEPTANCE_AUDIT_2026-06-19.md exists and shows this verdict.
+      Archived to: archive/2026-06-p0-p2-controlled-paper-history/03_acceptance_audits/P0_ACCEPTANCE_AUDIT_2026-06-18.md
+      (File moved 2026-06-23. Verdict: P0_ACCEPTED_WITH_RUNTIME_MONITORING — confirmed.)
 
 [ ] P1_ACCEPTED_WITH_RUNTIME_MONITORING
-      docs/P1_RE_ACCEPTANCE_AUDIT_2026-06-19.md exists and shows this verdict.
+      Archived to: archive/2026-06-p0-p2-controlled-paper-history/03_acceptance_audits/P1_RE_ACCEPTANCE_AUDIT_2026-06-19.md
+      (File moved 2026-06-23. Verdict: P1_ACCEPTED_WITH_RUNTIME_MONITORING — confirmed.)
 
 [ ] P2_ACCEPTED_WITH_RUNTIME_MONITORING
       docs/P2_ACCEPTANCE_AUDIT_2026-06-21.md exists and shows this verdict.

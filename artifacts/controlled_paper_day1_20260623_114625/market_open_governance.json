@@ -1,0 +1,39 @@
+{
+  "snapshot_time_utc": "2026-06-23T12:30:06Z",
+  "strategy_lifecycle": {
+    "S1": {"mode": "supervised_paper", "approved": true, "target_mode": null, "promotion_blocked": true, "live_authorized": false, "promotion_authorized": false},
+    "S2": {"mode": "disabled", "approved": false, "target_mode": null},
+    "S4": {"mode": "paper", "approved": true, "target_mode": null}
+  },
+  "S1_api_status": {
+    "id": "s1",
+    "status": "supervised_paper",
+    "promotion_blocked": true,
+    "live_authorized": false,
+    "promotion_authorized": false
+  },
+  "S4_api_status": "NOT_IN_STRATEGIES_API (known gap, tracked as non-blocking)",
+  "S3_api_status": {"id": "s3", "status": "rd_sleeve", "note": "R&D only, not operational"},
+  "GLOBAL_LIVE_PROMOTION_ENABLED": false,
+  "admin_status": {"killswitch": false, "mode": "paper", "llm_models": "all"},
+  "alpaca_endpoint": "https://paper-api.alpaca.markets",
+  "live_credentials_present": false,
+  "live_orders": 0,
+  "governance_checks": {
+    "S1_approved_supervised_paper": "PASS",
+    "S1_promotion_blocked": "PASS",
+    "S1_live_authorized_false": "PASS",
+    "S2_approved_false": "PASS",
+    "S2_mode_disabled": "PASS",
+    "S3_excluded": "PASS (rd_sleeve only)",
+    "S4_approved_paper": "PASS",
+    "S7_excluded": "PASS (not in lifecycle)",
+    "GLOBAL_LIVE_PROMOTION_ENABLED_false": "PASS",
+    "mode_paper": "PASS",
+    "killswitch_false": "PASS",
+    "no_live_endpoint": "PASS",
+    "no_live_credentials": "PASS",
+    "no_live_orders": "PASS"
+  },
+  "overall": "GOVERNANCE_PASS"
+}

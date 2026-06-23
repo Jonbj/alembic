@@ -32,7 +32,7 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 ## 2026-06-15
 
 ### Code Review
-- Review completa del codebase: vedi `docs/CODE_REVIEW_FULL_2026-06-15.md`
+- Review completa del codebase: vedi `archive/2026-06-p0-p2-controlled-paper-history/02_external_reviews/CODE_REVIEW_FULL_2026-06-15.md` (archived 2026-06-23)
 - Identificati 13 fix prioritari ora tracciati in `docs/superpowers/plans/2026-06-16-master-roadmap.md`
 
 ---
@@ -54,7 +54,7 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 - `asyncio.run()` in contesto async: sostituito con `await` corretto
 - N+1 queries: batch query per simboli multipli
 - Race condition PostgreSQL: aggiunto `FOR UPDATE` su operazioni critiche
-- Vedi `docs/CODE_REVIEW_FULL_2026-06-15.md` per lista completa
+- Vedi `archive/2026-06-p0-p2-controlled-paper-history/02_external_reviews/CODE_REVIEW_FULL_2026-06-15.md` per lista completa (archived 2026-06-23)
 
 ---
 

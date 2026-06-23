@@ -714,6 +714,21 @@ These bugs were identified by static architecture review against live-trading fa
 
 ---
 
+## Historical Archive
+
+P0/P1/P2 phase documents, external reviews, forensic reports, and historical design specs
+have been archived to:
+
+```
+archive/2026-06-p0-p2-controlled-paper-history/
+```
+
+Manifest and restore notes: `archive/2026-06-p0-p2-controlled-paper-history/00_manifest/`
+
+Active Day 1 controlled paper evidence remains in `artifacts/`. See `artifacts/ARCHIVE_INDEX.md`.
+
+---
+
 ## License
 
 MIT License — see `LICENSE` for details.

@@ -1,0 +1,38 @@
+{
+  "day1_monitoring_started_utc": "2026-06-23T12:30:06Z",
+  "commit_hash": "99c14a7",
+  "phases_completed": ["F0_plan", "F1_working_tree", "F2_pre_market_readiness"],
+  "current_phase": "WAITING_FIRST_CYCLE",
+  "next_scheduled_check_utc": "2026-06-23T13:30:00Z",
+  "first_cycle_expected_utc": "2026-06-23T14:07:00Z",
+  "sentiment_worker_expected_utc": "2026-06-23T14:00:00Z",
+  "market_open_utc": "2026-06-23T13:30:00Z",
+  "market_close_utc": "2026-06-23T20:00:00Z",
+  "pre_market_snapshot": {
+    "total_decisions": 356,
+    "open_db_trades": 16,
+    "closed_db_trades": 176,
+    "positions_api_count": 6,
+    "positions_api_symbols": ["AMAT", "CRM", "IWM", "ORCL", "QQQ", "XLK"],
+    "total_market_value_usd": 11150.54,
+    "total_unrealized_pl_usd": -367.70,
+    "killswitch": false,
+    "mode": "paper",
+    "stale_signals": true,
+    "worker_beat_lag": true,
+    "latest_sentiment_signal_utc": "2026-06-22T21:48:44Z"
+  },
+  "governance_snapshot": {
+    "S1": {"mode": "supervised_paper", "approved": true},
+    "S2": {"mode": "disabled", "approved": false},
+    "S4": {"mode": "paper", "approved": true},
+    "GLOBAL_LIVE_PROMOTION_ENABLED": false
+  },
+  "wakeup_schedule": [
+    {"wakeup": "2026-06-23T13:30:00Z", "action": "market_open_readiness_check"},
+    {"wakeup": "2026-06-23T14:15:00Z", "action": "post_first_cycle_evidence"},
+    {"wakeup": "2026-06-23T15:15:00Z", "action": "mid_session_checkpoint_1"},
+    {"wakeup": "2026-06-23T17:00:00Z", "action": "mid_session_checkpoint_2"},
+    {"wakeup": "2026-06-23T20:15:00Z", "action": "eod_evidence_and_report"}
+  ]
+}

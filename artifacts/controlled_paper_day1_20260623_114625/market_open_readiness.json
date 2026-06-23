@@ -1,0 +1,26 @@
+{
+  "snapshot_time_utc": "2026-06-23T12:30:06Z",
+  "phase": "PRE_MARKET",
+  "note": "Captured at 12:30 UTC, ~60 min before market open (13:30 UTC), ~97 min before first portfolio cycle (14:07 UTC)",
+  "readiness": {
+    "redis_healthy": true,
+    "redis_writeable": true,
+    "db_healthy": true,
+    "killswitch_active": false,
+    "stale_signals": true,
+    "worker_beat_lag": true,
+    "last_signal_age_minutes": 881.0,
+    "last_cycle_age_minutes": 6757.7
+  },
+  "stale_signals_explanation": "Expected — sentiment worker scheduled at 14:00 UTC. stale_signals=true is acceptable pre-market. Must clear by 14:07 UTC first cycle.",
+  "worker_beat_lag_explanation": "Expected — containers restarted at 12:04 UTC after git commit/rebuild. First portfolio cycle scheduled at 14:07 UTC. Lag is ~6757 min (112 hours) — system was idle since 2026-06-18.",
+  "blocking_flags": {
+    "redis_healthy": "PASS",
+    "redis_writeable": "PASS",
+    "db_healthy": "PASS",
+    "killswitch_active": "PASS (false)",
+    "stale_signals": "WARN (pre-market, expected — must resolve before first valid cycle at 14:07 UTC)",
+    "worker_beat_lag": "WARN (pre-market, expected — resolves after first cycle at 14:07 UTC)"
+  },
+  "overall": "PRE_MARKET_PASS_WITH_EXPECTED_WARNINGS"
+}
