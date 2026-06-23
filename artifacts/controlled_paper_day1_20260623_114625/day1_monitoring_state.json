@@ -60,9 +60,23 @@
       "affected_symbols": ["TSM", "MS", "TM", "GS", "TXN"],
       "occurrences": 9,
       "impact": "0 trades opened. Pipeline correct; broker submission step fails.",
-      "fix_required_before_day2": true
+      "fix_required_before_day2": true,
+      "fix_status": "FIXED",
+      "fix_deployed_utc": "2026-06-23T16:18:00Z",
+      "fix_confirmed_utc": "2026-06-23T16:22:00Z",
+      "fix_commit": "54d3be3"
     }
   ],
+
+  "post_fix_trading": {
+    "first_successful_cycle_utc": "2026-06-23T16:22:00Z",
+    "trades_opened": ["MU", "GS", "GOOGL"],
+    "trades_closed": ["GS"],
+    "pnl_realized": 0.45,
+    "pnl_unrealized_at_1712": -1.24,
+    "pnl_net_at_1712": -0.79,
+    "account_equity_at_1712": 110113.94
+  },
 
   "governance_snapshot": {
     "S1": {"mode": "supervised_paper", "approved": true},
