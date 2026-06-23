@@ -85,10 +85,33 @@
     "GLOBAL_LIVE_PROMOTION_ENABLED": false
   },
 
+  "final_snapshot_1748": {
+    "account_equity": 110110.90,
+    "account_cash": 109580.89,
+    "positions": [
+      {"symbol": "GOOGL", "qty": 0.769970294, "mv": 267.58, "pl": 0.08},
+      {"symbol": "MU",    "qty": 0.245606315, "mv": 262.44, "pl": -4.37}
+    ],
+    "open_orders": 0,
+    "total_cycles": 15,
+    "total_decisions": 12,
+    "new_trades": 3,
+    "pnl_realized": 0.45,
+    "pnl_unrealized": -4.29,
+    "pnl_net": -3.85
+  },
+
+  "eod_report": {
+    "status": "FINAL",
+    "finalized_utc": "2026-06-23T17:48:00Z",
+    "verdict": "CONTROLLED_PAPER_DAY1_EOD_PARTIAL_SUCCESS_BUG_FIXED_CONTINUE_DAY2",
+    "report_file": "CONTROLLED_PAPER_DAY1_EOD_REPORT.md"
+  },
+
   "wakeup_schedule": [
     {"wakeup": "2026-06-23T13:30:00Z", "action": "market_open_readiness_check", "status": "DONE"},
     {"wakeup": "2026-06-23T14:15:00Z", "action": "post_first_cycle_evidence", "status": "DONE"},
     {"wakeup": "2026-06-23T16:10:00Z", "action": "intraday_checkpoint", "status": "DONE"},
-    {"wakeup": "2026-06-23T20:05:00Z", "action": "eod_evidence_and_report", "status": "PENDING"}
+    {"wakeup": "2026-06-23T17:48:00Z", "action": "eod_final_report", "status": "DONE"}
   ]
 }
