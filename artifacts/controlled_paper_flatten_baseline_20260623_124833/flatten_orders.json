@@ -1,0 +1,80 @@
+{
+  "flatten_type": "LEGACY_PAPER_ACCOUNT_FLATTEN",
+  "timestamp_utc": "2026-06-23T12:54:37Z",
+  "classification": "LEGACY_FLATTEN_ORDER",
+  "note": "These orders close legacy positions from 2026-06-18 test sessions. NOT S1/S4 strategy orders. PnL excluded from Day 1 controlled paper performance.",
+  "endpoint": "https://paper-api.alpaca.markets",
+  "api_call": "DELETE /v2/positions",
+  "http_status": 207,
+  "orders": [
+    {
+      "symbol": "AMAT",
+      "id": "ecac2ea2-c542-4a75-9a5b-fd8cd0489985",
+      "side": "sell",
+      "type": "market",
+      "qty": "2.993744815",
+      "status": "new",
+      "time_in_force": "day",
+      "expires_at": "2026-06-23T20:00:00Z",
+      "classification": "LEGACY_FLATTEN"
+    },
+    {
+      "symbol": "CRM",
+      "id": "1affa941-59f0-40d3-b6cf-d670d3e4b728",
+      "side": "sell",
+      "type": "market",
+      "qty": "13.575013922",
+      "status": "new",
+      "time_in_force": "day",
+      "expires_at": "2026-06-23T20:00:00Z",
+      "classification": "LEGACY_FLATTEN"
+    },
+    {
+      "symbol": "IWM",
+      "id": "a628a270-e78a-40fe-b714-3161b9c7f6f9",
+      "side": "sell",
+      "type": "market",
+      "qty": "7.007726085",
+      "status": "new",
+      "time_in_force": "day",
+      "expires_at": "2026-06-23T20:00:00Z",
+      "classification": "LEGACY_FLATTEN"
+    },
+    {
+      "symbol": "ORCL",
+      "id": "45408ec5-3914-48e3-b20b-4b3d799fcea1",
+      "side": "sell",
+      "type": "market",
+      "qty": "11.601857062",
+      "status": "new",
+      "time_in_force": "day",
+      "expires_at": "2026-06-23T20:00:00Z",
+      "classification": "LEGACY_FLATTEN"
+    },
+    {
+      "symbol": "QQQ",
+      "id": "ec30142b-19af-46d0-aee2-517ac415f871",
+      "side": "sell",
+      "type": "market",
+      "qty": "1.775030982",
+      "status": "new",
+      "time_in_force": "day",
+      "expires_at": "2026-06-23T20:00:00Z",
+      "classification": "LEGACY_FLATTEN"
+    },
+    {
+      "symbol": "XLK",
+      "id": "36f34b4a-d016-4795-b6bb-2e40f319cbd5",
+      "side": "sell",
+      "type": "market",
+      "qty": "10.819815555",
+      "status": "new",
+      "time_in_force": "day",
+      "expires_at": "2026-06-23T20:00:00Z",
+      "classification": "LEGACY_FLATTEN"
+    }
+  ],
+  "orders_count": 6,
+  "expected_fill": "13:30 UTC market open (before first portfolio cycle at 14:07 UTC)",
+  "pnl_treatment": "EXCLUDED_FROM_DAY1_BASELINE"
+}

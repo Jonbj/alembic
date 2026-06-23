@@ -340,6 +340,29 @@ Complete the `CONTROLLED_PAPER_DAY1_EOD_TEMPLATE.md` with:
 
 ---
 
-## 16. Stop Point
+## 16. Addendum: Account Flatten & Baseline Reset (12:48–12:54 UTC)
+
+**Flatten completed after Day 1 launch but before first cycle.**
+
+At 12:48 UTC, PO authorized a Legacy Paper Account Flatten to remove 6 pre-Day-1 positions (AMAT, CRM, IWM, ORCL, QQQ, XLK) from 2026-06-18 test sessions. These were classified as R-13 (existing legacy exposure).
+
+| Step | Time (UTC) | Status |
+|------|------------|--------|
+| PO approval recorded | 12:48 | ✅ |
+| Safety check (paper-only, GLPE=False) | 12:53 | ✅ PASS |
+| 6 LEGACY_FLATTEN sell orders submitted | 12:54 | ✅ HTTP 207 / all 200 |
+| Orders fill at market open | 13:30 | ⏳ Pending |
+| First S1/S4 cycle (clean account) | 14:07 | ⏳ Pending |
+
+**PnL treatment:** Legacy flatten unrealized PnL (-$376.84) is **EXCLUDED** from Day 1 baseline.  
+**Evidence:** `artifacts/controlled_paper_flatten_baseline_20260623_124833/`
+
+**R-13 resolution:** Alpaca paper positions will zero at 13:30 UTC (market open). DB trades (16 open) remain in the `trades` table as historical records; the BUG-5 pyramiding guard prevents any new BUY on symbols with existing open DB trades.
+
+---
+
+## 17. Stop Point
 
 Ho registrato il PO Final Sign-Off e ho eseguito solo il Controlled Paper Day 1 launch in ambiente Alpaca paper/sandbox per S1/S4. Non ho autorizzato live trading, non ho promosso strategie a live, non ho abilitato GLOBAL_LIVE_PROMOTION_ENABLED, non ho usato credenziali live, non ho inviato ordini live, non ho autorizzato S2/S3/S7 e non ho iniziato P3/P4.
+
+Ho anche eseguito il Legacy Paper Account Flatten (12 LEGACY_FLATTEN sell orders per 6 posizioni) come operazione separata con autorizzazione PO dedicata. Il PnL di questo flatten è escluso dalla baseline Day 1.

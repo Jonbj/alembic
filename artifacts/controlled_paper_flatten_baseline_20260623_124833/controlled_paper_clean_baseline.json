@@ -1,0 +1,48 @@
+{
+  "baseline_type": "CONTROLLED_PAPER_CLEAN_BASELINE",
+  "baseline_timestamp_utc": "2026-06-23T12:54:37Z",
+  "expected_clean_from": "2026-06-23T13:30:00Z",
+  "first_valid_cycle_utc": "2026-06-23T14:07:00Z",
+  "account_number": "PA34OYJWSJUY",
+  "endpoint": "https://paper-api.alpaca.markets",
+
+  "baseline_state": {
+    "positions_count": 0,
+    "open_orders_count": 0,
+    "note": "Legacy positions close at market open 13:30 UTC. From 13:30 UTC the account has 0 legacy positions."
+  },
+
+  "day1_scope": {
+    "strategies_in_scope": ["S1", "S4"],
+    "strategies_excluded": ["S2", "S3", "S7"],
+    "live_authorized": false,
+    "promotion_authorized": false,
+    "GLOBAL_LIVE_PROMOTION_ENABLED": false
+  },
+
+  "pre_baseline_account": {
+    "equity": "110118.59",
+    "portfolio_value": "110118.59",
+    "cash": "99002.80",
+    "buying_power": "427135.42"
+  },
+
+  "day1_pnl_exclusions": [
+    {
+      "type": "LEGACY_FLATTEN",
+      "symbols": ["AMAT", "CRM", "IWM", "ORCL", "QQQ", "XLK"],
+      "reason": "Pre-Day-1 legacy positions from 2026-06-18 test sessions",
+      "total_unrealized_pl_at_flatten": -376.84,
+      "pnl_treatment": "EXCLUDED_FROM_DAY1_BASELINE"
+    }
+  ],
+
+  "day1_baseline_starting_from": "2026-06-23T14:07:00Z",
+  "verdict": "BASELINE_READY",
+  "notes": [
+    "6 LEGACY_FLATTEN orders placed at 12:54 UTC, will auto-fill at market open 13:30 UTC",
+    "First S1/S4 portfolio cycle runs at 14:07 UTC on a clean account",
+    "Day 1 PnL measured from 14:07 UTC first cycle onwards",
+    "Legacy flatten PnL (~-376.84 unrealized) excluded from Day 1 controlled paper metrics"
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "check_timestamp_utc": "2026-06-23T12:53:00Z",
+  "market_status": "CLOSED",
+  "market_open_utc": "2026-06-23T13:30:00Z",
+  "first_portfolio_cycle_utc": "2026-06-23T14:07:00Z",
+  "flatten_submitted_utc": "2026-06-23T12:54:37Z",
+  "minutes_before_market_open": 36,
+  "minutes_before_first_cycle": 73,
+
+  "safety_checks": {
+    "alpaca_endpoint": {
+      "status": "PASS",
+      "value": "https://paper-api.alpaca.markets",
+      "note": "Paper endpoint only, no live endpoint reference"
+    },
+    "live_endpoint_absent": {
+      "status": "PASS",
+      "check": "grep broker-api live-api .env",
+      "result": "0 matches"
+    },
+    "GLOBAL_LIVE_PROMOTION_ENABLED": {
+      "status": "PASS",
+      "value": false,
+      "location": "src/strategies/promotion.py:27"
+    },
+    "market_closed_at_flatten": {
+      "status": "PASS",
+      "market_status": "CLOSED",
+      "note": "Flatten submitted 36 minutes before market open"
+    },
+    "kill_switch_required": {
+      "status": "NOT_REQUIRED",
+      "reason": "Market was CLOSED at flatten time (12:54 UTC). Rule requires kill-switch only if market is already open.",
+      "kill_switch_state": false
+    },
+    "cycle_conflict_risk": {
+      "status": "NONE",
+      "note": "Flatten orders will fill at 13:30 UTC. First cycle at 14:07 UTC. 37-minute buffer prevents any cycle running during flatten."
+    },
+    "live_trading": {
+      "status": "NOT_AUTHORIZED",
+      "confirmed": true
+    },
+    "strategy_scope": {
+      "status": "PASS",
+      "in_scope": ["S1", "S4"],
+      "excluded": ["S2", "S3", "S7"]
+    }
+  },
+
+  "overall_safety": "PASS",
+  "proceed_authorized": true
+}

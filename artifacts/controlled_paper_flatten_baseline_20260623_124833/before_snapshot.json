@@ -1,0 +1,25 @@
+{
+  "snapshot_type": "BEFORE_FLATTEN",
+  "timestamp_utc": "2026-06-23T12:53:00Z",
+  "account": {
+    "account_number": "PA34OYJWSJUY",
+    "status": "ACTIVE",
+    "equity": "110118.59",
+    "portfolio_value": "110118.59",
+    "cash": "99002.80",
+    "buying_power": "427135.42"
+  },
+  "open_orders": 0,
+  "positions": [
+    {"symbol": "AMAT", "qty": "2.993744815", "market_value": "1764.812568", "unrealized_pl": "-82.897432"},
+    {"symbol": "CRM",  "qty": "13.575013922", "market_value": "2068.331204", "unrealized_pl": "-0.528801"},
+    {"symbol": "IWM",  "qty": "7.007726085", "market_value": "2054.595211", "unrealized_pl": "-2.597918"},
+    {"symbol": "ORCL", "qty": "11.601857062", "market_value": "1976.956443", "unrealized_pl": "-195.313551"},
+    {"symbol": "QQQ",  "qty": "1.775030982", "market_value": "1271.791948", "unrealized_pl": "-38.504331"},
+    {"symbol": "XLK",  "qty": "10.819815555", "market_value": "2004.911822", "unrealized_pl": "-56.998183"}
+  ],
+  "positions_count": 6,
+  "total_market_value": 11141.399196,
+  "total_unrealized_pl": -376.840216,
+  "note": "Legacy positions from 2026-06-18 test sessions. Classification: LEGACY_FLATTEN. NOT S1/S4 strategy trades. PnL excluded from Day 1 controlled paper baseline."
+}
