@@ -1,1 +1,17 @@
-{"note":"market_closed_at_launch — to be filled at first paper cycle execution"}
+{
+  "captured_at_utc": "2026-06-23T16:10:00Z",
+  "period": "2026-06-23 14:07–16:10 UTC",
+  "new_orders_submitted": 0,
+  "new_orders_filled": 0,
+  "failed_submissions": 9,
+  "failure_error_code": 42210000,
+  "failure_reason": "fractional orders must be simple orders",
+  "failed_symbols": ["TSM", "MS", "TM", "GS", "TXN"],
+  "bug_id": "BUG-DAY1-01",
+  "note": "All order generations passed internal constraints but failed at Alpaca broker submission. Symbols are not fractionable on Alpaca paper. Fix required: check fractionable flag, round to whole shares.",
+  "alpaca_positions_count": 0,
+  "alpaca_open_orders_count": 0,
+  "account_equity": "110114.75",
+  "account_cash": "110114.75",
+  "account_portfolio_value": "110114.75"
+}

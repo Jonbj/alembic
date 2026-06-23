@@ -1,1 +1,9 @@
-{"note":"market_closed_at_launch — to be filled at first paper cycle execution"}
+{
+  "captured_at_utc": "2026-06-23T16:10:00Z",
+  "positions": [],
+  "positions_count": 0,
+  "open_orders_count": 0,
+  "note": "Account flat. Legacy flatten filled at 13:30 UTC. No new S1/S4 positions due to BUG-DAY1-01.",
+  "db_open_trades": 16,
+  "db_new_trades_today": 0
+}

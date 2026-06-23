@@ -1,13 +1,12 @@
 {
   "day1_monitoring_started_utc": "2026-06-23T12:30:06Z",
+  "last_updated_utc": "2026-06-23T16:10:00Z",
   "commit_hash": "99c14a7",
-  "phases_completed": ["F0_plan", "F1_working_tree", "F2_pre_market_readiness"],
-  "current_phase": "WAITING_FIRST_CYCLE",
-  "next_scheduled_check_utc": "2026-06-23T13:30:00Z",
-  "first_cycle_expected_utc": "2026-06-23T14:07:00Z",
-  "sentiment_worker_expected_utc": "2026-06-23T14:00:00Z",
+  "phases_completed": ["F0_plan", "F1_working_tree", "F2_pre_market_readiness", "F3_flatten", "F4_market_open", "F5_intraday"],
+  "current_phase": "INTRADAY_MONITORING",
   "market_open_utc": "2026-06-23T13:30:00Z",
   "market_close_utc": "2026-06-23T20:00:00Z",
+
   "pre_market_snapshot": {
     "total_decisions": 356,
     "open_db_trades": 16,
@@ -22,17 +21,60 @@
     "worker_beat_lag": true,
     "latest_sentiment_signal_utc": "2026-06-22T21:48:44Z"
   },
+
+  "flatten_result": {
+    "status": "COMPLETE",
+    "orders_placed_utc": "2026-06-23T12:54:37Z",
+    "orders_filled_at": "2026-06-23T13:30:00Z",
+    "positions_after": 0,
+    "pnl_excluded": -376.84
+  },
+
+  "intraday_snapshot_16_10": {
+    "system_health": {
+      "redis_healthy": true,
+      "db_healthy": true,
+      "killswitch_active": false,
+      "mode": "paper",
+      "stale_signals": false,
+      "last_signal_age_minutes": 1.15,
+      "worker_beat_lag": false
+    },
+    "cycles_run": 9,
+    "cycle_ids": [90, 91, 92, 93, 94, 95, 96, 97, 98],
+    "first_cycle_utc": "2026-06-23T14:07:00Z",
+    "last_cycle_utc": "2026-06-23T16:07:00Z",
+    "decisions_today": 8,
+    "orders_submitted": 0,
+    "new_positions": 0,
+    "pnl_day1": 0.0,
+    "account_equity": "110114.75",
+    "account_cash": "110114.75"
+  },
+
+  "anomalies": [
+    {
+      "id": "BUG-DAY1-01",
+      "severity": "HIGH",
+      "description": "All order submissions rejected by Alpaca 42210000 (fractional orders must be simple orders)",
+      "affected_symbols": ["TSM", "MS", "TM", "GS", "TXN"],
+      "occurrences": 9,
+      "impact": "0 trades opened. Pipeline correct; broker submission step fails.",
+      "fix_required_before_day2": true
+    }
+  ],
+
   "governance_snapshot": {
     "S1": {"mode": "supervised_paper", "approved": true},
     "S2": {"mode": "disabled", "approved": false},
     "S4": {"mode": "paper", "approved": true},
     "GLOBAL_LIVE_PROMOTION_ENABLED": false
   },
+
   "wakeup_schedule": [
-    {"wakeup": "2026-06-23T13:30:00Z", "action": "market_open_readiness_check"},
-    {"wakeup": "2026-06-23T14:15:00Z", "action": "post_first_cycle_evidence"},
-    {"wakeup": "2026-06-23T15:15:00Z", "action": "mid_session_checkpoint_1"},
-    {"wakeup": "2026-06-23T17:00:00Z", "action": "mid_session_checkpoint_2"},
-    {"wakeup": "2026-06-23T20:15:00Z", "action": "eod_evidence_and_report"}
+    {"wakeup": "2026-06-23T13:30:00Z", "action": "market_open_readiness_check", "status": "DONE"},
+    {"wakeup": "2026-06-23T14:15:00Z", "action": "post_first_cycle_evidence", "status": "DONE"},
+    {"wakeup": "2026-06-23T16:10:00Z", "action": "intraday_checkpoint", "status": "DONE"},
+    {"wakeup": "2026-06-23T20:05:00Z", "action": "eod_evidence_and_report", "status": "PENDING"}
   ]
 }

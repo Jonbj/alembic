@@ -1,1 +1,17 @@
-{"note":"market_closed_at_launch — to be filled at first paper cycle execution"}
+{
+  "captured_at_utc": "2026-06-23T16:10:00Z",
+  "period": "2026-06-23 14:00–16:10 UTC",
+  "total_today": 8,
+  "strategies_seen": ["S4"],
+  "note": "S1 produced no decisions (no EMA crossover signals). All 8 decisions are S4 news-driven.",
+  "decisions": [
+    {"id": 357, "symbol": "TSM", "decision": "BUY", "score": 0.05,   "regime_mult": 0.2, "ema_pass": true, "created_at": "2026-06-23T14:07:04Z", "reason_excerpt": "S4: sentiment +0.546 ensemble kimi+qwen, weight 5.0%"},
+    {"id": 358, "symbol": "MS",  "decision": "BUY", "score": 0.05,   "regime_mult": 0.2, "ema_pass": true, "created_at": "2026-06-23T14:07:04Z", "reason_excerpt": "S4: sentiment +0.485 ensemble kimi+qwen, weight 5.0%"},
+    {"id": 359, "symbol": "TM",  "decision": "BUY", "score": 0.05,   "regime_mult": 0.2, "ema_pass": true, "created_at": "2026-06-23T15:07:04Z", "reason_excerpt": "S4: sentiment +0.208 ensemble kimi+qwen, weight 5.0%"},
+    {"id": 360, "symbol": "TSM", "decision": "BUY", "score": 0.05,   "regime_mult": 0.2, "ema_pass": true, "created_at": "2026-06-23T15:37:04Z", "reason_excerpt": "S4: sentiment +0.626 ensemble kimi+qwen, weight 5.0%"},
+    {"id": 361, "symbol": "TSM", "decision": "BUY", "score": 0.0333, "regime_mult": 0.2, "ema_pass": true, "created_at": "2026-06-23T15:52:03Z", "reason_excerpt": "S4: sentiment +0.296 ensemble kimi+qwen, weight 3.3%"},
+    {"id": 362, "symbol": "GS",  "decision": "BUY", "score": 0.0333, "regime_mult": 0.2, "ema_pass": true, "created_at": "2026-06-23T15:52:03Z", "reason_excerpt": "S4: sentiment +0.138 kimi-k2.6, weight 3.3%"},
+    {"id": 363, "symbol": "TXN", "decision": "BUY", "score": 0.025,  "regime_mult": 0.2, "ema_pass": true, "created_at": "2026-06-23T16:07:04Z", "reason_excerpt": "S4: sentiment +0.457 finbert fallback, weight 2.5%"},
+    {"id": 364, "symbol": "MS",  "decision": "BUY", "score": 0.025,  "regime_mult": 0.2, "ema_pass": true, "created_at": "2026-06-23T16:07:04Z", "reason_excerpt": "S4: sentiment +0.120 kimi-k2.6, weight 2.5%"}
+  ]
+}
