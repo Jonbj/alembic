@@ -1341,8 +1341,8 @@ def _submit_portfolio_orders(
                         )
 
                     # P2-A: Bracket order — attach take-profit and stop-loss legs when enabled.
-                    # Requires a known entry price (use snapshot price, not notional).
-                    if _cfg_order.ALPACA_BRACKET_ENABLED and price and price > 0:
+                    # Requires whole-share qty: Alpaca rejects bracket on notional/fractional orders (error 42210000).
+                    if _cfg_order.ALPACA_BRACKET_ENABLED and price and price > 0 and not is_fractionable:
                         tp_price = round(price * (1 + _cfg_order.ALPACA_TAKE_PROFIT_PCT), 2)
                         sl_price = round(price * (1 - _cfg_order.ALPACA_STOP_LOSS_PCT), 2)
                         base_kwargs["order_class"] = OrderClass.BRACKET
