@@ -1,0 +1,2 @@
+2759498a5a73012d3a305fe18cbb629e  /home/stefano/Documents/Projects/Alembic/config/trading.yaml
+11d7e81704bd3f805b0a562d98284ddf  /home/stefano/Documents/Projects/Alembic/config/strategies.yaml

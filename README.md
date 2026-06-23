@@ -658,7 +658,8 @@ These bugs were identified by static architecture review against live-trading fa
 - ✅ `sentiment.py` + `celery_app.py`: In-flight queue — `LMOVE` pattern implemented
 - ✅ `performance.py`: Weight guardrail mean-ICIR floor — G3.5 guard added
 
-**P2-05 Execution Edge Cases** ✅ RESOLVED (commit `55cbf56`, 2026-06-21 — Kimi P2 Audit: `P2_ACCEPTED_WITH_RUNTIME_MONITORING`)
+**P2-05 Execution Edge Cases** ✅ RESOLVED (commit `55cbf56`, 2026-06-21 — Kimi P2 Audit: `P2_ACCEPTED_WITH_RUNTIME_MONITORING`)  
+**Controlled Paper Preflight** — runbook: [`docs/CONTROLLED_PAPER_PREFLIGHT_RUNBOOK_2026-06-21.md`](docs/CONTROLLED_PAPER_PREFLIGHT_RUNBOOK_2026-06-21.md) — dry-run and PO sign-off pending
 - ✅ `portfolio_scheduler.py`: `_get_fired_signal_ids()` now returns `None` on Redis error (fail-closed); `_apply_idempotency_filter()` skips all S4 BUYs when idempotency unverifiable
 - ✅ `portfolio_scheduler.py` + `constraints.py`: `_load_risk_config()` reads `max_portfolio_exposure` and `max_single_asset_pct` from `config/trading.yaml`; `ConstraintEnforcer` receives both values at each cycle
 - ✅ `orchestrator.py` + `vol_targeting.py`: `PortfolioVolTargeter.scale_orders()` now runs BEFORE `ConstraintEnforcer.enforce()` — enforcer has the final word on risk caps

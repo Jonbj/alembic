@@ -91,7 +91,10 @@ def get_cockpit_alerts(
         except Exception:
             pass
         try:
-            killswitch_active = bool(redis_client.get("killswitch_active"))
+            killswitch_active = (
+                bool(redis_client.get("killswitch_active"))
+                or bool(redis_client.get("system:halted_by_operator"))
+            )
         except Exception:
             pass
     except Exception:

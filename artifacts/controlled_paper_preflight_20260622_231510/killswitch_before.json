@@ -1,0 +1,22 @@
+=== FASE 11: KILL-SWITCH REHEARSAL ===
+Start: 2026-06-22T21:20:40Z
+
+--- G1: Baseline (before activation) ---
+killswitch_active before: False
+
+--- G2: Activate kill-switch ---
+Activation result: {"killswitch":"activated","mode":"halted","reason":"manual operator halt via API"}
+
+--- G3: Verify activation ---
+killswitch_active after activation: True
+{
+    "redis_healthy": true,
+    "redis_writeable": true,
+    "db_healthy": true,
+    "killswitch_active": true,
+    "stale_signals": false,
+    "worker_beat_lag": true,
+    "last_signal_age_minutes": 1.1349544666666667,
+    "last_cycle_age_minutes": 5848.671574466667
+}
+

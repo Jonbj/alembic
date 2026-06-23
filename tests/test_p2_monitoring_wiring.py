@@ -159,6 +159,63 @@ class TestCockpitAlerts:
             "Compute: last_signal_age_minutes > staleness_hours * 60."
         )
 
+    def test_killswitch_active_true_when_operator_halt_key_set(self):
+        """killswitch_active must be True when system:halted_by_operator is set in Redis,
+        even if the drawdown-path key killswitch_active is absent.
+
+        The kill-switch has two activation paths:
+          - drawdown path  → sets Redis key ``killswitch_active``
+          - operator path  → sets Redis key ``system:halted_by_operator``
+        Both must be reflected in the cockpit health dict.  Before the fix, only the
+        drawdown-path key was checked, so a manual operator halt was invisible to the
+        cockpit (BUG-6).
+        """
+        from src.monitoring.cockpit import get_cockpit_alerts
+        from unittest.mock import MagicMock
+
+        pg = _make_mock_pg()
+        redis_client = MagicMock()
+        redis_client.ping.return_value = True
+        redis_client.set.return_value = True
+        # drawdown-path key: absent; operator-halt key: set
+        redis_client.get.side_effect = lambda key: (
+            b"1" if key == "system:halted_by_operator" else None
+        )
+
+        result = get_cockpit_alerts(pg=pg, redis_client=redis_client)
+
+        assert result["killswitch_active"] is True, (
+            "killswitch_active must be True when system:halted_by_operator is set in Redis. "
+            "Fix: check both 'killswitch_active' and 'system:halted_by_operator' keys. "
+            f"Got killswitch_active={result['killswitch_active']!r}."
+        )
+
+    def test_killswitch_active_true_when_drawdown_key_set(self):
+        """killswitch_active must be True when the drawdown-path key killswitch_active is set."""
+        from src.monitoring.cockpit import get_cockpit_alerts
+
+        pg = _make_mock_pg()
+        redis_client = _make_mock_redis(ks_active=True)
+
+        result = get_cockpit_alerts(pg=pg, redis_client=redis_client)
+
+        assert result["killswitch_active"] is True, (
+            "killswitch_active must be True when Redis key 'killswitch_active' is set."
+        )
+
+    def test_killswitch_active_false_when_neither_key_set(self):
+        """killswitch_active must be False when both keys are absent."""
+        from src.monitoring.cockpit import get_cockpit_alerts
+
+        pg = _make_mock_pg()
+        redis_client = _make_mock_redis(ks_active=False)
+
+        result = get_cockpit_alerts(pg=pg, redis_client=redis_client)
+
+        assert result["killswitch_active"] is False, (
+            "killswitch_active must be False when neither key is present in Redis."
+        )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # T5-T7: GET /api/system/readiness

@@ -1,0 +1,29 @@
+{
+  "timestamp": "2026-06-21T08:51:03Z",
+  "alpaca_base_url": "https://paper-api.alpaca.markets",
+  "alpaca_api_key_prefix": "PK",
+  "alpaca_endpoint_is_paper": true,
+  "alpaca_key_is_paper": true,
+  "global_live_promotion_enabled": false,
+  "redis_ping": "PONG",
+  "redis_writeable_test": "OK (preflight_write_test=1, TTL=10s)",
+  "postgres_ready": "accepting connections",
+  "killswitch_active": false,
+  "api_health": {"status": "ok"},
+  "migrations_applied": {
+    "025_strategy_lifecycle": "applied 2026-06-21T08:50Z",
+    "026_strategy_lifecycle_audit": "applied 2026-06-21T08:50Z"
+  },
+  "containers_rebuilt": {
+    "reason": "Containers pre-dated P2-05 commit 55cbf56 by 35h; rebuilt to deploy committed code",
+    "rebuilt_at": "2026-06-21T08:51:03Z",
+    "services": ["api", "worker", "worker-inference", "beat"]
+  },
+  "statement": "No live credentials or live endpoint detected. ALPACA_BASE_URL=https://paper-api.alpaca.markets (paper endpoint). API key prefix PK (paper key). No live account touched.",
+  "risk_limits_from_config": {
+    "max_portfolio_exposure": 0.50,
+    "max_position_pct": 0.10,
+    "stop_loss": 0.02,
+    "portfolio_drawdown": 0.05
+  }
+}

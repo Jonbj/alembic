@@ -1,0 +1,43 @@
+=== FASE 10: ORDER LIFECYCLE EVIDENCE ===
+Timestamp: 2026-06-22T21:20:08Z
+
+--- Historical cycles (last 3) ---
+ id |           timestamp           | strategies_run | orders_count | constraints_fired 
+----+-------------------------------+----------------+--------------+-------------------
+ 89 | 2026-06-18 19:52:00.700619+00 | ["S1", "S4"]   |            5 | []
+ 88 | 2026-06-18 19:37:00.887283+00 | ["S1", "S4"]   |            5 | []
+ 87 | 2026-06-18 19:22:00.739764+00 | ["S1", "S4"]   |            6 | []
+(3 rows)
+
+
+--- Recent trades (paper) ---
+ERROR:  column "side" does not exist
+LINE 1: SELECT id, symbol, side, quantity, entry_price, entry_time, ...
+                           ^
+HINT:  Perhaps you meant to reference the column "trades.id".
+
+--- Open trades count ---
+ open_trades 
+-------------
+          16
+(1 row)
+
+
+--- DRY-RUN CYCLE RESULT ---
+Cycle triggered: abb2243f-f272-4fd7-91ef-2651fec4b776 (2026-06-22T21:18:12Z)
+Result: {'skipped': True, 'reason': 'no_approved_strategies'}
+
+EXPLANATION: Both S1 and S4 have approved=False in strategy_lifecycle.
+The _filter_approved_strategies() gate is working correctly (fail-closed).
+No new portfolio_cycles row was created — cycle was halted before order submission.
+No orders were submitted to the paper broker during this preflight cycle.
+
+HISTORICAL EVIDENCE (cycles 87-89, 2026-06-18):
+  - strategies_run: ['S1', 'S4']
+  - orders_count: 5-6 per cycle
+  - constraints_fired: [] (no cap violations)
+  - All decisions from S4 (news-driven) with full LLM attribution
+  - No unexplained BUYs, no live references
+
+RISK NOTE (R-13): 16 open trades from previous sessions.
+Pyramid guard (open_trade_symbols) must be active when approved=True.

@@ -2,14 +2,15 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   BarChart, Bar, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, ResponsiveContainer,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   Cell,
 } from 'recharts'
 import { strategiesApi } from '@/api/strategies'
 import { HelpButton } from '@/components/shared/HelpButton'
 import { DataTable } from '@/components/shared/DataTable'
 import { KPICard } from '@/components/shared/KPICard'
-import type { Strategy, GateResult, SensitivityPoint } from '@/api/strategies'
+import { StrategyAuthStatus } from '@/components/shared/StrategyAuthStatus'
+import type { GateResult, SensitivityPoint } from '@/api/strategies'
 
 function fmt(v: number | null | undefined, decimals = 4): string {
   if (v == null) return '—'
@@ -132,7 +133,7 @@ export default function Strategies() {
       <HelpButton title="Strategies — Validazione Strategie" sections={[
         {
           heading: "Le strategie",
-          content: "Alembic usa un portfolio multi-strategia. Ogni strategia è validata independently con 5 validation gates.\n\n**S1 — Time-Series Momentum**: strategia cross-asset trend-following con volatility targeting. VALIDATA (OOS Sharpe 0.51, 5/5 gate passati).\n\n**S3 — Cross-Sectional Momentum**: strategia equity residual momentum. R&D SLEEVE — gate 3 (robustness) e 5 (stress) FALLITI. OOS Sharpe 0.15. NON nel portfolio live.\n\n**S4 — News-Driven Tactical**: strategia news/sentiment. In esecuzione live con allocazione 10%.\n\nS2 (VRP) è in sviluppo.",
+          content: "Alembic usa un portfolio multi-strategia. Ogni strategia è validata con 5 validation gates.\n\n**S1 — Time-Series Momentum**: cross-asset trend-following con volatility targeting. Modalità: supervised_paper. Promotion blocked — NON autorizzata al live né alla promozione.\n\n**S3 — Cross-Sectional Momentum**: equity residual momentum. R&D sleeve — gate 3 (robustness) e 5 (stress) FALLITI. OOS Sharpe 0.15. NON nel portfolio.\n\n**S4 — News-Driven Tactical**: strategia news/sentiment. Modalità: paper. Promotion blocked — NON autorizzata al live né alla promozione.\n\nS2 (VRP) è in sviluppo (disabled).\n\n⚠ Lo stato di autorizzazione è quello mostrato dal badge sotto ogni strategia, non le metriche di backtest.",
         },
         {
           heading: "KPI Cards — definizioni",
@@ -173,11 +174,21 @@ export default function Strategies() {
       </div>
 
       {currentStrategy && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ color: '#64748b', fontSize: 12 }}>
-            {currentStrategy.n_assets} assets · {currentStrategy.status.toUpperCase()} · {currentStrategy.oos_sharpe} OOS Sharpe
-          </span>
-          <DataSourceBadge source={currentStrategy.data_source} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ color: '#64748b', fontSize: 12 }}>
+              {currentStrategy.n_assets} assets · {currentStrategy.oos_sharpe != null ? `${currentStrategy.oos_sharpe} OOS Sharpe (backtest snapshot)` : '—'}
+            </span>
+            <DataSourceBadge source={currentStrategy.data_source} />
+          </div>
+          {/* F0-1: authorization truth — consumes live API fields */}
+          <StrategyAuthStatus
+            mode={currentStrategy.mode}
+            promotion_blocked={currentStrategy.promotion_blocked}
+            live_authorized={currentStrategy.live_authorized}
+            promotion_authorized={currentStrategy.promotion_authorized}
+            data_quality_warning={currentStrategy.data_quality_warning}
+          />
         </div>
       )}
 
@@ -252,7 +263,21 @@ export default function Strategies() {
 
       {/* Gates */}
       <div>
-        <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>Validation Gates</h3>
+        <h3 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600 }}>Validation Gates</h3>
+        {/* F0-1: stale snapshot notice — gate results are backtest evidence, not current authorization */}
+        <div style={{
+          marginBottom: 12,
+          padding: '6px 12px',
+          background: '#1c1917',
+          border: '1px solid #44403c',
+          borderRadius: 6,
+          color: '#a8a29e',
+          fontSize: 11,
+        }}>
+          ⓘ Gate results below are historical backtest evidence (snapshot).
+          They do not reflect current authorization state and do not authorize paper, promotion, or live trading.
+          See authorization badges above for the current lifecycle state.
+        </div>
         <DataTable
           columns={[
             { label: 'Gate',      width: '25%' },
@@ -315,7 +340,7 @@ export default function Strategies() {
             <div key={key} style={{ background: '#0f172a', padding: 12, borderRadius: 6 }}>
               <div style={{ color: '#64748b', fontSize: 11 }}>{key.replace(/_/g, ' ')}</div>
               <div style={{ color: 'white', fontSize: 14, fontWeight: 600 }}>
-                {Array.isArray(val) ? val.join(', ') : (val ?? '—')}
+                {Array.isArray(val) ? (val as unknown[]).join(', ') : String(val ?? '—')}
               </div>
             </div>
           ))}

@@ -1,0 +1,50 @@
+=== FASE 2: ENVIRONMENT SAFETY CHECK ===
+Timestamp: 2026-06-22T21:15:57Z
+
+--- 2.1 BROKER ENVIRONMENT ---
+ALPACA_BASE_URL: https://paper-api.alpaca.markets
+API_KEY_PREFIX: PK
+BROKER_URL_CHECK: PASS (paper endpoint confirmed)
+API_KEY_PREFIX_CHECK: PASS (PK = paper key)
+
+--- 2.2 PROMOTION KILL-SWITCH ---
+GLOBAL_LIVE_PROMOTION_ENABLED: bool = False
+
+--- 2.3 STRATEGY LIFECYCLE STATES ---
+ strategy_id |       mode       | target_mode | approved |          updated_at          
+-------------+------------------+-------------+----------+------------------------------
+ S1          | supervised_paper |             | f        | 2026-06-21 08:50:06.20054+00
+ S2          | disabled         |             | t        | 2026-06-21 08:50:06.20054+00
+ S4          | paper            |             | f        | 2026-06-21 08:50:06.20054+00
+(3 rows)
+
+
+--- 2.4 INFRASTRUCTURE HEALTH ---
+Redis ping:
+PONG
+PG ready:
+/var/run/postgresql:5432 - accepting connections
+API health:
+{"status":"ok","mode":"backtest"}
+--- 2.5 KILL-SWITCH STATE ---
+killswitch_active raw: ''
+
+--- 2.6 MIGRATIONS PRESENT ---
+ public | execution_decisions      | table | trading
+ public | portfolio_cycles         | table | trading
+ public | strategy_lifecycle       | table | trading
+ public | strategy_lifecycle_audit | table | trading
+
+--- 2.7 CONFIG FILES ---
+  max_portfolio_exposure: 0.50
+
+--- 2.8 REDIS SYSTEM MODE ---
+system:mode: 'paper'
+
+--- 2.9 NO LIVE CREDENTIALS ---
+Live endpoint in .env: 0 (must be 0)
+LIVE_CREDENTIAL_CHECK: PASS — No live endpoint detected
+
+--- ENVIRONMENT SAFETY SUMMARY ---
+No live credentials or live endpoint detected: CONFIRMED
+Environment is paper/sandbox ONLY

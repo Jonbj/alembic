@@ -1,0 +1,20 @@
+ open_trades 
+-------------
+          16
+(1 row)
+
+ closed_trades 
+---------------
+           176
+(1 row)
+
+ total_decisions 
+-----------------
+             356
+(1 row)
+
+ total_cycles 
+--------------
+           89
+(1 row)
+

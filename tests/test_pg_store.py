@@ -858,5 +858,104 @@ class TestCloseTradeCostBreakdown:
         assert "qty" in sig.parameters
 
 
+# ── BUG-2: reconcile window too narrow (24h → 7d) ────────────────────────────
+
+
+class TestReconcileWindow:
+    """reconcile_trade_fills must use a 7-day window, not 24 hours.
+
+    Trades opened and closed across a weekend (or if the daily reconcile task
+    missed a run) have entry_time > 24h ago and would never be reconciled under
+    the old '24 hours' window, leaving entry_price = NULL forever.
+    """
+
+    def test_reconcile_entry_query_uses_7_day_window(self):
+        """The SELECT for unfilled entries must look back 7 days, not 24 hours."""
+        from src.store.pg_store import PostgreSQLStore
+
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchall.side_effect = [[], []]
+
+        store = PostgreSQLStore(conn=mock_conn)
+        store.reconcile_trade_fills(MagicMock())
+
+        all_sqls = [str(c[0][0]) for c in mock_cur.execute.call_args_list]
+        entry_select = next(
+            (s for s in all_sqls if "entry_price IS NULL" in s), None
+        )
+        assert entry_select is not None, "Expected a SELECT filtering on entry_price IS NULL"
+        assert "24 hours" not in entry_select, (
+            "reconcile window must NOT use '24 hours' — trades older than 1 day "
+            "are missed; use '7 days' instead"
+        )
+        assert "7 days" in entry_select, (
+            "reconcile window must be '7 days' so weekend and missed-run trades "
+            "are still reconciled"
+        )
+
+
+# ── BUG-4: fetch_decisions must return signal_score ───────────────────────────
+
+
+class TestFetchDecisionsSignalScore:
+    """fetch_decisions must include signal_score in returned rows.
+
+    The execution_decisions table stores both score (allocation_weight) and
+    signal_score (LLM sentiment). fetch_decisions previously omitted signal_score,
+    making it invisible to the API and analytics.
+    """
+
+    def test_fetch_decisions_returns_signal_score(self):
+        """Returned dicts must include a 'signal_score' key."""
+        from datetime import datetime, timezone
+        from src.store.pg_store import PostgreSQLStore
+
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.description = [
+            ("id",), ("tick_time",), ("symbol",), ("signal_id",),
+            ("score",), ("signal_score",), ("regime_mult",), ("ema_pass",),
+            ("decision",), ("order_id",), ("reason",), ("created_at",),
+        ]
+        now = datetime(2026, 6, 18, 14, tzinfo=timezone.utc)
+        mock_cur.fetchall.return_value = [
+            (1, now, "XLK", 294, 0.02, 0.707, 0.2, True, "BUY", None, "S4 news-driven", now),
+        ]
+
+        store = PostgreSQLStore(conn=mock_conn)
+        rows = store.fetch_decisions(limit=10)
+
+        assert len(rows) == 1
+        assert "signal_score" in rows[0], (
+            "fetch_decisions must return signal_score so the API and analytics "
+            "can distinguish LLM quality from allocation_weight"
+        )
+        assert rows[0]["signal_score"] == 0.707
+
+    def test_fetch_decisions_sql_selects_signal_score(self):
+        """The SELECT SQL must include signal_score so it is returned from DB."""
+        from src.store.pg_store import PostgreSQLStore
+
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.description = []
+        mock_cur.fetchall.return_value = []
+
+        store = PostgreSQLStore(conn=mock_conn)
+        store.fetch_decisions(limit=5)
+
+        all_sqls = [str(c[0][0]) for c in mock_cur.execute.call_args_list]
+        select_sql = next((s for s in all_sqls if "execution_decisions" in s), None)
+        assert select_sql is not None, "Expected a SELECT on execution_decisions"
+        assert "signal_score" in select_sql, (
+            "fetch_decisions SELECT must include signal_score — currently omitted "
+            "so the LLM sentiment score is invisible to the API and analytics"
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -247,8 +247,8 @@ class PostgreSQLStore:
 
     _INSERT_DECISION = """
         INSERT INTO execution_decisions
-            (tick_time, symbol, signal_id, score, regime_mult, ema_pass, decision, order_id, reason)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (tick_time, symbol, signal_id, score, signal_score, regime_mult, ema_pass, decision, order_id, reason)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
     """
 
@@ -263,14 +263,22 @@ class PostgreSQLStore:
         decision: str,
         order_id: str | None = None,
         reason: str | None = None,
+        signal_score: float | None = None,
     ) -> int:
-        """Insert one execution decision row. Returns the new id."""
+        """Insert one execution decision row. Returns the new id.
+
+        Args:
+            score:        Portfolio allocation weight (e.g. 0.02 = 2% target weight).
+            signal_score: Actual LLM sentiment score that drove the decision (e.g. +0.707).
+                          Stored separately from score so IC analytics can correlate
+                          signal quality with subsequent returns.
+        """
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(
                     self._INSERT_DECISION,
-                    (tick_time, symbol, signal_id, score, regime_mult, ema_pass, decision, order_id, reason),
+                    (tick_time, symbol, signal_id, score, signal_score, regime_mult, ema_pass, decision, order_id, reason),
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -310,7 +318,7 @@ class PostgreSQLStore:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"""SELECT id, tick_time, symbol, signal_id, score, regime_mult,
+                    f"""SELECT id, tick_time, symbol, signal_id, score, signal_score, regime_mult,
                                ema_pass, decision, order_id, reason, created_at
                         FROM execution_decisions {where}
                         ORDER BY tick_time DESC LIMIT %s""",
@@ -771,7 +779,7 @@ class PostgreSQLStore:
                 cur.execute(
                     """SELECT id, entry_order_id, symbol, entry_notional FROM trades
                        WHERE entry_price IS NULL
-                         AND entry_time > now() - '24 hours'::interval"""
+                         AND entry_time > now() - '7 days'::interval"""
                 )
                 rows = cur.fetchall()
             updated = 0

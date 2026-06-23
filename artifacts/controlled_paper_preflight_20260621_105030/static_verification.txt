@@ -1,0 +1,44 @@
+CONTROLLED PAPER PREFLIGHT — STATIC VERIFICATION
+Date: 2026-06-21T08:50 UTC
+Operator: Maintainer (preflight execution)
+
+=== GIT STATE ===
+9e1039e docs(pre-paper): reconcile stale doc/API surfaces per Kimi P2 Audit findings
+55cbf56 fix(p2-05): execution edge cases — fail-closed idempotency, cap from config, vol→cap order
+7166a40 docs: update P0/P1 acceptance audits and forensic daily-analysis script
+d4b3f3b feat(P2-04): monitoring wiring / operator cockpit
+69d9725 feat(frontend/news): show both ingestion time and published_at
+
+ M README.md
+ M docs/P2_STATUS_2026-06-21.md
+ M docs/RESIDUAL_RISK_REGISTER.md
+?? artifacts/
+?? docs/CONTROLLED_PAPER_PREFLIGHT_RUNBOOK_2026-06-21.md
+?? docs/FRONTEND_IMPACT_AND_CUSTOMER_JOURNEY_REVIEW_2026-06-21.md
+
+=== RESULTS ===
+[PASS] Current branch: main
+[PASS] HEAD commit: 9e1039e (docs(pre-paper): reconcile stale doc/API surfaces)
+[PASS] Reconciliation commit 9e1039e found in history
+[PASS] P2_ACCEPTANCE_AUDIT_2026-06-21.md: present
+[PASS] CONTROLLED_PAPER_PREFLIGHT_RUNBOOK_2026-06-21.md: present
+[PASS] P2_STATUS_2026-06-21.md: present
+[PASS] RESIDUAL_RISK_REGISTER.md: present
+[PASS] GLOBAL_LIVE_PROMOTION_ENABLED: False (src/strategies/promotion.py:27)
+[PASS] README: "Not authorized" for controlled paper and live trading
+[PASS] S1 API status (rebuilt container): supervised_paper
+[PASS] S1 promotion_blocked: True
+[PASS] S1 live_authorized: False
+[PASS] S2: enabled=false, allocation_pct=0.00, mode=research
+[PASS] S3: enabled=false, allocation_pct=0.00, mode=research
+[PASS] S7: enabled=false, allocation_pct=0.00, mode=research
+[PASS] No P3/P4 branches active
+[PASS] Active branch: main
+[NOTE] API/worker containers rebuilt to deploy committed code (55cbf56 + 9e1039e)
+       Containers pre-rebuild were from 2026-06-19T23:38Z, missing P2-05 safety fixes
+       Rebuild is operational deployment step, not a code change
+[NOTE] Migrations 025/026 applied: strategy_lifecycle + strategy_lifecycle_audit created
+       S1=supervised_paper, S2=disabled, S4=paper seeded
+
+=== VERDICT ===
+STATIC VERIFICATION: PASS (with operational deployment note)

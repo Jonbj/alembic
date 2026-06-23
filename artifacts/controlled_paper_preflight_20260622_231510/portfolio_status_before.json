@@ -1,0 +1,38 @@
+=== FASE 7: PRE-RUN SNAPSHOT ===
+Timestamp: 2026-06-22T21:17:40Z
+
+--- Config Hashes ---
+2759498a5a73012d3a305fe18cbb629e  /home/stefano/Documents/Projects/Alembic/config/trading.yaml
+11d7e81704bd3f805b0a562d98284ddf  /home/stefano/Documents/Projects/Alembic/config/strategies.yaml
+
+--- Redis pre-run state ---
+paper
+
+
+
+--- Portfolio cycles baseline ---
+ total_cycles 
+--------------
+           89
+(1 row)
+
+
+--- Execution decisions baseline ---
+ total_decisions 
+-----------------
+             356
+(1 row)
+
+
+--- Open trades baseline ---
+ERROR:  column "closed_at" does not exist
+LINE 1: SELECT COUNT(*) AS open_trades FROM trades WHERE closed_at I...
+                                                         ^
+
+--- System mode (Redis) ---
+paper
+
+--- Readiness (pre-run) ---
+{"redis_healthy":true,"redis_writeable":true,"db_healthy":true,"killswitch_active":false,"stale_signals":false,"worker_beat_lag":true,"last_signal_age_minutes":1.1605220333333333,"last_cycle_age_minutes":5845.665561100001}
+--- Kill-switch state ---
+{"killswitch":false,"mode":"paper","llm_models":"all"}

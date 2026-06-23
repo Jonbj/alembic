@@ -1,0 +1,10 @@
+  53 |
+  54 |   const scrollRef = useRef<HTMLDivElement>(null)
+> 55 |   const virtualizer = useVirtualizer({
+     |                       ^^^^^^^^^^^^^^ TanStack Virtual's `useVirtualizer()` API returns functions that cannot be memoized safely
+  56 |     count: filtered.length,
+  57 |     getScrollElement: () => scrollRef.current,
+  58 |     estimateSize: () => ROW_H,  react-hooks/incompatible-library
+
+✖ 6 problems (3 errors, 3 warnings)
+

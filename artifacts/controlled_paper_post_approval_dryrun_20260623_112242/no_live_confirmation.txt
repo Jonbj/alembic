@@ -1,0 +1,36 @@
+=== NO LIVE TRADING CONFIRMATION ===
+Timestamp: 2026-06-23T11:30:00Z
+Operator: Maintainer (Claude Code / Jonbj)
+
+ENVIRONMENT CHECKS:
+- ALPACA_BASE_URL: https://paper-api.alpaca.markets (paper only)
+- API key prefix: PK (paper key)
+- Live endpoint in .env: 0 occurrences
+- GLOBAL_LIVE_PROMOTION_ENABLED: False (hardcoded in src/strategies/promotion.py)
+- system:mode (Redis): paper
+
+LIFECYCLE CHECKS (post-approval):
+- S1: mode=supervised_paper, approved=true (for paper path only)
+- S2: mode=disabled, approved=true (pre-existing inconsistency, not touched, no execution path)
+- S4: mode=paper, approved=true (for paper path only)
+- No mode changed to 'live' during this session
+- target_mode: null for all strategies
+- promoted_by: null for all strategies
+- promoted_at: null for all strategies
+
+OPERATION CHECKS:
+- No live orders placed
+- No live credentials used
+- No live broker endpoint contacted
+- No live Alpaca account touched
+- Kill-switch: false (not activated)
+- System mode: paper throughout
+- GLOBAL_LIVE_PROMOTION_ENABLED: False throughout
+- promotion_blocked: True for S1/S4 (enforced in API layer, unchanged)
+- live_authorized: False for S1/S4 (unchanged)
+- promotion_authorized: False for S1/S4 (unchanged)
+
+Operator statement: All interactions were with paper-api.alpaca.markets paper account only.
+No live orders were placed. No live credentials were loaded.
+The approval governance update (approved=true for S1/S4) is a controlled-paper-only gate
+and does NOT constitute live promotion.

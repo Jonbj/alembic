@@ -1,0 +1,83 @@
+=== FASE 1: STATIC VERIFICATION ===
+Timestamp: 2026-06-22T21:15:29Z
+
+--- GIT STATUS ---
+ M README.md
+ M docs/P2_STATUS_2026-06-21.md
+ M docs/RESIDUAL_RISK_REGISTER.md
+ M frontend/package-lock.json
+ M frontend/package.json
+ M frontend/src/api/admin.ts
+ M frontend/src/api/strategies.ts
+ M frontend/src/components/layout/ModeBadge.tsx
+ M frontend/src/pages/Admin.tsx
+ M frontend/src/pages/Config.tsx
+ M frontend/src/pages/Strategies.tsx
+ M frontend/tsconfig.app.json
+ M src/api/routes/admin.py
+ M src/monitoring/cockpit.py
+ M src/store/pg_store.py
+ M src/workers/portfolio_scheduler.py
+ M tests/test_p2_monitoring_wiring.py
+ M tests/workers/test_portfolio_scheduler.py
+?? artifacts/
+?? docs/CONTROLLED_PAPER_PREFLIGHT_RUNBOOK_2026-06-21.md
+?? docs/FRONTEND_IMPACT_AND_CUSTOMER_JOURNEY_REVIEW_2026-06-21.md
+?? docs/OPUS_REVIEW_OF_GLM_FRONTEND_IMPACT_REVIEW_2026-06-21.md
+?? frontend/src/components/shared/RiskParamWarning.tsx
+?? frontend/src/components/shared/StrategyAuthStatus.tsx
+?? frontend/src/tests/
+?? frontend/vitest.config.ts
+?? migrations/028_add_signal_score_to_execution_decisions.sql
+?? tests/api/test_admin_killswitch_token.py
+
+--- GIT LOG (last 5) ---
+9e1039e docs(pre-paper): reconcile stale doc/API surfaces per Kimi P2 Audit findings
+55cbf56 fix(p2-05): execution edge cases — fail-closed idempotency, cap from config, vol→cap order
+7166a40 docs: update P0/P1 acceptance audits and forensic daily-analysis script
+d4b3f3b feat(P2-04): monitoring wiring / operator cockpit
+69d9725 feat(frontend/news): show both ingestion time and published_at
+
+HEAD: 9e1039e20eb0183dcd19e320333a183c9ed3f180
+Branch: main
+
+--- RECONCILIATION COMMIT 9e1039e PRESENT ---
+9e1039e docs(pre-paper): reconcile stale doc/API surfaces per Kimi P2 Audit findings
+
+--- AUDIT DOCUMENTS ---
+-rw-rw-r-- 1 stefano stefano 39811 Jun 21 10:34 /home/stefano/Documents/Projects/Alembic/docs/CONTROLLED_PAPER_PREFLIGHT_RUNBOOK_2026-06-21.md
+-rw-rw-r-- 1 stefano stefano 21066 Jun 21 09:55 /home/stefano/Documents/Projects/Alembic/docs/P2_ACCEPTANCE_AUDIT_2026-06-21.md
+-rw-rw-r-- 1 stefano stefano  7116 Jun 22 18:45 /home/stefano/Documents/Projects/Alembic/docs/RESIDUAL_RISK_REGISTER.md
+
+--- GLOBAL_LIVE_PROMOTION_ENABLED ---
+  3. GLOBAL_LIVE_PROMOTION_ENABLED = True when target is 'live'
+GLOBAL_LIVE_PROMOTION_ENABLED: bool = False
+    if target_mode == "live" and not GLOBAL_LIVE_PROMOTION_ENABLED:
+            "(GLOBAL_LIVE_PROMOTION_ENABLED=False). "
+
+--- README AUTHORIZATION CLAIMS ---
+537:This section is the canonical list of known gaps, uncalibrated parameters, and open engineering questions. It exists to help code reviewers — human or AI — focus effort where uncertainty is highest. Items marked **⚠️** are unvalidated assumptions that could affect live trading outcomes.
+541:Every number below was chosen heuristically and has not been validated against historical data. They are the first place to look if the system underperforms.
+547:| EMA period | `20 days` | `execution.py` | Not validated for news-driven intraday signals; standard technical indicator only |
+
+--- CONFIG/STRATEGIES.YAML STRATEGY MODES ---
+  S1:
+    enabled: true
+    mode: supervised_paper
+  S2:
+    enabled: false
+    mode: research
+  S3:
+    enabled: false
+    mode: research
+  S4:
+    enabled: true
+    mode: paper
+  S7:
+    enabled: false
+    mode: research
+
+--- ALPACA_BASE_URL (MASKED KEY) ---
+ALPACA_BASE_URL=https://paper-api.alpaca.markets
+ALPACA_API_KEY_PREFIX=PK
+

@@ -1,0 +1,1 @@
+{"redis_healthy":true,"redis_writeable":true,"db_healthy":true,"killswitch_active":false,"stale_signals":false,"worker_beat_lag":true,"last_signal_age_minutes":3.2000102666666668,"last_cycle_age_minutes":5851.978195333333}

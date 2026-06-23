@@ -1,6 +1,27 @@
 import { apiFetch } from './client'
 
-export interface Strategy {
+/** Authorization state fields returned by the strategy API (F0-1). */
+export interface StrategyAuthFields {
+  /** Lifecycle mode: "supervised_paper" | "paper" | "research" | "disabled" | "live" */
+  mode?: string
+  /** True when promotion to a higher lifecycle mode is blocked by a gate or policy. */
+  promotion_blocked?: boolean
+  /** Explicit flag: false = not authorized for live trading. Fail-closed: absent = treat as false. */
+  live_authorized?: boolean
+  /** Explicit flag: false = not authorized for promotion. */
+  promotion_authorized?: boolean
+  /**
+   * Non-empty string when backtest metrics are a stale historical snapshot
+   * and must not be interpreted as authorization for paper, promotion, or live trading.
+   */
+  data_quality_warning?: string
+  /** Describes the validation lifecycle state (e.g. "backtest_only"). */
+  validation_status?: string
+  /** ISO date of the most recent metric snapshot, if known. */
+  metrics_as_of?: string
+}
+
+export interface Strategy extends StrategyAuthFields {
   id: string
   name: string
   description: string
@@ -13,12 +34,12 @@ export interface Strategy {
   data_source?: 'LIVE' | 'BACKTEST'
 }
 
-export interface StrategyDetail {
+export interface StrategyDetail extends StrategyAuthFields {
   id: string
   name: string
   description: string
   status: string
-  parameters: Record<string, any>
+  parameters: Record<string, unknown>
   universe: string[] | string
   n_assets: number
   oos_sharpe: number | null

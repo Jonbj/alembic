@@ -189,7 +189,8 @@ async def deactivate_killswitch(
 
     # Token validation (one-time use).
     stored_token = store._r.get("ks:recovery_token")
-    if not confirm_token or stored_token is None or stored_token != confirm_token:
+    stored_token_str = stored_token.decode() if isinstance(stored_token, bytes) else stored_token
+    if not confirm_token or stored_token is None or stored_token_str != confirm_token:
         raise HTTPException(
             status_code=422,
             detail="Invalid or expired recovery token — request a new one via POST /killswitch/recovery-token",

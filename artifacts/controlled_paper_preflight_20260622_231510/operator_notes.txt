@@ -1,0 +1,59 @@
+OPERATOR NOTES — Controlled Paper Preflight 2026-06-22
+=======================================================
+
+Operator: Maintainer (Claude Code / Jonbj)
+Date/time: 2026-06-22 21:15-21:24 UTC
+
+STATEMENT: No live credentials were loaded. No live orders were placed.
+All broker interactions were with Alpaca paper account (paper-api.alpaca.markets)
+using paper credentials (key prefix PK).
+
+DEVIATIONS FROM RUNBOOK:
+
+1. Working tree not clean (git status: 19 modified + 8 untracked files)
+   These are F0-1/F0-3 frontend safety hygiene improvements + backend bug fixes.
+   None are safety regressions. All should be committed before first authorized cycle.
+
+2. Dry-run cycle produced no portfolio_cycles row.
+   The _filter_approved_strategies() gate correctly excluded S1 and S4 (both approved=False).
+   This is expected/designed behavior. The runbook criterion "at least one portfolio_cycles row"
+   cannot be met without PO first setting approved=True. The evidence base includes 89 prior
+   cycles demonstrating the infrastructure works.
+
+3. S2 has approved=True in strategy_lifecycle despite mode=disabled.
+   This is a data inconsistency, not an operational risk. S2 cannot execute:
+   enabled=false in YAML, allocation_pct=0.00, no StrategyRegistry entry.
+   Recommend: UPDATE strategy_lifecycle SET approved=false WHERE strategy_id='S2';
+
+4. S4 is not in the strategies API STRATEGIES dict (only S1 and S3 are exposed).
+   S4 is correctly tracked in lifecycle table and config/strategies.yaml.
+   This is a frontend/API informational gap, not a safety issue.
+
+5. worker_beat_lag=true in readiness endpoint.
+   Expected: execution is on Sunday 21:17 UTC (US market closed).
+   Documented-acceptable per runbook Section 7.
+
+OPEN RISKS ACKNOWLEDGED:
+- R-13: 16 open paper positions (pyramiding). Must be acknowledged by PO.
+  Symbols with multiple positions: ORCL(4), IWM(3), AMAT(2).
+- R-14: entry_time NULL on closed trades (blocks postmortem).
+- R-15: postmortem pipeline never ran (blocked by R-14).
+- R-11: Redis flush clears kill-switch (use appendonly yes in production).
+
+KILL-SWITCH REHEARSAL: COMPLETE
+- Activated at 21:20:40 UTC
+- Cycle halted at 21:20:51 UTC (worker log confirmed)
+- Emergency order cancellation confirmed
+- Cooldown enforced (120s minimum)
+- OTP recovery token flow used for deactivation
+- Deactivated at 21:23:32 UTC
+- Final readiness: killswitch_active=false
+
+NO ACTIONS TAKEN THAT ARE NOT AUTHORIZED:
+- Did not modify strategy lifecycle state
+- Did not set approved=True for any strategy
+- Did not promote any strategy
+- Did not enable GLOBAL_LIVE_PROMOTION_ENABLED
+- Did not submit orders to any broker
+- Did not use live credentials or live endpoints
+- Did not start P3/P4 work

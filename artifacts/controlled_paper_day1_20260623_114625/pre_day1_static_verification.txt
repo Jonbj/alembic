@@ -1,0 +1,36 @@
+=== CONTROLLED PAPER DAY 1 — STATIC VERIFICATION ===
+Timestamp: Tue Jun 23 11:48:30 AM UTC 2026
+
+--- GIT STATE ---
+Branch: main
+HEAD commit: 9e1039e20eb0183dcd19e320333a183c9ed3f180
+Commit message: docs(pre-paper): reconcile stale doc/API surfaces per Kimi P2 Audit findings
+Working tree: 29 modified/untracked files
+
+--- EVIDENCE DIRECTORIES ---
+Preflight exists: YES
+Post-approval DRY-RUN exists: YES
+PO Sign-Off package (dry-run): PRESENT
+
+--- ENVIRONMENT SAFETY ---
+ALPACA_BASE_URL: ALPACA_BASE_URL=https://paper-api.alpaca.markets
+API_KEY_PREFIX: PK
+LIVE_API_IN_ENV: 0 occurrences (must be 0)
+GLOBAL_LIVE_PROMOTION_ENABLED: GLOBAL_LIVE_PROMOTION_ENABLED: bool = False
+SYSTEM_MODE_REDIS: paper
+ADMIN_STATUS: {"killswitch":false,"mode":"paper","llm_models":"all"}
+
+--- PROMOTION GATE VERIFICATION ---
+PROMOTE_CODE: 27:GLOBAL_LIVE_PROMOTION_ENABLED: bool = False
+MODE_CHECK: 1 gate check(s) present
+
+--- CONTAINERS ---
+alembic-frontend-1: Up 15 hours
+alembic-api-1: Up 18 hours (healthy)
+alembic-worker-1: Up 18 hours
+alembic-beat-1: Up 18 hours
+alembic-worker-inference-1: Up 18 hours
+alembic-grafana-1: Up 2 weeks
+alembic-postgres-1: Up 2 weeks (healthy)
+alembic-redis-1: Up 2 weeks (healthy)
+

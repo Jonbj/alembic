@@ -1,0 +1,9 @@
+=== ENVIRONMENT SAFETY ===
+ALPACA_BASE_URL: ALPACA_BASE_URL=https://paper-api.alpaca.markets
+API_KEY_PREFIX: ALPACA_API_KEY=PKNT7NQZGWC4IXS...
+LIVE_ENDPOINT_COUNT: 1
+LIVE_ENDPOINT_IN_ENV: 0
+REDIS_SYSTEM_MODE: paper
+ADMIN_STATUS: {"killswitch":false,"mode":"paper","llm_models":"all"}
+GLOBAL_LIVE_PROMOTION_ENABLED:   3. GLOBAL_LIVE_PROMOTION_ENABLED = True when target is 'live'
+KILLSWITCH_KEYS: system:mode

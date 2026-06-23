@@ -53,6 +53,16 @@ def _portfolio_postmortem(
     """
     from src.performance.postmortem import TradeContext, diagnose_loss, should_trigger_postmortem
 
+    # If entry_price is 0 (Alpaca positions failed to load), fall back to the
+    # reconciled entry_price from the DB trade record.
+    if entry_price <= 0 and trade_id:
+        try:
+            _trade_rec = pg_store.fetch_trade_with_signal(trade_id)
+            if _trade_rec and _trade_rec.get("entry_price"):
+                entry_price = float(_trade_rec["entry_price"])
+        except Exception:
+            pass
+
     loss_pct = (entry_price - exit_price) / entry_price if entry_price > 0 else 0.0
     confidence = float(signal.get("confidence", 0.5))
     ensemble_std = float(signal.get("ensemble_std", 0.0))
@@ -775,6 +785,25 @@ def _run_cycle_inner() -> dict:
     except Exception as _hold_exc:
         log.warning("Hold minimum check failed: %s — proceeding without filter", _hold_exc)
 
+    # P0-05: pre-fetch open DB positions BEFORE decision logging so BUY decisions for symbols
+    # already in an open trade are skipped (prevents polluting the decision log with duplicate
+    # BUY entries on every cycle, which was the root cause of apparent stale-signal replay).
+    open_db_symbols: set[str] = set()
+    try:
+        from src.store.pg_store import PostgreSQLStore as _PGGuard
+        _pg_guard = _PGGuard()
+        _open_trades = _pg_guard.fetch_trades(status="open", limit=1000)
+        open_db_symbols = {t["symbol"] for t in _open_trades}
+        _pg_guard.close()
+        if open_db_symbols:
+            log.info("P0-05 pyramiding guard: %d symbols have open DB trades", len(open_db_symbols))
+    except Exception as _guard_exc:
+        log.warning(
+            "P0-05: open-trade DB fetch failed — all BUYs blocked this cycle (fail-closed): %s",
+            _guard_exc,
+        )
+        open_db_symbols = None
+
     # Log decisions to execution_decisions so the UI Decision Log tab is populated.
     # Also capture decision_ids for later trade DB writes.
     _symbol_decisions: dict[str, dict] = {}  # {symbol: {decision_id, score, signal_id}}
@@ -832,6 +861,10 @@ def _run_cycle_inner() -> dict:
             # P1-S4-IDEMPOTENCY: skip this order if its signal_id was already fired today.
             if order.symbol in _idempotency_skip:
                 continue
+            # P0-05: skip BUY decision for symbols already in an open trade (no pyramiding).
+            if order.side.value == "BUY" and isinstance(open_db_symbols, set) and order.symbol in open_db_symbols:
+                log.info("P0-05: skipping BUY decision for %s — already has an open trade", order.symbol)
+                continue
             wt_pct = f"{order.allocation_weight * 100:.1f}%"
             if "S4" in strats:
                 sig = _s4_signals.get(order.symbol, {})
@@ -857,6 +890,7 @@ def _run_cycle_inner() -> dict:
                 symbol=order.symbol,
                 signal_id=_signal_ids.get(order.symbol),
                 score=order.allocation_weight,
+                signal_score=_s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
                 regime_mult=_regime_mult,
                 ema_pass=True,
                 decision=order.side.value,
@@ -914,28 +948,14 @@ def _run_cycle_inner() -> dict:
         submitted_orders = []
     else:
         fractionable = _get_fractionable_symbols(trading_client)
-        # P0-05: fetch symbols with open DB trades to prevent pyramiding.
-        open_db_symbols: set[str] = set()
-        try:
-            from src.store.pg_store import PostgreSQLStore as _PGGuard
-            _pg_guard = _PGGuard()
-            _open_trades = _pg_guard.fetch_trades(status="open", limit=1000)
-            open_db_symbols = {t["symbol"] for t in _open_trades}
-            _pg_guard.close()
-            if open_db_symbols:
-                log.info("P0-05 pyramiding guard: %d symbols have open DB trades", len(open_db_symbols))
-        except Exception as _guard_exc:
-            log.warning(
-                "P0-05: Could not fetch open DB trades for pyramiding guard: %s — guard disabled for this cycle",
-                _guard_exc,
-            )
+        # open_db_symbols already fetched before decision logging (P0-05 pre-fetch above).
         # P2-05-A: exclude S4 BUY orders for symbols whose idempotency check was skipped
         # (Redis unavailable). SELLs and non-S4 orders are not affected.
         _orders_to_submit = _apply_idempotency_filter(result.final_orders, _idempotency_skip)
         submitted_orders = _submit_portfolio_orders(
             _orders_to_submit, trading_client, market,
             fractionable_symbols=fractionable,
-            open_trade_symbols=open_db_symbols or None,
+            open_trade_symbols=open_db_symbols,  # None = guard unavailable → fail-closed
             regime_mult=_regime_mult,
         )
 
@@ -1235,7 +1255,7 @@ def _submit_portfolio_orders(
     market,
     _submit_fn=None,
     fractionable_symbols: set[str] | None = None,
-    open_trade_symbols: set[str] | None = None,
+    open_trade_symbols: set[str] | frozenset[str] | None = frozenset(),
     regime_mult: float = 1.0,
     _on_broker_reject=None,
 ) -> list[dict]:
@@ -1251,9 +1271,10 @@ def _submit_portfolio_orders(
         fractionable_symbols: Set of symbols that support notional/fractional orders.
             BUY orders for non-fractionable symbols fall back to whole-share qty.
             If None, all symbols are treated as fractionable.
-        open_trade_symbols: Symbols that already have an open trade in the DB.
-            BUY orders for these symbols are skipped to prevent pyramiding (P0-05).
-            If None, no duplicate guard is applied.
+        open_trade_symbols: Symbols that already have an open trade in the DB (P0-05).
+            ``frozenset()`` (default) — guard available, no open trades; all BUYs allowed.
+            ``{sym, …}``              — guard available; BUYs for listed symbols are blocked.
+            ``None``                  — guard DB unavailable; ALL BUYs blocked (fail-closed).
         regime_mult: Regime multiplier from Redis (P0-09). Scales BUY notional so
             high-volatility regimes (mult=0.2) result in smaller position sizes.
 
@@ -1267,8 +1288,15 @@ def _submit_portfolio_orders(
     for order in orders:
         try:
             if order.side == OrderSide.BUY:
-                # P0-05: skip BUY if an open DB trade already exists for this symbol.
-                if open_trade_symbols and order.symbol in open_trade_symbols:
+                # P0-05: skip BUY if guard is unavailable (None = fail-closed) or if an open
+                # trade already exists for this symbol. SELLs are never blocked.
+                if open_trade_symbols is None:
+                    log.warning(
+                        "P0-05: pyramiding guard unavailable — skipping BUY for %s (fail-closed)",
+                        order.symbol,
+                    )
+                    continue
+                if order.symbol in open_trade_symbols:
                     log.warning(
                         "P0-05 pyramiding guard: skipping BUY for %s — open trade exists in DB",
                         order.symbol,

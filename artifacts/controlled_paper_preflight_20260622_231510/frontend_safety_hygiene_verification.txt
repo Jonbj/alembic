@@ -1,0 +1,91 @@
+=== FASE 5: FRONTEND SAFETY HYGIENE VERIFICATION ===
+Timestamp: 2026-06-22T21:17:05Z
+
+--- F0-1: strategies.ts authorization fields ---
+5:  /** Lifecycle mode: "supervised_paper" | "paper" | "research" | "disabled" | "live" */
+6:  mode?: string
+7:  /** True when promotion to a higher lifecycle mode is blocked by a gate or policy. */
+8:  promotion_blocked?: boolean
+10:  live_authorized?: boolean
+12:  promotion_authorized?: boolean
+17:  data_quality_warning?: string
+
+--- F0-1: StrategyAuthStatus component present ---
+-rw-rw-r-- 1 stefano stefano 4922 Jun 22 22:34 /home/stefano/Documents/Projects/Alembic/frontend/src/components/shared/StrategyAuthStatus.tsx
+
+--- F0-1: grep for misleading terms in frontend/src ---
+Checking for 'VALIDATA':
+/home/stefano/Documents/Projects/Alembic/frontend/src/tests/f0_safety_hygiene.test.tsx:79:  test('does not render "validated" or "VALIDATA" for supervised_paper strategy', async () => {
+
+Checking for 'validated' (non-test context):
+/home/stefano/Documents/Projects/Alembic/frontend/src/components/shared/StrategyAuthStatus.tsx:10: * IMPORTANT: never renders "validated", "live-ready", or "authorized for live"
+
+Checking for 'live-ready':
+/home/stefano/Documents/Projects/Alembic/frontend/src/components/shared/StrategyAuthStatus.tsx:10: * IMPORTANT: never renders "validated", "live-ready", or "authorized for live"
+
+Checking for 'in esecuzione live':
+/home/stefano/Documents/Projects/Alembic/frontend/src/tests/f0_safety_hygiene.test.tsx:91:    expect(screen.queryByText(/in esecuzione live/i)).not.toBeInTheDocument()
+
+Checking for 'S4.*live' or 'S4.*produzione':
+/home/stefano/Documents/Projects/Alembic/frontend/src/pages/Strategies.tsx:136:          content: "Alembic usa un portfolio multi-strategia. Ogni strategia è validata con 5 validation gates.\n\n**S1 — Time-Series Momentum**: cross-asset trend-following con volatility targeting. Modalità: supervised_paper. Promotion blocked — NON autorizzata al live né alla promozione.\n\n**S3 — Cross-Sectional Momentum**: equity residual momentum. R&D sleeve — gate 3 (robustness) e 5 (stress) FALLITI. OOS Sharpe 0.15. NON nel portfolio.\n\n**S4 — News-Driven Tactical**: strategia news/sentiment. Modalità: paper. Promotion blocked — NON autorizzata al live né alla promozione.\n\nS2 (VRP) è in sviluppo (disabled).\n\n⚠ Lo stato di autorizzazione è quello mostrato dal badge sotto ogni strategia, non le metriche di backtest.",
+/home/stefano/Documents/Projects/Alembic/frontend/src/pages/Docs.tsx:48:          content: "**S1 (50%)**: momentum multi-lookback su ETF/azionario — usa solo prezzi storici, nessun LLM.\n\n**S4 (10%)**: news sentiment via LLM ensemble — legge segnali pre-calcolati da Redis, filtra con EMA e regime.\n\n**S7 (0% — paper)**: PEAD earnings drift — classifica filing 8-K di SEC EDGAR, tiene posizioni 20 giorni su earnings beat.\n\n**S2**: DISABILITATA (OOS Sharpe −0.55, tutti i gate falliti).\n\n**S3**: R&D sleeve, non in produzione.",
+
+--- F0-3: full_auto in ModeBadge (must be RED not GREEN) ---
+7:  full_auto: 'badge-red',   // full_auto is not authorized — red, not green
+
+--- F0-3: Admin.tsx kill-switch OTP flow ---
+7:  requestKillswitchRecoveryToken,
+28:  const [deactivateConfirmOpen, setDeactivateConfirmOpen] = useState(false)
+43:  // F0-3: two-step recovery flow — request OTP token, then deactivate with it
+48:      const { recovery_token } = await requestKillswitchRecoveryToken()
+86:          content: "**full_auto è disabilitato** in questa fase. Live trading e strategy promotions non sono autorizzati.\n\nLa pagina Admin richiede API key per le operazioni di scrittura. La deattivazione del kill-switch avviene solo tramite confirmation dialog + recovery token.",
+114:            /* F0-3: deactivation opens confirmation dialog — never direct API call */
+173:      {/* Activate confirmation dialog */}
+197:      {/* F0-3: Deactivate confirmation dialog — required copy per spec */}
+198:      {deactivateConfirmOpen && (
+
+--- F0-3: Config.tsx risk warnings and save confirmation ---
+5:import { RiskParamWarning } from '@/components/shared/RiskParamWarning'
+16:  const [saveConfirmOpen, setSaveConfirmOpen] = useState(false)
+36:  const isHighRisk = stopLoss > 0.10 || drawdown > 10
+39:    if (isHighRisk) {
+110:                  HIGH RISK
+127:                  HIGH RISK
+140:          <RiskParamWarning stopLoss={stopLoss} drawdown={drawdown} />
+164:      {saveConfirmOpen && (
+
+--- F0-3: No promote/approve/demote UI ---
+Checking 'promote' buttons in frontend/src/pages/:
+/home/stefano/Documents/Projects/Alembic/frontend/src/pages/Docs.tsx:413:          Ogni strategia deve superare 5 gate prima di entrare nel portfolio live. Il fallimento demote la strategia al sleeve R&D.
+/home/stefano/Documents/Projects/Alembic/frontend/src/pages/LLM.tsx:4:import { fetchLLMFeedback, fetchWeights, approveWeights } from '@/api/llm'
+/home/stefano/Documents/Projects/Alembic/frontend/src/pages/LLM.tsx:26:  const approveMutation = useMutation({
+/home/stefano/Documents/Projects/Alembic/frontend/src/pages/LLM.tsx:27:    mutationFn: () => approveWeights(note),
+/home/stefano/Documents/Projects/Alembic/frontend/src/pages/LLM.tsx:170:                    onClick={() => approveMutation.mutate()}
+/home/stefano/Documents/Projects/Alembic/frontend/src/pages/LLM.tsx:171:                    disabled={approveMutation.isPending}
+/home/stefano/Documents/Projects/Alembic/frontend/src/pages/LLM.tsx:173:                    {approveMutation.isPending ? 'Approving...' : 'Approve — apply these weights'}
+/home/stefano/Documents/Projects/Alembic/frontend/src/pages/LLM.tsx:175:                  {approveMutation.isError && <p style={{ color: 'var(--red)', fontSize: 12 }}>Error — check API key</p>}
+
+--- F0-3: RiskParamWarning component present ---
+-rw-rw-r-- 1 stefano stefano 1889 Jun 22 22:35 /home/stefano/Documents/Projects/Alembic/frontend/src/components/shared/RiskParamWarning.tsx
+
+--- FRONTEND TESTS ---
+
+ RUN  v4.1.9 /home/stefano/Documents/Projects/Alembic/frontend
+
+ ✓ src/tests/f0_safety_hygiene.test.tsx > F0-1 Strategy Authorization Truth > renders promotion_blocked warning when promotion_blocked=true 55ms
+ ✓ src/tests/f0_safety_hygiene.test.tsx > F0-1 Strategy Authorization Truth > renders data_quality_warning when present 6ms
+ ✓ src/tests/f0_safety_hygiene.test.tsx > F0-1 Strategy Authorization Truth > does not render "validated" or "VALIDATA" for supervised_paper strategy 6ms
+ ✓ src/tests/f0_safety_hygiene.test.tsx > F0-1 Strategy Authorization Truth > does not imply live authorization for paper/promotion-blocked strategy 4ms
+ ✓ src/tests/f0_safety_hygiene.test.tsx > F0-1 Strategy Authorization Truth > shows fail-safe message when no authorization fields are provided 4ms
+ ✓ src/tests/f0_safety_hygiene.test.tsx > F0-3 Admin and Config Safety Guardrails > full_auto radio input is disabled in Admin page 110ms
+ ✓ src/tests/f0_safety_hygiene.test.tsx > F0-3 Admin and Config Safety Guardrails > RiskParamWarning shows high-risk warning when stop-loss exceeds 10% 8ms
+ ✓ src/tests/f0_safety_hygiene.test.tsx > F0-3 Admin and Config Safety Guardrails > RiskParamWarning shows high-risk warning when max drawdown exceeds 10% 3ms
+ ✓ src/tests/f0_safety_hygiene.test.tsx > F0-3 Admin and Config Safety Guardrails > kill-switch deactivation requires confirmation dialog with mandatory safety copy 78ms
+ ✓ src/tests/f0_safety_hygiene.test.tsx > F0-3 Admin and Config Safety Guardrails > Strategies page does not introduce promote/approve/demote UI elements 1ms
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  23:17:05
+   Duration  1.11s (transform 67ms, setup 64ms, import 133ms, tests 278ms, environment 539ms)
+
+

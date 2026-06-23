@@ -4,7 +4,7 @@ const MODE_STYLE: Record<string, string> = {
   backtest: 'badge-grey',
   paper: 'badge-blue',
   semi_auto: 'badge-yellow',
-  full_auto: 'badge-green',
+  full_auto: 'badge-red',   // full_auto is not authorized — red, not green
   halted: 'badge-red',
 }
 

@@ -1,0 +1,66 @@
+=== FASE 4: STRATEGY GOVERNANCE CHECK ===
+Timestamp: 2026-06-22T21:16:42Z
+
+--- C1: Strategy list API ---
+[
+    {
+        "id": "s1",
+        "name": "S1 \u2014 Time-Series Momentum",
+        "description": "Cross-asset time-series momentum strategy with volatility targeting",
+        "status": "supervised_paper",
+        "mode": "supervised_paper",
+        "promotion_blocked": true,
+        "live_authorized": false,
+        "promotion_authorized": false,
+        "data_quality_warning": "Backtest metrics are a stale historical snapshot (as of 2026-05-30). They do NOT authorize promotion, paper, or live trading. Current config: mode=supervised_paper, promotion_blocked=true.",
+        "n_assets": 15,
+        "oos_sharpe": 0.5128,
+        "max_drawdown": 0.15,
+        "annual_return": 0.07,
+        "data_source": "LIVE"
+    },
+    {
+        "id": "s3",
+        "name": "S3 \u2014 Cross-Sectional Momentum",
+        "description": "Cross-sectional residual momentum equity strategy (R&D sleeve \u2014 NOT in live portfolio)",
+        "status": "rd_sleeve",
+        "n_assets": 55,
+        "oos_sharpe": 0.1483,
+        "max_drawdown": 0.1,
+        "annual_return": null,
+        "data_source": "BACKTEST"
+    }
+]
+
+--- C2: S1 detail ---
+status: supervised_paper
+mode: supervised_paper
+promotion_blocked: True
+live_authorized: False
+promotion_authorized: False
+data_quality_warning present: True
+
+--- C3: Lifecycle table ---
+ strategy_id |       mode       | target_mode | approved |          updated_at          
+-------------+------------------+-------------+----------+------------------------------
+ S1          | supervised_paper |             | f        | 2026-06-21 08:50:06.20054+00
+ S2          | disabled         |             | t        | 2026-06-21 08:50:06.20054+00
+ S4          | paper            |             | f        | 2026-06-21 08:50:06.20054+00
+(3 rows)
+
+
+--- C4: No live promotions pending ---
+Live/target_live count: 0 (must be 0)
+LIVE_PROMOTION_CHECK: PASS
+
+--- GOVERNANCE NOTES ---
+S4 NOTE: S4 is present in strategy_lifecycle (mode=paper, approved=false) and config/strategies.yaml
+         but is NOT in the strategies API registry (STRATEGIES dict only has s1 and s3).
+         S4 is functionally present in the orchestrator via YAML; API exposure is informational gap.
+
+S2 NOTE: S2 has approved=true in lifecycle table but mode=disabled, enabled=false in YAML.
+         This is a data inconsistency. S2 cannot trade because:
+         1. enabled=false in strategies.yaml (not in StrategyRegistry)
+         2. allocation_pct=0.00 (no capital)
+         3. mode=disabled in lifecycle table
+         However approved=true on a disabled strategy is misleading. Risk: LOW (no execution path).
