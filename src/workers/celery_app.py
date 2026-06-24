@@ -103,6 +103,16 @@ app.conf.beat_schedule = {
         "schedule": crontab(hour=7, minute=0, day_of_week="1-5"),
         "options": {"queue": "inference"},
     },
+    # P0-09 safety net: second regime run at 13:30 UTC (30 min before NYSE open).
+    # If the 07:00 run fails (LLM/FRED unavailable), regime:current stays absent
+    # and all cycles use the ×0.2 high_vol fallback (observed Day 1, 2026-06-23).
+    # This run fires just before portfolio cycles begin (first cycle at 14:07),
+    # ensuring regime is fresh. Harmless if 07:00 already succeeded (same result).
+    "regime-detector-premarket": {
+        "task": "src.workers.regime.detect_regime",
+        "schedule": crontab(hour=13, minute=30, day_of_week="1-5"),
+        "options": {"queue": "inference"},
+    },
     # GDELT GKG ingestion every 15 min Mon-Fri during market hours (14:00-21:00 UTC).
     # Queries GDELT GKG, extracts tickers via PostgreSQL lookup, and pushes
     # annotated NewsItems to news:queue for the SentimentWorker.
