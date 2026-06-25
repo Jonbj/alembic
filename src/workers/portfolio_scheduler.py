@@ -1108,7 +1108,8 @@ def _run_cycle_inner() -> dict:
                         }
             except Exception as _zse:
                 log.warning("FIX-F: stale-signal lookup failed: %s", _zse)
-        _s4_max_age_h = S4Config().max_signal_age_hours
+        from src.strategies.s4.config import S4Config as _S4Config
+        _s4_max_age_h = _S4Config().max_signal_age_hours
         for order in result.final_orders:
             strats = _sym_strats.get(order.symbol, [])
             # P1-S4-IDEMPOTENCY: skip this order if its signal_id was already fired today.
