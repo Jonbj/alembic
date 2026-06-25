@@ -326,6 +326,53 @@ def _load_execution_engine() -> str:
 _S4_FIRED_SIGNALS_TTL = 108_000  # 30 hours — auto-expires after session date
 
 
+def _preserve_stale_signals_for_open_positions(
+    fresh_signals: list,
+    stale_signals: list,
+    open_symbols: set,
+) -> list:
+    """Re-admit stale positive signals when the symbol has an open position and no counter-signal.
+
+    FIX-D (Day 2): a signal expiry (max_signal_age_hours exceeded) is not the same
+    as a counter-signal. When AMD's BUY signal aged out at 19:16 UTC, the portfolio
+    set its weight to 0 → portfolio_sell at the next cycle, triggering a roundtrip
+    loss. Signal expiry means "no new information", not "exit". Only a fresh negative
+    signal or a stop-loss breach should close a position.
+
+    Rule: if a stale signal has score > 0 AND its symbol has an open DB trade AND no
+    fresh signal (counter-signal) exists for the same symbol → re-add it so the
+    portfolio retains the current weight rather than dropping to zero.
+    """
+    fresh_syms = {s.symbol for s in fresh_signals}
+    preserved = []
+    for sig in stale_signals:
+        if sig.score > 0 and sig.symbol in open_symbols and sig.symbol not in fresh_syms:
+            preserved.append(sig)
+    return fresh_signals + preserved
+
+
+def _log_constraint_block_if_needed(result, risk_cfg: dict) -> None:
+    """Emit a CONSTRAINT_BLOCK warning when all pre-constraint orders are eliminated.
+
+    FIX-E (Day 2): when only 1 symbol passed the feedback gate (max_single_asset_pct=10%
+    requires ≥10 symbols for diversification), the portfolio cycle logged "0 final orders"
+    with no explanation. This function surfaces the constraint names and minimum symbol
+    count so the log is actionable.
+    """
+    if result.orders_before_constraints > 0 and len(result.final_orders) == 0:
+        max_single = risk_cfg.get("max_single_asset_pct", 0.10)
+        min_syms = int(1.0 / max_single) if max_single > 0 else "?"
+        fired = sorted(result.constraints_fired) if result.constraints_fired else ["unknown"]
+        log.warning(
+            "CONSTRAINT_BLOCK: %d strategy signal(s) → 0 orders after constraints. "
+            "Fired: %s. Diversification requires ≥%s symbols (max_single_asset_pct=%.0f%%).",
+            result.orders_before_constraints,
+            fired,
+            min_syms,
+            max_single * 100,
+        )
+
+
 def _filter_stale_signals(
     signals: list,
     max_age_hours: int,
@@ -870,6 +917,8 @@ def _run_cycle_inner() -> dict:
         len(result.constraints_fired),
         len(result.final_orders),
     )
+    # FIX-E: surface actionable reason when constraints eliminate all strategy orders.
+    _log_constraint_block_if_needed(result, _risk_cfg)
 
     # FIX-C: drop any normal orders for stop-loss symbols — they are force-closed
     # separately below, so the rebalance must not also buy/sell them this cycle.
@@ -1318,6 +1367,29 @@ def _build_strategy_instance(entry, bars_df):
                             )
                         except Exception as _ae:
                             log.warning("P1-S4: stale audit write failed: %s", _ae)
+                # FIX-D: re-admit stale positive signals for open positions with no
+                # counter-signal. Query open trades from DB; fail-open (empty set) on error
+                # so stale discard behavior is unchanged when DB is unavailable.
+                if stale_signals:
+                    try:
+                        _open_syms_fd = {
+                            t["symbol"]
+                            for t in store.fetch_trades(status="open", limit=1000)
+                        }
+                    except Exception as _fd_exc:
+                        log.warning("FIX-D: open-trade query failed (%s) — no stale preservation", _fd_exc)
+                        _open_syms_fd = set()
+                    fresh_signals = _preserve_stale_signals_for_open_positions(
+                        fresh_signals, stale_signals, _open_syms_fd
+                    )
+                    _preserved = [s for s in fresh_signals if s in stale_signals]
+                    if _preserved:
+                        log.info(
+                            "FIX-D: preserved %d stale signal(s) for open positions "
+                            "with no counter-signal: %s",
+                            len(_preserved),
+                            sorted(s.symbol for s in _preserved),
+                        )
                 signals = fresh_signals
                 if signals:
                     import pandas as pd
