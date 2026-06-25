@@ -262,3 +262,77 @@ class TestLogConstraintBlockIfNeeded:
             _log_constraint_block_if_needed(result, {"max_single_asset_pct": 0.10})
 
         assert not any("CONSTRAINT_BLOCK" in r.message for r in caplog.records)
+
+
+# ─────────── FIX-F: informative reason for stale-expiry SELL orders ─────────
+
+
+class TestReasonForZeroWeightSell:
+    """_reason_for_zero_weight_sell() unit tests.
+
+    FIX-F (Day-3): "Portfolio rebalance: weight 0.0%" logged for CAT/TSM sells
+    gave no indication of *why* the weight dropped to zero. Root cause was S4
+    signal expiry overnight (20.3h > 4h max_age). The helper generates a reason
+    string that surfaces the expiry fact so the decision log is actionable.
+    """
+
+    def test_expired_signal_includes_age_in_reason(self):
+        """Core case: stale signal → reason must mention expiry and age."""
+        from src.workers.portfolio_scheduler import _reason_for_zero_weight_sell
+
+        gen_at = datetime.now(timezone.utc) - timedelta(hours=20.3)
+        last_signal = {"generated_at": gen_at, "score": 0.60}
+        reason = _reason_for_zero_weight_sell("CAT", last_signal, max_age_hours=4)
+
+        assert "expired" in reason.lower() or "expir" in reason.lower(), (
+            "Reason must mention signal expiry when signal is older than max_age_hours"
+        )
+        assert "20" in reason, "Reason must include approximate age (hours)"
+
+    def test_expired_signal_mentions_max_age(self):
+        """Reason must show both actual age and the configured max_age threshold."""
+        from src.workers.portfolio_scheduler import _reason_for_zero_weight_sell
+
+        gen_at = datetime.now(timezone.utc) - timedelta(hours=20.3)
+        reason = _reason_for_zero_weight_sell(
+            "CAT", {"generated_at": gen_at, "score": 0.60}, max_age_hours=4
+        )
+        assert "4" in reason, "Reason must include max_age_hours threshold (4)"
+
+    def test_no_signal_gives_informative_fallback(self):
+        """When no DB signal exists for the symbol, reason must not be generic 'weight 0.0%'."""
+        from src.workers.portfolio_scheduler import _reason_for_zero_weight_sell
+
+        reason = _reason_for_zero_weight_sell("XYZ", last_signal=None, max_age_hours=4)
+        assert "no" in reason.lower() or "unknown" in reason.lower(), (
+            "When no signal found, reason must say so explicitly (not just 'weight 0.0%')"
+        )
+
+    def test_fresh_signal_zero_weight_shows_score(self):
+        """If signal is fresh but weight still 0 (e.g. score below min_score), show the score."""
+        from src.workers.portfolio_scheduler import _reason_for_zero_weight_sell
+
+        gen_at = datetime.now(timezone.utc) - timedelta(hours=1.0)  # fresh
+        reason = _reason_for_zero_weight_sell(
+            "AAPL", {"generated_at": gen_at, "score": 0.05}, max_age_hours=4
+        )
+        # Should not say "expired" (signal is fresh)
+        assert "expired" not in reason.lower(), (
+            "Must not claim signal is expired when age < max_age_hours"
+        )
+        # Should include the score
+        assert "0.05" in reason or "score" in reason.lower(), (
+            "Reason should include the signal score when signal is fresh"
+        )
+
+    def test_reason_does_not_say_generic_portfolio_rebalance_for_expired(self):
+        """Expired signal must not produce the old generic reason."""
+        from src.workers.portfolio_scheduler import _reason_for_zero_weight_sell
+
+        gen_at = datetime.now(timezone.utc) - timedelta(hours=20)
+        reason = _reason_for_zero_weight_sell(
+            "CAT", {"generated_at": gen_at, "score": 0.60}, max_age_hours=4
+        )
+        assert reason != "Portfolio rebalance: weight 0.0%.", (
+            "Expired signal must produce a more specific reason than the old generic text"
+        )

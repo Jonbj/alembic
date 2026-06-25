@@ -351,6 +351,48 @@ def _preserve_stale_signals_for_open_positions(
     return fresh_signals + preserved
 
 
+def _reason_for_zero_weight_sell(
+    symbol: str,
+    last_signal: dict | None,
+    max_age_hours: int,
+) -> str:
+    """Return an informative decision-log reason for a SELL order with weight 0.0%.
+
+    FIX-F (Day 3): "Portfolio rebalance: weight 0.0%" gave no indication of why the
+    weight dropped to zero. For stale-signal SELLs (CAT/TSM on 2026-06-25) the true
+    cause is signal expiry overnight — visible here as age > max_age_hours — not an
+    operator rebalance or a counter-signal.
+
+    Args:
+        symbol: ticker being sold.
+        last_signal: dict with "generated_at" (datetime) and "score" (float), or None.
+        max_age_hours: S4 max_signal_age_hours threshold (default 4).
+    """
+    if last_signal is None:
+        return (
+            f"Portfolio rebalance: weight 0.0% — no S4 signal found in DB "
+            f"(signal may be older than the lookback window or never generated)."
+        )
+    from datetime import datetime as _dt, timezone as _tz
+    now_utc = _dt.now(_tz.utc)
+    age_h = (now_utc - last_signal["generated_at"]).total_seconds() / 3600
+    gen_str = last_signal["generated_at"].strftime("%Y-%m-%d %H:%M UTC")
+    score = last_signal.get("score", 0.0)
+
+    if age_h > max_age_hours:
+        return (
+            f"S4 signal expired (age={age_h:.1f}h > max_age={max_age_hours}h, "
+            f"generated {gen_str}, score={score:+.3f}): "
+            f"weight 0.0% — no counter-signal found, position closed."
+        )
+    # Signal is technically fresh but weight is still 0 (e.g. score below min_score,
+    # or the portfolio constraint forced it out). Show score so log is actionable.
+    return (
+        f"Portfolio rebalance: weight 0.0% — S4 signal present but not driving a position "
+        f"(score={score:+.3f}, age={age_h:.1f}h, generated {gen_str})."
+    )
+
+
 def _log_constraint_block_if_needed(result, risk_cfg: dict) -> None:
     """Emit a CONSTRAINT_BLOCK warning when all pre-constraint orders are eliminated.
 
@@ -1041,6 +1083,32 @@ def _run_cycle_inner() -> dict:
                 _s4_signals = {s.symbol: {"score": s.score, "reasoning": s.reasoning, "model_id": s.model_id} for s in _raw_sigs}
             except Exception:
                 pass
+        # FIX-F: pre-fetch last signal (any age, up to 48h) for SELL-weight-0 orders
+        # that have no strategy attribution. These are typically stale-expiry closes
+        # and need an informative reason ("signal expired 20.3h ago") not the generic
+        # "Portfolio rebalance: weight 0.0%".
+        from src.backtest.engine.types import OrderSide as _OSReason
+        _zero_sell_syms = [
+            o.symbol for o in result.final_orders
+            if o.side == _OSReason.SELL
+            and o.allocation_weight == 0.0
+            and not _sym_strats.get(o.symbol)
+        ]
+        _zero_sell_signals: dict[str, dict] = {}
+        if _zero_sell_syms:
+            try:
+                _zero_raw = _pg.fetch_signals_for_cycle(hours=48, symbols=_zero_sell_syms)
+                for _zs in _zero_raw:
+                    # Keep most recent per symbol
+                    if _zs.symbol not in _zero_sell_signals or \
+                            _zs.generated_at > _zero_sell_signals[_zs.symbol]["generated_at"]:
+                        _zero_sell_signals[_zs.symbol] = {
+                            "generated_at": _zs.generated_at,
+                            "score": _zs.score,
+                        }
+            except Exception as _zse:
+                log.warning("FIX-F: stale-signal lookup failed: %s", _zse)
+        _s4_max_age_h = S4Config().max_signal_age_hours
         for order in result.final_orders:
             strats = _sym_strats.get(order.symbol, [])
             # P1-S4-IDEMPOTENCY: skip this order if its signal_id was already fired today.
@@ -1069,7 +1137,17 @@ def _run_cycle_inner() -> dict:
             elif strats:
                 reason = f"{'+'.join(strats)}: merged portfolio weight {wt_pct}."
             else:
-                reason = f"Portfolio rebalance: weight {wt_pct}."
+                # FIX-F: for SELL-weight-0 with no strategy attribution, surface the
+                # real cause (signal expiry, missing signal, etc.) rather than the
+                # generic "Portfolio rebalance: weight 0.0%" which gave no insight.
+                if order.side.value == "SELL" and order.allocation_weight == 0.0:
+                    reason = _reason_for_zero_weight_sell(
+                        order.symbol,
+                        _zero_sell_signals.get(order.symbol),
+                        _s4_max_age_h,
+                    )
+                else:
+                    reason = f"Portfolio rebalance: weight {wt_pct}."
             decision_id = _pg.write_execution_decision(
                 tick_time=ts,
                 symbol=order.symbol,
