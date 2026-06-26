@@ -541,23 +541,6 @@ export default function Performance() {
       ]} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Performance</h2>
-        {activeTab === 'pnl' && <div style={{ display: 'flex', gap: 4 }}>
-          {PERIODS.map((p) => (
-            <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              style={{
-                padding: '4px 10px',
-                fontSize: 12,
-                background: period === p ? 'var(--blue)' : 'transparent',
-                color: period === p ? 'white' : 'var(--text-muted)',
-                border: '1px solid var(--border)',
-              }}
-            >
-              {p}
-            </button>
-          ))}
-        </div>}
       </div>
 
       {/* Tab switcher */}
@@ -584,6 +567,28 @@ export default function Performance() {
 
       {activeTab === 'pnl' && (
         <>
+          {/* Period filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 20 }}>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Periodo</span>
+            {PERIODS.map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                style={{
+                  padding: '4px 10px',
+                  fontSize: 12,
+                  background: period === p ? 'var(--blue)' : 'transparent',
+                  color: period === p ? 'white' : 'var(--text-muted)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                }}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+
           {isLoading && <p style={{ color: 'var(--text-muted)' }}>Loading...</p>}
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
