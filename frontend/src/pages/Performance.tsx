@@ -332,13 +332,15 @@ function DailyPnLTab() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr>
-              {['Symbol', 'Motivo uscita', 'Entry', 'Exit', 'Qty', 'Gross P&L', 'Net P&L'].map((h) => (
+              {['Symbol', 'Motivo uscita', 'Entry', 'Exit', 'Qty', 'P&L Lordo', 'Costi', 'P&L Netto'].map((h) => (
                 <th key={h} style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--text-muted)', fontWeight: 600, fontSize: 11 }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {day.trades.map((t, i) => (
+            {day.trades.map((t, i) => {
+              const costs = t.gross_pnl != null ? t.gross_pnl - t.net_pnl : 0
+              return (
               <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
                 <td style={{ padding: '4px 8px', fontWeight: 600 }}>{t.symbol}</td>
                 <td style={{ padding: '4px 8px', color: 'var(--text-muted)', maxWidth: 300, wordBreak: 'break-word' }}>
@@ -350,11 +352,15 @@ function DailyPnLTab() {
                 <td style={{ padding: '4px 8px', color: (t.gross_pnl ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
                   {t.gross_pnl != null ? fmtPnL(t.gross_pnl) : '—'}
                 </td>
+                <td style={{ padding: '4px 8px', color: costs !== 0 ? 'var(--red)' : 'var(--text-muted)', fontSize: 11 }}>
+                  {costs !== 0 ? `-$${Math.abs(costs).toFixed(2)}` : '—'}
+                </td>
                 <td style={{ padding: '4px 8px', fontWeight: 700, color: t.net_pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
                   {fmtPnL(t.net_pnl)}
                 </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       ) : undefined,
