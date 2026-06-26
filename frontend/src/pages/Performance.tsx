@@ -523,6 +523,10 @@ export default function Performance() {
           content: "**Trades**: numero di trade chiusi nel periodo (30 giorni).\n**Trades/week**: frequenza annualizzata — es. 2.0 = 2 trade a settimana in media.\n**Win rate**: % di trade chiusi in profitto netto. >50% = sistema in vantaggio.\n**Avg net P&L**: P&L medio per trade al netto dei costi di transazione.\n**Total net P&L**: P&L cumulativo totale del periodo.\n**Avg hold**: durata media di una posizione in minuti.\n**Slippage % gross**: costi di esecuzione (spread + market impact) come % del P&L lordo — idealmente <20%.",
         },
         {
+          heading: "Giornaliero — Metriche",
+          content: "**W (Winners)**: trade chiusi con profitto netto positivo (net_pnl > 0).\n**L (Losers)**: trade chiusi in perdita (net_pnl < 0).\n**Net P&L**: somma dei net_pnl di tutti i trade chiusi in quella giornata. È il risultato reale dopo slippage e costi stimati — non l'equity Alpaca.\n**Profitti**: somma dei soli trade positivi (gross profit della giornata).\n**Perdite**: somma dei soli trade negativi (gross loss della giornata).\n**Win rate (KPI)**: Winners / totale trade nel periodo selezionato. >50% = più trade in guadagno che in perdita.\n**Giorni +/−**: numero di giornate con P&L netto positivo vs negativo nel range.\n\n**Nota**: i dati vengono dalla tabella `trades` locale, non da Alpaca. Piccole differenze vs P&L Storico (tab 1) sono normali perché Alpaca conta le variazioni di equity intraday incluse le posizioni aperte.",
+        },
+        {
           heading: "Report Settimanale — Trade P&L",
           content: "**Win rate**: percentuale di trade chiusi in profitto. Baseline attesa >50%.\n**P&L netto medio**: guadagno/perdita medio per trade dopo aver sottratto i costi di transazione.\n**Return on Notional (RON)**: P&L netto totale / capitale totale impiegato. Misura l'efficienza del capitale: 0.5% = hai guadagnato 50¢ ogni 100$ deployati.\n**Slippage medio**: stima del costo di esecuzione per trade (spread bid-ask + market impact).\n**Trade/settimana**: frequenza di trading annualizzata.",
         },
