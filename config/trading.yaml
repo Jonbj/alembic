@@ -131,6 +131,12 @@ execution:
   # cadence (15 min) to prevent buy→sell→buy roundtrips.
   hold_minimum_minutes: 90
 
+  # Anti-churn hysteresis: a held position must be targeted for exit for this many
+  # consecutive cycles before it is actually sold. Kills the buy→sell→buy flicker
+  # (a name dropping out of the target for 1 cycle then returning is held, not flipped).
+  # 0 disables. Stop-loss/reversal exits bypass this.
+  exit_persistence_cycles: 2
+
 risk:
   # Kill-switch triggers
   vix_spike: 40.0

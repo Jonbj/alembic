@@ -584,6 +584,88 @@ def _get_hold_minimum_minutes() -> int:
         return _HOLD_MINIMUM_MINUTES
 
 
+_EXIT_HYSTERESIS_KEY = "portfolio:exit_count:"  # + symbol; per-symbol exit streak counter
+_CYCLE_SECONDS = 900  # ~15-min beat cadence; used to size the hysteresis counter TTL
+
+
+def _get_exit_persistence_cycles() -> int:
+    """Consecutive rebalance cycles a held position must be targeted for exit before it
+    is actually sold (anti-churn hysteresis). 0 disables. From trading.yaml
+    ``execution.exit_persistence_cycles``, default 2.
+
+    A no-trade band cannot fix this churn: positions are ~0.85% of NAV, so the exit gap
+    (weight->0) equals the entry gap, and any band that blocks marginal exits also blocks
+    marginal entries. Hysteresis instead makes exits *sticky* — a name that drops out of
+    the target for a single cycle then returns is held, not flipped.
+    """
+    try:
+        import yaml
+        with open(_TRADING_YAML) as f:
+            cfg = yaml.safe_load(f)
+        return int(cfg.get("execution", {}).get("exit_persistence_cycles", 2))
+    except Exception:
+        return 2
+
+
+def _apply_exit_hysteresis(final_orders, redis_url: str, persistence_cycles: int):
+    """Suppress rebalance SELLs until a position has been targeted for exit for
+    ``persistence_cycles`` consecutive cycles. Kills the buy->sell->buy flicker where a
+    name drops out of the merged target for one cycle then re-enters the next.
+
+    Per-symbol exit streak is tracked in Redis (INCR + TTL). A BUY resets the streak;
+    a SELL increments it and is only allowed through once the streak reaches the
+    threshold. Stop-loss / reversal sells are NOT in ``final_orders`` here, so they are
+    never delayed. Fail-open: any Redis error returns the orders unchanged.
+    """
+    from src.backtest.engine.types import OrderSide as _OS
+
+    if persistence_cycles <= 0 or not final_orders:
+        return final_orders
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+    except Exception as exc:
+        log.warning("Exit hysteresis: Redis unavailable (%s) — no suppression", exc)
+        return final_orders
+
+    ttl = (persistence_cycles + 1) * _CYCLE_SECONDS
+    kept: list = []
+    suppressed: list[str] = []
+    try:
+        for o in final_orders:
+            key = f"{_EXIT_HYSTERESIS_KEY}{o.symbol}"
+            if o.side == _OS.BUY:
+                r.delete(key)  # re-wanted -> reset exit streak
+                kept.append(o)
+            elif o.side == _OS.SELL:
+                count = int(r.incr(key))
+                r.expire(key, ttl)
+                if count < persistence_cycles:
+                    suppressed.append(o.symbol)  # hold this cycle (not yet persistent)
+                else:
+                    r.delete(key)
+                    kept.append(o)  # genuine, persistent exit
+            else:
+                kept.append(o)
+    except Exception as exc:
+        log.warning("Exit hysteresis: error (%s) — no suppression", exc)
+        try:
+            r.close()
+        except Exception:
+            pass
+        return final_orders
+    try:
+        r.close()
+    except Exception:
+        pass
+    if suppressed:
+        log.info(
+            "Exit hysteresis (%d cycles): held %d position(s) flagged for exit: %s",
+            persistence_cycles, len(suppressed), sorted(suppressed),
+        )
+    return kept
+
+
 @app.task(name="src.workers.portfolio_scheduler.run_portfolio_cycle")
 def run_portfolio_cycle() -> dict:
     """Celery entry-point for the portfolio orchestration cycle."""
@@ -1011,6 +1093,26 @@ def _run_cycle_inner() -> dict:
                 )
     except Exception as _hold_exc:
         log.warning("Hold minimum check failed: %s — proceeding without filter", _hold_exc)
+
+    # Exit hysteresis: require a position to be targeted for exit for N consecutive
+    # cycles before selling — kills the buy->sell->buy flicker that the bigger sizes
+    # (regime fix) amplified. Stop-loss / reversal sells are unaffected (not in final_orders).
+    try:
+        _persist = _get_exit_persistence_cycles()
+        _before_hyst = len(result.final_orders)
+        _hyst_orders = _apply_exit_hysteresis(result.final_orders, config.REDIS_URL, _persist)
+        if len(_hyst_orders) != _before_hyst:
+            result = type(result)(
+                strategies_run=result.strategies_run,
+                orders_per_strategy=result.orders_per_strategy,
+                orders_before_constraints=result.orders_before_constraints,
+                orders_after_constraints=result.orders_after_constraints,
+                constraints_fired=result.constraints_fired,
+                final_orders=_hyst_orders,
+                symbol_strategies=result.symbol_strategies,
+            )
+    except Exception as _hyst_exc:
+        log.warning("Exit hysteresis failed: %s — proceeding without it", _hyst_exc)
 
     # P0-05: pre-fetch open DB positions BEFORE decision logging so BUY decisions for symbols
     # already in an open trade are skipped (prevents polluting the decision log with duplicate
