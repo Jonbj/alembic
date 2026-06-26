@@ -27,6 +27,27 @@ export interface PeadSignal {
   is_active: boolean
 }
 
+export interface Readiness {
+  redis_healthy: boolean
+  redis_writeable: boolean
+  db_healthy: boolean
+  killswitch_active: boolean
+  stale_signals: boolean
+  worker_beat_lag: boolean
+  last_signal_age_minutes: number | null
+  last_cycle_age_minutes: number | null
+}
+
+export type ReadinessState = 'ready' | 'degraded' | 'blocked'
+
+/** Derive a single state from the flags. HTTP 200 does NOT imply healthy. */
+export function readinessState(r: Readiness): ReadinessState {
+  if (r.killswitch_active || !r.db_healthy || !r.redis_healthy) return 'blocked'
+  if (!r.redis_writeable || r.stale_signals || r.worker_beat_lag) return 'degraded'
+  return 'ready'
+}
+
 export const fetchScheduler = () => apiFetch<SchedulerTask[]>('/api/system/scheduler')
 export const fetchActivity = (limit = 60) => apiFetch<ActivityEvent[]>(`/api/system/activity?limit=${limit}`)
 export const fetchPeadSignals = () => apiFetch<PeadSignal[]>('/api/pead/signals')
+export const fetchReadiness = () => apiFetch<Readiness>('/api/system/readiness')

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
+import { ReadinessBanner } from './ReadinessBanner'
 import { useStore } from '@/store'
 
 export function Layout() {
@@ -25,9 +26,12 @@ export function Layout() {
   return (
     <>
       <Sidebar />
-      <main style={{ flex: 1, padding: '24px', overflowY: 'auto', maxWidth: '100%' }}>
-        <Outlet />
-      </main>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', maxWidth: '100%' }}>
+        <ReadinessBanner />
+        <main style={{ flex: 1, padding: '24px' }}>
+          <Outlet />
+        </main>
+      </div>
     </>
   )
 }
