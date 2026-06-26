@@ -2,7 +2,7 @@
 
 **FastAPI REST API**
 **Version:** 1.0.0
-**Updated:** 2026-06-17
+**Updated:** 2026-06-26
 
 ---
 
@@ -210,7 +210,88 @@ Validation: each weight in `[0.10, 0.70]`, sum = 1.0 ± 0.001, model IDs in `MOD
 
 ### `GET /api/performance/pnl`
 
-Daily P&L from Alpaca account history.
+Daily P&L from Alpaca account portfolio history (equity-based, not trade-by-trade).
+
+**Query parameters:** `period` (default `6M` — valid values: `1M`, `3M`, `6M`, `1Y`)
+
+**Response 200:**
+```json
+{
+  "daily": [{"date": "2026-06-25", "equity": 98500.0, "profit_loss": 47.55}],
+  "monthly": [{"month": "2026-06", "pnl": 27.98}]
+}
+```
+
+### `GET /api/performance/daily`
+
+Per-day P&L breakdown from the local `trades` table (not Alpaca). Returns trade-level detail with per-day aggregation. Use this for forensic analysis of specific days or date ranges.
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `from_date` | `YYYY-MM-DD` | today − `days` | Inclusive start date |
+| `to_date` | `YYYY-MM-DD` | today | Inclusive end date |
+| `days` | int | 7 | Shortcut: last N days (ignored if `from_date`/`to_date` supplied) |
+
+Max range: 365 days.
+
+**Response 200:**
+```json
+{
+  "from_date": "2026-06-24",
+  "to_date": "2026-06-26",
+  "days": [
+    {
+      "date": "2026-06-24",
+      "trades_closed": 4,
+      "total_net_pnl": -19.57,
+      "gross_profit": 0.0,
+      "gross_loss": -19.57,
+      "winners": 0,
+      "losers": 4,
+      "trades": [
+        {
+          "symbol": "CAT",
+          "entry_time": "2026-06-23T18:52:00Z",
+          "exit_time": "2026-06-24T14:07:00Z",
+          "entry_price": 982.99,
+          "exit_price": 1037.60,
+          "qty": 0.2857,
+          "gross_pnl": 15.60,
+          "net_pnl": 15.10,
+          "exit_reason": "portfolio_sell"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total_net_pnl": 27.98,
+    "total_trades": 13,
+    "winners": 4,
+    "losers": 9,
+    "win_rate": 0.3077,
+    "positive_days": 1,
+    "negative_days": 1
+  }
+}
+```
+
+**Example:**
+```bash
+curl -H "X-API-Key: $ADMIN_API_KEY" \
+  "http://localhost:8001/api/performance/daily?from_date=2026-06-24&to_date=2026-06-26"
+```
+
+**Note:** `total_net_pnl` may differ slightly from Alpaca's `profit_loss` because Alpaca calculates equity delta (includes unrealized P&L movements) while this endpoint sums `net_pnl` from closed trade records only.
+
+### `GET /api/performance/weekly`
+
+Structured weekly report from Redis cache (computed every Monday at 04:00 UTC, TTL 9 days). Enriched at read-time with live Alpaca account data and latest Redis regime state.
+
+**Response 200:** See `WeeklyReport` TypeScript type in `frontend/src/api/performance.ts` for full schema. Sections: `trade_pnl`, `capital_efficiency`, `regime`, `feedback`, `infrastructure`, `weights`.
+
+**Response 404:** No weekly report cached yet (first Monday hasn't run, or cache expired).
 
 ### `GET /api/performance/positions`
 
@@ -626,6 +707,7 @@ Returns 503 if any dependency is unreachable.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 6.0.0 | 2026-06-26 | GET /api/performance/daily (per-day P&L from trades table, with trade-level detail); documented GET /api/performance/weekly and GET /api/performance/pnl schemas |
 | 5.0.0 | 2026-06-06 | Phase B: GET /api/feedback/status; Phase C: GET /api/trades/analytics/counterfactual |
 | 4.0.0 | 2026-06-06 | Phase A analytics: trades, decisions, analytics/by-symbol, analytics/by-dimension, postmortem endpoints; kill switch GET+DELETE; trades/decisions require auth |
 | 3.0.0 | 2026-06-03 | Full English rewrite; Phase G portfolio, risk, decay endpoints; new admin/llm-models, config endpoints |

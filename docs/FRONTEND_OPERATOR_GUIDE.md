@@ -1,6 +1,6 @@
 # Alembic — Frontend & Operator Guide
 
-**Last updated:** 2026-06-21  
+**Last updated:** 2026-06-26  
 **Scope:** P2-04 operator surfaces and frontend page inventory  
 **Authorization:** Live trading NOT authorized. `GLOBAL_LIVE_PROMOTION_ENABLED = False`.
 
@@ -95,7 +95,7 @@ The React frontend (`frontend/src/pages/`) exposes 16 pages. Authorization: logi
 | Strategies | `Strategies.tsx` | `/api/config` | Strategy allocation view |
 | Trading | `Trading.tsx` | `/api/admin/mode`, `/api/admin/killswitch` | Mode control + kill-switch |
 | Trades | `Trades.tsx` | `/api/trades/*`, `/analytics/*` | Trade analytics + P&L |
-| Performance | `Performance.tsx` | `/api/performance/latest`, `/weights/*` | IC, weights, drift |
+| Performance | `Performance.tsx` | `/api/performance/pnl`, `/api/performance/daily`, `/api/performance/weekly`, `/weights/*` | P&L storico, breakdown giornaliero, report settimanale |
 | News | `News.tsx` | `/api/news/recent` | Recent ingested articles |
 | LLM | `LLM.tsx` | `/api/llm/feedback` | Model feedback loop |
 | Auto-Improve | `AutoImprove.tsx` | `/api/feedback/status` | Phase B loss feedback |
@@ -106,7 +106,35 @@ The React frontend (`frontend/src/pages/`) exposes 16 pages. Authorization: logi
 | Docs | `Docs.tsx` | Static | Documentation viewer |
 | Login | `LoginPage.tsx` | `/api/auth/login` | Authentication |
 
-### 2.1 P2-04 Cockpit — Frontend Gap
+### 2.1 Pagina Performance — Tab disponibili
+
+La pagina Performance (`/performance`) ha tre tab:
+
+| Tab | Sorgente dati | Cosa mostra |
+|-----|--------------|-------------|
+| **P&L Storico** | `GET /api/performance/pnl` → Alpaca SDK | Cumulative P&L line chart, Portfolio Equity line chart, Monthly P&L Summary table, Trade Activity (last 30d) |
+| **Giornaliero** | `GET /api/performance/daily` → tabella `trades` locale | P&L per giornata con filtro date (dal/al), preset 7d/14d/30d, grafico a barre verde/rosso, tabella espandibile per giorno con dettaglio trade (symbol, entry/exit price, qty, gross P&L, net P&L, motivo uscita) |
+| **Report Settimanale** | `GET /api/performance/weekly` → Redis cache | Trade P&L 7d, analisi costi, capital efficiency, regime, feedback loop, infrastruttura, pesi LLM correnti/suggeriti |
+
+**Nota:** "P&L Storico" usa l'equity Alpaca (variazione netta di conto), mentre "Giornaliero" usa i record `trades` locali con `net_pnl` calcolato da `entry_price`/`exit_price`. Piccole differenze numeriche sono normali (commissioni Alpaca, slippage).
+
+#### Come usare il tab Giornaliero
+
+1. Selezionare il range con i campi **Dal / al** (formato italiano DD/MM/YYYY, clicking apre il calendar nativo)
+2. Oppure usare i preset rapidi **7d / 14d / 30d**
+3. Leggere i 4 KPI in cima (P&L totale, trade W/L, win rate, giorni +/−)
+4. Usare il **grafico a barre** per identificare visivamente le giornate positive (verde) e negative (rosso)
+5. Nella tabella "Dettaglio per Giornata", **cliccare su una riga** per espandere e vedere i singoli trade di quel giorno
+
+**Esempio — query da CLI equivalente al tab Giornaliero:**
+```bash
+curl -H "X-API-Key: $ADMIN_API_KEY" \
+  "http://localhost:8001/api/performance/daily?from_date=2026-06-24&to_date=2026-06-26"
+```
+
+---
+
+### 2.2 P2-04 Cockpit — Frontend Gap
 
 The P2-04 operator cockpit (`/api/system/readiness`) is **API-available but has no dedicated UI page**. No frontend component currently polls `GET /api/system/readiness` and renders the 8-key health flags visually.
 
@@ -120,7 +148,7 @@ The P2-04 operator cockpit (`/api/system/readiness`) is **API-available but has 
 
 This gap is acceptable for supervised_paper mode (operator manually polls) but should be addressed before controlled paper trading.
 
-### 2.2 Strategy Mode / Lifecycle — Frontend Gap
+### 2.3 Strategy Mode / Lifecycle — Frontend Gap
 
 The strategy lifecycle state machine (research → paper → supervised_paper → live) has no frontend display. The `Strategies.tsx` page shows allocation percentages from config but does NOT show:
 - Current lifecycle mode per strategy
