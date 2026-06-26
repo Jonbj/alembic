@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchReadiness, type Readiness } from '@/api/system'
-import { isUsMarketHours } from '@/utils/market'
+import { isTradingWindow } from '@/utils/market'
 
 type BannerState = 'ready' | 'degraded' | 'blocked' | 'closed'
 
@@ -77,7 +77,7 @@ export function ReadinessBanner() {
   }
   if (!data) return null
 
-  const marketOpen = isUsMarketHours()
+  const marketOpen = isTradingWindow()
   const state = bannerState(data, marketOpen)
   const c = COLORS[state]
   return (
