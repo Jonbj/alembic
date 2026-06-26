@@ -2,7 +2,7 @@
 
 import hashlib
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -201,6 +201,55 @@ async def approve_weights(
     )
 
     return {"applied_weights": weights, "source": source, "log_id": log_id}
+
+
+@router.get("/performance/daily")
+def get_daily_pnl(
+    pg: Annotated[PostgreSQLStore, Depends(get_pg_store)],
+    from_date: str | None = None,
+    to_date: str | None = None,
+    days: int = 7,
+) -> dict:
+    """Return per-day P&L breakdown from closed trades in the local trades table.
+
+    Args (query params):
+        from_date: 'YYYY-MM-DD' (default: today - days)
+        to_date:   'YYYY-MM-DD' (default: today)
+        days:      shortcut for last N days when from_date/to_date not set (default 7)
+    """
+    today = date.today()
+    try:
+        _to = date.fromisoformat(to_date) if to_date else today
+        _from = date.fromisoformat(from_date) if from_date else (_to - timedelta(days=days - 1))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid date format: {exc}") from exc
+
+    if (_to - _from).days > 365:
+        raise HTTPException(status_code=422, detail="Date range cannot exceed 365 days")
+
+    day_rows = pg.fetch_daily_pnl(str(_from), str(_to))
+
+    total_net_pnl = sum(r["total_net_pnl"] for r in day_rows)
+    total_trades = sum(r["trades_closed"] for r in day_rows)
+    total_winners = sum(r["winners"] for r in day_rows)
+    total_losers = sum(r["losers"] for r in day_rows)
+    positive_days = sum(1 for r in day_rows if r["total_net_pnl"] > 0)
+    negative_days = sum(1 for r in day_rows if r["total_net_pnl"] < 0)
+
+    return {
+        "from_date": str(_from),
+        "to_date": str(_to),
+        "days": day_rows,
+        "summary": {
+            "total_net_pnl": round(total_net_pnl, 2),
+            "total_trades": total_trades,
+            "winners": total_winners,
+            "losers": total_losers,
+            "win_rate": round(total_winners / total_trades, 4) if total_trades > 0 else 0.0,
+            "positive_days": positive_days,
+            "negative_days": negative_days,
+        },
+    }
 
 
 @router.get("/performance/pnl")

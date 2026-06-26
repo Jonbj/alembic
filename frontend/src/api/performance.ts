@@ -69,8 +69,51 @@ export interface WeeklyReport {
   }
 }
 
+export interface DailyTrade {
+  symbol: string
+  entry_time: string | null
+  exit_time: string | null
+  entry_price: number | null
+  exit_price: number | null
+  qty: number | null
+  gross_pnl: number | null
+  net_pnl: number
+  exit_reason: string | null
+}
+
+export interface DailyPnLDay {
+  date: string
+  trades_closed: number
+  total_net_pnl: number
+  gross_profit: number
+  gross_loss: number
+  winners: number
+  losers: number
+  trades: DailyTrade[]
+}
+
+export interface DailyPnLReport {
+  from_date: string
+  to_date: string
+  days: DailyPnLDay[]
+  summary: {
+    total_net_pnl: number
+    total_trades: number
+    winners: number
+    losers: number
+    win_rate: number
+    positive_days: number
+    negative_days: number
+  }
+}
+
 export const fetchPnL = (period = '6M') =>
   apiFetch<PnLData>(`/api/performance/pnl?period=${period}`)
 
 export const fetchWeeklyReport = () =>
   apiFetch<WeeklyReport>('/api/performance/weekly')
+
+export const fetchDailyPnL = (fromDate: string, toDate: string) =>
+  apiFetch<DailyPnLReport>(
+    `/api/performance/daily?from_date=${fromDate}&to_date=${toDate}`
+  )

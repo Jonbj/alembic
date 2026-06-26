@@ -654,6 +654,95 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def fetch_daily_pnl(self, from_date: str, to_date: str) -> list[dict]:
+        """Return per-day P&L breakdown from closed trades, with individual trade detail.
+
+        Args:
+            from_date: inclusive start date as 'YYYY-MM-DD'
+            to_date:   inclusive end date as 'YYYY-MM-DD'
+
+        Returns list of dicts with keys:
+            date, trades_closed, total_net_pnl, gross_profit, gross_loss,
+            winners, losers, trades (list of individual trade dicts)
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                # Daily aggregates
+                cur.execute(
+                    """
+                    SELECT
+                        (exit_time AT TIME ZONE 'UTC')::date           AS trading_date,
+                        COUNT(*)                                        AS trades_closed,
+                        ROUND(SUM(net_pnl)::numeric, 2)                AS total_net_pnl,
+                        ROUND(SUM(CASE WHEN net_pnl > 0 THEN net_pnl ELSE 0 END)::numeric, 2)
+                                                                        AS gross_profit,
+                        ROUND(SUM(CASE WHEN net_pnl < 0 THEN net_pnl ELSE 0 END)::numeric, 2)
+                                                                        AS gross_loss,
+                        COUNT(CASE WHEN net_pnl > 0 THEN 1 END)        AS winners,
+                        COUNT(CASE WHEN net_pnl < 0 THEN 1 END)        AS losers
+                    FROM trades
+                    WHERE exit_time IS NOT NULL AND net_pnl IS NOT NULL
+                      AND (exit_time AT TIME ZONE 'UTC')::date BETWEEN %s AND %s
+                    GROUP BY trading_date
+                    ORDER BY trading_date
+                    """,
+                    (from_date, to_date),
+                )
+                agg_cols = [d[0] for d in cur.description]
+                day_rows = [dict(zip(agg_cols, row)) for row in cur.fetchall()]
+
+                # Per-trade detail for the same date range
+                cur.execute(
+                    """
+                    SELECT symbol, entry_time, exit_time, entry_price, exit_price,
+                           qty, gross_pnl, net_pnl, exit_reason,
+                           (exit_time AT TIME ZONE 'UTC')::date AS trading_date
+                    FROM trades
+                    WHERE exit_time IS NOT NULL AND net_pnl IS NOT NULL
+                      AND (exit_time AT TIME ZONE 'UTC')::date BETWEEN %s AND %s
+                    ORDER BY exit_time ASC
+                    """,
+                    (from_date, to_date),
+                )
+                trade_cols = [d[0] for d in cur.description]
+                trade_rows = [dict(zip(trade_cols, row)) for row in cur.fetchall()]
+
+                # Group trades by date
+                from collections import defaultdict
+                trades_by_date: dict = defaultdict(list)
+                for t in trade_rows:
+                    d = str(t["trading_date"])
+                    trades_by_date[d].append({
+                        "symbol": t["symbol"],
+                        "entry_time": t["entry_time"].isoformat() if t["entry_time"] else None,
+                        "exit_time": t["exit_time"].isoformat() if t["exit_time"] else None,
+                        "entry_price": float(t["entry_price"]) if t["entry_price"] is not None else None,
+                        "exit_price": float(t["exit_price"]) if t["exit_price"] is not None else None,
+                        "qty": float(t["qty"]) if t["qty"] is not None else None,
+                        "gross_pnl": float(t["gross_pnl"]) if t["gross_pnl"] is not None else None,
+                        "net_pnl": float(t["net_pnl"]),
+                        "exit_reason": t["exit_reason"],
+                    })
+
+                result = []
+                for row in day_rows:
+                    d = str(row["trading_date"])
+                    result.append({
+                        "date": d,
+                        "trades_closed": int(row["trades_closed"]),
+                        "total_net_pnl": float(row["total_net_pnl"]),
+                        "gross_profit": float(row["gross_profit"]),
+                        "gross_loss": float(row["gross_loss"]),
+                        "winners": int(row["winners"]),
+                        "losers": int(row["losers"]),
+                        "trades": trades_by_date.get(d, []),
+                    })
+                return result
+        except Exception:
+            conn.rollback()
+            raise
+
     def fetch_recently_bought_symbols(self, minutes: int = 30) -> set[str]:
         """Return symbols with an open trade entered in the last `minutes` minutes.
 

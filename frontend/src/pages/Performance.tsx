@@ -3,10 +3,10 @@ import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
-  ResponsiveContainer,
+  ResponsiveContainer, Cell,
 } from 'recharts'
-import { fetchPnL, fetchWeeklyReport } from '@/api/performance'
-import type { WeeklyReport } from '@/api/performance'
+import { fetchPnL, fetchWeeklyReport, fetchDailyPnL } from '@/api/performance'
+import type { WeeklyReport, DailyPnLDay } from '@/api/performance'
 import { fetchTradesSummary } from '@/api/trades'
 import { HelpButton } from '@/components/shared/HelpButton'
 import { DataTable } from '@/components/shared/DataTable'
@@ -220,9 +220,279 @@ function WeeklyReportTab({
   )
 }
 
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function nDaysAgoStr(n: number) {
+  const d = new Date()
+  d.setDate(d.getDate() - n)
+  return d.toISOString().slice(0, 10)
+}
+
+function fmtPnL(v: number) {
+  const sign = v >= 0 ? '+' : ''
+  return `${sign}$${v.toFixed(2)}`
+}
+
+// ─── DailyPnLTab ────────────────────────────────────────────────────────────
+
+function DailyPnLTab() {
+  const [fromDate, setFromDate] = useState(nDaysAgoStr(6))
+  const [toDate, setToDate] = useState(todayStr())
+  const [expandedDay, setExpandedDay] = useState<string | null>(null)
+
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['daily-pnl', fromDate, toDate],
+    queryFn: () => fetchDailyPnL(fromDate, toDate),
+    enabled: !!fromDate && !!toDate && fromDate <= toDate,
+    staleTime: 60_000,
+  })
+
+  const card: React.CSSProperties = {
+    background: '#1e293b', border: '1px solid #334155',
+    borderRadius: 8, padding: '16px 20px', marginBottom: 16,
+  }
+
+  const summary = data?.summary
+  const days = data?.days ?? []
+
+  const chartData = days.map((d) => ({
+    date: d.date.slice(5),   // MM-DD for brevity
+    pnl: d.total_net_pnl,
+  }))
+
+  return (
+    <div>
+      {/* Date range picker */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <label style={{ fontSize: 13, color: '#94a3b8' }}>Dal</label>
+        <input
+          type="date"
+          value={fromDate}
+          max={toDate}
+          onChange={(e) => setFromDate(e.target.value)}
+          style={{
+            background: '#1e293b', border: '1px solid #334155', borderRadius: 6,
+            color: 'white', padding: '4px 10px', fontSize: 13,
+          }}
+        />
+        <label style={{ fontSize: 13, color: '#94a3b8' }}>al</label>
+        <input
+          type="date"
+          value={toDate}
+          min={fromDate}
+          max={todayStr()}
+          onChange={(e) => setToDate(e.target.value)}
+          style={{
+            background: '#1e293b', border: '1px solid #334155', borderRadius: 6,
+            color: 'white', padding: '4px 10px', fontSize: 13,
+          }}
+        />
+        {/* Quick presets */}
+        {[
+          { label: '7d', from: nDaysAgoStr(6) },
+          { label: '14d', from: nDaysAgoStr(13) },
+          { label: '30d', from: nDaysAgoStr(29) },
+        ].map(({ label, from }) => (
+          <button
+            key={label}
+            onClick={() => { setFromDate(from); setToDate(todayStr()) }}
+            style={{
+              padding: '4px 10px', fontSize: 12,
+              background: fromDate === from && toDate === todayStr() ? 'var(--blue)' : 'transparent',
+              color: fromDate === from && toDate === todayStr() ? 'white' : '#94a3b8',
+              border: '1px solid #334155', borderRadius: 6, cursor: 'pointer',
+            }}
+          >{label}</button>
+        ))}
+      </div>
+
+      {isLoading && <div style={{ color: '#94a3b8', padding: 24 }}>Caricamento…</div>}
+      {isError && <div style={{ color: '#ef4444', padding: 24 }}>Errore nel caricamento dei dati.</div>}
+      {!isLoading && !isError && days.length === 0 && (
+        <div style={{ color: '#64748b', padding: 24, textAlign: 'center' }}>
+          Nessun trade chiuso nel periodo selezionato.
+        </div>
+      )}
+
+      {summary && days.length > 0 && (
+        <>
+          {/* KPI strip */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+            {[
+              {
+                label: 'P&L Netto Totale',
+                value: fmtPnL(summary.total_net_pnl),
+                color: summary.total_net_pnl >= 0 ? '#22c55e' : '#ef4444',
+              },
+              {
+                label: 'Trade Chiusi',
+                value: `${summary.total_trades} (${summary.winners}W / ${summary.losers}L)`,
+                color: 'white',
+              },
+              {
+                label: 'Win Rate',
+                value: `${(summary.win_rate * 100).toFixed(1)}%`,
+                color: summary.win_rate >= 0.5 ? '#22c55e' : '#f59e0b',
+              },
+              {
+                label: 'Giorni +/−',
+                value: `${summary.positive_days} ▲ / ${summary.negative_days} ▼`,
+                color: 'white',
+              },
+            ].map(({ label, value, color }) => (
+              <div key={label} style={{ ...card, marginBottom: 0, textAlign: 'center' }}>
+                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>{label}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color }}>{value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Bar chart */}
+          <div style={{ ...card }}>
+            <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600, color: 'white' }}>
+              P&L per Giornata
+            </h3>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
+                <Tooltip
+                  formatter={(v) => [`${fmtPnL(Number(v))}`, 'Net P&L']}
+                  contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6 }}
+                  labelStyle={{ color: '#94a3b8' }}
+                />
+                <Bar dataKey="pnl" radius={[4, 4, 0, 0]}>
+                  {chartData.map((entry, idx) => (
+                    <Cell key={idx} fill={entry.pnl >= 0 ? '#22c55e' : '#ef4444'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Per-day table */}
+          <div>
+            <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>Dettaglio per Giornata</h3>
+            <div style={{ border: '1px solid #334155', borderRadius: 8, overflow: 'hidden' }}>
+              {/* Header */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '120px 80px 110px 90px 80px 80px 36px',
+                padding: '8px 16px', background: '#0f172a',
+                fontSize: 11, color: '#64748b', fontWeight: 600, gap: 8,
+              }}>
+                <span>Data</span>
+                <span>Trade</span>
+                <span>Net P&L</span>
+                <span>Profitti</span>
+                <span>Perdite</span>
+                <span>W / L</span>
+                <span></span>
+              </div>
+              {days.map((day) => (
+                <DayRow
+                  key={day.date}
+                  day={day}
+                  expanded={expandedDay === day.date}
+                  onToggle={() => setExpandedDay(expandedDay === day.date ? null : day.date)}
+                />
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function DayRow({ day, expanded, onToggle }: {
+  day: DailyPnLDay
+  expanded: boolean
+  onToggle: () => void
+}) {
+  const isPositive = day.total_net_pnl >= 0
+  const rowBg = isPositive ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)'
+
+  return (
+    <>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: '120px 80px 110px 90px 80px 80px 36px',
+          padding: '10px 16px', background: rowBg,
+          borderTop: '1px solid #1e293b', fontSize: 13, gap: 8,
+          cursor: day.trades.length > 0 ? 'pointer' : 'default',
+          alignItems: 'center',
+        }}
+        onClick={day.trades.length > 0 ? onToggle : undefined}
+      >
+        <span style={{ color: 'white', fontWeight: 500 }}>{day.date}</span>
+        <span style={{ color: '#94a3b8' }}>{day.trades_closed}</span>
+        <span style={{ color: isPositive ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
+          {fmtPnL(day.total_net_pnl)}
+        </span>
+        <span style={{ color: '#22c55e' }}>{day.gross_profit > 0 ? `+$${day.gross_profit.toFixed(2)}` : '—'}</span>
+        <span style={{ color: '#ef4444' }}>{day.gross_loss < 0 ? `-$${Math.abs(day.gross_loss).toFixed(2)}` : '—'}</span>
+        <span style={{ color: '#94a3b8' }}>{day.winners}W / {day.losers}L</span>
+        <span style={{ color: '#475569', fontSize: 11 }}>{day.trades.length > 0 ? (expanded ? '▲' : '▼') : ''}</span>
+      </div>
+
+      {expanded && day.trades.length > 0 && (
+        <div style={{ background: '#0f172a', borderTop: '1px solid #1e293b' }}>
+          {/* Trade detail header */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '70px 1fr 90px 90px 60px 80px 80px',
+            padding: '6px 32px', fontSize: 10, color: '#475569', fontWeight: 600, gap: 8,
+          }}>
+            <span>Symbol</span>
+            <span>Motivo uscita</span>
+            <span>Entry</span>
+            <span>Exit</span>
+            <span>Qty</span>
+            <span>Gross P&L</span>
+            <span>Net P&L</span>
+          </div>
+          {day.trades.map((t, i) => (
+            <div
+              key={i}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '70px 1fr 90px 90px 60px 80px 80px',
+                padding: '5px 32px',
+                borderTop: '1px solid #1e293b',
+                fontSize: 12, gap: 8, alignItems: 'start',
+              }}
+            >
+              <span style={{ color: 'white', fontWeight: 600 }}>{t.symbol}</span>
+              <span style={{ color: '#64748b', fontSize: 11, wordBreak: 'break-word' }}>
+                {t.exit_reason ?? '—'}
+              </span>
+              <span style={{ color: '#94a3b8' }}>{t.entry_price != null ? `$${t.entry_price.toFixed(2)}` : '—'}</span>
+              <span style={{ color: '#94a3b8' }}>{t.exit_price != null ? `$${t.exit_price.toFixed(2)}` : '—'}</span>
+              <span style={{ color: '#94a3b8' }}>{t.qty ?? '—'}</span>
+              <span style={{ color: (t.gross_pnl ?? 0) >= 0 ? '#22c55e' : '#ef4444' }}>
+                {t.gross_pnl != null ? fmtPnL(t.gross_pnl) : '—'}
+              </span>
+              <span style={{ color: t.net_pnl >= 0 ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
+                {fmtPnL(t.net_pnl)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
 export default function Performance() {
   const [period, setPeriod] = useState<Period>('6M')
-  const [activeTab, setActiveTab] = useState<'pnl' | 'weekly'>('pnl')
+  const [activeTab, setActiveTab] = useState<'pnl' | 'weekly' | 'daily'>('pnl')
 
   const { data: pnl, isLoading } = useQuery({
     queryKey: ['pnl', period],
@@ -308,7 +578,7 @@ export default function Performance() {
 
       {/* Tab switcher */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 20, marginTop: 8 }}>
-        {(['pnl', 'weekly'] as const).map((t) => (
+        {(['pnl', 'daily', 'weekly'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setActiveTab(t)}
@@ -323,7 +593,7 @@ export default function Performance() {
               cursor: 'pointer',
             }}
           >
-            {t === 'pnl' ? 'P&L Storico' : 'Report Settimanale'}
+            {t === 'pnl' ? 'P&L Storico' : t === 'daily' ? 'Giornaliero' : 'Report Settimanale'}
           </button>
         ))}
       </div>
@@ -426,6 +696,7 @@ export default function Performance() {
           )}
         </>
       )}
+      {activeTab === 'daily' && <DailyPnLTab />}
       {activeTab === 'weekly' && (
         <WeeklyReportTab weekly={weekly} isLoading={weeklyLoading} />
       )}
