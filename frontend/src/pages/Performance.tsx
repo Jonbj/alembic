@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { fmtDateTime } from '@/utils/format'
+import { fmtDateTime, fmtDate } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -237,12 +237,61 @@ function fmtPnL(v: number) {
   return `${sign}$${v.toFixed(2)}`
 }
 
+// DD/MM from YYYY-MM-DD (for chart axis — no year to save space)
+function fmtDateShort(iso: string) {
+  if (!iso || iso.length < 10) return iso
+  return `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
+}
+
+// ─── ItDatePicker — shows Italian format, delegates to native input ──────────
+
+function ItDatePicker({ value, onChange, min, max, label }: {
+  value: string
+  onChange: (v: string) => void
+  label: string
+  min?: string
+  max?: string
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{label}</span>
+      <div style={{ position: 'relative', display: 'inline-block' }}>
+        <span style={{
+          display: 'block',
+          padding: '4px 10px',
+          background: 'var(--card)',
+          border: '1px solid var(--border)',
+          borderRadius: 6,
+          color: 'var(--text)',
+          fontSize: 13,
+          minWidth: 90,
+          pointerEvents: 'none',
+          userSelect: 'none',
+        }}>
+          {fmtDate(value)}
+        </span>
+        <input
+          type="date"
+          value={value}
+          min={min}
+          max={max}
+          onChange={(e) => onChange(e.target.value)}
+          style={{
+            position: 'absolute', top: 0, left: 0,
+            width: '100%', height: '100%',
+            opacity: 0, cursor: 'pointer',
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
 // ─── DailyPnLTab ────────────────────────────────────────────────────────────
 
 function DailyPnLTab() {
   const [fromDate, setFromDate] = useState(nDaysAgoStr(6))
   const [toDate, setToDate] = useState(todayStr())
-  const [expandedDay, setExpandedDay] = useState<string | null>(null)
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['daily-pnl', fromDate, toDate],
@@ -251,69 +300,97 @@ function DailyPnLTab() {
     staleTime: 60_000,
   })
 
-  const card: React.CSSProperties = {
-    background: '#1e293b', border: '1px solid #334155',
-    borderRadius: 8, padding: '16px 20px', marginBottom: 16,
-  }
-
   const summary = data?.summary
   const days = data?.days ?? []
 
   const chartData = days.map((d) => ({
-    date: d.date.slice(5),   // MM-DD for brevity
+    date: fmtDateShort(d.date),
     pnl: d.total_net_pnl,
   }))
 
+  const tableRows = days.map((day) => {
+    const pos = day.total_net_pnl >= 0
+    return {
+      cells: [
+        <span style={{ fontWeight: 500 }}>{fmtDate(day.date)}</span>,
+        day.trades_closed,
+        <span style={{ color: pos ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>
+          {fmtPnL(day.total_net_pnl)}
+        </span>,
+        <span style={{ color: 'var(--green)' }}>
+          {day.gross_profit > 0 ? `+$${day.gross_profit.toFixed(2)}` : '—'}
+        </span>,
+        <span style={{ color: 'var(--red)' }}>
+          {day.gross_loss < 0 ? `-$${Math.abs(day.gross_loss).toFixed(2)}` : '—'}
+        </span>,
+        <span className={`badge ${pos ? 'badge-green' : 'badge-red'}`}>
+          {day.winners}W / {day.losers}L
+        </span>,
+      ],
+      expanded: day.trades.length > 0 ? (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr>
+              {['Symbol', 'Motivo uscita', 'Entry', 'Exit', 'Qty', 'Gross P&L', 'Net P&L'].map((h) => (
+                <th key={h} style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--text-muted)', fontWeight: 600, fontSize: 11 }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {day.trades.map((t, i) => (
+              <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+                <td style={{ padding: '4px 8px', fontWeight: 600 }}>{t.symbol}</td>
+                <td style={{ padding: '4px 8px', color: 'var(--text-muted)', maxWidth: 300, wordBreak: 'break-word' }}>
+                  {t.exit_reason ?? '—'}
+                </td>
+                <td style={{ padding: '4px 8px' }}>{t.entry_price != null ? `$${t.entry_price.toFixed(2)}` : '—'}</td>
+                <td style={{ padding: '4px 8px' }}>{t.exit_price != null ? `$${t.exit_price.toFixed(2)}` : '—'}</td>
+                <td style={{ padding: '4px 8px' }}>{t.qty != null ? t.qty.toFixed(4) : '—'}</td>
+                <td style={{ padding: '4px 8px', color: (t.gross_pnl ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {t.gross_pnl != null ? fmtPnL(t.gross_pnl) : '—'}
+                </td>
+                <td style={{ padding: '4px 8px', fontWeight: 700, color: t.net_pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {fmtPnL(t.net_pnl)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : undefined,
+    }
+  })
+
   return (
     <div>
-      {/* Date range picker */}
+      {/* Date range bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-        <label style={{ fontSize: 13, color: '#94a3b8' }}>Dal</label>
-        <input
-          type="date"
-          value={fromDate}
-          max={toDate}
-          onChange={(e) => setFromDate(e.target.value)}
-          style={{
-            background: '#1e293b', border: '1px solid #334155', borderRadius: 6,
-            color: 'white', padding: '4px 10px', fontSize: 13,
-          }}
-        />
-        <label style={{ fontSize: 13, color: '#94a3b8' }}>al</label>
-        <input
-          type="date"
-          value={toDate}
-          min={fromDate}
-          max={todayStr()}
-          onChange={(e) => setToDate(e.target.value)}
-          style={{
-            background: '#1e293b', border: '1px solid #334155', borderRadius: 6,
-            color: 'white', padding: '4px 10px', fontSize: 13,
-          }}
-        />
-        {/* Quick presets */}
+        <ItDatePicker label="Dal" value={fromDate} max={toDate} onChange={setFromDate} />
+        <ItDatePicker label="al" value={toDate} min={fromDate} max={todayStr()} onChange={setToDate} />
         {[
           { label: '7d', from: nDaysAgoStr(6) },
           { label: '14d', from: nDaysAgoStr(13) },
           { label: '30d', from: nDaysAgoStr(29) },
-        ].map(({ label, from }) => (
-          <button
-            key={label}
-            onClick={() => { setFromDate(from); setToDate(todayStr()) }}
-            style={{
-              padding: '4px 10px', fontSize: 12,
-              background: fromDate === from && toDate === todayStr() ? 'var(--blue)' : 'transparent',
-              color: fromDate === from && toDate === todayStr() ? 'white' : '#94a3b8',
-              border: '1px solid #334155', borderRadius: 6, cursor: 'pointer',
-            }}
-          >{label}</button>
-        ))}
+        ].map(({ label, from }) => {
+          const active = fromDate === from && toDate === todayStr()
+          return (
+            <button
+              key={label}
+              onClick={() => { setFromDate(from); setToDate(todayStr()) }}
+              style={{
+                padding: '4px 10px', fontSize: 12, cursor: 'pointer',
+                background: active ? 'var(--blue)' : 'transparent',
+                color: active ? 'white' : 'var(--text-muted)',
+                border: '1px solid var(--border)', borderRadius: 6,
+              }}
+            >{label}</button>
+          )
+        })}
       </div>
 
-      {isLoading && <div style={{ color: '#94a3b8', padding: 24 }}>Caricamento…</div>}
-      {isError && <div style={{ color: '#ef4444', padding: 24 }}>Errore nel caricamento dei dati.</div>}
+      {isLoading && <div style={{ color: 'var(--text-muted)', padding: 24 }}>Caricamento…</div>}
+      {isError && <div style={{ color: 'var(--red)', padding: 24 }}>Errore nel caricamento dei dati.</div>}
       {!isLoading && !isError && days.length === 0 && (
-        <div style={{ color: '#64748b', padding: 24, textAlign: 'center' }}>
+        <div style={{ color: 'var(--text-muted)', padding: 24, textAlign: 'center' }}>
           Nessun trade chiuso nel periodo selezionato.
         </div>
       )}
@@ -326,49 +403,46 @@ function DailyPnLTab() {
               {
                 label: 'P&L Netto Totale',
                 value: fmtPnL(summary.total_net_pnl),
-                color: summary.total_net_pnl >= 0 ? '#22c55e' : '#ef4444',
+                color: summary.total_net_pnl >= 0 ? 'var(--green)' : 'var(--red)',
               },
               {
                 label: 'Trade Chiusi',
                 value: `${summary.total_trades} (${summary.winners}W / ${summary.losers}L)`,
-                color: 'white',
+                color: 'var(--text)',
               },
               {
                 label: 'Win Rate',
                 value: `${(summary.win_rate * 100).toFixed(1)}%`,
-                color: summary.win_rate >= 0.5 ? '#22c55e' : '#f59e0b',
+                color: summary.win_rate >= 0.5 ? 'var(--green)' : '#f59e0b',
               },
               {
                 label: 'Giorni +/−',
                 value: `${summary.positive_days} ▲ / ${summary.negative_days} ▼`,
-                color: 'white',
+                color: 'var(--text)',
               },
             ].map(({ label, value, color }) => (
-              <div key={label} style={{ ...card, marginBottom: 0, textAlign: 'center' }}>
-                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>{label}</div>
+              <div key={label} className="card" style={{ textAlign: 'center', padding: '12px 16px' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>{label}</div>
                 <div style={{ fontSize: 18, fontWeight: 700, color }}>{value}</div>
               </div>
             ))}
           </div>
 
           {/* Bar chart */}
-          <div style={{ ...card }}>
-            <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600, color: 'white' }}>
-              P&L per Giornata
-            </h3>
+          <div className="card" style={{ marginBottom: 20 }}>
+            <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>P&L per Giornata</h3>
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={chartData} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
                 <Tooltip
-                  formatter={(v) => [`${fmtPnL(Number(v))}`, 'Net P&L']}
-                  contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6 }}
-                  labelStyle={{ color: '#94a3b8' }}
+                  formatter={(v) => [fmtPnL(Number(v)), 'Net P&L']}
+                  contentStyle={{ borderRadius: 6 }}
                 />
                 <Bar dataKey="pnl" radius={[4, 4, 0, 0]}>
                   {chartData.map((entry, idx) => (
-                    <Cell key={idx} fill={entry.pnl >= 0 ? '#22c55e' : '#ef4444'} />
+                    <Cell key={idx} fill={entry.pnl >= 0 ? '#16a34a' : '#dc2626'} />
                   ))}
                 </Bar>
               </BarChart>
@@ -376,117 +450,23 @@ function DailyPnLTab() {
           </div>
 
           {/* Per-day table */}
-          <div>
-            <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>Dettaglio per Giornata</h3>
-            <div style={{ border: '1px solid #334155', borderRadius: 8, overflow: 'hidden' }}>
-              {/* Header */}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: '120px 80px 110px 90px 80px 80px 36px',
-                padding: '8px 16px', background: '#0f172a',
-                fontSize: 11, color: '#64748b', fontWeight: 600, gap: 8,
-              }}>
-                <span>Data</span>
-                <span>Trade</span>
-                <span>Net P&L</span>
-                <span>Profitti</span>
-                <span>Perdite</span>
-                <span>W / L</span>
-                <span></span>
-              </div>
-              {days.map((day) => (
-                <DayRow
-                  key={day.date}
-                  day={day}
-                  expanded={expandedDay === day.date}
-                  onToggle={() => setExpandedDay(expandedDay === day.date ? null : day.date)}
-                />
-              ))}
-            </div>
-          </div>
+          <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>Dettaglio per Giornata</h3>
+          <DataTable
+            loading={isLoading}
+            columns={[
+              { label: 'Data',     width: '16%' },
+              { label: 'Trade',    width: '8%'  },
+              { label: 'Net P&L',  width: '14%' },
+              { label: 'Profitti', width: '14%' },
+              { label: 'Perdite',  width: '14%' },
+              { label: 'W / L',    width: '14%' },
+            ]}
+            rows={tableRows}
+            emptyMessage="Nessun trade chiuso nel periodo selezionato."
+          />
         </>
       )}
     </div>
-  )
-}
-
-function DayRow({ day, expanded, onToggle }: {
-  day: DailyPnLDay
-  expanded: boolean
-  onToggle: () => void
-}) {
-  const isPositive = day.total_net_pnl >= 0
-  const rowBg = isPositive ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)'
-
-  return (
-    <>
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '120px 80px 110px 90px 80px 80px 36px',
-          padding: '10px 16px', background: rowBg,
-          borderTop: '1px solid #1e293b', fontSize: 13, gap: 8,
-          cursor: day.trades.length > 0 ? 'pointer' : 'default',
-          alignItems: 'center',
-        }}
-        onClick={day.trades.length > 0 ? onToggle : undefined}
-      >
-        <span style={{ color: 'white', fontWeight: 500 }}>{day.date}</span>
-        <span style={{ color: '#94a3b8' }}>{day.trades_closed}</span>
-        <span style={{ color: isPositive ? '#22c55e' : '#ef4444', fontWeight: 700 }}>
-          {fmtPnL(day.total_net_pnl)}
-        </span>
-        <span style={{ color: '#22c55e' }}>{day.gross_profit > 0 ? `+$${day.gross_profit.toFixed(2)}` : '—'}</span>
-        <span style={{ color: '#ef4444' }}>{day.gross_loss < 0 ? `-$${Math.abs(day.gross_loss).toFixed(2)}` : '—'}</span>
-        <span style={{ color: '#94a3b8' }}>{day.winners}W / {day.losers}L</span>
-        <span style={{ color: '#475569', fontSize: 11 }}>{day.trades.length > 0 ? (expanded ? '▲' : '▼') : ''}</span>
-      </div>
-
-      {expanded && day.trades.length > 0 && (
-        <div style={{ background: '#0f172a', borderTop: '1px solid #1e293b' }}>
-          {/* Trade detail header */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '70px 1fr 90px 90px 60px 80px 80px',
-            padding: '6px 32px', fontSize: 10, color: '#475569', fontWeight: 600, gap: 8,
-          }}>
-            <span>Symbol</span>
-            <span>Motivo uscita</span>
-            <span>Entry</span>
-            <span>Exit</span>
-            <span>Qty</span>
-            <span>Gross P&L</span>
-            <span>Net P&L</span>
-          </div>
-          {day.trades.map((t, i) => (
-            <div
-              key={i}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '70px 1fr 90px 90px 60px 80px 80px',
-                padding: '5px 32px',
-                borderTop: '1px solid #1e293b',
-                fontSize: 12, gap: 8, alignItems: 'start',
-              }}
-            >
-              <span style={{ color: 'white', fontWeight: 600 }}>{t.symbol}</span>
-              <span style={{ color: '#64748b', fontSize: 11, wordBreak: 'break-word' }}>
-                {t.exit_reason ?? '—'}
-              </span>
-              <span style={{ color: '#94a3b8' }}>{t.entry_price != null ? `$${t.entry_price.toFixed(2)}` : '—'}</span>
-              <span style={{ color: '#94a3b8' }}>{t.exit_price != null ? `$${t.exit_price.toFixed(2)}` : '—'}</span>
-              <span style={{ color: '#94a3b8' }}>{t.qty ?? '—'}</span>
-              <span style={{ color: (t.gross_pnl ?? 0) >= 0 ? '#22c55e' : '#ef4444' }}>
-                {t.gross_pnl != null ? fmtPnL(t.gross_pnl) : '—'}
-              </span>
-              <span style={{ color: t.net_pnl >= 0 ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
-                {fmtPnL(t.net_pnl)}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </>
   )
 }
 
