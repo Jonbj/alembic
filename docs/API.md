@@ -288,6 +288,19 @@ Max range: 365 days.
 | `total_net_pnl` | `SUM(net_pnl)` | Risultato effettivo dopo i costi |
 | `winners` | `COUNT(net_pnl > 0)` | Trade chiusi in profitto |
 | `losers` | `COUNT(net_pnl < 0)` | Trade chiusi in perdita |
+
+**Campi per singolo trade (array `trades`):**
+
+| Campo | Descrizione |
+|-------|-------------|
+| `symbol` | Ticker symbol |
+| `entry_time` / `exit_time` | Timestamp ISO-8601 UTC |
+| `entry_price` / `exit_price` | Prezzi di entrata/uscita |
+| `qty` | Quantità |
+| `gross_pnl` | P&L lordo prima dei costi (`null` per trade pre-migration) |
+| `net_pnl` | P&L netto dopo i costi |
+| `costs` | Calcolato dal frontend: `gross_pnl − net_pnl` (non nel payload JSON) |
+| `exit_reason` | Motivo di chiusura (es. `portfolio_sell`, `stop_loss`) |
 ```
 
 **Example:**
@@ -720,6 +733,7 @@ Returns 503 if any dependency is unreachable.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 6.1.1 | 2026-06-26 | GET /api/performance/daily: trade-level detail now includes Costi column (gross_pnl − net_pnl per trade) in frontend drill-down |
 | 6.1.0 | 2026-06-26 | GET /api/performance/daily: add total_gross_pnl and total_costs fields (gross/net breakdown); remove gross_profit/gross_loss fields |
 | 6.0.0 | 2026-06-26 | GET /api/performance/daily (per-day P&L from trades table, with trade-level detail); documented GET /api/performance/weekly and GET /api/performance/pnl schemas |
 | 5.0.0 | 2026-06-06 | Phase B: GET /api/feedback/status; Phase C: GET /api/trades/analytics/counterfactual |

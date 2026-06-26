@@ -129,7 +129,7 @@ La pagina Performance (`/performance`) ha tre tab:
 | P&L Netto | `SUM(net_pnl)` | Risultato effettivo dopo i costi |
 | W / L | `COUNT(net_pnl > 0)` / `COUNT(net_pnl < 0)` | Trade vincenti / perdenti |
 
-Espandendo una riga giornata si vedono i singoli trade con: symbol, motivo uscita, entry/exit price, qty, gross P&L, net P&L.
+Espandendo una riga giornata si vedono i singoli trade con: symbol, motivo uscita, entry/exit price, qty, P&L Lordo, Costi (`gross_pnl − net_pnl`), P&L Netto.
 
 **KPI in cima al tab:**
 - Riga 1: **P&L Lordo → Costi Transazione → P&L Netto** (progressione lordo→netto)
