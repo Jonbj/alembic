@@ -310,18 +310,19 @@ function DailyPnLTab() {
 
   const tableRows = days.map((day) => {
     const pos = day.total_net_pnl >= 0
+    const hasCosts = day.total_costs !== 0
     return {
       cells: [
         <span style={{ fontWeight: 500 }}>{fmtDate(day.date)}</span>,
         day.trades_closed,
+        <span style={{ color: (day.total_gross_pnl ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+          {day.total_gross_pnl != null ? fmtPnL(day.total_gross_pnl) : '—'}
+        </span>,
+        <span style={{ color: hasCosts ? 'var(--red)' : 'var(--text-muted)', fontSize: 12 }}>
+          {hasCosts ? `-$${Math.abs(day.total_costs).toFixed(2)}` : '—'}
+        </span>,
         <span style={{ color: pos ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>
           {fmtPnL(day.total_net_pnl)}
-        </span>,
-        <span style={{ color: 'var(--green)' }}>
-          {day.gross_profit > 0 ? `+$${day.gross_profit.toFixed(2)}` : '—'}
-        </span>,
-        <span style={{ color: 'var(--red)' }}>
-          {day.gross_loss < 0 ? `-$${Math.abs(day.gross_loss).toFixed(2)}` : '—'}
         </span>,
         <span className={`badge ${pos ? 'badge-green' : 'badge-red'}`}>
           {day.winners}W / {day.losers}L
@@ -397,14 +398,38 @@ function DailyPnLTab() {
 
       {summary && days.length > 0 && (
         <>
-          {/* KPI strip */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+          {/* KPI strip — row 1: P&L lordo → costi → netto */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 12 }}>
             {[
               {
-                label: 'P&L Netto Totale',
+                label: 'P&L Lordo',
+                value: fmtPnL(summary.total_gross_pnl),
+                sub: 'prima dei costi di transazione',
+                color: summary.total_gross_pnl >= 0 ? 'var(--green)' : 'var(--red)',
+              },
+              {
+                label: 'Costi Transazione',
+                value: summary.total_costs !== 0 ? `-$${Math.abs(summary.total_costs).toFixed(2)}` : '—',
+                sub: 'slippage + spread stimati',
+                color: summary.total_costs !== 0 ? 'var(--red)' : 'var(--text-muted)',
+              },
+              {
+                label: 'P&L Netto',
                 value: fmtPnL(summary.total_net_pnl),
+                sub: 'risultato effettivo',
                 color: summary.total_net_pnl >= 0 ? 'var(--green)' : 'var(--red)',
               },
+            ].map(({ label, value, sub, color }) => (
+              <div key={label} className="card" style={{ textAlign: 'center', padding: '12px 16px' }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
+                <div style={{ fontSize: 20, fontWeight: 700, color }}>{value}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>{sub}</div>
+              </div>
+            ))}
+          </div>
+          {/* KPI strip — row 2: trade stats */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+            {[
               {
                 label: 'Trade Chiusi',
                 value: `${summary.total_trades} (${summary.winners}W / ${summary.losers}L)`,
@@ -423,7 +448,7 @@ function DailyPnLTab() {
             ].map(({ label, value, color }) => (
               <div key={label} className="card" style={{ textAlign: 'center', padding: '12px 16px' }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>{label}</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color }}>{value}</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color }}>{value}</div>
               </div>
             ))}
           </div>
@@ -454,12 +479,12 @@ function DailyPnLTab() {
           <DataTable
             loading={isLoading}
             columns={[
-              { label: 'Data',     width: '16%' },
-              { label: 'Trade',    width: '8%'  },
-              { label: 'Net P&L',  width: '14%' },
-              { label: 'Profitti', width: '14%' },
-              { label: 'Perdite',  width: '14%' },
-              { label: 'W / L',    width: '14%' },
+              { label: 'Data',        width: '18%' },
+              { label: 'Trade',       width: '8%'  },
+              { label: 'P&L Lordo',   width: '14%' },
+              { label: 'Costi',       width: '12%' },
+              { label: 'P&L Netto',   width: '14%' },
+              { label: 'W / L',       width: '12%' },
             ]}
             rows={tableRows}
             emptyMessage="Nessun trade chiuso nel periodo selezionato."
@@ -524,7 +549,7 @@ export default function Performance() {
         },
         {
           heading: "Giornaliero — Metriche",
-          content: "**W (Winners)**: trade chiusi con profitto netto positivo (net_pnl > 0).\n**L (Losers)**: trade chiusi in perdita (net_pnl < 0).\n**Net P&L**: somma dei net_pnl di tutti i trade chiusi in quella giornata. È il risultato reale dopo slippage e costi stimati — non l'equity Alpaca.\n**Profitti**: somma dei soli trade positivi (gross profit della giornata).\n**Perdite**: somma dei soli trade negativi (gross loss della giornata).\n**Win rate (KPI)**: Winners / totale trade nel periodo selezionato. >50% = più trade in guadagno che in perdita.\n**Giorni +/−**: numero di giornate con P&L netto positivo vs negativo nel range.\n\n**Nota**: i dati vengono dalla tabella `trades` locale, non da Alpaca. Piccole differenze vs P&L Storico (tab 1) sono normali perché Alpaca conta le variazioni di equity intraday incluse le posizioni aperte.",
+          content: "**P&L Lordo**: somma di gross_pnl per tutti i trade chiusi nella giornata — il risultato prima dei costi di transazione (spread bid-ask + market impact stimato).\n**Costi**: gross_pnl − net_pnl, ovvero l'erosione causata dallo slippage e dal costo di esecuzione. Sempre negativo o zero.\n**P&L Netto**: risultato effettivo dopo i costi. È il valore che conta per la performance reale.\n\n**W (Winners)**: trade chiusi con net_pnl > 0.\n**L (Losers)**: trade chiusi con net_pnl < 0.\n**Win rate (KPI)**: Winners / totale trade nel periodo. >50% = più trade in guadagno che in perdita.\n**Giorni +/−**: giornate con P&L netto positivo vs negativo nel range selezionato.\n\n**Nota**: i dati vengono dalla tabella `trades` locale (non da Alpaca). Piccole differenze vs P&L Storico sono normali: Alpaca include variazioni di equity sulle posizioni aperte, questa vista conta solo i trade chiusi.",
         },
         {
           heading: "Report Settimanale — Trade P&L",

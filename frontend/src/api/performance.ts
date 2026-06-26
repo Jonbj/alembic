@@ -84,9 +84,9 @@ export interface DailyTrade {
 export interface DailyPnLDay {
   date: string
   trades_closed: number
+  total_gross_pnl: number
+  total_costs: number
   total_net_pnl: number
-  gross_profit: number
-  gross_loss: number
   winners: number
   losers: number
   trades: DailyTrade[]
@@ -97,6 +97,8 @@ export interface DailyPnLReport {
   to_date: string
   days: DailyPnLDay[]
   summary: {
+    total_gross_pnl: number
+    total_costs: number
     total_net_pnl: number
     total_trades: number
     winners: number

@@ -662,7 +662,7 @@ class PostgreSQLStore:
             to_date:   inclusive end date as 'YYYY-MM-DD'
 
         Returns list of dicts with keys:
-            date, trades_closed, total_net_pnl, gross_profit, gross_loss,
+            date, trades_closed, total_gross_pnl, total_costs, total_net_pnl,
             winners, losers, trades (list of individual trade dicts)
         """
         conn = self._get_connection()
@@ -672,15 +672,14 @@ class PostgreSQLStore:
                 cur.execute(
                     """
                     SELECT
-                        (exit_time AT TIME ZONE 'UTC')::date           AS trading_date,
-                        COUNT(*)                                        AS trades_closed,
-                        ROUND(SUM(net_pnl)::numeric, 2)                AS total_net_pnl,
-                        ROUND(SUM(CASE WHEN net_pnl > 0 THEN net_pnl ELSE 0 END)::numeric, 2)
-                                                                        AS gross_profit,
-                        ROUND(SUM(CASE WHEN net_pnl < 0 THEN net_pnl ELSE 0 END)::numeric, 2)
-                                                                        AS gross_loss,
-                        COUNT(CASE WHEN net_pnl > 0 THEN 1 END)        AS winners,
-                        COUNT(CASE WHEN net_pnl < 0 THEN 1 END)        AS losers
+                        (exit_time AT TIME ZONE 'UTC')::date                   AS trading_date,
+                        COUNT(*)                                                AS trades_closed,
+                        ROUND(SUM(COALESCE(gross_pnl, net_pnl))::numeric, 2)  AS total_gross_pnl,
+                        ROUND(SUM(COALESCE(gross_pnl, net_pnl) - net_pnl)::numeric, 2)
+                                                                                AS total_costs,
+                        ROUND(SUM(net_pnl)::numeric, 2)                        AS total_net_pnl,
+                        COUNT(CASE WHEN net_pnl > 0 THEN 1 END)                AS winners,
+                        COUNT(CASE WHEN net_pnl < 0 THEN 1 END)                AS losers
                     FROM trades
                     WHERE exit_time IS NOT NULL AND net_pnl IS NOT NULL
                       AND (exit_time AT TIME ZONE 'UTC')::date BETWEEN %s AND %s
@@ -731,9 +730,9 @@ class PostgreSQLStore:
                     result.append({
                         "date": d,
                         "trades_closed": int(row["trades_closed"]),
+                        "total_gross_pnl": float(row["total_gross_pnl"]),
+                        "total_costs": float(row["total_costs"]),
                         "total_net_pnl": float(row["total_net_pnl"]),
-                        "gross_profit": float(row["gross_profit"]),
-                        "gross_loss": float(row["gross_loss"]),
                         "winners": int(row["winners"]),
                         "losers": int(row["losers"]),
                         "trades": trades_by_date.get(d, []),

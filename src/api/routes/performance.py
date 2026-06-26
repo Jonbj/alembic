@@ -229,6 +229,8 @@ def get_daily_pnl(
 
     day_rows = pg.fetch_daily_pnl(str(_from), str(_to))
 
+    total_gross_pnl = sum(r["total_gross_pnl"] for r in day_rows)
+    total_costs = sum(r["total_costs"] for r in day_rows)
     total_net_pnl = sum(r["total_net_pnl"] for r in day_rows)
     total_trades = sum(r["trades_closed"] for r in day_rows)
     total_winners = sum(r["winners"] for r in day_rows)
@@ -241,6 +243,8 @@ def get_daily_pnl(
         "to_date": str(_to),
         "days": day_rows,
         "summary": {
+            "total_gross_pnl": round(total_gross_pnl, 2),
+            "total_costs": round(total_costs, 2),
             "total_net_pnl": round(total_net_pnl, 2),
             "total_trades": total_trades,
             "winners": total_winners,
