@@ -245,9 +245,9 @@ Max range: 365 days.
     {
       "date": "2026-06-24",
       "trades_closed": 4,
+      "total_gross_pnl": -19.09,
+      "total_costs": -0.48,
       "total_net_pnl": -19.57,
-      "gross_profit": 0.0,
-      "gross_loss": -19.57,
       "winners": 0,
       "losers": 4,
       "trades": [
@@ -266,6 +266,8 @@ Max range: 365 days.
     }
   ],
   "summary": {
+    "total_gross_pnl": 28.94,
+    "total_costs": -0.96,
     "total_net_pnl": 27.98,
     "total_trades": 13,
     "winners": 4,
@@ -275,6 +277,17 @@ Max range: 365 days.
     "negative_days": 1
   }
 }
+```
+
+**Campi per giornata:**
+
+| Campo | Calcolo SQL | Descrizione |
+|-------|------------|-------------|
+| `total_gross_pnl` | `SUM(COALESCE(gross_pnl, net_pnl))` | P&L prima dei costi di transazione. `COALESCE` gestisce trade precedenti alla migration che hanno `gross_pnl = NULL` |
+| `total_costs` | `SUM(gross_pnl − net_pnl)` | Erosione da slippage + spread stimati. Sempre ≤ 0. Zero per trade con `gross_pnl = NULL` |
+| `total_net_pnl` | `SUM(net_pnl)` | Risultato effettivo dopo i costi |
+| `winners` | `COUNT(net_pnl > 0)` | Trade chiusi in profitto |
+| `losers` | `COUNT(net_pnl < 0)` | Trade chiusi in perdita |
 ```
 
 **Example:**
@@ -707,6 +720,7 @@ Returns 503 if any dependency is unreachable.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 6.1.0 | 2026-06-26 | GET /api/performance/daily: add total_gross_pnl and total_costs fields (gross/net breakdown); remove gross_profit/gross_loss fields |
 | 6.0.0 | 2026-06-26 | GET /api/performance/daily (per-day P&L from trades table, with trade-level detail); documented GET /api/performance/weekly and GET /api/performance/pnl schemas |
 | 5.0.0 | 2026-06-06 | Phase B: GET /api/feedback/status; Phase C: GET /api/trades/analytics/counterfactual |
 | 4.0.0 | 2026-06-06 | Phase A analytics: trades, decisions, analytics/by-symbol, analytics/by-dimension, postmortem endpoints; kill switch GET+DELETE; trades/decisions require auth |

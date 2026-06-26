@@ -1,6 +1,6 @@
 # Alembic — Frontend & Operator Guide
 
-**Last updated:** 2026-06-26  
+**Last updated:** 2026-06-26 (rev 2)  
 **Scope:** P2-04 operator surfaces and frontend page inventory  
 **Authorization:** Live trading NOT authorized. `GLOBAL_LIVE_PROMOTION_ENABLED = False`.
 
@@ -118,11 +118,28 @@ La pagina Performance (`/performance`) ha tre tab:
 
 **Nota:** "P&L Storico" usa l'equity Alpaca (variazione netta di conto), mentre "Giornaliero" usa i record `trades` locali con `net_pnl` calcolato da `entry_price`/`exit_price`. Piccole differenze numeriche sono normali (commissioni Alpaca, slippage).
 
+#### Colonne della tabella "Dettaglio per Giornata"
+
+| Colonna | Fonte | Significato |
+|---------|-------|-------------|
+| Data | `exit_time::date` | Giorno di chiusura trade (UTC) |
+| Trade | `COUNT(*)` | Numero di trade chiusi in quella giornata |
+| P&L Lordo | `SUM(COALESCE(gross_pnl, net_pnl))` | P&L prima dei costi di transazione |
+| Costi | `SUM(gross_pnl − net_pnl)` | Erosione da slippage + spread stimati (sempre ≤ 0) |
+| P&L Netto | `SUM(net_pnl)` | Risultato effettivo dopo i costi |
+| W / L | `COUNT(net_pnl > 0)` / `COUNT(net_pnl < 0)` | Trade vincenti / perdenti |
+
+Espandendo una riga giornata si vedono i singoli trade con: symbol, motivo uscita, entry/exit price, qty, gross P&L, net P&L.
+
+**KPI in cima al tab:**
+- Riga 1: **P&L Lordo → Costi Transazione → P&L Netto** (progressione lordo→netto)
+- Riga 2: Trade chiusi (W/L), Win rate, Giorni +/−
+
 #### Come usare il tab Giornaliero
 
 1. Selezionare il range con i campi **Dal / al** (formato italiano DD/MM/YYYY, clicking apre il calendar nativo)
 2. Oppure usare i preset rapidi **7d / 14d / 30d**
-3. Leggere i 4 KPI in cima (P&L totale, trade W/L, win rate, giorni +/−)
+3. Leggere i KPI in cima: riga 1 mostra la progressione lordo→costi→netto; riga 2 mostra trade stats
 4. Usare il **grafico a barre** per identificare visivamente le giornate positive (verde) e negative (rosso)
 5. Nella tabella "Dettaglio per Giornata", **cliccare su una riga** per espandere e vedere i singoli trade di quel giorno
 
