@@ -541,7 +541,7 @@ export default function Performance() {
       ]} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Performance</h2>
-        <div style={{ display: 'flex', gap: 4 }}>
+        {activeTab === 'pnl' && <div style={{ display: 'flex', gap: 4 }}>
           {PERIODS.map((p) => (
             <button
               key={p}
@@ -557,7 +557,7 @@ export default function Performance() {
               {p}
             </button>
           ))}
-        </div>
+        </div>}
       </div>
 
       {/* Tab switcher */}
