@@ -682,6 +682,7 @@ class PostgreSQLStore:
                         COUNT(CASE WHEN net_pnl < 0 THEN 1 END)                AS losers
                     FROM trades
                     WHERE exit_time IS NOT NULL AND net_pnl IS NOT NULL
+                      AND exit_reason IS DISTINCT FROM 'LEGACY_FLATTEN'
                       AND (exit_time AT TIME ZONE 'UTC')::date BETWEEN %s AND %s
                     GROUP BY trading_date
                     ORDER BY trading_date
@@ -699,6 +700,7 @@ class PostgreSQLStore:
                            (exit_time AT TIME ZONE 'UTC')::date AS trading_date
                     FROM trades
                     WHERE exit_time IS NOT NULL AND net_pnl IS NOT NULL
+                      AND exit_reason IS DISTINCT FROM 'LEGACY_FLATTEN'
                       AND (exit_time AT TIME ZONE 'UTC')::date BETWEEN %s AND %s
                     ORDER BY exit_time ASC
                     """,

@@ -276,23 +276,26 @@ def compute_new_weights(
         w = max(old_w - max_delta, min(old_w + max_delta, w))
         constrained[model] = w
 
-    # Final re-normalization after max_delta clipping
+    # Final re-normalization after max_delta clipping, then enforce [floor, cap].
+    # Iterative projection: clip → renormalize → clip → renormalize until stable.
+    # Converges in ≤3 iterations for typical 4-5 model ensembles.
     total = sum(constrained.values())
-    if total > 0:
-        final = {m: w / total for m, w in constrained.items()}
-        # Second max_delta check after final normalization
-        # (normalization can slightly violate delta, so we clip again)
-        result = {}
-        for model in final.keys():
-            old_w = current_weights.get(model, 1.0 / len(final))
-            w = final[model]
-            w = max(old_w - max_delta, min(old_w + max_delta, w))
-            result[model] = w
-        # One last normalization
-        total = sum(result.values())
-        if total > 0:
-            return {m: w / total for m, w in result.items()}
-        return {m: 1.0 / len(result) for m in result.keys()}
-    else:
+    if total <= 0:
         n = len(clipped)
         return {m: 1.0 / n for m in clipped.keys()}
+
+    working = {m: w / total for m, w in constrained.items()}
+    for _ in range(5):
+        clipped2 = {m: max(floor, min(cap, w)) for m, w in working.items()}
+        t = sum(clipped2.values())
+        if t <= 0:
+            break
+        renormed = {m: w / t for m, w in clipped2.items()}
+        # Check convergence: all values already within [floor, cap]
+        if all(floor - 1e-9 <= v <= cap + 1e-9 for v in renormed.values()):
+            return renormed
+        working = renormed
+
+    # Fallback: equal weights if projection fails to converge
+    n = len(constrained)
+    return {m: 1.0 / n for m in constrained.keys()}

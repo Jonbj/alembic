@@ -435,6 +435,42 @@ def _filter_stale_signals(
     return fresh, stale
 
 
+def _mark_stop_loss_today(redis_url: str, symbol: str) -> None:
+    """Write stop_loss_today:{symbol} with TTL until midnight UTC.
+
+    Prevents same-day re-entry after a stop-loss exit: the BUY guard reads
+    this key and skips the symbol for the rest of the trading session.
+    """
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    ttl = max(1, int((midnight - now).total_seconds()))
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            r.set(f"stop_loss_today:{symbol}", 1, ex=ttl)
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Could not mark stop-loss cooldown for %s: %s", symbol, exc)
+
+
+def _get_stop_loss_cooldown_symbols(redis_url: str) -> set[str]:
+    """Return symbols that were stopped out today (BUY blocked for rest of session)."""
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            keys = r.keys("stop_loss_today:*")
+            return {k.split(":", 1)[1] for k in keys} if keys else set()
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Could not fetch stop-loss cooldown symbols: %s", exc)
+        return set()
+
+
 def _get_fired_signal_ids(session_date: str, redis_url: str) -> set[int] | None:
     """Return fired signal_ids for today, or None if Redis is unavailable (P2-05-A fail-closed).
 
@@ -1133,6 +1169,11 @@ def _run_cycle_inner() -> dict:
         )
         open_db_symbols = None
 
+    # Stop-loss cooldown: symbols stopped out today — BUY blocked for the rest of the session.
+    stopped_today: set[str] = _get_stop_loss_cooldown_symbols(config.REDIS_URL)
+    if stopped_today:
+        log.info("Stop-loss cooldown active for: %s", sorted(stopped_today))
+
     # Log decisions to execution_decisions so the UI Decision Log tab is populated.
     # Also capture decision_ids for later trade DB writes.
     _symbol_decisions: dict[str, dict] = {}  # {symbol: {decision_id, score, signal_id}}
@@ -1220,6 +1261,10 @@ def _run_cycle_inner() -> dict:
             # P0-05: skip BUY decision for symbols already in an open trade (no pyramiding).
             if order.side.value == "BUY" and isinstance(open_db_symbols, set) and order.symbol in open_db_symbols:
                 log.info("P0-05: skipping BUY decision for %s — already has an open trade", order.symbol)
+                continue
+            # Stop-loss cooldown: skip BUY for symbols stopped out earlier today.
+            if order.side.value == "BUY" and order.symbol in stopped_today:
+                log.info("Stop-loss cooldown: skipping BUY for %s — stopped out today", order.symbol)
                 continue
             wt_pct = f"{order.allocation_weight * 100:.1f}%"
             if "S4" in strats:
@@ -1344,6 +1389,7 @@ def _run_cycle_inner() -> dict:
                         "notional": 0.0, "reason": "stop_loss",
                     })
                     log.warning("Stop-loss exit submitted for %s (qty=%s)", sym, qty_held)
+                    _mark_stop_loss_today(config.REDIS_URL, sym)
             except Exception as _sl_sub_exc:
                 log.warning("Failed to submit stop-loss exit for %s: %s", sym, _sl_sub_exc)
 
@@ -1710,6 +1756,16 @@ def _submit_portfolio_orders(
                 if order.symbol in open_trade_symbols:
                     log.warning(
                         "P0-05 pyramiding guard: skipping BUY for %s — open trade exists in DB",
+                        order.symbol,
+                    )
+                    continue
+                # Stop-loss cooldown: block re-entry for the rest of the session.
+                _sl_cooldown = _get_stop_loss_cooldown_symbols(
+                    __import__("src.config", fromlist=["config"]).config.REDIS_URL
+                )
+                if order.symbol in _sl_cooldown:
+                    log.warning(
+                        "Stop-loss cooldown: skipping BUY for %s — stopped out today",
                         order.symbol,
                     )
                     continue

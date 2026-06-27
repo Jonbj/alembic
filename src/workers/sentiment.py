@@ -101,10 +101,16 @@ async def run_inference(
       The backtest CLI writes to backtest_signals via UPDATE. Keeping store
       logic outside run_inference makes it reusable for both contexts.
     """
-    raw_symbol = item.asset_tags[0] if item.asset_tags else ""
+    if not item.asset_tags:
+        log.debug("Skipping news item with no asset_tags: %s", (item.url or "")[:80])
+        return None
+    raw_symbol = item.asset_tags[0]
     # Sanitize text BEFORE truncation to ensure proper handling of unicode/homoglyphs
     clean_body = sanitize_text(item.body or "")
     clean_symbol = sanitize_ticker(raw_symbol) if raw_symbol else "UNKNOWN"
+    if clean_symbol == "UNKNOWN":
+        log.debug("Skipping news item with unresolvable ticker (raw=%r)", raw_symbol)
+        return None
     _body_limit = int(os.environ.get("SENTIMENT_LLM_BODY_CHARS", "600"))
     prompt = _DK_COT_PROMPT.format(text=clean_body[:_body_limit], symbol=clean_symbol)
 

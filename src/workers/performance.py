@@ -655,6 +655,37 @@ def _build_weekly_structured(
     return data
 
 
+@app.task(name="src.workers.performance.run_reconcile_fills_intraday")
+def run_reconcile_fills_intraday() -> dict:
+    """Intraday fill reconciliation — runs every 15 min during market hours.
+
+    Fetches Alpaca fill prices for trades whose exit_order_id is set but
+    exit_price is still NULL (recorded by record_trade_exit, price pending).
+    Lightweight: no IC/report computation, no Telegram alerts.
+    """
+    from src.config import config as _cfg
+
+    if not _cfg.ALPACA_API_KEY or not _cfg.ALPACA_SECRET_KEY:
+        return {"skipped": True, "reason": "no_credentials"}
+
+    pg = PostgreSQLStore()
+    try:
+        from alpaca.trading.client import TradingClient
+        tc = TradingClient(
+            api_key=_cfg.ALPACA_API_KEY,
+            secret_key=_cfg.ALPACA_SECRET_KEY,
+            paper=_cfg.ALPACA_PAPER_MODE,
+        )
+        updated = pg.reconcile_trade_fills(tc)
+        log.info("Intraday reconcile: %d fill(s) updated", updated)
+        return {"updated": updated}
+    except Exception as exc:
+        log.warning("Intraday fill reconciliation failed: %s", exc)
+        return {"error": str(exc)}
+    finally:
+        pg.close()
+
+
 @app.task(name="src.workers.performance.run_daily_report")
 def run_daily_report():
     """Daily performance report task.

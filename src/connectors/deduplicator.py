@@ -8,7 +8,7 @@ Provides two deduplication strategies:
      article text appears for multiple tickers, but each (url, ticker) pair
      should be treated as a distinct item.
 
-Both strategies use Redis SET with NX (set if not exists) and a 2-hour TTL.
+Both strategies use Redis SET with NX (set if not exists) and a 4-hour TTL.
 This is lightweight and avoids a separate lookup-before-write round-trip.
 """
 
@@ -19,7 +19,7 @@ from redis import Redis
 
 from src.models.news import NewsItem
 
-_DEDUP_TTL_SECONDS = 2 * 3600  # 2 hours
+_DEDUP_TTL_SECONDS = 4 * 3600  # 4 hours
 
 
 def compute_dedup_hash(item: NewsItem) -> str:

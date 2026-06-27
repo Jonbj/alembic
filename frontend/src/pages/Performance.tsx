@@ -3,7 +3,7 @@ import { fmtDateTime, fmtDate } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
 import {
   LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
-  ResponsiveContainer, Cell,
+  ResponsiveContainer, Cell, ReferenceLine,
 } from 'recharts'
 import { fetchPnL, fetchWeeklyReport, fetchDailyPnL } from '@/api/performance'
 import type { WeeklyReport, DailyPnLDay } from '@/api/performance'
@@ -471,7 +471,8 @@ function DailyPnLTab() {
                   formatter={(v) => [fmtPnL(Number(v)), 'Net P&L']}
                   contentStyle={{ borderRadius: 6 }}
                 />
-                <Bar dataKey="pnl" radius={[4, 4, 0, 0]}>
+                <ReferenceLine y={0} stroke="#94a3b8" strokeWidth={1} />
+                <Bar dataKey="pnl" radius={[4, 4, 0, 0]} {...{ baseValue: 0 } as Record<string, unknown>}>
                   {chartData.map((entry, idx) => (
                     <Cell key={idx} fill={entry.pnl >= 0 ? '#16a34a' : '#dc2626'} />
                   ))}
