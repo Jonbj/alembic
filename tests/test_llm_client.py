@@ -9,6 +9,7 @@ import pytest
 from src.llm.client import (
     GlmClient, OpusClient, Qwen35Client,
     OllamaKimiClient, OllamaGlmClient, OllamaQwen35Client, OllamaDeepseekClient,
+    OllamaGLM52Client,
 )
 from src.llm.ensemble import EnsembleAggregator, ModelOutput, run_ensemble_query
 from src.models.news import LLMSentimentOutput
@@ -88,6 +89,17 @@ class TestOllamaCloudClients:
     def test_ollama_glm_model_id(self):
         assert OllamaGlmClient().model_id == "glm-5.1:cloud"
 
+    def test_ollama_glm52_model_id(self):
+        assert OllamaGLM52Client().model_id == "glm-5.2:cloud"
+
+    def test_ollama_glm52_model_id_in_allowlist(self):
+        from src.llm.client import ALLOWED_MODEL_IDS
+        assert "glm-5.2:cloud" in ALLOWED_MODEL_IDS
+
+    def test_ollama_glm52_is_ollama_cloud_subclass(self):
+        from src.llm.client import OllamaCloudClient
+        assert issubclass(OllamaGLM52Client, OllamaCloudClient)
+
     def test_ollama_qwen35_model_id(self):
         assert OllamaQwen35Client().model_id == "qwen3.5:cloud"
 
@@ -96,7 +108,7 @@ class TestOllamaCloudClients:
 
     def test_ollama_model_ids_in_allowlist(self):
         from src.llm.client import ALLOWED_MODEL_IDS
-        for client_cls in (OllamaKimiClient, OllamaGlmClient, OllamaQwen35Client, OllamaDeepseekClient):
+        for client_cls in (OllamaKimiClient, OllamaGlmClient, OllamaQwen35Client, OllamaDeepseekClient, OllamaGLM52Client):
             assert client_cls().model_id in ALLOWED_MODEL_IDS
 
     @pytest.mark.asyncio

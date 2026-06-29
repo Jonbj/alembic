@@ -8,7 +8,7 @@ Pipeline per batch (up to 10 items pulled atomically via LMOVE):
      previous crash (LMOVE is atomic; items are never lost, only delayed).
   2. Pre-filter — skip near-neutral MarketAux articles
      (|marketaux_sentiment| < 0.20) to save 60-80% of token spend.
-  3. LLM ensemble — query Kimi K2.6, Qwen3.5, DeepSeek-V4-Pro, GLM-5.1 in
+  3. LLM ensemble — query Kimi K2.6, GLM-5.2 in
      parallel using DK-CoT prompting; aggregate with LOO ICIR weights if
      available, else confidence-weighted mean.
   4. Divergence fallback — if ensemble std > 0.30 (models disagree strongly)
@@ -293,7 +293,7 @@ def run_sentiment_worker() -> dict:
     import psycopg2
     from redis import Redis
 
-    from src.llm.client import OllamaKimiClient, OllamaQwen35Client
+    from src.llm.client import OllamaKimiClient, OllamaGLM52Client
 
     # Initialize connections
     redis_client = Redis.from_url(config.REDIS_URL)
@@ -303,9 +303,9 @@ def run_sentiment_worker() -> dict:
 
     # Initialize components — model selection read from Redis (set by UI toggle),
     # falling back to SENTIMENT_LLM_MODELS env var, then "all".
-    # Accepted values (comma-separated subset of: kimi, qwen):
-    #   "all"   → 2-model ensemble Kimi + Qwen (default, best quality/quota balance)
-    #   "qwen"  → single model, saves 50% Ollama quota
+    # Accepted values (comma-separated subset of: kimi, glm52):
+    #   "all"    → 2-model ensemble Kimi + GLM-5.2 (default, best quality/quota balance)
+    #   "glm52"  → single model, saves 50% Ollama quota
     _redis_model_sel = redis_store.get_llm_models()
     _model_selection = (
         (_redis_model_sel or os.environ.get("SENTIMENT_LLM_MODELS", "all"))
@@ -314,7 +314,7 @@ def run_sentiment_worker() -> dict:
     )
     _all_clients = {
         "kimi": OllamaKimiClient(),
-        "qwen": OllamaQwen35Client(),
+        "glm52": OllamaGLM52Client(),
     }
     if "all" in _model_selection:
         clients = list(_all_clients.values())

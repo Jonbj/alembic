@@ -1,12 +1,12 @@
 # Configurazione LLM Ensemble
 
-## Modelli attivi in produzione (2026-06-17)
+## Modelli attivi in produzione (2026-06-29)
 
 | Modello | Provider | Uso | Note |
 |---------|----------|-----|------|
 | FinBERT | HuggingFace (locale) | Sentiment primario / fallback | int8 quantized, ~50% RAM vs baseline |
-| Kimi K2.6 | Ollama (locale) | Sentiment ensemble principale | |
-| Qwen3.5 | Ollama (locale) | Sentiment ensemble principale | |
+| Kimi K2.6 | Ollama (cloud) | Sentiment ensemble principale | Conservativo, ben calibrato su macro |
+| GLM-5.2 | Ollama (cloud) | Sentiment ensemble principale | Flagship Zhipu AI, long-horizon reasoning |
 
 ## Modelli rimossi
 
@@ -14,6 +14,7 @@
 |---------|----------------|--------|
 | DeepSeek-V4-Pro | 2026-06-16 | OOM + latency eccessiva su hardware locale |
 | GLM-5.1 | 2026-06-16 | IC inferiore a Kimi K2.6 in A/B test |
+| Qwen3.5 | 2026-06-29 | Ticker extraction troppo aggressiva (es. MU da notizia macro Iran/US); sostituito da GLM-5.2 |
 
 ## Formula segnale
 
@@ -28,7 +29,7 @@ Il prodotto scala correttamente il segnale direzionale per la certezza del model
 ## Fallback chain
 
 ```
-Ollama (Kimi/Qwen, async ensemble)
+Ollama (Kimi K2.6 + GLM-5.2, async ensemble)
     ↓ timeout o errore
 FinBERT locale (via run_in_executor)
     ↓ timeout o errore

@@ -635,9 +635,9 @@ class RedisStore:
         """Persist LLM model selection override.
 
         Args:
-            models: Comma-separated subset of {kimi, qwen, deepseek, glm} or "all".
-                    "all"  → full 4-model ensemble (normal operation)
-                    "glm"  → single cheapest model, saves 75% Ollama quota
+            models: Comma-separated subset of {kimi, glm52} or "all".
+                    "all"   → 2-model ensemble Kimi + GLM-5.2 (normal operation)
+                    "glm52" → single model, saves 50% Ollama quota
         """
         self._r.set("config:sentiment_llm_models", models)
 

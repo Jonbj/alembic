@@ -139,11 +139,9 @@ sleeve_weight = normalise(raw_weight, long-only, sum≤1)`}</div>
   ├── MarketAux    — news finanziarie con ticker
   └── Alpaca News  — news real-time
 
-LLM Ensemble (4 modelli in parallelo via Ollama cloud):
+LLM Ensemble (2 modelli in parallelo via Ollama cloud):
   kimi-k2.6   → { polarity ∈ [-1,+1], confidence ∈ [0,1] }
-  qwen3.5     → { polarity, confidence }
-  deepseek    → { polarity, confidence }
-  glm-5.1     → { polarity, confidence }
+  glm-5.2     → { polarity, confidence }
 
   score_i = polarity_i × confidence_i
 

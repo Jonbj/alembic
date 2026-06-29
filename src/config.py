@@ -47,6 +47,9 @@ class Config(BaseModel):
     OLLAMA_GLM_TIMEOUT_SECONDS: int = Field(
         default_factory=lambda: int(os.environ.get("OLLAMA_GLM_TIMEOUT_SECONDS", "90"))
     )
+    OLLAMA_GLM52_TIMEOUT_SECONDS: int = Field(
+        default_factory=lambda: int(os.environ.get("OLLAMA_GLM52_TIMEOUT_SECONDS", "90"))
+    )
 
     # Model costs (per 1M tokens) - should be loaded from config YAML in production
     # All 14 models from models.md (8 general purpose + 6 coding specialized)
@@ -59,6 +62,7 @@ class Config(BaseModel):
             "qwen3.5:cloud": (2.0, 6.0),
             "deepseek-v4-pro:cloud": (4.0, 12.0),
             "glm-5.1:cloud": (1.5, 4.5),  # Estimated based on GLM pricing tier
+            "glm-5.2:cloud": (2.0, 6.0),  # Estimated — flagship GLM, same tier as qwen3.5
             "kimi-k2.6:cloud": (2.5, 7.5),  # Estimated based on Moonshot AI pricing
             "gemma4:31b-cloud": (1.0, 3.0),  # Estimated based on Gemma open pricing
             # Coding specialized models

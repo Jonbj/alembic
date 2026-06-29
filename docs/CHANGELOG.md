@@ -4,6 +4,15 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ---
 
+## 2026-06-29
+
+### LLM Ensemble
+- **Qwen3.5 sostituito da GLM-5.2** nel sentiment ensemble news. Motivo: Qwen3.5 estraeva ticker in modo troppo aggressivo (es. MU da notizia macro Iran/US deal); GLM-5.2 è il flagship Zhipu AI con reasoning long-horizon migliore per analisi macroeconomica.
+- Ensemble attivo: Kimi K2.6 + GLM-5.2 (2 modelli)
+- Fallback weights performance worker aggiornati: `{kimi-k2.6:cloud: 0.50, glm-5.2:cloud: 0.50}`
+
+---
+
 ## 2026-06-17
 
 ### Documentazione

@@ -124,7 +124,7 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 | Component | File | Role |
 |-----------|------|------|
 | `SentimentWorker` | `src/workers/sentiment.py` | Consumes `news:queue`, runs ensemble, writes signal |
-| `LLMClient` (ABC) | `src/llm/client.py` | Ollama cloud clients: Kimi K2.6, Qwen3.5 (DeepSeek/GLM removed — quota/quality trade-off) |
+| `LLMClient` (ABC) | `src/llm/client.py` | Ollama cloud clients: Kimi K2.6, GLM-5.2 (Qwen3.5 removed — ticker extraction too aggressive) |
 | `EnsembleAggregator` | `src/llm/ensemble.py` | Weighted averaging + divergence check (std > 0.30) |
 | `FinBERTClient` | `src/llm/finbert.py` | Local fallback: entropic confidence from 3-class softmax |
 | `LLMBudgetTracker` | `src/llm/budget.py` | Daily spend cap per model via Redis counters |
@@ -424,7 +424,7 @@ NewsIngestionWorker
     ▼
 SentimentWorker (batch 21 items/cycle, semaphore=3 concurrent)
     ├── sanitize_text()
-    ├── LLM Ensemble (2 × Ollama cloud: Kimi K2.6 + Qwen3.5-397B, asyncio.gather)
+    ├── LLM Ensemble (2 × Ollama cloud: Kimi K2.6 + GLM-5.2, asyncio.gather)
     │   ├── divergence check (std > 0.30 → FinBERT via run_in_executor)
     │   └── budget check (daily cap → FinBERT via run_in_executor)
     ├── score = polarity × confidence

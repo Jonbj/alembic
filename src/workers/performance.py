@@ -706,7 +706,7 @@ def run_daily_report():
         if raw_weights:
             current_weights = json.loads(raw_weights).get("weights", {})
         else:
-            current_weights = {"kimi-k2.6:cloud": 0.25, "qwen3.5:cloud": 0.25, "deepseek-v4-pro:cloud": 0.25, "glm-5.1:cloud": 0.25}
+            current_weights = {"kimi-k2.6:cloud": 0.50, "glm-5.2:cloud": 0.50}
 
         # Build report
         report = build_performance_report(pg, current_weights, period_days=30)
@@ -791,7 +791,7 @@ def run_weekly_weights():
         if raw_weights:
             current_weights = json.loads(raw_weights).get("weights", {})
         else:
-            current_weights = {"kimi-k2.6:cloud": 0.25, "qwen3.5:cloud": 0.25, "deepseek-v4-pro:cloud": 0.25, "glm-5.1:cloud": 0.25}
+            current_weights = {"kimi-k2.6:cloud": 0.50, "glm-5.2:cloud": 0.50}
 
         # Fetch per-model signals from llm_responses for LOO ICIR.
         # sentiment_signals.model_id stores the compound ensemble ID so

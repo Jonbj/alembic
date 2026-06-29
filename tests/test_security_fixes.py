@@ -222,7 +222,7 @@ class TestModelIDConsistency:
         """Model IDs used as fallback weights in performance worker must be in ALLOWED_MODEL_IDS."""
         # These are the hardcoded defaults in src/workers/performance.py
         # If this test fails, there is a typo in the performance worker fallback weights.
-        default_weight_model_ids = {"kimi-k2.6:cloud", "qwen3.5:cloud", "deepseek-v4-pro:cloud", "glm-5.1:cloud"}
+        default_weight_model_ids = {"kimi-k2.6:cloud", "glm-5.2:cloud"}
         assert default_weight_model_ids.issubset(ALLOWED_MODEL_IDS), (
             f"Model IDs in performance worker fallback weights not in ALLOWED_MODEL_IDS: "
             f"{default_weight_model_ids - ALLOWED_MODEL_IDS}"
@@ -230,9 +230,9 @@ class TestModelIDConsistency:
 
     def test_client_model_ids_in_allowlist(self):
         """Each concrete client's model_id must be in ALLOWED_MODEL_IDS."""
-        from src.llm.client import OllamaKimiClient, OllamaQwen35Client, OllamaDeepseekClient, OllamaGlmClient
+        from src.llm.client import OllamaKimiClient, OllamaQwen35Client, OllamaDeepseekClient, OllamaGlmClient, OllamaGLM52Client
 
-        for client_cls in (OllamaKimiClient, OllamaQwen35Client, OllamaDeepseekClient, OllamaGlmClient):
+        for client_cls in (OllamaKimiClient, OllamaQwen35Client, OllamaDeepseekClient, OllamaGlmClient, OllamaGLM52Client):
             assert client_cls.model_id in ALLOWED_MODEL_IDS, (
                 f"{client_cls.__name__}.model_id={client_cls.model_id!r} not in ALLOWED_MODEL_IDS"
             )

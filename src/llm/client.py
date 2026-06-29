@@ -67,7 +67,7 @@ ALLOWED_MODEL_IDS = frozenset({
     "opus", "sonnet", "haiku",
     # General purpose cloud
     "qwen3.5:cloud", "deepseek-v4-pro:cloud",
-    "glm-5.1:cloud", "kimi-k2.6:cloud", "gemma4:31b-cloud",
+    "glm-5.1:cloud", "glm-5.2:cloud", "kimi-k2.6:cloud", "gemma4:31b-cloud",
     # Coding specialized
     "qwen3-coder-next:cloud", "devstral-small-2:24b-cloud",
     "devstral-2:123b-cloud", "minimax-m2.1:cloud",
@@ -767,6 +767,13 @@ class OllamaGlmClient(OllamaCloudClient):
     model_id = "glm-5.1:cloud"
     model_name = "GLM 5.1 (Ollama)"
     _OLLAMA_TIMEOUT = config.OLLAMA_GLM_TIMEOUT_SECONDS
+
+
+class OllamaGLM52Client(OllamaCloudClient):
+    """GLM-5.2 via Ollama cloud HTTP API — flagship long-horizon reasoning model."""
+    model_id = "glm-5.2:cloud"
+    model_name = "GLM 5.2 (Ollama)"
+    _OLLAMA_TIMEOUT = config.OLLAMA_GLM52_TIMEOUT_SECONDS
 
 
 class OllamaQwen35Client(OllamaCloudClient):

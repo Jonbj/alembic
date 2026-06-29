@@ -74,7 +74,7 @@ export default function Signals() {
       <HelpButton title="Signals — Guida completa" sections={[
         {
           heading: "Cosa sono i segnali",
-          content: "I segnali sono l'output del modello LLM ensemble. Per ogni ticker nel watchlist, i modelli (kimi, qwen e altri) generano un sentiment score da -1 (bearish forte) a +1 (bullish forte), con confidence 0-1. Il sistema aggrega i punteggi ponderati per produrre il segnale finale.",
+          content: "I segnali sono l'output del modello LLM ensemble. Per ogni ticker nel watchlist, i modelli (kimi, glm-5.2 e altri) generano un sentiment score da -1 (bearish forte) a +1 (bullish forte), con confidence 0-1. Il sistema aggrega i punteggi ponderati per produrre il segnale finale.",
         },
         {
           heading: "Colonne — Signals",
