@@ -6,10 +6,17 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ## 2026-06-29
 
+### Portfolio Scheduler — Anti-stale-ranker-sell guard
+- **Bug fix**: posizioni con segnale fresco positivo venivano vendute quando `CrossSectionalRanker` ritornava `{}` pesi per vincolo `min_stocks=2` (es. solo 1 segnale a forza positiva tra i 2 che passano il gate assoluto). L'orchestratore interpretava `merged_weights={}` come "sell all" per le posizioni correnti.
+  - Root cause: il gate `abs(score) >= threshold` ammette segnali negativi (es. MU -0.4185) che passano il gate ma vengono scartati dal ranker long-only (`strength = score*confidence <= 0`). Con 1 candidato positivo < `min_stocks=2` il ranker ritorna vuoto.
+  - Fix: nuovo `_fresh_signal_protected_symbols()` — protegge le posizioni aperte con segnale fresco >= threshold da SELL senza attributazione di strategy.
+  - 8 test TDD aggiunti in `tests/workers/test_protected_sell.py`.
+
 ### LLM Ensemble
 - **Qwen3.5 sostituito da GLM-5.2** nel sentiment ensemble news. Motivo: Qwen3.5 estraeva ticker in modo troppo aggressivo (es. MU da notizia macro Iran/US deal); GLM-5.2 è il flagship Zhipu AI con reasoning long-horizon migliore per analisi macroeconomica.
-- Ensemble attivo: Kimi K2.6 + GLM-5.2 (2 modelli)
+- Ensemble attivo: Kimi K2.6 + GLM-5.2 (2 modelli) — entrambi attivi, confermato da log `worker-inference`
 - Fallback weights performance worker aggiornati: `{kimi-k2.6:cloud: 0.50, glm-5.2:cloud: 0.50}`
+- GLM-5.2 e Kimi K2.6 in timeout da 20:47 UTC per Ollama cloud overload — FinBERT fallback attivo fino a disponibilità Ollama
 
 ---
 

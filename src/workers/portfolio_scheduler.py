@@ -575,6 +575,62 @@ def _stop_loss_breached_symbols(
     return breached
 
 
+def _get_feedback_threshold(redis_url: str) -> float:
+    """Return active feedback entry threshold from Redis (feedback:entry_threshold).
+
+    Falls back to S4Config.min_score when the key is absent or Redis is unreachable,
+    so protection is still applied for clearly-positive signals even without Redis.
+    """
+    try:
+        from redis import Redis as _R
+        _r = _R.from_url(redis_url, decode_responses=True)
+        try:
+            raw = _r.get("feedback:entry_threshold")
+            if raw is not None:
+                return float(raw)
+        finally:
+            _r.close()
+    except Exception as exc:
+        log.warning("Could not read feedback threshold from Redis: %s — using S4 min_score", exc)
+    from src.strategies.s4.config import S4Config as _S4Cfg
+    return _S4Cfg().min_score
+
+
+def _fresh_signal_protected_symbols(
+    candidate_symbols: set[str],
+    pg,
+    entry_threshold: float,
+    max_age_hours: int,
+) -> set[str]:
+    """Return symbols from candidate_symbols that should be protected from a rebalance SELL.
+
+    A symbol is protected when its most recent signal within max_age_hours has
+    score >= entry_threshold (fresh, positive signal → original buy thesis still holds).
+
+    This prevents the S4 min_stocks constraint from causing premature exits:
+    when only 1 positive-strength signal exists but the ranker requires min_stocks=2,
+    the ranker returns {} weights and the orchestrator generates a SELL for all positions,
+    including ones whose signal is still valid.
+
+    Fail-open: returns empty set on DB error (positions may be sold rather than blocking).
+    """
+    if not candidate_symbols:
+        return set()
+    try:
+        signals = pg.fetch_signals_for_cycle(hours=max_age_hours, symbols=list(candidate_symbols))
+        latest: dict[str, object] = {}
+        for sig in signals:
+            prev = latest.get(sig.symbol)
+            if prev is None or sig.generated_at > prev.generated_at:
+                latest[sig.symbol] = sig
+        return {sym for sym, sig in latest.items() if sig.score >= entry_threshold}
+    except Exception as exc:
+        log.warning(
+            "_fresh_signal_protected_symbols: DB error (%s) — no protection applied (fail-open)", exc
+        )
+        return set()
+
+
 def _mark_signal_fired(
     signal_id: int,
     session_date: str,
@@ -1168,6 +1224,55 @@ def _run_cycle_inner() -> dict:
             _guard_exc,
         )
         open_db_symbols = None
+
+    # Anti-stale-ranker-sell: protect open positions with a fresh positive signal from
+    # being sold when the S4 ranker returns no output due to min_stocks constraint.
+    # Typical trigger: only 1 positive-strength signal exists but ranker requires 2+
+    # (the 2nd signal passing abs(score) gate is negative → strength<0 → skipped).
+    # Result without this: merged_weights={}, orchestrator sells all held positions
+    # even if the original buy signal is still valid.
+    try:
+        from src.backtest.engine.types import OrderSide as _OSProtect
+        from src.strategies.s4.config import S4Config as _S4CfgProt
+        _prot_age = _S4CfgProt().max_signal_age_hours
+        _prot_threshold = _get_feedback_threshold(config.REDIS_URL)
+        _sell_candidates: set[str] = {
+            o.symbol for o in result.final_orders
+            if o.side == _OSProtect.SELL
+            and o.allocation_weight == 0.0
+            and not result.symbol_strategies.get(o.symbol)
+            and isinstance(open_db_symbols, set)
+            and o.symbol in open_db_symbols
+        }
+        if _sell_candidates:
+            from src.store.pg_store import PostgreSQLStore as _PGProt
+            _pg_prot = _PGProt()
+            try:
+                _protected = _fresh_signal_protected_symbols(
+                    _sell_candidates, _pg_prot, _prot_threshold, _prot_age
+                )
+            finally:
+                _pg_prot.close()
+            if _protected:
+                result = type(result)(
+                    strategies_run=result.strategies_run,
+                    orders_per_strategy=result.orders_per_strategy,
+                    orders_before_constraints=result.orders_before_constraints,
+                    orders_after_constraints=result.orders_after_constraints,
+                    constraints_fired=result.constraints_fired,
+                    final_orders=[
+                        o for o in result.final_orders
+                        if not (o.side == _OSProtect.SELL and o.symbol in _protected)
+                    ],
+                    symbol_strategies=result.symbol_strategies,
+                )
+                log.info(
+                    "Anti-stale-ranker-sell: protected %d position(s) from rebalance SELL "
+                    "(fresh positive signal >= %.3f): %s",
+                    len(_protected), _prot_threshold, sorted(_protected),
+                )
+    except Exception as _prot_exc:
+        log.warning("Anti-stale-ranker-sell check failed: %s — proceeding without protection", _prot_exc)
 
     # Stop-loss cooldown: symbols stopped out today — BUY blocked for the rest of the session.
     stopped_today: set[str] = _get_stop_loss_cooldown_symbols(config.REDIS_URL)
