@@ -185,13 +185,16 @@ def _check_divergence_and_alert(
             AlertLevel.WARNING,
         )
 
-    fill_ratio = submitted_count / final_count if final_count > 0 else 0.0
-    if check_execution_divergence(fill_ratio, 1.0):
-        _fire_alert(
-            notifier,
-            f"Execution fill divergence: {submitted_count}/{final_count} orders submitted",
-            AlertLevel.WARNING,
-        )
+    # Skip fill-divergence check when no orders were generated: 0/0 is not a divergence,
+    # it means the cycle had nothing to trade (signals below threshold, market closed, etc.).
+    if final_count > 0:
+        fill_ratio = submitted_count / final_count
+        if check_execution_divergence(fill_ratio, 1.0):
+            _fire_alert(
+                notifier,
+                f"Execution fill divergence: {submitted_count}/{final_count} orders submitted",
+                AlertLevel.WARNING,
+            )
 
 
 def _emergency_cancel_all(api_key: str, secret_key: str, paper: bool) -> None:
