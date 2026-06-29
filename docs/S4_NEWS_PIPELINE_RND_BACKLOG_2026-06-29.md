@@ -23,7 +23,7 @@ L'analisi esterna in larga parte *conferma* l'architettura esistente:
 |---|---|
 | LLM offline, produce feature non ordini (Alpha Miner) | `score = polarity × confidence` → Redis → execution legge al tick |
 | Output JSON strutturato / function calling | `LLMSentimentOutput` Pydantic + `response_schema` (`src/workers/sentiment.py:123`) |
-| Ensemble + variance + fallback | Kimi+Qwen; divergence → fallback FinBERT |
+| Ensemble + variance + fallback | Kimi + GLM-5.2 (Qwen3.5 sostituito, commit `150d2c2` 2026-06-29); divergence → fallback FinBERT |
 | Tiering di costo | pre-filtro MarketAux (skip near-neutral `|sent|<0.20` → −60-80% token) + fallback FinBERT a budget esaurito |
 | Dedup articoli | `src/connectors/deduplicator.py` |
 | Estrazione ticker | `src/connectors/ticker_extractor.py` |
