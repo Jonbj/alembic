@@ -60,6 +60,42 @@ def test_reversal_sells_handles_malformed_redis_value():
     assert "TSLA" not in result
 
 
+def test_reversal_sells_returns_signal_metadata():
+    """_sentiment_reversal_sells deve restituire {signal_id, score} per ogni simbolo venduto."""
+    from src.workers.portfolio_scheduler import _sentiment_reversal_sells
+    import json
+
+    positions = [_make_position("AAPL"), _make_position("MSFT")]
+    mock_redis = MagicMock()
+    mock_redis.get.side_effect = lambda key: {
+        "signal:AAPL:sentiment": json.dumps({"score": -0.5, "signal_id": 42}),
+        "signal:MSFT:sentiment": json.dumps({"score": 0.3, "signal_id": 99}),
+    }.get(key)
+
+    result = _sentiment_reversal_sells(positions, mock_redis, threshold=-0.20)
+
+    assert "AAPL" in result
+    assert result["AAPL"]["score"] == -0.5
+    assert result["AAPL"]["signal_id"] == 42
+    assert "MSFT" not in result
+
+
+def test_reversal_sells_signal_id_optional():
+    """signal_id può essere None se non presente nel payload Redis (segnale vecchio stile)."""
+    from src.workers.portfolio_scheduler import _sentiment_reversal_sells
+    import json
+
+    positions = [_make_position("NVDA")]
+    mock_redis = MagicMock()
+    mock_redis.get.return_value = json.dumps({"score": -0.6})  # no signal_id key
+
+    result = _sentiment_reversal_sells(positions, mock_redis, threshold=-0.20)
+
+    assert "NVDA" in result
+    assert result["NVDA"]["signal_id"] is None
+    assert result["NVDA"]["score"] == -0.6
+
+
 def test_reversal_threshold_from_config():
     """SENTIMENT_REVERSAL_EXIT_THRESHOLD deve essere leggibile da config."""
     with __import__("unittest.mock", fromlist=["patch"]).patch.dict(

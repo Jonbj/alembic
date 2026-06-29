@@ -1396,7 +1396,7 @@ def _run_cycle_inner() -> dict:
     # Submit forced sells for sentiment reversal (symbols not already being sold).
     if reversal_sell_symbols and operating_mode not in ("dry_run", "halted"):
         already_selling = {o.symbol for o in result.final_orders if o.side.value == "sell"}
-        to_force_sell = reversal_sell_symbols - already_selling - stop_loss_sells
+        to_force_sell = set(reversal_sell_symbols) - already_selling - stop_loss_sells
         for sym in to_force_sell:
             try:
                 from alpaca.trading.enums import OrderSide, TimeInForce
@@ -1412,14 +1412,36 @@ def _run_cycle_inner() -> dict:
                         time_in_force=TimeInForce.DAY,
                     )
                     resp = trading_client.submit_order(req)
+                    _rev_order_id = str(resp.id)
                     submitted_orders.append({
                         "symbol": sym,
                         "side": "sell",
-                        "order_id": str(resp.id),
+                        "order_id": _rev_order_id,
                         "notional": 0.0,
                         "reason": "sentiment_reversal",
                     })
                     log.info("Forced sell submitted for %s (sentiment reversal)", sym)
+                    # Write SELL to execution_decisions so Decision Log shows the exit.
+                    try:
+                        from src.store.pg_store import PostgreSQLStore as _PGS
+                        _pg_rev = _PGS()
+                        _rev_sig = reversal_sell_symbols[sym]
+                        _threshold = config.SENTIMENT_REVERSAL_EXIT_THRESHOLD
+                        _pg_rev.write_execution_decision(
+                            tick_time=ts,
+                            symbol=sym,
+                            signal_id=_rev_sig.get("signal_id"),
+                            score=0.0,
+                            signal_score=_rev_sig["score"],
+                            regime_mult=_regime_mult,
+                            ema_pass=True,
+                            decision="SELL",
+                            order_id=_rev_order_id,
+                            reason=f"sentiment_reversal: score {_rev_sig['score']:.3f} < threshold {_threshold:.2f}",
+                        )
+                        _pg_rev.close()
+                    except Exception as _dec_exc:
+                        log.warning("Could not write sentiment_reversal decision for %s: %s", sym, _dec_exc)
             except Exception as _fs_exc:
                 log.warning("Failed to submit forced sell for %s: %s", sym, _fs_exc)
 
@@ -1857,16 +1879,16 @@ def _sentiment_reversal_sells(
     alpaca_positions: list,
     redis_client,
     threshold: float,
-) -> set:
+) -> dict:
     """Return symbols held long whose current sentiment score has gone negative.
 
     Reads signal:{symbol}:sentiment from Redis for each open position.
-    Returns the set of symbols that should be force-sold this cycle.
+    Returns {symbol: {score, signal_id}} for symbols that should be force-sold.
     Fail-open: symbols with no signal or unparseable value are NOT sold.
     """
     import json as _json
 
-    reversal = set()
+    reversal: dict = {}
     for pos in alpaca_positions:
         try:
             raw = redis_client.get(f"signal:{pos.symbol}:sentiment")
@@ -1875,7 +1897,10 @@ def _sentiment_reversal_sells(
             data = _json.loads(raw)
             score = float(data.get("score", 0.0))
             if score < threshold:
-                reversal.add(pos.symbol)
+                reversal[pos.symbol] = {
+                    "score": score,
+                    "signal_id": data.get("signal_id"),
+                }
                 log.info(
                     "Sentiment reversal: %s score=%.3f < threshold=%.2f — forced exit",
                     pos.symbol, score, threshold,
