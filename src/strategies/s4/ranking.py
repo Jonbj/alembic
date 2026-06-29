@@ -1,8 +1,11 @@
 """S4 cross-sectional ranking of news sentiment signals.
 
-Reads SentimentResult objects for every ticker in the watchlist, computes
-effective_strength = score × confidence, and returns the top-N tickers with
-equal-weight allocation within the S4 bucket.
+Reads SentimentResult objects for every ticker in the watchlist, ranks by
+effective_strength = score, and returns the top-N tickers with equal-weight
+allocation within the S4 bucket. NOTE: score already encodes confidence — the
+sentiment worker stores score = polarity × confidence (CLAUDE.md). The ranker
+must NOT multiply by confidence again (that would apply confidence² and bias
+selection toward high-confidence over high-polarity names).
 """
 from __future__ import annotations
 
@@ -145,7 +148,10 @@ class CrossSectionalRanker:
                 continue
             if abs(sig.score) < cfg.min_score:
                 continue
-            strength = sig.score * sig.confidence
+            # effective_strength = score. score already = polarity × confidence
+            # (set by the sentiment worker, CLAUDE.md). Multiplying by confidence
+            # here would apply it twice (confidence²) and distort the top-N ranking.
+            strength = sig.score
             if strength <= 0:
                 # long-only: skip neutral or net-negative signals
                 continue

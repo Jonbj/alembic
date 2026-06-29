@@ -277,15 +277,37 @@ def test_as_of_timestamp():
 
 
 # ---------------------------------------------------------------------------
-# effective_strength = score × confidence
+# effective_strength = score (score already encodes confidence)
 # ---------------------------------------------------------------------------
 
 def test_effective_strength_formula():
+    # score already = polarity × confidence (sentiment worker). effective_strength
+    # equals score — the ranker must NOT multiply by confidence again.
     sig = _sig("TSLA", score=0.6, confidence=0.8)
     ranker = CrossSectionalRanker(S4Config(n_top=1, min_stocks=1))
     result = ranker.rank([sig])
 
-    assert result.rankings[0].effective_strength == pytest.approx(0.6 * 0.8)
+    assert result.rankings[0].effective_strength == pytest.approx(0.6)
+
+
+def test_ranking_does_not_apply_confidence_twice():
+    """Regression: effective_strength = score, NOT score × confidence (confidence²).
+
+    score is already polarity × confidence. Re-applying confidence would flip the
+    top-N selection toward high-confidence over high-polarity names.
+      A: polarity 0.9 × conf 0.5 → score 0.45
+      B: polarity 0.5 × conf 0.8 → score 0.40
+    Documented formula: A (0.45) outranks B (0.40).
+    Buggy confidence²:  A→0.225, B→0.32  → B would wrongly outrank A.
+    """
+    sig_a = _sig("AAA", score=0.45, confidence=0.5)
+    sig_b = _sig("BBB", score=0.40, confidence=0.8)
+    ranker = CrossSectionalRanker(S4Config(n_top=2, min_stocks=2))
+    result = ranker.rank([sig_a, sig_b])
+
+    assert [r.ticker for r in result.rankings] == ["AAA", "BBB"]
+    assert result.rankings[0].effective_strength == pytest.approx(0.45)
+    assert result.rankings[1].effective_strength == pytest.approx(0.40)
 
 
 # ---------------------------------------------------------------------------
