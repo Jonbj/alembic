@@ -124,12 +124,18 @@ async def run_inference(
             symbol=clean_symbol,
         )
 
+        all_models_timed_out = not raw_outputs
         aggregated = (
             aggregator.aggregate(raw_outputs, weights=weights) if raw_outputs else None
         )
 
         if aggregated is None:
-            log.info(f"Ensemble diverged for {clean_symbol}, using FinBERT fallback")
+            if all_models_timed_out:
+                fallback_reason = "FinBERT fallback (Ollama timeout)"
+                log.info(f"All ensemble models timed out for {clean_symbol}, using FinBERT fallback")
+            else:
+                fallback_reason = "FinBERT fallback (ensemble divergence)"
+                log.info(f"Ensemble diverged for {clean_symbol}, using FinBERT fallback")
             loop = asyncio.get_running_loop()
             fb_result = await loop.run_in_executor(
                 None, finbert.analyze, clean_body[:512]
@@ -138,7 +144,7 @@ async def run_inference(
                 symbol=clean_symbol,
                 score=fb_result.polarity * fb_result.confidence,
                 confidence=fb_result.confidence,
-                reasoning="FinBERT fallback (ensemble divergence)",
+                reasoning=fallback_reason,
                 model_id="finbert",
                 fallback_used=True,
             ), []
@@ -275,6 +281,39 @@ async def process_news_batch(
 
     gathered = await asyncio.gather(*[_bounded(item) for item in news_items])
     return [r for r in gathered if r is not None]
+
+
+_OLLAMA_TIMEOUT_ALERT_KEY = "ollama:timeout_alert:last_sent"
+_OLLAMA_TIMEOUT_ALERT_COOLDOWN_S = 1800  # one alert per 30 minutes max
+
+
+def _maybe_notify_ollama_timeout(redis_client, timeout_count: int, total: int) -> None:
+    """Send a rate-limited Telegram alert when all ensemble models time out.
+
+    Uses Redis SET NX with TTL as the cooldown gate — at most one alert per 30 min.
+    Silently swallows any Telegram errors to avoid crashing the worker.
+    """
+    if timeout_count == 0:
+        return
+    if not redis_client.set(
+        _OLLAMA_TIMEOUT_ALERT_KEY, "1", nx=True, ex=_OLLAMA_TIMEOUT_ALERT_COOLDOWN_S
+    ):
+        return  # cooldown active: suppress duplicate alert
+    try:
+        from src.notifications.telegram import TelegramNotifier
+        from src.notifications.base import AlertLevel
+
+        notifier = TelegramNotifier()
+        asyncio.run(
+            notifier.send_alert(
+                f"Ollama timeout: tutti i modelli LLM non disponibili "
+                f"({timeout_count}/{total} news → FinBERT fallback). "
+                f"Se persiste: docker exec alembic-redis-1 redis-cli DEL ollama:sem ollama:sem:init",
+                level=AlertLevel.WARNING,
+            )
+        )
+    except Exception as exc:
+        log.warning("Failed to send Ollama timeout Telegram alert: %s", exc)
 
 
 @app.task(name="src.workers.sentiment.run_sentiment_worker", acks_late=True)
@@ -444,8 +483,17 @@ def run_sentiment_worker() -> dict:
             )
         )
 
-        # Count fallbacks
+        # Count fallbacks — distinguish Ollama timeout from ensemble divergence
         fallback_count = sum(1 for r in results if r.fallback_used)
+        ollama_timeout_count = sum(
+            1 for r in results if r.reasoning == "FinBERT fallback (Ollama timeout)"
+        )
+        if ollama_timeout_count > 0:
+            _maybe_notify_ollama_timeout(
+                redis_client,
+                timeout_count=ollama_timeout_count,
+                total=len(items_to_process),
+            )
 
         # All items processed successfully — clear from processing queue
         if raw_items:
