@@ -286,6 +286,32 @@ async def process_news_batch(
 _OLLAMA_TIMEOUT_ALERT_KEY = "ollama:timeout_alert:last_sent"
 _OLLAMA_TIMEOUT_ALERT_COOLDOWN_S = 1800  # one alert per 30 minutes max
 
+_OLLAMA_SEM_KEY = "ollama:sem"
+_OLLAMA_SEM_INIT_KEY = "ollama:sem:init"
+
+
+def _recover_ollama_semaphore_if_leaked(redis_client) -> None:
+    """Reset the Ollama semaphore if all slots have been leaked by a killed task.
+
+    Safe to call at task startup: worker-inference has concurrency=1, so a
+    starting task is guaranteed to be the only live holder — any prior task
+    that leaked tokens has already terminated.
+
+    Only resets when LLEN==0 AND init flag is set (semaphore was ever initialized).
+    Partial leaks (1-2 slots missing) are left alone to avoid false positives.
+    """
+    try:
+        slots = redis_client.llen(_OLLAMA_SEM_KEY)
+        init_exists = redis_client.exists(_OLLAMA_SEM_INIT_KEY)
+        if init_exists and slots == 0:
+            log.warning(
+                "Ollama semaphore exhausted (0 slots) — auto-recovering leaked tokens "
+                "(safe: worker-inference concurrency=1 guarantees no concurrent holder)"
+            )
+            redis_client.delete(_OLLAMA_SEM_KEY, _OLLAMA_SEM_INIT_KEY)
+    except Exception as exc:
+        log.warning("_recover_ollama_semaphore_if_leaked: Redis error (%s) — skipping", exc)
+
 
 def _maybe_notify_ollama_timeout(redis_client, timeout_count: int, total: int) -> None:
     """Send a rate-limited Telegram alert when all ensemble models time out.
@@ -397,6 +423,9 @@ def run_sentiment_worker() -> dict:
                 )
 
     try:
+        # Semaphore auto-recovery: reset leaked slots before any inference starts.
+        _recover_ollama_semaphore_if_leaked(redis_client)
+
         # Crash recovery: restore items from processing queue left by a previous crash.
         # LMOVE is atomic so partial crashes leave items in news:processing, not lost.
         stuck = redis_client.lrange("news:processing", 0, -1)
