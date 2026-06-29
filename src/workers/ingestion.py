@@ -390,14 +390,49 @@ _RSS_FEEDS = [
 ]
 
 
-def _extract_tickers_from_text(text: str, watchlist: set) -> list:
-    """Find watchlist tickers mentioned as whole words in text.
+# Ticker-resolution safety (design: docs/Alembic_ticker_sentiment_design.docx §3, §11.1).
+# A wrong ticker triggers an order on an unrelated stock — qualitatively worse than
+# missing a news item — so the bare-text path must minimise false_positive_ticker_rate.
+# Short tickers (F, T, C, GS, MA…) and tickers that are also common English words
+# (CAT, ON, META, ALL…) match constantly in prose ("F-150 sales", "Plan C",
+# "the ON switch", "GM" = general manager). In the RSS text path they are accepted
+# ONLY via an explicit cashtag ($F). The reliable sources — GKG org-name lookup and
+# MarketAux/Alpaca ticker metadata — still resolve these tickers, so recall is retained.
+_AMBIGUOUS_WORD_TICKERS = frozenset({
+    "ALL", "KEY", "CAT", "ON", "ARE", "NOW", "NEW", "REAL", "OPEN", "META",
+    "ANY", "OUT", "ONE", "TWO", "BIG", "FOR", "CEO", "USA", "EPS", "IPO",
+})
+_MIN_BARE_TICKER_LEN = 3  # tickers shorter than this need a cashtag in free text
+_CASHTAG_RE = re.compile(r"\$([A-Z]{1,5})\b")
 
-    Uses word-boundary regex: 'AAPL' in 'AAPL rose' matches, but 'APP' in
-    'APPS' does not. Simple but fast — no NLP required.
+
+def _extract_tickers_from_text(text: str, watchlist: set) -> list:
+    """Find watchlist tickers in text, minimising false-positive ticker matches.
+
+    Two match modes:
+      1. Cashtag ($AAPL, $F): explicit, high-confidence — always accepted.
+      2. Bare word (AAPL): accepted only for unambiguous tickers — length >= 3 and
+         not a common English word. Short tickers (F, T, C, GS) and word-tickers
+         (CAT, ON, META) are NOT matched bare ("F-150", "Plan C", "the ON switch");
+         they require a cashtag.
+
+    Word-boundary regex still applies: 'APPS' does not match 'APP'. The GKG
+    (org-name) and MarketAux/Alpaca (metadata) paths resolve the excluded tickers
+    reliably, so this only tightens the lowest-confidence (bare RSS text) path.
     """
-    words = set(re.findall(r"\b[A-Z]{1,5}\b", text))
-    return [t for t in watchlist if t in words]
+    cashtags = {m.group(1) for m in _CASHTAG_RE.finditer(text)}
+    bare_words = set(re.findall(r"\b[A-Z]{1,5}\b", text))
+    out: list[str] = []
+    for t in watchlist:
+        if t in cashtags:
+            out.append(t)
+        elif (
+            t in bare_words
+            and len(t) >= _MIN_BARE_TICKER_LEN
+            and t not in _AMBIGUOUS_WORD_TICKERS
+        ):
+            out.append(t)
+    return out
 
 
 async def _fetch_rss_items(connector) -> list:

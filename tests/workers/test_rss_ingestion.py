@@ -43,6 +43,38 @@ class TestExtractTickersFromText:
         result = _extract_tickers_from_text("APPS rallied today", {"APP"})
         assert result == []
 
+    # --- Ticker-resolution safety: false-positive guard (design doc §3/§11.1) ---
+
+    def test_single_letter_ticker_not_matched_bare(self):
+        """'F' in 'F-150 sales rose' must NOT signal Ford — needs a cashtag."""
+        from src.workers.ingestion import _extract_tickers_from_text
+        assert _extract_tickers_from_text("F-150 sales rose 4%", {"F"}) == []
+        assert _extract_tickers_from_text("Vitamin C demand up", {"C"}) == []
+
+    def test_two_letter_ticker_not_matched_bare(self):
+        """'GS' bare in prose is too ambiguous — needs a cashtag."""
+        from src.workers.ingestion import _extract_tickers_from_text
+        assert _extract_tickers_from_text("GS reported strong Q3", {"GS"}) == []
+
+    def test_common_word_ticker_not_matched_bare(self):
+        """Word-tickers (CAT, ON, META) must not match as bare prose words."""
+        from src.workers.ingestion import _extract_tickers_from_text
+        assert _extract_tickers_from_text("CAT bonds surged", {"CAT"}) == []
+        assert _extract_tickers_from_text("the ON switch flipped", {"ON"}) == []
+
+    def test_cashtag_accepts_ambiguous_ticker(self):
+        """An explicit cashtag is high-confidence and always accepted."""
+        from src.workers.ingestion import _extract_tickers_from_text
+        assert _extract_tickers_from_text("$F gained 2% today", {"F"}) == ["F"]
+        assert _extract_tickers_from_text("$GS beat estimates", {"GS"}) == ["GS"]
+        assert _extract_tickers_from_text("$CAT raised guidance", {"CAT"}) == ["CAT"]
+
+    def test_cashtag_and_bare_unambiguous_both_work(self):
+        """Normal >=3-char tickers still match bare; cashtags also work."""
+        from src.workers.ingestion import _extract_tickers_from_text
+        result = _extract_tickers_from_text("AAPL rose, $MSFT fell", {"AAPL", "MSFT"})
+        assert set(result) == {"AAPL", "MSFT"}
+
 
 def test_rss_worker_queues_items_with_ticker_match():
     """Worker deve pushare solo articoli con almeno un ticker della watchlist."""

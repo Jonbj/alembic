@@ -5,13 +5,28 @@
 
 ---
 
-## ⚠️ NON IMPLEMENTARE ORA — vincolo di validazione
+## Stato: IMPLEMENTAZIONE AVVIATA (freeze annullato dal PO, 2026-06-30)
 
-Alembic è in **controlled paper, finestra di validazione**. S4 è `promotion_blocked`, IC>placebo non confermato.
-**Ogni item di questo backlog cambia il comportamento di S4 → resetterebbe il clock di validazione.**
-Questi item vanno ripresi **dopo** la chiusura della finestra di validazione, e ognuno va **misurato col model tournament** prima di promuovere. Non toccare la pipeline S4 live durante i 90 giorni.
+Il vincolo di validazione/freeze è stato esplicitamente **revocato dal PO**: si procede con gli sviluppi.
+Design di riferimento completo: **`docs/Alembic_ticker_sentiment_design.docx`** (v1.0, 2026-06-29) — separazione
+formale di **entity extraction / ticker resolution / issuer-specific sentiment**, resolver deterministico,
+FinBERT come auditor, gate NO_TRADE per ambiguità.
 
-Questo è un documento di pianificazione. Non autorizza modifiche a S4, promozioni o live trading.
+### Implementation status
+
+| Item | Stato | Commit |
+|---|---|---|
+| Bug confidence² nel ranking S4 (rank by `score`, non `score×confidence`) | ✅ **DONE** | `e5927de` |
+| **Increment 1 — Ticker false-positive guard** (cashtag + soglia lunghezza + parole comuni) nel path RSS regex | ✅ **DONE** | questo commit |
+| B1 — schema arricchito (`risk_flags` gate, `materiality`, `event_type`, `directness`) | ⏳ prossimo | — |
+| B2-B — resolver esterno OpenFIGI/SEC + `resolution_confidence` + NO_TRADE | 📋 roadmap Fase 1 | — |
+| B3 — novelty evento + already-priced | 📋 roadmap Fase 5 | — |
+| Issuer-specific sentiment (FinBERT su evidence sentences) | 📋 roadmap Fase 2-3 | — |
+| Harness IC per-modello (LOO-ICIR) | 📋 roadmap Fase 5 | — |
+
+Roadmap a fasi (dal design doc §11): Fase 1 resolver + `news_resolved_entities` → Fase 2 issuer sentiment →
+Fase 3 FinBERT auditor → Fase 4 gate portfolio (`resolution_confidence`/`directness`/`ambiguity_margin`) →
+Fase 5 backtest+LOO-ICIR → Fase 6 auto-improve (threshold per event_type/fonte).
 
 ---
 

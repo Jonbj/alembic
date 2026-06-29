@@ -50,6 +50,10 @@ export default function News() {
           heading: "Filtraggio",
           content: "Filtra per ticker (es. SPY) o per fonte. Clicca su una riga per espandere e vedere l'URL dell'articolo e il sentiment score dettagliato.",
         },
+        {
+          heading: "Estrazione ticker (sicurezza)",
+          content: "Un ticker sbagliato è peggio di una news persa: genererebbe un ordine su un titolo non correlato. Per questo i ticker ambigui — sigle corte (es. F, T, C, GS) o parole comuni (CAT, ON, META) — vengono associati a un articolo RSS **solo** se citati con cashtag esplicito (es. $F), non come parola sciolta (\"F-150\", \"Vitamin C\"). Le fonti con metadata ticker affidabili (GDELT, MarketAux, Alpaca) non sono toccate. Per questo alcune news di testo potrebbero non comparire associate a un ticker.",
+        },
       ]} />
 
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
