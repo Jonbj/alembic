@@ -7,6 +7,10 @@ export interface Signal {
   model_id: string
   fallback_used: boolean
   generated_at: string
+  signal_id?: number | null
+  used_in_decision?: boolean
+  decision_at?: string | null
+  decision_type?: string | null
 }
 
 export const fetchSignals = (symbol?: string) => {

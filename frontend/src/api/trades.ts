@@ -50,6 +50,7 @@ export interface Decision {
   order_id: string | null
   reason: string | null
   created_at: string
+  signal_generated_at: string | null
 }
 
 export type TradeStatus = 'open' | 'closed' | 'all'

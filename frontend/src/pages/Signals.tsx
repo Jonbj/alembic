@@ -11,13 +11,14 @@ import { DataTable } from '@/components/shared/DataTable'
 const ROW_H = 40
 
 const COLS = [
-  { label: 'Ticker',     pct: 10 },
-  { label: 'Direction',  pct: 12 },
-  { label: 'Score',      pct: 11 },
-  { label: 'Confidence', pct: 11 },
-  { label: 'Model',      pct: 28 },
-  { label: 'Fallback',   pct: 8 },
-  { label: 'Time',       pct: 20 },
+  { label: 'Ticker',     pct: 9 },
+  { label: 'Direction',  pct: 10 },
+  { label: 'Score',      pct: 9 },
+  { label: 'Confidence', pct: 9 },
+  { label: 'Model',      pct: 22 },
+  { label: 'Fallback',   pct: 7 },
+  { label: 'Time',       pct: 17 },
+  { label: 'Usato',      pct: 17 },
 ]
 
 const GRID_TEMPLATE = COLS.map(c => `${c.pct}%`).join(' ')
@@ -123,26 +124,41 @@ export default function Signals() {
           <DataTable
             loading={decisionsLoading}
             columns={[
-              { label: 'Tick Time', width: '14%' },
-              { label: 'Symbol',    width: '9%' },
-              { label: 'Weight',    width: '8%' },
-              { label: 'Decision',  width: '8%' },
-              { label: 'Order ID',  width: '12%' },
-              { label: 'Reason',    width: 'auto' },
+              { label: 'Tick Time',    width: '13%' },
+              { label: 'Symbol',       width: '7%' },
+              { label: 'Weight',       width: '7%' },
+              { label: 'Decision',     width: '8%' },
+              { label: 'Segnale →Δ',  width: '10%' },
+              { label: 'Order ID',     width: '10%' },
+              { label: 'Reason',       width: 'auto' },
             ]}
-            rows={(decisions as Decision[]).map(d => ({
-              cells: [
-                <span style={{ color: 'var(--text-muted)' }}>{d.tick_time.slice(0, 16).replace('T', ' ')}</span>,
-                <strong>{d.symbol}</strong>,
-                `${(d.score * 100).toFixed(1)}%`,
-                <span style={{
-                  color: d.decision === 'BUY' ? 'var(--green)' : d.decision === 'SELL' ? 'var(--red)' : 'var(--text-muted)',
-                  fontWeight: ['BUY', 'SELL'].includes(d.decision) ? 600 : 400,
-                }}>{DECISION_LABELS[d.decision] ?? d.decision}</span>,
-                <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{d.order_id ?? '—'}</span>,
-                <span style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.4 }}>{d.reason ?? '—'}</span>,
-              ],
-            }))}
+            rows={(decisions as Decision[]).map(d => {
+              let signalLag: string = '—'
+              if (d.signal_generated_at && d.tick_time) {
+                const lagMs = new Date(d.tick_time).getTime() - new Date(d.signal_generated_at).getTime()
+                const lagMin = Math.round(lagMs / 60000)
+                const lagH = Math.floor(Math.abs(lagMin) / 60)
+                const lagM = Math.abs(lagMin) % 60
+                signalLag = lagH > 0 ? `+${lagH}h${lagM}m` : `+${lagMin}m`
+              }
+              return {
+                cells: [
+                  <span style={{ color: 'var(--text-muted)' }}>{d.tick_time.slice(0, 16).replace('T', ' ')}</span>,
+                  <strong>{d.symbol}</strong>,
+                  `${(d.score * 100).toFixed(1)}%`,
+                  <span style={{
+                    color: d.decision === 'BUY' ? 'var(--green)' : d.decision === 'SELL' ? 'var(--red)' : 'var(--text-muted)',
+                    fontWeight: ['BUY', 'SELL'].includes(d.decision) ? 600 : 400,
+                  }}>{DECISION_LABELS[d.decision] ?? d.decision}</span>,
+                  <span title={d.signal_generated_at ? `Segnale generato: ${fmtDateTime(d.signal_generated_at)}` : undefined}
+                    style={{ color: 'var(--text-muted)', fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>
+                    {signalLag}
+                  </span>,
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{d.order_id ?? '—'}</span>,
+                  <span style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.4 }}>{d.reason ?? '—'}</span>,
+                ],
+              }
+            })}
             emptyMessage="No decisions logged yet."
           />
         </div>
@@ -221,6 +237,26 @@ export default function Signals() {
                   <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{s.model_id}</div>
                   <div>{s.fallback_used ? <span className="badge badge-yellow">FB</span> : '—'}</div>
                   <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{fmtDateTime(s.generated_at)}</div>
+                  <div>
+                    {s.used_in_decision === true ? (
+                      <span title={`Decisione: ${s.decision_type} alle ${s.decision_at ? fmtDateTime(s.decision_at) : '?'}`} style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        color: s.decision_type === 'BUY' ? 'var(--green)' : s.decision_type === 'SELL' ? 'var(--red)' : 'var(--text-muted)',
+                        fontSize: 11, fontWeight: 600,
+                      }}>
+                        ✓ {s.decision_type}
+                        {s.decision_at && (
+                          <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>
+                            {new Date(s.decision_at).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
+                      </span>
+                    ) : s.used_in_decision === false ? (
+                      <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>—</span>
+                    ) : (
+                      <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>—</span>
+                    )}
+                  </div>
                 </div>
               )
             })}

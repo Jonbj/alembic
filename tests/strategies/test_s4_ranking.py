@@ -46,7 +46,7 @@ def test_s4_config_defaults():
     assert cfg.min_confidence == 0.3
     assert cfg.min_score == 0.1
     assert cfg.min_stocks == 2
-    assert cfg.signals_lookback_hours == 24
+    assert cfg.signals_lookback_hours == 96  # extended from 24 to cover weekend gaps
     assert cfg.rebalance_frequency == RebalanceFrequency.DAILY
 
 

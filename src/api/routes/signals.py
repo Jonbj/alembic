@@ -69,6 +69,23 @@ async def get_all_signals(
 
     # Sort by generated_at descending (newest first)
     results.sort(key=lambda x: x.get("generated_at", ""), reverse=True)
+
+    # Enrich with decision status: did this signal produce an execution_decision?
+    signal_ids = [int(r["signal_id"]) for r in results if r.get("signal_id") is not None]
+    if signal_ids:
+        try:
+            status_map = pg_store.fetch_signal_decision_status(signal_ids)
+            for r in results:
+                sid = r.get("signal_id")
+                if sid is not None and int(sid) in status_map:
+                    r.update(status_map[int(sid)])
+                else:
+                    r["used_in_decision"] = False
+                    r["decision_at"] = None
+                    r["decision_type"] = None
+        except Exception:
+            pass
+
     return results
 
 

@@ -306,11 +306,15 @@ class PostgreSQLStore:
         symbol: str | None = None,
         limit: int = 20,
     ) -> list[dict]:
-        """Return decision log rows, most-recent first."""
+        """Return decision log rows, most-recent first.
+
+        Includes signal_generated_at (from sentiment_signals JOIN) so the UI
+        can display the lag between signal generation and portfolio cycle decision.
+        """
         filters = []
         params: list = []
         if symbol:
-            filters.append("symbol = %s")
+            filters.append("ed.symbol = %s")
             params.append(symbol)
         where = ("WHERE " + " AND ".join(filters)) if filters else ""
         params.append(limit)
@@ -318,14 +322,51 @@ class PostgreSQLStore:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"""SELECT id, tick_time, symbol, signal_id, score, signal_score, regime_mult,
-                               ema_pass, decision, order_id, reason, created_at
-                        FROM execution_decisions {where}
-                        ORDER BY tick_time DESC LIMIT %s""",
+                    f"""SELECT ed.id, ed.tick_time, ed.symbol, ed.signal_id, ed.score,
+                               ed.signal_score, ed.regime_mult, ed.ema_pass, ed.decision,
+                               ed.order_id, ed.reason, ed.created_at,
+                               ss.generated_at AS signal_generated_at
+                        FROM execution_decisions ed
+                        LEFT JOIN sentiment_signals ss ON ss.id = ed.signal_id
+                        {where}
+                        ORDER BY ed.tick_time DESC LIMIT %s""",
                     params,
                 )
                 cols = [d[0] for d in cur.description]
                 return [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception:
+            conn.rollback()
+            raise
+
+    def fetch_signal_decision_status(self, signal_ids: list[int]) -> dict[int, dict]:
+        """Return the first decision made for each signal_id (used_in_decision enrichment).
+
+        Returns {signal_id: {used_in_decision: True, decision_at: str, decision_type: str}}.
+        Signal IDs not present in execution_decisions are absent from the result.
+        """
+        if not signal_ids:
+            return {}
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                placeholders = ", ".join(["%s"] * len(signal_ids))
+                cur.execute(
+                    f"""SELECT DISTINCT ON (signal_id)
+                               signal_id, tick_time, decision
+                        FROM execution_decisions
+                        WHERE signal_id IN ({placeholders})
+                        ORDER BY signal_id, tick_time DESC""",
+                    signal_ids,
+                )
+                result: dict[int, dict] = {}
+                for row in cur.fetchall():
+                    sid, tick_time, decision = row
+                    result[int(sid)] = {
+                        "used_in_decision": True,
+                        "decision_at": tick_time.isoformat() if tick_time else None,
+                        "decision_type": decision,
+                    }
+                return result
         except Exception:
             conn.rollback()
             raise
@@ -1375,7 +1416,7 @@ class PostgreSQLStore:
                 placeholders = ", ".join(["%s"] * len(symbols))
                 cur.execute(
                     "SELECT DISTINCT ON (symbol) "
-                    "  symbol, score, confidence, reasoning, "
+                    "  id AS signal_id, symbol, score, confidence, reasoning, "
                     "  model_id, ensemble_std, fallback_used, generated_at "
                     "FROM sentiment_signals "
                     "WHERE symbol IN (" + placeholders + ") "

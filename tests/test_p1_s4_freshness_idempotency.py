@@ -250,3 +250,121 @@ class TestS4IdempotencyGate:
         assert "s4:fired_signals:2026-06-18" in calls
         assert "s4:fired_signals:2026-06-19" in calls
         assert calls[0] != calls[1], "Different dates must produce different Redis keys"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Group C — Weekend / long-gap signal preservation (FIX-D extended)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestWeekendSignalPreservation:
+    """Regression guard: signals from Friday must survive Monday's portfolio cycle.
+
+    Root cause (2026-06-29): signals_lookback_hours=24 meant fetch_signals_for_cycle
+    returned empty for signals 65h old (Fri→Mon). FIX-D (_preserve_stale_signals_for_open_positions)
+    never ran because there was nothing to preserve, triggering a mass-sell of all positions.
+    Fix: signals_lookback_hours must be >= 96 so weekend signals enter the stale list.
+    """
+
+    def test_s4_config_signals_lookback_hours_covers_weekend(self):
+        """signals_lookback_hours must be >= 96h to cover the longest market closure gap.
+
+        A US 3-day weekend (Friday close 21:00 UTC → Tuesday open 13:30 UTC) is ~88h.
+        The lookback window must exceed this gap so Friday signals reach the stale-preservation
+        logic on Monday/Tuesday morning.
+        """
+        from src.strategies.s4.config import S4Config
+
+        cfg = S4Config()
+        assert cfg.signals_lookback_hours >= 96, (
+            f"signals_lookback_hours={cfg.signals_lookback_hours} is too short to cover "
+            f"a weekend gap (need >= 96h). Weekend signals aged ~65-88h are invisible "
+            f"to fetch_signals_for_cycle, causing FIX-D preservation to never run → mass-sell."
+        )
+
+    def test_weekend_stale_positive_signal_preserved_for_open_position(self):
+        """A 65h-old positive signal (Friday→Monday gap) is preserved when the symbol has an open position."""
+        from src.workers.portfolio_scheduler import _preserve_stale_signals_for_open_positions
+
+        friday_signal = _make_signal("TSLA", age_hours=65.0, score=0.7)
+        result = _preserve_stale_signals_for_open_positions(
+            fresh_signals=[],
+            stale_signals=[friday_signal],
+            open_symbols={"TSLA"},
+        )
+
+        assert friday_signal in result, (
+            "65h-old positive signal for an open position must be preserved — "
+            "signal expiry over the weekend is not a counter-signal."
+        )
+
+    def test_weekend_stale_negative_signal_not_preserved(self):
+        """A stale negative signal (score < 0) must NOT be preserved — it IS a counter-signal."""
+        from src.workers.portfolio_scheduler import _preserve_stale_signals_for_open_positions
+
+        bearish_signal = _make_signal("TSLA", age_hours=65.0, score=-0.3)
+        result = _preserve_stale_signals_for_open_positions(
+            fresh_signals=[],
+            stale_signals=[bearish_signal],
+            open_symbols={"TSLA"},
+        )
+
+        assert bearish_signal not in result, (
+            "Stale negative signal must NOT be preserved — negative score means bearish, "
+            "which IS a reason to exit the position."
+        )
+
+    def test_weekend_stale_signal_not_preserved_when_fresh_counter_signal_exists(self):
+        """A stale bullish signal must NOT be preserved when a fresh counter-signal (same symbol) exists."""
+        from src.workers.portfolio_scheduler import _preserve_stale_signals_for_open_positions
+
+        stale_bullish = _make_signal("TSLA", age_hours=65.0, score=0.7)
+        fresh_bearish = _make_signal("TSLA", age_hours=1.0, score=-0.4)
+
+        result = _preserve_stale_signals_for_open_positions(
+            fresh_signals=[fresh_bearish],
+            stale_signals=[stale_bullish],
+            open_symbols={"TSLA"},
+        )
+
+        assert stale_bullish not in result, (
+            "When a fresh signal already exists for the symbol, the stale one must NOT be "
+            "re-added — the fresh signal takes precedence."
+        )
+        assert fresh_bearish in result, "Fresh counter-signal must remain in the result."
+
+    def test_weekend_stale_signal_not_preserved_for_symbol_without_open_position(self):
+        """A stale signal for a symbol without an open position must NOT be preserved."""
+        from src.workers.portfolio_scheduler import _preserve_stale_signals_for_open_positions
+
+        stale_signal = _make_signal("NVDA", age_hours=65.0, score=0.9)
+        result = _preserve_stale_signals_for_open_positions(
+            fresh_signals=[],
+            stale_signals=[stale_signal],
+            open_symbols={"TSLA"},  # NVDA not in open positions
+        )
+
+        assert stale_signal not in result, (
+            "Stale signal for a symbol without an open position must NOT be preserved — "
+            "no existing position to protect."
+        )
+
+    def test_weekend_mixed_portfolio_preserves_open_positions_only(self):
+        """Realistic scenario: 4 open positions over weekend, only open ones preserved."""
+        from src.workers.portfolio_scheduler import _preserve_stale_signals_for_open_positions
+
+        tsla = _make_signal("TSLA", 65.0, score=0.8)   # open, bullish → preserve
+        tsm  = _make_signal("TSM",  65.0, score=0.6)   # open, bullish → preserve
+        avgo = _make_signal("AVGO", 65.0, score=0.5)   # open, bullish → preserve
+        nvda = _make_signal("NVDA", 65.0, score=-0.1)  # open, but score<=0 → do NOT preserve
+
+        result = _preserve_stale_signals_for_open_positions(
+            fresh_signals=[],
+            stale_signals=[tsla, tsm, avgo, nvda],
+            open_symbols={"TSLA", "TSM", "AVGO", "NVDA"},
+        )
+
+        assert tsla in result, "TSLA bullish stale signal must be preserved"
+        assert tsm  in result, "TSM bullish stale signal must be preserved"
+        assert avgo in result, "AVGO bullish stale signal must be preserved"
+        assert nvda not in result, "NVDA score<=0 — must NOT be preserved even with open position"
+        assert len(result) == 3
