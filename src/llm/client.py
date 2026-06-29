@@ -622,7 +622,7 @@ class GlmClient(LLMClient):
 #   redis-cli DEL ollama:sem ollama:sem:init
 #
 _OLLAMA_SEM_KEY = "ollama:sem"
-_OLLAMA_SEM_SLOTS = 3      # Ollama cloud limit: max 3 concurrent model calls
+_OLLAMA_SEM_SLOTS = 2      # ensemble has 2 models (kimi + glm-5.2) → max 2 parallel calls
 _OLLAMA_SEM_WAIT_S = 180   # max seconds to wait for a slot (12 workers × ~14s/call)
 
 
