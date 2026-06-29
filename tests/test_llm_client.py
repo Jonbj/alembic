@@ -9,7 +9,7 @@ import pytest
 from src.llm.client import (
     GlmClient, OpusClient, Qwen35Client,
     OllamaKimiClient, OllamaGlmClient, OllamaQwen35Client, OllamaDeepseekClient,
-    OllamaGLM52Client,
+    OllamaGLM52Client, OllamaCloudClient,
 )
 from src.llm.ensemble import EnsembleAggregator, ModelOutput, run_ensemble_query
 from src.models.news import LLMSentimentOutput
@@ -97,7 +97,9 @@ class TestOllamaCloudClients:
         assert "glm-5.2:cloud" in ALLOWED_MODEL_IDS
 
     def test_ollama_glm52_is_ollama_cloud_subclass(self):
-        from src.llm.client import OllamaCloudClient
+        # Use the module-level OllamaCloudClient import (not a fresh inner import):
+        # another test (test_ollama_timeout) importlib.reload()s src.llm.client, which
+        # would otherwise give a different class object here and break issubclass.
         assert issubclass(OllamaGLM52Client, OllamaCloudClient)
 
     def test_ollama_qwen35_model_id(self):

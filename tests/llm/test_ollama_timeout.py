@@ -1,5 +1,22 @@
 """Test per-model LLM timeout configuration."""
+import importlib
 from unittest.mock import patch
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _restore_reloaded_modules():
+    """These tests importlib.reload() src.config and src.llm.client to pick up
+    env-driven timeouts. reload() rebinds the modules' classes and config values in
+    place, which leaks into other test files (e.g. issubclass checks, timeout reads).
+    Reload once more at teardown — after the patched env is gone — to restore pristine
+    module state and keep the suite order-independent."""
+    yield
+    import src.config as cfg_mod
+    importlib.reload(cfg_mod)
+    import src.llm.client as client_mod
+    importlib.reload(client_mod)
 
 
 def test_kimi_client_reads_timeout_from_config():
