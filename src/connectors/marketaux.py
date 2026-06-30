@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import aiohttp
 
 from src.connectors.base import NewsConnector
+from src.connectors.cashtag import extract_cashtag_tickers
 from src.models.news import MarketAuxNewsItem
 
 logger = logging.getLogger(__name__)
@@ -207,7 +208,10 @@ class MarketAuxConnector(NewsConnector):
             url=url,
             timestamp=ts,
             source="marketaux",
-            asset_tags=asset_tags or list(self._symbols),
+            # QT-01: never fall back to the whole watchlist (mass false positives).
+            # No source entity → try explicit cashtags in the text, else no ticker
+            # (the article is then dropped downstream by `if not item.asset_tags`).
+            asset_tags=asset_tags or extract_cashtag_tickers(f"{title} {body}", self._symbols),
             language="en",
             marketaux_sentiment=sentiment,
         )
