@@ -51,6 +51,9 @@ _SENTIMENT_MAX_NEWS_AGE_HOURS = 24
 # Cap on items scanned per run while skipping stale ones (bounds one task; a large stale
 # backlog drains over a few runs rather than holding everything in news:processing at once).
 _MAX_QUEUE_SCAN_PER_RUN = 5000
+# Resolver shadow (Fase A): compute + persist deterministic ticker resolution for
+# measurement. Offline/fail-safe; never gates the signal. Disable via RESOLVER_SHADOW_ENABLED=0.
+_RESOLVER_SHADOW_ENABLED = os.environ.get("RESOLVER_SHADOW_ENABLED", "1") != "0"
 from src.store.pg_store import PostgreSQLStore
 
 
@@ -565,6 +568,16 @@ def run_sentiment_worker() -> dict:
                 weights=model_weights,
             )
         )
+
+        # Resolver SHADOW (Fase A): persist deterministic ticker resolution for each item
+        # to news_resolved_entities so resolver precision can be measured vs news_labels.
+        # Offline + fail-safe — does NOT affect the signal just written.
+        if _RESOLVER_SHADOW_ENABLED and items_to_process:
+            try:
+                from src.connectors.resolver_shadow import resolve_and_log_shadow
+                resolve_and_log_shadow(items_to_process, pg_store)
+            except Exception as exc:
+                log.warning("resolver shadow batch failed: %s", exc)
 
         # Count fallbacks — distinguish Ollama timeout from ensemble divergence
         fallback_count = sum(1 for r in results if r.fallback_used)

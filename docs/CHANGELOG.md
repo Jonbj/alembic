@@ -6,6 +6,11 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ## 2026-06-30
 
+### S4 dev-doc punti 1-3 (da `S4_TICKER_SENTIMENT_DEV_INSTRUCTIONS_2026-06-30.md`)
+- **(1) Soglie unificate + documentate**: `docs/strategies.md` riscritto col vero chain di gating live (freshness → prefiltro ranker `min_score 0.10`/`min_confidence 0.30` → **order gate** `feedback:entry_threshold` 0.30/dyn → ranking top-N), con tabella "Threshold map" che distingue i 3 concetti e segna il gate legacy `score>0.30 AND EMA20` come INATTIVO sotto `engine=portfolio`. Commento di chiarezza in `S4Config` (min_score = prefiltro, non order threshold). Corretti anche i modelli ensemble nel doc (Kimi+GLM-5.2 cloud, non Qwen/locale).
+- **(2) Resolver in SHADOW (Fase A)**: nuovo `news_resolved_entities` (migr. 031) + `src/connectors/resolver_shadow.py` + `pg_store.write_resolved_entity`. Il worker sentiment calcola e **persiste** la risoluzione ticker deterministica (decision/confidence/ambiguity/directness/tradable + evidenze) per ogni news, **senza gating** del signal live (offline, fail-safe, flag `RESOLVER_SHADOW_ENABLED`). Prepara la misura precision resolver vs `news_labels`.
+- **(3) Decision Log — `SKIP_STALE`**: i signal **forti** (|score| ≥ min_score) scartati per età (> max_age 4h) vengono registrati in `execution_decisions` (`decision=SKIP_STALE`, reason con età+score), così si vede quando si "perde" un segnale buono per scadenza. Frontend: label + help aggiornati.
+
 ### Signals page — evidenzia i segnali sopra soglia
 - **Feat**: la colonna Score della pagina Signals evidenzia in **verde ✓** i segnali con `|score| ≥ soglia feedback gate` (soglia live da `/feedback/status`, default 0.35); legenda con la soglia corrente. Colpo d'occhio su quali segnali superano il gate senza incrociare Auto-Improve.
 

@@ -1694,6 +1694,44 @@ def _record_gate_drops(dropped_df, threshold: float) -> None:
         log.warning("Failed to log gate-dropped signals: %s", exc)
 
 
+def _record_stale_drops(stale_signals, max_age_hours: int, min_score: float) -> None:
+    """Write SKIP_STALE rows for signals that were strong enough to matter
+    (|score| >= min_score) but were dropped because older than max_age_hours. Surfaces
+    'we aged out a real signal' in the Decision Log without flooding it with stale
+    near-zero noise. Fail-safe — never breaks the cycle.
+    """
+    try:
+        from datetime import datetime, timezone
+
+        from src.config import config
+        from src.store.pg_store import PostgreSQLStore
+
+        notable = [s for s in stale_signals if abs(float(s.score)) >= min_score]
+        if not notable:
+            return
+        regime_mult = _get_regime_multiplier_from_redis(config.REDIS_URL)
+        now = datetime.now(timezone.utc)
+        pg = PostgreSQLStore()
+        for sig in notable:
+            gen = sig.generated_at
+            if getattr(gen, "tzinfo", None) is None:
+                gen = gen.replace(tzinfo=timezone.utc)
+            age_h = (now - gen).total_seconds() / 3600.0
+            pg.write_execution_decision(
+                tick_time=now,
+                symbol=sig.symbol,
+                signal_id=None,
+                score=0.0,
+                regime_mult=regime_mult,
+                ema_pass=False,
+                decision="SKIP_STALE",
+                reason=f"signal {age_h:.1f}h old > max_age {max_age_hours}h (score {float(sig.score):.3f})",
+                signal_score=float(sig.score),
+            )
+    except Exception as exc:
+        log.warning("Failed to log stale-dropped signals: %s", exc)
+
+
 def _build_strategy_instance(entry, bars_df):
     from src.strategies.s1.strategy import S1Config, TimeSeriesMomentum
     from src.strategies.s2.strategy import VRPStrategy
@@ -1770,6 +1808,12 @@ def _build_strategy_instance(entry, bars_df):
                     fresh_signals = _preserve_stale_signals_for_open_positions(
                         fresh_signals, stale_signals, _open_syms_fd
                     )
+                    # Surface notable signals lost to staleness in the Decision Log.
+                    _dropped_stale = [s for s in stale_signals if s not in fresh_signals]
+                    if _dropped_stale:
+                        _record_stale_drops(
+                            _dropped_stale, s4_config.max_signal_age_hours, s4_config.min_score
+                        )
                     _preserved = [s for s in fresh_signals if s in stale_signals]
                     if _preserved:
                         log.info(

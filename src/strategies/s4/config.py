@@ -11,6 +11,10 @@ class S4Config:
     strategy_id: str = "S4"
     n_top: int = 5
     bucket_pct: float = 0.10
+    # min_score / min_confidence are RANKER PREFILTERS, not the order threshold. The live
+    # order gate is feedback:entry_threshold (baseline 0.30, raised dynamically by the
+    # loss-feedback loop, enforced in portfolio_scheduler). See docs/strategies.md
+    # §"Signal Logic (live = portfolio path)" — Threshold map.
     min_confidence: float = 0.3
     min_score: float = 0.1
     min_stocks: int = 2

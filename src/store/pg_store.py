@@ -298,6 +298,37 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    _INSERT_RESOLVED_ENTITY = """
+        INSERT INTO news_resolved_entities
+            (news_log_id, url, candidate_ticker, extraction_method, decision,
+             resolved_ticker, resolution_confidence, ambiguity_margin, directness,
+             tradable, exchange, figi, source_ticker_match, alias_match,
+             sec_openfigi_match, llm_agreement)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """
+
+    def write_resolved_entity(
+        self, *, candidate_ticker: str, extraction_method: str, verdict, evidence,
+        url: str | None = None, news_log_id: int | None = None,
+    ) -> None:
+        """Persist a SHADOW resolver verdict to news_resolved_entities (offline only —
+        never gates the live signal). ``verdict`` is a ResolvedTicker, ``evidence`` a
+        ResolutionEvidence (src/connectors/ticker_resolver.py)."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._INSERT_RESOLVED_ENTITY, (
+                    news_log_id, url, candidate_ticker, extraction_method,
+                    verdict.decision, verdict.resolved_ticker, verdict.resolution_confidence,
+                    verdict.ambiguity_margin, verdict.directness, verdict.tradable,
+                    verdict.exchange, verdict.figi, evidence.source_ticker_match,
+                    evidence.alias_match, evidence.sec_openfigi_match, evidence.llm_agreement,
+                ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
     def update_decision_order_id(self, decision_id: int, order_id: str) -> None:
         """Back-fill the Alpaca order_id on an execution_decisions row after submission."""
         conn = self._get_connection()

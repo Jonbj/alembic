@@ -77,6 +77,7 @@ export default function Signals() {
     SKIP_CAP: 'Skip — cycle cap',
     SKIP_POSITION: 'Skip — position open',
     SKIP_THRESHOLD: 'Skip — sotto soglia',
+    SKIP_STALE: 'Skip — segnale scaduto',
   }
 
   return (
@@ -97,7 +98,7 @@ export default function Signals() {
         },
         {
           heading: "Colonne — Decision Log",
-          content: "**Tick Time**: timestamp del ciclo in cui è stata presa la decisione.\n**Symbol**: ticker azionario.\n**Weight**: peso percentuale assegnato nel portafoglio (es. 2.0% = 2% del NAV).\n**Decision**: esito — BUY (ordine inviato ad Alpaca); SKIP_EMA (prezzo corrente sotto la EMA20 — filtro trend-following); SKIP_CAP (raggiunto il numero massimo di ordini per ciclo); SKIP_POSITION (posizione già aperta su questo ticker); SKIP_THRESHOLD (segnale scartato perché sotto la soglia del feedback gate — vedi Reason per score e soglia: così i giorni senza trade non sono un log vuoto).\n**Order ID**: ID dell'ordine Alpaca se la decisione era BUY; vuoto altrimenti.\n**Reason**: testo esplicativo con score, modello usato, e reasoning LLM abbreviato.",
+          content: "**Tick Time**: timestamp del ciclo in cui è stata presa la decisione.\n**Symbol**: ticker azionario.\n**Weight**: peso percentuale assegnato nel portafoglio (es. 2.0% = 2% del NAV).\n**Decision**: esito — BUY (ordine inviato ad Alpaca); SKIP_EMA (prezzo corrente sotto la EMA20 — filtro trend-following); SKIP_CAP (raggiunto il numero massimo di ordini per ciclo); SKIP_POSITION (posizione già aperta su questo ticker); SKIP_THRESHOLD (segnale scartato perché sotto la soglia del feedback gate — vedi Reason per score e soglia: così i giorni senza trade non sono un log vuoto); SKIP_STALE (segnale forte ma più vecchio di max_age 4h → scaduto prima di poter tradare).\n**Order ID**: ID dell'ordine Alpaca se la decisione era BUY; vuoto altrimenti.\n**Reason**: testo esplicativo con score, modello usato, e reasoning LLM abbreviato.",
         },
         {
           heading: "Filtri",
