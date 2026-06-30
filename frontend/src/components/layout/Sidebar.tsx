@@ -8,6 +8,7 @@ const NAV = [
   { to: '/signals',     label: 'Signals',     icon: '⚡' },
   { to: '/trading',     label: 'Trading',     icon: '📈' },
   { to: '/validation',  label: 'Validation',  icon: '🧪' },
+  { to: '/labeling',    label: 'Labeling',    icon: '🏷️' },
   { to: '/auto-improve',  label: 'Auto-Improve', icon: '🔧' },
   { to: '/performance',   label: 'Performance',  icon: '📊' },
   { to: '/strategies',  label: 'Strategies',  icon: '🎯' },

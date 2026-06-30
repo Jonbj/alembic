@@ -21,6 +21,7 @@ const Dashboard   = lazy(() => import('@/pages/DashboardPage'))
 const LoginPage   = lazy(() => import('@/pages/LoginPage'))
 const SystemLog   = lazy(() => import('@/pages/SystemLog'))
 const Validation  = lazy(() => import('@/pages/Validation'))
+const Labeling    = lazy(() => import('@/pages/Labeling'))
 
 const qc = new QueryClient({
   defaultOptions: { queries: { retry: 3, retryDelay: (n) => Math.min(1000 * 2 ** n, 30000) } },
@@ -60,6 +61,7 @@ export default function App() {
                 <Route path="/dashboard"    element={<Dashboard />} />
                 <Route path="/system"       element={<SystemLog />} />
                 <Route path="/validation"   element={<Validation />} />
+                <Route path="/labeling"     element={<Labeling />} />
               </Route>
             </Routes>
           </Suspense>
