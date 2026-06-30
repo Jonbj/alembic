@@ -4,6 +4,24 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ---
 
+## 2026-06-30
+
+### Sentiment Worker — Observability Ollama semaphore
+- **Feat**: notifica Telegram rate-limited (max 1 ogni 30 min) quando tutti i modelli ensemble vanno in timeout (`raw_outputs=[]`). Il messaggio include il comando di recovery esatto.
+  - Nuova funzione `_maybe_notify_ollama_timeout()` in `src/workers/sentiment.py`.
+  - `run_inference` ora usa reasoning `"FinBERT fallback (Ollama timeout)"` vs `"FinBERT fallback (ensemble divergence)"` per distinguere i due scenari.
+  - 6 test TDD in `tests/workers/test_ollama_timeout_alert.py`.
+- **Fix**: auto-recovery del semaphore Redis se tutti gli slot sono stati perduti (`LLEN==0`). Il worker li ripristina all'avvio del task successivo senza intervento manuale (sicuro: `worker-inference` ha `concurrency=1`).
+  - Nuova funzione `_recover_ollama_semaphore_if_leaked()` in `src/workers/sentiment.py`.
+  - 5 test TDD in `tests/workers/test_ollama_sem_recovery.py`.
+- **Fix**: slot semaphore Ollama ridotti da 3 → 2 (ensemble ha 2 modelli; max 2 call parallele per item).
+- **Root cause analisi** (2026-06-29 ore 21:xx UTC): Ollama API era UP ma il semaphore Redis era a 0/3 slot per leak da task killati da `SoftTimeLimitExceeded` (4 item × 270s/item > soft_limit 600s). Recovery manuale eseguito (`DEL ollama:sem ollama:sem:init`), ora automatico.
+
+### Documentazione
+- Aggiunta review qualitativa estrazione ticker + sentiment: `docs/TICKER_SENTIMENT_QUALITY_REVIEW_2026-06-30.md`
+
+---
+
 ## 2026-06-29
 
 ### Portfolio Scheduler — Anti-stale-ranker-sell guard
@@ -11,12 +29,11 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
   - Root cause: il gate `abs(score) >= threshold` ammette segnali negativi (es. MU -0.4185) che passano il gate ma vengono scartati dal ranker long-only (`strength = score*confidence <= 0`). Con 1 candidato positivo < `min_stocks=2` il ranker ritorna vuoto.
   - Fix: nuovo `_fresh_signal_protected_symbols()` — protegge le posizioni aperte con segnale fresco >= threshold da SELL senza attributazione di strategy.
   - 8 test TDD aggiunti in `tests/workers/test_protected_sell.py`.
+- **Fix**: falso alert Telegram "Execution fill divergence: 0/0 orders submitted" su cicli idle (nessun ordine pianificato). Il check viene ora saltato quando `final_count==0`.
 
 ### LLM Ensemble
-- **Qwen3.5 sostituito da GLM-5.2** nel sentiment ensemble news. Motivo: Qwen3.5 estraeva ticker in modo troppo aggressivo (es. MU da notizia macro Iran/US deal); GLM-5.2 è il flagship Zhipu AI con reasoning long-horizon migliore per analisi macroeconomica.
-- Ensemble attivo: Kimi K2.6 + GLM-5.2 (2 modelli) — entrambi attivi, confermato da log `worker-inference`
-- Fallback weights performance worker aggiornati: `{kimi-k2.6:cloud: 0.50, glm-5.2:cloud: 0.50}`
-- GLM-5.2 e Kimi K2.6 in timeout da 20:47 UTC per Ollama cloud overload — FinBERT fallback attivo fino a disponibilità Ollama
+- **Qwen3.5 sostituito da GLM-5.2**: Qwen3.5 estraeva ticker in modo aggressivo (es. MU da notizia macro); GLM-5.2 ha reasoning long-horizon migliore per analisi macroeconomica.
+- Ensemble attivo: Kimi K2.6 + GLM-5.2 (2 modelli); fallback weights `{kimi-k2.6:cloud: 0.50, glm-5.2:cloud: 0.50}`.
 
 ---
 
