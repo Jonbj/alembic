@@ -534,8 +534,8 @@ class TestDKCoTPrompt:
         assert "buy-side equity analyst" in _DK_COT_PROMPT
         assert "step-by-step" in _DK_COT_PROMPT.lower()
         assert "revenue" in _DK_COT_PROMPT.lower()
-        assert "bull case" in _DK_COT_PROMPT.lower()
-        assert "bear case" in _DK_COT_PROMPT.lower()
+        assert "bull" in _DK_COT_PROMPT.lower()  # "bull/bear case" / "bull/bear analysis"
+        assert "bear" in _DK_COT_PROMPT.lower()
         assert "{text}" in _DK_COT_PROMPT
         assert "{symbol}" in _DK_COT_PROMPT
         assert "polarity" in _DK_COT_PROMPT

@@ -87,3 +87,25 @@ class LLMSentimentOutput(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0, description="Model confidence [0, 1]")
     reasoning: str = Field(description="Step-by-step reasoning for the sentiment")
     ticker: str = Field(default="", description="Ticker symbol mentioned")
+
+    # Enriched fields (design doc §5/§9). Backward-compatible defaults: materiality and
+    # novelty default to 1.0 and directness to "direct" so an unenriched output (older
+    # models, parse fallback) leaves score = polarity × confidence unchanged. These feed
+    # the ticker resolver and future score weighting / risk gating (gated on QX-01).
+    event_type: str = Field(
+        default="other",
+        description="earnings|guidance|mna|regulatory|lawsuit|analyst_rating|product|management|macro|other",
+    )
+    directness: str = Field(
+        default="direct",
+        description="direct|customer_supplier|competitor_readthrough|sector|macro|unclear",
+    )
+    materiality: float = Field(default=1.0, ge=0.0, le=1.0, description="Economic relevance [0,1]")
+    novelty: float = Field(default=1.0, ge=0.0, le=1.0, description="How new / not-yet-priced [0,1]")
+    risk_flags: list[str] = Field(
+        default_factory=list,
+        description="rumor|already_priced_in|ambiguous_entity|low_source_quality",
+    )
+    evidence_sentences: list[str] = Field(
+        default_factory=list, description="Key sentences from the article supporting the verdict"
+    )

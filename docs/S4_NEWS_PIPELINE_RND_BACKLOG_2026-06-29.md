@@ -20,11 +20,22 @@ FinBERT come auditor, gate NO_TRADE per ambiguità.
 | **Increment 1 — Ticker false-positive guard** (cashtag + soglia lunghezza + parole comuni) nel path RSS regex | ✅ **DONE** | questo commit |
 | **Resolver deterministico — decision core** (scoring §4.4, gate NO_TRADE §4.3, directness §4.2) | ✅ **DONE** | `dc5921d` |
 | **Resolver — provider esterni** (OpenFIGI + SEC company_tickers + alias + tradability, `gather_evidence`) | ✅ **DONE, verificato live** (AAPL→RESOLVED, garbage→NO_TRADE, SEC NVIDIA→NVDA) | questo commit |
-| Resolver — wiring nel pipeline + enforcement | ⏳ gated dietro punto 1 (serve company_name/directness dall'LLM) + calibrazione soglie su shadow data | — |
-| B1 — schema arricchito (`risk_flags` gate, `materiality`, `event_type`, `directness`) | ⏳ prossimo (alimenta il resolver) | — |
+| **QT-01 — Drop watchlist fallback** (marketaux/alpaca: no entity → cashtag, mai watchlist intera) | ✅ **DONE** | `e1845c7` |
+| **Punto 1a — schema + prompt arricchito** (`event_type`/`directness`/`materiality`/`novelty`/`risk_flags`/`evidence_sentences` in `LLMSentimentOutput`, prompt issuer-specific + no buy/sell/hold) | ✅ **DONE** (backward-compatible, default neutri) | questo commit |
+| Punto 1b — gate `risk_flags` + weighting `materiality×directness` sul live score | ⏳ **gated su QX-01** (calibrazione/label set: cambia comportamento, non falsificabile senza misura) | — |
+| Resolver — wiring + enforcement | ⏳ **gated su QX-01** (shadow → calibrazione → enforce) | — |
 | B3 — novelty evento + already-priced | 📋 roadmap Fase 5 | — |
 | Issuer-specific sentiment (FinBERT su evidence sentences) | 📋 roadmap Fase 2-3 | — |
 | Harness IC per-modello (LOO-ICIR) | 📋 roadmap Fase 5 | — |
+
+### Cross-reference con `TICKER_SENTIMENT_QUALITY_REVIEW_2026-06-30.md` (altro agente)
+Il quality review (empirico, query sui DB vivi) **conferma e prioritizza**: (1) il vero generatore di
+false-positive è il **fallback watchlist** (A1 → QT-01, **fatto**); (2) sul sentiment i fix ad alto valore
+sono **calibrazione confidence (QS-01)** e **bias correction qwen (QS-02)** — più dell'arricchimento schema;
+(3) **blocco metodologico**: nulla è falsificabile senza il **golden label set (QX-01)**, che richiede
+annotazione umana (~80-130h) + una **fonte prezzo affidabile** (R-09, non yfinance). Conseguenza: enforcement
+(Punto 1b, resolver, QS-01) è correttamente **gated su QX-01**. Prossimo unblock reale: **QT-03 logging**
+(candidati scartati + flag fallback) → costruzione QX-01 → calibrazione → enforce.
 
 Roadmap a fasi (dal design doc §11): Fase 1 resolver + `news_resolved_entities` → Fase 2 issuer sentiment →
 Fase 3 FinBERT auditor → Fase 4 gate portfolio (`resolution_confidence`/`directness`/`ambiguity_margin`) →

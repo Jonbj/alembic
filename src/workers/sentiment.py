@@ -56,20 +56,29 @@ _finbert_singleton: FinBERTClient | None = None
 # Worker version constant
 WORKER_VERSION = "1.0.0"
 
-# Domain Knowledge Chain-of-Thought prompt for sentiment analysis
-_DK_COT_PROMPT = """You are a buy-side equity analyst. Analyze the following news item and provide a sentiment assessment.
+# Domain Knowledge Chain-of-Thought prompt for sentiment analysis (design doc §9).
+# Issuer-specific: assess the impact on THIS ticker only. The model produces signal
+# features (polarity, materiality, event type, directness, risk flags) — never a
+# trading action (no buy/sell/hold). Enriched fields feed the resolver and future
+# score weighting; they are backward-compatible (defaults leave score unchanged).
+_DK_COT_PROMPT = """You are a buy-side equity analyst. Assess this news item's impact on the SPECIFIC issuer below.
 
 Think step-by-step:
-1. What does this mean for the company's revenue and cash flows?
-2. How does this compare to competitor performance?
-3. What is the bull case? What is the bear case?
+1. What does this mean for THIS company's revenue, cash flows and competitive position?
+2. Is the impact direct, or only an indirect read-through (customer/supplier/competitor/sector/macro)?
+3. How material and how novel (not already priced in) is it? What is the bull/bear case?
 4. What is your overall verdict?
+
+Rules:
+- Sentiment must be issuer-specific (about {symbol}, not the news in general).
+- Do NOT output a trading action (no buy/sell/hold) — only the signal features below.
+- Use only evidence in the article; if the market impact is unclear, set polarity=0, confidence low.
 
 News: {text}
 Ticker: {symbol}
 
 Respond ONLY with valid JSON matching this schema:
-{{"polarity": <float -1.0 to 1.0>, "confidence": <float 0.0 to 1.0>, "reasoning": "<bull/bear analysis in one sentence>"}}"""
+{{"polarity": <float -1.0..1.0>, "confidence": <float 0.0..1.0>, "reasoning": "<bull/bear analysis, one sentence>", "event_type": "earnings|guidance|mna|regulatory|lawsuit|analyst_rating|product|management|macro|other", "directness": "direct|customer_supplier|competitor_readthrough|sector|macro|unclear", "materiality": <0.0..1.0>, "novelty": <0.0..1.0>, "risk_flags": ["rumor"|"already_priced_in"|"ambiguous_entity"|"low_source_quality"], "evidence_sentences": ["<key sentence>"]}}"""
 
 
 async def run_inference(
