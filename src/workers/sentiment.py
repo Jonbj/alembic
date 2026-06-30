@@ -28,7 +28,7 @@ Exported public API (used by backtest CLI):
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from src.config import config
 from src.llm.budget import LLMBudgetExhaustedError, LLMBudgetTracker
@@ -42,7 +42,24 @@ from src.text.sanitizer import sanitize_text, sanitize_ticker
 # Articles with |marketaux_sentiment| below this threshold are near-neutral.
 # Skipping LLM inference on them saves 60-80% of token spend.
 _MARKETAUX_NEUTRAL_THRESHOLD = 0.2
+# Freshness: news older than this is skipped WITHOUT an LLM call. A news-driven signal
+# is only useful while the news is recent (the trading cycle reads a 4h window); spending
+# minutes/article on 2-week-old news both wastes inference and, since the signal's
+# generated_at is the processing time, injects stale sentiment as if it were fresh.
+# Skipping also lets the worker drain a backlog fast (instant skip vs ~minutes/article).
+_SENTIMENT_MAX_NEWS_AGE_HOURS = 24
+# Cap on items scanned per run while skipping stale ones (bounds one task; a large stale
+# backlog drains over a few runs rather than holding everything in news:processing at once).
+_MAX_QUEUE_SCAN_PER_RUN = 5000
 from src.store.pg_store import PostgreSQLStore
+
+
+def _is_stale_news(item, now: datetime, max_age_hours: int = _SENTIMENT_MAX_NEWS_AGE_HOURS) -> bool:
+    """True if the item's news timestamp is older than max_age_hours (tz-safe)."""
+    ts = item.timestamp
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return (now - ts) > timedelta(hours=max_age_hours)
 from src.store.redis_store import RedisStore
 from src.workers.celery_app import app
 
@@ -455,22 +472,41 @@ def run_sentiment_worker() -> dict:
         news_items: list[NewsItem] = []
         raw_items: list[bytes] = []
         failed_raw: list[bytes] = []
-        for _ in range(4):
+        skipped_stale = 0
+        _now = datetime.now(timezone.utc)
+        # Pull until 4 FRESH items (or queue empty / scan cap). Stale items are skipped
+        # without an LLM call and left in news:processing → discarded by the delete()
+        # at run end. This drains a backlog of old news fast instead of generating
+        # stale-but-"fresh"-timestamped signals on it.
+        scanned = 0
+        while len(news_items) < 4 and scanned < _MAX_QUEUE_SCAN_PER_RUN:
             item_json = redis_client.lmove(
                 "news:queue", "news:processing", "LEFT", "RIGHT"
             )
             if item_json is None:
                 break
+            scanned += 1
             raw_items.append(item_json)
             try:
                 data = json.loads(item_json)
-                if "marketaux_sentiment" in data:
-                    news_items.append(MarketAuxNewsItem(**data))
-                else:
-                    news_items.append(NewsItem(**data))
+                item = (
+                    MarketAuxNewsItem(**data)
+                    if "marketaux_sentiment" in data
+                    else NewsItem(**data)
+                )
             except (json.JSONDecodeError, Exception) as e:
                 log.warning(f"Failed to parse news item from queue: {e}")
                 failed_raw.append(item_json)
+                continue
+            if _is_stale_news(item, _now):
+                skipped_stale += 1
+                continue
+            news_items.append(item)
+        if skipped_stale:
+            log.info(
+                "Skipped %d stale news items (> %dh old) without inference",
+                skipped_stale, _SENTIMENT_MAX_NEWS_AGE_HOURS,
+            )
 
         # Move unparseable items to dead-letter queue — prevents infinite retry loop
         # where the recovery block keeps re-queuing corrupt items on every invocation.
@@ -485,7 +521,16 @@ def run_sentiment_worker() -> dict:
             )
 
         if not news_items:
-            return {"processed": 0, "reason": "no_items_in_queue"}
+            # No fresh items this run. If we scanned (and skipped stale) items, discard
+            # them from news:processing so the crash-recovery block does NOT re-queue them
+            # — otherwise a stale backlog would loop forever instead of draining.
+            if raw_items:
+                redis_client.delete("news:processing")
+            return {
+                "processed": 0,
+                "reason": "no_items_in_queue",
+                "skipped_stale": skipped_stale,
+            }
 
         # Pre-filter: skip near-neutral MarketAux articles before LLM inference.
         # This saves 60-80% of token spend on articles that are unlikely to
@@ -542,6 +587,7 @@ def run_sentiment_worker() -> dict:
             "ensemble_success": len(results) - fallback_count,
             "finbert_fallbacks": fallback_count,
             "skipped_neutral": skipped_neutral,
+            "skipped_stale": skipped_stale,
             "symbols": list(set(r.symbol for r in results)),
         }
 
