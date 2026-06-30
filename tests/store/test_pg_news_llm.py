@@ -287,3 +287,25 @@ class TestGetLlmFeedback:
         params = call_args[1]
         assert "r.model_id = %s" in query
         assert "opus" in params
+
+
+class TestLogNewsItemNewsLogId:
+    """QS-09: news_log_id must be populated even when the article already exists."""
+
+    def test_returns_existing_id_on_conflict(self, pg_store):
+        mock_cursor = pg_store._conn.cursor.return_value
+        # INSERT ... ON CONFLICT DO NOTHING returns no row, then the fallback SELECT
+        # returns the existing news_log id.
+        mock_cursor.fetchone.side_effect = [None, (99,)]
+        item = NewsItem(id="x", body="b", title="t", url="http://ex/a", asset_tags=["AAPL"])
+        result = pg_store.log_news_item(item, ticker="AAPL")
+        assert result == 99
+        assert mock_cursor.execute.call_count == 2  # INSERT + fallback SELECT
+
+    def test_returns_insert_id_without_conflict(self, pg_store):
+        mock_cursor = pg_store._conn.cursor.return_value
+        mock_cursor.fetchone.side_effect = [(42,)]
+        item = NewsItem(id="x", body="b", title="t", url="http://ex/a", asset_tags=["AAPL"])
+        result = pg_store.log_news_item(item, ticker="AAPL")
+        assert result == 42
+        assert mock_cursor.execute.call_count == 1  # only INSERT, no fallback SELECT

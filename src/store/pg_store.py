@@ -225,6 +225,16 @@ class PostgreSQLStore:
                     ),
                 )
                 row = cur.fetchone()
+                if row is None:
+                    # QS-09: ON CONFLICT DO NOTHING returned no id (this (url, ticker)
+                    # was already in news_log from a previous fetch). Look up the
+                    # existing row so the signal still links to its news (otherwise
+                    # news_log_id stays NULL and breaks auditability/joins).
+                    cur.execute(
+                        "SELECT id FROM news_log WHERE url = %s AND ticker = %s",
+                        (item.url[:1000] if item.url else "", ticker),
+                    )
+                    row = cur.fetchone()
             conn.commit()
             return int(row[0]) if row else None
         except Exception:

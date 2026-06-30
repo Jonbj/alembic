@@ -33,6 +33,42 @@ class TestQS03AgreementWeighting:
         assert r.confidence == pytest.approx(0.8)  # std=0, single model → no change
 
 
+class TestQS10FailureLogging:
+    """QS-10: model failures are logged with a kind (timeout/invalid/error), not print()."""
+
+    def test_classify_timeout(self):
+        import asyncio
+        from src.llm.ensemble import _classify_failure
+        assert _classify_failure(asyncio.TimeoutError()) == "timeout"
+        assert _classify_failure(TimeoutError()) == "timeout"
+
+    def test_classify_invalid(self):
+        from src.llm.ensemble import _classify_failure
+        assert _classify_failure(ValueError("bad json")) == "invalid"
+        assert _classify_failure(KeyError("missing")) == "invalid"
+
+    def test_classify_error(self):
+        from src.llm.ensemble import _classify_failure
+        assert _classify_failure(RuntimeError("boom")) == "error"
+
+    @pytest.mark.asyncio
+    async def test_run_ensemble_query_logs_failure_kind(self, caplog):
+        from unittest.mock import AsyncMock, MagicMock
+        from src.llm.ensemble import run_ensemble_query
+        from src.models.news import LLMSentimentOutput
+
+        client = MagicMock()
+        client.model_id = "kimi-k2.6:cloud"
+        client.complete = AsyncMock(side_effect=ValueError("refused"))
+
+        with caplog.at_level("WARNING"):
+            out = await run_ensemble_query("p", [client], LLMSentimentOutput, "AAPL")
+
+        assert out == []
+        assert "kind=invalid" in caplog.text
+        assert "model=kimi-k2.6:cloud" in caplog.text
+
+
 class TestEnsembleAggregator:
     """Test ensemble aggregation logic."""
 

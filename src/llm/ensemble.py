@@ -46,11 +46,27 @@ Author: LLM Trading System Team
 Version: 1.0.0
 """
 
+import logging
+
 import numpy as np
 from pydantic import BaseModel
 
 from src.llm.client import LLMClient
 from src.models.news import LLMSentimentOutput
+
+log = logging.getLogger(__name__)
+
+
+def _classify_failure(exc: BaseException) -> str:
+    """QS-10: bucket a model failure so refusal/invalid vs timeout vs error are
+    distinguishable in logs (and a per-model refusal/timeout rate is trackable)."""
+    import asyncio
+
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
+        return "timeout"
+    if isinstance(exc, (ValueError, KeyError, TypeError)):
+        return "invalid"  # malformed / refused / unparseable model output
+    return "error"
 
 
 class ModelOutput(BaseModel):
@@ -325,7 +341,7 @@ async def run_ensemble_query(
 
     # EDGE CASE: Handle empty clients list
     if not clients:
-        print("Ensemble: No clients configured - returning empty results")
+        log.warning("ensemble: no clients configured — returning empty results")
         return []
 
     # gather preserves order → model_id association is trivial (index-based)
@@ -337,7 +353,12 @@ async def run_ensemble_query(
     raw_outputs: list[ModelOutput] = []
     for client, result in zip(clients, results):
         if isinstance(result, BaseException):
-            print(f"Ensemble: Model {client.model_id} failed: {result}")
+            # QS-10: structured per-model failure logging — kind lets us track
+            # refusal/invalid vs timeout rates per model (was a bare print()).
+            log.warning(
+                "ensemble model failed: model=%s kind=%s error=%s",
+                client.model_id, _classify_failure(result), result,
+            )
             continue
         raw_outputs.append(
             ModelOutput(
