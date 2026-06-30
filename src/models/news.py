@@ -37,6 +37,9 @@ class NewsItem(BaseModel):
     asset_tags: list[str] = Field(default_factory=list)
     url: str = ""
     language: str = "en"
+    # QT-03: how asset_tags were derived — source_metadata | cashtag | org_lookup | regex.
+    # Logged to news_log to measure extraction precision per method (and confirm QT-01).
+    extraction_method: str = ""
 
 
 class GKGNewsItem(NewsItem):

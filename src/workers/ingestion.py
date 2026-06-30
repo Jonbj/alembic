@@ -136,6 +136,7 @@ def _process_gkg_items(
                 url=gkg_item.url,
                 language=gkg_item.language,
                 asset_tags=[ticker],  # SentimentWorker consumes asset_tags[0].
+                extraction_method="org_lookup",  # QT-03: GDELT org name → ticker_lookup
             )
 
             # Step 4: deduplication
@@ -189,6 +190,7 @@ def _process_marketaux_items(
                 url=item.url,
                 language=item.language,
                 asset_tags=[ticker],
+                extraction_method=item.extraction_method,  # QT-03: carry provenance
                 marketaux_sentiment=item.marketaux_sentiment,
             )
 
@@ -277,6 +279,7 @@ def _process_alpaca_items(
                 url=item.url,
                 language=item.language,
                 asset_tags=[ticker],
+                extraction_method=item.extraction_method,  # QT-03: carry provenance
             )
 
             if deduplicator.is_duplicate_by_id(per_ticker):
@@ -466,6 +469,7 @@ def _process_rss_items(
                 url=item.url,
                 language=item.language,
                 asset_tags=[ticker],
+                extraction_method="regex",  # QT-03: RSS bare-word watchlist match
             )
             if deduplicator.is_duplicate_by_id(per_ticker):
                 stats["duplicates"] += 1

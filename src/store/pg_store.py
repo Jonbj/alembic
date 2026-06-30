@@ -170,8 +170,8 @@ class PostgreSQLStore:
             raise
 
     _INSERT_NEWS_LOG = """
-        INSERT INTO news_log (title, url, source, ticker, body_snippet, raw_sentiment, published_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO news_log (title, url, source, ticker, body_snippet, raw_sentiment, published_at, extraction_method)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (url, ticker) DO NOTHING
         RETURNING id
     """
@@ -221,6 +221,7 @@ class PostgreSQLStore:
                         item.body[:500] if item.body else None,
                         raw_sentiment,
                         item.timestamp,
+                        getattr(item, "extraction_method", "") or None,
                     ),
                 )
                 row = cur.fetchone()

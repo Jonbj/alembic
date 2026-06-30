@@ -178,6 +178,16 @@ class AlpacaNewsConnector(NewsConnector):
         except (ValueError, AttributeError):
             ts = datetime.now(timezone.utc)
 
+        # QT-01: never fall back to the whole watchlist (mass false positives).
+        # No source symbols → try explicit cashtags in the text, else no ticker
+        # (the article is then dropped downstream by `if not item.asset_tags`).
+        # QT-03: record the provenance for per-method precision measurement.
+        if symbols:
+            tags, method = symbols, "source_metadata"
+        else:
+            tags = extract_cashtag_tickers(f"{headline} {body}", self._symbols)
+            method = "cashtag" if tags else ""
+
         return NewsItem(
             id=f"alpaca:{article.get('id', url)}",
             body=body,
@@ -185,9 +195,7 @@ class AlpacaNewsConnector(NewsConnector):
             url=url,
             timestamp=ts,
             source="alpaca_benzinga",
-            # QT-01: never fall back to the whole watchlist (mass false positives).
-            # No source symbols → try explicit cashtags in the text, else no ticker
-            # (the article is then dropped downstream by `if not item.asset_tags`).
-            asset_tags=symbols or extract_cashtag_tickers(f"{headline} {body}", self._symbols),
+            asset_tags=tags,
+            extraction_method=method,
             language="en",
         )

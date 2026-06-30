@@ -201,6 +201,16 @@ class MarketAuxConnector(NewsConnector):
                 sentiment = float(score)
                 break
 
+        # QT-01: never fall back to the whole watchlist (mass false positives).
+        # No source entity → try explicit cashtags in the text, else no ticker
+        # (the article is then dropped downstream by `if not item.asset_tags`).
+        # QT-03: record the provenance for per-method precision measurement.
+        if asset_tags:
+            method = "source_metadata"
+        else:
+            asset_tags = extract_cashtag_tickers(f"{title} {body}", self._symbols)
+            method = "cashtag" if asset_tags else ""
+
         return MarketAuxNewsItem(
             id=f"{url}",
             body=body,
@@ -208,10 +218,8 @@ class MarketAuxConnector(NewsConnector):
             url=url,
             timestamp=ts,
             source="marketaux",
-            # QT-01: never fall back to the whole watchlist (mass false positives).
-            # No source entity → try explicit cashtags in the text, else no ticker
-            # (the article is then dropped downstream by `if not item.asset_tags`).
-            asset_tags=asset_tags or extract_cashtag_tickers(f"{title} {body}", self._symbols),
+            asset_tags=asset_tags,
+            extraction_method=method,
             language="en",
             marketaux_sentiment=sentiment,
         )
