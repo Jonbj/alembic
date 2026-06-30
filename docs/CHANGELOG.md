@@ -6,6 +6,12 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ## 2026-06-30
 
+### Sentiment Worker — skip news stantie + drenaggio backlog (e2e fix)
+- **Root cause** (diagnosi e2e): `news:queue` è FIFO e il worker (4 item/run, ~16/h) era **~13 giorni indietro** (item più vecchio 17 giu). Generava signal su news di 2 settimane fa con `generated_at=now()` → sentiment stantio iniettato nel ciclo live come se fosse fresco, tutto troppo debole per superare il feedback gate. Sintomo osservato: "signal con data di oggi ma nessun decision log".
+- **Fix**: il worker ora pesca finché non ha **4 item freschi**, saltando senza chiamata LLM gli item più vecchi di `_SENTIMENT_MAX_NEWS_AGE_HOURS` (24h), con cap `_MAX_QUEUE_SCAN_PER_RUN=5000`. Gli item saltati vengono scartati da `news:processing` (anche nel ramo all-stale, altrimenti la crash-recovery li ri-accodava in loop). 5 test su `_is_stale_news`. (`28638f9`)
+- **Risultato live**: backlog drenato **9309 → 835** in ~3 run (saltati ~8500 item vecchi); item più vecchio in coda ora ~24h invece di 13 giorni; il worker processa di nuovo news recenti.
+- **Nota residua**: throughput ~16 signal/h (latenza LLM) < ingestion → la coda fresca si processa parzialmente e gli item invecchiati >24h vengono ora saltati. Da approfondire separatamente.
+
 ### Signal Selection — ensemble non sovrascritto da fallback FinBERT
 - **Fix**: `fetch_signals_for_cycle` ora preferisce il segnale **ensemble** più recente al FinBERT fallback nella finestra 4h (`ORDER BY symbol, fallback_used ASC, generated_at DESC`). Prima si prendeva solo il più recente per simbolo, quindi un fallback debole generato dopo un ensemble forte lo sovrascriveva (es. AMKR +0.638 alle 15:16 → +0.009 fallback alle 15:48), facendo cadere il simbolo sotto soglia. Il fallback si usa solo se non c'è ensemble nella finestra. (`10c7836`)
 
