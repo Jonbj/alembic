@@ -157,6 +157,118 @@ GATES_S1 = [
     },
 ]
 
+# ─── S4 — News-Driven LLM Sentiment (Paper) ─────────────────────────────────
+# Source: backtest run alpaca-smallmid-2506 (2026-03-06 → 2026-06-04) + paper trading live since 2026-06-15.
+# Signal metrics: IC=0.039, ICIR≈0, hit_rate=49.4% (2199 scored signals).
+# Paper P&L since 2026-06-15: −$730 on ~$100k base (−0.73% / 9 trading days).
+# Authorization state: mode=paper, promotion_blocked=true.
+
+_S4_DATA_QUALITY_WARNING = (
+    "Signal IC from alpaca-smallmid-2506 backtest (2026-03-06 → 2026-06-04, 2199 signals). "
+    "Live paper trading since 2026-06-15 (9 trading days — too short for Sharpe estimation). "
+    "IC=0.039 is below the 0.05 significance threshold. ICIR≈0 indicates high week-to-week variance. "
+    "Promotion to supervised_paper requires IC≥0.05, ICIR≥0.30 on ≥26 weeks of data."
+)
+
+S4_STRATEGY = {
+    "id": "s4",
+    "name": "S4 — News-Driven LLM Sentiment",
+    "description": "Intraday news sentiment via FinBERT + Ollama ensemble (Kimi K2.6 + GLM-5.2). Long-only, single-day holding, cross-sectional ranker.",
+    "status": "paper",
+    "mode": "paper",
+    "promotion_blocked": True,
+    "live_authorized": False,
+    "promotion_authorized": False,
+    "data_quality_warning": _S4_DATA_QUALITY_WARNING,
+    "validation_status": "paper_monitoring",
+    "n_assets": 96,
+    "oos_sharpe": None,
+    "max_drawdown": -0.0074,
+    "annual_return": None,
+}
+
+S4_DETAIL = {
+    "id": "s4",
+    "name": "S4 — News-Driven LLM Sentiment",
+    "description": "Intraday news sentiment via FinBERT + Ollama ensemble (Kimi K2.6 + GLM-5.2). Long-only, single-day holding, cross-sectional ranker.",
+    "status": "paper",
+    "mode": "paper",
+    "promotion_blocked": True,
+    "live_authorized": False,
+    "promotion_authorized": False,
+    "data_quality_warning": _S4_DATA_QUALITY_WARNING,
+    "validation_status": "paper_monitoring",
+    "parameters": {
+        "ensemble": ["kimi-k2.6:cloud", "glm-5.2:cloud"],
+        "fallback": "finbert-int8",
+        "score_formula": "polarity × confidence",
+        "entry_threshold": 0.35,
+        "max_signal_age_hours": 4,
+        "max_position_pct": 0.10,
+        "hold_days": 1,
+        "signal_ic_backtest": 0.039,
+        "signal_icir_backtest": -0.003,
+        "signal_hit_rate": 0.494,
+        "backtest_run": "alpaca-smallmid-2506",
+        "backtest_n_signals": 2199,
+    },
+    "universe": "96 US small/mid-cap stocks (watchlist S4 — dynamic, news-driven entity extraction)",
+    "n_assets": 96,
+    "oos_sharpe": None,
+    "max_drawdown": -0.0074,
+    "annual_return": None,
+    "is_sharpe": None,
+    "calmar_ratio": None,
+    "sortino_ratio": None,
+    "win_rate": None,
+    "avg_holding_period": "1 day",
+    "total_trades": 223,
+    "metrics_as_of": "2026-06-29",
+}
+
+GATES_S4 = [
+    {
+        "gate_id": "signal_ic",
+        "gate_name": "Signal IC (Spearman)",
+        "passed": False,
+        "details": "Backtest IC 0.039 < threshold 0.050 (alpaca-smallmid-2506, 2199 signals)",
+        "metric_value": 0.039,
+        "threshold": 0.05,
+    },
+    {
+        "gate_id": "signal_icir",
+        "gate_name": "ICIR Consistency",
+        "passed": False,
+        "details": "ICIR ≈ 0 — high week-to-week variance in signal predictability",
+        "metric_value": -0.003,
+        "threshold": 0.30,
+    },
+    {
+        "gate_id": "hit_rate",
+        "gate_name": "Hit Rate > 50%",
+        "passed": False,
+        "details": "Directional accuracy 49.4% — essentially random on this backtest window",
+        "metric_value": 0.494,
+        "threshold": 0.50,
+    },
+    {
+        "gate_id": "live_execution",
+        "gate_name": "Live Paper Execution",
+        "passed": True,
+        "details": "223 paper trades executed 2026-06-15 → 2026-06-29 without system errors",
+        "metric_value": 223,
+        "threshold": 0,
+    },
+    {
+        "gate_id": "data_sample",
+        "gate_name": "Minimum Sample (26 weeks)",
+        "passed": False,
+        "details": "Paper trading started 2026-06-15 — need ≥26 weeks before Sharpe estimation is meaningful",
+        "metric_value": 2,
+        "threshold": 26,
+    },
+]
+
 # ─── S3 — Cross-Sectional Momentum (R&D SLEEVE) ──────────────────────────────
 # Gate 3 (robustness) and Gate 5 (stress) FAILED. OOS Sharpe 0.15.
 
@@ -232,6 +344,96 @@ GATES_S3 = [
     },
 ]
 
+# ─── S7 — PEAD (Post-Earnings Announcement Drift) ────────────────────────────
+# Source: no backtest data yet — research/paper phase only. Worker active since 2026-06-07.
+# Authorization state: mode=research, not yet in strategy_lifecycle.
+
+S7_STRATEGY = {
+    "id": "s7",
+    "name": "S7 — PEAD (Post-Earnings Drift)",
+    "description": "Classifies 8-K earnings filings via Ollama to capture Post-Earnings Announcement Drift. Long-only sleeve, max 25% portfolio, 20-day hold.",
+    "status": "research",
+    "mode": "research",
+    "promotion_blocked": True,
+    "live_authorized": False,
+    "promotion_authorized": False,
+    "data_quality_warning": (
+        "Research phase — no backtest or paper trading data available yet. "
+        "Worker running since 2026-06-07. Promotion gate requires signal IC≥0.05 "
+        "on ≥26 weeks of 8-K filing data with verified earnings surprise labels."
+    ),
+    "validation_status": "research",
+    "n_assets": 0,
+    "oos_sharpe": None,
+    "max_drawdown": None,
+    "annual_return": None,
+}
+
+S7_DETAIL = {
+    "id": "s7",
+    "name": "S7 — PEAD (Post-Earnings Drift)",
+    "description": "Classifies 8-K earnings filings via Ollama to capture Post-Earnings Announcement Drift. Long-only sleeve, max 25% portfolio, 20-day hold.",
+    "status": "research",
+    "mode": "research",
+    "promotion_blocked": True,
+    "live_authorized": False,
+    "promotion_authorized": False,
+    "data_quality_warning": (
+        "Research phase — no backtest or paper trading data available yet. "
+        "Worker running since 2026-06-07. Promotion gate requires signal IC≥0.05 "
+        "on ≥26 weeks of 8-K filing data with verified earnings surprise labels."
+    ),
+    "validation_status": "research",
+    "parameters": {
+        "model": "ollama-ensemble",
+        "max_position_pct": 0.05,
+        "max_sleeve_pct": 0.25,
+        "min_confidence": 0.70,
+        "surprise_threshold": 0.05,
+        "hold_days": 20,
+        "worker": "pead-ingestion (queue: inference, every 30 min 14:05-21:35 UTC)",
+    },
+    "universe": "Dynamic — all US public companies filing 8-K earnings releases on SEC EDGAR",
+    "n_assets": 0,
+    "oos_sharpe": None,
+    "max_drawdown": None,
+    "annual_return": None,
+    "is_sharpe": None,
+    "calmar_ratio": None,
+    "sortino_ratio": None,
+    "win_rate": None,
+    "avg_holding_period": "20 days",
+    "total_trades": 0,
+    "metrics_as_of": None,
+}
+
+GATES_S7 = [
+    {
+        "gate_id": "signal_ic",
+        "gate_name": "Signal IC (Spearman) ≥ 0.05",
+        "passed": False,
+        "details": "No backtest data yet — insufficient 8-K signal history",
+        "metric_value": 0.0,
+        "threshold": 0.05,
+    },
+    {
+        "gate_id": "data_sample",
+        "gate_name": "Minimum Sample (26 weeks)",
+        "passed": False,
+        "details": "Worker started 2026-06-07 — need ≥26 weeks of labeled filing data",
+        "metric_value": 3,
+        "threshold": 26,
+    },
+    {
+        "gate_id": "earnings_label_set",
+        "gate_name": "Earnings Label Set Validated",
+        "passed": False,
+        "details": "Surprise labels (beat/miss) not yet validated against consensus estimates",
+        "metric_value": 0.0,
+        "threshold": 1.0,
+    },
+]
+
 _REPORTS_DIR = Path(__file__).parent.parent.parent.parent / "reports"
 
 
@@ -271,6 +473,10 @@ for lookback in [21, 63, 126, 252]:
             "max_drawdown": round(dd, 4),
         })
 
+# S4 and S7 have no sensitivity grid (different parameter space — not comparable to lookback/vol_window)
+SENSITIVITY_S4: list = []
+SENSITIVITY_S7: list = []
+
 # ─── Strategy registry ────────────────────────────────────────────────────────
 
 STRATEGIES = {
@@ -285,6 +491,18 @@ STRATEGIES = {
         "detail": S3_DETAIL,
         "gates": GATES_S3,
         "sensitivity": SENSITIVITY_S3,
+    },
+    "s4": {
+        "summary": S4_STRATEGY,
+        "detail": S4_DETAIL,
+        "gates": GATES_S4,
+        "sensitivity": SENSITIVITY_S4,
+    },
+    "s7": {
+        "summary": S7_STRATEGY,
+        "detail": S7_DETAIL,
+        "gates": GATES_S7,
+        "sensitivity": SENSITIVITY_S7,
     },
 }
 
