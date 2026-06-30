@@ -1004,8 +1004,16 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
-    def log_llm_responses(self, signal_id: int, outputs: list[ModelOutput]) -> None:
-        """Write per-model outputs to llm_responses. No-op for empty list."""
+    def log_llm_responses(
+        self, signal_id: int, outputs: list[ModelOutput], min_confidence: float = 0.4
+    ) -> None:
+        """Write per-model outputs to llm_responses. No-op for empty list.
+
+        QS-06: ``eligible`` reflects whether the model passed the ensemble confidence
+        filter (``confidence >= min_confidence``) — NOT hardcoded True. Without this,
+        LOO-ICIR and post-hoc audit count discarded (<0.4) models as if they entered
+        the signal, misrepresenting what actually contributed.
+        """
         if not outputs:
             return
         conn = self._get_connection()
@@ -1014,7 +1022,10 @@ class PostgreSQLStore:
                 cur.executemany(
                     self._INSERT_LLM_RESPONSE,
                     [
-                        (signal_id, out.model_id, out.polarity, out.confidence, out.reasoning, True)
+                        (
+                            signal_id, out.model_id, out.polarity, out.confidence,
+                            out.reasoning, out.confidence >= min_confidence,
+                        )
                         for out in outputs
                     ],
                 )

@@ -5,6 +5,34 @@ import pytest
 from src.llm.ensemble import EnsembleAggregator, ModelOutput
 
 
+def _mo(polarity, confidence, model_id="m"):
+    return ModelOutput(symbol="A", polarity=polarity, confidence=confidence,
+                       reasoning="x", model_id=model_id)
+
+
+class TestQS03AgreementWeighting:
+    """QS-03: agreement (low std) increases confidence; disagreement discounts it."""
+
+    def test_off_by_default_uses_mean_confidence(self):
+        # std of [0.6,0.2] ≈ 0.283 (< 0.30 → not discarded); legacy = mean(0.8,0.6)=0.7
+        agg = EnsembleAggregator()
+        r = agg.aggregate([_mo(0.6, 0.8, "m1"), _mo(0.2, 0.6, "m2")])
+        assert r.confidence == pytest.approx(0.7)
+
+    def test_on_discounts_disagreement(self):
+        agg = EnsembleAggregator(agreement_weighting=True)
+        high_disagree = agg.aggregate([_mo(0.6, 0.8, "m1"), _mo(0.2, 0.6, "m2")])   # std≈0.283
+        low_disagree = agg.aggregate([_mo(0.6, 0.8, "m1"), _mo(0.58, 0.6, "m2")])   # std≈0.014
+        assert high_disagree.confidence < low_disagree.confidence
+        assert high_disagree.confidence < 0.7                       # discounted below mean
+        assert low_disagree.confidence == pytest.approx(0.7, abs=0.05)  # agreement ≈ mean
+
+    def test_on_single_model_no_discount(self):
+        agg = EnsembleAggregator(agreement_weighting=True)
+        r = agg.aggregate([_mo(0.6, 0.8, "m1")])
+        assert r.confidence == pytest.approx(0.8)  # std=0, single model → no change
+
+
 class TestEnsembleAggregator:
     """Test ensemble aggregation logic."""
 

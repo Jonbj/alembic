@@ -146,6 +146,21 @@ class TestLogLlmResponses:
         assert batch[0][1] == "opus"
         assert batch[1][1] == "qwen3.5:cloud"
 
+    def test_log_llm_responses_eligible_reflects_confidence(self, pg_store):
+        """QS-06: eligible = (confidence >= min_confidence), not hardcoded True."""
+        outputs = [
+            ModelOutput(symbol="AAPL", polarity=0.7, confidence=0.85,
+                        reasoning="strong", model_id="kimi"),      # eligible
+            ModelOutput(symbol="AAPL", polarity=-0.2, confidence=0.30,
+                        reasoning="weak", model_id="weak"),        # discarded (<0.4)
+        ]
+        pg_store.log_llm_responses(signal_id=42, outputs=outputs, min_confidence=0.4)
+
+        _, batch = pg_store._conn.cursor.return_value.executemany.call_args[0]
+        batch = list(batch)
+        assert batch[0][5] is True    # eligible column, 0.85 >= 0.4
+        assert batch[1][5] is False   # 0.30 < 0.4 → NOT eligible (was hardcoded True)
+
     def test_log_llm_responses_empty_list_is_noop(self, pg_store):
         """log_llm_responses with empty list writes nothing and does not raise."""
         pg_store.log_llm_responses(signal_id=42, outputs=[])

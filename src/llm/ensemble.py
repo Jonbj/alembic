@@ -164,7 +164,16 @@ class EnsembleAggregator:
         ...     print("Divergence detected - falling back to FinBERT")
     """
 
-    def __init__(self, min_confidence: float = 0.4, divergence_threshold: float = 0.30):
+    # QS-03: max fraction by which moderate disagreement discounts the consensus
+    # confidence (at std == divergence_threshold). Only applied when agreement_weighting.
+    _AGREEMENT_PENALTY = 0.5
+
+    def __init__(
+        self,
+        min_confidence: float = 0.4,
+        divergence_threshold: float = 0.30,
+        agreement_weighting: bool = False,
+    ):
         """
         Initialize the ensemble aggregator with configurable thresholds.
 
@@ -188,6 +197,11 @@ class EnsembleAggregator:
         """
         self.min_confidence = min_confidence
         self.divergence_threshold = divergence_threshold
+        # QS-03: when True, consensus confidence is discounted by disagreement
+        # (agreement increases confidence). Default False = legacy mean-of-confidences
+        # until the effect is validated against the QX-01 label set (changes the live
+        # score = polarity × confidence).
+        self.agreement_weighting = agreement_weighting
 
     def aggregate(self, outputs: list[ModelOutput], weights: dict[str, float] | None = None) -> AggregatedResult | None:
         """
@@ -259,6 +273,15 @@ class EnsembleAggregator:
         weighted_polarity = sum(o.polarity * _w(o) for o in eligible) / total_weight
         mean_confidence = sum(o.confidence for o in eligible) / len(eligible)
 
+        # QS-03: make "agreement increases confidence" real (the docstring claimed it
+        # but the code returned mean_confidence regardless of std). When enabled, a
+        # higher polarity std (more disagreement) discounts the consensus confidence,
+        # up to _AGREEMENT_PENALTY at std == divergence_threshold. Gated by flag.
+        confidence = mean_confidence
+        if self.agreement_weighting and len(eligible) > 1 and self.divergence_threshold > 0:
+            agreement_factor = 1.0 - self._AGREEMENT_PENALTY * min(1.0, std / self.divergence_threshold)
+            confidence = mean_confidence * agreement_factor
+
         # Use reasoning from highest-confidence model
         best = max(eligible, key=lambda o: o.confidence)
 
@@ -266,7 +289,7 @@ class EnsembleAggregator:
             symbol=eligible[0].symbol,
             # Clamping non necessario ma mantenuto per safety (weighted avg di valori in [-1,1] è sempre in [-1,1])
             polarity=max(-1.0, min(1.0, weighted_polarity)),
-            confidence=mean_confidence,
+            confidence=confidence,
             reasoning=best.reasoning,
             model_ids=[o.model_id for o in eligible],
             ensemble_std=std,
