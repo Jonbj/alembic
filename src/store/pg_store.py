@@ -1242,6 +1242,10 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    # Per symbol, prefer the most recent ENSEMBLE signal over a FinBERT fallback within
+    # the freshness window (fallback_used ASC first): a low-conviction FinBERT fallback
+    # generated after a strong ensemble signal must NOT overwrite it (the ensemble is the
+    # more reliable read of current sentiment). Among same-status signals, most recent wins.
     _FETCH_SIGNALS_FOR_CYCLE = """
         SELECT DISTINCT ON (symbol)
             symbol, score, confidence,
@@ -1250,18 +1254,22 @@ class PostgreSQLStore:
         FROM sentiment_signals
         WHERE generated_at >= NOW() - (%s || ' hours')::interval
           AND symbol = ANY(%s)
-        ORDER BY symbol, generated_at DESC
+        ORDER BY symbol, fallback_used ASC, generated_at DESC
     """
 
     def fetch_signals_for_cycle(
         self, hours: int = 4, symbols: list[str] | None = None
     ) -> list[SentimentResult]:
-        """Fetch the latest signal per symbol from the last N hours.
+        """Fetch one signal per symbol from the last N hours.
 
         Used by the live portfolio cycle to load fresh signals for S4.
         Only returns signals for symbols in the provided list (watchlist) so
         that off-watchlist tickers don't consume ranking slots in S4 and then
         get silently dropped when no market price is available.
+
+        Within the window, the **most recent ensemble** signal is preferred over a
+        FinBERT fallback (so a weak fallback does not overwrite a strong recent
+        ensemble read); among same-status signals the most recent wins.
 
         Returns SentimentResult objects with timezone-aware generated_at.
         """

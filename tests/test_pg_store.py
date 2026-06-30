@@ -86,7 +86,8 @@ class TestPostgreSQLStoreInterface:
         assert "DISTINCT ON (symbol)" in query
         assert "INTERVAL '%s'" not in query
         assert "(%s || ' hours')::interval" in query or "%s || ' hours'" in query
-        assert "ORDER BY symbol, generated_at DESC" in query
+        # Prefer ensemble over FinBERT fallback within the window, then most recent.
+        assert "ORDER BY symbol, fallback_used ASC, generated_at DESC" in query
         assert "ANY(%s)" in query
 
     def test_fetch_signals_for_cycle_signature(self):
