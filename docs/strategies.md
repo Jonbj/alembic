@@ -109,15 +109,34 @@ S2 runs as `(ts, data_replay, portfolio, market) → list[Order]`. The orchestra
 **Allocation:** Configurable via `StrategyRegistry`
 **Status:** `promotion_blocked` — allocation capped until dedicated gate report is produced (P0-13, commit `6d86d3f`)
 
-### Signal Logic
+### Signal Logic (live = portfolio path)
 
-Reads pre-computed LLM ensemble sentiment signals from Redis (written by the SentimentWorker every 15 min). Entry conditions:
-1. `score > 0.3` — signal is meaningfully bullish (filters near-neutral signals)
-2. `price > EMA20` — price is in an uptrend (avoids buying into a downtrend on sentiment alone)
+The authoritative execution path is `execution.engine: portfolio` — only the portfolio
+cycle submits orders. S4 reads pre-computed ensemble sentiment from Redis/PostgreSQL
+(written by SentimentWorker every 15 min) and gates it through a **documented chain**:
+
+1. **Freshness** — only signals within `max_signal_age_hours` (4h) of the cycle tick;
+   staler ones are dropped (Decision Log: `SKIP_STALE`). Per symbol, the most recent
+   **ensemble** signal is preferred over a later FinBERT fallback.
+2. **Prefilter (ranker)** — `CrossSectionalRanker` keeps signals with
+   `score ≥ S4Config.min_score` (0.10) and `confidence ≥ S4Config.min_confidence`
+   (0.30). These are **prefilters**, NOT the order threshold.
+3. **Feedback gate = the order threshold** — a signal must clear the live
+   `feedback:entry_threshold` (baseline **0.30**, currently raised to **0.35** by the
+   loss-feedback loop, up to 0.60). Below it → dropped (Decision Log: `SKIP_THRESHOLD`).
+4. **Cross-sectional ranking** — top-N (`n_top=5`) of the survivors, minimum 2 stocks,
+   equal-weight within the bucket.
+
+> **Threshold map — three distinct concepts, do not conflate:**
+> | Name | Value | Role |
+> |---|---|---|
+> | `S4Config.min_score` / `min_confidence` | 0.10 / 0.30 | ranker **prefilter** |
+> | `feedback:entry_threshold` | baseline 0.30, dynamic (→0.60) | **order gate (source of truth)** |
+> | legacy `ENTRY_THRESHOLD` + `score>0.30 AND price>EMA20` | — | old `legacy_sentiment` path, **INACTIVE** under `engine=portfolio` |
 
 Exit conditions:
 - Stop-loss: position closed if price falls to `entry_price × (1 - stop_loss_pct)`
-- Signal expiry: signal older than 30 min → skip (stale news has no edge)
+- Positions absent from the new target weights are closed at the next rebalance.
 
 ### Scoring Formula
 
@@ -129,10 +148,10 @@ Where `polarity ∈ [-1, +1]` is the direction of sentiment and `confidence ∈ 
 
 ### LLM Ensemble
 
-Due modelli attivi via Ollama (locale):
-- Kimi K2.6, Qwen3.5
+Due modelli attivi via Ollama Cloud:
+- Kimi K2.6 + GLM-5.2
 
-> DeepSeek-V4-Pro e GLM-5.1 rimossi il 2026-06-16 (OOM e IC inferiore rispettivamente). Vedi `docs/llm-config.md`.
+> Qwen3.5 sostituito da GLM-5.2 il 2026-06-29 (estrazione ticker troppo aggressiva su news macro). DeepSeek-V4-Pro e GLM-5.1 rimossi il 2026-06-16. Vedi `docs/llm-config.md` e `docs/CHANGELOG.md`.
 
 Each uses **DK-CoT** (Domain Knowledge Chain-of-Thought) prompting:
 1. Act as buy-side analyst

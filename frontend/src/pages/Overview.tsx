@@ -4,22 +4,117 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 import { fetchSignals } from '@/api/signals'
 import { fetchPositions } from '@/api/positions'
 import { fetchPnL } from '@/api/performance'
+import { fetchReadiness } from '@/api/system'
+import { fetchDecisions, fetchFeedbackStatus } from '@/api/trades'
+import { fetchQualityMetrics } from '@/api/quality'
+import { strategiesApi } from '@/api/strategies'
 import { KPICard } from '@/components/shared/KPICard'
 import { DirectionBadge } from '@/components/shared/DirectionBadge'
 import { HelpButton } from '@/components/shared/HelpButton'
+
+const SIGNAL_FRESH_HOURS = 4
+
+function pct(v: number | null | undefined, digits = 1): string {
+  return v == null ? '—' : `${(Number(v) * 100).toFixed(digits)}%`
+}
+
+function n(v: number | null | undefined, digits = 2): string {
+  return v == null ? '—' : Number(v).toFixed(digits)
+}
+
+function ageText(minutes: number | null | undefined): string {
+  if (minutes == null) return '—'
+  if (minutes < 60) return `${Math.round(minutes)}m`
+  return `${(minutes / 60).toFixed(1)}h`
+}
+
+function signalAgeMinutes(iso: string): number {
+  return (Date.now() - new Date(iso).getTime()) / 60000
+}
+
+function StatusPill({ label, tone = 'neutral' }: { label: string; tone?: 'good' | 'warn' | 'bad' | 'neutral' }) {
+  const palette = {
+    good: { bg: '#dcfce7', fg: '#15803d' },
+    warn: { bg: '#fef9c3', fg: '#a16207' },
+    bad: { bg: '#fee2e2', fg: '#b91c1c' },
+    neutral: { bg: '#f1f5f9', fg: '#475569' },
+  }[tone]
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      padding: '2px 8px',
+      borderRadius: 999,
+      fontSize: 11,
+      fontWeight: 700,
+      background: palette.bg,
+      color: palette.fg,
+      whiteSpace: 'nowrap',
+    }}>
+      {label}
+    </span>
+  )
+}
+
+function MiniMetric({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div style={{ minWidth: 130 }}>
+      <div style={{ color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 700 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, marginTop: 3 }}>{value}</div>
+      {sub && <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 1 }}>{sub}</div>}
+    </div>
+  )
+}
 
 export default function Overview() {
   const { data: signals = [] } = useQuery({ queryKey: ['signals'], queryFn: () => fetchSignals(), refetchInterval: 60000 })
   const { data: positions = [] } = useQuery({ queryKey: ['positions'], queryFn: fetchPositions, refetchInterval: 60000 })
   const { data: pnl } = useQuery({ queryKey: ['pnl'], queryFn: () => fetchPnL('6M'), refetchInterval: 300000 })
+  const { data: readiness } = useQuery({ queryKey: ['readiness'], queryFn: fetchReadiness, refetchInterval: 30000 })
+  const { data: decisions = [] } = useQuery({ queryKey: ['overview-decisions'], queryFn: () => fetchDecisions(undefined, 40), refetchInterval: 60000 })
+  const { data: feedback } = useQuery({ queryKey: ['feedback-status'], queryFn: fetchFeedbackStatus, refetchInterval: 120000 })
+  const { data: quality } = useQuery({ queryKey: ['overview-quality', 14], queryFn: () => fetchQualityMetrics(14), refetchInterval: 120000 })
+  const { data: strategies = [] } = useQuery({ queryKey: ['overview-strategies'], queryFn: strategiesApi.list, staleTime: 60000 })
 
+  const gateThreshold = feedback?.entry_threshold ?? 0.30
+  const now = Date.now()
+  const freshSignals = signals.filter((s) => now - new Date(s.generated_at).getTime() <= SIGNAL_FRESH_HOURS * 3600_000)
+  const staleSignals = signals.length - freshSignals.length
   const buys = signals.filter((s) => s.score > 0.1).length
   const sells = signals.filter((s) => s.score < -0.1).length
   const holds = signals.length - buys - sells
+  const gatePass = freshSignals.filter((s) => s.score >= gateThreshold && !s.fallback_used).length
 
   const totalUnrealized = positions.reduce((acc, p) => acc + (p.unrealized_pl || 0), 0)
+  const deployedNotional = positions.reduce((acc, p) => acc + Math.abs(p.market_value || 0), 0)
   const monthlyPnL = pnl?.monthly ?? []
   const currentMonthPnL = monthlyPnL[monthlyPnL.length - 1]?.pnl ?? 0
+  const s4 = strategies.find((s) => s.id.toLowerCase() === 's4')
+  const s1 = strategies.find((s) => s.id.toLowerCase() === 's1')
+
+  const decisionCounts = decisions.reduce<Record<string, number>>((acc, d) => {
+    acc[d.decision] = (acc[d.decision] ?? 0) + 1
+    return acc
+  }, {})
+  const recentBuys = decisions.filter((d) => d.decision === 'BUY').length
+  const skipThreshold = decisionCounts.SKIP_THRESHOLD ?? 0
+  const skipStale = decisionCounts.SKIP_STALE ?? 0
+  const skipFallback = decisionCounts.SKIP_FALLBACK ?? 0
+  const topSkips = Object.entries(decisionCounts)
+    .filter(([key]) => key.startsWith('SKIP'))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+
+  const readinessTone =
+    readiness == null ? 'neutral'
+      : readiness.killswitch_active || !readiness.db_healthy || !readiness.redis_healthy ? 'bad'
+        : !readiness.redis_writeable || readiness.stale_signals || readiness.worker_beat_lag ? 'warn'
+          : 'good'
+  const readinessLabel =
+    readinessTone === 'bad' ? 'Blocked'
+      : readinessTone === 'warn' ? 'Degraded'
+        : readinessTone === 'good' ? 'Ready'
+          : 'Unknown'
 
   return (
     <div style={{ position: 'relative' }}>
@@ -27,23 +122,23 @@ export default function Overview() {
       <HelpButton title="Overview — Dashboard" sections={[
         {
           heading: "Cos'è questa pagina",
-          content: "La dashboard riassume lo stato attuale del sistema: P&L mensile, posizioni aperte, P&L non realizzato e segnali recenti. I dati si aggiornano automaticamente ogni 60 secondi.",
+          content: "La dashboard riassume lo stato operativo del sistema: readiness, autorizzazione strategie, P&L, posizioni, soglia segnale, qualità del sentiment e ultime decisioni. I dati principali si aggiornano automaticamente.",
         },
         {
           heading: "Come leggere le KPI cards",
-          content: "**Net P&L (month)**: il profitto/perdita netto del mese corrente, basato sul P&L giornaliero Alpaca. Aggiornato ogni 5 minuti.\n\n**Open positions**: numero di posizioni attualmente aperte su Alpaca. Il sottotitolo elenca i ticker (es. AVGO, MU, NVDA).\n\n**Unrealized P&L**: profitto/perdita fluttuante totale delle posizioni ancora aperte. Non è un guadagno realizzato finché le posizioni non vengono chiuse.\n\n**Signals today**: formato \"XB / YS / ZH\" — X segnali BUY (score > 0.1), Y SELL (score < -0.1), Z HOLD (|score| ≤ 0.1). Il numero totale include tutti i ticker nel watchlist che hanno un segnale attivo.",
+          content: "**Net P&L (month)**: profitto/perdita netto del mese corrente, basato sul P&L giornaliero Alpaca.\n\n**Open positions**: numero di posizioni aperte su Alpaca e ticker coinvolti.\n\n**Unrealized P&L**: P&L fluttuante delle posizioni ancora aperte.\n\n**Active signals**: formato \"XB / YS / ZH\" — X segnali BUY (score > 0.1), Y SELL (score < -0.1), Z HOLD (|score| ≤ 0.1). Non significa necessariamente \"generati oggi\": sono i segnali restituiti dall'endpoint latest.",
         },
         {
-          heading: "Grafico Monthly P&L",
-          content: "Barre mensili del P&L di portafoglio. Verde = mese in profitto, rosso = mese in perdita.\n\nUtile per identificare stagionalità, periodi di drawdown, e la consistenza del rendimento nel tempo. I dati provengono da Alpaca e coprono gli ultimi 6 mesi.",
+          heading: "Operational State",
+          content: "Mostra se il sistema è READY/DEGRADED/BLOCKED, l'età dell'ultimo signal e dell'ultimo portfolio cycle, la soglia attiva del feedback gate, e lo stato di autorizzazione di S1/S4. La home non autorizza trading: guarda sempre i badge lifecycle.",
         },
         {
-          heading: "Tabelle Open Positions e Latest Signals",
-          content: "**Open Positions**: lista compatta delle posizioni aperte con qty, P&L assoluto e P&L percentuale.\n\n**Latest Signals**: ultimi 10 segnali LLM generati, con direzione (BUY/SELL/HOLD), score (-1 a +1), confidence (0-100%), modello usato e orario di generazione. Questi segnali guidano le decisioni del portfolio scheduler al ciclo successivo.",
+          heading: "Signal Quality e Decisioni",
+          content: "Le card Quality riportano near-zero rate, fallback rate e precision ticker dal golden label set. Il Decision Summary mostra cosa è successo negli ultimi cicli: BUY, SKIP_THRESHOLD, SKIP_STALE, SKIP_FALLBACK e altri skip.",
         },
         {
           heading: "Flusso consigliato",
-          content: "1. Controlla Overview per il quadro generale\n2. Vai su Signals per i dettagli dei segnali e il Decision Log\n3. Verifica su Trading le posizioni e gli ordini\n4. Su Strategies controlla lo stato delle strategie validate\n5. Su Performance analizza il P&L storico e i costi",
+          content: "1. Controlla readiness e lifecycle in Overview\n2. Vai su Signals per signal dettagliati e Decision Log\n3. Verifica Trading per posizioni e ordini\n4. Usa Quality per capire se il problema è ticker/sentiment\n5. Usa Performance e Auto-Improve per P&L, costi e soglie dinamiche",
         },
       ]} />
 
@@ -51,7 +146,76 @@ export default function Overview() {
         <KPICard label="Net P&L (month)" value={`$${currentMonthPnL.toFixed(2)}`} sub="current month" tooltip="Profitto/perdita netto del mese corrente." />
         <KPICard label="Open positions" value={String(positions.length)} sub={positions.map((p) => p.symbol).join(', ') || '—'} tooltip="Numero di posizioni attualmente aperte e relativi ticker." />
         <KPICard label="Unrealized P&L" value={`$${totalUnrealized.toFixed(2)}`} tooltip="Profitto/perdita fluttuante delle posizioni ancora aperte." />
-        <KPICard label="Signals today" value={`${buys}B / ${sells}S / ${holds}H`} sub={`${signals.length} total`} tooltip="Segnali odierni: B (buy, score > 0.1), S (sell, score < -0.1), H (hold)." />
+        <KPICard label="Active signals" value={`${buys}B / ${sells}S / ${holds}H`} sub={`${signals.length} latest · ${freshSignals.length} fresh`} tooltip="Latest signals: B (score > 0.1), S (score < -0.1), H (|score| ≤ 0.1). Fresh = entro 4 ore." />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, marginBottom: 24 }}>
+        <div className="card">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Operational State</h3>
+            <StatusPill label={readinessLabel} tone={readinessTone} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <MiniMetric label="Last signal" value={ageText(readiness?.last_signal_age_minutes)} sub={readiness?.stale_signals ? 'stale flag' : 'freshness'} />
+            <MiniMetric label="Last cycle" value={ageText(readiness?.last_cycle_age_minutes)} sub={readiness?.worker_beat_lag ? 'beat lag' : 'portfolio'} />
+            <MiniMetric label="Redis" value={readiness?.redis_healthy ? 'OK' : readiness ? 'Down' : '—'} sub={readiness?.redis_writeable === false ? 'not writeable' : 'writeable'} />
+            <MiniMetric label="Database" value={readiness?.db_healthy ? 'OK' : readiness ? 'Down' : '—'} sub={readiness?.killswitch_active ? 'kill-switch active' : 'kill-switch off'} />
+          </div>
+        </div>
+
+        <div className="card">
+          <h3 style={{ margin: '0 0 14px', fontSize: 14, fontWeight: 700 }}>Authorization</h3>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            <StatusPill label={`S1 ${s1?.mode ?? 'unknown'}`} tone={s1?.live_authorized ? 'good' : 'warn'} />
+            <StatusPill label={`S4 ${s4?.mode ?? 'unknown'}`} tone={s4?.promotion_blocked ? 'warn' : s4?.live_authorized ? 'good' : 'neutral'} />
+            <StatusPill label={s4?.promotion_blocked ? 'S4 promotion blocked' : 'S4 promotion open'} tone={s4?.promotion_blocked ? 'warn' : 'good'} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <MiniMetric label="S4 Allocation" value="10%" sub="paper overlay cap" />
+            <MiniMetric label="Live authorized" value={strategies.some((s) => s.live_authorized) ? 'Some' : 'No'} sub="fail-closed display" />
+            <MiniMetric label="Data source" value={s4?.data_source ?? '—'} sub="S4 metrics" />
+            <MiniMetric label="Engine" value="Portfolio" sub="authoritative path" />
+          </div>
+        </div>
+
+        <div className="card">
+          <h3 style={{ margin: '0 0 14px', fontSize: 14, fontWeight: 700 }}>Signal Gate</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <MiniMetric label="Threshold" value={gateThreshold.toFixed(2)} sub={feedback?.adjustment_active ? 'feedback active' : 'baseline / current'} />
+            <MiniMetric label="Gate pass" value={String(gatePass)} sub="fresh non-FB score ≥ threshold" />
+            <MiniMetric label="Stale latest" value={String(staleSignals)} sub={`>${SIGNAL_FRESH_HOURS}h old`} />
+            <MiniMetric label="Deployed" value={`$${deployedNotional.toFixed(0)}`} sub="open market value" />
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16, marginBottom: 24 }}>
+        <div className="card">
+          <h3 style={{ margin: '0 0 14px', fontSize: 14, fontWeight: 700 }}>Signal Quality</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <MiniMetric label="Near-zero" value={pct(quality?.signals.near_zero_rate)} sub={`${quality?.signals.n ?? 0} signals / 14d`} />
+            <MiniMetric label="Fallback" value={pct(quality?.signals.fallback_rate)} sub="FinBERT share" />
+            <MiniMetric label="Ensemble std" value={n(quality?.signals.mean_ensemble_std, 3)} sub="model divergence" />
+            <MiniMetric label="Ticker precision" value={n(quality?.extraction.precision, 2)} sub={`${quality?.extraction.n_labeled ?? 0} labels`} />
+          </div>
+        </div>
+
+        <div className="card">
+          <h3 style={{ margin: '0 0 14px', fontSize: 14, fontWeight: 700 }}>Decision Summary</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 12 }}>
+            <MiniMetric label="BUY" value={String(recentBuys)} sub="last 40 decisions" />
+            <MiniMetric label="Skip threshold" value={String(skipThreshold)} sub="score below gate" />
+            <MiniMetric label="Skip stale" value={String(skipStale)} sub="signal expired" />
+            <MiniMetric label="Skip fallback" value={String(skipFallback)} sub="FinBERT only" />
+          </div>
+          {topSkips.length > 0 ? (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {topSkips.map(([key, value]) => <StatusPill key={key} label={`${key}: ${value}`} tone="neutral" />)}
+            </div>
+          ) : (
+            <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>No recent skip decisions.</div>
+          )}
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
@@ -98,15 +262,22 @@ export default function Overview() {
       <div className="card">
         <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>Latest Signals</h3>
         <table>
-          <thead><tr><th>Ticker</th><th>Direction</th><th>Score</th><th>Confidence</th><th>Model</th><th>Time</th></tr></thead>
+          <thead><tr><th>Ticker</th><th>Direction</th><th>Score</th><th>Confidence</th><th>Fallback</th><th>Used</th><th>Model</th><th>Age</th><th>Time</th></tr></thead>
           <tbody>
             {signals.slice(0, 10).map((s, i) => (
               <tr key={i}>
                 <td><strong>{s.symbol}</strong></td>
                 <td><DirectionBadge score={s.score} /></td>
-                <td>{s.score.toFixed(3)}</td>
+                <td style={{ color: s.score >= gateThreshold ? 'var(--green)' : 'inherit', fontWeight: s.score >= gateThreshold ? 700 : 400 }}>
+                  {s.score.toFixed(3)}{s.score >= gateThreshold ? ' ✓' : ''}
+                </td>
                 <td>{(s.confidence * 100).toFixed(0)}%</td>
+                <td>{s.fallback_used ? <span className="badge badge-yellow">FB</span> : '—'}</td>
+                <td>{s.used_in_decision ? <StatusPill label={s.decision_type ?? 'used'} tone={s.decision_type === 'BUY' ? 'good' : 'neutral'} /> : '—'}</td>
                 <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{s.model_id}</td>
+                <td style={{ color: signalAgeMinutes(s.generated_at) > SIGNAL_FRESH_HOURS * 60 ? 'var(--red)' : 'var(--text-muted)', fontSize: 12 }}>
+                  {ageText(signalAgeMinutes(s.generated_at))}
+                </td>
                 <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{fmtDateTime(s.generated_at)}</td>
               </tr>
             ))}
