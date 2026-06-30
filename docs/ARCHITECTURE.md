@@ -418,7 +418,9 @@ Article arrives via GDELT/MarketAux/Alpaca
     ▼
 NewsIngestionWorker
     ├── SHA-256 dedup (Redis set, TTL 2h)
-    ├── TickerExtractor (PostgreSQL lookup)
+    ├── TickerExtractor (PostgreSQL ticker_lookup) + RSS cashtag/ambiguity guard
+    │       bare F/T/C/GS/CAT/ON… require a $cashtag (minimise false_positive_ticker_rate)
+    │       [ticker-resolution layer: built/verified, enforcement gated — see §3.1]
     └── LPUSH news:queue (annotated NewsItem JSON)
     │
     ▼
@@ -458,6 +460,40 @@ PortfolioOrchestrator (hourly, active only when execution.engine=portfolio)
     ├── PortfolioVolTargeter (instantiated but inactive — strategy_returns not wired)
     └── Alpaca SDK market orders
 ```
+
+### 3.1 Ticker-resolution layer (design doc §4)
+
+Separates **ticker resolution** from sentiment so a wrong ticker (an order on an
+unrelated stock) is treated as the worst-case error. LLMs/extractors *propose*
+candidates; a **deterministic resolver** decides the canonical, tradable symbol only
+when evidence is strong and unambiguous, else emits a `NO_TRADE_*` reason.
+
+```
+candidate ticker(s) + company name
+    │
+    ▼
+gather_evidence (src/connectors/ticker_resolver_providers.py)
+    ├── source_ticker_match  (cashtag / broker / MarketAux metadata)   w .30
+    ├── alias_match          (internal ticker_lookup)                   w .25
+    ├── sec_openfigi_match   (SEC company_tickers ∨ OpenFIGI mapping)   w .20
+    ├── llm_agreement        (LLM entity extraction agrees)             w .15
+    └── tradable             (broker universe)                         w .10
+    │
+    ▼
+resolve (src/connectors/ticker_resolver.py)  →  RESOLVED | NO_TRADE_*
+    gates: confidence ≥ .80, ambiguity_margin ≥ .15, tradable, directness ≠ unclear
+```
+
+External providers are **fail-open** (an OpenFIGI/SEC outage lowers confidence, never
+fabricates a match) and cached (OpenFIGI per-ticker; SEC company_tickers once). Config:
+`OPENFIGI_API_KEY` (optional, raises rate limits), `SEC_USER_AGENT`.
+
+**Status (2026-06-30):** decision core + providers built, unit-tested and verified live
+(AAPL→RESOLVED, garbage→NO_TRADE, SEC NVIDIA→NVDA). **Enforcement is gated**: the
+confidence thresholds assume LLM entity extraction (company_name + directness, design
+point 1) feeds the resolver — wiring + enforcement land with that increment, after the
+thresholds are calibrated on shadow data (design doc §10). Already deployed today: the
+RSS cashtag/ambiguity guard (Increment 1).
 
 ---
 

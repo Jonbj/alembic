@@ -52,7 +52,7 @@ export default function News() {
         },
         {
           heading: "Estrazione ticker (sicurezza)",
-          content: "Un ticker sbagliato è peggio di una news persa: genererebbe un ordine su un titolo non correlato. Per questo i ticker ambigui — sigle corte (es. F, T, C, GS) o parole comuni (CAT, ON, META) — vengono associati a un articolo RSS **solo** se citati con cashtag esplicito (es. $F), non come parola sciolta (\"F-150\", \"Vitamin C\"). Le fonti con metadata ticker affidabili (GDELT, MarketAux, Alpaca) non sono toccate. Per questo alcune news di testo potrebbero non comparire associate a un ticker.",
+          content: "Un ticker sbagliato è peggio di una news persa: genererebbe un ordine su un titolo non correlato. Per questo i ticker ambigui — sigle corte (es. F, T, C, GS) o parole comuni (CAT, ON, META) — vengono associati a un articolo RSS **solo** se citati con cashtag esplicito (es. $F), non come parola sciolta (\"F-150\", \"Vitamin C\"). Le fonti con metadata ticker affidabili (GDELT, MarketAux, Alpaca) non sono toccate. Per questo alcune news di testo potrebbero non comparire associate a un ticker.\n\nÈ in arrivo un **resolver deterministico** che valida ogni ticker contro fonti ufficiali (SEC, OpenFIGI) e l'universo tradabile: quando l'evidenza è debole o ambigua (es. Apple Hospitality APLE vs Apple AAPL) il segnale viene marcato NO_TRADE invece di rischiare il ticker sbagliato.",
         },
       ]} />
 

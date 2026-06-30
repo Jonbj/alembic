@@ -18,8 +18,10 @@ FinBERT come auditor, gate NO_TRADE per ambiguità.
 |---|---|---|
 | Bug confidence² nel ranking S4 (rank by `score`, non `score×confidence`) | ✅ **DONE** | `e5927de` |
 | **Increment 1 — Ticker false-positive guard** (cashtag + soglia lunghezza + parole comuni) nel path RSS regex | ✅ **DONE** | questo commit |
-| B1 — schema arricchito (`risk_flags` gate, `materiality`, `event_type`, `directness`) | ⏳ prossimo | — |
-| B2-B — resolver esterno OpenFIGI/SEC + `resolution_confidence` + NO_TRADE | 📋 roadmap Fase 1 | — |
+| **Resolver deterministico — decision core** (scoring §4.4, gate NO_TRADE §4.3, directness §4.2) | ✅ **DONE** | `dc5921d` |
+| **Resolver — provider esterni** (OpenFIGI + SEC company_tickers + alias + tradability, `gather_evidence`) | ✅ **DONE, verificato live** (AAPL→RESOLVED, garbage→NO_TRADE, SEC NVIDIA→NVDA) | questo commit |
+| Resolver — wiring nel pipeline + enforcement | ⏳ gated dietro punto 1 (serve company_name/directness dall'LLM) + calibrazione soglie su shadow data | — |
+| B1 — schema arricchito (`risk_flags` gate, `materiality`, `event_type`, `directness`) | ⏳ prossimo (alimenta il resolver) | — |
 | B3 — novelty evento + already-priced | 📋 roadmap Fase 5 | — |
 | Issuer-specific sentiment (FinBERT su evidence sentences) | 📋 roadmap Fase 2-3 | — |
 | Harness IC per-modello (LOO-ICIR) | 📋 roadmap Fase 5 | — |

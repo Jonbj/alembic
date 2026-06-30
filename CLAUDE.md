@@ -39,6 +39,15 @@ All text fed to LLMs **must be sanitized** before prompt construction:
 - Remove hidden text insertions that invert sentiment
 - Use normalized ASCII-safe representations for ticker symbols
 
+### Ticker Resolution (separate from sentiment)
+A wrong ticker is the worst-case error (an order on an unrelated stock), so ticker
+resolution is a **separate, deterministic** task — never decided by the LLM alone. The
+bare-text path only matches ambiguous tickers (short, or common words) via an explicit
+`$cashtag`. A deterministic resolver (`src/connectors/ticker_resolver*.py`) confirms the
+canonical, tradable symbol against internal aliases, SEC `company_tickers` and OpenFIGI,
+emitting `NO_TRADE_*` when evidence is weak or ambiguous. Goal: `false_positive_ticker_rate → 0`.
+Design: `docs/Alembic_ticker_sentiment_design.docx` (full) · `docs/S4_NEWS_PIPELINE_RND_BACKLOG_2026-06-29.md` (status).
+
 ### Sentiment Scoring Formula
 Convert LLM output to a numeric signal:
 
