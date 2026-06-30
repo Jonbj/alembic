@@ -109,6 +109,13 @@ class Config(BaseModel):
     # MarketAux news API (primary live news source)
     MARKETAUX_API_KEY: str = Field(default_factory=lambda: os.environ.get("MARKETAUX_API_KEY", ""))
 
+    # Ticker resolution (design doc §4). OpenFIGI key is optional (raises rate limits
+    # ~25→~250 req/min). SEC requires a User-Agent with a contact for company_tickers.
+    OPENFIGI_API_KEY: str = Field(default_factory=lambda: os.environ.get("OPENFIGI_API_KEY", ""))
+    SEC_USER_AGENT: str = Field(
+        default_factory=lambda: os.environ.get("SEC_USER_AGENT", "Alembic research stefano.delgobbo@gmail.com")
+    )
+
     # Alpaca Markets (execution + news via Benzinga)
     ALPACA_API_KEY: str = Field(default_factory=lambda: os.environ.get("ALPACA_API_KEY", ""))
     ALPACA_SECRET_KEY: str = Field(default_factory=lambda: os.environ.get("ALPACA_SECRET_KEY", ""))
