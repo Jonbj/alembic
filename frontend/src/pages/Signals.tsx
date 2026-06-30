@@ -3,7 +3,7 @@ import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { fetchSignals, type Signal } from '@/api/signals'
-import { fetchDecisions, type Decision } from '@/api/trades'
+import { fetchDecisions, fetchFeedbackStatus, type Decision } from '@/api/trades'
 import { DirectionBadge } from '@/components/shared/DirectionBadge'
 import { HelpButton } from '@/components/shared/HelpButton'
 import { DataTable } from '@/components/shared/DataTable'
@@ -40,6 +40,15 @@ export default function Signals() {
     enabled: tab === 'decisions',
     refetchInterval: 60000,
   })
+
+  // Live feedback gate threshold (loss-feedback). Signals with |score| >= this clear
+  // the gate; below it they are dropped (see Decision Log → SKIP_THRESHOLD).
+  const { data: feedback } = useQuery({
+    queryKey: ['feedback-status'],
+    queryFn: fetchFeedbackStatus,
+    refetchInterval: 120000,
+  })
+  const gateThreshold = feedback?.entry_threshold ?? 0.35
 
   const filtered = useMemo(() =>
     signals.filter((s: Signal) => {
@@ -178,6 +187,10 @@ export default function Signals() {
           <option value="HOLD">HOLD</option>
         </select>
         <span style={{ color: 'var(--text-muted)', alignSelf: 'center', fontSize: 12 }}>{filtered.length} signals</span>
+        <span style={{ alignSelf: 'center', fontSize: 12, marginLeft: 'auto', color: 'var(--text-muted)' }}>
+          Feedback gate: <strong style={{ color: 'var(--text)' }}>{gateThreshold.toFixed(2)}</strong>
+          {' · '}<span style={{ color: '#059669', fontWeight: 700 }}>verde ✓</span> = |score| ≥ soglia (supera il gate)
+        </span>
       </div>
 
       <div className="card" style={{ padding: 0 }}>
@@ -234,7 +247,14 @@ export default function Signals() {
                 >
                   <div><strong>{s.symbol}</strong></div>
                   <div><DirectionBadge score={s.score} /></div>
-                  <div style={{ fontVariantNumeric: 'tabular-nums' }}>{s.score.toFixed(4)}</div>
+                  <div style={{
+                    fontVariantNumeric: 'tabular-nums',
+                    ...(Math.abs(s.score) >= gateThreshold
+                      ? { color: '#059669', fontWeight: 700 }
+                      : { color: 'var(--text-muted)' }),
+                  }}>
+                    {s.score.toFixed(4)}{Math.abs(s.score) >= gateThreshold ? ' ✓' : ''}
+                  </div>
                   <div>{(s.confidence * 100).toFixed(1)}%</div>
                   <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>{s.model_id}</div>
                   <div>{s.fallback_used ? <span className="badge badge-yellow">FB</span> : '—'}</div>

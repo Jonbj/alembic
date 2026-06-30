@@ -6,6 +6,9 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ## 2026-06-30
 
+### Signals page — evidenzia i segnali sopra soglia
+- **Feat**: la colonna Score della pagina Signals evidenzia in **verde ✓** i segnali con `|score| ≥ soglia feedback gate` (soglia live da `/feedback/status`, default 0.35); legenda con la soglia corrente. Colpo d'occhio su quali segnali superano il gate senza incrociare Auto-Improve.
+
 ### Decision Log — visibilità signal scartati al feedback gate
 - **Feat**: i signal scartati dal feedback gate S4 (score < soglia) vengono ora registrati in `execution_decisions` con `decision=SKIP_THRESHOLD` e `reason` (es. "score 0.180 < feedback threshold 0.350"). Prima sparivano senza traccia → nei giorni senza trade il Decision Log era vuoto e non si distingueva "valutati e scartati" da "nessun signal". Nuovo helper `_record_gate_drops` (fail-safe); frontend: label + help aggiornati (`SKIP_THRESHOLD`).
 
