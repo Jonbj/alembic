@@ -111,6 +111,12 @@ symbols:
     - XLE
     - XLV
     - SOXX
+    # --- Added 2026-06-30: off-watchlist names with recurrent strong ensemble signals (14d) ---
+    - ROKU
+    - RDDT
+    - HOOD
+    - WDC
+    - SPCX
 
 execution:
   # Authoritative execution engine.
