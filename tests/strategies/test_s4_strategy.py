@@ -392,7 +392,9 @@ class TestSignalTimeFiltering:
         assert orders == []
 
     def test_past_signals_included(self) -> None:
-        past_ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        # QS-07: past signals WITHIN the freshness window (max_signal_age_hours) are
+        # included; staler ones are now dropped (backtest/live parity). 2h before _TS.
+        past_ts = datetime(2024, 1, 7, 22, 0, tzinfo=timezone.utc)
         df = _make_signals_df(
             [f"T{i:02d}" for i in range(5)],
             generated_at=past_ts,

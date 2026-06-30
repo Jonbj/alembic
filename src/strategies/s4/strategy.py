@@ -1,7 +1,7 @@
 """S4 News-Driven Tactical strategy module."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Sequence
 
 import pandas as pd
@@ -146,6 +146,13 @@ class NewsDrivenTactical:
         df = self._signals_df
         if "generated_at" in df.columns:
             df = df[df["generated_at"] <= ts]
+            # QS-07 backtest/live parity: the live cycle drops signals older than
+            # max_signal_age_hours at each tick (_filter_stale_signals). Apply the same
+            # freshness window here so backtest IC is reproducible in live and does not
+            # use stale signals the live engine would have discarded (T0 contamination).
+            max_age = getattr(self._config, "max_signal_age_hours", 0) or 0
+            if max_age > 0:
+                df = df[df["generated_at"] >= ts - timedelta(hours=max_age)]
         results: list[SentimentResult] = []
         for _, row in df.iterrows():
             results.append(
