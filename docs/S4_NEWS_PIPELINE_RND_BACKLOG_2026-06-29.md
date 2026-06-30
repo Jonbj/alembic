@@ -21,7 +21,15 @@ FinBERT come auditor, gate NO_TRADE per ambiguità.
 | **Resolver deterministico — decision core** (scoring §4.4, gate NO_TRADE §4.3, directness §4.2) | ✅ **DONE** | `dc5921d` |
 | **Resolver — provider esterni** (OpenFIGI + SEC company_tickers + alias + tradability, `gather_evidence`) | ✅ **DONE, verificato live** (AAPL→RESOLVED, garbage→NO_TRADE, SEC NVIDIA→NVDA) | questo commit |
 | **QT-01 — Drop watchlist fallback** (marketaux/alpaca: no entity → cashtag, mai watchlist intera) | ✅ **DONE** | `e1845c7` |
-| **Punto 1a — schema + prompt arricchito** (`event_type`/`directness`/`materiality`/`novelty`/`risk_flags`/`evidence_sentences` in `LLMSentimentOutput`, prompt issuer-specific + no buy/sell/hold) | ✅ **DONE** (backward-compatible, default neutri) | questo commit |
+| **Punto 1a — schema + prompt arricchito** (`event_type`/`directness`/`materiality`/`novelty`/`risk_flags`/`evidence_sentences` in `LLMSentimentOutput`, prompt issuer-specific + no buy/sell/hold) | ✅ **DONE** (backward-compatible, default neutri) | `137861a` |
+| **QS-06 — eligible reale** (`llm_responses.eligible = confidence ≥ soglia`, non hardcoded True) | ✅ **DONE, deployed** | `fb24dec` |
+| **QS-07 — backtest/live parity** (`_signals_as_of` applica `max_signal_age_hours`; chiude la T0 contamination) | ✅ **DONE, deployed** (solo backtest, zero impatto live) | `b4421f2` |
+| **QT-03 — provenance estrazione** (`news_log.extraction_method`: source_metadata / cashtag / org_lookup / regex; migr. 030) | ✅ **DONE, deployed** | `71a98e5` |
+| **QS-09 — backfill news_log_id** (SELECT esistente su conflitto → news_log_id mai NULL) | ✅ **DONE, deployed** | `33f52e5` |
+| **QS-10 — logging strutturato fallimenti ensemble** (kind timeout/invalid/error, no più `print`) | ✅ **DONE, deployed** | `33f52e5` |
+| **QX-01 tooling** — tabella `news_labels` (migr. 029), sampling 148 stratificato, UI Labeling **blind**, forward-return Alpaca, harness `validate_ticker_sentiment.py` | ✅ **DONE, live** (annotazione in corso) | `9d21215`, `537471f` |
+| **QX-02 — dashboard qualità** (`/quality`: distribuzione per-modello, near-zero/fallback rate, precision estrazione dal label set) | ✅ **DONE, live** | `0dcf4da` |
+| **QS-03 — agreement→confidence** (confidence scontata dalla divergenza, dietro flag `agreement_weighting`) | ✅ **DONE** (default OFF: cambia live score → attivare post-QX-01) | `fb24dec` |
 | Punto 1b — gate `risk_flags` + weighting `materiality×directness` sul live score | ⏳ **gated su QX-01** (calibrazione/label set: cambia comportamento, non falsificabile senza misura) | — |
 | Resolver — wiring + enforcement | ⏳ **gated su QX-01** (shadow → calibrazione → enforce) | — |
 | B3 — novelty evento + already-priced | 📋 roadmap Fase 5 | — |
@@ -33,9 +41,15 @@ Il quality review (empirico, query sui DB vivi) **conferma e prioritizza**: (1) 
 false-positive è il **fallback watchlist** (A1 → QT-01, **fatto**); (2) sul sentiment i fix ad alto valore
 sono **calibrazione confidence (QS-01)** e **bias correction qwen (QS-02)** — più dell'arricchimento schema;
 (3) **blocco metodologico**: nulla è falsificabile senza il **golden label set (QX-01)**, che richiede
-annotazione umana (~80-130h) + una **fonte prezzo affidabile** (R-09, non yfinance). Conseguenza: enforcement
-(Punto 1b, resolver, QS-01) è correttamente **gated su QX-01**. Prossimo unblock reale: **QT-03 logging**
-(candidati scartati + flag fallback) → costruzione QX-01 → calibrazione → enforce.
+annotazione umana + una **fonte prezzo affidabile** (R-09, non yfinance). Conseguenza: enforcement
+(Punto 1b, resolver, QS-01) è correttamente **gated su QX-01**.
+
+**Aggiornamento 2026-06-30** — il binario di misura QX-01 è **costruito e live**: tabella `news_labels`,
+sampling 148 (Fase 1: 150, 1 annotatore, blind), UI **Labeling** (`/labeling`), harness extraction, e
+dashboard **Quality** (`/quality`). **Fonte prezzo decisa: Alpaca historical** (forward return 1h/1d/2d
+point-in-time, automatici). QT-03 (provenance) **fatto**. Primo baseline pre-fix (17 annotate): precision
+estrazione **0.24**, macro-FP **2.0** — conferma quantitativa del problema. Resta: completare l'annotazione →
+forward return → sentiment sign-accuracy + IC end-to-end → calibrazione QS-01/QS-02 → enforce con gate misurati.
 
 Roadmap a fasi (dal design doc §11): Fase 1 resolver + `news_resolved_entities` → Fase 2 issuer sentiment →
 Fase 3 FinBERT auditor → Fase 4 gate portfolio (`resolution_confidence`/`directness`/`ambiguity_margin`) →

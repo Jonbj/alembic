@@ -48,6 +48,14 @@ canonical, tradable symbol against internal aliases, SEC `company_tickers` and O
 emitting `NO_TRADE_*` when evidence is weak or ambiguous. Goal: `false_positive_ticker_rate → 0`.
 Design: `docs/Alembic_ticker_sentiment_design.docx` (full) · `docs/S4_NEWS_PIPELINE_RND_BACKLOG_2026-06-29.md` (status).
 
+**Measurement before enforcement (QX-01):** resolver enforcement, confidence calibration,
+and `risk_flags` gating are **gated on a golden label set** — don't enable scoring changes
+un-measured. The rails are live: `news_labels` table, blind Labeling UI (`/labeling`),
+`scripts/{sample_news_labels,compute_label_forward_returns,validate_ticker_sentiment}.py`
+(forward returns from **Alpaca historical**, not yfinance), and the Quality dashboard
+(`/quality`). `news_log.extraction_method` records the extraction path (QT-03). See
+ARCHITECTURE §3.2.
+
 ### Sentiment Scoring Formula
 Convert LLM output to a numeric signal:
 

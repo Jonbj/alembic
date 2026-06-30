@@ -709,6 +709,49 @@ Unified activity log — recent portfolio cycles, sentiment runs, news ingestion
 
 ---
 
+## Labeling Endpoints (QX-01 golden label set)
+
+Offline/admin (require API key). Blind annotation: `next` never returns the system's extracted tickers.
+
+### `GET /api/labeling/progress`
+
+```json
+{ "labeled": 17, "pending": 131, "total": 148 }
+```
+
+### `GET /api/labeling/next`
+
+Next pending article — **blind** (no extracted tickers). Returns `{ "done": true }` when none remain.
+
+```json
+{ "done": false, "label_id": 1, "source": "marketaux", "title": "...", "body_snippet": "...", "published_at": "2025-11-01T00:00:00Z", "text_adequacy": "full" }
+```
+
+### `POST /api/labeling/{label_id}`
+
+Save human ground truth; marks the row labeled.
+
+**Body:** `gt_tickers` (list, [] = none), `gt_relevance` (company_specific|sector|macro|irrelevant), `gt_sentiment_dir` (positive|negative|neutral), `gt_sentiment_strength` ([-1,1]), `gt_rationale` (optional).
+
+---
+
+## Quality Endpoint (QX-02)
+
+### `GET /api/quality/metrics`
+
+Read-only sentiment + extraction quality. **Query parameters:** `days` (default 14).
+
+```json
+{
+  "window_days": 14,
+  "per_model": [ { "model_id": "kimi-k2.6:cloud", "n": 911, "mean_polarity": 0.044, "mean_confidence": 0.661, "near_zero_rate": 0.188, "eligible_rate": 1.0 } ],
+  "signals": { "near_zero_rate": 0.341, "fallback_rate": 0.236, "mean_ensemble_std": 0.05 },
+  "extraction": { "n_labeled": 17, "precision": 0.24, "recall": 0.40, "recall_in_watchlist": 1.0, "fp_per_article": 1.12, "macro_fp_per_article": 2.0 }
+}
+```
+
+---
+
 ## Health Check
 
 ### `GET /api/health`

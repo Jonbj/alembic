@@ -495,6 +495,28 @@ point 1) feeds the resolver — wiring + enforcement land with that increment, a
 thresholds are calibrated on shadow data (design doc §10). Already deployed today: the
 RSS cashtag/ambiguity guard (Increment 1).
 
+### 3.2 Quality & measurement layer (QX-01 / QX-02)
+
+Enforcement of the resolver, confidence calibration, and `risk_flags` gating are all
+**gated on a golden label set (QX-01)** — measuring against dirty data would be
+garbage-in/garbage-out. The measurement rails are built and offline/read-only (never in
+the hot path):
+
+| Piece | Where | Role |
+|-------|-------|------|
+| `news_labels` (migr. 029) | PostgreSQL | one row per distinct article; `extracted_tickers` (system) vs human `gt_*`; forward returns |
+| `scripts/sample_news_labels.py` | offline | deterministic stratified sample (seed 42; marketaux/alpaca/gdelt; near-zero oversampled) |
+| Labeling UI | `/labeling` + `/api/labeling/*` | **blind** annotation (no extracted tickers shown); ~30-60s/article |
+| `scripts/compute_label_forward_returns.py` | offline | forward return 1h/1d/2d from **Alpaca historical** (point-in-time; not yfinance, R-09) |
+| `scripts/validate_ticker_sentiment.py` | offline | extraction precision/recall/FP per source from the label set |
+| Quality dashboard | `/quality` + `/api/quality/metrics` | live per-model polarity/confidence, near-zero/fallback rate, extraction precision |
+
+`extraction_method` on `news_log` (QT-03: `source_metadata` / `cashtag` / `org_lookup` /
+`regex`) lets precision be measured per extraction path and confirms QT-01 removed the
+watchlist fallback. First pre-fix baseline (17 labels): extraction precision 0.24,
+macro-FP 2.0. Next: complete annotation → forward returns → sentiment IC → calibrate →
+enforce with **measured** gates.
+
 ---
 
 ## 4. Redis Key Schema

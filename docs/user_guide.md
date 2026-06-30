@@ -452,6 +452,33 @@ Il bottone in basso a sinistra nella sidebar permette di commutare tra:
 - **Full ensemble** (⚡): Tutti e 4 i modelli LLM analizzano ogni articolo. Più accurato ma più costoso.
 - **Economy** (🪙): Solo il modello GLM analizza. Più economico ma meno accurato. Utile per risparmiare token quando il mercato è chiuso.
 
+### 3.11 Labeling 🏷️
+
+**A cosa serve**: Costruire il *golden label set* (QX-01) — la verità di riferimento contro cui si misura la qualità dell'estrazione ticker e del sentiment. È l'**unico passo umano** che sblocca calibrazione ed enforcement.
+
+**Come si usa**: Per ogni news leggi **titolo + testo** (annotazione **blind**: NON vedi il ticker estratto dal sistema, per non farti influenzare), poi indichi:
+
+| Campo | Cosa | 
+|-------|------|
+| **Ticker** | Le aziende quotate che la news riguarda davvero (vuoto se macro/irrilevante) |
+| **Rilevanza** | company_specific / sector / macro / irrelevant |
+| **Direzione** | positive / neutral / negative |
+| **Forza** | 0 (debole/neutro) → ±1 (forte) |
+
+~30-60s a news. La progress si salva. I **forward return** (1h/1d/2d) vengono calcolati automaticamente da Alpaca dopo l'annotazione — non li inserisci tu.
+
+### 3.12 Quality 🔬
+
+**A cosa serve**: Vedere empiricamente la qualità del segnale — i problemi che il quality review ha trovato, ora misurabili e aggiornati in tempo reale.
+
+| Sezione | Cosa mostra |
+|---------|-------------|
+| **Sentiment per modello** | Polarity media (≠0 = bias), confidence media (compressa ≈0.65 = poco discriminante), near-zero rate, eligible rate |
+| **Segnali ensemble** | Near-zero rate (rumore), fallback rate (FinBERT), ensemble std (divergenza) |
+| **Estrazione ticker** (golden set) | Precision, recall, FP/articolo, macro-FP (dovrebbe ≈0) — si aggiorna man mano che annoti su Labeling |
+
+Auto-refresh ogni 2 minuti. Finestra selezionabile (7/14/30 giorni).
+
 ---
 
 ## 4. Le metriche: come leggerle
