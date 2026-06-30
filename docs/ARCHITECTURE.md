@@ -132,6 +132,13 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 
 **Signal formula:** `score = polarity × confidence` where polarity ∈ [-1, +1] and confidence ∈ [0, 1].
 
+**Per-symbol selection (live cycle):** `fetch_signals_for_cycle` returns one signal per
+symbol within the freshness window (`max_signal_age_hours`, default 4h), preferring the
+most recent **ensemble** signal over a FinBERT fallback (`ORDER BY symbol,
+fallback_used ASC, generated_at DESC`). A low-conviction fallback generated after a
+strong ensemble signal therefore does not overwrite it; a fallback is used only when no
+ensemble signal exists in the window.
+
 ### 2.3 Regime Detection
 
 | Component | File | Role |

@@ -6,6 +6,16 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ## 2026-06-30
 
+### Signal Selection — ensemble non sovrascritto da fallback FinBERT
+- **Fix**: `fetch_signals_for_cycle` ora preferisce il segnale **ensemble** più recente al FinBERT fallback nella finestra 4h (`ORDER BY symbol, fallback_used ASC, generated_at DESC`). Prima si prendeva solo il più recente per simbolo, quindi un fallback debole generato dopo un ensemble forte lo sovrascriveva (es. AMKR +0.638 alle 15:16 → +0.009 fallback alle 15:48), facendo cadere il simbolo sotto soglia. Il fallback si usa solo se non c'è ensemble nella finestra. (`10c7836`)
+
+### Watchlist S4 — +5 simboli (91 → 96)
+- Aggiunti **ROKU, RDDT, HOOD, WDC, SPCX**: nomi off-watchlist con segnali ensemble forti **ricorrenti** su 14g (es. ROKU 4×≥0.35 avg 0.38), prima non tradabili perché il ciclo portfolio carica solo i simboli in watchlist. Il sentiment per questi nomi era già calcolato via estrazione entity/cashtag dalle news. Correttezza estrazione non ancora validata su QX-01 — rivedere dopo l'annotazione. (`38be96b`)
+
+### Qualità & misurazione (QX-01 / QX-02) + igiene dati
+- Golden label set: tabella `news_labels`, sampling stratificato (148), **UI Labeling blind** (`/labeling`), forward-return da Alpaca historical, harness `validate_ticker_sentiment.py`; **dashboard Quality** (`/quality`). (`9d21215`, `537471f`, `0dcf4da`)
+- Igiene dati: QS-06 (`eligible` reale), QS-07 (backtest/live parity), QT-03 (`news_log.extraction_method`), QS-09 (backfill `news_log_id`), QS-10 (logging strutturato fallimenti ensemble), QS-03 (agreement→confidence, dietro flag). Dettaglio e stato in `docs/S4_NEWS_PIPELINE_RND_BACKLOG_2026-06-29.md`.
+
 ### Sentiment Worker — Observability Ollama semaphore
 - **Feat**: notifica Telegram rate-limited (max 1 ogni 30 min) quando tutti i modelli ensemble vanno in timeout (`raw_outputs=[]`). Il messaggio include il comando di recovery esatto.
   - Nuova funzione `_maybe_notify_ollama_timeout()` in `src/workers/sentiment.py`.

@@ -139,6 +139,8 @@ La dashboard è accessibile all'indirizzo **http://192.168.178.144:3000** ed è 
 | **Fallback** | Badge "FB" se il FinBERT di fallback è stato attivato (i modelli principali erano in disaccordo) |
 | **Time** | Quando il segnale è stato generato |
 
+> **Nota selezione (ciclo live)**: per ogni ticker il sistema usa, nella finestra di freschezza (4h), il segnale **ensemble più recente** — un fallback FinBERT "FB" debole generato *dopo* un ensemble forte **non** lo sovrascrive (il fallback si usa solo se non c'è ensemble fresco). La watchlist tradabile S4 è a **96 simboli** (aggiunti ROKU, RDDT, HOOD, WDC, SPCX il 2026-06-30).
+
 **Filtri disponibili:**
 - **Filter ticker**: cerca un ticker specifico (es. "NVDA")
 - **All directions / BUY / SELL / HOLD**: filtra per direzione del segnale
