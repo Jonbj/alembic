@@ -6,6 +6,9 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ## 2026-06-30
 
+### Decision Log — visibilità signal scartati al feedback gate
+- **Feat**: i signal scartati dal feedback gate S4 (score < soglia) vengono ora registrati in `execution_decisions` con `decision=SKIP_THRESHOLD` e `reason` (es. "score 0.180 < feedback threshold 0.350"). Prima sparivano senza traccia → nei giorni senza trade il Decision Log era vuoto e non si distingueva "valutati e scartati" da "nessun signal". Nuovo helper `_record_gate_drops` (fail-safe); frontend: label + help aggiornati (`SKIP_THRESHOLD`).
+
 ### Sentiment Worker — skip news stantie + drenaggio backlog (e2e fix)
 - **Root cause** (diagnosi e2e): `news:queue` è FIFO e il worker (4 item/run, ~16/h) era **~13 giorni indietro** (item più vecchio 17 giu). Generava signal su news di 2 settimane fa con `generated_at=now()` → sentiment stantio iniettato nel ciclo live come se fosse fresco, tutto troppo debole per superare il feedback gate. Sintomo osservato: "signal con data di oggi ma nessun decision log".
 - **Fix**: il worker ora pesca finché non ha **4 item freschi**, saltando senza chiamata LLM gli item più vecchi di `_SENTIMENT_MAX_NEWS_AGE_HOURS` (24h), con cap `_MAX_QUEUE_SCAN_PER_RUN=5000`. Gli item saltati vengono scartati da `news:processing` (anche nel ramo all-stale, altrimenti la crash-recovery li ri-accodava in loop). 5 test su `_is_stale_news`. (`28638f9`)

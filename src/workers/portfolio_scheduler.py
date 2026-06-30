@@ -1663,6 +1663,37 @@ def _strategy_symbols(entry) -> list[str]:
     return syms
 
 
+def _record_gate_drops(dropped_df, threshold: float) -> None:
+    """Write SKIP_THRESHOLD rows to execution_decisions for signals the S4 feedback
+    gate dropped (score below threshold), so the Decision Log explains no-trade cycles
+    instead of being silently empty. Fail-safe — never breaks the cycle.
+    """
+    try:
+        from datetime import datetime, timezone
+
+        from src.config import config
+        from src.store.pg_store import PostgreSQLStore
+
+        regime_mult = _get_regime_multiplier_from_redis(config.REDIS_URL)
+        now = datetime.now(timezone.utc)
+        pg = PostgreSQLStore()
+        for _, row in dropped_df.iterrows():
+            sig_score = float(row["score"])
+            pg.write_execution_decision(
+                tick_time=now,
+                symbol=str(row["symbol"]),
+                signal_id=None,
+                score=0.0,  # no allocation weight — it never reached ranking
+                regime_mult=regime_mult,
+                ema_pass=False,
+                decision="SKIP_THRESHOLD",
+                reason=f"score {abs(sig_score):.3f} < feedback threshold {threshold:.3f}",
+                signal_score=sig_score,
+            )
+    except Exception as exc:
+        log.warning("Failed to log gate-dropped signals: %s", exc)
+
+
 def _build_strategy_instance(entry, bars_df):
     from src.strategies.s1.strategy import S1Config, TimeSeriesMomentum
     from src.strategies.s2.strategy import VRPStrategy
@@ -1815,13 +1846,16 @@ def _build_strategy_instance(entry, bars_df):
                 # so bearish signals are also gated, consistent with BUY-only logic).
                 if _fb_threshold is not None and _fb_threshold > s4_config.min_score:
                     before = len(signals_df)
+                    dropped_df = signals_df[signals_df["score"].abs() < _fb_threshold]
                     signals_df = signals_df[signals_df["score"].abs() >= _fb_threshold]
-                    dropped = before - len(signals_df)
-                    if dropped:
+                    if len(dropped_df):
                         log.info(
                             "S4 feedback gate: dropped %d/%d signals below threshold %.3f",
-                            dropped, before, _fb_threshold,
+                            len(dropped_df), before, _fb_threshold,
                         )
+                        # Surface the drops in the Decision Log (decision=SKIP_THRESHOLD)
+                        # so a no-trade cycle shows WHY, not just an empty log.
+                        _record_gate_drops(dropped_df, _fb_threshold)
             except Exception as exc:
                 log.warning("Signal velocity application failed: %s — using raw scores", exc)
         # Each Celery task creates a fresh instance with _last_rebalance=None.
