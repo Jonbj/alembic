@@ -5,22 +5,20 @@ import alembicLogo from '@/assets/alembic.png'
 
 const NAV = [
   { to: '/',            label: 'Overview',    icon: '⊞' },
+  { to: '/operations',  label: 'Operations',  icon: '⚙' },
+  { to: '/news',        label: 'News',        icon: '📰' },
   { to: '/signals',     label: 'Signals',     icon: '⚡' },
-  { to: '/trading',     label: 'Trading',     icon: '📈' },
-  { to: '/validation',  label: 'Validation',  icon: '🧪' },
-  { to: '/labeling',    label: 'Labeling',    icon: '🏷️' },
   { to: '/quality',     label: 'Quality',     icon: '🔬' },
-  { to: '/auto-improve',  label: 'Auto-Improve', icon: '🔧' },
+  { to: '/trading',     label: 'Trading',     icon: '📈' },
   { to: '/performance',   label: 'Performance',  icon: '📊' },
   { to: '/strategies',  label: 'Strategies',  icon: '🎯' },
-  { to: '/backtest',    label: 'Backtest',    icon: '🔬' },
-  { to: '/news',        label: 'News',        icon: '📰' },
+  { to: '/auto-improve',  label: 'Auto-Improve', icon: '🔧' },
+  { to: '/validation',  label: 'Validation',  icon: '🧪' },
+  { to: '/labeling',    label: 'Labeling',    icon: '🏷️' },
   { to: '/llm',         label: 'LLM',         icon: '🤖' },
-  { to: '/config',      label: 'Config',      icon: '⚙' },
-  { to: '/admin',       label: 'Admin',       icon: '🔒' },
-  { to: '/docs',        label: 'Docs',        icon: '📖' },
+  { to: '/backtest',    label: 'Backtest',    icon: '🔬' },
   { to: '/dashboard',  label: 'Dashboard',   icon: '📡' },
-  { to: '/system',     label: 'System',      icon: '🖥' },
+  { to: '/docs',        label: 'Docs',        icon: '📖' },
 ]
 
 export function Sidebar() {

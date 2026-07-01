@@ -536,7 +536,7 @@ Returns the current loss-feedback adjustments active in Redis. If no adjustment 
 |-------|------|-------------|
 | `entry_threshold` | float | Effective entry threshold (baseline or Redis override) |
 | `entry_threshold_baseline` | float | Module constant baseline (default 0.30) |
-| `regime_scale` | float | Regime multiplier scaling factor (1.0 = no adjustment) |
+| `regime_scale` | float | Redis feedback scale state. Applied by legacy `execution.py`; in portfolio mode it is exposed for audit until portfolio sizing is explicitly wired to it. |
 | `adjustment_active` | bool | True if any Redis override is currently set |
 | `last_adjustment_ts` | string\|null | ISO-8601 timestamp of last adjustment |
 | `last_reason` | string\|null | Human-readable trigger description |
@@ -561,6 +561,14 @@ Aggregate opportunity-cost statistics for skipped signals. Returns one row per s
 ```json
 [
   {
+    "decision": "SKIP_THRESHOLD",
+    "total_skips": 31,
+    "computed": 29,
+    "avg_return": 0.0014,
+    "pct_profitable": 0.517,
+    "sum_positive_returns": 0.061
+  },
+  {
     "decision": "SKIP_EMA",
     "total_skips": 42,
     "computed": 38,
@@ -581,14 +589,14 @@ Aggregate opportunity-cost statistics for skipped signals. Returns one row per s
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `decision` | string | `SKIP_EMA` or `SKIP_CAP` |
+| `decision` | string | `SKIP_THRESHOLD`, `SKIP_EMA` or `SKIP_CAP` |
 | `total_skips` | int | Total skipped signals in the window |
 | `computed` | int | Skips with a 1h return computed (Alpaca bars available) |
 | `avg_return` | float | Mean 1-hour return if entry had been taken |
 | `pct_profitable` | float | Fraction of skips where 1h return > 0 |
 | `sum_positive_returns` | float | Sum of all positive 1h returns (upside missed) |
 
-`SKIP_POSITION` (already in position) is excluded — it is not a missed opportunity.
+`SKIP_POSITION` (already in position) is excluded — it is not a missed opportunity. `SKIP_STALE` and `SKIP_FALLBACK` are also excluded because they are signal freshness/reliability failures, not filters to relax.
 
 Returns `[]` until the first nightly `counterfactual-worker` run at 22:45 UTC.
 
@@ -622,7 +630,7 @@ Execution decision log — one row per symbol per tick for every symbol that cle
 ]
 ```
 
-Decision labels: `BUY`, `SKIP_EMA` (price below EMA20), `SKIP_CAP` (position cap reached), `SKIP_POSITION` (already in position), `STOP_LOSS` (stop triggered).
+Decision labels include `BUY`, `SELL`, `SKIP_THRESHOLD` (below active feedback gate), `SKIP_STALE` (signal expired), `SKIP_FALLBACK` (fallback-only signal), `SKIP_EMA` (price below EMA20), `SKIP_CAP` (position cap reached), `SKIP_POSITION` (already in position), `STOP_LOSS` (stop triggered).
 
 ---
 

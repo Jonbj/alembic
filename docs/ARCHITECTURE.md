@@ -61,7 +61,7 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 │              PERFORMANCE & MONITORING LOOP                        │
 │                                                                   │
 │  Daily 22:00: ForwardReturnWorker → populate sentiment_signals   │
-│  Daily 22:45: CounterfactualWorker → 1h return for SKIP rows     │
+│  Daily 22:45: CounterfactualWorker → 1h return for gate skips    │
 │  Daily 03:00: PerformanceWorker → IC + drift + Telegram digest   │
 │  Daily 22:30: RiskMonitor → HHI + correlation + drawdown alerts  │
 │  Mon  04:00: WeightOptimiser → LOO ICIR → auto-apply / Telegram  │
@@ -87,15 +87,17 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 │    ├── fetch last N closed trades from PostgreSQL                │
 │    ├── detect: N consecutive losses OR negative rolling P&L      │
 │    ├── on trigger: raise ENTRY_THRESHOLD (Redis, 48h TTL)        │
-│    │              reduce regime_scale (Redis, 48h TTL)           │
+│    │              write regime_scale (Redis, 48h TTL; legacy/audit)│
 │    │              send Telegram ⚠️ alert                          │
 │    ├── recovery: consecutive wins → step back toward baseline    │
 │    └── cooldown: max 1 adjustment per 4h                         │
-│    ExecutionWorker reads Redis keys at each cycle start           │
+│    Portfolio scheduler enforces feedback:entry_threshold;         │
+│    legacy ExecutionWorker also reads regime_scale                 │
 │                                                                   │
 │  Phase C — Counterfactual / Opportunity Cost (daily 22:45 UTC)   │
 │    CounterfactualWorker                                           │
-│    ├── fetch SKIP_EMA + SKIP_CAP rows without counterfactual     │
+│    ├── fetch SKIP_THRESHOLD + SKIP_EMA + SKIP_CAP rows            │
+│    │   without counterfactual                                     │
 │    ├── fetch 1-min Alpaca bars per symbol                        │
 │    ├── compute return = (price_T+1h - price_T) / price_T         │
 │    └── bulk-write counterfactual_return_1h to execution_decisions│
@@ -123,7 +125,7 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 
 | Component | File | Role |
 |-----------|------|------|
-| `SentimentWorker` | `src/workers/sentiment.py` | Consumes `news:queue`, runs ensemble, writes signal |
+| `SentimentWorker` | `src/workers/sentiment.py` | Consumes `news:queue` (skips news >24h without inference), runs ensemble, writes signal, shadow-resolves the ticker (§3.2) |
 | `LLMClient` (ABC) | `src/llm/client.py` | Ollama cloud clients: Kimi K2.6, GLM-5.2 (Qwen3.5 removed — ticker extraction too aggressive) |
 | `EnsembleAggregator` | `src/llm/ensemble.py` | Weighted averaging + divergence check (std > 0.30) |
 | `FinBERTClient` | `src/llm/finbert.py` | Local fallback: entropic confidence from 3-class softmax |
@@ -237,7 +239,7 @@ Execution checklist (per tick):
 |-----------|------|------|
 | `PerformanceWorker` | `src/workers/performance.py` | IC (B4 + Newey-West HAC), drift (PSI + CUSUM), auto-weights |
 | `ForwardReturnWorker` | `src/workers/performance.py` | Populates `sentiment_signals.forward_return` at market close |
-| `LossFeedbackCheck` | `src/workers/performance.py` | Phase B: detects loss patterns, adjusts threshold + regime scale |
+| `LossFeedbackCheck` | `src/workers/performance.py` | Phase B: detects loss patterns, adjusts entry threshold and writes feedback audit state |
 | `CounterfactualWorker` | `src/workers/performance.py` | Phase C: computes 1h return for every skipped trade |
 | `ICCalculator` | `src/performance/ic.py` | Composite IC B4 with Newey-West HAC standard errors |
 | `WeightOptimiser` | `src/performance/weights.py` | LOO ICIR with guardrails (VIX, drawdown, floor/cap) |
@@ -300,27 +302,28 @@ Configured in `config/trading.yaml` under `loss_feedback:`.
 | `threshold_step` | 0.05 | ENTRY_THRESHOLD raised by this amount per trigger |
 | `threshold_max` | 0.60 | ceiling for raised threshold |
 | `threshold_baseline` | 0.30 | target for recovery |
-| `regime_scale_factor` | 0.80 | regime_mult multiplied by this on trigger |
-| `regime_min_scale` | 0.20 | floor for regime scale |
+| `regime_scale_factor` | 0.80 | legacy/audit scale factor written on trigger |
+| `regime_min_scale` | 0.20 | floor for legacy/audit scale |
 | `cooldown_hours` | 4 | minimum hours between adjustments |
 | `recovery_win_streak` | 5 | consecutive wins → step threshold back down |
 | `feedback_ttl_hours` | 48 | Redis TTL — adjustments expire automatically |
 
 **Redis keys written:** `feedback:entry_threshold`, `feedback:regime_scale`, `feedback:state` (audit JSON). All have 48h TTL, so adjustments cannot persist indefinitely through system restarts.
 
-**ExecutionWorker reads** `feedback:entry_threshold` and `feedback:regime_scale` at the start of every 15-min cycle via `_load_entry_threshold()` and `_load_feedback_regime_scale()`. If the Redis keys are absent (no active adjustment), the module-level constant `ENTRY_THRESHOLD=0.30` and scale `1.0` are used.
+**Portfolio scheduler reads** `feedback:entry_threshold` and enforces it before S4 ranking/order generation, logging dropped signals as `SKIP_THRESHOLD`. **Legacy ExecutionWorker** reads both `feedback:entry_threshold` and `feedback:regime_scale` at cycle start. In portfolio mode, `feedback:regime_scale` is visible for audit but is not sizing-authoritative until explicitly wired into portfolio allocation.
 
 ### 2.10 Counterfactual Analysis (Phase C)
 
 Answers: *"For each trade we skipped, what would the 1-hour return have been?"*
 
-- Only `SKIP_EMA` and `SKIP_CAP` decisions are analysed. `SKIP_POSITION` is excluded (position was already open — it's not a missed opportunity).
+- `SKIP_THRESHOLD`, `SKIP_EMA` and `SKIP_CAP` decisions are analysed. `SKIP_POSITION` is excluded (position was already open — it's not a missed opportunity). `SKIP_STALE` and `SKIP_FALLBACK` are excluded because they are signal freshness/reliability failures.
 - Runs nightly at 22:45 UTC. Processes SKIP decisions from the last 7 days that don't have a counterfactual yet (`counterfactual_computed_at IS NULL`).
 - Fetches 1-minute Alpaca bars per symbol. Computes: `return = (close_{T+60min} − close_T) / close_T`.
 - Stores result in `execution_decisions.counterfactual_return_1h`.
 - `GET /api/trades/analytics/counterfactual` aggregates by decision type: avg return, % profitable, total upside missed.
 
 **Interpretation:**
+- `SKIP_THRESHOLD` with high `avg_return` and enough observations → feedback gate may be too restrictive; review with IC/label evidence before changing thresholds.
 - `SKIP_EMA` with high `avg_return` → EMA filter is too conservative; consider relaxing or removing it in strong-trend regimes.
 - `SKIP_CAP` with high `sum_positive_returns` → cycle allocation cap is too tight; consider raising `MAX_CYCLE_NOTIONAL_PCT`.
 
@@ -345,7 +348,7 @@ CREATE TABLE execution_decisions (
     score                    DOUBLE PRECISION NOT NULL,
     regime_mult              DOUBLE PRECISION NOT NULL,
     ema_pass                 BOOLEAN NOT NULL,
-    decision                 VARCHAR(20) NOT NULL,  -- BUY | SELL | SKIP_EMA | SKIP_CAP | SKIP_POSITION
+    decision                 VARCHAR(20) NOT NULL,  -- BUY | SELL | SKIP_THRESHOLD | SKIP_STALE | SKIP_FALLBACK | SKIP_EMA | SKIP_CAP | SKIP_POSITION
     order_id                 TEXT,
     reason                   TEXT,                  -- human-readable explanation (migration 020)
     counterfactual_return_1h DOUBLE PRECISION,      -- Phase C: NULL until computed nightly
@@ -443,7 +446,7 @@ SentimentWorker (batch 21 items/cycle, semaphore=3 concurrent)
     ▼
 ExecutionWorker (every 15 min, active only when execution.engine=legacy_sentiment)
     ├── GET killswitch_active
-    ├── GET regime_multiplier × GET feedback:regime_scale  (Phase B)
+    ├── GET regime_multiplier × GET feedback:regime_scale  (Phase B, legacy path)
     ├── GET feedback:entry_threshold (or default 0.30)      (Phase B)
     ├── For each symbol in watchlist:
     │   ├── GET sentiment:signal:{sym}
@@ -496,11 +499,14 @@ fabricates a match) and cached (OpenFIGI per-ticker; SEC company_tickers once). 
 `OPENFIGI_API_KEY` (optional, raises rate limits), `SEC_USER_AGENT`.
 
 **Status (2026-06-30):** decision core + providers built, unit-tested and verified live
-(AAPL→RESOLVED, garbage→NO_TRADE, SEC NVIDIA→NVDA). **Enforcement is gated**: the
-confidence thresholds assume LLM entity extraction (company_name + directness, design
-point 1) feeds the resolver — wiring + enforcement land with that increment, after the
-thresholds are calibrated on shadow data (design doc §10). Already deployed today: the
-RSS cashtag/ambiguity guard (Increment 1).
+(AAPL→RESOLVED, garbage→NO_TRADE, SEC NVIDIA→NVDA). **Shadow mode is wired** (Fase A):
+the SentimentWorker resolves each news ticker and persists the verdict to
+`news_resolved_entities` (`src/connectors/resolver_shadow.py`, fail-safe, flag
+`RESOLVER_SHADOW_ENABLED`) **without gating the live signal** — so resolver precision can
+be measured vs `news_labels`. **Enforcement remains gated** on QX-01: the confidence
+thresholds assume LLM entity extraction (company_name + directness, design point 1) feeds
+the resolver, and are calibrated on shadow data first (design doc §10). Already deployed:
+the RSS cashtag/ambiguity guard (Increment 1).
 
 ### 3.2 Quality & measurement layer (QX-01 / QX-02)
 
@@ -512,6 +518,7 @@ the hot path):
 | Piece | Where | Role |
 |-------|-------|------|
 | `news_labels` (migr. 029) | PostgreSQL | one row per distinct article; `extracted_tickers` (system) vs human `gt_*`; forward returns |
+| `news_resolved_entities` (migr. 031) | PostgreSQL | resolver SHADOW verdict per news ticker (decision/confidence/ambiguity/directness/tradable + evidence); compared vs `news_labels` |
 | `scripts/sample_news_labels.py` | offline | deterministic stratified sample (seed 42; marketaux/alpaca/gdelt; near-zero oversampled) |
 | Labeling UI | `/labeling` + `/api/labeling/*` | **blind** annotation (no extracted tickers shown); ~30-60s/article |
 | `scripts/compute_label_forward_returns.py` | offline | forward return 1h/1d/2d from **Alpaca historical** (point-in-time; not yfinance, R-09) |
@@ -642,8 +649,8 @@ CREATE TABLE decay_reports (
 | `run-retention-sweep` | 3:30 daily | Nightly old data cleanup |
 | `decay-monitor` | 23:00 1st of month | Actual vs backtest baseline |
 | `poll-telegram-updates` | every 5 seconds | Weight approve/reject keyboard |
-| `loss-feedback-check` | */30 14-21 Mon-Fri | Phase B: detect loss patterns → adjust threshold/regime scale |
-| `counterfactual-worker` | 22:45 daily | Phase C: compute 1h counterfactual returns for SKIP rows |
+| `loss-feedback-check` | */30 14-21 Mon-Fri | Phase B: detect loss patterns → raise feedback threshold; write legacy/audit scale state |
+| `counterfactual-worker` | 22:45 daily | Phase C: compute 1h counterfactual returns for SKIP_THRESHOLD/SKIP_EMA/SKIP_CAP rows |
 
 ---
 

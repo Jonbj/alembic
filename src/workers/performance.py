@@ -1788,10 +1788,14 @@ def _compute_1h_return(
 
 @app.task(name="src.workers.performance.run_counterfactual_worker")
 def run_counterfactual_worker() -> dict:
-    """Compute 1-hour counterfactual returns for SKIP_EMA and SKIP_CAP decisions.
+    """Compute 1-hour counterfactual returns for trade-filter skip decisions.
 
     For each skipped decision, answers: "if we had entered at tick_time,
     what would the 1-hour return have been?"
+
+    Includes SKIP_THRESHOLD because the live portfolio path now enforces the
+    feedback gate there. Excludes freshness/fallback skips: stale or fallback-only
+    signals are data-quality/reliability issues, not filters to relax for alpha.
 
     Scheduled daily at 22:45 UTC (after market close and forward-return worker).
     Only processes decisions from the last 7 days with no counterfactual yet.

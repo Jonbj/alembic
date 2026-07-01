@@ -6,6 +6,12 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ## 2026-06-30
 
+### Operations Navigation + Auto-Improve Gate Counterfactuals
+- **Frontend**: `Config`, `Admin` e `System` sono unificati nella nuova pagina `Operations` con tab dedicate; i vecchi URL fanno redirect verso `Operations?tab=...`. La sidebar segue il flusso operativo: Overview → Operations → News → Signals → Quality → Trading → Performance → Strategies → Auto-Improve → ricerca/strumenti.
+- **Auto-Improve**: Phase B è presentata come feedback gate. La pagina distingue la soglia effettivamente applicata dal portfolio scheduler da `regime_scale`, che resta legacy/audit finché non viene cablato nel sizing portfolio.
+- **Counterfactual**: Phase C include `SKIP_THRESHOLD` oltre a `SKIP_EMA` e `SKIP_CAP`; restano esclusi `SKIP_STALE`, `SKIP_FALLBACK` e `SKIP_POSITION`.
+- **Docs**: aggiornata documentazione API, architettura, user guide e frontend operator guide per riflettere Operations e i nuovi counterfactual gate.
+
 ### S4 dev-doc punti 1-3 (da `S4_TICKER_SENTIMENT_DEV_INSTRUCTIONS_2026-06-30.md`)
 - **(1) Soglie unificate + documentate**: `docs/strategies.md` riscritto col vero chain di gating live (freshness → prefiltro ranker `min_score 0.10`/`min_confidence 0.30` → **order gate** `feedback:entry_threshold` 0.30/dyn → ranking top-N), con tabella "Threshold map" che distingue i 3 concetti e segna il gate legacy `score>0.30 AND EMA20` come INATTIVO sotto `engine=portfolio`. Commento di chiarezza in `S4Config` (min_score = prefiltro, non order threshold). Corretti anche i modelli ensemble nel doc (Kimi+GLM-5.2 cloud, non Qwen/locale).
 - **(2) Resolver in SHADOW (Fase A)**: nuovo `news_resolved_entities` (migr. 031) + `src/connectors/resolver_shadow.py` + `pg_store.write_resolved_entity`. Il worker sentiment calcola e **persiste** la risoluzione ticker deterministica (decision/confidence/ambiguity/directness/tradable + evidenze) per ogni news, **senza gating** del signal live (offline, fail-safe, flag `RESOLVER_SHADOW_ENABLED`). Prepara la misura precision resolver vs `news_labels`.

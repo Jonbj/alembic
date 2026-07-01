@@ -49,15 +49,20 @@ Il sistema è attualmente in **modalità backtest/paper**. Nessun capitale reale
 ```
 Mattina (9:00)
 ├── Overview
-│   └── Controlla P&L del mese e posizioni aperte
+│   └── Controlla readiness, P&L, posizioni, signal gate e decision summary
 │
-├── Auto-Improve → card Phase B
-│   └── Il feedback loop è attivo? (threshold > 0.30 o scale < 1.0×)
-│   └── Se attivo da >24h → vai su Signals e verifica confidence
+├── Operations → System
+│   └── Worker schedulati recenti? Activity log coerente? Kill-switch/mode corretti?
+│
+├── News
+│   └── Verifica ingestion e notizie rilevanti prima di leggere i signal
 │
 ├── Signals
 │   └── Ci sono segnali estremi (>0.6 o <-0.6)?
 │   └── Il modello è concorde (bassa ensemble_std)?
+│
+├── Quality
+│   └── Near-zero/fallback/ticker precision stanno degradando?
 │
 Giorno per giorno
 ├── Trades → tab Analytics (dopo ≥20 trade nel periodo)
@@ -75,8 +80,8 @@ Giorno per giorno
 │
 Settimanalmente
 ├── Auto-Improve → tabella Phase C
-│   └── SKIP_EMA ha avg_return positivo su ≥30 obs? Valuta abbassare il filtro EMA
-│   └── SKIP_CAP con upside missed alto? Valuta alzare il cap di allocazione
+│   └── SKIP_THRESHOLD ha avg_return positivo su ≥30 obs? Valuta il feedback gate con IC/label evidence
+│   └── SKIP_EMA/SKIP_CAP con upside missed alto? Valuta solo se ancora rilevanti nel path attivo
 │
 ├── Backtest
 │   └── IC, ICIR, hit rate — la qualità predittiva si mantiene?
@@ -84,8 +89,8 @@ Settimanalmente
 ├── Strategies
 │   └── I gate sono ancora tutti PASS? La sensitivity è stabile?
 │
-├── Admin
-│   └── Verifica che il sistema sia in modalità corretta
+├── Operations → Config/Admin
+│   └── Verifica watchlist, rischio, modalità e kill-switch
 ```
 
 ### Cosa NON fare
@@ -234,31 +239,34 @@ Cambia il periodo (7/30/90 gg) per bilanciare freschezza e volume statistico. Co
 
 **A cosa serve**: Monitorare il sistema di auto-correzione in tre fasi. Nessun intervento manuale richiesto in condizioni normali — il sistema si aggiusta da solo.
 
-**Card: Phase B — Loss Feedback Loop**
+**Card: Phase B — Feedback Gate**
 
-Il sistema controlla le perdite ogni 30 minuti durante gli orari di mercato e alza le soglie di ingresso automaticamente.
+Il sistema controlla le perdite ogni 30 minuti durante gli orari di mercato e alza automaticamente la soglia di ingresso letta dal portfolio scheduler.
 
 | Stato | Significato | Azione |
 |-------|------------|--------|
 | Entry Threshold = 0.30, Scale = 1.0× | Baseline, nessuna perdita recente | Nessuna |
 | Threshold > 0.30 | Feedback attivo dopo perdite consecutive | Monitorare — normale in mercati difficili |
-| Scale < 1.0× | Sizing ridotto — protezione in contesto avverso | Monitorare |
+| Scale < 1.0× | Stato Redis legacy/audit; non interpretarlo come sizing ridotto nel path portfolio finché non è cablato | Monitorare |
 | Attivo da >24h senza recovery | Mercato persistentemente avverso | Verificare Signals, Overview, considerare Halted |
 
 **Trigger** (logica OR): 3 perdite consecutive, oppure P&L rolling negativo sugli ultimi 10 trade.
 **Recovery**: 5 vincite consecutive riportano ai valori baseline.
 **TTL**: ogni aggiustamento scade automaticamente dopo 48 ore.
 
-**Card: Phase C — Opportunity Cost (tabella)**
+**Card: Phase C — Gate Opportunity Cost (tabella)**
 
-Analisi retrospettiva dei trade filtrati. Il `counterfactual-worker` calcola nightly (22:45 UTC) il ritorno a 1h per ogni segnale saltato.
+Analisi retrospettiva dei candidati scartati da gate/filtri. Il `counterfactual-worker` calcola nightly (22:45 UTC) il ritorno a 1h per i casi inclusi.
 
 | Tipo | Causa del filtro | Quando preoccuparsi |
 |------|-----------------|---------------------|
+| **SKIP_THRESHOLD** | Score sotto la soglia feedback attiva | avg_return >+0.5% e % profitable >55% su ≥30 obs, poi verificare IC/label evidence |
 | **SKIP_EMA** | Prezzo sotto EMA20 al momento del segnale | avg_return >+0.5% e % profitable >55% su ≥30 obs |
 | **SKIP_CAP** | Limite di allocazione per ciclo raggiunto | upside missed alto e ricorrente |
 
-**Regola decisionale**: agisci su un filtro solo se *avg_return > +0.5%* e *% profitable > 55%* su almeno 30 osservazioni. Sotto questa soglia i dati sono statisticamente rumorosi.
+`SKIP_STALE`, `SKIP_FALLBACK` e `SKIP_POSITION` sono esclusi: non rappresentano filtri da allentare, ma signal non affidabili o posizioni già aperte.
+
+**Regola decisionale**: agisci su un filtro solo se *avg_return > +0.5%* e *% profitable > 55%* su almeno 30 osservazioni computate. Sotto questa soglia i dati sono statisticamente rumorosi.
 
 I dati del giorno corrente appariranno il giorno successivo. La tabella è vuota nei primi giorni di paper trading.
 
@@ -403,7 +411,19 @@ Non approvare se:
 
 ---
 
-### 3.9 Config ⚙
+### 3.9 Operations ⚙
+
+**A cosa serve**: Unifica System, Config e Admin in un unico punto operativo.
+
+**Tab System**: scheduler, activity log e segnali PEAD.
+
+**Tab Config**: watchlist, risk parameters e full config read-only.
+
+**Tab Admin**: kill switch e operating mode, con conferme esplicite per le azioni critiche.
+
+---
+
+### 3.9a Config
 
 **A cosa serve**: Configurare il comportamento del sistema in tempo reale.
 
@@ -421,7 +441,7 @@ Non approvare se:
 
 ---
 
-### 3.10 Admin 🔒
+### 3.9b Admin
 
 **A cosa serve**: Controllare e modificare il funzionamento del sistema. **Richiede API key.**
 
@@ -676,8 +696,8 @@ I segnali hanno una finestra di freschezza di **30 minuti**. Se `generated_at` r
 
 ### "Nessun segnale appare"
 
-1. **Controlla la modalità** in Admin — se è `backtest`, il sistema non genera segnali live
-2. **Controlla la watchlist** in Config — se è vuota, non ci sono ticker da monitorare
+1. **Controlla la modalità** in Operations → Admin — se è `backtest`, il sistema non genera segnali live
+2. **Controlla la watchlist** in Operations → Config — se è vuota, non ci sono ticker da monitorare
 3. **Controlla i worker** — i sentiment worker girano ogni 15 minuti, potresti dover aspettare
 
 ### "Il P&L è sempre zero"

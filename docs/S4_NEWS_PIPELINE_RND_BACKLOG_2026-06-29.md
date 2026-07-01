@@ -31,7 +31,8 @@ FinBERT come auditor, gate NO_TRADE per ambiguità.
 | **QX-02 — dashboard qualità** (`/quality`: distribuzione per-modello, near-zero/fallback rate, precision estrazione dal label set) | ✅ **DONE, live** | `0dcf4da` |
 | **QS-03 — agreement→confidence** (confidence scontata dalla divergenza, dietro flag `agreement_weighting`) | ✅ **DONE** (default OFF: cambia live score → attivare post-QX-01) | `fb24dec` |
 | Punto 1b — gate `risk_flags` + weighting `materiality×directness` sul live score | ⏳ **gated su QX-01** (calibrazione/label set: cambia comportamento, non falsificabile senza misura) | — |
-| Resolver — wiring + enforcement | ⏳ **gated su QX-01** (shadow → calibrazione → enforce) | — |
+| Resolver — **shadow mode wired (Fase A)** (`news_resolved_entities` migr. 031 + `resolver_shadow.py`; verdetto persistito per ogni news, **no gating**) | ✅ **DONE, deployed** (verificato live: XLF/XLE→NO_TRADE_LOW_CONF, XLI/XLC→NO_TRADE_NOT_TRADABLE) | `565bb89` |
+| Resolver — enforcement (decision != RESOLVED → no signal tradabile) | ⏳ **gated su QX-01** (shadow → calibrazione → enforce) | — |
 | B3 — novelty evento + already-priced | 📋 roadmap Fase 5 | — |
 | Issuer-specific sentiment (FinBERT su evidence sentences) | 📋 roadmap Fase 2-3 | — |
 | Harness IC per-modello (LOO-ICIR) | 📋 roadmap Fase 5 | — |

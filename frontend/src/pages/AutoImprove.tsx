@@ -15,6 +15,36 @@ const fmtSign = (v: number | null | undefined) => {
   return `${s}${(v * 100).toFixed(2)}%`
 }
 
+const DECISION_STYLE: Record<string, { label: string; bg: string; fg: string; note: string }> = {
+  SKIP_THRESHOLD: {
+    label: 'Gate threshold',
+    bg: 'rgba(245,158,11,0.15)',
+    fg: '#d97706',
+    note: 'Feedback gate blocked the signal because score was below the active entry threshold.',
+  },
+  SKIP_EMA: {
+    label: 'EMA trend',
+    bg: 'rgba(99,102,241,0.15)',
+    fg: '#6366f1',
+    note: 'Legacy trend filter blocked a candidate below EMA20.',
+  },
+  SKIP_CAP: {
+    label: 'Cycle cap',
+    bg: 'rgba(249,115,22,0.15)',
+    fg: '#ea580c',
+    note: 'Legacy cycle allocation cap blocked an otherwise valid candidate.',
+  },
+}
+
+function decisionMeta(decision: string) {
+  return DECISION_STYLE[decision] ?? {
+    label: decision,
+    bg: 'rgba(100,116,139,0.15)',
+    fg: '#64748b',
+    note: 'Skipped trade candidate.',
+  }
+}
+
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="card" style={{ marginBottom: 20 }}>
@@ -75,16 +105,16 @@ export default function AutoImprove() {
     <div style={{ position: 'relative' }}>
       <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700 }}>Auto-Improve</h2>
       <p style={{ margin: '0 0 24px', color: 'var(--text-muted)', fontSize: 14 }}>
-        Automatic strategy adjustments triggered by live performance.
+        Feedback gate status and counterfactual checks on skipped trade candidates.
       </p>
       <HelpButton title="Auto-Improve — Guida alla Lettura" sections={[
         {
           heading: "Cos'è Auto-Improve",
-          content: 'Il sistema si auto-corregge in tre fasi:\n\n**Phase A** (tab Analytics in Trades): analizza il passato — dove guadagna e perde il sistema per dimensione.\n**Phase B** (questa pagina, card sopra): reagisce alle perdite in tempo reale — alza le soglie di ingresso e riduce l\'esposizione quando il sistema sta perdendo.\n**Phase C** (questa pagina, tabella sotto): valuta le opportunità mancate — analizza retrospettivamente i trade filtrati per capire se i filtri sono troppo restrittivi.\n\nNessun intervento manuale richiesto: Phase B e C operano automaticamente.',
+          content: 'Il sistema si auto-corregge in tre fasi:\n\n**Phase A** (tab Analytics in Trades): analizza il passato — dove guadagna e perde il sistema per dimensione.\n**Phase B** (questa pagina, card sopra): reagisce alle perdite alzando la soglia di ingresso usata dal portfolio scheduler.\n**Phase C** (questa pagina, tabella sotto): misura retrospettivamente i candidati scartati da gate/filtri per capire se il sistema è troppo restrittivo.\n\nNessun intervento manuale richiesto: Phase B e C operano automaticamente.',
         },
         {
           heading: 'Phase B — Valori da Monitorare',
-          content: '**Entry Threshold** (baseline 0.30): il sistema entra in posizione solo se lo score LLM supera questa soglia. Quando il feedback è attivo, può salire fino a 0.60 — il sistema diventa più selettivo (meno trade, ma filtrati meglio).\n\n**Regime Scale** (normale 1.0×): moltiplica il regime_mult di ogni ciclo. Con scale=0.80, un regime_mult di 1.20 diventa effettivamente 0.96 — position sizing ridotto del 20%.\n\nEsempio pratico: se threshold=0.45 e scale=0.80, solo segnali forti entrano in posizione e con sizing ridotto.',
+          content: '**Entry Threshold** (baseline 0.30): il portfolio scheduler entra in posizione solo se lo score supera questa soglia. Quando il feedback è attivo, può salire fino a 0.60 — il sistema diventa più selettivo.\n\n**Regime Scale** (normale 1.0×): è ancora esposto come stato Redis e resta consumato dal path legacy `execution.py`. Nel path portfolio corrente non deve essere interpretato come riduzione certa del sizing finché non viene cablato esplicitamente nel portfolio scheduler.',
         },
         {
           heading: 'Phase B — Trigger e Recovery',
@@ -96,11 +126,11 @@ export default function AutoImprove() {
         },
         {
           heading: 'Phase C — Come Leggere la Tabella',
-          content: '**SKIP_EMA**: trade saltati perché il prezzo era sotto la EMA20 (filtro trend-following). La EMA evita di comprare in downtrend.\n**SKIP_CAP**: trade saltati perché il limite di allocazione del ciclo era stato raggiunto (troppi trade in un singolo ciclo orario).\n\n**Colonne chiave**:\n• **Skips**: quante volte il filtro ha bloccato un trade nel periodo\n• **Computed**: quanti skip hanno un ritorno a 1h calcolato (dipende dalla disponibilità di dati Alpaca)\n• **Avg 1h return**: ritorno medio se avessimo aperto la posizione\n• **% Profitable**: percentuale di skip che sarebbero stati profittevoli\n• **Upside missed**: somma dei ritorni positivi — opportunità economica persa',
+          content: '**SKIP_THRESHOLD**: segnale scartato dal feedback gate perché sotto la soglia attiva. È il caso più importante nel path portfolio.\n**SKIP_EMA** e **SKIP_CAP**: filtri legacy ancora supportati dai counterfactual.\n\n**SKIP_STALE** e **SKIP_FALLBACK** non sono inclusi: sono problemi di freshness/affidabilità del segnale, non opportunità da sbloccare abbassando un filtro.\n\n**Colonne chiave**:\n• **Skips**: quante volte il filtro ha bloccato un trade nel periodo\n• **Computed**: quanti skip hanno un ritorno a 1h calcolato\n• **Avg 1h return**: ritorno medio se avessimo aperto la posizione\n• **% Profitable**: percentuale di skip che sarebbero stati profittevoli\n• **Upside missed**: somma dei ritorni positivi',
         },
         {
           heading: 'Phase C — Interpretazione e Azioni',
-          content: '**Avg 1h return verde + % profitable >50%** → il filtro sta bloccando trade profittevoli. Considera:\n• Per SKIP_EMA: abbassare o disabilitare il filtro EMA (parametro in Config).\n• Per SKIP_CAP: aumentare il cap di allocazione per ciclo.\n\n**Avg 1h return rosso** → il filtro funziona correttamente, stai evitando perdite. Non intervenire.\n\n**Upside missed alto con pochi skip** → possibilmente rumore statistico. Aspetta almeno 2 settimane di dati (>50 skip per tipo) prima di modificare i parametri.\n\n**Regola pratica**: agisci solo se avg_return >+0.5% e % profitable >55% su almeno 30 osservazioni.',
+          content: '**Avg 1h return verde + % profitable >50%** → il gate potrebbe essere troppo restrittivo. Per SKIP_THRESHOLD valuta la soglia solo insieme a IC/label evidence, non solo sul ritorno 1h.\n\n**Avg 1h return rosso** → il filtro sta evitando perdite. Non intervenire.\n\n**Upside missed alto con pochi skip** → possibilmente rumore statistico. Aspetta almeno 2 settimane di dati e almeno 30 osservazioni computate prima di modificare parametri.',
         },
         {
           heading: 'Phase C — Tempistica e Aggiornamento Dati',
@@ -109,7 +139,7 @@ export default function AutoImprove() {
       ]} />
 
       {/* Phase B: Loss Feedback */}
-      <Card title="Phase B — Loss Feedback Loop">
+      <Card title="Phase B — Feedback Gate">
         {fbLoading ? (
           <p style={{ color: 'var(--text-muted)' }}>Loading…</p>
         ) : !feedback ? (
@@ -126,7 +156,7 @@ export default function AutoImprove() {
               <Stat
                 label="Regime Scale"
                 value={`${fmt(feedback.regime_scale, 2)}×`}
-                sub={feedback.regime_scale < 1 ? 'reduced by feedback' : 'normal'}
+                sub={feedback.regime_scale < 1 ? 'legacy scale state' : 'normal'}
                 highlight={feedback.regime_scale < 1}
               />
               <Stat
@@ -158,23 +188,35 @@ export default function AutoImprove() {
               </div>
             )}
 
+            {feedback.regime_scale < 1 && (
+              <div style={{
+                background: 'rgba(59,130,246,0.08)',
+                border: '1px solid rgba(59,130,246,0.25)',
+                borderRadius: 8, padding: '10px 14px', fontSize: 13, marginTop: 10,
+                color: 'var(--text-muted)',
+              }}>
+                Portfolio path note: the entry threshold is enforced by the scheduler.
+                Regime scale is currently an audit/legacy execution state unless portfolio sizing is explicitly wired to it.
+              </div>
+            )}
+
             <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
-              Checked every 30 min during market hours. Raises threshold after 3 consecutive losses
-              or negative rolling P&L (last 10 trades). Recovers after 5 consecutive wins.
-              Adjustments expire after 48 h.
+              Checked every 30 min during market hours. Raises the entry threshold after
+              3 consecutive losses or negative rolling P&L (last 10 trades). Recovers after
+              5 consecutive wins. Adjustments expire after 48 h.
             </p>
           </>
         )}
       </Card>
 
       {/* Phase C: Counterfactual / Opportunity Cost */}
-      <Card title="Phase C — Opportunity Cost (last 7 days)">
+      <Card title="Phase C — Gate Opportunity Cost (last 7 days)">
         {cfLoading ? (
           <p style={{ color: 'var(--text-muted)' }}>Loading…</p>
         ) : !counterfactual || counterfactual.length === 0 ? (
           <p style={{ color: 'var(--text-muted)' }}>
-            No data yet — counterfactual returns are computed nightly at 22:45 UTC.
-            Data will appear after the first day of paper trading.
+            No gate/filter skip data yet — counterfactual returns are computed nightly at 22:45 UTC.
+            Rows appear after SKIP_THRESHOLD, SKIP_EMA or SKIP_CAP decisions are recorded and processed.
           </p>
         ) : (
           <>
@@ -190,37 +232,44 @@ export default function AutoImprove() {
                 </tr>
               </thead>
               <tbody>
-                {counterfactual.map(row => (
-                  <tr key={row.decision} style={{ borderTop: '1px solid var(--border)' }}>
-                    <td style={td}>
-                      <span style={{
-                        background: row.decision === 'SKIP_EMA'
-                          ? 'rgba(99,102,241,0.15)' : 'rgba(249,115,22,0.15)',
-                        color: row.decision === 'SKIP_EMA' ? '#818cf8' : '#fb923c',
-                        borderRadius: 4, padding: '2px 6px', fontSize: 11, fontWeight: 600,
-                      }}>
-                        {row.decision}
-                      </span>
-                    </td>
-                    <td style={td}>{row.total_skips}</td>
-                    <td style={td}>{row.computed}</td>
-                    <td style={{ ...td, color: row.avg_return >= 0 ? '#4ade80' : '#f87171' }}>
-                      {fmtSign(row.avg_return)}
-                    </td>
-                    <td style={td}>{fmtPct(row.pct_profitable)}</td>
-                    <td style={{ ...td, color: row.sum_positive_returns > 0 ? '#f59e0b' : 'inherit' }}>
-                      {fmtSign(row.sum_positive_returns)}
-                    </td>
-                  </tr>
-                ))}
+                {counterfactual.map(row => {
+                  const meta = decisionMeta(row.decision)
+                  return (
+                    <tr key={row.decision} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={td}>
+                        <div>
+                          <span style={{
+                            background: meta.bg,
+                            color: meta.fg,
+                            borderRadius: 4, padding: '2px 6px', fontSize: 11, fontWeight: 600,
+                          }}>
+                            {row.decision}
+                          </span>
+                          <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 3 }}>
+                            {meta.label}
+                          </div>
+                        </div>
+                      </td>
+                      <td style={td}>{row.total_skips}</td>
+                      <td style={td}>{row.computed}</td>
+                      <td style={{ ...td, color: row.avg_return >= 0 ? '#4ade80' : '#f87171' }}>
+                        {fmtSign(row.avg_return)}
+                      </td>
+                      <td style={td}>{fmtPct(row.pct_profitable)}</td>
+                      <td style={{ ...td, color: row.sum_positive_returns > 0 ? '#f59e0b' : 'inherit' }}>
+                        {fmtSign(row.sum_positive_returns)}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
 
             <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
-              <strong>SKIP_EMA</strong>: price was below EMA20 — would the trade have been profitable
-              anyway? <strong>SKIP_CAP</strong>: cycle allocation cap was hit — what did we leave on
-              the table? <em>Upside missed</em> = sum of positive 1-hour returns across all skipped
-              signals. SKIP_POSITION (already open) is excluded.
+              <strong>SKIP_THRESHOLD</strong> measures whether the active feedback gate is rejecting
+              profitable candidates. <strong>SKIP_EMA</strong> and <strong>SKIP_CAP</strong> remain
+              supported for legacy filter analysis. SKIP_STALE, SKIP_FALLBACK and SKIP_POSITION are
+              excluded intentionally.
             </p>
           </>
         )}

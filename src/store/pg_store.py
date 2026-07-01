@@ -420,14 +420,14 @@ class PostgreSQLStore:
         days_back: int = 7,
         limit: int = 500,
     ) -> list[dict]:
-        """Return SKIP_EMA and SKIP_CAP rows from the last N days that have no counterfactual yet."""
+        """Return trade-filter skip rows from the last N days that have no counterfactual yet."""
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(
                     """SELECT id, tick_time, symbol, score, regime_mult, decision
                        FROM execution_decisions
-                       WHERE decision IN ('SKIP_EMA', 'SKIP_CAP')
+                       WHERE decision IN ('SKIP_THRESHOLD', 'SKIP_EMA', 'SKIP_CAP')
                          AND counterfactual_computed_at IS NULL
                          AND tick_time >= now() - (%s || ' days')::interval
                        ORDER BY tick_time DESC
@@ -484,7 +484,7 @@ class PostgreSQLStore:
             COALESCE(SUM(CASE WHEN counterfactual_return_1h > 0 THEN counterfactual_return_1h ELSE 0 END), 0)
                 AS sum_positive_returns
         FROM execution_decisions
-        WHERE decision IN ('SKIP_EMA', 'SKIP_CAP')
+        WHERE decision IN ('SKIP_THRESHOLD', 'SKIP_EMA', 'SKIP_CAP')
           AND tick_time >= now() - (%s || ' days')::interval
         GROUP BY decision
         ORDER BY decision

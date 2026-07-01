@@ -98,10 +98,8 @@ The React frontend (`frontend/src/pages/`) exposes 16 pages. Authorization: logi
 | Performance | `Performance.tsx` | `/api/performance/pnl`, `/api/performance/daily`, `/api/performance/weekly`, `/weights/*` | P&L storico, breakdown giornaliero, report settimanale |
 | News | `News.tsx` | `/api/news/recent` | Recent ingested articles |
 | LLM | `LLM.tsx` | `/api/llm/feedback` | Model feedback loop |
-| Auto-Improve | `AutoImprove.tsx` | `/api/feedback/status` | Phase B loss feedback |
-| Config | `Config.tsx` | `/api/config` (GET/POST) | System config editor |
-| System Log | `SystemLog.tsx` | `/api/system/activity` | Unified event log |
-| Admin | `Admin.tsx` | `/api/admin/*` | Kill-switch + mode admin |
+| Auto-Improve | `AutoImprove.tsx` | `/api/feedback/status`, `/api/trades/analytics/counterfactual` | Feedback gate + counterfactual opportunity cost |
+| Operations | `Operations.tsx` | `/api/system/*`, `/api/config`, `/api/admin/*` | Unified System / Config / Admin operator surface |
 | Backtest | `Backtest.tsx` | Backtest API | Strategy backtesting |
 | Docs | `Docs.tsx` | Static | Documentation viewer |
 | Login | `LoginPage.tsx` | `/api/auth/login` | Authentication |
@@ -151,19 +149,16 @@ curl -H "X-API-Key: $ADMIN_API_KEY" \
 
 ---
 
-### 2.2 P2-04 Cockpit — Frontend Gap
+### 2.2 P2-04 Cockpit — Frontend Coverage
 
-The P2-04 operator cockpit (`/api/system/readiness`) is **API-available but has no dedicated UI page**. No frontend component currently polls `GET /api/system/readiness` and renders the 8-key health flags visually.
+The P2-04 operator cockpit is now partially surfaced in the frontend:
 
-**Current workaround:** Use `curl` commands from operations.md runbooks.
+- `Overview.tsx` polls `GET /api/system/readiness` and shows high-level operational state.
+- `Operations.tsx` groups the System tab (`/api/system/scheduler`, `/api/system/activity`, PEAD signals), Config tab and Admin tab.
 
-**What a future cockpit UI page would show:**
-- Red/green indicators for each of the 8 health flags
-- Last-updated timestamp
-- Direct links to runbooks for each unhealthy flag
-- Auto-refresh every 60 seconds
+**Remaining gap:** there is still no dedicated full 8-flag readiness matrix with direct runbook links for each unhealthy flag.
 
-This gap is acceptable for supervised_paper mode (operator manually polls) but should be addressed before controlled paper trading.
+Use the `curl` commands from operations.md when a full readiness payload is required for preflight evidence.
 
 ### 2.3 Strategy Mode / Lifecycle — Frontend Gap
 

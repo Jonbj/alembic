@@ -49,7 +49,7 @@ export default function Docs() {
         },
         {
           heading: "Dove guardare",
-          content: "• **Overview** — P&L live, segnali recenti, IC\n• **Signals** — segnali LLM per ticker\n• **Trades → Analytics** — P&L per regime/simbolo/durata\n• **Performance → Weekly Report** — costi, cash drag, infrastruttura\n• **Strategies** — gate di validazione OOS\n• **Auto-Improve** — feedback loop e counterfactual\n• **LLM** — pesi ensemble e ICIR per modello\n• **System** — scheduler status, activity log, segnali PEAD\n• **News** — articoli per fonte (Reuters, CNBC, EDGAR, GDELT…)",
+          content: "• **Overview** — P&L live, stato operativo, segnali e decisioni recenti\n• **Operations** — scheduler, activity log, configurazione, kill switch e mode\n• **News** — articoli per fonte (Reuters, CNBC, EDGAR, GDELT…)\n• **Signals** — segnali LLM per ticker e decision log\n• **Quality** — metriche ticker/sentiment e fallback\n• **Trades → Analytics** — P&L per regime/simbolo/durata\n• **Performance → Weekly Report** — costi, cash drag, infrastruttura\n• **Strategies** — gate di validazione OOS\n• **Auto-Improve** — feedback gate e counterfactual\n• **LLM** — pesi ensemble e ICIR per modello",
         },
       ]} />
 
@@ -207,7 +207,7 @@ Filtri:
 Su beat confermato:
   SurpriseSignal { hold_until = detected_at + 20 giorni }
   → SET Redis: pead:signal:{symbol} (TTL 30 giorni)
-  → Visibile in: System → PEAD Signals`}</div>
+  → Visibile in: Operations → System → PEAD Signals`}</div>
               <h3 style={{ ...h3, margin: '8px 0 4px' }}>Posizionamento nel portfolio</h3>
               <p style={p}>
                 S7 è in fase di raccolta dati. Non è ancora in <code>strategies.yaml</code> con allocazione positiva. Quando il backtest su dati storici supererà i gate, verrà attivata con allocazione massima 5% (max 5% per posizione, max 25% sleeve totale).
@@ -459,20 +459,20 @@ high_vol ×0.2   sleeve=0.4% → ordine ~$4`}</div>
           <li><strong>P&L per score bucket</strong> — segnali con score alto → P&L alto? Se no, il segnale LLM non ha edge</li>
           <li><strong>P&L per durata holding</strong> — finestra ottimale di holding</li>
         </ul>
-        <h3 style={h3}>Phase B — Loss Feedback Loop (pagina Auto-Improve)</h3>
+        <h3 style={h3}>Phase B — Feedback Gate (pagina Auto-Improve)</h3>
         <p style={p}>
-          N perdite consecutive o P&L rolling negativo → <code>LossFeedbackWorker</code> alza <code>ENTRY_THRESHOLD</code> e riduce <code>regime_scale</code>. Visibile nel tab Weekly Report della pagina Performance.
+          N perdite consecutive o P&L rolling negativo → <code>LossFeedbackWorker</code> alza <code>feedback:entry_threshold</code>. Nel path portfolio questa soglia è applicata dal portfolio scheduler. <code>regime_scale</code> resta visibile come stato Redis/legacy finché non viene cablato nel sizing portfolio.
         </p>
         <h3 style={h3}>Phase C — Counterfactual Analysis (pagina Auto-Improve)</h3>
         <p style={p}>
-          Per ogni trade saltato (<code>SKIP_EMA</code>, <code>SKIP_CAP</code>, <code>SKIP_POSITION</code>), calcola il rendimento che avrebbe generato. Permette di calibrare i filtri.
+          Per i candidati scartati da gate/filtri (<code>SKIP_THRESHOLD</code>, <code>SKIP_EMA</code>, <code>SKIP_CAP</code>), calcola il rendimento a 1h che avrebbero generato. <code>SKIP_STALE</code>, <code>SKIP_FALLBACK</code> e <code>SKIP_POSITION</code> sono esclusi perché non sono opportunità operative da sbloccare.
         </p>
       </div>
 
       {/* 9. SCHEDULER E SYSTEM */}
       <div style={card}>
-        <h2 style={h2}>🖥 Pagina System — Scheduler e Log</h2>
-        <p style={p}>La pagina <strong>System</strong> offre visibilità operativa sull'infrastruttura senza dover accedere ai log Docker.</p>
+        <h2 style={h2}>🖥 Pagina Operations — System, Config e Admin</h2>
+        <p style={p}>La pagina <strong>Operations</strong> unifica visibilità operativa, configurazione e controlli di emergenza. Il tab System offre visibilità sull'infrastruttura senza dover accedere ai log Docker.</p>
         <h3 style={h3}>Tab Scheduler</h3>
         <p style={p}>Mostra tutti i worker Celery schedulati con la loro frequenza e l'ultimo timestamp di esecuzione (dedotto da DB). Se "Last Run" è molto vecchio o assente, il worker non sta girando correttamente.</p>
         <div style={{ overflowX: 'auto', marginBottom: 12 }}>
@@ -490,7 +490,7 @@ high_vol ×0.2   sleeve=0.4% → ordine ~$4`}</div>
                 ['sec-edgar-ingestion', 'ogni ora, mercato aperto', 'Filing 8-K → news_log'],
                 ['pead-ingestion', 'xx:05/35, ogni 30 min, mercato aperto', 'Classifica 8-K → segnali S7 in Redis'],
                 ['risk-monitor', 'ogni 30 min, mercato aperto', 'Drawdown check + alert Telegram'],
-                ['counterfactual-worker', '22:45 UTC, Lun-Ven', 'Calcola ritorni 1h per trade saltati (Phase C)'],
+                ['counterfactual-worker', '22:45 UTC, Lun-Ven', 'Calcola ritorni 1h per SKIP_THRESHOLD/SKIP_EMA/SKIP_CAP (Phase C)'],
               ].map(([task, freq, desc]) => (
                 <tr key={task as string} style={tableRow}>
                   <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }}>{task}</td>

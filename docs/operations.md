@@ -96,8 +96,8 @@ Beat schedules are defined in `src/workers/celery_app.py`. All times are UTC.
 | `poll-telegram-updates` | every 5s | Process approve/reject callbacks |
 | `run-sec-edgar-ingestion` | */30 14-21 Mon-Fri | SEC EDGAR 8-K filings → news queue |
 | `pead-ingestion` | 5,35 14-21 Mon-Fri | Classifica 8-K via Ollama → pead_signals (queue: inference) |
-| `loss-feedback-check` | */30 14-21 Mon-Fri | Phase B: detect loss patterns → adjust threshold/regime scale |
-| `counterfactual-worker` | 22:45 daily | Phase C: compute 1h counterfactual returns for SKIP rows |
+| `loss-feedback-check` | */30 14-21 Mon-Fri | Phase B: detect loss patterns → raise feedback entry threshold; write legacy/audit scale state |
+| `counterfactual-worker` | 22:45 daily | Phase C: compute 1h counterfactual returns for SKIP_THRESHOLD/SKIP_EMA/SKIP_CAP rows |
 | `reconcile-fills-evening` | 21:30 Mon-Fri | Reconcile fill prices after NYSE close |
 
 ### Manual Task Triggering

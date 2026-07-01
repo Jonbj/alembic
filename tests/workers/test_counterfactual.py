@@ -211,6 +211,7 @@ class TestPgStoreCounterfactual:
         store.fetch_skip_decisions_without_counterfactual(days_back=7, limit=100)
 
         called_sql = mock_cursor.execute.call_args[0][0]
+        assert "SKIP_THRESHOLD" in called_sql
         assert "SKIP_EMA" in called_sql
         assert "SKIP_CAP" in called_sql
         assert "counterfactual_computed_at IS NULL" in called_sql

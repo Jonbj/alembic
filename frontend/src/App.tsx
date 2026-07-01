@@ -12,14 +12,12 @@ const Performance = lazy(() => import('@/pages/Performance'))
 const Backtest    = lazy(() => import('@/pages/Backtest'))
 const News        = lazy(() => import('@/pages/News'))
 const LLM         = lazy(() => import('@/pages/LLM'))
-const Config      = lazy(() => import('@/pages/Config'))
-const Admin       = lazy(() => import('@/pages/Admin'))
+const Operations  = lazy(() => import('@/pages/Operations'))
 const AutoImprove = lazy(() => import('@/pages/AutoImprove'))
 const Strategies  = lazy(() => import('@/pages/Strategies'))
 const Docs        = lazy(() => import('@/pages/Docs'))
 const Dashboard   = lazy(() => import('@/pages/DashboardPage'))
 const LoginPage   = lazy(() => import('@/pages/LoginPage'))
-const SystemLog   = lazy(() => import('@/pages/SystemLog'))
 const Validation  = lazy(() => import('@/pages/Validation'))
 const Labeling    = lazy(() => import('@/pages/Labeling'))
 const Quality     = lazy(() => import('@/pages/Quality'))
@@ -55,12 +53,13 @@ export default function App() {
                 <Route path="/backtest"     element={<Backtest />} />
                 <Route path="/news"         element={<News />} />
                 <Route path="/llm"          element={<LLM />} />
-                <Route path="/config"       element={<Config />} />
-                <Route path="/admin"        element={<Admin />} />
+                <Route path="/operations"   element={<Operations />} />
+                <Route path="/config"       element={<Navigate to="/operations?tab=config" replace />} />
+                <Route path="/admin"        element={<Navigate to="/operations?tab=admin" replace />} />
                 <Route path="/auto-improve" element={<AutoImprove />} />
                 <Route path="/docs"         element={<Docs />} />
                 <Route path="/dashboard"    element={<Dashboard />} />
-                <Route path="/system"       element={<SystemLog />} />
+                <Route path="/system"       element={<Navigate to="/operations?tab=system" replace />} />
                 <Route path="/validation"   element={<Validation />} />
                 <Route path="/labeling"     element={<Labeling />} />
                 <Route path="/quality"      element={<Quality />} />
