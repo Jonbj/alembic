@@ -6,6 +6,7 @@ import alembicLogo from '@/assets/alembic.png'
 const NAV = [
   { to: '/',            label: 'Overview',    icon: '⊞' },
   { to: '/news',        label: 'News',        icon: '📰' },
+  { to: '/llm',         label: 'LLM',         icon: '🤖' },
   { to: '/signals',     label: 'Signals',     icon: '⚡' },
   { to: '/quality',     label: 'Quality',     icon: '🔬' },
   { to: '/trading',     label: 'Trading',     icon: '📈' },
@@ -14,7 +15,6 @@ const NAV = [
   { to: '/auto-improve',  label: 'Auto-Improve', icon: '🔧' },
   { to: '/validation',  label: 'Validation',  icon: '🧪' },
   { to: '/labeling',    label: 'Labeling',    icon: '🏷️' },
-  { to: '/llm',         label: 'LLM',         icon: '🤖' },
   { to: '/backtest',    label: 'Backtest',    icon: '🔬' },
   { to: '/dashboard',  label: 'Dashboard',   icon: '📡' },
   { to: '/operations',  label: 'Admin',       icon: '🔒' },
