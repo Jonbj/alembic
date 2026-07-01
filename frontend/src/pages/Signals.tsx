@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
@@ -7,26 +8,29 @@ import { fetchDecisions, fetchFeedbackStatus, type Decision } from '@/api/trades
 import { DirectionBadge } from '@/components/shared/DirectionBadge'
 import { HelpButton } from '@/components/shared/HelpButton'
 import { DataTable } from '@/components/shared/DataTable'
+import { SignalTraceLinks } from '@/components/shared/SignalTraceLinks'
 
 const ROW_H = 40
 
 const COLS = [
-  { label: 'Ticker',     pct: 9 },
-  { label: 'Direction',  pct: 10 },
-  { label: 'Score',      pct: 9 },
-  { label: 'Confidence', pct: 9 },
-  { label: 'Model',      pct: 22 },
-  { label: 'Fallback',   pct: 7 },
-  { label: 'Time',       pct: 17 },
-  { label: 'Usato',      pct: 17 },
+  { label: 'Ticker',     pct: 8 },
+  { label: 'Direction',  pct: 9 },
+  { label: 'Score',      pct: 8 },
+  { label: 'Confidence', pct: 8 },
+  { label: 'Model',      pct: 20 },
+  { label: 'Fallback',   pct: 6 },
+  { label: 'Time',       pct: 15 },
+  { label: 'Usato',      pct: 14 },
+  { label: 'Trace',      pct: 12 },
 ]
 
 const GRID_TEMPLATE = COLS.map(c => `${c.pct}%`).join(' ')
 
 export default function Signals() {
-  const [ticker, setTicker] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [ticker, setTicker] = useState(searchParams.get('symbol') ?? '')
   const [direction, setDirection] = useState('')
-  const [tab, setTab] = useState<'signals' | 'decisions'>('signals')
+  const [tab, setTab] = useState<'signals' | 'decisions'>(searchParams.get('tab') === 'decisions' ? 'decisions' : 'signals')
 
   const { data: signals = [], isLoading, error } = useQuery({
     queryKey: ['signals'],
@@ -80,6 +84,25 @@ export default function Signals() {
     SKIP_STALE: 'Skip — segnale scaduto',
   }
 
+  const updateTraceParams = (nextTab: 'signals' | 'decisions', nextTicker = ticker) => {
+    const next = new URLSearchParams(searchParams)
+    if (nextTab === 'decisions') next.set('tab', 'decisions')
+    else next.delete('tab')
+    if (nextTicker.trim()) next.set('symbol', nextTicker.trim().toUpperCase())
+    else next.delete('symbol')
+    setSearchParams(next, { replace: true })
+  }
+
+  const updateTicker = (value: string) => {
+    setTicker(value)
+    updateTraceParams(tab, value)
+  }
+
+  const updateTab = (nextTab: 'signals' | 'decisions') => {
+    setTab(nextTab)
+    updateTraceParams(nextTab)
+  }
+
   return (
     <div style={{ position: 'relative' }}>
       <h2 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>Signals</h2>
@@ -110,7 +133,7 @@ export default function Signals() {
         {(['signals', 'decisions'] as const).map(t => (
           <button
             key={t}
-            onClick={() => setTab(t)}
+            onClick={() => updateTab(t)}
             style={{
               padding: '8px 20px', border: 'none', cursor: 'pointer',
               background: 'transparent',
@@ -128,7 +151,7 @@ export default function Signals() {
           <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
             <input
               value={ticker}
-              onChange={e => setTicker(e.target.value)}
+              onChange={e => updateTicker(e.target.value)}
               placeholder="Filter symbol…"
               style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #334155', background: '#0f172a', color: 'white', fontSize: 13, width: 140 }}
             />
@@ -142,6 +165,7 @@ export default function Signals() {
               { label: 'Decision',     width: '8%' },
               { label: 'Segnale →Δ',  width: '10%' },
               { label: 'Order ID',     width: '10%' },
+              { label: 'Trace',        width: '9%' },
               { label: 'Reason',       width: 'auto' },
             ]}
             rows={(decisions as Decision[]).map(d => {
@@ -167,6 +191,7 @@ export default function Signals() {
                     {signalLag}
                   </span>,
                   <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{d.order_id ?? '—'}</span>,
+                  <SignalTraceLinks symbol={d.symbol} compact />,
                   <span style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.4 }}>{d.reason ?? '—'}</span>,
                 ],
               }
@@ -180,7 +205,7 @@ export default function Signals() {
       <>
 
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-        <input placeholder="Filter ticker..." value={ticker} onChange={(e) => setTicker(e.target.value)} style={{ width: 160 }} />
+        <input placeholder="Filter ticker..." value={ticker} onChange={(e) => updateTicker(e.target.value)} style={{ width: 160 }} />
         <select value={direction} onChange={(e) => setDirection(e.target.value)}>
           <option value="">All directions</option>
           <option value="BUY">BUY</option>
@@ -280,6 +305,7 @@ export default function Signals() {
                       <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>—</span>
                     )}
                   </div>
+                  <div><SignalTraceLinks symbol={s.symbol} compact /></div>
                 </div>
               )
             })}

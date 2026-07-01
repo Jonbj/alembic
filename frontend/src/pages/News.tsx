@@ -1,8 +1,10 @@
 import { Fragment, useState, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
 import { fetchNews, type NewsItem } from '@/api/news'
 import { HelpButton } from '@/components/shared/HelpButton'
+import { SignalTraceLinks } from '@/components/shared/SignalTraceLinks'
 
 function safeUrl(url: string): string | undefined {
   try {
@@ -13,7 +15,8 @@ function safeUrl(url: string): string | undefined {
 }
 
 export default function News() {
-  const [ticker, setTicker] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [ticker, setTicker] = useState(searchParams.get('ticker') ?? '')
   const [source, setSource] = useState('')
   const [expanded, setExpanded] = useState<number | null>(null)
 
@@ -26,6 +29,14 @@ export default function News() {
   const toggleExpanded = useCallback((id: number) => {
     setExpanded((prev) => (prev === id ? null : id))
   }, [])
+
+  const updateTicker = (value: string) => {
+    setTicker(value)
+    const next = new URLSearchParams(searchParams)
+    if (value.trim()) next.set('ticker', value.trim().toUpperCase())
+    else next.delete('ticker')
+    setSearchParams(next, { replace: true })
+  }
 
   function sentimentBadge(raw: number | null) {
     if (raw === null) return <span className="badge badge-grey">—</span>
@@ -57,7 +68,7 @@ export default function News() {
       ]} />
 
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-        <input placeholder="Filter ticker..." value={ticker} onChange={(e) => setTicker(e.target.value)} style={{ width: 160 }} />
+        <input placeholder="Filter ticker..." value={ticker} onChange={(e) => updateTicker(e.target.value)} style={{ width: 160 }} />
         <select value={source} onChange={(e) => setSource(e.target.value)}>
           <option value="">All sources</option>
           <optgroup label="Live feeds">
@@ -128,6 +139,9 @@ export default function News() {
                           Raw sentiment score: {item.raw_sentiment?.toFixed(4)}
                         </div>
                       )}
+                      <div style={{ marginTop: 10 }}>
+                        <SignalTraceLinks symbol={item.ticker} />
+                      </div>
                     </td>
                   </tr>
                 )}

@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
 import { fetchPositions, fetchOrders, type Position, type Order } from '@/api/positions'
@@ -36,8 +37,9 @@ function ts(iso: string | null) {
 }
 
 export default function Trading() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [tab, setTab] = useState<Tab>('positions')
-  const [symbolFilter, setSymbolFilter] = useState('')
+  const [symbolFilter, setSymbolFilter] = useState(searchParams.get('symbol') ?? '')
 
   const { data: positions = [], isLoading: posLoading } = useQuery({
     queryKey: ['positions'],
@@ -76,6 +78,14 @@ export default function Trading() {
     fontSize: 14,
     cursor: 'pointer',
   })
+
+  const updateSymbolFilter = (value: string) => {
+    setSymbolFilter(value)
+    const next = new URLSearchParams(searchParams)
+    if (value.trim()) next.set('symbol', value.trim().toUpperCase())
+    else next.delete('symbol')
+    setSearchParams(next, { replace: true })
+  }
 
   const posRows = filteredPositions.map(p => ({
     cells: [
@@ -165,7 +175,7 @@ export default function Trading() {
         </div>
         <input
           value={symbolFilter}
-          onChange={e => setSymbolFilter(e.target.value)}
+          onChange={e => updateSymbolFilter(e.target.value)}
           placeholder="Filter symbol…"
           style={{ width: 130 }}
         />
