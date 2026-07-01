@@ -16,7 +16,6 @@ const Operations  = lazy(() => import('@/pages/Operations'))
 const AutoImprove = lazy(() => import('@/pages/AutoImprove'))
 const Strategies  = lazy(() => import('@/pages/Strategies'))
 const Docs        = lazy(() => import('@/pages/Docs'))
-const Dashboard   = lazy(() => import('@/pages/DashboardPage'))
 const LoginPage   = lazy(() => import('@/pages/LoginPage'))
 const Validation  = lazy(() => import('@/pages/Validation'))
 const Labeling    = lazy(() => import('@/pages/Labeling'))
@@ -58,7 +57,7 @@ export default function App() {
                 <Route path="/admin"        element={<Navigate to="/operations?tab=admin" replace />} />
                 <Route path="/auto-improve" element={<AutoImprove />} />
                 <Route path="/docs"         element={<Docs />} />
-                <Route path="/dashboard"    element={<Dashboard />} />
+                <Route path="/dashboard"    element={<Navigate to="/" replace />} />
                 <Route path="/system"       element={<Navigate to="/operations?tab=system" replace />} />
                 <Route path="/validation"   element={<Validation />} />
                 <Route path="/labeling"     element={<Labeling />} />

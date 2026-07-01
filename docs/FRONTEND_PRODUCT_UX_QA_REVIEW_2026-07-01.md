@@ -1,7 +1,7 @@
 # Alembic — Frontend Product / UX / QA Review
 
 Data review: 2026-07-01  
-Ambiente verificato: frontend locale `http://localhost:3000`, API locale via proxy `/api/*`, Grafana `http://localhost:3001`  
+Ambiente verificato: frontend locale `http://localhost:3000`, API locale via proxy `/api/*`; Grafana rimosso dal frontend e dallo stack locale nel blocco 4  
 Metodo: lettura documentazione e codice, navigazione sistematica con Playwright su desktop/tablet/mobile, controlli API mirati, verifica screenshot, interazioni non distruttive.
 
 ## Checklist di esplorazione
@@ -25,10 +25,10 @@ Il frontend di Alembic e gia utile come cockpit interno per un operatore tecnico
 
 Non e pero pronto per utenti reali non interni. I rischi principali sono:
 
-- alcune funzioni sono rotte o fuorvianti: Dashboard/Grafana non deve restare superficie frontend, LLM weights non rispetta lo schema dell'API, Trading/Fills usa campi trade invece di veri fill, il toggle Economy/Full ensemble invia `glm` ma il worker accetta `glm52`;
-- la documentazione e disallineata: cita una pagina Trades non piu navigabile, modelli LLM hardcoded/non dinamici, 10 sezioni quando il menu ne mostra 15, credenziali Grafana e stati strategia non correnti;
+- alcune funzioni erano rotte o fuorvianti e sono state chiuse nei primi blocchi: LLM weights, Trading/Fills, Economy mode, labeling validation, Auto-Improve observability, Performance analytics e Dashboard/Grafana frontend;
+- la documentazione era disallineata: citava una pagina Trades non piu navigabile, modelli LLM hardcoded/non dinamici, 10 sezioni quando il menu ne mostrava 15, credenziali Grafana e stati strategia non correnti;
 - il responsive mobile e di fatto non utilizzabile: sidebar fissa e tabelle/grafici tagliati;
-- l'interfaccia espone molte metriche corrette ma spesso non dice all'utente "cosa fare dopo", soprattutto in Quality, News, Backtest e Dashboard.
+- l'interfaccia espone molte metriche corrette ma spesso non dice all'utente "cosa fare dopo", soprattutto in Quality, News e Backtest.
 
 Valutazione complessiva: **utilizzabile solo internamente**. Con la correzione dei P1 sotto, puo diventare utilizzabile da beta user tecnici; per utenti reali servono responsive, coerenza documentale, stati di errore migliori e flussi piu guidati.
 
@@ -46,7 +46,7 @@ Queste decisioni sono state confermate dopo la review e devono guidare le modifi
 | Model registry | I modelli live non devono essere scolpiti nella UI/documentazione. La UI deve leggere modelli disponibili/attivi in modo dinamico, perche l'API Ollama puo cambiare disponibilita modello nel tempo. I modelli storici vanno marcati come storico/retired quando non sono piu nel registry live. |
 | Economy mode | Il toggle Economy deve selezionare GLM-5.2, usando il valore riconosciuto dal backend/worker. |
 | Mobile | Mobile non deve essere un full cockpit. Deve essere una vista read-only/status, con alert principali e link di approfondimento. |
-| Grafana | Grafana va eliminato per ora dal frontend come superficie utente. I summary React devono diventare fonte primaria di monitoraggio. |
+| Grafana | Grafana va eliminato per ora dal frontend e dallo stack locale. I summary React devono diventare fonte primaria di monitoraggio. |
 | Operating mode | Ogni cambio operating mode deve richiedere conferma esplicita. |
 | Labeling strength | `gt_sentiment_strength` resta signed `-1..1`, ma la UI deve vincolarlo alla direction: positive > 0, negative < 0, neutral = 0. |
 | Auto-Improve Phase C | La pagina deve esporre last run del counterfactual worker e raw skip counts, per distinguere assenza dati da worker fermo. |
@@ -399,13 +399,16 @@ Overview iframe, tab Risk Monitor, Decay Monitor, console errors, docs helper.
 **Risultato osservato**  
 Overview dashboard si renderizza. Durante l'interazione sono emersi errori Grafana: `Datasource alembic-pg was not found`. Dopo la decisione prodotto, Grafana non deve rimanere una superficie frontend: i summary React devono diventare il monitor primario.
 
+**Stato blocco 4**  
+Risolto: `DashboardPage.tsx` e l'iframe Grafana sono stati rimossi dal frontend utente, il menu laterale non espone piu Dashboard e la route legacy `/dashboard` reindirizza a Overview. Il servizio Grafana e i dashboard/provisioning legacy sono stati rimossi anche da `docker-compose.yml` e dal repo.
+
 **Problemi trovati**
 
 | Priorita | Tipo | Problema | Impatto | Raccomandazione |
 |---|---|---|---|---|
-| P1 | Prodotto/funzionale | Grafana embed resta nel frontend ma non e piu la direzione prodotto; inoltre Decay dipende da datasource errato. | Monitoring rotto e superficie ridondante. | Eliminare la pagina/iframe Grafana dal frontend e sostituire con summary React nativi. |
-| P1 | Responsive | Grafana embed e illeggibile su mobile: pannelli tagliati e legenda/grafici compressi. | Monitoring mobile non usabile. | Mobile solo read-only/status con card native. |
-| P2 | Docs/helper | Helper dice credenziali admin/admin e parla di Grafana come superficie utente. | Istruzioni fuorvianti. | Rimuovere dal frontend helper utente; tenere eventuali istruzioni Grafana solo in docs tecniche di ops. |
+| Risolto | Prodotto/funzionale | Grafana embed restava nel frontend ma non era piu la direzione prodotto; inoltre Decay dipendeva da datasource errato. | Monitoring rotto e superficie ridondante. | Fatto nel blocco 4: pagina/iframe rimossi, `/dashboard` redirect a Overview. |
+| Risolto | Responsive | Grafana embed era illeggibile su mobile: pannelli tagliati e legenda/grafici compressi. | Monitoring mobile non usabile. | Fatto nel blocco 4: superficie iframe rimossa; resta da completare il mobile read-only nativo. |
+| Risolto | Docs/helper | Helper diceva credenziali admin/admin e parlava di Grafana come superficie utente. | Istruzioni fuorvianti. | Fatto nel blocco 4: helper rimosso con la pagina; Grafana rimosso dalle docs operative correnti. |
 
 ### Docs / Helper online
 
@@ -424,7 +427,7 @@ L'helper e utile ma non sempre allineato. La pagina Docs e lunga e informativa, 
 |---|---|---|---|---|
 | P1 | Gap docs/prodotto | User guide citava `Trades -> Analytics`, ma la pagina Trades non e nel menu ne nelle route attive. | Utente seguiva istruzioni impossibili. | Risolto nel blocco 3: Phase A analytics sono in `Performance -> Analytics`; ordini/fill restano in `Trading`. |
 | P1 | Gap docs/modelli | Docs citano modelli statici, ma l'API Ollama puo cambiare disponibilita nel tempo. | Confusione operativa e rischio config errata. | Centralizzare model registry dinamico nei backend endpoint e generare UI/docs da quello. |
-| P2 | Struttura | User guide dice 10 sezioni, menu ne mostra 15. | Guida percepita stale. | Aggiornare indice e ordine secondo sidebar. |
+| Risolto | Struttura | User guide diceva 10 sezioni, menu ne mostrava 15. | Guida percepita stale. | Fatto nel blocco 4: indice testuale aggiornato all'ordine sidebar corrente. |
 | P2 | UX contenuti | Docs e helper sono molto lunghi e tecnici, poco contestuali al task attuale. | Operatore deve leggere troppo. | Dividere in "What this page answers", "When to act", "Runbook links". |
 
 ## 4. Review dei flussi principali
@@ -504,26 +507,26 @@ Valutazione: la funzione ha ancora senso, ma non come "auto improve" generico. O
 
 | Area | Gap | Impatto | Raccomandazione |
 |---|---|---|---|
-| User guide | Dice che la dashboard ha 10 sezioni; sidebar ne ha 15. | Guida stale. | Aggiornare indice e ordine menu. |
+| User guide | Diceva che la dashboard aveva 10 sezioni; sidebar ne mostrava 15. | Guida stale. | Risolto nel blocco 4: ordine menu aggiornato e Dashboard/Grafana rimossa come superficie utente. |
 | User guide / Docs | Citava `Trades -> Analytics`, ma route/menu Trades non sono attivi. | Istruzioni impossibili. | Risolto nel blocco 3: riferimenti spostati a `Performance -> Analytics`. |
 | Modelli LLM | Docs/API citano Qwen/DeepSeek/GLM-5.1; worker corrente usa Kimi + GLM-5.2; Quality/Backtest mostrano modelli storici senza label. | Rischio decisioni e config errate. | Model registry unico e badge current/retired. |
-| Sidebar toggle | UI dice Full ensemble/4 models e Economy GLM; worker accetta `glm52`. | Toggle potenzialmente inefficace. | Allineare valori e copy. |
-| Dashboard | Helper credenziali/admin e datasource non coerenti; Grafana non e piu superficie frontend desiderata. | Monitoring rotto/fuorviante. | Rimuovere Grafana dal frontend e creare summary React nativi. |
+| Sidebar toggle | UI diceva Full ensemble/4 models e Economy GLM; worker accettava `glm52`. | Toggle potenzialmente inefficace. | Risolto nel blocco 1: Economy usa `glm52`/GLM-5.2. |
+| Dashboard | Helper credenziali/admin e datasource non coerenti; Grafana non e piu superficie frontend desiderata. | Monitoring rotto/fuorviante. | Risolto nel blocco 4: superficie Grafana rimossa dal frontend; summary React restano primari. |
 | S4 status | Alcune docs parlano di S4 prevista/refactor; UI/API la mostrano paper promotion_blocked. | Stato prodotto ambiguo. | Aggiornare docs al lifecycle corrente. |
-| Frontend operator guide | Inventory parla di 16 pagine, include Trading con mode/killswitch e Trades, non rispecchia menu attuale. | Mappa frontend non affidabile. | Rigenerare inventory da route/sidebar. |
+| Frontend operator guide | Inventory parlava di pagine legacy e non rispecchiava menu/route attuali. | Mappa frontend non affidabile. | Risolto nei blocchi 3-4: Trades non ripristinata, Analytics in Performance, Dashboard rimossa. |
 
 ## 6. Problemi principali ordinati per priorita
 
 | Priorita | Area | Problema | Impatto | Raccomandazione | Sforzo |
 |---|---|---|---|---|---|
-| P1 | Dashboard | Decay dashboard usa datasource `alembic-pg` inesistente. | Monitor decay rotto. | UID `alembic-postgres`, verificare query. | Basso |
-| P1 | LLM | Weights tab attende schema API sbagliato. | Pesi live non visibili. | Allineare client/API e aggiungere suggestion endpoint. | Medio |
-| P1 | LLM/Menu | Economy toggle invia `glm`, worker accetta `glm52`. | Risparmio quota/costi non effettivo. | Allineare Economy a GLM-5.2 con valore backend/worker riconosciuto. | Basso |
-| P1 | Trading | Fills non mostra veri fill. | Dati esecuzione fuorvianti. | Usare orders filled o endpoint fills. | Medio |
+| Risolto | Dashboard | Decay dashboard usava datasource `alembic-pg` inesistente nella superficie frontend Grafana. | Monitor decay rotto. | Risolto nel blocco 4 rimuovendo Grafana dal frontend utente. | Basso |
+| Risolto | LLM | Weights tab attendeva schema API sbagliato. | Pesi live non visibili. | Risolto nel blocco 1: client/API allineati e suggestion endpoint separato. | Medio |
+| Risolto | LLM/Menu | Economy toggle inviava `glm`, worker accettava `glm52`. | Risparmio quota/costi non effettivo. | Risolto nel blocco 1: Economy usa GLM-5.2. | Basso |
+| Risolto | Trading | Fills non mostrava veri fill. | Dati esecuzione fuorvianti. | Risolto nel blocco 1: fill derivati da ordini filled. | Medio |
 | P1 | Responsive | Mobile/tablet stretto non usabili. | Blocca uso fuori desktop. | Sidebar drawer + tabelle responsive. | Medio/Alto |
-| P1 | Labeling | Salvataggio label incoerenti consentito. | Golden set e metriche contaminate. | Validazioni semantiche prima del submit. | Basso |
+| Risolto | Labeling | Salvataggio label incoerenti consentito. | Golden set e metriche contaminate. | Risolto nel blocco 1: validation su direction/strength/relevance/ticker. | Basso |
 | P1 | Docs | Guida cita pagine/modelli/stati non correnti. | Perdita fiducia e istruzioni errate. | Aggiornamento docs impattate. | Medio |
-| P1 | Admin | Cambio mode immediato su radio click. | Errore operativo possibile. | Conferma mode change e audit feedback. | Basso |
+| Risolto | Admin | Cambio mode immediato su radio click. | Errore operativo possibile. | Risolto nel blocco 1: conferma esplicita per cambio mode. | Basso |
 | P2 | Quality | Metriche critiche senza verdict/CTA. | Difficile agire su degradazione. | Soglie + action hints. | Medio |
 | P2 | News/Signals | Nessuna trace news -> signal -> decision -> order. | Diagnosi lenta. | Drawer trace/cross-link. | Medio |
 | P2 | Strategies/Backtest | Titoli bianchi su fondo chiaro. | Orientamento compromesso. | Colore testo standard. | Basso |
@@ -536,14 +539,14 @@ Valutazione: la funzione ha ancora senso, ma non come "auto improve" generico. O
 | Problema | Soluzione proposta | Impatto atteso | Sforzo |
 |---|---|---|---|
 | Titoli Strategies/Backtest invisibili | Cambiare `color: white` in `var(--text)`. | Orientamento immediato. | Basso |
-| Dashboard Decay rotta | Sostituire UID datasource `alembic-pg` con `alembic-postgres`. | Ripristina monitor. | Basso |
-| Economy toggle inefficace | Payload `glm52` o alias backend `glm`. | Risparmio quota/costi reale. | Basso |
-| Labeling incoerente | Validare relevance/ticker/direction/strength. | Golden set piu affidabile. | Basso |
-| Admin mode pericoloso | Modal conferma per cambio mode. | Riduce errori operativi. | Basso |
-| LLM weights vuota | Mappare `weights` API a `current` e aggiungere fetch suggestion separato. | Pesi live visibili. | Basso/Medio |
+| Dashboard Decay rotta | Rimuovere la superficie Grafana dal frontend utente invece di mantenere il datasource legacy. | Evita monitor iframe fragile e sposta il controllo sui summary React. | Fatto nel blocco 4 |
+| Economy toggle inefficace | Payload `glm52` o alias backend `glm`. | Risparmio quota/costi reale. | Fatto nel blocco 1 |
+| Labeling incoerente | Validare relevance/ticker/direction/strength. | Golden set piu affidabile. | Fatto nel blocco 1 |
+| Admin mode pericoloso | Modal conferma per cambio mode. | Riduce errori operativi. | Fatto nel blocco 1 |
+| LLM weights vuota | Mappare `weights` API a `current` e aggiungere fetch suggestion separato. | Pesi live visibili. | Fatto nel blocco 1 |
 | Quality senza azioni | Aggiungere CTA sotto KPI critici. | Migliore decision support. | Basso |
 | Docs cita Trades | Rimuovere/rindirizzare riferimenti a Trades. | Riduce confusione. | Fatto nel blocco 3 |
-| Dashboard/Grafana | Rimuovere superficie Grafana dal frontend e sostituirla con summary React primari. | Evita dipendenza da iframe/datasource e chiarisce la UX. | Medio |
+| Dashboard/Grafana | Rimuovere superficie Grafana dal frontend e sostituirla con summary React primari. | Evita dipendenza da iframe/datasource e chiarisce la UX. | Fatto nel blocco 4 |
 | News troppo lunga | Default limit 50 + filtro "with signal". | Scan piu veloce. | Medio |
 
 ## 8. Suggerimenti strategici di prodotto e UX
@@ -569,7 +572,7 @@ Valutazione: la funzione ha ancora senso, ma non come "auto improve" generico. O
 | Facilita di navigazione | 3 | Menu completo ma ordine migliorabile e Admin/Operations ambiguo. |
 | Qualita dei flussi principali | 3 | Flussi possibili ma richiedono conoscenza del dominio e molti passaggi. |
 | Coerenza visuale | 3 | Buona base, ma titoli invisibili e dark/light non sempre coerenti. |
-| Coerenza funzionale | 3 | Core pages funzionano; LLM weights, Fills e Dashboard Decay sono problemi reali. |
+| Coerenza funzionale | 4 | Core pages funzionano; LLM weights, Fills e Dashboard/Grafana frontend sono stati corretti nei blocchi 1-4. Restano problemi su verdict e stati limite. |
 | Gestione errori/stati limite | 2 | Empty state presenti, errori spesso generici, loading minimale, pochi recovery hints. |
 | Accessibilita | 2 | Mancano semantica dialog/tab, aria-label e supporto tastiera robusto. |
 | Responsive design | 1 | Mobile non usabile per tabelle/monitoring e sidebar fissa. |

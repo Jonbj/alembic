@@ -16,7 +16,6 @@ const NAV = [
   { to: '/validation',  label: 'Validation',  icon: '🧪' },
   { to: '/labeling',    label: 'Labeling',    icon: '🏷️' },
   { to: '/backtest',    label: 'Backtest',    icon: '🔬' },
-  { to: '/dashboard',  label: 'Dashboard',   icon: '📡' },
   { to: '/operations',  label: 'Admin',       icon: '🔒' },
   { to: '/docs',        label: 'Docs',        icon: '📖' },
 ]

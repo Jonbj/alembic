@@ -112,7 +112,7 @@ sleep 10  # wait for health checks
 docker compose exec postgres psql -U trading -d trading -f /dev/stdin < migrations/001_initial.sql
 
 # 5. Start application services
-docker compose up -d api worker beat frontend grafana
+docker compose up -d api worker beat frontend
 
 # 6. Verify all services healthy
 docker compose ps
@@ -223,7 +223,6 @@ Before going live on a real brokerage account:
 - [ ] Test kill-switch works: `POST /api/admin/killswitch`, verify mode=halted in Redis
 - [ ] Confirm Telegram alerts are received (deploy sends test alert)
 - [ ] Verify drawdown cap: set `10%` as starting threshold, monitor first session
-- [ ] Enable Grafana authentication for production (disable anonymous access)
 - [ ] Verify `GLOBAL_LIVE_PROMOTION_ENABLED=false` in `.env` (must remain `false` until PO sign-off + P2-05 closure + Kimi P2 Audit complete)
 - [ ] Verify `GET /api/system/readiness` returns all-healthy before first session
 - [ ] Apply all migrations 001–026+ (not just `001_initial.sql`)

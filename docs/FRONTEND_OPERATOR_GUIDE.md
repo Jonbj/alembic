@@ -90,7 +90,6 @@ The React frontend (`frontend/src/pages/`) exposes the operator pages below. Aut
 | Page | File | API endpoints used | Operator usefulness |
 |------|------|-------------------|---------------------|
 | Overview | `Overview.tsx` | `/api/health`, `/api/admin/status` | Quick system status |
-| Dashboard | `DashboardPage.tsx` | Grafana embed (legacy) | Legacy monitoring surface; product direction is native React summaries |
 | Signals | `Signals.tsx` | `/api/signals/{symbol}`, `/history` | Live sentiment signals |
 | Strategies | `Strategies.tsx` | `/api/config` | Strategy allocation view |
 | Trading | `Trading.tsx` | `/api/positions`, `/api/orders` | Positions, orders and true fills from filled orders |
@@ -104,6 +103,8 @@ The React frontend (`frontend/src/pages/`) exposes the operator pages below. Aut
 | Login | `LoginPage.tsx` | `/api/auth/login` | Authentication |
 
 `Trades.tsx` is not restored as a route. Order/fill operations are in `Trading`; closed-trade diagnostics and Phase A analytics are in `Performance`.
+
+`DashboardPage.tsx` has been removed from the user-facing frontend. The legacy `/dashboard` route redirects to `Overview`; React pages are the primary monitoring surface. Grafana is no longer part of the local compose stack.
 
 ### 2.1 Pagina Performance — Tab disponibili
 

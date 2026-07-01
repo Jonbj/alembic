@@ -15,7 +15,6 @@ Day-to-day operational reference for running, monitoring, and troubleshooting th
 | `worker-inference` | — | Celery worker (queue `inference`, concurrency=1 — FinBERT/Ollama/PEAD) |
 | `beat` | — | Celery beat (task scheduler) |
 | `frontend` | 3000→80 | React dashboard (Nginx) |
-| `grafana` | 3001→3000 | Grafana dashboards |
 | `backtest` | — | One-shot backtest runner (profile: backtest) |
 
 ### Common Commands
@@ -234,30 +233,17 @@ ORDER BY MIN(generated_at) DESC;
 
 ---
 
-## Grafana Dashboards
+## Monitoring Surfaces
 
-Grafana runs on port 3001. Default credentials: `admin / alembic123`.
+Grafana has been removed from the local stack. The primary monitoring surfaces are the native React pages: Overview, Performance and Admin/Operations.
 
-Anonymous read access is enabled — no login required for viewing.
+During paper trading, watch:
 
-### Dashboard provisioning
-
-Dashboards are auto-provisioned from `grafana/dashboards/*.json`. To add a new dashboard:
-1. Create/export the dashboard JSON from the UI
-2. Save to `grafana/dashboards/your-dashboard.json`
-3. Restart Grafana: `docker compose restart grafana`
-
-### Data source
-
-The Grafana PostgreSQL data source connects to the `trading` database at `postgres:5432`. Connection is configured in `grafana/provisioning/datasources/`.
-
-### Key panels to watch during paper trading
-
-- **Signal score distribution** — median score and std per day; watch for mean drift
-- **IC rolling 30d** — information coefficient; should be consistently positive
-- **Daily P&L** — from Alpaca paper account equity curve
-- **Kill-switch events** — any unintended activations during overnight sessions
-- **Sentiment queue depth** — `news:queue` LLEN; should drain to 0 within 15 min of each ingest
+- **Signal score distribution** — Quality and Signals pages.
+- **IC / hit-rate evidence** — Backtest and Quality pages.
+- **Daily P&L** — Performance page.
+- **Kill-switch and mode state** — Admin/Operations page.
+- **Worker freshness and scheduler state** — Overview and Admin/Operations pages.
 
 ---
 
