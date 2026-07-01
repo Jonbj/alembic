@@ -82,6 +82,49 @@ function DataSourceBadge({ source }: { source: 'LIVE' | 'BACKTEST' | undefined }
   )
 }
 
+function LifecyclePanel({ strategy }: { strategy: NonNullable<ReturnType<typeof strategiesApi.list> extends Promise<(infer T)[]> ? T : never> }) {
+  const liveAuthorized = strategy.live_authorized === true
+  const promotionAuthorized = strategy.promotion_authorized === true
+  const promotionBlocked = strategy.promotion_blocked === true
+  const tone = liveAuthorized ? 'good' : promotionBlocked ? 'warn' : 'neutral'
+  const palette = {
+    good: { bg: '#dcfce7', border: '#86efac', fg: '#166534' },
+    warn: { bg: '#fef9c3', border: '#fde68a', fg: '#854d0e' },
+    neutral: { bg: '#f1f5f9', border: '#cbd5e1', fg: '#475569' },
+  }[tone]
+
+  return (
+    <div style={{ background: palette.bg, border: `1px solid ${palette.border}`, color: palette.fg, borderRadius: 8, padding: 14 }}>
+      <div style={{ fontWeight: 800, marginBottom: 8 }}>Lifecycle verdict</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Mode</div>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>{strategy.mode ?? 'unknown'}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Promotion</div>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>{promotionBlocked ? 'blocked' : promotionAuthorized ? 'authorized' : 'not authorized'}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Live trading</div>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>{liveAuthorized ? 'authorized' : 'not authorized'}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Metrics</div>
+          <div style={{ fontSize: 16, fontWeight: 800 }}>{strategy.data_source ?? 'unknown'}</div>
+        </div>
+      </div>
+      <div style={{ marginTop: 10, fontSize: 12, lineHeight: 1.45 }}>
+        {liveAuthorized
+          ? 'Live trading is explicitly authorized by the strategy API.'
+          : promotionBlocked
+            ? 'Promotion is blocked. Treat metrics below as evidence only, not permission to promote or trade live.'
+            : 'No live authorization flag is present. Fail closed and require operator sign-off before promotion.'}
+      </div>
+    </div>
+  )
+}
+
 export default function Strategies() {
   const { data: strategies, isLoading: strategiesLoading, error: strategiesError } = useQuery({
     queryKey: ['strategies'],
@@ -153,7 +196,7 @@ export default function Strategies() {
         },
       ]} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'white' }}>Strategies</h1>
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>Strategies</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <span style={{ color: '#94a3b8', fontSize: 13 }}>Strategy:</span>
           <select
@@ -189,6 +232,7 @@ export default function Strategies() {
             promotion_authorized={currentStrategy.promotion_authorized}
             data_quality_warning={currentStrategy.data_quality_warning}
           />
+          <LifecyclePanel strategy={currentStrategy} />
         </div>
       )}
 

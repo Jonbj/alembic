@@ -33,10 +33,10 @@ Alembic è un **sistema di trading algoritmico** che combina analisi del sentime
 
 | Strategia | Tipo | Stato | Note |
 |-----------|------|-------|------|
-| S1 — Time-Series Momentum | Momentum cross-asset | ✅ Validata | Sharpe 0.51 OOS, 5/5 gate passati |
-| S2 — Volatility Risk Premium | Vendita opzioni put SPY | 🔄 In sviluppo | Fase D in corso |
+| S1 — Time-Series Momentum | Momentum cross-asset | supervised_paper, promotion_blocked | Re-promotion richiede evidenza aggiornata e sign-off |
+| S2 — Volatility Risk Premium | Vendita opzioni put SPY | disabled/in sviluppo | Non nel portfolio operativo |
 | S3 — Cross-Sectional Momentum | Momentum relativo equity | ⏸ R&D sleeve | Sharpe 0.15, gate 3&5 falliti |
-| S4 — News-Driven Tactical | Sentiment ranking | 📋 Prevista | Rifattorizzazione della strategia attuale |
+| S4 — News-Driven Tactical | Sentiment ranking | paper, promotion_blocked | 10% paper overlay; non autorizzata live |
 
 Il sistema è attualmente in **modalità backtest/paper**. Nessun capitale reale è a rischio.
 
@@ -314,6 +314,7 @@ I dati del giorno corrente appariranno il giorno successivo. La tabella è vuota
 
 | Sezione | Cosa mostra |
 |---------|------------|
+| **Lifecycle verdict** | Mode corrente, stato promotion/live authorization e fonte metriche LIVE/BACKTEST |
 | **KPI Cards** | OOS Sharpe (performance fuori campione), Max Drawdown, Annual Return, Total Trades |
 | **Equity Curve** | Grafico del ritorno cumulativo e del drawdown nel tempo |
 | **Validation Gates** | Tabella con 5 gate: Significance, Walk-Forward, Robustness, Regime, Stress — ognuno con PASS/FAIL |
@@ -324,9 +325,10 @@ I dati del giorno corrente appariranno il giorno successivo. La tabella è vuota
 **Come usarla:**
 
 1. Seleziona la strategia dal menu a tendina
-2. Controlla prima i **KPI** — OOS Sharpe ≥ 0.5 è il minimo per entrare nel portfolio
-3. Poi controlla i **gates** — devono essere tutti PASS (o con eccezioni documentate)
-4. La **sensitivity** ti dice se la strategia è robusta o se funziona solo con parametri perfetti
+2. Controlla prima il **Lifecycle verdict** — se promotion/live sono false o blocked, i KPI sono solo evidenza
+3. Controlla i **KPI** — OOS Sharpe ≥ 0.5 è il minimo per discutere promozione, non un'autorizzazione
+4. Poi controlla i **gates** — devono essere tutti PASS (o con eccezioni documentate)
+5. La **sensitivity** ti dice se la strategia è robusta o se funziona solo con parametri perfetti
 
 ---
 
@@ -595,11 +597,11 @@ Se un modello ha IC negativo o N=0, non significa necessariamente che è rotto. 
 
 **Perché è in pausa**: Il backtest su dati reali ha dato Sharpe 0.15 (troppo basso), con alta fragilità ai parametri (CV=2.05 quando il massimo accettabile è 0.5). Il codice esiste e funziona, ma non entra nel portfolio live finché il tuning non migliora i risultati.
 
-### S4 — News-Driven Tactical 📋
+### S4 — News-Driven Tactical
 
-**Cosa fa**: Rifattorizzazione della strategia attuale (v1) in formato cross-sectional ranking. Usa il sentiment LLM per selezionare i top 5 ticker per assegnazione.
+**Cosa fa**: Strategia news/sentiment in modalità paper overlay. Usa segnali LLM pre-calcolati, feedback gate, filtri di freschezza e trend per decidere se proporre esposizione tattica su ticker della watchlist.
 
-**Stato**: Prevista per Fase E (dopo S2)
+**Stato**: `paper`, `promotion_blocked`, `live_authorized=false`. Non è autorizzata al live; le metriche e i counterfactual servono solo come evidenza per revisione futura.
 
 ---
 

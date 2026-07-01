@@ -91,7 +91,7 @@ The React frontend (`frontend/src/pages/`) exposes the operator pages below. Aut
 |------|------|-------------------|---------------------|
 | Overview | `Overview.tsx` | `/api/health`, `/api/admin/status` | Quick system status |
 | Signals | `Signals.tsx` | `/api/signals/{symbol}`, `/history` | Live sentiment signals |
-| Strategies | `Strategies.tsx` | `/api/config` | Strategy allocation view |
+| Strategies | `Strategies.tsx` | `/api/strategies/*` | Strategy metrics, gates, lifecycle mode and authorization status |
 | Trading | `Trading.tsx` | `/api/positions`, `/api/orders` | Positions, orders and true fills from filled orders |
 | Performance | `Performance.tsx` | `/api/performance/pnl`, `/api/performance/daily`, `/api/performance/weekly`, `/api/trades/analytics/by-symbol`, `/api/trades/analytics/by-dimension`, `/weights/*` | P&L storico, breakdown giornaliero, Phase A trade analytics, report settimanale |
 | News | `News.tsx` | `/api/news/recent` | Recent ingested articles |
@@ -163,14 +163,14 @@ The P2-04 operator cockpit is now partially surfaced in the frontend:
 
 Use the `curl` commands from operations.md when a full readiness payload is required for preflight evidence.
 
-### 2.3 Strategy Mode / Lifecycle — Frontend Gap
+### 2.3 Strategy Mode / Lifecycle — Frontend Coverage
 
-The strategy lifecycle state machine (research → paper → supervised_paper → live) has no frontend display. The `Strategies.tsx` page shows allocation percentages from config but does NOT show:
+`Strategies.tsx` now displays the lifecycle fields returned by `/api/strategies/*`:
 - Current lifecycle mode per strategy
-- Promotion prerequisites and remaining blockers
-- Whether a strategy is in `promotion_blocked` state
+- `promotion_blocked`, `promotion_authorized`, and `live_authorized`
+- Whether displayed metrics are `LIVE` or `BACKTEST`
 
-**Current workaround:** Query `strategy_lifecycle` table directly or read `docs/strategies.md`.
+Fail-closed rule: absent or false authorization fields must be treated as not authorized. Backtest gates are evidence only and do not authorize promotion or live trading.
 
 ### 2.4 Block 1 Product Decisions Reflected in Frontend
 
