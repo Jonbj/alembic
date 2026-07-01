@@ -77,10 +77,39 @@ button {
   transition: opacity 0.15s;
 }
 button:hover { opacity: 0.85; }
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+button:disabled:hover { opacity: 0.55; }
+
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
 
 .btn-primary { background: var(--blue); color: white; }
 .btn-danger  { background: var(--red); color: white; }
 .btn-ghost   { background: transparent; border: 1px solid var(--border); color: var(--text); }
+
+@media (max-width: 1024px) {
+  .card:has(> table) {
+    overflow-x: auto;
+  }
+
+  .card > table {
+    min-width: 640px;
+  }
+}
 
 @media (max-width: 767px) {
   #root {

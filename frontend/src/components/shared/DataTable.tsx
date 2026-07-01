@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react'
+import { type KeyboardEvent, type ReactNode, useState } from 'react'
 
 export interface Column {
   label: string
@@ -20,6 +20,13 @@ interface Props {
 export function DataTable({ columns, rows, emptyMessage = 'No data.', loading = false }: Props) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
   const templateColumns = columns.map(c => c.width).join(' ')
+  const toggleExpanded = (idx: number) => setExpandedIdx(expandedIdx === idx ? null : idx)
+  const handleExpandableKeyDown = (event: KeyboardEvent<HTMLDivElement>, idx: number) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      toggleExpanded(idx)
+    }
+  }
 
   return (
     <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -46,7 +53,11 @@ export function DataTable({ columns, rows, emptyMessage = 'No data.', loading = 
       {!loading && rows.map((row, i) => (
         <div key={i}>
           <div
-            onClick={() => row.expanded ? setExpandedIdx(expandedIdx === i ? null : i) : undefined}
+            onClick={() => row.expanded ? toggleExpanded(i) : undefined}
+            onKeyDown={row.expanded ? event => handleExpandableKeyDown(event, i) : undefined}
+            role={row.expanded ? 'button' : undefined}
+            tabIndex={row.expanded ? 0 : undefined}
+            aria-expanded={row.expanded ? expandedIdx === i : undefined}
             style={{
               display: 'grid',
               gridTemplateColumns: templateColumns,
