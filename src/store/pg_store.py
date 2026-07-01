@@ -511,6 +511,63 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def fetch_counterfactual_status(self, days: int = 7) -> dict:
+        """Return raw Phase C skip counts and processing coverage for the window."""
+        phase_c_decisions = {"SKIP_THRESHOLD", "SKIP_EMA", "SKIP_CAP"}
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """SELECT
+                           decision,
+                           COUNT(*) AS total,
+                           COUNT(counterfactual_computed_at) AS processed,
+                           COUNT(counterfactual_return_1h) AS with_return,
+                           SUM(CASE WHEN counterfactual_computed_at IS NULL THEN 1 ELSE 0 END) AS pending
+                       FROM execution_decisions
+                       WHERE decision LIKE 'SKIP_%%'
+                         AND tick_time >= now() - (%s || ' days')::interval
+                       GROUP BY decision
+                       ORDER BY decision""",
+                    (str(days),),
+                )
+                cols = [d[0] for d in cur.description]
+                rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+
+                cur.execute(
+                    """SELECT MAX(counterfactual_computed_at)
+                       FROM execution_decisions
+                       WHERE decision IN ('SKIP_THRESHOLD', 'SKIP_EMA', 'SKIP_CAP')"""
+                )
+                last_processed = cur.fetchone()[0]
+
+            raw_counts = [
+                {
+                    "decision": row["decision"],
+                    "total": int(row["total"]),
+                    "processed": int(row["processed"]),
+                    "with_return": int(row["with_return"]),
+                    "pending": int(row["pending"] or 0),
+                    "included_in_phase_c": row["decision"] in phase_c_decisions,
+                }
+                for row in rows
+            ]
+            phase_c_rows = [row for row in raw_counts if row["included_in_phase_c"]]
+            return {
+                "days": days,
+                "last_processed_at": last_processed.isoformat() if last_processed else None,
+                "raw_skip_counts": raw_counts,
+                "phase_c": {
+                    "total_skips": sum(row["total"] for row in phase_c_rows),
+                    "processed": sum(row["processed"] for row in phase_c_rows),
+                    "with_return": sum(row["with_return"] for row in phase_c_rows),
+                    "pending": sum(row["pending"] for row in phase_c_rows),
+                },
+            }
+        except Exception:
+            conn.rollback()
+            raise
+
     _INSERT_TRADE = """
         INSERT INTO trades
             (symbol, signal_id, decision_id, entry_order_id,

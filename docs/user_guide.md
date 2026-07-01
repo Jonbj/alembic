@@ -258,6 +258,25 @@ Il sistema controlla le perdite ogni 30 minuti durante gli orari di mercato e al
 
 Analisi retrospettiva dei candidati scartati da gate/filtri. Il `counterfactual-worker` calcola nightly (22:45 UTC) il ritorno a 1h per i casi inclusi.
 
+La card mostra anche lo stato operativo Phase C:
+
+| Campo | Significato |
+|-------|-------------|
+| Last worker run | Ultima esecuzione osservata del `counterfactual-worker` salvata in Redis |
+| Last processed row | Ultimo `counterfactual_computed_at` scritto su `execution_decisions` |
+| Raw Phase C skips | Totale skip inclusi in Phase C, quanti sono pending e quanti hanno ritorno 1h disponibile |
+| Raw skip counts | Conteggio grezzo di tutti gli `SKIP_*`, inclusi quelli esclusi intenzionalmente dalla Phase C |
+
+Se la tabella opportunity-cost è vuota, leggi prima lo stato:
+
+| Stato | Interpretazione |
+|-------|-----------------|
+| Worker not observed | Non c'è ancora metadata Redis dell'ultimo run: verificare scheduler/log se persiste |
+| Last worker run skipped/failed | La Phase C non è affidabile finché il worker non torna `ok` |
+| No Phase C skips in window | Vuoto reale: nessun `SKIP_THRESHOLD`, `SKIP_EMA` o `SKIP_CAP` nella finestra |
+| Skips pending nightly processing | Esistono skip, ma mancano ancora i ritorni 1h; attendere il run 22:45 UTC |
+| Phase C processed | I dati sono aggiornati rispetto all'ultimo run osservato |
+
 | Tipo | Causa del filtro | Quando preoccuparsi |
 |------|-----------------|---------------------|
 | **SKIP_THRESHOLD** | Score sotto la soglia feedback attiva | avg_return >+0.5% e % profitable >55% su ≥30 obs, poi verificare IC/label evidence |

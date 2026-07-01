@@ -635,7 +635,63 @@ Aggregate opportunity-cost statistics for skipped signals. Returns one row per s
 
 `SKIP_POSITION` (already in position) is excluded — it is not a missed opportunity. `SKIP_STALE` and `SKIP_FALLBACK` are also excluded because they are signal freshness/reliability failures, not filters to relax.
 
-Returns `[]` until the first nightly `counterfactual-worker` run at 22:45 UTC.
+Returns `[]` when no Phase C skip rows exist in the window or when rows are still pending the nightly `counterfactual-worker`. Use the status endpoint below to distinguish those cases.
+
+### `GET /api/trades/analytics/counterfactual/status`
+
+Raw Phase C coverage metadata for the Auto-Improve page. Use this endpoint to distinguish:
+
+- no skip decisions in the window;
+- skip decisions pending the nightly worker;
+- worker has not run or last run failed/skipped;
+- rows processed but 1-hour return data was unavailable.
+
+**Query parameters:** `days` (int, default 7, range 1–90)
+
+**Response 200:**
+```json
+{
+  "days": 7,
+  "last_processed_at": "2026-07-01T22:45:12+00:00",
+  "raw_skip_counts": [
+    {
+      "decision": "SKIP_THRESHOLD",
+      "total": 31,
+      "processed": 29,
+      "with_return": 27,
+      "pending": 2,
+      "included_in_phase_c": true
+    },
+    {
+      "decision": "SKIP_STALE",
+      "total": 14,
+      "processed": 0,
+      "with_return": 0,
+      "pending": 14,
+      "included_in_phase_c": false
+    }
+  ],
+  "phase_c": {
+    "total_skips": 31,
+    "processed": 29,
+    "with_return": 27,
+    "pending": 2
+  },
+  "worker": {
+    "last_run_at": "2026-07-01T22:45:00+00:00",
+    "completed_at": "2026-07-01T22:45:12+00:00",
+    "status": "ok",
+    "reason": null,
+    "updated": 27,
+    "skipped_no_data": 2,
+    "errors": 0,
+    "total_decisions": 29
+  },
+  "next_run_hint": "22:45 UTC, Mon-Fri"
+}
+```
+
+`worker` is read from Redis key `counterfactual:worker:last_run` and can be `null` if no run has been observed since the metadata key was introduced. `last_processed_at` is `MAX(counterfactual_computed_at)` over included Phase C rows.
 
 ---
 

@@ -340,14 +340,14 @@ Monitorare feedback gate Phase B e counterfactual Phase C per capire se i filtri
 Feedback status API, Phase B active state, Phase C empty state, helper.
 
 **Risultato osservato**  
-La pagina ha ancora senso. Phase B e attiva: threshold 0.35, baseline 0.30, regime scale 0.80 legacy, rolling P&L -40.39. Phase C e vuota per assenza di skip data processati.
+La pagina ha ancora senso. Phase B e attiva: threshold 0.35, baseline 0.30, regime scale 0.80 legacy, rolling P&L -40.39. Phase C e stata rafforzata nel blocco 2: ora mostra last worker run, ultimo `counterfactual_computed_at`, raw skip counts e pending count, distinguendo vuoto reale da worker fermo o dati non ancora processati.
 
 **Problemi trovati**
 
 | Priorita | Tipo | Problema | Impatto | Raccomandazione |
 |---|---|---|---|---|
 | P2 | Naming/prodotto | "Auto-Improve" promette miglioramento automatico, ma oggi e soprattutto monitor/audit del feedback gate. | Aspettativa eccessiva sull'autonomia del sistema. | Valutare label "Feedback Gate" o "Adaptive Gate" nel menu, mantenendo docs su Phase B/C. |
-| P2 | UX | Phase C vuota non mostra ultima esecuzione worker o se il worker ha girato. | Non si capisce se e vuota per assenza dati o worker fermo. | Mostrare last counterfactual-worker run, count SKIP_THRESHOLD raw, next run attesa. |
+| P2 | UX | Phase C vuota non mostrava ultima esecuzione worker o se il worker ha girato. | Non si capiva se era vuota per assenza dati o worker fermo. | Risolto nel blocco 2: endpoint `/api/trades/analytics/counterfactual/status`, metadata Redis ultimo run e raw skip counts. |
 | P2 | Decision support | Non c'e soglia per "attivo da troppo tempo". | Operatore deve ricordare il runbook. | Alert se active >24h senza recovery e link a Signals/Performance. |
 
 ### LLM
@@ -498,7 +498,7 @@ Obiettivo: capire se il sistema sta stringendo la soglia e se i filtri perdono o
 
 Passaggi attuali: Auto-Improve -> Signals/Decision Log -> Performance.
 
-Valutazione: la funzione ha ancora senso, ma non come "auto improve" generico. Oggi e un monitor di adaptive gate e counterfactual. Va mantenuta, ma con naming e verdict piu precisi.
+Valutazione: la funzione ha ancora senso, ma non come "auto improve" generico. Oggi e un monitor di adaptive gate e counterfactual. Dopo il blocco 2 e piu affidabile come pagina autonoma perche distingue esplicitamente worker freshness, raw skips, pending processing e opportunity cost processato.
 
 ## 5. Gap tra documentazione, helper online e frontend
 

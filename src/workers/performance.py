@@ -1810,9 +1810,25 @@ def run_counterfactual_worker() -> dict:
     from alpaca.data.timeframe import TimeFrame
 
     stats: dict = {"updated": 0, "skipped_no_data": 0, "errors": 0, "total_decisions": 0}
+    started_at = datetime.now(timezone.utc)
+
+    def _record_run(status: str, reason: str | None = None) -> None:
+        state = {
+            "last_run_at": started_at.isoformat(),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "status": status,
+            "reason": reason,
+            **stats,
+        }
+        store = RedisStore()
+        try:
+            store.set_counterfactual_worker_state(state)
+        finally:
+            store.close()
 
     if not config.ALPACA_API_KEY or not config.ALPACA_SECRET_KEY:
         log.warning("Alpaca credentials not configured — skipping counterfactual worker")
+        _record_run("skipped", "no_credentials")
         return {**stats, "skipped": True, "reason": "no_credentials"}
 
     pg_conn = psycopg2.connect(config.DATABASE_URL)
@@ -1822,6 +1838,7 @@ def run_counterfactual_worker() -> dict:
         rows = pg.fetch_skip_decisions_without_counterfactual(days_back=7, limit=500)
         if not rows:
             log.info("No SKIP decisions pending counterfactual")
+            _record_run("ok", "no_pending_decisions")
             return stats
 
         stats["total_decisions"] = len(rows)
@@ -1911,7 +1928,11 @@ def run_counterfactual_worker() -> dict:
             "Counterfactual worker complete: updated=%d skipped=%d errors=%d",
             stats["updated"], stats["skipped_no_data"], stats["errors"],
         )
+        _record_run("ok")
 
+    except Exception as exc:
+        _record_run("error", str(exc))
+        raise
     finally:
         pg_conn.close()
 

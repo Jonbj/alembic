@@ -240,6 +240,24 @@ def get_counterfactual_summary(
     return pg.fetch_counterfactual_summary(days=days)
 
 
+@router.get("/trades/analytics/counterfactual/status")
+def get_counterfactual_status(
+    pg: Annotated[object, Depends(get_pg_store)],
+    redis: Annotated[object, Depends(get_redis_store)],
+    days: int = Query(default=7, ge=1, le=90),
+) -> dict:
+    """Raw skip counts and last Phase C worker run metadata.
+
+    This endpoint exists so the UI can distinguish an empty counterfactual table
+    from a stopped worker or from skip decisions that are still pending the
+    nightly 1-hour-return computation.
+    """
+    status = pg.fetch_counterfactual_status(days=days)
+    status["worker"] = redis.get_counterfactual_worker_state()
+    status["next_run_hint"] = "22:45 UTC, Mon-Fri"
+    return status
+
+
 @router.get("/feedback/status")
 def get_feedback_status(
     redis: Annotated[object, Depends(get_redis_store)],

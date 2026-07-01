@@ -98,3 +98,40 @@ export interface CounterfactualRow {
 
 export const fetchCounterfactualSummary = (days = 7) =>
   apiFetch<CounterfactualRow[]>(`/api/trades/analytics/counterfactual?days=${days}`)
+
+export interface CounterfactualRawSkipCount {
+  decision: string
+  total: number
+  processed: number
+  with_return: number
+  pending: number
+  included_in_phase_c: boolean
+}
+
+export interface CounterfactualWorkerState {
+  last_run_at: string
+  completed_at: string
+  status: 'ok' | 'skipped' | 'error' | string
+  reason: string | null
+  updated: number
+  skipped_no_data: number
+  errors: number
+  total_decisions: number
+}
+
+export interface CounterfactualStatus {
+  days: number
+  last_processed_at: string | null
+  raw_skip_counts: CounterfactualRawSkipCount[]
+  phase_c: {
+    total_skips: number
+    processed: number
+    with_return: number
+    pending: number
+  }
+  worker: CounterfactualWorkerState | null
+  next_run_hint: string
+}
+
+export const fetchCounterfactualStatus = (days = 7) =>
+  apiFetch<CounterfactualStatus>(`/api/trades/analytics/counterfactual/status?days=${days}`)

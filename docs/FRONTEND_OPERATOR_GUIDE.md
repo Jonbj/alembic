@@ -97,7 +97,7 @@ The React frontend (`frontend/src/pages/`) exposes the operator pages below. Aut
 | Performance | `Performance.tsx` | `/api/performance/pnl`, `/api/performance/daily`, `/api/performance/weekly`, `/weights/*` | P&L storico, breakdown giornaliero, report settimanale |
 | News | `News.tsx` | `/api/news/recent` | Recent ingested articles |
 | LLM | `LLM.tsx` | `/api/llm/feedback`, `/api/llm/models`, `/api/weights/*` | Model feedback loop and dynamic ensemble weights |
-| Auto-Improve | `AutoImprove.tsx` | `/api/feedback/status`, `/api/trades/analytics/counterfactual` | Feedback gate + counterfactual opportunity cost |
+| Auto-Improve | `AutoImprove.tsx` | `/api/feedback/status`, `/api/trades/analytics/counterfactual`, `/api/trades/analytics/counterfactual/status` | Feedback gate + counterfactual opportunity cost with worker freshness and raw skip counts |
 | Operations | `Operations.tsx` | `/api/system/*`, `/api/config`, `/api/admin/*` | Unified System / Config / Admin operator surface |
 | Backtest | `Backtest.tsx` | Backtest API | Strategy backtesting |
 | Docs | `Docs.tsx` | Static | Documentation viewer |

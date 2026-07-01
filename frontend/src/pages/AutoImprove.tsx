@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { fmtDateTime } from '@/utils/format'
-import { fetchFeedbackStatus, fetchCounterfactualSummary } from '@/api/trades'
+import { fetchFeedbackStatus, fetchCounterfactualSummary, fetchCounterfactualStatus } from '@/api/trades'
 import { HelpButton } from '@/components/shared/HelpButton'
 
 const fmt = (v: number | null | undefined, digits = 2) =>
@@ -66,6 +66,22 @@ function StatusDot({ active }: { active: boolean }) {
   )
 }
 
+function PhaseCState({ status }: { status: ReturnType<typeof describePhaseCState> }) {
+  return (
+    <div style={{
+      background: status.bg,
+      border: `1px solid ${status.border}`,
+      borderRadius: 8,
+      padding: '10px 14px',
+      marginBottom: 14,
+      fontSize: 13,
+    }}>
+      <strong style={{ color: status.fg }}>{status.label}</strong>
+      <span style={{ color: 'var(--text-muted)' }}> — {status.detail}</span>
+    </div>
+  )
+}
+
 function Stat({
   label, value, sub, highlight = false,
 }: {
@@ -88,6 +104,70 @@ function Stat({
 const th: React.CSSProperties = { padding: '4px 12px 8px 0', fontWeight: 500 }
 const td: React.CSSProperties = { padding: '8px 12px 8px 0' }
 
+function describePhaseCState(status: Awaited<ReturnType<typeof fetchCounterfactualStatus>> | undefined) {
+  if (!status) {
+    return {
+      label: 'Status unavailable',
+      detail: 'Phase C metadata could not be loaded.',
+      bg: 'rgba(100,116,139,0.10)',
+      border: 'rgba(100,116,139,0.30)',
+      fg: '#64748b',
+    }
+  }
+  if (!status.worker) {
+    return {
+      label: 'Worker not observed',
+      detail: 'No counterfactual-worker run metadata is present in Redis. The table may be empty because the worker has not run since this metadata was introduced.',
+      bg: 'rgba(245,158,11,0.10)',
+      border: 'rgba(245,158,11,0.35)',
+      fg: '#d97706',
+    }
+  }
+  if (status.worker.status === 'error') {
+    return {
+      label: 'Last worker run failed',
+      detail: status.worker.reason || 'Check worker logs before trusting Phase C freshness.',
+      bg: 'rgba(239,68,68,0.10)',
+      border: 'rgba(239,68,68,0.35)',
+      fg: '#dc2626',
+    }
+  }
+  if (status.worker.status === 'skipped') {
+    return {
+      label: 'Last worker run skipped',
+      detail: status.worker.reason || 'The worker did not process Phase C rows.',
+      bg: 'rgba(245,158,11,0.10)',
+      border: 'rgba(245,158,11,0.35)',
+      fg: '#d97706',
+    }
+  }
+  if (status.phase_c.total_skips === 0) {
+    return {
+      label: 'No Phase C skips in window',
+      detail: 'The worker has run, but no SKIP_THRESHOLD, SKIP_EMA or SKIP_CAP decisions exist in the selected window.',
+      bg: 'rgba(34,197,94,0.10)',
+      border: 'rgba(34,197,94,0.30)',
+      fg: '#16a34a',
+    }
+  }
+  if (status.phase_c.pending > 0) {
+    return {
+      label: 'Skips pending nightly processing',
+      detail: `${status.phase_c.pending} Phase C skip(s) still need 1h return computation. Next scheduled run: ${status.next_run_hint}.`,
+      bg: 'rgba(59,130,246,0.08)',
+      border: 'rgba(59,130,246,0.30)',
+      fg: '#2563eb',
+    }
+  }
+  return {
+    label: 'Phase C processed',
+    detail: `${status.phase_c.processed} skip(s) processed; ${status.phase_c.with_return} have available 1h return data.`,
+    bg: 'rgba(34,197,94,0.10)',
+    border: 'rgba(34,197,94,0.30)',
+    fg: '#16a34a',
+  }
+}
+
 export default function AutoImprove() {
   const { data: feedback, isLoading: fbLoading } = useQuery({
     queryKey: ['feedback-status'],
@@ -100,6 +180,14 @@ export default function AutoImprove() {
     queryFn: () => fetchCounterfactualSummary(7),
     refetchInterval: 300_000,
   })
+
+  const { data: cfStatus, isLoading: cfStatusLoading } = useQuery({
+    queryKey: ['counterfactual-status-7d'],
+    queryFn: () => fetchCounterfactualStatus(7),
+    refetchInterval: 300_000,
+  })
+
+  const phaseCState = describePhaseCState(cfStatus)
 
   return (
     <div style={{ position: 'relative' }}>
@@ -211,59 +299,112 @@ export default function AutoImprove() {
 
       {/* Phase C: Counterfactual / Opportunity Cost */}
       <Card title="Phase C — Gate Opportunity Cost (last 7 days)">
-        {cfLoading ? (
+        {cfLoading || cfStatusLoading ? (
           <p style={{ color: 'var(--text-muted)' }}>Loading…</p>
-        ) : !counterfactual || counterfactual.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)' }}>
-            No gate/filter skip data yet — counterfactual returns are computed nightly at 22:45 UTC.
-            Rows appear after SKIP_THRESHOLD, SKIP_EMA or SKIP_CAP decisions are recorded and processed.
-          </p>
         ) : (
           <>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
-                  <th style={th}>Decision</th>
-                  <th style={th}>Skips</th>
-                  <th style={th}>Computed</th>
-                  <th style={th}>Avg 1h return</th>
-                  <th style={th}>% Profitable</th>
-                  <th style={th}>Upside missed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {counterfactual.map(row => {
-                  const meta = decisionMeta(row.decision)
-                  return (
-                    <tr key={row.decision} style={{ borderTop: '1px solid var(--border)' }}>
-                      <td style={td}>
-                        <div>
-                          <span style={{
-                            background: meta.bg,
-                            color: meta.fg,
-                            borderRadius: 4, padding: '2px 6px', fontSize: 11, fontWeight: 600,
-                          }}>
-                            {row.decision}
-                          </span>
-                          <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 3 }}>
-                            {meta.label}
+            <PhaseCState status={phaseCState} />
+
+            <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', marginBottom: 16 }}>
+              <Stat
+                label="Last worker run"
+                value={<span style={{ fontSize: 16 }}>{cfStatus?.worker?.last_run_at ? fmtDateTime(cfStatus.worker.last_run_at) : '—'}</span>}
+                sub={cfStatus?.worker?.reason || cfStatus?.worker?.status || 'no metadata'}
+              />
+              <Stat
+                label="Last processed row"
+                value={<span style={{ fontSize: 16 }}>{cfStatus?.last_processed_at ? fmtDateTime(cfStatus.last_processed_at) : '—'}</span>}
+                sub="MAX counterfactual_computed_at"
+              />
+              <Stat
+                label="Raw Phase C skips"
+                value={cfStatus?.phase_c.total_skips ?? 0}
+                sub={`${cfStatus?.phase_c.pending ?? 0} pending · ${cfStatus?.phase_c.with_return ?? 0} with 1h return`}
+                highlight={(cfStatus?.phase_c.pending ?? 0) > 0}
+              />
+            </div>
+
+            {!counterfactual || counterfactual.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', marginBottom: 16 }}>
+                No opportunity-cost rows are available yet. Use the status above and raw skip counts below
+                to tell whether this is a true zero-skip window, pending nightly processing, or missing worker metadata.
+              </p>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
+                    <th style={th}>Decision</th>
+                    <th style={th}>Skips</th>
+                    <th style={th}>Computed</th>
+                    <th style={th}>Avg 1h return</th>
+                    <th style={th}>% Profitable</th>
+                    <th style={th}>Upside missed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {counterfactual.map(row => {
+                    const meta = decisionMeta(row.decision)
+                    return (
+                      <tr key={row.decision} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td style={td}>
+                          <div>
+                            <span style={{
+                              background: meta.bg,
+                              color: meta.fg,
+                              borderRadius: 4, padding: '2px 6px', fontSize: 11, fontWeight: 600,
+                            }}>
+                              {row.decision}
+                            </span>
+                            <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 3 }}>
+                              {meta.label}
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td style={td}>{row.total_skips}</td>
-                      <td style={td}>{row.computed}</td>
-                      <td style={{ ...td, color: row.avg_return >= 0 ? '#4ade80' : '#f87171' }}>
-                        {fmtSign(row.avg_return)}
-                      </td>
-                      <td style={td}>{fmtPct(row.pct_profitable)}</td>
-                      <td style={{ ...td, color: row.sum_positive_returns > 0 ? '#f59e0b' : 'inherit' }}>
-                        {fmtSign(row.sum_positive_returns)}
-                      </td>
+                        </td>
+                        <td style={td}>{row.total_skips}</td>
+                        <td style={td}>{row.computed}</td>
+                        <td style={{ ...td, color: row.avg_return >= 0 ? '#4ade80' : '#f87171' }}>
+                          {fmtSign(row.avg_return)}
+                        </td>
+                        <td style={td}>{fmtPct(row.pct_profitable)}</td>
+                        <td style={{ ...td, color: row.sum_positive_returns > 0 ? '#f59e0b' : 'inherit' }}>
+                          {fmtSign(row.sum_positive_returns)}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            )}
+
+            {(cfStatus?.raw_skip_counts.length ?? 0) > 0 && (
+              <div style={{ marginTop: 18 }}>
+                <h4 style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--text-muted)' }}>Raw skip counts</h4>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
+                      <th style={th}>Decision</th>
+                      <th style={th}>Raw</th>
+                      <th style={th}>Processed</th>
+                      <th style={th}>With return</th>
+                      <th style={th}>Pending</th>
+                      <th style={th}>Phase C</th>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {cfStatus?.raw_skip_counts.map(row => (
+                      <tr key={row.decision} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td style={td}>{row.decision}</td>
+                        <td style={td}>{row.total}</td>
+                        <td style={td}>{row.processed}</td>
+                        <td style={td}>{row.with_return}</td>
+                        <td style={{ ...td, color: row.pending > 0 ? '#f59e0b' : 'inherit' }}>{row.pending}</td>
+                        <td style={td}>{row.included_in_phase_c ? 'included' : 'excluded'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
               <strong>SKIP_THRESHOLD</strong> measures whether the active feedback gate is rejecting

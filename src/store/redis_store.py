@@ -603,6 +603,20 @@ class RedisStore:
         except (ValueError, TypeError):
             return None
 
+    def set_counterfactual_worker_state(self, state: dict, ttl: int = 86400 * 14) -> None:
+        """Persist last Phase C counterfactual worker run metadata."""
+        self._r.setex("counterfactual:worker:last_run", ttl, json.dumps(state))
+
+    def get_counterfactual_worker_state(self) -> dict | None:
+        """Return last Phase C counterfactual worker run metadata, if available."""
+        raw = self._r.get("counterfactual:worker:last_run")
+        if raw is None:
+            return None
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+
     # =========================================================================
     # OPERATING MODE
     # =========================================================================
