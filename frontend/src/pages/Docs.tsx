@@ -49,7 +49,7 @@ export default function Docs() {
         },
         {
           heading: "Dove guardare",
-          content: "• **Overview** — P&L live, stato operativo, segnali e decisioni recenti\n• **Operations** — scheduler, activity log, configurazione, kill switch e mode\n• **News** — articoli per fonte (Reuters, CNBC, EDGAR, GDELT…)\n• **Signals** — segnali LLM per ticker e decision log\n• **Quality** — metriche ticker/sentiment e fallback\n• **Trades → Analytics** — P&L per regime/simbolo/durata\n• **Performance → Weekly Report** — costi, cash drag, infrastruttura\n• **Strategies** — gate di validazione OOS\n• **Auto-Improve** — feedback gate e counterfactual\n• **LLM** — pesi ensemble e ICIR per modello",
+          content: "• **Overview** — P&L live, stato operativo, segnali e decisioni recenti\n• **Operations** — scheduler, activity log, configurazione, kill switch e mode\n• **News** — articoli per fonte (Reuters, CNBC, EDGAR, GDELT…)\n• **Signals** — segnali LLM per ticker e decision log\n• **Quality** — metriche ticker/sentiment e fallback\n• **Trading** — posizioni, ordini e fills\n• **Performance → Analytics** — P&L per regime/simbolo/ora/score/durata\n• **Performance → Weekly Report** — costi, cash drag, infrastruttura\n• **Strategies** — gate di validazione OOS\n• **Auto-Improve** — feedback gate e counterfactual\n• **LLM** — pesi ensemble e ICIR per modello",
         },
       ]} />
 
@@ -452,7 +452,7 @@ high_vol ×0.2   sleeve=0.4% → ordine ~$4`}</div>
       {/* 8. AUTO-IMPROVE */}
       <div style={card}>
         <h2 style={h2}>🔧 Auto-Improve (Phase A / B / C)</h2>
-        <h3 style={h3}>Phase A — Trade Analytics (pagina Trades → tab Analytics)</h3>
+        <h3 style={h3}>Phase A — Trade Analytics (Performance → Analytics)</h3>
         <ul style={ul}>
           <li><strong>P&L per simbolo</strong> — quali ticker generano alpha, quali distruggono valore</li>
           <li><strong>P&L per regime</strong> — la strategia funziona meglio in bull o sideways?</li>

@@ -422,7 +422,7 @@ L'helper e utile ma non sempre allineato. La pagina Docs e lunga e informativa, 
 
 | Priorita | Tipo | Problema | Impatto | Raccomandazione |
 |---|---|---|---|---|
-| P1 | Gap docs/prodotto | User guide cita `Trades -> Analytics`, ma la pagina Trades non e nel menu ne nelle route attive. | Utente segue istruzioni impossibili. | Aggiornare guida: analytics ora sono in Performance/Trading o ripristinare route Trades. |
+| P1 | Gap docs/prodotto | User guide citava `Trades -> Analytics`, ma la pagina Trades non e nel menu ne nelle route attive. | Utente seguiva istruzioni impossibili. | Risolto nel blocco 3: Phase A analytics sono in `Performance -> Analytics`; ordini/fill restano in `Trading`. |
 | P1 | Gap docs/modelli | Docs citano modelli statici, ma l'API Ollama puo cambiare disponibilita nel tempo. | Confusione operativa e rischio config errata. | Centralizzare model registry dinamico nei backend endpoint e generare UI/docs da quello. |
 | P2 | Struttura | User guide dice 10 sezioni, menu ne mostra 15. | Guida percepita stale. | Aggiornare indice e ordine secondo sidebar. |
 | P2 | UX contenuti | Docs e helper sono molto lunghi e tecnici, poco contestuali al task attuale. | Operatore deve leggere troppo. | Dividere in "What this page answers", "When to act", "Runbook links". |
@@ -505,7 +505,7 @@ Valutazione: la funzione ha ancora senso, ma non come "auto improve" generico. O
 | Area | Gap | Impatto | Raccomandazione |
 |---|---|---|---|
 | User guide | Dice che la dashboard ha 10 sezioni; sidebar ne ha 15. | Guida stale. | Aggiornare indice e ordine menu. |
-| User guide / Docs | Cita `Trades -> Analytics`, ma route/menu Trades non sono attivi. | Istruzioni impossibili. | Rimuovere o ripristinare pagina Trades. |
+| User guide / Docs | Citava `Trades -> Analytics`, ma route/menu Trades non sono attivi. | Istruzioni impossibili. | Risolto nel blocco 3: riferimenti spostati a `Performance -> Analytics`. |
 | Modelli LLM | Docs/API citano Qwen/DeepSeek/GLM-5.1; worker corrente usa Kimi + GLM-5.2; Quality/Backtest mostrano modelli storici senza label. | Rischio decisioni e config errate. | Model registry unico e badge current/retired. |
 | Sidebar toggle | UI dice Full ensemble/4 models e Economy GLM; worker accetta `glm52`. | Toggle potenzialmente inefficace. | Allineare valori e copy. |
 | Dashboard | Helper credenziali/admin e datasource non coerenti; Grafana non e piu superficie frontend desiderata. | Monitoring rotto/fuorviante. | Rimuovere Grafana dal frontend e creare summary React nativi. |
@@ -542,7 +542,7 @@ Valutazione: la funzione ha ancora senso, ma non come "auto improve" generico. O
 | Admin mode pericoloso | Modal conferma per cambio mode. | Riduce errori operativi. | Basso |
 | LLM weights vuota | Mappare `weights` API a `current` e aggiungere fetch suggestion separato. | Pesi live visibili. | Basso/Medio |
 | Quality senza azioni | Aggiungere CTA sotto KPI critici. | Migliore decision support. | Basso |
-| Docs cita Trades | Rimuovere/rindirizzare riferimenti a Trades. | Riduce confusione. | Basso |
+| Docs cita Trades | Rimuovere/rindirizzare riferimenti a Trades. | Riduce confusione. | Fatto nel blocco 3 |
 | Dashboard/Grafana | Rimuovere superficie Grafana dal frontend e sostituirla con summary React primari. | Evita dipendenza da iframe/datasource e chiarisce la UX. | Medio |
 | News troppo lunga | Default limit 50 + filtro "with signal". | Scan piu veloce. | Medio |
 
@@ -585,6 +585,4 @@ Le domande principali emerse dalla review sono state risolte nelle "Decisioni pr
 
 1. Quale endpoint deve esporre il model registry dinamico per il frontend: estendere `/api/admin/status`, aggiungere `/api/llm/models`, o leggere una config esistente?
 2. Dopo la rimozione di Grafana dal frontend, quali metriche minime devono comporre i summary React di monitoring: risk, decay, readiness, model health, costi?
-3. Gli analytics mancanti da `Trades.tsx` vanno portati in `Performance`, in `Trading`, o in una nuova tab nativa "Analytics" dentro `Performance`?
-4. Per mobile read-only/status, quali azioni restano consentite: logout soltanto, o anche kill switch/admin emergency?
-5. Per Auto-Improve Phase C, esiste gia una fonte backend affidabile per last run e raw skip counts o va aggiunto un endpoint dedicato?
+3. Per mobile read-only/status, quali azioni restano consentite: logout soltanto, o anche kill switch/admin emergency?

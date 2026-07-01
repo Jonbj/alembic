@@ -8,11 +8,15 @@ import {
 import { fetchPnL, fetchWeeklyReport, fetchDailyPnL } from '@/api/performance'
 import type { WeeklyReport, DailyPnLDay } from '@/api/performance'
 import { fetchTradesSummary } from '@/api/trades'
+import { fetchAnalyticsByDimension, fetchAnalyticsBySymbol } from '@/api/analytics'
+import type { AnalyticsDim, DimensionRow } from '@/api/analytics'
 import { HelpButton } from '@/components/shared/HelpButton'
 import { DataTable } from '@/components/shared/DataTable'
 
 const PERIODS = ['1M', '3M', '6M', '1Y'] as const
 type Period = typeof PERIODS[number]
+type PerformanceTab = 'pnl' | 'daily' | 'analytics' | 'weekly'
+type AnalyticsPeriod = 30 | 90 | 365
 
 function WeeklyReportTab({
   weekly,
@@ -235,6 +239,17 @@ function nDaysAgoStr(n: number) {
 function fmtPnL(v: number) {
   const sign = v >= 0 ? '+' : ''
   return `${sign}$${v.toFixed(2)}`
+}
+
+function fmtMoney(v: number | null | undefined) {
+  if (v == null) return '—'
+  const sign = v >= 0 ? '+' : ''
+  return `${sign}$${Number(v).toFixed(2)}`
+}
+
+function fmtPct(v: number | null | undefined) {
+  if (v == null) return '—'
+  return `${(Number(v) * 100).toFixed(1)}%`
 }
 
 // DD/MM from YYYY-MM-DD (for chart axis — no year to save space)
@@ -502,9 +517,179 @@ function DailyPnLTab() {
   )
 }
 
+function AnalyticsTable({
+  rows,
+  loading,
+  emptyMessage,
+}: {
+  rows: DimensionRow[]
+  loading: boolean
+  emptyMessage: string
+}) {
+  const tableRows = rows.map((row) => ({
+    cells: [
+      <strong>{row.label}</strong>,
+      row.trade_count,
+      <span style={{ color: row.win_rate >= 0.5 ? 'var(--green)' : '#f59e0b', fontWeight: 600 }}>
+        {fmtPct(row.win_rate)}
+      </span>,
+      <span style={{ color: row.avg_net_pnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>
+        {fmtMoney(row.avg_net_pnl)}
+      </span>,
+      <span style={{ color: row.total_net_pnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>
+        {fmtMoney(row.total_net_pnl)}
+      </span>,
+    ],
+  }))
+
+  return (
+    <DataTable
+      loading={loading}
+      columns={[
+        { label: 'Bucket', width: '30%' },
+        { label: 'Trades', width: '12%' },
+        { label: 'Win Rate', width: '16%' },
+        { label: 'Avg Net P&L', width: '18%' },
+        { label: 'Total Net P&L', width: '20%' },
+      ]}
+      rows={tableRows}
+      emptyMessage={emptyMessage}
+    />
+  )
+}
+
+function AnalyticsTab() {
+  const [days, setDays] = useState<AnalyticsPeriod>(90)
+  const [dim, setDim] = useState<AnalyticsDim>('regime')
+
+  const { data: bySymbol = [], isLoading: symbolLoading } = useQuery({
+    queryKey: ['analytics-by-symbol', days],
+    queryFn: () => fetchAnalyticsBySymbol(days),
+    staleTime: 60_000,
+  })
+
+  const { data: byDim = [], isLoading: dimLoading } = useQuery({
+    queryKey: ['analytics-by-dimension', dim, days],
+    queryFn: () => fetchAnalyticsByDimension(dim, days),
+    staleTime: 60_000,
+  })
+
+  const dimLabels: Record<AnalyticsDim, string> = {
+    regime: 'Regime',
+    hour: 'Hour',
+    score: 'Score',
+    holdtime: 'Hold Time',
+  }
+
+  const dimDescriptions: Record<AnalyticsDim, string> = {
+    regime: 'Shows whether realized P&L depends on the regime multiplier bucket.',
+    hour: 'Groups trades by New York entry hour to reveal weak trading windows.',
+    score: 'Groups trades by LLM score bucket. Higher buckets should outperform lower buckets if the signal has edge.',
+    holdtime: 'Groups closed trades by hold duration to identify stale or too-short holding windows.',
+  }
+
+  const bestSymbols = bySymbol.slice(0, 8).map((row) => ({
+    label: row.label,
+    total: row.total_net_pnl,
+  }))
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Trade Analytics — Phase A</h3>
+          <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 13 }}>
+            Closed-trade diagnostics moved here from the removed Trades page.
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Window</span>
+          {([30, 90, 365] as const).map((d) => (
+            <button
+              key={d}
+              onClick={() => setDays(d)}
+              style={{
+                padding: '4px 10px',
+                fontSize: 12,
+                background: days === d ? 'var(--blue)' : 'transparent',
+                color: days === d ? 'white' : 'var(--text-muted)',
+                border: '1px solid var(--border)',
+                borderRadius: 6,
+                cursor: 'pointer',
+              }}
+            >
+              {d === 365 ? '1Y' : `${d}d`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 20 }}>
+        <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>By Symbol</h3>
+        {bestSymbols.length > 0 && (
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={bestSymbols} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
+              <Tooltip formatter={(v) => [fmtMoney(Number(v)), 'Total net P&L']} />
+              <ReferenceLine y={0} stroke="#94a3b8" strokeWidth={1} />
+              <Bar dataKey="total" radius={[4, 4, 0, 0]} {...{ baseValue: 0 } as Record<string, unknown>}>
+                {bestSymbols.map((entry, idx) => (
+                  <Cell key={idx} fill={entry.total >= 0 ? '#16a34a' : '#dc2626'} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+        <AnalyticsTable
+          rows={bySymbol}
+          loading={symbolLoading}
+          emptyMessage="No closed-trade analytics by symbol for this window."
+        />
+      </div>
+
+      <div className="card">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>By Dimension</h3>
+            <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 12 }}>
+              {dimDescriptions[dim]}
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {(['regime', 'hour', 'score', 'holdtime'] as const).map((d) => (
+              <button
+                key={d}
+                onClick={() => setDim(d)}
+                style={{
+                  padding: '4px 10px',
+                  fontSize: 12,
+                  background: dim === d ? 'var(--blue)' : 'transparent',
+                  color: dim === d ? 'white' : 'var(--text-muted)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                }}
+              >
+                {dimLabels[d]}
+              </button>
+            ))}
+          </div>
+        </div>
+        <AnalyticsTable
+          rows={byDim}
+          loading={dimLoading}
+          emptyMessage={`No ${dimLabels[dim].toLowerCase()} analytics for this window.`}
+        />
+      </div>
+    </div>
+  )
+}
+
 export default function Performance() {
   const [period, setPeriod] = useState<Period>('6M')
-  const [activeTab, setActiveTab] = useState<'pnl' | 'weekly' | 'daily'>('pnl')
+  const [activeTab, setActiveTab] = useState<PerformanceTab>('pnl')
 
   const { data: pnl, isLoading } = useQuery({
     queryKey: ['pnl', period],
@@ -570,6 +755,10 @@ export default function Performance() {
           heading: "Report Settimanale — Regime & Feedback",
           content: "**Regime**: stato del mercato rilevato dal modello — bear / caution / neutral / bull / strong_bull.\n**Multiplier (×N)**: fattore applicato all'entry threshold. ×0.7 in bear = threshold più alta, meno trade. ×1.3 in bull = threshold più bassa, più trade.\n**Deployment ceiling**: massima % di portafoglio allocabile in questo regime (es. 30% in bear, 90% in bull).\n**Capitale trattenuto vs bull**: quanta liquidità stiamo tenendo rispetto a un regime bull — il costo del regime di cautela.\n\n**Threshold corrente**: soglia minima di score per aprire un trade (baseline 0.30). Si alza automaticamente dopo serie di perdite.\n**Regime scale ×N**: ulteriore moltiplicatore sul capitale allocato per trade. ×0.8 = posizioni più piccole del normale.",
         },
+        {
+          heading: "Analytics — Phase A",
+          content: "**By Symbol**: quali ticker generano o distruggono P&L netto.\n**By Dimension**: diagnostica per regime, ora NY, bucket di score e durata posizione.\n\nUsa 30d per segnali recenti, 90d per diagnosi operativa, 1Y per pattern strutturali. Con meno di 30 trade chiusi, interpreta i risultati come indicativi.",
+        },
       ]} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
         <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Performance</h2>
@@ -577,7 +766,7 @@ export default function Performance() {
 
       {/* Tab switcher */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 20, marginTop: 8 }}>
-        {(['pnl', 'daily', 'weekly'] as const).map((t) => (
+        {(['pnl', 'daily', 'analytics', 'weekly'] as const).map((t) => (
           <button
             key={t}
             onClick={() => setActiveTab(t)}
@@ -592,7 +781,7 @@ export default function Performance() {
               cursor: 'pointer',
             }}
           >
-            {t === 'pnl' ? 'P&L Storico' : t === 'daily' ? 'Giornaliero' : 'Report Settimanale'}
+            {t === 'pnl' ? 'P&L Storico' : t === 'daily' ? 'Giornaliero' : t === 'analytics' ? 'Analytics' : 'Report Settimanale'}
           </button>
         ))}
       </div>
@@ -718,6 +907,7 @@ export default function Performance() {
         </>
       )}
       {activeTab === 'daily' && <DailyPnLTab />}
+      {activeTab === 'analytics' && <AnalyticsTab />}
       {activeTab === 'weekly' && (
         <WeeklyReportTab weekly={weekly} isLoading={weeklyLoading} />
       )}

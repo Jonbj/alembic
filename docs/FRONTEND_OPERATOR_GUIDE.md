@@ -94,7 +94,7 @@ The React frontend (`frontend/src/pages/`) exposes the operator pages below. Aut
 | Signals | `Signals.tsx` | `/api/signals/{symbol}`, `/history` | Live sentiment signals |
 | Strategies | `Strategies.tsx` | `/api/config` | Strategy allocation view |
 | Trading | `Trading.tsx` | `/api/positions`, `/api/orders` | Positions, orders and true fills from filled orders |
-| Performance | `Performance.tsx` | `/api/performance/pnl`, `/api/performance/daily`, `/api/performance/weekly`, `/weights/*` | P&L storico, breakdown giornaliero, report settimanale |
+| Performance | `Performance.tsx` | `/api/performance/pnl`, `/api/performance/daily`, `/api/performance/weekly`, `/api/trades/analytics/by-symbol`, `/api/trades/analytics/by-dimension`, `/weights/*` | P&L storico, breakdown giornaliero, Phase A trade analytics, report settimanale |
 | News | `News.tsx` | `/api/news/recent` | Recent ingested articles |
 | LLM | `LLM.tsx` | `/api/llm/feedback`, `/api/llm/models`, `/api/weights/*` | Model feedback loop and dynamic ensemble weights |
 | Auto-Improve | `AutoImprove.tsx` | `/api/feedback/status`, `/api/trades/analytics/counterfactual`, `/api/trades/analytics/counterfactual/status` | Feedback gate + counterfactual opportunity cost with worker freshness and raw skip counts |
@@ -103,7 +103,7 @@ The React frontend (`frontend/src/pages/`) exposes the operator pages below. Aut
 | Docs | `Docs.tsx` | Static | Documentation viewer |
 | Login | `LoginPage.tsx` | `/api/auth/login` | Authentication |
 
-`Trades.tsx` is not restored as a route for now. Trade analytics should converge into `Trading` and `Performance` instead of reintroducing a separate menu item.
+`Trades.tsx` is not restored as a route. Order/fill operations are in `Trading`; closed-trade diagnostics and Phase A analytics are in `Performance`.
 
 ### 2.1 Pagina Performance — Tab disponibili
 
@@ -113,6 +113,7 @@ La pagina Performance (`/performance`) ha tre tab:
 |-----|--------------|-------------|
 | **P&L Storico** | `GET /api/performance/pnl` → Alpaca SDK | Cumulative P&L line chart, Portfolio Equity line chart, Monthly P&L Summary table, Trade Activity (last 30d) |
 | **Giornaliero** | `GET /api/performance/daily` → tabella `trades` locale | P&L per giornata con filtro date (dal/al), preset 7d/14d/30d, grafico a barre verde/rosso, tabella espandibile per giorno con dettaglio trade (symbol, entry/exit price, qty, gross P&L, net P&L, motivo uscita) |
+| **Analytics** | `GET /api/trades/analytics/by-symbol`, `GET /api/trades/analytics/by-dimension` | Phase A diagnostics by symbol, regime, hour, score bucket and hold time |
 | **Report Settimanale** | `GET /api/performance/weekly` → Redis cache | Trade P&L 7d, analisi costi, capital efficiency, regime, feedback loop, infrastruttura, pesi LLM correnti/suggeriti |
 
 **Nota:** "P&L Storico" usa l'equity Alpaca (variazione netta di conto), mentre "Giornaliero" usa i record `trades` locali con `net_pnl` calcolato da `entry_price`/`exit_price`. Piccole differenze numeriche sono normali (commissioni Alpaca, slippage).

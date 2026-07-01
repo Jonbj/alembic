@@ -65,7 +65,7 @@ Mattina (9:00)
 │   └── Near-zero/fallback/ticker precision stanno degradando?
 │
 Giorno per giorno
-├── Trades → tab Analytics (dopo ≥20 trade nel periodo)
+├── Performance → tab Analytics (dopo ≥20 trade chiusi nel periodo)
 │   └── Quale simbolo/ora/score bucket sta trainando o drenando il P&L?
 │   └── Win rate in calo? → controlla segnale per quei ticker
 │
@@ -196,15 +196,13 @@ La dashboard è accessibile all'indirizzo **http://192.168.178.144:3000** ed è 
 
 ---
 
-### 3.3b Trades 💰
+### 3.3b Performance — Daily & Analytics 📊
 
-**A cosa serve**: Analisi completa dei trade chiusi e valutazione multidimensionale dell'edge del sistema. È la principale pagina di diagnosi post-trade.
+**A cosa serve**: Analisi dei trade chiusi e valutazione multidimensionale dell'edge del sistema. La vecchia pagina `Trades` non è più nel menu: lo storico operativo è in **Trading**, mentre la diagnosi post-trade è in **Performance**.
 
-**Due tab:**
+**Tab Giornaliero**
 
-**Tab Trades**
-
-Storico di tutti i trade con filtri per simbolo e status (open/closed/all). Le metriche sommario in cima mostrano:
+Mostra P&L lordo, costi e P&L netto per giorno, con dettaglio espandibile dei trade chiusi. Le metriche sommario mostrano:
 
 | Metrica | Interpretazione |
 |---------|----------------|
@@ -213,15 +211,13 @@ Storico di tutti i trade con filtri per simbolo e status (open/closed/all). Le m
 | **Avg Net P&L** | Media per trade dopo slippage stimato. Positivo ma vicino a zero indica edge sottile |
 | **Total Net P&L** | P&L cumulativo. Verde = sistema in profitto netto |
 
-Il **grafico cumulativo** mostra l'equity curve del sistema. Una slope positiva costante indica edge stabile; un drawdown accentuato attiva automaticamente Phase B (feedback loop).
+Il **grafico P&L per giornata** mostra se le perdite sono concentrate in singole sessioni o distribuite. Una sequenza di perdite accentuata può attivare Phase B nella pagina Auto-Improve.
 
-Clicca una riga per espandere i dettagli: signal_id, order ID, notional, slippage stimato, gross P&L, e **badge postmortem** se disponibile.
-
-**Badge postmortem**: diagnosi automatica della causa di perdita — `ADVERSE_MOVE`, `HIGH_SPREAD`, `STALENESS`, `REGIME_SHIFT`. Usato per classificare sistematicamente le perdite senza revisione manuale.
+Clicca una giornata per espandere i dettagli: simbolo, motivo uscita, entry/exit, quantità, gross P&L, costi e net P&L.
 
 **Tab Analytics (Phase A)**
 
-Cinque grafici che rispondo alla domanda: *dove guadagna e perde il sistema?*
+Questa tab recupera gli analytics precedentemente indicati come `Trades → Analytics`. Risponde alla domanda: *dove guadagna e perde il sistema?*
 
 | Grafico | Come leggerlo | Azione se negativo |
 |---------|--------------|-------------------|
@@ -231,7 +227,7 @@ Cinque grafici che rispondo alla domanda: *dove guadagna e perde il sistema?*
 | **Per Score LLM** | P&L per bucket di score | Se bucket alti non battono quelli bassi, il segnale non ha edge discriminante |
 | **Per Durata** | P&L per durata di detenzione | Trade <15min soffrono di spread; >2h il segnale è stantio |
 
-Cambia il periodo (7/30/90 gg) per bilanciare freschezza e volume statistico. Con meno di 30 trade i grafici hanno bassa significatività.
+Cambia il periodo (30/90/365 gg) per bilanciare freschezza e volume statistico. Con meno di 30 trade chiusi i grafici hanno bassa significatività.
 
 ---
 

@@ -198,7 +198,7 @@ export default function AutoImprove() {
       <HelpButton title="Auto-Improve — Guida alla Lettura" sections={[
         {
           heading: "Cos'è Auto-Improve",
-          content: 'Il sistema si auto-corregge in tre fasi:\n\n**Phase A** (tab Analytics in Trades): analizza il passato — dove guadagna e perde il sistema per dimensione.\n**Phase B** (questa pagina, card sopra): reagisce alle perdite alzando la soglia di ingresso usata dal portfolio scheduler.\n**Phase C** (questa pagina, tabella sotto): misura retrospettivamente i candidati scartati da gate/filtri per capire se il sistema è troppo restrittivo.\n\nNessun intervento manuale richiesto: Phase B e C operano automaticamente.',
+          content: 'Il sistema si auto-corregge in tre fasi:\n\n**Phase A** (Performance → Analytics): analizza il passato — dove guadagna e perde il sistema per simbolo, regime, ora, score e durata.\n**Phase B** (questa pagina, card sopra): reagisce alle perdite alzando la soglia di ingresso usata dal portfolio scheduler.\n**Phase C** (questa pagina, tabella sotto): misura retrospettivamente i candidati scartati da gate/filtri per capire se il sistema è troppo restrittivo.\n\nNessun intervento manuale richiesto: Phase B e C operano automaticamente.',
         },
         {
           heading: 'Phase B — Valori da Monitorare',
@@ -210,7 +210,7 @@ export default function AutoImprove() {
         },
         {
           heading: 'Phase B — Cosa Fare Quando è Attivo',
-          content: 'Se l\'aggiustamento è attivo **da più di 24 ore senza recovery**, valuta:\n\n1. **Pagina Signals** — confidence bassa sui segnali? I modelli LLM concordano poco?\n2. **Pagina Overview** — regime di mercato ribassista? HHI elevato (portfolio concentrato)?\n3. **Pagina News** — notizie macro avverse nel watchlist (es. earnings season, eventi Fed)?\n4. **Analytics tab in Trades** — quale ora o simbolo sta generando le perdite?\n\nSe il contesto è chiaramente avverso (mercato in sell-off, VIX elevato), considera di attivare manualmente la modalità Halted dalla pagina Admin.',
+          content: 'Se l\'aggiustamento è attivo **da più di 24 ore senza recovery**, valuta:\n\n1. **Pagina Signals** — confidence bassa sui segnali? I modelli LLM concordano poco?\n2. **Pagina Overview** — regime di mercato ribassista? HHI elevato (portfolio concentrato)?\n3. **Pagina News** — notizie macro avverse nel watchlist (es. earnings season, eventi Fed)?\n4. **Performance → Analytics** — quale ora, simbolo, score bucket o durata sta generando le perdite?\n\nSe il contesto è chiaramente avverso (mercato in sell-off, VIX elevato), considera di attivare manualmente la modalità Halted dalla pagina Admin.',
         },
         {
           heading: 'Phase C — Come Leggere la Tabella',
