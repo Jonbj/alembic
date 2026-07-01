@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchConfig, updateConfig, type ConfigResponse } from '@/api/config'
 import { HelpButton } from '@/components/shared/HelpButton'
 import { RiskParamWarning } from '@/components/shared/RiskParamWarning'
+import { AccessibleModal } from '@/components/shared/AccessibleModal'
 
 export default function Config() {
   const qc = useQueryClient()
@@ -162,9 +163,7 @@ export default function Config() {
 
       {/* F0-3: confirmation dialog for high-risk save */}
       {saveConfirmOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card" style={{ width: 460 }}>
-            <h3 style={{ margin: '0 0 12px', color: '#ef4444' }}>⚠ High-Risk Configuration</h3>
+        <AccessibleModal title="High-Risk Configuration" tone="danger" width={460} onClose={() => setSaveConfirmOpen(false)}>
             <p style={{ color: 'var(--text-muted)', marginBottom: 8, lineHeight: 1.6 }}>
               You are saving risk parameters that exceed the 10% safety threshold:
             </p>
@@ -186,8 +185,7 @@ export default function Config() {
                 Confirm Save High-Risk Values
               </button>
             </div>
-          </div>
-        </div>
+        </AccessibleModal>
       )}
     </div>
   )

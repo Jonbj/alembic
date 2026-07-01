@@ -28,23 +28,40 @@ function renderContent(text: string) {
 export function HelpButton({ title, sections }: HelpButtonProps) {
   const [open, setOpen] = useState(false)
   const drawerRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const titleId = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-help-title`
 
   useEffect(() => {
     if (!open) return
+    drawerRef.current?.focus()
     function handleClick(e: MouseEvent) {
       if (drawerRef.current && !drawerRef.current.contains(e.target as Node)) {
         setOpen(false)
       }
     }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setOpen(false)
+      }
+    }
     document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClick)
+      document.removeEventListener('keydown', handleKeyDown)
+      buttonRef.current?.focus()
+    }
   }, [open])
 
   return (
     <>
       <button
+        ref={buttonRef}
         onClick={() => setOpen(true)}
         title="Guida e documentazione"
+        aria-label={`Apri guida: ${title}`}
+        aria-expanded={open}
         style={{
           position: 'absolute',
           top: 0,
@@ -70,7 +87,7 @@ export function HelpButton({ title, sections }: HelpButtonProps) {
       </button>
 
       {open && (
-        <div style={{
+        <div role="presentation" style={{
           position: 'fixed',
           inset: 0,
           zIndex: 1000,
@@ -78,6 +95,10 @@ export function HelpButton({ title, sections }: HelpButtonProps) {
         }}>
           <div
             ref={drawerRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            tabIndex={-1}
             style={{
               position: 'absolute',
               top: 0,
@@ -107,9 +128,10 @@ export function HelpButton({ title, sections }: HelpButtonProps) {
               borderBottom: '1px solid #334155',
               flexShrink: 0,
             }}>
-              <div style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>{title}</div>
+              <div id={titleId} style={{ color: 'white', fontWeight: 700, fontSize: 15 }}>{title}</div>
               <button
                 onClick={() => setOpen(false)}
+                aria-label="Chiudi guida"
                 style={{
                   background: 'transparent',
                   border: 'none',

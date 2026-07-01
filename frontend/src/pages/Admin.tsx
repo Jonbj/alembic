@@ -10,6 +10,7 @@ import {
   setMode,
 } from '@/api/admin'
 import { HelpButton } from '@/components/shared/HelpButton'
+import { AccessibleModal } from '@/components/shared/AccessibleModal'
 import { useStore } from '@/store'
 
 const MODES = ['backtest', 'paper', 'semi_auto', 'full_auto', 'halted'] as const
@@ -175,9 +176,7 @@ export default function Admin() {
 
       {/* Activate confirmation dialog */}
       {confirmOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card" style={{ width: 420 }}>
-            <h3 style={{ margin: '0 0 12px', color: 'var(--red)' }}>⚠ Activate Kill Switch</h3>
+        <AccessibleModal title="Activate Kill Switch" tone="danger" width={420} onClose={() => setConfirmOpen(false)}>
             <p style={{ color: 'var(--text-muted)', marginBottom: 16 }}>
               This will halt all order execution immediately. Are you sure?
             </p>
@@ -193,15 +192,12 @@ export default function Admin() {
                 {activateMutation.isPending ? 'Activating...' : 'Confirm Activate'}
               </button>
             </div>
-          </div>
-        </div>
+        </AccessibleModal>
       )}
 
       {/* F0-3: Deactivate confirmation dialog — required copy per spec */}
       {deactivateConfirmOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card" style={{ width: 480 }}>
-            <h3 style={{ margin: '0 0 12px', color: '#f59e0b' }}>⚠ Deactivate Kill Switch</h3>
+        <AccessibleModal title="Deactivate Kill Switch" tone="warning" width={480} onClose={() => { setDeactivateConfirmOpen(false); setDeactivateError(null) }}>
             <p style={{ color: 'var(--text-muted)', marginBottom: 12, lineHeight: 1.6 }}>
               Deactivating kill-switch may allow the next paper cycle to proceed.
               Confirm only if the preflight/runbook allows it.
@@ -230,15 +226,12 @@ export default function Admin() {
                 {isDeactivating ? 'Deactivating…' : 'Confirm Deactivate'}
               </button>
             </div>
-          </div>
-        </div>
+        </AccessibleModal>
       )}
 
       {/* Operating mode confirmation dialog */}
       {pendingMode && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="card" style={{ width: 460 }}>
-            <h3 style={{ margin: '0 0 12px', color: '#f59e0b' }}>Confirm Operating Mode Change</h3>
+        <AccessibleModal title="Confirm Operating Mode Change" tone="warning" width={460} onClose={() => setPendingMode(null)}>
             <p style={{ color: 'var(--text-muted)', marginBottom: 12, lineHeight: 1.6 }}>
               Change operating mode from <strong>{modeData?.mode ?? 'unknown'}</strong> to <strong>{pendingMode}</strong>?
             </p>
@@ -261,8 +254,7 @@ export default function Admin() {
                 {modeMutation.isPending ? 'Changing...' : 'Confirm Change'}
               </button>
             </div>
-          </div>
-        </div>
+        </AccessibleModal>
       )}
     </div>
   )
