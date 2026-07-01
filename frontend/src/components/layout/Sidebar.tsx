@@ -46,7 +46,7 @@ export function Sidebar() {
   }
 
   return (
-    <nav style={{
+    <nav className="app-sidebar" style={{
       width: 'var(--sidebar-w)',
       minWidth: 'var(--sidebar-w)',
       background: '#1e293b',
