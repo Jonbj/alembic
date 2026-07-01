@@ -1,4 +1,4 @@
-import { Fragment, useState, useCallback } from 'react'
+import { Fragment, useState, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
@@ -17,14 +17,22 @@ function safeUrl(url: string): string | undefined {
 export default function News() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [ticker, setTicker] = useState(searchParams.get('ticker') ?? '')
-  const [source, setSource] = useState('')
+  const [source, setSource] = useState(searchParams.get('source') ?? '')
+  const [limit, setLimit] = useState(Number(searchParams.get('limit') ?? 50))
+  const [actionableOnly, setActionableOnly] = useState(searchParams.get('actionable') === '1')
   const [expanded, setExpanded] = useState<number | null>(null)
 
   const { data: news = [], isLoading, error } = useQuery({
-    queryKey: ['news', ticker, source],
-    queryFn: () => fetchNews({ limit: 200, ticker: ticker || undefined, source: source || undefined }),
+    queryKey: ['news', ticker, source, limit],
+    queryFn: () => fetchNews({ limit, ticker: ticker || undefined, source: source || undefined }),
     refetchInterval: 300000,
   })
+
+  const visibleNews = useMemo(() =>
+    actionableOnly
+      ? news.filter((item) => item.ticker && item.raw_sentiment != null && Math.abs(item.raw_sentiment) >= 0.1)
+      : news
+  , [news, actionableOnly])
 
   const toggleExpanded = useCallback((id: number) => {
     setExpanded((prev) => (prev === id ? null : id))
@@ -36,6 +44,36 @@ export default function News() {
     if (value.trim()) next.set('ticker', value.trim().toUpperCase())
     else next.delete('ticker')
     setSearchParams(next, { replace: true })
+  }
+
+  const updateSource = (value: string) => {
+    setSource(value)
+    const next = new URLSearchParams(searchParams)
+    if (value) next.set('source', value)
+    else next.delete('source')
+    setSearchParams(next, { replace: true })
+  }
+
+  const updateLimit = (value: number) => {
+    setLimit(value)
+    const next = new URLSearchParams(searchParams)
+    next.set('limit', String(value))
+    setSearchParams(next, { replace: true })
+  }
+
+  const updateActionable = (checked: boolean) => {
+    setActionableOnly(checked)
+    const next = new URLSearchParams(searchParams)
+    if (checked) next.set('actionable', '1')
+    else next.delete('actionable')
+    setSearchParams(next, { replace: true })
+  }
+
+  const clearFilters = () => {
+    setTicker('')
+    setSource('')
+    setActionableOnly(false)
+    setSearchParams(new URLSearchParams(), { replace: true })
   }
 
   function sentimentBadge(raw: number | null) {
@@ -69,7 +107,7 @@ export default function News() {
 
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
         <input placeholder="Filter ticker..." value={ticker} onChange={(e) => updateTicker(e.target.value)} style={{ width: 160 }} />
-        <select value={source} onChange={(e) => setSource(e.target.value)}>
+        <select value={source} onChange={(e) => updateSource(e.target.value)}>
           <option value="">All sources</option>
           <optgroup label="Live feeds">
             <option value="reuters">Reuters RSS</option>
@@ -82,7 +120,26 @@ export default function News() {
             <option value="alpaca_benzinga">Alpaca / Benzinga</option>
           </optgroup>
         </select>
-        <span style={{ color: 'var(--text-muted)', alignSelf: 'center', fontSize: 12 }}>{news.length} articles</span>
+        <select value={limit} onChange={(e) => updateLimit(Number(e.target.value))}>
+          <option value={50}>50 latest</option>
+          <option value={100}>100 latest</option>
+          <option value={200}>200 latest</option>
+        </select>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 12 }}>
+          <input
+            type="checkbox"
+            checked={actionableOnly}
+            onChange={(e) => updateActionable(e.target.checked)}
+            style={{ width: 14, height: 14, padding: 0 }}
+          />
+          actionable only
+        </label>
+        {(ticker || source || actionableOnly) && (
+          <button className="btn-ghost" onClick={clearFilters} style={{ fontSize: 12, padding: '5px 10px' }}>Clear</button>
+        )}
+        <span style={{ color: 'var(--text-muted)', alignSelf: 'center', fontSize: 12 }}>
+          {visibleNews.length} shown · {news.length} fetched
+        </span>
       </div>
 
       {isLoading && <p style={{ color: 'var(--text-muted)' }}>Loading...</p>}
@@ -94,7 +151,7 @@ export default function News() {
             <tr><th>Title</th><th>Source</th><th>Ticker</th><th>Sentiment</th><th>Time</th></tr>
           </thead>
           <tbody>
-            {news.map((item: NewsItem) => (
+            {visibleNews.map((item: NewsItem) => (
               <Fragment key={item.id}>
                 <tr
                   onClick={() => toggleExpanded(item.id)}
@@ -147,8 +204,14 @@ export default function News() {
                 )}
               </Fragment>
             ))}
-            {news.length === 0 && !isLoading && (
-              <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No news</td></tr>
+            {visibleNews.length === 0 && !isLoading && (
+              <tr>
+                <td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>
+                  {news.length === 0
+                    ? 'No news returned for the selected filters.'
+                    : 'No actionable news in the fetched set. Clear filters or increase the limit.'}
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
