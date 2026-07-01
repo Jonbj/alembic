@@ -109,6 +109,9 @@ class Config(BaseModel):
     # MarketAux news API (primary live news source)
     MARKETAUX_API_KEY: str = Field(default_factory=lambda: os.environ.get("MARKETAUX_API_KEY", ""))
 
+    # Finnhub company-news (clean explicit ticker tagging, US equities, free tier 60/min).
+    FINNHUB_API_KEY: str = Field(default_factory=lambda: os.environ.get("FINNHUB_API_KEY", ""))
+
     # Ticker resolution (design doc §4). OpenFIGI key is optional (raises rate limits
     # ~25→~250 req/min). SEC requires a User-Agent with a contact for company_tickers.
     OPENFIGI_API_KEY: str = Field(default_factory=lambda: os.environ.get("OPENFIGI_API_KEY", ""))

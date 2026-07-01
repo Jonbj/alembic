@@ -45,6 +45,7 @@ _TICKER_ALIASES: dict[str, str] = {
     "FB": "META",
 }
 from src.connectors.alpaca_news import AlpacaNewsConnector
+from src.connectors.finnhub_news import FinnhubNewsConnector
 from src.connectors.deduplicator import Deduplicator
 from src.connectors.rss import RSSConnector
 from src.connectors.sec_edgar import SECEdgarConnector
@@ -328,6 +329,77 @@ def run_alpaca_ingestion_worker() -> dict:
         log.info("Alpaca ingestion stats: %s", stats)
         return stats
 
+    finally:
+        redis_client.close()
+
+
+async def _fetch_finnhub_items(connector: FinnhubNewsConnector) -> list[NewsItem]:
+    """Drain the async Finnhub News iterator into a concrete list."""
+    return [item async for item in connector.fetch()]
+
+
+def _process_finnhub_items(
+    items: list[NewsItem],
+    deduplicator: Deduplicator,
+    redis_client: Redis,
+) -> dict:
+    """Deduplicate and push Finnhub NewsItems to news:queue.
+
+    Finnhub articles already carry a single explicit ticker in asset_tags
+    (extraction_method='source_metadata') — no TickerExtractor needed.
+    """
+    stats = {"fetched": 0, "tickers_found": 0, "queued": 0, "duplicates": 0}
+
+    for item in items:
+        stats["fetched"] += 1
+        if not item.asset_tags:
+            continue
+        stats["tickers_found"] += len(item.asset_tags)
+        for ticker in item.asset_tags:
+            ticker = _TICKER_ALIASES.get(ticker, ticker)
+            per_ticker = NewsItem(
+                id=f"{item.id}:{ticker}",
+                source=item.source,
+                timestamp=item.timestamp,
+                title=item.title,
+                body=item.body,
+                url=item.url,
+                language=item.language,
+                asset_tags=[ticker],
+                extraction_method=item.extraction_method,
+            )
+            if deduplicator.is_duplicate_by_id(per_ticker):
+                stats["duplicates"] += 1
+                continue
+            redis_client.rpush("news:queue", per_ticker.model_dump_json())
+            stats["queued"] += 1
+
+    return stats
+
+
+@app.task(name="src.workers.ingestion.run_finnhub_ingestion_worker")
+def run_finnhub_ingestion_worker() -> dict:
+    """Celery entry-point for Finnhub company-news ingestion.
+
+    Clean, explicitly-tagged US company news for WATCHLIST_SYMBOLS. Skips silently
+    when FINNHUB_API_KEY is not configured, so it is safe to schedule before the key
+    is added.
+    """
+    redis_client = Redis.from_url(config.REDIS_URL)
+    if not config.FINNHUB_API_KEY:
+        log.warning("FINNHUB_API_KEY not configured — skipping Finnhub ingestion")
+        redis_client.close()
+        return {"skipped": True, "reason": "no_credentials"}
+    try:
+        connector = FinnhubNewsConnector(
+            api_key=config.FINNHUB_API_KEY,
+            symbols=config.WATCHLIST_SYMBOLS or [],
+        )
+        deduplicator = Deduplicator(redis_client)
+        items = asyncio.run(_fetch_finnhub_items(connector))
+        stats = _process_finnhub_items(items, deduplicator, redis_client)
+        log.info("Finnhub ingestion stats: %s", stats)
+        return stats
     finally:
         redis_client.close()
 

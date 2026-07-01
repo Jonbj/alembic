@@ -96,7 +96,41 @@ def main() -> None:
 
     print("\nLegenda: prec = ext∩gt / ext · recall = ext∩gt / gt · rec(WL) = recall solo su gt in watchlist")
     print("FP/art = falsi positivi medi per articolo · macro-FP = ticker estratti su news macro/irrilevanti (dovrebbe ≈0)")
+
+    _print_precision_by_method()
+
     print("\nSentiment sign-accuracy + IC end-to-end: in attesa di compute_label_forward_returns.py.")
+
+
+def _print_precision_by_method() -> None:
+    """Extraction precision per extraction_method (source_metadata / cashtag / org_lookup
+    / regex), joining labeled articles to news_log. This is the data-driven lens for the
+    'keep or drop GDELT (org_lookup)' decision: it isolates which extraction PATH — not
+    just which source — produces false positives. Only rows with a recorded method (QT-03)."""
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """SELECT nl.extraction_method AS method,
+                          (nl.ticker = ANY(lbl.gt_tickers))::int AS correct
+                   FROM news_log nl
+                   JOIN news_labels lbl ON lbl.url = nl.url
+                   WHERE lbl.status = 'labeled'
+                     AND nl.extraction_method IS NOT NULL AND nl.extraction_method <> ''"""
+            )
+            rows = cur.fetchall()
+    if not rows:
+        print("\nPrecision per extraction_method: nessuna label con extraction_method (QT-03) ancora.")
+        return
+    by: dict[str, list[int]] = defaultdict(list)
+    for r in rows:
+        by[r["method"]].append(int(r["correct"]))
+    print(f"\n# Precision per extraction_method\n{'method':18} {'n':>5} {'precision':>10}")
+    for method in sorted(by, key=lambda m: -len(by[m])):
+        vals = by[method]
+        prec = sum(vals) / len(vals)
+        print(f"{method:18} {len(vals):>5} {prec:>10.2f}")
+    print("→ org_lookup/regex bassi vs source_metadata/cashtag alti = conferma quantitativa che il rumore")
+    print("  viene dal path di estrazione NER/regex (es. GDELT), non dalle fonti explicit-tagged.")
 
 
 if __name__ == "__main__":
