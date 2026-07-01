@@ -19,6 +19,82 @@ function pct(v: number | null | undefined): string {
   return (Number(v) * 100).toFixed(2) + '%'
 }
 
+type VerdictTone = 'good' | 'warn' | 'bad' | 'neutral'
+
+function VerdictBox({ tone, title, details }: { tone: VerdictTone; title: string; details: string[] }) {
+  const palette = {
+    good: { bg: '#064e3b', border: '#059669', fg: '#bbf7d0' },
+    warn: { bg: '#78350f', border: '#d97706', fg: '#fef3c7' },
+    bad: { bg: '#7f1d1d', border: '#dc2626', fg: '#fecaca' },
+    neutral: { bg: '#1e293b', border: '#334155', fg: '#cbd5e1' },
+  }[tone]
+
+  return (
+    <div style={{ background: palette.bg, border: `1px solid ${palette.border}`, color: palette.fg, borderRadius: 8, padding: 16 }}>
+      <div style={{ fontWeight: 800, marginBottom: 8 }}>{title}</div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {details.map((detail) => (
+          <span key={detail} style={{ fontSize: 12, fontWeight: 600 }}>{detail}</span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function monotonicityScore(rows: { avg_return: number }[] | undefined): number | null {
+  if (!rows || rows.length < 3) return null
+  let increasingPairs = 0
+  for (let i = 1; i < rows.length; i += 1) {
+    if (Number(rows[i].avg_return) >= Number(rows[i - 1].avg_return)) increasingPairs += 1
+  }
+  return increasingPairs / (rows.length - 1)
+}
+
+function buildBacktestVerdict(summary: Awaited<ReturnType<typeof backtestApi.summary>> | undefined, buckets: { avg_return: number }[] | undefined) {
+  if (!summary) {
+    return { tone: 'neutral' as const, title: 'Verdict: waiting for evidence', details: ['summary not loaded yet'] }
+  }
+
+  const details: string[] = []
+  let blockers = 0
+  let warnings = 0
+  const mono = monotonicityScore(buckets)
+
+  if ((summary.n_scored ?? 0) < 1000) {
+    warnings += 1
+    details.push('sample below 1,000 scored signals')
+  }
+  if ((summary.ic ?? 0) < 0.05) {
+    blockers += 1
+    details.push('IC below 0.05 promotion threshold')
+  }
+  if ((summary.icir ?? 0) < 0.30) {
+    warnings += 1
+    details.push('ICIR below 0.30 stability threshold')
+  }
+  if ((summary.hit_rate ?? 0) < 0.50) {
+    blockers += 1
+    details.push('hit rate below 50% directional edge')
+  }
+  if ((summary.avg_long_return ?? 0) <= 0) {
+    warnings += 1
+    details.push('long bucket return not positive')
+  }
+  if ((summary.avg_short_return ?? 0) <= 0) {
+    warnings += 1
+    details.push('short bucket return not positive')
+  }
+  if (mono != null && mono < 0.60) {
+    warnings += 1
+    details.push('score buckets are not monotonic enough')
+  }
+
+  if (details.length === 0) details.push('meets current promotion evidence thresholds')
+  if (blockers > 0) return { tone: 'bad' as const, title: 'Verdict: not enough evidence for promotion', details }
+  if (warnings > 0) return { tone: 'warn' as const, title: 'Verdict: review before promotion', details }
+  return { tone: 'good' as const, title: 'Verdict: promotion evidence acceptable', details }
+}
+
 function RunSelector({ runs, selected, onChange }: {
   runs: BacktestRun[]
   selected: string
@@ -99,6 +175,7 @@ export default function Backtest() {
   if (!runs || runs.length === 0) return <div style={{ color: '#94a3b8', padding: 24 }}>No backtest runs found.</div>
 
   const currentRun = runs.find(r => r.run_id === runId)
+  const verdict = buildBacktestVerdict(summary, bucketData)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24, position: 'relative' }}>
@@ -129,7 +206,7 @@ export default function Backtest() {
         },
       ]} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'white' }}>Backtest Analysis</h1>
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>Backtest Analysis</h1>
         <RunSelector
           runs={runs}
           selected={runId}
@@ -142,6 +219,8 @@ export default function Backtest() {
           {currentRun.symbols} symbols · {currentRun.models} models · {currentRun.started_at?.slice(0, 10)} → {currentRun.ended_at?.slice(0, 10)}
         </div>
       )}
+
+      <VerdictBox {...verdict} />
 
       {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>

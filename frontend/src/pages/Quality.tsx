@@ -11,6 +11,72 @@ function pct(v: number | null | undefined): string {
   return v == null ? '—' : (Number(v) * 100).toFixed(1) + '%'
 }
 
+type VerdictTone = 'good' | 'warn' | 'bad' | 'neutral'
+
+function VerdictBox({ tone, title, details }: { tone: VerdictTone; title: string; details: string[] }) {
+  const palette = {
+    good: { bg: '#dcfce7', border: '#86efac', fg: '#166534' },
+    warn: { bg: '#fef9c3', border: '#fde68a', fg: '#854d0e' },
+    bad: { bg: '#fee2e2', border: '#fca5a5', fg: '#991b1b' },
+    neutral: { bg: '#f1f5f9', border: '#cbd5e1', fg: '#475569' },
+  }[tone]
+
+  return (
+    <div style={{ background: palette.bg, border: `1px solid ${palette.border}`, color: palette.fg, borderRadius: 8, padding: 14, marginBottom: 16 }}>
+      <div style={{ fontWeight: 800, marginBottom: 6 }}>{title}</div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {details.map((detail) => (
+          <span key={detail} style={{ fontSize: 12, fontWeight: 600 }}>{detail}</span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function buildQualityVerdict(data: Awaited<ReturnType<typeof fetchQualityMetrics>>) {
+  const details: string[] = []
+  let risk = 0
+
+  if ((data.signals.n ?? 0) < 50) {
+    risk += 1
+    details.push('sample too small for stable quality read')
+  }
+  if ((data.signals.near_zero_rate ?? 0) > 0.55) {
+    risk += 1
+    details.push('near-zero rate high: signal is mostly noise')
+  }
+  if ((data.signals.fallback_rate ?? 0) > 0.20) {
+    risk += 1
+    details.push('fallback rate high: primary model path degraded')
+  }
+  if ((data.signals.mean_ensemble_std ?? 0) > 0.30) {
+    risk += 1
+    details.push('ensemble divergence above discard threshold')
+  }
+  if (data.extraction.n_labeled < 30) {
+    risk += 1
+    details.push('needs more labels before trusting extraction metrics')
+  } else {
+    if ((data.extraction.precision ?? 1) < 0.80) {
+      risk += 2
+      details.push('ticker precision below 0.80: false positives likely')
+    }
+    if ((data.extraction.recall ?? 1) < 0.70) {
+      risk += 1
+      details.push('ticker recall below 0.70: missed tickers likely')
+    }
+    if ((data.extraction.macro_fp_per_article ?? 0) > 0.10) {
+      risk += 1
+      details.push('macro false positives are leaking into ticker labels')
+    }
+  }
+
+  if (details.length === 0) details.push('no quality blocker detected in current window')
+  if (risk >= 3) return { tone: 'bad' as const, title: 'Verdict: blocked for promotion', details }
+  if (risk >= 1) return { tone: 'warn' as const, title: 'Verdict: usable with review', details }
+  return { tone: 'good' as const, title: 'Verdict: quality acceptable', details }
+}
+
 export default function Quality() {
   const [days, setDays] = useState(14)
   const { data, isLoading, error } = useQuery({
@@ -39,6 +105,8 @@ export default function Quality() {
 
       {data && (
         <>
+          <VerdictBox {...buildQualityVerdict(data)} />
+
           <h3 style={{ fontSize: 14, fontWeight: 600, margin: '8px 0' }}>Sentiment per modello</h3>
           <div className="card" style={{ padding: 0 }}>
             <table>
