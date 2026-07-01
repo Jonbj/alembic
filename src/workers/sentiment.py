@@ -390,7 +390,12 @@ def run_sentiment_worker() -> dict:
     import psycopg2
     from redis import Redis
 
-    from src.llm.client import OllamaKimiClient, OllamaGLM52Client
+    from src.llm.model_registry import (
+        build_sentiment_clients,
+        model_ids_for_keys,
+        normalize_model_selection,
+        normalize_weights_for_active_models,
+    )
 
     # Initialize connections
     redis_client = Redis.from_url(config.REDIS_URL)
@@ -400,25 +405,17 @@ def run_sentiment_worker() -> dict:
 
     # Initialize components — model selection read from Redis (set by UI toggle),
     # falling back to SENTIMENT_LLM_MODELS env var, then "all".
-    # Accepted values (comma-separated subset of: kimi, glm52):
-    #   "all"    → 2-model ensemble Kimi + GLM-5.2 (default, best quality/quota balance)
-    #   "glm52"  → single model, saves 50% Ollama quota
     _redis_model_sel = redis_store.get_llm_models()
-    _model_selection = (
-        (_redis_model_sel or os.environ.get("SENTIMENT_LLM_MODELS", "all"))
-        .lower()
-        .split(",")
+    _canonical_selection, _model_keys, _invalid_models = normalize_model_selection(
+        _redis_model_sel or os.environ.get("SENTIMENT_LLM_MODELS", "all")
     )
-    _all_clients = {
-        "kimi": OllamaKimiClient(),
-        "glm52": OllamaGLM52Client(),
-    }
-    if "all" in _model_selection:
-        clients = list(_all_clients.values())
-    else:
-        clients = [
-            _all_clients[k] for k in _model_selection if k in _all_clients
-        ] or list(_all_clients.values())
+    if _invalid_models:
+        log.warning(
+            "Ignoring invalid sentiment model selection tokens: %s",
+            _invalid_models,
+        )
+    clients = build_sentiment_clients(_model_keys)
+    active_model_ids = model_ids_for_keys(_model_keys)
     aggregator = EnsembleAggregator(
         min_confidence=config.ENSEMBLE_MIN_CONFIDENCE,
         divergence_threshold=config.ENSEMBLE_DIVERGENCE_STD,
@@ -443,15 +440,32 @@ def run_sentiment_worker() -> dict:
     _raw_weights = redis_store.get_ensemble_weights()
     model_weights: dict[str, float] | None = None
     if _raw_weights:
-        model_weights = json.loads(_raw_weights).get("weights")
+        raw_model_weights = json.loads(_raw_weights).get("weights")
+        model_weights, dropped_weights = normalize_weights_for_active_models(
+            raw_model_weights,
+            active_model_ids,
+        )
+        if dropped_weights:
+            log.warning(
+                "Ignoring weights for inactive sentiment models: %s",
+                dropped_weights,
+            )
     else:
         suggestion = redis_store.get_weight_suggestion()
         if suggestion:
-            model_weights = suggestion.get("suggested_weights")
+            model_weights, dropped_weights = normalize_weights_for_active_models(
+                suggestion.get("suggested_weights"),
+                active_model_ids,
+            )
             if model_weights:
                 log.info(
                     "Using suggestion weights (applied weights not yet set): %s",
                     {m: f"{w:.2f}" for m, w in model_weights.items()},
+                )
+            if dropped_weights:
+                log.warning(
+                    "Ignoring suggested weights for inactive sentiment models: %s",
+                    dropped_weights,
                 )
 
     try:

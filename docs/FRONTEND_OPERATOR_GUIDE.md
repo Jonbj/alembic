@@ -85,24 +85,25 @@ curl -X POST -H "X-API-Key: $ADMIN_API_KEY" \
 
 ## 2. Frontend Page Inventory
 
-The React frontend (`frontend/src/pages/`) exposes 16 pages. Authorization: login required for all pages.
+The React frontend (`frontend/src/pages/`) exposes the operator pages below. Authorization: login required for all pages.
 
 | Page | File | API endpoints used | Operator usefulness |
 |------|------|-------------------|---------------------|
 | Overview | `Overview.tsx` | `/api/health`, `/api/admin/status` | Quick system status |
-| Dashboard | `DashboardPage.tsx` | Multi-endpoint | P&L + activity summary |
+| Dashboard | `DashboardPage.tsx` | Grafana embed (legacy) | Legacy monitoring surface; product direction is native React summaries |
 | Signals | `Signals.tsx` | `/api/signals/{symbol}`, `/history` | Live sentiment signals |
 | Strategies | `Strategies.tsx` | `/api/config` | Strategy allocation view |
-| Trading | `Trading.tsx` | `/api/admin/mode`, `/api/admin/killswitch` | Mode control + kill-switch |
-| Trades | `Trades.tsx` | `/api/trades/*`, `/analytics/*` | Trade analytics + P&L |
+| Trading | `Trading.tsx` | `/api/positions`, `/api/orders` | Positions, orders and true fills from filled orders |
 | Performance | `Performance.tsx` | `/api/performance/pnl`, `/api/performance/daily`, `/api/performance/weekly`, `/weights/*` | P&L storico, breakdown giornaliero, report settimanale |
 | News | `News.tsx` | `/api/news/recent` | Recent ingested articles |
-| LLM | `LLM.tsx` | `/api/llm/feedback` | Model feedback loop |
+| LLM | `LLM.tsx` | `/api/llm/feedback`, `/api/llm/models`, `/api/weights/*` | Model feedback loop and dynamic ensemble weights |
 | Auto-Improve | `AutoImprove.tsx` | `/api/feedback/status`, `/api/trades/analytics/counterfactual` | Feedback gate + counterfactual opportunity cost |
 | Operations | `Operations.tsx` | `/api/system/*`, `/api/config`, `/api/admin/*` | Unified System / Config / Admin operator surface |
 | Backtest | `Backtest.tsx` | Backtest API | Strategy backtesting |
 | Docs | `Docs.tsx` | Static | Documentation viewer |
 | Login | `LoginPage.tsx` | `/api/auth/login` | Authentication |
+
+`Trades.tsx` is not restored as a route for now. Trade analytics should converge into `Trading` and `Performance` instead of reintroducing a separate menu item.
 
 ### 2.1 Pagina Performance — Tab disponibili
 
@@ -168,6 +169,15 @@ The strategy lifecycle state machine (research → paper → supervised_paper �
 - Whether a strategy is in `promotion_blocked` state
 
 **Current workaround:** Query `strategy_lifecycle` table directly or read `docs/strategies.md`.
+
+### 2.4 Block 1 Product Decisions Reflected in Frontend
+
+- LLM model names must come from the backend registry (`GET /api/llm/models` or `GET /api/admin/status`), not from hardcoded frontend lists.
+- Sidebar Economy mode selects GLM-5.2 via canonical key `glm52`; legacy `glm` is accepted by the backend only as an alias.
+- `LLM` weights use `GET /api/weights/current` for active weights and `GET /api/weights/suggestion` for pending suggestions. Stored weights for inactive models are ignored and surfaced as `dropped_models`.
+- `Trading` Fills are derived from filled orders, not from local trade entry/exit rows.
+- Operating mode changes require explicit confirmation before calling the write API.
+- Labeling strength remains signed `-1..1` and is constrained by sentiment direction: positive > 0, negative < 0, neutral = 0.
 
 ---
 

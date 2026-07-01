@@ -10,7 +10,7 @@ interface AppState {
   killswitchActive: boolean
   token: string
   isAuthenticated: boolean
-  llmModels: string  // "all" = full ensemble, "glm" = savings mode
+  llmModels: string  // "all" = full ensemble, "glm52" = GLM-5.2 economy mode
   setMode: (mode: Mode) => void
   setTheme: (theme: Theme) => void
   setKillswitch: (active: boolean) => void

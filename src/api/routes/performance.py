@@ -10,7 +10,13 @@ from pydantic import BaseModel
 
 from src.api.auth import require_api_key
 from src.api.deps import get_alpaca_trading_client, get_pg_store, get_redis_store
-from src.config import config
+from src.llm.model_registry import (
+    default_weights,
+    model_ids_for_keys,
+    normalize_model_selection,
+    normalize_weights_for_active_models,
+    sentiment_model_payload,
+)
 from src.store.pg_store import PostgreSQLStore
 from src.store.redis_store import RedisStore
 
@@ -20,12 +26,7 @@ _WEIGHT_MIN = 0.10
 _WEIGHT_MAX = 0.70
 
 _DEFAULT_WEIGHTS = {
-    "weights": {
-        "kimi-k2.6:cloud": 0.25,
-        "qwen3.5:cloud": 0.25,
-        "deepseek-v4-pro:cloud": 0.25,
-        "glm-5.1:cloud": 0.25,
-    },
+    "weights": default_weights(),
     "source": "default",
 }
 
@@ -36,10 +37,11 @@ class ApproveWeightsRequest(BaseModel):
 
 
 def _validate_override_weights(weights: dict[str, float]) -> dict[str, float]:
-    known = set(config.MODEL_COSTS.keys())
+    _, keys, _ = normalize_model_selection("all")
+    known = set(model_ids_for_keys(keys))
     for model_id, w in weights.items():
         if model_id not in known:
-            raise HTTPException(status_code=422, detail=f"Unknown model: {model_id}")
+            raise HTTPException(status_code=422, detail=f"Unknown or inactive model: {model_id}")
         if w < _WEIGHT_MIN:
             raise HTTPException(
                 status_code=422,
@@ -137,7 +139,23 @@ async def get_current_weights(
     redis: Annotated[RedisStore, Depends(get_redis_store)],
 ) -> dict:
     stored = redis.get_current_weights_stored()
-    return stored if stored is not None else _DEFAULT_WEIGHTS
+    selection = redis.get_llm_models() or "all"
+    _, keys, _ = normalize_model_selection(selection)
+    active_model_ids = model_ids_for_keys(keys)
+
+    source = "default"
+    weights = _DEFAULT_WEIGHTS["weights"]
+    if stored is not None:
+        source = stored.get("source", "stored")
+        weights = stored.get("weights", {})
+
+    normalized, dropped = normalize_weights_for_active_models(weights, active_model_ids)
+    return {
+        "weights": normalized,
+        "source": source,
+        "dropped_models": dropped,
+        "model_registry": sentiment_model_payload(selection),
+    }
 
 
 @router.get("/weights/suggestion")
@@ -176,9 +194,15 @@ async def approve_weights(
 
     if body.override_weights is not None:
         weights = _validate_override_weights(body.override_weights)
+        dropped_models: list[str] = []
         source = "override"
     else:
-        weights = suggestion["suggested_weights"]
+        selection = redis.get_llm_models() or "all"
+        _, keys, _ = normalize_model_selection(selection)
+        weights, dropped_models = normalize_weights_for_active_models(
+            suggestion["suggested_weights"],
+            model_ids_for_keys(keys),
+        )
         source = "suggestion"
 
     # Redis write happens before PostgreSQL write. If pg.log_weight_update() fails,
@@ -200,7 +224,12 @@ async def approve_weights(
         approved_by=approved_by,
     )
 
-    return {"applied_weights": weights, "source": source, "log_id": log_id}
+    return {
+        "applied_weights": weights,
+        "source": source,
+        "log_id": log_id,
+        "dropped_models": dropped_models,
+    }
 
 
 @router.get("/performance/daily")

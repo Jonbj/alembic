@@ -56,7 +56,7 @@ export default function LLM() {
         },
         {
           heading: "Pesi ensemble — Active Weights",
-          content: "I pesi attivi determinano quanto contribuisce ogni modello al segnale finale aggregato. Un modello con peso 0.40 (40%) ha il doppio dell'influenza di uno con peso 0.20 (20%).\n\nI pesi di default sono uniformi. Vengono aggiornati dal worker settimanale in base alla performance storica (pIC purificato per modello).",
+          content: "I pesi attivi determinano quanto contribuisce ogni modello al segnale finale aggregato. La lista dei modelli non è scolpita nella UI: viene letta dal registry backend perché la disponibilità Ollama può cambiare nel tempo.\n\nI pesi di default sono uniformi sui modelli attivi. Vengono aggiornati dal worker settimanale in base alla performance storica (pIC purificato per modello).",
         },
         {
           heading: "Pesi ensemble — Proposed Weights e approvazione",
@@ -105,9 +105,36 @@ export default function LLM() {
             <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 600 }}>Active Weights</h3>
             <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--text-muted)' }}>
               These weights are currently live and applied to every ensemble signal.
+              {weights?.source ? ` Source: ${weights.source}.` : ''}
             </p>
+            {weights?.model_registry && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                {weights.model_registry.models.map((model) => (
+                  <span
+                    key={model.key}
+                    className={`badge ${model.active ? 'badge-blue' : 'badge-grey'}`}
+                    title={model.model_id}
+                  >
+                    {model.label}{model.economy_default ? ' · economy' : ''}
+                  </span>
+                ))}
+              </div>
+            )}
+            {(weights?.dropped_models?.length ?? 0) > 0 && (
+              <p style={{
+                margin: '0 0 12px',
+                padding: '8px 10px',
+                borderRadius: 6,
+                background: 'rgba(245,158,11,0.10)',
+                border: '1px solid rgba(245,158,11,0.30)',
+                color: '#92400e',
+                fontSize: 12,
+              }}>
+                Ignored inactive model weights: {weights?.dropped_models?.join(', ')}.
+              </p>
+            )}
             {wLoading && <p style={{ color: 'var(--text-muted)' }}>Loading...</p>}
-            {weights?.current && (
+            {weights?.current && Object.keys(weights.current).length > 0 && (
               <table>
                 <thead><tr><th>Model</th><th>Weight</th></tr></thead>
                 <tbody>

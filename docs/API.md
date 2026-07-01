@@ -124,10 +124,23 @@ curl -X POST http://localhost:8001/api/admin/mode \
 
 ### `GET /api/admin/status`
 
-System status snapshot (no auth): kill-switch state, operating mode, LLM model selection.
+System status snapshot (no auth): kill-switch state, operating mode, LLM model selection, and the current sentiment model registry.
 
 ```json
-{"killswitch": false, "mode": "paper", "llm_models": "all"}
+{
+  "killswitch": false,
+  "mode": "paper",
+  "llm_models": "all",
+  "llm_model_registry": {
+    "selection": "all",
+    "active_model_ids": ["kimi-k2.6:cloud", "glm-5.2:cloud"],
+    "economy_model": "glm52",
+    "models": [
+      {"key": "kimi", "model_id": "kimi-k2.6:cloud", "label": "Kimi K2.6", "active": true},
+      {"key": "glm52", "model_id": "glm-5.2:cloud", "label": "GLM-5.2", "active": true}
+    ]
+  }
+}
 ```
 
 ### `POST /api/admin/llm-models`
@@ -138,10 +151,27 @@ Restrict which models run in the ensemble (for token-budget savings).
 curl -X POST http://localhost:8001/api/admin/llm-models \
   -H "X-API-Key: $ADMIN_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"models": "kimi,deepseek"}'
+  -d '{"models": "glm52"}'
 ```
 
-Valid values: `all`, `kimi`, `qwen`, `deepseek`, `glm` (comma-separated subset).
+Valid values are provided by the runtime registry. Current sentiment-worker values are `all`, `kimi`, `glm52`; legacy alias `glm` is accepted and canonicalized to `glm52`.
+
+### `GET /api/llm/models`
+
+Authenticated endpoint returning the model registry used by the frontend. The UI should use this endpoint instead of hardcoding model names, because Ollama model availability can change over time.
+
+```json
+{
+  "selection": "all",
+  "active_model_ids": ["kimi-k2.6:cloud", "glm-5.2:cloud"],
+  "economy_model": "glm52",
+  "invalid": [],
+  "models": [
+    {"key": "kimi", "model_id": "kimi-k2.6:cloud", "label": "Kimi K2.6", "active": true, "economy_default": false},
+    {"key": "glm52", "model_id": "glm-5.2:cloud", "label": "GLM-5.2", "active": true, "economy_default": true}
+  ]
+}
+```
 
 ---
 
@@ -155,21 +185,23 @@ Latest PerformanceWorker report from Redis (IC, ICIR, drift alerts, post-mortems
 
 ### `GET /api/weights/current`
 
-Current ensemble weights. Returns defaults (equal 0.25 each) if no weights have been set.
+Current ensemble weights, filtered and normalized against the active sentiment model registry. Returns equal defaults across active models if no valid weights have been set.
 
 ```json
 {
   "weights": {
-    "kimi-k2.6:cloud": 0.25,
-    "qwen3.5:cloud": 0.25,
-    "deepseek-v4-pro:cloud": 0.25,
-    "glm-5.1:cloud": 0.25
+    "kimi-k2.6:cloud": 0.5,
+    "glm-5.2:cloud": 0.5
   },
-  "source": "default"
+  "source": "default",
+  "dropped_models": [],
+  "model_registry": {"selection": "all", "...": "..."}
 }
 ```
 
 `source` values: `auto_apply`, `telegram`, `suggestion`, `override`, `default`
+
+`dropped_models` lists stored weights ignored because the model is not active in the current registry.
 
 ### `GET /api/weights/suggestion`
 
@@ -201,11 +233,16 @@ Apply weight suggestion or force custom weights. Requires `X-API-Key`.
 - `override_weights: null` → apply current suggestion (403 if `freeze_reason` non-empty)
 - `override_weights: {...}` → force custom weights (bypasses freeze guardrails)
 
-Validation: each weight in `[0.10, 0.70]`, sum = 1.0 ± 0.001, model IDs in `MODEL_COSTS`.
+Validation: each weight in `[0.10, 0.70]`, sum = 1.0 ± 0.001, model IDs active in the current sentiment model registry.
 
 **Response:**
 ```json
-{"applied_weights": {"kimi-k2.6:cloud": 0.30, "...": "..."}, "source": "suggestion", "log_id": 42}
+{
+  "applied_weights": {"kimi-k2.6:cloud": 0.50, "glm-5.2:cloud": 0.50},
+  "source": "suggestion",
+  "log_id": 42,
+  "dropped_models": []
+}
 ```
 
 ### `GET /api/performance/pnl`

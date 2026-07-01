@@ -13,6 +13,7 @@ import { HelpButton } from '@/components/shared/HelpButton'
 import { useStore } from '@/store'
 
 const MODES = ['backtest', 'paper', 'semi_auto', 'full_auto', 'halted'] as const
+type Mode = typeof MODES[number]
 const MODE_DESC: Record<string, string> = {
   backtest: 'Running historical simulation — no live orders',
   paper: 'Paper trading — simulated orders, no real capital',
@@ -28,6 +29,7 @@ export default function Admin() {
   const [deactivateConfirmOpen, setDeactivateConfirmOpen] = useState(false)
   const [deactivateError, setDeactivateError] = useState<string | null>(null)
   const [isDeactivating, setIsDeactivating] = useState(false)
+  const [pendingMode, setPendingMode] = useState<Mode | null>(null)
 
   const qc = useQueryClient()
   const setStoreMode = useStore((s) => s.setMode)
@@ -58,14 +60,15 @@ export default function Admin() {
     }
   }, [qc])
 
-  type Mode = Parameters<typeof setStoreMode>[0]
-
   const modeMutation = useMutation({
     mutationFn: (m: Mode) => setMode(m),
-    onSuccess: (_, m) => { qc.invalidateQueries({ queryKey: ['mode'] }); setStoreMode(m) },
+    onSuccess: (_, m) => { qc.invalidateQueries({ queryKey: ['mode'] }); setStoreMode(m); setPendingMode(null) },
   })
 
-  const handleModeChange = useCallback((m: Mode) => modeMutation.mutate(m), [modeMutation])
+  const handleModeChange = useCallback((m: Mode) => {
+    if (m === modeData?.mode) return
+    setPendingMode(m)
+  }, [modeData?.mode])
 
   const ksActive = ks?.active ?? false
 
@@ -225,6 +228,37 @@ export default function Admin() {
                 disabled={isDeactivating}
               >
                 {isDeactivating ? 'Deactivating…' : 'Confirm Deactivate'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Operating mode confirmation dialog */}
+      {pendingMode && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div className="card" style={{ width: 460 }}>
+            <h3 style={{ margin: '0 0 12px', color: '#f59e0b' }}>Confirm Operating Mode Change</h3>
+            <p style={{ color: 'var(--text-muted)', marginBottom: 12, lineHeight: 1.6 }}>
+              Change operating mode from <strong>{modeData?.mode ?? 'unknown'}</strong> to <strong>{pendingMode}</strong>?
+            </p>
+            <p style={{ color: '#94a3b8', fontSize: 12, marginBottom: 16 }}>
+              This affects the next execution cycles. It does not authorize live trading or strategy promotion.
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                className="btn-ghost"
+                onClick={() => setPendingMode(null)}
+                disabled={modeMutation.isPending}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                onClick={() => modeMutation.mutate(pendingMode)}
+                disabled={modeMutation.isPending}
+              >
+                {modeMutation.isPending ? 'Changing...' : 'Confirm Change'}
               </button>
             </div>
           </div>

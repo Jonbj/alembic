@@ -6,6 +6,7 @@ import { HelpButton } from '@/components/shared/HelpButton'
 
 const RELEVANCE = ['company_specific', 'sector', 'macro', 'irrelevant'] as const
 const DIRECTION = ['positive', 'negative', 'neutral'] as const
+const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/
 
 function Btn({ active, onClick, children, color }: { active: boolean; onClick: () => void; children: React.ReactNode; color?: string }) {
   return (
@@ -39,15 +40,38 @@ export default function Labeling() {
     if (relevance === 'irrelevant' || relevance === 'macro') { setTickers(''); if (!direction) setDirection('neutral') }
   }, [relevance])
 
-  const canSave = relevance && direction && !saving
+  useEffect(() => {
+    if (direction === 'neutral') setStrength(0)
+    if (direction === 'positive' && strength <= 0) setStrength(0.1)
+    if (direction === 'negative' && strength >= 0) setStrength(-0.1)
+  }, [direction, strength])
+
+  const parsedTickers = tickers.split(',').map((t) => t.trim().toUpperCase()).filter(Boolean)
+  const validationErrors = [
+    !relevance ? 'Seleziona la rilevanza.' : '',
+    !direction ? 'Seleziona la direzione del sentiment.' : '',
+    relevance === 'company_specific' && parsedTickers.length === 0
+      ? 'Le news company-specific richiedono almeno un ticker.'
+      : '',
+    parsedTickers.some((ticker) => !TICKER_RE.test(ticker))
+      ? 'Usa ticker validi separati da virgola, ad esempio AAPL, BRK.B.'
+      : '',
+    (relevance === 'macro' || relevance === 'irrelevant') && parsedTickers.length > 0
+      ? 'Macro e irrilevante devono avere ticker vuoto.'
+      : '',
+    direction === 'positive' && strength <= 0 ? 'Il sentiment positive richiede forza > 0.' : '',
+    direction === 'negative' && strength >= 0 ? 'Il sentiment negative richiede forza < 0.' : '',
+    direction === 'neutral' && strength !== 0 ? 'Il sentiment neutral richiede forza 0.' : '',
+  ].filter(Boolean)
+  const canSave = validationErrors.length === 0 && !saving
+  const showValidation = Boolean(relevance || direction || tickers || strength !== 0)
 
   const save = async () => {
     if (!item?.label_id || !canSave) return
     setSaving(true); setErr('')
     try {
-      const gt = tickers.split(',').map((t) => t.trim().toUpperCase()).filter(Boolean)
       await submitLabel(item.label_id, {
-        gt_tickers: gt, gt_relevance: relevance, gt_sentiment_dir: direction,
+        gt_tickers: parsedTickers, gt_relevance: relevance, gt_sentiment_dir: direction,
         gt_sentiment_strength: strength, gt_rationale: rationale, annotator_id: 'operator',
       })
       reset()
@@ -113,12 +137,19 @@ export default function Labeling() {
             <div>
               <label style={{ fontSize: 13, fontWeight: 600 }}>Forza: {strength.toFixed(1)}</label>
               <input type="range" min={-1} max={1} step={0.1} value={strength}
-                onChange={(e) => setStrength(Number(e.target.value))} style={{ width: '100%' }} />
+                onChange={(e) => setStrength(Number(e.target.value))}
+                disabled={direction === 'neutral'}
+                style={{ width: '100%' }} />
             </div>
             <div>
               <label style={{ fontSize: 13, fontWeight: 600 }}>Motivazione (opzionale)</label>
               <input value={rationale} onChange={(e) => setRationale(e.target.value)} style={{ width: '100%', marginTop: 4 }} />
             </div>
+            {showValidation && validationErrors.length > 0 && (
+              <div style={{ color: 'var(--red)', fontSize: 12, lineHeight: 1.6 }}>
+                {validationErrors.map((message) => <div key={message}>{message}</div>)}
+              </div>
+            )}
             {err && <p style={{ color: 'var(--red)', fontSize: 12 }}>{err}</p>}
             <button onClick={save} disabled={!canSave}
               style={{ background: canSave ? 'var(--blue)' : '#334155', color: 'white', padding: '10px', fontWeight: 600, fontSize: 14 }}>

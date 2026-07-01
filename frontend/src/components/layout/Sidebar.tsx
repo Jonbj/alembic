@@ -26,7 +26,7 @@ export function Sidebar() {
   const isSavings = llmModels !== 'all'
 
   const toggleSavings = async () => {
-    const next = isSavings ? 'all' : 'glm'
+    const next = isSavings ? 'all' : 'glm52'
     try {
       const res = await fetch('/api/admin/llm-models', {
         method: 'POST',
@@ -96,7 +96,7 @@ export function Sidebar() {
         <ModeBadge />
         <button
           onClick={toggleSavings}
-          title={isSavings ? 'Economy mode (1 model) — click for full ensemble' : 'Full ensemble (4 models) — click for economy mode'}
+          title={isSavings ? 'Economy mode (GLM-5.2) — click for full ensemble' : 'Full ensemble — click for GLM-5.2 economy mode'}
           style={{
             marginTop: 8,
             width: '100%',
@@ -111,7 +111,7 @@ export function Sidebar() {
           }}
         >
           <span>{isSavings ? '🪙' : '⚡'}</span>
-          <span>{isSavings ? 'Economy (GLM)' : 'Full ensemble'}</span>
+          <span>{isSavings ? 'Economy (GLM-5.2)' : 'Full ensemble'}</span>
         </button>
         <button
           onClick={handleLogout}

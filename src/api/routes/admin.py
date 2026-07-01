@@ -12,11 +12,16 @@ from src.api.auth import require_api_key
 from src.store.redis_store import RedisStore
 from src.store.pg_store import PostgreSQLStore
 from src.api.deps import get_redis_store, get_pg_store
+from src.llm.model_registry import (
+    normalize_model_selection,
+    sentiment_model_payload,
+    valid_selection_tokens,
+)
 
 router = APIRouter(prefix="/api/admin")
 
 _VALID_MODES = frozenset({"backtest", "paper", "semi_auto", "full_auto", "halted", "dry_run"})
-_VALID_LLM_MODELS = frozenset({"all", "kimi", "qwen", "deepseek", "glm"})
+_VALID_LLM_MODELS = frozenset(valid_selection_tokens())
 
 # Recovery token lives 5 minutes; operator must deactivate within that window.
 _RECOVERY_TOKEN_TTL = 300
@@ -70,10 +75,12 @@ async def get_status(
     store: Annotated[RedisStore, Depends(get_redis_store)],
 ) -> dict:
     """System status — killswitch state, operating mode, and LLM model selection. No auth."""
+    llm_selection, _, _ = normalize_model_selection(store.get_llm_models() or "all")
     return {
         "killswitch": store.is_killswitch_active(),
         "mode": store.get_mode() or "unknown",
-        "llm_models": store.get_llm_models() or "all",
+        "llm_models": llm_selection,
+        "llm_model_registry": sentiment_model_payload(llm_selection),
     }
 
 
@@ -93,15 +100,18 @@ async def set_llm_models(
     Args:
         models: "all" (full ensemble) or comma-separated subset: kimi, qwen, deepseek, glm
     """
-    selections = [m.strip() for m in req.models.lower().split(",")]
-    invalid = [m for m in selections if m not in _VALID_LLM_MODELS]
+    canonical, _, invalid = normalize_model_selection(req.models)
     if invalid:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid model(s): {invalid}. Valid: {sorted(_VALID_LLM_MODELS)}",
         )
-    store.set_llm_models(req.models.lower())
-    return {"llm_models": req.models.lower(), "status": "ok"}
+    store.set_llm_models(canonical)
+    return {
+        "llm_models": canonical,
+        "model_registry": sentiment_model_payload(canonical),
+        "status": "ok",
+    }
 
 
 class KillswitchRequest(BaseModel):

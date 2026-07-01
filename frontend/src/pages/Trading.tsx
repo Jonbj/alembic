@@ -2,7 +2,6 @@ import { useState, useMemo } from 'react'
 import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
 import { fetchPositions, fetchOrders, type Position, type Order } from '@/api/positions'
-import { fetchTrades, type Trade } from '@/api/trades'
 import { HelpButton } from '@/components/shared/HelpButton'
 import { DataTable } from '@/components/shared/DataTable'
 
@@ -52,12 +51,6 @@ export default function Trading() {
     refetchInterval: 60000,
   })
 
-  const { data: fills = [], isLoading: fillsLoading } = useQuery({
-    queryKey: ['trades-fills'],
-    queryFn: () => fetchTrades(undefined, 'all', 200),
-    refetchInterval: 60000,
-  })
-
   const filteredPositions = useMemo(() =>
     (positions as Position[]).filter(p => !symbolFilter || p.symbol.toLowerCase().includes(symbolFilter.toLowerCase()))
   , [positions, symbolFilter])
@@ -67,8 +60,11 @@ export default function Trading() {
   , [orders, symbolFilter])
 
   const filteredFills = useMemo(() =>
-    (fills as Trade[]).filter(t => !symbolFilter || t.symbol.toLowerCase().includes(symbolFilter.toLowerCase()))
-  , [fills, symbolFilter])
+    (orders as Order[]).filter((o) =>
+      o.status === 'filled' &&
+      (!symbolFilter || o.symbol.toLowerCase().includes(symbolFilter.toLowerCase()))
+    )
+  , [orders, symbolFilter])
 
   const tabStyle = (t: Tab): React.CSSProperties => ({
     padding: '8px 20px',
@@ -106,19 +102,24 @@ export default function Trading() {
     ],
   }))
 
-  const fillRows = filteredFills.map(t => ({
+  const fillRows = filteredFills.map(o => {
+    const qty = o.qty && o.qty !== 'None' ? parseFloat(o.qty) : null
+    const price = o.filled_avg_price ? parseFloat(o.filled_avg_price) : null
+    const notional = qty != null && price != null ? qty * price : null
+    return {
     cells: [
-      <strong>{t.symbol}</strong>,
-      sideSpan(t.exit_reason),
-      fmt(t.entry_price),
-      t.qty != null ? t.qty.toFixed(4) : '—',
-      fmt(t.entry_notional),
-      ts(t.entry_time),
+      <strong>{o.symbol}</strong>,
+      sideSpan(o.side),
+      price != null ? fmt(price) : '—',
+      qty != null ? qty.toFixed(4) : '—',
+      fmt(notional),
+      ts(o.filled_at),
     ],
-    expanded: t.entry_order_id
-      ? <span>order_id: {t.entry_order_id}</span>
+    expanded: o.id
+      ? <span>order_id: {o.id}</span>
       : undefined,
-  }))
+    }
+  })
 
   return (
     <div style={{ position: 'relative' }}>
@@ -159,7 +160,7 @@ export default function Trading() {
             Orders ({orders.length})
           </button>
           <button style={tabStyle('fills')} onClick={() => setTab('fills')}>
-            Fills ({fills.length})
+            Fills ({filteredFills.length})
           </button>
         </div>
         <input
@@ -205,7 +206,7 @@ export default function Trading() {
 
       {tab === 'fills' && (
         <DataTable
-          loading={fillsLoading}
+          loading={ordLoading}
           columns={[
             { label: 'Ticker',     width: '10%' },
             { label: 'Side',       width: '10%' },
