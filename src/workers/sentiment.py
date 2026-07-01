@@ -44,10 +44,13 @@ from src.text.sanitizer import sanitize_text, sanitize_ticker
 _MARKETAUX_NEUTRAL_THRESHOLD = 0.2
 # Freshness: news older than this is skipped WITHOUT an LLM call. A news-driven signal
 # is only useful while the news is recent (the trading cycle reads a 4h window); spending
-# minutes/article on 2-week-old news both wastes inference and, since the signal's
-# generated_at is the processing time, injects stale sentiment as if it were fresh.
-# Skipping also lets the worker drain a backlog fast (instant skip vs ~minutes/article).
-_SENTIMENT_MAX_NEWS_AGE_HOURS = 24
+# minutes/article on old news both wastes inference and, since the signal's generated_at
+# is the processing time, injects stale sentiment as if it were fresh. Skipping also lets
+# the worker drain a backlog fast (instant skip vs ~minutes/article).
+# 12h: within a session (~7h) news stays fresh, but cross-session leftovers from the prior
+# day (ingestion runs 14-21 UTC; ~17h overnight gap) are skipped so each market open starts
+# on that day's news, not yesterday's.
+_SENTIMENT_MAX_NEWS_AGE_HOURS = 12
 # Cap on items scanned per run while skipping stale ones (bounds one task; a large stale
 # backlog drains over a few runs rather than holding everything in news:processing at once).
 _MAX_QUEUE_SCAN_PER_RUN = 5000
