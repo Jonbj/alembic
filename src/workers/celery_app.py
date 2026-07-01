@@ -141,12 +141,11 @@ app.conf.beat_schedule = {
         "task": "src.workers.ingestion.run_alpaca_ingestion_worker",
         "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
     },
-    # Finnhub company-news every 15 min during market hours. Clean explicit ticker
-    # tagging (source_metadata) for US equities. Skips silently if FINNHUB_API_KEY unset.
-    "run-finnhub-ingestion": {
-        "task": "src.workers.ingestion.run_finnhub_ingestion_worker",
-        "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
-    },
+    # Finnhub company-news: SHELVED 2026-07-01. Mini-spike showed ~2115 articles/fetch
+    # (5.5× worker throughput → flood) with loose relevance (generic/listicle/competitor
+    # mentions tagged to the company). Connector + task kept, but NOT scheduled and gated
+    # behind FINNHUB_INGESTION_ENABLED. Re-enable only with a hard per-symbol cap + a
+    # relevance filter (see CHANGELOG 2026-07-01).
     # SEC EDGAR filings every 30 min during market hours.
     # 8-K filings = earnings, M&A, guidance revision — high signal/noise ratio.
     # Public API, zero cost. Filters by WATCHLIST_SYMBOLS.

@@ -4,6 +4,16 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ---
 
+## 2026-07-01
+
+### Fonti — Finnhub aggiunto poi SHELVED dopo mini-spike
+- **Analisi fonti** (via ricerca): principio "explicit tagging > NER > none". Aggiunto `FinnhubNewsConnector` (company-news US, ticker taggati dalla fonte, free tier) + breakdown precision per `extraction_method` nell'harness (`validate_ticker_sentiment.py`) per decidere data-driven su GDELT.
+- **Mini-spike (verdict: SHELVE)**: un fetch reale ha prodotto **2115 articoli/fetch** (5,5× il throughput del worker ~16/h → flood) con **rilevanza larga** (news generiche/listicle/competitor taggate all'azienda, es. "Best CD rates" → GS, "31 Single-Stock ETFs" → TSM; ~40-60% issuer-specific). Conclusione: il *ticker* è pulito (source-tagged, no NER nostro) ma la *rilevanza* no → non è un win e floodderebbe la coda.
+- **Azione**: Finnhub **shelved** — schedule beat rimossa + guard `FINNHUB_INGESTION_ENABLED` (default off). Connector/task/test restano pronti. Riabilitare SOLO con cap per-simbolo + filtro rilevanza.
+- **Reframe**: il collo di bottiglia reale è il **throughput del worker**, non il numero di fonti. La leva è rilevanza/precisione per articolo, non volume.
+
+---
+
 ## 2026-06-30
 
 ### Operations Navigation + Auto-Improve Gate Counterfactuals

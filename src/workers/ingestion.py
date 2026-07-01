@@ -29,6 +29,7 @@ Connection lifecycle:
 
 import asyncio
 import logging
+import os
 import re
 
 import psycopg2
@@ -382,9 +383,16 @@ def run_finnhub_ingestion_worker() -> dict:
     """Celery entry-point for Finnhub company-news ingestion.
 
     Clean, explicitly-tagged US company news for WATCHLIST_SYMBOLS. Skips silently
-    when FINNHUB_API_KEY is not configured, so it is safe to schedule before the key
-    is added.
+    when FINNHUB_API_KEY is not configured.
+
+    SHELVED (2026-07-01): OFF by default. A mini-spike found ~2115 articles/fetch
+    (5.5× worker throughput → queue flood) with loose relevance (generic/listicle/
+    competitor mentions tagged to the company). Re-enable with FINNHUB_INGESTION_ENABLED=1
+    ONLY after adding a hard per-symbol cap + a relevance filter.
     """
+    if os.environ.get("FINNHUB_INGESTION_ENABLED", "0") == "0":
+        return {"skipped": True, "reason": "finnhub_ingestion_disabled"}
+
     redis_client = Redis.from_url(config.REDIS_URL)
     if not config.FINNHUB_API_KEY:
         log.warning("FINNHUB_API_KEY not configured — skipping Finnhub ingestion")
