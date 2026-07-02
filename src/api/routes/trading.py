@@ -50,6 +50,7 @@ def get_positions(
 @router.get("/orders")
 def get_orders(
     client: Annotated[object, Depends(get_alpaca_trading_client)],
+    pg: Annotated[object, Depends(get_pg_store)],
     limit: int = 50,
 ) -> list[dict]:
     """Return order history from Alpaca (filled + cancelled)."""
@@ -59,8 +60,9 @@ def get_orders(
         status=QueryOrderStatus.ALL,
         limit=min(limit, 500),
     ))
-    return [
-        {
+    rows = []
+    for o in orders:
+        rows.append({
             "id": str(o.id),
             "symbol": o.symbol,
             "side": o.side.value if o.side else None,
@@ -69,9 +71,26 @@ def get_orders(
             "status": o.status.value if o.status else None,
             "filled_at": o.filled_at.isoformat() if o.filled_at else None,
             "submitted_at": o.submitted_at.isoformat() if o.submitted_at else None,
-        }
-        for o in orders
-    ]
+            "signal_id": None,
+            "decision_id": None,
+            "news_log_id": None,
+            "trade_id": None,
+        })
+
+    order_ids = [row["id"] for row in rows if row.get("id")]
+    try:
+        trace_by_order = pg.fetch_order_trace(order_ids) if order_ids else {}
+    except Exception:
+        trace_by_order = {}
+    for row in rows:
+        trace = trace_by_order.get(row["id"], {})
+        row.update({
+            "signal_id": trace.get("signal_id"),
+            "decision_id": trace.get("decision_id"),
+            "news_log_id": trace.get("news_log_id"),
+            "trade_id": trace.get("trade_id"),
+        })
+    return rows
 
 
 def _execution_engine() -> str:

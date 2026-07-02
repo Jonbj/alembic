@@ -29,6 +29,10 @@ export interface Order {
   status: string
   filled_at: string | null
   submitted_at: string | null
+  signal_id?: number | null
+  decision_id?: number | null
+  news_log_id?: number | null
+  trade_id?: number | null
 }
 
 export const fetchPositions = () =>

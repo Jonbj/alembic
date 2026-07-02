@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 
 export interface SignalTraceAvailability {
   newsId?: number
+  signalId?: number
   signalCount?: number
   decisionCount?: number
   orderCount?: number
@@ -51,7 +52,11 @@ export function SignalTraceLinks({
     { key: 'news', to: path('/news', { ticker }), text: 'News', show: includeNews },
     {
       key: 'signal',
-      to: path('/signals', { symbol: ticker, news_id: availability?.newsId ? String(availability.newsId) : undefined }),
+      to: path('/signals', {
+        symbol: ticker,
+        signal_id: availability?.signalId ? String(availability.signalId) : undefined,
+        news_id: availability?.newsId ? String(availability.newsId) : undefined,
+      }),
       text: label('Signal', availability?.signalCount, hasAvailability),
       show: includeSignal && (!hasAvailability || signalCount > 0),
     },

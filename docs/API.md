@@ -52,8 +52,9 @@ openssl rand -hex 20
 
 Get latest signals for all watchlist symbols. Falls back to PostgreSQL for any symbols not in Redis cache.
 When `news_id` is provided, returns historical signals linked to that `news_log.id` instead of the latest watchlist view. This is used by the News trace links so a news row never points to an empty latest-signal page when its signal is historical.
+When `signal_id` is provided, returns the exact historical signal row. This is used by Trading/Decision trace links when the originating signal is known but the news row is missing.
 
-**Query parameters:** `symbol` (optional, filter to one symbol), `news_id` (optional, historical trace for one news row)
+**Query parameters:** `symbol` (optional, filter to one symbol), `news_id` (optional, historical trace for one news row), `signal_id` (optional, exact historical signal)
 
 **Response 200:**
 ```json
@@ -370,6 +371,32 @@ Structured weekly report from Redis cache (computed every Monday at 04:00 UTC, T
 ### `GET /api/performance/positions`
 
 Current open positions from Alpaca.
+
+---
+
+## Trading Endpoints
+
+### `GET /api/orders`
+
+Recent Alpaca orders enriched with local Alembic trace ids when the broker order can be matched to an execution decision or trade.
+
+**Query parameters:** `limit` (default 50, max 500)
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Broker order id |
+| `symbol` | Ticker symbol |
+| `side` | Broker side, usually `buy` or `sell` |
+| `qty` | Submitted quantity |
+| `filled_avg_price` | Average fill price, or `null` when not filled |
+| `status` | Broker order status |
+| `filled_at` / `submitted_at` | Broker timestamps |
+| `signal_id` | Originating `sentiment_signals.id`, or `null` for manual/unmatched broker orders |
+| `decision_id` | Originating `execution_decisions.id`, or `null` |
+| `news_log_id` | Originating `news_log.id` through the signal, or `null` |
+| `trade_id` | Local `trades.id` when the order is linked to a recorded trade |
+
+The enrichment is intentionally nullable: the Trading frontend only renders trace links when these ids exist, avoiding links to empty Signal/Decision views for orders that did not originate from Alembic.
 
 ---
 

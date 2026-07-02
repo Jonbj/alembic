@@ -343,6 +343,70 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def fetch_order_trace(self, order_ids: list[str]) -> dict[str, dict]:
+        """Return local Alembic trace metadata keyed by broker order id."""
+        clean_order_ids = [str(order_id) for order_id in order_ids if order_id]
+        if not clean_order_ids:
+            return {}
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (order_id)
+                           order_id, signal_id, decision_id, news_log_id, trade_id
+                    FROM (
+                        SELECT ed.order_id,
+                               ed.signal_id,
+                               ed.id AS decision_id,
+                               ss.news_log_id,
+                               NULL::BIGINT AS trade_id
+                        FROM execution_decisions ed
+                        LEFT JOIN sentiment_signals ss ON ss.id = ed.signal_id
+                        WHERE ed.order_id = ANY(%s)
+
+                        UNION ALL
+
+                        SELECT t.entry_order_id AS order_id,
+                               t.signal_id,
+                               t.decision_id,
+                               ss.news_log_id,
+                               t.id AS trade_id
+                        FROM trades t
+                        LEFT JOIN sentiment_signals ss ON ss.id = t.signal_id
+                        WHERE t.entry_order_id = ANY(%s)
+
+                        UNION ALL
+
+                        SELECT t.exit_order_id AS order_id,
+                               t.signal_id,
+                               t.decision_id,
+                               ss.news_log_id,
+                               t.id AS trade_id
+                        FROM trades t
+                        LEFT JOIN sentiment_signals ss ON ss.id = t.signal_id
+                        WHERE t.exit_order_id = ANY(%s)
+                    ) traces
+                    WHERE order_id IS NOT NULL
+                    ORDER BY order_id, trade_id NULLS LAST, decision_id NULLS LAST
+                    """,
+                    (clean_order_ids, clean_order_ids, clean_order_ids),
+                )
+                cols = [d[0] for d in cur.description]
+                rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+                return {
+                    row["order_id"]: {
+                        "signal_id": int(row["signal_id"]) if row["signal_id"] is not None else None,
+                        "decision_id": int(row["decision_id"]) if row["decision_id"] is not None else None,
+                        "news_log_id": int(row["news_log_id"]) if row["news_log_id"] is not None else None,
+                        "trade_id": int(row["trade_id"]) if row["trade_id"] is not None else None,
+                    }
+                    for row in rows
+                }
+        except Exception:
+            conn.rollback()
+            raise
+
     def fetch_decisions(
         self,
         symbol: str | None = None,
@@ -1582,6 +1646,34 @@ class PostgreSQLStore:
                     "WHERE symbol IN (" + placeholders + ") "
                     "ORDER BY symbol, generated_at DESC",
                     tuple(symbols)
+                )
+                rows = cur.fetchall()
+                results = []
+                for row in rows:
+                    d = dict(row)
+                    if d.get("generated_at") is not None:
+                        d["generated_at"] = d["generated_at"].isoformat()
+                    results.append(d)
+                return results
+        except Exception:
+            conn.rollback()
+            raise
+
+    def fetch_signals_by_ids(self, signal_ids: list[int]) -> list[dict]:
+        """Fetch historical signals by exact local signal ids."""
+        clean_signal_ids = [int(signal_id) for signal_id in signal_ids if signal_id]
+        if not clean_signal_ids:
+            return []
+        conn = self._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """SELECT id AS signal_id, symbol, score, confidence, reasoning,
+                              model_id, ensemble_std, fallback_used, generated_at
+                       FROM sentiment_signals
+                       WHERE id = ANY(%s)
+                       ORDER BY generated_at DESC""",
+                    (clean_signal_ids,),
                 )
                 rows = cur.fetchall()
                 results = []

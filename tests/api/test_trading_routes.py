@@ -53,7 +53,17 @@ def test_get_orders_returns_list():
 
     mock_client = MagicMock()
     mock_client.get_orders.return_value = [mock_order]
+    mock_pg = MagicMock()
+    mock_pg.fetch_order_trace.return_value = {
+        "abc-123": {
+            "signal_id": 7,
+            "decision_id": 11,
+            "news_log_id": 1444,
+            "trade_id": 19,
+        }
+    }
     app.dependency_overrides[get_alpaca_trading_client] = lambda: mock_client
+    app.dependency_overrides[get_pg_store] = lambda: mock_pg
     app.dependency_overrides[require_api_key] = _skip_auth
 
     tc = TestClient(app)
@@ -66,6 +76,11 @@ def test_get_orders_returns_list():
     assert data[0]["symbol"] == "AAPL"
     assert data[0]["side"] == "buy"
     assert "filled_at" in data[0]
+    assert data[0]["signal_id"] == 7
+    assert data[0]["decision_id"] == 11
+    assert data[0]["news_log_id"] == 1444
+    assert data[0]["trade_id"] == 19
+    mock_pg.fetch_order_trace.assert_called_once_with(["abc-123"])
 
 
 def test_get_orders_with_limit():
@@ -73,6 +88,7 @@ def test_get_orders_with_limit():
     mock_client = MagicMock()
     mock_client.get_orders.return_value = []
     app.dependency_overrides[get_alpaca_trading_client] = lambda: mock_client
+    app.dependency_overrides[get_pg_store] = lambda: MagicMock()
     app.dependency_overrides[require_api_key] = _skip_auth
 
     tc = TestClient(app)

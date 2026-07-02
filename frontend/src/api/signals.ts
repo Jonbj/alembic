@@ -13,10 +13,11 @@ export interface Signal {
   decision_type?: string | null
 }
 
-export const fetchSignals = (filters?: { symbol?: string; newsId?: number }) => {
+export const fetchSignals = (filters?: { symbol?: string; newsId?: number; signalId?: number }) => {
   const params = new URLSearchParams()
   if (filters?.symbol) params.set('symbol', filters.symbol)
   if (filters?.newsId) params.set('news_id', String(filters.newsId))
+  if (filters?.signalId) params.set('signal_id', String(filters.signalId))
   const qs = params.toString()
   return apiFetch<Signal[]>(`/api/signals${qs ? `?${qs}` : ''}`)
 }

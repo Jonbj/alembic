@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchPositions, fetchOrders, type Position, type Order } from '@/api/positions'
 import { HelpButton } from '@/components/shared/HelpButton'
 import { DataTable } from '@/components/shared/DataTable'
+import { SignalTraceLinks } from '@/components/shared/SignalTraceLinks'
 
 type Tab = 'positions' | 'orders' | 'fills'
 
@@ -34,6 +35,25 @@ function ts(iso: string | null) {
   return <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
     {fmtDateTime(iso)}
   </span>
+}
+
+function orderTraceLinks(o: Order) {
+  return (
+    <SignalTraceLinks
+      symbol={o.symbol}
+      compact
+      includeNews={false}
+      includeOrders={false}
+      includePerformance={false}
+      availability={{
+        newsId: o.news_log_id ?? undefined,
+        signalId: o.signal_id ?? undefined,
+        signalCount: o.signal_id ? 1 : 0,
+        decisionCount: o.decision_id ? 1 : 0,
+      }}
+      emptyMessage="—"
+    />
+  )
 }
 
 export default function Trading() {
@@ -108,6 +128,7 @@ export default function Trading() {
       o.qty ?? '—',
       o.filled_avg_price ? `$${parseFloat(o.filled_avg_price).toFixed(2)}` : '—',
       statusSpan(o.status),
+      orderTraceLinks(o),
       ts(o.submitted_at),
     ],
   }))
@@ -123,6 +144,7 @@ export default function Trading() {
       price != null ? fmt(price) : '—',
       qty != null ? qty.toFixed(4) : '—',
       fmt(notional),
+      orderTraceLinks(o),
       ts(o.filled_at),
     ],
     expanded: o.id
@@ -207,6 +229,7 @@ export default function Trading() {
             { label: 'Qty',        width: '10%' },
             { label: 'Fill Price', width: '12%' },
             { label: 'Status',     width: '14%' },
+            { label: 'Trace',      width: '13%' },
             { label: 'Submitted',  width: 'auto' },
           ]}
           rows={ordRows}
@@ -223,6 +246,7 @@ export default function Trading() {
             { label: 'Fill Price', width: '14%' },
             { label: 'Qty',        width: '12%' },
             { label: 'Notional',   width: '14%' },
+            { label: 'Trace',      width: '13%' },
             { label: 'Filled At',  width: 'auto' },
           ]}
           rows={fillRows}

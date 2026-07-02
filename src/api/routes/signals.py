@@ -34,12 +34,31 @@ async def get_all_signals(
     pg_store: Annotated[PostgreSQLStore, Depends(get_pg_store)],
     symbol: str | None = None,
     news_id: int | None = None,
+    signal_id: int | None = None,
 ) -> list[dict]:
     """Get latest signals for all watchlist symbols (or a single symbol if provided).
     
     Tries Redis cache first (fast, TTL 4h). Falls back to PostgreSQL
     for any symbols not found in cache.
     """
+    if signal_id is not None:
+        results = pg_store.fetch_signals_by_ids([signal_id])
+        signal_ids = [int(r["signal_id"]) for r in results if r.get("signal_id") is not None]
+        if signal_ids:
+            try:
+                status_map = pg_store.fetch_signal_decision_status(signal_ids)
+                for r in results:
+                    sid = r.get("signal_id")
+                    if sid is not None and int(sid) in status_map:
+                        r.update(status_map[int(sid)])
+                    else:
+                        r["used_in_decision"] = False
+                        r["decision_at"] = None
+                        r["decision_type"] = None
+            except Exception:
+                pass
+        return results
+
     if news_id is not None:
         results = pg_store.fetch_signals_for_news(news_id)
         signal_ids = [int(r["signal_id"]) for r in results if r.get("signal_id") is not None]
