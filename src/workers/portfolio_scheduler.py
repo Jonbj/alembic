@@ -655,7 +655,7 @@ def _mark_signal_fired(
 
 
 _CYCLE_LOCK_KEY = "portfolio:cycle:lock"
-_CYCLE_LOCK_TTL = 840  # 14 min — covers worst case; just under the 15-min schedule
+_CYCLE_LOCK_TTL = 1200  # 20 min — safely above the 15-min beat cadence (was 840s, shorter than beat)
 # FIX-B: raised 30→90 so a freshly-entered position cannot be sold by the next
 # rebalance cycle. With a 15-min cadence, 30 min allowed buy→sell→buy churn every
 # ~2 cycles (Day-1: GS/MU/MS roundtrips). 90 min (≥6 cycles) also subsumes the
@@ -777,18 +777,33 @@ def run_portfolio_cycle() -> dict:
 
     # Cycle idempotency lock: prevents duplicate runs when Celery beat fires
     # multiple tasks before the previous one completes (e.g. worker restart at :30).
+    # B26-FIX: use a UUID token as lock value so the finally block only deletes
+    # the lock it owns — safe even if the TTL expires and a second cycle starts.
+    import uuid as _uuid
+    _cycle_token = str(_uuid.uuid4())
+    _lock_acquired = False
     try:
         from redis import Redis as _RedisLock
         _rl = _RedisLock.from_url(config.REDIS_URL, decode_responses=True)
         try:
-            acquired = _rl.set(_CYCLE_LOCK_KEY, 1, nx=True, ex=_CYCLE_LOCK_TTL)
+            acquired = _rl.set(_CYCLE_LOCK_KEY, _cycle_token, nx=True, ex=_CYCLE_LOCK_TTL)
             if not acquired:
                 log.info("Portfolio cycle skipped — lock held by a concurrent run")
                 return {"skipped": True, "reason": "cycle_lock"}
+            _lock_acquired = True
         finally:
             _rl.close()
     except Exception as _lock_exc:
         log.warning("Could not acquire cycle lock: %s — proceeding anyway", _lock_exc)
+
+    # Lua script: atomically delete the lock only if we own it (token matches).
+    _UNLOCK_LUA = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+else
+    return 0
+end
+"""
 
     try:
         return _run_cycle_inner()
@@ -797,16 +812,18 @@ def run_portfolio_cycle() -> dict:
         return {"error": str(exc)}
     finally:
         # Release the lock early so the next scheduled cycle can run.
-        try:
-            from redis import Redis as _RedisUnlock
-            from src.config import config as _cfg_ul
-            _ru = _RedisUnlock.from_url(_cfg_ul.REDIS_URL, decode_responses=True)
+        # Only delete if we own the lock (token check via Lua to avoid TOCTOU).
+        if _lock_acquired:
             try:
-                _ru.delete(_CYCLE_LOCK_KEY)
-            finally:
-                _ru.close()
-        except Exception as _ul_exc:
-            log.debug("Could not release cycle lock: %s", _ul_exc)
+                from redis import Redis as _RedisUnlock
+                from src.config import config as _cfg_ul
+                _ru = _RedisUnlock.from_url(_cfg_ul.REDIS_URL, decode_responses=True)
+                try:
+                    _ru.eval(_UNLOCK_LUA, 1, _CYCLE_LOCK_KEY, _cycle_token)
+                finally:
+                    _ru.close()
+            except Exception as _ul_exc:
+                log.debug("Could not release cycle lock: %s", _ul_exc)
 
 
 def _run_cycle_inner() -> dict:
@@ -1285,6 +1302,7 @@ def _run_cycle_inner() -> dict:
     # Log decisions to execution_decisions so the UI Decision Log tab is populated.
     # Also capture decision_ids for later trade DB writes.
     _symbol_decisions: dict[str, dict] = {}  # {symbol: {decision_id, score, signal_id}}
+    _pending_s4_fires: dict[str, int] = {}   # B27-FIX: {symbol: signal_id} to mark after Alpaca confirm
     _s4_signals: dict[str, dict] = {}
     # P0-09: read actual regime multiplier once; used in both decisions and trade writes.
     _regime_mult: float = _get_regime_multiplier_from_redis(config.REDIS_URL)
@@ -1422,10 +1440,12 @@ def _run_cycle_inner() -> dict:
                 # LLM sentiment score — distinct from allocation_weight stored in score.
                 "signal_score": _s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
             }
-            # P1-S4-IDEMPOTENCY: mark this signal_id as fired for today's session.
+            # B27-FIX: collect S4 signals to mark as fired AFTER Alpaca confirmation.
+            # Previously fired here (before submission), causing signals to be consumed
+            # even when the order was skipped (dry-run, halt, broker reject, etc.).
             _fired_sig_id = _signal_ids.get(order.symbol)
-            if _fired_sig_id is not None and "S4" in strats:
-                _mark_signal_fired(_fired_sig_id, _session_date, config.REDIS_URL)
+            if _fired_sig_id is not None and "S4" in strats and order.side.value == "BUY":
+                _pending_s4_fires[order.symbol] = _fired_sig_id
         _pg.close()
     except Exception as _exc:
         log.warning("Failed to log portfolio decisions: %s", _exc)
@@ -1477,6 +1497,47 @@ def _run_cycle_inner() -> dict:
             open_trade_symbols=open_db_symbols,  # None = guard unavailable → fail-closed
             regime_mult=_regime_mult,
         )
+
+    # B27-FIX: mark S4 signals fired only for orders that were actually submitted to Alpaca.
+    # Previously this happened during decision logging (before submission), causing signals
+    # to be consumed even when the order was skipped (dry-run, halt, broker reject, etc.).
+    _submitted_buy_symbols = {o["symbol"] for o in submitted_orders if o.get("side") == "buy"}
+    for _sym, _sid in _pending_s4_fires.items():
+        if _sym in _submitted_buy_symbols:
+            _mark_signal_fired(_sid, _session_date, config.REDIS_URL)
+        else:
+            log.debug("B27: S4 signal_id=%s for %s NOT marked fired — order not submitted", _sid, _sym)
+
+    # B28-FIX: write BUY trade rows to DB immediately after Alpaca confirms the order.
+    # Previously all writes happened in a batch at the end of the cycle (after stop-loss
+    # and reversal sells), creating an orphan window: Alpaca held the position but DB had
+    # no record, so the next cycle's anti-pyramiding guard would allow a duplicate BUY.
+    # SELLs are written later (in the existing batch); the orphan risk for sells is low
+    # (the guard only blocks BUYs, not SELLs on already-gone positions).
+    _written_buy_order_ids: set[str] = set()
+    _buy_orders_to_write = [o for o in submitted_orders if o.get("side") == "buy"]
+    if _buy_orders_to_write:
+        try:
+            from src.store.pg_store import PostgreSQLStore as _PGTradesEarly
+            _pg_early = _PGTradesEarly()
+            for _sub_b in _buy_orders_to_write:
+                _sym_b = _sub_b["symbol"]
+                _dec_b = _symbol_decisions.get(_sym_b, {})
+                _pg_early.open_trade(
+                    symbol=_sym_b,
+                    signal_id=_dec_b.get("signal_id"),
+                    decision_id=_dec_b.get("decision_id"),
+                    entry_order_id=_sub_b["order_id"],
+                    entry_time=ts,
+                    entry_notional=_sub_b["notional"],
+                    score=_dec_b.get("score", 0.0),
+                    regime_mult=_regime_mult,
+                    signal_score=_dec_b.get("signal_score"),
+                )
+                _written_buy_order_ids.add(_sub_b["order_id"])
+            _pg_early.close()
+        except Exception as _exc_b:
+            log.warning("B28: Failed to write BUY trade rows after submission: %s", _exc_b)
 
     # FIX-C: submit synthetic stop-loss exits. Force-close positions that breached the
     # stop threshold. Runs regardless of the hold-minimum (protection takes priority).
@@ -1572,17 +1633,23 @@ def _run_cycle_inner() -> dict:
                 sym = sub["symbol"]
                 dec = _symbol_decisions.get(sym, {})
                 if sub["side"] == "buy":
-                    _pg_trades.open_trade(
-                        symbol=sym,
-                        signal_id=dec.get("signal_id"),
-                        decision_id=dec.get("decision_id"),
-                        entry_order_id=sub["order_id"],
-                        entry_time=ts,
-                        entry_notional=sub["notional"],
-                        score=dec.get("score", 0.0),
-                        regime_mult=_regime_mult,
-                        signal_score=dec.get("signal_score"),
-                    )
+                    # B28-FIX: BUY rows already written immediately after submission above.
+                    # Skip to avoid duplicate primary-key violation.
+                    if sub["order_id"] in _written_buy_order_ids:
+                        # Still back-fill decision order_id below.
+                        pass
+                    else:
+                        _pg_trades.open_trade(
+                            symbol=sym,
+                            signal_id=dec.get("signal_id"),
+                            decision_id=dec.get("decision_id"),
+                            entry_order_id=sub["order_id"],
+                            entry_time=ts,
+                            entry_notional=sub["notional"],
+                            score=dec.get("score", 0.0),
+                            regime_mult=_regime_mult,
+                            signal_score=dec.get("signal_score"),
+                        )
                 else:
                     _trade_id = _pg_trades.record_trade_exit(
                         symbol=sym,

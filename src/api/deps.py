@@ -48,5 +48,5 @@ def get_alpaca_trading_client():
     return TradingClient(
         api_key=config.ALPACA_API_KEY,
         secret_key=config.ALPACA_SECRET_KEY,
-        paper=config.ALPACA_BASE_URL.startswith("https://paper"),
+        paper=config.ALPACA_PAPER_MODE,
     )
