@@ -39,6 +39,7 @@ app = Celery(
         "src.workers.sentiment",
         "src.workers.telegram_poller",
         "src.workers.pead_worker",
+        "src.workers.earnings_pead_worker",
     ],
 )
 
@@ -221,5 +222,12 @@ app.conf.beat_schedule = {
         "task": "src.workers.pead_worker.run_pead_ingestion_worker",
         "schedule": crontab(minute="5,35", hour="14-21", day_of_week="1-5"),
         "options": {"queue": "inference"},
+    },
+    # Earnings-surprise PEAD (fuel for S7): Finnhub earnings calendar → deterministic
+    # surprise → Redis SurpriseSignals. No LLM → default queue. Hourly across a wide
+    # window to catch both before-market (bmo) and after-market (amc) reports.
+    "earnings-pead": {
+        "task": "src.workers.earnings_pead_worker.run_earnings_pead_worker",
+        "schedule": crontab(minute=10, hour="11-23", day_of_week="1-5"),
     },
 }
