@@ -7,6 +7,11 @@
 
 set -euo pipefail
 
+# cron runs with a minimal PATH that doesn't include ~/.local/bin, where the
+# `claude` binary lives — without this the script aborts silently right after
+# the header lines (set -e kills it at the `claude -p` call with "not found").
+export PATH="$HOME/.local/bin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 LOG_DIR="$PROJECT_DIR/logs"
@@ -103,8 +108,8 @@ API REST locale (Authorization: Bearer __ALEMBIC_API_KEY__):
     curl -s -H "Authorization: Bearer __ALEMBIC_API_KEY__" "$BASE/decisions?limit=200"
     curl -s -H "Authorization: Bearer __ALEMBIC_API_KEY__" "$BASE/trades?limit=200"
     curl -s -H "Authorization: Bearer __ALEMBIC_API_KEY__" "$BASE/signals?limit=100"
-    curl -s -H "Authorization: Bearer __ALEMBIC_API_KEY__" "$BASE/trading/positions"
-    curl -s -H "Authorization: Bearer __ALEMBIC_API_KEY__" "$BASE/trading/orders?limit=100"
+    curl -s -H "Authorization: Bearer __ALEMBIC_API_KEY__" "$BASE/positions"
+    curl -s -H "Authorization: Bearer __ALEMBIC_API_KEY__" "$BASE/orders?limit=100"
 
 Log container Docker (solo lettura):
   docker compose logs worker --since 48h 2>&1 | grep -E "ERROR|WARNING|semaphore|fallback|FinBERT|Ollama" | tail -50
