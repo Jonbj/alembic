@@ -88,6 +88,7 @@ def test_rss_worker_queues_items_with_ticker_match():
     mock_redis = MagicMock()
     mock_dedup = MagicMock()
     mock_dedup.is_duplicate_by_id.return_value = False
+    mock_dedup.is_duplicate_content_symbol.return_value = False  # EN-03: not under test here
 
     with patch("src.workers.ingestion.RSSConnector") as mock_rss_cls, \
          patch("src.workers.ingestion.Deduplicator", return_value=mock_dedup), \
@@ -120,6 +121,7 @@ def test_rss_worker_expands_per_ticker():
     mock_redis = MagicMock()
     mock_dedup = MagicMock()
     mock_dedup.is_duplicate_by_id.return_value = False
+    mock_dedup.is_duplicate_content_symbol.return_value = False  # EN-03: not under test here
 
     with patch("src.workers.ingestion.RSSConnector") as mock_rss_cls, \
          patch("src.workers.ingestion.Deduplicator", return_value=mock_dedup), \

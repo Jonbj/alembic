@@ -51,6 +51,7 @@ async def test_ingestion_worker_queues_item_with_ticker():
     mock_extractor = MagicMock()
     mock_extractor.extract.return_value = ["AAPL"]
     mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_content_symbol.return_value = False  # EN-03: only is_duplicate_by_id under test here
     mock_dedup.is_duplicate_by_id.return_value = False
     mock_redis = MagicMock()
 
@@ -73,6 +74,7 @@ async def test_ingestion_worker_discards_no_ticker():
     mock_extractor = MagicMock()
     mock_extractor.extract.return_value = []
     mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_content_symbol.return_value = False  # EN-03: only is_duplicate_by_id under test here
     mock_redis = MagicMock()
 
     stats = _process_gkg_items(gkg_items, mock_extractor, mock_dedup, mock_redis)
@@ -90,6 +92,7 @@ def test_ingestion_worker_multi_ticker_article():
     mock_extractor = MagicMock()
     mock_extractor.extract.return_value = ["AAPL", "MSFT"]
     mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_content_symbol.return_value = False  # EN-03: only is_duplicate_by_id under test here
     mock_dedup.is_duplicate_by_id.return_value = False
     mock_redis = MagicMock()
 
@@ -121,6 +124,7 @@ def test_ingestion_worker_dedup_blocks_second():
         return call_count["n"] > 1  # first is False, subsequent True
 
     mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_content_symbol.return_value = False  # EN-03: only is_duplicate_by_id under test here
     mock_dedup.is_duplicate_by_id.side_effect = dedup_side_effect
     mock_redis = MagicMock()
 
@@ -141,6 +145,7 @@ def test_ingestion_worker_returns_correct_stats():
     mock_extractor = MagicMock()
     mock_extractor.extract.side_effect = [["AAPL"], []]
     mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_content_symbol.return_value = False  # EN-03: only is_duplicate_by_id under test here
     mock_dedup.is_duplicate_by_id.return_value = False
     mock_redis = MagicMock()
 
@@ -161,6 +166,7 @@ def test_marketaux_process_queues_per_ticker():
 
     items = [make_marketaux_item("https://ma.com/1", ["NVDA", "AMD"], sentiment=0.7)]
     mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_content_symbol.return_value = False  # EN-03: only is_duplicate_by_id under test here
     mock_dedup.is_duplicate_by_id.return_value = False
     mock_redis = MagicMock()
 
@@ -179,6 +185,7 @@ def test_marketaux_process_preserves_sentiment_per_ticker():
 
     items = [make_marketaux_item("https://ma.com/2", ["AAPL"], sentiment=0.65)]
     mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_content_symbol.return_value = False  # EN-03: only is_duplicate_by_id under test here
     mock_dedup.is_duplicate_by_id.return_value = False
     mock_redis = MagicMock()
 
@@ -204,6 +211,7 @@ def test_marketaux_process_dedup():
         return call_count["n"] > 1
 
     mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_content_symbol.return_value = False  # EN-03: only is_duplicate_by_id under test here
     mock_dedup.is_duplicate_by_id.side_effect = dedup_side
     mock_redis = MagicMock()
 
@@ -219,6 +227,7 @@ def test_marketaux_process_skips_no_tickers():
 
     items = [make_marketaux_item("https://ma.com/4", [], sentiment=0.8)]
     mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_content_symbol.return_value = False  # EN-03: only is_duplicate_by_id under test here
     mock_redis = MagicMock()
 
     stats = _process_marketaux_items(items, mock_dedup, mock_redis)
@@ -248,6 +257,7 @@ def test_alpaca_process_queues_per_ticker():
 
     items = [make_alpaca_item("https://bz.com/1", ["AAPL", "MSFT"])]
     mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_content_symbol.return_value = False  # EN-03: only is_duplicate_by_id under test here
     mock_dedup.is_duplicate_by_id.return_value = False
     mock_redis = MagicMock()
 
@@ -266,6 +276,7 @@ def test_alpaca_process_single_ticker_per_item():
 
     items = [make_alpaca_item("https://bz.com/2", ["NVDA"])]
     mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_content_symbol.return_value = False  # EN-03: only is_duplicate_by_id under test here
     mock_dedup.is_duplicate_by_id.return_value = False
     mock_redis = MagicMock()
 
@@ -292,6 +303,7 @@ def test_alpaca_process_dedup():
         return call_count["n"] > 1
 
     mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_content_symbol.return_value = False  # EN-03: only is_duplicate_by_id under test here
     mock_dedup.is_duplicate_by_id.side_effect = dedup_side
     mock_redis = MagicMock()
 
@@ -307,6 +319,7 @@ def test_alpaca_process_skips_no_tickers():
 
     items = [make_alpaca_item("https://bz.com/4", [])]
     mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_content_symbol.return_value = False  # EN-03: only is_duplicate_by_id under test here
     mock_redis = MagicMock()
 
     stats = _process_alpaca_items(items, mock_dedup, mock_redis)

@@ -143,7 +143,7 @@ def _process_gkg_items(
             )
 
             # Step 4: deduplication
-            if deduplicator.is_duplicate_by_id(item):
+            if deduplicator.is_duplicate_by_id(item) or deduplicator.is_duplicate_content_symbol(item):
                 stats["duplicates"] += 1
                 continue
 
@@ -197,7 +197,7 @@ def _process_marketaux_items(
                 marketaux_sentiment=item.marketaux_sentiment,
             )
 
-            if deduplicator.is_duplicate_by_id(per_ticker):
+            if deduplicator.is_duplicate_by_id(per_ticker) or deduplicator.is_duplicate_content_symbol(per_ticker):
                 stats["duplicates"] += 1
                 continue
 
@@ -288,7 +288,7 @@ def _process_alpaca_items(
                 extraction_method=item.extraction_method,  # QT-03: carry provenance
             )
 
-            if deduplicator.is_duplicate_by_id(per_ticker):
+            if deduplicator.is_duplicate_by_id(per_ticker) or deduplicator.is_duplicate_content_symbol(per_ticker):
                 stats["duplicates"] += 1
                 continue
 
@@ -373,7 +373,7 @@ def _process_finnhub_items(
                 asset_tags=[ticker],
                 extraction_method=item.extraction_method,
             )
-            if deduplicator.is_duplicate_by_id(per_ticker):
+            if deduplicator.is_duplicate_by_id(per_ticker) or deduplicator.is_duplicate_content_symbol(per_ticker):
                 stats["duplicates"] += 1
                 continue
             redis_client.rpush("news:queue", per_ticker.model_dump_json())
@@ -479,7 +479,7 @@ def _process_gdelt_doc_items(
             asset_tags=[ticker],
             extraction_method=item.extraction_method,
         )
-        if deduplicator.is_duplicate_by_id(per_ticker):
+        if deduplicator.is_duplicate_by_id(per_ticker) or deduplicator.is_duplicate_content_symbol(per_ticker):
             stats["duplicates"] += 1
             continue
         redis_client.rpush("news:queue", per_ticker.model_dump_json())
@@ -543,7 +543,7 @@ def _process_sec_edgar_items(
         if not ticker or ticker not in watchlist:
             stats["filtered"] += 1
             continue
-        if deduplicator.is_duplicate_by_id(item):
+        if deduplicator.is_duplicate_by_id(item) or deduplicator.is_duplicate_content_symbol(item):
             stats["duplicates"] += 1
             continue
         redis_client.rpush("news:queue", item.model_dump_json())
@@ -667,7 +667,7 @@ def _process_rss_items(
                 asset_tags=[ticker],
                 extraction_method="regex",  # QT-03: RSS bare-word watchlist match
             )
-            if deduplicator.is_duplicate_by_id(per_ticker):
+            if deduplicator.is_duplicate_by_id(per_ticker) or deduplicator.is_duplicate_content_symbol(per_ticker):
                 stats["duplicates"] += 1
                 continue
             redis_client.rpush("news:queue", per_ticker.model_dump_json())

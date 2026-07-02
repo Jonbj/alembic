@@ -102,3 +102,21 @@ class Deduplicator:
         key = f"dedup:id:{hashlib.sha256(item.id.encode()).hexdigest()}"
         result = self._r.set(key, 1, ex=_DEDUP_TTL_SECONDS, nx=True)
         return result is None
+
+    def is_duplicate_content_symbol(self, item: NewsItem) -> bool:
+        """Cross-source dedup: content hash + primary ticker (EN-03).
+
+        The same article fetched from two sources has different ids
+        (`is_duplicate_by_id` misses it) but identical normalised text.
+        Keying on content hash ALONE would break multi-ticker fan-out
+        (same text, different ticker → legitimate distinct items), so the
+        key includes the item's primary ticker.
+
+        Items without asset_tags are never treated as content duplicates
+        (nothing downstream to save; discarding here would hide data).
+        """
+        if not item.asset_tags:
+            return False
+        key = f"dedup:content:{compute_dedup_hash(item)}:{item.asset_tags[0]}"
+        result = self._r.set(key, 1, ex=_DEDUP_TTL_SECONDS, nx=True)
+        return result is None
