@@ -134,6 +134,45 @@ class TestWriteSignalReturnsId:
         mock_cursor.fetchone.assert_called_once()
 
 
+class TestFallbackCounterPersistence:
+    """PostgreSQLStore must write through to the fallback_counters table
+    (migrations/001_initial.sql), which existed but was never populated."""
+
+    def test_record_fallback_increment_upserts_counter(self):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_conn.cursor.return_value = mock_cursor
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        store.record_fallback_increment("consecutive_fallback", 3)
+
+        mock_cursor.execute.assert_called_once()
+        sql, params = mock_cursor.execute.call_args[0]
+        assert "INSERT INTO fallback_counters" in sql
+        assert "ON CONFLICT" in sql
+        assert params == ("consecutive_fallback", 3)
+        mock_conn.commit.assert_called_once()
+
+    def test_record_fallback_reset_upserts_counter_to_zero(self):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_conn.cursor.return_value = mock_cursor
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        store.record_fallback_reset("consecutive_fallback")
+
+        mock_cursor.execute.assert_called_once()
+        sql, params = mock_cursor.execute.call_args[0]
+        assert "INSERT INTO fallback_counters" in sql
+        assert "ON CONFLICT" in sql
+        assert params == ("consecutive_fallback",)
+        mock_conn.commit.assert_called_once()
+
+
 class TestLogWeightUpdate:
     """Test PostgreSQLStore.log_weight_update()."""
 

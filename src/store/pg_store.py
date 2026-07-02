@@ -169,6 +169,42 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    _UPSERT_FALLBACK_INCREMENT = """
+        INSERT INTO fallback_counters (counter_name, counter_value, last_increment_at)
+        VALUES (%s, %s, now())
+        ON CONFLICT (counter_name) DO UPDATE
+        SET counter_value = EXCLUDED.counter_value, last_increment_at = now()
+    """
+
+    def record_fallback_increment(self, counter_name: str, value: int) -> None:
+        """Persist the consecutive-fallback count (audit/durability alongside Redis)."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._UPSERT_FALLBACK_INCREMENT, (counter_name, value))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    _UPSERT_FALLBACK_RESET = """
+        INSERT INTO fallback_counters (counter_name, counter_value, reset_at)
+        VALUES (%s, 0, now())
+        ON CONFLICT (counter_name) DO UPDATE
+        SET counter_value = 0, reset_at = now()
+    """
+
+    def record_fallback_reset(self, counter_name: str) -> None:
+        """Persist a fallback-counter reset (audit/durability alongside Redis)."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._UPSERT_FALLBACK_RESET, (counter_name,))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
     _INSERT_NEWS_LOG = """
         INSERT INTO news_log (title, url, source, ticker, body_snippet, raw_sentiment, published_at, extraction_method)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)

@@ -61,6 +61,10 @@ _MAX_QUEUE_SCAN_PER_RUN = 5000
 # the S4 strategy's 4h usability window before ever being scored (throughput bottleneck,
 # DAY-2026-07-02).
 _SENTIMENT_BATCH_SIZE = 12
+# Single named row in the fallback_counters table (Postgres mirror of the Redis
+# consecutive-fallback counter — kept in sync so the count survives a Redis flush
+# and is queryable for audit/dashboards).
+_FALLBACK_COUNTER_NAME = "consecutive_fallback"
 # Resolver shadow (Fase A): compute + persist deterministic ticker resolution for
 # measurement. Offline/fail-safe; never gates the signal. Disable via RESOLVER_SHADOW_ENABLED=0.
 _RESOLVER_SHADOW_ENABLED = os.environ.get("RESOLVER_SHADOW_ENABLED", "1") != "0"
@@ -250,9 +254,11 @@ async def process_news_item(
     try:
         ticker = result.symbol
         if result.fallback_used:
-            redis_store.increment_fallback_counter()
+            count = redis_store.increment_fallback_counter()
+            pg_store.record_fallback_increment(_FALLBACK_COUNTER_NAME, count)
         else:
             redis_store.reset_fallback_counter()
+            pg_store.record_fallback_reset(_FALLBACK_COUNTER_NAME)
         signal_id = pg_store.write_signal(result)
         redis_store.write_sentiment(result, signal_id=signal_id)
         try:

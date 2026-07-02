@@ -275,6 +275,79 @@ class TestProcessNewsItem:
         mock_pg.log_llm_responses.assert_not_called()
 
 
+class TestFallbackCounterPersistence:
+    """The fallback_counters Postgres table (migrations/001_initial.sql) was never
+    written to — only the Redis key was. process_news_item must persist both.
+    """
+
+    @pytest.mark.asyncio
+    async def test_fallback_used_persists_counter_to_postgres(self):
+        """On fallback, Postgres must record the same count Redis just returned."""
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock(
+            side_effect=LLMBudgetExhaustedError("Budget exhausted")
+        )
+        mock_finbert = MagicMock(spec=FinBERTClient)
+        mock_finbert.analyze.return_value = MagicMock(polarity=-0.3, confidence=0.65)
+        mock_redis = MagicMock(spec=RedisStore)
+        mock_redis.increment_fallback_counter.return_value = 3
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+
+        news_item = make_news_item("AAPL", 0)
+
+        await process_news_item(
+            item=news_item,
+            clients=[],
+            aggregator=mock_aggregator,
+            finbert=mock_finbert,
+            budget_tracker=mock_budget,
+            redis_store=mock_redis,
+            pg_store=mock_pg,
+        )
+
+        mock_pg.record_fallback_increment.assert_called_once_with(
+            "consecutive_fallback", 3
+        )
+
+    @pytest.mark.asyncio
+    async def test_ensemble_success_persists_counter_reset_to_postgres(self):
+        """On ensemble success, Postgres must record the reset too."""
+        mock_outputs = [make_model_output(0.6, 0.8, "opus")]
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+        mock_aggregator.aggregate.return_value = MagicMock(
+            polarity=0.6,
+            confidence=0.8,
+            reasoning="Strong beat",
+            model_ids=["opus"],
+        )
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock(return_value="ok")
+        mock_budget.record_spending = AsyncMock(return_value=1.0)
+        mock_finbert = MagicMock(spec=FinBERTClient)
+        mock_redis = MagicMock(spec=RedisStore)
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+
+        news_item = make_news_item("AAPL", 0)
+
+        with patch(
+            "src.workers.sentiment.run_ensemble_query", new_callable=AsyncMock
+        ) as mock_run_ensemble:
+            mock_run_ensemble.return_value = mock_outputs
+
+            await process_news_item(
+                item=news_item,
+                clients=[],
+                aggregator=mock_aggregator,
+                finbert=mock_finbert,
+                budget_tracker=mock_budget,
+                redis_store=mock_redis,
+                pg_store=mock_pg,
+            )
+
+        mock_pg.record_fallback_reset.assert_called_once_with("consecutive_fallback")
+
+
 class TestRunInference:
     """Tests for run_inference — pure inference without store writes."""
 
