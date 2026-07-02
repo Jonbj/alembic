@@ -6,6 +6,12 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ## 2026-07-01
 
+### Fix da analisi e2e del 2026-07-01 (giornata +$68, ma 3 affinamenti)
+- **SKIP_STALE meno rumoroso**: la lookback a 96h del ciclo ri-scansiona segnali vecchi ogni 15 min → un segnale di 40h (es. INTC 0.451 di ~2gg prima) veniva loggato ogni ciclo come "appena scaduto" (94% dei 399 SKIP_STALE di ieri). Ora `_record_stale_drops` logga solo i segnali scaduti *da poco* (entro `_STALE_LOG_RECENT_BUFFER_H`=1h da max_age). (`b2c0f54`)
+- **Floor order-gate a 0.30**: quando `feedback:entry_threshold` scade (TTL 48h), il gate cadeva al prefiltro `min_score 0.10` → segnali deboli tradavano (SPCX 0.180). Ora fa floor al `loss_feedback.threshold_baseline` (0.30). (`b2c0f54`)
+- **Reversal non si fida dei fallback**: `_sentiment_reversal_sells` forzava un SELL leggendo solo lo score, anche su un **FinBERT fallback** (parte quando l'ensemble diverge → inaffidabile). Es. SPCX venduto su fallback −0.573 → perdita −20.23. Ora ignora i segnali `fallback_used`. Fix generale (tutte le posizioni).
+- **Nota fonti** (side-effect): lo skip freschezza (24h→12h) ha silenziato GDELT e MarketAux perché le loro news sono intrinsecamente vecchie (GDELT ~24h+ lag GKG, MarketAux ~9 giorni). Resta solo alpaca_benzinga (fresco+pulito). Da decidere consapevolmente + indagare il lag MarketAux.
+
 ### Fonti — Finnhub aggiunto poi SHELVED dopo mini-spike
 - **Analisi fonti** (via ricerca): principio "explicit tagging > NER > none". Aggiunto `FinnhubNewsConnector` (company-news US, ticker taggati dalla fonte, free tier) + breakdown precision per `extraction_method` nell'harness (`validate_ticker_sentiment.py`) per decidere data-driven su GDELT.
 - **Mini-spike (verdict: SHELVE)**: un fetch reale ha prodotto **2115 articoli/fetch** (5,5× il throughput del worker ~16/h → flood) con **rilevanza larga** (news generiche/listicle/competitor taggate all'azienda, es. "Best CD rates" → GS, "31 Single-Stock ETFs" → TSM; ~40-60% issuer-specific). Conclusione: il *ticker* è pulito (source-tagged, no NER nostro) ma la *rilevanza* no → non è un win e floodderebbe la coda.

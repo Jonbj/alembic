@@ -2115,6 +2115,11 @@ def _sentiment_reversal_sells(
             if raw is None:
                 continue
             data = _json.loads(raw)
+            # Do NOT force-sell on a FinBERT fallback signal: it fires when the ensemble
+            # diverges (low reliability). A reversal exit must rest on a trustworthy
+            # ensemble read (SPCX -0.573 fallback → -20.23 loss on 2026-07-01).
+            if data.get("fallback_used"):
+                continue
             score = float(data.get("score", 0.0))
             if score < threshold:
                 reversal[pos.symbol] = {
