@@ -4,6 +4,14 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ---
 
+## 2026-07-02
+
+### Fonti — MarketAux fix lag (bug connector) → riattivata diversificazione
+- **Root cause**: MarketAux era silente (news di ~13 giorni fa, skippate dallo skip freschezza 12h). Non era un ritardo del free tier — il `fetch()` live non passava `sort`/`published_after`, quindi l'API restituiva il default (articoli vecchi). Test live: con `sort=published_on` MarketAux serve news di **oggi**.
+- **Fix**: `fetch()` ora richiede `sort=published_on` + `published_after=(ora−12h)` + `filter_entities=true` → news fresche, on-topic, entity-tagged. Riattiva una **seconda fonte fresca e diversificata** (5000+ testate) accanto ad alpaca_benzinga → riduce il rischio di single-source/polarizzazione.
+
+---
+
 ## 2026-07-01
 
 ### Fix da analisi e2e del 2026-07-01 (giornata +$68, ma 3 affinamenti)

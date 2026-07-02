@@ -310,3 +310,44 @@ async def test_sentiment_is_none_when_no_matching_entity():
 
     assert len(items) == 1
     assert items[0].marketaux_sentiment is None
+
+
+def test_build_params_recent_sorted_entity_filtered():
+    """Fix (2026-07-02): live fetch must request newest-first + entity-filtered news,
+    else MarketAux's default returns ~13-day-old articles."""
+    conn = MarketAuxConnector(api_key="k", symbols=["AAPL"])
+    params = conn._build_params(
+        page=1, published_after="2026-07-02T00:00", sort="published_on", filter_entities=True
+    )
+    assert params["sort"] == "published_on"
+    assert params["filter_entities"] == "true"
+    assert params["published_after"] == "2026-07-02T00:00"
+
+
+@pytest.mark.asyncio
+async def test_fetch_requests_recent_sorted_news():
+    conn = MarketAuxConnector(api_key="k", symbols=["AAPL"])
+    captured: dict = {}
+
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json = AsyncMock(return_value={"data": []})
+    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+    def _get(url, params=None):
+        captured.update(params or {})
+        return mock_resp
+
+    mock_session = AsyncMock()
+    mock_session.get = MagicMock(side_effect=_get)
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("src.connectors.marketaux.aiohttp.ClientSession", return_value=mock_session):
+        _ = [i async for i in conn.fetch()]
+
+    assert captured.get("sort") == "published_on"
+    assert captured.get("filter_entities") == "true"
+    assert "published_after" in captured   # recent window bound, not stale default

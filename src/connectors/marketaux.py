@@ -10,7 +10,7 @@ token spend by ~60-80% on neutral articles.
 
 import logging
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import aiohttp
 
@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 
 _MARKETAUX_BASE_URL = "https://api.marketaux.com/v1/news/all"
 _DEFAULT_MAX_REQUESTS = 95
+# Live fetch: only news from the last N hours, sorted newest-first. Without this the
+# MarketAux default sort returns stale articles (2026-07-01: ~13-day-old data).
+_LIVE_FETCH_LOOKBACK_H = 12
 
 
 class MarketAuxAuthError(Exception):
@@ -58,18 +61,23 @@ class MarketAuxConnector(NewsConnector):
         self._requests_made = 0
 
     async def fetch(self) -> AsyncIterator[MarketAuxNewsItem]:
-        """Poll recent articles for the configured symbols (live trading).
+        """Poll the most RECENT articles for the configured symbols (live trading).
 
-        Fetches the latest page (no date filter) — intended to be called
-        every ~5 minutes by the live ingestion worker. Deduplication is
-        handled upstream by the Redis deduplicator (TTL 2h).
+        Requests newest-first sort + a recent published_after window + entity filtering,
+        so MarketAux returns fresh, on-topic news. Without these its default sort returns
+        stale articles (2026-07-01: ~13-day-old data). Dedup upstream (Redis TTL 2h).
         """
         if self._requests_made >= self._max_requests:
             raise MarketAuxRateLimitError(
                 f"Daily budget exhausted ({self._requests_made}/{self._max_requests})"
             )
 
-        params = self._build_params(page=1)
+        published_after = (
+            datetime.now(timezone.utc) - timedelta(hours=_LIVE_FETCH_LOOKBACK_H)
+        ).strftime("%Y-%m-%dT%H:%M")
+        params = self._build_params(
+            page=1, published_after=published_after, sort="published_on", filter_entities=True
+        )
 
         async with aiohttp.ClientSession() as session:
             async with session.get(_MARKETAUX_BASE_URL, params=params) as resp:
@@ -139,6 +147,8 @@ class MarketAuxConnector(NewsConnector):
         page: int = 1,
         published_after: str | None = None,
         published_before: str | None = None,
+        sort: str | None = None,
+        filter_entities: bool = False,
     ) -> dict:
         params: dict = {
             "api_token": self._api_key,
@@ -151,6 +161,10 @@ class MarketAuxConnector(NewsConnector):
             params["published_after"] = published_after
         if published_before:
             params["published_before"] = published_before
+        if sort:
+            params["sort"] = sort
+        if filter_entities:
+            params["filter_entities"] = "true"
         return params
 
     def _check_status(self, status: int) -> None:
