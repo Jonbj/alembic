@@ -22,7 +22,7 @@ LLMs are **never called synchronously inside trading loops**. All LLM inference 
 
 - **Backend async stack**: FastAPI + Celery + Redis (background sentiment pipeline)
 - **Backtesting**: Backtrader (`bt.feeds.PandasData` with custom `lines`)
-- **LLM models**: FinBERT (local, int8 quantized), Kimi K2.6 + Qwen3.5 via Ollama (ensemble)
+- **LLM models**: FinBERT (local, int8 quantized) + an ensemble pair via Ollama Cloud (hosted at `ollama.com`, **not** local inference — `OLLAMA_BASE_URL` in `src/config.py`). The pair is not fixed: it's auto-selected from a larger candidate pool (kimi-k2.6, qwen3.5, deepseek-v4-pro, glm-5.1/5.2, …) via LOO ICIR performance rebalancing (`redis_store.get_llm_models()`, `src/workers/sentiment.py`) — expect it to change over time.
 - **Broker integration**: Alpaca SDK (paper/live); Backtrader for backtesting
 - **Workers**: `worker` (concurrency=4, queue `celery`) + `worker-inference` (concurrency=1, queue `inference` — FinBERT/Ollama isolation)
 
