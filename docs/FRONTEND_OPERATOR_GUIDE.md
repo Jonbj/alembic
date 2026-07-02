@@ -102,7 +102,9 @@ The React frontend (`frontend/src/pages/`) exposes the operator pages below. Aut
 | Docs | `Docs.tsx` | Static | Documentation viewer |
 | Login | `LoginPage.tsx` | `/api/auth/login` | Authentication |
 
-`Trades.tsx` is not restored as a route. Order/fill operations are in `Trading`; closed-trade diagnostics and Phase A analytics are in `Performance`.
+`Trades.tsx` has been removed from the frontend. The legacy `/trades` route redirects to `Trading`. Order/fill operations are in `Trading`; closed-trade diagnostics and Phase A analytics are in `Performance`.
+
+Trace links use one shared causal model: `News -> Signal -> Decision -> Order -> Performance`. Inline links remain available for fast navigation, and the `Trace` drawer shows the full chain with unavailable steps marked as not traced. Links are rendered only when the matching downstream id/count exists, so a trace should not lead to an empty list.
 
 `DashboardPage.tsx` has been removed from the user-facing frontend. The legacy `/dashboard` route redirects to `Overview`; React pages are the primary monitoring surface. Grafana is no longer part of the local compose stack.
 

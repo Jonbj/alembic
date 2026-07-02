@@ -51,6 +51,10 @@ export default function Docs() {
           heading: "Dove guardare",
           content: "• **Overview** — P&L live, stato operativo, segnali e decisioni recenti\n• **Operations** — scheduler, activity log, configurazione, kill switch e mode\n• **News** — articoli per fonte (Reuters, CNBC, EDGAR, GDELT…)\n• **Signals** — segnali LLM per ticker e decision log\n• **Quality** — metriche ticker/sentiment e fallback\n• **Trading** — posizioni, ordini e fills\n• **Performance → Analytics** — P&L per regime/simbolo/ora/score/durata\n• **Performance → Weekly Report** — costi, cash drag, infrastruttura\n• **Strategies** — gate di validazione OOS\n• **Auto-Improve** — feedback gate e counterfactual\n• **LLM** — pesi ensemble e ICIR per modello",
         },
+        {
+          heading: "Catena causale",
+          content: "La catena standard è **News → Signal → Decision → Order → Performance**. I link Trace compaiono solo quando il record downstream esiste davvero. Il bottone Trace apre una drawer con il percorso completo e indica quali passaggi sono disponibili o non tracciati.",
+        },
       ]} />
 
       <h1 style={{ margin: '0 0 20px', fontSize: 20, fontWeight: 700 }}>Guida Alembic</h1>
@@ -74,6 +78,30 @@ export default function Docs() {
 [Risk Constraints + Vol Targeting] ──→ [Alpaca Paper/Live API]`}</div>
         <p style={p}>
           Questo design garantisce che un eventuale timeout o rallentamento del modello LLM non blocchi mai l'esecuzione di un ordine. Il motore di esecuzione ha sempre un segnale già pronto in Redis.
+        </p>
+      </div>
+
+      <div style={card}>
+        <h2 style={h2}>🧬 Catena causale e Trace</h2>
+        <p style={p}>
+          La diagnostica principale di Alembic segue il percorso <strong>News → Signal → Decision → Order → Performance</strong>. Questo permette di capire se una notizia ha prodotto un segnale, se il portfolio scheduler l'ha usato, se è stato inviato un ordine e quale P&amp;L ne è derivato.
+        </p>
+        <div style={mono}>{`News
+  articolo ingerito, ticker risolto, source e raw_sentiment
+      ↓
+Signal
+  score ensemble, confidence, model_id, fallback e signal_id
+      ↓
+Decision
+  BUY / SELL / SKIP_* con reason, threshold e decision_id
+      ↓
+Order
+  ordine broker Alpaca, fill, status e order_id
+      ↓
+Performance
+  trade chiuso, costi, slippage e P&L netto`}</div>
+        <p style={p}>
+          Il bottone <strong>Trace</strong> apre una drawer con i passaggi disponibili. I link diretti restano visibili per navigare rapidamente, ma vengono mostrati solo quando l'ID o il contatore corrispondente esiste. Il simbolo <strong>—</strong> significa record non generato, non tracciato o precedente alla migrazione di osservabilità.
         </p>
       </div>
 

@@ -47,6 +47,7 @@ export default function App() {
                 <Route path="/"             element={<Overview />} />
                 <Route path="/signals"      element={<Signals />} />
                 <Route path="/trading"      element={<Trading />} />
+                <Route path="/trades"       element={<Navigate to="/trading" replace />} />
                 <Route path="/performance"  element={<Performance />} />
                 <Route path="/strategies"   element={<Strategies />} />
                 <Route path="/backtest"     element={<Backtest />} />

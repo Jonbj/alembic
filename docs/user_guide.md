@@ -104,7 +104,9 @@ Settimanalmente
 
 ## 3. Le pagine della dashboard
 
-L'applicazione è accessibile all'indirizzo **http://192.168.178.144:3000**. Il menu laterale segue il flusso operativo: Overview, News, LLM, Signals, Quality, Trading, Performance, Strategies, Auto-Improve, Validation, Labeling, Backtest, Admin e Docs. La vecchia pagina Dashboard/Grafana non è più una superficie utente: `/dashboard` reindirizza a Overview.
+L'applicazione è accessibile all'indirizzo **http://192.168.178.144:3000**. Il menu laterale segue il flusso operativo: Overview, News, LLM, Signals, Quality, Trading, Performance, Strategies, Auto-Improve, Validation, Labeling, Backtest, Admin e Docs. La vecchia pagina Dashboard/Grafana non è più una superficie utente: `/dashboard` reindirizza a Overview. La vecchia pagina Trades è stata rimossa: `/trades` reindirizza a Trading, mentre analytics e P&L restano in Performance.
+
+I pulsanti **Trace** seguono la catena causale `News -> Signal -> Decision -> Order -> Performance`: aprono una drawer con i passaggi disponibili e marcano come non tracciati quelli non generati dal sistema.
 
 ---
 

@@ -115,7 +115,7 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 ║  Phase A — Trade Analytics Engine (always on)                                ║
 ║    • Multi-dimensional P&L breakdown: by symbol, regime, hour, score, hold  ║
 ║    • Postmortem diagnosis per losing trade                                   ║
-║    • Surfaces via /api/trades/analytics/* endpoints and Trades → Analytics  ║
+║    • Surfaces via /api/trades/analytics/* endpoints and Performance         ║
 ║                                                                              ║
 ║  Phase B — Loss Feedback Loop (every 30 min, market hours)                  ║
 ║    • Detects 3 consecutive losses or negative rolling P&L (last 10 trades)  ║
