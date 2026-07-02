@@ -215,6 +215,12 @@ class TestConnectionPoolSafety:
             store.get_llm_feedback()
         mock_conn.rollback.assert_called_once()
 
+    def test_get_news_source_quality_rollback_on_error(self):
+        store, mock_conn = self._make_store_with_failing_cursor()
+        with pytest.raises(Exception):
+            store.get_news_source_quality()
+        mock_conn.rollback.assert_called_once()
+
     def test_fetch_signals_for_ic_rollback_on_error(self):
         store, mock_conn = self._make_store_with_failing_cursor()
         with pytest.raises(Exception):

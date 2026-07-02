@@ -1276,6 +1276,138 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def get_news_source_quality(self, days: int = 30) -> list[dict]:
+        """Return per-source news quality funnel metrics for the recent window."""
+        days = max(1, min(days, 365))
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH source_news AS (
+                        SELECT id, source, ticker, raw_sentiment, fetched_at, published_at
+                        FROM news_log
+                        WHERE fetched_at >= NOW() - (%s * INTERVAL '1 day')
+                    ),
+                    signal_stats AS (
+                        SELECT
+                            nl.source,
+                            COUNT(DISTINCT ss.id) AS signals_count,
+                            AVG(ss.score) AS avg_score,
+                            AVG(ss.confidence) AS avg_confidence
+                        FROM source_news nl
+                        LEFT JOIN sentiment_signals ss ON ss.news_log_id = nl.id
+                        GROUP BY nl.source
+                    ),
+                    decision_stats AS (
+                        SELECT
+                            nl.source,
+                            COUNT(DISTINCT ed.id) AS decisions_count
+                        FROM source_news nl
+                        JOIN sentiment_signals ss ON ss.news_log_id = nl.id
+                        JOIN execution_decisions ed ON ed.signal_id = ss.id
+                        GROUP BY nl.source
+                    ),
+                    order_stats AS (
+                        SELECT source, COUNT(*) AS orders_count
+                        FROM (
+                            SELECT DISTINCT nl.source, 'decision:' || ed.id::text AS trace_id
+                            FROM source_news nl
+                            JOIN sentiment_signals ss ON ss.news_log_id = nl.id
+                            JOIN execution_decisions ed ON ed.signal_id = ss.id
+                            WHERE ed.order_id IS NOT NULL
+                            UNION
+                            SELECT DISTINCT
+                                nl.source,
+                                CASE
+                                    WHEN t.decision_id IS NOT NULL THEN 'decision:' || t.decision_id::text
+                                    ELSE 'trade:' || t.id::text
+                                END AS trace_id
+                            FROM source_news nl
+                            JOIN sentiment_signals ss ON ss.news_log_id = nl.id
+                            JOIN trades t ON t.signal_id = ss.id
+                        ) traced_orders
+                        GROUP BY source
+                    ),
+                    trade_stats AS (
+                        SELECT
+                            nl.source,
+                            COUNT(DISTINCT t.id) AS trades_count,
+                            COUNT(DISTINCT t.id) FILTER (
+                                WHERE t.exit_time IS NOT NULL AND t.net_pnl IS NOT NULL
+                            ) AS closed_trades_count,
+                            AVG(t.net_pnl) FILTER (
+                                WHERE t.exit_time IS NOT NULL AND t.net_pnl IS NOT NULL
+                            ) AS avg_net_pnl,
+                            SUM(t.net_pnl) FILTER (
+                                WHERE t.exit_time IS NOT NULL AND t.net_pnl IS NOT NULL
+                            ) AS total_net_pnl,
+                            AVG(CASE
+                                WHEN t.exit_time IS NOT NULL AND t.net_pnl IS NOT NULL
+                                THEN CASE WHEN t.net_pnl > 0 THEN 1.0 ELSE 0.0 END
+                            END)::float AS win_rate
+                        FROM source_news nl
+                        JOIN sentiment_signals ss ON ss.news_log_id = nl.id
+                        JOIN trades t ON t.signal_id = ss.id
+                        GROUP BY nl.source
+                    )
+                    SELECT
+                        nl.source,
+                        COUNT(*) AS news_count,
+                        COUNT(*) FILTER (
+                            WHERE nl.ticker IS NOT NULL
+                              AND nl.ticker <> ''
+                              AND nl.ticker <> 'UNKNOWN'
+                        ) AS with_ticker_count,
+                        COUNT(*) FILTER (WHERE nl.raw_sentiment IS NOT NULL) AS with_sentiment_count,
+                        AVG(ABS(nl.raw_sentiment)) FILTER (
+                            WHERE nl.raw_sentiment IS NOT NULL
+                        ) AS avg_abs_raw_sentiment,
+                        AVG(EXTRACT(EPOCH FROM (nl.fetched_at - nl.published_at)) / 60.0) FILTER (
+                            WHERE nl.published_at IS NOT NULL
+                              AND nl.fetched_at IS NOT NULL
+                              AND nl.fetched_at >= nl.published_at
+                        )::float AS avg_publish_to_fetch_minutes,
+                        COALESCE(ss.signals_count, 0) AS signals_count,
+                        COALESCE(ds.decisions_count, 0) AS decisions_count,
+                        COALESCE(os.orders_count, 0) AS orders_count,
+                        COALESCE(ts.trades_count, 0) AS trades_count,
+                        COALESCE(ts.closed_trades_count, 0) AS closed_trades_count,
+                        ss.avg_score,
+                        ss.avg_confidence,
+                        ts.avg_net_pnl,
+                        ts.total_net_pnl,
+                        ts.win_rate,
+                        COALESCE(ss.signals_count, 0)::float / NULLIF(COUNT(*), 0) AS signal_rate,
+                        COALESCE(ds.decisions_count, 0)::float / NULLIF(COALESCE(ss.signals_count, 0), 0) AS decision_rate,
+                        COALESCE(os.orders_count, 0)::float / NULLIF(COALESCE(ds.decisions_count, 0), 0) AS order_rate
+                    FROM source_news nl
+                    LEFT JOIN signal_stats ss ON ss.source = nl.source
+                    LEFT JOIN decision_stats ds ON ds.source = nl.source
+                    LEFT JOIN order_stats os ON os.source = nl.source
+                    LEFT JOIN trade_stats ts ON ts.source = nl.source
+                    GROUP BY
+                        nl.source,
+                        ss.signals_count,
+                        ss.avg_score,
+                        ss.avg_confidence,
+                        ds.decisions_count,
+                        os.orders_count,
+                        ts.trades_count,
+                        ts.closed_trades_count,
+                        ts.avg_net_pnl,
+                        ts.total_net_pnl,
+                        ts.win_rate
+                    ORDER BY news_count DESC, nl.source
+                    """,
+                    (days,),
+                )
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception:
+            conn.rollback()
+            raise
+
     def get_llm_feedback(
         self,
         limit: int = 50,

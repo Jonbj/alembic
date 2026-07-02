@@ -239,6 +239,46 @@ class TestGetNewsRecent:
         assert "gdelt_gkg" in params
 
 
+class TestGetNewsSourceQuality:
+    """Test PostgreSQLStore.get_news_source_quality()."""
+
+    def test_get_news_source_quality_returns_rows(self, pg_store):
+        """get_news_source_quality returns per-source funnel rows."""
+        mock_cursor = pg_store._conn.cursor.return_value
+        mock_cursor.description = [
+            ("source",), ("news_count",), ("with_ticker_count",), ("signals_count",),
+            ("decisions_count",), ("orders_count",), ("avg_confidence",),
+        ]
+        mock_cursor.fetchall.return_value = [
+            ("finnhub", 10, 10, 8, 3, 1, 0.72),
+        ]
+
+        rows = pg_store.get_news_source_quality(days=30)
+
+        assert rows == [
+            {
+                "source": "finnhub",
+                "news_count": 10,
+                "with_ticker_count": 10,
+                "signals_count": 8,
+                "decisions_count": 3,
+                "orders_count": 1,
+                "avg_confidence": 0.72,
+            }
+        ]
+
+    def test_get_news_source_quality_bounds_days(self, pg_store):
+        """get_news_source_quality bounds the requested window."""
+        mock_cursor = pg_store._conn.cursor.return_value
+        mock_cursor.description = [("source",)]
+        mock_cursor.fetchall.return_value = []
+
+        pg_store.get_news_source_quality(days=999)
+
+        params = mock_cursor.execute.call_args[0][1]
+        assert params == (365,)
+
+
 class TestGetLlmFeedback:
     """Test PostgreSQLStore.get_llm_feedback()."""
 

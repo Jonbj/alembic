@@ -2,7 +2,7 @@ import { Fragment, useState, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
-import { fetchNews, type NewsItem } from '@/api/news'
+import { fetchNews, fetchNewsSourceQuality, type NewsItem, type NewsSourceQualityRow } from '@/api/news'
 import { HelpButton } from '@/components/shared/HelpButton'
 import { SignalTraceLinks } from '@/components/shared/SignalTraceLinks'
 
@@ -19,12 +19,19 @@ export default function News() {
   const [ticker, setTicker] = useState(searchParams.get('ticker') ?? '')
   const [source, setSource] = useState(searchParams.get('source') ?? '')
   const [limit, setLimit] = useState(Number(searchParams.get('limit') ?? 50))
+  const [qualityDays, setQualityDays] = useState(Number(searchParams.get('quality_days') ?? 30))
   const [actionableOnly, setActionableOnly] = useState(searchParams.get('actionable') === '1')
   const [expanded, setExpanded] = useState<number | null>(null)
 
   const { data: news = [], isLoading, error } = useQuery({
     queryKey: ['news', ticker, source, limit],
     queryFn: () => fetchNews({ limit, ticker: ticker || undefined, source: source || undefined }),
+    refetchInterval: 300000,
+  })
+
+  const { data: sourceQuality = [], isLoading: qualityLoading, error: qualityError } = useQuery({
+    queryKey: ['news-source-quality', qualityDays],
+    queryFn: () => fetchNewsSourceQuality({ days: qualityDays }),
     refetchInterval: 300000,
   })
 
@@ -61,6 +68,13 @@ export default function News() {
     setSearchParams(next, { replace: true })
   }
 
+  const updateQualityDays = (value: number) => {
+    setQualityDays(value)
+    const next = new URLSearchParams(searchParams)
+    next.set('quality_days', String(value))
+    setSearchParams(next, { replace: true })
+  }
+
   const updateActionable = (checked: boolean) => {
     setActionableOnly(checked)
     const next = new URLSearchParams(searchParams)
@@ -82,6 +96,40 @@ export default function News() {
     if (raw < -0.1) return <span className="badge badge-red">Negative</span>
     return <span className="badge badge-grey">Neutral</span>
   }
+
+  function fmtPct(value: number | null | undefined) {
+    if (value == null || Number.isNaN(value)) return '—'
+    return `${(value * 100).toFixed(1)}%`
+  }
+
+  function fmtNum(value: number | null | undefined, digits = 2) {
+    if (value == null || Number.isNaN(value)) return '—'
+    return value.toFixed(digits)
+  }
+
+  function fmtMoney(value: number | null | undefined) {
+    if (value == null || Number.isNaN(value)) return '—'
+    return `$${value.toFixed(2)}`
+  }
+
+  function fmtMinutes(value: number | null | undefined) {
+    if (value == null || Number.isNaN(value)) return '—'
+    if (value < 60) return `${value.toFixed(0)}m`
+    return `${(value / 60).toFixed(1)}h`
+  }
+
+  const qualitySummary = useMemo(() => {
+    const totals = sourceQuality.reduce(
+      (acc, row) => ({
+        news: acc.news + row.news_count,
+        signals: acc.signals + row.signals_count,
+        decisions: acc.decisions + row.decisions_count,
+        orders: acc.orders + row.orders_count,
+      }),
+      { news: 0, signals: 0, decisions: 0, orders: 0 },
+    )
+    return `${totals.news} news · ${totals.signals} signals · ${totals.decisions} decisions · ${totals.orders} orders`
+  }, [sourceQuality])
 
   return (
     <div style={{ position: 'relative' }}>
@@ -145,6 +193,106 @@ export default function News() {
         <span style={{ color: 'var(--text-muted)', alignSelf: 'center', fontSize: 12 }}>
           {visibleNews.length} shown · {news.length} fetched
         </span>
+      </div>
+
+      <div className="card" style={{ padding: 0, marginBottom: 16, overflowX: 'auto' }}>
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 12,
+          alignItems: 'center',
+          padding: '10px 12px',
+          borderBottom: '1px solid var(--border)',
+          minWidth: 980,
+        }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Source quality</h3>
+            <div style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 2 }}>
+              Conversion funnel per fonte negli ultimi {qualityDays} giorni · {qualitySummary}
+            </div>
+          </div>
+          <select value={qualityDays} onChange={(e) => updateQualityDays(Number(e.target.value))}>
+            <option value={7}>7 days</option>
+            <option value={30}>30 days</option>
+            <option value={90}>90 days</option>
+            <option value={180}>180 days</option>
+          </select>
+        </div>
+
+        <table style={{ minWidth: 980 }}>
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>News</th>
+              <th>Ticker</th>
+              <th>Signal</th>
+              <th>Decision</th>
+              <th>Order</th>
+              <th>Avg conf.</th>
+              <th>Latency</th>
+              <th>Closed</th>
+              <th>Win</th>
+              <th>Total P&amp;L</th>
+            </tr>
+          </thead>
+          <tbody>
+            {qualityLoading && (
+              <tr>
+                <td colSpan={11} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 18 }}>Loading source quality...</td>
+              </tr>
+            )}
+            {qualityError && !qualityLoading && (
+              <tr>
+                <td colSpan={11} style={{ textAlign: 'center', color: 'var(--red)', padding: 18 }}>Error loading source quality</td>
+              </tr>
+            )}
+            {!qualityLoading && !qualityError && sourceQuality.map((row: NewsSourceQualityRow) => (
+              <tr key={row.source}>
+                <td>
+                  <button
+                    className="btn-ghost"
+                    onClick={() => updateSource(row.source)}
+                    style={{ fontSize: 12, padding: '4px 8px' }}
+                    title={`Filter news by ${row.source}`}
+                  >
+                    {row.source}
+                  </button>
+                </td>
+                <td>{row.news_count}</td>
+                <td>
+                  {row.with_ticker_count}
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11, display: 'block' }}>
+                    {fmtPct(row.news_count ? row.with_ticker_count / row.news_count : null)}
+                  </span>
+                </td>
+                <td>
+                  {row.signals_count}
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11, display: 'block' }}>{fmtPct(row.signal_rate)}</span>
+                </td>
+                <td>
+                  {row.decisions_count}
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11, display: 'block' }}>{fmtPct(row.decision_rate)}</span>
+                </td>
+                <td>
+                  {row.orders_count}
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11, display: 'block' }}>{fmtPct(row.order_rate)}</span>
+                </td>
+                <td>{fmtNum(row.avg_confidence)}</td>
+                <td>{fmtMinutes(row.avg_publish_to_fetch_minutes)}</td>
+                <td>{row.closed_trades_count}</td>
+                <td>{fmtPct(row.win_rate)}</td>
+                <td>{fmtMoney(row.total_net_pnl)}</td>
+              </tr>
+            ))}
+            {!qualityLoading && !qualityError && sourceQuality.length === 0 && (
+              <tr>
+                <td colSpan={11} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 18 }}>
+                  No source quality data in the selected window.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
 
       {isLoading && <p style={{ color: 'var(--text-muted)' }}>Loading...</p>}

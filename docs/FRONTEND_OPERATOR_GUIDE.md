@@ -94,7 +94,7 @@ The React frontend (`frontend/src/pages/`) exposes the operator pages below. Aut
 | Strategies | `Strategies.tsx` | `/api/strategies/*` | Strategy metrics, gates, lifecycle mode and authorization status |
 | Trading | `Trading.tsx` | `/api/positions`, `/api/orders` | Positions, orders and true fills from filled orders |
 | Performance | `Performance.tsx` | `/api/performance/pnl`, `/api/performance/daily`, `/api/performance/weekly`, `/api/trades/analytics/by-symbol`, `/api/trades/analytics/by-dimension`, `/weights/*` | P&L storico, breakdown giornaliero, Phase A trade analytics, report settimanale |
-| News | `News.tsx` | `/api/news/recent` | Recent ingested articles |
+| News | `News.tsx` | `/api/news/recent`, `/api/news/source-quality` | Recent ingested articles and per-source quality funnel |
 | LLM | `LLM.tsx` | `/api/llm/feedback`, `/api/llm/models`, `/api/weights/*` | Model feedback loop and dynamic ensemble weights |
 | Auto-Improve | `AutoImprove.tsx` | `/api/feedback/status`, `/api/trades/analytics/counterfactual`, `/api/trades/analytics/counterfactual/status` | Feedback gate + counterfactual opportunity cost with worker freshness and raw skip counts |
 | Operations | `Operations.tsx` | `/api/system/*`, `/api/config`, `/api/admin/*` | Unified System / Config / Admin operator surface |

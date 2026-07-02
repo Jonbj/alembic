@@ -450,6 +450,14 @@ Each row also includes downstream trace counters:
 | `decision_count` | Number of `execution_decisions` rows linked through those signals |
 | `order_count` | Number of order/trade traces linked through those signals |
 
+### `GET /api/news/source-quality`
+
+Per-source quality funnel over recent `news_log` rows. Query params: `days` (1-365, default 30).
+
+The endpoint groups by `news_log.source` and returns article volume, ticker coverage, signal/decision/order conversion rates, average signal confidence, average publish-to-fetch latency, and closed-trade P&L where traceable through `news_log_id`.
+
+Key fields: `news_count`, `with_ticker_count`, `signals_count`, `decisions_count`, `orders_count`, `closed_trades_count`, `signal_rate`, `decision_rate`, `order_rate`, `avg_confidence`, `avg_publish_to_fetch_minutes`, `win_rate`, `total_net_pnl`.
+
 ### `GET /api/llm/feedback`
 
 Per-model LLM outputs joined to signals (for model quality analysis). Query params: `ticker`, `model_id`, `limit`.

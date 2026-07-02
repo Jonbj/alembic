@@ -375,14 +375,16 @@ Se il grafico è **monotonamente crescente** (da sinistra a destra), il modello 
 | Colonna | Significato |
 |---------|------------|
 | **Title** | Titolo dell'articolo (clicca per espandere e vedere URL) |
-| **Source** | Fonte (gdelt_gkg, marketaux, alpaca) |
+| **Source** | Fonte (`gdelt_gkg`, `gdelt`, `marketaux`, `alpaca_benzinga`, `finnhub`, `sec_edgar`, RSS live se attivi) |
 | **Ticker** | Ticker associato all'articolo |
 | **Sentiment** | Badge Positive/Negative/Neutral basato su raw_sentiment |
 | **Time** | Quando l'articolo è stato acquisito |
 
+**Source quality**: il pannello sopra la tabella confronta le fonti negli ultimi 7/30/90/180 giorni. Mostra il funnel `News -> Signal -> Decision -> Order`, copertura ticker, confidence media, latenza media publish-to-fetch e P&L chiuso quando disponibile. Usa questi dati per capire se una fonte produce segnali utili o solo volume.
+
 **Filtri:**
 - **Filter ticker**: mostra solo notizie per un ticker specifico
-- **Source filter**: GDELT GKG / MarketAux / Alpaca
+- **Source filter**: filtra una fonte specifica, inclusi GDELT, MarketAux, Alpaca/Benzinga, Finnhub, SEC EDGAR e feed RSS live se attivi
 
 **Come usarla**: Se un segnale su un ticker ti sembra strano, filtra per quel ticker e controlla quali notizie lo hanno generato. Un articolo singolo anomalo può distorcere il punteggio.
 
