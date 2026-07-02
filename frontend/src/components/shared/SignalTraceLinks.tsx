@@ -6,6 +6,9 @@ export interface SignalTraceAvailability {
   signalId?: number
   decisionId?: number
   orderId?: string
+  decisionType?: string
+  decisionReason?: string
+  decisionSignalScore?: number
   signalCount?: number
   decisionCount?: number
   orderCount?: number
@@ -85,7 +88,9 @@ export function SignalTraceLinks({
       text: label('Decision', availability?.decisionCount, hasAvailability),
       show: includeDecision && (!hasAvailability || decisionCount > 0),
       available: !hasAvailability || decisionCount > 0,
-      detail: availability?.decisionId ? `Decision #${availability.decisionId}` : `${decisionCount} decision(s)`,
+      detail: availability?.decisionType
+        ? `${availability.decisionType}${availability.decisionSignalScore !== undefined ? ` · score ${availability.decisionSignalScore.toFixed(3)}` : ''}${availability.decisionReason ? ` · ${availability.decisionReason}` : ''}`
+        : availability?.decisionId ? `Decision #${availability.decisionId}` : `${decisionCount} decision(s)`,
     },
     {
       key: 'orders',

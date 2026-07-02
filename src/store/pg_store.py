@@ -1235,7 +1235,14 @@ class PostgreSQLStore:
                                nl.raw_sentiment, nl.body_snippet, nl.fetched_at, nl.published_at,
                                COALESCE(sc.signal_count, 0) AS signal_count,
                                COALESCE(dc.decision_count, 0) AS decision_count,
-                               COALESCE(oc.order_count, 0) AS order_count
+                               COALESCE(oc.order_count, 0) AS order_count,
+                               ls.id AS latest_signal_id,
+                               ld.id AS latest_decision_id,
+                               ld.decision AS latest_decision,
+                               ld.reason AS latest_decision_reason,
+                               ld.signal_score AS latest_decision_signal_score,
+                               ld.order_id AS latest_decision_order_id,
+                               ld.tick_time AS latest_decision_at
                         FROM news_log nl
                         LEFT JOIN (
                             SELECT news_log_id, COUNT(*) AS signal_count
@@ -1266,6 +1273,32 @@ class PostgreSQLStore:
                             ) orders
                             GROUP BY news_log_id
                         ) oc ON oc.news_log_id = nl.id
+                        LEFT JOIN LATERAL (
+                            SELECT id, score, generated_at
+                            FROM sentiment_signals
+                            WHERE news_log_id = nl.id
+                            ORDER BY generated_at DESC
+                            LIMIT 1
+                        ) ls ON TRUE
+                        LEFT JOIN LATERAL (
+                            SELECT ed.id, ed.decision, ed.reason, ed.signal_score,
+                                   ed.order_id, ed.tick_time
+                            FROM execution_decisions ed
+                            WHERE ed.signal_id = ls.id
+                               OR (
+                                   ed.signal_id IS NULL
+                                   AND ls.id IS NOT NULL
+                                   AND ed.symbol = nl.ticker
+                                   AND ed.tick_time >= ls.generated_at
+                                   AND ed.tick_time <= ls.generated_at + INTERVAL '6 hours'
+                                   AND ed.signal_score IS NOT NULL
+                                   AND ABS(ed.signal_score - ls.score) < 0.000001
+                               )
+                            ORDER BY
+                                CASE WHEN ed.signal_id = ls.id THEN 0 ELSE 1 END,
+                                ed.tick_time ASC
+                            LIMIT 1
+                        ) ld ON TRUE
                         {where}
                         ORDER BY nl.fetched_at DESC LIMIT %s""",
                     params,

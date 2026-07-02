@@ -14,6 +14,17 @@ function safeUrl(url: string): string | undefined {
   return undefined
 }
 
+const DECISION_LABELS: Record<string, string> = {
+  BUY: 'BUY',
+  SELL: 'SELL',
+  SKIP_EMA: 'Skip — below EMA',
+  SKIP_CAP: 'Skip — cycle cap',
+  SKIP_POSITION: 'Skip — position open',
+  SKIP_THRESHOLD: 'Skip — sotto soglia',
+  SKIP_STALE: 'Skip — segnale scaduto',
+  SKIP_FALLBACK: 'Skip — fallback',
+}
+
 export default function News() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [ticker, setTicker] = useState(searchParams.get('ticker') ?? '')
@@ -95,6 +106,12 @@ export default function News() {
     if (raw > 0.1) return <span className="badge badge-green">Positive</span>
     if (raw < -0.1) return <span className="badge badge-red">Negative</span>
     return <span className="badge badge-grey">Neutral</span>
+  }
+
+  function decisionBadge(decision: string | null) {
+    if (!decision) return null
+    const cls = decision === 'BUY' ? 'badge-green' : decision === 'SELL' ? 'badge-red' : 'badge-grey'
+    return <span className={`badge ${cls}`}>{DECISION_LABELS[decision] ?? decision}</span>
   }
 
   function fmtPct(value: number | null | undefined) {
@@ -349,15 +366,48 @@ export default function News() {
                           Raw sentiment score: {item.raw_sentiment?.toFixed(4)}
                         </div>
                       )}
+                      {item.latest_decision && (
+                        <div style={{
+                          display: 'grid',
+                          gap: 6,
+                          marginTop: 10,
+                          padding: '8px 10px',
+                          border: '1px solid var(--border)',
+                          borderRadius: 6,
+                          background: 'white',
+                          fontSize: 12,
+                        }}>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <strong>Decision outcome</strong>
+                            {decisionBadge(item.latest_decision)}
+                            {item.latest_decision_signal_score !== null && (
+                              <span style={{ color: 'var(--text-muted)' }}>
+                                score {item.latest_decision_signal_score.toFixed(3)}
+                              </span>
+                            )}
+                          </div>
+                          {item.latest_decision_reason && (
+                            <div style={{ color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                              {item.latest_decision_reason}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div style={{ marginTop: 10 }}>
                         <SignalTraceLinks
                           symbol={item.ticker}
                           includeNews={false}
                           availability={{
                             newsId: item.id,
+                            signalId: item.latest_signal_id ?? undefined,
+                            decisionId: item.latest_decision_id ?? undefined,
+                            orderId: item.latest_decision_order_id ?? undefined,
+                            decisionType: item.latest_decision ?? undefined,
+                            decisionReason: item.latest_decision_reason ?? undefined,
+                            decisionSignalScore: item.latest_decision_signal_score ?? undefined,
                             signalCount: item.signal_count,
-                            decisionCount: item.decision_count,
-                            orderCount: item.order_count,
+                            decisionCount: item.latest_decision_id ? 1 : item.decision_count,
+                            orderCount: item.latest_decision_order_id ? 1 : item.order_count,
                           }}
                           emptyMessage="No downstream signal generated for this news."
                         />

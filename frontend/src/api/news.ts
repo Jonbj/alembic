@@ -13,6 +13,13 @@ export interface NewsItem {
   signal_count: number
   decision_count: number
   order_count: number
+  latest_signal_id: number | null
+  latest_decision_id: number | null
+  latest_decision: string | null
+  latest_decision_reason: string | null
+  latest_decision_signal_score: number | null
+  latest_decision_order_id: string | null
+  latest_decision_at: string | null
 }
 
 export interface NewsSourceQualityRow {

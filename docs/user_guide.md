@@ -382,6 +382,8 @@ Se il grafico è **monotonamente crescente** (da sinistra a destra), il modello 
 
 **Source quality**: il pannello sopra la tabella confronta le fonti negli ultimi 7/30/90/180 giorni. Mostra il funnel `News -> Signal -> Decision -> Order`, copertura ticker, confidence media, latenza media publish-to-fetch e P&L chiuso quando disponibile. Usa questi dati per capire se una fonte produce segnali utili o solo volume.
 
+**Decision outcome**: nel dettaglio di una news, se il ciclo portfolio ha valutato il segnale, vedi anche l'esito diagnostico. Esempio: `SKIP_THRESHOLD` indica che la news ha generato un segnale, ma lo score era sotto la soglia operativa attiva; non è quindi un errore né una news ignorata.
+
 **Filtri:**
 - **Filter ticker**: mostra solo notizie per un ticker specifico
 - **Source filter**: filtra una fonte specifica, inclusi GDELT, MarketAux, Alpaca/Benzinga, Finnhub, SEC EDGAR e feed RSS live se attivi

@@ -450,6 +450,8 @@ Each row also includes downstream trace counters:
 | `decision_count` | Number of `execution_decisions` rows linked through those signals |
 | `order_count` | Number of order/trade traces linked through those signals |
 
+Rows also include `latest_signal_id` plus `latest_decision_*` diagnostic fields when the portfolio cycle produced an outcome for the news-derived signal. This includes strict fallback matching for skip rows such as `SKIP_THRESHOLD` that were historically logged without `signal_id` but match the same ticker, signal score, and post-signal time window.
+
 ### `GET /api/news/source-quality`
 
 Per-source quality funnel over recent `news_log` rows. Query params: `days` (1-365, default 30).
