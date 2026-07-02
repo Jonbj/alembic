@@ -149,10 +149,11 @@ app.conf.beat_schedule = {
     # SEC EDGAR filings every 30 min during market hours.
     # 8-K filings = earnings, M&A, guidance revision — high signal/noise ratio.
     # Public API, zero cost. Filters by WATCHLIST_SYMBOLS.
-    "run-sec-edgar-ingestion": {
-        "task": "src.workers.ingestion.run_sec_edgar_ingestion_worker",
-        "schedule": crontab(minute="*/30", hour="14-21", day_of_week="1-5"),
-    },
+    # SEC EDGAR news-sentiment: DISABLED 2026-07-02. Never produced a signal (0 rows
+    # ever): the connector read a non-existent `ticker_symbol` field (EDGAR uses CIK /
+    # display_names), so every filing got empty asset_tags and was dropped. Also
+    # redundant with S7 PEAD, which has its own 8-K pipeline. Task kept but not scheduled,
+    # gated behind SEC_EDGAR_INGESTION_ENABLED. Re-enable only after fixing CIK→ticker.
     # RSS news ingestion every 15 min during market hours.
     # Reuters + CNBC. Lower latency than REST polling (~2-5 min vs 15 min).
     # Uses watchlist ticker mention extraction (regex, no NLP).
