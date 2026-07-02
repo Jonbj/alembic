@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
@@ -31,8 +31,18 @@ export default function Signals() {
   const [ticker, setTicker] = useState(searchParams.get('symbol') ?? '')
   const newsId = searchParams.get('news_id')
   const signalId = searchParams.get('signal_id')
+  const decisionId = searchParams.get('decision_id')
   const [direction, setDirection] = useState('')
   const [tab, setTab] = useState<'signals' | 'decisions'>(searchParams.get('tab') === 'decisions' ? 'decisions' : 'signals')
+
+  useEffect(() => {
+    const nextTab = searchParams.get('tab') === 'decisions' ? 'decisions' : 'signals'
+    setTab((current) => (current === nextTab ? current : nextTab))
+    setTicker((current) => {
+      const nextTicker = searchParams.get('symbol') ?? ''
+      return current === nextTicker ? current : nextTicker
+    })
+  }, [searchParams])
 
   const { data: signals = [], isLoading, error } = useQuery({
     queryKey: ['signals', newsId, signalId],
@@ -44,8 +54,8 @@ export default function Signals() {
   })
 
   const { data: decisions = [], isLoading: decisionsLoading } = useQuery({
-    queryKey: ['decisions', ticker],
-    queryFn: () => fetchDecisions(ticker || undefined, 100),
+    queryKey: ['decisions', ticker, decisionId],
+    queryFn: () => fetchDecisions(ticker || undefined, 100, decisionId ? Number(decisionId) : undefined),
     enabled: tab === 'decisions',
     refetchInterval: 60000,
   })
@@ -123,6 +133,10 @@ export default function Signals() {
         {
           heading: "Decision Log — cosa è",
           content: "Il Decision Log registra le decisioni prese dal portfolio scheduler ad ogni ciclo (ogni 15 min). Non ogni segnale genera un ordine: il sistema applica filtri aggiuntivi prima di inviare ordini ad Alpaca.",
+        },
+        {
+          heading: "Trace",
+          content: "La colonna Trace mostra solo collegamenti con dati realmente presenti: Signal porta al segnale storico esatto, Decision alla decisione esatta e Orders all'ordine broker esatto. \"—\" significa che quella conseguenza non esiste o non è tracciata, non un errore di caricamento.",
         },
         {
           heading: "Colonne — Decision Log",
@@ -203,7 +217,9 @@ export default function Signals() {
                     includeDecision={false}
                     includePerformance={false}
                     availability={{
+                      newsId: d.news_log_id ?? undefined,
                       signalId: d.signal_id ?? undefined,
+                      orderId: d.order_id ?? undefined,
                       signalCount: d.signal_id ? 1 : 0,
                       orderCount: d.order_id ? 1 : 0,
                     }}
@@ -215,6 +231,34 @@ export default function Signals() {
             })}
             emptyMessage="No decisions logged yet."
           />
+          {decisionId && (
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 12,
+              marginTop: 12,
+              padding: '8px 10px',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              background: '#f8fafc',
+              color: 'var(--text-muted)',
+              fontSize: 12,
+            }}>
+              <span>Showing decision #{decisionId}.</span>
+              <button
+                className="btn-ghost"
+                onClick={() => {
+                  const next = new URLSearchParams(searchParams)
+                  next.delete('decision_id')
+                  setSearchParams(next, { replace: true })
+                }}
+                style={{ fontSize: 12, padding: '4px 8px' }}
+              >
+                Show latest decisions
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -260,6 +304,7 @@ export default function Signals() {
               const next = new URLSearchParams(searchParams)
               next.delete('news_id')
               next.delete('signal_id')
+              next.delete('decision_id')
               setSearchParams(next, { replace: true })
             }}
             style={{ fontSize: 12, padding: '4px 8px' }}
@@ -363,6 +408,7 @@ export default function Signals() {
                       includeSignal={false}
                       includePerformance={false}
                       availability={{
+                        decisionId: s.decision_id ?? undefined,
                         decisionCount: s.used_in_decision ? 1 : 0,
                         orderCount: ['BUY', 'SELL'].includes(s.decision_type ?? '') ? 1 : 0,
                       }}

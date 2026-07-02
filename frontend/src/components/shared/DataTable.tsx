@@ -20,6 +20,7 @@ interface Props {
 export function DataTable({ columns, rows, emptyMessage = 'No data.', loading = false }: Props) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
   const templateColumns = columns.map(c => c.width).join(' ')
+  const minTableWidth = columns.length >= 7 ? 760 : columns.length >= 6 ? 680 : 560
   const toggleExpanded = (idx: number) => setExpandedIdx(expandedIdx === idx ? null : idx)
   const handleExpandableKeyDown = (event: KeyboardEvent<HTMLDivElement>, idx: number) => {
     if (event.key === 'Enter' || event.key === ' ') {
@@ -29,11 +30,12 @@ export function DataTable({ columns, rows, emptyMessage = 'No data.', loading = 
   }
 
   return (
-    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+    <div className="card" style={{ padding: 0, overflowX: 'auto', overflowY: 'hidden' }}>
       {/* Header */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: templateColumns,
+        minWidth: minTableWidth,
         padding: '8px 12px',
         fontSize: 11,
         fontWeight: 600,
@@ -61,6 +63,7 @@ export function DataTable({ columns, rows, emptyMessage = 'No data.', loading = 
             style={{
               display: 'grid',
               gridTemplateColumns: templateColumns,
+              minWidth: minTableWidth,
               padding: '9px 12px',
               fontSize: 13,
               color: 'var(--text)',
@@ -77,6 +80,7 @@ export function DataTable({ columns, rows, emptyMessage = 'No data.', loading = 
           {expandedIdx === i && row.expanded && (
             <div style={{
               padding: '6px 12px 10px',
+              minWidth: minTableWidth,
               background: '#f1f5f9',
               fontSize: 12,
               color: 'var(--text-muted)',

@@ -31,6 +31,8 @@ Production:   https://api.your-domain.com
 | `/api/weights/current`, `/api/weights/suggestion` | No | — |
 | `/api/weights/approve` | **Yes** | `X-API-Key` |
 | `/api/admin/*` | **Yes** | `X-API-Key` |
+| `/api/orders` | **Yes** | `X-API-Key` |
+| `/api/decisions` | **Yes** | `X-API-Key` |
 | `/api/trades/*` | **Yes** | `X-API-Key` |
 | `/api/system/decisions` | **Yes** | `X-API-Key` |
 | `/api/system/readiness` | **Yes** | `X-API-Key` |
@@ -380,7 +382,7 @@ Current open positions from Alpaca.
 
 Recent Alpaca orders enriched with local Alembic trace ids when the broker order can be matched to an execution decision or trade.
 
-**Query parameters:** `limit` (default 50, max 500)
+**Query parameters:** `limit` (default 50, max 500), `order_id` (optional, exact broker order trace)
 
 | Field | Meaning |
 | --- | --- |
@@ -397,6 +399,24 @@ Recent Alpaca orders enriched with local Alembic trace ids when the broker order
 | `trade_id` | Local `trades.id` when the order is linked to a recorded trade |
 
 The enrichment is intentionally nullable: the Trading frontend only renders trace links when these ids exist, avoiding links to empty Signal/Decision views for orders that did not originate from Alembic.
+
+### `GET /api/decisions`
+
+Execution decision log from `execution_decisions`, enriched with originating signal/news metadata when available.
+
+**Query parameters:** `symbol` (optional), `decision_id` (optional exact decision trace), `limit` (default 20, max 200)
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Local execution decision id |
+| `tick_time` | Portfolio scheduler cycle timestamp |
+| `symbol` | Ticker symbol |
+| `signal_id` | Originating `sentiment_signals.id`, or `null` |
+| `news_log_id` | Originating `news_log.id` through the signal, or `null` |
+| `decision` | BUY/SELL or skip reason such as `SKIP_THRESHOLD`, `SKIP_EMA`, `SKIP_STALE` |
+| `order_id` | Broker order id when the decision submitted an order |
+| `signal_generated_at` | Timestamp of the originating signal, used to show signal-to-decision lag |
+| `reason` | Human-readable scheduler reason |
 
 ---
 

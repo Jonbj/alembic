@@ -96,6 +96,10 @@ export default function News() {
           content: "Ogni articolo ha un sentiment grezzo (raw_sentiment): positivo > 0.1, negativo < -0.1, neutro altrimenti. Il sentiment viene calcolato dal modello LLM e alimentato nel sistema di segnali.",
         },
         {
+          heading: "Trace",
+          content: "Nel dettaglio di una news compaiono link a Signal, Decision e Orders solo se quella news ha generato conseguenze tracciate nel database. Se non ci sono link, la news è stata ingerita ma non ha prodotto un segnale o una decisione operativa.",
+        },
+        {
           heading: "Filtraggio",
           content: "Filtra per ticker (es. SPY) o per fonte. Clicca su una riga per espandere e vedere l'URL dell'articolo e il sentiment score dettagliato.",
         },

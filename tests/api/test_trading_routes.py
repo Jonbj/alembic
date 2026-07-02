@@ -98,6 +98,41 @@ def test_get_orders_with_limit():
     mock_client.get_orders.assert_called_once()
 
 
+def test_get_orders_with_order_id_fetches_exact_broker_order():
+    """GET /api/orders?order_id=... fetches a single broker order and enriches trace."""
+    from datetime import datetime, timezone
+
+    mock_order = MagicMock()
+    mock_order.id = "order-1"
+    mock_order.symbol = "NVDA"
+    mock_order.side.value = "sell"
+    mock_order.qty = "2"
+    mock_order.filled_avg_price = "900.00"
+    mock_order.status.value = "filled"
+    mock_order.filled_at = datetime(2026, 5, 18, 14, 0, tzinfo=timezone.utc)
+    mock_order.submitted_at = datetime(2026, 5, 18, 13, 55, tzinfo=timezone.utc)
+
+    mock_client = MagicMock()
+    mock_client.get_order_by_id.return_value = mock_order
+    mock_pg = MagicMock()
+    mock_pg.fetch_order_trace.return_value = {"order-1": {"signal_id": 9, "decision_id": 22, "news_log_id": 33, "trade_id": 44}}
+    app.dependency_overrides[get_alpaca_trading_client] = lambda: mock_client
+    app.dependency_overrides[get_pg_store] = lambda: mock_pg
+    app.dependency_overrides[require_api_key] = _skip_auth
+
+    tc = TestClient(app)
+    resp = tc.get("/api/orders?order_id=order-1")
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["id"] == "order-1"
+    assert data[0]["decision_id"] == 22
+    mock_client.get_order_by_id.assert_called_once_with("order-1")
+    mock_client.get_orders.assert_not_called()
+
+
 class TestTradesEndpoints:
     def test_get_trades_returns_list(self):
         from src.api.deps import get_alpaca_trading_client, get_pg_store
@@ -154,6 +189,26 @@ class TestTradesEndpoints:
 
         assert resp.status_code == 200
         assert resp.json()[0]["decision"] == "BUY"
+        mock_pg.fetch_decisions.assert_called_once_with(symbol=None, decision_id=None, limit=20)
+
+    def test_get_decisions_by_decision_id(self):
+        from src.api.deps import get_pg_store
+        mock_pg = MagicMock()
+        mock_pg.fetch_decisions.return_value = [
+            {"id": 42, "tick_time": "2026-06-05T10:00:00+00:00",
+             "symbol": "NVDA", "score": 0.55, "decision": "BUY", "order_id": "order-1",
+             "news_log_id": 99}
+        ]
+        app.dependency_overrides[get_pg_store] = lambda: mock_pg
+        app.dependency_overrides[require_api_key] = lambda: "test-key"
+
+        tc = TestClient(app)
+        resp = tc.get("/api/decisions?decision_id=42")
+        app.dependency_overrides.clear()
+
+        assert resp.status_code == 200
+        assert resp.json()[0]["id"] == 42
+        mock_pg.fetch_decisions.assert_called_once_with(symbol=None, decision_id=42, limit=20)
 
     @pytest.mark.require_auth
     def test_trades_requires_auth(self):

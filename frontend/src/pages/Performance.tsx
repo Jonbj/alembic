@@ -382,6 +382,9 @@ function DailyPnLTab() {
                     includePerformance={false}
                     availability={{
                       newsId: t.news_log_id ?? undefined,
+                      signalId: t.signal_id ?? undefined,
+                      decisionId: t.decision_id ?? undefined,
+                      orderId: t.entry_order_id ?? undefined,
                       signalCount: t.signal_id ? 1 : 0,
                       decisionCount: t.decision_id ? 1 : 0,
                       orderCount: t.entry_order_id ? 1 : 0,
@@ -757,7 +760,7 @@ export default function Performance() {
         },
         {
           heading: "Giornaliero — Metriche",
-          content: "**P&L Lordo**: somma di gross_pnl per tutti i trade chiusi nella giornata — il risultato prima dei costi di transazione (spread bid-ask + market impact stimato).\n**Costi**: gross_pnl − net_pnl, ovvero l'erosione causata dallo slippage e dal costo di esecuzione. Sempre negativo o zero.\n**P&L Netto**: risultato effettivo dopo i costi. È il valore che conta per la performance reale.\n\n**W (Winners)**: trade chiusi con net_pnl > 0.\n**L (Losers)**: trade chiusi con net_pnl < 0.\n**Win rate (KPI)**: Winners / totale trade nel periodo. >50% = più trade in guadagno che in perdita.\n**Giorni +/−**: giornate con P&L netto positivo vs negativo nel range selezionato.\n\n**Nota**: i dati vengono dalla tabella `trades` locale (non da Alpaca). Piccole differenze vs P&L Storico sono normali: Alpaca include variazioni di equity sulle posizioni aperte, questa vista conta solo i trade chiusi.",
+          content: "**P&L Lordo**: somma di gross_pnl per tutti i trade chiusi nella giornata — il risultato prima dei costi di transazione (spread bid-ask + market impact stimato).\n**Costi**: gross_pnl − net_pnl, ovvero l'erosione causata dallo slippage e dal costo di esecuzione. Sempre negativo o zero.\n**P&L Netto**: risultato effettivo dopo i costi. È il valore che conta per la performance reale.\n**Trace**: link puntuali a segnale, decisione e ordine quando il trade è collegato alla catena Alembic. \"—\" indica dati non tracciati o pre-migration.\n\n**W (Winners)**: trade chiusi con net_pnl > 0.\n**L (Losers)**: trade chiusi con net_pnl < 0.\n**Win rate (KPI)**: Winners / totale trade nel periodo. >50% = più trade in guadagno che in perdita.\n**Giorni +/−**: giornate con P&L netto positivo vs negativo nel range selezionato.\n\n**Nota**: i dati vengono dalla tabella `trades` locale (non da Alpaca). Piccole differenze vs P&L Storico sono normali: Alpaca include variazioni di equity sulle posizioni aperte, questa vista conta solo i trade chiusi.",
         },
         {
           heading: "Report Settimanale — Trade P&L",

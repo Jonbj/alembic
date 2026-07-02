@@ -48,4 +48,8 @@ export const fetchPositions = () =>
     }))
   )
 
-export const fetchOrders = (limit = 100) => apiFetch<Order[]>(`/api/orders?limit=${limit}`)
+export const fetchOrders = (limit = 100, orderId?: string) => {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (orderId) params.set('order_id', orderId)
+  return apiFetch<Order[]>(`/api/orders?${params}`)
+}

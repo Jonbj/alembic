@@ -410,6 +410,7 @@ class PostgreSQLStore:
     def fetch_decisions(
         self,
         symbol: str | None = None,
+        decision_id: int | None = None,
         limit: int = 20,
     ) -> list[dict]:
         """Return decision log rows, most-recent first.
@@ -422,6 +423,9 @@ class PostgreSQLStore:
         if symbol:
             filters.append("ed.symbol = %s")
             params.append(symbol)
+        if decision_id is not None:
+            filters.append("ed.id = %s")
+            params.append(decision_id)
         where = ("WHERE " + " AND ".join(filters)) if filters else ""
         params.append(limit)
         conn = self._get_connection()
@@ -431,7 +435,8 @@ class PostgreSQLStore:
                     f"""SELECT ed.id, ed.tick_time, ed.symbol, ed.signal_id, ed.score,
                                ed.signal_score, ed.regime_mult, ed.ema_pass, ed.decision,
                                ed.order_id, ed.reason, ed.created_at,
-                               ss.generated_at AS signal_generated_at
+                               ss.generated_at AS signal_generated_at,
+                               ss.news_log_id
                         FROM execution_decisions ed
                         LEFT JOIN sentiment_signals ss ON ss.id = ed.signal_id
                         {where}
@@ -447,7 +452,7 @@ class PostgreSQLStore:
     def fetch_signal_decision_status(self, signal_ids: list[int]) -> dict[int, dict]:
         """Return the first decision made for each signal_id (used_in_decision enrichment).
 
-        Returns {signal_id: {used_in_decision: True, decision_at: str, decision_type: str}}.
+        Returns {signal_id: {used_in_decision: True, decision_id: int, decision_at: str, decision_type: str}}.
         Signal IDs not present in execution_decisions are absent from the result.
         """
         if not signal_ids:
@@ -458,7 +463,7 @@ class PostgreSQLStore:
                 placeholders = ", ".join(["%s"] * len(signal_ids))
                 cur.execute(
                     f"""SELECT DISTINCT ON (signal_id)
-                               signal_id, tick_time, decision
+                               signal_id, id, tick_time, decision
                         FROM execution_decisions
                         WHERE signal_id IN ({placeholders})
                         ORDER BY signal_id, tick_time DESC""",
@@ -466,9 +471,10 @@ class PostgreSQLStore:
                 )
                 result: dict[int, dict] = {}
                 for row in cur.fetchall():
-                    sid, tick_time, decision = row
+                    sid, decision_id, tick_time, decision = row
                     result[int(sid)] = {
                         "used_in_decision": True,
+                        "decision_id": int(decision_id),
                         "decision_at": tick_time.isoformat() if tick_time else None,
                         "decision_type": decision,
                     }

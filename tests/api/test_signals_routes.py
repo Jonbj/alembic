@@ -59,6 +59,7 @@ def test_get_signals_by_signal_id_uses_exact_historical_trace():
     mock_pg.fetch_signal_decision_status.return_value = {
         7: {
             "used_in_decision": True,
+            "decision_id": 42,
             "decision_at": "2026-06-30T22:15:00+00:00",
             "decision_type": "BUY",
         }
@@ -76,6 +77,7 @@ def test_get_signals_by_signal_id_uses_exact_historical_trace():
     assert data[0]["signal_id"] == 7
     assert data[0]["symbol"] == "NVDA"
     assert data[0]["used_in_decision"] is True
+    assert data[0]["decision_id"] == 42
     assert data[0]["decision_type"] == "BUY"
     mock_pg.fetch_signals_by_ids.assert_called_once_with([7])
     mock_pg.fetch_signals_for_news.assert_not_called()

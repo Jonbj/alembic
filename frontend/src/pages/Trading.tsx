@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
@@ -48,6 +48,8 @@ function orderTraceLinks(o: Order) {
       availability={{
         newsId: o.news_log_id ?? undefined,
         signalId: o.signal_id ?? undefined,
+        decisionId: o.decision_id ?? undefined,
+        orderId: o.id,
         signalCount: o.signal_id ? 1 : 0,
         decisionCount: o.decision_id ? 1 : 0,
       }}
@@ -58,8 +60,17 @@ function orderTraceLinks(o: Order) {
 
 export default function Trading() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const [tab, setTab] = useState<Tab>('positions')
+  const orderId = searchParams.get('order_id') ?? ''
+  const [tab, setTab] = useState<Tab>(orderId ? 'orders' : 'positions')
   const [symbolFilter, setSymbolFilter] = useState(searchParams.get('symbol') ?? '')
+
+  useEffect(() => {
+    if (orderId) setTab('orders')
+    setSymbolFilter((current) => {
+      const nextSymbol = searchParams.get('symbol') ?? ''
+      return current === nextSymbol ? current : nextSymbol
+    })
+  }, [orderId, searchParams])
 
   const { data: positions = [], isLoading: posLoading } = useQuery({
     queryKey: ['positions'],
@@ -68,8 +79,8 @@ export default function Trading() {
   })
 
   const { data: orders = [], isLoading: ordLoading } = useQuery({
-    queryKey: ['orders'],
-    queryFn: () => fetchOrders(200),
+    queryKey: ['orders', orderId],
+    queryFn: () => fetchOrders(200, orderId || undefined),
     refetchInterval: 60000,
   })
 
@@ -171,7 +182,7 @@ export default function Trading() {
         },
         {
           heading: 'Colonne — Orders',
-          content: '**Ticker**: simbolo azionario.\n**Side**: BUY (acquisto) o SELL (vendita).\n**Qty**: quantità ordinata (in azioni).\n**Fill Price**: prezzo medio di esecuzione dell\'ordine. "—" se l\'ordine non è ancora stato eseguito (es. pending o canceled).\n**Status**: stato dell\'ordine — filled (eseguito), partial_fill (parzialmente eseguito), canceled (annullato), pending_new (in attesa di conferma).\n**Submitted**: timestamp di quando l\'ordine è stato inviato ad Alpaca.',
+          content: '**Ticker**: simbolo azionario.\n**Side**: BUY (acquisto) o SELL (vendita).\n**Qty**: quantità ordinata (in azioni).\n**Fill Price**: prezzo medio di esecuzione dell\'ordine. "—" se l\'ordine non è ancora stato eseguito (es. pending o canceled).\n**Status**: stato dell\'ordine — filled (eseguito), partial_fill (parzialmente eseguito), canceled (annullato), pending_new (in attesa di conferma).\n**Trace**: link a segnale e decisione solo se l\'ordine è collegato a una catena Alembic. "—" significa ordine manuale/non tracciato o relazione non disponibile.\n**Submitted**: timestamp di quando l\'ordine è stato inviato ad Alpaca.',
         },
         {
           heading: 'Fills',
@@ -179,7 +190,7 @@ export default function Trading() {
         },
         {
           heading: 'Colonne — Fills',
-          content: '**Ticker**: simbolo azionario.\n**Side**: BUY (apertura/incremento) o SELL (riduzione/chiusura di posizione).\n**Fill Price**: prezzo effettivo di esecuzione — può differire leggermente dal prezzo richiesto per ordini a mercato (slippage).\n**Qty**: numero di azioni effettivamente eseguite.\n**Notional**: controvalore totale dell\'ordine = Fill Price × Qty in USD — rappresenta il capitale impiegato.\n**Filled At**: data e ora di esecuzione dell\'ordine (fuso orario locale).',
+          content: '**Ticker**: simbolo azionario.\n**Side**: BUY (apertura/incremento) o SELL (riduzione/chiusura di posizione).\n**Fill Price**: prezzo effettivo di esecuzione — può differire leggermente dal prezzo richiesto per ordini a mercato (slippage).\n**Qty**: numero di azioni effettivamente eseguite.\n**Notional**: controvalore totale dell\'ordine = Fill Price × Qty in USD — rappresenta il capitale impiegato.\n**Trace**: percorso causale verso segnale e decisione quando disponibile.\n**Filled At**: data e ora di esecuzione dell\'ordine (fuso orario locale).',
         },
       ]} />
 
@@ -202,6 +213,35 @@ export default function Trading() {
           style={{ width: 130 }}
         />
       </div>
+
+      {orderId && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 12,
+          marginBottom: 12,
+          padding: '8px 10px',
+          border: '1px solid var(--border)',
+          borderRadius: 6,
+          background: '#f8fafc',
+          color: 'var(--text-muted)',
+          fontSize: 12,
+        }}>
+          <span>Showing broker order {orderId}.</span>
+          <button
+            className="btn-ghost"
+            onClick={() => {
+              const next = new URLSearchParams(searchParams)
+              next.delete('order_id')
+              setSearchParams(next, { replace: true })
+            }}
+            style={{ fontSize: 12, padding: '4px 8px' }}
+          >
+            Show latest orders
+          </button>
+        </div>
+      )}
 
       {tab === 'positions' && (
         <DataTable

@@ -43,6 +43,7 @@ export interface Decision {
   tick_time: string
   symbol: string
   signal_id: number | null
+  news_log_id?: number | null
   score: number
   regime_mult: number
   ema_pass: boolean
@@ -65,9 +66,10 @@ export const fetchTrades = (symbol?: string, status: TradeStatus = 'all', limit 
 export const fetchTradesSummary = (days: SummaryPeriod = 7) =>
   apiFetch<TradesSummary>(`/api/trades/summary?days=${days}`)
 
-export const fetchDecisions = (symbol?: string, limit = 20) => {
+export const fetchDecisions = (symbol?: string, limit = 20, decisionId?: number) => {
   const params = new URLSearchParams({ limit: String(limit) })
   if (symbol) params.set('symbol', symbol)
+  if (decisionId) params.set('decision_id', String(decisionId))
   return apiFetch<Decision[]>(`/api/decisions?${params}`)
 }
 

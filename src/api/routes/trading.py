@@ -51,15 +51,19 @@ def get_positions(
 def get_orders(
     client: Annotated[object, Depends(get_alpaca_trading_client)],
     pg: Annotated[object, Depends(get_pg_store)],
+    order_id: str | None = None,
     limit: int = 50,
 ) -> list[dict]:
     """Return order history from Alpaca (filled + cancelled)."""
     from alpaca.trading.requests import GetOrdersRequest
     from alpaca.trading.enums import QueryOrderStatus
-    orders = client.get_orders(GetOrdersRequest(
-        status=QueryOrderStatus.ALL,
-        limit=min(limit, 500),
-    ))
+    if order_id:
+        orders = [client.get_order_by_id(order_id)]
+    else:
+        orders = client.get_orders(GetOrdersRequest(
+            status=QueryOrderStatus.ALL,
+            limit=min(limit, 500),
+        ))
     rows = []
     for o in orders:
         rows.append({
@@ -211,10 +215,11 @@ def get_trades_summary(
 def get_decisions(
     pg: Annotated[object, Depends(get_pg_store)],
     symbol: str | None = None,
+    decision_id: int | None = None,
     limit: int = Query(default=20, ge=1, le=200),
 ) -> list[dict]:
     """Execution decision log (score > threshold candidates only)."""
-    return pg.fetch_decisions(symbol=symbol, limit=limit)
+    return pg.fetch_decisions(symbol=symbol, decision_id=decision_id, limit=limit)
 
 
 @router.get("/trades/analytics/by-symbol")
