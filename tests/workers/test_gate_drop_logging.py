@@ -40,20 +40,22 @@ def _sig(symbol, score, gen):
     return SimpleNamespace(symbol=symbol, score=score, generated_at=gen)
 
 
-def test_record_stale_drops_only_notable_signals():
-    """SKIP_STALE logs only signals strong enough to matter (|score| >= min_score)."""
+def test_record_stale_drops_only_notable_recent_signals():
+    """SKIP_STALE logs only notable (|score| >= min_score) signals that JUST aged out
+    (within the recent buffer of max_age) — not near-zero noise nor deep-lookback data."""
     from datetime import datetime, timedelta, timezone
     now = datetime.now(timezone.utc)
     stale = [
-        _sig("AMAT", 0.42, now - timedelta(hours=6)),   # notable
-        _sig("VZ", 0.02, now - timedelta(hours=6)),      # near-zero noise → not logged
+        _sig("AMAT", 0.42, now - timedelta(hours=4, minutes=30)),  # notable + just aged → logged
+        _sig("VZ", 0.02, now - timedelta(hours=4, minutes=30)),    # near-zero → not logged
+        _sig("INTC", 0.45, now - timedelta(hours=20)),             # strong but old lookback → not logged
     ]
     mock_pg = MagicMock()
     with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_pg), \
          patch.object(portfolio_scheduler, "_get_regime_multiplier_from_redis", return_value=0.7):
         portfolio_scheduler._record_stale_drops(stale, max_age_hours=4, min_score=0.1)
 
-    assert mock_pg.write_execution_decision.call_count == 1  # only AMAT
+    assert mock_pg.write_execution_decision.call_count == 1  # only AMAT (recent + notable)
     c = mock_pg.write_execution_decision.call_args
     assert c.kwargs["decision"] == "SKIP_STALE"
     assert c.kwargs["symbol"] == "AMAT"
@@ -61,8 +63,14 @@ def test_record_stale_drops_only_notable_signals():
 
 
 def test_record_stale_drops_is_fail_safe():
-    from datetime import datetime, timezone
-    stale = [_sig("AMAT", 0.42, datetime.now(timezone.utc))]
+    from datetime import datetime, timedelta, timezone
+    stale = [_sig("AMAT", 0.42, datetime.now(timezone.utc) - timedelta(hours=4, minutes=15))]
     with patch("src.store.pg_store.PostgreSQLStore", side_effect=RuntimeError("db down")), \
          patch.object(portfolio_scheduler, "_get_regime_multiplier_from_redis", return_value=0.7):
         portfolio_scheduler._record_stale_drops(stale, max_age_hours=4, min_score=0.1)  # no raise
+
+
+def test_entry_threshold_baseline_is_the_gate_floor():
+    """Fix 2: the order-gate floor is the config baseline (0.30), not min_score (0.10)."""
+    assert portfolio_scheduler._load_entry_threshold_baseline() == 0.30
+    assert portfolio_scheduler._ENTRY_THRESHOLD_BASELINE == 0.30

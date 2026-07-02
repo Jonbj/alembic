@@ -1663,6 +1663,29 @@ def _strategy_symbols(entry) -> list[str]:
     return syms
 
 
+# SKIP_STALE is logged only for signals that JUST aged out (within this buffer of
+# max_age), not deep lookback data (up to signals_lookback_hours) re-scanned every cycle.
+_STALE_LOG_RECENT_BUFFER_H = 1.0
+
+
+def _load_entry_threshold_baseline() -> float:
+    """loss_feedback.threshold_baseline from config/trading.yaml (fallback 0.30). Used as
+    the ORDER-GATE FLOOR when feedback:entry_threshold is absent (expired) — so the gate
+    never drops to the min_score prefilter (0.10) and let weak signals trade."""
+    try:
+        import os
+
+        import yaml
+        path = os.path.join(os.path.dirname(__file__), "..", "..", "config", "trading.yaml")
+        with open(path) as f:
+            return float(yaml.safe_load(f).get("loss_feedback", {}).get("threshold_baseline", 0.30))
+    except Exception:
+        return 0.30
+
+
+_ENTRY_THRESHOLD_BASELINE = _load_entry_threshold_baseline()
+
+
 def _record_gate_drops(dropped_df, threshold: float) -> None:
     """Write SKIP_THRESHOLD rows to execution_decisions for signals the S4 feedback
     gate dropped (score below threshold), so the Decision Log explains no-trade cycles
@@ -1695,10 +1718,11 @@ def _record_gate_drops(dropped_df, threshold: float) -> None:
 
 
 def _record_stale_drops(stale_signals, max_age_hours: int, min_score: float) -> None:
-    """Write SKIP_STALE rows for signals that were strong enough to matter
-    (|score| >= min_score) but were dropped because older than max_age_hours. Surfaces
-    'we aged out a real signal' in the Decision Log without flooding it with stale
-    near-zero noise. Fail-safe — never breaks the cycle.
+    """Write SKIP_STALE rows for signals that (a) mattered (|score| >= min_score) AND
+    (b) JUST aged out — within _STALE_LOG_RECENT_BUFFER_H of max_age. Excludes deep
+    lookback data (up to signals_lookback_hours) that the cycle re-scans every 15 min,
+    which otherwise floods the Decision Log with the same 8-40h-old signals (masking the
+    real just-aged ones). Fail-safe — never breaks the cycle.
     """
     try:
         from datetime import datetime, timezone
@@ -1706,17 +1730,23 @@ def _record_stale_drops(stale_signals, max_age_hours: int, min_score: float) -> 
         from src.config import config
         from src.store.pg_store import PostgreSQLStore
 
-        notable = [s for s in stale_signals if abs(float(s.score)) >= min_score]
-        if not notable:
-            return
-        regime_mult = _get_regime_multiplier_from_redis(config.REDIS_URL)
         now = datetime.now(timezone.utc)
-        pg = PostgreSQLStore()
-        for sig in notable:
-            gen = sig.generated_at
+        cutoff_h = max_age_hours + _STALE_LOG_RECENT_BUFFER_H
+        notable: list = []
+        for s in stale_signals:
+            if abs(float(s.score)) < min_score:
+                continue
+            gen = s.generated_at
             if getattr(gen, "tzinfo", None) is None:
                 gen = gen.replace(tzinfo=timezone.utc)
             age_h = (now - gen).total_seconds() / 3600.0
+            if age_h <= cutoff_h:  # recently crossed max_age, not old lookback noise
+                notable.append((s, age_h))
+        if not notable:
+            return
+        regime_mult = _get_regime_multiplier_from_redis(config.REDIS_URL)
+        pg = PostgreSQLStore()
+        for sig, age_h in notable:
             pg.write_execution_decision(
                 tick_time=now,
                 symbol=sig.symbol,
@@ -1871,11 +1901,15 @@ def _build_strategy_instance(entry, bars_df):
                     # T-01: apply loss-feedback threshold from Redis.
                     # ENTRY_THRESHOLD in execution.py applies only to legacy mode;
                     # portfolio mode must enforce it here so the mechanism is not bypassed.
+                    # Floor: when the loss-feedback key is absent (expired, TTL 48h) fall
+                    # back to the baseline (0.30), NOT to the min_score prefilter (0.10) —
+                    # otherwise the order gate silently drops and weak signals trade (e.g.
+                    # SPCX 0.180 churn on 2026-07-01).
                     try:
                         _fb_raw = _r_sv.get("feedback:entry_threshold")
-                        _fb_threshold = float(_fb_raw) if _fb_raw is not None else None
+                        _fb_threshold = float(_fb_raw) if _fb_raw is not None else _ENTRY_THRESHOLD_BASELINE
                     except Exception:
-                        _fb_threshold = None
+                        _fb_threshold = _ENTRY_THRESHOLD_BASELINE
                 finally:
                     _r_sv.close()
                 signals_df = signals_df.copy()
