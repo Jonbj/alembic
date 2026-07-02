@@ -51,8 +51,14 @@ app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
-    task_time_limit=660,  # 11 minutes — 4 articles × 90s Ollama + 43s FinBERT warmup + margin
-    task_soft_time_limit=600,  # 10 minutes soft limit
+    # 14 min hard / 13 min soft — sized for the sentiment worker's 12-article batch
+    # (_SENTIMENT_BATCH_SIZE) at concurrency 2: worst case ceil(12/2) x 90s Ollama
+    # timeout + 43s FinBERT warmup + margin, kept under the 15-min beat cadence so a
+    # cycle doesn't overrun into the next. Applies to all inference-queue tasks
+    # (pead-ingestion, regime-detector too) — harmless for them, just a longer
+    # hang-detection ceiling than their own workload needs.
+    task_time_limit=840,
+    task_soft_time_limit=780,
 )
 
 # Beat schedule for periodic tasks

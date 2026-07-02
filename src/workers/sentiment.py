@@ -54,6 +54,13 @@ _SENTIMENT_MAX_NEWS_AGE_HOURS = 12
 # Cap on items scanned per run while skipping stale ones (bounds one task; a large stale
 # backlog drains over a few runs rather than holding everything in news:processing at once).
 _MAX_QUEUE_SCAN_PER_RUN = 5000
+# Fresh items processed per run. Sized against the 15-min beat cadence: observed per-item
+# latency is 25-70s, so 12 items at the batch semaphore's concurrency of 2 (see
+# process_news_batch) fit comfortably inside one cycle instead of leaving the worker idle
+# 70-90% of it. The old cap of 4 let fresh news outpace processing capacity, aging past
+# the S4 strategy's 4h usability window before ever being scored (throughput bottleneck,
+# DAY-2026-07-02).
+_SENTIMENT_BATCH_SIZE = 12
 # Resolver shadow (Fase A): compute + persist deterministic ticker resolution for
 # measurement. Offline/fail-safe; never gates the signal. Disable via RESOLVER_SHADOW_ENABLED=0.
 _RESOLVER_SHADOW_ENABLED = os.environ.get("RESOLVER_SHADOW_ENABLED", "1") != "0"
@@ -296,7 +303,12 @@ async def process_news_batch(
     Returns:
         List of SentimentResult objects
     """
-    sem = asyncio.Semaphore(1)
+    # 2, not 1: each item's own ensemble call already bounds itself to the 2 global
+    # Ollama semaphore slots (client.py _OLLAMA_SEM_SLOTS), so this doesn't add pressure
+    # beyond that ceiling — it just lets one item's store writes/aggregation overlap
+    # with the next item's Ollama round-trip instead of leaving the worker fully idle
+    # between items.
+    sem = asyncio.Semaphore(2)
 
     async def _bounded(item):
         async with sem:
@@ -494,12 +506,12 @@ def run_sentiment_worker() -> dict:
         failed_raw: list[bytes] = []
         skipped_stale = 0
         _now = datetime.now(timezone.utc)
-        # Pull until 4 FRESH items (or queue empty / scan cap). Stale items are skipped
-        # without an LLM call and left in news:processing → discarded by the delete()
-        # at run end. This drains a backlog of old news fast instead of generating
-        # stale-but-"fresh"-timestamped signals on it.
+        # Pull until _SENTIMENT_BATCH_SIZE FRESH items (or queue empty / scan cap). Stale
+        # items are skipped without an LLM call and left in news:processing → discarded by
+        # the delete() at run end. This drains a backlog of old news fast instead of
+        # generating stale-but-"fresh"-timestamped signals on it.
         scanned = 0
-        while len(news_items) < 4 and scanned < _MAX_QUEUE_SCAN_PER_RUN:
+        while len(news_items) < _SENTIMENT_BATCH_SIZE and scanned < _MAX_QUEUE_SCAN_PER_RUN:
             item_json = redis_client.lmove(
                 "news:queue", "news:processing", "LEFT", "RIGHT"
             )

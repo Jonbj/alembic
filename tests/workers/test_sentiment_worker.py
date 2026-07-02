@@ -766,6 +766,107 @@ class TestEnsembleWeightReading:
         assert mock_pnb.call_count == 1, f"Expected 1 call, got {mock_pnb.call_count}"
         assert mock_pnb.call_args.kwargs.get("weights") == applied
 
+    def test_run_sentiment_worker_pulls_more_than_four_fresh_items_per_cycle(self):
+        """Worker must drain more than 4 fresh items/cycle.
+
+        With 6 fresh items available, the old hardcoded cap of 4 stopped the
+        scan early — leaving fresh news unscored until it aged past the S4
+        strategy's 4h usability window (throughput bottleneck, worker idle
+        70-90% of each 15-min cycle).
+        """
+        import json
+        from unittest.mock import patch, MagicMock
+        from src.workers.sentiment import run_sentiment_worker
+
+        def make_item_json(n: int) -> bytes:
+            return json.dumps({
+                "id": f"test-item-{n}",
+                "title": f"AAPL earnings update {n}",
+                "body": "Apple reported strong quarterly results.",
+                "url": f"https://example.com/aapl-{n}",
+                "source": "test",
+                "asset_tags": ["AAPL"],
+            }).encode()
+
+        fresh_items = [make_item_json(n) for n in range(6)]
+
+        mock_redis_client = MagicMock()
+        mock_redis_client.lrange.return_value = []
+        mock_redis_client.lmove.side_effect = fresh_items + [None]
+        mock_redis_client.delete.return_value = None
+
+        mock_redis_store = MagicMock()
+        mock_redis_store.get_ensemble_weights.return_value = None
+        mock_redis_store.get_weight_suggestion.return_value = None
+        mock_redis_store.get_llm_models.return_value = None
+
+        with patch("redis.Redis") as mock_redis_cls, \
+             patch("src.workers.sentiment.RedisStore", return_value=mock_redis_store), \
+             patch("psycopg2.connect") as mock_pg_connect, \
+             patch("src.workers.sentiment.PostgreSQLStore") as mock_pg_cls, \
+             patch("src.workers.sentiment.LLMBudgetTracker") as mock_bt_cls, \
+             patch("src.workers.sentiment.process_news_batch") as mock_pnb, \
+             patch("src.workers.sentiment.asyncio.run") as mock_async_run:
+            mock_redis_cls.from_url.return_value = mock_redis_client
+            mock_pg_connect.return_value = MagicMock()
+            mock_pg_cls.return_value = MagicMock()
+            mock_bt_cls.return_value = MagicMock()
+            mock_async_run.return_value = []
+            run_sentiment_worker()
+
+        assert mock_pnb.call_count == 1, f"Expected 1 call, got {mock_pnb.call_count}"
+        pulled = mock_pnb.call_args.kwargs["news_items"]
+        assert len(pulled) == 6, (
+            f"Expected all 6 fresh items to be pulled in one cycle, got {len(pulled)}"
+        )
+
+
+class TestProcessNewsBatchConcurrency:
+    """process_news_batch must overlap item processing, not fully serialize it."""
+
+    @pytest.mark.asyncio
+    async def test_process_batch_allows_two_concurrent_items(self):
+        """At least 2 items should be in flight at once.
+
+        The old asyncio.Semaphore(1) fully serialized the batch even though
+        each item's own Ollama round-trip only ever occupies at most 2 of the
+        2 global Ollama semaphore slots — serializing everything left the
+        non-Ollama portion of each item (store writes, aggregation) idle time
+        that a second in-flight item could have used.
+        """
+        active = 0
+        max_active = 0
+        lock = asyncio.Lock()
+
+        async def fake_process_item(item, **kwargs):
+            nonlocal active, max_active
+            async with lock:
+                active += 1
+                max_active = max(max_active, active)
+            await asyncio.sleep(0.05)
+            async with lock:
+                active -= 1
+            return make_sentiment_result(symbol=item.asset_tags[0])
+
+        news_items = [make_news_item("AAPL", i) for i in range(4)]
+
+        with patch(
+            "src.workers.sentiment.process_news_item", side_effect=fake_process_item
+        ):
+            await process_news_batch(
+                news_items=news_items,
+                clients=[],
+                aggregator=MagicMock(),
+                finbert=MagicMock(),
+                budget_tracker=MagicMock(),
+                redis_store=MagicMock(),
+                pg_store=MagicMock(),
+            )
+
+        assert max_active >= 2, (
+            f"Expected at least 2 concurrent items, max observed was {max_active}"
+        )
+
 
 class TestProcessNewsItemCorrelation:
     """process_news_item must write signal first, then link to news_log row."""
