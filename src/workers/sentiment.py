@@ -190,6 +190,7 @@ async def run_inference(
                 reasoning=fallback_reason,
                 model_id="finbert",
                 fallback_used=True,
+                published_at=item.timestamp,
             ), []
 
         score = aggregated.polarity * aggregated.confidence
@@ -214,6 +215,7 @@ async def run_inference(
             model_id=f"ensemble:{'+'.join(aggregated.model_ids)}",
             ensemble_std=aggregated.ensemble_std,
             fallback_used=False,
+            published_at=item.timestamp,
         ), raw_outputs
 
     except LLMBudgetExhaustedError:
@@ -227,6 +229,7 @@ async def run_inference(
             reasoning="FinBERT fallback (budget exhausted)",
             model_id="finbert",
             fallback_used=True,
+            published_at=item.timestamp,
         ), []
 
     except Exception as e:

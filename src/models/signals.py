@@ -16,6 +16,8 @@ class SentimentResult(BaseModel):
     ensemble_std: float = Field(default=0.0, ge=0.0)
     fallback_used: bool = Field(default=False)
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    # FIX-03: news publication time (event-time). None = unknown (legacy/non-news).
+    published_at: datetime | None = None
 
     def model_dump_json(self) -> str:  # type: ignore[override]
         """Serialize to JSON string for Redis storage."""
@@ -31,5 +33,6 @@ class SentimentResult(BaseModel):
                 "ensemble_std": self.ensemble_std,
                 "fallback_used": self.fallback_used,
                 "generated_at": self.generated_at.isoformat(),
+                "published_at": self.published_at.isoformat() if self.published_at else None,
             }
         )

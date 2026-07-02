@@ -66,8 +66,8 @@ class PostgreSQLStore:
     _INSERT_SIGNAL = """
         INSERT INTO sentiment_signals (
             symbol, score, confidence, reasoning, model_id,
-            ensemble_std, fallback_used, generated_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ensemble_std, fallback_used, generated_at, published_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (symbol, generated_at) DO UPDATE SET
             score = EXCLUDED.score,
             confidence = EXCLUDED.confidence,
@@ -159,6 +159,7 @@ class PostgreSQLStore:
                         result.ensemble_std,
                         result.fallback_used,
                         result.generated_at,
+                        result.published_at,
                     ),
                 )
                 row = cur.fetchone()
