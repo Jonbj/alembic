@@ -133,14 +133,10 @@ app.conf.beat_schedule = {
         "task": "src.workers.ingestion.run_news_ingestion_worker",
         "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
     },
-    # MarketAux ingestion every 15 min Mon-Fri during market hours.
-    # 28 calls/market session — well within the 100 req/day free-tier limit.
-    # Pushes MarketAuxNewsItems (with pre-computed sentiment) to news:queue.
-    # The SentimentWorker skips articles with |sentiment| < 0.2 before LLM.
-    "run-marketaux-ingestion": {
-        "task": "src.workers.ingestion.run_marketaux_ingestion_worker",
-        "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
-    },
+    # MarketAux ingestion: DISABLED 2026-07-03 (FIX-01, FUNCTIONAL_REVIEW_2026-07-03).
+    # 17-day paper evidence: 0/20 winners, -$14.11/trade, -$282 total, p50 latency 7.6d,
+    # 100 req/day cap → ~4 low-quality news/day. Task kept but not scheduled, gated
+    # behind MARKETAUX_INGESTION_ENABLED. Re-enable only with per-source IC > 0 evidence.
     # Alpaca/Benzinga news ingestion every 15 min Mon-Fri during market hours.
     # Zero marginal cost — reuses the same Alpaca broker credentials.
     # Benzinga is a premium financial news source with full article text.
@@ -161,13 +157,9 @@ app.conf.beat_schedule = {
     # display_names), so every filing got empty asset_tags and was dropped. Also
     # redundant with S7 PEAD, which has its own 8-K pipeline. Task kept but not scheduled,
     # gated behind SEC_EDGAR_INGESTION_ENABLED. Re-enable only after fixing CIK→ticker.
-    # RSS news ingestion every 15 min during market hours.
-    # Reuters + CNBC. Lower latency than REST polling (~2-5 min vs 15 min).
-    # Uses watchlist ticker mention extraction (regex, no NLP).
-    "run-rss-ingestion": {
-        "task": "src.workers.ingestion.run_rss_ingestion_worker",
-        "schedule": crontab(minute="*/15", hour="14-21", day_of_week="1-5"),
-    },
+    # RSS (Reuters/CNBC) ingestion: DISABLED 2026-07-03 (FIX-02, FUNCTIONAL_REVIEW_2026-07-03).
+    # 0 news_log rows in 17 days → dead feeds or no ticker match. Task kept but not
+    # scheduled, gated behind RSS_INGESTION_ENABLED. Revive only with official IR feeds.
     # Execution worker every 15 min Mon-Fri during market hours.
     # Reads LLM signals from Redis and places orders via Alpaca paper/live.
     "run-execution": {

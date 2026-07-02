@@ -1,4 +1,5 @@
 """Tests for RSS ingestion worker."""
+import os
 import re
 import pytest
 from unittest.mock import MagicMock, patch
@@ -91,7 +92,8 @@ def test_rss_worker_queues_items_with_ticker_match():
     with patch("src.workers.ingestion.RSSConnector") as mock_rss_cls, \
          patch("src.workers.ingestion.Deduplicator", return_value=mock_dedup), \
          patch("src.workers.ingestion.Redis") as mock_redis_cls, \
-         patch("src.workers.ingestion.config") as mock_cfg:
+         patch("src.workers.ingestion.config") as mock_cfg, \
+         patch.dict(os.environ, {"RSS_INGESTION_ENABLED": "1"}):  # FIX-02: source is gated off by default
 
         mock_cfg.WATCHLIST_SYMBOLS = ["AAPL", "MSFT", "GOOGL"]
         mock_cfg.REDIS_URL = "redis://localhost:6379/0"
@@ -122,7 +124,8 @@ def test_rss_worker_expands_per_ticker():
     with patch("src.workers.ingestion.RSSConnector") as mock_rss_cls, \
          patch("src.workers.ingestion.Deduplicator", return_value=mock_dedup), \
          patch("src.workers.ingestion.Redis") as mock_redis_cls, \
-         patch("src.workers.ingestion.config") as mock_cfg:
+         patch("src.workers.ingestion.config") as mock_cfg, \
+         patch.dict(os.environ, {"RSS_INGESTION_ENABLED": "1"}):  # FIX-02: source is gated off by default
 
         mock_cfg.WATCHLIST_SYMBOLS = ["AAPL", "MSFT"]
         mock_cfg.REDIS_URL = "redis://localhost:6379/0"

@@ -222,6 +222,9 @@ def run_marketaux_ingestion_worker() -> dict:
         Stats dict: fetched, tickers_found, queued, duplicates.
         Returns {"skipped": True} if MARKETAUX_API_KEY is not configured.
     """
+    if os.environ.get("MARKETAUX_INGESTION_ENABLED", "0") == "0":
+        return {"skipped": True, "reason": "MARKETAUX_INGESTION_ENABLED=0 (FIX-01: net-negative source)"}
+
     redis_client = Redis.from_url(config.REDIS_URL)
 
     if not config.MARKETAUX_API_KEY:
@@ -681,6 +684,9 @@ def run_rss_ingestion_worker() -> dict:
 
     Schedule: every 15 min, Mon-Fri 14:00-21:00 UTC.
     """
+    if os.environ.get("RSS_INGESTION_ENABLED", "0") == "0":
+        return {"skipped": True, "reason": "RSS_INGESTION_ENABLED=0 (FIX-02: dead feeds, 0 news in 17d)"}
+
     redis_client = Redis.from_url(config.REDIS_URL)
     try:
         watchlist = set(config.WATCHLIST_SYMBOLS or [])
