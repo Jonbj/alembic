@@ -89,7 +89,7 @@ export default function News() {
       <HelpButton title="News — Notizie" sections={[
         {
           heading: "Fonti dati",
-          content: "Le notizie provengono da sei fonti:\n\n- **Reuters RSS**: feed live di Reuters Business News (ogni 30 min)\n- **CNBC RSS**: feed live CNBC Markets (ogni 30 min)\n- **SEC EDGAR**: filing 8-K da SEC (ogni ora, mercato aperto)\n- **GDELT GKG**: global knowledge graph con entities e sentiment automatizzato\n- **MarketAux**: notizie finanziarie con metadata aziendale\n- **Alpaca / Benzinga**: notizie dal broker direttamente",
+          content: "Le notizie provengono da sette fonti:\n\n- **Reuters RSS**: feed live di Reuters Business News (ogni 30 min)\n- **CNBC RSS**: feed live CNBC Markets (ogni 30 min)\n- **SEC EDGAR**: filing 8-K da SEC (ogni ora, mercato aperto)\n- **GDELT GKG**: global knowledge graph con entities e sentiment automatizzato\n- **MarketAux**: notizie finanziarie con metadata aziendale\n- **Alpaca / Benzinga**: notizie dal broker direttamente\n- **Finnhub**: company news per ticker con metadata esplicito dalla fonte",
         },
         {
           heading: "Sentiment",
@@ -118,6 +118,7 @@ export default function News() {
             <option value="gdelt_gkg">GDELT GKG</option>
             <option value="marketaux">MarketAux</option>
             <option value="alpaca_benzinga">Alpaca / Benzinga</option>
+            <option value="finnhub">Finnhub</option>
           </optgroup>
         </select>
         <select value={limit} onChange={(e) => updateLimit(Number(e.target.value))}>
@@ -197,7 +198,17 @@ export default function News() {
                         </div>
                       )}
                       <div style={{ marginTop: 10 }}>
-                        <SignalTraceLinks symbol={item.ticker} />
+                        <SignalTraceLinks
+                          symbol={item.ticker}
+                          includeNews={false}
+                          availability={{
+                            newsId: item.id,
+                            signalCount: item.signal_count,
+                            decisionCount: item.decision_count,
+                            orderCount: item.order_count,
+                          }}
+                          emptyMessage="No downstream signal generated for this news."
+                        />
                       </div>
                     </td>
                   </tr>

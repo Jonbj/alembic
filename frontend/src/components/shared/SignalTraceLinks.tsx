@@ -1,5 +1,12 @@
 import { Link } from 'react-router-dom'
 
+export interface SignalTraceAvailability {
+  newsId?: number
+  signalCount?: number
+  decisionCount?: number
+  orderCount?: number
+}
+
 function path(pathname: string, params: Record<string, string | undefined>) {
   const qs = new URLSearchParams()
   Object.entries(params).forEach(([key, value]) => {
@@ -9,9 +16,72 @@ function path(pathname: string, params: Record<string, string | undefined>) {
   return query ? `${pathname}?${query}` : pathname
 }
 
-export function SignalTraceLinks({ symbol, compact = false }: { symbol: string; compact?: boolean }) {
+function label(base: string, count: number | undefined, showCounts: boolean) {
+  return showCounts && count !== undefined ? `${base} (${count})` : base
+}
+
+export function SignalTraceLinks({
+  symbol,
+  compact = false,
+  includeNews = true,
+  includeSignal = true,
+  includeDecision = true,
+  includeOrders = true,
+  includePerformance = true,
+  availability,
+  emptyMessage,
+}: {
+  symbol: string
+  compact?: boolean
+  includeNews?: boolean
+  includeSignal?: boolean
+  includeDecision?: boolean
+  includeOrders?: boolean
+  includePerformance?: boolean
+  availability?: SignalTraceAvailability
+  emptyMessage?: string
+}) {
   const ticker = symbol.trim().toUpperCase()
   if (!ticker) return null
+  const hasAvailability = availability !== undefined
+  const signalCount = availability?.signalCount ?? 0
+  const decisionCount = availability?.decisionCount ?? 0
+  const orderCount = availability?.orderCount ?? 0
+  const links: { key: string; to: string; text: string; show: boolean }[] = [
+    { key: 'news', to: path('/news', { ticker }), text: 'News', show: includeNews },
+    {
+      key: 'signal',
+      to: path('/signals', { symbol: ticker, news_id: availability?.newsId ? String(availability.newsId) : undefined }),
+      text: label('Signal', availability?.signalCount, hasAvailability),
+      show: includeSignal && (!hasAvailability || signalCount > 0),
+    },
+    {
+      key: 'decision',
+      to: path('/signals', { tab: 'decisions', symbol: ticker }),
+      text: label('Decision', availability?.decisionCount, hasAvailability),
+      show: includeDecision && (!hasAvailability || decisionCount > 0),
+    },
+    {
+      key: 'orders',
+      to: path('/trading', { symbol: ticker }),
+      text: label('Orders', availability?.orderCount, hasAvailability),
+      show: includeOrders && (!hasAvailability || orderCount > 0),
+    },
+    {
+      key: 'performance',
+      to: '/performance',
+      text: 'Performance',
+      show: includePerformance && !compact && (!hasAvailability || orderCount > 0),
+    },
+  ]
+  const visibleLinks = links.filter(link => link.show)
+  if (visibleLinks.length === 0) {
+    return emptyMessage ? (
+      <span style={{ color: 'var(--text-muted)', fontSize: compact ? 11 : 12 }}>
+        {emptyMessage}
+      </span>
+    ) : null
+  }
 
   const linkStyle: React.CSSProperties = {
     display: 'inline-flex',
@@ -30,11 +100,9 @@ export function SignalTraceLinks({ symbol, compact = false }: { symbol: string; 
 
   return (
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-      <Link style={linkStyle} to={path('/news', { ticker })}>News</Link>
-      <Link style={linkStyle} to={path('/signals', { symbol: ticker })}>Signal</Link>
-      <Link style={linkStyle} to={path('/signals', { tab: 'decisions', symbol: ticker })}>Decision</Link>
-      <Link style={linkStyle} to={path('/trading', { symbol: ticker })}>Orders</Link>
-      {!compact && <Link style={linkStyle} to="/performance">Performance</Link>}
+      {visibleLinks.map(link => (
+        <Link key={link.key} style={linkStyle} to={link.to}>{link.text}</Link>
+      ))}
     </div>
   )
 }

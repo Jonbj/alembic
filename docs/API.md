@@ -51,8 +51,9 @@ openssl rand -hex 20
 ### `GET /api/signals`
 
 Get latest signals for all watchlist symbols. Falls back to PostgreSQL for any symbols not in Redis cache.
+When `news_id` is provided, returns historical signals linked to that `news_log.id` instead of the latest watchlist view. This is used by the News trace links so a news row never points to an empty latest-signal page when its signal is historical.
 
-**Query parameters:** `symbol` (optional, filter to one symbol)
+**Query parameters:** `symbol` (optional, filter to one symbol), `news_id` (optional, historical trace for one news row)
 
 **Response 200:**
 ```json
@@ -289,7 +290,12 @@ Max range: 365 days.
       "losers": 4,
       "trades": [
         {
+          "id": 123,
           "symbol": "CAT",
+          "signal_id": 456,
+          "decision_id": 789,
+          "news_log_id": 1444,
+          "entry_order_id": "alpaca-order-id",
           "entry_time": "2026-06-23T18:52:00Z",
           "exit_time": "2026-06-24T14:07:00Z",
           "entry_price": 982.99,
@@ -330,7 +336,12 @@ Max range: 365 days.
 
 | Campo | Descrizione |
 |-------|-------------|
+| `id` | Local trade id |
 | `symbol` | Ticker symbol |
+| `signal_id` | Linked `sentiment_signals.id`, if the trade came from an Alembic signal |
+| `decision_id` | Linked `execution_decisions.id`, if available |
+| `news_log_id` | Linked `news_log.id` through the originating signal, if available |
+| `entry_order_id` | Broker order id for the entry |
 | `entry_time` / `exit_time` | Timestamp ISO-8601 UTC |
 | `entry_price` / `exit_price` | Prezzi di entrata/uscita |
 | `qty` | Quantità |
@@ -383,6 +394,14 @@ Latest decay monitor report (actual vs backtest baseline per strategy).
 ### `GET /api/news/recent`
 
 Recent ingested news items from `news_log`. Query params: `ticker`, `source`, `limit`.
+
+Each row also includes downstream trace counters:
+
+| Field | Meaning |
+| --- | --- |
+| `signal_count` | Number of `sentiment_signals` rows linked through `news_log_id` |
+| `decision_count` | Number of `execution_decisions` rows linked through those signals |
+| `order_count` | Number of order/trade traces linked through those signals |
 
 ### `GET /api/llm/feedback`
 

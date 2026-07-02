@@ -10,6 +10,9 @@ export interface NewsItem {
   body_snippet: string | null
   fetched_at: string
   published_at: string | null
+  signal_count: number
+  decision_count: number
+  order_count: number
 }
 
 export const fetchNews = (params?: { limit?: number; ticker?: string; source?: string }) => {

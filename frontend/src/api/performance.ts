@@ -70,7 +70,12 @@ export interface WeeklyReport {
 }
 
 export interface DailyTrade {
+  id: number
   symbol: string
+  signal_id: number | null
+  decision_id: number | null
+  news_log_id: number | null
+  entry_order_id: string | null
   entry_time: string | null
   exit_time: string | null
   entry_price: number | null

@@ -835,14 +835,16 @@ class PostgreSQLStore:
                 # Per-trade detail for the same date range
                 cur.execute(
                     """
-                    SELECT symbol, entry_time, exit_time, entry_price, exit_price,
-                           qty, gross_pnl, net_pnl, exit_reason,
+                    SELECT t.id, t.symbol, t.signal_id, t.decision_id, ss.news_log_id,
+                           t.entry_order_id, t.entry_time, t.exit_time, t.entry_price, t.exit_price,
+                           t.qty, t.gross_pnl, t.net_pnl, t.exit_reason,
                            (exit_time AT TIME ZONE 'UTC')::date AS trading_date
-                    FROM trades
-                    WHERE exit_time IS NOT NULL AND net_pnl IS NOT NULL
-                      AND exit_reason IS DISTINCT FROM 'LEGACY_FLATTEN'
-                      AND (exit_time AT TIME ZONE 'UTC')::date BETWEEN %s AND %s
-                    ORDER BY exit_time ASC
+                    FROM trades t
+                    LEFT JOIN sentiment_signals ss ON ss.id = t.signal_id
+                    WHERE t.exit_time IS NOT NULL AND t.net_pnl IS NOT NULL
+                      AND t.exit_reason IS DISTINCT FROM 'LEGACY_FLATTEN'
+                      AND (t.exit_time AT TIME ZONE 'UTC')::date BETWEEN %s AND %s
+                    ORDER BY t.exit_time ASC
                     """,
                     (from_date, to_date),
                 )
@@ -855,7 +857,12 @@ class PostgreSQLStore:
                 for t in trade_rows:
                     d = str(t["trading_date"])
                     trades_by_date[d].append({
+                        "id": int(t["id"]),
                         "symbol": t["symbol"],
+                        "signal_id": int(t["signal_id"]) if t["signal_id"] is not None else None,
+                        "decision_id": int(t["decision_id"]) if t["decision_id"] is not None else None,
+                        "news_log_id": int(t["news_log_id"]) if t["news_log_id"] is not None else None,
+                        "entry_order_id": t["entry_order_id"],
                         "entry_time": t["entry_time"].isoformat() if t["entry_time"] else None,
                         "exit_time": t["exit_time"].isoformat() if t["exit_time"] else None,
                         "entry_price": float(t["entry_price"]) if t["entry_price"] is not None else None,
@@ -1139,14 +1146,14 @@ class PostgreSQLStore:
         ticker: str | None = None,
         source: str | None = None,
     ) -> list[dict]:
-        """Return recent news_log rows as dicts, newest first."""
+        """Return recent news_log rows with downstream trace counts, newest first."""
         filters = []
         params: list = []
         if ticker:
-            filters.append("ticker = %s")
+            filters.append("nl.ticker = %s")
             params.append(ticker)
         if source:
-            filters.append("source = %s")
+            filters.append("nl.source = %s")
             params.append(source)
         where = ("WHERE " + " AND ".join(filters)) if filters else ""
         params.append(limit)
@@ -1154,8 +1161,43 @@ class PostgreSQLStore:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    f"SELECT id, title, url, source, ticker, raw_sentiment, body_snippet, fetched_at, published_at "
-                    f"FROM news_log {where} ORDER BY fetched_at DESC LIMIT %s",
+                    f"""SELECT nl.id, nl.title, nl.url, nl.source, nl.ticker,
+                               nl.raw_sentiment, nl.body_snippet, nl.fetched_at, nl.published_at,
+                               COALESCE(sc.signal_count, 0) AS signal_count,
+                               COALESCE(dc.decision_count, 0) AS decision_count,
+                               COALESCE(oc.order_count, 0) AS order_count
+                        FROM news_log nl
+                        LEFT JOIN (
+                            SELECT news_log_id, COUNT(*) AS signal_count
+                            FROM sentiment_signals
+                            WHERE news_log_id IS NOT NULL
+                            GROUP BY news_log_id
+                        ) sc ON sc.news_log_id = nl.id
+                        LEFT JOIN (
+                            SELECT ss.news_log_id, COUNT(ed.id) AS decision_count
+                            FROM sentiment_signals ss
+                            JOIN execution_decisions ed ON ed.signal_id = ss.id
+                            WHERE ss.news_log_id IS NOT NULL
+                            GROUP BY ss.news_log_id
+                        ) dc ON dc.news_log_id = nl.id
+                        LEFT JOIN (
+                            SELECT news_log_id, COUNT(*) AS order_count
+                            FROM (
+                                SELECT DISTINCT ss.news_log_id, ed.order_id AS trace_id
+                                FROM sentiment_signals ss
+                                JOIN execution_decisions ed ON ed.signal_id = ss.id
+                                WHERE ss.news_log_id IS NOT NULL
+                                  AND ed.order_id IS NOT NULL
+                                UNION
+                                SELECT DISTINCT ss.news_log_id, t.id::text AS trace_id
+                                FROM sentiment_signals ss
+                                JOIN trades t ON t.signal_id = ss.id
+                                WHERE ss.news_log_id IS NOT NULL
+                            ) orders
+                            GROUP BY news_log_id
+                        ) oc ON oc.news_log_id = nl.id
+                        {where}
+                        ORDER BY nl.fetched_at DESC LIMIT %s""",
                     params,
                 )
                 cols = [d[0] for d in cur.description]
@@ -1540,6 +1582,32 @@ class PostgreSQLStore:
                     "WHERE symbol IN (" + placeholders + ") "
                     "ORDER BY symbol, generated_at DESC",
                     tuple(symbols)
+                )
+                rows = cur.fetchall()
+                results = []
+                for row in rows:
+                    d = dict(row)
+                    if d.get("generated_at") is not None:
+                        d["generated_at"] = d["generated_at"].isoformat()
+                    results.append(d)
+                return results
+        except Exception:
+            conn.rollback()
+            raise
+
+    def fetch_signals_for_news(self, news_log_id: int, limit: int = 50) -> list[dict]:
+        """Fetch historical signals generated from a specific news_log row."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """SELECT id AS signal_id, symbol, score, confidence, reasoning,
+                              model_id, ensemble_std, fallback_used, generated_at
+                       FROM sentiment_signals
+                       WHERE news_log_id = %s
+                       ORDER BY generated_at DESC
+                       LIMIT %s""",
+                    (news_log_id, limit),
                 )
                 rows = cur.fetchall()
                 results = []

@@ -12,6 +12,7 @@ import { fetchAnalyticsByDimension, fetchAnalyticsBySymbol } from '@/api/analyti
 import type { AnalyticsDim, DimensionRow } from '@/api/analytics'
 import { HelpButton } from '@/components/shared/HelpButton'
 import { DataTable } from '@/components/shared/DataTable'
+import { SignalTraceLinks } from '@/components/shared/SignalTraceLinks'
 
 const PERIODS = ['1M', '3M', '6M', '1Y'] as const
 type Period = typeof PERIODS[number]
@@ -347,7 +348,7 @@ function DailyPnLTab() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr>
-              {['Symbol', 'Motivo uscita', 'Entry', 'Exit', 'Qty', 'P&L Lordo', 'Costi', 'P&L Netto'].map((h) => (
+              {['Symbol', 'Motivo uscita', 'Entry', 'Exit', 'Qty', 'P&L Lordo', 'Costi', 'P&L Netto', 'Trace'].map((h) => (
                 <th key={h} style={{ textAlign: 'left', padding: '4px 8px', color: 'var(--text-muted)', fontWeight: 600, fontSize: 11 }}>{h}</th>
               ))}
             </tr>
@@ -372,6 +373,21 @@ function DailyPnLTab() {
                 </td>
                 <td style={{ padding: '4px 8px', fontWeight: 700, color: t.net_pnl >= 0 ? 'var(--green)' : 'var(--red)' }}>
                   {fmtPnL(t.net_pnl)}
+                </td>
+                <td style={{ padding: '4px 8px' }}>
+                  <SignalTraceLinks
+                    symbol={t.symbol}
+                    compact
+                    includeNews={false}
+                    includePerformance={false}
+                    availability={{
+                      newsId: t.news_log_id ?? undefined,
+                      signalCount: t.signal_id ? 1 : 0,
+                      decisionCount: t.decision_id ? 1 : 0,
+                      orderCount: t.entry_order_id ? 1 : 0,
+                    }}
+                    emptyMessage="—"
+                  />
                 </td>
               </tr>
               )
