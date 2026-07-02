@@ -48,6 +48,7 @@ _TICKER_ALIASES: dict[str, str] = {
 from src.connectors.alpaca_news import AlpacaNewsConnector
 from src.connectors.finnhub_news import FinnhubNewsConnector
 from src.connectors.deduplicator import Deduplicator
+from src.connectors.gdelt_doc import GdeltDocConnector
 from src.connectors.rss import RSSConnector
 from src.connectors.sec_edgar import SECEdgarConnector
 from src.connectors.gdelt_gkg import GDELTGKGConnector
@@ -412,6 +413,114 @@ def run_finnhub_ingestion_worker() -> dict:
         redis_client.close()
 
 
+def _load_gdelt_doc_ticker_names(symbols: list[str]) -> dict[str, str]:
+    """Resolve company names for symbols via SEC company_tickers.json. Fail-open.
+
+    Returns ticker→raw-title dict (e.g. {"AAPL": "APPLE INC"}) for building
+    precise GDELT queries. Skips silently on any network/parse error.
+    """
+    try:
+        import httpx
+
+        resp = httpx.get(
+            "https://www.sec.gov/files/company_tickers.json",
+            headers={"User-Agent": "Alembic/1.0 stefano.delgobbo@gmail.com"},
+            timeout=10.0,
+        )
+        resp.raise_for_status()
+        symbol_set = {s.upper() for s in symbols}
+        result: dict[str, str] = {}
+        for row in resp.json().values():
+            t = str(row.get("ticker", "")).upper()
+            if t in symbol_set:
+                title = str(row.get("title", "")).strip()
+                if title:
+                    result[t] = title
+        log.debug("GDELT DOC: resolved %d/%d ticker names from SEC", len(result), len(symbols))
+        return result
+    except Exception as exc:
+        log.warning("GDELT DOC: SEC name lookup failed (%s) — using $TICKER cashtag fallback", exc)
+        return {}
+
+
+async def _fetch_gdelt_doc_items(connector: GdeltDocConnector) -> list[NewsItem]:
+    """Drain the async GDELT DOC iterator into a concrete list."""
+    return [item async for item in connector.fetch()]
+
+
+def _process_gdelt_doc_items(
+    items: list[NewsItem],
+    deduplicator: Deduplicator,
+    redis_client: Redis,
+) -> dict:
+    """Deduplicate and push GDELT DOC NewsItems to news:queue.
+
+    Articles are pre-tagged to a specific symbol (extraction_method='gdelt_doc') —
+    no TickerExtractor needed. Mirrors _process_finnhub_items.
+    """
+    stats = {"fetched": 0, "queued": 0, "duplicates": 0}
+
+    for item in items:
+        stats["fetched"] += 1
+        if not item.asset_tags:
+            continue
+        ticker = _TICKER_ALIASES.get(item.asset_tags[0], item.asset_tags[0])
+        per_ticker = NewsItem(
+            id=item.id,
+            source=item.source,
+            timestamp=item.timestamp,
+            title=item.title,
+            body=item.body,
+            url=item.url,
+            language=item.language,
+            asset_tags=[ticker],
+            extraction_method=item.extraction_method,
+        )
+        if deduplicator.is_duplicate_by_id(per_ticker):
+            stats["duplicates"] += 1
+            continue
+        redis_client.rpush("news:queue", per_ticker.model_dump_json())
+        stats["queued"] += 1
+
+    return stats
+
+
+@app.task(name="src.workers.ingestion.run_gdelt_doc_ingestion_worker")
+def run_gdelt_doc_ingestion_worker() -> dict:
+    """Celery entry-point for GDELT DOC 2.0 news ingestion.
+
+    Queries the GDELT DOC 2.0 API per-ticker for recent English news (timespan=12h),
+    tags each article explicitly to the queried ticker (extraction_method='gdelt_doc'),
+    deduplicates, and pushes to news:queue.
+
+    OFF by default — enable with GDELT_DOC_INGESTION_ENABLED=1 after confirming
+    volume and relevance via mini-spike. No beat schedule added yet.
+
+    Volume control: maxrecords=5 per ticker (96 tickers → ≤480 raw articles/fetch,
+    minus dedup → typically <<100 new items). Lesson from Finnhub: keep this LOW.
+    """
+    if os.environ.get("GDELT_DOC_INGESTION_ENABLED", "0") == "0":
+        return {"skipped": True, "reason": "gdelt_doc_ingestion_disabled"}
+
+    redis_client = Redis.from_url(config.REDIS_URL)
+    try:
+        symbols = config.WATCHLIST_SYMBOLS or []
+        ticker_names = _load_gdelt_doc_ticker_names(symbols)
+        connector = GdeltDocConnector(
+            symbols=symbols,
+            ticker_names=ticker_names,
+            timespan="12h",
+            maxrecords=5,
+        )
+        deduplicator = Deduplicator(redis_client)
+        items = asyncio.run(_fetch_gdelt_doc_items(connector))
+        stats = _process_gdelt_doc_items(items, deduplicator, redis_client)
+        log.info("GDELT DOC ingestion stats: %s", stats)
+        return stats
+    finally:
+        redis_client.close()
+
+
 async def _fetch_sec_edgar_items(connector) -> list:
     """Drain the async SEC EDGAR iterator into a concrete list."""
     return [item async for item in connector.fetch()]
@@ -443,11 +552,15 @@ def _process_sec_edgar_items(
 def run_sec_edgar_ingestion_worker() -> dict:
     """Celery entry-point: fetch SEC 8-K/10-Q/10-K filings, push to news:queue.
 
-    Fetches today's EDGAR filings, filters by WATCHLIST_SYMBOLS, deduplicates,
-    and pushes to news:queue for the SentimentWorker. Zero API cost (public API).
-
-    Schedule: every 30 min, Mon-Fri 14:00-21:00 UTC.
+    DISABLED (2026-07-02): OFF by default. Never produced a signal — the connector read
+    a non-existent `ticker_symbol` field (EDGAR filings use CIK / display_names), so every
+    item got empty asset_tags and was dropped downstream. Also redundant with S7 PEAD's
+    8-K pipeline. Re-enable with SEC_EDGAR_INGESTION_ENABLED=1 ONLY after fixing the
+    CIK→ticker attribution (e.g. via SecCompanyTickers) and enriching the body (8-K item).
     """
+    if os.environ.get("SEC_EDGAR_INGESTION_ENABLED", "0") == "0":
+        return {"skipped": True, "reason": "sec_edgar_ingestion_disabled"}
+
     redis_client = Redis.from_url(config.REDIS_URL)
     try:
         connector = SECEdgarConnector(form_types=["8-K", "10-Q", "10-K"])
