@@ -37,3 +37,10 @@ def test_marketaux_task_skips_by_default():
         from src.workers.ingestion import run_marketaux_ingestion_worker
         result = run_marketaux_ingestion_worker()
     assert result.get("skipped") is True
+
+
+def test_reconcile_fills_evening_points_to_reconcile_task():
+    """B20: the evening entry must run fill reconciliation, not the daily report."""
+    from src.workers.celery_app import app
+    entry = app.conf.beat_schedule["reconcile-fills-evening"]
+    assert entry["task"] == "src.workers.performance.run_reconcile_fills_intraday"

@@ -86,7 +86,7 @@ app.conf.beat_schedule = {
     },
     # P0-E: EOD reconcile pass at 21:30 UTC — catches any fills missed intraday.
     "reconcile-fills-evening": {
-        "task": "src.workers.performance.run_daily_report",
+        "task": "src.workers.performance.run_reconcile_fills_intraday",
         "schedule": crontab(hour=21, minute=30, day_of_week="1-5"),
     },
     # Performance daily report at 03:00 UTC
