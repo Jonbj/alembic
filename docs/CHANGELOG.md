@@ -6,16 +6,13 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ## 2026-07-02
 
-### Connettore GDELT DOC 2.0 (OFF di default — mini-spike findings)
-- **Nuovo connettore** `src/connectors/gdelt_doc.py` (`GdeltDocConnector`): interroga la GDELT DOC 2.0 API (`api.gdeltproject.org/api/v2/doc/doc`) per simbolo, tagga esplicitamente ogni articolo al ticker interrogato (`extraction_method="gdelt_doc"`), fail-open su qualsiasi errore.
-- **Task ingestion** `run_gdelt_doc_ingestion_worker` in `src/workers/ingestion.py`, OFF di default dietro `GDELT_DOC_INGESTION_ENABLED=1`. Nessun beat schedule aggiunto.
-- **11 test TDD** in `tests/connectors/test_gdelt_doc.py` (parse, fetch mockato, throttle, company-name query, cashtag fallback).
-- **Mini-spike findings** (2026-07-02):
-  - **Rate limit**: GDELT impone ≥5s/request per IP (documentato nel messaggio di errore). Un burst di 8 richieste senza throttle adeguato ha causato un rate-limit IP prolungato (ore). Il connettore usa ora 6s di throttle.
-  - **Ciclo completo**: 96 simboli × 6s = ~10 min/ciclo → margine stretto per un beat da 15 min. Raccomandazione: limitare a 20-30 simboli ad alto volume oppure usare beat da 30 min.
-  - **Volume**: non misurato completamente (IP in cooldown). Delle prime 2 richieste andate a buon fine (Apple, Microsoft) → 0 articoli nella finestra 12h. Potrebbe indicare finestra troppo corta o disponibilità variabile.
-  - **Stato**: codice e test pronti. **NON abilitare** finché: (1) IP cooldown finito, (2) spike su 5-10 simboli con 6s throttle con dati reali, (3) volume e freschezza confermati.
-- **`_REQ_INTERVAL_S`**: aggiornato da 1.0 → 6.0 (rispetto limite GDELT).
+### Connettore GDELT DOC 2.0 — SHELVED (stesso problema del GKG: lag indexing)
+- **Connettore implementato** `src/connectors/gdelt_doc.py` (`GdeltDocConnector`) + task `run_gdelt_doc_ingestion_worker` — 11 test TDD verdi.
+- **SHELVED dopo mini-spike** (2026-07-02): **NON abilitare, NON aggiungere beat schedule.**
+- **Root cause**: GDELT DOC 2.0 ha un lag di indexing di **≥2 giorni** (confermato: articoli più recenti nel feed = 30 giugno; oggi = 2 luglio). Il filtro `_SENTIMENT_MAX_NEWS_AGE_HOURS=12` del sentiment worker scarterebbe sempre il 100% degli articoli GDELT. Stessa causa del GKG (`gdelt_gkg.py` già dismesso per lag 24h).
+- **Rilevanza bassa**: query `NVIDIA sourcelang:english` ha restituito "Eli Lilly Upgraded, Carvana Downgraded" — nessuna relazione con NVIDIA. Full-text search loose, peggiore di `org_lookup`.
+- **Rate limit**: 5s/request per IP; burst → ban multi-ora. 96 simboli × 6s ≈ 10 min/ciclo.
+- **Fonti attive**: `alpaca_benzinga` + `marketaux` coprono il need di freschezza e diversificazione. GDELT DOC non aggiunge valore.
 
 ### Fonti — MarketAux fix lag (bug connector) → riattivata diversificazione
 - **Root cause**: MarketAux era silente (news di ~13 giorni fa, skippate dallo skip freschezza 12h). Non era un ritardo del free tier — il `fetch()` live non passava `sort`/`published_after`, quindi l'API restituiva il default (articoli vecchi). Test live: con `sort=published_on` MarketAux serve news di **oggi**.

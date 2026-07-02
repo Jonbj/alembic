@@ -1,14 +1,17 @@
 """GDELT DOC 2.0 API connector — per-ticker query, explicit tagging.
 
-Queries the GDELT DOC 2.0 API for each watchlist symbol by company name (or
-$TICKER cashtag fallback). Unlike the legacy GKG bulk connector this is:
-  - Mirated per ticker (no global-feed download + local filter)
-  - Fresh (timespan=12h, sort=DateDesc)
-  - Explicitly tagged to the queried ticker (extraction_method='gdelt_doc')
-  - Fail-open: per-ticker errors are logged and skipped
+SHELVED (2026-07-02): mini-spike confirmed GDELT DOC has ≥2 day indexing lag.
+The sentiment worker's _SENTIMENT_MAX_NEWS_AGE_HOURS=12 filter would discard
+100% of GDELT DOC articles. Same root cause as the legacy GKG connector.
+Connector and tests are kept for reference; do NOT enable the beat schedule.
 
-NOTE: the DOC artlist endpoint does not include article bodies — only headline
-+ metadata. The title is used as body proxy (headline-level sentiment).
+Original design:
+  Queries the GDELT DOC 2.0 API for each watchlist symbol by company name (or
+  $TICKER cashtag fallback). Unlike the legacy GKG bulk connector:
+  - Per-ticker targeted query (no global-feed download + local filter)
+  - Explicitly tagged to queried ticker (extraction_method='gdelt_doc')
+  - Fail-open: per-ticker errors logged and skipped
+  - Rate limit: ≥6s between requests (GDELT enforces 5s/request per IP)
 
 API ref: https://api.gdeltproject.org/api/v2/doc/doc
 """
