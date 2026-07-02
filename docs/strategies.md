@@ -184,7 +184,7 @@ The multiplier (0.2× to 1.0×) prevents full-size entries during bear markets o
 |-----------|---------|-------------|
 | `score_threshold` | 0.3 | Minimum score to trigger BUY |
 | `signal_max_age_min` | 30 | Max signal age before stale |
-| `stop_loss_pct` | 0.05 | 5% stop-loss from entry |
+| `stop_loss_pct` | 0.02 (da config/trading.yaml risk.stop_loss) | 2% stop-loss from entry |
 | `base_position_size` | 0.02 | 2% of NAV per position |
 
 ---
@@ -244,7 +244,7 @@ Applied iteratively (up to 10 passes) after weight merging:
 |-----------|---------|--------|
 | Max single asset | 10% NAV | Scale down BUY |
 | Max strategy exposure | alloc_pct × 1.5 | Scale down excess |
-| Max portfolio exposure | 95% NAV | Scale all BUYs |
+| Max portfolio exposure | 50% NAV | Scale all BUYs |
 | Max sector exposure | 25% NAV | Scale sector BUYs |
 | Max correlation cluster | corr > 0.70 | Reduce higher-vol |
 

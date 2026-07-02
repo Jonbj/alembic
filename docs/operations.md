@@ -258,7 +258,7 @@ Telegram alerts are sent to `TELEGRAM_CHAT_ID` via the bot token configured in `
 | PSI > 0.25 (signal distribution drift) | CRITICAL | DriftDetector |
 | Weight suggestion ready (guardrails passed) | INFO | Monday 04:00 |
 | Weight approval required (guardrail blocked) | INFO | Inline [✅ Approve] [❌ Reject] |
-| Drawdown cap reached (≥10% daily loss) | CRITICAL | ExecutionWorker |
+| Drawdown cap reached (≥5% (`risk.portfolio_drawdown` in `config/trading.yaml`) daily loss) | CRITICAL | ExecutionWorker |
 | Decay metric CRITICAL | CRITICAL | DecayMonitor (monthly) |
 | Risk alert (drawdown, weight drift) | WARNING | RiskMonitor (daily) |
 

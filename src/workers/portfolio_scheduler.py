@@ -23,7 +23,6 @@ from pathlib import Path
 from src.notifications.base import AlertLevel
 from src.workers.celery_app import app
 
-_MAX_DRAWDOWN_PCT = 0.10  # portfolio-level circuit breaker; mirrors execution.py constant
 _PEAK_EQUITY_KEY = "portfolio:peak_equity"
 
 log = logging.getLogger(__name__)
@@ -516,6 +515,7 @@ def _load_risk_config() -> dict[str, float]:
         "max_portfolio_exposure": 0.50,
         "max_single_asset_pct": 0.10,
         "stop_loss": 0.02,
+        "portfolio_drawdown": 0.05,  # B13: single source of truth = trading.yaml
     }
     try:
         import yaml
@@ -526,6 +526,7 @@ def _load_risk_config() -> dict[str, float]:
             "max_portfolio_exposure": float(risk.get("max_portfolio_exposure", defaults["max_portfolio_exposure"])),
             "max_single_asset_pct": float(risk.get("max_position_pct", defaults["max_single_asset_pct"])),
             "stop_loss": float(risk.get("stop_loss", defaults["stop_loss"])),
+            "portfolio_drawdown": float(risk.get("portfolio_drawdown", defaults["portfolio_drawdown"])),
         }
     except Exception as exc:
         log.warning("P2-05-B: could not load risk config (%s) — using defaults", exc)
@@ -1045,15 +1046,16 @@ def _run_cycle_inner() -> dict:
                 peak_equity = equity
 
             drawdown = (peak_equity - equity) / peak_equity if peak_equity > 0 else 0.0
-            if drawdown >= _MAX_DRAWDOWN_PCT:
-                _dd_reason = f"portfolio drawdown {drawdown:.1%} >= {_MAX_DRAWDOWN_PCT:.0%} cap"
+            _dd_cap = _load_risk_config()["portfolio_drawdown"]
+            if drawdown >= _dd_cap:
+                _dd_reason = f"portfolio drawdown {drawdown:.1%} >= {_dd_cap:.0%} cap"
                 _dd_payload = _jdd.dumps({"reason": _dd_reason, "activated_at": datetime.now(timezone.utc).isoformat()})
                 _r_dd.pipeline().setex("killswitch_active", 64800, 1).setex("killswitch_reason", 64800, _dd_payload).execute()
                 msg = (
                     f"🚨 <b>Drawdown cap raggiunto — kill-switch attivato</b>\n\n"
                     f"Equity attuale: <b>${equity:,.0f}</b>\n"
                     f"Picco: <b>${peak_equity:,.0f}</b>\n"
-                    f"Drawdown: <b>{drawdown:.1%}</b> (soglia: {_MAX_DRAWDOWN_PCT:.0%})\n\n"
+                    f"Drawdown: <b>{drawdown:.1%}</b> (soglia: {_dd_cap:.0%})\n\n"
                     f"Trading sospeso per 18h. Per riprendere: <code>redis-cli DEL killswitch_active</code>"
                 )
                 _fire_alert(notifier, msg, AlertLevel.CRITICAL)

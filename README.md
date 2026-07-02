@@ -88,7 +88,7 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 ║  ExecutionWorker per tick:                                                   ║
 ║    1. Kill-switch check   → abort if active                                  ║
 ║    2. EMA20 cache refresh → SPY + watchlist prices (yfinance)                ║
-║    3. Drawdown cap check  → halt + alert if daily loss ≥ 10%                ║
+║    3. Drawdown cap check  → halt + alert if daily loss ≥ 5% (config)        ║
 ║    4. For each symbol:                                                        ║
 ║         a. Read sentiment signal from Redis (freshness ≤ 30 min)            ║
 ║         b. Stop-loss check (if open position and price ≤ stop)               ║
@@ -199,7 +199,7 @@ The checklist runs in strict order every 15 minutes during market hours (14:00�
 
 **2. EMA20 cache refresh.** The worker fetches the latest prices for SPY and the watchlist from yfinance, computes the 20-day exponential moving average, and writes the result to a local in-process cache. This cache is used in the BUY gate below to filter out entries against the trend.
 
-**3. Drawdown cap check.** The worker queries the Alpaca portfolio history API for today's equity curve. If the portfolio is down ≥ 10% from the day's opening value, it sets the kill-switch, sends a CRITICAL Telegram alert, and halts. This cap prevents a runaway sequence of losing trades from compounding into a catastrophic loss within a single session.
+**3. Drawdown cap check.** The worker queries the Alpaca portfolio history API for today's equity curve. If the portfolio is down ≥ 5% (`risk.portfolio_drawdown` in `config/trading.yaml`) from the day's opening value, it sets the kill-switch, sends a CRITICAL Telegram alert, and halts. This cap prevents a runaway sequence of losing trades from compounding into a catastrophic loss within a single session.
 
 **4. Per-symbol loop.** For each symbol in the configured watchlist:
 
@@ -257,7 +257,7 @@ The `PortfolioOrchestrator` runs hourly during market hours and coordinates all 
 | **Graceful Degradation** | Redis OOM handled silently, FinBERT fallback on ensemble divergence, circuit breakers on drift |
 | **Regime-Aware Sizing** | `regime_multiplier` (1.0×, 0.7×, 0.4×, 0.2×) applied to position size based on macro conditions |
 | **Human-in-the-Loop** | Weight updates require Telegram approval when guardrails (VIX, drawdown, freeze) trigger |
-| **Drawdown Cap** | Daily loss ≥ 10% auto-activates kill-switch + sends Telegram CRITICAL alert |
+| **Drawdown Cap** | Daily loss ≥ 5% (`risk.portfolio_drawdown` in `config/trading.yaml`) auto-activates kill-switch + sends Telegram CRITICAL alert |
 | **Budget Enforcement** | Daily LLM spend is tracked per-model; ensemble falls back to FinBERT when budget is exhausted |
 
 ---
@@ -547,7 +547,7 @@ Every number below was chosen heuristically and has not been validated against h
 | EMA period | `20 days` | `execution.py` | Not validated for news-driven intraday signals; standard technical indicator only |
 | Ensemble divergence std | `> 0.30` | `workers.yaml` | Too tight → excessive FinBERT fallbacks; too loose → noisy ensemble consensus |
 | Min model confidence | `0.40` | `workers.yaml` | Rejects models that are systematically cautious on all articles |
-| Daily drawdown cap | `10%` | `execution.py` | Not calibrated to strategy volatility; could halt unnecessarily in high-volatility regimes |
+| Daily drawdown cap | `5%` (`risk.portfolio_drawdown` in `config/trading.yaml`) | `execution.py` / `portfolio_scheduler.py` | Not calibrated to strategy volatility; could halt unnecessarily in high-volatility regimes |
 | Regime multipliers | `1.0 / 0.7 / 0.4 / 0.2` | `regime.py` | Values not derived from historical portfolio data; purely heuristic |
 | IC rolling window | `30 days` | `workers.yaml` | Too short → noisy IC; too long → slow drift detection |
 | PSI yellow threshold | `0.10` | `workers.yaml` | Standard PSI bounds, not tuned to this signal distribution |
