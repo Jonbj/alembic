@@ -15,7 +15,7 @@ from src.backtest.metrics.performance import sharpe_ratio
 def gate_2_walkforward(
     wf_results: list[pd.Series],
     periods: int = 252,
-    min_oos_sharpe: float = 0.0,
+    min_oos_sharpe: float = 0.3,  # B12: real threshold (master roadmap); 0.0 was tautological
     min_positive_fraction: float = 0.5,
 ) -> GateResult:
     """Gate 2: Walk-forward consistency.

@@ -18,11 +18,11 @@ class GateConfig:
     """Configuration for gate thresholds."""
     # Gate 1
     n_trials: int = 1
-    min_sharpe: float = 0.0
+    min_sharpe: float = 0.5  # B12: real threshold (master roadmap); 0.0 was tautological
     max_pvalue: float = 0.05
     min_dsr: float = 0.5
     # Gate 2
-    min_oos_sharpe: float = 0.0
+    min_oos_sharpe: float = 0.3  # B12: real threshold (master roadmap); 0.0 was tautological
     min_positive_fraction: float = 0.5
     # Gate 3
     max_cv: float = 0.5

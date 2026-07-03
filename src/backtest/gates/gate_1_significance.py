@@ -36,7 +36,7 @@ def gate_1_significance(
     returns: pd.Series,
     n_trials: int = 1,
     periods: int = 252,
-    min_sharpe: float = 0.0,
+    min_sharpe: float = 0.5,  # B12: real threshold (master roadmap); 0.0 was tautological
     max_pvalue: float = 0.05,
     min_dsr: float = 0.5,
 ) -> GateResult:
