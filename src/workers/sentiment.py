@@ -78,6 +78,22 @@ def _is_stale_news(item, now: datetime, max_age_hours: int = _SENTIMENT_MAX_NEWS
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
     return (now - ts) > timedelta(hours=max_age_hours)
+
+
+# Conservative resolver enforcement: only the hard, maximum-precision verdict blocks
+# inference. Finer gates (LOW_CONF/AMBIGUOUS thresholds) stay observational until the
+# QX-01 golden label set calibrates them. Fail-open by design: no verdict → pass.
+_RESOLVER_ENFORCE_NOT_TRADABLE_VERDICT = "NO_TRADE_NOT_TRADABLE"
+
+
+def _filter_enforced_items(items: list, verdicts: dict[str, str]) -> tuple[list, int]:
+    """Drop items whose resolver verdict is NO_TRADE_NOT_TRADABLE. Returns (kept, n_dropped)."""
+    if os.environ.get("RESOLVER_ENFORCE_NOT_TRADABLE", "1") == "0":
+        return items, 0
+    kept = [i for i in items if verdicts.get(i.id) != _RESOLVER_ENFORCE_NOT_TRADABLE_VERDICT]
+    return kept, len(items) - len(kept)
+
+
 from src.store.redis_store import RedisStore
 from src.workers.celery_app import app
 
@@ -594,6 +610,27 @@ def run_sentiment_worker() -> dict:
             else:
                 items_to_process.append(item)
 
+        # Resolver SHADOW (Fase A) + conservative enforcement (review §3.2): resolve
+        # each item's ticker BEFORE inference so the hard NOT_TRADABLE verdict can drop
+        # it pre-LLM. Verdicts are also persisted to news_resolved_entities for QX-01
+        # precision measurement. Fail-open: any error leaves verdicts empty (no drops).
+        resolver_verdicts: dict[str, str] = {}
+        if _RESOLVER_SHADOW_ENABLED and items_to_process:
+            try:
+                from src.connectors.resolver_shadow import resolve_and_log_shadow
+                resolver_verdicts = resolve_and_log_shadow(items_to_process, pg_store)
+            except Exception as _shadow_exc:
+                log.warning("Resolver shadow failed (fail-open): %s", _shadow_exc)
+
+        items_to_process, skipped_not_tradable = _filter_enforced_items(
+            items_to_process, resolver_verdicts
+        )
+        if skipped_not_tradable:
+            log.info(
+                "Resolver enforcement: dropped %d NOT_TRADABLE item(s) pre-inference",
+                skipped_not_tradable,
+            )
+
         # Process batch
         results = asyncio.run(
             process_news_batch(
@@ -607,16 +644,6 @@ def run_sentiment_worker() -> dict:
                 weights=model_weights,
             )
         )
-
-        # Resolver SHADOW (Fase A): persist deterministic ticker resolution for each item
-        # to news_resolved_entities so resolver precision can be measured vs news_labels.
-        # Offline + fail-safe — does NOT affect the signal just written.
-        if _RESOLVER_SHADOW_ENABLED and items_to_process:
-            try:
-                from src.connectors.resolver_shadow import resolve_and_log_shadow
-                resolve_and_log_shadow(items_to_process, pg_store)
-            except Exception as exc:
-                log.warning("resolver shadow batch failed: %s", exc)
 
         # Count fallbacks — distinguish Ollama timeout from ensemble divergence
         fallback_count = sum(1 for r in results if r.fallback_used)
@@ -640,6 +667,7 @@ def run_sentiment_worker() -> dict:
             "finbert_fallbacks": fallback_count,
             "skipped_neutral": skipped_neutral,
             "skipped_stale": skipped_stale,
+            "skipped_not_tradable": skipped_not_tradable,
             "symbols": list(set(r.symbol for r in results)),
         }
 

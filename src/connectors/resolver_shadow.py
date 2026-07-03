@@ -56,15 +56,17 @@ def _providers() -> tuple[OpenFigiClient | None, SecCompanyTickers | None]:
     return _openfigi, _sec
 
 
-def resolve_and_log_shadow(items, pg_store, *, tradable_symbols=None, alias_tickers=None) -> int:
+def resolve_and_log_shadow(items, pg_store, *, tradable_symbols=None, alias_tickers=None) -> dict[str, str]:
     """Resolve each item's primary ticker in shadow and write to news_resolved_entities.
 
-    Returns the number of verdicts written. Never raises.
+    Returns a mapping of item.id -> resolver decision (e.g. "RESOLVED",
+    "NO_TRADE_NOT_TRADABLE"). Never raises — items that error or have no
+    ticker are simply absent from the returned mapping (fail-open).
     """
     openfigi, sec = _providers()
     if tradable_symbols is None:
         tradable_symbols = _tradable_symbols()
-    written = 0
+    verdicts: dict[str, str] = {}
     for item in items:
         try:
             tickers = getattr(item, "asset_tags", None) or []
@@ -88,7 +90,9 @@ def resolve_and_log_shadow(items, pg_store, *, tradable_symbols=None, alias_tick
                 evidence=evidence,
                 url=getattr(item, "url", None),
             )
-            written += 1
+            item_id = getattr(item, "id", None)
+            if item_id is not None:
+                verdicts[str(item_id)] = verdict.decision
         except Exception as exc:
             log.warning("resolver shadow failed for %s: %s", getattr(item, "url", "?"), exc)
-    return written
+    return verdicts
