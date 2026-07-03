@@ -180,6 +180,13 @@ class Config(BaseModel):
         default_factory=lambda: float(os.environ.get("SIGNAL_VELOCITY_BOOST", "0.20"))
     )
 
+    # FIX-03: max age of a news item (from published time) before it is skipped
+    # without inference, and before its signal is excluded from the live cycle.
+    # Editorial news older than this is priced in; tactical horizon is intraday.
+    MAX_NEWS_AGE_HOURS: float = Field(
+        default_factory=lambda: float(os.environ.get("MAX_NEWS_AGE_HOURS", "2"))
+    )
+
     # Fallback settings
     MAX_CONSECUTIVE_FALLBACKS: int = Field(default=3)
 

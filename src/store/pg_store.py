@@ -1655,12 +1655,15 @@ class PostgreSQLStore:
             model_id, ensemble_std, fallback_used, generated_at
         FROM sentiment_signals
         WHERE generated_at >= NOW() - (%s || ' hours')::interval
+          AND (published_at IS NULL
+               OR published_at >= NOW() - (%s || ' hours')::interval)
           AND symbol = ANY(%s)
         ORDER BY symbol, fallback_used ASC, generated_at DESC
     """
 
     def fetch_signals_for_cycle(
-        self, hours: int = 4, symbols: list[str] | None = None
+        self, hours: int = 4, symbols: list[str] | None = None,
+        news_age_hours: float = 2.0,
     ) -> list[SentimentResult]:
         """Fetch one signal per symbol from the last N hours.
 
@@ -1673,6 +1676,10 @@ class PostgreSQLStore:
         FinBERT fallback (so a weak fallback does not overwrite a strong recent
         ensemble read); among same-status signals the most recent wins.
 
+        published_at gate (FIX-03): signals whose news is older than
+        `news_age_hours` are excluded; NULL published_at (legacy rows) passes —
+        the generated_at window still bounds those.
+
         Returns SentimentResult objects with timezone-aware generated_at.
         """
         from datetime import timezone as _tz
@@ -1681,7 +1688,10 @@ class PostgreSQLStore:
         conn = self._get_connection()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(self._FETCH_SIGNALS_FOR_CYCLE, (str(hours), watchlist))
+                cur.execute(
+                    self._FETCH_SIGNALS_FOR_CYCLE,
+                    (str(hours), str(news_age_hours), watchlist),
+                )
                 rows = cur.fetchall()
         except Exception:
             conn.rollback()

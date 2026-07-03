@@ -47,10 +47,11 @@ _MARKETAUX_NEUTRAL_THRESHOLD = 0.2
 # minutes/article on old news both wastes inference and, since the signal's generated_at
 # is the processing time, injects stale sentiment as if it were fresh. Skipping also lets
 # the worker drain a backlog fast (instant skip vs ~minutes/article).
-# 12h: within a session (~7h) news stays fresh, but cross-session leftovers from the prior
-# day (ingestion runs 14-21 UTC; ~17h overnight gap) are skipped so each market open starts
-# on that day's news, not yesterday's.
-_SENTIMENT_MAX_NEWS_AGE_HOURS = 12
+# FIX-03: config-driven (MAX_NEWS_AGE_HOURS, default 2h). Editorial news older than this
+# is priced in; tactical horizon is intraday. Previously a hardcoded 12h (cross-session
+# leftovers from the prior day's 14-21 UTC ingestion window were skipped so each market
+# open started on that day's news) — tightened per the event-time freshness gate.
+_SENTIMENT_MAX_NEWS_AGE_HOURS = config.MAX_NEWS_AGE_HOURS
 # Cap on items scanned per run while skipping stale ones (bounds one task; a large stale
 # backlog drains over a few runs rather than holding everything in news:processing at once).
 _MAX_QUEUE_SCAN_PER_RUN = 5000

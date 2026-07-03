@@ -1863,6 +1863,7 @@ def _build_strategy_instance(entry, bars_df):
             signals = store.fetch_signals_for_cycle(
                 hours=s4_config.signals_lookback_hours,
                 symbols=s4_symbols,
+                news_age_hours=_cfg.MAX_NEWS_AGE_HOURS,  # FIX-03
             )
             if signals:
                 # P1-S4-FRESHNESS: drop signals older than max_signal_age_hours.
