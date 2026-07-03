@@ -43,3 +43,23 @@ Nessuna delle richieste ha richiesto un piano a pagamento.
 - **FAIL sul gate primario** (hit-rate). Drift medio positivo ma non sufficientemente diretto trade-per-trade.
 - Small/mid-cap: **non testato** (0 eventi) — non si può concludere che l'alpha "esiste in un universo diverso" perché quell'universo non è stato campionato in questo run.
 - Raccomandazione (da PO): S7 **non promuovere a paper trading** su questo risultato. Se si vuole testare l'ipotesi small/mid-cap, serve espandere l'universo di simboli monitorato oltre l'attuale, dato che con l'universo corrente FMP non ha restituito eventi small/mid-cap con |surprise|≥5%.
+
+## Addendum — analisi di distribuzione dei 97 eventi (2026-07-03, `scripts/analyze_s7_events.py`)
+
+Domanda: il drift +1.96% con hit-rate 51% è "edge diffuso con direzione rumorosa" o "moneta lanciata + biglietti della lotteria"? E quanto è beta di mercato?
+
+| Metrica (BEAT long, n=76) | Raw | Excess vs SPY (stessa finestra 20 sedute) |
+|---|---|---|
+| Media | +1.96% | **+0.05%** |
+| Mediana | +0.24% | **−1.07%** |
+| Trimmed mean 10% | +1.04% | −1.23% |
+| % positivi | 51% | 46% |
+
+- **Beta, non alpha:** l'intero +1.96% sparisce al netto di SPY (media excess +0.05%, mediana negativa). Il gate misurava il mercato Gen-Mag 2026, non il PEAD.
+- **Concentrazione estrema:** media raw senza i top-5 winner (su 76) = **−0.23%**. Cinque code positive (+45%, +44%, +29%, +24%, +23%) reggono tutto.
+- **Nessuna dose-response:** surprise 5-15% → excess −0.30%; 15-50% → −1.97%; >50% → media +3.93% ma mediana −0.83% (ancora outlier). L'ipotesi "più surprise → più drift" non regge su questo universo.
+- **Instabilità mensile:** maggio −4.40% excess (33% positivi).
+- **Universo:** tutti i 76 eventi con dati sono large-cap (≥$10B) — il bucket small/mid resta a n=0, non testato.
+- Lato MISS (short, n=20): excess +0.16% — niente neanche lì.
+
+**Conclusione:** su large-cap USA il PEAD da raw surprise è indistinguibile da zero — coerente con la letteratura (fattore competuto via). Il FAIL del gate non è "quasi PASS mancato per il hit-rate": al netto del beta non c'è edge da nessuna soglia. Restano due ipotesi S7 non testate, entrambe = decisione PO: (a) universo small/mid (dove il PEAD accademico vive, ma richiede filtri liquidità + copertura dati), (b) overlay qualitativo LLM (transcript tone / guidance, ALPHA-A3/A4) — che era l'edge dichiarato di S7, mentre il numero di surprise è esattamente la parte competuta.
