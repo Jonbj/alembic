@@ -3,7 +3,7 @@ items whose resolver verdict is NO_TRADE_NOT_TRADABLE are dropped BEFORE
 LLM inference. Everything else passes. Any resolver error → fail-open."""
 
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from src.models.news import NewsItem
 
