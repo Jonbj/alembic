@@ -1,0 +1,19 @@
+# S7 PEAD backtest — earnings 2026-01-01..2026-05-15, hold 20d
+
+Earnings events with |surprise|>= 0.05: 0
+Unique symbols: 0 — fetching Alpaca bars...
+Fetching market caps (Finnhub, throttled)...
+Events with price data: 0
+
+bucket     dir   stats (drift = 20d forward return; hit = correct-direction %)
+ALL        BEAT   n=0
+ALL        MISS   n=0
+large      BEAT   n=0
+large      MISS   n=0
+small/mid  BEAT   n=0
+small/mid  MISS   n=0
+
+## ALPHA-A5 GATE (BEAT long): drift >= +1.5% AND hit-rate > 55%
+  ALL       : n=0 — inconclusive
+  large     : n=0 — inconclusive
+  small/mid : n=0 — inconclusive
