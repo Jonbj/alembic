@@ -186,7 +186,7 @@ def build_performance_report(
 
     # Per-model IC/ICIR — must use llm_responses (individual model IDs).
     # sentiment_signals.model_id stores the compound ensemble ID
-    # (e.g. "ensemble:kimi+qwen+deepseek+glm"), so grouping it yields one
+    # (e.g. "ensemble:kimi-k2.6+glm-5.2"), so grouping it yields one
     # bucket and the per-model lookup against current_weights.keys() always
     # returns [].  llm_responses has one row per model per inference with the
     # correct individual model_id (e.g. "kimi-k2.6:cloud").

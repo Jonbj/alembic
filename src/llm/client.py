@@ -696,7 +696,7 @@ class OllamaCloudClient(LLMClient):
 
     model_id: str = ""
     model_name: str = ""
-    # Ollama cloud models (Kimi k2.6, Qwen3.5-397B) are large thinking models.
+    # Ollama cloud models (Kimi K2.6, GLM-5.2 — active sentiment pair) are large thinking models.
     # DK-CoT prompts generate 500-1000 tokens of internal reasoning; 90s gives
     # enough headroom without blocking the batch for too long.
     _OLLAMA_TIMEOUT = 90
