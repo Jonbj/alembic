@@ -40,7 +40,7 @@ pytest tests/ -x -q           # all tests
 pytest tests/workers/ -x -q   # workers only
 ```
 
-All 1700+ tests must pass before opening a PR. CI blocks on any failure.
+The full test suite must pass before opening a PR (~2600+ tests as of 2026-07-03; 11 known pre-existing failures are tracked — do not add new ones). CI blocks on any failure.
 
 ### Frontend development (hot reload)
 

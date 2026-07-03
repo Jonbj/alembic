@@ -4,6 +4,30 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ---
 
+## 2026-07-03
+
+### Sprint 1 — Functional Review Remediation (merged su main)
+- **FIX-01/02**: MarketAux e RSS rimosse dal beat (net-negative: 0/20 winner, 0 news/17g); task env-gated.
+- **FIX-03**: freshness event-time — skip pre-inferenza 12h→2h (`MAX_NEWS_AGE_HOURS`); `sentiment_signals.published_at` (migr. 032) gate-a l'entry S4 nel ciclo live (default `None` per gli altri caller — sell-protection/audit vedono segnali più vecchi by design).
+- **EN-03**: dedup cross-source content-hash+ticker wired su tutti i punti di ingestione.
+- **B13**: drawdown cap unificato — 5% da `trading.yaml`, rimosso hardcode 10% dal portfolio scheduler; doc allineate (exposure 50%, stop S4 2%).
+- **B20**: `reconcile-fills-evening` puntava a `run_daily_report` → ora `run_reconcile_fills_intraday`.
+- **Resolver**: enforcement conservativo ON — `NO_TRADE_NOT_TRADABLE` droppato pre-inferenza (fail-open, `RESOLVER_ENFORCE_NOT_TRADABLE`).
+- **B12**: soglie reali nei gate di backtest (Sharpe ≥0.5 IS / ≥0.3 OOS; erano 0.0 tautologiche).
+
+### S2-1 — Source P&L Funnel (merged su main)
+- `ingestion_stats_daily` (migr. 033) + `news_log.{raw_ingested_at,content_hash,discarded_reason}`; contatori persistiti da ogni worker (fail-safe).
+- `GET /api/quality/sources` + sezione "Source Funnel & P&L" sulla pagina Quality con verdetti alle soglie roadmap §7.4.
+- Backfill conservativo `news_log_id`: 435 orfani, 0 match non ambigui (gap genuino) → bucket `unknown`.
+
+### S7 PEAD — SHELVED (gate ALPHA-A5 FAIL conclusivo)
+- Run FMP (workaround free-tier: backward-walk su `to`): 97 eventi, drift +1.96% ma **excess vs SPY +0.05% (mediana −1.07%)** = beta + 5 outlier; nessuna dose-response; small/mid non testato (n=0). Audit in `strategy_lifecycle_audit`; riapertura solo via decisione PO (universo small/mid o POC transcript-tone — FMP free tier blocca i transcript).
+
+### Doc coherence pass
+- README/ARCHITECTURE/operations/frontend-guide/API/user_guide allineati al codice (B15/B16/B19/B21-B25); beat schedule tables riscritte dalla fonte (`celery_app.py`); API key rimossa da AGENT.md; doc storici archiviati in `docs/archive/`.
+
+---
+
 ## 2026-07-02
 
 ### Connettore GDELT DOC 2.0 — SHELVED (stesso problema del GKG: lag indexing)
@@ -44,7 +68,7 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 - **Counterfactual**: Phase C include `SKIP_THRESHOLD` oltre a `SKIP_EMA` e `SKIP_CAP`; restano esclusi `SKIP_STALE`, `SKIP_FALLBACK` e `SKIP_POSITION`.
 - **Docs**: aggiornata documentazione API, architettura, user guide e frontend operator guide per riflettere Operations e i nuovi counterfactual gate.
 
-### S4 dev-doc punti 1-3 (da `S4_TICKER_SENTIMENT_DEV_INSTRUCTIONS_2026-06-30.md`)
+### S4 dev-doc punti 1-3 (da `docs/archive/2026-06-07-oneoff/S4_TICKER_SENTIMENT_DEV_INSTRUCTIONS_2026-06-30.md`)
 - **(1) Soglie unificate + documentate**: `docs/strategies.md` riscritto col vero chain di gating live (freshness → prefiltro ranker `min_score 0.10`/`min_confidence 0.30` → **order gate** `feedback:entry_threshold` 0.30/dyn → ranking top-N), con tabella "Threshold map" che distingue i 3 concetti e segna il gate legacy `score>0.30 AND EMA20` come INATTIVO sotto `engine=portfolio`. Commento di chiarezza in `S4Config` (min_score = prefiltro, non order threshold). Corretti anche i modelli ensemble nel doc (Kimi+GLM-5.2 cloud, non Qwen/locale).
 - **(2) Resolver in SHADOW (Fase A)**: nuovo `news_resolved_entities` (migr. 031) + `src/connectors/resolver_shadow.py` + `pg_store.write_resolved_entity`. Il worker sentiment calcola e **persiste** la risoluzione ticker deterministica (decision/confidence/ambiguity/directness/tradable + evidenze) per ogni news, **senza gating** del signal live (offline, fail-safe, flag `RESOLVER_SHADOW_ENABLED`). Prepara la misura precision resolver vs `news_labels`.
 - **(3) Decision Log — `SKIP_STALE`**: i signal **forti** (|score| ≥ min_score) scartati per età (> max_age 4h) vengono registrati in `execution_decisions` (`decision=SKIP_STALE`, reason con età+score), così si vede quando si "perde" un segnale buono per scadenza. Frontend: label + help aggiornati.

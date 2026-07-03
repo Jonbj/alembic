@@ -21,8 +21,8 @@ The system currently covers ~89 tickers (US mega-cap equities, ETFs, and interna
 |---|---|
 | `backtest` | Historical signal evaluation only, no live orders |
 | `paper` | Paper trading on Alpaca (no real money) |
-| `semi_auto` | Live trading — human approval required for each order |
-| `full_auto` | Live trading — fully autonomous |
+| `semi_auto` | Live trading — human approval required for each order. **NOT authorized** (`GLOBAL_LIVE_PROMOTION_ENABLED=False`) |
+| `full_auto` | Live trading — fully autonomous. **NOT authorized** (`GLOBAL_LIVE_PROMOTION_ENABLED=False`) |
 | `halted` | All activity frozen (killswitch engaged) |
 
 ---
@@ -34,7 +34,7 @@ The system currently covers ~89 tickers (US mega-cap equities, ETFs, and interna
 **Authentication:** Every protected endpoint requires this HTTP header:
 
 ```
-X-API-Key: eJvMeuHhJS27FPugKIu4qKGgV7roIdLfcv7h20MwuQg
+X-API-Key: <ADMIN_API_KEY from .env — never commit real keys>
 ```
 
 Endpoints that do **not** require authentication: `GET /api/health`, `GET /api/admin/status`, `GET /api/config`, and all `/api/backtest/*` and `/api/performance/*` routes.

@@ -24,7 +24,7 @@ Alembic è un **sistema di trading algoritmico** che combina analisi del sentime
 
 **Come funziona in soldoni:**
 
-1. Ogni 15 minuti, un ensemble di LLM (Kimi, Qwen, DeepSeek, GLM) analizza le notizie finanziarie
+1. Ogni 15 minuti, un ensemble di LLM cloud (coppia attiva: Kimi K2.6 + GLM-5.2, selezionata dinamicamente dal pool) analizza le notizie finanziarie
 2. Ogni articolo produce un **punteggio di sentiment** da -1.0 (molto bearish) a +1.0 (molto bullish)
 3. I punteggi vengono aggregati e filtrati in **segnali di trading**
 4. I segnali alimentano le strategie operative che decidono se comprare, vendere o restare fermi
@@ -403,7 +403,7 @@ Se il grafico è **monotonamente crescente** (da sinistra a destra), il modello 
 | Colonna | Significato |
 |---------|------------|
 | **Ticker** | Simbolo analizzato |
-| **Model** | Quale modello ha prodotto l'analisi (es. `ensemble:kimi+qwen+deepseek+glm`) |
+| **Model** | Quale modello ha prodotto l'analisi (es. `ensemble:kimi-k2.6+glm-5.2`, o `finbert` per il fallback) |
 | **Polarity** | Sentiment del modello: ▲ positivo / ▼ negativo / — neutro |
 | **Confidence** | Livello di certezza del modello |
 | **Divergence σ** | Deviazione standard tra i modelli — alto (>0.3) = disaccordo |
@@ -664,7 +664,7 @@ Ogni strategia deve superare 5 gate per entrare nel portfolio live. Ecco cosa si
 ```
 Notizia finanziaria
     ↓
-Ensemble di LLM (Kimi, Qwen, DeepSeek, GLM)
+Ensemble di LLM cloud (coppia attiva: Kimi K2.6 + GLM-5.2)
     ↓ Ogni modello analizza l'articolo e produce:
     • polarity (-1 a +1)
     • confidence (0 a 1)

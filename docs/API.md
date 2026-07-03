@@ -66,7 +66,7 @@ When `signal_id` is provided, returns the exact historical signal row. This is u
     "score": 0.42,
     "confidence": 0.78,
     "reasoning": "Strong bullish tone from earnings beat",
-    "model_id": "ensemble:kimi-k2.6+qwen3.5+deepseek-v4-pro+glm-5.1",
+    "model_id": "ensemble:kimi-k2.6+glm-5.2",
     "ensemble_std": 0.11,
     "fallback_used": false,
     "generated_at": "2026-06-03T10:30:00Z"
@@ -91,6 +91,18 @@ curl "http://localhost:8001/api/signals/history?symbol=AAPL&limit=100"
 ```
 
 ---
+
+## Quality Endpoints
+
+### `GET /api/quality/metrics`
+QX-02 dashboard data: per-model polarity/confidence distribution, signal near-zero/fallback
+rates, extraction precision/recall from the QX-01 label set. Query param: `days` (default 14).
+
+### `GET /api/quality/sources`
+S2-1 Source Funnel & P&L (FIX-04): per-source ingestion funnel (`ingestion_stats_daily`),
+signal latency p50/p95 (`generated_at − published_at`), near-zero rate, trade hit-rate and
+net P&L, plus `trace_coverage` (signals linked to a news source). Query param: `days`
+(default 14). Sources in `trades` without a `news_log` link report as `unknown`.
 
 ## Admin Endpoints
 

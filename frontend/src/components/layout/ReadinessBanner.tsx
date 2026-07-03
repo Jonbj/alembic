@@ -90,7 +90,7 @@ export function ReadinessBanner() {
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>{flagChips(data, marketOpen)}</div>
       {state === 'degraded' || state === 'blocked' ? (
         <span style={{ opacity: 0.85, fontStyle: 'italic' }}>
-          HTTP 200 ≠ healthy — vedi flag. Runbook: docs/CONTROLLED_PAPER_PREFLIGHT_RUNBOOK §7
+          HTTP 200 ≠ healthy — vedi flag. Runbook: docs/archive/2026-06-p2-milestone/CONTROLLED_PAPER_PREFLIGHT_RUNBOOK §7
         </span>
       ) : state === 'closed' ? (
         <span style={{ opacity: 0.7, fontStyle: 'italic' }}>

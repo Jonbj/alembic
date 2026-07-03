@@ -286,7 +286,7 @@ Execution checklist (per tick):
 - `check_signal_divergence(signal_syms, order_syms)`: Jaccard overlap < 0.8 (defined in `src/monitoring/alerts.py`)
 - `check_execution_divergence(fill_ratio, 1.0)`: |fill_ratio − 1.0| > 0.20
 
-**Strategy lifecycle / promotion gate:** `src/strategies/promotion.py` implements an ordered state machine (`research → paper → supervised_paper → live`). Promotions require: `promotion_blocked=False`, `gate_report_id` set, `GLOBAL_LIVE_PROMOTION_ENABLED=True` (currently `False`), and sequential transition. Demotions are always allowed. Every transition is appended to `strategy_lifecycle_audit` (immutable). See `docs/P2_STATUS_2026-06-21.md` for current authorization state.
+**Strategy lifecycle / promotion gate:** `src/strategies/promotion.py` implements an ordered state machine (`research → paper → supervised_paper → live`). Promotions require: `promotion_blocked=False`, `gate_report_id` set, `GLOBAL_LIVE_PROMOTION_ENABLED=True` (currently `False`), and sequential transition. Demotions are always allowed. Every transition is appended to `strategy_lifecycle_audit` (immutable). Authoritative runtime state: `strategy_lifecycle` DB table (historical P2 status archived in `docs/archive/2026-06-p2-milestone/`).
 
 ### 2.9 Trade Analytics Engine (Phase A)
 
@@ -750,4 +750,4 @@ All three P2-05 safety requirements are implemented and test-covered. Kimi P2 Ac
 
 **Runtime monitoring watchlist (R-04 through R-12 remain open):** see `docs/RESIDUAL_RISK_REGISTER.md` for full tracking. Key open items: soft CI gates (mypy/pip-audit/gitleaks), S1 backtest report stale (needs PIT regeneration before promotion discussion), S4/S7 no confirmed IC > placebo.
 
-See `docs/P2_STATUS_2026-06-21.md` and `docs/P2_ACCEPTANCE_AUDIT_2026-06-21.md` for full P2 status.
+Full P2 milestone history archived in `docs/archive/2026-06-p2-milestone/` (P2_STATUS + P2_ACCEPTANCE_AUDIT + preflight runbook).

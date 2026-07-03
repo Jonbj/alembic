@@ -2,7 +2,7 @@
 
 This document describes each trading strategy, its signal logic, sizing rules, and integration with the portfolio orchestrator.
 
-> **Governance note (2026-06-21):** Live trading is NOT authorized. Strategy promotions require a passing gate report, an approved `strategy_lifecycle` DB row, and explicit PO sign-off. `GLOBAL_LIVE_PROMOTION_ENABLED` must remain `False`. See `docs/P2_STATUS_2026-06-21.md` for current authorization status.
+> **Governance note (2026-06-21):** Live trading is NOT authorized. Strategy promotions require a passing gate report, an approved `strategy_lifecycle` DB row, and explicit PO sign-off. `GLOBAL_LIVE_PROMOTION_ENABLED` must remain `False`. Authoritative runtime state: `strategy_lifecycle` DB table (historical P2 status: `docs/archive/2026-06-p2-milestone/P2_STATUS_2026-06-21.md`).
 
 ---
 
