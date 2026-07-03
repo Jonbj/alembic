@@ -207,8 +207,8 @@ class PostgreSQLStore:
             raise
 
     _INSERT_NEWS_LOG = """
-        INSERT INTO news_log (title, url, source, ticker, body_snippet, raw_sentiment, published_at, extraction_method)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO news_log (title, url, source, ticker, body_snippet, raw_sentiment, published_at, extraction_method, raw_ingested_at, content_hash)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (url, ticker) DO NOTHING
         RETURNING id
     """
@@ -245,6 +245,13 @@ class PostgreSQLStore:
             raw_sentiment = computed_sentiment
         else:
             raw_sentiment = item.marketaux_sentiment if isinstance(item, MarketAuxNewsItem) else None
+
+        from src.connectors.deduplicator import compute_dedup_hash
+        try:
+            content_hash = compute_dedup_hash(item)
+        except Exception:
+            content_hash = None
+
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
@@ -259,6 +266,8 @@ class PostgreSQLStore:
                         raw_sentiment,
                         item.timestamp,
                         getattr(item, "extraction_method", "") or None,
+                        item.raw_ingested_at,
+                        content_hash,
                     ),
                 )
                 row = cur.fetchone()
