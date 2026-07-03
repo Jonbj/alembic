@@ -1,0 +1,36 @@
+# S7 PEAD backtest — earnings 2026-01-01..2026-05-15, hold 20d (FMP)
+
+  ...FMP call 1 (to=2026-05-15): 63 records, 2026-04-08..2026-05-13
+  ...FMP call 2 (to=2026-05-05): 54 records, 2026-04-08..2026-05-05
+  ...FMP call 3 (to=2026-04-25): 21 records, 2026-04-08..2026-04-24
+  ...FMP call 4 (to=2026-04-15): 8 records, 2026-04-08..2026-04-15
+  ...FMP call 5 (to=2026-04-05): 0 records, empty
+  ...FMP call 6 (to=2026-03-26): 78 records, 2026-01-08..2026-03-19
+  ...FMP call 7 (to=2026-03-16): 78 records, 2025-12-18..2026-03-12
+  ...FMP call 8 (to=2026-03-06): 78 records, 2025-12-10..2026-03-05
+  ...FMP call 9 (to=2026-02-24): 69 records, 2025-12-04..2026-02-24
+  ...FMP call 10 (to=2026-02-14): 72 records, 2025-11-18..2026-02-13
+  ...FMP call 11 (to=2026-02-04): 65 records, 2025-11-06..2026-02-04
+  ...FMP call 12 (to=2026-01-25): 71 records, 2025-10-28..2026-01-22
+  ...FMP call 13 (to=2026-01-15): 78 records, 2025-10-21..2026-01-15
+  ...FMP call 14 (to=2026-01-05): 80 records, 2025-10-09..2025-12-19
+  ...FMP call 15 (to=2025-12-26): 82 records, 2025-09-29..2025-12-19
+Earnings events with |surprise|>= 0.05: 97
+Unique symbols: 66 — fetching Alpaca bars...
+  ...bars 66/66
+Fetching market caps (FMP)...
+  ...market caps 50/66
+Events with price data: 96
+
+bucket     dir   stats (drift = 20d forward return; hit = correct-direction %)
+ALL        BEAT   n=  76  mean_drift=+1.96%  hit_rate=51%
+ALL        MISS   n=  20  mean_drift=-0.13%  hit_rate=55%
+large      BEAT   n=  76  mean_drift=+1.96%  hit_rate=51%
+large      MISS   n=  20  mean_drift=-0.13%  hit_rate=55%
+small/mid  BEAT   n=0
+small/mid  MISS   n=0
+
+## ALPHA-A5 GATE (BEAT long): drift >= +1.5% AND hit-rate > 55%
+  ALL       : drift=+1.96% hit=51% n=76 → FAIL
+  large     : drift=+1.96% hit=51% n=76 → FAIL
+  small/mid : n=0 — inconclusive
