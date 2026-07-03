@@ -112,6 +112,11 @@ class Config(BaseModel):
     # Finnhub company-news (clean explicit ticker tagging, US equities, free tier 60/min).
     FINNHUB_API_KEY: str = Field(default_factory=lambda: os.environ.get("FINNHUB_API_KEY", ""))
 
+    # Financial Modeling Prep — historical earnings calendar (ALPHA-A5 S7 backtest).
+    # Finnhub's calendar/earnings free tier only covers ~30 days of history; FMP's
+    # /stable/earnings-calendar covers the full requested range.
+    FMP_API_KEY: str = Field(default_factory=lambda: os.environ.get("FMP_API_KEY", ""))
+
     # Ticker resolution (design doc §4). OpenFIGI key is optional (raises rate limits
     # ~25→~250 req/min). SEC requires a User-Agent with a contact for company_tickers.
     OPENFIGI_API_KEY: str = Field(default_factory=lambda: os.environ.get("OPENFIGI_API_KEY", ""))
