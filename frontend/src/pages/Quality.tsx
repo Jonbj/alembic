@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchQualityMetrics } from '@/api/quality'
+import { fetchQualityMetrics, fetchQualitySources } from '@/api/quality'
 import { KPICard } from '@/components/shared/KPICard'
 import { HelpButton } from '@/components/shared/HelpButton'
+import { sourceVerdict } from './qualitySourceVerdict'
 
 function n3(v: number | null | undefined): string {
   return v == null ? '—' : Number(v).toFixed(3)
@@ -84,6 +85,11 @@ export default function Quality() {
     queryFn: () => fetchQualityMetrics(days),
     refetchInterval: 120000,
   })
+  const sourcesQ = useQuery({
+    queryKey: ['quality-sources', days],
+    queryFn: () => fetchQualitySources(days),
+    refetchInterval: 120000,
+  })
 
   return (
     <div>
@@ -150,6 +156,79 @@ export default function Quality() {
           <p style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 16 }}>Finestra {data.window_days}g · auto-refresh 2 min</p>
         </>
       )}
+
+      <h3 style={{ fontSize: 14, fontWeight: 600, margin: '24px 0 8px' }}>Source Funnel &amp; P&amp;L</h3>
+      {sourcesQ.isLoading && <p style={{ color: 'var(--text-muted)' }}>Loading…</p>}
+      {sourcesQ.error != null && <p style={{ color: 'var(--red)' }}>Error loading source metrics</p>}
+      {sourcesQ.data && (() => {
+        const s = sourcesQ.data
+        const names = Array.from(new Set([
+          ...s.funnel.map((f) => f.source),
+          ...s.signals.map((x) => x.source),
+          ...s.trades.map((t) => t.source),
+        ]))
+        const toneColor: Record<string, string> = {
+          good: 'var(--green, #166534)',
+          warn: 'var(--amber, #d97706)',
+          bad: 'var(--red, #991b1b)',
+          neutral: 'var(--text-muted)',
+        }
+        return (
+          <>
+            <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: '0 0 8px' }}>
+              Trace coverage: {s.trace_coverage.linked ?? '—'}/{s.trace_coverage.total ?? '—'} segnali con fonte nota ·
+              soglie rimozione (roadmap §7.4): hit&lt;40% ∧ P&amp;L&lt;0 · latenza p50&gt;24h · near-zero&gt;50%
+            </p>
+            {names.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Nessun dato ancora — il funnel si popola coi run di ingestione.</p>
+            ) : (
+              <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Fonte</th><th>Fetched</th><th>Queued</th><th>Dup</th><th>No ticker</th><th>Stale</th><th>Parse fail</th>
+                      <th>Segnali</th><th>Near-zero</th><th>Lat p50</th><th>Trade</th><th>Hit</th><th>P&amp;L</th><th>Verdetto</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {names.map((name) => {
+                      const f = s.funnel.find((x) => x.source === name)
+                      const sig = s.signals.find((x) => x.source === name)
+                      const trd = s.trades.find((x) => x.source === name)
+                      const v = sourceVerdict({
+                        hitRate: trd?.hit_rate ?? null,
+                        totalPnl: trd?.total_net_pnl ?? null,
+                        latencyP50Min: sig?.latency_p50_min ?? null,
+                        nearZeroRate: sig?.near_zero_rate ?? null,
+                      })
+                      return (
+                        <tr key={name}>
+                          <td><strong>{name}</strong></td>
+                          <td>{f?.fetched ?? '—'}</td>
+                          <td>{f?.queued ?? '—'}</td>
+                          <td>{f?.duplicates ?? '—'}</td>
+                          <td>{f?.discarded_no_ticker ?? '—'}</td>
+                          <td>{f?.discarded_stale ?? '—'}</td>
+                          <td>{f?.parse_fail ?? '—'}</td>
+                          <td>{sig?.n_signals ?? '—'}</td>
+                          <td>{pct(sig?.near_zero_rate)}</td>
+                          <td>{sig?.latency_p50_min != null ? `${Math.round(sig.latency_p50_min)}m` : '—'}</td>
+                          <td>{trd?.n_trades ?? '—'}</td>
+                          <td>{pct(trd?.hit_rate)}</td>
+                          <td style={{ color: (trd?.total_net_pnl ?? 0) < 0 ? 'var(--red)' : undefined }}>
+                            {trd?.total_net_pnl != null ? `$${trd.total_net_pnl.toFixed(2)}` : '—'}
+                          </td>
+                          <td style={{ color: toneColor[v.tone], fontWeight: 700 }} title={v.reasons.join('; ')}>{v.tone}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )
+      })()}
     </div>
   )
 }
