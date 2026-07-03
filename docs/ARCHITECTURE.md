@@ -5,9 +5,9 @@
 # Alembic — Technical Architecture
 
 **Technical Architecture Document**
-**Version:** 7.0.0
-**Date:** 2026-06-06
-**Status:** Phase A (Trade Analytics) + Phase B (Loss Feedback Loop) + Phase C (Counterfactual Analysis) + Portfolio Governance
+**Version:** 7.1.0
+**Date:** 2026-07-03
+**Status:** Phase A/B/C + Portfolio Governance + Sprint 1 remediation (FIX-01/02/03, EN-03, B13/B20, resolver enforcement, gate thresholds) + S2-1 Source P&L Funnel. S7 SHELVED (ALPHA-A5 FAIL).
 
 ---
 
@@ -30,9 +30,10 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 │                   OFFLINE SENTIMENT PIPELINE                      │
 │                                                                   │
 │  News Sources ──► NewsIngestionWorker ──► Redis news:queue       │
-│  (GDELT GKG,                              (SHA-256 dedup, TTL)   │
-│   MarketAux,       ▼                                             │
-│   Alpaca News) SentimentWorker ──► LLM Ensemble (2 models)       │
+│  (GDELT GKG,                    (id + content-hash dedup, TTL)   │
+│   Alpaca News;     ▼                                             │
+│   MarketAux/RSS SentimentWorker ──► LLM Ensemble (2 models)      │
+│   OFF 2026-07-03)                                                │
 │                                         ↓              ↓         │
 │                                   Redis signal    PostgreSQL      │
 │                                   (TTL 4h)        audit trail    │
@@ -115,17 +116,18 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 | Component | File | Role |
 |-----------|------|------|
 | `GDELTGKGConnector` | `src/connectors/gdelt_gkg.py` | Fetches 15-min GKG bulk CSVs, extracts English financial themes |
-| `MarketAuxConnector` | `src/connectors/marketaux.py` | Paid news API with pre-tagged ticker symbols |
+| `MarketAuxConnector` | `src/connectors/marketaux.py` | **Disabled from beat 2026-07-03 (FIX-01, net-negative)** — paid news API with pre-tagged tickers; env-gated |
 | `AlpacaNewsConnector` | `src/connectors/alpaca_news.py` | Broker-native Benzinga news |
 | `SecEdgarConnector` | `src/connectors/sec_edgar.py` | SEC EDGAR 8-K/10-Q filings |
-| `NewsDeduplicator` | `src/connectors/deduplicator.py` | SHA-256 hash dedup via Redis set (TTL 2h) |
+| `NewsDeduplicator` | `src/connectors/deduplicator.py` | id dedup + **content-hash+ticker cross-source dedup (EN-03)** via Redis SET NX (TTL 4h) |
 | `TickerExtractor` | `src/connectors/ticker_extractor.py` | Company name → ticker via PostgreSQL lookup |
+| `EarningsCalendarProvider` | `src/connectors/earnings_calendar.py` | Finnhub earnings calendar → deterministic surprise (feeds `earnings-pead` worker) |
 
 ### 2.2 Sentiment Pipeline
 
 | Component | File | Role |
 |-----------|------|------|
-| `SentimentWorker` | `src/workers/sentiment.py` | Consumes `news:queue` (skips news >24h without inference), runs ensemble, writes signal, shadow-resolves the ticker (§3.2) |
+| `SentimentWorker` | `src/workers/sentiment.py` | Consumes `news:queue`; skips news older than `MAX_NEWS_AGE_HOURS` (**2h**, FIX-03) pre-inference; resolver runs **before** inference and drops `NO_TRADE_NOT_TRADABLE` items (conservative enforcement, fail-open); writes signal with `published_at` |
 | `LLMClient` (ABC) | `src/llm/client.py` | Ollama cloud clients: Kimi K2.6, GLM-5.2 (Qwen3.5 removed — ticker extraction too aggressive) |
 | `EnsembleAggregator` | `src/llm/ensemble.py` | Weighted averaging + divergence check (std > 0.30) |
 | `FinBERTClient` | `src/llm/finbert.py` | Local fallback: entropic confidence from 3-class softmax |
@@ -140,6 +142,13 @@ most recent **ensemble** signal over a FinBERT fallback (`ORDER BY symbol,
 fallback_used ASC, generated_at DESC`). A low-conviction fallback generated after a
 strong ensemble signal therefore does not overwrite it; a fallback is used only when no
 ensemble signal exists in the window.
+
+**Event-time gate (FIX-03):** the live cycle additionally filters on
+`sentiment_signals.published_at` — signals whose *news* is older than
+`MAX_NEWS_AGE_HOURS` (default 2h) are excluded from S4 entry, even if the signal itself
+is recent. NULL `published_at` (legacy rows) passes. The bound is applied **only** at
+the S4 entry fetch; sell-protection and audit lookups deliberately see older signals
+(`fetch_signals_for_cycle(news_age_hours=None)` default).
 
 ### 2.3 Regime Detection
 
@@ -189,7 +198,7 @@ Strategies produce sleeve-local weights: fractions of their own sleeve, not the 
 | **S2** | Volatility Risk Premium | 0% | **Disabled** (research) | Proxy: overnight gap on low-VRP days. OOS Sharpe −0.55; all gates failed. Needs options infrastructure for v2 |
 | **S3** | Cross-Sectional Residual Momentum | 0% | Research | Cross-sectional rank of residual 1-12M returns; PIT sizing wired (P1-07); gate 3/5 failed |
 | **S4** | News-Driven Tactical | 10% | `promotion_blocked` (P0-13) | LLM ensemble sentiment → BUY gate: score > 0.3 AND price > EMA20; capped at 10% until dedicated gate report |
-| **S7** | PEAD (Post-Earnings Announcement Drift) | 15% (config only) | **R&D/contained** — NOT in portfolio orchestrator (P0-13) | Implementation complete (worker, pead_signals table, API routes) but NOT wired into portfolio cycle. Promotion blocked. |
+| **S7** | PEAD (Post-Earnings Announcement Drift) | 0% | **SHELVED 2026-07-03** (ALPHA-A5 FAIL: drift = SPY beta + outliers, no edge net of market) | Code kept (8-K worker, pead_signals) as building block for S9/vector B. Reopening requires PO decision (small/mid universe or transcript-tone POC). |
 
 #### S7 — PEAD (Post-Earnings Announcement Drift)
 Implementation: Worker `src/workers/pead_worker.py` classifies SEC 8-K filings via Ollama LLM. Writes to `pead_signals` table. Routes at `src/api/routes/pead_routes.py`. Schedule: beat task `pead-ingestion` ogni 30 min, 14:00-21:00 UTC, queue `inference`.
@@ -427,21 +436,23 @@ Article arrives via GDELT/MarketAux/Alpaca
     │
     ▼
 NewsIngestionWorker
-    ├── SHA-256 dedup (Redis set, TTL 2h)
+    ├── dedup: by id AND by content-hash+ticker (EN-03, Redis SET NX TTL 4h)
     ├── TickerExtractor (PostgreSQL ticker_lookup) + RSS cashtag/ambiguity guard
     │       bare F/T/C/GS/CAT/ON… require a $cashtag (minimise false_positive_ticker_rate)
     │       [ticker-resolution layer: built/verified, enforcement gated — see §3.1]
     └── LPUSH news:queue (annotated NewsItem JSON)
     │
     ▼
-SentimentWorker (batch 21 items/cycle, semaphore=3 concurrent)
+SentimentWorker (batch 12 items/cycle, semaphore=2 concurrent)
+    ├── skip news older than MAX_NEWS_AGE_HOURS (2h) — FIX-03
+    ├── resolver (shadow log + conservative enforcement: NO_TRADE_NOT_TRADABLE dropped)
     ├── sanitize_text()
     ├── LLM Ensemble (2 × Ollama cloud: Kimi K2.6 + GLM-5.2, asyncio.gather)
     │   ├── divergence check (std > 0.30 → FinBERT via run_in_executor)
     │   └── budget check (daily cap → FinBERT via run_in_executor)
     ├── score = polarity × confidence
     ├── SET sentiment:signal:{sym} EX 14400 (Redis, TTL 4h)
-    └── INSERT sentiment_signals (PostgreSQL, permanent)
+    └── INSERT sentiment_signals (PostgreSQL, permanent — includes published_at, news_log_id)
     │
     ▼
 ExecutionWorker (every 15 min, active only when execution.engine=legacy_sentiment)
@@ -498,7 +509,13 @@ External providers are **fail-open** (an OpenFIGI/SEC outage lowers confidence, 
 fabricates a match) and cached (OpenFIGI per-ticker; SEC company_tickers once). Config:
 `OPENFIGI_API_KEY` (optional, raises rate limits), `SEC_USER_AGENT`.
 
-**Status (2026-06-30):** decision core + providers built, unit-tested and verified live
+**Status (2026-07-03):** conservative enforcement is **ON**: items whose resolver
+verdict is `NO_TRADE_NOT_TRADABLE` are dropped before LLM inference (fail-open on
+resolver errors; disable via `RESOLVER_ENFORCE_NOT_TRADABLE=0`). Finer gates
+(`NO_TRADE_LOW_CONF`, ambiguity) remain observational until QX-01 calibration — the
+2026-07-02 SNDK→AAPL mistag (see `docs/FORENSIC_DAILY_REPORT_2026-07-02.md`) was flagged
+`NO_TRADE_LOW_RESOLUTION_CONFIDENCE` in shadow and is the standing evidence for
+completing QX-01. Previous status (2026-06-30): decision core + providers built, unit-tested and verified live
 (AAPL→RESOLVED, garbage→NO_TRADE, SEC NVIDIA→NVDA). **Shadow mode is wired** (Fase A):
 the SentimentWorker resolves each news ticker and persists the verdict to
 `news_resolved_entities` (`src/connectors/resolver_shadow.py`, fail-safe, flag
@@ -525,6 +542,14 @@ the hot path):
 | `scripts/validate_ticker_sentiment.py` | offline | extraction precision/recall/FP per source from the label set |
 | Quality dashboard | `/quality` + `/api/quality/metrics` | live per-model polarity/confidence, near-zero/fallback rate, extraction precision |
 
+**Source funnel (S2-1, 2026-07-03):** `ingestion_stats_daily` (migr. 033) persists
+per-(day, source) counters (fetched/queued/duplicates/discarded); `news_log` gained
+`raw_ingested_at`, `content_hash`, `discarded_reason` (populated by S2-2, pending);
+`GET /api/quality/sources` aggregates funnel + per-source latency
+(`generated_at − published_at`) + per-source trade P&L; the Quality page renders it with
+removal-threshold verdicts (roadmap §7.4). Legacy signals without `news_log_id` report
+as source `unknown` (backfill script matched 0 rows unambiguously — genuine 6-9 day gap).
+
 `extraction_method` on `news_log` (QT-03: `source_metadata` / `cashtag` / `org_lookup` /
 `regex`) lets precision be measured per extraction path and confirms QT-01 removed the
 watchlist fallback. First pre-fix baseline (17 labels): extraction precision 0.24,
@@ -539,7 +564,8 @@ enforce with **measured** gates.
 |-----|------|-----|---------|
 | `sentiment:signal:{SYM}` | JSON string | 4h | Latest signal per symbol |
 | `news:queue` | List | — | Inbound article queue |
-| `news:dedup:{HASH}` | String | 2h | Article URL deduplication |
+| `news:dedup:{HASH}` | String | 4h | Article id deduplication |
+| `dedup:content:{HASH}:{SYM}` | String | 4h | Cross-source content dedup (EN-03) |
 | `killswitch_active` | String (`0`/`1`) | None | Emergency halt flag |
 | `system:mode` | String | None | Operating mode |
 | `llm:models` | String | None | Active LLM subset |
@@ -565,10 +591,27 @@ CREATE TABLE sentiment_signals (
     model_id VARCHAR(200),
     ensemble_std FLOAT,
     fallback_used BOOLEAN DEFAULT FALSE,
-    forward_return FLOAT,          -- populated by ForwardReturnWorker
+    forward_return FLOAT,          -- populated by ForwardReturnWorker (Alpaca daily bars)
     generated_at TIMESTAMPTZ NOT NULL,
+    published_at TIMESTAMPTZ,      -- event-time of the news (migr. 032, FIX-03); NULL = legacy
+    news_log_id BIGINT,            -- trace link to news_log (QS-09)
     UNIQUE (symbol, generated_at)
 );
+
+-- S2-1 (migr. 033): per-source ingestion funnel, upsert-incremented by each worker run
+CREATE TABLE ingestion_stats_daily (
+    day                  DATE        NOT NULL,
+    source               VARCHAR(50) NOT NULL,
+    fetched              INTEGER     NOT NULL DEFAULT 0,
+    queued               INTEGER     NOT NULL DEFAULT 0,
+    duplicates           INTEGER     NOT NULL DEFAULT 0,
+    discarded_no_ticker  INTEGER     NOT NULL DEFAULT 0,
+    discarded_stale      INTEGER     NOT NULL DEFAULT 0,
+    parse_fail           INTEGER     NOT NULL DEFAULT 0,
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (day, source)
+);
+-- news_log also gained (migr. 033): raw_ingested_at, content_hash, discarded_reason
 
 CREATE TABLE llm_responses (
     id SERIAL PRIMARY KEY,
@@ -634,23 +677,29 @@ CREATE TABLE decay_reports (
 | Task | Cron (UTC) | Description |
 |------|-----------|-------------|
 | `run-news-ingestion` | */15 14-21 Mon-Fri | GDELT GKG → news queue |
-| `run-marketaux-ingestion` | */15 14-21 Mon-Fri | MarketAux → news queue |
 | `run-alpaca-ingestion` | */15 14-21 Mon-Fri | Alpaca/Benzinga → news queue |
 | `sentiment-worker` | */15 14-21 Mon-Fri | news queue → LLM → Redis/PG |
 | `run-execution` | */15 14-21 Mon-Fri | signals → Alpaca orders (active only when `execution.engine=legacy_sentiment`) |
-| `portfolio-cycle` | 0 14-21 Mon-Fri | Weight-then-order multi-strategy (active only when `execution.engine=portfolio`) |
+| `portfolio-cycle` | 7,22,37,52 14-21 Mon-Fri | **Active order path** — weight-then-order multi-strategy (when `execution.engine=portfolio`) |
 | `regime-detector` | 7:00 Mon-Fri | FRED/yfinance → LLM → Redis |
-| `forward-return-worker` | 22:00 daily | Populate forward returns from yfinance |
+| `regime-detector-premarket` | 13:30 Mon-Fri | Safety-net rerun 30 min before NYSE open (P0-09) |
+| `reconcile-fills-intraday` | 12,27,42,57 14-21 Mon-Fri | Alpaca fill prices → trades table |
+| `reconcile-fills-evening` | 21:30 Mon-Fri | EOD reconcile pass (B20 fixed 2026-07-03) |
+| `earnings-pead` | :10 11-23 Mon-Fri | Finnhub earnings calendar → deterministic surprise |
+| `pead-ingestion` | 5,35 14-21 Mon-Fri | S7 8-K LLM classification (R&D — S7 shelved) |
+| `forward-return-worker` | 22:00 daily | Populate forward returns from **Alpaca daily bars** |
 | `risk-monitor` | 22:30 daily | HHI + correlation + drawdown |
 | `performance-daily` | 3:00 daily | IC + drift + Telegram digest |
 | `drift-detection` | 4:30 Sunday | PSI + CUSUM over weekly window |
 | `check-suggestion-expiry` | 5:00 daily | Expire old weight suggestions |
 | `performance-weekly` | 4:00 Monday | LOO ICIR → weight suggestion |
 | `run-retention-sweep` | 3:30 daily | Nightly old data cleanup |
-| `decay-monitor` | 23:00 1st of month | Actual vs backtest baseline |
+| `decay-monitor` | 21:00 daily (temporary during paper validation; monthly afterwards) | Actual vs backtest baseline |
 | `poll-telegram-updates` | every 5 seconds | Weight approve/reject keyboard |
 | `loss-feedback-check` | */30 14-21 Mon-Fri | Phase B: detect loss patterns → raise feedback threshold; write legacy/audit scale state |
 | `counterfactual-worker` | 22:45 daily | Phase C: compute 1h counterfactual returns for SKIP_THRESHOLD/SKIP_EMA/SKIP_CAP rows |
+
+> Removed from the beat (tasks kept, env-gated): `run-marketaux-ingestion` + `run-rss-ingestion` (FIX-01/02, 2026-07-03 — net-negative sources); `sec-edgar-ingestion` (2026-07-02, CIK→ticker bug); `finnhub-ingestion` (2026-07-01, flood).
 
 ---
 
@@ -678,14 +727,16 @@ See `README.md` → *Pre-Live Blockers* section for the authoritative list of cr
 | Gap | Description | Planned |
 |-----|-------------|---------|
 | NULL P&L on notional orders | `qty` can be NULL at stop-loss close if fill hasn't been reconciled; `reconcile_trade_fills` window is 24h | Wire Alpaca position qty at close |
-| Vol targeting not active | `PortfolioVolTargeter` is instantiated in `portfolio_scheduler.py` but `strategy_returns` is not passed to `run_cycle()` — vol scaling branch never executes | Wire strategy returns from DB |
+| ~~Vol targeting not active~~ | **RESOLVED**: `strategy_returns` is passed to `run_cycle()` (`portfolio_scheduler.py` ~1136-1145); vol scaling executes before the ConstraintEnforcer (P2-05-C) | Done |
 | Strategies API placeholder | `GET /api/strategies` equity curves use `random.gauss()`; gate `passed` values are not from actual metrics | Phase D |
 | Analytics tab empty on fresh deploy | All analytics charts show "No data yet" until closed trades accumulate in the `trades` table | Operational |
 | Auto-Improve counterfactual empty | Phase C data requires at least one nightly run of `counterfactual-worker` after SKIP decisions are recorded | Operational |
 | S4 no dedicated gate report | `reports/s4_backtest/` does not exist; S4 allocation capped at 10% until this is produced | Research |
 | S2 proxy vs real options | Current S2 is an equity proxy (overnight gap); actual cash-secured short put needs options chain data + IBKR adapter | Phase D |
 | ConstraintEnforcer loses sleeve provenance | Final merged orders have `strategy_id="merged"`; per-sleeve exposure constraints cannot be enforced | Future |
-| Feedback loop blind to S1 | `run_loss_feedback_check` reads `trades` table which today is populated only by `run-execution` (S4 flow). Portfolio-cycle trades not yet written to `trades`. | Wire portfolio_scheduler to open/close_trade |
+| Feedback loop blind to S1 | Partially resolved: portfolio-cycle BUY trades are written immediately after `submit_order()` (B28 fix, 2026-07-02); SELL/stop-loss still batch-written | Monitor |
+| Risk monitor uses wrong NAV and placeholder exposure | `_fetch_strategy_data` approximates NAV from cumulative P&L (B48) and `total_exposure` is hardcoded `1.0` → the daily "exposure 100% > 50%" alert has fired identically 10/10 days and cannot detect a real breach (forensic report 2026-07-02) | Fix with S2-7: real Alpaca equity + computed exposure |
+| Ensemble barely load-bearing | 79.5% of 2026-07-02 signals fell back to FinBERT via divergence std>0.30 (not timeouts/budget) — the 2-model cloud ensemble is discarded 4 times out of 5 | Measure via biweekly quality check; options: recalibrate divergence threshold or 3rd model with median vote |
 
 ### P2-05 Resolved Safety Items (IMPLEMENTED — commit `55cbf56`, 2026-06-21)
 

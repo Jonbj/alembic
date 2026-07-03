@@ -48,6 +48,7 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 ║  MarketAux ─────┼──► NewsIngestionWorker ──► Redis news queue               ║
 ║  Alpaca News ───┘         (dedup via SHA-256 hash, TTL 4 h)                 ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
+> **2026-07-03:** MarketAux and RSS are **disabled from the beat** (FIX-01/02 — net-negative sources; tasks kept, env-gated). Dedup is now id-based **and** content-hash+ticker cross-source (EN-03). News older than `MAX_NEWS_AGE_HOURS` (2h) is skipped before inference and gated again at cycle time via `sentiment_signals.published_at` (FIX-03).
                                     │ (consumed as fast as produced)
                                     ▼
 ╔══════════════════════════════════════════════════════════════════════════════╗
@@ -55,8 +56,8 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 ║                                                                              ║
 ║  Redis news queue ──► SentimentWorker                                        ║
 ║                           │                                                  ║
-║                           ├──► LLM Ensemble (Kimi K2.6 + Qwen3.5,           ║
-║                           │    Ollama cloud — DeepSeek/GLM removed 2026-06-16)║
+║                           ├──► LLM Ensemble (Kimi K2.6 + GLM-5.2,           ║
+║                           │    Ollama cloud — Qwen3.5 swapped out 2026-06-29) ║
 ║                           │       DK-CoT prompting, budget-gated             ║
 ║                           │       divergence check (std > 0.30)              ║
 ║                           │                                                  ║
@@ -85,7 +86,7 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║  PHASE 4 — EXECUTION ENGINE  (every 15 min, Mon–Fri 14:00–21:00 UTC)       ║
 ║                                                                              ║
-║  ExecutionWorker per tick:                                                   ║
+║  ExecutionWorker per tick (LEGACY — inactive by default, see note below):                                                   ║
 ║    1. Kill-switch check   → abort if active                                  ║
 ║    2. EMA20 cache refresh → SPY + watchlist prices (yfinance)                ║
 ║    3. Drawdown cap check  → halt + alert if daily loss ≥ 5% (config)        ║
@@ -96,6 +97,7 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 ║         d. Position size = base × regime_multiplier                          ║
 ║         e. Place market order via Alpaca SDK                                 ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
+> **Active order path is `execution.engine: portfolio`** (config/trading.yaml): only the `portfolio-cycle` task (Phase G, PortfolioOrchestrator) submits orders; this legacy `ExecutionWorker` returns early. Shown for reference only.
                                     │
                                     ▼ (daily + weekly async)
 ╔══════════════════════════════════════════════════════════════════════════════╗
@@ -135,7 +137,7 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 Every 15 minutes during US market hours, Alembic pulls financial news from three independent sources, each chosen for a different reason:
 
 - **GDELT GKG v2** — a free, open global news graph that ingests tens of thousands of outlets worldwide. Alembic fetches the bulk CSV files published every 15 minutes, filters for English-language financial themes, and extracts article URLs, tone scores, and entity mentions. Because GDELT is a secondary index (not a primary publisher), articles can appear with a short lag, but the breadth is unmatched for zero cost.
-- **MarketAux** — a paid news API that pre-tags articles with ticker symbols. Using pre-tagged data reduces the number of LLM tokens needed for ticker extraction and increases precision: MarketAux has already resolved "Apple" → `AAPL` before the article reaches the sentiment pipeline.
+- **MarketAux** *(disabled from the beat 2026-07-03 — FIX-01: 17-day paper evidence net-negative, 0/20 winners; task kept, env-gated)* — a paid news API that pre-tags articles with ticker symbols. Using pre-tagged data reduces the number of LLM tokens needed for ticker extraction and increases precision: MarketAux has already resolved "Apple" → `AAPL` before the article reaches the sentiment pipeline.
 - **Alpaca News** — the broker's own news feed, surfaced via the same SDK used for order placement. Being broker-native means the latency between article publication and ingestion is minimal, and there is no additional authentication surface.
 
 Each article is fingerprinted with a **SHA-256 hash of its URL** before being pushed to a Redis list. If the hash already exists in a Redis set (TTL: 4 hours), the article is silently dropped — so the same story arriving from two sources in the same 15-minute window is processed exactly once. This deduplication is critical: without it, a major earnings announcement covered by 50 outlets would trigger 50 redundant LLM inference calls and inflate the daily budget.
@@ -156,7 +158,7 @@ score = polarity × confidence
 
 This formula correctly handles uncertainty: a strong positive call with low confidence yields a small score, while a moderate positive call with high confidence yields a larger one. A model that says "slightly bullish, very certain" outranks one that says "extremely bullish, almost guessing."
 
-**LLM ensemble.** Two models are queried in parallel via Ollama cloud: Kimi K2.6 and Qwen3.5 (DeepSeek-V4-Pro and GLM-5.1 were removed 2026-06-16, commit `d4b3f3b`). Each receives the same article text after passing through `sanitize_text()` — a pre-processing step that strips BiDi override characters, Unicode homoglyphs, and hidden sentiment-inverting injections that could corrupt NER or flip the model's conclusion. Every prompt uses **DK-CoT** (Domain Knowledge Chain-of-Thought): the model is instructed to act as a buy-side analyst, reason through cash flows and competition before reaching a verdict, provide explicit bull and bear cases, and return a structured JSON object. Forcing structured output makes parsing deterministic and eliminates the need for regex heuristics on free-form text.
+**LLM ensemble.** Two models are queried in parallel via Ollama cloud: Kimi K2.6 and GLM-5.2 (Qwen3.5 was replaced by GLM-5.2 on 2026-06-29 — over-aggressive ticker extraction on macro news; DeepSeek-V4-Pro and GLM-5.1 were removed 2026-06-16). Each receives the same article text after passing through `sanitize_text()` — a pre-processing step that strips BiDi override characters, Unicode homoglyphs, and hidden sentiment-inverting injections that could corrupt NER or flip the model's conclusion. Every prompt uses **DK-CoT** (Domain Knowledge Chain-of-Thought): the model is instructed to act as a buy-side analyst, reason through cash flows and competition before reaching a verdict, provide explicit bull and bear cases, and return a structured JSON object. Forcing structured output makes parsing deterministic and eliminates the need for regex heuristics on free-form text.
 
 **Divergence check.** After both scores arrive, the worker computes the standard deviation of the ensemble. If `std > 0.30`, the models have reached meaningfully different conclusions about the same article — which is itself a signal of ambiguity. Rather than averaging a high-variance ensemble into a false consensus, the worker discards the LLM results and falls back to FinBERT.
 
@@ -176,7 +178,7 @@ Once per trading day at **07:00 UTC** (before US pre-market), a `RegimeDetector`
 - **T10Y2Y spread** (10-year minus 2-year Treasury yield) from FRED — a negative spread (yield curve inversion) is historically associated with recessions
 - **SPY 20-day price momentum** from yfinance — whether the broad market has been trending up or down over the past month
 
-These indicators are packaged into a `MacroSnapshot` and sent to a **two-model LLM pair** (Kimi K2.6 + Qwen3.5). Each model is asked to independently classify the current regime as one of four labels:
+These indicators are packaged into a `MacroSnapshot` and sent to a **two-model LLM pair** (Kimi K2.6 + Qwen3.5 — note: regime detection still uses Qwen3.5; the *sentiment* ensemble switched to GLM-5.2 on 2026-06-29). Each model is asked to independently classify the current regime as one of four labels:
 
 | Label | Multiplier | Typical conditions |
 |-------|-----------|-------------------|
@@ -233,7 +235,7 @@ If all guardrails pass, the weights are **auto-applied** and written to Redis in
 
 ### Phase G — Portfolio Orchestration (Multi-Strategy)
 
-The `PortfolioOrchestrator` runs hourly during market hours and coordinates all active strategies using a **weight-then-order** architecture. Instead of each strategy independently generating full-portfolio orders (which causes double-counting when merged), strategies output **target weights**; the orchestrator merges them by allocation percentage, then computes a single set of delta orders.
+The `PortfolioOrchestrator` runs every 15 minutes during market hours (at :07/:22/:37/:52 — offset +7 min after the sentiment worker so it reads freshly written signals) and coordinates all active strategies using a **weight-then-order** architecture. Instead of each strategy independently generating full-portfolio orders (which causes double-counting when merged), strategies output **target weights**; the orchestrator merges them by allocation percentage, then computes a single set of delta orders.
 
 **Cycle:**
 1. Each active strategy (`S1`, `S4`) produces target weights (fractions of NAV) scaled by its `allocation_pct` — S2 is disabled (`research` mode, 0% allocation)
@@ -266,7 +268,7 @@ The `PortfolioOrchestrator` runs hourly during market hours and coordinates all 
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| **LLM Ensemble** | Kimi K2.6, Qwen3.5 (via Ollama cloud; DeepSeek-V4-Pro + GLM-5.1 removed 2026-06-16) | Sentiment analysis with DK-CoT |
+| **LLM Ensemble** | Kimi K2.6 + GLM-5.2 (via Ollama cloud; regime detector still uses Qwen3.5) | Sentiment analysis with DK-CoT |
 | **Fallback Model** | FinBERT | Fallback when ensemble diverges or budget exhausted |
 | **Task Queue** | Celery + Redis | Background task processing |
 | **Cache** | Redis | Signal caching, kill-switch, counters, regime state |
@@ -290,7 +292,7 @@ Alembic/
 │   │   ├── performance.py     # PerformanceReport, PostMortem
 │   │   └── regime.py          # RegimeState, RegimeOutput, MacroSnapshot, RegimeLabel
 │   ├── llm/
-│   │   ├── client.py          # LLMClient ABC + OllamaKimiClient, OllamaQwen35Client (DeepSeek/GLM removed 2026-06-16)
+│   │   ├── client.py          # LLMClient ABC + Ollama cloud clients (active sentiment pair: Kimi K2.6 + GLM-5.2)
 │   │   ├── ensemble.py        # EnsembleAggregator, run_ensemble_query
 │   │   ├── finbert.py         # FinBERT fallback + entropic confidence mapping + score_articles()
 │   │   └── budget.py          # LLMBudgetTracker (daily budget enforcement)
@@ -336,7 +338,7 @@ Alembic/
 │   │   ├── performance.py     # PerformanceWorker: IC, weights, drift, auto-apply
 │   │   ├── regime.py          # RegimeDetector: macro → LLM pair → regime → Redis
 │   │   ├── ingestion.py       # NewsIngestionWorker: GDELT/MarketAux/Alpaca → Redis queue
-│   │   ├── portfolio_scheduler.py # PortfolioCycleTask: hourly multi-strategy orchestration
+│   │   ├── portfolio_scheduler.py # PortfolioCycleTask: 15-min multi-strategy orchestration
 │   │   ├── decay_monitor_task.py  # DecayMonitorTask: monthly baseline comparison
 │   │   ├── risk_monitor_task.py   # RiskMonitorTask: daily risk metrics
 │   │   └── telegram_poller.py # TelegramPoller: /getUpdates → approve/reject weights
@@ -455,22 +457,34 @@ weight_cap: 0.70
 
 ## Celery Beat Schedule
 
+> Source of truth: `src/workers/celery_app.py` (`beat_schedule`). Updated 2026-07-03.
+
 | Task | Frequency | Time (UTC) | Description |
 |------|-----------|------------|-------------|
-| `execution-worker` | Every 15 min | Mon–Fri 14:00–21:00 | Signals → Alpaca orders + drawdown cap |
-| `sentiment-worker` | Every 15 min | Mon–Fri 14:00–21:00 | News → LLM sentiment → Redis/PG |
-| `ingestion-gdelt` | Every 15 min | Mon–Fri 14:00–21:00 | GDELT GKG → news queue |
-| `ingestion-marketaux` | Every 15 min | Mon–Fri 14:00–21:00 | MarketAux → news queue |
-| `ingestion-alpaca` | Every 15 min | Mon–Fri 14:00–21:00 | Alpaca news → news queue |
-| `performance-daily` | Daily | 03:00 | IC report + Telegram alert |
-| `performance-weekly` | Weekly | Mon 04:00 | LOO ICIR → weight suggestion |
+| `sentiment-worker` | Every 15 min | Mon–Fri 14:00–21:00 | News → LLM sentiment → Redis/PG (queue `inference`) |
+| `run-news-ingestion` | Every 15 min | Mon–Fri 14:00–21:00 | GDELT GKG → news queue |
+| `run-alpaca-ingestion` | Every 15 min | Mon–Fri 14:00–21:00 | Alpaca/Benzinga news → news queue |
+| `run-execution` | Every 15 min | Mon–Fri 14:00–21:00 | LEGACY — returns early unless `engine=legacy_sentiment` |
+| `portfolio-cycle` | Every 15 min (:07/:22/:37/:52) | Mon–Fri 14:00–21:00 | **Active order path** — multi-strategy weight-then-order |
+| `reconcile-fills-intraday` | Every 15 min (:12/:27/:42/:57) | Mon–Fri 14:00–21:00 | Alpaca fill prices → trades table |
+| `reconcile-fills-evening` | Daily | Mon–Fri 21:30 | EOD reconcile pass (missed fills) |
+| `loss-feedback-check` | Every 30 min | Mon–Fri 14:00–21:00 | Phase B: losses → raise entry threshold |
 | `regime-detector` | Daily | Mon–Fri 07:00 | Macro → LLM pair → regime → Redis |
-| `portfolio-cycle` | Hourly | Mon–Fri 14:00–21:00 | Multi-strategy weight-then-order cycle |
-| `loss-feedback-check` | Every 30 min | Mon–Fri 14:00–21:00 | Phase B: detect losses → adjust threshold/scale in Redis |
-| `counterfactual-worker` | Daily | 22:45 | Phase C: compute 1h forward returns for SKIP_EMA/SKIP_CAP |
+| `regime-detector-premarket` | Daily | Mon–Fri 13:30 | Safety-net rerun 30 min before NYSE open |
+| `earnings-pead` | Hourly (:10) | Mon–Fri 11:00–23:00 | Finnhub earnings calendar → deterministic surprise |
+| `pead-ingestion` | Every 30 min (:05/:35) | Mon–Fri 14:00–21:00 | S7 8-K LLM classification (R&D — S7 shelved) |
+| `forward-return-worker` | Daily | 22:00 | Populate `sentiment_signals.forward_return` |
 | `risk-monitor` | Daily | 22:30 | Per-strategy + combined risk metrics |
-| `decay-monitor` | Monthly | 1st 23:00 | Actual vs backtest baseline decay check |
-| `poll-telegram-updates` | Every 5s | Always | Process approve/reject taps |
+| `counterfactual-worker` | Daily | 22:45 | Phase C: 1h forward returns for SKIP_* decisions |
+| `decay-monitor` | Daily (temp. during paper validation) | 21:00 | Actual vs backtest baseline decay check |
+| `performance-daily` | Daily | 03:00 | IC report + Telegram alert |
+| `run-retention-sweep` | Daily | 03:30 | Old data cleanup |
+| `performance-weekly` | Weekly | Mon 04:00 | LOO ICIR → weight suggestion |
+| `drift-detection` | Weekly | Sun 04:30 | PSI + CUSUM drift over weekly window |
+| `check-suggestion-expiry` | Daily | 05:00 | Expire stale weight suggestions |
+| `poll-telegram-updates` | Every 5s | Always | Approve/reject keyboard (queue `inference`) |
+
+> Removed from the beat: `run-marketaux-ingestion` and `run-rss-ingestion` (FIX-01/02, 2026-07-03 — net-negative sources, env-gated); `sec-edgar-ingestion` (2026-07-02 — CIK→ticker bug, never produced a signal); `finnhub-ingestion` (shelved 2026-07-01 — flood).
 
 ---
 
@@ -602,7 +616,7 @@ Every number below was chosen heuristically and has not been validated against h
 
 **GDELT article age.** GDELT is a secondary aggregator. Articles it references may be 1–6 hours old at the time Alembic fetches the 15-min bulk CSV. The `fetched_at` field in `news_log` records when Alembic fetched the entry, not when the article was originally published. Downstream IC analysis that uses `fetched_at` as T0 may understate signal latency.
 
-**MarketAux ticker false positives.** Pre-tagged tickers from MarketAux can include false positives — an article about "Apple cider" may be tagged as `AAPL`. The system does not validate ticker relevance before running LLM inference; it relies on the LLM to produce a near-zero polarity for irrelevant text. This works in practice but inflates token usage and budget consumption.
+**MarketAux ticker false positives** *(source disabled from beat 2026-07-03, FIX-01)***.** Pre-tagged tickers from MarketAux can include false positives — an article about "Apple cider" may be tagged as `AAPL`. The system does not validate ticker relevance before running LLM inference; it relies on the LLM to produce a near-zero polarity for irrelevant text. This works in practice but inflates token usage and budget consumption.
 
 **FRED API single point of failure.** `RegimeDetector` fetches VIX and T10Y2Y from the FRED API. If FRED is unavailable (the service has had outages), regime detection silently fails. There is no cached fallback (e.g., previous day's regime label retained) — the behaviour on FRED unavailability should be verified in `src/connectors/macro.py`.
 
@@ -641,7 +655,7 @@ Every number below was chosen heuristically and has not been validated against h
 
 ### Pre-Live Blockers 🚨
 
-These bugs were identified by static architecture review against live-trading failure scenarios. **CRITICAL bugs below were resolved in P0 forensic pass (commit `c4ab1b6`, 2026-06-17). HIGH items remain open.** Live trading is NOT authorized until P2-05 is complete, Kimi P2 Audit passes, and PO sign-off is obtained.
+These bugs were identified by static architecture review against live-trading failure scenarios. **CRITICAL bugs below were resolved in P0 forensic pass (commit `c4ab1b6`, 2026-06-17). HIGH items remain open.** Live trading is NOT authorized (`GLOBAL_LIVE_PROMOTION_ENABLED=False`): P2-05 is complete and the Kimi P2 Audit passed (`P2_ACCEPTED_WITH_RUNTIME_MONITORING`), but PO sign-off is still required.
 
 **CRITICAL — System correctness** ✅ RESOLVED (P0 forensic pass, commit `c4ab1b6`)
 - ✅ `pg_store.py`: PostgreSQL connection lifecycle — pool leak fixed; `_release_connection()` now called on happy path
@@ -676,7 +690,7 @@ These bugs were identified by static architecture review against live-trading fa
 - Exponential time-decay on sentiment signals: `score_adj = score × e^(−λt)` where `t` is minutes since signal generation — replaces the current binary 30-min validity cutoff with a continuous degradation that reduces position size as the news ages
 - IC forward return from signal timestamp: fix the Performance Worker to measure return from `generated_at` (signal time) rather than market open, eliminating contamination from pre-signal price moves and making PSI/CUSUM statistically valid
 - Signal store: bounded top-K per symbol (Redis ZSET scored by `|signal_score|`) instead of single last-write-wins `setex`; prevents a weak follow-up article from masking a high-conviction earlier signal within the same 15-min window (`src/store/redis_store.py:84`)
-- SentimentWorker: content-hash dedup pre-inference — the same article arriving from GDELT, MarketAux, and Alpaca has three different URLs; all three pass URL-based dedup and trigger three separate LLM calls; add content-hash check in SentimentWorker before inference (`src/connectors/deduplicator.py:83`)
+- ✅ RESOLVED 2026-07-03 (EN-03): content-hash+ticker dedup wired at ingestion for all sources — the same article from multiple sources now triggers a single LLM call (`Deduplicator.is_duplicate_content_symbol`)
 - SentimentWorker: skip items with empty `asset_tags` before LLM inference — currently processes to `symbol="UNKNOWN"`, wastes budget and pollutes audit data (`src/workers/sentiment.py:71`)
 - Dedup TTL: reconcile code value (2 h in `deduplicator.py:22`) with architecture docs (4 h); make configurable via env var
 

@@ -222,7 +222,7 @@ Before going live on a real brokerage account:
 - [ ] Set `AUTO_APPLY_ENABLED=false` for first week of paper trading (manual weight approval)
 - [ ] Test kill-switch works: `POST /api/admin/killswitch`, verify mode=halted in Redis
 - [ ] Confirm Telegram alerts are received (deploy sends test alert)
-- [ ] Verify drawdown cap: set `10%` as starting threshold, monitor first session
+- [ ] Verify drawdown cap: `risk.portfolio_drawdown` in `config/trading.yaml` (production value **5%**, single source of truth — B13), monitor first session
 - [ ] Verify `GLOBAL_LIVE_PROMOTION_ENABLED=false` in `.env` (must remain `false` until PO sign-off + P2-05 closure + Kimi P2 Audit complete)
 - [ ] Verify `GET /api/system/readiness` returns all-healthy before first session
 - [ ] Apply all migrations 001–026+ (not just `001_initial.sql`)

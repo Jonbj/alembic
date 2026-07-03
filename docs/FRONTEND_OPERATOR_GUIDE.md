@@ -98,6 +98,9 @@ The React frontend (`frontend/src/pages/`) exposes the operator pages below. Aut
 | LLM | `LLM.tsx` | `/api/llm/feedback`, `/api/llm/models`, `/api/weights/*` | Model feedback loop and dynamic ensemble weights |
 | Auto-Improve | `AutoImprove.tsx` | `/api/feedback/status`, `/api/trades/analytics/counterfactual`, `/api/trades/analytics/counterfactual/status` | Feedback gate + counterfactual opportunity cost with worker freshness and raw skip counts |
 | Operations | `Operations.tsx` | `/api/system/*`, `/api/config`, `/api/admin/*` | Unified System / Config / Admin operator surface |
+| Quality | `Quality.tsx` | `/api/quality/metrics`, `/api/quality/sources` | QX-02 signal/extraction quality + **Source Funnel & P&L (S2-1, 2026-07-03)**: per-source funnel→latency→P&L table with removal-threshold verdicts (roadmap §7.4) and trace coverage |
+| Labeling | `Labeling.tsx` | `/api/labeling/*` | QX-01 blind annotation UI (golden label set) |
+| Validation | `Validation.tsx` | `/api/validation/*` | Paper-validation progress metrics |
 | Backtest | `Backtest.tsx` | Backtest API | Strategy backtesting |
 | Docs | `Docs.tsx` | Static | Documentation viewer |
 | Login | `LoginPage.tsx` | `/api/auth/login` | Authentication |
@@ -209,14 +212,13 @@ docker compose logs --tail=20 beat
 # Check current state
 docker compose exec redis redis-cli GET killswitch_active
 
-# Clear kill-switch (manual)
-docker compose exec redis redis-cli DEL killswitch_active
-
-# Or via API
+# Clear kill-switch — ALWAYS via the API OTP flow (audit trail + cooldown).
+# Never redis-cli DEL: it bypasses the recovery audit (see operations.md runbook).
 curl -X POST -H "X-API-Key: $ADMIN_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"active": false}' \
-  http://localhost:8001/api/admin/killswitch
+  http://localhost:8001/api/admin/killswitch/recovery-token
+# then, with the returned token:
+curl -X DELETE -H "X-API-Key: $ADMIN_API_KEY" \
+  "http://localhost:8001/api/admin/killswitch?confirm_token=<token>"
 ```
 
 ### 3.3 Reading Strategy Mode

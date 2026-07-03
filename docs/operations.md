@@ -78,7 +78,7 @@ Beat schedules are defined in `src/workers/celery_app.py`. All times are UTC.
 | Task name | Cron | Description |
 |-----------|------|-------------|
 | `run-news-ingestion` | */15 14-21 Mon-Fri | GDELT GKG → news:queue |
-| `run-marketaux-ingestion` | */15 14-21 Mon-Fri | MarketAux → news:queue |
+| ~~`run-marketaux-ingestion`~~ | — | **Removed from beat 2026-07-03 (FIX-01, net-negative source; env-gated `MARKETAUX_INGESTION_ENABLED`)** |
 | `run-alpaca-ingestion` | */15 14-21 Mon-Fri | Alpaca/Benzinga → news:queue |
 | `sentiment-worker` | */15 14-21 Mon-Fri | news:queue → LLM → Redis + PG |
 | `run-execution` | */15 14-21 Mon-Fri | signals → Alpaca orders |
@@ -437,9 +437,10 @@ Poll `GET /api/system/readiness` at the start of each trading day and after any 
 
 **Recovery (after investigation):**
 1. `GET /api/admin/status` — see current mode and kill-switch state
-2. `POST /api/admin/killswitch/recover` with OTP (see P0-06 OTP flow)
-3. Verify mode returns to paper: `GET /api/admin/mode`
-4. Monitor first cycle: `GET /api/system/decisions?limit=5`
+2. `POST /api/admin/killswitch/recovery-token` — issues a one-time confirm token
+3. `DELETE /api/admin/killswitch?confirm_token=<token>` — clears the kill-switch
+4. Verify mode: `GET /api/admin/mode`
+5. Monitor first cycle: `GET /api/system/decisions?limit=5`
 
 **DO NOT** clear kill-switch via `redis-cli SET killswitch_active 0` without using the API OTP recovery flow — bypassing it defeats the cooldown and audit trail.
 
@@ -480,3 +481,13 @@ Before any trading session:
 - Kimi P2 Acceptance Audit must complete before controlled paper trading begins
 
 **No live trading, strategy promotions, or P3/P4 work without explicit PO sign-off.**
+
+
+## Environment Overrides (docker-compose)
+
+| Variable | Default (`src/config.py`) | docker-compose override | Why |
+|----------|--------------------------|------------------------|-----|
+| `SENTIMENT_REVERSAL_EXIT_THRESHOLD` | `-0.20` | `-0.35` (worker + worker-inference) | Fewer forced reversal exits in paper validation — a reversal sell requires a strongly negative, reliable ensemble signal |
+| `MAX_NEWS_AGE_HOURS` | `2` | — | FIX-03 event-time freshness: news older than this is skipped pre-inference and gated at cycle time |
+| `RESOLVER_ENFORCE_NOT_TRADABLE` | `1` (on) | — | Conservative resolver enforcement; set `0` to disable pre-inference drops |
+| `MARKETAUX_INGESTION_ENABLED` / `RSS_INGESTION_ENABLED` | `0` (off) | — | FIX-01/02: net-negative sources removed from beat; re-enable only with per-source IC > 0 evidence |
