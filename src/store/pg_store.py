@@ -1663,7 +1663,7 @@ class PostgreSQLStore:
 
     def fetch_signals_for_cycle(
         self, hours: int = 4, symbols: list[str] | None = None,
-        news_age_hours: float = 2.0,
+        news_age_hours: float | None = None,
     ) -> list[SentimentResult]:
         """Fetch one signal per symbol from the last N hours.
 
@@ -1676,9 +1676,12 @@ class PostgreSQLStore:
         FinBERT fallback (so a weak fallback does not overwrite a strong recent
         ensemble read); among same-status signals the most recent wins.
 
-        published_at gate (FIX-03): signals whose news is older than
-        `news_age_hours` are excluded; NULL published_at (legacy rows) passes —
-        the generated_at window still bounds those.
+        published_at gate (FIX-03): when `news_age_hours` is set, signals whose
+        news is older are excluded; NULL published_at (legacy rows) passes — the
+        generated_at window still bounds those. Default None = NO event-time gate:
+        only the S4 entry path passes an explicit bound. Sell-protection and
+        audit/reason callers need older-news signals (e.g. "signal expired 20h
+        ago") and must not be narrowed by the entry-freshness policy.
 
         Returns SentimentResult objects with timezone-aware generated_at.
         """
@@ -1688,9 +1691,10 @@ class PostgreSQLStore:
         conn = self._get_connection()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                _news_h = news_age_hours if news_age_hours is not None else 24 * 365
                 cur.execute(
                     self._FETCH_SIGNALS_FOR_CYCLE,
-                    (str(hours), str(news_age_hours), watchlist),
+                    (str(hours), str(_news_h), watchlist),
                 )
                 rows = cur.fetchall()
         except Exception:
