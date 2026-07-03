@@ -258,10 +258,13 @@ Applied iteratively (up to 10 passes) after weight merging:
 
 **Type:** Event-driven momentum
 **File:** `src/strategies/s7/`
-**Allocation:** 15% configured in `config/strategies.yaml` (NOT active — see status below)
-**Status:** `research` / R&D/contained — NOT in portfolio orchestrator; promotion blocked (P0-13, commit `6d86d3f`)
+**Allocation:** 0% (`config/strategies.yaml`: enabled=false)
+**Status:** `research` / **SHELVED 2026-07-03** — ALPHA-A5 gate FAIL conclusivo (B17: la vecchia nota "15%" era doc drift)
 
-> S7 implementation is complete (worker, signal classifier, pead_signals table, API routes) but is **not wired into the portfolio orchestrator**. It is explicitly R&D/contained. Promotion requires: OOS backtest gates (Sharpe > 0.5, hit rate > 55%, max drawdown < 15%), 30 days paper evidence with ≥10 events, gate report, and PO sign-off. Live trading is NOT authorized.
+> **Verdetto ALPHA-A5 (dati FMP, 96 eventi Gen–Mag 2026):** il drift raw +1.96% è interamente beta SPY — excess vs SPY +0.05% medio, mediana −1.07% — più 5 outlier (media senza i top-5 winner: negativa). Nessuna dose-response tra magnitudine della surprise e drift; lato MISS altrettanto nullo; universo small/mid non testato (0 eventi nel campione). Il raw-surprise PEAD su large-cap è competuto via.
+> Report: `reports/s7_backtest/ALPHA_A5_gate_report_2026-07-03_fmp.md` (con addendum di distribuzione e CSV per-evento) · audit immutabile in `strategy_lifecycle_audit`.
+> **Riapertura solo via decisione PO:** (a) espansione universo small/mid-cap (richiede filtri liquidità + fonte prezzi migliore di IEX), oppure (b) POC transcript-tone (ALPHA-A3): testare "BEAT + tone positivo" vs "BEAT da solo" sui 76 eventi già in CSV — gated su vendor transcript (FMP free tier li blocca).
+> Il codice (worker 8-K, pipeline EDGAR, classificazione LLM) resta in repo: è il mattone di S9 / vettore B. Live trading NOT authorized (invariato).
 
 ### Segnale
 

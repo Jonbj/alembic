@@ -51,5 +51,9 @@ strategies:
     mode: research
     promotion_blocked: true
     note: >
-      PEAD alpha — R&D only (P0-13). No PIT data, no gate script, no IC evaluation.
+      SHELVED 2026-07-03: ALPHA-A5 gate FAIL conclusivo (drift = beta SPY + 5 outlier,
+      excess vs SPY +0.05% mediana -1.07%, nessuna dose-response; report
+      reports/s7_backtest/ALPHA_A5_gate_report_2026-07-03_fmp.md + audit in
+      strategy_lifecycle). Riapertura solo via decisione PO: universo small/mid
+      oppure POC transcript-tone ALPHA-A3 (gated su vendor transcript).
       Must not appear in operational registry until P1-03/04 + IC>placebo confirmed.
