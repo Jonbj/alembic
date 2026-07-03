@@ -287,6 +287,57 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    # EN-06: canonical funnel counters ← worker stats-dict synonyms.
+    # "discarded" (GKG worker) and "filtered" (RSS/EDGAR workers) are the REAL keys
+    # found in src/workers/ingestion.py for no-ticker-match discards (there is no
+    # separate discarded_stale/parse_fail counter yet — those stay 0 until S2-2).
+    _INGESTION_STAT_SYNONYMS: dict[str, tuple[str, ...]] = {
+        "fetched": ("fetched", "total_fetched", "items_fetched", "total"),
+        "queued": ("queued", "pushed", "enqueued"),
+        "duplicates": ("duplicates", "skipped_duplicate", "dupes"),
+        "discarded_no_ticker": (
+            "discarded_no_ticker", "skipped_no_ticker", "no_ticker", "no_asset_tags",
+            "discarded", "filtered",
+        ),
+        "discarded_stale": ("discarded_stale", "skipped_stale", "stale"),
+        "parse_fail": ("parse_fail", "parse_errors", "errors"),
+    }
+
+    _UPSERT_INGESTION_STATS = """
+        INSERT INTO ingestion_stats_daily
+            (day, source, fetched, queued, duplicates,
+             discarded_no_ticker, discarded_stale, parse_fail, updated_at)
+        VALUES (CURRENT_DATE, %s, %s, %s, %s, %s, %s, %s, now())
+        ON CONFLICT (day, source) DO UPDATE SET
+            fetched             = ingestion_stats_daily.fetched + EXCLUDED.fetched,
+            queued              = ingestion_stats_daily.queued + EXCLUDED.queued,
+            duplicates          = ingestion_stats_daily.duplicates + EXCLUDED.duplicates,
+            discarded_no_ticker = ingestion_stats_daily.discarded_no_ticker + EXCLUDED.discarded_no_ticker,
+            discarded_stale     = ingestion_stats_daily.discarded_stale + EXCLUDED.discarded_stale,
+            parse_fail          = ingestion_stats_daily.parse_fail + EXCLUDED.parse_fail,
+            updated_at          = now()
+    """
+
+    def record_ingestion_stats(self, source: str, stats: dict) -> None:
+        """Upsert-increment today's funnel counters for a source. Fail-safe: never raises."""
+        try:
+            canon = {
+                key: sum(int(stats.get(s, 0) or 0) for s in synonyms)
+                for key, synonyms in self._INGESTION_STAT_SYNONYMS.items()
+            }
+            if not any(canon.values()):
+                return
+            conn = self._get_connection()
+            with conn.cursor() as cur:
+                cur.execute(
+                    self._UPSERT_INGESTION_STATS,
+                    (source, canon["fetched"], canon["queued"], canon["duplicates"],
+                     canon["discarded_no_ticker"], canon["discarded_stale"], canon["parse_fail"]),
+                )
+            conn.commit()
+        except Exception as exc:
+            log.warning("record_ingestion_stats(%s) failed (fail-safe): %s", source, exc)
+
     _LINK_SIGNAL_TO_NEWS = """
         UPDATE sentiment_signals SET news_log_id = %s WHERE id = %s
     """

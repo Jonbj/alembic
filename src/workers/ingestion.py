@@ -246,6 +246,12 @@ def run_marketaux_ingestion_worker() -> dict:
         stats = _process_marketaux_items(items, deduplicator, redis_client)
 
         log.info("MarketAux ingestion stats: %s", stats)
+        try:
+            from src.store.pg_store import PostgreSQLStore
+            with PostgreSQLStore() as _pg:
+                _pg.record_ingestion_stats("marketaux", stats)
+        except Exception as _stats_exc:
+            log.warning("Could not persist ingestion stats: %s", _stats_exc)
         return stats
 
     finally:
@@ -336,6 +342,12 @@ def run_alpaca_ingestion_worker() -> dict:
         stats = _process_alpaca_items(items, deduplicator, redis_client)
 
         log.info("Alpaca ingestion stats: %s", stats)
+        try:
+            from src.store.pg_store import PostgreSQLStore
+            with PostgreSQLStore() as _pg:
+                _pg.record_ingestion_stats("alpaca_benzinga", stats)
+        except Exception as _stats_exc:
+            log.warning("Could not persist ingestion stats: %s", _stats_exc)
         return stats
 
     finally:
@@ -416,6 +428,12 @@ def run_finnhub_ingestion_worker() -> dict:
         items = asyncio.run(_fetch_finnhub_items(connector))
         stats = _process_finnhub_items(items, deduplicator, redis_client)
         log.info("Finnhub ingestion stats: %s", stats)
+        try:
+            from src.store.pg_store import PostgreSQLStore
+            with PostgreSQLStore() as _pg:
+                _pg.record_ingestion_stats("finnhub", stats)
+        except Exception as _stats_exc:
+            log.warning("Could not persist ingestion stats: %s", _stats_exc)
         return stats
     finally:
         redis_client.close()
@@ -525,6 +543,12 @@ def run_gdelt_doc_ingestion_worker() -> dict:
         items = asyncio.run(_fetch_gdelt_doc_items(connector))
         stats = _process_gdelt_doc_items(items, deduplicator, redis_client)
         log.info("GDELT DOC ingestion stats: %s", stats)
+        try:
+            from src.store.pg_store import PostgreSQLStore
+            with PostgreSQLStore() as _pg:
+                _pg.record_ingestion_stats("gdelt", stats)
+        except Exception as _stats_exc:
+            log.warning("Could not persist ingestion stats: %s", _stats_exc)
         return stats
     finally:
         redis_client.close()
@@ -581,6 +605,12 @@ def run_sec_edgar_ingestion_worker() -> dict:
         stats = _process_sec_edgar_items(items, watchlist, deduplicator, redis_client)
 
         log.info("SEC EDGAR ingestion stats: %s", stats)
+        try:
+            from src.store.pg_store import PostgreSQLStore
+            with PostgreSQLStore() as _pg:
+                _pg.record_ingestion_stats("sec_edgar", stats)
+        except Exception as _stats_exc:
+            log.warning("Could not persist ingestion stats: %s", _stats_exc)
         return stats
     except Exception as exc:
         log.error("SEC EDGAR ingestion failed: %s", exc, exc_info=True)
@@ -713,6 +743,12 @@ def run_rss_ingestion_worker() -> dict:
                 for k, v in stats.items():
                     total_stats[k] = total_stats.get(k, 0) + v
                 log.info("RSS [%s] stats: %s", source_name, stats)
+                try:
+                    from src.store.pg_store import PostgreSQLStore
+                    with PostgreSQLStore() as _pg:
+                        _pg.record_ingestion_stats(source_name, stats)
+                except Exception as _stats_exc:
+                    log.warning("Could not persist ingestion stats: %s", _stats_exc)
             except Exception as exc:
                 log.warning("RSS feed [%s] failed: %s — skipping", source_name, exc)
 
@@ -752,6 +788,12 @@ def run_news_ingestion_worker() -> dict:
         stats = _process_gkg_items(gkg_items, extractor, deduplicator, redis_client, watchlist=watchlist)
 
         log.info("Ingestion stats: %s", stats)
+        try:
+            from src.store.pg_store import PostgreSQLStore
+            with PostgreSQLStore() as _pg:
+                _pg.record_ingestion_stats("gdelt_gkg", stats)
+        except Exception as _stats_exc:
+            log.warning("Could not persist ingestion stats: %s", _stats_exc)
         return stats
 
     finally:
