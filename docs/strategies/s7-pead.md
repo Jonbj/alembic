@@ -1,5 +1,15 @@
 # S7 — PEAD (Post-Earnings Announcement Drift)
 
+> ⚠️ **SHELVED 2026-07-03 — gate ALPHA-A5 FAIL conclusivo.** Su 96 eventi reali (FMP,
+> Gen–Mag 2026) il drift raw +1.96% è interamente beta SPY (excess +0.05%, mediana
+> −1.07%) più 5 outlier; nessuna dose-response per magnitudine della surprise; universo
+> small/mid non testato (0 eventi). Report:
+> `reports/s7_backtest/ALPHA_A5_gate_report_2026-07-03_fmp.md` · audit in
+> `strategy_lifecycle_audit`. Riapertura solo via decisione PO (universo small/mid o POC
+> transcript-tone ALPHA-A3). Il resto di questo documento descrive l'implementazione,
+> che resta in repo come mattone di S9/vettore B.
+
+
 ## Razionale
 
 Il PEAD è una delle anomalie di mercato più robuste documentate in letteratura finanziaria (Ball & Brown 1968, Foster et al. 1984). Dopo una sorpresa positiva negli earnings, il prezzo non incorpora immediatamente tutta l'informazione: c'è un drift positivo misurabile nei 60 giorni successivi. S7 cattura questo effetto usando LLM per classificare gli 8-K filing SEC.

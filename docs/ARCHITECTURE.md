@@ -47,7 +47,7 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 └──────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
-│           PORTFOLIO ORCHESTRATION (hourly 14-21 UTC, Mon-Fri)     │
+│      PORTFOLIO ORCHESTRATION (every 15 min, 14-21 UTC, Mon-Fri)   │
 │                                                                   │
 │  StrategyRegistry ──► S1/S2/S4 target weights                    │
 │                            ↓ merge by allocation_pct             │
@@ -470,7 +470,7 @@ ExecutionWorker (every 15 min, active only when execution.engine=legacy_sentimen
     └── Alpaca SDK market order
     │
     ▼
-PortfolioOrchestrator (hourly, active only when execution.engine=portfolio)
+PortfolioOrchestrator (every 15 min at :07/:22/:37/:52, active only when execution.engine=portfolio)
     ├── StrategyRegistry → active entries from config/strategies.yaml
     │   currently: S1 (alloc=0.50) + S4 (alloc=0.10); S2 disabled
     ├── S1.compute_target_weights(prices) → sleeve-local weights

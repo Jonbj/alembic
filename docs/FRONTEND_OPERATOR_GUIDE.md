@@ -249,7 +249,7 @@ Expected output for current authorized state:
 | Setting `GLOBAL_LIVE_PROMOTION_ENABLED=True` | NOT authorized | See above |
 
 Live trading authorization requires:
-1. P2-05 closed (3 pending safety items)
+1. P2-05 closed (all 3 safety items implemented, commit 55cbf56)
 2. Kimi P2 Acceptance Audit completed
 3. 90 days of supervised_paper trading for S1
 4. Explicit PO sign-off
