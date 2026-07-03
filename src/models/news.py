@@ -40,6 +40,10 @@ class NewsItem(BaseModel):
     # QT-03: how asset_tags were derived — source_metadata | cashtag | org_lookup | regex.
     # Logged to news_log to measure extraction precision per method (and confirm QT-01).
     extraction_method: str = ""
+    # EN-05: when the connector fetched this article (None = legacy/unknown).
+    # Distinct from `timestamp` (publication time): the gap between the two is the
+    # per-source ingestion latency, persisted to news_log.raw_ingested_at.
+    raw_ingested_at: datetime | None = None
 
 
 class GKGNewsItem(NewsItem):

@@ -31,6 +31,7 @@ import asyncio
 import logging
 import os
 import re
+from datetime import datetime, timezone
 
 import psycopg2
 from redis import Redis
@@ -148,6 +149,7 @@ def _process_gkg_items(
                 continue
 
             # Step 5: enqueue to Redis
+            item.raw_ingested_at = datetime.now(timezone.utc)
             redis_client.rpush("news:queue", item.model_dump_json())
             stats["queued"] += 1
 
@@ -201,6 +203,7 @@ def _process_marketaux_items(
                 stats["duplicates"] += 1
                 continue
 
+            per_ticker.raw_ingested_at = datetime.now(timezone.utc)
             redis_client.rpush("news:queue", per_ticker.model_dump_json())
             stats["queued"] += 1
 
@@ -292,6 +295,7 @@ def _process_alpaca_items(
                 stats["duplicates"] += 1
                 continue
 
+            per_ticker.raw_ingested_at = datetime.now(timezone.utc)
             redis_client.rpush("news:queue", per_ticker.model_dump_json())
             stats["queued"] += 1
 
@@ -376,6 +380,7 @@ def _process_finnhub_items(
             if deduplicator.is_duplicate_by_id(per_ticker) or deduplicator.is_duplicate_content_symbol(per_ticker):
                 stats["duplicates"] += 1
                 continue
+            per_ticker.raw_ingested_at = datetime.now(timezone.utc)
             redis_client.rpush("news:queue", per_ticker.model_dump_json())
             stats["queued"] += 1
 
@@ -482,6 +487,7 @@ def _process_gdelt_doc_items(
         if deduplicator.is_duplicate_by_id(per_ticker) or deduplicator.is_duplicate_content_symbol(per_ticker):
             stats["duplicates"] += 1
             continue
+        per_ticker.raw_ingested_at = datetime.now(timezone.utc)
         redis_client.rpush("news:queue", per_ticker.model_dump_json())
         stats["queued"] += 1
 
@@ -546,6 +552,7 @@ def _process_sec_edgar_items(
         if deduplicator.is_duplicate_by_id(item) or deduplicator.is_duplicate_content_symbol(item):
             stats["duplicates"] += 1
             continue
+        item.raw_ingested_at = datetime.now(timezone.utc)
         redis_client.rpush("news:queue", item.model_dump_json())
         stats["queued"] += 1
     return stats
@@ -670,6 +677,7 @@ def _process_rss_items(
             if deduplicator.is_duplicate_by_id(per_ticker) or deduplicator.is_duplicate_content_symbol(per_ticker):
                 stats["duplicates"] += 1
                 continue
+            per_ticker.raw_ingested_at = datetime.now(timezone.utc)
             redis_client.rpush("news:queue", per_ticker.model_dump_json())
             stats["queued"] += 1
     return stats
