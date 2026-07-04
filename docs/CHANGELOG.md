@@ -6,6 +6,11 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ## 2026-07-04
 
+### S7 revival month — POC-1 eseguito, POC-2 not executed (vendor tier)
+- **POC-1 (small/mid PEAD):** INCONCLUSIVE_DATA — n=15 eventi con barre+liquidità, sotto il minimo n≥30 pre-registrato. Due bug di codice trovati e corretti in esecuzione (mismatch unità market-cap `_market_caps` USD grezzi vs `classify_cap` milioni; crash batch Alpaca su ticker preferred). Nessuna vera small-cap (<$2B) è sopravvissuta ai filtri barre IEX/liquidità.
+- **POC-2 (transcript tone, ALPHA-A3):** NOT EXECUTED — i transcript FMP richiedono il piano Ultimate ($99/mo); il PO ha acquistato Starter ($29/mo, non li include) e ha scelto di procedere solo con POC-1.
+- Report: `reports/s7_poc/S7_REVIVAL_DECISION_REPORT_2026-07-04.md` (+ dettaglio POC-1 `reports/s7_poc/POC1_smallmid_report_2026-07-04.md`). Decisione S7 (rimozione/espansione POC/upgrade Ultimate) pendente dal PO.
+
 ### Risk monitor — NAV ed esposizione reali (fix finding forense #2)
 - `_fetch_account_state()` in `risk_monitor_task.py`: NAV = equity Alpaca reale (era: somma cumulativa net_pnl → NAV negativo −578$), `total_exposure` = valore lordo posizioni / equity (era: hardcoded 1.0 → falso alert "exposure 100% > 50%" ogni giorno). Broker irraggiungibile → (0, 0) con warning, niente falso alert. TDD: `tests/workers/test_risk_monitor_task.py` (5 test). Verificato end-to-end nel worker: report id=21, NAV $110.307, exposure 5,7%, 0 alert.
 

@@ -8,6 +8,12 @@
 > `strategy_lifecycle_audit`. Riapertura solo via decisione PO (universo small/mid o POC
 > transcript-tone ALPHA-A3). Il resto di questo documento descrive l'implementazione,
 > che resta in repo come mattone di S9/vettore B.
+>
+> **Aggiornamento 2026-07-04:** POC revival eseguiti — solo POC-1 (small/mid PEAD),
+> esito INCONCLUSIVE_DATA (n=15 < 30 minimo). POC-2 (transcript tone) NOT EXECUTED:
+> richiede FMP Ultimate ($99/mo), il PO ha acquistato Starter ($29/mo) e scelto di non
+> fare l'upgrade. Vedi `reports/s7_poc/S7_REVIVAL_DECISION_REPORT_2026-07-04.md`.
+> Decisione PO pendente.
 
 
 ## Razionale
