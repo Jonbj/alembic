@@ -29,7 +29,9 @@ from scripts.s7_poc_helpers import (  # noqa: E402
 _FMP = "https://financialmodelingprep.com/stable"
 _START = os.environ.get("BT_START", "2026-01-01")
 _END = os.environ.get("BT_END", "2026-05-15")
-_MAX_CAP_LOOKUPS = 600  # Starter: 300 call/min, quota giornaliera ampia
+# Default 600 riproduce il run 2026-07-04; override MAX_CAP_LOOKUPS=7000 copre
+# l'intero universo (~6.200 simboli, Starter 300 call/min → solo runtime).
+_MAX_CAP_LOOKUPS = int(os.environ.get("MAX_CAP_LOOKUPS", "600"))
 # _market_caps() has its own internal cap (_MAX_SYMBOLS_FOR_CAP=150) sized for the
 # OLD free-tier quota (~250 calls/day). Starter allows 300 calls/MIN, so raise it to
 # match _MAX_CAP_LOOKUPS or the small/mid sample silently truncates to 150 symbols.
