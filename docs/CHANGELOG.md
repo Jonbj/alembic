@@ -4,6 +4,13 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ---
 
+## 2026-07-04
+
+### Risk monitor — NAV ed esposizione reali (fix finding forense #2)
+- `_fetch_account_state()` in `risk_monitor_task.py`: NAV = equity Alpaca reale (era: somma cumulativa net_pnl → NAV negativo −578$), `total_exposure` = valore lordo posizioni / equity (era: hardcoded 1.0 → falso alert "exposure 100% > 50%" ogni giorno). Broker irraggiungibile → (0, 0) con warning, niente falso alert. TDD: `tests/workers/test_risk_monitor_task.py` (5 test). Verificato end-to-end nel worker: report id=21, NAV $110.307, exposure 5,7%, 0 alert.
+
+---
+
 ## 2026-07-03
 
 ### Sprint 1 — Functional Review Remediation (merged su main)

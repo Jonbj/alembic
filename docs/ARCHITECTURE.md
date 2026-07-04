@@ -735,7 +735,7 @@ See `README.md` → *Pre-Live Blockers* section for the authoritative list of cr
 | S2 proxy vs real options | Current S2 is an equity proxy (overnight gap); actual cash-secured short put needs options chain data + IBKR adapter | Phase D |
 | ConstraintEnforcer loses sleeve provenance | Final merged orders have `strategy_id="merged"`; per-sleeve exposure constraints cannot be enforced | Future |
 | Feedback loop blind to S1 | Partially resolved: portfolio-cycle BUY trades are written immediately after `submit_order()` (B28 fix, 2026-07-02); SELL/stop-loss still batch-written | Monitor |
-| Risk monitor uses wrong NAV and placeholder exposure | `_fetch_strategy_data` approximates NAV from cumulative P&L (B48) and `total_exposure` is hardcoded `1.0` → the daily "exposure 100% > 50%" alert has fired identically 10/10 days and cannot detect a real breach (forensic report 2026-07-02) | Fix with S2-7: real Alpaca equity + computed exposure |
+| ~~Risk monitor uses wrong NAV and placeholder exposure~~ | **RESOLVED** (2026-07-04): `_fetch_account_state()` reads real Alpaca equity as NAV and gross position value / equity as exposure; broker outage degrades to (0, 0) with a warning instead of a false alert (was: NAV from cumulative P&L, `total_exposure` hardcoded `1.0`, false "exposure 100% > 50%" alert daily — forensic report 2026-07-02) | Done |
 | Ensemble barely load-bearing | 79.5% of 2026-07-02 signals fell back to FinBERT via divergence std>0.30 (not timeouts/budget) — the 2-model cloud ensemble is discarded 4 times out of 5 | Measure via biweekly quality check; options: recalibrate divergence threshold or 3rd model with median vote |
 
 ### P2-05 Resolved Safety Items (IMPLEMENTED — commit `55cbf56`, 2026-06-21)
