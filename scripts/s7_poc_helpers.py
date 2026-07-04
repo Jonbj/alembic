@@ -55,18 +55,26 @@ def gate_verdict_smallmid(excess_rets: list[float], cost_bps: int = 30) -> dict:
             "verdict": "PASS" if ok else "FAIL"}
 
 
-def transcript_matches_event(transcript_date, event_date: str) -> bool:
-    """True se il transcript è datato in [event−2g, event+3g] (guardia anti wrong-quarter
-    e anti look-ahead: l'entry è comunque il giorno di borsa DOPO max(call, evento))."""
-    if not transcript_date:
-        return False
+def reported_quarter_candidates(event_date: str) -> list[str]:
+    """I due trimestri fiscali candidati per il transcript AV di un evento earnings.
+
+    Alpha Vantage chiave i transcript per fiscal quarter RIPORTATO (es. call di
+    aprile 2026 → "2026Q1"), senza data call. Il trimestre riportato precede
+    sempre l'evento → il worst case di un match sbagliato è un transcript VECCHIO
+    (rumore), mai informazione futura: anti look-ahead strutturale.
+    """
     try:
-        td = datetime.fromisoformat(str(transcript_date)[:10]).date()
-        ed = datetime.fromisoformat(event_date).date()
+        d = datetime.fromisoformat(event_date)
     except (ValueError, TypeError):
-        return False
-    delta = (td - ed).days
-    return -2 <= delta <= 3
+        return []
+    y, q = d.year, (d.month - 1) // 3 + 1
+    out = []
+    for _ in range(2):
+        q -= 1
+        if q == 0:
+            y, q = y - 1, 4
+        out.append(f"{y}Q{q}")
+    return out
 
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)

@@ -7,7 +7,7 @@ from scripts.s7_poc_helpers import (
     classify_cap,
     adv_usd,
     gate_verdict_smallmid,
-    transcript_matches_event,
+    reported_quarter_candidates,
     parse_tone_json,
     spearman_ic,
 )
@@ -58,16 +58,17 @@ class TestGateVerdict:
         assert gate_verdict_smallmid(rets, cost_bps=30)["verdict"] == "FAIL"
 
 
-class TestTranscriptMatch:
-    def test_within_window(self):
-        assert transcript_matches_event("2026-04-24 21:00:00", "2026-04-24")
-        assert transcript_matches_event("2026-04-22", "2026-04-24")   # −2 giorni
-        assert transcript_matches_event("2026-04-27", "2026-04-24")   # +3 giorni
+class TestReportedQuarterCandidates:
+    def test_mid_year_event_reports_previous_quarter(self):
+        # call di fine aprile → riporta il Q1 fiscale; fallback Q4 anno prima
+        assert reported_quarter_candidates("2026-04-24") == ["2026Q1", "2025Q4"]
 
-    def test_outside_window_or_garbage(self):
-        assert not transcript_matches_event("2026-01-30", "2026-04-24")
-        assert not transcript_matches_event("", "2026-04-24")
-        assert not transcript_matches_event(None, "2026-04-24")
+    def test_january_event_rolls_over_year(self):
+        assert reported_quarter_candidates("2026-01-15") == ["2025Q4", "2025Q3"]
+
+    def test_garbage_returns_empty(self):
+        assert reported_quarter_candidates("") == []
+        assert reported_quarter_candidates("not-a-date") == []
 
 
 class TestParseToneJson:
