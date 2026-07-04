@@ -50,20 +50,18 @@ def _serialize_report(report) -> dict:
     }
 
 
-def _fetch_strategy_data(pg) -> tuple[dict[str, list[float]], dict[str, float], float, float]:
-    """Fetch portfolio returns, weights, exposure and NAV from PostgreSQL.
+def _fetch_strategy_data(pg) -> tuple[dict[str, list[float]], dict[str, float]]:
+    """Fetch portfolio returns and weights from PostgreSQL.
 
     The portfolio_daily_state view aggregates all strategies as a single portfolio
     (columns: snapshot_date, daily_return, net_pnl, n_trades).  We expose it to
     the risk monitor under the synthetic key "portfolio" so existing metrics
     (Sharpe, drawdown) are computed at the portfolio level.
 
-    Returns (strategy_returns, current_weights, total_exposure, nav).
+    Returns (strategy_returns, current_weights).
     Falls back to empty data if the view is empty or unavailable.
     """
     strategy_returns: dict[str, list[float]] = {}
-    nav = 0.0
-    total_exposure = 0.0
 
     try:
         conn = pg._get_connection()
@@ -80,15 +78,39 @@ def _fetch_strategy_data(pg) -> tuple[dict[str, list[float]], dict[str, float], 
             rows = cur.fetchall()
         if rows:
             strategy_returns["portfolio"] = [float(r[1] or 0.0) for r in rows]
-            # Approximate NAV from cumulative net_pnl (no cash tracking in DB yet).
-            nav = sum(float(r[2] or 0.0) for r in rows)
-            total_exposure = 1.0  # full-portfolio exposure placeholder
     except Exception as e:
         log.warning("Could not fetch portfolio_daily_state: %s — skipping risk report", e)
-        return {}, {}, 0.0, 0.0
+        return {}, {}
 
     current_weights = {"portfolio": 1.0} if strategy_returns else {}
-    return strategy_returns, current_weights, total_exposure, nav
+    return strategy_returns, current_weights
+
+
+def _fetch_account_state() -> tuple[float, float]:
+    """Fetch real NAV (account equity) and gross exposure from Alpaca.
+
+    total_exposure = Σ|position market value| / equity, as a fraction of NAV.
+    Returns (0.0, 0.0) if the broker is unreachable: the report is still stored
+    with the DB-derived drawdown metrics, and the exposure alert stays silent
+    rather than firing on a placeholder value.
+    """
+    from alpaca.trading.client import TradingClient
+
+    from src.config import config
+
+    try:
+        client = TradingClient(
+            api_key=config.ALPACA_API_KEY,
+            secret_key=config.ALPACA_SECRET_KEY,
+            paper=config.ALPACA_PAPER_MODE,
+        )
+        equity = float(client.get_account().equity)
+        gross = sum(abs(float(p.market_value)) for p in client.get_all_positions())
+        exposure = gross / equity if equity > 0 else 0.0
+        return equity, exposure
+    except Exception as e:
+        log.warning("Could not fetch Alpaca account state: %s — nav/exposure set to 0", e)
+        return 0.0, 0.0
 
 
 def _store_risk_report(pg, report) -> int:
@@ -143,7 +165,8 @@ def compute_risk_report() -> dict:
     try:
         pg = PostgreSQLStore()
 
-        strategy_returns, current_weights, total_exposure, nav = _fetch_strategy_data(pg)
+        strategy_returns, current_weights = _fetch_strategy_data(pg)
+        nav, total_exposure = _fetch_account_state()
 
         # Use target weights from config if available, else equal-weight
         target_weights: dict[str, float] = getattr(config, "PORTFOLIO_TARGET_WEIGHTS", {})
