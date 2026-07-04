@@ -3,6 +3,11 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
 > **Esecutore: UN SOLO agente Sonnet, task in ordine 1→8, nessun subagent.** Ogni task committa da solo. Se un task fallisce per dati/vendor (non per codice), scrivilo nel report e prosegui dove possibile.
+>
+> **SUPERSEDED per l'esecuzione (2026-07-04 sera):** Task 1–3 eseguiti dal primo run
+> (versione pre-correzione). L'esecuzione riprende con
+> `docs/superpowers/plans/2026-07-04-s7-revival-resume.md` — NON eseguire questo documento.
+> I gate pre-registrati qui definiti restano la fonte di verità.
 
 **Goal:** In un mese (deadline decisione: **2026-08-01**) rispondere in modo binario alla domanda "S7 si tiene o si elimina", testando le due ipotesi mai campionate dal gate ALPHA-A5: (1) PEAD su universo small/mid-cap, (2) tone-analysis LLM sui transcript earnings (ALPHA-A3).
 

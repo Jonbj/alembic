@@ -9,11 +9,13 @@
 > transcript-tone ALPHA-A3). Il resto di questo documento descrive l'implementazione,
 > che resta in repo come mattone di S9/vettore B.
 >
-> **Aggiornamento 2026-07-04:** POC revival eseguiti — solo POC-1 (small/mid PEAD),
-> esito INCONCLUSIVE_DATA (n=15 < 30 minimo). POC-2 (transcript tone) NOT EXECUTED:
-> richiede FMP Ultimate ($99/mo), il PO ha acquistato Starter ($29/mo) e scelto di non
-> fare l'upgrade. Vedi `reports/s7_poc/S7_REVIVAL_DECISION_REPORT_2026-07-04.md`.
-> Decisione PO pendente.
+> **Aggiornamento 2026-07-04 (corretto in serata):** POC revival IN CORSO. POC-1
+> (small/mid PEAD): primo run INCONCLUSIVE_DATA (n=15 < 30, campione 600 simboli
+> alfabetici) — in ri-esecuzione su universo completo. POC-2 (transcript tone):
+> in corso via Alpha Vantage `EARNINGS_CALL_TRANSCRIPT` free tier (i transcript FMP
+> richiedono Ultimate, non acquistato; il primo run seguiva la versione pre-correzione
+> del piano). Piano: `docs/superpowers/plans/2026-07-04-s7-revival-resume.md`.
+> Esito e decisione PO entro 2026-08-01.
 
 
 ## Razionale

@@ -1,5 +1,12 @@
 # S7 Revival Month — Decision Report (2026-07-04)
 
+> **NOTA (2026-07-04, sera): report INTERIM con premessa superata.** "Il PO ha deciso
+> di procedere solo con POC-1" non è mai stata una decisione del PO: l'executor seguiva
+> la versione pre-correzione del piano. POC-2 è eseguibile a costo zero via Alpha Vantage
+> `EARNINGS_CALL_TRANSCRIPT` (chiave in `.env` dal 2026-07-04) ed è in corso; POC-1 è in
+> ri-esecuzione su universo completo. Report finale sostitutivo a POC completati —
+> piano: `docs/superpowers/plans/2026-07-04-s7-revival-resume.md`.
+
 **Scope reale eseguito:** solo POC-1. Il PO ha acquistato FMP **Starter** ($29/mo), non
 **Ultimate** ($99/mo) — il piano prevedeva Starter come sufficiente per entrambi i POC,
 ma i transcript earnings (necessari a POC-2) sono gated su Ultimate, non su Starter
