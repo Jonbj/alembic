@@ -6,7 +6,7 @@
 
 **Goal:** In un mese (deadline decisione: **2026-08-01**) rispondere in modo binario alla domanda "S7 si tiene o si elimina", testando le due ipotesi mai campionate dal gate ALPHA-A5: (1) PEAD su universo small/mid-cap, (2) tone-analysis LLM sui transcript earnings (ALPHA-A3).
 
-**Contesto:** Il gate ALPHA-A5 del 2026-07-03 ha dato FAIL conclusivo sul PEAD large-cap (excess vs SPY +0.05%, mediana −1.07% → beta + 5 outlier). S7 è `research`/blocked in `strategy_lifecycle`. Il PO ha autorizzato **1 mese di FMP Starter (~$29)** che sblocca sia il calendario earnings storico (`from` param) sia i transcript. Report di riferimento: `reports/s7_backtest/ALPHA_A5_gate_report_2026-07-03_fmp.md`.
+**Contesto:** Il gate ALPHA-A5 del 2026-07-03 ha dato FAIL conclusivo sul PEAD large-cap (excess vs SPY +0.05%, mediana −1.07% → beta + 5 outlier). S7 è `research`/blocked in `strategy_lifecycle`. Il PO ha autorizzato **1 mese di FMP Starter (~$29)**. **Correzione vendor 2026-07-04 (verificata dal PO sulla pagina pricing FMP):** i transcript FMP richiedono il piano **Ultimate**, NON Starter. Quindi: POC-1 usa FMP Starter (calendario `from/to` + market cap); POC-2 usa **Alpha Vantage `EARNINGS_CALL_TRANSCRIPT`** (free tier, 25 req/giorno — endpoint verificato funzionante il 2026-07-04 con la demo key; il fetch di ~120 transcript richiede ~5 giorni di calendario, lo script è resumabile). Report di riferimento: `reports/s7_backtest/ALPHA_A5_gate_report_2026-07-03_fmp.md`.
 
 **Architecture:** Due POC come script di ricerca offline in `scripts/` (stesso stile self-contained di `scripts/backtest_s7_pead.py`, da cui si riusano i fetcher). Helper puri estratti e testati TDD (pattern esistente: `tests/backtest/test_backtest_runner.py` importa da `scripts.`). Nessuna modifica al codice live, nessuna modifica a `strategy_lifecycle` (decisione riservata al PO). Output: CSV + report markdown in `reports/` (gitignored → `git add -f`, prassi già usata per i gate report).
 
@@ -17,16 +17,19 @@
 | POC | Gate PASS | Note |
 |---|---|---|
 | POC-1 small/mid PEAD | n≥30 eventi BEAT small/mid con prezzo; media excess vs **IWM** a 20d, **al netto di 30bps** round-trip, ≥ +1.5%; hit-rate (excess netto > 0) > 55% | large-cap NON si ritesta (già FAIL) |
-| POC-2 transcript tone | n≥30 eventi con transcript matchato; Spearman IC(tone_score, excess_20d vs SPY) ≥ +0.10; spread terzile top−bottom ≥ +1.5%; IC > 0 in entrambe le metà del campione (split-half) | modello primario `kimi-k2.6:cloud`; costo cap: max 120 transcript, max 24.000 char ciascuno |
+| POC-2 transcript tone | n≥30 eventi con transcript matchato; Spearman IC(tone_score, excess_20d vs SPY) ≥ +0.10; spread terzile top−bottom ≥ +1.5%; IC > 0 in entrambe le metà del campione (split-half) | modello primario `kimi-k2.6:cloud`; costo cap: max 120 transcript, max 24.000 char ciascuno; fetch da Alpha Vantage free tier = 25/giorno → ~5 giorni, script resumabile |
 | Copertura dati | se transcript matchati < 50% degli eventi o eventi small/mid con barre < 30 → verdetto **INCONCLUSIVE_DATA** (≠ FAIL alpha) | va scritto nel report, decide il PO |
 
 **Esito → azione:** entrambi FAIL → il PO ordina la rimozione completa di S7 (task beat `earnings-pead`/`pead-ingestion`, lifecycle → disabled, archivio doc). Almeno un PASS → piano dedicato di build. Il piano NON esegue la rimozione.
 
 ---
 
-## Prerequisito (manuale, PO)
+## Prerequisiti (manuali, PO)
 
-FMP Starter attivo sulla stessa `FMP_API_KEY` già in `.env`. Il Task 1 lo verifica e **abortisce il piano** se non attivo.
+1. FMP Starter attivo sulla stessa `FMP_API_KEY` già in `.env` (serve solo per POC-1).
+2. Chiave Alpha Vantage gratuita (signup istantaneo su alphavantage.co/support/#api-key) in `.env` come `ALPHAVANTAGE_API_KEY` (serve per i transcript di POC-2).
+
+Il Task 1 verifica entrambi e **abortisce il piano** se mancano.
 
 ---
 
@@ -42,15 +45,15 @@ set -a; source .env; set +a
 curl -s "https://financialmodelingprep.com/stable/earnings-calendar?from=2026-01-05&to=2026-01-10&apikey=$FMP_API_KEY" | head -c 300; echo
 ```
 
-Expected: array JSON di eventi earnings (`[{"symbol":...`). Se contiene `"Special Endpoint"` o `402` → Starter NON attivo: **STOP, segnala al PO, non proseguire.**
+Expected: array JSON di eventi earnings (`[{"symbol":...`). Se contiene `"Special Endpoint"` o `402` → Starter NON attivo: **STOP, segnala al PO, non proseguire.** (NB: i transcript FMP NON servono — richiedono il piano Ultimate, per i transcript si usa Alpha Vantage.)
 
-- [ ] **Step 2: Verifica transcript sbloccati**
+- [ ] **Step 2: Verifica transcript Alpha Vantage con la chiave reale**
 
 ```bash
-curl -s "https://financialmodelingprep.com/stable/earning-call-transcript?symbol=AAPL&year=2026&quarter=1&apikey=$FMP_API_KEY" | head -c 300; echo
+curl -s "https://www.alphavantage.co/query?function=EARNINGS_CALL_TRANSCRIPT&symbol=IBM&quarter=2026Q1&apikey=$ALPHAVANTAGE_API_KEY" | head -c 400; echo
 ```
 
-Expected: JSON con campo `content` (testo transcript). Se `"Restricted Endpoint"` → STOP come sopra.
+Expected: JSON `{"symbol": "IBM", "quarter": "2026Q1", "transcript": [{"speaker": ..., "content": ...}]}`. Se compare `"Information"` con richiesta di premium o `"Note"` di rate limit → annota e STOP se il blocco è di piano (il rate limit 25/giorno invece è atteso: il fetcher lo gestisce).
 
 ---
 
@@ -72,7 +75,7 @@ from scripts.s7_poc_helpers import (
     classify_cap,
     adv_usd,
     gate_verdict_smallmid,
-    transcript_matches_event,
+    reported_quarter_candidates,
     parse_tone_json,
     spearman_ic,
 )
@@ -123,16 +126,17 @@ class TestGateVerdict:
         assert gate_verdict_smallmid(rets, cost_bps=30)["verdict"] == "FAIL"
 
 
-class TestTranscriptMatch:
-    def test_within_window(self):
-        assert transcript_matches_event("2026-04-24 21:00:00", "2026-04-24")
-        assert transcript_matches_event("2026-04-22", "2026-04-24")   # −2 giorni
-        assert transcript_matches_event("2026-04-27", "2026-04-24")   # +3 giorni
+class TestReportedQuarterCandidates:
+    def test_mid_year_event_reports_previous_quarter(self):
+        # call di fine aprile → riporta il Q1 fiscale; fallback Q4 anno prima
+        assert reported_quarter_candidates("2026-04-24") == ["2026Q1", "2025Q4"]
 
-    def test_outside_window_or_garbage(self):
-        assert not transcript_matches_event("2026-01-30", "2026-04-24")
-        assert not transcript_matches_event("", "2026-04-24")
-        assert not transcript_matches_event(None, "2026-04-24")
+    def test_january_event_rolls_over_year(self):
+        assert reported_quarter_candidates("2026-01-15") == ["2025Q4", "2025Q3"]
+
+    def test_garbage_returns_empty(self):
+        assert reported_quarter_candidates("") == []
+        assert reported_quarter_candidates("not-a-date") == []
 
 
 class TestParseToneJson:
@@ -227,18 +231,26 @@ def gate_verdict_smallmid(excess_rets: list[float], cost_bps: int = 30) -> dict:
             "verdict": "PASS" if ok else "FAIL"}
 
 
-def transcript_matches_event(transcript_date, event_date: str) -> bool:
-    """True se il transcript è datato in [event−2g, event+3g] (guardia anti wrong-quarter
-    e anti look-ahead: l'entry è comunque il giorno di borsa DOPO max(call, evento))."""
-    if not transcript_date:
-        return False
+def reported_quarter_candidates(event_date: str) -> list[str]:
+    """I due trimestri fiscali candidati per il transcript AV di un evento earnings.
+
+    Alpha Vantage chiave i transcript per fiscal quarter RIPORTATO (es. call di
+    aprile 2026 → "2026Q1"), senza data call. Il trimestre riportato precede
+    sempre l'evento → il worst case di un match sbagliato è un transcript VECCHIO
+    (rumore), mai informazione futura: anti look-ahead strutturale.
+    """
     try:
-        td = datetime.fromisoformat(str(transcript_date)[:10]).date()
-        ed = datetime.fromisoformat(event_date).date()
+        d = datetime.fromisoformat(event_date)
     except (ValueError, TypeError):
-        return False
-    delta = (td - ed).days
-    return -2 <= delta <= 3
+        return []
+    y, q = d.year, (d.month - 1) // 3 + 1
+    out = []
+    for _ in range(2):
+        q -= 1
+        if q == 0:
+            y, q = y - 1, 4
+        out.append(f"{y}Q{q}")
+    return out
 
 
 _JSON_RE = re.compile(r"\{.*\}", re.DOTALL)
@@ -297,7 +309,7 @@ def spearman_ic(scores: list[float], rets: list[float]) -> float | None:
 - [ ] **Step 4: Run test → verdi**
 
 Run: `.venv/bin/python -m pytest tests/analysis/test_s7_poc_helpers.py -q`
-Expected: `15 passed`
+Expected: `16 passed`
 
 - [ ] **Step 5: Commit**
 
@@ -473,12 +485,19 @@ git commit -m "feat(s7-poc): POC-1 small/mid PEAD backtest + gate report (excess
 
 ```python
 #!/usr/bin/env python3
-"""POC-2a: scarica i transcript earnings (FMP Starter) per gli eventi ALPHA-A5.
+"""POC-2a: scarica i transcript earnings (Alpha Vantage EARNINGS_CALL_TRANSCRIPT).
+
+I transcript FMP richiedono il piano Ultimate → si usa Alpha Vantage free tier
+(25 richieste/giorno, ~5 req/min): lo script è RESUMABILE — processa finché la
+quota regge, poi si ferma pulito; va rilanciato nei giorni successivi finché la
+copertura è completa (~5-7 giorni di calendario per ~120 eventi).
 
 Eventi = union di reports/s7_backtest/alpha_a5_events_2026-07-03.csv (large)
 e reports/s7_poc/poc1_smallmid_events_*.csv (small/mid, se esiste).
-Cache: reports/s7_poc/transcripts/{SYM}_{DATE}.json — rilanciabile, salta gli esistenti.
-Match: la data del transcript deve cadere in [evento−2g, evento+3g], altrimenti scartato.
+Cache: reports/s7_poc/transcripts/{SYM}_{DATE}.json — salta gli esistenti.
+Match: AV chiave i transcript per fiscal quarter (nessuna data call) → si provano
+i due trimestri precedenti l'evento (reported_quarter_candidates); il worst case
+è un transcript vecchio (rumore), mai informazione futura.
 
 Run: set -a; source .env; set +a; .venv/bin/python scripts/fetch_s7_transcripts.py
 """
@@ -490,14 +509,13 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
 
 import httpx
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scripts.s7_poc_helpers import transcript_matches_event  # noqa: E402
+from scripts.s7_poc_helpers import reported_quarter_candidates  # noqa: E402
 
-_FMP = "https://financialmodelingprep.com/stable"
+_AV = "https://www.alphavantage.co/query"
 _CACHE = "reports/s7_poc/transcripts"
 _MAX_TRANSCRIPTS = 120  # cost cap pre-registrato
 
@@ -518,17 +536,25 @@ def _load_events() -> list[dict]:
     return events
 
 
-def _quarter_candidates(event_date: str) -> list[tuple[int, int]]:
-    d = datetime.fromisoformat(event_date)
-    q = (d.month - 1) // 3 + 1
-    prev = (d.year, q - 1) if q > 1 else (d.year - 1, 4)
-    return [(d.year, q), prev]
+def _fetch_quarter(key: str, symbol: str, quarter: str) -> dict | None:
+    """Una chiamata AV. Ritorna {"_quota": msg} se la quota giornaliera è finita."""
+    r = httpx.get(_AV, params={"function": "EARNINGS_CALL_TRANSCRIPT",
+                               "symbol": symbol, "quarter": quarter,
+                               "apikey": key}, timeout=30.0)
+    if r.status_code != 200:
+        return None
+    data = r.json()
+    if "Note" in data or "Information" in data:
+        return {"_quota": str(data.get("Note") or data.get("Information"))}
+    if data.get("transcript"):
+        return data
+    return None
 
 
 def main() -> None:
-    key = os.environ.get("FMP_API_KEY", "")
+    key = os.environ.get("ALPHAVANTAGE_API_KEY", "")
     if not key:
-        print("No FMP_API_KEY"); return
+        print("No ALPHAVANTAGE_API_KEY in env"); return
     os.makedirs(_CACHE, exist_ok=True)
 
     events = _load_events()[:_MAX_TRANSCRIPTS]
@@ -542,18 +568,18 @@ def main() -> None:
             cached += 1
             continue
         found = None
-        for year, q in _quarter_candidates(date):
-            r = httpx.get(f"{_FMP}/earning-call-transcript",
-                          params={"symbol": sym, "year": year, "quarter": q,
-                                  "apikey": key}, timeout=30.0)
-            time.sleep(0.25)
-            if r.status_code != 200:
-                continue
-            data = r.json() or []
-            item = data[0] if isinstance(data, list) and data else None
-            if item and item.get("content") and transcript_matches_event(item.get("date"), date):
-                found = {"symbol": sym, "event_date": date, "transcript_date": item.get("date"),
-                         "year": year, "quarter": q, "content": item["content"]}
+        for q in reported_quarter_candidates(date):
+            data = _fetch_quarter(key, sym, q)
+            time.sleep(13)  # free tier: 5 req/min
+            if data and "_quota" in data:
+                print(f"\n⏸ Quota giornaliera AV esaurita: {data['_quota'][:120]}")
+                print(f"Coperti finora: {hits + cached} match, {misses} miss — rilanciare domani.")
+                return
+            if data:
+                content = "\n".join(
+                    f"{s.get('speaker', '?')} ({s.get('title', '')}): {s.get('content', '')}"
+                    for s in data["transcript"])
+                found = {"symbol": sym, "event_date": date, "quarter": q, "content": content}
                 break
         if found:
             with open(path, "w") as f:
@@ -561,8 +587,8 @@ def main() -> None:
             hits += 1
         else:
             misses += 1
-        if (hits + misses) % 20 == 0:
-            print(f"  ...{hits + misses} processati (match {hits}, miss {misses})")
+        if (hits + misses) % 10 == 0:
+            print(f"  ...{hits + misses} processati oggi (match {hits}, miss {misses})")
 
     total = hits + misses + cached
     print(f"\nMatch: {hits + cached}/{total} ({(hits + cached) / max(total, 1):.0%}) — miss {misses}")
@@ -574,10 +600,10 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Esegui e annota la copertura**
+- [ ] **Step 2: Esegui (più giorni) e annota la copertura**
 
-Run: `set -a; source .env; set +a; .venv/bin/python scripts/fetch_s7_transcripts.py 2>&1 | tee /tmp/poc2_fetch.log`
-Expected: file JSON in `reports/s7_poc/transcripts/`, riga finale `Match: X/Y`. Annota X/Y: entra nel report finale.
+Run: `set -a; source .env; set +a; .venv/bin/python scripts/fetch_s7_transcripts.py 2>&1 | tee -a /tmp/poc2_fetch.log`
+Expected: file JSON in `reports/s7_poc/transcripts/`; con la quota free (25 call/giorno, fino a 2 call/evento) lo script si ferma con `⏸ Quota giornaliera AV esaurita` — **rilanciarlo ogni giorno finché stampa la riga finale `Match: X/Y`** (~5-7 giorni). I Task 3 e 5 possono procedere in parallelo nel frattempo. Se il PO vuole chiudere in un giorno: Alpha Vantage Plan 75 ($49.99/mese, disdicibile) rimuove il limite — decisione sua, annotarla nei costi del report finale.
 
 - [ ] **Step 3: Commit (solo script — la cache transcript NON si committa: contenuto vendor)**
 
@@ -646,7 +672,7 @@ State the bull case, then the bear case. Then output ONLY a JSON object:
  "guidance": "raised"|"maintained"|"lowered"|"none",
  "key_evidence": "<one sentence>"}}
 
-TRANSCRIPT ({symbol}, call date {date}):
+TRANSCRIPT ({symbol}, fiscal quarter {date}):
 {text}"""
 # NB: le doppie graffe {{ }} nel blocco JSON sono obbligatorie — _PROMPT.format()
 # le collassa a graffe singole; graffe singole causerebbero KeyError.
@@ -686,7 +712,7 @@ def main() -> None:
             if k in done:
                 continue
             text = sanitize_text(t["content"])[:_MAX_CHARS]
-            prompt = _PROMPT.format(symbol=t["symbol"], date=t["transcript_date"], text=text)
+            prompt = _PROMPT.format(symbol=t["symbol"], date=t["quarter"], text=text)
             parsed = None
             for attempt in range(2):
                 try:
@@ -868,7 +894,7 @@ git commit -m "feat(s7-poc): POC-2c tone IC analysis + pre-registered ALPHA-A3 g
 
 ## POC-1 — dettaglio  (parametri, funnel scarti, tabella BEAT/MISS, onestà su copertura IEX)
 ## POC-2 — dettaglio  (copertura transcript X/Y, IC, terzili, split-half, agreement kimi/glm, concordanza guidance, JSON-fail rate)
-## Costi consuntivi   (FMP $29; LLM: stima da len(prompt)/4 × n_chiamate; tempo)
+## Costi consuntivi   (FMP Starter $29; Alpha Vantage free $0 — o Plan 75 $49.99 se scelto; LLM: stima da len(prompt)/4 × n_chiamate; tempo)
 ## Raccomandazione al PO (binaria)
 - Entrambi FAIL → rimozione completa S7 (beat tasks earnings-pead/pead-ingestion,
   lifecycle → disabled, archivio docs) + disdetta FMP Starter prima del rinnovo.
