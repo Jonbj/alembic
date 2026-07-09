@@ -115,56 +115,65 @@ def _fetch_labeled_rows() -> list[dict]:
         conn.close()
 
 
-def _build_budget_tracker() -> LLMBudgetTracker:
+def _build_budget_tracker() -> tuple[LLMBudgetTracker, "psycopg2.extensions.connection"]:
+    """Build a tracker backed by an explicit connection.
+
+    ``LLMBudgetTracker.close()`` is a no-op when a ``conn=`` is passed in (see
+    ``src/llm/budget.py``: passing ``conn`` sets ``_owns_connection = False``), so the
+    raw connection is returned alongside the tracker and must be closed by the caller —
+    mirroring the pattern already used in ``src/workers/sentiment.py``.
+    """
     conn = psycopg2.connect(config.DATABASE_URL)
-    return LLMBudgetTracker(conn=conn)
+    return LLMBudgetTracker(conn=conn), conn
 
 
 def main() -> None:
     os.makedirs(os.path.dirname(_OUT), exist_ok=True)
+    is_new_file = not os.path.exists(_OUT)
     done = set()
-    if os.path.exists(_OUT):
+    if not is_new_file:
         with open(_OUT) as f:
             done = {(int(r["label_id"]), r["model"]) for r in csv.DictReader(f)}
-    new_file = not done
 
     rows = _fetch_labeled_rows()
     print(f"Labeled rows: {len(rows)} — già scorati: {len(done)}")
-    budget_tracker = _build_budget_tracker()
+    budget_tracker, budget_conn = _build_budget_tracker()
 
-    with open(_OUT, "a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=_FIELDS)
-        if new_file:
-            w.writeheader()
-        for row in rows:
-            tickers = row["gt_tickers"] or row["extracted_tickers"] or []
-            symbol = tickers[0] if tickers else "UNKNOWN"
-            prompt = _DK_COT_PROMPT.format(text=(row["body_snippet"] or "")[:600], symbol=symbol)
-            for model in _MODELS:
-                key = (row["label_id"], model)
-                if key in done:
-                    continue
-                result = _score_one(model, prompt)
-                if not result["parse_error"]:
-                    asyncio.run(budget_tracker.record_spending(
-                        model_id=model,
-                        input_tokens=len(prompt) // 4,
-                        output_tokens=result["output_chars"] // 4,
-                    ))
-                predicted_dir = _direction(result["polarity"]) if not result["parse_error"] else ""
-                correct = (
-                    predicted_dir == row["gt_sentiment_dir"] if not result["parse_error"] else False
-                )
-                w.writerow({
-                    "label_id": row["label_id"], "model": model,
-                    "polarity": result["polarity"], "confidence": result["confidence"],
-                    "gt_sentiment_dir": row["gt_sentiment_dir"],
-                    "predicted_dir": predicted_dir, "correct": correct,
-                    "parse_error": result["parse_error"], "latency_ms": result["latency_ms"],
-                })
-                f.flush()
-                time.sleep(1)
-    budget_tracker.close()
+    try:
+        with open(_OUT, "a", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=_FIELDS)
+            if is_new_file:
+                w.writeheader()
+            for row in rows:
+                tickers = row["gt_tickers"] or row["extracted_tickers"] or []
+                symbol = tickers[0] if tickers else "UNKNOWN"
+                prompt = _DK_COT_PROMPT.format(text=(row["body_snippet"] or "")[:600], symbol=symbol)
+                for model in _MODELS:
+                    key = (row["label_id"], model)
+                    if key in done:
+                        continue
+                    result = _score_one(model, prompt)
+                    if not result["parse_error"]:
+                        asyncio.run(budget_tracker.record_spending(
+                            model_id=model,
+                            input_tokens=len(prompt) // 4,
+                            output_tokens=result["output_chars"] // 4,
+                        ))
+                    predicted_dir = _direction(result["polarity"]) if not result["parse_error"] else ""
+                    correct = (
+                        predicted_dir == row["gt_sentiment_dir"] if not result["parse_error"] else False
+                    )
+                    w.writerow({
+                        "label_id": row["label_id"], "model": model,
+                        "polarity": result["polarity"], "confidence": result["confidence"],
+                        "gt_sentiment_dir": row["gt_sentiment_dir"],
+                        "predicted_dir": predicted_dir, "correct": correct,
+                        "parse_error": result["parse_error"], "latency_ms": result["latency_ms"],
+                    })
+                    f.flush()
+                    time.sleep(1)
+    finally:
+        budget_conn.close()
     print(f"Done → {_OUT}")
 
 

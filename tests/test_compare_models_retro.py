@@ -84,6 +84,13 @@ class _NoopTracker:
         pass
 
 
+class _FakeConn:
+    """Stand-in for the raw psycopg2 connection returned by _build_budget_tracker."""
+
+    def close(self):
+        pass
+
+
 def test_main_skips_already_scored_pairs_and_records_spend(tmp_path, monkeypatch):
     import scripts.compare_models_retro as mod
 
@@ -120,7 +127,7 @@ def test_main_skips_already_scored_pairs_and_records_spend(tmp_path, monkeypatch
     monkeypatch.setattr(mod, "_score_one", fake_score_one)
     monkeypatch.setattr(mod.time, "sleep", lambda *_: None)
     tracker = _NoopTracker()
-    monkeypatch.setattr(mod, "_build_budget_tracker", lambda: tracker)
+    monkeypatch.setattr(mod, "_build_budget_tracker", lambda: (tracker, _FakeConn()))
 
     mod.main()
 
