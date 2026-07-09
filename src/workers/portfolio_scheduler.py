@@ -1045,6 +1045,11 @@ def _run_cycle_inner() -> dict:
                 _r_dd.set(_PEAK_EQUITY_KEY, str(equity))
                 peak_equity = equity
 
+            # Cache equity for consumers that need account size (e.g. the
+            # loss-feedback relative trigger). Legacy execution wrote this key;
+            # in portfolio mode this is the authoritative writer.
+            _r_dd.setex("portfolio:value", 86400, str(equity))
+
             drawdown = (peak_equity - equity) / peak_equity if peak_equity > 0 else 0.0
             _dd_cap = _load_risk_config()["portfolio_drawdown"]
             if drawdown >= _dd_cap:
@@ -1683,6 +1688,18 @@ def _run_cycle_inner() -> dict:
         except Exception as _exc:
             log.warning("Failed to write trade fills to DB: %s", _exc)
 
+    # Alert when an approved strategy consistently produces zero target weights.
+    # This catches silent strategy death (e.g. S1 killed by a single sparse ticker).
+    try:
+        _check_strategy_zero_weights(
+            result=result,
+            active_strategy_ids={e.strategy_id for e in active},
+            redis_url=config.REDIS_URL,
+            notifier=notifier,
+        )
+    except Exception as _zw_exc:
+        log.warning("Strategy zero-weight alert failed: %s", _zw_exc)
+
     _persist_cycle_result({
         "timestamp": end,
         "strategies_run": result.strategies_run,
@@ -1699,6 +1716,70 @@ def _run_cycle_inner() -> dict:
         "final_orders": len(result.final_orders),
         "submitted": len(submitted_orders),
     }
+
+
+_STRATEGY_ZERO_WEIGHTS_KEY = "strategy:zero_weights_cycles:{strategy_id}"
+# ~1 trading day at 15-min cadence. A strategy can legitimately produce 0 weights
+# for a few cycles at market open or during data gaps; alerting at 3 cycles (~45 min)
+# produced spam. 24 cycles catches real silent-death (S1 was dead for 5 weeks).
+_STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES = 24
+_STRATEGY_ZERO_WEIGHTS_TTL = 7 * 24 * 3600  # 7 days
+
+
+def _check_strategy_zero_weights(
+    result,
+    active_strategy_ids: set[str],
+    redis_url: str,
+    notifier,
+) -> None:
+    """Track consecutive cycles with zero target weights and alert when stuck.
+
+    A strategy that returns empty target weights for several cycles while still
+    enabled is likely data-starved or broken (e.g. S1 sparse-ticker poisoning).
+    The alert fires once when the streak reaches the threshold.
+    """
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+    except Exception as exc:
+        log.warning("Could not connect to Redis for zero-weights tracking: %s", exc)
+        return
+
+    try:
+        # Strategies that ran but produced 0 weights, plus active strategies that
+        # did not run at all (instance build failed).
+        zero_weight_ids: set[str] = set()
+        for sid in active_strategy_ids:
+            if sid not in result.strategies_run:
+                zero_weight_ids.add(sid)
+            elif result.orders_per_strategy.get(sid, 0) == 0:
+                zero_weight_ids.add(sid)
+
+        for sid in active_strategy_ids:
+            key = _STRATEGY_ZERO_WEIGHTS_KEY.format(strategy_id=sid)
+            if sid in zero_weight_ids:
+                streak = int(r.incr(key))
+                r.expire(key, _STRATEGY_ZERO_WEIGHTS_TTL)
+                if streak == _STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES:
+                    msg = (
+                        f"⚠️ *Strategia silenziosa*: {sid} ha prodotto 0 pesi "
+                        f"per {streak} cicli consecutivi. "
+                        f"Verificare dati/istanza."
+                    )
+                    _fire_alert(notifier, msg, AlertLevel.WARNING)
+                    log.warning(
+                        "STRATEGY_ZERO_WEIGHTS: %s produced 0 weights for %d consecutive cycles",
+                        sid, streak,
+                    )
+            else:
+                r.delete(key)
+    except Exception as exc:
+        log.warning("Strategy zero-weights tracking failed: %s", exc)
+    finally:
+        try:
+            r.close()
+        except Exception:
+            pass
 
 
 def _apply_zeygos_filter(symbols: list[str], pg) -> list[str]:
@@ -2038,6 +2119,9 @@ def _build_strategy_instance(entry, bars_df):
                         _fb_threshold = _ENTRY_THRESHOLD_BASELINE
                 finally:
                     _r_sv.close()
+                # Pass the active threshold to the ranker so it can adapt min_stocks
+                # when the gate is raised: a lone strong signal should still trade.
+                s4_config.entry_threshold = _fb_threshold
                 signals_df = signals_df.copy()
                 signals_df["score"] = signals_df.apply(
                     lambda row: row["score"] * multipliers.get(row["symbol"], 1.0),

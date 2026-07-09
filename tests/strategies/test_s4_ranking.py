@@ -154,6 +154,31 @@ def test_too_few_stocks_returns_empty():
     assert len(result.rankings) == 0
 
 
+def test_adaptive_min_stocks_allows_single_name_when_threshold_raised():
+    """With entry_threshold > baseline, min_stocks drops to 1."""
+    signals = _make_signals(1)
+    cfg = S4Config(min_stocks=2, entry_threshold=0.40, entry_threshold_baseline=0.30)
+    ranker = CrossSectionalRanker(cfg)
+    result = ranker.rank(signals, entry_threshold=0.40)
+
+    assert result.n_selected == 1
+
+
+def test_adaptive_min_stocks_disabled_uses_config_min():
+    """With adaptive disabled, threshold raise does not lower min_stocks."""
+    signals = _make_signals(1)
+    cfg = S4Config(
+        min_stocks=2,
+        adaptive_min_stocks=False,
+        entry_threshold=0.40,
+        entry_threshold_baseline=0.30,
+    )
+    ranker = CrossSectionalRanker(cfg)
+    result = ranker.rank(signals, entry_threshold=0.40)
+
+    assert result.n_selected == 0
+
+
 def test_exactly_min_stocks_passes():
     signals = _make_signals(3)
     ranker = CrossSectionalRanker(S4Config(n_top=3, min_stocks=3))

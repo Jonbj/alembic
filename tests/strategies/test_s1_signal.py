@@ -100,6 +100,26 @@ class TestComputeSignal:
         result = compute_signal(trending_prices)
         assert not np.isinf(result["signal"]).any(), "Infinite values in signal"
 
+    def test_sparse_ticker_does_not_poison_panel(self, trending_prices: pd.DataFrame) -> None:
+        """A ticker with <75% valid observations is dropped; the rest produces signals."""
+        prices = trending_prices.copy()
+        # Make C sparse: only last 20% of history has data
+        n = len(prices)
+        prices["C"] = np.nan
+        prices.loc[prices.index[int(n * 0.8) :], "C"] = 100.0
+
+        result = compute_signal(prices)
+        assert "C" not in result["ticker"].unique()
+        assert set(result["ticker"].unique()) == {"A", "B"}
+        assert not result.empty
+
+    def test_all_sparse_tickers_return_empty(self, trending_prices: pd.DataFrame) -> None:
+        """If all tickers are too sparse, return an empty DataFrame safely."""
+        prices = trending_prices.copy()
+        prices.iloc[: int(len(prices) * 0.9)] = np.nan
+        result = compute_signal(prices)
+        assert result.empty
+
 
 # ---------------------------------------------------------------------------
 # Point-in-time correctness

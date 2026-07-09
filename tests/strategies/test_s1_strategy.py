@@ -199,6 +199,29 @@ class TestComputeTargetWeights:
         assert strat.compute_target_weights(short_prices) == {}
 
 
+class TestSleeveNormalization:
+    def test_weights_sum_capped_at_one(self) -> None:
+        # 16 uptrending tickers → the cross-sectional z-score puts roughly half
+        # above the mean (positive signal), each inverse-vol weight capped at
+        # max_weight=0.20 → the sleeve sum lands well above 1.0 without
+        # normalization (portfolio over-allocation before the enforcer).
+        idx = pd.date_range("2023-01-02", periods=400, freq="B")
+        rng = np.random.default_rng(7)
+        data = {}
+        for i in range(16):
+            drift = 0.0008 + 0.0002 * i
+            noise = rng.normal(0, 0.01, len(idx))
+            data[f"T{i:02d}"] = 100 * np.exp(np.cumsum(drift + noise))
+        prices = pd.DataFrame(data, index=idx)
+
+        strat = TimeSeriesMomentum(prices=prices, config=S1Config())
+        weights = strat.compute_target_weights(prices)
+
+        assert weights, "expected non-empty target weights"
+        assert sum(weights.values()) <= 1.0 + 1e-9
+        assert all(w > 0 for w in weights.values())
+
+
 # ---------------------------------------------------------------------------
 # Strategy callable — return type
 # ---------------------------------------------------------------------------

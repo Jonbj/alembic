@@ -1016,3 +1016,61 @@ def test_buy_decision_not_logged_for_symbol_with_open_trade():
         "BUY decision for XLK must NOT be logged when XLK already has an open trade. "
         f"Got {len(buy_calls)} call(s): {buy_calls}"
     )
+
+
+# ── _check_strategy_zero_weights ──────────────────────────────────────────────
+
+
+def test_check_strategy_zero_weights_alerts_after_threshold():
+    """After N consecutive zero-weight cycles, a Telegram alert is fired."""
+    from src.notifications.base import AlertLevel
+    from src.workers.portfolio_scheduler import (
+        _STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES,
+        _check_strategy_zero_weights,
+    )
+
+    mock_result = MagicMock()
+    mock_result.strategies_run = ["S1"]
+    mock_result.orders_per_strategy = {"S1": 0}
+
+    redis_inst = MagicMock()
+    redis_inst.incr.side_effect = list(range(1, _STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES + 1))
+
+    notifier = MagicMock()
+
+    with patch("redis.Redis.from_url", return_value=redis_inst), \
+         patch("src.workers.portfolio_scheduler._fire_alert") as mock_fire:
+        for _ in range(_STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES):
+            _check_strategy_zero_weights(
+                mock_result, {"S1"}, "redis://localhost", notifier
+            )
+
+    mock_fire.assert_called_once()
+    args = mock_fire.call_args[0]
+    assert "S1" in args[1]
+    assert args[2] == AlertLevel.WARNING
+
+
+def test_check_strategy_zero_weights_resets_on_positive_weights():
+    """A cycle with >0 weights resets the counter."""
+    from src.workers.portfolio_scheduler import _check_strategy_zero_weights
+
+    mock_result = MagicMock()
+    mock_result.strategies_run = ["S1"]
+    mock_result.orders_per_strategy = {"S1": 0}
+
+    redis_inst = MagicMock()
+    redis_inst.incr.return_value = 1
+
+    with patch("redis.Redis.from_url", return_value=redis_inst):
+        _check_strategy_zero_weights(
+            mock_result, {"S1"}, "redis://localhost", MagicMock()
+        )
+
+    mock_result.orders_per_strategy = {"S1": 3}
+    with patch("redis.Redis.from_url", return_value=redis_inst):
+        _check_strategy_zero_weights(
+            mock_result, {"S1"}, "redis://localhost", MagicMock()
+        )
+
+    redis_inst.delete.assert_called_once_with("strategy:zero_weights_cycles:S1")

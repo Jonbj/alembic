@@ -175,20 +175,26 @@ loss_feedback:
   enabled: true
   consecutive_loss_trigger: 3    # N consecutive losses → raise threshold
   rolling_pnl_window: 10         # trades to sum for rolling P&L check
+  # 2026-07-09: rolling P&L trigger now requires a material %-of-equity drawdown.
+  # Previously any negative rolling P&L (-$208 on $110K = -0.19%) raised the gate,
+  # causing a self-reinforcing drought. 0.5% means ~$550 on the current account.
+  rolling_pnl_drawdown_pct: 0.005
+  # When portfolio:value is missing from Redis, fall back to an absolute floor
+  # so the relative trigger still has a sensible bound.
+  rolling_pnl_trigger_floor_usd: 250.0
   threshold_step: 0.05           # amount to raise ENTRY_THRESHOLD per trigger
   threshold_max: 0.60            # ceiling for raised threshold
   threshold_baseline: 0.30       # baseline to recover toward
+  # 2026-07-09: auto-decay the raised gate every 24h without a new trigger, so a
+  # transient loss does not keep the threshold stuck near 0.55 forever.
+  threshold_decay_hours: 24
   regime_scale_factor: 0.80      # multiply regime scale by this on trigger
   regime_min_scale: 0.20         # floor for regime scale
   cooldown_hours: 4              # minimum hours between adjustments
-  # 5 -> 3 on 2026-07-09: escalation only needs 3 consecutive losses (or any negative
-  # rolling P&L) and can refire every cooldown_hours, so the threshold ratchets up fast;
-  # recovery required 5 *consecutive* wins with zero losses in between, which at the
-  # observed trade volume (2-6/day) rarely completes, leaving the gate stuck near
-  # threshold_max long after the triggering cause is fixed. Matched to
-  # consecutive_loss_trigger so escalation and recovery need the same bar of evidence.
+  # 5 -> 3 on 2026-07-09: recovery needs 3 consecutive wins, same bar as trigger.
   recovery_win_streak: 3         # consecutive wins → step threshold back down
   feedback_ttl_hours: 48         # Redis TTL for feedback keys
+  equity_fallback: 110000.0      # used if portfolio:value is not in Redis
 
 retention:
   news_log_days: 180      # delete news_log rows older than N days

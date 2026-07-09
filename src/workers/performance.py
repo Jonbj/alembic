@@ -1539,14 +1539,18 @@ def _load_loss_feedback_config() -> dict:
         "enabled": True,
         "consecutive_loss_trigger": 3,
         "rolling_pnl_window": 10,
+        "rolling_pnl_drawdown_pct": 0.005,  # trigger only on >0.5% equity loss
+        "rolling_pnl_trigger_floor_usd": 250.0,
         "threshold_step": 0.05,
         "threshold_max": 0.60,
         "threshold_baseline": 0.30,
+        "threshold_decay_hours": 24,        # auto-decay threshold if no trigger
         "regime_scale_factor": 0.80,
         "regime_min_scale": 0.20,
         "cooldown_hours": 4,
         "recovery_win_streak": 3,
         "feedback_ttl_hours": 48,
+        "equity_fallback": 110_000.0,
     }
     try:
         with open(_TRADING_YAML) as f:
@@ -1638,21 +1642,36 @@ def run_loss_feedback_check() -> dict:
     current_threshold = redis.get_feedback_entry_threshold() or cfg["threshold_baseline"]
     current_scale = redis.get_feedback_regime_scale() or 1.0
 
+    # Trigger on consecutive losses OR on a material rolling P&L drawdown.
+    # Using a %-of-equity threshold prevents noise (-$208 on $110K = 0.19%)
+    # from ratcheting the gate to 0.55 and choking all signals.
+    # When portfolio:value is absent, fall back to a conservative absolute floor.
+    equity = redis.get_portfolio_value()
+    drawdown_pct = cfg.get("rolling_pnl_drawdown_pct", 0.0)
+    if equity is not None and equity > 0 and drawdown_pct > 0:
+        rolling_loss_limit = equity * drawdown_pct
+    else:
+        rolling_loss_limit = cfg.get("rolling_pnl_trigger_floor_usd", 250.0)
+    pnl_drawdown_trigger = rolling_net_pnl < -rolling_loss_limit
+
     triggered = (
         consecutive_losses >= cfg["consecutive_loss_trigger"]
-        or rolling_net_pnl < 0
+        or pnl_drawdown_trigger
     )
 
     result: dict = {
         "consecutive_losses": consecutive_losses,
         "consecutive_wins": consecutive_wins,
         "rolling_net_pnl": round(rolling_net_pnl, 2),
+        "rolling_loss_limit": round(rolling_loss_limit, 2),
+        "equity": equity,
         "current_threshold": current_threshold,
         "current_scale": current_scale,
         "triggered": triggered,
         "cooldown_ok": cooldown_ok,
         "adjusted": False,
         "recovered": False,
+        "decayed": False,
     }
 
     if triggered and cooldown_ok:
@@ -1668,6 +1687,7 @@ def run_loss_feedback_check() -> dict:
             "reason": "triggered",
             "consecutive_losses": consecutive_losses,
             "rolling_net_pnl": round(rolling_net_pnl, 2),
+            "equity": equity,
             "threshold_before": current_threshold,
             "threshold_after": new_threshold,
             "scale_before": current_scale,
@@ -1678,10 +1698,11 @@ def run_loss_feedback_check() -> dict:
         result["new_threshold"] = new_threshold
         result["new_scale"] = new_scale
 
+        display_equity = equity if equity is not None else cfg.get("equity_fallback", 110_000.0)
         log.warning(
-            "Loss feedback triggered: %d consecutive losses, rolling P&L $%.2f — "
+            "Loss feedback triggered: %d consecutive losses, rolling P&L $%.2f (equity $%.0f) — "
             "threshold %.2f→%.2f, regime scale %.2f→%.2f",
-            consecutive_losses, rolling_net_pnl,
+            consecutive_losses, rolling_net_pnl, display_equity,
             current_threshold, new_threshold,
             current_scale, new_scale,
         )
@@ -1689,8 +1710,15 @@ def run_loss_feedback_check() -> dict:
         reason_parts = []
         if consecutive_losses >= cfg["consecutive_loss_trigger"]:
             reason_parts.append(f"{consecutive_losses} consecutive losses")
-        if rolling_net_pnl < 0:
-            reason_parts.append(f"rolling P&L ${rolling_net_pnl:.2f}")
+        if pnl_drawdown_trigger:
+            if equity is not None and equity > 0:
+                reason_parts.append(
+                    f"rolling P&L ${rolling_net_pnl:.2f} ({abs(rolling_net_pnl) / equity:.2%} of equity)"
+                )
+            else:
+                reason_parts.append(
+                    f"rolling P&L ${rolling_net_pnl:.2f} (limit -${rolling_loss_limit:.0f})"
+                )
         reason_str = " + ".join(reason_parts)
 
         msg = (
@@ -1745,6 +1773,40 @@ def run_loss_feedback_check() -> dict:
                     run_async(notifier.send_alert(msg, level="info"))
                 except Exception as exc:
                     log.warning("Telegram alert failed for feedback recovery: %s", exc)
+
+    elif not triggered and current_threshold > cfg["threshold_baseline"]:
+        # Temporal decay: if no trigger for a long time, gradually lower the gate
+        # so a single noisy loss does not keep the system locked at 0.55 forever.
+        decay_hours = cfg.get("threshold_decay_hours")
+        if decay_hours and last_adj_str:
+            try:
+                last_adj = datetime.fromisoformat(last_adj_str)
+                if last_adj.tzinfo is None:
+                    last_adj = last_adj.replace(tzinfo=timezone.utc)
+                hours_since = (datetime.now(timezone.utc) - last_adj).total_seconds() / 3600
+                if hours_since >= decay_hours:
+                    new_threshold = max(current_threshold - cfg["threshold_step"], cfg["threshold_baseline"])
+                    new_scale = min(current_scale / cfg["regime_scale_factor"], 1.0)
+                    if new_threshold < current_threshold:
+                        redis.set_feedback_entry_threshold(new_threshold, ttl=ttl_seconds)
+                        redis.set_feedback_regime_scale(new_scale, ttl=ttl_seconds)
+                        redis.set_feedback_state({
+                            "last_adjustment_ts": datetime.now(timezone.utc).isoformat(),
+                            "reason": "decay",
+                            "threshold_before": current_threshold,
+                            "threshold_after": new_threshold,
+                            "scale_before": current_scale,
+                            "scale_after": new_scale,
+                        }, ttl=ttl_seconds)
+                        result["decayed"] = True
+                        result["new_threshold"] = new_threshold
+                        result["new_scale"] = new_scale
+                        log.info(
+                            "Loss feedback decay: threshold %.2f→%.2f after %.0fh without trigger",
+                            current_threshold, new_threshold, hours_since,
+                        )
+            except (ValueError, TypeError):
+                pass
 
     redis.close()
     return result

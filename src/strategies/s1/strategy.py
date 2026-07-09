@@ -110,7 +110,7 @@ class TimeSeriesMomentum:
             as_of_date = as_of.date() if hasattr(as_of, "date") else as_of
             eligible = {a.symbol for a in self._universe.active_at(as_of_date)}
 
-        return {
+        weights = {
             ticker: float(weights_row[ticker])
             for ticker in signals_row.index
             if (
@@ -120,6 +120,15 @@ class TimeSeriesMomentum:
                 and (eligible is None or ticker in eligible)
             )
         }
+        # Sleeve contract (config/strategies.yaml): sleeve-local weights must sum
+        # to ≤ 1.0. Per-name inverse-vol weights are only capped individually
+        # (max_weight), so with many qualifying names the sum can far exceed 1.
+        # Normalising at the source prevents the ConstraintEnforcer from
+        # proportionally crushing other strategies' contributions in the same pass.
+        total = sum(weights.values())
+        if total > 1.0:
+            weights = {t: w / total for t, w in weights.items()}
+        return weights
 
     def health_check(self) -> bool:
         """Return True when precomputed signals are non-empty, finite, and NaN-free."""

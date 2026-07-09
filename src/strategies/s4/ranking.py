@@ -62,6 +62,7 @@ class CrossSectionalRanker:
         self,
         signals: Sequence[SentimentResult],
         as_of: datetime | None = None,
+        entry_threshold: float | None = None,
     ) -> RankingResult:
         """Compute cross-sectional ranking from a collection of SentimentResult.
 
@@ -69,6 +70,9 @@ class CrossSectionalRanker:
             signals: One SentimentResult per ticker (duplicates collapsed to the
                      most recent by generated_at).
             as_of: Timestamp to stamp the result; defaults to now (UTC).
+            entry_threshold: Optional live entry threshold. When the threshold is
+                raised above baseline (loss-feedback), min_stocks drops to 1 so a
+                lone strong signal is not discarded.
 
         Returns:
             RankingResult with top-N tickers and equal weights, or an empty
@@ -80,7 +84,18 @@ class CrossSectionalRanker:
         cfg = self._config
         candidates = self._filter_and_deduplicate(signals)
 
-        if len(candidates) < cfg.min_stocks:
+        # Adaptive min_stocks: when the live gate is tightened, allow a single-name
+        # bucket so a rare high-confidence signal can still trade.
+        effective_min_stocks = cfg.min_stocks
+        if (
+            cfg.adaptive_min_stocks
+            and entry_threshold is not None
+            and cfg.entry_threshold_baseline is not None
+            and entry_threshold > cfg.entry_threshold_baseline
+        ):
+            effective_min_stocks = 1
+
+        if len(candidates) < effective_min_stocks:
             return RankingResult(
                 as_of=as_of,
                 rankings=(),
@@ -92,7 +107,7 @@ class CrossSectionalRanker:
         candidates.sort(key=lambda x: x[1], reverse=True)
         selected = candidates[: cfg.n_top]
 
-        if len(selected) < cfg.min_stocks:
+        if len(selected) < effective_min_stocks:
             return RankingResult(
                 as_of=as_of,
                 rankings=(),
