@@ -30,3 +30,29 @@ def test_sources_endpoint_survives_db_error():
         resp = client.get("/api/quality/sources")
     assert resp.status_code == 200
     assert resp.json()["funnel"] == []
+
+
+def test_rows_converts_decimal_to_float():
+    """Postgres NUMERIC columns (e.g. ROUND(...)::numeric) come back from psycopg
+    as decimal.Decimal. FastAPI's default JSON encoder serializes Decimal as a
+    *string*, silently breaking the `number | null` contract declared for these
+    fields in frontend/src/api/quality.ts — and crashing any .toFixed() call on
+    the frontend, e.g. Quality.tsx's `trd.total_net_pnl.toFixed(2)` (confirmed via
+    a live API call returning `"total_net_pnl":"-208.65"`, a quoted JSON string).
+    _rows() must convert Decimal -> float before the value ever reaches FastAPI's
+    encoder, at the single chokepoint both quality endpoints share.
+    """
+    from decimal import Decimal
+
+    from src.api.routes.quality_routes import _rows
+
+    cursor = MagicMock()
+    cursor.description = [("source",), ("total_net_pnl",), ("n_trades",)]
+    cursor.fetchall.return_value = [("alpaca_benzinga", Decimal("-208.65"), 21)]
+
+    rows = _rows(cursor, "SELECT source, total_net_pnl, n_trades FROM trades")
+
+    assert rows == [{"source": "alpaca_benzinga", "total_net_pnl": -208.65, "n_trades": 21}]
+    assert isinstance(rows[0]["total_net_pnl"], float), \
+        "Decimal must be converted to float, not left for FastAPI to stringify"
+    assert isinstance(rows[0]["n_trades"], int), "non-Decimal values must pass through unchanged"

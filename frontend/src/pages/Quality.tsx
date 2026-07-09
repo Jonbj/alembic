@@ -216,7 +216,7 @@ export default function Quality() {
                           <td>{trd?.n_trades ?? '—'}</td>
                           <td>{pct(trd?.hit_rate)}</td>
                           <td style={{ color: (trd?.total_net_pnl ?? 0) < 0 ? 'var(--red)' : undefined }}>
-                            {trd?.total_net_pnl != null ? `$${trd.total_net_pnl.toFixed(2)}` : '—'}
+                            {trd?.total_net_pnl != null ? `$${Number(trd.total_net_pnl).toFixed(2)}` : '—'}
                           </td>
                           <td style={{ color: toneColor[v.tone], fontWeight: 700 }} title={v.reasons.join('; ')}>{v.tone}</td>
                         </tr>

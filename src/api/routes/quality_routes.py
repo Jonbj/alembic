@@ -27,9 +27,21 @@ def _watchlist() -> set[str]:
 
 
 def _rows(cur, sql, params=()):
+    """Run a query and return rows as dicts, with NUMERIC/Decimal columns coerced
+    to float. Postgres NUMERIC (e.g. ROUND(...)::numeric) comes back from psycopg
+    as decimal.Decimal; FastAPI's default JSON encoder serializes Decimal as a
+    *string*, silently breaking the `number | null` contract the frontend expects
+    and crashing any `.toFixed()` call on the value. Convert at the source so
+    every caller gets a real JSON number.
+    """
+    from decimal import Decimal
+
     cur.execute(sql, params)
     cols = [d[0] for d in cur.description]
-    return [dict(zip(cols, r)) for r in cur.fetchall()]
+    return [
+        {col: (float(val) if isinstance(val, Decimal) else val) for col, val in zip(cols, r)}
+        for r in cur.fetchall()
+    ]
 
 
 @router.get("/metrics")
