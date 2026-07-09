@@ -142,3 +142,33 @@ def test_main_skips_already_scored_pairs_and_records_spend(tmp_path, monkeypatch
     assert model_id == "glm-5.2:cloud"
     assert input_tokens > 0
     assert output_tokens == 200 // 4
+
+
+def test_summary_computes_accuracy_and_parse_fail_rate(tmp_path, monkeypatch, capsys):
+    import scripts.compare_models_retro as mod
+
+    out_path = tmp_path / "stage1_retro.csv"
+    with open(out_path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=mod._FIELDS)
+        w.writeheader()
+        w.writerow({"label_id": 1, "model": "kimi-k2.6:cloud", "polarity": 0.3,
+                     "confidence": 0.6, "gt_sentiment_dir": "positive",
+                     "predicted_dir": "positive", "correct": True,
+                     "parse_error": False, "latency_ms": 900})
+        w.writerow({"label_id": 2, "model": "kimi-k2.6:cloud", "polarity": 0.1,
+                     "confidence": 0.4, "gt_sentiment_dir": "negative",
+                     "predicted_dir": "neutral", "correct": False,
+                     "parse_error": False, "latency_ms": 700})
+        w.writerow({"label_id": 3, "model": "kimi-k2.6:cloud", "polarity": 0.0,
+                     "confidence": 0.0, "gt_sentiment_dir": "positive",
+                     "predicted_dir": "", "correct": False,
+                     "parse_error": True, "latency_ms": 0})
+    monkeypatch.setattr(mod, "_OUT", str(out_path))
+    monkeypatch.setattr(mod, "_MODELS", ["kimi-k2.6:cloud"])
+
+    mod._print_summary()
+
+    out = capsys.readouterr().out
+    assert "kimi-k2.6:cloud" in out
+    assert "0.50" in out  # accuracy: 1 correct / 2 parsed
+    assert "0.33" in out  # parse_fail_rate: 1/3

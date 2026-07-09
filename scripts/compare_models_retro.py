@@ -175,6 +175,33 @@ def main() -> None:
     finally:
         budget_conn.close()
     print(f"Done → {_OUT}")
+    _print_summary()
+
+
+def _print_summary() -> None:
+    """Print a markdown table: accuracy, parse-failure rate, confidence, latency per model."""
+    import statistics
+
+    with open(_OUT) as f:
+        rows = list(csv.DictReader(f))
+
+    print("\n| model | n | accuracy | parse_fail_rate | avg_confidence | avg_latency_ms |")
+    print("|---|---|---|---|---|---|")
+    for model in _MODELS:
+        model_rows = [r for r in rows if r["model"] == model]
+        if not model_rows:
+            continue
+        n = len(model_rows)
+        parsed_ok = [r for r in model_rows if r["parse_error"] == "False"]
+        accuracy = (
+            sum(1 for r in parsed_ok if r["correct"] == "True") / len(parsed_ok)
+            if parsed_ok else 0.0
+        )
+        parse_fail_rate = 1 - len(parsed_ok) / n
+        avg_conf = statistics.mean(float(r["confidence"]) for r in parsed_ok) if parsed_ok else 0.0
+        latencies = [float(r["latency_ms"]) for r in model_rows if float(r["latency_ms"]) > 0]
+        avg_latency = statistics.mean(latencies) if latencies else 0.0
+        print(f"| {model} | {n} | {accuracy:.2f} | {parse_fail_rate:.2f} | {avg_conf:.2f} | {avg_latency:.0f} |")
 
 
 if __name__ == "__main__":
