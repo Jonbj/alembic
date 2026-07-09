@@ -1732,9 +1732,55 @@ def _strategy_symbols(entry) -> list[str]:
     return syms
 
 
-# SKIP_STALE is logged only for signals that JUST aged out (within this buffer of
-# max_age), not deep lookback data (up to signals_lookback_hours) re-scanned every cycle.
-_STALE_LOG_RECENT_BUFFER_H = 1.0
+# Idempotency store for SKIP_STALE logging: a signal is identified by symbol+generated_at
+# (unique per sentiment_signals row). TTL comfortably exceeds S4's signals_lookback_hours
+# (96h) so a signal never falls out of the idempotency set while it could still be re-scanned.
+_STALE_LOGGED_SIGNALS_KEY = "s4:logged_stale_signals"
+_STALE_LOGGED_TTL_SECONDS = 10 * 24 * 3600  # 10 days
+
+
+def _stale_signal_key(symbol: str, generated_at) -> str:
+    from datetime import timezone
+    gen = generated_at
+    if getattr(gen, "tzinfo", None) is None:
+        gen = gen.replace(tzinfo=timezone.utc)
+    return f"{symbol}|{gen.isoformat()}"
+
+
+def _get_logged_stale_signal_keys(redis_url: str) -> set[str] | None:
+    """Return signal keys already logged as SKIP_STALE, or None if Redis is unreachable.
+
+    Unlike the S4 fired-signal idempotency gate (which fails CLOSED to protect against
+    duplicate orders), this fails OPEN: callers should treat None as "nothing logged yet"
+    and log anyway — a duplicate Decision Log row is a minor nuisance, but silently
+    dropping visibility into a strong signal is the exact bug this store exists to fix.
+    """
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            return set(r.smembers(_STALE_LOGGED_SIGNALS_KEY))
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Could not read logged-stale-signal set from Redis: %s", exc)
+        return None
+
+
+def _mark_stale_signals_logged(keys: list[str], redis_url: str) -> None:
+    """Add signal keys to the idempotency set; refresh TTL. Fail-silent."""
+    if not keys:
+        return
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            r.sadd(_STALE_LOGGED_SIGNALS_KEY, *keys)
+            r.expire(_STALE_LOGGED_SIGNALS_KEY, _STALE_LOGGED_TTL_SECONDS)
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Failed to mark stale signals as logged: %s", exc)
 
 
 def _load_entry_threshold_baseline() -> float:
@@ -1788,10 +1834,14 @@ def _record_gate_drops(dropped_df, threshold: float) -> None:
 
 def _record_stale_drops(stale_signals, max_age_hours: int, min_score: float) -> None:
     """Write SKIP_STALE rows for signals that (a) mattered (|score| >= min_score) AND
-    (b) JUST aged out — within _STALE_LOG_RECENT_BUFFER_H of max_age. Excludes deep
-    lookback data (up to signals_lookback_hours) that the cycle re-scans every 15 min,
-    which otherwise floods the Decision Log with the same 8-40h-old signals (masking the
-    real just-aged ones). Fail-safe — never breaks the cycle.
+    (b) have not already been logged (idempotency set keyed by symbol+generated_at).
+
+    Signals generated late enough in the session that no cycle runs again before they
+    age past max_age (e.g. after-close signals, first evaluated 16h+ later at the next
+    day's opening cycle) must still get exactly one Decision Log entry — not be silently
+    dropped forever. The idempotency check (rather than a recency cutoff) also prevents
+    re-logging the same old signal on every subsequent 15-min re-scan of the
+    signals_lookback_hours window. Fail-safe — never breaks the cycle.
     """
     try:
         from datetime import datetime, timezone
@@ -1799,23 +1849,27 @@ def _record_stale_drops(stale_signals, max_age_hours: int, min_score: float) -> 
         from src.config import config
         from src.store.pg_store import PostgreSQLStore
 
+        notable = [s for s in stale_signals if abs(float(s.score)) >= min_score]
+        if not notable:
+            return
+
+        already_logged = _get_logged_stale_signal_keys(config.REDIS_URL)
+        if already_logged is None:
+            already_logged = set()  # fail open: Redis down → log anyway, dedupe later
+
+        to_log = [s for s in notable if _stale_signal_key(s.symbol, s.generated_at) not in already_logged]
+        if not to_log:
+            return
+
         now = datetime.now(timezone.utc)
-        cutoff_h = max_age_hours + _STALE_LOG_RECENT_BUFFER_H
-        notable: list = []
-        for s in stale_signals:
-            if abs(float(s.score)) < min_score:
-                continue
-            gen = s.generated_at
+        regime_mult = _get_regime_multiplier_from_redis(config.REDIS_URL)
+        pg = PostgreSQLStore()
+        logged_keys: list[str] = []
+        for sig in to_log:
+            gen = sig.generated_at
             if getattr(gen, "tzinfo", None) is None:
                 gen = gen.replace(tzinfo=timezone.utc)
             age_h = (now - gen).total_seconds() / 3600.0
-            if age_h <= cutoff_h:  # recently crossed max_age, not old lookback noise
-                notable.append((s, age_h))
-        if not notable:
-            return
-        regime_mult = _get_regime_multiplier_from_redis(config.REDIS_URL)
-        pg = PostgreSQLStore()
-        for sig, age_h in notable:
             pg.write_execution_decision(
                 tick_time=now,
                 symbol=sig.symbol,
@@ -1827,6 +1881,8 @@ def _record_stale_drops(stale_signals, max_age_hours: int, min_score: float) -> 
                 reason=f"signal {age_h:.1f}h old > max_age {max_age_hours}h (score {float(sig.score):.3f})",
                 signal_score=float(sig.score),
             )
+            logged_keys.append(_stale_signal_key(sig.symbol, sig.generated_at))
+        _mark_stale_signals_logged(logged_keys, config.REDIS_URL)
     except Exception as exc:
         log.warning("Failed to log stale-dropped signals: %s", exc)
 
