@@ -98,3 +98,75 @@ def _score_one(model: str, prompt: str) -> dict:
         "polarity": 0.0, "confidence": 0.0, "parse_error": True,
         "latency_ms": 0, "output_chars": 0,
     }
+
+
+def _fetch_labeled_rows() -> list[dict]:
+    """Return all news_labels rows with status='labeled', oldest first."""
+    conn = psycopg2.connect(config.DATABASE_URL)
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                "SELECT label_id, body_snippet, gt_tickers, extracted_tickers, "
+                "gt_sentiment_dir FROM news_labels WHERE status = 'labeled' "
+                "ORDER BY label_id"
+            )
+            return list(cur.fetchall())
+    finally:
+        conn.close()
+
+
+def _build_budget_tracker() -> LLMBudgetTracker:
+    conn = psycopg2.connect(config.DATABASE_URL)
+    return LLMBudgetTracker(conn=conn)
+
+
+def main() -> None:
+    os.makedirs(os.path.dirname(_OUT), exist_ok=True)
+    done = set()
+    if os.path.exists(_OUT):
+        with open(_OUT) as f:
+            done = {(int(r["label_id"]), r["model"]) for r in csv.DictReader(f)}
+    new_file = not done
+
+    rows = _fetch_labeled_rows()
+    print(f"Labeled rows: {len(rows)} — già scorati: {len(done)}")
+    budget_tracker = _build_budget_tracker()
+
+    with open(_OUT, "a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=_FIELDS)
+        if new_file:
+            w.writeheader()
+        for row in rows:
+            tickers = row["gt_tickers"] or row["extracted_tickers"] or []
+            symbol = tickers[0] if tickers else "UNKNOWN"
+            prompt = _DK_COT_PROMPT.format(text=(row["body_snippet"] or "")[:600], symbol=symbol)
+            for model in _MODELS:
+                key = (row["label_id"], model)
+                if key in done:
+                    continue
+                result = _score_one(model, prompt)
+                if not result["parse_error"]:
+                    asyncio.run(budget_tracker.record_spending(
+                        model_id=model,
+                        input_tokens=len(prompt) // 4,
+                        output_tokens=result["output_chars"] // 4,
+                    ))
+                predicted_dir = _direction(result["polarity"]) if not result["parse_error"] else ""
+                correct = (
+                    predicted_dir == row["gt_sentiment_dir"] if not result["parse_error"] else False
+                )
+                w.writerow({
+                    "label_id": row["label_id"], "model": model,
+                    "polarity": result["polarity"], "confidence": result["confidence"],
+                    "gt_sentiment_dir": row["gt_sentiment_dir"],
+                    "predicted_dir": predicted_dir, "correct": correct,
+                    "parse_error": result["parse_error"], "latency_ms": result["latency_ms"],
+                })
+                f.flush()
+                time.sleep(1)
+    budget_tracker.close()
+    print(f"Done → {_OUT}")
+
+
+if __name__ == "__main__":
+    main()
