@@ -432,7 +432,7 @@ def _format_feedback_stall_section(redis: "RedisStore") -> str:
 
     baseline = float(fb_cfg.get("threshold_baseline", 0.30))
     threshold_max = float(fb_cfg.get("threshold_max", 0.60))
-    recovery_win_streak = int(fb_cfg.get("recovery_win_streak", 5))
+    recovery_win_streak = int(fb_cfg.get("recovery_win_streak", 3))
 
     current_threshold = redis.get_feedback_entry_threshold() or baseline
     current_scale = redis.get_feedback_regime_scale() or 1.0
@@ -618,7 +618,7 @@ def _build_weekly_structured(
     try:
         fb_cfg = _cfg_yaml.get("loss_feedback", {})
         baseline = float(fb_cfg.get("threshold_baseline", 0.30))
-        recovery_win_streak = int(fb_cfg.get("recovery_win_streak", 5))
+        recovery_win_streak = int(fb_cfg.get("recovery_win_streak", 3))
         current_thr = redis.get_feedback_entry_threshold() or baseline
         current_scale = redis.get_feedback_regime_scale() or 1.0
         fb_state = redis.get_feedback_state() or {}
@@ -1545,7 +1545,7 @@ def _load_loss_feedback_config() -> dict:
         "regime_scale_factor": 0.80,
         "regime_min_scale": 0.20,
         "cooldown_hours": 4,
-        "recovery_win_streak": 5,
+        "recovery_win_streak": 3,
         "feedback_ttl_hours": 48,
     }
     try:

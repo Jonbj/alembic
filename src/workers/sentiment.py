@@ -11,8 +11,9 @@ Pipeline per batch (up to 10 items pulled atomically via LMOVE):
   3. LLM ensemble — query Kimi K2.6, GLM-5.2 in
      parallel using DK-CoT prompting; aggregate with LOO ICIR weights if
      available, else confidence-weighted mean.
-  4. Divergence fallback — if ensemble std > 0.30 (models disagree strongly)
-     or budget is exhausted, fall back to FinBERT (local, zero cost).
+  4. Divergence fallback — if ensemble std > config.ENSEMBLE_DIVERGENCE_STD (models
+     disagree strongly; default 0.40, see src/config.py for rationale) or budget is
+     exhausted, fall back to FinBERT (local, zero cost).
   5. Store writes — signal → PostgreSQL (audit) and Redis (live cache);
      per-model LLM responses logged for LOO weight recalculation.
   6. Dead-letter — unparseable queue items moved to news:dead-letter to

@@ -164,7 +164,18 @@ class Config(BaseModel):
 
     # Ensemble thresholds
     ENSEMBLE_MIN_CONFIDENCE: float = Field(default=0.4)
-    ENSEMBLE_DIVERGENCE_STD: float = Field(default=0.30)
+    # Raised 0.30 -> 0.40 on 2026-07-09: the qwen3.5->GLM-5.2 pair swap (150d2c2,
+    # 2026-06-29) made the 2-model pair disagree far more often, pushing FinBERT-fallback
+    # rate from ~15-20% to ~70-86% of signals. FinBERT fallback scores are much weaker
+    # (avg |score| 0.07 vs 0.20, confidence 0.33 vs 0.65), so they rarely clear the entry
+    # threshold in portfolio_scheduler -> most signals ended in SKIP_THRESHOLD (68% of
+    # execution_decisions over 14d) and order flow to Alpaca dropped to a handful/day.
+    # Widening the divergence gate lets same-direction-but-different-magnitude
+    # disagreement resolve to a weighted-average signal (still confidence-scored, unlike
+    # FinBERT) instead of discarding it; opposite-direction disagreement still averages
+    # toward ~0 and gets filtered downstream either way, so this doesn't let through
+    # genuinely conflicting model output.
+    ENSEMBLE_DIVERGENCE_STD: float = Field(default=0.40)
 
     # Sentiment reversal exit: if a held position's current LLM score drops below
     # this threshold, a forced SELL is submitted in the next portfolio cycle.

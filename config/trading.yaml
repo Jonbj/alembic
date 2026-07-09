@@ -181,7 +181,13 @@ loss_feedback:
   regime_scale_factor: 0.80      # multiply regime scale by this on trigger
   regime_min_scale: 0.20         # floor for regime scale
   cooldown_hours: 4              # minimum hours between adjustments
-  recovery_win_streak: 5         # consecutive wins → step threshold back down
+  # 5 -> 3 on 2026-07-09: escalation only needs 3 consecutive losses (or any negative
+  # rolling P&L) and can refire every cooldown_hours, so the threshold ratchets up fast;
+  # recovery required 5 *consecutive* wins with zero losses in between, which at the
+  # observed trade volume (2-6/day) rarely completes, leaving the gate stuck near
+  # threshold_max long after the triggering cause is fixed. Matched to
+  # consecutive_loss_trigger so escalation and recovery need the same bar of evidence.
+  recovery_win_streak: 3         # consecutive wins → step threshold back down
   feedback_ttl_hours: 48         # Redis TTL for feedback keys
 
 retention:

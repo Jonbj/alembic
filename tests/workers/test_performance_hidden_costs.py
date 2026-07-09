@@ -125,10 +125,11 @@ class TestFeedbackStall:
         assert "0.55" in result
 
     def test_recovery_progress_shown(self):
-        state = {"consecutive_wins": 3, "last_adjustment_ts": "2026-06-05T10:00:00+00:00"}
+        # recovery_win_streak is 3 (config/trading.yaml loss_feedback), so 1 win leaves 2 more needed.
+        state = {"consecutive_wins": 1, "last_adjustment_ts": "2026-06-05T10:00:00+00:00"}
         redis = self._make_redis(threshold=0.50, state=state)
         result = _format_feedback_stall_section(redis)
-        assert "3/" in result
+        assert "1/" in result
         assert "2 more" in result
 
     def test_last_trigger_date_shown(self):

@@ -36,7 +36,7 @@ FinBERT locale (via run_in_executor)
 fallback_used=True, score=0.0 (decisione: NO-ORDER)
 ```
 
-Divergenza ensemble: se `std(scores) > 0.30` → scarta ensemble, usa FinBERT come arbitro.
+Divergenza ensemble: se `std(scores) > 0.40` (config.ENSEMBLE_DIVERGENCE_STD, alzato da 0.30 il 2026-07-09 — vedi src/config.py per il razionale) → scarta ensemble, usa FinBERT come arbitro.
 
 ## FinBERT — Confidence formula
 
