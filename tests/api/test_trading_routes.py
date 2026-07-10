@@ -296,3 +296,45 @@ class TestAnalyticsRoutes:
         tc = TestClient(app)
         resp = tc.get("/api/trades/postmortem/999")
         assert resp.status_code == 404
+
+
+def test_get_orders_origin_strategy():
+    """origin_strategy is derived from the trace: 'S4' when a sentiment signal is
+    linked, 'S1' when the portfolio path traced the order without a signal
+    (momentum orders have no news), None when the order has no local trace."""
+    from datetime import datetime, timezone
+
+    def _mk(order_id, symbol):
+        o = MagicMock()
+        o.id = order_id
+        o.symbol = symbol
+        o.side.value = "buy"
+        o.qty = "10"
+        o.filled_avg_price = "100.0"
+        o.status.value = "filled"
+        o.filled_at = datetime(2026, 7, 10, 14, 0, tzinfo=timezone.utc)
+        o.submitted_at = datetime(2026, 7, 10, 13, 55, tzinfo=timezone.utc)
+        return o
+
+    mock_client = MagicMock()
+    mock_client.get_orders.return_value = [
+        _mk("ord-news", "PFE"), _mk("ord-momentum", "AAPL"), _mk("ord-untraced", "MSFT"),
+    ]
+    mock_pg = MagicMock()
+    mock_pg.fetch_order_trace.return_value = {
+        "ord-news": {"signal_id": 7, "decision_id": 11, "news_log_id": 3, "trade_id": 1},
+        "ord-momentum": {"signal_id": None, "decision_id": 12, "news_log_id": None, "trade_id": 2},
+    }
+    app.dependency_overrides[get_alpaca_trading_client] = lambda: mock_client
+    app.dependency_overrides[get_pg_store] = lambda: mock_pg
+    app.dependency_overrides[require_api_key] = _skip_auth
+
+    tc = TestClient(app)
+    resp = tc.get("/api/orders")
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    by_id = {r["id"]: r for r in resp.json()}
+    assert by_id["ord-news"]["origin_strategy"] == "S4"
+    assert by_id["ord-momentum"]["origin_strategy"] == "S1"
+    assert by_id["ord-untraced"]["origin_strategy"] is None

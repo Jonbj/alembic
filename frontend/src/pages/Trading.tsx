@@ -52,6 +52,7 @@ function orderTraceLinks(o: Order) {
         orderId: o.id,
         signalCount: o.signal_id ? 1 : 0,
         decisionCount: o.decision_id ? 1 : 0,
+        originStrategy: o.origin_strategy ?? undefined,
       }}
       emptyMessage="—"
     />

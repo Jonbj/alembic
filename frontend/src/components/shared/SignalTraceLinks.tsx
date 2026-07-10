@@ -12,6 +12,15 @@ export interface SignalTraceAvailability {
   signalCount?: number
   decisionCount?: number
   orderCount?: number
+  /** Strategy that originated the traced order (e.g. "S1"). Non-news strategies
+   *  legitimately have no news/signal steps — the drawer says so instead of
+   *  showing a misleading "not traced". */
+  originStrategy?: string
+}
+
+const ORIGIN_LABELS: Record<string, string> = {
+  S1: 'S1 · momentum',
+  S4: 'S4 · news sentiment',
 }
 
 function path(pathname: string, params: Record<string, string | undefined>) {
@@ -200,6 +209,14 @@ export function SignalTraceLinks({
               {drawerSteps.map((step, index) => {
                 const isVisible = step.available
                 const title = step.key === 'orders' ? 'Orders' : step.text.replace(/\s\(\d+\)$/, '')
+                // A non-news strategy (e.g. S1 momentum) has no news/signal by
+                // design: show the origin instead of "not traced".
+                const origin = availability?.originStrategy
+                const showOrigin = !isVisible
+                  && !!origin
+                  && origin !== 'S4'
+                  && (step.key === 'news' || step.key === 'signal')
+                const originLabel = origin ? (ORIGIN_LABELS[origin] ?? `origin: ${origin}`) : ''
                 return (
                   <div
                     key={step.key}
@@ -232,11 +249,15 @@ export function SignalTraceLinks({
                       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
                         <strong style={{ fontSize: 13 }}>{title}</strong>
                         <span className={`badge ${isVisible ? 'badge-blue' : 'badge-grey'}`}>
-                          {isVisible ? 'available' : 'not traced'}
+                          {isVisible ? 'available' : showOrigin ? originLabel : 'not traced'}
                         </span>
                       </div>
                       <div style={{ marginTop: 4, color: 'var(--text-muted)', fontSize: 12, overflowWrap: 'anywhere' }}>
-                        {isVisible ? step.detail : 'No linked downstream record for this item.'}
+                        {isVisible
+                          ? step.detail
+                          : showOrigin
+                            ? `Order originated from ${originLabel} (price-based strategy) — no news is expected for this order.`
+                            : 'No linked downstream record for this item.'}
                       </div>
                       {isVisible && (
                         <Link

@@ -88,11 +88,22 @@ def get_orders(
         trace_by_order = {}
     for row in rows:
         trace = trace_by_order.get(row["id"], {})
+        # Origin strategy derived from trace linkage: S4 is the only strategy
+        # that attaches sentiment signals, so a traced order without signal_id
+        # came from the momentum sleeve (S1). Untraced orders (manual, legacy
+        # pre-logging) stay None.
+        if trace.get("signal_id"):
+            origin = "S4"
+        elif trace.get("decision_id") or trace.get("trade_id"):
+            origin = "S1"
+        else:
+            origin = None
         row.update({
             "signal_id": trace.get("signal_id"),
             "decision_id": trace.get("decision_id"),
             "news_log_id": trace.get("news_log_id"),
             "trade_id": trace.get("trade_id"),
+            "origin_strategy": origin,
         })
     return rows
 

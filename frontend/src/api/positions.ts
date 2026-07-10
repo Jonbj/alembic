@@ -33,6 +33,7 @@ export interface Order {
   decision_id?: number | null
   news_log_id?: number | null
   trade_id?: number | null
+  origin_strategy?: string | null
 }
 
 export const fetchPositions = () =>
