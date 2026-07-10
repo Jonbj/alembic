@@ -57,7 +57,7 @@ def next_item() -> dict:
             cur.execute(
                 """SELECT label_id, source, title, body_snippet, published_at, text_adequacy
                    FROM news_labels WHERE status = 'pending'
-                   ORDER BY label_id LIMIT 1"""
+                   ORDER BY (text_adequacy = 'full') DESC, label_id LIMIT 1"""
             )
             row = cur.fetchone()
     if row is None:
