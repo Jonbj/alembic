@@ -144,6 +144,44 @@ def test_main_skips_already_scored_pairs_and_records_spend(tmp_path, monkeypatch
     assert output_tokens == 200 // 4
 
 
+def test_main_does_not_duplicate_header_on_header_only_resume(tmp_path, monkeypatch):
+    import scripts.compare_models_retro as mod
+
+    out_path = tmp_path / "stage1_retro.csv"
+    # Simulates a run interrupted right after writeheader(), before any row completed.
+    with open(out_path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=mod._FIELDS)
+        w.writeheader()
+
+    monkeypatch.setattr(mod, "_OUT", str(out_path))
+    monkeypatch.setattr(mod, "_MODELS", ["kimi-k2.6:cloud"])
+    monkeypatch.setattr(
+        mod, "_fetch_labeled_rows",
+        lambda: [{
+            "label_id": 1, "body_snippet": "Some news body",
+            "gt_tickers": ["AAPL"], "extracted_tickers": [],
+            "gt_sentiment_dir": "positive",
+        }],
+    )
+    monkeypatch.setattr(
+        mod, "_score_one",
+        lambda model, prompt: {
+            "polarity": 0.2, "confidence": 0.5, "parse_error": False,
+            "latency_ms": 100, "output_chars": 150,
+        },
+    )
+    monkeypatch.setattr(mod.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(mod, "_build_budget_tracker", lambda: (_NoopTracker(), _FakeConn()))
+
+    mod.main()
+
+    with open(out_path) as f:
+        lines = f.readlines()
+    header_lines = [l for l in lines if l.startswith("label_id,")]
+    assert len(header_lines) == 1  # not duplicated
+    assert len(lines) == 2  # exactly: 1 header + 1 data row
+
+
 def test_summary_computes_accuracy_and_parse_fail_rate(tmp_path, monkeypatch, capsys):
     import scripts.compare_models_retro as mod
 

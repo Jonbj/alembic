@@ -10,9 +10,6 @@ docs/superpowers/specs/2026-07-09-ensemble-model-comparison-design.md).
 Does not use the live async OllamaCloudClient / Redis semaphore: this is a slow,
 sequential, one-off batch with no concurrency, fully decoupled from the live worker.
 
-Imports below (asyncio, csv, psycopg2, LLMBudgetTracker, _DK_COT_PROMPT, config) are used
-starting in Task 2's main() loop; this task only adds _call/_direction/_score_one.
-
 Run: set -a; source .env; set +a; .venv/bin/python scripts/compare_models_retro.py
 """
 from __future__ import annotations
