@@ -194,7 +194,6 @@ loss_feedback:
   # 5 -> 3 on 2026-07-09: recovery needs 3 consecutive wins, same bar as trigger.
   recovery_win_streak: 3         # consecutive wins → step threshold back down
   feedback_ttl_hours: 48         # Redis TTL for feedback keys
-  equity_fallback: 110000.0      # used if portfolio:value is not in Redis
 
 retention:
   news_log_days: 180      # delete news_log rows older than N days

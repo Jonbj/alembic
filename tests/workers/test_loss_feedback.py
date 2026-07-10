@@ -106,7 +106,6 @@ def _default_cfg():
         "cooldown_hours": 4,
         "recovery_win_streak": 3,
         "feedback_ttl_hours": 48,
-        "equity_fallback": 100_000.0,
     }
 
 
@@ -213,6 +212,22 @@ class TestTriggerOnNegativeRollingPnl:
         assert result_hi["triggered"] is True
         result_lo, _ = _patched_run(_make_trades([-200, 40, 30, 10, 5]))
         assert result_lo["triggered"] is False
+
+    def test_zero_drawdown_pct_disables_rolling_pnl_trigger(self):
+        """rolling_pnl_drawdown_pct=0 must disable the rolling-P&L trigger entirely.
+
+        Only consecutive losses should still be able to trigger.
+        """
+        # Large rolling loss but no consecutive losses and pct=0 → no trigger.
+        trades = _make_trades([-600, 40, 30, -20, -50])
+        result, _ = _patched_run(
+            trades,
+            redis_equity=100_000.0,
+            cfg_override={"rolling_pnl_drawdown_pct": 0.0},
+        )
+        assert result["triggered"] is False
+        assert result["adjusted"] is False
+        assert result["rolling_loss_limit"] is None
 
     def test_positive_rolling_pnl_no_trigger(self):
         trades = _make_trades([5, 3, 2, -1, 1])
@@ -338,6 +353,36 @@ class TestTemporalDecay:
         )
 
         assert result["decayed"] is False
+
+    def test_decay_sends_baseline_reset_notification(self):
+        """When decay reaches baseline, a Telegram reset alert is sent."""
+        from unittest.mock import MagicMock, patch
+
+        trades = _make_trades([5, 3, -1, 2, 1])
+        old_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+        cfg = _default_cfg()
+        mock_redis = MagicMock()
+        mock_redis.get_feedback_entry_threshold.return_value = 0.31  # one step above baseline
+        mock_redis.get_feedback_regime_scale.return_value = None
+        mock_redis.get_feedback_state.return_value = {"last_adjustment_ts": old_ts, "reason": "triggered"}
+        mock_redis.get_portfolio_value.return_value = 100_000.0
+        mock_pg = MagicMock()
+        mock_pg.fetch_trades.return_value = trades
+
+        with patch("src.workers.performance._load_loss_feedback_config", return_value=cfg), \
+             patch("src.workers.performance.RedisStore", return_value=mock_redis), \
+             patch("src.workers.performance.PostgreSQLStore", return_value=mock_pg), \
+             patch("src.workers.performance.TelegramNotifier") as mock_notifier_cls, \
+             patch("src.workers.performance.run_async") as mock_run_async:
+            run_loss_feedback_check()
+
+        mock_notifier_cls.assert_called_once()
+        mock_run_async.assert_called_once()
+        send_alert_call = mock_notifier_cls.return_value.send_alert.call_args
+        assert send_alert_call is not None
+        msg = send_alert_call[0][0]
+        assert "Loss Feedback Reset" in msg
+        assert "0.30" in msg
 
 
 class TestRedisWrites:
