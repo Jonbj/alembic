@@ -198,6 +198,20 @@ class TestComputeTargetWeights:
         strat = TimeSeriesMomentum(short_prices, config)
         assert strat.compute_target_weights(short_prices) == {}
 
+    def test_warns_when_serving_stale_signal_panel(
+        self, prices: pd.DataFrame, config: S1Config, caplog
+    ) -> None:
+        """If the looked-up signal date is >5 trading days older than as_of, warn."""
+        strat = TimeSeriesMomentum(prices, config)
+        # Truncate precomputed signals to simulate a stale panel (defence-in-depth).
+        strat._signal_wide = strat._signal_wide.iloc[:-10]
+        strat._weight_wide = strat._weight_wide.iloc[:-10]
+
+        with caplog.at_level("WARNING"):
+            strat.compute_target_weights(prices)
+
+        assert any("panel may be stale" in rec.message for rec in caplog.records)
+
 
 class TestSleeveNormalization:
     def test_weights_sum_capped_at_one(self) -> None:

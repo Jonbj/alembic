@@ -1,6 +1,7 @@
 """S1 Time-Series Momentum strategy module."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +20,8 @@ from src.backtest.engine.types import (
     RebalanceFrequency,
 )
 from src.strategies.s1.signal import generate_signals
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -100,6 +103,25 @@ class TimeSeriesMomentum:
         if len(valid_dates) == 0:
             return {}
         lookup_date = valid_dates[-1]
+
+        # Warn if the strategy is serving a stale signal panel. This can happen when
+        # a ticker with recent NaNs was not dropped by the sparse filter but still
+        # truncated the panel's most recent dates (defence-in-depth).
+        try:
+            trading_days_stale = int(
+                np.busday_count(
+                    lookup_date.strftime("%Y-%m-%d"),
+                    as_of.strftime("%Y-%m-%d"),
+                )
+            )
+            if trading_days_stale > 5:
+                log.warning(
+                    "S1 compute_target_weights: serving signal from %s "
+                    "(%d trading days before as_of %s) — panel may be stale",
+                    lookup_date, trading_days_stale, as_of,
+                )
+        except Exception:
+            pass
 
         signals_row = self._signal_wide.loc[lookup_date]
         weights_row = self._weight_wide.loc[lookup_date]

@@ -120,6 +120,24 @@ class TestComputeSignal:
         result = compute_signal(prices)
         assert result.empty
 
+    def test_stale_tailed_ticker_dropped_to_keep_panel_recent(self, trending_prices: pd.DataFrame) -> None:
+        """A ticker whose prices stop mid-window is dropped even if overall coverage is high.
+
+        Without this check the ticker's trailing NaNs would truncate the panel's
+        most recent dates and the strategy would serve stale signals.
+        """
+        prices = trending_prices.copy()
+        # C has valid prices until 10 rows before the end, then stops.
+        # Overall coverage is ~97%, but no price in the last 5 rows.
+        prices["C"] = prices["A"]
+        prices.iloc[-10:, prices.columns.get_loc("C")] = np.nan
+
+        result = compute_signal(prices)
+        assert "C" not in result["ticker"].unique()
+        assert set(result["ticker"].unique()) == {"A", "B"}
+        # Panel remains recent up to the last available date.
+        assert result["as_of"].max() == prices.index[-1]
+
 
 # ---------------------------------------------------------------------------
 # Point-in-time correctness
