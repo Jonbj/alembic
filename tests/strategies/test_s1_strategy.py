@@ -198,6 +198,43 @@ class TestComputeTargetWeights:
         strat = TimeSeriesMomentum(short_prices, config)
         assert strat.compute_target_weights(short_prices) == {}
 
+    def test_warns_when_serving_stale_signal_panel(
+        self, prices: pd.DataFrame, config: S1Config, caplog
+    ) -> None:
+        """If the looked-up signal date is >5 trading days older than as_of, warn."""
+        strat = TimeSeriesMomentum(prices, config)
+        # Truncate precomputed signals to simulate a stale panel (defence-in-depth).
+        strat._signal_wide = strat._signal_wide.iloc[:-10]
+        strat._weight_wide = strat._weight_wide.iloc[:-10]
+
+        with caplog.at_level("WARNING"):
+            strat.compute_target_weights(prices)
+
+        assert any("panel may be stale" in rec.message for rec in caplog.records)
+
+
+class TestSleeveNormalization:
+    def test_weights_sum_capped_at_one(self) -> None:
+        # 16 uptrending tickers → the cross-sectional z-score puts roughly half
+        # above the mean (positive signal), each inverse-vol weight capped at
+        # max_weight=0.20 → the sleeve sum lands well above 1.0 without
+        # normalization (portfolio over-allocation before the enforcer).
+        idx = pd.date_range("2023-01-02", periods=400, freq="B")
+        rng = np.random.default_rng(7)
+        data = {}
+        for i in range(16):
+            drift = 0.0008 + 0.0002 * i
+            noise = rng.normal(0, 0.01, len(idx))
+            data[f"T{i:02d}"] = 100 * np.exp(np.cumsum(drift + noise))
+        prices = pd.DataFrame(data, index=idx)
+
+        strat = TimeSeriesMomentum(prices=prices, config=S1Config())
+        weights = strat.compute_target_weights(prices)
+
+        assert weights, "expected non-empty target weights"
+        assert sum(weights.values()) <= 1.0 + 1e-9
+        assert all(w > 0 for w in weights.values())
+
 
 # ---------------------------------------------------------------------------
 # Strategy callable — return type

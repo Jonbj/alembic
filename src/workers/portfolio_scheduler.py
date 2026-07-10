@@ -1045,6 +1045,11 @@ def _run_cycle_inner() -> dict:
                 _r_dd.set(_PEAK_EQUITY_KEY, str(equity))
                 peak_equity = equity
 
+            # Cache equity for consumers that need account size (e.g. the
+            # loss-feedback relative trigger). Legacy execution wrote this key;
+            # in portfolio mode this is the authoritative writer.
+            _r_dd.setex("portfolio:value", 86400, str(equity))
+
             drawdown = (peak_equity - equity) / peak_equity if peak_equity > 0 else 0.0
             _dd_cap = _load_risk_config()["portfolio_drawdown"]
             if drawdown >= _dd_cap:
@@ -1683,6 +1688,18 @@ def _run_cycle_inner() -> dict:
         except Exception as _exc:
             log.warning("Failed to write trade fills to DB: %s", _exc)
 
+    # Alert when an approved strategy consistently produces zero target weights.
+    # This catches silent strategy death (e.g. S1 killed by a single sparse ticker).
+    try:
+        _check_strategy_zero_weights(
+            result=result,
+            active_strategy_ids={e.strategy_id for e in active},
+            redis_url=config.REDIS_URL,
+            notifier=notifier,
+        )
+    except Exception as _zw_exc:
+        log.warning("Strategy zero-weight alert failed: %s", _zw_exc)
+
     _persist_cycle_result({
         "timestamp": end,
         "strategies_run": result.strategies_run,
@@ -1699,6 +1716,73 @@ def _run_cycle_inner() -> dict:
         "final_orders": len(result.final_orders),
         "submitted": len(submitted_orders),
     }
+
+
+_STRATEGY_ZERO_WEIGHTS_KEY = "strategy:zero_weights_cycles:{strategy_id}"
+# ~1 trading day at 15-min cadence. A strategy can legitimately produce 0 weights
+# for a few cycles at market open or during data gaps; alerting at 3 cycles (~45 min)
+# produced spam. 24 cycles catches real silent-death (S1 was dead for 5 weeks).
+_STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES = 24
+_STRATEGY_ZERO_WEIGHTS_TTL = 7 * 24 * 3600  # 7 days
+
+
+def _check_strategy_zero_weights(
+    result,
+    active_strategy_ids: set[str],
+    redis_url: str,
+    notifier,
+) -> None:
+    """Track consecutive cycles with zero target weights and alert when stuck.
+
+    A strategy that returns empty target weights for several cycles while still
+    enabled is likely data-starved or broken (e.g. S1 sparse-ticker poisoning).
+    The alert fires once when the streak reaches the threshold.
+    """
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+    except Exception as exc:
+        log.warning("Could not connect to Redis for zero-weights tracking: %s", exc)
+        return
+
+    try:
+        # Strategies that ran but produced 0 weights, plus active strategies that
+        # did not run at all (instance build failed).
+        zero_weight_ids: set[str] = set()
+        for sid in active_strategy_ids:
+            if sid not in result.strategies_run:
+                zero_weight_ids.add(sid)
+            elif result.orders_per_strategy.get(sid, 0) == 0:
+                zero_weight_ids.add(sid)
+
+        for sid in active_strategy_ids:
+            key = _STRATEGY_ZERO_WEIGHTS_KEY.format(strategy_id=sid)
+            if sid in zero_weight_ids:
+                streak = int(r.incr(key))
+                r.expire(key, _STRATEGY_ZERO_WEIGHTS_TTL)
+                # Alert at every threshold multiple so a double increment (e.g.
+                # manual cycle trigger overlapping a beat cycle) does not skip
+                # the notification permanently.
+                if streak > 0 and streak % _STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES == 0:
+                    msg = (
+                        f"⚠️ *Strategia silenziosa*: {sid} ha prodotto 0 pesi "
+                        f"per {streak} cicli consecutivi. "
+                        f"Verificare dati/istanza."
+                    )
+                    _fire_alert(notifier, msg, AlertLevel.WARNING)
+                    log.warning(
+                        "STRATEGY_ZERO_WEIGHTS: %s produced 0 weights for %d consecutive cycles",
+                        sid, streak,
+                    )
+            else:
+                r.delete(key)
+    except Exception as exc:
+        log.warning("Strategy zero-weights tracking failed: %s", exc)
+    finally:
+        try:
+            r.close()
+        except Exception:
+            pass
 
 
 def _apply_zeygos_filter(symbols: list[str], pg) -> list[str]:
@@ -2011,6 +2095,23 @@ def _build_strategy_instance(entry, bars_df):
                 store.close()
         # Apply signal velocity multiplier to S4 scores before strategy sees them.
         if signals_df is not None and not signals_df.empty:
+            # T-01: read the active feedback threshold FIRST, outside the velocity
+            # try/except. A velocity-computation or Redis failure must degrade to
+            # "raw scores, gate still enforced" — never to an ungated stream.
+            _fb_threshold = _ENTRY_THRESHOLD_BASELINE
+            try:
+                from redis import Redis as _RedisFB
+                from src.config import config as _cfg_fb
+                _r_fb = _RedisFB.from_url(_cfg_fb.REDIS_URL, decode_responses=True)
+                try:
+                    _fb_raw = _r_fb.get("feedback:entry_threshold")
+                    _fb_threshold = float(_fb_raw) if _fb_raw is not None else _ENTRY_THRESHOLD_BASELINE
+                finally:
+                    _r_fb.close()
+            except Exception:
+                _fb_threshold = _ENTRY_THRESHOLD_BASELINE
+
+            # Apply velocity multipliers (best-effort; failures fall back to raw scores).
             try:
                 from redis import Redis as _RedisSV
                 from src.config import config as _cfg_sv
@@ -2024,18 +2125,6 @@ def _build_strategy_instance(entry, bars_df):
                         )
                         for sym in signals_df["symbol"].unique()
                     }
-                    # T-01: apply loss-feedback threshold from Redis.
-                    # ENTRY_THRESHOLD in execution.py applies only to legacy mode;
-                    # portfolio mode must enforce it here so the mechanism is not bypassed.
-                    # Floor: when the loss-feedback key is absent (expired, TTL 48h) fall
-                    # back to the baseline (0.30), NOT to the min_score prefilter (0.10) —
-                    # otherwise the order gate silently drops and weak signals trade (e.g.
-                    # SPCX 0.180 churn on 2026-07-01).
-                    try:
-                        _fb_raw = _r_sv.get("feedback:entry_threshold")
-                        _fb_threshold = float(_fb_raw) if _fb_raw is not None else _ENTRY_THRESHOLD_BASELINE
-                    except Exception:
-                        _fb_threshold = _ENTRY_THRESHOLD_BASELINE
                 finally:
                     _r_sv.close()
                 signals_df = signals_df.copy()
@@ -2046,22 +2135,23 @@ def _build_strategy_instance(entry, bars_df):
                 n_boosted = sum(1 for m in multipliers.values() if m != 1.0)
                 if n_boosted:
                     log.info("Signal velocity: %d/%d symbols adjusted", n_boosted, len(multipliers))
-                # Drop signals below the active feedback threshold (absolute value check
-                # so bearish signals are also gated, consistent with BUY-only logic).
-                if _fb_threshold is not None and _fb_threshold > s4_config.min_score:
-                    before = len(signals_df)
-                    dropped_df = signals_df[signals_df["score"].abs() < _fb_threshold]
-                    signals_df = signals_df[signals_df["score"].abs() >= _fb_threshold]
-                    if len(dropped_df):
-                        log.info(
-                            "S4 feedback gate: dropped %d/%d signals below threshold %.3f",
-                            len(dropped_df), before, _fb_threshold,
-                        )
-                        # Surface the drops in the Decision Log (decision=SKIP_THRESHOLD)
-                        # so a no-trade cycle shows WHY, not just an empty log.
-                        _record_gate_drops(dropped_df, _fb_threshold)
             except Exception as exc:
                 log.warning("Signal velocity application failed: %s — using raw scores", exc)
+
+            # Drop signals below the active feedback threshold (absolute value check
+            # so bearish signals are also gated, consistent with BUY-only logic).
+            if _fb_threshold is not None and _fb_threshold > s4_config.min_score:
+                before = len(signals_df)
+                dropped_df = signals_df[signals_df["score"].abs() < _fb_threshold]
+                signals_df = signals_df[signals_df["score"].abs() >= _fb_threshold]
+                if len(dropped_df):
+                    log.info(
+                        "S4 feedback gate: dropped %d/%d signals below threshold %.3f",
+                        len(dropped_df), before, _fb_threshold,
+                    )
+                    # Surface the drops in the Decision Log (decision=SKIP_THRESHOLD)
+                    # so a no-trade cycle shows WHY, not just an empty log.
+                    _record_gate_drops(dropped_df, _fb_threshold)
         # Each Celery task creates a fresh instance with _last_rebalance=None.
         # We intentionally do NOT restore last_rebalance from Redis: the daily gate
         # conflicts with intraday 15-min cycling — if S4 runs on a zero-signal

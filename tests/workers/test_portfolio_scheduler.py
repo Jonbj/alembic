@@ -246,6 +246,48 @@ def test_build_strategy_instance_s4_handles_db_error_gracefully():
     assert result._signals_df is None
 
 
+def test_build_strategy_instance_s4_gate_enforced_when_velocity_fails():
+    """If signal-velocity computation raises, the loss-feedback gate must still drop
+    sub-threshold signals (degrade to raw scores, gate still enforced)."""
+    from src.models.signals import SentimentResult
+    from src.strategies.s4.strategy import NewsDrivenTactical
+    from src.workers.portfolio_scheduler import _build_strategy_instance
+
+    entry = MagicMock()
+    entry.strategy_id = "S4"
+    bars_df = _make_bars_df(n=5, symbols=["SPY"])
+
+    _recent = datetime.now(timezone.utc) - timedelta(hours=1)
+    mock_signals = [
+        SentimentResult(
+            symbol="STRONG", score=0.8, confidence=0.9, reasoning="strong",
+            model_id="test", generated_at=_recent,
+        ),
+        SentimentResult(
+            symbol="WEAK", score=0.15, confidence=0.9, reasoning="weak",
+            model_id="test", generated_at=_recent,
+        ),
+    ]
+    mock_store = MagicMock()
+    mock_store.fetch_signals_for_cycle.return_value = mock_signals
+
+    # Redis returns a raised gate; velocity raises.
+    fake_redis = MagicMock()
+    fake_redis.get.return_value = "0.50"
+    fake_redis.close.return_value = None
+
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_store), \
+         patch("redis.Redis.from_url", return_value=fake_redis), \
+         patch("src.workers.portfolio_scheduler._compute_signal_velocity") as mock_velocity:
+        mock_velocity.side_effect = RuntimeError("velocity failed")
+        result = _build_strategy_instance(entry, bars_df)
+
+    assert isinstance(result, NewsDrivenTactical)
+    assert result._signals_df is not None
+    assert set(result._signals_df["symbol"]) == {"STRONG"}
+    assert "WEAK" not in result._signals_df["symbol"].values
+
+
 def test_build_strategy_instance_s4_no_signals_in_db():
     """S4 with empty DB result returns NewsDrivenTactical with signals=None."""
     from src.strategies.s4.strategy import NewsDrivenTactical
@@ -1016,3 +1058,111 @@ def test_buy_decision_not_logged_for_symbol_with_open_trade():
         "BUY decision for XLK must NOT be logged when XLK already has an open trade. "
         f"Got {len(buy_calls)} call(s): {buy_calls}"
     )
+
+
+# ── _check_strategy_zero_weights ──────────────────────────────────────────────
+
+
+def test_check_strategy_zero_weights_alerts_after_threshold():
+    """After N consecutive zero-weight cycles, a Telegram alert is fired."""
+    from src.notifications.base import AlertLevel
+    from src.workers.portfolio_scheduler import (
+        _STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES,
+        _check_strategy_zero_weights,
+    )
+
+    mock_result = MagicMock()
+    mock_result.strategies_run = ["S1"]
+    mock_result.orders_per_strategy = {"S1": 0}
+
+    redis_inst = MagicMock()
+    redis_inst.incr.side_effect = list(range(1, _STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES + 1))
+
+    notifier = MagicMock()
+
+    with patch("redis.Redis.from_url", return_value=redis_inst), \
+         patch("src.workers.portfolio_scheduler._fire_alert") as mock_fire:
+        for _ in range(_STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES):
+            _check_strategy_zero_weights(
+                mock_result, {"S1"}, "redis://localhost", notifier
+            )
+
+    mock_fire.assert_called_once()
+    args = mock_fire.call_args[0]
+    assert "S1" in args[1]
+    assert args[2] == AlertLevel.WARNING
+
+
+def test_check_strategy_zero_weights_resets_on_positive_weights():
+    """A cycle with >0 weights resets the counter."""
+    from src.workers.portfolio_scheduler import _check_strategy_zero_weights
+
+    mock_result = MagicMock()
+    mock_result.strategies_run = ["S1"]
+    mock_result.orders_per_strategy = {"S1": 0}
+
+    redis_inst = MagicMock()
+    redis_inst.incr.return_value = 1
+
+    with patch("redis.Redis.from_url", return_value=redis_inst):
+        _check_strategy_zero_weights(
+            mock_result, {"S1"}, "redis://localhost", MagicMock()
+        )
+
+    mock_result.orders_per_strategy = {"S1": 3}
+    with patch("redis.Redis.from_url", return_value=redis_inst):
+        _check_strategy_zero_weights(
+            mock_result, {"S1"}, "redis://localhost", MagicMock()
+        )
+
+    redis_inst.delete.assert_called_once_with("strategy:zero_weights_cycles:S1")
+
+
+def test_check_strategy_zero_weights_alerts_at_threshold_multiples():
+    """Alert fires at 24, 48, ... and tolerates a jump from 23 to 48."""
+    from src.workers.portfolio_scheduler import (
+        _STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES,
+        _check_strategy_zero_weights,
+    )
+
+    mock_result = MagicMock()
+    mock_result.strategies_run = ["S1"]
+    mock_result.orders_per_strategy = {"S1": 0}
+
+    redis_inst = MagicMock()
+    redis_inst.incr.return_value = _STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES * 2
+
+    notifier = MagicMock()
+
+    with patch("redis.Redis.from_url", return_value=redis_inst), \
+         patch("src.workers.portfolio_scheduler._fire_alert") as mock_fire:
+        _check_strategy_zero_weights(
+            mock_result, {"S1"}, "redis://localhost", notifier
+        )
+
+    mock_fire.assert_called_once()
+
+
+def test_check_strategy_zero_weights_no_alert_between_threshold_multiples():
+    """A streak of 25 does not re-alert; only exact multiples do."""
+    from src.workers.portfolio_scheduler import (
+        _STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES,
+        _check_strategy_zero_weights,
+    )
+
+    mock_result = MagicMock()
+    mock_result.strategies_run = ["S1"]
+    mock_result.orders_per_strategy = {"S1": 0}
+
+    redis_inst = MagicMock()
+    redis_inst.incr.return_value = _STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES + 1
+
+    notifier = MagicMock()
+
+    with patch("redis.Redis.from_url", return_value=redis_inst), \
+         patch("src.workers.portfolio_scheduler._fire_alert") as mock_fire:
+        _check_strategy_zero_weights(
+            mock_result, {"S1"}, "redis://localhost", notifier
+        )
+
+    mock_fire.assert_not_called()

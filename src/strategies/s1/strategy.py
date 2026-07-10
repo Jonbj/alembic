@@ -1,6 +1,7 @@
 """S1 Time-Series Momentum strategy module."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +20,8 @@ from src.backtest.engine.types import (
     RebalanceFrequency,
 )
 from src.strategies.s1.signal import generate_signals
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -101,6 +104,25 @@ class TimeSeriesMomentum:
             return {}
         lookup_date = valid_dates[-1]
 
+        # Warn if the strategy is serving a stale signal panel. This can happen when
+        # a ticker with recent NaNs was not dropped by the sparse filter but still
+        # truncated the panel's most recent dates (defence-in-depth).
+        try:
+            trading_days_stale = int(
+                np.busday_count(
+                    lookup_date.strftime("%Y-%m-%d"),
+                    as_of.strftime("%Y-%m-%d"),
+                )
+            )
+            if trading_days_stale > 5:
+                log.warning(
+                    "S1 compute_target_weights: serving signal from %s "
+                    "(%d trading days before as_of %s) — panel may be stale",
+                    lookup_date, trading_days_stale, as_of,
+                )
+        except Exception:
+            pass
+
         signals_row = self._signal_wide.loc[lookup_date]
         weights_row = self._weight_wide.loc[lookup_date]
         threshold = self._config.signal_threshold
@@ -110,7 +132,7 @@ class TimeSeriesMomentum:
             as_of_date = as_of.date() if hasattr(as_of, "date") else as_of
             eligible = {a.symbol for a in self._universe.active_at(as_of_date)}
 
-        return {
+        weights = {
             ticker: float(weights_row[ticker])
             for ticker in signals_row.index
             if (
@@ -120,6 +142,15 @@ class TimeSeriesMomentum:
                 and (eligible is None or ticker in eligible)
             )
         }
+        # Sleeve contract (config/strategies.yaml): sleeve-local weights must sum
+        # to ≤ 1.0. Per-name inverse-vol weights are only capped individually
+        # (max_weight), so with many qualifying names the sum can far exceed 1.
+        # Normalising at the source prevents the ConstraintEnforcer from
+        # proportionally crushing other strategies' contributions in the same pass.
+        total = sum(weights.values())
+        if total > 1.0:
+            weights = {t: w / total for t, w in weights.items()}
+        return weights
 
     def health_check(self) -> bool:
         """Return True when precomputed signals are non-empty, finite, and NaN-free."""

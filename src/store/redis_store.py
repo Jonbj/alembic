@@ -668,6 +668,16 @@ class RedisStore:
         """Cache current portfolio equity in Redis (24h TTL)."""
         self._r.setex("portfolio:value", 86400, str(equity))
 
+    def get_portfolio_value(self) -> float | None:
+        """Return cached portfolio equity, or None if not present."""
+        raw = self._r.get("portfolio:value")
+        if raw is None:
+            return None
+        try:
+            return float(raw)
+        except (ValueError, TypeError):
+            return None
+
     # =========================================================================
     # OVERNIGHT ALERT DEDUP
     # =========================================================================

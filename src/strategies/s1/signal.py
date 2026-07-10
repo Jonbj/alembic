@@ -1,13 +1,18 @@
 """Time-series momentum signal computation for S1 strategy."""
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
 from src.strategies.s1.sizing import compute_weights
 
+log = logging.getLogger(__name__)
+
 _DEFAULT_LOOKBACKS: tuple[int, ...] = (21, 63, 126, 252)
 _DEFAULT_VOL_WINDOW: int = 63
+_MIN_RECENT_PRICE_ROWS: int = 5  # a ticker whose prices stop mid-window is dropped
 
 
 def _exponential_lb_weights(lookbacks: tuple[int, ...]) -> np.ndarray:
@@ -26,6 +31,7 @@ def compute_signal(
     lookbacks: tuple[int, ...] = _DEFAULT_LOOKBACKS,
     vol_window: int = _DEFAULT_VOL_WINDOW,
     lb_weights: tuple[float, ...] | None = None,
+    min_observation_ratio: float = 0.75,
 ) -> pd.DataFrame:
     """Compute multi-lookback vol-normalized momentum signal with cross-sectional z-score.
 
@@ -40,10 +46,19 @@ def compute_signal(
         lookbacks: Lookback windows in trading days.
         vol_window: Rolling window for annualized vol denominator.
         lb_weights: Override lookback weights (must match len(lookbacks), need not sum to 1).
+        min_observation_ratio: Minimum fraction of non-NaN signal observations a
+            ticker must have to be included in the cross-sectional z-score. Tickers
+            with sparse history (e.g. recent ADR/ETF additions) are dropped so they
+            do not poison the entire date panel. Default 0.75.
+
+    Note:
+        Ticker inclusion uses full-window statistics (coverage ratio plus a recent-
+        price check). This is a known, accepted look-ahead in backtests; live
+        usage feeds the strategy pre-computed bars up to the current date.
 
     Returns:
         Long-format DataFrame with columns: ticker, as_of, signal.
-        Only rows where all tickers have valid data are included (no look-ahead).
+        Only rows where all *included* tickers have valid data are kept.
     """
     if lb_weights is None:
         weights = _exponential_lb_weights(lookbacks)
@@ -68,7 +83,39 @@ def compute_signal(
     # Propagate NaN: rows where any component was NaN become NaN
     signal_raw[nan_mask] = np.nan
 
-    # Keep only rows where ALL tickers have valid signals
+    # Drop tickers with sparse or stale-tailed price history before requiring a
+    # full panel. A single illiquid/newly-listed ticker (e.g. AZN on IEX, SPCX
+    # thin bars) otherwise invalidates every cross-sectional date and kills the
+    # strategy. We also drop tickers whose prices stop mid-window: even with
+    # full-window coverage, their trailing NaNs would truncate the panel's most
+    # recent dates and serve stale signals.
+    if prices.shape[1] > 0:
+        price_valid_counts = prices.notna().sum(axis=0)
+        min_required = max(1, int(len(prices) * min_observation_ratio))
+        coverage_ok = price_valid_counts >= min_required
+        recent_ok = prices.tail(_MIN_RECENT_PRICE_ROWS).notna().any(axis=0)
+        keep_mask = coverage_ok & recent_ok
+        keep_tickers = prices.columns[keep_mask].tolist()
+        dropped_tickers = [t for t in prices.columns if t not in keep_tickers]
+        if dropped_tickers:
+            log.warning(
+                "S1 compute_signal: dropped %d sparse/stale-tailed ticker(s) "
+                "(%.0f%% price observations required, last %d rows must have a price): %s",
+                len(dropped_tickers),
+                min_observation_ratio * 100,
+                _MIN_RECENT_PRICE_ROWS,
+                sorted(dropped_tickers),
+            )
+        if len(keep_tickers) < 2:
+            log.warning(
+                "S1 compute_signal: only %d ticker(s) pass the observation "
+                "filter — cannot compute cross-sectional z-score",
+                len(keep_tickers),
+            )
+            return pd.DataFrame(columns=["ticker", "as_of", "signal"])
+        signal_raw = signal_raw[keep_tickers]
+
+    # Keep only rows where ALL remaining tickers have valid signals
     valid_rows = signal_raw.notna().all(axis=1)
     signal_raw = signal_raw[valid_rows]
 
@@ -100,6 +147,7 @@ def generate_signals(
     lb_weights: tuple[float, ...] | None = None,
     target_vol: float = 0.10,
     max_weight: float = 0.20,
+    min_observation_ratio: float = 0.75,
 ) -> pd.DataFrame:
     """Combine momentum signal and inverse-vol sizing into a single DataFrame.
 
@@ -111,11 +159,14 @@ def generate_signals(
         lb_weights: Override lookback weights.
         target_vol: Annualized target vol per position.
         max_weight: Maximum position weight cap.
+        min_observation_ratio: Passed to compute_signal to drop sparse tickers.
 
     Returns:
         Long-format DataFrame with columns: ticker, as_of, signal, weight.
     """
-    signals = compute_signal(prices, lookbacks, vol_window_signal, lb_weights)
+    signals = compute_signal(
+        prices, lookbacks, vol_window_signal, lb_weights, min_observation_ratio
+    )
     weights = compute_weights(prices, vol_window_sizing, target_vol, max_weight)
 
     merged = signals.merge(weights, on=["ticker", "as_of"], how="inner")
