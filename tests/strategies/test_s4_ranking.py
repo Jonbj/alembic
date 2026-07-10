@@ -45,7 +45,7 @@ def test_s4_config_defaults():
     assert cfg.bucket_pct == 0.10
     assert cfg.min_confidence == 0.3
     assert cfg.min_score == 0.1
-    assert cfg.min_stocks == 2
+    assert cfg.min_stocks == 1  # default: a lone gate-surviving signal must trade
     assert cfg.signals_lookback_hours == 96  # extended from 24 to cover weekend gaps
     assert cfg.rebalance_frequency == RebalanceFrequency.DAILY
 
@@ -154,29 +154,19 @@ def test_too_few_stocks_returns_empty():
     assert len(result.rankings) == 0
 
 
-def test_adaptive_min_stocks_allows_single_name_when_threshold_raised():
-    """With entry_threshold > baseline, min_stocks drops to 1."""
+def test_single_candidate_forms_bucket_of_one():
+    """A lone strong signal must trade under the default config (min_stocks=1).
+
+    The live entry gate is enforced upstream in portfolio_scheduler; by the time
+    signals reach the ranker they have already passed the gate. Discarding a
+    lone survivor at min_stocks=2 was the original deployment chokepoint.
+    """
     signals = _make_signals(1)
-    cfg = S4Config(min_stocks=2, entry_threshold=0.40, entry_threshold_baseline=0.30)
-    ranker = CrossSectionalRanker(cfg)
-    result = ranker.rank(signals, entry_threshold=0.40)
+    ranker = CrossSectionalRanker(S4Config())  # default min_stocks=1
+    result = ranker.rank(signals)
 
     assert result.n_selected == 1
-
-
-def test_adaptive_min_stocks_disabled_uses_config_min():
-    """With adaptive disabled, threshold raise does not lower min_stocks."""
-    signals = _make_signals(1)
-    cfg = S4Config(
-        min_stocks=2,
-        adaptive_min_stocks=False,
-        entry_threshold=0.40,
-        entry_threshold_baseline=0.30,
-    )
-    ranker = CrossSectionalRanker(cfg)
-    result = ranker.rank(signals, entry_threshold=0.40)
-
-    assert result.n_selected == 0
+    assert result.weights == {"T00": 1.0}
 
 
 def test_exactly_min_stocks_passes():

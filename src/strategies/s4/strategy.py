@@ -54,9 +54,7 @@ class NewsDrivenTactical:
         as_of: datetime | None = None,
     ) -> dict[str, float]:
         """Return {ticker: weight} for top-ranked tickers from given signals."""
-        result = self._ranker.rank(
-            signals, as_of=as_of, entry_threshold=self._config.entry_threshold
-        )
+        result = self._ranker.rank(signals, as_of=as_of)
         return result.weights
 
     def health_check(self) -> bool:
