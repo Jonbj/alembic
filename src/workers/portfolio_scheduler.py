@@ -1760,7 +1760,10 @@ def _check_strategy_zero_weights(
             if sid in zero_weight_ids:
                 streak = int(r.incr(key))
                 r.expire(key, _STRATEGY_ZERO_WEIGHTS_TTL)
-                if streak == _STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES:
+                # Alert at every threshold multiple so a double increment (e.g.
+                # manual cycle trigger overlapping a beat cycle) does not skip
+                # the notification permanently.
+                if streak > 0 and streak % _STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES == 0:
                     msg = (
                         f"⚠️ *Strategia silenziosa*: {sid} ha prodotto 0 pesi "
                         f"per {streak} cicli consecutivi. "
@@ -2092,6 +2095,23 @@ def _build_strategy_instance(entry, bars_df):
                 store.close()
         # Apply signal velocity multiplier to S4 scores before strategy sees them.
         if signals_df is not None and not signals_df.empty:
+            # T-01: read the active feedback threshold FIRST, outside the velocity
+            # try/except. A velocity-computation or Redis failure must degrade to
+            # "raw scores, gate still enforced" — never to an ungated stream.
+            _fb_threshold = _ENTRY_THRESHOLD_BASELINE
+            try:
+                from redis import Redis as _RedisFB
+                from src.config import config as _cfg_fb
+                _r_fb = _RedisFB.from_url(_cfg_fb.REDIS_URL, decode_responses=True)
+                try:
+                    _fb_raw = _r_fb.get("feedback:entry_threshold")
+                    _fb_threshold = float(_fb_raw) if _fb_raw is not None else _ENTRY_THRESHOLD_BASELINE
+                finally:
+                    _r_fb.close()
+            except Exception:
+                _fb_threshold = _ENTRY_THRESHOLD_BASELINE
+
+            # Apply velocity multipliers (best-effort; failures fall back to raw scores).
             try:
                 from redis import Redis as _RedisSV
                 from src.config import config as _cfg_sv
@@ -2105,23 +2125,8 @@ def _build_strategy_instance(entry, bars_df):
                         )
                         for sym in signals_df["symbol"].unique()
                     }
-                    # T-01: apply loss-feedback threshold from Redis.
-                    # ENTRY_THRESHOLD in execution.py applies only to legacy mode;
-                    # portfolio mode must enforce it here so the mechanism is not bypassed.
-                    # Floor: when the loss-feedback key is absent (expired, TTL 48h) fall
-                    # back to the baseline (0.30), NOT to the min_score prefilter (0.10) —
-                    # otherwise the order gate silently drops and weak signals trade (e.g.
-                    # SPCX 0.180 churn on 2026-07-01).
-                    try:
-                        _fb_raw = _r_sv.get("feedback:entry_threshold")
-                        _fb_threshold = float(_fb_raw) if _fb_raw is not None else _ENTRY_THRESHOLD_BASELINE
-                    except Exception:
-                        _fb_threshold = _ENTRY_THRESHOLD_BASELINE
                 finally:
                     _r_sv.close()
-                # Pass the active threshold to the ranker so it can adapt min_stocks
-                # when the gate is raised: a lone strong signal should still trade.
-                s4_config.entry_threshold = _fb_threshold
                 signals_df = signals_df.copy()
                 signals_df["score"] = signals_df.apply(
                     lambda row: row["score"] * multipliers.get(row["symbol"], 1.0),
@@ -2130,22 +2135,23 @@ def _build_strategy_instance(entry, bars_df):
                 n_boosted = sum(1 for m in multipliers.values() if m != 1.0)
                 if n_boosted:
                     log.info("Signal velocity: %d/%d symbols adjusted", n_boosted, len(multipliers))
-                # Drop signals below the active feedback threshold (absolute value check
-                # so bearish signals are also gated, consistent with BUY-only logic).
-                if _fb_threshold is not None and _fb_threshold > s4_config.min_score:
-                    before = len(signals_df)
-                    dropped_df = signals_df[signals_df["score"].abs() < _fb_threshold]
-                    signals_df = signals_df[signals_df["score"].abs() >= _fb_threshold]
-                    if len(dropped_df):
-                        log.info(
-                            "S4 feedback gate: dropped %d/%d signals below threshold %.3f",
-                            len(dropped_df), before, _fb_threshold,
-                        )
-                        # Surface the drops in the Decision Log (decision=SKIP_THRESHOLD)
-                        # so a no-trade cycle shows WHY, not just an empty log.
-                        _record_gate_drops(dropped_df, _fb_threshold)
             except Exception as exc:
                 log.warning("Signal velocity application failed: %s — using raw scores", exc)
+
+            # Drop signals below the active feedback threshold (absolute value check
+            # so bearish signals are also gated, consistent with BUY-only logic).
+            if _fb_threshold is not None and _fb_threshold > s4_config.min_score:
+                before = len(signals_df)
+                dropped_df = signals_df[signals_df["score"].abs() < _fb_threshold]
+                signals_df = signals_df[signals_df["score"].abs() >= _fb_threshold]
+                if len(dropped_df):
+                    log.info(
+                        "S4 feedback gate: dropped %d/%d signals below threshold %.3f",
+                        len(dropped_df), before, _fb_threshold,
+                    )
+                    # Surface the drops in the Decision Log (decision=SKIP_THRESHOLD)
+                    # so a no-trade cycle shows WHY, not just an empty log.
+                    _record_gate_drops(dropped_df, _fb_threshold)
         # Each Celery task creates a fresh instance with _last_rebalance=None.
         # We intentionally do NOT restore last_rebalance from Redis: the daily gate
         # conflicts with intraday 15-min cycling — if S4 runs on a zero-signal
