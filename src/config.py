@@ -65,6 +65,7 @@ class Config(BaseModel):
             "glm-5.2:cloud": (2.0, 6.0),  # Estimated — flagship GLM, same tier as qwen3.5
             "kimi-k2.6:cloud": (2.5, 7.5),  # Estimated based on Moonshot AI pricing
             "gemma4:31b-cloud": (1.0, 3.0),  # Estimated based on Gemma open pricing
+            "gpt-oss:20b-cloud": (1.0, 3.0),  # Estimated — 20B open-weight, same tier as gemma4:31b-cloud
             # Coding specialized models
             "qwen3-coder-next:cloud": (3.0, 9.0),  # Premium coding model
             "devstral-small-2:24b-cloud": (1.5, 4.5),  # 24B params, mid-tier
