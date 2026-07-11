@@ -151,6 +151,24 @@ risk:
 
   # Execution risk (read by ExecutionWorker at cycle start)
   stop_loss: 0.02
+  stop_loss_mode: fixed           # fixed | vol_scaled (ship: fixed)
+  stop_strategy_params:
+    S1: {k: 3.5, floor: 0.06, cap: 0.12}
+    S4: {k: 2.0, floor: 0.03, cap: 0.08}
+    S7: {k: 2.5, floor: 0.04, cap: 0.10}
+    default: {k: 3.0, floor: 0.04, cap: 0.12}
+  stop_sigma_lookback_fast: 20
+  stop_sigma_lookback_slow: 63
+  stop_sigma_ewma_floor_ratio: 0.8
+  stop_risk_budget_bp_per_pos: 12
+  stop_risk_budget_bp_aggregate: 100
+  stop_gap_buffer_pct: 0.005
+  stop_shadow_enabled: false
+  broker_disaster_stop:
+    multiplier: 1.5
+    sigma_multiple: 5.0
+    floor_pct: 0.12
+    cap_pct: 0.20
 
   # Position limits
   max_position_pct: 0.10
