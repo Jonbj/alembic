@@ -295,7 +295,7 @@ _REQUIRED_COLUMNS = {
 
 _INSERT_OPTION_CHAIN = """
     INSERT INTO option_chains (
-        symbol, trade_date, expiry, strike, right,
+        symbol, trade_date, expiry, strike, "right",
         bid, ask, mid, volume, open_interest,
         implied_vol, delta, gamma, theta, vega,
         underlying_price, multiplier, source
@@ -305,17 +305,17 @@ _INSERT_OPTION_CHAIN = """
         %(implied_vol)s, %(delta)s, %(gamma)s, %(theta)s, %(vega)s,
         %(underlying_price)s, %(multiplier)s, %(source)s
     )
-    ON CONFLICT (symbol, trade_date, expiry, strike, right) DO NOTHING
+    ON CONFLICT (symbol, trade_date, expiry, strike, "right") DO NOTHING
 """
 
 _FETCH_CHAIN = """
-    SELECT symbol, trade_date, expiry, strike, right,
+    SELECT symbol, trade_date, expiry, strike, "right",
            bid, ask, mid, volume, open_interest,
            implied_vol, delta, gamma, theta, vega,
            underlying_price, multiplier, source
     FROM option_chains
     WHERE symbol = %s AND trade_date = %s
-    ORDER BY expiry, strike, right
+    ORDER BY expiry, strike, "right"
 """
 
 

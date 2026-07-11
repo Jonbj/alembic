@@ -5,7 +5,7 @@
 -- Secondary use: live chains ingested from IBKR when TWS is connected.
 --
 -- Design notes:
---   - UNIQUE(symbol, trade_date, expiry, strike, right) enables idempotent ON CONFLICT DO NOTHING
+--   - UNIQUE(symbol, trade_date, expiry, strike, "right") enables idempotent ON CONFLICT DO NOTHING
 --   - idx_option_chains_lookup covers the hot query: chain at (symbol, trade_date)
 --   - BRIN on trade_date for efficient multi-year range scans
 --   - source distinguishes 'synthetic' (Black-Scholes) from 'ibkr' (live data)
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS option_chains (
     trade_date       DATE               NOT NULL,
     expiry           DATE               NOT NULL,
     strike           DOUBLE PRECISION   NOT NULL,
-    right            CHAR(1)            NOT NULL CHECK (right IN ('C', 'P')),
+    "right"          CHAR(1)            NOT NULL CHECK ("right" IN ('C', 'P')),
     bid              DOUBLE PRECISION,
     ask              DOUBLE PRECISION,
     mid              DOUBLE PRECISION,
@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS option_chains (
     created_at       TIMESTAMPTZ        NOT NULL DEFAULT now(),
 
     CONSTRAINT uq_option_chain_row
-        UNIQUE (symbol, trade_date, expiry, strike, right)
+        UNIQUE (symbol, trade_date, expiry, strike, "right")
 );
 
 -- Fast lookup: chain at specific date (< 1s requirement)
@@ -50,7 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_option_chains_expiry
 
 COMMENT ON TABLE option_chains IS
     'Historical EOD option chain snapshots. Synthetic (Black-Scholes) and live (IBKR) sources.';
-COMMENT ON COLUMN option_chains.right IS
+COMMENT ON COLUMN option_chains."right" IS
     'C = call, P = put';
 COMMENT ON COLUMN option_chains.source IS
     'synthetic = Black-Scholes priced; ibkr = live IBKR data';

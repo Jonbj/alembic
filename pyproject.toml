@@ -80,4 +80,9 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-cov>=7.1.0",
     "pytest-mock>=3.14",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "types-PyYAML>=6.0",
+    "types-python-dateutil>=2.9",
+    "pip-audit>=2.7",
 ]
