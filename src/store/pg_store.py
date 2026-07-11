@@ -738,8 +738,11 @@ class PostgreSQLStore:
     _INSERT_TRADE = """
         INSERT INTO trades
             (symbol, signal_id, decision_id, entry_order_id,
-             entry_time, entry_notional, score, regime_mult, qty, signal_score)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             entry_time, entry_notional, score, regime_mult, qty, signal_score,
+             stop_strategy, stop_mode, stop_vol_at_entry, stop_k,
+             stop_floor, stop_cap, stop_d_init, stop_vol_source)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
     """
 
@@ -773,6 +776,7 @@ class PostgreSQLStore:
         regime_mult: float,
         qty: float | None = None,
         signal_score: float | None = None,
+        frozen_stop: "FrozenStop | None" = None,
     ) -> None:
         """Insert an open trade row (entry_price populated later by reconcile).
 
@@ -780,14 +784,24 @@ class PostgreSQLStore:
             score: Portfolio allocation weight (e.g. 0.02 = 2% target weight).
             signal_score: Actual LLM sentiment score that motivated the trade.
                 Stored separately so IC / score-bucket analytics are meaningful.
+            frozen_stop: Optional frozen stop parameters (migration 034).
         """
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
+                fs = frozen_stop
                 cur.execute(
                     self._INSERT_TRADE,
                     (symbol, signal_id, decision_id, entry_order_id,
-                     entry_time, entry_notional, score, regime_mult, qty, signal_score),
+                     entry_time, entry_notional, score, regime_mult, qty, signal_score,
+                     fs.strategy if fs else None,
+                     fs.mode if fs else None,
+                     fs.vol_at_entry if fs else None,
+                     fs.k if fs else None,
+                     fs.floor if fs else None,
+                     fs.cap if fs else None,
+                     fs.d_init if fs else None,
+                     fs.vol_source if fs else None),
                 )
                 row = cur.fetchone()
                 trade_id: int | None = row[0] if row else None
@@ -925,6 +939,182 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def fetch_open_trade_meta(self, symbol: str) -> dict | None:
+        """Return strategy + signal_id for the open trade for symbol.
+
+        Mirrors the origin-strategy derivation in src/api/routes/trading.py:
+        S4 if signal-driven, S1 otherwise. Returns None if no open trade exists.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT signal_id FROM trades WHERE symbol = %s AND exit_time IS NULL",
+                    (symbol,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                signal_id = row[0]
+                return {
+                    "signal_id": signal_id,
+                    "strategy": "S4" if signal_id is not None else "S1",
+                }
+        except Exception:
+            conn.rollback()
+            raise
+
+    def load_frozen_stop(self, symbol: str) -> "FrozenStop | None":
+        """Load the frozen stop params from the open trade row for symbol."""
+        from src.portfolio.stop_policy import FrozenStop
+
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT stop_strategy, stop_mode, stop_vol_at_entry, stop_k,
+                           stop_floor, stop_cap, stop_d_init, stop_vol_source
+                    FROM trades
+                    WHERE symbol = %s AND exit_time IS NULL
+                    """,
+                    (symbol,),
+                )
+                row = cur.fetchone()
+                if row is None or row[6] is None:
+                    return None
+                return FrozenStop(
+                    strategy=row[0],
+                    mode=row[1] or "fixed",
+                    vol_at_entry=row[2],
+                    sigma_eff=row[2],
+                    k=row[3],
+                    floor=row[4],
+                    cap=row[5],
+                    d_init=float(row[6]),
+                    vol_source=row[7],
+                )
+        except Exception:
+            conn.rollback()
+            raise
+
+    def save_frozen_stop(self, trade_id: int, frozen: "FrozenStop") -> None:
+        """Persist frozen stop parameters on an existing open trade row.
+
+        Used when the entry order id is known only after open_trade is called, or
+        when a live trade needs its frozen stop backfilled (spec §6.4).
+        """
+        if frozen is None:
+            return
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE trades
+                    SET stop_strategy   = %s,
+                        stop_mode       = %s,
+                        stop_vol_at_entry = %s,
+                        stop_k          = %s,
+                        stop_floor      = %s,
+                        stop_cap        = %s,
+                        stop_d_init     = %s,
+                        stop_vol_source = %s
+                    WHERE id = %s AND exit_time IS NULL
+                    """,
+                    (
+                        frozen.strategy,
+                        frozen.mode,
+                        frozen.vol_at_entry,
+                        frozen.k,
+                        frozen.floor,
+                        frozen.cap,
+                        frozen.d_init,
+                        frozen.vol_source,
+                        trade_id,
+                    ),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    def insert_stop_decision(self, decision: "StopDecision", exit_order_id: str | None) -> None:
+        """Persist one fired protective stop decision."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO stop_decisions
+                        (trade_id, symbol, strategy, mode, entry_price, observed_price,
+                         trigger_price, d_init, vol_at_entry, sigma_eff, k, floor, cap,
+                         price_source, vol_source, exit_order_id, cycle_ts)
+                    VALUES (
+                        (SELECT id FROM trades WHERE symbol=%s AND exit_time IS NULL),
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                    """,
+                    (
+                        decision.symbol,
+                        decision.symbol,
+                        decision.strategy,
+                        decision.mode,
+                        decision.entry_price,
+                        decision.observed_price,
+                        decision.trigger_price,
+                        decision.d_init,
+                        decision.vol_at_entry,
+                        decision.sigma_eff,
+                        decision.k,
+                        decision.floor,
+                        decision.cap,
+                        decision.price_source,
+                        decision.vol_source,
+                        exit_order_id,
+                        decision.cycle_ts,
+                    ),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    def insert_stop_shadow(self, rows: list[dict]) -> None:
+        """Persist per-cycle shadow log rows (high volume, batched)."""
+        if not rows:
+            return
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                _values = [
+                    (
+                        r["cycle_ts"], r["symbol"], r.get("strategy"),
+                        r.get("entry_price"), r.get("observed_price"),
+                        r.get("vol_at_entry"), r.get("sigma_eff"), r.get("vol_source"),
+                        r.get("d_init_fixed"), r.get("trigger_fixed"), r.get("would_breach_fixed"),
+                        r.get("d_init_vol_scaled"), r.get("trigger_vol_scaled"), r.get("would_breach_vol_scaled"),
+                        r.get("d_hard"), r.get("d_hard_trigger"), r.get("d_hard_breached"),
+                    )
+                    for r in rows
+                ]
+                cur.executemany(
+                    """
+                    INSERT INTO stop_shadow_log
+                        (cycle_ts, symbol, strategy, entry_price, observed_price,
+                         vol_at_entry, sigma_eff, vol_source,
+                         d_init_fixed, trigger_fixed, would_breach_fixed,
+                         d_init_vol_scaled, trigger_vol_scaled, would_breach_vol_scaled,
+                         d_hard, d_hard_trigger, d_hard_breached)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    _values,
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
     def fetch_trades(
         self,
         symbol: str | None = None,
@@ -950,7 +1140,8 @@ class PostgreSQLStore:
                     f"""SELECT id, symbol, signal_id, decision_id, entry_order_id,
                                entry_price, entry_time, entry_notional, score, regime_mult,
                                exit_price, exit_time, exit_reason, qty,
-                               gross_pnl, slippage_est, net_pnl, postmortem_diagnosis, created_at
+                               gross_pnl, slippage_est, net_pnl, postmortem_diagnosis, created_at,
+                               stop_strategy, stop_d_init
                         FROM trades {where}
                         ORDER BY entry_time DESC LIMIT %s""",
                     params,

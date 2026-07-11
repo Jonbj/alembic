@@ -404,6 +404,40 @@ def test_submit_portfolio_orders_mixed_buy_sell():
     assert submitted_syms == ["SPY", "QQQ", "GLD"]
 
 
+def test_submit_portfolio_orders_stop_risk_sizing_caps_qty():
+    """A wide frozen stop caps notional so per-position loss at stop is bounded."""
+    from src.portfolio.stop_policy import StopPolicy
+    from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+    risk_cfg = {
+        "stop_loss": 0.02,
+        "stop_loss_mode": "fixed",
+        "stop_strategy_params": {
+            "S1": {"k": 3.5, "floor": 0.06, "cap": 0.12},
+            "default": {"k": 3.0, "floor": 0.04, "cap": 0.12},
+        },
+        "stop_risk_budget_bp_per_pos": 12,
+        "stop_gap_buffer_pct": 0.005,
+    }
+    policy = StopPolicy(risk_cfg, bars_df=None)
+    orders = [_make_combined_order("SPY", OrderSide.BUY, qty=10.0)]
+    market = _make_market(prices={"SPY": 100.0})
+
+    submitted_calls = []
+    def mock_submit(order, notional, client):
+        submitted_calls.append((order.symbol, order.quantity, notional))
+
+    submitted = _submit_portfolio_orders(
+        orders, MagicMock(), market, _submit_fn=mock_submit,
+        risk_cfg=risk_cfg, stop_policy=policy, nav=10000.0,
+    )
+    assert len(submitted) == 1
+    sym, qty, notional = submitted_calls[0]
+    # max_notional = 10000 * 0.0012 / (0.02 + 0.005) = 480; max_qty = 480 / 100 = 4.8
+    assert qty <= 4.9
+    assert notional <= 490.0
+
+
 # ── Pyramiding guard fail-closed (BUG-1) ─────────────────────────────────────
 
 

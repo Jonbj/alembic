@@ -121,66 +121,101 @@ class _Mkt:
 
 
 class TestStopLossBreachedSymbols:
+    def _make_policy(self):
+        from src.portfolio.stop_policy import StopPolicy
+        return StopPolicy({"stop_loss": 0.02, "stop_loss_mode": "fixed"}, bars_df=None)
+
+    def _assert_breached(self, out, expected_symbols):
+        from src.portfolio.stop_policy import StopDecision
+        assert set(out.keys()) == set(expected_symbols)
+        for sym, dec in out.items():
+            assert isinstance(dec, StopDecision)
+            assert dec.entry_price > 0
+            assert dec.observed_price <= dec.trigger_price
+            assert dec.d_init == pytest.approx(0.02)
+
     def test_breach_below_threshold(self):
         from src.workers.portfolio_scheduler import _stop_loss_breached_symbols
+        mock_store = MagicMock()
+        mock_store.load_frozen_stop.return_value = None
         out = _stop_loss_breached_symbols(
-            [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({"AAPL": 97.0}), 0.02
+            [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({"AAPL": 97.0}),
+            self._make_policy(), mock_store,
         )
-        assert out == {"AAPL"}
+        self._assert_breached(out, {"AAPL"})
 
     def test_no_breach_above_threshold(self):
         from src.workers.portfolio_scheduler import _stop_loss_breached_symbols
+        mock_store = MagicMock()
+        mock_store.load_frozen_stop.return_value = None
         out = _stop_loss_breached_symbols(
-            [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({"AAPL": 99.0}), 0.02
+            [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({"AAPL": 99.0}),
+            self._make_policy(), mock_store,
         )
-        assert out == set()
+        assert out == {}
 
     def test_boundary_is_breach(self):
         from src.workers.portfolio_scheduler import _stop_loss_breached_symbols
         # price exactly at entry*(1-stop) counts as breached
+        mock_store = MagicMock()
+        mock_store.load_frozen_stop.return_value = None
         out = _stop_loss_breached_symbols(
-            [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({"AAPL": 98.0}), 0.02
+            [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({"AAPL": 98.0}),
+            self._make_policy(), mock_store,
         )
-        assert out == {"AAPL"}
+        self._assert_breached(out, {"AAPL"})
 
     def test_missing_entry_price_skipped(self):
         from src.workers.portfolio_scheduler import _stop_loss_breached_symbols
+        mock_store = MagicMock()
         out = _stop_loss_breached_symbols(
-            [_Pos("AAPL")], {}, _Mkt({"AAPL": 1.0}), 0.02
+            [_Pos("AAPL")], {}, _Mkt({"AAPL": 1.0}),
+            self._make_policy(), mock_store,
         )
-        assert out == set()
+        assert out == {}
+        mock_store.assert_not_called()
 
     def test_missing_market_price_skipped(self):
         from src.workers.portfolio_scheduler import _stop_loss_breached_symbols
+        mock_store = MagicMock()
         out = _stop_loss_breached_symbols(
-            [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({}), 0.02
+            [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({}),
+            self._make_policy(), mock_store,
         )
-        assert out == set()
+        assert out == {}
 
     def test_zero_stop_pct_disables(self):
         from src.workers.portfolio_scheduler import _stop_loss_breached_symbols
+        from src.portfolio.stop_policy import StopPolicy
+        mock_store = MagicMock()
+        disabled_policy = StopPolicy({"stop_loss": 0.0, "stop_loss_mode": "fixed"}, bars_df=None)
         out = _stop_loss_breached_symbols(
-            [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({"AAPL": 1.0}), 0.0
+            [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({"AAPL": 1.0}),
+            disabled_policy, mock_store,
         )
-        assert out == set()
+        assert out == {}
 
     def test_non_numeric_price_skipped(self):
         """Robust to MagicMock prices (heavily-mocked integration tests)."""
         from src.workers.portfolio_scheduler import _stop_loss_breached_symbols
+        mock_store = MagicMock()
         out = _stop_loss_breached_symbols(
-            [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({"AAPL": MagicMock()}), 0.02
+            [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({"AAPL": MagicMock()}),
+            self._make_policy(), mock_store,
         )
-        assert out == set()
+        assert out == {}
 
     def test_only_breached_symbols_returned(self):
         from src.workers.portfolio_scheduler import _stop_loss_breached_symbols
+        mock_store = MagicMock()
+        mock_store.load_frozen_stop.return_value = None
         out = _stop_loss_breached_symbols(
             [_Pos("AAPL"), _Pos("MSFT")],
             {"AAPL": 100.0, "MSFT": 100.0},
             _Mkt({"AAPL": 90.0, "MSFT": 100.0}),
-            0.02,
+            self._make_policy(), mock_store,
         )
-        assert out == {"AAPL"}
+        self._assert_breached(out, {"AAPL"})
 
 
 # ─────────────────────────── FIX-B + config plumbing ───────────────────────────

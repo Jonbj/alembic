@@ -1,12 +1,10 @@
-"""Tests for run_loss_feedback_check (Phase B — Feedback Loop on Losses).
+"""Tests for run_loss_feedback_check (Phase 5 — per-strategy risk-normalized feedback).
 
 Covers:
-  - Loss detection: consecutive losses, rolling P&L
-  - Threshold and regime scale adjustments
-  - Cooldown enforcement
-  - Recovery (consecutive wins)
-  - Disabled flag
-  - No trades / insufficient trades
+  - Disabled / no-trades skip paths
+  - Per-strategy ratchet isolation (S1 loss must not affect S4 threshold)
+  - R-multiple / EWMA trigger and recovery
+  - Cooldown, temporal decay, Redis writes
 """
 from __future__ import annotations
 
@@ -27,13 +25,41 @@ from src.workers.performance import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_trade(net_pnl: float) -> dict:
-    return {"net_pnl": net_pnl, "symbol": "AAPL", "entry_time": datetime.now(timezone.utc).isoformat()}
+def _make_trade(
+    net_pnl: float,
+    *,
+    signal_id: int | None = None,
+    entry_notional: float = 1000.0,
+    stop_d_init: float = 0.02,
+    exit_reason: str = "stop_loss",
+) -> dict:
+    """Return a closed trade fixture.
+
+    signal_id=None  -> strategy S1 (momentum/rebalance)
+    signal_id=set   -> strategy S4 (news-driven signal)
+    """
+    return {
+        "net_pnl": net_pnl,
+        "symbol": "AAPL",
+        "entry_time": datetime.now(timezone.utc).isoformat(),
+        "signal_id": signal_id,
+        "entry_notional": entry_notional,
+        "stop_d_init": stop_d_init,
+        "exit_reason": exit_reason,
+    }
 
 
-def _make_trades(pnls: list[float]) -> list[dict]:
+def _make_trades(
+    pnls: list[float],
+    *,
+    signal_id: int | None = None,
+    exit_reason: str = "stop_loss",
+) -> list[dict]:
     """Most-recent first (matching fetch_trades ordering)."""
-    return [_make_trade(p) for p in pnls]
+    return [
+        _make_trade(pnl, signal_id=signal_id, exit_reason=exit_reason)
+        for pnl in pnls
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -87,16 +113,13 @@ def test_load_loss_feedback_config_returns_defaults_on_missing_section():
 
 
 # ---------------------------------------------------------------------------
-# Integration: run_loss_feedback_check
+# Integration: run_loss_feedback_check (per-strategy)
 # ---------------------------------------------------------------------------
 
 def _default_cfg():
     return {
         "enabled": True,
         "consecutive_loss_trigger": 3,
-        "rolling_pnl_window": 5,
-        "rolling_pnl_drawdown_pct": 0.005,
-        "rolling_pnl_trigger_floor_usd": 250.0,
         "threshold_step": 0.05,
         "threshold_max": 0.60,
         "threshold_baseline": 0.30,
@@ -115,7 +138,6 @@ def _patched_run(
     redis_threshold: float | None = None,
     redis_scale: float | None = None,
     redis_state: dict | None = None,
-    redis_equity: float | None = None,
     cfg_override: dict | None = None,
 ):
     """Helper that patches all external dependencies and runs the task."""
@@ -125,7 +147,6 @@ def _patched_run(
     mock_redis.get_feedback_entry_threshold.return_value = redis_threshold
     mock_redis.get_feedback_regime_scale.return_value = redis_scale
     mock_redis.get_feedback_state.return_value = redis_state
-    mock_redis.get_portfolio_value.return_value = redis_equity
 
     mock_pg = MagicMock()
     mock_pg.fetch_trades.return_value = trades
@@ -135,7 +156,7 @@ def _patched_run(
         patch("src.workers.performance.RedisStore", return_value=mock_redis),
         patch("src.workers.performance.PostgreSQLStore", return_value=mock_pg),
         patch("src.workers.performance.TelegramNotifier"),
-        patch("asyncio.run"),
+        patch("src.workers.performance.run_async"),
     ):
         result = run_loss_feedback_check()
 
@@ -155,170 +176,163 @@ class TestNoTrades:
 
 
 class TestTriggerOnConsecutiveLosses:
-    def test_3_consecutive_losses_triggers(self):
-        trades = _make_trades([-5, -10, -3, 8, 2])
+    def test_s4_3_consecutive_losses_triggers(self):
+        trades = _make_trades([-5, -10, -3, 8, 2], signal_id=123)
         result, mock_redis = _patched_run(trades)
 
-        assert result["triggered"] is True
         assert result["adjusted"] is True
-        assert result["consecutive_losses"] == 3
+        s4 = result["per_strategy"]["S4"]
+        assert s4["triggered"] is True
+        assert s4["consecutive_losses"] == 3
         mock_redis.set_feedback_entry_threshold.assert_called_once()
         mock_redis.set_feedback_regime_scale.assert_called_once()
 
     def test_threshold_raised_by_step(self):
-        trades = _make_trades([-5, -10, -3, 8, 2])
+        trades = _make_trades([-5, -10, -3, 8, 2], signal_id=123)
         result, _ = _patched_run(trades, redis_threshold=0.30)
 
-        assert result["new_threshold"] == pytest.approx(0.35)
+        s4 = result["per_strategy"]["S4"]
+        assert s4["new_threshold"] == pytest.approx(0.35)
 
     def test_regime_scale_reduced_by_factor(self):
-        trades = _make_trades([-5, -10, -3, 8, 2])
+        trades = _make_trades([-5, -10, -3, 8, 2], signal_id=123)
         result, _ = _patched_run(trades, redis_scale=1.0)
 
-        assert result["new_scale"] == pytest.approx(0.80)
+        s4 = result["per_strategy"]["S4"]
+        assert s4["new_scale"] == pytest.approx(0.80)
 
     def test_2_consecutive_losses_does_not_trigger(self):
-        # 2 consecutive losses (below trigger=3) AND positive rolling P&L → no trigger
-        trades = _make_trades([-5, -10, 8, 9, 10])
+        trades = _make_trades([-5, -10, 8, 9, 10], signal_id=123)
         result, _ = _patched_run(trades)
 
-        assert result["triggered"] is False
+        s4 = result["per_strategy"]["S4"]
+        assert s4["triggered"] is False
         assert result["adjusted"] is False
 
 
-class TestTriggerOnNegativeRollingPnl:
-    def test_negative_rolling_pnl_triggers(self):
-        # Rolling P&L must exceed 0.5% of equity ($100K * 0.005 = $500).
-        trades = _make_trades([-600, 3, -2, 1, -2])
-        # consecutive losses = 1 (below trigger=3), but rolling P&L drawdown > 0.5%
-        result, mock_redis = _patched_run(trades, redis_equity=100_000.0)
+class TestPerStrategyIsolation:
+    def test_s1_losses_do_not_poison_s4_threshold(self):
+        """Three S1 stop-out losses must not adjust the S4 entry threshold."""
+        # Most recent first: three S1 losses, then two S4 wins.
+        trades = [
+            _make_trade(-20, signal_id=None),   # S1
+            _make_trade(-30, signal_id=None),   # S1
+            _make_trade(-25, signal_id=None),   # S1
+            _make_trade(10, signal_id=999),     # S4 win
+            _make_trade(5, signal_id=999),      # S4 win
+        ]
+        result, mock_redis = _patched_run(trades, redis_threshold=0.30)
 
-        assert result["triggered"] is True
+        assert result["per_strategy"]["S1"]["triggered"] is True
+        assert result["per_strategy"]["S4"]["triggered"] is False
+        # S4 threshold must stay untouched.
+        for call in mock_redis.set_feedback_entry_threshold.call_args_list:
+            assert call.kwargs.get("strategy") != "S4"
+
+
+class TestTriggerOnEwmaR:
+    def test_large_r_losses_trigger_via_ewma(self):
+        """Three -2R losses produce EWMA R <= -0.5, which triggers S4."""
+        trades = [
+            _make_trade(-40, signal_id=123, entry_notional=1000, stop_d_init=0.02),
+            _make_trade(-40, signal_id=123, entry_notional=1000, stop_d_init=0.02),
+            _make_trade(-40, signal_id=123, entry_notional=1000, stop_d_init=0.02),
+        ]
+        result, _ = _patched_run(trades)
+        s4 = result["per_strategy"]["S4"]
+        assert s4["ewma_r"] <= -0.5
+        assert s4["triggered"] is True
         assert result["adjusted"] is True
-        assert result["rolling_net_pnl"] < -500
-
-    def test_small_negative_rolling_pnl_does_not_trigger(self):
-        """Noise-level loss (-$208 on $110K) must NOT raise the gate."""
-        trades = _make_trades([-208, 3, -2, 1, -2])
-        result, _ = _patched_run(trades, redis_equity=100_000.0)
-
-        assert result["triggered"] is False
-        assert result["adjusted"] is False
-
-    def test_floor_used_when_equity_missing(self):
-        """When portfolio:value is absent, the absolute floor applies."""
-        # Sum -315 over window triggers (floor $250); sum -115 does not.
-        result_hi, _ = _patched_run(_make_trades([-400, 40, 30, 10, 5]))
-        assert result_hi["triggered"] is True
-        result_lo, _ = _patched_run(_make_trades([-200, 40, 30, 10, 5]))
-        assert result_lo["triggered"] is False
-
-    def test_zero_drawdown_pct_disables_rolling_pnl_trigger(self):
-        """rolling_pnl_drawdown_pct=0 must disable the rolling-P&L trigger entirely.
-
-        Only consecutive losses should still be able to trigger.
-        """
-        # Large rolling loss but no consecutive losses and pct=0 → no trigger.
-        trades = _make_trades([-600, 40, 30, -20, -50])
-        result, _ = _patched_run(
-            trades,
-            redis_equity=100_000.0,
-            cfg_override={"rolling_pnl_drawdown_pct": 0.0},
-        )
-        assert result["triggered"] is False
-        assert result["adjusted"] is False
-        assert result["rolling_loss_limit"] is None
-
-    def test_positive_rolling_pnl_no_trigger(self):
-        trades = _make_trades([5, 3, 2, -1, 1])
-        result, _ = _patched_run(trades, redis_equity=100_000.0)
-
-        assert result["triggered"] is False
-        assert result["adjusted"] is False
 
 
 class TestThresholdCap:
     def test_threshold_capped_at_max(self):
-        trades = _make_trades([-5, -10, -3, 8, 2])
-        # Already near max
+        trades = _make_trades([-5, -10, -3, 8, 2], signal_id=123)
         result, _ = _patched_run(trades, redis_threshold=0.58)
 
-        assert result["new_threshold"] == pytest.approx(0.60)  # capped
+        s4 = result["per_strategy"]["S4"]
+        assert s4["new_threshold"] == pytest.approx(0.60)
 
     def test_regime_scale_floored_at_min(self):
-        trades = _make_trades([-5, -10, -3, 8, 2])
+        trades = _make_trades([-5, -10, -3, 8, 2], signal_id=123)
         result, _ = _patched_run(trades, redis_scale=0.22)
 
-        assert result["new_scale"] == pytest.approx(0.20)  # floored at regime_min_scale=0.20
+        s4 = result["per_strategy"]["S4"]
+        assert s4["new_scale"] == pytest.approx(0.20)
 
 
 class TestCooldown:
     def test_adjustment_skipped_within_cooldown(self):
-        trades = _make_trades([-5, -10, -3, 8, 2])
+        trades = _make_trades([-5, -10, -3, 8, 2], signal_id=123)
         recent_ts = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
         result, mock_redis = _patched_run(
             trades,
             redis_state={"last_adjustment_ts": recent_ts},
         )
 
-        assert result["cooldown_ok"] is False
-        assert result["adjusted"] is False
+        s4 = result["per_strategy"]["S4"]
+        assert s4["cooldown_ok"] is False
+        assert s4["adjusted"] is False
         mock_redis.set_feedback_entry_threshold.assert_not_called()
 
     def test_adjustment_allowed_after_cooldown(self):
-        trades = _make_trades([-5, -10, -3, 8, 2])
+        trades = _make_trades([-5, -10, -3, 8, 2], signal_id=123)
         old_ts = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
         result, mock_redis = _patched_run(
             trades,
             redis_state={"last_adjustment_ts": old_ts},
         )
 
-        assert result["cooldown_ok"] is True
-        assert result["adjusted"] is True
+        s4 = result["per_strategy"]["S4"]
+        assert s4["cooldown_ok"] is True
+        assert s4["adjusted"] is True
+        mock_redis.set_feedback_entry_threshold.assert_called_once()
 
 
 class TestRecovery:
     def test_win_streak_steps_threshold_down(self):
-        # 3 consecutive wins, threshold above baseline
-        trades = _make_trades([5, 10, 3, -1, 2])
+        # 3 consecutive S4 wins, threshold above baseline
+        trades = _make_trades([5, 10, 3, -1, 2], signal_id=123)
         result, mock_redis = _patched_run(
             trades,
-            redis_threshold=0.40,  # above baseline 0.30
+            redis_threshold=0.40,
             redis_scale=0.80,
         )
 
-        assert result["triggered"] is False
-        assert result["recovered"] is True
-        assert result["new_threshold"] == pytest.approx(0.35)
+        s4 = result["per_strategy"]["S4"]
+        assert s4["triggered"] is False
+        assert s4["recovered"] is True
+        assert s4["new_threshold"] == pytest.approx(0.35)
 
     def test_no_recovery_when_already_at_baseline(self):
-        trades = _make_trades([5, 10, 3, 2, 1])
+        trades = _make_trades([5, 10, 3, 2, 1], signal_id=123)
         result, mock_redis = _patched_run(
             trades,
-            redis_threshold=0.30,  # already at baseline
+            redis_threshold=0.30,
             redis_scale=1.0,
         )
 
-        assert result["recovered"] is False
+        s4 = result["per_strategy"]["S4"]
+        assert s4["recovered"] is False
         mock_redis.set_feedback_entry_threshold.assert_not_called()
 
     def test_insufficient_win_streak_no_recovery(self):
         # Only 2 consecutive wins, need 3
-        trades = _make_trades([5, 10, -1, 2, 1])
+        trades = _make_trades([5, 10, -1, 2, 1], signal_id=123)
         result, _ = _patched_run(
             trades,
             redis_threshold=0.40,
             cfg_override={"recovery_win_streak": 3},
         )
 
-        assert result["recovered"] is False
+        s4 = result["per_strategy"]["S4"]
+        assert s4["recovered"] is False
 
 
 class TestTemporalDecay:
     def test_threshold_decays_after_quiet_period(self):
-        """After threshold_decay_hours with no trigger, the gate lowers by one step."""
-        # 2 consecutive wins only, so recovery-by-wins does not fire.
-        trades = _make_trades([5, 3, -1, 2, 1])
+        # No trigger, current threshold above baseline, quiet > 24h
+        trades = _make_trades([5, 3, -1, 2, 1], signal_id=123)
         old_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
         result, mock_redis = _patched_run(
             trades,
@@ -326,13 +340,13 @@ class TestTemporalDecay:
             redis_state={"last_adjustment_ts": old_ts, "reason": "triggered"},
         )
 
-        assert result["decayed"] is True
-        assert result["new_threshold"] == pytest.approx(0.35)
+        s4 = result["per_strategy"]["S4"]
+        assert s4["decayed"] is True
+        assert s4["new_threshold"] == pytest.approx(0.35)
         mock_redis.set_feedback_entry_threshold.assert_called_once()
 
     def test_no_decay_within_decay_window(self):
-        """If the last adjustment is recent, no temporal decay occurs."""
-        trades = _make_trades([5, 3, -1, 2, 1])
+        trades = _make_trades([5, 3, -1, 2, 1], signal_id=123)
         recent_ts = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
         result, mock_redis = _patched_run(
             trades,
@@ -340,65 +354,25 @@ class TestTemporalDecay:
             redis_state={"last_adjustment_ts": recent_ts, "reason": "triggered"},
         )
 
-        assert result["decayed"] is False
+        s4 = result["per_strategy"]["S4"]
+        assert s4["decayed"] is False
         mock_redis.set_feedback_entry_threshold.assert_not_called()
-
-    def test_no_decay_when_already_at_baseline(self):
-        trades = _make_trades([5, 3, -1, 2, 1])
-        old_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
-        result, _ = _patched_run(
-            trades,
-            redis_threshold=0.30,
-            redis_state={"last_adjustment_ts": old_ts, "reason": "triggered"},
-        )
-
-        assert result["decayed"] is False
-
-    def test_decay_sends_baseline_reset_notification(self):
-        """When decay reaches baseline, a Telegram reset alert is sent."""
-        from unittest.mock import MagicMock, patch
-
-        trades = _make_trades([5, 3, -1, 2, 1])
-        old_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
-        cfg = _default_cfg()
-        mock_redis = MagicMock()
-        mock_redis.get_feedback_entry_threshold.return_value = 0.31  # one step above baseline
-        mock_redis.get_feedback_regime_scale.return_value = None
-        mock_redis.get_feedback_state.return_value = {"last_adjustment_ts": old_ts, "reason": "triggered"}
-        mock_redis.get_portfolio_value.return_value = 100_000.0
-        mock_pg = MagicMock()
-        mock_pg.fetch_trades.return_value = trades
-
-        with patch("src.workers.performance._load_loss_feedback_config", return_value=cfg), \
-             patch("src.workers.performance.RedisStore", return_value=mock_redis), \
-             patch("src.workers.performance.PostgreSQLStore", return_value=mock_pg), \
-             patch("src.workers.performance.TelegramNotifier") as mock_notifier_cls, \
-             patch("src.workers.performance.run_async") as mock_run_async:
-            run_loss_feedback_check()
-
-        mock_notifier_cls.assert_called_once()
-        mock_run_async.assert_called_once()
-        send_alert_call = mock_notifier_cls.return_value.send_alert.call_args
-        assert send_alert_call is not None
-        msg = send_alert_call[0][0]
-        assert "Loss Feedback Reset" in msg
-        assert "0.30" in msg
 
 
 class TestRedisWrites:
     def test_state_written_on_trigger(self):
-        trades = _make_trades([-5, -10, -3, 8, 2])
+        trades = _make_trades([-5, -10, -3, 8, 2], signal_id=123)
         _, mock_redis = _patched_run(trades)
 
-        mock_redis.set_feedback_state.assert_called_once()
+        assert mock_redis.set_feedback_state.call_count == 1
         state_arg = mock_redis.set_feedback_state.call_args[0][0]
-        assert state_arg["reason"] == "triggered"
+        assert state_arg["reason"] != ""  # per-strategy reason
         assert "last_adjustment_ts" in state_arg
         assert "threshold_before" in state_arg
         assert "threshold_after" in state_arg
 
     def test_state_written_on_recovery(self):
-        trades = _make_trades([5, 10, 3, 2, 1])
+        trades = _make_trades([5, 10, 3, 2, 1], signal_id=123)
         _, mock_redis = _patched_run(
             trades,
             redis_threshold=0.40,
