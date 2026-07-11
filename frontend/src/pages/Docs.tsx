@@ -167,27 +167,33 @@ sleeve_weight = normalise(raw_weight, long-only, sum≤1)`}</div>
   ├── MarketAux    — news finanziarie con ticker
   └── Alpaca News  — news real-time
 
-LLM Ensemble (2 modelli in parallelo via Ollama cloud):
-  kimi-k2.6   → { polarity ∈ [-1,+1], confidence ∈ [0,1] }
-  glm-5.2     → { polarity, confidence }
+LLM Ensemble (2 modelli in parallelo via Ollama cloud;
+coppia da Redis config:sentiment_llm_models — oggi glm-5.2 + gpt-oss:20b):
+  modello A   → { polarity ∈ [-1,+1], confidence ∈ [0,1] }
+  modello B   → { polarity, confidence }
 
   score_i = polarity_i × confidence_i
 
 Aggregazione:
-  if std(score_i) > 0.30 → FinBERT locale (fallback)
+  if std(polarity_i) ≥ 0.40 → FinBERT locale (fallback;
+      raw output salvati in llm_responses con eligible=false)
   else: score = Σ(weight_i × score_i)
 
 Redis: SET signal:{symbol}:sentiment = { score, ts, model_id }`}</div>
               <h3 style={{ ...h3, margin: '8px 0 4px' }}>Come S4 interviene sul segnale</h3>
-              <div style={mono}>{`Ogni ciclo portfolio (ogni ora):
+              <div style={mono}>{`Ogni ciclo portfolio (ogni 15 min):
   S4.compute_target_weights(signals):
 
-  [1] Filtro score:     score < 0.30  → SKIP
-  [2] Filtro EMA20:     price < EMA20 → SKIP (downtrend)
-  [3] Filtro staleness: age > 30 min  → SKIP (news obsoleta)
+  [1] Gate soglia:   |score| < feedback:entry_threshold (baseline 0.30) → SKIP
+  [2] Freshness:     age > 4h → SKIP (preservato se posizione aperta
+                     senza counter-signal, FIX-D)
+  [3] Ranking:       top-5 per score, equal-weight nel bucket
+                     (min_stocks=1: anche un solo survivor trada)
+  Nota: NESSUN filtro EMA20 nel path portfolio (solo nel legacy inattivo)
 
   Se PASS:
-    sleeve_weight = base_size (0.02) × regime_multiplier
+    sleeve_weight = 1/n del bucket × sleeve S4 (10% NAV)
+    notional alla submit × regime_multiplier
 
   regime_multiplier:
     bull      → ×1.0  |  sideways → ×0.7
@@ -218,7 +224,7 @@ Portfolio orchestratore:
               <h3 style={{ ...h3, margin: '8px 0 4px' }}>Come genera il segnale</h3>
               <div style={mono}>{`Fonte: SEC EDGAR 8-K filing (ogni 30 min durante mercato)
 
-LLM classificatore (kimi-k2.6):
+LLM classificatore (Ollama cloud):
   input: testo del filing 8-K
   output: {
     direction: "beat" | "miss" | "inline" | "no_eps",
@@ -297,10 +303,12 @@ STEP 2 — LLM ENSEMBLE (xx:00, stesso ciclo)
   Prompt DK-CoT: "Act as buy-side analyst. Reason over cash flows,
   competition, profitability. Output JSON: {polarity, confidence, reasoning}"
 
-  4 modelli in parallelo → [score_1, score_2, score_3, score_4]
+  2 modelli in parallelo (coppia configurabile, oggi glm-5.2 + gpt-oss:20b)
+    → [output_A, output_B]
 
-  if std(scores) > 0.30:
+  if std(polarity_i) ≥ 0.40 (ENSEMBLE_DIVERGENCE_STD):
     → FinBERT locale: confidence = 1 - H(softmax) / log(3)
+      (raw output divergenti salvati in llm_responses, eligible=false)
   else:
     → score = Σ(weight_i × polarity_i × confidence_i)
 
@@ -317,11 +325,12 @@ STEP 3 — PORTFOLIO CYCLE (xx:07, ogni 15 min, offset +7 min dopo sentiment)
     → {AAPL: 0.35, NVDA: 0.22, ...}  # sleeve-local, no LLM
 
   S4.compute_target_weights(signals):
-    Per ticker: score < 0.30 → skip | price < EMA20 → skip | age > 30min → skip
-    → {MSFT: 0.02, TSLA: 0.015, ...}  # sleeve-local, scaled by regime
+    Per ticker: |score| < feedback:entry_threshold → skip | age > 4h → skip
+    (nessun filtro EMA20 nel path portfolio; regime applicato al notional in submit)
+    → {MSFT: 0.02, TSLA: 0.015, ...}  # sleeve-local
 
-  Sentiment reversal check: posizioni già aperte con nuovo score < -0.35
-    → aggiunge SELL forzato alla lista ordini
+  Sentiment reversal check: posizioni già aperte con nuovo score ensemble < -0.20
+    (i segnali FinBERT fallback NON forzano l'exit) → SELL forzato
 
 STEP 4 — MERGE + RISK CONSTRAINTS
   merged[sym] += S1_weight[sym] × 0.50

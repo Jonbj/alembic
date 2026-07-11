@@ -12,7 +12,7 @@ sentiment signal. The ensemble approach provides:
 
 Key Concepts:
 - **Confidence-weighted average**: Models with higher confidence have more influence
-- **Divergence threshold**: If models disagree too much (std >= 0.30), fallback to FinBERT
+- **Divergence threshold**: If models disagree too much (std >= config.ENSEMBLE_DIVERGENCE_STD, 0.40 live since 2026-07-09), fallback to FinBERT
 - **Minimum confidence**: Individual models must meet confidence threshold (0.4) to be eligible
 
 Ensemble Flow:
@@ -127,7 +127,7 @@ class AggregatedResult(BaseModel):
     Interpretation:
         - ensemble_std < 0.10: Strong agreement (high confidence in consensus)
         - ensemble_std 0.10-0.30: Moderate agreement (acceptable variance)
-        - ensemble_std >= 0.30: High divergence (trigger FinBERT fallback)
+        - ensemble_std >= divergence_threshold: High divergence (trigger FinBERT fallback; live threshold 0.40)
 
     Example:
         >>> result = AggregatedResult(
@@ -168,7 +168,7 @@ class EnsembleAggregator:
 
     Attributes:
         min_confidence (float): Minimum confidence for a model to be eligible (default: 0.4)
-        divergence_threshold (float): Max acceptable ensemble std (default: 0.30)
+        divergence_threshold (float): Max acceptable ensemble std (constructor default 0.30; the live worker passes config.ENSEMBLE_DIVERGENCE_STD = 0.40)
 
     Usage Example:
         >>> aggregator = EnsembleAggregator(
@@ -202,7 +202,7 @@ class EnsembleAggregator:
             divergence_threshold: Maximum acceptable standard deviation of polarities.
                                  If ensemble_std >= this value, aggregation fails
                                  and FinBERT fallback is triggered.
-                                 Typical value: 0.30 (30% std)
+                                 Live value: config.ENSEMBLE_DIVERGENCE_STD (0.40)
                                  Range: [0.0, 1.0]
 
         Note:

@@ -623,7 +623,7 @@ class GlmClient(LLMClient):
 #   redis-cli DEL ollama:sem ollama:sem:init
 #
 _OLLAMA_SEM_KEY = "ollama:sem"
-_OLLAMA_SEM_SLOTS = 2      # ensemble has 2 models (kimi + glm-5.2) → max 2 parallel calls
+_OLLAMA_SEM_SLOTS = 2      # live ensemble runs 2 models (pair via config:sentiment_llm_models) → max 2 parallel calls
 _OLLAMA_SEM_WAIT_S = 180   # max seconds to wait for a slot (12 workers × ~14s/call)
 
 

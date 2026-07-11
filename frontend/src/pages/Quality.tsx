@@ -50,7 +50,7 @@ function buildQualityVerdict(data: Awaited<ReturnType<typeof fetchQualityMetrics
     risk += 1
     details.push('fallback rate high: primary model path degraded')
   }
-  if ((data.signals.mean_ensemble_std ?? 0) > 0.30) {
+  if ((data.signals.mean_ensemble_std ?? 0) > 0.40) {
     risk += 1
     details.push('ensemble divergence above discard threshold')
   }
@@ -138,7 +138,7 @@ export default function Quality() {
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <KPICard label="Near-zero rate" value={pct(data.signals.near_zero_rate)} sub={`${data.signals.n ?? 0} segnali`} tooltip="Frazione di segnali con |score|<0.05 — rumore che non clearera la soglia." />
             <KPICard label="Fallback rate" value={pct(data.signals.fallback_rate)} sub="FinBERT fallback" tooltip="Frazione di segnali da FinBERT (timeout/divergenza/budget)." />
-            <KPICard label="Ensemble std medio" value={n3(data.signals.mean_ensemble_std)} sub="divergenza modelli" tooltip="Std medio delle polarità tra modelli (soglia discard 0.30)." />
+            <KPICard label="Ensemble std medio" value={n3(data.signals.mean_ensemble_std)} sub="divergenza modelli" tooltip="Std medio delle polarità tra modelli (soglia discard 0.40; sulle righe fallback la std salvata è 0)." />
             <KPICard label="Score medio" value={n3(data.signals.mean_score)} sub={`std ${n3(data.signals.std_score)}`} tooltip="polarity × confidence medio." />
           </div>
 

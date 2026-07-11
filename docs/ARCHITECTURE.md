@@ -43,7 +43,8 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 │                   REGIME DETECTION (daily 07:00 UTC)              │
 │                                                                   │
 │  FRED API (VIX, T10Y2Y) ──► RegimeDetector ──► Redis            │
-│  yfinance (SPY 20d EMA)       LLM pair          regime_multiplier│
+│  yfinance (SPY momentum)      LLM pair       regime:current +   │
+│                                              qc:sizing_multiplier│
 └──────────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
@@ -128,10 +129,10 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 | Component | File | Role |
 |-----------|------|------|
 | `SentimentWorker` | `src/workers/sentiment.py` | Consumes `news:queue`; skips news older than `MAX_NEWS_AGE_HOURS` (**2h**, FIX-03) pre-inference; resolver runs **before** inference and drops `NO_TRADE_NOT_TRADABLE` items (conservative enforcement, fail-open); writes signal with `published_at` |
-| `LLMClient` (ABC) | `src/llm/client.py` | Ollama cloud clients: Kimi K2.6, GLM-5.2 (Qwen3.5 removed — ticker extraction too aggressive) |
-| `EnsembleAggregator` | `src/llm/ensemble.py` | Weighted averaging + divergence check (std > 0.30) |
+| `LLMClient` (ABC) | `src/llm/client.py` | Ollama cloud clients; active pair via Redis `config:sentiment_llm_models` (dal 2026-07-11: `glm52,gptoss`); registry `src/llm/model_registry.py` — i candidati swap (qwen35, gptoss) hanno `in_all=False`, quindi "all" resta il set live a 2 modelli |
+| `EnsembleAggregator` | `src/llm/ensemble.py` | Weighted averaging + divergence check (std ≥ `ENSEMBLE_DIVERGENCE_STD`, **0.40** dal 2026-07-09; i raw output divergenti sono persistiti in `llm_responses` con `eligible=false` dal 2026-07-11) |
 | `FinBERTClient` | `src/llm/finbert.py` | Local fallback: entropic confidence from 3-class softmax |
-| `LLMBudgetTracker` | `src/llm/budget.py` | Daily spend cap per model via Redis counters |
+| `LLMBudgetTracker` | `src/llm/budget.py` | Daily spend cap per model — PostgreSQL `llm_budget` + Redis `budget_exhausted` flag |
 | `sanitize_text` | `src/text/sanitizer.py` | Strip BiDi overrides, homoglyphs, NFKC normalisation |
 
 **Signal formula:** `score = polarity × confidence` where polarity ∈ [-1, +1] and confidence ∈ [0, 1].
@@ -218,8 +219,8 @@ Il `worker-inference` ha concurrency=1 per garantire un singolo processo Python 
 
 ### 2.5c Portfolio Cycle Safeguards
 
-- **Redis cycle lock**: `SET portfolio:cycle:lock NX EX 840` — previene run concorrenti del portfolio orchestrator. TTL 14 min (appena sotto lo schedule di 15 min). Implementato in `src/workers/portfolio_scheduler.py`.
-- **Hold minimum 30 min**: le SELL su simboli comprati negli ultimi 30 minuti vengono filtrate tramite `fetch_recently_bought_symbols()` in `src/store/pg_store.py`. Previene roundtrip involontari S4→S1 (S4 compra, S1 riequilibra e vende nello stesso ciclo).
+- **Redis cycle lock**: `SET portfolio:cycle:lock NX EX 1200` — previene run concorrenti del portfolio orchestrator. TTL 20 min (sopra lo schedule di 15 min). Implementato in `src/workers/portfolio_scheduler.py`.
+- **Hold minimum 90 min** (`execution.hold_minimum_minutes`, trading.yaml): le SELL su simboli comprati negli ultimi 90 minuti vengono filtrate tramite `fetch_recently_bought_symbols()` in `src/store/pg_store.py`. Previene roundtrip involontari S4→S1 (S4 compra, S1 riequilibra e vende nello stesso ciclo). Gli exit da stop-loss bypassano il filtro.
 - **FinBERT int8 quantization**: quantizzazione dinamica `torch.qint8` applicata al caricamento del modello in `src/llm/finbert.py` — riduce footprint RAM ~50% senza perdita significativa di accuratezza sul task di sentiment classification.
 
 ### 2.6 Execution Engine
@@ -227,7 +228,7 @@ Il `worker-inference` ha concurrency=1 per garantire un singolo processo Python 
 | Component | File | Role |
 |-----------|------|------|
 | `ExecutionWorker` | `src/workers/execution.py` | Sequential safety checklist → Alpaca orders |
-| `AlpacaBroker` | `src/brokers/ibkr_adapter.py` | Order placement adapter |
+| Alpaca order submission | `alpaca-py` diretto in `execution.py` / `portfolio_scheduler.py` | Nessuna classe `AlpacaBroker` esiste; `src/brokers/ibkr_adapter.py` contiene solo `IBKRAdapter` (non usato dal path live) |
 | `_write_decision` | `src/workers/execution.py` | Log each scored symbol's outcome to `execution_decisions` |
 | `_maybe_postmortem` | `src/workers/execution.py` | On stop-loss close: gate → diagnose → write `postmortem_diagnosis` |
 | `_regime_label` | `src/workers/execution.py` | Convert numeric `regime_mult` to string label for `TradeContext` |
@@ -314,7 +315,9 @@ Configured in `config/trading.yaml` under `loss_feedback:`.
 | `regime_scale_factor` | 0.80 | legacy/audit scale factor written on trigger |
 | `regime_min_scale` | 0.20 | floor for legacy/audit scale |
 | `cooldown_hours` | 4 | minimum hours between adjustments |
-| `recovery_win_streak` | 5 | consecutive wins → step threshold back down |
+| `recovery_win_streak` | 3 | consecutive wins → step threshold back down (5→3, 2026-07-09) |
+| `rolling_pnl_drawdown_pct` | 0.005 | il rolling loss deve superare questa frazione dell'equity per triggerare (2026-07-10; prima bastava un rolling P&L < 0 di qualsiasi entità) |
+| `threshold_decay_hours` | 24 | decay automatico della soglia verso il baseline dopo 24h senza trigger (2026-07-10) |
 | `feedback_ttl_hours` | 48 | Redis TTL — adjustments expire automatically |
 
 **Redis keys written:** `feedback:entry_threshold`, `feedback:regime_scale`, `feedback:state` (audit JSON). All have 48h TTL, so adjustments cannot persist indefinitely through system restarts.
@@ -340,7 +343,7 @@ Answers: *"For each trade we skipped, what would the 1-hour return have been?"*
 
 | Store | Technology | Schema |
 |-------|------------|--------|
-| `RedisStore` | Redis 7 | `sentiment:signal:{sym}` TTL 4h; `killswitch_active`; `regime_multiplier`; `ensemble:weights:current`; `system:mode`; `feedback:entry_threshold`; `feedback:regime_scale`; `feedback:state` |
+| `RedisStore` | Redis 7 | `signal:{sym}:sentiment` TTL 4h; `killswitch_active`; `regime:current` (JSON) + `qc:sizing_multiplier`; `ensemble:weights:current`; `system:mode`; `feedback:entry_threshold`; `feedback:regime_scale`; `feedback:state`; `config:sentiment_llm_models`; `portfolio:value` |
 | `PostgreSQLStore` | PostgreSQL 16 | `sentiment_signals`, `llm_responses`, `news_log`, `weight_update_log`, `backtest_signals`, `portfolio_cycles`, `risk_reports`, `decay_reports`, `execution_decisions`, `trades`, `pead_signals`, `strategy_lifecycle`, `strategy_lifecycle_audit` |
 
 **Tables added by migrations 016–018:**
@@ -447,20 +450,20 @@ SentimentWorker (batch 12 items/cycle, semaphore=2 concurrent)
     ├── skip news older than MAX_NEWS_AGE_HOURS (2h) — FIX-03
     ├── resolver (shadow log + conservative enforcement: NO_TRADE_NOT_TRADABLE dropped)
     ├── sanitize_text()
-    ├── LLM Ensemble (2 × Ollama cloud: Kimi K2.6 + GLM-5.2, asyncio.gather)
-    │   ├── divergence check (std > 0.30 → FinBERT via run_in_executor)
+    ├── LLM Ensemble (2 × Ollama cloud, coppia da config:sentiment_llm_models — oggi GLM-5.2 + GPT-OSS 20B, asyncio.gather)
+    │   ├── divergence check (std ≥ 0.40 → FinBERT via run_in_executor; raw outputs → llm_responses eligible=false)
     │   └── budget check (daily cap → FinBERT via run_in_executor)
     ├── score = polarity × confidence
-    ├── SET sentiment:signal:{sym} EX 14400 (Redis, TTL 4h)
+    ├── SET signal:{sym}:sentiment EX 14400 (Redis, TTL 4h)
     └── INSERT sentiment_signals (PostgreSQL, permanent — includes published_at, news_log_id)
     │
     ▼
 ExecutionWorker (every 15 min, active only when execution.engine=legacy_sentiment)
     ├── GET killswitch_active
-    ├── GET regime_multiplier × GET feedback:regime_scale  (Phase B, legacy path)
+    ├── GET regime:current (JSON) × GET feedback:regime_scale  (Phase B, legacy path)
     ├── GET feedback:entry_threshold (or default 0.30)      (Phase B)
     ├── For each symbol in watchlist:
-    │   ├── GET sentiment:signal:{sym}
+    │   ├── GET signal:{sym}:sentiment
     │   ├── freshness check (< 30 min)
     │   ├── stop-loss check → close_trade() → _maybe_postmortem()
     │   ├── BUY gate: score > entry_threshold AND price > EMA20
@@ -562,18 +565,20 @@ enforce with **measured** gates.
 
 | Key | Type | TTL | Purpose |
 |-----|------|-----|---------|
-| `sentiment:signal:{SYM}` | JSON string | 4h | Latest signal per symbol |
+| `signal:{SYM}:sentiment` | JSON string | 4h | Latest signal per symbol |
 | `news:queue` | List | — | Inbound article queue |
 | `news:dedup:{HASH}` | String | 4h | Article id deduplication |
 | `dedup:content:{HASH}:{SYM}` | String | 4h | Cross-source content dedup (EN-03) |
 | `killswitch_active` | String (`0`/`1`) | None | Emergency halt flag |
 | `system:mode` | String | None | Operating mode |
-| `llm:models` | String | None | Active LLM subset |
-| `regime_multiplier` | String (float) | 26h | Current regime position scale |
-| `regime_label` | String | 26h | Current regime label |
+| `config:sentiment_llm_models` | String | None | Active ensemble pair selection (es. `glm52,gptoss`) |
+| `regime:current` | JSON | 26h | Regime label + multiplier + macro snapshot |
+| `qc:sizing_multiplier` | String (float) | 24h | Position-sizing multiplier derived from regime |
 | `ensemble:weights:current` | JSON | None | Current model weights |
 | `ensemble:weights:suggestion` | JSON | 7d | Pending weight suggestion |
-| `llm:budget:{MODEL}:{DATE}` | String (float) | 2d | Daily LLM spend counter |
+| `budget_exhausted` | String flag | daily | LLM budget stop flag (spend ledger lives in PG `llm_budget`) |
+| `portfolio:value` | String (float) | 24h | Equity cache scritta dal portfolio cycle (consumata dal loss-feedback relativo) |
+| `strategy:zero_weights_cycles:{SID}` | Int counter | 7d | Watchdog: cicli consecutivi a zero pesi per strategia |
 | `performance:report:latest` | JSON | None | Latest PerformanceWorker output |
 
 ---
@@ -736,7 +741,7 @@ See `README.md` → *Pre-Live Blockers* section for the authoritative list of cr
 | ConstraintEnforcer loses sleeve provenance | Final merged orders have `strategy_id="merged"`; per-sleeve exposure constraints cannot be enforced | Future |
 | Feedback loop blind to S1 | Partially resolved: portfolio-cycle BUY trades are written immediately after `submit_order()` (B28 fix, 2026-07-02); SELL/stop-loss still batch-written | Monitor |
 | ~~Risk monitor uses wrong NAV and placeholder exposure~~ | **RESOLVED** (2026-07-04): `_fetch_account_state()` reads real Alpaca equity as NAV and gross position value / equity as exposure; broker outage degrades to (0, 0) with a warning instead of a false alert (was: NAV from cumulative P&L, `total_exposure` hardcoded `1.0`, false "exposure 100% > 50%" alert daily — forensic report 2026-07-02) | Done |
-| Ensemble barely load-bearing | 79.5% of 2026-07-02 signals fell back to FinBERT via divergence std>0.30 (not timeouts/budget) — the 2-model cloud ensemble is discarded 4 times out of 5 | Measure via biweekly quality check; options: recalibrate divergence threshold or 3rd model with median vote |
+| Ensemble barely load-bearing | 79.5% of 2026-07-02 signals fell back to FinBERT via divergence (not timeouts/budget) — the 2-model cloud ensemble is discarded 4 times out of 5. **Update 2026-07-11:** raising the threshold 0.30→0.40 had NO effect (fallback 75-80%): the kimi⇄glm disagreement is directional/bimodal, no threshold separates the modes. Pair swapped to glm-5.2+gpt-oss (2026-07-11); divergent raw outputs now persisted for audit; 3-model median ensemble spec'd in `docs/superpowers/plans/2026-07-11-three-model-ensemble-handoff.md` | Monitor fallback rate post-swap; decide 3-model go/no-go |
 
 ### P2-05 Resolved Safety Items (IMPLEMENTED — commit `55cbf56`, 2026-06-21)
 

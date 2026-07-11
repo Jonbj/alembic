@@ -1,20 +1,30 @@
 # Configurazione LLM Ensemble
 
-## Modelli attivi in produzione (2026-06-29)
+## Selezione della coppia (meccanismo)
+
+La coppia ensemble NON è hardcoded: è selezionata dalla chiave Redis
+`config:sentiment_llm_models` (settabile da UI/operatore), con fallback all'env
+`SENTIMENT_LLM_MODELS`, poi `"all"`. Il registry dei modelli disponibili è
+`src/llm/model_registry.py`: i candidati per swap (`qwen35`, `gptoss`) hanno
+`in_all=False`, quindi la selezione `"all"` resta il set live a 2 modelli e
+registrare un candidato non allarga silenziosamente l'ensemble.
+
+## Modelli attivi in produzione (2026-07-11)
 
 | Modello | Provider | Uso | Note |
 |---------|----------|-----|------|
-| FinBERT | HuggingFace (locale) | Sentiment primario / fallback | int8 quantized, ~50% RAM vs baseline |
-| Kimi K2.6 | Ollama (cloud) | Sentiment ensemble principale | Conservativo, ben calibrato su macro |
-| GLM-5.2 | Ollama (cloud) | Sentiment ensemble principale | Flagship Zhipu AI, long-horizon reasoning |
+| FinBERT | HuggingFace (locale) | Fallback su divergenza/timeout/budget | int8 quantized, ~50% RAM vs baseline |
+| GLM-5.2 | Ollama (cloud) | Sentiment ensemble | Flagship Zhipu AI; Stage 1: accuracy 0.47, 2.8s |
+| GPT-OSS 20B | Ollama (cloud) | Sentiment ensemble | Open-weight, unico vendor non cinese; Stage 1: accuracy 0.41, 0 parse-fail, 8.7s |
 
-## Modelli rimossi
+## Modelli rimossi / sostituiti
 
-| Modello | Data rimozione | Motivo |
+| Modello | Data | Motivo |
 |---------|----------------|--------|
-| DeepSeek-V4-Pro | 2026-06-16 | OOM + latency eccessiva su hardware locale |
+| DeepSeek-V4-Pro | 2026-06-16 | OOM + latency eccessiva su hardware locale (resta candidato 3° modello via cloud) |
 | GLM-5.1 | 2026-06-16 | IC inferiore a Kimi K2.6 in A/B test |
 | Qwen3.5 | 2026-06-29 | Ticker extraction troppo aggressiva (es. MU da notizia macro Iran/US); sostituito da GLM-5.2 |
+| Kimi K2.6 | 2026-07-11 | Disaccordo direzionale sistematico con GLM-5.2 (fallback 75-80%); Stage 1: peggior accuracy (0.29) e 29s di latenza; sostituito da GPT-OSS 20B |
 
 ## Formula segnale
 
@@ -29,14 +39,14 @@ Il prodotto scala correttamente il segnale direzionale per la certezza del model
 ## Fallback chain
 
 ```
-Ollama (Kimi K2.6 + GLM-5.2, async ensemble)
+Ollama (coppia attiva da config:sentiment_llm_models, async ensemble)
     ↓ timeout o errore
 FinBERT locale (via run_in_executor)
     ↓ timeout o errore
 fallback_used=True, score=0.0 (decisione: NO-ORDER)
 ```
 
-Divergenza ensemble: se `std(scores) > 0.40` (config.ENSEMBLE_DIVERGENCE_STD, alzato da 0.30 il 2026-07-09 — vedi src/config.py per il razionale) → scarta ensemble, usa FinBERT come arbitro.
+Divergenza ensemble: se `std(scores) > 0.40` (config.ENSEMBLE_DIVERGENCE_STD, alzato da 0.30 il 2026-07-09) → scarta ensemble, usa FinBERT come arbitro. Dal 2026-07-11 i raw output divergenti vengono comunque persistiti in `llm_responses` con `eligible=false` per l'audit (prima venivano scartati). Nota misurata (2026-07-11): l'aumento di soglia 0.30→0.40 NON ha ridotto il fallback rate — il disaccordo tra modelli è direzionale/bimodale; la leva efficace è la scelta della coppia, non la soglia.
 
 ## FinBERT — Confidence formula
 
@@ -71,7 +81,7 @@ Il `worker-inference` ha concurrency=1 per garantire un singolo processo Python 
 
 - **Task time limit**: 660s (11 min) — accomoda 4 articoli × 90s Ollama + 43s FinBERT warmup + margine
 - **Task soft limit**: 600s (10 min) — raise SoftTimeLimitExceeded, worker può cleanup
-- **Budget giornaliero**: controllato da `LLMBudgetTracker` via Redis key `llm:budget:{MODEL}:{DATE}`
+- **Budget giornaliero**: controllato da `LLMBudgetTracker` — ledger su PostgreSQL (`llm_budget`) + flag Redis `budget_exhausted` (non esiste una chiave `llm:budget:{MODEL}:{DATE}`)
 - **TTL segnale Redis**: 4h — segnali più vecchi ignorati dall'execution engine
 
 ## S7 PEAD (classificazione 8-K)

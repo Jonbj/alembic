@@ -124,11 +124,11 @@ export default function Signals() {
       <HelpButton title="Signals — Guida completa" sections={[
         {
           heading: "Cosa sono i segnali",
-          content: "I segnali sono l'output del modello LLM ensemble. Per ogni ticker nel watchlist, i modelli (kimi, glm-5.2 e altri) generano un sentiment score da -1 (bearish forte) a +1 (bullish forte), con confidence 0-1. Il sistema aggrega i punteggi ponderati per produrre il segnale finale.",
+          content: "I segnali sono l'output del modello LLM ensemble. Per ogni ticker nel watchlist, i modelli della coppia attiva (configurabile — oggi glm-5.2 + gpt-oss:20b) generano un sentiment score da -1 (bearish forte) a +1 (bullish forte), con confidence 0-1. Il sistema aggrega i punteggi ponderati per produrre il segnale finale.",
         },
         {
           heading: "Colonne — Signals",
-          content: "**Ticker**: il simbolo azionario (es. NVDA, AAPL).\n**Direction**: basata sullo score — BUY (score > 0.1), SELL (score < -0.1), HOLD (|score| ≤ 0.1).\n**Score**: valore da -1 a +1. |score| > 0.3 è significativo, > 0.6 è forte.\n**Confidence**: da 0 a 1. Indica quanto è certo il modello. Alta confidence = segnale affidabile.\n**Model**: identificatore del modello LLM che ha generato il segnale (es. ensemble:kimi-k2.6:cloud).\n**FB**: badge giallo = il modello fallback (FinBERT) è stato usato perché il modello primario ha fallito o divergeva troppo.\n\n_Selezione per ticker_: nella finestra di freschezza (4h) il ciclo usa il segnale **ensemble più recente**; un FB debole generato dopo un ensemble forte non lo sovrascrive (il fallback si usa solo se non c'è ensemble fresco).",
+          content: "**Ticker**: il simbolo azionario (es. NVDA, AAPL).\n**Direction**: basata sullo score — BUY (score > 0.1), SELL (score < -0.1), HOLD (|score| ≤ 0.1).\n**Score**: valore da -1 a +1. |score| > 0.3 è significativo, > 0.6 è forte.\n**Confidence**: da 0 a 1. Indica quanto è certo il modello. Alta confidence = segnale affidabile.\n**Model**: identificatore del modello LLM che ha generato il segnale (es. ensemble:glm-5.2:cloud+gpt-oss:20b-cloud, oppure finbert per i fallback).\n**FB**: badge giallo = il modello fallback (FinBERT) è stato usato perché il modello primario ha fallito o divergeva troppo.\n\n_Selezione per ticker_: nella finestra di freschezza (4h) il ciclo usa il segnale **ensemble più recente**; un FB debole generato dopo un ensemble forte non lo sovrascrive (il fallback si usa solo se non c'è ensemble fresco).",
         },
         {
           heading: "Decision Log — cosa è",

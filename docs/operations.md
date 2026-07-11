@@ -157,13 +157,14 @@ GET killswitch_active
 GET system:mode
 
 # Read regime multiplier
-GET regime_multiplier
+GET regime:current
 
 # Read current ensemble weights
 GET ensemble:weights:current
 
-# Check LLM daily budget for a model
-GET llm:budget:kimi-k2.6:cloud:2026-06-03
+# Check LLM budget stop flag (spend ledger lives in PostgreSQL llm_budget)
+GET budget_exhausted
+# psql: SELECT * FROM llm_budget ORDER BY date DESC LIMIT 5;
 
 # View news queue depth
 LLEN news:queue
@@ -408,7 +409,7 @@ Poll `GET /api/system/readiness` at the start of each trading day and after any 
 3. `docker compose ps worker` — check worker container
 4. `docker compose logs worker | grep "portfolio" | tail -20` — check cycle execution
 5. Check Redis cycle lock: `docker compose exec redis redis-cli TTL portfolio:cycle:lock`
-   - If TTL > 0 (lock held): wait for it to expire (max 840s) or investigate what holds it
+   - If TTL > 0 (lock held): wait for it to expire (max 1200s) or investigate what holds it
    - If TTL = -1 (no expiry, stuck): `docker compose exec redis redis-cli DEL portfolio:cycle:lock` — only after confirming no cycle is running
 6. `docker compose restart beat worker` if containers appear healthy but tasks are not executing
 

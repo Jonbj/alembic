@@ -22,7 +22,7 @@ LLMs are **never called synchronously inside trading loops**. All LLM inference 
 
 - **Backend async stack**: FastAPI + Celery + Redis (background sentiment pipeline)
 - **Backtesting**: Backtrader (`bt.feeds.PandasData` with custom `lines`)
-- **LLM models**: FinBERT (local, int8 quantized) + an ensemble pair via Ollama Cloud (hosted at `ollama.com`, **not** local inference — `OLLAMA_BASE_URL` in `src/config.py`). The pair is not fixed: it's auto-selected from a larger candidate pool (kimi-k2.6, qwen3.5, deepseek-v4-pro, glm-5.1/5.2, …) via LOO ICIR performance rebalancing (`redis_store.get_llm_models()`, `src/workers/sentiment.py`) — expect it to change over time.
+- **LLM models**: FinBERT (local, int8 quantized) + an ensemble pair via Ollama Cloud (hosted at `ollama.com`, **not** local inference — `OLLAMA_BASE_URL` in `src/config.py`). The pair is not fixed: it's selected via the Redis key `config:sentiment_llm_models` (UI toggle / operator; fallback `SENTIMENT_LLM_MODELS` env, then "all") against the registry in `src/llm/model_registry.py` — 2026-07-11: `glm52,gptoss`. Swap candidates carry `in_all=False` so "all" never silently grows the live ensemble. LOO ICIR rebalancing adjusts the per-model *weights* (`ensemble:weights:current`), not the pair membership — expect the pair to change over time via explicit swaps.
 - **Broker integration**: Alpaca SDK (paper/live); Backtrader for backtesting
 - **Workers**: `worker` (concurrency=4, queue `celery`) + `worker-inference` (concurrency=1, queue `inference` — FinBERT/Ollama isolation)
 
@@ -84,7 +84,7 @@ When LLM ensemble variance is high or timeout occurs, fall back to deterministic
 - Live broker: `backtrader_ib_insync` for Interactive Brokers
 
 ### Alpaca (live/paper execution)
-- Use `AlpacaBroker` in `src/brokers/ibkr_adapter.py` for order placement
+- Order placement uses `alpaca-py` directly (`TradingClient` / `MarketOrderRequest`) in `src/workers/portfolio_scheduler.py` and `src/workers/execution.py` — there is no `AlpacaBroker` class (`src/brokers/ibkr_adapter.py` holds only the unused `IBKRAdapter`)
 - Paper and live trading share the same code path — switch via `config/trading.yaml` → `execution.engine`
 - `execution.engine=portfolio` (default): only `portfolio-cycle` submits orders
 - `execution.engine=legacy_sentiment`: only `run-execution` submits orders
