@@ -1,30 +1,36 @@
 title = "Alembic gitleaks configuration"
 
+# This file previously defined ONLY the allowlist below, with no [[rules]] and
+# no [extend] — gitleaks does not fall back to its bundled ruleset when a
+# custom config supplies zero rules, so detection has effectively been a
+# no-op since this file was introduced (verified: with this file, 0 findings
+# against a planted fake GitHub token; with it removed, gitleaks' default
+# rules find 40). [extend].useDefault pulls in the full default ruleset,
+# which this file's allowlist then layers on top of.
+[extend]
+  useDefault = true
+
 # Allow test-only credentials that appear in the CI workflow and test fixtures.
 # These are NOT real secrets — they are used exclusively in the GitHub Actions
 # CI environment with a throwaway Postgres/Redis instance.
 # Review and tighten this allowlist before any production deployment.
-[[allowlist]]
-  description = "CI-only test credentials in workflow file"
+#
+# gitleaks 8.24 expects a single [allowlist] table (not [[allowlist]] array
+# entries — the old array-of-tables syntax fails config parsing on this
+# version with "'Allowlist' expected a map, got 'slice'"). The three
+# conditions below used to be separate blocks, each scoping its regexes to a
+# specific path; a single table can't express per-regex path scoping, so
+# these are now combined — the two CI-only literal marker strings and the
+# bcrypt test-hash pattern are allowlisted wherever they appear, and the
+# whole tests/ directory remains allowlisted for synthetic/fake API keys.
+[allowlist]
+  description = "CI-only test credentials (ci.yml) + synthetic keys in tests/"
   regexes = [
     "test-api-key-for-ci-only",
     "test-jwt-secret-key-for-ci-only",
+    '''\$2b\$12\$i6qSOhZRTLWbWoSTukGsw''',
   ]
   paths = [
     ".github/workflows/ci.yml",
-  ]
-
-[[allowlist]]
-  description = "Bcrypt hash of test password (not a plaintext secret)"
-  regexes = [
-    '''\\$2b\\$12\\$i6qSOhZRTLWbWoSTukGsw''',
-  ]
-  paths = [
-    ".github/workflows/ci.yml",
-  ]
-
-[[allowlist]]
-  description = "Test fixture files may contain synthetic/fake API keys"
-  paths = [
     "tests/",
   ]
