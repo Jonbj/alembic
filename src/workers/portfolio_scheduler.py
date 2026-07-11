@@ -538,8 +538,8 @@ def _stop_loss_breached_symbols(
     entry_prices: dict[str, float],
     market,
     stop_loss_pct: float,
-) -> set[str]:
-    """Return symbols whose current price has fallen at/below the stop-loss threshold.
+) -> dict[str, dict]:
+    """Return per-symbol stop decision data for positions that breached.
 
     FIX-C synthetic stop-loss: Alpaca rejects bracket (stop-loss) legs on
     notional/fractional orders (error 42210000), so positions opened via notional
@@ -548,17 +548,28 @@ def _stop_loss_breached_symbols(
 
     Fail-open: positions with no recorded entry price or no current market price are
     skipped (never force-sold on missing data). Robust to non-numeric inputs.
+
+    Return mapping ``symbol -> {"entry", "observed", "trigger", "pct", "strategy"}``.
+    Strategy is derived from the open trade row: S4 if signal-driven, S1 otherwise.
     """
     if stop_loss_pct <= 0:
-        return set()
+        return {}
     prices = getattr(market, "prices", {}) or {}
-    breached: set[str] = set()
+    breached: dict[str, dict] = {}
 
     def _num(v) -> float | None:
         # Accept only real numbers; reject bool and non-numeric (e.g. MagicMock).
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             return None
         return float(v)
+
+    # Single store instance for strategy lookups; fail-open on DB errors.
+    try:
+        from src.store.pg_store import PostgreSQLStore
+
+        _pg_strategy = PostgreSQLStore()
+    except Exception:
+        _pg_strategy = None
 
     for pos in positions:
         sym = getattr(pos, "symbol", None)
@@ -570,8 +581,23 @@ def _stop_loss_breached_symbols(
             continue
         if entry <= 0 or price <= 0:
             continue
-        if price <= entry * (1.0 - stop_loss_pct):
-            breached.add(sym)
+        trigger = entry * (1.0 - stop_loss_pct)
+        if price <= trigger:
+            try:
+                trade_meta = _pg_strategy.fetch_open_trade_meta(sym) if _pg_strategy else None
+            except Exception:
+                trade_meta = None
+            strategy = trade_meta.get("strategy") if trade_meta else None
+            signal_id = trade_meta.get("signal_id") if trade_meta else None
+            breached[sym] = {
+                "entry": entry,
+                "observed": price,
+                "trigger": trigger,
+                "pct": stop_loss_pct,
+                "strategy": strategy,
+                "signal_id": signal_id,
+                "mode": "fixed",
+            }
             log.warning(
                 "Stop-loss: %s price %.4f <= entry %.4f × (1-%.3f) — forced exit",
                 sym, price, entry, stop_loss_pct,
@@ -1114,13 +1140,13 @@ def _run_cycle_inner() -> dict:
     # bracket, so positions are force-closed here when price breaches the stop.
     # Computed before the rebalance so breached symbols are dropped from normal
     # orders and force-sold below (bypassing the hold-minimum hold).
-    stop_loss_sells: set[str] = set()
+    stop_loss_sells: dict[str, dict] = {}
     try:
         stop_loss_sells = _stop_loss_breached_symbols(
             alpaca_positions, alpaca_entry_prices, market, _risk_cfg.get("stop_loss", 0.02)
         )
         if stop_loss_sells:
-            log.warning("FIX-C stop-loss breached: %s", sorted(stop_loss_sells))
+            log.warning("FIX-C stop-loss breached: %s", sorted(stop_loss_sells.keys()))
     except Exception as _sl_exc:
         log.warning("Stop-loss check failed: %s — proceeding without stop-loss", _sl_exc)
 
@@ -1166,13 +1192,14 @@ def _run_cycle_inner() -> dict:
     # FIX-C: drop any normal orders for stop-loss symbols — they are force-closed
     # separately below, so the rebalance must not also buy/sell them this cycle.
     if stop_loss_sells:
+        _sl_symbols = set(stop_loss_sells.keys())
         result = type(result)(
             strategies_run=result.strategies_run,
             orders_per_strategy=result.orders_per_strategy,
             orders_before_constraints=result.orders_before_constraints,
             orders_after_constraints=result.orders_after_constraints,
             constraints_fired=result.constraints_fired,
-            final_orders=[o for o in result.final_orders if o.symbol not in stop_loss_sells],
+            final_orders=[o for o in result.final_orders if o.symbol not in _sl_symbols],
             symbol_strategies=result.symbol_strategies,
         )
 
@@ -1549,7 +1576,7 @@ def _run_cycle_inner() -> dict:
     # FIX-C: submit synthetic stop-loss exits. Force-close positions that breached the
     # stop threshold. Runs regardless of the hold-minimum (protection takes priority).
     if stop_loss_sells and operating_mode not in ("dry_run", "halted"):
-        for sym in sorted(stop_loss_sells):
+        for sym, _sl_dec in sorted(stop_loss_sells.items()):
             try:
                 from alpaca.trading.enums import OrderSide as _OSsl, TimeInForce as _TIFsl
                 from alpaca.trading.requests import MarketOrderRequest as _MORsl
@@ -1560,19 +1587,51 @@ def _run_cycle_inner() -> dict:
                     resp = trading_client.submit_order(_MORsl(
                         symbol=sym, qty=qty_held, side=_OSsl.SELL, time_in_force=_TIFsl.DAY,
                     ))
+                    _order_id = str(resp.id)
                     submitted_orders.append({
-                        "symbol": sym, "side": "sell", "order_id": str(resp.id),
+                        "symbol": sym, "side": "sell", "order_id": _order_id,
                         "notional": 0.0, "reason": "stop_loss",
                     })
                     log.warning("Stop-loss exit submitted for %s (qty=%s)", sym, qty_held)
                     _mark_stop_loss_today(config.REDIS_URL, sym)
+                    # Write SELL to execution_decisions so Decision Log shows the exit.
+                    _pg_sl = None
+                    try:
+                        from src.store.pg_store import PostgreSQLStore as _PGS
+                        _pg_sl = _PGS()
+                        _pg_sl.write_execution_decision(
+                            tick_time=ts,
+                            symbol=sym,
+                            signal_id=_sl_dec.get("signal_id"),
+                            score=0.0,
+                            signal_score=None,
+                            regime_mult=_regime_mult,
+                            ema_pass=True,
+                            decision="SELL",
+                            order_id=_order_id,
+                            reason=(
+                                f"stop_loss: {sym} px {_sl_dec['observed']:.2f} "
+                                f"<= trigger {_sl_dec['trigger']:.2f} "
+                                f"(d_init {_sl_dec['pct']:.2%}, "
+                                f"mode {_sl_dec.get('mode', 'fixed')}, "
+                                f"strat {_sl_dec['strategy']})"
+                            ),
+                        )
+                    except Exception as _dec_exc:
+                        log.warning("Failed to write stop-loss decision for %s: %s", sym, _dec_exc)
+                    finally:
+                        if _pg_sl is not None:
+                            try:
+                                _pg_sl.close()
+                            except Exception:
+                                pass
             except Exception as _sl_sub_exc:
                 log.warning("Failed to submit stop-loss exit for %s: %s", sym, _sl_sub_exc)
 
     # Submit forced sells for sentiment reversal (symbols not already being sold).
     if reversal_sell_symbols and operating_mode not in ("dry_run", "halted"):
         already_selling = {o.symbol for o in result.final_orders if o.side.value == "sell"}
-        to_force_sell = set(reversal_sell_symbols) - already_selling - stop_loss_sells
+        to_force_sell = set(reversal_sell_symbols) - already_selling - set(stop_loss_sells.keys())
         for sym in to_force_sell:
             try:
                 from alpaca.trading.enums import OrderSide, TimeInForce

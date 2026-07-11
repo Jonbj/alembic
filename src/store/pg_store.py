@@ -925,6 +925,31 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def fetch_open_trade_meta(self, symbol: str) -> dict | None:
+        """Return strategy + signal_id for the open trade for symbol.
+
+        Mirrors the origin-strategy derivation in src/api/routes/trading.py:
+        S4 if signal-driven, S1 otherwise. Returns None if no open trade exists.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT signal_id FROM trades WHERE symbol = %s AND exit_time IS NULL",
+                    (symbol,),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                signal_id = row[0]
+                return {
+                    "signal_id": signal_id,
+                    "strategy": "S4" if signal_id is not None else "S1",
+                }
+        except Exception:
+            conn.rollback()
+            raise
+
     def fetch_trades(
         self,
         symbol: str | None = None,

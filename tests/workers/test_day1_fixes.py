@@ -121,19 +121,27 @@ class _Mkt:
 
 
 class TestStopLossBreachedSymbols:
+    def _assert_breached(self, out, expected_symbols):
+        assert set(out.keys()) == set(expected_symbols)
+        for sym, dec in out.items():
+            assert dec["entry"] > 0
+            assert dec["observed"] <= dec["trigger"]
+            assert dec["pct"] == 0.02
+            assert "strategy" in dec
+
     def test_breach_below_threshold(self):
         from src.workers.portfolio_scheduler import _stop_loss_breached_symbols
         out = _stop_loss_breached_symbols(
             [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({"AAPL": 97.0}), 0.02
         )
-        assert out == {"AAPL"}
+        self._assert_breached(out, {"AAPL"})
 
     def test_no_breach_above_threshold(self):
         from src.workers.portfolio_scheduler import _stop_loss_breached_symbols
         out = _stop_loss_breached_symbols(
             [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({"AAPL": 99.0}), 0.02
         )
-        assert out == set()
+        assert out == {}
 
     def test_boundary_is_breach(self):
         from src.workers.portfolio_scheduler import _stop_loss_breached_symbols
@@ -141,28 +149,28 @@ class TestStopLossBreachedSymbols:
         out = _stop_loss_breached_symbols(
             [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({"AAPL": 98.0}), 0.02
         )
-        assert out == {"AAPL"}
+        self._assert_breached(out, {"AAPL"})
 
     def test_missing_entry_price_skipped(self):
         from src.workers.portfolio_scheduler import _stop_loss_breached_symbols
         out = _stop_loss_breached_symbols(
             [_Pos("AAPL")], {}, _Mkt({"AAPL": 1.0}), 0.02
         )
-        assert out == set()
+        assert out == {}
 
     def test_missing_market_price_skipped(self):
         from src.workers.portfolio_scheduler import _stop_loss_breached_symbols
         out = _stop_loss_breached_symbols(
             [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({}), 0.02
         )
-        assert out == set()
+        assert out == {}
 
     def test_zero_stop_pct_disables(self):
         from src.workers.portfolio_scheduler import _stop_loss_breached_symbols
         out = _stop_loss_breached_symbols(
             [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({"AAPL": 1.0}), 0.0
         )
-        assert out == set()
+        assert out == {}
 
     def test_non_numeric_price_skipped(self):
         """Robust to MagicMock prices (heavily-mocked integration tests)."""
@@ -170,7 +178,7 @@ class TestStopLossBreachedSymbols:
         out = _stop_loss_breached_symbols(
             [_Pos("AAPL")], {"AAPL": 100.0}, _Mkt({"AAPL": MagicMock()}), 0.02
         )
-        assert out == set()
+        assert out == {}
 
     def test_only_breached_symbols_returned(self):
         from src.workers.portfolio_scheduler import _stop_loss_breached_symbols
@@ -180,7 +188,7 @@ class TestStopLossBreachedSymbols:
             _Mkt({"AAPL": 90.0, "MSFT": 100.0}),
             0.02,
         )
-        assert out == {"AAPL"}
+        self._assert_breached(out, {"AAPL"})
 
 
 # ─────────────────────────── FIX-B + config plumbing ───────────────────────────
