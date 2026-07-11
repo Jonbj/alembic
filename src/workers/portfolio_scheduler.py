@@ -473,6 +473,43 @@ def _get_stop_loss_cooldown_symbols(redis_url: str) -> set[str]:
         return set()
 
 
+def _update_last_good_sigma(redis_url: str, symbol: str, sigma: float | None) -> None:
+    """Persist a non-default sigma_eff for future cycles when bars_df is sparse.
+
+    Stored in Redis with 30-day TTL; StopPolicy's last_good_lookup reads it back
+    as the second fallback tier (bars_df -> last_good -> asset_median -> tier -> default).
+    """
+    if sigma is None or sigma <= 0:
+        return
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            r.setex(f"stop:last_good_sigma:{symbol.upper()}", 86400 * 30, str(float(sigma)))
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Could not update last_good sigma for %s: %s", symbol, exc)
+
+
+def _last_good_sigma_lookup(redis_url: str):
+    """Return a callable(symbol) -> sigma | None backed by Redis."""
+    def _lookup(symbol: str) -> float | None:
+        try:
+            import redis as _redis
+            r = _redis.Redis.from_url(redis_url, decode_responses=True)
+            try:
+                raw = r.get(f"stop:last_good_sigma:{symbol.upper()}")
+                if raw is not None:
+                    return float(raw)
+            finally:
+                r.close()
+        except Exception as exc:
+            log.warning("last_good sigma lookup failed for %s: %s", symbol, exc)
+        return None
+    return _lookup
+
+
 def _get_fired_signal_ids(session_date: str, redis_url: str) -> set[int] | None:
     """Return fired signal_ids for today, or None if Redis is unavailable (P2-05-A fail-closed).
 
@@ -509,25 +546,44 @@ def _apply_idempotency_filter(orders: list, skip_syms: set[str]) -> list:
     return [o for o in orders if not (o.symbol in skip_syms and o.side == _OS.BUY)]
 
 
-def _load_risk_config() -> dict[str, float]:
-    """Return risk limits from trading.yaml; returns safe hardcoded defaults on error (P2-05-B)."""
-    defaults: dict[str, float] = {
+def _load_risk_config() -> dict:
+    """Return the full risk section from trading.yaml; safe defaults on error (P2-05-B)."""
+    defaults: dict = {
         "max_portfolio_exposure": 0.50,
         "max_single_asset_pct": 0.10,
         "stop_loss": 0.02,
-        "portfolio_drawdown": 0.05,  # B13: single source of truth = trading.yaml
+        "portfolio_drawdown": 0.05,
+        "stop_loss_mode": "fixed",
+        "stop_strategy_params": {
+            "S1": {"k": 3.5, "floor": 0.06, "cap": 0.12},
+            "S4": {"k": 2.0, "floor": 0.03, "cap": 0.08},
+            "S7": {"k": 2.5, "floor": 0.04, "cap": 0.10},
+            "default": {"k": 3.0, "floor": 0.04, "cap": 0.12},
+        },
+        "stop_sigma_lookback_fast": 20,
+        "stop_sigma_lookback_slow": 63,
+        "stop_sigma_ewma_floor_ratio": 0.8,
+        "stop_risk_budget_bp_per_pos": 12,
+        "stop_risk_budget_bp_aggregate": 100,
+        "stop_gap_buffer_pct": 0.005,
+        "stop_shadow_enabled": False,
+        "broker_disaster_stop": {"multiplier": 1.5, "sigma_multiple": 5.0, "floor_pct": 0.12, "cap_pct": 0.20},
     }
     try:
         import yaml
         with open(_TRADING_YAML) as f:
             cfg = yaml.safe_load(f)
         risk = cfg.get("risk", {})
-        return {
-            "max_portfolio_exposure": float(risk.get("max_portfolio_exposure", defaults["max_portfolio_exposure"])),
-            "max_single_asset_pct": float(risk.get("max_position_pct", defaults["max_single_asset_pct"])),
-            "stop_loss": float(risk.get("stop_loss", defaults["stop_loss"])),
-            "portfolio_drawdown": float(risk.get("portfolio_drawdown", defaults["portfolio_drawdown"])),
-        }
+        merged = {**defaults, **risk}
+        # Preserve nested structures (shallow merge for stop_strategy_params / broker_disaster_stop).
+        for nested in ("stop_strategy_params", "broker_disaster_stop"):
+            if nested in defaults and nested in risk:
+                merged[nested] = {**defaults[nested], **risk[nested]}
+        # Alias: trading.yaml uses risk.max_position_pct; code uses max_single_asset_pct.
+        merged["max_single_asset_pct"] = float(
+            risk.get("max_position_pct", defaults["max_single_asset_pct"])
+        )
+        return merged
     except Exception as exc:
         log.warning("P2-05-B: could not load risk config (%s) — using defaults", exc)
         return defaults
@@ -538,6 +594,29 @@ def _num(v: Any) -> float | None:
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         return None
     return float(v)
+
+
+def _open_stop_risk(open_trades: list[dict] | None) -> float:
+    """Return total open stop-risk in $: sum(d_init * entry_notional) across open trades.
+
+    Pre-migration trades without stop_d_init use the legacy 2% fixed stop.
+    """
+    total = 0.0
+    for t in open_trades or []:
+        notional = float(t.get("entry_notional") or 0.0)
+        if notional <= 0:
+            continue
+        d_init = t.get("stop_d_init")
+        if d_init is None or d_init <= 0:
+            d_init = 0.02
+        total += float(d_init) * notional
+    return total
+
+
+def _aggregate_stop_budget(nav: float, risk_cfg: dict) -> float:
+    """Aggregate sleeve stop-risk budget in dollars."""
+    bp = float(risk_cfg.get("stop_risk_budget_bp_aggregate", 100))
+    return nav * bp / 10000.0
 
 
 def _stop_loss_breached_symbols(
@@ -637,6 +716,15 @@ def _build_stop_shadow_rows(
         vol_frozen = vol_policy.freeze(sym, strategy, entry, cycle_ts)
         vol_dec = vol_policy.compute(sym, entry, price, vol_frozen, cycle_ts, "market.prices")
 
+        # d_hard audit: broker disaster-stop distance for this position.
+        d_hard = d_hard_trigger = None
+        try:
+            sigma_current = vol_policy._sigma_eff(sym)[0]
+            d_hard = vol_policy.d_hard(sym, vol_frozen, sigma_current)
+            d_hard_trigger = entry * (1.0 - d_hard) if d_hard is not None else None
+        except Exception as _dhard_exc:
+            log.warning("d_hard shadow audit failed for %s: %s", sym, _dhard_exc)
+
         rows.append({
             "cycle_ts": cycle_ts,
             "symbol": sym,
@@ -652,6 +740,9 @@ def _build_stop_shadow_rows(
             "d_init_vol_scaled": vol_dec.d_init,
             "trigger_vol_scaled": vol_dec.trigger_price,
             "would_breach_vol_scaled": vol_dec.breached,
+            "d_hard": d_hard,
+            "d_hard_trigger": d_hard_trigger,
+            "d_hard_breached": (d_hard_trigger is not None and price <= d_hard_trigger),
         })
     return rows
 
@@ -1203,7 +1294,11 @@ def _run_cycle_inner() -> dict:
         from src.portfolio.stop_policy import StopPolicy as _StopPolicy
         from src.store.pg_store import PostgreSQLStore as _PGStore
 
-        _stop_policy = _StopPolicy(_risk_cfg, bars_df=bars_df)
+        _stop_policy = _StopPolicy(
+            _risk_cfg,
+            bars_df=bars_df,
+            last_good_lookup=_last_good_sigma_lookup(config.REDIS_URL),
+        )
         _pg_stop = _PGStore()
         stop_loss_sells = _stop_loss_breached_symbols(
             alpaca_positions, alpaca_entry_prices, market, _stop_policy, _pg_stop
@@ -1338,6 +1433,7 @@ def _run_cycle_inner() -> dict:
     # already in an open trade are skipped (prevents polluting the decision log with duplicate
     # BUY entries on every cycle, which was the root cause of apparent stale-signal replay).
     open_db_symbols: set[str] = set()
+    _open_trades: list[dict] = []
     try:
         from src.store.pg_store import PostgreSQLStore as _PGGuard
         _pg_guard = _PGGuard()
@@ -1608,6 +1704,7 @@ def _run_cycle_inner() -> dict:
             bars_df=bars_df,
             stop_policy=_stop_policy,
             nav=equity,
+            open_trades=_open_trades,
         )
 
     # B27-FIX: mark S4 signals fired only for orders that were actually submitted to Alpaca.
@@ -1650,6 +1747,9 @@ def _run_cycle_inner() -> dict:
                     _frozen_stop = _stop_policy.freeze(
                         _sym_b, _strategy_b, float(_entry_px_b), ts
                     )
+                    # Persist non-default sigma for future cycles (last_good fallback).
+                    if _frozen_stop and _frozen_stop.sigma_eff is not None:
+                        _update_last_good_sigma(config.REDIS_URL, _sym_b, _frozen_stop.sigma_eff)
                 except Exception as _freeze_exc:
                     log.warning("Failed to freeze stop for %s: %s", _sym_b, _freeze_exc)
                     _frozen_stop = None
@@ -2324,6 +2424,7 @@ def _submit_portfolio_orders(
     bars_df=None,
     stop_policy: "StopPolicy" | None = None,
     nav: float | None = None,
+    open_trades: list[dict] | None = None,
 ) -> list[dict]:
     """Submit BUY and SELL orders to Alpaca.
 
@@ -2343,6 +2444,7 @@ def _submit_portfolio_orders(
             ``None``                  — guard DB unavailable; ALL BUYs blocked (fail-closed).
         regime_mult: Regime multiplier from Redis (P0-09). Scales BUY notional so
             high-volatility regimes (mult=0.2) result in smaller position sizes.
+        open_trades: Open DB trade rows; used for aggregate stop-risk budget enforcement.
 
     Returns:
         List of dicts for successfully submitted orders, each containing:
@@ -2350,11 +2452,18 @@ def _submit_portfolio_orders(
     """
     if stop_policy is None and risk_cfg:
         from src.portfolio.stop_policy import StopPolicy as _StopPolicy
-        stop_policy = _StopPolicy(risk_cfg, bars_df=bars_df)
+        stop_policy = _StopPolicy(
+            risk_cfg,
+            bars_df=bars_df,
+            last_good_lookup=_last_good_sigma_lookup(config.REDIS_URL),
+        )
 
     from src.backtest.engine.types import OrderSide
 
     submitted = []
+    _current_open_risk = _open_stop_risk(open_trades)
+    _agg_budget = _aggregate_stop_budget(nav, risk_cfg or {}) if nav is not None and nav > 0 else None
+    _accepted_risk = 0.0
     for order in orders:
         try:
             if order.side == OrderSide.BUY:
@@ -2417,6 +2526,33 @@ def _submit_portfolio_orders(
                     except Exception as _sizing_exc:
                         log.warning("Stop-risk sizing failed for %s: %s — using target qty", order.symbol, _sizing_exc)
 
+                # Phase 4b: aggregate sleeve stop-risk budget (default 100 bp of NAV).
+                # Enforced after per-position cap so we never exceed the sleeve budget
+                # just by opening many positions with tight stops.
+                if _agg_budget is not None and _agg_budget > 0:
+                    _d_agg = (_frozen_sizing.d_init if _frozen_sizing is not None else 0.02)
+                    _intended_notional = price * order.quantity * regime_mult
+                    _intended_risk = _d_agg * _intended_notional
+                    _remaining = _agg_budget - _current_open_risk - _accepted_risk
+                    if _intended_risk > _remaining and _d_agg > 0:
+                        _max_notional_agg = _remaining / _d_agg
+                        _max_qty_agg = _max_notional_agg / (price * regime_mult)
+                        if _max_qty_agg <= 0:
+                            log.warning(
+                                "Aggregate stop-risk budget exhausted: skipping BUY for %s "
+                                "(open=%.2f, accepted=%.2f, budget=%.2f)",
+                                order.symbol, _current_open_risk, _accepted_risk, _agg_budget,
+                            )
+                            continue
+                        if abs(order.quantity) > _max_qty_agg:
+                            order = order.with_quantity(min(abs(order.quantity), max(0.0, _max_qty_agg)))
+                            log.info(
+                                "Aggregate stop-risk sizing: %s qty capped %.4f -> %.4f "
+                                "(d_init %.2f%%, remaining budget $%.2f)",
+                                order.symbol, order.quantity, _max_qty_agg,
+                                _d_agg * 100, _remaining,
+                            )
+
                 notional = round(price * order.quantity * regime_mult, 2)
                 if notional < _MIN_ORDER_NOTIONAL:
                     log.info(
@@ -2424,6 +2560,7 @@ def _submit_portfolio_orders(
                         order.symbol, notional, _MIN_ORDER_NOTIONAL,
                     )
                     continue
+                _accepted_risk += (_frozen_sizing.d_init if _frozen_sizing is not None else 0.02) * notional
                 # P1-B: Non-fractionable symbols require whole-share qty instead of notional.
                 is_fractionable = (fractionable_symbols is None or order.symbol in fractionable_symbols)
                 if _submit_fn is not None:

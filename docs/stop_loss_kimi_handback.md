@@ -12,8 +12,8 @@
 | 2 | Gap A — write SELL `execution_decisions` row on stop fire | ✅ Committed earlier | `src/workers/portfolio_scheduler.py` |
 | 3 | `StopPolicy` deep module + freeze-at-entry + fire log + shadow log | ✅ Fixed review findings and committed | `src/portfolio/stop_policy.py`, `src/store/pg_store.py`, `src/workers/portfolio_scheduler.py`, tests |
 | 4 | Vol-scaled protective stop + stop-risk sizing (flag-off) | ✅ Committed | `src/workers/portfolio_scheduler.py`, `config/trading.yaml` |
-| 5 | Decouple S1↔S4 ratchet + risk-normalize | 🟡 Infrastructure ready; performance.py wiring pending | `src/portfolio/loss_feedback.py`, `src/store/redis_store.py`, `src/workers/portfolio_scheduler.py` |
-| 6 | Historical replay script + gates | ✅ Committed | `scripts/replay_stop_loss.py` |
+| 5 | Decouple S1↔S4 ratchet + risk-normalize | ✅ Wired to `performance.py`; per-strategy keys | `src/portfolio/loss_feedback.py`, `src/store/redis_store.py`, `src/workers/performance.py` |
+| 6 | Historical replay script + gates | ✅ Eseguito (Round 2) — gate FAIL, numeri riportati in §8 | `scripts/replay_stop_loss.py` |
 | 7 | Canary runbook | ✅ This doc (§4) | `docs/stop_loss_kimi_handback.md` |
 
 ## 2. Test results
@@ -59,7 +59,7 @@ These do not touch stop-loss code.
        --start 2026-07-01 --end 2026-07-10 \
        --bars-csv data/daily_close.csv --mode report
    ```
-   Gate must be **PASS** before live enablement.
+   Gate must be **PASS** before live enablement. **As of 2026-07-11 the gate is FAIL (42.5% bootstrap delta OOS < 70%); keep `stop_loss_mode: fixed`.**
 
 ### 4.2 Enable shadow log only
 
@@ -105,12 +105,36 @@ Run on **paper only** until replay gate re-passes with live fills.
 - No increase in max daily drawdown.
 - Operator sign-off in `strategy_lifecycle` PO (memory `project_p2_acceptance_audit.md`).
 
-## 5. Remaining work
+## 5. Remaining work (post Round 2)
 
-- **Phase 5 completion:** wire `src/portfolio/loss_feedback.py` into `src/workers/performance.py::run_loss_feedback_check`. Group closed trades by `stop_strategy`, read/write per-strategy EWMA-R state in Redis (`feedback:state:S*`), and adjust per-strategy `feedback:entry_threshold:S*` / `feedback:regime_scale:S*`. Update `tests/workers/test_loss_feedback.py` accordingly.
-- **Aggregate stop-risk budget:** current implementation only enforces per-position budget. Aggregate sleeve budget (75–100 bp) is not yet wired.
-- **last_good production lookup:** `StopPolicy` accepts a callable but the scheduler does not yet inject one. A Redis-backed lookup (last 5 sessions' `stop_vol_at_entry` per symbol) is the intended fill.
-- **d_hard for fractionable positions:** spec calls for a synthetic per-cycle `d_hard` check in addition to the protective check. Since the protective trigger is strictly tighter for longs, this is redundant for exits, but should still be logged for audit.
+- **Gate §10 re-run:** il replay Round 2 è FAIL (bootstrap delta P&L 42.5% OOS < 70%). Prima di abilitare `vol_scaled` rivedere k/floor/cap e rilanciare finché il gate non passa. `stop_loss_mode` resta `fixed` in config.
+- **Live validation:** quando il gate passerà, seguire il runbook §4 (shadow → paper → sign-off).
+
+## 8. Round 2 — replay execution results (2026-07-11)
+
+Command run:
+
+```bash
+export $(grep -E '^(DATABASE_URL|ALPACA_API_KEY|ALPACA_SECRET_KEY|ALPACA_BASE_URL)=' .env)
+.venv/bin/python scripts/replay_stop_loss.py \
+    --start 2026-06-01 --end 2026-07-11 \
+    --bars-csv data/daily_close.csv --mode report --nav-est 110000
+```
+
+Sample: 207 closed trades, 39 symbols, 100% 15-min intraday coverage. Walk-forward 70/30 → train 144 / test 63.
+
+| Gate | Full sample | OOS | Threshold |
+|---|---|---|---|
+| false-stop reduction vs fixed 2% | 100.0% | 100.0% | ≥ 40% |
+| median net P&L (vol vs fixed) | -0.31 vs -0.72 | -0.99 vs -1.31 | vol > fixed |
+| bootstrap delta P&L positive | 53.7% | **42.5%** | ≥ 70–75% |
+| max DD delta | -1.8994 | -0.4857 | ≤ 0.10 |
+| ES95 delta vs base | -10.88 | -20.13 | not materially worse |
+| open-stop risk vs budget | 69.3 bp / 100 bp | 50.4 bp / 100 bp | within |
+| name-dependence top-2 | 20.5% | 21.7% | ≤ 50% |
+| costs included | yes | yes | yes |
+
+**Verdict: OOS gate FAIL** — bootstrap delta P&L non supera il 70%. Per il guardrail §5.5, **NON abilitare `vol_scaled` live**. La variante che minimizza le perdite cumulate OOS è `fixed_5pct`, ma anche lei fallisce il gate critico. Prossimo passo: rivedere k/floor/cap per strategia (spec §6.4) e rilanciare.
 
 ## 6. Commits on `stop-loss-redesign`
 
@@ -122,6 +146,14 @@ de2e915 feat(stop-loss): Phase 5 scaffolding — per-strategy feedback keys + ri
 ```
 
 Phases 1 and 2 were already on `main` before this run started.
+
+Round 2 changes (uncommitted at end of this run) add:
+- `src/workers/performance.py` wired to per-strategy `LossFeedback`
+- `tests/workers/test_loss_feedback.py` per-strategy integration tests
+- aggregate stop-risk budget in `src/workers/portfolio_scheduler.py`
+- Redis-backed `last_good` sigma lookup in scheduler
+- migration `035_stop_loss_dhard_audit.sql` + d_hard shadow audit columns
+- updated replay report in this handback §8
 
 ## 7. How to merge
 

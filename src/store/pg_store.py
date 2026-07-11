@@ -1094,6 +1094,7 @@ class PostgreSQLStore:
                         r.get("vol_at_entry"), r.get("sigma_eff"), r.get("vol_source"),
                         r.get("d_init_fixed"), r.get("trigger_fixed"), r.get("would_breach_fixed"),
                         r.get("d_init_vol_scaled"), r.get("trigger_vol_scaled"), r.get("would_breach_vol_scaled"),
+                        r.get("d_hard"), r.get("d_hard_trigger"), r.get("d_hard_breached"),
                     )
                     for r in rows
                 ]
@@ -1103,8 +1104,9 @@ class PostgreSQLStore:
                         (cycle_ts, symbol, strategy, entry_price, observed_price,
                          vol_at_entry, sigma_eff, vol_source,
                          d_init_fixed, trigger_fixed, would_breach_fixed,
-                         d_init_vol_scaled, trigger_vol_scaled, would_breach_vol_scaled)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         d_init_vol_scaled, trigger_vol_scaled, would_breach_vol_scaled,
+                         d_hard, d_hard_trigger, d_hard_breached)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     _values,
                 )

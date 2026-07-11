@@ -8,7 +8,8 @@ This module is pure logic: no Redis I/O, no DB I/O. Callers pass trades and conf
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Callable
 
 
 # Exit reasons that should teach the loss-feedback ratchet.
@@ -53,8 +54,15 @@ def r_multiple(trade: dict) -> float:
     return net_pnl / budget
 
 
-def _is_teaching_trade(trade: dict) -> bool:
-    return trade.get("exit_reason") in TEACHING_EXIT_REASONS
+def _is_teaching_trade(exit_reason: str | None) -> bool:
+    return exit_reason in TEACHING_EXIT_REASONS
+
+
+def update_ewma_r(old_ewma: float | None, new_r: float, alpha: float = 0.3) -> float:
+    """One-step EWMA update for R-multiples."""
+    if old_ewma is None:
+        return new_r
+    return alpha * new_r + (1.0 - alpha) * old_ewma
 
 
 @dataclass(frozen=True)
@@ -70,11 +78,144 @@ class FeedbackOutcome:
     reason: str
 
 
-def update_ewma_r(old_ewma: float | None, new_r: float, alpha: float = 0.3) -> float:
-    """One-step EWMA update for R-multiples."""
-    if old_ewma is None:
-        return new_r
-    return alpha * new_r + (1.0 - alpha) * old_ewma
+@dataclass
+class LossFeedback:
+    """Stateful per-strategy loss-feedback ratchet.
+
+    Usage:
+        fb = LossFeedback(config)
+        fb.record_exit("S1", "stop_loss", net_pnl=-40, risk_budget=20)
+        outcome = fb.evaluate("S1")
+        threshold = fb.threshold("S1")
+    """
+
+    config: dict
+    # strategy -> list of recorded exits in chronological order
+    _history: dict[str, list[dict]] = field(default_factory=dict)
+    # strategy -> EWMA of R after the most recent teaching exit
+    _ewma_r: dict[str, float | None] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Ensure default config values are present."""
+        defaults = {
+            "threshold_baseline": 0.30,
+            "threshold_max": 0.60,
+            "threshold_step": 0.05,
+            "regime_scale_factor": 0.80,
+            "regime_min_scale": 0.20,
+            "ewma_alpha": 0.30,
+            "trigger_band": -0.50,
+            "recovery_band": 0.50,
+            "consecutive_loss_trigger": 3,
+            "recovery_win_streak": 3,
+        }
+        merged = {**defaults, **self.config}
+        self.config = merged
+
+    def record_exit(
+        self,
+        strategy: str,
+        exit_reason: str,
+        net_pnl: float,
+        risk_budget: float,
+    ) -> None:
+        """Record one closed trade exit for the strategy sleeve.
+
+        Only TEACHING_EXIT_REASONS affect the ratchet; others are ignored.
+        """
+        if not _is_teaching_trade(exit_reason):
+            return
+        if risk_budget <= 0:
+            return
+        r = net_pnl / risk_budget
+        self._history.setdefault(strategy, []).append(
+            {"net_pnl": net_pnl, "risk_budget": risk_budget, "r": r}
+        )
+        prior = self._ewma_r.get(strategy)
+        self._ewma_r[strategy] = update_ewma_r(prior, r, self.config["ewma_alpha"])
+
+    def evaluate(self, strategy: str) -> FeedbackOutcome:
+        """Evaluate feedback state for one strategy after recorded exits."""
+        history = self._history.get(strategy, [])
+
+        # Consecutive loss/win counts over the most-recent teaching exits.
+        consecutive_losses = 0
+        consecutive_wins = 0
+        for exit in reversed(history):
+            pnl = exit["net_pnl"]
+            if pnl < 0:
+                if consecutive_wins > 0:
+                    break
+                consecutive_losses += 1
+            elif pnl > 0:
+                if consecutive_losses > 0:
+                    break
+                consecutive_wins += 1
+            else:
+                break
+
+        rolling_net_pnl = sum(e["net_pnl"] for e in history)
+        ewma_r = self._ewma_r.get(strategy)
+        ewma_r = ewma_r if ewma_r is not None else 0.0
+
+        trigger_band = self.config["trigger_band"]
+        triggered = ewma_r <= trigger_band or consecutive_losses >= self.config["consecutive_loss_trigger"]
+
+        reason_parts: list[str] = []
+        if ewma_r <= trigger_band:
+            reason_parts.append(f"EWMA R {ewma_r:.2f} <= {trigger_band}")
+        if consecutive_losses >= self.config["consecutive_loss_trigger"]:
+            reason_parts.append(f"{consecutive_losses} consecutive losses")
+        reason = " + ".join(reason_parts) if reason_parts else "none"
+
+        return FeedbackOutcome(
+            strategy=strategy,
+            triggered=triggered,
+            ewma_r=round(ewma_r, 4),
+            consecutive_losses=consecutive_losses,
+            consecutive_wins=consecutive_wins,
+            rolling_net_pnl=round(rolling_net_pnl, 2),
+            reason=reason,
+        )
+
+    def threshold(self, strategy: str) -> float:
+        """Return the entry-threshold gate for a strategy.
+
+        S1 has no discrete threshold gate today (continuous rebalance), so return 0.0.
+        S4/S7 return the baseline.
+        """
+        if strategy == "S1":
+            return 0.0
+        return self.config["threshold_baseline"]
+
+    def scale(self, _strategy: str) -> float:
+        """Return the regime scale factor. Per-strategy scale is not used in v1."""
+        return 1.0
+
+    def state(self, strategy: str) -> dict:
+        """Return serializable state for a strategy."""
+        outcome = self.evaluate(strategy)
+        return {
+            "strategy": strategy,
+            "ewma_r": outcome.ewma_r,
+            "consecutive_losses": outcome.consecutive_losses,
+            "consecutive_wins": outcome.consecutive_wins,
+            "rolling_net_pnl": outcome.rolling_net_pnl,
+            "triggered": outcome.triggered,
+            "threshold": self.threshold(strategy),
+        }
+
+    def should_raise(self, strategy: str) -> bool:
+        """True when the ratchet recommends raising the gate for this strategy."""
+        return self.evaluate(strategy).triggered
+
+    def should_recover(self, strategy: str) -> bool:
+        """True when a win streak suggests lowering the gate."""
+        outcome = self.evaluate(strategy)
+        return (
+            not outcome.triggered
+            and outcome.consecutive_wins >= self.config["recovery_win_streak"]
+        )
 
 
 def evaluate_strategy_feedback(
@@ -85,59 +226,22 @@ def evaluate_strategy_feedback(
     recovery_band: float = 0.5,
     alpha: float = 0.3,
 ) -> FeedbackOutcome:
-    """Evaluate loss feedback for one strategy sleeve.
+    """Evaluate loss feedback for one strategy sleeve (legacy helper).
 
     Uses the most recent teaching trades for this strategy (already limited by the
     caller's lookback). Trigger fires when the EWMA of R drops below trigger_band.
-    Recovery fires when EWMA of R rises above recovery_band and the most recent
-    teaching trades are wins.
-
-    Args:
-        trades: Closed trades for this strategy, most-recent first.
-        strategy: Strategy key ("S1", "S4", etc.).
-        ewma_r_prior: Previously persisted EWMA of R for this strategy, if any.
-        trigger_band: EWMA R threshold for raising the gate (negative).
-        recovery_band: EWMA R threshold for stepping the gate back down.
-        alpha: EWMA decay factor.
     """
-    teaching = [t for t in trades if _is_teaching_trade(t)]
-
-    # Consecutive loss/win counts over the most-recent teaching trades only.
-    consecutive_losses = 0
-    consecutive_wins = 0
-    for t in teaching:
-        net_pnl = float(t.get("net_pnl") or 0.0)
-        if net_pnl < 0:
-            consecutive_losses += 1
-            consecutive_wins = 0
-        elif net_pnl > 0:
-            consecutive_wins += 1
-            consecutive_losses = 0
-        else:
-            break
-
-    rolling_net_pnl = sum(float(t.get("net_pnl") or 0.0) for t in teaching)
-
-    # Update EWMA of R from most-recent to oldest so later trades have more weight.
-    ewma_r = ewma_r_prior
-    for t in reversed(teaching):
-        ewma_r = update_ewma_r(ewma_r, r_multiple(t), alpha)
-    ewma_r = ewma_r if ewma_r is not None else 0.0
-
-    triggered = ewma_r <= trigger_band or consecutive_losses >= 3
-    reason_parts: list[str] = []
-    if ewma_r <= trigger_band:
-        reason_parts.append(f"EWMA R {ewma_r:.2f} <= {trigger_band}")
-    if consecutive_losses >= 3:
-        reason_parts.append(f"{consecutive_losses} consecutive losses")
-    reason = " + ".join(reason_parts) if reason_parts else "none"
-
-    return FeedbackOutcome(
-        strategy=strategy,
-        triggered=triggered,
-        ewma_r=round(ewma_r, 4),
-        consecutive_losses=consecutive_losses,
-        consecutive_wins=consecutive_wins,
-        rolling_net_pnl=round(rolling_net_pnl, 2),
-        reason=reason,
+    fb = LossFeedback(
+        {
+            "trigger_band": trigger_band,
+            "recovery_band": recovery_band,
+            "ewma_alpha": alpha,
+            "consecutive_loss_trigger": 3,
+        }
     )
+    if ewma_r_prior is not None:
+        fb._ewma_r[strategy] = ewma_r_prior
+    for t in trades:
+        if _is_teaching_trade(t.get("exit_reason")):
+            fb.record_exit(strategy, t.get("exit_reason", ""), t.get("net_pnl", 0.0), risk_budget_at_entry(t))
+    return fb.evaluate(strategy)

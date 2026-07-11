@@ -60,6 +60,12 @@ from src.performance.drift import (
 from src.performance.ic import compute_composite_ic, compute_icir
 from src.performance.postmortem import diagnose_loss, should_trigger_postmortem, TradeContext
 from src.performance.weights import compute_new_weights, compute_purified_icir
+from src.portfolio.loss_feedback import (
+    LossFeedback,
+    _is_teaching_trade,
+    risk_budget_at_entry,
+    strategy_for_trade,
+)
 from src.store.pg_store import PostgreSQLStore
 from src.store.redis_store import RedisStore
 from src.workers.celery_app import app
@@ -1591,21 +1597,26 @@ def _step_threshold_down(
     reason: str,
     consecutive_wins: int | None = None,
     hours_since: float | None = None,
+    strategy: str | None = None,
 ) -> tuple[float, float] | None:
     """Lower the entry threshold one step toward baseline and scale back up.
 
     Shared by recovery (win streak) and time-decay branches. Returns the new
     (threshold, scale) tuple, or None if already at baseline.
     """
-    if current_threshold <= cfg["threshold_baseline"]:
+    baseline = cfg["threshold_baseline"]
+    if current_threshold <= baseline and strategy != "S1":
         return None
 
-    new_threshold = max(current_threshold - cfg["threshold_step"], cfg["threshold_baseline"])
+    new_threshold = max(current_threshold - cfg["threshold_step"], baseline)
+    # S1 has no entry-threshold gate; keep scale/global behaviour unchanged.
+    if strategy == "S1":
+        new_threshold = 0.0
     new_scale = min(current_scale / cfg["regime_scale_factor"], 1.0)
     ttl_seconds = int(cfg["feedback_ttl_hours"] * 3600)
 
-    redis.set_feedback_entry_threshold(new_threshold, ttl=ttl_seconds)
-    redis.set_feedback_regime_scale(new_scale, ttl=ttl_seconds)
+    redis.set_feedback_entry_threshold(new_threshold, ttl=ttl_seconds, strategy=strategy)
+    redis.set_feedback_regime_scale(new_scale, ttl=ttl_seconds, strategy=strategy)
 
     state: dict = {
         "last_adjustment_ts": datetime.now(timezone.utc).isoformat(),
@@ -1619,29 +1630,29 @@ def _step_threshold_down(
         state["consecutive_wins"] = consecutive_wins
     if hours_since is not None:
         state["hours_since"] = hours_since
-    redis.set_feedback_state(state, ttl=ttl_seconds)
+    redis.set_feedback_state(state, ttl=ttl_seconds, strategy=strategy)
 
     return new_threshold, new_scale
 
 
 @app.task(name="src.workers.performance.run_loss_feedback_check")
 def run_loss_feedback_check() -> dict:
-    """Detect loss patterns and auto-adjust ENTRY_THRESHOLD and regime scale.
+    """Per-strategy, risk-normalized loss feedback (Phase 5).
 
-    Trigger conditions (either is sufficient):
-      - N consecutive losses  (consecutive_loss_trigger)
-      - Negative sum of rolling net P&L over last rolling_pnl_window trades
+    Decouples S1 and S4 ratchets so a loss in S1 does not poison S4's entry
+    threshold. Uses an EWMA of R-multiples (net_pnl / risk_budget_at_entry)
+    over teaching exits (stop_loss / portfolio_sell) per strategy sleeve.
 
-    On trigger:
+    On trigger (per strategy):
       - Raises ENTRY_THRESHOLD by threshold_step (capped at threshold_max)
       - Reduces regime scale by regime_scale_factor (floored at regime_min_scale)
-      - Writes both to Redis with feedback_ttl_hours TTL
+      - Writes both to Redis per-strategy with feedback_ttl_hours TTL
       - Sends Telegram alert
 
     Recovery:
       - recovery_win_streak consecutive wins → steps threshold back toward baseline
 
-    Cooldown: no adjustment within cooldown_hours of the last one.
+    Cooldown: per-strategy, no adjustment within cooldown_hours of the last one.
     """
     cfg = _load_loss_feedback_config()
     if not cfg["enabled"]:
@@ -1650,7 +1661,8 @@ def run_loss_feedback_check() -> dict:
     redis = RedisStore()
     pg = PostgreSQLStore()
     try:
-        fetch_n = max(cfg["consecutive_loss_trigger"] + 1, cfg["rolling_pnl_window"])
+        # Enough history to warm up the EWMA; newest trades are first from PG.
+        fetch_n = max(cfg["consecutive_loss_trigger"] + 2, 50)
         trades = pg.fetch_trades(status="closed", limit=fetch_n)
     finally:
         pg.close()
@@ -1659,190 +1671,172 @@ def run_loss_feedback_check() -> dict:
         redis.close()
         return {"skipped": True, "reason": "no_closed_trades"}
 
-    consecutive_losses = _count_consecutive_losses(trades)
-    consecutive_wins = _count_consecutive_wins(trades)
-    rolling_trades = trades[: cfg["rolling_pnl_window"]]
-    rolling_net_pnl = sum((t.get("net_pnl") or 0) for t in rolling_trades)
-
-    # Cooldown check
-    feedback_state = redis.get_feedback_state() or {}
-    last_adj_str = feedback_state.get("last_adjustment_ts")
-    cooldown_ok = True
-    hours_since: float | None = None
-    if last_adj_str:
-        try:
-            last_adj = datetime.fromisoformat(last_adj_str)
-            if last_adj.tzinfo is None:
-                last_adj = last_adj.replace(tzinfo=timezone.utc)
-            hours_since = (datetime.now(timezone.utc) - last_adj).total_seconds() / 3600
-            cooldown_ok = hours_since >= cfg["cooldown_hours"]
-        except (ValueError, TypeError):
-            pass
+    fb = LossFeedback(cfg)
+    # Record in chronological order (reverse the most-recent-first PG result).
+    for t in reversed(trades):
+        strategy = strategy_for_trade(t)
+        exit_reason = t.get("exit_reason", "")
+        if not _is_teaching_trade(exit_reason):
+            continue
+        budget = risk_budget_at_entry(t)
+        if budget <= 0:
+            continue
+        fb.record_exit(strategy, exit_reason, float(t.get("net_pnl") or 0.0), budget)
 
     ttl_seconds = int(cfg["feedback_ttl_hours"] * 3600)
-    current_threshold = redis.get_feedback_entry_threshold() or cfg["threshold_baseline"]
-    current_scale = redis.get_feedback_regime_scale() or 1.0
+    now = datetime.now(timezone.utc)
+    per_strategy: dict[str, dict] = {}
+    any_adjusted = any_recovered = any_decayed = False
 
-    # Trigger on consecutive losses OR on a material rolling P&L drawdown.
-    # Using a %-of-equity threshold prevents noise (-$208 on $110K = 0.19%)
-    # from ratcheting the gate to 0.55 and choking all signals.
-    # When portfolio:value is absent, fall back to a conservative absolute floor.
-    equity = redis.get_portfolio_value()
-    drawdown_pct = cfg.get("rolling_pnl_drawdown_pct", 0.0)
-    if drawdown_pct <= 0:
-        # Explicitly disabled: only consecutive losses can trigger.
-        rolling_loss_limit = None
-        pnl_drawdown_trigger = False
-    elif equity is not None and equity > 0:
-        rolling_loss_limit = equity * drawdown_pct
-        pnl_drawdown_trigger = rolling_net_pnl < -rolling_loss_limit
-    else:
-        # Equity unknown and the %-trigger is enabled: fall back to the floor.
-        rolling_loss_limit = cfg.get("rolling_pnl_trigger_floor_usd", 250.0)
-        pnl_drawdown_trigger = rolling_net_pnl < -rolling_loss_limit
+    for strategy in sorted(fb._history.keys()):
+        outcome = fb.evaluate(strategy)
+        state = redis.get_feedback_state(strategy=strategy) or {}
+        last_adj_str = state.get("last_adjustment_ts")
+        cooldown_ok = True
+        hours_since: float | None = None
+        if last_adj_str:
+            try:
+                last_adj = datetime.fromisoformat(last_adj_str)
+                if last_adj.tzinfo is None:
+                    last_adj = last_adj.replace(tzinfo=timezone.utc)
+                hours_since = (now - last_adj).total_seconds() / 3600
+                cooldown_ok = hours_since >= cfg["cooldown_hours"]
+            except (ValueError, TypeError):
+                pass
 
-    triggered = (
-        consecutive_losses >= cfg["consecutive_loss_trigger"]
-        or pnl_drawdown_trigger
-    )
+        current_threshold = redis.get_feedback_entry_threshold(strategy=strategy) or cfg["threshold_baseline"]
+        current_scale = redis.get_feedback_regime_scale(strategy=strategy) or 1.0
 
-    result: dict = {
-        "consecutive_losses": consecutive_losses,
-        "consecutive_wins": consecutive_wins,
-        "rolling_net_pnl": round(rolling_net_pnl, 2),
-        "rolling_loss_limit": round(rolling_loss_limit, 2) if rolling_loss_limit is not None else None,
-        "equity": equity,
-        "current_threshold": current_threshold,
-        "current_scale": current_scale,
-        "triggered": triggered,
-        "cooldown_ok": cooldown_ok,
-        "adjusted": False,
-        "recovered": False,
-        "decayed": False,
-    }
+        s_result: dict = {
+            "strategy": strategy,
+            "triggered": outcome.triggered,
+            "cooldown_ok": cooldown_ok,
+            "ewma_r": outcome.ewma_r,
+            "consecutive_losses": outcome.consecutive_losses,
+            "consecutive_wins": outcome.consecutive_wins,
+            "rolling_net_pnl": outcome.rolling_net_pnl,
+            "reason": outcome.reason,
+            "current_threshold": current_threshold,
+            "current_scale": current_scale,
+            "adjusted": False,
+            "recovered": False,
+            "decayed": False,
+        }
 
-    if triggered and cooldown_ok:
-        new_threshold = min(current_threshold + cfg["threshold_step"], cfg["threshold_max"])
-        new_scale = max(current_scale * cfg["regime_scale_factor"], cfg["regime_min_scale"])
+        if outcome.triggered and cooldown_ok:
+            new_threshold = min(current_threshold + cfg["threshold_step"], cfg["threshold_max"])
+            new_scale = max(current_scale * cfg["regime_scale_factor"], cfg["regime_min_scale"])
 
-        redis.set_feedback_entry_threshold(new_threshold, ttl=ttl_seconds)
-        redis.set_feedback_regime_scale(new_scale, ttl=ttl_seconds)
-
-        now_iso = datetime.now(timezone.utc).isoformat()
-        redis.set_feedback_state({
-            "last_adjustment_ts": now_iso,
-            "reason": "triggered",
-            "consecutive_losses": consecutive_losses,
-            "rolling_net_pnl": round(rolling_net_pnl, 2),
-            "equity": equity,
-            "threshold_before": current_threshold,
-            "threshold_after": new_threshold,
-            "scale_before": current_scale,
-            "scale_after": new_scale,
-        }, ttl=ttl_seconds)
-
-        result["adjusted"] = True
-        result["new_threshold"] = new_threshold
-        result["new_scale"] = new_scale
-
-        if equity is not None and equity > 0:
-            equity_log = f"equity ${equity:.0f}"
-        else:
-            equity_log = "equity unknown"
-        log.warning(
-            "Loss feedback triggered: %d consecutive losses, rolling P&L $%.2f (%s) — "
-            "threshold %.2f→%.2f, regime scale %.2f→%.2f",
-            consecutive_losses, rolling_net_pnl, equity_log,
-            current_threshold, new_threshold,
-            current_scale, new_scale,
-        )
-
-        reason_parts = []
-        if consecutive_losses >= cfg["consecutive_loss_trigger"]:
-            reason_parts.append(f"{consecutive_losses} consecutive losses")
-        if pnl_drawdown_trigger:
-            if equity is not None and equity > 0:
-                reason_parts.append(
-                    f"rolling P&L ${rolling_net_pnl:.2f} ({abs(rolling_net_pnl) / equity:.2%} of equity)"
-                )
-            else:
-                reason_parts.append(
-                    f"rolling P&L ${rolling_net_pnl:.2f} (limit -${rolling_loss_limit:.0f})"
-                )
-        reason_str = " + ".join(reason_parts)
-
-        msg = (
-            f"⚠️ *Loss Feedback Triggered*\n"
-            f"Reason: {reason_str}\n"
-            f"ENTRY\\_THRESHOLD: {current_threshold:.2f} → {new_threshold:.2f}\n"
-            f"Regime scale: {current_scale:.2f} → {new_scale:.2f}\n"
-            f"_Adjustments active for {cfg['feedback_ttl_hours']}h_"
-        )
-        try:
-            notifier = TelegramNotifier()
-            run_async(notifier.send_alert(msg, level="warning"))
-        except Exception as exc:
-            log.warning("Telegram alert failed for loss feedback: %s", exc)
-
-    elif not triggered and consecutive_wins >= cfg["recovery_win_streak"]:
-        # Recovery: step threshold back toward baseline after a win streak.
-        stepped = _step_threshold_down(
-            current_threshold, current_scale, cfg, redis,
-            reason="recovery", consecutive_wins=consecutive_wins,
-        )
-        if stepped is not None:
-            new_threshold, new_scale = stepped
-            result["recovered"] = True
-            result["new_threshold"] = new_threshold
-            result["new_scale"] = new_scale
-
-            log.info(
-                "Loss feedback recovery: %d consecutive wins — threshold %.2f→%.2f, scale %.2f→%.2f",
-                consecutive_wins, current_threshold, new_threshold, current_scale, new_scale,
+            # S1 has no discrete entry-threshold gate; persist state only.
+            if strategy == "S1":
+                new_threshold = 0.0
+            redis.set_feedback_entry_threshold(new_threshold, ttl=ttl_seconds, strategy=strategy)
+            redis.set_feedback_regime_scale(new_scale, ttl=ttl_seconds, strategy=strategy)
+            redis.set_feedback_state(
+                {
+                    "last_adjustment_ts": now.isoformat(),
+                    "reason": outcome.reason,
+                    "ewma_r": outcome.ewma_r,
+                    "consecutive_losses": outcome.consecutive_losses,
+                    "rolling_net_pnl": outcome.rolling_net_pnl,
+                    "threshold_before": current_threshold,
+                    "threshold_after": new_threshold,
+                    "scale_before": current_scale,
+                    "scale_after": new_scale,
+                },
+                ttl=ttl_seconds,
+                strategy=strategy,
             )
 
-            if new_threshold <= cfg["threshold_baseline"]:
-                msg = (
-                    f"✅ *Loss Feedback Reset*\n"
-                    f"{consecutive_wins} consecutive wins — threshold back to baseline {new_threshold:.2f}\n"
-                    f"Regime scale restored to {new_scale:.2f}"
-                )
-                try:
-                    notifier = TelegramNotifier()
-                    run_async(notifier.send_alert(msg, level="info"))
-                except Exception as exc:
-                    log.warning("Telegram alert failed for feedback recovery: %s", exc)
+            s_result.update({"adjusted": True, "new_threshold": new_threshold, "new_scale": new_scale})
+            any_adjusted = True
 
-    elif not triggered and current_threshold > cfg["threshold_baseline"]:
-        # Temporal decay: if no trigger for a long time, gradually lower the gate
-        # so a single noisy loss does not keep the system locked at 0.55 forever.
-        decay_hours = cfg.get("threshold_decay_hours")
-        if decay_hours and hours_since is not None and hours_since >= decay_hours:
+            log.warning(
+                "Loss feedback triggered for %s: EWMA R %.2f, %d consecutive losses, rolling P&L $%.2f — "
+                "threshold %.2f→%.2f, regime scale %.2f→%.2f",
+                strategy, outcome.ewma_r, outcome.consecutive_losses, outcome.rolling_net_pnl,
+                current_threshold, new_threshold, current_scale, new_scale,
+            )
+
+            msg = (
+                f"⚠️ *Loss Feedback Triggered — {strategy}*\n"
+                f"Reason: {outcome.reason}\n"
+                f"EWMA R: {outcome.ewma_r:.2f}\n"
+                f"ENTRY\\_THRESHOLD: {current_threshold:.2f} → {new_threshold:.2f}\n"
+                f"Regime scale: {current_scale:.2f} → {new_scale:.2f}\n"
+                f"_Adjustments active for {cfg['feedback_ttl_hours']}h_"
+            )
+            try:
+                notifier = TelegramNotifier()
+                run_async(notifier.send_alert(msg, level="warning"))
+            except Exception as exc:
+                log.warning("Telegram alert failed for loss feedback: %s", exc)
+
+        elif not outcome.triggered and outcome.consecutive_wins >= cfg["recovery_win_streak"]:
             stepped = _step_threshold_down(
                 current_threshold, current_scale, cfg, redis,
-                reason="decay", hours_since=hours_since,
+                reason="recovery", consecutive_wins=outcome.consecutive_wins,
+                strategy=strategy,
             )
             if stepped is not None:
                 new_threshold, new_scale = stepped
-                result["decayed"] = True
-                result["new_threshold"] = new_threshold
-                result["new_scale"] = new_scale
+                s_result.update({"recovered": True, "new_threshold": new_threshold, "new_scale": new_scale})
+                any_recovered = True
+
                 log.info(
-                    "Loss feedback decay: threshold %.2f→%.2f after %.0fh without trigger",
-                    current_threshold, new_threshold, hours_since,
+                    "Loss feedback recovery for %s: %d consecutive wins — threshold %.2f→%.2f, scale %.2f→%.2f",
+                    strategy, outcome.consecutive_wins, current_threshold, new_threshold, current_scale, new_scale,
                 )
+
                 if new_threshold <= cfg["threshold_baseline"]:
                     msg = (
-                        f"✅ *Loss Feedback Reset*\n"
-                        f"Quiet period passed — threshold back to baseline {new_threshold:.2f}\n"
+                        f"✅ *Loss Feedback Reset — {strategy}*\n"
+                        f"{outcome.consecutive_wins} consecutive wins — threshold back to baseline {new_threshold:.2f}\n"
                         f"Regime scale restored to {new_scale:.2f}"
                     )
                     try:
                         notifier = TelegramNotifier()
                         run_async(notifier.send_alert(msg, level="info"))
                     except Exception as exc:
-                        log.warning("Telegram alert failed for feedback decay: %s", exc)
+                        log.warning("Telegram alert failed for feedback recovery: %s", exc)
 
+        elif not outcome.triggered and current_threshold > cfg["threshold_baseline"]:
+            decay_hours = cfg.get("threshold_decay_hours")
+            if decay_hours and hours_since is not None and hours_since >= decay_hours:
+                stepped = _step_threshold_down(
+                    current_threshold, current_scale, cfg, redis,
+                    reason="decay", hours_since=hours_since,
+                    strategy=strategy,
+                )
+                if stepped is not None:
+                    new_threshold, new_scale = stepped
+                    s_result.update({"decayed": True, "new_threshold": new_threshold, "new_scale": new_scale})
+                    any_decayed = True
+                    log.info(
+                        "Loss feedback decay for %s: threshold %.2f→%.2f after %.0fh without trigger",
+                        strategy, current_threshold, new_threshold, hours_since,
+                    )
+                    if new_threshold <= cfg["threshold_baseline"]:
+                        msg = (
+                            f"✅ *Loss Feedback Reset — {strategy}*\n"
+                            f"Quiet period passed — threshold back to baseline {new_threshold:.2f}\n"
+                            f"Regime scale restored to {new_scale:.2f}"
+                        )
+                        try:
+                            notifier = TelegramNotifier()
+                            run_async(notifier.send_alert(msg, level="info"))
+                        except Exception as exc:
+                            log.warning("Telegram alert failed for feedback decay: %s", exc)
+
+        per_strategy[strategy] = s_result
+
+    result: dict = {
+        "per_strategy": per_strategy,
+        "strategies_evaluated": sorted(per_strategy.keys()),
+        "adjusted": any_adjusted,
+        "recovered": any_recovered,
+        "decayed": any_decayed,
+    }
     redis.close()
     return result
 
