@@ -201,6 +201,9 @@ async def run_inference(
             fb_result = await loop.run_in_executor(
                 None, finbert.analyze, clean_body[:512]
             )
+            # Preserve the divergent raw outputs (empty on timeout): the caller
+            # persists them to llm_responses with eligible=False so the
+            # disagreement is auditable instead of silently discarded.
             return SentimentResult(
                 symbol=clean_symbol,
                 score=fb_result.polarity * fb_result.confidence,
@@ -209,7 +212,7 @@ async def run_inference(
                 model_id="finbert",
                 fallback_used=True,
                 published_at=item.timestamp,
-            ), []
+            ), list(raw_outputs or [])
 
         score = aggregated.polarity * aggregated.confidence
         # Rough token estimate: ~4 chars per token (English text average).
@@ -298,7 +301,13 @@ async def process_news_item(
             #   SELECT COUNT(*)-COUNT(news_log_id) FROM sentiment_signals WHERE generated_at > now()-'1h'::interval
             log.debug("news_log_id NULL for signal %s/%s (url conflict or empty url)", ticker, signal_id)
         if raw_outputs:
-            pg_store.log_llm_responses(signal_id=signal_id, outputs=raw_outputs)
+            # On fallback the raw outputs did NOT enter the signal (FinBERT did):
+            # force eligible=False so LOO-ICIR/audit never count them as contributors.
+            pg_store.log_llm_responses(
+                signal_id=signal_id,
+                outputs=raw_outputs,
+                force_ineligible=result.fallback_used,
+            )
     except Exception as e:
         log.error(f"Failed to write signal for {result.symbol}: {e}")
     return result

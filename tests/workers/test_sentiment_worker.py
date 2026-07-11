@@ -228,7 +228,13 @@ class TestProcessNewsItem:
         mock_redis.increment_fallback_counter.assert_called_once()
         mock_pg.write_signal.assert_called_once()
         mock_pg.log_news_item.assert_called_once()
-        mock_pg.log_llm_responses.assert_not_called()
+        # Divergent raw outputs are persisted for audit, but marked ineligible:
+        # they did NOT enter the signal (FinBERT did), so LOO-ICIR and post-hoc
+        # analysis must not count them as contributors.
+        mock_pg.log_llm_responses.assert_called_once()
+        _kwargs = mock_pg.log_llm_responses.call_args.kwargs
+        assert _kwargs["outputs"] == mock_outputs
+        assert _kwargs["force_ineligible"] is True
 
     @pytest.mark.asyncio
     async def test_empty_ensemble_outputs_uses_finbert(self):
@@ -409,8 +415,9 @@ class TestRunInference:
 
         item = make_news_item("MSFT", 1)
 
+        mock_raw = [MagicMock()]
         with patch("src.workers.sentiment.run_ensemble_query",
-                   new_callable=AsyncMock, return_value=[MagicMock()]):
+                   new_callable=AsyncMock, return_value=mock_raw):
             inference_result = await run_inference(
                 item=item,
                 clients=[],
@@ -423,7 +430,9 @@ class TestRunInference:
         result, raw_outputs = inference_result
         assert result.fallback_used is True
         assert result.model_id == "finbert"
-        assert raw_outputs == []  # no outputs on fallback
+        # Raw outputs are preserved on divergence so the disagreement can be
+        # audited in llm_responses (they were silently discarded before).
+        assert raw_outputs == mock_raw
         mock_finbert.analyze.assert_called_once()
 
     @pytest.mark.asyncio

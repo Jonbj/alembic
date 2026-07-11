@@ -161,6 +161,22 @@ class TestLogLlmResponses:
         assert batch[0][5] is True    # eligible column, 0.85 >= 0.4
         assert batch[1][5] is False   # 0.30 < 0.4 → NOT eligible (was hardcoded True)
 
+    def test_log_llm_responses_force_ineligible_overrides_confidence(self, pg_store):
+        """Divergence-fallback outputs are audit-only: eligible must be False even
+        for high-confidence outputs, because they did NOT enter the signal."""
+        outputs = [
+            ModelOutput(symbol="AAPL", polarity=0.8, confidence=0.95,
+                        reasoning="confident bull", model_id="glm-5.2:cloud"),
+            ModelOutput(symbol="AAPL", polarity=-0.7, confidence=0.90,
+                        reasoning="confident bear", model_id="kimi-k2.6:cloud"),
+        ]
+        pg_store.log_llm_responses(signal_id=7, outputs=outputs, force_ineligible=True)
+
+        _, batch = pg_store._conn.cursor.return_value.executemany.call_args[0]
+        batch = list(batch)
+        assert batch[0][5] is False
+        assert batch[1][5] is False
+
     def test_log_llm_responses_empty_list_is_noop(self, pg_store):
         """log_llm_responses with empty list writes nothing and does not raise."""
         pg_store.log_llm_responses(signal_id=42, outputs=[])

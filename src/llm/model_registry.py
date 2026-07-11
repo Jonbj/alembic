@@ -17,11 +17,19 @@ class SentimentModel:
     model_id: str
     label: str
     economy_default: bool = False
+    # When False the model is selectable via an explicit token but is NOT part
+    # of the "all" expansion — protects live cost/latency from silently growing
+    # the ensemble when candidates are registered for pair swaps.
+    in_all: bool = True
 
 
 _MODELS: tuple[SentimentModel, ...] = (
     SentimentModel("kimi", "kimi-k2.6:cloud", "Kimi K2.6"),
     SentimentModel("glm52", "glm-5.2:cloud", "GLM-5.2", economy_default=True),
+    # Stage 1 comparison pool (2026-07-10): registered so the live pair can be
+    # swapped via config:sentiment_llm_models without a code change.
+    SentimentModel("qwen35", "qwen3.5:cloud", "Qwen3.5", in_all=False),
+    SentimentModel("gptoss", "gpt-oss:20b-cloud", "GPT-OSS 20B", in_all=False),
 )
 
 _ALIASES = {
@@ -30,6 +38,12 @@ _ALIASES = {
     "glm-5.2:cloud": "glm52",
     "kimi-k2.6": "kimi",
     "kimi-k2.6:cloud": "kimi",
+    "qwen": "qwen35",
+    "qwen3.5": "qwen35",
+    "qwen3.5:cloud": "qwen35",
+    "gpt-oss": "gptoss",
+    "gpt-oss:20b": "gptoss",
+    "gpt-oss:20b-cloud": "gptoss",
 }
 
 
@@ -75,7 +89,7 @@ def normalize_model_selection(raw: str | None) -> tuple[str, list[str], list[str
         raw = environ.get("SENTIMENT_LLM_MODELS", "all")
     tokens = [part.strip().lower() for part in raw.split(",") if part.strip()]
     if not tokens or "all" in tokens:
-        keys = [m.key for m in _MODELS]
+        keys = [m.key for m in _MODELS if m.in_all]
         return "all", keys, []
 
     keys: list[str] = []
@@ -89,7 +103,7 @@ def normalize_model_selection(raw: str | None) -> tuple[str, list[str], list[str
             keys.append(key)
 
     if not keys:
-        keys = [m.key for m in _MODELS]
+        keys = [m.key for m in _MODELS if m.in_all]
         return "all", keys, invalid
     return ",".join(keys), keys, invalid
 
@@ -153,11 +167,20 @@ def sentiment_model_payload(selection: str | None = None) -> dict:
 
 def build_sentiment_clients(keys: list[str]):
     """Instantiate sentiment clients for the selected model keys."""
-    from src.llm.client import OllamaGLM52Client, OllamaKimiClient
+    from src.llm.client import (
+        OllamaGLM52Client,
+        OllamaGptOssClient,
+        OllamaKimiClient,
+        OllamaQwen35Client,
+    )
 
     registry = {
         "kimi": OllamaKimiClient,
         "glm52": OllamaGLM52Client,
+        "qwen35": OllamaQwen35Client,
+        "gptoss": OllamaGptOssClient,
     }
     clients = [registry[key]() for key in keys if key in registry]
-    return clients or [registry[model.key]() for model in _MODELS]
+    return clients or [
+        registry[model.key]() for model in _MODELS if model.in_all
+    ]

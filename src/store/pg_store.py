@@ -1278,7 +1278,11 @@ class PostgreSQLStore:
             raise
 
     def log_llm_responses(
-        self, signal_id: int, outputs: list[ModelOutput], min_confidence: float = 0.4
+        self,
+        signal_id: int,
+        outputs: list[ModelOutput],
+        min_confidence: float = 0.4,
+        force_ineligible: bool = False,
     ) -> None:
         """Write per-model outputs to llm_responses. No-op for empty list.
 
@@ -1286,6 +1290,10 @@ class PostgreSQLStore:
         filter (``confidence >= min_confidence``) — NOT hardcoded True. Without this,
         LOO-ICIR and post-hoc audit count discarded (<0.4) models as if they entered
         the signal, misrepresenting what actually contributed.
+
+        ``force_ineligible=True`` marks every row ineligible regardless of
+        confidence — used for divergence-fallback outputs, which are persisted
+        for audit but did not enter the signal (FinBERT did).
         """
         if not outputs:
             return
@@ -1297,7 +1305,8 @@ class PostgreSQLStore:
                     [
                         (
                             signal_id, out.model_id, out.polarity, out.confidence,
-                            out.reasoning, out.confidence >= min_confidence,
+                            out.reasoning,
+                            False if force_ineligible else out.confidence >= min_confidence,
                         )
                         for out in outputs
                     ],

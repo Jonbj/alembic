@@ -50,6 +50,9 @@ class Config(BaseModel):
     OLLAMA_GLM52_TIMEOUT_SECONDS: int = Field(
         default_factory=lambda: int(os.environ.get("OLLAMA_GLM52_TIMEOUT_SECONDS", "90"))
     )
+    OLLAMA_GPTOSS_TIMEOUT_SECONDS: int = Field(
+        default_factory=lambda: int(os.environ.get("OLLAMA_GPTOSS_TIMEOUT_SECONDS", "90"))
+    )
 
     # Model costs (per 1M tokens) - should be loaded from config YAML in production
     # All 14 models from models.md (8 general purpose + 6 coding specialized)

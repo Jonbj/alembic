@@ -68,6 +68,7 @@ ALLOWED_MODEL_IDS = frozenset({
     # General purpose cloud
     "qwen3.5:cloud", "deepseek-v4-pro:cloud",
     "glm-5.1:cloud", "glm-5.2:cloud", "kimi-k2.6:cloud", "gemma4:31b-cloud",
+    "gpt-oss:20b-cloud",
     # Coding specialized
     "qwen3-coder-next:cloud", "devstral-small-2:24b-cloud",
     "devstral-2:123b-cloud", "minimax-m2.1:cloud",
@@ -788,3 +789,10 @@ class OllamaDeepseekClient(OllamaCloudClient):
     model_id = "deepseek-v4-pro:cloud"
     model_name = "DeepSeek V4 Pro (Ollama)"
     _OLLAMA_TIMEOUT = config.OLLAMA_DEEPSEEK_TIMEOUT_SECONDS
+
+
+class OllamaGptOssClient(OllamaCloudClient):
+    """GPT-OSS 20B via Ollama cloud HTTP API — open-weight, non-Chinese vendor."""
+    model_id = "gpt-oss:20b-cloud"
+    model_name = "GPT-OSS 20B (Ollama)"
+    _OLLAMA_TIMEOUT = config.OLLAMA_GPTOSS_TIMEOUT_SECONDS
