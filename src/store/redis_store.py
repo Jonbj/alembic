@@ -559,13 +559,25 @@ class RedisStore:
     # LOSS FEEDBACK ADJUSTMENTS
     # =========================================================================
 
-    def set_feedback_entry_threshold(self, value: float, ttl: int) -> None:
+    @staticmethod
+    def _feedback_key(base: str, strategy: str | None) -> str:
+        return f"{base}:{strategy}" if strategy else base
+
+    def set_feedback_entry_threshold(self, value: float, ttl: int, strategy: str | None = None) -> None:
         """Override ENTRY_THRESHOLD in Redis. Execution worker reads this at cycle start."""
-        self._r.setex("feedback:entry_threshold", ttl, str(value))
+        key = self._feedback_key("feedback:entry_threshold", strategy)
+        self._r.setex(key, ttl, str(value))
+        # Legacy compatibility: S4 is the original key owner; mirror it on the bare key.
+        if strategy == "S4":
+            self._r.setex("feedback:entry_threshold", ttl, str(value))
 
-    def get_feedback_entry_threshold(self) -> float | None:
+    def get_feedback_entry_threshold(self, strategy: str | None = None) -> float | None:
         """Return feedback-adjusted entry threshold, or None if not set."""
-        raw = self._r.get("feedback:entry_threshold")
+        key = self._feedback_key("feedback:entry_threshold", strategy)
+        raw = self._r.get(key)
+        if raw is None and strategy is not None:
+            # Fallback to legacy key if per-strategy key is absent.
+            raw = self._r.get("feedback:entry_threshold")
         if raw is None:
             return None
         try:
@@ -573,13 +585,19 @@ class RedisStore:
         except (ValueError, TypeError):
             return None
 
-    def set_feedback_regime_scale(self, value: float, ttl: int) -> None:
+    def set_feedback_regime_scale(self, value: float, ttl: int, strategy: str | None = None) -> None:
         """Override regime multiplier scale factor in Redis (0.0–1.0)."""
-        self._r.setex("feedback:regime_scale", ttl, str(value))
+        key = self._feedback_key("feedback:regime_scale", strategy)
+        self._r.setex(key, ttl, str(value))
+        if strategy == "S4":
+            self._r.setex("feedback:regime_scale", ttl, str(value))
 
-    def get_feedback_regime_scale(self) -> float | None:
+    def get_feedback_regime_scale(self, strategy: str | None = None) -> float | None:
         """Return feedback regime scale factor, or None if not set (default 1.0)."""
-        raw = self._r.get("feedback:regime_scale")
+        key = self._feedback_key("feedback:regime_scale", strategy)
+        raw = self._r.get(key)
+        if raw is None and strategy is not None:
+            raw = self._r.get("feedback:regime_scale")
         if raw is None:
             return None
         try:
@@ -587,20 +605,24 @@ class RedisStore:
         except (ValueError, TypeError):
             return None
 
-    def set_feedback_state(self, state: dict, ttl: int) -> None:
+    def set_feedback_state(self, state: dict, ttl: int, strategy: str | None = None) -> None:
         """Persist full feedback audit state (consecutive_losses, rolling_pnl, timestamp)."""
         import json
-        self._r.setex("feedback:state", ttl, json.dumps(state))
+        key = self._feedback_key("feedback:state", strategy)
+        self._r.setex(key, ttl, json.dumps(state))
 
-    def get_feedback_state(self) -> dict | None:
-        """Return last feedback audit state, or None if absent."""
+    def get_feedback_state(self, strategy: str | None = None) -> dict | None:
+        """Return persisted feedback audit state, or None if not set."""
         import json
-        raw = self._r.get("feedback:state")
+        key = self._feedback_key("feedback:state", strategy)
+        raw = self._r.get(key)
+        if raw is None and strategy is not None:
+            raw = self._r.get("feedback:state")
         if raw is None:
             return None
         try:
             return json.loads(raw)
-        except (ValueError, TypeError):
+        except json.JSONDecodeError:
             return None
 
     def set_counterfactual_worker_state(self, state: dict, ttl: int = 86400 * 14) -> None:

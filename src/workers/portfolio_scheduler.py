@@ -656,23 +656,29 @@ def _build_stop_shadow_rows(
     return rows
 
 
-def _get_feedback_threshold(redis_url: str) -> float:
-    """Return active feedback entry threshold from Redis (feedback:entry_threshold).
+def _get_feedback_threshold(redis_url: str, strategy: str = "S4") -> float:
+    """Return active feedback entry threshold for a strategy sleeve from Redis.
 
-    Falls back to S4Config.min_score when the key is absent or Redis is unreachable,
-    so protection is still applied for clearly-positive signals even without Redis.
+    Per-strategy keys (feedback:entry_threshold:S4, :S1, …) decouple the ratchet so a
+    loss in one strategy does not poison another. Falls back to the legacy bare key
+    and then to S4Config.min_score when Redis is unreachable.
     """
     try:
         from redis import Redis as _R
         _r = _R.from_url(redis_url, decode_responses=True)
         try:
-            raw = _r.get("feedback:entry_threshold")
+            raw = _r.get(f"feedback:entry_threshold:{strategy}")
+            if raw is None:
+                raw = _r.get("feedback:entry_threshold")
             if raw is not None:
                 return float(raw)
         finally:
             _r.close()
     except Exception as exc:
-        log.warning("Could not read feedback threshold from Redis: %s — using S4 min_score", exc)
+        log.warning(
+            "Could not read feedback threshold for %s from Redis: %s — using S4 min_score",
+            strategy, exc,
+        )
     from src.strategies.s4.config import S4Config as _S4Cfg
     return _S4Cfg().min_score
 
@@ -1357,7 +1363,7 @@ def _run_cycle_inner() -> dict:
         from src.backtest.engine.types import OrderSide as _OSProtect
         from src.strategies.s4.config import S4Config as _S4CfgProt
         _prot_age = _S4CfgProt().max_signal_age_hours
-        _prot_threshold = _get_feedback_threshold(config.REDIS_URL)
+        _prot_threshold = _get_feedback_threshold(config.REDIS_URL, strategy="S4")
         _sell_candidates: set[str] = {
             o.symbol for o in result.final_orders
             if o.side == _OSProtect.SELL
@@ -2249,18 +2255,8 @@ def _build_strategy_instance(entry, bars_df):
             # T-01: read the active feedback threshold FIRST, outside the velocity
             # try/except. A velocity-computation or Redis failure must degrade to
             # "raw scores, gate still enforced" — never to an ungated stream.
-            _fb_threshold = _ENTRY_THRESHOLD_BASELINE
-            try:
-                from redis import Redis as _RedisFB
-                from src.config import config as _cfg_fb
-                _r_fb = _RedisFB.from_url(_cfg_fb.REDIS_URL, decode_responses=True)
-                try:
-                    _fb_raw = _r_fb.get("feedback:entry_threshold")
-                    _fb_threshold = float(_fb_raw) if _fb_raw is not None else _ENTRY_THRESHOLD_BASELINE
-                finally:
-                    _r_fb.close()
-            except Exception:
-                _fb_threshold = _ENTRY_THRESHOLD_BASELINE
+            from src.config import config as _cfg_fb
+            _fb_threshold = _get_feedback_threshold(_cfg_fb.REDIS_URL, strategy="S4")
 
             # Apply velocity multipliers (best-effort; failures fall back to raw scores).
             try:

@@ -1138,7 +1138,8 @@ class PostgreSQLStore:
                     f"""SELECT id, symbol, signal_id, decision_id, entry_order_id,
                                entry_price, entry_time, entry_notional, score, regime_mult,
                                exit_price, exit_time, exit_reason, qty,
-                               gross_pnl, slippage_est, net_pnl, postmortem_diagnosis, created_at
+                               gross_pnl, slippage_est, net_pnl, postmortem_diagnosis, created_at,
+                               stop_strategy, stop_d_init
                         FROM trades {where}
                         ORDER BY entry_time DESC LIMIT %s""",
                     params,
