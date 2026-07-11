@@ -1601,6 +1601,7 @@ def _run_cycle_inner() -> dict:
             risk_cfg=_risk_cfg,
             bars_df=bars_df,
             stop_policy=_stop_policy,
+            nav=equity,
         )
 
     # B27-FIX: mark S4 signals fired only for orders that were actually submitted to Alpaca.
@@ -2326,6 +2327,7 @@ def _submit_portfolio_orders(
     risk_cfg: dict | None = None,
     bars_df=None,
     stop_policy: "StopPolicy" | None = None,
+    nav: float | None = None,
 ) -> list[dict]:
     """Submit BUY and SELL orders to Alpaca.
 
@@ -2388,6 +2390,37 @@ def _submit_portfolio_orders(
                 if price is None or price <= 0:
                     log.warning("No market price for %s — skipping BUY order", order.symbol)
                     continue
+
+                # Phase 4: stop-risk sizing — cap notional so per-position loss at the
+                # frozen stop is bounded. A wider protective stop → smaller position.
+                # Default mode=fixed keeps sizing close to current behavior.
+                _strategy_order = getattr(order, "strategy_id", None)
+                _frozen_sizing: "FrozenStop | None" = None
+                if stop_policy is not None and nav is not None and nav > 0:
+                    try:
+                        _frozen_sizing = stop_policy.freeze(
+                            order.symbol, _strategy_order, float(price), datetime.now(timezone.utc)
+                        )
+                        _risk_budget_cfg = risk_cfg or {}
+                        _default_bp = float(_risk_budget_cfg.get("stop_risk_budget_bp_per_pos", 12))
+                        _per_strat_cfg = (_risk_budget_cfg.get("stop_strategy_params", {}) or {}).get(
+                            _strategy_order or "default", {}
+                        )
+                        _budget_bp = float(_per_strat_cfg.get("risk_budget_bp", _default_bp))
+                        _gap_buffer = float(_risk_budget_cfg.get("stop_gap_buffer_pct", 0.005))
+                        _B = _budget_bp / 10000.0
+                        _max_notional = nav * _B / (_frozen_sizing.d_init + _gap_buffer)
+                        _max_qty = _max_notional / (price * regime_mult)
+                        if abs(order.quantity) > _max_qty:
+                            order = order.with_quantity(min(abs(order.quantity), max(0.0, _max_qty)))
+                            log.info(
+                                "Stop-risk sizing: %s qty capped %.4f -> %.4f (d_init %.2f%%, budget %.1fbp)",
+                                order.symbol, order.quantity, _max_qty,
+                                _frozen_sizing.d_init * 100, _budget_bp,
+                            )
+                    except Exception as _sizing_exc:
+                        log.warning("Stop-risk sizing failed for %s: %s — using target qty", order.symbol, _sizing_exc)
+
                 notional = round(price * order.quantity * regime_mult, 2)
                 if notional < _MIN_ORDER_NOTIONAL:
                     log.info(
