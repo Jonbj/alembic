@@ -170,7 +170,7 @@ curl -X POST http://localhost:8001/api/admin/llm-models \
   -d '{"models": "glm52"}'
 ```
 
-Valid values are provided by the runtime registry. Current sentiment-worker values are `all`, `kimi`, `glm52`; legacy alias `glm` is accepted and canonicalized to `glm52`.
+Valid values are provided by the runtime registry (`src/llm/model_registry.py`). Current keys: `all`, `kimi`, `glm52`, plus the swap candidates `qwen35` and `gptoss` (registered with `in_all=False`, so they are selectable explicitly but excluded from the `all` expansion). Aliases (`glm`, `qwen`, `gpt-oss`, full model ids…) are canonicalized. Live selection since 2026-07-11: `glm52,gptoss`.
 
 ### `GET /api/llm/models`
 
