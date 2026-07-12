@@ -210,3 +210,98 @@ class TestRegimeMultiplierAppliedToSizing:
             f"regime_mult=0.2 must produce 20% of baseline notional. "
             f"Got {n_reduced} vs baseline {n_full}"
         )
+
+
+class TestRegimeMultiplierWholeShare:
+    """F5: regime_mult must scale whole-share (non-fractionable) BUY qty too.
+
+    The fractionable path scales `notional` by regime_mult; the whole-share path
+    must derive its qty from that same scaled notional, not from raw
+    `order.quantity` — which silently bypassed regime_mult on mega-caps (whole-share
+    names), leaking full-size deployment in risk-off regimes. Zero behavior change
+    when regime_mult == 1.0.
+    """
+
+    def _make_order(self, symbol="BRK.A", qty=10.0):
+        from src.backtest.engine.types import Order, OrderSide
+        from datetime import datetime, timezone
+        return Order.market_order(
+            ts=datetime(2026, 6, 19, 14, 0, tzinfo=timezone.utc),
+            symbol=symbol,
+            side=OrderSide.BUY,
+            qty=qty,
+        )
+
+    def _make_market(self, price=100.0, symbol="BRK.A"):
+        from src.backtest.engine.types import MarketSnapshot
+        from datetime import datetime, timezone
+        return MarketSnapshot(
+            timestamp=datetime(2026, 6, 19, 14, 0, tzinfo=timezone.utc),
+            prices={symbol: price},
+            volumes={symbol: 1_000_000.0},
+            adv_20d={symbol: 1_000_000.0},
+        )
+
+    def _capture_whole_share_qty(self, regime_mult: float) -> int:
+        """Run _submit_portfolio_orders for a non-fractionable BUY and return the
+        whole-share qty passed to the broker's MarketOrderRequest."""
+        from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+        trading_client = MagicMock()
+        captured: list = []
+
+        def _capture(req):
+            captured.append(req)
+            return MagicMock(id="test-id")
+
+        trading_client.submit_order.side_effect = _capture
+
+        order = self._make_order(qty=10.0)
+        market = self._make_market(price=100.0)
+
+        # Disable the broker bracket leg so the plain MarketOrderRequest(qty=...)
+        # path is exercised. stop_policy/nav/risk_cfg None → no stop-risk sizing.
+        # config is a frozen pydantic instance, so patch the whole object; the only
+        # attribute read on this code path is ALPACA_BRACKET_ENABLED.
+        with patch("src.config.config") as mock_cfg:
+            mock_cfg.ALPACA_BRACKET_ENABLED = False
+            _submit_portfolio_orders(
+                [order], trading_client, market,
+                fractionable_symbols=set(),  # symbol NOT in set → whole-share path
+                regime_mult=regime_mult,
+                nav=None, risk_cfg=None, stop_policy=None,
+            )
+
+        assert captured, (
+            f"whole-share BUY was not submitted (regime_mult={regime_mult}) — "
+            "the order was silently skipped in _submit_portfolio_orders"
+        )
+        return int(captured[0].qty)
+
+    def test_regime_mult_scales_whole_share_qty(self):
+        """regime_mult=0.5 must halve whole-share qty vs regime_mult=1.0 (F5)."""
+        qty_full = self._capture_whole_share_qty(1.0)
+        qty_half = self._capture_whole_share_qty(0.5)
+        assert qty_full == 10, (
+            f"regime_mult=1.0 whole-share qty should be 10 (qty*regime=10*1.0), "
+            f"got {qty_full}"
+        )
+        assert qty_half == 5, (
+            f"regime_mult=0.5 whole-share qty should be 5 (qty*regime=10*0.5), "
+            f"got {qty_half} — regime_mult is being bypassed on whole-share BUYs (F5)"
+        )
+
+    def test_regime_mult_one_is_identity_whole_share(self):
+        """regime_mult=1.0 must leave whole-share qty unchanged (zero behavior change)."""
+        qty = self._capture_whole_share_qty(1.0)
+        assert qty == 10, (
+            f"regime_mult=1.0 should submit full qty=10, got {qty}"
+        )
+
+    def test_regime_mult_zero_point_two_whole_share(self):
+        """regime_mult=0.2 must reduce whole-share qty to 20% (floored at 1 share)."""
+        # qty=10, price=100, regime=0.2 → notional=$200 → whole_qty=int(200/100)=2
+        qty = self._capture_whole_share_qty(0.2)
+        assert qty == 2, (
+            f"regime_mult=0.2 whole-share qty should be 2 (10*0.2), got {qty}"
+        )

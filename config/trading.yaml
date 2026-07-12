@@ -212,6 +212,13 @@ loss_feedback:
   # 5 -> 3 on 2026-07-09: recovery needs 3 consecutive wins, same bar as trigger.
   recovery_win_streak: 3         # consecutive wins → step threshold back down
   feedback_ttl_hours: 48         # Redis TTL for feedback keys
+  # F8: apply the per-strategy feedback regime scale to portfolio sizing.
+  # false = SHADOW ONLY — the orchestrator records the would-be deployment delta
+  # (CycleResult.feedback_shadow, logged each cycle) but does NOT shrink weights.
+  # Flip to true only after the shadow gate passes: >=1 trigger->recovery cycle
+  # observed per active strategy AND no over-suppression in a stable regime.
+  # measure-before-enforce (QX-01). See docs/superpowers/plans/2026-07-11-stop-loss-redesign.md F8.
+  apply_regime_scale: false
 
 retention:
   news_log_days: 180      # delete news_log rows older than N days

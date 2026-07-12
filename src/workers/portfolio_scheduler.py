@@ -291,6 +291,51 @@ def _get_regime_multiplier_from_redis(redis_url: str) -> float:
 _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
 
 
+def _read_feedback_regime_scales(redis_url: str, strategy_ids) -> dict[str, float]:
+    """Read per-strategy feedback:regime_scale:S* (F8 de-risk/re-risk throttle).
+
+    Returns {strategy_id: scale} for strategies with a non-identity scale set.
+    The legacy key ``feedback:regime_scale`` (no suffix) is the fallback when a
+    per-strategy key is absent. Fail-open: any error → {} → no de-risking applied
+    (safe default; the orchestrator then sees an empty dict and applies 1.0
+    everywhere, i.e. zero behavior change).
+
+    The scheduler passes this dict to the orchestrator. Whether it is *applied*
+    (vs shadow-only) is gated by ``loss_feedback.apply_regime_scale``.
+    """
+    if not strategy_ids:
+        return {}
+    try:
+        from redis import Redis as _R
+        _r = _R.from_url(redis_url, decode_responses=True)
+        try:
+            out: dict[str, float] = {}
+            legacy: str | None = None  # lazily read once
+            for sid in strategy_ids:
+                raw = _r.get(f"feedback:regime_scale:{sid}")
+                if raw is None:
+                    if legacy is None:
+                        legacy = _r.get("feedback:regime_scale")
+                    raw = legacy
+                if raw is None:
+                    continue
+                try:
+                    scale = float(raw)
+                except (TypeError, ValueError):
+                    continue
+                if abs(scale - 1.0) > 1e-9:
+                    out[sid] = scale
+            return out
+        finally:
+            _r.close()
+    except Exception as _exc:
+        log.warning(
+            "F8: could not read feedback:regime_scale (%s) — no de-risking applied",
+            _exc,
+        )
+        return {}
+
+
 def _get_fractionable_symbols(trading_client) -> set[str]:
     """Return set of symbols that support fractional/notional orders.
 
@@ -1342,10 +1387,38 @@ def _run_cycle_inner() -> dict:
         if len(_port_returns) >= 2:
             _strategy_returns = {"portfolio": _port_returns}
 
+    # F8: per-strategy feedback regime scale (de-risk/re-risk throttle). The
+    # scheduler reads feedback:regime_scale:S* and passes them to the orchestrator.
+    # loss_feedback.apply_regime_scale gates APPLY vs SHADOW: when false the
+    # orchestrator records the would-be deployment delta (CycleResult.feedback_shadow)
+    # without shrinking weights — measure-before-enforce (QX-01).
+    _fb_strategy_ids = [e.strategy_id for e in registry.get_active_strategies()]
+    _fb_scales: dict[str, float] = _read_feedback_regime_scales(
+        config.REDIS_URL, _fb_strategy_ids
+    )
+    _apply_fb_scale = False
+    try:
+        from src.workers.performance import _load_loss_feedback_config as _load_fb_cfg
+        _apply_fb_scale = bool(_load_fb_cfg().get("apply_regime_scale", False))
+    except Exception as _fb_cfg_exc:
+        log.warning("F8: could not load apply_regime_scale flag (%s) — defaulting to shadow-only", _fb_cfg_exc)
+
     result = orchestrator.run_cycle(
         ts=ts, data_replay=data_replay, portfolio=portfolio, market=market,
         strategy_returns=_strategy_returns,
+        feedback_scales=_fb_scales or None,
+        apply_feedback_scale=_apply_fb_scale,
     )
+
+    # F8 shadow log: emit the would-be deployment delta per scaled strategy so the
+    # forensic report / operator can see what regime_scale would do before it goes live.
+    if result.feedback_shadow:
+        import json as _fb_json
+        log.info(
+            "F8 feedback_scale_shadow applied=%s scales=%s",
+            _apply_fb_scale,
+            _fb_json.dumps(result.feedback_shadow, default=str),
+        )
 
     log.info(
         "Portfolio cycle: strategies=%s before=%d after=%d constraints=%d final=%d",
@@ -1355,6 +1428,7 @@ def _run_cycle_inner() -> dict:
         len(result.constraints_fired),
         len(result.final_orders),
     )
+
     # FIX-E: surface actionable reason when constraints eliminate all strategy orders.
     _log_constraint_block_if_needed(result, _risk_cfg)
 
@@ -2579,8 +2653,16 @@ def _submit_portfolio_orders(
                             time_in_force="day",
                         )
                     else:
-                        whole_qty = max(1, int(order.quantity))
-                        log.info("P1-B: %s not fractionable — using qty=%d instead of notional", order.symbol, whole_qty)
+                        # F5: derive whole-share qty from the SCALED notional so regime_mult
+                        # (P0-09) applies to non-fractionable BUYs too. Using raw
+                        # int(order.quantity) here silently bypassed regime_mult on
+                        # whole-share names (mega-caps), leaking full-size deployment in
+                        # risk-off regimes. Zero behavior change when regime_mult == 1.0.
+                        whole_qty = max(1, int(notional / price))
+                        log.info(
+                            "P1-B: %s not fractionable — using qty=%d (regime_mult=%.2f, notional=$%.2f)",
+                            order.symbol, whole_qty, regime_mult, notional,
+                        )
                         base_kwargs = dict(
                             symbol=order.symbol,
                             qty=whole_qty,

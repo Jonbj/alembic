@@ -112,6 +112,26 @@ def test_load_loss_feedback_config_returns_defaults_on_missing_section():
     assert cfg["threshold_baseline"] == pytest.approx(0.30)
 
 
+def test_apply_regime_scale_defaults_to_false():
+    """F8 ships shadow-only: apply_regime_scale must default to False so the
+    feedback regime scale is measured (shadow-logged) but NOT applied to sizing
+    until an operator flips it after the shadow gate passes (QX-01)."""
+    with patch("builtins.open", side_effect=FileNotFoundError):
+        cfg = _load_loss_feedback_config()
+    assert cfg.get("apply_regime_scale") is False, (
+        "apply_regime_scale must default False — measure-before-enforce"
+    )
+
+
+def test_trading_yaml_ships_apply_regime_scale_false():
+    """The shipped config must keep apply_regime_scale: false until the F8 shadow
+    gate passes — guards against an accidental live flip."""
+    cfg = _load_loss_feedback_config()  # reads the real config/trading.yaml
+    assert cfg.get("apply_regime_scale") is False, (
+        "config/trading.yaml must ship apply_regime_scale: false (shadow-only)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Integration: run_loss_feedback_check (per-strategy)
 # ---------------------------------------------------------------------------
@@ -357,6 +377,75 @@ class TestTemporalDecay:
         s4 = result["per_strategy"]["S4"]
         assert s4["decayed"] is False
         mock_redis.set_feedback_entry_threshold.assert_not_called()
+
+    def test_s1_scale_decays_after_quiet_period(self):
+        """F8: S1's suppressed regime_scale must decay on the quiet period even
+        though S1's entry threshold is held at 0.0 (no entry gate).
+
+        Pre-fix the decay branch guard `current_threshold > baseline` excluded
+        S1 (0.0 > 0.30 is False), leaving its scale stuck until a 3-win streak —
+        a one-way suppressor on the strategy that bled most on 2026-07-10.
+        Post-fix decay fires when the scale is suppressed (current_scale < 1.0)
+        independent of the threshold.
+        """
+        # S1 trades, not triggered, only 2 consecutive wins (< recovery_win_streak)
+        trades = _make_trades([5, 3, -1, 2, 1], signal_id=None)
+        old_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+        result, mock_redis = _patched_run(
+            trades,
+            redis_threshold=0.0,   # S1 always 0.0
+            redis_scale=0.50,      # suppressed
+            redis_state={"last_adjustment_ts": old_ts, "reason": "triggered"},
+        )
+
+        s1 = result["per_strategy"]["S1"]
+        assert s1["decayed"] is True, (
+            "S1 suppressed scale must decay on quiet period (F8) — pre-fix it was "
+            "stuck because the decay guard required threshold > baseline"
+        )
+        assert s1["new_scale"] == pytest.approx(0.625, rel=1e-4), (
+            "0.50 / 0.80 = 0.625"
+        )
+        mock_redis.set_feedback_regime_scale.assert_called_once()
+
+    def test_s4_scale_decays_when_threshold_at_baseline_but_scale_suppressed(self):
+        """F8: a non-S1 strategy whose threshold is already at baseline but
+        whose scale is still suppressed must decay the scale. Pre-fix the
+        early-return in _step_threshold_down (current_threshold <= baseline)
+        short-circuited and left the scale stuck."""
+        trades = _make_trades([5, 3, -1, 2, 1], signal_id=123)
+        old_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+        result, mock_redis = _patched_run(
+            trades,
+            redis_threshold=0.30,  # at baseline
+            redis_scale=0.50,      # suppressed
+            redis_state={"last_adjustment_ts": old_ts, "reason": "triggered"},
+        )
+
+        s4 = result["per_strategy"]["S4"]
+        assert s4["decayed"] is True, (
+            "Suppressed scale must decay even when threshold is at baseline (F8)"
+        )
+        assert s4["new_scale"] == pytest.approx(0.625, rel=1e-4)
+        assert s4["new_threshold"] == pytest.approx(0.30, rel=1e-4), (
+            "threshold already at baseline — unchanged"
+        )
+
+    def test_no_decay_when_s1_fully_at_rest(self):
+        """S1 with threshold=0.0 and scale=1.0 has nothing to decay — guard
+        against the early-return change over-firing."""
+        trades = _make_trades([5, 3, -1, 2, 1], signal_id=None)
+        old_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+        result, mock_redis = _patched_run(
+            trades,
+            redis_threshold=0.0,
+            redis_scale=1.0,       # at rest
+            redis_state={"last_adjustment_ts": old_ts, "reason": "triggered"},
+        )
+
+        s1 = result["per_strategy"]["S1"]
+        assert s1["decayed"] is False
+        mock_redis.set_feedback_regime_scale.assert_not_called()
 
 
 class TestRedisWrites:

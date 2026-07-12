@@ -1556,6 +1556,12 @@ def _load_loss_feedback_config() -> dict:
         "cooldown_hours": 4,
         "recovery_win_streak": 3,
         "feedback_ttl_hours": 48,
+        # F8: wire feedback:regime_scale:S* into the portfolio path sizing.
+        # False = shadow-only (orchestrator records the would-be delta but does
+        # not apply the scale). Flip to True only after the shadow gate passes
+        # (>=1 trigger->recovery cycle observed per active strategy AND no
+        # over-suppression in a stable regime). measure-before-enforce (QX-01).
+        "apply_regime_scale": False,
     }
     try:
         with open(_TRADING_YAML) as f:
@@ -1605,7 +1611,14 @@ def _step_threshold_down(
     (threshold, scale) tuple, or None if already at baseline.
     """
     baseline = cfg["threshold_baseline"]
-    if current_threshold <= baseline and strategy != "S1":
+    # F8: decay is a per-lever concern. The threshold and the regime scale are
+    # independent levers; nothing-to-do is when BOTH are at rest. S1's threshold
+    # is held at 0.0 (no entry gate) but its scale can still be suppressed, so the
+    # threshold-at-baseline check alone must not short-circuit — and equally a
+    # non-S1 strategy at threshold-baseline with a suppressed scale must still
+    # decay the scale. Pre-fix this early-return stranded a suppressed scale
+    # until a 3-win recovery streak (one-way suppressor, worst for S1).
+    if current_threshold <= baseline and current_scale >= 1.0:
         return None
 
     new_threshold = max(current_threshold - cfg["threshold_step"], baseline)
@@ -1800,7 +1813,9 @@ def run_loss_feedback_check() -> dict:
                     except Exception as exc:
                         log.warning("Telegram alert failed for feedback recovery: %s", exc)
 
-        elif not outcome.triggered and current_threshold > cfg["threshold_baseline"]:
+        elif not outcome.triggered and (
+            current_threshold > cfg["threshold_baseline"] or current_scale < 1.0
+        ):
             decay_hours = cfg.get("threshold_decay_hours")
             if decay_hours and hours_since is not None and hours_since >= decay_hours:
                 stepped = _step_threshold_down(

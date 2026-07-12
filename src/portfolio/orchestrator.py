@@ -44,6 +44,10 @@ class CycleResult:
     constraints_fired: list[ConstraintViolation]
     final_orders: list[CombinedOrder]
     symbol_strategies: dict[str, list[str]] = field(default_factory=dict)
+    # F8 shadow: per-strategy {scale, unscaled_weight, scaled_weight} for strategies
+    # whose feedback regime scale was != 1.0 this cycle. Lets the scheduler log the
+    # deployment delta (measure-before-enforce) without applying the scale live.
+    feedback_shadow: dict[str, dict] = field(default_factory=dict)
 
 
 class PortfolioOrchestrator:
@@ -79,6 +83,8 @@ class PortfolioOrchestrator:
         portfolio: VirtualPortfolio,
         market: MarketSnapshot,
         strategy_returns: dict[str, list[float]] | None = None,
+        feedback_scales: dict[str, float] | None = None,
+        apply_feedback_scale: bool = True,
     ) -> CycleResult:
         """Execute one portfolio cycle.
 
@@ -92,6 +98,17 @@ class PortfolioOrchestrator:
             portfolio:        Current virtual portfolio state.
             market:           Current market snapshot (prices, volumes).
             strategy_returns: Optional per-strategy daily return series for vol targeting.
+            feedback_scales: Optional per-strategy sizing scale (F8 loss-feedback
+                de-risk/re-risk throttle). Each strategy's `wt * alloc` contribution
+                is multiplied by `feedback_scales.get(strategy_id, 1.0)` before the
+                weighted-sum merge, preserving per-strategy isolation (a loss in one
+                sleeve shrinks only that sleeve). None / missing strategy → 1.0
+                (identity, zero behavior change when the scheduler flag is off).
+            apply_feedback_scale: When False, the scale is NOT applied to the merge
+                (weights stay unscaled) but `feedback_shadow` still records the
+                would-be unscaled-vs-scaled delta. This is the measure-before-enforce
+                path: the scheduler logs the shadow for N cycles before flipping the
+                flag to True. Default True (passing scales applies them).
 
         Returns:
             CycleResult with strategies run, order counts, constraint violations, orders.
@@ -105,6 +122,13 @@ class PortfolioOrchestrator:
         orders_per_strategy: dict[str, int] = {}
         merged_weights: dict[str, float] = {}
         symbol_strategies: dict[str, list[str]] = {}
+        feedback_shadow: dict[str, dict] = {}
+
+        # F8: per-strategy feedback regime scale (loss-feedback de-risk/re-risk
+        # throttle). None / missing strategy → 1.0 (identity). Applied to each
+        # strategy's sleeve contribution before the weighted-sum merge so a loss
+        # in one sleeve shrinks only that sleeve (Phase 5 decouple preserved).
+        _fb_scales = feedback_scales or {}
 
         nav = self._compute_nav(portfolio, market)
 
@@ -134,9 +158,25 @@ class PortfolioOrchestrator:
                 # Two strategies both holding a symbol correctly ADD their contributions —
                 # that symbol genuinely receives combined capital from both sleeves.
                 alloc = entry.allocation_pct
+                _fb_scale = float(_fb_scales.get(entry.strategy_id, 1.0) or 1.0)
+                _effective_scale = _fb_scale if apply_feedback_scale else 1.0
                 for sym, wt in tw.items():
-                    merged_weights[sym] = merged_weights.get(sym, 0.0) + wt * alloc
+                    merged_weights[sym] = merged_weights.get(sym, 0.0) + wt * alloc * _effective_scale
                     symbol_strategies.setdefault(sym, []).append(entry.strategy_id)
+
+                # F8 shadow: record this strategy's unscaled vs would-be-scaled
+                # sleeve contribution so the scheduler can log the deployment delta.
+                # Recorded whenever a non-identity scale is in play, regardless of
+                # apply_feedback_scale — so measure-before-enforce can observe the
+                # would-be effect without applying it.
+                if _fb_scale != 1.0:
+                    _unscaled = sum(wt * alloc for _, wt in tw.items())
+                    feedback_shadow[entry.strategy_id] = {
+                        "scale": _fb_scale,
+                        "unscaled_weight": _unscaled,
+                        "scaled_weight": _unscaled * _fb_scale,
+                        "applied": apply_feedback_scale,
+                    }
 
             except Exception as exc:
                 log.error(
@@ -246,6 +286,7 @@ class PortfolioOrchestrator:
             constraints_fired=violations,
             final_orders=combined,
             symbol_strategies=symbol_strategies,
+            feedback_shadow=feedback_shadow,
         )
 
     # ── Private ────────────────────────────────────────────────────────────────
