@@ -104,7 +104,10 @@ def test_worker_requests_iex_feed():
 
     with patch("src.workers.performance.PostgreSQLStore", return_value=mock_pg), \
          patch("psycopg2.connect", return_value=MagicMock()), \
+         patch("src.workers.performance.config") as mock_cfg, \
          patch("alpaca.data.historical.StockHistoricalDataClient", return_value=mock_client):
+        mock_cfg.ALPACA_API_KEY = "key"
+        mock_cfg.ALPACA_SECRET_KEY = "secret"
         run_forward_return_worker()
 
     req = mock_client.get_stock_bars.call_args[0][0]
