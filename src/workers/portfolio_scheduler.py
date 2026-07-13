@@ -606,11 +606,35 @@ def _apply_idempotency_filter(orders: list, skip_syms: set[str]) -> list:
     return [o for o in orders if not (o.symbol in skip_syms and o.side == _OS.BUY)]
 
 
+def _load_sector_map() -> dict[str, str] | None:
+    """Invert the trading.yaml `sectors:` block to {symbol: sector}.
+
+    Fail-open (None) when the block is missing/unreadable: the enforcer treats
+    None as 'sector pass disabled', matching pre-2026-07-13 behavior.
+    """
+    try:
+        import yaml
+        with open(_TRADING_YAML) as f:
+            raw = yaml.safe_load(f) or {}
+        sectors = raw.get("sectors") or {}
+        if not sectors:
+            return None
+        return {
+            str(sym): str(sector)
+            for sector, symbols in sectors.items()
+            for sym in (symbols or [])
+        }
+    except Exception as exc:
+        log.warning("Could not load sector map (%s) — sector cap disabled", exc)
+        return None
+
+
 def _load_risk_config() -> dict:
     """Return the full risk section from trading.yaml; safe defaults on error (P2-05-B)."""
     defaults: dict = {
         "max_portfolio_exposure": 0.50,
         "max_single_asset_pct": 0.10,
+        "max_sector_exposure": 0.0,
         "stop_loss": 0.02,
         "portfolio_drawdown": 0.05,
         "stop_loss_mode": "fixed",
@@ -1392,6 +1416,8 @@ def _run_cycle_inner() -> dict:
         constraint_enforcer=ConstraintEnforcer(
             max_portfolio_exposure=_risk_cfg["max_portfolio_exposure"],
             max_single_asset_pct=_risk_cfg["max_single_asset_pct"],
+            sector_map=_load_sector_map(),
+            max_sector_pct=_risk_cfg.get("max_sector_exposure", 0.0),
         ),
         vol_targeter=_vol_targeter,
     )

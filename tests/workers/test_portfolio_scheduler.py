@@ -1200,3 +1200,22 @@ def test_check_strategy_zero_weights_no_alert_between_threshold_multiples():
         )
 
     mock_fire.assert_not_called()
+
+
+class TestSectorMapLoader:
+    def test_load_sector_map_inverts_yaml(self, tmp_path, monkeypatch):
+        cfg = tmp_path / "trading.yaml"
+        cfg.write_text(
+            "sectors:\n  semis: [NVDA, AMD]\n  tech: [AAPL]\n"
+        )
+        from src.workers import portfolio_scheduler as ps
+        monkeypatch.setattr(ps, "_TRADING_YAML", cfg)
+        result = ps._load_sector_map()
+        assert result == {"NVDA": "semis", "AMD": "semis", "AAPL": "tech"}
+
+    def test_load_sector_map_absent_returns_none(self, tmp_path, monkeypatch):
+        cfg = tmp_path / "trading.yaml"
+        cfg.write_text("risk: {}\n")
+        from src.workers import portfolio_scheduler as ps
+        monkeypatch.setattr(ps, "_TRADING_YAML", cfg)
+        assert ps._load_sector_map() is None
