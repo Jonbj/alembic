@@ -68,6 +68,13 @@ signal — the signal only gates selection. Replace the bullet with:
 > by the orchestrator's 2% delta band and the anti-churn hysteresis in trading.yaml.
 ```
 
+> **Disambiguation (added 2026-07-13, after commit 22c8fe5/F6a):** there are TWO
+> distinct `target_vol` in this system. (1) `S1Config.target_vol` = per-position
+> inverse-vol sizing input (code default 0.10) — THIS is what the doc fix above
+> refers to. (2) The PORTFOLIO-level `PortfolioVolTargeter` target_vol, now
+> config-driven via the new `vol_target:` section in `config/trading.yaml` (F6a)
+> — do NOT touch that section or conflate the two when fixing the docs.
+
 - [ ] **Step 2: Commit**
 
 ```bash
