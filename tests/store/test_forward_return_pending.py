@@ -46,3 +46,13 @@ def test_bulk_add_forward_returns_writes_three_horizons(pg_store):
     # Param order: (fwd_1d, fwd_3d, fwd_5d, id)
     assert batch[0] == (0.01, 0.02, None, 42)
     assert batch[1] == (None, None, 0.05, 43)
+
+
+def test_ic_queries_still_exclude_fallback_signals():
+    """Populating forward_return on fallback rows is safe ONLY because every
+    IC/LOO consumer filters fallback_used = FALSE in SQL. If someone removes
+    one of those filters, FinBERT fallback rows would silently pollute the
+    ensemble IC series. Three consumers exist as of 2026-07-12."""
+    from pathlib import Path
+    src = Path("src/store/pg_store.py").read_text()
+    assert src.upper().count("FALLBACK_USED = FALSE") >= 3
