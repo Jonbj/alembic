@@ -2076,15 +2076,30 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    _FETCH_PENDING_FWD = """
+        SELECT id, symbol, generated_at
+        FROM sentiment_signals
+        WHERE (forward_return IS NULL
+               OR forward_return_3d IS NULL
+               OR forward_return_5d IS NULL)
+          AND generated_at < NOW() - INTERVAL '1 day'
+          AND generated_at > NOW() - INTERVAL '1 day' * %s
+        ORDER BY symbol, generated_at
+    """
+
     def fetch_signals_pending_forward_return(
         self, days_back: int = 60
     ) -> list[tuple]:
         """Fetch signals that need a forward return populated.
 
-        Returns (id, symbol, generated_at) for non-fallback signals that:
-          - Have no forward_return yet
+        Returns (id, symbol, generated_at) for signals — including FinBERT
+        fallback rows (they are tradeable via the no-fresh-ensemble path and
+        needed for shadow-model evaluation) — that:
+          - Are missing at least one horizon (1d/3d/5d)
           - Are older than 1 day (need next trading day to have closed)
           - Are within days_back days (avoid re-processing old history)
+
+        A row stays pending until every computable horizon is filled.
 
         Args:
             days_back: Maximum lookback window in days (default 60).
@@ -2092,18 +2107,7 @@ class PostgreSQLStore:
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT id, symbol, generated_at
-                    FROM sentiment_signals
-                    WHERE forward_return IS NULL
-                      AND fallback_used = false
-                      AND generated_at < NOW() - INTERVAL '1 day'
-                      AND generated_at > NOW() - INTERVAL '1 day' * %s
-                    ORDER BY symbol, generated_at
-                    """,
-                    (days_back,),
-                )
+                cur.execute(self._FETCH_PENDING_FWD, (days_back,))
                 return cur.fetchall()
         except Exception:
             conn.rollback()
