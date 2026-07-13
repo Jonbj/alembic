@@ -29,3 +29,20 @@ def test_pending_query_covers_all_horizons():
     assert "forward_return IS NULL" in sql
     assert "forward_return_3d IS NULL" in sql
     assert "forward_return_5d IS NULL" in sql
+
+
+def test_bulk_add_forward_returns_writes_three_horizons(pg_store):
+    """Writer takes (id, fwd_1d, fwd_3d, fwd_5d); None preserves existing values
+    via COALESCE so partially-computable rows can be completed later."""
+    updates = [(42, 0.01, 0.02, None), (43, None, None, 0.05)]
+    pg_store.bulk_add_forward_returns(updates)
+
+    cur = pg_store._conn.cursor.return_value
+    assert cur.executemany.call_count == 1
+    sql, batch = cur.executemany.call_args[0]
+    assert "COALESCE" in sql
+    assert "forward_return_3d" in sql and "forward_return_5d" in sql
+    batch = list(batch)
+    # Param order: (fwd_1d, fwd_3d, fwd_5d, id)
+    assert batch[0] == (0.01, 0.02, None, 42)
+    assert batch[1] == (None, None, 0.05, 43)

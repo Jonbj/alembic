@@ -2200,12 +2200,15 @@ class PostgreSQLStore:
             raise
 
     def bulk_add_forward_returns(
-        self, updates: list[tuple[int, float]]
+        self, updates: list[tuple[int, float | None, float | None, float | None]]
     ) -> int:
-        """Update forward_return for multiple signals in a single transaction.
+        """Update 1d/3d/5d forward returns for multiple signals in one transaction.
 
         Args:
-            updates: List of (signal_id, forward_return) tuples.
+            updates: List of (signal_id, forward_return, forward_return_3d,
+                forward_return_5d) tuples. A None horizon is left untouched via
+                COALESCE (preserves any previously-written value) so a row with
+                only partially-computable horizons can be completed on a later run.
 
         Returns:
             Number of rows updated.
@@ -2216,8 +2219,14 @@ class PostgreSQLStore:
         try:
             with conn.cursor() as cur:
                 cur.executemany(
-                    "UPDATE sentiment_signals SET forward_return = %s WHERE id = %s",
-                    [(ret, sid) for sid, ret in updates],
+                    """
+                    UPDATE sentiment_signals
+                    SET forward_return    = COALESCE(%s, forward_return),
+                        forward_return_3d = COALESCE(%s, forward_return_3d),
+                        forward_return_5d = COALESCE(%s, forward_return_5d)
+                    WHERE id = %s
+                    """,
+                    [(f1, f3, f5, sid) for sid, f1, f3, f5 in updates],
                 )
                 updated = cur.rowcount
             conn.commit()
