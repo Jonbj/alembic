@@ -1458,10 +1458,13 @@ def run_forward_return_worker() -> dict:
         for symbol, signals in by_symbol.items():
             try:
                 # Determine date range: earliest signal date minus 1 day buffer,
-                # latest signal date plus 3 days (covers weekends / holidays for T+1).
+                # latest signal date plus 12 days. T+5 TRADING days spans up to
+                # 10 calendar days (Friday signal before a Monday holiday:
+                # Fri -> next Fri = +7, plus holiday = +10); +12 adds margin so
+                # the 5d horizon is never structurally unreachable.
                 dates = [ts for _, ts in signals]
                 start = min(dates) - timedelta(days=2)
-                end = max(dates) + timedelta(days=9)
+                end = max(dates) + timedelta(days=12)
 
                 req = StockBarsRequest(
                     symbol_or_symbols=symbol,
