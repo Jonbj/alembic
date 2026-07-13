@@ -85,3 +85,27 @@ def test_worker_partial_horizons_when_future_bars_missing():
     sid, f1, f3, f5 = updates[0]
     assert abs(f1 - 0.01) < 1e-9
     assert f3 is None and f5 is None
+
+
+def test_worker_requests_iex_feed():
+    """The bars request must pin feed=IEX: the default (SIP) is rejected by the
+    paper subscription during market hours ('recent SIP data'), silently zeroing
+    coverage for every symbol (194/196 failed on the 2026-07-13 backfill)."""
+    from alpaca.data.enums import DataFeed
+
+    signal_rows = [(7, "AAPL", datetime(2026, 6, 1, 10, 0, tzinfo=timezone.utc))]
+    bars = _bars([("2026-06-01", 100.0), ("2026-06-02", 101.0)])
+
+    mock_pg = MagicMock()
+    mock_pg.fetch_signals_pending_forward_return.return_value = signal_rows
+    mock_pg.bulk_add_forward_returns.return_value = 1
+    mock_client = MagicMock()
+    mock_client.get_stock_bars.return_value = bars
+
+    with patch("src.workers.performance.PostgreSQLStore", return_value=mock_pg), \
+         patch("psycopg2.connect", return_value=MagicMock()), \
+         patch("alpaca.data.historical.StockHistoricalDataClient", return_value=mock_client):
+        run_forward_return_worker()
+
+    req = mock_client.get_stock_bars.call_args[0][0]
+    assert req.feed == DataFeed.IEX

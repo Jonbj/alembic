@@ -1422,6 +1422,7 @@ def run_forward_return_worker() -> dict:
     from collections import defaultdict
 
     import psycopg2
+    from alpaca.data.enums import DataFeed
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
@@ -1471,6 +1472,10 @@ def run_forward_return_worker() -> dict:
                     timeframe=TimeFrame.Day,
                     start=start,
                     end=end,
+                    # Pin IEX: the SIP default is rejected by the paper
+                    # subscription while the market is open ("recent SIP data"),
+                    # which silently zeroes coverage for every symbol.
+                    feed=DataFeed.IEX,
                 )
                 bars_df = data_client.get_stock_bars(req).df
 
