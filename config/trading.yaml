@@ -193,7 +193,13 @@ risk:
 #   (target_vol=0.15 -> vol_scale ~0.96 -> 0.50 * 1.0 * 0.96 = 48%, ok;
 #    target_vol=0.20 -> 0.50 * 1.0 * 1.28 = 64% -> hard cap binds).
 vol_target:
-  target_vol: 0.10            # desired annualized portfolio volatility
+  # Flipped 0.10 -> 0.12 2026-07-13 after the F6 (b) read-only replay
+  # (scripts/audit_vol_target_replay.py, 60-day window) showed: realized vol
+  # ~16%, vol_scale 0.10->0.62 / 0.12->0.74, 0% clamp at floor for both, and
+  # 0% days breaching the 0.50 hard cap even at regime_mult=1.0 (max gross 0.42
+  # at 0.12 vs 0.53 at 0.15). 0.12 targets 12% portfolio vol (still below the
+  # ~16% realized), +~4pp deployment at the current regime, no headroom risk.
+  target_vol: 0.12            # desired annualized portfolio volatility
   clamp_low: 0.5              # min vol-targeting scale (floor on de-leveraging)
   clamp_high: 2.0             # max vol-targeting scale (cap on re-leveraging)
 
