@@ -311,7 +311,7 @@ class TestConnectionPoolSafety:
         mock_conn.commit.side_effect = Exception("commit failed")
         store = PostgreSQLStore(conn=mock_conn, use_pool=False)
         with pytest.raises(Exception, match="commit failed"):
-            store.bulk_add_forward_returns([(1, 0.02), (2, -0.01)])
+            store.bulk_add_forward_returns([(1, 0.02, None, None), (2, -0.01, None, None)])
         mock_conn.rollback.assert_called_once()
 
     def test_close_does_not_double_release_after_exception(self):
