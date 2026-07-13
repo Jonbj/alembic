@@ -1398,17 +1398,21 @@ def check_and_apply_weights():
 
 @app.task(name="src.workers.performance.run_forward_return_worker")
 def run_forward_return_worker() -> dict:
-    """Populate forward_return for sentiment signals that are at least 1 day old.
+    """Populate forward_return/_3d/_5d for sentiment signals at least 1 day old.
 
     Scheduled daily at 22:00 UTC (6pm ET, after US market close + settlement).
-    Uses Alpaca StockHistoricalDataClient to fetch daily bars.
+    Uses Alpaca StockHistoricalDataClient to fetch daily bars. Now includes
+    FinBERT fallback signals (previously excluded — see migration 036 / pending
+    query change), so coverage is no longer capped at ~29% of the stream.
 
-    Forward return definition:
-        fwd_ret = (close_{T+1} - close_T) / close_T
+    Forward return definition (per horizon n in {1, 3, 5} TRADING days):
+        fwd_ret_n = (close_{T+n} - close_T) / close_T
 
-    Where T = trading day of the signal and T+1 = next trading day.
-    Signals generated after market close (>= 21:00 UTC / 4pm ET) are treated
-    as belonging to the NEXT trading day, so their T+1 is T+2 calendar days.
+    Where T = trading day of the signal. Signals generated after market close
+    (>= 21:00 UTC / 4pm ET) are treated as belonging to the NEXT trading day.
+    A horizon whose future bar isn't available yet is left NULL and the row
+    stays pending — bulk_add_forward_returns' COALESCE preserves any horizon
+    already computed on a prior run, so partial rows complete incrementally.
 
     Skips symbols without available daily bars (ETFs, ADRs, delisted tickers).
 
@@ -1449,7 +1453,7 @@ def run_forward_return_worker() -> dict:
             secret_key=config.ALPACA_SECRET_KEY,
         )
 
-        updates: list[tuple[int, float]] = []
+        updates: list[tuple[int, float | None, float | None, float | None]] = []
 
         for symbol, signals in by_symbol.items():
             try:
@@ -1457,7 +1461,7 @@ def run_forward_return_worker() -> dict:
                 # latest signal date plus 3 days (covers weekends / holidays for T+1).
                 dates = [ts for _, ts in signals]
                 start = min(dates) - timedelta(days=2)
-                end = max(dates) + timedelta(days=4)
+                end = max(dates) + timedelta(days=9)
 
                 req = StockBarsRequest(
                     symbol_or_symbols=symbol,
@@ -1495,20 +1499,30 @@ def run_forward_return_worker() -> dict:
 
                         # Find T: the first trading day on or after signal_date.
                         t_dates = [d for d in trading_dates if d >= signal_date]
-                        if len(t_dates) < 2:
+                        if not t_dates:
                             stats["skipped_no_data"] += 1
                             continue
 
-                        t0, t1 = t_dates[0], t_dates[1]
-                        close_t0 = close_by_date[t0]
-                        close_t1 = close_by_date[t1]
-
+                        close_t0 = close_by_date[t_dates[0]]
                         if close_t0 == 0:
                             stats["skipped_no_data"] += 1
                             continue
 
-                        fwd_ret = (close_t1 - close_t0) / close_t0
-                        updates.append((sid, fwd_ret))
+                        # Horizons in TRADING days from T0; None when the future
+                        # bar is not yet available (row stays pending for that
+                        # horizon; COALESCE in the writer preserves prior values).
+                        fwd: dict[int, float | None] = {}
+                        for n in (1, 3, 5):
+                            if len(t_dates) > n:
+                                fwd[n] = (close_by_date[t_dates[n]] - close_t0) / close_t0
+                            else:
+                                fwd[n] = None
+
+                        if all(v is None for v in fwd.values()):
+                            stats["skipped_no_data"] += 1
+                            continue
+
+                        updates.append((sid, fwd[1], fwd[3], fwd[5]))
 
                     except Exception as e:
                         log.debug("Error computing fwd return for signal %d (%s): %s", sid, symbol, e)
