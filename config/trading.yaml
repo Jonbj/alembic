@@ -118,6 +118,22 @@ symbols:
     - WDC
     - SPCX
 
+# Sector map for the MAX_SECTOR_EXPOSURE constraint (coarse 11-group taxonomy;
+# formalizes the watchlist comment blocks). Symbols missing here fall into the
+# "unknown" bucket, which is capped as its own sector.
+sectors:
+  tech: [AAPL, MSFT, GOOGL, AMZN, META, CRM, ADBE, ORCL, NOW, SNOW, CSCO, PLTR, PANW, IBM, SAP, BABA, BIDU, JD, SONY, INFY, XLK]
+  semis: [NVDA, AMD, AVGO, QCOM, TXN, INTC, MU, ASML, ARM, AMAT, TSM, MRVL, DELL, WDC, SOXX]
+  financials: [JPM, BAC, GS, MS, WFC, C, AXP, MA, V, BRK.B, UBS, DB, HOOD, XLF]
+  consumer: [WMT, COST, MCD, SBUX, NKE, HD, TSLA, GM, F, TM, PG]
+  media: [DIS, CMCSA, NFLX, ROKU, RDDT]
+  healthcare: [JNJ, PFE, MRK, UNH, ABBV, LLY, NVO, AZN, XLV]
+  energy: [CVX, XOM, SHEL, BP, PBR, XLE]
+  industrials: [BA, GE, CAT, MMM]
+  materials: [RIO, VALE]
+  telecom: [T, VZ, TMUS, ERIC, NOK]
+  etf_broad: [SPY, QQQ, IWM, SPCX]
+
 execution:
   # Authoritative execution engine.
   # portfolio         → only portfolio-cycle (orchestrator) sends orders
@@ -173,6 +189,13 @@ risk:
   # Position limits
   max_position_pct: 0.10
   max_portfolio_exposure: 0.50
+
+  # Per-sector BUY exposure cap (fraction of NAV). 0 = DISABLED (current state).
+  # Evidence: 2026-07-10 (3 semis) and 2026-07-13 (9 semis + SOXX, same cycle)
+  # stopped out together. Suggested operator value when enabling: 0.10.
+  # NOTE: complementary to the F9a stop redesign — caps concentration, does not
+  # fix sub-sigma stops.
+  max_sector_exposure: 0.0
 
   min_trade_pnl_threshold: 5.0   # $ min avg net P&L per trade before ⚠️ alert in weekly report
 
