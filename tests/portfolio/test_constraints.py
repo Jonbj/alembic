@@ -490,3 +490,53 @@ def test_iterative_no_violations_completes_without_error(unit_market, std_alloca
     result, violations = enforcer.enforce(orders, unit_market, nav=1000.0, allocations=std_allocations)
     assert violations == []
     assert all(o.quantity == pytest.approx(10.0) for o in result)
+
+
+# ── Config-driven sector cap (max_sector_pct constructor param) ────────────────
+
+
+class TestSectorCapConfig:
+    def _orders_two_semis(self):
+        # Two BUY orders in the same sector totalling 30% of a 100k NAV, using
+        # the file's existing helpers. Unit-price market (like unit_market)
+        # keeps notional == quantity: 15,000 qty each == $15,000 notional each.
+        market = _market({"NVDA": 1.0, "AMD": 1.0})
+        orders = [
+            _combined("NVDA", OrderSide.BUY, 15_000.0, "S1", 0.5),
+            _combined("AMD", OrderSide.BUY, 15_000.0, "S1", 0.5),
+        ]
+        return orders, market
+
+    def test_sector_cap_param_overrides_module_default(self):
+        # Isolate the sector constraint from MAX_SINGLE_ASSET_PCT (default 0.10
+        # would otherwise scale each $15k order down to $10k first, landing
+        # exactly at the 20% sector cap with no violation) — same isolation
+        # pattern as every other MAX_SECTOR_EXPOSURE test in this file.
+        enforcer = ConstraintEnforcer(
+            sector_map={"NVDA": "semis", "AMD": "semis"},
+            max_sector_pct=0.20,
+            max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+            max_strategy_overshoot=100.0,
+        )
+        orders, market = self._orders_two_semis()
+        result, violations = enforcer.enforce(orders, market, nav=100_000, allocations={})
+        assert any(v.constraint_name == "MAX_SECTOR_EXPOSURE" for v in violations)
+        total = sum(o.quantity * market.price_of(o.symbol) for o in result if o.side.value == "BUY")
+        assert total <= 0.20 * 100_000 + 1e-6
+
+    def test_sector_cap_zero_disables(self):
+        enforcer = ConstraintEnforcer(
+            sector_map={"NVDA": "semis", "AMD": "semis"},
+            max_sector_pct=0.0,
+            max_single_asset_pct=1.0, max_portfolio_exposure=10.0,
+            max_strategy_overshoot=100.0,
+        )
+        orders, market = self._orders_two_semis()
+        _, violations = enforcer.enforce(orders, market, nav=100_000, allocations={})
+        assert not any(v.constraint_name == "MAX_SECTOR_EXPOSURE" for v in violations)
+
+    def test_default_unchanged_without_param(self):
+        """Backtests constructing ConstraintEnforcer(sector_map=...) without the
+        new param keep the historical 0.25 behavior."""
+        enforcer = ConstraintEnforcer(sector_map={"NVDA": "semis"})
+        assert enforcer._max_sector_pct == 0.25

@@ -45,7 +45,9 @@ class ConstraintEnforcer:
         1. MAX_SINGLE_ASSET_PCT    — per-symbol BUY notional ≤ max_single_asset_pct × NAV
         2. MAX_STRATEGY_EXPOSURE   — per-strategy BUY notional ≤ alloc_pct × max_strategy_overshoot × NAV
         3. MAX_PORTFOLIO_EXPOSURE  — total BUY notional ≤ max_portfolio_exposure × NAV
-        4. MAX_SECTOR_EXPOSURE     — per-sector BUY notional ≤ 25% NAV (when sector_map provided)
+        4. MAX_SECTOR_EXPOSURE     — per-sector BUY notional ≤ max_sector_pct × NAV
+           (default 0.25; ≤0 disables; live value from trading.yaml
+           risk.max_sector_exposure; when sector_map provided)
         5. MAX_CORRELATION_CLUSTER — high-corr strategy pair: reduce higher-vol by 20%
 
     When violated, orders for the affected scope are scaled down proportionally.
@@ -64,12 +66,14 @@ class ConstraintEnforcer:
         max_strategy_overshoot: float = 1.50,
         sector_map: Optional[dict[str, str]] = None,
         strategy_returns: Optional[dict[str, list[float]]] = None,
+        max_sector_pct: float = _MAX_SECTOR_PCT,
     ) -> None:
         self._max_single_asset_pct = max_single_asset_pct
         self._max_portfolio_exposure = max_portfolio_exposure
         self._max_strategy_overshoot = max_strategy_overshoot
         self._sector_map = sector_map
         self._strategy_returns = strategy_returns or {}
+        self._max_sector_pct = max_sector_pct
 
     def enforce(
         self,
@@ -255,10 +259,10 @@ class ConstraintEnforcer:
         market: MarketSnapshot,
         nav: float,
     ) -> tuple[list[CombinedOrder], list[ConstraintViolation]]:
-        if self._sector_map is None:
+        if self._sector_map is None or self._max_sector_pct <= 0:
             return orders, []
 
-        cap = _MAX_SECTOR_PCT * nav
+        cap = self._max_sector_pct * nav
         violations: list[ConstraintViolation] = []
 
         by_sector: dict[str, list[int]] = {}
@@ -281,7 +285,7 @@ class ConstraintEnforcer:
                     strategy_id=strategy_id,
                     constraint_name="MAX_SECTOR_EXPOSURE",
                     current_value=total_notional / nav,
-                    threshold=_MAX_SECTOR_PCT,
+                    threshold=self._max_sector_pct,
                 ))
                 log.warning(
                     "MAX_SECTOR_EXPOSURE violated: sector=%s strategy=%s "
