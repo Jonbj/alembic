@@ -17,16 +17,34 @@ class PortfolioVolTargeter:
     """Scale BUY order quantities so the combined portfolio hits a target annualized volatility.
 
     Vol is estimated via EWMA variance on the average of strategy returns, then annualized.
-    The resulting scale factor is clamped to [0.5, 2.0] to avoid extreme leverage.
+    The resulting scale factor is clamped to [clamp_low, clamp_high] (default [0.5, 2.0])
+    to avoid extreme leverage.
 
     Args:
-        target_vol: desired annualized portfolio volatility (default 10%)
-        span:       EWMA span in bars (default 60)
+        target_vol:  desired annualized portfolio volatility (default 10%)
+        span:        EWMA span in bars (default 60)
+        clamp_low:   minimum vol-targeting scale, floor on de-leveraging (default 0.5)
+        clamp_high:  maximum vol-targeting scale, cap on re-leveraging (default 2.0)
+
+    target_vol and the clamp bounds are config-driven (see load_vol_target_config /
+    config/trading.yaml `vol_target`). Defaults preserve the status quo so making
+    them configurable is zero behavior change. Calibration is a risk-budget decision
+    (measure-before-enforce, QX-01): do not raise target_vol without a read-only
+    replay shadow confirming the implied portfolio vol stays in band and the
+    max_portfolio_exposure hard cap is not breached at regime_mult=1.0.
     """
 
-    def __init__(self, target_vol: float = 0.10, span: int = 60) -> None:
+    def __init__(
+        self,
+        target_vol: float = 0.10,
+        span: int = 60,
+        clamp_low: float = _CLAMP_LOW,
+        clamp_high: float = _CLAMP_HIGH,
+    ) -> None:
         self.target_vol = target_vol
         self.span = span
+        self.clamp_low = clamp_low
+        self.clamp_high = clamp_high
 
     def estimate_vol(self, strategy_returns: dict[str, list[float]]) -> float:
         """Return EWMA-estimated annualized portfolio vol from strategy returns.
@@ -52,15 +70,15 @@ class PortfolioVolTargeter:
         return math.sqrt(ewma_var * _ANNUALIZE)
 
     def compute_scale(self, estimated_vol: float) -> float:
-        """Return the vol-targeting scale factor, clamped to [0.5, 2.0]."""
+        """Return the vol-targeting scale factor, clamped to [clamp_low, clamp_high]."""
         if estimated_vol <= 0.0:
             return 1.0  # unknown vol → no-op (neutral), not max leverage
         raw = self.target_vol / estimated_vol
-        # Clamp scale to [0.5, 2.0] to prevent extreme de-leveraging or over-leveraging.
-        # Without a floor, a vol spike could scale all orders to near-zero (fully
-        # exiting all positions). Without a cap, a low-vol period could push leverage
-        # to 2× or more, violating broker margin requirements.
-        return max(_CLAMP_LOW, min(_CLAMP_HIGH, raw))
+        # Clamp scale to [clamp_low, clamp_high] to prevent extreme de-leveraging or
+        # over-leveraging. Without a floor, a vol spike could scale all orders to
+        # near-zero (fully exiting all positions). Without a cap, a low-vol period
+        # could push leverage to 2× or more, violating broker margin requirements.
+        return max(self.clamp_low, min(self.clamp_high, raw))
 
     def scale_orders(
         self, orders: list[CombinedOrder], scale: float
@@ -73,3 +91,38 @@ class PortfolioVolTargeter:
             else:
                 result.append(order)
         return result
+
+
+def load_vol_target_config() -> dict:
+    """Load the ``vol_target`` section from ``config/trading.yaml`` with safe
+    defaults equal to the status quo (zero behavior change).
+
+    Returns a kwargs dict suitable for ``PortfolioVolTargeter(**cfg)``:
+    ``target_vol``, ``clamp_low``, ``clamp_high`` (and ``span`` only if set).
+    Co-located with the targeter so the calibration knobs live with the module
+    that owns them (locality), and the scheduler can stay thin.
+
+    measure-before-enforce (QX-01): defaults ship at status quo; raising
+    ``target_vol`` is an operator decision after a read-only replay shadow
+    (see ``scripts/audit_deployment_decomposition.py``) confirms the implied
+    portfolio vol band and headroom under the ``max_portfolio_exposure`` cap.
+    """
+    import yaml
+    from pathlib import Path
+
+    _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
+    defaults = {
+        "target_vol": 0.10,
+        "clamp_low": _CLAMP_LOW,
+        "clamp_high": _CLAMP_HIGH,
+    }
+    try:
+        with open(_TRADING_YAML) as f:
+            cfg = yaml.safe_load(f) or {}
+        section = cfg.get("vol_target", {}) or {}
+        out = {**defaults, **{k: section[k] for k in defaults if k in section}}
+        if "span" in section:
+            out["span"] = section["span"]
+        return out
+    except Exception:
+        return defaults

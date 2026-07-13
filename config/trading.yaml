@@ -183,6 +183,20 @@ risk:
     recovery_drawdown_pct: 0.025  # unlock when drawdown drops below this (half of trigger)
     require_non_panic_regime: true # do not unlock while regime == high_vol
 
+# PortfolioVolTargeter calibration (F6). These were hardcoded in the scheduler;
+# they are now config-driven so the target vol and clamp can be calibrated
+# without a code change. Values below = status quo (zero behavior change).
+# measure-before-enforce (QX-01): do NOT raise target_vol without a read-only
+# replay shadow (scripts/audit_deployment_decomposition.py) confirming the
+# implied portfolio vol stays in band and the 0.50 max_portfolio_exposure cap
+# is not breached at regime_mult=1.0
+#   (target_vol=0.15 -> vol_scale ~0.96 -> 0.50 * 1.0 * 0.96 = 48%, ok;
+#    target_vol=0.20 -> 0.50 * 1.0 * 1.28 = 64% -> hard cap binds).
+vol_target:
+  target_vol: 0.10            # desired annualized portfolio volatility
+  clamp_low: 0.5              # min vol-targeting scale (floor on de-leveraging)
+  clamp_high: 2.0             # max vol-targeting scale (cap on re-leveraging)
+
 schedule:
   # Celery beat intervals
   sentiment_worker_minutes: 15

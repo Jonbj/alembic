@@ -336,6 +336,21 @@ def _read_feedback_regime_scales(redis_url: str, strategy_ids) -> dict[str, floa
         return {}
 
 
+def _build_vol_targeter():
+    """Construct the PortfolioVolTargeter from config/trading.yaml `vol_target` (F6).
+
+    Co-locates the config read with the targeter so target_vol / clamp are
+    calibratable without a code change. Defaults = status quo (zero behavior
+    change). Returns (targeter, cfg) so the caller can log the active config.
+    measure-before-enforce (QX-01): do not raise target_vol without a read-only
+    replay shadow (scripts/audit_deployment_decomposition.py) confirming the
+    implied vol band and headroom under max_portfolio_exposure at regime_mult=1.0.
+    """
+    from src.portfolio.vol_targeting import PortfolioVolTargeter, load_vol_target_config
+    cfg = load_vol_target_config()
+    return PortfolioVolTargeter(**cfg), cfg
+
+
 def _get_fractionable_symbols(trading_client) -> set[str]:
     """Return set of symbols that support fractional/notional orders.
 
@@ -1062,7 +1077,6 @@ def _run_cycle_inner() -> dict:
     from src.notifications.telegram import TelegramNotifier
     from src.portfolio.constraints import ConstraintEnforcer
     from src.portfolio.orchestrator import PortfolioOrchestrator
-    from src.portfolio.vol_targeting import PortfolioVolTargeter
     from src.strategies.registry import StrategyRegistry
 
     notifier = TelegramNotifier()
@@ -1365,6 +1379,13 @@ def _run_cycle_inner() -> dict:
         log.warning("Stop-loss check failed: %s — proceeding without stop-loss", _sl_exc)
 
     data_replay = DataReplay(bars_df)
+    _vol_targeter, _vol_cfg = _build_vol_targeter()
+    log.info(
+        "Vol targeter config (F6): target_vol=%.4f clamp=[%.2f, %.2f]",
+        _vol_cfg.get("target_vol", 0.10),
+        _vol_cfg.get("clamp_low", 0.5),
+        _vol_cfg.get("clamp_high", 2.0),
+    )
     orchestrator = PortfolioOrchestrator(
         registry=registry,
         strategy_instances=strategy_instances,
@@ -1372,7 +1393,7 @@ def _run_cycle_inner() -> dict:
             max_portfolio_exposure=_risk_cfg["max_portfolio_exposure"],
             max_single_asset_pct=_risk_cfg["max_single_asset_pct"],
         ),
-        vol_targeter=PortfolioVolTargeter(target_vol=0.10),
+        vol_targeter=_vol_targeter,
     )
 
     ts = end

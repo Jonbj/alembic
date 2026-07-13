@@ -6,6 +6,7 @@ from datetime import datetime
 
 import numpy as np
 import pytest
+from unittest.mock import patch, mock_open
 
 from src.backtest.engine.data_replay import DataReplay
 from src.backtest.engine.portfolio import VirtualPortfolio
@@ -204,6 +205,139 @@ class TestDefaultConfig:
     def test_default_span_is_60(self):
         targeter = PortfolioVolTargeter()
         assert targeter.span == 60
+
+    def test_default_clamp_is_0_5_to_2_0(self):
+        """F6: default clamp must be the status-quo [0.5, 2.0] so making the
+        clamp config-driven is zero behavior change."""
+        targeter = PortfolioVolTargeter()
+        assert targeter.clamp_low == pytest.approx(0.5)
+        assert targeter.clamp_high == pytest.approx(2.0)
+
+
+# ── Custom Clamp (F6: clamp is now config-driven) ───────────────────────────
+
+class TestCustomClamp:
+    def test_custom_clamp_low_binds_instead_of_default(self):
+        """A lower clamp_low of 0.3 must let the scale fall to 0.3 where the
+        default 0.5 floor would have stopped it at 0.5 (target=0.10, vol=0.50
+        -> raw 0.20 -> clamped to clamp_low=0.3)."""
+        targeter = PortfolioVolTargeter(target_vol=0.10, clamp_low=0.3, clamp_high=2.0)
+        scale = targeter.compute_scale(0.50)
+        assert scale == pytest.approx(0.3), (
+            f"custom clamp_low=0.3 must bind at 0.3, got {scale} (default floor 0.5 would be wrong)"
+        )
+
+    def test_custom_clamp_high_binds_instead_of_default(self):
+        """A lower clamp_high of 1.5 must cap the scale at 1.5 where the default
+        2.0 cap would have allowed 2.0 (target=0.10, vol=0.01 -> raw 10)."""
+        targeter = PortfolioVolTargeter(target_vol=0.10, clamp_low=0.5, clamp_high=1.5)
+        scale = targeter.compute_scale(0.01)
+        assert scale == pytest.approx(1.5), (
+            f"custom clamp_high=1.5 must bind at 1.5, got {scale} (default cap 2.0 would be wrong)"
+        )
+
+    def test_default_clamp_preserves_status_quo_floor(self):
+        """Regression guard: default construction still floors at 0.5."""
+        targeter = PortfolioVolTargeter(target_vol=0.10)
+        assert targeter.compute_scale(0.50) == pytest.approx(0.5)
+
+    def test_default_clamp_preserves_status_quo_cap(self):
+        """Regression guard: default construction still caps at 2.0."""
+        targeter = PortfolioVolTargeter(target_vol=0.10)
+        assert targeter.compute_scale(0.01) == pytest.approx(2.0)
+
+    def test_clamp_attributes_stored(self):
+        targeter = PortfolioVolTargeter(clamp_low=0.3, clamp_high=1.5)
+        assert targeter.clamp_low == pytest.approx(0.3)
+        assert targeter.clamp_high == pytest.approx(1.5)
+
+
+# ── Config loader (F6: target_vol / clamp driven by trading.yaml) ───────────
+
+class TestLoadVolTargetConfig:
+    def test_defaults_on_missing_section(self):
+        """When trading.yaml is absent, return status-quo defaults (zero
+        behavior change)."""
+        from src.portfolio.vol_targeting import load_vol_target_config
+        with patch("builtins.open", side_effect=FileNotFoundError):
+            cfg = load_vol_target_config()
+        assert cfg["target_vol"] == pytest.approx(0.10)
+        assert cfg["clamp_low"] == pytest.approx(0.5)
+        assert cfg["clamp_high"] == pytest.approx(2.0)
+
+    def test_trading_yaml_ships_status_quo(self):
+        """The shipped config must keep vol_target at status quo until an
+        operator calibrates it after a replay shadow — guards against an
+        accidental live flip (measure-before-enforce, QX-01)."""
+        from src.portfolio.vol_targeting import load_vol_target_config
+        cfg = load_vol_target_config()  # reads the real config/trading.yaml
+        assert cfg["target_vol"] == pytest.approx(0.10), (
+            "config/trading.yaml must ship target_vol: 0.10 (status quo) — "
+            "calibration only after a read-only replay shadow"
+        )
+        assert cfg["clamp_low"] == pytest.approx(0.5)
+        assert cfg["clamp_high"] == pytest.approx(2.0)
+
+    def test_reads_custom_values_from_yaml(self):
+        """When vol_target.target_vol is set in the yaml, the loader returns it
+        (and a custom clamp), so the scheduler constructs the targeter from
+        config, not from a hardcoded literal."""
+        from src.portfolio.vol_targeting import load_vol_target_config
+        custom_yaml = (
+            "vol_target:\n"
+            "  target_vol: 0.15\n"
+            "  clamp_low: 0.4\n"
+            "  clamp_high: 1.8\n"
+        )
+        with patch("builtins.open", mock_open(read_data=custom_yaml)):
+            cfg = load_vol_target_config()
+        assert cfg["target_vol"] == pytest.approx(0.15)
+        assert cfg["clamp_low"] == pytest.approx(0.4)
+        assert cfg["clamp_high"] == pytest.approx(1.8)
+
+    def test_targeter_constructed_from_loader_dict(self):
+        """PortfolioVolTargeter(**load_vol_target_config()) must work — the
+        loader returns exactly the kwargs the constructor accepts."""
+        from src.portfolio.vol_targeting import load_vol_target_config
+        cfg = load_vol_target_config()
+        targeter = PortfolioVolTargeter(**cfg)
+        assert targeter.target_vol == pytest.approx(cfg["target_vol"])
+        assert targeter.clamp_low == pytest.approx(cfg["clamp_low"])
+        assert targeter.clamp_high == pytest.approx(cfg["clamp_high"])
+
+
+# ── Scheduler wiring (F6: scheduler builds targeter from config) ────────────
+
+class TestSchedulerWiring:
+    def test_build_vol_targeter_reads_config_not_hardcoded(self):
+        """_build_vol_targeter must construct the targeter from
+        load_vol_target_config, so flipping trading.yaml changes the live
+        targeter without a code change (F6)."""
+        from src.workers.portfolio_scheduler import _build_vol_targeter
+        with patch(
+            "src.portfolio.vol_targeting.load_vol_target_config",
+            return_value={"target_vol": 0.15, "clamp_low": 0.5, "clamp_high": 2.0},
+        ):
+            targeter, cfg = _build_vol_targeter()
+        assert targeter.target_vol == pytest.approx(0.15), (
+            "_build_vol_targeter must use the config value (0.15), not a hardcoded 0.10"
+        )
+        assert cfg["target_vol"] == pytest.approx(0.15)
+
+    def test_no_hardcoded_target_vol_literal_in_scheduler(self):
+        """Guard against a revert: the scheduler must not construct the vol
+        targeter with a hardcoded target_vol=0.10 literal — it must go through
+        _build_vol_targeter / load_vol_target_config."""
+        import inspect
+        import src.workers.portfolio_scheduler as ps
+        src_text = inspect.getsource(ps)
+        assert "PortfolioVolTargeter(target_vol=0.10)" not in src_text, (
+            "scheduler must not hardcode PortfolioVolTargeter(target_vol=0.10) — "
+            "F6: target_vol is config-driven via _build_vol_targeter()"
+        )
+        assert "_build_vol_targeter" in src_text, (
+            "scheduler must wire the vol targeter through _build_vol_targeter() (F6)"
+        )
 
 
 # ── Integration with PortfolioCombiner ───────────────────────────────────────
