@@ -2024,6 +2024,19 @@ def _run_cycle_inner() -> dict:
                         # Still back-fill decision order_id below.
                         pass
                     else:
+                        # Freeze stop metadata at entry for the legacy batch path too.
+                        _frozen_stop_legacy: "FrozenStop | None" = None
+                        if _stop_policy is not None:
+                            _raw_px_l = market.prices.get(sym) if market and getattr(market, "prices", None) else None
+                            _entry_px_l = float(_raw_px_l) if isinstance(_raw_px_l, (int, float)) and not isinstance(_raw_px_l, bool) else None
+                            if _entry_px_l is None and sub.get("qty"):
+                                _entry_px_l = sub["notional"] / sub["qty"]
+                            if _entry_px_l is None:
+                                _entry_px_l = float(sub["notional"]) if sub.get("notional") else 0.0
+                            _strategy_l = "S4" if dec.get("signal_id") else "S1"
+                            _frozen_stop_legacy = _stop_policy.freeze(
+                                sym, _strategy_l, float(_entry_px_l), ts
+                            )
                         _pg_trades.open_trade(
                             symbol=sym,
                             signal_id=dec.get("signal_id"),
@@ -2034,6 +2047,7 @@ def _run_cycle_inner() -> dict:
                             score=dec.get("score", 0.0),
                             regime_mult=_regime_mult,
                             signal_score=dec.get("signal_score"),
+                            frozen_stop=_frozen_stop_legacy,
                         )
                 else:
                     _trade_id = _pg_trades.record_trade_exit(

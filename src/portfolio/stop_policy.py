@@ -197,24 +197,19 @@ class StopPolicy:
         mode=vol_scaled -> sigma_eff via _sigma_eff; d_init = clip(k*sigma_eff, floor, cap).
         """
         mode = self._cfg.get("stop_loss_mode", "fixed")
-        if mode == "fixed":
-            return FrozenStop(
-                strategy=strategy,
-                mode="fixed",
-                vol_at_entry=None,
-                sigma_eff=None,
-                k=None,
-                floor=None,
-                cap=None,
-                d_init=float(self._cfg.get("stop_loss", 0.02)),
-                vol_source=None,
-            )
+        # Always compute sigma/k/floor/cap at entry so the trade row carries the
+        # full freeze-at-entry audit record even when live mode is "fixed". This
+        # makes the metadata available for future vol_scaled sizing without
+        # changing the protective trigger distance today.
         k, floor, cap = self._params(strategy)
         sigma_eff, vol_source = self._sigma_eff(symbol)
-        d_init = min(max(k * (sigma_eff or 0.0), floor), cap)
+        if mode == "fixed":
+            d_init = float(self._cfg.get("stop_loss", 0.02))
+        else:
+            d_init = min(max(k * (sigma_eff or 0.0), floor), cap)
         return FrozenStop(
             strategy=strategy,
-            mode="vol_scaled",
+            mode=mode,
             vol_at_entry=sigma_eff,
             sigma_eff=sigma_eff,
             k=k,
