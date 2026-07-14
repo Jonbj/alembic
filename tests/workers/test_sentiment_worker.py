@@ -749,10 +749,10 @@ class TestEnsembleWeightReading:
 
         suggestion = {
             "suggested_weights": {
+                # Active default pair is "all" -> kimi + glm52, so suggestion
+                # weights must match active models.
                 "kimi-k2.6:cloud": 0.40,
-                "qwen3.5:cloud": 0.30,
-                "deepseek-v4-pro:cloud": 0.20,
-                "glm-5.1:cloud": 0.10,
+                "glm-5.2:cloud": 0.60,
             },
             "purified_icir": {},
             "freeze_reason": "VIX data unavailable (fail-safe)",
@@ -781,7 +781,8 @@ class TestEnsembleWeightReading:
         mock_redis_store.get_weight_suggestion.return_value = suggestion
         mock_redis_store.get_llm_models.return_value = None
 
-        with patch("redis.Redis") as mock_redis_cls, \
+        with patch("src.workers.sentiment.is_market_open", return_value=True), \
+             patch("redis.Redis") as mock_redis_cls, \
              patch("src.workers.sentiment.RedisStore", return_value=mock_redis_store), \
              patch("psycopg2.connect") as mock_pg_connect, \
              patch("src.workers.sentiment.PostgreSQLStore") as mock_pg_cls, \
@@ -808,8 +809,7 @@ class TestEnsembleWeightReading:
         from unittest.mock import patch, MagicMock
         from src.workers.sentiment import run_sentiment_worker
 
-        applied = {"kimi-k2.6:cloud": 0.35, "qwen3.5:cloud": 0.35,
-                   "deepseek-v4-pro:cloud": 0.20, "glm-5.1:cloud": 0.10}
+        applied = {"kimi-k2.6:cloud": 0.35, "glm-5.2:cloud": 0.65}
         raw_applied = json.dumps({"weights": applied, "source": "auto_apply"}).encode()
 
         # Provide a valid news item in the queue
@@ -831,7 +831,8 @@ class TestEnsembleWeightReading:
         mock_redis_store.get_ensemble_weights.return_value = raw_applied
         mock_redis_store.get_llm_models.return_value = None
 
-        with patch("redis.Redis") as mock_redis_cls, \
+        with patch("src.workers.sentiment.is_market_open", return_value=True), \
+             patch("redis.Redis") as mock_redis_cls, \
              patch("src.workers.sentiment.RedisStore", return_value=mock_redis_store), \
              patch("psycopg2.connect") as mock_pg_connect, \
              patch("src.workers.sentiment.PostgreSQLStore") as mock_pg_cls, \
@@ -882,7 +883,8 @@ class TestEnsembleWeightReading:
         mock_redis_store.get_weight_suggestion.return_value = None
         mock_redis_store.get_llm_models.return_value = None
 
-        with patch("redis.Redis") as mock_redis_cls, \
+        with patch("src.workers.sentiment.is_market_open", return_value=True), \
+             patch("redis.Redis") as mock_redis_cls, \
              patch("src.workers.sentiment.RedisStore", return_value=mock_redis_store), \
              patch("psycopg2.connect") as mock_pg_connect, \
              patch("src.workers.sentiment.PostgreSQLStore") as mock_pg_cls, \
@@ -1045,3 +1047,18 @@ class TestProcessNewsItemCorrelation:
             )
 
         mock_pg.link_signal_to_news.assert_not_called()
+
+
+def test_run_sentiment_worker_skips_when_market_closed():
+    """WS-4: sentiment worker exits early when US market is closed."""
+    from src.workers.sentiment import run_sentiment_worker
+
+    with patch("src.workers.sentiment.is_market_open", return_value=False), \
+         patch("redis.Redis") as mock_redis_cls, \
+         patch("psycopg2.connect") as mock_pg_connect:
+        result = run_sentiment_worker()
+
+    assert result["skipped"] is True
+    assert result["reason"] == "market_closed"
+    mock_redis_cls.from_url.return_value.close.assert_called_once()
+    mock_pg_connect.return_value.close.assert_called_once()

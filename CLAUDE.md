@@ -104,3 +104,17 @@ When LLM ensemble variance is high or timeout occurs, fall back to deterministic
 - Roadmap: `docs/superpowers/plans/2026-06-16-master-roadmap.md`
 - LLM config: `docs/llm-config.md`
 - FinGPT (open-source): github.com/AI4Finance-Foundation/FinGPT
+
+## Agent skills
+
+### Issue tracker
+
+Issues for this repo are tracked as GitHub issues (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical triage roles, label strings equal to their names. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.

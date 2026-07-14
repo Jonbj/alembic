@@ -671,20 +671,25 @@ class TestCheckAndApplyWeights:
     """Tests for check_and_apply_weights Celery task."""
 
     SUGGESTION = {
+        # Models must be live registry model_ids (src/llm/model_registry.py).
+        # WS-3 (2026-07-14) made check_and_apply_weights normalize the suggestion
+        # against the active pair, dropping any model not in the registry. The
+        # old opus/qwen3.5/deepseek fixtures predated the registry and were
+        # silently normalized to kimi+glm52 defaults, so the "applied == suggested"
+        # assertion broke. Keep suggested == current (delta 0) so the all-pass
+        # test reaches the apply path.
         "suggested_weights": {
-            "opus": 0.45,
-            "qwen3.5:cloud": 0.35,
-            "deepseek-v4-pro:cloud": 0.20,
+            "kimi-k2.6:cloud": 0.45,
+            "glm-5.2:cloud": 0.55,
         },
         "purified_icir": {
-            "opus": 0.31,
-            "qwen3.5:cloud": 0.18,
-            "deepseek-v4-pro:cloud": 0.09,
+            "kimi-k2.6:cloud": 0.31,
+            "glm-5.2:cloud": 0.24,
         },
         "freeze_reason": "",
         "computed_at": "2026-05-04T08:00:00+00:00",
     }
-    CURRENT = {"weights": {"opus": 0.34, "qwen3.5:cloud": 0.33, "deepseek-v4-pro:cloud": 0.33}, "source": "suggestion"}
+    CURRENT = {"weights": {"kimi-k2.6:cloud": 0.45, "glm-5.2:cloud": 0.55}, "source": "suggestion"}
 
     def _make_redis(self, suggestion=None, current=None, vix_cached=None):
         mock = MagicMock()

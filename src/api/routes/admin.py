@@ -13,6 +13,8 @@ from src.store.redis_store import RedisStore
 from src.store.pg_store import PostgreSQLStore
 from src.api.deps import get_redis_store, get_pg_store
 from src.llm.model_registry import (
+    default_weights,
+    model_ids_for_keys,
     normalize_model_selection,
     sentiment_model_payload,
     valid_selection_tokens,
@@ -98,15 +100,32 @@ async def set_llm_models(
     """Set LLM model selection for token-budget savings.
 
     Args:
-        models: "all" (full ensemble) or comma-separated subset: kimi, qwen, deepseek, glm
+        models: canonical comma-separated model keys (e.g. "glm52,gptoss") or
+            "all" to expand to every model with in_all=True in the registry.
+            Valid keys are taken from src.llm.model_registry; do not hardcode
+            model names here.
     """
-    canonical, _, invalid = normalize_model_selection(req.models)
+    canonical, keys, invalid = normalize_model_selection(req.models)
     if invalid:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid model(s): {invalid}. Valid: {sorted(_VALID_LLM_MODELS)}",
         )
     store.set_llm_models(canonical)
+
+    # WS-3 (2026-07-14): if the new pair does not include every model that the
+    # stored ensemble weights reference, the stored weights are stale. Re-sync
+    # to uniform weights over the new active model_ids so the dashboard never
+    # displays weights for a dead pair.
+    active_model_ids = model_ids_for_keys(keys)
+    current_weights_data = store.get_current_weights_stored()
+    if current_weights_data:
+        current_weights = current_weights_data.get("weights", {})
+        if current_weights and any(mid not in active_model_ids for mid in current_weights.keys()):
+            store.set_ensemble_weights(
+                default_weights(active_model_ids), source="pair_swap_resync"
+            )
+
     return {
         "llm_models": canonical,
         "model_registry": sentiment_model_payload(canonical),

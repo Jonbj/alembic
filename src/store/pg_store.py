@@ -916,25 +916,89 @@ class PostgreSQLStore:
         exit_order_id: str,
         exit_time,
         exit_reason: str,
+        *,
+        trade_id: int | None = None,
+        is_final: bool = True,
     ) -> int | None:
-        """Mark the open trade for symbol as exited; exit_price reconciled later.
+        """Mark a trade as exited; exit_price is reconciled later by
+        reconcile_trade_fills.
 
-        Sets exit_order_id, exit_time, exit_reason. exit_price remains NULL until
-        reconcile_trade_fills fetches the Alpaca fill.
+        Multi-tranche model (WS-5 fix-back 2026-07-14). A position wound down
+        across several SELL tranches (e.g. SHEL, 3 tranches over 3 cycles) is ONE
+        trade row. ``exit_order_ids`` accumulates every tranche's order id so the
+        daily reconcile can aggregate them into one weighted-average exit price.
+
+        Targeting — targets ONLY the trade being wound down, never the many
+        historical closed trades for the same symbol (META 24, AZN 20, ...):
+        - ``trade_id`` given (preferred, caller passes the open trade's id):
+          ``WHERE id = %s``.
+        - ``trade_id`` None (fallback): ``WHERE symbol = %s AND exit_time IS NULL``
+          — the single open trade (the pyramiding guard guarantees at most one
+          open trade per symbol). NEVER a naked ``WHERE symbol = %s``, which
+          would match and corrupt every historical trade's ``exit_order_ids``.
+
+        ``is_final`` controls whether this tranche closes the trade:
+        - ``is_final=True`` (default; stop-loss / reversal full-close SELLs and
+          the final portfolio tranche): set ``exit_time`` + ``exit_reason`` and
+          return the ``trade_id`` so the caller runs its postmortem exactly once.
+        - ``is_final=False`` (partial portfolio SELL tranche, target weight > 0):
+          append the order id but do NOT set ``exit_time``/``exit_reason`` — the
+          trade stays "open" so the pyramiding guard keeps blocking re-BUY during
+          wind-down and the daily reconcile skips it until it is fully closed;
+          return None so the caller skips the postmortem until the final tranche.
         """
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
+                # exit_order_id (single, first tranche) + exit_order_ids (all
+                # tranches, dedup) are updated on EVERY tranche so reconcile can
+                # aggregate every fill.
+                append_clause = (
+                    "exit_order_id = COALESCE(exit_order_id, %s),\n"
+                    "                               exit_order_ids = CASE\n"
+                    "                                   WHEN COALESCE(\n"
+                    "                                       array_position(COALESCE(exit_order_ids, ARRAY[]::text[]), %s),\n"
+                    "                                       0\n"
+                    "                                   ) = 0\n"
+                    "                                   THEN COALESCE(exit_order_ids, ARRAY[]::text[]) || %s\n"
+                    "                                   ELSE exit_order_ids\n"
+                    "                               END"
+                )
+                if is_final:
+                    set_clause = (
+                        append_clause
+                        + ",\n                               exit_time = COALESCE(exit_time, %s),\n"
+                        "                               exit_reason = COALESCE(exit_reason, %s)"
+                    )
+                    set_params = (exit_order_id, exit_order_id, exit_order_id,
+                                   exit_time, exit_reason)
+                else:
+                    set_clause = append_clause
+                    set_params = (exit_order_id, exit_order_id, exit_order_id)
+
+                if trade_id is not None:
+                    where_sql = "WHERE id = %s"
+                    where_params = (trade_id,)
+                else:
+                    where_sql = "WHERE symbol = %s AND exit_time IS NULL"
+                    where_params = (symbol,)
+
                 cur.execute(
-                    """UPDATE trades
-                       SET exit_order_id = %s, exit_time = %s, exit_reason = %s
-                       WHERE symbol = %s AND exit_time IS NULL
-                       RETURNING id""",
-                    (exit_order_id, exit_time, exit_reason, symbol),
+                    f"""UPDATE trades
+                        SET {set_clause}
+                        {where_sql}
+                        RETURNING id""",
+                    set_params + where_params,
                 )
                 row = cur.fetchone()
             conn.commit()
-            return int(row[0]) if row else None
+            if row is None:
+                # No matching open trade (e.g. a SELL for a symbol with no open
+                # row, or a double close): nothing to record, no postmortem.
+                return None
+            trade_id = int(row[0])
+            # Postmortem runs only on the final tranche.
+            return trade_id if is_final else None
         except Exception:
             conn.rollback()
             raise
@@ -1411,39 +1475,61 @@ class PostgreSQLStore:
                 except Exception as e:
                     log.warning("Failed to reconcile order %s: %s", order_id, e)
 
-            # Reconcile exit fills — compute P&L once fill price is known
+            # Reconcile exit fills — compute P&L once fill price is known.
+            # WS-5 fix-back (2026-07-14): reconcile ONLY fully-closed trades
+            # (exit_time IS NOT NULL, set on the final tranche). Intermediate
+            # tranches set exit_order_id/exit_order_ids but keep exit_time NULL,
+            # so a position mid-wind-down is not prematurely reconciled with a
+            # partial fill. Aggregates every tranche in exit_order_ids.
             with conn.cursor() as cur:
                 cur.execute(
-                    """SELECT id, exit_order_id, entry_price, entry_notional, qty, symbol
+                    """SELECT id, exit_order_id, exit_order_ids,
+                              entry_price, entry_notional, qty, symbol
                        FROM trades
-                       WHERE exit_order_id IS NOT NULL
+                       WHERE exit_time IS NOT NULL
                          AND exit_price IS NULL
                          AND exit_time > now() - '48 hours'::interval"""
                 )
                 exit_rows = cur.fetchall()
             exit_updated = 0
-            for trade_id, exit_order_id, entry_price, entry_notional, qty, symbol in exit_rows:
+            for trade_id, exit_order_id, exit_order_ids, entry_price, entry_notional, qty, symbol in exit_rows:
                 try:
-                    order = trading_client.get_order_by_id(exit_order_id)
-                    if order.filled_avg_price is None:
+                    order_ids = list(exit_order_ids) if exit_order_ids else [exit_order_id]
+                    fills: list[tuple[float, float]] = []
+                    for oid in order_ids:
+                        order = trading_client.get_order_by_id(oid)
+                        if order.filled_avg_price is None:
+                            continue
+                        fill_price = float(order.filled_avg_price)
+                        fill_qty = float(order.filled_qty) if order.filled_qty else 0.0
+                        fills.append((fill_price, fill_qty))
+                    if not fills:
                         continue
-                    fill_price = float(order.filled_avg_price)
+                    total_fill_qty = sum(q for _, q in fills)
+                    if total_fill_qty <= 0:
+                        continue
+                    avg_exit_price = sum(p * q for p, q in fills) / total_fill_qty
                     entry_p = float(entry_price) if entry_price is not None else 0.0
-                    qty_f = float(qty) if qty is not None else 0.0
-                    notional_f = float(entry_notional) if entry_notional is not None else 0.0
+                    # Use the actual filled quantity across all tranches so the
+                    # P&L matches the total shares that left the position.
+                    qty_f = total_fill_qty
+                    notional_f = float(entry_notional) if entry_notional is not None else (
+                        avg_exit_price * qty_f
+                    )
                     costs = self._cost_calc.compute(
                         symbol=symbol,
                         notional=notional_f,
                         qty=qty_f,
-                        fill_price=fill_price,
+                        fill_price=avg_exit_price,
                         side="SELL",
                     )
-                    gross_pnl = (fill_price - entry_p) * qty_f if entry_p else None
+                    gross_pnl = (avg_exit_price - entry_p) * qty_f if entry_p else None
                     net_pnl = (gross_pnl - costs.total_cost_usd) if gross_pnl is not None else None
                     with conn.cursor() as cur:
                         cur.execute(
                             """UPDATE trades SET
                                exit_price = %s,
+                               qty = %s,
                                gross_pnl = %s,
                                net_pnl = %s,
                                cost_bps = %s,
@@ -1453,7 +1539,7 @@ class PostgreSQLStore:
                                regulatory_cost_usd = %s,
                                slippage_est = %s
                                WHERE id = %s""",
-                            (fill_price, gross_pnl, net_pnl,
+                            (avg_exit_price, qty_f, gross_pnl, net_pnl,
                              costs.total_cost_bps, costs.total_cost_usd,
                              costs.spread_cost_bps, costs.impact_cost_bps,
                              costs.regulatory_cost_usd, costs.total_cost_usd,
@@ -1461,7 +1547,7 @@ class PostgreSQLStore:
                         )
                     exit_updated += 1
                 except Exception as e:
-                    log.warning("Failed to reconcile exit order %s: %s", exit_order_id, e)
+                    log.warning("Failed to reconcile exit order(s) %s for trade %s: %s", order_ids, trade_id, e)
             conn.commit()
             return updated + exit_updated
         except Exception:

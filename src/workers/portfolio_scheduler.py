@@ -2014,6 +2014,11 @@ def _run_cycle_inner() -> dict:
         try:
             from src.store.pg_store import PostgreSQLStore
             _pg_trades = PostgreSQLStore()
+            # Map symbol -> open trade id so record_trade_exit can target the
+            # specific trade being wound down (never the historical closed trades
+            # for the same symbol). _open_trades was fetched at the top of the
+            # cycle (exit_time IS NULL => the positions still open at submit time).
+            _open_trade_ids = {t["symbol"]: t["id"] for t in _open_trades}
             for sub in submitted_orders:
                 sym = sub["symbol"]
                 dec = _symbol_decisions.get(sym, {})
@@ -2024,6 +2029,19 @@ def _run_cycle_inner() -> dict:
                         # Still back-fill decision order_id below.
                         pass
                     else:
+                        # Freeze stop metadata at entry for the legacy batch path too.
+                        _frozen_stop_legacy: "FrozenStop | None" = None
+                        if _stop_policy is not None:
+                            _raw_px_l = market.prices.get(sym) if market and getattr(market, "prices", None) else None
+                            _entry_px_l = float(_raw_px_l) if isinstance(_raw_px_l, (int, float)) and not isinstance(_raw_px_l, bool) else None
+                            if _entry_px_l is None and sub.get("qty"):
+                                _entry_px_l = sub["notional"] / sub["qty"]
+                            if _entry_px_l is None:
+                                _entry_px_l = float(sub["notional"]) if sub.get("notional") else 0.0
+                            _strategy_l = "S4" if dec.get("signal_id") else "S1"
+                            _frozen_stop_legacy = _stop_policy.freeze(
+                                sym, _strategy_l, float(_entry_px_l), ts
+                            )
                         _pg_trades.open_trade(
                             symbol=sym,
                             signal_id=dec.get("signal_id"),
@@ -2034,13 +2052,22 @@ def _run_cycle_inner() -> dict:
                             score=dec.get("score", 0.0),
                             regime_mult=_regime_mult,
                             signal_score=dec.get("signal_score"),
+                            frozen_stop=_frozen_stop_legacy,
                         )
                 else:
+                    # WS-5 fix-back: target the open trade by id and tell
+                    # record_trade_exit whether this is the final tranche.
+                    # is_final: a SELL whose target allocation_weight is 0.0 is a
+                    # full close (final tranche); stop-loss / reversal SELLs carry
+                    # no allocation_weight and default to 0.0 => final (full close).
+                    _is_final = float(sub.get("allocation_weight", 0.0) or 0.0) == 0.0
                     _trade_id = _pg_trades.record_trade_exit(
                         symbol=sym,
                         exit_order_id=sub["order_id"],
                         exit_time=ts,
                         exit_reason=sub.get("reason", "portfolio_sell"),
+                        trade_id=_open_trade_ids.get(sym),
+                        is_final=_is_final,
                     )
                     if _trade_id is not None:
                         _entry_px = alpaca_entry_prices.get(sym, 0.0)
@@ -2760,7 +2787,13 @@ def _submit_portfolio_orders(
                     )
                     alpaca_order = trading_client.submit_order(req)
                     alpaca_id = str(alpaca_order.id)
-                submitted.append({"symbol": order.symbol, "side": "sell", "order_id": alpaca_id, "qty": qty})
+                # allocation_weight propagates the target-weight intent so the
+                # trade-exit writer can tell a full-close SELL (weight == 0.0 =>
+                # final tranche) from a partial trim (weight > 0 => intermediate).
+                submitted.append({
+                    "symbol": order.symbol, "side": "sell", "order_id": alpaca_id,
+                    "qty": qty, "allocation_weight": order.allocation_weight,
+                })
             else:
                 log.warning("Unknown order side %s for %s — skipping", order.side, order.symbol)
                 continue

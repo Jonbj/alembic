@@ -71,6 +71,7 @@ _FALLBACK_COUNTER_NAME = "consecutive_fallback"
 # measurement. Offline/fail-safe; never gates the signal. Disable via RESOLVER_SHADOW_ENABLED=0.
 _RESOLVER_SHADOW_ENABLED = os.environ.get("RESOLVER_SHADOW_ENABLED", "1") != "0"
 from src.store.pg_store import PostgreSQLStore
+from src.workers.market_clock import is_market_open
 
 
 def _is_stale_news(item, now: datetime, max_age_hours: int = _SENTIMENT_MAX_NEWS_AGE_HOURS) -> bool:
@@ -450,6 +451,12 @@ def run_sentiment_worker() -> dict:
     pg_conn = psycopg2.connect(config.DATABASE_URL)
     redis_store = RedisStore(redis_client)
     pg_store = PostgreSQLStore(conn=pg_conn)
+
+    if not is_market_open():
+        log.info("Market closed — skipping sentiment worker")
+        redis_client.close()
+        pg_conn.close()
+        return {"skipped": True, "reason": "market_closed"}
 
     # Initialize components — model selection read from Redis (set by UI toggle),
     # falling back to SENTIMENT_LLM_MODELS env var, then "all".

@@ -21,36 +21,36 @@ def _make_edgar_item(ticker: str, id_: str = None) -> NewsItem:
     )
 
 
+def _dedup(duplicate_by_id: bool = False, duplicate_content: bool = False) -> MagicMock:
+    """Build a Deduplicator mock with both dedup methods set explicitly.
+
+    _process_sec_edgar_items checks ``is_duplicate_by_id(item) OR
+    is_duplicate_content_symbol(item)``, so a default MagicMock (truthy) would
+    mark every item as a duplicate. Set both returns explicitly.
+    """
+    d = MagicMock()
+    d.is_duplicate_by_id.return_value = duplicate_by_id
+    d.is_duplicate_content_symbol.return_value = duplicate_content
+    return d
+
+
+# The Celery entry-point run_sec_edgar_ingestion_worker() is disabled by default
+# since 2026-07-02 (SEC_EDGAR_INGESTION_ENABLED=0) and short-circuits to
+# {"skipped": True, ...}. The testable unit is the pure _process_sec_edgar_items
+# helper it delegates to, which returns {fetched, queued, filtered, duplicates}.
+
 def test_sec_edgar_worker_queues_watchlist_items():
-    """Worker deve pushare items per ticker in watchlist, skippare gli altri."""
+    """Pure processor queues items whose ticker is in the watchlist, filters the rest."""
+    from src.workers.ingestion import _process_sec_edgar_items
     items = [
         _make_edgar_item("AAPL"),
         _make_edgar_item("UNKNOWN_CORP"),  # non in watchlist
         _make_edgar_item("MSFT"),
     ]
-
     mock_redis = MagicMock()
-    mock_dedup = MagicMock()
-    mock_dedup.is_duplicate_by_id.return_value = False
+    watchlist = {"AAPL", "MSFT", "GOOGL"}
 
-    with patch("src.workers.ingestion.SECEdgarConnector") as mock_connector_cls, \
-         patch("src.workers.ingestion.Deduplicator", return_value=mock_dedup), \
-         patch("src.workers.ingestion.Redis") as mock_redis_cls, \
-         patch("src.workers.ingestion.config") as mock_cfg:
-
-        mock_cfg.WATCHLIST_SYMBOLS = ["AAPL", "MSFT", "GOOGL"]
-        mock_cfg.REDIS_URL = "redis://localhost:6379/0"
-        mock_redis_cls.from_url.return_value = mock_redis
-
-        # SECEdgarConnector().fetch() è async generator
-        async def fake_fetch():
-            for item in items:
-                yield item
-
-        mock_connector_cls.return_value.fetch.return_value = fake_fetch()
-
-        from src.workers.ingestion import run_sec_edgar_ingestion_worker
-        result = run_sec_edgar_ingestion_worker()
+    result = _process_sec_edgar_items(items, watchlist, _dedup(), mock_redis)
 
     assert result["queued"] == 2        # AAPL + MSFT
     assert result["filtered"] == 1      # UNKNOWN_CORP
@@ -58,30 +58,13 @@ def test_sec_edgar_worker_queues_watchlist_items():
 
 
 def test_sec_edgar_worker_deduplicates():
-    """Worker deve skippare item già visto."""
+    """Pure processor skips an item already seen (by id)."""
+    from src.workers.ingestion import _process_sec_edgar_items
     items = [_make_edgar_item("AAPL")]
-
     mock_redis = MagicMock()
-    mock_dedup = MagicMock()
-    mock_dedup.is_duplicate_by_id.return_value = True  # già in cache
+    watchlist = {"AAPL"}
 
-    with patch("src.workers.ingestion.SECEdgarConnector") as mock_connector_cls, \
-         patch("src.workers.ingestion.Deduplicator", return_value=mock_dedup), \
-         patch("src.workers.ingestion.Redis") as mock_redis_cls, \
-         patch("src.workers.ingestion.config") as mock_cfg:
-
-        mock_cfg.WATCHLIST_SYMBOLS = ["AAPL"]
-        mock_cfg.REDIS_URL = "redis://localhost:6379/0"
-        mock_redis_cls.from_url.return_value = mock_redis
-
-        async def fake_fetch():
-            for item in items:
-                yield item
-
-        mock_connector_cls.return_value.fetch.return_value = fake_fetch()
-
-        from src.workers.ingestion import run_sec_edgar_ingestion_worker
-        result = run_sec_edgar_ingestion_worker()
+    result = _process_sec_edgar_items(items, watchlist, _dedup(duplicate_by_id=True), mock_redis)
 
     assert result["queued"] == 0
     assert result["duplicates"] == 1
@@ -89,7 +72,8 @@ def test_sec_edgar_worker_deduplicates():
 
 
 def test_sec_edgar_worker_skips_item_with_no_ticker():
-    """Item senza asset_tags viene skippato."""
+    """Item senza asset_tags viene skippato (filtered)."""
+    from src.workers.ingestion import _process_sec_edgar_items
     item_no_ticker = NewsItem(
         id="edgar:no-ticker",
         source="sec_edgar",
@@ -100,26 +84,21 @@ def test_sec_edgar_worker_skips_item_with_no_ticker():
         language="en",
         asset_tags=[],  # nessun ticker
     )
-
     mock_redis = MagicMock()
-    mock_dedup = MagicMock()
+    watchlist = {"AAPL"}
 
-    with patch("src.workers.ingestion.SECEdgarConnector") as mock_connector_cls, \
-         patch("src.workers.ingestion.Deduplicator", return_value=mock_dedup), \
-         patch("src.workers.ingestion.Redis") as mock_redis_cls, \
-         patch("src.workers.ingestion.config") as mock_cfg:
-
-        mock_cfg.WATCHLIST_SYMBOLS = ["AAPL"]
-        mock_cfg.REDIS_URL = "redis://localhost:6379/0"
-        mock_redis_cls.from_url.return_value = mock_redis
-
-        async def fake_fetch():
-            yield item_no_ticker
-
-        mock_connector_cls.return_value.fetch.return_value = fake_fetch()
-
-        from src.workers.ingestion import run_sec_edgar_ingestion_worker
-        result = run_sec_edgar_ingestion_worker()
+    result = _process_sec_edgar_items([item_no_ticker], watchlist, _dedup(), mock_redis)
 
     assert result["queued"] == 0
     assert result["filtered"] == 1
+    assert mock_redis.rpush.call_count == 0
+
+
+def test_sec_edgar_worker_entrypoint_disabled_by_default(monkeypatch):
+    """The Celery entry-point is OFF by default (2026-07-02) and short-circuits
+    without touching the connector — guards against running the broken CIK path
+    until the CIK→ticker attribution is fixed."""
+    monkeypatch.delenv("SEC_EDGAR_INGESTION_ENABLED", raising=False)
+    from src.workers.ingestion import run_sec_edgar_ingestion_worker
+    result = run_sec_edgar_ingestion_worker()
+    assert result == {"skipped": True, "reason": "sec_edgar_ingestion_disabled"}

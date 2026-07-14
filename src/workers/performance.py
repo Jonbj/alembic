@@ -66,6 +66,7 @@ from src.portfolio.loss_feedback import (
     risk_budget_at_entry,
     strategy_for_trade,
 )
+from src.llm.model_registry import model_ids_for_keys, normalize_model_selection, normalize_weights_for_active_models
 from src.store.pg_store import PostgreSQLStore
 from src.store.redis_store import RedisStore
 from src.workers.celery_app import app
@@ -1371,16 +1372,30 @@ def check_and_apply_weights():
 
         log.info("Auto-apply frozen: %s", freeze_reason)
       else:
-        redis.set_ensemble_weights(suggested_weights, source="auto_apply")
+        # WS-3 (2026-07-14): drop any suggested weights for models that are no
+        # longer in the active pair before persisting. The read path already
+        # filters them, but writing a stale dict confuses the dashboard.
+        llm_selection = redis.get_llm_models() or "all"
+        _, active_keys, _ = normalize_model_selection(llm_selection)
+        active_model_ids = model_ids_for_keys(active_keys)
+        applied_weights, dropped = normalize_weights_for_active_models(
+            suggested_weights, active_model_ids
+        )
+        if dropped:
+            log.warning(
+                "Auto-apply dropped weights for inactive models: %s",
+                dropped,
+            )
+        redis.set_ensemble_weights(applied_weights, source="auto_apply")
         redis.delete_suggestion_snapshot()
 
         pg.log_weight_update(
             source="auto_apply",
-            applied_weights=suggested_weights,
+            applied_weights=applied_weights,
             suggested_weights=suggested_weights,
             purified_icir=purified_icir,
             freeze_reason=None,
-            note=json.dumps({"vix": vix, "ic_variance": ic_variance, "max_delta": max_delta}),
+            note=json.dumps({"vix": vix, "ic_variance": ic_variance, "max_delta": max_delta, "dropped": dropped}),
             approved_by="system",
         )
 

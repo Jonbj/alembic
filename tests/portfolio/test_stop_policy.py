@@ -41,14 +41,18 @@ def _bars(symbol: str, sigma_daily: float, n: int = 100) -> pd.DataFrame:
     return pd.DataFrame({symbol: prices}, index=idx)
 
 
-def test_fixed_mode_reproduces_legacy_two_percent():
+def test_fixed_mode_reproduces_legacy_two_percent_and_freezes_audit_fields():
     cfg = _risk_cfg("fixed")
     policy = StopPolicy(cfg, bars_df=None)
     ts = datetime(2026, 7, 10, 14, 0, tzinfo=timezone.utc)
     frozen = policy.freeze("AAPL", "S1", 100.0, ts)
     assert frozen.mode == "fixed"
     assert frozen.d_init == pytest.approx(0.02)
-    assert frozen.vol_at_entry is None
+    # Fixed mode must still freeze k/floor/cap/sigma for future vol_scaled sizing.
+    assert frozen.k == pytest.approx(3.5)
+    assert frozen.floor == pytest.approx(0.06)
+    assert frozen.cap == pytest.approx(0.12)
+    assert frozen.vol_at_entry is not None
 
     dec = policy.compute("AAPL", 100.0, 97.0, frozen, ts)
     assert dec.trigger_price == pytest.approx(98.0)

@@ -15,15 +15,18 @@ from src.api.main import app, get_pg_store, get_redis_store
 API_KEY = "test-api-key-for-testing-only-12345678"
 
 SAMPLE_SUGGESTION = {
+    # Models must be live registry model_ids (src/llm/model_registry.py):
+    # the approve endpoint validates overrides against the in_all model_ids and
+    # normalizes the suggestion against the active pair, dropping any model not
+    # in the registry. The old opus/qwen3.5/deepseek fixtures predated the
+    # registry and were silently normalized to kimi+glm52 defaults.
     "suggested_weights": {
-        "opus": 0.45,
-        "qwen3.5:cloud": 0.35,
-        "deepseek-v4-pro:cloud": 0.20,
+        "kimi-k2.6:cloud": 0.45,
+        "glm-5.2:cloud": 0.55,
     },
     "purified_icir": {
-        "opus": 0.31,
-        "qwen3.5:cloud": 0.18,
-        "deepseek-v4-pro:cloud": 0.09,
+        "kimi-k2.6:cloud": 0.31,
+        "glm-5.2:cloud": 0.24,
     },
     "freeze_reason": "",
     "computed_at": "2026-05-04T08:00:00+00:00",
@@ -61,7 +64,7 @@ async def test_get_suggestion_ok():
 
     assert resp.status_code == 200
     data = resp.json()
-    assert data["suggested_weights"]["opus"] == pytest.approx(0.45)
+    assert data["suggested_weights"]["kimi-k2.6:cloud"] == pytest.approx(0.45)
     assert "expires_at" in data
     assert data["expires_at"].startswith("2026-05-11")
 
@@ -119,7 +122,7 @@ async def test_approve_override_bypasses_freeze():
     pg = make_pg_mock()
     app.dependency_overrides[get_redis_store] = lambda: redis
     app.dependency_overrides[get_pg_store] = lambda: pg
-    override = {"opus": 0.50, "qwen3.5:cloud": 0.30, "deepseek-v4-pro:cloud": 0.20}
+    override = {"kimi-k2.6:cloud": 0.50, "glm-5.2:cloud": 0.50}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post(
             "/api/weights/approve",
@@ -137,7 +140,7 @@ async def test_approve_override_invalid_sum():
     """POST /approve with weights summing to ≠ 1.0 → 422."""
     redis = make_redis_mock()
     app.dependency_overrides[get_redis_store] = lambda: redis
-    bad = {"opus": 0.50, "qwen3.5:cloud": 0.30, "deepseek-v4-pro:cloud": 0.30}  # sum=1.1
+    bad = {"kimi-k2.6:cloud": 0.60, "glm-5.2:cloud": 0.50}  # sum=1.1
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post(
             "/api/weights/approve",
@@ -154,7 +157,7 @@ async def test_approve_override_cap_exceeded():
     """POST /approve with weight > 0.70 → 422."""
     redis = make_redis_mock()
     app.dependency_overrides[get_redis_store] = lambda: redis
-    bad = {"opus": 0.80, "qwen3.5:cloud": 0.10, "deepseek-v4-pro:cloud": 0.10}
+    bad = {"kimi-k2.6:cloud": 0.80, "glm-5.2:cloud": 0.20}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post(
             "/api/weights/approve",
@@ -171,7 +174,7 @@ async def test_approve_unknown_model():
     """POST /approve with an unknown model id → 422."""
     redis = make_redis_mock()
     app.dependency_overrides[get_redis_store] = lambda: redis
-    bad = {"opus": 0.50, "gpt5": 0.50}  # gpt5 is not in config.MODEL_COSTS
+    bad = {"kimi-k2.6:cloud": 0.50, "gpt5": 0.50}  # gpt5 is not a registered model_id
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post(
             "/api/weights/approve",
