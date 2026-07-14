@@ -683,6 +683,10 @@ class _OllamaSemaphore:
 
 _ollama_sem = _OllamaSemaphore()
 
+# Stage-2 shadow candidates get their own pool: shadow load must never compete
+# with live ensemble calls (spec 2026-07-09 §Concurrency).
+_ollama_shadow_sem = _OllamaSemaphore(key="ollama:sem:shadow", slots=3)
+
 
 class OllamaCloudClient(LLMClient):
     """Base class for Ollama cloud models accessed via HTTP API.

@@ -625,6 +625,25 @@ class RedisStore:
         except json.JSONDecodeError:
             return None
 
+    # =========================================================================
+    # SHADOW MODE TOGGLE (Stage 2 model comparison)
+    # =========================================================================
+
+    _SHADOW_START_KEY = "shadow:model_comparison:started_at"
+
+    def set_shadow_comparison_start(self, iso_ts: str) -> None:
+        """Arm Stage-2 shadow mode (operator action; auto-report disarms it)."""
+        self._r.set(self._SHADOW_START_KEY, iso_ts)
+
+    def get_shadow_comparison_start(self) -> str | None:
+        """Get shadow comparison start timestamp if armed, or None."""
+        raw = self._r.get(self._SHADOW_START_KEY)
+        return raw.decode() if isinstance(raw, bytes) else raw
+
+    def clear_shadow_comparison_start(self) -> None:
+        """Disarm Stage-2 shadow mode (auto-called after reporting)."""
+        self._r.delete(self._SHADOW_START_KEY)
+
     def set_counterfactual_worker_state(self, state: dict, ttl: int = 86400 * 14) -> None:
         """Persist last Phase C counterfactual worker run metadata."""
         self._r.setex("counterfactual:worker:last_run", ttl, json.dumps(state))
