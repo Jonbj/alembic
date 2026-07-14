@@ -325,7 +325,13 @@ async def _shadow_query_candidates(
         clients = build_shadow_clients(redis_store)
         if not clients:
             return
-        prompt = _DK_COT_PROMPT.format(text=clean_body[:600], symbol=clean_symbol)
+        # Must match run_inference's truncation exactly (same env var, same
+        # default) — otherwise a mid-window change to SENTIMENT_LLM_BODY_CHARS
+        # would silently feed shadow candidates a different-length article than
+        # the live models saw, biasing the IC/hit-rate comparison this feature
+        # exists to produce, with no trace left in the data.
+        _body_limit = int(os.environ.get("SENTIMENT_LLM_BODY_CHARS", "600"))
+        prompt = _DK_COT_PROMPT.format(text=clean_body[:_body_limit], symbol=clean_symbol)
 
         async def _score_one(client) -> dict:
             model_id = getattr(client, "model_id", "?")
@@ -362,10 +368,17 @@ async def _shadow_query_candidates(
                 }
 
         # Run all candidates concurrently (mirrors run_ensemble_query's gather
-        # pattern): total added latency is bounded by the slowest candidate
-        # instead of their sum, minimizing the shadow path's footprint.
-        rows = await asyncio.gather(*[_score_one(c) for c in clients])
-        pg_store.log_shadow_responses(list(rows))
+        # pattern, including return_exceptions=True): total added latency is
+        # bounded by the slowest candidate instead of their sum, and one
+        # candidate raising a BaseException (e.g. CancelledError, or a future
+        # bug in _score_one's own except-handler) can never cancel sibling
+        # in-flight candidates or skip the store write for the whole item —
+        # only that candidate's row is dropped, not all of them.
+        results = await asyncio.gather(
+            *[_score_one(c) for c in clients], return_exceptions=True
+        )
+        rows = [r for r in results if isinstance(r, dict)]
+        pg_store.log_shadow_responses(rows)
     except Exception as exc:
         log.debug("shadow path swallowed: %s", exc)
 
