@@ -618,6 +618,47 @@ class TestCloseTradeReturnsId:
         assert result is None
 
 
+class TestRecordTradeExit:
+    """record_trade_exit marks a trade closed and accumulates multi-tranche
+    exit order IDs in exit_order_ids."""
+
+    def test_record_trade_exit_returns_id_on_first_close(self):
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (7, False)
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        result = store.record_trade_exit(
+            symbol="TSLA",
+            exit_order_id="exit-1",
+            exit_time=datetime(2026, 6, 5, 16, tzinfo=timezone.utc),
+            exit_reason="portfolio_sell",
+        )
+        assert result == 7
+        sql = mock_cur.execute.call_args[0][0]
+        assert "exit_order_ids" in sql
+        assert "COALESCE" in sql
+        mock_conn.commit.assert_called_once()
+
+    def test_record_trade_exit_returns_none_for_later_tranche(self):
+        """WS-5: second SELL tranche appends the order id but does not re-run
+        postmortem (returned id is None)."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        # first call: new close; second call: already closed
+        mock_cur.fetchone.side_effect = [(7, False), (7, True)]
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        ts = datetime(2026, 6, 5, 16, tzinfo=timezone.utc)
+        assert store.record_trade_exit("SHEL", "o1", ts, "sell") == 7
+        assert store.record_trade_exit("SHEL", "o2", ts, "sell") is None
+        assert mock_conn.commit.call_count == 2
+
+
 class TestFetchTrades:
     def test_fetch_all_trades(self):
         from datetime import datetime, timezone
@@ -725,6 +766,46 @@ class TestReconcileTradesFills:
         updated = store.reconcile_trade_fills(mock_trading)
 
         assert updated == 0
+
+    def test_exit_multi_tranche_computes_weighted_average(self):
+        """WS-5: three SELL tranches are aggregated into one exit_price/qty/pnl."""
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        # Entry fills empty, exit fills with one multi-tranche trade.
+        mock_cur.fetchall.side_effect = [
+            [],
+            [(
+                42, "order-exit-1",
+                ["order-exit-1", "order-exit-2", "order-exit-3"],
+                100.0, 1800.0, 18.021, "SHEL",
+            )],
+        ]
+
+        orders = {
+            "order-exit-1": MagicMock(filled_avg_price="84.06", filled_qty="1.322"),
+            "order-exit-2": MagicMock(filled_avg_price="84.10", filled_qty="0.418"),
+            "order-exit-3": MagicMock(filled_avg_price="84.00", filled_qty="16.281"),
+        }
+        mock_trading = MagicMock()
+        mock_trading.get_order_by_id.side_effect = lambda oid: orders[oid]
+
+        store = PostgreSQLStore(conn=mock_conn)
+        updated = store.reconcile_trade_fills(mock_trading)
+
+        assert updated == 1
+        # Find the exit UPDATE call
+        update_call = next(
+            c for c in mock_cur.execute.call_args_list
+            if c[0][0].startswith("UPDATE trades SET") and "exit_price" in c[0][0]
+        )
+        params = update_call[0][1]
+        exit_price, exit_qty, gross_pnl = params[0], params[1], params[2]
+        expected_qty = 1.322 + 0.418 + 16.281
+        expected_price = (84.06 * 1.322 + 84.10 * 0.418 + 84.00 * 16.281) / expected_qty
+        assert exit_qty == pytest.approx(expected_qty)
+        assert exit_price == pytest.approx(expected_price, abs=0.001)
+        assert gross_pnl == pytest.approx((expected_price - 100.0) * expected_qty, abs=0.01)
 
 
 class TestFetchAnalyticsBySymbol:
