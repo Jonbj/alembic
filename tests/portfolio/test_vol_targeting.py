@@ -266,14 +266,20 @@ class TestLoadVolTargetConfig:
         assert cfg["clamp_high"] == pytest.approx(2.0)
 
     def test_trading_yaml_ships_status_quo(self):
-        """The shipped config must keep vol_target at status quo until an
-        operator calibrates it after a replay shadow — guards against an
-        accidental live flip (measure-before-enforce, QX-01)."""
+        """The shipped config must keep vol_target at the calibrated status quo
+        until an operator re-calibrates after a replay shadow — guards against an
+        accidental live flip (measure-before-enforce, QX-01).
+
+        target_vol was 0.10 until 2026-07-13, when the F6 (b) read-only replay
+        (scripts/audit_vol_target_replay.py, 60-day window) justified flipping
+        the shipped value to 0.12 (commit 237e660). This test pins the current
+        shipped value so a future accidental edit is caught.
+        """
         from src.portfolio.vol_targeting import load_vol_target_config
         cfg = load_vol_target_config()  # reads the real config/trading.yaml
-        assert cfg["target_vol"] == pytest.approx(0.10), (
-            "config/trading.yaml must ship target_vol: 0.10 (status quo) — "
-            "calibration only after a read-only replay shadow"
+        assert cfg["target_vol"] == pytest.approx(0.12), (
+            "config/trading.yaml must ship target_vol: 0.12 (status quo since the "
+            "2026-07-13 F6 replay flip) — re-calibration only after a read-only replay shadow"
         )
         assert cfg["clamp_low"] == pytest.approx(0.5)
         assert cfg["clamp_high"] == pytest.approx(2.0)
