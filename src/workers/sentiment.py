@@ -16,7 +16,15 @@ Pipeline per batch (up to 10 items pulled atomically via LMOVE):
      exhausted, fall back to FinBERT (local, zero cost).
   5. Store writes — signal → PostgreSQL (audit) and Redis (live cache);
      per-model LLM responses logged for LOO weight recalculation.
-  6. Dead-letter — unparseable queue items moved to news:dead-letter to
+  6. Shadow scoring (Stage-2, armed via set_shadow_comparison_start) — the SAME
+     item is optionally re-scored with candidate models not in the live pair,
+     purely for offline comparison (llm_shadow_responses table). Dispatched as
+     a detached asyncio.Task per item (process_news_item's shadow_tasks param)
+     so its latency never composes with process_news_batch's per-item
+     semaphore or this task's Celery time budget — process_news_batch instead
+     gives the whole set of shadow tasks one bounded wait after all live items
+     have returned (see _SHADOW_BOUNDED_WAIT_S).
+  7. Dead-letter — unparseable queue items moved to news:dead-letter to
      prevent infinite retry loops.
 
 Exported public API (used by backtest CLI):
@@ -64,6 +72,29 @@ _MAX_QUEUE_SCAN_PER_RUN = 5000
 # the S4 strategy's 4h usability window before ever being scored (throughput bottleneck,
 # DAY-2026-07-02).
 _SENTIMENT_BATCH_SIZE = 12
+# Stage-2 shadow scoring (_shadow_query_candidates, dispatched via process_news_item's
+# shadow_tasks param) must never compose with the live per-item semaphore latency —
+# that was the Critical finding from the stage2-shadow-2026-07-12 review: awaiting it
+# inline added up to ~45s per item on top of the live ensemble's up-to-90s call, and
+# across process_news_batch's 6 sequential concurrency-2 rounds (12 items / sem(2))
+# that could reach ~810s, past celery_app.py's task_soft_time_limit=780s and close to
+# task_time_limit=840s.
+#
+# Fix: shadow calls are fired as detached asyncio.Tasks during the live gather, and
+# process_news_batch gives the whole set ONE bounded wait (this constant) *after* all
+# live items have already returned — so shadow latency no longer multiplies across
+# rounds. Arithmetic against the real celery_app.py constants (see its comment):
+#   live worst case = ceil(12/2) x 90s Ollama timeout + 43s FinBERT warmup = 583s
+#   583s (unchanged by this fix) + 60s (this wait)                        = 643s
+#   task_soft_time_limit=780s -> 137s margin left (vs. the original 197s the
+#     live-only budget was sized with — this fix spends well under half of it)
+#   task_time_limit=840s      -> 197s margin left
+# 60s itself = the existing per-candidate _score_one timeout (45s, see
+# _shadow_query_candidates) + ~15s slack for asyncio.gather sequencing and the
+# pg_store.log_shadow_responses write inside it — enough for a shadow round that
+# hits its own internal timeout to still finish and get logged, not be cut off right
+# at the wire, while keeping comfortable margin under both Celery limits above.
+_SHADOW_BOUNDED_WAIT_S = 60
 # Single named row in the fallback_counters table (Postgres mirror of the Redis
 # consecutive-fallback counter — kept in sync so the count survives a Redis flush
 # and is queryable for audit/dashboards).
@@ -392,8 +423,28 @@ async def process_news_item(
     redis_store: RedisStore,
     pg_store: PostgreSQLStore,
     weights: dict[str, float] | None = None,
+    shadow_tasks: list | None = None,
 ) -> SentimentResult | None:
-    """Process a single news item: infer, update fallback counters, write to stores."""
+    """Process a single news item: infer, update fallback counters, write to stores.
+
+    shadow_tasks controls how Stage-2 shadow scoring (_shadow_query_candidates) is
+    dispatched, and exists to decouple shadow latency from process_news_batch's
+    per-item semaphore (Critical finding, stage2-shadow-2026-07-12 review — see
+    _SHADOW_BOUNDED_WAIT_S for the full arithmetic this fixes):
+
+      - shadow_tasks is a list (batch mode, set by process_news_batch): the shadow
+        coroutine is wrapped in asyncio.create_task() and appended to shadow_tasks
+        WITHOUT being awaited here. process_news_batch collects these across all
+        items and gives them one bounded wait after every live item has already
+        returned, so this function's own semaphore-held critical section never
+        includes shadow latency.
+      - shadow_tasks is None (the default): falls back to the original, safe
+        behavior of awaiting the shadow call inline (with the same swallow-all
+        try/except as before) before returning. This is for any direct/test caller
+        that invokes process_news_item outside process_news_batch's bounded-wait
+        contract — such a caller has no mechanism to later collect a detached Task,
+        so awaiting inline is the only correct behavior for it.
+    """
     inference_result = await run_inference(
         item, clients, aggregator, finbert, budget_tracker, weights=weights
     )
@@ -433,20 +484,35 @@ async def process_news_item(
                 outputs=raw_outputs,
                 force_ineligible=result.fallback_used,
             )
-        # Stage-2 shadow scoring: fire-and-forget, strictly AFTER every live
-        # write above. Own try/except as belt & braces on top of the internal
-        # catch-all inside _shadow_query_candidates — this must never be the
-        # reason the live signal write above is reported as failed.
-        try:
-            await _shadow_query_candidates(
+        # Stage-2 shadow scoring: strictly AFTER every live write above (either mode
+        # below). See this function's docstring for why there are two modes.
+        if shadow_tasks is not None:
+            # Batch mode: schedule as a detached Task, do NOT await it here — the
+            # semaphore slot in process_news_batch's _bounded() releases as soon as
+            # this function returns, instead of staying held for shadow latency too.
+            shadow_coro = _shadow_query_candidates(
                 clean_body=sanitize_text(item.body or ""),
                 clean_symbol=result.symbol,
                 news_log_id=news_log_id,
                 pg_store=pg_store,
                 redis_store=redis_store,
             )
-        except Exception as _sh_exc:
-            log.debug("shadow hook swallowed: %s", _sh_exc)
+            shadow_tasks.append(asyncio.create_task(shadow_coro))
+        else:
+            # Direct/test-call mode (no batch-level bounded wait available):
+            # own try/except as belt & braces on top of the internal catch-all
+            # inside _shadow_query_candidates — this must never be the reason the
+            # live signal write above is reported as failed.
+            try:
+                await _shadow_query_candidates(
+                    clean_body=sanitize_text(item.body or ""),
+                    clean_symbol=result.symbol,
+                    news_log_id=news_log_id,
+                    pg_store=pg_store,
+                    redis_store=redis_store,
+                )
+            except Exception as _sh_exc:
+                log.debug("shadow hook swallowed: %s", _sh_exc)
     except Exception as e:
         log.error(f"Failed to write signal for {result.symbol}: {e}")
     return result
@@ -484,6 +550,10 @@ async def process_news_batch(
     # with the next item's Ollama round-trip instead of leaving the worker fully idle
     # between items.
     sem = asyncio.Semaphore(2)
+    # Collects the detached Stage-2 shadow Tasks created by process_news_item (batch
+    # mode — see its docstring and _SHADOW_BOUNDED_WAIT_S). Populated during the
+    # gather below, drained by the bounded wait after it.
+    shadow_tasks: list = []
 
     async def _bounded(item):
         async with sem:
@@ -496,9 +566,29 @@ async def process_news_batch(
                 redis_store=redis_store,
                 pg_store=pg_store,
                 weights=weights,
+                shadow_tasks=shadow_tasks,
             )
 
     gathered = await asyncio.gather(*[_bounded(item) for item in news_items])
+
+    if shadow_tasks:
+        # Give shadow candidates a bounded window to finish (cleanly releasing
+        # _ollama_shadow_sem via normal async-with cleanup) without holding up this
+        # Celery task's return, and without the composed latency this was designed to
+        # avoid ever again pushing the batch toward task_soft_time_limit (780s,
+        # celery_app.py) — see _SHADOW_BOUNDED_WAIT_S for the full arithmetic and the
+        # Critical finding this decouples us from.
+        _, pending = await asyncio.wait(shadow_tasks, timeout=_SHADOW_BOUNDED_WAIT_S)
+        for t in pending:
+            t.cancel()
+        # Retrieve every task's outcome (done ones return near-instantly here;
+        # cancelled ones now get their CancelledError delivered and collected).
+        # Without this, asyncio can log "Task exception was never retrieved" / "Task
+        # was destroyed but it is pending!" once these Task objects are GC'd — harmless
+        # here (_shadow_query_candidates isolates all Exceptions itself, Task 4's
+        # invariant) but alarming-looking in production logs.
+        await asyncio.gather(*shadow_tasks, return_exceptions=True)
+
     return [r for r in gathered if r is not None]
 
 
