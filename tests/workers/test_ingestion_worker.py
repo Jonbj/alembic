@@ -326,3 +326,31 @@ def test_alpaca_process_skips_no_tickers():
 
     assert stats["queued"] == 0
     mock_redis.rpush.assert_not_called()
+
+
+def test_alpaca_ingestion_skips_when_market_closed():
+    """WS-4: beat schedule is hardcoded UTC; task exits early when market closed."""
+    from unittest.mock import patch
+
+    from src.workers.ingestion import run_alpaca_ingestion_worker
+
+    with patch("src.workers.ingestion.is_market_open", return_value=False), \
+         patch("src.workers.ingestion.Redis") as mock_redis:
+        result = run_alpaca_ingestion_worker()
+
+    assert result["skipped"] is True
+    assert result["reason"] == "market_closed"
+    mock_redis.from_url.return_value.close.assert_called_once()
+
+
+def test_gdelt_ingestion_skips_when_market_closed():
+    """WS-4: GDELT ingestion exits early when US market is closed."""
+    from unittest.mock import patch
+
+    from src.workers.ingestion import run_news_ingestion_worker
+
+    with patch("src.workers.ingestion.is_market_open", return_value=False):
+        result = run_news_ingestion_worker()
+
+    assert result["skipped"] is True
+    assert result["reason"] == "market_closed"

@@ -57,6 +57,7 @@ from src.connectors.marketaux import MarketAuxConnector
 from src.connectors.ticker_extractor import TickerExtractor
 from src.models.news import GKGNewsItem, MarketAuxNewsItem, NewsItem
 from src.workers.celery_app import app
+from src.workers.market_clock import is_market_open
 
 log = logging.getLogger(__name__)
 
@@ -324,6 +325,11 @@ def run_alpaca_ingestion_worker() -> dict:
         Returns {"skipped": True} if Alpaca credentials are not configured.
     """
     redis_client = Redis.from_url(config.REDIS_URL)
+
+    if not is_market_open():
+        log.info("Market closed — skipping Alpaca ingestion")
+        redis_client.close()
+        return {"skipped": True, "reason": "market_closed"}
 
     if not config.ALPACA_API_KEY or not config.ALPACA_SECRET_KEY:
         log.warning("ALPACA_API_KEY/SECRET not configured — skipping Alpaca ingestion")
@@ -773,6 +779,10 @@ def run_news_ingestion_worker() -> dict:
     Returns:
         Stats dict (see `_process_gkg_items`).
     """
+    if not is_market_open():
+        log.info("Market closed — skipping GDELT ingestion")
+        return {"skipped": True, "reason": "market_closed"}
+
     # Open connections once per task. Closed in finally to avoid leaks.
     redis_client = Redis.from_url(config.REDIS_URL)
     pg_conn = psycopg2.connect(config.DATABASE_URL)
