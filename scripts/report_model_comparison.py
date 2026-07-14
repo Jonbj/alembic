@@ -21,9 +21,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.config import config  # noqa: E402
 from src.performance.model_comparison import build_comparison, render_markdown  # noqa: E402
-from src.store.pg_store import PostgreSQLStore  # noqa: E402
-
-_COLS = ["news_log_id", "model_id", "polarity", "confidence", "parse_error"]
+from src.store.pg_store import PostgreSQLStore, SHADOW_COMPARISON_COLUMNS  # noqa: E402
 
 
 def main() -> None:
@@ -37,7 +35,7 @@ def main() -> None:
     try:
         rows = pd.DataFrame(
             list(pg.fetch_shadow_rows(since)) + list(pg.fetch_live_response_rows(since)),
-            columns=_COLS,
+            columns=SHADOW_COMPARISON_COLUMNS,
         )
         fwd = dict(pg.fetch_fwd_by_news(since))
     finally:

@@ -40,6 +40,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import httpx
 import numpy as np
+import pandas as pd
 import psycopg2
 
 from src.config import config
@@ -58,6 +59,7 @@ from src.performance.drift import (
     DriftAlert,
 )
 from src.performance.ic import compute_composite_ic, compute_icir
+from src.performance.model_comparison import build_comparison, render_markdown
 from src.performance.postmortem import diagnose_loss, should_trigger_postmortem, TradeContext
 from src.performance.weights import compute_new_weights, compute_purified_icir
 from src.portfolio.loss_feedback import (
@@ -66,7 +68,7 @@ from src.portfolio.loss_feedback import (
     risk_budget_at_entry,
     strategy_for_trade,
 )
-from src.store.pg_store import PostgreSQLStore
+from src.store.pg_store import PostgreSQLStore, SHADOW_COMPARISON_COLUMNS
 from src.store.redis_store import RedisStore
 from src.workers.celery_app import app
 from src.workers.execution import ENTRY_THRESHOLD
@@ -2084,13 +2086,14 @@ def run_shadow_comparison_report() -> dict:
 
     No-op (skipped) unless an operator armed shadow mode via
     RedisStore.set_shadow_comparison_start, and until 7 days have elapsed since
-    arming. Once the window closes, this always disarms — even if the Telegram
-    send fails — so a broken notifier can't leave shadow mode running forever.
+    arming.
+
+    Self-disarm invariant: once the 7-day window closes, redis.clear_shadow_
+    comparison_start() ALWAYS runs — it sits outside (after) the Telegram
+    try/except below, so a failed/misconfigured Telegram send cannot leave
+    shadow mode armed forever. Disarming is unconditional on reaching that
+    point; only sending the report is best-effort.
     """
-    import pandas as pd
-
-    from src.performance.model_comparison import build_comparison, render_markdown
-
     redis = RedisStore()
     try:
         started_raw = redis.get_shadow_comparison_start()
@@ -2105,10 +2108,9 @@ def run_shadow_comparison_report() -> dict:
 
         pg = PostgreSQLStore()
         try:
-            cols = ["news_log_id", "model_id", "polarity", "confidence", "parse_error"]
             rows = pd.DataFrame(
                 list(pg.fetch_shadow_rows(started)) + list(pg.fetch_live_response_rows(started)),
-                columns=cols,
+                columns=SHADOW_COMPARISON_COLUMNS,
             )
             fwd = dict(pg.fetch_fwd_by_news(started))
         finally:

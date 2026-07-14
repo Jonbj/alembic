@@ -24,6 +24,15 @@ if TYPE_CHECKING:
 # Global connection pool - lazy initialized
 _db_pool: pool.ThreadedConnectionPool | None = None
 
+# Stage-2 shadow-mode model comparison (src/workers/performance.run_shadow_comparison_report
+# and scripts/report_model_comparison.py): fetch_shadow_rows/fetch_live_response_rows both
+# return plain tuples, positionally aligned to this column order, which both callers use to
+# build a pandas DataFrame. This is the single source of truth for that order — if either
+# _FETCH_SHADOW_ROWS or _FETCH_LIVE_RESPONSE_ROWS SELECT column order changes below, this
+# list (and any caller still hardcoding its own copy) must change with it, or the DataFrame
+# silently misaligns (no error — just wrong IC/hit-rate numbers).
+SHADOW_COMPARISON_COLUMNS = ["news_log_id", "model_id", "polarity", "confidence", "parse_error"]
+
 
 def _get_pool() -> pool.ThreadedConnectionPool:
     """Get or create the global connection pool."""
@@ -1540,6 +1549,10 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    # WARNING: this SELECT's column order must stay in sync with the module-level
+    # SHADOW_COMPARISON_COLUMNS constant above — both run_shadow_comparison_report
+    # (src/workers/performance.py) and scripts/report_model_comparison.py build a
+    # DataFrame from this method's raw tuples using that name list, positionally.
     _FETCH_SHADOW_ROWS = """
         SELECT news_log_id, model_id, polarity, confidence, parse_error
         FROM llm_shadow_responses
@@ -1560,6 +1573,10 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    # WARNING: this SELECT's column order must stay in sync with the module-level
+    # SHADOW_COMPARISON_COLUMNS constant above (and with _FETCH_SHADOW_ROWS, since
+    # fetch_shadow_rows and fetch_live_response_rows feed the same DataFrame) — see
+    # the note on _FETCH_SHADOW_ROWS above.
     _FETCH_LIVE_RESPONSE_ROWS = """
         SELECT s.news_log_id, r.model_id, r.polarity, r.confidence, FALSE AS parse_error
         FROM llm_responses r
