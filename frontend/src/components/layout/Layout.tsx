@@ -82,7 +82,7 @@ function MobileStatus() {
 }
 
 export function Layout() {
-  const { setKillswitch, setMode, setLlmModels } = useStore()
+  const { setKillswitch, setMode, setLlmModels, setLlmModelRegistry } = useStore()
 
   useEffect(() => {
     const sync = async () => {
@@ -93,6 +93,7 @@ export function Layout() {
         setKillswitch(data.killswitch)
         if (data.mode && data.mode !== 'unknown') setMode(data.mode)
         if (data.llm_models) setLlmModels(data.llm_models)
+        if (data.llm_model_registry) setLlmModelRegistry(data.llm_model_registry)
       } catch { /* backend unreachable */ }
     }
     sync()

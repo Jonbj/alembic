@@ -30,6 +30,16 @@ def test_build_clients_for_new_keys():
     assert {c.model_id for c in clients} == {"qwen3.5:cloud", "gpt-oss:20b-cloud"}
 
 
+def test_pair_selection_canonicalizes_to_registry_order():
+    """Two operators typing the same pair in different orders must persist the
+    same canonical key — otherwise the UI label flickers and the dashboard sees
+    two 'different' selections."""
+    canonical, keys, invalid = normalize_model_selection("gptoss,glm52")
+    assert invalid == []
+    assert keys == ["glm52", "gptoss"]
+    assert canonical == "glm52,gptoss"
+
+
 def test_all_expansion_excludes_selectable_only_candidates():
     """The live Redis selection is often "all": registering swap candidates must
     NOT silently grow the running ensemble (cost, latency, divergence chaos)."""

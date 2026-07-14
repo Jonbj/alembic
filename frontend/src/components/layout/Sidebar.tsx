@@ -1,6 +1,8 @@
+import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { ModeBadge } from './ModeBadge'
 import { useStore } from '@/store'
+import type { LLMModelInfo } from '@/store'
 import alembicLogo from '@/assets/alembic.png'
 
 const NAV = [
@@ -20,30 +22,75 @@ const NAV = [
   { to: '/docs',        label: 'Docs',        icon: '📖' },
 ]
 
-export function Sidebar() {
-  const { token, logout, llmModels, setLlmModels } = useStore()
-  const isSavings = llmModels !== 'all'
+export function activeModelLabel(models: LLMModelInfo[]): string {
+  const active = models.filter(m => m.active)
+  if (active.length === 0) return 'No models'
+  if (active.length === 1) return active[0].label
+  return active.map(m => m.label.split(' ')[0]).join(' + ')
+}
 
-  const toggleSavings = async () => {
-    const next = isSavings ? 'all' : 'glm52'
+export function Sidebar() {
+  const { token, logout, llmModels, setLlmModels, llmModelRegistry, setLlmModelRegistry } = useStore()
+
+  // Load registry on first render if Layout hasn't already.
+  useEffect(() => {
+    if (llmModelRegistry) return
+    fetch('/api/admin/status', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        if (data?.llm_model_registry) setLlmModelRegistry(data.llm_model_registry)
+      })
+      .catch(() => { /* backend unreachable */ })
+  }, [llmModelRegistry, setLlmModelRegistry, token])
+
+  const [pendingKeys, setPendingKeys] = useState<Set<string>>(new Set())
+  const [saving, setSaving] = useState(false)
+
+  // Keep local pending selection in sync with canonical store value.
+  useEffect(() => {
+    setPendingKeys(new Set(llmModels.split(',').filter(Boolean)))
+  }, [llmModels])
+
+  const applySelection = async (keys: Set<string>) => {
+    const canonical = Array.from(keys).join(',') || 'all'
+    setSaving(true)
     try {
       const res = await fetch('/api/admin/llm-models', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ models: next }),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ models: canonical }),
       })
       if (res.ok) {
-        setLlmModels(next)
+        const data = await res.json()
+        setLlmModels(data.llm_models)
+        if (data.model_registry) setLlmModelRegistry(data.model_registry)
       } else {
-        console.warn(`LLM model toggle failed: ${res.status}`)
+        console.warn(`LLM model update failed: ${res.status}`)
       }
     } catch { /* network error — no state change */ }
+    setSaving(false)
+  }
+
+  const toggleKey = (key: string) => {
+    const next = new Set(pendingKeys)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    setPendingKeys(next)
+  }
+
+  const applyEconomy = () => {
+    const economy = llmModelRegistry?.models.find((m: LLMModelInfo) => m.economy_default)
+    applySelection(new Set(economy ? [economy.key] : ['glm52']))
   }
 
   const handleLogout = () => {
     logout()
     window.location.href = '/login'
   }
+
+  const registry = llmModelRegistry
+  const selectionLabel = registry ? activeModelLabel(registry.models) : (llmModels === 'all' ? 'Inferred ensemble' : llmModels)
+  const registryModels: LLMModelInfo[] = registry?.models ?? []
 
   return (
     <nav className="app-sidebar" style={{
@@ -93,25 +140,76 @@ export function Sidebar() {
 
       <div style={{ padding: '12px 14px', borderTop: '1px solid #334155' }}>
         <ModeBadge />
-        <button
-          onClick={toggleSavings}
-          title={isSavings ? 'Economy mode (GLM-5.2) — click for full ensemble' : 'Full ensemble — click for GLM-5.2 economy mode'}
-          style={{
-            marginTop: 8,
-            width: '100%',
-            background: isSavings ? '#92400e' : 'transparent',
-            color: isSavings ? '#fcd34d' : '#94a3b8',
-            border: `1px solid ${isSavings ? '#b45309' : '#334155'}`,
-            fontSize: 11,
-            padding: '5px 8px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 5,
-          }}
-        >
-          <span>{isSavings ? '🪙' : '⚡'}</span>
-          <span>{isSavings ? 'Economy (GLM-5.2)' : 'Full ensemble'}</span>
-        </button>
+
+        {/* Registry-backed model-pair selector (WS-1, 2026-07-14). */}
+        <div style={{
+          marginTop: 8,
+          padding: '8px 10px',
+          border: '1px solid #334155',
+          borderRadius: 6,
+          background: '#0f172a',
+          fontSize: 11,
+          color: '#94a3b8',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontWeight: 600, color: '#e2e8f0' }}>LLM ensemble</span>
+            <span style={{ color: '#fcd34d' }}>{selectionLabel}</span>
+          </div>
+          {registry ? (
+            <>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
+                {registryModels.map((model: LLMModelInfo) => (
+                  <label key={model.key} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={pendingKeys.has(model.key)}
+                      onChange={() => toggleKey(model.key)}
+                      disabled={saving}
+                    />
+                    <span style={{ color: pendingKeys.has(model.key) ? '#e2e8f0' : '#94a3b8' }}>{model.label}</span>
+                  </label>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  onClick={() => applySelection(pendingKeys)}
+                  disabled={saving || pendingKeys.size === 0}
+                  style={{
+                    flex: 1,
+                    padding: '4px 8px',
+                    fontSize: 11,
+                    background: pendingKeys.size > 0 ? '#0ea5e9' : '#475569',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 4,
+                    cursor: pendingKeys.size > 0 ? 'pointer' : 'not-allowed',
+                  }}
+                >
+                  {saving ? 'Saving…' : 'Apply'}
+                </button>
+                <button
+                  onClick={applyEconomy}
+                  disabled={saving}
+                  title="Single economy model (lowest token cost)"
+                  style={{
+                    padding: '4px 8px',
+                    fontSize: 11,
+                    background: 'transparent',
+                    color: '#94a3b8',
+                    border: '1px solid #334155',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Economy
+                </button>
+              </div>
+            </>
+          ) : (
+            <div style={{ fontStyle: 'italic', color: '#64748b' }}>Loading registry…</div>
+          )}
+        </div>
+
         <button
           onClick={handleLogout}
           style={{ marginTop: 6, width: '100%', background: 'transparent', color: '#94a3b8', border: '1px solid #334155', fontSize: 12 }}

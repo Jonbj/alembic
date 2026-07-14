@@ -105,6 +105,10 @@ def normalize_model_selection(raw: str | None) -> tuple[str, list[str], list[str
     if not keys:
         keys = [m.key for m in _MODELS if m.in_all]
         return "all", keys, invalid
+    # Canonical order: preserve registry order so "gptoss,glm52" canonicalizes
+    # to "glm52,gptoss" and two operators never persist visually-different keys.
+    registry_order = [m.key for m in _MODELS]
+    keys.sort(key=lambda k: registry_order.index(k))
     return ",".join(keys), keys, invalid
 
 

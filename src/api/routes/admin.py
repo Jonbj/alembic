@@ -98,7 +98,10 @@ async def set_llm_models(
     """Set LLM model selection for token-budget savings.
 
     Args:
-        models: "all" (full ensemble) or comma-separated subset: kimi, qwen, deepseek, glm
+        models: canonical comma-separated model keys (e.g. "glm52,gptoss") or
+            "all" to expand to every model with in_all=True in the registry.
+            Valid keys are taken from src.llm.model_registry; do not hardcode
+            model names here.
     """
     canonical, _, invalid = normalize_model_selection(req.models)
     if invalid:

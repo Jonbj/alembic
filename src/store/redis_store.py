@@ -671,9 +671,10 @@ class RedisStore:
         """Persist LLM model selection override.
 
         Args:
-            models: Comma-separated subset of {kimi, glm52} or "all".
-                    "all"   → 2-model ensemble Kimi + GLM-5.2 (normal operation)
-                    "glm52" → single model, saves 50% Ollama quota
+            models: Canonical comma-separated model keys (e.g. "glm52,gptoss")
+                or "all". "all" expands at read time to every model with
+                in_all=True in src.llm.model_registry; it is NOT necessarily the
+                live pair. Use explicit keys for deterministic pair selection.
         """
         self._r.set("config:sentiment_llm_models", models)
 
