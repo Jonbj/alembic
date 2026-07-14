@@ -2075,3 +2075,55 @@ def run_daily_trading_analysis(target_date: str | None = None) -> dict:
     stats_out = {"skipped": True, "reason": "replaced_by_claude_code"}
     log.info("Daily trading analysis complete: %s", stats_out)
     return stats_out
+
+
+@app.task(name="src.workers.performance.run_shadow_comparison_report")
+def run_shadow_comparison_report() -> dict:
+    """Stage-2 auto-report: after >=7 days armed, build the ranked comparison,
+    send it via Telegram, and DISARM the shadow toggle (self-bounding spend).
+
+    No-op (skipped) unless an operator armed shadow mode via
+    RedisStore.set_shadow_comparison_start, and until 7 days have elapsed since
+    arming. Once the window closes, this always disarms — even if the Telegram
+    send fails — so a broken notifier can't leave shadow mode running forever.
+    """
+    import pandas as pd
+
+    from src.performance.model_comparison import build_comparison, render_markdown
+
+    redis = RedisStore()
+    try:
+        started_raw = redis.get_shadow_comparison_start()
+        if not started_raw:
+            return {"skipped": True, "reason": "not_armed"}
+
+        started = datetime.fromisoformat(started_raw)
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - started) < timedelta(days=7):
+            return {"skipped": True, "reason": "window_open"}
+
+        pg = PostgreSQLStore()
+        try:
+            cols = ["news_log_id", "model_id", "polarity", "confidence", "parse_error"]
+            rows = pd.DataFrame(
+                list(pg.fetch_shadow_rows(started)) + list(pg.fetch_live_response_rows(started)),
+                columns=cols,
+            )
+            fwd = dict(pg.fetch_fwd_by_news(started))
+        finally:
+            pg.close()
+
+        report = build_comparison(rows, fwd, divergence_threshold=config.ENSEMBLE_DIVERGENCE_STD)
+        md = render_markdown(report)
+
+        try:
+            notifier = TelegramNotifier()
+            run_async(notifier.send_alert(md, level="info"))
+        except Exception as exc:
+            log.warning("shadow report Telegram send failed: %s", exc)
+
+        redis.clear_shadow_comparison_start()
+        return {"reported": True, "models": len(report["models"])}
+    finally:
+        redis.close()

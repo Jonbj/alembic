@@ -1540,6 +1540,68 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    _FETCH_SHADOW_ROWS = """
+        SELECT news_log_id, model_id, polarity, confidence, parse_error
+        FROM llm_shadow_responses
+        WHERE created_at >= %s
+    """
+
+    def fetch_shadow_rows(self, since) -> list[tuple]:
+        """Stage-2 shadow-model rows (news_log_id, model_id, polarity, confidence,
+        parse_error) generated since `since`. Used by the auto-report task and the
+        manual report script — see src/performance/model_comparison.build_comparison.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_SHADOW_ROWS, (since,))
+                return cur.fetchall()
+        except Exception:
+            conn.rollback()
+            raise
+
+    _FETCH_LIVE_RESPONSE_ROWS = """
+        SELECT s.news_log_id, r.model_id, r.polarity, r.confidence, FALSE AS parse_error
+        FROM llm_responses r
+        JOIN sentiment_signals s ON s.id = r.signal_id
+        WHERE r.generated_at >= %s AND s.news_log_id IS NOT NULL
+    """
+
+    def fetch_live_response_rows(self, since) -> list[tuple]:
+        """Live-ensemble per-model rows since `since`, shaped like fetch_shadow_rows
+        (parse_error hardcoded FALSE — live llm_responses rows are always parsed) so
+        both can feed the same comparison DataFrame.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_LIVE_RESPONSE_ROWS, (since,))
+                return cur.fetchall()
+        except Exception:
+            conn.rollback()
+            raise
+
+    _FETCH_FWD_BY_NEWS = """
+        SELECT news_log_id, forward_return
+        FROM sentiment_signals
+        WHERE news_log_id IS NOT NULL
+          AND forward_return IS NOT NULL
+          AND generated_at >= %s
+    """
+
+    def fetch_fwd_by_news(self, since) -> list[tuple]:
+        """(news_log_id, forward_return) pairs since `since` — the join key used
+        by build_comparison to score both shadow and live per-model rows.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_FWD_BY_NEWS, (since,))
+                return cur.fetchall()
+        except Exception:
+            conn.rollback()
+            raise
+
     def get_news_recent(
         self,
         limit: int = 100,

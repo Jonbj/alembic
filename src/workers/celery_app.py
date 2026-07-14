@@ -204,6 +204,14 @@ app.conf.beat_schedule = {
         "task": "src.workers.performance.run_loss_feedback_check",
         "schedule": crontab(minute="*/30", hour="14-21", day_of_week="1-5"),
     },
+    # Stage-2 shadow-mode model comparison: no-op unless armed via
+    # RedisStore.set_shadow_comparison_start (operator action). Once armed for
+    # >= 7 days, builds the ranked comparison, sends it via Telegram, and
+    # disarms itself (self-bounding spend — see src/workers/performance.py).
+    "shadow-comparison-report": {
+        "task": "src.workers.performance.run_shadow_comparison_report",
+        "schedule": crontab(hour=21, minute=40),
+    },
     # Counterfactual worker at 22:45 UTC daily (after risk monitor at 22:30).
     # Computes 1-hour forward return for SKIP_THRESHOLD, SKIP_EMA and SKIP_CAP decisions.
     "counterfactual-worker": {
