@@ -218,6 +218,13 @@ class PostgreSQLStore:
         VALUES (%s, %s, %s, %s, %s, %s, now())
     """
 
+    _INSERT_SHADOW_RESPONSE = """
+        INSERT INTO llm_shadow_responses
+            (news_log_id, symbol, model_id, polarity, confidence, reasoning,
+             parse_error, latency_ms)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    """
+
     def log_news_item(
         self,
         item: NewsItem,
@@ -1500,6 +1507,32 @@ class PostgreSQLStore:
                             False if force_ineligible else out.confidence >= min_confidence,
                         )
                         for out in outputs
+                    ],
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    def log_shadow_responses(self, rows: list[dict]) -> None:
+        """Write Stage-2 shadow-model outputs. No-op for empty list.
+
+        Rows are audit/measurement only: nothing in the live path reads them.
+        news_log_id may be None (URL/ticker conflict in log_news_item), hence
+        the extra symbol column for joinability.
+        """
+        if not rows:
+            return
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    self._INSERT_SHADOW_RESPONSE,
+                    [
+                        (r.get("news_log_id"), r["symbol"], r["model_id"],
+                         r.get("polarity"), r.get("confidence"), r.get("reasoning"),
+                         bool(r.get("parse_error", False)), r.get("latency_ms"))
+                        for r in rows
                     ],
                 )
             conn.commit()
