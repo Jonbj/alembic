@@ -32,7 +32,7 @@ def build_comparison(
         ok = g[~g["parse_error"] & g["fwd"].notna() & g["polarity"].notna()]
         score = ok["polarity"] * ok["confidence"]
         ic = float(score.rank().corr(ok["fwd"].rank())) if len(ok) >= 3 else float("nan")
-        hit = float((np.sign(score) == np.sign(ok["fwd"])).mean()) if len(ok) else float("nan")
+        hit = float((np.sign(score) == np.sign(ok["fwd"])).mean()) if len(ok) >= 3 else float("nan")
         out["models"][model_id] = {
             "n": int(len(g)),
             "parse_fail_rate": float(g["parse_error"].mean()),
@@ -66,16 +66,25 @@ def build_comparison(
     return out
 
 
+def _fmt_pct(x: float) -> str:
+    return "—" if pd.isna(x) else f"{x:.0%}"
+
+
+def _fmt_num(x: float) -> str:
+    return "—" if pd.isna(x) else f"{x:.3f}"
+
+
 def render_markdown(report: dict) -> str:
     lines = ["# Stage-2 model comparison", "", "## Models",
              "| model | n | parse_fail | IC | hit rate |", "|---|---|---|---|---|"]
-    for m, s in sorted(report["models"].items(), key=lambda kv: -(kv[1]["ic"] or -9)):
-        lines.append(f"| {m} | {s['n']} | {s['parse_fail_rate']:.0%} "
-                     f"| {s['ic']:.3f} | {s['hit_rate']:.0%} |")
+    for m, s in sorted(report["models"].items(),
+                       key=lambda kv: -(kv[1]["ic"] if pd.notna(kv[1]["ic"]) else -9)):
+        lines.append(f"| {m} | {s['n']} | {_fmt_pct(s['parse_fail_rate'])} "
+                     f"| {_fmt_num(s['ic'])} | {_fmt_pct(s['hit_rate'])} |")
     lines += ["", "## Pairs (replayed at live threshold)",
               "| pair | n | divergence | pair IC |", "|---|---|---|---|"]
     for p, s in sorted(report["pairs"].items(),
                        key=lambda kv: kv[1]["divergence_rate"]):
-        lines.append(f"| {p} | {s['n_common']} | {s['divergence_rate']:.0%} "
-                     f"| {s['pair_ic']:.3f} |")
+        lines.append(f"| {p} | {s['n_common']} | {_fmt_pct(s['divergence_rate'])} "
+                     f"| {_fmt_num(s['pair_ic'])} |")
     return "\n".join(lines)
