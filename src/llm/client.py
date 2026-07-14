@@ -697,6 +697,8 @@ class OllamaCloudClient(LLMClient):
 
     Unlike the CLI-based clients above, this does NOT use the claude CLI —
     it's a direct HTTP call to Ollama's cloud inference endpoint.
+
+    `_semaphore_override` is set only by the Stage-2 shadow path.
     """
 
     model_id: str = ""
@@ -733,7 +735,8 @@ class OllamaCloudClient(LLMClient):
         for attempt in range(self.max_retries + 1):
             try:
                 # Acquire semaphore → HTTP call → release semaphore → parse
-                async with _ollama_sem.acquire():
+                sem = getattr(self, "_semaphore_override", None) or _ollama_sem
+                async with sem.acquire():
                     async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
                         async with session.post(url, json=payload) as resp:
                             resp.raise_for_status()

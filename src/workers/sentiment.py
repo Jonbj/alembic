@@ -29,6 +29,7 @@ Exported public API (used by backtest CLI):
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
 
 from src.config import config
@@ -258,6 +259,117 @@ async def run_inference(
         return None
 
 
+def build_shadow_clients(redis_store):
+    """Instantiate Stage-2 shadow candidate clients: the registry pool minus the
+    currently active (live) selection — pair-swap-proof (re-reads Redis every call
+    so a live pair swap is picked up on the next news item, no restart needed).
+
+    Routed through the dedicated `_ollama_shadow_sem` pool (never the live
+    `_ollama_sem`) so shadow load can never compete with live ensemble calls.
+    """
+    from src.llm.client import _ollama_shadow_sem
+    from src.llm.model_registry import (
+        build_sentiment_clients,
+        normalize_model_selection,
+        sentiment_models,
+    )
+
+    _, active_keys, _ = normalize_model_selection(redis_store.get_llm_models())
+    candidate_keys = [m.key for m in sentiment_models() if m.key not in active_keys]
+    if not candidate_keys:
+        # Nothing left to shadow (e.g. active selection already spans the whole
+        # registry). NOTE: build_sentiment_clients([]) falls back to the default
+        # "all" clients — which ARE the active pair in the common case — so an
+        # empty candidate_keys must short-circuit here rather than fall through,
+        # or the shadow path would silently score with the live models instead
+        # of candidates, defeating the whole comparison.
+        return []
+    clients = build_sentiment_clients(candidate_keys)
+    for c in clients:
+        # Route through the dedicated shadow pool (never the live semaphore).
+        c._semaphore_override = _ollama_shadow_sem
+    return clients
+
+
+async def _shadow_query_candidates(
+    clean_body: str,
+    clean_symbol: str,
+    news_log_id: int | None,
+    pg_store,
+    redis_store,
+) -> None:
+    """Stage-2 shadow-mode candidate scoring (spec 2026-07-09).
+
+    Scores the SAME news item with the candidate models NOT currently in the
+    live ensemble pair, purely for offline measurement (llm_shadow_responses).
+    Called strictly AFTER the live signal has already been written by the
+    caller — this function's own outcome never feeds back into it.
+
+    TOTAL ISOLATION (non-negotiable): this function must never raise to the
+    caller, must never write to any live-path store (pg_store.write_signal,
+    redis_store.write_sentiment, or anything the live ensemble writes), and
+    must never be the reason a live news item fails to produce/persist its
+    signal. Every failure mode — armed-check, client construction, the model
+    call itself, the shadow store write — is caught and logged at debug level
+    only; nothing propagates.
+    """
+    try:
+        # get_shadow_comparison_start() is documented to return str | None (an
+        # ISO8601 timestamp when armed). Guard with isinstance rather than bare
+        # truthiness so any non-string/unexpected value (including an
+        # unconfigured test double) is treated as "not armed" instead of
+        # accidentally engaging the shadow path.
+        start = redis_store.get_shadow_comparison_start()
+        if not isinstance(start, str) or not start:
+            return
+        clients = build_shadow_clients(redis_store)
+        if not clients:
+            return
+        prompt = _DK_COT_PROMPT.format(text=clean_body[:600], symbol=clean_symbol)
+
+        async def _score_one(client) -> dict:
+            model_id = getattr(client, "model_id", "?")
+            t0 = time.monotonic()
+            try:
+                out = await asyncio.wait_for(
+                    client.complete(prompt, response_schema=LLMSentimentOutput),
+                    timeout=45,
+                )
+                return {
+                    "news_log_id": news_log_id,
+                    "symbol": clean_symbol,
+                    "model_id": model_id,
+                    "polarity": out.polarity,
+                    "confidence": out.confidence,
+                    "reasoning": out.reasoning,
+                    "parse_error": False,
+                    "latency_ms": int((time.monotonic() - t0) * 1000),
+                }
+            except Exception as _model_exc:
+                log.debug(
+                    "shadow candidate model failed: model=%s error=%s",
+                    model_id, _model_exc,
+                )
+                return {
+                    "news_log_id": news_log_id,
+                    "symbol": clean_symbol,
+                    "model_id": model_id,
+                    "polarity": None,
+                    "confidence": None,
+                    "reasoning": None,
+                    "parse_error": True,
+                    "latency_ms": int((time.monotonic() - t0) * 1000),
+                }
+
+        # Run all candidates concurrently (mirrors run_ensemble_query's gather
+        # pattern): total added latency is bounded by the slowest candidate
+        # instead of their sum, minimizing the shadow path's footprint.
+        rows = await asyncio.gather(*[_score_one(c) for c in clients])
+        pg_store.log_shadow_responses(list(rows))
+    except Exception as exc:
+        log.debug("shadow path swallowed: %s", exc)
+
+
 async def process_news_item(
     item: NewsItem,
     clients: list[LLMClient],
@@ -308,6 +420,20 @@ async def process_news_item(
                 outputs=raw_outputs,
                 force_ineligible=result.fallback_used,
             )
+        # Stage-2 shadow scoring: fire-and-forget, strictly AFTER every live
+        # write above. Own try/except as belt & braces on top of the internal
+        # catch-all inside _shadow_query_candidates — this must never be the
+        # reason the live signal write above is reported as failed.
+        try:
+            await _shadow_query_candidates(
+                clean_body=sanitize_text(item.body or ""),
+                clean_symbol=result.symbol,
+                news_log_id=news_log_id,
+                pg_store=pg_store,
+                redis_store=redis_store,
+            )
+        except Exception as _sh_exc:
+            log.debug("shadow hook swallowed: %s", _sh_exc)
     except Exception as e:
         log.error(f"Failed to write signal for {result.symbol}: {e}")
     return result
