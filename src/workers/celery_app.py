@@ -57,6 +57,9 @@ app.conf.update(
     # cycle doesn't overrun into the next. Applies to all inference-queue tasks
     # (pead-ingestion, regime-detector too) — harmless for them, just a longer
     # hang-detection ceiling than their own workload needs.
+    # src/workers/sentiment.py's _SHADOW_BOUNDED_WAIT_S (Stage-2 shadow mode) is
+    # sized against these two constants (583s live-only worst case + bounded
+    # wait, kept under task_soft_time_limit) — re-check it if you change these.
     task_time_limit=840,
     task_soft_time_limit=780,
 )
@@ -203,6 +206,14 @@ app.conf.beat_schedule = {
     "loss-feedback-check": {
         "task": "src.workers.performance.run_loss_feedback_check",
         "schedule": crontab(minute="*/30", hour="14-21", day_of_week="1-5"),
+    },
+    # Stage-2 shadow-mode model comparison: no-op unless armed via
+    # RedisStore.set_shadow_comparison_start (operator action). Once armed for
+    # >= 7 days, builds the ranked comparison, sends it via Telegram, and
+    # disarms itself (self-bounding spend — see src/workers/performance.py).
+    "shadow-comparison-report": {
+        "task": "src.workers.performance.run_shadow_comparison_report",
+        "schedule": crontab(hour=21, minute=40),
     },
     # Counterfactual worker at 22:45 UTC daily (after risk monitor at 22:30).
     # Computes 1-hour forward return for SKIP_THRESHOLD, SKIP_EMA and SKIP_CAP decisions.

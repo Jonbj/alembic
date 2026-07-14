@@ -24,6 +24,15 @@ if TYPE_CHECKING:
 # Global connection pool - lazy initialized
 _db_pool: pool.ThreadedConnectionPool | None = None
 
+# Stage-2 shadow-mode model comparison (src/workers/performance.run_shadow_comparison_report
+# and scripts/report_model_comparison.py): fetch_shadow_rows/fetch_live_response_rows both
+# return plain tuples, positionally aligned to this column order, which both callers use to
+# build a pandas DataFrame. This is the single source of truth for that order — if either
+# _FETCH_SHADOW_ROWS or _FETCH_LIVE_RESPONSE_ROWS SELECT column order changes below, this
+# list (and any caller still hardcoding its own copy) must change with it, or the DataFrame
+# silently misaligns (no error — just wrong IC/hit-rate numbers).
+SHADOW_COMPARISON_COLUMNS = ["news_log_id", "model_id", "polarity", "confidence", "parse_error"]
+
 
 def _get_pool() -> pool.ThreadedConnectionPool:
     """Get or create the global connection pool."""
@@ -216,6 +225,13 @@ class PostgreSQLStore:
     _INSERT_LLM_RESPONSE = """
         INSERT INTO llm_responses (signal_id, model_id, polarity, confidence, reasoning, eligible, generated_at)
         VALUES (%s, %s, %s, %s, %s, %s, now())
+    """
+
+    _INSERT_SHADOW_RESPONSE = """
+        INSERT INTO llm_shadow_responses
+            (news_log_id, symbol, model_id, polarity, confidence, reasoning,
+             parse_error, latency_ms)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """
 
     def log_news_item(
@@ -1589,6 +1605,102 @@ class PostgreSQLStore:
                     ],
                 )
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    def log_shadow_responses(self, rows: list[dict]) -> None:
+        """Write Stage-2 shadow-model outputs. No-op for empty list.
+
+        Rows are audit/measurement only: nothing in the live path reads them.
+        news_log_id may be None (URL/ticker conflict in log_news_item), hence
+        the extra symbol column for joinability.
+        """
+        if not rows:
+            return
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    self._INSERT_SHADOW_RESPONSE,
+                    [
+                        (r.get("news_log_id"), r["symbol"], r["model_id"],
+                         r.get("polarity"), r.get("confidence"), r.get("reasoning"),
+                         bool(r.get("parse_error", False)), r.get("latency_ms"))
+                        for r in rows
+                    ],
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    # WARNING: this SELECT's column order must stay in sync with the module-level
+    # SHADOW_COMPARISON_COLUMNS constant above — both run_shadow_comparison_report
+    # (src/workers/performance.py) and scripts/report_model_comparison.py build a
+    # DataFrame from this method's raw tuples using that name list, positionally.
+    _FETCH_SHADOW_ROWS = """
+        SELECT news_log_id, model_id, polarity, confidence, parse_error
+        FROM llm_shadow_responses
+        WHERE created_at >= %s
+    """
+
+    def fetch_shadow_rows(self, since) -> list[tuple]:
+        """Stage-2 shadow-model rows (news_log_id, model_id, polarity, confidence,
+        parse_error) generated since `since`. Used by the auto-report task and the
+        manual report script — see src/performance/model_comparison.build_comparison.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_SHADOW_ROWS, (since,))
+                return cur.fetchall()
+        except Exception:
+            conn.rollback()
+            raise
+
+    # WARNING: this SELECT's column order must stay in sync with the module-level
+    # SHADOW_COMPARISON_COLUMNS constant above (and with _FETCH_SHADOW_ROWS, since
+    # fetch_shadow_rows and fetch_live_response_rows feed the same DataFrame) — see
+    # the note on _FETCH_SHADOW_ROWS above.
+    _FETCH_LIVE_RESPONSE_ROWS = """
+        SELECT s.news_log_id, r.model_id, r.polarity, r.confidence, FALSE AS parse_error
+        FROM llm_responses r
+        JOIN sentiment_signals s ON s.id = r.signal_id
+        WHERE r.generated_at >= %s AND s.news_log_id IS NOT NULL
+    """
+
+    def fetch_live_response_rows(self, since) -> list[tuple]:
+        """Live-ensemble per-model rows since `since`, shaped like fetch_shadow_rows
+        (parse_error hardcoded FALSE — live llm_responses rows are always parsed) so
+        both can feed the same comparison DataFrame.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_LIVE_RESPONSE_ROWS, (since,))
+                return cur.fetchall()
+        except Exception:
+            conn.rollback()
+            raise
+
+    _FETCH_FWD_BY_NEWS = """
+        SELECT news_log_id, forward_return
+        FROM sentiment_signals
+        WHERE news_log_id IS NOT NULL
+          AND forward_return IS NOT NULL
+          AND generated_at >= %s
+    """
+
+    def fetch_fwd_by_news(self, since) -> list[tuple]:
+        """(news_log_id, forward_return) pairs since `since` — the join key used
+        by build_comparison to score both shadow and live per-model rows.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_FWD_BY_NEWS, (since,))
+                return cur.fetchall()
         except Exception:
             conn.rollback()
             raise

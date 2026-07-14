@@ -40,6 +40,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import httpx
 import numpy as np
+import pandas as pd
 import psycopg2
 
 from src.config import config
@@ -58,6 +59,7 @@ from src.performance.drift import (
     DriftAlert,
 )
 from src.performance.ic import compute_composite_ic, compute_icir
+from src.performance.model_comparison import build_comparison, render_markdown
 from src.performance.postmortem import diagnose_loss, should_trigger_postmortem, TradeContext
 from src.performance.weights import compute_new_weights, compute_purified_icir
 from src.portfolio.loss_feedback import (
@@ -67,7 +69,7 @@ from src.portfolio.loss_feedback import (
     strategy_for_trade,
 )
 from src.llm.model_registry import model_ids_for_keys, normalize_model_selection, normalize_weights_for_active_models
-from src.store.pg_store import PostgreSQLStore
+from src.store.pg_store import PostgreSQLStore, SHADOW_COMPARISON_COLUMNS
 from src.store.redis_store import RedisStore
 from src.workers.celery_app import app
 from src.workers.execution import ENTRY_THRESHOLD
@@ -2090,3 +2092,55 @@ def run_daily_trading_analysis(target_date: str | None = None) -> dict:
     stats_out = {"skipped": True, "reason": "replaced_by_claude_code"}
     log.info("Daily trading analysis complete: %s", stats_out)
     return stats_out
+
+
+@app.task(name="src.workers.performance.run_shadow_comparison_report")
+def run_shadow_comparison_report() -> dict:
+    """Stage-2 auto-report: after >=7 days armed, build the ranked comparison,
+    send it via Telegram, and DISARM the shadow toggle (self-bounding spend).
+
+    No-op (skipped) unless an operator armed shadow mode via
+    RedisStore.set_shadow_comparison_start, and until 7 days have elapsed since
+    arming.
+
+    Self-disarm invariant: once the 7-day window closes, redis.clear_shadow_
+    comparison_start() ALWAYS runs — it sits outside (after) the Telegram
+    try/except below, so a failed/misconfigured Telegram send cannot leave
+    shadow mode armed forever. Disarming is unconditional on reaching that
+    point; only sending the report is best-effort.
+    """
+    redis = RedisStore()
+    try:
+        started_raw = redis.get_shadow_comparison_start()
+        if not started_raw:
+            return {"skipped": True, "reason": "not_armed"}
+
+        started = datetime.fromisoformat(started_raw)
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - started) < timedelta(days=7):
+            return {"skipped": True, "reason": "window_open"}
+
+        pg = PostgreSQLStore()
+        try:
+            rows = pd.DataFrame(
+                list(pg.fetch_shadow_rows(started)) + list(pg.fetch_live_response_rows(started)),
+                columns=SHADOW_COMPARISON_COLUMNS,
+            )
+            fwd = dict(pg.fetch_fwd_by_news(started))
+        finally:
+            pg.close()
+
+        report = build_comparison(rows, fwd, divergence_threshold=config.ENSEMBLE_DIVERGENCE_STD)
+        md = render_markdown(report)
+
+        try:
+            notifier = TelegramNotifier()
+            run_async(notifier.send_alert(md, level="info"))
+        except Exception as exc:
+            log.warning("shadow report Telegram send failed: %s", exc)
+
+        redis.clear_shadow_comparison_start()
+        return {"reported": True, "models": len(report["models"])}
+    finally:
+        redis.close()
