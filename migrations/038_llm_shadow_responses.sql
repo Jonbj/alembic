@@ -1,4 +1,4 @@
--- 037_llm_shadow_responses.sql
+-- 038_llm_shadow_responses.sql
 -- Stage 2 shadow-mode model comparison (spec 2026-07-09). Shadow candidates score
 -- live news items; forward returns join via news_log_id -> sentiment_signals.
 SET lock_timeout = '2s';
