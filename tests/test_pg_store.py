@@ -643,20 +643,165 @@ class TestRecordTradeExit:
         mock_conn.commit.assert_called_once()
 
     def test_record_trade_exit_returns_none_for_later_tranche(self):
-        """WS-5: second SELL tranche appends the order id but does not re-run
-        postmortem (returned id is None)."""
+        """WS-5 fix-back: an intermediate (non-final) SELL tranche (is_final=False)
+        appends the order id but does not set exit_time and returns None, so the
+        caller skips the postmortem; the final tranche (is_final=True) sets
+        exit_time and returns the trade id so the postmortem runs exactly once."""
         from datetime import datetime, timezone
         mock_conn = MagicMock()
         mock_cur = MagicMock()
         mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-        # first call: new close; second call: already closed
-        mock_cur.fetchone.side_effect = [(7, False), (7, True)]
+        # Same open trade (id=7) found on every tranche — it stays open until the
+        # final tranche, so the fallback WHERE ... AND exit_time IS NULL keeps
+        # matching it.
+        mock_cur.fetchone.side_effect = [(7,), (7,)]
 
         store = PostgreSQLStore(conn=mock_conn, use_pool=False)
         ts = datetime(2026, 6, 5, 16, tzinfo=timezone.utc)
-        assert store.record_trade_exit("SHEL", "o1", ts, "sell") == 7
-        assert store.record_trade_exit("SHEL", "o2", ts, "sell") is None
+        # Intermediate tranche: appends order id, trade stays open, no postmortem.
+        assert store.record_trade_exit("SHEL", "o1", ts, "sell", is_final=False) is None
+        # Final tranche: sets exit_time, returns id, postmortem runs once.
+        assert store.record_trade_exit("SHEL", "o2", ts, "sell", is_final=True) == 7
         assert mock_conn.commit.call_count == 2
+
+
+class TestRecordTradeExitMultiTrancheFixback:
+    """WS-5 fix-back (2026-07-14): record_trade_exit must target ONLY the open trade
+    for a symbol, never the many historical closed trades for the same symbol
+    (META 24, AZN 20, ...). The is_final model keeps the trade "open" (exit_time
+    NULL) on intermediate tranches so the pyramiding guard blocks re-BUY during
+    wind-down and reconcile runs once, on the fully-closed trade.
+    """
+
+    def test_final_tranche_targets_by_trade_id_not_symbol(self):
+        """The UPDATE WHERE must target the open trade by id (or by
+        symbol+exit_time IS NULL), NEVER a naked `WHERE symbol = %s` that would
+        match every historical closed trade for the symbol."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        # The open trade is id=99. Historicals (id 1,2,3) must NOT be touched.
+        mock_cur.fetchone.return_value = (99,)
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        result = store.record_trade_exit(
+            symbol="META",
+            exit_order_id="exit-final",
+            exit_time=datetime(2026, 7, 14, 19, 52, tzinfo=timezone.utc),
+            exit_reason="portfolio_sell",
+            trade_id=99,
+            is_final=True,
+        )
+        assert result == 99
+        sql = mock_cur.execute.call_args[0][0]
+        # MUST target the specific trade, never a naked symbol match.
+        assert "WHERE symbol = %s\n" not in sql  # Kimi's bug: naked symbol match
+        assert "WHERE id = %s" in sql
+        params = mock_cur.execute.call_args[0][1]
+        assert params[-1] == 99  # trade_id is the WHERE target
+        # Final tranche sets exit_time + exit_reason.
+        assert "exit_time = COALESCE(exit_time" in sql
+        assert "exit_reason = COALESCE(exit_reason" in sql
+
+    def test_intermediate_tranche_does_not_set_exit_time(self):
+        """A partial SELL tranche (is_final=False) appends the order id but must
+        NOT set exit_time/exit_reason — the trade stays "open" so the pyramiding
+        guard keeps blocking re-BUY during wind-down, and so the caller skips the
+        postmortem (returns None)."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (99,)
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        result = store.record_trade_exit(
+            symbol="META",
+            exit_order_id="exit-tranche-1",
+            exit_time=datetime(2026, 7, 14, 18, 22, tzinfo=timezone.utc),
+            exit_reason="portfolio_sell",
+            trade_id=99,
+            is_final=False,
+        )
+        # Intermediate tranche: no postmortem (returns None).
+        assert result is None
+        sql = mock_cur.execute.call_args[0][0]
+        # Appends to exit_order_ids (multi-tranche aggregation).
+        assert "exit_order_ids" in sql
+        # MUST NOT set exit_time/exit_reason on an intermediate tranche.
+        assert "exit_time = COALESCE(exit_time" not in sql
+        assert "exit_reason = COALESCE(exit_reason" not in sql
+
+    def test_fallback_without_trade_id_targets_open_trade_only(self):
+        """When the caller cannot pass trade_id, the fallback WHERE must be
+        `symbol = %s AND exit_time IS NULL` (the single open trade) — NEVER
+        `WHERE symbol = %s` alone, which would corrupt every historical trade."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (99,)
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        store.record_trade_exit(
+            symbol="META",
+            exit_order_id="exit-1",
+            exit_time=datetime(2026, 7, 14, 18, 22, tzinfo=timezone.utc),
+            exit_reason="portfolio_sell",
+            is_final=False,
+        )
+        sql = mock_cur.execute.call_args[0][0]
+        # Fallback must scope to the open trade only via exit_time IS NULL.
+        assert "WHERE symbol = %s AND exit_time IS NULL" in sql
+        # And must NOT be the naked symbol match (Kimi's bug: `WHERE symbol = %s`
+        # immediately followed by a newline / RETURNING, no exit_time filter).
+        assert "WHERE symbol = %s\n" not in sql
+
+    def test_multi_tranche_flow_runs_postmortem_once(self):
+        """A 3-tranche wind-down: tranches 1-2 (is_final=False) return None
+        (postmortem skipped); tranche 3 (is_final=True) returns the trade_id
+        (postmortem runs exactly once, on the final tranche)."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        # Same open trade (id=99) found on every tranche (it stays open until final).
+        mock_cur.fetchone.side_effect = [(99,), (99,), (99,)]
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        ts = datetime(2026, 7, 14, 19, 52, tzinfo=timezone.utc)
+        r1 = store.record_trade_exit("META", "o1", ts, "sell", trade_id=99, is_final=False)
+        r2 = store.record_trade_exit("META", "o2", ts, "sell", trade_id=99, is_final=False)
+        r3 = store.record_trade_exit("META", "o3", ts, "sell", trade_id=99, is_final=True)
+        assert [r1, r2, r3] == [None, None, 99]
+        # Only the final (3rd) UPDATE sets exit_time.
+        sqls = [c[0][0] for c in mock_cur.execute.call_args_list]
+        assert "exit_time = COALESCE(exit_time" not in sqls[0]
+        assert "exit_time = COALESCE(exit_time" not in sqls[1]
+        assert "exit_time = COALESCE(exit_time" in sqls[2]
+        assert mock_conn.commit.call_count == 3
+
+    def test_stop_loss_full_close_defaults_to_final(self):
+        """Stop-loss / reversal SELLs are full-close: they don't pass is_final, so
+        the default is_final=True applies — exit_time is set, trade_id returned,
+        postmortem runs. No behavior regression for those paths."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (7,)
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        result = store.record_trade_exit(
+            symbol="PANW",
+            exit_order_id="stop-1",
+            exit_time=datetime(2026, 7, 14, 16, tzinfo=timezone.utc),
+            exit_reason="stop_loss",
+        )
+        assert result == 7
+        sql = mock_cur.execute.call_args[0][0]
+        assert "exit_time = COALESCE(exit_time" in sql
 
 
 class TestFetchTrades:
