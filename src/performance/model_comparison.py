@@ -84,7 +84,7 @@ def render_markdown(report: dict) -> str:
     lines += ["", "## Pairs (replayed at live threshold)",
               "| pair | n | divergence | pair IC |", "|---|---|---|---|"]
     for p, s in sorted(report["pairs"].items(),
-                       key=lambda kv: kv[1]["divergence_rate"]):
+                       key=lambda kv: kv[1]["divergence_rate"] if pd.notna(kv[1]["divergence_rate"]) else 9):
         lines.append(f"| {p} | {s['n_common']} | {_fmt_pct(s['divergence_rate'])} "
                      f"| {_fmt_num(s['pair_ic'])} |")
     return "\n".join(lines)
