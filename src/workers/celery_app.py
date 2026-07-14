@@ -57,6 +57,9 @@ app.conf.update(
     # cycle doesn't overrun into the next. Applies to all inference-queue tasks
     # (pead-ingestion, regime-detector too) — harmless for them, just a longer
     # hang-detection ceiling than their own workload needs.
+    # src/workers/sentiment.py's _SHADOW_BOUNDED_WAIT_S (Stage-2 shadow mode) is
+    # sized against these two constants (583s live-only worst case + bounded
+    # wait, kept under task_soft_time_limit) — re-check it if you change these.
     task_time_limit=840,
     task_soft_time_limit=780,
 )

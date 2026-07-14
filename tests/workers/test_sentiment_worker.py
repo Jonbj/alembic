@@ -993,7 +993,7 @@ class TestProcessNewsBatchShadowDecoupling:
         ) as mock_run_ensemble, patch(
             "src.workers.sentiment._shadow_query_candidates",
             new=AsyncMock(side_effect=slow_shadow),
-        ), patch("src.workers.sentiment._SHADOW_BOUNDED_WAIT_S", 0.05):
+        ), patch("src.workers.sentiment._SHADOW_BOUNDED_WAIT_S", 0.05, create=True):
             mock_run_ensemble.return_value = mock_outputs
 
             # Old (pre-fix) behavior awaits the 0.5s shadow call inline inside
@@ -1036,7 +1036,7 @@ class TestProcessNewsBatchShadowDecoupling:
         ) as mock_run_ensemble, patch(
             "src.workers.sentiment._shadow_query_candidates",
             new=AsyncMock(side_effect=fast_shadow),
-        ), patch("src.workers.sentiment._SHADOW_BOUNDED_WAIT_S", 0.2):
+        ), patch("src.workers.sentiment._SHADOW_BOUNDED_WAIT_S", 0.2, create=True):
             mock_run_ensemble.return_value = mock_outputs
 
             await asyncio.wait_for(
