@@ -1016,6 +1016,8 @@ class PostgreSQLStore:
                 # position (exit_order_ids NULL) hit `COALESCE(NULL, ARRAY[]::text[]) || %s`
                 # and raised, which (pre-B33) broke the whole trade-write loop.
                 # array_append(anyarray, anyelement) is unambiguous.
+                # Dedup guard: array_position is 1-BASED and returns NULL when the
+                # element is absent; COALESCE(..., 0) = 0 means "not present → append".
                 append_clause = (
                     "exit_order_id = COALESCE(exit_order_id, %s),\n"
                     "                               exit_order_ids = CASE\n"

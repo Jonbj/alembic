@@ -1087,13 +1087,16 @@ def _persist_trade_fills(
         for sub in submitted_orders:
             sym = sub["symbol"]
             dec = symbol_decisions.get(sym, {})
+            _trade_id = None
+            # --- Trade write (BUY open_trade / SELL record_trade_exit) ---
+            # Isolated per-order: a failure here counts as a trade-write failure,
+            # rolls back the connection, and skips this order's postmortem/back-fill
+            # (continue). One bad order must NOT abort the remaining batch (B33).
             try:
                 if sub["side"] == "buy":
                     # B28-FIX: BUY rows already written immediately after submission.
                     # Skip to avoid duplicate primary-key violation.
-                    if sub["order_id"] in written_buy_order_ids:
-                        pass
-                    else:
+                    if sub["order_id"] not in written_buy_order_ids:
                         # Freeze stop metadata at entry for the legacy batch path too.
                         _frozen_stop_legacy: "FrozenStop | None" = None
                         if stop_policy is not None:
@@ -1134,43 +1137,53 @@ def _persist_trade_fills(
                         trade_id=_open_trade_ids.get(sym),
                         is_final=_is_final,
                     )
-                    if _trade_id is not None:
-                        _entry_px = alpaca_entry_prices.get(sym, 0.0)
-                        _exit_px = market.prices.get(sym, 0.0)
-                        _sig = s4_signals.get(sym, {})
-                        _portfolio_postmortem(
-                            _pg_trades,
-                            _trade_id,
-                            signal=_sig,
-                            score=dec.get("score", 0.0),
-                            entry_price=_entry_px,
-                            exit_price=_exit_px,
-                            tick_time=tick_time,
-                        )
-                # Back-fill Alpaca order_id on the execution_decisions row.
-                # Isolated: a back-fill failure must not count as a trade-write
-                # failure (the trade row already committed) and must not roll back.
-                dec_id = dec.get("decision_id")
-                if dec_id is not None:
-                    try:
-                        _pg_trades.update_decision_order_id(dec_id, sub["order_id"])
-                    except Exception as _eid_exc:
-                        log.warning("Could not back-fill order_id on decision %s: %s", dec_id, _eid_exc)
-            except Exception as _per_order_exc:
+            except Exception as _tw_exc:
                 _failures += 1
                 # Rollback so a connection left in 'current transaction is
                 # aborted' by the failed op is cleaned before the next iteration —
-                # otherwise every subsequent order cascade-fails too.
-                # record_trade_exit already rolls back on its own re-raise, but
-                # open_trade / the freeze may not, so this is defensive + idempotent.
+                # otherwise every subsequent order cascade-fails too. Idempotent:
+                # record_trade_exit and open_trade both rollback on their own
+                # re-raise; stop_policy.freeze is pure (no DB). This guards future
+                # code paths and any op that doesn't self-rollback.
                 try:
                     _pg_trades.rollback()
                 except Exception:
                     pass
                 log.warning(
                     "B33: trade-write failed for %s %s (order_id=%s): %s — continuing with remaining orders",
-                    sym, sub["side"], sub.get("order_id"), _per_order_exc,
+                    sym, sub["side"], sub.get("order_id"), _tw_exc,
                 )
+                continue
+            # --- Postmortem (final tranche only) ---
+            # Runs only after a successful trade write. A postmortem failure must
+            # NOT count as a trade-write failure (the trade row is already committed)
+            # and must NOT skip the order_id back-fill below. (I-1: keeping the
+            # failure counter honest for the B33 'N/M failed' monitor log.)
+            if _trade_id is not None:
+                try:
+                    _entry_px = alpaca_entry_prices.get(sym, 0.0)
+                    _exit_px = market.prices.get(sym, 0.0) if market and getattr(market, "prices", None) else 0.0
+                    _sig = s4_signals.get(sym, {})
+                    _portfolio_postmortem(
+                        _pg_trades,
+                        _trade_id,
+                        signal=_sig,
+                        score=dec.get("score", 0.0),
+                        entry_price=_entry_px,
+                        exit_price=_exit_px,
+                        tick_time=tick_time,
+                    )
+                except Exception as _pm_exc:
+                    log.warning("B33: postmortem failed for %s (trade_id=%s): %s", sym, _trade_id, _pm_exc)
+            # --- Back-fill Alpaca order_id on the execution_decisions row ---
+            # Cosmetic (Decision Log display); failure must not count as a trade-write
+            # failure (the trade row already committed) and must not roll back.
+            dec_id = dec.get("decision_id")
+            if dec_id is not None:
+                try:
+                    _pg_trades.update_decision_order_id(dec_id, sub["order_id"])
+                except Exception as _eid_exc:
+                    log.warning("Could not back-fill order_id on decision %s: %s", dec_id, _eid_exc)
         if _failures:
             log.warning(
                 "B33: %d/%d trade writes failed this cycle (continued past failures; "

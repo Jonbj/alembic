@@ -1296,6 +1296,13 @@ def test_persist_trade_fills_isolates_per_order_sell_failure():
     assert "dec-msft" in backfilled and "dec-nflx" in backfilled, (
         f"order_id back-fill must run for orders after the failure; got {backfilled}"
     )
+    # The FAILED order (DIS) must NOT have its decision back-filled — its trade
+    # row was never written, so linking the order_id would be misleading. Pre-I-1
+    # the postmortem/back-fill ran inside the same try as the trade write; now a
+    # trade-write failure `continue`s before reaching the back-fill.
+    assert "dec-dis" not in backfilled, (
+        f"back-fill must not run for the order whose trade write failed; got {backfilled}"
+    )
     # Connection rolled back after the failure so the next order could reuse it
     # (otherwise psycopg2 'current transaction is aborted' cascades to all).
     pg.rollback.assert_called(), "rollback must be called after a per-order failure"
