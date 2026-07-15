@@ -298,20 +298,26 @@ docker compose ps beat
 3. Check `llm:budget:*` keys — daily budget may be exhausted
 4. Check worker logs for LLM connection errors (Ollama cloud timeout)
 
-### PostgreSQL connection pool exhausted
+### PostgreSQL connection pool exhausted / idle-in-transaction leak (B7/B32)
 
-Symptom: `psycopg2.pool.PoolError: connection pool exhausted`
+Symptom: `psycopg2.pool.PoolError: connection pool exhausted`, or `ALTER TABLE` / migrations hanging on `trades` (AccessShareLock held by idle-in-transaction conns).
 
-Cause: A worker process did not call `pg.close()` in its `finally` block.
+Cause (pre-fix 2026-07-14): a bare `PostgreSQLStore()` in the portfolio scheduler stop-loss check was never closed → 1 "idle in transaction" connection leaked per 15-min cycle → pool maxconn=20 exhausted. Aggravators: read-only methods (`load_frozen_stop`, `fetch_open_trade_meta`) left the transaction open; `_release_connection` did not rollback before `putconn`.
 
-Fix:
+Fix (shipped 2026-07-15, commit `06671f7`): `finally: .close()` on all scheduler stores; `_release_connection` rolls back before putconn/close; read-only methods end their transaction. Rebuild + restart required (config/source baked in image).
+
+Recovery + verification:
 ```bash
-# Restart the worker to release all connections
-docker compose restart worker
+# Check idle-in-transaction leak count (must be 0 post-fix)
+docker compose exec postgres psql -U trading -d trading -t \
+  -c "SELECT count(*) FROM pg_stat_activity WHERE state='idle in transaction';"
 
-# Verify pool recovery
+# If non-zero: restart the workers to release (stop container → leak drops to 0)
+docker compose restart worker beat
+
+# Verify pool recovery + leak stays 0 across portfolio cycles
 docker compose exec postgres psql -U trading -d trading \
-  -c "SELECT count(*) FROM pg_stat_activity WHERE datname='trading';"
+  -c "SELECT state, count(*) FROM pg_stat_activity WHERE datname='trading' GROUP BY state;"
 ```
 
 ### FinBERT cold-start latency

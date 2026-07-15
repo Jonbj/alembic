@@ -189,7 +189,7 @@
   - `src/connectors/alpaca_news.py` righe 98-121: stesso pattern
   - Fix: `if page_count >= max_pages: break`
 
-- [ ] **A-13 — Token-aware truncation in finbert.py**
+- [x] **A-13 — Token-aware truncation in finbert.py**
   - **Problema:** riga 112 usa `clean_text[:self._MAX_TOKENS]` che taglia code points Unicode, non token. Un token BPE può essere 1-4 caratteri.
   - **Fix:**
     ```python

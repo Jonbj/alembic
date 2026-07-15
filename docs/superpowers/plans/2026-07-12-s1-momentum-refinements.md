@@ -1,5 +1,7 @@
 # S1 Momentum Refinements Implementation Plan
 
+> **Status (2026-07-15):** All tasks implemented and tested on branch `s1-refinements-2026-07-12` (NOT merged — by design, awaiting operator review of the variants-comparison report + flag-flip decision). Checkboxes below reflect implementation status, not merge status.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans (or superpowers:subagent-driven-development) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add three flag-gated refinements to the S1 Time-Series Momentum strategy — skip-month lookbacks, absolute-momentum filter, cap-after-normalization sizing — plus doc fixes and a variants-comparison backtest, WITHOUT changing live behavior (all flags default to current behavior).
@@ -44,7 +46,7 @@ Constraints:
 **Files:**
 - Modify: `docs/strategies.md` (S1 section, starts ~line 22)
 
-- [ ] **Step 1: Fix the three drift points**
+- [x] **Step 1: Fix the three drift points**
 
 (a) The Sizing bullet reads `raw_weight ∝ signal × (target_vol / realised_vol)`.
 The code (`src/strategies/s1/sizing.py::compute_weights`) does NOT multiply by the
@@ -75,7 +77,7 @@ signal — the signal only gates selection. Replace the bullet with:
 > config-driven via the new `vol_target:` section in `config/trading.yaml` (F6a)
 > — do NOT touch that section or conflate the two when fixing the docs.
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add docs/strategies.md
@@ -91,7 +93,7 @@ git commit -m "docs(s1): fix sizing formula, target_vol default, rebalance caden
 - Modify: `src/strategies/s1/strategy.py` (`S1Config` — the dataclass lives HERE, not in a config.py — plus `from_yaml` and the pass-through in `TimeSeriesMomentum.__init__`)
 - Test: `tests/strategies/test_s1_signal.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `tests/strategies/test_s1_signal.py` inside `class TestComputeSignal` (reuse the
 existing `trending_prices` fixture; it has columns A, B, C):
@@ -124,12 +126,12 @@ existing `trending_prices` fixture; it has columns A, B, C):
         assert not result.empty  # the 252 leg alone still produces a signal
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `.venv/bin/pytest tests/strategies/test_s1_signal.py -q -k "skip_days"`
 Expected: FAIL with `TypeError: compute_signal() got an unexpected keyword argument 'skip_days'`
 
-- [ ] **Step 3: Implement in signal.py**
+- [x] **Step 3: Implement in signal.py**
 
 In `src/strategies/s1/signal.py::compute_signal`, add the parameter as the LAST
 one in the signature (so no existing positional call breaks):
@@ -176,7 +178,7 @@ with:
         nan_mask |= vol_norm.isna()
 ```
 
-- [ ] **Step 4: Thread the parameter through**
+- [x] **Step 4: Thread the parameter through**
 
 In `generate_signals` (same file): add `skip_days: int = 0` to the signature, document
 it ("Passed to compute_signal"), and pass it in the `compute_signal(...)` call
@@ -189,12 +191,12 @@ In `src/strategies/s1/strategy.py`:
 - `TimeSeriesMomentum.__init__` passes `skip_days=config.skip_days` in its
   `generate_signals(...)` call.
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `.venv/bin/pytest tests/strategies/test_s1_signal.py tests/strategies/test_s1_strategy.py -q`
 Expected: all PASS (the skip_days=0 identity test proves no behavior change).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/strategies/s1/signal.py src/strategies/s1/strategy.py tests/strategies/test_s1_signal.py
@@ -210,7 +212,7 @@ git commit -m "feat(s1): flag-gated skip-month lookback construction (skip_days,
 - Modify: `src/strategies/s1/strategy.py` (`S1Config`, `__init__` pivot, `compute_target_weights` gate)
 - Test: `tests/strategies/test_s1_signal.py`, `tests/strategies/test_s1_strategy.py`
 
-- [ ] **Step 1: Write the failing signal-level test**
+- [x] **Step 1: Write the failing signal-level test**
 
 Add to `tests/strategies/test_s1_signal.py::TestComputeSignal`:
 
@@ -228,12 +230,12 @@ Add to `tests/strategies/test_s1_signal.py::TestComputeSignal`:
         assert (last["signal"] < 0).any()
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `.venv/bin/pytest tests/strategies/test_s1_signal.py -q -k "signal_abs"`
 Expected: FAIL with `KeyError`/assert on missing `signal_abs` column.
 
-- [ ] **Step 3: Export signal_abs from compute_signal**
+- [x] **Step 3: Export signal_abs from compute_signal**
 
 In `compute_signal`, the tail currently is:
 
@@ -275,7 +277,7 @@ Run the Step-1 test: PASS. Run the whole file: `test_skip_days_zero_is_identical
 still passes (both frames carry the new column). If any existing test asserts the exact
 column list, update it to include `signal_abs`.
 
-- [ ] **Step 4: Write the failing strategy-level test**
+- [x] **Step 4: Write the failing strategy-level test**
 
 Add to `tests/strategies/test_s1_strategy.py`:
 
@@ -310,13 +312,13 @@ not clear threshold with seed 11, adjust the drift spread (make T0 `-0.0001` and
 others more negative) until the baseline test passes BEFORE implementing — it documents
 current behavior and must be green pre-change; only the second test is the RED one.
 
-- [ ] **Step 5: Run to verify RED**
+- [x] **Step 5: Run to verify RED**
 
 Run: `.venv/bin/pytest tests/strategies/test_s1_strategy.py::TestAbsoluteFilter -q`
 Expected: first test PASS, second FAIL with `TypeError: S1Config.__init__() got an
 unexpected keyword argument 'absolute_filter'`.
 
-- [ ] **Step 6: Implement**
+- [x] **Step 6: Implement**
 
 In `src/strategies/s1/strategy.py`:
 
@@ -363,12 +365,12 @@ and add one condition to the dict-comprehension filter (after the
                 and (abs_row is None or (pd.notna(abs_row[ticker]) and abs_row[ticker] > 0.0))
 ```
 
-- [ ] **Step 7: Run the tests**
+- [x] **Step 7: Run the tests**
 
 Run: `.venv/bin/pytest tests/strategies/test_s1_strategy.py tests/strategies/test_s1_signal.py -q`
 Expected: all PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/strategies/s1/signal.py src/strategies/s1/strategy.py tests/strategies/test_s1_signal.py tests/strategies/test_s1_strategy.py
@@ -383,7 +385,7 @@ git commit -m "feat(s1): flag-gated absolute-momentum filter (dual momentum, def
 - Modify: `src/strategies/s1/strategy.py` (`S1Config`, `__init__`, `compute_target_weights`)
 - Test: `tests/strategies/test_s1_strategy.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `tests/strategies/test_s1_strategy.py` (mirror the synthetic-panel style of the
 existing `TestSleeveNormalization`):
@@ -427,12 +429,12 @@ class TestCapAfterNormalization:
         assert spread(diff) > spread(flat) * 1.5
 ```
 
-- [ ] **Step 2: Run to verify RED**
+- [x] **Step 2: Run to verify RED**
 
 Run: `.venv/bin/pytest tests/strategies/test_s1_strategy.py::TestCapAfterNormalization -q`
 Expected: FAIL with `TypeError: ... unexpected keyword argument 'cap_after_normalization'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 (a) `S1Config` gains:
 
@@ -483,12 +485,12 @@ with:
         return weights
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `.venv/bin/pytest tests/strategies/test_s1_strategy.py tests/strategies/test_s1_signal.py tests/strategies/test_s1_backtest.py tests/strategies/test_s1_rebalance.py tests/strategies/test_s1_sensitivity.py -q`
 Expected: all PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/strategies/s1/strategy.py tests/strategies/test_s1_strategy.py
@@ -503,7 +505,7 @@ git commit -m "feat(s1): flag-gated cap-after-normalization sizing (default off 
 - Create: `scripts/compare_s1_variants.py`
 - Output: `reports/s1_variants/comparison_<date>.md` (gitignored dir is fine; commit the script only)
 
-- [ ] **Step 1: Read the backtest entry point**
+- [x] **Step 1: Read the backtest entry point**
 
 Read `src/strategies/s1/backtest.py` fully. You will reuse
 `run_s1_backtest_from_prices(prices, output_dir=..., wf_config=..., s1_config=...,
@@ -511,7 +513,7 @@ run_robustness=False)` which returns a dict containing `oos_sharpe` and
 `milestone_b_pass`. Mirror ITS import for `WalkForwardConfig` (check the file header
 for where it imports it from — do not guess).
 
-- [ ] **Step 2: Write the script**
+- [x] **Step 2: Write the script**
 
 Create `scripts/compare_s1_variants.py`:
 
@@ -619,7 +621,7 @@ if __name__ == "__main__":
 If the `WalkForwardConfig` import fails, open `src/strategies/s1/backtest.py`, find its
 real source module, and fix the import — do not reimplement the class.
 
-- [ ] **Step 3: Run it in the container**
+- [x] **Step 3: Run it in the container**
 
 ```bash
 docker cp scripts/compare_s1_variants.py alembic-worker-1:/tmp/compare_s1_variants.py
@@ -632,7 +634,7 @@ back. Expected runtime: minutes (5 variants × walk-forward, robustness off). If
 variant errors with insufficient history for the WF windows, reduce to
 `WalkForwardConfig(in_sample_days=378, out_of_sample_days=126)` and note it in the report.
 
-- [ ] **Step 4: Commit the script and echo the table**
+- [x] **Step 4: Commit the script and echo the table**
 
 ```bash
 git add scripts/compare_s1_variants.py
@@ -645,10 +647,10 @@ Paste the resulting comparison table into your final report.
 
 ### Task 6: Full suite + wrap-up
 
-- [ ] **Step 1:** `.venv/bin/pytest -q` → only the 10 known pre-existing failures
+- [x] **Step 1:** `.venv/bin/pytest -q` → only the 10 known pre-existing failures
 (listed in Context) are allowed. Fix any other regression before finishing.
 
-- [ ] **Step 2:** Final report: branch name, commits, test counts, the variants table
+- [x] **Step 2:** Final report: branch name, commits, test counts, the variants table
 from Task 5, and an explicit statement that live behavior is unchanged (all flags off)
 and that flag flips + merge are operator decisions pending the comparison review.
 

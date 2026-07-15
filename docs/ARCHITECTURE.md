@@ -130,6 +130,7 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 |-----------|------|------|
 | `SentimentWorker` | `src/workers/sentiment.py` | Consumes `news:queue`; skips news older than `MAX_NEWS_AGE_HOURS` (**2h**, FIX-03) pre-inference; resolver runs **before** inference and drops `NO_TRADE_NOT_TRADABLE` items (conservative enforcement, fail-open); writes signal with `published_at` |
 | `LLMClient` (ABC) | `src/llm/client.py` | Ollama cloud clients; active pair via Redis `config:sentiment_llm_models` (dal 2026-07-11: `glm52,gptoss`); registry `src/llm/model_registry.py` — i candidati swap (qwen35, gptoss) hanno `in_all=False`, quindi "all" resta il set live a 2 modelli |
+| Stage-2 shadow | `src/workers/shadow_*` + `llm_shadow_responses` (migration 038) | Model-comparison shadow mode (merged 2026-07-15): dedicated `ollama:sem:shadow` pool, Redis arm/disarm toggle, fire-and-forget candidate scoring with total live-path isolation, pairwise comparison (models + pair replay), 7-day auto-report with self-disarm. Shadows candidate models against the live pair without touching the productive path. Armato via `scripts/auto_arm_shadow_monday.sh` (cron lunedì 09:00 Rome). |
 | `EnsembleAggregator` | `src/llm/ensemble.py` | Weighted averaging + divergence check (std ≥ `ENSEMBLE_DIVERGENCE_STD`, **0.40** dal 2026-07-09; i raw output divergenti sono persistiti in `llm_responses` con `eligible=false` dal 2026-07-11) |
 | `FinBERTClient` | `src/llm/finbert.py` | Local fallback: entropic confidence from 3-class softmax |
 | `LLMBudgetTracker` | `src/llm/budget.py` | Daily spend cap per model — PostgreSQL `llm_budget` + Redis `budget_exhausted` flag |
@@ -173,7 +174,7 @@ Regime multipliers applied to position sizes:
 |-----------|------|------|
 | `PortfolioOrchestrator` | `src/portfolio/orchestrator.py` | Weight-then-order multi-strategy cycle |
 | `StrategyRegistry` | `src/strategies/registry.py` | Active strategy entries; reads `config/strategies.yaml` |
-| `ConstraintEnforcer` | `src/portfolio/constraints.py` | 5-pass risk constraint enforcement |
+| `ConstraintEnforcer` | `src/portfolio/constraints.py` | 5-pass risk constraint enforcement (single-asset, strategy-exposure, portfolio-exposure, **sector-exposure**, correlation-cluster) |
 | `PortfolioVolTargeter` | `src/portfolio/vol_targeting.py` | EWMA vol estimation + BUY order scaling |
 | `PortfolioRiskMonitor` | `src/portfolio/risk_monitor.py` | Daily HHI, correlation, drawdown alerts |
 | `DecayMonitor` | `src/portfolio/decay_monitor.py` | Monthly actual vs backtest baseline |
@@ -190,6 +191,8 @@ Strategies produce sleeve-local weights: fractions of their own sleeve, not the 
 - `portfolio` (default): only `portfolio-cycle` submits orders; `run-execution` returns early
 - `legacy_sentiment`: only `run-execution` submits orders; `portfolio-cycle` returns early
 - `disabled`: neither worker submits orders
+
+**Sector exposure cap (2026-07-13, shipped disabled):** the `MAX_SECTOR_EXPOSURE` pass is wired (sector map: 96 symbols / 11 groups). `risk.max_sector_exposure: 0.0` in `trading.yaml` = DISABLED (≤0 disables). Complementary to F9a — caps concentration, does not fix sub-sigma stops. Operator flip value suggested: 0.10.
 
 ### 2.5 Strategies
 
@@ -222,6 +225,26 @@ Il `worker-inference` ha concurrency=1 per garantire un singolo processo Python 
 - **Redis cycle lock**: `SET portfolio:cycle:lock NX EX 1200` — previene run concorrenti del portfolio orchestrator. TTL 20 min (sopra lo schedule di 15 min). Implementato in `src/workers/portfolio_scheduler.py`.
 - **Hold minimum 90 min** (`execution.hold_minimum_minutes`, trading.yaml): le SELL su simboli comprati negli ultimi 90 minuti vengono filtrate tramite `fetch_recently_bought_symbols()` in `src/store/pg_store.py`. Previene roundtrip involontari S4→S1 (S4 compra, S1 riequilibra e vende nello stesso ciclo). Gli exit da stop-loss bypassano il filtro.
 - **FinBERT int8 quantization**: quantizzazione dinamica `torch.qint8` applicata al caricamento del modello in `src/llm/finbert.py` — riduce footprint RAM ~50% senza perdita significativa di accuratezza sul task di sentiment classification.
+
+### 2.5d Stop-Loss Policy (F9a redesign, 2026-07-11/12)
+
+The portfolio path (engine=portfolio) handles stops via `StopPolicy` (`src/portfolio/stop_policy.py`), NOT the legacy ExecutionWorker checklist in §2.6.
+
+| Component | File | Role |
+|-----------|------|------|
+| `StopPolicy` | `src/portfolio/stop_policy.py` | Freeze-at-entry + per-cycle protective check + `d_hard` broker disaster distance |
+| `FrozenStop` | dataclass | Persisted on the trade row at entry: `mode`, `vol_at_entry`, `sigma_eff`, `k`, `floor`, `cap`, `d_init`, `vol_source` |
+| `_stop_loss_breached_symbols` | `src/workers/portfolio_scheduler.py` | Per-cycle: force-close positions at/below the frozen protective trigger |
+| `StopPolicy.d_hard` | `src/portfolio/stop_policy.py` | Broker disaster stop distance — wider than `d_init`, `clip([floor_pct, cap_pct])`, default 12-20% |
+| `stop_decisions` / `stop_shadow_log` | PostgreSQL (migration 034) | Fire log + shadow audit (d_hard trigger/breach per held position) |
+
+**Modes** (`config/trading.yaml` → `risk.stop_loss_mode`):
+- `fixed` (ship): `d_init = stop_loss` (flat pct). 2026-07-15: `stop_loss: 0.0` → protective check **disabled** (see Current state).
+- `vol_scaled` (implemented, parked): `d_init = clip(k·σ_entry, floor, cap)` per strategy (`stop_strategy_params`). Gate OOS FAIL 07-12 (bootstrap 41.5%); recalibrated 07-15 (Kimi) to S1 (k8/0.04/0.15), S4 (k8/0.025/0.12) → PASS marginale (71.6%); **not enabled** — operator chose the more aggressive no-protective path.
+
+**Stop-risk sizing (§6.4):** a wider stop sizes down qty so $ risk per position is bounded (`Notional ≤ NAV·B_strat / (d_init + gap_buffer)`). Active in the live scheduler order-sizing path.
+
+**Current state (2026-07-15, paper):** protective 2% stop **DISABLED** (`stop_loss: 0.0`). Rationale: Kimi OOS replay showed `no_protective` cum P&L $-56 vs `fixed_2pct` $-419 — the 2% noise stop destroyed 7.5x more alpha than it protected (07-10 PANW/WDC/DELL stop-outs on 0.26-0.53σ that recovered). `stop_shadow_enabled: true` keeps `d_hard` (12-20%) as SHADOW telemetry only (`stop_shadow_log`) — no enforced floor. Revisit trigger: if a position rides past -15/20% per the shadow log, wire `d_hard` to a real broker order (catastrophe-only). Disable guard: `_stop_loss_breached_symbols` returns `{}` when `stop_loss <= 0 and mode == fixed`.
 
 ### 2.6 Execution Engine
 
@@ -745,7 +768,7 @@ See `README.md` → *Pre-Live Blockers* section for the authoritative list of cr
 
 ### P2-05 Resolved Safety Items (IMPLEMENTED — commit `55cbf56`, 2026-06-21)
 
-All three P2-05 safety requirements are implemented and test-covered. Kimi P2 Acceptance Audit verdict: **`P2_ACCEPTED_WITH_RUNTIME_MONITORING`**. Controlled paper trading is NOT yet authorized — PO sign-off and a dry-run are still required.
+All three P2-05 safety requirements are implemented and test-covered. Kimi P2 Acceptance Audit verdict: **`P2_ACCEPTED_WITH_RUNTIME_MONITORING`**. Controlled paper trading IS running on the live Alpaca paper stack (since 2026-07-14: `fixes-2026-07-14` merged `ff3de56` + deployed, migration 037 applied; 2026-07-15 pool-leak fix `06671f7` + stop flip `1f450c6` deployed). `GLOBAL_LIVE_PROMOTION_ENABLED` remains `False` — this is paper, not live money. Live go-live still requires the 90-day supervised_paper clock + explicit PO sign-off.
 
 | Item | Fix | File |
 |------|-----|------|

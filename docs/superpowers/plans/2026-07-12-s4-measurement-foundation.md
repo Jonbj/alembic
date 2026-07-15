@@ -1,5 +1,7 @@
 # S4 Measurement Foundation Implementation Plan
 
+> **Status (2026-07-15):** All tasks implemented, tested, and MERGED to main (commit `3591d5c`, 2026-07-13). Migration applied live; forward-return coverage confirmed 97%/78%/63% (1d/3d/5d) vs 29% baseline. Checkboxes below updated to reflect this.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans (or superpowers:subagent-driven-development) to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make S4's alpha measurable: populate forward returns for ALL sentiment signals (fallback included — today 70-80% of the stream is excluded by design, coverage 29%) and add 3-day / 5-day horizons alongside the existing 1-day.
@@ -40,7 +42,7 @@ Constraints:
 **Files:**
 - Create: `migrations/036_forward_return_horizons.sql`
 
-- [ ] **Step 1: Write the migration**
+- [x] **Step 1: Write the migration**
 
 ```sql
 -- 036_forward_return_horizons.sql
@@ -59,7 +61,7 @@ COMMENT ON COLUMN sentiment_signals.forward_return_5d IS
     'Close-to-close return T -> T+5 trading days (NULL until computable)';
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add migrations/036_forward_return_horizons.sql
@@ -77,14 +79,14 @@ applies it — see the wrap-up section.)
 - Modify: `src/store/pg_store.py` (`fetch_signals_pending_forward_return`, line ~2079)
 - Create: `tests/store/test_forward_return_pending.py`
 
-- [ ] **Step 1: Refactor the inline SQL into a class constant (no behavior change yet)**
+- [x] **Step 1: Refactor the inline SQL into a class constant (no behavior change yet)**
 
 In `src/store/pg_store.py`, the method currently executes an inline query.
 Move the SQL into a class-level constant named `_FETCH_PENDING_FWD` (same pattern
 as the existing `_FETCH_PER_MODEL_FOR_IC` constant) and have the method execute
 `self._FETCH_PENDING_FWD`. Keep the SQL text identical in this step.
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 Create `tests/store/test_forward_return_pending.py`. Copy the `pg_store` fixture
 from the top of `tests/store/test_pg_news_llm.py` VERBATIM (it wires the mocked
@@ -111,13 +113,13 @@ def test_pending_query_covers_all_horizons():
     assert "forward_return_5d IS NULL" in sql
 ```
 
-- [ ] **Step 3: Run to verify RED**
+- [x] **Step 3: Run to verify RED**
 
 Run: `.venv/bin/pytest tests/store/test_forward_return_pending.py -q`
 Expected: 2 FAIL (constant still contains `fallback_used = false` and no 3d/5d columns).
 (If Step 1's refactor was skipped, the tests fail with AttributeError — do Step 1.)
 
-- [ ] **Step 4: Update the SQL**
+- [x] **Step 4: Update the SQL**
 
 ```python
     _FETCH_PENDING_FWD = """
@@ -136,14 +138,14 @@ Update the method docstring: it now returns fallback signals too (they are
 tradeable via the no-fresh-ensemble path and needed for shadow-model evaluation),
 and a row is pending until all computable horizons are filled.
 
-- [ ] **Step 5: Run to verify GREEN**
+- [x] **Step 5: Run to verify GREEN**
 
 Run: `.venv/bin/pytest tests/store/test_forward_return_pending.py tests/test_pg_store.py -q`
 Expected: PASS (if a pre-existing test in `tests/test_pg_store.py` asserts the old
 fallback filter, update THAT test — its premise is the thing this task changes;
 say so in the commit message).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/store/pg_store.py tests/store/test_forward_return_pending.py
@@ -158,12 +160,12 @@ git commit -m "feat(measurement): pending forward-return query covers fallback s
 - Modify: `src/store/pg_store.py` (`bulk_add_forward_returns`)
 - Test: `tests/store/test_forward_return_pending.py` (append)
 
-- [ ] **Step 1: Read the current method**
+- [x] **Step 1: Read the current method**
 
 `grep -n "def bulk_add_forward_returns" -A 25 src/store/pg_store.py` — note its
 current tuple shape `(signal_id, fwd_ret)` and transaction pattern (mirror it).
 
-- [ ] **Step 2: Write the failing test** (append to the Task-2 test file)
+- [x] **Step 2: Write the failing test** (append to the Task-2 test file)
 
 ```python
 def test_bulk_add_forward_returns_writes_three_horizons(pg_store):
@@ -183,12 +185,12 @@ def test_bulk_add_forward_returns_writes_three_horizons(pg_store):
     assert batch[1] == (None, None, 0.05, 43)
 ```
 
-- [ ] **Step 3: Run to verify RED**
+- [x] **Step 3: Run to verify RED**
 
 Run: `.venv/bin/pytest tests/store/test_forward_return_pending.py -q -k bulk`
 Expected: FAIL (old 2-tuple shape / missing columns).
 
-- [ ] **Step 4: Implement**
+- [x] **Step 4: Implement**
 
 Replace the UPDATE statement inside `bulk_add_forward_returns` with:
 
@@ -204,7 +206,7 @@ and adapt the executemany parameter build to `(f1, f3, f5, sid)` per update tupl
 `(sid, f1, f3, f5)`. Update the docstring (tuple shape + COALESCE semantics).
 The only caller is `run_forward_return_worker` — updated in Task 4.
 
-- [ ] **Step 5: GREEN + commit**
+- [x] **Step 5: GREEN + commit**
 
 Run: `.venv/bin/pytest tests/store/test_forward_return_pending.py -q`
 Expected: all PASS.
@@ -222,13 +224,13 @@ git commit -m "feat(measurement): bulk forward-return writer handles 1d/3d/5d wi
 - Modify: `src/workers/performance.py` (`run_forward_return_worker`, lines ~1454-1523)
 - Test: `tests/workers/test_forward_return_horizons.py` (new)
 
-- [ ] **Step 1: Read the existing worker tests**
+- [x] **Step 1: Read the existing worker tests**
 
 `grep -rn "forward_return" tests/workers/test_performance_worker.py | head` —
 if that file already tests this worker, mirror its mocking helpers; the test
 below is self-contained either way.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `tests/workers/test_forward_return_horizons.py`:
 
@@ -311,12 +313,12 @@ Note: `run_forward_return_worker` imports `StockHistoricalDataClient` INSIDE the
 function body, so the patch target is the alpaca module path (as written above),
 not `src.workers.performance.StockHistoricalDataClient`.
 
-- [ ] **Step 3: Run to verify RED**
+- [x] **Step 3: Run to verify RED**
 
 Run: `.venv/bin/pytest tests/workers/test_forward_return_horizons.py -q`
 Expected: FAIL — updates tuples still have the 2-element shape `(sid, fwd)`.
 
-- [ ] **Step 4: Implement the multi-horizon loop**
+- [x] **Step 4: Implement the multi-horizon loop**
 
 In `run_forward_return_worker`:
 
@@ -374,13 +376,13 @@ check above handles it — but zero T dates would crash `t_dates[0]`).
 (d) Update the worker docstring: three horizons, trading days, fallback signals
 now included (query change in Task 2), partial rows re-processed until complete.
 
-- [ ] **Step 5: GREEN + regression**
+- [x] **Step 5: GREEN + regression**
 
 Run: `.venv/bin/pytest tests/workers/test_forward_return_horizons.py tests/workers/test_performance_worker.py -q`
 Expected: PASS. If `test_performance_worker.py` has forward-return tests asserting
 the 2-tuple shape, update them to the 4-tuple shape (that is this task's change).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/workers/performance.py tests/workers/test_forward_return_horizons.py tests/workers/test_performance_worker.py
@@ -394,7 +396,7 @@ git commit -m "feat(measurement): forward-return worker computes 1d/3d/5d tradin
 **Files:**
 - Test: `tests/store/test_forward_return_pending.py` (append)
 
-- [ ] **Step 1: Write the test (passes today; guards Task 2's safety premise)**
+- [x] **Step 1: Write the test (passes today; guards Task 2's safety premise)**
 
 ```python
 def test_ic_queries_still_exclude_fallback_signals():
@@ -407,12 +409,12 @@ def test_ic_queries_still_exclude_fallback_signals():
     assert src.upper().count("FALLBACK_USED = FALSE") >= 3
 ```
 
-- [ ] **Step 2: Run (expected PASS immediately — this one is a tripwire, not TDD)**
+- [x] **Step 2: Run (expected PASS immediately — this one is a tripwire, not TDD)**
 
 Run: `.venv/bin/pytest tests/store/test_forward_return_pending.py -q`
 Expected: all PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/store/test_forward_return_pending.py
@@ -423,9 +425,9 @@ git commit -m "test(measurement): tripwire — IC queries must keep excluding fa
 
 ### Task 6: Full suite + report
 
-- [ ] **Step 1:** `.venv/bin/pytest -q` → only the 10 known pre-existing failures.
+- [x] **Step 1:** `.venv/bin/pytest -q` → only the 10 known pre-existing failures.
 
-- [ ] **Step 2:** Final report: branch + commits, test counts, and confirm NO
+- [x] **Step 2:** Final report: branch + commits, test counts, and confirm NO
 deploy/merge/live-DB action was taken.
 
 ---

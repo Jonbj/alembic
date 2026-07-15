@@ -1,5 +1,7 @@
 # Stage 2 Shadow-Mode Model Comparison Implementation Plan
 
+> **Status (2026-07-15):** All tasks implemented, tested, and MERGED to main (commit `a099719`, 2026-07-15), including a post-review Critical fix decoupling shadow scoring from the Celery batch time budget. Migration 038 applied live, containers rebuilt/verified. Shadow toggle NOT armed — arming is an operator decision (automated via a Monday cron with safety checks, see `scripts/auto_arm_shadow_monday.sh`). Checkboxes below updated to reflect implementation status.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended — this touches the live worker hot path) or superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax.
 
 **Goal:** Score every live news item with the NON-active candidate models (shadow, fire-and-forget, totally isolated), store results in `llm_shadow_responses`, and auto-report a ranked model/pair comparison via Telegram after a 7-day window — implementing the approved spec `docs/superpowers/specs/2026-07-09-ensemble-model-comparison-design.md` (Stage 2 + Auto-report sections).
@@ -44,7 +46,7 @@ Constraints:
 **Files:**
 - Create: `migrations/037_llm_shadow_responses.sql`
 
-- [ ] **Step 1: Write the migration** (schema verbatim from the spec)
+- [x] **Step 1: Write the migration** (schema verbatim from the spec)
 
 ```sql
 -- 037_llm_shadow_responses.sql
@@ -74,7 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_shadow_news
 (`symbol` is added vs the spec's minimal schema: news_log_id can be NULL on URL
 conflicts — same as live signals — and without symbol those rows would be unjoinable.)
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add migrations/037_llm_shadow_responses.sql
@@ -90,7 +92,7 @@ git commit -m "feat(shadow): migration 037 — llm_shadow_responses table"
 - Test: `tests/store/test_shadow_responses.py` (new; copy the `pg_store` fixture
   VERBATIM from `tests/store/test_pg_news_llm.py`)
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```python
 """llm_shadow_responses writer — Stage 2 shadow mode."""
@@ -123,10 +125,10 @@ def test_log_shadow_responses_empty_noop(pg_store):
     assert pg_store._conn.cursor.return_value.executemany.call_count == 0
 ```
 
-- [ ] **Step 2: RED** — `.venv/bin/pytest tests/store/test_shadow_responses.py -q`
+- [x] **Step 2: RED** — `.venv/bin/pytest tests/store/test_shadow_responses.py -q`
 Expected: FAIL `AttributeError: log_shadow_responses`.
 
-- [ ] **Step 3: Implement** (mirror `log_llm_responses`'s transaction pattern)
+- [x] **Step 3: Implement** (mirror `log_llm_responses`'s transaction pattern)
 
 ```python
     _INSERT_SHADOW_RESPONSE = """
@@ -163,7 +165,7 @@ Expected: FAIL `AttributeError: log_shadow_responses`.
             raise
 ```
 
-- [ ] **Step 4: GREEN + commit**
+- [x] **Step 4: GREEN + commit**
 
 ```bash
 git add src/store/pg_store.py tests/store/test_shadow_responses.py
@@ -179,7 +181,7 @@ git commit -m "feat(shadow): log_shadow_responses store writer"
 - Test: `tests/llm/test_shadow_semaphore.py` (new), `tests/store/` (append toggle tests
   wherever RedisStore helpers are tested — grep `get_feedback_state` for the file)
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 `tests/llm/test_shadow_semaphore.py`:
 
@@ -205,7 +207,7 @@ def test_shadow_toggle_roundtrip(redis_store):
     redis_store._r.delete.assert_called_with("shadow:model_comparison:started_at")
 ```
 
-- [ ] **Step 2: RED**, then implement:
+- [x] **Step 2: RED**, then implement:
 
 `client.py`, right under `_ollama_sem = _OllamaSemaphore()`:
 
@@ -232,7 +234,7 @@ _ollama_shadow_sem = _OllamaSemaphore(key="ollama:sem:shadow", slots=3)
         self._r.delete(self._SHADOW_START_KEY)
 ```
 
-- [ ] **Step 3: GREEN + commit**
+- [x] **Step 3: GREEN + commit**
 
 ```bash
 git add src/llm/client.py src/store/redis_store.py tests/
@@ -248,7 +250,7 @@ git commit -m "feat(shadow): dedicated ollama:sem:shadow pool + Redis arm/disarm
 - Modify: `src/llm/client.py` (per-instance semaphore override — see Step 2)
 - Test: `tests/workers/test_shadow_query.py` (new)
 
-- [ ] **Step 1: Failing tests** (the spec's three invariants)
+- [x] **Step 1: Failing tests** (the spec's three invariants)
 
 ```python
 """Stage-2 shadow path: total isolation from the live signal path."""
@@ -314,7 +316,7 @@ and adjust `fake_client` in the test to the real method name BEFORE running RED,
 so the test exercises the true interface. The three assertions (never raise /
 no-op unarmed / no live writes) are the fixed requirements.
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 (a) `build_shadow_clients` in `src/workers/sentiment.py` (module level, so tests can
 patch it):
@@ -417,7 +419,7 @@ own try/except:
 re-sanitizing — check; `run_inference` computes it internally, `process_news_item`
 may only have `item`.)
 
-- [ ] **Step 3: GREEN + commit**
+- [x] **Step 3: GREEN + commit**
 
 Run: `.venv/bin/pytest tests/workers/test_shadow_query.py tests/workers/test_sentiment_worker.py -q`
 Expected: PASS except the 2 known TestEnsembleWeightReading failures.
@@ -435,7 +437,7 @@ git commit -m "feat(shadow): fire-and-forget candidate scoring with total live-p
 - Create: `src/performance/model_comparison.py`
 - Test: `tests/performance/test_model_comparison.py` (new)
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```python
 """Pairwise shadow/live model comparison (Stage 2 auto-report core)."""
@@ -476,7 +478,7 @@ def test_pairwise_divergence_rate():
     assert abs(pair["divergence_rate"] - 1 / 3) < 1e-9
 ```
 
-- [ ] **Step 2: RED**, then implement `src/performance/model_comparison.py`:
+- [x] **Step 2: RED**, then implement `src/performance/model_comparison.py`:
 
 ```python
 """Shared Stage-2 comparison logic (beat auto-report + manual script — factored
@@ -562,7 +564,7 @@ def render_markdown(report: dict) -> str:
     return "\n".join(lines)
 ```
 
-- [ ] **Step 3: GREEN + commit**
+- [x] **Step 3: GREEN + commit**
 
 ```bash
 git add src/performance/model_comparison.py tests/performance/test_model_comparison.py
@@ -579,7 +581,7 @@ git commit -m "feat(shadow): shared pairwise comparison module (models + pair re
 - Create: `scripts/report_model_comparison.py`
 - Test: `tests/workers/test_shadow_report.py` (new)
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 ```python
 """Auto-report task: no-op before 7 days; report+disarm after."""
@@ -624,7 +626,7 @@ def test_report_and_disarm_after_seven_days():
     redis.clear_shadow_comparison_start.assert_called_once()
 ```
 
-- [ ] **Step 2: Implement**
+- [x] **Step 2: Implement**
 
 (a) `pg_store.py` fetch helpers (mirror existing fetch patterns; constants + methods):
 
@@ -705,7 +707,7 @@ def run_shadow_comparison_report() -> dict:
 (d) `scripts/report_model_comparison.py`: thin wrapper — parse `--since ISO`,
 call the same fetch helpers + `build_comparison` + print `render_markdown`.
 
-- [ ] **Step 3: GREEN + commit**
+- [x] **Step 3: GREEN + commit**
 
 Run: `.venv/bin/pytest tests/workers/test_shadow_report.py tests/performance/test_model_comparison.py -q`
 
@@ -718,8 +720,8 @@ git commit -m "feat(shadow): 7-day auto-report with self-disarm + manual report 
 
 ### Task 7: Full suite + report
 
-- [ ] `.venv/bin/pytest -q` → only the 10 known pre-existing failures.
-- [ ] Final report: branch, commits, test counts; confirm shadow is NOT armed and
+- [x] `.venv/bin/pytest -q` → only the 10 known pre-existing failures.
+- [x] Final report: branch, commits, test counts; confirm shadow is NOT armed and
 nothing was deployed.
 
 ---

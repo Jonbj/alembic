@@ -1,5 +1,15 @@
 # Capital Deployment Fixes Implementation Plan
 
+> **Status (verified 2026-07-15):** All 6 fixes landed in a single commit `3ef745b` (2026-07-10)
+> rather than task-by-task as this plan specifies, and Tasks 4/5's specific mechanism
+> (`get_portfolio_value()`-based equity-relative trigger + flat time-decay) was subsequently
+> superseded by the Phase 5 per-strategy EWMA-R rework from the stop-loss-redesign plan — see
+> inline notes on those tasks. Deployed and live: full suite 2826 passed / 5 failed (failures are
+> the separate, already-tracked B7/B32 pool-leak issue, not a regression here); S1+S4 both
+> producing orders live (44-45/cycle as of 2026-07-14 19:52 UTC); `feedback:entry_threshold` at
+> baseline (nil). Checkboxes below reflect what's verifiable in code/git today, not a literal
+> re-enactment of the plan's task-by-task sequence.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Restore capital deployment by fixing the four independent chokepoints found in the 2026-07-09 forensic analysis: S1 (50% sleeve) silently dead since 2026-06-01, loss-feedback threshold pinned near max by an asymmetric ratchet, S4 ranker discarding lone survivors, and no alerting when an enabled strategy goes silent.
@@ -35,17 +45,19 @@ The working tree already contains the fix (parameter `min_observation_ratio: flo
 - Already modified (uncommitted): `src/strategies/s1/signal.py`
 - Already modified (uncommitted): `tests/strategies/test_s1_signal.py`
 
-- [ ] **Step 1: Inspect the pending diff**
+- [x] **Step 1: Inspect the pending diff**
 
 Run: `git diff src/strategies/s1/signal.py tests/strategies/test_s1_signal.py`
 Expected: `min_observation_ratio` parameter, a sparse-ticker drop block with `log.warning`, and two new tests (`test_sparse_ticker_does_not_poison_panel`, `test_all_sparse_tickers_return_empty`).
 
-- [ ] **Step 2: Run the S1 test files**
+- [x] **Step 2: Run the S1 test files**
 
 Run: `.venv/bin/pytest tests/strategies/test_s1_signal.py tests/strategies/test_s1_strategy.py tests/strategies/test_s1_backtest.py tests/strategies/test_s1_rebalance.py -q`
 Expected: all PASS (test_s1_signal.py alone was 21 passed as of 2026-07-10).
 
-- [ ] **Step 3: Commit**
+<!-- Verified 2026-07-15: 60 passed across the 4 files. -->
+
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/strategies/s1/signal.py tests/strategies/test_s1_signal.py
@@ -57,6 +69,11 @@ weights every cycle since 2026-06-01. Tickers below a 75% observation ratio
 are now dropped per-ticker with a WARNING log."
 ```
 
+<!-- Verified 2026-07-15: landed as part of the combined commit 3ef745b "fix(deployment): restore
+capital deployment by fixing four chokepoints" (all of Tasks 1-6 in one commit, not split per-task
+as the plan specified) — followed up by 0b1fbdf "fix(s1): drop tickers with stale trailing prices
+and warn on stale signal lookup" (F9) hardening the same filter. -->
+
 ---
 
 ### Task 2: Normalize S1 sleeve weights to sum ≤ 1.0
@@ -67,7 +84,7 @@ are now dropped per-ticker with a WARNING log."
 - Modify: `src/strategies/s1/strategy.py:113-122` (the return of `compute_target_weights`)
 - Test: `tests/strategies/test_s1_strategy.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `tests/strategies/test_s1_strategy.py` (reuse the file's existing imports — it already imports `pd`, `np`, `TimeSeriesMomentum`, `S1Config`; add any that are missing):
 
@@ -100,7 +117,7 @@ class TestSleeveNormalization:
 Run: `.venv/bin/pytest tests/strategies/test_s1_strategy.py::TestSleeveNormalization -q`
 Expected: FAIL — sum of weights > 1.0 (if it passes instead, the synthetic data produced too few positive signals: increase periods to 500 or drift values, and confirm the assert on non-empty weights holds).
 
-- [ ] **Step 3: Implement the normalization**
+- [x] **Step 3: Implement the normalization**
 
 In `src/strategies/s1/strategy.py`, `compute_target_weights` currently ends with:
 
@@ -139,12 +156,17 @@ Replace with:
         return weights
 ```
 
-- [ ] **Step 4: Run the S1 test files**
+- [x] **Step 4: Run the S1 test files**
 
 Run: `.venv/bin/pytest tests/strategies/test_s1_strategy.py tests/strategies/test_s1_signal.py tests/strategies/test_s1_backtest.py tests/strategies/test_s1_rebalance.py tests/strategies/test_s1_sensitivity.py -q`
 Expected: all PASS. If an existing test asserts exact unnormalized weight values, inspect it: tests exercising few tickers (sum ≤ 1.0) are unaffected by design; only adjust a test if it deliberately constructs a >1.0 sum.
 
-- [ ] **Step 5: Commit**
+<!-- Verified 2026-07-15: passing. -->
+
+- [x] **Step 5: Commit**
+
+<!-- Verified 2026-07-15: bundled into commit 3ef745b (see Task 1 note), not a standalone commit
+with this exact message — code and test are present and green. -->
 
 ```bash
 git add src/strategies/s1/strategy.py tests/strategies/test_s1_strategy.py
@@ -161,7 +183,16 @@ An enabled strategy that produces 0 target weights every cycle must page the ope
 - Modify: `src/workers/portfolio_scheduler.py` (new helper + call site after the cycle-complete log around line 1150)
 - Test: create `tests/workers/test_zero_weights_watchdog.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
+
+<!-- Verified 2026-07-15: the watchdog was implemented with different identifiers than specified
+here — function `_check_strategy_zero_weights` (not `_track_zero_weight_strategies`), constant
+`_STRATEGY_ZERO_WEIGHTS_ALERT_CYCLES = 24` (not `_ZERO_WEIGHT_ALERT_CYCLES`), and tests were added
+to the existing `tests/workers/test_portfolio_scheduler.py` rather than a new dedicated file. The
+described behavior (per-strategy zero-weight streak counter, alert at 24 consecutive cycles, reset
+on nonzero weights) is present and tested — see
+tests/workers/test_portfolio_scheduler.py::test_check_strategy_zero_weights_alerts_after_threshold
+and 3 sibling tests, 4 passed. -->
 
 Create `tests/workers/test_zero_weights_watchdog.py`:
 
@@ -230,7 +261,9 @@ def test_redis_error_does_not_raise():
 Run: `.venv/bin/pytest tests/workers/test_zero_weights_watchdog.py -q`
 Expected: FAIL with `ImportError: cannot import name '_ZERO_WEIGHT_ALERT_CYCLES'`.
 
-- [ ] **Step 3: Implement the watchdog helper**
+- [x] **Step 3: Implement the watchdog helper**
+
+<!-- Verified 2026-07-15: implemented as `_check_strategy_zero_weights` (see note on Step 1). -->
 
 In `src/workers/portfolio_scheduler.py`, add near the other module-level constants (there is `_PRICE_BARS = 300` around line 30):
 
@@ -278,7 +311,7 @@ def _track_zero_weight_strategies(
             log.warning("Zero-weight watchdog failed for %s: %s", sid, exc)
 ```
 
-- [ ] **Step 4: Wire the call site**
+- [x] **Step 4: Wire the call site**
 
 In `run_portfolio_cycle`, directly after the cycle-complete log block (the `log.info("Portfolio cycle: strategies=%s before=%d after=%d constraints=%d final=%d", ...)` call around line 1150, before the `_log_constraint_block_if_needed(result, _risk_cfg)` line), add:
 
@@ -298,12 +331,17 @@ In `run_portfolio_cycle`, directly after the cycle-complete log block (the `log.
 
 `notifier` is already in scope (created at line ~849). `AlertLevel` is already imported at the top of the file.
 
-- [ ] **Step 5: Run the tests**
+- [x] **Step 5: Run the tests**
 
 Run: `.venv/bin/pytest tests/workers/test_zero_weights_watchdog.py -q`
 Expected: 6 passed.
 
-- [ ] **Step 6: Commit**
+<!-- Verified 2026-07-15: no such file; equivalent 4 tests in test_portfolio_scheduler.py pass
+(see Step 1 note). -->
+
+- [x] **Step 6: Commit**
+
+<!-- Verified 2026-07-15: bundled into commit 3ef745b (see Task 1 note). -->
 
 ```bash
 git add src/workers/portfolio_scheduler.py tests/workers/test_zero_weights_watchdog.py
@@ -323,7 +361,7 @@ git commit -m "feat(monitoring): alert when an enabled strategy produces zero ta
 - Modify: `config/trading.yaml` (`loss_feedback` section)
 - Test: `tests/workers/test_loss_feedback.py`
 
-- [ ] **Step 1: Add the Redis getter**
+- [x] **Step 1: Add the Redis getter**
 
 In `src/store/redis_store.py`, right after `set_portfolio_value` (line ~667-669), add:
 
@@ -337,7 +375,7 @@ In `src/store/redis_store.py`, right after `set_portfolio_value` (line ~667-669)
             return None
 ```
 
-- [ ] **Step 2: Write `portfolio:value` from the portfolio scheduler**
+- [x] **Step 2: Write `portfolio:value` from the portfolio scheduler**
 
 In `src/workers/portfolio_scheduler.py`, inside the drawdown-cap block (the `try:` that creates `_r_dd` around line 1040), immediately after `_raw_peak = _r_dd.get(_PEAK_EQUITY_KEY)` reads and before the `if drawdown >= _dd_cap:` check, add one line (equity is already computed in scope):
 
@@ -348,7 +386,19 @@ In `src/workers/portfolio_scheduler.py`, inside the drawdown-cap block (the `try
             _r_dd.setex("portfolio:value", 86400, str(equity))
 ```
 
-- [ ] **Step 3: Update config defaults and trading.yaml**
+- [x] **Step 3: Update config defaults and trading.yaml**
+
+<!-- Verified 2026-07-15: shipped with different key names than specified —
+`rolling_pnl_drawdown_pct` (not `rolling_pnl_trigger_pct`) and an added `equity_fallback: 110000.0`
+alongside `rolling_pnl_trigger_floor_usd: 250.0`. IMPORTANT SUPERSESSION NOTE (applies to this whole
+task): this equity-relative mechanism was implemented as specified in commit 3ef745b (2026-07-10),
+but `run_loss_feedback_check` has since been fully rewritten for Phase 5 of the stop-loss redesign
+(2026-07-11+) into a per-strategy, risk-normalized EWMA-R trigger (`src/portfolio/loss_feedback.py`,
+`LossFeedback.evaluate`). The current trigger logic no longer calls `get_portfolio_value()` at
+all — grepped 2026-07-15, its only reference in src/ is its own definition in redis_store.py, i.e.
+it is now dead code. The underlying goal (don't ratchet on trivial losses) is still met, more
+rigorously, by the newer mechanism; the remaining steps below are checked as historically completed
+but no longer describe live behavior. -->
 
 In `src/workers/performance.py::_load_loss_feedback_config` (~line 1533), the `defaults` dict currently contains keys like `consecutive_loss_trigger`, `rolling_pnl_window`, …, `feedback_ttl_hours`. Add two entries:
 
@@ -424,7 +474,10 @@ class TestRelativeRollingPnlTrigger:
 Run: `.venv/bin/pytest tests/workers/test_loss_feedback.py -q`
 Expected: the four new tests FAIL (small losses still trigger); old tests pass.
 
-- [ ] **Step 6: Implement the relative trigger**
+- [x] **Step 6: Implement the relative trigger**
+
+<!-- Verified 2026-07-15: implemented in 3ef745b as specified in spirit (equity * pct vs. floor
+fallback); see supersession note on Step 3 — since replaced by Phase 5's EWMA-R mechanism. -->
 
 In `src/workers/performance.py::run_loss_feedback_check`, replace (line ~1641):
 
@@ -470,12 +523,27 @@ And in the alert-reason block (~line 1692), replace `if rolling_net_pnl < 0:` wi
 
 (delete the old `reason_parts.append(f"rolling P&L ${rolling_net_pnl:.2f}")` line inside that branch).
 
-- [ ] **Step 7: Run the full loss-feedback test file**
+- [x] **Step 7: Run the full loss-feedback test file**
 
 Run: `.venv/bin/pytest tests/workers/test_loss_feedback.py -q`
 Expected: PASS. Pre-existing tests that asserted a trigger from a *small* negative rolling P&L alone will fail — for each, decide from its name: if it tests the rolling-P&L mechanism itself, keep it meaningful by passing `cfg_override={"rolling_pnl_trigger_floor_usd": 0.0}` (restores strict `< 0` semantics for that test); if it tests something else and the rolling loss is incidental, make the loss larger than $250.
 
-- [ ] **Step 8: Commit**
+<!-- Verified 2026-07-15: 39 passed — but the passing suite now exercises the Phase 5 EWMA-R
+mechanism (TestTriggerOnEwmaR, TestPerStrategyIsolation, etc.), not the equity-relative tests
+literally named in this task (TestRelativeRollingPnlTrigger never existed — confirmed via
+`git log -S`). See supersession note on Step 3. -->
+
+- [x] **Step 8: Commit**
+
+<!-- Verified 2026-07-15: bundled into commit 3ef745b (see Task 1 note). -->
+
+<!-- Step 4 (write the failing tests exactly as named — TestRelativeRollingPnlTrigger) and Step 5
+(verify they fail) are left UNCHECKED: `git log -S "TestRelativeRollingPnlTrigger"` across all
+branches returns nothing — that literal test class was never written. The task's goal was met by
+a different, since-superseding test suite (see notes above), so I'm not checking a deliverable
+that never existed under this name. -->
+
+
 
 ```bash
 git add src/store/redis_store.py src/workers/performance.py src/workers/portfolio_scheduler.py config/trading.yaml tests/workers/test_loss_feedback.py
@@ -551,12 +619,24 @@ class TestTimeDecay:
         assert result["adjusted"] is True
 ```
 
+<!-- Step 1 above (write TestTimeDecay) left UNCHECKED: `git log -S "class TestTimeDecay"` across
+all branches returns nothing — that literal test class was never written. Time-decay of the raised
+threshold IS implemented and tested, but under the config key `threshold_decay_hours` (not
+`decay_hours`) and the test class `TestTemporalDecay` (not `TestTimeDecay`), itself later folded
+into the per-strategy Phase 5 rework alongside Task 4's mechanism — see the supersession note on
+Task 4 Step 3. Verified 2026-07-15: `threshold_decay_hours: 24` present in config/trading.yaml and
+src/workers/performance.py:1592/1858; tests/workers/test_loss_feedback.py::TestTemporalDecay (5
+tests) pass as part of the 39-test file total. -->
+
 - [ ] **Step 2: Run to verify they fail**
 
 Run: `.venv/bin/pytest tests/workers/test_loss_feedback.py::TestTimeDecay -q`
 Expected: FAIL with `KeyError: 'decayed'`.
 
-- [ ] **Step 3: Implement the decay**
+- [x] **Step 3: Implement the decay**
+
+<!-- Verified 2026-07-15: implemented in spirit in 3ef745b, since folded into the Phase 5
+per-strategy rework (config key renamed threshold_decay_hours). -->
 
 In `src/workers/performance.py`:
 
@@ -622,12 +702,16 @@ with:
 
 Note the state write updates `last_adjustment_ts`, so the next decay can only happen another `decay_hours` later.
 
-- [ ] **Step 4: Run the whole file**
+- [x] **Step 4: Run the whole file**
 
 Run: `.venv/bin/pytest tests/workers/test_loss_feedback.py -q`
 Expected: all PASS.
 
-- [ ] **Step 5: Commit**
+<!-- Verified 2026-07-15: 39 passed. -->
+
+- [x] **Step 5: Commit**
+
+<!-- Verified 2026-07-15: bundled into commit 3ef745b (see Task 1 note). -->
 
 ```bash
 git add src/workers/performance.py config/trading.yaml tests/workers/test_loss_feedback.py
@@ -644,7 +728,7 @@ With the entry gate high, the rare surviving strong signal is discarded because 
 - Modify: `src/strategies/s4/config.py:20`
 - Test: `tests/strategies/test_s4_ranking.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `tests/strategies/test_s4_ranking.py` (the file already has the `_sig(symbol, score=..., confidence=...)` helper):
 
@@ -662,7 +746,7 @@ def test_single_candidate_forms_bucket_of_one():
 Run: `.venv/bin/pytest tests/strategies/test_s4_ranking.py::test_single_candidate_forms_bucket_of_one -q`
 Expected: FAIL — `n_selected == 0` (empty result under min_stocks=2).
 
-- [ ] **Step 3: Change the default**
+- [x] **Step 3: Change the default**
 
 In `src/strategies/s4/config.py` replace `min_stocks: int = 2` with:
 
@@ -673,14 +757,18 @@ In `src/strategies/s4/config.py` replace `min_stocks: int = 2` with:
     min_stocks: int = 1
 ```
 
-- [ ] **Step 4: Fix the defaults assertion and run the S4 test files**
+- [x] **Step 4: Fix the defaults assertion and run the S4 test files**
 
 In `tests/strategies/test_s4_ranking.py::test_s4_config_defaults` (line ~48) change `assert cfg.min_stocks == 2` to `assert cfg.min_stocks == 1`.
 
 Run: `.venv/bin/pytest tests/strategies/test_s4_ranking.py tests/strategies/test_s4_strategy.py tests/strategies/test_s4_backtest.py tests/strategies/test_s4_backtest_parity.py -q`
 Expected: PASS. Any test that specifically exercises the min_stocks mechanism with an explicit `S4Config(min_stocks=N)` is unaffected; a test relying on the *default* rejecting one signal must be updated to pass `S4Config(min_stocks=2)` explicitly.
 
-- [ ] **Step 5: Commit**
+<!-- Verified 2026-07-15: 71 passed across the 4 files. -->
+
+- [x] **Step 5: Commit**
+
+<!-- Verified 2026-07-15: bundled into commit 3ef745b (see Task 1 note). -->
 
 ```bash
 git add src/strategies/s4/config.py tests/strategies/test_s4_ranking.py
@@ -691,12 +779,17 @@ git commit -m "fix(s4): allow single-name bucket so a lone surviving signal stil
 
 ### Task 7: Full suite, deploy, live verification
 
-- [ ] **Step 1: Full test suite**
+- [x] **Step 1: Full test suite**
 
 Run: `.venv/bin/pytest -q`
 Expected: 0 failures (baseline was ~2340 passed / 1 skipped). Fix any regression before proceeding — do not skip tests to get to green.
 
-- [ ] **Step 2: Deploy (images bake `src/`, a restart is NOT enough)**
+<!-- Verified 2026-07-15: 2826 passed, 7 skipped, 5 failed. The 5 failures are all in
+tests/test_pg_store.py::TestConnectionLeakB7B32 — a separate, already-tracked open issue (the
+B7/B32 Postgres pool-leak hardening item, unrelated to this plan's changes; predates and is
+independent of the deployment-fixes diffs). Not a regression from this plan's tasks. -->
+
+- [x] **Step 2: Deploy (images bake `src/`, a restart is NOT enough)**
 
 ```bash
 docker compose build api worker worker-inference beat
@@ -704,7 +797,10 @@ docker compose up -d api worker worker-inference beat
 docker ps --format '{{.Names}}\t{{.Status}}'   # all Up, api healthy
 ```
 
-- [ ] **Step 3: Reset the stale pinned threshold (one-time operator action)**
+<!-- Verified 2026-07-15: all containers Up (api healthy) and running code well past 3ef745b
+(the stack has been rebuilt many times since, most recently for the sector-exposure-cap merge). -->
+
+- [x] **Step 3: Reset the stale pinned threshold (one-time operator action)**
 
 The old 0.55 threshold and 0.33 scale in Redis were produced by the pre-fix trigger (a -$208 rolling blip) and have a ~48h TTL; under the new rules they would not exist. Clear them so the gate returns to the 0.30 baseline immediately:
 
@@ -712,7 +808,9 @@ The old 0.55 threshold and 0.33 scale in Redis were produced by the pre-fix trig
 docker exec alembic-redis-1 redis-cli DEL feedback:entry_threshold feedback:regime_scale feedback:state
 ```
 
-- [ ] **Step 4: Verify live during market hours (13:30–20:00 UTC, Mon–Fri)**
+<!-- Verified 2026-07-15: `GET feedback:entry_threshold` returns nil right now — baseline applies. -->
+
+- [x] **Step 4: Verify live during market hours (13:30–20:00 UTC, Mon–Fri)**
 
 Wait for at least one 15-min portfolio cycle, then:
 
@@ -755,6 +853,10 @@ print('rows:', len(comb), '| latest tickers signal>0:', (last['signal'] > 0).sum
 "
 ```
 Expected: `rows:` in the thousands and `latest tickers signal>0:` in the tens (it was `rows: 0` before the fix).
+
+<!-- Verified 2026-07-15 via live Postgres query (market was open, cycle at 19:52 UTC):
+portfolio_cycles shows strategies_run=["S1","S4"] and orders_count 44-45 on each of the last 4
+cycles — S1 is alive and orders are flowing, matching the expected outcome. -->
 
 - [ ] **Step 5: Report**
 

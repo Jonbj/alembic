@@ -1,5 +1,7 @@
 # Sector Exposure Cap Implementation Plan
 
+> **Status (2026-07-15):** All tasks implemented, tested, and MERGED to main (commit `ea436fd`). Shipped disabled (`max_sector_exposure: 0.0` in `config/trading.yaml`) — enabling (suggested 0.10) is a pending operator decision. Checkboxes below updated to reflect implementation status.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Wire the already-implemented (but dormant) per-sector BUY exposure cap into the live portfolio path: sector map from config, cap value config-driven, disabled by default (0 = off; enabling is an operator flip).
@@ -43,7 +45,7 @@ Constraints:
   `_enforce_sector_exposure` lines 252-292)
 - Test: `tests/portfolio/test_constraints.py` (append)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/portfolio/test_constraints.py`, mirroring the file's existing
 order/market fixture helpers (read the top of the file first and reuse its
@@ -85,12 +87,12 @@ class TestSectorCapConfig:
 
 Complete `_orders_two_semis` with the file's real helpers before running.
 
-- [ ] **Step 2: RED**
+- [x] **Step 2: RED**
 
 Run: `.venv/bin/pytest tests/portfolio/test_constraints.py -q -k SectorCap`
 Expected: FAIL with `TypeError: ... unexpected keyword argument 'max_sector_pct'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 In `__init__`, add parameter `max_sector_pct: float = _MAX_SECTOR_PCT` (keeps the
 module constant as the backward-compatible default) and store
@@ -110,7 +112,7 @@ and in the `ConstraintViolation(...)`: `threshold=self._max_sector_pct,`.
 Update the class docstring line 48 ("≤ 25% NAV") to "≤ max_sector_pct × NAV
 (default 0.25; ≤0 disables; live value from trading.yaml risk.max_sector_exposure)".
 
-- [ ] **Step 4: GREEN + commit**
+- [x] **Step 4: GREEN + commit**
 
 Run: `.venv/bin/pytest tests/portfolio/test_constraints.py -q`
 Expected: all PASS.
@@ -127,7 +129,7 @@ git commit -m "feat(risk): config-driven sector exposure cap (<=0 disables, defa
 **Files:**
 - Modify: `config/trading.yaml` (risk section + new top-level `sectors:` block)
 
-- [ ] **Step 1: Add the cap to the risk section** (after `max_portfolio_exposure`):
+- [x] **Step 1: Add the cap to the risk section** (after `max_portfolio_exposure`):
 
 ```yaml
   # Per-sector BUY exposure cap (fraction of NAV). 0 = DISABLED (current state).
@@ -138,7 +140,7 @@ git commit -m "feat(risk): config-driven sector exposure cap (<=0 disables, defa
   max_sector_exposure: 0.0
 ```
 
-- [ ] **Step 2: Add the sector map** (new top-level block, after `symbols:`):
+- [x] **Step 2: Add the sector map** (new top-level block, after `symbols:`):
 
 ```yaml
 # Sector map for the MAX_SECTOR_EXPOSURE constraint (coarse 11-group taxonomy;
@@ -161,7 +163,7 @@ sectors:
 (Yes, the YAML shape is sector → list; Task 3's loader inverts it to
 symbol → sector, which is what `ConstraintEnforcer` expects.)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add config/trading.yaml
@@ -177,7 +179,7 @@ git commit -m "feat(risk): sector map + max_sector_exposure config (shipped disa
   construction at line ~1392; new `_load_sector_map()`)
 - Test: `tests/workers/test_portfolio_scheduler.py` (append)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 class TestSectorMapLoader:
@@ -205,7 +207,7 @@ for `_load_sector_map` — the monkeypatch target above must be the real path
 symbol; adjust the tests to whatever the file actually uses (env var, constant,
 or hardcoded path). Do not introduce a second config-path convention.
 
-- [ ] **Step 2: RED**, then implement
+- [x] **Step 2: RED**, then implement
 
 (a) `_load_sector_map()` in the scheduler (module level, near `_load_risk_config`):
 
@@ -250,7 +252,7 @@ def _load_sector_map() -> dict[str, str] | None:
 (Read the actual current call first — if other kwargs were added by parallel
 workstreams, preserve them.)
 
-- [ ] **Step 3: GREEN + commit**
+- [x] **Step 3: GREEN + commit**
 
 Run: `.venv/bin/pytest tests/workers/test_portfolio_scheduler.py tests/portfolio/test_constraints.py -q`
 Expected: PASS.
@@ -264,8 +266,8 @@ git commit -m "feat(risk): wire sector map + config cap into the live constraint
 
 ### Task 4: Full suite + report
 
-- [ ] `.venv/bin/pytest -q` → only the 10 known pre-existing failures.
-- [ ] Report: branch + commits, test counts, explicit confirmation that
+- [x] `.venv/bin/pytest -q` → only the 10 known pre-existing failures.
+- [x] Report: branch + commits, test counts, explicit confirmation that
 `max_sector_exposure` shipped as 0.0 (live behavior unchanged) and no deploy ran.
 
 ---

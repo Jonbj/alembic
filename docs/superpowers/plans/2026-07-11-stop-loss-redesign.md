@@ -742,20 +742,78 @@ Before any live (paper or canary) enablement of `vol_scaled`:
 
 ## 12. Acceptance checklist (per phase)
 
-- [ ] **P1** `034_stop_loss_redesign.sql` applies cleanly (idempotent); new columns/tables exist.
-- [ ] **P2** Stop exit writes an `execution_decisions` SELL row; Decision Log shows stops.
-- [ ] **P3** `StopPolicy` interface tested; freeze-at-entry persisted on new trades;
+> **Status (verified 2026-07-15):** P1-P5 done and merged to `main` (commits `05acc17`, `7cc6a91`,
+> `f9e4f11`, `de2e915`/`d1c9186`, plus follow-ups). `stop_loss_mode` remains `fixed` in
+> `config/trading.yaml` as required. P6 has a real, documented run as of *today* on branch
+> `stop-loss-calibration-2026-07-15` (commit `a109046`, not merged to `main`): OOS gate **PASS**,
+> but marginal (bootstrap 71.6%, threshold 70%) and explicitly flagged by its own handback
+> (`docs/stop_loss_calibration_handback_2026-07-15.md`) as a thin margin, not a strong green
+> light — left unchecked below pending operator review, not because it failed. P7 (canary) has
+> not happened.
+
+- [x] **P1** `034_stop_loss_redesign.sql` applies cleanly (idempotent); new columns/tables exist.
+
+<!-- Verified 2026-07-15: migration file present; `trades` has all 8 stop_* columns and
+`stop_decisions`/`stop_shadow_log` tables exist live in alembic-postgres-1. -->
+
+- [x] **P2** Stop exit writes an `execution_decisions` SELL row; Decision Log shows stops.
+
+<!-- Verified 2026-07-15: commit 05acc17 "feat(stop): Gap A — Decision Log SELL row for every
+stop-loss exit"; tests/workers/test_stop_loss_decision_log.py passes. -->
+
+- [x] **P3** `StopPolicy` interface tested; freeze-at-entry persisted on new trades;
       `stop_decisions` row on every fire; `stop_shadow_log` rows when flag on (no orders).
       Never-widens test passes. `mode=fixed` reproduces 2%.
-- [ ] **P4** `vol_scaled` mode + stop-risk sizing wired; wider `d_init` → smaller qty;
+
+<!-- Verified 2026-07-15: src/portfolio/stop_policy.py exists (commit 7cc6a91);
+tests/portfolio/test_stop_policy.py::test_never_widens_despite_rising_current_vol and
+test_fixed_mode_reproduces_legacy_two_percent_and_freezes_audit_fields both present; 12 passed. -->
+
+- [x] **P4** `vol_scaled` mode + stop-risk sizing wired; wider `d_init` → smaller qty;
       default stays `fixed`; full suite green.
-- [ ] **P5** S1 loss moves only `:S1` threshold; magnitude-based; operational exits
+
+<!-- Verified 2026-07-15: config/trading.yaml `stop_loss_mode: fixed` (comment: "ship: fixed");
+stop_risk_budget_bp_per_pos/aggregate wired in portfolio_scheduler.py;
+tests/workers/test_portfolio_scheduler.py::test_submit_portfolio_orders_stop_risk_sizing_caps_qty
+passes. Full suite: 2826 passed / 5 failed — the 5 are the separate, already-tracked B7/B32
+pool-leak issue, not related to stop-loss work. -->
+
+- [x] **P5** S1 loss moves only `:S1` threshold; magnitude-based; operational exits
       excluded; decays on wins.
+
+<!-- Verified 2026-07-15: src/portfolio/loss_feedback.py (EWMA-R), per-strategy Redis keys in
+redis_store.py; tests/workers/test_loss_feedback.py::TestPerStrategyIsolation::
+test_s1_losses_do_not_poison_s4_threshold and TestTriggerOnEwmaR pass; S1 forced to
+new_threshold=0.0 (no discrete gate) per performance.py:1780. -->
+
 - [ ] **P6** `replay_stop_loss.py` runs; all gates pass on walk-forward OOS.
+
+<!-- NOT checked — genuinely ambiguous, not failed. Ran today (2026-07-15) on branch
+stop-loss-calibration-2026-07-15, commit a109046, NOT merged to main: OOS verdict PASS on all 7
+gates but bootstrap delta P&L only 71.6% vs a 70% threshold — the handback document itself calls
+this "a thin margin... do not treat this as a strong green light" and notes the recommended
+variant by P&L is actually `no_protective` (no stop at all), which beats vol_scaled. Leaving
+unchecked pending operator review of that handback rather than presenting a marginal, unmerged
+result as a settled gate pass. -->
+
 - [ ] **P7** S1 canary, 10% budget, ≥20 exits, zero anomalies, old stop in shadow.
-- [ ] `scripts/audit_stop_loss_attribution.py` green after every phase.
-- [ ] No LLM / remote call added to the 15-min cycle.
-- [ ] All tests pass except the 8 updated `test_day1_fixes` assertions.
+
+<!-- NOT checked — no canary has run; stop_loss_mode is still fixed and stop_shadow_enabled: false
+in config/trading.yaml. Depends on P6 being settled first. -->
+
+- [x] `scripts/audit_stop_loss_attribution.py` green after every phase.
+
+<!-- Verified 2026-07-15: ran it live just now — ATTRIBUTION GATE: PASS (100.00%). -->
+
+- [x] No LLM / remote call added to the 15-min cycle.
+
+<!-- Verified 2026-07-15: no ollama/llm imports anywhere in src/portfolio/stop_policy.py or the
+stop-related additions to portfolio_scheduler.py. -->
+
+- [x] All tests pass except the 8 updated `test_day1_fixes` assertions.
+
+<!-- Verified 2026-07-15: tests/workers/test_day1_fixes.py — 22 passed. The only suite-wide
+failures are the 5 unrelated B7/B32 pool-leak tests noted under P4. -->
 
 ---
 
