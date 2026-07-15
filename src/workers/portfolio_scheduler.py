@@ -176,6 +176,31 @@ def _divergence_alert_enabled() -> bool:
         return False
 
 
+def _fill_divergence_alert_enabled() -> bool:
+    """Read notifications.send_fill_divergence_alert from config/trading.yaml.
+
+    Default false (2026-07-15): suppress the recurring "Execution fill divergence:
+    N/M orders submitted" Telegram noise. On the live book this alert fires almost
+    every cycle as a false positive — when the anti-pyramiding guard (P0-05)
+    skips redundant re-BUYs for already-held symbols, submitted_count drops to 0
+    while final_count stays high, and the detector flags it as a divergence even
+    though the suppression is intentional and correct. The divergence is still
+    detected by _check_divergence_and_alert; only the Telegram WARNING send is
+    gated. Flip the flag to true to re-enable. Isolated as a helper so tests can
+    patch it.
+    """
+    try:
+        import yaml
+        _ty = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
+        with open(_ty) as _f:
+            return bool(
+                ((yaml.safe_load(_f) or {}).get("notifications") or {})
+                .get("send_fill_divergence_alert", False)
+            )
+    except Exception:
+        return False
+
+
 def _check_divergence_and_alert(
     signal_syms: set,
     order_syms: set,
@@ -215,11 +240,16 @@ def _check_divergence_and_alert(
     if final_count > 0:
         fill_ratio = submitted_count / final_count
         if check_execution_divergence(fill_ratio, 1.0):
-            _fire_alert(
-                notifier,
-                f"Execution fill divergence: {submitted_count}/{final_count} orders submitted",
-                AlertLevel.WARNING,
-            )
+            # Gated by notifications.send_fill_divergence_alert (default false) — on the
+            # live book this fires as a false positive whenever the anti-pyramiding guard
+            # skips redundant re-BUYs (submitted=0, final_count high). Detection still
+            # runs; only the Telegram WARNING send is suppressed. Flip the flag to re-enable.
+            if _fill_divergence_alert_enabled():
+                _fire_alert(
+                    notifier,
+                    f"Execution fill divergence: {submitted_count}/{final_count} orders submitted",
+                    AlertLevel.WARNING,
+                )
 
 
 def _emergency_cancel_all(api_key: str, secret_key: str, paper: bool) -> None:
