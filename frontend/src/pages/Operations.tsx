@@ -7,7 +7,7 @@ import { HelpButton } from '@/components/shared/HelpButton'
 type OperationsTab = 'system' | 'config' | 'admin'
 
 const TABS: Array<{ id: OperationsTab; label: string; description: string }> = [
-  { id: 'system', label: 'System', description: 'Scheduler, activity log, PEAD signals' },
+  { id: 'system', label: 'System', description: 'Scheduler and activity log' },
   { id: 'config', label: 'Config', description: 'Watchlist, risk parameters, read-only config' },
   { id: 'admin', label: 'Admin', description: 'Kill switch and operating mode' },
 ]
@@ -35,7 +35,7 @@ export default function Operations() {
       <HelpButton title="Operations — Guida" sections={[
         {
           heading: 'System',
-          content: 'Vista read-only per verificare scheduler, activity log e segnali PEAD. È il punto di partenza consigliato prima di intervenire.',
+          content: 'Vista read-only per verificare scheduler e activity log. È il punto di partenza consigliato prima di intervenire.',
         },
         {
           heading: 'Config',

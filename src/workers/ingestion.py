@@ -594,8 +594,8 @@ def run_sec_edgar_ingestion_worker() -> dict:
 
     DISABLED (2026-07-02): OFF by default. Never produced a signal — the connector read
     a non-existent `ticker_symbol` field (EDGAR filings use CIK / display_names), so every
-    item got empty asset_tags and was dropped downstream. Also redundant with S7 PEAD's
-    8-K pipeline. Re-enable with SEC_EDGAR_INGESTION_ENABLED=1 ONLY after fixing the
+    item got empty asset_tags and was dropped downstream. Re-enable with
+    SEC_EDGAR_INGESTION_ENABLED=1 ONLY after fixing the
     CIK→ticker attribution (e.g. via SecCompanyTickers) and enriching the body (8-K item).
     """
     if os.environ.get("SEC_EDGAR_INGESTION_ENABLED", "0") == "0":

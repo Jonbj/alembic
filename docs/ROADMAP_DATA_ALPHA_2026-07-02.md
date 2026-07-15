@@ -75,6 +75,18 @@ Nessun alpha vector (P2/P3) va promosso senza questi. Sono il "measurement befor
 
 ### Vettore A — Catena eventi earnings (SBLOCCA S7)
 
+> 🪦 **S7 RIMOSSA 2026-07-15 — Vettore A confutato.** Tutti e tre i gate di S7 hanno
+> fallito su dati reali: **ALPHA-A5** large-cap FAIL (drift = beta SPY, n=76),
+> **ALPHA-A2/A3 POC-1** small/mid INCONCLUSIVE_DATA (n=15), **ALPHA-A3** POC-2
+> transcript-tone FAIL a decision-grade (n=73, IC≈0, spread invertito, split-half
+> opposti, robusto cross-modello kimi↔glm ρ=+0.858). La condizionale pre-registrata
+> PO-5 *"Se POC-2 FAIL → REMOVE"* è attivata. S7 (strategy dir, workers, routes, beat,
+> config, tests) è stata eliminata dal repo; la superficie PEAD/8-K è recuperabile da
+> git. Storia + evidence: `docs/S7_LIFECYCLE_HISTORY_2026-07-15.md`, `reports/s7_*`.
+> Le righe ALPHA-A* qui sotto restano come **record storico** della valutazione che
+> ha portato al ritiro; non sono lavoro aperto. Vettore B (ALPHA-B0) e D restano
+> indirizzi di ricerca futuri, ma non sbloccano più S7 (S7 non esiste).
+
 **Tesi:** PEAD è uno degli effetti più documentati (+3-5% su 20d post positive surprise). S7 è **già completa** (`pead_worker.py`, `s7/signal.py`) ma produce zero per assenza di dati: il consensus lo fa estrarre all'LLM dal testo del 8-K dove **non c'è**; il connector EDGAR ha il bug ticker → 0 input. Strategia costruita, carburante zero.
 
 **LLM edge reale:** classificare direzione surprise + tone guidance dal linguaggio del transcript/Q&A è un compito NLP genuino che un fattore numerico non fa ("management ha detto 'headwinds'/'transitory' 14 volte in Q&A").

@@ -80,7 +80,13 @@ S1 exposes `compute_target_weights(prices: pd.DataFrame) → dict[str, float]`. 
 
 ### Economic Rationale
 
-Implied vol (VIX) systematically exceeds realised vol by ~3–4 vol points annualised. Selling that premium (via short puts or long SPY overnight) captures a structural income edge.
+The normative theory is documented in
+[`docs/strategies/s2-vrp-theory.md`](strategies/s2-vrp-theory.md). In seller-sign terms,
+the variance risk premium is the difference between risk-neutral expected variance and
+physical expected variance over the same horizon. It is primarily compensation for
+downside, jump, convexity, correlation, liquidity, and intermediary-capital risks, not
+alpha by definition. A short put is a mixed exposure to that premium; long SPY overnight
+is not an equivalent variance-premium exposure.
 
 ### Current Implementation (Proxy)
 
@@ -254,41 +260,28 @@ Applied iteratively (up to 10 passes) after weight merging:
 
 ---
 
-## S7 — PEAD (Post-Earnings Announcement Drift)
+## S7 — PEAD (Post-Earnings Announcement Drift) — REMOVED 2026-07-15
 
-**Type:** Event-driven momentum
-**File:** `src/strategies/s7/`
-**Allocation:** 0% (`config/strategies.yaml`: enabled=false)
-**Status:** `research` / **SHELVED 2026-07-03** — ALPHA-A5 gate FAIL conclusivo (B17: la vecchia nota "15%" era doc drift)
+**Status:** **REMOVED 2026-07-15.** Strategy dir, workers, routes, beat tasks, config,
+API entries, tests e codice di supporto eliminati. S7 non è più in repo.
 
-> **Verdetto ALPHA-A5 (dati FMP, 96 eventi Gen–Mag 2026):** il drift raw +1.96% è interamente beta SPY — excess vs SPY +0.05% medio, mediana −1.07% — più 5 outlier (media senza i top-5 winner: negativa). Nessuna dose-response tra magnitudine della surprise e drift; lato MISS altrettanto nullo; universo small/mid non testato (0 eventi nel campione). Il raw-surprise PEAD su large-cap è competuto via.
-> Report: `reports/s7_backtest/ALPHA_A5_gate_report_2026-07-03_fmp.md` (con addendum di distribuzione e CSV per-evento) · audit immutabile in `strategy_lifecycle_audit`.
-> **Riapertura solo via decisione PO:** (a) espansione universo small/mid-cap (richiede filtri liquidità + fonte prezzi migliore di IEX), oppure (b) POC transcript-tone (ALPHA-A3): testare "BEAT + tone positivo" vs "BEAT da solo" sui 76 eventi già in CSV — gated su vendor transcript (FMP free tier li blocca).
-> Il codice (worker 8-K, pipeline EDGAR, classificazione LLM) resta in repo: è il mattone di S9 / vettore B. Live trading NOT authorized (invariato).
+**Perché rimossa:** l'edge dichiarato di S7 (transcript tone → alpha, ALPHA-A3) è confutato
+a decision-grade su dati reali. Tre valutazioni distinte, tutte negative:
 
-### Segnale
+| Valutazione | Data | Esito | n |
+|---|---|---|---|
+| ALPHA-A5 large-cap (FMP) | 2026-07-03 | FAIL — drift = beta SPY, hit 51%, no dose-response | 76 |
+| POC-1 small/mid PEAD | 2026-07-04 | INCONCLUSIVE_DATA — copertura IEX/liquidità insufficiente | 15 |
+| POC-2 transcript tone (ALPHA-A3) | 2026-07-15 | FAIL — IC≈0, spread invertito, split-half opposti, cross-model (kimi↔glm ρ=+0.858) | 73 |
 
-Classifica gli 8-K filing SEC via LLM (Ollama). Estrae la direzione della sorpresa rispetto alle aspettative di consensus: dopo una sorpresa positiva, le azioni tendono a continuare a salire nei giorni successivi (drift). S7 cattura questo momentum post-annuncio.
+La condizionale pre-registrata di PO-5 — *"Se POC-2 FAIL → REMOVE"* — è attivata.
 
-**Gate di ingresso:** score LLM > 0.3, filing < 4 ore dalla pubblicazione
+**Cosa resta:** la documentazione storica completa in
+`docs/S7_LIFECYCLE_HISTORY_2026-07-15.md` (design, implementazione, 4 run di valutazione,
+decisioni PO, evidence synthesis) e i report/CSV raw in `reports/s7_*` (gitignored,
+evidenza locale). Il codice rimosso è recuperabile da git se una futura strategia
+event-driven volesse riutilizzare la superficie PEAD/8-K.
 
-### Pipeline
-
-```
-SEC EDGAR API (ogni 30 min) → run_sec_edgar_ingestion_worker
-       ↓
-run_pead_ingestion_worker (+5 min offset) → Ollama LLM classification
-       ↓
-pead_signals table (PostgreSQL)
-       ↓
-Portfolio Orchestrator → weight target S7
-```
-
-### Schedule
-
-`pead-ingestion` Celery beat task: ogni 30 min, 14:05–21:35 UTC, offset +5 min da SEC EDGAR ingestion (:00/:30) per garantire che i filing siano già disponibili prima della classificazione. Queue: `inference`.
-
-**Worker:** `src/workers/pead_worker.py`
-**Routes:** `src/api/routes/pead_routes.py`
-
-Vedi `docs/strategies/s7-pead.md` per la documentazione completa.
+**Re-introduzione:** richiede un design fresco + gate evaluation ex novo (non una
+riattivazione). Il test `TestS7NotInOperationalRegistry` (`tests/test_p0_13_*.py`) fa da
+guard: S7 non deve ricomparire nel `StrategyRegistry` operativo, nemmeno disabilitata.

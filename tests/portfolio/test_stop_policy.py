@@ -18,7 +18,6 @@ def _risk_cfg(stop_loss_mode: str = "fixed") -> dict:
         "stop_strategy_params": {
             "S1": {"k": 3.5, "floor": 0.06, "cap": 0.12},
             "S4": {"k": 2.0, "floor": 0.03, "cap": 0.08},
-            "S7": {"k": 2.5, "floor": 0.04, "cap": 0.10},
             "default": {"k": 3.0, "floor": 0.04, "cap": 0.12},
         },
         "stop_sigma_lookback_fast": 20,

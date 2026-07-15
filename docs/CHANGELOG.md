@@ -6,6 +6,32 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ## 2026-07-15
 
+### S7 (PEAD) RIMOSSA dal repository — edge ALPHA-A3 confutato a decision-grade
+- S7 ritirata: strategy dir `src/strategies/s7/`, `src/models/pead.py`,
+  `src/workers/pead_worker.py` + `earnings_pead_worker.py`,
+  `src/connectors/earnings_calendar.py`, `src/api/routes/pead_routes.py`,
+  beat task `pead-ingestion` + `earnings-pead` (celery_app), config S7
+  (`config/strategies.yaml`, `config/trading.yaml` stop sizing, `src/config.py`
+  `PEAD_*`), API/display entries (`strategies.py` S7 dict, `system_routes.py`),
+  `redis_store.py` pead methods, e test S7-specifici — tutto eliminato.
+- Motivo: l'edge dichiarato di S7 (transcript tone → alpha, ALPHA-A3) confutato su
+  dati reali. Tre valutazioni, tutte negative: ALPHA-A5 large-cap FAIL (drift = beta
+  SPY, n=76, 2026-07-03); POC-1 small/mid INCONCLUSIVE_DATA (n=15, 2026-07-04);
+  **POC-2 transcript-tone FAIL a decision-grade** (n=73, Spearman IC(tone,excess_20d)
+  +0.012 vs soglia +0.10, tercile spread −0.93% invertito, split-half opposti, IC
+  dentro BEAT −0.016; agreement kimi↔glm ρ=+0.858 → FAIL robusto cross-modello). La
+  condizionale pre-registrata PO-5 *"Se POC-2 FAIL → REMOVE"* è attivata.
+- Preservato: POC scripts + report/CSV in `reports/s7_*` (evidenza, gitignored),
+  `tests/analysis/test_s7_poc_helpers.py`, DB audit history (immutable). Codice
+  recuperabile da git. Guard anti re-introduzione:
+  `tests/test_p0_13_strategy_containment.py::TestS7NotInOperationalRegistry`.
+- Documentazione: `docs/S7_LIFECYCLE_HISTORY_2026-07-15.md` (storia completa),
+  `docs/strategies.md` §S7, `docs/strategies/s7-pead.md`, `docs/ARCHITECTURE.md`,
+  `docs/operations.md`, `docs/ROADMAP_DATA_ALPHA_2026-07-02.md` aggiornati.
+- Costi consuntivi S7 lifecycle: FMP Starter $29 (mese 07, disdetto #23);
+  POC-2 $0 (Alpha Vantage free tier); LLM: 73 kimi + 20 GLM POC-2 + 8-K idle.
+- Full suite: 2796 passed, 7 skipped, 0 fail. Issue #38 chiusa con la PR di rimozione.
+
 ### Pool-leak B7/B32 — fix deployato e verificato live (pre-live blocker)
 - Root cause: `_pg_stop = PostgreSQLStore()` nel check stop-loss del `portfolio_scheduler` non era mai chiuso → 1 connessione "idle in transaction" leakata per ciclo 15-min → pool maxconn=20 esaurito. Venerdì 07-14 teneva AccessShareLock su `trades` e bloccava migration 037.
 - Fix A+B+C (commit `06671f7`, merge FF su main): `finally: .close()` su `_pg_stop`/`_pg`/`_pg_trades` nel scheduler; `_release_connection` ora rollback prima di `putconn`/`close` (solo su path pool/owned); `load_frozen_stop`/`fetch_open_trade_meta` chiudono la transazione read-only. 7 guard test nuovi. Full suite 2831 pass.

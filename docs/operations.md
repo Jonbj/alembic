@@ -12,7 +12,7 @@ Day-to-day operational reference for running, monitoring, and troubleshooting th
 | `redis` | 6379 | Redis 7 (signal cache, task queue) |
 | `api` | 8001→8000 | FastAPI application |
 | `worker` | — | Celery worker (queue `celery`, concurrency=4 — task generici) |
-| `worker-inference` | — | Celery worker (queue `inference`, concurrency=1 — FinBERT/Ollama/PEAD) |
+| `worker-inference` | — | Celery worker (queue `inference`, concurrency=1 — FinBERT/Ollama) |
 | `beat` | — | Celery beat (task scheduler) |
 | `frontend` | 3000→80 | React dashboard (Nginx) |
 | `backtest` | — | One-shot backtest runner (profile: backtest) |
@@ -94,7 +94,6 @@ Beat schedules are defined in `src/workers/celery_app.py`. All times are UTC.
 | `decay-monitor` | 23:00 1st of month | Actual vs backtest baseline |
 | `poll-telegram-updates` | every 5s | Process approve/reject callbacks |
 | `run-sec-edgar-ingestion` | */30 14-21 Mon-Fri | SEC EDGAR 8-K filings → news queue |
-| `pead-ingestion` | 5,35 14-21 Mon-Fri | Classifica 8-K via Ollama → pead_signals (queue: inference) |
 | `loss-feedback-check` | */30 14-21 Mon-Fri | Phase B: detect loss patterns → raise feedback entry threshold; write legacy/audit scale state |
 | `counterfactual-worker` | 22:45 daily | Phase C: compute 1h counterfactual returns for SKIP_THRESHOLD/SKIP_EMA/SKIP_CAP rows |
 | `reconcile-fills-evening` | 21:30 Mon-Fri | Reconcile fill prices after NYSE close |

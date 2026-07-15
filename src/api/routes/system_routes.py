@@ -76,22 +76,6 @@ _SCHEDULE = [
         "db_col": None,
     },
     {
-        "task": "earnings-pead",
-        "description": "Finnhub earnings calendar → deterministic surprise",
-        "cron": "10 11-23 * * 1-5",
-        "human": "Hourly at :10, 11:00–23:00 UTC, Mon–Fri",
-        "db_table": None,
-        "db_col": None,
-    },
-    {
-        "task": "pead-ingestion",
-        "description": "PEAD 8-K classification (S7 — shelved, R&D)",
-        "cron": "5,35 14-21 * * 1-5",
-        "human": "xx:05/35, 14:00–21:00 UTC, Mon–Fri",
-        "db_table": None,
-        "db_col": None,
-    },
-    {
         "task": "forward-return-worker",
         "description": "Populate sentiment_signals.forward_return (Alpaca bars)",
         "cron": "0 22 * * *",

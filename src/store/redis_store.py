@@ -745,35 +745,10 @@ class RedisStore:
         return bool(self._r.get("system:halted_by_operator"))
 
     # ------------------------------------------------------------------
-    # PEAD signals (S7 strategy)
+    # PEAD signal helpers removed 2026-07-15 (S7 retired). The Redis keys
+    # signal:{symbol}:pead_event and pead:processed:{filing_id} are no longer
+    # written; any stale keys TTL out (30d). See docs/S7_LIFECYCLE_HISTORY_2026-07-15.md.
     # ------------------------------------------------------------------
-
-    def write_pead_signal(self, signal: "SurpriseSignal", ttl: int = 30 * 86400) -> None:  # type: ignore[name-defined]
-        """Store a PEAD SurpriseSignal in Redis with 30-day TTL."""
-        from src.models.pead import SurpriseSignal  # noqa: F401
-        key = f"signal:{signal.symbol}:pead_event"
-        self._r.set(key, signal.model_dump_json(), ex=ttl)
-
-    def read_pead_signal(self, symbol: str) -> "SurpriseSignal | None":  # type: ignore[name-defined]
-        """Retrieve the active PEAD SurpriseSignal for a symbol, or None."""
-        import json
-        from src.models.pead import SurpriseSignal
-
-        raw = self._r.get(f"signal:{symbol}:pead_event")
-        if raw is None:
-            return None
-        try:
-            return SurpriseSignal.model_validate(json.loads(raw))
-        except Exception:
-            return None
-
-    def is_pead_processed(self, filing_id: str) -> bool:
-        """Return True if this filing has already been classified."""
-        return bool(self._r.get(f"pead:processed:{filing_id}"))
-
-    def mark_pead_processed(self, filing_id: str, ttl: int = 30 * 86400) -> None:
-        """Mark a filing as processed to prevent duplicate classification."""
-        self._r.set(f"pead:processed:{filing_id}", "1", ex=ttl)
 
     def __enter__(self) -> "RedisStore":
         return self

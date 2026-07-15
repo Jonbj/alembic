@@ -27,7 +27,7 @@ import yaml
 class FrozenStop:
     """Stop params frozen at entry; persisted on the trade row (migration 034)."""
 
-    strategy: str | None  # "S1" | "S4" | "S7" | None
+    strategy: str | None  # "S1" | "S4" | None
     mode: str  # "fixed" | "vol_scaled"
     vol_at_entry: float | None  # sigma_eff at entry (None in fixed mode)
     sigma_eff: float | None

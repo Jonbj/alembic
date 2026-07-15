@@ -7,7 +7,7 @@
 **Technical Architecture Document**
 **Version:** 7.1.0
 **Date:** 2026-07-03
-**Status:** Phase A/B/C + Portfolio Governance + Sprint 1 remediation (FIX-01/02/03, EN-03, B13/B20, resolver enforcement, gate thresholds) + S2-1 Source P&L Funnel. S7 SHELVED (ALPHA-A5 FAIL).
+**Status:** Phase A/B/C + Portfolio Governance + Sprint 1 remediation (FIX-01/02/03, EN-03, B13/B20, resolver enforcement, gate thresholds) + S2-1 Source P&L Funnel. S7 REMOVED 2026-07-15 (ALPHA-A3 confuted, POC-2 FAIL).
 
 ---
 
@@ -122,7 +122,10 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 | `SecEdgarConnector` | `src/connectors/sec_edgar.py` | SEC EDGAR 8-K/10-Q filings |
 | `NewsDeduplicator` | `src/connectors/deduplicator.py` | id dedup + **content-hash+ticker cross-source dedup (EN-03)** via Redis SET NX (TTL 4h) |
 | `TickerExtractor` | `src/connectors/ticker_extractor.py` | Company name → ticker via PostgreSQL lookup |
-| `EarningsCalendarProvider` | `src/connectors/earnings_calendar.py` | Finnhub earnings calendar → deterministic surprise (feeds `earnings-pead` worker) |
+
+> `EarningsCalendarProvider` (`src/connectors/earnings_calendar.py`) and the PEAD
+> 8-K worker/strategy were **REMOVED 2026-07-15** with S7 retirement. See
+> `docs/S7_LIFECYCLE_HISTORY_2026-07-15.md`.
 
 ### 2.2 Sentiment Pipeline
 
@@ -202,12 +205,15 @@ Strategies produce sleeve-local weights: fractions of their own sleeve, not the 
 | **S2** | Volatility Risk Premium | 0% | **Disabled** (research) | Proxy: overnight gap on low-VRP days. OOS Sharpe −0.55; all gates failed. Needs options infrastructure for v2 |
 | **S3** | Cross-Sectional Residual Momentum | 0% | Research | Cross-sectional rank of residual 1-12M returns; PIT sizing wired (P1-07); gate 3/5 failed |
 | **S4** | News-Driven Tactical | 10% | `promotion_blocked` (P0-13) | LLM ensemble sentiment → BUY gate: score > 0.3 AND price > EMA20; capped at 10% until dedicated gate report |
-| **S7** | PEAD (Post-Earnings Announcement Drift) | 0% | **SHELVED 2026-07-03** (ALPHA-A5 FAIL: drift = SPY beta + outliers, no edge net of market) | Code kept (8-K worker, pead_signals) as building block for S9/vector B. Reopening requires PO decision (small/mid universe or transcript-tone POC). |
 
-#### S7 — PEAD (Post-Earnings Announcement Drift)
-Implementation: Worker `src/workers/pead_worker.py` classifies SEC 8-K filings via Ollama LLM. Writes to `pead_signals` table. Routes at `src/api/routes/pead_routes.py`. Schedule: beat task `pead-ingestion` ogni 30 min, 14:00-21:00 UTC, queue `inference`.
-
-**Production status:** S7 is R&D/contained. Despite the `allocation_pct: 0.15` in `config/strategies.yaml`, S7 is NOT wired into the PortfolioOrchestrator. `promotion_blocked=True` in `strategy_lifecycle`. Promotion requires OOS gates + 30-day paper evidence + PO sign-off.
+> **S7 (PEAD) — REMOVED 2026-07-15.** Strategy dir, workers, routes, beat tasks
+> (`pead-ingestion`, `earnings-pead`), config and tests deleted. The declared edge
+> (transcript tone → alpha, ALPHA-A3) was confuted at decision-grade (POC-2 FAIL
+> n=73, IC≈0; POC-1 INCONCLUSIVE n=15; ALPHA-A5 large-cap FAIL = beta). PO-5
+> conditional *"Se POC-2 FAIL → REMOVE"* activated. Lifecycle history +
+> evidence: `docs/S7_LIFECYCLE_HISTORY_2026-07-15.md`, `reports/s7_*`. Code
+> recoverable from git. Re-introduction requires a fresh design + gate pass (guard:
+> `tests/test_p0_13_strategy_containment.py::TestS7NotInOperationalRegistry`).
 
 Allocation and enabled/disabled state are configured in `config/strategies.yaml`. The authoritative runtime state is in the `strategy_lifecycle` DB table. Live trading is NOT authorized for any strategy.
 
@@ -216,9 +222,9 @@ Allocation and enabled/disabled state are configured in `config/strategies.yaml`
 | Worker | Concurrency | Queue | Handles |
 |--------|-------------|-------|---------|
 | `worker` | 4 | `celery` | Tutti i task tranne FinBERT/Ollama |
-| `worker-inference` | 1 | `inference` | Sentiment (FinBERT+Ollama), Regime, PEAD |
+| `worker-inference` | 1 | `inference` | Sentiment (FinBERT+Ollama), Regime |
 
-Il `worker-inference` ha concurrency=1 per garantire un singolo processo Python che carica FinBERT una sola volta — con concurrency>1, ogni subprocess allocava una copia del modello causando OOM. I task su queue `inference` sono: `sentiment-worker`, `regime-detector`, `pead-ingestion`.
+Il `worker-inference` ha concurrency=1 per garantire un singolo processo Python che carica FinBERT una sola volta — con concurrency>1, ogni subprocess allocava una copia del modello causando OOM. I task su queue `inference` sono: `sentiment-worker`, `regime-detector`. (PEAD beat tasks removed 2026-07-15 con S7.)
 
 ### 2.5c Portfolio Cycle Safeguards
 
@@ -367,7 +373,7 @@ Answers: *"For each trade we skipped, what would the 1-hour return have been?"*
 | Store | Technology | Schema |
 |-------|------------|--------|
 | `RedisStore` | Redis 7 | `signal:{sym}:sentiment` TTL 4h; `killswitch_active`; `regime:current` (JSON) + `qc:sizing_multiplier`; `ensemble:weights:current`; `system:mode`; `feedback:entry_threshold`; `feedback:regime_scale`; `feedback:state`; `config:sentiment_llm_models`; `portfolio:value` |
-| `PostgreSQLStore` | PostgreSQL 16 | `sentiment_signals`, `llm_responses`, `news_log`, `weight_update_log`, `backtest_signals`, `portfolio_cycles`, `risk_reports`, `decay_reports`, `execution_decisions`, `trades`, `pead_signals`, `strategy_lifecycle`, `strategy_lifecycle_audit` |
+| `PostgreSQLStore` | PostgreSQL 16 | `sentiment_signals`, `llm_responses`, `news_log`, `weight_update_log`, `backtest_signals`, `portfolio_cycles`, `risk_reports`, `decay_reports`, `execution_decisions`, `trades`, `strategy_lifecycle`, `strategy_lifecycle_audit` |
 
 **Tables added by migrations 016–018:**
 
@@ -391,17 +397,19 @@ CREATE TABLE execution_decisions (
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- pead_signals: S7 PEAD event classifications from SEC 8-K filings (R&D/contained)
-CREATE TABLE pead_signals (
-    id              BIGSERIAL PRIMARY KEY,
-    symbol          VARCHAR(20) NOT NULL,
-    score           DOUBLE PRECISION,
-    direction       VARCHAR(20),   -- positive | negative | inline
-    confidence      DOUBLE PRECISION,
-    category        VARCHAR(50),   -- earnings_beat | earnings_miss | etc.
-    filing_url      TEXT,
-    classified_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+-- pead_signals: REMOVED 2026-07-15 con S7 retirement. (This DDL was doc-only — no
+-- migration ever created the table in the live DB. The schema is kept here as a
+-- historical record of the removed S7/PEAD surface; see S7_LIFECYCLE_HISTORY.)
+-- CREATE TABLE pead_signals (
+--     id              BIGSERIAL PRIMARY KEY,
+--     symbol          VARCHAR(20) NOT NULL,
+--     score           DOUBLE PRECISION,
+--     direction       VARCHAR(20),   -- positive | negative | inline
+--     confidence      DOUBLE PRECISION,
+--     category        VARCHAR(50),   -- earnings_beat | earnings_miss | etc.
+--     filing_url      TEXT,
+--     classified_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+-- );
 
 -- strategy_lifecycle (026): one row per strategy, immutable audit via strategy_lifecycle_audit
 CREATE TABLE strategy_lifecycle (
@@ -713,8 +721,6 @@ CREATE TABLE decay_reports (
 | `regime-detector-premarket` | 13:30 Mon-Fri | Safety-net rerun 30 min before NYSE open (P0-09) |
 | `reconcile-fills-intraday` | 12,27,42,57 14-21 Mon-Fri | Alpaca fill prices → trades table |
 | `reconcile-fills-evening` | 21:30 Mon-Fri | EOD reconcile pass (B20 fixed 2026-07-03) |
-| `earnings-pead` | :10 11-23 Mon-Fri | Finnhub earnings calendar → deterministic surprise |
-| `pead-ingestion` | 5,35 14-21 Mon-Fri | S7 8-K LLM classification (R&D — S7 shelved) |
 | `forward-return-worker` | 22:00 daily | Populate forward returns from **Alpaca daily bars** |
 | `risk-monitor` | 22:30 daily | HHI + correlation + drawdown |
 | `performance-daily` | 3:00 daily | IC + drift + Telegram digest |
@@ -776,6 +782,6 @@ All three P2-05 safety requirements are implemented and test-covered. Kimi P2 Ac
 | P2-05-B: Net exposure cap wired from config | `_load_risk_config()` reads `max_portfolio_exposure` and `max_single_asset_pct` from `config/trading.yaml`; passed to `ConstraintEnforcer` at each cycle | `src/workers/portfolio_scheduler.py:338-352` |
 | P2-05-C: VolTargeter runs before enforcer | `PortfolioVolTargeter.scale_orders()` called before `ConstraintEnforcer.enforce()` — enforcer is the last constraint pass and cannot be re-violated by vol scaling | `src/portfolio/orchestrator.py:218-229` |
 
-**Runtime monitoring watchlist (R-04 through R-12 remain open):** see `docs/RESIDUAL_RISK_REGISTER.md` for full tracking. Key open items: soft CI gates (mypy/pip-audit/gitleaks), S1 backtest report stale (needs PIT regeneration before promotion discussion), S4/S7 no confirmed IC > placebo.
+**Runtime monitoring watchlist (R-04 through R-12 remain open):** see `docs/RESIDUAL_RISK_REGISTER.md` for full tracking. Key open items: soft CI gates (mypy/pip-audit/gitleaks), S1 backtest report stale (needs PIT regeneration before promotion discussion), S4 no confirmed IC > placebo. (S7 removed 2026-07-15.)
 
 Full P2 milestone history archived in `docs/archive/2026-06-p2-milestone/` (P2_STATUS + P2_ACCEPTANCE_AUDIT + preflight runbook).

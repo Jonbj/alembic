@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fmtDateTime } from '@/utils/format'
-import { fetchScheduler, fetchActivity, fetchPeadSignals } from '@/api/system'
+import { fetchScheduler, fetchActivity } from '@/api/system'
 import { HelpButton } from '@/components/shared/HelpButton'
 
-type Tab = 'scheduler' | 'activity' | 'pead'
+type Tab = 'scheduler' | 'activity'
 
 const TYPE_LABELS: Record<string, { label: string; color: string }> = {
   portfolio_cycle: { label: 'Cycle',     color: 'var(--blue)' },
@@ -29,13 +29,6 @@ export default function SystemLog() {
     enabled: tab === 'activity',
   })
 
-  const { data: pead = [], isLoading: peadLoading } = useQuery({
-    queryKey: ['pead-signals'],
-    queryFn: fetchPeadSignals,
-    refetchInterval: 300_000,
-    enabled: tab === 'pead',
-  })
-
   const tabStyle = (t: Tab) => ({
     padding: '8px 20px', cursor: 'pointer',
     borderBottom: tab === t ? '2px solid var(--blue)' : '2px solid transparent',
@@ -57,7 +50,7 @@ export default function SystemLog() {
     <div style={{ position: 'relative' }}>
       <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700 }}>System</h2>
       <p style={{ margin: '0 0 20px', color: 'var(--text-muted)', fontSize: 14 }}>
-        Scheduler status, activity log and PEAD signals.
+        Scheduler status and activity log.
       </p>
 
       <HelpButton title="System — Guida" sections={[
@@ -69,16 +62,11 @@ export default function SystemLog() {
           heading: "Activity Log",
           content: "Cronologia degli eventi di sistema delle ultime 24 ore:\n- **Cycle**: cicli portfolio eseguiti con numero di ordini\n- **Sentiment**: run del worker LLM con numero di segnali generati\n- **Ingestion**: batch di articoli ingestiti per fonte\n- **Trade**: decisioni di trading prese dall'orchestratore\n\nGli eventi sono ordinati dal più recente.",
         },
-        {
-          heading: "PEAD Signals",
-          content: "Segnali attivi della strategia S7 (Post-Earnings Announcement Drift):\n- Il worker analizza i filing 8-K di SEC EDGAR\n- L'LLM classifica se c'è un earnings beat (sorpresa positiva)\n- Per ogni beat con confidence ≥ 70%, viene creato un segnale con hold di 20 giorni\n\nQuesta tabella è vuota fino al primo ciclo di mercato con earnings beat classificati.",
-        },
       ]} />
 
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', marginBottom: 20 }}>
         <button style={tabStyle('scheduler')} onClick={() => setTab('scheduler')}>Scheduler</button>
         <button style={tabStyle('activity')} onClick={() => setTab('activity')}>Activity Log</button>
-        <button style={tabStyle('pead')} onClick={() => setTab('pead')}>PEAD Signals</button>
       </div>
 
       {/* ── SCHEDULER ───────────────────────────────────────────── */}
@@ -159,65 +147,6 @@ export default function SystemLog() {
               )}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {/* ── PEAD SIGNALS ────────────────────────────────────────── */}
-      {tab === 'pead' && (
-        <div>
-          <div style={{ marginBottom: 16, padding: '10px 14px', background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, fontSize: 13 }}>
-            <strong>S7 PEAD</strong> — Post-Earnings Announcement Drift. Il worker classifica i filing 8-K di SEC EDGAR ogni 30 minuti durante il mercato. I segnali rimangono attivi per 20 giorni dall'earnings beat.
-          </div>
-
-          <div className="card" style={{ padding: 0 }}>
-            {peadLoading && <p style={{ padding: 16, color: 'var(--text-muted)' }}>Loading...</p>}
-            <table>
-              <thead>
-                <tr>
-                  <th>Ticker</th>
-                  <th>Direction</th>
-                  <th>Surprise %</th>
-                  <th>Confidence</th>
-                  <th>Detected</th>
-                  <th>Hold Until</th>
-                  <th>Days Left</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pead.map((s) => (
-                  <tr key={s.filing_id}>
-                    <td><strong>{s.symbol}</strong></td>
-                    <td>
-                      <span className={`badge ${s.direction === 'beat' ? 'badge-green' : 'badge-red'}`}>
-                        {s.direction === 'beat' ? '▲ beat' : '▼ miss'}
-                      </span>
-                    </td>
-                    <td>{s.surprise_pct > 0 ? '+' : ''}{(s.surprise_pct * 100).toFixed(1)}%</td>
-                    <td>{(s.confidence * 100).toFixed(0)}%</td>
-                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmtDateTime(s.detected_at)}</td>
-                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmtDateTime(s.hold_until)}</td>
-                    <td>
-                      <span style={{ fontWeight: 600, color: s.days_remaining > 10 ? 'var(--green)' : 'var(--yellow, #f59e0b)' }}>
-                        {s.days_remaining}d
-                      </span>
-                    </td>
-                    <td>
-                      {s.is_active
-                        ? <span className="badge badge-green">Active</span>
-                        : <span className="badge badge-grey">Expired</span>
-                      }
-                    </td>
-                  </tr>
-                ))}
-                {pead.length === 0 && !peadLoading && (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 24 }}>
-                    No PEAD signals yet — worker will populate this once 8-K filings with earnings beats are processed.
-                  </td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
         </div>
       )}
     </div>

@@ -38,8 +38,6 @@ app = Celery(
         "src.workers.decay_monitor_task",
         "src.workers.sentiment",
         "src.workers.telegram_poller",
-        "src.workers.pead_worker",
-        "src.workers.earnings_pead_worker",
     ],
 )
 
@@ -55,7 +53,7 @@ app.conf.update(
     # (_SENTIMENT_BATCH_SIZE) at concurrency 2: worst case ceil(12/2) x 90s Ollama
     # timeout + 43s FinBERT warmup + margin, kept under the 15-min beat cadence so a
     # cycle doesn't overrun into the next. Applies to all inference-queue tasks
-    # (pead-ingestion, regime-detector too) — harmless for them, just a longer
+    # (regime-detector too) — harmless for them, just a longer
     # hang-detection ceiling than their own workload needs.
     # src/workers/sentiment.py's _SHADOW_BOUNDED_WAIT_S (Stage-2 shadow mode) is
     # sized against these two constants (583s live-only worst case + bounded
@@ -157,9 +155,9 @@ app.conf.beat_schedule = {
     # Public API, zero cost. Filters by WATCHLIST_SYMBOLS.
     # SEC EDGAR news-sentiment: DISABLED 2026-07-02. Never produced a signal (0 rows
     # ever): the connector read a non-existent `ticker_symbol` field (EDGAR uses CIK /
-    # display_names), so every filing got empty asset_tags and was dropped. Also
-    # redundant with S7 PEAD, which has its own 8-K pipeline. Task kept but not scheduled,
-    # gated behind SEC_EDGAR_INGESTION_ENABLED. Re-enable only after fixing CIK→ticker.
+    # display_names), so every filing got empty asset_tags and was dropped. Task kept
+    # but not scheduled, gated behind SEC_EDGAR_INGESTION_ENABLED. Re-enable only after
+    # fixing CIK→ticker.
     # RSS (Reuters/CNBC) ingestion: DISABLED 2026-07-03 (FIX-02, FUNCTIONAL_REVIEW_2026-07-03).
     # 0 news_log rows in 17 days → dead feeds or no ticker match. Task kept but not
     # scheduled, gated behind RSS_INGESTION_ENABLED. Revive only with official IR feeds.
@@ -223,20 +221,6 @@ app.conf.beat_schedule = {
     },
     # daily-trading-analysis removed: replaced by Claude Code scheduled session.
     # Claude Code runs at 07:00 CEST weekdays via CronCreate (see session config).
-    # S7 PEAD: classify 8-K filings every 30 min during market hours.
-    # Offset by 5 min from SEC EDGAR ingestion (:00/:30) to ensure filings
-    # are already in EDGAR before we classify them.
-    # Routed to 'inference' queue — uses Ollama LLM client for 8-K classification.
-    "pead-ingestion": {
-        "task": "src.workers.pead_worker.run_pead_ingestion_worker",
-        "schedule": crontab(minute="5,35", hour="14-21", day_of_week="1-5"),
-        "options": {"queue": "inference"},
-    },
-    # Earnings-surprise PEAD (fuel for S7): Finnhub earnings calendar → deterministic
-    # surprise → Redis SurpriseSignals. No LLM → default queue. Hourly across a wide
-    # window to catch both before-market (bmo) and after-market (amc) reports.
-    "earnings-pead": {
-        "task": "src.workers.earnings_pead_worker.run_earnings_pead_worker",
-        "schedule": crontab(minute=10, hour="11-23", day_of_week="1-5"),
-    },
+    # S7 (PEAD) removed 2026-07-15: ALPHA-A3 transcript-tone edge confuted at decision-grade
+    # (POC-2 FAIL, n=73, IC≈0). Beat tasks pead-ingestion + earnings-pead retired with it.
 }

@@ -126,25 +126,6 @@ class TestPromotionBlocked:
                 db_conn=conn,
             )
 
-    def test_s7_cannot_be_promoted_when_promotion_blocked(self):
-        """S7 also has promotion_blocked=True — same enforcement applies."""
-        from src.strategies.promotion import request_promotion, PromotionBlockedError
-
-        conn, cur = _make_db()
-        row = _lifecycle_row(
-            strategy_id="S7", mode="research", promotion_blocked=True
-        )
-        cur.fetchone.return_value = row
-
-        with pytest.raises(PromotionBlockedError, match="promotion_blocked"):
-            request_promotion(
-                strategy_id="S7",
-                target_mode="paper",
-                gate_report_id="rpt-s7-001",
-                requested_by="operator",
-                db_conn=conn,
-            )
-
     def test_promotion_blocked_false_does_not_block_by_itself(self):
         """When promotion_blocked=False, failure is for another reason (gate_report_id missing),
         not because of the blocked flag."""
