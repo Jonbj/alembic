@@ -166,8 +166,18 @@ risk:
   portfolio_drawdown: 0.05
 
   # Execution risk (read by ExecutionWorker at cycle start)
-  stop_loss: 0.02
-  stop_loss_mode: fixed           # fixed | vol_scaled (ship: fixed)
+  # 2026-07-15 AGGRESSIVE PAPER DECISION: protective 2% stop DISABLED (stop_loss: 0.0).
+  # Evidence: Kimi OOS replay (docs/stop_loss_calibration_handback_2026-07-15.md §5)
+  # — no_protective cum P&L $-56 vs fixed_2pct $-419 vs wide vol_scaled $-561. The
+  # 2% noise stop destroyed 7.5x more alpha than it protected (07-10 PANW/WDC/DELL
+  # stop-outs on 0.26-0.53σ noise that recovered). Disable guard:
+  # portfolio_scheduler._stop_loss_breached_symbols returns {} when stop_loss<=0 &
+  # mode==fixed. broker_disaster_stop (d_hard 12-20%) stays as SHADOW telemetry only
+  # (stop_shadow_enabled: true) — observe worst adverse excursion, no enforced floor.
+  # PAPER ONLY. Revisit: if any position rides past -15/20% (d_hard shadow), wire
+  # d_hard to a real broker order (catastrophe-only), NOT the 2% noise stop.
+  stop_loss: 0.0
+  stop_loss_mode: fixed           # fixed | vol_scaled (ship: fixed; 0.0 = protective disabled)
   stop_strategy_params:
     S1: {k: 3.5, floor: 0.06, cap: 0.12}
     S4: {k: 2.0, floor: 0.03, cap: 0.08}
@@ -179,7 +189,7 @@ risk:
   stop_risk_budget_bp_per_pos: 12
   stop_risk_budget_bp_aggregate: 100
   stop_gap_buffer_pct: 0.005
-  stop_shadow_enabled: false
+  stop_shadow_enabled: true       # 2026-07-15: on — observe d_hard / adverse excursion with protective stop disabled
   broker_disaster_stop:
     multiplier: 1.5
     sigma_multiple: 5.0
