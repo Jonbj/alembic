@@ -2,6 +2,8 @@
 
 Audit di tutta la documentazione/roadmap/plans per estrarre i lavori **ancora aperti o mai chiusi**. Estratto da 3 agent Explore in parallelo + cross-referenza con git/memory.
 
+> **UPDATE 2026-07-15 (post-session):** spuntati due Tier-0/Tier-4 chiusi e deployati oggi — **B7/B32 pool-leak** (`06671f7`, leak=0 verificato) e **F9a stop flip** (`1f450c6`, protective 2% disabilitato su paper, d_hard shadow-only). Ripuliti worktree mergiati/obsoleti (`s4-measurement`, `sector-cap`); conservato `s1-refinements` (lavoro S1 attivo, +5 commit non mergiati). Ordine di esecuzione dei lavori sospesi appeso in fondo (§ "Ordine di esecuzione proposto").
+
 > **Caveat importante (doc/code drift):** molti plan doc hanno checkbox `- [ ]` mai spuntate **ma il lavoro è in realtà DONE e merged** (il piano non è stato aggiornato post-esecuzione). Dove ho cross-confermato lo stato reale via commit/memory, lo marco. **Non fidarti dei checkbox vuoti come indicatore di "non fatto"** — verifica sempre contro git.
 
 ---
@@ -19,7 +21,7 @@ Audit di tutta la documentazione/roadmap/plans per estrarre i lavori **ancora ap
 
 | Item | Stato reale | Gate di flip |
 |---|---|---|
-| **F9a vol-scaled stop** | implementato+merged, `stop_loss_mode: fixed` (live 2%). Gate fase 6 FAIL 07-11. **Calibrazione delegata a Kimi oggi** (`docs/stop_loss_calibration_kimi_prompt_2026-07-15.md`) | gate OOS PASS (bootstrap ≥70%, DD delta ≤0.10) → canary S1 10% → PO sign-off |
+| **F9a vol-scaled stop** | ✅ **DECISIONE AGGRESSIVA DEPLOYATA 07-15** (`1f450c6`). Calibrazione Kimi: vol_scaled PASSA 7 gate OOS, bootstrap delta P&L positive 71.6% (thin); **no_protective** cum P&L $-56 vs vol_scaled $-561 vs fixed_2pct $-419. Esito: `stop_loss: 0.0` (protective 2% **disabilitato** su paper), `stop_loss_mode: fixed`, `stop_shadow_enabled: true` (d_hard shadow-only, osserva adverse excursion). Branch calibrazione `stop-loss-calibration-2026-07-15` **NON merged** (solo handback doc portato su main `78d5d57`) | flip futuro a `vol_scaled` = decisione operatore post-3gg shadow → canary S1 10% → PO sign-off. Handback: `docs/stop_loss_calibration_handback_2026-07-15.md` |
 | **Sector exposure cap** | wired+merged (ea436fd), `max_sector_exposure: 0.0` = off. Non avrebbe boundato l'incidente 07-13 a sizing attuale | PO flip 0.10 (ricalibrare con F9a) |
 | **F8 regime_scale** | wired portfolio path (2bf31bd), `apply_regime_scale: false` = shadow-only | 10-14gg shadow → flip |
 | **S1 refinements** (skip-month, absolute filter, cap-after-norm) | piano TDD esiste, flag default off. **Non verificato se implementato** (plan checkbox vuote) | comparison report → PO flip |
@@ -63,7 +65,7 @@ Audit di tutta la documentazione/roadmap/plans per estrarre i lavori **ancora ap
 
 | Item | Stato | Note |
 |---|---|---|
-| **B7/B32 — PostgreSQL pool leak** | **APERTO, CONFERMATO LIVE** | Ieri 20 connessioni worker/beat leaked "idle in transaction" tenevano lock su `trades` (bloccato migration 037). Stop container → leak 0. Fonte = worker/beat |
+| **B7/B32 — PostgreSQL pool leak** | ✅ **CHIUSO + DEPLOYATO 07-15** (`06671f7`) | Root cause: bare `PostgreSQLStore()` in scheduler stop-check mai chiuso → 1 conn "idle in transaction"/ciclo → pool maxconn=20 esaurito + AccessShareLock su `trades`. Fix: `finally: .close()` su tutti gli store scheduler; `_release_connection` rollback prima di putconn/close; metodi read-only chiudono la transazione. Rebuild+restart, **leak=0 verificato** (era 20). 2831 pass/0 fail. Runbook in operations.md aggiornato |
 | **B5 — Frontend XSS (DOMPurify + CSP + token storage)** | **APERTO, Critical** | |
 | B3 — kill-switch resume non ripristina mode | APERTO | |
 | B8 — rate limiting + CORS | APERTO | |
@@ -102,8 +104,24 @@ Piano documenti con checkbox `- [ ]` ma lavoro **effettivamente DONE+merged**: S
 
 ## Top 5 più actionabili ora
 
-1. **Kimi calibrazione F9a** — già delegata oggi (prompt pronto). Sblocca il flip dello stop vol-scaled.
-2. **QX-01 annotazione** — serve PO Decisione #4 (in-house vs out). È il collo di bottiglia di tutta la qualità S4.
-3. **B7/B32 pool leak** — confermato live ieri. Pre-live blocker. Root cause = connessioni worker/beat non chiuse.
-4. **Stage 2 shadow arm** — codice merged, manca solo l'arm del toggle + 7gg di raccolta → decide la coppia modello definitiva.
-5. **S7 decisione PO** — deadline 2026-08-01. Se FAIL → rimozione completa (beat + lifecycle + disdetta FMP).
+> Aggiornato 2026-07-15 post-session. Kimi calibrazione F9a (ex #1) e B7/B32 pool-leak (ex #3) **chiusi e deployati** — rimossi dalla lista.
+
+1. **Stage 2 shadow arm** — codice merged (a099719), manca solo l'arm del toggle Redis + 7gg di raccolta → decide la coppia modello definitiva (risolve indirettamente anche il collo #1 di S4, divergenza kimi⇄glm).
+2. **QX-01 annotazione** — serve PO Decisione #4 (in-house vs out). È il collo di bottiglia di tutta la qualità S4 (enforcement resolver, calibrazione, QS-03).
+3. **F8 regime_scale gate-flip** — shadow-only wired (2bf31bd); insedia il timer 10-14gg → flip operatore.
+4. **S7 decisione PO** — deadline 2026-08-01. Se FAIL → rimozione completa (beat + lifecycle + disdetta FMP).
+5. **B5 frontend XSS** — Critical, release-blocker per go-live reale (non paper). Primo dei Tier-4 hardening.
+
+---
+
+## Ordine di esecuzione proposto (lavori ancora sospesi)
+
+Aggiunto 2026-07-15. Ordina per: (a) cosa sbottona altro lavoro, (b) cosa è già code-ready vs richiede build, (c) gate decisionali prima del lavoro.
+
+1. **Decisioni PO bloccanti** — #4 (budget annotazione QX-01: in-house vs esternalizzata → accelera a 400 label Fase 1) e #5 (S7 keep/remove entro 08-01). Sono gate decisionali, non codice, ma sbottonano/sbottonano tutto il resto. **Iniziare da qui.**
+2. **Stage-2 shadow ARM** — infrastruttura già merged (a099719, migration 038, auto-arm script). Manca solo arm/disarm via Redis → 7gg di confronto candidati vs coppia live `glm52,gptoss`. Costo ~0, valore alto (decide coppia definitiva).
+3. **F8 regime_scale clock** — shadow-only wired (2bf31bd). Insedia il gate-flip timer 10-14gg, poi decisione operatore.
+4. **S1 refinements** — l'altra sessione sta implementando le 5 varianti nel worktree `s1-refinements-2026-07-12` (+5 commit non mergiati: skip-month, abs-filter, cap-after-norm, backtest script, doc fix). Al termine: backtest comparativo → decisione operatore flip.
+5. **QX-01 annotazione** — dietro decisione PO #4. È il golden set che sblinda enforcement + calibrazione resolver (QX-01 rails già live: `news_labels`, `/labeling`, forward-return da Alpaca, `/quality`).
+6. **Tier-4 hardening** — B5 XSS frontend prima degli altri (Critical, DOMPurify + CSP + token storage). Poi B3/B8/B9/B13-14-18/B31/B33-34/B35/B44/B5b.
+7. **Orizzonte lungo** — ensemble a 3 modelli (risolve direttamente il collo #1 di S4: divergenza kimi⇄glm, fallback 75-80%, 3-6 entry/dì), Vettore A event-driven (earnings chain), S7 revival, S2-1 completamento (FIX-06 popolamento via S2-2).
