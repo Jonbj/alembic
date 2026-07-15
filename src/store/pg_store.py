@@ -1008,6 +1008,14 @@ class PostgreSQLStore:
                 # exit_order_id (single, first tranche) + exit_order_ids (all
                 # tranches, dedup) are updated on EVERY tranche so reconcile can
                 # aggregate every fill.
+                # NB: use array_append(...), NOT `arr || elem`. On this Postgres
+                # `text[] || text` resolves to array_cat and tries to cast the
+                # scalar string to text[], throwing 'malformed array literal'
+                # (reproduced 2026-07-15). This was the real root cause of the
+                # 5-missing-SELL-trace incident: the first SELL on a fresh
+                # position (exit_order_ids NULL) hit `COALESCE(NULL, ARRAY[]::text[]) || %s`
+                # and raised, which (pre-B33) broke the whole trade-write loop.
+                # array_append(anyarray, anyelement) is unambiguous.
                 append_clause = (
                     "exit_order_id = COALESCE(exit_order_id, %s),\n"
                     "                               exit_order_ids = CASE\n"
@@ -1015,7 +1023,7 @@ class PostgreSQLStore:
                     "                                       array_position(COALESCE(exit_order_ids, ARRAY[]::text[]), %s),\n"
                     "                                       0\n"
                     "                                   ) = 0\n"
-                    "                                   THEN COALESCE(exit_order_ids, ARRAY[]::text[]) || %s\n"
+                    "                                   THEN array_append(COALESCE(exit_order_ids, ARRAY[]::text[]), %s)\n"
                     "                                   ELSE exit_order_ids\n"
                     "                               END"
                 )
