@@ -695,6 +695,28 @@ def run_reconcile_fills_intraday() -> dict:
         pg.close()
 
 
+def _daily_performance_report_tg_enabled() -> bool:
+    """Read notifications.send_daily_performance_report from config/trading.yaml.
+
+    Default false (2026-07-15): suppress the daily "Performance Report" Telegram
+    message (IC/ICIR/weights) from run_daily_report at 03:00 UTC — flagged as
+    noise. The report is still built and cached in Redis for the API/UI; only the
+    Telegram send is gated. Flip the flag to true to re-enable. Isolated as a
+    helper so tests can patch it.
+    """
+    try:
+        import yaml
+        from pathlib import Path
+        _ty = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
+        with open(_ty) as _f:
+            return bool(
+                ((yaml.safe_load(_f) or {}).get("notifications") or {})
+                .get("send_daily_performance_report", False)
+            )
+    except Exception:
+        return False
+
+
 @app.task(name="src.workers.performance.run_daily_report")
 def run_daily_report():
     """Daily performance report task.
@@ -747,14 +769,18 @@ def run_daily_report():
         # Build signal distribution for last 24h (visibility into why portfolio is cash)
         signal_distribution = _build_signal_distribution(pg, lookback_hours=24)
 
-        # Send Telegram alert
-        notifier = TelegramNotifier()
-        message = _format_performance_telegram_message(
-            report, cb_result.soft_warnings_triggered, signal_distribution
-        )
-        run_async(notifier.send_alert(message, level="info"))
+        # Send Telegram alert — gated by notifications.send_daily_performance_report
+        # in config/trading.yaml (default false: suppress daily "Performance Report"
+        # Telegram noise). The report is still cached in Redis above for the API/UI;
+        # only the Telegram send is gated. Flip the flag to true to re-enable.
+        if _daily_performance_report_tg_enabled():
+            notifier = TelegramNotifier()
+            message = _format_performance_telegram_message(
+                report, cb_result.soft_warnings_triggered, signal_distribution
+            )
+            run_async(notifier.send_alert(message, level="info"))
 
-        log.info(f"Daily report sent. Overall IC: {report.overall_ic:.4f}, ICIR: {report.icir:.3f}")
+        log.info(f"Daily report built. Overall IC: {report.overall_ic:.4f}, ICIR: {report.icir:.3f}")
 
         # Reconcile fill prices from Alpaca for trades placed in last 24h
         if config.ALPACA_API_KEY and config.ALPACA_SECRET_KEY:

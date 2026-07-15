@@ -396,12 +396,18 @@ class TestDivergenceAlertsInScheduler:
 
         signal_syms={"AAPL","MSFT"}, order_syms=set() → Jaccard overlap=0 < 0.8 threshold
         → check_signal_divergence returns True → _fire_alert must be called.
+        The Telegram send is gated by notifications.send_signal_order_divergence_alert
+        (default false); this wiring test patches the gate ON to verify the path.
         """
         from src.workers.portfolio_scheduler import _check_divergence_and_alert
 
         notifier = MagicMock()
 
-        with patch("src.workers.portfolio_scheduler._fire_alert") as mock_fire:
+        with patch("src.workers.portfolio_scheduler._fire_alert") as mock_fire, \
+             patch(
+                 "src.workers.portfolio_scheduler._divergence_alert_enabled",
+                 return_value=True,
+             ):
             _check_divergence_and_alert(
                 signal_syms={"AAPL", "MSFT"},
                 order_syms=set(),
@@ -411,9 +417,37 @@ class TestDivergenceAlertsInScheduler:
             )
 
         assert mock_fire.called, (
-            "_fire_alert must be called when signal/order divergence exceeds threshold. "
+            "_fire_alert must be called when signal/order divergence exceeds threshold "
+            "and the alert gate is enabled. "
             "signal_syms={'AAPL','MSFT'} vs order_syms=set() → 0% overlap < 80% threshold. "
             "Wire check_signal_divergence() into _check_divergence_and_alert()."
+        )
+
+    def test_scheduler_silent_on_signal_divergence_when_gate_off(self):
+        """When notifications.send_signal_order_divergence_alert is false (default),
+        _check_divergence_and_alert must NOT call _fire_alert even on divergence.
+        The divergence is still detected; only the Telegram send is suppressed.
+        """
+        from src.workers.portfolio_scheduler import _check_divergence_and_alert
+
+        notifier = MagicMock()
+
+        with patch("src.workers.portfolio_scheduler._fire_alert") as mock_fire, \
+             patch(
+                 "src.workers.portfolio_scheduler._divergence_alert_enabled",
+                 return_value=False,
+             ):
+            _check_divergence_and_alert(
+                signal_syms={"AAPL", "MSFT"},
+                order_syms=set(),
+                submitted_count=0,
+                final_count=0,
+                notifier=notifier,
+            )
+
+        assert not mock_fire.called, (
+            "_fire_alert must NOT be called when the divergence alert gate is off. "
+            "Detection still runs; only the Telegram WARNING send is suppressed."
         )
 
     def test_scheduler_fires_warning_on_execution_divergence(self):

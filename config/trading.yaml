@@ -282,3 +282,13 @@ infrastructure:
   # Breakdown: hosting/VPS ~$600, LLM API calls ~$840 at current signal volume.
   # Update when actual billing changes; used only for reporting, not for trade logic.
   annual_fixed_cost_usd: 1440.0
+
+notifications:
+  # Telegram noise control (2026-07-15). The operator flagged these recurring
+  # alerts as noise. false = do NOT send the Telegram message (code path stays
+  # intact and reversible; flip to true to re-enable). Reports/data are still
+  # computed and cached in Redis for the API/UI — only the Telegram send is gated.
+  # daily "Performance Report" (IC/ICIR/weights) from run_daily_report at 03:00 UTC.
+  send_daily_performance_report: false
+  # P2-04 WARNING when signal/order symbol overlap < 0.8 on a portfolio cycle.
+  send_signal_order_divergence_alert: false

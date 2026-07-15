@@ -156,6 +156,26 @@ def _fire_alert(notifier, message: str, level: AlertLevel) -> None:
         log.warning("Telegram alert send failed: %s", exc)
 
 
+def _divergence_alert_enabled() -> bool:
+    """Read notifications.send_signal_order_divergence_alert from config/trading.yaml.
+
+    Default false (2026-07-15): suppress the recurring "Signal/order divergence:
+    signals=..." Telegram noise. The divergence is still detected by
+    _check_divergence_and_alert; only the Telegram WARNING send is gated. Flip the
+    flag to true to re-enable. Isolated as a helper so tests can patch it.
+    """
+    try:
+        import yaml
+        _ty = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
+        with open(_ty) as _f:
+            return bool(
+                ((yaml.safe_load(_f) or {}).get("notifications") or {})
+                .get("send_signal_order_divergence_alert", False)
+            )
+    except Exception:
+        return False
+
+
 def _check_divergence_and_alert(
     signal_syms: set,
     order_syms: set,
@@ -178,11 +198,17 @@ def _check_divergence_and_alert(
     from src.monitoring.alerts import check_signal_divergence, check_execution_divergence
 
     if check_signal_divergence(signal_syms, order_syms):
-        _fire_alert(
-            notifier,
-            f"Signal/order divergence: signals={sorted(signal_syms)}, orders={sorted(order_syms)}",
-            AlertLevel.WARNING,
-        )
+        # Gated by notifications.send_signal_order_divergence_alert in
+        # config/trading.yaml (default false: suppress the recurring
+        # "Signal/order divergence: signals=..." Telegram noise, P2-04). The
+        # divergence is still detected here; only the Telegram WARNING send is
+        # gated. Flip the flag to true to re-enable the alert.
+        if _divergence_alert_enabled():
+            _fire_alert(
+                notifier,
+                f"Signal/order divergence: signals={sorted(signal_syms)}, orders={sorted(order_syms)}",
+                AlertLevel.WARNING,
+            )
 
     # Skip fill-divergence check when no orders were generated: 0/0 is not a divergence,
     # it means the cycle had nothing to trade (signals below threshold, market closed, etc.).
