@@ -1096,6 +1096,25 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def fetch_open_trade_entry_time(self, symbol: str) -> str | None:
+        """Return the entry_time (ISO string) of the open trade for symbol, if any."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT entry_time FROM trades WHERE symbol = %s AND exit_time IS NULL ORDER BY entry_time DESC LIMIT 1",
+                    (symbol,),
+                )
+                row = cur.fetchone()
+            conn.rollback()
+            if row is None or row[0] is None:
+                return None
+            # row[0] may be datetime or string depending on psycopg2/adapter.
+            return row[0].isoformat() if hasattr(row[0], "isoformat") else str(row[0])
+        except Exception:
+            conn.rollback()
+            raise
+
     def load_frozen_stop(self, symbol: str) -> "FrozenStop | None":
         """Load the frozen stop params from the open trade row for symbol."""
         from src.portfolio.stop_policy import FrozenStop

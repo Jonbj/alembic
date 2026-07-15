@@ -8,6 +8,7 @@ interface RawPosition {
   unrealized_plpc: string
   avg_entry_price: string
   current_price: string
+  entry_time: string | null
 }
 
 export interface Position {
@@ -18,6 +19,7 @@ export interface Position {
   unrealized_plpc: number
   avg_entry_price: number
   current_price: number
+  entry_time: string | null
 }
 
 export interface Order {
@@ -46,6 +48,7 @@ export const fetchPositions = () =>
       unrealized_plpc: parseFloat(p.unrealized_plpc),
       avg_entry_price: parseFloat(p.avg_entry_price),
       current_price: parseFloat(p.current_price),
+      entry_time: p.entry_time ?? null,
     }))
   )
 

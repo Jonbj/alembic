@@ -23,7 +23,10 @@ def test_get_positions_returns_list():
 
     mock_client = MagicMock()
     mock_client.get_all_positions.return_value = [mock_pos]
+    mock_pg = MagicMock()
+    mock_pg.fetch_open_trade_entry_time.return_value = "2026-05-18T14:00:00+00:00"
     app.dependency_overrides[get_alpaca_trading_client] = lambda: mock_client
+    app.dependency_overrides[get_pg_store] = lambda: mock_pg
     app.dependency_overrides[require_api_key] = _skip_auth
 
     tc = TestClient(app)
@@ -35,6 +38,7 @@ def test_get_positions_returns_list():
     assert isinstance(data, list)
     assert data[0]["symbol"] == "AAPL"
     assert "unrealized_pl" in data[0]
+    assert data[0]["entry_time"] == "2026-05-18T14:00:00+00:00"
 
 
 def test_get_orders_returns_list():

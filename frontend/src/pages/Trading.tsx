@@ -86,7 +86,15 @@ export default function Trading() {
   })
 
   const filteredPositions = useMemo(() =>
-    (positions as Position[]).filter(p => !symbolFilter || p.symbol.toLowerCase().includes(symbolFilter.toLowerCase()))
+    (positions as Position[])
+      .filter(p => !symbolFilter || p.symbol.toLowerCase().includes(symbolFilter.toLowerCase()))
+      .sort((a, b) => {
+        // Most recent entry_time first; rows without entry_time go to the bottom.
+        if (!a.entry_time && !b.entry_time) return 0
+        if (!a.entry_time) return 1
+        if (!b.entry_time) return -1
+        return new Date(b.entry_time).getTime() - new Date(a.entry_time).getTime()
+      })
   , [positions, symbolFilter])
 
   const filteredOrders = useMemo(() =>
@@ -130,6 +138,7 @@ export default function Trading() {
       <span style={{ color: p.unrealized_plpc >= 0 ? 'var(--green)' : 'var(--red)' }}>
         {(p.unrealized_plpc * 100).toFixed(2)}%
       </span>,
+      ts(p.entry_time),
     ],
   }))
 
@@ -175,7 +184,7 @@ export default function Trading() {
         },
         {
           heading: 'Colonne — Positions',
-          content: '**Ticker**: simbolo azionario.\n**Qty**: numero di azioni detenute.\n**Entry Price**: prezzo medio ponderato di ingresso (avg fill price di tutti gli ordini BUY sulla posizione).\n**Market Price**: prezzo corrente di mercato dell\'azione.\n**Market Value**: Qty × Market Price — valore attuale della posizione in USD.\n**Unrealized P&L**: guadagno/perdita non ancora realizzato = Market Value − (Entry Price × Qty). Verde se positivo, rosso se negativo.\n**P&L %**: rendimento percentuale sulla posizione = Unrealized P&L / (Entry Price × Qty) × 100.',
+          content: '**Ticker**: simbolo azionario.\n**Qty**: numero di azioni detenute.\n**Entry Price**: prezzo medio ponderato di ingresso (avg fill price di tutti gli ordini BUY sulla posizione).\n**Market Price**: prezzo corrente di mercato dell\'azione.\n**Market Value**: Qty × Market Price — valore attuale della posizione in USD.\n**Unrealized P&L**: guadagno/perdita non ancora realizzato = Market Value − (Entry Price × Qty). Verde se positivo, rosso se negativo.\n**P&L %**: rendimento percentuale sulla posizione = Unrealized P&L / (Entry Price × Qty) × 100.\n**Entry Time**: data e ora in cui Alembic ha aperto la posizione (dal DB). Le righe sono ordinate con la posizione più recente in alto.',
         },
         {
           heading: 'Orders',
@@ -249,12 +258,13 @@ export default function Trading() {
           loading={posLoading}
           columns={[
             { label: 'Ticker',         width: '10%' },
-            { label: 'Qty',            width: '10%' },
-            { label: 'Entry Price',    width: '12%' },
-            { label: 'Market Price',   width: '12%' },
-            { label: 'Market Value',   width: '14%' },
-            { label: 'Unrealized P&L', width: '14%' },
-            { label: 'P&L %',          width: '10%' },
+            { label: 'Qty',            width: '9%' },
+            { label: 'Entry Price',    width: '11%' },
+            { label: 'Market Price',   width: '11%' },
+            { label: 'Market Value',   width: '12%' },
+            { label: 'Unrealized P&L', width: '12%' },
+            { label: 'P&L %',          width: '9%' },
+            { label: 'Entry Time',     width: 'auto' },
           ]}
           rows={posRows}
           emptyMessage="No open positions"

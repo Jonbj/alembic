@@ -30,11 +30,14 @@ router = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
 @router.get("/positions")
 def get_positions(
     client: Annotated[object, Depends(get_alpaca_trading_client)],
+    pg: Annotated[object, Depends(get_pg_store)],
 ) -> list[dict]:
-    """Return all open positions from Alpaca."""
+    """Return all open positions from Alpaca enriched with Alembic entry_time."""
     positions = client.get_all_positions()
-    return [
-        {
+    rows = []
+    for p in positions:
+        entry_time = pg.fetch_open_trade_entry_time(p.symbol)
+        rows.append({
             "symbol": p.symbol,
             "qty": str(p.qty),
             "market_value": str(p.market_value),
@@ -42,9 +45,9 @@ def get_positions(
             "unrealized_plpc": str(p.unrealized_plpc),
             "avg_entry_price": str(p.avg_entry_price),
             "current_price": str(p.current_price),
-        }
-        for p in positions
-    ]
+            "entry_time": entry_time,
+        })
+    return rows
 
 
 @router.get("/orders")
