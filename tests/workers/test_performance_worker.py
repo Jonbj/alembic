@@ -337,13 +337,18 @@ class TestFetchAllSignalsForIC:
 class TestRunDailyReport:
     """Tests for run_daily_report Celery task."""
 
+    @patch("src.workers.performance._daily_performance_report_tg_enabled", return_value=True)
     @patch("src.workers.performance.PostgreSQLStore")
     @patch("src.workers.performance.RedisStore")
     @patch("src.workers.performance.TelegramNotifier")
     def test_run_daily_report_success(
-        self, mock_notifier_cls, mock_redis_cls, mock_pg_cls
+        self, mock_notifier_cls, mock_redis_cls, mock_pg_cls, mock_perf_tg_enabled
     ):
-        """Test successful daily report execution."""
+        """Test successful daily report execution.
+
+        The Telegram send is gated by notifications.send_daily_performance_report
+        (default false); this test patches the gate ON to verify the send path.
+        """
         # Mock PostgreSQL
         mock_pg = MagicMock(spec=PostgreSQLStore)
         mock_pg_cls.return_value = mock_pg
@@ -373,6 +378,39 @@ class TestRunDailyReport:
 
         # Verify Telegram alert was sent
         mock_notifier.send_alert.assert_called_once()
+
+    @patch("src.workers.performance._daily_performance_report_tg_enabled", return_value=False)
+    @patch("src.workers.performance.PostgreSQLStore")
+    @patch("src.workers.performance.RedisStore")
+    @patch("src.workers.performance.TelegramNotifier")
+    def test_run_daily_report_silent_when_gate_off(
+        self, mock_notifier_cls, mock_redis_cls, mock_pg_cls, mock_perf_tg_enabled
+    ):
+        """When notifications.send_daily_performance_report is false (default),
+        run_daily_report must NOT send the Telegram alert. The report is still
+        built and cached in Redis; only the Telegram send is suppressed.
+        """
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        mock_pg_cls.return_value = mock_pg
+        rows = generate_signal_rows(350, "opus", return_correlation=0.3)
+        mock_pg.fetch_all_signals_for_ic.return_value = rows
+        mock_pg.fetch_per_model_signals_for_ic.return_value = []
+
+        mock_redis = MagicMock(spec=RedisStore)
+        mock_redis.get_ensemble_weights.return_value = None
+        mock_redis._r = MagicMock()
+        mock_redis_cls.return_value = mock_redis
+
+        mock_notifier = MagicMock()
+        mock_notifier.send_alert = AsyncMock()
+        mock_notifier_cls.return_value = mock_notifier
+
+        run_daily_report()
+
+        # Report still cached for the API/UI even when the Telegram send is gated off
+        mock_redis._r.setex.assert_called()
+        # But no Telegram noise
+        mock_notifier.send_alert.assert_not_called()
 
     @patch("src.workers.performance.PostgreSQLStore")
     @patch("src.workers.performance.RedisStore")
@@ -671,20 +709,25 @@ class TestCheckAndApplyWeights:
     """Tests for check_and_apply_weights Celery task."""
 
     SUGGESTION = {
+        # Models must be live registry model_ids (src/llm/model_registry.py).
+        # WS-3 (2026-07-14) made check_and_apply_weights normalize the suggestion
+        # against the active pair, dropping any model not in the registry. The
+        # old opus/qwen3.5/deepseek fixtures predated the registry and were
+        # silently normalized to kimi+glm52 defaults, so the "applied == suggested"
+        # assertion broke. Keep suggested == current (delta 0) so the all-pass
+        # test reaches the apply path.
         "suggested_weights": {
-            "opus": 0.45,
-            "qwen3.5:cloud": 0.35,
-            "deepseek-v4-pro:cloud": 0.20,
+            "kimi-k2.6:cloud": 0.45,
+            "glm-5.2:cloud": 0.55,
         },
         "purified_icir": {
-            "opus": 0.31,
-            "qwen3.5:cloud": 0.18,
-            "deepseek-v4-pro:cloud": 0.09,
+            "kimi-k2.6:cloud": 0.31,
+            "glm-5.2:cloud": 0.24,
         },
         "freeze_reason": "",
         "computed_at": "2026-05-04T08:00:00+00:00",
     }
-    CURRENT = {"weights": {"opus": 0.34, "qwen3.5:cloud": 0.33, "deepseek-v4-pro:cloud": 0.33}, "source": "suggestion"}
+    CURRENT = {"weights": {"kimi-k2.6:cloud": 0.45, "glm-5.2:cloud": 0.55}, "source": "suggestion"}
 
     def _make_redis(self, suggestion=None, current=None, vix_cached=None):
         mock = MagicMock()

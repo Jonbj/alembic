@@ -1,73 +1,42 @@
-# React + TypeScript + Vite
+# Alembic — Operator Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React + TypeScript + Vite single-page app — the operator monitoring/control surface for the Alembic LLM trading system. Talks to the FastAPI backend (`src/api/`, default `http://localhost:8001`).
 
-Currently, two official plugins are available:
+**For the full operator guide (API surfaces, page inventory, runbooks, authorization status) see [`docs/FRONTEND_OPERATOR_GUIDE.md`](../docs/FRONTEND_OPERATOR_GUIDE.md).** This README covers the frontend build/dev workflow only.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Stack
 
-## React Compiler
+- React 19 + TypeScript + Vite 8
+- Tailwind CSS 4 (`@tailwindcss/vite`)
+- TanStack Query (server state) + TanStack Virtual (long lists)
+- Recharts (P&L/equity charts) + lightweight-charts (price)
+- React Router, lucide-react icons, class-variance-authority
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Pages (`src/pages/`)
 
-## Expanding the ESLint configuration
+Overview, Signals, Strategies, Trading, Performance, News, LLM, AutoImprove, Operations, Quality, Labeling, Validation, Backtest, Docs, SystemLog, Admin, Config, Login.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+Trace model is shared across pages: `News -> Signal -> Decision -> Order -> Performance` (Trace drawer shows the full chain with `origin_strategy` for non-news orders).
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+## Development
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+cd frontend
+npm install
+npm run dev        # Vite dev server with HMR
+npm run build      # tsc -b && vite build -> dist/
+npm run lint       # eslint
+npm run preview    # preview the production build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+The backend URL is configured via Vite env (`VITE_API_URL`); defaults to the local compose backend. All operator API endpoints require the `X-API-Key` header (`ADMIN_API_KEY`).
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## Deployment (compose)
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+The frontend is built into a static bundle and served by nginx in the `frontend` compose service (`build: ./frontend`, multi-stage Dockerfile). It is the primary monitoring surface — Grafana is no longer part of the local compose stack. After frontend changes: `docker compose build frontend && docker compose up -d frontend`.
+
+## Notes
+
+- Authorization: controlled paper trading is running; `GLOBAL_LIVE_PROMOTION_ENABLED = False` (paper, not live money). See the operator guide §4.
+- The legacy `/trades` and `/dashboard` routes redirect to `Trading` and `Overview` respectively (`Trades.tsx` / `DashboardPage.tsx` removed).
+- NUMERIC columns from Postgres are serialized as JSON numbers by the backend (since 2026-07-09) — frontend `.toFixed()` calls are safe; the old Decimal-as-string crash on the Quality page is resolved.

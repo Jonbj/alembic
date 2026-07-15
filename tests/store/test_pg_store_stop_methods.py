@@ -56,6 +56,42 @@ def test_load_frozen_stop_round_trip() -> None:
 
 
 @pytest.mark.skipif(os.environ.get("SKIP_DB_TESTS"), reason="SKIP_DB_TESTS set")
+def test_fixed_mode_freezes_audit_fields() -> None:
+    """Fixed mode still persists k/floor/cap/sigma on the trade row so the
+    vol_scaled sizing gate has the full freeze-at-entry record later."""
+    store = PostgreSQLStore(use_pool=False)
+    ts = datetime(2026, 7, 10, 14, 0, tzinfo=timezone.utc)
+    symbol = "TEST_STOP_FIXED_AUDIT"
+    frozen = FrozenStop(
+        strategy="S1", mode="fixed", vol_at_entry=0.018, sigma_eff=0.018,
+        k=3.5, floor=0.06, cap=0.12, d_init=0.02, vol_source="tier",
+    )
+    try:
+        store.open_trade(
+            symbol=symbol, signal_id=None, decision_id=None,
+            entry_order_id="test-order-fixed-audit", entry_time=ts,
+            entry_notional=1000.0, score=0.02, regime_mult=1.0,
+            qty=10.0, signal_score=None, frozen_stop=frozen,
+        )
+        loaded = store.load_frozen_stop(symbol)
+        assert loaded is not None
+        assert loaded.mode == "fixed"
+        assert loaded.d_init == pytest.approx(0.02)
+        assert loaded.k == pytest.approx(3.5)
+        assert loaded.floor == pytest.approx(0.06)
+        assert loaded.cap == pytest.approx(0.12)
+        assert loaded.vol_at_entry == pytest.approx(0.018)
+        assert loaded.vol_source == "tier"
+    finally:
+        conn = _connect_or_skip()
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM trades WHERE symbol = %s", (symbol,))
+            conn.commit()
+        conn.close()
+        store.close()
+
+
+@pytest.mark.skipif(os.environ.get("SKIP_DB_TESTS"), reason="SKIP_DB_TESTS set")
 def test_save_frozen_stop_round_trip() -> None:
     """save_frozen_stop backfills frozen params on an existing open trade row."""
     store = PostgreSQLStore(use_pool=False)

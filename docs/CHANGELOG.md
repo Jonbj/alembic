@@ -4,6 +4,135 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ---
 
+## 2026-07-15
+
+### S7 (PEAD) RIMOSSA dal repository — edge ALPHA-A3 confutato a decision-grade
+- S7 ritirata: strategy dir `src/strategies/s7/`, `src/models/pead.py`,
+  `src/workers/pead_worker.py` + `earnings_pead_worker.py`,
+  `src/connectors/earnings_calendar.py`, `src/api/routes/pead_routes.py`,
+  beat task `pead-ingestion` + `earnings-pead` (celery_app), config S7
+  (`config/strategies.yaml`, `config/trading.yaml` stop sizing, `src/config.py`
+  `PEAD_*`), API/display entries (`strategies.py` S7 dict, `system_routes.py`),
+  `redis_store.py` pead methods, e test S7-specifici — tutto eliminato.
+- Motivo: l'edge dichiarato di S7 (transcript tone → alpha, ALPHA-A3) confutato su
+  dati reali. Tre valutazioni, tutte negative: ALPHA-A5 large-cap FAIL (drift = beta
+  SPY, n=76, 2026-07-03); POC-1 small/mid INCONCLUSIVE_DATA (n=15, 2026-07-04);
+  **POC-2 transcript-tone FAIL a decision-grade** (n=73, Spearman IC(tone,excess_20d)
+  +0.012 vs soglia +0.10, tercile spread −0.93% invertito, split-half opposti, IC
+  dentro BEAT −0.016; agreement kimi↔glm ρ=+0.858 → FAIL robusto cross-modello). La
+  condizionale pre-registrata PO-5 *"Se POC-2 FAIL → REMOVE"* è attivata.
+- Preservato: POC scripts + report/CSV in `reports/s7_*` (evidenza, gitignored),
+  `tests/analysis/test_s7_poc_helpers.py`, DB audit history (immutable). Codice
+  recuperabile da git. Guard anti re-introduzione:
+  `tests/test_p0_13_strategy_containment.py::TestS7NotInOperationalRegistry`.
+- Documentazione: `docs/S7_LIFECYCLE_HISTORY_2026-07-15.md` (storia completa),
+  `docs/strategies.md` §S7, `docs/strategies/s7-pead.md`, `docs/ARCHITECTURE.md`,
+  `docs/operations.md`, `docs/ROADMAP_DATA_ALPHA_2026-07-02.md` aggiornati.
+- Costi consuntivi S7 lifecycle: FMP Starter $29 (mese 07, disdetto #23);
+  POC-2 $0 (Alpha Vantage free tier); LLM: 73 kimi + 20 GLM POC-2 + 8-K idle.
+- Full suite: 2796 passed, 7 skipped, 0 fail. Issue #38 chiusa con la PR di rimozione.
+
+### Pool-leak B7/B32 — fix deployato e verificato live (pre-live blocker)
+- Root cause: `_pg_stop = PostgreSQLStore()` nel check stop-loss del `portfolio_scheduler` non era mai chiuso → 1 connessione "idle in transaction" leakata per ciclo 15-min → pool maxconn=20 esaurito. Venerdì 07-14 teneva AccessShareLock su `trades` e bloccava migration 037.
+- Fix A+B+C (commit `06671f7`, merge FF su main): `finally: .close()` su `_pg_stop`/`_pg`/`_pg_trades` nel scheduler; `_release_connection` ora rollback prima di `putconn`/`close` (solo su path pool/owned); `load_frozen_stop`/`fetch_open_trade_meta` chiudono la transazione read-only. 7 guard test nuovi. Full suite 2831 pass.
+- Deploy: rebuild api/worker/worker-inference/beat + restart. Verificato live: `idle in transaction` = 0 (era 20), fix baked nei container (marker B7/B32 presenti).
+
+### Stop protettivo 2% DISABILITATO su paper (decisione operatore aggressive-alpha)
+- `config/trading.yaml`: `stop_loss: 0.02 → 0.0` (mode resta `fixed` → disable guard `_stop_loss_breached_symbols` ritorna `{}`), `stop_shadow_enabled: true`. Commit `1f450c6`.
+- Evidence: Kimi OOS replay (`docs/stop_loss_calibration_handback_2026-07-15.md` §5) — `no_protective` cum P&L $-56 vs `fixed_2pct` $-419 (7.5x) vs `wide vol_scaled` $-561. Lo stop al 2% su rumore (07-10: PANW/WDC/DELL, 0.26-0.53σ che hanno recuperato) distruggeva alpha.
+- `broker_disaster_stop` (d_hard 12-20%) resta SHADOW-only (telemetria su `stop_shadow_log`, nessun floor applicato). Verificato e2e nel worker live: posizione -10% underwater non force-closed. Revisit: se una posizione cavalca oltre -15/20% (d_hard shadow) → wire d_hard a ordine broker reale (catastrophe-only), NON rimettere il 2%.
+
+### Kimi stop k/floor/cap calibration — handback consegnato (NON mergeato)
+- Branch `stop-loss-calibration-2026-07-15` (3 commit, handback). Window 06-01→07-14, 245 trade, walk-forward 70/30.
+- Finding: Round 2 girava senza stop-risk sizing → DD blow-up. Aggiunto sizing al replay → gate stabile.
+- Params calibrati: S1 (k8.0/floor0.04/cap0.15), S4 (k8.0/floor0.025/cap0.12). Gate OOS 7/7 PASS ma bootstrap 71.6% (marginale). L'operatore ha scelto la via più aggressiva (no protective stop, vedi sopra) invece del wide vol_scaled. Branch resta non mergeato come fallback conservative-aggressive.
+
+## 2026-07-14
+
+### Stage-2 shadow mode — model comparison (sviluppo, merge 07-15 `a099719`)
+- Infrastruttura shadow completa: migration 037/038 (`llm_shadow_responses`), `log_shadow_responses` writer, pool `ollama:sem:shadow` dedicato + toggle Redis arm/disarm, scoring fire-and-forget con isolamento totale dal live path, comparison module pairwise (models + pair replay), 7-day auto-report con self-disarm. Stage-2 shadow armato confronta i candidati contro la coppia live senza toccare il path produttivo.
+
+### Fixes 2026-07-14 — merge `ff3de56` (deployed live paper)
+- **WS-1**: registry-based LLM model-pair selector + canonical order (`9688afa`).
+- **WS-2**: freeze full stop metadata at entry anche in fixed mode (`d4512b0`).
+- **WS-3**: resync stale ensemble weights on pair swap (`3ffe2fc`).
+- **WS-4**: gate ingestion + sentiment su Alpaca real-time market clock (`a06e9f0`).
+- **WS-5**: multi-tranche exit reconciliation — weighted-average exit price, `exit_order_ids` (migration 037), modello `is_final` (`b18006d`, `300b4d0`).
+- 10 stale-fixture failure sistemate (`66e57c2`). Deploy: merge main + rebuild + restart, migration 037 applicata al DB live. **Incidente pool leak scoperto qui** (20 conn idle-in-transaction → fix 07-15 sopra).
+
+## 2026-07-13
+
+### Sector exposure cap — wired nel ConstraintEnforcer (shipped disabled)
+- Pass `MAX_SECTOR_EXPOSURE` cablato nel `ConstraintEnforcer` (`ea436fd`, `af140d2`, `7f3be2e`): per-sector BUY notional ≤ `max_sector_exposure × NAV`. Sector map 96 simboli / 11 gruppi.
+- `max_sector_exposure: 0.0` in `trading.yaml` = DISABLED (default). Non avrebbe boundato l'incidente 07-10/07-13 (semis ~6% NAV, sotto soglia) — protezione forward, complementare a F9a. Flip operatore suggerito: 0.10.
+
+### F6 vol-target config-driven + flip live
+- `target_vol` + clamp config-driven, zero behavior change (`22c8fe5`). Replay di calibrazione read-only (`d64715d`).
+- Flip live `target_vol 0.10 → 0.12` (`237e660`, pushato): vol_scale ~0.74, +4pp deployment, 0% cap breach. DEFAULT shipped resta 0.10, LIVE è 0.12.
+
+### S4 measurement Wave 1 — merge `3591d5c`
+- Forward returns multi-orizzonte (1d/3d/5d, migration 036) incl. fallback signals. Coverage fwd 97/78/63% (da 29/0/0). +2 fix review: buffer +12d, feed IEX pinned (`83de839`).
+
+### Frontend — nginx stale-backend-IP fix
+- `d3ce750`: nginx re-resolve api upstream per evitare stale backend IP (self-heal dei 502 intermittenti).
+
+## 2026-07-12
+
+### F9a stop-loss redesign — merge `99215ff` (vol_scaled parked)
+- `StopPolicy` deep module (`src/portfolio/stop_policy.py`): freeze-at-entry, mode `fixed`|`vol_scaled`, stop-risk sizing (§6.4), per-strategy `LossFeedback` (S1↔S4 decoupled), `d_hard` broker disaster stop.
+- Migration 034: 8 colonne `stop_*` su `trades` + tabelle `stop_decisions` + `stop_shadow_log` (applicata al DB live).
+- Replay gate OOS = **FAIL** (bootstrap delta P&L 41.5%, threshold ≥70%). 6/7 gate favoriscono vol_scaled ma il gate bootstrap non passa. `stop_loss_mode` resta `fixed`. Calibrazione delegata a Kimi (07-15, vedi sopra).
+
+### F5 + F8 — merge `2bf31bd`
+- **F5**: bug whole-share `regime_mult` fixato (troncamento intero del moltiplicatore).
+- **F8**: `feedback:regime_scale:S*` cablato nel path portfolio (orchestrator weight-merge, per-strategy) dietro flag `apply_regime_scale=false` (shadow-only). Fix decay S1 (prerequisito). Gate flip 10-14gg shadow.
+
+### Piani + doc
+- S1 momentum refinements plan (skip-month, filtro assoluto, cap-after-norm) — Sonnet handoff.
+- Three-model ensemble handoff brief (deepseek 3° modello, majority-of-3).
+- S4 measurement foundation plan. Doc/code drift sweep project-wide (`27435ad`).
+
+## 2026-07-11
+
+### Pair world — sentiment ensemble coppia live
+- Ensemble swap a `glm52,gptoss` via Redis `config:sentiment_llm_models` (was "all"/kimi+glm). Candidati swap `qwen35`/`gptoss` registrati con `in_all=False` ("all" resta il set live a 2 modelli). `7d530bb`.
+- Divergent raw outputs persistiti per audit (gap audit colmato). Soglia divergence 0.30→0.40 (`a77fc64`, 07-09) INEFFICACE (fallback 75-80%: disaccordo kimi⇄glm bimodale) → swap coppia è la leva, non la soglia.
+
+### F9a stop redesign — Phase 1-6 + Round 2 (Kimi)
+- Phase 1-6: migration 034, Gap A Decision Log SELL row, StopPolicy, stop-risk sizing, per-strategy feedback, replay script.
+- Round 2 (Kimi): replay augmentato a 7 gate spec §10 (bar Alpaca 15-min intraday, counterfactual P&L reale, bootstrap, walk-forward, ES95/max-DD/name-dependence). Per-strategy `LossFeedback` cablato in `performance.py`. Gate FAIL.
+
+### CI
+- Ruff/mypy/pip-audit install nelle CI, migrations before tests (`43641be`). Gitleaks fix: `[extend]` + `[[allowlist]]` (`f1e2544` — prima scannava nothing).
+
+## 2026-07-10
+
+### Deployment fixes — merge `e7e8f6f` (capital deployment restored)
+- 4 chokepoint risolti (regime_mult fallback, vol floor, ecc.): deployment restored. Risultato live: 46 entry / $37.5K day-1 (vs 3-6 entry / $5-11K pre-fix), esposizione 26.2%, zero errori.
+- **S1 sparse-ticker fix** (`0b1fbdf`): drop tickers con trailing prices stale; la sleeve 50% morta era la causa (deployment 0% da 06-01 a 07-10).
+- Loss-feedback gate spostato fuori dal velocity block (`e1188fe`); rolling trigger 0% disabilitato, equity fallback rimosso (`ee13c50`). S4 `min_stocks=1` (`60a7095`).
+
+### Trace panel — strategy origin
+- `edd69f1`: il drawer Trace mostra `origin_strategy` per ordini non-news.
+
+### Model comparison Stage 1 — merge `c931d13`
+- Retro screen 5 modelli candidati vs 17 labeled items. Kimi worst-accuracy+slow, GLM-5.2 good, n=17 too small to act on. Stage 2 (shadow, live traffic) = base per Stage-2 shadow mode (07-14).
+
+### Late-day signals + Quality page fix
+- `59e66e3`: strong BUY after ~20:00 UTC loggati una volta (idempotent SKIP_STALE) invece di silent drop.
+- `5f9baad`: NUMERIC→JSON numbers in quality routes (fix crash Quality.tsx `.toFixed()` su Decimal serializzato come stringa).
+
+## 2026-07-09
+
+### Ensemble divergence + loss-feedback
+- `a77fc64`: soglia divergence 0.30→0.40, recovery loss-feedback eased. (Poi riscontrato inefficace 07-11, vedi pair world.)
+
+### Model comparison Stage 1 — design + plan
+- `5f6635d` (spec), `92a2234` (plan), `afc2245`/`4c4ee35` (helpers + resumable main loop with budget tracking).
+
+### S7 POC-2c (07-07, `1007b13`)
+- Tone IC analysis + pre-registered ALPHA-A3 gate. POC-1 small/mid PEAD inconclusive (n=15<30). S7 decision PO pendente (deadline 2026-08-01).
+
 ## 2026-07-04
 
 ### S7 revival month — POC-1 primo run, POC-2 riavviato via Alpha Vantage (correzione)

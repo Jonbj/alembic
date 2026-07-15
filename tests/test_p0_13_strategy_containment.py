@@ -1,17 +1,14 @@
-"""P0-13 — S4 promotion block + S7 R&D containment.
+"""P0-13 — S4 promotion block + S7 re-introduction guard.
 
-Problem:
-- S4 has no gate report and no IC>placebo evaluation yet. Without a promotion block,
-  it could be quietly promoted from paper to live by editing strategies.yaml.
-- S7 (PEAD) is a new strategy in R&D that must not appear in the operational registry.
-  If it gets accidentally enabled, it can run with real capital before any validation.
+S7 (PEAD) was REMOVED 2026-07-15 — ALPHA-A3 transcript-tone edge confuted at
+decision-grade (POC-2 FAIL n=73 IC≈0; POC-1 INCONCLUSIVE n=15; ALPHA-A5 large-cap
+FAIL = beta). Full lifecycle: docs/S7_LIFECYCLE_HISTORY_2026-07-15.md.
 
-Fix:
-- S4: add promotion_blocked=true in strategies.yaml; _validate_allocations rejects
-  if S4 mode is 'live' (only paper until gate report exists).
-- S7: must not be present in StrategyRegistry as an enabled entry.
+These tests now act as a guard: S7 must NOT be re-introduced into the operational
+StrategyRegistry (even disabled/research). If S7 is ever revived, it must go through
+a fresh design + gate evaluation, not be quietly re-added to strategies.yaml.
 
-Acceptance: test_s7_not_in_operational_registry passes.
+S4 promotion block remains live: no gate report / IC>placebo yet → promotion_blocked.
 """
 
 from __future__ import annotations
@@ -63,17 +60,15 @@ class TestS4PromotionBlock:
 
 
 class TestS7NotInOperationalRegistry:
-    """S7 must not appear as an active/enabled strategy in the operational registry."""
+    """S7 must not be re-introduced into the operational registry (removed 2026-07-15)."""
 
     def test_s7_not_in_operational_registry(self):
-        """S7 must not be an enabled strategy in StrategyRegistry.
+        """S7 must not be present in StrategyRegistry at all (removed 2026-07-15).
 
-        S7/PEAD is a speculative R&D strategy. Until it has:
-        - A runnable gate script
-        - IC>placebo evaluation
-        - OOS backtest on real (non-circular) data
-        it must not be in the operational registry at all, or if present,
-        must be disabled with mode='research'.
+        S7/PEAD was retired after its declared edge (transcript tone → alpha) was
+        confuted at decision-grade. Re-introduction requires a fresh design + gate
+        pass, not a quiet re-add to strategies.yaml. If present, it must be disabled
+        with mode='research' — but the clean state is absence.
         """
         from src.strategies.registry import StrategyRegistry
         reg = StrategyRegistry()
@@ -98,8 +93,8 @@ class TestS7NotInOperationalRegistry:
         active_ids = [e.strategy_id for e in reg.get_active_strategies()]
         assert "S7" not in active_ids, (
             "S7 is in get_active_strategies() — it would receive capital allocation. "
-            "S7/PEAD is R&D and must not be in the active strategy list. "
-            "Fix: disable S7 in strategies.yaml or remove it."
+            "S7/PEAD was removed 2026-07-15 and must not be re-added to the active "
+            "strategy list. Fix: remove S7 from strategies.yaml."
         )
 
     def test_only_validated_strategies_are_live_or_paper(self):

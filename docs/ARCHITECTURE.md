@@ -7,7 +7,7 @@
 **Technical Architecture Document**
 **Version:** 7.1.0
 **Date:** 2026-07-03
-**Status:** Phase A/B/C + Portfolio Governance + Sprint 1 remediation (FIX-01/02/03, EN-03, B13/B20, resolver enforcement, gate thresholds) + S2-1 Source P&L Funnel. S7 SHELVED (ALPHA-A5 FAIL).
+**Status:** Phase A/B/C + Portfolio Governance + Sprint 1 remediation (FIX-01/02/03, EN-03, B13/B20, resolver enforcement, gate thresholds) + S2-1 Source P&L Funnel. S7 REMOVED 2026-07-15 (ALPHA-A3 confuted, POC-2 FAIL).
 
 ---
 
@@ -122,7 +122,10 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 | `SecEdgarConnector` | `src/connectors/sec_edgar.py` | SEC EDGAR 8-K/10-Q filings |
 | `NewsDeduplicator` | `src/connectors/deduplicator.py` | id dedup + **content-hash+ticker cross-source dedup (EN-03)** via Redis SET NX (TTL 4h) |
 | `TickerExtractor` | `src/connectors/ticker_extractor.py` | Company name → ticker via PostgreSQL lookup |
-| `EarningsCalendarProvider` | `src/connectors/earnings_calendar.py` | Finnhub earnings calendar → deterministic surprise (feeds `earnings-pead` worker) |
+
+> `EarningsCalendarProvider` (`src/connectors/earnings_calendar.py`) and the PEAD
+> 8-K worker/strategy were **REMOVED 2026-07-15** with S7 retirement. See
+> `docs/S7_LIFECYCLE_HISTORY_2026-07-15.md`.
 
 ### 2.2 Sentiment Pipeline
 
@@ -130,6 +133,7 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 |-----------|------|------|
 | `SentimentWorker` | `src/workers/sentiment.py` | Consumes `news:queue`; skips news older than `MAX_NEWS_AGE_HOURS` (**2h**, FIX-03) pre-inference; resolver runs **before** inference and drops `NO_TRADE_NOT_TRADABLE` items (conservative enforcement, fail-open); writes signal with `published_at` |
 | `LLMClient` (ABC) | `src/llm/client.py` | Ollama cloud clients; active pair via Redis `config:sentiment_llm_models` (dal 2026-07-11: `glm52,gptoss`); registry `src/llm/model_registry.py` — i candidati swap (qwen35, gptoss) hanno `in_all=False`, quindi "all" resta il set live a 2 modelli |
+| Stage-2 shadow | `src/workers/shadow_*` + `llm_shadow_responses` (migration 038) | Model-comparison shadow mode (merged 2026-07-15): dedicated `ollama:sem:shadow` pool, Redis arm/disarm toggle, fire-and-forget candidate scoring with total live-path isolation, pairwise comparison (models + pair replay), 7-day auto-report with self-disarm. Shadows candidate models against the live pair without touching the productive path. Armato via `scripts/auto_arm_shadow_monday.sh` (cron lunedì 09:00 Rome). |
 | `EnsembleAggregator` | `src/llm/ensemble.py` | Weighted averaging + divergence check (std ≥ `ENSEMBLE_DIVERGENCE_STD`, **0.40** dal 2026-07-09; i raw output divergenti sono persistiti in `llm_responses` con `eligible=false` dal 2026-07-11) |
 | `FinBERTClient` | `src/llm/finbert.py` | Local fallback: entropic confidence from 3-class softmax |
 | `LLMBudgetTracker` | `src/llm/budget.py` | Daily spend cap per model — PostgreSQL `llm_budget` + Redis `budget_exhausted` flag |
@@ -173,7 +177,7 @@ Regime multipliers applied to position sizes:
 |-----------|------|------|
 | `PortfolioOrchestrator` | `src/portfolio/orchestrator.py` | Weight-then-order multi-strategy cycle |
 | `StrategyRegistry` | `src/strategies/registry.py` | Active strategy entries; reads `config/strategies.yaml` |
-| `ConstraintEnforcer` | `src/portfolio/constraints.py` | 5-pass risk constraint enforcement |
+| `ConstraintEnforcer` | `src/portfolio/constraints.py` | 5-pass risk constraint enforcement (single-asset, strategy-exposure, portfolio-exposure, **sector-exposure**, correlation-cluster) |
 | `PortfolioVolTargeter` | `src/portfolio/vol_targeting.py` | EWMA vol estimation + BUY order scaling |
 | `PortfolioRiskMonitor` | `src/portfolio/risk_monitor.py` | Daily HHI, correlation, drawdown alerts |
 | `DecayMonitor` | `src/portfolio/decay_monitor.py` | Monthly actual vs backtest baseline |
@@ -191,6 +195,8 @@ Strategies produce sleeve-local weights: fractions of their own sleeve, not the 
 - `legacy_sentiment`: only `run-execution` submits orders; `portfolio-cycle` returns early
 - `disabled`: neither worker submits orders
 
+**Sector exposure cap (2026-07-13, shipped disabled):** the `MAX_SECTOR_EXPOSURE` pass is wired (sector map: 96 symbols / 11 groups). `risk.max_sector_exposure: 0.0` in `trading.yaml` = DISABLED (≤0 disables). Complementary to F9a — caps concentration, does not fix sub-sigma stops. Operator flip value suggested: 0.10.
+
 ### 2.5 Strategies
 
 | ID | Name | Allocation | Status | Logic |
@@ -199,12 +205,15 @@ Strategies produce sleeve-local weights: fractions of their own sleeve, not the 
 | **S2** | Volatility Risk Premium | 0% | **Disabled** (research) | Proxy: overnight gap on low-VRP days. OOS Sharpe −0.55; all gates failed. Needs options infrastructure for v2 |
 | **S3** | Cross-Sectional Residual Momentum | 0% | Research | Cross-sectional rank of residual 1-12M returns; PIT sizing wired (P1-07); gate 3/5 failed |
 | **S4** | News-Driven Tactical | 10% | `promotion_blocked` (P0-13) | LLM ensemble sentiment → BUY gate: score > 0.3 AND price > EMA20; capped at 10% until dedicated gate report |
-| **S7** | PEAD (Post-Earnings Announcement Drift) | 0% | **SHELVED 2026-07-03** (ALPHA-A5 FAIL: drift = SPY beta + outliers, no edge net of market) | Code kept (8-K worker, pead_signals) as building block for S9/vector B. Reopening requires PO decision (small/mid universe or transcript-tone POC). |
 
-#### S7 — PEAD (Post-Earnings Announcement Drift)
-Implementation: Worker `src/workers/pead_worker.py` classifies SEC 8-K filings via Ollama LLM. Writes to `pead_signals` table. Routes at `src/api/routes/pead_routes.py`. Schedule: beat task `pead-ingestion` ogni 30 min, 14:00-21:00 UTC, queue `inference`.
-
-**Production status:** S7 is R&D/contained. Despite the `allocation_pct: 0.15` in `config/strategies.yaml`, S7 is NOT wired into the PortfolioOrchestrator. `promotion_blocked=True` in `strategy_lifecycle`. Promotion requires OOS gates + 30-day paper evidence + PO sign-off.
+> **S7 (PEAD) — REMOVED 2026-07-15.** Strategy dir, workers, routes, beat tasks
+> (`pead-ingestion`, `earnings-pead`), config and tests deleted. The declared edge
+> (transcript tone → alpha, ALPHA-A3) was confuted at decision-grade (POC-2 FAIL
+> n=73, IC≈0; POC-1 INCONCLUSIVE n=15; ALPHA-A5 large-cap FAIL = beta). PO-5
+> conditional *"Se POC-2 FAIL → REMOVE"* activated. Lifecycle history +
+> evidence: `docs/S7_LIFECYCLE_HISTORY_2026-07-15.md`, `reports/s7_*`. Code
+> recoverable from git. Re-introduction requires a fresh design + gate pass (guard:
+> `tests/test_p0_13_strategy_containment.py::TestS7NotInOperationalRegistry`).
 
 Allocation and enabled/disabled state are configured in `config/strategies.yaml`. The authoritative runtime state is in the `strategy_lifecycle` DB table. Live trading is NOT authorized for any strategy.
 
@@ -213,15 +222,35 @@ Allocation and enabled/disabled state are configured in `config/strategies.yaml`
 | Worker | Concurrency | Queue | Handles |
 |--------|-------------|-------|---------|
 | `worker` | 4 | `celery` | Tutti i task tranne FinBERT/Ollama |
-| `worker-inference` | 1 | `inference` | Sentiment (FinBERT+Ollama), Regime, PEAD |
+| `worker-inference` | 1 | `inference` | Sentiment (FinBERT+Ollama), Regime |
 
-Il `worker-inference` ha concurrency=1 per garantire un singolo processo Python che carica FinBERT una sola volta — con concurrency>1, ogni subprocess allocava una copia del modello causando OOM. I task su queue `inference` sono: `sentiment-worker`, `regime-detector`, `pead-ingestion`.
+Il `worker-inference` ha concurrency=1 per garantire un singolo processo Python che carica FinBERT una sola volta — con concurrency>1, ogni subprocess allocava una copia del modello causando OOM. I task su queue `inference` sono: `sentiment-worker`, `regime-detector`. (PEAD beat tasks removed 2026-07-15 con S7.)
 
 ### 2.5c Portfolio Cycle Safeguards
 
 - **Redis cycle lock**: `SET portfolio:cycle:lock NX EX 1200` — previene run concorrenti del portfolio orchestrator. TTL 20 min (sopra lo schedule di 15 min). Implementato in `src/workers/portfolio_scheduler.py`.
 - **Hold minimum 90 min** (`execution.hold_minimum_minutes`, trading.yaml): le SELL su simboli comprati negli ultimi 90 minuti vengono filtrate tramite `fetch_recently_bought_symbols()` in `src/store/pg_store.py`. Previene roundtrip involontari S4→S1 (S4 compra, S1 riequilibra e vende nello stesso ciclo). Gli exit da stop-loss bypassano il filtro.
 - **FinBERT int8 quantization**: quantizzazione dinamica `torch.qint8` applicata al caricamento del modello in `src/llm/finbert.py` — riduce footprint RAM ~50% senza perdita significativa di accuratezza sul task di sentiment classification.
+
+### 2.5d Stop-Loss Policy (F9a redesign, 2026-07-11/12)
+
+The portfolio path (engine=portfolio) handles stops via `StopPolicy` (`src/portfolio/stop_policy.py`), NOT the legacy ExecutionWorker checklist in §2.6.
+
+| Component | File | Role |
+|-----------|------|------|
+| `StopPolicy` | `src/portfolio/stop_policy.py` | Freeze-at-entry + per-cycle protective check + `d_hard` broker disaster distance |
+| `FrozenStop` | dataclass | Persisted on the trade row at entry: `mode`, `vol_at_entry`, `sigma_eff`, `k`, `floor`, `cap`, `d_init`, `vol_source` |
+| `_stop_loss_breached_symbols` | `src/workers/portfolio_scheduler.py` | Per-cycle: force-close positions at/below the frozen protective trigger |
+| `StopPolicy.d_hard` | `src/portfolio/stop_policy.py` | Broker disaster stop distance — wider than `d_init`, `clip([floor_pct, cap_pct])`, default 12-20% |
+| `stop_decisions` / `stop_shadow_log` | PostgreSQL (migration 034) | Fire log + shadow audit (d_hard trigger/breach per held position) |
+
+**Modes** (`config/trading.yaml` → `risk.stop_loss_mode`):
+- `fixed` (ship): `d_init = stop_loss` (flat pct). 2026-07-15: `stop_loss: 0.0` → protective check **disabled** (see Current state).
+- `vol_scaled` (implemented, parked): `d_init = clip(k·σ_entry, floor, cap)` per strategy (`stop_strategy_params`). Gate OOS FAIL 07-12 (bootstrap 41.5%); recalibrated 07-15 (Kimi) to S1 (k8/0.04/0.15), S4 (k8/0.025/0.12) → PASS marginale (71.6%); **not enabled** — operator chose the more aggressive no-protective path.
+
+**Stop-risk sizing (§6.4):** a wider stop sizes down qty so $ risk per position is bounded (`Notional ≤ NAV·B_strat / (d_init + gap_buffer)`). Active in the live scheduler order-sizing path.
+
+**Current state (2026-07-15, paper):** protective 2% stop **DISABLED** (`stop_loss: 0.0`). Rationale: Kimi OOS replay showed `no_protective` cum P&L $-56 vs `fixed_2pct` $-419 — the 2% noise stop destroyed 7.5x more alpha than it protected (07-10 PANW/WDC/DELL stop-outs on 0.26-0.53σ that recovered). `stop_shadow_enabled: true` keeps `d_hard` (12-20%) as SHADOW telemetry only (`stop_shadow_log`) — no enforced floor. Revisit trigger: if a position rides past -15/20% per the shadow log, wire `d_hard` to a real broker order (catastrophe-only). Disable guard: `_stop_loss_breached_symbols` returns `{}` when `stop_loss <= 0 and mode == fixed`.
 
 ### 2.6 Execution Engine
 
@@ -344,7 +373,7 @@ Answers: *"For each trade we skipped, what would the 1-hour return have been?"*
 | Store | Technology | Schema |
 |-------|------------|--------|
 | `RedisStore` | Redis 7 | `signal:{sym}:sentiment` TTL 4h; `killswitch_active`; `regime:current` (JSON) + `qc:sizing_multiplier`; `ensemble:weights:current`; `system:mode`; `feedback:entry_threshold`; `feedback:regime_scale`; `feedback:state`; `config:sentiment_llm_models`; `portfolio:value` |
-| `PostgreSQLStore` | PostgreSQL 16 | `sentiment_signals`, `llm_responses`, `news_log`, `weight_update_log`, `backtest_signals`, `portfolio_cycles`, `risk_reports`, `decay_reports`, `execution_decisions`, `trades`, `pead_signals`, `strategy_lifecycle`, `strategy_lifecycle_audit` |
+| `PostgreSQLStore` | PostgreSQL 16 | `sentiment_signals`, `llm_responses`, `news_log`, `weight_update_log`, `backtest_signals`, `portfolio_cycles`, `risk_reports`, `decay_reports`, `execution_decisions`, `trades`, `strategy_lifecycle`, `strategy_lifecycle_audit` |
 
 **Tables added by migrations 016–018:**
 
@@ -368,17 +397,19 @@ CREATE TABLE execution_decisions (
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- pead_signals: S7 PEAD event classifications from SEC 8-K filings (R&D/contained)
-CREATE TABLE pead_signals (
-    id              BIGSERIAL PRIMARY KEY,
-    symbol          VARCHAR(20) NOT NULL,
-    score           DOUBLE PRECISION,
-    direction       VARCHAR(20),   -- positive | negative | inline
-    confidence      DOUBLE PRECISION,
-    category        VARCHAR(50),   -- earnings_beat | earnings_miss | etc.
-    filing_url      TEXT,
-    classified_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+-- pead_signals: REMOVED 2026-07-15 con S7 retirement. (This DDL was doc-only — no
+-- migration ever created the table in the live DB. The schema is kept here as a
+-- historical record of the removed S7/PEAD surface; see S7_LIFECYCLE_HISTORY.)
+-- CREATE TABLE pead_signals (
+--     id              BIGSERIAL PRIMARY KEY,
+--     symbol          VARCHAR(20) NOT NULL,
+--     score           DOUBLE PRECISION,
+--     direction       VARCHAR(20),   -- positive | negative | inline
+--     confidence      DOUBLE PRECISION,
+--     category        VARCHAR(50),   -- earnings_beat | earnings_miss | etc.
+--     filing_url      TEXT,
+--     classified_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+-- );
 
 -- strategy_lifecycle (026): one row per strategy, immutable audit via strategy_lifecycle_audit
 CREATE TABLE strategy_lifecycle (
@@ -690,8 +721,6 @@ CREATE TABLE decay_reports (
 | `regime-detector-premarket` | 13:30 Mon-Fri | Safety-net rerun 30 min before NYSE open (P0-09) |
 | `reconcile-fills-intraday` | 12,27,42,57 14-21 Mon-Fri | Alpaca fill prices → trades table |
 | `reconcile-fills-evening` | 21:30 Mon-Fri | EOD reconcile pass (B20 fixed 2026-07-03) |
-| `earnings-pead` | :10 11-23 Mon-Fri | Finnhub earnings calendar → deterministic surprise |
-| `pead-ingestion` | 5,35 14-21 Mon-Fri | S7 8-K LLM classification (R&D — S7 shelved) |
 | `forward-return-worker` | 22:00 daily | Populate forward returns from **Alpaca daily bars** |
 | `risk-monitor` | 22:30 daily | HHI + correlation + drawdown |
 | `performance-daily` | 3:00 daily | IC + drift + Telegram digest |
@@ -745,7 +774,7 @@ See `README.md` → *Pre-Live Blockers* section for the authoritative list of cr
 
 ### P2-05 Resolved Safety Items (IMPLEMENTED — commit `55cbf56`, 2026-06-21)
 
-All three P2-05 safety requirements are implemented and test-covered. Kimi P2 Acceptance Audit verdict: **`P2_ACCEPTED_WITH_RUNTIME_MONITORING`**. Controlled paper trading is NOT yet authorized — PO sign-off and a dry-run are still required.
+All three P2-05 safety requirements are implemented and test-covered. Kimi P2 Acceptance Audit verdict: **`P2_ACCEPTED_WITH_RUNTIME_MONITORING`**. Controlled paper trading IS running on the live Alpaca paper stack (since 2026-07-14: `fixes-2026-07-14` merged `ff3de56` + deployed, migration 037 applied; 2026-07-15 pool-leak fix `06671f7` + stop flip `1f450c6` deployed). `GLOBAL_LIVE_PROMOTION_ENABLED` remains `False` — this is paper, not live money. Live go-live still requires the 90-day supervised_paper clock + explicit PO sign-off.
 
 | Item | Fix | File |
 |------|-----|------|
@@ -753,6 +782,6 @@ All three P2-05 safety requirements are implemented and test-covered. Kimi P2 Ac
 | P2-05-B: Net exposure cap wired from config | `_load_risk_config()` reads `max_portfolio_exposure` and `max_single_asset_pct` from `config/trading.yaml`; passed to `ConstraintEnforcer` at each cycle | `src/workers/portfolio_scheduler.py:338-352` |
 | P2-05-C: VolTargeter runs before enforcer | `PortfolioVolTargeter.scale_orders()` called before `ConstraintEnforcer.enforce()` — enforcer is the last constraint pass and cannot be re-violated by vol scaling | `src/portfolio/orchestrator.py:218-229` |
 
-**Runtime monitoring watchlist (R-04 through R-12 remain open):** see `docs/RESIDUAL_RISK_REGISTER.md` for full tracking. Key open items: soft CI gates (mypy/pip-audit/gitleaks), S1 backtest report stale (needs PIT regeneration before promotion discussion), S4/S7 no confirmed IC > placebo.
+**Runtime monitoring watchlist (R-04 through R-12 remain open):** see `docs/RESIDUAL_RISK_REGISTER.md` for full tracking. Key open items: soft CI gates (mypy/pip-audit/gitleaks), S1 backtest report stale (needs PIT regeneration before promotion discussion), S4 no confirmed IC > placebo. (S7 removed 2026-07-15.)
 
 Full P2 milestone history archived in `docs/archive/2026-06-p2-milestone/` (P2_STATUS + P2_ACCEPTANCE_AUDIT + preflight runbook).

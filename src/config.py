@@ -116,9 +116,10 @@ class Config(BaseModel):
     # Finnhub company-news (clean explicit ticker tagging, US equities, free tier 60/min).
     FINNHUB_API_KEY: str = Field(default_factory=lambda: os.environ.get("FINNHUB_API_KEY", ""))
 
-    # Financial Modeling Prep — historical earnings calendar (ALPHA-A5 S7 backtest).
+    # Financial Modeling Prep — historical earnings calendar.
     # Finnhub's calendar/earnings free tier only covers ~30 days of history; FMP's
-    # /stable/earnings-calendar covers the full requested range.
+    # /stable/earnings-calendar covers the full requested range. (FMP Starter cancelled
+    # 2026-07-15, #23; key retained for opportunistic historical pulls.)
     FMP_API_KEY: str = Field(default_factory=lambda: os.environ.get("FMP_API_KEY", ""))
 
     # Ticker resolution (design doc §4). OpenFIGI key is optional (raises rate limits
@@ -272,28 +273,8 @@ class Config(BaseModel):
         default_factory=lambda: int(os.environ.get("REGIME_REDIS_TTL_SECONDS", "259200"))
     )  # 72h — covers the Fri→Mon weekend gap (detector runs Mon-Fri only)
 
-    # S7 PEAD strategy
-    PEAD_SURPRISE_THRESHOLD: float = Field(
-        default_factory=lambda: float(os.environ.get("PEAD_SURPRISE_THRESHOLD", "0.05"))
-    )
-    PEAD_HOLD_DAYS: int = Field(
-        default_factory=lambda: int(os.environ.get("PEAD_HOLD_DAYS", "20"))
-    )
-    PEAD_MAX_POSITION_PCT: float = Field(
-        default_factory=lambda: float(os.environ.get("PEAD_MAX_POSITION_PCT", "0.05"))
-    )
-    PEAD_MAX_SLEEVE_PCT: float = Field(
-        default_factory=lambda: float(os.environ.get("PEAD_MAX_SLEEVE_PCT", "0.25"))
-    )
-    PEAD_MIN_CONFIDENCE: float = Field(
-        default_factory=lambda: float(os.environ.get("PEAD_MIN_CONFIDENCE", "0.70"))
-    )
-    PEAD_ALLOCATION_PCT: float = Field(
-        default_factory=lambda: float(os.environ.get("PEAD_ALLOCATION_PCT", "0.15"))
-    )
-    PEAD_REDIS_TTL_SECONDS: int = Field(
-        default_factory=lambda: int(os.environ.get("PEAD_REDIS_TTL_SECONDS", str(30 * 86400)))
-    )  # 30 days — matches maximum hold period
+    # S7 (PEAD) settings removed 2026-07-15 — strategy retired (POC-2 FAIL, ALPHA-A3
+    # confuted). PEAD_* config fields retired with it; see docs/S7_LIFECYCLE_HISTORY_2026-07-15.md.
 
     @field_validator("ADMIN_API_KEY")
     @classmethod

@@ -156,6 +156,26 @@ def _fire_alert(notifier, message: str, level: AlertLevel) -> None:
         log.warning("Telegram alert send failed: %s", exc)
 
 
+def _divergence_alert_enabled() -> bool:
+    """Read notifications.send_signal_order_divergence_alert from config/trading.yaml.
+
+    Default false (2026-07-15): suppress the recurring "Signal/order divergence:
+    signals=..." Telegram noise. The divergence is still detected by
+    _check_divergence_and_alert; only the Telegram WARNING send is gated. Flip the
+    flag to true to re-enable. Isolated as a helper so tests can patch it.
+    """
+    try:
+        import yaml
+        _ty = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
+        with open(_ty) as _f:
+            return bool(
+                ((yaml.safe_load(_f) or {}).get("notifications") or {})
+                .get("send_signal_order_divergence_alert", False)
+            )
+    except Exception:
+        return False
+
+
 def _check_divergence_and_alert(
     signal_syms: set,
     order_syms: set,
@@ -178,11 +198,17 @@ def _check_divergence_and_alert(
     from src.monitoring.alerts import check_signal_divergence, check_execution_divergence
 
     if check_signal_divergence(signal_syms, order_syms):
-        _fire_alert(
-            notifier,
-            f"Signal/order divergence: signals={sorted(signal_syms)}, orders={sorted(order_syms)}",
-            AlertLevel.WARNING,
-        )
+        # Gated by notifications.send_signal_order_divergence_alert in
+        # config/trading.yaml (default false: suppress the recurring
+        # "Signal/order divergence: signals=..." Telegram noise, P2-04). The
+        # divergence is still detected here; only the Telegram WARNING send is
+        # gated. Flip the flag to true to re-enable the alert.
+        if _divergence_alert_enabled():
+            _fire_alert(
+                notifier,
+                f"Signal/order divergence: signals={sorted(signal_syms)}, orders={sorted(order_syms)}",
+                AlertLevel.WARNING,
+            )
 
     # Skip fill-divergence check when no orders were generated: 0/0 is not a divergence,
     # it means the cycle had nothing to trade (signals below threshold, market closed, etc.).
@@ -606,18 +632,41 @@ def _apply_idempotency_filter(orders: list, skip_syms: set[str]) -> list:
     return [o for o in orders if not (o.symbol in skip_syms and o.side == _OS.BUY)]
 
 
+def _load_sector_map() -> dict[str, str] | None:
+    """Invert the trading.yaml `sectors:` block to {symbol: sector}.
+
+    Fail-open (None) when the block is missing/unreadable: the enforcer treats
+    None as 'sector pass disabled', matching pre-2026-07-13 behavior.
+    """
+    try:
+        import yaml
+        with open(_TRADING_YAML) as f:
+            raw = yaml.safe_load(f) or {}
+        sectors = raw.get("sectors") or {}
+        if not sectors:
+            return None
+        return {
+            str(sym): str(sector)
+            for sector, symbols in sectors.items()
+            for sym in (symbols or [])
+        }
+    except Exception as exc:
+        log.warning("Could not load sector map (%s) — sector cap disabled", exc)
+        return None
+
+
 def _load_risk_config() -> dict:
     """Return the full risk section from trading.yaml; safe defaults on error (P2-05-B)."""
     defaults: dict = {
         "max_portfolio_exposure": 0.50,
         "max_single_asset_pct": 0.10,
+        "max_sector_exposure": 0.0,
         "stop_loss": 0.02,
         "portfolio_drawdown": 0.05,
         "stop_loss_mode": "fixed",
         "stop_strategy_params": {
             "S1": {"k": 3.5, "floor": 0.06, "cap": 0.12},
             "S4": {"k": 2.0, "floor": 0.03, "cap": 0.08},
-            "S7": {"k": 2.5, "floor": 0.04, "cap": 0.10},
             "default": {"k": 3.0, "floor": 0.04, "cap": 0.12},
         },
         "stop_sigma_lookback_fast": 20,
@@ -1349,6 +1398,7 @@ def _run_cycle_inner() -> dict:
     # orders and force-sold below (bypassing the hold-minimum hold).
     stop_loss_sells: dict[str, "StopDecision"] = {}
     _stop_policy: "StopPolicy" | None = None
+    _pg_stop = None
     try:
         from src.portfolio.stop_policy import StopPolicy as _StopPolicy
         from src.store.pg_store import PostgreSQLStore as _PGStore
@@ -1377,6 +1427,12 @@ def _run_cycle_inner() -> dict:
                 log.warning("Stop shadow log failed: %s — continuing", _shadow_exc)
     except Exception as _sl_exc:
         log.warning("Stop-loss check failed: %s — proceeding without stop-loss", _sl_exc)
+    finally:
+        # B7/B32 (2026-07-15): return the stop-loss connection to the pool. The
+        # bare _pg_stop was never closed → one leaked idle-in-transaction conn
+        # per 15-min cycle (20 conns live, blocking migration 037).
+        if _pg_stop is not None:
+            _pg_stop.close()
 
     data_replay = DataReplay(bars_df)
     _vol_targeter, _vol_cfg = _build_vol_targeter()
@@ -1392,6 +1448,8 @@ def _run_cycle_inner() -> dict:
         constraint_enforcer=ConstraintEnforcer(
             max_portfolio_exposure=_risk_cfg["max_portfolio_exposure"],
             max_single_asset_pct=_risk_cfg["max_single_asset_pct"],
+            sector_map=_load_sector_map(),
+            max_sector_pct=_risk_cfg.get("max_sector_exposure", 0.0),
         ),
         vol_targeter=_vol_targeter,
     )
@@ -1605,6 +1663,7 @@ def _run_cycle_inner() -> dict:
     _s4_signals: dict[str, dict] = {}
     # P0-09: read actual regime multiplier once; used in both decisions and trade writes.
     _regime_mult: float = _get_regime_multiplier_from_redis(config.REDIS_URL)
+    _pg = None
     try:
         from src.store.pg_store import PostgreSQLStore
         _pg = PostgreSQLStore()
@@ -1745,9 +1804,12 @@ def _run_cycle_inner() -> dict:
             _fired_sig_id = _signal_ids.get(order.symbol)
             if _fired_sig_id is not None and "S4" in strats and order.side.value == "BUY":
                 _pending_s4_fires[order.symbol] = _fired_sig_id
-        _pg.close()
     except Exception as _exc:
         log.warning("Failed to log portfolio decisions: %s", _exc)
+    finally:
+        # B7/B32: return the decisions-log connection to the pool on every path.
+        if _pg is not None:
+            _pg.close()
 
     # Check operating mode before submitting orders
     operating_mode = None
@@ -1985,9 +2047,15 @@ def _run_cycle_inner() -> dict:
     # Write trade entries/exits to DB for P&L tracking.
     # Also back-fill the Alpaca order_id on execution_decisions rows.
     if submitted_orders:
+        _pg_trades = None
         try:
             from src.store.pg_store import PostgreSQLStore
             _pg_trades = PostgreSQLStore()
+            # Map symbol -> open trade id so record_trade_exit can target the
+            # specific trade being wound down (never the historical closed trades
+            # for the same symbol). _open_trades was fetched at the top of the
+            # cycle (exit_time IS NULL => the positions still open at submit time).
+            _open_trade_ids = {t["symbol"]: t["id"] for t in _open_trades}
             for sub in submitted_orders:
                 sym = sub["symbol"]
                 dec = _symbol_decisions.get(sym, {})
@@ -1998,6 +2066,19 @@ def _run_cycle_inner() -> dict:
                         # Still back-fill decision order_id below.
                         pass
                     else:
+                        # Freeze stop metadata at entry for the legacy batch path too.
+                        _frozen_stop_legacy: "FrozenStop | None" = None
+                        if _stop_policy is not None:
+                            _raw_px_l = market.prices.get(sym) if market and getattr(market, "prices", None) else None
+                            _entry_px_l = float(_raw_px_l) if isinstance(_raw_px_l, (int, float)) and not isinstance(_raw_px_l, bool) else None
+                            if _entry_px_l is None and sub.get("qty"):
+                                _entry_px_l = sub["notional"] / sub["qty"]
+                            if _entry_px_l is None:
+                                _entry_px_l = float(sub["notional"]) if sub.get("notional") else 0.0
+                            _strategy_l = "S4" if dec.get("signal_id") else "S1"
+                            _frozen_stop_legacy = _stop_policy.freeze(
+                                sym, _strategy_l, float(_entry_px_l), ts
+                            )
                         _pg_trades.open_trade(
                             symbol=sym,
                             signal_id=dec.get("signal_id"),
@@ -2008,13 +2089,22 @@ def _run_cycle_inner() -> dict:
                             score=dec.get("score", 0.0),
                             regime_mult=_regime_mult,
                             signal_score=dec.get("signal_score"),
+                            frozen_stop=_frozen_stop_legacy,
                         )
                 else:
+                    # WS-5 fix-back: target the open trade by id and tell
+                    # record_trade_exit whether this is the final tranche.
+                    # is_final: a SELL whose target allocation_weight is 0.0 is a
+                    # full close (final tranche); stop-loss / reversal SELLs carry
+                    # no allocation_weight and default to 0.0 => final (full close).
+                    _is_final = float(sub.get("allocation_weight", 0.0) or 0.0) == 0.0
                     _trade_id = _pg_trades.record_trade_exit(
                         symbol=sym,
                         exit_order_id=sub["order_id"],
                         exit_time=ts,
                         exit_reason=sub.get("reason", "portfolio_sell"),
+                        trade_id=_open_trade_ids.get(sym),
+                        is_final=_is_final,
                     )
                     if _trade_id is not None:
                         _entry_px = alpaca_entry_prices.get(sym, 0.0)
@@ -2036,9 +2126,12 @@ def _run_cycle_inner() -> dict:
                         _pg_trades.update_decision_order_id(dec_id, sub["order_id"])
                     except Exception as _eid_exc:
                         log.warning("Could not back-fill order_id on decision %s: %s", dec_id, _eid_exc)
-            _pg_trades.close()
         except Exception as _exc:
             log.warning("Failed to write trade fills to DB: %s", _exc)
+        finally:
+            # B7/B32: return the trade-writes connection to the pool on every path.
+            if _pg_trades is not None:
+                _pg_trades.close()
 
     # Alert when an approved strategy consistently produces zero target weights.
     # This catches silent strategy death (e.g. S1 killed by a single sparse ticker).
@@ -2734,7 +2827,13 @@ def _submit_portfolio_orders(
                     )
                     alpaca_order = trading_client.submit_order(req)
                     alpaca_id = str(alpaca_order.id)
-                submitted.append({"symbol": order.symbol, "side": "sell", "order_id": alpaca_id, "qty": qty})
+                # allocation_weight propagates the target-weight intent so the
+                # trade-exit writer can tell a full-close SELL (weight == 0.0 =>
+                # final tranche) from a partial trim (weight > 0 => intermediate).
+                submitted.append({
+                    "symbol": order.symbol, "side": "sell", "order_id": alpaca_id,
+                    "qty": qty, "allocation_weight": order.allocation_weight,
+                })
             else:
                 log.warning("Unknown order side %s for %s — skipping", order.side, order.symbol)
                 continue

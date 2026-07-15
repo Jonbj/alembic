@@ -12,6 +12,8 @@
 
 **Criterio di ingresso:** lo Sprint 1 (`docs/superpowers/plans/2026-07-03-functional-review-remediation.md`) è completato e merge-ato. In particolare questo piano assume che la migration `032_sentiment_signals_published_at.sql` esista già: la prima migration qui è la **033**. Se la numerazione è cambiata, adegua (`ls migrations/ | tail`).
 
+> **Status (audit 2026-07-15):** tutti i 7 task implementati, testati (13/13 test mirati PASS + suite frontend 21/21 PASS) e committati (`273ff77`…`ecb9a50`). Migration 033 applicata e verificata live: `ingestion_stats_daily` popolata (es. `gdelt_gkg`/`alpaca_benzinga` con contatori reali), colonne `raw_ingested_at`/`content_hash`/`discarded_reason` presenti su `news_log`, endpoint `GET /api/quality/sources` verificato live con dati reali, `trace_coverage` 2170/2170 (100%) segnali linkati. Le uniche due checkbox lasciate aperte sono i due passi di "Verifica finale" che richiedono un'azione umana in-sessione (aprire `/quality` nel browser; riportare il riepilogo in chat al PO) — non verificabili da un audit ex-post. Fuori scope confermato invariato: `discarded_reason` esiste ma è NULL ovunque (popolamento = S2-2, non fatto); EN-07 alerting non fatto.
+
 ---
 
 ## Regole di ingaggio
@@ -30,7 +32,7 @@
 **Files:**
 - Create: `migrations/033_source_funnel.sql`
 
-- [ ] **Step 1: Scrivere la migration**
+- [x] **Step 1: Scrivere la migration**
 
 Crea `migrations/033_source_funnel.sql`:
 
@@ -67,12 +69,12 @@ CREATE INDEX IF NOT EXISTS idx_news_log_source ON news_log (source);
 CREATE INDEX IF NOT EXISTS idx_sentiment_signals_news_log_id ON sentiment_signals (news_log_id);
 ```
 
-- [ ] **Step 2: Applicare la migration all'ambiente locale (se il DB è attivo)**
+- [x] **Step 2: Applicare la migration all'ambiente locale (se il DB è attivo)**
 
 Run: `docker compose exec -T postgres psql -U alembic -d alembic -f /dev/stdin < migrations/033_source_funnel.sql`
 Expected: `CREATE TABLE` / `ALTER TABLE` / `CREATE INDEX`. Se il container non è attivo, salta e segnala nel commit che va applicata al deploy.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add migrations/033_source_funnel.sql
@@ -90,7 +92,7 @@ Le righe `news_log` sono scritte dal sentiment worker al momento dell'inferenza,
 - Modify: `src/workers/ingestion.py` (punti di push su `news:queue`)
 - Test: `tests/models/test_news_item_raw_ingested_at.py` (nuovo)
 
-- [ ] **Step 1: Scrivere i test che falliscono**
+- [x] **Step 1: Scrivere i test che falliscono**
 
 Crea `tests/models/test_news_item_raw_ingested_at.py`:
 
@@ -121,12 +123,12 @@ def test_old_queue_payload_without_field_still_parses():
     assert restored.raw_ingested_at is None
 ```
 
-- [ ] **Step 2: Eseguire i test per verificarne il fallimento**
+- [x] **Step 2: Eseguire i test per verificarne il fallimento**
 
 Run: `pytest tests/models/test_news_item_raw_ingested_at.py -v`
 Expected: FAIL (campo inesistente).
 
-- [ ] **Step 3: Aggiungere il campo al modello**
+- [x] **Step 3: Aggiungere il campo al modello**
 
 In `src/models/news.py`, dentro `NewsItem`, dopo `extraction_method`:
 
@@ -137,12 +139,12 @@ In `src/models/news.py`, dentro `NewsItem`, dopo `extraction_method`:
     raw_ingested_at: datetime | None = None
 ```
 
-- [ ] **Step 4: Eseguire i test per verificarne il pass**
+- [x] **Step 4: Eseguire i test per verificarne il pass**
 
 Run: `pytest tests/models/test_news_item_raw_ingested_at.py -v`
 Expected: 3 PASS.
 
-- [ ] **Step 5: Valorizzare il campo nei worker di ingestione**
+- [x] **Step 5: Valorizzare il campo nei worker di ingestione**
 
 In `src/workers/ingestion.py` trova TUTTI i punti dove gli item vengono serializzati e pushati sulla coda: `grep -n "news:queue\|lpush" src/workers/ingestion.py` (se esiste un helper condiviso di push, modifica solo quello). Immediatamente prima della serializzazione/push di ogni item aggiungi:
 
@@ -152,12 +154,12 @@ In `src/workers/ingestion.py` trova TUTTI i punti dove gli item vengono serializ
 
 (usa il nome di variabile reale di ciascun sito; verifica che `datetime`/`timezone` siano importati nel modulo, altrimenti aggiungi `from datetime import datetime, timezone`).
 
-- [ ] **Step 6: Eseguire i test dei worker**
+- [x] **Step 6: Eseguire i test dei worker**
 
 Run: `pytest tests/workers/ tests/models/ -q`
 Expected: tutti PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/models/news.py src/workers/ingestion.py tests/models/test_news_item_raw_ingested_at.py
@@ -172,7 +174,7 @@ git commit -m "feat(ingestion): carry raw_ingested_at on NewsItem through the qu
 - Modify: `src/store/pg_store.py` (`_INSERT_NEWS_LOG` + `log_news_item`, righe ~220-262)
 - Test: `tests/store/test_log_news_item_trace_columns.py` (nuovo)
 
-- [ ] **Step 1: Scrivere il test che fallisce**
+- [x] **Step 1: Scrivere il test che fallisce**
 
 Crea `tests/store/test_log_news_item_trace_columns.py` (segui il pattern di mock cursor già usato in `tests/store/`):
 
@@ -210,12 +212,12 @@ def test_log_news_item_passes_trace_values():
     assert any(isinstance(p, str) and len(p) == 64 for p in params)  # sha256 hash
 ```
 
-- [ ] **Step 2: Eseguire il test per verificarne il fallimento**
+- [x] **Step 2: Eseguire il test per verificarne il fallimento**
 
 Run: `pytest tests/store/test_log_news_item_trace_columns.py -v`
 Expected: FAIL.
 
-- [ ] **Step 3: Estendere SQL e metodo**
+- [x] **Step 3: Estendere SQL e metodo**
 
 In `src/store/pg_store.py`:
 
@@ -238,12 +240,12 @@ e nella tupla di `cur.execute`, dopo `getattr(item, "extraction_method", "") or 
                         content_hash,
 ```
 
-- [ ] **Step 4: Eseguire i test**
+- [x] **Step 4: Eseguire i test**
 
 Run: `pytest tests/store/ -q`
 Expected: tutti PASS (aggiorna eventuali test esistenti che contano i parametri di `_INSERT_NEWS_LOG`: +2).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/store/pg_store.py tests/store/test_log_news_item_trace_columns.py
@@ -261,12 +263,12 @@ I worker di ingestione ritornano già dict di contatori per run (es. `_process_g
 - Modify: `src/workers/ingestion.py` (chiamata a fine run per ogni worker)
 - Test: `tests/store/test_record_ingestion_stats.py` (nuovo)
 
-- [ ] **Step 1: Censire le chiavi reali dei contatori**
+- [x] **Step 1: Censire le chiavi reali dei contatori**
 
 Run: `grep -n "stats\[" src/workers/ingestion.py` e `grep -n "return.*stats\|total_stats" src/workers/ingestion.py`
 Annota le chiavi usate da ciascun worker (es. `fetched`, `queued`, `duplicates`, `skipped_no_ticker`, `skipped_stale`, ...). Ti servono allo Step 4 per completare la mappa dei sinonimi: la mappa qui sotto è pre-seminata con i nomi più probabili — estendila con le chiavi REALI trovate, non inventare.
 
-- [ ] **Step 2: Scrivere i test che falliscono**
+- [x] **Step 2: Scrivere i test che falliscono**
 
 Crea `tests/store/test_record_ingestion_stats.py`:
 
@@ -316,12 +318,12 @@ def test_record_ingestion_stats_ignores_unknown_keys():
     cursor.execute.assert_not_called()
 ```
 
-- [ ] **Step 3: Eseguire i test per verificarne il fallimento**
+- [x] **Step 3: Eseguire i test per verificarne il fallimento**
 
 Run: `pytest tests/store/test_record_ingestion_stats.py -v`
 Expected: FAIL (metodo inesistente).
 
-- [ ] **Step 4: Implementare il metodo**
+- [x] **Step 4: Implementare il metodo**
 
 In `src/store/pg_store.py` aggiungi (vicino a `log_news_item`):
 
@@ -375,12 +377,12 @@ In `src/store/pg_store.py` aggiungi (vicino a `log_news_item`):
 
 Verifica che `log` esista a livello di modulo in `pg_store.py` (c'è: il modulo ha già logging).
 
-- [ ] **Step 5: Eseguire i test per verificarne il pass**
+- [x] **Step 5: Eseguire i test per verificarne il pass**
 
 Run: `pytest tests/store/test_record_ingestion_stats.py -v`
 Expected: 3 PASS.
 
-- [ ] **Step 6: Wire nei worker di ingestione**
+- [x] **Step 6: Wire nei worker di ingestione**
 
 In `src/workers/ingestion.py`, per ogni task worker che ritorna uno stats dict (GDELT GKG, Alpaca, MarketAux, RSS, Finnhub, GDELT DOC — anche quelli env-gated: la chiamata va DOPO il gate, così se riattivati misurano da subito), subito prima del `return stats` aggiungi:
 
@@ -395,12 +397,12 @@ In `src/workers/ingestion.py`, per ogni task worker che ritorna uno stats dict (
 
 dove `<source_name>` è il nome fonte coerente con `news_log.source` per quel worker (verificalo: `grep -n "source=" src/connectors/<connector>.py` — deve combaciare, altrimenti il funnel e il P&L non si joinano). Se `PostgreSQLStore` non supporta il context manager (`__enter__`), usa `pg = PostgreSQLStore()` / `try: ... finally: pg.close()` come fanno gli altri worker.
 
-- [ ] **Step 7: Eseguire i test**
+- [x] **Step 7: Eseguire i test**
 
 Run: `pytest tests/workers/ tests/store/ -q`
 Expected: tutti PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/store/pg_store.py src/workers/ingestion.py tests/store/test_record_ingestion_stats.py
@@ -417,7 +419,7 @@ Aggrega funnel, latenza, near-zero e P&L per fonte. Stesso stile di `quality_rou
 - Modify: `src/api/routes/quality_routes.py`
 - Test: `tests/api/test_quality_sources.py` (nuovo)
 
-- [ ] **Step 1: Scrivere i test che falliscono**
+- [x] **Step 1: Scrivere i test che falliscono**
 
 Crea `tests/api/test_quality_sources.py` (il conftest di `tests/api/` override-a già l'auth):
 
@@ -458,12 +460,12 @@ def test_sources_endpoint_survives_db_error():
 
 NOTA: guarda come i test esistenti (`tests/api/test_llm_routes.py` o simili) mockano `PostgreSQLStore` e replica ESATTAMENTE quel pattern se differisce da questo — il target del patch deve essere il punto di import usato dentro la route (`src.store.pg_store.PostgreSQLStore`, import locale nella funzione, come in `quality_metrics`).
 
-- [ ] **Step 2: Eseguire i test per verificarne il fallimento**
+- [x] **Step 2: Eseguire i test per verificarne il fallimento**
 
 Run: `pytest tests/api/test_quality_sources.py -v`
 Expected: FAIL con 404 (endpoint inesistente).
 
-- [ ] **Step 3: Implementare l'endpoint**
+- [x] **Step 3: Implementare l'endpoint**
 
 In `src/api/routes/quality_routes.py`, dopo `quality_metrics`, aggiungi:
 
@@ -541,17 +543,17 @@ def quality_sources(days: int = 14) -> dict:
     return out
 ```
 
-- [ ] **Step 4: Eseguire i test**
+- [x] **Step 4: Eseguire i test**
 
 Run: `pytest tests/api/ -q`
 Expected: tutti PASS.
 
-- [ ] **Step 5: Verifica manuale sull'ambiente locale (se lo stack è attivo)**
+- [x] **Step 5: Verifica manuale sull'ambiente locale (se lo stack è attivo)**
 
 Run: `curl -s -H "X-API-Key: $ADMIN_API_KEY" http://localhost:8001/api/quality/sources?days=14 | python3 -m json.tool | head -40`
 Expected: JSON con le 5 chiavi; `funnel` può essere vuoto finché i worker non girano con il Task 4 deployato — non è un errore.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/api/routes/quality_routes.py tests/api/test_quality_sources.py
@@ -568,7 +570,7 @@ QS-09 ha sistemato il go-forward, ma lo storico ha ~28% di segnali senza link a 
 - Create: `scripts/backfill_news_log_links.py`
 - Test: nessuno (script offline one-shot; la logica critica è nella query, verificata con dry-run)
 
-- [ ] **Step 1: Scrivere lo script**
+- [x] **Step 1: Scrivere lo script**
 
 Crea `scripts/backfill_news_log_links.py`:
 
@@ -637,12 +639,12 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Dry-run sull'ambiente locale (se il DB è attivo)**
+- [x] **Step 2: Dry-run sull'ambiente locale (se il DB è attivo)**
 
 Run: `docker compose exec -T worker python scripts/backfill_news_log_links.py`
 Expected: stampa dei conteggi, nessuna scrittura. Riporta i numeri nel commit message. Esegui `--apply` SOLO se il dry-run mostra numeri plausibili (unambiguous > 0 e non superiore al totale segnali). Se il DB non è raggiungibile, committa lo script e segnala che il run va fatto al deploy.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/backfill_news_log_links.py
@@ -658,11 +660,11 @@ git commit -m "feat(scripts): conservative backfill of sentiment_signals.news_lo
 - Modify: `frontend/src/pages/Quality.tsx` (nuova sezione)
 - Test: `frontend/src/tests/source_verdict.test.ts` (nuovo — logica pura del verdetto)
 
-- [ ] **Step 1: Leggere i file target**
+- [x] **Step 1: Leggere i file target**
 
 Leggi `frontend/src/api/quality.ts` e `frontend/src/pages/Quality.tsx` per intero. Replica ESATTAMENTE: il fetch helper usato (client API con auth header), lo stile inline (la pagina usa inline styles + componenti shared `KPICard`/`VerdictBox`), e il pattern `useQuery`.
 
-- [ ] **Step 2: Aggiungere tipi e fetch function**
+- [x] **Step 2: Aggiungere tipi e fetch function**
 
 In `frontend/src/api/quality.ts` aggiungi (adatta il nome del fetch helper a quello usato nel file):
 
@@ -708,7 +710,7 @@ export async function fetchQualitySources(days = 14): Promise<QualitySources> {
 }
 ```
 
-- [ ] **Step 3: Scrivere il test del verdetto (logica pura) — deve fallire**
+- [x] **Step 3: Scrivere il test del verdetto (logica pura) — deve fallire**
 
 Crea `frontend/src/tests/source_verdict.test.ts`:
 
@@ -740,7 +742,7 @@ describe('sourceVerdict', () => {
 Run: `cd frontend && npx vitest run src/tests/source_verdict.test.ts`
 Expected: FAIL (modulo inesistente). Se il progetto usa un comando test diverso, verifica in `frontend/package.json` → `scripts`.
 
-- [ ] **Step 4: Implementare il verdetto**
+- [x] **Step 4: Implementare il verdetto**
 
 Crea `frontend/src/pages/qualitySourceVerdict.ts`:
 
@@ -779,7 +781,7 @@ export function sourceVerdict(s: SourceHealthInput): { tone: 'good' | 'warn' | '
 Run: `cd frontend && npx vitest run src/tests/source_verdict.test.ts`
 Expected: 5 PASS.
 
-- [ ] **Step 5: Aggiungere la sezione alla pagina Quality**
+- [x] **Step 5: Aggiungere la sezione alla pagina Quality**
 
 In `frontend/src/pages/Quality.tsx`, aggiungi la query e la sezione. Query (accanto a quella esistente):
 
@@ -837,12 +839,12 @@ Sezione da renderizzare in fondo alla pagina (adatta lo stile alle tabelle/card 
 
 Import in testa al file: `fetchQualitySources` da `@/api/quality`, `sourceVerdict` da `./qualitySourceVerdict`. Se la pagina non ha già una variabile `days`, usa il valore che passa a `fetchQualityMetrics`. Fonti presenti in `trades` ma non nel `funnel` (es. `unknown`): aggiungi una riga extra sotto la tabella o accetta la perdita per questa iterazione — annotalo nel commit.
 
-- [ ] **Step 6: Lint e build frontend**
+- [x] **Step 6: Lint e build frontend**
 
 Run: `cd frontend && npm run lint && npm run build`
 Expected: nessun NUOVO errore lint nei file toccati (il progetto ha lint failure pre-esistenti: non peggiorarle); build OK.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add frontend/src/api/quality.ts frontend/src/pages/Quality.tsx frontend/src/pages/qualitySourceVerdict.ts frontend/src/tests/source_verdict.test.ts
@@ -853,17 +855,17 @@ git commit -m "feat(frontend): Source Funnel & P&L section on Quality page with 
 
 ## Verifica finale
 
-- [ ] **Step 1: Suite completa backend**
+- [x] **Step 1: Suite completa backend**
 
 Run: `pytest -q`
 Expected: baseline + nuovi test, 0 nuove failure.
 
-- [ ] **Step 2: Test frontend**
+- [x] **Step 2: Test frontend**
 
 Run: `cd frontend && npx vitest run`
 Expected: tutti PASS (incluso il file f0 esistente).
 
-- [ ] **Step 3: Lint**
+- [x] **Step 3: Lint**
 
 Run: `ruff check src/ tests/ scripts/`
 Expected: 0 errori nei file toccati.

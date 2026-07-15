@@ -1,8 +1,8 @@
 # Alembic — Frontend & Operator Guide
 
-**Last updated:** 2026-06-26 (rev 2)  
-**Scope:** P2-04 operator surfaces and frontend page inventory  
-**Authorization:** Live trading NOT authorized. `GLOBAL_LIVE_PROMOTION_ENABLED = False`.
+**Last updated:** 2026-07-15 (rev 3)
+**Scope:** P2-04 operator surfaces and frontend page inventory
+**Authorization:** Controlled paper trading IS running on the live Alpaca paper stack. `GLOBAL_LIVE_PROMOTION_ENABLED = False` (paper, not live money). Live go-live still requires 90-day supervised_paper + PO sign-off.
 
 ---
 
@@ -180,11 +180,17 @@ Fail-closed rule: absent or false authorization fields must be treated as not au
 ### 2.4 Block 1 Product Decisions Reflected in Frontend
 
 - LLM model names must come from the backend registry (`GET /api/llm/models` or `GET /api/admin/status`), not from hardcoded frontend lists.
-- Sidebar Economy mode selects GLM-5.2 via canonical key `glm52`; legacy `glm` is accepted by the backend only as an alias.
+- **Sentiment ensemble = a PAIR, not a single model (2026-07-11 "pair world").** The sidebar/toggle selects the active ensemble pair via Redis `config:sentiment_llm_models` (live: `glm52,gptoss`). The old binary single-model Economy toggle (pre-07-11) is superseded: `glm52` alone is no longer the live config — the pair is. "all" expands to the live 2-model set only (swap candidates carry `in_all=False`, so "all" never silently grows the ensemble). Pair swaps require `WS-3` weight resync (`3ffe2fc`). Stage-2 shadow mode (2026-07-15) compares candidate models against the live pair without touching the productive path — toggle via Redis arm/disarm, 7-day auto-report.
 - `LLM` weights use `GET /api/weights/current` for active weights and `GET /api/weights/suggestion` for pending suggestions. Stored weights for inactive models are ignored and surfaced as `dropped_models`.
 - `Trading` Fills are derived from filled orders, not from local trade entry/exit rows.
 - Operating mode changes require explicit confirmation before calling the write API.
 - Labeling strength remains signed `-1..1` and is constrained by sentiment direction: positive > 0, negative < 0, neutral = 0.
+
+### 2.5 Stop UI + Trace origin (2026-07-10/15)
+
+- **Stop UI display:** the protective stop is configured in `trading.yaml` → `risk`. As of 2026-07-15 the protective 2% stop is **disabled** on paper (`stop_loss: 0.0`, see ARCHITECTURE §2.5d). The SELL reason shown in the Trading/Performance exit columns reflects `exit_reason` attributed at submit time (`record_trade_exit`). Multi-tranche exits (WS-5, 2026-07-14) show a weighted-average exit price with `exit_order_ids`; the `is_final` flag marks the close that reconciles the open trade.
+- **Trace drawer — `origin_strategy`:** for non-news orders (e.g. S1 momentum) the Trace drawer shows `origin_strategy` so the causal chain `News -> Signal -> Decision -> Order -> Performance` is traceable to the originating strategy, not just "merged" (`edd69f1`, 2026-07-10).
+- **Quality page — Source Funnel & P&L (S2-1):** per-source funnel→latency→P&L table with removal-threshold verdicts. NUMERIC columns are serialized as JSON numbers (not strings) since `5f9baad` (2026-07-09) — the old `.toFixed()` crash on Decimal-as-string is resolved.
 
 ---
 
@@ -238,19 +244,19 @@ Expected output for current authorized state:
 
 ---
 
-## 4. What Is NOT Authorized (2026-06-21)
+## 4. Authorization Status (2026-07-15)
 
-| Action | Status | Blocker |
-|--------|--------|---------|
-| Live trading | NOT authorized | 90-day supervised_paper period not started; `GLOBAL_LIVE_PROMOTION_ENABLED=False`; PO sign-off required |
-| Controlled paper trading | NOT authorized | P2-05 complete; Kimi P2 Audit complete (`P2_ACCEPTED_WITH_RUNTIME_MONITORING`); end-to-end dry-run and PO sign-off still required |
+| Action | Status | Note |
+|--------|--------|------|
+| **Controlled paper trading** | **RUNNING** | Live Alpaca paper stack. `fixes-2026-07-14` (`ff3de56`) deployed, migration 037 applied. Pool-leak fix (`06671f7`) + stop flip (`1f450c6`) deployed 2026-07-15. S1 `supervised_paper`, S4 `paper` (both `promotion_blocked`). |
+| Live (real-money) trading | NOT authorized | `GLOBAL_LIVE_PROMOTION_ENABLED=False`; 90-day supervised_paper clock + PO sign-off required |
 | Strategy promotions to `live` | NOT authorized | `GLOBAL_LIVE_PROMOTION_ENABLED = False` |
-| Strategy promotions to `paper` | NOT authorized | No PO sign-off for any strategy currently in research |
-| Setting `GLOBAL_LIVE_PROMOTION_ENABLED=True` | NOT authorized | See above |
+| Strategy promotions to `paper` | NOT authorized | No PO sign-off for strategies currently in research |
+| Setting `GLOBAL_LIVE_PROMOTION_ENABLED=True` | NOT authorized | Requires 90-day supervised_paper + explicit PO sign-off |
 
-Live trading authorization requires:
+Live (real-money) trading authorization requires:
 1. P2-05 closed (all 3 safety items implemented, commit 55cbf56)
-2. Kimi P2 Acceptance Audit completed
+2. Kimi P2 Acceptance Audit completed (`P2_ACCEPTED_WITH_RUNTIME_MONITORING`)
 3. 90 days of supervised_paper trading for S1
 4. Explicit PO sign-off
 5. `GLOBAL_LIVE_PROMOTION_ENABLED = True` set deliberately in `.env`

@@ -29,7 +29,7 @@ Results accumulate in a resumable CSV; a summary function prints a markdown tabl
 - Create: `scripts/compare_models_retro.py`
 - Test: `tests/test_compare_models_retro.py`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/test_compare_models_retro.py
@@ -104,13 +104,13 @@ def test_score_one_fails_both_attempts():
     }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `.venv/bin/python -m pytest tests/test_compare_models_retro.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'scripts.compare_models_retro'`
 (the file doesn't exist yet).
 
-- [ ] **Step 3: Write the script with `_direction()` and `_score_one()`**
+- [x] **Step 3: Write the script with `_direction()` and `_score_one()`**
 
 ```python
 #!/usr/bin/env python3
@@ -212,12 +212,12 @@ def _score_one(model: str, prompt: str) -> dict:
     }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_compare_models_retro.py -v`
 Expected: PASS (6 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/compare_models_retro.py tests/test_compare_models_retro.py
@@ -232,7 +232,7 @@ git commit -m "feat(model-comparison): stage 1 scoring helpers (_direction, _sco
 - Modify: `scripts/compare_models_retro.py`
 - Test: `tests/test_compare_models_retro.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_compare_models_retro.py`:
 
@@ -304,12 +304,12 @@ def test_main_skips_already_scored_pairs_and_records_spend(tmp_path, monkeypatch
     assert output_tokens == 200 // 4
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_compare_models_retro.py::test_main_skips_already_scored_pairs_and_records_spend -v`
 Expected: FAIL with `AttributeError: module 'scripts.compare_models_retro' has no attribute '_fetch_labeled_rows'`
 
-- [ ] **Step 3: Add `_fetch_labeled_rows()`, `_build_budget_tracker()` and `main()`**
+- [x] **Step 3: Add `_fetch_labeled_rows()`, `_build_budget_tracker()` and `main()`**
 
 Append to `scripts/compare_models_retro.py`:
 
@@ -386,12 +386,12 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_compare_models_retro.py -v`
 Expected: PASS (7 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/compare_models_retro.py tests/test_compare_models_retro.py
@@ -406,7 +406,7 @@ git commit -m "feat(model-comparison): stage 1 resumable main loop with budget t
 - Modify: `scripts/compare_models_retro.py`
 - Test: `tests/test_compare_models_retro.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_compare_models_retro.py`:
 
@@ -441,12 +441,12 @@ def test_summary_computes_accuracy_and_parse_fail_rate(tmp_path, monkeypatch, ca
     assert "0.33" in out  # parse_fail_rate: 1/3
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `.venv/bin/python -m pytest tests/test_compare_models_retro.py::test_summary_computes_accuracy_and_parse_fail_rate -v`
 Expected: FAIL with `AttributeError: module 'scripts.compare_models_retro' has no attribute '_print_summary'`
 
-- [ ] **Step 3: Add `_print_summary()` and call it from `main()`**
+- [x] **Step 3: Add `_print_summary()` and call it from `main()`**
 
 Append to `scripts/compare_models_retro.py` (before the `if __name__ == "__main__":` line):
 
@@ -497,12 +497,12 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `.venv/bin/python -m pytest tests/test_compare_models_retro.py -v`
 Expected: PASS (8 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/compare_models_retro.py
@@ -515,7 +515,7 @@ git commit -m "feat(model-comparison): stage 1 markdown summary report"
 
 **Files:** none (execution only)
 
-- [ ] **Step 1: Run the script against the live database**
+- [x] **Step 1: Run the script against the live database**
 
 Run: `set -a; source .env; set +a; .venv/bin/python scripts/compare_models_retro.py`
 
@@ -525,7 +525,7 @@ markdown summary table. Verify no unhandled exception. If interrupted, rerunning
 same command must resume (skip already-scored pairs per Task 2's cache) — confirm by
 checking the printed "già scorati" count on a second run.
 
-- [ ] **Step 2: Read the summary table and flag anything unexpected**
+- [x] **Step 2: Read the summary table and flag anything unexpected**
 
 Look for: any model with `parse_fail_rate > 0.2` (worth a closer look at its raw
 output), or an `accuracy` far below/above the others (small-n=17 means don't

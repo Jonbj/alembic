@@ -12,7 +12,7 @@ Day-to-day operational reference for running, monitoring, and troubleshooting th
 | `redis` | 6379 | Redis 7 (signal cache, task queue) |
 | `api` | 8001→8000 | FastAPI application |
 | `worker` | — | Celery worker (queue `celery`, concurrency=4 — task generici) |
-| `worker-inference` | — | Celery worker (queue `inference`, concurrency=1 — FinBERT/Ollama/PEAD) |
+| `worker-inference` | — | Celery worker (queue `inference`, concurrency=1 — FinBERT/Ollama) |
 | `beat` | — | Celery beat (task scheduler) |
 | `frontend` | 3000→80 | React dashboard (Nginx) |
 | `backtest` | — | One-shot backtest runner (profile: backtest) |
@@ -94,7 +94,6 @@ Beat schedules are defined in `src/workers/celery_app.py`. All times are UTC.
 | `decay-monitor` | 23:00 1st of month | Actual vs backtest baseline |
 | `poll-telegram-updates` | every 5s | Process approve/reject callbacks |
 | `run-sec-edgar-ingestion` | */30 14-21 Mon-Fri | SEC EDGAR 8-K filings → news queue |
-| `pead-ingestion` | 5,35 14-21 Mon-Fri | Classifica 8-K via Ollama → pead_signals (queue: inference) |
 | `loss-feedback-check` | */30 14-21 Mon-Fri | Phase B: detect loss patterns → raise feedback entry threshold; write legacy/audit scale state |
 | `counterfactual-worker` | 22:45 daily | Phase C: compute 1h counterfactual returns for SKIP_THRESHOLD/SKIP_EMA/SKIP_CAP rows |
 | `reconcile-fills-evening` | 21:30 Mon-Fri | Reconcile fill prices after NYSE close |
@@ -298,20 +297,26 @@ docker compose ps beat
 3. Check `llm:budget:*` keys — daily budget may be exhausted
 4. Check worker logs for LLM connection errors (Ollama cloud timeout)
 
-### PostgreSQL connection pool exhausted
+### PostgreSQL connection pool exhausted / idle-in-transaction leak (B7/B32)
 
-Symptom: `psycopg2.pool.PoolError: connection pool exhausted`
+Symptom: `psycopg2.pool.PoolError: connection pool exhausted`, or `ALTER TABLE` / migrations hanging on `trades` (AccessShareLock held by idle-in-transaction conns).
 
-Cause: A worker process did not call `pg.close()` in its `finally` block.
+Cause (pre-fix 2026-07-14): a bare `PostgreSQLStore()` in the portfolio scheduler stop-loss check was never closed → 1 "idle in transaction" connection leaked per 15-min cycle → pool maxconn=20 exhausted. Aggravators: read-only methods (`load_frozen_stop`, `fetch_open_trade_meta`) left the transaction open; `_release_connection` did not rollback before `putconn`.
 
-Fix:
+Fix (shipped 2026-07-15, commit `06671f7`): `finally: .close()` on all scheduler stores; `_release_connection` rolls back before putconn/close; read-only methods end their transaction. Rebuild + restart required (config/source baked in image).
+
+Recovery + verification:
 ```bash
-# Restart the worker to release all connections
-docker compose restart worker
+# Check idle-in-transaction leak count (must be 0 post-fix)
+docker compose exec postgres psql -U trading -d trading -t \
+  -c "SELECT count(*) FROM pg_stat_activity WHERE state='idle in transaction';"
 
-# Verify pool recovery
+# If non-zero: restart the workers to release (stop container → leak drops to 0)
+docker compose restart worker beat
+
+# Verify pool recovery + leak stays 0 across portfolio cycles
 docker compose exec postgres psql -U trading -d trading \
-  -c "SELECT count(*) FROM pg_stat_activity WHERE datname='trading';"
+  -c "SELECT state, count(*) FROM pg_stat_activity WHERE datname='trading' GROUP BY state;"
 ```
 
 ### FinBERT cold-start latency

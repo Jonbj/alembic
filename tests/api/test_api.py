@@ -39,6 +39,10 @@ def mock_redis_store():
     store.is_killswitch_active.return_value = False
     store.set_mode = MagicMock()
     store.activate_killswitch = MagicMock()
+    store.get_llm_models.return_value = None
+    store.set_llm_models = MagicMock()
+    store.get_current_weights_stored.return_value = None
+    store.set_ensemble_weights = MagicMock()
     return store
 
 
@@ -165,4 +169,86 @@ async def test_admin_mode_invalid_mode(mock_redis_store):
             json={"mode": "invalid_mode"},
         )
     assert resp.status_code == 400
+    app.dependency_overrides.pop(get_redis_store, None)
+
+
+@pytest.mark.asyncio
+async def test_llm_models_canonicalizes_pair(mock_redis_store):
+    """Test POST /api/admin/llm-models canonicalizes a comma-separated pair."""
+    app.dependency_overrides[get_redis_store] = lambda: mock_redis_store
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post(
+            "/api/admin/llm-models",
+            json={"models": "gptoss,glm52"},
+            headers={"Authorization": "Bearer test-api-key-for-testing-only-12345678"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["llm_models"] == "glm52,gptoss"
+    assert data["status"] == "ok"
+    mock_redis_store.set_llm_models.assert_called_once_with("glm52,gptoss")
+    app.dependency_overrides.pop(get_redis_store, None)
+
+
+@pytest.mark.asyncio
+async def test_llm_models_status_reports_registry(mock_redis_store):
+    """Test GET /api/admin/status returns canonical selection and registry."""
+    app.dependency_overrides[get_redis_store] = lambda: mock_redis_store
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/api/admin/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["llm_models"] == "all"  # fallback when Redis key is unset
+    assert "llm_model_registry" in data
+    assert any(m["key"] == "glm52" for m in data["llm_model_registry"]["models"])
+    app.dependency_overrides.pop(get_redis_store, None)
+
+
+@pytest.mark.asyncio
+async def test_llm_models_resyncs_stale_ensemble_weights(mock_redis_store):
+    """Test POST /api/admin/llm-models re-syncs stored weights when the new
+    pair excludes a model referenced by the old weights."""
+    mock_redis_store.get_current_weights_stored.return_value = {
+        "weights": {"kimi-k2.6:cloud": 0.41, "qwen3.5:cloud": 0.59},
+    }
+    app.dependency_overrides[get_redis_store] = lambda: mock_redis_store
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post(
+            "/api/admin/llm-models",
+            json={"models": "glm52,gptoss"},
+            headers={"Authorization": "Bearer test-api-key-for-testing-only-12345678"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["llm_models"] == "glm52,gptoss"
+    mock_redis_store.set_ensemble_weights.assert_called_once()
+    applied = mock_redis_store.set_ensemble_weights.call_args.args[0]
+    assert set(applied.keys()) == {"glm-5.2:cloud", "gpt-oss:20b-cloud"}
+    assert all(w == pytest.approx(0.5) for w in applied.values())
+    app.dependency_overrides.pop(get_redis_store, None)
+
+
+@pytest.mark.asyncio
+async def test_llm_models_keeps_weights_when_pair_unchanged(mock_redis_store):
+    """Test POST /api/admin/llm-models does not touch weights when the stored
+    weights already match the requested pair."""
+    mock_redis_store.get_current_weights_stored.return_value = {
+        "weights": {"glm-5.2:cloud": 0.5, "gpt-oss:20b-cloud": 0.5},
+    }
+    app.dependency_overrides[get_redis_store] = lambda: mock_redis_store
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.post(
+            "/api/admin/llm-models",
+            json={"models": "glm52,gptoss"},
+            headers={"Authorization": "Bearer test-api-key-for-testing-only-12345678"},
+        )
+    assert resp.status_code == 200
+    mock_redis_store.set_ensemble_weights.assert_not_called()
     app.dependency_overrides.pop(get_redis_store, None)

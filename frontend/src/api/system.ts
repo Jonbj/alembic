@@ -15,18 +15,6 @@ export interface ActivityEvent {
   status: 'ok' | 'warn' | 'error'
 }
 
-export interface PeadSignal {
-  symbol: string
-  direction: 'beat' | 'miss' | 'inline'
-  surprise_pct: number
-  confidence: number
-  filing_id: string
-  detected_at: string
-  hold_until: string
-  days_remaining: number
-  is_active: boolean
-}
-
 export interface Readiness {
   redis_healthy: boolean
   redis_writeable: boolean
@@ -49,5 +37,4 @@ export function readinessState(r: Readiness): ReadinessState {
 
 export const fetchScheduler = () => apiFetch<SchedulerTask[]>('/api/system/scheduler')
 export const fetchActivity = (limit = 60) => apiFetch<ActivityEvent[]>(`/api/system/activity?limit=${limit}`)
-export const fetchPeadSignals = () => apiFetch<PeadSignal[]>('/api/pead/signals')
 export const fetchReadiness = () => apiFetch<Readiness>('/api/system/readiness')

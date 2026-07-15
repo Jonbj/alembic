@@ -182,7 +182,7 @@ class LossFeedback:
         """Return the entry-threshold gate for a strategy.
 
         S1 has no discrete threshold gate today (continuous rebalance), so return 0.0.
-        S4/S7 return the baseline.
+        S4 returns the baseline.
         """
         if strategy == "S1":
             return 0.0

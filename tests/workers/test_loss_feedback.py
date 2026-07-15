@@ -503,3 +503,52 @@ class TestExecutionThresholdIntegration:
         mock_redis = MagicMock()
         mock_redis.get_feedback_regime_scale.return_value = 0.64
         assert _load_feedback_regime_scale(mock_redis) == pytest.approx(0.64)
+
+
+class TestShadowComparisonToggle:
+    """Tests for shadow mode arm/disarm toggle helpers (Stage 2 model comparison)."""
+
+    def test_shadow_toggle_roundtrip(self):
+        """Shadow toggle should support set → get → clear lifecycle."""
+        mock_redis = MagicMock()
+        mock_redis._r = MagicMock()
+
+        from src.store.redis_store import RedisStore
+
+        redis_store = RedisStore(redis_client=mock_redis)
+
+        # Set
+        redis_store.set_shadow_comparison_start("2026-07-13T14:00:00+00:00")
+        mock_redis.set.assert_called_once()
+
+        # Get
+        mock_redis.get.return_value = "2026-07-13T14:00:00+00:00"
+        result = redis_store.get_shadow_comparison_start()
+        mock_redis.get.assert_called_with("shadow:model_comparison:started_at")
+        assert result == "2026-07-13T14:00:00+00:00"
+
+        # Clear
+        redis_store.clear_shadow_comparison_start()
+        mock_redis.delete.assert_called_with("shadow:model_comparison:started_at")
+
+    def test_shadow_toggle_get_returns_none_when_absent(self):
+        """get_shadow_comparison_start should return None if key is absent."""
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = None
+
+        from src.store.redis_store import RedisStore
+
+        redis_store = RedisStore(redis_client=mock_redis)
+        result = redis_store.get_shadow_comparison_start()
+        assert result is None
+
+    def test_shadow_toggle_get_handles_bytes(self):
+        """get_shadow_comparison_start should decode bytes if needed."""
+        mock_redis = MagicMock()
+        mock_redis.get.return_value = b"2026-07-13T14:00:00+00:00"
+
+        from src.store.redis_store import RedisStore
+
+        redis_store = RedisStore(redis_client=mock_redis)
+        result = redis_store.get_shadow_comparison_start()
+        assert result == "2026-07-13T14:00:00+00:00"

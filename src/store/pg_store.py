@@ -24,6 +24,15 @@ if TYPE_CHECKING:
 # Global connection pool - lazy initialized
 _db_pool: pool.ThreadedConnectionPool | None = None
 
+# Stage-2 shadow-mode model comparison (src/workers/performance.run_shadow_comparison_report
+# and scripts/report_model_comparison.py): fetch_shadow_rows/fetch_live_response_rows both
+# return plain tuples, positionally aligned to this column order, which both callers use to
+# build a pandas DataFrame. This is the single source of truth for that order — if either
+# _FETCH_SHADOW_ROWS or _FETCH_LIVE_RESPONSE_ROWS SELECT column order changes below, this
+# list (and any caller still hardcoding its own copy) must change with it, or the DataFrame
+# silently misaligns (no error — just wrong IC/hit-rate numbers).
+SHADOW_COMPARISON_COLUMNS = ["news_log_id", "model_id", "polarity", "confidence", "parse_error"]
+
 
 def _get_pool() -> pool.ThreadedConnectionPool:
     """Get or create the global connection pool."""
@@ -131,10 +140,31 @@ class PostgreSQLStore:
         return self._conn
 
     def _release_connection(self, conn: psycopg2.extensions.connection) -> None:
-        """Return connection to pool if using pooling."""
-        if self._use_pool and conn is not None:
+        """Return connection to pool if using pooling.
+
+        B7/B32 (2026-07-15): rollback before returning/closing so a connection
+        left 'idle in transaction' by a read-only method (load_frozen_stop,
+        fetch_open_trade_meta) is cleaned before it goes back into the pool —
+        otherwise putconn returns a dirty connection and the next user inherits
+        an open transaction. Seen live: 20 leaked idle-in-transaction conns.
+
+        Only rolled back on paths we actually release (pool / owned). An
+        externally-supplied connection (conn=..., use_pool=False) is not ours
+        to roll back or close — the caller owns its transaction lifecycle.
+        """
+        if conn is None:
+            return
+        if self._use_pool:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             _get_pool().putconn(conn)
-        elif self._owns_connection and conn is not None:
+        elif self._owns_connection:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             conn.close()
 
     def close(self) -> None:
@@ -216,6 +246,13 @@ class PostgreSQLStore:
     _INSERT_LLM_RESPONSE = """
         INSERT INTO llm_responses (signal_id, model_id, polarity, confidence, reasoning, eligible, generated_at)
         VALUES (%s, %s, %s, %s, %s, %s, now())
+    """
+
+    _INSERT_SHADOW_RESPONSE = """
+        INSERT INTO llm_shadow_responses
+            (news_log_id, symbol, model_id, polarity, confidence, reasoning,
+             parse_error, latency_ms)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """
 
     def log_news_item(
@@ -916,25 +953,89 @@ class PostgreSQLStore:
         exit_order_id: str,
         exit_time,
         exit_reason: str,
+        *,
+        trade_id: int | None = None,
+        is_final: bool = True,
     ) -> int | None:
-        """Mark the open trade for symbol as exited; exit_price reconciled later.
+        """Mark a trade as exited; exit_price is reconciled later by
+        reconcile_trade_fills.
 
-        Sets exit_order_id, exit_time, exit_reason. exit_price remains NULL until
-        reconcile_trade_fills fetches the Alpaca fill.
+        Multi-tranche model (WS-5 fix-back 2026-07-14). A position wound down
+        across several SELL tranches (e.g. SHEL, 3 tranches over 3 cycles) is ONE
+        trade row. ``exit_order_ids`` accumulates every tranche's order id so the
+        daily reconcile can aggregate them into one weighted-average exit price.
+
+        Targeting — targets ONLY the trade being wound down, never the many
+        historical closed trades for the same symbol (META 24, AZN 20, ...):
+        - ``trade_id`` given (preferred, caller passes the open trade's id):
+          ``WHERE id = %s``.
+        - ``trade_id`` None (fallback): ``WHERE symbol = %s AND exit_time IS NULL``
+          — the single open trade (the pyramiding guard guarantees at most one
+          open trade per symbol). NEVER a naked ``WHERE symbol = %s``, which
+          would match and corrupt every historical trade's ``exit_order_ids``.
+
+        ``is_final`` controls whether this tranche closes the trade:
+        - ``is_final=True`` (default; stop-loss / reversal full-close SELLs and
+          the final portfolio tranche): set ``exit_time`` + ``exit_reason`` and
+          return the ``trade_id`` so the caller runs its postmortem exactly once.
+        - ``is_final=False`` (partial portfolio SELL tranche, target weight > 0):
+          append the order id but do NOT set ``exit_time``/``exit_reason`` — the
+          trade stays "open" so the pyramiding guard keeps blocking re-BUY during
+          wind-down and the daily reconcile skips it until it is fully closed;
+          return None so the caller skips the postmortem until the final tranche.
         """
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
+                # exit_order_id (single, first tranche) + exit_order_ids (all
+                # tranches, dedup) are updated on EVERY tranche so reconcile can
+                # aggregate every fill.
+                append_clause = (
+                    "exit_order_id = COALESCE(exit_order_id, %s),\n"
+                    "                               exit_order_ids = CASE\n"
+                    "                                   WHEN COALESCE(\n"
+                    "                                       array_position(COALESCE(exit_order_ids, ARRAY[]::text[]), %s),\n"
+                    "                                       0\n"
+                    "                                   ) = 0\n"
+                    "                                   THEN COALESCE(exit_order_ids, ARRAY[]::text[]) || %s\n"
+                    "                                   ELSE exit_order_ids\n"
+                    "                               END"
+                )
+                if is_final:
+                    set_clause = (
+                        append_clause
+                        + ",\n                               exit_time = COALESCE(exit_time, %s),\n"
+                        "                               exit_reason = COALESCE(exit_reason, %s)"
+                    )
+                    set_params = (exit_order_id, exit_order_id, exit_order_id,
+                                   exit_time, exit_reason)
+                else:
+                    set_clause = append_clause
+                    set_params = (exit_order_id, exit_order_id, exit_order_id)
+
+                if trade_id is not None:
+                    where_sql = "WHERE id = %s"
+                    where_params = (trade_id,)
+                else:
+                    where_sql = "WHERE symbol = %s AND exit_time IS NULL"
+                    where_params = (symbol,)
+
                 cur.execute(
-                    """UPDATE trades
-                       SET exit_order_id = %s, exit_time = %s, exit_reason = %s
-                       WHERE symbol = %s AND exit_time IS NULL
-                       RETURNING id""",
-                    (exit_order_id, exit_time, exit_reason, symbol),
+                    f"""UPDATE trades
+                        SET {set_clause}
+                        {where_sql}
+                        RETURNING id""",
+                    set_params + where_params,
                 )
                 row = cur.fetchone()
             conn.commit()
-            return int(row[0]) if row else None
+            if row is None:
+                # No matching open trade (e.g. a SELL for a symbol with no open
+                # row, or a double close): nothing to record, no postmortem.
+                return None
+            trade_id = int(row[0])
+            # Postmortem runs only on the final tranche.
+            return trade_id if is_final else None
         except Exception:
             conn.rollback()
             raise
@@ -953,13 +1054,16 @@ class PostgreSQLStore:
                     (symbol,),
                 )
                 row = cur.fetchone()
-                if row is None:
-                    return None
-                signal_id = row[0]
-                return {
-                    "signal_id": signal_id,
-                    "strategy": "S4" if signal_id is not None else "S1",
-                }
+            # B7/B32: read-only — end the transaction so the connection is not
+            # left 'idle in transaction' (the exact state of the leaked conns).
+            conn.rollback()
+            if row is None:
+                return None
+            signal_id = row[0]
+            return {
+                "signal_id": signal_id,
+                "strategy": "S4" if signal_id is not None else "S1",
+            }
         except Exception:
             conn.rollback()
             raise
@@ -981,19 +1085,23 @@ class PostgreSQLStore:
                     (symbol,),
                 )
                 row = cur.fetchone()
-                if row is None or row[6] is None:
-                    return None
-                return FrozenStop(
-                    strategy=row[0],
-                    mode=row[1] or "fixed",
-                    vol_at_entry=row[2],
-                    sigma_eff=row[2],
-                    k=row[3],
-                    floor=row[4],
-                    cap=row[5],
-                    d_init=float(row[6]),
-                    vol_source=row[7],
-                )
+            # B7/B32: read-only — end the transaction so the connection is not
+            # left 'idle in transaction' (load_frozen_stop was the last query on
+            # the 20 leaked live connections, 2026-07-14).
+            conn.rollback()
+            if row is None or row[6] is None:
+                return None
+            return FrozenStop(
+                strategy=row[0],
+                mode=row[1] or "fixed",
+                vol_at_entry=row[2],
+                sigma_eff=row[2],
+                k=row[3],
+                floor=row[4],
+                cap=row[5],
+                d_init=float(row[6]),
+                vol_source=row[7],
+            )
         except Exception:
             conn.rollback()
             raise
@@ -1411,39 +1519,61 @@ class PostgreSQLStore:
                 except Exception as e:
                     log.warning("Failed to reconcile order %s: %s", order_id, e)
 
-            # Reconcile exit fills — compute P&L once fill price is known
+            # Reconcile exit fills — compute P&L once fill price is known.
+            # WS-5 fix-back (2026-07-14): reconcile ONLY fully-closed trades
+            # (exit_time IS NOT NULL, set on the final tranche). Intermediate
+            # tranches set exit_order_id/exit_order_ids but keep exit_time NULL,
+            # so a position mid-wind-down is not prematurely reconciled with a
+            # partial fill. Aggregates every tranche in exit_order_ids.
             with conn.cursor() as cur:
                 cur.execute(
-                    """SELECT id, exit_order_id, entry_price, entry_notional, qty, symbol
+                    """SELECT id, exit_order_id, exit_order_ids,
+                              entry_price, entry_notional, qty, symbol
                        FROM trades
-                       WHERE exit_order_id IS NOT NULL
+                       WHERE exit_time IS NOT NULL
                          AND exit_price IS NULL
                          AND exit_time > now() - '48 hours'::interval"""
                 )
                 exit_rows = cur.fetchall()
             exit_updated = 0
-            for trade_id, exit_order_id, entry_price, entry_notional, qty, symbol in exit_rows:
+            for trade_id, exit_order_id, exit_order_ids, entry_price, entry_notional, qty, symbol in exit_rows:
                 try:
-                    order = trading_client.get_order_by_id(exit_order_id)
-                    if order.filled_avg_price is None:
+                    order_ids = list(exit_order_ids) if exit_order_ids else [exit_order_id]
+                    fills: list[tuple[float, float]] = []
+                    for oid in order_ids:
+                        order = trading_client.get_order_by_id(oid)
+                        if order.filled_avg_price is None:
+                            continue
+                        fill_price = float(order.filled_avg_price)
+                        fill_qty = float(order.filled_qty) if order.filled_qty else 0.0
+                        fills.append((fill_price, fill_qty))
+                    if not fills:
                         continue
-                    fill_price = float(order.filled_avg_price)
+                    total_fill_qty = sum(q for _, q in fills)
+                    if total_fill_qty <= 0:
+                        continue
+                    avg_exit_price = sum(p * q for p, q in fills) / total_fill_qty
                     entry_p = float(entry_price) if entry_price is not None else 0.0
-                    qty_f = float(qty) if qty is not None else 0.0
-                    notional_f = float(entry_notional) if entry_notional is not None else 0.0
+                    # Use the actual filled quantity across all tranches so the
+                    # P&L matches the total shares that left the position.
+                    qty_f = total_fill_qty
+                    notional_f = float(entry_notional) if entry_notional is not None else (
+                        avg_exit_price * qty_f
+                    )
                     costs = self._cost_calc.compute(
                         symbol=symbol,
                         notional=notional_f,
                         qty=qty_f,
-                        fill_price=fill_price,
+                        fill_price=avg_exit_price,
                         side="SELL",
                     )
-                    gross_pnl = (fill_price - entry_p) * qty_f if entry_p else None
+                    gross_pnl = (avg_exit_price - entry_p) * qty_f if entry_p else None
                     net_pnl = (gross_pnl - costs.total_cost_usd) if gross_pnl is not None else None
                     with conn.cursor() as cur:
                         cur.execute(
                             """UPDATE trades SET
                                exit_price = %s,
+                               qty = %s,
                                gross_pnl = %s,
                                net_pnl = %s,
                                cost_bps = %s,
@@ -1453,7 +1583,7 @@ class PostgreSQLStore:
                                regulatory_cost_usd = %s,
                                slippage_est = %s
                                WHERE id = %s""",
-                            (fill_price, gross_pnl, net_pnl,
+                            (avg_exit_price, qty_f, gross_pnl, net_pnl,
                              costs.total_cost_bps, costs.total_cost_usd,
                              costs.spread_cost_bps, costs.impact_cost_bps,
                              costs.regulatory_cost_usd, costs.total_cost_usd,
@@ -1461,7 +1591,7 @@ class PostgreSQLStore:
                         )
                     exit_updated += 1
                 except Exception as e:
-                    log.warning("Failed to reconcile exit order %s: %s", exit_order_id, e)
+                    log.warning("Failed to reconcile exit order(s) %s for trade %s: %s", order_ids, trade_id, e)
             conn.commit()
             return updated + exit_updated
         except Exception:
@@ -1503,6 +1633,102 @@ class PostgreSQLStore:
                     ],
                 )
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    def log_shadow_responses(self, rows: list[dict]) -> None:
+        """Write Stage-2 shadow-model outputs. No-op for empty list.
+
+        Rows are audit/measurement only: nothing in the live path reads them.
+        news_log_id may be None (URL/ticker conflict in log_news_item), hence
+        the extra symbol column for joinability.
+        """
+        if not rows:
+            return
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    self._INSERT_SHADOW_RESPONSE,
+                    [
+                        (r.get("news_log_id"), r["symbol"], r["model_id"],
+                         r.get("polarity"), r.get("confidence"), r.get("reasoning"),
+                         bool(r.get("parse_error", False)), r.get("latency_ms"))
+                        for r in rows
+                    ],
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    # WARNING: this SELECT's column order must stay in sync with the module-level
+    # SHADOW_COMPARISON_COLUMNS constant above — both run_shadow_comparison_report
+    # (src/workers/performance.py) and scripts/report_model_comparison.py build a
+    # DataFrame from this method's raw tuples using that name list, positionally.
+    _FETCH_SHADOW_ROWS = """
+        SELECT news_log_id, model_id, polarity, confidence, parse_error
+        FROM llm_shadow_responses
+        WHERE created_at >= %s
+    """
+
+    def fetch_shadow_rows(self, since) -> list[tuple]:
+        """Stage-2 shadow-model rows (news_log_id, model_id, polarity, confidence,
+        parse_error) generated since `since`. Used by the auto-report task and the
+        manual report script — see src/performance/model_comparison.build_comparison.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_SHADOW_ROWS, (since,))
+                return cur.fetchall()
+        except Exception:
+            conn.rollback()
+            raise
+
+    # WARNING: this SELECT's column order must stay in sync with the module-level
+    # SHADOW_COMPARISON_COLUMNS constant above (and with _FETCH_SHADOW_ROWS, since
+    # fetch_shadow_rows and fetch_live_response_rows feed the same DataFrame) — see
+    # the note on _FETCH_SHADOW_ROWS above.
+    _FETCH_LIVE_RESPONSE_ROWS = """
+        SELECT s.news_log_id, r.model_id, r.polarity, r.confidence, FALSE AS parse_error
+        FROM llm_responses r
+        JOIN sentiment_signals s ON s.id = r.signal_id
+        WHERE r.generated_at >= %s AND s.news_log_id IS NOT NULL
+    """
+
+    def fetch_live_response_rows(self, since) -> list[tuple]:
+        """Live-ensemble per-model rows since `since`, shaped like fetch_shadow_rows
+        (parse_error hardcoded FALSE — live llm_responses rows are always parsed) so
+        both can feed the same comparison DataFrame.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_LIVE_RESPONSE_ROWS, (since,))
+                return cur.fetchall()
+        except Exception:
+            conn.rollback()
+            raise
+
+    _FETCH_FWD_BY_NEWS = """
+        SELECT news_log_id, forward_return
+        FROM sentiment_signals
+        WHERE news_log_id IS NOT NULL
+          AND forward_return IS NOT NULL
+          AND generated_at >= %s
+    """
+
+    def fetch_fwd_by_news(self, since) -> list[tuple]:
+        """(news_log_id, forward_return) pairs since `since` — the join key used
+        by build_comparison to score both shadow and live per-model rows.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_FWD_BY_NEWS, (since,))
+                return cur.fetchall()
         except Exception:
             conn.rollback()
             raise
@@ -2076,15 +2302,30 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    _FETCH_PENDING_FWD = """
+        SELECT id, symbol, generated_at
+        FROM sentiment_signals
+        WHERE (forward_return IS NULL
+               OR forward_return_3d IS NULL
+               OR forward_return_5d IS NULL)
+          AND generated_at < NOW() - INTERVAL '1 day'
+          AND generated_at > NOW() - INTERVAL '1 day' * %s
+        ORDER BY symbol, generated_at
+    """
+
     def fetch_signals_pending_forward_return(
         self, days_back: int = 60
     ) -> list[tuple]:
         """Fetch signals that need a forward return populated.
 
-        Returns (id, symbol, generated_at) for non-fallback signals that:
-          - Have no forward_return yet
+        Returns (id, symbol, generated_at) for signals — including FinBERT
+        fallback rows (they are tradeable via the no-fresh-ensemble path and
+        needed for shadow-model evaluation) — that:
+          - Are missing at least one horizon (1d/3d/5d)
           - Are older than 1 day (need next trading day to have closed)
           - Are within days_back days (avoid re-processing old history)
+
+        A row stays pending until every computable horizon is filled.
 
         Args:
             days_back: Maximum lookback window in days (default 60).
@@ -2092,18 +2333,7 @@ class PostgreSQLStore:
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT id, symbol, generated_at
-                    FROM sentiment_signals
-                    WHERE forward_return IS NULL
-                      AND fallback_used = false
-                      AND generated_at < NOW() - INTERVAL '1 day'
-                      AND generated_at > NOW() - INTERVAL '1 day' * %s
-                    ORDER BY symbol, generated_at
-                    """,
-                    (days_back,),
-                )
+                cur.execute(self._FETCH_PENDING_FWD, (days_back,))
                 return cur.fetchall()
         except Exception:
             conn.rollback()
@@ -2196,12 +2426,15 @@ class PostgreSQLStore:
             raise
 
     def bulk_add_forward_returns(
-        self, updates: list[tuple[int, float]]
+        self, updates: list[tuple[int, float | None, float | None, float | None]]
     ) -> int:
-        """Update forward_return for multiple signals in a single transaction.
+        """Update 1d/3d/5d forward returns for multiple signals in one transaction.
 
         Args:
-            updates: List of (signal_id, forward_return) tuples.
+            updates: List of (signal_id, forward_return, forward_return_3d,
+                forward_return_5d) tuples. A None horizon is left untouched via
+                COALESCE (preserves any previously-written value) so a row with
+                only partially-computable horizons can be completed on a later run.
 
         Returns:
             Number of rows updated.
@@ -2212,8 +2445,14 @@ class PostgreSQLStore:
         try:
             with conn.cursor() as cur:
                 cur.executemany(
-                    "UPDATE sentiment_signals SET forward_return = %s WHERE id = %s",
-                    [(ret, sid) for sid, ret in updates],
+                    """
+                    UPDATE sentiment_signals
+                    SET forward_return    = COALESCE(%s, forward_return),
+                        forward_return_3d = COALESCE(%s, forward_return_3d),
+                        forward_return_5d = COALESCE(%s, forward_return_5d)
+                    WHERE id = %s
+                    """,
+                    [(f1, f3, f5, sid) for sid, f1, f3, f5 in updates],
                 )
                 updated = cur.rowcount
             conn.commit()

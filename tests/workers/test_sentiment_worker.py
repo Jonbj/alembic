@@ -749,10 +749,10 @@ class TestEnsembleWeightReading:
 
         suggestion = {
             "suggested_weights": {
+                # Active default pair is "all" -> kimi + glm52, so suggestion
+                # weights must match active models.
                 "kimi-k2.6:cloud": 0.40,
-                "qwen3.5:cloud": 0.30,
-                "deepseek-v4-pro:cloud": 0.20,
-                "glm-5.1:cloud": 0.10,
+                "glm-5.2:cloud": 0.60,
             },
             "purified_icir": {},
             "freeze_reason": "VIX data unavailable (fail-safe)",
@@ -781,7 +781,8 @@ class TestEnsembleWeightReading:
         mock_redis_store.get_weight_suggestion.return_value = suggestion
         mock_redis_store.get_llm_models.return_value = None
 
-        with patch("redis.Redis") as mock_redis_cls, \
+        with patch("src.workers.sentiment.is_market_open", return_value=True), \
+             patch("redis.Redis") as mock_redis_cls, \
              patch("src.workers.sentiment.RedisStore", return_value=mock_redis_store), \
              patch("psycopg2.connect") as mock_pg_connect, \
              patch("src.workers.sentiment.PostgreSQLStore") as mock_pg_cls, \
@@ -808,8 +809,7 @@ class TestEnsembleWeightReading:
         from unittest.mock import patch, MagicMock
         from src.workers.sentiment import run_sentiment_worker
 
-        applied = {"kimi-k2.6:cloud": 0.35, "qwen3.5:cloud": 0.35,
-                   "deepseek-v4-pro:cloud": 0.20, "glm-5.1:cloud": 0.10}
+        applied = {"kimi-k2.6:cloud": 0.35, "glm-5.2:cloud": 0.65}
         raw_applied = json.dumps({"weights": applied, "source": "auto_apply"}).encode()
 
         # Provide a valid news item in the queue
@@ -831,7 +831,8 @@ class TestEnsembleWeightReading:
         mock_redis_store.get_ensemble_weights.return_value = raw_applied
         mock_redis_store.get_llm_models.return_value = None
 
-        with patch("redis.Redis") as mock_redis_cls, \
+        with patch("src.workers.sentiment.is_market_open", return_value=True), \
+             patch("redis.Redis") as mock_redis_cls, \
              patch("src.workers.sentiment.RedisStore", return_value=mock_redis_store), \
              patch("psycopg2.connect") as mock_pg_connect, \
              patch("src.workers.sentiment.PostgreSQLStore") as mock_pg_cls, \
@@ -882,7 +883,8 @@ class TestEnsembleWeightReading:
         mock_redis_store.get_weight_suggestion.return_value = None
         mock_redis_store.get_llm_models.return_value = None
 
-        with patch("redis.Redis") as mock_redis_cls, \
+        with patch("src.workers.sentiment.is_market_open", return_value=True), \
+             patch("redis.Redis") as mock_redis_cls, \
              patch("src.workers.sentiment.RedisStore", return_value=mock_redis_store), \
              patch("psycopg2.connect") as mock_pg_connect, \
              patch("src.workers.sentiment.PostgreSQLStore") as mock_pg_cls, \
@@ -948,6 +950,111 @@ class TestProcessNewsBatchConcurrency:
         assert max_active >= 2, (
             f"Expected at least 2 concurrent items, max observed was {max_active}"
         )
+
+
+class TestProcessNewsBatchShadowDecoupling:
+    """Critical finding (stage2-shadow-2026-07-12 review): Stage-2 shadow scoring
+    awaited inline inside process_news_item composed with the live ensemble's
+    up-to-90s call, inside process_news_batch's per-item semaphore — across the
+    batch's 6 sequential concurrency-2 rounds this could blow celery_app.py's
+    task_soft_time_limit (780s). process_news_batch must instead give shadow
+    tasks a single bounded wait AFTER all live items have returned, so a slow
+    shadow candidate cannot hold up the batch's return, while a fast one still
+    gets to finish and log its row.
+    """
+
+    @staticmethod
+    def _make_live_mocks():
+        mock_outputs = [make_model_output(0.6, 0.8, "opus")]
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+        mock_aggregator.aggregate.return_value = MagicMock(
+            polarity=0.6, confidence=0.8, reasoning="Strong beat", model_ids=["opus"],
+        )
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock(return_value="ok")
+        mock_budget.record_spending = AsyncMock(return_value=1.0)
+        mock_finbert = MagicMock(spec=FinBERTClient)
+        return mock_outputs, mock_aggregator, mock_budget, mock_finbert
+
+    @pytest.mark.asyncio
+    async def test_slow_shadow_candidate_does_not_block_batch_return(self):
+        """A shadow call slower than the bounded-wait window must not make
+        process_news_batch wait for it: the batch must return within roughly
+        the bounded-wait window, not the shadow call's full duration.
+        """
+        mock_outputs, mock_aggregator, mock_budget, mock_finbert = self._make_live_mocks()
+        mock_redis = MagicMock(spec=RedisStore)
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        news_items = [make_news_item("AAPL", i) for i in range(4)]
+
+        async def slow_shadow(**kwargs):
+            await asyncio.sleep(0.5)
+
+        with patch(
+            "src.workers.sentiment.run_ensemble_query", new_callable=AsyncMock
+        ) as mock_run_ensemble, patch(
+            "src.workers.sentiment._shadow_query_candidates",
+            new=AsyncMock(side_effect=slow_shadow),
+        ), patch("src.workers.sentiment._SHADOW_BOUNDED_WAIT_S", 0.05, create=True):
+            mock_run_ensemble.return_value = mock_outputs
+
+            # Old (pre-fix) behavior awaits the 0.5s shadow call inline inside
+            # each item's semaphore slot: with 4 items at concurrency 2 that's
+            # >= 1.0s total, which the 0.3s ceiling below is well under —
+            # proving we're no longer waiting for the slow shadow candidate.
+            results = await asyncio.wait_for(
+                process_news_batch(
+                    news_items=news_items,
+                    clients=[],
+                    aggregator=mock_aggregator,
+                    finbert=mock_finbert,
+                    budget_tracker=mock_budget,
+                    redis_store=mock_redis,
+                    pg_store=mock_pg,
+                ),
+                timeout=0.3,
+            )
+
+        assert len(results) == 4
+
+    @pytest.mark.asyncio
+    async def test_fast_shadow_candidate_still_logs_within_bounded_wait(self):
+        """A shadow call that finishes well inside the bounded-wait window must
+        NOT be cancelled — its store write must still happen. Guards against an
+        overly-aggressive bounded wait that would defeat the point of giving
+        shadow tasks a chance to complete at all.
+        """
+        mock_outputs, mock_aggregator, mock_budget, mock_finbert = self._make_live_mocks()
+        mock_redis = MagicMock(spec=RedisStore)
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        news_items = [make_news_item("AAPL", 0)]
+
+        async def fast_shadow(*, clean_body, clean_symbol, news_log_id, pg_store, redis_store):
+            await asyncio.sleep(0.01)
+            pg_store.log_shadow_responses([{"symbol": clean_symbol}])
+
+        with patch(
+            "src.workers.sentiment.run_ensemble_query", new_callable=AsyncMock
+        ) as mock_run_ensemble, patch(
+            "src.workers.sentiment._shadow_query_candidates",
+            new=AsyncMock(side_effect=fast_shadow),
+        ), patch("src.workers.sentiment._SHADOW_BOUNDED_WAIT_S", 0.2, create=True):
+            mock_run_ensemble.return_value = mock_outputs
+
+            await asyncio.wait_for(
+                process_news_batch(
+                    news_items=news_items,
+                    clients=[],
+                    aggregator=mock_aggregator,
+                    finbert=mock_finbert,
+                    budget_tracker=mock_budget,
+                    redis_store=mock_redis,
+                    pg_store=mock_pg,
+                ),
+                timeout=1.0,
+            )
+
+        mock_pg.log_shadow_responses.assert_called_once()
 
 
 class TestProcessNewsItemCorrelation:
@@ -1045,3 +1152,18 @@ class TestProcessNewsItemCorrelation:
             )
 
         mock_pg.link_signal_to_news.assert_not_called()
+
+
+def test_run_sentiment_worker_skips_when_market_closed():
+    """WS-4: sentiment worker exits early when US market is closed."""
+    from src.workers.sentiment import run_sentiment_worker
+
+    with patch("src.workers.sentiment.is_market_open", return_value=False), \
+         patch("redis.Redis") as mock_redis_cls, \
+         patch("psycopg2.connect") as mock_pg_connect:
+        result = run_sentiment_worker()
+
+    assert result["skipped"] is True
+    assert result["reason"] == "market_closed"
+    mock_redis_cls.from_url.return_value.close.assert_called_once()
+    mock_pg_connect.return_value.close.assert_called_once()

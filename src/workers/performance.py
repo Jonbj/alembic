@@ -40,6 +40,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import httpx
 import numpy as np
+import pandas as pd
 import psycopg2
 
 from src.config import config
@@ -58,6 +59,7 @@ from src.performance.drift import (
     DriftAlert,
 )
 from src.performance.ic import compute_composite_ic, compute_icir
+from src.performance.model_comparison import build_comparison, render_markdown
 from src.performance.postmortem import diagnose_loss, should_trigger_postmortem, TradeContext
 from src.performance.weights import compute_new_weights, compute_purified_icir
 from src.portfolio.loss_feedback import (
@@ -66,7 +68,8 @@ from src.portfolio.loss_feedback import (
     risk_budget_at_entry,
     strategy_for_trade,
 )
-from src.store.pg_store import PostgreSQLStore
+from src.llm.model_registry import model_ids_for_keys, normalize_model_selection, normalize_weights_for_active_models
+from src.store.pg_store import PostgreSQLStore, SHADOW_COMPARISON_COLUMNS
 from src.store.redis_store import RedisStore
 from src.workers.celery_app import app
 from src.workers.execution import ENTRY_THRESHOLD
@@ -692,6 +695,28 @@ def run_reconcile_fills_intraday() -> dict:
         pg.close()
 
 
+def _daily_performance_report_tg_enabled() -> bool:
+    """Read notifications.send_daily_performance_report from config/trading.yaml.
+
+    Default false (2026-07-15): suppress the daily "Performance Report" Telegram
+    message (IC/ICIR/weights) from run_daily_report at 03:00 UTC — flagged as
+    noise. The report is still built and cached in Redis for the API/UI; only the
+    Telegram send is gated. Flip the flag to true to re-enable. Isolated as a
+    helper so tests can patch it.
+    """
+    try:
+        import yaml
+        from pathlib import Path
+        _ty = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
+        with open(_ty) as _f:
+            return bool(
+                ((yaml.safe_load(_f) or {}).get("notifications") or {})
+                .get("send_daily_performance_report", False)
+            )
+    except Exception:
+        return False
+
+
 @app.task(name="src.workers.performance.run_daily_report")
 def run_daily_report():
     """Daily performance report task.
@@ -744,14 +769,18 @@ def run_daily_report():
         # Build signal distribution for last 24h (visibility into why portfolio is cash)
         signal_distribution = _build_signal_distribution(pg, lookback_hours=24)
 
-        # Send Telegram alert
-        notifier = TelegramNotifier()
-        message = _format_performance_telegram_message(
-            report, cb_result.soft_warnings_triggered, signal_distribution
-        )
-        run_async(notifier.send_alert(message, level="info"))
+        # Send Telegram alert — gated by notifications.send_daily_performance_report
+        # in config/trading.yaml (default false: suppress daily "Performance Report"
+        # Telegram noise). The report is still cached in Redis above for the API/UI;
+        # only the Telegram send is gated. Flip the flag to true to re-enable.
+        if _daily_performance_report_tg_enabled():
+            notifier = TelegramNotifier()
+            message = _format_performance_telegram_message(
+                report, cb_result.soft_warnings_triggered, signal_distribution
+            )
+            run_async(notifier.send_alert(message, level="info"))
 
-        log.info(f"Daily report sent. Overall IC: {report.overall_ic:.4f}, ICIR: {report.icir:.3f}")
+        log.info(f"Daily report built. Overall IC: {report.overall_ic:.4f}, ICIR: {report.icir:.3f}")
 
         # Reconcile fill prices from Alpaca for trades placed in last 24h
         if config.ALPACA_API_KEY and config.ALPACA_SECRET_KEY:
@@ -1371,16 +1400,30 @@ def check_and_apply_weights():
 
         log.info("Auto-apply frozen: %s", freeze_reason)
       else:
-        redis.set_ensemble_weights(suggested_weights, source="auto_apply")
+        # WS-3 (2026-07-14): drop any suggested weights for models that are no
+        # longer in the active pair before persisting. The read path already
+        # filters them, but writing a stale dict confuses the dashboard.
+        llm_selection = redis.get_llm_models() or "all"
+        _, active_keys, _ = normalize_model_selection(llm_selection)
+        active_model_ids = model_ids_for_keys(active_keys)
+        applied_weights, dropped = normalize_weights_for_active_models(
+            suggested_weights, active_model_ids
+        )
+        if dropped:
+            log.warning(
+                "Auto-apply dropped weights for inactive models: %s",
+                dropped,
+            )
+        redis.set_ensemble_weights(applied_weights, source="auto_apply")
         redis.delete_suggestion_snapshot()
 
         pg.log_weight_update(
             source="auto_apply",
-            applied_weights=suggested_weights,
+            applied_weights=applied_weights,
             suggested_weights=suggested_weights,
             purified_icir=purified_icir,
             freeze_reason=None,
-            note=json.dumps({"vix": vix, "ic_variance": ic_variance, "max_delta": max_delta}),
+            note=json.dumps({"vix": vix, "ic_variance": ic_variance, "max_delta": max_delta, "dropped": dropped}),
             approved_by="system",
         )
 
@@ -1398,17 +1441,21 @@ def check_and_apply_weights():
 
 @app.task(name="src.workers.performance.run_forward_return_worker")
 def run_forward_return_worker() -> dict:
-    """Populate forward_return for sentiment signals that are at least 1 day old.
+    """Populate forward_return/_3d/_5d for sentiment signals at least 1 day old.
 
     Scheduled daily at 22:00 UTC (6pm ET, after US market close + settlement).
-    Uses Alpaca StockHistoricalDataClient to fetch daily bars.
+    Uses Alpaca StockHistoricalDataClient to fetch daily bars. Now includes
+    FinBERT fallback signals (previously excluded — see migration 036 / pending
+    query change), so coverage is no longer capped at ~29% of the stream.
 
-    Forward return definition:
-        fwd_ret = (close_{T+1} - close_T) / close_T
+    Forward return definition (per horizon n in {1, 3, 5} TRADING days):
+        fwd_ret_n = (close_{T+n} - close_T) / close_T
 
-    Where T = trading day of the signal and T+1 = next trading day.
-    Signals generated after market close (>= 21:00 UTC / 4pm ET) are treated
-    as belonging to the NEXT trading day, so their T+1 is T+2 calendar days.
+    Where T = trading day of the signal. Signals generated after market close
+    (>= 21:00 UTC / 4pm ET) are treated as belonging to the NEXT trading day.
+    A horizon whose future bar isn't available yet is left NULL and the row
+    stays pending — bulk_add_forward_returns' COALESCE preserves any horizon
+    already computed on a prior run, so partial rows complete incrementally.
 
     Skips symbols without available daily bars (ETFs, ADRs, delisted tickers).
 
@@ -1418,6 +1465,7 @@ def run_forward_return_worker() -> dict:
     from collections import defaultdict
 
     import psycopg2
+    from alpaca.data.enums import DataFeed
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
@@ -1449,21 +1497,28 @@ def run_forward_return_worker() -> dict:
             secret_key=config.ALPACA_SECRET_KEY,
         )
 
-        updates: list[tuple[int, float]] = []
+        updates: list[tuple[int, float | None, float | None, float | None]] = []
 
         for symbol, signals in by_symbol.items():
             try:
                 # Determine date range: earliest signal date minus 1 day buffer,
-                # latest signal date plus 3 days (covers weekends / holidays for T+1).
+                # latest signal date plus 12 days. T+5 TRADING days spans up to
+                # 10 calendar days (Friday signal before a Monday holiday:
+                # Fri -> next Fri = +7, plus holiday = +10); +12 adds margin so
+                # the 5d horizon is never structurally unreachable.
                 dates = [ts for _, ts in signals]
                 start = min(dates) - timedelta(days=2)
-                end = max(dates) + timedelta(days=4)
+                end = max(dates) + timedelta(days=12)
 
                 req = StockBarsRequest(
                     symbol_or_symbols=symbol,
                     timeframe=TimeFrame.Day,
                     start=start,
                     end=end,
+                    # Pin IEX: the SIP default is rejected by the paper
+                    # subscription while the market is open ("recent SIP data"),
+                    # which silently zeroes coverage for every symbol.
+                    feed=DataFeed.IEX,
                 )
                 bars_df = data_client.get_stock_bars(req).df
 
@@ -1495,20 +1550,30 @@ def run_forward_return_worker() -> dict:
 
                         # Find T: the first trading day on or after signal_date.
                         t_dates = [d for d in trading_dates if d >= signal_date]
-                        if len(t_dates) < 2:
+                        if not t_dates:
                             stats["skipped_no_data"] += 1
                             continue
 
-                        t0, t1 = t_dates[0], t_dates[1]
-                        close_t0 = close_by_date[t0]
-                        close_t1 = close_by_date[t1]
-
+                        close_t0 = close_by_date[t_dates[0]]
                         if close_t0 == 0:
                             stats["skipped_no_data"] += 1
                             continue
 
-                        fwd_ret = (close_t1 - close_t0) / close_t0
-                        updates.append((sid, fwd_ret))
+                        # Horizons in TRADING days from T0; None when the future
+                        # bar is not yet available (row stays pending for that
+                        # horizon; COALESCE in the writer preserves prior values).
+                        fwd: dict[int, float | None] = {}
+                        for n in (1, 3, 5):
+                            if len(t_dates) > n:
+                                fwd[n] = (close_by_date[t_dates[n]] - close_t0) / close_t0
+                            else:
+                                fwd[n] = None
+
+                        if all(v is None for v in fwd.values()):
+                            stats["skipped_no_data"] += 1
+                            continue
+
+                        updates.append((sid, fwd[1], fwd[3], fwd[5]))
 
                     except Exception as e:
                         log.debug("Error computing fwd return for signal %d (%s): %s", sid, symbol, e)
@@ -2053,3 +2118,55 @@ def run_daily_trading_analysis(target_date: str | None = None) -> dict:
     stats_out = {"skipped": True, "reason": "replaced_by_claude_code"}
     log.info("Daily trading analysis complete: %s", stats_out)
     return stats_out
+
+
+@app.task(name="src.workers.performance.run_shadow_comparison_report")
+def run_shadow_comparison_report() -> dict:
+    """Stage-2 auto-report: after >=7 days armed, build the ranked comparison,
+    send it via Telegram, and DISARM the shadow toggle (self-bounding spend).
+
+    No-op (skipped) unless an operator armed shadow mode via
+    RedisStore.set_shadow_comparison_start, and until 7 days have elapsed since
+    arming.
+
+    Self-disarm invariant: once the 7-day window closes, redis.clear_shadow_
+    comparison_start() ALWAYS runs — it sits outside (after) the Telegram
+    try/except below, so a failed/misconfigured Telegram send cannot leave
+    shadow mode armed forever. Disarming is unconditional on reaching that
+    point; only sending the report is best-effort.
+    """
+    redis = RedisStore()
+    try:
+        started_raw = redis.get_shadow_comparison_start()
+        if not started_raw:
+            return {"skipped": True, "reason": "not_armed"}
+
+        started = datetime.fromisoformat(started_raw)
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        if (datetime.now(timezone.utc) - started) < timedelta(days=7):
+            return {"skipped": True, "reason": "window_open"}
+
+        pg = PostgreSQLStore()
+        try:
+            rows = pd.DataFrame(
+                list(pg.fetch_shadow_rows(started)) + list(pg.fetch_live_response_rows(started)),
+                columns=SHADOW_COMPARISON_COLUMNS,
+            )
+            fwd = dict(pg.fetch_fwd_by_news(started))
+        finally:
+            pg.close()
+
+        report = build_comparison(rows, fwd, divergence_threshold=config.ENSEMBLE_DIVERGENCE_STD)
+        md = render_markdown(report)
+
+        try:
+            notifier = TelegramNotifier()
+            run_async(notifier.send_alert(md, level="info"))
+        except Exception as exc:
+            log.warning("shadow report Telegram send failed: %s", exc)
+
+        redis.clear_shadow_comparison_start()
+        return {"reported": True, "models": len(report["models"])}
+    finally:
+        redis.close()

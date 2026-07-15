@@ -1,7 +1,7 @@
 """Tests for PostgreSQL store - SQL injection fix verification."""
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from src.store.pg_store import PostgreSQLStore
 
@@ -311,19 +311,29 @@ class TestConnectionPoolSafety:
         mock_conn.commit.side_effect = Exception("commit failed")
         store = PostgreSQLStore(conn=mock_conn, use_pool=False)
         with pytest.raises(Exception, match="commit failed"):
-            store.bulk_add_forward_returns([(1, 0.02), (2, -0.01)])
+            store.bulk_add_forward_returns([(1, 0.02, None, None), (2, -0.01, None, None)])
         mock_conn.rollback.assert_called_once()
 
     def test_close_does_not_double_release_after_exception(self):
-        """Connection released exactly once even when method raised."""
+        """Connection released exactly once even when a method raised.
+
+        This fixture uses an *externally-supplied* connection
+        (``conn=mock_conn, use_pool=False``): the store neither pools nor owns
+        it, so ``close()`` must NOT release/rollback/close it — the caller owns
+        that lifecycle. The only rollback is the method's own except path.
+        B7/B32 (2026-07-15): the leak fix rolls back only on paths the store
+        actually releases (pool / owned), never on an external connection.
+        """
         store, mock_conn = self._make_store_with_failing_cursor()
         try:
             store.fetch_signals_for_ic("AAPL", 30)
         except Exception:
             pass
         store.close()
-        # _release_connection called once (in close()), rollback called once (in method)
+        # only the method's except path rolls back — close() leaves the
+        # external connection untouched (no double release, no surprise rollback)
         mock_conn.rollback.assert_called_once()
+        mock_conn.close.assert_not_called()
 
     def test_get_last_portfolio_cycle_rollback_on_error(self):
         """get_last_portfolio_cycle rolls back on error and returns None."""
@@ -618,6 +628,192 @@ class TestCloseTradeReturnsId:
         assert result is None
 
 
+class TestRecordTradeExit:
+    """record_trade_exit marks a trade closed and accumulates multi-tranche
+    exit order IDs in exit_order_ids."""
+
+    def test_record_trade_exit_returns_id_on_first_close(self):
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (7, False)
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        result = store.record_trade_exit(
+            symbol="TSLA",
+            exit_order_id="exit-1",
+            exit_time=datetime(2026, 6, 5, 16, tzinfo=timezone.utc),
+            exit_reason="portfolio_sell",
+        )
+        assert result == 7
+        sql = mock_cur.execute.call_args[0][0]
+        assert "exit_order_ids" in sql
+        assert "COALESCE" in sql
+        mock_conn.commit.assert_called_once()
+
+    def test_record_trade_exit_returns_none_for_later_tranche(self):
+        """WS-5 fix-back: an intermediate (non-final) SELL tranche (is_final=False)
+        appends the order id but does not set exit_time and returns None, so the
+        caller skips the postmortem; the final tranche (is_final=True) sets
+        exit_time and returns the trade id so the postmortem runs exactly once."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        # Same open trade (id=7) found on every tranche — it stays open until the
+        # final tranche, so the fallback WHERE ... AND exit_time IS NULL keeps
+        # matching it.
+        mock_cur.fetchone.side_effect = [(7,), (7,)]
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        ts = datetime(2026, 6, 5, 16, tzinfo=timezone.utc)
+        # Intermediate tranche: appends order id, trade stays open, no postmortem.
+        assert store.record_trade_exit("SHEL", "o1", ts, "sell", is_final=False) is None
+        # Final tranche: sets exit_time, returns id, postmortem runs once.
+        assert store.record_trade_exit("SHEL", "o2", ts, "sell", is_final=True) == 7
+        assert mock_conn.commit.call_count == 2
+
+
+class TestRecordTradeExitMultiTrancheFixback:
+    """WS-5 fix-back (2026-07-14): record_trade_exit must target ONLY the open trade
+    for a symbol, never the many historical closed trades for the same symbol
+    (META 24, AZN 20, ...). The is_final model keeps the trade "open" (exit_time
+    NULL) on intermediate tranches so the pyramiding guard blocks re-BUY during
+    wind-down and reconcile runs once, on the fully-closed trade.
+    """
+
+    def test_final_tranche_targets_by_trade_id_not_symbol(self):
+        """The UPDATE WHERE must target the open trade by id (or by
+        symbol+exit_time IS NULL), NEVER a naked `WHERE symbol = %s` that would
+        match every historical closed trade for the symbol."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        # The open trade is id=99. Historicals (id 1,2,3) must NOT be touched.
+        mock_cur.fetchone.return_value = (99,)
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        result = store.record_trade_exit(
+            symbol="META",
+            exit_order_id="exit-final",
+            exit_time=datetime(2026, 7, 14, 19, 52, tzinfo=timezone.utc),
+            exit_reason="portfolio_sell",
+            trade_id=99,
+            is_final=True,
+        )
+        assert result == 99
+        sql = mock_cur.execute.call_args[0][0]
+        # MUST target the specific trade, never a naked symbol match.
+        assert "WHERE symbol = %s\n" not in sql  # Kimi's bug: naked symbol match
+        assert "WHERE id = %s" in sql
+        params = mock_cur.execute.call_args[0][1]
+        assert params[-1] == 99  # trade_id is the WHERE target
+        # Final tranche sets exit_time + exit_reason.
+        assert "exit_time = COALESCE(exit_time" in sql
+        assert "exit_reason = COALESCE(exit_reason" in sql
+
+    def test_intermediate_tranche_does_not_set_exit_time(self):
+        """A partial SELL tranche (is_final=False) appends the order id but must
+        NOT set exit_time/exit_reason — the trade stays "open" so the pyramiding
+        guard keeps blocking re-BUY during wind-down, and so the caller skips the
+        postmortem (returns None)."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (99,)
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        result = store.record_trade_exit(
+            symbol="META",
+            exit_order_id="exit-tranche-1",
+            exit_time=datetime(2026, 7, 14, 18, 22, tzinfo=timezone.utc),
+            exit_reason="portfolio_sell",
+            trade_id=99,
+            is_final=False,
+        )
+        # Intermediate tranche: no postmortem (returns None).
+        assert result is None
+        sql = mock_cur.execute.call_args[0][0]
+        # Appends to exit_order_ids (multi-tranche aggregation).
+        assert "exit_order_ids" in sql
+        # MUST NOT set exit_time/exit_reason on an intermediate tranche.
+        assert "exit_time = COALESCE(exit_time" not in sql
+        assert "exit_reason = COALESCE(exit_reason" not in sql
+
+    def test_fallback_without_trade_id_targets_open_trade_only(self):
+        """When the caller cannot pass trade_id, the fallback WHERE must be
+        `symbol = %s AND exit_time IS NULL` (the single open trade) — NEVER
+        `WHERE symbol = %s` alone, which would corrupt every historical trade."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (99,)
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        store.record_trade_exit(
+            symbol="META",
+            exit_order_id="exit-1",
+            exit_time=datetime(2026, 7, 14, 18, 22, tzinfo=timezone.utc),
+            exit_reason="portfolio_sell",
+            is_final=False,
+        )
+        sql = mock_cur.execute.call_args[0][0]
+        # Fallback must scope to the open trade only via exit_time IS NULL.
+        assert "WHERE symbol = %s AND exit_time IS NULL" in sql
+        # And must NOT be the naked symbol match (Kimi's bug: `WHERE symbol = %s`
+        # immediately followed by a newline / RETURNING, no exit_time filter).
+        assert "WHERE symbol = %s\n" not in sql
+
+    def test_multi_tranche_flow_runs_postmortem_once(self):
+        """A 3-tranche wind-down: tranches 1-2 (is_final=False) return None
+        (postmortem skipped); tranche 3 (is_final=True) returns the trade_id
+        (postmortem runs exactly once, on the final tranche)."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        # Same open trade (id=99) found on every tranche (it stays open until final).
+        mock_cur.fetchone.side_effect = [(99,), (99,), (99,)]
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        ts = datetime(2026, 7, 14, 19, 52, tzinfo=timezone.utc)
+        r1 = store.record_trade_exit("META", "o1", ts, "sell", trade_id=99, is_final=False)
+        r2 = store.record_trade_exit("META", "o2", ts, "sell", trade_id=99, is_final=False)
+        r3 = store.record_trade_exit("META", "o3", ts, "sell", trade_id=99, is_final=True)
+        assert [r1, r2, r3] == [None, None, 99]
+        # Only the final (3rd) UPDATE sets exit_time.
+        sqls = [c[0][0] for c in mock_cur.execute.call_args_list]
+        assert "exit_time = COALESCE(exit_time" not in sqls[0]
+        assert "exit_time = COALESCE(exit_time" not in sqls[1]
+        assert "exit_time = COALESCE(exit_time" in sqls[2]
+        assert mock_conn.commit.call_count == 3
+
+    def test_stop_loss_full_close_defaults_to_final(self):
+        """Stop-loss / reversal SELLs are full-close: they don't pass is_final, so
+        the default is_final=True applies — exit_time is set, trade_id returned,
+        postmortem runs. No behavior regression for those paths."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (7,)
+
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        result = store.record_trade_exit(
+            symbol="PANW",
+            exit_order_id="stop-1",
+            exit_time=datetime(2026, 7, 14, 16, tzinfo=timezone.utc),
+            exit_reason="stop_loss",
+        )
+        assert result == 7
+        sql = mock_cur.execute.call_args[0][0]
+        assert "exit_time = COALESCE(exit_time" in sql
+
+
 class TestFetchTrades:
     def test_fetch_all_trades(self):
         from datetime import datetime, timezone
@@ -725,6 +921,46 @@ class TestReconcileTradesFills:
         updated = store.reconcile_trade_fills(mock_trading)
 
         assert updated == 0
+
+    def test_exit_multi_tranche_computes_weighted_average(self):
+        """WS-5: three SELL tranches are aggregated into one exit_price/qty/pnl."""
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        # Entry fills empty, exit fills with one multi-tranche trade.
+        mock_cur.fetchall.side_effect = [
+            [],
+            [(
+                42, "order-exit-1",
+                ["order-exit-1", "order-exit-2", "order-exit-3"],
+                100.0, 1800.0, 18.021, "SHEL",
+            )],
+        ]
+
+        orders = {
+            "order-exit-1": MagicMock(filled_avg_price="84.06", filled_qty="1.322"),
+            "order-exit-2": MagicMock(filled_avg_price="84.10", filled_qty="0.418"),
+            "order-exit-3": MagicMock(filled_avg_price="84.00", filled_qty="16.281"),
+        }
+        mock_trading = MagicMock()
+        mock_trading.get_order_by_id.side_effect = lambda oid: orders[oid]
+
+        store = PostgreSQLStore(conn=mock_conn)
+        updated = store.reconcile_trade_fills(mock_trading)
+
+        assert updated == 1
+        # Find the exit UPDATE call
+        update_call = next(
+            c for c in mock_cur.execute.call_args_list
+            if c[0][0].startswith("UPDATE trades SET") and "exit_price" in c[0][0]
+        )
+        params = update_call[0][1]
+        exit_price, exit_qty, gross_pnl = params[0], params[1], params[2]
+        expected_qty = 1.322 + 0.418 + 16.281
+        expected_price = (84.06 * 1.322 + 84.10 * 0.418 + 84.00 * 16.281) / expected_qty
+        assert exit_qty == pytest.approx(expected_qty)
+        assert exit_price == pytest.approx(expected_price, abs=0.001)
+        assert gross_pnl == pytest.approx((expected_price - 100.0) * expected_qty, abs=0.01)
 
 
 class TestFetchAnalyticsBySymbol:
@@ -1000,6 +1236,142 @@ class TestFetchDecisionsSignalScore:
         assert "signal_score" in select_sql, (
             "fetch_decisions SELECT must include signal_score — currently omitted "
             "so the LLM sentiment score is invisible to the API and analytics"
+        )
+
+
+class TestConnectionLeakB7B32:
+    """B7/B32 (2026-07-15): PostgreSQL pool leak.
+
+    Root cause seen live 2026-07-14: 20 connections 'idle in transaction' from
+    `SELECT stop_strategy, stop_mode, stop_vol_at_entry, stop_k ...` (load_frozen_stop),
+    one per 15-min portfolio cycle, holding AccessShareLock on `trades` for hours
+    and blocking migration 037. Source: bare `PostgreSQLStore()` instances never
+    closed (connection never returned to pool) + read-only methods not ending the
+    transaction + `_release_connection` not rolling back before `putconn`.
+    """
+
+    def test_release_connection_rolls_back_before_putconn(self):
+        """Returning a pooled connection MUST rollback before putconn, so a
+        connection left 'idle in transaction' by a read-only method is cleaned
+        before it goes back into the pool (and before the next user gets a dirty
+        connection). Without this, putconn returns a connection with an open tx."""
+        import src.store.pg_store as pgm
+
+        parent = MagicMock()
+        mock_conn = parent.conn
+        mock_pool = parent.pool
+        with patch.object(pgm, "_get_pool", return_value=mock_pool):
+            store = PostgreSQLStore(use_pool=True)  # _use_pool=True, _conn=None
+            store._release_connection(mock_conn)
+
+        mock_conn.rollback.assert_called_once()
+        mock_pool.putconn.assert_called_once_with(mock_conn)
+        # rollback MUST happen before putconn (call order on the shared parent)
+        calls = [name for (name, _, _) in parent.mock_calls]
+        assert calls.index("conn.rollback") < calls.index("pool.putconn"), (
+            "rollback must run before putconn so the connection is clean on return"
+        )
+
+    def test_release_connection_rolls_back_before_close_owned(self):
+        """Non-pool (owned) connection: rollback before close()."""
+        mock_conn = MagicMock()
+        store = PostgreSQLStore(use_pool=False)  # _owns_connection=True
+        store._release_connection(mock_conn)
+        mock_conn.rollback.assert_called_once()
+        mock_conn.close.assert_called_once()
+
+    def test_close_rolls_back_connection_before_release(self):
+        """close() -> _release_connection must rollback the held connection,
+        not just putconn it dirty."""
+        import src.store.pg_store as pgm
+
+        mock_pool = MagicMock()
+        mock_conn = MagicMock()
+        with patch.object(pgm, "_get_pool", return_value=mock_pool):
+            store = PostgreSQLStore(use_pool=True)
+            store._conn = mock_conn
+            store.close()
+        mock_conn.rollback.assert_called_once()
+        mock_pool.putconn.assert_called_once_with(mock_conn)
+        assert store._conn is None
+
+    def test_load_frozen_stop_ends_transaction(self):
+        """Read-only load_frozen_stop MUST end its transaction (rollback) so the
+        connection is not left 'idle in transaction'. This was the exact last
+        query on the 20 leaked live connections."""
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        # row: strategy, mode, vol_at_entry, k, floor, cap, d_init, vol_source
+        mock_cur.fetchone.return_value = ("S1", "fixed", 0.15, 3.5, 0.06, 0.12, 0.02, "fast")
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+
+        result = store.load_frozen_stop("AAPL")
+
+        assert result is not None
+        assert result.d_init == pytest.approx(0.02)
+        # MUST end the transaction — the leak left it open (idle in transaction)
+        mock_conn.rollback.assert_called_once()
+
+    def test_fetch_open_trade_meta_ends_transaction(self):
+        """Read-only fetch_open_trade_meta MUST end its transaction (rollback)."""
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (42,)  # signal_id
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+
+        result = store.fetch_open_trade_meta("AAPL")
+
+        assert result == {"signal_id": 42, "strategy": "S4"}
+        mock_conn.rollback.assert_called_once()
+
+
+class TestSchedulerStoreLeakB7:
+    """B7: bare PostgreSQLStore() instances in the scheduler hot path must be
+    closed (with/finally). The stop-loss `_pg_stop` leaked one pooled connection
+    per 15-min cycle (20 conns live, 2026-07-14)."""
+
+    def test_pg_stop_is_closed_not_bare_abandoned(self):
+        """The _pg_stop store in the stop-loss section must be closed (with or
+        finally), not bare-and-abandoned as it was on 2026-07-14."""
+        import inspect
+        import src.workers.portfolio_scheduler as ps
+
+        src = inspect.getsource(ps)
+        assert (
+            "_pg_stop.close()" in src
+            or "with _PGStore() as _pg_stop" in src
+        ), "stop-loss _pg_stop must be closed (with/finally) — B7 leak fix"
+
+    def test_no_bare_postgres_store_without_close_in_scheduler(self):
+        """Guard: every PostgreSQLStore() / _PG* instantiation in the scheduler
+        must be closed — either via `with ... as X:` or have a matching X.close()
+        in a finally. Catches re-introduction of bare-and-abandoned stores."""
+        import inspect
+        import re
+        import src.workers.portfolio_scheduler as ps
+
+        src = inspect.getsource(ps)
+        # Every bare `X = PostgreSQLStore(...)` (or aliased _PGStore/_PG*)
+        # must have a corresponding X.close() somewhere in the module, OR be a
+        # `with PostgreSQLStore() as X:` form. We check the close() exists for
+        # each non-with assignment name.
+        assign_re = re.compile(
+            r"^\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:PostgreSQLStore|_PGStore|_PG[A-Za-z]*)\(",
+            re.MULTILINE,
+        )
+        with_re = re.compile(r"with\s+(?:PostgreSQLStore|_PGStore|_PG[A-Za-z]*)\(\)\s+as\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
+        with_names = {m.group("name") for m in with_re.finditer(src)}
+        missing = []
+        for m in assign_re.finditer(src):
+            name = m.group("name")
+            if name in with_names:
+                continue
+            if f"{name}.close()" not in src:
+                missing.append(name)
+        assert not missing, (
+            f"bare PostgreSQLStore() without close() in scheduler (B7 leak): {missing}"
         )
 
 

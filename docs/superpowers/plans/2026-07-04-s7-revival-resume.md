@@ -29,6 +29,20 @@ Il primo executor ha lavorato sulla **versione pre-correzione** del piano (la co
 
 **Vincoli invariati dal piano originale:** gate pre-registrati immutabili; niente `strategy_lifecycle`/beat; cache transcript NON committata (contenuto vendor); scoring LLM fuori dalle 14:00–21:00 UTC (quota Ollama condivisa col worker live); deadline decisione 2026-08-01.
 
+> **Verifica checkbox (2026-07-15):** Task 2–6 e Task 8 confermati DONE via commit reali
+> (7c483d0, 4cc0343, 22f6cc0, d7a1757, 72932db, 1007b13) e via i dati effettivamente
+> presenti (`reports/s7_poc/transcripts/`: 48 file; `tone_scores.csv`: 48 righe kimi).
+> Il commit `1007b13` mostra un run interim (48/120 transcript, 40% copertura, split-half
+> instabile → FAIL su quel criterio) esplicitamente etichettato "NOT the final gate".
+> **Task 7 Step 1 spuntato** (il ciclo fetch→score è girato su più giorni, 4→7 luglio, coi
+> file transcript datati di conseguenza); **Step 2 e 3 lasciati non spuntati**: il cutoff
+> del 2026-07-26 non è ancora arrivato (oggi 2026-07-15) e non risulta un run col subsample
+> GLM (`tone_scores.csv` contiene solo righe `kimi-k2.6:cloud`, nessuna `glm-5.2:cloud`).
+> **Task 9 e 10 lasciati interamente non spuntati**: nessun `S7_REVIVAL_DECISION_REPORT_*FINAL*`
+> in `reports/s7_poc/`, nessun commit successivo a `1007b13` (2026-07-07) che tocchi questo
+> lavoro — il fetch giornaliero risulta fermo da allora, ben prima del cutoff pre-registrato.
+> **Task 1 lasciato non spuntato** (step di sola verifica manuale, nessun commit atteso).
+
 ---
 
 ### Task 1: Probe vendor (Alpha Vantage con la chiave reale + FMP ancora attivo)
@@ -63,7 +77,7 @@ Il fetcher AV chiave i transcript per **trimestre fiscale riportato** (es. call 
 - Modify: `scripts/s7_poc_helpers.py`
 - Modify: `tests/analysis/test_s7_poc_helpers.py`
 
-- [ ] **Step 1: Aggiorna i test (falliranno: import inesistente)**
+- [x] **Step 1: Aggiorna i test (falliranno: import inesistente)**
 
 In `tests/analysis/test_s7_poc_helpers.py`: nell'import sostituire la riga `transcript_matches_event,` con `reported_quarter_candidates,`; sostituire l'intera classe `TestTranscriptMatch` (righe 61–70) con:
 
@@ -81,12 +95,12 @@ class TestReportedQuarterCandidates:
         assert reported_quarter_candidates("not-a-date") == []
 ```
 
-- [ ] **Step 2: Run per verificare il fallimento giusto**
+- [x] **Step 2: Run per verificare il fallimento giusto**
 
 Run: `.venv/bin/python -m pytest tests/analysis/test_s7_poc_helpers.py -q`
 Expected: `ImportError: cannot import name 'reported_quarter_candidates'`
 
-- [ ] **Step 3: Implementa**
+- [x] **Step 3: Implementa**
 
 In `scripts/s7_poc_helpers.py`: eliminare per intero la funzione `transcript_matches_event` (righe 58–69, docstring inclusa) e al suo posto inserire:
 
@@ -113,12 +127,12 @@ def reported_quarter_candidates(event_date: str) -> list[str]:
     return out
 ```
 
-- [ ] **Step 4: Run test → verdi + nessun altro chiamante**
+- [x] **Step 4: Run test → verdi + nessun altro chiamante**
 
 Run: `.venv/bin/python -m pytest tests/analysis/test_s7_poc_helpers.py -q` → Expected: `16 passed`
 Run: `grep -rn transcript_matches_event --include='*.py' .` → Expected: nessun risultato.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/s7_poc_helpers.py tests/analysis/test_s7_poc_helpers.py
@@ -134,7 +148,7 @@ Il run del 2026-07-04 ha campionato i primi **600 simboli in ordine alfabetico**
 **Files:**
 - Modify: `scripts/backtest_s7_smallmid.py:32`
 
-- [ ] **Step 1: Rendi il cap overridabile da env**
+- [x] **Step 1: Rendi il cap overridabile da env**
 
 Sostituire la riga 32:
 
@@ -150,16 +164,16 @@ con:
 _MAX_CAP_LOOKUPS = int(os.environ.get("MAX_CAP_LOOKUPS", "600"))
 ```
 
-- [ ] **Step 2: Esegui sul full universe**
+- [x] **Step 2: Esegui sul full universe**
 
 Run: `set -a; source .env; set +a; MAX_CAP_LOOKUPS=7000 .venv/bin/python scripts/backtest_s7_smallmid.py 2>&1 | tee /tmp/poc1_full_run.log`
 Expected: funnel con ~6.200 lookup; verdetto finale PASS / FAIL / INCONCLUSIVE_DATA. NB: se eseguito in una data diversa dal 2026-07-04 il CSV esce con la nuova data (i vecchi 15 eventi sono un sottoinsieme, la dedup a valle è per (symbol,date)); se eseguito lo stesso giorno sovrascrive il CSV — accettabile, l'originale è in git (`9e99444`).
 
-- [ ] **Step 3: Report**
+- [x] **Step 3: Report**
 
 Crea `reports/s7_poc/POC1_smallmid_report_<data-run>_full_universe.md` con: nota esplicita "supersede il run 2026-07-04 (600 simboli alfabetici → universo completo; stessi gate pre-registrati)", funnel scarti, tabella BEAT/MISS (n, mean lordo/netto, mediana, hit), range di market cap effettivo dei sopravvissuti, verdetto. **Interpretazione chiave da includere se n resta < 30:** gli small/mid scartati per no-bars IEX o ADV<$5M non sarebbero comunque tradabili da Alembic via Alpaca → l'INCONCLUSIVE diventa strutturale e per QUESTO sistema equivale operativamente a "ipotesi non sfruttabile", che è decision-grade per il PO.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/backtest_s7_smallmid.py
@@ -180,7 +194,7 @@ Quattro doc affermano che POC-2 richiedeva un upgrade a Ultimate che "il PO ha s
 - Modify: `reports/s7_poc/S7_REVIVAL_DECISION_REPORT_2026-07-04.md` (nota in testa)
 - Modify: `docs/superpowers/plans/2026-07-04-s7-revival-pocs.md` (nota superseded)
 
-- [ ] **Step 1: ROADMAP — riga ALPHA-A3**
+- [x] **Step 1: ROADMAP — riga ALPHA-A3**
 
 Sostituire (dentro la riga ALPHA-A3):
 
@@ -194,7 +208,7 @@ con:
 → **POC IN CORSO dal 2026-07-04 via Alpha Vantage** `EARNINGS_CALL_TRANSCRIPT` (free tier, 25 req/giorno, fetch resumabile ~1 settimana; i transcript FMP richiedono Ultimate $99/mo, non acquistato — il primo executor seguiva la versione pre-correzione del piano). Piano: `docs/superpowers/plans/2026-07-04-s7-revival-resume.md`; esito entro 2026-08-01
 ```
 
-- [ ] **Step 2: s7-pead.md — blockquote**
+- [x] **Step 2: s7-pead.md — blockquote**
 
 Sostituire:
 
@@ -218,7 +232,7 @@ con:
 > Esito e decisione PO entro 2026-08-01.
 ```
 
-- [ ] **Step 3: CHANGELOG — correggi l'entry 2026-07-04**
+- [x] **Step 3: CHANGELOG — correggi l'entry 2026-07-04**
 
 Sostituire il titolo `### S7 revival month — POC-1 eseguito, POC-2 not executed (vendor tier)` con `### S7 revival month — POC-1 primo run, POC-2 riavviato via Alpha Vantage (correzione)`.
 
@@ -234,7 +248,7 @@ con:
 - **POC-2 (transcript tone, ALPHA-A3):** riavviato in serata — i transcript FMP richiedono Ultimate ($99/mo, non acquistato), ma il piano corretto (`0e84850`) usa Alpha Vantage `EARNINGS_CALL_TRANSCRIPT` (free tier, 25 req/giorno, `ALPHAVANTAGE_API_KEY` in `.env`); il primo executor seguiva la versione pre-correzione del piano. POC-1 in ri-esecuzione su universo completo (era 600 simboli alfabetici su 6.177). Resume plan: `docs/superpowers/plans/2026-07-04-s7-revival-resume.md`.
 ```
 
-- [ ] **Step 4: Decision report — nota INTERIM in testa**
+- [x] **Step 4: Decision report — nota INTERIM in testa**
 
 Subito dopo il titolo `# S7 Revival Month — Decision Report (2026-07-04)` inserire:
 
@@ -247,7 +261,7 @@ Subito dopo il titolo `# S7 Revival Month — Decision Report (2026-07-04)` inse
 > piano: `docs/superpowers/plans/2026-07-04-s7-revival-resume.md`.
 ```
 
-- [ ] **Step 5: Piano originale — nota superseded**
+- [x] **Step 5: Piano originale — nota superseded**
 
 In `docs/superpowers/plans/2026-07-04-s7-revival-pocs.md`, in coda al blockquote di testa (dopo la riga "**Esecutore: UN SOLO agente Sonnet...**") aggiungere:
 
@@ -259,7 +273,7 @@ In `docs/superpowers/plans/2026-07-04-s7-revival-pocs.md`, in coda al blockquote
 > I gate pre-registrati qui definiti restano la fonte di verità.
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add docs/ROADMAP_DATA_ALPHA_2026-07-02.md docs/strategies/s7-pead.md docs/CHANGELOG.md docs/superpowers/plans/2026-07-04-s7-revival-pocs.md
@@ -274,7 +288,7 @@ git commit -m "docs(s7-poc): correct false premise — POC-2 was never a PO deci
 **Files:**
 - Create: `scripts/fetch_s7_transcripts.py`
 
-- [ ] **Step 1: Scrivi lo script**
+- [x] **Step 1: Scrivi lo script**
 
 ```python
 #!/usr/bin/env python3
@@ -393,12 +407,12 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Primo run (giorno 1) e annota la copertura**
+- [x] **Step 2: Primo run (giorno 1) e annota la copertura**
 
 Run: `set -a; source .env; set +a; .venv/bin/python scripts/fetch_s7_transcripts.py 2>&1 | tee -a /tmp/poc2_fetch.log`
 Expected: ~12–25 file JSON in `reports/s7_poc/transcripts/`, poi `⏸ Quota giornaliera AV esaurita`. È il comportamento corretto, non un errore.
 
-- [ ] **Step 3: Commit (solo script — la cache transcript NON si committa: contenuto vendor)**
+- [x] **Step 3: Commit (solo script — la cache transcript NON si committa: contenuto vendor)**
 
 ```bash
 git add scripts/fetch_s7_transcripts.py
@@ -412,7 +426,7 @@ git commit -m "feat(s7-poc): POC-2a transcript fetcher (Alpha Vantage, quarter-k
 **Files:**
 - Create: `scripts/score_s7_transcripts.py`
 
-- [ ] **Step 1: Scrivi lo script**
+- [x] **Step 1: Scrivi lo script**
 
 ```python
 #!/usr/bin/env python3
@@ -532,12 +546,12 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Smoke su 3 transcript del giorno 1**
+- [x] **Step 2: Smoke su 3 transcript del giorno 1**
 
 Run (smoke): sposta temporaneamente tutti i JSON tranne 3 in `/tmp/`, esegui, verifica 3 righe valide nel CSV, ripristina i JSON, rilancia (idempotente: salta i 3 già scorati e processa il resto della cache giorno-1). **Lanciare fuori dalle 14:00–21:00 UTC.**
 Expected: `tone_scores.csv` con una riga per transcript; JSON invalidi < 10%.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/score_s7_transcripts.py
@@ -550,7 +564,7 @@ git commit -m "feat(s7-poc): POC-2b LLM tone scoring (DK-CoT, kimi primary, incr
 
 **Files:** nessuno nuovo (esecuzione ripetuta). Questa fase attraversa più giorni di calendario: la sessione dell'executor NON deve restare aperta — ogni giorno è un rilancio manuale (PO o nuova sessione).
 
-- [ ] **Step 1: Ogni giorno, un comando**
+- [x] **Step 1: Ogni giorno, un comando**
 
 ```bash
 cd /home/stefano/Documents/Projects/Alembic && set -a; source .env; set +a; \
@@ -575,7 +589,7 @@ Run: `TONE_MODEL=glm-5.2:cloud` sui primi 20 transcript (ordina per nome file; s
 **Files:**
 - Create: `scripts/analyze_s7_tone.py`
 
-- [ ] **Step 1: Scrivi lo script**
+- [x] **Step 1: Scrivi lo script**
 
 ```python
 #!/usr/bin/env python3
@@ -674,12 +688,12 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Esegui**
+- [x] **Step 2: Esegui**
 
 Run: `.venv/bin/python scripts/analyze_s7_tone.py 2>&1 | tee /tmp/poc2_analysis.log`
 Expected: IC, terzili, split-half, agreement, verdetto PASS/FAIL/INCONCLUSIVE_DATA.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/analyze_s7_tone.py

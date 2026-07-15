@@ -8,6 +8,18 @@
 > (versione pre-correzione). L'esecuzione riprende con
 > `docs/superpowers/plans/2026-07-04-s7-revival-resume.md` — NON eseguire questo documento.
 > I gate pre-registrati qui definiti restano la fonte di verità.
+>
+> **Verifica checkbox (2026-07-15):** Task 2–6 confermati DONE via commit reali con
+> messaggio quasi identico allo specificato (8891372, 9e99444/4cc0343, d7a1757,
+> 72932db, 1007b13). **Task 5 Step 3 (subsample agreement GLM) lasciato non spuntato**
+> — nessuna evidenza commit trovata. **Task 7 lasciato non spuntato**: il decision
+> report esistente (`S7_REVIVAL_DECISION_REPORT_2026-07-04.md`, commit `85b0a70`)
+> dichiara "POC-2 not executed" sulla base della premessa poi corretta in `22f6cc0`
+> ("POC-2 was never a PO decision to skip") — POC-2 è stato eseguito DOPO quel
+> report, ma non risulta un decision report aggiornato che incorpori anche l'esito
+> POC-2. **Task 1 e Task 8 lasciati non spuntati** (step di sola verifica, nessun
+> artefatto git da controllare — l'esito positivo è implicito nel fatto che i task
+> successivi hanno funzionato, ma non è una prova diretta).
 
 **Goal:** In un mese (deadline decisione: **2026-08-01**) rispondere in modo binario alla domanda "S7 si tiene o si elimina", testando le due ipotesi mai campionate dal gate ALPHA-A5: (1) PEAD su universo small/mid-cap, (2) tone-analysis LLM sui transcript earnings (ALPHA-A3).
 
@@ -68,7 +80,7 @@ Expected: JSON `{"symbol": "IBM", "quarter": "2026Q1", "transcript": [{"speaker"
 - Create: `scripts/s7_poc_helpers.py`
 - Test: `tests/analysis/test_s7_poc_helpers.py`
 
-- [ ] **Step 1: Scrivi i test (falliranno: modulo inesistente)**
+- [x] **Step 1: Scrivi i test (falliranno: modulo inesistente)**
 
 ```python
 """Helper puri dei POC S7 revival (small/mid PEAD + transcript tone)."""
@@ -171,12 +183,12 @@ class TestSpearmanIC:
         assert spearman_ic([1], [2]) is None
 ```
 
-- [ ] **Step 2: Run per verificare il fallimento giusto**
+- [x] **Step 2: Run per verificare il fallimento giusto**
 
 Run: `.venv/bin/python -m pytest tests/analysis/test_s7_poc_helpers.py -q`
 Expected: `ModuleNotFoundError: No module named 'scripts.s7_poc_helpers'`
 
-- [ ] **Step 3: Implementa `scripts/s7_poc_helpers.py`**
+- [x] **Step 3: Implementa `scripts/s7_poc_helpers.py`**
 
 ```python
 """Pure helpers for the S7 revival POCs (small/mid PEAD + transcript tone).
@@ -311,12 +323,12 @@ def spearman_ic(scores: list[float], rets: list[float]) -> float | None:
     return cov / (vx * vy) ** 0.5
 ```
 
-- [ ] **Step 4: Run test → verdi**
+- [x] **Step 4: Run test → verdi**
 
 Run: `.venv/bin/python -m pytest tests/analysis/test_s7_poc_helpers.py -q`
 Expected: `16 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/s7_poc_helpers.py tests/analysis/test_s7_poc_helpers.py
@@ -331,7 +343,7 @@ git commit -m "feat(s7-poc): pure helpers for revival POCs (cap buckets, ADV, ga
 - Create: `scripts/backtest_s7_smallmid.py`
 - Riusa da `scripts/backtest_s7_pead.py`: `_alpaca_bars`, `_forward_return`, `_market_caps` (import diretto, come già fa `scripts/analyze_s7_events.py`)
 
-- [ ] **Step 1: Scrivi lo script**
+- [x] **Step 1: Scrivi lo script**
 
 ```python
 #!/usr/bin/env python3
@@ -462,16 +474,16 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Esegui**
+- [x] **Step 2: Esegui**
 
 Run: `set -a; source .env; set +a; .venv/bin/python scripts/backtest_s7_smallmid.py 2>&1 | tee /tmp/poc1_run.log`
 Expected: CSV in `reports/s7_poc/`, verdetto PASS/FAIL/INCONCLUSIVE_DATA stampato. Runtime atteso 5–15 min (cap lookups con sleep).
 
-- [ ] **Step 3: Scrivi il report**
+- [x] **Step 3: Scrivi il report**
 
 Crea `reports/s7_poc/POC1_smallmid_report_<YYYY-MM-DD>.md` con: parametri (finestra, soglie, filtri), tabella BEAT/MISS (n, mean lordo, mean netto, hit, mediana — calcola la mediana dal CSV), conteggio scarti (no-bars vs illiquidi, con la nota sulla copertura IEX), verdetto gate, 3 righe di interpretazione oneste. Modello di riferimento per lo stile: `reports/s7_backtest/ALPHA_A5_gate_report_2026-07-03_fmp.md`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/backtest_s7_smallmid.py
@@ -486,7 +498,7 @@ git commit -m "feat(s7-poc): POC-1 small/mid PEAD backtest + gate report (excess
 **Files:**
 - Create: `scripts/fetch_s7_transcripts.py`
 
-- [ ] **Step 1: Scrivi lo script**
+- [x] **Step 1: Scrivi lo script**
 
 ```python
 #!/usr/bin/env python3
@@ -605,12 +617,12 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Esegui (più giorni) e annota la copertura**
+- [x] **Step 2: Esegui (più giorni) e annota la copertura**
 
 Run: `set -a; source .env; set +a; .venv/bin/python scripts/fetch_s7_transcripts.py 2>&1 | tee -a /tmp/poc2_fetch.log`
 Expected: file JSON in `reports/s7_poc/transcripts/`; con la quota free (25 call/giorno, fino a 2 call/evento) lo script si ferma con `⏸ Quota giornaliera AV esaurita` — **rilanciarlo ogni giorno finché stampa la riga finale `Match: X/Y`** (~5-7 giorni). I Task 3 e 5 possono procedere in parallelo nel frattempo. Se il PO vuole chiudere in un giorno: Alpha Vantage Plan 75 ($49.99/mese, disdicibile) rimuove il limite — decisione sua, annotarla nei costi del report finale.
 
-- [ ] **Step 3: Commit (solo script — la cache transcript NON si committa: contenuto vendor)**
+- [x] **Step 3: Commit (solo script — la cache transcript NON si committa: contenuto vendor)**
 
 ```bash
 git add scripts/fetch_s7_transcripts.py
@@ -624,7 +636,7 @@ git commit -m "feat(s7-poc): POC-2a transcript fetcher with idempotent cache and
 **Files:**
 - Create: `scripts/score_s7_transcripts.py`
 
-- [ ] **Step 1: Scrivi lo script**
+- [x] **Step 1: Scrivi lo script**
 
 ```python
 #!/usr/bin/env python3
@@ -744,7 +756,7 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Smoke su 3 transcript, poi run completo**
+- [x] **Step 2: Smoke su 3 transcript, poi run completo**
 
 Run (smoke): sposta temporaneamente tutti i JSON tranne 3 in `/tmp/`, esegui, verifica 3 righe valide nel CSV, ripristina i JSON, rilancia (idempotente: salta i 3). **Lanciare fuori dalle 14:00–21:00 UTC** per non contendere la quota Ollama al worker live.
 Expected: `tone_scores.csv` con una riga per transcript; JSON invalidi < 10%.
@@ -753,7 +765,7 @@ Expected: `tone_scores.csv` con una riga per transcript; JSON invalidi < 10%.
 
 Run: `TONE_MODEL=glm-5.2:cloud` sui primi 20 transcript (ordina per nome file, sposta gli altri via come nello smoke). Il CSV accumula righe con `model` diverso — servono al report per la stat di agreement.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/score_s7_transcripts.py
@@ -768,7 +780,7 @@ git commit -m "feat(s7-poc): POC-2b LLM tone scoring (DK-CoT, kimi primary + glm
 **Files:**
 - Create: `scripts/analyze_s7_tone.py`
 
-- [ ] **Step 1: Scrivi lo script**
+- [x] **Step 1: Scrivi lo script**
 
 ```python
 #!/usr/bin/env python3
@@ -867,12 +879,12 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 2: Esegui**
+- [x] **Step 2: Esegui**
 
 Run: `.venv/bin/python scripts/analyze_s7_tone.py 2>&1 | tee /tmp/poc2_analysis.log`
 Expected: IC, terzili, split-half, agreement, verdetto.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add scripts/analyze_s7_tone.py

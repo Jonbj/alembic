@@ -235,4 +235,6 @@ class TestConfigPlumbing:
         from src.workers.portfolio_scheduler import _load_risk_config
         cfg = _load_risk_config()
         assert "stop_loss" in cfg
-        assert cfg["stop_loss"] == pytest.approx(0.02)
+        # 2026-07-15 aggressive paper decision: protective 2% stop DISABLED (0.0).
+        # See config/trading.yaml risk.stop_loss comment + Kimi handback §5.
+        assert cfg["stop_loss"] == pytest.approx(0.0)

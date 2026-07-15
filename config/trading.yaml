@@ -118,6 +118,22 @@ symbols:
     - WDC
     - SPCX
 
+# Sector map for the MAX_SECTOR_EXPOSURE constraint (coarse 11-group taxonomy;
+# formalizes the watchlist comment blocks). Symbols missing here fall into the
+# "unknown" bucket, which is capped as its own sector.
+sectors:
+  tech: [AAPL, MSFT, GOOGL, AMZN, META, CRM, ADBE, ORCL, NOW, SNOW, CSCO, PLTR, PANW, IBM, SAP, BABA, BIDU, JD, SONY, INFY, XLK]
+  semis: [NVDA, AMD, AVGO, QCOM, TXN, INTC, MU, ASML, ARM, AMAT, TSM, MRVL, DELL, WDC, SOXX]
+  financials: [JPM, BAC, GS, MS, WFC, C, AXP, MA, V, BRK.B, UBS, DB, HOOD, XLF]
+  consumer: [WMT, COST, MCD, SBUX, NKE, HD, TSLA, GM, F, TM, PG]
+  media: [DIS, CMCSA, NFLX, ROKU, RDDT]
+  healthcare: [JNJ, PFE, MRK, UNH, ABBV, LLY, NVO, AZN, XLV]
+  energy: [CVX, XOM, SHEL, BP, PBR, XLE]
+  industrials: [BA, GE, CAT, MMM]
+  materials: [RIO, VALE]
+  telecom: [T, VZ, TMUS, ERIC, NOK]
+  etf_broad: [SPY, QQQ, IWM, SPCX]
+
 execution:
   # Authoritative execution engine.
   # portfolio         → only portfolio-cycle (orchestrator) sends orders
@@ -150,12 +166,21 @@ risk:
   portfolio_drawdown: 0.05
 
   # Execution risk (read by ExecutionWorker at cycle start)
-  stop_loss: 0.02
-  stop_loss_mode: fixed           # fixed | vol_scaled (ship: fixed)
+  # 2026-07-15 AGGRESSIVE PAPER DECISION: protective 2% stop DISABLED (stop_loss: 0.0).
+  # Evidence: Kimi OOS replay (docs/stop_loss_calibration_handback_2026-07-15.md §5)
+  # — no_protective cum P&L $-56 vs fixed_2pct $-419 vs wide vol_scaled $-561. The
+  # 2% noise stop destroyed 7.5x more alpha than it protected (07-10 PANW/WDC/DELL
+  # stop-outs on 0.26-0.53σ noise that recovered). Disable guard:
+  # portfolio_scheduler._stop_loss_breached_symbols returns {} when stop_loss<=0 &
+  # mode==fixed. broker_disaster_stop (d_hard 12-20%) stays as SHADOW telemetry only
+  # (stop_shadow_enabled: true) — observe worst adverse excursion, no enforced floor.
+  # PAPER ONLY. Revisit: if any position rides past -15/20% (d_hard shadow), wire
+  # d_hard to a real broker order (catastrophe-only), NOT the 2% noise stop.
+  stop_loss: 0.0
+  stop_loss_mode: fixed           # fixed | vol_scaled (ship: fixed; 0.0 = protective disabled)
   stop_strategy_params:
     S1: {k: 3.5, floor: 0.06, cap: 0.12}
     S4: {k: 2.0, floor: 0.03, cap: 0.08}
-    S7: {k: 2.5, floor: 0.04, cap: 0.10}
     default: {k: 3.0, floor: 0.04, cap: 0.12}
   stop_sigma_lookback_fast: 20
   stop_sigma_lookback_slow: 63
@@ -163,7 +188,7 @@ risk:
   stop_risk_budget_bp_per_pos: 12
   stop_risk_budget_bp_aggregate: 100
   stop_gap_buffer_pct: 0.005
-  stop_shadow_enabled: false
+  stop_shadow_enabled: true       # 2026-07-15: on — observe d_hard / adverse excursion with protective stop disabled
   broker_disaster_stop:
     multiplier: 1.5
     sigma_multiple: 5.0
@@ -173,6 +198,13 @@ risk:
   # Position limits
   max_position_pct: 0.10
   max_portfolio_exposure: 0.50
+
+  # Per-sector BUY exposure cap (fraction of NAV). 0 = DISABLED (current state).
+  # Evidence: 2026-07-10 (3 semis) and 2026-07-13 (9 semis + SOXX, same cycle)
+  # stopped out together. Suggested operator value when enabling: 0.10.
+  # NOTE: complementary to the F9a stop redesign — caps concentration, does not
+  # fix sub-sigma stops.
+  max_sector_exposure: 0.0
 
   min_trade_pnl_threshold: 5.0   # $ min avg net P&L per trade before ⚠️ alert in weekly report
 
@@ -249,3 +281,13 @@ infrastructure:
   # Breakdown: hosting/VPS ~$600, LLM API calls ~$840 at current signal volume.
   # Update when actual billing changes; used only for reporting, not for trade logic.
   annual_fixed_cost_usd: 1440.0
+
+notifications:
+  # Telegram noise control (2026-07-15). The operator flagged these recurring
+  # alerts as noise. false = do NOT send the Telegram message (code path stays
+  # intact and reversible; flip to true to re-enable). Reports/data are still
+  # computed and cached in Redis for the API/UI — only the Telegram send is gated.
+  # daily "Performance Report" (IC/ICIR/weights) from run_daily_report at 03:00 UTC.
+  send_daily_performance_report: false
+  # P2-04 WARNING when signal/order symbol overlap < 0.8 on a portfolio cycle.
+  send_signal_order_divergence_alert: false

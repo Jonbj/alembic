@@ -45,15 +45,7 @@ strategies:
       exists and IC>placebo has not been confirmed. Re-promotion to live requires
       P1-03 (gate fixes + SPA) + P1-04 (gate script runnable) + IC>placebo + 90-day paper.
 
-  S7:
-    enabled: false
-    allocation_pct: 0.00
-    mode: research
-    promotion_blocked: true
-    note: >
-      SHELVED 2026-07-03: ALPHA-A5 gate FAIL conclusivo (drift = beta SPY + 5 outlier,
-      excess vs SPY +0.05% mediana -1.07%, nessuna dose-response; report
-      reports/s7_backtest/ALPHA_A5_gate_report_2026-07-03_fmp.md + audit in
-      strategy_lifecycle). Riapertura solo via decisione PO: universo small/mid
-      oppure POC transcript-tone ALPHA-A3 (gated su vendor transcript).
-      Must not appear in operational registry until P1-03/04 + IC>placebo confirmed.
+  # S7 (PEAD) REMOVED 2026-07-15 — ALPHA-A3 transcript-tone edge confuted at decision-grade
+  # (POC-2 FAIL n=73 IC≈0; POC-1 INCONCLUSIVE n=15; ALPHA-A5 large-cap FAIL = beta).
+  # Lifecycle history + evidence: docs/S7_LIFECYCLE_HISTORY_2026-07-15.md, reports/s7_*.
+  # Code recoverable from git if a future event-driven strategy reuses the PEAD surface.

@@ -57,6 +57,7 @@ from src.connectors.marketaux import MarketAuxConnector
 from src.connectors.ticker_extractor import TickerExtractor
 from src.models.news import GKGNewsItem, MarketAuxNewsItem, NewsItem
 from src.workers.celery_app import app
+from src.workers.market_clock import is_market_open
 
 log = logging.getLogger(__name__)
 
@@ -325,6 +326,11 @@ def run_alpaca_ingestion_worker() -> dict:
     """
     redis_client = Redis.from_url(config.REDIS_URL)
 
+    if not is_market_open():
+        log.info("Market closed — skipping Alpaca ingestion")
+        redis_client.close()
+        return {"skipped": True, "reason": "market_closed"}
+
     if not config.ALPACA_API_KEY or not config.ALPACA_SECRET_KEY:
         log.warning("ALPACA_API_KEY/SECRET not configured — skipping Alpaca ingestion")
         redis_client.close()
@@ -588,8 +594,8 @@ def run_sec_edgar_ingestion_worker() -> dict:
 
     DISABLED (2026-07-02): OFF by default. Never produced a signal — the connector read
     a non-existent `ticker_symbol` field (EDGAR filings use CIK / display_names), so every
-    item got empty asset_tags and was dropped downstream. Also redundant with S7 PEAD's
-    8-K pipeline. Re-enable with SEC_EDGAR_INGESTION_ENABLED=1 ONLY after fixing the
+    item got empty asset_tags and was dropped downstream. Re-enable with
+    SEC_EDGAR_INGESTION_ENABLED=1 ONLY after fixing the
     CIK→ticker attribution (e.g. via SecCompanyTickers) and enriching the body (8-K item).
     """
     if os.environ.get("SEC_EDGAR_INGESTION_ENABLED", "0") == "0":
@@ -773,6 +779,10 @@ def run_news_ingestion_worker() -> dict:
     Returns:
         Stats dict (see `_process_gkg_items`).
     """
+    if not is_market_open():
+        log.info("Market closed — skipping GDELT ingestion")
+        return {"skipped": True, "reason": "market_closed"}
+
     # Open connections once per task. Closed in finally to avoid leaks.
     redis_client = Redis.from_url(config.REDIS_URL)
     pg_conn = psycopg2.connect(config.DATABASE_URL)

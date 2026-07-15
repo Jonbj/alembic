@@ -344,95 +344,9 @@ GATES_S3 = [
     },
 ]
 
-# ─── S7 — PEAD (Post-Earnings Announcement Drift) ────────────────────────────
-# Source: no backtest data yet — research/paper phase only. Worker active since 2026-06-07.
-# Authorization state: mode=research, not yet in strategy_lifecycle.
-
-S7_STRATEGY = {
-    "id": "s7",
-    "name": "S7 — PEAD (Post-Earnings Drift)",
-    "description": "Classifies 8-K earnings filings via Ollama to capture Post-Earnings Announcement Drift. Long-only sleeve, max 25% portfolio, 20-day hold.",
-    "status": "research",
-    "mode": "research",
-    "promotion_blocked": True,
-    "live_authorized": False,
-    "promotion_authorized": False,
-    "data_quality_warning": (
-        "Research phase — no backtest or paper trading data available yet. "
-        "Worker running since 2026-06-07. Promotion gate requires signal IC≥0.05 "
-        "on ≥26 weeks of 8-K filing data with verified earnings surprise labels."
-    ),
-    "validation_status": "research",
-    "n_assets": 0,
-    "oos_sharpe": None,
-    "max_drawdown": None,
-    "annual_return": None,
-}
-
-S7_DETAIL = {
-    "id": "s7",
-    "name": "S7 — PEAD (Post-Earnings Drift)",
-    "description": "Classifies 8-K earnings filings via Ollama to capture Post-Earnings Announcement Drift. Long-only sleeve, max 25% portfolio, 20-day hold.",
-    "status": "research",
-    "mode": "research",
-    "promotion_blocked": True,
-    "live_authorized": False,
-    "promotion_authorized": False,
-    "data_quality_warning": (
-        "Research phase — no backtest or paper trading data available yet. "
-        "Worker running since 2026-06-07. Promotion gate requires signal IC≥0.05 "
-        "on ≥26 weeks of 8-K filing data with verified earnings surprise labels."
-    ),
-    "validation_status": "research",
-    "parameters": {
-        "model": "ollama-ensemble",
-        "max_position_pct": 0.05,
-        "max_sleeve_pct": 0.25,
-        "min_confidence": 0.70,
-        "surprise_threshold": 0.05,
-        "hold_days": 20,
-        "worker": "pead-ingestion (queue: inference, every 30 min 14:05-21:35 UTC)",
-    },
-    "universe": "Dynamic — all US public companies filing 8-K earnings releases on SEC EDGAR",
-    "n_assets": 0,
-    "oos_sharpe": None,
-    "max_drawdown": None,
-    "annual_return": None,
-    "is_sharpe": None,
-    "calmar_ratio": None,
-    "sortino_ratio": None,
-    "win_rate": None,
-    "avg_holding_period": "20 days",
-    "total_trades": 0,
-    "metrics_as_of": None,
-}
-
-GATES_S7 = [
-    {
-        "gate_id": "signal_ic",
-        "gate_name": "Signal IC (Spearman) ≥ 0.05",
-        "passed": False,
-        "details": "No backtest data yet — insufficient 8-K signal history",
-        "metric_value": 0.0,
-        "threshold": 0.05,
-    },
-    {
-        "gate_id": "data_sample",
-        "gate_name": "Minimum Sample (26 weeks)",
-        "passed": False,
-        "details": "Worker started 2026-06-07 — need ≥26 weeks of labeled filing data",
-        "metric_value": 3,
-        "threshold": 26,
-    },
-    {
-        "gate_id": "earnings_label_set",
-        "gate_name": "Earnings Label Set Validated",
-        "passed": False,
-        "details": "Surprise labels (beat/miss) not yet validated against consensus estimates",
-        "metric_value": 0.0,
-        "threshold": 1.0,
-    },
-]
+# S7 (PEAD) removed 2026-07-15 — ALPHA-A3 transcript-tone edge confuted at decision-grade
+# (POC-2 FAIL, n=73, IC≈0; POC-1 INCONCLUSIVE n=15; ALPHA-A5 large-cap FAIL = beta). See
+# docs/S7_LIFECYCLE_HISTORY_2026-07-15.md. History + evidence preserved in git + reports/s7_*.
 
 _REPORTS_DIR = Path(__file__).parent.parent.parent.parent / "reports"
 
@@ -473,9 +387,8 @@ for lookback in [21, 63, 126, 252]:
             "max_drawdown": round(dd, 4),
         })
 
-# S4 and S7 have no sensitivity grid (different parameter space — not comparable to lookback/vol_window)
+# S4 has no sensitivity grid (different parameter space — not comparable to lookback/vol_window)
 SENSITIVITY_S4: list = []
-SENSITIVITY_S7: list = []
 
 # ─── Strategy registry ────────────────────────────────────────────────────────
 
@@ -497,12 +410,6 @@ STRATEGIES = {
         "detail": S4_DETAIL,
         "gates": GATES_S4,
         "sensitivity": SENSITIVITY_S4,
-    },
-    "s7": {
-        "summary": S7_STRATEGY,
-        "detail": S7_DETAIL,
-        "gates": GATES_S7,
-        "sensitivity": SENSITIVITY_S7,
     },
 }
 

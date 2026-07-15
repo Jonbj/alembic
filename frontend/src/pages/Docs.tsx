@@ -45,7 +45,7 @@ export default function Docs() {
         },
         {
           heading: "Le strategie in breve",
-          content: "**S1 (50%)**: momentum multi-lookback su ETF/azionario — usa solo prezzi storici, nessun LLM.\n\n**S4 (10%)**: news sentiment via LLM ensemble — legge segnali pre-calcolati da Redis, filtra con EMA e regime.\n\n**S7 (0% — paper)**: PEAD earnings drift — classifica filing 8-K di SEC EDGAR, tiene posizioni 20 giorni su earnings beat.\n\n**S2**: DISABILITATA (OOS Sharpe −0.55, tutti i gate falliti).\n\n**S3**: R&D sleeve, non in produzione.",
+          content: "**S1 (50%)**: momentum multi-lookback su ETF/azionario — usa solo prezzi storici, nessun LLM.\n\n**S4 (10%)**: news sentiment via LLM ensemble — legge segnali pre-calcolati da Redis, filtra con EMA e regime.\n\n**S2**: DISABILITATA (OOS Sharpe −0.55, tutti i gate falliti).\n\n**S3**: R&D sleeve, non in produzione.\n\n**S7 (PEAD)**: RIMOSSA 2026-07-15 — edge transcript-tone confutato a decision-grade (POC-2 FAIL).",
         },
         {
           heading: "Dove guardare",
@@ -69,9 +69,6 @@ export default function Docs() {
          ↓  ogni 15 min, xx:00 (ore di mercato)
 [LLM Ensemble Worker] ──→ Redis: signal:{symbol}:sentiment
          ↑ offline, asincrono
-
-[SEC EDGAR 8-K] ──→ [PEAD Worker] ──→ Redis: pead:signal:{symbol}
-         ↑ ogni 30 min (ore di mercato)
 
 [Portfolio Scheduler] ──→ legge segnali da Redis (ogni 15 min, xx:07)
          ↓
@@ -208,43 +205,25 @@ Portfolio orchestratore:
           </div>
         </div>
 
-        {/* S7 */}
-        <div style={inner}>
+        {/* S7 — RIMOSSA */}
+        <div style={{ ...inner, opacity: 0.6 }}>
           <div style={rowFlex}>
             <div style={{ ...stag, background: '#6d28d9' }}>S7</div>
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
                 PEAD — Post-Earnings Announcement Drift
-                <span style={badge('#6d28d9', '#ede9fe')}>PAPER — 0% (in raccolta dati)</span>
+                <span style={badge('#6d28d9', '#ede9fe')}>RIMOSSA 2026-07-15</span>
               </div>
-              <h3 style={{ ...h3, margin: '8px 0 4px' }}>Teoria</h3>
               <p style={p}>
-                Il PEAD (Ball & Brown, 1968; Bernard & Thomas, 1990) è una delle anomalie di mercato più robuste: dopo un earnings beat, le azioni continuano a salire nei 30–60 giorni successivi. Il mercato sotto-reagisce inizialmente, poi aggiusta progressivamente. L'effetto è più forte su aziende small-cap e in periodi di bassa attenzione degli analisti.
-              </p>
-              <h3 style={{ ...h3, margin: '8px 0 4px' }}>Come genera il segnale</h3>
-              <div style={mono}>{`Fonte: SEC EDGAR 8-K filing (ogni 30 min durante mercato)
-
-LLM classificatore (Ollama cloud):
-  input: testo del filing 8-K
-  output: {
-    direction: "beat" | "miss" | "inline" | "no_eps",
-    surprise_pct: float,   # (actual - consensus) / |consensus|
-    confidence: float,     # 0–1
-    guidance: "revised-up" | "maintained" | "no-guidance"
-  }
-
-Filtri:
-  confidence < 0.70 → skip
-  |surprise_pct| < 5% → skip (non significativo)
-  direction == "inline" → skip
-
-Su beat confermato:
-  SurpriseSignal { hold_until = detected_at + 20 giorni }
-  → SET Redis: pead:signal:{symbol} (TTL 30 giorni)
-  → Visibile in: Operations → System → PEAD Signals`}</div>
-              <h3 style={{ ...h3, margin: '8px 0 4px' }}>Posizionamento nel portfolio</h3>
-              <p style={p}>
-                S7 è in fase di raccolta dati. Non è ancora in <code>strategies.yaml</code> con allocazione positiva. Quando il backtest su dati storici supererà i gate, verrà attivata con allocazione massima 5% (max 5% per posizione, max 25% sleeve totale).
+                S7 è stata <strong>rimossa dal repository</strong> il 2026-07-15. L'edge
+                dichiarato (transcript tone → alpha, ALPHA-A3) è confutato a
+                decision-grade su dati reali: POC-2 FAIL (n=73, IC≈0, spread invertito,
+                split-half opposti, robusto cross-modello kimi↔glm), POC-1 INCONCLUSIVE
+                (n=15), ALPHA-A5 large-cap FAIL (drift = beta SPY). La condizionale
+                pre-registrata del PO (PO-5) *"Se POC-2 FAIL → REMOVE"* è attivata.
+                Strategia, worker, route, beat task e test eliminati; storia + evidence in
+                <code> docs/S7_LIFECYCLE_HISTORY_2026-07-15.md</code>. Re-introduzione solo
+                con un design fresco + gate pass.
               </p>
             </div>
           </div>
@@ -426,7 +405,6 @@ high_vol ×0.2   sleeve=0.4% → ordine ~$4`}</div>
               ['Max signal age S4', '30 min', 'Segnali più vecchi di 30 min vengono ignorati.'],
               ['Allocazione S1', '50% NAV', 'Unica strategia con gate completi superati.'],
               ['Allocazione S4', '10% NAV', 'Cappato al 10% fino a gate dedicati passati.'],
-              ['Allocazione S7 (PEAD)', '0% NAV', 'In raccolta dati. Attivazione dopo gate backtest superati.'],
               ['SENTIMENT_REVERSAL_EXIT_THRESHOLD', '−0.35', 'Score sotto cui una posizione aperta viene chiusa forzatamente al ciclo successivo.'],
               ['Delta dead zone (ribilanciamento)', '2% del target qty', 'Evita micro-ordini da variazioni di prezzo inferiori al 2%.'],
               ['Ciclo portfolio', 'ogni 15 min (xx:07)', 'Offset +7 min rispetto al sentiment worker per leggere segnali freschi.'],
@@ -525,7 +503,6 @@ high_vol ×0.2   sleeve=0.4% → ordine ~$4`}</div>
                 ['portfolio-cycle', 'xx:07/22/37/52, ogni 15 min, mercato aperto', 'Orchestratore → ordini Alpaca'],
                 ['rss-ingestion', 'ogni 30 min, sempre', 'Reuters + CNBC RSS → news_log'],
                 ['sec-edgar-ingestion', 'ogni ora, mercato aperto', 'Filing 8-K → news_log'],
-                ['pead-ingestion', 'xx:05/35, ogni 30 min, mercato aperto', 'Classifica 8-K → segnali S7 in Redis'],
                 ['risk-monitor', 'ogni 30 min, mercato aperto', 'Drawdown check + alert Telegram'],
                 ['counterfactual-worker', '22:45 UTC, Lun-Ven', 'Calcola ritorni 1h per SKIP_THRESHOLD/SKIP_EMA/SKIP_CAP (Phase C)'],
               ].map(([task, freq, desc]) => (
@@ -540,8 +517,6 @@ high_vol ×0.2   sleeve=0.4% → ordine ~$4`}</div>
         </div>
         <h3 style={h3}>Tab Activity Log</h3>
         <p style={p}>Cronologia degli ultimi 80 eventi di sistema delle ultime 24 ore: cicli portfolio, run sentiment, batch di ingestion, decisioni di trading. Aggiornamento ogni 30 secondi.</p>
-        <h3 style={h3}>Tab PEAD Signals</h3>
-        <p style={p}>Segnali attivi della strategia S7: ticker con earnings beat classificato dall'LLM, surprise%, confidence e giorni rimanenti al termine del hold period di 20 giorni.</p>
       </div>
 
       {/* 10. MODALITÀ OPERATIVE */}

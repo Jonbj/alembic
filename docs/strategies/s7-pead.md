@@ -1,5 +1,14 @@
 # S7 — PEAD (Post-Earnings Announcement Drift)
 
+> 🪦 **REMOVED 2026-07-15.** S7 è stata rimossa dal repository (strategy dir, workers,
+> routes, beat tasks, config, API, tests). L'edge dichiarato (transcript tone → alpha,
+> ALPHA-A3) è confutato a decision-grade: POC-2 FAIL (n=73, IC≈0, spread invertito,
+> split-half opposti, robusto cross-modello kimi↔glm ρ=+0.858); POC-1 INCONCLUSIVE (n=15);
+> ALPHA-A5 large-cap FAIL (drift = beta SPY). La condizionale pre-registrata di PO-5
+> (*"Se POC-2 FAIL → REMOVE"*) è attivata. **Questo documento resta come storico** — il
+> codice che descrive non esiste più in repo (recuperabile da git). Storia completa +
+> evidence: `docs/S7_LIFECYCLE_HISTORY_2026-07-15.md`, `reports/s7_*`.
+
 > ⚠️ **SHELVED 2026-07-03 — gate ALPHA-A5 FAIL conclusivo.** Su 96 eventi reali (FMP,
 > Gen–Mag 2026) il drift raw +1.96% è interamente beta SPY (excess +0.05%, mediana
 > −1.07%) più 5 outlier; nessuna dose-response per magnitudine della surprise; universo
