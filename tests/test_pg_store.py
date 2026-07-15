@@ -1,7 +1,7 @@
 """Tests for PostgreSQL store - SQL injection fix verification."""
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from src.store.pg_store import PostgreSQLStore
 
@@ -315,15 +315,25 @@ class TestConnectionPoolSafety:
         mock_conn.rollback.assert_called_once()
 
     def test_close_does_not_double_release_after_exception(self):
-        """Connection released exactly once even when method raised."""
+        """Connection released exactly once even when a method raised.
+
+        This fixture uses an *externally-supplied* connection
+        (``conn=mock_conn, use_pool=False``): the store neither pools nor owns
+        it, so ``close()`` must NOT release/rollback/close it — the caller owns
+        that lifecycle. The only rollback is the method's own except path.
+        B7/B32 (2026-07-15): the leak fix rolls back only on paths the store
+        actually releases (pool / owned), never on an external connection.
+        """
         store, mock_conn = self._make_store_with_failing_cursor()
         try:
             store.fetch_signals_for_ic("AAPL", 30)
         except Exception:
             pass
         store.close()
-        # _release_connection called once (in close()), rollback called once (in method)
+        # only the method's except path rolls back — close() leaves the
+        # external connection untouched (no double release, no surprise rollback)
         mock_conn.rollback.assert_called_once()
+        mock_conn.close.assert_not_called()
 
     def test_get_last_portfolio_cycle_rollback_on_error(self):
         """get_last_portfolio_cycle rolls back on error and returns None."""
@@ -1226,6 +1236,142 @@ class TestFetchDecisionsSignalScore:
         assert "signal_score" in select_sql, (
             "fetch_decisions SELECT must include signal_score — currently omitted "
             "so the LLM sentiment score is invisible to the API and analytics"
+        )
+
+
+class TestConnectionLeakB7B32:
+    """B7/B32 (2026-07-15): PostgreSQL pool leak.
+
+    Root cause seen live 2026-07-14: 20 connections 'idle in transaction' from
+    `SELECT stop_strategy, stop_mode, stop_vol_at_entry, stop_k ...` (load_frozen_stop),
+    one per 15-min portfolio cycle, holding AccessShareLock on `trades` for hours
+    and blocking migration 037. Source: bare `PostgreSQLStore()` instances never
+    closed (connection never returned to pool) + read-only methods not ending the
+    transaction + `_release_connection` not rolling back before `putconn`.
+    """
+
+    def test_release_connection_rolls_back_before_putconn(self):
+        """Returning a pooled connection MUST rollback before putconn, so a
+        connection left 'idle in transaction' by a read-only method is cleaned
+        before it goes back into the pool (and before the next user gets a dirty
+        connection). Without this, putconn returns a connection with an open tx."""
+        import src.store.pg_store as pgm
+
+        parent = MagicMock()
+        mock_conn = parent.conn
+        mock_pool = parent.pool
+        with patch.object(pgm, "_get_pool", return_value=mock_pool):
+            store = PostgreSQLStore(use_pool=True)  # _use_pool=True, _conn=None
+            store._release_connection(mock_conn)
+
+        mock_conn.rollback.assert_called_once()
+        mock_pool.putconn.assert_called_once_with(mock_conn)
+        # rollback MUST happen before putconn (call order on the shared parent)
+        calls = [name for (name, _, _) in parent.mock_calls]
+        assert calls.index("conn.rollback") < calls.index("pool.putconn"), (
+            "rollback must run before putconn so the connection is clean on return"
+        )
+
+    def test_release_connection_rolls_back_before_close_owned(self):
+        """Non-pool (owned) connection: rollback before close()."""
+        mock_conn = MagicMock()
+        store = PostgreSQLStore(use_pool=False)  # _owns_connection=True
+        store._release_connection(mock_conn)
+        mock_conn.rollback.assert_called_once()
+        mock_conn.close.assert_called_once()
+
+    def test_close_rolls_back_connection_before_release(self):
+        """close() -> _release_connection must rollback the held connection,
+        not just putconn it dirty."""
+        import src.store.pg_store as pgm
+
+        mock_pool = MagicMock()
+        mock_conn = MagicMock()
+        with patch.object(pgm, "_get_pool", return_value=mock_pool):
+            store = PostgreSQLStore(use_pool=True)
+            store._conn = mock_conn
+            store.close()
+        mock_conn.rollback.assert_called_once()
+        mock_pool.putconn.assert_called_once_with(mock_conn)
+        assert store._conn is None
+
+    def test_load_frozen_stop_ends_transaction(self):
+        """Read-only load_frozen_stop MUST end its transaction (rollback) so the
+        connection is not left 'idle in transaction'. This was the exact last
+        query on the 20 leaked live connections."""
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        # row: strategy, mode, vol_at_entry, k, floor, cap, d_init, vol_source
+        mock_cur.fetchone.return_value = ("S1", "fixed", 0.15, 3.5, 0.06, 0.12, 0.02, "fast")
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+
+        result = store.load_frozen_stop("AAPL")
+
+        assert result is not None
+        assert result.d_init == pytest.approx(0.02)
+        # MUST end the transaction — the leak left it open (idle in transaction)
+        mock_conn.rollback.assert_called_once()
+
+    def test_fetch_open_trade_meta_ends_transaction(self):
+        """Read-only fetch_open_trade_meta MUST end its transaction (rollback)."""
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (42,)  # signal_id
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+
+        result = store.fetch_open_trade_meta("AAPL")
+
+        assert result == {"signal_id": 42, "strategy": "S4"}
+        mock_conn.rollback.assert_called_once()
+
+
+class TestSchedulerStoreLeakB7:
+    """B7: bare PostgreSQLStore() instances in the scheduler hot path must be
+    closed (with/finally). The stop-loss `_pg_stop` leaked one pooled connection
+    per 15-min cycle (20 conns live, 2026-07-14)."""
+
+    def test_pg_stop_is_closed_not_bare_abandoned(self):
+        """The _pg_stop store in the stop-loss section must be closed (with or
+        finally), not bare-and-abandoned as it was on 2026-07-14."""
+        import inspect
+        import src.workers.portfolio_scheduler as ps
+
+        src = inspect.getsource(ps)
+        assert (
+            "_pg_stop.close()" in src
+            or "with _PGStore() as _pg_stop" in src
+        ), "stop-loss _pg_stop must be closed (with/finally) — B7 leak fix"
+
+    def test_no_bare_postgres_store_without_close_in_scheduler(self):
+        """Guard: every PostgreSQLStore() / _PG* instantiation in the scheduler
+        must be closed — either via `with ... as X:` or have a matching X.close()
+        in a finally. Catches re-introduction of bare-and-abandoned stores."""
+        import inspect
+        import re
+        import src.workers.portfolio_scheduler as ps
+
+        src = inspect.getsource(ps)
+        # Every bare `X = PostgreSQLStore(...)` (or aliased _PGStore/_PG*)
+        # must have a corresponding X.close() somewhere in the module, OR be a
+        # `with PostgreSQLStore() as X:` form. We check the close() exists for
+        # each non-with assignment name.
+        assign_re = re.compile(
+            r"^\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:PostgreSQLStore|_PGStore|_PG[A-Za-z]*)\(",
+            re.MULTILINE,
+        )
+        with_re = re.compile(r"with\s+(?:PostgreSQLStore|_PGStore|_PG[A-Za-z]*)\(\)\s+as\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
+        with_names = {m.group("name") for m in with_re.finditer(src)}
+        missing = []
+        for m in assign_re.finditer(src):
+            name = m.group("name")
+            if name in with_names:
+                continue
+            if f"{name}.close()" not in src:
+                missing.append(name)
+        assert not missing, (
+            f"bare PostgreSQLStore() without close() in scheduler (B7 leak): {missing}"
         )
 
 

@@ -140,10 +140,31 @@ class PostgreSQLStore:
         return self._conn
 
     def _release_connection(self, conn: psycopg2.extensions.connection) -> None:
-        """Return connection to pool if using pooling."""
-        if self._use_pool and conn is not None:
+        """Return connection to pool if using pooling.
+
+        B7/B32 (2026-07-15): rollback before returning/closing so a connection
+        left 'idle in transaction' by a read-only method (load_frozen_stop,
+        fetch_open_trade_meta) is cleaned before it goes back into the pool —
+        otherwise putconn returns a dirty connection and the next user inherits
+        an open transaction. Seen live: 20 leaked idle-in-transaction conns.
+
+        Only rolled back on paths we actually release (pool / owned). An
+        externally-supplied connection (conn=..., use_pool=False) is not ours
+        to roll back or close — the caller owns its transaction lifecycle.
+        """
+        if conn is None:
+            return
+        if self._use_pool:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             _get_pool().putconn(conn)
-        elif self._owns_connection and conn is not None:
+        elif self._owns_connection:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
             conn.close()
 
     def close(self) -> None:
@@ -1033,13 +1054,16 @@ class PostgreSQLStore:
                     (symbol,),
                 )
                 row = cur.fetchone()
-                if row is None:
-                    return None
-                signal_id = row[0]
-                return {
-                    "signal_id": signal_id,
-                    "strategy": "S4" if signal_id is not None else "S1",
-                }
+            # B7/B32: read-only — end the transaction so the connection is not
+            # left 'idle in transaction' (the exact state of the leaked conns).
+            conn.rollback()
+            if row is None:
+                return None
+            signal_id = row[0]
+            return {
+                "signal_id": signal_id,
+                "strategy": "S4" if signal_id is not None else "S1",
+            }
         except Exception:
             conn.rollback()
             raise
@@ -1061,19 +1085,23 @@ class PostgreSQLStore:
                     (symbol,),
                 )
                 row = cur.fetchone()
-                if row is None or row[6] is None:
-                    return None
-                return FrozenStop(
-                    strategy=row[0],
-                    mode=row[1] or "fixed",
-                    vol_at_entry=row[2],
-                    sigma_eff=row[2],
-                    k=row[3],
-                    floor=row[4],
-                    cap=row[5],
-                    d_init=float(row[6]),
-                    vol_source=row[7],
-                )
+            # B7/B32: read-only — end the transaction so the connection is not
+            # left 'idle in transaction' (load_frozen_stop was the last query on
+            # the 20 leaked live connections, 2026-07-14).
+            conn.rollback()
+            if row is None or row[6] is None:
+                return None
+            return FrozenStop(
+                strategy=row[0],
+                mode=row[1] or "fixed",
+                vol_at_entry=row[2],
+                sigma_eff=row[2],
+                k=row[3],
+                floor=row[4],
+                cap=row[5],
+                d_init=float(row[6]),
+                vol_source=row[7],
+            )
         except Exception:
             conn.rollback()
             raise

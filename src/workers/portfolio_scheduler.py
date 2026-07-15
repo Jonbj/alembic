@@ -1373,6 +1373,7 @@ def _run_cycle_inner() -> dict:
     # orders and force-sold below (bypassing the hold-minimum hold).
     stop_loss_sells: dict[str, "StopDecision"] = {}
     _stop_policy: "StopPolicy" | None = None
+    _pg_stop = None
     try:
         from src.portfolio.stop_policy import StopPolicy as _StopPolicy
         from src.store.pg_store import PostgreSQLStore as _PGStore
@@ -1401,6 +1402,12 @@ def _run_cycle_inner() -> dict:
                 log.warning("Stop shadow log failed: %s — continuing", _shadow_exc)
     except Exception as _sl_exc:
         log.warning("Stop-loss check failed: %s — proceeding without stop-loss", _sl_exc)
+    finally:
+        # B7/B32 (2026-07-15): return the stop-loss connection to the pool. The
+        # bare _pg_stop was never closed → one leaked idle-in-transaction conn
+        # per 15-min cycle (20 conns live, blocking migration 037).
+        if _pg_stop is not None:
+            _pg_stop.close()
 
     data_replay = DataReplay(bars_df)
     _vol_targeter, _vol_cfg = _build_vol_targeter()
@@ -1631,6 +1638,7 @@ def _run_cycle_inner() -> dict:
     _s4_signals: dict[str, dict] = {}
     # P0-09: read actual regime multiplier once; used in both decisions and trade writes.
     _regime_mult: float = _get_regime_multiplier_from_redis(config.REDIS_URL)
+    _pg = None
     try:
         from src.store.pg_store import PostgreSQLStore
         _pg = PostgreSQLStore()
@@ -1771,9 +1779,12 @@ def _run_cycle_inner() -> dict:
             _fired_sig_id = _signal_ids.get(order.symbol)
             if _fired_sig_id is not None and "S4" in strats and order.side.value == "BUY":
                 _pending_s4_fires[order.symbol] = _fired_sig_id
-        _pg.close()
     except Exception as _exc:
         log.warning("Failed to log portfolio decisions: %s", _exc)
+    finally:
+        # B7/B32: return the decisions-log connection to the pool on every path.
+        if _pg is not None:
+            _pg.close()
 
     # Check operating mode before submitting orders
     operating_mode = None
@@ -2011,6 +2022,7 @@ def _run_cycle_inner() -> dict:
     # Write trade entries/exits to DB for P&L tracking.
     # Also back-fill the Alpaca order_id on execution_decisions rows.
     if submitted_orders:
+        _pg_trades = None
         try:
             from src.store.pg_store import PostgreSQLStore
             _pg_trades = PostgreSQLStore()
@@ -2089,9 +2101,12 @@ def _run_cycle_inner() -> dict:
                         _pg_trades.update_decision_order_id(dec_id, sub["order_id"])
                     except Exception as _eid_exc:
                         log.warning("Could not back-fill order_id on decision %s: %s", dec_id, _eid_exc)
-            _pg_trades.close()
         except Exception as _exc:
             log.warning("Failed to write trade fills to DB: %s", _exc)
+        finally:
+            # B7/B32: return the trade-writes connection to the pool on every path.
+            if _pg_trades is not None:
+                _pg_trades.close()
 
     # Alert when an approved strategy consistently produces zero target weights.
     # This catches silent strategy death (e.g. S1 killed by a single sparse ticker).
