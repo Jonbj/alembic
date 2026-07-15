@@ -1045,6 +1045,152 @@ def _apply_exit_hysteresis(final_orders, redis_url: str, persistence_cycles: int
     return kept
 
 
+def _persist_trade_fills(
+    submitted_orders,
+    *,
+    open_trades,
+    symbol_decisions,
+    written_buy_order_ids,
+    stop_policy,
+    market,
+    alpaca_entry_prices,
+    s4_signals,
+    regime_mult,
+    tick_time,
+) -> int:
+    """Persist trade entry/exit rows + back-fill Alpaca order_ids, one order at a time.
+
+    Extracted from run_portfolio_cycle's trade-write tail (B28-FIX + WS-5).
+    B33 (2026-07-15): each order's DB write is isolated in its OWN try/except so
+    a single failing order cannot abort the remaining ones. Previously the whole
+    loop shared one try/except and record_trade_exit re-raises DB errors — so the
+    first SELL that threw (a dead pooled connection) broke the loop, skipping
+    record_trade_exit AND the order_id back-fill for every subsequent order,
+    leaving 5 Alpaca fills unrecorded (DB↔Alpaca divergence). On a per-order
+    failure the connection is rolled back (clearing psycopg2's 'current
+    transaction is aborted' state) so the next order reuses the same connection,
+    then the loop continues. Reconcile-fills remains the safety net for any fill
+    whose trade row still didn't get written.
+
+    Returns the count of orders whose trade-write failed (0 = all written).
+    """
+    _pg_trades = None
+    _failures = 0
+    try:
+        from src.store.pg_store import PostgreSQLStore
+        _pg_trades = PostgreSQLStore()
+        # Map symbol -> open trade id so record_trade_exit targets the specific
+        # trade being wound down (never the historical closed trades for the
+        # same symbol). open_trades was fetched at the top of the cycle
+        # (exit_time IS NULL => positions still open at submit time).
+        _open_trade_ids = {t["symbol"]: t["id"] for t in open_trades}
+        for sub in submitted_orders:
+            sym = sub["symbol"]
+            dec = symbol_decisions.get(sym, {})
+            try:
+                if sub["side"] == "buy":
+                    # B28-FIX: BUY rows already written immediately after submission.
+                    # Skip to avoid duplicate primary-key violation.
+                    if sub["order_id"] in written_buy_order_ids:
+                        pass
+                    else:
+                        # Freeze stop metadata at entry for the legacy batch path too.
+                        _frozen_stop_legacy: "FrozenStop | None" = None
+                        if stop_policy is not None:
+                            _raw_px_l = market.prices.get(sym) if market and getattr(market, "prices", None) else None
+                            _entry_px_l = float(_raw_px_l) if isinstance(_raw_px_l, (int, float)) and not isinstance(_raw_px_l, bool) else None
+                            if _entry_px_l is None and sub.get("qty"):
+                                _entry_px_l = sub["notional"] / sub["qty"]
+                            if _entry_px_l is None:
+                                _entry_px_l = float(sub["notional"]) if sub.get("notional") else 0.0
+                            _strategy_l = "S4" if dec.get("signal_id") else "S1"
+                            _frozen_stop_legacy = stop_policy.freeze(
+                                sym, _strategy_l, float(_entry_px_l), tick_time
+                            )
+                        _pg_trades.open_trade(
+                            symbol=sym,
+                            signal_id=dec.get("signal_id"),
+                            decision_id=dec.get("decision_id"),
+                            entry_order_id=sub["order_id"],
+                            entry_time=tick_time,
+                            entry_notional=sub["notional"],
+                            score=dec.get("score", 0.0),
+                            regime_mult=regime_mult,
+                            signal_score=dec.get("signal_score"),
+                            frozen_stop=_frozen_stop_legacy,
+                        )
+                else:
+                    # WS-5 fix-back: target the open trade by id and tell
+                    # record_trade_exit whether this is the final tranche.
+                    # is_final: a SELL whose target allocation_weight is 0.0 is a
+                    # full close (final tranche); stop-loss / reversal SELLs carry
+                    # no allocation_weight and default to 0.0 => final (full close).
+                    _is_final = float(sub.get("allocation_weight", 0.0) or 0.0) == 0.0
+                    _trade_id = _pg_trades.record_trade_exit(
+                        symbol=sym,
+                        exit_order_id=sub["order_id"],
+                        exit_time=tick_time,
+                        exit_reason=sub.get("reason", "portfolio_sell"),
+                        trade_id=_open_trade_ids.get(sym),
+                        is_final=_is_final,
+                    )
+                    if _trade_id is not None:
+                        _entry_px = alpaca_entry_prices.get(sym, 0.0)
+                        _exit_px = market.prices.get(sym, 0.0)
+                        _sig = s4_signals.get(sym, {})
+                        _portfolio_postmortem(
+                            _pg_trades,
+                            _trade_id,
+                            signal=_sig,
+                            score=dec.get("score", 0.0),
+                            entry_price=_entry_px,
+                            exit_price=_exit_px,
+                            tick_time=tick_time,
+                        )
+                # Back-fill Alpaca order_id on the execution_decisions row.
+                # Isolated: a back-fill failure must not count as a trade-write
+                # failure (the trade row already committed) and must not roll back.
+                dec_id = dec.get("decision_id")
+                if dec_id is not None:
+                    try:
+                        _pg_trades.update_decision_order_id(dec_id, sub["order_id"])
+                    except Exception as _eid_exc:
+                        log.warning("Could not back-fill order_id on decision %s: %s", dec_id, _eid_exc)
+            except Exception as _per_order_exc:
+                _failures += 1
+                # Rollback so a connection left in 'current transaction is
+                # aborted' by the failed op is cleaned before the next iteration —
+                # otherwise every subsequent order cascade-fails too.
+                # record_trade_exit already rolls back on its own re-raise, but
+                # open_trade / the freeze may not, so this is defensive + idempotent.
+                try:
+                    _pg_trades.rollback()
+                except Exception:
+                    pass
+                log.warning(
+                    "B33: trade-write failed for %s %s (order_id=%s): %s — continuing with remaining orders",
+                    sym, sub["side"], sub.get("order_id"), _per_order_exc,
+                )
+        if _failures:
+            log.warning(
+                "B33: %d/%d trade writes failed this cycle (continued past failures; "
+                "reconcile-fills will backfill any Alpaca fills not recorded)",
+                _failures, len(submitted_orders),
+            )
+    except Exception as _exc:
+        # Fatal init failure (pool unavailable, open_trades malformed) — nothing
+        # written. Reconcile-fills remains the safety net for any Alpaca fills.
+        log.warning("Failed to initialize trade-write batch: %s", _exc)
+    finally:
+        # B7/B32: return the trade-writes connection to the pool on every path.
+        if _pg_trades is not None:
+            try:
+                _pg_trades.close()
+            except Exception:
+                pass
+    return _failures
+
+
 @app.task(name="src.workers.portfolio_scheduler.run_portfolio_cycle")
 def run_portfolio_cycle() -> dict:
     """Celery entry-point for the portfolio orchestration cycle."""
@@ -2046,92 +2192,21 @@ def _run_cycle_inner() -> dict:
 
     # Write trade entries/exits to DB for P&L tracking.
     # Also back-fill the Alpaca order_id on execution_decisions rows.
+    # B33 (2026-07-15): per-order isolation — one failing order no longer aborts
+    # the rest. See _persist_trade_fills.
     if submitted_orders:
-        _pg_trades = None
-        try:
-            from src.store.pg_store import PostgreSQLStore
-            _pg_trades = PostgreSQLStore()
-            # Map symbol -> open trade id so record_trade_exit can target the
-            # specific trade being wound down (never the historical closed trades
-            # for the same symbol). _open_trades was fetched at the top of the
-            # cycle (exit_time IS NULL => the positions still open at submit time).
-            _open_trade_ids = {t["symbol"]: t["id"] for t in _open_trades}
-            for sub in submitted_orders:
-                sym = sub["symbol"]
-                dec = _symbol_decisions.get(sym, {})
-                if sub["side"] == "buy":
-                    # B28-FIX: BUY rows already written immediately after submission above.
-                    # Skip to avoid duplicate primary-key violation.
-                    if sub["order_id"] in _written_buy_order_ids:
-                        # Still back-fill decision order_id below.
-                        pass
-                    else:
-                        # Freeze stop metadata at entry for the legacy batch path too.
-                        _frozen_stop_legacy: "FrozenStop | None" = None
-                        if _stop_policy is not None:
-                            _raw_px_l = market.prices.get(sym) if market and getattr(market, "prices", None) else None
-                            _entry_px_l = float(_raw_px_l) if isinstance(_raw_px_l, (int, float)) and not isinstance(_raw_px_l, bool) else None
-                            if _entry_px_l is None and sub.get("qty"):
-                                _entry_px_l = sub["notional"] / sub["qty"]
-                            if _entry_px_l is None:
-                                _entry_px_l = float(sub["notional"]) if sub.get("notional") else 0.0
-                            _strategy_l = "S4" if dec.get("signal_id") else "S1"
-                            _frozen_stop_legacy = _stop_policy.freeze(
-                                sym, _strategy_l, float(_entry_px_l), ts
-                            )
-                        _pg_trades.open_trade(
-                            symbol=sym,
-                            signal_id=dec.get("signal_id"),
-                            decision_id=dec.get("decision_id"),
-                            entry_order_id=sub["order_id"],
-                            entry_time=ts,
-                            entry_notional=sub["notional"],
-                            score=dec.get("score", 0.0),
-                            regime_mult=_regime_mult,
-                            signal_score=dec.get("signal_score"),
-                            frozen_stop=_frozen_stop_legacy,
-                        )
-                else:
-                    # WS-5 fix-back: target the open trade by id and tell
-                    # record_trade_exit whether this is the final tranche.
-                    # is_final: a SELL whose target allocation_weight is 0.0 is a
-                    # full close (final tranche); stop-loss / reversal SELLs carry
-                    # no allocation_weight and default to 0.0 => final (full close).
-                    _is_final = float(sub.get("allocation_weight", 0.0) or 0.0) == 0.0
-                    _trade_id = _pg_trades.record_trade_exit(
-                        symbol=sym,
-                        exit_order_id=sub["order_id"],
-                        exit_time=ts,
-                        exit_reason=sub.get("reason", "portfolio_sell"),
-                        trade_id=_open_trade_ids.get(sym),
-                        is_final=_is_final,
-                    )
-                    if _trade_id is not None:
-                        _entry_px = alpaca_entry_prices.get(sym, 0.0)
-                        _exit_px = market.prices.get(sym, 0.0)
-                        _sig = _s4_signals.get(sym, {})
-                        _portfolio_postmortem(
-                            _pg_trades,
-                            _trade_id,
-                            signal=_sig,
-                            score=dec.get("score", 0.0),
-                            entry_price=_entry_px,
-                            exit_price=_exit_px,
-                            tick_time=ts,
-                        )
-                # Back-fill Alpaca order_id on the execution_decisions row.
-                dec_id = dec.get("decision_id")
-                if dec_id is not None:
-                    try:
-                        _pg_trades.update_decision_order_id(dec_id, sub["order_id"])
-                    except Exception as _eid_exc:
-                        log.warning("Could not back-fill order_id on decision %s: %s", dec_id, _eid_exc)
-        except Exception as _exc:
-            log.warning("Failed to write trade fills to DB: %s", _exc)
-        finally:
-            # B7/B32: return the trade-writes connection to the pool on every path.
-            if _pg_trades is not None:
-                _pg_trades.close()
+        _persist_trade_fills(
+            submitted_orders,
+            open_trades=_open_trades,
+            symbol_decisions=_symbol_decisions,
+            written_buy_order_ids=_written_buy_order_ids,
+            stop_policy=_stop_policy,
+            market=market,
+            alpaca_entry_prices=alpaca_entry_prices,
+            s4_signals=_s4_signals,
+            regime_mult=_regime_mult,
+            tick_time=ts,
+        )
 
     # Alert when an approved strategy consistently produces zero target weights.
     # This catches silent strategy death (e.g. S1 killed by a single sparse ticker).

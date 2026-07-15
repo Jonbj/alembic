@@ -1219,3 +1219,129 @@ class TestSectorMapLoader:
         from src.workers import portfolio_scheduler as ps
         monkeypatch.setattr(ps, "_TRADING_YAML", cfg)
         assert ps._load_sector_map() is None
+
+
+# ── B33: per-order trade-write isolation ──────────────────────────────────────
+
+
+def test_persist_trade_fills_isolates_per_order_sell_failure():
+    """B33: a single failing SELL must NOT abort the remaining orders' DB writes.
+
+    Root cause (2026-07-15, 5 SELLs lost): the trade-write tail wrapped every
+    order in ONE try/except, and record_trade_exit re-raises DB errors
+    (pg_store.py: `except Exception: conn.rollback(); raise`). So the first
+    SELL that threw broke the loop, skipping record_trade_exit AND the
+    order_id back-fill for every subsequent order — leaving 5 Alpaca fills
+    unrecorded (DB↔Alpaca divergence). Fix: per-order try/except + rollback so
+    the connection is reusable for the next order.
+    """
+    from src.workers.portfolio_scheduler import _persist_trade_fills
+
+    pg = MagicMock()
+    # First SELL raises (dead pooled connection), the next two succeed.
+    pg.record_trade_exit.side_effect = [
+        RuntimeError("server closed the connection unexpectedly"),
+        324,  # MSFT
+        322,  # NFLX
+    ]
+    pg.update_decision_order_id.return_value = None
+
+    submitted = [
+        {"symbol": "DIS", "side": "sell", "order_id": "ord-dis",
+         "notional": 0.0, "reason": "portfolio_sell", "allocation_weight": 0.0},
+        {"symbol": "MSFT", "side": "sell", "order_id": "ord-msft",
+         "notional": 0.0, "reason": "portfolio_sell", "allocation_weight": 0.0},
+        {"symbol": "NFLX", "side": "sell", "order_id": "ord-nflx",
+         "notional": 0.0, "reason": "portfolio_sell", "allocation_weight": 0.0},
+    ]
+    open_trades = [
+        {"symbol": "DIS", "id": 323},
+        {"symbol": "MSFT", "id": 324},
+        {"symbol": "NFLX", "id": 322},
+    ]
+    symbol_decisions = {
+        "DIS": {"decision_id": "dec-dis"},
+        "MSFT": {"decision_id": "dec-msft"},
+        "NFLX": {"decision_id": "dec-nflx"},
+    }
+    market = MagicMock()
+    market.prices = {"DIS": 100.0, "MSFT": 400.0, "NFLX": 600.0}
+
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=pg), \
+         patch("src.workers.portfolio_scheduler._portfolio_postmortem"):
+        failures = _persist_trade_fills(
+            submitted,
+            open_trades=open_trades,
+            symbol_decisions=symbol_decisions,
+            written_buy_order_ids=set(),
+            stop_policy=None,
+            market=market,
+            alpaca_entry_prices={},
+            s4_signals={},
+            regime_mult=0.7,
+            tick_time=datetime(2026, 7, 15, 14, 22, tzinfo=timezone.utc),
+        )
+
+    # DIS threw → exactly 1 failure reported.
+    assert failures == 1, f"expected 1 failure, got {failures}"
+    # record_trade_exit MUST have been called for ALL three orders (loop continued
+    # past the DIS failure). This is the regression — pre-fix it stopped at DIS.
+    called_syms = [c.kwargs["symbol"] for c in pg.record_trade_exit.call_args_list]
+    assert called_syms == ["DIS", "MSFT", "NFLX"], (
+        f"record_trade_exit must be called for every order even when one fails; "
+        f"got {called_syms}"
+    )
+    # The order_id back-fill must have run for the orders AFTER the failure.
+    backfilled = {c.args[0] for c in pg.update_decision_order_id.call_args_list}
+    assert "dec-msft" in backfilled and "dec-nflx" in backfilled, (
+        f"order_id back-fill must run for orders after the failure; got {backfilled}"
+    )
+    # Connection rolled back after the failure so the next order could reuse it
+    # (otherwise psycopg2 'current transaction is aborted' cascades to all).
+    pg.rollback.assert_called(), "rollback must be called after a per-order failure"
+    # Connection returned to the pool on every path.
+    pg.close.assert_called_once()
+
+
+def test_persist_trade_fills_buy_failure_does_not_block_subsequent_sell():
+    """B33: a failing BUY (legacy batch path) must not block a following SELL's write."""
+    from src.workers.portfolio_scheduler import _persist_trade_fills
+
+    pg = MagicMock()
+    pg.open_trade.side_effect = [RuntimeError("pool exhausted mid-INSERT")]
+    pg.record_trade_exit.return_value = 322  # NFLX SELL succeeds
+    pg.update_decision_order_id.return_value = None
+
+    submitted = [
+        {"symbol": "AAPL", "side": "buy", "order_id": "ord-aapl",
+         "notional": 1000.0, "qty": 5.0, "reason": "portfolio_buy"},
+        {"symbol": "NFLX", "side": "sell", "order_id": "ord-nflx",
+         "notional": 0.0, "reason": "portfolio_sell", "allocation_weight": 0.0},
+    ]
+    market = MagicMock()
+    market.prices = {"AAPL": 200.0, "NFLX": 600.0}
+
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=pg), \
+         patch("src.workers.portfolio_scheduler._portfolio_postmortem"):
+        failures = _persist_trade_fills(
+            submitted,
+            open_trades=[{"symbol": "NFLX", "id": 322}],
+            symbol_decisions={"AAPL": {"decision_id": "dec-aapl"},
+                              "NFLX": {"decision_id": "dec-nflx"}},
+            written_buy_order_ids=set(),
+            stop_policy=None,
+            market=market,
+            alpaca_entry_prices={},
+            s4_signals={},
+            regime_mult=0.7,
+            tick_time=datetime(2026, 7, 15, 14, 22, tzinfo=timezone.utc),
+        )
+
+    assert failures == 1, f"expected 1 failure (the BUY), got {failures}"
+    # The SELL after the failed BUY must still be recorded.
+    sell_syms = [c.kwargs["symbol"] for c in pg.record_trade_exit.call_args_list]
+    assert sell_syms == ["NFLX"], (
+        f"SELL after a failed BUY must still be written; got {sell_syms}"
+    )
+    pg.rollback.assert_called()
+    pg.close.assert_called_once()

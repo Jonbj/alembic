@@ -173,6 +173,24 @@ class PostgreSQLStore:
             self._release_connection(self._conn)
             self._conn = None
 
+    def rollback(self) -> None:
+        """Rollback the current transaction WITHOUT releasing the connection.
+
+        For callers that loop over multiple independent writes (the portfolio
+        scheduler's per-order trade-write loop, B33): if one order's write
+        throws, psycopg2 leaves the connection in 'current transaction is
+        aborted' state and every subsequent command fails until rolled back.
+        Rolling back here clears that state so the next order can proceed on
+        the same connection. Idempotent and safe after a commit (no-ops a fresh
+        transaction). Does NOT close/return the connection — call close() when
+        the loop is done.
+        """
+        if self._conn is not None:
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+
     def write_signal(self, result: SentimentResult) -> int:
         """Write sentiment signal to database. Returns the inserted/updated row id."""
         conn = self._get_connection()
