@@ -173,6 +173,24 @@ class PostgreSQLStore:
             self._release_connection(self._conn)
             self._conn = None
 
+    def rollback(self) -> None:
+        """Rollback the current transaction WITHOUT releasing the connection.
+
+        For callers that loop over multiple independent writes (the portfolio
+        scheduler's per-order trade-write loop, B33): if one order's write
+        throws, psycopg2 leaves the connection in 'current transaction is
+        aborted' state and every subsequent command fails until rolled back.
+        Rolling back here clears that state so the next order can proceed on
+        the same connection. Idempotent and safe after a commit (no-ops a fresh
+        transaction). Does NOT close/return the connection — call close() when
+        the loop is done.
+        """
+        if self._conn is not None:
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+
     def write_signal(self, result: SentimentResult) -> int:
         """Write sentiment signal to database. Returns the inserted/updated row id."""
         conn = self._get_connection()
@@ -990,6 +1008,16 @@ class PostgreSQLStore:
                 # exit_order_id (single, first tranche) + exit_order_ids (all
                 # tranches, dedup) are updated on EVERY tranche so reconcile can
                 # aggregate every fill.
+                # NB: use array_append(...), NOT `arr || elem`. On this Postgres
+                # `text[] || text` resolves to array_cat and tries to cast the
+                # scalar string to text[], throwing 'malformed array literal'
+                # (reproduced 2026-07-15). This was the real root cause of the
+                # 5-missing-SELL-trace incident: the first SELL on a fresh
+                # position (exit_order_ids NULL) hit `COALESCE(NULL, ARRAY[]::text[]) || %s`
+                # and raised, which (pre-B33) broke the whole trade-write loop.
+                # array_append(anyarray, anyelement) is unambiguous.
+                # Dedup guard: array_position is 1-BASED and returns NULL when the
+                # element is absent; COALESCE(..., 0) = 0 means "not present → append".
                 append_clause = (
                     "exit_order_id = COALESCE(exit_order_id, %s),\n"
                     "                               exit_order_ids = CASE\n"
@@ -997,7 +1025,7 @@ class PostgreSQLStore:
                     "                                       array_position(COALESCE(exit_order_ids, ARRAY[]::text[]), %s),\n"
                     "                                       0\n"
                     "                                   ) = 0\n"
-                    "                                   THEN COALESCE(exit_order_ids, ARRAY[]::text[]) || %s\n"
+                    "                                   THEN array_append(COALESCE(exit_order_ids, ARRAY[]::text[]), %s)\n"
                     "                                   ELSE exit_order_ids\n"
                     "                               END"
                 )
