@@ -3,6 +3,8 @@
 Audit di tutta la documentazione/roadmap/plans per estrarre i lavori **ancora aperti o mai chiusi**. Estratto da 3 agent Explore in parallelo + cross-referenza con git/memory.
 
 > **UPDATE 2026-07-15 (post-session):** spuntati due Tier-0/Tier-4 chiusi e deployati oggi — **B7/B32 pool-leak** (`06671f7`, leak=0 verificato) e **F9a stop flip** (`1f450c6`, protective 2% disabilitato su paper, d_hard shadow-only). Ripuliti worktree mergiati/obsoleti (`s4-measurement`, `sector-cap`); conservato `s1-refinements` (lavoro S1 attivo, +5 commit non mergiati). Ordine di esecuzione dei lavori sospesi appeso in fondo (§ "Ordine di esecuzione proposto").
+>
+> **MIGRAZIONE WAYFINDER (2026-07-15):** questo audit è stato importato in GitHub issues come **source of truth enforced** — vedi map issue **#21 "Alembic Roadmap (Wayfinder map)"** + 32 child (#22-#53) con dipendenze `blocked_by` native che codificano la scaletta. Questo doc resta lo **snapshot narrativo** che ha alimentato la migrazione; lo stato live si legge con `gh issue list`. I Tier qui sotto ora sono degni di cross-riferimento ma **non** sono più il tracker — la issue è lo stato. Nuovo lavoro = nuova child issue su #21, non checkbox qui.
 
 > **Caveat importante (doc/code drift):** molti plan doc hanno checkbox `- [ ]` mai spuntate **ma il lavoro è in realtà DONE e merged** (il piano non è stato aggiornato post-esecuzione). Dove ho cross-confermato lo stato reale via commit/memory, lo marco. **Non fidarti dei checkbox vuoti come indicatore di "non fatto"** — verifica sempre contro git.
 
