@@ -756,6 +756,9 @@ def _load_risk_config() -> dict:
         # #61: require N consecutive "whipsaw"-classified cycles (#60) before letting
         # a weight-0 S4 SELL through, instead of exiting on the first fresh weak/neutral
         # re-signal. Off by default — flip only after reviewing the shadow frequency log.
+        # STACKS with execution.exit_persistence_cycles (_apply_exit_hysteresis, runs
+        # earlier, always on) — effective confirmation is ~exit_persistence_cycles +
+        # s4_anti_whipsaw_confirm_cycles, not this value alone. See config/trading.yaml.
         "s4_anti_whipsaw_damping_enabled": False,
         "s4_anti_whipsaw_confirm_cycles": 2,
     }

@@ -15,6 +15,14 @@ Design: require N (default 2) CONSECUTIVE cycles classified "whipsaw" for
 the same symbol before letting the SELL through — a single weak/neutral
 re-signal holds one more cycle; a second consecutive one confirms the exit.
 Flag-gated, off by default (config/trading.yaml risk.s4_anti_whipsaw_damping_enabled).
+
+NOTE (functional review, 2026-07-16): a weight-0 SELL only reaches this check
+after ALREADY clearing the separate, always-on execution.exit_persistence_cycles
+hysteresis (_apply_exit_hysteresis in portfolio_scheduler.py, default 2 cycles,
+runs earlier and filters result.final_orders before this module ever sees the
+order). The two counters stack — effective confirmation with this flag ON is
+~exit_persistence_cycles + confirm_cycles (≈4 cycles / ~60min by default), not
+confirm_cycles alone. Factor this into the flip decision.
 """
 from __future__ import annotations
 
