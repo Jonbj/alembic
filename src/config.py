@@ -156,6 +156,14 @@ class Config(BaseModel):
         default_factory=lambda: float(os.environ.get("ALPACA_STOP_LOSS_PCT", "0.03"))
     )
 
+    # #62/#63 (2026-07-16 PO decision): promote the d_hard disaster-stop from shadow
+    # telemetry to a real broker-enforced GTC stop for fractional positions (100% of
+    # the book — Alpaca rejects bracket orders on fractional/notional quantities).
+    # Default True per the decision; set false only to roll back.
+    ALPACA_FRACTIONAL_STOP_ENABLED: bool = Field(
+        default_factory=lambda: os.environ.get("ALPACA_FRACTIONAL_STOP_ENABLED", "true").lower() == "true"
+    )
+
     # Telegram notifications
     TELEGRAM_BOT_TOKEN: str = Field(default_factory=lambda: os.environ.get("TELEGRAM_BOT_TOKEN", ""))
     TELEGRAM_CHAT_ID: str = Field(default_factory=lambda: os.environ.get("TELEGRAM_CHAT_ID", ""))

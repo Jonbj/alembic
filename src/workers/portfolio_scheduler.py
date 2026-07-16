@@ -399,6 +399,57 @@ def _get_fractionable_symbols(trading_client) -> set[str]:
     return {sym for sym, ok in _FRACTIONABLE_CACHE.items() if ok}
 
 
+def _sync_fractional_protective_stops(trading_client, stop_policy, cycle_ts) -> dict:
+    """#62/#63: reconcile broker-side protective stops for fractional positions.
+
+    Alpaca rejects bracket orders on fractional/notional quantities, so
+    fractionable positions (100% of the book as of 2026-07-16) carry no
+    broker-side floor from the BUY-time bracket path. This runs once per
+    cycle, idempotently: re-derives the desired stop (whole-share floor of
+    the current position, d_hard trigger from avg_entry_price) and only
+    touches the broker when it's missing or stale. Never raises — a failure
+    here must not block order submission.
+    """
+    from alpaca.trading.enums import OrderSide as _OrderSideEnum
+    from alpaca.trading.enums import OrderType as _OrderTypeEnum
+    from alpaca.trading.enums import QueryOrderStatus
+    from alpaca.trading.requests import GetOrdersRequest
+
+    from src.portfolio.fractional_stop_orders import (
+        ExistingStopOrder,
+        build_protective_stop_plans,
+        execute_protective_stop_plans,
+    )
+
+    try:
+        positions = trading_client.get_all_positions()
+    except Exception as exc:
+        log.warning("Fractional protective stop sync: failed to fetch positions: %s", exc)
+        return {"skipped": "positions_fetch_failed"}
+
+    try:
+        open_orders = trading_client.get_orders(
+            GetOrdersRequest(status=QueryOrderStatus.OPEN, side=_OrderSideEnum.SELL)
+        )
+    except Exception as exc:
+        log.warning("Fractional protective stop sync: failed to fetch open orders: %s", exc)
+        return {"skipped": "orders_fetch_failed"}
+
+    stop_orders_by_symbol: dict[str, list[ExistingStopOrder]] = {}
+    for o in open_orders:
+        if getattr(o, "type", None) != _OrderTypeEnum.STOP:
+            continue
+        stop_orders_by_symbol.setdefault(o.symbol, []).append(
+            ExistingStopOrder(id=str(o.id), qty=float(o.qty), stop_price=float(o.stop_price))
+        )
+
+    plans = build_protective_stop_plans(positions, stop_orders_by_symbol, stop_policy, cycle_ts)
+    summary = execute_protective_stop_plans(plans, trading_client)
+    if summary.get("created") or summary.get("replaced") or summary.get("errors"):
+        log.info("Fractional protective stop sync: %s", summary)
+    return summary
+
+
 def _load_execution_engine() -> str:
     """Return execution.engine from trading.yaml; defaults to 'portfolio'."""
     try:
@@ -2050,6 +2101,15 @@ def _run_cycle_inner() -> dict:
             nav=equity,
             open_trades=_open_trades,
         )
+
+        # #62/#63: reconcile broker-side protective stops for fractional positions.
+        # Best-effort — a failure here must never block order submission (already
+        # completed above) or the rest of the cycle.
+        if _stop_policy is not None and config.ALPACA_FRACTIONAL_STOP_ENABLED:
+            try:
+                _sync_fractional_protective_stops(trading_client, _stop_policy, ts)
+            except Exception as _sync_exc:
+                log.warning("Fractional protective stop sync failed: %s", _sync_exc)
 
     # B27-FIX: mark S4 signals fired only for orders that were actually submitted to Alpaca.
     # Previously this happened during decision logging (before submission), causing signals
