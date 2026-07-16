@@ -1478,3 +1478,122 @@ def test_persist_trade_fills_buy_failure_does_not_block_subsequent_sell():
     )
     pg.rollback.assert_called()
     pg.close.assert_called_once()
+
+
+# ── #62/#63: broker-side protective stop sync for fractional positions ──────
+
+
+def _fake_position(symbol: str, qty: str, avg_entry_price: str):
+    from types import SimpleNamespace
+    return SimpleNamespace(symbol=symbol, qty=qty, avg_entry_price=avg_entry_price)
+
+
+def _fake_order(symbol: str, order_id: str, qty: str, stop_price: str, order_type):
+    from types import SimpleNamespace
+    return SimpleNamespace(symbol=symbol, id=order_id, qty=qty, stop_price=stop_price, type=order_type)
+
+
+class TestSyncFractionalProtectiveStops:
+    def test_fetches_positions_and_open_sell_orders(self):
+        from src.workers.portfolio_scheduler import _sync_fractional_protective_stops
+        from src.portfolio.stop_policy import StopPolicy
+
+        tc = MagicMock()
+        tc.get_all_positions.return_value = []
+        tc.get_orders.return_value = []
+        stop_policy = StopPolicy({"stop_loss_mode": "fixed", "stop_loss": 0.0})
+
+        _sync_fractional_protective_stops(tc, stop_policy, datetime(2026, 7, 16, tzinfo=timezone.utc))
+
+        tc.get_all_positions.assert_called_once()
+        tc.get_orders.assert_called_once()
+
+    def test_creates_stop_for_fractional_position_with_no_existing_stop(self):
+        from alpaca.trading.enums import OrderType
+        from src.workers.portfolio_scheduler import _sync_fractional_protective_stops
+        from src.portfolio.stop_policy import StopPolicy
+
+        tc = MagicMock()
+        tc.get_all_positions.return_value = [_fake_position("AAPL", "2.4578", "100.0")]
+        tc.get_orders.return_value = []
+        stop_policy = StopPolicy({"stop_loss_mode": "fixed", "stop_loss": 0.0})
+
+        summary = _sync_fractional_protective_stops(
+            tc, stop_policy, datetime(2026, 7, 16, tzinfo=timezone.utc)
+        )
+
+        tc.submit_order.assert_called_once()
+        assert summary["created"] == 1
+
+    def test_ignores_non_stop_orders_when_checking_existing_protection(self):
+        from alpaca.trading.enums import OrderType
+        from src.workers.portfolio_scheduler import _sync_fractional_protective_stops
+        from src.portfolio.stop_policy import StopPolicy
+
+        tc = MagicMock()
+        tc.get_all_positions.return_value = [_fake_position("AAPL", "2.4578", "100.0")]
+        # A resting limit sell (take-profit) for the same symbol must NOT count as
+        # existing protection — only a STOP-type order does.
+        tc.get_orders.return_value = [
+            _fake_order("AAPL", "limit-1", "2", "150.0", OrderType.LIMIT),
+        ]
+        stop_policy = StopPolicy({"stop_loss_mode": "fixed", "stop_loss": 0.0})
+
+        summary = _sync_fractional_protective_stops(
+            tc, stop_policy, datetime(2026, 7, 16, tzinfo=timezone.utc)
+        )
+
+        tc.submit_order.assert_called_once()
+        assert summary["created"] == 1
+
+    def test_noop_when_matching_stop_order_already_exists(self):
+        from alpaca.trading.enums import OrderType
+        from src.workers.portfolio_scheduler import _sync_fractional_protective_stops
+        from src.portfolio.stop_policy import StopPolicy
+
+        tc = MagicMock()
+        tc.get_all_positions.return_value = [_fake_position("AAPL", "2.4578", "100.0")]
+        # fixed mode, stop_loss=0.0 -> d_init=0 -> d_hard = floor 0.12 -> stop_price = 88.0
+        tc.get_orders.return_value = [
+            _fake_order("AAPL", "stop-1", "2", "88.0", OrderType.STOP),
+        ]
+        stop_policy = StopPolicy({"stop_loss_mode": "fixed", "stop_loss": 0.0})
+
+        summary = _sync_fractional_protective_stops(
+            tc, stop_policy, datetime(2026, 7, 16, tzinfo=timezone.utc)
+        )
+
+        tc.submit_order.assert_not_called()
+        tc.cancel_order_by_id.assert_not_called()
+        assert summary["noop"] == 1
+
+    def test_returns_skip_marker_when_positions_fetch_fails(self):
+        from src.workers.portfolio_scheduler import _sync_fractional_protective_stops
+        from src.portfolio.stop_policy import StopPolicy
+
+        tc = MagicMock()
+        tc.get_all_positions.side_effect = RuntimeError("api down")
+        stop_policy = StopPolicy({"stop_loss_mode": "fixed", "stop_loss": 0.0})
+
+        summary = _sync_fractional_protective_stops(
+            tc, stop_policy, datetime(2026, 7, 16, tzinfo=timezone.utc)
+        )
+
+        assert summary == {"skipped": "positions_fetch_failed"}
+        tc.submit_order.assert_not_called()
+
+    def test_returns_skip_marker_when_orders_fetch_fails(self):
+        from src.workers.portfolio_scheduler import _sync_fractional_protective_stops
+        from src.portfolio.stop_policy import StopPolicy
+
+        tc = MagicMock()
+        tc.get_all_positions.return_value = [_fake_position("AAPL", "2.4578", "100.0")]
+        tc.get_orders.side_effect = RuntimeError("api down")
+        stop_policy = StopPolicy({"stop_loss_mode": "fixed", "stop_loss": 0.0})
+
+        summary = _sync_fractional_protective_stops(
+            tc, stop_policy, datetime(2026, 7, 16, tzinfo=timezone.utc)
+        )
+
+        assert summary == {"skipped": "orders_fetch_failed"}
+        tc.submit_order.assert_not_called()
