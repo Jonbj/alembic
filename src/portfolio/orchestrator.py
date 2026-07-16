@@ -48,6 +48,14 @@ class CycleResult:
     # whose feedback regime scale was != 1.0 this cycle. Lets the scheduler log the
     # deployment delta (measure-before-enforce) without applying the scale live.
     feedback_shadow: dict[str, dict] = field(default_factory=dict)
+    # B33-follow-up: per-symbol {signal_id, score, reasoning, model_id} pinned
+    # by S4 at the exact moment it computed weights this cycle. The scheduler
+    # must use this for decision logging + idempotency instead of re-fetching
+    # "latest signal" later, which can race a signal that arrives in between
+    # (see the 2026-07-15 MSFT incident: ranker used +0.165, a later re-fetch
+    # picked up a -0.110 signal that arrived 34s after). Only symbols S4
+    # actually ranked this cycle are present; other strategies contribute none.
+    symbol_signal_provenance: dict[str, dict] = field(default_factory=dict)
 
 
 class PortfolioOrchestrator:
@@ -123,6 +131,7 @@ class PortfolioOrchestrator:
         merged_weights: dict[str, float] = {}
         symbol_strategies: dict[str, list[str]] = {}
         feedback_shadow: dict[str, dict] = {}
+        symbol_signal_provenance: dict[str, dict] = {}
 
         # F8: per-strategy feedback regime scale (loss-feedback de-risk/re-risk
         # throttle). None / missing strategy → 1.0 (identity). Applied to each
@@ -151,6 +160,15 @@ class PortfolioOrchestrator:
                 )
                 strategies_run.append(entry.strategy_id)
                 orders_per_strategy[entry.strategy_id] = len(tw)
+
+                # B33-follow-up: pin S4's per-symbol signal provenance right
+                # here, in the same call that computed the weights — never
+                # re-derived later from a fresh DB query.
+                _provenance = getattr(callable_fn, "last_signal_provenance", None)
+                if _provenance:
+                    for sym in tw:
+                        if sym in _provenance:
+                            symbol_signal_provenance[sym] = _provenance[sym]
 
                 # Merge: weighted sum (sleeve-local semantics).
                 # Strategies produce sleeve-local weights (fraction of their own sleeve).
@@ -287,6 +305,7 @@ class PortfolioOrchestrator:
             final_orders=combined,
             symbol_strategies=symbol_strategies,
             feedback_shadow=feedback_shadow,
+            symbol_signal_provenance=symbol_signal_provenance,
         )
 
     # ── Private ────────────────────────────────────────────────────────────────

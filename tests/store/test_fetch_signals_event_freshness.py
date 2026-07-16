@@ -24,6 +24,42 @@ def test_fetch_signals_passes_news_age_parameter():
     assert "2.0" in [str(p) for p in params]
 
 
+def test_fetch_signals_sql_selects_id():
+    """B33-follow-up: id must be selected so SentimentResult.signal_id can be pinned."""
+    query = PostgreSQLStore._FETCH_SIGNALS_FOR_CYCLE
+    # id must appear in the SELECT list (before FROM), not just anywhere in the query.
+    select_clause = query.split("FROM", 1)[0]
+    assert "id" in [c.strip().split(" ")[0] for c in select_clause.replace("SELECT DISTINCT ON (symbol)", "").split(",")]
+
+
+def test_fetch_signals_populates_signal_id_from_row():
+    """B33-follow-up: each returned SentimentResult carries the DB row's id."""
+    from datetime import datetime, timezone
+
+    store = PostgreSQLStore.__new__(PostgreSQLStore)
+    cursor = MagicMock()
+    cursor.fetchall.return_value = [
+        {
+            "id": 3770,
+            "symbol": "MSFT",
+            "score": 0.165,
+            "confidence": 0.9,
+            "reasoning": "bull case",
+            "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+            "ensemble_std": 0.01,
+            "fallback_used": False,
+            "generated_at": datetime(2026, 7, 15, 18, 30, 16, tzinfo=timezone.utc),
+        }
+    ]
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+    conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    with patch.object(PostgreSQLStore, "_get_connection", return_value=conn):
+        results = store.fetch_signals_for_cycle(hours=4, symbols=["MSFT"])
+    assert len(results) == 1
+    assert results[0].signal_id == 3770
+
+
 def test_fetch_signals_default_has_no_event_time_gate():
     """Review follow-up: default news_age_hours=None must NOT narrow the window.
 

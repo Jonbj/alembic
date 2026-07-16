@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from src.backtest.engine.types import OrderSide, OrderType
+from src.models.signals import SentimentResult
 from src.portfolio.types import CombinedOrder
 
 
@@ -1091,6 +1092,131 @@ def test_buy_decision_not_logged_for_symbol_with_open_trade():
     assert len(buy_calls) == 0, (
         "BUY decision for XLK must NOT be logged when XLK already has an open trade. "
         f"Got {len(buy_calls)} call(s): {buy_calls}"
+    )
+
+
+# ── B33-follow-up: pinned S4 signal provenance (no "latest" re-fetch race) ───
+#
+# 2026-07-15 MSFT incident: the ranker used signal_id=3770 (score +0.165) to
+# compute the BUY weight; ~34s later the decision-logging block re-queried
+# "latest signal" and picked up signal_id=3773 (score -0.110, arrived after
+# ranking) instead. The decision row and the idempotency fired-set both ended
+# up pointing at the wrong signal. The fix: use CycleResult.symbol_signal_
+# provenance (pinned by the orchestrator at weight-computation time) instead
+# of re-fetching. These tests mock fetch_latest_signal_ids/fetch_signals_for_
+# cycle to return the WRONG (later) signal, and assert the decision is logged
+# with the PINNED (correct, earlier) one.
+
+
+def test_s4_decision_uses_pinned_provenance_not_stale_refetch():
+    """write_execution_decision must use the pinned signal_id/score from
+    CycleResult.symbol_signal_provenance, not a fresh fetch_latest_signal_ids/
+    fetch_signals_for_cycle call that could return a newer, different signal.
+    """
+    import pandas as pd
+    from unittest.mock import MagicMock, patch
+    from src.workers.portfolio_scheduler import _run_cycle_inner
+    from src.portfolio.orchestrator import CycleResult
+
+    bars_df = pd.DataFrame({"MSFT": [100.0 + i for i in range(100)]})
+    bars_df.index = pd.date_range("2025-01-01", periods=100, freq="B")
+
+    # Pinned at ranking time: the correct, bullish signal that drove the BUY.
+    mock_cycle_result = CycleResult(
+        strategies_run=["S4"],
+        orders_per_strategy={"S4": 1},
+        orders_before_constraints=1,
+        orders_after_constraints=1,
+        constraints_fired=[],
+        final_orders=[_make_combined_order("MSFT", OrderSide.BUY)],
+        symbol_strategies={"MSFT": ["S4"]},
+        symbol_signal_provenance={
+            "MSFT": {
+                "signal_id": 3770, "score": 0.165,
+                "reasoning": "bull case", "model_id": "ensemble:glm-5.2:cloud",
+            },
+        },
+    )
+
+    mock_pg = MagicMock()
+    mock_pg.fetch_trades.return_value = []
+    mock_pg.fetch_recently_bought_symbols.return_value = set()
+    # A stale re-fetch would return the WRONG, later-arriving signal (3773,
+    # -0.110) — if the fix works, these values must never reach the decision.
+    mock_pg.fetch_latest_signal_ids.return_value = {"MSFT": 3773}
+    mock_pg.fetch_signals_for_cycle.return_value = [
+        SentimentResult(
+            symbol="MSFT", score=-0.110, confidence=0.9,
+            reasoning="bear case (arrived after ranking)", model_id="gpt-oss:20b-cloud",
+            signal_id=3773,
+        )
+    ]
+    mock_pg.write_execution_decision = MagicMock(return_value=1)
+
+    with patch("src.strategies.registry.StrategyRegistry") as mock_reg, \
+         patch("alpaca.data.historical.StockHistoricalDataClient") as mock_dc, \
+         patch("alpaca.trading.client.TradingClient") as mock_tc, \
+         patch("src.portfolio.orchestrator.PortfolioOrchestrator") as mock_orch, \
+         patch("src.backtest.engine.data_replay.DataReplay"), \
+         patch("src.backtest.engine.portfolio.VirtualPortfolio"), \
+         patch("src.workers.portfolio_scheduler._persist_cycle_result"), \
+         patch("src.store.pg_store.PostgreSQLStore", return_value=mock_pg), \
+         patch("redis.Redis") as mock_redis_cls:
+
+        entry = MagicMock()
+        entry.strategy_id = "S4"
+        mock_reg.return_value.get_active_strategies.return_value = [entry]
+        mock_reg.return_value.load_mode_from_db.return_value = None
+
+        dates = pd.date_range("2025-01-01", periods=100, freq="B")
+        alpaca_raw = pd.DataFrame(
+            {"close": [100.0 + i for i in range(100)]},
+            index=pd.MultiIndex.from_arrays(
+                [["MSFT"] * 100, dates],
+                names=["symbol", "timestamp"],
+            ),
+        )
+        mock_dc.return_value.get_stock_bars.return_value.df = alpaca_raw
+        mock_dc.return_value.get_stock_snapshot.side_effect = Exception("no snap")
+
+        clock = MagicMock()
+        clock.is_open = True
+        account = MagicMock()
+        account.cash = "100000"
+        account.equity = "100000"
+        account.buying_power = "100000"
+        account.trading_blocked = False
+        account.account_blocked = False
+        mock_tc.return_value.get_clock.return_value = clock
+        mock_tc.return_value.get_account.return_value = account
+        mock_tc.return_value.get_all_positions.return_value = []
+
+        mock_orch.return_value.run_cycle.return_value = mock_cycle_result
+
+        redis_inst = MagicMock()
+        redis_inst.get.return_value = None
+        redis_inst.set.return_value = True
+        redis_inst.smembers.return_value = set()
+        mock_redis_cls.from_url.return_value = redis_inst
+
+        try:
+            _run_cycle_inner()
+        except Exception:
+            pass
+
+    msft_calls = [
+        c for c in mock_pg.write_execution_decision.call_args_list
+        if c.kwargs.get("symbol") == "MSFT"
+    ]
+    assert len(msft_calls) == 1, f"Expected exactly one MSFT decision, got {len(msft_calls)}"
+    call_kwargs = msft_calls[0].kwargs
+    assert call_kwargs["signal_id"] == 3770, (
+        "Decision must use the PINNED signal_id (3770, ranked) not the stale "
+        f"re-fetch (3773). Got {call_kwargs['signal_id']}."
+    )
+    assert call_kwargs["signal_score"] == 0.165, (
+        "Decision must use the PINNED score (+0.165) not the stale re-fetch "
+        f"(-0.110). Got {call_kwargs['signal_score']}."
     )
 
 

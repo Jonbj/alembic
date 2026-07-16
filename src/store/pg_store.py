@@ -2183,7 +2183,7 @@ class PostgreSQLStore:
     # more reliable read of current sentiment). Among same-status signals, most recent wins.
     _FETCH_SIGNALS_FOR_CYCLE = """
         SELECT DISTINCT ON (symbol)
-            symbol, score, confidence,
+            id, symbol, score, confidence,
             COALESCE(reasoning, '') AS reasoning,
             model_id, ensemble_std, fallback_used, generated_at
         FROM sentiment_signals
@@ -2249,6 +2249,7 @@ class PostgreSQLStore:
                     ensemble_std=float(row.get("ensemble_std") or 0.0),
                     fallback_used=bool(row.get("fallback_used", False)),
                     generated_at=generated_at,
+                    signal_id=row.get("id"),
                 )
             )
         return results

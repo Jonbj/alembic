@@ -332,6 +332,76 @@ def test_orchestrator_weight_merge_no_double_counting():
     assert len(aapl_orders) == 1
 
 
+# ── B33-follow-up: S4 signal provenance propagation ─────────────────────────
+# The scheduler used to re-fetch "latest signal" for logging/idempotency
+# *after* the orchestrator already computed weights from an earlier snapshot
+# — a race that mis-attributed a newer signal to an older decision (the
+# 2026-07-15 MSFT incident). CycleResult.symbol_signal_provenance carries the
+# exact signal_id/score/reasoning/model_id pinned at weight-computation time.
+
+def test_cycle_result_has_symbol_signal_provenance_field():
+    result = CycleResult(
+        strategies_run=[], orders_per_strategy={}, orders_before_constraints=0,
+        orders_after_constraints=0, constraints_fired=[], final_orders=[],
+    )
+    assert result.symbol_signal_provenance == {}
+
+
+def test_orchestrator_propagates_s4_signal_provenance():
+    from src.models.signals import SentimentResult
+    from src.strategies.s4.config import S4Config
+    from src.strategies.s4.strategy import NewsDrivenTactical
+
+    signals_df = pd.DataFrame({
+        "symbol": ["AAPL"],
+        "score": [0.165],
+        "confidence": [0.9],
+        "reasoning": ["bull case"],
+        "model_id": ["ensemble:glm-5.2:cloud"],
+        "ensemble_std": [0.01],
+        "fallback_used": [False],
+        "generated_at": [datetime(2024, 1, 15)],
+        "signal_id": [3770],
+    })
+    s4 = NewsDrivenTactical(S4Config(min_stocks=1), signals=signals_df)
+    entries = [StrategyEntry("S4", NewsDrivenTactical, 0.10, "30 14 * * 1-5")]
+    registry = _make_registry(entries)
+    orch = PortfolioOrchestrator(
+        registry=registry,
+        strategy_instances={"S4": s4},
+        constraint_enforcer=ConstraintEnforcer(),
+    )
+    result = orch.run_cycle(
+        ts=datetime(2024, 1, 15),
+        data_replay=_make_data_replay(),
+        portfolio=_make_portfolio(),
+        market=_make_market(),
+    )
+    assert result.symbol_signal_provenance["AAPL"]["signal_id"] == 3770
+    assert result.symbol_signal_provenance["AAPL"]["reasoning"] == "bull case"
+    assert result.symbol_signal_provenance["AAPL"]["model_id"] == "ensemble:glm-5.2:cloud"
+
+
+def test_orchestrator_no_provenance_for_non_s4_strategy():
+    """S1/S2 (order-returning or price-based strategies) have no signal
+    provenance — the field must simply be absent, not raise."""
+    s1 = _FixedStrategy([_make_order(strategy_id="S1")])
+    entries = [StrategyEntry("S1", _FixedStrategy, 1.0, "30 14 * * 1-5")]
+    registry = _make_registry(entries)
+    orch = PortfolioOrchestrator(
+        registry=registry,
+        strategy_instances={"S1": s1},
+        constraint_enforcer=ConstraintEnforcer(),
+    )
+    result = orch.run_cycle(
+        ts=datetime(2024, 1, 15),
+        data_replay=_make_data_replay(),
+        portfolio=_make_portfolio(),
+        market=_make_market(),
+    )
+    assert result.symbol_signal_provenance == {}
+
+
 # ── Constraints ───────────────────────────────────────────────────────────────
 
 def test_orchestrator_applies_constraint_enforcer():

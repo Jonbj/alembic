@@ -1830,7 +1830,22 @@ def _run_cycle_inner() -> dict:
         # to its merged weight (e.g. {"AAPL": ["S4"], "SPY": ["S2"]}).
         _sym_strats = result.symbol_strategies
         _s4_symbols = [sym for sym, strats in _sym_strats.items() if "S4" in strats]
-        _signal_ids = _pg.fetch_latest_signal_ids(_s4_symbols) if _s4_symbols else {}
+        # B33-follow-up: use the signal pinned by the ranker at weight-computation
+        # time (result.symbol_signal_provenance) instead of re-querying "latest
+        # signal" here. A re-query can race a signal that arrives between ranking
+        # and this point in the cycle, silently mis-attributing the decision/
+        # idempotency-fire to a different signal than the one that was actually
+        # ranked (2026-07-15 MSFT incident: ranker used +0.165, re-fetch picked up
+        # a -0.110 signal that arrived 34s later). Fall back to the live re-fetch
+        # only for S4 symbols the orchestrator did not pin (should not happen in
+        # practice — defensive only).
+        _s4_provenance: dict[str, dict] = result.symbol_signal_provenance or {}
+        _unpinned_s4_symbols = [s for s in _s4_symbols if s not in _s4_provenance]
+        _signal_ids = dict(_pg.fetch_latest_signal_ids(_unpinned_s4_symbols)) if _unpinned_s4_symbols else {}
+        for _sym in _s4_symbols:
+            _prov_sid = _s4_provenance.get(_sym, {}).get("signal_id")
+            if _prov_sid is not None:
+                _signal_ids[_sym] = _prov_sid
         # P1-S4-IDEMPOTENCY: skip S4 orders whose signal_id already fired today.
         _session_date = ts.strftime("%Y-%m-%d")
         _fired_ids = _get_fired_signal_ids(_session_date, config.REDIS_URL)
@@ -1861,12 +1876,25 @@ def _run_cycle_inner() -> dict:
                         )
                     except Exception as _ae:
                         log.warning("P1-S4: duplicate audit write failed: %s", _ae)
-        # Load S4 signal details (score + reasoning) for the reason text
-        _s4_signals: dict[str, dict] = {}
-        if _s4_symbols:
+        # Load S4 signal details (score + reasoning) for the reason text.
+        # B33-follow-up: prefer the pinned provenance (see above) — only fall
+        # back to a fresh fetch_signals_for_cycle for symbols the orchestrator
+        # did not pin (defensive; should not happen for a symbol with "S4" in
+        # _sym_strats this cycle).
+        _s4_signals: dict[str, dict] = {
+            sym: {
+                "score": prov["score"],
+                "reasoning": prov["reasoning"],
+                "model_id": prov["model_id"],
+            }
+            for sym, prov in _s4_provenance.items()
+        }
+        _unpinned_for_signals = [s for s in _s4_symbols if s not in _s4_signals]
+        if _unpinned_for_signals:
             try:
-                _raw_sigs = _pg.fetch_signals_for_cycle(hours=24, symbols=_s4_symbols)
-                _s4_signals = {s.symbol: {"score": s.score, "reasoning": s.reasoning, "model_id": s.model_id} for s in _raw_sigs}
+                _raw_sigs = _pg.fetch_signals_for_cycle(hours=24, symbols=_unpinned_for_signals)
+                for s in _raw_sigs:
+                    _s4_signals[s.symbol] = {"score": s.score, "reasoning": s.reasoning, "model_id": s.model_id}
             except Exception:
                 pass
         # FIX-F: pre-fetch last signal (any age, up to 48h) for SELL-weight-0 orders
