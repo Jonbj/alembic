@@ -16,13 +16,13 @@ from src.backtest.engine.types import RebalanceFrequency
 # ---------------------------------------------------------------------------
 
 def _sig(symbol: str, score: float, confidence: float, **kwargs) -> SentimentResult:
+    defaults = {"reasoning": "test", "model_id": "test"}
+    defaults.update(kwargs)
     return SentimentResult(
         symbol=symbol,
         score=score,
         confidence=confidence,
-        reasoning="test",
-        model_id="test",
-        **kwargs,
+        **defaults,
     )
 
 
@@ -89,6 +89,50 @@ def test_equal_weight_calculation():
     expected_weight = pytest.approx(1.0 / 5, rel=1e-9)
     for r in result.rankings:
         assert r.weight == expected_weight
+
+
+# ---------------------------------------------------------------------------
+# B33-follow-up: signal provenance (signal_id/reasoning/model_id) pinned per
+# ticker at ranking time, so the decision log / idempotency never need to
+# re-fetch "latest" later and race a newer signal for the same symbol.
+# ---------------------------------------------------------------------------
+
+def test_ranked_ticker_carries_signal_id():
+    sig = _sig("MSFT", score=0.165, confidence=0.9, signal_id=3770)
+    ranker = CrossSectionalRanker(S4Config(min_stocks=1))
+    result = ranker.rank([sig])
+    assert result.rankings[0].signal_id == 3770
+
+
+def test_ranked_ticker_carries_reasoning_and_model_id():
+    sig = _sig("MSFT", score=0.165, confidence=0.9, signal_id=3770,
+                reasoning="bull case", model_id="ensemble:glm-5.2:cloud")
+    ranker = CrossSectionalRanker(S4Config(min_stocks=1))
+    result = ranker.rank([sig])
+    assert result.rankings[0].reasoning == "bull case"
+    assert result.rankings[0].model_id == "ensemble:glm-5.2:cloud"
+
+
+def test_ranking_result_provenance_keyed_by_ticker():
+    sigs = [
+        _sig("MSFT", score=0.165, confidence=0.9, signal_id=3770, reasoning="bull", model_id="m1"),
+        _sig("AAPL", score=0.5, confidence=0.9, signal_id=42, reasoning="beat", model_id="m2"),
+    ]
+    ranker = CrossSectionalRanker(S4Config(min_stocks=1))
+    result = ranker.rank(sigs)
+    assert result.provenance["MSFT"] == {
+        "signal_id": 3770, "score": 0.165, "reasoning": "bull", "model_id": "m1",
+    }
+    assert result.provenance["AAPL"]["signal_id"] == 42
+
+
+def test_ranked_ticker_signal_id_defaults_to_none():
+    """Backtest signals with no DB row have signal_id=None — provenance still works."""
+    sig = _sig("MSFT", score=0.165, confidence=0.9)
+    ranker = CrossSectionalRanker(S4Config(min_stocks=1))
+    result = ranker.rank([sig])
+    assert result.rankings[0].signal_id is None
+    assert result.provenance["MSFT"]["signal_id"] is None
 
 
 def test_bucket_weight_preserved():

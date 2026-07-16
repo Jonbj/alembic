@@ -91,8 +91,15 @@ class RedisStore:
         """
         key = f"signal:{result.symbol}:sentiment"
         payload = json.loads(result.model_dump_json())
-        if signal_id is not None:
-            payload["signal_id"] = signal_id
+        # B33-follow-up: SentimentResult.signal_id (pinned by the ranker) is
+        # the fallback when no explicit signal_id kwarg is given. Either way,
+        # omit the key entirely when no id is known — some consumers use
+        # "signal_id" in payload as a presence check, not payload.get(...).
+        _effective_signal_id = signal_id if signal_id is not None else result.signal_id
+        if _effective_signal_id is not None:
+            payload["signal_id"] = _effective_signal_id
+        else:
+            payload.pop("signal_id", None)
         try:
             self._r.setex(key, self._signal_ttl, json.dumps(payload))
         except Exception as e:

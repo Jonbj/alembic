@@ -43,6 +43,13 @@ class NewsDrivenTactical:
         self._ranker = CrossSectionalRanker(config)
         self._signals_df = signals
         self._last_rebalance: Optional[datetime] = None
+        # B33-follow-up: provenance (signal_id/score/reasoning/model_id) of the
+        # signal that drove each ticker's weight in the most recent
+        # compute_target_weights() call. Pinned here so the orchestrator can
+        # carry it through to decision logging + idempotency without ever
+        # re-querying the signal store for "latest" (which races a signal
+        # that arrives after ranking but before logging).
+        self._last_signal_provenance: dict[str, dict] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -55,7 +62,14 @@ class NewsDrivenTactical:
     ) -> dict[str, float]:
         """Return {ticker: weight} for top-ranked tickers from given signals."""
         result = self._ranker.rank(signals, as_of=as_of)
+        self._last_signal_provenance = result.provenance
         return result.weights
+
+    @property
+    def last_signal_provenance(self) -> dict[str, dict]:
+        """Per-ticker {signal_id, score, reasoning, model_id} from the most
+        recent compute_target_weights() call. Empty before the first call."""
+        return self._last_signal_provenance
 
     def health_check(self) -> bool:
         return True
@@ -155,6 +169,8 @@ class NewsDrivenTactical:
                 df = df[df["generated_at"] >= ts - timedelta(hours=max_age)]
         results: list[SentimentResult] = []
         for _, row in df.iterrows():
+            raw_signal_id = row.get("signal_id") if "signal_id" in row.index else None
+            signal_id = int(raw_signal_id) if pd.notna(raw_signal_id) else None
             results.append(
                 SentimentResult(
                     symbol=str(row["symbol"]),
@@ -165,6 +181,7 @@ class NewsDrivenTactical:
                     ensemble_std=float(row.get("ensemble_std", 0.0)),
                     fallback_used=bool(row.get("fallback_used", False)),
                     generated_at=row["generated_at"] if "generated_at" in row.index else ts,
+                    signal_id=signal_id,
                 )
             )
         return results

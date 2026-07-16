@@ -165,6 +165,63 @@ class TestComputeTargetWeights:
         assert strat.compute_target_weights([], as_of=_TS) == {}
 
 
+class TestSignalProvenance:
+    """B33-follow-up: last_signal_provenance pins the exact signal used per
+    ticker at compute_target_weights() time, so callers (the orchestrator /
+    scheduler) never need to re-fetch "latest" later and race a newer signal.
+    """
+
+    def test_provenance_available_after_compute(self) -> None:
+        signals = [_sig("AAPL", score=0.6, confidence=0.8)]
+        strat = NewsDrivenTactical(S4Config(min_stocks=1))
+        strat.compute_target_weights(signals, as_of=_TS)
+        assert "AAPL" in strat.last_signal_provenance
+
+    def test_provenance_carries_signal_id(self) -> None:
+        sig = SentimentResult(
+            symbol="MSFT", score=0.165, confidence=0.9, reasoning="bull",
+            model_id="ensemble:glm-5.2:cloud", generated_at=_TS, signal_id=3770,
+        )
+        strat = NewsDrivenTactical(S4Config(min_stocks=1))
+        strat.compute_target_weights([sig], as_of=_TS)
+        assert strat.last_signal_provenance["MSFT"]["signal_id"] == 3770
+        assert strat.last_signal_provenance["MSFT"]["score"] == 0.165
+        assert strat.last_signal_provenance["MSFT"]["reasoning"] == "bull"
+        assert strat.last_signal_provenance["MSFT"]["model_id"] == "ensemble:glm-5.2:cloud"
+
+    def test_provenance_empty_before_first_compute(self) -> None:
+        strat = NewsDrivenTactical(S4Config())
+        assert strat.last_signal_provenance == {}
+
+    def test_provenance_resets_to_only_currently_ranked_tickers(self) -> None:
+        """A ticker that drops out of the ranking on a later cycle must not
+        linger in provenance from a stale prior cycle."""
+        strat = NewsDrivenTactical(S4Config(min_stocks=1))
+        strat.compute_target_weights([_sig("AAPL", score=0.6, confidence=0.8)], as_of=_TS)
+        assert "AAPL" in strat.last_signal_provenance
+        strat.compute_target_weights([_sig("MSFT", score=0.6, confidence=0.8)], as_of=_TS)
+        assert "AAPL" not in strat.last_signal_provenance
+        assert "MSFT" in strat.last_signal_provenance
+
+    def test_provenance_via_signals_as_of_dataframe_roundtrip(self) -> None:
+        """Live path: signals arrive as a DataFrame (portfolio_scheduler builds
+        it from DB rows) with a signal_id column — the id must survive the
+        DataFrame -> SentimentResult reconstruction in _signals_as_of."""
+        df = _make_signals_df(["MSFT"])
+        df["signal_id"] = [3770]
+        strat = NewsDrivenTactical(S4Config(min_stocks=1), signals=df)
+        signals = strat._signals_as_of(_TS)
+        assert signals[0].signal_id == 3770
+
+    def test_provenance_via_signals_as_of_missing_column_is_none(self) -> None:
+        """Backward compat: a DataFrame with no signal_id column (older
+        callers, other tests) must not raise — signal_id defaults to None."""
+        df = _make_signals_df(["MSFT"])
+        strat = NewsDrivenTactical(S4Config(min_stocks=1), signals=df)
+        signals = strat._signals_as_of(_TS)
+        assert signals[0].signal_id is None
+
+
 # ---------------------------------------------------------------------------
 # __call__ — no orders when no signals
 # ---------------------------------------------------------------------------

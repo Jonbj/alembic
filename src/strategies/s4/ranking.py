@@ -25,6 +25,11 @@ class RankedTicker:
     effective_strength: float
     rank: int
     weight: float
+    # B33-follow-up: provenance of the exact SentimentResult used for this
+    # ticker, pinned here so callers never need to re-fetch "latest" later.
+    signal_id: int | None = None
+    reasoning: str = ""
+    model_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -41,6 +46,25 @@ class RankingResult:
     @property
     def weights(self) -> dict[str, float]:
         return {r.ticker: r.weight for r in self.rankings}
+
+    @property
+    def provenance(self) -> dict[str, dict]:
+        """Per-ticker {signal_id, score, reasoning, model_id} pinned at rank time.
+
+        B33-follow-up: this is the single source of truth for "which signal
+        drove this ticker's weight" — callers must use this instead of
+        re-querying the signal store for the latest signal, which can return
+        a different (newer) signal than the one actually ranked.
+        """
+        return {
+            r.ticker: {
+                "signal_id": r.signal_id,
+                "score": r.score,
+                "reasoning": r.reasoning,
+                "model_id": r.model_id,
+            }
+            for r in self.rankings
+        }
 
 
 class CrossSectionalRanker:
@@ -111,6 +135,9 @@ class CrossSectionalRanker:
                 effective_strength=strength,
                 rank=rank + 1,
                 weight=per_ticker_weight,
+                signal_id=sig.signal_id,
+                reasoning=sig.reasoning,
+                model_id=sig.model_id,
             )
             for rank, (sig, strength) in enumerate(selected)
         )

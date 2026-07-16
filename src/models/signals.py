@@ -18,6 +18,12 @@ class SentimentResult(BaseModel):
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     # FIX-03: news publication time (event-time). None = unknown (legacy/non-news).
     published_at: datetime | None = None
+    # B33-follow-up: sentiment_signals.id, when this result was loaded from the
+    # DB. None = synthetic/backtest signal with no DB row. Carried through the
+    # ranker so the exact signal that drove a decision can be pinned at
+    # decision time, instead of re-querying "latest" later and racing a signal
+    # that arrived in between (see the 2026-07-15 MSFT incident).
+    signal_id: int | None = None
 
     def model_dump_json(self) -> str:  # type: ignore[override]
         """Serialize to JSON string for Redis storage."""
@@ -34,5 +40,6 @@ class SentimentResult(BaseModel):
                 "fallback_used": self.fallback_used,
                 "generated_at": self.generated_at.isoformat(),
                 "published_at": self.published_at.isoformat() if self.published_at else None,
+                "signal_id": self.signal_id,
             }
         )
