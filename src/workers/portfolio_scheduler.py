@@ -490,6 +490,30 @@ def _preserve_stale_signals_for_open_positions(
     return fresh_signals + preserved
 
 
+def _classify_zero_weight_exit(
+    last_signal: dict | None,
+    max_age_hours: int,
+) -> str:
+    """Classify why a weight-0 S4 SELL happened: "no_signal" | "expired" | "whipsaw".
+
+    #60: a structured tag alongside the free-text reason (`_reason_for_zero_weight_sell`)
+    so downstream measurement (#61 anti-whipsaw damping) doesn't need to parse free
+    text to tell the 3 cases apart. Same boundary rule as the reason text: age strictly
+    greater than max_age_hours is "expired", otherwise a fresh-but-weak signal is
+    "whipsaw".
+
+    Args:
+        last_signal: dict with "generated_at" (datetime) and "score" (float), or None.
+        max_age_hours: S4 max_signal_age_hours threshold (default 4).
+    """
+    if last_signal is None:
+        return "no_signal"
+    from datetime import datetime as _dt, timezone as _tz
+    now_utc = _dt.now(_tz.utc)
+    age_h = (now_utc - last_signal["generated_at"]).total_seconds() / 3600
+    return "expired" if age_h > max_age_hours else "whipsaw"
+
+
 def _reason_for_zero_weight_sell(
     symbol: str,
     last_signal: dict | None,
@@ -502,6 +526,10 @@ def _reason_for_zero_weight_sell(
     cause is signal expiry overnight — visible here as age > max_age_hours — not an
     operator rebalance or a counter-signal.
 
+    #60: each branch is prefixed with the same tag `_classify_zero_weight_exit`
+    returns ("[no_signal]" / "[expired]" / "[whipsaw]"), so the reason text and the
+    structured `exit_mechanism` column always agree.
+
     Args:
         symbol: ticker being sold.
         last_signal: dict with "generated_at" (datetime) and "score" (float), or None.
@@ -509,7 +537,7 @@ def _reason_for_zero_weight_sell(
     """
     if last_signal is None:
         return (
-            f"Portfolio rebalance: weight 0.0% — no S4 signal found in DB "
+            f"[no_signal] Portfolio rebalance: weight 0.0% — no S4 signal found in DB "
             f"(signal may be older than the lookback window or never generated)."
         )
     from datetime import datetime as _dt, timezone as _tz
@@ -520,14 +548,14 @@ def _reason_for_zero_weight_sell(
 
     if age_h > max_age_hours:
         return (
-            f"S4 signal expired (age={age_h:.1f}h > max_age={max_age_hours}h, "
+            f"[expired] S4 signal expired (age={age_h:.1f}h > max_age={max_age_hours}h, "
             f"generated {gen_str}, score={score:+.3f}): "
             f"weight 0.0% — no counter-signal found, position closed."
         )
     # Signal is technically fresh but weight is still 0 (e.g. score below min_score,
     # or the portfolio constraint forced it out). Show score so log is actionable.
     return (
-        f"Portfolio rebalance: weight 0.0% — S4 signal present but not driving a position "
+        f"[whipsaw] Portfolio rebalance: weight 0.0% — S4 signal present but not driving a position "
         f"(score={score:+.3f}, age={age_h:.1f}h, generated {gen_str})."
     )
 
@@ -1989,6 +2017,7 @@ def _run_cycle_inner() -> dict:
                 log.info("Stop-loss cooldown: skipping BUY for %s — stopped out today", order.symbol)
                 continue
             wt_pct = f"{order.allocation_weight * 100:.1f}%"
+            exit_mechanism: str | None = None
             if "S4" in strats:
                 sig = _s4_signals.get(order.symbol, {})
                 sig_score = sig.get("score", 0.0)
@@ -2011,11 +2040,11 @@ def _run_cycle_inner() -> dict:
                 # real cause (signal expiry, missing signal, etc.) rather than the
                 # generic "Portfolio rebalance: weight 0.0%" which gave no insight.
                 if order.side.value == "SELL" and order.allocation_weight == 0.0:
-                    reason = _reason_for_zero_weight_sell(
-                        order.symbol,
-                        _zero_sell_signals.get(order.symbol),
-                        _s4_max_age_h,
-                    )
+                    _zero_sig = _zero_sell_signals.get(order.symbol)
+                    reason = _reason_for_zero_weight_sell(order.symbol, _zero_sig, _s4_max_age_h)
+                    # #60: structured tag alongside the reason text (queryable
+                    # without parsing free text — see #61 anti-whipsaw damping).
+                    exit_mechanism = _classify_zero_weight_exit(_zero_sig, _s4_max_age_h)
                 else:
                     reason = f"Portfolio rebalance: weight {wt_pct}."
             decision_id = _pg.write_execution_decision(
@@ -2028,6 +2057,7 @@ def _run_cycle_inner() -> dict:
                 ema_pass=True,
                 decision=order.side.value,
                 reason=reason,
+                exit_mechanism=exit_mechanism,
             )
             _symbol_decisions[order.symbol] = {
                 "decision_id": decision_id,

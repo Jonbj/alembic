@@ -486,6 +486,51 @@ class TestWriteExecutionDecision:
         )
         assert decision_id == 56
 
+    def test_exit_mechanism_passed_through_to_insert(self):
+        """#60: exit_mechanism (whipsaw/expired/no_signal) is written when supplied."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (57,)
+
+        store = PostgreSQLStore(conn=mock_conn)
+        decision_id = store.write_execution_decision(
+            tick_time=datetime(2026, 7, 16, 15, tzinfo=timezone.utc),
+            symbol="CAT",
+            signal_id=None,
+            score=0.0,
+            regime_mult=1.0,
+            ema_pass=True,
+            decision="SELL",
+            reason="[expired] S4 signal expired...",
+            exit_mechanism="expired",
+        )
+        assert decision_id == 57
+        params = mock_cur.execute.call_args[0][1]
+        assert "expired" in params
+
+    def test_exit_mechanism_defaults_to_none(self):
+        """exit_mechanism is optional — most decisions (BUY, stop_loss, ...) don't set it."""
+        from datetime import datetime, timezone
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.fetchone.return_value = (58,)
+
+        store = PostgreSQLStore(conn=mock_conn)
+        store.write_execution_decision(
+            tick_time=datetime(2026, 7, 16, 15, tzinfo=timezone.utc),
+            symbol="NVDA",
+            signal_id=7,
+            score=0.55,
+            regime_mult=1.0,
+            ema_pass=True,
+            decision="BUY",
+        )
+        params = mock_cur.execute.call_args[0][1]
+        assert None in params
+
 
 class TestFetchDecisions:
     """fetch_decisions returns list of dicts, most-recent first."""

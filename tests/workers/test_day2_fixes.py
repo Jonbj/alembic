@@ -336,3 +336,83 @@ class TestReasonForZeroWeightSell:
         assert reason != "Portfolio rebalance: weight 0.0%.", (
             "Expired signal must produce a more specific reason than the old generic text"
         )
+
+
+# ─── #60: structured exit_mechanism classification for weight-0 SELLs ──────
+
+
+class TestClassifyZeroWeightExit:
+    """_classify_zero_weight_exit() — structured tag alongside the free-text reason.
+
+    #60: 3 buckets (no_signal / expired / whipsaw) so #61's anti-whipsaw
+    measurement doesn't need to parse free text.
+    """
+
+    def test_no_signal_returns_no_signal_mechanism(self):
+        from src.workers.portfolio_scheduler import _classify_zero_weight_exit
+
+        mechanism = _classify_zero_weight_exit(None, max_age_hours=4)
+
+        assert mechanism == "no_signal"
+
+    def test_stale_signal_returns_expired_mechanism(self):
+        from src.workers.portfolio_scheduler import _classify_zero_weight_exit
+
+        gen_at = datetime.now(timezone.utc) - timedelta(hours=20.3)
+        mechanism = _classify_zero_weight_exit(
+            {"generated_at": gen_at, "score": 0.60}, max_age_hours=4
+        )
+
+        assert mechanism == "expired"
+
+    def test_fresh_weak_signal_returns_whipsaw_mechanism(self):
+        from src.workers.portfolio_scheduler import _classify_zero_weight_exit
+
+        gen_at = datetime.now(timezone.utc) - timedelta(hours=1.0)
+        mechanism = _classify_zero_weight_exit(
+            {"generated_at": gen_at, "score": 0.05}, max_age_hours=4
+        )
+
+        assert mechanism == "whipsaw"
+
+    def test_boundary_age_just_under_max_is_not_expired(self):
+        """age_h > max_age_hours (strict) — matches _reason_for_zero_weight_sell's own boundary."""
+        from src.workers.portfolio_scheduler import _classify_zero_weight_exit
+
+        gen_at = datetime.now(timezone.utc) - timedelta(hours=3.999)
+        mechanism = _classify_zero_weight_exit(
+            {"generated_at": gen_at, "score": 0.10}, max_age_hours=4
+        )
+
+        assert mechanism == "whipsaw"
+
+
+class TestReasonForZeroWeightSellTags:
+    """#60: each branch of _reason_for_zero_weight_sell carries a structured tag prefix."""
+
+    def test_no_signal_reason_tagged(self):
+        from src.workers.portfolio_scheduler import _reason_for_zero_weight_sell
+
+        reason = _reason_for_zero_weight_sell("XYZ", last_signal=None, max_age_hours=4)
+
+        assert reason.startswith("[no_signal]")
+
+    def test_expired_reason_tagged(self):
+        from src.workers.portfolio_scheduler import _reason_for_zero_weight_sell
+
+        gen_at = datetime.now(timezone.utc) - timedelta(hours=20.3)
+        reason = _reason_for_zero_weight_sell(
+            "CAT", {"generated_at": gen_at, "score": 0.60}, max_age_hours=4
+        )
+
+        assert reason.startswith("[expired]")
+
+    def test_whipsaw_reason_tagged(self):
+        from src.workers.portfolio_scheduler import _reason_for_zero_weight_sell
+
+        gen_at = datetime.now(timezone.utc) - timedelta(hours=1.0)
+        reason = _reason_for_zero_weight_sell(
+            "AAPL", {"generated_at": gen_at, "score": 0.05}, max_age_hours=4
+        )
+
+        assert reason.startswith("[whipsaw]")
