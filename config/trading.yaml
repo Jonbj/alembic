@@ -195,6 +195,24 @@ risk:
     floor_pct: 0.12
     cap_pct: 0.20
 
+  # #61: anti-whipsaw damping for S4 weight-0 SELLs classified "whipsaw" (#60) — a
+  # fresh weak/neutral re-signal, not a strong-bearish sentiment_reversal or a
+  # legitimate signal expiry. Evidence: intraday S4 exits average -$0.77 (40.2% win
+  # rate) vs overnight+ +$2.64 (30.5% win rate), 230 historical exits. Off by default
+  # — flip only after reviewing the shadow frequency log (measure-before-enforce, QX-01).
+  #
+  # IMPORTANT (functional review, 2026-07-16): this STACKS on top of the always-on
+  # execution.exit_persistence_cycles hysteresis below (default 2), which runs
+  # earlier and already filters result.final_orders before this check ever sees
+  # the order. A whipsaw-classified SELL must clear THAT gate first (2 cycles),
+  # then this one (2 more) — effective confirmation is ~exit_persistence_cycles +
+  # s4_anti_whipsaw_confirm_cycles (~4 cycles / ~60min), NOT s4_anti_whipsaw_confirm_
+  # cycles alone. The shadow log therefore only sees whipsaws that already survived
+  # the generic hysteresis (a marginal measurement of #61's additive effect, not a
+  # count of every whipsaw). Account for this before flipping the flag.
+  s4_anti_whipsaw_damping_enabled: false
+  s4_anti_whipsaw_confirm_cycles: 2   # ADDITIONAL consecutive whipsaw-classified cycles required on top of exit_persistence_cycles (see note above) before the SELL is let through
+
   # Position limits
   max_position_pct: 0.10
   max_portfolio_exposure: 0.50
