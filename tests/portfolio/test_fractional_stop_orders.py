@@ -165,6 +165,41 @@ class TestBuildProtectiveStopPlans:
 
         assert plans[0].action == "noop"
 
+    def test_orphan_stop_cancelled_when_position_fully_closed(self, stop_policy, cycle_ts):
+        """#62 review finding (GLM): reconciliation was position-driven only — a
+        symbol sold to zero drops out of get_all_positions() but its GTC stop
+        order was never cancelled, leaking an orphan broker order indefinitely."""
+        from src.portfolio.fractional_stop_orders import build_protective_stop_plans, ExistingStopOrder
+
+        existing = ExistingStopOrder(id="ord-orphan", qty=2, stop_price=88.0)
+        plans = build_protective_stop_plans(
+            positions=[],  # AAPL fully closed — no longer in get_all_positions()
+            stop_orders_by_symbol={"AAPL": [existing]},
+            stop_policy=stop_policy, cycle_ts=cycle_ts,
+        )
+
+        assert len(plans) == 1
+        assert plans[0].symbol == "AAPL"
+        assert plans[0].action == "cancel_orphan"
+        assert plans[0].cancel_order_ids == ("ord-orphan",)
+
+    def test_orphan_cancellation_only_for_symbols_without_a_position(self, stop_policy, cycle_ts):
+        from src.portfolio.fractional_stop_orders import build_protective_stop_plans, ExistingStopOrder
+
+        positions = [SimpleNamespace(symbol="AAPL", qty="2.4578", avg_entry_price="100.0")]
+        stop_orders_by_symbol = {
+            "AAPL": [ExistingStopOrder(id="ord-1", qty=2, stop_price=88.0)],  # still held -> not orphan
+            "MSFT": [ExistingStopOrder(id="ord-2", qty=1, stop_price=280.0)],  # closed -> orphan
+        }
+        plans = build_protective_stop_plans(
+            positions, stop_orders_by_symbol, stop_policy=stop_policy, cycle_ts=cycle_ts,
+        )
+
+        by_symbol = {p.symbol: p for p in plans}
+        assert by_symbol["AAPL"].action == "noop"
+        assert by_symbol["MSFT"].action == "cancel_orphan"
+        assert by_symbol["MSFT"].cancel_order_ids == ("ord-2",)
+
 
 class TestExecuteProtectiveStopPlans:
     def test_create_submits_stop_order(self):
@@ -221,6 +256,21 @@ class TestExecuteProtectiveStopPlans:
 
         tc.submit_order.assert_not_called()
         assert summary["skipped"] == 1
+
+    def test_cancel_orphan_cancels_without_submitting(self):
+        from src.portfolio.fractional_stop_orders import execute_protective_stop_plans, ProtectiveStopPlan
+
+        plan = ProtectiveStopPlan(
+            action="cancel_orphan", symbol="AAPL", whole_qty=0, stop_price=None,
+            cancel_order_ids=("ord-orphan",),
+        )
+        tc = MagicMock()
+
+        summary = execute_protective_stop_plans([plan], tc)
+
+        tc.cancel_order_by_id.assert_called_once_with("ord-orphan")
+        tc.submit_order.assert_not_called()
+        assert summary["cancelled_orphans"] == 1
 
     def test_submit_failure_recorded_not_raised(self):
         from src.portfolio.fractional_stop_orders import execute_protective_stop_plans, ProtectiveStopPlan

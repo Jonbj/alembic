@@ -1567,6 +1567,29 @@ class TestSyncFractionalProtectiveStops:
         tc.cancel_order_by_id.assert_not_called()
         assert summary["noop"] == 1
 
+    def test_cancels_orphan_stop_for_fully_closed_position(self):
+        """#62 review finding (GLM): a symbol sold to zero drops out of
+        get_all_positions() next cycle — its GTC stop must still be cancelled,
+        not left dangling on the broker indefinitely."""
+        from alpaca.trading.enums import OrderType
+        from src.workers.portfolio_scheduler import _sync_fractional_protective_stops
+        from src.portfolio.stop_policy import StopPolicy
+
+        tc = MagicMock()
+        tc.get_all_positions.return_value = []  # AAPL fully closed this cycle
+        tc.get_orders.return_value = [
+            _fake_order("AAPL", "stop-orphan", "2", "88.0", OrderType.STOP),
+        ]
+        stop_policy = StopPolicy({"stop_loss_mode": "fixed", "stop_loss": 0.0})
+
+        summary = _sync_fractional_protective_stops(
+            tc, stop_policy, datetime(2026, 7, 16, tzinfo=timezone.utc)
+        )
+
+        tc.cancel_order_by_id.assert_called_once_with("stop-orphan")
+        tc.submit_order.assert_not_called()
+        assert summary["cancelled_orphans"] == 1
+
     def test_returns_skip_marker_when_positions_fetch_fails(self):
         from src.workers.portfolio_scheduler import _sync_fractional_protective_stops
         from src.portfolio.stop_policy import StopPolicy
