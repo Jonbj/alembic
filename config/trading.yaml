@@ -195,6 +195,14 @@ risk:
     floor_pct: 0.12
     cap_pct: 0.20
 
+  # #61: anti-whipsaw damping for S4 weight-0 SELLs classified "whipsaw" (#60) — a
+  # fresh weak/neutral re-signal, not a strong-bearish sentiment_reversal or a
+  # legitimate signal expiry. Evidence: intraday S4 exits average -$0.77 (40.2% win
+  # rate) vs overnight+ +$2.64 (30.5% win rate), 230 historical exits. Off by default
+  # — flip only after reviewing the shadow frequency log (measure-before-enforce, QX-01).
+  s4_anti_whipsaw_damping_enabled: false
+  s4_anti_whipsaw_confirm_cycles: 2   # consecutive whipsaw-classified cycles required before the SELL is let through
+
   # Position limits
   max_position_pct: 0.10
   max_portfolio_exposure: 0.50

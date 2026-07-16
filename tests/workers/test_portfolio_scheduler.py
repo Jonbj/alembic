@@ -1220,6 +1220,163 @@ def test_s4_decision_uses_pinned_provenance_not_stale_refetch():
     )
 
 
+# ── #61: anti-whipsaw damping integration (full cycle) ────────────────────────
+
+
+def _whipsaw_cycle_result():
+    from src.portfolio.orchestrator import CycleResult
+    from src.portfolio.types import CombinedOrder
+
+    zero_weight_sell = CombinedOrder(
+        order_id="oid-NVDA",
+        timestamp=datetime(2026, 7, 16, 14, 0, tzinfo=timezone.utc),
+        symbol="NVDA",
+        side=OrderSide.SELL,
+        quantity=5.0,
+        order_type=OrderType.MARKET,
+        strategy_id=None,
+        allocation_weight=0.0,
+    )
+    return CycleResult(
+        strategies_run=["S4"],
+        orders_per_strategy={"S4": 1},
+        orders_before_constraints=1,
+        orders_after_constraints=1,
+        constraints_fired=[],
+        final_orders=[zero_weight_sell],
+        symbol_strategies={},  # NVDA dropped out of ranking this cycle — empty strats
+        symbol_signal_provenance={},
+    )
+
+
+def _run_whipsaw_cycle(risk_cfg_overrides: dict):
+    import pandas as pd
+    from unittest.mock import MagicMock, patch
+    from src.workers.portfolio_scheduler import _run_cycle_inner
+
+    mock_pg = MagicMock()
+    mock_pg.fetch_trades.return_value = []
+    mock_pg.fetch_recently_bought_symbols.return_value = set()
+    mock_pg.fetch_latest_signal_ids.return_value = {}
+    # Fresh (age < max_signal_age_hours=4h), weak/neutral score -> "whipsaw".
+    fresh_gen_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    mock_pg.fetch_signals_for_cycle.return_value = [
+        SentimentResult(
+            symbol="NVDA", score=-0.02, confidence=0.5,
+            reasoning="mixed signals", model_id="ensemble:glm-5.2:cloud",
+            generated_at=fresh_gen_at,
+        )
+    ]
+    mock_pg.write_execution_decision = MagicMock(return_value=1)
+
+    with patch("src.strategies.registry.StrategyRegistry") as mock_reg, \
+         patch("alpaca.data.historical.StockHistoricalDataClient") as mock_dc, \
+         patch("alpaca.trading.client.TradingClient") as mock_tc, \
+         patch("src.portfolio.orchestrator.PortfolioOrchestrator") as mock_orch, \
+         patch("src.backtest.engine.data_replay.DataReplay"), \
+         patch("src.backtest.engine.portfolio.VirtualPortfolio"), \
+         patch("src.workers.portfolio_scheduler._persist_cycle_result"), \
+         patch("src.workers.portfolio_scheduler._load_risk_config") as mock_risk_cfg, \
+         patch("src.store.pg_store.PostgreSQLStore", return_value=mock_pg), \
+         patch("redis.Redis") as mock_redis_cls:
+
+        entry = MagicMock()
+        entry.strategy_id = "S4"
+        mock_reg.return_value.get_active_strategies.return_value = [entry]
+        mock_reg.return_value.load_mode_from_db.return_value = None
+
+        base_risk_cfg = {
+            "max_portfolio_exposure": 0.50, "max_single_asset_pct": 0.10,
+            "max_sector_exposure": 0.0, "stop_loss": 0.0, "portfolio_drawdown": 0.05,
+            "stop_loss_mode": "fixed", "stop_strategy_params": {},
+            "stop_sigma_lookback_fast": 20, "stop_sigma_lookback_slow": 63,
+            "stop_sigma_ewma_floor_ratio": 0.8, "stop_risk_budget_bp_per_pos": 12,
+            "stop_risk_budget_bp_aggregate": 100, "stop_gap_buffer_pct": 0.005,
+            "stop_shadow_enabled": False,
+            "broker_disaster_stop": {"multiplier": 1.5, "sigma_multiple": 5.0, "floor_pct": 0.12, "cap_pct": 0.20},
+            "s4_anti_whipsaw_damping_enabled": False, "s4_anti_whipsaw_confirm_cycles": 2,
+        }
+        mock_risk_cfg.return_value = {**base_risk_cfg, **risk_cfg_overrides}
+
+        dates = pd.date_range("2025-01-01", periods=100, freq="B")
+        alpaca_raw = pd.DataFrame(
+            {"close": [400.0 + i for i in range(100)]},
+            index=pd.MultiIndex.from_arrays(
+                [["NVDA"] * 100, dates],
+                names=["symbol", "timestamp"],
+            ),
+        )
+        mock_dc.return_value.get_stock_bars.return_value.df = alpaca_raw
+        mock_dc.return_value.get_stock_snapshot.side_effect = Exception("no snap")
+
+        clock = MagicMock()
+        clock.is_open = True
+        account = MagicMock()
+        account.cash = "100000"
+        account.equity = "100000"
+        account.buying_power = "100000"
+        account.trading_blocked = False
+        account.account_blocked = False
+        mock_tc.return_value.get_clock.return_value = clock
+        mock_tc.return_value.get_account.return_value = account
+        mock_tc.return_value.get_all_positions.return_value = []
+
+        mock_orch.return_value.run_cycle.return_value = _whipsaw_cycle_result()
+
+        redis_inst = MagicMock()
+        redis_inst.get.return_value = None  # no prior whipsaw streak
+        redis_inst.set.return_value = True
+        redis_inst.smembers.return_value = set()
+        # Pre-existing exit-persistence hysteresis (_apply_exit_hysteresis,
+        # execution.exit_persistence_cycles) runs BEFORE the whipsaw check and
+        # would otherwise suppress this synthetic order on its own (a bare
+        # MagicMock().incr() coerces to 1 via int(), which is < the default
+        # persistence_cycles=2). Simulate a position that already cleared that
+        # separate gate, so this test exercises anti-whipsaw damping in isolation.
+        redis_inst.incr.return_value = 99
+        mock_redis_cls.from_url.return_value = redis_inst
+
+        try:
+            _run_cycle_inner()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+
+    return mock_pg, redis_inst
+
+
+def test_whipsaw_shadow_mode_sell_proceeds_with_annotated_reason():
+    """Flag off (default): the SELL still happens, but the reason notes what
+    damping WOULD have done — shadow measurement, no behavior change."""
+    mock_pg, redis_inst = _run_whipsaw_cycle({"s4_anti_whipsaw_damping_enabled": False})
+
+    nvda_calls = [
+        c for c in mock_pg.write_execution_decision.call_args_list
+        if c.kwargs.get("symbol") == "NVDA"
+    ]
+    assert len(nvda_calls) == 1, f"Expected exactly one NVDA decision (shadow doesn't block), got {len(nvda_calls)}"
+    assert nvda_calls[0].kwargs["exit_mechanism"] == "whipsaw"
+    assert "anti_whipsaw_shadow" in nvda_calls[0].kwargs["reason"]
+    assert "would_suppress=True" in nvda_calls[0].kwargs["reason"]
+    # Streak still tracked even in shadow mode, so a later flip doesn't start cold.
+    assert call("s4:whipsaw_streak:NVDA", 1800, "1") in redis_inst.setex.call_args_list
+
+
+def test_whipsaw_enabled_first_occurrence_suppresses_no_decision_logged():
+    """Flag on, first whipsaw for this symbol: no decision row this cycle — held."""
+    mock_pg, redis_inst = _run_whipsaw_cycle({"s4_anti_whipsaw_damping_enabled": True})
+
+    nvda_calls = [
+        c for c in mock_pg.write_execution_decision.call_args_list
+        if c.kwargs.get("symbol") == "NVDA"
+    ]
+    assert nvda_calls == [], (
+        f"First whipsaw occurrence with damping ON must be suppressed (no decision "
+        f"logged this cycle), got {len(nvda_calls)} calls"
+    )
+    assert call("s4:whipsaw_streak:NVDA", 1800, "1") in redis_inst.setex.call_args_list
+
+
 # ── _check_strategy_zero_weights ──────────────────────────────────────────────
 
 
@@ -1478,3 +1635,103 @@ def test_persist_trade_fills_buy_failure_does_not_block_subsequent_sell():
     )
     pg.rollback.assert_called()
     pg.close.assert_called_once()
+
+
+# ── #61: Redis-backed consecutive-whipsaw streak tracking ───────────────────
+
+
+class TestWhipsawStreakRedisHelpers:
+    def test_get_returns_zero_when_key_absent(self):
+        from src.workers.portfolio_scheduler import _get_whipsaw_streak
+
+        with patch("redis.Redis") as mock_cls:
+            inst = MagicMock()
+            inst.get.return_value = None
+            mock_cls.from_url.return_value = inst
+
+            streak = _get_whipsaw_streak("redis://localhost:6379/0", "NVDA")
+
+        assert streak == 0
+
+    def test_get_returns_persisted_value(self):
+        from src.workers.portfolio_scheduler import _get_whipsaw_streak
+
+        with patch("redis.Redis") as mock_cls:
+            inst = MagicMock()
+            inst.get.return_value = "1"
+            mock_cls.from_url.return_value = inst
+
+            streak = _get_whipsaw_streak("redis://localhost:6379/0", "NVDA")
+
+        assert streak == 1
+
+    def test_get_returns_zero_on_redis_error(self):
+        from src.workers.portfolio_scheduler import _get_whipsaw_streak
+
+        with patch("redis.Redis") as mock_cls:
+            mock_cls.from_url.side_effect = RuntimeError("redis down")
+
+            streak = _get_whipsaw_streak("redis://localhost:6379/0", "NVDA")
+
+        assert streak == 0
+
+    def test_set_positive_streak_calls_setex_with_ttl(self):
+        from src.workers.portfolio_scheduler import _set_whipsaw_streak
+
+        with patch("redis.Redis") as mock_cls:
+            inst = MagicMock()
+            mock_cls.from_url.return_value = inst
+
+            _set_whipsaw_streak("redis://localhost:6379/0", "NVDA", 1)
+
+        inst.setex.assert_called_once()
+        key, ttl, value = inst.setex.call_args[0]
+        assert key == "s4:whipsaw_streak:NVDA"
+        assert ttl <= 1800
+        assert value == "1"
+        inst.delete.assert_not_called()
+
+    def test_set_zero_streak_deletes_key(self):
+        from src.workers.portfolio_scheduler import _set_whipsaw_streak
+
+        with patch("redis.Redis") as mock_cls:
+            inst = MagicMock()
+            mock_cls.from_url.return_value = inst
+
+            _set_whipsaw_streak("redis://localhost:6379/0", "NVDA", 0)
+
+        inst.delete.assert_called_once_with("s4:whipsaw_streak:NVDA")
+        inst.setex.assert_not_called()
+
+
+class TestApplyWhipsawDampingFilter:
+    """#61: _apply_whipsaw_damping_filter excludes only SELLs for suppressed symbols."""
+
+    def test_no_suppressed_symbols_returns_orders_unchanged(self):
+        from src.workers.portfolio_scheduler import _apply_whipsaw_damping_filter
+
+        orders = [_make_combined_order("NVDA", side=OrderSide.SELL, qty=5.0)]
+
+        result = _apply_whipsaw_damping_filter(orders, set())
+
+        assert result == orders
+
+    def test_filters_out_sell_for_suppressed_symbol(self):
+        from src.workers.portfolio_scheduler import _apply_whipsaw_damping_filter
+
+        sell = _make_combined_order("NVDA", side=OrderSide.SELL, qty=5.0)
+        keep = _make_combined_order("IBM", side=OrderSide.SELL, qty=3.0)
+
+        result = _apply_whipsaw_damping_filter([sell, keep], {"NVDA"})
+
+        assert result == [keep]
+
+    def test_never_filters_buy_orders(self):
+        """A symbol landing in suppressed_syms only ever describes a held SELL — BUYs pass through."""
+        from src.workers.portfolio_scheduler import _apply_whipsaw_damping_filter
+
+        buy = _make_combined_order("NVDA", side=OrderSide.BUY, qty=5.0)
+
+        result = _apply_whipsaw_damping_filter([buy], {"NVDA"})
+
+        assert result == [buy]

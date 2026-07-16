@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from src.notifications.base import AlertLevel
+from src.portfolio.whipsaw_damping import evaluate_whipsaw_damping
 from src.workers.celery_app import app
 
 _PEAK_EQUITY_KEY = "portfolio:peak_equity"
@@ -587,6 +588,41 @@ def _get_stop_loss_cooldown_symbols(redis_url: str) -> set[str]:
         return set()
 
 
+_WHIPSAW_STREAK_TTL = 1800  # 30 min — ~2 cycles at 15-min cadence; a longer gap restarts the streak
+
+
+def _get_whipsaw_streak(redis_url: str, symbol: str) -> int:
+    """Return the current consecutive-whipsaw streak for symbol (0 if none/expired). #61."""
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            val = r.get(f"s4:whipsaw_streak:{symbol.upper()}")
+            return int(val) if val is not None else 0
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Could not fetch whipsaw streak for %s: %s", symbol, exc)
+        return 0
+
+
+def _set_whipsaw_streak(redis_url: str, symbol: str, streak: int) -> None:
+    """Persist (streak > 0) or clear (streak == 0) the consecutive-whipsaw streak. #61."""
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            key = f"s4:whipsaw_streak:{symbol.upper()}"
+            if streak <= 0:
+                r.delete(key)
+            else:
+                r.setex(key, _WHIPSAW_STREAK_TTL, str(streak))
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Could not persist whipsaw streak for %s: %s", symbol, exc)
+
+
 def _update_last_good_sigma(redis_url: str, symbol: str, sigma: float | None) -> None:
     """Persist a non-default sigma_eff for future cycles when bars_df is sparse.
 
@@ -660,6 +696,18 @@ def _apply_idempotency_filter(orders: list, skip_syms: set[str]) -> list:
     return [o for o in orders if not (o.symbol in skip_syms and o.side == _OS.BUY)]
 
 
+def _apply_whipsaw_damping_filter(orders: list, suppressed_syms: set[str]) -> list:
+    """Exclude SELL orders for symbols the anti-whipsaw damper suppressed this cycle (#61).
+
+    Only SELLs are filtered — a damped whipsaw means "hold the position", it never
+    affects any other order (mirrors _apply_idempotency_filter's BUY-only symmetry).
+    """
+    from src.backtest.engine.types import OrderSide as _OS
+    if not suppressed_syms:
+        return orders
+    return [o for o in orders if not (o.symbol in suppressed_syms and o.side == _OS.SELL)]
+
+
 def _load_sector_map() -> dict[str, str] | None:
     """Invert the trading.yaml `sectors:` block to {symbol: sector}.
 
@@ -705,6 +753,11 @@ def _load_risk_config() -> dict:
         "stop_gap_buffer_pct": 0.005,
         "stop_shadow_enabled": False,
         "broker_disaster_stop": {"multiplier": 1.5, "sigma_multiple": 5.0, "floor_pct": 0.12, "cap_pct": 0.20},
+        # #61: require N consecutive "whipsaw"-classified cycles (#60) before letting
+        # a weight-0 S4 SELL through, instead of exiting on the first fresh weak/neutral
+        # re-signal. Off by default — flip only after reviewing the shadow frequency log.
+        "s4_anti_whipsaw_damping_enabled": False,
+        "s4_anti_whipsaw_confirm_cycles": 2,
     }
     try:
         import yaml
@@ -1952,6 +2005,11 @@ def _run_cycle_inner() -> dict:
                 log.warning("FIX-F: stale-signal lookup failed: %s", _zse)
         from src.strategies.s4.config import S4Config as _S4Config
         _s4_max_age_h = _S4Config().max_signal_age_hours
+        # #61: symbols whose weight-0 SELL the anti-whipsaw damper suppressed this
+        # cycle — filtered out of _orders_to_submit below (never affects BUYs).
+        _whipsaw_suppressed_symbols: set[str] = set()
+        _anti_whipsaw_enabled = bool(_risk_cfg.get("s4_anti_whipsaw_damping_enabled", False))
+        _anti_whipsaw_confirm_cycles = int(_risk_cfg.get("s4_anti_whipsaw_confirm_cycles", 2))
         for order in result.final_orders:
             strats = _sym_strats.get(order.symbol, [])
             # P1-S4-IDEMPOTENCY: skip this order if its signal_id was already fired today.
@@ -1994,6 +2052,32 @@ def _run_cycle_inner() -> dict:
                     # #60: structured tag alongside the reason text (queryable
                     # without parsing free text — see #61 anti-whipsaw damping).
                     exit_mechanism = _classify_zero_weight_exit(_zero_sig, _s4_max_age_h)
+
+                    # #61: require N consecutive "whipsaw" cycles before letting this
+                    # SELL through. Streak is always tracked (so a later flag-flip
+                    # doesn't start cold); only actually suppressed when enabled.
+                    _prior_streak = _get_whipsaw_streak(config.REDIS_URL, order.symbol)
+                    _damping = evaluate_whipsaw_damping(
+                        exit_mechanism == "whipsaw", _prior_streak, _anti_whipsaw_confirm_cycles
+                    )
+                    _set_whipsaw_streak(config.REDIS_URL, order.symbol, _damping.new_streak)
+                    if exit_mechanism == "whipsaw":
+                        if _anti_whipsaw_enabled and _damping.suppress:
+                            _whipsaw_suppressed_symbols.add(order.symbol)
+                            log.info(
+                                "#61 anti-whipsaw damping: holding %s one more cycle "
+                                "(streak=%d/%d)", order.symbol, _damping.new_streak,
+                                _anti_whipsaw_confirm_cycles,
+                            )
+                            continue
+                        if not _anti_whipsaw_enabled:
+                            # Shadow: flag is off, SELL proceeds unchanged — annotate
+                            # what damping WOULD have done for frequency measurement.
+                            reason = (
+                                f"{reason} [anti_whipsaw_shadow: would_suppress="
+                                f"{_damping.suppress}, streak={_damping.new_streak}/"
+                                f"{_anti_whipsaw_confirm_cycles}]"
+                            )
                 else:
                     reason = f"Portfolio rebalance: weight {wt_pct}."
             decision_id = _pg.write_execution_decision(
@@ -2069,6 +2153,7 @@ def _run_cycle_inner() -> dict:
         # P2-05-A: exclude S4 BUY orders for symbols whose idempotency check was skipped
         # (Redis unavailable). SELLs and non-S4 orders are not affected.
         _orders_to_submit = _apply_idempotency_filter(result.final_orders, _idempotency_skip)
+        _orders_to_submit = _apply_whipsaw_damping_filter(_orders_to_submit, _whipsaw_suppressed_symbols)
         submitted_orders = _submit_portfolio_orders(
             _orders_to_submit, trading_client, market,
             fractionable_symbols=fractionable,
