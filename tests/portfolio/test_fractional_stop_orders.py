@@ -284,3 +284,61 @@ class TestExecuteProtectiveStopPlans:
         assert summary["created"] == 0
         assert len(summary["errors"]) == 1
         assert summary["errors"][0]["symbol"] == "AAPL"
+
+
+class TestCancelOpenStopSells:
+    """Regression fix for #62: a live GTC protective stop reserves the whole-share
+    qty of a position, so any scheduler market SELL for the full qty is rejected by
+    Alpaca with 40310000 "insufficient qty available" (verified live 2026-07-16
+    18:22 UTC, SOXX/INTC). Every scheduler SELL path must cancel the symbol's open
+    stop SELLs first to free the reserved shares."""
+
+    def _stop_order(self, order_id="stop-1", symbol="SOXX"):
+        from alpaca.trading.enums import OrderType
+
+        o = MagicMock()
+        o.id = order_id
+        o.symbol = symbol
+        o.type = OrderType.STOP
+        return o
+
+    def _limit_order(self, order_id="limit-1", symbol="SOXX"):
+        from alpaca.trading.enums import OrderType
+
+        o = MagicMock()
+        o.id = order_id
+        o.symbol = symbol
+        o.type = OrderType.LIMIT
+        return o
+
+    def test_cancels_only_open_stop_sells_and_returns_count(self):
+        from src.portfolio.fractional_stop_orders import cancel_open_stop_sells
+
+        tc = MagicMock()
+        tc.get_orders.return_value = [self._stop_order("stop-1"), self._limit_order("limit-1")]
+
+        cancelled = cancel_open_stop_sells(tc, "SOXX")
+
+        assert cancelled == 1
+        tc.cancel_order_by_id.assert_called_once_with("stop-1")
+        req = tc.get_orders.call_args[0][0]
+        assert req.symbols == ["SOXX"]
+        assert req.status.value == "open"
+
+    def test_fail_open_when_get_orders_raises(self):
+        from src.portfolio.fractional_stop_orders import cancel_open_stop_sells
+
+        tc = MagicMock()
+        tc.get_orders.side_effect = RuntimeError("api down")
+
+        assert cancel_open_stop_sells(tc, "SOXX") == 0
+        tc.cancel_order_by_id.assert_not_called()
+
+    def test_single_cancel_failure_does_not_abort_remaining(self):
+        from src.portfolio.fractional_stop_orders import cancel_open_stop_sells
+
+        tc = MagicMock()
+        tc.get_orders.return_value = [self._stop_order("stop-1"), self._stop_order("stop-2")]
+        tc.cancel_order_by_id.side_effect = [RuntimeError("gone"), None]
+
+        assert cancel_open_stop_sells(tc, "SOXX") == 1

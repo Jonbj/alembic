@@ -172,3 +172,40 @@ def execute_protective_stop_plans(plans: Sequence[ProtectiveStopPlan], trading_c
             log.warning("Failed to sync protective stop for %s: %s", plan.symbol, exc)
             summary["errors"].append({"symbol": plan.symbol, "error": str(exc)})
     return summary
+
+
+def cancel_open_stop_sells(trading_client, symbol: str) -> int:
+    """Cancel the symbol's open GTC stop SELL orders; return how many were cancelled.
+
+    A live protective stop reserves the whole-share qty of the position, so any
+    scheduler market SELL for the full qty is rejected by Alpaca with 40310000
+    "insufficient qty available" (verified live 2026-07-16 18:22 UTC, SOXX/INTC).
+    Every scheduler SELL path must call this first to free the reserved shares.
+
+    Fail-open: on any broker error the SELL attempt proceeds anyway — the worst
+    case is the same rejection we'd get today, retried next cycle. If the position
+    survives the SELL (partial trim), the per-cycle sync re-creates the stop.
+    """
+    from alpaca.trading.enums import OrderSide, OrderType, QueryOrderStatus
+    from alpaca.trading.requests import GetOrdersRequest
+
+    try:
+        open_orders = trading_client.get_orders(
+            GetOrdersRequest(
+                status=QueryOrderStatus.OPEN, side=OrderSide.SELL, symbols=[symbol]
+            )
+        )
+    except Exception as exc:
+        log.warning("Could not list open stop orders for %s: %s", symbol, exc)
+        return 0
+
+    cancelled = 0
+    for o in open_orders:
+        if getattr(o, "type", None) != OrderType.STOP:
+            continue
+        try:
+            trading_client.cancel_order_by_id(o.id)
+            cancelled += 1
+        except Exception as exc:
+            log.warning("Failed to cancel stop order %s for %s: %s", o.id, symbol, exc)
+    return cancelled

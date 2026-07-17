@@ -1877,3 +1877,165 @@ class TestApplyWhipsawDampingFilter:
         result = _apply_whipsaw_damping_filter([buy], {"NVDA"})
 
         assert result == [buy]
+
+
+# ── #62 regression fix: cancel protective stops before scheduler SELLs ───────
+# A live GTC protective stop reserves the whole-share qty, so a full-qty market
+# SELL is rejected by Alpaca with 40310000 (verified live 2026-07-16 18:22 UTC:
+# SOXX/INTC reversal force-sells failed while their stops were open).
+
+
+def _make_open_stop_order(symbol: str, order_id: str = "stop-1"):
+    from alpaca.trading.enums import OrderType as _AOT
+
+    o = MagicMock()
+    o.id = order_id
+    o.symbol = symbol
+    o.type = _AOT.STOP
+    return o
+
+
+def test_submit_portfolio_orders_cancels_protective_stop_before_sell():
+    """SELL path frees reserved shares: cancel the symbol's stop BEFORE submitting."""
+    from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+    orders = [_make_combined_order("SPY", OrderSide.SELL, qty=10.0)]
+    trading_client = MagicMock()
+    trading_client.get_orders.return_value = [_make_open_stop_order("SPY")]
+    market = _make_market()
+
+    events = []
+    trading_client.cancel_order_by_id.side_effect = lambda oid: events.append(("cancel", oid))
+
+    submitted = _submit_portfolio_orders(
+        orders, trading_client, market,
+        _submit_fn=lambda o, q, c: events.append(("submit", o.symbol)),
+    )
+
+    assert len(submitted) == 1
+    assert events == [("cancel", "stop-1"), ("submit", "SPY")]
+
+
+def test_submit_portfolio_orders_buy_does_not_touch_stop_orders():
+    """BUY path never lists/cancels stop orders."""
+    from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+    orders = [_make_combined_order("SPY", OrderSide.BUY, qty=10.0)]
+    trading_client = MagicMock()
+    market = _make_market(prices={"SPY": 450.0})
+
+    _submit_portfolio_orders(orders, trading_client, market, _submit_fn=lambda o, n, c: None)
+
+    trading_client.get_orders.assert_not_called()
+    trading_client.cancel_order_by_id.assert_not_called()
+
+
+def test_submit_portfolio_orders_sell_proceeds_when_cancel_fails():
+    """Fail-open: a broker error while freeing the stop must not block the SELL."""
+    from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+    orders = [_make_combined_order("SPY", OrderSide.SELL, qty=10.0)]
+    trading_client = MagicMock()
+    trading_client.get_orders.side_effect = RuntimeError("api down")
+    market = _make_market()
+
+    submitted = _submit_portfolio_orders(
+        orders, trading_client, market, _submit_fn=lambda o, q, c: None,
+    )
+
+    assert len(submitted) == 1
+
+
+# ── _submit_reversal_force_sells (extracted for testability after the 07-16
+#    live failure: reversal force-sells silently blocked by protective stops) ──
+
+
+def _make_alpaca_position(symbol: str, qty: float):
+    p = MagicMock()
+    p.symbol = symbol
+    p.qty = str(qty)
+    return p
+
+
+def test_reversal_force_sell_cancels_protective_stop_then_submits():
+    """The force-sell frees the symbol's reserved shares before the market SELL."""
+    from src.workers.portfolio_scheduler import _submit_reversal_force_sells
+
+    trading_client = MagicMock()
+    trading_client.get_orders.return_value = [_make_open_stop_order("SOXX", "stop-7")]
+    events = []
+    trading_client.cancel_order_by_id.side_effect = lambda oid: events.append(("cancel", oid))
+    resp = MagicMock()
+    resp.id = "ord-9"
+    trading_client.submit_order.side_effect = lambda req: events.append(("submit", req.symbol)) or resp
+
+    submitted_orders = []
+    with patch("src.store.pg_store.PostgreSQLStore") as _pgs:
+        _submit_reversal_force_sells(
+            reversal_sell_symbols={"SOXX": {"score": -0.42, "signal_id": 3861}},
+            final_orders=[],
+            stop_loss_sells={},
+            alpaca_positions=[_make_alpaca_position("SOXX", 1.13)],
+            trading_client=trading_client,
+            submitted_orders=submitted_orders,
+            ts=datetime(2026, 7, 16, 18, 22, tzinfo=timezone.utc),
+            regime_mult=0.7,
+            operating_mode="active",
+        )
+
+    assert events == [("cancel", "stop-7"), ("submit", "SOXX")]
+    assert len(submitted_orders) == 1
+    assert submitted_orders[0]["symbol"] == "SOXX"
+    assert submitted_orders[0]["reason"] == "sentiment_reversal"
+    assert submitted_orders[0]["order_id"] == "ord-9"
+    # The Decision Log SELL row must actually be written (a silent NameError in
+    # this block was caught by the blanket except and only logged as a warning).
+    _pgs.return_value.write_execution_decision.assert_called_once()
+    _dec_kwargs = _pgs.return_value.write_execution_decision.call_args.kwargs
+    assert _dec_kwargs["symbol"] == "SOXX"
+    assert _dec_kwargs["order_id"] == "ord-9"
+    assert "sentiment_reversal" in _dec_kwargs["reason"]
+
+
+def test_reversal_force_sell_skips_symbol_already_being_sold():
+    """A symbol with a SELL already in final_orders must not be double-sold
+    (guards the OrderSide 'SELL' vs 'sell' case mismatch found 2026-07-17)."""
+    from src.workers.portfolio_scheduler import _submit_reversal_force_sells
+
+    trading_client = MagicMock()
+    submitted_orders = []
+    _submit_reversal_force_sells(
+        reversal_sell_symbols={"SOXX": {"score": -0.42, "signal_id": None}},
+        final_orders=[_make_combined_order("SOXX", OrderSide.SELL, qty=1.13)],
+        stop_loss_sells={},
+        alpaca_positions=[_make_alpaca_position("SOXX", 1.13)],
+        trading_client=trading_client,
+        submitted_orders=submitted_orders,
+        ts=datetime(2026, 7, 16, 18, 22, tzinfo=timezone.utc),
+        regime_mult=0.7,
+        operating_mode="active",
+    )
+
+    trading_client.submit_order.assert_not_called()
+    assert submitted_orders == []
+
+
+def test_reversal_force_sell_noop_in_dry_run_and_halted():
+    """dry_run / halted modes never touch the broker."""
+    from src.workers.portfolio_scheduler import _submit_reversal_force_sells
+
+    for mode in ("dry_run", "halted"):
+        trading_client = MagicMock()
+        _submit_reversal_force_sells(
+            reversal_sell_symbols={"SOXX": {"score": -0.42, "signal_id": None}},
+            final_orders=[],
+            stop_loss_sells={},
+            alpaca_positions=[_make_alpaca_position("SOXX", 1.13)],
+            trading_client=trading_client,
+            submitted_orders=[],
+            ts=datetime(2026, 7, 16, 18, 22, tzinfo=timezone.utc),
+            regime_mult=0.7,
+            operating_mode=mode,
+        )
+        trading_client.submit_order.assert_not_called()
+        trading_client.cancel_order_by_id.assert_not_called()

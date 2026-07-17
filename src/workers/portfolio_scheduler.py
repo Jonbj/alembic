@@ -2303,6 +2303,15 @@ def _run_cycle_inner() -> dict:
                     (float(p.qty) for p in alpaca_positions if p.symbol == sym), None
                 )
                 if qty_held and qty_held > 0:
+                    # #62 regression: free the whole-share qty reserved by the
+                    # protective GTC stop or the full-qty SELL is rejected (40310000).
+                    from src.portfolio.fractional_stop_orders import cancel_open_stop_sells as _coss
+                    _n_freed_sl = _coss(trading_client, sym)
+                    if _n_freed_sl:
+                        log.info(
+                            "Cancelled %d protective stop(s) for %s before stop-loss exit",
+                            _n_freed_sl, sym,
+                        )
                     resp = trading_client.submit_order(_MORsl(
                         symbol=sym, qty=qty_held, side=_OSsl.SELL, time_in_force=_TIFsl.DAY,
                     ))
@@ -2349,56 +2358,17 @@ def _run_cycle_inner() -> dict:
                 log.warning("Failed to submit stop-loss exit for %s: %s", sym, _sl_sub_exc)
 
     # Submit forced sells for sentiment reversal (symbols not already being sold).
-    if reversal_sell_symbols and operating_mode not in ("dry_run", "halted"):
-        already_selling = {o.symbol for o in result.final_orders if o.side.value == "sell"}
-        to_force_sell = set(reversal_sell_symbols) - already_selling - set(stop_loss_sells.keys())
-        for sym in to_force_sell:
-            try:
-                from alpaca.trading.enums import OrderSide, TimeInForce
-                from alpaca.trading.requests import MarketOrderRequest
-                qty_held = next(
-                    (float(p.qty) for p in alpaca_positions if p.symbol == sym), None
-                )
-                if qty_held and qty_held > 0:
-                    req = MarketOrderRequest(
-                        symbol=sym,
-                        qty=qty_held,
-                        side=OrderSide.SELL,
-                        time_in_force=TimeInForce.DAY,
-                    )
-                    resp = trading_client.submit_order(req)
-                    _rev_order_id = str(resp.id)
-                    submitted_orders.append({
-                        "symbol": sym,
-                        "side": "sell",
-                        "order_id": _rev_order_id,
-                        "notional": 0.0,
-                        "reason": "sentiment_reversal",
-                    })
-                    log.info("Forced sell submitted for %s (sentiment reversal)", sym)
-                    # Write SELL to execution_decisions so Decision Log shows the exit.
-                    try:
-                        from src.store.pg_store import PostgreSQLStore as _PGS
-                        _pg_rev = _PGS()
-                        _rev_sig = reversal_sell_symbols[sym]
-                        _threshold = config.SENTIMENT_REVERSAL_EXIT_THRESHOLD
-                        _pg_rev.write_execution_decision(
-                            tick_time=ts,
-                            symbol=sym,
-                            signal_id=_rev_sig.get("signal_id"),
-                            score=0.0,
-                            signal_score=_rev_sig["score"],
-                            regime_mult=_regime_mult,
-                            ema_pass=True,
-                            decision="SELL",
-                            order_id=_rev_order_id,
-                            reason=f"sentiment_reversal: score {_rev_sig['score']:.3f} < threshold {_threshold:.2f}",
-                        )
-                        _pg_rev.close()
-                    except Exception as _dec_exc:
-                        log.warning("Could not write sentiment_reversal decision for %s: %s", sym, _dec_exc)
-            except Exception as _fs_exc:
-                log.warning("Failed to submit forced sell for %s: %s", sym, _fs_exc)
+    _submit_reversal_force_sells(
+        reversal_sell_symbols=reversal_sell_symbols,
+        final_orders=result.final_orders,
+        stop_loss_sells=stop_loss_sells,
+        alpaca_positions=alpaca_positions,
+        trading_client=trading_client,
+        submitted_orders=submitted_orders,
+        ts=ts,
+        regime_mult=_regime_mult,
+        operating_mode=operating_mode,
+    )
 
     # P2-04: fire divergence alerts if signals and submitted orders don't match.
     _check_divergence_and_alert(
@@ -3108,6 +3078,21 @@ def _submit_portfolio_orders(
                 qty = abs(order.quantity)
                 if qty < 1e-6:
                     continue
+                # #62 regression: a live GTC protective stop reserves the whole-share
+                # qty, so a full-qty SELL is rejected with 40310000. Free it first.
+                try:
+                    from src.portfolio.fractional_stop_orders import cancel_open_stop_sells
+                    _n_freed = cancel_open_stop_sells(trading_client, order.symbol)
+                    if _n_freed:
+                        log.info(
+                            "Cancelled %d protective stop(s) for %s before SELL",
+                            _n_freed, order.symbol,
+                        )
+                except Exception as _cps_exc:
+                    log.warning(
+                        "Protective-stop cancel before SELL failed for %s: %s — selling anyway",
+                        order.symbol, _cps_exc,
+                    )
                 if _submit_fn is not None:
                     _submit_fn(order, qty, trading_client)
                     alpaca_id = f"test-{order.symbol}-sell"
@@ -3140,6 +3125,95 @@ def _submit_portfolio_orders(
                 except Exception as _cb_exc:
                     log.debug("_on_broker_reject callback raised: %s", _cb_exc)
     return submitted
+
+
+def _submit_reversal_force_sells(
+    reversal_sell_symbols: dict,
+    final_orders,
+    stop_loss_sells: dict,
+    alpaca_positions: list,
+    trading_client,
+    submitted_orders: list,
+    ts,
+    regime_mult: float,
+    operating_mode: str,
+) -> None:
+    """Force-sell positions flagged by the sentiment-reversal check.
+
+    Extracted from run_portfolio_cycle after the 2026-07-16 live failure: with a
+    GTC protective stop open (#62), the full-qty market SELL was rejected by
+    Alpaca (40310000, whole-share qty held_for_orders) and the reversal exit
+    silently never happened. The symbol's protective stops are cancelled first.
+
+    Symbols already being sold by the rebalance (final_orders) or claimed by the
+    stop-loss path are skipped. Appends submitted orders to ``submitted_orders``
+    in place and writes a SELL row to execution_decisions per order.
+    """
+    if not reversal_sell_symbols or operating_mode in ("dry_run", "halted"):
+        return
+    # OrderSide values are uppercase ("SELL") — compare case-insensitively so a
+    # rebalance SELL already queued for the symbol really is detected.
+    already_selling = {
+        o.symbol for o in final_orders if o.side.value.lower() == "sell"
+    }
+    to_force_sell = set(reversal_sell_symbols) - already_selling - set(stop_loss_sells.keys())
+    for sym in to_force_sell:
+        try:
+            from alpaca.trading.enums import OrderSide, TimeInForce
+            from alpaca.trading.requests import MarketOrderRequest
+
+            from src.portfolio.fractional_stop_orders import cancel_open_stop_sells
+
+            qty_held = next(
+                (float(p.qty) for p in alpaca_positions if p.symbol == sym), None
+            )
+            if qty_held and qty_held > 0:
+                _n_freed = cancel_open_stop_sells(trading_client, sym)
+                if _n_freed:
+                    log.info(
+                        "Cancelled %d protective stop(s) for %s before reversal force-sell",
+                        _n_freed, sym,
+                    )
+                req = MarketOrderRequest(
+                    symbol=sym,
+                    qty=qty_held,
+                    side=OrderSide.SELL,
+                    time_in_force=TimeInForce.DAY,
+                )
+                resp = trading_client.submit_order(req)
+                _rev_order_id = str(resp.id)
+                submitted_orders.append({
+                    "symbol": sym,
+                    "side": "sell",
+                    "order_id": _rev_order_id,
+                    "notional": 0.0,
+                    "reason": "sentiment_reversal",
+                })
+                log.info("Forced sell submitted for %s (sentiment reversal)", sym)
+                # Write SELL to execution_decisions so Decision Log shows the exit.
+                try:
+                    from src.config import config
+                    from src.store.pg_store import PostgreSQLStore as _PGS
+                    _pg_rev = _PGS()
+                    _rev_sig = reversal_sell_symbols[sym]
+                    _threshold = config.SENTIMENT_REVERSAL_EXIT_THRESHOLD
+                    _pg_rev.write_execution_decision(
+                        tick_time=ts,
+                        symbol=sym,
+                        signal_id=_rev_sig.get("signal_id"),
+                        score=0.0,
+                        signal_score=_rev_sig["score"],
+                        regime_mult=regime_mult,
+                        ema_pass=True,
+                        decision="SELL",
+                        order_id=_rev_order_id,
+                        reason=f"sentiment_reversal: score {_rev_sig['score']:.3f} < threshold {_threshold:.2f}",
+                    )
+                    _pg_rev.close()
+                except Exception as _dec_exc:
+                    log.warning("Could not write sentiment_reversal decision for %s: %s", sym, _dec_exc)
+        except Exception as _fs_exc:
+            log.warning("Failed to submit forced sell for %s: %s", sym, _fs_exc)
 
 
 def _sentiment_reversal_sells(
