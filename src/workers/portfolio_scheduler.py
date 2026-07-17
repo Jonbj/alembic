@@ -3192,6 +3192,7 @@ def _submit_reversal_force_sells(
                 log.info("Forced sell submitted for %s (sentiment reversal)", sym)
                 # Write SELL to execution_decisions so Decision Log shows the exit.
                 try:
+                    from src.config import config
                     from src.store.pg_store import PostgreSQLStore as _PGS
                     _pg_rev = _PGS()
                     _rev_sig = reversal_sell_symbols[sym]

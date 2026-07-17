@@ -1988,6 +1988,13 @@ def test_reversal_force_sell_cancels_protective_stop_then_submits():
     assert submitted_orders[0]["symbol"] == "SOXX"
     assert submitted_orders[0]["reason"] == "sentiment_reversal"
     assert submitted_orders[0]["order_id"] == "ord-9"
+    # The Decision Log SELL row must actually be written (a silent NameError in
+    # this block was caught by the blanket except and only logged as a warning).
+    _pgs.return_value.write_execution_decision.assert_called_once()
+    _dec_kwargs = _pgs.return_value.write_execution_decision.call_args.kwargs
+    assert _dec_kwargs["symbol"] == "SOXX"
+    assert _dec_kwargs["order_id"] == "ord-9"
+    assert "sentiment_reversal" in _dec_kwargs["reason"]
 
 
 def test_reversal_force_sell_skips_symbol_already_being_sold():
