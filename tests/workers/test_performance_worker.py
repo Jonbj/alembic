@@ -1296,3 +1296,35 @@ class TestTelegramMessageMtmSection:
         msg = _format_performance_telegram_message(report, [], None)
 
         assert "P&L (mark-to-market)" not in msg
+
+
+class TestBrokerMtmSessionChange:
+    """nav_change_1d must be the LAST SESSION's MTM change: at the 03:00 UTC
+    report time, equity−last_equity measures only after-hours drift (≈0) —
+    the session number comes from portfolio history profit_loss."""
+
+    def test_day_change_prefers_portfolio_history_last_session(self):
+        from src.workers.performance import _broker_mtm_snapshot
+
+        tc = MagicMock()
+        tc.get_account.return_value = MagicMock(equity="109505.19", last_equity="109505.19")
+        tc.get_all_positions.return_value = []
+        ph = MagicMock()
+        ph.profit_loss = [12.0, -115.60]
+        tc.get_portfolio_history.return_value = ph
+
+        snap = _broker_mtm_snapshot(tc)
+
+        assert snap["nav_change_1d"] == pytest.approx(-115.60)
+
+    def test_day_change_falls_back_to_equity_delta(self):
+        from src.workers.performance import _broker_mtm_snapshot
+
+        tc = MagicMock()
+        tc.get_account.return_value = MagicMock(equity="109474.38", last_equity="109589.98")
+        tc.get_all_positions.return_value = []
+        tc.get_portfolio_history.side_effect = RuntimeError("no history")
+
+        snap = _broker_mtm_snapshot(tc)
+
+        assert snap["nav_change_1d"] == pytest.approx(-115.60)

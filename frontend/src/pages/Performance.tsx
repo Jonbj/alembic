@@ -340,6 +340,16 @@ function DailyPnLTab() {
         <span style={{ color: pos ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>
           {fmtPnL(day.total_net_pnl)}
         </span>,
+        <span
+          style={{
+            color: day.nav_change_1d == null ? 'var(--text-muted)'
+              : day.nav_change_1d >= 0 ? 'var(--green)' : 'var(--red)',
+            fontWeight: 700,
+          }}
+          title={day.nav_eod != null ? `NAV a fine giornata: $${day.nav_eod.toLocaleString('en-US', { minimumFractionDigits: 2 })}` : undefined}
+        >
+          {day.nav_change_1d != null ? fmtPnL(day.nav_change_1d) : '—'}
+        </span>,
         <span className={`badge ${pos ? 'badge-green' : 'badge-red'}`}>
           {day.winners}W / {day.losers}L
         </span>,
@@ -438,8 +448,8 @@ function DailyPnLTab() {
 
       {summary && days.length > 0 && (
         <>
-          {/* KPI strip — row 1: P&L lordo → costi → netto */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 12 }}>
+          {/* KPI strip — row 1: P&L lordo → costi → netto (realized) → Δ NAV (MTM) */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 12 }}>
             {[
               {
                 label: 'P&L Lordo',
@@ -454,10 +464,17 @@ function DailyPnLTab() {
                 color: summary.total_costs !== 0 ? 'var(--red)' : 'var(--text-muted)',
               },
               {
-                label: 'P&L Netto',
+                label: 'P&L Netto (realizzato)',
                 value: fmtPnL(summary.total_net_pnl),
-                sub: 'risultato effettivo',
+                sub: 'solo trade chiusi',
                 color: summary.total_net_pnl >= 0 ? 'var(--green)' : 'var(--red)',
+              },
+              {
+                label: 'Δ NAV Periodo (MTM)',
+                value: summary.nav_change_period != null ? fmtPnL(summary.nav_change_period) : '—',
+                sub: 'variazione equity reale, incl. posizioni aperte',
+                color: summary.nav_change_period == null ? 'var(--text-muted)'
+                  : summary.nav_change_period >= 0 ? 'var(--green)' : 'var(--red)',
               },
             ].map(({ label, value, sub, color }) => (
               <div key={label} className="card" style={{ textAlign: 'center', padding: '12px 16px' }}>
@@ -520,12 +537,13 @@ function DailyPnLTab() {
           <DataTable
             loading={isLoading}
             columns={[
-              { label: 'Data',        width: '18%' },
-              { label: 'Trade',       width: '8%'  },
-              { label: 'P&L Lordo',   width: '14%' },
-              { label: 'Costi',       width: '12%' },
-              { label: 'P&L Netto',   width: '14%' },
-              { label: 'W / L',       width: '12%' },
+              { label: 'Data',          width: '16%' },
+              { label: 'Trade',         width: '7%'  },
+              { label: 'P&L Lordo',     width: '12%' },
+              { label: 'Costi',         width: '10%' },
+              { label: 'P&L Netto',     width: '12%' },
+              { label: 'Δ NAV (MTM)',   width: '13%' },
+              { label: 'W / L',         width: '10%' },
             ]}
             rows={tableRows}
             emptyMessage="Nessun trade chiuso nel periodo selezionato."

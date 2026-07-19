@@ -707,9 +707,25 @@ def _broker_mtm_snapshot(trading_client) -> dict | None:
         acct = trading_client.get_account()
         positions = trading_client.get_all_positions()
         nav = float(acct.equity)
+        # Day change: prefer the last trading SESSION's P&L from portfolio history.
+        # At the 03:00 UTC report time equity−last_equity measures only after-hours
+        # drift (≈0) — last_equity is already the previous close by then.
+        nav_change = None
+        try:
+            from alpaca.trading.requests import GetPortfolioHistoryRequest
+            ph = trading_client.get_portfolio_history(
+                GetPortfolioHistoryRequest(period="1W", timeframe="1D")
+            )
+            pls = [float(p) for p in (ph.profit_loss or []) if p is not None]
+            if pls:
+                nav_change = pls[-1]
+        except Exception as _ph_exc:
+            log.debug("Portfolio history unavailable, falling back: %s", _ph_exc)
+        if nav_change is None:
+            nav_change = nav - float(acct.last_equity)
         return {
             "nav": nav,
-            "nav_change_1d": nav - float(acct.last_equity),
+            "nav_change_1d": nav_change,
             "unrealized_pnl_open": sum(float(p.unrealized_pl) for p in positions),
             "open_positions_count": len(positions),
         }

@@ -95,6 +95,9 @@ export interface DailyPnLDay {
   winners: number
   losers: number
   trades: DailyTrade[]
+  /** NAV mark-to-market: EOD snapshot and day change (incl. open positions). */
+  nav_eod?: number | null
+  nav_change_1d?: number | null
 }
 
 export interface DailyPnLReport {
@@ -111,6 +114,8 @@ export interface DailyPnLReport {
     win_rate: number
     positive_days: number
     negative_days: number
+    /** NAV change over the period (mark-to-market, incl. open positions). */
+    nav_change_period?: number | null
   }
 }
 
