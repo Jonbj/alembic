@@ -1409,6 +1409,37 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def fetch_nav_daily(self, from_date: str, to_date: str) -> list[dict]:
+        """Return the last NAV snapshot per calendar day from risk_reports.
+
+        One row per day in [from_date, to_date] (days without a snapshot are
+        absent). Feeds the mark-to-market enrichment of /api/performance/daily:
+        closed-trade sums alone hid the real day result (2026-07-17: −$18.46
+        realized vs −$115.60 NAV).
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (day)
+                        (timestamp AT TIME ZONE 'UTC')::date AS day,
+                        nav
+                    FROM risk_reports
+                    WHERE nav IS NOT NULL
+                      AND (timestamp AT TIME ZONE 'UTC')::date BETWEEN %s AND %s
+                    ORDER BY day, timestamp DESC
+                    """,
+                    (from_date, to_date),
+                )
+                return [
+                    {"date": str(row[0]), "nav": float(row[1])}
+                    for row in cur.fetchall()
+                ]
+        except Exception:
+            conn.rollback()
+            raise
+
     def fetch_recently_bought_symbols(self, minutes: int = 30) -> set[str]:
         """Return symbols with an open trade entered in the last `minutes` minutes.
 

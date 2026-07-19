@@ -1,6 +1,7 @@
 """Performance and weights endpoints."""
 
 import hashlib
+import logging
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
@@ -21,6 +22,7 @@ from src.store.pg_store import PostgreSQLStore
 from src.store.redis_store import RedisStore
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
+log = logging.getLogger(__name__)
 
 _WEIGHT_MIN = 0.10
 _WEIGHT_MAX = 0.70
@@ -258,6 +260,35 @@ def get_daily_pnl(
 
     day_rows = pg.fetch_daily_pnl(str(_from), str(_to))
 
+    # NAV mark-to-market enrichment from risk_reports snapshots: closed-trade
+    # sums alone hid the real day result (07-17: −$18.46 realized vs −$115.60
+    # NAV). 7-day buffer before from_date to find the baseline snapshot.
+    nav_change_period = None
+    try:
+        nav_rows = pg.fetch_nav_daily(str(_from - timedelta(days=7)), str(_to))
+        nav_by_day = {str(r["date"]): float(r["nav"]) for r in nav_rows}
+        snap_days = sorted(nav_by_day)
+        for r in day_rows:
+            d = str(r["date"])
+            nav = nav_by_day.get(d)
+            prev_days = [s for s in snap_days if s < d]
+            prev = nav_by_day[prev_days[-1]] if prev_days else None
+            r["nav_eod"] = nav
+            r["nav_change_1d"] = (
+                round(nav - prev, 2) if nav is not None and prev is not None else None
+            )
+        in_range = [s for s in snap_days if str(_from) <= s <= str(_to)]
+        baseline = [s for s in snap_days if s < str(_from)]
+        if in_range and baseline:
+            nav_change_period = round(
+                nav_by_day[in_range[-1]] - nav_by_day[baseline[-1]], 2
+            )
+    except Exception as exc:
+        log.warning("NAV MTM enrichment failed: %s", exc)
+        for r in day_rows:
+            r.setdefault("nav_eod", None)
+            r.setdefault("nav_change_1d", None)
+
     total_gross_pnl = sum(r["total_gross_pnl"] for r in day_rows)
     total_costs = sum(r["total_costs"] for r in day_rows)
     total_net_pnl = sum(r["total_net_pnl"] for r in day_rows)
@@ -281,6 +312,7 @@ def get_daily_pnl(
             "win_rate": round(total_winners / total_trades, 4) if total_trades > 0 else 0.0,
             "positive_days": positive_days,
             "negative_days": negative_days,
+            "nav_change_period": nav_change_period,
         },
     }
 
