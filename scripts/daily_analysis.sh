@@ -18,7 +18,13 @@ LOG_DIR="$PROJECT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
 DATE=$(date +%Y-%m-%d)
+# Target the last TRADING day, not the calendar yesterday: with the Mon-Fri
+# 14:30 cron, "yesterday" made Monday analyze Sunday (empty) and Friday was
+# never analyzed at all (#74). Monday now targets Friday.
 DATE_TARGET=$(date -d "yesterday" +%Y-%m-%d)
+if [[ $(date -d "yesterday" +%u) -ge 6 ]]; then
+    DATE_TARGET=$(date -d "last friday" +%Y-%m-%d)
+fi
 LOG_FILE="$LOG_DIR/daily_analysis_${DATE}.log"
 REPORT_FILE="$PROJECT_DIR/docs/FORENSIC_DAILY_REPORT_${DATE_TARGET}.md"
 
