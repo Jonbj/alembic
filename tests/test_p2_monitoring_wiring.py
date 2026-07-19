@@ -451,16 +451,23 @@ class TestDivergenceAlertsInScheduler:
         )
 
     def test_scheduler_fires_warning_on_execution_divergence(self):
-        """_check_divergence_and_alert must call _fire_alert when fill ratio diverges.
+        """_check_divergence_and_alert must call _fire_alert when fill ratio diverges
+        AND notifications.send_fill_divergence_alert is enabled.
 
         2 final orders, 0 submitted (fill ratio 0.0) vs baseline 1.0 → |0.0-1.0|=1.0 > 0.20
         → check_execution_divergence returns True → _fire_alert must be called.
+        The Telegram send is gated by send_fill_divergence_alert (default false); the
+        test patches the gate to True to verify the wiring fires when enabled.
         """
         from src.workers.portfolio_scheduler import _check_divergence_and_alert
 
         notifier = MagicMock()
 
-        with patch("src.workers.portfolio_scheduler._fire_alert") as mock_fire:
+        with patch("src.workers.portfolio_scheduler._fire_alert") as mock_fire, \
+             patch(
+                 "src.workers.portfolio_scheduler._fill_divergence_alert_enabled",
+                 return_value=True,
+             ):
             _check_divergence_and_alert(
                 signal_syms=set(),
                 order_syms=set(),
@@ -473,4 +480,32 @@ class TestDivergenceAlertsInScheduler:
             "_fire_alert must be called when execution fill ratio diverges from baseline. "
             "submitted_count=0, final_count=2 → fill_ratio=0.0, |0.0-1.0|=1.0 > 0.20 threshold. "
             "Wire check_execution_divergence() into _check_divergence_and_alert()."
+        )
+
+    def test_scheduler_suppresses_execution_divergence_when_gate_disabled(self):
+        """When notifications.send_fill_divergence_alert is false (default),
+        _check_divergence_and_alert must NOT call _fire_alert even on a clear fill
+        divergence (0/2). The detection still runs; only the Telegram WARNING send is
+        suppressed — this is the recurring "0/N orders submitted" noise gate (2026-07-15).
+        """
+        from src.workers.portfolio_scheduler import _check_divergence_and_alert
+
+        notifier = MagicMock()
+
+        with patch("src.workers.portfolio_scheduler._fire_alert") as mock_fire, \
+             patch(
+                 "src.workers.portfolio_scheduler._fill_divergence_alert_enabled",
+                 return_value=False,
+             ):
+            _check_divergence_and_alert(
+                signal_syms=set(),
+                order_syms=set(),
+                submitted_count=0,
+                final_count=2,
+                notifier=notifier,
+            )
+
+        assert not mock_fire.called, (
+            "With send_fill_divergence_alert=false the Telegram WARNING must be suppressed. "
+            "Detection still runs; only the send is gated."
         )

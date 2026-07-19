@@ -309,3 +309,8 @@ notifications:
   send_daily_performance_report: false
   # P2-04 WARNING when signal/order symbol overlap < 0.8 on a portfolio cycle.
   send_signal_order_divergence_alert: false
+  # P2-04 WARNING when the fill ratio (submitted/final orders) diverges from 1.0 by
+  # >0.20 on a portfolio cycle. Default false: on the live book this fires as a
+  # false positive whenever the anti-pyramiding guard skips redundant re-BUYs
+  # (0/M orders submitted). Detection still runs; only the Telegram send is gated.
+  send_fill_divergence_alert: false
