@@ -199,6 +199,23 @@ class Config(BaseModel):
         )
     )
 
+    # #67: a reversal force-sell must rest on a CURRENT read — much stricter than
+    # the BUY path's 4h (2026-07-16: one stale signal reused for 5 SELLs over 97min).
+    SENTIMENT_REVERSAL_MAX_AGE_MINUTES: int = Field(
+        default_factory=lambda: int(
+            os.environ.get("SENTIMENT_REVERSAL_MAX_AGE_MINUTES", "60")
+        )
+    )
+
+    # #68: after a reversal force-sell, block re-BUYs on the symbol (any strategy)
+    # for this many hours — same protection family as the stop-loss cooldown.
+    # 0 disables.
+    SENTIMENT_REVERSAL_REENTRY_COOLDOWN_HOURS: float = Field(
+        default_factory=lambda: float(
+            os.environ.get("SENTIMENT_REVERSAL_REENTRY_COOLDOWN_HOURS", "2.0")
+        )
+    )
+
     # Signal velocity: rate of change of sentiment score across recent cycles.
     # velocity = scores[0] - scores[-1] over last 3 history entries.
     # If |velocity| > threshold, apply ±boost multiplier to S4 scores.

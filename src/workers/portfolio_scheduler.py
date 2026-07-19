@@ -669,6 +669,24 @@ def _get_stop_loss_cooldown_symbols(redis_url: str) -> set[str]:
         return set()
 
 
+def _get_reversal_cooldown_symbols(redis_url: str) -> set[str]:
+    """#68: symbols force-sold for sentiment reversal still in re-entry cooldown.
+
+    Any strategy's BUY is blocked while the key lives (2026-07-16: S1 re-bought
+    SOXX/INTC 15 min after every reversal exit, re-arming the churn loop)."""
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            keys = r.keys("reversal_cooldown:*")
+            return {k.split(":", 1)[1] for k in keys} if keys else set()
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Could not fetch reversal cooldown symbols: %s", exc)
+        return set()
+
+
 _WHIPSAW_STREAK_TTL = 1800  # 30 min — ~2 cycles at 15-min cadence; a longer gap restarts the streak
 
 
@@ -1705,6 +1723,7 @@ def _run_cycle_inner() -> dict:
                 alpaca_positions,
                 _r_rev,
                 threshold=config.SENTIMENT_REVERSAL_EXIT_THRESHOLD,
+                max_age_minutes=config.SENTIMENT_REVERSAL_MAX_AGE_MINUTES,
             )
         finally:
             _r_rev.close()
@@ -2973,6 +2992,17 @@ def _submit_portfolio_orders(
                         order.symbol,
                     )
                     continue
+                # #68: reversal cooldown — a symbol force-sold on strong bearish
+                # sentiment must not be re-bought by ANY strategy while it lives.
+                _rev_cooldown = _get_reversal_cooldown_symbols(
+                    __import__("src.config", fromlist=["config"]).config.REDIS_URL
+                )
+                if order.symbol in _rev_cooldown:
+                    log.warning(
+                        "Reversal cooldown: skipping BUY for %s — force-sold on sentiment reversal",
+                        order.symbol,
+                    )
+                    continue
                 price = market.prices.get(order.symbol)
                 if price is None or price <= 0:
                     log.warning("No market price for %s — skipping BUY order", order.symbol)
@@ -3167,6 +3197,7 @@ def _submit_reversal_force_sells(
     ts,
     regime_mult: float,
     operating_mode: str,
+    redis_client=None,
 ) -> None:
     """Force-sell positions flagged by the sentiment-reversal check.
 
@@ -3220,6 +3251,36 @@ def _submit_reversal_force_sells(
                     "reason": "sentiment_reversal",
                 })
                 log.info("Forced sell submitted for %s (sentiment reversal)", sym)
+                # #67 consume-on-fire + #68 re-entry cooldown. Best-effort: a Redis
+                # failure must never undo an already-submitted SELL.
+                try:
+                    from src.config import config as _cfg_rev
+                    _r_mark = redis_client
+                    _own_mark = False
+                    if _r_mark is None:
+                        from redis import Redis as _RedisMark
+                        _r_mark = _RedisMark.from_url(_cfg_rev.REDIS_URL, decode_responses=True)
+                        _own_mark = True
+                    try:
+                        _identity = reversal_sell_symbols[sym].get("identity")
+                        if _identity:
+                            _r_mark.setex(
+                                f"signal:{sym}:reversal_consumed",
+                                _cfg_rev.REDIS_SIGNAL_TTL_SECONDS,
+                                str(_identity),
+                            )
+                        _cd_hours = float(_cfg_rev.SENTIMENT_REVERSAL_REENTRY_COOLDOWN_HOURS)
+                        if _cd_hours > 0:
+                            _r_mark.setex(
+                                f"reversal_cooldown:{sym}",
+                                int(_cd_hours * 3600),
+                                1,
+                            )
+                    finally:
+                        if _own_mark:
+                            _r_mark.close()
+                except Exception as _mark_exc:
+                    log.warning("Could not mark reversal consume/cooldown for %s: %s", sym, _mark_exc)
                 # Write SELL to execution_decisions so Decision Log shows the exit.
                 try:
                     from src.config import config
@@ -3250,14 +3311,25 @@ def _sentiment_reversal_sells(
     alpaca_positions: list,
     redis_client,
     threshold: float,
+    max_age_minutes: int = 60,
 ) -> dict:
     """Return symbols held long whose current sentiment score has gone negative.
 
     Reads signal:{symbol}:sentiment from Redis for each open position.
-    Returns {symbol: {score, signal_id}} for symbols that should be force-sold.
-    Fail-open: symbols with no signal or unparseable value are NOT sold.
+    Returns {symbol: {score, signal_id, identity}} for symbols that should be
+    force-sold. Fail-open: symbols with no signal or unparseable value are NOT sold.
+
+    #67 freshness discipline (2026-07-16: SOXX signal 3861 reused unchanged for
+    5 SELLs over 97 min, churn loop with S1 re-buys):
+    - age-gate: a signal older than max_age_minutes never triggers a reversal —
+      much stricter than the BUY path's 4h, a forced exit must rest on a CURRENT
+      read. Unknown age (missing/unparseable generated_at) counts as stale.
+    - consume-on-fire: signal:{symbol}:reversal_consumed holds the identity of
+      the last signal that already triggered a force-sell; the same signal never
+      fires twice. The marker is written by _submit_reversal_force_sells.
     """
     import json as _json
+    from datetime import datetime as _dt, timezone as _tz
 
     reversal: dict = {}
     for pos in alpaca_positions:
@@ -3272,15 +3344,43 @@ def _sentiment_reversal_sells(
             if data.get("fallback_used"):
                 continue
             score = float(data.get("score", 0.0))
-            if score < threshold:
-                reversal[pos.symbol] = {
-                    "score": score,
-                    "signal_id": data.get("signal_id"),
-                }
+            if score >= threshold:
+                continue
+            gen_raw = data.get("generated_at")
+            try:
+                gen_at = _dt.fromisoformat(str(gen_raw).replace("Z", "+00:00"))
+                if gen_at.tzinfo is None:
+                    gen_at = gen_at.replace(tzinfo=_tz.utc)
+                age_min = (_dt.now(_tz.utc) - gen_at).total_seconds() / 60.0
+            except (TypeError, ValueError):
+                age_min = None
+            if age_min is None or age_min > max_age_minutes:
                 log.info(
-                    "Sentiment reversal: %s score=%.3f < threshold=%.2f — forced exit",
-                    pos.symbol, score, threshold,
+                    "Sentiment reversal SKIPPED for %s: signal age %s > %d min gate",
+                    pos.symbol,
+                    f"{age_min:.0f}min" if age_min is not None else "unknown",
+                    max_age_minutes,
                 )
+                continue
+            identity = str(data.get("signal_id") or gen_raw)
+            consumed = redis_client.get(f"signal:{pos.symbol}:reversal_consumed")
+            if consumed is not None and (
+                consumed.decode() if isinstance(consumed, bytes) else str(consumed)
+            ) == identity:
+                log.info(
+                    "Sentiment reversal SKIPPED for %s: signal %s already consumed",
+                    pos.symbol, identity,
+                )
+                continue
+            reversal[pos.symbol] = {
+                "score": score,
+                "signal_id": data.get("signal_id"),
+                "identity": identity,
+            }
+            log.info(
+                "Sentiment reversal: %s score=%.3f < threshold=%.2f — forced exit",
+                pos.symbol, score, threshold,
+            )
         except Exception as exc:
             log.debug("Could not read sentiment for %s: %s", pos.symbol, exc)
     return reversal
