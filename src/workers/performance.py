@@ -695,6 +695,41 @@ def run_reconcile_fills_intraday() -> dict:
         pg.close()
 
 
+def _broker_mtm_snapshot(trading_client) -> dict | None:
+    """Real-money numbers from the broker: NAV, day MTM change, open-book unrealized.
+
+    Alpaca's ``last_equity`` is the previous trading-day close equity, so
+    ``equity − last_equity`` is the true day mark-to-market change — realized
+    AND unrealized (2026-07-17: −$18 realized vs −$115.60 real). Fail-open:
+    returns None on any broker error so the report still goes out without it.
+    """
+    try:
+        acct = trading_client.get_account()
+        positions = trading_client.get_all_positions()
+        nav = float(acct.equity)
+        return {
+            "nav": nav,
+            "nav_change_1d": nav - float(acct.last_equity),
+            "unrealized_pnl_open": sum(float(p.unrealized_pl) for p in positions),
+            "open_positions_count": len(positions),
+        }
+    except Exception as exc:
+        log.warning("Broker MTM snapshot unavailable: %s", exc)
+        return None
+
+
+def _realized_pnl_1d(conn) -> float:
+    """Net P&L of trades closed in the last 24h (report runs at 03:00 UTC,
+    so this covers the full prior US session)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT COALESCE(SUM(net_pnl), 0) FROM trades "
+            "WHERE exit_time >= NOW() - INTERVAL '24 hours'"
+        )
+        row = cur.fetchone()
+    return float(row[0]) if row and row[0] is not None else 0.0
+
+
 def _daily_performance_report_tg_enabled() -> bool:
     """Read notifications.send_daily_performance_report from config/trading.yaml.
 
@@ -742,6 +777,33 @@ def run_daily_report():
         # Build report
         report = build_performance_report(pg, current_weights, period_days=30)
 
+        # Real numbers (mark-to-market): NAV, day change, unrealized — realized-only
+        # hid the true day result. Enriched BEFORE caching so API/UI see them too.
+        trading_client = None
+        if config.ALPACA_API_KEY and config.ALPACA_SECRET_KEY:
+            try:
+                from alpaca.trading.client import TradingClient
+                trading_client = TradingClient(
+                    api_key=config.ALPACA_API_KEY,
+                    secret_key=config.ALPACA_SECRET_KEY,
+                    paper=config.ALPACA_PAPER_MODE,
+                )
+                mtm = _broker_mtm_snapshot(trading_client)
+                if mtm:
+                    report.nav = mtm["nav"]
+                    report.nav_change_1d = mtm["nav_change_1d"]
+                    report.unrealized_pnl_open = mtm["unrealized_pnl_open"]
+                    report.open_positions_count = mtm["open_positions_count"]
+            except Exception as e:
+                log.warning("MTM enrichment failed: %s", e)
+        try:
+            import psycopg2
+            _c = psycopg2.connect(config.DATABASE_URL)
+            report.realized_pnl_1d = _realized_pnl_1d(_c)
+            _c.close()
+        except Exception as e:
+            log.warning("Realized 24h P&L computation failed: %s", e)
+
         # Store report in Redis for API access
         redis._r.setex("performance:latest_report", 86400 * 7, report.model_dump_json())
 
@@ -783,15 +845,9 @@ def run_daily_report():
         log.info(f"Daily report built. Overall IC: {report.overall_ic:.4f}, ICIR: {report.icir:.3f}")
 
         # Reconcile fill prices from Alpaca for trades placed in last 24h
-        if config.ALPACA_API_KEY and config.ALPACA_SECRET_KEY:
+        if trading_client is not None:
             try:
-                from alpaca.trading.client import TradingClient
-                tc = TradingClient(
-                    api_key=config.ALPACA_API_KEY,
-                    secret_key=config.ALPACA_SECRET_KEY,
-                    paper=config.ALPACA_PAPER_MODE,
-                )
-                updated = pg.reconcile_trade_fills(tc)
+                updated = pg.reconcile_trade_fills(trading_client)
                 log.info("Reconciled %d trade fill(s) from Alpaca", updated)
             except Exception as e:
                 log.warning("Fill reconciliation failed: %s", e)
@@ -1134,6 +1190,32 @@ def _format_performance_telegram_message(
     lines = [
         "Performance Report",
         f"Period: {report.period_start} to {report.period_end}",
+    ]
+
+    if report.nav is not None:
+        def _usd(v: float) -> str:
+            return f"-${abs(v):,.2f}" if v < 0 else f"${v:,.2f}"
+
+        lines += [
+            "",
+            "P&L (mark-to-market):",
+            f"  NAV: {_usd(report.nav)}",
+        ]
+        if report.nav_change_1d is not None:
+            lines.append(f"  Day change (MTM): {_usd(report.nav_change_1d)}")
+        if report.realized_pnl_1d is not None:
+            lines.append(f"  Realized (24h): {_usd(report.realized_pnl_1d)}")
+        if report.unrealized_pnl_open is not None:
+            lines.append(
+                f"  Unrealized (open book): {_usd(report.unrealized_pnl_open)}"
+                + (
+                    f" ({report.open_positions_count} positions)"
+                    if report.open_positions_count is not None
+                    else ""
+                )
+            )
+
+    lines += [
         "",
         "Metrics:",
         f"  Composite IC: {report.overall_ic:.4f}",
