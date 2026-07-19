@@ -1195,3 +1195,104 @@ class TestFormatTradeMetrics:
         }
         text = _format_trade_metrics_section(summary)
         assert "⚠️" in text
+
+
+class TestBrokerMtmSnapshot:
+    """The daily report must show the real numbers: NAV, day mark-to-market change,
+    and open-book unrealized P&L (2026-07-17: report said −$18 realized while the
+    real day was −$115.60 NAV, ~−$78 of it unrealized MTM on the open book)."""
+
+    def _make_client(self, equity="109474.38", last_equity="109589.98", pls=("12.5", "-20.0")):
+        tc = MagicMock()
+        tc.get_account.return_value = MagicMock(equity=equity, last_equity=last_equity)
+        tc.get_all_positions.return_value = [
+            MagicMock(unrealized_pl=pl) for pl in pls
+        ]
+        return tc
+
+    def test_snapshot_computes_real_numbers(self):
+        from src.workers.performance import _broker_mtm_snapshot
+
+        snap = _broker_mtm_snapshot(self._make_client())
+
+        assert snap["nav"] == pytest.approx(109474.38)
+        assert snap["nav_change_1d"] == pytest.approx(-115.60)
+        assert snap["unrealized_pnl_open"] == pytest.approx(-7.5)
+        assert snap["open_positions_count"] == 2
+
+    def test_snapshot_fail_open_returns_none(self):
+        from src.workers.performance import _broker_mtm_snapshot
+
+        tc = MagicMock()
+        tc.get_account.side_effect = RuntimeError("api down")
+
+        assert _broker_mtm_snapshot(tc) is None
+
+
+class TestRealizedPnl1d:
+    def test_sums_net_pnl_of_trades_closed_in_last_24h(self):
+        from src.workers.performance import _realized_pnl_1d
+
+        conn = MagicMock()
+        cur = conn.cursor.return_value.__enter__.return_value
+        cur.fetchone.return_value = (-18.47,)
+
+        assert _realized_pnl_1d(conn) == pytest.approx(-18.47)
+
+    def test_none_sum_returns_zero(self):
+        from src.workers.performance import _realized_pnl_1d
+
+        conn = MagicMock()
+        cur = conn.cursor.return_value.__enter__.return_value
+        cur.fetchone.return_value = (None,)
+
+        assert _realized_pnl_1d(conn) == 0.0
+
+
+class TestTelegramMessageMtmSection:
+    def _make_report(self, **overrides) -> PerformanceReport:
+        kwargs = dict(
+            period_start=date(2026, 7, 1),
+            period_end=date(2026, 7, 17),
+            overall_ic=0.05,
+            icir=0.4,
+            hit_rate=0.52,
+            model_ic={"m1": 0.05},
+            model_icir={"m1": 0.4},
+            recommended_weights={"m1": 1.0},
+            weight_change_applied=False,
+            threshold_analysis={},
+            threshold_suggestion=None,
+            drift_alerts=[],
+            post_mortems=[],
+            report_version="1.0",
+        )
+        kwargs.update(overrides)
+        return PerformanceReport(**kwargs)
+
+    def test_message_leads_with_mtm_numbers_when_available(self):
+        report = self._make_report(
+            nav=109474.38,
+            nav_change_1d=-115.60,
+            realized_pnl_1d=-18.47,
+            unrealized_pnl_open=-7.50,
+            open_positions_count=46,
+        )
+
+        msg = _format_performance_telegram_message(report, [], None)
+
+        assert "P&L (mark-to-market)" in msg
+        assert "NAV: $109,474.38" in msg
+        assert "-$115.60" in msg          # day MTM change
+        assert "-$18.47" in msg           # realized 24h
+        assert "-$7.50" in msg            # unrealized open book
+        assert "46" in msg
+        # MTM section must appear before the IC metrics
+        assert msg.index("P&L (mark-to-market)") < msg.index("Composite IC")
+
+    def test_message_omits_mtm_section_when_unavailable(self):
+        report = self._make_report()
+
+        msg = _format_performance_telegram_message(report, [], None)
+
+        assert "P&L (mark-to-market)" not in msg

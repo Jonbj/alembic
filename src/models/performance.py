@@ -91,6 +91,22 @@ class PerformanceReport(BaseModel):
         default_factory=list,
         description="Post-mortem analyses for significant losses"
     )
+    # Real-money numbers (mark-to-market from the broker). Realized-only P&L hid
+    # the true day result (2026-07-17: −$18 realized vs −$115.60 NAV). None when
+    # the broker snapshot is unavailable at report time.
+    nav: float | None = Field(default=None, description="Broker account equity at report time")
+    nav_change_1d: float | None = Field(
+        default=None, description="equity − last_equity: day mark-to-market change"
+    )
+    realized_pnl_1d: float | None = Field(
+        default=None, description="Net P&L of trades closed in the last 24h"
+    )
+    unrealized_pnl_open: float | None = Field(
+        default=None, description="Sum of unrealized P&L across open positions"
+    )
+    open_positions_count: int | None = Field(
+        default=None, description="Open positions at report time"
+    )
     generated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
