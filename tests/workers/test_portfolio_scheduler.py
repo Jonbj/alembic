@@ -2039,3 +2039,62 @@ def test_reversal_force_sell_noop_in_dry_run_and_halted():
         )
         trading_client.submit_order.assert_not_called()
         trading_client.cancel_order_by_id.assert_not_called()
+
+
+# ── #67/#68: consume-on-fire marker + cross-strategy re-entry cooldown ────────
+
+
+def test_reversal_force_sell_marks_consumed_and_cooldown():
+    """After a successful force-sell the signal is consumed (never fires twice)
+    and the symbol enters the re-entry cooldown (S1 must not rebuy in 15 min)."""
+    from src.workers.portfolio_scheduler import _submit_reversal_force_sells
+
+    trading_client = MagicMock()
+    trading_client.get_orders.return_value = []
+    resp = MagicMock()
+    resp.id = "ord-9"
+    trading_client.submit_order.return_value = resp
+    redis_client = MagicMock()
+
+    with patch("src.store.pg_store.PostgreSQLStore"):
+        _submit_reversal_force_sells(
+            reversal_sell_symbols={"SOXX": {"score": -0.42, "signal_id": 3861, "identity": "3861"}},
+            final_orders=[],
+            stop_loss_sells={},
+            alpaca_positions=[_make_alpaca_position("SOXX", 1.13)],
+            trading_client=trading_client,
+            submitted_orders=[],
+            ts=datetime(2026, 7, 16, 18, 22, tzinfo=timezone.utc),
+            regime_mult=0.7,
+            operating_mode="active",
+            redis_client=redis_client,
+        )
+
+    setex_keys = {c.args[0]: c.args[2] for c in redis_client.setex.call_args_list}
+    assert setex_keys.get("signal:SOXX:reversal_consumed") == "3861"
+    assert "reversal_cooldown:SOXX" in setex_keys
+
+
+def test_submit_portfolio_orders_skips_buy_in_reversal_cooldown():
+    """A symbol force-sold for reversal must not be re-bought during the cooldown."""
+    from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+    orders = [_make_combined_order("SOXX", OrderSide.BUY, qty=1.0)]
+    trading_client = MagicMock()
+    market = _make_market(prices={"SOXX": 520.0})
+
+    calls = []
+    with patch(
+        "src.workers.portfolio_scheduler._get_reversal_cooldown_symbols",
+        return_value={"SOXX"},
+    ), patch(
+        "src.workers.portfolio_scheduler._get_stop_loss_cooldown_symbols",
+        return_value=set(),
+    ):
+        submitted = _submit_portfolio_orders(
+            orders, trading_client, market,
+            _submit_fn=lambda o, n, c: calls.append(o.symbol),
+        )
+
+    assert submitted == []
+    assert calls == []
