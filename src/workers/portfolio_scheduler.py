@@ -863,9 +863,10 @@ def _load_risk_config() -> dict:
         # #81: cap each S4 ticker's weight at 1/n_top regardless of how many
         # candidates actually pass the gate — fixes the lone-survivor
         # concentration bug (a single surviving ticker taking the full 10%
-        # sleeve bucket instead of its 2% slot). Off by default. See
-        # src/strategies/s4/config.py S4Config.fixed_slot_sizing.
-        "s4_fixed_slot_sizing_enabled": False,
+        # sleeve bucket instead of its 2% slot). ON by default per explicit
+        # operator decision 2026-07-20. See src/strategies/s4/config.py
+        # S4Config.fixed_slot_sizing.
+        "s4_fixed_slot_sizing_enabled": True,
     }
     try:
         import yaml
@@ -2758,7 +2759,7 @@ def _build_strategy_instance(entry, bars_df):
     if sid == "S4":
         from src.store.pg_store import PostgreSQLStore
         # #81: lone-survivor concentration cap, off by default.
-        _fixed_slot = bool(_load_risk_config().get("s4_fixed_slot_sizing_enabled", False))
+        _fixed_slot = bool(_load_risk_config().get("s4_fixed_slot_sizing_enabled", True))
         s4_config = S4Config(fixed_slot_sizing=_fixed_slot)
         signals_df = None
         store = None

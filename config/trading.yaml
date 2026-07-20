@@ -222,8 +222,12 @@ risk:
   # weaker single-model signal 0.150 vs DB's 0.672). When enabled, each
   # selected ticker instead gets a FIXED weight of 1/n_top — unused slots
   # stay undeployed rather than being redistributed to survivors. No effect
-  # when n_selected == n_top (the common case). Off by default.
-  s4_fixed_slot_sizing_enabled: false
+  # when n_selected == n_top (the common case). ON by default per explicit
+  # operator decision 2026-07-20 (real realized loss + an identical live
+  # position exposed to the same risk at decision time) — overrides this
+  # repo's usual off-by-default discipline, same rationale as #62/#63. Set
+  # false to roll back to the legacy formula.
+  s4_fixed_slot_sizing_enabled: true
 
   # Position limits
   max_position_pct: 0.10

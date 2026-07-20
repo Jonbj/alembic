@@ -28,9 +28,13 @@ class S4Config:
     # survivors. Fixes the lone-survivor concentration bug (a single
     # gate-surviving ticker getting the full 10% sleeve bucket instead of its
     # 2% slot; real losses 2026-07-17 DB -$77.88, 2026-07-20 MSFT same
-    # pattern). No effect when n_selected == n_top (the common case). Off by
-    # default — flag-gated (config/trading.yaml risk.s4_fixed_slot_sizing_enabled).
-    fixed_slot_sizing: bool = False
+    # pattern). No effect when n_selected == n_top (the common case). ON by
+    # default per explicit operator decision 2026-07-20 (real realized loss +
+    # an identical live position exposed to the same risk at decision time) —
+    # overrides this repo's usual off-by-default discipline, same as #62/#63.
+    # Set False (or config/trading.yaml risk.s4_fixed_slot_sizing_enabled:
+    # false) to roll back to the legacy formula.
+    fixed_slot_sizing: bool = True
     signals_lookback_hours: int = 96  # covers 3-day US market holiday gap (Fri→Tue ≈ 88h)
     max_signal_age_hours: int = 4
     rebalance_frequency: RebalanceFrequency = field(

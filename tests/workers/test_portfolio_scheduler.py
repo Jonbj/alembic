@@ -195,8 +195,10 @@ def test_build_strategy_instance_s4_returns_instance():
     assert isinstance(result, NewsDrivenTactical)
 
 
-def test_build_strategy_instance_s4_fixed_slot_sizing_defaults_false():
-    """#81: reads s4_fixed_slot_sizing_enabled from risk config, defaults False."""
+def test_build_strategy_instance_s4_fixed_slot_sizing_enabled_by_default():
+    """#81: ON by default per explicit operator decision 2026-07-20 (real
+    realized loss DB -$77.88 + an identical live position MSFT exposed to
+    the same risk at decision time) — reads real config/trading.yaml."""
     from src.strategies.s4.strategy import NewsDrivenTactical
     from src.workers.portfolio_scheduler import _build_strategy_instance
 
@@ -209,11 +211,11 @@ def test_build_strategy_instance_s4_fixed_slot_sizing_defaults_false():
         result = _build_strategy_instance(entry, bars_df)
 
     assert isinstance(result, NewsDrivenTactical)
-    assert result._config.fixed_slot_sizing is False
+    assert result._config.fixed_slot_sizing is True
 
 
-def test_build_strategy_instance_s4_fixed_slot_sizing_enabled_from_risk_config():
-    """#81: when the risk config flag is on, it's threaded into S4Config."""
+def test_build_strategy_instance_s4_fixed_slot_sizing_can_be_disabled_via_risk_config():
+    """#81: rollback path — explicit False in risk config disables the fix."""
     from src.workers.portfolio_scheduler import _build_strategy_instance
 
     entry = MagicMock()
@@ -224,11 +226,11 @@ def test_build_strategy_instance_s4_fixed_slot_sizing_enabled_from_risk_config()
     with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_store), \
          patch(
              "src.workers.portfolio_scheduler._load_risk_config",
-             return_value={"s4_fixed_slot_sizing_enabled": True},
+             return_value={"s4_fixed_slot_sizing_enabled": False},
          ):
         result = _build_strategy_instance(entry, bars_df)
 
-    assert result._config.fixed_slot_sizing is True
+    assert result._config.fixed_slot_sizing is False
 
 
 def test_build_strategy_instance_s4_loads_signals_from_db():

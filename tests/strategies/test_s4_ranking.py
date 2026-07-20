@@ -199,18 +199,21 @@ def test_too_few_stocks_returns_empty():
 
 
 def test_single_candidate_forms_bucket_of_one():
-    """A lone strong signal must trade under the default config (min_stocks=1).
+    """A lone strong signal must trade under the default config (min_stocks=1),
+    but (#81, fixed_slot_sizing default True) at its 1/n_top slot weight, not
+    the whole sleeve bucket — the lone-survivor concentration fix.
 
     The live entry gate is enforced upstream in portfolio_scheduler; by the time
     signals reach the ranker they have already passed the gate. Discarding a
-    lone survivor at min_stocks=2 was the original deployment chokepoint.
+    lone survivor at min_stocks=2 was the original deployment chokepoint —
+    still fixed here (n_selected==1), just no longer over-sized.
     """
     signals = _make_signals(1)
-    ranker = CrossSectionalRanker(S4Config())  # default min_stocks=1
+    ranker = CrossSectionalRanker(S4Config())  # default min_stocks=1, fixed_slot_sizing=True
     result = ranker.rank(signals)
 
     assert result.n_selected == 1
-    assert result.weights == {"T00": 1.0}
+    assert result.weights == {"T00": pytest.approx(0.2, rel=1e-9)}
 
 
 def test_exactly_min_stocks_passes():
@@ -265,14 +268,28 @@ def test_ties_all_selected_equal_weight():
 # ---------------------------------------------------------------------------
 
 def test_fewer_candidates_than_n_top():
-    # Only 4 pass filters, n_top=5, min_stocks=3
+    # Only 4 pass filters, n_top=5, min_stocks=3. Default fixed_slot_sizing=True
+    # (#81): each still gets its fixed 1/n_top slot, not the bucket redistributed
+    # across the 4 that showed up.
     signals = _make_signals(4)
     ranker = CrossSectionalRanker(S4Config(n_top=5, min_stocks=3))
     result = ranker.rank(signals)
 
     # Should select all 4 available (4 >= min_stocks=3)
     assert result.n_selected == 4
-    # weight = 1.0 / 4 = 0.25
+    # weight = 1.0 / n_top = 0.2 (fixed slot, not 1/4 redistribution)
+    for r in result.rankings:
+        assert r.weight == pytest.approx(1.0 / 5, rel=1e-9)
+
+
+def test_fewer_candidates_than_n_top_legacy_redistribution_with_flag_off():
+    """Rollback path: fixed_slot_sizing=False reproduces the pre-#81 formula
+    (unused slots redistributed across the survivors, weight = 1/n_selected)."""
+    signals = _make_signals(4)
+    ranker = CrossSectionalRanker(S4Config(n_top=5, min_stocks=3, fixed_slot_sizing=False))
+    result = ranker.rank(signals)
+
+    assert result.n_selected == 4
     for r in result.rankings:
         assert r.weight == pytest.approx(1.0 / 4, rel=1e-9)
 
@@ -408,13 +425,17 @@ def test_orchestrator_scale_gives_correct_portfolio_weight():
 # tickers actually passed the gate that cycle — unused slots are left
 # undeployed (smaller total sleeve utilization), not redistributed to the
 # survivors. Zero change in the fully-subscribed case (n_selected==n_top).
-# Off by default — flag-gated per this repo's measure-before-enforce
-# discipline (config/trading.yaml risk.s4_fixed_slot_sizing_enabled).
+# ON by default per explicit operator decision 2026-07-20 (real realized
+# loss + an identical live position exposed to the same risk at decision
+# time) — flag remains available to roll back to the legacy formula
+# (config/trading.yaml risk.s4_fixed_slot_sizing_enabled).
 # ---------------------------------------------------------------------------
 
-def test_config_fixed_slot_sizing_defaults_false():
+def test_config_fixed_slot_sizing_defaults_true():
+    """ON by default per explicit operator decision 2026-07-20 (real realized
+    loss + an identical live position exposed to the same risk)."""
     cfg = S4Config()
-    assert cfg.fixed_slot_sizing is False
+    assert cfg.fixed_slot_sizing is True
 
 
 def test_fixed_slot_sizing_false_preserves_legacy_lone_survivor_behavior():
