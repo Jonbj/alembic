@@ -213,6 +213,18 @@ risk:
   s4_anti_whipsaw_damping_enabled: false
   s4_anti_whipsaw_confirm_cycles: 2   # ADDITIONAL consecutive whipsaw-classified cycles required on top of exit_persistence_cycles (see note above) before the SELL is let through
 
+  # #81: lone-survivor concentration cap. Legacy ranker formula gives each
+  # selected ticker weight = 1/n_selected, which always deploys the FULL 10%
+  # S4 sleeve bucket regardless of how many candidates pass the gate — a lone
+  # gate-surviving ticker takes the whole 10% instead of its 2% slot (1/n_top
+  # at n_top=5). Real losses: DB -$77.88 (2026-07-17, -1.05% price move
+  # amplified 5x by the 10% size) and MSFT (2026-07-20, same pattern, a
+  # weaker single-model signal 0.150 vs DB's 0.672). When enabled, each
+  # selected ticker instead gets a FIXED weight of 1/n_top — unused slots
+  # stay undeployed rather than being redistributed to survivors. No effect
+  # when n_selected == n_top (the common case). Off by default.
+  s4_fixed_slot_sizing_enabled: false
+
   # Position limits
   max_position_pct: 0.10
   max_portfolio_exposure: 0.50

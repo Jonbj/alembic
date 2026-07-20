@@ -125,7 +125,12 @@ class CrossSectionalRanker:
             )
 
         n = len(selected)
-        per_ticker_weight = 1.0 / n
+        # #81: fixed_slot_sizing caps each ticker's weight at 1/n_top instead of
+        # 1/n_selected — a lone survivor gets its one slot, not the whole
+        # sleeve. n <= cfg.n_top always holds (selected is truncated above),
+        # so this only ever reduces total sleeve utilization, never increases
+        # any single ticker's weight above the legacy formula.
+        per_ticker_weight = 1.0 / cfg.n_top if cfg.fixed_slot_sizing else 1.0 / n
 
         ranked = tuple(
             RankedTicker(

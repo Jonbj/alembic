@@ -195,6 +195,42 @@ def test_build_strategy_instance_s4_returns_instance():
     assert isinstance(result, NewsDrivenTactical)
 
 
+def test_build_strategy_instance_s4_fixed_slot_sizing_defaults_false():
+    """#81: reads s4_fixed_slot_sizing_enabled from risk config, defaults False."""
+    from src.strategies.s4.strategy import NewsDrivenTactical
+    from src.workers.portfolio_scheduler import _build_strategy_instance
+
+    entry = MagicMock()
+    entry.strategy_id = "S4"
+    bars_df = _make_bars_df(n=5, symbols=["SPY"])
+    mock_store = MagicMock()
+    mock_store.fetch_signals_for_cycle.return_value = []
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_store):
+        result = _build_strategy_instance(entry, bars_df)
+
+    assert isinstance(result, NewsDrivenTactical)
+    assert result._config.fixed_slot_sizing is False
+
+
+def test_build_strategy_instance_s4_fixed_slot_sizing_enabled_from_risk_config():
+    """#81: when the risk config flag is on, it's threaded into S4Config."""
+    from src.workers.portfolio_scheduler import _build_strategy_instance
+
+    entry = MagicMock()
+    entry.strategy_id = "S4"
+    bars_df = _make_bars_df(n=5, symbols=["SPY"])
+    mock_store = MagicMock()
+    mock_store.fetch_signals_for_cycle.return_value = []
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_store), \
+         patch(
+             "src.workers.portfolio_scheduler._load_risk_config",
+             return_value={"s4_fixed_slot_sizing_enabled": True},
+         ):
+        result = _build_strategy_instance(entry, bars_df)
+
+    assert result._config.fixed_slot_sizing is True
+
+
 def test_build_strategy_instance_s4_loads_signals_from_db():
     """S4 loads signals from DB and passes them as a DataFrame to NewsDrivenTactical."""
     from src.models.signals import SentimentResult

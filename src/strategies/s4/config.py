@@ -22,6 +22,15 @@ class S4Config:
     # passed the gate, so requiring >1 stock here would silently discard a lone
     # survivor and choke capital deployment.
     min_stocks: int = 1
+    # #81: when True, each selected ticker gets a FIXED weight of 1/n_top,
+    # regardless of how many candidates actually passed the gate that cycle —
+    # unused slots stay undeployed instead of being redistributed to the
+    # survivors. Fixes the lone-survivor concentration bug (a single
+    # gate-surviving ticker getting the full 10% sleeve bucket instead of its
+    # 2% slot; real losses 2026-07-17 DB -$77.88, 2026-07-20 MSFT same
+    # pattern). No effect when n_selected == n_top (the common case). Off by
+    # default — flag-gated (config/trading.yaml risk.s4_fixed_slot_sizing_enabled).
+    fixed_slot_sizing: bool = False
     signals_lookback_hours: int = 96  # covers 3-day US market holiday gap (Fri→Tue ≈ 88h)
     max_signal_age_hours: int = 4
     rebalance_frequency: RebalanceFrequency = field(

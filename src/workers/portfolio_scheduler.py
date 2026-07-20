@@ -860,6 +860,12 @@ def _load_risk_config() -> dict:
         # s4_anti_whipsaw_confirm_cycles, not this value alone. See config/trading.yaml.
         "s4_anti_whipsaw_damping_enabled": False,
         "s4_anti_whipsaw_confirm_cycles": 2,
+        # #81: cap each S4 ticker's weight at 1/n_top regardless of how many
+        # candidates actually pass the gate — fixes the lone-survivor
+        # concentration bug (a single surviving ticker taking the full 10%
+        # sleeve bucket instead of its 2% slot). Off by default. See
+        # src/strategies/s4/config.py S4Config.fixed_slot_sizing.
+        "s4_fixed_slot_sizing_enabled": False,
     }
     try:
         import yaml
@@ -2751,7 +2757,9 @@ def _build_strategy_instance(entry, bars_df):
 
     if sid == "S4":
         from src.store.pg_store import PostgreSQLStore
-        s4_config = S4Config()
+        # #81: lone-survivor concentration cap, off by default.
+        _fixed_slot = bool(_load_risk_config().get("s4_fixed_slot_sizing_enabled", False))
+        s4_config = S4Config(fixed_slot_sizing=_fixed_slot)
         signals_df = None
         store = None
         try:
