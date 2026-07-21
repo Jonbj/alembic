@@ -545,6 +545,30 @@ def _classify_zero_weight_exit(
     return "expired" if age_h > max_age_hours else "whipsaw"
 
 
+def _reason_and_mechanism_for_non_s4_weight_drop(
+    symbol: str,
+    origin_strategy: str,
+    wt_pct: str,
+) -> tuple[str, str]:
+    """#72: origin-aware reason/tag for a weight-0 SELL on a non-S4 position.
+
+    _classify_zero_weight_exit/_reason_for_zero_weight_sell only ever check
+    the S4 sentiment-signals table, so they ALWAYS tag a non-S4-origin
+    position "[no_signal]" — trivially true (it never had an S4 signal to
+    begin with) but misleading, and it over-counts [no_signal] in #61's
+    flip-decision measurement. Real incident: SBUX trades 348/360
+    (2026-07-17), verified S1 momentum entries, tagged [no_signal].
+
+    Returns (exit_mechanism, reason_text).
+    """
+    exit_mechanism = f"{origin_strategy.lower()}_weight_drop"
+    reason = (
+        f"[{exit_mechanism}] {origin_strategy} target weight dropped to 0% "
+        f"— position closed (not an S4 exit; portfolio weight {wt_pct})."
+    )
+    return exit_mechanism, reason
+
+
 def _reason_for_zero_weight_sell(
     symbol: str,
     last_signal: dict | None,
@@ -687,6 +711,42 @@ def _get_reversal_cooldown_symbols(redis_url: str) -> set[str]:
         return set()
 
 
+def _get_s1_reentry_cooldown_symbols(redis_url: str) -> set[str]:
+    """#71: symbols S1 excluded (weight dropped to 0 by S1's own signal) still
+    in re-entry cooldown. Only S1's own BUY is blocked (see the check site) —
+    unlike #68's reversal_cooldown, a genuine S4 conviction buy on the same
+    name is a different signal and must not be vetoed by S1's own churn.
+    Evidence: SBUX sold 14:37, S1 re-bought 14:52 (15 min flip, 2026-07-17);
+    same week GE and XLF flipped within 1-2 cycles."""
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            keys = r.keys("s1_reentry_cooldown:*")
+            return {k.split(":", 1)[1] for k in keys} if keys else set()
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Could not fetch S1 re-entry cooldown symbols: %s", exc)
+        return set()
+
+
+def _mark_s1_reentry_cooldown(redis_url: str, symbol: str, minutes: float) -> None:
+    """#71: start (or refresh) the S1 re-entry cooldown for symbol. No-op if
+    minutes <= 0 (cooldown disabled)."""
+    if minutes <= 0:
+        return
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            r.setex(f"s1_reentry_cooldown:{symbol}", int(minutes * 60), "1")
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Could not set S1 re-entry cooldown for %s: %s", symbol, exc)
+
+
 _WHIPSAW_STREAK_TTL = 1800  # 30 min — ~2 cycles at 15-min cadence; a longer gap restarts the streak
 
 
@@ -807,6 +867,30 @@ def _apply_whipsaw_damping_filter(orders: list, suppressed_syms: set[str]) -> li
     return [o for o in orders if not (o.symbol in suppressed_syms and o.side == _OS.SELL)]
 
 
+def _resolve_buy_origin_strategy(symbol: str, sym_strats: dict, decision: dict) -> str:
+    """Return the strategy that actually contributed weight to this BUY this cycle.
+
+    Prefers sym_strats (CycleResult.symbol_strategies — accurate, computed from
+    which strategies contributed non-zero weight this cycle) over inferring
+    from signal_id presence. The signal_id heuristic silently mislabels an S4
+    BUY as S1 whenever its signal_id wasn't captured in the decision dict —
+    real incident 2026-07-17: trade 361 (DB) was a genuine S4 BUY (execution_
+    decisions.reason said "S4 news-driven: sentiment +0.672...") but
+    trades.stop_strategy recorded "S1", corrupting which stop_strategy_params
+    (k/floor/cap) applied to a $6,181 position.
+    """
+    strats = sym_strats.get(symbol, [])
+    if "S4" in strats:
+        return "S4"
+    if "S1" in strats:
+        return "S1"
+    if strats:
+        return strats[0]
+    # Defensive fallback only for the case sym_strats has no entry at all
+    # (shouldn't happen for a just-submitted BUY, but never crash on it).
+    return "S4" if decision.get("signal_id") else "S1"
+
+
 def _load_sector_map() -> dict[str, str] | None:
     """Invert the trading.yaml `sectors:` block to {symbol: sector}.
 
@@ -867,6 +951,12 @@ def _load_risk_config() -> dict:
         # operator decision 2026-07-20. See src/strategies/s4/config.py
         # S4Config.fixed_slot_sizing.
         "s4_fixed_slot_sizing_enabled": True,
+        # #71: once S1 excludes a symbol (weight dropped to 0 by S1's own
+        # signal), block S1 from re-buying it for N minutes — kills the
+        # 15-min self-churn flip (SBUX/GE/XLF, 2026-07-17). Off by default —
+        # flip only after reviewing the shadow frequency log.
+        "s1_reentry_cooldown_enabled": False,
+        "s1_reentry_cooldown_minutes": 30,
     }
     try:
         import yaml
@@ -1247,6 +1337,7 @@ def _persist_trade_fills(
     s4_signals,
     regime_mult,
     tick_time,
+    sym_strats: dict | None = None,
 ) -> int:
     """Persist trade entry/exit rows + back-fill Alpaca order_ids, one order at a time.
 
@@ -1296,7 +1387,7 @@ def _persist_trade_fills(
                                 _entry_px_l = sub["notional"] / sub["qty"]
                             if _entry_px_l is None:
                                 _entry_px_l = float(sub["notional"]) if sub.get("notional") else 0.0
-                            _strategy_l = "S4" if dec.get("signal_id") else "S1"
+                            _strategy_l = _resolve_buy_origin_strategy(sym, sym_strats or {}, dec)
                             _frozen_stop_legacy = stop_policy.freeze(
                                 sym, _strategy_l, float(_entry_px_l), tick_time
                             )
@@ -1951,6 +2042,12 @@ def _run_cycle_inner() -> dict:
             _guard_exc,
         )
         open_db_symbols = None
+    # #72: origin strategy of each open position (trades.stop_strategy, fixed to
+    # reflect CycleResult.symbol_strategies — see _resolve_buy_origin_strategy),
+    # used to tag weight-0 SELLs correctly instead of always assuming S4.
+    _open_trade_origin: dict[str, str] = {
+        t["symbol"]: t["stop_strategy"] for t in _open_trades if t.get("stop_strategy")
+    }
 
     # Anti-stale-ranker-sell: protect open positions with a fresh positive signal from
     # being sold when the S4 ranker returns no output due to min_stocks constraint.
@@ -2157,37 +2254,57 @@ def _run_cycle_inner() -> dict:
                 # real cause (signal expiry, missing signal, etc.) rather than the
                 # generic "Portfolio rebalance: weight 0.0%" which gave no insight.
                 if order.side.value == "SELL" and order.allocation_weight == 0.0:
-                    _zero_sig = _zero_sell_signals.get(order.symbol)
-                    reason = _reason_for_zero_weight_sell(order.symbol, _zero_sig, _s4_max_age_h)
-                    # #60: structured tag alongside the reason text (queryable
-                    # without parsing free text — see #61 anti-whipsaw damping).
-                    exit_mechanism = _classify_zero_weight_exit(_zero_sig, _s4_max_age_h)
+                    _origin_strategy = _open_trade_origin.get(order.symbol)
+                    if _origin_strategy and _origin_strategy != "S4":
+                        # #72: the position was opened by a non-S4 strategy — the
+                        # S4-specific classifier below would always misleadingly
+                        # tag this [no_signal] (trivially true, it never had an
+                        # S4 signal). Whipsaw damping (#61) is S4-only, skip it.
+                        exit_mechanism, reason = _reason_and_mechanism_for_non_s4_weight_drop(
+                            order.symbol, _origin_strategy, wt_pct
+                        )
+                        if _origin_strategy == "S1":
+                            # #71: start the re-entry cooldown regardless of the
+                            # enforce flag, so shadow frequency is measurable and
+                            # a later flip doesn't start cold. Enforcement (the
+                            # actual BUY-skip) happens in _submit_portfolio_orders.
+                            _mark_s1_reentry_cooldown(
+                                config.REDIS_URL, order.symbol,
+                                minutes=float(_risk_cfg.get("s1_reentry_cooldown_minutes", 30)),
+                            )
+                    else:
+                        _zero_sig = _zero_sell_signals.get(order.symbol)
+                        reason = _reason_for_zero_weight_sell(order.symbol, _zero_sig, _s4_max_age_h)
+                        # #60: structured tag alongside the reason text (queryable
+                        # without parsing free text — see #61 anti-whipsaw damping).
+                        exit_mechanism = _classify_zero_weight_exit(_zero_sig, _s4_max_age_h)
 
-                    # #61: require N consecutive "whipsaw" cycles before letting this
-                    # SELL through. Streak is always tracked (so a later flag-flip
-                    # doesn't start cold); only actually suppressed when enabled.
-                    _prior_streak = _get_whipsaw_streak(config.REDIS_URL, order.symbol)
-                    _damping = evaluate_whipsaw_damping(
-                        exit_mechanism == "whipsaw", _prior_streak, _anti_whipsaw_confirm_cycles
-                    )
-                    _set_whipsaw_streak(config.REDIS_URL, order.symbol, _damping.new_streak)
-                    if exit_mechanism == "whipsaw":
-                        if _anti_whipsaw_enabled and _damping.suppress:
-                            _whipsaw_suppressed_symbols.add(order.symbol)
-                            log.info(
-                                "#61 anti-whipsaw damping: holding %s one more cycle "
-                                "(streak=%d/%d)", order.symbol, _damping.new_streak,
-                                _anti_whipsaw_confirm_cycles,
-                            )
-                            continue
-                        if not _anti_whipsaw_enabled:
-                            # Shadow: flag is off, SELL proceeds unchanged — annotate
-                            # what damping WOULD have done for frequency measurement.
-                            reason = (
-                                f"{reason} [anti_whipsaw_shadow: would_suppress="
-                                f"{_damping.suppress}, streak={_damping.new_streak}/"
-                                f"{_anti_whipsaw_confirm_cycles}]"
-                            )
+                        # #61: require N consecutive "whipsaw" cycles before letting
+                        # this SELL through. Streak is always tracked (so a later
+                        # flag-flip doesn't start cold); only actually suppressed
+                        # when enabled.
+                        _prior_streak = _get_whipsaw_streak(config.REDIS_URL, order.symbol)
+                        _damping = evaluate_whipsaw_damping(
+                            exit_mechanism == "whipsaw", _prior_streak, _anti_whipsaw_confirm_cycles
+                        )
+                        _set_whipsaw_streak(config.REDIS_URL, order.symbol, _damping.new_streak)
+                        if exit_mechanism == "whipsaw":
+                            if _anti_whipsaw_enabled and _damping.suppress:
+                                _whipsaw_suppressed_symbols.add(order.symbol)
+                                log.info(
+                                    "#61 anti-whipsaw damping: holding %s one more cycle "
+                                    "(streak=%d/%d)", order.symbol, _damping.new_streak,
+                                    _anti_whipsaw_confirm_cycles,
+                                )
+                                continue
+                            if not _anti_whipsaw_enabled:
+                                # Shadow: flag is off, SELL proceeds unchanged — annotate
+                                # what damping WOULD have done for frequency measurement.
+                                reason = (
+                                    f"{reason} [anti_whipsaw_shadow: would_suppress="
+                                    f"{_damping.suppress}, streak={_damping.new_streak}/"
+                                    f"{_anti_whipsaw_confirm_cycles}]"
+                                )
                 else:
                     reason = f"Portfolio rebalance: weight {wt_pct}."
             decision_id = _pg.write_execution_decision(
@@ -2274,6 +2391,7 @@ def _run_cycle_inner() -> dict:
             stop_policy=_stop_policy,
             nav=equity,
             open_trades=_open_trades,
+            sym_strats=_sym_strats,
         )
 
         # #62/#63: reconcile broker-side protective stops for fractional positions.
@@ -2317,7 +2435,7 @@ def _run_cycle_inner() -> dict:
                     _entry_px_b = _sub_b["notional"] / _sub_b["qty"]
                 if _entry_px_b is None:
                     _entry_px_b = float(_sub_b["notional"]) if _sub_b.get("notional") else 0.0
-                _strategy_b = "S4" if _dec_b.get("signal_id") else "S1"
+                _strategy_b = _resolve_buy_origin_strategy(_sym_b, _sym_strats, _dec_b)
                 try:
                     if _stop_policy is None:
                         from src.portfolio.stop_policy import StopPolicy as _StopPolicyFreeze
@@ -2451,6 +2569,7 @@ def _run_cycle_inner() -> dict:
             s4_signals=_s4_signals,
             regime_mult=_regime_mult,
             tick_time=ts,
+            sym_strats=_sym_strats,
         )
 
     # Alert when an approved strategy consistently produces zero target weights.
@@ -2935,6 +3054,7 @@ def _submit_portfolio_orders(
     stop_policy: "StopPolicy" | None = None,
     nav: float | None = None,
     open_trades: list[dict] | None = None,
+    sym_strats: dict | None = None,
 ) -> list[dict]:
     """Submit BUY and SELL orders to Alpaca.
 
@@ -2961,11 +3081,12 @@ def _submit_portfolio_orders(
         symbol, side, order_id, and either notional (BUY) or qty (SELL).
     """
     if stop_policy is None and risk_cfg:
+        from src.config import config as _cfg_sp
         from src.portfolio.stop_policy import StopPolicy as _StopPolicy
         stop_policy = _StopPolicy(
             risk_cfg,
             bars_df=bars_df,
-            last_good_lookup=_last_good_sigma_lookup(config.REDIS_URL),
+            last_good_lookup=_last_good_sigma_lookup(_cfg_sp.REDIS_URL),
         )
 
     from src.backtest.engine.types import OrderSide
@@ -3012,6 +3133,22 @@ def _submit_portfolio_orders(
                         order.symbol,
                     )
                     continue
+                # #71: S1 re-entry cooldown — only blocks a BUY that is S1's OWN
+                # re-entry (unlike #68, a genuine S4 conviction buy on the same
+                # name must not be vetoed by S1's own churn). Flag-gated.
+                if (risk_cfg or {}).get("s1_reentry_cooldown_enabled", False):
+                    _strats_for_buy = set((sym_strats or {}).get(order.symbol, []))
+                    if _strats_for_buy == {"S1"}:
+                        _s1_cooldown = _get_s1_reentry_cooldown_symbols(
+                            __import__("src.config", fromlist=["config"]).config.REDIS_URL
+                        )
+                        if order.symbol in _s1_cooldown:
+                            log.warning(
+                                "S1 re-entry cooldown: skipping BUY for %s — "
+                                "recently excluded by S1's own signal",
+                                order.symbol,
+                            )
+                            continue
                 price = market.prices.get(order.symbol)
                 if price is None or price <= 0:
                     log.warning("No market price for %s — skipping BUY order", order.symbol)

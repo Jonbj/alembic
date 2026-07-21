@@ -1415,6 +1415,114 @@ def test_whipsaw_enabled_first_occurrence_suppresses_no_decision_logged():
     assert call("s4:whipsaw_streak:NVDA", 1800, "1") in redis_inst.setex.call_args_list
 
 
+# ── #72: origin-aware exit tag, full-cycle wiring ────────────────────────────
+
+
+def test_s1_origin_weight_drop_tagged_correctly_not_no_signal():
+    """#72: a weight-0 SELL on a position opened by S1 must get [s1_weight_drop],
+    not the S4-specific classifier's misleading [no_signal] tag. Reproduces the
+    2026-07-17 SBUX incident (trades 348/360)."""
+    import pandas as pd
+    from src.portfolio.orchestrator import CycleResult
+    from src.portfolio.types import CombinedOrder
+    from src.workers.portfolio_scheduler import _run_cycle_inner
+
+    zero_weight_sell = CombinedOrder(
+        order_id="oid-SBUX",
+        timestamp=datetime(2026, 7, 17, 14, 0, tzinfo=timezone.utc),
+        symbol="SBUX",
+        side=OrderSide.SELL,
+        quantity=5.0,
+        order_type=OrderType.MARKET,
+        strategy_id=None,
+        allocation_weight=0.0,
+    )
+    cycle_result = CycleResult(
+        strategies_run=["S1"],
+        orders_per_strategy={"S1": 0},
+        orders_before_constraints=1,
+        orders_after_constraints=1,
+        constraints_fired=[],
+        final_orders=[zero_weight_sell],
+        symbol_strategies={},  # SBUX dropped from S1's own target this cycle
+        symbol_signal_provenance={},
+    )
+
+    mock_pg = MagicMock()
+    # SBUX has an open trade whose origin (stop_strategy) is S1.
+    mock_pg.fetch_trades.return_value = [{"symbol": "SBUX", "stop_strategy": "S1"}]
+    mock_pg.fetch_recently_bought_symbols.return_value = set()
+    mock_pg.fetch_latest_signal_ids.return_value = {}
+    mock_pg.fetch_signals_for_cycle.return_value = []  # SBUX never had an S4 signal
+    mock_pg.write_execution_decision = MagicMock(return_value=1)
+
+    with patch("src.strategies.registry.StrategyRegistry") as mock_reg, \
+         patch("alpaca.data.historical.StockHistoricalDataClient") as mock_dc, \
+         patch("alpaca.trading.client.TradingClient") as mock_tc, \
+         patch("src.portfolio.orchestrator.PortfolioOrchestrator") as mock_orch, \
+         patch("src.backtest.engine.data_replay.DataReplay"), \
+         patch("src.backtest.engine.portfolio.VirtualPortfolio"), \
+         patch("src.workers.portfolio_scheduler._persist_cycle_result"), \
+         patch("src.store.pg_store.PostgreSQLStore", return_value=mock_pg), \
+         patch("redis.Redis") as mock_redis_cls:
+
+        entry = MagicMock()
+        entry.strategy_id = "S1"
+        mock_reg.return_value.get_active_strategies.return_value = [entry]
+        mock_reg.return_value.load_mode_from_db.return_value = None
+
+        dates = pd.date_range("2025-01-01", periods=100, freq="B")
+        alpaca_raw = pd.DataFrame(
+            {"close": [90.0 + i * 0.1 for i in range(100)]},
+            index=pd.MultiIndex.from_arrays(
+                [["SBUX"] * 100, dates],
+                names=["symbol", "timestamp"],
+            ),
+        )
+        mock_dc.return_value.get_stock_bars.return_value.df = alpaca_raw
+        mock_dc.return_value.get_stock_snapshot.side_effect = Exception("no snap")
+
+        clock = MagicMock()
+        clock.is_open = True
+        account = MagicMock()
+        account.cash = "100000"
+        account.equity = "100000"
+        account.buying_power = "100000"
+        account.trading_blocked = False
+        account.account_blocked = False
+        mock_tc.return_value.get_clock.return_value = clock
+        mock_tc.return_value.get_account.return_value = account
+        mock_tc.return_value.get_all_positions.return_value = []
+
+        mock_orch.return_value.run_cycle.return_value = cycle_result
+
+        redis_inst = MagicMock()
+        redis_inst.get.return_value = None
+        redis_inst.set.return_value = True
+        redis_inst.smembers.return_value = set()
+        # Pre-existing exit-persistence hysteresis (_apply_exit_hysteresis) runs
+        # before decision logging — a bare MagicMock().incr() coerces to 1 via
+        # int(), which is < the default persistence_cycles=2 and would suppress
+        # this synthetic order before it's ever classified. Simulate a position
+        # that already cleared that separate gate (same fix as the #61 tests).
+        redis_inst.incr.return_value = 99
+        mock_redis_cls.from_url.return_value = redis_inst
+
+        try:
+            _run_cycle_inner()
+        except Exception:
+            pass
+
+    sbux_calls = [
+        c for c in mock_pg.write_execution_decision.call_args_list
+        if c.kwargs.get("symbol") == "SBUX"
+    ]
+    assert len(sbux_calls) == 1, f"Expected exactly one SBUX decision, got {len(sbux_calls)}"
+    assert sbux_calls[0].kwargs["exit_mechanism"] == "s1_weight_drop"
+    assert "[s1_weight_drop]" in sbux_calls[0].kwargs["reason"]
+    assert "no_signal" not in sbux_calls[0].kwargs["reason"]
+
+
 # ── _check_strategy_zero_weights ──────────────────────────────────────────────
 
 
@@ -1675,6 +1783,45 @@ def test_persist_trade_fills_buy_failure_does_not_block_subsequent_sell():
     pg.close.assert_called_once()
 
 
+def test_persist_trade_fills_legacy_buy_path_uses_sym_strats_for_origin_strategy():
+    """Reproduces the 2026-07-17 DB incident in the legacy batch write path:
+    S4 contributed the weight this cycle (sym_strats) but signal_id is absent
+    from the decision dict — frozen_stop.strategy must still resolve to S4,
+    not fall back to the signal_id heuristic's "S1" guess."""
+    from src.portfolio.stop_policy import StopPolicy
+    from src.workers.portfolio_scheduler import _persist_trade_fills
+
+    pg = MagicMock()
+    pg.open_trade.return_value = None
+
+    submitted = [
+        {"symbol": "DB", "side": "buy", "order_id": "ord-db",
+         "notional": 6181.23, "qty": 175.7, "reason": "portfolio_buy"},
+    ]
+    market = MagicMock()
+    market.prices = {"DB": 35.18}
+    stop_policy = StopPolicy({"stop_loss_mode": "fixed", "stop_loss": 0.0})
+
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=pg), \
+         patch("src.workers.portfolio_scheduler._portfolio_postmortem"):
+        _persist_trade_fills(
+            submitted,
+            open_trades=[],
+            symbol_decisions={"DB": {"decision_id": "dec-db"}},  # no signal_id present
+            written_buy_order_ids=set(),
+            stop_policy=stop_policy,
+            market=market,
+            alpaca_entry_prices={},
+            s4_signals={},
+            regime_mult=1.0,
+            tick_time=datetime(2026, 7, 17, 18, 52, tzinfo=timezone.utc),
+            sym_strats={"DB": ["S4"]},
+        )
+
+    frozen_stop = pg.open_trade.call_args.kwargs["frozen_stop"]
+    assert frozen_stop.strategy == "S4"
+
+
 # ── #62/#63: broker-side protective stop sync for fractional positions ──────
 
 
@@ -1815,6 +1962,67 @@ class TestSyncFractionalProtectiveStops:
 
         assert summary == {"skipped": "orders_fetch_failed"}
         tc.submit_order.assert_not_called()
+
+
+# ── #71: S1 re-entry cooldown after a self-excluded weight drop ─────────────
+
+
+class TestS1ReentryCooldownRedisHelpers:
+    def test_get_returns_empty_set_when_no_keys(self):
+        from src.workers.portfolio_scheduler import _get_s1_reentry_cooldown_symbols
+
+        with patch("redis.Redis") as mock_cls:
+            inst = MagicMock()
+            inst.keys.return_value = []
+            mock_cls.from_url.return_value = inst
+
+            symbols = _get_s1_reentry_cooldown_symbols("redis://localhost:6379/0")
+
+        assert symbols == set()
+
+    def test_get_returns_symbols_from_keys(self):
+        from src.workers.portfolio_scheduler import _get_s1_reentry_cooldown_symbols
+
+        with patch("redis.Redis") as mock_cls:
+            inst = MagicMock()
+            inst.keys.return_value = ["s1_reentry_cooldown:SBUX", "s1_reentry_cooldown:GE"]
+            mock_cls.from_url.return_value = inst
+
+            symbols = _get_s1_reentry_cooldown_symbols("redis://localhost:6379/0")
+
+        assert symbols == {"SBUX", "GE"}
+
+    def test_get_returns_empty_set_on_redis_error(self):
+        from src.workers.portfolio_scheduler import _get_s1_reentry_cooldown_symbols
+
+        with patch("redis.Redis") as mock_cls:
+            mock_cls.from_url.side_effect = RuntimeError("redis down")
+
+            symbols = _get_s1_reentry_cooldown_symbols("redis://localhost:6379/0")
+
+        assert symbols == set()
+
+    def test_mark_sets_key_with_minutes_converted_to_ttl_seconds(self):
+        from src.workers.portfolio_scheduler import _mark_s1_reentry_cooldown
+
+        with patch("redis.Redis") as mock_cls:
+            inst = MagicMock()
+            mock_cls.from_url.return_value = inst
+
+            _mark_s1_reentry_cooldown("redis://localhost:6379/0", "SBUX", minutes=30)
+
+        inst.setex.assert_called_once_with("s1_reentry_cooldown:SBUX", 1800, "1")
+
+    def test_mark_noop_when_minutes_not_positive(self):
+        from src.workers.portfolio_scheduler import _mark_s1_reentry_cooldown
+
+        with patch("redis.Redis") as mock_cls:
+            inst = MagicMock()
+            mock_cls.from_url.return_value = inst
+
+            _mark_s1_reentry_cooldown("redis://localhost:6379/0", "SBUX", minutes=0)
+
+        inst.setex.assert_not_called()
 
 
 # ── #61: Redis-backed consecutive-whipsaw streak tracking ───────────────────
@@ -2136,3 +2344,165 @@ def test_submit_portfolio_orders_skips_buy_in_reversal_cooldown():
 
     assert submitted == []
     assert calls == []
+
+
+# ── #71: S1 re-entry cooldown enforcement (BUY-side) ─────────────────────────
+
+
+def test_submit_portfolio_orders_skips_s1_only_buy_in_reentry_cooldown_when_enabled():
+    """S1 excluded SBUX last cycle; flag on -> S1's own re-BUY must be skipped."""
+    from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+    orders = [_make_combined_order("SBUX", OrderSide.BUY, qty=2.0)]
+    trading_client = MagicMock()
+    market = _make_market(prices={"SBUX": 90.0})
+
+    calls = []
+    with patch(
+        "src.workers.portfolio_scheduler._get_reversal_cooldown_symbols",
+        return_value=set(),
+    ), patch(
+        "src.workers.portfolio_scheduler._get_stop_loss_cooldown_symbols",
+        return_value=set(),
+    ), patch(
+        "src.workers.portfolio_scheduler._get_s1_reentry_cooldown_symbols",
+        return_value={"SBUX"},
+    ):
+        submitted = _submit_portfolio_orders(
+            orders, trading_client, market,
+            _submit_fn=lambda o, n, c: calls.append(o.symbol),
+            risk_cfg={"s1_reentry_cooldown_enabled": True},
+            sym_strats={"SBUX": ["S1"]},
+        )
+
+    assert submitted == []
+    assert calls == []
+
+
+def test_submit_portfolio_orders_does_not_block_s1_reentry_when_flag_disabled():
+    """Same cooldown state, but the flag is off (default) -> BUY proceeds."""
+    from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+    orders = [_make_combined_order("SBUX", OrderSide.BUY, qty=2.0)]
+    trading_client = MagicMock()
+    market = _make_market(prices={"SBUX": 90.0})
+
+    calls = []
+    with patch(
+        "src.workers.portfolio_scheduler._get_reversal_cooldown_symbols",
+        return_value=set(),
+    ), patch(
+        "src.workers.portfolio_scheduler._get_stop_loss_cooldown_symbols",
+        return_value=set(),
+    ), patch(
+        "src.workers.portfolio_scheduler._get_s1_reentry_cooldown_symbols",
+        return_value={"SBUX"},
+    ):
+        submitted = _submit_portfolio_orders(
+            orders, trading_client, market,
+            _submit_fn=lambda o, n, c: calls.append(o.symbol),
+            risk_cfg={"s1_reentry_cooldown_enabled": False},
+            sym_strats={"SBUX": ["S1"]},
+        )
+
+    assert calls == ["SBUX"]
+
+
+def test_submit_portfolio_orders_does_not_block_s4_buy_on_s1_cooldown_symbol():
+    """S1 excluded SBUX, but THIS BUY is S4-driven (or mixed) — must not be
+    vetoed by S1's own churn cooldown, unlike #68's cross-strategy block."""
+    from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+    orders = [_make_combined_order("SBUX", OrderSide.BUY, qty=2.0)]
+    trading_client = MagicMock()
+    market = _make_market(prices={"SBUX": 90.0})
+
+    calls = []
+    with patch(
+        "src.workers.portfolio_scheduler._get_reversal_cooldown_symbols",
+        return_value=set(),
+    ), patch(
+        "src.workers.portfolio_scheduler._get_stop_loss_cooldown_symbols",
+        return_value=set(),
+    ), patch(
+        "src.workers.portfolio_scheduler._get_s1_reentry_cooldown_symbols",
+        return_value={"SBUX"},
+    ):
+        submitted = _submit_portfolio_orders(
+            orders, trading_client, market,
+            _submit_fn=lambda o, n, c: calls.append(o.symbol),
+            risk_cfg={"s1_reentry_cooldown_enabled": True},
+            sym_strats={"SBUX": ["S4"]},
+        )
+
+    assert calls == ["SBUX"]
+
+
+# ── B28-FIX origin-strategy attribution bug (2026-07-17 DB incident) ─────────
+#
+# trades.stop_strategy (and therefore which stop_strategy_params k/floor/cap
+# apply to the position) was resolved via a binary heuristic —
+# "S4" if decision.get("signal_id") else "S1" — instead of the accurate,
+# already-computed _sym_strats mapping (CycleResult.symbol_strategies: which
+# strategies actually contributed weight to this symbol THIS cycle). Real
+# incident: trade 361 (DB, 2026-07-17) was a genuine S4 BUY (execution_
+# decisions.reason said "S4 news-driven: sentiment +0.672...") but its
+# signal_id wasn't present in _symbol_decisions at write time, so the
+# heuristic silently mislabeled it "S1" — corrupting which stop params
+# applied to a $6,181 position.
+
+
+class TestResolveBuyOriginStrategy:
+    def test_prefers_s4_from_sym_strats_even_when_signal_id_missing(self):
+        """Reproduces the 2026-07-17 DB incident: S4 contributed the weight
+        this cycle, but decision["signal_id"] is missing — must still resolve S4."""
+        from src.workers.portfolio_scheduler import _resolve_buy_origin_strategy
+
+        result = _resolve_buy_origin_strategy(
+            "DB", sym_strats={"DB": ["S4"]}, decision={"decision_id": 3245},
+        )
+
+        assert result == "S4"
+
+    def test_resolves_s1_from_sym_strats(self):
+        from src.workers.portfolio_scheduler import _resolve_buy_origin_strategy
+
+        result = _resolve_buy_origin_strategy(
+            "SBUX", sym_strats={"SBUX": ["S1"]}, decision={},
+        )
+
+        assert result == "S1"
+
+    def test_s4_takes_priority_when_both_contribute(self):
+        from src.workers.portfolio_scheduler import _resolve_buy_origin_strategy
+
+        result = _resolve_buy_origin_strategy(
+            "XLK", sym_strats={"XLK": ["S1", "S4"]}, decision={},
+        )
+
+        assert result == "S4"
+
+    def test_falls_back_to_first_strategy_for_other_combos(self):
+        from src.workers.portfolio_scheduler import _resolve_buy_origin_strategy
+
+        result = _resolve_buy_origin_strategy(
+            "SPY", sym_strats={"SPY": ["S2"]}, decision={},
+        )
+
+        assert result == "S2"
+
+    def test_defensive_fallback_to_legacy_heuristic_when_sym_strats_empty(self):
+        """sym_strats missing an entry shouldn't happen for a just-submitted BUY,
+        but stay defensive — fall back to the old signal_id heuristic rather
+        than crash or silently mis-set None."""
+        from src.workers.portfolio_scheduler import _resolve_buy_origin_strategy
+
+        with_signal = _resolve_buy_origin_strategy(
+            "AAPL", sym_strats={}, decision={"signal_id": 999},
+        )
+        without_signal = _resolve_buy_origin_strategy(
+            "AAPL", sym_strats={}, decision={},
+        )
+
+        assert with_signal == "S4"
+        assert without_signal == "S1"
