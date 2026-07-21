@@ -309,7 +309,13 @@ loss_feedback:
   cooldown_hours: 4              # minimum hours between adjustments
   # 5 -> 3 on 2026-07-09: recovery needs 3 consecutive wins, same bar as trigger.
   recovery_win_streak: 3         # consecutive wins → step threshold back down
-  feedback_ttl_hours: 48         # Redis TTL for feedback keys
+  # 48 -> 96 on 2026-07-21 (#32): the loss-feedback cron runs only Mon-Fri
+  # 14:00-21:00 UTC, so a weekend gap (~65h) exceeded a 48h TTL and the scale
+  # expired — resetting to 1.0 every Monday, disarming the de-risk right when
+  # Monday gaps hit (07-20: -$287 with S4 freshly reset). 96h carries a normal
+  # weekend; the 24h decay branch still steps the scale back up during quiet
+  # periods, so a longer TTL does not strand a stale de-risk.
+  feedback_ttl_hours: 96         # Redis TTL for feedback keys (covers weekend gap)
   # F8: apply the per-strategy feedback regime scale to portfolio sizing.
   # false = SHADOW ONLY — the orchestrator records the would-be deployment delta
   # (CycleResult.feedback_shadow, logged each cycle) but does NOT shrink weights.

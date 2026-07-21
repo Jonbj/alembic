@@ -82,6 +82,20 @@ stateful ratchet whose intermediate state was never persisted (Finding 1).
 **We cannot pin down what F8 actually did — only approximate it.** That is a
 strong reason not to flip on trust.
 
+## Update 2026-07-21 — recommendations 2 & 3 implemented
+
+Findings 1 and 3 (no persistence) and Finding 3 (weekend reset) are now fixed,
+so the decision can be re-taken on recorded data in ~2 weeks:
+
+- **Persistence added**: the per-cycle shadow scale is written to
+  `f8_regime_scale_shadow` (migration 040) every cycle a non-identity scale is
+  in play. The trajectory is now a look-up, not a reconstruction.
+- **Weekend reset fixed**: `feedback_ttl_hours` 48 → 96, so the scale survives a
+  normal weekend gap instead of expiring to 1.0 every Monday.
+
+Both are behaviourally inert while `apply_regime_scale = false` (they change what
+the shadow records, not sizing). The flip itself remains the open PO decision.
+
 ## Recommendation for #32
 
 1. **Extend the shadow — do not flip yet.** Flipping an un-instrumented,

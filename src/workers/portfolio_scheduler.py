@@ -348,6 +348,30 @@ def _get_regime_multiplier_from_redis(redis_url: str) -> float:
 _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
 
 
+def _build_f8_shadow_rows(cycle_ts, feedback_shadow: dict | None) -> list[dict]:
+    """Turn CycleResult.feedback_shadow into f8_regime_scale_shadow rows (#32).
+
+    One row per scaled strategy. The F8 shadow was previously only logged +
+    kept in a 48h-TTL Redis key, so no trajectory survived for the flip
+    decision. Persisting it per cycle makes the evidence a look-up, matching
+    the #61/#71 shadow pattern. Missing numeric fields default to None so a
+    malformed entry never crashes the cycle.
+    """
+    if not feedback_shadow:
+        return []
+    rows = []
+    for strategy, s in feedback_shadow.items():
+        rows.append({
+            "cycle_ts": cycle_ts,
+            "strategy": strategy,
+            "scale": s.get("scale"),
+            "unscaled_weight": s.get("unscaled_weight"),
+            "scaled_weight": s.get("scaled_weight"),
+            "applied": s.get("applied"),
+        })
+    return rows
+
+
 def _read_feedback_regime_scales(redis_url: str, strategy_ids) -> dict[str, float]:
     """Read per-strategy feedback:regime_scale:S* (F8 de-risk/re-risk throttle).
 
@@ -1939,6 +1963,19 @@ def _run_cycle_inner() -> dict:
             _apply_fb_scale,
             _fb_json.dumps(result.feedback_shadow, default=str),
         )
+        # #32: persist the shadow so a real trajectory accrues (previously it
+        # only lived in a 48h-TTL Redis key). Best-effort — never break the cycle.
+        try:
+            _f8_rows = _build_f8_shadow_rows(ts, result.feedback_shadow)
+            if _f8_rows:
+                from src.store.pg_store import PostgreSQLStore as _PGSf8
+                _pg_f8 = _PGSf8()
+                try:
+                    _pg_f8.insert_f8_shadow(_f8_rows)
+                finally:
+                    _pg_f8.close()
+        except Exception as _f8_exc:
+            log.warning("F8 shadow persistence failed: %s", _f8_exc)
 
     log.info(
         "Portfolio cycle: strategies=%s before=%d after=%d constraints=%d final=%d",

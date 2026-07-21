@@ -1728,7 +1728,7 @@ def _load_loss_feedback_config() -> dict:
         "regime_min_scale": 0.20,
         "cooldown_hours": 4,
         "recovery_win_streak": 3,
-        "feedback_ttl_hours": 48,
+        "feedback_ttl_hours": 96,  # #32: covers the weekend gap (cron is Mon-Fri only)
         # F8: wire feedback:regime_scale:S* into the portfolio path sizing.
         # False = shadow-only (orchestrator records the would-be delta but does
         # not apply the scale). Flip to True only after the shadow gate passes
