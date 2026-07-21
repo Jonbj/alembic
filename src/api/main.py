@@ -6,6 +6,7 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from redis import Redis
 
+from src.api.dependencies import close_asyncpg_pool, init_asyncpg_pool  # noqa: F401
 from src.api.deps import close_redis, get_pg_store, get_redis_store, init_redis  # noqa: F401
 from src.config import config
 
@@ -21,7 +22,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "(e.g. `openssl rand -hex 32`)."
         )
     init_redis(Redis.from_url(config.REDIS_URL))
+    await init_asyncpg_pool()
     yield
+    await close_asyncpg_pool()
     close_redis()
 
 
@@ -38,9 +41,10 @@ async def health() -> dict[str, str]:
     return {"status": "ok", "mode": "backtest"}
 
 
-from src.api.routes import admin, auth, backtest, config_routes, llm_routes, news_routes, performance, portfolio, signals, strategies, trading, system_routes, validation_routes, labeling_routes, quality_routes  # noqa: E402
+from src.api.routes import admin, auth, backtest, config_routes, llm_routes, news_routes, performance, portfolio, signals, strategies, trading, system_routes, validation_routes, labeling_routes, quality_routes, mobile_auth  # noqa: E402
 
 app.include_router(auth.router)
+app.include_router(mobile_auth.router, prefix="/api/mobile/v1")
 app.include_router(signals.router)
 app.include_router(admin.router)
 app.include_router(performance.router)

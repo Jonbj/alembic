@@ -106,6 +106,17 @@ class Config(BaseModel):
         default_factory=lambda: int(os.environ.get("JWT_EXPIRE_MINUTES", "1440"))
     )
 
+    # Mobile monitor auth (MOB-02)
+    MOBILE_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
+        default_factory=lambda: int(os.environ.get("MOBILE_ACCESS_TOKEN_EXPIRE_MINUTES", "15"))
+    )
+    MOBILE_REFRESH_TOKEN_EXPIRE_DAYS: int = Field(
+        default_factory=lambda: int(os.environ.get("MOBILE_REFRESH_TOKEN_EXPIRE_DAYS", "30"))
+    )
+    MOBILE_TOKEN_PEPPER: str = Field(
+        default_factory=lambda: os.environ.get("MOBILE_TOKEN_PEPPER", "")
+    )
+
     # Ollama cloud API
     OLLAMA_API_KEY: str = Field(default_factory=lambda: os.environ.get("OLLAMA_API_KEY", ""))
     OLLAMA_BASE_URL: str = Field(default_factory=lambda: os.environ.get("OLLAMA_BASE_URL", "https://ollama.com"))

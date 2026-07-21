@@ -18,8 +18,10 @@ os.environ.setdefault("ADMIN_PASSWORD_HASH", "$2b$12$i6qSOhZRTLWbWoSTukGsw.p2y0h
 os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret-key-for-testing-only-not-for-prod")
 os.environ.setdefault("JWT_EXPIRE_MINUTES", "60")
 
-from src.api.auth import require_api_key
-from src.api.main import app
+os.environ.setdefault("MOBILE_TOKEN_PEPPER", "test-pepper")
+
+from src.api.auth import require_api_key  # noqa: E402
+from src.api.main import app  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
