@@ -30,10 +30,19 @@ def create_access_token(username: str) -> str:
     return jwt.encode(payload, _secret(), algorithm=config.JWT_ALGORITHM)
 
 
+_MOBILE_AUDIENCE = "alembic-mobile"
+
+
 def decode_access_token(token: str) -> str:
     """Return username from a valid token, raise JWTError on failure."""
-    payload = jwt.decode(token, _secret(), algorithms=[config.JWT_ALGORITHM])
+    try:
+        payload = jwt.decode(token, _secret(), algorithms=[config.JWT_ALGORITHM])
+    except JWTError as exc:
+        # Mobile-only audience is the expected failure mode for admin routes.
+        raise JWTError("mobile token rejected by admin routes") from exc
     username: str | None = payload.get("sub")
     if username is None:
         raise JWTError("missing sub claim")
+    if payload.get("aud") == _MOBILE_AUDIENCE:
+        raise JWTError("mobile token rejected by admin routes")
     return username
