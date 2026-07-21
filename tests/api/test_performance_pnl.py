@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from src.api.main import app
-from src.api.deps import get_alpaca_trading_client
+from src.api.deps import get_alpaca_trading_client, get_pg_store, get_redis_store
 
 
 def test_get_pnl_returns_monthly_list():
@@ -52,7 +52,6 @@ def test_get_pnl_with_custom_period():
 # while the real day was −$115.60 NAV. Day rows and summary now carry the
 # mark-to-market NAV change from risk_reports snapshots.
 
-from src.api.deps import get_pg_store
 
 
 def _daily_pg_mock(day_rows, nav_rows):
@@ -80,8 +79,10 @@ def test_daily_pnl_days_carry_nav_mtm_change():
         ],
     )
     app.dependency_overrides[get_pg_store] = lambda: pg
-    tc = TestClient(app)
-    resp = tc.get("/api/performance/daily?from_date=2026-07-16&to_date=2026-07-17")
+    app.dependency_overrides[get_redis_store] = lambda: MagicMock()
+    with patch("src.api.routes.performance._fetch_spy_closes", return_value=None):
+        tc = TestClient(app)
+        resp = tc.get("/api/performance/daily?from_date=2026-07-16&to_date=2026-07-17")
     app.dependency_overrides.clear()
 
     assert resp.status_code == 200
@@ -99,11 +100,64 @@ def test_daily_pnl_nav_fields_null_without_snapshot():
         nav_rows=[],
     )
     app.dependency_overrides[get_pg_store] = lambda: pg
-    tc = TestClient(app)
-    resp = tc.get("/api/performance/daily?from_date=2026-07-17&to_date=2026-07-17")
+    app.dependency_overrides[get_redis_store] = lambda: MagicMock()
+    with patch("src.api.routes.performance._fetch_spy_closes", return_value=None):
+        tc = TestClient(app)
+        resp = tc.get("/api/performance/daily?from_date=2026-07-17&to_date=2026-07-17")
     app.dependency_overrides.clear()
 
     day = resp.json()["days"][0]
     assert day["nav_change_1d"] is None
     assert day["nav_eod"] is None
     assert resp.json()["summary"]["nav_change_period"] is None
+
+
+# ── /api/performance/daily — beta-scaled benchmark + alpha ────────────────────
+
+
+def test_daily_pnl_summary_carries_benchmark_and_alpha():
+    pg = MagicMock()
+    pg.fetch_daily_pnl.return_value = [_day("2026-07-20", -18.46)]
+    pg.fetch_nav_daily.return_value = [
+        {"date": "2026-07-13", "nav": 100000.0, "exposure": 0.30},  # baseline
+        {"date": "2026-07-20", "nav": 99000.0, "exposure": 0.30},   # end (−1.0%)
+    ]
+    app.dependency_overrides[get_pg_store] = lambda: pg
+    app.dependency_overrides[get_redis_store] = lambda: MagicMock()
+
+    with patch(
+        "src.api.routes.performance._fetch_spy_closes",
+        return_value={"2026-07-13": 500.0, "2026-07-18": 498.0},  # SPY −0.4%
+    ):
+        tc = TestClient(app)
+        resp = tc.get("/api/performance/daily?from_date=2026-07-14&to_date=2026-07-20")
+    app.dependency_overrides.clear()
+
+    s = resp.json()["summary"]
+    assert s["alembic_return"] == -0.01
+    assert s["spy_return"] == round(498.0 / 500.0 - 1, 6)
+    assert s["avg_exposure"] == 0.30
+    assert s["benchmark_return"] == round(0.30 * (498.0 / 500.0 - 1), 6)
+    assert s["alpha"] == round(s["alembic_return"] - s["benchmark_return"], 6)
+    assert s["alpha"] < 0  # underperforming its beta-scaled bar
+
+
+def test_daily_pnl_benchmark_null_when_spy_unavailable():
+    pg = MagicMock()
+    pg.fetch_daily_pnl.return_value = [_day("2026-07-20", -18.46)]
+    pg.fetch_nav_daily.return_value = [
+        {"date": "2026-07-13", "nav": 100000.0, "exposure": 0.30},
+        {"date": "2026-07-20", "nav": 99000.0, "exposure": 0.30},
+    ]
+    app.dependency_overrides[get_pg_store] = lambda: pg
+    app.dependency_overrides[get_redis_store] = lambda: MagicMock()
+
+    with patch("src.api.routes.performance._fetch_spy_closes", return_value=None):
+        tc = TestClient(app)
+        resp = tc.get("/api/performance/daily?from_date=2026-07-14&to_date=2026-07-20")
+    app.dependency_overrides.clear()
+
+    s = resp.json()["summary"]
+    assert s["alembic_return"] == -0.01  # still computed from NAV
+    assert s["spy_return"] is None
+    assert s["alpha"] is None

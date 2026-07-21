@@ -1,6 +1,7 @@
 """Performance and weights endpoints."""
 
 import hashlib
+import json
 import logging
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
@@ -11,6 +12,8 @@ from pydantic import BaseModel
 
 from src.api.auth import require_api_key
 from src.api.deps import get_alpaca_trading_client, get_pg_store, get_redis_store
+from src.config import config
+from src.portfolio.benchmark import compute_period_benchmark
 from src.llm.model_registry import (
     default_weights,
     model_ids_for_keys,
@@ -23,6 +26,43 @@ from src.store.redis_store import RedisStore
 
 router = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
 log = logging.getLogger(__name__)
+
+
+def _fetch_spy_closes(from_date: str, to_date: str, redis=None) -> dict | None:
+    """SPY daily closes for the benchmark, {date: close}. Redis-cached 1h,
+    fail-open (None on any error) — the benchmark is enrichment, never a hard
+    dependency of the P&L endpoint. A 10-day lead buffer covers the baseline
+    anchor (last snapshot before from_date) landing on a market holiday."""
+    cache_key = f"benchmark:spy_closes:{from_date}:{to_date}"
+    if redis is not None:
+        try:
+            cached = redis._r.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+    try:
+        from alpaca.data.historical import StockHistoricalDataClient
+        from alpaca.data.requests import StockBarsRequest
+        from alpaca.data.timeframe import TimeFrame
+
+        start = (date.fromisoformat(from_date) - timedelta(days=10))
+        client = StockHistoricalDataClient(config.ALPACA_API_KEY, config.ALPACA_SECRET_KEY)
+        bars = client.get_stock_bars(StockBarsRequest(
+            symbol_or_symbols=["SPY"], timeframe=TimeFrame.Day,
+            start=datetime(start.year, start.month, start.day, tzinfo=timezone.utc),
+            end=datetime.fromisoformat(to_date).replace(hour=23, minute=59, tzinfo=timezone.utc),
+        )).data.get("SPY", [])
+        closes = {b.timestamp.date().isoformat(): float(b.close) for b in bars}
+        if redis is not None and closes:
+            try:
+                redis._r.setex(cache_key, 3600, json.dumps(closes))
+            except Exception:
+                pass
+        return closes or None
+    except Exception as exc:
+        log.warning("SPY benchmark fetch failed: %s", exc)
+        return None
 
 _WEIGHT_MIN = 0.10
 _WEIGHT_MAX = 0.70
@@ -237,6 +277,7 @@ async def approve_weights(
 @router.get("/performance/daily")
 def get_daily_pnl(
     pg: Annotated[PostgreSQLStore, Depends(get_pg_store)],
+    redis: Annotated[RedisStore, Depends(get_redis_store)],
     from_date: str | None = None,
     to_date: str | None = None,
     days: int = 7,
@@ -264,6 +305,7 @@ def get_daily_pnl(
     # sums alone hid the real day result (07-17: −$18.46 realized vs −$115.60
     # NAV). 7-day buffer before from_date to find the baseline snapshot.
     nav_change_period = None
+    nav_rows: list[dict] = []
     try:
         nav_rows = pg.fetch_nav_daily(str(_from - timedelta(days=7)), str(_to))
         nav_by_day = {str(r["date"]): float(r["nav"]) for r in nav_rows}
@@ -289,6 +331,19 @@ def get_daily_pnl(
             r.setdefault("nav_eod", None)
             r.setdefault("nav_change_1d", None)
 
+    # Beta-scaled benchmark + alpha: the book is ~30% net-long, so SPY outright
+    # is an unfair bar; the fair benchmark is exposure × SPY. Alpha isolates what
+    # the strategies add/subtract vs their market exposure. Fail-open.
+    benchmark = {
+        "alembic_return": None, "spy_return": None,
+        "avg_exposure": None, "benchmark_return": None, "alpha": None,
+    }
+    try:
+        _spy = _fetch_spy_closes(str(_from), str(_to), redis)
+        benchmark = compute_period_benchmark(nav_rows, _spy, str(_from), str(_to))
+    except Exception as exc:
+        log.warning("Benchmark computation failed: %s", exc)
+
     total_gross_pnl = sum(r["total_gross_pnl"] for r in day_rows)
     total_costs = sum(r["total_costs"] for r in day_rows)
     total_net_pnl = sum(r["total_net_pnl"] for r in day_rows)
@@ -313,6 +368,11 @@ def get_daily_pnl(
             "positive_days": positive_days,
             "negative_days": negative_days,
             "nav_change_period": nav_change_period,
+            "alembic_return": benchmark["alembic_return"],
+            "spy_return": benchmark["spy_return"],
+            "avg_exposure": benchmark["avg_exposure"],
+            "benchmark_return": benchmark["benchmark_return"],
+            "alpha": benchmark["alpha"],
         },
     }
 
