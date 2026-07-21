@@ -746,3 +746,15 @@ Active Day 1 controlled paper evidence remains in `artifacts/`. See `artifacts/A
 ## License
 
 MIT License — see `LICENSE` for details.
+
+### Not a financial advice / use at your own risk
+
+Alembic is a **research and educational project**. It is **not investment
+advice**, not a recommendation to buy or sell any security, and not a
+guarantee of any return or outcome. Trading financial instruments involves
+substantial risk of loss. Any deployment on real capital is undertaken **at
+the user's sole risk and discretion**. The authors and contributors are **not
+financial advisors** and accept no liability for losses, damages, or
+decisions resulting from the use of this software. Past or simulated
+performance (including controlled-paper results) does not predict future
+results. Verify all signals independently before acting.
