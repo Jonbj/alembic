@@ -758,3 +758,5 @@ financial advisors** and accept no liability for losses, damages, or
 decisions resulting from the use of this software. Past or simulated
 performance (including controlled-paper results) does not predict future
 results. Verify all signals independently before acting.
+
+See [`DISCLAIMER.md`](./DISCLAIMER.md) for the full disclaimer.
