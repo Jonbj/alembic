@@ -184,3 +184,38 @@ def test_insert_stop_decision_and_shadow() -> None:
             conn.commit()
         conn.close()
         store.close()
+
+
+@pytest.mark.skipif(os.environ.get("SKIP_DB_TESTS"), reason="SKIP_DB_TESTS set")
+def test_insert_f8_shadow_persists_rows() -> None:
+    """insert_f8_shadow persists per-strategy F8 regime_scale shadow rows (#32)."""
+    store = PostgreSQLStore(use_pool=False)
+    ts = datetime(2026, 7, 21, 14, 0, tzinfo=timezone.utc)
+    try:
+        store.insert_f8_shadow([
+            {"cycle_ts": ts, "strategy": "TEST_S1", "scale": 0.512,
+             "unscaled_weight": 0.5, "scaled_weight": 0.256, "applied": False},
+            {"cycle_ts": ts, "strategy": "TEST_S4", "scale": 0.80,
+             "unscaled_weight": 0.1, "scaled_weight": 0.08, "applied": False},
+        ])
+        conn = _connect_or_skip()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT scale, applied FROM f8_regime_scale_shadow "
+                "WHERE strategy=%s AND cycle_ts=%s",
+                ("TEST_S1", ts),
+            )
+            row = cur.fetchone()
+            assert row is not None
+            assert abs(row[0] - 0.512) < 1e-9
+            assert row[1] is False
+        conn.close()
+    finally:
+        conn = _connect_or_skip()
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM f8_regime_scale_shadow WHERE strategy IN ('TEST_S1','TEST_S4')"
+            )
+            conn.commit()
+        conn.close()
+        store.close()
