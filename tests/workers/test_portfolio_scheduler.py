@@ -1415,6 +1415,114 @@ def test_whipsaw_enabled_first_occurrence_suppresses_no_decision_logged():
     assert call("s4:whipsaw_streak:NVDA", 1800, "1") in redis_inst.setex.call_args_list
 
 
+# ── #72: origin-aware exit tag, full-cycle wiring ────────────────────────────
+
+
+def test_s1_origin_weight_drop_tagged_correctly_not_no_signal():
+    """#72: a weight-0 SELL on a position opened by S1 must get [s1_weight_drop],
+    not the S4-specific classifier's misleading [no_signal] tag. Reproduces the
+    2026-07-17 SBUX incident (trades 348/360)."""
+    import pandas as pd
+    from src.portfolio.orchestrator import CycleResult
+    from src.portfolio.types import CombinedOrder
+    from src.workers.portfolio_scheduler import _run_cycle_inner
+
+    zero_weight_sell = CombinedOrder(
+        order_id="oid-SBUX",
+        timestamp=datetime(2026, 7, 17, 14, 0, tzinfo=timezone.utc),
+        symbol="SBUX",
+        side=OrderSide.SELL,
+        quantity=5.0,
+        order_type=OrderType.MARKET,
+        strategy_id=None,
+        allocation_weight=0.0,
+    )
+    cycle_result = CycleResult(
+        strategies_run=["S1"],
+        orders_per_strategy={"S1": 0},
+        orders_before_constraints=1,
+        orders_after_constraints=1,
+        constraints_fired=[],
+        final_orders=[zero_weight_sell],
+        symbol_strategies={},  # SBUX dropped from S1's own target this cycle
+        symbol_signal_provenance={},
+    )
+
+    mock_pg = MagicMock()
+    # SBUX has an open trade whose origin (stop_strategy) is S1.
+    mock_pg.fetch_trades.return_value = [{"symbol": "SBUX", "stop_strategy": "S1"}]
+    mock_pg.fetch_recently_bought_symbols.return_value = set()
+    mock_pg.fetch_latest_signal_ids.return_value = {}
+    mock_pg.fetch_signals_for_cycle.return_value = []  # SBUX never had an S4 signal
+    mock_pg.write_execution_decision = MagicMock(return_value=1)
+
+    with patch("src.strategies.registry.StrategyRegistry") as mock_reg, \
+         patch("alpaca.data.historical.StockHistoricalDataClient") as mock_dc, \
+         patch("alpaca.trading.client.TradingClient") as mock_tc, \
+         patch("src.portfolio.orchestrator.PortfolioOrchestrator") as mock_orch, \
+         patch("src.backtest.engine.data_replay.DataReplay"), \
+         patch("src.backtest.engine.portfolio.VirtualPortfolio"), \
+         patch("src.workers.portfolio_scheduler._persist_cycle_result"), \
+         patch("src.store.pg_store.PostgreSQLStore", return_value=mock_pg), \
+         patch("redis.Redis") as mock_redis_cls:
+
+        entry = MagicMock()
+        entry.strategy_id = "S1"
+        mock_reg.return_value.get_active_strategies.return_value = [entry]
+        mock_reg.return_value.load_mode_from_db.return_value = None
+
+        dates = pd.date_range("2025-01-01", periods=100, freq="B")
+        alpaca_raw = pd.DataFrame(
+            {"close": [90.0 + i * 0.1 for i in range(100)]},
+            index=pd.MultiIndex.from_arrays(
+                [["SBUX"] * 100, dates],
+                names=["symbol", "timestamp"],
+            ),
+        )
+        mock_dc.return_value.get_stock_bars.return_value.df = alpaca_raw
+        mock_dc.return_value.get_stock_snapshot.side_effect = Exception("no snap")
+
+        clock = MagicMock()
+        clock.is_open = True
+        account = MagicMock()
+        account.cash = "100000"
+        account.equity = "100000"
+        account.buying_power = "100000"
+        account.trading_blocked = False
+        account.account_blocked = False
+        mock_tc.return_value.get_clock.return_value = clock
+        mock_tc.return_value.get_account.return_value = account
+        mock_tc.return_value.get_all_positions.return_value = []
+
+        mock_orch.return_value.run_cycle.return_value = cycle_result
+
+        redis_inst = MagicMock()
+        redis_inst.get.return_value = None
+        redis_inst.set.return_value = True
+        redis_inst.smembers.return_value = set()
+        # Pre-existing exit-persistence hysteresis (_apply_exit_hysteresis) runs
+        # before decision logging — a bare MagicMock().incr() coerces to 1 via
+        # int(), which is < the default persistence_cycles=2 and would suppress
+        # this synthetic order before it's ever classified. Simulate a position
+        # that already cleared that separate gate (same fix as the #61 tests).
+        redis_inst.incr.return_value = 99
+        mock_redis_cls.from_url.return_value = redis_inst
+
+        try:
+            _run_cycle_inner()
+        except Exception:
+            pass
+
+    sbux_calls = [
+        c for c in mock_pg.write_execution_decision.call_args_list
+        if c.kwargs.get("symbol") == "SBUX"
+    ]
+    assert len(sbux_calls) == 1, f"Expected exactly one SBUX decision, got {len(sbux_calls)}"
+    assert sbux_calls[0].kwargs["exit_mechanism"] == "s1_weight_drop"
+    assert "[s1_weight_drop]" in sbux_calls[0].kwargs["reason"]
+    assert "no_signal" not in sbux_calls[0].kwargs["reason"]
+
+
 # ── _check_strategy_zero_weights ──────────────────────────────────────────────
 
 

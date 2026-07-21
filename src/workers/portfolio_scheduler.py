@@ -545,6 +545,30 @@ def _classify_zero_weight_exit(
     return "expired" if age_h > max_age_hours else "whipsaw"
 
 
+def _reason_and_mechanism_for_non_s4_weight_drop(
+    symbol: str,
+    origin_strategy: str,
+    wt_pct: str,
+) -> tuple[str, str]:
+    """#72: origin-aware reason/tag for a weight-0 SELL on a non-S4 position.
+
+    _classify_zero_weight_exit/_reason_for_zero_weight_sell only ever check
+    the S4 sentiment-signals table, so they ALWAYS tag a non-S4-origin
+    position "[no_signal]" — trivially true (it never had an S4 signal to
+    begin with) but misleading, and it over-counts [no_signal] in #61's
+    flip-decision measurement. Real incident: SBUX trades 348/360
+    (2026-07-17), verified S1 momentum entries, tagged [no_signal].
+
+    Returns (exit_mechanism, reason_text).
+    """
+    exit_mechanism = f"{origin_strategy.lower()}_weight_drop"
+    reason = (
+        f"[{exit_mechanism}] {origin_strategy} target weight dropped to 0% "
+        f"— position closed (not an S4 exit; portfolio weight {wt_pct})."
+    )
+    return exit_mechanism, reason
+
+
 def _reason_for_zero_weight_sell(
     symbol: str,
     last_signal: dict | None,
@@ -1976,6 +2000,12 @@ def _run_cycle_inner() -> dict:
             _guard_exc,
         )
         open_db_symbols = None
+    # #72: origin strategy of each open position (trades.stop_strategy, fixed to
+    # reflect CycleResult.symbol_strategies — see _resolve_buy_origin_strategy),
+    # used to tag weight-0 SELLs correctly instead of always assuming S4.
+    _open_trade_origin: dict[str, str] = {
+        t["symbol"]: t["stop_strategy"] for t in _open_trades if t.get("stop_strategy")
+    }
 
     # Anti-stale-ranker-sell: protect open positions with a fresh positive signal from
     # being sold when the S4 ranker returns no output due to min_stocks constraint.
@@ -2182,37 +2212,48 @@ def _run_cycle_inner() -> dict:
                 # real cause (signal expiry, missing signal, etc.) rather than the
                 # generic "Portfolio rebalance: weight 0.0%" which gave no insight.
                 if order.side.value == "SELL" and order.allocation_weight == 0.0:
-                    _zero_sig = _zero_sell_signals.get(order.symbol)
-                    reason = _reason_for_zero_weight_sell(order.symbol, _zero_sig, _s4_max_age_h)
-                    # #60: structured tag alongside the reason text (queryable
-                    # without parsing free text — see #61 anti-whipsaw damping).
-                    exit_mechanism = _classify_zero_weight_exit(_zero_sig, _s4_max_age_h)
+                    _origin_strategy = _open_trade_origin.get(order.symbol)
+                    if _origin_strategy and _origin_strategy != "S4":
+                        # #72: the position was opened by a non-S4 strategy — the
+                        # S4-specific classifier below would always misleadingly
+                        # tag this [no_signal] (trivially true, it never had an
+                        # S4 signal). Whipsaw damping (#61) is S4-only, skip it.
+                        exit_mechanism, reason = _reason_and_mechanism_for_non_s4_weight_drop(
+                            order.symbol, _origin_strategy, wt_pct
+                        )
+                    else:
+                        _zero_sig = _zero_sell_signals.get(order.symbol)
+                        reason = _reason_for_zero_weight_sell(order.symbol, _zero_sig, _s4_max_age_h)
+                        # #60: structured tag alongside the reason text (queryable
+                        # without parsing free text — see #61 anti-whipsaw damping).
+                        exit_mechanism = _classify_zero_weight_exit(_zero_sig, _s4_max_age_h)
 
-                    # #61: require N consecutive "whipsaw" cycles before letting this
-                    # SELL through. Streak is always tracked (so a later flag-flip
-                    # doesn't start cold); only actually suppressed when enabled.
-                    _prior_streak = _get_whipsaw_streak(config.REDIS_URL, order.symbol)
-                    _damping = evaluate_whipsaw_damping(
-                        exit_mechanism == "whipsaw", _prior_streak, _anti_whipsaw_confirm_cycles
-                    )
-                    _set_whipsaw_streak(config.REDIS_URL, order.symbol, _damping.new_streak)
-                    if exit_mechanism == "whipsaw":
-                        if _anti_whipsaw_enabled and _damping.suppress:
-                            _whipsaw_suppressed_symbols.add(order.symbol)
-                            log.info(
-                                "#61 anti-whipsaw damping: holding %s one more cycle "
-                                "(streak=%d/%d)", order.symbol, _damping.new_streak,
-                                _anti_whipsaw_confirm_cycles,
-                            )
-                            continue
-                        if not _anti_whipsaw_enabled:
-                            # Shadow: flag is off, SELL proceeds unchanged — annotate
-                            # what damping WOULD have done for frequency measurement.
-                            reason = (
-                                f"{reason} [anti_whipsaw_shadow: would_suppress="
-                                f"{_damping.suppress}, streak={_damping.new_streak}/"
-                                f"{_anti_whipsaw_confirm_cycles}]"
-                            )
+                        # #61: require N consecutive "whipsaw" cycles before letting
+                        # this SELL through. Streak is always tracked (so a later
+                        # flag-flip doesn't start cold); only actually suppressed
+                        # when enabled.
+                        _prior_streak = _get_whipsaw_streak(config.REDIS_URL, order.symbol)
+                        _damping = evaluate_whipsaw_damping(
+                            exit_mechanism == "whipsaw", _prior_streak, _anti_whipsaw_confirm_cycles
+                        )
+                        _set_whipsaw_streak(config.REDIS_URL, order.symbol, _damping.new_streak)
+                        if exit_mechanism == "whipsaw":
+                            if _anti_whipsaw_enabled and _damping.suppress:
+                                _whipsaw_suppressed_symbols.add(order.symbol)
+                                log.info(
+                                    "#61 anti-whipsaw damping: holding %s one more cycle "
+                                    "(streak=%d/%d)", order.symbol, _damping.new_streak,
+                                    _anti_whipsaw_confirm_cycles,
+                                )
+                                continue
+                            if not _anti_whipsaw_enabled:
+                                # Shadow: flag is off, SELL proceeds unchanged — annotate
+                                # what damping WOULD have done for frequency measurement.
+                                reason = (
+                                    f"{reason} [anti_whipsaw_shadow: would_suppress="
+                                    f"{_damping.suppress}, streak={_damping.new_streak}/"
+                                    f"{_anti_whipsaw_confirm_cycles}]"
+                                )
                 else:
                     reason = f"Portfolio rebalance: weight {wt_pct}."
             decision_id = _pg.write_execution_decision(

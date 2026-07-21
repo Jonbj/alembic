@@ -416,3 +416,33 @@ class TestReasonForZeroWeightSellTags:
         )
 
         assert reason.startswith("[whipsaw]")
+
+
+# ─── #72: origin-aware exit tag for non-S4 weight-0 SELLs ───────────────────
+#
+# #60's classifier (_classify_zero_weight_exit) only ever checks the S4
+# sentiment-signals table, so it ALWAYS tags a non-S4-origin position
+# [no_signal] — trivially true (an S1 position never had an S4 signal) but
+# misleading, and it over-counts [no_signal] in #61's flip-decision
+# measurement. Real incident: SBUX trades 348/360 (2026-07-17), verified S1
+# momentum entries, tagged [no_signal] by the S4-only classifier.
+
+
+class TestReasonForNonS4WeightDrop:
+    def test_tags_s1_origin_with_s1_weight_drop(self):
+        from src.workers.portfolio_scheduler import _reason_and_mechanism_for_non_s4_weight_drop
+
+        mechanism, reason = _reason_and_mechanism_for_non_s4_weight_drop("SBUX", "S1", "0.0%")
+
+        assert mechanism == "s1_weight_drop"
+        assert reason.startswith("[s1_weight_drop]")
+        assert "S1" in reason
+
+    def test_tag_is_origin_aware_not_hardcoded_to_s1(self):
+        """Generalizes to any future non-S4 strategy id, not just S1."""
+        from src.workers.portfolio_scheduler import _reason_and_mechanism_for_non_s4_weight_drop
+
+        mechanism, reason = _reason_and_mechanism_for_non_s4_weight_drop("SPY", "S2", "0.0%")
+
+        assert mechanism == "s2_weight_drop"
+        assert reason.startswith("[s2_weight_drop]")
