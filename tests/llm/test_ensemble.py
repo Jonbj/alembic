@@ -208,6 +208,52 @@ class TestEnsembleAggregator:
         # Weighted result is strictly higher than unweighted
         assert result_weighted.polarity > result_unweighted.polarity
 
+    def test_aggregate_min_confidence_override_includes_low_confidence_models(self):
+        """min_confidence override (per-call) lets a caller retry aggregation
+        without the eligibility floor, without mutating the instance default.
+
+        #90: both models below the instance's min_confidence=0.4 but tightly
+        agreeing (small polarity spread) — the default call still returns None
+        (unchanged behavior), but passing min_confidence=0.0 for this call
+        aggregates them directly instead.
+        """
+        aggregator = EnsembleAggregator(min_confidence=0.4, divergence_threshold=0.40)
+        outputs = [
+            ModelOutput(symbol="AAPL", polarity=0.0, confidence=0.2,
+                        reasoning="Sector-level, no direct read-through", model_id="glm"),
+            ModelOutput(symbol="AAPL", polarity=0.1, confidence=0.25,
+                        reasoning="Indirect sector tailwind only", model_id="gpt"),
+        ]
+        # Default (instance min_confidence=0.4): both below threshold → None, unchanged.
+        assert aggregator.aggregate(outputs) is None
+
+        # Override for this call only: both become eligible, low spread → aggregates.
+        result = aggregator.aggregate(outputs, min_confidence=0.0)
+        assert result is not None
+        assert result.model_ids == ["glm", "gpt"]
+        # confidence-weighted average of (0.0, 0.2) and (0.1, 0.25)
+        assert abs(result.polarity - (0.0 * 0.2 + 0.1 * 0.25) / (0.2 + 0.25)) < 0.01
+        assert abs(result.confidence - 0.225) < 0.01
+
+        # Instance default is untouched by the override (no mutation).
+        assert aggregator.min_confidence == 0.4
+        assert aggregator.aggregate(outputs) is None
+
+    def test_aggregate_min_confidence_override_still_detects_genuine_divergence(self):
+        """The override only bypasses the confidence floor, not the divergence
+        check — models that truly disagree (even at low individual confidence)
+        must still return None so run_inference correctly falls back to FinBERT.
+        """
+        aggregator = EnsembleAggregator(min_confidence=0.4, divergence_threshold=0.40)
+        outputs = [
+            ModelOutput(symbol="AAPL", polarity=0.9, confidence=0.1,
+                        reasoning="Bullish", model_id="glm"),
+            ModelOutput(symbol="AAPL", polarity=-0.9, confidence=0.15,
+                        reasoning="Bearish", model_id="gpt"),
+        ]
+        assert aggregator.aggregate(outputs) is None
+        assert aggregator.aggregate(outputs, min_confidence=0.0) is None
+
     def test_aggregate_unknown_model_id_uses_default_weight(self):
         """Models absent from the weights dict default to weight 1.0 (not dropped)."""
         aggregator = EnsembleAggregator(min_confidence=0.4, divergence_threshold=0.30)

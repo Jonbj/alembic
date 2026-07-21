@@ -436,6 +436,77 @@ class TestRunInference:
         mock_finbert.analyze.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_run_inference_low_confidence_agreement_skips_finbert(self):
+        """#90: when the primary aggregation fails only because no model met
+        min_confidence (not genuine divergence), run_inference must retry with
+        min_confidence=0.0 and use that consensus directly instead of calling
+        FinBERT — the models agreeing at low confidence is a legitimate weak
+        signal, not a "divergence" to discard.
+        """
+        low_confidence_result = MagicMock(
+            polarity=0.05, confidence=0.225, reasoning="Sector-level, no direct read-through",
+            model_ids=["glm", "gpt"], ensemble_std=0.05,
+        )
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+        # First call (default threshold) -> None; retry call (min_confidence=0.0) -> succeeds.
+        mock_aggregator.aggregate.side_effect = [None, low_confidence_result]
+
+        mock_finbert = MagicMock(spec=FinBERTClient)
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock()
+        mock_budget.record_spending = AsyncMock()
+
+        item = make_news_item("AAPL", 4)
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock, return_value=[MagicMock(), MagicMock()]):
+            inference_result = await run_inference(
+                item=item, clients=[], aggregator=mock_aggregator,
+                finbert=mock_finbert, budget_tracker=mock_budget,
+            )
+
+        assert inference_result is not None
+        result, _ = inference_result
+        assert result.fallback_used is False
+        assert result.model_id == "ensemble:glm+gpt"
+        assert abs(result.score - (0.05 * 0.225)) < 1e-6
+        mock_finbert.analyze.assert_not_called()
+
+        assert mock_aggregator.aggregate.call_count == 2
+        retry_call = mock_aggregator.aggregate.call_args_list[1]
+        assert retry_call.kwargs.get("min_confidence") == 0.0
+
+    @pytest.mark.asyncio
+    async def test_run_inference_genuine_divergence_still_uses_finbert(self):
+        """#90 regression guard: if the retry (min_confidence=0.0) ALSO returns
+        None, the models genuinely disagree even without a confidence floor —
+        must still fall back to FinBERT, same as before."""
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+        mock_aggregator.aggregate.side_effect = [None, None]
+
+        mock_finbert = MagicMock(spec=FinBERTClient)
+        mock_finbert.analyze.return_value = MagicMock(polarity=0.3, confidence=0.7)
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock()
+
+        item = make_news_item("MSFT", 5)
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock, return_value=[MagicMock(), MagicMock()]):
+            inference_result = await run_inference(
+                item=item, clients=[], aggregator=mock_aggregator,
+                finbert=mock_finbert, budget_tracker=mock_budget,
+            )
+
+        assert inference_result is not None
+        result, _ = inference_result
+        assert result.fallback_used is True
+        assert result.model_id == "finbert"
+        assert result.reasoning == "FinBERT fallback (ensemble divergence)"
+        mock_finbert.analyze.assert_called_once()
+        assert mock_aggregator.aggregate.call_count == 2
+
+    @pytest.mark.asyncio
     async def test_run_inference_budget_exhausted_uses_finbert(self):
         """run_inference uses FinBERT when budget is exhausted."""
         mock_budget = AsyncMock(spec=LLMBudgetTracker)

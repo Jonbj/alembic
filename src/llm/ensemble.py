@@ -219,7 +219,12 @@ class EnsembleAggregator:
         # score = polarity × confidence).
         self.agreement_weighting = agreement_weighting
 
-    def aggregate(self, outputs: list[ModelOutput], weights: dict[str, float] | None = None) -> AggregatedResult | None:
+    def aggregate(
+        self,
+        outputs: list[ModelOutput],
+        weights: dict[str, float] | None = None,
+        min_confidence: float | None = None,
+    ) -> AggregatedResult | None:
         """
         Aggregate model outputs into a single consensus result.
 
@@ -249,6 +254,13 @@ class EnsembleAggregator:
         Args:
             outputs: List of ModelOutput from each LLM model in the ensemble.
                     Length is typically 2-4 (one per model).
+            min_confidence: Per-call override of the instance's min_confidence
+                    (does not mutate the instance). #90: run_inference retries
+                    with min_confidence=0.0 when the default call returns None,
+                    to distinguish "no model met the confidence floor" (still
+                    aggregatable, and usually tight agreement — not divergence)
+                    from genuine polarity divergence (which still returns None
+                    even with the floor removed).
 
         Returns:
             AggregatedResult with consensus values, or None if:
@@ -268,7 +280,8 @@ class EnsembleAggregator:
             >>> print(f"Consensus: {result.polarity} (conf: {result.confidence})")
             Consensus: 0.55 (conf: 0.75)
         """
-        eligible = [o for o in outputs if o.confidence >= self.min_confidence]
+        effective_min_confidence = self.min_confidence if min_confidence is None else min_confidence
+        eligible = [o for o in outputs if o.confidence >= effective_min_confidence]
 
         if not eligible:
             return None

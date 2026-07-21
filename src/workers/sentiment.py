@@ -11,9 +11,14 @@ Pipeline per batch (up to 10 items pulled atomically via LMOVE):
   3. LLM ensemble — query Kimi K2.6, GLM-5.2 in
      parallel using DK-CoT prompting; aggregate with LOO ICIR weights if
      available, else confidence-weighted mean.
-  4. Divergence fallback — if ensemble std > config.ENSEMBLE_DIVERGENCE_STD (models
-     disagree strongly; default 0.40, see src/config.py for rationale) or budget is
-     exhausted, fall back to FinBERT (local, zero cost).
+  4. Divergence fallback — if no model reaches ENSEMBLE_MIN_CONFIDENCE (0.4)
+     the aggregator retries once with the confidence floor removed (#90): tight
+     agreement at low confidence uses that consensus directly (models correctly
+     following the DK-CoT prompt's "if unclear, confidence low" instruction on
+     sector-level/indirect news is not divergence). Only genuine polarity
+     divergence that persists without a confidence floor (std > config.
+     ENSEMBLE_DIVERGENCE_STD, default 0.40), an all-model timeout, or budget
+     exhaustion fall back to FinBERT (local, zero cost).
   5. Store writes — signal → PostgreSQL (audit) and Redis (live cache);
      per-model LLM responses logged for LOO weight recalculation.
   6. Shadow scoring (Stage-2, armed via set_shadow_comparison_start) — the SAME
@@ -222,6 +227,19 @@ async def run_inference(
         aggregated = (
             aggregator.aggregate(raw_outputs, weights=weights) if raw_outputs else None
         )
+
+        if aggregated is None and not all_models_timed_out:
+            # #90: the default call above can return None for two very different
+            # reasons — genuine polarity divergence, or simply no model reaching
+            # min_confidence (models correctly following the DK-CoT prompt's own
+            # "if market impact is unclear, set confidence low" instruction on
+            # sector-level/indirect news). The latter is agreement, not
+            # divergence, and was being mislabeled + discarded in favor of a
+            # FinBERT call that lacks the direct-vs-indirect distinction the
+            # ensemble already made. Retry without the confidence floor: if the
+            # models still don't diverge, use their own (naturally low-score)
+            # consensus directly instead of substituting FinBERT.
+            aggregated = aggregator.aggregate(raw_outputs, weights=weights, min_confidence=0.0)
 
         if aggregated is None:
             if all_models_timed_out:
