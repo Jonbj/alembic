@@ -1454,7 +1454,8 @@ class PostgreSQLStore:
                     """
                     SELECT DISTINCT ON (day)
                         (timestamp AT TIME ZONE 'UTC')::date AS day,
-                        nav
+                        nav,
+                        total_exposure
                     FROM risk_reports
                     WHERE nav IS NOT NULL
                       AND (timestamp AT TIME ZONE 'UTC')::date BETWEEN %s AND %s
@@ -1463,7 +1464,11 @@ class PostgreSQLStore:
                     (from_date, to_date),
                 )
                 return [
-                    {"date": str(row[0]), "nav": float(row[1])}
+                    {
+                        "date": str(row[0]),
+                        "nav": float(row[1]),
+                        "exposure": float(row[2]) if row[2] is not None else None,
+                    }
                     for row in cur.fetchall()
                 ]
         except Exception:

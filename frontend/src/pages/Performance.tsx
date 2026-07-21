@@ -510,6 +510,36 @@ function DailyPnLTab() {
             ))}
           </div>
 
+          {/* Benchmark — alpha vs beta-scaled SPY */}
+          {summary.alembic_return != null && (
+            <div className="card" style={{ marginBottom: 20, padding: '12px 16px' }}>
+              <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 600 }}>Benchmark — vs SPY beta-scalato</h3>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
+                Il book è esposto ~{summary.avg_exposure != null ? (summary.avg_exposure * 100).toFixed(0) : '?'}%,
+                quindi la barra equa è esposizione × SPY (non SPY pieno). Alpha = rendimento Alembic − barra: positivo = batti il mercato per l'esposizione presa.
+              </div>
+              {summary.alpha != null ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+                  {[
+                    { label: 'Alembic', value: `${(summary.alembic_return * 100).toFixed(2)}%`, color: summary.alembic_return >= 0 ? 'var(--green)' : 'var(--red)' },
+                    { label: 'SPY', value: `${((summary.spy_return ?? 0) * 100).toFixed(2)}%`, color: 'var(--text)' },
+                    { label: `Barra attesa (${((summary.avg_exposure ?? 0) * 100).toFixed(0)}%×SPY)`, value: `${((summary.benchmark_return ?? 0) * 100).toFixed(2)}%`, color: 'var(--text-muted)' },
+                    { label: 'Alpha', value: `${summary.alpha >= 0 ? '+' : ''}${(summary.alpha * 100).toFixed(2)}pp`, color: summary.alpha >= 0 ? 'var(--green)' : 'var(--red)' },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color }}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Rendimento Alembic {(summary.alembic_return * 100).toFixed(2)}% — dato SPY non disponibile, alpha non calcolabile.
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Bar chart */}
           <div className="card" style={{ marginBottom: 20 }}>
             <h3 style={{ margin: '0 0 12px', fontSize: 14, fontWeight: 600 }}>P&L per Giornata</h3>

@@ -116,6 +116,12 @@ export interface DailyPnLReport {
     negative_days: number
     /** NAV change over the period (mark-to-market, incl. open positions). */
     nav_change_period?: number | null
+    /** Beta-scaled benchmark: Alembic return vs exposure × SPY, and the alpha. */
+    alembic_return?: number | null
+    spy_return?: number | null
+    avg_exposure?: number | null
+    benchmark_return?: number | null
+    alpha?: number | null
   }
 }
 
