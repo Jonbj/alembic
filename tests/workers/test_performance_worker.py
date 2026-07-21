@@ -442,21 +442,24 @@ class TestRunWeeklyWeights:
         self, mock_notifier_cls, mock_redis_cls, mock_fetch_cls, mock_purified_cls, mock_apply_task
     ):
         """Test weekly weights computation is observational (no auto-apply)."""
-        # Per-model rows: (model_id, score, forward_return)
+        # Per-model rows: (model_id, score, forward_return). Model ids must be
+        # real registry ids in the active pair, since run_weekly_weights now
+        # filters per_model_rows to the currently active model selection.
         mock_fetch_cls.return_value = (
-            [("opus", 0.3, 0.02)] * 300 +
-            [("qwen3.5:cloud", 0.2, 0.01)] * 300
+            [("kimi-k2.6:cloud", 0.3, 0.02)] * 300 +
+            [("glm-5.2:cloud", 0.2, 0.01)] * 300
         )
 
         # Mock compute_purified_icir to return valid ICIR values
         mock_purified_cls.return_value = {
-            "opus": 1.2,
-            "qwen3.5:cloud": 0.8,
+            "kimi-k2.6:cloud": 1.2,
+            "glm-5.2:cloud": 0.8,
         }
 
         # Mock Redis with proper get_ensemble_weights method and _r attribute
         mock_redis = MagicMock()
         mock_redis.get_ensemble_weights = MagicMock(return_value=None)
+        mock_redis.get_llm_models = MagicMock(return_value="all")
         mock_redis._r = MagicMock()
         mock_redis_cls.return_value = mock_redis
 
@@ -480,6 +483,51 @@ class TestRunWeeklyWeights:
 
         # Verify check_and_apply_weights was chained
         mock_apply_task.apply_async.assert_called_once_with(countdown=5)
+
+    @patch("src.workers.performance.check_and_apply_weights")
+    @patch("src.workers.performance.compute_purified_icir")
+    @patch("src.workers.performance._fetch_all_per_model_signals_for_loo")
+    @patch("src.workers.performance.RedisStore")
+    @patch("src.workers.performance.TelegramNotifier")
+    def test_run_weekly_weights_excludes_inactive_models(
+        self, mock_notifier_cls, mock_redis_cls, mock_fetch_cls, mock_purified_cls, mock_apply_task
+    ):
+        """Stale/inactive model_ids in llm_responses must not pollute LOO ICIR.
+
+        The active pair is glm52+gptoss (config:sentiment_llm_models), but
+        llm_responses still has 30d of historical rows from kimi (no longer
+        in the active pair). Those rows must be filtered out before the
+        per-model ICIR computation, otherwise stale model performance data
+        skews the suggested weights for models that aren't even running.
+        """
+        mock_fetch_cls.return_value = (
+            [("kimi-k2.6:cloud", 0.3, 0.02)] * 300 +
+            [("glm-5.2:cloud", 0.25, 0.015)] * 300 +
+            [("gpt-oss:20b-cloud", 0.2, 0.01)] * 300
+        )
+
+        mock_purified_cls.return_value = {
+            "glm-5.2:cloud": 1.1,
+            "gpt-oss:20b-cloud": 0.9,
+        }
+
+        mock_redis = MagicMock()
+        mock_redis.get_ensemble_weights = MagicMock(return_value=None)
+        mock_redis.get_llm_models = MagicMock(return_value="glm52,gptoss")
+        mock_redis._r = MagicMock()
+        mock_redis_cls.return_value = mock_redis
+
+        mock_notifier = MagicMock()
+        mock_notifier.send_alert = AsyncMock()
+        mock_notifier_cls.return_value = mock_notifier
+
+        run_weekly_weights()
+
+        assert mock_purified_cls.called
+        call_kwargs = mock_purified_cls.call_args.kwargs
+        assert set(call_kwargs["model_signals"].keys()) == {"glm-5.2:cloud", "gpt-oss:20b-cloud"}
+        assert set(call_kwargs["model_returns"].keys()) == {"glm-5.2:cloud", "gpt-oss:20b-cloud"}
+        assert "kimi-k2.6:cloud" not in call_kwargs["current_weights"]
 
     @patch("src.workers.performance._fetch_all_per_model_signals_for_loo")
     @patch("src.workers.performance.RedisStore")

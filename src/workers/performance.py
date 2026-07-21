@@ -68,7 +68,7 @@ from src.portfolio.loss_feedback import (
     risk_budget_at_entry,
     strategy_for_trade,
 )
-from src.llm.model_registry import model_ids_for_keys, normalize_model_selection, normalize_weights_for_active_models
+from src.llm.model_registry import default_weights, model_ids_for_keys, normalize_model_selection, normalize_weights_for_active_models
 from src.store.pg_store import PostgreSQLStore, SHADOW_COMPARISON_COLUMNS
 from src.store.redis_store import RedisStore
 from src.workers.celery_app import app
@@ -893,18 +893,28 @@ def run_weekly_weights():
         pg = PostgreSQLStore()
         redis = RedisStore()
 
+        # Resolve the currently active model pair — llm_responses retains
+        # 30d of history from any model ever run, including ones since
+        # swapped out of the active pair (e.g. kimi/qwen3.5). Stale rows
+        # must not enter LOO ICIR for models that aren't even running.
+        llm_selection = redis.get_llm_models() or "all"
+        _, active_keys, _ = normalize_model_selection(llm_selection)
+        active_model_ids = model_ids_for_keys(active_keys)
+
         # Get current weights
         raw_weights = redis.get_ensemble_weights()
         if raw_weights:
             current_weights = json.loads(raw_weights).get("weights", {})
         else:
-            current_weights = {"kimi-k2.6:cloud": 0.50, "glm-5.2:cloud": 0.50}
+            current_weights = default_weights(active_model_ids)
 
         # Fetch per-model signals from llm_responses for LOO ICIR.
         # sentiment_signals.model_id stores the compound ensemble ID so
         # grouping by it yields one bucket; llm_responses has one row per
         # model per inference, which is what per-model ICIR requires.
         per_model_rows = _fetch_all_per_model_signals_for_loo(pg, days=30)
+        if active_model_ids:
+            per_model_rows = [row for row in per_model_rows if row[0] in active_model_ids]
 
         if not per_model_rows:
             log.info("No per-model samples available for weight update")

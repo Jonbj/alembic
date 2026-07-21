@@ -2,9 +2,11 @@
 
 import hashlib
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 import pytest
+
+from src.store.pg_store import PostgreSQLStore
 
 
 def _compute_token(computed_at: str) -> str:
@@ -18,11 +20,16 @@ class TestTelegramPoller:
 
     @pytest.fixture
     def suggestion(self):
-        """Sample weight suggestion."""
+        """Sample weight suggestion.
+
+        Uses real registry model ids for the default "all" active pair
+        (kimi + glm52, both in_all=True) since _handle_approve filters
+        suggested_weights down to the currently active models.
+        """
         computed_at = "2026-05-05T10:00:00Z"
         return {
-            "suggested_weights": {"opus": 0.45, "qwen3.5:cloud": 0.55},
-            "current_weights": {"opus": 0.34, "qwen3.5:cloud": 0.66},
+            "suggested_weights": {"kimi-k2.6:cloud": 0.45, "glm-5.2:cloud": 0.55},
+            "current_weights": {"kimi-k2.6:cloud": 0.34, "glm-5.2:cloud": 0.66},
             "computed_at": computed_at,
             "freeze_reason": "VIX too high",
         }
@@ -51,12 +58,18 @@ class TestTelegramPoller:
             poll_telegram_updates()
 
     def test_callback_approve_valid(self, suggestion, token):
-        """Valid approve callback → weights applied, suggestion deleted, log written."""
+        """Valid approve callback → weights applied, suggestion deleted, log written.
+
+        pg is autospec'd against the real PostgreSQLStore so a kwarg mismatch
+        against log_weight_update's real signature raises TypeError here,
+        instead of silently succeeding against a generic MagicMock.
+        """
         redis = MagicMock()
         redis.get_offset.return_value = 100
         redis.get_weight_suggestion.return_value = suggestion
 
-        pg = MagicMock()
+        pg = create_autospec(PostgreSQLStore, instance=True)
+        pg.log_weight_update.return_value = 1
         notifier = MagicMock()
         notifier.edit_message_reply_markup = AsyncMock(return_value=True)
 
@@ -77,15 +90,72 @@ class TestTelegramPoller:
         pg.log_weight_update.assert_called_once()
         call_args = pg.log_weight_update.call_args
         assert call_args[1]["source"] == "telegram"
-        assert call_args[1]["applied_weights"] == {"opus": 0.45, "qwen3.5:cloud": 0.55}
+        assert call_args[1]["applied_weights"] == {"kimi-k2.6:cloud": 0.45, "glm-5.2:cloud": 0.55}
+        assert call_args[1]["suggested_weights"] == {"kimi-k2.6:cloud": 0.45, "glm-5.2:cloud": 0.55}
+
+    def test_callback_approve_drops_inactive_model(self):
+        """Approve callback with a stale model in the suggestion → dropped + renormalized.
+
+        Mirrors the auto-apply path's WS-3 filter: the active pair can change
+        between when a suggestion was computed and when a human taps Approve
+        (or the suggestion was generated before the pair was swapped), so the
+        applied weights must never include a model outside the active pair.
+        """
+        computed_at = "2026-05-05T11:00:00Z"
+        suggestion = {
+            "suggested_weights": {"qwen3.5:cloud": 0.20, "glm-5.2:cloud": 0.80},
+            "current_weights": {"qwen3.5:cloud": 0.20, "glm-5.2:cloud": 0.80},
+            "computed_at": computed_at,
+            "freeze_reason": "",
+        }
+        token = _compute_token(computed_at)
+
+        redis = MagicMock()
+        redis.get_offset.return_value = 100
+        redis.get_weight_suggestion.return_value = suggestion
+        redis.get_llm_models.return_value = "glm52,gptoss"
+
+        pg = create_autospec(PostgreSQLStore, instance=True)
+        pg.log_weight_update.return_value = 1
+        notifier = MagicMock()
+        notifier.edit_message_reply_markup = AsyncMock(return_value=True)
+
+        update = {
+            "update_id": 101,
+            "callback_query": {
+                "id": "cb123",
+                "from": {"id": 123456},
+                "message": {"message_id": 42},
+                "data": f"approve:{token}",
+            },
+        }
+
+        self._run_poller([update], redis, pg, notifier)
+
+        # qwen3.5 is not in the active pair (glm52+gptoss) — dropped, and
+        # the sole remaining active model (glm-5.2:cloud) absorbs 100%.
+        redis.set_ensemble_weights.assert_called_once()
+        applied_to_redis = redis.set_ensemble_weights.call_args[0][0]
+        assert applied_to_redis == {"glm-5.2:cloud": 1.0}
+
+        call_args = pg.log_weight_update.call_args
+        assert call_args[1]["applied_weights"] == {"glm-5.2:cloud": 1.0}
+        # suggested_weights in the audit log preserves the original (pre-filter) suggestion
+        assert call_args[1]["suggested_weights"] == {"qwen3.5:cloud": 0.20, "glm-5.2:cloud": 0.80}
 
     def test_callback_reject_valid(self, suggestion, token):
-        """Valid reject callback → suggestion deleted, log with empty weights."""
+        """Valid reject callback → suggestion deleted, log with empty weights.
+
+        pg is autospec'd against the real PostgreSQLStore so a kwarg mismatch
+        against log_weight_update's real signature raises TypeError here,
+        instead of silently succeeding against a generic MagicMock.
+        """
         redis = MagicMock()
         redis.get_offset.return_value = 100
         redis.get_weight_suggestion.return_value = suggestion
 
-        pg = MagicMock()
+        pg = create_autospec(PostgreSQLStore, instance=True)
+        pg.log_weight_update.return_value = 1
         notifier = MagicMock()
         notifier.edit_message_reply_markup = AsyncMock(return_value=True)
 
