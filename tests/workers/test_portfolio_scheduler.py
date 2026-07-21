@@ -1675,6 +1675,45 @@ def test_persist_trade_fills_buy_failure_does_not_block_subsequent_sell():
     pg.close.assert_called_once()
 
 
+def test_persist_trade_fills_legacy_buy_path_uses_sym_strats_for_origin_strategy():
+    """Reproduces the 2026-07-17 DB incident in the legacy batch write path:
+    S4 contributed the weight this cycle (sym_strats) but signal_id is absent
+    from the decision dict — frozen_stop.strategy must still resolve to S4,
+    not fall back to the signal_id heuristic's "S1" guess."""
+    from src.portfolio.stop_policy import StopPolicy
+    from src.workers.portfolio_scheduler import _persist_trade_fills
+
+    pg = MagicMock()
+    pg.open_trade.return_value = None
+
+    submitted = [
+        {"symbol": "DB", "side": "buy", "order_id": "ord-db",
+         "notional": 6181.23, "qty": 175.7, "reason": "portfolio_buy"},
+    ]
+    market = MagicMock()
+    market.prices = {"DB": 35.18}
+    stop_policy = StopPolicy({"stop_loss_mode": "fixed", "stop_loss": 0.0})
+
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=pg), \
+         patch("src.workers.portfolio_scheduler._portfolio_postmortem"):
+        _persist_trade_fills(
+            submitted,
+            open_trades=[],
+            symbol_decisions={"DB": {"decision_id": "dec-db"}},  # no signal_id present
+            written_buy_order_ids=set(),
+            stop_policy=stop_policy,
+            market=market,
+            alpaca_entry_prices={},
+            s4_signals={},
+            regime_mult=1.0,
+            tick_time=datetime(2026, 7, 17, 18, 52, tzinfo=timezone.utc),
+            sym_strats={"DB": ["S4"]},
+        )
+
+    frozen_stop = pg.open_trade.call_args.kwargs["frozen_stop"]
+    assert frozen_stop.strategy == "S4"
+
+
 # ── #62/#63: broker-side protective stop sync for fractional positions ──────
 
 
@@ -2136,3 +2175,73 @@ def test_submit_portfolio_orders_skips_buy_in_reversal_cooldown():
 
     assert submitted == []
     assert calls == []
+
+
+# ── B28-FIX origin-strategy attribution bug (2026-07-17 DB incident) ─────────
+#
+# trades.stop_strategy (and therefore which stop_strategy_params k/floor/cap
+# apply to the position) was resolved via a binary heuristic —
+# "S4" if decision.get("signal_id") else "S1" — instead of the accurate,
+# already-computed _sym_strats mapping (CycleResult.symbol_strategies: which
+# strategies actually contributed weight to this symbol THIS cycle). Real
+# incident: trade 361 (DB, 2026-07-17) was a genuine S4 BUY (execution_
+# decisions.reason said "S4 news-driven: sentiment +0.672...") but its
+# signal_id wasn't present in _symbol_decisions at write time, so the
+# heuristic silently mislabeled it "S1" — corrupting which stop params
+# applied to a $6,181 position.
+
+
+class TestResolveBuyOriginStrategy:
+    def test_prefers_s4_from_sym_strats_even_when_signal_id_missing(self):
+        """Reproduces the 2026-07-17 DB incident: S4 contributed the weight
+        this cycle, but decision["signal_id"] is missing — must still resolve S4."""
+        from src.workers.portfolio_scheduler import _resolve_buy_origin_strategy
+
+        result = _resolve_buy_origin_strategy(
+            "DB", sym_strats={"DB": ["S4"]}, decision={"decision_id": 3245},
+        )
+
+        assert result == "S4"
+
+    def test_resolves_s1_from_sym_strats(self):
+        from src.workers.portfolio_scheduler import _resolve_buy_origin_strategy
+
+        result = _resolve_buy_origin_strategy(
+            "SBUX", sym_strats={"SBUX": ["S1"]}, decision={},
+        )
+
+        assert result == "S1"
+
+    def test_s4_takes_priority_when_both_contribute(self):
+        from src.workers.portfolio_scheduler import _resolve_buy_origin_strategy
+
+        result = _resolve_buy_origin_strategy(
+            "XLK", sym_strats={"XLK": ["S1", "S4"]}, decision={},
+        )
+
+        assert result == "S4"
+
+    def test_falls_back_to_first_strategy_for_other_combos(self):
+        from src.workers.portfolio_scheduler import _resolve_buy_origin_strategy
+
+        result = _resolve_buy_origin_strategy(
+            "SPY", sym_strats={"SPY": ["S2"]}, decision={},
+        )
+
+        assert result == "S2"
+
+    def test_defensive_fallback_to_legacy_heuristic_when_sym_strats_empty(self):
+        """sym_strats missing an entry shouldn't happen for a just-submitted BUY,
+        but stay defensive — fall back to the old signal_id heuristic rather
+        than crash or silently mis-set None."""
+        from src.workers.portfolio_scheduler import _resolve_buy_origin_strategy
+
+        with_signal = _resolve_buy_origin_strategy(
+            "AAPL", sym_strats={}, decision={"signal_id": 999},
+        )
+        without_signal = _resolve_buy_origin_strategy(
+            "AAPL", sym_strats={}, decision={},
+        )
+
+        assert with_signal == "S4"
+        assert without_signal == "S1"

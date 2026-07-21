@@ -807,6 +807,30 @@ def _apply_whipsaw_damping_filter(orders: list, suppressed_syms: set[str]) -> li
     return [o for o in orders if not (o.symbol in suppressed_syms and o.side == _OS.SELL)]
 
 
+def _resolve_buy_origin_strategy(symbol: str, sym_strats: dict, decision: dict) -> str:
+    """Return the strategy that actually contributed weight to this BUY this cycle.
+
+    Prefers sym_strats (CycleResult.symbol_strategies — accurate, computed from
+    which strategies contributed non-zero weight this cycle) over inferring
+    from signal_id presence. The signal_id heuristic silently mislabels an S4
+    BUY as S1 whenever its signal_id wasn't captured in the decision dict —
+    real incident 2026-07-17: trade 361 (DB) was a genuine S4 BUY (execution_
+    decisions.reason said "S4 news-driven: sentiment +0.672...") but
+    trades.stop_strategy recorded "S1", corrupting which stop_strategy_params
+    (k/floor/cap) applied to a $6,181 position.
+    """
+    strats = sym_strats.get(symbol, [])
+    if "S4" in strats:
+        return "S4"
+    if "S1" in strats:
+        return "S1"
+    if strats:
+        return strats[0]
+    # Defensive fallback only for the case sym_strats has no entry at all
+    # (shouldn't happen for a just-submitted BUY, but never crash on it).
+    return "S4" if decision.get("signal_id") else "S1"
+
+
 def _load_sector_map() -> dict[str, str] | None:
     """Invert the trading.yaml `sectors:` block to {symbol: sector}.
 
@@ -1247,6 +1271,7 @@ def _persist_trade_fills(
     s4_signals,
     regime_mult,
     tick_time,
+    sym_strats: dict | None = None,
 ) -> int:
     """Persist trade entry/exit rows + back-fill Alpaca order_ids, one order at a time.
 
@@ -1296,7 +1321,7 @@ def _persist_trade_fills(
                                 _entry_px_l = sub["notional"] / sub["qty"]
                             if _entry_px_l is None:
                                 _entry_px_l = float(sub["notional"]) if sub.get("notional") else 0.0
-                            _strategy_l = "S4" if dec.get("signal_id") else "S1"
+                            _strategy_l = _resolve_buy_origin_strategy(sym, sym_strats or {}, dec)
                             _frozen_stop_legacy = stop_policy.freeze(
                                 sym, _strategy_l, float(_entry_px_l), tick_time
                             )
@@ -2317,7 +2342,7 @@ def _run_cycle_inner() -> dict:
                     _entry_px_b = _sub_b["notional"] / _sub_b["qty"]
                 if _entry_px_b is None:
                     _entry_px_b = float(_sub_b["notional"]) if _sub_b.get("notional") else 0.0
-                _strategy_b = "S4" if _dec_b.get("signal_id") else "S1"
+                _strategy_b = _resolve_buy_origin_strategy(_sym_b, _sym_strats, _dec_b)
                 try:
                     if _stop_policy is None:
                         from src.portfolio.stop_policy import StopPolicy as _StopPolicyFreeze
@@ -2451,6 +2476,7 @@ def _run_cycle_inner() -> dict:
             s4_signals=_s4_signals,
             regime_mult=_regime_mult,
             tick_time=ts,
+            sym_strats=_sym_strats,
         )
 
     # Alert when an approved strategy consistently produces zero target weights.
