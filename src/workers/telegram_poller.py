@@ -32,11 +32,13 @@ Usage:
 """
 
 import hashlib
+import json
 import logging
 
 import httpx
 
 from src.config import config
+from src.llm.model_registry import model_ids_for_keys, normalize_model_selection, normalize_weights_for_active_models
 from src.notifications.telegram import TelegramNotifier
 from src.store.pg_store import PostgreSQLStore
 from src.store.redis_store import RedisStore
@@ -407,6 +409,17 @@ def _handle_approve(
         weights = suggestion.get("suggested_weights", {})
         computed_at = suggestion.get("computed_at", "")
 
+        # Drop weights for models no longer in the active pair before applying
+        # (mirrors the auto-apply path's WS-3 filter) — the active pair can
+        # change between when a suggestion was computed and when a human
+        # taps Approve.
+        llm_selection = redis.get_llm_models() or "all"
+        _, active_keys, _ = normalize_model_selection(llm_selection)
+        active_model_ids = model_ids_for_keys(active_keys)
+        weights, dropped = normalize_weights_for_active_models(weights, active_model_ids)
+        if dropped:
+            log.warning("Telegram approve dropped weights for inactive models: %s", dropped)
+
         # Apply weights to Redis (source="telegram" for audit trail)
         redis.set_ensemble_weights(weights, source="telegram")
 
@@ -415,12 +428,14 @@ def _handle_approve(
         redis.delete_weight_suggestion()
 
         # Log to PostgreSQL for audit trail
-        # Fields: source, applied_weights, previous_weights, suggestion_data
         pg.log_weight_update(
             source="telegram",
             applied_weights=weights,
-            previous_weights=suggestion.get("current_weights", {}),
-            suggestion_data=suggestion,
+            suggested_weights=suggestion.get("suggested_weights", {}),
+            purified_icir=suggestion.get("purified_icir"),
+            freeze_reason=suggestion.get("freeze_reason"),
+            note=json.dumps({"previous_weights": suggestion.get("current_weights", {})}),
+            approved_by=str(chat_id) if chat_id else None,
         )
 
         # Acknowledge the tap with success toast
@@ -489,8 +504,11 @@ def _handle_reject(
         pg.log_weight_update(
             source="rejected_via_telegram",
             applied_weights={},
-            previous_weights=suggestion.get("current_weights", {}),
-            suggestion_data=suggestion,
+            suggested_weights=suggestion.get("suggested_weights", {}),
+            purified_icir=suggestion.get("purified_icir"),
+            freeze_reason=suggestion.get("freeze_reason"),
+            note=json.dumps({"previous_weights": suggestion.get("current_weights", {})}),
+            approved_by=str(chat_id) if chat_id else None,
         )
 
         # Acknowledge the tap with rejection toast
