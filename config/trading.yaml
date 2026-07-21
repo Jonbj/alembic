@@ -229,6 +229,18 @@ risk:
   # false to roll back to the legacy formula.
   s4_fixed_slot_sizing_enabled: true
 
+  # #71: once S1 excludes a symbol (its own signal drops the target weight to
+  # 0), block S1 from re-buying it for N minutes. Kills the 15-min self-churn
+  # flip: SBUX sold 14:37 UTC, re-bought by S1 at 14:52 (2026-07-17); same
+  # week GE and XLF flipped within 1-2 cycles too — Friday's entire realized
+  # P&L (-$18.47) was this churn. Distinct from #68 (cross-strategy reversal
+  # cooldown, blocks ANY strategy): this only blocks S1's own re-entry — a
+  # genuine S4 conviction buy on the same name is a different signal and must
+  # not be vetoed by S1's own flip-flop. Off by default — flip only after
+  # reviewing the shadow frequency log (measure-before-enforce, QX-01).
+  s1_reentry_cooldown_enabled: false
+  s1_reentry_cooldown_minutes: 30   # ~2 cycles at 15-min cadence
+
   # Position limits
   max_position_pct: 0.10
   max_portfolio_exposure: 0.50

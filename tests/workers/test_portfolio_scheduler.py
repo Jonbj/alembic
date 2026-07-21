@@ -1964,6 +1964,67 @@ class TestSyncFractionalProtectiveStops:
         tc.submit_order.assert_not_called()
 
 
+# ── #71: S1 re-entry cooldown after a self-excluded weight drop ─────────────
+
+
+class TestS1ReentryCooldownRedisHelpers:
+    def test_get_returns_empty_set_when_no_keys(self):
+        from src.workers.portfolio_scheduler import _get_s1_reentry_cooldown_symbols
+
+        with patch("redis.Redis") as mock_cls:
+            inst = MagicMock()
+            inst.keys.return_value = []
+            mock_cls.from_url.return_value = inst
+
+            symbols = _get_s1_reentry_cooldown_symbols("redis://localhost:6379/0")
+
+        assert symbols == set()
+
+    def test_get_returns_symbols_from_keys(self):
+        from src.workers.portfolio_scheduler import _get_s1_reentry_cooldown_symbols
+
+        with patch("redis.Redis") as mock_cls:
+            inst = MagicMock()
+            inst.keys.return_value = ["s1_reentry_cooldown:SBUX", "s1_reentry_cooldown:GE"]
+            mock_cls.from_url.return_value = inst
+
+            symbols = _get_s1_reentry_cooldown_symbols("redis://localhost:6379/0")
+
+        assert symbols == {"SBUX", "GE"}
+
+    def test_get_returns_empty_set_on_redis_error(self):
+        from src.workers.portfolio_scheduler import _get_s1_reentry_cooldown_symbols
+
+        with patch("redis.Redis") as mock_cls:
+            mock_cls.from_url.side_effect = RuntimeError("redis down")
+
+            symbols = _get_s1_reentry_cooldown_symbols("redis://localhost:6379/0")
+
+        assert symbols == set()
+
+    def test_mark_sets_key_with_minutes_converted_to_ttl_seconds(self):
+        from src.workers.portfolio_scheduler import _mark_s1_reentry_cooldown
+
+        with patch("redis.Redis") as mock_cls:
+            inst = MagicMock()
+            mock_cls.from_url.return_value = inst
+
+            _mark_s1_reentry_cooldown("redis://localhost:6379/0", "SBUX", minutes=30)
+
+        inst.setex.assert_called_once_with("s1_reentry_cooldown:SBUX", 1800, "1")
+
+    def test_mark_noop_when_minutes_not_positive(self):
+        from src.workers.portfolio_scheduler import _mark_s1_reentry_cooldown
+
+        with patch("redis.Redis") as mock_cls:
+            inst = MagicMock()
+            mock_cls.from_url.return_value = inst
+
+            _mark_s1_reentry_cooldown("redis://localhost:6379/0", "SBUX", minutes=0)
+
+        inst.setex.assert_not_called()
+
+
 # ── #61: Redis-backed consecutive-whipsaw streak tracking ───────────────────
 
 
@@ -2283,6 +2344,98 @@ def test_submit_portfolio_orders_skips_buy_in_reversal_cooldown():
 
     assert submitted == []
     assert calls == []
+
+
+# ── #71: S1 re-entry cooldown enforcement (BUY-side) ─────────────────────────
+
+
+def test_submit_portfolio_orders_skips_s1_only_buy_in_reentry_cooldown_when_enabled():
+    """S1 excluded SBUX last cycle; flag on -> S1's own re-BUY must be skipped."""
+    from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+    orders = [_make_combined_order("SBUX", OrderSide.BUY, qty=2.0)]
+    trading_client = MagicMock()
+    market = _make_market(prices={"SBUX": 90.0})
+
+    calls = []
+    with patch(
+        "src.workers.portfolio_scheduler._get_reversal_cooldown_symbols",
+        return_value=set(),
+    ), patch(
+        "src.workers.portfolio_scheduler._get_stop_loss_cooldown_symbols",
+        return_value=set(),
+    ), patch(
+        "src.workers.portfolio_scheduler._get_s1_reentry_cooldown_symbols",
+        return_value={"SBUX"},
+    ):
+        submitted = _submit_portfolio_orders(
+            orders, trading_client, market,
+            _submit_fn=lambda o, n, c: calls.append(o.symbol),
+            risk_cfg={"s1_reentry_cooldown_enabled": True},
+            sym_strats={"SBUX": ["S1"]},
+        )
+
+    assert submitted == []
+    assert calls == []
+
+
+def test_submit_portfolio_orders_does_not_block_s1_reentry_when_flag_disabled():
+    """Same cooldown state, but the flag is off (default) -> BUY proceeds."""
+    from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+    orders = [_make_combined_order("SBUX", OrderSide.BUY, qty=2.0)]
+    trading_client = MagicMock()
+    market = _make_market(prices={"SBUX": 90.0})
+
+    calls = []
+    with patch(
+        "src.workers.portfolio_scheduler._get_reversal_cooldown_symbols",
+        return_value=set(),
+    ), patch(
+        "src.workers.portfolio_scheduler._get_stop_loss_cooldown_symbols",
+        return_value=set(),
+    ), patch(
+        "src.workers.portfolio_scheduler._get_s1_reentry_cooldown_symbols",
+        return_value={"SBUX"},
+    ):
+        submitted = _submit_portfolio_orders(
+            orders, trading_client, market,
+            _submit_fn=lambda o, n, c: calls.append(o.symbol),
+            risk_cfg={"s1_reentry_cooldown_enabled": False},
+            sym_strats={"SBUX": ["S1"]},
+        )
+
+    assert calls == ["SBUX"]
+
+
+def test_submit_portfolio_orders_does_not_block_s4_buy_on_s1_cooldown_symbol():
+    """S1 excluded SBUX, but THIS BUY is S4-driven (or mixed) — must not be
+    vetoed by S1's own churn cooldown, unlike #68's cross-strategy block."""
+    from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+    orders = [_make_combined_order("SBUX", OrderSide.BUY, qty=2.0)]
+    trading_client = MagicMock()
+    market = _make_market(prices={"SBUX": 90.0})
+
+    calls = []
+    with patch(
+        "src.workers.portfolio_scheduler._get_reversal_cooldown_symbols",
+        return_value=set(),
+    ), patch(
+        "src.workers.portfolio_scheduler._get_stop_loss_cooldown_symbols",
+        return_value=set(),
+    ), patch(
+        "src.workers.portfolio_scheduler._get_s1_reentry_cooldown_symbols",
+        return_value={"SBUX"},
+    ):
+        submitted = _submit_portfolio_orders(
+            orders, trading_client, market,
+            _submit_fn=lambda o, n, c: calls.append(o.symbol),
+            risk_cfg={"s1_reentry_cooldown_enabled": True},
+            sym_strats={"SBUX": ["S4"]},
+        )
+
+    assert calls == ["SBUX"]
 
 
 # ── B28-FIX origin-strategy attribution bug (2026-07-17 DB incident) ─────────

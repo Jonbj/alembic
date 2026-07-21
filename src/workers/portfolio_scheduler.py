@@ -711,6 +711,42 @@ def _get_reversal_cooldown_symbols(redis_url: str) -> set[str]:
         return set()
 
 
+def _get_s1_reentry_cooldown_symbols(redis_url: str) -> set[str]:
+    """#71: symbols S1 excluded (weight dropped to 0 by S1's own signal) still
+    in re-entry cooldown. Only S1's own BUY is blocked (see the check site) —
+    unlike #68's reversal_cooldown, a genuine S4 conviction buy on the same
+    name is a different signal and must not be vetoed by S1's own churn.
+    Evidence: SBUX sold 14:37, S1 re-bought 14:52 (15 min flip, 2026-07-17);
+    same week GE and XLF flipped within 1-2 cycles."""
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            keys = r.keys("s1_reentry_cooldown:*")
+            return {k.split(":", 1)[1] for k in keys} if keys else set()
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Could not fetch S1 re-entry cooldown symbols: %s", exc)
+        return set()
+
+
+def _mark_s1_reentry_cooldown(redis_url: str, symbol: str, minutes: float) -> None:
+    """#71: start (or refresh) the S1 re-entry cooldown for symbol. No-op if
+    minutes <= 0 (cooldown disabled)."""
+    if minutes <= 0:
+        return
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            r.setex(f"s1_reentry_cooldown:{symbol}", int(minutes * 60), "1")
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Could not set S1 re-entry cooldown for %s: %s", symbol, exc)
+
+
 _WHIPSAW_STREAK_TTL = 1800  # 30 min — ~2 cycles at 15-min cadence; a longer gap restarts the streak
 
 
@@ -915,6 +951,12 @@ def _load_risk_config() -> dict:
         # operator decision 2026-07-20. See src/strategies/s4/config.py
         # S4Config.fixed_slot_sizing.
         "s4_fixed_slot_sizing_enabled": True,
+        # #71: once S1 excludes a symbol (weight dropped to 0 by S1's own
+        # signal), block S1 from re-buying it for N minutes — kills the
+        # 15-min self-churn flip (SBUX/GE/XLF, 2026-07-17). Off by default —
+        # flip only after reviewing the shadow frequency log.
+        "s1_reentry_cooldown_enabled": False,
+        "s1_reentry_cooldown_minutes": 30,
     }
     try:
         import yaml
@@ -2221,6 +2263,15 @@ def _run_cycle_inner() -> dict:
                         exit_mechanism, reason = _reason_and_mechanism_for_non_s4_weight_drop(
                             order.symbol, _origin_strategy, wt_pct
                         )
+                        if _origin_strategy == "S1":
+                            # #71: start the re-entry cooldown regardless of the
+                            # enforce flag, so shadow frequency is measurable and
+                            # a later flip doesn't start cold. Enforcement (the
+                            # actual BUY-skip) happens in _submit_portfolio_orders.
+                            _mark_s1_reentry_cooldown(
+                                config.REDIS_URL, order.symbol,
+                                minutes=float(_risk_cfg.get("s1_reentry_cooldown_minutes", 30)),
+                            )
                     else:
                         _zero_sig = _zero_sell_signals.get(order.symbol)
                         reason = _reason_for_zero_weight_sell(order.symbol, _zero_sig, _s4_max_age_h)
@@ -2340,6 +2391,7 @@ def _run_cycle_inner() -> dict:
             stop_policy=_stop_policy,
             nav=equity,
             open_trades=_open_trades,
+            sym_strats=_sym_strats,
         )
 
         # #62/#63: reconcile broker-side protective stops for fractional positions.
@@ -3002,6 +3054,7 @@ def _submit_portfolio_orders(
     stop_policy: "StopPolicy" | None = None,
     nav: float | None = None,
     open_trades: list[dict] | None = None,
+    sym_strats: dict | None = None,
 ) -> list[dict]:
     """Submit BUY and SELL orders to Alpaca.
 
@@ -3028,11 +3081,12 @@ def _submit_portfolio_orders(
         symbol, side, order_id, and either notional (BUY) or qty (SELL).
     """
     if stop_policy is None and risk_cfg:
+        from src.config import config as _cfg_sp
         from src.portfolio.stop_policy import StopPolicy as _StopPolicy
         stop_policy = _StopPolicy(
             risk_cfg,
             bars_df=bars_df,
-            last_good_lookup=_last_good_sigma_lookup(config.REDIS_URL),
+            last_good_lookup=_last_good_sigma_lookup(_cfg_sp.REDIS_URL),
         )
 
     from src.backtest.engine.types import OrderSide
@@ -3079,6 +3133,22 @@ def _submit_portfolio_orders(
                         order.symbol,
                     )
                     continue
+                # #71: S1 re-entry cooldown — only blocks a BUY that is S1's OWN
+                # re-entry (unlike #68, a genuine S4 conviction buy on the same
+                # name must not be vetoed by S1's own churn). Flag-gated.
+                if (risk_cfg or {}).get("s1_reentry_cooldown_enabled", False):
+                    _strats_for_buy = set((sym_strats or {}).get(order.symbol, []))
+                    if _strats_for_buy == {"S1"}:
+                        _s1_cooldown = _get_s1_reentry_cooldown_symbols(
+                            __import__("src.config", fromlist=["config"]).config.REDIS_URL
+                        )
+                        if order.symbol in _s1_cooldown:
+                            log.warning(
+                                "S1 re-entry cooldown: skipping BUY for %s — "
+                                "recently excluded by S1's own signal",
+                                order.symbol,
+                            )
+                            continue
                 price = market.prices.get(order.symbol)
                 if price is None or price <= 0:
                     log.warning("No market price for %s — skipping BUY order", order.symbol)
