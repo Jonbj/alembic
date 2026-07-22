@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Trusts only the configured LAN host for the operator-installed CA.
+  Release traffic is HTTPS-only. Debug builds may permit cleartext for explicit
+  emulator/development hosts via debug-overrides.
+-->
+<network-security-config xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="NetworkSecurityConfig">
+
+    <!-- Default: HTTPS only, trust only the system CA store. -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- LAN host: additionally trust the user-installed CA and the bundled test anchor. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">alembic.lan</domain>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+            <certificates src="@raw/lan_ca" />
+        </trust-anchors>
+    </domain-config>
+
+    <!-- Debug builds: allow cleartext only for explicit emulator/dev hosts. -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+            <certificates src="@raw/lan_ca" />
+        </trust-anchors>
+        <domain-config cleartextTrafficPermitted="true">
+            <domain>10.0.2.2</domain>
+            <domain>10.0.3.2</domain>
+        </domain-config>
+    </debug-overrides>
+</network-security-config>
