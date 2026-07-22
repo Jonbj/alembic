@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import sys
 import uuid
 from uuid import UUID
@@ -36,7 +37,14 @@ def _parser() -> argparse.ArgumentParser:
 
     create = sub.add_parser("create", help="Create a monitor user and device")
     create.add_argument("--username", required=True)
-    create.add_argument("--password", required=True)
+    create.add_argument(
+        "--password-hash",
+        help="Pre-hashed bcrypt password (safe for automation; preferred)",
+    )
+    create.add_argument(
+        "--password",
+        help="Plaintext password (insecure: visible in shell history). Use --password-hash or interactive prompt instead.",
+    )
     create.add_argument("--device-name", default="managed-device")
     create.add_argument("--app-version", default="1.0.0")
 
@@ -64,6 +72,19 @@ async def _store() -> tuple[asyncpg.Pool, MonitorStore]:
     return pool, MonitorStore(pool)
 
 
+def _resolve_password_hash(args: argparse.Namespace) -> str:
+    """Return a bcrypt password hash without ever printing the plaintext."""
+    if args.password_hash:
+        return args.password_hash
+    if args.password:
+        return bcrypt.hashpw(args.password.encode(), bcrypt.gensalt()).decode()
+    plaintext = getpass.getpass("Password for new monitor user: ")
+    confirm = getpass.getpass("Confirm password: ")
+    if plaintext != confirm:
+        raise SystemExit("Passwords do not match")
+    return bcrypt.hashpw(plaintext.encode(), bcrypt.gensalt()).decode()
+
+
 async def _create(args: argparse.Namespace) -> int:
     pool, store = await _store()
     try:
@@ -72,7 +93,7 @@ async def _create(args: argparse.Namespace) -> int:
             print(f"user already exists: id={existing.id}")
             return 1
 
-        password_hash = bcrypt.hashpw(args.password.encode(), bcrypt.gensalt()).decode()
+        password_hash = _resolve_password_hash(args)
         user = await store.create_user(
             username=args.username,
             password_hash=password_hash,

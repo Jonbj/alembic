@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import asyncpg
+import bcrypt
 import httpx
 import pytest
 import pytest_asyncio
@@ -340,7 +341,7 @@ class TestManageMonitorUsersCLI:
         from scripts import manage_monitor_users
 
         result = await manage_monitor_users.main(
-            ["create", "--username", "cliuser", "--password", "testsecret"]
+            ["create", "--username", "cliuser", "--password-hash", bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode()]
         )
         assert result == 0
         async with pg_pool.acquire() as conn:
@@ -354,7 +355,7 @@ class TestManageMonitorUsersCLI:
         from scripts import manage_monitor_users
 
         await manage_monitor_users.main(
-            ["create", "--username", "toggleuser", "--password", "testsecret"]
+            ["create", "--username", "toggleuser", "--password-hash", bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode()]
         )
         assert (
             await manage_monitor_users.main(
@@ -383,7 +384,7 @@ class TestManageMonitorUsersCLI:
         from scripts import manage_monitor_users
 
         await manage_monitor_users.main(
-            ["create", "--username", "sessuser", "--password", "testsecret"]
+            ["create", "--username", "sessuser", "--password-hash", bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode()]
         )
         async with pg_pool.acquire() as conn:
             session_id = await conn.fetchval(
@@ -417,7 +418,7 @@ class TestManageMonitorUsersCLI:
         from scripts import manage_monitor_users
 
         await manage_monitor_users.main(
-            ["create", "--username", "alluser", "--password", "testsecret"]
+            ["create", "--username", "alluser", "--password-hash", bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode()]
         )
         async with pg_pool.acquire() as conn:
             user_id = await conn.fetchval(
@@ -450,7 +451,7 @@ class TestManageMonitorUsersCLI:
         from scripts import manage_monitor_users
 
         await manage_monitor_users.main(
-            ["create", "--username", "devuser", "--password", "testsecret"]
+            ["create", "--username", "devuser", "--password-hash", bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode()]
         )
         async with pg_pool.acquire() as conn:
             device_id = await conn.fetchval(
@@ -473,7 +474,7 @@ class TestManageMonitorUsersCLI:
         from scripts import manage_monitor_users
 
         await manage_monitor_users.main(
-            ["create", "--username", "secretuser", "--password", "testsecret"]
+            ["create", "--username", "secretuser", "--password-hash", bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode()]
         )
         captured = capsys.readouterr().out + capsys.readouterr().err
         assert "refresh" not in captured.lower()
