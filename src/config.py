@@ -123,6 +123,14 @@ class Config(BaseModel):
         default_factory=lambda: os.environ.get("LATEST_MOBILE_APP_VERSION", "1.0.0")
     )
 
+    # Mobile FCM (MOB-04). Service-account JSON path is mounted at runtime; never commit it.
+    FIREBASE_SERVICE_ACCOUNT_PATH: str | None = Field(
+        default_factory=lambda: os.environ.get("FIREBASE_SERVICE_ACCOUNT_PATH") or None
+    )
+    FCM_PROJECT_ID: str | None = Field(
+        default_factory=lambda: os.environ.get("FCM_PROJECT_ID") or None
+    )
+
     # Ollama cloud API
     OLLAMA_API_KEY: str = Field(default_factory=lambda: os.environ.get("OLLAMA_API_KEY", ""))
     OLLAMA_BASE_URL: str = Field(default_factory=lambda: os.environ.get("OLLAMA_BASE_URL", "https://ollama.com"))
