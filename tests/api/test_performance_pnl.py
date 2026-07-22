@@ -161,3 +161,18 @@ def test_daily_pnl_benchmark_null_when_spy_unavailable():
     assert s["alembic_return"] == -0.01  # still computed from NAV
     assert s["spy_return"] is None
     assert s["alpha"] is None
+
+
+# ── SPY fetch end-date cap (bug 2026-07-22: IEX rejects querying the current
+#    day's SIP data, so the default range ending "today" returned no benchmark) ─
+from datetime import date
+
+
+def test_spy_fetch_end_capped_to_yesterday_when_to_is_today():
+    from src.api.routes.performance import _spy_fetch_end_date
+    assert _spy_fetch_end_date("2026-07-22", date(2026, 7, 22)) == date(2026, 7, 21)
+
+
+def test_spy_fetch_end_unchanged_for_past_range():
+    from src.api.routes.performance import _spy_fetch_end_date
+    assert _spy_fetch_end_date("2026-07-18", date(2026, 7, 22)) == date(2026, 7, 18)

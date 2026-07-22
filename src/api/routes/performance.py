@@ -28,6 +28,14 @@ router = APIRouter(prefix="/api", dependencies=[Depends(require_api_key)])
 log = logging.getLogger(__name__)
 
 
+def _spy_fetch_end_date(to_date: str, today: date) -> date:
+    """Cap the SPY fetch end at yesterday. The IEX data plan rejects querying the
+    current day's SIP data (APIError 'subscription does not permit querying recent
+    SIP data'), which blanked the benchmark on the default range ending today. NAV
+    anchors are end-of-day (<= yesterday) anyway, so nothing is lost."""
+    return min(date.fromisoformat(to_date), today - timedelta(days=1))
+
+
 def _fetch_spy_closes(from_date: str, to_date: str, redis=None) -> dict | None:
     """SPY daily closes for the benchmark, {date: close}. Redis-cached 1h,
     fail-open (None on any error) — the benchmark is enrichment, never a hard
@@ -47,11 +55,14 @@ def _fetch_spy_closes(from_date: str, to_date: str, redis=None) -> dict | None:
         from alpaca.data.timeframe import TimeFrame
 
         start = (date.fromisoformat(from_date) - timedelta(days=10))
+        end_d = _spy_fetch_end_date(to_date, datetime.now(timezone.utc).date())
+        if end_d < start:
+            return None
         client = StockHistoricalDataClient(config.ALPACA_API_KEY, config.ALPACA_SECRET_KEY)
         bars = client.get_stock_bars(StockBarsRequest(
             symbol_or_symbols=["SPY"], timeframe=TimeFrame.Day,
             start=datetime(start.year, start.month, start.day, tzinfo=timezone.utc),
-            end=datetime.fromisoformat(to_date).replace(hour=23, minute=59, tzinfo=timezone.utc),
+            end=datetime(end_d.year, end_d.month, end_d.day, 23, 59, tzinfo=timezone.utc),
         )).data.get("SPY", [])
         closes = {b.timestamp.date().isoformat(): float(b.close) for b in bars}
         if redis is not None and closes:
