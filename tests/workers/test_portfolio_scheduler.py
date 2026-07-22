@@ -2578,3 +2578,49 @@ def test_peak_and_drawdown_advances_on_new_high():
     peak, dd = _peak_and_drawdown(100000.0, 120000.0)
     assert peak == 120000.0
     assert dd == 0.0
+
+
+# ── #108 — S4 BUY must not fire on FinBERT-fallback signals (mirror SELL guard) ─
+from types import SimpleNamespace as _SNS
+
+
+def test_filter_fallback_signals_drops_fallback_keeps_ensemble():
+    from src.workers.portfolio_scheduler import _filter_fallback_signals
+    sigs = [
+        _SNS(symbol="AAPL", fallback_used=False),
+        _SNS(symbol="WDC", fallback_used=True),   # FinBERT fallback → dropped for BUY
+        _SNS(symbol="MSFT", fallback_used=False),
+    ]
+    keep, dropped = _filter_fallback_signals(sigs)
+    assert [s.symbol for s in keep] == ["AAPL", "MSFT"]
+    assert [s.symbol for s in dropped] == ["WDC"]
+
+
+def test_filter_fallback_signals_all_ensemble_keeps_all():
+    from src.workers.portfolio_scheduler import _filter_fallback_signals
+    sigs = [_SNS(symbol="A", fallback_used=False), _SNS(symbol="B", fallback_used=False)]
+    keep, dropped = _filter_fallback_signals(sigs)
+    assert len(keep) == 2 and dropped == []
+
+
+# ── #109 — logged S4 conviction must come from the SAME signal_id it links to ──
+
+
+def test_s4_signal_metadata_matches_resolved_signal_id():
+    """WDC regression: id resolved to the finbert +0.363 signal, so the logged
+    score must be +0.363 — NOT the ensemble −0.385 that a separate query returns."""
+    from src.workers.portfolio_scheduler import _s4_signal_metadata_by_id
+    signal_ids = {"WDC": 4427}
+    signals_by_id = [
+        {"signal_id": 4427, "symbol": "WDC", "score": 0.363, "reasoning": "fb", "model_id": "finbert"},
+        {"signal_id": 4390, "symbol": "WDC", "score": -0.385, "reasoning": "ens", "model_id": "ensemble"},
+    ]
+    out = _s4_signal_metadata_by_id(signal_ids, signals_by_id)
+    assert out["WDC"]["score"] == 0.363
+    assert out["WDC"]["model_id"] == "finbert"
+
+
+def test_s4_signal_metadata_skips_symbol_with_no_matching_row():
+    from src.workers.portfolio_scheduler import _s4_signal_metadata_by_id
+    out = _s4_signal_metadata_by_id({"X": 99}, [{"signal_id": 1, "symbol": "Y", "score": 0.1, "reasoning": "", "model_id": "m"}])
+    assert out == {}
