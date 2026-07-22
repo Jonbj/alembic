@@ -47,7 +47,7 @@ async def _store(request: Request) -> MonitorStore:
     return MonitorStore(await get_pool(request))
 
 
-async def _require_mobile_token(request: Request) -> dict:
+async def require_mobile_token(request: Request) -> dict:
     """Dependency: validate mobile access token from Authorization header."""
     auth = request.headers.get("authorization", "")
     if not auth or not auth.lower().startswith("bearer "):
@@ -178,7 +178,7 @@ async def refresh(request: Request, body: RefreshRequest) -> LoginResponse:
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(request: Request, body: LogoutRequest) -> None:
-    claims = await _require_mobile_token(request)
+    claims = await require_mobile_token(request)
     store = await _store(request)
     refresh_hash = hash_refresh_token(body.refresh_token)
     session = await store.get_session_by_refresh_hash(refresh_hash)
@@ -195,7 +195,7 @@ async def register_device(
     request: Request,
     body: DeviceRegistrationRequest,
 ) -> DeviceRegistrationResponse:
-    claims = await _require_mobile_token(request)
+    claims = await require_mobile_token(request)
     store = await _store(request)
     user_id = parse_uuid_claim(claims, "sub")
 
@@ -240,7 +240,7 @@ async def register_device(
 
 @router.get("/me", response_model=UserInfo)
 async def me(request: Request) -> UserInfo:
-    claims = await _require_mobile_token(request)
+    claims = await require_mobile_token(request)
     store = await _store(request)
     user = await store.get_user(parse_uuid_claim(claims, "sub"))
     if user is None:
