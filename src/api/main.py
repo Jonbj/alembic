@@ -41,10 +41,11 @@ async def health() -> dict[str, str]:
     return {"status": "ok", "mode": "backtest"}
 
 
-from src.api.routes import admin, auth, backtest, config_routes, llm_routes, news_routes, performance, portfolio, signals, strategies, trading, system_routes, validation_routes, labeling_routes, quality_routes, mobile_auth  # noqa: E402
+from src.api.routes import admin, auth, backtest, config_routes, llm_routes, news_routes, performance, portfolio, signals, strategies, trading, system_routes, validation_routes, labeling_routes, quality_routes, mobile_auth, mobile_read  # noqa: E402
 
 app.include_router(auth.router)
 app.include_router(mobile_auth.router, prefix="/api/mobile/v1")
+app.include_router(mobile_read.router, prefix="/api/mobile/v1")
 app.include_router(signals.router)
 app.include_router(admin.router)
 app.include_router(performance.router)

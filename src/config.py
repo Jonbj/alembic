@@ -116,6 +116,12 @@ class Config(BaseModel):
     MOBILE_TOKEN_PEPPER: str = Field(
         default_factory=lambda: os.environ.get("MOBILE_TOKEN_PEPPER", "")
     )
+    MIN_SUPPORTED_MOBILE_APP_VERSION: str = Field(
+        default_factory=lambda: os.environ.get("MIN_SUPPORTED_MOBILE_APP_VERSION", "1.0.0")
+    )
+    LATEST_MOBILE_APP_VERSION: str = Field(
+        default_factory=lambda: os.environ.get("LATEST_MOBILE_APP_VERSION", "1.0.0")
+    )
 
     # Ollama cloud API
     OLLAMA_API_KEY: str = Field(default_factory=lambda: os.environ.get("OLLAMA_API_KEY", ""))
