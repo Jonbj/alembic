@@ -301,21 +301,18 @@ class TestMobileAuthorizationMatrix:
     when called with a mobile access token.
     """
 
-    MUTATION_ROUTES = [
-        # Admin mutations
-        ("POST", "/api/admin/mode", {"mode": "halted"}),
-        ("POST", "/api/admin/llm-models", {"models": "glm52"}),
-        ("POST", "/api/admin/killswitch", {"reason": "test"}),
-        ("DELETE", "/api/admin/killswitch", {}),
-        ("POST", "/api/admin/killswitch/recovery-token", {}),
-        # Weight/strategy/config/labeling mutations
-        ("POST", "/api/weights/approve", {"weights": {}}),
-        ("POST", "/api/config", {"key": "x", "value": "y"}),
-        ("POST", "/api/strategies/S1/promote", {}),
-        ("POST", "/api/strategies/S1/approve", {}),
-        ("POST", "/api/strategies/S1/demote", {}),
-        ("POST", "/api/labeling/1", {"label": "neutral"}),
-    ]
+    # Programmatically discover every unsafe (non-GET/HEAD/OPTIONS) route that
+    # is outside the mobile prefix. This makes the matrix fail when a new
+    # mutation is added without an explicit authorization classification.
+    MUTATION_ROUTES: list[tuple[str, str, dict]] = []
+    for route in app.routes:
+        path = getattr(route, "path", "")
+        if not path.startswith("/api/") or path.startswith("/api/mobile/v1"):
+            continue
+        methods: set[str] = getattr(route, "methods", set()) - {"GET", "HEAD", "OPTIONS"}
+        for method in methods:
+            body = {"_matrix_probe": True}
+            MUTATION_ROUTES.append((method, path, body))
 
     @pytest.mark.parametrize("method,path,body", MUTATION_ROUTES)
     async def test_mutation_route_returns_403(

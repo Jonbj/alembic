@@ -16,10 +16,6 @@ class ReplayDetectedError(Exception):
     """Raised when a refresh token is reused; the family has been revoked."""
 
 
-class RotationError(Exception):
-    """Raised when atomic rotation fails before commit."""
-
-
 @dataclass(frozen=True)
 class MonitorUser:
     id: UUID
