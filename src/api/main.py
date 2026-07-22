@@ -36,6 +36,45 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def mobile_token_boundary(request, call_next):
+    """Anti-corruption layer: mobile JWTs are valid only under /api/mobile/v1.
+
+    Any request outside the mobile prefix that presents a bearer token whose
+    audience is ``alembic-mobile`` is rejected with 403 before it reaches a
+    route. This keeps the read-only monitor boundary explicit even if a future
+    route forgets to enforce its own auth dependency.
+    """
+    from fastapi import Request
+    from fastapi.responses import JSONResponse
+    from jose import JWTError, jwt
+
+    from src.api.jwt_utils import _secret
+    from src.config import config
+
+    MOBILE_AUDIENCE = "alembic-mobile"
+    path = request.url.path
+    if not path.startswith("/api/mobile/v1"):
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            token = auth[7:].strip()
+            try:
+                payload = jwt.decode(
+                    token,
+                    _secret(),
+                    algorithms=[config.JWT_ALGORITHM],
+                    audience=MOBILE_AUDIENCE,
+                )
+                if payload.get("aud") == MOBILE_AUDIENCE:
+                    return JSONResponse(
+                        status_code=403,
+                        content={"detail": "Mobile token cannot access this resource"},
+                    )
+            except JWTError:
+                pass
+    return await call_next(request)
+
+
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "mode": "backtest"}

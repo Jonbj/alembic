@@ -7,9 +7,10 @@ No trading, admin, strategy, or labeling mutations are allowed.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import UUID, uuid4
 
 import bcrypt
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from src.api.dependencies import get_pool
 from src.api.mobile_models import (
@@ -31,7 +32,7 @@ from src.mobile_monitoring.auth import (
     parse_uuid_claim,
 )
 from src.mobile_monitoring.models import DeviceResponse
-from src.mobile_monitoring.store import MonitorStore
+from src.mobile_monitoring.store import MonitorStore, ReplayDetectedError
 
 router = APIRouter(prefix="/auth", tags=["mobile-auth"])
 
@@ -47,8 +48,16 @@ async def _store(request: Request) -> MonitorStore:
     return MonitorStore(await get_pool(request))
 
 
-async def require_mobile_token(request: Request) -> dict:
-    """Dependency: validate mobile access token from Authorization header."""
+async def require_mobile_token(
+    request: Request,
+    pool = Depends(get_pool),
+) -> dict:
+    """Dependency: validate mobile access token from Authorization header.
+
+    In addition to JWT signature/audience/scope/expiry checks, the token's JTI
+    must map to an active monitor session. Family-wide revocation therefore
+    immediately invalidates outstanding access tokens.
+    """
     auth = request.headers.get("authorization", "")
     if not auth or not auth.lower().startswith("bearer "):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer token")
@@ -57,6 +66,13 @@ async def require_mobile_token(request: Request) -> dict:
         claims = decode_mobile_access_token(token)
     except Exception as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
+
+    jti = parse_uuid_claim(claims, "jti")
+    store = MonitorStore(pool)
+    session = await store.get_session_by_access_jti(jti)
+    if session is None or session.revoked_at is not None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session revoked")
+
     return claims
 
 
@@ -102,16 +118,19 @@ async def login(
 
     family_id = create_session_family()
     raw_refresh = generate_refresh_token()
+    access_jti = uuid4()
     session = await store.create_session(
         user_id=user.id,
         device_id=device.id,
         refresh_hash=hash_refresh_token(raw_refresh),
         family_id=family_id,
+        access_jti=access_jti,
     )
 
     access_token = create_mobile_access_token(
         user_id=user.id,
         device_id=device.id,
+        jti=access_jti,
     )
 
     return _response(user, device, session, access_token, raw_refresh)
@@ -123,19 +142,27 @@ async def refresh(request: Request, body: RefreshRequest) -> LoginResponse:
     old_hash = hash_refresh_token(body.refresh_token)
     old_session = await store.get_session_by_refresh_hash(old_hash)
 
+    # Reuse of an already-rotated or revoked refresh token revokes the entire
+    # family atomically. The error message only claims revocation when we have
+    # successfully issued the revocation query.
     if old_session is None or old_session.revoked_at is not None:
         known = await store.pool.fetchrow(
-            "SELECT id FROM monitor_sessions WHERE refresh_token_hash=$1", old_hash
+            """
+            SELECT id, family_id FROM monitor_sessions
+            WHERE refresh_token_hash=$1
+            """,
+            old_hash,
         )
         if known:
+            await store.revoke_family(known["family_id"])
             raise HTTPException(
                 status.HTTP_401_UNAUTHORIZED,
-                "Refresh token reuse detected; session revoked",
+                "Refresh token reuse detected; all family sessions revoked",
             )
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid refresh token")
 
     if old_session.expires_at < datetime.now(timezone.utc):
-        await store.revoke_session(old_session.id)
+        await store.revoke_family(old_session.family_id)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token expired")
 
     user = await store.get_user(old_session.user_id)
@@ -144,41 +171,45 @@ async def refresh(request: Request, body: RefreshRequest) -> LoginResponse:
         await store.revoke_session(old_session.id)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User or device inactive")
 
-    # Replay detection: any later active session in the same family means this token
-    # was already consumed.
-    active_same_family = await store.pool.fetchval(
-        """
-        SELECT COUNT(*) FROM monitor_sessions
-        WHERE family_id=$1 AND created_at > $2 AND revoked_at IS NULL
-        """,
-        old_session.family_id,
-        old_session.created_at,
-    )
-    if active_same_family:
-        await store.revoke_all_sessions_for_device(user.id, device.id)
+    new_refresh = generate_refresh_token()
+    access_jti = uuid4()
+    try:
+        new_session = await store.rotate_session_atomic(
+            old_session,
+            hash_refresh_token(new_refresh),
+            access_jti=access_jti,
+        )
+    except ReplayDetectedError:
+        # Atomic rotation already revoked the whole family before raising.
         raise HTTPException(
             status.HTTP_401_UNAUTHORIZED,
-            "Refresh token replay detected; device sessions revoked",
-        )
+            "Refresh token replay detected; all family sessions revoked",
+        ) from None
+    except Exception:
+        # Any other failure rolled back the atomic transaction; do not claim
+        # revocation occurred and do not expose internal details.
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "Token rotation failed",
+        ) from None
 
-    new_refresh = generate_refresh_token()
-    new_session = await store.rotate_session(
-        old_session,
-        hash_refresh_token(new_refresh),
-    )
     await store.mark_session_used(new_session.id)
 
     access_token = create_mobile_access_token(
         user_id=user.id,
         device_id=device.id,
+        jti=access_jti,
     )
 
     return _response(user, device, new_session, access_token, new_refresh)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(request: Request, body: LogoutRequest) -> None:
-    claims = await require_mobile_token(request)
+async def logout(
+    request: Request,
+    body: LogoutRequest,
+    claims: dict = Depends(require_mobile_token),
+) -> None:
     store = await _store(request)
     refresh_hash = hash_refresh_token(body.refresh_token)
     session = await store.get_session_by_refresh_hash(refresh_hash)
@@ -194,8 +225,8 @@ async def logout(request: Request, body: LogoutRequest) -> None:
 async def register_device(
     request: Request,
     body: DeviceRegistrationRequest,
+    claims: dict = Depends(require_mobile_token),
 ) -> DeviceRegistrationResponse:
-    claims = await require_mobile_token(request)
     store = await _store(request)
     user_id = parse_uuid_claim(claims, "sub")
 
@@ -220,9 +251,10 @@ async def register_device(
             push_enabled=body.push_enabled,
             last_seen_at=datetime.now(timezone.utc),
         )
-        device = await store.get_device(existing.id)
-        if device is None:
+        updated_device = await store.get_device(existing.id)
+        if updated_device is None:
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Device update failed")
+        device = updated_device
 
     return DeviceRegistrationResponse(
         device=DeviceResponse(
@@ -239,8 +271,10 @@ async def register_device(
 
 
 @router.get("/me", response_model=UserInfo)
-async def me(request: Request) -> UserInfo:
-    claims = await require_mobile_token(request)
+async def me(
+    request: Request,
+    claims: dict = Depends(require_mobile_token),
+) -> UserInfo:
     store = await _store(request)
     user = await store.get_user(parse_uuid_claim(claims, "sub"))
     if user is None:

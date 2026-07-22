@@ -69,6 +69,13 @@ CREATE INDEX IF NOT EXISTS idx_monitor_sessions_active
 CREATE INDEX IF NOT EXISTS idx_monitor_sessions_family
     ON monitor_sessions (family_id, created_at);
 
+-- MOB-02: bind each short-lived access token to its issuing session so that
+-- family-wide revocation immediately invalidates outstanding mobile access JWTs.
+ALTER TABLE monitor_sessions ADD COLUMN IF NOT EXISTS access_jti UUID;
+CREATE INDEX IF NOT EXISTS idx_monitor_sessions_access_jti
+    ON monitor_sessions (access_jti)
+    WHERE access_jti IS NOT NULL;
+
 -- Immutable, versioned monitoring snapshots assembled server-side. Stored
 -- every five minutes during expected windows and on material state transitions.
 CREATE TABLE IF NOT EXISTS portfolio_monitor_snapshots (

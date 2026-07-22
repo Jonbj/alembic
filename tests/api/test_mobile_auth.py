@@ -130,7 +130,7 @@ class TestMobileAuth:
         claims = decode_mobile_access_token(data["access_token"])
         assert claims["aud"] == "alembic-mobile"
         assert claims["type"] == "access"
-        assert claims["scope"] == ["monitor:read"]
+        assert claims["scope"] == ["monitor:read", "monitor:device"]
         assert claims["device_id"] == str(data["device_id"])
 
         device = await store.get_device(data["device_id"])

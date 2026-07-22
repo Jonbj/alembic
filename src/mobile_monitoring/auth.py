@@ -58,7 +58,7 @@ def create_mobile_access_token(
     expires_minutes: int | None = None,
 ) -> str:
     """Issue a mobile access token."""
-    scopes = scopes or ["monitor:read"]
+    scopes = scopes or ["monitor:read", "monitor:device"]
     jti = jti or uuid4()
     expire_minutes = expires_minutes or config.MOBILE_ACCESS_TOKEN_EXPIRE_MINUTES
     expire = datetime.now(timezone.utc) + timedelta(minutes=expire_minutes)
