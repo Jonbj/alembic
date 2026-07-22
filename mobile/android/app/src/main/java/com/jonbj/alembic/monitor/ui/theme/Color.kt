@@ -1,0 +1,27 @@
+package com.jonbj.alembic.monitor.ui.theme
+
+import androidx.compose.ui.graphics.Color
+
+val md_theme_dark_primary = Color(0xFF4ECCA3)
+val md_theme_dark_onPrimary = Color(0xFF003829)
+val md_theme_dark_primaryContainer = Color(0xFF00513D)
+val md_theme_dark_onPrimaryContainer = Color(0xFF74F8C8)
+val md_theme_dark_secondary = Color(0xFFB3CCBF)
+val md_theme_dark_onSecondary = Color(0xFF1E352C)
+val md_theme_dark_secondaryContainer = Color(0xFF354B42)
+val md_theme_dark_onSecondaryContainer = Color(0xFFCFE9DB)
+val md_theme_dark_tertiary = Color(0xFFA8CBE4)
+val md_theme_dark_onTertiary = Color(0xFF0C3449)
+val md_theme_dark_tertiaryContainer = Color(0xFF274B61)
+val md_theme_dark_onTertiaryContainer = Color(0xFFC4E5FF)
+val md_theme_dark_error = Color(0xFFFFB4AB)
+val md_theme_dark_onError = Color(0xFF690005)
+val md_theme_dark_errorContainer = Color(0xFF93000A)
+val md_theme_dark_onErrorContainer = Color(0xFFFFDAD6)
+val md_theme_dark_background = Color(0xFF0F1C2E)
+val md_theme_dark_onBackground = Color(0xFFE0E2E8)
+val md_theme_dark_surface = Color(0xFF0F1C2E)
+val md_theme_dark_onSurface = Color(0xFFE0E2E8)
+val md_theme_dark_surfaceVariant = Color(0xFF404944)
+val md_theme_dark_onSurfaceVariant = Color(0xFFBFC9C2)
+val md_theme_dark_outline = Color(0xFF89938D)

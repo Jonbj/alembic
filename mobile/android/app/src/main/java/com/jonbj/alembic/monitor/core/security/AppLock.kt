@@ -1,0 +1,74 @@
+package com.jonbj.alembic.monitor.core.security
+
+import android.os.SystemClock
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+
+interface AppLock {
+    val isLocked: StateFlow<Boolean>
+    fun onAppForeground()
+    fun onAppBackground()
+    fun unlock()
+}
+
+class TimeoutAppLock(
+    private val sessionVault: SessionVault,
+    private val timeoutMillis: Long = DEFAULT_TIMEOUT_MS,
+    private val clock: () -> Long = { SystemClock.elapsedRealtime() },
+    dispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Main.immediate
+) : AppLock {
+
+    private val scope = CoroutineScope(SupervisorJob() + dispatcher)
+    private val _isLocked = MutableStateFlow(false)
+    override val isLocked: StateFlow<Boolean> = _isLocked.asStateFlow()
+
+    private var backgroundAt: Long? = null
+    private var hasSession = sessionVault.sessionFlow.value != null
+
+    init {
+        sessionVault.sessionFlow
+            .onEach { session ->
+                hasSession = session != null
+                if (session == null) {
+                    _isLocked.value = false
+                }
+            }
+            .launchIn(scope)
+    }
+
+    override fun onAppForeground() {
+        val wasBackgroundAt = backgroundAt
+        backgroundAt = null
+        if (!hasSession) {
+            _isLocked.value = false
+            return
+        }
+        if (wasBackgroundAt != null) {
+            val elapsed = clock() - wasBackgroundAt
+            if (elapsed >= timeoutMillis) {
+                _isLocked.value = true
+            }
+        }
+    }
+
+    override fun onAppBackground() {
+        if (hasSession) {
+            backgroundAt = clock()
+        }
+    }
+
+    override fun unlock() {
+        _isLocked.value = false
+        backgroundAt = null
+    }
+
+    companion object {
+        private const val DEFAULT_TIMEOUT_MS = 5L * 60L * 1000L
+    }
+}

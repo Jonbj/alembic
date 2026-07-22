@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Alembic Monitor</string>
+
+    <!-- Auth -->
+    <string name="login_title">Accesso monitor Alembic</string>
+    <string name="username">Username</string>
+    <string name="password">Password</string>
+    <string name="login">Accedi</string>
+    <string name="login_error">Accesso fallito. Verifica le credenziali e la rete.</string>
+    <string name="logout">Esci</string>
+
+    <!-- Biometric -->
+    <string name="biometric_title">Sblocca Alembic Monitor</string>
+    <string name="biometric_subtitle">Conferma la tua identità per continuare.</string>
+    <string name="biometric_cancel">Annulla</string>
+    <string name="unlock">Sblocca</string>
+
+    <!-- Navigation -->
+    <string name="nav_status">Stato</string>
+    <string name="nav_performance">Andamento</string>
+    <string name="nav_portfolio">Portafoglio</string>
+    <string name="nav_events">Eventi</string>
+
+    <!-- Status -->
+    <string name="status_operational">OPERATIVO</string>
+    <string name="status_degraded">DEGRADATO</string>
+    <string name="status_blocked">BLOCCATO</string>
+    <string name="status_paused">IN PAUSA</string>
+    <string name="nav">NAV</string>
+    <string name="today">Oggi</string>
+    <string name="drawdown">Drawdown</string>
+    <string name="exposure">Esposizione</string>
+    <string name="cash">Cash</string>
+    <string name="positions">Posizioni</string>
+    <string name="pipeline">Pipeline</string>
+    <string name="strategies">Strategie</string>
+    <string name="updated">Aggiornato %1$s</string>
+    <string name="offline">OFFLINE</string>
+    <string name="cached">In cache</string>
+    <string name="unknown">Sconosciuto</string>
+
+    <!-- Performance -->
+    <string name="period_1w">1S</string>
+    <string name="period_1m">1M</string>
+    <string name="period_3m">3M</string>
+    <string name="period_6m">6M</string>
+    <string name="period_1y">1A</string>
+    <string name="period_all">Tutto</string>
+    <string name="portfolio_return">Rendimento</string>
+    <string name="max_drawdown">Max drawdown</string>
+    <string name="benchmark">Benchmark</string>
+    <string name="alpha">Alpha</string>
+    <string name="realized_pnl">Realized P&L</string>
+
+    <!-- Portfolio -->
+    <string name="position_weight">Peso</string>
+    <string name="market_value">Valore</string>
+    <string name="unrealized_pnl">Unreal. P&L</string>
+    <string name="quantity">Quantità</string>
+    <string name="avg_entry">Entry medio</string>
+    <string name="current_price">Prezzo</string>
+
+    <!-- Events -->
+    <string name="filter_all">Tutti</string>
+    <string name="filter_critical">Critici</string>
+    <string name="filter_trading">Trading</string>
+    <string name="filter_system">Sistema</string>
+    <string name="event_open">Aperto</string>
+    <string name="event_resolved">Risolto</string>
+
+    <!-- Errors -->
+    <string name="error_generic">Errore imprevisto</string>
+    <string name="retry">Riprova</string>
+    <string name="empty_data">Nessun dato disponibile</string>
+    <string name="version_update_required">Aggiornamento richiesto</string>
+</resources>

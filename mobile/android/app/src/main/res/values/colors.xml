@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#0F1C2E</color>
+    <color name="ic_launcher_foreground">#4ECCA3</color>
+
+    <!-- Material 3 baseline seed used in Theme.kt -->
+    <color name="seed">#4ECCA3</color>
+</resources>
