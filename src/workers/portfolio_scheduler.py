@@ -348,6 +348,21 @@ def _get_regime_multiplier_from_redis(redis_url: str) -> float:
 _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
 
 
+def _peak_and_drawdown(raw_peak: float | None, equity: float) -> tuple[float, float]:
+    """Return (peak_equity, drawdown_fraction) for the drawdown-cap kill-switch.
+
+    Seeds peak = equity on the first observation (raw_peak is None — e.g. an
+    unset/expired Redis key). Bug 2026-07-22: the old inline logic defaulted
+    peak to equity but only persisted it on ``equity > peak`` — never true on an
+    empty key — so the peak never seeded, drawdown stayed 0, and the cap could
+    never fire. The caller persists the returned peak every cycle so it always
+    survives.
+    """
+    peak = equity if raw_peak is None else max(raw_peak, equity)
+    drawdown = (peak - equity) / peak if peak > 0 else 0.0
+    return peak, drawdown
+
+
 def _build_f8_shadow_rows(cycle_ts, feedback_shadow: dict | None) -> list[dict]:
     """Turn CycleResult.feedback_shadow into f8_regime_scale_shadow rows (#32).
 
@@ -1786,17 +1801,18 @@ def _run_cycle_inner() -> dict:
         _r_dd = _Redis2.from_url(config.REDIS_URL, decode_responses=True)
         try:
             _raw_peak = _r_dd.get(_PEAK_EQUITY_KEY)
-            peak_equity = float(_raw_peak) if _raw_peak else equity
-            if equity > peak_equity:
-                _r_dd.set(_PEAK_EQUITY_KEY, str(equity))
-                peak_equity = equity
+            peak_equity, drawdown = _peak_and_drawdown(
+                float(_raw_peak) if _raw_peak else None, equity
+            )
+            # Persist every cycle so the peak always survives — seeds on the
+            # first observation (the old code never did, disabling the cap).
+            _r_dd.set(_PEAK_EQUITY_KEY, str(peak_equity))
 
             # Cache equity for consumers that need account size (e.g. the
             # loss-feedback relative trigger). Legacy execution wrote this key;
             # in portfolio mode this is the authoritative writer.
             _r_dd.setex("portfolio:value", 86400, str(equity))
 
-            drawdown = (peak_equity - equity) / peak_equity if peak_equity > 0 else 0.0
             _dd_cap = _load_risk_config()["portfolio_drawdown"]
             if drawdown >= _dd_cap:
                 _dd_reason = f"portfolio drawdown {drawdown:.1%} >= {_dd_cap:.0%} cap"

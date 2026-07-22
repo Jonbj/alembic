@@ -2551,3 +2551,30 @@ def test_build_f8_shadow_rows_tolerates_missing_keys():
     assert rows[0]["scale"] == 0.64
     assert rows[0]["unscaled_weight"] is None
     assert rows[0]["applied"] is None
+
+
+# ── drawdown kill-switch peak seeding (bug 2026-07-22: peak never persisted) ──
+# portfolio:peak_equity was never written because the write condition was
+# `equity > peak` while peak defaulted to equity on an empty key — so the peak
+# never seeded and the 5% drawdown cap could never fire.
+
+
+def test_peak_and_drawdown_seeds_on_first_observation():
+    from src.workers.portfolio_scheduler import _peak_and_drawdown
+    peak, dd = _peak_and_drawdown(None, 110000.0)
+    assert peak == 110000.0
+    assert dd == 0.0
+
+
+def test_peak_and_drawdown_measures_from_prior_peak():
+    from src.workers.portfolio_scheduler import _peak_and_drawdown
+    peak, dd = _peak_and_drawdown(120000.0, 108000.0)
+    assert peak == 120000.0
+    assert dd == pytest.approx((120000.0 - 108000.0) / 120000.0)  # 10%
+
+
+def test_peak_and_drawdown_advances_on_new_high():
+    from src.workers.portfolio_scheduler import _peak_and_drawdown
+    peak, dd = _peak_and_drawdown(100000.0, 120000.0)
+    assert peak == 120000.0
+    assert dd == 0.0
