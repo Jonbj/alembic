@@ -1,4 +1,5 @@
 """FastAPI dependency factories (shared by routes, avoids circular import with main.py)."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -22,18 +23,26 @@ def close_redis() -> None:
         _redis_client = None
 
 
+def get_redis_client() -> Redis:
+    """Return the Redis client owned by the FastAPI application lifespan."""
+    if _redis_client is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=503, detail="Cache unavailable")
+    return _redis_client
+
+
 def get_redis_store():
     """FastAPI dependency: RedisStore backed by the app-lifecycle Redis client."""
     from src.store.redis_store import RedisStore
-    if _redis_client is None:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=503, detail="Cache unavailable")
-    return RedisStore(_redis_client)
+
+    return RedisStore(get_redis_client())
 
 
 def get_pg_store():
     """FastAPI dependency: yields PostgreSQLStore and returns connection to pool on request end."""
     from src.store.pg_store import PostgreSQLStore
+
     pg = PostgreSQLStore()
     try:
         yield pg
@@ -44,7 +53,9 @@ def get_pg_store():
 def get_alpaca_trading_client():
     """FastAPI dependency: Alpaca TradingClient from app config."""
     from alpaca.trading.client import TradingClient
+
     from src.config import config
+
     return TradingClient(
         api_key=config.ALPACA_API_KEY,
         secret_key=config.ALPACA_SECRET_KEY,

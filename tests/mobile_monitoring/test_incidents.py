@@ -8,11 +8,17 @@ from pathlib import Path
 import asyncpg
 import pytest
 
-_MIGRATION_PATH = Path(__file__).parent.parent.parent / "migrations" / "041_mobile_monitoring.sql"
+_MIGRATION_PATHS = (
+    Path(__file__).parent.parent.parent / "migrations" / "041_mobile_monitoring.sql",
+    Path(__file__).parent.parent.parent
+    / "migrations"
+    / "042_mobile_session_access_jti.sql",
+)
 
 
 def _dsn() -> str:
     from src.config import config
+
     return os.environ.get("DATABASE_URL") or str(config.DATABASE_URL)
 
 
@@ -21,7 +27,8 @@ async def pool():
     dsn = _dsn()
     pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=4)
     async with pool.acquire() as conn:
-        await conn.execute(_MIGRATION_PATH.read_text())
+        for migration_path in _MIGRATION_PATHS:
+            await conn.execute(migration_path.read_text())
     yield pool
     await pool.close()
 
@@ -29,6 +36,14 @@ async def pool():
 @pytest.fixture
 async def store(pool):
     from src.mobile_monitoring.incidents import IncidentStore
+
+    async with pool.acquire() as conn:
+        await conn.execute("TRUNCATE TABLE mobile_notification_deliveries CASCADE")
+        await conn.execute("TRUNCATE TABLE mobile_event_history CASCADE")
+        await conn.execute("TRUNCATE TABLE mobile_events CASCADE")
+        await conn.execute("TRUNCATE TABLE monitor_sessions CASCADE")
+        await conn.execute("TRUNCATE TABLE monitor_devices CASCADE")
+        await conn.execute("TRUNCATE TABLE monitor_users CASCADE")
     yield IncidentStore(pool)
     async with pool.acquire() as conn:
         await conn.execute("TRUNCATE TABLE mobile_notification_deliveries CASCADE")
@@ -42,8 +57,10 @@ async def store(pool):
 @pytest.fixture
 async def user_device(pool):
     from src.mobile_monitoring.store import MonitorStore
+
     s = MonitorStore(pool)
     import bcrypt
+
     user = await s.create_user(
         username="monitor",
         password_hash=bcrypt.hashpw("x".encode(), bcrypt.gensalt()).decode(),
@@ -59,7 +76,9 @@ async def user_device(pool):
 
 
 class TestIncidentLifecycle:
-    async def test_open_incident_creates_event_history_and_outbox(self, store, user_device):
+    async def test_open_incident_creates_event_history_and_outbox(
+        self, store, user_device
+    ):
         from src.mobile_monitoring.models import EventCategory, EventKind, Severity
 
         result = await store.record_observation(
@@ -73,16 +92,25 @@ class TestIncidentLifecycle:
         )
         assert result.transition == "open"
         async with store.pool.acquire() as conn:
-            event = await conn.fetchrow("SELECT * FROM mobile_events WHERE fingerprint=$1", "system:killswitch")
+            event = await conn.fetchrow(
+                "SELECT * FROM mobile_events WHERE fingerprint=$1", "system:killswitch"
+            )
             assert event["status"] == "open"
             assert event["severity"] == "critical"
-            history = await conn.fetch("SELECT * FROM mobile_event_history WHERE event_id=$1", event["id"])
+            history = await conn.fetch(
+                "SELECT * FROM mobile_event_history WHERE event_id=$1", event["id"]
+            )
             assert len(history) == 1
-            deliveries = await conn.fetch("SELECT * FROM mobile_notification_deliveries WHERE event_id=$1", event["id"])
+            deliveries = await conn.fetch(
+                "SELECT * FROM mobile_notification_deliveries WHERE event_id=$1",
+                event["id"],
+            )
             assert len(deliveries) == 1
             assert deliveries[0]["transition"] == "open"
 
-    async def test_repeated_observation_updates_last_seen_without_duplicate_open(self, store):
+    async def test_repeated_observation_updates_last_seen_without_duplicate_open(
+        self, store
+    ):
         from src.mobile_monitoring.models import EventCategory, EventKind, Severity
 
         await store.record_observation(
@@ -105,7 +133,10 @@ class TestIncidentLifecycle:
         )
         assert result2.transition == "observe"
         async with store.pool.acquire() as conn:
-            count = await conn.fetchval("SELECT COUNT(*) FROM mobile_events WHERE fingerprint=$1", "system:killswitch")
+            count = await conn.fetchval(
+                "SELECT COUNT(*) FROM mobile_events WHERE fingerprint=$1",
+                "system:killswitch",
+            )
             assert count == 1
 
     async def test_escalate_increases_severity(self, store):
@@ -131,7 +162,10 @@ class TestIncidentLifecycle:
         )
         assert result.transition == "escalate"
         async with store.pool.acquire() as conn:
-            event = await conn.fetchrow("SELECT * FROM mobile_events WHERE fingerprint=$1", "pipeline:broker_stale")
+            event = await conn.fetchrow(
+                "SELECT * FROM mobile_events WHERE fingerprint=$1",
+                "pipeline:broker_stale",
+            )
             assert event["status"] == "escalated"
             assert event["severity"] == "critical"
 
@@ -158,7 +192,10 @@ class TestIncidentLifecycle:
         )
         assert result.transition == "recover"
         async with store.pool.acquire() as conn:
-            event = await conn.fetchrow("SELECT * FROM mobile_events WHERE fingerprint=$1", "pipeline:broker_stale")
+            event = await conn.fetchrow(
+                "SELECT * FROM mobile_events WHERE fingerprint=$1",
+                "pipeline:broker_stale",
+            )
             assert event["status"] == "recovered"
             deliveries = await conn.fetch(
                 "SELECT transition FROM mobile_notification_deliveries WHERE event_id=$1 ORDER BY created_at",
@@ -182,5 +219,7 @@ class TestIncidentLifecycle:
         )
         assert result.transition == "closed"
         async with store.pool.acquire() as conn:
-            event = await conn.fetchrow("SELECT * FROM mobile_events WHERE fingerprint=$1", "order:123:rejected")
+            event = await conn.fetchrow(
+                "SELECT * FROM mobile_events WHERE fingerprint=$1", "order:123:rejected"
+            )
             assert event["status"] == "closed"
