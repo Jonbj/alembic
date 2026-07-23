@@ -696,6 +696,43 @@ def _filter_stale_signals(
     return fresh, stale
 
 
+def _filter_fallback_signals(signals: list) -> tuple[list, list]:
+    """Split signals into (non_fallback, fallback) by ``fallback_used``.
+
+    #108: a BUY must not rest on a FinBERT-fallback signal — fallback fires when
+    the ensemble is unavailable/diverged (low reliability, lesson from the SPCX
+    −0.573 fallback → −20.23 loss on 2026-07-01). The reversal SELL path already
+    excludes fallback signals; this mirrors that guard on the BUY/ranking side.
+    """
+    non_fallback, fallback = [], []
+    for sig in signals:
+        (fallback if getattr(sig, "fallback_used", False) else non_fallback).append(sig)
+    return non_fallback, fallback
+
+
+def _s4_signal_metadata_by_id(signal_ids: dict, signals_by_id: list[dict]) -> dict:
+    """Map each symbol's score/reasoning/model_id to its RESOLVED ``signal_id``.
+
+    #109: the logged S4 conviction must come from the same signal the decision
+    links to. Previously the id (fetch_latest_signal_ids) and the score
+    (fetch_signals_for_cycle) came from two independent "latest signal" queries
+    that could resolve to different signals — WDC recorded signal_id=4427
+    (finbert +0.363) with signal_score=−0.385 (stale ensemble). Keying on the
+    resolved id makes the two impossible to desync.
+    """
+    by_id = {r["signal_id"]: r for r in signals_by_id}
+    out: dict = {}
+    for sym, sid in signal_ids.items():
+        row = by_id.get(sid)
+        if row is not None:
+            out[sym] = {
+                "score": row["score"],
+                "reasoning": row["reasoning"],
+                "model_id": row["model_id"],
+            }
+    return out
+
+
 def _mark_stop_loss_today(redis_url: str, symbol: str) -> None:
     """Write stop_loss_today:{symbol} with TTL until midnight UTC.
 
@@ -2233,9 +2270,18 @@ def _run_cycle_inner() -> dict:
         _unpinned_for_signals = [s for s in _s4_symbols if s not in _s4_signals]
         if _unpinned_for_signals:
             try:
-                _raw_sigs = _pg.fetch_signals_for_cycle(hours=24, symbols=_unpinned_for_signals)
-                for s in _raw_sigs:
-                    _s4_signals[s.symbol] = {"score": s.score, "reasoning": s.reasoning, "model_id": s.model_id}
+                # #109: derive score/reasoning from the SAME signal_id resolved
+                # above (fetch by exact id), not a separate "latest signal" query
+                # — the two could resolve to different signals and desync the
+                # logged conviction (WDC: id=finbert +0.363, score=ensemble −0.385).
+                _unpinned_ids = {
+                    s: _signal_ids[s] for s in _unpinned_for_signals if s in _signal_ids
+                }
+                _by_id_rows = (
+                    _pg.fetch_signals_by_ids(list(_unpinned_ids.values()))
+                    if _unpinned_ids else []
+                )
+                _s4_signals.update(_s4_signal_metadata_by_id(_unpinned_ids, _by_id_rows))
             except Exception:
                 pass
         # FIX-F: pre-fetch last signal (any age, up to 48h) for SELL-weight-0 orders
@@ -2944,6 +2990,16 @@ def _build_strategy_instance(entry, bars_df):
                 symbols=s4_symbols,
                 news_age_hours=_cfg.MAX_NEWS_AGE_HOURS,  # FIX-03
             )
+            if signals:
+                # #108: exclude FinBERT-fallback signals from BUY ranking — the
+                # reversal SELL path already excludes them (low reliability); the
+                # BUY side must match, or S4 buys on the weak local model.
+                signals, _fb_dropped = _filter_fallback_signals(signals)
+                if _fb_dropped:
+                    log.info(
+                        "S4: dropped %d fallback signal(s) from BUY ranking (#108): %s",
+                        len(_fb_dropped), sorted(s.symbol for s in _fb_dropped),
+                    )
             if signals:
                 # P1-S4-FRESHNESS: drop signals older than max_signal_age_hours.
                 _now_utc = datetime.now(timezone.utc)
