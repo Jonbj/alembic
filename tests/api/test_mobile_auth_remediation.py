@@ -18,32 +18,58 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import asyncpg
 import bcrypt
-import httpx
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
+from httpx import Response
+from jose import jwt
+from starlette.routing import BaseRoute
 
+from src.api.jwt_utils import _secret
 from src.api.main import app
+from src.api.routes.mobile_auth import get_login_rate_limiter
 from src.config import config
 from src.mobile_monitoring.auth import (
-    create_mobile_access_token,
-    decode_mobile_access_token,
     generate_refresh_token,
     hash_refresh_token,
 )
-from src.mobile_monitoring.store import MonitorStore
+from src.mobile_monitoring.rate_limit import RateLimitResult
+from src.mobile_monitoring.store import (
+    MonitorPrincipalInactiveError,
+    MonitorStore,
+    ReplayDetectedError,
+)
 from tests.api.test_mobile_auth import _login
 
 pytestmark = pytest.mark.asyncio
 
-_MIGRATION_PATH = Path(__file__).parent.parent.parent / "migrations" / "041_mobile_monitoring.sql"
+
+class _AllowLogin:
+    """Test limiter that prevents integration tests sharing a Redis budget."""
+
+    def check(self, username: str, source: str) -> RateLimitResult:
+        del username, source
+        return RateLimitResult(allowed=True, retry_after_seconds=0)
+
+
+_MIGRATION_PATHS = (
+    Path(__file__).parent.parent.parent / "migrations" / "041_mobile_monitoring.sql",
+    Path(__file__).parent.parent.parent
+    / "migrations"
+    / "042_mobile_session_access_jti.sql",
+)
 
 
 def _dsn() -> str:
     return os.environ.get("DATABASE_URL") or str(config.DATABASE_URL)
+
+
+def _error_message(response: Response) -> str:
+    return str(response.json()["error"]["message"])
 
 
 @pytest_asyncio.fixture(loop_scope="function")
@@ -51,9 +77,9 @@ async def pg_pool():
     """Asyncpg pool for the test database with the mobile schema applied."""
     pool = await asyncpg.create_pool(dsn=_dsn(), min_size=1, max_size=4)
     assert pool is not None
-    migration_sql = _MIGRATION_PATH.read_text()
     async with pool.acquire() as conn:
-        await conn.execute(migration_sql)
+        for migration_path in _MIGRATION_PATHS:
+            await conn.execute(migration_path.read_text())
     yield pool
     await pool.close()
 
@@ -71,14 +97,17 @@ async def store(pg_pool):
 @pytest_asyncio.fixture(loop_scope="function")
 async def client():
     """TestClient for the mobile routes."""
+    app.dependency_overrides[get_login_rate_limiter] = _AllowLogin
     with TestClient(app) as c:
         yield c
+    app.dependency_overrides.pop(get_login_rate_limiter, None)
 
 
 @pytest.fixture
 async def monitor_user(store):
     """A provisioned monitor user with a known password."""
     import bcrypt
+
     return await store.create_user(
         username="alice",
         password_hash=bcrypt.hashpw("secret123".encode(), bcrypt.gensalt()).decode(),
@@ -139,10 +168,10 @@ class TestRefreshReplayAndAtomicity:
         replay = client.post(
             "/api/mobile/v1/auth/refresh", json={"refresh_token": refresh}
         )
-        assert replay.status_code == 401
+        assert replay.status_code == 409
         data = replay.json()
-        assert "detail" in data
-        detail = data["detail"].lower()
+        assert "error" in data
+        detail = _error_message(replay).lower()
         # Must claim revocation was committed.
         assert "revoked" in detail
         # Must not expose tokens/hashes.
@@ -153,7 +182,7 @@ class TestRefreshReplayAndAtomicity:
             "/api/mobile/v1/auth/refresh",
             json={"refresh_token": child_refresh},
         )
-        assert child_reuse.status_code == 401
+        assert child_reuse.status_code == 409
 
         # Child access token must now be rejected.
         me_after = client.get(
@@ -162,53 +191,48 @@ class TestRefreshReplayAndAtomicity:
         )
         assert me_after.status_code == 401
 
-    async def test_concurrent_refresh_same_token(self, client: TestClient, monitor_user, store):
-        """MOB-02: concurrent refresh of the same token produces <=1 success
-        and exactly one active successor."""
-
-        async def _worker(token: str) -> tuple[int, str | None]:
-            async with httpx.AsyncClient(
-                transport=httpx.ASGITransport(app=app), base_url="http://test"
-            ) as ac:
-                resp = await ac.post(
-                    "/api/mobile/v1/auth/refresh",
-                    json={"refresh_token": token},
-                )
-            body = resp.json() if resp.status_code == 200 else {}
-            return resp.status_code, body.get("refresh_token")
-
+    async def test_concurrent_refresh_same_token(
+        self, client: TestClient, monitor_user, store
+    ):
+        """Exactly one rotation succeeds and replay revokes its successor."""
         login = _login(client, "alice", "secret123")
         refresh = login["refresh_token"]
+        old_session = await store.get_session_by_refresh_hash(
+            hash_refresh_token(refresh)
+        )
+        assert old_session is not None
 
-        # Spawn concurrent refreshes using the same token.
         results = await asyncio.gather(
-            *[_worker(refresh) for _ in range(8)],
+            *[
+                store.rotate_session_atomic(
+                    old_session,
+                    hash_refresh_token(generate_refresh_token()),
+                    access_jti=uuid4(),
+                )
+                for _ in range(8)
+            ],
             return_exceptions=True,
         )
 
-        statuses = [
-            r[0] for r in results if isinstance(r, tuple) and len(r) == 2
-        ]
-        successes = statuses.count(200)
-        # At most one success.
-        assert successes <= 1, f"Expected <=1 success, got {successes}: {statuses}"
+        successes = [result for result in results if not isinstance(result, Exception)]
+        failures = [result for result in results if isinstance(result, Exception)]
+        assert len(successes) == 1
+        assert len(failures) == 7
+        assert all(isinstance(result, ReplayDetectedError) for result in failures)
 
-        # Only one active successor refresh token in the family.
-        active_hashes = await store.pool.fetch(
+        active_sessions = await store.pool.fetch(
             """
-            SELECT id, revoked_at, rotated_at
+            SELECT id
             FROM monitor_sessions
-            WHERE family_id = (
-                SELECT family_id FROM monitor_sessions
-                WHERE refresh_token_hash=$1
-            )
-            AND revoked_at IS NULL
+            WHERE family_id=$1 AND revoked_at IS NULL
             """,
-            hash_refresh_token(refresh),
+            old_session.family_id,
         )
-        assert len(active_hashes) <= 1, active_hashes
+        assert active_sessions == []
 
-    async def test_rotation_failure_rolls_back(self, client: TestClient, monitor_user, store):
+    async def test_rotation_failure_rolls_back(
+        self, client: TestClient, monitor_user, store
+    ):
         """MOB-02: if rotation fails mid-transaction, the old token stays valid."""
         from src import mobile_monitoring
 
@@ -259,7 +283,7 @@ class TestRefreshReplayAndAtomicity:
             "/api/mobile/v1/auth/refresh", json={"refresh_token": refresh}
         )
         assert resp.status_code == 401
-        assert "device" in resp.json()["detail"].lower()
+        assert "device" in _error_message(resp).lower()
 
         # Create a new device/session to test expired token.
         user = await store.get_user_by_username("alice")
@@ -285,13 +309,104 @@ class TestRefreshReplayAndAtomicity:
             "/api/mobile/v1/auth/refresh", json={"refresh_token": expired_raw}
         )
         assert resp.status_code == 401
-        assert "expired" in resp.json()["detail"].lower()
+        assert "expired" in _error_message(resp).lower()
 
         # Malformed token.
         resp = client.post(
             "/api/mobile/v1/auth/refresh", json={"refresh_token": "not-a-token"}
         )
         assert resp.status_code in (401, 422)
+
+    async def test_refresh_rejects_disabled_user(
+        self, client: TestClient, monitor_user, store
+    ):
+        """A disabled user cannot rotate a previously issued refresh token."""
+        login = _login(client, "alice", "secret123")
+        await store.disable_user(monitor_user.id)
+
+        response = client.post(
+            "/api/mobile/v1/auth/refresh",
+            json={"refresh_token": login["refresh_token"]},
+        )
+
+        assert response.status_code == 401
+        assert "inactive" in _error_message(response).lower()
+
+    async def test_unknown_well_formed_refresh_token_is_not_called_replay(
+        self, client: TestClient, monitor_user
+    ):
+        """An unissued token gets a generic rejection without a revocation claim."""
+        unknown_token = generate_refresh_token()
+
+        response = client.post(
+            "/api/mobile/v1/auth/refresh",
+            json={"refresh_token": unknown_token},
+        )
+
+        assert response.status_code == 401
+        detail = _error_message(response).lower()
+        assert detail == "invalid refresh token"
+        assert "replay" not in detail
+        assert "revoked" not in detail
+        assert unknown_token not in response.text
+
+    async def test_disabling_user_invalidates_existing_access_token(
+        self, client: TestClient, monitor_user, store
+    ):
+        """An operator disable takes effect for access JWTs already issued."""
+        login = _login(client, "alice", "secret123")
+
+        await store.disable_user(monitor_user.id)
+
+        response = client.get(
+            "/api/mobile/v1/auth/me",
+            headers={"Authorization": f"Bearer {login['access_token']}"},
+        )
+        assert response.status_code == 401
+
+    async def test_revoking_device_invalidates_existing_access_token(
+        self, client: TestClient, monitor_user, store
+    ):
+        """An operator device revocation takes effect for existing access JWTs."""
+        login = _login(client, "alice", "secret123")
+
+        await store.revoke_device(login["device_id"])
+
+        response = client.get(
+            "/api/mobile/v1/auth/me",
+            headers={"Authorization": f"Bearer {login['access_token']}"},
+        )
+        assert response.status_code == 401
+
+    async def test_atomic_rotation_rechecks_disabled_user(
+        self, client: TestClient, monitor_user, store
+    ):
+        """Rotation rejects a user disabled after the route's initial lookup."""
+        login = _login(client, "alice", "secret123")
+        old_session = await store.get_session_by_refresh_hash(
+            hash_refresh_token(login["refresh_token"])
+        )
+        assert old_session is not None
+        await store.pool.execute(
+            "UPDATE monitor_users SET enabled=FALSE WHERE id=$1",
+            monitor_user.id,
+        )
+
+        with pytest.raises(MonitorPrincipalInactiveError, match="inactive"):
+            await store.rotate_session_atomic(
+                old_session,
+                hash_refresh_token(generate_refresh_token()),
+                access_jti=uuid4(),
+            )
+
+        active_sessions = await store.pool.fetchval(
+            """
+            SELECT COUNT(*) FROM monitor_sessions
+            WHERE family_id=$1 AND revoked_at IS NULL
+            """,
+            old_session.family_id,
+        )
+        assert active_sessions == 0
 
 
 @pytest.mark.require_auth
@@ -302,32 +417,124 @@ class TestMobileAuthorizationMatrix:
     when called with a mobile access token.
     """
 
-    # Programmatically discover every unsafe (non-GET/HEAD/OPTIONS) route that
-    # is outside the mobile prefix. This makes the matrix fail when a new
-    # mutation is added without an explicit authorization classification.
-    MUTATION_ROUTES: list[tuple[str, str, dict]] = []
+    # Programmatically discover every unsafe (non-GET/HEAD/OPTIONS) route. Only
+    # the four explicitly classified mobile auth writes are excluded. This
+    # makes a new mobile mutation fail closed until it is reviewed.
+    MOBILE_WRITE_ALLOWLIST = {
+        ("POST", "/api/mobile/v1/auth/login"),
+        ("POST", "/api/mobile/v1/auth/refresh"),
+        ("POST", "/api/mobile/v1/auth/logout"),
+        ("POST", "/api/mobile/v1/devices"),
+        ("DELETE", "/api/mobile/v1/devices/{device_id}"),
+    }
+    MUTATION_ROUTES: list[tuple[str, str, str, dict]] = []
     for route in app.routes:
         path = getattr(route, "path", "")
-        if not path.startswith("/api/") or path.startswith("/api/mobile/v1"):
+        if not path.startswith("/api/"):
             continue
-        methods: set[str] = getattr(route, "methods", set()) - {"GET", "HEAD", "OPTIONS"}
+        methods: set[str] = getattr(route, "methods", set()) - {
+            "GET",
+            "HEAD",
+            "OPTIONS",
+        }
         for method in methods:
+            if (method, path) in MOBILE_WRITE_ALLOWLIST:
+                continue
+            params: dict[str, object] = {}
+            for name, convertor in getattr(route, "param_convertors", {}).items():
+                convertor_name = type(convertor).__name__
+                if convertor_name == "IntegerConvertor":
+                    params[name] = 1
+                elif convertor_name == "FloatConvertor":
+                    params[name] = 1.0
+                elif convertor_name == "UUIDConvertor":
+                    params[name] = uuid4()
+                else:
+                    params[name] = "matrix-probe"
+            concrete_path = str(route.url_path_for(route.name, **params))
             body = {"_matrix_probe": True}
-            MUTATION_ROUTES.append((method, path, body))
+            MUTATION_ROUTES.append((method, path, concrete_path, body))
 
-    @pytest.mark.parametrize("method,path,body", MUTATION_ROUTES)
-    async def test_mutation_route_returns_403(
-        self, client: TestClient, monitor_user, method: str, path: str, body: dict
+    @pytest.mark.parametrize("method,route_path,path,body", MUTATION_ROUTES)
+    async def test_mutation_route_returns_403_before_handler(
+        self,
+        client: TestClient,
+        monitor_user,
+        monkeypatch,
+        method: str,
+        route_path: str,
+        path: str,
+        body: dict,
     ):
-        """MOB-02: mobile token must not mutate trading/admin/config/etc."""
+        """A blocked mobile request never reaches the mutation handler."""
         login = _login(client, "alice", "secret123")
         access = login["access_token"]
         headers = {"Authorization": f"Bearer {access}"}
 
+        matching_route: BaseRoute | None = next(
+            (
+                route
+                for route in app.routes
+                if getattr(route, "path", None) == route_path
+                and method in getattr(route, "methods", set())
+            ),
+            None,
+        )
+        assert matching_route is not None
+
+        async def _unexpected_handler(*args: Any, **kwargs: Any) -> None:
+            raise AssertionError(f"Blocked handler reached: {method} {route_path}")
+
+        monkeypatch.setattr(matching_route, "app", _unexpected_handler)
         fn = getattr(client, method.lower())
         kwargs = {"json": body} if method in {"POST", "PUT", "PATCH"} else {}
         resp = fn(path, headers=headers, **kwargs)
-        assert resp.status_code == 403, f"{method} {path} -> {resp.status_code}: {resp.text[:200]}"
+        assert resp.status_code == 403, (
+            f"{method} {path} -> {resp.status_code}: {resp.text[:200]}"
+        )
+
+    async def test_future_mobile_mutation_is_denied_by_default(
+        self, client: TestClient, monitor_user
+    ):
+        """A newly added mobile write is blocked until explicitly classified."""
+        reached = False
+        path = "/api/mobile/v1/_authorization-matrix-probe"
+
+        async def probe() -> dict[str, bool]:
+            nonlocal reached
+            reached = True
+            return {"reached": True}
+
+        app.add_api_route(path, probe, methods=["POST"])
+        route = app.routes[-1]
+        try:
+            access = _login(client, "alice", "secret123")["access_token"]
+            response = client.post(
+                path,
+                headers={"Authorization": f"Bearer {access}"},
+            )
+            assert response.status_code == 403
+            assert reached is False
+        finally:
+            app.router.routes.remove(route)
+
+    async def test_mobile_audience_array_is_still_confined(
+        self, client: TestClient, monitor_user
+    ):
+        """JWT audience arrays cannot bypass the mobile mutation boundary."""
+        access = _login(client, "alice", "secret123")["access_token"]
+        payload = jwt.get_unverified_claims(access)
+        payload["aud"] = ["alembic-mobile", "another-service"]
+        token = jwt.encode(payload, _secret(), algorithm=config.JWT_ALGORITHM)
+
+        response = client.post(
+            "/api/config",
+            json={"_matrix_probe": True},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "mobile_boundary_violation"
 
 
 class TestManageMonitorUsersCLI:
@@ -337,11 +544,36 @@ class TestManageMonitorUsersCLI:
     or hashes.
     """
 
+    async def test_cli_rejects_plaintext_password_argument(self, capsys):
+        """Plaintext credentials cannot be supplied through shell arguments."""
+        from scripts import manage_monitor_users
+
+        plaintext = "visible-in-shell-history"
+        with pytest.raises(SystemExit):
+            await manage_monitor_users.main(
+                [
+                    "create",
+                    "--username",
+                    "unsafe-user",
+                    "--password",
+                    plaintext,
+                ]
+            )
+        result = capsys.readouterr()
+        assert plaintext not in result.out
+        assert plaintext not in result.err
+
     async def test_cli_create_user_device(self, pg_pool):
         from scripts import manage_monitor_users
 
         result = await manage_monitor_users.main(
-            ["create", "--username", "cliuser", "--password-hash", bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode()]
+            [
+                "create",
+                "--username",
+                "cliuser",
+                "--password-hash",
+                bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode(),
+            ]
         )
         assert result == 0
         async with pg_pool.acquire() as conn:
@@ -355,12 +587,16 @@ class TestManageMonitorUsersCLI:
         from scripts import manage_monitor_users
 
         await manage_monitor_users.main(
-            ["create", "--username", "toggleuser", "--password-hash", bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode()]
+            [
+                "create",
+                "--username",
+                "toggleuser",
+                "--password-hash",
+                bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode(),
+            ]
         )
         assert (
-            await manage_monitor_users.main(
-                ["disable", "--username", "toggleuser"]
-            )
+            await manage_monitor_users.main(["disable", "--username", "toggleuser"])
             == 0
         )
         async with pg_pool.acquire() as conn:
@@ -369,10 +605,7 @@ class TestManageMonitorUsersCLI:
             )
         assert user["enabled"] is False
         assert (
-            await manage_monitor_users.main(
-                ["enable", "--username", "toggleuser"]
-            )
-            == 0
+            await manage_monitor_users.main(["enable", "--username", "toggleuser"]) == 0
         )
         async with pg_pool.acquire() as conn:
             user = await conn.fetchrow(
@@ -384,7 +617,13 @@ class TestManageMonitorUsersCLI:
         from scripts import manage_monitor_users
 
         await manage_monitor_users.main(
-            ["create", "--username", "sessuser", "--password-hash", bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode()]
+            [
+                "create",
+                "--username",
+                "sessuser",
+                "--password-hash",
+                bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode(),
+            ]
         )
         async with pg_pool.acquire() as conn:
             session_id = await conn.fetchval(
@@ -418,7 +657,13 @@ class TestManageMonitorUsersCLI:
         from scripts import manage_monitor_users
 
         await manage_monitor_users.main(
-            ["create", "--username", "alluser", "--password-hash", bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode()]
+            [
+                "create",
+                "--username",
+                "alluser",
+                "--password-hash",
+                bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode(),
+            ]
         )
         async with pg_pool.acquire() as conn:
             user_id = await conn.fetchval(
@@ -435,9 +680,7 @@ class TestManageMonitorUsersCLI:
                 datetime.now(timezone.utc) + timedelta(days=30),
             )
         assert (
-            await manage_monitor_users.main(
-                ["revoke-all", "--username", "alluser"]
-            )
+            await manage_monitor_users.main(["revoke-all", "--username", "alluser"])
             == 0
         )
         async with pg_pool.acquire() as conn:
@@ -451,7 +694,13 @@ class TestManageMonitorUsersCLI:
         from scripts import manage_monitor_users
 
         await manage_monitor_users.main(
-            ["create", "--username", "devuser", "--password-hash", bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode()]
+            [
+                "create",
+                "--username",
+                "devuser",
+                "--password-hash",
+                bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode(),
+            ]
         )
         async with pg_pool.acquire() as conn:
             device_id = await conn.fetchval(
@@ -473,9 +722,22 @@ class TestManageMonitorUsersCLI:
     async def test_cli_output_never_exposes_secrets(self, capsys):
         from scripts import manage_monitor_users
 
+        password_hash = bcrypt.hashpw(
+            "testsecret".encode(),
+            bcrypt.gensalt(),
+        ).decode()
         await manage_monitor_users.main(
-            ["create", "--username", "secretuser", "--password-hash", bcrypt.hashpw("testsecret".encode(), bcrypt.gensalt()).decode()]
+            [
+                "create",
+                "--username",
+                "secretuser",
+                "--password-hash",
+                password_hash,
+            ]
         )
-        captured = capsys.readouterr().out + capsys.readouterr().err
+        result = capsys.readouterr()
+        captured = result.out + result.err
+        assert password_hash not in captured
+        assert "testsecret" not in captured
         assert "refresh" not in captured.lower()
         assert "hash" not in captured.lower()

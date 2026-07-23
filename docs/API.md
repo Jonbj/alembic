@@ -38,6 +38,7 @@ Production:   https://api.your-domain.com
 | `/api/system/readiness` | **Yes** | `X-API-Key` |
 | `/api/system/scheduler` | **Yes** | `X-API-Key` |
 | `/api/system/activity` | **Yes** | `X-API-Key` |
+| `/api/mobile/v1/*` | **Monitor routes only** | `Authorization: Bearer <mobile-access-token>` |
 | `/api/health` | No | — |
 
 Generate an API key (minimum 32 characters):
@@ -45,6 +46,68 @@ Generate an API key (minimum 32 characters):
 openssl rand -hex 20
 # Set as ADMIN_API_KEY in .env
 ```
+
+---
+
+## Mobile monitor authentication
+
+Mobile identities are provisioned separately from the admin account. Their
+short-lived JWTs use `aud=alembic-mobile`, are bound to a monitor user, device,
+server session, and JTI, and cannot authenticate to Alembic mutation routes.
+
+| Method | Endpoint | Authentication | Purpose |
+|---|---|---|---|
+| `POST` | `/api/mobile/v1/auth/login` | Username/password | Create a device-bound access/refresh session |
+| `POST` | `/api/mobile/v1/auth/refresh` | Refresh token | Atomically rotate the refresh session |
+| `POST` | `/api/mobile/v1/auth/logout` | Mobile bearer + refresh token | Revoke device sessions and clear push registration best effort |
+| `GET` | `/api/mobile/v1/auth/me` | `monitor:read` | Return the monitor identity |
+| `POST` | `/api/mobile/v1/devices` | `monitor:device` | Idempotently register/update an installation |
+| `DELETE` | `/api/mobile/v1/devices/{device_id}` | `monitor:device` | Revoke an owned device and its sessions |
+
+Access tokens expire after 15 minutes by default. Opaque refresh tokens expire
+after 30 days, are stored only as hashes, rotate on every use, and revoke their
+whole family when reuse is detected. Login attempts are limited independently
+by normalized username and source address; `429` includes `Retry-After`.
+
+Mobile v1 errors use one stable envelope:
+
+```json
+{
+  "error": {
+    "code": "invalid_credentials",
+    "message": "Invalid credentials",
+    "request_id": "b44f39f4-882e-4230-827f-418fc613aa3a",
+    "retryable": false,
+    "details": {}
+  }
+}
+```
+
+Relevant environment settings:
+
+```dotenv
+MOBILE_ACCESS_TOKEN_EXPIRE_MINUTES=15
+MOBILE_REFRESH_TOKEN_EXPIRE_DAYS=30
+MOBILE_LOGIN_RATE_LIMIT=5
+MOBILE_LOGIN_RATE_WINDOW_SECONDS=300
+MOBILE_TOKEN_PEPPER=
+```
+
+Provision and revoke monitor access only from the server:
+
+```bash
+# Interactive password input; plaintext is not printed or put in shell history.
+uv run python scripts/manage_monitor_users.py create --username mobile-operator
+
+uv run python scripts/manage_monitor_users.py disable --username mobile-operator
+uv run python scripts/manage_monitor_users.py enable --username mobile-operator
+uv run python scripts/manage_monitor_users.py revoke-all --username mobile-operator
+uv run python scripts/manage_monitor_users.py revoke-session --session-id <uuid>
+uv run python scripts/manage_monitor_users.py revoke-device --device-id <uuid>
+```
+
+The command output contains identifiers only; it never prints passwords,
+refresh tokens, or token hashes.
 
 ---
 
@@ -506,9 +569,10 @@ Update operational config (requires `X-API-Key`). Validates YAML structure befor
 
 ---
 
-## Error Responses
+## Admin API Error Responses
 
-All errors return `{"detail": "..."}`.
+Unless an endpoint documents otherwise, non-mobile admin API errors return
+`{"detail": "..."}`. Mobile v1 uses the envelope documented above.
 
 | Code | Meaning |
 |------|---------|

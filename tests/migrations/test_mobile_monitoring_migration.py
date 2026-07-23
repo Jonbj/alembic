@@ -14,7 +14,14 @@ from pathlib import Path
 import psycopg2
 import pytest
 
-MIGRATION_PATH = Path(__file__).parent.parent.parent / "migrations" / "041_mobile_monitoring.sql"
+MIGRATION_PATH = (
+    Path(__file__).parent.parent.parent / "migrations" / "041_mobile_monitoring.sql"
+)
+ACCESS_JTI_MIGRATION_PATH = (
+    Path(__file__).parent.parent.parent
+    / "migrations"
+    / "042_mobile_session_access_jti.sql"
+)
 
 MOBILE_TABLES = [
     "monitor_users",
@@ -30,6 +37,7 @@ MOBILE_TABLES = [
 @pytest.fixture(scope="module")
 def db_connection():
     """Connect to the test database, creating it if necessary."""
+
     def _connect(url: str):
         return psycopg2.connect(url)
 
@@ -63,9 +71,7 @@ def db_connection():
     except psycopg2.OperationalError as exc:
         if "does not exist" in str(exc).lower():
             parsed = urllib.parse.urlparse(unique_candidates[0])
-            maintenance_url = urllib.parse.urlunparse(
-                parsed._replace(path="/postgres")
-            )
+            maintenance_url = urllib.parse.urlunparse(parsed._replace(path="/postgres"))
             maintenance = psycopg2.connect(maintenance_url)
             maintenance.autocommit = True
             with maintenance.cursor() as cur:
@@ -81,6 +87,53 @@ def db_connection():
 
 class TestMobileMonitoringMigration:
     """041 applies cleanly and enforces its integrity rules."""
+
+    def test_042_upgrades_database_that_already_applied_041(self, db_connection):
+        """The access-token binding is delivered by a forward-only migration."""
+        conn = db_connection
+        conn.autocommit = False
+        cur = conn.cursor()
+        try:
+            for table in reversed(MOBILE_TABLES):
+                cur.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+            cur.execute(MIGRATION_PATH.read_text())
+
+            cur.execute(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema='public'
+                  AND table_name='monitor_sessions'
+                  AND column_name='access_jti'
+                """
+            )
+            assert cur.fetchone() is None
+
+            cur.execute(ACCESS_JTI_MIGRATION_PATH.read_text())
+
+            cur.execute(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema='public'
+                  AND table_name='monitor_sessions'
+                  AND column_name='access_jti'
+                """
+            )
+            assert cur.fetchone() is not None
+            cur.execute(
+                """
+                SELECT indexdef FROM pg_indexes
+                WHERE schemaname='public'
+                  AND indexname='idx_monitor_sessions_access_jti'
+                """
+            )
+            index = cur.fetchone()
+            assert index is not None
+            assert "UNIQUE INDEX" in index[0]
+        finally:
+            cur.close()
+            conn.rollback()
 
     def test_migration_applies_and_tables_exist(self, db_connection):
         migration_sql = MIGRATION_PATH.read_text()

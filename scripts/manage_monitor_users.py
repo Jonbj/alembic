@@ -41,10 +41,7 @@ def _parser() -> argparse.ArgumentParser:
         "--password-hash",
         help="Pre-hashed bcrypt password (safe for automation; preferred)",
     )
-    create.add_argument(
-        "--password",
-        help="Plaintext password (insecure: visible in shell history). Use --password-hash or interactive prompt instead.",
-    )
+    create.add_argument("--password", help=argparse.SUPPRESS)
     create.add_argument("--device-name", default="managed-device")
     create.add_argument("--app-version", default="1.0.0")
 
@@ -74,10 +71,17 @@ async def _store() -> tuple[asyncpg.Pool, MonitorStore]:
 
 def _resolve_password_hash(args: argparse.Namespace) -> str:
     """Return a bcrypt password hash without ever printing the plaintext."""
+    if args.password is not None:
+        raise SystemExit(
+            "Plaintext password arguments are not supported; "
+            "use interactive input or --password-hash"
+        )
     if args.password_hash:
+        try:
+            bcrypt.checkpw(b"bcrypt-validation", args.password_hash.encode())
+        except ValueError as exc:
+            raise SystemExit("--password-hash must be a valid bcrypt hash") from exc
         return args.password_hash
-    if args.password:
-        return bcrypt.hashpw(args.password.encode(), bcrypt.gensalt()).decode()
     plaintext = getpass.getpass("Password for new monitor user: ")
     confirm = getpass.getpass("Confirm password: ")
     if plaintext != confirm:
@@ -181,6 +185,7 @@ async def _revoke_device(args: argparse.Namespace) -> int:
 
 
 async def main(argv: list[str] | None = None) -> int:
+    """Dispatch one monitor-user management command."""
     parser = _parser()
     args = parser.parse_args(argv)
 

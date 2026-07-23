@@ -11,6 +11,7 @@ import base64
 import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
+from typing import Any, Mapping
 from uuid import UUID, uuid4
 
 from jose import JWTError, jwt
@@ -19,6 +20,14 @@ from src.config import config
 
 _MOBILE_AUDIENCE = "alembic-mobile"
 _ACCESS_TYPE = "access"
+
+
+class MobileScopeError(JWTError):
+    """Raised when a valid mobile token lacks a required monitor scope."""
+
+
+class MobileAudienceError(JWTError):
+    """Raised when a validly signed identity is not intended for mobile."""
 
 
 def _secret() -> str:
@@ -58,9 +67,14 @@ def create_mobile_access_token(
     expires_minutes: int | None = None,
 ) -> str:
     """Issue a mobile access token."""
-    scopes = scopes or ["monitor:read", "monitor:device"]
+    if scopes is None:
+        scopes = ["monitor:read", "monitor:device"]
     jti = jti or uuid4()
-    expire_minutes = expires_minutes or config.MOBILE_ACCESS_TOKEN_EXPIRE_MINUTES
+    expire_minutes = (
+        config.MOBILE_ACCESS_TOKEN_EXPIRE_MINUTES
+        if expires_minutes is None
+        else expires_minutes
+    )
     expire = datetime.now(timezone.utc) + timedelta(minutes=expire_minutes)
     payload = {
         "sub": str(user_id),
@@ -74,7 +88,7 @@ def create_mobile_access_token(
     return jwt.encode(payload, _secret(), algorithm=config.JWT_ALGORITHM)
 
 
-def decode_mobile_access_token(token: str) -> dict:
+def decode_mobile_access_token(token: str) -> dict[str, Any]:
     """Validate and return mobile access-token claims.
 
     Raises JWTError on invalid/expired/wrong-audience tokens.
@@ -83,23 +97,53 @@ def decode_mobile_access_token(token: str) -> dict:
         "require": ["sub", "aud", "type", "scope", "device_id", "jti", "exp"],
         "verify_aud": True,
     }
-    payload = jwt.decode(
-        token,
-        _secret(),
-        algorithms=[config.JWT_ALGORITHM],
-        audience=_MOBILE_AUDIENCE,
-        options=options,
-    )
+    try:
+        payload = jwt.decode(
+            token,
+            _secret(),
+            algorithms=[config.JWT_ALGORITHM],
+            audience=_MOBILE_AUDIENCE,
+            options=options,
+        )
+    except JWTError as exc:
+        # Distinguish a validly signed identity presented to the wrong audience
+        # from an invalid signature or expired credential.  This preserves the
+        # approved 403 contract without trusting any unverified token payload.
+        try:
+            signed_payload = jwt.decode(
+                token,
+                _secret(),
+                algorithms=[config.JWT_ALGORITHM],
+                options={"verify_aud": False},
+            )
+        except JWTError:
+            raise exc
+        audience = signed_payload.get("aud")
+        if audience != _MOBILE_AUDIENCE and not (
+            isinstance(audience, list) and _MOBILE_AUDIENCE in audience
+        ):
+            raise MobileAudienceError("token is not intended for mobile") from exc
+        raise
+    audience = payload.get("aud")
+    if audience != _MOBILE_AUDIENCE and not (
+        isinstance(audience, list) and _MOBILE_AUDIENCE in audience
+    ):
+        raise MobileAudienceError("token is not intended for mobile")
     if payload.get("type") != _ACCESS_TYPE:
         raise JWTError("invalid token type")
-    if "monitor:read" not in payload.get("scope", []):
-        raise JWTError("missing monitor:read scope")
+    scopes = payload.get("scope")
+    if not isinstance(scopes, list) or not all(
+        isinstance(scope, str) for scope in scopes
+    ):
+        raise JWTError("invalid scope claim")
+    if "monitor:read" not in scopes:
+        raise MobileScopeError("missing monitor:read scope")
     return payload
 
 
-def parse_uuid_claim(claims: dict, key: str) -> UUID:
+def parse_uuid_claim(claims: Mapping[str, Any], key: str) -> UUID:
     """Parse a UUID claim, raising JWTError on bad format."""
     try:
-        return UUID(claims[key])
-    except (KeyError, ValueError) as exc:
+        return UUID(str(claims[key]))
+    except (KeyError, TypeError, ValueError) as exc:
         raise JWTError(f"missing or invalid {key}") from exc

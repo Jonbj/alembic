@@ -16,8 +16,18 @@ class ReplayDetectedError(Exception):
     """Raised when a refresh token is reused; the family has been revoked."""
 
 
+class RefreshExpiredError(Exception):
+    """Raised after an expired refresh-token family has been revoked."""
+
+
+class MonitorPrincipalInactiveError(Exception):
+    """Raised after an inactive user/device refresh family has been revoked."""
+
+
 @dataclass(frozen=True)
 class MonitorUser:
+    """Separately provisioned identity allowed to use the monitor API."""
+
     id: UUID
     username: str
     password_hash: str
@@ -28,6 +38,8 @@ class MonitorUser:
 
 @dataclass(frozen=True)
 class MonitorDevice:
+    """Registered mobile installation and its notification state."""
+
     id: UUID
     user_id: UUID
     installation_id: str
@@ -42,6 +54,8 @@ class MonitorDevice:
 
 @dataclass(frozen=True)
 class MonitorSession:
+    """One device-bound refresh/access session in a rotation family."""
+
     id: UUID
     user_id: UUID
     device_id: UUID | None
@@ -58,10 +72,12 @@ class MonitorSession:
 class MonitorStore:
     """Async DB operations for mobile monitoring auth."""
 
-    def __init__(self, pool: asyncpg.Pool):
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        """Bind mobile auth persistence to an application-owned asyncpg pool."""
         self.pool = pool
 
     async def get_user_by_username(self, username: str) -> MonitorUser | None:
+        """Return a monitor user by case-normalized username."""
         row = await self.pool.fetchrow(
             "SELECT * FROM monitor_users WHERE username=$1", username.lower()
         )
@@ -70,6 +86,7 @@ class MonitorStore:
         return self._user_from_row(row)
 
     async def get_user(self, user_id: UUID) -> MonitorUser | None:
+        """Return a monitor user by identifier."""
         row = await self.pool.fetchrow(
             "SELECT * FROM monitor_users WHERE id=$1", user_id
         )
@@ -83,6 +100,7 @@ class MonitorStore:
         username: str,
         password_hash: str,
     ) -> MonitorUser:
+        """Create a monitor identity with an already-hashed password."""
         row = await self.pool.fetchrow(
             """
             INSERT INTO monitor_users (username, password_hash)
@@ -95,6 +113,7 @@ class MonitorStore:
         return self._user_from_row(row)
 
     async def get_device(self, device_id: UUID) -> MonitorDevice | None:
+        """Return a registered monitor device by identifier."""
         row = await self.pool.fetchrow(
             "SELECT * FROM monitor_devices WHERE id=$1", device_id
         )
@@ -105,6 +124,7 @@ class MonitorStore:
     async def get_device_by_installation(
         self, user_id: UUID, installation_id: str
     ) -> MonitorDevice | None:
+        """Return a user's device for one installation identifier."""
         row = await self.pool.fetchrow(
             """
             SELECT * FROM monitor_devices
@@ -127,6 +147,7 @@ class MonitorStore:
         firebase_installation_id: str | None = None,
         push_enabled: bool = False,
     ) -> MonitorDevice:
+        """Register a monitor device owned by a provisioned user."""
         row = await self.pool.fetchrow(
             """
             INSERT INTO monitor_devices (
@@ -155,6 +176,7 @@ class MonitorStore:
         push_enabled: bool | None = None,
         last_seen_at: datetime | None = None,
     ) -> None:
+        """Update only the provided mutable device attributes."""
         # Build a dynamic SET clause safely.
         parts: list[str] = []
         values: list[Any] = []
@@ -176,17 +198,49 @@ class MonitorStore:
         if not parts:
             return
         values.append(device_id)
-        sql = "UPDATE monitor_devices SET " + ", ".join(parts) + " WHERE id=$" + str(len(values))
+        sql = (
+            "UPDATE monitor_devices SET "
+            + ", ".join(parts)
+            + " WHERE id=$"
+            + str(len(values))
+        )
         await self.pool.execute(sql, *values)
 
     async def revoke_device(self, device_id: UUID) -> None:
+        """Revoke a device and all of its active sessions atomically."""
+        now = datetime.now(timezone.utc)
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "UPDATE monitor_devices SET revoked_at=$1 WHERE id=$2",
+                    now,
+                    device_id,
+                )
+                await conn.execute(
+                    """
+                    UPDATE monitor_sessions
+                    SET revoked_at=$1
+                    WHERE device_id=$2 AND revoked_at IS NULL
+                    """,
+                    now,
+                    device_id,
+                )
+
+    async def clear_device_push_registration(self, device_id: UUID) -> None:
+        """Remove push delivery state without security-revoking the device."""
         await self.pool.execute(
-            "UPDATE monitor_devices SET revoked_at=$1 WHERE id=$2",
-            datetime.now(timezone.utc),
+            """
+            UPDATE monitor_devices
+            SET firebase_installation_id=NULL, push_enabled=FALSE
+            WHERE id=$1
+            """,
             device_id,
         )
 
-    async def get_session_by_refresh_hash(self, refresh_hash: str) -> MonitorSession | None:
+    async def get_session_by_refresh_hash(
+        self, refresh_hash: str
+    ) -> MonitorSession | None:
+        """Return the session containing an opaque refresh-token hash."""
         row = await self.pool.fetchrow(
             "SELECT * FROM monitor_sessions WHERE refresh_token_hash=$1", refresh_hash
         )
@@ -196,7 +250,7 @@ class MonitorStore:
 
     async def _insert_session(
         self,
-        conn,
+        conn: asyncpg.Connection,
         *,
         user_id: UUID,
         device_id: UUID | None,
@@ -205,6 +259,7 @@ class MonitorStore:
         expires_at: datetime,
         access_jti: UUID | None = None,
     ) -> MonitorSession:
+        """Create a device session in a caller-selected rotation family."""
         row = await conn.fetchrow(
             """
             INSERT INTO monitor_sessions
@@ -231,6 +286,7 @@ class MonitorStore:
         expires_days: int | None = None,
         access_jti: UUID | None = None,
     ) -> MonitorSession:
+        """Create a device-bound session with the configured absolute expiry."""
         expires_days = expires_days or config.MOBILE_REFRESH_TOKEN_EXPIRE_DAYS
         expires_at = datetime.now(timezone.utc) + timedelta(days=expires_days)
         async with self.pool.acquire() as conn:
@@ -244,26 +300,55 @@ class MonitorStore:
                 access_jti=access_jti,
             )
 
-    async def rotate_session(
+    async def create_login_session_atomic(
         self,
-        old_session: MonitorSession,
-        new_refresh_hash: str,
-        access_jti: UUID | None = None,
+        *,
+        user_id: UUID,
+        device_id: UUID,
+        refresh_hash: str,
+        family_id: UUID,
+        access_jti: UUID,
     ) -> MonitorSession:
-        now = datetime.now(timezone.utc)
-        await self.pool.execute(
-            "UPDATE monitor_sessions SET revoked_at=$1, rotated_at=$2 WHERE id=$3",
-            now,
-            now,
-            old_session.id,
+        """Create a login session only while its user and device remain active."""
+        expires_at = datetime.now(timezone.utc) + timedelta(
+            days=config.MOBILE_REFRESH_TOKEN_EXPIRE_DAYS
         )
-        return await self.create_session(
-            user_id=old_session.user_id,
-            device_id=old_session.device_id,
-            refresh_hash=new_refresh_hash,
-            family_id=old_session.family_id,
-            access_jti=access_jti,
-        )
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                user_enabled = await conn.fetchval(
+                    """
+                    SELECT enabled FROM monitor_users
+                    WHERE id=$1
+                    FOR UPDATE
+                    """,
+                    user_id,
+                )
+                device = await conn.fetchrow(
+                    """
+                    SELECT user_id, revoked_at FROM monitor_devices
+                    WHERE id=$1
+                    FOR UPDATE
+                    """,
+                    device_id,
+                )
+                if (
+                    user_enabled is not True
+                    or device is None
+                    or device["user_id"] != user_id
+                    or device["revoked_at"] is not None
+                ):
+                    raise MonitorPrincipalInactiveError(
+                        "Monitor user or device inactive"
+                    )
+                return await self._insert_session(
+                    conn,
+                    user_id=user_id,
+                    device_id=device_id,
+                    refresh_hash=refresh_hash,
+                    family_id=family_id,
+                    expires_at=expires_at,
+                    access_jti=access_jti,
+                )
 
     async def rotate_session_atomic(
         self,
@@ -272,79 +357,120 @@ class MonitorStore:
         now: datetime | None = None,
         access_jti: UUID | None = None,
     ) -> MonitorSession:
-        """Atomically rotate a refresh token under row lock.
-
-        Runs in a single transaction:
-        1. Lock the old session row with FOR UPDATE.
-        2. If a later active session exists in the same family, revoke the whole
-           family and raise ReplayDetectedError.
-        3. Revoke the old session and insert the successor.
-
-        Any exception before commit rolls back, leaving the old token valid.
-        """
+        """Rotate once under row lock, committing family revocation on replay."""
         now = now or datetime.now(timezone.utc)
+        rejection: Exception | None = None
+        new_session: MonitorSession | None = None
         async with self.pool.acquire() as conn:
             async with conn.transaction():
+                user_enabled = await conn.fetchval(
+                    """
+                    SELECT enabled FROM monitor_users
+                    WHERE id=$1
+                    FOR UPDATE
+                    """,
+                    old_session.user_id,
+                )
+                device = (
+                    await conn.fetchrow(
+                        """
+                        SELECT id, revoked_at FROM monitor_devices
+                        WHERE id=$1
+                        FOR UPDATE
+                        """,
+                        old_session.device_id,
+                    )
+                    if old_session.device_id is not None
+                    else None
+                )
                 row = await conn.fetchrow(
                     """
                     SELECT * FROM monitor_sessions
-                    WHERE id=$1 AND revoked_at IS NULL
+                    WHERE id=$1
                     FOR UPDATE
                     """,
                     old_session.id,
                 )
-                if row is None:
-                    # The session was revoked between lookup and lock.
-                    raise ReplayDetectedError("Refresh token already revoked")
-
-                later_active = await conn.fetchval(
-                    """
-                    SELECT COUNT(*) FROM monitor_sessions
-                    WHERE family_id=$1 AND created_at > $2 AND revoked_at IS NULL
-                    """,
-                    row["family_id"],
-                    row["created_at"],
+                family_id = (
+                    row["family_id"] if row is not None else old_session.family_id
                 )
-                if later_active:
+                if row is None or row["revoked_at"] is not None:
                     await conn.execute(
                         """
                         UPDATE monitor_sessions SET revoked_at=$1
                         WHERE family_id=$2 AND revoked_at IS NULL
                         """,
                         now,
-                        row["family_id"],
+                        family_id,
                     )
-                    raise ReplayDetectedError("Refresh token replay detected")
+                    rejection = ReplayDetectedError("Refresh token replay detected")
+                elif row["expires_at"] < now:
+                    await conn.execute(
+                        """
+                        UPDATE monitor_sessions SET revoked_at=$1
+                        WHERE family_id=$2 AND revoked_at IS NULL
+                        """,
+                        now,
+                        family_id,
+                    )
+                    rejection = RefreshExpiredError("Refresh token expired")
+                elif (
+                    user_enabled is not True
+                    or device is None
+                    or device["revoked_at"] is not None
+                ):
+                    await conn.execute(
+                        """
+                        UPDATE monitor_sessions SET revoked_at=$1
+                        WHERE family_id=$2 AND revoked_at IS NULL
+                        """,
+                        now,
+                        family_id,
+                    )
+                    rejection = MonitorPrincipalInactiveError(
+                        "Monitor user or device inactive"
+                    )
+                else:
+                    await conn.execute(
+                        """
+                        UPDATE monitor_sessions
+                        SET revoked_at=$1, rotated_at=$2, last_used_at=$3
+                        WHERE id=$4
+                        """,
+                        now,
+                        now,
+                        now,
+                        old_session.id,
+                    )
+                    new_session = await self._insert_session(
+                        conn,
+                        user_id=row["user_id"],
+                        device_id=row["device_id"],
+                        refresh_hash=new_refresh_hash,
+                        family_id=family_id,
+                        expires_at=row["expires_at"],
+                        access_jti=access_jti,
+                    )
 
-                await conn.execute(
-                    """
-                    UPDATE monitor_sessions
-                    SET revoked_at=$1, rotated_at=$2
-                    WHERE id=$3
-                    """,
-                    now,
-                    now,
-                    old_session.id,
-                )
-                expires_at = now + timedelta(days=config.MOBILE_REFRESH_TOKEN_EXPIRE_DAYS)
-                return await self._insert_session(
-                    conn,
-                    user_id=row["user_id"],
-                    device_id=row["device_id"],
-                    refresh_hash=new_refresh_hash,
-                    family_id=row["family_id"],
-                    expires_at=expires_at,
-                    access_jti=access_jti,
-                )
+        if rejection is not None:
+            raise rejection
+        if new_session is None:
+            raise RuntimeError("Session rotation completed without a result")
+        return new_session
 
     async def revoke_session(self, session_id: UUID) -> None:
+        """Revoke one monitor session."""
         await self.pool.execute(
-            "UPDATE monitor_sessions SET revoked_at=$1 WHERE id=$2",
+            """
+            UPDATE monitor_sessions SET revoked_at=$1
+            WHERE id=$2 AND revoked_at IS NULL
+            """,
             datetime.now(timezone.utc),
             session_id,
         )
 
     async def get_session_by_id(self, session_id: UUID) -> MonitorSession | None:
+        """Return a monitor session by identifier."""
         row = await self.pool.fetchrow(
             "SELECT * FROM monitor_sessions WHERE id=$1", session_id
         )
@@ -352,9 +478,24 @@ class MonitorStore:
             return None
         return self._session_from_row(row)
 
-    async def get_session_by_access_jti(self, access_jti: UUID) -> MonitorSession | None:
+    async def get_session_by_access_jti(
+        self, access_jti: UUID
+    ) -> MonitorSession | None:
+        """Return an active session whose user and device are still enabled."""
         row = await self.pool.fetchrow(
-            "SELECT * FROM monitor_sessions WHERE access_jti=$1", access_jti
+            """
+            SELECT session.*
+            FROM monitor_sessions AS session
+            JOIN monitor_users AS monitor_user
+              ON monitor_user.id=session.user_id
+            JOIN monitor_devices AS device
+              ON device.id=session.device_id
+            WHERE session.access_jti=$1
+              AND session.revoked_at IS NULL
+              AND monitor_user.enabled=TRUE
+              AND device.revoked_at IS NULL
+            """,
+            access_jti,
         )
         if not row:
             return None
@@ -372,11 +513,14 @@ class MonitorStore:
             family_id,
         )
 
-    async def revoke_all_sessions_for_device(self, user_id: UUID, device_id: UUID) -> None:
+    async def revoke_all_sessions_for_device(
+        self, user_id: UUID, device_id: UUID
+    ) -> None:
+        """Revoke all sessions for one device owned by the supplied user."""
         await self.pool.execute(
             """
             UPDATE monitor_sessions SET revoked_at=$1
-            WHERE user_id=$2 AND device_id=$3
+            WHERE user_id=$2 AND device_id=$3 AND revoked_at IS NULL
             """,
             datetime.now(timezone.utc),
             user_id,
@@ -395,17 +539,31 @@ class MonitorStore:
         )
 
     async def disable_user(self, user_id: UUID) -> None:
-        await self.pool.execute(
-            """
-            UPDATE monitor_users
-            SET enabled=FALSE, updated_at=$1
-            WHERE id=$2
-            """,
-            datetime.now(timezone.utc),
-            user_id,
-        )
+        """Disable a user and revoke every active session atomically."""
+        now = datetime.now(timezone.utc)
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    """
+                    UPDATE monitor_users
+                    SET enabled=FALSE, updated_at=$1
+                    WHERE id=$2
+                    """,
+                    now,
+                    user_id,
+                )
+                await conn.execute(
+                    """
+                    UPDATE monitor_sessions
+                    SET revoked_at=$1
+                    WHERE user_id=$2 AND revoked_at IS NULL
+                    """,
+                    now,
+                    user_id,
+                )
 
     async def enable_user(self, user_id: UUID) -> None:
+        """Re-enable login for a monitor user without restoring old sessions."""
         await self.pool.execute(
             """
             UPDATE monitor_users
@@ -414,13 +572,6 @@ class MonitorStore:
             """,
             datetime.now(timezone.utc),
             user_id,
-        )
-
-    async def mark_session_used(self, session_id: UUID) -> None:
-        await self.pool.execute(
-            "UPDATE monitor_sessions SET last_used_at=$1 WHERE id=$2",
-            datetime.now(timezone.utc),
-            session_id,
         )
 
     # -- helpers ---------------------------------------------------------

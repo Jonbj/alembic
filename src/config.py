@@ -3,10 +3,8 @@
 import os
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 def _load_trading_yaml() -> dict:
@@ -112,6 +110,14 @@ class Config(BaseModel):
     )
     MOBILE_REFRESH_TOKEN_EXPIRE_DAYS: int = Field(
         default_factory=lambda: int(os.environ.get("MOBILE_REFRESH_TOKEN_EXPIRE_DAYS", "30"))
+    )
+    MOBILE_LOGIN_RATE_LIMIT: int = Field(
+        default_factory=lambda: int(os.environ.get("MOBILE_LOGIN_RATE_LIMIT", "5"))
+    )
+    MOBILE_LOGIN_RATE_WINDOW_SECONDS: int = Field(
+        default_factory=lambda: int(
+            os.environ.get("MOBILE_LOGIN_RATE_WINDOW_SECONDS", "300")
+        )
     )
     MOBILE_TOKEN_PEPPER: str = Field(
         default_factory=lambda: os.environ.get("MOBILE_TOKEN_PEPPER", "")

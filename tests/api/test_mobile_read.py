@@ -26,7 +26,12 @@ from src.mobile_monitoring.auth import (  # noqa: E402
 )
 from src.mobile_monitoring.store import MonitorStore  # noqa: E402
 
-_MIGRATION_PATH = Path(__file__).parent.parent.parent / "migrations" / "041_mobile_monitoring.sql"
+_MIGRATION_PATHS = (
+    Path(__file__).parent.parent.parent / "migrations" / "041_mobile_monitoring.sql",
+    Path(__file__).parent.parent.parent
+    / "migrations"
+    / "042_mobile_session_access_jti.sql",
+)
 
 
 def _dsn() -> str:
@@ -39,13 +44,20 @@ async def pool():
     pool = await asyncpg.create_pool(dsn=dsn, min_size=1, max_size=4)
     assert pool is not None
     async with pool.acquire() as conn:
-        await conn.execute(_MIGRATION_PATH.read_text())
+        for migration_path in _MIGRATION_PATHS:
+            await conn.execute(migration_path.read_text())
     yield pool
     await pool.close()
 
 
 @pytest.fixture
 async def store(pool):
+    async with pool.acquire() as conn:
+        await conn.execute("TRUNCATE TABLE monitor_sessions CASCADE")
+        await conn.execute("TRUNCATE TABLE monitor_devices CASCADE")
+        await conn.execute("TRUNCATE TABLE monitor_users CASCADE")
+        await conn.execute("TRUNCATE TABLE mobile_events CASCADE")
+        await conn.execute("TRUNCATE TABLE mobile_event_history CASCADE")
     yield MonitorStore(pool)
     async with pool.acquire() as conn:
         await conn.execute("TRUNCATE TABLE monitor_sessions CASCADE")
@@ -57,7 +69,9 @@ async def store(pool):
 
 @pytest.fixture
 async def client():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
         yield c
 
 
@@ -140,19 +154,30 @@ async def mobile_deps(pool, client):
     def _event_store_override(request: Request):
         return store
 
+    def _auth_override():
+        return {
+            "sub": "00000000-0000-0000-0000-000000000001",
+            "device_id": "00000000-0000-0000-0000-000000000002",
+            "scope": ["monitor:read"],
+        }
+
     app.dependency_overrides[mobile_read_mod._builder] = _builder_override
     app.dependency_overrides[mobile_read_mod._event_store] = _event_store_override
+    app.dependency_overrides[mobile_read_mod.require_mobile_token] = _auth_override
 
     yield builder, store, redis
 
     app.dependency_overrides.pop(mobile_read_mod._builder, None)
     app.dependency_overrides.pop(mobile_read_mod._event_store, None)
+    app.dependency_overrides.pop(mobile_read_mod.require_mobile_token, None)
 
 
 class TestMobileRead:
     """Happy-path and negative tests for mobile read API."""
 
-    async def test_snapshot_requires_mobile_token(self, client, monitor_user, monitor_device):
+    async def test_snapshot_requires_mobile_token(
+        self, client, monitor_user, monitor_device
+    ):
         resp = await client.get("/api/mobile/v1/read/snapshot")
         assert resp.status_code == 401
 
@@ -197,7 +222,9 @@ class TestMobileRead:
         )
         assert resp.status_code == 400
 
-    async def test_events_returns_feed(self, client, mobile_deps, store, monitor_user, monitor_device):
+    async def test_events_returns_feed(
+        self, client, mobile_deps, store, monitor_user, monitor_device
+    ):
         token = _token(monitor_user, monitor_device)
         # Seed one event.
         async with store.pool.acquire() as conn:
