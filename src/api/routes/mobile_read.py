@@ -7,18 +7,22 @@ mutations are exposed.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from uuid import UUID, uuid4
-
 import hashlib
+import logging
+from datetime import datetime, timezone
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from packaging.version import Version
+from fastapi import APIRouter, Depends, Request, Response, status
+from packaging.version import InvalidVersion, Version
+from redis import Redis
+from starlette.concurrency import run_in_threadpool
 
 from src.api.dependencies import get_pool
+from src.api.deps import get_redis_client
+from src.api.mobile_errors import MobileAPIError
 from src.api.routes.mobile_auth import require_mobile_token
 from src.config import config
-from src.mobile_monitoring.builder import MobileEventStore, MobileSnapshotBuilder
+from src.mobile_monitoring.events import CursorError, MobileEventStore
 from src.mobile_monitoring.models import (
     EventCategory,
     EventsResponse,
@@ -28,12 +32,17 @@ from src.mobile_monitoring.models import (
     PositionsResponse,
     SnapshotResponse,
 )
+from src.mobile_monitoring.performance import MobilePerformanceService
+from src.mobile_monitoring.read_model import (
+    MobileReadBundle,
+    RedisMobileReadModelStore,
+    bundle_age_seconds,
+)
+from src.portfolio.spy import fetch_spy_closes
+from src.store.redis_store import RedisStore
 
-router = APIRouter(prefix="/read", tags=["mobile-read"])
-
-
-def _request_id() -> UUID:
-    return uuid4()
+router = APIRouter(tags=["mobile-read"])
+logger = logging.getLogger(__name__)
 
 
 def _app_version(request: Request) -> str | None:
@@ -48,23 +57,17 @@ def _check_app_version(request: Request, response: MobileReadResponse) -> None:
         return
     try:
         if Version(app_version) < Version(response.min_supported_app_version):
-            raise HTTPException(
-                status_code=status.HTTP_426_UPGRADE_REQUIRED,
-                detail={
-                    "error": {
-                        "code": "upgrade_required",
-                        "message": "App version is below the minimum supported version.",
-                        "request_id": str(_request_id()),
-                        "retryable": False,
-                        "details": {
-                            "app_version": app_version,
-                            "min_supported_app_version": response.min_supported_app_version,
-                            "latest_app_version": response.latest_app_version,
-                        },
-                    }
+            raise MobileAPIError(
+                status.HTTP_426_UPGRADE_REQUIRED,
+                "upgrade_required",
+                "App version is below the minimum supported version.",
+                details={
+                    "app_version": app_version,
+                    "min_supported_app_version": response.min_supported_app_version,
+                    "latest_app_version": response.latest_app_version,
                 },
             )
-    except Exception:
+    except InvalidVersion:
         # Malformed version strings are ignored; the device will be prompted once it sends a valid version.
         pass
 
@@ -95,35 +98,76 @@ def _render_read_response(
     )
 
 
-async def _builder(request: Request) -> MobileSnapshotBuilder:
-    return MobileSnapshotBuilder(pool=await get_pool(request))
+def _read_model(
+    redis: Redis = Depends(get_redis_client),
+) -> RedisMobileReadModelStore:
+    """Return the API-lifespan Redis read-model adapter."""
+    return RedisMobileReadModelStore(redis)
 
 
 async def _event_store(request: Request) -> MobileEventStore:
     return MobileEventStore(pool=await get_pool(request))
 
 
+async def _performance_service(
+    request: Request,
+    redis: Redis = Depends(get_redis_client),
+) -> MobilePerformanceService:
+    """Build the DB/cache projection with bounded cached SPY enrichment."""
+    return MobilePerformanceService(
+        await get_pool(request),
+        RedisMobileReadModelStore(redis),
+        spy_loader=lambda start, end: fetch_spy_closes(
+            start,
+            end,
+            RedisStore(redis),
+        ),
+    )
+
+
+async def _load_bundle(store: Any) -> MobileReadBundle:
+    """Load one safe coherent bundle without contacting broker dependencies."""
+    try:
+        bundle = await run_in_threadpool(store.load)
+    except Exception:
+        logger.exception("Mobile snapshot read-model load failed")
+        raise MobileAPIError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "snapshot_unavailable",
+            "Monitoring snapshot is temporarily unavailable.",
+            retryable=True,
+        ) from None
+    if bundle is None:
+        raise MobileAPIError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "snapshot_unavailable",
+            "Monitoring snapshot is temporarily unavailable.",
+            retryable=True,
+        )
+    age = bundle_age_seconds(bundle)
+    safe_ceiling = 300 if bundle.snapshot.operational.pipeline_expected else 1800
+    if age > safe_ceiling:
+        raise MobileAPIError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "snapshot_unavailable",
+            "Monitoring snapshot is temporarily unavailable.",
+            retryable=True,
+            details={"data_age_seconds": age},
+        )
+    return bundle
+
+
 @router.get("/snapshot", response_model=SnapshotResponse)
 async def snapshot(
     request: Request,
-    claims: dict = Depends(require_mobile_token),
-    builder: MobileSnapshotBuilder = Depends(_builder),
-) -> SnapshotResponse:
-    try:
-        resp = await builder.build_snapshot()
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "error": {
-                    "code": "snapshot_unavailable",
-                    "message": f"Monitoring snapshot is temporarily unavailable: {exc}",
-                    "request_id": str(_request_id()),
-                    "retryable": True,
-                    "details": {},
-                }
-            },
-        ) from exc
+    claims: dict[str, Any] = Depends(require_mobile_token),
+    store: Any = Depends(_read_model),
+) -> Response:
+    del claims
+    bundle = await _load_bundle(store)
+    resp = bundle.snapshot.model_copy(
+        update={"data_age_seconds": bundle_age_seconds(bundle)}
+    )
     return _render_read_response(request, resp)
 
 
@@ -131,63 +175,42 @@ async def snapshot(
 async def performance(
     request: Request,
     period: str = "1m",
-    claims: dict = Depends(require_mobile_token),
-    builder: MobileSnapshotBuilder = Depends(_builder),
-) -> PerformanceResponse:
+    claims: dict[str, Any] = Depends(require_mobile_token),
+    service: MobilePerformanceService = Depends(_performance_service),
+) -> Response:
+    del claims
     try:
         Period(period)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": {
-                    "code": "invalid_period",
-                    "message": f"Invalid period: {period}",
-                    "request_id": str(_request_id()),
-                    "retryable": False,
-                    "details": {},
-                }
-            },
+        raise MobileAPIError(
+            status.HTTP_400_BAD_REQUEST,
+            "invalid_period",
+            f"Invalid period: {period}",
         ) from exc
     try:
-        resp = await builder.build_performance(period=period)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "error": {
-                    "code": "performance_unavailable",
-                    "message": f"Performance data is temporarily unavailable: {exc}",
-                    "request_id": str(_request_id()),
-                    "retryable": True,
-                    "details": {},
-                }
-            },
-        ) from exc
+        resp = await service.build(period=period)
+    except Exception:
+        logger.exception("Mobile performance projection failed")
+        raise MobileAPIError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "performance_unavailable",
+            "Performance data is temporarily unavailable.",
+            retryable=True,
+        ) from None
     return _render_read_response(request, resp)
 
 
 @router.get("/positions", response_model=PositionsResponse)
 async def positions(
     request: Request,
-    claims: dict = Depends(require_mobile_token),
-    builder: MobileSnapshotBuilder = Depends(_builder),
-) -> PositionsResponse:
-    try:
-        resp = await builder.build_positions()
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "error": {
-                    "code": "positions_unavailable",
-                    "message": f"Positions are temporarily unavailable: {exc}",
-                    "request_id": str(_request_id()),
-                    "retryable": True,
-                    "details": {},
-                }
-            },
-        ) from exc
+    claims: dict[str, Any] = Depends(require_mobile_token),
+    read_model: Any = Depends(_read_model),
+) -> Response:
+    del claims
+    bundle = await _load_bundle(read_model)
+    resp = bundle.positions.model_copy(
+        update={"data_age_seconds": bundle_age_seconds(bundle)}
+    )
     return _render_read_response(request, resp)
 
 
@@ -198,78 +221,54 @@ async def events(
     days: int = 7,
     cursor: str | None = None,
     limit: int = 50,
-    claims: dict = Depends(require_mobile_token),
+    claims: dict[str, Any] = Depends(require_mobile_token),
     store: MobileEventStore = Depends(_event_store),
-) -> EventsResponse:
+) -> Response:
+    del claims
     try:
         cat = EventCategory(category)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": {
-                    "code": "invalid_category",
-                    "message": f"Invalid category: {category}",
-                    "request_id": str(_request_id()),
-                    "retryable": False,
-                    "details": {},
-                }
-            },
+        raise MobileAPIError(
+            status.HTTP_400_BAD_REQUEST,
+            "invalid_category",
+            f"Invalid category: {category}",
         ) from exc
 
-    if not (1 <= days <= 90):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": {
-                    "code": "invalid_days",
-                    "message": "days must be between 1 and 90",
-                    "request_id": str(_request_id()),
-                    "retryable": False,
-                    "details": {},
-                }
-            },
+    if not (1 <= days <= 30):
+        raise MobileAPIError(
+            status.HTTP_400_BAD_REQUEST,
+            "invalid_days",
+            "days must be between 1 and 30",
         )
     if not (1 <= limit <= 200):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": {
-                    "code": "invalid_limit",
-                    "message": "limit must be between 1 and 200",
-                    "request_id": str(_request_id()),
-                    "retryable": False,
-                    "details": {},
-                }
-            },
+        raise MobileAPIError(
+            status.HTTP_400_BAD_REQUEST,
+            "invalid_limit",
+            "limit must be between 1 and 200",
         )
 
     try:
-        items = await store.list_events(
+        page = await store.list_events(
             category=cat,
             days=days,
             cursor=cursor,
             limit=limit,
         )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "error": {
-                    "code": "events_unavailable",
-                    "message": f"Event feed is temporarily unavailable: {exc}",
-                    "request_id": str(_request_id()),
-                    "retryable": True,
-                    "details": {},
-                }
-            },
+    except CursorError as exc:
+        raise MobileAPIError(
+            status.HTTP_400_BAD_REQUEST,
+            "invalid_cursor",
+            "Invalid event cursor",
         ) from exc
+    except Exception:
+        raise MobileAPIError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "events_unavailable",
+            "Event feed is temporarily unavailable.",
+            retryable=True,
+        ) from None
 
     as_of = datetime.now(timezone.utc)
-    next_cursor = None
-    if len(items) > limit:
-        # Not implemented: real cursor signing would go here.
-        next_cursor = None
 
     resp = EventsResponse(
         as_of=as_of,
@@ -277,7 +276,7 @@ async def events(
         currency="USD",
         min_supported_app_version=config.MIN_SUPPORTED_MOBILE_APP_VERSION,
         latest_app_version=config.LATEST_MOBILE_APP_VERSION,
-        items=items[:limit],
-        next_cursor=next_cursor,
+        items=page.items,
+        next_cursor=page.next_cursor,
     )
     return _render_read_response(request, resp)

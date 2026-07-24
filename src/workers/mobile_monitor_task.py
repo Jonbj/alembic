@@ -1,0 +1,119 @@
+"""Periodic producer for the coherent mobile read model."""
+
+from __future__ import annotations
+
+import json
+import logging
+from datetime import datetime, timezone
+import asyncpg
+from redis import Redis
+from starlette.concurrency import run_in_threadpool
+
+from src.api.dependencies import init_asyncpg_pool
+from src.config import config
+from src.mobile_monitoring.builder import MobileSnapshotBuilder
+from src.mobile_monitoring.read_model import (
+    MobileReadBundle,
+    MobileReadModelStore,
+    RedisMobileReadModelStore,
+)
+from src.store.redis_store import RedisStore
+from src.workers._async_utils import run_async
+from src.workers.celery_app import app
+
+logger = logging.getLogger(__name__)
+
+
+async def publish_mobile_read_model(
+    *,
+    builder: MobileSnapshotBuilder,
+    read_model: MobileReadModelStore,
+    pool: asyncpg.Pool,
+    as_of: datetime | None = None,
+) -> MobileReadBundle:
+    """Build once, atomically publish, and periodically persist NAV history."""
+    observed_at = as_of or datetime.now(timezone.utc)
+    bundle = await builder.build_bundle(as_of=observed_at)
+    await run_in_threadpool(read_model.save, bundle)
+    if observed_at.minute % 5 == 0 and bundle.snapshot.portfolio.nav is not None:
+        await _persist_snapshot(pool, bundle)
+    return bundle
+
+
+async def _persist_snapshot(
+    pool: asyncpg.Pool,
+    bundle: MobileReadBundle,
+) -> None:
+    snapshot = bundle.snapshot
+    portfolio = snapshot.portfolio
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO portfolio_monitor_snapshots (
+                snapshot_id, as_of, broker_environment, mode, nav,
+                previous_close_equity, nav_change_today, cash,
+                gross_exposure, gross_exposure_limit, unrealized_pnl,
+                current_drawdown, drawdown_limit, open_positions, source,
+                pipeline_health, degradations
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                $13, $14, $15, $16::jsonb, $17::jsonb
+            )
+            ON CONFLICT (snapshot_id) DO NOTHING
+            """,
+            snapshot.snapshot_id,
+            snapshot.as_of,
+            "paper" if config.ALPACA_PAPER_MODE else "live",
+            snapshot.operational.mode,
+            portfolio.nav,
+            (
+                portfolio.nav - portfolio.nav_change_today
+                if portfolio.nav is not None
+                and portfolio.nav_change_today is not None
+                else None
+            ),
+            portfolio.nav_change_today,
+            portfolio.cash,
+            portfolio.gross_exposure,
+            portfolio.gross_exposure_limit,
+            portfolio.unrealized_pnl,
+            portfolio.current_drawdown,
+            portfolio.drawdown_limit,
+            portfolio.open_positions,
+            portfolio.source,
+            json.dumps(
+                {
+                    key: value.model_dump(mode="json")
+                    for key, value in snapshot.pipeline.items()
+                }
+            ),
+            json.dumps(
+                [
+                    degradation.model_dump(mode="json")
+                    for degradation in snapshot.degradations
+                ]
+            ),
+        )
+
+
+async def _run_mobile_monitor_snapshot() -> None:
+    pool = await init_asyncpg_pool()
+    redis_client = Redis.from_url(config.REDIS_URL)
+    redis_store = RedisStore(redis_client)
+    read_model = RedisMobileReadModelStore(redis_client)
+    try:
+        await publish_mobile_read_model(
+            builder=MobileSnapshotBuilder(pool=pool, redis=redis_store),
+            read_model=read_model,
+            pool=pool,
+        )
+    finally:
+        redis_client.close()
+
+
+@app.task(name="src.workers.mobile_monitor_task.run_mobile_monitor_snapshot")
+def run_mobile_monitor_snapshot() -> dict[str, int | str]:
+    """Celery entrypoint using worker-owned Redis and the persistent event loop."""
+    run_async(_run_mobile_monitor_snapshot())
+    return {"status": "ok", "processed": 1}

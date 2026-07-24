@@ -39,6 +39,7 @@ app = Celery(
         "src.workers.sentiment",
         "src.workers.telegram_poller",
         "src.workers.mobile_alert_task",
+        "src.workers.mobile_monitor_task",
     ],
 )
 
@@ -65,6 +66,11 @@ app.conf.update(
 
 # Beat schedule for periodic tasks
 app.conf.beat_schedule = {
+    # Coherent mobile read model, including paused/off-hours state.
+    "mobile-monitor-snapshot": {
+        "task": "src.workers.mobile_monitor_task.run_mobile_monitor_snapshot",
+        "schedule": crontab(minute="*/1"),
+    },
     # Sentiment Worker every 15 min during market hours (Mon-Fri 14:00-21:00 UTC = 9am-4pm ET)
     # Routed to 'inference' queue → handled by worker-inference (concurrency=1, single FinBERT copy).
     "sentiment-worker": {
