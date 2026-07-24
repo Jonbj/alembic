@@ -381,6 +381,20 @@ class TestMobileRead:
         assert loaded is not None
         assert loaded.snapshot.snapshot_id == bundle.snapshot.snapshot_id
 
+    async def test_healthy_redis_wins_when_postgres_fallback_is_unavailable(
+        self, mobile_deps
+    ):
+        bundle = mobile_deps[4].bundle
+        healthy_redis = MagicMock(spec=MobileReadModelStore)
+        healthy_redis.load.return_value = bundle
+        unavailable_pool = MagicMock(spec=asyncpg.Pool)
+        unavailable_pool.acquire.side_effect = RuntimeError("database unavailable")
+        reader = ResilientMobileReadModelReader(healthy_redis, unavailable_pool)
+
+        loaded = await reader.load()
+
+        assert loaded is bundle
+
     async def test_snapshot_stale_beyond_safe_ceiling_returns_503(
         self, client, mobile_deps, monitor_user, monitor_device
     ):

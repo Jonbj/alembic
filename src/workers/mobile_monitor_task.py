@@ -93,7 +93,11 @@ async def publish_mobile_read_model(
     bundle = await builder.build_bundle(as_of=observed_at)
     try:
         await run_in_threadpool(read_model.save, bundle)
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Redis mobile read-model publication failed; persisting fallback: %s",
+            exc,
+        )
         if bundle.snapshot.portfolio.nav is not None:
             await _persist_snapshot(pool, bundle)
         raise

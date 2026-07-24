@@ -105,22 +105,26 @@ class ResilientMobileReadModelReader:
         except Exception as exc:
             logger.warning("Primary mobile read model unavailable: %s", exc)
             primary = None
-        async with self._pool.acquire() as conn:
-            raw = await conn.fetchval(
-                """
-                SELECT pipeline_health -> '_mobile_read_bundle'
-                FROM portfolio_monitor_snapshots
-                WHERE pipeline_health ? '_mobile_read_bundle'
-                ORDER BY as_of DESC
-                LIMIT 1
-                """
-            )
-        if raw is None:
+        try:
+            async with self._pool.acquire() as conn:
+                raw = await conn.fetchval(
+                    """
+                    SELECT pipeline_health -> '_mobile_read_bundle'
+                    FROM portfolio_monitor_snapshots
+                    WHERE pipeline_health ? '_mobile_read_bundle'
+                    ORDER BY as_of DESC
+                    LIMIT 1
+                    """
+                )
+            if raw is None:
+                return primary
+            if isinstance(raw, (bytes, str)):
+                fallback = MobileReadBundle.model_validate_json(raw)
+            else:
+                fallback = MobileReadBundle.model_validate(raw)
+        except Exception as exc:
+            logger.warning("Fallback mobile read model unavailable: %s", exc)
             return primary
-        if isinstance(raw, (bytes, str)):
-            fallback = MobileReadBundle.model_validate_json(raw)
-        else:
-            fallback = MobileReadBundle.model_validate(raw)
         if primary is None or fallback.snapshot.as_of > primary.snapshot.as_of:
             return fallback
         return primary

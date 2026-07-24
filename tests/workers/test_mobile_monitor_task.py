@@ -20,6 +20,7 @@ from src.mobile_monitoring.models import (
     SnapshotResponse,
 )
 from src.mobile_monitoring.read_model import MobileReadBundle, MobileReadModelStore
+from src.portfolio.spy import fetch_spy_closes
 from src.workers.mobile_monitor_task import (
     _persist_snapshot,
     _warm_mobile_spy_cache,
@@ -277,7 +278,10 @@ def test_celery_entrypoint_returns_observable_status(
 def test_worker_warms_mobile_spy_ranges_outside_http_requests(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fetch = MagicMock(return_value={"2026-07-22": 625.5})
+    fetch = MagicMock(
+        spec=fetch_spy_closes,
+        return_value={"2026-07-22": 625.5},
+    )
     monkeypatch.setattr(
         "src.workers.mobile_monitor_task.fetch_spy_closes",
         fetch,
