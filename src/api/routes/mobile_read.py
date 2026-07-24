@@ -41,7 +41,7 @@ from src.mobile_monitoring.read_model import (
     bundle_age_seconds,
     ensure_bundle_safe,
 )
-from src.portfolio.spy import fetch_spy_closes
+from src.portfolio.spy import load_cached_spy_closes
 
 router = APIRouter(tags=["mobile-read"])
 logger = logging.getLogger(__name__)
@@ -122,11 +122,11 @@ async def _performance_service(
     request: Request,
     redis: Redis = Depends(get_redis_client),
 ) -> MobilePerformanceService:
-    """Build the DB/cache projection with bounded cached SPY enrichment."""
+    """Build the DB/cache projection with broker-free cached SPY enrichment."""
     return MobilePerformanceService(
         await get_pool(request),
         RedisMobileReadModelStore(redis),
-        spy_loader=lambda start, end: fetch_spy_closes(
+        spy_loader=lambda start, end: load_cached_spy_closes(
             start,
             end,
             redis,

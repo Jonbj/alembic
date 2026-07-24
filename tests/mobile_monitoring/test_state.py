@@ -103,8 +103,12 @@ def test_expected_activity_uses_schedule_plus_eight_minute_grace(
         component="signal",
         age_seconds=age_seconds,
         pipeline_expected=True,
+        interval_seconds=900,
+        grace_seconds=480,
         degradations=degradations,
     )
 
     assert component.status == expected_status
+    assert component.freshness_budget_seconds == 900
+    assert component.stale_after_seconds == 1380
     assert bool(degradations) is degraded

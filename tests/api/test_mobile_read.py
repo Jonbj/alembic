@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from time import perf_counter
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import asyncpg
 import pytest
@@ -136,6 +136,8 @@ class _FakeRedis:
         self.store = {}
         self._r = self
         self.ping = MagicMock(return_value=True)
+        self.set = MagicMock(return_value=True)
+        self.delete = MagicMock(return_value=1)
         self.is_killswitch_active = MagicMock(return_value=False)
 
     def get(self, key):
@@ -249,6 +251,8 @@ class TestMobileRead:
         assert data["operational"]["market_timezone"] == "America/New_York"
         assert data["portfolio"]["nav"] is not None
         assert data["pipeline"]["broker"]["status"] == "fresh"
+        assert data["pipeline"]["signal"]["freshness_budget_seconds"] == 900
+        assert data["pipeline"]["signal"]["stale_after_seconds"] == 1380
         assert len(data["strategies"]) >= 0
         assert data["snapshot_id"]
         alpaca.get_account.assert_not_called()
@@ -388,6 +392,42 @@ class TestMobileRead:
         blocked = await builder.build_bundle()
         assert blocked.snapshot.operational.state == "blocked"
         assert blocked.snapshot.portfolio.nav is not None
+
+    async def test_redis_read_only_is_degraded_and_reported_not_writeable(
+        self, mobile_deps
+    ):
+        builder, _, redis, _, _ = mobile_deps
+        redis.set.side_effect = RuntimeError("READONLY replica")
+
+        bundle = await builder.build_bundle()
+
+        assert bundle.snapshot.operational.state == "degraded"
+        assert bundle.snapshot.pipeline["redis"].writeable is False
+        redis.ping.assert_called()
+        assert any(
+            degradation.component == "redis"
+            and degradation.severity == "warning"
+            for degradation in bundle.snapshot.degradations
+        )
+
+    async def test_unknown_incident_state_is_a_critical_block(
+        self, mobile_deps
+    ):
+        builder = mobile_deps[0]
+        builder._count_active_incidents = AsyncMock(
+            spec=builder._count_active_incidents,
+            side_effect=RuntimeError("event schema unavailable"),
+        )
+
+        bundle = await builder.build_bundle()
+
+        assert bundle.snapshot.operational.state == "blocked"
+        assert bundle.snapshot.operational.primary_reason == "incidents_unavailable"
+        assert any(
+            degradation.component == "incidents"
+            and degradation.severity == "critical"
+            for degradation in bundle.snapshot.degradations
+        )
 
     async def test_broker_failure_is_null_not_zero(
         self, mobile_deps

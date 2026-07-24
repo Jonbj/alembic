@@ -154,7 +154,13 @@ shared with the positions projection produced by the same broker read.
   },
   "pipeline": {
     "database": {"status": "fresh", "age_seconds": 0},
-    "redis": {"status": "fresh", "age_seconds": 0, "writeable": true}
+    "redis": {"status": "fresh", "age_seconds": 0, "writeable": true},
+    "signal": {
+      "status": "fresh",
+      "age_seconds": 180,
+      "freshness_budget_seconds": 900,
+      "stale_after_seconds": 1380
+    }
   },
   "strategies": [],
   "degradations": []
@@ -164,6 +170,10 @@ shared with the positions projection produced by the same broker read.
 An absent or unsafe stale snapshot returns `503 snapshot_unavailable`; broker
 or dependency failures are represented as nullable values plus degradations,
 never invented zero NAV.
+
+Scheduled pipeline components expose their server-configured freshness budget
+and stale threshold in seconds. Android must render these values rather than
+duplicating schedule constants.
 
 ### `GET /api/mobile/v1/performance`
 

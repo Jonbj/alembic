@@ -115,6 +115,8 @@ class PipelineComponent(BaseModel):
     status: Freshness
     age_seconds: int = Field(..., ge=0)
     writeable: bool | None = None
+    freshness_budget_seconds: int | None = Field(default=None, ge=0)
+    stale_after_seconds: int | None = Field(default=None, ge=0)
 
 
 class OperationalBlock(BaseModel):

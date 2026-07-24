@@ -12,6 +12,30 @@ from src.config import config
 log = logging.getLogger(__name__)
 
 
+def _spy_cache_key(from_date: str, to_date: str) -> str:
+    return f"benchmark:spy_closes:{from_date}:{to_date}"
+
+
+def load_cached_spy_closes(
+    from_date: str,
+    to_date: str,
+    redis: Any,
+) -> dict[str, float] | None:
+    """Read SPY closes from Redis without falling back to a broker request."""
+    redis_client = getattr(redis, "__dict__", {}).get("_r", redis)
+    if redis_client is None:
+        return None
+    try:
+        cached = redis_client.get(_spy_cache_key(from_date, to_date))
+        if not cached:
+            return None
+        values = json.loads(cached)
+        return {str(day): float(close) for day, close in values.items()}
+    except Exception as exc:
+        log.debug("SPY cache read failed: %s", exc)
+        return None
+
+
 def spy_fetch_end_date(to_date: str, today: date) -> date:
     """Cap at yesterday because the configured data plan excludes current SIP data."""
     return min(date.fromisoformat(to_date), today - timedelta(days=1))
@@ -23,15 +47,11 @@ def fetch_spy_closes(
     redis: Any = None,
 ) -> dict[str, float] | None:
     """Return daily SPY closes with a one-hour cache; fail open on any error."""
-    cache_key = f"benchmark:spy_closes:{from_date}:{to_date}"
-    redis_client = getattr(redis, "_r", redis)
-    if redis_client is not None:
-        try:
-            cached = redis_client.get(cache_key)
-            if cached:
-                return json.loads(cached)
-        except Exception as exc:
-            log.debug("SPY cache read failed: %s", exc)
+    cache_key = _spy_cache_key(from_date, to_date)
+    redis_client = getattr(redis, "__dict__", {}).get("_r", redis)
+    cached = load_cached_spy_closes(from_date, to_date, redis_client)
+    if cached is not None:
+        return cached
     try:
         from alpaca.data.historical import StockHistoricalDataClient
         from alpaca.data.requests import StockBarsRequest

@@ -42,8 +42,8 @@ from src.store.redis_store import RedisStore
 
 logger = logging.getLogger(__name__)
 
-_PIPELINE_INTERVAL_SECONDS = 15 * 60
-_PIPELINE_GRACE_SECONDS = 8 * 60
+_DEFAULT_PIPELINE_INTERVAL_SECONDS = 15 * 60
+_DEFAULT_PIPELINE_GRACE_SECONDS = 8 * 60
 
 
 def _now() -> datetime:
@@ -84,16 +84,23 @@ def _pipeline_activity_component(
     component: str,
     age_seconds: int | None,
     pipeline_expected: bool,
+    interval_seconds: int,
+    grace_seconds: int,
     degradations: list[Degradation],
 ) -> PipelineComponent:
     """Classify scheduled activity and record lateness during expected windows."""
     if not pipeline_expected:
-        return PipelineComponent(status=Freshness.NOT_EXPECTED, age_seconds=0)
+        return PipelineComponent(
+            status=Freshness.NOT_EXPECTED,
+            age_seconds=0,
+            freshness_budget_seconds=interval_seconds,
+            stale_after_seconds=interval_seconds + grace_seconds,
+        )
     status = _classify_age(
         age_seconds,
         (
-            _PIPELINE_INTERVAL_SECONDS,
-            _PIPELINE_INTERVAL_SECONDS + _PIPELINE_GRACE_SECONDS,
+            interval_seconds,
+            interval_seconds + grace_seconds,
         ),
     )
     if status != Freshness.FRESH:
@@ -108,7 +115,12 @@ def _pipeline_activity_component(
                 severity=Severity.WARNING,
             )
         )
-    return PipelineComponent(status=status, age_seconds=age_seconds or 0)
+    return PipelineComponent(
+        status=status,
+        age_seconds=age_seconds or 0,
+        freshness_budget_seconds=interval_seconds,
+        stale_after_seconds=interval_seconds + grace_seconds,
+    )
 
 
 class MobileSnapshotBuilder:
@@ -129,6 +141,32 @@ class MobileSnapshotBuilder:
         # Workers own their Redis connection. FastAPI lifespan dependencies are
         # intentionally not used here because Celery has no API lifespan.
         self.redis = redis or RedisStore()
+        schedule = load_trading_config().get("schedule", {})
+        self._pipeline_interval_seconds = {
+            "signal": int(
+                schedule.get(
+                    "sentiment_worker_minutes",
+                    _DEFAULT_PIPELINE_INTERVAL_SECONDS // 60,
+                )
+            )
+            * 60,
+            "portfolio_cycle": int(
+                schedule.get(
+                    "portfolio_cycle_minutes",
+                    _DEFAULT_PIPELINE_INTERVAL_SECONDS // 60,
+                )
+            )
+            * 60,
+        }
+        self._pipeline_grace_seconds = (
+            int(
+                schedule.get(
+                    "mobile_freshness_grace_minutes",
+                    _DEFAULT_PIPELINE_GRACE_SECONDS // 60,
+                )
+            )
+            * 60
+        )
 
     async def build_snapshot(self, as_of: datetime | None = None) -> SnapshotResponse:
         """Build and return the snapshot half of one coherent read bundle."""
@@ -383,6 +421,13 @@ class MobileSnapshotBuilder:
                 "Mobile snapshot: active incident count unavailable: %s",
                 exc,
             )
+            degradations.append(
+                Degradation(
+                    component="incidents",
+                    reason="Active incident state unavailable",
+                    severity=Severity.CRITICAL,
+                )
+            )
 
         state = OperationalState.OPERATIONAL
         reason: str | None = None
@@ -558,12 +603,11 @@ class MobileSnapshotBuilder:
                 )
             )
 
-        # Redis
+        # Redis reachability and writeability are separate operational signals:
+        # a replica may answer PING while rejecting the atomic read-model SET.
         try:
-            cast(Redis, self.redis._r).ping()
-            pipeline["redis"] = PipelineComponent(
-                status=Freshness.FRESH, age_seconds=0, writeable=True
-            )
+            redis_client = cast(Redis, self.redis._r)
+            redis_client.ping()
         except Exception as exc:
             logger.warning("Mobile snapshot: Redis ping failed: %s", exc)
             pipeline["redis"] = PipelineComponent(
@@ -576,6 +620,34 @@ class MobileSnapshotBuilder:
                     severity=Severity.CRITICAL,
                 )
             )
+        else:
+            probe_key = f"mobile:health:write-probe:{uuid4()}"
+            try:
+                redis_client.set(probe_key, "1", ex=5)
+                pipeline["redis"] = PipelineComponent(
+                    status=Freshness.FRESH,
+                    age_seconds=0,
+                    writeable=True,
+                )
+            except Exception as exc:
+                logger.warning("Mobile snapshot: Redis write probe failed: %s", exc)
+                pipeline["redis"] = PipelineComponent(
+                    status=Freshness.FRESH,
+                    age_seconds=0,
+                    writeable=False,
+                )
+                degradations.append(
+                    Degradation(
+                        component="redis",
+                        reason="Redis is reachable but not writeable",
+                        severity=Severity.WARNING,
+                    )
+                )
+            else:
+                try:
+                    redis_client.delete(probe_key)
+                except Exception as exc:
+                    logger.debug("Mobile Redis write probe cleanup failed: %s", exc)
 
         # Broker
         broker_age = 0 if account is not None else 300
@@ -616,12 +688,16 @@ class MobileSnapshotBuilder:
             component="signal",
             age_seconds=signal_age,
             pipeline_expected=pipeline_expected,
+            interval_seconds=self._pipeline_interval_seconds["signal"],
+            grace_seconds=self._pipeline_grace_seconds,
             degradations=degradations,
         )
         pipeline["portfolio_cycle"] = _pipeline_activity_component(
             component="portfolio_cycle",
             age_seconds=cycle_age,
             pipeline_expected=pipeline_expected,
+            interval_seconds=self._pipeline_interval_seconds["portfolio_cycle"],
+            grace_seconds=self._pipeline_grace_seconds,
             degradations=degradations,
         )
 
@@ -654,14 +730,10 @@ class MobileSnapshotBuilder:
             return []
 
     async def _count_active_incidents(self) -> int:
-        try:
-            async with self.pool.acquire() as conn:
-                return await conn.fetchval(
-                    """
-                    SELECT COUNT(*) FROM mobile_events
-                    WHERE status IN ('open', 'escalated')
-                    """
-                ) or 0
-        except Exception as exc:
-            logger.warning("Mobile snapshot: active incident query failed: %s", exc)
-            return 0
+        async with self.pool.acquire() as conn:
+            return await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM mobile_events
+                WHERE status IN ('open', 'escalated')
+                """
+            ) or 0

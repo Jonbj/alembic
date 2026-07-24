@@ -21,9 +21,23 @@ from src.mobile_monitoring.models import (
 from src.mobile_monitoring.read_model import MobileReadBundle, MobileReadModelStore
 from src.workers.mobile_monitor_task import (
     _persist_snapshot,
+    _warm_mobile_spy_cache,
     publish_mobile_read_model,
     run_mobile_monitor_snapshot,
 )
+
+
+@pytest.fixture(autouse=True)
+def _run_worker_thread_calls_inline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep worker unit tests deterministic without starting executor threads."""
+
+    async def run_inline(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(
+        "src.workers.mobile_monitor_task.run_in_threadpool",
+        run_inline,
+    )
 
 
 def _bundle(
@@ -78,7 +92,7 @@ async def test_worker_publishes_one_coherent_bundle_without_persisting_off_caden
     as_of = datetime(2026, 7, 23, 14, 1, tzinfo=timezone.utc)
     bundle = _bundle(as_of)
     builder = MagicMock(spec=MobileSnapshotBuilder)
-    builder.build_bundle = AsyncMock(return_value=bundle)
+    builder.build_bundle.return_value = bundle
     read_model = MagicMock(spec=MobileReadModelStore)
     read_model.load.return_value = bundle
     pool = MagicMock(spec=asyncpg.Pool)
@@ -108,7 +122,7 @@ async def test_worker_persists_every_five_minutes(
     as_of = datetime(2026, 7, 23, 14, 5, tzinfo=timezone.utc)
     bundle = _bundle(as_of)
     builder = MagicMock(spec=MobileSnapshotBuilder)
-    builder.build_bundle = AsyncMock(return_value=bundle)
+    builder.build_bundle.return_value = bundle
     read_model = MagicMock(spec=MobileReadModelStore)
     read_model.load.return_value = bundle
     pool = MagicMock(spec=asyncpg.Pool)
@@ -136,7 +150,7 @@ async def test_worker_does_not_persist_fake_nav_when_broker_is_unavailable(
     bundle = _bundle(as_of)
     bundle.snapshot.portfolio.nav = None
     builder = MagicMock(spec=MobileSnapshotBuilder)
-    builder.build_bundle = AsyncMock(return_value=bundle)
+    builder.build_bundle.return_value = bundle
     read_model = MagicMock(spec=MobileReadModelStore)
     read_model.load.return_value = bundle
     pool = MagicMock(spec=asyncpg.Pool)
@@ -164,7 +178,7 @@ async def test_worker_persists_material_state_transition_off_cadence(
     previous = _bundle(as_of, state=OperationalState.OPERATIONAL)
     blocked = _bundle(as_of, state=OperationalState.BLOCKED)
     builder = MagicMock(spec=MobileSnapshotBuilder)
-    builder.build_bundle = AsyncMock(return_value=blocked)
+    builder.build_bundle.return_value = blocked
     read_model = MagicMock(spec=MobileReadModelStore)
     read_model.load.return_value = previous
     pool = MagicMock(spec=asyncpg.Pool)
@@ -195,7 +209,7 @@ async def test_worker_does_not_persist_off_hours_cadence_without_transition(
         pipeline_expected=False,
     )
     builder = MagicMock(spec=MobileSnapshotBuilder)
-    builder.build_bundle = AsyncMock(return_value=paused)
+    builder.build_bundle.return_value = paused
     read_model = MagicMock(spec=MobileReadModelStore)
     read_model.load.return_value = paused
     pool = MagicMock(spec=asyncpg.Pool)
@@ -228,3 +242,22 @@ def test_celery_entrypoint_returns_observable_status(
 
     run.assert_called_once()
     assert result == {"status": "ok", "processed": 1}
+
+
+def test_worker_warms_mobile_spy_ranges_outside_http_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fetch = MagicMock(return_value={"2026-07-22": 625.5})
+    monkeypatch.setattr(
+        "src.workers.mobile_monitor_task.fetch_spy_closes",
+        fetch,
+    )
+    redis = MagicMock()
+
+    _warm_mobile_spy_cache(
+        redis,
+        datetime(2026, 7, 23, 14, 5, tzinfo=timezone.utc),
+    )
+
+    assert fetch.call_count == 5
+    fetch.assert_any_call("2026-07-16", "2026-07-23", redis)

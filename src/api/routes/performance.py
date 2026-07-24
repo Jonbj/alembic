@@ -35,7 +35,7 @@ def _spy_fetch_end_date(to_date: str, today: date) -> date:
 def _fetch_spy_closes(
     from_date: str,
     to_date: str,
-    redis=None,
+    redis: RedisStore | None = None,
 ) -> dict[str, float] | None:
     """Compatibility seam around the shared cached loader."""
     return fetch_spy_closes(from_date, to_date, redis)

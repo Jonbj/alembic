@@ -280,7 +280,8 @@ Execution checklist (per tick):
 | `ForwardReturnWorker` | `src/workers/performance.py` | Populates `sentiment_signals.forward_return` at market close |
 | `LossFeedbackCheck` | `src/workers/performance.py` | Phase B: detects loss patterns, adjusts entry threshold and writes feedback audit state |
 | `CounterfactualWorker` | `src/workers/performance.py` | Phase C: computes 1h return for every skipped trade |
-| `MobileMonitorSnapshot` | `src/workers/mobile_monitor_task.py` | Produces one coherent atomic Redis read model per minute and persists NAV history every five minutes when broker NAV is available |
+| `MobileMonitorSnapshot` | `src/workers/mobile_monitor_task.py` | Produces one coherent atomic Redis read model per minute, persists NAV history every five minutes when broker NAV is available, and warms bounded SPY caches outside HTTP requests |
+| `MobileAlertEvaluator` | `src/workers/mobile_alert_task.py` | Evaluates incident lifecycle, reconciles rejected/canceled broker orders into the durable event feed, and drains the notification outbox |
 | Mobile read API | `src/api/routes/mobile_read.py` | Read-only `/api/mobile/v1` snapshot, performance, positions, and signed-cursor event projections; HTTP handlers never fan out to Alpaca |
 | `ICCalculator` | `src/performance/ic.py` | Composite IC B4 with Newey-West HAC standard errors |
 | `WeightOptimiser` | `src/performance/weights.py` | LOO ICIR with guardrails (VIX, drawdown, floor/cap) |

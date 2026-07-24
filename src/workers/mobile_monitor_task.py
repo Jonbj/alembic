@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
 import asyncpg
 from redis import Redis
 from starlette.concurrency import run_in_threadpool
@@ -23,11 +24,21 @@ from src.mobile_monitoring.read_model import (
     MobileReadModelStore,
     RedisMobileReadModelStore,
 )
+from src.portfolio.spy import fetch_spy_closes
 from src.store.redis_store import RedisStore
 from src.workers._async_utils import run_async
 from src.workers.celery_app import app
 
 logger = logging.getLogger(__name__)
+_MOBILE_PERFORMANCE_PERIOD_DAYS = (7, 30, 90, 180, 365)
+
+
+def _warm_mobile_spy_cache(redis: Redis, as_of: datetime) -> None:
+    """Populate broker-backed SPY ranges from the worker, never an HTTP request."""
+    to_date = as_of.date().isoformat()
+    for days in _MOBILE_PERFORMANCE_PERIOD_DAYS:
+        from_date = (as_of - timedelta(days=days)).date().isoformat()
+        fetch_spy_closes(from_date, to_date, redis)
 
 
 def _material_state_signature(bundle: MobileReadBundle) -> tuple[object, ...]:
@@ -144,10 +155,15 @@ async def _run_mobile_monitor_snapshot() -> None:
     redis_store = RedisStore(redis_client)
     read_model = RedisMobileReadModelStore(redis_client)
     try:
-        await publish_mobile_read_model(
+        bundle = await publish_mobile_read_model(
             builder=MobileSnapshotBuilder(pool=pool, redis=redis_store),
             read_model=read_model,
             pool=pool,
+        )
+        await run_in_threadpool(
+            _warm_mobile_spy_cache,
+            redis_client,
+            bundle.snapshot.as_of,
         )
     finally:
         redis_client.close()
