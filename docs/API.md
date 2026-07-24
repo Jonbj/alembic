@@ -120,6 +120,11 @@ Alpaca. Successful responses include `contract_version`, `as_of`,
 `latest_app_version`. Send `If-None-Match` with the returned weak `ETag` to
 receive `304` when the domain data is unchanged.
 
+The snapshot/positions reader chooses the newest coherent bundle across the
+atomic Redis document and its PostgreSQL fallback. This keeps a detected
+Redis-read-only degradation visible even when the primary cache cannot accept
+the replacement document; normal stale-safety ceilings still apply.
+
 ### `GET /api/mobile/v1/snapshot`
 
 Returns one server-built monitoring snapshot. `snapshot_id` and `as_of` are

@@ -22,9 +22,10 @@ from src.mobile_monitoring.models import (
     Severity,
 )
 from src.mobile_monitoring.read_model import (
-    MobileReadModelStore,
+    MobileReadModelSource,
     bundle_age_seconds,
     ensure_bundle_safe,
+    load_mobile_read_model,
 )
 from src.portfolio.benchmark import compute_period_benchmark, spy_on_or_before
 
@@ -123,7 +124,7 @@ class MobilePerformanceService:
     def __init__(
         self,
         pool: asyncpg.Pool,
-        read_model: MobileReadModelStore,
+        read_model: MobileReadModelSource,
         spy_loader: Callable[[str, str], dict[str, float] | None] | None = None,
     ) -> None:
         self._pool = pool
@@ -132,7 +133,7 @@ class MobilePerformanceService:
 
     async def build(self, period: str) -> PerformanceResponse:
         """Build one safe NAV projection without contacting the trading broker."""
-        bundle = await run_in_threadpool(self._read_model.load)
+        bundle = await load_mobile_read_model(self._read_model)
         if bundle is None:
             raise RuntimeError("mobile read model unavailable")
         ensure_bundle_safe(bundle)

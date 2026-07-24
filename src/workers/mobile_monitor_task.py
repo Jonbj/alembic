@@ -33,11 +33,21 @@ logger = logging.getLogger(__name__)
 _MOBILE_PERFORMANCE_PERIOD_DAYS = (7, 30, 90, 180, 365)
 
 
-def _warm_mobile_spy_cache(redis: Redis, as_of: datetime) -> None:
+def _warm_mobile_spy_cache(
+    redis: Redis,
+    as_of: datetime,
+    *,
+    earliest: datetime | None = None,
+) -> None:
     """Populate broker-backed SPY ranges from the worker, never an HTTP request."""
     to_date = as_of.date().isoformat()
-    for days in _MOBILE_PERFORMANCE_PERIOD_DAYS:
-        from_date = (as_of - timedelta(days=days)).date().isoformat()
+    from_dates = {
+        (as_of - timedelta(days=days)).date().isoformat()
+        for days in _MOBILE_PERFORMANCE_PERIOD_DAYS
+    }
+    if earliest is not None:
+        from_dates.add(earliest.date().isoformat())
+    for from_date in sorted(from_dates):
         fetch_spy_closes(from_date, to_date, redis)
 
 
@@ -81,7 +91,12 @@ async def publish_mobile_read_model(
         logger.warning("Previous mobile read model could not be loaded: %s", exc)
         previous = None
     bundle = await builder.build_bundle(as_of=observed_at)
-    await run_in_threadpool(read_model.save, bundle)
+    try:
+        await run_in_threadpool(read_model.save, bundle)
+    except Exception:
+        if bundle.snapshot.portfolio.nav is not None:
+            await _persist_snapshot(pool, bundle)
+        raise
     cadence_due = (
         bundle.snapshot.operational.pipeline_expected and observed_at.minute % 5 == 0
     )
@@ -139,6 +154,7 @@ async def _persist_snapshot(
                     key: value.model_dump(mode="json")
                     for key, value in snapshot.pipeline.items()
                 }
+                | {"_mobile_read_bundle": bundle.model_dump(mode="json")}
             ),
             json.dumps(
                 [
@@ -160,10 +176,19 @@ async def _run_mobile_monitor_snapshot() -> None:
             read_model=read_model,
             pool=pool,
         )
+        async with pool.acquire() as conn:
+            earliest = await conn.fetchval(
+                """
+                SELECT MIN(as_of)
+                FROM portfolio_monitor_snapshots
+                WHERE nav IS NOT NULL
+                """
+            )
         await run_in_threadpool(
             _warm_mobile_spy_cache,
             redis_client,
             bundle.snapshot.as_of,
+            earliest=earliest,
         )
     finally:
         redis_client.close()

@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import asyncpg
 import pytest
+from redis import Redis
 
 from src.mobile_monitoring.builder import MobileSnapshotBuilder
 from src.mobile_monitoring.models import (
@@ -171,6 +172,35 @@ async def test_worker_does_not_persist_fake_nav_when_broker_is_unavailable(
 
 
 @pytest.mark.asyncio
+async def test_worker_persists_database_fallback_when_redis_publish_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    as_of = datetime(2026, 7, 23, 14, 1, tzinfo=timezone.utc)
+    bundle = _bundle(as_of)
+    builder = MagicMock(spec=MobileSnapshotBuilder)
+    builder.build_bundle.return_value = bundle
+    read_model = MagicMock(spec=MobileReadModelStore)
+    read_model.load.return_value = None
+    read_model.save.side_effect = RuntimeError("READONLY replica")
+    pool = MagicMock(spec=asyncpg.Pool)
+    persist = AsyncMock(spec=_persist_snapshot)
+    monkeypatch.setattr(
+        "src.workers.mobile_monitor_task._persist_snapshot",
+        persist,
+    )
+
+    with pytest.raises(RuntimeError, match="READONLY"):
+        await publish_mobile_read_model(
+            builder=builder,
+            read_model=read_model,
+            pool=pool,
+            as_of=as_of,
+        )
+
+    persist.assert_awaited_once_with(pool, bundle)
+
+
+@pytest.mark.asyncio
 async def test_worker_persists_material_state_transition_off_cadence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -252,12 +282,14 @@ def test_worker_warms_mobile_spy_ranges_outside_http_requests(
         "src.workers.mobile_monitor_task.fetch_spy_closes",
         fetch,
     )
-    redis = MagicMock()
+    redis = MagicMock(spec=Redis)
 
     _warm_mobile_spy_cache(
         redis,
         datetime(2026, 7, 23, 14, 5, tzinfo=timezone.utc),
+        earliest=datetime(2025, 1, 2, tzinfo=timezone.utc),
     )
 
-    assert fetch.call_count == 5
+    assert fetch.call_count == 6
     fetch.assert_any_call("2026-07-16", "2026-07-23", redis)
+    fetch.assert_any_call("2025-01-02", "2026-07-23", redis)

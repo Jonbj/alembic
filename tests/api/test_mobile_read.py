@@ -6,6 +6,7 @@ snapshot shape, positions, performance, and events read paths.
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -26,6 +27,10 @@ from src.mobile_monitoring.auth import (  # noqa: E402
     create_mobile_access_token,
 )
 from src.mobile_monitoring.models import Freshness, OperationalState  # noqa: E402
+from src.mobile_monitoring.read_model import (  # noqa: E402
+    MobileReadModelStore,
+    ResilientMobileReadModelReader,
+)
 from src.mobile_monitoring.store import MonitorStore  # noqa: E402
 
 _MIGRATION_PATHS = (
@@ -341,6 +346,40 @@ class TestMobileRead:
         assert response.status_code == 503
         assert response.json()["error"]["code"] == "snapshot_unavailable"
         assert response.json()["error"]["retryable"] is True
+
+    async def test_postgres_fallback_wins_when_read_only_redis_is_stale(
+        self, pool, mobile_deps
+    ):
+        bundle = mobile_deps[4].bundle
+        pipeline_health = {
+            "_mobile_read_bundle": bundle.model_dump(mode="json"),
+        }
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO portfolio_monitor_snapshots (
+                    snapshot_id, as_of, nav, pipeline_health, degradations
+                )
+                VALUES ($1, $2, $3, $4::jsonb, '[]'::jsonb)
+                ON CONFLICT (snapshot_id) DO UPDATE
+                SET pipeline_health=EXCLUDED.pipeline_health
+                """,
+                bundle.snapshot.snapshot_id,
+                bundle.snapshot.as_of,
+                bundle.snapshot.portfolio.nav,
+                json.dumps(pipeline_health),
+            )
+
+        stale_primary = bundle.model_copy(deep=True)
+        stale_primary.snapshot.as_of -= timedelta(minutes=1)
+        read_only_redis = MagicMock(spec=MobileReadModelStore)
+        read_only_redis.load.return_value = stale_primary
+        reader = ResilientMobileReadModelReader(read_only_redis, pool)
+
+        loaded = await reader.load()
+
+        assert loaded is not None
+        assert loaded.snapshot.snapshot_id == bundle.snapshot.snapshot_id
 
     async def test_snapshot_stale_beyond_safe_ceiling_returns_503(
         self, client, mobile_deps, monitor_user, monitor_device

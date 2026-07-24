@@ -16,7 +16,6 @@ from typing import Any
 from fastapi import APIRouter, Depends, Request, Response, status
 from packaging.version import InvalidVersion, Version
 from redis import Redis
-from starlette.concurrency import run_in_threadpool
 
 from src.api.dependencies import get_pool
 from src.api.deps import get_redis_client
@@ -37,9 +36,11 @@ from src.mobile_monitoring.performance import MobilePerformanceService
 from src.mobile_monitoring.read_model import (
     MobileReadBundle,
     RedisMobileReadModelStore,
+    ResilientMobileReadModelReader,
     UnsafeReadModelError,
     bundle_age_seconds,
     ensure_bundle_safe,
+    load_mobile_read_model,
 )
 from src.portfolio.spy import load_cached_spy_closes
 
@@ -107,11 +108,15 @@ def _render_read_response(
     )
 
 
-def _read_model(
+async def _read_model(
+    request: Request,
     redis: Redis = Depends(get_redis_client),
-) -> RedisMobileReadModelStore:
-    """Return the API-lifespan Redis read-model adapter."""
-    return RedisMobileReadModelStore(redis)
+) -> ResilientMobileReadModelReader:
+    """Return the Redis-first reader with a durable PostgreSQL fallback."""
+    return ResilientMobileReadModelReader(
+        RedisMobileReadModelStore(redis),
+        await get_pool(request),
+    )
 
 
 async def _event_store(request: Request) -> MobileEventStore:
@@ -123,9 +128,13 @@ async def _performance_service(
     redis: Redis = Depends(get_redis_client),
 ) -> MobilePerformanceService:
     """Build the DB/cache projection with broker-free cached SPY enrichment."""
+    pool = await get_pool(request)
     return MobilePerformanceService(
-        await get_pool(request),
-        RedisMobileReadModelStore(redis),
+        pool,
+        ResilientMobileReadModelReader(
+            RedisMobileReadModelStore(redis),
+            pool,
+        ),
         spy_loader=lambda start, end: load_cached_spy_closes(
             start,
             end,
@@ -137,7 +146,7 @@ async def _performance_service(
 async def _load_bundle(store: Any) -> MobileReadBundle:
     """Load one safe coherent bundle without contacting broker dependencies."""
     try:
-        bundle = await run_in_threadpool(store.load)
+        bundle = await load_mobile_read_model(store)
     except Exception as exc:
         logger.exception("Mobile snapshot read-model load failed")
         raise MobileAPIError(

@@ -374,7 +374,7 @@ async def _schedule_retry(store: IncidentStore, delivery_id: int, attempt_count:
 
 
 @app.task(name="src.workers.mobile_alert_task.run_mobile_alert_evaluation")
-def run_mobile_alert_evaluation() -> None:
+def run_mobile_alert_evaluation() -> dict[str, int | str]:
     """Evaluate alerts on the persistent worker loop with worker-owned Redis."""
 
     async def _run() -> None:
@@ -394,3 +394,4 @@ def run_mobile_alert_evaluation() -> None:
             redis_client.close()
 
     run_async(_run())
+    return {"status": "ok", "processed": 1}

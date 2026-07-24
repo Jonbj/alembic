@@ -203,7 +203,9 @@ class TestIncidentLifecycle:
             )
             assert [d["transition"] for d in deliveries] == ["open", "recover"]
 
-    async def test_terminal_order_event_is_closed_historical(self, store):
+    async def test_terminal_order_event_is_closed_historical(
+        self, store, user_device
+    ):
         from src.mobile_monitoring.models import EventCategory, EventKind, Severity
 
         result = await store.record_observation(
@@ -223,3 +225,12 @@ class TestIncidentLifecycle:
                 "SELECT * FROM mobile_events WHERE fingerprint=$1", "order:123:rejected"
             )
             assert event["status"] == "closed"
+            deliveries = await conn.fetch(
+                """
+                SELECT transition
+                FROM mobile_notification_deliveries
+                WHERE event_id=$1
+                """,
+                event["id"],
+            )
+            assert [delivery["transition"] for delivery in deliveries] == ["terminal"]

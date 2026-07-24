@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import asyncpg
 import pytest
+from alpaca.trading.client import TradingClient
+from starlette.concurrency import run_in_threadpool
 
 from src.workers.mobile_alert_task import (
     record_order_event,
@@ -19,7 +21,7 @@ async def test_terminal_order_reconciliation_records_rejected_and_canceled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     observed_at = datetime(2026, 7, 23, 14, 5, tzinfo=timezone.utc)
-    broker = MagicMock()
+    broker = MagicMock(spec=TradingClient)
     orders = [
         SimpleNamespace(
             id="rejected-1",
@@ -43,7 +45,7 @@ async def test_terminal_order_reconciliation_records_rejected_and_canceled(
             canceled_at=None,
         ),
     ]
-    thread_call = AsyncMock(return_value=orders)
+    thread_call = AsyncMock(spec=run_in_threadpool, return_value=orders)
     monkeypatch.setattr(
         "src.workers.mobile_alert_task.run_in_threadpool",
         thread_call,
@@ -78,6 +80,6 @@ def test_alert_entrypoint_uses_persistent_worker_event_loop(
     )
     monkeypatch.setattr("src.workers.mobile_alert_task.run_async", run)
 
-    assert run_mobile_alert_evaluation.run() is None
+    assert run_mobile_alert_evaluation.run() == {"status": "ok", "processed": 1}
 
     run.assert_called_once()
