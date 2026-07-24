@@ -96,6 +96,8 @@ class IncidentStore:
                     await self._insert_history(conn, event_id, status.value, severity.value, details)
                     if status == EventStatus.OPEN:
                         await self._enqueue_deliveries(conn, event_id, "open")
+                    elif kind == EventKind.ORDER:
+                        await self._enqueue_deliveries(conn, event_id, "terminal")
                     return ObservationResult(event_id, fingerprint, status.value, severity.value, status.value)
 
                 event_id = existing["id"]

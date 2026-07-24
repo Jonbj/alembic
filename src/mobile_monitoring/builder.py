@@ -9,26 +9,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
-from typing import Any
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from typing import Any, cast
+from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import asyncpg
 from alpaca.trading.client import TradingClient
+from alpaca.trading.requests import GetCalendarRequest
+from redis import Redis
 
-from src.api.deps import get_redis_store
-from src.config import config
+from src.config import config, load_trading_config
 from src.mobile_monitoring.models import (
     Degradation,
-    EventCategory,
-    EventItem,
     Freshness,
     MarketPhase,
     OperationalState,
     OperationalBlock,
-    PerformancePoint,
-    PerformanceResponse,
-    PerformanceSummary,
     PipelineComponent,
     PortfolioBlock,
     PositionItem,
@@ -38,8 +36,14 @@ from src.mobile_monitoring.models import (
     SnapshotResponse,
     StrategyRow,
 )
+from src.mobile_monitoring.read_model import MobileReadBundle
+from src.mobile_monitoring.state import MARKET_TIMEZONE, resolve_market_context
+from src.store.redis_store import RedisStore
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_PIPELINE_INTERVAL_SECONDS = 15 * 60
+_DEFAULT_PIPELINE_GRACE_SECONDS = 8 * 60
 
 
 def _now() -> datetime:
@@ -60,7 +64,7 @@ def _to_decimal(value: Any) -> Decimal | None:
         return None
     try:
         return Decimal(str(value))
-    except Exception:
+    except (InvalidOperation, TypeError, ValueError):
         return None
 
 
@@ -75,6 +79,50 @@ def _classify_age(age_seconds: int | None, thresholds: tuple[int, int]) -> Fresh
     return Freshness.STALE
 
 
+def _pipeline_activity_component(
+    *,
+    component: str,
+    age_seconds: int | None,
+    pipeline_expected: bool,
+    interval_seconds: int,
+    grace_seconds: int,
+    degradations: list[Degradation],
+) -> PipelineComponent:
+    """Classify scheduled activity and record lateness during expected windows."""
+    if not pipeline_expected:
+        return PipelineComponent(
+            status=Freshness.NOT_EXPECTED,
+            age_seconds=0,
+            freshness_budget_seconds=interval_seconds,
+            stale_after_seconds=interval_seconds + grace_seconds,
+        )
+    status = _classify_age(
+        age_seconds,
+        (
+            interval_seconds,
+            interval_seconds + grace_seconds,
+        ),
+    )
+    if status != Freshness.FRESH:
+        degradations.append(
+            Degradation(
+                component=component,
+                reason=(
+                    f"Expected {component} activity is unavailable"
+                    if status == Freshness.UNKNOWN
+                    else f"Expected {component} activity is {status.value}"
+                ),
+                severity=Severity.WARNING,
+            )
+        )
+    return PipelineComponent(
+        status=status,
+        age_seconds=age_seconds or 0,
+        freshness_budget_seconds=interval_seconds,
+        stale_after_seconds=interval_seconds + grace_seconds,
+    )
+
+
 class MobileSnapshotBuilder:
     """Assemble a coherent monitoring snapshot for /api/mobile/v1/snapshot."""
 
@@ -82,18 +130,52 @@ class MobileSnapshotBuilder:
         self,
         pool: asyncpg.Pool,
         alpaca: TradingClient | None = None,
-        redis=None,
-    ):
+        redis: RedisStore | None = None,
+    ) -> None:
         self.pool = pool
         self.alpaca = alpaca or TradingClient(
             api_key=config.ALPACA_API_KEY,
             secret_key=config.ALPACA_SECRET_KEY,
             paper=config.ALPACA_PAPER_MODE,
         )
-        self.redis = redis or get_redis_store()
+        # Workers own their Redis connection. FastAPI lifespan dependencies are
+        # intentionally not used here because Celery has no API lifespan.
+        self.redis = redis or RedisStore()
+        schedule = load_trading_config().get("schedule", {})
+        self._pipeline_interval_seconds = {
+            "signal": int(
+                schedule.get(
+                    "sentiment_worker_minutes",
+                    _DEFAULT_PIPELINE_INTERVAL_SECONDS // 60,
+                )
+            )
+            * 60,
+            "portfolio_cycle": int(
+                schedule.get(
+                    "portfolio_cycle_minutes",
+                    _DEFAULT_PIPELINE_INTERVAL_SECONDS // 60,
+                )
+            )
+            * 60,
+        }
+        self._pipeline_grace_seconds = (
+            int(
+                schedule.get(
+                    "mobile_freshness_grace_minutes",
+                    _DEFAULT_PIPELINE_GRACE_SECONDS // 60,
+                )
+            )
+            * 60
+        )
 
     async def build_snapshot(self, as_of: datetime | None = None) -> SnapshotResponse:
+        """Build and return the snapshot half of one coherent read bundle."""
+        return (await self.build_bundle(as_of=as_of)).snapshot
+
+    async def build_bundle(self, as_of: datetime | None = None) -> MobileReadBundle:
+        """Read broker state once and derive snapshot and positions atomically."""
         as_of = as_of or _now()
+        snapshot_id = uuid4()
         degradations: list[Degradation] = []
 
         # --- operational state ------------------------------------------------
@@ -102,16 +184,40 @@ class MobileSnapshotBuilder:
         )
 
         # --- broker data ------------------------------------------------------
-        account, positions, broker_age = await self._broker_snapshot(as_of, degradations)
-        portfolio = self._build_portfolio(account, positions, broker_age, degradations)
+        account, positions = await self._broker_snapshot(degradations)
+        portfolio = self._build_portfolio(account, positions, degradations)
 
         # --- pipeline health --------------------------------------------------
-        pipeline = await self._build_pipeline(as_of, account, positions, degradations)
+        pipeline = await self._build_pipeline(
+            as_of,
+            account,
+            degradations,
+            pipeline_expected=pipeline_expected,
+        )
 
         # --- strategies -------------------------------------------------------
         strategies = self._build_strategies(degradations)
 
-        return SnapshotResponse(
+        critical = next(
+            (
+                degradation
+                for degradation in degradations
+                if degradation.severity == Severity.CRITICAL
+            ),
+            None,
+        )
+        if critical is not None:
+            operational.state = OperationalState.BLOCKED
+            operational.primary_reason = f"{critical.component}_unavailable"
+        elif degradations:
+            operational.state = OperationalState.DEGRADED
+            operational.primary_reason = "pipeline_degradation"
+        elif not operational.pipeline_expected:
+            operational.state = OperationalState.PAUSED
+            operational.primary_reason = "pipeline_not_expected"
+
+        snapshot = SnapshotResponse(
+            snapshot_id=snapshot_id,
             as_of=as_of,
             data_age_seconds=0,
             currency="USD",
@@ -123,10 +229,30 @@ class MobileSnapshotBuilder:
             strategies=strategies,
             degradations=degradations,
         )
+        positions_response = self._build_positions_response(
+            as_of=as_of,
+            snapshot_id=snapshot_id,
+            account=account,
+            positions=positions,
+            degradations=degradations,
+        )
+        return MobileReadBundle(snapshot=snapshot, positions=positions_response)
 
     async def build_positions(self, as_of: datetime | None = None) -> PositionsResponse:
+        """Build positions through the same coherent broker-read path."""
+        return (await self.build_bundle(as_of=as_of)).positions
+
+    def _build_positions_response(
+        self,
+        *,
+        as_of: datetime,
+        snapshot_id: Any,
+        account: Any,
+        positions: list[Any],
+        degradations: list[Degradation],
+    ) -> PositionsResponse:
+        """Derive positions without another broker call."""
         as_of = as_of or _now()
-        _, positions, _ = await self._broker_snapshot(as_of, [])
         items: list[PositionItem] = []
         total_market_value = Decimal("0")
         total_unrealized = Decimal("0")
@@ -149,19 +275,38 @@ class MobileSnapshotBuilder:
                     market_value=market_value,
                     position_weight=None,
                     unrealized_pnl=unrealized,
-                    unrealized_return=None,
+                    unrealized_return=_to_float(
+                        getattr(p, "unrealized_plpc", None)
+                    ),
                     entry_time=None,
                 )
             )
-        account = await self._account()
-        equity = _to_decimal(getattr(account, "equity", None)) or Decimal("0")
+        equity = _to_decimal(getattr(account, "equity", None))
         gross_exposure = (
-            float(total_market_value / equity) if equity and equity > 0 else None
+            float(
+                sum(
+                    abs(item.market_value)
+                    for item in items
+                    if item.market_value is not None
+                )
+                / equity
+            )
+            if equity is not None and equity > 0
+            else None
         )
         for item in items:
-            if gross_exposure is not None and gross_exposure > 0 and item.market_value is not None:
-                item.position_weight = float(item.market_value / equity) if equity else None
+            if equity is not None and equity > 0 and item.market_value is not None:
+                item.position_weight = float(abs(item.market_value) / equity)
+        items.sort(
+            key=lambda item: (
+                item.unrealized_return is None,
+                item.unrealized_return or 0,
+                -(abs(item.market_value) if item.market_value is not None else 0),
+            )
+        )
+        broker_available = account is not None
         return PositionsResponse(
+            snapshot_id=snapshot_id,
             as_of=as_of,
             data_age_seconds=0,
             currency="USD",
@@ -169,31 +314,16 @@ class MobileSnapshotBuilder:
             latest_app_version=config.LATEST_MOBILE_APP_VERSION,
             summary=PositionsSummary(
                 count=len(items),
-                market_value=total_market_value or None,
-                unrealized_pnl=total_unrealized or None,
+                market_value=total_market_value if broker_available else None,
+                unrealized_pnl=total_unrealized if broker_available else None,
                 gross_exposure=gross_exposure,
             ),
             items=items,
-        )
-
-    async def build_performance(
-        self, period: str, as_of: datetime | None = None
-    ) -> PerformanceResponse:
-        as_of = as_of or _now()
-        account = await self._account()
-        nav_end = _to_decimal(getattr(account, "equity", None))
-        summary = PerformanceSummary(nav_end=nav_end)
-        return PerformanceResponse(
-            as_of=as_of,
-            data_age_seconds=0,
-            currency="USD",
-            min_supported_app_version=config.MIN_SUPPORTED_MOBILE_APP_VERSION,
-            latest_app_version=config.LATEST_MOBILE_APP_VERSION,
-            period=period,
-            period_start=as_of - timedelta(days=30),
-            period_end=as_of,
-            summary=summary,
-            points=[PerformancePoint(at=as_of, nav=nav_end or Decimal("0"))],
+            degradations=[
+                degradation
+                for degradation in degradations
+                if degradation.component == "broker"
+            ],
         )
 
     # --- internal helpers -------------------------------------------------
@@ -203,32 +333,52 @@ class MobileSnapshotBuilder:
     ) -> tuple[OperationalBlock, str, MarketPhase, bool, datetime | None]:
         mode = "paper" if config.ALPACA_PAPER_MODE else "live"
         market_phase = MarketPhase.CLOSED
-        pipeline_expected = True
+        pipeline_expected = False
         next_activity: datetime | None = None
         active_incidents = 0
 
         try:
             clock = await asyncio.to_thread(self.alpaca.get_clock)
-            if clock.is_open:
-                market_phase = MarketPhase.OPEN
-            else:
-                # Heuristic: within 1h before next_open = pre-market, after last_close = after-hours.
-                next_open = getattr(clock, "next_open", None)
-                next_close = getattr(clock, "next_close", None)
-                if next_open:
-                    gap = (next_open - as_of).total_seconds()
-                    if 0 < gap <= 3600:
-                        market_phase = MarketPhase.PRE_MARKET
-                    elif next_close and as_of > next_close:
-                        market_phase = MarketPhase.AFTER_HOURS
-                next_activity = next_open
+            sessions: list[Any] = []
+            if not clock.is_open:
+                try:
+                    market_date = as_of.astimezone(ZoneInfo(MARKET_TIMEZONE)).date()
+                    sessions = list(
+                        await asyncio.to_thread(
+                            self.alpaca.get_calendar,
+                            GetCalendarRequest(
+                                start=market_date,
+                                end=market_date,
+                            ),
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Mobile snapshot: could not read market calendar: %s",
+                        exc,
+                    )
+                    degradations.append(
+                        Degradation(
+                            component="market_calendar",
+                            reason="Market calendar unavailable",
+                            severity=Severity.WARNING,
+                        )
+                    )
+            context = resolve_market_context(
+                as_of=as_of,
+                clock=clock,
+                sessions=sessions,
+            )
+            market_phase = context.phase
+            pipeline_expected = context.pipeline_expected
+            next_activity = context.next_activity_at
         except Exception as exc:
             logger.warning("Mobile snapshot: could not read market clock: %s", exc)
             degradations.append(
                 Degradation(
                     component="market_clock",
                     reason="Market clock unavailable",
-                    severity=Severity.WARNING,
+                    severity=Severity.CRITICAL,
                 )
             )
 
@@ -263,15 +413,21 @@ class MobileSnapshotBuilder:
                 next_activity,
             )
 
-        # Pipeline expected only during market hours.
-        if market_phase == MarketPhase.CLOSED:
-            pipeline_expected = False
-
         # Count active incidents from the event store.
         try:
             active_incidents = await self._count_active_incidents()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "Mobile snapshot: active incident count unavailable: %s",
+                exc,
+            )
+            degradations.append(
+                Degradation(
+                    component="incidents",
+                    reason="Active incident state unavailable",
+                    severity=Severity.CRITICAL,
+                )
+            )
 
         state = OperationalState.OPERATIONAL
         reason: str | None = None
@@ -299,15 +455,15 @@ class MobileSnapshotBuilder:
         )
 
     async def _broker_snapshot(
-        self, as_of: datetime, degradations: list[Degradation]
-    ) -> tuple[Any, list[Any], int]:
+        self, degradations: list[Degradation]
+    ) -> tuple[Any, list[Any]]:
         try:
             account, positions = await asyncio.gather(
                 asyncio.to_thread(self.alpaca.get_account),
                 asyncio.to_thread(self.alpaca.get_all_positions),
             )
             # Treat as fresh because it was just read.
-            return account, positions, 0
+            return account, cast(list[Any], positions)
         except Exception as exc:
             logger.warning("Mobile snapshot: Alpaca broker read failed: %s", exc)
             degradations.append(
@@ -317,13 +473,12 @@ class MobileSnapshotBuilder:
                     severity=Severity.CRITICAL,
                 )
             )
-            return None, [], 300
+            return None, []
 
     def _build_portfolio(
         self,
         account: Any,
         positions: list[Any],
-        broker_age: int,
         degradations: list[Degradation],
     ) -> PortfolioBlock:
         if account is None:
@@ -340,48 +495,82 @@ class MobileSnapshotBuilder:
             if nav_change is not None and last_equity and last_equity != 0
             else None
         )
-        total_market_value = Decimal("0")
+        total_absolute_market_value = Decimal("0")
         total_unrealized = Decimal("0")
         for p in positions:
             mv = _to_decimal(getattr(p, "market_value", None))
             u = _to_decimal(getattr(p, "unrealized_pl", None))
             if mv is not None:
-                total_market_value += mv
+                total_absolute_market_value += abs(mv)
             if u is not None:
                 total_unrealized += u
 
         gross_exposure = (
-            float(total_market_value / equity)
-            if equity is not None and equity != 0
+            float(total_absolute_market_value / equity)
+            if equity is not None and equity > 0
             else None
         )
         cash_pct = (
-            float((cash or Decimal("0")) / equity) if equity and equity != 0 else None
+            float(cash / equity)
+            if cash is not None and equity is not None and equity > 0
+            else None
         )
 
         # Drawdown from Redis peak equity.
         current_drawdown: float | None = None
         try:
-            raw_peak = self.redis._r.get("portfolio:peak_equity")
-            peak = Decimal(str(raw_peak.decode())) if raw_peak else None
+            redis_client = cast(Redis, self.redis._r)
+            raw_peak = cast(
+                bytes | str | None,
+                redis_client.get("portfolio:peak_equity"),
+            )
+            decoded_peak = (
+                raw_peak.decode() if isinstance(raw_peak, bytes) else raw_peak
+            )
+            peak = Decimal(decoded_peak) if decoded_peak else None
             if peak and equity and peak > 0:
-                current_drawdown = float((peak - equity) / peak)
-        except Exception:
-            pass
+                current_drawdown = max(0.0, float((peak - equity) / peak))
+        except Exception as exc:
+            logger.warning("Mobile snapshot: drawdown peak unavailable: %s", exc)
+
+        try:
+            risk = load_trading_config().get("risk", {})
+            gross_exposure_limit = _to_float(
+                risk.get("max_portfolio_exposure")
+            )
+            drawdown_limit = _to_float(risk.get("portfolio_drawdown"))
+            if gross_exposure_limit is None or drawdown_limit is None:
+                degradations.append(
+                    Degradation(
+                        component="risk_config",
+                        reason="One or more risk limits are unavailable",
+                        severity=Severity.WARNING,
+                    )
+                )
+        except Exception as exc:
+            logger.warning("Mobile snapshot: risk config unavailable: %s", exc)
+            degradations.append(
+                Degradation(
+                    component="risk_config",
+                    reason="Risk limits unavailable",
+                    severity=Severity.WARNING,
+                )
+            )
+            gross_exposure_limit = None
+            drawdown_limit = None
 
         return PortfolioBlock(
             nav=equity,
             nav_change_today=nav_change,
             nav_return_today=nav_return,
             realized_pnl_today=None,
-            unrealized_pnl=total_unrealized or None,
+            unrealized_pnl=total_unrealized,
             cash=cash,
             cash_pct=cash_pct,
             gross_exposure=gross_exposure,
-            gross_exposure_limit=_to_float(getattr(config, "GROSS_EXPOSURE_LIMIT", None))
-            or 0.50,
+            gross_exposure_limit=gross_exposure_limit,
             current_drawdown=current_drawdown,
-            drawdown_limit=_to_float(getattr(config, "DRAWDOWN_LIMIT", None)) or 0.05,
+            drawdown_limit=drawdown_limit,
             open_positions=len(positions) if positions is not None else None,
             source="alpaca_paper" if config.ALPACA_PAPER_MODE else "alpaca_live",
         )
@@ -390,8 +579,9 @@ class MobileSnapshotBuilder:
         self,
         as_of: datetime,
         account: Any,
-        positions: list[Any],
         degradations: list[Degradation],
+        *,
+        pipeline_expected: bool,
     ) -> dict[str, PipelineComponent]:
         pipeline: dict[str, PipelineComponent] = {}
 
@@ -413,12 +603,11 @@ class MobileSnapshotBuilder:
                 )
             )
 
-        # Redis
+        # Redis reachability and writeability are separate operational signals:
+        # a replica may answer PING while rejecting the atomic read-model SET.
         try:
-            self.redis._r.ping()
-            pipeline["redis"] = PipelineComponent(
-                status=Freshness.FRESH, age_seconds=0, writeable=True
-            )
+            redis_client = cast(Redis, self.redis._r)
+            redis_client.ping()
         except Exception as exc:
             logger.warning("Mobile snapshot: Redis ping failed: %s", exc)
             pipeline["redis"] = PipelineComponent(
@@ -431,6 +620,34 @@ class MobileSnapshotBuilder:
                     severity=Severity.CRITICAL,
                 )
             )
+        else:
+            probe_key = f"mobile:health:write-probe:{uuid4()}"
+            try:
+                redis_client.set(probe_key, "1", ex=5)
+                pipeline["redis"] = PipelineComponent(
+                    status=Freshness.FRESH,
+                    age_seconds=0,
+                    writeable=True,
+                )
+            except Exception as exc:
+                logger.warning("Mobile snapshot: Redis write probe failed: %s", exc)
+                pipeline["redis"] = PipelineComponent(
+                    status=Freshness.FRESH,
+                    age_seconds=0,
+                    writeable=False,
+                )
+                degradations.append(
+                    Degradation(
+                        component="redis",
+                        reason="Redis is reachable but not writeable",
+                        severity=Severity.WARNING,
+                    )
+                )
+            else:
+                try:
+                    redis_client.delete(probe_key)
+                except Exception as exc:
+                    logger.debug("Mobile Redis write probe cleanup failed: %s", exc)
 
         # Broker
         broker_age = 0 if account is not None else 300
@@ -438,38 +655,50 @@ class MobileSnapshotBuilder:
             status=_classify_age(broker_age, (30, 90)), age_seconds=broker_age
         )
 
-        # Signal pipeline — last signal age from Redis if available.
+        # Expected activity ages come from durable authoritative timestamps.
         signal_age: int | None = None
-        try:
-            last_signal = self.redis._r.get("sentiment:last_signal_at")
-            if last_signal:
-                last_ts = datetime.fromisoformat(last_signal.decode())
-                signal_age = int((as_of - last_ts).total_seconds())
-        except Exception:
-            pass
-        pipeline["signal"] = PipelineComponent(
-            status=_classify_age(signal_age, (600, 1800))
-            if signal_age is not None
-            else Freshness.UNKNOWN,
-            age_seconds=signal_age or 0,
-        )
-
-        # Portfolio cycle — last completion timestamp from DB.
         cycle_age: int | None = None
         try:
             async with self.pool.acquire() as conn:
                 row = await conn.fetchrow(
-                    "SELECT MAX(completed_at) AS last_completed FROM portfolio_cycles"
+                    """
+                    SELECT
+                        (SELECT MAX(generated_at) FROM sentiment_signals)
+                            AS last_signal,
+                        (SELECT MAX(timestamp) FROM portfolio_cycles)
+                            AS last_cycle
+                    """
                 )
-                if row and row["last_completed"]:
-                    cycle_age = int((as_of - row["last_completed"]).total_seconds())
-        except Exception:
-            pass
-        pipeline["portfolio_cycle"] = PipelineComponent(
-            status=_classify_age(cycle_age, (300, 900))
-            if cycle_age is not None
-            else Freshness.UNKNOWN,
-            age_seconds=cycle_age or 0,
+            if row and row["last_signal"]:
+                signal_age = max(
+                    0,
+                    int((as_of - row["last_signal"]).total_seconds()),
+                )
+            if row and row["last_cycle"]:
+                cycle_age = max(
+                    0,
+                    int((as_of - row["last_cycle"]).total_seconds()),
+                )
+        except Exception as exc:
+            logger.warning(
+                "Mobile snapshot: pipeline activity timestamps unavailable: %s",
+                exc,
+            )
+        pipeline["signal"] = _pipeline_activity_component(
+            component="signal",
+            age_seconds=signal_age,
+            pipeline_expected=pipeline_expected,
+            interval_seconds=self._pipeline_interval_seconds["signal"],
+            grace_seconds=self._pipeline_grace_seconds,
+            degradations=degradations,
+        )
+        pipeline["portfolio_cycle"] = _pipeline_activity_component(
+            component="portfolio_cycle",
+            age_seconds=cycle_age,
+            pipeline_expected=pipeline_expected,
+            interval_seconds=self._pipeline_interval_seconds["portfolio_cycle"],
+            grace_seconds=self._pipeline_grace_seconds,
+            degradations=degradations,
         )
 
         return pipeline
@@ -501,123 +730,10 @@ class MobileSnapshotBuilder:
             return []
 
     async def _count_active_incidents(self) -> int:
-        try:
-            async with self.pool.acquire() as conn:
-                return await conn.fetchval(
-                    """
-                    SELECT COUNT(*) FROM mobile_events
-                    WHERE status IN ('open', 'escalated')
-                    """
-                ) or 0
-        except Exception:
-            return 0
-
-    async def _account(self) -> Any:
-        return await asyncio.to_thread(self.alpaca.get_account)
-
-
-class MobileEventStore:
-    """Read-side event store for /api/mobile/v1/events."""
-
-    def __init__(self, pool: asyncpg.Pool):
-        self.pool = pool
-
-    async def list_events(
-        self,
-        *,
-        category: EventCategory,
-        days: int,
-        cursor: str | None,
-        limit: int,
-    ) -> list[EventItem]:
-        # Cursor encodes occurred_at and id as a signed opaque token.
-        since = _now() - timedelta(days=days)
-        cursor_at: datetime | None = None
-        cursor_id: Any = None
-        if cursor:
-            try:
-                cursor_at, cursor_id = self._decode_cursor(cursor)
-            except Exception:
-                cursor_at = None
-                cursor_id = None
-
-        statuses = ["open", "escalated", "recovered", "closed"]
-        categories = [category.value] if category != EventCategory.ALL else ["critical", "trading", "system"]
-        args: list[Any] = [since]
-        where = "WHERE occurred_at >= $1"
-        if category != EventCategory.ALL:
-            args.append(categories)
-            where += " AND category = ANY($2)"
-            args.append(statuses)
-            where += " AND status = ANY($3)"
-        else:
-            args.append(statuses)
-            where += " AND status = ANY($2)"
-
-        if cursor_at is not None:
-            # Order is (occurred_at DESC, id DESC). The cursor condition selects rows
-            # strictly older than the cursor tuple.
-            param_idx = len(args) + 1
-            args.extend([cursor_at, cursor_id])
-            where += f" AND (occurred_at, id) < (${param_idx}, ${param_idx + 1})"
-
-        sql = f"""
-            SELECT id, kind, category, severity, status, occurred_at,
-                   first_observed_at, last_observed_at, resolved_at, title,
-                   summary, entity_type, entity_id, details
-            FROM mobile_events
-            {where}
-            ORDER BY occurred_at DESC, id DESC
-            LIMIT ${len(args) + 1}
-        """
-        args.append(limit + 1)
-
         async with self.pool.acquire() as conn:
-            rows = await conn.fetch(sql, *args)
-
-        items: list[EventItem] = []
-        for row in rows[:limit]:
-            items.append(self._row_to_item(row))
-        return items
-
-    def _decode_cursor(self, cursor: str) -> tuple[datetime, Any]:
-        """Opaque cursor: base64(json([iso, id]))."""
-        import base64
-        import json
-
-        payload = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
-        return datetime.fromisoformat(payload[0]), payload[1]
-
-    def _row_to_item(self, row: asyncpg.Record) -> EventItem:
-        from src.mobile_monitoring.models import EventEntity, EventHistoryEntry, EventMeasure
-
-        entity = None
-        if row["entity_type"]:
-            entity = EventEntity(type=row["entity_type"], id=row["entity_id"])
-        measure = None
-        details = row["details"] or {}
-        if isinstance(details, dict):
-            if "measure_value" in details:
-                measure = EventMeasure(
-                    value=details.get("measure_value"),
-                    unit=details.get("measure_unit"),
-                    threshold=details.get("measure_threshold"),
-                )
-        history = [
-            EventHistoryEntry(state=row["status"], at=row["last_observed_at"]),
-        ]
-        return EventItem(
-            id=row["id"],
-            kind=row["kind"],
-            category=row["category"],
-            severity=row["severity"],
-            status=row["status"],
-            occurred_at=row["occurred_at"],
-            updated_at=row["last_observed_at"],
-            resolved_at=row["resolved_at"],
-            title=row["title"],
-            summary=row["summary"],
-            entity=entity,
-            measure=measure,
-            history=history,
-        )
+            return await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM mobile_events
+                WHERE status IN ('open', 'escalated')
+                """
+            ) or 0

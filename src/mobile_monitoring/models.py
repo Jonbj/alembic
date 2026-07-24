@@ -10,10 +10,15 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PlainSerializer
+
+JsonDecimal = Annotated[
+    Decimal,
+    PlainSerializer(float, return_type=float, when_used="json"),
+]
 
 
 class OperationalState(StrEnum):
@@ -110,6 +115,8 @@ class PipelineComponent(BaseModel):
     status: Freshness
     age_seconds: int = Field(..., ge=0)
     writeable: bool | None = None
+    freshness_budget_seconds: int | None = Field(default=None, ge=0)
+    stale_after_seconds: int | None = Field(default=None, ge=0)
 
 
 class OperationalBlock(BaseModel):
@@ -119,6 +126,7 @@ class OperationalBlock(BaseModel):
     primary_reason: str | None = None
     mode: str
     market_phase: MarketPhase
+    market_timezone: str = "America/New_York"
     pipeline_expected: bool
     next_expected_activity_at: datetime | None = None
     active_incident_count: int = Field(..., ge=0)
@@ -131,12 +139,12 @@ class PortfolioBlock(BaseModel):
     unavailable broker data.
     """
 
-    nav: Decimal | None = None
-    nav_change_today: Decimal | None = None
+    nav: JsonDecimal | None = None
+    nav_change_today: JsonDecimal | None = None
     nav_return_today: float | None = None
-    realized_pnl_today: Decimal | None = None
-    unrealized_pnl: Decimal | None = None
-    cash: Decimal | None = None
+    realized_pnl_today: JsonDecimal | None = None
+    unrealized_pnl: JsonDecimal | None = None
+    cash: JsonDecimal | None = None
     cash_pct: float | None = None
     gross_exposure: float | None = None
     gross_exposure_limit: float | None = None
@@ -166,6 +174,7 @@ class Degradation(BaseModel):
 class SnapshotResponse(MobileReadResponse):
     """GET /api/mobile/v1/snapshot response body."""
 
+    snapshot_id: UUID | None = None
     operational: OperationalBlock
     portfolio: PortfolioBlock
     pipeline: dict[str, PipelineComponent]
@@ -176,11 +185,11 @@ class SnapshotResponse(MobileReadResponse):
 class PerformanceSummary(BaseModel):
     """Period summary for the performance endpoint."""
 
-    nav_start: Decimal | None = None
-    nav_end: Decimal | None = None
-    nav_change: Decimal | None = None
+    nav_start: JsonDecimal | None = None
+    nav_end: JsonDecimal | None = None
+    nav_change: JsonDecimal | None = None
     portfolio_return: float | None = None
-    realized_pnl: Decimal | None = None
+    realized_pnl: JsonDecimal | None = None
     max_drawdown: float | None = None
     avg_gross_exposure: float | None = None
     spy_return: float | None = None
@@ -192,19 +201,23 @@ class PerformancePoint(BaseModel):
     """One NAV / drawdown / benchmark point on the performance curve."""
 
     at: datetime
-    nav: Decimal
+    nav: JsonDecimal
     drawdown: float | None = None
-    benchmark_nav: Decimal | None = None
+    benchmark_nav: JsonDecimal | None = None
 
 
 class PerformanceResponse(MobileReadResponse):
     """GET /api/mobile/v1/performance response body."""
 
+    snapshot_id: UUID | None = None
     period: str
     period_start: datetime
     period_end: datetime
+    history_data_age_seconds: int | None = Field(default=None, ge=0)
+    benchmark_data_age_seconds: int | None = Field(default=None, ge=0)
     summary: PerformanceSummary
     points: list[PerformancePoint]
+    degradations: list[Degradation] = Field(default_factory=list)
 
 
 class PositionItem(BaseModel):
@@ -212,11 +225,11 @@ class PositionItem(BaseModel):
 
     symbol: str
     qty: float
-    avg_entry_price: Decimal | None = None
-    current_price: Decimal | None = None
-    market_value: Decimal | None = None
+    avg_entry_price: JsonDecimal | None = None
+    current_price: JsonDecimal | None = None
+    market_value: JsonDecimal | None = None
     position_weight: float | None = None
-    unrealized_pnl: Decimal | None = None
+    unrealized_pnl: JsonDecimal | None = None
     unrealized_return: float | None = None
     entry_time: datetime | None = None
 
@@ -225,16 +238,18 @@ class PositionsSummary(BaseModel):
     """Aggregate positions data."""
 
     count: int = Field(..., ge=0)
-    market_value: Decimal | None = None
-    unrealized_pnl: Decimal | None = None
+    market_value: JsonDecimal | None = None
+    unrealized_pnl: JsonDecimal | None = None
     gross_exposure: float | None = None
 
 
 class PositionsResponse(MobileReadResponse):
     """GET /api/mobile/v1/positions response body."""
 
+    snapshot_id: UUID | None = None
     summary: PositionsSummary
     items: list[PositionItem]
+    degradations: list[Degradation] = Field(default_factory=list)
 
 
 class EventEntity(BaseModel):

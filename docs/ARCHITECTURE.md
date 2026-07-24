@@ -280,6 +280,9 @@ Execution checklist (per tick):
 | `ForwardReturnWorker` | `src/workers/performance.py` | Populates `sentiment_signals.forward_return` at market close |
 | `LossFeedbackCheck` | `src/workers/performance.py` | Phase B: detects loss patterns, adjusts entry threshold and writes feedback audit state |
 | `CounterfactualWorker` | `src/workers/performance.py` | Phase C: computes 1h return for every skipped trade |
+| `MobileMonitorSnapshot` | `src/workers/mobile_monitor_task.py` | Produces one coherent atomic Redis read model per minute, persists a PostgreSQL fallback (immediately on Redis write failure; otherwise on history cadence), and warms bounded SPY caches outside HTTP requests |
+| `MobileAlertEvaluator` | `src/workers/mobile_alert_task.py` | Evaluates incident lifecycle, reconciles rejected/canceled broker orders into the durable event feed, and drains the notification outbox |
+| Mobile read API | `src/api/routes/mobile_read.py` | Read-only `/api/mobile/v1` snapshot, performance, positions, and signed-cursor event projections; HTTP handlers never fan out to Alpaca |
 | `ICCalculator` | `src/performance/ic.py` | Composite IC B4 with Newey-West HAC standard errors |
 | `WeightOptimiser` | `src/performance/weights.py` | LOO ICIR with guardrails (VIX, drawdown, floor/cap) |
 | `DriftDetector` | `src/performance/drift.py` | PSI + CUSUM signal distribution drift |
@@ -732,6 +735,7 @@ CREATE TABLE decay_reports (
 | `poll-telegram-updates` | every 5 seconds | Weight approve/reject keyboard |
 | `loss-feedback-check` | */30 14-21 Mon-Fri | Phase B: detect loss patterns → raise feedback threshold; write legacy/audit scale state |
 | `counterfactual-worker` | 22:45 daily | Phase C: compute 1h counterfactual returns for SKIP_THRESHOLD/SKIP_EMA/SKIP_CAP rows |
+| `mobile-monitor-snapshot` | every minute | Build and atomically publish the coherent Android monitoring read model |
 
 > Removed from the beat (tasks kept, env-gated): `run-marketaux-ingestion` + `run-rss-ingestion` (FIX-01/02, 2026-07-03 — net-negative sources); `sec-edgar-ingestion` (2026-07-02, CIK→ticker bug); `finnhub-ingestion` (2026-07-01, flood).
 

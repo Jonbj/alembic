@@ -12,12 +12,20 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import asyncpg
+from alpaca.trading.client import TradingClient
+from alpaca.trading.enums import QueryOrderStatus
+from alpaca.trading.requests import GetOrdersRequest
+from redis import Redis
+from starlette.concurrency import run_in_threadpool
 
 from src.api.dependencies import init_asyncpg_pool
+from src.config import config
 from src.mobile_monitoring.builder import MobileSnapshotBuilder
 from src.mobile_monitoring.incidents import IncidentStore
 from src.mobile_monitoring.models import EventCategory, EventKind, Severity
 from src.notifications.fcm import build_fcm_payload, get_fcm_adapter
+from src.store.redis_store import RedisStore
+from src.workers._async_utils import run_async
 from src.workers.celery_app import app
 
 logger = logging.getLogger(__name__)
@@ -251,6 +259,7 @@ async def record_order_event(
     symbol: str,
     order_id: str,
     reason: str | None = None,
+    occurred_at: datetime | None = None,
 ) -> None:
     """Record a terminal order incident (rejected/cancelled) from the order path.
 
@@ -271,8 +280,47 @@ async def record_order_event(
         details={"symbol": symbol, "reason": reason},
         entity_type="order",
         entity_id=order_id,
+        occurred_at=occurred_at,
         expected=False,
     )
+
+
+async def reconcile_terminal_order_events(
+    pool: asyncpg.Pool,
+    alpaca: TradingClient,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Project recent rejected/canceled broker orders into the durable event feed."""
+    observed_at = now or datetime.now(timezone.utc)
+    request = GetOrdersRequest(
+        status=QueryOrderStatus.CLOSED,
+        after=observed_at - timedelta(days=1),
+        limit=500,
+    )
+    try:
+        orders = await run_in_threadpool(alpaca.get_orders, request)
+    except Exception as exc:
+        logger.warning("Terminal mobile order reconciliation failed: %s", exc)
+        return
+    for order in orders:
+        status = getattr(getattr(order, "status", None), "value", None) or str(
+            getattr(order, "status", "")
+        )
+        if status not in {"rejected", "canceled"}:
+            continue
+        occurred_at = (
+            getattr(order, "failed_at", None)
+            or getattr(order, "canceled_at", None)
+            or observed_at
+        )
+        await record_order_event(
+            pool,
+            kind=status,
+            symbol=str(getattr(order, "symbol", "")),
+            order_id=str(getattr(order, "id", "")),
+            occurred_at=occurred_at,
+        )
 
 
 async def dispatch_due_notifications(pool: asyncpg.Pool, limit: int = 100) -> None:
@@ -326,17 +374,24 @@ async def _schedule_retry(store: IncidentStore, delivery_id: int, attempt_count:
 
 
 @app.task(name="src.workers.mobile_alert_task.run_mobile_alert_evaluation")
-def run_mobile_alert_evaluation() -> None:
-    """Celery task entrypoint: evaluate incidents and dispatch notifications."""
-    import asyncio
+def run_mobile_alert_evaluation() -> dict[str, int | str]:
+    """Evaluate alerts on the persistent worker loop with worker-owned Redis."""
 
     async def _run() -> None:
         pool = await init_asyncpg_pool()
-        builder = MobileSnapshotBuilder(pool=pool)
-        store = IncidentStore(pool=pool)
-        evaluator = MobileAlertEvaluator(store=store, builder=builder)
-        await evaluator.evaluate()
-        await dispatch_due_notifications(pool=pool)
+        redis_client = Redis.from_url(config.REDIS_URL)
+        builder = MobileSnapshotBuilder(
+            pool=pool,
+            redis=RedisStore(redis_client),
+        )
+        try:
+            store = IncidentStore(pool=pool)
+            evaluator = MobileAlertEvaluator(store=store, builder=builder)
+            await evaluator.evaluate()
+            await reconcile_terminal_order_events(pool, builder.alpaca)
+            await dispatch_due_notifications(pool=pool)
+        finally:
+            redis_client.close()
 
-    asyncio.run(_run())
-
+    run_async(_run())
+    return {"status": "ok", "processed": 1}

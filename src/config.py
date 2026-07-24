@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -14,6 +15,11 @@ def _load_trading_yaml() -> dict:
         with path.open() as f:
             return yaml.safe_load(f) or {}
     return {}
+
+
+def load_trading_config() -> dict[str, Any]:
+    """Return the current runtime configuration from ``config/trading.yaml``."""
+    return _load_trading_yaml()
 
 
 class Config(BaseModel):
