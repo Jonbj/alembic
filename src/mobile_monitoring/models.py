@@ -211,6 +211,8 @@ class PerformanceResponse(MobileReadResponse):
     period: str
     period_start: datetime
     period_end: datetime
+    history_data_age_seconds: int | None = Field(default=None, ge=0)
+    benchmark_data_age_seconds: int | None = Field(default=None, ge=0)
     summary: PerformanceSummary
     points: list[PerformancePoint]
     degradations: list[Degradation] = Field(default_factory=list)

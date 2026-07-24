@@ -10,7 +10,7 @@ its exposure explains?", which no prior metric captured.
 from __future__ import annotations
 
 
-def _spy_on_or_before(spy_closes: dict, target_date: str) -> float | None:
+def spy_on_or_before(spy_closes: dict, target_date: str) -> float | None:
     """SPY close on the latest available date <= target (handles weekends/holidays)."""
     candidates = [d for d in spy_closes if d <= target_date]
     if not candidates:
@@ -54,8 +54,8 @@ def compute_period_benchmark(
         out["avg_exposure"] = round(sum(expos) / len(expos), 6)
 
     if spy_closes:
-        spy_start = _spy_on_or_before(spy_closes, baseline["date"])
-        spy_end = _spy_on_or_before(spy_closes, end["date"])
+        spy_start = spy_on_or_before(spy_closes, baseline["date"])
+        spy_end = spy_on_or_before(spy_closes, end["date"])
         if spy_start and spy_end:
             out["spy_return"] = round(spy_end / spy_start - 1, 6)
             avg_exposure = out["avg_exposure"]

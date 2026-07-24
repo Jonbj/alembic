@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import Iterable
+from zoneinfo import ZoneInfo
 
 import asyncpg
 from starlette.concurrency import run_in_threadpool
@@ -19,8 +21,14 @@ from src.mobile_monitoring.models import (
     PerformanceSummary,
     Severity,
 )
-from src.mobile_monitoring.read_model import MobileReadModelStore, bundle_age_seconds
-from src.portfolio.benchmark import compute_period_benchmark
+from src.mobile_monitoring.read_model import (
+    MobileReadModelStore,
+    bundle_age_seconds,
+    ensure_bundle_safe,
+)
+from src.portfolio.benchmark import compute_period_benchmark, spy_on_or_before
+
+logger = logging.getLogger(__name__)
 
 _PERIOD_DAYS = {
     "1w": 7,
@@ -40,7 +48,9 @@ class NavSample:
     gross_exposure: float | None
 
 
-def period_start(period: str, end: datetime, earliest: datetime | None = None) -> datetime:
+def period_start(
+    period: str, end: datetime, earliest: datetime | None = None
+) -> datetime:
     """Resolve the inclusive period boundary."""
     if period == "all":
         return earliest or end
@@ -51,7 +61,7 @@ def performance_summary(
     samples: list[NavSample],
     *,
     realized_pnl: Decimal | None,
-    spy_return: float | None,
+    benchmark: dict[str, float | None] | None = None,
 ) -> PerformanceSummary:
     """Compute approved period formulas from an anchored ordered NAV series."""
     if not samples:
@@ -75,24 +85,7 @@ def performance_summary(
         if peak > 0:
             max_drawdown = max(max_drawdown, (peak - sample.nav) / peak)
 
-    exposures = [
-        sample.gross_exposure
-        for sample in samples[1:]
-        if sample.gross_exposure is not None
-    ]
-    avg_exposure = (
-        round(sum(exposures) / len(exposures), 6) if exposures else None
-    )
-    benchmark_return = (
-        round(avg_exposure * spy_return, 6)
-        if avg_exposure is not None and spy_return is not None
-        else None
-    )
-    alpha = (
-        round(portfolio_return - benchmark_return, 6)
-        if portfolio_return is not None and benchmark_return is not None
-        else None
-    )
+    benchmark = benchmark or {}
     return PerformanceSummary(
         nav_start=nav_start,
         nav_end=nav_end,
@@ -100,10 +93,10 @@ def performance_summary(
         portfolio_return=portfolio_return,
         realized_pnl=realized_pnl,
         max_drawdown=float(max_drawdown),
-        avg_gross_exposure=avg_exposure,
-        spy_return=spy_return,
-        benchmark_return=benchmark_return,
-        alpha=alpha,
+        avg_gross_exposure=benchmark.get("avg_exposure"),
+        spy_return=benchmark.get("spy_return"),
+        benchmark_return=benchmark.get("benchmark_return"),
+        alpha=benchmark.get("alpha"),
     )
 
 
@@ -138,12 +131,17 @@ class MobilePerformanceService:
         self._spy_loader = spy_loader
 
     async def build(self, period: str) -> PerformanceResponse:
+        """Build one safe NAV projection without contacting the trading broker."""
         bundle = await run_in_threadpool(self._read_model.load)
         if bundle is None:
             raise RuntimeError("mobile read model unavailable")
+        ensure_bundle_safe(bundle)
         end = bundle.snapshot.as_of
         requested_start = period_start(period, end)
         rows = await self._load_nav_rows(requested_start, end, period == "all")
+        history_age_seconds = (
+            max(0, int((end - rows[-1]["as_of"]).total_seconds())) if rows else None
+        )
         samples = [
             NavSample(
                 at=row["as_of"],
@@ -189,13 +187,28 @@ class MobilePerformanceService:
             start.date().isoformat(),
             end.date().isoformat(),
         )
-        spy_return = benchmark["spy_return"]
         summary = performance_summary(
             samples,
             realized_pnl=realized,
-            spy_return=spy_return,
+            benchmark=benchmark,
         )
-        degradations = []
+        degradations: list[Degradation] = []
+        if len(samples) < 2:
+            degradations.append(
+                Degradation(
+                    component="history",
+                    reason="NAV history unavailable for the selected period",
+                    severity=Severity.WARNING,
+                )
+            )
+        if realized is None:
+            degradations.append(
+                Degradation(
+                    component="trades",
+                    reason="Realized trade P&L unavailable",
+                    severity=Severity.WARNING,
+                )
+            )
         if (
             summary.spy_return is None
             or summary.avg_gross_exposure is None
@@ -212,7 +225,11 @@ class MobilePerformanceService:
                     severity=Severity.WARNING,
                 )
             )
-        points = self._points(downsample(samples))
+        points = self._points(
+            downsample(samples),
+            spy_closes=spy_closes,
+            avg_exposure=summary.avg_gross_exposure,
+        )
         return PerformanceResponse(
             snapshot_id=bundle.snapshot.snapshot_id,
             as_of=end,
@@ -223,6 +240,11 @@ class MobilePerformanceService:
             period=period,
             period_start=start,
             period_end=end,
+            history_data_age_seconds=history_age_seconds,
+            benchmark_data_age_seconds=self._benchmark_age_seconds(
+                spy_closes,
+                end,
+            ),
             summary=summary,
             points=points,
             degradations=degradations,
@@ -241,7 +263,8 @@ class MobilePerformanceService:
                 start.date().isoformat(),
                 end.date().isoformat(),
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning("Mobile SPY history load failed: %s", exc)
             return None
 
     async def _load_nav_rows(
@@ -303,22 +326,67 @@ class MobilePerformanceService:
                     end,
                 )
             return Decimal(str(value)) if value is not None else Decimal("0")
-        except Exception:
+        except Exception as exc:
+            logger.warning("Mobile realized P&L query failed: %s", exc)
             return None
 
     @staticmethod
-    def _points(samples: Iterable[NavSample]) -> list[PerformancePoint]:
+    def _benchmark_age_seconds(
+        spy_closes: dict[str, float] | None,
+        end: datetime,
+    ) -> int | None:
+        if not spy_closes:
+            return None
+        latest_date = date.fromisoformat(max(spy_closes))
+        close_at = datetime.combine(
+            latest_date,
+            time(16),
+            tzinfo=ZoneInfo("America/New_York"),
+        )
+        return max(0, int((end - close_at.astimezone(timezone.utc)).total_seconds()))
+
+    @staticmethod
+    def _points(
+        samples: Iterable[NavSample],
+        *,
+        spy_closes: dict[str, float] | None,
+        avg_exposure: float | None,
+    ) -> list[PerformancePoint]:
+        ordered = list(samples)
+        baseline_close = (
+            spy_on_or_before(
+                spy_closes,
+                ordered[0].at.date().isoformat(),
+            )
+            if spy_closes and ordered
+            else None
+        )
+        baseline_nav = ordered[0].nav if ordered else None
         peak: Decimal | None = None
         points: list[PerformancePoint] = []
-        for sample in samples:
+        for sample in ordered:
             peak = sample.nav if peak is None else max(peak, sample.nav)
             drawdown = float((peak - sample.nav) / peak) if peak > 0 else None
+            close = (
+                spy_on_or_before(spy_closes, sample.at.date().isoformat())
+                if spy_closes
+                else None
+            )
+            benchmark_nav = (
+                baseline_nav
+                * Decimal(str(1 + avg_exposure * (close / baseline_close - 1)))
+                if baseline_nav is not None
+                and baseline_close is not None
+                and close is not None
+                and avg_exposure is not None
+                else None
+            )
             points.append(
                 PerformancePoint(
                     at=sample.at,
                     nav=sample.nav,
                     drawdown=drawdown,
-                    benchmark_nav=None,
+                    benchmark_nav=benchmark_nav,
                 )
             )
         return points

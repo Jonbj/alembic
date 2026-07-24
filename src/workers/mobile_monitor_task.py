@@ -1,4 +1,10 @@
-"""Periodic producer for the coherent mobile read model."""
+"""Periodic producer for the coherent mobile read model.
+
+The task reads broker account/positions, market context, Redis safety state,
+PostgreSQL health/activity, and strategy lifecycle data. It atomically replaces
+the Redis mobile document and persists NAV history on the expected cadence or a
+material state transition. It never submits or mutates trading decisions.
+"""
 
 from __future__ import annotations
 
@@ -24,6 +30,31 @@ from src.workers.celery_app import app
 logger = logging.getLogger(__name__)
 
 
+def _material_state_signature(bundle: MobileReadBundle) -> tuple[object, ...]:
+    snapshot = bundle.snapshot
+    return (
+        snapshot.operational.state,
+        snapshot.operational.primary_reason,
+        snapshot.operational.pipeline_expected,
+        tuple(
+            sorted(
+                (name, component.status)
+                for name, component in snapshot.pipeline.items()
+            )
+        ),
+        tuple(
+            sorted(
+                (
+                    degradation.component,
+                    degradation.severity,
+                    degradation.reason,
+                )
+                for degradation in snapshot.degradations
+            )
+        ),
+    )
+
+
 async def publish_mobile_read_model(
     *,
     builder: MobileSnapshotBuilder,
@@ -33,9 +64,20 @@ async def publish_mobile_read_model(
 ) -> MobileReadBundle:
     """Build once, atomically publish, and periodically persist NAV history."""
     observed_at = as_of or datetime.now(timezone.utc)
+    try:
+        previous = await run_in_threadpool(read_model.load)
+    except Exception as exc:
+        logger.warning("Previous mobile read model could not be loaded: %s", exc)
+        previous = None
     bundle = await builder.build_bundle(as_of=observed_at)
     await run_in_threadpool(read_model.save, bundle)
-    if observed_at.minute % 5 == 0 and bundle.snapshot.portfolio.nav is not None:
+    cadence_due = (
+        bundle.snapshot.operational.pipeline_expected and observed_at.minute % 5 == 0
+    )
+    state_changed = previous is not None and _material_state_signature(
+        previous
+    ) != _material_state_signature(bundle)
+    if bundle.snapshot.portfolio.nav is not None and (cadence_due or state_changed):
         await _persist_snapshot(pool, bundle)
     return bundle
 
@@ -69,8 +111,7 @@ async def _persist_snapshot(
             portfolio.nav,
             (
                 portfolio.nav - portfolio.nav_change_today
-                if portfolio.nav is not None
-                and portfolio.nav_change_today is not None
+                if portfolio.nav is not None and portfolio.nav_change_today is not None
                 else None
             ),
             portfolio.nav_change_today,

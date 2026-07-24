@@ -30,8 +30,8 @@ def fetch_spy_closes(
             cached = redis_client.get(cache_key)
             if cached:
                 return json.loads(cached)
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("SPY cache read failed: %s", exc)
     try:
         from alpaca.data.historical import StockHistoricalDataClient
         from alpaca.data.requests import StockBarsRequest
@@ -75,8 +75,8 @@ def fetch_spy_closes(
         if redis_client is not None and closes:
             try:
                 redis_client.setex(cache_key, 3600, json.dumps(closes))
-            except Exception:
-                pass
+            except Exception as exc:
+                log.debug("SPY cache write failed: %s", exc)
         return closes or None
     except Exception as exc:
         log.warning("SPY benchmark fetch failed: %s", exc)

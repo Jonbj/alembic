@@ -111,6 +111,179 @@ refresh tokens, or token hashes.
 
 ---
 
+## Mobile monitor read API
+
+All four routes require a mobile bearer token with `monitor:read`. They are
+read-only projections: HTTP requests read Redis/PostgreSQL and never contact
+Alpaca. Successful responses include `contract_version`, `as_of`,
+`data_age_seconds`, `currency`, `min_supported_app_version`, and
+`latest_app_version`. Send `If-None-Match` with the returned weak `ETag` to
+receive `304` when the domain data is unchanged.
+
+### `GET /api/mobile/v1/snapshot`
+
+Returns one server-built monitoring snapshot. `snapshot_id` and `as_of` are
+shared with the positions projection produced by the same broker read.
+
+**Query parameters:** none.
+
+```json
+{
+  "contract_version": 1,
+  "snapshot_id": "f3119d0a-4395-4320-9783-89a8bbc8024a",
+  "as_of": "2026-07-23T14:05:00Z",
+  "data_age_seconds": 12,
+  "currency": "USD",
+  "min_supported_app_version": "1.0.0",
+  "latest_app_version": "1.0.0",
+  "operational": {
+    "state": "operational",
+    "primary_reason": null,
+    "mode": "paper",
+    "market_phase": "open",
+    "market_timezone": "America/New_York",
+    "pipeline_expected": true,
+    "next_expected_activity_at": "2026-07-23T20:00:00Z",
+    "active_incident_count": 0
+  },
+  "portfolio": {
+    "nav": 110307.36,
+    "cash": 76998.12,
+    "gross_exposure": 0.30201,
+    "unrealized_pnl": -97.14
+  },
+  "pipeline": {
+    "database": {"status": "fresh", "age_seconds": 0},
+    "redis": {"status": "fresh", "age_seconds": 0, "writeable": true}
+  },
+  "strategies": [],
+  "degradations": []
+}
+```
+
+An absent or unsafe stale snapshot returns `503 snapshot_unavailable`; broker
+or dependency failures are represented as nullable values plus degradations,
+never invented zero NAV.
+
+### `GET /api/mobile/v1/performance`
+
+Returns anchored broker-NAV performance, drawdown, realized trade P&L, and the
+exposure-adjusted SPY benchmark. Benchmark values are all `null` with a
+degradation when SPY or exposure history is unavailable.
+
+**Query parameters:** `period` — `1w`, `1m` (default), `3m`, `6m`, `1y`, or
+`all`.
+
+```json
+{
+  "contract_version": 1,
+  "as_of": "2026-07-23T14:05:00Z",
+  "data_age_seconds": 12,
+  "currency": "USD",
+  "min_supported_app_version": "1.0.0",
+  "latest_app_version": "1.0.0",
+  "period": "1m",
+  "period_start": "2026-06-23T14:05:00Z",
+  "period_end": "2026-07-23T14:05:00Z",
+  "history_data_age_seconds": 300,
+  "benchmark_data_age_seconds": 64800,
+  "summary": {
+    "nav_start": 109850.0,
+    "nav_end": 110307.36,
+    "portfolio_return": 0.004164,
+    "max_drawdown": 0.0182,
+    "benchmark_return": 0.006027,
+    "alpha": -0.001863
+  },
+  "points": [
+    {
+      "at": "2026-06-23T20:00:00Z",
+      "nav": 109850.0,
+      "drawdown": 0.0,
+      "benchmark_nav": 109850.0
+    }
+  ],
+  "degradations": []
+}
+```
+
+### `GET /api/mobile/v1/positions`
+
+Returns current positions sorted by worst unrealized return, then absolute
+market value. Weights and gross exposure use absolute market values.
+
+**Query parameters:** none.
+
+```json
+{
+  "contract_version": 1,
+  "snapshot_id": "f3119d0a-4395-4320-9783-89a8bbc8024a",
+  "as_of": "2026-07-23T14:05:00Z",
+  "data_age_seconds": 12,
+  "currency": "USD",
+  "min_supported_app_version": "1.0.0",
+  "latest_app_version": "1.0.0",
+  "summary": {
+    "count": 1,
+    "market_value": 6234.1,
+    "unrealized_pnl": -77.88,
+    "gross_exposure": 0.0565
+  },
+  "items": [
+    {
+      "symbol": "MSFT",
+      "qty": 12.3456,
+      "market_value": 6234.1,
+      "position_weight": 0.0565,
+      "unrealized_pnl": -77.88,
+      "unrealized_return": -0.01234
+    }
+  ],
+  "degradations": []
+}
+```
+
+### `GET /api/mobile/v1/events`
+
+Returns safe incident, order, position, and significant `BUY`/`SELL`/`HALT`
+decision events. Normal `SKIP*` chatter is excluded. Pagination order is
+`(occurred_at DESC, id DESC)` and `next_cursor` is opaque and HMAC-signed.
+
+**Query parameters:** `category` (`all`, `critical`, `trading`, `system`;
+default `all`), `days` (1–30; default 7), `cursor` (optional), and `limit`
+(1–200; default 50).
+
+```json
+{
+  "contract_version": 1,
+  "as_of": "2026-07-23T14:05:00Z",
+  "data_age_seconds": 0,
+  "currency": "USD",
+  "min_supported_app_version": "1.0.0",
+  "latest_app_version": "1.0.0",
+  "items": [
+    {
+      "id": "0e8b54ce-a9cf-4025-98d1-65fe0e915c62",
+      "kind": "alert_incident",
+      "category": "system",
+      "severity": "critical",
+      "status": "open",
+      "occurred_at": "2026-07-23T14:00:00Z",
+      "updated_at": "2026-07-23T14:05:00Z",
+      "title": "Ciclo di portafoglio in ritardo",
+      "history": [{"state": "open", "at": "2026-07-23T14:00:00Z"}]
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+All routes return `426 upgrade_required` when `X-App-Version` is below
+`min_supported_app_version`. Invalid query values/cursors return the mobile v1
+error envelope with `400`; authentication failures return `401`/`403`.
+
+---
+
 ## Signal Endpoints
 
 ### `GET /api/signals`

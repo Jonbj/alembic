@@ -48,6 +48,8 @@ def encode_cursor(occurred_at: datetime, event_id: UUID) -> str:
 def decode_cursor(cursor: str) -> tuple[datetime, UUID]:
     """Verify and decode an opaque event cursor."""
     try:
+        if len(cursor) > 2048:
+            raise CursorError("cursor is too long")
         padded = cursor + "=" * (-len(cursor) % 4)
         raw = base64.urlsafe_b64decode(padded.encode())
         payload, supplied_signature = raw[:-32], raw[-32:]
@@ -84,6 +86,7 @@ class MobileEventStore:
         limit: int,
         now: datetime | None = None,
     ) -> EventPage:
+        """Project incidents and significant trading lifecycle rows into one feed."""
         since = (now or datetime.now(timezone.utc)) - timedelta(days=days)
         cursor_at: datetime | None = None
         cursor_id: UUID | None = None
@@ -100,15 +103,142 @@ class MobileEventStore:
             where.append(f"category = ${len(args)}")
         if cursor_at is not None and cursor_id is not None:
             args.extend([cursor_at, cursor_id])
-            where.append(
-                f"(occurred_at, id) < (${len(args) - 1}, ${len(args)})"
-            )
+            where.append(f"(occurred_at, id) < (${len(args) - 1}, ${len(args)})")
         args.append(limit + 1)
         sql = f"""
+            WITH projected AS (
+                SELECT
+                    id, kind, category, severity, status, occurred_at,
+                    first_observed_at, last_observed_at, resolved_at, title,
+                    summary, entity_type, entity_id, details
+                FROM mobile_events
+
+                UNION ALL
+
+                SELECT
+                    md5('decision:' || id::text)::uuid AS id,
+                    'decision'::text AS kind,
+                    'trading'::text AS category,
+                    'info'::text AS severity,
+                    'closed'::text AS status,
+                    tick_time AS occurred_at,
+                    tick_time AS first_observed_at,
+                    tick_time AS last_observed_at,
+                    tick_time AS resolved_at,
+                    'Decisione ' || UPPER(decision) || ' · ' || symbol AS title,
+                    'Decisione operativa registrata.'::text AS summary,
+                    'symbol'::text AS entity_type,
+                    symbol::text AS entity_id,
+                    NULL::jsonb AS details
+                FROM execution_decisions
+                WHERE UPPER(decision) IN ('BUY', 'SELL', 'HALT')
+
+                UNION ALL
+
+                SELECT
+                    md5('order-submitted:' || id::text)::uuid AS id,
+                    'order'::text AS kind,
+                    'trading'::text AS category,
+                    'info'::text AS severity,
+                    'closed'::text AS status,
+                    tick_time AS occurred_at,
+                    tick_time AS first_observed_at,
+                    tick_time AS last_observed_at,
+                    tick_time AS resolved_at,
+                    'Ordine ' || UPPER(decision) || ' inviato · ' || symbol
+                        AS title,
+                    'Ordine accettato dal percorso di esecuzione.'::text
+                        AS summary,
+                    'order'::text AS entity_type,
+                    order_id::text AS entity_id,
+                    NULL::jsonb AS details
+                FROM execution_decisions
+                WHERE order_id IS NOT NULL
+                  AND UPPER(decision) IN ('BUY', 'SELL')
+
+                UNION ALL
+
+                SELECT
+                    md5('order-filled-buy:' || id::text)::uuid AS id,
+                    'order'::text AS kind,
+                    'trading'::text AS category,
+                    'info'::text AS severity,
+                    'closed'::text AS status,
+                    entry_time AS occurred_at,
+                    entry_time AS first_observed_at,
+                    entry_time AS last_observed_at,
+                    entry_time AS resolved_at,
+                    'Ordine BUY eseguito · ' || symbol AS title,
+                    'Esecuzione di ingresso confermata.'::text AS summary,
+                    'order'::text AS entity_type,
+                    entry_order_id::text AS entity_id,
+                    NULL::jsonb AS details
+                FROM trades
+                WHERE entry_order_id IS NOT NULL
+
+                UNION ALL
+
+                SELECT
+                    md5('position-open:' || id::text)::uuid AS id,
+                    'position'::text AS kind,
+                    'trading'::text AS category,
+                    'info'::text AS severity,
+                    'closed'::text AS status,
+                    entry_time AS occurred_at,
+                    entry_time AS first_observed_at,
+                    entry_time AS last_observed_at,
+                    entry_time AS resolved_at,
+                    'Posizione aperta · ' || symbol AS title,
+                    'Apertura posizione registrata.'::text AS summary,
+                    'position'::text AS entity_type,
+                    id::text AS entity_id,
+                    NULL::jsonb AS details
+                FROM trades
+
+                UNION ALL
+
+                SELECT
+                    md5('order-filled-sell:' || id::text)::uuid AS id,
+                    'order'::text AS kind,
+                    'trading'::text AS category,
+                    'info'::text AS severity,
+                    'closed'::text AS status,
+                    exit_time AS occurred_at,
+                    exit_time AS first_observed_at,
+                    exit_time AS last_observed_at,
+                    exit_time AS resolved_at,
+                    'Ordine SELL eseguito · ' || symbol AS title,
+                    'Esecuzione di uscita confermata.'::text AS summary,
+                    'order'::text AS entity_type,
+                    exit_order_id::text AS entity_id,
+                    NULL::jsonb AS details
+                FROM trades
+                WHERE exit_time IS NOT NULL AND exit_order_id IS NOT NULL
+
+                UNION ALL
+
+                SELECT
+                    md5('position-close:' || id::text)::uuid AS id,
+                    'position'::text AS kind,
+                    'trading'::text AS category,
+                    'info'::text AS severity,
+                    'closed'::text AS status,
+                    exit_time AS occurred_at,
+                    exit_time AS first_observed_at,
+                    exit_time AS last_observed_at,
+                    exit_time AS resolved_at,
+                    'Posizione chiusa · ' || symbol AS title,
+                    'Chiusura posizione registrata.'::text AS summary,
+                    'position'::text AS entity_type,
+                    id::text AS entity_id,
+                    NULL::jsonb AS details
+                FROM trades
+                WHERE exit_time IS NOT NULL
+            )
             SELECT id, kind, category, severity, status, occurred_at,
                    first_observed_at, last_observed_at, resolved_at, title,
                    summary, entity_type, entity_id, details
-            FROM mobile_events
+            FROM projected
             WHERE {" AND ".join(where)}
             ORDER BY occurred_at DESC, id DESC
             LIMIT ${len(args)}
@@ -121,8 +251,7 @@ class MobileEventStore:
                 [row["id"] for row in visible_rows],
             )
         items = [
-            self._row_to_item(row, history.get(row["id"], []))
-            for row in visible_rows
+            self._row_to_item(row, history.get(row["id"], [])) for row in visible_rows
         ]
         next_cursor = None
         if len(rows) > limit and visible_rows:

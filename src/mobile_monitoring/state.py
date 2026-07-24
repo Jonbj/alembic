@@ -57,11 +57,7 @@ def resolve_market_context(
 
     local_date = as_of.astimezone(_ET).date()
     session = next(
-        (
-            item
-            for item in sessions
-            if getattr(item, "date", local_date) == local_date
-        ),
+        (item for item in sessions if getattr(item, "date", local_date) == local_date),
         None,
     )
     if session is None:

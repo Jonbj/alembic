@@ -8,6 +8,7 @@ mutations are exposed.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -36,10 +37,11 @@ from src.mobile_monitoring.performance import MobilePerformanceService
 from src.mobile_monitoring.read_model import (
     MobileReadBundle,
     RedisMobileReadModelStore,
+    UnsafeReadModelError,
     bundle_age_seconds,
+    ensure_bundle_safe,
 )
 from src.portfolio.spy import fetch_spy_closes
-from src.store.redis_store import RedisStore
 
 router = APIRouter(tags=["mobile-read"])
 logger = logging.getLogger(__name__)
@@ -73,9 +75,16 @@ def _check_app_version(request: Request, response: MobileReadResponse) -> None:
 
 
 def _etag_for(response: MobileReadResponse) -> str:
-    """Return a strong ETag for a read response."""
-    body = response.model_dump_json()
-    return f'"{hashlib.sha256(body.encode()).hexdigest()}"'
+    """Return a weak validator for domain data, excluding volatile age metadata."""
+    body = json.dumps(
+        response.model_dump(
+            mode="json",
+            exclude={"as_of", "data_age_seconds"},
+        ),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return f'W/"{hashlib.sha256(body.encode()).hexdigest()}"'
 
 
 def _render_read_response(
@@ -120,7 +129,7 @@ async def _performance_service(
         spy_loader=lambda start, end: fetch_spy_closes(
             start,
             end,
-            RedisStore(redis),
+            redis,
         ),
     )
 
@@ -129,14 +138,14 @@ async def _load_bundle(store: Any) -> MobileReadBundle:
     """Load one safe coherent bundle without contacting broker dependencies."""
     try:
         bundle = await run_in_threadpool(store.load)
-    except Exception:
+    except Exception as exc:
         logger.exception("Mobile snapshot read-model load failed")
         raise MobileAPIError(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "snapshot_unavailable",
             "Monitoring snapshot is temporarily unavailable.",
             retryable=True,
-        ) from None
+        ) from exc
     if bundle is None:
         raise MobileAPIError(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -144,16 +153,16 @@ async def _load_bundle(store: Any) -> MobileReadBundle:
             "Monitoring snapshot is temporarily unavailable.",
             retryable=True,
         )
-    age = bundle_age_seconds(bundle)
-    safe_ceiling = 300 if bundle.snapshot.operational.pipeline_expected else 1800
-    if age > safe_ceiling:
+    try:
+        ensure_bundle_safe(bundle)
+    except UnsafeReadModelError as exc:
         raise MobileAPIError(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "snapshot_unavailable",
             "Monitoring snapshot is temporarily unavailable.",
             retryable=True,
-            details={"data_age_seconds": age},
-        )
+            details={"data_age_seconds": exc.age_seconds},
+        ) from exc
     return bundle
 
 
@@ -163,6 +172,7 @@ async def snapshot(
     claims: dict[str, Any] = Depends(require_mobile_token),
     store: Any = Depends(_read_model),
 ) -> Response:
+    """Return the latest coherent monitoring snapshot without broker fan-out."""
     del claims
     bundle = await _load_bundle(store)
     resp = bundle.snapshot.model_copy(
@@ -178,6 +188,7 @@ async def performance(
     claims: dict[str, Any] = Depends(require_mobile_token),
     service: MobilePerformanceService = Depends(_performance_service),
 ) -> Response:
+    """Return NAV performance for one approved period."""
     del claims
     try:
         Period(period)
@@ -189,14 +200,14 @@ async def performance(
         ) from exc
     try:
         resp = await service.build(period=period)
-    except Exception:
+    except Exception as exc:
         logger.exception("Mobile performance projection failed")
         raise MobileAPIError(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "performance_unavailable",
             "Performance data is temporarily unavailable.",
             retryable=True,
-        ) from None
+        ) from exc
     return _render_read_response(request, resp)
 
 
@@ -206,6 +217,7 @@ async def positions(
     claims: dict[str, Any] = Depends(require_mobile_token),
     read_model: Any = Depends(_read_model),
 ) -> Response:
+    """Return positions derived from the same broker read as the snapshot."""
     del claims
     bundle = await _load_bundle(read_model)
     resp = bundle.positions.model_copy(
@@ -224,6 +236,7 @@ async def events(
     claims: dict[str, Any] = Depends(require_mobile_token),
     store: MobileEventStore = Depends(_event_store),
 ) -> Response:
+    """Return the safe operator event feed with signed keyset pagination."""
     del claims
     try:
         cat = EventCategory(category)
@@ -260,13 +273,14 @@ async def events(
             "invalid_cursor",
             "Invalid event cursor",
         ) from exc
-    except Exception:
+    except Exception as exc:
+        logger.exception("Mobile event projection failed")
         raise MobileAPIError(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "events_unavailable",
             "Event feed is temporarily unavailable.",
             retryable=True,
-        ) from None
+        ) from exc
 
     as_of = datetime.now(timezone.utc)
 

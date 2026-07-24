@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from src.mobile_monitoring.performance import (
+    MobilePerformanceService,
     NavSample,
     downsample,
     performance_summary,
@@ -22,7 +23,13 @@ def test_performance_uses_anchor_drawdown_and_exposure_adjusted_benchmark() -> N
     summary = performance_summary(
         samples,
         realized_pnl=Decimal("10"),
-        spy_return=0.10,
+        benchmark={
+            "alembic_return": 0.20,
+            "spy_return": 0.10,
+            "avg_exposure": 0.50,
+            "benchmark_return": 0.05,
+            "alpha": 0.15,
+        },
     )
 
     assert summary.nav_change == Decimal("20")
@@ -42,7 +49,7 @@ def test_benchmark_fields_are_null_as_a_group_without_spy() -> None:
             NavSample(start + timedelta(days=1), Decimal("105"), 0.30),
         ],
         realized_pnl=None,
-        spy_return=None,
+        benchmark=None,
     )
 
     assert summary.spy_return is None
@@ -60,7 +67,13 @@ def test_single_nav_point_does_not_invent_zero_return() -> None:
             )
         ],
         realized_pnl=None,
-        spy_return=0.10,
+        benchmark={
+            "alembic_return": 0.0,
+            "spy_return": 0.10,
+            "avg_exposure": 0.30,
+            "benchmark_return": 0.03,
+            "alpha": -0.03,
+        },
     )
 
     assert summary.nav_start is None
@@ -68,6 +81,23 @@ def test_single_nav_point_does_not_invent_zero_return() -> None:
     assert summary.nav_change is None
     assert summary.portfolio_return is None
     assert summary.max_drawdown is None
+
+
+def test_benchmark_curve_is_populated_as_one_group() -> None:
+    start = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    samples = [
+        NavSample(start, Decimal("100"), 0.50),
+        NavSample(start + timedelta(days=1), Decimal("105"), 0.50),
+    ]
+
+    points = MobilePerformanceService._points(
+        samples,
+        spy_closes={"2026-01-02": 100.0, "2026-01-03": 110.0},
+        avg_exposure=0.50,
+    )
+
+    assert points[0].benchmark_nav == Decimal("100.0")
+    assert points[1].benchmark_nav == Decimal("105.00")
 
 
 def test_downsample_retains_endpoints_and_nav_extrema() -> None:

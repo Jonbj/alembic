@@ -10,6 +10,7 @@ import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from time import perf_counter
 from unittest.mock import MagicMock
 
 import asyncpg
@@ -24,6 +25,7 @@ from src.config import config  # noqa: E402
 from src.mobile_monitoring.auth import (  # noqa: E402
     create_mobile_access_token,
 )
+from src.mobile_monitoring.models import Freshness, OperationalState  # noqa: E402
 from src.mobile_monitoring.store import MonitorStore  # noqa: E402
 
 _MIGRATION_PATHS = (
@@ -113,6 +115,7 @@ def _mock_alpaca():
     pos.current_price = "505.00"
     pos.market_value = "6234.10"
     pos.unrealized_pl = "-77.88"
+    pos.unrealized_plpc = "-0.01234"
 
     clock = MagicMock()
     clock.is_open = True
@@ -161,6 +164,17 @@ async def mobile_deps(pool, client):
     alpaca = _mock_alpaca()
     builder = MobileSnapshotBuilder(pool=pool, alpaca=alpaca, redis=redis)
     bundle = await builder.build_bundle()
+    bundle.snapshot.operational.state = OperationalState.OPERATIONAL
+    bundle.snapshot.operational.primary_reason = None
+    bundle.snapshot.pipeline["signal"].status = Freshness.FRESH
+    bundle.snapshot.pipeline["signal"].age_seconds = 0
+    bundle.snapshot.pipeline["portfolio_cycle"].status = Freshness.FRESH
+    bundle.snapshot.pipeline["portfolio_cycle"].age_seconds = 0
+    bundle.snapshot.degradations = [
+        degradation
+        for degradation in bundle.snapshot.degradations
+        if degradation.component not in {"signal", "portfolio_cycle"}
+    ]
     read_model = _FakeReadModel(bundle)
     store = MobileEventStore(pool=pool)
 
@@ -241,6 +255,25 @@ class TestMobileRead:
         alpaca.get_all_positions.assert_not_called()
         alpaca.get_clock.assert_not_called()
 
+    async def test_warm_snapshot_read_model_p95_is_below_250ms(
+        self, client, mobile_deps, monitor_user, monitor_device
+    ):
+        token = _token(monitor_user, monitor_device)
+        headers = {"Authorization": f"Bearer {token}"}
+        durations = []
+
+        for _ in range(30):
+            started = perf_counter()
+            response = await client.get(
+                "/api/mobile/v1/snapshot",
+                headers=headers,
+            )
+            durations.append(perf_counter() - started)
+            assert response.status_code == 200
+
+        p95 = sorted(durations)[int(len(durations) * 0.95) - 1]
+        assert p95 < 0.250
+
     async def test_snapshot_supports_etag_and_minimum_app_version(
         self, client, mobile_deps, monitor_user, monitor_device
     ):
@@ -260,6 +293,35 @@ class TestMobileRead:
         assert cached.status_code == 304
         assert upgrade.status_code == 426
         assert upgrade.json()["error"]["code"] == "upgrade_required"
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/mobile/v1/snapshot",
+            "/api/mobile/v1/performance?period=1m",
+            "/api/mobile/v1/positions",
+            "/api/mobile/v1/events?category=system",
+        ],
+    )
+    async def test_all_read_endpoints_support_stable_etag(
+        self,
+        path,
+        client,
+        mobile_deps,
+        monitor_user,
+        monitor_device,
+    ):
+        token = _token(monitor_user, monitor_device)
+        headers = {"Authorization": f"Bearer {token}"}
+        first = await client.get(path, headers=headers)
+        assert first.status_code == 200, first.text
+        cached = await client.get(
+            path,
+            headers={**headers, "If-None-Match": first.headers["ETag"]},
+        )
+
+        assert first.headers["ETag"].startswith('W/"')
+        assert cached.status_code == 304
 
     async def test_snapshot_absent_returns_safe_503(
         self, client, mobile_deps, monitor_user, monitor_device
@@ -293,6 +355,22 @@ class TestMobileRead:
         assert response.status_code == 503
         assert response.json()["error"]["details"]["data_age_seconds"] >= 301
 
+    async def test_performance_rejects_stale_read_model(
+        self, client, mobile_deps, monitor_user, monitor_device
+    ):
+        mobile_deps[4].bundle.snapshot.as_of = datetime.now(
+            timezone.utc
+        ) - timedelta(seconds=301)
+        token = _token(monitor_user, monitor_device)
+
+        response = await client.get(
+            "/api/mobile/v1/performance?period=1m",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "performance_unavailable"
+
     async def test_closed_market_is_paused_but_dependency_failure_is_blocked(
         self, mobile_deps
     ):
@@ -324,6 +402,42 @@ class TestMobileRead:
         assert bundle.snapshot.portfolio.cash is None
         assert bundle.positions.summary.market_value is None
         assert bundle.positions.summary.unrealized_pnl is None
+
+    async def test_gross_exposure_uses_absolute_long_and_short_values(
+        self, mobile_deps
+    ):
+        builder, _, _, alpaca, _ = mobile_deps
+        alpaca.get_account.return_value.equity = "10000"
+        alpaca.get_account.return_value.cash = None
+        long_position = MagicMock(
+            symbol="LONG",
+            qty="10",
+            avg_entry_price="600",
+            current_price="600",
+            market_value="6000",
+            unrealized_pl="0",
+            unrealized_plpc="0",
+        )
+        short_position = MagicMock(
+            symbol="SHORT",
+            qty="-10",
+            avg_entry_price="300",
+            current_price="300",
+            market_value="-3000",
+            unrealized_pl="0",
+            unrealized_plpc="0",
+        )
+        alpaca.get_all_positions.return_value = [
+            long_position,
+            short_position,
+        ]
+
+        bundle = await builder.build_bundle()
+
+        assert bundle.snapshot.portfolio.gross_exposure == 0.9
+        assert bundle.snapshot.portfolio.cash_pct is None
+        assert bundle.snapshot.portfolio.unrealized_pnl == 0
+        assert bundle.positions.summary.gross_exposure == 0.9
 
     async def test_positions_returns_items(
         self, client, mobile_deps, monitor_user, monitor_device
@@ -387,7 +501,7 @@ class TestMobileRead:
                 "test:fingerprint",
             )
         resp = await client.get(
-            "/api/mobile/v1/events?category=all&days=7",
+            "/api/mobile/v1/events?category=system&days=7",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 200, resp.text
@@ -408,26 +522,26 @@ class TestMobileRead:
                         fingerprint, kind, category, severity, status,
                         occurred_at, first_observed_at, last_observed_at, title
                     )
-                    VALUES ($1::varchar, 'decision', 'trading', 'info', 'closed',
+                    VALUES ($1::varchar, 'decision', 'system', 'info', 'closed',
                             $2, $2, $2, $1::text)
                     """,
                     fingerprint,
                     occurred_at,
                 )
         first = await client.get(
-            "/api/mobile/v1/events?limit=1",
+            "/api/mobile/v1/events?category=system&limit=1",
             headers={"Authorization": f"Bearer {token}"},
         )
         cursor = first.json()["next_cursor"]
         second = await client.get(
-            f"/api/mobile/v1/events?limit=1&cursor={cursor}",
+            f"/api/mobile/v1/events?category=system&limit=1&cursor={cursor}",
             headers={"Authorization": f"Bearer {token}"},
         )
         tamper_index = len(cursor) // 2
         replacement = "A" if cursor[tamper_index] != "A" else "B"
         tampered = cursor[:tamper_index] + replacement + cursor[tamper_index + 1 :]
         invalid = await client.get(
-            f"/api/mobile/v1/events?limit=1&cursor={tampered}",
+            f"/api/mobile/v1/events?category=system&limit=1&cursor={tampered}",
             headers={"Authorization": f"Bearer {token}"},
         )
 
@@ -437,3 +551,106 @@ class TestMobileRead:
         assert first.json()["items"][0]["id"] != second.json()["items"][0]["id"]
         assert invalid.status_code == 400
         assert invalid.json()["error"]["code"] == "invalid_cursor"
+
+    async def test_events_include_significant_lifecycle_and_exclude_skip_chatter(
+        self, client, mobile_deps, store, monitor_user, monitor_device
+    ):
+        token = _token(monitor_user, monitor_device)
+        now = datetime.now(timezone.utc)
+        async with store.pool.acquire() as conn:
+            buy_id = await conn.fetchval(
+                """
+                INSERT INTO execution_decisions (
+                    tick_time, symbol, score, regime_mult, ema_pass,
+                    decision, order_id
+                )
+                VALUES ($1, 'MOB03BUY', 0.5, 1.0, TRUE, 'BUY', 'mob03-buy')
+                RETURNING id
+                """,
+                now,
+            )
+            skip_id = await conn.fetchval(
+                """
+                INSERT INTO execution_decisions (
+                    tick_time, symbol, score, regime_mult, ema_pass, decision
+                )
+                VALUES ($1, 'MOB03SKIP', 0.1, 1.0, FALSE, 'SKIP_EMA')
+                RETURNING id
+                """,
+                now,
+            )
+            trade_id = await conn.fetchval(
+                """
+                INSERT INTO trades (
+                    symbol, entry_order_id, entry_price, entry_time,
+                    entry_notional, score, regime_mult, qty
+                )
+                VALUES (
+                    'MOB03POS', 'mob03-fill', 10.0, $1,
+                    100.0, 0.5, 1.0, 10.0
+                )
+                RETURNING id
+                """,
+                now,
+            )
+        try:
+            response = await client.get(
+                "/api/mobile/v1/events?category=trading&days=1&limit=200",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert response.status_code == 200, response.text
+            titles = {item["title"] for item in response.json()["items"]}
+            assert "Decisione BUY · MOB03BUY" in titles
+            assert "Ordine BUY inviato · MOB03BUY" in titles
+            assert "Ordine BUY eseguito · MOB03POS" in titles
+            assert "Posizione aperta · MOB03POS" in titles
+            assert not any("MOB03SKIP" in title for title in titles)
+        finally:
+            async with store.pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM trades WHERE id=$1",
+                    trade_id,
+                )
+                await conn.execute(
+                    "DELETE FROM execution_decisions WHERE id = ANY($1::bigint[])",
+                    [buy_id, skip_id],
+                )
+
+    async def test_events_critical_filter_and_thirty_day_cap(
+        self, client, mobile_deps, store, monitor_user, monitor_device
+    ):
+        token = _token(monitor_user, monitor_device)
+        async with store.pool.acquire() as conn:
+            for fingerprint, severity in (
+                ("filter:critical", "critical"),
+                ("filter:warning", "warning"),
+            ):
+                await conn.execute(
+                    """
+                    INSERT INTO mobile_events (
+                        fingerprint, kind, category, severity, status,
+                        occurred_at, first_observed_at, last_observed_at, title
+                    )
+                    VALUES (
+                        $1::varchar, 'alert_incident', 'system', $2, 'open',
+                        now(), now(), now(), $1::text
+                    )
+                    """,
+                    fingerprint,
+                    severity,
+                )
+
+        critical = await client.get(
+            "/api/mobile/v1/events?category=critical&days=30",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        invalid_days = await client.get(
+            "/api/mobile/v1/events?days=31",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        titles = {item["title"] for item in critical.json()["items"]}
+
+        assert "filter:critical" in titles
+        assert "filter:warning" not in titles
+        assert invalid_days.status_code == 400
+        assert invalid_days.json()["error"]["code"] == "invalid_days"

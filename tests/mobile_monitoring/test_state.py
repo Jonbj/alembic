@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from src.mobile_monitoring.models import MarketPhase
+from src.mobile_monitoring.builder import _pipeline_activity_component
+from src.mobile_monitoring.models import Freshness, MarketPhase
 from src.mobile_monitoring.state import resolve_market_context
 
 ET = ZoneInfo("America/New_York")
@@ -79,3 +80,31 @@ def test_open_clock_remains_authoritative_across_dst_transition(as_of) -> None:
 
     assert context.phase == MarketPhase.OPEN
     assert context.pipeline_expected is True
+
+
+@pytest.mark.parametrize(
+    ("age_seconds", "expected_status", "degraded"),
+    [
+        (900, Freshness.FRESH, False),
+        (901, Freshness.AGING, True),
+        (1380, Freshness.AGING, True),
+        (1381, Freshness.STALE, True),
+        (None, Freshness.UNKNOWN, True),
+    ],
+)
+def test_expected_activity_uses_schedule_plus_eight_minute_grace(
+    age_seconds,
+    expected_status,
+    degraded,
+) -> None:
+    degradations = []
+
+    component = _pipeline_activity_component(
+        component="signal",
+        age_seconds=age_seconds,
+        pipeline_expected=True,
+        degradations=degradations,
+    )
+
+    assert component.status == expected_status
+    assert bool(degradations) is degraded
