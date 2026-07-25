@@ -317,9 +317,10 @@ class TestFallbackCounterPersistence:
         )
 
     @pytest.mark.asyncio
-    async def test_single_model_success_persists_counter_increment_to_postgres(self):
-        """#111: a single-model read is gated like a fallback, so Postgres must
-        record a counter increment, not a reset."""
+    async def test_single_model_success_resets_breaker_counter(self):
+        """#128: a single-model read is gated for trading (fallback_used=True) but
+        is NOT a full ensemble outage, so it must RESET the sizing-breaker counter
+        (increment only on a real FinBERT full fallback), not increment it."""
         mock_outputs = [make_model_output(0.6, 0.8, "opus")]
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
         mock_aggregator.aggregate.return_value = MagicMock(
@@ -353,9 +354,8 @@ class TestFallbackCounterPersistence:
                 pg_store=mock_pg,
             )
 
-        mock_pg.record_fallback_increment.assert_called_once_with(
-            "consecutive_fallback", 1
-        )
+        mock_pg.record_fallback_reset.assert_called_once_with("consecutive_fallback")
+        mock_pg.record_fallback_increment.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_ensemble_success_persists_counter_reset_to_postgres(self):

@@ -184,6 +184,19 @@ def _label_from_model_count(model_ids: list[str], reasoning: str) -> tuple[str, 
     return f"ensemble:{'+'.join(model_ids)}", False, reasoning
 
 
+def _is_full_fallback(result) -> bool:
+    """#128/#111: the consecutive-fallback sizing circuit breaker must count only
+    a FULL ensemble outage (FinBERT fallback — both models down), NOT a
+    single-model read. A single-model read is gated for trading trust
+    (fallback_used=True) but one model still responded, so it must not trip the
+    ×0.5/24h sizing breaker. Keying the counter on this (instead of the raw
+    fallback_used) preserves the pre-#111 breaker trip rate; whether partial
+    degradation should also de-risk is tracked separately in #128.
+    A single-model read carries model_id='single:<model>'; a real FinBERT
+    fallback carries model_id='finbert'."""
+    return bool(result.fallback_used) and not result.model_id.startswith("single:")
+
+
 async def run_inference(
     item: NewsItem,
     clients: list[LLMClient],
@@ -488,7 +501,11 @@ async def process_news_item(
     result, raw_outputs = inference_result
     try:
         ticker = result.symbol
-        if result.fallback_used:
+        # #128/#111: the sizing circuit breaker fires only on a FULL ensemble
+        # outage (FinBERT), not on a single-model read. Single-model reads are
+        # still gated for trading trust (fallback_used=True) but must not trip
+        # the ×0.5/24h breaker — see _is_full_fallback.
+        if _is_full_fallback(result):
             count = redis_store.increment_fallback_counter()
             pg_store.record_fallback_increment(_FALLBACK_COUNTER_NAME, count)
         else:
