@@ -1523,6 +1523,120 @@ def test_s1_origin_weight_drop_tagged_correctly_not_no_signal():
     assert "no_signal" not in sbux_calls[0].kwargs["reason"]
 
 
+# ── #116: anti-stale-ranker-sell must run BEFORE exit-hysteresis ─────────────
+
+
+def test_anti_stale_ranker_protection_runs_before_exit_hysteresis_counter():
+    """#116: a SELL protected by anti-stale-ranker-sell must never reach
+    _apply_exit_hysteresis's Redis counter. Previously hysteresis ran first: on
+    reaching persistence_cycles it deleted its counter and let the order through
+    assuming it would execute, but the order was then vetoed downstream by
+    anti-stale-ranker-sell anyway — restarting the count from zero every cycle
+    it happened to pass, so a genuinely protected position could never
+    accumulate real persistence (NOW, 2026-07-23, -$49.69: protected/held
+    alternated for 2h45min instead of the counter reflecting eligible cycles)."""
+    import pandas as pd
+    from src.portfolio.orchestrator import CycleResult
+    from src.portfolio.types import CombinedOrder
+    from src.workers.portfolio_scheduler import _run_cycle_inner
+
+    zero_weight_sell = CombinedOrder(
+        order_id="oid-NOW",
+        timestamp=datetime(2026, 7, 23, 16, 7, tzinfo=timezone.utc),
+        symbol="NOW",
+        side=OrderSide.SELL,
+        quantity=12.0,
+        order_type=OrderType.MARKET,
+        strategy_id=None,
+        allocation_weight=0.0,
+    )
+    cycle_result = CycleResult(
+        strategies_run=["S4"],
+        orders_per_strategy={"S4": 0},
+        orders_before_constraints=1,
+        orders_after_constraints=1,
+        constraints_fired=[],
+        final_orders=[zero_weight_sell],
+        symbol_strategies={},  # ranker returned nothing for NOW this cycle (min_stocks-starved)
+        symbol_signal_provenance={},
+    )
+
+    mock_pg = MagicMock()
+    mock_pg.fetch_trades.return_value = [{"symbol": "NOW", "stop_strategy": "S4"}]
+    mock_pg.fetch_recently_bought_symbols.return_value = set()
+    mock_pg.fetch_latest_signal_ids.return_value = {}
+    fresh_gen_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    mock_pg.fetch_signals_for_cycle.return_value = [
+        SentimentResult(
+            symbol="NOW", score=0.5, confidence=0.9,
+            reasoning="Analysts raise forecasts post-earnings", model_id="ensemble:glm-5.2:cloud",
+            generated_at=fresh_gen_at,
+        ),
+    ]
+    mock_pg.write_execution_decision = MagicMock(return_value=1)
+
+    with patch("src.strategies.registry.StrategyRegistry") as mock_reg, \
+         patch("alpaca.data.historical.StockHistoricalDataClient") as mock_dc, \
+         patch("alpaca.trading.client.TradingClient") as mock_tc, \
+         patch("src.portfolio.orchestrator.PortfolioOrchestrator") as mock_orch, \
+         patch("src.backtest.engine.data_replay.DataReplay"), \
+         patch("src.backtest.engine.portfolio.VirtualPortfolio"), \
+         patch("src.workers.portfolio_scheduler._persist_cycle_result"), \
+         patch("src.store.pg_store.PostgreSQLStore", return_value=mock_pg), \
+         patch("redis.Redis") as mock_redis_cls:
+
+        entry = MagicMock()
+        entry.strategy_id = "S4"
+        mock_reg.return_value.get_active_strategies.return_value = [entry]
+        mock_reg.return_value.load_mode_from_db.return_value = None
+
+        dates = pd.date_range("2025-01-01", periods=100, freq="B")
+        alpaca_raw = pd.DataFrame(
+            {"close": [90.0 + i * 0.1 for i in range(100)]},
+            index=pd.MultiIndex.from_arrays(
+                [["NOW"] * 100, dates],
+                names=["symbol", "timestamp"],
+            ),
+        )
+        mock_dc.return_value.get_stock_bars.return_value.df = alpaca_raw
+        mock_dc.return_value.get_stock_snapshot.side_effect = Exception("no snap")
+
+        clock = MagicMock()
+        clock.is_open = True
+        account = MagicMock()
+        account.cash = "100000"
+        account.equity = "100000"
+        account.buying_power = "100000"
+        account.trading_blocked = False
+        account.account_blocked = False
+        mock_tc.return_value.get_clock.return_value = clock
+        mock_tc.return_value.get_account.return_value = account
+        mock_tc.return_value.get_all_positions.return_value = []
+
+        mock_orch.return_value.run_cycle.return_value = cycle_result
+
+        redis_inst = MagicMock()
+        redis_inst.get.return_value = None
+        redis_inst.set.return_value = True
+        redis_inst.smembers.return_value = set()
+        redis_inst.incr.return_value = 1
+        mock_redis_cls.from_url.return_value = redis_inst
+
+        try:
+            _run_cycle_inner()
+        except Exception:
+            import traceback
+            traceback.print_exc()
+
+    hysteresis_key = "portfolio:exit_count:NOW"
+    incr_keys = [c.args[0] if c.args else c.kwargs.get("name") for c in redis_inst.incr.call_args_list]
+    assert hysteresis_key not in incr_keys, (
+        "Exit-hysteresis counter was incremented for a symbol anti-stale-ranker-sell "
+        "should have protected this cycle — protection must run BEFORE hysteresis "
+        f"touches its Redis counter, got incr() calls for: {incr_keys}"
+    )
+
+
 # ── _check_strategy_zero_weights ──────────────────────────────────────────────
 
 
