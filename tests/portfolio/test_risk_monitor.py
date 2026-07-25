@@ -320,3 +320,68 @@ def test_alert_has_level_strategy_and_message():
     assert alert.level == AlertLevel.WARNING
     assert alert.message == "test"
     assert alert.strategy_id == "S1"
+
+
+class TestEquityDrawdown:
+    """#107: alert drawdown must come from the equity level curve."""
+
+    def test_monotonic_increase_has_no_drawdown(self):
+        from src.portfolio.risk_monitor import max_drawdown_from_equity
+        assert max_drawdown_from_equity([100.0, 110.0, 120.0]) == 0.0
+
+    def test_peak_to_trough(self):
+        from src.portfolio.risk_monitor import max_drawdown_from_equity
+        # peak 120 → trough 90 → 25%
+        assert max_drawdown_from_equity([100.0, 120.0, 90.0, 110.0]) == 0.25
+
+    def test_needs_two_positive_points(self):
+        from src.portfolio.risk_monitor import max_drawdown_from_equity
+        assert max_drawdown_from_equity([100.0]) == 0.0
+        assert max_drawdown_from_equity([]) == 0.0
+
+    def test_ignores_nonpositive_points(self):
+        from src.portfolio.risk_monitor import max_drawdown_from_equity
+        # only [100, 90] count → 10%
+        assert max_drawdown_from_equity([0.0, -5.0, 100.0, 90.0]) == pytest.approx(0.10)
+
+
+class TestCombinedDrawdownOverride:
+    """#107: when an equity-derived drawdown override is supplied it drives the
+    field and the CRITICAL alert, not the trade-return series."""
+
+    def test_override_above_threshold_fires_critical(self):
+        from src.portfolio.risk_monitor import AlertLevel
+        report = _make_report(combined_drawdown_override=0.20)
+        assert report.combined_drawdown == 0.20
+        assert any(a.level == AlertLevel.CRITICAL for a in report.alerts)
+
+    def test_override_below_threshold_no_critical(self):
+        from src.portfolio.risk_monitor import AlertLevel
+        report = _make_report(combined_drawdown_override=0.10)
+        assert report.combined_drawdown == 0.10
+        assert not any(a.level == AlertLevel.CRITICAL for a in report.alerts)
+
+
+class TestFetchEquityCurve:
+    def test_appends_current_equity_and_drops_bad_rows(self):
+        from unittest.mock import MagicMock
+        from src.workers.risk_monitor_task import _fetch_equity_curve
+
+        cur = MagicMock()
+        cur.fetchall.return_value = [(110_000.0,), (108_000.0,)]
+        conn = MagicMock()
+        conn.cursor.return_value.__enter__.return_value = cur
+        pg = MagicMock()
+        pg._get_connection.return_value = conn
+
+        curve = _fetch_equity_curve(pg, current_equity=109_000.0)
+        assert curve == [110_000.0, 108_000.0, 109_000.0]
+
+    def test_db_error_returns_current_equity_only(self):
+        from unittest.mock import MagicMock
+        from src.workers.risk_monitor_task import _fetch_equity_curve
+
+        pg = MagicMock()
+        pg._get_connection.side_effect = RuntimeError("db down")
+        curve = _fetch_equity_curve(pg, current_equity=109_000.0)
+        assert curve == [109_000.0]
