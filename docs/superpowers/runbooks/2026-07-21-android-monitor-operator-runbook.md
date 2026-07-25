@@ -65,7 +65,9 @@ From the server:
 
 1. Place `google-services.json` in `mobile/android/app/` before building.
 2. Mount the Firebase service account JSON at runtime on the server as `FIREBASE_SERVICE_ACCOUNT_PATH`.
-3. Ensure each device registers its FCM token via the device endpoint (token column to be added in a follow-up migration).
+3. Ensure each device registers its Firebase Installation ID through the
+   authenticated device endpoint; the backend requires Firebase Admin SDK 7.5+
+   for direct FID targeting.
 4. Generic lock-screen copy and opaque `event_id` are sent; no NAV, ticker, or token is included.
 
 ## 8. Operational checks

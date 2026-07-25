@@ -7,6 +7,7 @@ No financial detail, ticker, or token leaks into the outbox or FCM payload.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -58,6 +59,7 @@ class IncidentStore:
         entity_id: str | None = None,
         occurred_at: datetime | None = None,
         expected: bool = False,
+        recovery_observations_required: int = 1,
     ) -> ObservationResult:
         """Record an observation and transition the matching incident lifecycle.
 
@@ -69,8 +71,21 @@ class IncidentStore:
         occurred_at = occurred_at or datetime.now(timezone.utc)
         async with self.pool.acquire() as conn:
             async with conn.transaction():
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext($1))",
+                    fingerprint,
+                )
                 existing = await conn.fetchrow(
-                    "SELECT id, status, severity FROM mobile_events WHERE fingerprint=$1",
+                    """
+                    SELECT id, status, severity, clear_observation_count
+                    FROM mobile_events
+                    WHERE fingerprint=$1
+                    ORDER BY
+                        CASE WHEN status IN ('open', 'escalated') THEN 0 ELSE 1 END,
+                        occurred_at DESC
+                    LIMIT 1
+                    FOR UPDATE
+                    """,
                     fingerprint,
                 )
 
@@ -107,8 +122,17 @@ class IncidentStore:
                 # Update last_observed_at for active incidents.
                 if old_status in (EventStatus.OPEN, EventStatus.ESCALATED):
                     await conn.execute(
-                        "UPDATE mobile_events SET last_observed_at=$1 WHERE id=$2",
+                        """
+                        UPDATE mobile_events
+                        SET last_observed_at=$1,
+                            clear_observation_count=CASE
+                                WHEN $2 THEN 0
+                                ELSE clear_observation_count
+                            END
+                        WHERE id=$3
+                        """,
                         occurred_at,
+                        expected,
                         event_id,
                     )
 
@@ -130,16 +154,37 @@ class IncidentStore:
 
                 if old_status in (EventStatus.OPEN, EventStatus.ESCALATED):
                     if not expected and severity != Severity.CRITICAL:
+                        required = max(1, recovery_observations_required)
+                        clear_count = existing["clear_observation_count"] + 1
+                        if clear_count < required:
+                            await conn.execute(
+                                """
+                                UPDATE mobile_events
+                                SET clear_observation_count=$1
+                                WHERE id=$2
+                                """,
+                                clear_count,
+                                event_id,
+                            )
+                            return ObservationResult(
+                                event_id,
+                                fingerprint,
+                                "observe",
+                                old_severity.value,
+                                old_status.value,
+                            )
                         # Recovery: the fault condition has cleared.
                         await conn.execute(
                             """
                             UPDATE mobile_events
-                            SET status=$1, resolved_at=$2, last_observed_at=$3
-                            WHERE id=$4
+                            SET status=$1, resolved_at=$2, last_observed_at=$3,
+                                clear_observation_count=$4
+                            WHERE id=$5
                             """,
                             EventStatus.RECOVERED.value,
                             occurred_at,
                             occurred_at,
+                            clear_count,
                             event_id,
                         )
                         await self._insert_history(conn, event_id, EventStatus.RECOVERED.value, old_severity.value, details)
@@ -150,17 +195,22 @@ class IncidentStore:
                     return ObservationResult(event_id, fingerprint, "observe", old_severity.value, old_status.value)
 
                 if old_status == EventStatus.RECOVERED and expected and _severity_rank_value(severity) >= _severity_rank_value(Severity.WARNING):
-                    # Re-open a recovered incident.
-                    await conn.execute(
-                        """
-                        UPDATE mobile_events
-                        SET status=$1, severity=$2, resolved_at=NULL, last_observed_at=$3
-                        WHERE id=$4
-                        """,
-                        EventStatus.OPEN.value,
-                        severity.value,
-                        occurred_at,
-                        event_id,
+                    # A recurrence is a new incident cycle. It receives its own
+                    # id/outbox transitions while the prior recovery remains
+                    # immutable history.
+                    event_id = await self._insert_event(
+                        conn,
+                        fingerprint=fingerprint,
+                        kind=kind,
+                        category=category,
+                        severity=severity,
+                        status=EventStatus.OPEN,
+                        title=title,
+                        summary=summary,
+                        details=details,
+                        entity_type=entity_type,
+                        entity_id=entity_id,
+                        occurred_at=occurred_at,
                     )
                     await self._insert_history(conn, event_id, EventStatus.OPEN.value, severity.value, details)
                     await self._enqueue_deliveries(conn, event_id, "open")
@@ -241,7 +291,7 @@ class IncidentStore:
             summary,
             entity_type,
             entity_id,
-            details,
+            json.dumps(details) if details is not None else None,
         )
         return row["id"]
 
@@ -263,7 +313,7 @@ class IncidentStore:
             event_id,
             state,
             severity,
-            details,
+            json.dumps(details) if details is not None else None,
             occurred_at,
         )
 
@@ -277,7 +327,9 @@ class IncidentStore:
         rows = await conn.fetch(
             """
             SELECT id FROM monitor_devices
-            WHERE revoked_at IS NULL AND push_enabled = TRUE
+            WHERE revoked_at IS NULL
+              AND push_enabled = TRUE
+              AND firebase_installation_id IS NOT NULL
             """
         )
         for row in rows:
@@ -301,14 +353,40 @@ class IncidentStore:
         async with self.pool.acquire() as conn:
             return await conn.fetch(
                 """
-                SELECT d.id, d.event_id, d.device_id, d.transition, d.attempt_count,
-                       e.fingerprint, e.severity, e.status
-                FROM mobile_notification_deliveries d
+                WITH candidates AS (
+                    SELECT d.id
+                    FROM mobile_notification_deliveries d
+                    JOIN monitor_devices device ON device.id = d.device_id
+                    WHERE d.sent_at IS NULL
+                      AND d.failed_at IS NULL
+                      AND (d.next_attempt_at IS NULL OR d.next_attempt_at <= $1)
+                      AND (
+                          d.claimed_at IS NULL
+                          OR d.claimed_at <= $1 - INTERVAL '5 minutes'
+                      )
+                      AND device.revoked_at IS NULL
+                      AND device.push_enabled = TRUE
+                      AND device.firebase_installation_id IS NOT NULL
+                    ORDER BY d.attempt_count ASC, d.created_at ASC
+                    FOR UPDATE OF d SKIP LOCKED
+                    LIMIT $2
+                ),
+                claimed AS (
+                    UPDATE mobile_notification_deliveries d
+                    SET claimed_at=$1, claim_id=gen_random_uuid()
+                    FROM candidates c
+                    WHERE d.id=c.id
+                    RETURNING d.*
+                )
+                SELECT d.id, d.event_id, d.device_id, d.transition,
+                       d.attempt_count, d.claimed_at, d.claim_id,
+                       e.fingerprint, e.severity, e.status,
+                       d.created_at AS delivery_created_at,
+                       device.firebase_installation_id
+                FROM claimed d
                 JOIN mobile_events e ON e.id = d.event_id
-                WHERE d.sent_at IS NULL AND d.failed_at IS NULL
-                  AND (d.next_attempt_at IS NULL OR d.next_attempt_at <= $1)
+                JOIN monitor_devices device ON device.id = d.device_id
                 ORDER BY d.attempt_count ASC, d.created_at ASC
-                LIMIT $2
                 """,
                 now,
                 limit,
@@ -317,52 +395,102 @@ class IncidentStore:
     async def record_delivery_attempt(
         self,
         delivery_id: int,
+        claim_id: UUID,
         *,
         provider_message_id: str | None = None,
         failed_at: datetime | None = None,
         error_code: str | None = None,
         next_attempt_at: datetime | None = None,
-    ) -> None:
+        accepted_at: datetime | None = None,
+    ) -> bool:
         async with self.pool.acquire() as conn:
-            if failed_at is not None:
-                await conn.execute(
+            if next_attempt_at is not None:
+                updated = await conn.fetchval(
+                    """
+                    UPDATE mobile_notification_deliveries
+                    SET attempt_count = attempt_count + 1,
+                        failed_at=NULL,
+                        error_code=$1,
+                        next_attempt_at=$2,
+                        claimed_at=NULL,
+                        claim_id=NULL
+                    WHERE id=$3 AND claim_id=$4 AND sent_at IS NULL
+                    RETURNING TRUE
+                    """,
+                    error_code,
+                    next_attempt_at,
+                    delivery_id,
+                    claim_id,
+                )
+            elif failed_at is not None:
+                updated = await conn.fetchval(
                     """
                     UPDATE mobile_notification_deliveries
                     SET attempt_count = attempt_count + 1,
                         failed_at=$1,
                         error_code=$2,
-                        next_attempt_at=$3
-                    WHERE id=$4
+                        next_attempt_at=NULL,
+                        claimed_at=NULL,
+                        claim_id=NULL
+                    WHERE id=$3 AND claim_id=$4 AND sent_at IS NULL
+                    RETURNING TRUE
                     """,
                     failed_at,
                     error_code,
-                    next_attempt_at,
                     delivery_id,
+                    claim_id,
                 )
             else:
-                await conn.execute(
+                updated = await conn.fetchval(
                     """
                     UPDATE mobile_notification_deliveries
                     SET attempt_count = attempt_count + 1,
                         provider_message_id=$1,
-                        sent_at=$2
-                    WHERE id=$3
+                        sent_at=$2,
+                        failed_at=NULL,
+                        error_code=NULL,
+                        next_attempt_at=NULL,
+                        claimed_at=NULL,
+                        claim_id=NULL
+                    WHERE id=$3 AND claim_id=$4 AND sent_at IS NULL
+                    RETURNING TRUE
                     """,
                     provider_message_id,
-                    datetime.now(timezone.utc),
+                    accepted_at or datetime.now(timezone.utc),
                     delivery_id,
+                    claim_id,
                 )
+        return bool(updated)
 
-    async def disable_device_push(self, device_id: UUID) -> None:
+    async def disable_device_push(
+        self,
+        device_id: UUID,
+        firebase_installation_id: str,
+    ) -> None:
         async with self.pool.acquire() as conn:
             await conn.execute(
-                "UPDATE monitor_devices SET push_enabled=FALSE WHERE id=$1",
+                """
+                UPDATE monitor_devices
+                SET push_enabled=FALSE, firebase_installation_id=NULL
+                WHERE id=$1 AND firebase_installation_id=$2
+                """,
                 device_id,
+                firebase_installation_id,
             )
 
     async def list_active_fingerprints(self) -> set[str]:
+        return set(await self.list_active_incidents())
+
+    async def list_active_incidents(self) -> dict[str, datetime]:
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT fingerprint FROM mobile_events WHERE status IN ('open', 'escalated')"
+                """
+                SELECT fingerprint, last_observed_at
+                FROM mobile_events
+                WHERE status IN ('open', 'escalated')
+                """
             )
-            return {r["fingerprint"] for r in rows}
+            return {
+                r["fingerprint"]: r["last_observed_at"]
+                for r in rows
+            }

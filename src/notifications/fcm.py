@@ -7,6 +7,7 @@ reason, username, URL, or token is sent through FCM.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -19,7 +20,12 @@ logger = logging.getLogger(__name__)
 class FcmDeliveryPort(Protocol):
     """Outbound FCM delivery port."""
 
-    async def send(self, *, device_token: str, payload: dict[str, Any]) -> "FcmResult": ...
+    async def send(
+        self,
+        *,
+        firebase_installation_id: str,
+        payload: dict[str, Any],
+    ) -> "FcmResult": ...
 
 
 @dataclass(frozen=True)
@@ -31,14 +37,33 @@ class FcmResult:
 
 
 class FakeFcmAdapter(FcmDeliveryPort):
-    """Inert adapter used in tests and when no Firebase credentials are configured.
+    """Inert adapter enabled explicitly in tests/development.
 
-    Logs the generic payload shape without the destination token so logs stay safe.
+    Logs the generic payload shape without the destination identifier.
     """
 
-    async def send(self, *, device_token: str, payload: dict[str, Any]) -> FcmResult:
+    async def send(
+        self,
+        *,
+        firebase_installation_id: str,
+        payload: dict[str, Any],
+    ) -> FcmResult:
+        del firebase_installation_id
         logger.debug("FakeFcmAdapter: would send transition=%s severity=%s", payload.get("transition"), payload.get("severity"))
         return FcmResult(accepted=True, provider_message_id=f"fake:{payload.get('event_id', 'unknown')}")
+
+
+class UnavailableFcmAdapter(FcmDeliveryPort):
+    """Fail closed when a destination exists but Firebase is not configured."""
+
+    async def send(
+        self,
+        *,
+        firebase_installation_id: str,
+        payload: dict[str, Any],
+    ) -> FcmResult:
+        del firebase_installation_id, payload
+        return FcmResult(accepted=False, error_code="fcm_not_configured")
 
 
 class FirebaseFcmAdapter(FcmDeliveryPort):
@@ -66,14 +91,21 @@ class FirebaseFcmAdapter(FcmDeliveryPort):
         if service_account_path:
             cred = credentials.Certificate(service_account_path)
         try:
-            self._app = firebase_admin.initialize_app(cred)
+            project_id = getattr(config, "FCM_PROJECT_ID", None)
+            options = {"projectId": project_id} if project_id else None
+            self._app = firebase_admin.initialize_app(cred, options)
         except ValueError:
             # Already initialized in this process.
             self._app = firebase_admin.get_app()
         self._messaging = messaging
         return self._app
 
-    async def send(self, *, device_token: str, payload: dict[str, Any]) -> FcmResult:
+    async def send(
+        self,
+        *,
+        firebase_installation_id: str,
+        payload: dict[str, Any],
+    ) -> FcmResult:
         self._initialize()
         message = self._messaging.Message(
             data={
@@ -86,16 +118,27 @@ class FirebaseFcmAdapter(FcmDeliveryPort):
                 title="Alembic richiede attenzione",
                 body="Alembic è tornato operativo" if payload.get("transition") == "recover" else "Alembic richiede attenzione",
             ),
-            token=device_token,
+            fid=firebase_installation_id,
         )
         try:
-            response = self._messaging.send(message, app=self._app)
+            response = await asyncio.to_thread(
+                self._messaging.send,
+                message,
+                app=self._app,
+            )
             return FcmResult(accepted=True, provider_message_id=response)
         except self._messaging.UnregisteredError as exc:
-            logger.warning("FCM token unregistered: %s", exc)
+            logger.warning("FCM destination rejected: %s", type(exc).__name__)
             return FcmResult(accepted=False, error_code="unregistered", terminal=True)
+        except self._messaging.SenderIdMismatchError as exc:
+            logger.warning("FCM destination rejected: %s", type(exc).__name__)
+            return FcmResult(
+                accepted=False,
+                error_code="sender_id_mismatch",
+                terminal=True,
+            )
         except Exception as exc:
-            logger.warning("FCM send failed: %s", exc)
+            logger.warning("FCM send failed: %s", type(exc).__name__)
             return FcmResult(accepted=False, error_code="provider_error")
 
 
@@ -112,6 +155,9 @@ def build_fcm_payload(*, event_id: str, transition: str, severity: str, contract
 def get_fcm_adapter() -> FcmDeliveryPort:
     """Return the configured FCM adapter."""
     service_account_path = getattr(config, "FIREBASE_SERVICE_ACCOUNT_PATH", None)
-    if service_account_path:
+    use_adc = getattr(config, "FCM_USE_APPLICATION_DEFAULT_CREDENTIALS", False)
+    if service_account_path or use_adc:
         return FirebaseFcmAdapter()
-    return FakeFcmAdapter()
+    if getattr(config, "FCM_FAKE_DELIVERY_ENABLED", False):
+        return FakeFcmAdapter()
+    return UnavailableFcmAdapter()

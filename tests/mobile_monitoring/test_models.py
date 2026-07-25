@@ -117,6 +117,12 @@ class TestMobileContractRejection:
         with pytest.raises(ValidationError):
             SnapshotResponse.model_validate(payload)
 
+    def test_push_enabled_requires_firebase_installation_id(self):
+        payload = deepcopy(fixtures.DEVICE_REGISTRATION_PAYLOAD)
+        payload.pop("firebase_installation_id")
+        with pytest.raises(ValidationError, match="firebase_installation_id"):
+            DeviceRegistrationRequest.model_validate(payload)
+
 
 class TestNullabilityAndSafety:
     """Unavailable financial values remain nullable; zero is not injected."""

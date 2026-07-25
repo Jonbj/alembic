@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.mobile_monitoring.models import DeviceResponse
 
@@ -83,6 +83,14 @@ class DeviceRegistrationRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     app_version: str = Field(..., min_length=1, max_length=20)
     push_enabled: bool
+
+    @model_validator(mode="after")
+    def require_destination_when_push_is_enabled(self) -> "DeviceRegistrationRequest":
+        if self.push_enabled and not self.firebase_installation_id:
+            raise ValueError(
+                "firebase_installation_id is required when push_enabled is true"
+            )
+        return self
 
 
 class DeviceRegistrationResponse(BaseModel):

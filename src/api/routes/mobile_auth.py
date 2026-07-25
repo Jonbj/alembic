@@ -409,11 +409,15 @@ async def register_device(
             push_enabled=body.push_enabled,
         )
     else:
+        if not body.push_enabled:
+            await store.clear_device_push_registration(existing.id)
         await store.update_device(
             existing.id,
             name=body.name,
             app_version=body.app_version,
-            firebase_installation_id=body.firebase_installation_id,
+            firebase_installation_id=(
+                body.firebase_installation_id if body.push_enabled else None
+            ),
             push_enabled=body.push_enabled,
             last_seen_at=datetime.now(timezone.utc),
         )
