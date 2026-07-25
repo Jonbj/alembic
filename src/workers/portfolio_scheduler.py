@@ -2093,26 +2093,6 @@ def _run_cycle_inner() -> dict:
     except Exception as _hold_exc:
         log.warning("Hold minimum check failed: %s — proceeding without filter", _hold_exc)
 
-    # Exit hysteresis: require a position to be targeted for exit for N consecutive
-    # cycles before selling — kills the buy->sell->buy flicker that the bigger sizes
-    # (regime fix) amplified. Stop-loss / reversal sells are unaffected (not in final_orders).
-    try:
-        _persist = _get_exit_persistence_cycles()
-        _before_hyst = len(result.final_orders)
-        _hyst_orders = _apply_exit_hysteresis(result.final_orders, config.REDIS_URL, _persist)
-        if len(_hyst_orders) != _before_hyst:
-            result = type(result)(
-                strategies_run=result.strategies_run,
-                orders_per_strategy=result.orders_per_strategy,
-                orders_before_constraints=result.orders_before_constraints,
-                orders_after_constraints=result.orders_after_constraints,
-                constraints_fired=result.constraints_fired,
-                final_orders=_hyst_orders,
-                symbol_strategies=result.symbol_strategies,
-            )
-    except Exception as _hyst_exc:
-        log.warning("Exit hysteresis failed: %s — proceeding without it", _hyst_exc)
-
     # P0-05: pre-fetch open DB positions BEFORE decision logging so BUY decisions for symbols
     # already in an open trade are skipped (prevents polluting the decision log with duplicate
     # BUY entries on every cycle, which was the root cause of apparent stale-signal replay).
@@ -2145,6 +2125,14 @@ def _run_cycle_inner() -> dict:
     # (the 2nd signal passing abs(score) gate is negative → strength<0 → skipped).
     # Result without this: merged_weights={}, orchestrator sells all held positions
     # even if the original buy signal is still valid.
+    #
+    # #116: this MUST run BEFORE exit hysteresis. Hysteresis's Redis counter is
+    # reset the moment it lets an order "through" (reaches persistence_cycles),
+    # on the assumption the order will execute — but a downstream veto here would
+    # then restart the count from zero, forever, for as long as protection keeps
+    # applying. Filtering protected SELLs out first means hysteresis's counter
+    # only ever advances on cycles where the order was genuinely still a sell
+    # candidate (NOW, 2026-07-23, -$49.69: reset/veto sawtooth for 2h45min).
     try:
         from src.backtest.engine.types import OrderSide as _OSProtect
         from src.strategies.s4.config import S4Config as _S4CfgProt
@@ -2187,6 +2175,26 @@ def _run_cycle_inner() -> dict:
                 )
     except Exception as _prot_exc:
         log.warning("Anti-stale-ranker-sell check failed: %s — proceeding without protection", _prot_exc)
+
+    # Exit hysteresis: require a position to be targeted for exit for N consecutive
+    # cycles before selling — kills the buy->sell->buy flicker that the bigger sizes
+    # (regime fix) amplified. Stop-loss / reversal sells are unaffected (not in final_orders).
+    try:
+        _persist = _get_exit_persistence_cycles()
+        _before_hyst = len(result.final_orders)
+        _hyst_orders = _apply_exit_hysteresis(result.final_orders, config.REDIS_URL, _persist)
+        if len(_hyst_orders) != _before_hyst:
+            result = type(result)(
+                strategies_run=result.strategies_run,
+                orders_per_strategy=result.orders_per_strategy,
+                orders_before_constraints=result.orders_before_constraints,
+                orders_after_constraints=result.orders_after_constraints,
+                constraints_fired=result.constraints_fired,
+                final_orders=_hyst_orders,
+                symbol_strategies=result.symbol_strategies,
+            )
+    except Exception as _hyst_exc:
+        log.warning("Exit hysteresis failed: %s — proceeding without it", _hyst_exc)
 
     # Stop-loss cooldown: symbols stopped out today — BUY blocked for the rest of the session.
     stopped_today: set[str] = _get_stop_loss_cooldown_symbols(config.REDIS_URL)
