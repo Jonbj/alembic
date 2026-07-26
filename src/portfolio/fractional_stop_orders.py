@@ -53,11 +53,31 @@ def plan_protective_stop(
     cycle_ts: datetime,
     existing_stop_orders: list[ExistingStopOrder],
     price_tolerance: float = 0.005,
+    qty_available: float | None = None,
 ) -> ProtectiveStopPlan:
-    """Decide whether to create/replace/leave-alone the protective stop for one symbol."""
+    """Decide whether to create/replace/leave-alone the protective stop for one symbol.
+
+    #113: the stop qty must not exceed the shares actually free to reserve. When
+    other open orders (e.g. a pending scheduler SELL) already hold part of the
+    position, Alpaca rejects a stop sized to the full whole-share floor with
+    40310000 "insufficient qty available". We size against qty_available, adding
+    back the shares held by the existing stop orders we cancel this cycle (they
+    free up before the replacement is submitted). If nothing is placeable this
+    cycle, emit skip_insufficient_qty and retry next cycle. qty_available=None
+    preserves the pre-#113 behavior (size to the full position).
+    """
     whole_qty = math.floor(abs(position_qty))
     if whole_qty < 1:
         return ProtectiveStopPlan(action="skip_no_whole_share", symbol=symbol, whole_qty=0, stop_price=None)
+
+    if qty_available is None:
+        target_qty = whole_qty
+    else:
+        reserved_by_existing = sum(o.qty for o in existing_stop_orders)
+        placeable = math.floor(abs(qty_available) + reserved_by_existing)
+        target_qty = min(whole_qty, placeable)
+        if target_qty < 1:
+            return ProtectiveStopPlan(action="skip_insufficient_qty", symbol=symbol, whole_qty=0, stop_price=None)
 
     frozen = stop_policy.freeze(symbol, strategy, avg_entry_price, cycle_ts)
     d_hard = stop_policy.d_hard(symbol, frozen, current_sigma_eff)
@@ -65,17 +85,17 @@ def plan_protective_stop(
 
     if len(existing_stop_orders) == 1:
         existing = existing_stop_orders[0]
-        qty_matches = int(existing.qty) == whole_qty
+        qty_matches = int(existing.qty) == target_qty
         price_matches = abs(existing.stop_price - stop_price) / stop_price <= price_tolerance
         if qty_matches and price_matches:
-            return ProtectiveStopPlan(action="noop", symbol=symbol, whole_qty=whole_qty, stop_price=stop_price)
+            return ProtectiveStopPlan(action="noop", symbol=symbol, whole_qty=target_qty, stop_price=stop_price)
 
     if not existing_stop_orders:
-        return ProtectiveStopPlan(action="create", symbol=symbol, whole_qty=whole_qty, stop_price=stop_price)
+        return ProtectiveStopPlan(action="create", symbol=symbol, whole_qty=target_qty, stop_price=stop_price)
 
     cancel_ids = tuple(o.id for o in existing_stop_orders)
     return ProtectiveStopPlan(
-        action="replace", symbol=symbol, whole_qty=whole_qty, stop_price=stop_price, cancel_order_ids=cancel_ids,
+        action="replace", symbol=symbol, whole_qty=target_qty, stop_price=stop_price, cancel_order_ids=cancel_ids,
     )
 
 
@@ -103,6 +123,8 @@ def build_protective_stop_plans(
     for p in positions:
         symbol = p.symbol
         held_symbols.add(symbol)
+        _qa_raw = getattr(p, "qty_available", None)
+        _qty_available = float(_qa_raw) if _qa_raw is not None else float(p.qty)
         plans.append(
             plan_protective_stop(
                 symbol=symbol,
@@ -113,6 +135,7 @@ def build_protective_stop_plans(
                 stop_policy=stop_policy,
                 cycle_ts=cycle_ts,
                 existing_stop_orders=stop_orders_by_symbol.get(symbol, []),
+                qty_available=_qty_available,
             )
         )
     for symbol, existing in stop_orders_by_symbol.items():
@@ -141,7 +164,7 @@ def execute_protective_stop_plans(plans: Sequence[ProtectiveStopPlan], trading_c
         "cancelled_orphans": 0, "errors": [],
     }
     for plan in plans:
-        if plan.action == "skip_no_whole_share":
+        if plan.action in ("skip_no_whole_share", "skip_insufficient_qty"):
             summary["skipped"] += 1
             continue
         if plan.action == "noop":

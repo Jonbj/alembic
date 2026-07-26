@@ -342,3 +342,45 @@ class TestCancelOpenStopSells:
         tc.cancel_order_by_id.side_effect = [RuntimeError("gone"), None]
 
         assert cancel_open_stop_sells(tc, "SOXX") == 1
+
+
+class TestQtyAvailableSizing:
+    """#113: stop qty must not exceed shares actually free to reserve."""
+
+    def test_sizes_stop_to_available_when_shares_held_for_orders(self, stop_policy, cycle_ts):
+        # 5 whole shares held, but only 2.3 free (rest reserved by a pending SELL).
+        plan = _plan(
+            position_qty=5.4, qty_available=2.3, avg_entry_price=100.0,
+            stop_policy=stop_policy, cycle_ts=cycle_ts, existing_stop_orders=[],
+        )
+        assert plan.action == "create"
+        assert plan.whole_qty == 2  # floor(2.3), NOT floor(5.4)
+
+    def test_skip_when_no_shares_available(self, stop_policy, cycle_ts):
+        plan = _plan(
+            position_qty=5.4, qty_available=0.0, avg_entry_price=100.0,
+            stop_policy=stop_policy, cycle_ts=cycle_ts, existing_stop_orders=[],
+        )
+        assert plan.action == "skip_insufficient_qty"
+        assert plan.whole_qty == 0
+
+    def test_replace_adds_back_own_reserved_shares(self, stop_policy, cycle_ts):
+        # All 5 shares reserved by our OWN existing stop → qty_available reads 0,
+        # but cancelling that stop frees them, so we must still size to 5.
+        from src.portfolio.fractional_stop_orders import ExistingStopOrder
+
+        existing = ExistingStopOrder(id="ord-1", qty=5, stop_price=70.0)
+        plan = _plan(
+            position_qty=5.4, qty_available=0.0, avg_entry_price=100.0,
+            stop_policy=stop_policy, cycle_ts=cycle_ts, existing_stop_orders=[existing],
+        )
+        assert plan.action in ("replace", "noop")
+        assert plan.whole_qty == 5
+
+    def test_none_qty_available_keeps_legacy_full_size(self, stop_policy, cycle_ts):
+        plan = _plan(
+            position_qty=5.4, qty_available=None, avg_entry_price=100.0,
+            stop_policy=stop_policy, cycle_ts=cycle_ts, existing_stop_orders=[],
+        )
+        assert plan.action == "create"
+        assert plan.whole_qty == 5
