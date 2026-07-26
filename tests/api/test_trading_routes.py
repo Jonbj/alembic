@@ -342,3 +342,36 @@ def test_get_orders_origin_strategy():
     assert by_id["ord-news"]["origin_strategy"] == "S4"
     assert by_id["ord-momentum"]["origin_strategy"] == "S1"
     assert by_id["ord-untraced"]["origin_strategy"] is None
+
+
+def test_get_orders_serializes_none_qty_as_null():
+    """#75: a notional-only order has qty=None; it must serialize as JSON null,
+    not the literal string "None"."""
+    from datetime import datetime, timezone
+
+    mock_order = MagicMock()
+    mock_order.id = "ntl-1"
+    mock_order.symbol = "AAPL"
+    mock_order.side.value = "buy"
+    mock_order.qty = None  # notional-only order
+    mock_order.filled_avg_price = "177.53"
+    mock_order.status.value = "filled"
+    mock_order.filled_at = datetime(2026, 5, 18, 14, 0, tzinfo=timezone.utc)
+    mock_order.submitted_at = datetime(2026, 5, 18, 13, 55, tzinfo=timezone.utc)
+
+    mock_client = MagicMock()
+    mock_client.get_orders.return_value = [mock_order]
+    mock_pg = MagicMock()
+    mock_pg.fetch_order_trace.return_value = {}
+    app.dependency_overrides[get_alpaca_trading_client] = lambda: mock_client
+    app.dependency_overrides[get_pg_store] = lambda: mock_pg
+    app.dependency_overrides[require_api_key] = _skip_auth
+
+    tc = TestClient(app)
+    resp = tc.get("/api/orders")
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data[0]["qty"] is None
+    assert data[0]["qty"] != "None"
