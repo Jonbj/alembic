@@ -153,6 +153,7 @@ class PortfolioRiskMonitor:
         total_exposure: float,
         nav: float,
         combined_drawdown_override: float | None = None,
+        herfindahl_override: float | None = None,
     ) -> RiskReport:
         """Compute full risk report.
 
@@ -181,7 +182,10 @@ class PortfolioRiskMonitor:
                 target_weight=target,
             )
 
-        hhi = _herfindahl(current_weights)
+        if herfindahl_override is not None:
+            hhi = herfindahl_override
+        else:
+            hhi = _herfindahl(current_weights)
 
         if combined_drawdown_override is not None:
             combined_dd = combined_drawdown_override

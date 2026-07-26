@@ -46,7 +46,27 @@ class TestFetchAccountState:
         assert exposure == 0.0
 
 
-class TestComputeRiskReportUsesRealAccountState:
+class TestFetchPositionWeights:
+    """#75: per-symbol notional weights for a meaningful concentration metric."""
+
+    def test_normalizes_by_gross(self):
+        from unittest.mock import MagicMock, patch
+        from src.workers.risk_monitor_task import _fetch_position_weights
+
+        p1 = MagicMock(); p1.symbol = "AAPL"; p1.market_value = "3000"
+        p2 = MagicMock(); p2.symbol = "MSFT"; p2.market_value = "1000"
+        client = MagicMock()
+        client.get_all_positions.return_value = [p1, p2]
+        with patch("alpaca.trading.client.TradingClient", return_value=client):
+            weights = _fetch_position_weights()
+        assert weights == {"AAPL": 0.75, "MSFT": 0.25}
+
+    def test_empty_on_broker_error(self):
+        from unittest.mock import patch
+        from src.workers.risk_monitor_task import _fetch_position_weights
+
+        with patch("alpaca.trading.client.TradingClient", side_effect=RuntimeError("down")):
+            assert _fetch_position_weights() == {}
     def test_report_carries_alpaca_nav_and_exposure_no_false_alert(self, monkeypatch):
         """Regression: with real exposure below the 50% threshold, the daily
         'Total portfolio exposure 100.0% exceeds 50%' false alert must not fire."""
