@@ -171,6 +171,32 @@ Respond ONLY with valid JSON matching this schema:
 {{"polarity": <float -1.0..1.0>, "confidence": <float 0.0..1.0>, "reasoning": "<bull/bear analysis, one sentence>", "event_type": "earnings|guidance|mna|regulatory|lawsuit|analyst_rating|product|management|macro|other", "directness": "direct|customer_supplier|competitor_readthrough|sector|macro|unclear", "materiality": <0.0..1.0>, "novelty": <0.0..1.0>, "risk_flags": ["rumor"|"already_priced_in"|"ambiguous_entity"|"low_source_quality"], "evidence_sentences": ["<key sentence>"]}}"""
 
 
+def _label_from_model_count(model_ids: list[str], reasoning: str) -> tuple[str, bool, str]:
+    """#111: a single-model read has no cross-model agreement signal, so it must
+    not be labeled or trusted as a full ensemble. Return (model_id, fallback_used,
+    reasoning): a <2-model aggregate is tagged 'single:<model>' with
+    fallback_used=True so it is gated everywhere a FinBERT fallback is gated
+    (BUY ranking #108, reversal SELL exclusion), while staying distinguishable
+    from FinBERT (model_id='finbert') in metrics via the 'single:' prefix."""
+    if len(model_ids) < 2:
+        m = model_ids[0] if model_ids else "unknown"
+        return f"single:{m}", True, f"[single-model:{m}] {reasoning}"
+    return f"ensemble:{'+'.join(model_ids)}", False, reasoning
+
+
+def _is_full_fallback(result) -> bool:
+    """#128/#111: the consecutive-fallback sizing circuit breaker must count only
+    a FULL ensemble outage (FinBERT fallback — both models down), NOT a
+    single-model read. A single-model read is gated for trading trust
+    (fallback_used=True) but one model still responded, so it must not trip the
+    ×0.5/24h sizing breaker. Keying the counter on this (instead of the raw
+    fallback_used) preserves the pre-#111 breaker trip rate; whether partial
+    degradation should also de-risk is tracked separately in #128.
+    A single-model read carries model_id='single:<model>'; a real FinBERT
+    fallback carries model_id='finbert'."""
+    return bool(result.fallback_used) and not result.model_id.startswith("single:")
+
+
 async def run_inference(
     item: NewsItem,
     clients: list[LLMClient],
@@ -279,14 +305,17 @@ async def run_inference(
             except Exception as e:
                 log.warning(f"Failed to record spending for {model_id}: {e}")
 
+        _model_id, _fallback_used, _reasoning = _label_from_model_count(
+            list(aggregated.model_ids), aggregated.reasoning
+        )
         return SentimentResult(
             symbol=clean_symbol,
             score=max(-1.0, min(1.0, score)),
             confidence=aggregated.confidence,
-            reasoning=aggregated.reasoning,
-            model_id=f"ensemble:{'+'.join(aggregated.model_ids)}",
+            reasoning=_reasoning,
+            model_id=_model_id,
             ensemble_std=aggregated.ensemble_std,
-            fallback_used=False,
+            fallback_used=_fallback_used,
             published_at=item.timestamp,
         ), raw_outputs
 
@@ -472,7 +501,11 @@ async def process_news_item(
     result, raw_outputs = inference_result
     try:
         ticker = result.symbol
-        if result.fallback_used:
+        # #128/#111: the sizing circuit breaker fires only on a FULL ensemble
+        # outage (FinBERT), not on a single-model read. Single-model reads are
+        # still gated for trading trust (fallback_used=True) but must not trip
+        # the ×0.5/24h breaker — see _is_full_fallback.
+        if _is_full_fallback(result):
             count = redis_store.increment_fallback_counter()
             pg_store.record_fallback_increment(_FALLBACK_COUNTER_NAME, count)
         else:

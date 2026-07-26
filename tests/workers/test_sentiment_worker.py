@@ -317,8 +317,10 @@ class TestFallbackCounterPersistence:
         )
 
     @pytest.mark.asyncio
-    async def test_ensemble_success_persists_counter_reset_to_postgres(self):
-        """On ensemble success, Postgres must record the reset too."""
+    async def test_single_model_success_resets_breaker_counter(self):
+        """#128: a single-model read is gated for trading (fallback_used=True) but
+        is NOT a full ensemble outage, so it must RESET the sizing-breaker counter
+        (increment only on a real FinBERT full fallback), not increment it."""
         mock_outputs = [make_model_output(0.6, 0.8, "opus")]
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
         mock_aggregator.aggregate.return_value = MagicMock(
@@ -326,6 +328,48 @@ class TestFallbackCounterPersistence:
             confidence=0.8,
             reasoning="Strong beat",
             model_ids=["opus"],
+        )
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock(return_value="ok")
+        mock_budget.record_spending = AsyncMock(return_value=1.0)
+        mock_finbert = MagicMock(spec=FinBERTClient)
+        mock_redis = MagicMock(spec=RedisStore)
+        mock_redis.increment_fallback_counter.return_value = 1
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+
+        news_item = make_news_item("AAPL", 0)
+
+        with patch(
+            "src.workers.sentiment.run_ensemble_query", new_callable=AsyncMock
+        ) as mock_run_ensemble:
+            mock_run_ensemble.return_value = mock_outputs
+
+            await process_news_item(
+                item=news_item,
+                clients=[],
+                aggregator=mock_aggregator,
+                finbert=mock_finbert,
+                budget_tracker=mock_budget,
+                redis_store=mock_redis,
+                pg_store=mock_pg,
+            )
+
+        mock_pg.record_fallback_reset.assert_called_once_with("consecutive_fallback")
+        mock_pg.record_fallback_increment.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ensemble_success_persists_counter_reset_to_postgres(self):
+        """On a true >=2-model ensemble success, Postgres must record the reset."""
+        mock_outputs = [
+            make_model_output(0.6, 0.8, "opus"),
+            make_model_output(0.55, 0.75, "glm-5.2:cloud"),
+        ]
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+        mock_aggregator.aggregate.return_value = MagicMock(
+            polarity=0.6,
+            confidence=0.8,
+            reasoning="Strong beat",
+            model_ids=["opus", "glm-5.2:cloud"],
         )
         mock_budget = AsyncMock(spec=LLMBudgetTracker)
         mock_budget.check_budget = AsyncMock(return_value="ok")
@@ -358,8 +402,8 @@ class TestRunInference:
     """Tests for run_inference — pure inference without store writes."""
 
     @pytest.mark.asyncio
-    async def test_run_inference_ensemble_success(self):
-        """run_inference returns SentimentResult without touching any store."""
+    async def test_run_inference_single_model_labeled_as_fallback(self):
+        """#111: a one-model aggregate is labeled single: and gated like a fallback."""
         mock_raw_output = ModelOutput(
             symbol="AAPL", polarity=0.8, confidence=0.9,
             reasoning="Bullish on earnings", model_id="opus",
@@ -393,11 +437,63 @@ class TestRunInference:
         assert inference_result is not None
         result, raw_outputs = inference_result
         assert result.symbol == "AAPL"
-        assert result.fallback_used is False
+        assert result.fallback_used is True
+        assert result.model_id == "single:opus"
+        assert "[single-model:opus]" in result.reasoning
         assert abs(result.score) <= 1.0
         assert isinstance(raw_outputs, list)
         assert len(raw_outputs) > 0
         assert raw_outputs[0].model_id == "opus"
+        mock_budget.check_budget.assert_called_once()
+        mock_finbert.analyze.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_run_inference_ensemble_success(self):
+        """run_inference returns a true >=2-model ensemble result without fallback."""
+        mock_raw_outputs = [
+            ModelOutput(
+                symbol="AAPL", polarity=0.8, confidence=0.9,
+                reasoning="Bullish on earnings", model_id="glm-5.2:cloud",
+            ),
+            ModelOutput(
+                symbol="AAPL", polarity=0.75, confidence=0.85,
+                reasoning="Bullish on earnings", model_id="gpt-oss:20b-cloud",
+            ),
+        ]
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+        mock_aggregator.aggregate.return_value = MagicMock(
+            polarity=0.8,
+            confidence=0.9,
+            reasoning="Bullish on earnings",
+            model_ids=["glm-5.2:cloud", "gpt-oss:20b-cloud"],
+            ensemble_std=0.05,
+        )
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock()
+        mock_budget.record_spending = AsyncMock()
+        mock_finbert = MagicMock(spec=FinBERTClient)
+
+        item = make_news_item("AAPL", 0)
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock) as mock_eq:
+            mock_eq.return_value = mock_raw_outputs
+            inference_result = await run_inference(
+                item=item,
+                clients=[],
+                aggregator=mock_aggregator,
+                finbert=mock_finbert,
+                budget_tracker=mock_budget,
+            )
+
+        assert inference_result is not None
+        result, raw_outputs = inference_result
+        assert result.symbol == "AAPL"
+        assert result.fallback_used is False
+        assert result.model_id == "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud"
+        assert abs(result.score) <= 1.0
+        assert isinstance(raw_outputs, list)
+        assert len(raw_outputs) == 2
         mock_budget.check_budget.assert_called_once()
         mock_finbert.analyze.assert_not_called()
 
@@ -563,8 +659,8 @@ class TestProcessNewsBatch:
     """Tests for process_news_batch function."""
 
     @pytest.mark.asyncio
-    async def test_process_batch_returns_sentiment_results(self):
-        """Test processing a batch of news items."""
+    async def test_process_batch_returns_single_model_labeled_as_fallback(self):
+        """#111: a batch of single-model successes is gated like fallbacks."""
         # Mock run_ensemble_query
         mock_outputs = [make_model_output(0.6, 0.8, "opus")]
 
@@ -583,6 +679,7 @@ class TestProcessNewsBatch:
         mock_finbert = MagicMock(spec=FinBERTClient)
 
         mock_redis = MagicMock(spec=RedisStore)
+        mock_redis.increment_fallback_counter.return_value = 1
         mock_pg = MagicMock(spec=PostgreSQLStore)
 
         # Create batch of news items
@@ -607,8 +704,8 @@ class TestProcessNewsBatch:
         assert len(results) == 3
         for result in results:
             assert isinstance(result, SentimentResult)
-            assert result.fallback_used is False
-            assert result.model_id.startswith("ensemble:")
+            assert result.fallback_used is True
+            assert result.model_id == "single:opus"
 
     @pytest.mark.asyncio
     async def test_process_batch_mixed_results(self):
@@ -632,14 +729,17 @@ class TestProcessNewsBatch:
 
         mock_budget = make_budget_mock()
 
-        mock_outputs = [make_model_output(0.6, 0.8, "opus")]
+        mock_outputs = [
+            make_model_output(0.6, 0.8, "opus"),
+            make_model_output(0.55, 0.75, "glm-5.2:cloud"),
+        ]
 
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
         mock_aggregator.aggregate.return_value = MagicMock(
             polarity=0.6,
             confidence=0.8,
             reasoning="Strong beat",
-            model_ids=["opus"],
+            model_ids=["opus", "glm-5.2:cloud"],
         )
 
         mock_finbert = MagicMock(spec=FinBERTClient)
