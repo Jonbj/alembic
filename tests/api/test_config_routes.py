@@ -3,7 +3,9 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
+
+from src.api.deps import get_pg_store
 
 os.environ.setdefault("ADMIN_API_KEY", "test-api-key-for-testing-only-12345678")
 
@@ -22,10 +24,18 @@ risk:
 
 @pytest.fixture(autouse=True)
 def _override_auth():
-    """Override auth for all config route tests."""
+    """Override auth AND the pg store for all config route tests.
+
+    #119: update_config also depends on get_pg_store for its audit-log write;
+    without this override a real PostgreSQLStore connects to the live DATABASE_URL
+    and pollutes the production audit_log on every suite run.
+    """
+    pg_mock = MagicMock()
     app.dependency_overrides[require_api_key] = lambda: "test-key"
-    yield
+    app.dependency_overrides[get_pg_store] = lambda: pg_mock
+    yield pg_mock
     app.dependency_overrides.pop(require_api_key, None)
+    app.dependency_overrides.pop(get_pg_store, None)
 
 
 def test_get_config_returns_yaml_as_dict():
@@ -71,7 +81,7 @@ def test_post_config_updates_watchlist(tmp_path):
     assert "NVDA" in yaml_file.read_text()
 
 
-def test_post_config_deep_merges_nested_dict(tmp_path):
+def test_post_config_deep_merges_nested_dict(tmp_path, _override_auth):
     """POST /api/config deep merges nested dicts."""
     yaml_file = tmp_path / "trading.yaml"
     yaml_file.write_text("""
@@ -94,3 +104,5 @@ risk:
     content = yaml_file.read_text()
     assert "portfolio_drawdown: 0.05" in content
     assert "max_position_pct: 0.2" in content
+    # #119: the audit-log write went to the injected mock, not a real store.
+    _override_auth.write_audit_log.assert_called()
