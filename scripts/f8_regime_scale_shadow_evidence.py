@@ -3,13 +3,24 @@
 
 Read-only. `loss_feedback.apply_regime_scale` ships OFF (shadow): the per-
 strategy regime scale (`feedback:regime_scale:S*`) is computed by the loss-
-feedback ratchet and logged, but NOT applied to sizing. Unlike #61/#71, the
-F8 shadow was NEVER persisted (no annotation in execution_decisions, only a
-transient log line + a 48h-TTL Redis key), so there is no recorded trajectory
-to read back. This script RECONSTRUCTS the trajectory by faithfully replaying
-the real state machine over the persisted `trades`, then VALIDATES the replay
-against the current live Redis scale — if the reconstruction lands on the live
-values, the trajectory is trustworthy.
+feedback ratchet and logged, but NOT applied to sizing.
+
+The trajectory is HYBRID, and each row says which half it came from:
+  - `recorded` — read straight from `f8_regime_scale_shadow` (migration 040,
+    live since 2026-07-21). Authoritative: this is what the scheduler saw.
+  - `replay`   — RECONSTRUCTED for the window BEFORE persistence existed, by
+    replaying the real state machine over the persisted `trades`.
+Recorded rows win wherever both exist, and replay rows past the end of the
+recorded window are dropped so reconstructed numbers can never masquerade as
+observations. The replay is still VALIDATED against the live Redis scale.
+
+Persistence caveat: a row is written only when a NON-IDENTITY scale is in play,
+so "no row for a strategy on a day the cycle ran" means scale = 1.0 (not
+missing data) — that is how `merge_recorded_rows` fills it.
+
+Gate: `config/trading.yaml` conditions the flip on ">=1 trigger->recovery cycle
+observed per active strategy AND no over-suppression in a stable regime". Both
+halves are computed per strategy in `gate_verdict`.
 
 State machine replayed (src/workers/performance.run_loss_feedback_check, every
 30 min Mon-Fri 14:00-21:00 UTC):
@@ -47,6 +58,11 @@ from src.workers.performance import _load_loss_feedback_config
 
 STRATEGIES = ("S1", "S4")
 
+# Operational reading of the config gate's "no over-suppression in a stable
+# regime": a sleeve still pinned to the floor after a full trading week has not
+# demonstrated the lever can release, whatever the trajectory did before.
+_FLOOR_STREAK_LIMIT = 5
+
 
 def _conn():
     url = os.environ.get(
@@ -80,6 +96,95 @@ def _fetch_daily_nav(conn) -> dict[str, float]:
             """
         )
         return {str(d): float(n) for d, n in cur.fetchall()}
+
+
+def _fetch_recorded_shadow(conn) -> list[dict]:
+    """Rows persisted by the scheduler (#32, migration 040)."""
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute(
+            """
+            SELECT cycle_ts, strategy, scale
+            FROM f8_regime_scale_shadow
+            WHERE scale IS NOT NULL
+            ORDER BY cycle_ts
+            """
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def _day(value) -> str:
+    """Date key from a timestamp column (datetime or ISO string)."""
+    return str(value.date()) if hasattr(value, "date") else str(value)[:10]
+
+
+def merge_recorded_rows(recorded: list[dict], strategies=STRATEGIES) -> list[dict]:
+    """Collapse persisted rows into one EOD row per day.
+
+    A row is only written when a strategy is actually scaled, so a strategy
+    with no row on a day the cycle ran was at full size: fill 1.0 rather than
+    treating it as a hole. Within a day the last cycle wins (EOD state).
+    """
+    by_day: dict[str, dict[str, float]] = {}
+    for r in recorded:
+        by_day.setdefault(_day(r["cycle_ts"]), {})[r["strategy"]] = float(r["scale"])
+    out = []
+    for day in sorted(by_day):
+        row = {"date": day}
+        row.update({s: by_day[day].get(s, 1.0) for s in strategies})
+        row["source"] = "recorded"
+        out.append(row)
+    return out
+
+
+def splice_trajectory(replay: list[dict], recorded: list[dict]) -> list[dict]:
+    """Recorded observations win; the replay only covers the pre-persistence era.
+
+    Replay rows at or after the first recorded day are dropped — keeping them
+    would let reconstructed numbers pass as observations in the window where
+    the real ones exist.
+    """
+    if not recorded:
+        return [{**r, "source": "replay"} for r in replay]
+    cutoff = recorded[0]["date"]
+    head = [{**r, "source": "replay"} for r in replay if r["date"] < cutoff]
+    return head + list(recorded)
+
+
+def gate_verdict(rows: list[dict], strategy: str, min_scale: float) -> dict:
+    """Score one strategy against the flip gate written in config/trading.yaml.
+
+    Returns the two halves of the gate as numbers (so the operator can judge
+    the margin, not just the verdict): how many trigger->recovery cycles were
+    observed, and how long the sleeve has been sitting on the floor right now.
+    """
+    scales = [r[strategy] for r in rows if r.get(strategy) is not None]
+    at_floor = [s <= min_scale + 1e-9 for s in scales]
+
+    recovery_cycles = sum(
+        1 for prev, cur in zip(scales, scales[1:]) if prev < 1.0 and cur >= 1.0
+    )
+    streak = 0
+    for flag in reversed(at_floor):
+        if not flag:
+            break
+        streak += 1
+
+    reasons = []
+    if recovery_cycles == 0:
+        reasons.append("no trigger->recovery cycle observed")
+    if streak >= _FLOOR_STREAK_LIMIT:
+        reasons.append(f"pinned at floor {streak}d (over-suppression)")
+    if not scales:
+        reasons.append("no trajectory")
+
+    return {
+        "strategy": strategy,
+        "recovery_cycles": recovery_cycles,
+        "days_at_floor": sum(at_floor),
+        "current_floor_streak": streak,
+        "gate": "PASS" if not reasons else "FAIL",
+        "reason": "; ".join(reasons) or "recovery observed, not over-suppressed",
+    }
 
 
 def _live_scales() -> dict[str, float | None]:
@@ -178,35 +283,66 @@ def main() -> int:
     try:
         trades = _fetch_trades(conn)
         nav = _fetch_daily_nav(conn)
+        recorded_raw = _fetch_recorded_shadow(conn)
     finally:
         conn.close()
 
     now = datetime.now(timezone.utc)
-    rows = _replay(trades, cfg, now)
+    recorded = merge_recorded_rows(recorded_raw)
+    rows = splice_trajectory(_replay(trades, cfg, now), recorded)
     live = _live_scales()
 
     print("=" * 72)
     print("F8 regime_scale — SHADOW EVIDENCE (issue #32)")
-    print(f"apply_regime_scale = {cfg['apply_regime_scale']}  (False = shadow, not applied)")
+    _apply = cfg["apply_regime_scale"]
+    _applied_to = ("none (shadow)" if not _apply
+                   else "ALL sleeves" if _apply is True
+                   else ", ".join(str(s) for s in _apply))
+    print(f"apply_regime_scale = {_apply!r}  -> applied to: {_applied_to}")
     print("=" * 72)
-    print("\nInstrumentation gap: the F8 shadow scale is NOT persisted (no")
-    print("execution_decisions annotation, only a 48h-TTL Redis key). The")
-    print("trajectory below is a RECONSTRUCTION by replaying the real ratchet")
-    print("over persisted trades, validated against the live Redis scale.\n")
 
-    print("Live Redis scale now:  " + "  ".join(
+    n_rec = sum(1 for r in rows if r["source"] == "recorded")
+    n_rep = len(rows) - n_rec
+    print(f"\nTrajectory: {n_rec} day(s) RECORDED from f8_regime_scale_shadow"
+          + (f" (from {recorded[0]['date']})" if recorded else " (table empty)")
+          + f", {n_rep} day(s) REPLAYED before persistence existed.")
+    print("A strategy with no recorded row on a cycled day was at full size (1.0).")
+    if not recorded:
+        print("WARNING: no persisted rows — every number below is a reconstruction.")
+
+    print("\nLive Redis scale now:  " + "  ".join(
         f"{s}={live[s]}" if live[s] is not None else f"{s}=<none>" for s in STRATEGIES
     ))
     if rows:
         last = rows[-1]
-        print("Reconstruction ended:  " + "  ".join(f"{s}={last[s]}" for s in STRATEGIES))
+        print(f"Trajectory ends ({last['source']}):  "
+              + "  ".join(f"{s}={last[s]}" for s in STRATEGIES))
         ok = all(
             live[s] is not None and abs(last[s] - live[s]) < 0.05 for s in STRATEGIES
         )
-        print(f"Validation: {'PASS — reconstruction matches live' if ok else 'DRIFT — see note'}\n")
+        print(f"Consistency: {'PASS — trajectory matches live' if ok else 'DRIFT — see note'}")
+
+    # Flip gate (config/trading.yaml): >=1 trigger->recovery cycle per active
+    # strategy AND no over-suppression. Scored per strategy, not globally —
+    # a sleeve stuck on the floor must not ride in on another sleeve's pass.
+    print("\nFlip gate per strategy (trading.yaml: >=1 trigger->recovery cycle"
+          " AND no over-suppression):")
+    rec_rows = [r for r in rows if r["source"] == "recorded"]
+    for s in STRATEGIES:
+        for label, subset in (("full", rows), ("recorded-only", rec_rows)):
+            if not subset:
+                continue
+            v = gate_verdict(subset, s, cfg["regime_min_scale"])
+            print(f"  {s} [{label:13}]: {v['gate']:4}"
+                  f"  recovery_cycles={v['recovery_cycles']}"
+                  f"  days_at_floor={v['days_at_floor']}"
+                  f"  floor_streak_now={v['current_floor_streak']}d  — {v['reason']}")
+    if rec_rows:
+        print("  NB: the gate says 'observed'. A PASS that holds only on [full]"
+              " rests on REPLAYED evidence, not observations.")
 
     # Daily trajectory with NAV change and would-applying-have-helped signal.
-    print(f"{'date':12} {'S1':>6} {'S4':>6} {'ΔNAV':>10}  timing")
+    print(f"\n{'date':12} {'S1':>6} {'S4':>6} {'ΔNAV':>10}  {'src':9} timing")
     prev_nav = None
     helped = drag = 0.0
     for r in rows:
@@ -230,7 +366,7 @@ def main() -> int:
                 tag = "de-risk on UP day (would have dragged)"
                 drag += dnav
         dnav_s = f"{dnav:+.2f}" if dnav is not None else "—"
-        print(f"{d:12} {r['S1']:6.3f} {r['S4']:6.3f} {dnav_s:>10}  {tag}")
+        print(f"{d:12} {r['S1']:6.3f} {r['S4']:6.3f} {dnav_s:>10}  {r['source']:9} {tag}")
 
     print("\nDirectional read (NOT a precise counterfactual — applying the scale")
     print("would change which trades fire, a feedback the replay cannot model):")

@@ -321,9 +321,22 @@ loss_feedback:
   # F8: apply the per-strategy feedback regime scale to portfolio sizing.
   # false = SHADOW ONLY — the orchestrator records the would-be deployment delta
   # (CycleResult.feedback_shadow, logged each cycle) but does NOT shrink weights.
-  # Flip to true only after the shadow gate passes: >=1 trigger->recovery cycle
-  # observed per active strategy AND no over-suppression in a stable regime.
+  # true = every sleeve. A LIST enables only the named sleeves, because the gate
+  # is scored per strategy: >=1 trigger->recovery cycle observed AND no
+  # over-suppression in a stable regime.
   # measure-before-enforce (QX-01). See docs/superpowers/plans/2026-07-11-stop-loss-redesign.md F8.
+  #
+  # 2026-07-27 (#32) — the per-strategy allowlist above ships, the flip does NOT.
+  # Scored on recorded evidence, S4 passed the gate and S1 failed it, so [S4] was
+  # the intended value. Then #134 found the gate is scored on counters that
+  # DOUBLE-COUNT: 80-89% of neighbours in the trade sequence the ratchet consumes
+  # are simultaneous same-day exits, so one bad day is read as an N-loss streak
+  # once per open position. Collapsed to one observation per exit day, the serial
+  # dependence that an equity-curve de-risk rule requires disappears (S1 ac
+  # +0.065, S4 ac +0.017 — "no detectable dependence").
+  # So the sleeve that "passed" passed on an inflated signal. Ship the mechanism,
+  # keep the lever off: re-open the flip only after the counters aggregate by day
+  # and the premise is re-tested on that unit. See #134.
   apply_regime_scale: false
 
 retention:

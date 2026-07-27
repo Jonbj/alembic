@@ -1731,9 +1731,10 @@ def _load_loss_feedback_config() -> dict:
         "feedback_ttl_hours": 96,  # #32: covers the weekend gap (cron is Mon-Fri only)
         # F8: wire feedback:regime_scale:S* into the portfolio path sizing.
         # False = shadow-only (orchestrator records the would-be delta but does
-        # not apply the scale). Flip to True only after the shadow gate passes
-        # (>=1 trigger->recovery cycle observed per active strategy AND no
-        # over-suppression in a stable regime). measure-before-enforce (QX-01).
+        # not apply the scale). May also be a LIST of strategy ids, because the
+        # gate below is scored per strategy: enable only the sleeves that pass
+        # (>=1 trigger->recovery cycle observed AND no over-suppression in a
+        # stable regime). measure-before-enforce (QX-01).
         "apply_regime_scale": False,
     }
     try:

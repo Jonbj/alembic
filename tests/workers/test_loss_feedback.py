@@ -127,12 +127,22 @@ def test_apply_regime_scale_defaults_to_false():
     )
 
 
-def test_trading_yaml_ships_apply_regime_scale_false():
-    """The shipped config must keep apply_regime_scale: false until the F8 shadow
-    gate passes — guards against an accidental live flip."""
+def test_trading_yaml_ships_regime_scale_off_pending_the_premise_retest():
+    """The shipped config must keep F8 shadow-only — no sleeve enabled.
+
+    2026-07-27: S4 passed the flip gate and S1 failed it, so [S4] was the
+    intended value. #134 then showed the gate is scored on counters that
+    double-count simultaneous same-day exits (80-89% of neighbours), and that
+    the serial dependence such a rule needs vanishes once observations are
+    aggregated by day. The mechanism ships; the lever stays off until the
+    counters aggregate by day and the premise is re-tested on that unit.
+
+    Guards against an accidental live flip in either form (bool or allowlist).
+    """
     cfg = _load_loss_feedback_config()  # reads the real config/trading.yaml
-    assert cfg.get("apply_regime_scale") is False, (
-        "config/trading.yaml must ship apply_regime_scale: false (shadow-only)"
+    applied = cfg.get("apply_regime_scale")
+    assert not applied, (
+        f"config/trading.yaml must ship F8 shadow-only pending #134, got {applied!r}"
     )
 
 
