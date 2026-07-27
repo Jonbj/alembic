@@ -145,6 +145,34 @@ def _fetch_equity_curve(pg, current_equity: float) -> list[float]:
     return curve
 
 
+def _fetch_position_weights() -> dict[str, float]:
+    """Per-symbol portfolio weights (|market value| / gross) from Alpaca, for a
+    meaningful concentration (Herfindahl) metric. #75: the report previously fed
+    {"portfolio": 1.0}, making HHI a constant 1.0 that measured nothing. Returns
+    {} on any broker error / no positions → caller falls back to the old value.
+    """
+    from alpaca.trading.client import TradingClient
+
+    from src.config import config
+
+    try:
+        client = TradingClient(
+            api_key=config.ALPACA_API_KEY,
+            secret_key=config.ALPACA_SECRET_KEY,
+            paper=config.ALPACA_PAPER_MODE,
+        )
+        market_values = {
+            p.symbol: abs(float(p.market_value)) for p in client.get_all_positions()
+        }
+        gross = sum(market_values.values())
+        if gross <= 0:
+            return {}
+        return {sym: mv / gross for sym, mv in market_values.items()}
+    except Exception as e:
+        log.warning("Could not fetch position weights for HHI (#75): %s", e)
+        return {}
+
+
 def _store_risk_report(pg, report) -> int:
     """Store RiskReport to risk_reports table, return inserted id."""
     data = _serialize_report(report)
@@ -217,12 +245,18 @@ def compute_risk_report() -> dict:
         equity_curve = _fetch_equity_curve(pg, nav)
         equity_dd = max_drawdown_from_equity(equity_curve)
 
+        from src.portfolio.risk_monitor import _herfindahl
+
+        position_weights = _fetch_position_weights()
+        hhi_override = _herfindahl(position_weights) if position_weights else None
+
         report = monitor.compute_report(
             strategy_returns=strategy_returns,
             current_weights=current_weights,
             total_exposure=total_exposure,
             nav=nav,
             combined_drawdown_override=equity_dd,
+            herfindahl_override=hhi_override,
         )
 
         # Log all alerts
