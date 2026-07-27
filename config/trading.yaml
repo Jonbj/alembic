@@ -326,15 +326,18 @@ loss_feedback:
   # over-suppression in a stable regime.
   # measure-before-enforce (QX-01). See docs/superpowers/plans/2026-07-11-stop-loss-redesign.md F8.
   #
-  # 2026-07-27 (#32) — S4 ON, S1 deliberately left in shadow. Scored on RECORDED
-  # evidence (f8_regime_scale_shadow, not the replay) via
-  # scripts/f8_regime_scale_shadow_evidence.py:
-  #   S4 [recorded-only]: PASS  recovery_cycles=1  days_at_floor=0
-  #   S1 [recorded-only]: FAIL  recovery_cycles=0  floor_streak_now=3d
-  # S4 sat at 1.0 when this was enabled, so turning it on moved no position — it
-  # arms the de-risk for the next S4 drawdown. S1 stays shadow-only until #134
-  # settles whether its floor is a correct de-risk or a mis-calibrated ratchet.
-  apply_regime_scale: [S4]
+  # 2026-07-27 (#32) — the per-strategy allowlist above ships, the flip does NOT.
+  # Scored on recorded evidence, S4 passed the gate and S1 failed it, so [S4] was
+  # the intended value. Then #134 found the gate is scored on counters that
+  # DOUBLE-COUNT: 80-89% of neighbours in the trade sequence the ratchet consumes
+  # are simultaneous same-day exits, so one bad day is read as an N-loss streak
+  # once per open position. Collapsed to one observation per exit day, the serial
+  # dependence that an equity-curve de-risk rule requires disappears (S1 ac
+  # +0.065, S4 ac +0.017 — "no detectable dependence").
+  # So the sleeve that "passed" passed on an inflated signal. Ship the mechanism,
+  # keep the lever off: re-open the flip only after the counters aggregate by day
+  # and the premise is re-tested on that unit. See #134.
+  apply_regime_scale: false
 
 retention:
   news_log_days: 180      # delete news_log rows older than N days
