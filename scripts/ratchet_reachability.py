@@ -39,6 +39,7 @@ import psycopg2.extras
 from src.portfolio.loss_feedback import (
     LossFeedback,
     _is_teaching_trade,
+    r_multiple,
     risk_budget_at_entry,
     strategy_for_trade,
 )
@@ -131,6 +132,106 @@ def simulate_ratchet(observations: list[dict], cfg: dict) -> dict:
 
     stats["final_scale"] = round(scale, 4)
     return stats
+
+
+def serial_dependence(r_multiples: list[float]) -> dict:
+    """Test the premise the whole ratchet rests on: do losses beget losses?
+
+    An equity-curve de-risking rule (which is what F8 is) can only add value if
+    the strategy's trade returns are POSITIVELY serially correlated — if losses
+    cluster, cutting size after a loss avoids the next one. With independent
+    returns the rule is noise-chasing and pays a drag; with NEGATIVE correlation
+    it is actively backwards, cutting size exactly before the bounce. The
+    practitioner literature is blunt that most systematic strategies show no
+    such dependence, so this is a premise to verify, never to assume.
+
+    Two views of the same question:
+      - lag-1 autocorrelation of the R-multiples (magnitude as well as sign),
+        compared against the ~1.96/sqrt(n) band for zero dependence;
+      - a Wald-Wolfowitz runs test on the win/loss signs (fewer runs than
+        expected = streaky, more = alternating), which is robust to the fat
+        tails that make the autocorrelation of P&L noisy.
+    """
+    n = len(r_multiples)
+    out = {
+        "n": n,
+        "win_rate": (sum(1 for r in r_multiples if r > 0) / n) if n else None,
+        "lag1_autocorr": None,
+        "significance_band": (1.96 / (n ** 0.5)) if n else None,
+        "runs": None,
+        "runs_expected": None,
+        "runs_z": None,
+        "verdict": "insufficient data",
+    }
+    if n < 3:
+        return out
+
+    mean = sum(r_multiples) / n
+    denom = sum((x - mean) ** 2 for x in r_multiples)
+    if denom <= 0:
+        return out
+    num = sum(
+        (r_multiples[i] - mean) * (r_multiples[i + 1] - mean) for i in range(n - 1)
+    )
+    ac = num / denom
+    out["lag1_autocorr"] = round(ac, 4)
+
+    wins = [r > 0 for r in r_multiples]
+    n_w, n_l = sum(wins), n - sum(wins)
+    if n_w and n_l:
+        runs = 1 + sum(1 for i in range(n - 1) if wins[i] != wins[i + 1])
+        expected = 2 * n_w * n_l / n + 1
+        var = (2 * n_w * n_l * (2 * n_w * n_l - n)) / (n * n * (n - 1))
+        out["runs"] = runs
+        out["runs_expected"] = round(expected, 2)
+        if var > 0:
+            out["runs_z"] = round((runs - expected) / (var ** 0.5), 3)
+
+    band = out["significance_band"]
+    z = out["runs_z"]
+    streaky = ac > band or (z is not None and z < -1.96)
+    reverting = ac < -band or (z is not None and z > 1.96)
+    out["verdict"] = (
+        "streaky" if streaky else "mean-reverting" if reverting
+        else "no detectable dependence"
+    )
+    return out
+
+
+def daily_aggregate(observations: list[dict]) -> list[float]:
+    """Collapse trades to ONE budget-weighted R per exit day.
+
+    The ratchet reads closed trades as a sequence, but a sleeve holds many
+    names at once, so most neighbours in that sequence are simultaneous exits
+    sharing one market move — read in arbitrary within-day order. Counting them
+    as consecutive observations turns a single bad day into an N-loss "streak".
+    Aggregating by day is the unit the design language ("consecutive losses")
+    actually implies, and the only unit on which serial dependence means
+    anything.
+
+    `observations` are dicts with `day`, `net_pnl` and `budget`.
+    """
+    by_day: dict[object, list[float]] = {}
+    for o in observations:
+        budget = float(o.get("budget") or 0.0)
+        if budget <= 0:
+            continue
+        acc = by_day.setdefault(o["day"], [0.0, 0.0])
+        acc[0] += float(o.get("net_pnl") or 0.0)
+        acc[1] += budget
+    return [pnl / bud for _, (pnl, bud) in sorted(by_day.items()) if bud > 0]
+
+
+def same_day_neighbour_share(days: list) -> float | None:
+    """Fraction of consecutive pairs in the trade sequence sharing an exit day.
+
+    High share = the "sequence" the ratchet consumes is mostly cross-sectional,
+    not temporal, so its streak counters are double-counting one event.
+    """
+    if len(days) < 2:
+        return None
+    pairs = len(days) - 1
+    return sum(1 for a, b in zip(days, days[1:]) if a == b) / pairs
 
 
 def _conn():
@@ -247,6 +348,47 @@ def main() -> int:
             print(f"  median gap between down-steps {med_gap:.1f}h"
                   f"  vs decay window {cfg['threshold_decay_hours']}h  -> {verdict}")
         print(f"  final scale                {st['final_scale']}")
+
+    # The premise check: an equity-curve de-risking rule only pays if the
+    # sleeve's trade returns cluster. Measured on the same teaching trades the
+    # ratchet actually consumes, so the test matches what the rule sees.
+    print("\n" + "=" * 78)
+    print("PREMISE — do losses beget losses? (serial dependence of teaching R)")
+    print("=" * 78)
+    for s in STRATEGIES:
+        rs = [
+            r_multiple(t)
+            for t in trades
+            if _is_teaching_trade(t.get("exit_reason")) and strategy_for_trade(t) == s
+        ]
+        teach = [
+            t for t in trades
+            if _is_teaching_trade(t.get("exit_reason")) and strategy_for_trade(t) == s
+        ]
+        share = same_day_neighbour_share([t["exit_time"].date() for t in teach])
+        d = serial_dependence(rs)
+        d_day = serial_dependence(daily_aggregate([
+            {"day": t["exit_time"].date(), "net_pnl": t["net_pnl"],
+             "budget": risk_budget_at_entry(t)}
+            for t in teach
+        ]))
+        wr = "n/a" if d["win_rate"] is None else f"{100 * d['win_rate']:.1f}%"
+        print(f"\n--- {s} ---   n={d['n']}  win_rate={wr}")
+        if share is not None:
+            print(f"  consecutive pairs sharing an exit DAY   {100 * share:.0f}%"
+                  f"   <- the sequence is mostly cross-sectional")
+        for label, x in (("per-TRADE", d), ("per-DAY  ", d_day)):
+            ac = x["lag1_autocorr"]
+            ac_s = "n/a" if ac is None else f"{ac:+.4f}"
+            band_s = "" if x["significance_band"] is None else \
+                f"  band +/-{x['significance_band']:.3f}"
+            z_s = "" if x["runs_z"] is None else f"  runs_z={x['runs_z']:+.3f}"
+            print(f"  {label}  n={x['n']:>4}  ac={ac_s}{band_s}{z_s}"
+                  f"   -> {x['verdict']}")
+    print("\nA de-risk-after-losses rule only adds value on a STREAKY sleeve. On an"
+          "\nindependent one it is noise-chasing that pays a drag; on a mean-reverting"
+          "\none it cuts size exactly before the bounce. Judge on the per-DAY row:"
+          "\nper-TRADE counts one bad day once per open position.")
 
     print("\nReading: `decay` is the only branch that does not need winning trades."
           "\nA sleeve whose median gap between down-steps is shorter than the decay"
