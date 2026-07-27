@@ -67,6 +67,9 @@ class TestFetchPositionWeights:
 
         with patch("alpaca.trading.client.TradingClient", side_effect=RuntimeError("down")):
             assert _fetch_position_weights() == {}
+
+
+class TestComputeRiskReportUsesRealAccountState:
     def test_report_carries_alpaca_nav_and_exposure_no_false_alert(self, monkeypatch):
         """Regression: with real exposure below the 50% threshold, the daily
         'Total portfolio exposure 100.0% exceeds 50%' false alert must not fire."""
