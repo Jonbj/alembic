@@ -294,7 +294,11 @@ def main() -> int:
 
     print("=" * 72)
     print("F8 regime_scale — SHADOW EVIDENCE (issue #32)")
-    print(f"apply_regime_scale = {cfg['apply_regime_scale']}  (False = shadow, not applied)")
+    _apply = cfg["apply_regime_scale"]
+    _applied_to = ("none (shadow)" if not _apply
+                   else "ALL sleeves" if _apply is True
+                   else ", ".join(str(s) for s in _apply))
+    print(f"apply_regime_scale = {_apply!r}  -> applied to: {_applied_to}")
     print("=" * 72)
 
     n_rec = sum(1 for r in rows if r["source"] == "recorded")

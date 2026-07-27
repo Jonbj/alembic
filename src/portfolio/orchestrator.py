@@ -34,6 +34,34 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def _scale_gate(apply_feedback_scale):
+    """Build the per-strategy predicate for the F8 apply gate (#32).
+
+    Accepts the historical bool (all / none) or a collection of strategy ids
+    (allowlist). The allowlist exists because the flip gate written in
+    config/trading.yaml is scored PER STRATEGY: on 2026-07-27 S4 satisfied it on
+    recorded evidence (a full trigger->recovery cycle, never floored) while S1
+    did not (zero observed cycles, sitting on the floor). With only a global
+    bool the choice was between shipping an un-gated de-risk on S1 or shipping
+    none at all.
+
+    Fail-safe: anything unrecognised (None, a bad YAML value) means SHADOW, so a
+    misconfiguration can never silently start shrinking live sizing.
+    """
+    if apply_feedback_scale is True:
+        return lambda _sid: True
+    if not apply_feedback_scale:  # False, None, empty collection
+        return lambda _sid: False
+    if isinstance(apply_feedback_scale, (list, tuple, set, frozenset)):
+        allowed = {str(s) for s in apply_feedback_scale}
+        return lambda sid: sid in allowed
+    log.warning(
+        "F8: unrecognised apply_regime_scale value %r — defaulting to shadow-only",
+        apply_feedback_scale,
+    )
+    return lambda _sid: False
+
+
 @dataclass
 class CycleResult:
     """Result from a single PortfolioOrchestrator cycle."""
@@ -112,11 +140,11 @@ class PortfolioOrchestrator:
                 weighted-sum merge, preserving per-strategy isolation (a loss in one
                 sleeve shrinks only that sleeve). None / missing strategy → 1.0
                 (identity, zero behavior change when the scheduler flag is off).
-            apply_feedback_scale: When False, the scale is NOT applied to the merge
-                (weights stay unscaled) but `feedback_shadow` still records the
-                would-be unscaled-vs-scaled delta. This is the measure-before-enforce
-                path: the scheduler logs the shadow for N cycles before flipping the
-                flag to True. Default True (passing scales applies them).
+            apply_feedback_scale: Which sleeves actually get their scale applied.
+                `False`/`None` → none (measure-before-enforce: weights stay
+                unscaled but `feedback_shadow` still records the would-be delta),
+                `True` → all, or a collection of strategy ids → only those.
+                Default True (passing scales applies them). See `_scale_gate`.
 
         Returns:
             CycleResult with strategies run, order counts, constraint violations, orders.
@@ -138,6 +166,7 @@ class PortfolioOrchestrator:
         # strategy's sleeve contribution before the weighted-sum merge so a loss
         # in one sleeve shrinks only that sleeve (Phase 5 decouple preserved).
         _fb_scales = feedback_scales or {}
+        _applies_to = _scale_gate(apply_feedback_scale)
 
         nav = self._compute_nav(portfolio, market)
 
@@ -177,7 +206,8 @@ class PortfolioOrchestrator:
                 # that symbol genuinely receives combined capital from both sleeves.
                 alloc = entry.allocation_pct
                 _fb_scale = float(_fb_scales.get(entry.strategy_id, 1.0) or 1.0)
-                _effective_scale = _fb_scale if apply_feedback_scale else 1.0
+                _fb_applied = _applies_to(entry.strategy_id)
+                _effective_scale = _fb_scale if _fb_applied else 1.0
                 for sym, wt in tw.items():
                     merged_weights[sym] = merged_weights.get(sym, 0.0) + wt * alloc * _effective_scale
                     symbol_strategies.setdefault(sym, []).append(entry.strategy_id)
@@ -193,7 +223,7 @@ class PortfolioOrchestrator:
                         "scale": _fb_scale,
                         "unscaled_weight": _unscaled,
                         "scaled_weight": _unscaled * _fb_scale,
-                        "applied": apply_feedback_scale,
+                        "applied": _fb_applied,
                     }
 
             except Exception as exc:

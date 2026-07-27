@@ -127,12 +127,22 @@ def test_apply_regime_scale_defaults_to_false():
     )
 
 
-def test_trading_yaml_ships_apply_regime_scale_false():
-    """The shipped config must keep apply_regime_scale: false until the F8 shadow
-    gate passes — guards against an accidental live flip."""
+def test_trading_yaml_enables_regime_scale_only_where_the_gate_passed():
+    """The shipped config must enable F8 only on sleeves that passed the gate.
+
+    2026-07-27 (#32): S4 passed on RECORDED evidence (1 trigger->recovery cycle,
+    never floored), S1 did not (0 cycles, 3d on the floor) and stays shadow-only
+    pending #134. This still guards against an accidental live flip — it now
+    pins the reviewed decision instead of a blanket false, so enabling S1 or
+    every sleeve has to break a test and be argued for.
+    """
     cfg = _load_loss_feedback_config()  # reads the real config/trading.yaml
-    assert cfg.get("apply_regime_scale") is False, (
-        "config/trading.yaml must ship apply_regime_scale: false (shadow-only)"
+    applied = cfg.get("apply_regime_scale")
+    assert applied is not True, (
+        "apply_regime_scale: true would enable F8 on S1, which fails the gate"
+    )
+    assert list(applied or []) == ["S4"], (
+        f"config/trading.yaml must ship apply_regime_scale: [S4], got {applied!r}"
     )
 
 
