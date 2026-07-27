@@ -1,5 +1,6 @@
 """Tests for LLM budget tracker."""
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -113,6 +114,52 @@ class TestBudgetTracker:
         remaining = asyncio.run(tracker.get_remaining_budget())
 
         assert remaining == 50.0
+
+
+class TestCheckBudgetReleasesLock:
+    """#46: check_budget must end its FOR UPDATE transaction (commit/rollback)
+    so the row lock is released — no idle-in-transaction leak."""
+
+    def test_commits_after_read_ok_path(self):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = None  # no row -> "ok"
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        tracker = LLMBudgetTracker(conn=mock_conn)
+        result = asyncio.run(tracker.check_budget())
+
+        assert result == "ok"
+        mock_conn.commit.assert_called_once()
+        mock_conn.rollback.assert_not_called()
+
+    def test_commits_even_on_exhausted_path(self):
+        # The lock must be released BEFORE the exhausted error is raised.
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.fetchone.return_value = {"total_spent_usd": 40.0, "budget_exhausted": True}
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+
+        tracker = LLMBudgetTracker(conn=mock_conn)
+        with pytest.raises(LLMBudgetExhaustedError):
+            asyncio.run(tracker.check_budget())
+
+        mock_conn.commit.assert_called_once()
+
+    def test_rolls_back_on_db_error(self):
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.execute.side_effect = RuntimeError("db error")
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+        # Do not let the mock cursor's __exit__ swallow the exception.
+        mock_conn.cursor.return_value.__exit__.return_value = False
+
+        tracker = LLMBudgetTracker(conn=mock_conn)
+        with pytest.raises(RuntimeError):
+            asyncio.run(tracker.check_budget())
+
+        mock_conn.rollback.assert_called_once()
+        mock_conn.commit.assert_not_called()
 
 
 if __name__ == "__main__":

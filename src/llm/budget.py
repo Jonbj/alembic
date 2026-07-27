@@ -107,29 +107,36 @@ class LLMBudgetTracker:
 
         def _check() -> Literal["ok", "exhausted"]:
             today = date.today()
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    SELECT total_spent_usd, budget_exhausted
-                    FROM llm_budget
-                    WHERE date = %s
-                    FOR UPDATE  -- Row-level lock for thread safety
-                    """,
-                    (today,),
-                )
-                row = cur.fetchone()
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(
+                        """
+                        SELECT total_spent_usd, budget_exhausted
+                        FROM llm_budget
+                        WHERE date = %s
+                        FOR UPDATE  -- Row-level lock for thread safety
+                        """,
+                        (today,),
+                    )
+                    row = cur.fetchone()
 
                 if row is None:
-                    # No row yet = no spending = ok
-                    return "ok"
+                    result: Literal["ok", "exhausted"] = "ok"  # no row = no spending
+                elif row["budget_exhausted"]:
+                    result = "exhausted"
+                elif row["total_spent_usd"] >= self._daily_limit:
+                    result = "exhausted"
+                else:
+                    result = "ok"
 
-                if row["budget_exhausted"]:
-                    return "exhausted"
-
-                if row["total_spent_usd"] >= self._daily_limit:
-                    return "exhausted"
-
-                return "ok"
+                # B31/#46: release the FOR UPDATE row lock. Without a commit the
+                # transaction stays open (idle-in-transaction), holding the lock
+                # and pinning the pooled connection — the B7/B32 pool-leak class.
+                conn.commit()
+                return result
+            except Exception:
+                conn.rollback()
+                raise
 
         loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(None, _check)
