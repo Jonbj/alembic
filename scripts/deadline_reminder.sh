@@ -71,4 +71,7 @@ while IFS='|' read -r id due msg; do
 ${msg}"
     echo "$TODAY" > "$lastsent"
     echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') sent id=${id} due=${due}" >> "$ACK_DIR/${id}.log"
-done < "$CONF"
+# `|| [[ -n "$id" ]]`: a file whose last line has no trailing newline makes
+# `read` return non-zero at EOF, and the loop body would never run for that
+# entry — a reminder appended at the end of the config would be silently dead.
+done < <(cat "$CONF"; echo)
