@@ -145,7 +145,8 @@ class TestComputeNewWeights:
         assert result == {"opus": 0.5, "qwen35": 0.5}
 
     def test_compute_new_weights_all_negative_icir(self):
-        """When all ICIR are negative the target is uniform (1/n each).
+        """When all ICIR are negative, current_weights are projected through
+        the box — the target is NOT uniform.
         The projected result must respect floor/cap bounds and sum to 1.0;
         it preserves current_weights subject to projection — it does NOT
         reset to uniform 1/n (that was the silent equal-weight fallback
