@@ -151,8 +151,8 @@ async def mobile_token_boundary(
 
 @app.get("/api/health")
 async def health() -> dict[str, str]:
-    """Return the API liveness state."""
-    return {"status": "ok", "mode": "backtest"}
+    """Return the API liveness state (not trading mode — see GET /api/admin/mode)."""
+    return {"status": "ok"}
 
 
 from src.api.routes import (  # noqa: E402

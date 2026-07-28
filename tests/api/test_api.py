@@ -132,6 +132,25 @@ async def test_health_endpoint():
 
 
 @pytest.mark.asyncio
+async def test_health_endpoint_does_not_expose_mode():
+    """GET /api/health must not contain a 'mode' key.
+
+    The field was a hardcoded "backtest" literal that contradicted the authoritative
+    source (GET /api/admin/mode). Removing it eliminates the duplicate source of truth.
+    """
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/api/health")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "mode" not in data, (
+        "GET /api/health must not expose 'mode' — it was a hardcoded literal that "
+        "contradicted GET /api/admin/mode. Use that endpoint instead."
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.require_auth
 async def test_killswitch_requires_api_key(mock_redis_store):
     """Test POST /api/admin/killswitch requires valid API key."""

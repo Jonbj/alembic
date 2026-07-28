@@ -1198,10 +1198,20 @@ Read-only sentiment + extraction quality. **Query parameters:** `days` (default 
 ### `GET /api/health`
 
 ```json
-{"status": "healthy", "redis": "connected", "postgres": "connected"}
+{"status": "ok"}
 ```
 
-Returns 503 if any dependency is unreachable.
+**Liveness only.** It confirms the API process is up and answering — nothing else. It runs no
+dependency check, and it **always returns 200**: it will answer `ok` with Redis or Postgres
+down. Do not wire alerting to it expecting otherwise.
+
+Until 2026-07-28 this endpoint also returned a `mode` field hardcoded to `"backtest"`, which
+contradicted the authoritative source; it was removed (#138). For the trading mode use
+`GET /api/admin/mode`.
+
+For actual dependency health use **`GET /api/system/readiness`** (requires `ADMIN_API_KEY`),
+which aggregates the operator alert flags from Redis and the DB. Note that it too always
+returns HTTP 200 by design — the status code only says the endpoint ran; read the body flags.
 
 ---
 
