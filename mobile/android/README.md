@@ -9,7 +9,10 @@ Native Kotlin / Jetpack Compose read-only monitoring application for Alembic.
 - Biometric / device-credential gate on cold start and after 5 minutes in background.
 - Encrypted session vault backed by Android Keystore.
 - Encrypted offline cache (Room + AES-GCM column encryption via Keystore).
-- Repository skeletons with network-first and cache fallback, exposed as StateFlow.
+- Status, performance, and portfolio product destinations backed by the real v1
+  repositories, with explicit live/offline/stale/update-required presentation.
+- Lifecycle-aware foreground polling (60 seconds while the server says the
+  pipeline is expected; 5 minutes otherwise) plus pull-to-refresh.
 - LAN TLS with a domain-scoped user CA.
 - Backend incidents and FCM delivery are available; the Android receiver is delivered by MOB-07.
 
@@ -90,10 +93,20 @@ Key test areas:
 - `EncryptedSessionVaultTest`: Keystore-backed encryption round-trip.
 - `TimeoutAppLockTest`: biometric timeout gating logic with a fake clock.
 - `RepositoryCacheFallbackTest`: repository returns cached data when the network returns 503.
+- `MonitoringPresentationTest`: safety-state precedence, refresh cadence, numeric
+  formatting, and worst-return-first position ordering.
+- `RepositoryRefreshSerializationTest`: foreground/manual refreshes never overlap
+  inside one repository.
+- `MonitoringScreensTest`: Compose semantics for operational/degraded/blocked/
+  paused/offline/empty/update-required states and 200% font scale.
 - `MobileDtoContractTest`: Android DTOs decode the real v1 server contract.
 - `ApiCallerConcurrencyTest`: concurrent 401 responses trigger one refresh rotation.
 - `ServerUrlPolicyTest`: release HTTPS onboarding and debug loopback policy.
 - `KeystoreSessionVaultInstrumentedTest`: real Keystore cipher on a device.
+
+The NAV visualization uses a small custom Compose `Canvas` rather than another
+chart dependency. Every series has a textual summary and an expandable data
+table, so the chart is never the only accessible representation.
 
 ## External prerequisites
 

@@ -39,8 +39,33 @@
     <string name="strategies">Strategie</string>
     <string name="updated">Aggiornato %1$s</string>
     <string name="offline">OFFLINE</string>
+    <string name="live">LIVE</string>
+    <string name="stale">DATI OBSOLETI</string>
     <string name="cached">In cache</string>
     <string name="unknown">Sconosciuto</string>
+    <string name="unavailable">NON DISPONIBILE</string>
+    <string name="session_expired">Sessione scaduta</string>
+    <string name="freshness_summary">%1$s · aggiornato %2$s · età %3$s</string>
+    <string name="degradations">Limitazioni attive</string>
+    <string name="unknown_mode_reason">Modalità operativa sconosciuta: stato considerato bloccato.</string>
+    <plurals name="active_incidents">
+        <item quantity="one">%1$d incidente attivo</item>
+        <item quantity="other">%1$d incidenti attivi</item>
+    </plurals>
+    <string name="portfolio_summary">Riepilogo portafoglio</string>
+    <string name="not_available">Non disponibile</string>
+    <string name="not_expected">Non atteso</string>
+    <string name="read_only_component">Componente in sola lettura</string>
+    <string name="approved">Approvata</string>
+    <string name="not_approved">Non approvata</string>
+    <string name="market_open">Mercato aperto</string>
+    <string name="market_pre">Pre-market</string>
+    <string name="market_after">After-hours</string>
+    <string name="market_closed">Mercato chiuso</string>
+    <string name="market_holiday">Festività di mercato</string>
+    <string name="pipeline_fresh">Aggiornato</string>
+    <string name="pipeline_aging">In ritardo</string>
+    <string name="pipeline_stale">Obsoleto</string>
 
     <!-- Performance -->
     <string name="period_1w">1S</string>
@@ -54,6 +79,13 @@
     <string name="benchmark">Benchmark</string>
     <string name="alpha">Alpha</string>
     <string name="realized_pnl">Realized P&amp;L</string>
+    <string name="performance_summary">Riepilogo andamento</string>
+    <string name="nav_change">Variazione NAV</string>
+    <string name="avg_exposure">Esposizione media</string>
+    <string name="nav_chart">Andamento NAV</string>
+    <string name="show_data_table">Mostra tabella accessibile</string>
+    <string name="hide_data_table">Nascondi tabella</string>
+    <string name="accessible_data_table">Dati del grafico</string>
 
     <!-- Portfolio -->
     <string name="position_weight">Peso</string>
@@ -62,6 +94,8 @@
     <string name="quantity">Quantità</string>
     <string name="avg_entry">Entry medio</string>
     <string name="current_price">Prezzo</string>
+    <string name="entry_time">Data ingresso</string>
+    <string name="data_age">Età dati</string>
 
     <!-- Events -->
     <string name="filter_all">Tutti</string>

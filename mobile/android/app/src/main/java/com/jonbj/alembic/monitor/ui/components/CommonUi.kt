@@ -5,10 +5,18 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -16,6 +24,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.jonbj.alembic.monitor.R
+import com.jonbj.alembic.monitor.core.model.ContentMode
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import java.text.NumberFormat
 import java.util.Locale
 
@@ -33,11 +45,13 @@ fun LoadingSpinner(modifier: Modifier = Modifier) {
 fun ErrorMessage(
     message: String,
     onRetry: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    retryable: Boolean = true
 ) {
     Column(
         modifier = modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -46,8 +60,10 @@ fun ErrorMessage(
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center
         )
-        Button(onClick = onRetry, modifier = Modifier.padding(top = 16.dp)) {
-            Text(text = stringResource(R.string.retry))
+        if (retryable) {
+            Button(onClick = onRetry, modifier = Modifier.padding(top = 16.dp)) {
+                Text(text = stringResource(R.string.retry))
+            }
         }
     }
 }
@@ -66,18 +82,83 @@ fun EmptyMessage(modifier: Modifier = Modifier) {
 }
 
 @Composable
+fun FreshnessBanner(
+    mode: ContentMode,
+    asOf: Instant,
+    dataAgeSeconds: Int,
+    modifier: Modifier = Modifier
+) {
+    val modeLabel = when (mode) {
+        ContentMode.LIVE -> stringResource(R.string.live)
+        ContentMode.OFFLINE -> stringResource(R.string.offline)
+        ContentMode.STALE -> stringResource(R.string.stale)
+        ContentMode.INCOMPATIBLE -> stringResource(R.string.version_update_required)
+        ContentMode.UNAUTHENTICATED -> stringResource(R.string.session_expired)
+        ContentMode.UNAVAILABLE -> stringResource(R.string.unavailable)
+    }
+    val time = asOf.toLocalDateTime(TimeZone.currentSystemDefault())
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (mode == ContentMode.LIVE) {
+                MaterialTheme.colorScheme.surfaceVariant
+            } else {
+                MaterialTheme.colorScheme.errorContainer
+            }
+        )
+    ) {
+        Text(
+            text = stringResource(
+                R.string.freshness_summary,
+                modeLabel,
+                "${time.hour.toString().padStart(2, '0')}:${time.minute.toString().padStart(2, '0')}",
+                formatDataAge(dataAgeSeconds)
+            ),
+            style = MaterialTheme.typography.labelLarge,
+            color = if (mode == ContentMode.LIVE) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onErrorContainer
+            },
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterialApi::class)
+@Composable
+fun PullRefreshContainer(
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    val state = rememberPullRefreshState(refreshing, onRefresh)
+    Box(modifier = modifier.fillMaxSize().pullRefresh(state)) {
+        content()
+        PullRefreshIndicator(
+            refreshing = refreshing,
+            state = state,
+            modifier = Modifier.align(Alignment.TopCenter),
+            backgroundColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.primary
+        )
+    }
+}
+
+@Composable
 fun OfflineBanner(modifier: Modifier = Modifier) {
     Text(
         text = stringResource(R.string.offline),
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.onErrorContainer,
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
+        modifier = modifier.padding(8.dp)
     )
 }
 
-fun formatMoney(value: Double?, currency: String = "USD", orEmpty: String = "--"): String {
+fun formatMoney(
+    value: Double?,
+    currency: String = "USD",
+    orEmpty: String = "Non disponibile"
+): String {
     if (value == null) return orEmpty
     return when (currency.uppercase()) {
         "USD" -> NumberFormat.getCurrencyInstance(Locale.US).format(value)
@@ -85,7 +166,7 @@ fun formatMoney(value: Double?, currency: String = "USD", orEmpty: String = "--"
     }
 }
 
-fun formatPercent(value: Double?, orEmpty: String = "--"): String {
+fun formatPercent(value: Double?, orEmpty: String = "Non disponibile"): String {
     if (value == null) return orEmpty
     return NumberFormat.getPercentInstance(Locale.US).apply {
         minimumFractionDigits = 2

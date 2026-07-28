@@ -9,6 +9,8 @@ import com.jonbj.alembic.monitor.core.network.dto.PositionsResponse
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class PortfolioRepository(
     private val apiProvider: MobileApiProvider,
@@ -18,9 +20,10 @@ class PortfolioRepository(
 
     private val _positions = MutableStateFlow<LoadState<Positions>>(LoadState.Loading)
     val positions: StateFlow<LoadState<Positions>> = _positions.asStateFlow()
+    private val refreshMutex = Mutex()
 
-    suspend fun refresh(force: Boolean = false) {
-        if (force || _positions.value !is LoadState.Success) {
+    suspend fun refresh(@Suppress("UNUSED_PARAMETER") force: Boolean = false) = refreshMutex.withLock {
+        if (_positions.value !is LoadState.Success) {
             _positions.value = LoadState.Loading
         }
 

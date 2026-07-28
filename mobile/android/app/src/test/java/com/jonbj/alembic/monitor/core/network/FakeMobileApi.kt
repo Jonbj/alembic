@@ -23,6 +23,7 @@ class FakeMobileApi : MobileApi {
     var loginResponse: Response<LoginResponse>? = null
     var refreshResponse: Response<RefreshResponse>? = null
     var logoutResponse: Response<Unit>? = null
+    var snapshotHandler: (suspend () -> Response<SnapshotResponse>)? = null
 
     override suspend fun login(request: LoginRequest): Response<LoginResponse> {
         return loginResponse ?: Response.success(
@@ -55,6 +56,7 @@ class FakeMobileApi : MobileApi {
     }
 
     override suspend fun snapshot(etag: String?): Response<SnapshotResponse> {
+        snapshotHandler?.let { return it() }
         return snapshotResponse ?: Response.success(
             SnapshotResponse(
                 contractVersion = 1,

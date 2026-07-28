@@ -202,7 +202,7 @@ internal fun <T> failureState(
     cachedAgeSeconds: Int? = null
 ): LoadState<T> = when (error) {
     is MobileError.Version -> LoadState.Error(
-        message = error.message ?: "Aggiornamento obbligatorio",
+        message = "Aggiornamento obbligatorio",
         cached = cached,
         source = cached?.let { DataSource.CACHE },
         dataAgeSeconds = cachedAgeSeconds,
@@ -210,7 +210,7 @@ internal fun <T> failureState(
         mode = ContentMode.INCOMPATIBLE
     )
     is MobileError.Auth -> LoadState.Error(
-        message = error.message ?: "Sessione scaduta",
+        message = "Sessione scaduta",
         retryable = false,
         mode = ContentMode.UNAUTHENTICATED
     )
