@@ -90,7 +90,7 @@ class RedisStore:
                        can read it without a DB round-trip.
         """
         key = f"signal:{result.symbol}:sentiment"
-        payload = json.loads(result.model_dump_json())
+        payload = json.loads(result.to_redis_json())
         # B33-follow-up: SentimentResult.signal_id (pinned by the ranker) is
         # the fallback when no explicit signal_id kwarg is given. Either way,
         # omit the key entirely when no id is known — some consumers use
