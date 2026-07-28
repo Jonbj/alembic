@@ -2010,10 +2010,17 @@ def _run_cycle_inner() -> dict:
     _fb_scales: dict[str, float] = _read_feedback_regime_scales(
         config.REDIS_URL, _fb_strategy_ids
     )
-    _apply_fb_scale = False
+    # #32: the flag is bool OR an allowlist of strategy ids — the flip gate is
+    # scored per strategy, so passing a bare bool would force all-or-nothing.
+    # The orchestrator normalises it (_scale_gate); anything unrecognised there
+    # falls back to shadow-only, so no config typo can start shrinking sizing.
+    _apply_fb_scale: bool | list = False
     try:
         from src.workers.performance import _load_loss_feedback_config as _load_fb_cfg
-        _apply_fb_scale = bool(_load_fb_cfg().get("apply_regime_scale", False))
+        _raw_apply = _load_fb_cfg().get("apply_regime_scale", False)
+        _apply_fb_scale = (
+            _raw_apply if isinstance(_raw_apply, (bool, list, tuple)) else bool(_raw_apply)
+        )
     except Exception as _fb_cfg_exc:
         log.warning("F8: could not load apply_regime_scale flag (%s) — defaulting to shadow-only", _fb_cfg_exc)
 

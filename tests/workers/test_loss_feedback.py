@@ -32,13 +32,14 @@ def _make_trade(
     entry_notional: float = 1000.0,
     stop_d_init: float = 0.02,
     exit_reason: str = "stop_loss",
+    trade_id: int | None = None,
 ) -> dict:
     """Return a closed trade fixture.
 
     signal_id=None  -> strategy S1 (momentum/rebalance)
     signal_id=set   -> strategy S4 (news-driven signal)
     """
-    return {
+    trade = {
         "net_pnl": net_pnl,
         "symbol": "AAPL",
         "entry_time": datetime.now(timezone.utc).isoformat(),
@@ -47,6 +48,9 @@ def _make_trade(
         "stop_d_init": stop_d_init,
         "exit_reason": exit_reason,
     }
+    if trade_id is not None:
+        trade["id"] = trade_id
+    return trade
 
 
 def _make_trades(
@@ -123,12 +127,22 @@ def test_apply_regime_scale_defaults_to_false():
     )
 
 
-def test_trading_yaml_ships_apply_regime_scale_false():
-    """The shipped config must keep apply_regime_scale: false until the F8 shadow
-    gate passes — guards against an accidental live flip."""
+def test_trading_yaml_ships_regime_scale_off_pending_the_premise_retest():
+    """The shipped config must keep F8 shadow-only — no sleeve enabled.
+
+    2026-07-27: S4 passed the flip gate and S1 failed it, so [S4] was the
+    intended value. #134 then showed the gate is scored on counters that
+    double-count simultaneous same-day exits (80-89% of neighbours), and that
+    the serial dependence such a rule needs vanishes once observations are
+    aggregated by day. The mechanism ships; the lever stays off until the
+    counters aggregate by day and the premise is re-tested on that unit.
+
+    Guards against an accidental live flip in either form (bool or allowlist).
+    """
     cfg = _load_loss_feedback_config()  # reads the real config/trading.yaml
-    assert cfg.get("apply_regime_scale") is False, (
-        "config/trading.yaml must ship apply_regime_scale: false (shadow-only)"
+    applied = cfg.get("apply_regime_scale")
+    assert not applied, (
+        f"config/trading.yaml must ship F8 shadow-only pending #134, got {applied!r}"
     )
 
 
@@ -503,6 +517,87 @@ class TestExecutionThresholdIntegration:
         mock_redis = MagicMock()
         mock_redis.get_feedback_regime_scale.return_value = 0.64
         assert _load_feedback_regime_scale(mock_redis) == pytest.approx(0.64)
+
+
+class TestStaleEvidenceGuard:
+    """Loss-feedback ratchet must not re-step on the same evidence trade (#122)."""
+
+    def _s4_triggering_trades(self) -> list[dict]:
+        """Most-recent first: 3 S4 stop-loss losses then 2 wins.
+
+        The most recent teaching trade (id=100) is the evidence used to ratchet.
+        """
+        return [
+            _make_trade(-5, signal_id=123, trade_id=100),
+            _make_trade(-10, signal_id=123, trade_id=99),
+            _make_trade(-3, signal_id=123, trade_id=98),
+            _make_trade(8, signal_id=123, trade_id=97),
+            _make_trade(2, signal_id=123, trade_id=96),
+        ]
+
+    def test_skips_reapply_on_same_evidence_after_cooldown(self):
+        """After cooldown, identical evidence trade must not re-apply the step-down."""
+        old_ts = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+        result, mock_redis = _patched_run(
+            self._s4_triggering_trades(),
+            redis_state={
+                "last_adjustment_ts": old_ts,
+                "last_trigger_evidence_trade_id": 100,
+            },
+        )
+
+        s4 = result["per_strategy"]["S4"]
+        assert s4["triggered"] is True
+        assert s4["cooldown_ok"] is True
+        assert s4["adjusted"] is False
+        assert s4.get("skipped_stale_evidence") is True
+        mock_redis.set_feedback_entry_threshold.assert_not_called()
+        mock_redis.set_feedback_regime_scale.assert_not_called()
+
+    def test_reapplies_when_new_teaching_trade_closed(self):
+        """A fresh teaching trade (different id) is new evidence — ratchet applies."""
+        old_ts = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+        result, mock_redis = _patched_run(
+            self._s4_triggering_trades(),
+            redis_state={
+                "last_adjustment_ts": old_ts,
+                "last_trigger_evidence_trade_id": 99,
+            },
+        )
+
+        s4 = result["per_strategy"]["S4"]
+        assert s4["triggered"] is True
+        assert s4["cooldown_ok"] is True
+        assert s4["adjusted"] is True
+        assert s4.get("skipped_stale_evidence") is not True
+        mock_redis.set_feedback_entry_threshold.assert_called_once()
+        mock_redis.set_feedback_regime_scale.assert_called_once()
+
+    def test_applies_when_prior_state_has_no_evidence_id(self):
+        """Backward compatibility: missing evidence id never blocks the ratchet."""
+        old_ts = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+        result, mock_redis = _patched_run(
+            self._s4_triggering_trades(),
+            redis_state={"last_adjustment_ts": old_ts},
+        )
+
+        s4 = result["per_strategy"]["S4"]
+        assert s4["triggered"] is True
+        assert s4["adjusted"] is True
+        assert s4.get("skipped_stale_evidence") is not True
+        mock_redis.set_feedback_entry_threshold.assert_called_once()
+        mock_redis.set_feedback_regime_scale.assert_called_once()
+
+    def test_persists_evidence_id_on_apply(self):
+        """The applied state must remember the evidence trade id that caused it."""
+        old_ts = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+        _, mock_redis = _patched_run(
+            self._s4_triggering_trades(),
+            redis_state={"last_adjustment_ts": old_ts},
+        )
+
+        state_arg = mock_redis.set_feedback_state.call_args[0][0]
+        assert state_arg["last_trigger_evidence_trade_id"] == 100
 
 
 class TestShadowComparisonToggle:

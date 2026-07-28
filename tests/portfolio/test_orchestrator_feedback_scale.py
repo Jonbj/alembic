@@ -254,6 +254,108 @@ def test_apply_feedback_scale_false_shadows_without_applying():
     assert row["applied"] is False
 
 
+# ── per-strategy apply gate (#32): allowlist instead of a global bool ─────────
+
+def _two_sleeve_orch():
+    """S1 (alloc 0.50, 100 qty) + S4 (alloc 0.10, 300 qty), both buying AAPL."""
+    s1 = _FixedStrategy([_buy_order("AAPL", qty=100.0, strategy_id="S1")])
+    s4 = _FixedStrategy([_buy_order("AAPL", qty=300.0, strategy_id="S4")])
+    registry = _make_registry([
+        StrategyEntry("S1", _FixedStrategy, 0.50, "30 14 * * 1-5"),
+        StrategyEntry("S4", _FixedStrategy, 0.10, "30 14 * * 1-5"),
+    ])
+    return PortfolioOrchestrator(
+        registry=registry,
+        strategy_instances={"S1": s1, "S4": s4},
+        constraint_enforcer=ConstraintEnforcer(max_single_asset_pct=0.30),
+    )
+
+
+def _run(orch, **kwargs):
+    return orch.run_cycle(
+        ts=datetime(2024, 1, 15),
+        data_replay=_make_data_replay(),
+        portfolio=_make_portfolio(cash=100_000.0),
+        market=_make_market(),
+        **kwargs,
+    )
+
+
+def test_allowlist_applies_only_to_listed_strategy():
+    """apply_feedback_scale=["S4"] applies S4's scale and leaves S1 in shadow.
+
+    Both sleeves are de-risked to 0.5, but only S4's is enforced:
+      S1 unscaled 50 + S4 halved 15 = 65 shares (S1's 0.5 must NOT bite).
+    """
+    result = _run(
+        _two_sleeve_orch(),
+        feedback_scales={"S1": 0.5, "S4": 0.5},
+        apply_feedback_scale=["S4"],
+    )
+    aapl = [o for o in result.final_orders if o.symbol == "AAPL"]
+    assert aapl[0].quantity == pytest.approx(65.0, rel=0.01)
+
+
+def test_allowlist_records_applied_per_strategy_in_shadow():
+    """The shadow's `applied` flag is per strategy — it is persisted to
+    f8_regime_scale_shadow, so a global value would misrecord the trajectory."""
+    result = _run(
+        _two_sleeve_orch(),
+        feedback_scales={"S1": 0.5, "S4": 0.5},
+        apply_feedback_scale=["S4"],
+    )
+    assert result.feedback_shadow["S4"]["applied"] is True
+    assert result.feedback_shadow["S1"]["applied"] is False
+    # Shadow still records the would-be delta for the un-applied sleeve.
+    assert result.feedback_shadow["S1"]["scaled_weight"] == pytest.approx(
+        result.feedback_shadow["S1"]["unscaled_weight"] * 0.5, rel=0.01
+    )
+
+
+def test_empty_allowlist_applies_nothing():
+    result = _run(
+        _two_sleeve_orch(),
+        feedback_scales={"S1": 0.5, "S4": 0.5},
+        apply_feedback_scale=[],
+    )
+    aapl = [o for o in result.final_orders if o.symbol == "AAPL"]
+    assert aapl[0].quantity == pytest.approx(80.0, rel=0.01), "baseline, nothing scaled"
+    assert result.feedback_shadow["S4"]["applied"] is False
+
+
+def test_allowlist_naming_an_absent_strategy_changes_nothing():
+    result = _run(
+        _two_sleeve_orch(),
+        feedback_scales={"S1": 0.5, "S4": 0.5},
+        apply_feedback_scale=["S9"],
+    )
+    aapl = [o for o in result.final_orders if o.symbol == "AAPL"]
+    assert aapl[0].quantity == pytest.approx(80.0, rel=0.01)
+
+
+def test_bool_contract_still_holds():
+    """The historical bool contract must keep working: True = every sleeve."""
+    result = _run(
+        _two_sleeve_orch(),
+        feedback_scales={"S1": 0.5, "S4": 0.5},
+        apply_feedback_scale=True,
+    )
+    aapl = [o for o in result.final_orders if o.symbol == "AAPL"]
+    # S1 halved (25) + S4 halved (15) = 40
+    assert aapl[0].quantity == pytest.approx(40.0, rel=0.01)
+
+
+def test_none_is_treated_as_shadow_not_as_apply_all():
+    """Fail-safe: an unreadable/absent flag must never enable de-risking."""
+    result = _run(
+        _two_sleeve_orch(),
+        feedback_scales={"S1": 0.5, "S4": 0.5},
+        apply_feedback_scale=None,
+    )
+    aapl = [o for o in result.final_orders if o.symbol == "AAPL"]
+    assert aapl[0].quantity == pytest.approx(80.0, rel=0.01)
+
+
 def test_feedback_shadow_empty_when_no_scale():
     """No non-identity scale → feedback_shadow is empty (nothing to measure)."""
     s4 = _FixedStrategy([_buy_order("AAPL", qty=300.0, strategy_id="S4")])

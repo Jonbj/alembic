@@ -66,6 +66,28 @@ def _compute_drawdown(returns: list[float]) -> float:
     return float(-np.min(drawdowns))
 
 
+def max_drawdown_from_equity(equity_curve: list[float]) -> float:
+    """Peak-to-trough max drawdown of an equity LEVEL series (non-negative fraction).
+
+    Distinct from _compute_drawdown, which consumes a *returns* series. This
+    feeds the CRITICAL portfolio-drawdown alert (#107), so it must reflect real
+    account equity, not trade-notional returns. Non-positive points are ignored;
+    fewer than two usable points → 0.0 (fail-safe: no drawdown asserted).
+    """
+    levels = [e for e in equity_curve if e and e > 0]
+    if len(levels) < 2:
+        return 0.0
+    peak = levels[0]
+    max_dd = 0.0
+    for e in levels:
+        if e > peak:
+            peak = e
+        dd = (peak - e) / peak
+        if dd > max_dd:
+            max_dd = dd
+    return float(max_dd)
+
+
 def _ewma_volatility(returns: list[float], span: int = 60) -> float:
     """Annualised EWMA volatility with given span."""
     if len(returns) < 2:
@@ -130,6 +152,8 @@ class PortfolioRiskMonitor:
         current_weights: dict[str, float],
         total_exposure: float,
         nav: float,
+        combined_drawdown_override: float | None = None,
+        herfindahl_override: float | None = None,
     ) -> RiskReport:
         """Compute full risk report.
 
@@ -158,10 +182,16 @@ class PortfolioRiskMonitor:
                 target_weight=target,
             )
 
-        hhi = _herfindahl(current_weights)
+        if herfindahl_override is not None:
+            hhi = herfindahl_override
+        else:
+            hhi = _herfindahl(current_weights)
 
-        combined_rets = _combined_returns(strategy_returns, current_weights)
-        combined_dd = _compute_drawdown(combined_rets)
+        if combined_drawdown_override is not None:
+            combined_dd = combined_drawdown_override
+        else:
+            combined_rets = _combined_returns(strategy_returns, current_weights)
+            combined_dd = _compute_drawdown(combined_rets)
 
         # Pairwise correlations
         strategy_correlations: dict[str, float] = {}

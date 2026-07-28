@@ -120,9 +120,10 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 ║    • Surfaces via /api/trades/analytics/* endpoints and Performance         ║
 ║                                                                              ║
 ║  Phase B — Loss Feedback Loop (every 30 min, market hours)                  ║
-║    • Detects 3 consecutive losses or negative rolling P&L (last 10 trades)  ║
+║    • Detects EWMA R ≤ −0.50 or 3 consecutive losing teaching trades         ║
 ║    • Raises ENTRY_THRESHOLD (up to 0.60) and reduces regime_scale (→ 0.80×) ║
-║    • Redis TTL 48h; recovery after 5 consecutive wins                        ║
+║    • Redis TTL 96h; recovery after 3 wins, or decay after a quiet 24h        ║
+║    • regime_scale → portfolio sizing is gated by apply_regime_scale (OFF)   ║
 ║    • Surfaces via /api/feedback/status and Auto-Improve page                 ║
 ║                                                                              ║
 ║  Phase C — Counterfactual / Opportunity Cost (nightly 22:45 UTC)            ║

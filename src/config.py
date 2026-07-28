@@ -264,6 +264,13 @@ class Config(BaseModel):
         )
     )
 
+    # #107: real account-equity drawdown baseline. The risk-monitor CRITICAL
+    # drawdown alert measures peak-to-trough over risk_reports.nav on/after this
+    # date, excluding pre-baseline garbage NAV. YYYY-MM-DD.
+    RISK_DRAWDOWN_BASELINE_DATE: str = Field(
+        default_factory=lambda: os.environ.get("RISK_DRAWDOWN_BASELINE_DATE", "2026-07-04")
+    )
+
     # Signal velocity: rate of change of sentiment score across recent cycles.
     # velocity = scores[0] - scores[-1] over last 3 history entries.
     # If |velocity| > threshold, apply ±boost multiplier to S4 scores.

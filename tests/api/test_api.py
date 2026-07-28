@@ -9,6 +9,8 @@ from httpx import ASGITransport, AsyncClient
 os.environ["ADMIN_API_KEY"] = "test-api-key-for-testing-only-12345678"
 
 from src.api.main import app, get_redis_store
+from src.api.deps import get_pg_store
+from unittest.mock import MagicMock
 from src.store.redis_store import RedisStore
 
 
@@ -130,22 +132,45 @@ async def test_health_endpoint():
 
 
 @pytest.mark.asyncio
+async def test_health_endpoint_does_not_expose_mode():
+    """GET /api/health must not contain a 'mode' key.
+
+    The field was a hardcoded "backtest" literal that contradicted the authoritative
+    source (GET /api/admin/mode). Removing it eliminates the duplicate source of truth.
+    """
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        resp = await client.get("/api/health")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "mode" not in data, (
+        "GET /api/health must not expose 'mode' — it was a hardcoded literal that "
+        "contradicted GET /api/admin/mode. Use that endpoint instead."
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.require_auth
 async def test_killswitch_requires_api_key(mock_redis_store):
     """Test POST /api/admin/killswitch requires valid API key."""
     app.dependency_overrides[get_redis_store] = lambda: mock_redis_store
+    app.dependency_overrides[get_pg_store] = lambda: MagicMock()
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         resp = await client.post("/api/admin/killswitch")
     assert resp.status_code == 403
     app.dependency_overrides.pop(get_redis_store, None)
+    app.dependency_overrides.pop(get_pg_store, None)
 
 
 @pytest.mark.asyncio
 async def test_killswitch_with_valid_key(mock_redis_store):
     """Test POST /api/admin/killswitch with valid API key activates killswitch."""
+    pg_mock = MagicMock()
     app.dependency_overrides[get_redis_store] = lambda: mock_redis_store
+    app.dependency_overrides[get_pg_store] = lambda: pg_mock
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -154,7 +179,10 @@ async def test_killswitch_with_valid_key(mock_redis_store):
     data = resp.json()
     assert data["killswitch"] == "activated"
     assert data["mode"] == "halted"
+    # #119: the audit-log write went to the injected mock, not a real store.
+    pg_mock.write_audit_log.assert_called()
     app.dependency_overrides.pop(get_redis_store, None)
+    app.dependency_overrides.pop(get_pg_store, None)
 
 
 @pytest.mark.asyncio
@@ -252,3 +280,31 @@ async def test_llm_models_keeps_weights_when_pair_unchanged(mock_redis_store):
     assert resp.status_code == 200
     mock_redis_store.set_ensemble_weights.assert_not_called()
     app.dependency_overrides.pop(get_redis_store, None)
+
+
+@pytest.mark.asyncio
+async def test_killswitch_never_instantiates_real_pg_store(monkeypatch, mock_redis_store):
+    """#119: with get_pg_store overridden, the killswitch endpoint must use the
+    injected mock and never construct a real PostgreSQLStore (which would connect
+    to DATABASE_URL and write to the live audit_log)."""
+    import src.store.pg_store as _pgs
+
+    def _boom(self, *args, **kwargs):
+        raise AssertionError("real PostgreSQLStore was instantiated (#119)")
+
+    monkeypatch.setattr(_pgs.PostgreSQLStore, "__init__", _boom)
+
+    pg_mock = MagicMock()
+    app.dependency_overrides[get_redis_store] = lambda: mock_redis_store
+    app.dependency_overrides[get_pg_store] = lambda: pg_mock
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post("/api/admin/killswitch")
+    finally:
+        app.dependency_overrides.pop(get_redis_store, None)
+        app.dependency_overrides.pop(get_pg_store, None)
+
+    assert resp.status_code == 200
+    pg_mock.write_audit_log.assert_called()

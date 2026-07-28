@@ -476,7 +476,10 @@ high_vol ×0.2   sleeve=0.4% → ordine ~$4`}</div>
         </ul>
         <h3 style={h3}>Phase B — Feedback Gate (pagina Auto-Improve)</h3>
         <p style={p}>
-          N perdite consecutive o P&L rolling negativo → <code>LossFeedbackWorker</code> alza <code>feedback:entry_threshold</code>. Nel path portfolio questa soglia è applicata dal portfolio scheduler. <code>regime_scale</code> resta visibile come stato Redis/legacy finché non viene cablato nel sizing portfolio.
+          N perdite consecutive o EWMA degli R-multipli sotto −0.50 → <code>LossFeedbackWorker</code> alza <code>feedback:entry_threshold</code> e abbassa <code>feedback:regime_scale:&lt;strategia&gt;</code> (×0.80, pavimento 0.20). Nel path portfolio la soglia è applicata dal portfolio scheduler. Il regime scale <strong>è cablato</strong> nel sizing per-strategia, ma dietro il flag <code>loss_feedback.apply_regime_scale</code>: oggi <strong>off</strong>, quindi l&apos;effetto viene registrato in <code>f8_regime_scale_shadow</code> e mostrato in Auto-Improve senza toccare le posizioni. Il flag accetta <code>false</code>, <code>true</code> o una lista di strategie, perché il gate di attivazione si valuta per sleeve.
+        </p>
+        <p style={p}>
+          <strong>Limite noto (issue #134).</strong> I contatori di streak leggono i trade chiusi uno per uno, ma una sleeve tiene molti nomi insieme: l&apos;80–89% delle coppie consecutive sono uscite simultanee dello stesso giorno. Una giornata storta viene quindi contata come una streak di N perdite, una volta per posizione aperta. Aggregando a una osservazione per giorno, la dipendenza seriale che questo tipo di regola richiede sparisce — motivo per cui il flag resta off.
         </p>
         <h3 style={h3}>Phase C — Counterfactual Analysis (pagina Auto-Improve)</h3>
         <p style={p}>

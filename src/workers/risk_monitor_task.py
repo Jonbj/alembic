@@ -113,6 +113,66 @@ def _fetch_account_state() -> tuple[float, float]:
         return 0.0, 0.0
 
 
+def _fetch_equity_curve(pg, current_equity: float) -> list[float]:
+    """Real account-equity curve for the drawdown alert (#107).
+
+    Historical NAV from risk_reports (nav > 0, on/after the clean baseline date)
+    plus the current live equity appended. Anchoring at the baseline excludes
+    pre-baseline garbage NAV. On error / empty → returns whatever it has (caller
+    reports 0 drawdown for <2 points: fail-safe, never a spurious CRITICAL).
+    """
+    from src.config import config
+
+    baseline = getattr(config, "RISK_DRAWDOWN_BASELINE_DATE", "2026-07-04")
+    curve: list[float] = []
+    try:
+        conn = pg._get_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT nav FROM risk_reports
+                WHERE nav > 0 AND timestamp::date >= %s::date
+                ORDER BY timestamp ASC
+                """,
+                (baseline,),
+            )
+            curve = [float(r[0]) for r in cur.fetchall()]
+    except Exception as e:
+        log.warning("Could not fetch equity curve for drawdown (#107): %s", e)
+        curve = []
+    if current_equity and current_equity > 0:
+        curve.append(float(current_equity))
+    return curve
+
+
+def _fetch_position_weights() -> dict[str, float]:
+    """Per-symbol portfolio weights (|market value| / gross) from Alpaca, for a
+    meaningful concentration (Herfindahl) metric. #75: the report previously fed
+    {"portfolio": 1.0}, making HHI a constant 1.0 that measured nothing. Returns
+    {} on any broker error / no positions → caller falls back to the old value.
+    """
+    from alpaca.trading.client import TradingClient
+
+    from src.config import config
+
+    try:
+        client = TradingClient(
+            api_key=config.ALPACA_API_KEY,
+            secret_key=config.ALPACA_SECRET_KEY,
+            paper=config.ALPACA_PAPER_MODE,
+        )
+        market_values = {
+            p.symbol: abs(float(p.market_value)) for p in client.get_all_positions()
+        }
+        gross = sum(market_values.values())
+        if gross <= 0:
+            return {}
+        return {sym: mv / gross for sym, mv in market_values.items()}
+    except Exception as e:
+        log.warning("Could not fetch position weights for HHI (#75): %s", e)
+        return {}
+
+
 def _store_risk_report(pg, report) -> int:
     """Store RiskReport to risk_reports table, return inserted id."""
     data = _serialize_report(report)
@@ -180,11 +240,23 @@ def compute_risk_report() -> dict:
             log.info("No strategy return data available — skipping risk report")
             return {"skipped": True, "reason": "no_data"}
 
+        from src.portfolio.risk_monitor import max_drawdown_from_equity
+
+        equity_curve = _fetch_equity_curve(pg, nav)
+        equity_dd = max_drawdown_from_equity(equity_curve)
+
+        from src.portfolio.risk_monitor import _herfindahl
+
+        position_weights = _fetch_position_weights()
+        hhi_override = _herfindahl(position_weights) if position_weights else None
+
         report = monitor.compute_report(
             strategy_returns=strategy_returns,
             current_weights=current_weights,
             total_exposure=total_exposure,
             nav=nav,
+            combined_drawdown_override=equity_dd,
+            herfindahl_override=hhi_override,
         )
 
         # Log all alerts

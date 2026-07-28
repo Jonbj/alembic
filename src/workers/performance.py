@@ -1731,9 +1731,10 @@ def _load_loss_feedback_config() -> dict:
         "feedback_ttl_hours": 96,  # #32: covers the weekend gap (cron is Mon-Fri only)
         # F8: wire feedback:regime_scale:S* into the portfolio path sizing.
         # False = shadow-only (orchestrator records the would-be delta but does
-        # not apply the scale). Flip to True only after the shadow gate passes
-        # (>=1 trigger->recovery cycle observed per active strategy AND no
-        # over-suppression in a stable regime). measure-before-enforce (QX-01).
+        # not apply the scale). May also be a LIST of strategy ids, because the
+        # gate below is scored per strategy: enable only the sleeves that pass
+        # (>=1 trigger->recovery cycle observed AND no over-suppression in a
+        # stable regime). measure-before-enforce (QX-01).
         "apply_regime_scale": False,
     }
     try:
@@ -1858,6 +1859,7 @@ def run_loss_feedback_check() -> dict:
         return {"skipped": True, "reason": "no_closed_trades"}
 
     fb = LossFeedback(cfg)
+    latest_teaching_trade_id: dict[str, int] = {}
     # Record in chronological order (reverse the most-recent-first PG result).
     for t in reversed(trades):
         strategy = strategy_for_trade(t)
@@ -1868,6 +1870,9 @@ def run_loss_feedback_check() -> dict:
         if budget <= 0:
             continue
         fb.record_exit(strategy, exit_reason, float(t.get("net_pnl") or 0.0), budget)
+        _tid = t.get("id")
+        if _tid is not None:
+            latest_teaching_trade_id[strategy] = int(_tid)
 
     ttl_seconds = int(cfg["feedback_ttl_hours"] * 3600)
     now = datetime.now(timezone.utc)
@@ -1893,6 +1898,14 @@ def run_loss_feedback_check() -> dict:
         current_threshold = redis.get_feedback_entry_threshold(strategy=strategy) or cfg["threshold_baseline"]
         current_scale = redis.get_feedback_regime_scale(strategy=strategy) or 1.0
 
+        evidence_id = latest_teaching_trade_id.get(strategy)
+        prev_evidence_id = state.get("last_trigger_evidence_trade_id")
+        stale_evidence = (
+            evidence_id is not None
+            and prev_evidence_id is not None
+            and evidence_id == prev_evidence_id
+        )
+
         s_result: dict = {
             "strategy": strategy,
             "triggered": outcome.triggered,
@@ -1909,7 +1922,15 @@ def run_loss_feedback_check() -> dict:
             "decayed": False,
         }
 
-        if outcome.triggered and cooldown_ok:
+        if outcome.triggered and cooldown_ok and stale_evidence:
+            s_result["skipped_stale_evidence"] = True
+            log.info(
+                "Loss feedback stale-evidence guard for %s: evidence trade id %d unchanged since last "
+                "adjustment — skipping re-ratchet",
+                strategy, evidence_id,
+            )
+
+        elif outcome.triggered and cooldown_ok:
             new_threshold = min(current_threshold + cfg["threshold_step"], cfg["threshold_max"])
             new_scale = max(current_scale * cfg["regime_scale_factor"], cfg["regime_min_scale"])
 
@@ -1921,6 +1942,7 @@ def run_loss_feedback_check() -> dict:
             redis.set_feedback_state(
                 {
                     "last_adjustment_ts": now.isoformat(),
+                    "last_trigger_evidence_trade_id": evidence_id,
                     "reason": outcome.reason,
                     "ewma_r": outcome.ewma_r,
                     "consecutive_losses": outcome.consecutive_losses,
