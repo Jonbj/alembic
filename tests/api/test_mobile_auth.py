@@ -52,6 +52,9 @@ _MIGRATION_PATHS = (
     Path(__file__).parent.parent.parent
     / "migrations"
     / "042_mobile_session_access_jti.sql",
+    Path(__file__).parent.parent.parent
+    / "migrations"
+    / "043_mobile_fcm_delivery.sql",
 )
 
 
@@ -628,6 +631,7 @@ class TestMobileAuth:
                 "installation_id": str(uuid.uuid4()),
                 "name": "Pixel 9b",
                 "app_version": "1.0.1",
+                "firebase_installation_id": "fid-auth-test",
                 "push_enabled": True,
             },
         )
@@ -644,6 +648,7 @@ class TestMobileAuth:
                 "installation_id": installation_id,
                 "name": "Pixel 9b",
                 "app_version": "1.0.1",
+                "firebase_installation_id": "fid-idempotent",
                 "push_enabled": True,
             },
             headers=headers,
@@ -666,6 +671,32 @@ class TestMobileAuth:
         assert device1["id"] == device2["id"]
         assert device2["name"] == "Pixel 9b renamed"
         assert device2["push_enabled"] is False
+
+    async def test_device_registration_persists_firebase_installation_id(
+        self, client, store, monitor_user
+    ):
+        login = _login(client, "alice", "secret123")
+        fid = "opaque-fid"
+
+        response = client.post(
+            "/api/mobile/v1/devices",
+            json={
+                "installation_id": str(uuid.uuid4()),
+                "firebase_installation_id": fid,
+                "name": "Pixel 9",
+                "app_version": "1.0.0",
+                "push_enabled": True,
+            },
+            headers={"Authorization": f"Bearer {login['access_token']}"},
+        )
+
+        assert response.status_code == 200
+        device = await store.get_device_by_installation(
+            monitor_user.id,
+            response.json()["device"]["installation_id"],
+        )
+        assert device is not None
+        assert device.firebase_installation_id == fid
 
     async def test_device_registration_requires_device_scope(
         self, client, store, monitor_user
@@ -690,6 +721,7 @@ class TestMobileAuth:
                 "installation_id": str(uuid.uuid4()),
                 "name": "Pixel 9b",
                 "app_version": "1.0.1",
+                "firebase_installation_id": "fid-scope-test",
                 "push_enabled": True,
             },
             headers={"Authorization": f"Bearer {read_only_token}"},

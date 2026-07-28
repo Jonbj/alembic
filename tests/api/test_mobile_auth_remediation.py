@@ -61,6 +61,9 @@ _MIGRATION_PATHS = (
     Path(__file__).parent.parent.parent
     / "migrations"
     / "042_mobile_session_access_jti.sql",
+    Path(__file__).parent.parent.parent
+    / "migrations"
+    / "043_mobile_fcm_delivery.sql",
 )
 
 

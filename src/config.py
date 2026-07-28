@@ -142,7 +142,18 @@ class Config(BaseModel):
     FCM_PROJECT_ID: str | None = Field(
         default_factory=lambda: os.environ.get("FCM_PROJECT_ID") or None
     )
-
+    FCM_FAKE_DELIVERY_ENABLED: bool = Field(
+        default_factory=lambda: os.environ.get(
+            "FCM_FAKE_DELIVERY_ENABLED", "false"
+        ).lower()
+        in {"1", "true", "yes"}
+    )
+    FCM_USE_APPLICATION_DEFAULT_CREDENTIALS: bool = Field(
+        default_factory=lambda: os.environ.get(
+            "FCM_USE_APPLICATION_DEFAULT_CREDENTIALS", "false"
+        ).lower()
+        in {"1", "true", "yes"}
+    )
     # Ollama cloud API
     OLLAMA_API_KEY: str = Field(default_factory=lambda: os.environ.get("OLLAMA_API_KEY", ""))
     OLLAMA_BASE_URL: str = Field(default_factory=lambda: os.environ.get("OLLAMA_BASE_URL", "https://ollama.com"))

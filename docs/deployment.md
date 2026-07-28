@@ -45,6 +45,15 @@ cp .env.example .env
 | `TELEGRAM_BOT_TOKEN` | From @BotFather |
 | `TELEGRAM_CHAT_ID` | Group or channel ID for alerts |
 | `TELEGRAM_ALLOWED_USER_IDS` | Comma-separated IDs allowed to approve weights |
+| `FIREBASE_SERVICE_ACCOUNT_PATH` | Path, mounted inside API/worker containers, to a Firebase Admin service-account JSON. Never commit the file. |
+| `FCM_PROJECT_ID` | Firebase project identifier used for mobile push delivery. |
+| `FCM_USE_APPLICATION_DEFAULT_CREDENTIALS` | Set `true` only when the worker has an explicitly configured Google ADC identity. |
+| `FCM_FAKE_DELIVERY_ENABLED` | Keep `false` outside explicit local tests. When credentials are absent, delivery fails closed instead of falsely acknowledging pushes. |
+
+Mobile push also requires migration `043_mobile_fcm_delivery.sql` and Firebase
+Admin Python SDK 7.5 or newer. The Android client registers its Firebase
+Installation ID through the authenticated device endpoint; the server targets
+that FID directly.
 
 ### LLM Ensemble
 

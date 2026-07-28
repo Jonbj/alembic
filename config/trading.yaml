@@ -164,6 +164,9 @@ risk:
   vix_spike: 40.0
   vix_1d_change: 0.30
   portfolio_drawdown: 0.05
+  # Mobile incident recovery dead-band. The critical incident remains open
+  # until drawdown is below trigger * ratio (5% * 0.95 = 4.75% by default).
+  mobile_drawdown_recovery_ratio: 0.95
 
   # Execution risk (read by ExecutionWorker at cycle start)
   # 2026-07-15 AGGRESSIVE PAPER DECISION: protective 2% stop DISABLED (stop_loss: 0.0).

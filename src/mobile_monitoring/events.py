@@ -300,6 +300,11 @@ class MobileEventStore:
             else None
         )
         details = row["details"] or {}
+        if isinstance(details, str):
+            try:
+                details = json.loads(details)
+            except json.JSONDecodeError:
+                details = {}
         measure = None
         if isinstance(details, dict) and "measure_value" in details:
             measure = EventMeasure(

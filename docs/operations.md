@@ -97,6 +97,7 @@ Beat schedules are defined in `src/workers/celery_app.py`. All times are UTC.
 | `loss-feedback-check` | */30 14-21 Mon-Fri | Phase B: detect loss patterns → raise feedback entry threshold; lower per-strategy `feedback:regime_scale:S*` (applied to sizing only where `loss_feedback.apply_regime_scale` allows — ships off, see F8/#134) |
 | `counterfactual-worker` | 22:45 daily | Phase C: compute 1h counterfactual returns for SKIP_THRESHOLD/SKIP_EMA/SKIP_CAP rows |
 | `reconcile-fills-evening` | 21:30 Mon-Fri | Reconcile fill prices after NYSE close |
+| `mobile-alert-evaluation` | every minute | Evaluate mobile incidents and drain the leased FCM outbox; schedule-lag rules suppress themselves off-hours |
 
 ### Manual Task Triggering
 
@@ -115,7 +116,28 @@ docker compose exec worker celery -A src.workers.celery_app call \
 
 # Check scheduled tasks
 docker compose exec beat celery -A src.workers.celery_app inspect scheduled
+
+# Evaluate mobile incidents and drain due FCM notifications now
+docker compose exec worker celery -A src.workers.celery_app call \
+  src.workers.mobile_alert_task.run_mobile_alert_evaluation
 ```
+
+### Mobile incident and FCM checks
+
+```bash
+# Active/recent incidents
+docker compose exec postgres psql -U trading -d trading -c \
+  "SELECT fingerprint,severity,status,last_observed_at FROM mobile_events ORDER BY occurred_at DESC LIMIT 20"
+
+# Pending/retrying/terminal deliveries (provider errors are redacted codes)
+docker compose exec postgres psql -U trading -d trading -c \
+  "SELECT transition,attempt_count,next_attempt_at,sent_at,failed_at,error_code FROM mobile_notification_deliveries ORDER BY created_at DESC LIMIT 20"
+```
+
+The in-process evaluator is best effort. If PostgreSQL, the worker host, or the
+whole API stack is down, that same stack cannot guarantee a host-down push.
+Keep external uptime/host monitoring as a separate control; do not interpret
+the absence of a mobile incident as proof that the host is healthy.
 
 ---
 

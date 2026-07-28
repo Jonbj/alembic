@@ -182,11 +182,11 @@ app.conf.beat_schedule = {
         "schedule": 5.0,  # 5 seconds
         "options": {"queue": "inference"},
     },
-    # Mobile monitor alert evaluation every minute during market hours.
-    # Incident detection and FCM dispatch share one worker pass.
+    # Mobile monitor alert evaluation every minute. Schedule-freshness rules
+    # suppress themselves off-hours; safety/infrastructure/order alerts do not.
     "mobile-alert-evaluation": {
         "task": "src.workers.mobile_alert_task.run_mobile_alert_evaluation",
-        "schedule": crontab(minute="*/1", hour="14-21", day_of_week="1-5"),
+        "schedule": crontab(minute="*/1"),
     },
     # Nightly retention sweep at 03:30 UTC
     "run-retention-sweep": {

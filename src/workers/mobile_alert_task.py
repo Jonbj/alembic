@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import UUID
 
 import asyncpg
 from alpaca.trading.client import TradingClient
@@ -19,7 +20,7 @@ from redis import Redis
 from starlette.concurrency import run_in_threadpool
 
 from src.api.dependencies import init_asyncpg_pool
-from src.config import config
+from src.config import config, load_trading_config
 from src.mobile_monitoring.builder import MobileSnapshotBuilder
 from src.mobile_monitoring.incidents import IncidentStore
 from src.mobile_monitoring.models import EventCategory, EventKind, Severity
@@ -29,6 +30,18 @@ from src.workers._async_utils import run_async
 from src.workers.celery_app import app
 
 logger = logging.getLogger(__name__)
+
+
+def _drawdown_recovery_ratio() -> float:
+    raw = load_trading_config().get("risk", {}).get(
+        "mobile_drawdown_recovery_ratio",
+        0.95,
+    )
+    try:
+        ratio = float(raw)
+    except (TypeError, ValueError):
+        return 0.95
+    return ratio if 0 < ratio < 1 else 0.95
 
 
 class MobileAlertEvaluator:
@@ -51,6 +64,8 @@ class MobileAlertEvaluator:
             )
             return
 
+        active_incidents = await self.store.list_active_incidents()
+        active = set(active_incidents)
         expected: set[str] = set()
 
         # Critical safety: kill-switch.
@@ -100,7 +115,7 @@ class MobileAlertEvaluator:
                 expected=True,
             )
         elif broker and broker.status == "aging":
-            fp = "pipeline:broker_aging"
+            fp = "pipeline:broker_stale"
             expected.add(fp)
             await self.store.record_observation(
                 fingerprint=fp,
@@ -161,13 +176,33 @@ class MobileAlertEvaluator:
                     entity_type="signal_pipeline",
                     expected=True,
                 )
+        else:
+            # Market close is not evidence of recovery. Preserve schedule
+            # incidents unless a successful component observation is newer than
+            # the last fault observation.
+            for component_name, fingerprint in (
+                ("portfolio_cycle", "pipeline:portfolio_cycle_late"),
+                ("signal", "pipeline:signal_stale"),
+            ):
+                component = snapshot.pipeline.get(component_name)
+                if fingerprint not in active or component is None:
+                    continue
+                observed_at = snapshot.as_of - timedelta(
+                    seconds=component.age_seconds
+                )
+                if (
+                    component.status != "fresh"
+                    or observed_at <= active_incidents[fingerprint]
+                ):
+                    expected.add(fingerprint)
 
         # Risk limits.
         portfolio = snapshot.portfolio
         mode = snapshot.operational.mode
         if portfolio.current_drawdown is not None and portfolio.drawdown_limit is not None:
+            drawdown_fp = f"risk:drawdown:{mode}"
             if portfolio.current_drawdown >= portfolio.drawdown_limit:
-                fp = f"risk:drawdown:{mode}"
+                fp = drawdown_fp
                 expected.add(fp)
                 await self.store.record_observation(
                     fingerprint=fp,
@@ -183,6 +218,15 @@ class MobileAlertEvaluator:
                     entity_type="risk",
                     expected=True,
                 )
+            elif (
+                portfolio.current_drawdown
+                >= portfolio.drawdown_limit * _drawdown_recovery_ratio()
+            ):
+                # Keep the active incident open inside the recovery dead-band.
+                expected.add(drawdown_fp)
+        elif f"risk:drawdown:{mode}" in active:
+            # Missing risk data is unknown, never proof of recovery.
+            expected.add(f"risk:drawdown:{mode}")
 
         if portfolio.gross_exposure is not None and portfolio.gross_exposure_limit is not None:
             if portfolio.gross_exposure >= portfolio.gross_exposure_limit:
@@ -202,6 +246,8 @@ class MobileAlertEvaluator:
                     entity_type="risk",
                     expected=True,
                 )
+        elif f"risk:exposure:{mode}" in active:
+            expected.add(f"risk:exposure:{mode}")
 
         # Infrastructure degradations from the snapshot.
         for deg in snapshot.degradations:
@@ -220,8 +266,13 @@ class MobileAlertEvaluator:
                 )
 
         # Recover incidents whose conditions are no longer present.
-        active = await self.store.list_active_fingerprints()
         for fp in active - expected:
+            confirmations = (
+                2
+                if fp in {"system:database", "system:redis"}
+                or fp.startswith("risk:exposure:")
+                else 1
+            )
             await self.store.record_observation(
                 fingerprint=fp,
                 kind=EventKind.ALERT_INCIDENT,
@@ -230,6 +281,7 @@ class MobileAlertEvaluator:
                 title="Condizione rientrata",
                 summary="La condizione allarmante non è più presente.",
                 expected=False,
+                recovery_observations_required=confirmations,
             )
 
     async def _expect_critical(
@@ -267,7 +319,11 @@ async def record_order_event(
     """
     store = IncidentStore(pool)
     fingerprint = f"order:{order_id}:{kind}"
-    severity = Severity.CRITICAL if kind == "rejected" else Severity.WARNING
+    severity = (
+        Severity.CRITICAL
+        if kind in {"rejected", "error"}
+        else Severity.WARNING
+    )
     title = f"Ordine {kind}"
     summary = f"Ordine {kind} per {symbol}" + (f": {reason}" if reason else "")
     await store.record_observation(
@@ -303,11 +359,23 @@ async def reconcile_terminal_order_events(
     except Exception as exc:
         logger.warning("Terminal mobile order reconciliation failed: %s", exc)
         return
+    active = await IncidentStore(pool).list_active_fingerprints()
+    killswitch_active = "system:killswitch" in active
     for order in orders:
         status = getattr(getattr(order, "status", None), "value", None) or str(
             getattr(order, "status", "")
         )
         if status not in {"rejected", "canceled"}:
+            continue
+        order_type = (
+            getattr(getattr(order, "type", None), "value", None)
+            or str(getattr(order, "type", ""))
+        ).lower()
+        if status == "canceled" and (
+            killswitch_active
+            or order_type == "stop"
+            or getattr(order, "replaced_by", None) is not None
+        ):
             continue
         occurred_at = (
             getattr(order, "failed_at", None)
@@ -323,52 +391,132 @@ async def reconcile_terminal_order_events(
         )
 
 
-async def dispatch_due_notifications(pool: asyncpg.Pool, limit: int = 100) -> None:
+@app.task(name="src.workers.mobile_alert_task.record_mobile_order_failure")
+def record_mobile_order_failure(
+    *,
+    failure_id: str,
+    symbol: str,
+    side: str,
+    error_code: str,
+) -> dict[str, str]:
+    """Persist an event-driven broker submission error without sensitive detail."""
+
+    async def _run() -> None:
+        pool = await init_asyncpg_pool()
+        await record_order_event(
+            pool,
+            kind="error",
+            symbol=symbol,
+            order_id=failure_id,
+            reason=f"{side}:{error_code}",
+        )
+
+    run_async(_run())
+    return {"status": "recorded", "failure_id": failure_id}
+
+
+def _delivery_slo_seconds(fingerprint: str) -> int:
+    if fingerprint == "system:killswitch" or fingerprint.startswith("order:"):
+        return 60
+    return 300
+
+
+async def dispatch_due_notifications(
+    pool: asyncpg.Pool,
+    limit: int = 100,
+    *,
+    now: datetime | None = None,
+) -> None:
     """Drain the notification outbox using the configured FCM adapter."""
     store = IncidentStore(pool)
     adapter = get_fcm_adapter()
-    rows = await store.list_due_deliveries(limit=limit)
-    for row in rows:
+    for _ in range(limit):
+        rows = await store.list_due_deliveries(limit=1, now=now)
+        if not rows:
+            break
+        row = rows[0]
         payload = build_fcm_payload(
             event_id=str(row["event_id"]),
             transition=row["transition"],
             severity=row["severity"],
         )
-        # TODO: read FCM token from monitor_devices once a token column is added.
-        # For the MVP, send to firebase_installation_id if present; FakeFcmAdapter accepts any string.
-        device_token = "dummy"
+        firebase_installation_id = row["firebase_installation_id"]
         try:
-            result = await adapter.send(device_token=device_token, payload=payload)
+            result = await adapter.send(
+                firebase_installation_id=firebase_installation_id,
+                payload=payload,
+            )
         except Exception as exc:
-            logger.warning("FCM dispatch failed for delivery %s: %s", row["id"], exc)
+            logger.warning(
+                "FCM dispatch failed for delivery %s: %s",
+                row["id"],
+                type(exc).__name__,
+            )
             result = None
 
         if result is None:
-            await _schedule_retry(store, row["id"], attempt_count=row["attempt_count"] + 1)
+            await _schedule_retry(
+                store,
+                row["id"],
+                row["claim_id"],
+                attempt_count=row["attempt_count"] + 1,
+                error_code="adapter_exception",
+            )
         elif result.accepted:
+            accepted_at = now or datetime.now(timezone.utc)
             await store.record_delivery_attempt(
                 row["id"],
+                row["claim_id"],
                 provider_message_id=result.provider_message_id,
+                accepted_at=accepted_at,
+            )
+            latency_seconds = max(
+                0.0,
+                (accepted_at - row["delivery_created_at"]).total_seconds(),
+            )
+            logger.info(
+                "FCM accepted delivery=%s latency_seconds=%.3f slo_met=%s",
+                row["id"],
+                latency_seconds,
+                latency_seconds
+                <= _delivery_slo_seconds(row["fingerprint"]),
             )
         else:
             if result.terminal:
-                await store.record_delivery_attempt(
+                recorded = await store.record_delivery_attempt(
                     row["id"],
+                    row["claim_id"],
                     failed_at=datetime.now(timezone.utc),
                     error_code=result.error_code,
                 )
-                await store.disable_device_push(row["device_id"])
+                if recorded:
+                    await store.disable_device_push(
+                        row["device_id"],
+                        firebase_installation_id,
+                    )
             else:
-                await _schedule_retry(store, row["id"], attempt_count=row["attempt_count"] + 1)
+                await _schedule_retry(
+                    store,
+                    row["id"],
+                    row["claim_id"],
+                    attempt_count=row["attempt_count"] + 1,
+                    error_code=result.error_code or "provider_error",
+                )
 
 
-async def _schedule_retry(store: IncidentStore, delivery_id: int, attempt_count: int) -> None:
+async def _schedule_retry(
+    store: IncidentStore,
+    delivery_id: int,
+    claim_id: UUID,
+    attempt_count: int,
+    error_code: str,
+) -> None:
     backoff = min(2 ** attempt_count * 60, 3600)
     next_attempt = datetime.now(timezone.utc) + timedelta(seconds=backoff)
     await store.record_delivery_attempt(
         delivery_id,
-        failed_at=datetime.now(timezone.utc),
-        error_code="retry",
+        claim_id,
+        error_code=error_code,
         next_attempt_at=next_attempt,
     )
 

@@ -19,6 +19,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from src.notifications.base import AlertLevel
 from src.portfolio.whipsaw_damping import evaluate_whipsaw_damping
@@ -35,6 +36,22 @@ import time as _time
 _FRACTIONABLE_CACHE: dict[str, bool] = {}
 _FRACTIONABLE_CACHE_TS: float = 0.0
 _FRACTIONABLE_CACHE_TTL: float = 86400.0
+
+
+def _enqueue_mobile_broker_error(
+    symbol: str,
+    side: str,
+    exc: Exception,
+) -> None:
+    """Send a redacted order-path failure to the durable mobile event worker."""
+    from src.workers.mobile_alert_task import record_mobile_order_failure
+
+    record_mobile_order_failure.delay(
+        failure_id=str(uuid4()),
+        symbol=symbol,
+        side=side,
+        error_code=type(exc).__name__,
+    )
 
 
 def _portfolio_postmortem(
@@ -2495,6 +2512,7 @@ def _run_cycle_inner() -> dict:
         # (Redis unavailable). SELLs and non-S4 orders are not affected.
         _orders_to_submit = _apply_idempotency_filter(result.final_orders, _idempotency_skip)
         _orders_to_submit = _apply_whipsaw_damping_filter(_orders_to_submit, _whipsaw_suppressed_symbols)
+
         submitted_orders = _submit_portfolio_orders(
             _orders_to_submit, trading_client, market,
             fractionable_symbols=fractionable,
@@ -2506,6 +2524,7 @@ def _run_cycle_inner() -> dict:
             nav=equity,
             open_trades=_open_trades,
             sym_strats=_sym_strats,
+            _on_broker_reject=_enqueue_mobile_broker_error,
         )
 
         # #62/#63: reconcile broker-side protective stops for fractional positions.

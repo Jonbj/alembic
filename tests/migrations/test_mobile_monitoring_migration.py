@@ -22,6 +22,11 @@ ACCESS_JTI_MIGRATION_PATH = (
     / "migrations"
     / "042_mobile_session_access_jti.sql"
 )
+FCM_DELIVERY_MIGRATION_PATH = (
+    Path(__file__).parent.parent.parent
+    / "migrations"
+    / "043_mobile_fcm_delivery.sql"
+)
 
 MOBILE_TABLES = [
     "monitor_users",
@@ -131,6 +136,41 @@ class TestMobileMonitoringMigration:
             index = cur.fetchone()
             assert index is not None
             assert "UNIQUE INDEX" in index[0]
+        finally:
+            cur.close()
+            conn.rollback()
+
+    def test_043_adds_recovery_counter_and_outbox_lease(
+        self, db_connection
+    ):
+        conn = db_connection
+        conn.autocommit = False
+        cur = conn.cursor()
+        try:
+            for table in reversed(MOBILE_TABLES):
+                cur.execute(f"DROP TABLE IF EXISTS {table} CASCADE")
+            cur.execute(MIGRATION_PATH.read_text())
+            cur.execute(ACCESS_JTI_MIGRATION_PATH.read_text())
+            cur.execute(FCM_DELIVERY_MIGRATION_PATH.read_text())
+
+            expected = {
+                ("mobile_events", "clear_observation_count"),
+                ("mobile_notification_deliveries", "claimed_at"),
+                ("mobile_notification_deliveries", "claim_id"),
+            }
+            cur.execute(
+                """
+                SELECT table_name, column_name
+                FROM information_schema.columns
+                WHERE table_schema='public'
+                  AND (table_name, column_name) IN (
+                      ('mobile_events', 'clear_observation_count'),
+                      ('mobile_notification_deliveries', 'claimed_at'),
+                      ('mobile_notification_deliveries', 'claim_id')
+                  )
+                """
+            )
+            assert set(cur.fetchall()) == expected
         finally:
             cur.close()
             conn.rollback()
