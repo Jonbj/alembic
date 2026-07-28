@@ -2256,7 +2256,7 @@ class PostgreSQLStore:
         SELECT DISTINCT ON (symbol)
             id, symbol, score, confidence,
             COALESCE(reasoning, '') AS reasoning,
-            model_id, ensemble_std, fallback_used, generated_at
+            model_id, ensemble_std, fallback_used, generated_at, published_at
         FROM sentiment_signals
         WHERE generated_at >= NOW() - (%s || ' hours')::interval
           AND (published_at IS NULL
@@ -2310,6 +2310,9 @@ class PostgreSQLStore:
             generated_at = row["generated_at"]
             if generated_at is not None and generated_at.tzinfo is None:
                 generated_at = generated_at.replace(tzinfo=_tz.utc)
+            published_at = row.get("published_at")
+            if published_at is not None and published_at.tzinfo is None:
+                published_at = published_at.replace(tzinfo=_tz.utc)
             results.append(
                 SentimentResult(
                     symbol=row["symbol"],
@@ -2320,6 +2323,7 @@ class PostgreSQLStore:
                     ensemble_std=float(row.get("ensemble_std") or 0.0),
                     fallback_used=bool(row.get("fallback_used", False)),
                     generated_at=generated_at,
+                    published_at=published_at,
                     signal_id=row.get("id"),
                 )
             )

@@ -693,6 +693,51 @@ def _log_constraint_block_if_needed(result, risk_cfg: dict) -> None:
         )
 
 
+def _apply_entry_freshness_gate(
+    signals: list,
+    open_symbols: set,
+    news_age_hours: float | None,
+    now_utc,
+) -> list:
+    """Apply the news-freshness (published_at) entry gate only to symbols with no
+    open position.
+
+    #150: fetch_signals_for_cycle's own docstring says the news_age_hours bound is
+    meant "only for the S4 entry path" — sell-protection/hold callers "must not be
+    narrowed by the entry-freshness policy". Passing news_age_hours straight into
+    the SQL fetch broke that promise for the one caller (_build_strategy_instance)
+    that uses the same query result for both new entries AND already-open
+    positions: a held symbol whose only signal had old published_at was excluded
+    before FIX-D (_preserve_stale_signals_for_open_positions) ever saw it, and got
+    force-sold as "[no_signal]" despite a strong, never-contradicted score (NOW,
+    2026-07-27 — docs/ALPHA_MISS_REPORT_2026-07-27.md §4).
+
+    A symbol already held skips this gate entirely — _filter_stale_signals/FIX-D
+    downstream decide whether to keep it, based on generated_at/score/counter-signal,
+    exactly as they do today. A symbol with no open position keeps the existing
+    entry-freshness policy unchanged. published_at=None (legacy/non-news signals)
+    always passes, matching the SQL "published_at IS NULL" semantics it replaces.
+    news_age_hours=None disables the gate entirely (no event-time bound).
+    """
+    if news_age_hours is None:
+        return list(signals)
+    kept = []
+    for sig in signals:
+        if sig.symbol in open_symbols:
+            kept.append(sig)
+            continue
+        published = getattr(sig, "published_at", None)
+        if published is None:
+            kept.append(sig)
+            continue
+        if published.tzinfo is None:
+            published = published.replace(tzinfo=timezone.utc)
+        age_hours = (now_utc - published).total_seconds() / 3600.0
+        if age_hours <= news_age_hours:
+            kept.append(sig)
+    return kept
+
+
 def _filter_stale_signals(
     signals: list,
     max_age_hours: int,
@@ -3019,11 +3064,41 @@ def _build_strategy_instance(entry, bars_df):
             store = PostgreSQLStore()
             from src.config import config as _cfg
             s4_symbols = list(_cfg.WATCHLIST_SYMBOLS or [])
+            # #150: no news_age_hours bound at the SQL layer — this fetch feeds both
+            # new-entry ranking AND the hold/exit decision for already-open positions
+            # (NewsDrivenTactical closes any symbol absent from target_weights). The
+            # entry-only freshness gate is applied in Python below, scoped to symbols
+            # with no open position, so a held position is never force-sold purely
+            # because news_age_hours elapsed (NOW, 2026-07-27 — see
+            # docs/ALPHA_MISS_REPORT_2026-07-27.md §4).
             signals = store.fetch_signals_for_cycle(
                 hours=s4_config.signals_lookback_hours,
                 symbols=s4_symbols,
-                news_age_hours=_cfg.MAX_NEWS_AGE_HOURS,  # FIX-03
+                news_age_hours=None,
             )
+            try:
+                _open_syms = {
+                    t["symbol"] for t in store.fetch_trades(status="open", limit=1000)
+                }
+            except Exception as _os_exc:
+                log.warning(
+                    "#150: open-trade query failed (%s) — entry-freshness gate "
+                    "applies to all symbols this cycle (same as pre-#150 behavior)",
+                    _os_exc,
+                )
+                _open_syms = set()
+            if signals:
+                _before_freshness = len(signals)
+                signals = _apply_entry_freshness_gate(
+                    signals, _open_syms, _cfg.MAX_NEWS_AGE_HOURS, datetime.now(timezone.utc)
+                )
+                _dropped_freshness = _before_freshness - len(signals)
+                if _dropped_freshness:
+                    log.info(
+                        "S4: dropped %d signal(s) below entry-freshness (news_age_hours=%s), "
+                        "symbols with no open position only (#150)",
+                        _dropped_freshness, _cfg.MAX_NEWS_AGE_HOURS,
+                    )
             if signals:
                 # #108: exclude FinBERT-fallback signals from BUY ranking — the
                 # reversal SELL path already excludes them (low reliability); the
@@ -3063,19 +3138,13 @@ def _build_strategy_instance(entry, bars_df):
                         except Exception as _ae:
                             log.warning("P1-S4: stale audit write failed: %s", _ae)
                 # FIX-D: re-admit stale positive signals for open positions with no
-                # counter-signal. Query open trades from DB; fail-open (empty set) on error
-                # so stale discard behavior is unchanged when DB is unavailable.
+                # counter-signal. Reuses _open_syms fetched above (#150) instead of a
+                # second open-trades query — same fail-open (empty set) behavior when
+                # that earlier fetch failed, so stale discard is unchanged when DB is
+                # unavailable.
                 if stale_signals:
-                    try:
-                        _open_syms_fd = {
-                            t["symbol"]
-                            for t in store.fetch_trades(status="open", limit=1000)
-                        }
-                    except Exception as _fd_exc:
-                        log.warning("FIX-D: open-trade query failed (%s) — no stale preservation", _fd_exc)
-                        _open_syms_fd = set()
                     fresh_signals = _preserve_stale_signals_for_open_positions(
-                        fresh_signals, stale_signals, _open_syms_fd
+                        fresh_signals, stale_signals, _open_syms
                     )
                     # Surface notable signals lost to staleness in the Decision Log.
                     _dropped_stale = [s for s in stale_signals if s not in fresh_signals]
