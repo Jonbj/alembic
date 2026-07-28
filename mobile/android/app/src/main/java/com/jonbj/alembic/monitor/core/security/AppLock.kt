@@ -25,7 +25,7 @@ class TimeoutAppLock(
 ) : AppLock {
 
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
-    private val _isLocked = MutableStateFlow(false)
+    private val _isLocked = MutableStateFlow(sessionVault.sessionFlow.value != null)
     override val isLocked: StateFlow<Boolean> = _isLocked.asStateFlow()
 
     private var backgroundAt: Long? = null
@@ -34,8 +34,12 @@ class TimeoutAppLock(
     init {
         sessionVault.sessionFlow
             .onEach { session ->
+                val alreadyAuthenticated = hasSession
                 hasSession = session != null
                 if (session == null) {
+                    _isLocked.value = false
+                } else if (!alreadyAuthenticated) {
+                    // The interactive server login is sufficient for this first entry.
                     _isLocked.value = false
                 }
             }

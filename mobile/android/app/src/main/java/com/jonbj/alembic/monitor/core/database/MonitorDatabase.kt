@@ -14,13 +14,11 @@ abstract class MonitorDatabase : RoomDatabase() {
 
         fun create(context: Context): MonitorDatabase {
             return Room.databaseBuilder(context, MonitorDatabase::class.java, NAME)
-                .fallbackToDestructiveMigration()
                 .build()
         }
 
         fun createInMemory(context: Context): MonitorDatabase {
             return Room.inMemoryDatabaseBuilder(context, MonitorDatabase::class.java)
-                .fallbackToDestructiveMigration()
                 .build()
         }
     }

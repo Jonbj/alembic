@@ -1,11 +1,12 @@
 package com.jonbj.alembic.monitor.app.di
 
 import android.content.Context
+import com.jonbj.alembic.monitor.BuildConfig
 import com.jonbj.alembic.monitor.core.database.CacheStore
 import com.jonbj.alembic.monitor.core.database.EncryptedCacheStore
 import com.jonbj.alembic.monitor.core.database.MonitorDatabase
-import com.jonbj.alembic.monitor.core.network.MobileApi
-import com.jonbj.alembic.monitor.core.network.MobileApiClient
+import com.jonbj.alembic.monitor.core.network.ServerUrlPolicy
+import com.jonbj.alembic.monitor.core.network.SessionMobileApiProvider
 import com.jonbj.alembic.monitor.core.security.AndroidBiometricGate
 import com.jonbj.alembic.monitor.core.security.AndroidKeystoreAesGcmCipher
 import com.jonbj.alembic.monitor.core.security.AppLock
@@ -22,16 +23,16 @@ import com.jonbj.alembic.monitor.data.repository.PortfolioRepository
 import com.jonbj.alembic.monitor.data.repository.StatusRepository
 import kotlinx.serialization.json.Json
 
-object AppModule {
-
-    private lateinit var appContext: Context
-    private lateinit var baseUrl: String
-    private lateinit var appVersion: String
+class AppContainer(
+    context: Context,
+    defaultBaseUrl: String,
+    private val appVersion: String
+) {
+    private val appContext = context.applicationContext
 
     private val json: Json by lazy {
         Json {
             ignoreUnknownKeys = true
-            explicitNulls = false
             coerceInputValues = true
         }
     }
@@ -40,44 +41,60 @@ object AppModule {
         MonitorDatabase.create(appContext)
     }
 
-    private val cipher by lazy {
-        AndroidKeystoreAesGcmCipher()
+    private val sessionCipher by lazy {
+        AndroidKeystoreAesGcmCipher(alias = "alembic_session_key")
+    }
+
+    private val cacheCipher by lazy {
+        AndroidKeystoreAesGcmCipher(alias = "alembic_cache_key")
     }
 
     val sessionVault: SessionVault by lazy {
-        EncryptedSessionVault(appContext, cipher, json)
+        EncryptedSessionVault(appContext, sessionCipher, json)
     }
 
     val deviceInfoProvider: DeviceInfoProvider by lazy {
         AndroidDeviceInfoProvider(appContext)
     }
 
-    private val mobileApi: MobileApi by lazy {
-        MobileApiClient.create(baseUrl, sessionVault, json)
+    private val apiProvider by lazy {
+        SessionMobileApiProvider(defaultBaseUrl, sessionVault, json)
     }
 
     private val cacheStore: CacheStore by lazy {
-        EncryptedCacheStore(database.cacheEntryDao(), cipher, json)
+        EncryptedCacheStore(database.cacheEntryDao(), cacheCipher, json)
     }
 
     val authRepository: AuthRepository by lazy {
-        AuthRepository(mobileApi, sessionVault, baseUrl, appVersion)
+        AuthRepository(
+            apiProvider = apiProvider,
+            vault = sessionVault,
+            serverUrlPolicy = ServerUrlPolicy(allowDebugCleartext = BuildConfig.DEBUG),
+            appVersion = appVersion,
+            clearLocalData = {
+                try {
+                    sessionVault.clear()
+                } finally {
+                    cacheStore.clear()
+                }
+            }
+        )
     }
 
     val statusRepository: StatusRepository by lazy {
-        StatusRepository(mobileApi, cacheStore, json, authRepository)
+        StatusRepository(apiProvider, cacheStore, authRepository)
     }
 
     val performanceRepository: PerformanceRepository by lazy {
-        PerformanceRepository(mobileApi, cacheStore, json, authRepository)
+        PerformanceRepository(apiProvider, cacheStore, authRepository)
     }
 
     val portfolioRepository: PortfolioRepository by lazy {
-        PortfolioRepository(mobileApi, cacheStore, json, authRepository)
+        PortfolioRepository(apiProvider, cacheStore, authRepository)
     }
 
     val eventsRepository: EventsRepository by lazy {
-        EventsRepository(mobileApi, cacheStore, json, authRepository)
+        EventsRepository(apiProvider, cacheStore, authRepository)
     }
 
     val appLock: AppLock by lazy {
@@ -88,13 +105,4 @@ object AppModule {
         AndroidBiometricGate(appContext)
     }
 
-    fun init(context: Context, baseUrl: String, appVersion: String) {
-        appContext = context.applicationContext
-        this.baseUrl = ensureTrailingSlash(baseUrl)
-        this.appVersion = appVersion
-    }
-
-    private fun ensureTrailingSlash(url: String): String {
-        return if (url.endsWith("/")) url else "$url/"
-    }
 }

@@ -19,7 +19,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jonbj.alembic.monitor.R
 import com.jonbj.alembic.monitor.core.model.LoadState
 import com.jonbj.alembic.monitor.core.model.OperationalState
@@ -34,7 +33,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
 @Composable
-fun StatusScreen(viewModel: StatusViewModel = viewModel()) {
+fun StatusScreen(viewModel: StatusViewModel) {
     val state by viewModel.state.collectAsState()
     StatusContent(state = state, onRetry = { viewModel.refresh(true) })
 }

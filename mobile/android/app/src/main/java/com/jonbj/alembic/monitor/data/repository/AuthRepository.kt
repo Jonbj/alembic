@@ -3,7 +3,8 @@ package com.jonbj.alembic.monitor.data.repository
 import com.jonbj.alembic.monitor.core.model.MobileError
 import com.jonbj.alembic.monitor.core.model.Session
 import com.jonbj.alembic.monitor.core.model.UserInfo
-import com.jonbj.alembic.monitor.core.network.MobileApi
+import com.jonbj.alembic.monitor.core.network.MobileApiProvider
+import com.jonbj.alembic.monitor.core.network.ServerUrlPolicy
 import com.jonbj.alembic.monitor.core.network.dto.DeviceInfoDto
 import com.jonbj.alembic.monitor.core.network.dto.LoginRequest
 import com.jonbj.alembic.monitor.core.network.dto.LogoutRequest
@@ -12,34 +13,43 @@ import com.jonbj.alembic.monitor.core.security.SessionVault
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
 import kotlin.time.Duration.Companion.seconds
 
 interface TokenRefresher {
-    suspend fun refreshAccessToken(): Result<Unit>
+    fun currentAccessToken(): String?
+    suspend fun refreshAccessToken(failedAccessToken: String?): Result<Unit>
+    suspend fun invalidateSession()
 }
 
 class AuthRepository(
-    private val api: MobileApi,
+    private val apiProvider: MobileApiProvider,
     private val vault: SessionVault,
-    private val baseUrl: String,
-    private val appVersion: String
+    private val serverUrlPolicy: ServerUrlPolicy,
+    private val appVersion: String,
+    private val clearLocalData: suspend () -> Unit
 ) : TokenRefresher {
 
     private val refreshMutex = Mutex()
 
     suspend fun login(
+        serverUrl: String,
         username: String,
         password: String,
         installationId: String,
         deviceName: String
     ): Result<Session> {
+        val baseUrl = serverUrlPolicy.normalize(serverUrl).getOrElse {
+            return Result.failure(
+                MobileError.Http(400, it.message ?: "Indirizzo server non valido")
+            )
+        }
         val device = DeviceInfoDto(
             installationId = installationId,
             name = deviceName,
             appVersion = appVersion
         )
         return try {
+            val api = apiProvider.forBaseUrl(baseUrl)
             val response = api.login(LoginRequest(username, password, device))
             if (response.isSuccessful) {
                 val body = response.body()
@@ -55,44 +65,69 @@ class AuthRepository(
         }
     }
 
-    override suspend fun refreshAccessToken(): Result<Unit> = refreshMutex.withLock {
-        val current = vault.get()
-            ?: return Result.failure(MobileError.Auth("No session", requireRelogin = true))
-        return try {
-            val response = api.refresh(RefreshRequest(current.refreshToken))
-            if (response.isSuccessful) {
-                val body = response.body()
-                    ?: return Result.failure(MobileError.Http(200, "Empty refresh response"))
-                val updated = current.copy(
-                    accessToken = body.accessToken,
-                    refreshToken = body.refreshToken,
-                    accessExpiresAt = Clock.System.now() + body.expiresIn.seconds
-                )
-                vault.save(updated)
-                Result.success(Unit)
-            } else {
-                if (response.code() == 409) {
-                    vault.clear()
-                    Result.failure(MobileError.Auth("Session revoked", requireRelogin = true))
-                } else {
-                    Result.failure(mapError(response))
-                }
-            }
-        } catch (e: Exception) {
-            Result.failure(MobileError.Network(e.message ?: "Network error"))
-        }
+    override fun currentAccessToken(): String? = vault.getBlocking()?.accessToken
+
+    override suspend fun invalidateSession() {
+        clearLocalData()
     }
+
+    override suspend fun refreshAccessToken(failedAccessToken: String?): Result<Unit> =
+        refreshMutex.withLock {
+            val current = vault.get()
+                ?: return@withLock Result.failure(
+                    MobileError.Auth("No session", requireRelogin = true)
+                )
+            if (failedAccessToken != null && current.accessToken != failedAccessToken) {
+                return@withLock Result.success(Unit)
+            }
+            try {
+                val api = apiProvider.forBaseUrl(current.baseUrl)
+                val response = api.refresh(RefreshRequest(current.refreshToken))
+                if (response.isSuccessful) {
+                    val body = response.body()
+                        ?: return@withLock Result.failure(
+                            MobileError.Http(200, "Empty refresh response")
+                        )
+                    val updated = current.copy(
+                        accessToken = body.accessToken,
+                        refreshToken = body.refreshToken,
+                        accessExpiresAt = Clock.System.now() + body.expiresIn.seconds,
+                        refreshExpiresAt = body.refreshExpiresAt
+                    )
+                    vault.save(updated)
+                    Result.success(Unit)
+                } else {
+                    if (response.code() == 401 || response.code() == 409) {
+                        clearLocalData()
+                        Result.failure(
+                            MobileError.Auth("Session revoked", requireRelogin = true)
+                        )
+                    } else {
+                        Result.failure(mapError(response))
+                    }
+                }
+            } catch (e: Exception) {
+                Result.failure(MobileError.Network(e.message ?: "Network error"))
+            }
+        }
 
     suspend fun logout(): Result<Unit> {
         val current = vault.get()
-        return try {
-            current?.let { api.logout(LogoutRequest(it.refreshToken)) }
-            vault.clear()
-            Result.success(Unit)
+        val result = try {
+            if (current == null) {
+                Result.success(Unit)
+            } else {
+                val response = apiProvider.forBaseUrl(current.baseUrl)
+                    .logout(LogoutRequest(current.refreshToken))
+                if (response.isSuccessful) Result.success(Unit)
+                else Result.failure(mapError(response))
+            }
         } catch (e: Exception) {
-            vault.clear()
-            Result.success(Unit)
+            Result.failure(MobileError.Network(e.message ?: "Network error"))
+        } finally {
+            clearLocalData()
         }
+        return result
     }
 
     private fun mapError(response: retrofit2.Response<*>): MobileError {

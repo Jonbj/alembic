@@ -16,6 +16,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.jonbj.alembic.monitor.app.di.AppContainer
+import com.jonbj.alembic.monitor.app.viewModelFactory
 import com.jonbj.alembic.monitor.feature.events.EventsScreen
 import com.jonbj.alembic.monitor.feature.login.LogoutTopBarButton
 import com.jonbj.alembic.monitor.feature.performance.PerformanceScreen
@@ -23,7 +26,7 @@ import com.jonbj.alembic.monitor.feature.portfolio.PortfolioScreen
 import com.jonbj.alembic.monitor.feature.status.StatusScreen
 
 @Composable
-fun MainScaffold() {
+fun MainScaffold(container: AppContainer) {
     val navController = rememberNavController()
 
     Scaffold(
@@ -50,7 +53,7 @@ fun MainScaffold() {
             }
         },
         topBar = {
-            LogoutTopBarButton()
+            LogoutTopBarButton { container.authRepository.logout() }
         }
     ) { innerPadding ->
         NavHost(
@@ -58,10 +61,42 @@ fun MainScaffold() {
             startDestination = Destination.Status.route,
             modifier = Modifier.padding(innerPadding)
         ) {
-            composable(Destination.Status.route) { StatusScreen() }
-            composable(Destination.Performance.route) { PerformanceScreen() }
-            composable(Destination.Portfolio.route) { PortfolioScreen() }
-            composable(Destination.Events.route) { EventsScreen() }
+            composable(Destination.Status.route) {
+                StatusScreen(
+                    viewModel(factory = viewModelFactory {
+                        com.jonbj.alembic.monitor.feature.status.StatusViewModel(
+                            container.statusRepository
+                        )
+                    })
+                )
+            }
+            composable(Destination.Performance.route) {
+                PerformanceScreen(
+                    viewModel(factory = viewModelFactory {
+                        com.jonbj.alembic.monitor.feature.performance.PerformanceViewModel(
+                            container.performanceRepository
+                        )
+                    })
+                )
+            }
+            composable(Destination.Portfolio.route) {
+                PortfolioScreen(
+                    viewModel(factory = viewModelFactory {
+                        com.jonbj.alembic.monitor.feature.portfolio.PortfolioViewModel(
+                            container.portfolioRepository
+                        )
+                    })
+                )
+            }
+            composable(Destination.Events.route) {
+                EventsScreen(
+                    viewModel(factory = viewModelFactory {
+                        com.jonbj.alembic.monitor.feature.events.EventsViewModel(
+                            container.eventsRepository
+                        )
+                    })
+                )
+            }
         }
     }
 }

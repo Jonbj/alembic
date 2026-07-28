@@ -6,7 +6,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.jonbj.alembic.monitor.app.di.AppModule
+import com.jonbj.alembic.monitor.MonitorApplication
 import java.util.concurrent.TimeUnit
 
 class CacheRefreshWorker(
@@ -16,11 +16,12 @@ class CacheRefreshWorker(
 
     override suspend fun doWork(): Result {
         return try {
-            if (AppModule.sessionVault.get() == null) {
+            val container = (applicationContext as MonitorApplication).container
+            if (container.sessionVault.get() == null) {
                 return Result.success()
             }
-            AppModule.statusRepository.refresh(force = false)
-            AppModule.portfolioRepository.refresh(force = false)
+            container.statusRepository.refresh(force = false)
+            container.portfolioRepository.refresh(force = false)
             Result.success()
         } catch (e: Exception) {
             Result.retry()

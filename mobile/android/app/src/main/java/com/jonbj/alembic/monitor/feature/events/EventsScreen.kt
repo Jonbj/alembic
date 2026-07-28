@@ -18,7 +18,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jonbj.alembic.monitor.R
 import com.jonbj.alembic.monitor.core.model.EventItem
 import com.jonbj.alembic.monitor.core.model.EventsPage
@@ -32,7 +31,7 @@ import kotlinx.datetime.toLocalDateTime
 private val CATEGORIES = listOf("all", "critical", "trading", "system")
 
 @Composable
-fun EventsScreen(viewModel: EventsViewModel = viewModel()) {
+fun EventsScreen(viewModel: EventsViewModel) {
     val state by viewModel.state.collectAsState()
     val category by viewModel.selectedCategory.collectAsState()
     EventsContent(
@@ -103,7 +102,7 @@ private fun EventCard(event: EventItem) {
                 Text(event.severity.name)
             }
             Text(
-                text = event.summary,
+                text = event.summary.orEmpty(),
                 style = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.padding(vertical = 4.dp)
             )

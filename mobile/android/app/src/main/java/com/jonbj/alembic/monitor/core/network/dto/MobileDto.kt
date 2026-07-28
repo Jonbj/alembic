@@ -3,6 +3,7 @@ package com.jonbj.alembic.monitor.core.network.dto
 import kotlinx.datetime.Instant
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 @Serializable
 data class DeviceInfoDto(
@@ -65,7 +66,16 @@ data class DeviceRegistrationRequest(
 
 @Serializable
 data class DeviceRegistrationResponse(
-    @SerialName("device_id") val deviceId: String,
+    val device: DeviceDto
+)
+
+@Serializable
+data class DeviceDto(
+    val id: String,
+    @SerialName("installation_id") val installationId: String,
+    @SerialName("firebase_installation_id") val firebaseInstallationId: String? = null,
+    val name: String,
+    @SerialName("app_version") val appVersion: String,
     @SerialName("push_enabled") val pushEnabled: Boolean
 )
 
@@ -79,9 +89,9 @@ data class SnapshotResponse(
     @SerialName("latest_app_version") val latestAppVersion: String,
     val operational: OperationalDto,
     val portfolio: PortfolioDto,
-    val pipeline: List<PipelineComponentDto>,
+    val pipeline: Map<String, PipelineComponentDto>,
     val strategies: List<StrategyDto>,
-    val degradations: List<String> = emptyList()
+    val degradations: List<DegradationDto> = emptyList()
 )
 
 @Serializable
@@ -108,8 +118,8 @@ data class PortfolioDto(
     @SerialName("gross_exposure_limit") val grossExposureLimit: Double? = null,
     @SerialName("current_drawdown") val currentDrawdown: Double? = null,
     @SerialName("drawdown_limit") val drawdownLimit: Double? = null,
-    @SerialName("open_positions") val openPositions: Int = 0,
-    val source: String
+    @SerialName("open_positions") val openPositions: Int? = null,
+    val source: String? = null
 )
 
 @Serializable
@@ -117,6 +127,13 @@ data class PipelineComponentDto(
     val status: String,
     @SerialName("age_seconds") val ageSeconds: Int = 0,
     val writeable: Boolean? = null
+)
+
+@Serializable
+data class DegradationDto(
+    val component: String,
+    val reason: String,
+    val severity: String? = null
 )
 
 @Serializable
@@ -138,17 +155,17 @@ data class PerformanceResponse(
     @SerialName("period_end") val periodEnd: Instant,
     val summary: PerformanceSummaryDto,
     val points: List<PerformancePointDto> = emptyList(),
-    val degradations: List<String> = emptyList()
+    val degradations: List<DegradationDto> = emptyList()
 )
 
 @Serializable
 data class PerformanceSummaryDto(
-    @SerialName("nav_start") val navStart: Double,
-    @SerialName("nav_end") val navEnd: Double,
-    @SerialName("nav_change") val navChange: Double,
-    @SerialName("portfolio_return") val portfolioReturn: Double,
+    @SerialName("nav_start") val navStart: Double? = null,
+    @SerialName("nav_end") val navEnd: Double? = null,
+    @SerialName("nav_change") val navChange: Double? = null,
+    @SerialName("portfolio_return") val portfolioReturn: Double? = null,
     @SerialName("realized_pnl") val realizedPnl: Double? = null,
-    @SerialName("max_drawdown") val maxDrawdown: Double,
+    @SerialName("max_drawdown") val maxDrawdown: Double? = null,
     @SerialName("avg_gross_exposure") val avgGrossExposure: Double? = null,
     @SerialName("spy_return") val spyReturn: Double? = null,
     @SerialName("benchmark_return") val benchmarkReturn: Double? = null,
@@ -171,14 +188,14 @@ data class PositionsResponse(
     val currency: String,
     val summary: PositionSummaryDto,
     val items: List<PositionDto> = emptyList(),
-    val degradations: List<String> = emptyList()
+    val degradations: List<DegradationDto> = emptyList()
 )
 
 @Serializable
 data class PositionSummaryDto(
     val count: Int = 0,
-    @SerialName("market_value") val marketValue: Double = 0.0,
-    @SerialName("unrealized_pnl") val unrealizedPnl: Double = 0.0,
+    @SerialName("market_value") val marketValue: Double? = null,
+    @SerialName("unrealized_pnl") val unrealizedPnl: Double? = null,
     @SerialName("gross_exposure") val grossExposure: Double? = null
 )
 
@@ -186,19 +203,23 @@ data class PositionSummaryDto(
 data class PositionDto(
     val symbol: String,
     val qty: Double,
-    @SerialName("avg_entry_price") val avgEntryPrice: Double,
-    @SerialName("current_price") val currentPrice: Double,
-    @SerialName("market_value") val marketValue: Double,
+    @SerialName("avg_entry_price") val avgEntryPrice: Double? = null,
+    @SerialName("current_price") val currentPrice: Double? = null,
+    @SerialName("market_value") val marketValue: Double? = null,
     @SerialName("position_weight") val positionWeight: Double? = null,
-    @SerialName("unrealized_pnl") val unrealizedPnl: Double,
-    @SerialName("unrealized_return") val unrealizedReturn: Double,
-    @SerialName("entry_time") val entryTime: Instant
+    @SerialName("unrealized_pnl") val unrealizedPnl: Double? = null,
+    @SerialName("unrealized_return") val unrealizedReturn: Double? = null,
+    @SerialName("entry_time") val entryTime: Instant? = null
 )
 
 @Serializable
 data class EventsResponse(
     @SerialName("contract_version") val contractVersion: Int,
     @SerialName("as_of") val asOf: Instant,
+    @SerialName("data_age_seconds") val dataAgeSeconds: Int,
+    val currency: String,
+    @SerialName("min_supported_app_version") val minSupportedAppVersion: String,
+    @SerialName("latest_app_version") val latestAppVersion: String,
     val items: List<EventItemDto> = emptyList(),
     @SerialName("next_cursor") val nextCursor: String? = null
 )
@@ -214,7 +235,7 @@ data class EventItemDto(
     @SerialName("updated_at") val updatedAt: Instant,
     @SerialName("resolved_at") val resolvedAt: Instant? = null,
     val title: String,
-    val summary: String,
+    val summary: String? = null,
     val entity: EventEntityDto? = null,
     val measure: EventMeasureDto? = null,
     val history: List<EventHistoryEntryDto> = emptyList()
@@ -228,8 +249,8 @@ data class EventEntityDto(
 
 @Serializable
 data class EventMeasureDto(
-    val value: Double,
-    val unit: String,
+    val value: Double? = null,
+    val unit: String? = null,
     val threshold: Double? = null
 )
 
@@ -249,6 +270,6 @@ data class ApiErrorBody(
     val code: String,
     val message: String,
     @SerialName("request_id") val requestId: String? = null,
-    val retryable: Boolean = true,
-    val details: Map<String, String>? = null
+    val retryable: Boolean = false,
+    val details: JsonObject? = null
 )

@@ -2,7 +2,6 @@ package com.jonbj.alembic.monitor.app
 
 import android.os.Bundle
 import android.view.WindowManager
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -11,17 +10,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.jonbj.alembic.monitor.app.di.AppModule
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.jonbj.alembic.monitor.MonitorApplication
 import com.jonbj.alembic.monitor.app.navigation.MainScaffold
 import com.jonbj.alembic.monitor.feature.biometric.BiometricLockScreen
 import com.jonbj.alembic.monitor.feature.login.LoginScreen
+import com.jonbj.alembic.monitor.feature.login.LoginViewModel
 import com.jonbj.alembic.monitor.ui.theme.AlembicMonitorTheme
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
-    private val sessionVault = AppModule.sessionVault
-    private val appLock = AppModule.appLock
-    private val biometricGate = AppModule.biometricGate
+    private val container by lazy { (application as MonitorApplication).container }
+    private val sessionVault by lazy { container.sessionVault }
+    private val appLock by lazy { container.appLock }
+    private val biometricGate by lazy { container.biometricGate }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,17 +42,26 @@ class MainActivity : ComponentActivity() {
                     val isLocked by appLock.isLocked.collectAsStateWithLifecycle()
 
                     when {
-                        session == null -> LoginScreen()
+                        session == null -> LoginScreen(
+                            viewModel(
+                                factory = viewModelFactory {
+                                    LoginViewModel(
+                                        authRepository = container.authRepository,
+                                        deviceInfoProvider = container.deviceInfoProvider,
+                                        defaultServerUrl = com.jonbj.alembic.monitor.BuildConfig.BASE_URL
+                                    )
+                                }
+                            )
+                        )
                         isLocked -> BiometricLockScreen(
                             biometricGate = biometricGate,
                             activity = this,
                             onUnlocked = { appLock.unlock() },
                             onLogout = {
-                                AppModule.authRepository.logout()
-                                sessionVault.clear()
+                                container.authRepository.logout()
                             }
                         )
-                        else -> MainScaffold()
+                        else -> MainScaffold(container)
                     }
                 }
             }

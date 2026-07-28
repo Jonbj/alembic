@@ -68,8 +68,14 @@ class AndroidKeystoreAesGcmCipher(
     }
 
     private fun decode(data: ByteArray): Pair<ByteArray, ByteArray> {
+        require(data.size >= Int.SIZE_BYTES + GCM_IV_LENGTH_BYTES + GCM_TAG_LENGTH_BITS / 8) {
+            "Invalid encrypted payload"
+        }
         val buffer = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN)
         val ivLength = buffer.int
+        require(ivLength == GCM_IV_LENGTH_BYTES && buffer.remaining() > ivLength) {
+            "Invalid encrypted payload"
+        }
         val iv = ByteArray(ivLength)
         buffer.get(iv)
         val ciphertext = ByteArray(buffer.remaining())

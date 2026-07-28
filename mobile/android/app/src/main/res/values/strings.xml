@@ -5,6 +5,8 @@
     <!-- Auth -->
     <string name="login_title">Accesso monitor Alembic</string>
     <string name="username">Username</string>
+    <string name="server_url">Server HTTPS</string>
+    <string name="device_name">Nome dispositivo</string>
     <string name="password">Password</string>
     <string name="login">Accedi</string>
     <string name="login_error">Accesso fallito. Verifica le credenziali e la rete.</string>
@@ -51,12 +53,12 @@
     <string name="max_drawdown">Max drawdown</string>
     <string name="benchmark">Benchmark</string>
     <string name="alpha">Alpha</string>
-    <string name="realized_pnl">Realized P&L</string>
+    <string name="realized_pnl">Realized P&amp;L</string>
 
     <!-- Portfolio -->
     <string name="position_weight">Peso</string>
     <string name="market_value">Valore</string>
-    <string name="unrealized_pnl">Unreal. P&L</string>
+    <string name="unrealized_pnl">Unreal. P&amp;L</string>
     <string name="quantity">Quantità</string>
     <string name="avg_entry">Entry medio</string>
     <string name="current_price">Prezzo</string>

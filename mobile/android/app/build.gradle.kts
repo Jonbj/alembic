@@ -33,8 +33,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Release signing material must be injected by CI; never commit a real keystore.
-            signingConfig = signingConfigs.getByName("debug")
+            // MOB-08 injects release signing material; never fall back to the debug key.
         }
         debug {
             isMinifyEnabled = false
@@ -70,6 +69,12 @@ android {
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
+            all {
+                it.systemProperty(
+                    "maven.repo.local",
+                    layout.buildDirectory.dir("robolectric-dependencies").get().asFile.absolutePath
+                )
+            }
         }
     }
 }
@@ -119,6 +124,7 @@ dependencies {
     testImplementation(libs.coroutines.test)
     testImplementation(libs.turbine)
     testImplementation(libs.robolectric)
+    testImplementation(libs.okhttp.mockwebserver)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.espresso.core)

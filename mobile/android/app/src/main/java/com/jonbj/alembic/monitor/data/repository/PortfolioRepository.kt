@@ -4,17 +4,15 @@ import com.jonbj.alembic.monitor.core.database.CacheKey
 import com.jonbj.alembic.monitor.core.database.CacheStore
 import com.jonbj.alembic.monitor.core.model.LoadState
 import com.jonbj.alembic.monitor.core.model.Positions
-import com.jonbj.alembic.monitor.core.network.MobileApi
+import com.jonbj.alembic.monitor.core.network.MobileApiProvider
 import com.jonbj.alembic.monitor.core.network.dto.PositionsResponse
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.serialization.json.Json
 
 class PortfolioRepository(
-    private val api: MobileApi,
+    private val apiProvider: MobileApiProvider,
     private val cache: CacheStore,
-    private val json: Json,
     private val refresher: TokenRefresher
 ) {
 
@@ -26,7 +24,7 @@ class PortfolioRepository(
             _positions.value = LoadState.Loading
         }
 
-        val result = ApiCaller.execute(refresher) { api.positions() }
+        val result = ApiCaller.execute(refresher) { apiProvider.current().positions() }
 
         result.fold(
             onSuccess = { dto ->
@@ -41,15 +39,11 @@ class PortfolioRepository(
             },
             onFailure = { error ->
                 val cached = cache.get(CacheKey.POSITIONS, PositionsResponse.serializer())
-                _positions.value = if (cached != null) {
-                    successFromCache(cached.data.toDomain(), cached.dataAgeSeconds)
-                } else {
-                    LoadState.Error(
-                        message = error.message ?: "Errore imprevisto",
-                        retryable = (error as? com.jonbj.alembic.monitor.core.model.MobileError)?.retryable
-                            ?: true
-                    )
-                }
+                _positions.value = failureState(
+                    error,
+                    cached?.data?.toDomain(),
+                    cached?.dataAgeSeconds
+                )
             }
         )
     }

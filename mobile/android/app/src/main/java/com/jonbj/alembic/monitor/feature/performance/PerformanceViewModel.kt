@@ -2,7 +2,6 @@ package com.jonbj.alembic.monitor.feature.performance
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.jonbj.alembic.monitor.app.di.AppModule
 import com.jonbj.alembic.monitor.data.repository.PerformanceRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -10,7 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class PerformanceViewModel(
-    private val repository: PerformanceRepository = AppModule.performanceRepository
+    private val repository: PerformanceRepository
 ) : ViewModel() {
 
     val state = repository.performance

@@ -2,6 +2,7 @@ package com.jonbj.alembic.monitor.core.database
 
 import com.jonbj.alembic.monitor.core.security.AesGcmCipher
 import kotlinx.datetime.Instant
+import kotlinx.datetime.Clock
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 
@@ -31,7 +32,8 @@ data class Cached<T>(
 class EncryptedCacheStore(
     private val dao: CacheEntryDao,
     private val cipher: AesGcmCipher,
-    private val json: Json
+    private val json: Json,
+    private val clock: Clock = Clock.System
 ) : CacheStore {
 
     override suspend fun <T> put(
@@ -60,10 +62,15 @@ class EncryptedCacheStore(
         val entry = dao.get(key) ?: return null
         return try {
             val plaintext = cipher.decrypt(entry.encryptedBlob)
+            val asOf = Instant.fromEpochSeconds(entry.asOfEpochSeconds)
+            val wallAgeSeconds = (clock.now() - asOf).inWholeSeconds
+                .coerceAtLeast(0)
+                .coerceAtMost(Int.MAX_VALUE.toLong())
+                .toInt()
             Cached(
                 data = json.decodeFromString(serializer, plaintext),
-                asOf = Instant.fromEpochSeconds(entry.asOfEpochSeconds),
-                dataAgeSeconds = entry.dataAgeSeconds
+                asOf = asOf,
+                dataAgeSeconds = maxOf(entry.dataAgeSeconds, wallAgeSeconds)
             )
         } catch (e: Exception) {
             dao.delete(key)

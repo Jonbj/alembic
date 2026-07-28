@@ -1,28 +1,29 @@
 package com.jonbj.alembic.monitor.data.repository
 
 import com.jonbj.alembic.monitor.core.model.MobileError
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import retrofit2.Response
 
 object ApiCaller {
-
-    private val refreshMutex = Mutex()
 
     suspend fun <T> execute(
         refresher: TokenRefresher,
         call: suspend () -> Response<T>
     ): Result<T> {
+        val failedAccessToken = refresher.currentAccessToken()
         val first = executeOnce(call)
         if (first.isSuccess || first.exceptionOrNull()?.isAuth() != true) {
             return first
         }
 
-        val refreshResult = refreshMutex.withLock { refresher.refreshAccessToken() }
+        val refreshResult = refresher.refreshAccessToken(failedAccessToken)
         if (refreshResult.isFailure) {
             return Result.failure(refreshResult.exceptionOrNull() ?: MobileError.Auth("Refresh failed"))
         }
-        return executeOnce(call)
+        val retried = executeOnce(call)
+        if (retried.exceptionOrNull()?.isAuth() == true) {
+            refresher.invalidateSession()
+        }
+        return retried
     }
 
     private suspend fun <T> executeOnce(call: suspend () -> Response<T>): Result<T> {

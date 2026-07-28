@@ -1,6 +1,5 @@
 package com.jonbj.alembic.monitor.feature.biometric
 
-import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -17,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
 import com.jonbj.alembic.monitor.R
 import com.jonbj.alembic.monitor.core.security.BiometricGate
 import com.jonbj.alembic.monitor.core.security.BiometricResult
@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun BiometricLockScreen(
     biometricGate: BiometricGate,
-    activity: ComponentActivity,
+    activity: FragmentActivity,
     onUnlocked: () -> Unit,
     onLogout: suspend () -> Unit
 ) {
