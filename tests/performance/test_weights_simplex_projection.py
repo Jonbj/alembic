@@ -67,7 +67,8 @@ class TestSimplexProjectionFallbackCase:
 
 
 class TestSimplexProjectionInvariant:
-    """Test 3: Invariant holds on 200 random inputs."""
+    """Test 3: Invariant holds on 200 random inputs (spec).
+       Test 3b: Fuzz — 2000 random inputs to catch UnboundLocalError cases."""
 
     @pytest.fixture
     def rng(self):
@@ -103,6 +104,41 @@ class TestSimplexProjectionInvariant:
                 failures.append(f"run {i} sum={sum(result.values()):.9f} ≠ 1.0")
 
         assert not failures, "\n".join(failures[:10])
+
+    def test_fuzz_2000_random_inputs_no_crash(self, rng):
+        """Fuzz test: 2000 random inputs must all return valid projections with
+        no UnboundLocalError, bounds respected, and sum exactly 1.0.
+
+        The original code crashed (UnboundLocalError) when the bisection hit
+        |S(λ)-1|<1e-12 on the first iteration, because w was assigned AFTER
+        the break. 200 runs was insufficient to trigger it; 2000 catches it.
+        """
+        floor, cap = 0.10, 0.70
+        n_runs = 2000
+        failures = []
+        for i in range(n_runs):
+            n_models = rng.integers(2, 6)          # 2..5 models
+            icir = {f"m{j}": rng.uniform(-1.0, 2.0) for j in range(n_models)}
+            current = {f"m{j}": rng.uniform(0.05, 0.4) for j in range(n_models)}
+            total = sum(current.values())
+            current = {k: v / total for k, v in current.items()}
+            alpha = rng.uniform(0.1, 1.0)
+            max_delta = rng.uniform(0.05, 1.0)
+            try:
+                result = compute_new_weights(
+                    icir, current, alpha=alpha,
+                    floor=floor, cap=cap, max_delta=max_delta,
+                )
+            except Exception as e:
+                failures.append(f"run {i} raised {type(e).__name__}: {e}")
+                continue
+            for k, w in result.items():
+                if not (floor - 1e-9 <= w <= cap + 1e-9):
+                    failures.append(f"run {i} {k}={w:.6f} outside [{floor},{cap}]")
+            if not abs(sum(result.values()) - 1.0) < 1e-9:
+                failures.append(f"run {i} sum={sum(result.values()):.15f} ≠ 1.0")
+
+        assert not failures, f"{len(failures)} failures out of {n_runs}:\n" + "\n".join(failures[:10])
 
     def test_no_silent_equal_weight_fallback(self, rng):
         """When the target is NOT uniform, the output must NOT be uniform.

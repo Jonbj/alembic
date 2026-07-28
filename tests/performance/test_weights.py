@@ -145,13 +145,23 @@ class TestComputeNewWeights:
         assert result == {"opus": 0.5, "qwen35": 0.5}
 
     def test_compute_new_weights_all_negative_icir(self):
-        """Should keep current weights when all ICIR are negative."""
+        """When all ICIR are negative the target is uniform (1/n each).
+        The projected result must respect floor/cap bounds and sum to 1.0;
+        it will not equal the raw current_weights due to projection, but with
+        floor=0.10 and cap=0.70 a uniform 2-model target stays at 0.5 — so
+        the result is close to current_weights up to floating-point tolerance."""
         purified_icir = {"opus": -0.5, "qwen35": -0.3}
         current_weights = {"opus": 0.5, "qwen35": 0.5}
 
         result = compute_new_weights(purified_icir, current_weights)
 
-        assert result == current_weights
+        # Bounds and sum invariants always hold
+        assert sum(result.values()) == pytest.approx(1.0)
+        for w in result.values():
+            assert 0.10 - 1e-9 <= w <= 0.70 + 1e-9
+        # Result is close to uniform (current_weights were already uniform)
+        assert result["opus"] == pytest.approx(0.5, abs=1e-9)
+        assert result["qwen35"] == pytest.approx(0.5, abs=1e-9)
 
     def test_compute_new_weights_floor(self):
         """No weight should go below floor (10%)."""

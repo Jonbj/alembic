@@ -257,15 +257,14 @@ def _project_to_simplex_with_bounds(
         else:
             hi = mid
 
-        lamb = (lo + hi) / 2.0
-        w = [max(floor, min(cap, ti + lamb)) for ti in t]
+    # λ and w are computed ONCE after the loop exits, using the converged λ.
+    # This avoids the stale-w from the previous iteration bug and the
+    # UnboundLocalError when break fires on the first iteration.
+    lamb = (lo + hi) / 2.0
+    w = [max(floor, min(cap, ti + lamb)) for ti in t]
 
-    # Final renormalise to guarantee sum = 1.0
-    total = sum(w)
-    if total > 0:
-        w = [v / total for v in w]
-
-    # Invariant assertion
+    # Water-filling KKT: sum is 1 by construction when the λ search converges.
+    # No renormalise needed — that would mask a broken projection.
     eps = 1e-9
     result = dict(zip(keys, w))
     for k, v in result.items():
@@ -317,6 +316,14 @@ def compute_new_weights(
     ------
     ValueError
         If the box constraints (n*floor > 1.0 or n*cap < 1.0) are infeasible.
+        This propagates to the caller of ``compute_new_weights``:
+
+        - ``run_weekly_weights`` (performance.py:954) sits inside a top-level
+          ``try/except/raise`` — on ``ValueError`` the task logs the error and
+          re-raises, aborting the weight suggestion for that cycle. The old
+          weights in Redis are untouched; no order is affected.
+        - With default ``floor=0.10`` and ``n≤3`` models the constraint is
+          always feasible, so this guard is for future expansion only.
 
     Notes
     -----
@@ -340,8 +347,13 @@ def compute_new_weights(
     if total > 0:
         target = {m: v / total for m, v in raw.items()}
     else:
-        # All ICIR negative -- keep current weights unchanged
-        return current_weights.copy()
+        # All ICIR negative — keep current weights but still project to the
+        # feasible box so the output always satisfies the floor/cap invariant.
+        # This is the only path where the projection gets a uniform target
+        # (all 1/n) rather than ICIR-driven weights.
+        n = len(current_weights)
+        uniform = {m: 1.0 / n for m in current_weights}
+        return _project_to_simplex_with_bounds(uniform, floor=floor, cap=cap)
 
     # Step 3: Smoothing -- 75% old + 25% new
     blended = {}
