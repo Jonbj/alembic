@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import pathlib
 from datetime import datetime, timezone
 
 import psycopg2
@@ -10,6 +11,48 @@ import pytest
 
 from src.portfolio.stop_policy import FrozenStop, StopDecision
 from src.store.pg_store import PostgreSQLStore
+
+
+# ── Guard: no test symbol may exceed the VARCHAR(20) column width ────────────
+# This runs at import/collection time — no DB, no network. It breaks before any
+# live-DB test fires if a new symbol that is too long is introduced.
+_TRADE_SYMBOL_MAX = 20  # trades.symbol VARCHAR(20)
+
+
+def _guard_symbol_lengths() -> None:
+    """Fail at import if any `symbol = "..."` in THIS file exceeds the column.
+
+    The symbols are read out of the module's own source, not listed by hand.
+    A hand-kept list would be a second copy of the truth: it drifts silently,
+    and — the point of the guard — it does not see a symbol written inline in a
+    test added tomorrow, which is exactly how #112 happened. Deriving them means
+    a new over-long symbol breaks collection with no DB and no discipline
+    required from whoever writes the test.
+    """
+    import ast
+
+    source = pathlib.Path(__file__).read_text()
+    found: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(t, ast.Name) and t.id == "symbol" for t in node.targets
+        ):
+            continue
+        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            found.append(node.value.value)
+
+    assert found, "guard found no `symbol = \"...\"` assignments — has the file moved?"
+    violations = sorted({s for s in found if len(s) > _TRADE_SYMBOL_MAX})
+    assert not violations, (
+        f"Symbol(s) exceed trades.symbol VARCHAR({_TRADE_SYMBOL_MAX}): "
+        f"{violations} — shorten or the DB will reject the row with "
+        f"StringDataRightTruncation (cf. #112)"
+    )
+
+
+_guard_symbol_lengths()  # run immediately on import; raises if violated
 
 
 def _connect_or_skip() -> psycopg2.extensions.connection:
@@ -61,7 +104,7 @@ def test_fixed_mode_freezes_audit_fields() -> None:
     vol_scaled sizing gate has the full freeze-at-entry record later."""
     store = PostgreSQLStore(use_pool=False)
     ts = datetime(2026, 7, 10, 14, 0, tzinfo=timezone.utc)
-    symbol = "TEST_STOP_FIXED_AUDIT"
+    symbol = "TEST_STOP_FIXED_AUD"  # max 20 chars — trades.symbol is VARCHAR(20)
     frozen = FrozenStop(
         strategy="S1", mode="fixed", vol_at_entry=0.018, sigma_eff=0.018,
         k=3.5, floor=0.06, cap=0.12, d_init=0.02, vol_source="tier",
