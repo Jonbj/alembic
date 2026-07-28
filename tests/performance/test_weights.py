@@ -145,13 +145,47 @@ class TestComputeNewWeights:
         assert result == {"opus": 0.5, "qwen35": 0.5}
 
     def test_compute_new_weights_all_negative_icir(self):
-        """Should keep current weights when all ICIR are negative."""
+        """When all ICIR are negative, current_weights are projected through
+        the box — the target is NOT uniform.
+        The projected result must respect floor/cap bounds and sum to 1.0;
+        it preserves current_weights subject to projection — it does NOT
+        reset to uniform 1/n (that was the silent equal-weight fallback
+        this fix eliminates)."""
         purified_icir = {"opus": -0.5, "qwen35": -0.3}
         current_weights = {"opus": 0.5, "qwen35": 0.5}
 
         result = compute_new_weights(purified_icir, current_weights)
 
-        assert result == current_weights
+        # Bounds and sum invariants always hold
+        assert sum(result.values()) == pytest.approx(1.0)
+        for w in result.values():
+            assert 0.10 - 1e-9 <= w <= 0.70 + 1e-9
+        # Preserves current_weights — projection only clips if already out of box
+        assert result["opus"] == pytest.approx(0.5, abs=1e-9)
+        assert result["qwen35"] == pytest.approx(0.5, abs=1e-9)
+
+    def test_all_negative_icir_preserves_differentiated_weights(self):
+        """All-negative ICIR must NOT reset to equipesi — it must project
+        current_weights through the box, preserving their relative ranking.
+        This guards against a silent equal-weight fallback reintroduced on
+        this code path."""
+        purified_icir = {"a": -0.5, "b": -0.3, "c": -0.1}
+        # Differentiated current weights — the anti-pattern would give [1/3, 1/3, 1/3]
+        current_weights = {"a": 0.60, "b": 0.25, "c": 0.15}
+
+        result = compute_new_weights(purified_icir, current_weights)
+
+        # Must NOT be equipesi
+        vals = sorted(result.values())
+        assert vals[-1] - vals[0] > 1e-6, (
+            f"Silent equal-weight fallback detected: {result}"
+        )
+        # Bounds and sum invariants
+        assert sum(result.values()) == pytest.approx(1.0)
+        for w in result.values():
+            assert 0.10 - 1e-9 <= w <= 0.70 + 1e-9
+        # Ordering of current_weights is preserved (a > b > c in current_weights)
+        assert result["a"] > result["b"] > result["c"]
 
     def test_compute_new_weights_floor(self):
         """No weight should go below floor (10%)."""

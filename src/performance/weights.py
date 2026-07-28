@@ -189,6 +189,94 @@ def _compute_rolling_ic(
     return ic_series
 
 
+def _project_to_simplex_with_bounds(
+    target: Dict[str, float],
+    floor: float,
+    cap: float,
+) -> Dict[str, float]:
+    """KKT water-filling simplex projection with box constraints [floor, cap].
+
+    Given target weights that sum to 1.0 and a box [floor, cap] per weight,
+    returns the weight vector that minimises ||w - target||_2 subject to
+    floor ≤ w_i ≤ cap and sum(w_i) = 1.
+
+    Algorithm (standard KKT water-filling):
+    1. Identify indices at cap → fix them there, remove from active set.
+    2. Identify indices at floor → fix them there, remove from active set.
+    3. For the remaining unsaturated indices, adjust them by a uniform delta
+       (the Lagrange multiplier) until the active set sums to the remaining budget.
+    4. Repeat until all indices are either at cap or at floor (or the active
+       set naturally satisfies the budget).
+
+    This is deterministic, O(n) per iteration, converges in ≤ n iterations.
+
+    Raises
+    ------
+    ValueError
+        If n * floor > 1.0 or n * cap < 1.0 — constraints are mutually
+        infeasible.
+    """
+    n = len(target)
+    if n * floor > 1.0 + 1e-9:
+        raise ValueError(
+            f"Box constraints are infeasible: n={n} models, floor={floor:.4f}, "
+            f"minimum achievable sum={n * floor:.4f} > 1.0"
+        )
+    if n * cap < 1.0 - 1e-9:
+        raise ValueError(
+            f"Box constraints are infeasible: n={n} models, cap={cap:.4f}, "
+            f"maximum achievable sum={n * cap:.4f} < 1.0"
+        )
+
+    # Bisection search for the Lagrange multiplier λ.
+    # The L2 projection of t onto {w: sum(w)=1, floor<=w_i<=cap} satisfies:
+    #   w_i(λ) = max(floor, min(cap, t_i + λ))
+    # We find λ such that sum(w_i(λ)) = 1.
+    # S(λ) = sum_i max(floor, min(cap, t_i + λ)) is monotone non-decreasing in λ.
+    t = list(target.values())
+    keys = list(target.keys())
+
+    def sum_w(lamb: float) -> float:
+        return sum(max(floor, min(cap, ti + lamb)) for ti in t)
+
+    # Bracket: λ = floor - max(t) → w_i = floor (all) → S = n*floor.
+    #          λ = cap - min(t)  → w_i = cap  (all) → S = n*cap.
+    lo = floor - max(t)
+    hi = cap - min(t)
+    s_lo = sum_w(lo)
+    s_hi = sum_w(hi)
+
+    # Binary search for λ in [lo, hi] such that |S(λ) - 1| < 1e-12
+    for _ in range(80):
+        mid = (lo + hi) / 2.0
+        s_mid = sum_w(mid)
+        if abs(s_mid - 1.0) < 1e-12:
+            break
+        if s_mid < 1.0:
+            lo = mid
+        else:
+            hi = mid
+
+    # λ and w are computed ONCE after the loop exits, using the converged λ.
+    # This avoids the stale-w from the previous iteration bug and the
+    # UnboundLocalError when break fires on the first iteration.
+    lamb = (lo + hi) / 2.0
+    w = [max(floor, min(cap, ti + lamb)) for ti in t]
+
+    # Water-filling KKT: sum is 1 by construction when the λ search converges.
+    # No renormalise needed — that would mask a broken projection.
+    eps = 1e-9
+    result = dict(zip(keys, w))
+    for k, v in result.items():
+        assert floor - eps <= v <= cap + eps, (
+            f"Output weight {k}={v:.10f} outside [{floor}, {cap}]"
+        )
+    assert abs(sum(result.values()) - 1.0) < 1e-9, (
+        f"Output weights sum to {sum(result.values()):.15f}, expected 1.0"
+    )
+    return result
+
+
 def compute_new_weights(
     purified_icir: Dict[str, float],
     current_weights: Dict[str, float],
@@ -224,6 +312,19 @@ def compute_new_weights(
     Dict[str, float]
         New normalized weights that sum to 1.0.
 
+    Raises
+    ------
+    ValueError
+        If the box constraints (n*floor > 1.0 or n*cap < 1.0) are infeasible.
+        This propagates to the caller of ``compute_new_weights``:
+
+        - ``run_weekly_weights`` (performance.py:954) sits inside a top-level
+          ``try/except/raise`` — on ``ValueError`` the task logs the error and
+          re-raises, aborting the weight suggestion for that cycle. The old
+          weights in Redis are untouched; no order is affected.
+        - With default ``floor=0.10`` and ``n≤3`` models the constraint is
+          always feasible, so this guard is for future expansion only.
+
     Notes
     -----
     Based on design spec Section 4, PW-Q1 and PW-Q2:
@@ -231,7 +332,8 @@ def compute_new_weights(
     - Normalize to sum to 1.0 (softmax-like)
     - Smoothing: blended = 0.75*old + 0.25*target
     - Guardrails: floor 10%, cap 70%, max delta 10%
-    - Re-normalize to sum to 1.0
+    - Projection onto feasible simplex with box constraints via water-filling
+      (deterministic, no iteration fallback)
     """
     if not purified_icir:
         return current_weights.copy()
@@ -245,8 +347,13 @@ def compute_new_weights(
     if total > 0:
         target = {m: v / total for m, v in raw.items()}
     else:
-        # All ICIR negative -- keep current weights unchanged
-        return current_weights.copy()
+        # All ICIR negative — project current_weights through the box
+        # so the output always satisfies floor/cap and sum=1.  The current
+        # weights are preserved (subject to projection) rather than discarded
+        # and replaced with uniform 1/n.  This path can raise ValueError if
+        # current_weights violates the box constraints (n*floor > 1 or
+        # n*cap < 1), which propagates to run_weekly_weights (see Raises above).
+        return _project_to_simplex_with_bounds(current_weights, floor=floor, cap=cap)
 
     # Step 3: Smoothing -- 75% old + 25% new
     blended = {}
@@ -254,48 +361,12 @@ def compute_new_weights(
         old_w = current_weights.get(model, 1.0 / len(target))
         blended[model] = (1 - alpha) * old_w + alpha * target[model]
 
-    # Step 4: Apply floor and cap
-    clipped = {m: max(floor, min(cap, w)) for m, w in blended.items()}
-
-    # Step 5: Re-normalize to sum to 1.0
-    total = sum(clipped.values())
-    if total > 0:
-        normalized = {m: w / total for m, w in clipped.items()}
-    else:
-        # Fallback: equal weights
-        n = len(clipped)
-        return {m: 1.0 / n for m in clipped.keys()}
-
-    # Step 6: Apply max_delta guardrail after normalization
-    # This may cause weights to not sum exactly to 1.0, but ensures stability
+    # Step 4: Apply max_delta guardrail before projection
     constrained = {}
-    for model in normalized.keys():
-        old_w = current_weights.get(model, 1.0 / len(normalized))
-        w = normalized[model]
-        # Clamp to [old - max_delta, old + max_delta]
-        w = max(old_w - max_delta, min(old_w + max_delta, w))
-        constrained[model] = w
+    for model in blended.keys():
+        old_w = current_weights.get(model, 1.0 / len(blended))
+        w = blended[model]
+        constrained[model] = max(old_w - max_delta, min(old_w + max_delta, w))
 
-    # Final re-normalization after max_delta clipping, then enforce [floor, cap].
-    # Iterative projection: clip → renormalize → clip → renormalize until stable.
-    # Converges in ≤3 iterations for typical 4-5 model ensembles.
-    total = sum(constrained.values())
-    if total <= 0:
-        n = len(clipped)
-        return {m: 1.0 / n for m in clipped.keys()}
-
-    working = {m: w / total for m, w in constrained.items()}
-    for _ in range(5):
-        clipped2 = {m: max(floor, min(cap, w)) for m, w in working.items()}
-        t = sum(clipped2.values())
-        if t <= 0:
-            break
-        renormed = {m: w / t for m, w in clipped2.items()}
-        # Check convergence: all values already within [floor, cap]
-        if all(floor - 1e-9 <= v <= cap + 1e-9 for v in renormed.values()):
-            return renormed
-        working = renormed
-
-    # Fallback: equal weights if projection fails to converge
-    n = len(constrained)
-    return {m: 1.0 / n for m in constrained.keys()}
+    # Step 5: Water-filling projection onto the feasible simplex with box constraints
+    return _project_to_simplex_with_bounds(constrained, floor=floor, cap=cap)
