@@ -14,14 +14,17 @@ class PerformanceViewModel(
 
     val state = repository.performance
 
-    private val _selectedPeriod = MutableStateFlow("1m")
-    val selectedPeriod: StateFlow<String> = _selectedPeriod.asStateFlow()
+    private val _selectedPeriod = MutableStateFlow(PerformancePeriod.DEFAULT)
+    val selectedPeriod: StateFlow<PerformancePeriod> = _selectedPeriod.asStateFlow()
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+    private var activeRefreshes = 0
 
     init {
         refresh()
     }
 
-    fun selectPeriod(period: String) {
+    fun selectPeriod(period: PerformancePeriod) {
         if (period != _selectedPeriod.value) {
             _selectedPeriod.value = period
             refresh()
@@ -30,7 +33,14 @@ class PerformanceViewModel(
 
     fun refresh(force: Boolean = true) {
         viewModelScope.launch {
-            repository.refresh(_selectedPeriod.value, force)
+            activeRefreshes += 1
+            _isRefreshing.value = true
+            try {
+                repository.refresh(_selectedPeriod.value.apiValue, force)
+            } finally {
+                activeRefreshes -= 1
+                _isRefreshing.value = activeRefreshes > 0
+            }
         }
     }
 }

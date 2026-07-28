@@ -7,6 +7,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -17,6 +18,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.jonbj.alembic.monitor.app.di.AppContainer
 import com.jonbj.alembic.monitor.app.viewModelFactory
 import com.jonbj.alembic.monitor.feature.events.EventsScreen
@@ -28,6 +32,26 @@ import com.jonbj.alembic.monitor.feature.status.StatusScreen
 @Composable
 fun MainScaffold(container: AppContainer) {
     val navController = rememberNavController()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val refreshCoordinator = container.foregroundRefreshCoordinator
+
+    DisposableEffect(lifecycleOwner, refreshCoordinator) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> refreshCoordinator.start()
+                Lifecycle.Event.ON_STOP -> refreshCoordinator.stop()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            refreshCoordinator.start()
+        }
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            refreshCoordinator.stop()
+        }
+    }
 
     Scaffold(
         bottomBar = {

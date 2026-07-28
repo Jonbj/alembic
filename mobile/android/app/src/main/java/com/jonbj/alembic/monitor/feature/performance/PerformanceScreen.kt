@@ -2,71 +2,100 @@ package com.jonbj.alembic.monitor.feature.performance
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jonbj.alembic.monitor.R
 import com.jonbj.alembic.monitor.core.model.LoadState
 import com.jonbj.alembic.monitor.core.model.Performance
+import com.jonbj.alembic.monitor.core.model.PerformancePoint
 import com.jonbj.alembic.monitor.ui.components.EmptyMessage
 import com.jonbj.alembic.monitor.ui.components.ErrorMessage
+import com.jonbj.alembic.monitor.ui.components.FreshnessBanner
 import com.jonbj.alembic.monitor.ui.components.LoadingSpinner
-import com.jonbj.alembic.monitor.ui.components.OfflineBanner
+import com.jonbj.alembic.monitor.ui.components.PullRefreshContainer
 import com.jonbj.alembic.monitor.ui.components.formatMoney
 import com.jonbj.alembic.monitor.ui.components.formatPercent
-
-private val PERIODS = listOf("1w", "1m", "3m", "6m", "1y", "all")
+import com.jonbj.alembic.monitor.ui.components.formatSignedMoney
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 @Composable
 fun PerformanceScreen(viewModel: PerformanceViewModel) {
-    val state by viewModel.state.collectAsState()
-    val period by viewModel.selectedPeriod.collectAsState()
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val viewModelPeriod by viewModel.selectedPeriod.collectAsStateWithLifecycle()
+    val refreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    var savedPeriod by rememberSaveable { mutableStateOf(viewModelPeriod.apiValue) }
+
+    LaunchedEffect(savedPeriod) {
+        val restored = PerformancePeriod.fromApiValue(savedPeriod)
+        if (restored != viewModelPeriod) viewModel.selectPeriod(restored)
+    }
+    LaunchedEffect(viewModelPeriod) {
+        savedPeriod = viewModelPeriod.apiValue
+    }
+
     PerformanceContent(
         state = state,
-        selectedPeriod = period,
+        selectedPeriod = viewModelPeriod,
+        refreshing = refreshing,
         onPeriodSelected = viewModel::selectPeriod,
-        onRetry = { viewModel.refresh(true) }
+        onRefresh = { viewModel.refresh(true) }
     )
 }
 
 @Composable
-private fun PerformanceContent(
+internal fun PerformanceContent(
     state: LoadState<Performance>,
-    selectedPeriod: String,
-    onPeriodSelected: (String) -> Unit,
-    onRetry: () -> Unit
+    selectedPeriod: PerformancePeriod,
+    refreshing: Boolean,
+    onPeriodSelected: (PerformancePeriod) -> Unit,
+    onRefresh: () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
+    Column(modifier = Modifier.fillMaxSize()) {
         PeriodSelector(
             selected = selectedPeriod,
             onSelected = onPeriodSelected,
             modifier = Modifier.fillMaxWidth()
         )
-        when (state) {
-            is LoadState.Loading -> LoadingSpinner()
-            is LoadState.Error -> ErrorMessage(message = state.message, onRetry = onRetry)
-            is LoadState.Success -> {
-                if (state.source == com.jonbj.alembic.monitor.core.model.DataSource.CACHE) {
-                    OfflineBanner()
-                }
-                PerformanceMetrics(state.data, modifier = Modifier.verticalScroll(rememberScrollState()))
+        PullRefreshContainer(
+            refreshing = refreshing,
+            onRefresh = onRefresh,
+            modifier = Modifier.weight(1f)
+        ) {
+            when (state) {
+                is LoadState.Loading -> LoadingSpinner()
+                is LoadState.Error -> ErrorMessage(
+                    message = state.message,
+                    retryable = state.retryable,
+                    onRetry = onRefresh
+                )
+                is LoadState.Success -> PerformanceList(state)
             }
         }
     }
@@ -74,32 +103,134 @@ private fun PerformanceContent(
 
 @Composable
 private fun PeriodSelector(
-    selected: String,
-    onSelected: (String) -> Unit,
+    selected: PerformancePeriod,
+    onSelected: (PerformancePeriod) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = modifier.padding(vertical = 8.dp),
+    LazyRow(
+        modifier = modifier,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        PERIODS.forEach { period ->
-            Button(
+        items(PerformancePeriod.entries) { period ->
+            FilterChip(
+                selected = period == selected,
                 onClick = { onSelected(period) },
-                enabled = period != selected
-            ) {
-                Text(period.uppercase())
+                label = { Text(stringResource(period.labelRes)) },
+                modifier = Modifier.heightIn(min = 48.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun PerformanceList(state: LoadState.Success<Performance>) {
+    val performance = state.data
+    var showBenchmark by rememberSaveable(performance.period) { mutableStateOf(false) }
+    var showDrawdown by rememberSaveable(performance.period) { mutableStateOf(false) }
+    var showTable by rememberSaveable(performance.period) { mutableStateOf(false) }
+    val hasBenchmark = performance.points.any { it.benchmarkNav != null }
+    val hasDrawdown = performance.points.any { it.drawdown != null }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            FreshnessBanner(
+                mode = state.mode,
+                asOf = performance.asOf,
+                dataAgeSeconds = state.dataAgeSeconds
+            )
+        }
+        item { SummaryMetrics(performance) }
+        if (performance.points.isEmpty()) {
+            item { EmptyMessage(modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp)) }
+        } else {
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        SectionHeading(stringResource(R.string.nav_chart))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (hasBenchmark) {
+                                item {
+                                    FilterChip(
+                                        selected = showBenchmark,
+                                        onClick = { showBenchmark = !showBenchmark },
+                                        label = { Text(stringResource(R.string.benchmark)) }
+                                    )
+                                }
+                            }
+                            if (hasDrawdown) {
+                                item {
+                                    FilterChip(
+                                        selected = showDrawdown,
+                                        onClick = { showDrawdown = !showDrawdown },
+                                        label = { Text(stringResource(R.string.drawdown)) }
+                                    )
+                                }
+                            }
+                        }
+                        PerformanceChart(
+                            points = performance.points,
+                            currency = performance.currency,
+                            showBenchmark = showBenchmark,
+                            showDrawdown = showDrawdown
+                        )
+                        Button(onClick = { showTable = !showTable }) {
+                            Text(
+                                if (showTable) {
+                                    stringResource(R.string.hide_data_table)
+                                } else {
+                                    stringResource(R.string.show_data_table)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+            if (showTable) {
+                item { SectionHeading(stringResource(R.string.accessible_data_table)) }
+                items(performance.points, key = { it.at.toEpochMilliseconds() }) { point ->
+                    PerformancePointRow(point, performance.currency)
+                }
+            }
+        }
+        if (performance.degradations.isNotEmpty()) {
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        SectionHeading(stringResource(R.string.degradations))
+                        performance.degradations.forEach { Text(it) }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun PerformanceMetrics(performance: Performance, modifier: Modifier = Modifier) {
-    Card(modifier = modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-        Column(modifier = Modifier.padding(16.dp)) {
+private fun SummaryMetrics(performance: Performance) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            SectionHeading(stringResource(R.string.performance_summary))
             MetricRow(
                 stringResource(R.string.portfolio_return),
                 formatPercent(performance.summary.portfolioReturn)
+            )
+            MetricRow(
+                stringResource(R.string.nav_change),
+                formatSignedMoney(performance.summary.navChange, performance.currency)
             )
             MetricRow(
                 stringResource(R.string.nav),
@@ -109,35 +240,80 @@ private fun PerformanceMetrics(performance: Performance, modifier: Modifier = Mo
                 stringResource(R.string.max_drawdown),
                 formatPercent(performance.summary.maxDrawdown)
             )
+            performance.summary.benchmarkReturn?.let {
+                MetricRow(stringResource(R.string.benchmark), formatPercent(it))
+            }
+            performance.summary.alpha?.let {
+                MetricRow(stringResource(R.string.alpha), formatPercent(it))
+            }
             MetricRow(
-                stringResource(R.string.benchmark),
-                formatPercent(performance.summary.benchmarkReturn)
+                stringResource(R.string.avg_exposure),
+                formatPercent(performance.summary.avgGrossExposure)
             )
-            MetricRow(
-                stringResource(R.string.alpha),
-                formatPercent(performance.summary.alpha)
-            )
-            MetricRow(
-                stringResource(R.string.realized_pnl),
-                formatMoney(performance.summary.realizedPnl, performance.currency)
+        }
+    }
+    Card(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = stringResource(R.string.realized_pnl),
+                style = MaterialTheme.typography.labelLarge
             )
             Text(
-                text = "${performance.points.size} punti",
-                style = MaterialTheme.typography.labelLarge
+                text = formatSignedMoney(
+                    performance.summary.realizedPnl,
+                    performance.currency
+                ),
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold
             )
         }
     }
 }
 
 @Composable
-private fun MetricRow(label: String, value: String) {
-    Row(
+private fun PerformancePointRow(point: PerformancePoint, currency: String) {
+    val local = point.at.toLocalDateTime(TimeZone.currentSystemDefault())
+    val description = buildList {
+        add("${local.date} ${local.hour}:${local.minute.toString().padStart(2, '0')}")
+        add("NAV ${formatMoney(point.nav, currency)}")
+        point.benchmarkNav?.let { add("Benchmark ${formatMoney(it, currency)}") }
+        point.drawdown?.let { add("Drawdown ${formatPercent(it)}") }
+    }.joinToString(". ")
+    Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
+            .semantics { contentDescription = description }
     ) {
-        Text(label)
-        Text(value)
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text("${local.date} · ${local.hour}:${local.minute.toString().padStart(2, '0')}")
+            MetricRow("NAV", formatMoney(point.nav, currency))
+            point.benchmarkNav?.let {
+                MetricRow(stringResource(R.string.benchmark), formatMoney(it, currency))
+            }
+            point.drawdown?.let {
+                MetricRow(stringResource(R.string.drawdown), formatPercent(it))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeading(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.semantics { heading() }
+    )
+}
+
+@Composable
+private fun MetricRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(label, modifier = Modifier.weight(1f))
+        Text(value, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
     }
 }

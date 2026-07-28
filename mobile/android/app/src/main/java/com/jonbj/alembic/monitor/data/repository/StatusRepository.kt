@@ -9,6 +9,8 @@ import com.jonbj.alembic.monitor.core.network.dto.SnapshotResponse
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class StatusRepository(
     private val apiProvider: MobileApiProvider,
@@ -18,9 +20,10 @@ class StatusRepository(
 
     private val _snapshot = MutableStateFlow<LoadState<Snapshot>>(LoadState.Loading)
     val snapshot: StateFlow<LoadState<Snapshot>> = _snapshot.asStateFlow()
+    private val refreshMutex = Mutex()
 
-    suspend fun refresh(force: Boolean = false) {
-        if (force || _snapshot.value !is LoadState.Success) {
+    suspend fun refresh(@Suppress("UNUSED_PARAMETER") force: Boolean = false) = refreshMutex.withLock {
+        if (_snapshot.value !is LoadState.Success) {
             _snapshot.value = LoadState.Loading
         }
 

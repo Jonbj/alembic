@@ -2,147 +2,257 @@ package com.jonbj.alembic.monitor.feature.status
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.PauseCircle
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jonbj.alembic.monitor.R
 import com.jonbj.alembic.monitor.core.model.LoadState
+import com.jonbj.alembic.monitor.core.model.MarketPhase
+import com.jonbj.alembic.monitor.core.model.Mode
+import com.jonbj.alembic.monitor.core.model.Operational
 import com.jonbj.alembic.monitor.core.model.OperationalState
+import com.jonbj.alembic.monitor.core.model.PipelineComponent
+import com.jonbj.alembic.monitor.core.model.PipelineStatus
+import com.jonbj.alembic.monitor.core.model.Portfolio
 import com.jonbj.alembic.monitor.core.model.Snapshot
-import com.jonbj.alembic.monitor.ui.components.EmptyMessage
+import com.jonbj.alembic.monitor.core.model.StrategyRow
 import com.jonbj.alembic.monitor.ui.components.ErrorMessage
+import com.jonbj.alembic.monitor.ui.components.FreshnessBanner
 import com.jonbj.alembic.monitor.ui.components.LoadingSpinner
-import com.jonbj.alembic.monitor.ui.components.OfflineBanner
+import com.jonbj.alembic.monitor.ui.components.PullRefreshContainer
+import com.jonbj.alembic.monitor.ui.components.effectiveOperationalState
+import com.jonbj.alembic.monitor.ui.components.formatDataAge
 import com.jonbj.alembic.monitor.ui.components.formatMoney
 import com.jonbj.alembic.monitor.ui.components.formatPercent
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
+import com.jonbj.alembic.monitor.ui.components.formatSignedMoney
 
 @Composable
 fun StatusScreen(viewModel: StatusViewModel) {
-    val state by viewModel.state.collectAsState()
-    StatusContent(state = state, onRetry = { viewModel.refresh(true) })
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val refreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
+    StatusContent(
+        state = state,
+        refreshing = refreshing,
+        onRefresh = { viewModel.refresh(true) }
+    )
 }
 
 @Composable
-private fun StatusContent(state: LoadState<Snapshot>, onRetry: () -> Unit) {
-    when (state) {
-        is LoadState.Loading -> LoadingSpinner()
-        is LoadState.Error -> ErrorMessage(
-            message = state.message,
-            onRetry = onRetry
-        )
-        is LoadState.Success -> {
-            if (state.source == com.jonbj.alembic.monitor.core.model.DataSource.CACHE) {
-                OfflineBanner()
-            }
-            SnapshotCard(state.data, modifier = Modifier.verticalScroll(rememberScrollState()))
+internal fun StatusContent(
+    state: LoadState<Snapshot>,
+    refreshing: Boolean,
+    onRefresh: () -> Unit
+) {
+    PullRefreshContainer(refreshing = refreshing, onRefresh = onRefresh) {
+        when (state) {
+            is LoadState.Loading -> LoadingSpinner()
+            is LoadState.Error -> ErrorMessage(
+                message = state.message,
+                retryable = state.retryable,
+                onRetry = onRefresh
+            )
+            is LoadState.Success -> SnapshotList(state)
         }
     }
 }
 
 @Composable
-private fun SnapshotCard(snapshot: Snapshot, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
+private fun SnapshotList(state: LoadState.Success<Snapshot>) {
+    val snapshot = state.data
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        StateBanner(snapshot.operational.state, snapshot.operational.mode.name)
-        Text(
-            text = stringResource(
-                R.string.updated,
-                snapshot.asOf.toLocalDateTime(TimeZone.currentSystemDefault()).toString()
-            ),
-            style = MaterialTheme.typography.labelLarge
-        )
-        PortfolioCard(snapshot.portfolio, snapshot.currency)
-        PipelineCard(snapshot.pipeline)
-        StrategiesCard(snapshot.strategies)
-    }
-}
-
-@Composable
-private fun StateBanner(state: OperationalState, mode: String) {
-    val (label, color) = when (state) {
-        OperationalState.OPERATIONAL -> stringResource(R.string.status_operational) to MaterialTheme.colorScheme.primary
-        OperationalState.DEGRADED -> stringResource(R.string.status_degraded) to MaterialTheme.colorScheme.error
-        OperationalState.BLOCKED -> stringResource(R.string.status_blocked) to MaterialTheme.colorScheme.error
-        OperationalState.PAUSED -> stringResource(R.string.status_paused) to MaterialTheme.colorScheme.outline
-    }
-    Card {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.headlineMedium,
-                color = color
+        item {
+            FreshnessBanner(
+                mode = state.mode,
+                asOf = snapshot.asOf,
+                dataAgeSeconds = state.dataAgeSeconds
             )
-            Text(
-                text = mode.uppercase(),
-                style = MaterialTheme.typography.titleLarge
-            )
+        }
+        item { StateBanner(snapshot.operational) }
+        item { PortfolioCard(snapshot.portfolio, snapshot.currency) }
+        item { PipelineCard(snapshot.pipeline) }
+        item { StrategiesCard(snapshot.strategies) }
+        if (snapshot.degradations.isNotEmpty()) {
+            item {
+                InfoCard(
+                    title = stringResource(R.string.degradations),
+                    lines = snapshot.degradations
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun PortfolioCard(portfolio: com.jonbj.alembic.monitor.core.model.Portfolio, currency: String) {
+private fun StateBanner(operational: Operational) {
+    val state = effectiveOperationalState(operational)
+    val label = operationalStateLabel(state)
+    val modeText = modeLabel(operational.mode)
+    val color = operationalStateColor(state)
+    val icon = when (state) {
+        OperationalState.OPERATIONAL -> Icons.Default.CheckCircle
+        OperationalState.DEGRADED -> Icons.Default.Warning
+        OperationalState.BLOCKED -> Icons.Default.Error
+        OperationalState.PAUSED -> Icons.Default.PauseCircle
+    }
+    val reason = when {
+        operational.mode == Mode.UNKNOWN -> stringResource(R.string.unknown_mode_reason)
+        !operational.primaryReason.isNullOrBlank() -> reasonLabel(operational.primaryReason)
+        else -> null
+    }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics {
+                contentDescription = listOfNotNull(label, modeText, reason)
+                    .joinToString(". ")
+            }
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Icon(icon, contentDescription = null, tint = color)
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = color,
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics { heading() }
+                )
+                Text(
+                    text = modeText,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Text(
+                text = marketPhaseLabel(operational.marketPhase),
+                style = MaterialTheme.typography.labelLarge
+            )
+            reason?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (state == OperationalState.OPERATIONAL) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    }
+                )
+            }
+            if (operational.activeIncidentCount > 0) {
+                Text(
+                    text = pluralStringResource(
+                        R.plurals.active_incidents,
+                        operational.activeIncidentCount,
+                        operational.activeIncidentCount
+                    ),
+                    style = MaterialTheme.typography.labelLarge
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PortfolioCard(portfolio: Portfolio, currency: String) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            SectionHeading(stringResource(R.string.portfolio_summary))
             MetricRow(stringResource(R.string.nav), formatMoney(portfolio.nav, currency))
-            MetricRow(stringResource(R.string.today), formatMoney(portfolio.navChangeToday, currency))
+            MetricRow(
+                stringResource(R.string.today),
+                buildList {
+                    portfolio.navChangeToday?.let { add(formatSignedMoney(it, currency)) }
+                    portfolio.navReturnToday?.let { add(formatPercent(it)) }
+                }.ifEmpty { listOf("Non disponibile") }.joinToString(" · ")
+            )
             MetricRow(
                 stringResource(R.string.drawdown),
-                formatPercent(portfolio.currentDrawdown)
+                formatPercentWithLimit(portfolio.currentDrawdown, portfolio.drawdownLimit)
             )
             MetricRow(
                 stringResource(R.string.exposure),
-                formatPercent(portfolio.grossExposure)
+                formatPercentWithLimit(portfolio.grossExposure, portfolio.grossExposureLimit)
             )
             MetricRow(
                 stringResource(R.string.positions),
-                portfolio.openPositions.toString()
+                portfolio.openPositions?.toString() ?: stringResource(R.string.not_available)
             )
+            MetricRow(
+                stringResource(R.string.unrealized_pnl),
+                formatSignedMoney(portfolio.unrealizedPnl, currency)
+            )
+            MetricRow(stringResource(R.string.cash), formatMoney(portfolio.cash, currency))
         }
     }
 }
 
 @Composable
-private fun PipelineCard(components: List<com.jonbj.alembic.monitor.core.model.PipelineComponent>) {
+private fun PipelineCard(components: List<PipelineComponent>) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = stringResource(R.string.pipeline),
-                style = MaterialTheme.typography.titleLarge
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            components.forEach { component ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(component.name)
-                    Text(component.status.name)
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            SectionHeading(stringResource(R.string.pipeline))
+            if (components.isEmpty()) {
+                Text(stringResource(R.string.empty_data))
+            } else {
+                components.forEach { component ->
+                    val age = when (component.status) {
+                        PipelineStatus.NOT_EXPECTED -> stringResource(R.string.not_expected)
+                        PipelineStatus.UNKNOWN -> stringResource(R.string.not_available)
+                        else -> formatDataAge(component.ageSeconds)
+                    }
+                    MetricRow(
+                        label = pipelineName(component.name),
+                        value = "${pipelineStatusLabel(component.status)} · $age"
+                    )
+                    if (component.writeable == false) {
+                        Text(
+                            text = stringResource(R.string.read_only_component),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                 }
             }
         }
@@ -150,25 +260,54 @@ private fun PipelineCard(components: List<com.jonbj.alembic.monitor.core.model.P
 }
 
 @Composable
-private fun StrategiesCard(strategies: List<com.jonbj.alembic.monitor.core.model.StrategyRow>) {
+private fun StrategiesCard(strategies: List<StrategyRow>) {
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = stringResource(R.string.strategies),
-                style = MaterialTheme.typography.titleLarge
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            strategies.forEach { strategy ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("${strategy.id} (${strategy.mode})")
-                    Text(formatPercent(strategy.allocationPct))
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            SectionHeading(stringResource(R.string.strategies))
+            if (strategies.isEmpty()) {
+                Text(stringResource(R.string.empty_data))
+            } else {
+                strategies.forEach { strategy ->
+                    MetricRow(
+                        label = "${strategy.id} · ${strategy.mode}",
+                        value = "${formatPercent(strategy.allocationPct)} · ${
+                            if (strategy.approved) {
+                                stringResource(R.string.approved)
+                            } else {
+                                stringResource(R.string.not_approved)
+                            }
+                        }"
+                    )
                 }
             }
         }
     }
+}
+
+@Composable
+private fun InfoCard(title: String, lines: List<String>) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            SectionHeading(title)
+            lines.forEach { Text(it) }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeading(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.semantics { heading() }
+    )
 }
 
 @Composable
@@ -176,10 +315,81 @@ private fun MetricRow(label: String, value: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
+            .padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(label)
-        Text(value)
+        Text(label, modifier = Modifier.weight(1f))
+        Text(
+            text = value,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1.2f)
+        )
     }
+}
+
+@Composable
+private fun operationalStateLabel(state: OperationalState): String = when (state) {
+    OperationalState.OPERATIONAL -> stringResource(R.string.status_operational)
+    OperationalState.DEGRADED -> stringResource(R.string.status_degraded)
+    OperationalState.BLOCKED -> stringResource(R.string.status_blocked)
+    OperationalState.PAUSED -> stringResource(R.string.status_paused)
+}
+
+@Composable
+private fun operationalStateColor(state: OperationalState): Color = when (state) {
+    OperationalState.OPERATIONAL -> MaterialTheme.colorScheme.primary
+    OperationalState.DEGRADED -> MaterialTheme.colorScheme.tertiary
+    OperationalState.BLOCKED -> MaterialTheme.colorScheme.error
+    OperationalState.PAUSED -> MaterialTheme.colorScheme.outline
+}
+
+@Composable
+private fun modeLabel(mode: Mode): String = when (mode) {
+    Mode.PAPER -> "PAPER"
+    Mode.LIVE -> "LIVE"
+    Mode.UNKNOWN -> stringResource(R.string.unknown)
+}
+
+@Composable
+private fun marketPhaseLabel(phase: MarketPhase): String = when (phase) {
+    MarketPhase.OPEN -> stringResource(R.string.market_open)
+    MarketPhase.PRE_MARKET -> stringResource(R.string.market_pre)
+    MarketPhase.AFTER_HOURS -> stringResource(R.string.market_after)
+    MarketPhase.CLOSED -> stringResource(R.string.market_closed)
+    MarketPhase.HOLIDAY -> stringResource(R.string.market_holiday)
+}
+
+@Composable
+private fun pipelineStatusLabel(status: PipelineStatus): String = when (status) {
+    PipelineStatus.FRESH -> stringResource(R.string.pipeline_fresh)
+    PipelineStatus.AGING -> stringResource(R.string.pipeline_aging)
+    PipelineStatus.STALE -> stringResource(R.string.pipeline_stale)
+    PipelineStatus.NOT_EXPECTED -> stringResource(R.string.not_expected)
+    PipelineStatus.UNKNOWN -> stringResource(R.string.unknown)
+}
+
+private fun pipelineName(name: String): String =
+    when (name.lowercase()) {
+        "database" -> "Database"
+        "redis" -> "Redis"
+        "signal" -> "Segnali"
+        "portfolio_cycle" -> "Ciclo portafoglio"
+        "broker" -> "Broker"
+        else -> name.replace('_', ' ').replaceFirstChar { it.uppercase() }
+    }
+
+private fun reasonLabel(reason: String): String = when (reason.lowercase()) {
+    "killswitch_active" -> "Kill switch attivo"
+    "active_incidents" -> "Incidenti critici attivi"
+    "pipeline_degradation" -> "Pipeline degradata"
+    "pipeline_not_expected" -> "Pipeline non attesa nella finestra corrente"
+    else -> reason.replace('_', ' ').replaceFirstChar { it.uppercase() }
+}
+
+private fun formatPercentWithLimit(value: Double?, limit: Double?): String {
+    val values = buildList {
+        value?.let { add(formatPercent(it)) }
+        limit?.let { add(formatPercent(it)) }
+    }
+    return if (values.isEmpty()) "Non disponibile" else values.joinToString(" / ")
 }

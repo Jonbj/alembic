@@ -9,6 +9,8 @@ import com.jonbj.alembic.monitor.core.network.dto.PerformanceResponse
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class PerformanceRepository(
     private val apiProvider: MobileApiProvider,
@@ -18,9 +20,14 @@ class PerformanceRepository(
 
     private val _performance = MutableStateFlow<LoadState<Performance>>(LoadState.Loading)
     val performance: StateFlow<LoadState<Performance>> = _performance.asStateFlow()
+    private val refreshMutex = Mutex()
 
-    suspend fun refresh(period: String, force: Boolean = false) {
-        if (force || _performance.value !is LoadState.Success) {
+    suspend fun refresh(
+        period: String,
+        @Suppress("UNUSED_PARAMETER") force: Boolean = false
+    ) = refreshMutex.withLock {
+        val current = _performance.value
+        if (current !is LoadState.Success || current.data.period != period) {
             _performance.value = LoadState.Loading
         }
 

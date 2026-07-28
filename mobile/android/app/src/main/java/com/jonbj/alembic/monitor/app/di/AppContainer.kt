@@ -18,6 +18,7 @@ import com.jonbj.alembic.monitor.data.repository.AndroidDeviceInfoProvider
 import com.jonbj.alembic.monitor.data.repository.AuthRepository
 import com.jonbj.alembic.monitor.data.repository.DeviceInfoProvider
 import com.jonbj.alembic.monitor.data.repository.EventsRepository
+import com.jonbj.alembic.monitor.data.repository.ForegroundRefreshCoordinator
 import com.jonbj.alembic.monitor.data.repository.PerformanceRepository
 import com.jonbj.alembic.monitor.data.repository.PortfolioRepository
 import com.jonbj.alembic.monitor.data.repository.StatusRepository
@@ -95,6 +96,10 @@ class AppContainer(
 
     val eventsRepository: EventsRepository by lazy {
         EventsRepository(apiProvider, cacheStore, authRepository)
+    }
+
+    val foregroundRefreshCoordinator: ForegroundRefreshCoordinator by lazy {
+        ForegroundRefreshCoordinator(statusRepository, portfolioRepository)
     }
 
     val appLock: AppLock by lazy {
