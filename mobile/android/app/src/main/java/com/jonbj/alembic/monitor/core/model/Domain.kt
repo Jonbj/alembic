@@ -34,15 +34,9 @@ enum class PipelineStatus {
 
 enum class EventKind {
     ALERT_INCIDENT,
-    ORDER_SUBMITTED,
-    ORDER_FILLED,
-    ORDER_REJECTED,
-    ORDER_CANCELED,
-    POSITION_OPENED,
-    POSITION_CLOSED,
-    BUY_DECISION,
-    SELL_DECISION,
-    HALT_DECISION
+    ORDER,
+    POSITION,
+    DECISION
 }
 
 enum class EventCategory {
@@ -54,14 +48,14 @@ enum class EventCategory {
 enum class EventSeverity {
     CRITICAL,
     WARNING,
-    INFO,
-    RECOVERY
+    INFO
 }
 
 enum class EventStatus {
     OPEN,
     ESCALATED,
-    RESOLVED
+    RECOVERED,
+    CLOSED
 }
 
 @Serializable
@@ -117,8 +111,8 @@ data class Portfolio(
     val grossExposureLimit: Double?,
     val currentDrawdown: Double?,
     val drawdownLimit: Double?,
-    val openPositions: Int,
-    val source: String
+    val openPositions: Int?,
+    val source: String?
 )
 
 data class PipelineComponent(
@@ -149,12 +143,12 @@ data class Performance(
 )
 
 data class PerformanceSummary(
-    val navStart: Double,
-    val navEnd: Double,
-    val navChange: Double,
-    val portfolioReturn: Double,
+    val navStart: Double?,
+    val navEnd: Double?,
+    val navChange: Double?,
+    val portfolioReturn: Double?,
     val realizedPnl: Double?,
-    val maxDrawdown: Double,
+    val maxDrawdown: Double?,
     val avgGrossExposure: Double?,
     val spyReturn: Double?,
     val benchmarkReturn: Double?,
@@ -180,21 +174,21 @@ data class Positions(
 
 data class PositionSummary(
     val count: Int,
-    val marketValue: Double,
-    val unrealizedPnl: Double,
+    val marketValue: Double?,
+    val unrealizedPnl: Double?,
     val grossExposure: Double?
 )
 
 data class Position(
     val symbol: String,
     val qty: Double,
-    val avgEntryPrice: Double,
-    val currentPrice: Double,
-    val marketValue: Double,
+    val avgEntryPrice: Double?,
+    val currentPrice: Double?,
+    val marketValue: Double?,
     val positionWeight: Double?,
-    val unrealizedPnl: Double,
-    val unrealizedReturn: Double,
-    val entryTime: Instant
+    val unrealizedPnl: Double?,
+    val unrealizedReturn: Double?,
+    val entryTime: Instant?
 )
 
 data class EventsPage(
@@ -214,7 +208,7 @@ data class EventItem(
     val updatedAt: Instant,
     val resolvedAt: Instant?,
     val title: String,
-    val summary: String,
+    val summary: String?,
     val entity: EventEntity?,
     val measure: EventMeasure?,
     val history: List<EventHistoryEntry>
@@ -226,8 +220,8 @@ data class EventEntity(
 )
 
 data class EventMeasure(
-    val value: Double,
-    val unit: String,
+    val value: Double?,
+    val unit: String?,
     val threshold: Double?
 )
 

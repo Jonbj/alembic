@@ -73,8 +73,9 @@ class FakeMobileApi : MobileApi {
                     nav = 100000.0,
                     source = "alpaca_paper"
                 ),
-                pipeline = listOf(
-                    com.jonbj.alembic.monitor.core.network.dto.PipelineComponentDto("fresh", 0)
+                pipeline = mapOf(
+                    "database" to
+                        com.jonbj.alembic.monitor.core.network.dto.PipelineComponentDto("fresh", 0)
                 ),
                 strategies = emptyList()
             )
@@ -128,13 +129,27 @@ class FakeMobileApi : MobileApi {
             EventsResponse(
                 contractVersion = 1,
                 asOf = Clock.System.now(),
+                dataAgeSeconds = 0,
+                currency = "USD",
+                minSupportedAppVersion = "1.0.0",
+                latestAppVersion = "1.0.0",
                 items = emptyList()
             )
         )
     }
 
     override suspend fun registerDevice(request: DeviceRegistrationRequest): Response<DeviceRegistrationResponse> {
-        return Response.success(DeviceRegistrationResponse("d1", pushEnabled = false))
+        return Response.success(
+            DeviceRegistrationResponse(
+                com.jonbj.alembic.monitor.core.network.dto.DeviceDto(
+                    id = "d1",
+                    installationId = request.installationId,
+                    name = request.name,
+                    appVersion = request.appVersion,
+                    pushEnabled = false
+                )
+            )
+        )
     }
 
     override suspend fun revokeDevice(deviceId: String): Response<Unit> {

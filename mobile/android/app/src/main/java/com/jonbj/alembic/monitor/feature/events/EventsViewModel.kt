@@ -2,7 +2,6 @@ package com.jonbj.alembic.monitor.feature.events
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.jonbj.alembic.monitor.app.di.AppModule
 import com.jonbj.alembic.monitor.data.repository.EventsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -10,7 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class EventsViewModel(
-    private val repository: EventsRepository = AppModule.eventsRepository
+    private val repository: EventsRepository
 ) : ViewModel() {
 
     val state = repository.events

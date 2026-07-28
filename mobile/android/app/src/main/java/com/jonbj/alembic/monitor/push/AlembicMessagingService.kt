@@ -5,10 +5,9 @@ import android.content.Intent
 import android.os.IBinder
 
 /**
- * FCM delivery is external-only in the MVP. The backend owns alert incidents and
- * pushes opaque routing data through Firebase Cloud Messaging. This stub keeps the
- * manifest entry and the delivery port in place; a future build can swap in the
- * real FirebaseMessagingService without changing incident semantics.
+ * The backend already owns alert incidents and FCM delivery. MOB-07 replaces this
+ * Android-only placeholder with FirebaseMessagingService while preserving the
+ * opaque, privacy-safe payload boundary.
  */
 class AlembicMessagingService : Service() {
 

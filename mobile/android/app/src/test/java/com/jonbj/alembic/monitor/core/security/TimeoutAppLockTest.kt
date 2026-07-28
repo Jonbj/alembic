@@ -24,6 +24,33 @@ class TimeoutAppLockTest {
     )
 
     @Test
+    fun `existing session is locked on cold startup`() = runTest {
+        val vault = InMemorySessionVault(session)
+        val lock = TimeoutAppLock(
+            vault,
+            clock = { 0L },
+            dispatcher = UnconfinedTestDispatcher(testScheduler)
+        )
+
+        assertTrue(lock.isLocked.value)
+    }
+
+    @Test
+    fun `session token rotation does not relock an unlocked app`() = runTest {
+        val vault = InMemorySessionVault(session)
+        val lock = TimeoutAppLock(
+            vault,
+            clock = { 0L },
+            dispatcher = UnconfinedTestDispatcher(testScheduler)
+        )
+        lock.unlock()
+
+        vault.save(session.copy(accessToken = "rotated"))
+
+        assertFalse(lock.isLocked.value)
+    }
+
+    @Test
     fun `lock triggers after five minutes in background`() = runTest {
         var now = 0L
         val vault = InMemorySessionVault(session)
@@ -34,6 +61,7 @@ class TimeoutAppLockTest {
             dispatcher = UnconfinedTestDispatcher(testScheduler)
         )
 
+        lock.unlock()
         assertFalse(lock.isLocked.value)
 
         lock.onAppBackground()
@@ -54,6 +82,7 @@ class TimeoutAppLockTest {
             dispatcher = UnconfinedTestDispatcher(testScheduler)
         )
 
+        lock.unlock()
         lock.onAppBackground()
         now += 60L * 1000L
         lock.onAppForeground()
@@ -72,6 +101,7 @@ class TimeoutAppLockTest {
             dispatcher = UnconfinedTestDispatcher(testScheduler)
         )
 
+        lock.unlock()
         lock.onAppBackground()
         now += 10L * 60L * 1000L
         lock.onAppForeground()
@@ -90,6 +120,7 @@ class TimeoutAppLockTest {
             dispatcher = UnconfinedTestDispatcher(testScheduler)
         )
 
+        lock.unlock()
         lock.onAppBackground()
         now += 6L * 60L * 1000L
         lock.onAppForeground()

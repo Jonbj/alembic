@@ -4,8 +4,12 @@ class FakeTokenRefresher(private val succeed: Boolean = true) : TokenRefresher {
     var refreshCount = 0
         private set
 
-    override suspend fun refreshAccessToken(): Result<Unit> {
+    override fun currentAccessToken(): String = "fake-access"
+
+    override suspend fun refreshAccessToken(failedAccessToken: String?): Result<Unit> {
         refreshCount++
         return if (succeed) Result.success(Unit) else Result.failure(RuntimeException("Refresh failed"))
     }
+
+    override suspend fun invalidateSession() = Unit
 }

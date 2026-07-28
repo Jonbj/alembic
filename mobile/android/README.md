@@ -11,7 +11,7 @@ Native Kotlin / Jetpack Compose read-only monitoring application for Alembic.
 - Encrypted offline cache (Room + AES-GCM column encryption via Keystore).
 - Repository skeletons with network-first and cache fallback, exposed as StateFlow.
 - LAN TLS with a domain-scoped user CA.
-- Push delivery is intentionally external-only in the MVP; the backend owns incidents and FCM is a future delivery channel.
+- Backend incidents and FCM delivery are available; the Android receiver is delivered by MOB-07.
 
 ## Project structure
 
@@ -28,7 +28,7 @@ mobile/android/
 │   ├── push/             # Push delivery port and stub service
 │   └── worker/           # Opportunistic cache refresh worker
 ├── app/src/main/res/xml/network_security_config.xml
-└── app/src/main/res/raw/lan_ca.pem  # test-only fake CA; replace with your real LAN CA
+└── app/src/debug/res/raw/lan_ca.pem  # debug-only fake CA; absent from release
 ```
 
 ## Build
@@ -44,15 +44,8 @@ cd mobile/android
 ./gradlew assembleDebug
 ```
 
-Release builds require an injected signing keystore:
-
-```bash
-./gradlew assembleRelease \
-  -Pandroid.injected.signing.store.file=$KEYSTORE_PATH \
-  -Pandroid.injected.signing.store.password=$STORE_PASSWORD \
-  -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
-  -Pandroid.injected.signing.key.password=$KEY_PASSWORD
-```
+Release signing and the private release pipeline are intentionally owned by MOB-08.
+This project never falls back to the Android debug key for a release artifact.
 
 Never commit `google-services.json`, release keystores, or backend secrets.
 
@@ -61,18 +54,22 @@ Never commit `google-services.json`, release keystores, or backend secrets.
 1. Choose a stable LAN hostname (e.g. `alembic.lan`) and point it at the Alembic host.
 2. Run a reverse proxy with TLS using your internal CA.
 3. Install the CA certificate on the Pixel device as a user CA.
-4. Replace `app/src/main/res/raw/lan_ca.pem` with your real CA certificate.
-5. Configure the mobile base URL at build time via `BASE_URL` in `app/build.gradle.kts` or through managed configuration.
+4. Enter the trusted HTTPS server origin in the first-run login screen.
 
-`network_security_config.xml` trusts the system store plus the user CA and the bundled anchor only for `alembic.lan`. Cleartext is disabled in release builds; debug builds allow cleartext only for `10.0.2.2` / `10.0.3.2` (emulator hosts).
+`network_security_config.xml` trusts the system store plus the operator-installed
+user CA only for `alembic.lan`. The test CA is packaged only in debug. Cleartext is
+disabled in release builds; debug builds allow it only for explicit emulator and
+loopback hosts.
 
 ## Security notes
 
 - Session JWTs and refresh tokens are encrypted at rest; the encryption key lives in Android Keystore and is non-exportable.
 - Cached financial data is encrypted before being written to Room.
 - `FLAG_SECURE` hides window content from the task switcher / screenshots.
-- Logout clears local tokens and cache even if the server call fails.
-- The bundled `lan_ca.pem` is a self-signed test certificate and must be replaced before any real deployment.
+- Logout clears local tokens and cache even if server revocation fails, and reports
+  that revocation failure to the caller.
+- The bundled debug `lan_ca.pem` is a self-signed test certificate and is never
+  packaged in release.
 
 ## Tests
 
@@ -93,6 +90,9 @@ Key test areas:
 - `EncryptedSessionVaultTest`: Keystore-backed encryption round-trip.
 - `TimeoutAppLockTest`: biometric timeout gating logic with a fake clock.
 - `RepositoryCacheFallbackTest`: repository returns cached data when the network returns 503.
+- `MobileDtoContractTest`: Android DTOs decode the real v1 server contract.
+- `ApiCallerConcurrencyTest`: concurrent 401 responses trigger one refresh rotation.
+- `ServerUrlPolicyTest`: release HTTPS onboarding and debug loopback policy.
 - `KeystoreSessionVaultInstrumentedTest`: real Keystore cipher on a device.
 
 ## External prerequisites
@@ -100,7 +100,7 @@ Key test areas:
 The following are intentionally not bundled and must be supplied by the operator:
 
 - Real LAN CA certificate and hostname.
-- Firebase project and `google-services.json` if enabling FCM in a future build.
+- Firebase project and `google-services.json` for the MOB-07 Android FCM integration.
 - Release signing keystore.
 - Monitor user provisioned on the Alembic server.
 

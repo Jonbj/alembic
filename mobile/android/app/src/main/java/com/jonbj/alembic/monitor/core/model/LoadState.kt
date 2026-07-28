@@ -5,7 +5,12 @@ sealed class LoadState<out T> {
     data class Success<T>(
         val data: T,
         val source: DataSource,
-        val dataAgeSeconds: Int
+        val dataAgeSeconds: Int,
+        val mode: ContentMode = if (source == DataSource.NETWORK) {
+            ContentMode.LIVE
+        } else {
+            ContentMode.OFFLINE
+        }
     ) : LoadState<T>()
 
     data class Error<T>(
@@ -13,7 +18,8 @@ sealed class LoadState<out T> {
         val cached: T? = null,
         val source: DataSource? = null,
         val dataAgeSeconds: Int? = null,
-        val retryable: Boolean = true
+        val retryable: Boolean = true,
+        val mode: ContentMode = ContentMode.UNAVAILABLE
     ) : LoadState<T>()
 }
 
@@ -21,4 +27,13 @@ enum class DataSource {
     NETWORK,
     CACHE,
     FALLBACK_EMPTY
+}
+
+enum class ContentMode {
+    LIVE,
+    OFFLINE,
+    STALE,
+    INCOMPATIBLE,
+    UNAUTHENTICATED,
+    UNAVAILABLE
 }

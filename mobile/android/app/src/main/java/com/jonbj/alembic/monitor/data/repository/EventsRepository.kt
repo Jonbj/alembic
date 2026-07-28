@@ -4,17 +4,15 @@ import com.jonbj.alembic.monitor.core.database.CacheKey
 import com.jonbj.alembic.monitor.core.database.CacheStore
 import com.jonbj.alembic.monitor.core.model.EventsPage
 import com.jonbj.alembic.monitor.core.model.LoadState
-import com.jonbj.alembic.monitor.core.network.MobileApi
+import com.jonbj.alembic.monitor.core.network.MobileApiProvider
 import com.jonbj.alembic.monitor.core.network.dto.EventsResponse
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.serialization.json.Json
 
 class EventsRepository(
-    private val api: MobileApi,
+    private val apiProvider: MobileApiProvider,
     private val cache: CacheStore,
-    private val json: Json,
     private val refresher: TokenRefresher
 ) {
 
@@ -32,11 +30,19 @@ class EventsRepository(
         }
 
         val cacheKey = "${CacheKey.EVENTS}_$category"
-        val result = ApiCaller.execute(refresher) { api.events(category, days, cursor) }
+        val result = ApiCaller.execute(refresher) {
+            apiProvider.current().events(category, days, cursor)
+        }
 
         result.fold(
             onSuccess = { dto ->
-                cache.put(cacheKey, dto, EventsResponse.serializer(), dto.asOf, 0)
+                cache.put(
+                    cacheKey,
+                    dto,
+                    EventsResponse.serializer(),
+                    dto.asOf,
+                    dto.dataAgeSeconds
+                )
                 _events.value = LoadState.Success(
                     data = EventsPage(
                         contractVersion = dto.contractVersion,
@@ -45,29 +51,20 @@ class EventsRepository(
                         nextCursor = dto.nextCursor
                     ),
                     source = com.jonbj.alembic.monitor.core.model.DataSource.NETWORK,
-                    dataAgeSeconds = 0
+                    dataAgeSeconds = dto.dataAgeSeconds
                 )
             },
             onFailure = { error ->
                 val cached = cache.get(cacheKey, EventsResponse.serializer())
-                _events.value = if (cached != null) {
-                    LoadState.Success(
-                        data = EventsPage(
-                            contractVersion = cached.data.contractVersion,
-                            asOf = cached.data.asOf,
-                            items = cached.data.items.toEventsDomain(),
-                            nextCursor = cached.data.nextCursor
-                        ),
-                        source = com.jonbj.alembic.monitor.core.model.DataSource.CACHE,
-                        dataAgeSeconds = cached.dataAgeSeconds
-                    )
-                } else {
-                    LoadState.Error(
-                        message = error.message ?: "Errore imprevisto",
-                        retryable = (error as? com.jonbj.alembic.monitor.core.model.MobileError)?.retryable
-                            ?: true
+                val cachedDomain = cached?.data?.let {
+                    EventsPage(
+                        contractVersion = it.contractVersion,
+                        asOf = it.asOf,
+                        items = it.items.toEventsDomain(),
+                        nextCursor = it.nextCursor
                     )
                 }
+                _events.value = failureState(error, cachedDomain, cached?.dataAgeSeconds)
             }
         )
     }

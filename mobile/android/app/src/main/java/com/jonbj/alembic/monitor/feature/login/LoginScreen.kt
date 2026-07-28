@@ -26,12 +26,13 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jonbj.alembic.monitor.R
 
 @Composable
-fun LoginScreen(viewModel: LoginViewModel = viewModel()) {
+fun LoginScreen(viewModel: LoginViewModel) {
     val state by viewModel.state.collectAsState()
+    var serverUrl by remember { mutableStateOf(viewModel.defaultServerUrl) }
+    var deviceName by remember { mutableStateOf(viewModel.defaultDeviceName) }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
 
@@ -47,6 +48,27 @@ fun LoginScreen(viewModel: LoginViewModel = viewModel()) {
             style = MaterialTheme.typography.headlineMedium
         )
         Spacer(modifier = Modifier.height(24.dp))
+        OutlinedTextField(
+            value = serverUrl,
+            onValueChange = { serverUrl = it },
+            label = { Text(stringResource(R.string.server_url)) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Uri,
+                imeAction = ImeAction.Next
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        OutlinedTextField(
+            value = deviceName,
+            onValueChange = { deviceName = it },
+            label = { Text(stringResource(R.string.device_name)) },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(12.dp))
         OutlinedTextField(
             value = username,
             onValueChange = { username = it },
@@ -70,7 +92,7 @@ fun LoginScreen(viewModel: LoginViewModel = viewModel()) {
         )
         Spacer(modifier = Modifier.height(24.dp))
         Button(
-            onClick = { viewModel.login(username, password) },
+            onClick = { viewModel.login(serverUrl, username, password, deviceName) },
             enabled = state !is LoginUiState.Loading,
             modifier = Modifier.fillMaxWidth()
         ) {

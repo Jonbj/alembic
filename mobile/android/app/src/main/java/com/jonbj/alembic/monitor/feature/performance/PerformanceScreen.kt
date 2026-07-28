@@ -18,7 +18,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jonbj.alembic.monitor.R
 import com.jonbj.alembic.monitor.core.model.LoadState
 import com.jonbj.alembic.monitor.core.model.Performance
@@ -32,7 +31,7 @@ import com.jonbj.alembic.monitor.ui.components.formatPercent
 private val PERIODS = listOf("1w", "1m", "3m", "6m", "1y", "all")
 
 @Composable
-fun PerformanceScreen(viewModel: PerformanceViewModel = viewModel()) {
+fun PerformanceScreen(viewModel: PerformanceViewModel) {
     val state by viewModel.state.collectAsState()
     val period by viewModel.selectedPeriod.collectAsState()
     PerformanceContent(

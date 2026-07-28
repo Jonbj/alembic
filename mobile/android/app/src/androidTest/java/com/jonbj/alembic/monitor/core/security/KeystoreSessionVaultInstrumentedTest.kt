@@ -31,7 +31,7 @@ class KeystoreSessionVaultInstrumentedTest {
 
     @Test
     fun encryptAndDecryptRoundTrip() = runBlocking {
-        val plaintext = "{"key":"value"}"
+        val plaintext = """{"key":"value"}"""
         val encrypted = cipher.encrypt(plaintext)
         val decrypted = cipher.decrypt(encrypted)
         assertEquals(plaintext, decrypted)

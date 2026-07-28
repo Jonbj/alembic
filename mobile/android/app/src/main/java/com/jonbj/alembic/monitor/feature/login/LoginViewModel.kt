@@ -2,7 +2,6 @@ package com.jonbj.alembic.monitor.feature.login
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.jonbj.alembic.monitor.app.di.AppModule
 import com.jonbj.alembic.monitor.data.repository.AuthRepository
 import com.jonbj.alembic.monitor.data.repository.DeviceInfoProvider
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,25 +17,31 @@ sealed class LoginUiState {
 }
 
 class LoginViewModel(
-    private val authRepository: AuthRepository = AppModule.authRepository,
-    private val deviceInfoProvider: DeviceInfoProvider = AppModule.deviceInfoProvider
+    private val authRepository: AuthRepository,
+    private val deviceInfoProvider: DeviceInfoProvider,
+    val defaultServerUrl: String
 ) : ViewModel() {
+    val defaultDeviceName: String = deviceInfoProvider.deviceName()
 
     private val _state = MutableStateFlow<LoginUiState>(LoginUiState.Idle)
     val state: StateFlow<LoginUiState> = _state.asStateFlow()
 
-    fun login(username: String, password: String) {
-        if (username.isBlank() || password.isBlank()) {
-            _state.value = LoginUiState.Error("Username e password sono obbligatori")
+    fun login(serverUrl: String, username: String, password: String, deviceName: String) {
+        if (serverUrl.isBlank() || username.isBlank() || password.isBlank() ||
+            deviceName.isBlank()
+        ) {
+            _state.value =
+                LoginUiState.Error("Server, dispositivo, username e password sono obbligatori")
             return
         }
         _state.value = LoginUiState.Loading
         viewModelScope.launch {
             val result = authRepository.login(
+                serverUrl = serverUrl,
                 username = username,
                 password = password,
                 installationId = deviceInfoProvider.installationId(),
-                deviceName = deviceInfoProvider.deviceName()
+                deviceName = deviceName.trim()
             )
             _state.value = if (result.isSuccess) {
                 LoginUiState.LoggedIn

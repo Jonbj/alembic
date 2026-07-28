@@ -17,7 +17,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.jonbj.alembic.monitor.R
 import com.jonbj.alembic.monitor.core.model.LoadState
 import com.jonbj.alembic.monitor.core.model.Position
@@ -29,7 +28,7 @@ import com.jonbj.alembic.monitor.ui.components.formatMoney
 import com.jonbj.alembic.monitor.ui.components.formatPercent
 
 @Composable
-fun PortfolioScreen(viewModel: PortfolioViewModel = viewModel()) {
+fun PortfolioScreen(viewModel: PortfolioViewModel) {
     val state by viewModel.state.collectAsState()
     PortfolioContent(state = state, onRetry = { viewModel.refresh(true) })
 }

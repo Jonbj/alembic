@@ -1,6 +1,8 @@
 package com.jonbj.alembic.monitor.data.repository
 
 import com.jonbj.alembic.monitor.core.model.DataSource
+import com.jonbj.alembic.monitor.core.model.ContentMode
+import com.jonbj.alembic.monitor.core.model.MobileError
 import com.jonbj.alembic.monitor.core.model.EventCategory
 import com.jonbj.alembic.monitor.core.model.EventEntity
 import com.jonbj.alembic.monitor.core.model.EventHistoryEntry
@@ -44,9 +46,9 @@ fun SnapshotResponse.toDomain(): Snapshot = Snapshot(
     latestAppVersion = latestAppVersion,
     operational = operational.toDomain(),
     portfolio = portfolio.toDomain(),
-    pipeline = pipeline.mapIndexed { index, dto -> dto.toDomain(index) },
+    pipeline = pipeline.map { (name, dto) -> dto.toDomain(name) },
     strategies = strategies.map { it.toDomain() },
-    degradations = degradations
+    degradations = degradations.map { "${it.component}:${it.reason}" }
 )
 
 private fun OperationalDto.toDomain(): Operational = Operational(
@@ -75,15 +77,8 @@ private fun PortfolioDto.toDomain(): Portfolio = Portfolio(
     source = source
 )
 
-private fun PipelineComponentDto.toDomain(index: Int): PipelineComponent = PipelineComponent(
-    name = when (index) {
-        0 -> "database"
-        1 -> "redis"
-        2 -> "signal"
-        3 -> "portfolio_cycle"
-        4 -> "broker"
-        else -> "component_$index"
-    },
+private fun PipelineComponentDto.toDomain(name: String): PipelineComponent = PipelineComponent(
+    name = name,
     status = parsePipelineStatus(status),
     ageSeconds = ageSeconds,
     writeable = writeable
@@ -117,7 +112,7 @@ fun PerformanceResponse.toDomain(): Performance = Performance(
         alpha = summary.alpha
     ),
     points = points.map { PerformancePoint(it.at, it.nav, it.drawdown, it.benchmarkNav) },
-    degradations = degradations
+    degradations = degradations.map { "${it.component}:${it.reason}" }
 )
 
 fun PositionsResponse.toDomain(): Positions = Positions(
@@ -132,7 +127,7 @@ fun PositionsResponse.toDomain(): Positions = Positions(
         grossExposure = summary.grossExposure
     ),
     items = items.map { it.toDomain() },
-    degradations = degradations
+    degradations = degradations.map { "${it.component}:${it.reason}" }
 )
 
 private fun PositionDto.toDomain(): Position = Position(
@@ -194,4 +189,40 @@ internal fun <T> successFromNetwork(data: T, dataAgeSeconds: Int): LoadState.Suc
     LoadState.Success(data, DataSource.NETWORK, dataAgeSeconds)
 
 internal fun <T> successFromCache(data: T, dataAgeSeconds: Int): LoadState.Success<T> =
-    LoadState.Success(data, DataSource.CACHE, dataAgeSeconds)
+    LoadState.Success(
+        data,
+        DataSource.CACHE,
+        dataAgeSeconds,
+        if (dataAgeSeconds > STALE_AFTER_SECONDS) ContentMode.STALE else ContentMode.OFFLINE
+    )
+
+internal fun <T> failureState(
+    error: Throwable,
+    cached: T? = null,
+    cachedAgeSeconds: Int? = null
+): LoadState<T> = when (error) {
+    is MobileError.Version -> LoadState.Error(
+        message = error.message ?: "Aggiornamento obbligatorio",
+        cached = cached,
+        source = cached?.let { DataSource.CACHE },
+        dataAgeSeconds = cachedAgeSeconds,
+        retryable = false,
+        mode = ContentMode.INCOMPATIBLE
+    )
+    is MobileError.Auth -> LoadState.Error(
+        message = error.message ?: "Sessione scaduta",
+        retryable = false,
+        mode = ContentMode.UNAUTHENTICATED
+    )
+    else -> if (cached != null && cachedAgeSeconds != null) {
+        successFromCache(cached, cachedAgeSeconds)
+    } else {
+        LoadState.Error(
+            message = error.message ?: "Errore imprevisto",
+            retryable = (error as? MobileError)?.retryable ?: true,
+            mode = ContentMode.UNAVAILABLE
+        )
+    }
+}
+
+internal const val STALE_AFTER_SECONDS = 5 * 60
