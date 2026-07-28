@@ -12,6 +12,33 @@ from src.portfolio.stop_policy import FrozenStop, StopDecision
 from src.store.pg_store import PostgreSQLStore
 
 
+# ── Guard: no test symbol may exceed the VARCHAR(20) column width ────────────
+# This runs at import/collection time — no DB, no network. It breaks before any
+# live-DB test fires if a new symbol that is too long is introduced.
+_TRADE_SYMBOL_MAX = 20  # trades.symbol VARCHAR(20)
+
+_TEST_SYMBOLS = {
+    "TEST_STOP_1",
+    "TEST_STOP_FIXED_AUD",   # was 21 chars ("TEST_STOP_FIXED_AUDIT") — fixed #112
+    "TEST_STOP_2",
+    "TEST_STOP_3",
+    "TEST_S1",
+    "TEST_S4",
+}
+
+
+def _guard_symbol_lengths() -> None:
+    violations = [s for s in _TEST_SYMBOLS if len(s) > _TRADE_SYMBOL_MAX]
+    assert not violations, (
+        f"Symbol(s) exceed trades.symbol VARCHAR({_TRADE_SYMBOL_MAX}): "
+        f"{violations} — shorten or the DB will reject the row with "
+        f"StringDataRightTruncation (cf. #112)"
+    )
+
+
+_guard_symbol_lengths()  # run immediately on import; raises if violated
+
+
 def _connect_or_skip() -> psycopg2.extensions.connection:
     url = os.environ.get("DATABASE_URL", "")
     if not url:
@@ -61,7 +88,7 @@ def test_fixed_mode_freezes_audit_fields() -> None:
     vol_scaled sizing gate has the full freeze-at-entry record later."""
     store = PostgreSQLStore(use_pool=False)
     ts = datetime(2026, 7, 10, 14, 0, tzinfo=timezone.utc)
-    symbol = "TEST_STOP_FIXED_AUDIT"
+    symbol = "TEST_STOP_FIXED_AUD"  # max 20 chars — trades.symbol is VARCHAR(20)
     frozen = FrozenStop(
         strategy="S1", mode="fixed", vol_at_entry=0.018, sigma_eff=0.018,
         k=3.5, floor=0.06, cap=0.12, d_init=0.02, vol_source="tier",
