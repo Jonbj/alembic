@@ -4,6 +4,60 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ---
 
+## 2026-07-27
+
+### F8 regime_scale — gate per-strategia, evidenza dai dati registrati, leva OFF (#32, #134)
+PR #135 (`9171099`) e #136 (`77d2af9`). **Nessun cambiamento di comportamento in produzione**:
+`apply_regime_scale` resta `false`. Cambiano il meccanismo, la diagnostica e le conclusioni.
+
+- **`scripts/f8_regime_scale_shadow_evidence.py` legge la tabella persistita.** Migration 040 +
+  scheduler registravano `f8_regime_scale_shadow` dal 07-21, ma lo script continuava a
+  ricostruire tutto per replay ignorando 138 righe reali. Traiettoria ora ibrida con
+  provenienza per riga (`recorded` / `replay`); le righe di replay dal primo giorno registrato
+  in poi sono scartate. **Il replay era sbagliato**: dava S1 al floor dal 07-15 (in realtà dal
+  07-23) e S4 a 1.0 il 21-22/07 (in realtà 0.640 / 0.512).
+- **Gate di flip scorato per strategia**, due volte (traiettoria completa vs solo-registrato),
+  perché il gate in `trading.yaml` dice *observed* e un PASS che regge solo sul replay non lo è.
+- **`apply_regime_scale` accetta ora `false` | `true` | lista di strategy id.** Era un bool
+  globale, che imponeva "de-riska tutte le sleeve o nessuna" mentre il gate è per strategia.
+  `PortfolioOrchestrator._scale_gate` normalizza; fail-safe: `None`, lista vuota o valore YAML
+  non riconosciuto ⇒ shadow. `feedback_shadow[...]["applied"]` è ora per-strategia (finisce
+  nella tabella: un valore globale la registrava male).
+- **La leva resta OFF.** `[S4]` era il valore che il gate implicava (S4 PASS, S1 FAIL), ma #134
+  ha mostrato che il gate è scorato su contatori che **contano due volte**.
+
+### #134 — i contatori del ratchet misurano un artefatto cross-sezionale
+`scripts/ratchet_reachability.py` (22 test). Analisi read-only, nessun codice di produzione toccato.
+
+- **Il recovery è di fatto irraggiungibile.** Un down-step resetta lo stesso `last_adjustment`
+  che il ramo decay legge: con un gap mediano fra down-step di 20.0h (S1) / 19.5h (S4) contro
+  una finestra di 24h, **il decay è affamato su entrambe le sleeve** (21 e 17 clock resettati).
+  L'unica uscita funzionante è la win streak: S4 la usa 15 volte, S1 mai in 453 tick.
+- **La premessa della regola non regge.** F8 è un equity curve filter, e questa classe paga solo
+  se i rendimenti dei trade sono positivamente autocorrelati. Per trade sembra di sì (S1 ac
+  +0.318, S4 +0.459), ma **l'80% (S1) e l'89% (S4) delle coppie consecutive sono uscite
+  simultanee dello stesso giorno**: una sleeve tiene molti nomi, quindi una giornata storta è
+  letta come una streak di N perdite, una volta per posizione aperta. Aggregando a una
+  osservazione per giorno di uscita, la dipendenza sparisce (S1 +0.065, S4 +0.017).
+- **Conseguenze**: trigger sul 32-40% dei tick; le "10 perdite consecutive" di S1 sono ~2-3
+  giornate; win streak irraggiungibile per costruzione per chi tiene più di un nome.
+- **Raccomandazione**: aggregare per giorno prima di alimentare i contatori, poi ri-testare la
+  premessa su quell'unità; se resta ~0, ritirare F8 a favore dei controlli di rischio di
+  portafoglio già presenti (che gestiscono lo stesso rischio cross-sezionale senza dedurlo dal P&L).
+- **Limite dichiarato**: n=10 (S1) e n=26 (S4) osservazioni giornaliere — il "nessuna dipendenza"
+  per giorno è sotto-potenziato. Il confondente invece è strutturale, non una stima.
+- **Su S1**: perde su *ogni* exit reason (9.5% win rate su 63 trade chiusi, −$869). Decisione di
+  allocazione, non di taratura. Tracciata in #134.
+
+### Documentazione riallineata
+`CONTEXT.md` (voce "Regime scale" diceva "scritto ma **non consumato**" — falso dal 07-12; aggiunta
+voce "Teaching trade"), `docs/ARCHITECTURE.md` (§2.9 + diagramma Phase B: TTL 48→96h, chiavi
+per-strategia, nuova sotto-sezione F8 apply gate + limite #134), `docs/operations.md`, `README.md`,
+`frontend/src/pages/AutoImprove.tsx` (nota "audit/legacy" rimossa, TTL 48→96h, recovery 5→3 wins,
+trigger EWMA R) e `frontend/src/pages/Docs.tsx`.
+
+---
+
 ## 2026-07-15
 
 ### S7 (PEAD) RIMOSSA dal repository — edge ALPHA-A3 confutato a decision-grade

@@ -87,14 +87,18 @@ Alembic implements the **Alpha Miner** paradigm: LLMs operate exclusively offlin
 │  Phase B — Loss Feedback Loop (every 30 min, market hours)       │
 │    LossFeedbackCheck                                              │
 │    ├── fetch last N closed trades from PostgreSQL                │
-│    ├── detect: N consecutive losses OR negative rolling P&L      │
-│    ├── on trigger: raise ENTRY_THRESHOLD (Redis, 48h TTL)        │
-│    │              write regime_scale (Redis, 48h TTL; legacy/audit)│
+│    ├── detect: EWMA R <= -0.50 OR N consecutive teaching losses  │
+│    ├── on trigger: raise ENTRY_THRESHOLD (Redis, 96h TTL)        │
+│    │              lower regime_scale:<strategy> (Redis, 96h TTL) │
 │    │              send Telegram ⚠️ alert                          │
 │    ├── recovery: consecutive wins → step back toward baseline    │
+│    ├── decay: 24h without a trigger → step back one notch        │
 │    └── cooldown: max 1 adjustment per 4h                         │
-│    Portfolio scheduler enforces feedback:entry_threshold;         │
-│    legacy ExecutionWorker also reads regime_scale                 │
+│    Portfolio scheduler enforces feedback:entry_threshold and     │
+│    passes regime_scale:S* to the orchestrator, which applies it  │
+│    per sleeve iff loss_feedback.apply_regime_scale allows that   │
+│    sleeve (F8); the would-be delta is persisted every cycle to   │
+│    f8_regime_scale_shadow regardless                             │
 │                                                                   │
 │  Phase C — Counterfactual / Opportunity Cost (daily 22:45 UTC)   │
 │    CounterfactualWorker                                           │
@@ -344,17 +348,26 @@ Configured in `config/trading.yaml` under `loss_feedback:`.
 | `threshold_step` | 0.05 | ENTRY_THRESHOLD raised by this amount per trigger |
 | `threshold_max` | 0.60 | ceiling for raised threshold |
 | `threshold_baseline` | 0.30 | target for recovery |
-| `regime_scale_factor` | 0.80 | legacy/audit scale factor written on trigger |
-| `regime_min_scale` | 0.20 | floor for legacy/audit scale |
+| `regime_scale_factor` | 0.80 | per-strategy sizing scale multiplied on each trigger, divided on recovery/decay |
+| `regime_min_scale` | 0.20 | floor for the sizing scale |
 | `cooldown_hours` | 4 | minimum hours between adjustments |
 | `recovery_win_streak` | 3 | consecutive wins → step threshold back down (5→3, 2026-07-09) |
 | `rolling_pnl_drawdown_pct` | 0.005 | il rolling loss deve superare questa frazione dell'equity per triggerare (2026-07-10; prima bastava un rolling P&L < 0 di qualsiasi entità) |
 | `threshold_decay_hours` | 24 | decay automatico della soglia verso il baseline dopo 24h senza trigger (2026-07-10) |
-| `feedback_ttl_hours` | 48 | Redis TTL — adjustments expire automatically |
+| `feedback_ttl_hours` | 96 | Redis TTL — adjustments expire automatically (48→96 on 2026-07-21, #32: the check runs Mon–Fri only, so a 48h key expired across the weekend and reset the scale to 1.0 every Monday) |
+| `apply_regime_scale` | `false` | F8 gate: `false` = shadow, `true` = every sleeve, or a **list of strategy ids** = only those. Ships `false` |
 
-**Redis keys written:** `feedback:entry_threshold`, `feedback:regime_scale`, `feedback:state` (audit JSON). All have 48h TTL, so adjustments cannot persist indefinitely through system restarts.
+**Redis keys written:** `feedback:entry_threshold`, `feedback:regime_scale:<strategy>`, `feedback:state:<strategy>` (audit JSON). All carry the 96h TTL, so adjustments cannot persist indefinitely through system restarts.
 
-**Portfolio scheduler reads** `feedback:entry_threshold` and enforces it before S4 ranking/order generation, logging dropped signals as `SKIP_THRESHOLD`. **Legacy ExecutionWorker** reads both `feedback:entry_threshold` and `feedback:regime_scale` at cycle start. In portfolio mode, `feedback:regime_scale` is visible for audit but is not sizing-authoritative until explicitly wired into portfolio allocation.
+**Portfolio scheduler reads** `feedback:entry_threshold` and enforces it before S4 ranking/order generation, logging dropped signals as `SKIP_THRESHOLD`. It also reads `feedback:regime_scale:S*` and passes the dict to the orchestrator, which multiplies each sleeve's `wt × alloc` contribution by its own scale **before** the weighted-sum merge — so a loss in one sleeve shrinks only that sleeve.
+
+#### F8 — the apply gate (`apply_regime_scale`)
+
+`PortfolioOrchestrator._scale_gate` normalises the flag into a per-strategy predicate. Anything unrecognised (`None`, an empty list, a bad YAML value) means shadow, so a config typo can never start shrinking live sizing. Whatever the gate decides, the would-be delta is written every cycle to **`f8_regime_scale_shadow`** (migration 040) with a per-strategy `applied` flag — one row per *scaled* strategy, so the absence of a row on a cycled day means scale = 1.0, not missing data.
+
+Read the trajectory with `scripts/f8_regime_scale_shadow_evidence.py`, which splices recorded rows over the pre-persistence replay and scores the flip gate per sleeve.
+
+**Known limitation (issue #134):** the ratchet consumes closed trades as a sequence, but a sleeve holds many names at once, so 80–89 % of consecutive pairs are simultaneous same-day exits. One bad day is therefore counted as an N-loss streak, once per open position. Collapsed to one observation per exit day, the positive serial dependence that an equity-curve de-risk rule requires disappears (S1 +0.318 → +0.065, S4 +0.459 → +0.017). This is why the flag ships off. Measure with `scripts/ratchet_reachability.py`.
 
 ### 2.10 Counterfactual Analysis (Phase C)
 
