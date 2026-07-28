@@ -1,16 +1,22 @@
-"""#44: SentimentResult serialization — replace the hand-rolled model_dump_json
-override with a dedicated to_redis_json() method using Pydantic native serialization.
+"""#44: SentimentResult serialization — remove the hand-rolled model_dump_json
+override and use Pydantic native serialization.
 
 Goals:
 1. Remove the override that shadows Pydantic's API (TypeError on kwargs).
 2. Ensure every model field is serialised — no silent drops when fields are added.
-3. Maintain wire compatibility: existing Redis payloads stay readable.
+3. Maintain semantic compatibility: datetime instants survive serialisation;
+   Python fromisoformat (3.11) and JS Date accept both Z and +00:00.
 
-Chosen path: (b) — keep a named method (to_redis_json) rather than overriding
-model_dump_json. Reason: Pydantic v2's native datetime serialisation uses ``Z``
-suffix for UTC while the original override used ``+00:00`` (isoformat). The string
-difference would break existing tests without being a semantic change. A separate
-named method keeps the wire format stable and leaves the Pydantic contract intact.
+Chosen path: (a) — remove override entirely, rely on Pydantic native.
+
+Wire format change: new Redis writes use ``Z`` suffix (Pydantic native) instead
+of ``+00:00`` (old override). This is safe because:
+- _stale_signal_key (portfolio_scheduler:2824) uses datetime.isoformat() on the
+  parsed object — string format is irrelevant.
+- Python fromisoformat on 3.11 accepts both Z and +00:00.
+- Frontend uses new Date() which accepts both.
+- No consumer compares raw strings.
+- TTL means old +00:00 payloads expire naturally.
 """
 
 import json
@@ -174,32 +180,21 @@ def test_native_pydantic_api_accepts_exclude_kwarg():
     assert "reasoning" not in parsed
 
 
-# ── Test 5: to_redis_json produces the exact old wire format ─────────────────
+# ── Test 5: native datetime serialisation round-trips ─────────────────────────
 
-def test_to_redis_json_uses_plus_offset_not_z():
-    """to_redis_json() must emit ``+00:00`` for UTC, not ``Z``.
+def test_datetime_roundtrips_via_fromisoformat():
+    """A UTC datetime serialised by Pydantic (Z suffix) must deserialise back
+    to the same instant via datetime.fromisoformat().
 
-    The original override used datetime.isoformat() which produces ``+00:00``.
-    Pydantic v2 native uses ``Z``. The named method normalises to ``+00:00``
-    so existing Redis payloads (written by the old override) stay readable and
-    new payloads are byte-for-byte identical to what consumers expect.
+    The invariant being tested is the instant, not the string format — Pydantic
+    uses Z which is semantically identical to +00:00 for UTC.
     """
     dt = datetime(2026, 7, 10, 14, 30, 0, tzinfo=timezone.utc)
     instance = _result(generated_at=dt, published_at=dt)
-    payload = json.loads(instance.to_redis_json())
-    assert payload["generated_at"] == "2026-07-10T14:30:00+00:00"
-    assert payload["published_at"] == "2026-07-10T14:30:00+00:00"
-    # model_dump_json (native) uses Z — confirm they differ
-    native_payload = json.loads(instance.model_dump_json())
-    assert native_payload["generated_at"] == "2026-07-10T14:30:00Z"
-
-
-def test_to_redis_json_preserves_all_fields():
-    """to_redis_json() serialises every SentimentResult field."""
-    instance = _result(signal_id=3771)
-    payload = json.loads(instance.to_redis_json())
-    assert set(payload.keys()) == set(SentimentResult.model_fields.keys())
-    assert payload["signal_id"] == 3771
+    payload = json.loads(instance.model_dump_json())
+    # Both fields round-trip via fromisoformat (Python 3.11 accepts Z and +00:00)
+    assert datetime.fromisoformat(payload["generated_at"]) == dt
+    assert datetime.fromisoformat(payload["published_at"]) == dt
 
 
 def test_old_redis_literal_remains_deserialisable():

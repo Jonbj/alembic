@@ -24,19 +24,3 @@ class SentimentResult(BaseModel):
     # decision time, instead of re-querying "latest" later and racing a signal
     # that arrived in between (see the 2026-07-15 MSFT incident).
     signal_id: int | None = None
-
-    def to_redis_json(self) -> str:
-        """Serialize to the Redis-compatible JSON format expected by consumers.
-
-        Uses Pydantic native serialization (forward kwargs, all fields included)
-        then normalises UTC datetime strings from Pydantic's ``Z`` suffix to the
-        ``+00:00`` offset form the original override produced, so existing Redis
-        payloads stay readable.
-        """
-        import re
-
-        raw = super().model_dump_json()
-        # Pydantic v2: "2026-07-10T14:30:00Z".  Old override: "2026-07-10T14:30:00+00:00".
-        # Only the UTC offset Z needs normalising; a regex targets it precisely.
-        return re.sub(r'"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})Z"',
-                       r'"\1+00:00"', raw)
