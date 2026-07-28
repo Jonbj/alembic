@@ -244,7 +244,7 @@ export default function AutoImprove() {
               <Stat
                 label="Regime Scale"
                 value={`${fmt(feedback.regime_scale, 2)}×`}
-                sub={feedback.regime_scale < 1 ? 'legacy scale state' : 'normal'}
+                sub={feedback.regime_scale < 1 ? 'de-risked (shadow)' : 'normal'}
                 highlight={feedback.regime_scale < 1}
               />
               <Stat
@@ -284,14 +284,28 @@ export default function AutoImprove() {
                 color: 'var(--text-muted)',
               }}>
                 Portfolio path note: the entry threshold is enforced by the scheduler.
-                Regime scale is currently an audit/legacy execution state unless portfolio sizing is explicitly wired to it.
+                The regime scale IS wired into portfolio sizing per strategy, but ships
+                behind <code>loss_feedback.apply_regime_scale</code>, which is currently
+                off — so this value is recorded and shown, not applied to your positions.
+                The would-be effect is persisted per cycle in{' '}
+                <code>f8_regime_scale_shadow</code>.
               </div>
             )}
 
             <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
-              Checked every 30 min during market hours. Raises the entry threshold after
-              3 consecutive losses or negative rolling P&L (last 10 trades). Recovers after
-              5 consecutive wins. Adjustments expire after 48 h.
+              Checked every 30 min during market hours. Triggers when the EWMA of trade
+              R-multiples falls to −0.50 or on 3 consecutive losing teaching trades (exits
+              tagged <code>stop_loss</code> / <code>portfolio_sell</code>), with a 4 h
+              cooldown between adjustments. Recovers on 3 consecutive wins, or decays back
+              one step per quiet 24 h. Adjustments expire after 96 h (long enough to carry
+              a weekend, so the de-risk no longer disarms itself every Monday).
+            </p>
+            <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+              Known limitation (issue #134): the streak counters read closed trades one by
+              one, but a sleeve holds many names at once, so 80–89 % of consecutive pairs
+              are simultaneous same-day exits. One bad day is therefore counted as a streak
+              of N losses, once per open position — read “consecutive losses” as roughly
+              “bad days”, not independent events.
             </p>
           </>
         )}

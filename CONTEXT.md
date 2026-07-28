@@ -39,12 +39,16 @@ _Avoid:_ dedup (too generic; also used for news content deduplication).
 ### Risk feedback
 
 **Loss-feedback ratchet**:
-The mechanism that raises the feedback entry threshold (and, in the legacy path, the regime scale) after losing streaks or rolling-P&L drawdown, decaying back toward baseline on wins. Its adjustments carry a 48h TTL.
+The mechanism that raises the feedback entry threshold and lowers the regime scale after losing streaks or an EWMA of trade R-multiples at or below −0.50, decaying back toward baseline on wins or on quiet time. Its adjustments carry a 96h TTL (raised from 48h on 2026-07-21: the check runs Mon–Fri only, so a 48h key expired over the weekend and the de-risk disarmed itself every Monday).
 _Avoid:_ feedback loop (too generic), throttle.
 
 **Regime scale** (feedback):
-A legacy-path lever (`feedback:regime_scale`) that scales the regime multiplier down after losses. In the portfolio path it is written but **not consumed** — a known-incomplete state.
+A per-strategy lever (`feedback:regime_scale:<strategy>`) that scales a sleeve's sizing down after that sleeve's own losses — ×0.80 per trigger, floored at 0.20. It **is** wired into the portfolio path (per-strategy, before the weighted-sum merge), gated by `loss_feedback.apply_regime_scale`, which accepts `false`, `true` or a list of strategy ids. Currently `false`: the would-be effect is recorded per cycle in `f8_regime_scale_shadow` and shown in Auto-Improve, but never applied to sizing.
 _Avoid:_ regime multiplier (that is the macro throttle; this is the loss-feedback overlay).
+
+**Teaching trade**:
+A closed trade the loss-feedback ratchet learns from — exits tagged `stop_loss` or `portfolio_sell` only. Other exits (`sentiment_reversal`, `LEGACY_FLATTEN`) are invisible to the ratchet, so a sleeve's teaching subset is not the same population as its P&L.
+_Avoid:_ closed trade (broader), losing trade (a teaching trade can be a win).
 
 ### Exits
 
