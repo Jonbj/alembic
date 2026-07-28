@@ -347,13 +347,13 @@ def compute_new_weights(
     if total > 0:
         target = {m: v / total for m, v in raw.items()}
     else:
-        # All ICIR negative — keep current weights but still project to the
-        # feasible box so the output always satisfies the floor/cap invariant.
-        # This is the only path where the projection gets a uniform target
-        # (all 1/n) rather than ICIR-driven weights.
-        n = len(current_weights)
-        uniform = {m: 1.0 / n for m in current_weights}
-        return _project_to_simplex_with_bounds(uniform, floor=floor, cap=cap)
+        # All ICIR negative — project current_weights through the box
+        # so the output always satisfies floor/cap and sum=1.  The current
+        # weights are preserved (subject to projection) rather than discarded
+        # and replaced with uniform 1/n.  This path can raise ValueError if
+        # current_weights violates the box constraints (n*floor > 1 or
+        # n*cap < 1), which propagates to run_weekly_weights (see Raises above).
+        return _project_to_simplex_with_bounds(current_weights, floor=floor, cap=cap)
 
     # Step 3: Smoothing -- 75% old + 25% new
     blended = {}
