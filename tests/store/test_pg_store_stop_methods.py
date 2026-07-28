@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import pathlib
 from datetime import datetime, timezone
 
 import psycopg2
@@ -17,18 +18,33 @@ from src.store.pg_store import PostgreSQLStore
 # live-DB test fires if a new symbol that is too long is introduced.
 _TRADE_SYMBOL_MAX = 20  # trades.symbol VARCHAR(20)
 
-_TEST_SYMBOLS = {
-    "TEST_STOP_1",
-    "TEST_STOP_FIXED_AUD",   # was 21 chars ("TEST_STOP_FIXED_AUDIT") — fixed #112
-    "TEST_STOP_2",
-    "TEST_STOP_3",
-    "TEST_S1",
-    "TEST_S4",
-}
-
 
 def _guard_symbol_lengths() -> None:
-    violations = [s for s in _TEST_SYMBOLS if len(s) > _TRADE_SYMBOL_MAX]
+    """Fail at import if any `symbol = "..."` in THIS file exceeds the column.
+
+    The symbols are read out of the module's own source, not listed by hand.
+    A hand-kept list would be a second copy of the truth: it drifts silently,
+    and — the point of the guard — it does not see a symbol written inline in a
+    test added tomorrow, which is exactly how #112 happened. Deriving them means
+    a new over-long symbol breaks collection with no DB and no discipline
+    required from whoever writes the test.
+    """
+    import ast
+
+    source = pathlib.Path(__file__).read_text()
+    found: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(
+            isinstance(t, ast.Name) and t.id == "symbol" for t in node.targets
+        ):
+            continue
+        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            found.append(node.value.value)
+
+    assert found, "guard found no `symbol = \"...\"` assignments — has the file moved?"
+    violations = sorted({s for s in found if len(s) > _TRADE_SYMBOL_MAX})
     assert not violations, (
         f"Symbol(s) exceed trades.symbol VARCHAR({_TRADE_SYMBOL_MAX}): "
         f"{violations} — shorten or the DB will reject the row with "
