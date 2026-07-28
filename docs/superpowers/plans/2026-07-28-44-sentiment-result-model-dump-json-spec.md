@@ -61,6 +61,25 @@ framework. Due strade accettabili, scegli tu e motiva in una riga nella PR:
 
 Preferisci **(a)** se e solo se dimostri l'identità dell'output.
 
+## Cerca i consumatori anche in `docs/`
+
+**Lezione da #138 (2026-07-28).** In quella spec avevo verificato i consumatori solo nel
+codice. Il fix era corretto, ma `docs/API.md` continuava a descrivere lo stesso endpoint con
+una risposta inventata e con un comportamento (`503` sulle dipendenze) che non è mai esistito —
+e il runbook mandava l'operatore proprio lì. Il difetto che stavamo togliendo dal codice era
+rimasto nella documentazione.
+
+Quindi, se il tuo intervento cambia una **risposta API, un formato serializzato, uno schema o un
+contratto osservabile dall'esterno**, la ricerca dei consumatori deve includere:
+
+- `docs/` (in particolare `docs/API.md`, `docs/ARCHITECTURE.md`, `docs/operations.md`)
+- `README.md` e `CONTEXT.md`
+- il frontend (`frontend/src`), incluse le pagine di testo come `Docs.tsx`
+
+Se trovi una descrizione diventata falsa, **correggila nello stesso branch** e dillo nella PR.
+Se non cambi nulla di osservabile dall'esterno, scrivi una riga nella PR che lo dichiara —
+serve a far vedere che il controllo è stato fatto, non saltato.
+
 ## Fuori scope
 
 - Non aggiungere né rimuovere campi da `SentimentResult`.
