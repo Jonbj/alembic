@@ -79,3 +79,70 @@ def test_fetch_signals_default_has_no_event_time_gate():
     params = cursor.execute.call_args[0][1]
     # effectively unbounded (1 year), i.e. the generated_at window dominates
     assert str(24 * 365) in [str(p) for p in params]
+
+
+def test_fetch_signals_sql_selects_published_at():
+    """#150: published_at must be selected so the caller can apply an entry-only
+    freshness gate in Python (_apply_entry_freshness_gate) instead of at the SQL
+    layer, where it would also narrow the hold/exit path for open positions."""
+    query = PostgreSQLStore._FETCH_SIGNALS_FOR_CYCLE
+    select_clause = query.split("FROM", 1)[0]
+    columns = [c.strip().split(" ")[0] for c in select_clause.replace("SELECT DISTINCT ON (symbol)", "").split(",")]
+    assert "published_at" in columns
+
+
+def test_fetch_signals_populates_published_at_from_row():
+    """#150: each returned SentimentResult carries the row's published_at, tz-aware."""
+    from datetime import datetime, timezone
+
+    store = PostgreSQLStore.__new__(PostgreSQLStore)
+    cursor = MagicMock()
+    cursor.fetchall.return_value = [
+        {
+            "id": 4427,
+            "symbol": "NOW",
+            "score": 0.81,
+            "confidence": 0.9,
+            "reasoning": "bull case",
+            "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+            "ensemble_std": 0.01,
+            "fallback_used": False,
+            "generated_at": datetime(2026, 7, 24, 18, 30, 12, tzinfo=timezone.utc),
+            "published_at": datetime(2026, 7, 24, 16, 38, 20),  # naive, as Postgres can return
+        }
+    ]
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+    conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    with patch.object(PostgreSQLStore, "_get_connection", return_value=conn):
+        results = store.fetch_signals_for_cycle(hours=96, symbols=["NOW"])
+    assert len(results) == 1
+    assert results[0].published_at == datetime(2026, 7, 24, 16, 38, 20, tzinfo=timezone.utc)
+
+
+def test_fetch_signals_populates_none_published_at_from_row():
+    """Legacy rows with NULL published_at must map to None, not raise."""
+    from datetime import datetime, timezone
+
+    store = PostgreSQLStore.__new__(PostgreSQLStore)
+    cursor = MagicMock()
+    cursor.fetchall.return_value = [
+        {
+            "id": 1,
+            "symbol": "AAPL",
+            "score": 0.1,
+            "confidence": 0.5,
+            "reasoning": "",
+            "model_id": "finbert",
+            "ensemble_std": 0.0,
+            "fallback_used": True,
+            "generated_at": datetime(2026, 7, 24, 18, 30, 12, tzinfo=timezone.utc),
+            "published_at": None,
+        }
+    ]
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+    conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    with patch.object(PostgreSQLStore, "_get_connection", return_value=conn):
+        results = store.fetch_signals_for_cycle(hours=96, symbols=["AAPL"])
+    assert results[0].published_at is None

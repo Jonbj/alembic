@@ -346,6 +346,48 @@ def test_build_strategy_instance_s4_no_signals_in_db():
     assert result._signals_df is None
 
 
+def test_build_strategy_instance_s4_keeps_held_position_past_news_age_gate():
+    """#150 regression: NOW, 2026-07-27 — a held symbol's only signal is strongly
+    positive (0.81) but both its generated_at and published_at are ~70h old (a
+    quiet weekend, no new news). Before the fix this signal was excluded by the
+    SQL-level news_age_hours gate before FIX-D ever saw it, and the position was
+    force-sold as "[no_signal]" despite never being contradicted. It must now
+    survive into signals_df via _apply_entry_freshness_gate (skips the held
+    symbol) + FIX-D (_preserve_stale_signals_for_open_positions re-admits it:
+    score>0, open position, no counter-signal)."""
+    from src.models.signals import SentimentResult
+    from src.strategies.s4.strategy import NewsDrivenTactical
+    from src.workers.portfolio_scheduler import _build_strategy_instance
+
+    entry = MagicMock()
+    entry.strategy_id = "S4"
+    bars_df = _make_bars_df(n=5, symbols=["SPY"])
+
+    old = datetime.now(timezone.utc) - timedelta(hours=69, minutes=40)
+    mock_signals = [
+        SentimentResult(
+            symbol="NOW", score=0.81, confidence=0.9, reasoning="bull case",
+            model_id="ensemble:test", generated_at=old, published_at=old,
+        ),
+    ]
+    mock_store = MagicMock()
+    mock_store.fetch_signals_for_cycle.return_value = mock_signals
+    mock_store.fetch_trades.return_value = [{"symbol": "NOW"}]  # open position
+
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_store):
+        result = _build_strategy_instance(entry, bars_df)
+
+    # The SQL-level gate must be off — otherwise this fixture wouldn't reproduce the
+    # bug: a mocked fetch_signals_for_cycle ignores news_age_hours and returns
+    # mock_signals regardless, so the real fix has to be "don't ask for the gate at
+    # the DB layer", not "hope the mock enforces it".
+    assert mock_store.fetch_signals_for_cycle.call_args.kwargs["news_age_hours"] is None
+
+    assert isinstance(result, NewsDrivenTactical)
+    assert result._signals_df is not None
+    assert "NOW" in set(result._signals_df["symbol"])
+
+
 def test_build_strategy_instance_returns_none_for_unknown_id():
     """Unknown strategy_id logs a warning and returns None."""
     from src.workers.portfolio_scheduler import _build_strategy_instance
