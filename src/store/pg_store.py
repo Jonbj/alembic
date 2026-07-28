@@ -1270,6 +1270,39 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def record_news_queue_drops(self, rows: list[dict]) -> None:
+        """Persist queue items discarded as stale by the sentiment worker (#149).
+
+        Best-effort: the caller must never let a failure here break a run — the
+        instrumentation exists to measure the loss, not to become a new way of
+        losing news.
+        """
+        if not rows:
+            return
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    """
+                    INSERT INTO news_queue_drops
+                        (item_id, article_id, symbol, source, published_at,
+                         age_hours, title)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """,
+                    [
+                        (
+                            r["item_id"], r["article_id"], r.get("symbol"),
+                            r.get("source"), r.get("published_at"),
+                            r.get("age_hours"), r.get("title"),
+                        )
+                        for r in rows
+                    ],
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
     def insert_stop_shadow(self, rows: list[dict]) -> None:
         """Persist per-cycle shadow log rows (high volume, batched)."""
         if not rows:
