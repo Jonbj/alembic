@@ -24,22 +24,3 @@ class SentimentResult(BaseModel):
     # decision time, instead of re-querying "latest" later and racing a signal
     # that arrived in between (see the 2026-07-15 MSFT incident).
     signal_id: int | None = None
-
-    def model_dump_json(self) -> str:  # type: ignore[override]
-        """Serialize to JSON string for Redis storage."""
-        import json
-
-        return json.dumps(
-            {
-                "symbol": self.symbol,
-                "score": self.score,
-                "confidence": self.confidence,
-                "reasoning": self.reasoning,
-                "model_id": self.model_id,
-                "ensemble_std": self.ensemble_std,
-                "fallback_used": self.fallback_used,
-                "generated_at": self.generated_at.isoformat(),
-                "published_at": self.published_at.isoformat() if self.published_at else None,
-                "signal_id": self.signal_id,
-            }
-        )

@@ -20,9 +20,16 @@ def test_published_at_defaults_to_none():
 
 
 def test_published_at_roundtrips_in_json():
+    """The published_at instant must survive serialisation intact.
+
+    We assert semantics (the datetime instant is preserved) rather than the
+    string format — Pydantic uses ``Z`` suffix, which is semantically
+    equivalent to ``+00:00`` for UTC, and consumers (Python fromisoformat,
+    JS Date) parse both correctly.
+    """
     ts = datetime(2026, 7, 3, 14, 30, tzinfo=timezone.utc)
     payload = json.loads(_result(published_at=ts).model_dump_json())
-    assert payload["published_at"] == ts.isoformat()
+    assert datetime.fromisoformat(payload["published_at"]) == ts
 
 
 def test_published_at_none_serialises_as_null():
