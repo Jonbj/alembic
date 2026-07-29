@@ -28,28 +28,34 @@ class NotificationDeepLinkGateTest {
 
         val coldVault = InMemorySessionVault(null)
         val coldLock = lock(coldVault)
-        val coldCoordinator = DeepLinkCoordinator()
+        val coldCoordinator = DeepLinkCoordinator(coldLock)
         assertTrue(coldCoordinator.accept(intent(eventId)))
-        coldLock.lock()
         coldVault.save(session())
         assertTrue(coldLock.isLocked.value)
         assertEquals(opaqueEventId, coldCoordinator.pendingEventId.value)
+        assertEquals(null, coldCoordinator.authenticatedEventId())
+        coldLock.unlock()
+        assertEquals(opaqueEventId, coldCoordinator.authenticatedEventId())
 
         val warmVault = InMemorySessionVault(session())
         val warmLock = lock(warmVault).apply { unlock() }
-        val warmCoordinator = DeepLinkCoordinator()
+        val warmCoordinator = DeepLinkCoordinator(warmLock)
         assertTrue(warmCoordinator.accept(intent(eventId)))
-        warmLock.lock()
         assertTrue(warmLock.isLocked.value)
         assertEquals(opaqueEventId, warmCoordinator.pendingEventId.value)
+        assertEquals(null, warmCoordinator.authenticatedEventId())
+        warmLock.unlock()
+        assertEquals(opaqueEventId, warmCoordinator.authenticatedEventId())
 
         val restoredVault = InMemorySessionVault(session())
         val restoredLock = lock(restoredVault)
-        val restoredCoordinator = DeepLinkCoordinator()
+        val restoredCoordinator = DeepLinkCoordinator(restoredLock)
         assertTrue(restoredCoordinator.accept(intent(eventId)))
-        restoredLock.lock()
         assertTrue(restoredLock.isLocked.value)
         assertEquals(opaqueEventId, restoredCoordinator.pendingEventId.value)
+        assertEquals(null, restoredCoordinator.authenticatedEventId())
+        restoredLock.unlock()
+        assertEquals(opaqueEventId, restoredCoordinator.authenticatedEventId())
     }
 
     private fun lock(vault: InMemorySessionVault) = TimeoutAppLock(

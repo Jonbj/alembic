@@ -77,9 +77,7 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun acceptNotificationIntent(intent: Intent?) {
-        if (container.deepLinkCoordinator.accept(intent)) {
-            appLock.lock()
-        }
+        container.deepLinkCoordinator.accept(intent)
     }
 
     override fun onResume() {

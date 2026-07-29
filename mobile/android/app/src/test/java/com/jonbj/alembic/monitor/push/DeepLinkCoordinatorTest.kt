@@ -2,6 +2,9 @@ package com.jonbj.alembic.monitor.push
 
 import android.app.Application
 import android.content.Intent
+import com.jonbj.alembic.monitor.core.security.InMemorySessionVault
+import com.jonbj.alembic.monitor.core.security.TimeoutAppLock
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -13,11 +16,12 @@ import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class)
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class DeepLinkCoordinatorTest {
 
     @Test
     fun `accepts only internal opaque event intents and consumes once`() {
-        val coordinator = DeepLinkCoordinator()
+        val coordinator = coordinator()
         val eventId = "15af48e4-2be5-4ea0-969f-a59ca154bf79"
         val intent = Intent().apply {
             action = DeepLinkCoordinator.ACTION_OPEN_EVENT
@@ -34,7 +38,7 @@ class DeepLinkCoordinatorTest {
 
     @Test
     fun `rejects external actions and malformed identifiers`() {
-        val coordinator = DeepLinkCoordinator()
+        val coordinator = coordinator()
         assertFalse(
             coordinator.accept(
                 Intent("https://example.invalid").putExtra(
@@ -45,4 +49,11 @@ class DeepLinkCoordinatorTest {
         )
         assertNull(coordinator.pendingEventId.value)
     }
+
+    private fun coordinator() = DeepLinkCoordinator(
+        TimeoutAppLock(
+            InMemorySessionVault(),
+            dispatcher = UnconfinedTestDispatcher()
+        )
+    )
 }

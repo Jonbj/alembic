@@ -50,7 +50,7 @@ fun MainScaffold(container: AppContainer) {
     PushPermissionPrompt(container.pushCoordinator)
 
     LaunchedEffect(pendingEventId) {
-        pendingEventId?.let { eventId ->
+        container.deepLinkCoordinator.authenticatedEventId()?.let { eventId ->
             navController.navigate(Destination.EventDetail.route(eventId)) {
                 launchSingleTop = true
             }

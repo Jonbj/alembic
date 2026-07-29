@@ -1,11 +1,14 @@
 package com.jonbj.alembic.monitor.push
 
 import android.content.Intent
+import com.jonbj.alembic.monitor.core.security.AppLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class DeepLinkCoordinator {
+class DeepLinkCoordinator(
+    private val appLock: AppLock
+) {
     private val _pendingEventId = MutableStateFlow<OpaqueEventId?>(null)
     val pendingEventId: StateFlow<OpaqueEventId?> = _pendingEventId.asStateFlow()
 
@@ -16,8 +19,12 @@ class DeepLinkCoordinator {
         )
             ?: return false
         _pendingEventId.value = eventId
+        appLock.lock()
         return true
     }
+
+    fun authenticatedEventId(): OpaqueEventId? =
+        _pendingEventId.value?.takeIf { !appLock.isLocked.value }
 
     fun consume(eventId: OpaqueEventId) {
         if (_pendingEventId.value == eventId) _pendingEventId.value = null

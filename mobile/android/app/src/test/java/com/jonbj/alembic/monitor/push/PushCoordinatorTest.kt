@@ -64,6 +64,11 @@ class PushCoordinatorTest {
         assertEquals(1, gateway.unregisterCalls)
         assertEquals(false, api.deviceRegistrations.single().pushEnabled)
         assertEquals(PushStatus.DISABLED, repository.status.value)
+        assertFalse(coordinator.shouldExplainPermission)
+
+        coordinator.onPermissionResult(granted = true)
+        assertEquals(1, gateway.registerCalls)
+        assertEquals(PushStatus.REGISTERING, repository.status.value)
     }
 
     @Test

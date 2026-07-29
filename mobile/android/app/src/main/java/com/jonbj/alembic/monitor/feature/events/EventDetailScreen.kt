@@ -31,14 +31,22 @@ import kotlinx.datetime.toLocalDateTime
 @Composable
 fun EventDetailScreen(viewModel: EventDetailViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    EventDetailContent(state, viewModel::refresh)
+}
+
+@Composable
+internal fun EventDetailContent(
+    state: LoadState<EventItem>,
+    onRetry: () -> Unit
+) {
     when (state) {
         is LoadState.Loading -> LoadingSpinner()
         is LoadState.Error -> ErrorMessage(
-            message = (state as LoadState.Error).message,
+            message = state.message,
             retryable = true,
-            onRetry = viewModel::refresh
+            onRetry = onRetry
         )
-        is LoadState.Success -> EventDetail((state as LoadState.Success).data)
+        is LoadState.Success -> EventDetail(state.data)
     }
 }
 

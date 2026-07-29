@@ -116,7 +116,7 @@ class AppContainer(
     }
 
     val deepLinkCoordinator by lazy {
-        DeepLinkCoordinator()
+        DeepLinkCoordinator(appLock)
     }
 
     val pushRegistrationRepository by lazy {
