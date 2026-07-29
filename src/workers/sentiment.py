@@ -111,6 +111,45 @@ from src.store.pg_store import PostgreSQLStore
 from src.workers.market_clock import is_market_open
 
 
+def article_id_of(item_id: str) -> str:
+    """Collapse a queue-entry id to the article it is a fan-out copy of.
+
+    Ingestion explodes one article into one queue entry per tagged ticker
+    (``alpaca:60706041:JBS``, ``…:MU``, …). Grouping by the id minus its ticker
+    suffix is what makes fan-out visible: on 2026-07-27 three articles held 46 of
+    the 119 queued entries, one of them across 23 tickers (#149).
+
+    Ids without a ticker suffix are returned unchanged.
+    """
+    if ":" not in item_id:
+        return item_id
+    return item_id.rsplit(":", 1)[0]
+
+
+def build_stale_drop_row(item, now: datetime) -> dict:
+    """One persisted row for a queue item discarded as stale.
+
+    Age is computed HERE, at the moment of the drop, not derived later from
+    ``dropped_at`` — the two diverge as soon as a run is slow or delayed, and the
+    whole point of the record is to distinguish "arrived already old" from "aged
+    while queued" (#149). A naive timestamp is read as UTC, matching
+    ``_is_stale_news``.
+    """
+    ts = item.timestamp
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    tags = getattr(item, "asset_tags", None) or []
+    return {
+        "item_id": item.id,
+        "article_id": article_id_of(item.id),
+        "symbol": tags[0] if tags else None,
+        "source": getattr(item, "source", "") or "",
+        "published_at": ts,
+        "age_hours": (now - ts).total_seconds() / 3600.0,
+        "title": (getattr(item, "title", "") or "")[:300],
+    }
+
+
 def _is_stale_news(item, now: datetime, max_age_hours: int = _SENTIMENT_MAX_NEWS_AGE_HOURS) -> bool:
     """True if the item's news timestamp is older than max_age_hours (tz-safe)."""
     ts = item.timestamp
@@ -828,6 +867,7 @@ def run_sentiment_worker() -> dict:
         raw_items: list[bytes] = []
         failed_raw: list[bytes] = []
         skipped_stale = 0
+        stale_drop_rows: list[dict] = []
         _now = datetime.now(timezone.utc)
         # Pull until _SENTIMENT_BATCH_SIZE FRESH items (or queue empty / scan cap). Stale
         # items are skipped without an LLM call and left in news:processing → discarded by
@@ -855,6 +895,7 @@ def run_sentiment_worker() -> dict:
                 continue
             if _is_stale_news(item, _now):
                 skipped_stale += 1
+                stale_drop_rows.append(build_stale_drop_row(item, _now))
                 continue
             news_items.append(item)
         if skipped_stale:
@@ -862,6 +903,20 @@ def run_sentiment_worker() -> dict:
                 "Skipped %d stale news items (> %dh old) without inference",
                 skipped_stale, _SENTIMENT_MAX_NEWS_AGE_HOURS,
             )
+        # #149: persist what was discarded. Without this the loss is invisible —
+        # a run that drops 200 items looks exactly like a quiet one, and the two
+        # candidate causes ("arrived already stale" vs "aged in the queue") are
+        # indistinguishable. Best-effort: never break the run over telemetry.
+        if stale_drop_rows:
+            try:
+                from src.store.pg_store import PostgreSQLStore as _PGSdrop
+                _pg_drop = _PGSdrop()
+                try:
+                    _pg_drop.record_news_queue_drops(stale_drop_rows)
+                finally:
+                    _pg_drop.close()
+            except Exception as _drop_exc:
+                log.warning("Could not persist stale news drops (#149): %s", _drop_exc)
 
         # Move unparseable items to dead-letter queue — prevents infinite retry loop
         # where the recovery block keeps re-queuing corrupt items on every invocation.
