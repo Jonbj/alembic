@@ -29,6 +29,10 @@ class _FakeMessaging:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
+    class AndroidConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
     def __init__(self):
         self.message = None
 
@@ -84,6 +88,8 @@ class TestFcmAdapter:
         assert result.accepted
         assert messaging.message.kwargs["fid"] == "firebase-installation-id"
         assert "token" not in messaging.message.kwargs
+        assert "notification" not in messaging.message.kwargs
+        assert messaging.message.kwargs["android"].kwargs["priority"] == "high"
 
     async def test_fake_adapter_must_be_explicitly_enabled(self, monkeypatch):
         monkeypatch.setattr(

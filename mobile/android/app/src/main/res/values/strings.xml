@@ -104,6 +104,27 @@
     <string name="filter_system">Sistema</string>
     <string name="event_open">Aperto</string>
     <string name="event_resolved">Risolto</string>
+    <string name="events_days_7">7 giorni</string>
+    <string name="events_days_30">30 giorni</string>
+    <string name="load_more">Carica altri eventi</string>
+    <string name="loading_more">Caricamento…</string>
+    <string name="event_history_count">%1$d aggiornamenti nella cronologia</string>
+    <string name="event_timeline">Cronologia incidente</string>
+    <string name="push_enabled">Notifiche attive</string>
+    <string name="push_registering">Attivazione notifiche…</string>
+    <string name="push_disabled">Notifiche disattivate</string>
+    <string name="push_unavailable">Notifiche non configurate</string>
+    <string name="push_error">Notifiche temporaneamente non disponibili</string>
+    <string name="push_permission_title">Ricevi gli avvisi operativi?</string>
+    <string name="push_permission_explanation">Alembic può avvisarti in modo generico quando un incidente richiede attenzione. I dettagli restano protetti nell’app.</string>
+    <string name="push_permission_allow">Attiva notifiche</string>
+    <string name="push_permission_not_now">Non ora</string>
+    <string name="notification_channel_name">Avvisi di monitoraggio</string>
+    <string name="notification_channel_description">Avvisi operativi generici di Alembic</string>
+    <string name="notification_generic_title">Alembic richiede attenzione</string>
+    <string name="notification_attention_body">Apri l’app per controllare lo stato.</string>
+    <string name="notification_recovered_body">Alembic è tornato operativo.</string>
+    <string name="notification_private_body">Nuovo aggiornamento di Alembic.</string>
 
     <!-- Errors -->
     <string name="error_generic">Errore imprevisto</string>

@@ -14,6 +14,9 @@ sealed class Destination(val route: String) {
     data object Performance : Destination("performance")
     data object Portfolio : Destination("portfolio")
     data object Events : Destination("events")
+    data object EventDetail : Destination("events/{eventId}") {
+        fun route(eventId: String) = "events/${android.net.Uri.encode(eventId)}"
+    }
 }
 
 data class BottomNavItem(

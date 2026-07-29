@@ -14,6 +14,7 @@ interface AppLock {
     val isLocked: StateFlow<Boolean>
     fun onAppForeground()
     fun onAppBackground()
+    fun lock()
     fun unlock()
 }
 
@@ -30,6 +31,7 @@ class TimeoutAppLock(
 
     private var backgroundAt: Long? = null
     private var hasSession = sessionVault.sessionFlow.value != null
+    private var forceLocked = false
 
     init {
         sessionVault.sessionFlow
@@ -37,10 +39,10 @@ class TimeoutAppLock(
                 val alreadyAuthenticated = hasSession
                 hasSession = session != null
                 if (session == null) {
-                    _isLocked.value = false
+                    _isLocked.value = forceLocked
                 } else if (!alreadyAuthenticated) {
                     // The interactive server login is sufficient for this first entry.
-                    _isLocked.value = false
+                    _isLocked.value = forceLocked
                 }
             }
             .launchIn(scope)
@@ -67,7 +69,13 @@ class TimeoutAppLock(
         }
     }
 
+    override fun lock() {
+        forceLocked = true
+        _isLocked.value = true
+    }
+
     override fun unlock() {
+        forceLocked = false
         _isLocked.value = false
         backgroundAt = null
     }
