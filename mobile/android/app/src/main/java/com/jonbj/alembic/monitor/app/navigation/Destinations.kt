@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.Wallet
 import androidx.compose.material.icons.automirrored.filled.EventNote
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.jonbj.alembic.monitor.R
+import com.jonbj.alembic.monitor.push.OpaqueEventId
 
 sealed class Destination(val route: String) {
     data object Login : Destination("login")
@@ -15,7 +16,8 @@ sealed class Destination(val route: String) {
     data object Portfolio : Destination("portfolio")
     data object Events : Destination("events")
     data object EventDetail : Destination("events/{eventId}") {
-        fun route(eventId: String) = "events/${android.net.Uri.encode(eventId)}"
+        fun route(eventId: OpaqueEventId) =
+            "events/${android.net.Uri.encode(eventId.value)}"
     }
 }
 

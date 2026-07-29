@@ -66,12 +66,12 @@ class AlembicMessagingService : FirebaseMessagingService() {
     private fun showGenericNotification(payload: PushPayload) {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             action = DeepLinkCoordinator.ACTION_OPEN_EVENT
-            putExtra(DeepLinkCoordinator.EXTRA_EVENT_ID, payload.eventId)
+            putExtra(DeepLinkCoordinator.EXTRA_EVENT_ID, payload.eventId.value)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val pendingIntent = PendingIntent.getActivity(
             this,
-            payload.eventId.hashCode(),
+            payload.eventId.value.hashCode(),
             openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -103,7 +103,7 @@ class AlembicMessagingService : FirebaseMessagingService() {
             .build()
         try {
             NotificationManagerCompat.from(this)
-                .notify(payload.eventId.hashCode(), notification)
+                .notify(payload.eventId.value.hashCode(), notification)
         } catch (_: SecurityException) {
             // Permission denial must never impact the monitoring UI.
         }

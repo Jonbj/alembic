@@ -6,13 +6,14 @@ import com.jonbj.alembic.monitor.core.model.DataSource
 import com.jonbj.alembic.monitor.core.model.EventItem
 import com.jonbj.alembic.monitor.core.model.LoadState
 import com.jonbj.alembic.monitor.data.repository.EventsRepository
+import com.jonbj.alembic.monitor.push.OpaqueEventId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 class EventDetailViewModel(
-    private val eventId: String,
+    private val eventId: OpaqueEventId,
     private val repository: EventsRepository
 ) : ViewModel() {
     private val _state = MutableStateFlow<LoadState<EventItem>>(LoadState.Loading)

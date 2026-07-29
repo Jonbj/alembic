@@ -26,8 +26,9 @@ class DeepLinkCoordinatorTest {
         }
 
         assertTrue(coordinator.accept(intent))
-        assertEquals(eventId, coordinator.pendingEventId.value)
-        coordinator.consume(eventId)
+        val opaqueEventId = requireNotNull(OpaqueEventId.parse(eventId))
+        assertEquals(opaqueEventId, coordinator.pendingEventId.value)
+        coordinator.consume(opaqueEventId)
         assertNull(coordinator.pendingEventId.value)
     }
 

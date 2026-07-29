@@ -12,6 +12,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -65,6 +66,49 @@ class PushCoordinatorTest {
         assertEquals(PushStatus.DISABLED, repository.status.value)
     }
 
+    @Test
+    fun `provider registration failure is visible without ending the monitor session`() = runTest {
+        val api = FakeMobileApi()
+        val gateway = FakePushGateway(failRegistration = true)
+        val repository = repository(api)
+        val coordinator = PushCoordinator(
+            gateway,
+            PushPreferenceStore(context),
+            repository
+        )
+
+        coordinator.onPermissionResult(granted = true)
+
+        assertEquals(PushStatus.UNAVAILABLE, repository.status.value)
+    }
+
+    @Test
+    fun `not now keeps contextual permission explanation eligible for a later login`() = runTest {
+        val coordinator = PushCoordinator(
+            FakePushGateway(),
+            PushPreferenceStore(context),
+            repository(FakeMobileApi())
+        )
+
+        coordinator.onPermissionDeferred()
+
+        assertTrue(coordinator.shouldExplainPermission)
+    }
+
+    @Test
+    fun `manifest opts into Firebase Installation ID registration`() {
+        val applicationInfo = context.packageManager.getApplicationInfo(
+            context.packageName,
+            android.content.pm.PackageManager.GET_META_DATA
+        )
+
+        assertTrue(
+            applicationInfo.metaData.getBoolean(
+                "firebase_messaging_installation_id_enabled"
+            )
+        )
+    }
+
     private fun repository(api: FakeMobileApi): PushRegistrationRepository {
         val now = Clock.System.now()
         val session = Session(
@@ -90,13 +134,15 @@ class PushCoordinatorTest {
 }
 
 private class FakePushGateway(
-    override val isAvailable: Boolean = true
+    override val isAvailable: Boolean = true,
+    private val failRegistration: Boolean = false
 ) : PushGateway {
     var registerCalls = 0
     var unregisterCalls = 0
 
-    override fun register() {
+    override fun register(onFailure: () -> Unit) {
         registerCalls += 1
+        if (failRegistration) onFailure()
     }
 
     override fun unregister() {

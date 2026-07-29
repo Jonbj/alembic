@@ -115,6 +115,7 @@
     <string name="push_disabled">Notifiche disattivate</string>
     <string name="push_unavailable">Notifiche non configurate</string>
     <string name="push_error">Notifiche temporaneamente non disponibili</string>
+    <string name="push_manage">Gestisci notifiche</string>
     <string name="push_permission_title">Ricevi gli avvisi operativi?</string>
     <string name="push_permission_explanation">Alembic può avvisarti in modo generico quando un incidente richiede attenzione. I dettagli restano protetti nell’app.</string>
     <string name="push_permission_allow">Attiva notifiche</string>

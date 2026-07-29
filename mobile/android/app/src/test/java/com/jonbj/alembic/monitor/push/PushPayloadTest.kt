@@ -18,7 +18,10 @@ class PushPayloadTest {
             )
         )
 
-        assertEquals("15af48e4-2be5-4ea0-969f-a59ca154bf79", payload?.eventId)
+        assertEquals(
+            "15af48e4-2be5-4ea0-969f-a59ca154bf79",
+            payload?.eventId?.value
+        )
         assertEquals(PushTransition.OPENED, payload?.transition)
     }
 

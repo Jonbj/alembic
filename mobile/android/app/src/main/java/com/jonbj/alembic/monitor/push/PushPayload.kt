@@ -15,20 +15,16 @@ enum class PushSeverity {
 }
 
 data class PushPayload(
-    val eventId: String,
+    val eventId: OpaqueEventId,
     val transition: PushTransition,
     val severity: PushSeverity
 ) {
-    val fingerprint: String get() = "$eventId:${transition.name}"
+    val fingerprint: String get() = "${eventId.value}:${transition.name}"
 
     companion object {
-        private val OPAQUE_EVENT_ID =
-            Regex("^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
-
         fun parse(data: Map<String, String>): PushPayload? {
             if (data["contract_version"] != "1") return null
-            val eventId = data["event_id"]
-                ?.takeIf { OPAQUE_EVENT_ID.matches(it) }
+            val eventId = OpaqueEventId.parse(data["event_id"])
                 ?: return null
             val transition = when (data["transition"]?.lowercase()) {
                 "open", "opened" -> PushTransition.OPENED

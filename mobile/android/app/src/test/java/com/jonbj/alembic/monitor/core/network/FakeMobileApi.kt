@@ -23,6 +23,7 @@ class FakeMobileApi : MobileApi {
     var loginResponse: Response<LoginResponse>? = null
     var refreshResponse: Response<RefreshResponse>? = null
     var logoutResponse: Response<Unit>? = null
+    var deviceRegistrationResponse: Response<DeviceRegistrationResponse>? = null
     var snapshotHandler: (suspend () -> Response<SnapshotResponse>)? = null
     var eventsHandler: (suspend (String, Int, String?, Int) -> Response<EventsResponse>)? = null
     val deviceRegistrations = mutableListOf<DeviceRegistrationRequest>()
@@ -146,6 +147,7 @@ class FakeMobileApi : MobileApi {
 
     override suspend fun registerDevice(request: DeviceRegistrationRequest): Response<DeviceRegistrationResponse> {
         deviceRegistrations += request
+        deviceRegistrationResponse?.let { return it }
         return Response.success(
             DeviceRegistrationResponse(
                 com.jonbj.alembic.monitor.core.network.dto.DeviceDto(

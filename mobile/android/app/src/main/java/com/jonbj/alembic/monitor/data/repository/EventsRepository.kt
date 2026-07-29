@@ -8,6 +8,7 @@ import com.jonbj.alembic.monitor.core.model.EventsPage
 import com.jonbj.alembic.monitor.core.model.LoadState
 import com.jonbj.alembic.monitor.core.network.MobileApiProvider
 import com.jonbj.alembic.monitor.core.network.dto.EventsResponse
+import com.jonbj.alembic.monitor.push.OpaqueEventId
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -57,7 +58,7 @@ class EventsRepository(
      * Notification detail lookup always comes from the authenticated API. It
      * searches the complete supported window and never trusts notification text.
      */
-    suspend fun findById(eventId: String): EventItem? = requestMutex.withLock {
+    suspend fun findById(eventId: OpaqueEventId): EventItem? = requestMutex.withLock {
         var cursor: String? = null
         var pageCount = 0
         do {
@@ -69,7 +70,7 @@ class EventsRepository(
                 )
             }
             val page = result.getOrNull() ?: return@withLock null
-            page.items.firstOrNull { it.id == eventId }?.let {
+            page.items.firstOrNull { it.id == eventId.value }?.let {
                 return@withLock it.toDomain()
             }
             cursor = page.nextCursor

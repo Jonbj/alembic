@@ -2,6 +2,7 @@ package com.jonbj.alembic.monitor.push
 
 import android.content.Context
 import com.google.firebase.FirebaseApp
+import com.google.firebase.installations.FirebaseInstallations
 import com.google.firebase.messaging.FirebaseMessaging
 import com.jonbj.alembic.monitor.core.network.MobileApiProvider
 import com.jonbj.alembic.monitor.core.network.dto.DeviceRegistrationRequest
@@ -23,7 +24,7 @@ enum class PushStatus {
 
 interface PushGateway {
     val isAvailable: Boolean
-    fun register()
+    fun register(onFailure: () -> Unit)
     fun unregister()
 }
 
@@ -32,14 +33,20 @@ class FirebasePushGateway(context: Context) : PushGateway {
     override val isAvailable: Boolean
         get() = FirebaseApp.getApps(appContext).isNotEmpty()
 
-    override fun register() {
+    override fun register(onFailure: () -> Unit) {
         if (!isAvailable) return
-        FirebaseMessaging.getInstance().register()
+        FirebaseMessaging.getInstance()
+            .register()
+            .addOnFailureListener { onFailure() }
     }
 
     override fun unregister() {
         if (!isAvailable) return
-        FirebaseMessaging.getInstance().unregister()
+        FirebaseMessaging.getInstance()
+            .unregister()
+            .continueWithTask {
+                FirebaseInstallations.getInstance().delete()
+            }
     }
 }
 
@@ -80,15 +87,10 @@ class PushRegistrationRepository(
     suspend fun register(firebaseInstallationId: String): Result<Unit> {
         if (sessionVault.get() == null) return Result.success(Unit)
         _status.value = PushStatus.REGISTERING
-        val request = DeviceRegistrationRequest(
-            installationId = deviceInfoProvider.installationId(),
-            firebaseInstallationId = firebaseInstallationId,
-            name = deviceInfoProvider.deviceName(),
-            appVersion = appVersion,
-            pushEnabled = true
-        )
         val result = ApiCaller.execute(refresher) {
-            apiProvider.current().registerDevice(request)
+            apiProvider.current().registerDevice(
+                registrationRequest(firebaseInstallationId, pushEnabled = true)
+            )
         }.map { Unit }
         _status.value = if (result.isSuccess) PushStatus.ENABLED else PushStatus.ERROR
         return result
@@ -99,15 +101,10 @@ class PushRegistrationRepository(
             _status.value = PushStatus.DISABLED
             return Result.success(Unit)
         }
-        val request = DeviceRegistrationRequest(
-            installationId = deviceInfoProvider.installationId(),
-            firebaseInstallationId = null,
-            name = deviceInfoProvider.deviceName(),
-            appVersion = appVersion,
-            pushEnabled = false
-        )
         val result = ApiCaller.execute(refresher) {
-            apiProvider.current().registerDevice(request)
+            apiProvider.current().registerDevice(
+                registrationRequest(firebaseInstallationId = null, pushEnabled = false)
+            )
         }.map { Unit }
         _status.value = PushStatus.DISABLED
         return result
@@ -124,4 +121,15 @@ class PushRegistrationRepository(
     fun loggedOut() {
         _status.value = PushStatus.DISABLED
     }
+
+    private fun registrationRequest(
+        firebaseInstallationId: String?,
+        pushEnabled: Boolean
+    ) = DeviceRegistrationRequest(
+        installationId = deviceInfoProvider.installationId(),
+        firebaseInstallationId = firebaseInstallationId,
+        name = deviceInfoProvider.deviceName(),
+        appVersion = appVersion,
+        pushEnabled = pushEnabled
+    )
 }

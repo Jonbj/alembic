@@ -8,10 +8,6 @@ class PushCoordinator(
     val shouldExplainPermission: Boolean
         get() = gateway.isAvailable && !preferences.permissionAsked
 
-    fun markPromptShown() {
-        preferences.permissionAsked = true
-    }
-
     suspend fun onPermissionResult(granted: Boolean) {
         preferences.permissionAsked = true
         preferences.permissionEnabled = granted
@@ -21,11 +17,17 @@ class PushCoordinator(
         }
         if (granted) {
             repository.registering()
-            gateway.register()
+            gateway.register(repository::unavailable)
         } else {
             gateway.unregister()
             repository.disable()
         }
+    }
+
+    suspend fun onPermissionDeferred() {
+        preferences.permissionEnabled = false
+        if (gateway.isAvailable) gateway.unregister()
+        repository.disable()
     }
 
     suspend fun onRegistered(firebaseInstallationId: String) {

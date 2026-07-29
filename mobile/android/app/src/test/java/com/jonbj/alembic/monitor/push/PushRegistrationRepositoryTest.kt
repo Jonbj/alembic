@@ -9,10 +9,12 @@ import com.jonbj.alembic.monitor.data.repository.DeviceInfoProvider
 import com.jonbj.alembic.monitor.data.repository.FakeTokenRefresher
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import retrofit2.Response
 
 class PushRegistrationRepositoryTest {
 
@@ -42,6 +44,22 @@ class PushRegistrationRepositoryTest {
         assertNull(api.deviceRegistrations.single().firebaseInstallationId)
         assertEquals(false, api.deviceRegistrations.single().pushEnabled)
         assertEquals(PushStatus.DISABLED, repository.status.value)
+    }
+
+    @Test
+    fun `registration failure is exposed without clearing the session`() = runTest {
+        val api = FakeMobileApi().apply {
+            deviceRegistrationResponse = Response.error(
+                503,
+                "unavailable".toResponseBody()
+            )
+        }
+        val repository = repository(api)
+
+        val result = repository.register("fid-one")
+
+        assertTrue(result.isFailure)
+        assertEquals(PushStatus.ERROR, repository.status.value)
     }
 
     private fun repository(api: FakeMobileApi): PushRegistrationRepository {

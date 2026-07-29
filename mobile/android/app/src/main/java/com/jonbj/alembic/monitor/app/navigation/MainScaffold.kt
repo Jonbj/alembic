@@ -1,30 +1,17 @@
 package com.jonbj.alembic.monitor.app.navigation
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -46,8 +33,9 @@ import com.jonbj.alembic.monitor.feature.events.EventDetailViewModel
 import com.jonbj.alembic.monitor.feature.login.LogoutTopBarButton
 import com.jonbj.alembic.monitor.feature.performance.PerformanceScreen
 import com.jonbj.alembic.monitor.feature.portfolio.PortfolioScreen
+import com.jonbj.alembic.monitor.feature.push.PushPermissionPrompt
 import com.jonbj.alembic.monitor.feature.status.StatusScreen
-import kotlinx.coroutines.launch
+import com.jonbj.alembic.monitor.push.OpaqueEventId
 
 @Composable
 fun MainScaffold(container: AppContainer) {
@@ -59,7 +47,7 @@ fun MainScaffold(container: AppContainer) {
     val pendingEventId by container.deepLinkCoordinator.pendingEventId
         .collectAsStateWithLifecycle()
 
-    PushPermissionPrompt(container)
+    PushPermissionPrompt(container.pushCoordinator)
 
     LaunchedEffect(pendingEventId) {
         pendingEventId?.let { eventId ->
@@ -155,8 +143,10 @@ fun MainScaffold(container: AppContainer) {
                         )
                     }),
                     pushStatus = pushStatus,
-                    onEventSelected = {
-                        navController.navigate(Destination.EventDetail.route(it))
+                    onEventSelected = { rawEventId ->
+                        OpaqueEventId.parse(rawEventId)?.let {
+                            navController.navigate(Destination.EventDetail.route(it))
+                        }
                     }
                 )
             }
@@ -166,10 +156,12 @@ fun MainScaffold(container: AppContainer) {
                     navArgument("eventId") { type = NavType.StringType }
                 )
             ) { entry ->
-                val eventId = requireNotNull(entry.arguments?.getString("eventId"))
+                val eventId = requireNotNull(
+                    OpaqueEventId.parse(entry.arguments?.getString("eventId"))
+                )
                 EventDetailScreen(
                     viewModel(
-                        key = eventId,
+                        key = eventId.value,
                         factory = viewModelFactory {
                             EventDetailViewModel(
                                 eventId,
@@ -180,90 +172,5 @@ fun MainScaffold(container: AppContainer) {
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun PushPermissionPrompt(container: AppContainer) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var showExplanation by remember { mutableStateOf(false) }
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        scope.launch {
-            container.pushCoordinator.onPermissionResult(granted)
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        val granted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-        when {
-            granted -> container.pushCoordinator.onPermissionResult(true)
-            container.pushCoordinator.shouldExplainPermission -> {
-                container.pushCoordinator.markPromptShown()
-                showExplanation = true
-            }
-            else -> container.pushCoordinator.onPermissionResult(false)
-        }
-    }
-
-    if (showExplanation) {
-        AlertDialog(
-            onDismissRequest = {
-                showExplanation = false
-                scope.launch {
-                    container.pushCoordinator.onPermissionResult(false)
-                }
-            },
-            title = { Text(stringResource(com.jonbj.alembic.monitor.R.string.push_permission_title)) },
-            text = {
-                Text(
-                    stringResource(
-                        com.jonbj.alembic.monitor.R.string.push_permission_explanation
-                    )
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showExplanation = false
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        } else {
-                            scope.launch {
-                                container.pushCoordinator.onPermissionResult(true)
-                            }
-                        }
-                    }
-                ) {
-                    Text(
-                        stringResource(
-                            com.jonbj.alembic.monitor.R.string.push_permission_allow
-                        )
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        showExplanation = false
-                        scope.launch {
-                            container.pushCoordinator.onPermissionResult(false)
-                        }
-                    }
-                ) {
-                    Text(
-                        stringResource(
-                            com.jonbj.alembic.monitor.R.string.push_permission_not_now
-                        )
-                    )
-                }
-            }
-        )
     }
 }

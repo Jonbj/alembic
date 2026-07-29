@@ -31,17 +31,15 @@ class SharedPreferencesDeliveryFingerprintStore(context: Context) :
     override fun add(fingerprint: String) {
         val existing = prefs.getStringSet(KEY_FINGERPRINTS, emptySet())
             .orEmpty()
-            .toMutableList()
-        existing.remove(fingerprint)
+            .toMutableSet()
         existing += fingerprint
         prefs.edit()
-            .putStringSet(KEY_FINGERPRINTS, existing.takeLast(MAX_ENTRIES).toSet())
+            .putStringSet(KEY_FINGERPRINTS, existing)
             .apply()
     }
 
     private companion object {
         const val KEY_FINGERPRINTS = "fingerprints"
-        const val MAX_ENTRIES = 128
     }
 }
 

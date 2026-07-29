@@ -1,5 +1,7 @@
 package com.jonbj.alembic.monitor.feature.events
 
+import android.content.Intent
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -15,9 +17,11 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -46,6 +50,7 @@ fun EventsScreen(
     pushStatus: PushStatus,
     onEventSelected: (String) -> Unit
 ) {
+    val context = LocalContext.current
     val state by viewModel.state.collectAsStateWithLifecycle()
     val category by viewModel.selectedCategory.collectAsStateWithLifecycle()
     val days by viewModel.selectedDays.collectAsStateWithLifecycle()
@@ -62,7 +67,15 @@ fun EventsScreen(
         onDaysSelected = viewModel::selectDays,
         onEventSelected = onEventSelected,
         onLoadNext = viewModel::loadNext,
-        onRetry = { viewModel.refresh(true) }
+        onRetry = { viewModel.refresh(true) },
+        onManageNotifications = {
+            context.startActivity(
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(
+                    Settings.EXTRA_APP_PACKAGE,
+                    context.packageName
+                )
+            )
+        }
     )
 }
 
@@ -78,7 +91,8 @@ internal fun EventsContent(
     onDaysSelected: (Int) -> Unit,
     onEventSelected: (String) -> Unit,
     onLoadNext: () -> Unit,
-    onRetry: () -> Unit
+    onRetry: () -> Unit,
+    onManageNotifications: () -> Unit = {}
 ) {
     PullRefreshContainer(refreshing = refreshing, onRefresh = onRetry) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -87,7 +101,8 @@ internal fun EventsContent(
                 selectedDays,
                 pushStatus,
                 onCategorySelected,
-                onDaysSelected
+                onDaysSelected,
+                onManageNotifications
             )
             when (state) {
                 is LoadState.Loading -> LoadingSpinner()
@@ -118,7 +133,8 @@ private fun EventFilters(
     selectedDays: Int,
     pushStatus: PushStatus,
     onCategorySelected: (EventFilter) -> Unit,
-    onDaysSelected: (Int) -> Unit
+    onDaysSelected: (Int) -> Unit,
+    onManageNotifications: () -> Unit
 ) {
     Column(
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -134,6 +150,11 @@ private fun EventFilters(
             },
             style = MaterialTheme.typography.labelLarge
         )
+        if (pushStatus == PushStatus.DISABLED) {
+            TextButton(onClick = onManageNotifications) {
+                Text(stringResource(R.string.push_manage))
+            }
+        }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(EventFilter.entries) { filter ->
                 FilterChip(
