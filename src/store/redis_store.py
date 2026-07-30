@@ -612,6 +612,33 @@ class RedisStore:
         except (ValueError, TypeError):
             return None
 
+    def refresh_feedback_ttl(self, strategy: str | None, ttl: int) -> bool:
+        """Extend the lease on a sleeve's feedback keys WITHOUT changing their values.
+
+        The feedback keys are written only by a ratchet/recovery/decay event, but they
+        carry a TTL — so a sleeve sitting at rest lets them expire. Live, that left the
+        S4 entry gate reading its code-level fallback from 2026-07-28 17:22 UTC with no
+        self-heal (#163). This re-arms the lease; it deliberately does not write values,
+        so it cannot disturb the ratchet's own state machine.
+
+        Returns True if the entry-threshold key was still alive (EXPIRE is a no-op
+        returning 0 on a missing key) — False tells the caller to restore the value.
+        """
+        keys = [
+            self._feedback_key("feedback:entry_threshold", strategy),
+            self._feedback_key("feedback:regime_scale", strategy),
+            self._feedback_key("feedback:state", strategy),
+        ]
+        existed = bool(self._r.expire(keys[0], ttl))
+        for key in keys[1:]:
+            self._r.expire(key, ttl)
+        # Keep the legacy bare mirrors (written by the S4 setters) on the same clock,
+        # or get_feedback_entry_threshold's fallback could resurrect a stale value.
+        if strategy == "S4":
+            self._r.expire("feedback:entry_threshold", ttl)
+            self._r.expire("feedback:regime_scale", ttl)
+        return existed
+
     def set_feedback_state(self, state: dict, ttl: int, strategy: str | None = None) -> None:
         """Persist full feedback audit state (consecutive_losses, rolling_pnl, timestamp)."""
         import json

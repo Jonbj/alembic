@@ -1188,6 +1188,19 @@ def test_buy_decision_not_logged_for_symbol_with_open_trade():
 # with the PINNED (correct, earlier) one.
 
 
+def _redis_get_gate_off(key):
+    """Redis .get side_effect that parks the S4 feedback gate out of the way.
+
+    #163: before the gate floor was fixed, a Redis mock returning None for every key
+    left the gate inert (the fallback landed on min_score and the guard bypassed the
+    block). Tests that are about something else — provenance pinning, anti-whipsaw
+    damping — silently relied on that. The gate now engages on a missing key, so those
+    tests must say so out loud: a stored 0.0 is below min_score, so _gate_is_active is
+    False and no SKIP_THRESHOLD rows are written. Everything else still reads absent.
+    """
+    return "0.0" if "feedback:entry_threshold" in str(key) else None
+
+
 def test_s4_decision_uses_pinned_provenance_not_stale_refetch():
     """write_execution_decision must use the pinned signal_id/score from
     CycleResult.symbol_signal_provenance, not a fresh fetch_latest_signal_ids/
@@ -1274,7 +1287,7 @@ def test_s4_decision_uses_pinned_provenance_not_stale_refetch():
         mock_orch.return_value.run_cycle.return_value = mock_cycle_result
 
         redis_inst = MagicMock()
-        redis_inst.get.return_value = None
+        redis_inst.get.side_effect = _redis_get_gate_off  # this test is about provenance
         redis_inst.set.return_value = True
         redis_inst.smembers.return_value = set()
         mock_redis_cls.from_url.return_value = redis_inst
@@ -1404,7 +1417,8 @@ def _run_whipsaw_cycle(risk_cfg_overrides: dict):
         mock_orch.return_value.run_cycle.return_value = _whipsaw_cycle_result()
 
         redis_inst = MagicMock()
-        redis_inst.get.return_value = None  # no prior whipsaw streak
+        # no prior whipsaw streak; gate parked (this test is about damping)
+        redis_inst.get.side_effect = _redis_get_gate_off
         redis_inst.set.return_value = True
         redis_inst.smembers.return_value = set()
         # Pre-existing exit-persistence hysteresis (_apply_exit_hysteresis,
