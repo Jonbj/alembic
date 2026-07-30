@@ -137,3 +137,51 @@ def test_entry_threshold_baseline_is_the_gate_floor():
     """Fix 2: the order-gate floor is the config baseline (0.30), not min_score (0.10)."""
     assert portfolio_scheduler._load_entry_threshold_baseline() == 0.30
     assert portfolio_scheduler._ENTRY_THRESHOLD_BASELINE == 0.30
+
+
+# ---------------------------------------------------------------------------
+# #163: the gate silently disarmed itself when the Redis key expired.
+# ---------------------------------------------------------------------------
+
+
+def test_get_feedback_threshold_falls_back_to_baseline_when_key_absent():
+    """The order-gate floor on a missing/expired Redis key is the config baseline
+    (0.30), NOT the ranker prefilter min_score (0.10). Regression for the gate being
+    silently disarmed from 2026-07-28 17:22 UTC onward."""
+    with patch("redis.Redis") as mock_cls:
+        inst = MagicMock()
+        inst.get.return_value = None  # per-strategy AND legacy key absent
+        mock_cls.from_url.return_value = inst
+        got = portfolio_scheduler._get_feedback_threshold("redis://x", strategy="S4")
+    assert got == portfolio_scheduler._ENTRY_THRESHOLD_BASELINE == 0.30
+
+
+def test_get_feedback_threshold_falls_back_to_baseline_when_redis_unreachable():
+    """A Redis outage must degrade to the strict floor, never to an open gate."""
+    with patch("redis.Redis") as mock_cls:
+        mock_cls.from_url.side_effect = ConnectionError("down")
+        got = portfolio_scheduler._get_feedback_threshold("redis://x", strategy="S4")
+    assert got == 0.30
+
+
+def test_get_feedback_threshold_honours_a_present_value_verbatim():
+    """A stored value is returned as-is — including values below the baseline, so a
+    sleeve that deliberately stores 0.0 (S1: no entry gate) is not silently armed."""
+    for stored, expected in (("0.45", 0.45), ("0.0", 0.0)):
+        with patch("redis.Redis") as mock_cls:
+            inst = MagicMock()
+            inst.get.return_value = stored
+            mock_cls.from_url.return_value = inst
+            got = portfolio_scheduler._get_feedback_threshold("redis://x", strategy="S4")
+        assert got == expected
+
+
+def test_gate_is_active_engages_at_equality_with_min_score():
+    """Guard regression: `>` meant a 0.10 fallback compared 0.10 > 0.10 == False and
+    the whole filter+logging block was bypassed — no filter AND no Decision Log rows."""
+    from src.strategies.s4.config import S4Config
+    min_score = S4Config().min_score
+    assert portfolio_scheduler._gate_is_active(min_score, min_score) is True
+    assert portfolio_scheduler._gate_is_active(0.30, min_score) is True
+    assert portfolio_scheduler._gate_is_active(None, min_score) is False
+    assert portfolio_scheduler._gate_is_active(0.05, min_score) is False
