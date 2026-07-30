@@ -144,7 +144,7 @@ private fun PositionDto.toDomain(): Position = Position(
 
 fun List<EventItemDto>.toEventsDomain(): List<EventItem> = map { it.toDomain() }
 
-private fun EventItemDto.toDomain(): EventItem = EventItem(
+internal fun EventItemDto.toDomain(): EventItem = EventItem(
     id = id,
     kind = parseEventKind(kind),
     category = parseEventCategory(category),

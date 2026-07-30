@@ -23,7 +23,11 @@ class FakeMobileApi : MobileApi {
     var loginResponse: Response<LoginResponse>? = null
     var refreshResponse: Response<RefreshResponse>? = null
     var logoutResponse: Response<Unit>? = null
+    var deviceRegistrationResponse: Response<DeviceRegistrationResponse>? = null
     var snapshotHandler: (suspend () -> Response<SnapshotResponse>)? = null
+    var eventsHandler: (suspend (String, Int, String?, Int) -> Response<EventsResponse>)? = null
+    val deviceRegistrations = mutableListOf<DeviceRegistrationRequest>()
+    val revokedDevices = mutableListOf<String>()
 
     override suspend fun login(request: LoginRequest): Response<LoginResponse> {
         return loginResponse ?: Response.success(
@@ -127,6 +131,7 @@ class FakeMobileApi : MobileApi {
         cursor: String?,
         limit: Int
     ): Response<EventsResponse> {
+        eventsHandler?.let { return it(category, days, cursor, limit) }
         return eventsResponse ?: Response.success(
             EventsResponse(
                 contractVersion = 1,
@@ -141,6 +146,8 @@ class FakeMobileApi : MobileApi {
     }
 
     override suspend fun registerDevice(request: DeviceRegistrationRequest): Response<DeviceRegistrationResponse> {
+        deviceRegistrations += request
+        deviceRegistrationResponse?.let { return it }
         return Response.success(
             DeviceRegistrationResponse(
                 com.jonbj.alembic.monitor.core.network.dto.DeviceDto(
@@ -148,13 +155,15 @@ class FakeMobileApi : MobileApi {
                     installationId = request.installationId,
                     name = request.name,
                     appVersion = request.appVersion,
-                    pushEnabled = false
+                    firebaseInstallationId = request.firebaseInstallationId,
+                    pushEnabled = request.pushEnabled
                 )
             )
         )
     }
 
     override suspend fun revokeDevice(deviceId: String): Response<Unit> {
+        revokedDevices += deviceId
         return Response.success(Unit)
     }
 }

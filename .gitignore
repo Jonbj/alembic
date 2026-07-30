@@ -59,3 +59,7 @@ logs/
 
 # Backtest venv (host-side, not needed with Docker)
 .venv-backtest/
+# Firebase Android client configuration is deployment-specific and private.
+/mobile/android/app/google-services.json
+/mobile/android/app/src/debug/google-services.json
+/mobile/android/app/src/release/google-services.json

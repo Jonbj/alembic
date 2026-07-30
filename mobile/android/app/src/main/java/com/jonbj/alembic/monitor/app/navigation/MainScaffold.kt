@@ -9,6 +9,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -17,23 +18,45 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jonbj.alembic.monitor.app.di.AppContainer
 import com.jonbj.alembic.monitor.app.viewModelFactory
 import com.jonbj.alembic.monitor.feature.events.EventsScreen
+import com.jonbj.alembic.monitor.feature.events.EventDetailScreen
+import com.jonbj.alembic.monitor.feature.events.EventDetailViewModel
 import com.jonbj.alembic.monitor.feature.login.LogoutTopBarButton
 import com.jonbj.alembic.monitor.feature.performance.PerformanceScreen
 import com.jonbj.alembic.monitor.feature.portfolio.PortfolioScreen
+import com.jonbj.alembic.monitor.feature.push.PushPermissionPrompt
 import com.jonbj.alembic.monitor.feature.status.StatusScreen
+import com.jonbj.alembic.monitor.push.OpaqueEventId
 
 @Composable
 fun MainScaffold(container: AppContainer) {
     val navController = rememberNavController()
     val lifecycleOwner = LocalLifecycleOwner.current
     val refreshCoordinator = container.foregroundRefreshCoordinator
+    val pushStatus by container.pushRegistrationRepository.status
+        .collectAsStateWithLifecycle()
+    val pendingEventId by container.deepLinkCoordinator.pendingEventId
+        .collectAsStateWithLifecycle()
+
+    PushPermissionPrompt(container.pushCoordinator)
+
+    LaunchedEffect(pendingEventId) {
+        container.deepLinkCoordinator.authenticatedEventId()?.let { eventId ->
+            navController.navigate(Destination.EventDetail.route(eventId)) {
+                launchSingleTop = true
+            }
+            container.deepLinkCoordinator.consume(eventId)
+        }
+    }
 
     DisposableEffect(lifecycleOwner, refreshCoordinator) {
         val observer = LifecycleEventObserver { _, event ->
@@ -77,7 +100,7 @@ fun MainScaffold(container: AppContainer) {
             }
         },
         topBar = {
-            LogoutTopBarButton { container.authRepository.logout() }
+            LogoutTopBarButton { container.logout() }
         }
     ) { innerPadding ->
         NavHost(
@@ -118,7 +141,34 @@ fun MainScaffold(container: AppContainer) {
                         com.jonbj.alembic.monitor.feature.events.EventsViewModel(
                             container.eventsRepository
                         )
-                    })
+                    }),
+                    pushStatus = pushStatus,
+                    onEventSelected = { rawEventId ->
+                        OpaqueEventId.parse(rawEventId)?.let {
+                            navController.navigate(Destination.EventDetail.route(it))
+                        }
+                    }
+                )
+            }
+            composable(
+                route = Destination.EventDetail.route,
+                arguments = listOf(
+                    navArgument("eventId") { type = NavType.StringType }
+                )
+            ) { entry ->
+                val eventId = requireNotNull(
+                    OpaqueEventId.parse(entry.arguments?.getString("eventId"))
+                )
+                EventDetailScreen(
+                    viewModel(
+                        key = eventId.value,
+                        factory = viewModelFactory {
+                            EventDetailViewModel(
+                                eventId,
+                                container.eventsRepository
+                            )
+                        }
+                    )
                 )
             }
         }

@@ -14,7 +14,8 @@ Native Kotlin / Jetpack Compose read-only monitoring application for Alembic.
 - Lifecycle-aware foreground polling (60 seconds while the server says the
   pipeline is expected; 5 minutes otherwise) plus pull-to-refresh.
 - LAN TLS with a domain-scoped user CA.
-- Backend incidents and FCM delivery are available; the Android receiver is delivered by MOB-07.
+- Backend incidents and FCM delivery are integrated with the Android receiver,
+  privacy-safe notifications, authenticated event deep links, and local deduplication.
 
 ## Project structure
 
@@ -28,7 +29,7 @@ mobile/android/
 │   ├── core/security/    # Keystore cipher, session vault, biometric gate, app lock
 │   ├── data/repository/  # Auth + status/performance/portfolio/events repositories
 │   ├── feature/          # Login, status, performance, portfolio, events, biometric lock
-│   ├── push/             # Push delivery port and stub service
+│   ├── push/             # Firebase gateway, receiver, registration, deep links, deduplication
 │   └── worker/           # Opportunistic cache refresh worker
 ├── app/src/main/res/xml/network_security_config.xml
 └── app/src/debug/res/raw/lan_ca.pem  # debug-only fake CA; absent from release

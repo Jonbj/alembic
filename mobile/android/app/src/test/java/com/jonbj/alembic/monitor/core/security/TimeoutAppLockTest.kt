@@ -129,4 +129,21 @@ class TimeoutAppLockTest {
         lock.unlock()
         assertFalse(lock.isLocked.value)
     }
+
+    @Test
+    fun `notification force lock survives login until biometric unlock`() = runTest {
+        val vault = InMemorySessionVault(null)
+        val lock = TimeoutAppLock(
+            vault,
+            clock = { 0L },
+            dispatcher = UnconfinedTestDispatcher(testScheduler)
+        )
+
+        lock.lock()
+        vault.save(session)
+
+        assertTrue(lock.isLocked.value)
+        lock.unlock()
+        assertFalse(lock.isLocked.value)
+    }
 }

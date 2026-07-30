@@ -1,5 +1,6 @@
 package com.jonbj.alembic.monitor.app
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.compose.setContent
@@ -31,6 +32,7 @@ class MainActivity : FragmentActivity() {
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        acceptNotificationIntent(intent)
 
         setContent {
             AlembicMonitorTheme {
@@ -58,7 +60,7 @@ class MainActivity : FragmentActivity() {
                             activity = this,
                             onUnlocked = { appLock.unlock() },
                             onLogout = {
-                                container.authRepository.logout()
+                                container.logout()
                             }
                         )
                         else -> MainScaffold(container)
@@ -66,6 +68,16 @@ class MainActivity : FragmentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        acceptNotificationIntent(intent)
+    }
+
+    private fun acceptNotificationIntent(intent: Intent?) {
+        container.deepLinkCoordinator.accept(intent)
     }
 
     override fun onResume() {

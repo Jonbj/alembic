@@ -22,6 +22,11 @@ import com.jonbj.alembic.monitor.data.repository.ForegroundRefreshCoordinator
 import com.jonbj.alembic.monitor.data.repository.PerformanceRepository
 import com.jonbj.alembic.monitor.data.repository.PortfolioRepository
 import com.jonbj.alembic.monitor.data.repository.StatusRepository
+import com.jonbj.alembic.monitor.push.DeepLinkCoordinator
+import com.jonbj.alembic.monitor.push.FirebasePushGateway
+import com.jonbj.alembic.monitor.push.PushCoordinator
+import com.jonbj.alembic.monitor.push.PushPreferenceStore
+import com.jonbj.alembic.monitor.push.PushRegistrationRepository
 import kotlinx.serialization.json.Json
 
 class AppContainer(
@@ -110,4 +115,30 @@ class AppContainer(
         AndroidBiometricGate(appContext)
     }
 
+    val deepLinkCoordinator by lazy {
+        DeepLinkCoordinator(appLock)
+    }
+
+    val pushRegistrationRepository by lazy {
+        PushRegistrationRepository(
+            apiProvider = apiProvider,
+            sessionVault = sessionVault,
+            deviceInfoProvider = deviceInfoProvider,
+            appVersion = appVersion,
+            refresher = authRepository
+        )
+    }
+
+    val pushCoordinator by lazy {
+        PushCoordinator(
+            gateway = FirebasePushGateway(appContext),
+            preferences = PushPreferenceStore(appContext),
+            repository = pushRegistrationRepository
+        )
+    }
+
+    suspend fun logout(): Result<Unit> {
+        pushCoordinator.onLogout()
+        return authRepository.logout()
+    }
 }

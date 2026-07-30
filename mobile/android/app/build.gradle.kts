@@ -5,6 +5,17 @@ plugins {
     kotlin("kapt")
 }
 
+// Firebase configuration is private deployment material. Developers and CI can
+// still compile/test a monitoring-only build without google-services.json.
+val hasGoogleServicesConfig = listOf(
+    file("google-services.json"),
+    file("src/debug/google-services.json"),
+    file("src/release/google-services.json")
+).any { it.isFile }
+if (hasGoogleServicesConfig) {
+    apply(plugin = "com.google.gms.google-services")
+}
+
 android {
     namespace = "com.jonbj.alembic.monitor"
     compileSdk = 34
@@ -113,6 +124,11 @@ dependencies {
     implementation(libs.retrofit.converter.serialization)
     implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
+
+    // Firebase Cloud Messaging / Installations
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
+    implementation(libs.firebase.installations)
 
     // Serialization / coroutines
     implementation(libs.kotlinx.serialization.json)

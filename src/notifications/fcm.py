@@ -114,10 +114,10 @@ class FirebaseFcmAdapter(FcmDeliveryPort):
                 "severity": payload.get("severity", ""),
                 "contract_version": str(payload.get("contract_version", "1")),
             },
-            notification=self._messaging.Notification(
-                title="Alembic richiede attenzione",
-                body="Alembic è tornato operativo" if payload.get("transition") == "recover" else "Alembic richiede attenzione",
-            ),
+            # Data-only messages are rendered by the Android client after
+            # validation/deduplication. A notification payload would be rendered
+            # automatically in background and bypass the biometric deep-link gate.
+            android=self._messaging.AndroidConfig(priority="high"),
             fid=firebase_installation_id,
         )
         try:
