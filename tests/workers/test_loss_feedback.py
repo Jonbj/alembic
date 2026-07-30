@@ -173,14 +173,21 @@ def _patched_run(
     redis_scale: float | None = None,
     redis_state: dict | None = None,
     cfg_override: dict | None = None,
+    ttl_refresh_existed: bool = True,
 ):
-    """Helper that patches all external dependencies and runs the task."""
+    """Helper that patches all external dependencies and runs the task.
+
+    ttl_refresh_existed mirrors refresh_feedback_ttl's return value: True = the keys
+    were still alive and only had their lease extended, False = they had already
+    expired and the caller must restore them (#163).
+    """
     cfg = {**_default_cfg(), **(cfg_override or {})}
 
     mock_redis = MagicMock()
     mock_redis.get_feedback_entry_threshold.return_value = redis_threshold
     mock_redis.get_feedback_regime_scale.return_value = redis_scale
     mock_redis.get_feedback_state.return_value = redis_state
+    mock_redis.refresh_feedback_ttl.return_value = ttl_refresh_existed
 
     mock_pg = MagicMock()
     mock_pg.fetch_trades.return_value = trades
@@ -647,3 +654,88 @@ class TestShadowComparisonToggle:
         redis_store = RedisStore(redis_client=mock_redis)
         result = redis_store.get_shadow_comparison_start()
         assert result == "2026-07-13T14:00:00+00:00"
+
+
+class TestFeedbackKeyHeartbeat:
+    """#163: the feedback keys carry feedback_ttl_hours but are written ONLY by a
+    ratchet/recovery/decay event. A sleeve at rest gets no write, so the keys age out
+    and the S4 gate falls back forever — live, disarmed from 2026-07-28 17:22 UTC with
+    no self-heal. Every run must re-arm the lease for every sleeve."""
+
+    def test_refreshes_ttl_for_every_sleeve_on_an_at_rest_run(self):
+        # 2 wins: under the 3-win recovery streak, threshold at baseline, scale at 1.0
+        # -> no branch fires, so nothing else would write these keys.
+        trades = _make_trades([5, 3], signal_id=None)
+        result, mock_redis = _patched_run(trades, redis_threshold=0.30, redis_scale=1.0)
+
+        assert result["adjusted"] is False and result["recovered"] is False
+        calls = mock_redis.refresh_feedback_ttl.call_args_list
+        assert {c.kwargs["strategy"] for c in calls} == {"S1", "S4"}
+        assert all(c.kwargs["ttl"] == 48 * 3600 for c in calls)  # _default_cfg ttl hours
+        # a live lease is extended, never rewritten
+        mock_redis.set_feedback_entry_threshold.assert_not_called()
+        mock_redis.set_feedback_regime_scale.assert_not_called()
+
+    def test_covers_a_sleeve_with_no_recent_teaching_trades(self):
+        """THE regression that matters. The per-strategy loop iterates fb._history,
+        which only holds sleeves with a recent TEACHING trade (stop_loss /
+        portfolio_sell — sentiment_reversal does NOT count) among the last 50 closed
+        trades. A heartbeat placed inside that loop passes every other test here and
+        fails this one: a quiet S4 would silently stop being refreshed."""
+        trades = _make_trades([5, 3], signal_id=None)  # S1 only
+        result, mock_redis = _patched_run(trades, redis_threshold=0.30, redis_scale=1.0)
+
+        assert result["strategies_evaluated"] == ["S1"]  # S4 never entered the loop
+        refreshed = {c.kwargs["strategy"] for c in mock_redis.refresh_feedback_ttl.call_args_list}
+        assert "S4" in refreshed
+
+    def test_runs_even_when_there_are_no_closed_trades(self):
+        """The task early-returns on no_closed_trades before the loop; the lease must
+        already have been re-armed by then."""
+        result, mock_redis = _patched_run([])
+
+        assert result == {"skipped": True, "reason": "no_closed_trades"}
+        refreshed = {c.kwargs["strategy"] for c in mock_redis.refresh_feedback_ttl.call_args_list}
+        assert refreshed == {"S1", "S4"}
+
+    def test_restores_the_keys_when_they_have_already_expired(self):
+        """Self-heal: once the keys are gone, extending a lease is a no-op — the at-rest
+        values have to be written back or the gate stays disarmed forever."""
+        result, mock_redis = _patched_run([], ttl_refresh_existed=False)
+
+        by_strategy = {
+            c.kwargs["strategy"]: c for c in mock_redis.set_feedback_entry_threshold.call_args_list
+        }
+        assert set(by_strategy) == {"S1", "S4"}
+        assert by_strategy["S4"].args[0] == 0.30  # config baseline
+        assert by_strategy["S1"].args[0] == 0.0   # S1 has no discrete entry gate
+        scales = {c.kwargs["strategy"]: c.args[0] for c in mock_redis.set_feedback_regime_scale.call_args_list}
+        assert scales == {"S1": 1.0, "S4": 1.0}
+
+    def test_does_not_run_when_loss_feedback_is_disabled(self):
+        """Disabled means no ratchet at all; the gate then relies on the code-level
+        floor (_ENTRY_THRESHOLD_BASELINE), not on a key this task keeps alive."""
+        _, mock_redis = _patched_run([], cfg_override={"enabled": False})
+        mock_redis.refresh_feedback_ttl.assert_not_called()
+
+    def test_is_fail_safe(self):
+        """A Redis failure in the heartbeat must not take down the loss-feedback run."""
+        trades = _make_trades([-5, -10, -3], signal_id=123)
+        mock_redis = MagicMock()
+        mock_redis.refresh_feedback_ttl.side_effect = ConnectionError("redis down")
+        mock_redis.get_feedback_entry_threshold.return_value = 0.30
+        mock_redis.get_feedback_regime_scale.return_value = 1.0
+        mock_redis.get_feedback_state.return_value = None
+        mock_pg = MagicMock()
+        mock_pg.fetch_trades.return_value = trades
+
+        with (
+            patch("src.workers.performance._load_loss_feedback_config", return_value=_default_cfg()),
+            patch("src.workers.performance.RedisStore", return_value=mock_redis),
+            patch("src.workers.performance.PostgreSQLStore", return_value=mock_pg),
+            patch("src.workers.performance.TelegramNotifier"),
+            patch("src.workers.performance.run_async"),
+        ):
+            result = run_loss_feedback_check()  # must not raise
+
+        assert result["adjusted"] is True  # the ratchet still ran

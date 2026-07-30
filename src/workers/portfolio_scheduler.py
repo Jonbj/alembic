@@ -1279,7 +1279,12 @@ def _get_feedback_threshold(redis_url: str, strategy: str = "S4") -> float:
 
     Per-strategy keys (feedback:entry_threshold:S4, :S1, …) decouple the ratchet so a
     loss in one strategy does not poison another. Falls back to the legacy bare key
-    and then to S4Config.min_score when Redis is unreachable.
+    and then to the gate floor (_ENTRY_THRESHOLD_BASELINE) when the key is absent or
+    Redis is unreachable.
+
+    A present value is returned verbatim, including values below the floor: S1 stores
+    0.0 deliberately (it has no discrete entry gate), and clamping it here would arm a
+    gate for a sleeve designed not to have one.
     """
     try:
         from redis import Redis as _R
@@ -1294,11 +1299,15 @@ def _get_feedback_threshold(redis_url: str, strategy: str = "S4") -> float:
             _r.close()
     except Exception as exc:
         log.warning(
-            "Could not read feedback threshold for %s from Redis: %s — using S4 min_score",
-            strategy, exc,
+            "Could not read feedback threshold for %s from Redis: %s — using gate floor %.2f",
+            strategy, exc, _ENTRY_THRESHOLD_BASELINE,
         )
-    from src.strategies.s4.config import S4Config as _S4Cfg
-    return _S4Cfg().min_score
+    # #163: this fallback used to be S4Config().min_score (0.10) — a RANKER PREFILTER,
+    # not an order threshold. Combined with the `>` guard at the gate it disarmed the
+    # gate entirely (0.10 > 0.10 is False -> no filter AND no SKIP_THRESHOLD rows) from
+    # 2026-07-28 17:22 UTC, with no self-heal. Defined below at module level; resolved
+    # at call time, so the forward reference is fine.
+    return _ENTRY_THRESHOLD_BASELINE
 
 
 def _fresh_signal_protected_symbols(
@@ -2947,6 +2956,17 @@ def _load_entry_threshold_baseline() -> float:
 _ENTRY_THRESHOLD_BASELINE = _load_entry_threshold_baseline()
 
 
+def _gate_is_active(threshold: float | None, min_score: float) -> bool:
+    """True when the S4 feedback gate should filter this cycle.
+
+    `>=` not `>`: at equality the gate is a no-op filter but still writes
+    SKIP_THRESHOLD rows, which is exactly the visibility we want. The old `>` turned
+    a 0.10 fallback into a fully bypassed block — no filter AND no Decision Log rows,
+    so a no-trade cycle looked identical to a cycle with nothing to say (#163).
+    """
+    return threshold is not None and threshold >= min_score
+
+
 def _record_gate_drops(dropped_df, threshold: float) -> None:
     """Write SKIP_THRESHOLD rows to execution_decisions for signals the S4 feedback
     gate dropped (score below threshold), so the Decision Log explains no-trade cycles
@@ -3228,7 +3248,7 @@ def _build_strategy_instance(entry, bars_df):
 
             # Drop signals below the active feedback threshold (absolute value check
             # so bearish signals are also gated, consistent with BUY-only logic).
-            if _fb_threshold is not None and _fb_threshold > s4_config.min_score:
+            if _gate_is_active(_fb_threshold, s4_config.min_score):
                 before = len(signals_df)
                 dropped_df = signals_df[signals_df["score"].abs() < _fb_threshold]
                 signals_df = signals_df[signals_df["score"].abs() >= _fb_threshold]

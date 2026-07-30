@@ -551,5 +551,71 @@ class TestWriteSentimentSignalId:
         assert "signal_id" not in payload
 
 
+class TestFeedbackTtlRefresh:
+    """#163: the feedback keys are written ONLY by a ratchet/recovery/decay event but
+    carry a 96h TTL, so a sleeve at rest lets them expire — live this disarmed the S4
+    entry gate from 2026-07-28 17:22 UTC with no self-heal. refresh_feedback_ttl
+    re-arms the TTL without touching the stored values."""
+
+    def test_extends_ttl_on_every_feedback_key_for_the_sleeve(self):
+        mock_redis = MagicMock()
+        mock_redis.expire.return_value = 1
+        store = RedisStore(redis_client=mock_redis)
+
+        existed = store.refresh_feedback_ttl(strategy="S4", ttl=345600)
+
+        assert existed is True
+        touched = {c.args[0] for c in mock_redis.expire.call_args_list}
+        assert {
+            "feedback:entry_threshold:S4",
+            "feedback:regime_scale:S4",
+            "feedback:state:S4",
+        } <= touched
+        assert all(c.args[1] == 345600 for c in mock_redis.expire.call_args_list)
+
+    def test_does_not_rewrite_the_values(self):
+        """The whole point: extend the lease, do not touch what is stored."""
+        mock_redis = MagicMock()
+        mock_redis.expire.return_value = 1
+        store = RedisStore(redis_client=mock_redis)
+
+        store.refresh_feedback_ttl(strategy="S1", ttl=1000)
+
+        mock_redis.setex.assert_not_called()
+        mock_redis.set.assert_not_called()
+
+    def test_keeps_the_legacy_bare_mirror_alive_for_s4(self):
+        """set_feedback_entry_threshold mirrors S4 onto the bare key, and
+        get_feedback_entry_threshold falls back to it — so the mirror must not be
+        allowed to outlive or predecease the per-strategy key."""
+        mock_redis = MagicMock()
+        mock_redis.expire.return_value = 1
+        store = RedisStore(redis_client=mock_redis)
+
+        store.refresh_feedback_ttl(strategy="S4", ttl=1000)
+
+        touched = {c.args[0] for c in mock_redis.expire.call_args_list}
+        assert {"feedback:entry_threshold", "feedback:regime_scale"} <= touched
+
+    def test_does_not_touch_the_bare_mirror_for_other_sleeves(self):
+        mock_redis = MagicMock()
+        mock_redis.expire.return_value = 1
+        store = RedisStore(redis_client=mock_redis)
+
+        store.refresh_feedback_ttl(strategy="S1", ttl=1000)
+
+        touched = {c.args[0] for c in mock_redis.expire.call_args_list}
+        assert "feedback:entry_threshold" not in touched
+
+    def test_returns_false_when_the_key_has_already_expired(self):
+        """Redis EXPIRE on a missing key is a no-op returning 0 — that is the signal
+        the caller needs to restore the value instead of silently doing nothing."""
+        mock_redis = MagicMock()
+        mock_redis.expire.return_value = 0
+        store = RedisStore(redis_client=mock_redis)
+
+        assert store.refresh_feedback_ttl(strategy="S4", ttl=1000) is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

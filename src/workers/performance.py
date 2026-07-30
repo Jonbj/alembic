@@ -1822,6 +1822,43 @@ def _step_threshold_down(
     return new_threshold, new_scale
 
 
+# Sleeves that own feedback keys. Hardcoded rather than derived from fb._history:
+# that dict only holds sleeves with a recent *teaching* trade, so a quiet sleeve would
+# silently stop having its lease renewed — the exact failure #163 guards against.
+# Deriving this from StrategyRegistry.get_active_strategies() would be better, but it
+# would add a DB round-trip to a task that currently needs none.
+_FEEDBACK_STRATEGIES = ("S1", "S4")
+
+
+def _refresh_feedback_ttl(redis, cfg: dict) -> None:
+    """Re-arm the TTL on every sleeve's feedback keys, restoring them if already gone.
+
+    The keys carry feedback_ttl_hours but are written ONLY by a ratchet, recovery, or
+    decay event. When a sleeve is at rest no branch writes, so the keys age out and
+    never come back — live, this left the S4 entry gate disarmed from 2026-07-28 17:22
+    UTC (#163). Must run before the per-strategy loop (which skips quiet sleeves) and
+    before the no_closed_trades early return. Fail-safe: a Redis error here must not
+    take down the loss-feedback run.
+    """
+    ttl_seconds = int(cfg["feedback_ttl_hours"] * 3600)
+    for strategy in _FEEDBACK_STRATEGIES:
+        try:
+            if redis.refresh_feedback_ttl(strategy=strategy, ttl=ttl_seconds):
+                continue
+            # Already expired: extending a lease on a missing key is a no-op, so write
+            # the at-rest values back. S1 holds 0.0 — it has no discrete entry gate
+            # (see the S1 branches in _step_threshold_down / the trigger path).
+            at_rest = 0.0 if strategy == "S1" else cfg["threshold_baseline"]
+            redis.set_feedback_entry_threshold(at_rest, ttl=ttl_seconds, strategy=strategy)
+            redis.set_feedback_regime_scale(1.0, ttl=ttl_seconds, strategy=strategy)
+            log.warning(
+                "Feedback keys for %s had expired — restored to threshold %.2f, scale 1.0",
+                strategy, at_rest,
+            )
+        except Exception as exc:
+            log.warning("Feedback TTL heartbeat failed for %s: %s", strategy, exc)
+
+
 @app.task(name="src.workers.performance.run_loss_feedback_check")
 def run_loss_feedback_check() -> dict:
     """Per-strategy, risk-normalized loss feedback (Phase 5).
@@ -1846,6 +1883,8 @@ def run_loss_feedback_check() -> dict:
         return {"skipped": True, "reason": "disabled"}
 
     redis = RedisStore()
+    # #163: before anything that can skip a sleeve or return early.
+    _refresh_feedback_ttl(redis, cfg)
     pg = PostgreSQLStore()
     try:
         # Enough history to warm up the EWMA; newest trades are first from PG.
