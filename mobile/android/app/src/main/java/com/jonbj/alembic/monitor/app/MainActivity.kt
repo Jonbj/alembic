@@ -13,6 +13,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.jonbj.alembic.monitor.BuildConfig
 import com.jonbj.alembic.monitor.MonitorApplication
 import com.jonbj.alembic.monitor.app.navigation.MainScaffold
 import com.jonbj.alembic.monitor.feature.biometric.BiometricLockScreen
@@ -31,7 +32,9 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        if (!BuildConfig.DEBUG) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
         acceptNotificationIntent(intent)
 
         setContent {
@@ -50,7 +53,7 @@ class MainActivity : FragmentActivity() {
                                     LoginViewModel(
                                         authRepository = container.authRepository,
                                         deviceInfoProvider = container.deviceInfoProvider,
-                                        defaultServerUrl = com.jonbj.alembic.monitor.BuildConfig.BASE_URL
+                                        defaultServerUrl = BuildConfig.BASE_URL
                                     )
                                 }
                             )
