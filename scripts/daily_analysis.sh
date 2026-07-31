@@ -337,6 +337,43 @@ FORMATO FINDING obbligatorio per ogni anomalia trovata:
 * Azione consigliata:
 * Test/monitor consigliato:
 
+LEDGER DELLE EVIDENZE
+
+Prima di iniziare l'analisi leggi docs/evidence/findings.json e
+docs/evidence/OBSERVATION_CHARTER.md. Sei dentro un periodo di sola osservazione: NON proporre
+tarature. I remediation ticket che la sezione precedente ti chiede restano ammessi solo per
+difetti di CORRETTEZZA, cioè quelli che, se non corretti, rendono sbagliata l'evidenza raccolta
+nelle settimane successive.
+
+Al termine, per OGNI anomalia che hai riportato, aggiorna docs/evidence/findings.json:
+- SE corrisponde a un finding già presente: aggiungi UNA voce al suo array "occorrenze" e
+  ricalcola "costo_cumulato_usd" come somma di occorrenze[].costo_usd.
+- SE è genuinamente nuova: crea un record con id "F-NNN" dove NNN è il valore corrente di
+  "prossimo_id" formattato a 3 cifre, poi incrementa "prossimo_id" di 1.
+
+Schema di un record:
+{"id":"F-001","titolo":"","tipo":"difetto|alpha_miss|osservazione",
+ "confidenza":"misurata|attribuita|congetturale","primo_avvistamento":"__DATE_TARGET__",
+ "occorrenze":[{"data":"__DATE_TARGET__","costo_usd":0.0,"nota":"","fonte":""}],
+ "costo_cumulato_usd":0.0,"stato":"aperto","issue":null}
+
+Livelli di confidenza: misurata = perdita reale tracciabile a righe di DB; attribuita = il trade
+esiste e il controfattuale è corto; congetturale = nessun trade avvenuto.
+Il campo "fonte" punta al report e alla sezione, es. "FORENSIC_DAILY_REPORT__DATE_TARGET__.md".
+
+DUE REGOLE VINCOLANTI:
+1. SOLO APPEND. Non modificare né cancellare occorrenze già presenti, né cambiare titolo o id di
+   un finding esistente.
+2. NEL DUBBIO, AGGANCIA. Creare un id nuovo va giustificato nella nota. Un'evidenza spezzata in
+   più id ha riccorrenza 1 ciascuno e sparisce sotto tutte le soglie.
+
+Poi committa:
+   git add docs/evidence/findings.json
+   git commit -m "evidence: forensic __DATE_TARGET__"
+Se non c'è nulla da committare, non forzare il commit.
+
+Nel report, ogni anomalia riportata deve avere il suo id fra parentesi quadre a inizio riga.
+
 REGOLE IMPORTANTI
 
 * Non inventare dati mancanti.
@@ -358,7 +395,7 @@ _CLAUDE_PROMPT="${_PROMPT_TEMPLATE//__ALEMBIC_API_KEY__/$ALEMBIC_API_KEY}"
 _CLAUDE_PROMPT="${_CLAUDE_PROMPT//__DATE_TARGET__/$DATE_TARGET}"
 _CLAUDE_PROMPT="${_CLAUDE_PROMPT//__REPORT_FILE__/$REPORT_FILE}"
 
-ANALYSIS_OUTPUT=$(claude --allowedTools "Bash,Write" -p "$_CLAUDE_PROMPT" 2>&1)
+ANALYSIS_OUTPUT=$(claude --allowedTools "Bash,Read,Write,Edit" -p "$_CLAUDE_PROMPT" 2>&1)
 
 echo "$ANALYSIS_OUTPUT" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
