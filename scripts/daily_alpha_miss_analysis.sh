@@ -105,6 +105,14 @@ Limita l'analisi ESCLUSIVAMENTE ai simboli in config/trading.yaml -> symbols.wat
 (circa 96 simboli). Non è uno scan whole-market: la domanda è "abbiamo perso qualcosa che
 potevamo effettivamente tradare", non "cosa ha fatto il mercato in generale".
 
+FASE 0 — LEGGI IL LEDGER PRIMA DI ANALIZZARE
+Leggi docs/evidence/findings.json. Contiene le evidenze già note, ciascuna con un id stabile
+(F-001, F-002, ...), un titolo e le occorrenze già registrate. Tienile presenti per tutta
+l'analisi: alla fine ogni segnalazione che produrrai andrà agganciata a una di queste o
+registrata come nuova.
+Leggi anche docs/evidence/OBSERVATION_CHARTER.md: sei dentro un periodo di sola osservazione,
+quindi NON proporre tarature né fix, solo evidenza.
+
 FASE 1 — RENDIMENTI DEL __DATE_TARGET__
 Scarica le barre giornaliere Alpaca per l'intera watchlist e calcola il rendimento
 percentuale (close vs close precedente). Credenziali in .env (ALPACA_API_KEY,
@@ -170,6 +178,73 @@ Salva un report Markdown in __REPORT_FILE__ usando il Write tool, con queste sez
 7. Non proporre fix di codice: se una causa (es. FILTERED) sembra un bug piuttosto che un limite
    noto, dillo esplicitamente e basta — la decisione se aprire un'issue è dell'operatore.
 
+FASE FINALE — AGGIORNA I DUE LEDGER
+
+A) Appendi UNA riga a docs/evidence/market_daily.jsonl (JSON Lines: una riga sola, niente
+   indentazione, newline finale). Schema esatto:
+
+   {"data":"__DATE_TARGET__","spy":0.0,"qqq":0.0,"dispersione_sigma":0.0,
+    "mover_3pct":0,"up":0,"down":0,"watchlist_zero_news":0,"tema":"",
+    "miss":{"NO_NEWS":0,"THIN_NEUTRAL":0,"WRONG_SIGN":0,"FILTERED":0,"OUT_OF_STRATEGY_SCOPE":0},
+    "catturati":0,
+    "book":{"equity":0.0,"realizzato":0.0,"mtm":null,"s1_realizzato":0.0,"s4_realizzato":0.0}}
+
+   Definizioni:
+   - spy / qqq: rendimento giornaliero (close vs close precedente), come frazione non percentuale.
+   - dispersione_sigma: deviazione standard cross-sectional dei rendimenti dei 96 simboli.
+   - mover_3pct / up / down: quanti simboli con |return| >= 3%, e la ripartizione.
+   - watchlist_zero_news: quanti dei 96 simboli hanno ZERO righe in news_log quel giorno.
+   - tema: una riga di testo, la stessa lettura della tua sezione "Pattern osservato".
+     Ammesso "non chiaro".
+   - miss: i conteggi della tua tabella dei miss classificati.
+   - catturati: quanti mover erano in portafoglio o sono stati tradati.
+   - book: equity di fine giornata da Alpaca; realizzato = somma net_pnl dei trade chiusi quel
+     giorno; s1_realizzato / s4_realizzato = stessa somma per strategia; mtm = variazione
+     mark-to-market del book aperto se la calcoli, altrimenti null.
+   Se un valore non lo puoi calcolare, scrivi null. NON inventarlo e NON omettere la chiave.
+   Se esiste già una riga con la stessa "data", NON aggiungerne una seconda: significa che il
+   report è stato rigenerato. In quel caso lascia il file com'è e segnalalo a stdout.
+
+B) Aggiorna docs/evidence/findings.json per OGNI voce della tua sezione di segnalazioni.
+   Per ciascuna, decidi se è già nel ledger:
+   - SE corrisponde a un finding esistente: aggiungi UNA voce al suo array "occorrenze" e
+     ricalcola "costo_cumulato_usd" come somma di occorrenze[].costo_usd.
+   - SE è genuinamente nuova: crea un record con id "F-NNN" dove NNN è il valore corrente di
+     "prossimo_id" formattato a 3 cifre, poi incrementa "prossimo_id" di 1.
+
+   Schema di un record:
+   {"id":"F-001","titolo":"","tipo":"difetto|alpha_miss|osservazione",
+    "confidenza":"misurata|attribuita|congetturale","primo_avvistamento":"__DATE_TARGET__",
+    "occorrenze":[{"data":"__DATE_TARGET__","costo_usd":0.0,"nota":"","fonte":""}],
+    "costo_cumulato_usd":0.0,"stato":"aperto","issue":null}
+
+   Livelli di confidenza:
+   - misurata: perdita reale tracciabile a righe di DB.
+   - attribuita: il trade esiste, il controfattuale è corto.
+   - congetturale: alpha mancato, nessun trade avvenuto. TUTTI i miss sono congetturali.
+   Il campo "fonte" deve puntare al report e alla sezione che giustifica l'occorrenza, es.
+   "ALPHA_MISS_REPORT___DATE_TARGET__.md §7".
+
+   DUE REGOLE VINCOLANTI:
+   1. SOLO APPEND. Non modificare né cancellare occorrenze già presenti, né cambiare il titolo o
+      l'id di un finding esistente. Puoi solo aggiungere occorrenze, creare record nuovi, e
+      ricalcolare costo_cumulato_usd.
+   2. NEL DUBBIO, AGGANCIA. Creare un id nuovo va giustificato nella nota. Due record duplicati si
+      fondono a fine periodo; un'evidenza spezzata in cinque id diversi ha ricorrenza 1 ciascuno e
+      sparisce sotto tutte le soglie — errore silenzioso e non recuperabile.
+
+   Le CAUSE di miss (NO_NEWS, THIN_NEUTRAL, ...) NON diventano findings: sono già contate in
+   market_daily.jsonl. Diventa un finding solo un'affermazione strutturale, es. "39 simboli su 96
+   non hanno copertura news in un giorno tipico".
+
+C) Committa i due file:
+   git add docs/evidence/findings.json docs/evidence/market_daily.jsonl
+   git commit -m "evidence: ledger __DATE_TARGET__"
+   Se non c'è nulla da committare, non forzare il commit.
+
+D) Nella sezione di segnalazioni del report, ogni voce deve riportare il suo id fra parentesi
+   quadre a inizio riga, es. "[F-004] Sembra un difetto — ...".
+
 REGOLE IMPORTANTI
 * Modalità read-only: nessuna modifica a codice, nessun commit, nessun ordine, nessun worker
   avviato. L'unico file che scrivi è __REPORT_FILE__.
@@ -184,7 +259,7 @@ PROMPT
 _CLAUDE_PROMPT="${_PROMPT_TEMPLATE//__DATE_TARGET__/$DATE_TARGET}"
 _CLAUDE_PROMPT="${_CLAUDE_PROMPT//__REPORT_FILE__/$REPORT_FILE}"
 
-ANALYSIS_OUTPUT=$(claude --allowedTools "Bash,Write" -p "$_CLAUDE_PROMPT" 2>&1)
+ANALYSIS_OUTPUT=$(claude --allowedTools "Bash,Read,Write,Edit" -p "$_CLAUDE_PROMPT" 2>&1)
 
 echo "$ANALYSIS_OUTPUT" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
