@@ -42,6 +42,15 @@ Quattro decisioni prese con l'operatore il 2026-08-01, che vincolano il design:
 Approccio architetturale scelto: **carta + due file versionati, zero codice nuovo**. I due cron
 esistenti vengono estesi nel prompt. Nessuno script, nessuna migrazione, nessuna tabella.
 
+> **Aggiornamento 2026-08-01, stesso giorno.** Un design successivo
+> (`2026-08-01-report-alpha-miner-simmetrico-design.md`) introduce uno script deterministico di
+> precalcolo, come **deroga esplicita** al freeze (vedi §3.1). Non invalida questo documento: il
+> protocollo del ledger resta di solo prompt e viene rilasciato **lunedì 2026-08-03**, in anticipo
+> rispetto allo script. Quel documento introduce anche l'unica eccezione ammessa alla regola "solo
+> append": al momento dell'innesto lo script ricalcola le righe di `market_daily.jsonl` scritte
+> prima, perché l'intera serie abbia una sola provenienza. L'eccezione non si applica mai a
+> `findings.json`.
+
 Motivo: il freeze vieta la taratura, ma il senso è più ampio — l'atto di costruire lo strumento non
 deve consumare le settimane che servono a osservare. Due file JSON e un prompt esteso si fanno in
 un'ora; una tabella Postgres con migrazione, script di aggregazione e pannello sono giorni, e

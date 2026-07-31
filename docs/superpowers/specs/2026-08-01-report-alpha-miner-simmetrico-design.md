@@ -2,8 +2,19 @@
 
 Data: 2026-08-01
 Stato: design approvato, implementazione non iniziata
-Documento gemello: `2026-08-01-osservazione-evidenze-roadmap-pesata-design.md` (le due modifiche
-toccano lo stesso prompt e vanno rilasciate insieme)
+Documento gemello: `2026-08-01-osservazione-evidenze-roadmap-pesata-design.md`
+
+**Rilascio in due tempi** (deciso il 2026-08-01). Le due modifiche toccano lo stesso prompt ma NON
+vengono rilasciate insieme:
+
+| quando | cosa | tipo di lavoro |
+|---|---|---|
+| **lunedì 2026-08-03** | protocollo ledger del documento gemello: lettura di `findings.json`, match degli ID, append di `market_daily.jsonl` | solo prompt |
+| **appena pronto** | questo documento: script del dossier, sezioni nuove, aggregazioni | script + prompt |
+
+Conseguenza favorevole: **i findings e la serie di mercato partono dal giorno 1**, quindi cade
+l'inserimento manuale retroattivo previsto in §8. Resta da ricalcolare solo ciò che dipende dallo
+script.
 
 ## 1. Problema
 
@@ -194,13 +205,22 @@ non sopravvive, e va detto.
 L'osservazione parte lunedì 2026-08-03 con lo strumento attuale; script e prompt si innestano appena
 pronti. La carta di osservazione registra la **data dell'innesto**.
 
-Il recupero è asimmetrico e va dichiarato:
+Grazie al rilascio in due tempi (vedi intestazione), il recupero è molto più semplice di quanto
+previsto in origine:
 
-- La **riga di mercato dei giorni scoperti è ricostruibile al 100%**: si calcola da barre Alpaca e
-  DB, entrambi storici e disponibili. Lo script accetta una data arbitraria proprio per questo, e
-  ribobina all'indietro fino al 2026-08-03. La serie di mercato risulta completa dal giorno 1.
-- I **findings di quei giorni no**: vanno inseriti a mano leggendo le §7 dei report già prodotti,
-  con un campo che li marca come retroattivi.
+- I **findings partono dal giorno 1**: il protocollo di match è attivo dal 3 agosto perché è solo
+  prompt. Nessun inserimento manuale retroattivo.
+- Le **righe di mercato partono dal giorno 1**, scritte dalla sessione: sono gli stessi numeri che
+  il report già calcola per la sua tabella.
+- Restano da ricalcolare solo le metriche introdotte da questo documento (`entry_percentile`,
+  `mtm_eod`, `vs_apertura`, `drift_post_uscita`). Sono **ricostruibili al 100%** da barre Alpaca e
+  DB, entrambi storici: lo script accetta una data arbitraria proprio per questo e ribobina fino al
+  2026-08-03.
+
+Un'avvertenza: le righe di mercato scritte prima dell'innesto sono calcolate dalla sessione, quelle
+successive dallo script. Allo stesso passaggio lo script deve **ricalcolare e riscrivere** le righe
+del periodo precedente, così l'intera serie ha una sola provenienza. È l'unica eccezione ammessa
+alla regola "solo append" del documento gemello, e va annotata nella carta.
 
 ## 9. Deroga al freeze
 
