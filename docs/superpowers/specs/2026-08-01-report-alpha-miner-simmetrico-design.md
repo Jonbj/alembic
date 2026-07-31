@@ -47,8 +47,9 @@ Prese con l'operatore il 2026-08-01:
 
 Il confine non è arbitrario. Classificare un miss come `THIN_NEUTRAL` invece che `NO_NEWS` richiede
 di leggere l'articolo e decidere se è un roundup macro generico o un catalyst specifico sul titolo:
-è giudizio irriducibile, e un LLM lo fa bene. Calcolare un capture ratio è aritmetica, e un LLM che
-la rifà ogni mattina la rifà ogni mattina in modo leggermente diverso.
+è giudizio irriducibile, e un LLM lo fa bene. Calcolare dove cade un prezzo d'ingresso nel range
+della giornata è aritmetica, e un LLM che la rifà ogni mattina la rifà ogni mattina in modo
+leggermente diverso.
 
 ```
 scripts/alpha_miner_dossier.py   (nuovo, deterministico)
