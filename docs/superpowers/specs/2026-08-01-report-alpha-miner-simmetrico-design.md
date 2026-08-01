@@ -140,7 +140,7 @@ Tutte calcolate dallo script, mai dall'LLM.
 | `dispersione_sigma` | dev. std cross-sectional dei rendimenti dei 96 simboli | già usata nel report del 24/07 per motivare la soglia mover |
 
 L'`entry_percentile` è la misura diretta dell'inseguimento. Riscontro: S1 ha comprato F a 16,02 il
-2026-07-29, giornata con range 15,16-16,29 → percentile 0,93; il titolo ha chiuso a 15,28 e la
+2026-07-29, giornata con range 15,16-16,29 → percentile 0,7611; il titolo ha chiuso a 15,28 e la
 posizione è stata liquidata il giorno dopo a −$52,00.
 
 Il `drift_post_uscita` sistematizza un'osservazione che i report facevano a occhio ("uscita a 46,07

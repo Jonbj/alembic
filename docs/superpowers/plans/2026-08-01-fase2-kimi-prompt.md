@@ -51,25 +51,42 @@ Dopo ogni task che copia codice dal piano, **confronta ciò che hai scritto con 
 ```bash
 cd /home/stefano/Documents/Projects/Alembic/.worktrees/fase2-dossier
 python3 - <<'PY'
+import ast
+import glob
 import re
+
 plan = open('docs/superpowers/plans/2026-08-01-fase2-dossier-report-simmetrico.md').read()
 blocchi = re.findall(r"```python\n(.*?)```", plan, re.S)
-sorgenti = open('src/analysis/dossier/market.py').read() + open('src/analysis/dossier/book.py').read() \
-    if __import__('os').path.exists('src/analysis/dossier/book.py') else open('src/analysis/dossier/market.py').read()
-tests = "".join(open(f).read() for f in __import__('glob').glob('tests/analysis/test_*.py'))
-tutto = sorgenti + tests
+percorsi = [
+    'src/analysis/dossier/market.py',
+    'src/analysis/dossier/book.py',
+    *glob.glob('tests/analysis/test_dossier_*.py'),
+]
+nodi_reali = set()
+for percorso in percorsi:
+    modulo = ast.parse(open(percorso).read())
+    nodi_reali.update(
+        ast.dump(nodo, include_attributes=False)
+        for nodo in modulo.body
+        if not isinstance(nodo, (ast.Import, ast.ImportFrom))
+    )
+
 mancanti = []
-for b in blocchi:
-    for riga in b.splitlines():
-        r = riga.strip()
-        if len(r) > 25 and not r.startswith('#') and r not in tutto:
-            mancanti.append(r)
-print("righe del piano non ritrovate nel codice:", len(mancanti))
-for m in mancanti[:10]: print("  MANCANTE:", m[:100])
+for indice, blocco in enumerate(blocchi, 1):
+    modulo = ast.parse(blocco)
+    for nodo in modulo.body:
+        if isinstance(nodo, (ast.Import, ast.ImportFrom)):
+            continue
+        if ast.dump(nodo, include_attributes=False) not in nodi_reali:
+            mancanti.append((indice, getattr(nodo, 'name', type(nodo).__name__)))
+
+print('nodi del piano non ritrovati nel codice:', len(mancanti))
+for indice, nome in mancanti[:10]:
+    print(f'  MANCANTE blocco {indice}: {nome}')
 PY
 ```
 
-Alcune righe possono legittimamente non comparire (per esempio quelle di blocchi di task che non hai ancora fatto). Quello che conta è che **nessuna riga di una task che hai già completato risulti mancante**: se una riga che hai appena scritto non viene ritrovata, l'hai copiata male.
+Durante l'esecuzione intermedia possono mancare i nodi delle task non ancora completate. Alla fine il conteggio deve essere zero. Il confronto usa l'AST, quindi non produce falsi positivi quando `ruff format` spezza una riga in modo diverso dal piano.
 
 ### Baseline della suite
 
@@ -80,7 +97,7 @@ cd /home/stefano/Documents/Projects/Alembic/.worktrees/fase2-dossier
 uv run pytest -q 2>&1 | tail -3
 ```
 
-Attesa al 2026-08-01: `3281 passed, 1 skipped`. Alla fine deve essere identica, più i tuoi 13 test nuovi. **Un fallimento in più va indagato e riportato, mai ignorato.**
+Baseline osservata nel worktree al 2026-08-01: `1 failed, 3267 passed, 14 skipped`; il fallimento è il caso noto #152. Alla fine deve essere identica, più i tuoi 22 test nuovi. **Un fallimento in più va indagato e riportato, mai ignorato.**
 
 ---
 
@@ -103,7 +120,7 @@ Fermati e riporta. Non inventare una soluzione alternativa e non "aggiustare" un
 Quando hai finito, riporta:
 
 1. I 6 commit prodotti (hash + messaggio)
-2. L'output reale di `uv run pytest tests/analysis/ -v` (deve mostrare 13 test)
+2. L'output reale di `uv run pytest tests/analysis/test_dossier_market.py tests/analysis/test_dossier_book.py -v` (deve mostrare 22 test)
 3. L'output reale della suite completa, confrontato con la baseline
 4. L'esito della verifica anti-corruzione
 5. Qualunque cosa ti abbia sorpreso o su cui hai dovuto decidere da solo

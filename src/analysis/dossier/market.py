@@ -2,16 +2,51 @@
 
 Modulo puro: riceve prezzi e conteggi gia' caricati, non tocca rete ne' DB.
 """
+
 from __future__ import annotations
 
 import statistics
+from typing import TypedDict
+
+
+class SignalEvidence(TypedDict):
+    """Segnale disponibile per spiegare un candidato miss."""
+
+    ora: str
+    score: float
+    fallback: bool
+
+
+class MarketMetrics(TypedDict):
+    """Metriche deterministiche della watchlist per una giornata."""
+
+    rendimenti: dict[str, float]
+    dispersione_sigma: float | None
+    mover_3pct: int
+    up: int
+    down: int
+    watchlist_zero_news: int
+    simboli_senza_dati: list[str]
+
+
+MissCandidate = TypedDict(
+    "MissCandidate",
+    {
+        "symbol": str,
+        "return": float,
+        "news_count": int,
+        "segnali": list[SignalEvidence],
+        "in_portafoglio": bool,
+    },
+)
+MissCandidate.__doc__ = "Evidenza grezza su un mover non presente nel portafoglio."
 
 
 def compute_market(
     closes: dict[str, tuple[float | None, float | None]],
     news_counts: dict[str, int],
     soglia_mover: float,
-) -> dict:
+) -> MarketMetrics:
     """Calcola le metriche di mercato della giornata.
 
     Args:
@@ -58,10 +93,10 @@ def compute_market(
 def compute_miss_candidates(
     rendimenti: dict[str, float],
     news_counts: dict[str, int],
-    segnali: dict[str, list[dict]],
+    segnali: dict[str, list[SignalEvidence]],
     in_portafoglio: set[str],
     soglia_mover: float,
-) -> list[dict]:
+) -> list[MissCandidate]:
     """Raccoglie l'evidenza sui mover NON in portafoglio.
 
     Non classifica: la categoria del miss (NO_NEWS, THIN_NEUTRAL, ...) richiede di
@@ -69,7 +104,7 @@ def compute_miss_candidates(
 
     Ordinati per |rendimento| decrescente: i candidati piu' costosi per primi.
     """
-    out = [
+    candidates: list[MissCandidate] = [
         {
             "symbol": sym,
             "return": ret,
@@ -80,4 +115,6 @@ def compute_miss_candidates(
         for sym, ret in rendimenti.items()
         if abs(ret) >= soglia_mover and sym not in in_portafoglio
     ]
-    return sorted(out, key=lambda c: abs(c["return"]), reverse=True)
+    return sorted(
+        candidates, key=lambda candidate: abs(candidate["return"]), reverse=True
+    )

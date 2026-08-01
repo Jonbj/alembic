@@ -1,6 +1,6 @@
 # Fase 2 — Dossier deterministico e report simmetrico Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** execute this plan task-by-task with the repository's implementation workflow. The numbered steps describe procedure only; live progress is tracked by the linked GitHub issue, never by editing this document.
 
 **Goal:** Precalcolare in modo deterministico i numeri del report alpha-miner, e aggiungere le due dimensioni che oggi mancano — falsi positivi e qualità di cattura.
 
@@ -27,7 +27,7 @@
 | `scripts/alpha_miner_dossier.py` | orchestratore: I/O, unione, scrittura JSON — **lo scrive il revisore** |
 | `scripts/daily_alpha_miss_analysis.sh` | prompt che consuma il dossier — **lo scrive il revisore** |
 
-**Regola di isolamento:** l'agente crea e modifica solo i quattro file sopra marcati come suoi. Non tocca l'orchestratore, lo script cron, né alcunché sotto `src/workers/`, `src/strategies/`, `src/store/`, `config/`.
+**Regola di isolamento:** l'agente modifica solo i quattro file di modulo/test elencati sopra e gli `__init__.py` strettamente necessari per il sottopacchetto. Non tocca l'orchestratore, lo script cron, né alcunché sotto `src/workers/`, `src/strategies/`, `src/store/`, `config/`.
 
 **Perché i moduli non fanno I/O:** ricevendo dati già caricati sono testabili con fixture in memoria, senza DB né chiamate di rete. È ciò che rende questo lavoro delegabile e verificabile.
 
@@ -36,19 +36,24 @@
 ## Task A1: Struttura del pacchetto
 
 **Files:**
-- Create: `src/analysis/__init__.py`, `src/analysis/dossier/__init__.py`, `tests/analysis/__init__.py`
+- Preserve and extend: `src/analysis/__init__.py`
+- Create: `src/analysis/dossier/__init__.py`
+- Preserve: `tests/analysis/__init__.py`
 
-- [ ] **Step 1: Creare i tre file vuoti**
+**Step 1: Preparare il sottopacchetto senza sovrascrivere i package esistenti**
 
 ```bash
-cd /home/stefano/Documents/Projects/Alembic
+cd /home/stefano/Documents/Projects/Alembic/.worktrees/fase2-dossier
 mkdir -p src/analysis/dossier tests/analysis
-printf '"""Analisi offline: dossier per il report alpha-miner."""\n' > src/analysis/__init__.py
 printf '"""Moduli puri di calcolo del dossier. Nessun I/O: ricevono dati, restituiscono dict."""\n' > src/analysis/dossier/__init__.py
-touch tests/analysis/__init__.py
+test -f src/analysis/__init__.py
+test -f tests/analysis/__init__.py
 ```
 
-- [ ] **Step 2: Commit**
+Estendere il docstring esistente di `src/analysis/__init__.py` con il riferimento al sottopacchetto
+`dossier`; non sostituire la descrizione preesistente delle analisi post-trade.
+
+**Step 2: Commit**
 
 ```bash
 git add src/analysis tests/analysis
@@ -63,7 +68,7 @@ git commit -m "chore(dossier): struttura del pacchetto di analisi"
 - Create: `src/analysis/dossier/market.py`
 - Test: `tests/analysis/test_dossier_market.py`
 
-- [ ] **Step 1: Scrivere i test che falliscono**
+**Step 1: Scrivere i test che falliscono**
 
 Contenuto integrale di `tests/analysis/test_dossier_market.py`:
 
@@ -89,7 +94,7 @@ def test_rendimenti_dispersione_e_mover():
     assert out["up"] == 1
     assert out["down"] == 1
     # dev.std campionaria di [0.10, -0.05, 0.01]
-    assert out["dispersione_sigma"] == pytest.approx(0.0776745, abs=1e-6)
+    assert out["dispersione_sigma"] == pytest.approx(0.0754983, abs=1e-6)
 
 
 def test_copertura_news_conta_i_simboli_a_zero():
@@ -121,16 +126,16 @@ def test_soglia_e_inclusiva():
     assert out["mover_3pct"] == 1
 ```
 
-- [ ] **Step 2: Eseguire e vedere il fallimento giusto**
+**Step 2: Eseguire e vedere il fallimento giusto**
 
 ```bash
-cd /home/stefano/Documents/Projects/Alembic
+cd /home/stefano/Documents/Projects/Alembic/.worktrees/fase2-dossier
 uv run pytest tests/analysis/test_dossier_market.py -v
 ```
 
 Atteso: `ModuleNotFoundError: No module named 'src.analysis.dossier.market'`. Se fallisce per altro, fermati.
 
-- [ ] **Step 3: Implementare**
+**Step 3: Implementare**
 
 Contenuto integrale di `src/analysis/dossier/market.py`:
 
@@ -142,13 +147,26 @@ Modulo puro: riceve prezzi e conteggi gia' caricati, non tocca rete ne' DB.
 from __future__ import annotations
 
 import statistics
+from typing import TypedDict
+
+
+class MarketMetrics(TypedDict):
+    """Metriche deterministiche della watchlist per una giornata."""
+
+    rendimenti: dict[str, float]
+    dispersione_sigma: float | None
+    mover_3pct: int
+    up: int
+    down: int
+    watchlist_zero_news: int
+    simboli_senza_dati: list[str]
 
 
 def compute_market(
     closes: dict[str, tuple[float | None, float | None]],
     news_counts: dict[str, int],
     soglia_mover: float,
-) -> dict:
+) -> MarketMetrics:
     """Calcola le metriche di mercato della giornata.
 
     Args:
@@ -192,7 +210,7 @@ def compute_market(
     }
 ```
 
-- [ ] **Step 4: Eseguire e vedere il verde**
+**Step 4: Eseguire e vedere il verde**
 
 ```bash
 uv run pytest tests/analysis/test_dossier_market.py -v
@@ -200,7 +218,7 @@ uv run pytest tests/analysis/test_dossier_market.py -v
 
 Atteso: 5 passed.
 
-- [ ] **Step 5: Commit**
+**Step 5: Commit**
 
 ```bash
 git add src/analysis/dossier/market.py tests/analysis/test_dossier_market.py
@@ -221,10 +239,10 @@ Lo script raccoglie l'**evidenza**; la classificazione (NO_NEWS / THIN_NEUTRAL /
 - Modify: `src/analysis/dossier/market.py` (aggiunge una funzione)
 - Modify: `tests/analysis/test_dossier_market.py` (aggiunge test)
 
-- [ ] **Step 1: Aggiungere i test in coda al file**
+**Step 1: Estendere l'import in testa al file e aggiungere i test**
 
 ```python
-from src.analysis.dossier.market import compute_miss_candidates
+from src.analysis.dossier.market import compute_market, compute_miss_candidates
 
 
 def test_candidati_miss_solo_mover_non_in_portafoglio():
@@ -233,7 +251,7 @@ def test_candidati_miss_solo_mover_non_in_portafoglio():
         rendimenti=rendimenti, news_counts={"AAA": 2}, segnali={}, in_portafoglio={"BBB"},
         soglia_mover=0.03,
     )
-    simboli = [c["symbol"] for c in out]
+    simboli = [candidate["symbol"] for candidate in out]
     assert simboli == ["AAA"]          # BBB e' in portafoglio, CCC non e' mover
     assert out[0]["news_count"] == 2
     assert out[0]["in_portafoglio"] is False
@@ -245,7 +263,7 @@ def test_candidati_miss_ordinati_per_rendimento_assoluto_decrescente():
         rendimenti=rendimenti, news_counts={}, segnali={}, in_portafoglio=set(),
         soglia_mover=0.03,
     )
-    assert [c["symbol"] for c in out] == ["BBB", "CCC", "AAA"]
+    assert [candidate["symbol"] for candidate in out] == ["BBB", "CCC", "AAA"]
 
 
 def test_candidati_miss_riportano_i_segnali_con_fallback():
@@ -265,7 +283,7 @@ def test_candidati_miss_senza_segnali_lista_vuota_non_none():
     assert out[0]["segnali"] == []
 ```
 
-- [ ] **Step 2: Eseguire e vedere il fallimento**
+**Step 2: Eseguire e vedere il fallimento**
 
 ```bash
 uv run pytest tests/analysis/test_dossier_market.py -v
@@ -273,16 +291,37 @@ uv run pytest tests/analysis/test_dossier_market.py -v
 
 Atteso: `ImportError: cannot import name 'compute_miss_candidates'`.
 
-- [ ] **Step 3: Implementare (aggiungere in coda a `market.py`)**
+**Step 3: Aggiungere i contratti tipizzati prima delle funzioni e implementare**
 
 ```python
+class SignalEvidence(TypedDict):
+    """Segnale disponibile per spiegare un candidato miss."""
+
+    ora: str
+    score: float
+    fallback: bool
+
+
+MissCandidate = TypedDict(
+    "MissCandidate",
+    {
+        "symbol": str,
+        "return": float,
+        "news_count": int,
+        "segnali": list[SignalEvidence],
+        "in_portafoglio": bool,
+    },
+)
+MissCandidate.__doc__ = "Evidenza grezza su un mover non presente nel portafoglio."
+
+
 def compute_miss_candidates(
     rendimenti: dict[str, float],
     news_counts: dict[str, int],
-    segnali: dict[str, list[dict]],
+    segnali: dict[str, list[SignalEvidence]],
     in_portafoglio: set[str],
     soglia_mover: float,
-) -> list[dict]:
+) -> list[MissCandidate]:
     """Raccoglie l'evidenza sui mover NON in portafoglio.
 
     Non classifica: la categoria del miss (NO_NEWS, THIN_NEUTRAL, ...) richiede di
@@ -290,7 +329,7 @@ def compute_miss_candidates(
 
     Ordinati per |rendimento| decrescente: i candidati piu' costosi per primi.
     """
-    out = [
+    candidates: list[MissCandidate] = [
         {
             "symbol": sym,
             "return": ret,
@@ -301,10 +340,14 @@ def compute_miss_candidates(
         for sym, ret in rendimenti.items()
         if abs(ret) >= soglia_mover and sym not in in_portafoglio
     ]
-    return sorted(out, key=lambda c: abs(c["return"]), reverse=True)
+    return sorted(
+        candidates,
+        key=lambda candidate: abs(candidate["return"]),
+        reverse=True,
+    )
 ```
 
-- [ ] **Step 4: Verde**
+**Step 4: Verde**
 
 ```bash
 uv run pytest tests/analysis/test_dossier_market.py -v
@@ -312,7 +355,7 @@ uv run pytest tests/analysis/test_dossier_market.py -v
 
 Atteso: 9 passed.
 
-- [ ] **Step 5: Commit**
+**Step 5: Commit**
 
 ```bash
 git add src/analysis/dossier/market.py tests/analysis/test_dossier_market.py
@@ -331,7 +374,7 @@ l'articolo, ed e' giudizio che resta alla sessione."
 - Create: `src/analysis/dossier/book.py`
 - Test: `tests/analysis/test_dossier_book.py`
 
-- [ ] **Step 1: Scrivere i test che falliscono**
+**Step 1: Scrivere i test che falliscono**
 
 Contenuto integrale di `tests/analysis/test_dossier_book.py`:
 
@@ -342,7 +385,12 @@ import pytest
 from src.analysis.dossier.book import compute_entries
 
 
-def _bar(open_=100.0, high=110.0, low=90.0, close=105.0):
+def _bar(
+    open_: float = 100.0,
+    high: float = 110.0,
+    low: float = 90.0,
+    close: float = 105.0,
+) -> dict[str, float]:
     return {"open": open_, "high": high, "low": low, "close": close}
 
 
@@ -393,7 +441,7 @@ def test_simbolo_senza_barra_e_saltato_non_inventato():
     assert out[0]["mtm_eod"] is None
 ```
 
-- [ ] **Step 2: Fallimento atteso**
+**Step 2: Fallimento atteso**
 
 ```bash
 uv run pytest tests/analysis/test_dossier_book.py -v
@@ -401,7 +449,7 @@ uv run pytest tests/analysis/test_dossier_book.py -v
 
 Atteso: `ModuleNotFoundError: No module named 'src.analysis.dossier.book'`.
 
-- [ ] **Step 3: Implementare**
+**Step 3: Implementare**
 
 Contenuto integrale di `src/analysis/dossier/book.py`:
 
@@ -413,9 +461,39 @@ Modulo puro: riceve trade e barre gia' caricati, non tocca rete ne' DB.
 from __future__ import annotations
 
 import statistics
+from typing import TypedDict
 
 
-def compute_entries(trades: list[dict], bars: dict[str, dict]) -> list[dict]:
+class EntryTrade(TypedDict):
+    """Campi di un ingresso necessari alle metriche del dossier."""
+
+    symbol: str
+    strategia: str
+    ora_utc: str
+    entry_price: float
+    qty: float
+
+
+class DailyBar(TypedDict):
+    """Barra giornaliera OHLC usata per misurare un ingresso."""
+
+    open: float
+    high: float
+    low: float
+    close: float
+
+
+class EntryMetrics(EntryTrade):
+    """Ingresso arricchito con metriche provvisorie di fine giornata."""
+
+    entry_percentile: float | None
+    mtm_eod: float | None
+    vs_apertura: float | None
+
+
+def compute_entries(
+    trades: list[EntryTrade], bars: dict[str, DailyBar]
+) -> list[EntryMetrics]:
     """Metriche degli ingressi del giorno, con esito PROVVISORIO di fine giornata.
 
     Attenzione a come si legge: su un book dove la posizione media dura 14 giorni,
@@ -425,15 +503,15 @@ def compute_entries(trades: list[dict], bars: dict[str, dict]) -> list[dict]:
     entry_percentile e' la misura dell'inseguimento: 0 = comprato sul minimo del
     giorno, 1 = sul massimo. None se il range e' degenere o la barra manca.
     """
-    out = []
-    for t in trades:
-        bar = bars.get(t["symbol"])
-        riga = {
-            "symbol": t["symbol"],
-            "strategia": t["strategia"],
-            "ora_utc": t["ora_utc"],
-            "entry_price": t["entry_price"],
-            "qty": t["qty"],
+    result: list[EntryMetrics] = []
+    for trade in trades:
+        bar = bars.get(trade["symbol"])
+        row: EntryMetrics = {
+            "symbol": trade["symbol"],
+            "strategia": trade["strategia"],
+            "ora_utc": trade["ora_utc"],
+            "entry_price": trade["entry_price"],
+            "qty": trade["qty"],
             "entry_percentile": None,
             "mtm_eod": None,
             "vs_apertura": None,
@@ -441,14 +519,14 @@ def compute_entries(trades: list[dict], bars: dict[str, dict]) -> list[dict]:
         if bar is not None:
             rng = bar["high"] - bar["low"]
             if rng > 0:
-                riga["entry_percentile"] = (t["entry_price"] - bar["low"]) / rng
-            riga["mtm_eod"] = (bar["close"] - t["entry_price"]) * t["qty"]
-            riga["vs_apertura"] = (bar["close"] - bar["open"]) * t["qty"]
-        out.append(riga)
-    return out
+                row["entry_percentile"] = (trade["entry_price"] - bar["low"]) / rng
+            row["mtm_eod"] = (bar["close"] - trade["entry_price"]) * trade["qty"]
+            row["vs_apertura"] = (bar["close"] - bar["open"]) * trade["qty"]
+        result.append(row)
+    return result
 ```
 
-- [ ] **Step 4: Verde**
+**Step 4: Verde**
 
 ```bash
 uv run pytest tests/analysis/test_dossier_book.py -v
@@ -456,7 +534,7 @@ uv run pytest tests/analysis/test_dossier_book.py -v
 
 Atteso: 5 passed.
 
-- [ ] **Step 5: Commit**
+**Step 5: Commit**
 
 ```bash
 git add src/analysis/dossier/book.py tests/analysis/test_dossier_book.py
@@ -475,10 +553,10 @@ None, mai un numero inventato."
 - Modify: `src/analysis/dossier/book.py`
 - Modify: `tests/analysis/test_dossier_book.py`
 
-- [ ] **Step 1: Test in coda al file**
+**Step 1: Estendere l'import in testa al file e aggiungere i test**
 
 ```python
-from src.analysis.dossier.book import compute_exits
+from src.analysis.dossier.book import compute_entries, compute_exits
 
 
 def test_drift_post_uscita_positivo_significa_soldi_lasciati_sul_tavolo():
@@ -509,41 +587,63 @@ def test_senza_prezzo_di_chiusura_drift_none():
     assert compute_exits(trades, {})[0]["drift_post_uscita"] is None
 ```
 
-- [ ] **Step 2: Fallimento atteso** (`ImportError: cannot import name 'compute_exits'`)
+**Step 2: Fallimento atteso** (`ImportError: cannot import name 'compute_exits'`)
 
 ```bash
 uv run pytest tests/analysis/test_dossier_book.py -v
 ```
 
-- [ ] **Step 3: Implementare (in coda a `book.py`)**
+**Step 3: Aggiungere i contratti tipizzati prima delle funzioni e implementare**
 
 ```python
-def compute_exits(trades: list[dict], closes: dict[str, float]) -> list[dict]:
+class ExitTrade(TypedDict):
+    """Campi di una chiusura necessari alle metriche del dossier."""
+
+    symbol: str
+    strategia: str
+    exit_price: float
+    qty: float
+    pnl_net: float
+    exit_reason: str
+    ore_tenuta: float
+
+
+class ExitMetrics(ExitTrade):
+    """Chiusura arricchita con il drift successivo all'uscita."""
+
+    drift_post_uscita: float | None
+
+
+def compute_exits(
+    trades: list[ExitTrade], closes: dict[str, float]
+) -> list[ExitMetrics]:
     """Metriche delle posizioni chiuse: qui il verdetto e' legittimo, l'esito e' completo.
 
     drift_post_uscita positivo = soldi lasciati sul tavolo (il titolo e' salito dopo
     che siamo usciti); negativo = perdita evitata. Se la mediana mobile e' stabilmente
     positiva, usciamo troppo presto — ed e' misurabile, a differenza di un miss.
     """
-    out = []
-    for t in trades:
-        close = closes.get(t["symbol"])
-        out.append({
-            "symbol": t["symbol"],
-            "strategia": t["strategia"],
-            "exit_price": t["exit_price"],
-            "qty": t["qty"],
-            "pnl_net": t["pnl_net"],
-            "exit_reason": t["exit_reason"],
-            "ore_tenuta": t["ore_tenuta"],
+    result: list[ExitMetrics] = []
+    for trade in trades:
+        close = closes.get(trade["symbol"])
+        result.append({
+            "symbol": trade["symbol"],
+            "strategia": trade["strategia"],
+            "exit_price": trade["exit_price"],
+            "qty": trade["qty"],
+            "pnl_net": trade["pnl_net"],
+            "exit_reason": trade["exit_reason"],
+            "ore_tenuta": trade["ore_tenuta"],
             "drift_post_uscita": (
-                None if close is None else (close - t["exit_price"]) * t["qty"]
+                None
+                if close is None
+                else (close - trade["exit_price"]) * trade["qty"]
             ),
         })
-    return out
+    return result
 ```
 
-- [ ] **Step 4: Verde** (9 passed) — **Step 5: Commit**
+**Step 4: Verde** (9 passed) — **Step 5: Commit**
 
 ```bash
 git add src/analysis/dossier/book.py tests/analysis/test_dossier_book.py
@@ -563,10 +663,14 @@ Positivo = soldi lasciati sul tavolo, negativo = perdita evitata."
 - Modify: `src/analysis/dossier/book.py`
 - Modify: `tests/analysis/test_dossier_book.py`
 
-- [ ] **Step 1: Test in coda al file**
+**Step 1: Estendere l'import in testa al file e aggiungere i test**
 
 ```python
-from src.analysis.dossier.book import aggregate_by_entry_hour
+from src.analysis.dossier.book import (
+    aggregate_by_entry_hour,
+    compute_entries,
+    compute_exits,
+)
 
 
 def test_aggregazione_per_ora_conta_e_somma():
@@ -601,10 +705,31 @@ def test_ordinamento_per_ora_crescente():
     assert [r["ora"] for r in aggregate_by_entry_hour(chiusi)] == [14, 19]
 ```
 
-- [ ] **Step 2: Fallimento atteso** — **Step 3: Implementare (in coda a `book.py`)**
+**Step 2: Fallimento atteso** — **Step 3: aggiungere i contratti tipizzati e implementare**
 
 ```python
-def aggregate_by_entry_hour(chiusi: list[dict]) -> list[dict]:
+class ClosedTradeForHour(TypedDict):
+    """Campi minimi per aggregare il P&L per ora di ingresso."""
+
+    ora_ingresso: int
+    pnl_net: float
+
+
+class EntryHourAggregate(TypedDict):
+    """Statistiche descrittive dei trade entrati nella stessa ora UTC."""
+
+    ora: int
+    n: int
+    win: int
+    somma_pnl: float
+    media: float
+    dev_std: float | None
+    t_stat: float | None
+
+
+def aggregate_by_entry_hour(
+    chiusi: list[ClosedTradeForHour],
+) -> list[EntryHourAggregate]:
     """Raggruppa i trade chiusi per ora UTC di ingresso.
 
     ATTENZIONE ALLA LETTURA: e' un'analisi post-hoc su molti bucket orari. Un t_stat
@@ -613,29 +738,29 @@ def aggregate_by_entry_hour(chiusi: list[dict]) -> list[dict]:
     vere. Chi consuma questo dato deve riportare anche la numerosita'.
     """
     per_ora: dict[int, list[float]] = {}
-    for t in chiusi:
-        per_ora.setdefault(t["ora_ingresso"], []).append(t["pnl_net"])
+    for trade in chiusi:
+        per_ora.setdefault(trade["ora_ingresso"], []).append(trade["pnl_net"])
 
-    out = []
+    result: list[EntryHourAggregate] = []
     for ora in sorted(per_ora):
-        v = per_ora[ora]
-        n = len(v)
-        media = sum(v) / n
-        dev = statistics.stdev(v) if n >= 2 else None
-        t_stat = (media / (dev / (n ** 0.5))) if dev else None
-        out.append({
+        pnl_values = per_ora[ora]
+        sample_size = len(pnl_values)
+        mean = sum(pnl_values) / sample_size
+        std_dev = statistics.stdev(pnl_values) if sample_size >= 2 else None
+        t_stat = (mean / (std_dev / (sample_size**0.5))) if std_dev else None
+        result.append({
             "ora": ora,
-            "n": n,
-            "win": sum(1 for x in v if x > 0),
-            "somma_pnl": sum(v),
-            "media": media,
-            "dev_std": dev,
+            "n": sample_size,
+            "win": sum(1 for pnl in pnl_values if pnl > 0),
+            "somma_pnl": sum(pnl_values),
+            "media": mean,
+            "dev_std": std_dev,
             "t_stat": t_stat,
         })
-    return out
+    return result
 ```
 
-- [ ] **Step 4: Verde** (13 passed) — **Step 5: Commit**
+**Step 4: Verde** (13 passed) — **Step 5: Commit**
 
 ```bash
 git add src/analysis/dossier/book.py tests/analysis/test_dossier_book.py
@@ -650,16 +775,16 @@ bucket, il t_stat ordina le ipotesi e non le dichiara vere."
 
 ## Verifica finale
 
-- [ ] Il proprio modulo passa: `uv run pytest tests/analysis/ -v`
-- [ ] La suite completa non peggiora rispetto alla baseline catturata prima di iniziare:
+- Il proprio modulo passa: `uv run pytest tests/analysis/ -v` (22 test dossier).
+- La suite completa non peggiora rispetto alla baseline catturata prima di iniziare:
 
 ```bash
 uv run pytest -q 2>&1 | tail -3
 ```
 
-Baseline attesa al 2026-08-01: `3281 passed, 1 skipped`. Un fallimento in più va indagato, non ignorato.
+Baseline osservata nel worktree al 2026-08-01: `1 failed, 3267 passed, 14 skipped`; il fallimento è il caso noto #152. Un fallimento in più va indagato, non ignorato.
 
-- [ ] `git push origin evidence/fase2-dossier` e fermarsi. Niente PR, niente merge.
+- `git push origin evidence/fase2-dossier` e fermarsi. Niente merge.
 
 ## Cosa resta al revisore
 
