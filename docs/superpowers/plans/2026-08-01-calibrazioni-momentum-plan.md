@@ -26,11 +26,16 @@
 `src/backtest/`, `src/workers/`, `src/strategies/`, `src/store/`, `config/`, `docs/evidence/`,
 `scripts/`.
 
-**Una scelta di progetto da capire prima di scrivere.** Le funzioni ragionano su **posizioni in una
-lista ordinata di giorni di borsa**, non su date di calendario. «Lookback di 252 giorni» in
-letteratura significa 252 *giorni di borsa*, e sottrarre 252 giorni di calendario darebbe un
-risultato diverso e sbagliato. Per questo `momentum_scores` riceve la lista ordinata delle date e un
-indice, invece di una data.
+**Una scelta di progetto da capire prima di scrivere.** Le funzioni ragionano su **posizioni intere
+in una serie di giorni di borsa**, non su date di calendario. «Lookback di 252 giorni» in letteratura
+significa 252 *giorni di borsa*, e sottrarre 252 giorni di calendario darebbe un risultato diverso e
+sbagliato.
+
+Conseguenza concreta sulle firme: `closes` è `{simbolo: {posizione: prezzo}}` dove la posizione è un
+intero, e le funzioni ricevono indici (`idx`, `start`, `end`), mai oggetti `date`. La traduzione fra
+date reali e posizioni la fa l'orchestratore, che è l'unico a sapere quali giorni la borsa fosse
+aperta. Il modulo resta ignaro del calendario, ed è ciò che lo rende testabile con dizionari
+minuscoli.
 
 ---
 
