@@ -113,3 +113,50 @@ def test_nessun_simbolo_valido_da_none():
 
 def test_paniere_vuoto_da_none():
     assert equal_weighted_return((), {}, 0, 21) is None
+
+
+from src.analysis.calibration.momentum import summarize_excess
+
+
+def test_media_deviazione_e_t():
+    out = summarize_excess([0.01, 0.02, 0.03, 0.02])
+    assert out["n"] == 4
+    assert out["media"] == pytest.approx(0.02)
+    assert out["dev_std"] == pytest.approx(0.0081649658, abs=1e-9)
+    assert out["t_stat"] == pytest.approx(4.898979, abs=1e-5)
+
+
+def test_intervallo_di_confidenza_al_95_percento():
+    out = summarize_excess([0.01, 0.02, 0.03, 0.02])
+    se = 0.0081649658 / 2.0
+    assert out["ci_low"] == pytest.approx(0.02 - 1.96 * se, abs=1e-9)
+    assert out["ci_high"] == pytest.approx(0.02 + 1.96 * se, abs=1e-9)
+
+
+def test_sotto_i_due_campioni_niente_statistiche_inventate():
+    out = summarize_excess([0.01])
+    assert out["n"] == 1
+    assert out["media"] == pytest.approx(0.01)
+    assert out["dev_std"] is None
+    assert out["t_stat"] is None
+    assert out["ci_low"] is None and out["ci_high"] is None
+
+
+def test_serie_vuota():
+    out = summarize_excess([])
+    assert out["n"] == 0
+    assert out["media"] is None
+    assert out["t_stat"] is None
+
+
+def test_dev_std_nulla_da_t_none_non_infinito():
+    """Valori identici: la dev.std e' zero e il t non e' definito."""
+    out = summarize_excess([0.02, 0.02, 0.02])
+    assert out["dev_std"] == pytest.approx(0.0)
+    assert out["t_stat"] is None
+
+
+def test_soglia_di_azionabilita_a_tre():
+    """La pre-registrazione impone |t| >= 3.0: il campo lo rende esplicito."""
+    assert summarize_excess([0.01, 0.02, 0.03, 0.02])["supera_soglia_3"] is True
+    assert summarize_excess([0.01, -0.02, 0.03, -0.02])["supera_soglia_3"] is False

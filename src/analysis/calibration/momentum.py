@@ -87,3 +87,48 @@ def equal_weighted_return(
     if not rendimenti:
         return None
     return sum(rendimenti) / len(rendimenti)
+
+
+def summarize_excess(excess: list[float]) -> dict:
+    """Statistiche riassuntive di una serie di extra-rendimenti periodali.
+
+    ATTENZIONE ALL'INTERPRETAZIONE. La pre-registrazione
+    (docs/evidence/PREREGISTRAZIONE_BACKTEST_S1.md) impone |t| >= 3.0 perche'
+    con le decine di anomalie testate in letteratura la soglia convenzionale di
+    1.96 produce in maggioranza falsi positivi (Harvey-Liu-Zhu 2016).
+
+    E impone anche questo: se il t non raggiunge 3.0, l'esito da registrare e'
+    "NON DIMOSTRATA su questo campione", non "falsa". Con l'effetto atteso
+    (~0.3%/mese) servono oltre 100 mesi per raggiungere t=3 anche se l'effetto
+    fosse reale e stabile: l'assenza di significativita' qui e' attesa per
+    costruzione, non e' una scoperta.
+
+    L'intervallo di confidenza usa l'approssimazione normale (1.96), valida per
+    n >= ~30. Sotto quella soglia va letto come indicativo.
+    """
+    n = len(excess)
+    if n == 0:
+        return {"n": 0, "media": None, "dev_std": None, "t_stat": None,
+                "ci_low": None, "ci_high": None, "supera_soglia_3": False}
+
+    media = sum(excess) / n
+    if n < 2:
+        return {"n": n, "media": media, "dev_std": None, "t_stat": None,
+                "ci_low": None, "ci_high": None, "supera_soglia_3": False}
+
+    dev = statistics.stdev(excess)
+    if dev == 0:
+        return {"n": n, "media": media, "dev_std": dev, "t_stat": None,
+                "ci_low": None, "ci_high": None, "supera_soglia_3": False}
+
+    se = dev / math.sqrt(n)
+    t = media / se
+    return {
+        "n": n,
+        "media": media,
+        "dev_std": dev,
+        "t_stat": t,
+        "ci_low": media - 1.96 * se,
+        "ci_high": media + 1.96 * se,
+        "supera_soglia_3": abs(t) >= 3.0,
+    }
