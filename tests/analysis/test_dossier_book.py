@@ -53,3 +53,34 @@ def test_simbolo_senza_barra_e_saltato_non_inventato():
     out = compute_entries(trades, {})
     assert out[0]["entry_percentile"] is None
     assert out[0]["mtm_eod"] is None
+
+
+from src.analysis.dossier.book import compute_exits
+
+
+def test_drift_post_uscita_positivo_significa_soldi_lasciati_sul_tavolo():
+    trades = [{"symbol": "AAA", "strategia": "S4", "exit_price": 100.0, "qty": 10.0,
+               "pnl_net": 50.0, "exit_reason": "portfolio_sell", "ore_tenuta": 3.5}]
+    out = compute_exits(trades, {"AAA": 103.0})
+    assert out[0]["drift_post_uscita"] == pytest.approx(30.0)
+
+
+def test_drift_negativo_significa_perdita_evitata():
+    trades = [{"symbol": "AAA", "strategia": "S4", "exit_price": 100.0, "qty": 10.0,
+               "pnl_net": 50.0, "exit_reason": "stop_loss", "ore_tenuta": 3.5}]
+    out = compute_exits(trades, {"AAA": 97.0})
+    assert out[0]["drift_post_uscita"] == pytest.approx(-30.0)
+
+
+def test_caso_reale_msft_uscita_sopra_la_chiusura():
+    """MSFT 2026-07-30: uscita a 455.56, chiusura 451.55, 2.82 azioni."""
+    trades = [{"symbol": "MSFT", "strategia": "S4", "exit_price": 455.56, "qty": 2.82,
+               "pnl_net": 13.03, "exit_reason": "portfolio_sell", "ore_tenuta": 2.75}]
+    out = compute_exits(trades, {"MSFT": 451.55})
+    assert out[0]["drift_post_uscita"] == pytest.approx(-11.31, abs=0.01)
+
+
+def test_senza_prezzo_di_chiusura_drift_none():
+    trades = [{"symbol": "ZZZ", "strategia": "S1", "exit_price": 10.0, "qty": 1.0,
+               "pnl_net": 1.0, "exit_reason": "portfolio_sell", "ore_tenuta": 1.0}]
+    assert compute_exits(trades, {})[0]["drift_post_uscita"] is None

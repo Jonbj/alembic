@@ -38,3 +38,28 @@ def compute_entries(trades: list[dict], bars: dict[str, dict]) -> list[dict]:
             riga["vs_apertura"] = (bar["close"] - bar["open"]) * t["qty"]
         out.append(riga)
     return out
+
+
+def compute_exits(trades: list[dict], closes: dict[str, float]) -> list[dict]:
+    """Metriche delle posizioni chiuse: qui il verdetto e' legittimo, l'esito e' completo.
+
+    drift_post_uscita positivo = soldi lasciati sul tavolo (il titolo e' salito dopo
+    che siamo usciti); negativo = perdita evitata. Se la mediana mobile e' stabilmente
+    positiva, usciamo troppo presto — ed e' misurabile, a differenza di un miss.
+    """
+    out = []
+    for t in trades:
+        close = closes.get(t["symbol"])
+        out.append({
+            "symbol": t["symbol"],
+            "strategia": t["strategia"],
+            "exit_price": t["exit_price"],
+            "qty": t["qty"],
+            "pnl_net": t["pnl_net"],
+            "exit_reason": t["exit_reason"],
+            "ore_tenuta": t["ore_tenuta"],
+            "drift_post_uscita": (
+                None if close is None else (close - t["exit_price"]) * t["qty"]
+            ),
+        })
+    return out
