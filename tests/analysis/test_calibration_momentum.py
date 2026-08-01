@@ -80,3 +80,36 @@ def test_include_anche_punteggi_negativi_se_sono_i_migliori():
     Il filtro assoluto e' un'ipotesi separata, non un default."""
     scores = {"AAA": -0.1, "BBB": -0.5, "CCC": -0.9}
     assert select_top(scores, n_top=2) == ("AAA", "BBB")
+
+
+from src.analysis.calibration.momentum import equal_weighted_return
+
+
+def test_rendimento_equipesato():
+    closes = {
+        "AAA": {0: 100.0, 21: 110.0},   # +10%
+        "BBB": {0: 100.0, 21: 90.0},    # -10%
+    }
+    assert equal_weighted_return(("AAA", "BBB"), closes, 0, 21) == pytest.approx(0.0)
+
+
+def test_media_dei_rendimenti_non_rendimento_della_media():
+    """Equipesato = media aritmetica dei rendimenti dei componenti."""
+    closes = {"AAA": {0: 10.0, 21: 20.0}, "BBB": {0: 1000.0, 21: 1100.0}}
+    # +100% e +10% -> 55%, NON un rendimento pesato per prezzo
+    assert equal_weighted_return(("AAA", "BBB"), closes, 0, 21) == pytest.approx(0.55)
+
+
+def test_simbolo_senza_prezzi_nel_periodo_e_saltato_non_azzerato():
+    """Chi non ha dati esce dal calcolo; NON contribuisce con uno zero."""
+    closes = {"AAA": {0: 100.0, 21: 110.0}, "BBB": {0: 100.0}}
+    assert equal_weighted_return(("AAA", "BBB"), closes, 0, 21) == pytest.approx(0.10)
+
+
+def test_nessun_simbolo_valido_da_none():
+    closes = {"AAA": {0: 100.0}}
+    assert equal_weighted_return(("AAA",), closes, 0, 21) is None
+
+
+def test_paniere_vuoto_da_none():
+    assert equal_weighted_return((), {}, 0, 21) is None

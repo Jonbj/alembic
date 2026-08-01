@@ -59,3 +59,31 @@ def select_top(scores: dict[str, float], n_top: int) -> tuple[str, ...]:
     """
     ordinati = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
     return tuple(sym for sym, _ in ordinati[:n_top])
+
+
+def equal_weighted_return(
+    symbols: tuple[str, ...],
+    closes: dict[str, dict[int, float]],
+    start: int,
+    end: int,
+) -> float | None:
+    """Media aritmetica dei rendimenti dei componenti fra due posizioni.
+
+    Equipesato significa media dei RENDIMENTI, non rendimento di un indice
+    pesato per prezzo: due titoli a 10$ e 1000$ contribuiscono uguale.
+
+    Un simbolo senza entrambi i prezzi viene SALTATO, non contato come zero:
+    contarlo come zero significherebbe affermare che non si e' mosso, che e'
+    un'affermazione falsa. Restituisce None se nessun simbolo e' valutabile.
+    """
+    rendimenti: list[float] = []
+    for sym in symbols:
+        serie = closes.get(sym, {})
+        p0 = serie.get(start)
+        p1 = serie.get(end)
+        if p0 is None or p1 is None or p0 == 0:
+            continue
+        rendimenti.append(p1 / p0 - 1.0)
+    if not rendimenti:
+        return None
+    return sum(rendimenti) / len(rendimenti)
