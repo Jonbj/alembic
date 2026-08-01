@@ -1,5 +1,42 @@
 {
   "schema_version": 1,
-  "prossimo_id": 1,
-  "findings": []
+  "prossimo_id": 3,
+  "findings": [
+    {
+      "id": "F-001",
+      "titolo": "Copertura news bassa sulla watchlist (maggioranza dei simboli senza articoli in giornata)",
+      "tipo": "osservazione",
+      "confidenza": "congetturale",
+      "primo_avvistamento": "2026-07-31",
+      "occorrenze": [
+        {
+          "data": "2026-07-31",
+          "costo_usd": 0.0,
+          "nota": "55/96 simboli (57%) zero righe in news_log il 07-31. Tra gli 11 mover >=3% del giorno, NO_NEWS ha causato il miss di BIDU (+3.38%) e RDDT (-20.99%, il mover piu' estremo della giornata).",
+          "fonte": "ALPHA_MISS_REPORT_2026-07-31.md §3, §7"
+        }
+      ],
+      "costo_cumulato_usd": 0.0,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-002",
+      "titolo": "Attribuzione strategia (S1/S4) mancante su trade legacy antecedenti alla patch stop_strategy",
+      "tipo": "osservazione",
+      "confidenza": "misurata",
+      "primo_avvistamento": "2026-07-31",
+      "occorrenze": [
+        {
+          "data": "2026-07-31",
+          "costo_usd": 0.0,
+          "nota": "trades.stop_strategy NULL per GOOGL (aperta 07-10, tuttora aperta, +$43.19 MTM il 07-31) e ABBV (aperta 07-10, chiusa 07-31, net_pnl +$16.90) — trade da 07-14 in poi (MU, AAPL) hanno il campo popolato correttamente. Effetto: il realizzato per strategia del 07-31 (S1 -$11.17, S4 +$0.64) esclude i $16.90 di ABBV; se GOOGL chiude durante il periodo di osservazione il suo P&L sara' ugualmente non attribuibile, il che confligge con la domanda di uscita 2 della carta (split P&L economico S1 vs SPY).",
+          "fonte": "ALPHA_MISS_REPORT_2026-07-31.md §4, §7"
+        }
+      ],
+      "costo_cumulato_usd": 0.0,
+      "stato": "aperto",
+      "issue": null
+    }
+  ]
 }

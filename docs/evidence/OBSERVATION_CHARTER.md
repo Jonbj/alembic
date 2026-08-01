@@ -83,3 +83,23 @@ esplicitamente ignorata**.
 
 **Esito legittimo previsto:** se alla scadenza nessun criterio è soddisfatto, la conclusione corretta
 è **estendere la finestra**, non agire comunque.
+
+## Stato
+
+| data | evento |
+|---|---|
+| 2026-08-01 | Carta scritta e committata. Ledger inizializzati. Protocollo attivo su entrambi i cron. Promemoria OSS_MIDPOINT e OSS_SCADENZA programmati. Prova end-to-end eseguita sul giorno di borsa 2026-07-31. |
+| 2026-08-03 | Inizio del periodo di osservazione. |
+
+### Nota sulla riga del 2026-07-31
+
+`market_daily.jsonl` contiene una riga per il **2026-07-31**, e `findings.json` i record **F-001** e
+**F-002**, prodotti dalla prova end-to-end del protocollo. Sono dati veri, generati dal protocollo
+reale su un giorno di borsa reale — non fixture — ma cadono **prima** dell'inizio della finestra.
+
+Alla sintesi del giorno 40 vanno trattati così:
+- La riga di mercato del 2026-07-31 **non entra** nel conteggio dei giorni della finestra.
+- Le occorrenze datate 2026-07-31 su F-001 e F-002 **non contano** verso le soglie di ricorrenza né
+  verso i costi cumulati.
+- I due findings restano aperti con i loro id: se ricompaiono dal 2026-08-03 in poi, le nuove
+  occorrenze contano normalmente.
