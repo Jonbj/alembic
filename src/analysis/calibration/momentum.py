@@ -43,3 +43,19 @@ def momentum_scores(
             continue
         out[sym] = p1 / p0 - 1.0
     return out
+
+
+def select_top(scores: dict[str, float], n_top: int) -> tuple[str, ...]:
+    """I migliori n per punteggio, con pareggio risolto alfabeticamente.
+
+    Il tie-break alfabetico non e' estetica: senza, l'ordine dipende
+    dall'iterazione del dizionario e due esecuzioni sugli stessi dati possono
+    dare panieri diversi. Una calibrazione deve essere riproducibile.
+
+    Nota: NON filtra i punteggi negativi. Long-only significa che non shortiamo
+    i perdenti, non che escludiamo i vincitori relativi in un mercato in calo.
+    Il filtro di momentum assoluto e' un'ipotesi a se' (dual momentum), non un
+    default silenzioso.
+    """
+    ordinati = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
+    return tuple(sym for sym, _ in ordinati[:n_top])

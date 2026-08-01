@@ -50,3 +50,33 @@ def test_indice_troppo_piccolo_da_dizionario_vuoto():
     """Se la finestra andrebbe prima dell'inizio della serie, nessun punteggio."""
     closes = {"AAA": {i: 100.0 for i in range(300)}}
     assert momentum_scores(closes, idx=100, lookback=242, skip=21) == {}
+
+
+from src.analysis.calibration.momentum import select_top
+
+
+def test_seleziona_i_migliori_n():
+    scores = {"AAA": 0.5, "BBB": 0.1, "CCC": 0.9, "DDD": -0.2}
+    assert select_top(scores, n_top=2) == ("CCC", "AAA")
+
+
+def test_pareggio_risolto_alfabeticamente_per_determinismo():
+    """Due punteggi identici devono dare sempre lo stesso paniere."""
+    scores = {"BBB": 0.5, "AAA": 0.5, "CCC": 0.1}
+    assert select_top(scores, n_top=2) == ("AAA", "BBB")
+
+
+def test_n_top_maggiore_del_disponibile_restituisce_tutto():
+    scores = {"AAA": 0.5, "BBB": 0.1}
+    assert select_top(scores, n_top=10) == ("AAA", "BBB")
+
+
+def test_punteggi_vuoti_danno_tupla_vuota():
+    assert select_top({}, n_top=5) == ()
+
+
+def test_include_anche_punteggi_negativi_se_sono_i_migliori():
+    """Long-only NON significa filtro sul segno: il paniere e' relativo.
+    Il filtro assoluto e' un'ipotesi separata, non un default."""
+    scores = {"AAA": -0.1, "BBB": -0.5, "CCC": -0.9}
+    assert select_top(scores, n_top=2) == ("AAA", "BBB")
