@@ -53,3 +53,31 @@ def compute_market(
         "watchlist_zero_news": zero_news,
         "simboli_senza_dati": sorted(senza_dati),
     }
+
+
+def compute_miss_candidates(
+    rendimenti: dict[str, float],
+    news_counts: dict[str, int],
+    segnali: dict[str, list[dict]],
+    in_portafoglio: set[str],
+    soglia_mover: float,
+) -> list[dict]:
+    """Raccoglie l'evidenza sui mover NON in portafoglio.
+
+    Non classifica: la categoria del miss (NO_NEWS, THIN_NEUTRAL, ...) richiede di
+    leggere il testo degli articoli ed e' compito della sessione, non di questo modulo.
+
+    Ordinati per |rendimento| decrescente: i candidati piu' costosi per primi.
+    """
+    out = [
+        {
+            "symbol": sym,
+            "return": ret,
+            "news_count": news_counts.get(sym, 0),
+            "segnali": segnali.get(sym, []),
+            "in_portafoglio": False,
+        }
+        for sym, ret in rendimenti.items()
+        if abs(ret) >= soglia_mover and sym not in in_portafoglio
+    ]
+    return sorted(out, key=lambda c: abs(c["return"]), reverse=True)
