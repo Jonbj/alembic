@@ -1,8 +1,11 @@
 package com.jonbj.alembic.monitor.feature
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.unit.Density
 import com.jonbj.alembic.monitor.core.model.DataSource
 import com.jonbj.alembic.monitor.core.model.EventCategory
 import com.jonbj.alembic.monitor.core.model.EventHistoryEntry
@@ -129,6 +132,40 @@ class EventsScreenTest {
         }
         composeRule.onNodeWithText("Server non disponibile").assertIsDisplayed()
         composeRule.onNodeWithText("Riprova").assertIsDisplayed()
+    }
+
+    @Test
+    fun allEventFiltersRemainVisibleAtTwoHundredPercentFontScale() {
+        val now = Clock.System.now()
+        composeRule.setContent {
+            AlembicMonitorTheme {
+                CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                    EventsContent(
+                        state = LoadState.Success(
+                            EventsPage(1, now, emptyList(), null),
+                            DataSource.NETWORK,
+                            0
+                        ),
+                        selectedCategory = EventFilter.ALL,
+                        selectedDays = 30,
+                        refreshing = false,
+                        loadingNext = false,
+                        pushStatus = PushStatus.ENABLED,
+                        onCategorySelected = {},
+                        onDaysSelected = {},
+                        onEventSelected = {},
+                        onLoadNext = {},
+                        onRetry = {}
+                    )
+                }
+            }
+        }
+
+        composeRule.onNodeWithText("Tutti").assertIsDisplayed()
+        composeRule.onNodeWithText("Critici").assertIsDisplayed()
+        composeRule.onNodeWithText("Trading").assertIsDisplayed()
+        composeRule.onNodeWithText("Sistema").assertIsDisplayed()
+        composeRule.onNodeWithText("30 giorni").assertIsDisplayed()
     }
 
     @Test

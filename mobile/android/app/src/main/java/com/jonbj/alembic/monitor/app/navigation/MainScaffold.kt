@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -30,7 +31,7 @@ import com.jonbj.alembic.monitor.app.viewModelFactory
 import com.jonbj.alembic.monitor.feature.events.EventsScreen
 import com.jonbj.alembic.monitor.feature.events.EventDetailScreen
 import com.jonbj.alembic.monitor.feature.events.EventDetailViewModel
-import com.jonbj.alembic.monitor.feature.login.LogoutTopBarButton
+import com.jonbj.alembic.monitor.feature.login.AlembicTopBar
 import com.jonbj.alembic.monitor.feature.performance.PerformanceScreen
 import com.jonbj.alembic.monitor.feature.portfolio.PortfolioScreen
 import com.jonbj.alembic.monitor.feature.push.PushPermissionPrompt
@@ -46,6 +47,9 @@ fun MainScaffold(container: AppContainer) {
         .collectAsStateWithLifecycle()
     val pendingEventId by container.deepLinkCoordinator.pendingEventId
         .collectAsStateWithLifecycle()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentDestination = navBackStackEntry?.destination
+    val showingDetail = currentDestination?.route == Destination.EventDetail.route
 
     PushPermissionPrompt(container.pushCoordinator)
 
@@ -78,29 +82,45 @@ fun MainScaffold(container: AppContainer) {
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
-                val navBackStackEntry by navController.currentBackStackEntryAsState()
-                val currentDestination = navBackStackEntry?.destination
-                bottomNavItems.forEach { item ->
-                    NavigationBarItem(
-                        icon = { Icon(item.icon, contentDescription = null) },
-                        label = { Text(stringResource(item.labelRes)) },
-                        selected = currentDestination?.hierarchy?.any { it.route == item.destination.route } == true,
-                        onClick = {
-                            navController.navigate(item.destination.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+            if (!showingDetail) {
+                NavigationBar(tonalElevation = 0.dp) {
+                    bottomNavItems.forEach { item ->
+                        NavigationBarItem(
+                            icon = {
+                                Icon(
+                                    item.icon,
+                                    contentDescription = stringResource(item.labelRes)
+                                )
+                            },
+                            label = {
+                                Text(
+                                    text = stringResource(item.labelRes),
+                                    maxLines = 1
+                                )
+                            },
+                            selected = currentDestination?.hierarchy?.any {
+                                it.route == item.destination.route
+                            } == true,
+                            onClick = {
+                                navController.navigate(item.destination.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
                                 }
-                                launchSingleTop = true
-                                restoreState = true
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         },
         topBar = {
-            LogoutTopBarButton { container.logout() }
+            AlembicTopBar(
+                detail = showingDetail,
+                onBack = { navController.popBackStack() },
+                onLogout = { container.logout() }
+            )
         }
     ) { innerPadding ->
         NavHost(

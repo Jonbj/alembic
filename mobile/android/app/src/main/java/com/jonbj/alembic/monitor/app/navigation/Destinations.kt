@@ -1,10 +1,10 @@
 package com.jonbj.alembic.monitor.app.navigation
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Analytics
-import androidx.compose.material.icons.filled.Dashboard
-import androidx.compose.material.icons.filled.Wallet
-import androidx.compose.material.icons.automirrored.filled.EventNote
+import androidx.compose.material.icons.rounded.AccountBalanceWallet
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.automirrored.rounded.ShowChart
+import androidx.compose.material.icons.rounded.SpaceDashboard
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.jonbj.alembic.monitor.R
 import com.jonbj.alembic.monitor.push.OpaqueEventId
@@ -28,8 +28,8 @@ data class BottomNavItem(
 )
 
 val bottomNavItems = listOf(
-    BottomNavItem(Destination.Status, R.string.nav_status, Icons.Default.Dashboard),
-    BottomNavItem(Destination.Performance, R.string.nav_performance, Icons.Default.Analytics),
-    BottomNavItem(Destination.Portfolio, R.string.nav_portfolio, Icons.Default.Wallet),
-    BottomNavItem(Destination.Events, R.string.nav_events, Icons.AutoMirrored.Filled.EventNote)
+    BottomNavItem(Destination.Status, R.string.nav_status, Icons.Rounded.SpaceDashboard),
+    BottomNavItem(Destination.Performance, R.string.nav_performance, Icons.AutoMirrored.Rounded.ShowChart),
+    BottomNavItem(Destination.Portfolio, R.string.nav_portfolio, Icons.Rounded.AccountBalanceWallet),
+    BottomNavItem(Destination.Events, R.string.nav_events, Icons.Rounded.Notifications)
 )

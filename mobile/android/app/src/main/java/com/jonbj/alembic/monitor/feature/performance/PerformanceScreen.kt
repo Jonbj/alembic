@@ -2,6 +2,8 @@ package com.jonbj.alembic.monitor.feature.performance
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -9,10 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,7 +38,10 @@ import com.jonbj.alembic.monitor.ui.components.EmptyMessage
 import com.jonbj.alembic.monitor.ui.components.ErrorMessage
 import com.jonbj.alembic.monitor.ui.components.FreshnessBanner
 import com.jonbj.alembic.monitor.ui.components.LoadingSpinner
+import com.jonbj.alembic.monitor.ui.components.MetricRow
+import com.jonbj.alembic.monitor.ui.components.MonitorCard
 import com.jonbj.alembic.monitor.ui.components.PullRefreshContainer
+import com.jonbj.alembic.monitor.ui.components.SectionHeading
 import com.jonbj.alembic.monitor.ui.components.formatMoney
 import com.jonbj.alembic.monitor.ui.components.formatPercent
 import com.jonbj.alembic.monitor.ui.components.formatSignedMoney
@@ -101,18 +104,19 @@ internal fun PerformanceContent(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PeriodSelector(
     selected: PerformancePeriod,
     onSelected: (PerformancePeriod) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    LazyRow(
-        modifier = modifier,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    FlowRow(
+        modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        items(PerformancePeriod.entries) { period ->
+        PerformancePeriod.entries.forEach { period ->
             FilterChip(
                 selected = period == selected,
                 onClick = { onSelected(period) },
@@ -123,6 +127,7 @@ private fun PeriodSelector(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PerformanceList(state: LoadState.Success<Performance>) {
     val performance = state.data
@@ -149,31 +154,26 @@ private fun PerformanceList(state: LoadState.Success<Performance>) {
             item { EmptyMessage(modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp)) }
         } else {
             item {
-                Card(modifier = Modifier.fillMaxWidth()) {
+                MonitorCard(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         SectionHeading(stringResource(R.string.nav_chart))
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (hasBenchmark) {
-                                item {
-                                    FilterChip(
-                                        selected = showBenchmark,
-                                        onClick = { showBenchmark = !showBenchmark },
-                                        label = { Text(stringResource(R.string.benchmark)) }
-                                    )
-                                }
-                            }
-                            if (hasDrawdown) {
-                                item {
-                                    FilterChip(
-                                        selected = showDrawdown,
-                                        onClick = { showDrawdown = !showDrawdown },
-                                        label = { Text(stringResource(R.string.drawdown)) }
-                                    )
-                                }
-                            }
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            if (hasBenchmark) FilterChip(
+                                selected = showBenchmark,
+                                onClick = { showBenchmark = !showBenchmark },
+                                label = { Text(stringResource(R.string.benchmark)) }
+                            )
+                            if (hasDrawdown) FilterChip(
+                                selected = showDrawdown,
+                                onClick = { showDrawdown = !showDrawdown },
+                                label = { Text(stringResource(R.string.drawdown)) }
+                            )
                         }
                         PerformanceChart(
                             points = performance.points,
@@ -202,7 +202,7 @@ private fun PerformanceList(state: LoadState.Success<Performance>) {
         }
         if (performance.degradations.isNotEmpty()) {
             item {
-                Card(modifier = Modifier.fillMaxWidth()) {
+                MonitorCard(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -218,7 +218,7 @@ private fun PerformanceList(state: LoadState.Success<Performance>) {
 
 @Composable
 private fun SummaryMetrics(performance: Performance) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    MonitorCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -252,7 +252,7 @@ private fun SummaryMetrics(performance: Performance) {
             )
         }
     }
-    Card(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
+    MonitorCard(modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = stringResource(R.string.realized_pnl),
@@ -279,7 +279,7 @@ private fun PerformancePointRow(point: PerformancePoint, currency: String) {
         point.benchmarkNav?.let { add("Benchmark ${formatMoney(it, currency)}") }
         point.drawdown?.let { add("Drawdown ${formatPercent(it)}") }
     }.joinToString(". ")
-    Card(
+    MonitorCard(
         modifier = Modifier
             .fillMaxWidth()
             .semantics { contentDescription = description }
@@ -294,26 +294,5 @@ private fun PerformancePointRow(point: PerformancePoint, currency: String) {
                 MetricRow(stringResource(R.string.drawdown), formatPercent(it))
             }
         }
-    }
-}
-
-@Composable
-private fun SectionHeading(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleLarge,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.semantics { heading() }
-    )
-}
-
-@Composable
-private fun MetricRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text(label, modifier = Modifier.weight(1f))
-        Text(value, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
     }
 }

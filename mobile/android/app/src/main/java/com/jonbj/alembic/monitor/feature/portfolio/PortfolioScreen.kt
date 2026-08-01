@@ -11,9 +11,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material3.Card
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -41,15 +40,17 @@ import com.jonbj.alembic.monitor.ui.components.EmptyMessage
 import com.jonbj.alembic.monitor.ui.components.ErrorMessage
 import com.jonbj.alembic.monitor.ui.components.FreshnessBanner
 import com.jonbj.alembic.monitor.ui.components.LoadingSpinner
+import com.jonbj.alembic.monitor.ui.components.MetricRow
+import com.jonbj.alembic.monitor.ui.components.MonitorCard
 import com.jonbj.alembic.monitor.ui.components.PullRefreshContainer
+import com.jonbj.alembic.monitor.ui.components.SectionHeading
 import com.jonbj.alembic.monitor.ui.components.formatDataAge
+import com.jonbj.alembic.monitor.ui.components.formatDateTime
 import com.jonbj.alembic.monitor.ui.components.formatMoney
 import com.jonbj.alembic.monitor.ui.components.formatPercent
 import com.jonbj.alembic.monitor.ui.components.formatQuantity
 import com.jonbj.alembic.monitor.ui.components.formatSignedMoney
 import com.jonbj.alembic.monitor.ui.components.sortPositionsForRisk
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
 
 @Composable
 fun PortfolioScreen(viewModel: PortfolioViewModel) {
@@ -124,7 +125,7 @@ private fun PositionsList(state: LoadState.Success<Positions>) {
         }
         if (positions.degradations.isNotEmpty()) {
             item {
-                Card(modifier = Modifier.fillMaxWidth()) {
+                MonitorCard(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -140,7 +141,7 @@ private fun PositionsList(state: LoadState.Success<Positions>) {
 
 @Composable
 private fun SummaryCard(summary: PositionSummary, currency: String) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    MonitorCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -173,7 +174,7 @@ private fun PositionCard(
         append(", ${formatPercent(position.unrealizedReturn)}")
         append(if (expanded) ". Dettagli aperti" else ". Tocca per i dettagli")
     }
-    Card(
+    androidx.compose.material3.ElevatedCard(
         onClick = onToggle,
         modifier = Modifier
             .fillMaxWidth()
@@ -203,7 +204,7 @@ private fun PositionCard(
                     fontWeight = FontWeight.Bold
                 )
                 Icon(
-                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    imageVector = if (expanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                     contentDescription = null
                 )
             }
@@ -227,32 +228,11 @@ private fun PositionCard(
                 )
                 MetricRow(
                     stringResource(R.string.entry_time),
-                    position.entryTime?.toLocalDateTime(TimeZone.currentSystemDefault())?.toString()
+                    position.entryTime?.let(::formatDateTime)
                         ?: stringResource(R.string.not_available)
                 )
                 MetricRow(stringResource(R.string.data_age), formatDataAge(dataAgeSeconds))
             }
         }
-    }
-}
-
-@Composable
-private fun SectionHeading(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleLarge,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.semantics { heading() }
-    )
-}
-
-@Composable
-private fun MetricRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text(label, modifier = Modifier.weight(1f))
-        Text(value, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1.2f))
     }
 }

@@ -4,6 +4,8 @@ import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,10 +13,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.NotificationsActive
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,6 +37,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jonbj.alembic.monitor.R
 import com.jonbj.alembic.monitor.core.model.EventItem
+import com.jonbj.alembic.monitor.core.model.EventSeverity
+import com.jonbj.alembic.monitor.core.model.EventStatus
 import com.jonbj.alembic.monitor.core.model.EventsPage
 import com.jonbj.alembic.monitor.core.model.LoadState
 import com.jonbj.alembic.monitor.push.PushStatus
@@ -41,8 +47,8 @@ import com.jonbj.alembic.monitor.ui.components.ErrorMessage
 import com.jonbj.alembic.monitor.ui.components.LoadingSpinner
 import com.jonbj.alembic.monitor.ui.components.OfflineBanner
 import com.jonbj.alembic.monitor.ui.components.PullRefreshContainer
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
+import com.jonbj.alembic.monitor.ui.components.StatusPill
+import com.jonbj.alembic.monitor.ui.components.formatDateTime
 
 @Composable
 fun EventsScreen(
@@ -127,6 +133,7 @@ internal fun EventsContent(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EventFilters(
     selectedCategory: EventFilter,
@@ -140,23 +147,33 @@ private fun EventFilters(
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(
-            text = when (pushStatus) {
-                PushStatus.ENABLED -> stringResource(R.string.push_enabled)
-                PushStatus.REGISTERING -> stringResource(R.string.push_registering)
-                PushStatus.UNAVAILABLE -> stringResource(R.string.push_unavailable)
-                PushStatus.ERROR -> stringResource(R.string.push_error)
-                PushStatus.DISABLED -> stringResource(R.string.push_disabled)
-            },
-            style = MaterialTheme.typography.labelLarge
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(
+                Icons.Rounded.NotificationsActive,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = when (pushStatus) {
+                    PushStatus.ENABLED -> stringResource(R.string.push_enabled)
+                    PushStatus.REGISTERING -> stringResource(R.string.push_registering)
+                    PushStatus.UNAVAILABLE -> stringResource(R.string.push_unavailable)
+                    PushStatus.ERROR -> stringResource(R.string.push_error)
+                    PushStatus.DISABLED -> stringResource(R.string.push_disabled)
+                },
+                style = MaterialTheme.typography.labelLarge
+            )
+        }
         if (pushStatus == PushStatus.DISABLED) {
             TextButton(onClick = onManageNotifications) {
                 Text(stringResource(R.string.push_manage))
             }
         }
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(EventFilter.entries) { filter ->
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            EventFilter.entries.forEach { filter ->
                 FilterChip(
                     selected = filter == selectedCategory,
                     onClick = { onCategorySelected(filter) },
@@ -175,7 +192,10 @@ private fun EventFilters(
                 )
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
             listOf(7, 30).forEach { days ->
                 FilterChip(
                     selected = days == selectedDays,
@@ -234,10 +254,15 @@ private fun EventsList(
 
 @Composable
 private fun EventCard(event: EventItem, onClick: () -> Unit) {
-    val localTime = event.occurredAt
-        .toLocalDateTime(TimeZone.currentSystemDefault())
-        .toString()
-    Card(
+    val localTime = formatDateTime(event.occurredAt)
+    val severity = eventSeverityLabel(event.severity)
+    val status = eventStatusLabel(event.status)
+    val severityColor = when (event.severity) {
+        EventSeverity.CRITICAL -> MaterialTheme.colorScheme.error
+        EventSeverity.WARNING -> MaterialTheme.colorScheme.tertiary
+        EventSeverity.INFO -> MaterialTheme.colorScheme.secondary
+    }
+    ElevatedCard(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
@@ -245,7 +270,7 @@ private fun EventCard(event: EventItem, onClick: () -> Unit) {
             .semantics {
                 role = Role.Button
                 contentDescription =
-                    "${event.title}. ${event.severity}. ${event.status}. $localTime"
+                    "${event.title}. $severity. $status. $localTime"
             }
     ) {
         Column(
@@ -262,13 +287,14 @@ private fun EventCard(event: EventItem, onClick: () -> Unit) {
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f).semantics { heading() }
                 )
-                Text(
-                    text = event.severity.name,
-                    style = MaterialTheme.typography.labelLarge
-                )
+                StatusPill(text = severity, color = severityColor)
             }
             event.summary?.takeIf { it.isNotBlank() }?.let { Text(it) }
-            Text("${event.status.name} · $localTime")
+            Text(
+                "$status · $localTime",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             if (event.history.isNotEmpty()) {
                 Text(
                     text = stringResource(
@@ -281,3 +307,22 @@ private fun EventCard(event: EventItem, onClick: () -> Unit) {
         }
     }
 }
+
+@Composable
+internal fun eventSeverityLabel(severity: EventSeverity): String = stringResource(
+    when (severity) {
+        EventSeverity.CRITICAL -> R.string.event_severity_critical
+        EventSeverity.WARNING -> R.string.event_severity_warning
+        EventSeverity.INFO -> R.string.event_severity_info
+    }
+)
+
+@Composable
+internal fun eventStatusLabel(status: EventStatus): String = stringResource(
+    when (status) {
+        EventStatus.OPEN -> R.string.event_status_open
+        EventStatus.ESCALATED -> R.string.event_status_escalated
+        EventStatus.RECOVERED -> R.string.event_status_recovered
+        EventStatus.CLOSED -> R.string.event_status_closed
+    }
+)
