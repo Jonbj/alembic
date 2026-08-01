@@ -16,7 +16,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.NotificationsActive
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +44,7 @@ import com.jonbj.alembic.monitor.push.PushStatus
 import com.jonbj.alembic.monitor.ui.components.EmptyMessage
 import com.jonbj.alembic.monitor.ui.components.ErrorMessage
 import com.jonbj.alembic.monitor.ui.components.LoadingSpinner
+import com.jonbj.alembic.monitor.ui.components.MonitorCard
 import com.jonbj.alembic.monitor.ui.components.OfflineBanner
 import com.jonbj.alembic.monitor.ui.components.PullRefreshContainer
 import com.jonbj.alembic.monitor.ui.components.StatusPill
@@ -257,12 +257,8 @@ private fun EventCard(event: EventItem, onClick: () -> Unit) {
     val localTime = formatDateTime(event.occurredAt)
     val severity = eventSeverityLabel(event.severity)
     val status = eventStatusLabel(event.status)
-    val severityColor = when (event.severity) {
-        EventSeverity.CRITICAL -> MaterialTheme.colorScheme.error
-        EventSeverity.WARNING -> MaterialTheme.colorScheme.tertiary
-        EventSeverity.INFO -> MaterialTheme.colorScheme.secondary
-    }
-    ElevatedCard(
+    val severityColor = eventSeverityColor(event.severity)
+    MonitorCard(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
@@ -326,3 +322,19 @@ internal fun eventStatusLabel(status: EventStatus): String = stringResource(
         EventStatus.CLOSED -> R.string.event_status_closed
     }
 )
+
+@Composable
+internal fun eventSeverityColor(severity: EventSeverity) = when (severity) {
+    EventSeverity.CRITICAL -> MaterialTheme.colorScheme.error
+    EventSeverity.WARNING -> MaterialTheme.colorScheme.tertiary
+    EventSeverity.INFO -> MaterialTheme.colorScheme.secondary
+}
+
+@Composable
+internal fun eventHistoryStateLabel(state: String): String = when (state.lowercase()) {
+    "open" -> stringResource(R.string.event_status_open)
+    "escalated" -> stringResource(R.string.event_status_escalated)
+    "recovered" -> stringResource(R.string.event_status_recovered)
+    "closed", "resolved" -> stringResource(R.string.event_status_closed)
+    else -> state.replace('_', ' ').replaceFirstChar { it.uppercase() }
+}

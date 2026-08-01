@@ -45,8 +45,7 @@ import com.jonbj.alembic.monitor.ui.components.SectionHeading
 import com.jonbj.alembic.monitor.ui.components.formatMoney
 import com.jonbj.alembic.monitor.ui.components.formatPercent
 import com.jonbj.alembic.monitor.ui.components.formatSignedMoney
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
+import com.jonbj.alembic.monitor.ui.components.formatDateTime
 
 @Composable
 fun PerformanceScreen(viewModel: PerformanceViewModel) {
@@ -106,7 +105,7 @@ internal fun PerformanceContent(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PeriodSelector(
+internal fun PeriodSelector(
     selected: PerformancePeriod,
     onSelected: (PerformancePeriod) -> Unit,
     modifier: Modifier = Modifier
@@ -272,9 +271,9 @@ private fun SummaryMetrics(performance: Performance) {
 
 @Composable
 private fun PerformancePointRow(point: PerformancePoint, currency: String) {
-    val local = point.at.toLocalDateTime(TimeZone.currentSystemDefault())
+    val local = formatDateTime(point.at)
     val description = buildList {
-        add("${local.date} ${local.hour}:${local.minute.toString().padStart(2, '0')}")
+        add(local)
         add("NAV ${formatMoney(point.nav, currency)}")
         point.benchmarkNav?.let { add("Benchmark ${formatMoney(it, currency)}") }
         point.drawdown?.let { add("Drawdown ${formatPercent(it)}") }
@@ -285,7 +284,7 @@ private fun PerformancePointRow(point: PerformancePoint, currency: String) {
             .semantics { contentDescription = description }
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text("${local.date} · ${local.hour}:${local.minute.toString().padStart(2, '0')}")
+            Text(local)
             MetricRow("NAV", formatMoney(point.nav, currency))
             point.benchmarkNav?.let {
                 MetricRow(stringResource(R.string.benchmark), formatMoney(it, currency))

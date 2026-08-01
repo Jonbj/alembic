@@ -3,7 +3,6 @@ package com.jonbj.alembic.monitor.ui.components
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CardDefaults
@@ -27,6 +26,24 @@ fun MonitorCard(
     content: @Composable () -> Unit
 ) {
     ElevatedCard(
+        modifier = modifier,
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        ),
+        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
+    ) {
+        content()
+    }
+}
+
+@Composable
+fun MonitorCard(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    ElevatedCard(
+        onClick = onClick,
         modifier = modifier,
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
@@ -121,49 +138,5 @@ fun StatusPill(
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
         )
-    }
-}
-
-@Composable
-fun MetricPair(
-    modifier: Modifier = Modifier,
-    content: @Composable RowScope.() -> Unit
-) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        content = content
-    )
-}
-
-@Composable
-fun MetricTile(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-    valueColor: Color = Color.Unspecified
-) {
-    Surface(
-        modifier = modifier,
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surface
-    ) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
-        ) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                text = value,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontFeatureSettings = "tnum"
-                ),
-                color = valueColor
-            )
-        }
     }
 }

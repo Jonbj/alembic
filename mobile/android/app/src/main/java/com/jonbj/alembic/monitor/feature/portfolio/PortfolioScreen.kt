@@ -174,7 +174,7 @@ private fun PositionCard(
         append(", ${formatPercent(position.unrealizedReturn)}")
         append(if (expanded) ". Dettagli aperti" else ". Tocca per i dettagli")
     }
-    androidx.compose.material3.ElevatedCard(
+    MonitorCard(
         onClick = onToggle,
         modifier = Modifier
             .fillMaxWidth()

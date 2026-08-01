@@ -22,8 +22,8 @@
 
     <!-- Navigation -->
     <string name="nav_status">Stato</string>
-    <string name="nav_performance">Trend</string>
-    <string name="nav_portfolio">Posizioni</string>
+    <string name="nav_performance">Andamento</string>
+    <string name="nav_portfolio">Portafoglio</string>
     <string name="nav_events">Eventi</string>
 
     <!-- Status -->

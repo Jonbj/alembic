@@ -80,6 +80,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawNormalizedArea(
     values: List<Double?>,
     color: Color
 ) {
+    if (values.any { it == null || !it.isFinite() }) return
     val finite = values.mapNotNull { it?.takeIf(Double::isFinite) }
     if (finite.size < 2) return
     val min = finite.min()

@@ -1,9 +1,11 @@
 package com.jonbj.alembic.monitor.app.navigation
 
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -11,9 +13,11 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -83,36 +87,18 @@ fun MainScaffold(container: AppContainer) {
     Scaffold(
         bottomBar = {
             if (!showingDetail) {
-                NavigationBar(tonalElevation = 0.dp) {
-                    bottomNavItems.forEach { item ->
-                        NavigationBarItem(
-                            icon = {
-                                Icon(
-                                    item.icon,
-                                    contentDescription = stringResource(item.labelRes)
-                                )
-                            },
-                            label = {
-                                Text(
-                                    text = stringResource(item.labelRes),
-                                    maxLines = 1
-                                )
-                            },
-                            selected = currentDestination?.hierarchy?.any {
-                                it.route == item.destination.route
-                            } == true,
-                            onClick = {
-                                navController.navigate(item.destination.route) {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
-                                    }
-                                    launchSingleTop = true
-                                    restoreState = true
-                                }
+                MonitorBottomBar(
+                    currentRoute = currentDestination?.route,
+                    onDestinationSelected = { destination ->
+                        navController.navigate(destination.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
                             }
-                        )
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
-                }
+                )
             }
         },
         topBar = {
@@ -191,6 +177,46 @@ fun MainScaffold(container: AppContainer) {
                     )
                 )
             }
+        }
+    }
+}
+
+@Composable
+internal fun MonitorBottomBar(
+    currentRoute: String?,
+    onDestinationSelected: (Destination) -> Unit
+) {
+    val largeText = LocalDensity.current.fontScale >= 1.45f
+    NavigationBar(
+        modifier = Modifier.height(if (largeText) 96.dp else 80.dp),
+        tonalElevation = 0.dp
+    ) {
+        bottomNavItems.forEach { item ->
+            NavigationBarItem(
+                icon = {
+                    Icon(
+                        item.icon,
+                        contentDescription = stringResource(item.labelRes)
+                    )
+                },
+                label = {
+                    Text(
+                        text = stringResource(item.labelRes),
+                        style = if (largeText) {
+                            MaterialTheme.typography.labelMedium.copy(
+                                fontSize = 10.sp,
+                                lineHeight = 12.sp
+                            )
+                        } else {
+                            MaterialTheme.typography.labelMedium
+                        },
+                        maxLines = 2,
+                        textAlign = TextAlign.Center
+                    )
+                },
+                selected = currentRoute == item.destination.route,
+                onClick = { onDestinationSelected(item.destination) }
+            )
         }
     }
 }

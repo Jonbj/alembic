@@ -74,14 +74,7 @@ private fun EventDetail(event: EventItem) {
                 ) {
                     StatusPill(
                         text = eventSeverityLabel(event.severity),
-                        color = when (event.severity) {
-                            com.jonbj.alembic.monitor.core.model.EventSeverity.CRITICAL ->
-                                MaterialTheme.colorScheme.error
-                            com.jonbj.alembic.monitor.core.model.EventSeverity.WARNING ->
-                                MaterialTheme.colorScheme.tertiary
-                            com.jonbj.alembic.monitor.core.model.EventSeverity.INFO ->
-                                MaterialTheme.colorScheme.secondary
-                        }
+                        color = eventSeverityColor(event.severity)
                     )
                     Text(
                         eventStatusLabel(event.status),
@@ -102,7 +95,7 @@ private fun EventDetail(event: EventItem) {
             items(event.history) { entry ->
                 MonitorCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
-                        Text(entry.state, fontWeight = FontWeight.Bold)
+                        Text(eventHistoryStateLabel(entry.state), fontWeight = FontWeight.Bold)
                         Text(formatDateTime(entry.at))
                     }
                 }
