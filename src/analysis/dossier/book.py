@@ -63,3 +63,34 @@ def compute_exits(trades: list[dict], closes: dict[str, float]) -> list[dict]:
             ),
         })
     return out
+
+
+def aggregate_by_entry_hour(chiusi: list[dict]) -> list[dict]:
+    """Raggruppa i trade chiusi per ora UTC di ingresso.
+
+    ATTENZIONE ALLA LETTURA: e' un'analisi post-hoc su molti bucket orari. Un t_stat
+    marginale qui NON e' una scoperta: con ~8 bucket, una correzione per confronti
+    multipli lo annulla. Il campo esiste per ordinare le ipotesi, non per dichiararle
+    vere. Chi consuma questo dato deve riportare anche la numerosita'.
+    """
+    per_ora: dict[int, list[float]] = {}
+    for t in chiusi:
+        per_ora.setdefault(t["ora_ingresso"], []).append(t["pnl_net"])
+
+    out = []
+    for ora in sorted(per_ora):
+        v = per_ora[ora]
+        n = len(v)
+        media = sum(v) / n
+        dev = statistics.stdev(v) if n >= 2 else None
+        t_stat = (media / (dev / (n ** 0.5))) if dev else None
+        out.append({
+            "ora": ora,
+            "n": n,
+            "win": sum(1 for x in v if x > 0),
+            "somma_pnl": sum(v),
+            "media": media,
+            "dev_std": dev,
+            "t_stat": t_stat,
+        })
+    return out

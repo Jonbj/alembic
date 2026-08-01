@@ -84,3 +84,38 @@ def test_senza_prezzo_di_chiusura_drift_none():
     trades = [{"symbol": "ZZZ", "strategia": "S1", "exit_price": 10.0, "qty": 1.0,
                "pnl_net": 1.0, "exit_reason": "portfolio_sell", "ore_tenuta": 1.0}]
     assert compute_exits(trades, {})[0]["drift_post_uscita"] is None
+
+
+from src.analysis.dossier.book import aggregate_by_entry_hour
+
+
+def test_aggregazione_per_ora_conta_e_somma():
+    chiusi = [
+        {"ora_ingresso": 14, "pnl_net": -10.0},
+        {"ora_ingresso": 14, "pnl_net": -20.0},
+        {"ora_ingresso": 14, "pnl_net": 6.0},
+        {"ora_ingresso": 19, "pnl_net": 5.0},
+    ]
+    out = {r["ora"]: r for r in aggregate_by_entry_hour(chiusi)}
+    assert out[14]["n"] == 3
+    assert out[14]["win"] == 1
+    assert out[14]["somma_pnl"] == pytest.approx(-24.0)
+    assert out[14]["media"] == pytest.approx(-8.0)
+
+
+def test_t_stat_none_sotto_i_due_campioni():
+    """Con un solo trade la dev.std non esiste: t_stat None, non zero."""
+    out = aggregate_by_entry_hour([{"ora_ingresso": 14, "pnl_net": -10.0}])
+    assert out[0]["t_stat"] is None
+    assert out[0]["dev_std"] is None
+
+
+def test_t_stat_none_se_dev_std_nulla():
+    """Tutti i valori identici: la dev.std e' zero, il t non e' definito."""
+    chiusi = [{"ora_ingresso": 14, "pnl_net": -5.0} for _ in range(3)]
+    assert aggregate_by_entry_hour(chiusi)[0]["t_stat"] is None
+
+
+def test_ordinamento_per_ora_crescente():
+    chiusi = [{"ora_ingresso": 19, "pnl_net": 1.0}, {"ora_ingresso": 14, "pnl_net": 1.0}]
+    assert [r["ora"] for r in aggregate_by_entry_hour(chiusi)] == [14, 19]
