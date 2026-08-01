@@ -180,14 +180,19 @@ Salva un report Markdown in __REPORT_FILE__ usando il Write tool, con queste sez
 
 FASE FINALE — AGGIORNA I DUE LEDGER
 
-A) Appendi UNA riga a docs/evidence/market_daily.jsonl (JSON Lines: una riga sola, niente
-   indentazione, newline finale). Schema esatto:
+A) Appendi UNA riga a docs/evidence/market_daily.jsonl.
 
-   {"data":"__DATE_TARGET__","spy":0.0,"qqq":0.0,"dispersione_sigma":0.0,
-    "mover_3pct":0,"up":0,"down":0,"watchlist_zero_news":0,"tema":"",
-    "miss":{"NO_NEWS":0,"THIN_NEUTRAL":0,"WRONG_SIGN":0,"FILTERED":0,"OUT_OF_STRATEGY_SCOPE":0},
-    "catturati":0,
-    "book":{"equity":0.0,"realizzato":0.0,"mtm":null,"s1_realizzato":0.0,"s4_realizzato":0.0}}
+   FORMATO VINCOLANTE: JSON Lines. La riga deve stare su UNA SOLA RIGA FISICA, senza
+   indentazione e senza a capo interni, terminata da newline. Il file NON e' un JSON: e' una
+   sequenza di oggetti JSON uno per riga, e un oggetto spezzato su piu' righe lo rende
+   illeggibile. Lo schema qui sotto e' scritto su una riga sola apposta: copiane la FORMA, non
+   solo i campi.
+
+   {"data":"__DATE_TARGET__","spy":0.0,"qqq":0.0,"dispersione_sigma":0.0,"mover_3pct":0,"up":0,"down":0,"watchlist_zero_news":0,"tema":"","miss":{"NO_NEWS":0,"THIN_NEUTRAL":0,"WRONG_SIGN":0,"FILTERED":0,"OUT_OF_STRATEGY_SCOPE":0},"catturati":0,"book":{"equity":0.0,"realizzato":0.0,"mtm":null,"s1_realizzato":0.0,"s4_realizzato":0.0}}
+
+   Dopo aver scritto, VERIFICA che il file sia ancora JSON Lines valido:
+     python3 -c "import json;[json.loads(l) for l in open('docs/evidence/market_daily.jsonl') if l.strip()];print('JSONL ok')"
+   Se stampa un errore invece di "JSONL ok", hai spezzato la riga: correggila.
 
    Definizioni:
    - spy / qqq: rendimento giornaliero (close vs close precedente), come frazione non percentuale.
@@ -237,10 +242,22 @@ B) Aggiorna docs/evidence/findings.json per OGNI voce della tua sezione di segna
    market_daily.jsonl. Diventa un finding solo un'affermazione strutturale, es. "39 simboli su 96
    non hanno copertura news in un giorno tipico".
 
-C) Committa i due file:
-   git add docs/evidence/findings.json docs/evidence/market_daily.jsonl
-   git commit -m "evidence: ledger __DATE_TARGET__"
-   Se non c'è nulla da committare, non forzare il commit.
+C) Committa i due file SOLO SE il branch corrente e' main. Controlla PRIMA:
+
+     git rev-parse --abbrev-ref HEAD
+
+   - Se stampa "main": committa.
+       git add docs/evidence/findings.json docs/evidence/market_daily.jsonl
+       git commit -m "evidence: ledger __DATE_TARGET__"
+   - Se stampa QUALSIASI ALTRA COSA: NON committare. I file restano scritti sul disco (non
+     annullare le modifiche) e stampi su stdout, come ultima riga:
+       ATTENZIONE: ledger scritto ma NON committato — branch corrente <nome>, atteso main.
+
+   Motivo: questo cron gira nella directory principale del repo, che puo' trovarsi sul branch di
+   lavoro di un altro agente. Un commit del ledger su un branch casuale lo disperderebbe e
+   spezzerebbe la cronologia git, che e' l'audit del ledger stesso.
+
+   Se non c'e' nulla da committare, non forzare il commit.
 
 D) Nella sezione di segnalazioni del report, ogni voce deve riportare il suo id fra parentesi
    quadre a inizio riga, es. "[F-004] Sembra un difetto — ...".
