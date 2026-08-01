@@ -359,18 +359,30 @@ Schema di un record:
 
 Livelli di confidenza: misurata = perdita reale tracciabile a righe di DB; attribuita = il trade
 esiste e il controfattuale è corto; congetturale = nessun trade avvenuto.
-Il campo "fonte" punta al report e alla sezione, es. "FORENSIC_DAILY_REPORT__DATE_TARGET__.md".
+Il campo "fonte" punta al report e alla sezione, es. "FORENSIC_DAILY_REPORT___DATE_TARGET__.md".
 
 DUE REGOLE VINCOLANTI:
 1. SOLO APPEND. Non modificare né cancellare occorrenze già presenti, né cambiare titolo o id di
    un finding esistente.
 2. NEL DUBBIO, AGGANCIA. Creare un id nuovo va giustificato nella nota. Un'evidenza spezzata in
-   più id ha riccorrenza 1 ciascuno e sparisce sotto tutte le soglie.
+   più id ha ricorrenza 1 ciascuno e sparisce sotto tutte le soglie.
 
-Poi committa:
-   git add docs/evidence/findings.json
-   git commit -m "evidence: forensic __DATE_TARGET__"
-Se non c'è nulla da committare, non forzare il commit.
+Poi committa SOLO SE il branch corrente e' main. Controlla PRIMA:
+
+   git rev-parse --abbrev-ref HEAD
+
+- Se stampa "main": committa.
+    git add docs/evidence/findings.json
+    git commit -m "evidence: forensic __DATE_TARGET__"
+- Se stampa QUALSIASI ALTRA COSA: NON committare. Il file resta scritto sul disco (non annullare
+  le modifiche) e stampi su stdout, come ultima riga:
+    ATTENZIONE: findings scritto ma NON committato — branch corrente <nome>, atteso main.
+
+Motivo: questo cron gira nella directory principale del repo, che puo' trovarsi sul branch di
+lavoro di un altro agente. Un commit del ledger su un branch casuale lo disperderebbe e
+spezzerebbe la cronologia git, che e' l'audit del ledger stesso.
+
+Se non c'e' nulla da committare, non forzare il commit.
 
 Nel report, ogni anomalia riportata deve avere il suo id fra parentesi quadre a inizio riga.
 
