@@ -1,6 +1,6 @@
 # Alembic — Frontend & Operator Guide
 
-**Last updated:** 2026-07-15 (rev 3)
+**Last updated:** 2026-08-03 (rev 4 — verificata contro `frontend/src/pages/`, il router e la sidebar)
 **Scope:** P2-04 operator surfaces and frontend page inventory
 **Authorization:** Controlled paper trading IS running on the live Alpaca paper stack. `GLOBAL_LIVE_PROMOTION_ENABLED = False` (paper, not live money). Live go-live still requires 90-day supervised_paper + PO sign-off.
 
@@ -104,6 +104,18 @@ The React frontend (`frontend/src/pages/`) exposes the operator pages below. Aut
 | Backtest | `Backtest.tsx` | Backtest API | Strategy backtesting |
 | Docs | `Docs.tsx` | Static | Documentation viewer |
 | Login | `LoginPage.tsx` | `/api/auth/login` | Authentication |
+
+**Rotte esistenti ma NON in sidebar** (raggiungibili solo per URL diretta, verificato il 2026-08-03
+contro `frontend/src/components/layout/Sidebar.tsx`, che espone 15 voci):
+
+| Rotta | File | Nota |
+|---|---|---|
+| `/config` | `Config.tsx` | `/api/config` — superata dalla scheda Config dentro **Operations** |
+| `/admin` | `Admin.tsx` | `/api/admin` — superata dalla scheda Admin dentro **Operations** |
+| `/system` | `SystemLog.tsx` | `/api/system` — superata dalla scheda System dentro **Operations** |
+
+Restano montate per compatibilità: se una di esse diverge da quanto mostra Operations, è Operations
+la superficie autorevole.
 
 `Trades.tsx` has been removed from the frontend. The legacy `/trades` route redirects to `Trading`. Order/fill operations are in `Trading`; closed-trade diagnostics and Phase A analytics are in `Performance`.
 
@@ -240,7 +252,8 @@ Expected output for current authorized state:
 - S2: `disabled` (migration 025 seed; config: `research`, 0% allocation — options infra not implemented; do not enable)
 - S3: `research`
 - S4: `paper`, promotion_blocked=true
-- S7: `research`
+
+(S7 è stata rimossa dal repo il 2026-07-15 e non compare più fra gli stati.)
 
 ---
 

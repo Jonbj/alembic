@@ -84,9 +84,15 @@ Il `worker-inference` ha concurrency=1 per garantire un singolo processo Python 
 - **Budget giornaliero**: controllato da `LLMBudgetTracker` — ledger su PostgreSQL (`llm_budget`) + flag Redis `budget_exhausted` (non esiste una chiave `llm:budget:{MODEL}:{DATE}`)
 - **TTL segnale Redis**: 4h — segnali più vecchi ignorati dall'execution engine
 
-## S7 PEAD (classificazione 8-K)
+## S7 PEAD (classificazione 8-K) — RIMOSSA il 2026-07-15
 
-S7 usa Ollama separatamente dal pipeline sentiment principale. Prompt DK-CoT specializzato per earnings surprise detection:
+> **Questa sezione è storica.** S7 è stata rimossa dal repo il 2026-07-15 (edge ALPHA-A3
+> confutato, POC-2 FAIL): strategia, worker, route API, task del beat e config sono stati
+> eliminati. Un test di guardia (`tests/test_p0_13_strategy_containment.py`) impedisce la
+> re-introduzione accidentale. Storia completa: `docs/S7_LIFECYCLE_HISTORY_2026-07-15.md`.
+> Quanto segue descrive com'era configurata quando esisteva.
+
+S7 usava Ollama separatamente dal pipeline sentiment principale. Prompt DK-CoT specializzato per earnings surprise detection:
 
 1. Ruolo: "Act as a financial analyst specializing in earnings reports"
 2. Reasoning: estrai EPS atteso vs riportato, guidance direction, management tone

@@ -1,5 +1,12 @@
 # Prompt per Kimi 2.7-code — Stop-Loss Redesign (implementazione)
 
+> **Documento storico — non è documentazione corrente.** Prompt di handoff usato nel luglio 2026
+> per delegare l'implementazione del redesign dello stop-loss. Conservato come traccia della
+> consegna, non aggiornato da allora: alcuni riferimenti non corrispondono più al codice (per
+> esempio `src/workers/loss_feedback.py`, che non è mai esistito con quel nome — il loop di
+> loss-feedback vive in `src/workers/performance.py`). Per lo stato attuale vedi
+> `docs/strategies.md` e `docs/ARCHITECTURE.md`.
+
 Sei un ingegnere senior. Implementa il redesign dello stop-loss di un sistema di
 trading algoritmico live (Alembic, "Alpha Miner ATS"). Lavori nel repo (hai accesso ai
 file). Questo prompt è autosufficiente per l'esecuzione; le decisioni di design sono
