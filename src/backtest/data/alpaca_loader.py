@@ -37,7 +37,7 @@ class AlpacaDailyLoader:
     def __init__(
         self,
         cache: ParquetCache | None = None,
-        feed: str = "iex",
+        feed: str = "sip",
         api_key: str | None = None,
         secret_key: str | None = None,
     ) -> None:
@@ -88,9 +88,12 @@ class AlpacaDailyLoader:
             symbol_or_symbols=symbol,
             timeframe=TimeFrame.Day,
             start=pd.Timestamp(start).to_pydatetime(),
-            # Alpaca's end is exclusive of intraday but inclusive of the day bar;
-            # one extra day costs nothing and avoids losing the final session.
-            end=pd.Timestamp(end + timedelta(days=1)).to_pydatetime(),
+            # Alpaca's day boundary is effectively exclusive, so we ask for one
+            # extra day to keep the final session — but NEVER past today: the SIP
+            # feed rejects any request reaching into the future or the last 15
+            # minutes ("subscription does not permit querying recent SIP data"),
+            # and the rejection kills the whole symbol, not just the last bar.
+            end=pd.Timestamp(min(end + timedelta(days=1), date.today())).to_pydatetime(),
             feed=self._feed,
             adjustment="all",
         )
