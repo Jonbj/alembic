@@ -186,12 +186,27 @@ The multiplier (0.2× to 1.0×) prevents full-size entries during bear markets o
 
 ### Key Parameters (`S4Config`)
 
+> **Verificato contro `src/strategies/s4/config.py` il 2026-08-03.** La tabella precedente
+> elencava quattro parametri (`score_threshold`, `signal_max_age_min`, `base_position_size`,
+> `stop_loss_pct`) di cui **nessuno esiste in `S4Config`**, e uno era fuorviante di un fattore
+> otto: dichiarava una scadenza segnale di 30 minuti contro le 4 ore reali.
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `score_threshold` | 0.3 | Minimum score to trigger BUY |
-| `signal_max_age_min` | 30 | Max signal age before stale |
-| `stop_loss_pct` | 0.02 (da config/trading.yaml risk.stop_loss) | 2% stop-loss from entry |
-| `base_position_size` | 0.02 | 2% of NAV per position |
+| `n_top` | 5 | Numero di ticker selezionati per ciclo |
+| `bucket_pct` | 0.10 | Quota di portafoglio assegnata alla sleeve S4 |
+| `min_score` | 0.1 | **Prefiltro del ranker**, NON la soglia d'ordine |
+| `min_confidence` | 0.3 | **Prefiltro del ranker**, NON la soglia d'ordine |
+| `min_stocks` | 1 | Minimo di titoli per emettere ordini (1 = ammesso il lone survivor) |
+| `fixed_slot_sizing` | True | Peso fisso 1/`n_top` per ticker; gli slot inutilizzati restano non investiti (#81) |
+| `signals_lookback_hours` | 96 | Finestra di lettura dei segnali dal DB (copre il ponte festivo Ven→Mar) |
+| `max_signal_age_hours` | 4 | Oltre questa età il segnale è scaduto e la posizione viene chiusa |
+| `rebalance_frequency` | DAILY | Cadenza di ribilanciamento della sleeve |
+
+**La soglia d'ordine non è in `S4Config`.** È `feedback:entry_threshold` in Redis (baseline 0.30,
+alzata dinamicamente dal loop di loss-feedback) ed è applicata a monte, nel portfolio scheduler.
+Confondere `min_score` con la soglia d'ordine è l'errore che nel luglio 2026 ha lasciato il gate
+disarmato per un giorno e mezzo (issue #163).
 
 ---
 
