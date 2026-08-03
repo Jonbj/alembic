@@ -146,6 +146,19 @@ migliorie su una premessa sbagliata.
 
 ---
 
+## Avvertenza sulla documentazione
+
+Questo repo ha una storia documentata di **divergenza fra documentazione e codice**. Verificando gli
+allegati il 2026-08-03 ho trovato che la tabella dei parametri di S4 in `docs/strategies.md`
+elencava quattro campi di cui **nessuno esisteva nel codice**, e uno dichiarava una scadenza segnale
+di 30 minuti contro le 4 ore reali. È stata corretta, ma la lezione vale in generale:
+
+**Dove documentazione e codice si contraddicono, il codice ha ragione.** Se noti un'incoerenza,
+segnalala: è essa stessa un finding utile.
+
+I numeri della sezione 2 di questo documento sono invece misurati direttamente sul database di
+produzione, non presi dalla documentazione.
+
 ## Documenti da allegare
 
 1. `docs/evidence/S4_IC_ANALISI_2026-08-03.md` — la misura dell'IC e il vincolo di potenza
@@ -158,5 +171,7 @@ migliorie su una premessa sbagliata.
    correzione per test multipli, distinzione calibrazione/confermativa/diagnostica)
 6. `docs/RESEARCH_SYNTHESIS_ALPHA_AND_TOOLING_2026-07-26.md` — la rassegna che ha portato a scartare
    RL, bot a indicatori e FinGPT
-7. `src/strategies/s4/` e `src/workers/sentiment.py` — il codice della strategia e dello scoring
+9. `docs/strategies.md` §S4 — parametri verificati contro il codice il 2026-08-03
+7. `src/strategies/s4/` e `src/workers/sentiment.py` — il codice della strategia e dello scoring.
+   **Autorevole in caso di conflitto con la documentazione.**
 8. `config/trading.yaml` — watchlist, soglie, parametri di rischio
