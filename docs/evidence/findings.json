@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 8,
+  "prossimo_id": 10,
   "findings": [
     {
       "id": "F-001",
@@ -14,9 +14,15 @@
           "costo_usd": null,
           "nota": "55/96 simboli (57%) zero righe in news_log il 07-31. Tra gli 11 mover >=3% del giorno, NO_NEWS ha causato il miss di BIDU (+3.38%) e RDDT (-20.99%, il mover piu' estremo della giornata).",
           "fonte": "ALPHA_MISS_REPORT_2026-07-31.md §3, §7"
+        },
+        {
+          "data": "2026-08-03",
+          "costo_usd": 344.92,
+          "nota": "41/96 simboli (43%) zero righe in news_log il 08-03. Tre dei nove miss del giorno sono NO_NEWS puri: BA (+8.03%), HOOD (+4.37%), SAP (+3.28%) - zero righe in news_log, zero in sentiment_signals, zero in execution_decisions, nessuna catena decisionale esistente. Costo stimato con size S4 tipica $2200: 176.60+96.07+72.25 = 344.92. BA e' NO_NEWS anche il 07-29 e il 07-30; SAP e' mancato per assenza/genericita' di news anche il 07-24, 07-27 e 07-28: sono buchi sistematici sullo stesso set di ticker, non copertura casuale.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-03.md §7"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 344.92,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 1
@@ -33,12 +39,18 @@
           "costo_usd": null,
           "nota": "trades.stop_strategy NULL per GOOGL (aperta 07-10, tuttora aperta, +$43.19 MTM il 07-31) e ABBV (aperta 07-10, chiusa 07-31, net_pnl +$16.90) — trade da 07-14 in poi (MU, AAPL) hanno il campo popolato correttamente. Effetto: il realizzato per strategia del 07-31 (S1 -$11.17, S4 +$0.64) esclude i $16.90 di ABBV; se GOOGL chiude durante il periodo di osservazione il suo P&L sara' ugualmente non attribuibile, il che confligge con la domanda di uscita 2 della carta (split P&L economico S1 vs SPY).",
           "fonte": "ALPHA_MISS_REPORT_2026-07-31.md §4, §7"
+        },
+        {
+          "data": "2026-08-03",
+          "costo_usd": null,
+          "nota": "12 delle 49 posizioni aperte a fine 08-03 hanno trades.stop_strategy NULL (BAC, BP, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE, tutte aperte il 07-10). Contribuiscono +$16.69 di MTM sulla giornata, di cui +$33.41 da GOOGL, che e' un mover del giorno (+4.88%) contato come catturato ma non attribuibile ad alcuna strategia. Finche' queste 12 posizioni restano aperte una fetta del book resta fuori dallo split S1/S4 richiesto dalla domanda di uscita 2 della carta.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-03.md §4.2, §7"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 1
+      "occorrenze_non_stimate": 2
     },
     {
       "id": "F-003",
@@ -134,6 +146,44 @@
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 1
+    },
+    {
+      "id": "F-008",
+      "titolo": "Un articolo macro generico multi-ticker inverte un segnale ticker-specifico e forza l'uscita anticipata da un mover",
+      "tipo": "difetto",
+      "confidenza": "attribuita",
+      "primo_avvistamento": "2026-08-03",
+      "occorrenze": [
+        {
+          "data": "2026-08-03",
+          "costo_usd": 19.54,
+          "nota": "ORCL, #2 mover del giorno (+9.22%). 14:37 news_log 'What Is Going on With Oracle Stock on Monday?' (alpaca_benzinga, ticker-specifico) -> 15:31 sentiment_signals +0.5151 (conf 0.775, ensemble non-fallback, std 0.071) -> 15:37 execution_decisions id 5810 BUY, trade 640, 9.065 az. a 137.09. Poi 15:05 news_log secondo articolo su ORCL: 'Amazon, Alphabet Lead AI Debt Tsunami Now Blamed for 20-Year-High Rates', pezzo macro sul costo del debito AI taggato contemporaneamente a ORCL e SPCX, senza contenuto specifico su Oracle -> 16:01 sentiment_signals -0.3428 (capovolgimento di 0.858 punti in 30 minuti) -> 17:22 execution_decisions id 5997 SELL [whipsaw] a 139.77. ORCL chiude a 141.85: realizzato $23.61 contro $43.15 tenendo fino alla chiusura (9.065 * (141.85-137.09)) = $19.54 di costo attribuito, controfattuale corto (stesso giorno, stessa size, stesso strumento). Lo stesso articolo e' taggato su SPCX, che finisce in WRONG_SIGN lo stesso giorno. In aggregato sui 4 trade intraday del 08-03 l'uscita anticipata costa solo $8.89, quindi il costo e' concentrato su questo caso e non diffuso. Nuovo id giustificato: nessun finding esistente (F-001..F-007) riguarda la qualita'/attribuzione degli articoli in ingresso ne' la stabilita' del segnale ensemble intra-giornata.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-03.md §7"
+        }
+      ],
+      "costo_cumulato_usd": 19.54,
+      "occorrenze_non_stimate": 0,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-009",
+      "titolo": "Il gate d'ingresso S4 (0.30) scarta segnali col segno corretto su mover forti: il collo di bottiglia e' la magnitudine, non il segno",
+      "tipo": "alpha_miss",
+      "confidenza": "congetturale",
+      "primo_avvistamento": "2026-08-03",
+      "occorrenze": [
+        {
+          "data": "2026-08-03",
+          "costo_usd": 417.35,
+          "nota": "Tre mover con headline ticker-specifica esplicitamente direzionale e segnale ensemble del segno giusto ma sotto gate 0.300: RDDT +9.98% (mover piu' forte del giorno) titolo 'Reddit Stock Gains Monday: What's Driving the Post-Earnings Rebound?', segnale non-fallback +0.1693 conf 0.500, SKIP_THRESHOLD id 5819/5845/5872/5899; SNOW +4.86% titolo 'Snowflake Stock Surges: What's Driving the Rebound?', segnale +0.1956 conf 0.550, SKIP_THRESHOLD id 5901/5927/5956/5986; BABA +4.13% titolo 'Alibaba shares climb 4% after launch of most powerful Qwen model yet', segnale +0.2300, SKIP_THRESHOLD id 6002/6028/6052. Costo stimato con size S4 tipica $2200: 219.58+106.89+90.88 = 417.35. Il gate e' taratura e resta congelato dalla carta: registrata solo l'evidenza. Nuovo id giustificato: non e' un riconteggio della categoria THIN_NEUTRAL (gia' in market_daily.jsonl) ma l'affermazione strutturale che la pipeline produce la risposta direzionale corretta e la scarta per calibrazione della magnitudine - rilevante per la domanda di uscita 1 della carta.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-03.md §7"
+        }
+      ],
+      "costo_cumulato_usd": 417.35,
+      "occorrenze_non_stimate": 0,
+      "stato": "aperto",
+      "issue": null
     }
   ],
   "_nota_migrazione": "2026-08-04: le occorrenze scritte prima di questa data avevano costo_usd 0.0 perche' il prompt non chiedeva di stimarlo. Convertite a null: zero significa 'e' costato zero', null significa 'non stimato'. Deroga al solo-append registrata nella carta di osservazione."
