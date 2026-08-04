@@ -39,6 +39,7 @@ Ogni eccezione applicata va annotata qui con data, motivo e commit.
 | data | deroga | motivo | commit |
 |---|---|---|---|
 | 2026-08-01 | Script deterministico di precalcolo per il report alpha-miner (`scripts/alpha_miner_dossier.py`, fase 2) | Senza precalcolo i numeri della roadmap pesata sono ri-derivati ogni mattina da un LLM diverso, e la sessione rischia il timeout silenzioso che farebbe fallire l'osservazione stessa. È strumentazione, non un difetto di correttezza: quindi deroga. | nessuno: deroga registrata in anticipo, fase 2 non ancora rilasciata |
+| 2026-08-04 | Conversione di `costo_usd` da `0.0` a `null` sulle 7 occorrenze già scritte, più il campo `occorrenze_non_stimate` | Il prompt dei cron non chiedeva di stimare il costo, quindi le sessioni scrivevano `0.0`. Ma le soglie di questa carta sono in dollari: con tutte le occorrenze a zero **nessuna evidenza avrebbe mai attraversato una soglia**, e la roadmap pesata del 28/09 sarebbe uscita vuota per un difetto dello strumento, non per assenza di evidenza. Passa il test di esenzione: se non lo correggo, l'evidenza raccolta è sbagliata. Unica modifica retroattiva ammessa su `findings.json`. | commit del 2026-08-04 |
 | 2026-08-01 | Riscrittura retroattiva di `market_daily.jsonl` all'innesto della fase 2 | Le righe scritte prima dell'innesto sono calcolate dalla sessione, quelle successive dallo script: lo script le ricalcola tutte perché la serie abbia una sola provenienza. Unica eccezione ammessa al "solo append"; **non si applica mai a `findings.json`**. | nessuno: deroga registrata in anticipo, fase 2 non ancora rilasciata |
 
 ## Soglie: cosa guadagna diritto a lavoro alla scadenza
@@ -48,6 +49,16 @@ Ogni eccezione applicata va annotata qui con data, motivo e commit.
 | **misurata** | perdita reale tracciabile a righe di DB | ≥ $100 cumulativi, ricorrenza irrilevante |
 | **attribuita** | il trade esiste, il controfattuale è corto | ≥ $250 cumulativi **e** ≥ 5 giorni distinti |
 | **congetturale** | alpha mancato, nessun trade avvenuto | ≥ $1.000 cumulativi **e** ≥ 10 giorni distinti |
+
+**Findings senza costo stimabile.** Un'osservazione strutturale (per esempio «la copertura news è
+bassa») tipicamente non ha un costo giornaliero quantificabile, e la sua occorrenza porta
+`costo_usd: null`. Evidenze così non attraverserebbero mai una soglia in dollari, ma non per questo
+sono irrilevanti: **un finding con `occorrenze_non_stimate` ≥ 15 giorni distinti entra comunque in
+roadmap**, valutato per ricorrenza invece che per costo. Va discusso, non pesato.
+
+Distinzione che regge tutto l'impianto: `costo_usd: null` significa «non stimato», `0.0` significa
+«è costato zero». Confonderli rende impossibile distinguere un difetto innocuo da uno mai
+quantificato.
 
 L'asimmetria è voluta: un controfattuale deve valere dieci volte un bug misurato per pesare uguale.
 Sugli alpha mancati non sappiamo se saremmo entrati, con che size, né quando saremmo usciti. Il
