@@ -355,10 +355,29 @@ Schema di un record:
 {"id":"F-001","titolo":"","tipo":"difetto|alpha_miss|osservazione",
  "confidenza":"misurata|attribuita|congetturale","primo_avvistamento":"__DATE_TARGET__",
  "occorrenze":[{"data":"__DATE_TARGET__","costo_usd":0.0,"nota":"","fonte":""}],
- "costo_cumulato_usd":0.0,"stato":"aperto","issue":null}
+ "costo_cumulato_usd":0.0,"occorrenze_non_stimate":0,"stato":"aperto","issue":null}
 
 Livelli di confidenza: misurata = perdita reale tracciabile a righe di DB; attribuita = il trade
 esiste e il controfattuale è corto; congetturale = nessun trade avvenuto.
+
+IL COSTO VA STIMATO. E' obbligatorio provarci: le soglie che decideranno cosa merita lavoro sono
+espresse in dollari, quindi un'occorrenza senza costo non pesa nulla e l'evidenza raccolta diventa
+inutilizzabile.
+
+Come stimarlo, per livello:
+- misurata: il P&L reale attribuibile al difetto (es. il net_pnl di un trade chiuso male). Cita
+  l'id del trade.
+- attribuita: la differenza fra quanto e' successo e quanto sarebbe successo senza il difetto, su
+  un controfattuale CORTO. Cita i numeri usati.
+- congetturale: il movimento non catturato per una size di posizione plausibile — usa la size
+  tipica S4 (~2% del NAV, ~2.200 $ su ~110.000 $), NON il notional pieno del titolo.
+
+SE NON E' STIMABILE, scrivi "costo_usd": null — MAI 0.0. Zero significa "e' costato zero", che e'
+un'affermazione; null significa "non l'ho stimato", che e' un'altra cosa. Un'anomalia strutturale
+o di sola osservabilita' tipicamente non ha costo stimabile: usa null e conta sulla ricorrenza.
+
+"costo_cumulato_usd" e' la somma delle sole occorrenze con costo non-null. Aggiungi anche
+"occorrenze_non_stimate": <quante hanno costo_usd null>.
 Il campo "fonte" punta al report e alla sezione, es. "FORENSIC_DAILY_REPORT___DATE_TARGET__.md".
 
 DUE REGOLE VINCOLANTI:

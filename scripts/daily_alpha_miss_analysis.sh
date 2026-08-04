@@ -221,12 +221,38 @@ B) Aggiorna docs/evidence/findings.json per OGNI voce della tua sezione di segna
    {"id":"F-001","titolo":"","tipo":"difetto|alpha_miss|osservazione",
     "confidenza":"misurata|attribuita|congetturale","primo_avvistamento":"__DATE_TARGET__",
     "occorrenze":[{"data":"__DATE_TARGET__","costo_usd":0.0,"nota":"","fonte":""}],
-    "costo_cumulato_usd":0.0,"stato":"aperto","issue":null}
+    "costo_cumulato_usd":0.0,"occorrenze_non_stimate":0,"stato":"aperto","issue":null}
 
    Livelli di confidenza:
    - misurata: perdita reale tracciabile a righe di DB.
    - attribuita: il trade esiste, il controfattuale è corto.
    - congetturale: alpha mancato, nessun trade avvenuto. TUTTI i miss sono congetturali.
+
+   IL COSTO VA STIMATO. E' obbligatorio provarci: le soglie che decideranno cosa
+   merita lavoro sono espresse in dollari, quindi un'occorrenza senza costo non
+   pesa nulla e l'evidenza raccolta diventa inutilizzabile.
+
+   Come stimarlo, per livello:
+   - misurata: il P&L reale attribuibile al difetto. Esempio: un trade chiuso in
+     perdita per un exit sbagliato -> il suo net_pnl. Cita l'id del trade.
+   - attribuita: la differenza fra quanto e' successo e quanto sarebbe successo
+     senza il difetto, su un controfattuale CORTO. Esempio: uscita troppo presto
+     -> (close del giorno - exit_price) * qty. Cita i numeri usati.
+   - congetturale: il movimento non catturato per una size di posizione
+     plausibile. Usa la size tipica di una posizione S4 (~2% del NAV, cioe'
+     ~2.200 $ su un conto da ~110.000 $), NON il notional pieno del titolo.
+     Esempio: mover a +6% mancato -> 2200 * 0.06 = 132 $.
+
+   SE NON E' STIMABILE, scrivi "costo_usd": null — MAI 0.0. Zero significa "e'
+   costato zero", che e' un'affermazione; null significa "non l'ho stimato", che
+   e' un'altra cosa. Confonderle rende impossibile distinguere un difetto innocuo
+   da uno mai quantificato.
+
+   Un'osservazione strutturale (es. "la copertura news e' bassa") tipicamente NON
+   ha un costo giornaliero stimabile: usa null, e conta sulla ricorrenza.
+
+   "costo_cumulato_usd" e' la somma delle sole occorrenze con costo non-null.
+   Aggiungi anche "occorrenze_non_stimate": <quante hanno costo_usd null>.
    Il campo "fonte" deve puntare al report e alla sezione che giustifica l'occorrenza, es.
    "ALPHA_MISS_REPORT___DATE_TARGET__.md §7".
 

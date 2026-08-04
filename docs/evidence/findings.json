@@ -11,14 +11,15 @@
       "occorrenze": [
         {
           "data": "2026-07-31",
-          "costo_usd": 0.0,
+          "costo_usd": null,
           "nota": "55/96 simboli (57%) zero righe in news_log il 07-31. Tra gli 11 mover >=3% del giorno, NO_NEWS ha causato il miss di BIDU (+3.38%) e RDDT (-20.99%, il mover piu' estremo della giornata).",
           "fonte": "ALPHA_MISS_REPORT_2026-07-31.md §3, §7"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "stato": "aperto",
-      "issue": null
+      "issue": null,
+      "occorrenze_non_stimate": 1
     },
     {
       "id": "F-002",
@@ -29,14 +30,15 @@
       "occorrenze": [
         {
           "data": "2026-07-31",
-          "costo_usd": 0.0,
+          "costo_usd": null,
           "nota": "trades.stop_strategy NULL per GOOGL (aperta 07-10, tuttora aperta, +$43.19 MTM il 07-31) e ABBV (aperta 07-10, chiusa 07-31, net_pnl +$16.90) — trade da 07-14 in poi (MU, AAPL) hanno il campo popolato correttamente. Effetto: il realizzato per strategia del 07-31 (S1 -$11.17, S4 +$0.64) esclude i $16.90 di ABBV; se GOOGL chiude durante il periodo di osservazione il suo P&L sara' ugualmente non attribuibile, il che confligge con la domanda di uscita 2 della carta (split P&L economico S1 vs SPY).",
           "fonte": "ALPHA_MISS_REPORT_2026-07-31.md §4, §7"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "stato": "aperto",
-      "issue": null
+      "issue": null,
+      "occorrenze_non_stimate": 1
     },
     {
       "id": "F-003",
@@ -47,14 +49,15 @@
       "occorrenze": [
         {
           "data": "2026-07-31",
-          "costo_usd": 0.0,
+          "costo_usd": null,
           "nota": "risk_reports id=49, 22:30:00 UTC: alert 'Strategy portfolio drawdown 13.9% exceeds 10%' generato da per_strategy_metrics->portfolio->drawdown=0.1387, ma la colonna dedicata combined_drawdown nello stesso report vale 0.012429 (1.24%) - 10x piu basso. Nessuna perdita diretta, e' un difetto di misura/coerenza che rischia di far leggere un drawdown falsato durante il periodo di osservazione. Riconferma quantificata di un problema gia' annotato in memoria (Bug Sweep 2026-07-22, 'combined_drawdown fuorviante').",
           "fonte": "FORENSIC_DAILY_REPORT_2026-07-31.md §10 [DAY-001]"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "stato": "aperto",
-      "issue": null
+      "issue": null,
+      "occorrenze_non_stimate": 1
     },
     {
       "id": "F-004",
@@ -65,14 +68,15 @@
       "occorrenze": [
         {
           "data": "2026-07-31",
-          "costo_usd": 0.0,
+          "costo_usd": null,
           "nota": "decay_monitor_task._fetch_actual_metrics (src/workers/decay_monitor_task.py:52-66) non filtra per strategy_id: ic/hit_rate vengono da sentiment_signals (dominio S4) e sharpe/max_drawdown da portfolio_daily_state (intero book), applicati identici a S1, S2 e S4. Log 21:00 UTC: 'DECAY CRITICAL [S2]: Max drawdown exceeds baseline by 6.9pp: 12.9% vs 6.0%' - ma S2 e' disabilitata (0% allocazione, ARCHITECTURE.md:209) e non ha mai un trade in tabella trades. Confermato ricorrente anche su decay_reports 08-01 e 08-02 (valori identici tra S1/S2/S4 nello stesso giorno). Rischio diretto sulla domanda di uscita 2 della carta (S1 ha un edge?) se qualcuno consulta decay_reports per giudicare S1 credendo siano metriche S1-specifiche.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-07-31.md §10 [DAY-002]"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "stato": "aperto",
-      "issue": null
+      "issue": null,
+      "occorrenze_non_stimate": 1
     },
     {
       "id": "F-005",
@@ -83,14 +87,15 @@
       "occorrenze": [
         {
           "data": "2026-07-31",
-          "costo_usd": 0.0,
+          "costo_usd": null,
           "nota": "20:30:00 UTC, docker logs worker: subito dopo 'Loss feedback triggered for S1: EWMA R -0.52, ... threshold 0.30->0.00' segue 'TelegramNotifier: Failed to send alert: Client error 400 Bad Request'. Nessuna perdita diretta tracciabile, ma un evento operativo rilevante (soglia S1 azzerata) rischia di non essere notato in tempo reale durante il periodo di osservazione.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-07-31.md §10 [DAY-003]"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "stato": "aperto",
-      "issue": null
+      "issue": null,
+      "occorrenze_non_stimate": 1
     },
     {
       "id": "F-006",
@@ -101,14 +106,15 @@
       "occorrenze": [
         {
           "data": "2026-07-31",
-          "costo_usd": 0.0,
+          "costo_usd": null,
           "nota": "execution_decisions id 5404,5420,5437,5455,5475,5495,5514 (16:22-17:52 UTC): decision=BUY, reason='S1 momentum: time-series momentum signal, portfolio weight 1.2%.', order_id vuoto per tutte e 7 le righe. Log worker rivela la vera causa solo a livello testuale: 'Reversal cooldown: skipping BUY for ABBV - force-sold on sentiment reversal'. Un'analisi solo-DB (come richiesto da questo stesso protocollo forensic) non puo' distinguere un blocco intenzionale da un fallimento di submission ordine - difetto di correttezza/auditabilita' che corromperebbe analisi forensi future basate solo sul DB.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-07-31.md §10 [DAY-004]"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "stato": "aperto",
-      "issue": null
+      "issue": null,
+      "occorrenze_non_stimate": 1
     },
     {
       "id": "F-007",
@@ -119,14 +125,16 @@
       "occorrenze": [
         {
           "data": "2026-07-31",
-          "costo_usd": 0.0,
+          "costo_usd": null,
           "nota": "ingestion_stats_daily 2026-07-31 alpaca_benzinga: fetched=657, duplicates=2674 (4x il fetched). Il contatore e' un UPSERT additivo cross-run (src/store/pg_store.py:369, duplicates = duplicates + EXCLUDED.duplicates), quindi plausibile su piu' cicli di polling che ri-scansionano una finestra sovrapposta, ma non verificato indipendentemente contro i conteggi grezzi per-ciclo (log non disponibili oltre la retention Docker). Riduce l'affidabilita' di ingestion_stats_daily come fonte di audit stand-alone; i 71 record finali in news_log restano verificati riga per riga.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-07-31.md §4 [DAY-006b]"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "stato": "aperto",
-      "issue": null
+      "issue": null,
+      "occorrenze_non_stimate": 1
     }
-  ]
+  ],
+  "_nota_migrazione": "2026-08-04: le occorrenze scritte prima di questa data avevano costo_usd 0.0 perche' il prompt non chiedeva di stimarlo. Convertite a null: zero significa 'e' costato zero', null significa 'non stimato'. Deroga al solo-append registrata nella carta di osservazione."
 }
