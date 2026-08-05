@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 19,
+  "prossimo_id": 20,
   "findings": [
     {
       "id": "F-001",
@@ -20,9 +20,15 @@
           "costo_usd": 344.92,
           "nota": "41/96 simboli (43%) zero righe in news_log il 08-03. Tre dei nove miss del giorno sono NO_NEWS puri: BA (+8.03%), HOOD (+4.37%), SAP (+3.28%) - zero righe in news_log, zero in sentiment_signals, zero in execution_decisions, nessuna catena decisionale esistente. Costo stimato con size S4 tipica $2200: 176.60+96.07+72.25 = 344.92. BA e' NO_NEWS anche il 07-29 e il 07-30; SAP e' mancato per assenza/genericita' di news anche il 07-24, 07-27 e 07-28: sono buchi sistematici sullo stesso set di ticker, non copertura casuale.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-03.md §7"
+        },
+        {
+          "data": "2026-08-04",
+          "costo_usd": 452.54,
+          "nota": "42/96 simboli (44%) zero righe in news_log il 08-04. Cinque dei nove miss del giorno sono NO_NEWS puri: QCOM (+7.32%), HOOD (+3.48%), NOW (+3.45%), RDDT (+3.30%), SAP (+3.02%) - zero righe in news_log, zero in sentiment_signals, zero in execution_decisions, nessuna catena decisionale esistente. Costo stimato con size S4 tipica $2200 sul return pieno: 161.04+76.56+75.90+72.60+66.44 = 452.54. CAVEAT nuovo rispetto alle occorrenze precedenti: su questi cinque nomi il 56% del movimento e' nel gap di apertura, quindi la porzione realmente catturabile intraday vale 352.88 invece di 452.54; uso il return pieno per non rompere la comparabilita' della serie e lascio qui il numero alternativo. Ricorrenza sugli stessi ticker: RDDT e' NO_NEWS il 07-31, sotto-gate il 08-03 e NO_NEWS oggi; SAP e' mancato per assenza/genericita' di news il 07-24, 07-27, 07-28, 08-03 e oggi; HOOD e' NO_NEWS il 08-03 e oggi. La quota di watchlist scoperta oscilla in banda stretta: 55/96 (07-31), 41/96 (08-03), 42/96 (08-04).",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-04.md §7"
         }
       ],
-      "costo_cumulato_usd": 344.92,
+      "costo_cumulato_usd": 797.46,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 1
@@ -45,12 +51,18 @@
           "costo_usd": null,
           "nota": "12 delle 49 posizioni aperte a fine 08-03 hanno trades.stop_strategy NULL (BAC, BP, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE, tutte aperte il 07-10). Contribuiscono +$16.69 di MTM sulla giornata, di cui +$33.41 da GOOGL, che e' un mover del giorno (+4.88%) contato come catturato ma non attribuibile ad alcuna strategia. Finche' queste 12 posizioni restano aperte una fetta del book resta fuori dallo split S1/S4 richiesto dalla domanda di uscita 2 della carta.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-03.md §4.2, §7"
+        },
+        {
+          "data": "2026-08-04",
+          "costo_usd": null,
+          "nota": "12 delle 52 posizioni aperte a fine 08-04 hanno trades.stop_strategy NULL (BAC, BP, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE, tutte aperte il 07-10) - stesso insieme del 08-03. Contribuiscono +40.24 di MTM sulla giornata. Fra queste ci sono entrambi gli estremi del giorno: RIO (+3.31%, un mover contato come catturato) e BP (-4.00%, il peggiore contributore del book con -29.51 di MTM). Finche' restano aperte, i due estremi del book restano fuori dallo split S1/S4 richiesto dalla domanda di uscita 2 della carta.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-04.md §4.3, §7"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 2
+      "occorrenze_non_stimate": 3
     },
     {
       "id": "F-003",
@@ -177,6 +189,12 @@
           "costo_usd": 0.0,
           "nota": "SECONDA OCCORRENZA DELLO STESSO GIORNO, evento distinto da quello gia' registrato su ORCL - da NON contare come secondo giorno verso le soglie di ricorrenza. Lato ingresso invece che uscita: sentiment_signals 6124 (MSFT, 15:30:34) score +0.710 conf 0.875 da 'Microsoft Stock Jumps as Azure Tops $100 Billion and Copilot Hits 30 Million Paid Seats' (gdelt_gkg, ticker-specifico, glm +0.85/0.90 e gpt +0.75/0.85 entrambi eleggibili) - il segnale piu' forte della giornata. 58 secondi dopo, sentiment_signals 6130 (15:31:32) score -0.056 conf 0.275 dallo stesso articolo Benzinga 'What Is Going on With ORACLE Stock on Monday?' in cui MSFT compare solo per fan-out multi-ticker. Il ciclo portfolio legge l'ultimo segnale per simbolo: alle 15:37 MSFT valeva -0.056, nessun ordine. Nessuna aggregazione fra segnali dello stesso simbolo nella stessa finestra: vince l'ultimo arrivato a prescindere da confidenza e specificita'. COSTO 0.0 (non null): il controfattuale e' stato calcolato ed e' favorevole. MSFT chiude a 487.65, barra 15m delle 15:30 close 487.25; ingresso alle 15:37 con lo stesso notional $1242 = 2.549 az. -> +$1.02 tenendo fino alla chiusura, contro i +$3.70 effettivamente realizzati con l'ingresso delle 16:52 a 488.50 e uscita 18:37 a 490.05. Su questa occorrenza il difetto ha fatto guadagnare $2.68: e' costato zero, non e' non stimato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-03.md section 10 [DAY-005]"
+        },
+        {
+          "data": "2026-08-04",
+          "costo_usd": 0.0,
+          "nota": "Due casi, entrambi sul lato ingresso. ARM: 15:15:20 segnale 6328 +0.6264 conf 0.800 (ensemble non-fallback) da 'Arm Jumps More Than 11%: Data Center Royalty Growth Drives Post-Selloff Semiconductor Rally' (ticker-specifico, direzionale); SEDICI SECONDI dopo, 15:15:36, segnale 6330 +0.0082 conf 0.175 da 'Caterpillar, Wayfair, Zebra Technologies, Gartner And Other Big Stocks Moving Higher On Tuesday', rassegna in cui ARM e' un tag di fan-out. Il ciclo legge l'ultimo segnale per simbolo: seguono 17 righe consecutive di SKIP_THRESHOLD a score 0.007 (id 6253..6580) dalle 15:22 alle 19:52. ARM chiude +17.43%. CAT: +0.7470 conf 0.900 alle 14:00:35 da 'Caterpillar Cashes In On AI Buildout, Raises 2026 Sales Outlook' azzerato a 0.000 alle 14:30:21, pattern ripetuto 6 volte nel giorno (0.7177->0.000, 0.7200->0.006, 0.6932->0.000, 0.6605->0.058, 0.6484->0.013). COSTO 0.0 (non null): il controfattuale e' stato calcolato ed e' nullo. Sia ARM sia CAT erano gia' in book come posizioni S1 e il guard P0-05 (no pyramiding) ha bloccato esplicitamente il BUY a ogni ciclo indipendentemente dal punteggio - log worker 14:07:09, 14:22:09, 14:37:09, 14:52:09, 15:07:08, 15:22:08, 15:37:09, 15:52:07, 16:07:11, 16:22:09, 16:37:09, 16:52:08, 17:07:12, 17:22:09: 'P0-05: skipping BUY decision for ARM - already has an open trade'. Il difetto di segnale e' reale e documentato ma quel giorno non ha impedito alcun ordine.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-04.md §7"
         }
       ],
       "costo_cumulato_usd": 19.54,
@@ -196,9 +214,15 @@
           "costo_usd": 417.35,
           "nota": "Tre mover con headline ticker-specifica esplicitamente direzionale e segnale ensemble del segno giusto ma sotto gate 0.300: RDDT +9.98% (mover piu' forte del giorno) titolo 'Reddit Stock Gains Monday: What's Driving the Post-Earnings Rebound?', segnale non-fallback +0.1693 conf 0.500, SKIP_THRESHOLD id 5819/5845/5872/5899; SNOW +4.86% titolo 'Snowflake Stock Surges: What's Driving the Rebound?', segnale +0.1956 conf 0.550, SKIP_THRESHOLD id 5901/5927/5956/5986; BABA +4.13% titolo 'Alibaba shares climb 4% after launch of most powerful Qwen model yet', segnale +0.2300, SKIP_THRESHOLD id 6002/6028/6052. Costo stimato con size S4 tipica $2200: 219.58+106.89+90.88 = 417.35. Il gate e' taratura e resta congelato dalla carta: registrata solo l'evidenza. Nuovo id giustificato: non e' un riconteggio della categoria THIN_NEUTRAL (gia' in market_daily.jsonl) ma l'affermazione strutturale che la pipeline produce la risposta direzionale corretta e la scarta per calibrazione della magnitudine - rilevante per la domanda di uscita 1 della carta.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-03.md §7"
+        },
+        {
+          "data": "2026-08-04",
+          "costo_usd": 144.32,
+          "nota": "Un solo caso oggi: AVGO +6.56%, segnale 6379 alle 16:45 +0.2762 conf 0.600 ensemble non-fallback, segno corretto e sotto il gate 0.300, SKIP_THRESHOLD id 6552. Costo stimato con size S4 tipica $2200 sul return pieno: 144.32 (82.28 sulla sola porzione intraday, il gap vale +2.71pp dei +6.56pp). NOTA CHE INDEBOLISCE L'ATTRIBUZIONE: l'articolo sorgente non e' su Broadcom ma e' 'Big Tech's $1.2 Trillion Hyperscaler AI Bet Could Ignite the Next Semiconductor ETF Rally', taggato in fan-out anche ad AMAT e SOXX - la magnitudine bassa puo' quindi essere la conseguenza corretta della genericita' della fonte e non una mis-calibrazione del gate. Il legame vero e' con F-012.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-04.md §7"
         }
       ],
-      "costo_cumulato_usd": 417.35,
+      "costo_cumulato_usd": 561.67,
       "occorrenze_non_stimate": 0,
       "stato": "aperto",
       "issue": null
@@ -253,10 +277,16 @@
           "costo_usd": null,
           "nota": "32 articoli su 130 (25%) sono taggati a 2+ ticker e generano 104 delle 202 righe scorate (51%). Distribuzione n_ticker per articolo: 1->98, 2->17, 3->4, 4->6, 5->1, 6->2, 7->1, 10->1. Caso piu' netto: 'CoreWeave Stock Jumps as AI Data-Center Demand Skyrockets Ahead of Q2 Earnings' (Benzinga, pubblicato 15:29:30), pezzo su CoreWeave che NON e' in watchlist ne' in book, taggato ad AAPL/AMZN/META/MSFT/NVDA, produce i segnali 6175 (AMZN +0.343), 6176 (MSFT +0.307), 6178 (NVDA +0.388), cioe' 3 dei 6 BUY della giornata (decisioni 5912, 5939, 5938). Secondo caso: 'Yen Intervention And Falling Oil Help Stocks...' taggato a 10 ticker contemporaneamente. extraction_method e' source_metadata su tutte le 91 righe Benzinga: il resolver deterministico non e' coinvolto, i tag arrivano dal provider e vengono accettati integralmente. ECONOMICAMENTE il 08-03 non e' costato: i tre BUY da CoreWeave chiudono a +$3.06 netti aggregati (AMZN -8.93, MSFT +3.70, NVDA +8.29); non uso 0.0 perche' l'affermazione del finding non e' 'questi trade hanno perso' ma 'il meccanismo di attribuzione e' sbagliato', e il costo di quello non e' stimabile su una giornata. Impatto sulla domanda di uscita 1 della carta: se meta' dell'evidenza 'news editoriale -> segnale' e' in realta' 'articolo su un terzo -> segnale', la risposta misura un'altra cosa. Nuovo id giustificato: F-008 riguarda l'inversione di un segnale ticker-specifico da parte di un articolo generico (lato qualita' del singolo evento); questo e' l'affermazione strutturale sul tasso di fan-out e sul lato ingresso.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-03.md section 10 [DAY-004], section 4.4"
+        },
+        {
+          "data": "2026-08-04",
+          "costo_usd": null,
+          "nota": "36 articoli su 106 (34%) taggati a 2+ ticker, generano 134 delle 204 righe scorate (66%) - in crescita netta dal 51% del 08-03. Distribuzione n_ticker per articolo: 1->70, 2->17, 3->10, 4->1, 5->2, 6->1, 7->1, 8->1, 9->1, 13->2 (due articoli taggati a 13 ticker ciascuno). Tre conseguenze misurate: (a) l'unico BUY sul mover #1 della giornata, PLTR +29.17%, nasce dal segnale 6480 il cui articolo si intitola 'What Is Going on With Broadcom Stock on Tuesday?', mentre il pezzo Palantir-specifico (6392, +0.3528) era stato scartato prima dal gate di freschezza; (b) IBM +3.96% ha come unica copertura del giorno 'Why Is Rigetti Stock Surging on Tuesday?' (6478, score 0.000 fallback) e finisce in THIN_NEUTRAL; (c) CSCO +5.06% ha come unica copertura 'Why Is CrowdStrike Stock Surging on Tuesday?' (6468). Entrambi i miss THIN_NEUTRAL della giornata hanno quindi come fonte un articolo su una terza societa'. Costo non stimabile: l'affermazione non e' 'questi trade hanno perso' ma 'il meccanismo di attribuzione misura un'altra cosa'.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-04.md §7"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 1,
+      "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
     },
@@ -371,6 +401,25 @@
       ],
       "costo_cumulato_usd": 0,
       "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-019",
+      "titolo": "La latenza di ingestione news (mediana ~1h50m) consuma il 92% della finestra di entry-freshness (2.0h): i segnali nascono quasi scaduti",
+      "tipo": "difetto",
+      "confidenza": "congetturale",
+      "primo_avvistamento": "2026-08-04",
+      "occorrenze": [
+        {
+          "data": "2026-08-04",
+          "costo_usd": 2.37,
+          "nota": "Misura su news_log 08-04 con published_at non nullo: latenza created_at-published_at mediana 111.7 min per alpaca_benzinga (n=126, media 102.2, min 18, max 121) e 105.6 min per gdelt_gkg (n=78, media 97.2, min 46, max 107). Il gate entry-freshness (#150) usa MAX_NEWS_AGE_HOURS=2.0. L'articolo mediano viene scorato quando gli restano ~8 minuti di vita utile, meno di un ciclo di portafoglio (cadenza 15 min), e 14 articoli su 126 (11%) sono gia' scaduti nell'istante in cui vengono scorati. Effetto aggregato: ogni ciclo del 08-04 scarta da 26 a 32 segnali per questo solo gate (log 'S4: dropped 30 signal(s) below entry-freshness (news_age_hours=2.0)' e varianti, 24 cicli su 24), il che lo rende il filtro piu' selettivo dell'intero percorso S4 - piu' del gate 0.300, che ne scarta 14-21 su 16-26. Non e' una deriva del giorno: 07-31 media 91.3/102.0 min, 08-03 media 80.4/74.1 min, 08-04 media 102.2/97.2 min; la latenza e' sempre stata dello stesso ordine di grandezza del gate. Due casi tracciati riga per riga: PLTR 6392 pubblicato 15:06:13 e scorato 17:01:13 (+0.3528, sopra gate), scartato al ciclo 17:07 perche' a 2h01m di eta' - l'ordine arrivera' solo alle 19:37 su un altro articolo; SPCX 6476 pubblicato 17:16:39 e scorato 19:16:16 (+0.4500), gia' a 2h00m alla nascita, unica causa del miss FILTERED del giorno. COSTO 2.37, unica istanza prezzabile: controfattuale corto su PLTR, stesso notional effettivo $1136.71, ingresso al ciclo 17:07 a 162.56 invece che alle 19:37 a 162.90 -> 6.9927 azioni che chiudono a 162.61 danno +0.35 contro i -2.02 realmente a mercato. E' piccolo perche' il 96% del movimento intraday di PLTR era gia' finito alle 17:00, non perche' il gate sia innocuo. Su SPCX non prezzo nulla: il segnale sarebbe caduto comunque su #108 (fallback_used=true). ID NUOVO GIUSTIFICATO: nessun finding esistente riguarda la latenza della pipeline di ingestione - F-001 riguarda l'assenza di copertura e non il ritardo di quella che c'e', F-009 il gate di magnitudine 0.300, F-012 l'attribuzione dei ticker. E' la terza causa strutturale di scarto ed e' quella che opera sul volume maggiore di segnali. NOTA DI CONFORMITA': MAX_NEWS_AGE_HOURS e' taratura e resta congelato dalla carta; la segnalazione riguarda la latenza misurata, non il valore del parametro.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-04.md §7"
+        }
+      ],
+      "costo_cumulato_usd": 2.37,
+      "occorrenze_non_stimate": 0,
       "stato": "aperto",
       "issue": null
     }
