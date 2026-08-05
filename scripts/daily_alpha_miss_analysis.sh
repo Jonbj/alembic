@@ -275,6 +275,10 @@ C) Committa i due file SOLO SE il branch corrente e' main. Controlla PRIMA:
    - Se stampa "main": committa.
        git add docs/evidence/findings.json docs/evidence/market_daily.jsonl
        git commit -m "evidence: ledger __DATE_TARGET__"
+       git push origin main
+     Il PUSH e' obbligatorio quanto il commit: senza, il ledger vive solo su questa
+     macchina e un cambio di sessione o un guasto lo perde. Se il push fallisce (rete,
+     divergenza col remoto) NON forzarlo: lascia il commit locale e segnalalo a stdout.
    - Se stampa QUALSIASI ALTRA COSA: NON committare. I file restano scritti sul disco (non
      annullare le modifiche) e stampi su stdout, come ultima riga:
        ATTENZIONE: ledger scritto ma NON committato — branch corrente <nome>, atteso main.

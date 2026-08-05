@@ -393,6 +393,10 @@ Poi committa SOLO SE il branch corrente e' main. Controlla PRIMA:
 - Se stampa "main": committa.
     git add docs/evidence/findings.json
     git commit -m "evidence: forensic __DATE_TARGET__"
+   git push origin main
+ Il PUSH e' obbligatorio quanto il commit: senza, il ledger vive solo su questa macchina
+ e un cambio di sessione lo perde. Se il push fallisce NON forzarlo: lascia il commit
+ locale e segnalalo a stdout.
 - Se stampa QUALSIASI ALTRA COSA: NON committare. Il file resta scritto sul disco (non annullare
   le modifiche) e stampi su stdout, come ultima riga:
     ATTENZIONE: findings scritto ma NON committato — branch corrente <nome>, atteso main.
