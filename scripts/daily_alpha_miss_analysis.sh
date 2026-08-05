@@ -105,7 +105,27 @@ Limita l'analisi ESCLUSIVAMENTE ai simboli in config/trading.yaml -> symbols.wat
 (circa 96 simboli). Non è uno scan whole-market: la domanda è "abbiamo perso qualcosa che
 potevamo effettivamente tradare", non "cosa ha fatto il mercato in generale".
 
-FASE 0 — LEGGI IL LEDGER PRIMA DI ANALIZZARE
+FASE 0 — LEGGI IL DOSSIER E IL LEDGER PRIMA DI ANALIZZARE
+
+Un dossier deterministico con i numeri della giornata e' gia' stato calcolato:
+  __DOSSIER_FILE__
+Se il percorso e' "(non disponibile)" la generazione e' fallita: calcola i numeri
+tu come facevi prima e segnalalo nel report. Altrimenti LEGGILO e USALO.
+
+Contiene: rendimenti di tutti i simboli, dispersione cross-sectional, conteggio
+mover, copertura news, candidati miss con la loro evidenza, gli INGRESSI del
+giorno con entry_percentile/mtm_eod/vs_apertura, le CHIUSURE con
+drift_post_uscita, e tre aggregati (per ora d'ingresso, cause di miss cumulate,
+mediane mobili a 20 giorni).
+
+REGOLA: NON ricalcolare cio' che il dossier contiene gia'. Ogni numero che citi
+deve venire dal dossier, e in caso di discrepanza fra il tuo calcolo e il suo
+vince il dossier — e' deterministico, tu no. Il tuo compito e' interpretare:
+classificare le cause dei miss leggendo il testo degli articoli (cosa che il
+dossier non puo' fare), leggere il pattern della giornata, e scrivere le
+segnalazioni.
+
+FASE 0b — LEGGI IL LEDGER
 Leggi docs/evidence/findings.json. Contiene le evidenze già note, ciascuna con un id stabile
 (F-001, F-002, ...), un titolo e le occorrenze già registrate. Tienile presenti per tutta
 l'analisi: alla fine ogni segnalazione che produrrai andrà agganciata a una di queste o
@@ -303,7 +323,20 @@ REGOLE IMPORTANTI
 PROMPT
 )
 
+# Dossier deterministico (#174): i numeri si calcolano UNA volta, qui, e la
+# sessione li interpreta invece di ri-derivarli. Fallisce in modo morbido: se il
+# dossier non si genera la sessione lavora come prima, calcolandosi i numeri da
+# se'. Meglio un report senza dossier che nessun report.
+DOSSIER_FILE="$PROJECT_DIR/docs/evidence/dossier/${DATE_TARGET}.json"
+if uv run python "$PROJECT_DIR/scripts/alpha_miner_dossier.py" "$DATE_TARGET" >> "$LOG_FILE" 2>&1; then
+    echo "Dossier generato: $DOSSIER_FILE" | tee -a "$LOG_FILE"
+else
+    echo "ATTENZIONE: generazione dossier fallita — la sessione procede senza." | tee -a "$LOG_FILE"
+    DOSSIER_FILE="(non disponibile)"
+fi
+
 _CLAUDE_PROMPT="${_PROMPT_TEMPLATE//__DATE_TARGET__/$DATE_TARGET}"
+_CLAUDE_PROMPT="${_CLAUDE_PROMPT//__DOSSIER_FILE__/$DOSSIER_FILE}"
 _CLAUDE_PROMPT="${_CLAUDE_PROMPT//__REPORT_FILE__/$REPORT_FILE}"
 
 ANALYSIS_OUTPUT=$(claude --allowedTools "Bash,Read,Write,Edit" -p "$_CLAUDE_PROMPT" 2>&1)
