@@ -57,23 +57,23 @@ _MECHANISM_BY_DISPOSITION = {
 
 _DESCRIPTION_BY_DISPOSITION = {
     FRESH: (
-        "S4 signal present and fresh but not driving a position "
-        "(rank cutoff, min_score or a portfolio constraint)"
+        "S4 signal reached the portfolio engine fresh and is not driving a position "
+        "— rank cutoff, min_score or a portfolio constraint"
     ),
     STALE_PRESERVED: (
-        "S4 signal was stale but FIX-D re-admitted it this cycle (open position, "
-        "no counter-signal) and the portfolio weight is 0 anyway — the mechanism "
-        "that zeroed it is not recorded, so this exit is NOT a signal expiry"
+        "S4 signal was stale but FIX-D re-admitted it this cycle — open position, no "
+        "counter-signal — and the weight is 0 anyway: the mechanism that zeroed it is "
+        "not recorded, so this exit is NOT a signal expiry, see #184"
     ),
-    STALE_DROPPED: "S4 signal discarded for age this cycle (no FIX-D preservation)",
-    FALLBACK_FILTERED: "S4 signal excluded from the ranking as FinBERT fallback (#108)",
-    ENTRY_FRESHNESS_FILTERED: "S4 signal excluded by the news-freshness entry gate (#150)",
-    BELOW_ENTRY_GATE: "S4 signal dropped below the active feedback entry threshold",
+    STALE_DROPPED: "S4 signal discarded for age this cycle — FIX-D did not preserve it",
+    FALLBACK_FILTERED: "S4 signal excluded from the ranking as FinBERT fallback, #108",
+    ENTRY_FRESHNESS_FILTERED: "S4 signal excluded by the news-freshness entry gate, #150",
+    BELOW_ENTRY_GATE: "S4 signal fell below the active feedback entry threshold",
 }
 
 _NO_OBSERVATION = (
-    "the S4 pipeline recorded no disposition for this symbol this cycle "
-    "(strategy inactive, symbol outside the S4 universe, or signal load failed)"
+    "the S4 cycle recorded no disposition for this symbol — strategy inactive, symbol "
+    "outside the S4 universe, or signal load failed"
 )
 
 
