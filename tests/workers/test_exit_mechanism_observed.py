@@ -160,6 +160,68 @@ class TestFixDPreservationCannotProduceExpired:
         assert mechanism != "expired"
 
 
+# ── _build_strategy_instance registra la disposizione dove agisce sul segnale ──
+
+
+def _s4_dispositions_for(signals, open_trades=None) -> dict:
+    """Costruisce l'istanza S4 su `signals` e restituisce le disposizioni registrate."""
+    from src.workers.portfolio_scheduler import _build_strategy_instance
+
+    entry = MagicMock()
+    entry.strategy_id = "S4"
+    bars_df = pd.DataFrame(
+        {"SPY": [100.0 + i * 0.1 for i in range(5)]},
+        index=pd.date_range("2025-01-01", periods=5, freq="B"),
+    )
+    store = MagicMock()
+    store.fetch_signals_for_cycle.return_value = signals
+    store.fetch_trades.return_value = open_trades or []
+
+    dispositions: dict[str, str] = {}
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=store):
+        _build_strategy_instance(entry, bars_df, dispositions=dispositions)
+    return dispositions
+
+
+def _signal(symbol, score=0.8, age_hours=1.0, fallback_used=False):
+    return SentimentResult(
+        symbol=symbol, score=score, confidence=0.9, reasoning="",
+        model_id="ensemble:glm-5.2:cloud",
+        generated_at=datetime.now(timezone.utc) - timedelta(hours=age_hours),
+        fallback_used=fallback_used,
+    )
+
+
+def test_fresh_signal_is_recorded_as_fresh():
+    assert _s4_dispositions_for([_signal("NVDA")])["NVDA"] == FRESH
+
+
+def test_stale_signal_without_open_position_is_recorded_as_dropped():
+    assert _s4_dispositions_for([_signal("NVDA", age_hours=20)])["NVDA"] == STALE_DROPPED
+
+
+def test_stale_signal_preserved_by_fix_d_overwrites_the_dropped_tag():
+    dispositions = _s4_dispositions_for(
+        [_signal("NVDA", age_hours=20)],
+        open_trades=[{"symbol": "NVDA", "stop_strategy": "S4"}],
+    )
+
+    assert dispositions["NVDA"] == STALE_PRESERVED
+
+
+def test_fallback_signal_is_recorded_as_fallback_filtered():
+    dispositions = _s4_dispositions_for([_signal("NVDA", fallback_used=True)])
+
+    assert dispositions["NVDA"] == FALLBACK_FILTERED
+
+
+def test_signal_under_the_entry_gate_is_recorded_as_below_gate():
+    """Soglia di default 0.30 (_ENTRY_THRESHOLD_BASELINE), Redis non raggiungibile."""
+    dispositions = _s4_dispositions_for([_signal("NVDA", score=0.05)])
+
+    assert dispositions["NVDA"] == BELOW_ENTRY_GATE
+
+
 # ── Ciclo completo: la disposizione arriva dal pipeline al Decision Log ────────
 
 
