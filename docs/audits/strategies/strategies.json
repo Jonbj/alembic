@@ -1,0 +1,79 @@
+{
+  "generated_at": "2026-08-03T21:59:15Z",
+  "method": "Union of config/strategies.yaml, src/strategies/<id>/, strategy_lifecycle DB table, src/strategies/registry.py, docs/, and git history. Deduped by strategy_id.",
+  "strategies": [
+    {
+      "id": "S1",
+      "name": "TimeSeriesMomentum",
+      "class": "src/strategies/s1/strategy.py::TimeSeriesMomentum",
+      "description": "Multi-Lookback Relative Momentum: vol-normalised returns over {21,63,126,252}d, exponentially weighted, cross-sectional z-scored, long-only. NOT canonical Moskowitz 12-1 TSMOM.",
+      "status": "enabled",
+      "lifecycle_mode": "supervised_paper",
+      "approved": true,
+      "allocation_pct": 0.50,
+      "config": "config/strategies.yaml (S1), config/s1_strategy.yaml",
+      "source_files": ["src/strategies/s1/strategy.py", "src/strategies/s1/signal.py", "src/strategies/s1/sizing.py", "src/strategies/s1/backtest.py", "src/strategies/s1/sensitivity.py"],
+      "promoted_by": "bootstrap",
+      "hypothesis": "Time-series / cross-sectional momentum",
+      "notes": "Demoted 2026-06-19 (P0-01): backtest invalid (same-bar t+0 fills, survivorship, zero-cost, circular stress/regime, DSR n_trials=1). Re-promotion gated by P0-05/06/07 etc."
+    },
+    {
+      "id": "S2",
+      "name": "VRPStrategy",
+      "class": "src/strategies/s2/strategy.py::VRPStrategy",
+      "description": "Volatility Risk Premium — theory is short-put selling on SPY; current implementation is a PROXY (long SPY overnight when VIX/realised_vol_20d - 1 > threshold), NOT options. Intended design (cash-secured short put, delta -0.20, DTE 30-45d) requires IBKR adapter + options data (Phase D).",
+      "status": "disabled",
+      "lifecycle_mode": "disabled",
+      "approved": false,
+      "allocation_pct": 0.00,
+      "config": "config/strategies.yaml (S2), docs/strategies/s2-vrp-theory.md",
+      "source_files": ["src/strategies/s2/strategy.py", "src/strategies/s2/config.py", "src/strategies/s2/event_filter.py", "src/strategies/s2/regime.py", "src/strategies/s2/signal.py", "src/strategies/s2/exit.py", "src/strategies/s2/backtest.py"],
+      "hypothesis": "Variance risk premium / short-vol carry",
+      "notes": "OOS Sharpe -0.55, all backtest gates 1-4 failed. Research only, explicitly NOT active."
+    },
+    {
+      "id": "S3",
+      "name": "CrossSectionalMomentum",
+      "class": "src/strategies/s3/strategy.py::CrossSectionalMomentum",
+      "description": "Cross-Sectional Residual Momentum — momentum on residual returns after factor regression (per docs/strategies module docstring). Research implementation.",
+      "status": "disabled",
+      "lifecycle_mode": null,
+      "approved": false,
+      "allocation_pct": 0.00,
+      "config": "config/strategies.yaml (S3)",
+      "source_files": ["src/strategies/s3/strategy.py", "src/strategies/s3/signal.py", "src/strategies/s3/universe.py", "src/strategies/s3/backtest.py"],
+      "hypothesis": "Residual momentum (factor-orthogonalized)",
+      "notes": "NOT present in strategy_lifecycle DB table (only S1/S2/S4/S7 have rows). config note: gate 3/5 failed, possible sizing lookahead. See docs/RESEARCH_S3_STRATEGY_REVIEW_2026-07-20.md."
+    },
+    {
+      "id": "S4",
+      "name": "NewsDrivenTactical",
+      "class": "src/strategies/s4/strategy.py::NewsDrivenTactical",
+      "description": "News-sentiment tactical overlay: reads pre-computed ensemble sentiment (polarity x confidence) from Redis/PG, gates via freshness + ranker prefilter + dynamic feedback:entry_threshold (0.30->0.60), top-N equal-weight, regime-scaled sizing, stop-loss exit.",
+      "status": "enabled",
+      "lifecycle_mode": "paper",
+      "approved": true,
+      "allocation_pct": 0.10,
+      "config": "config/strategies.yaml (S4), src/strategies/s4/config.py",
+      "source_files": ["src/strategies/s4/strategy.py", "src/strategies/s4/config.py", "src/strategies/s4/ranking.py", "src/strategies/s4/backtest.py", "src/strategies/s4/gate_cli.py"],
+      "promoted_by": "bootstrap",
+      "hypothesis": "News sentiment drift / underreaction",
+      "notes": "promotion_blocked (P0-13): no gate report, IC>placebo not confirmed. Re-promotion needs P1-03/04 + IC>placebo + 90-day paper. Long-only intent (DAY-001 violation historically observed)."
+    },
+    {
+      "id": "S7",
+      "name": "PEAD (Post-Earnings-Announcement Drift)",
+      "class": "src/strategies/s7/ (REMOVED)",
+      "description": "Earnings-event strategy: post-earnings-announcement drift via earnings-call transcript tone (ALPHA-A3 transcript-tone edge). REMOVED from source at commit d1e6de6 (originally implemented at 1dd2c35). Code recoverable from git.",
+      "status": "removed",
+      "lifecycle_mode": "research",
+      "approved": false,
+      "allocation_pct": 0.00,
+      "config": "config/strategies.yaml (S7 comment block, removed)",
+      "source_files": [],
+      "hypothesis": "PEAD / transcript-tone drift",
+      "notes": "POC-2 FAIL n=73 IC≈0.012; POC-1 INCONCLUSIVE n=15; ALPHA-A5 large-cap FAIL (=beta). Lifecycle row still present (research, not approved). History: docs/S7_LIFECYCLE_HISTORY_2026-07-15.md. Audit from git history + docs."
+    }
+  ],
+  "coverage": "S1, S2, S3, S4, S7 — all discovered strategies. No S5/S6/S8+ exist in any source."
+}
