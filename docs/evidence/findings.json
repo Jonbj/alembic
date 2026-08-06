@@ -26,6 +26,12 @@
           "costo_usd": 452.54,
           "nota": "42/96 simboli (44%) zero righe in news_log il 08-04. Cinque dei nove miss del giorno sono NO_NEWS puri: QCOM (+7.32%), HOOD (+3.48%), NOW (+3.45%), RDDT (+3.30%), SAP (+3.02%) - zero righe in news_log, zero in sentiment_signals, zero in execution_decisions, nessuna catena decisionale esistente. Costo stimato con size S4 tipica $2200 sul return pieno: 161.04+76.56+75.90+72.60+66.44 = 452.54. CAVEAT nuovo rispetto alle occorrenze precedenti: su questi cinque nomi il 56% del movimento e' nel gap di apertura, quindi la porzione realmente catturabile intraday vale 352.88 invece di 452.54; uso il return pieno per non rompere la comparabilita' della serie e lascio qui il numero alternativo. Ricorrenza sugli stessi ticker: RDDT e' NO_NEWS il 07-31, sotto-gate il 08-03 e NO_NEWS oggi; SAP e' mancato per assenza/genericita' di news il 07-24, 07-27, 07-28, 08-03 e oggi; HOOD e' NO_NEWS il 08-03 e oggi. La quota di watchlist scoperta oscilla in banda stretta: 55/96 (07-31), 41/96 (08-03), 42/96 (08-04).",
           "fonte": "ALPHA_MISS_REPORT_2026-08-04.md §7"
+        },
+        {
+          "data": "2026-08-05",
+          "costo_usd": 0.0,
+          "nota": "51/96 simboli (53%) zero righe in news_log il 08-05, in peggioramento su 41/96 (08-03) e 42/96 (08-04). Due dei quattro miss del giorno sono NO_NEWS puri: AZN +3.78% e QCOM -3.16%, entrambi con zero righe in news_log, zero in sentiment_signals e zero in execution_decisions. QCOM e' NO_NEWS per il SECONDO GIORNO CONSECUTIVO (il 08-04 era +7.32%): mover >=3% in entrambe le direzioni, copertura nulla in entrambe le giornate. COSTO 0.00 (non null e non stimato per difetto): il controfattuale e' stato calcolato ed e' nullo o negativo. Con size S4 tipica 2200 $ AZN varrebbe 83.16 $ sul return pieno, ma il suo movimento e' interamente nel gap di apertura (+5.25%) mentre l'intraday e' NEGATIVO (-1.40%): un ingresso all'apertura avrebbe perso denaro, e nessuna strategia intraday poteva catturare quel return. QCOM e' un mover al ribasso e le strategie sono long-only. Registro quindi la ricorrenza strutturale del buco di copertura con costo nullo verificato. Nota che aggrava l'osservazione: la copertura apparente e' gonfiata dal fan-out sui ticker bancari (vedi F-020) - dei 46 ticker con almeno una riga, tre (MS, GS, DB) assorbono 51 righe su 194 su articoli riguardanti societa' terze.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-05.md §7"
         }
       ],
       "costo_cumulato_usd": 797.46,
@@ -219,9 +225,15 @@
           "costo_usd": 0.0,
           "nota": "Due casi, entrambi sul lato ingresso. ARM: 15:15:20 segnale 6328 +0.6264 conf 0.800 (ensemble non-fallback) da 'Arm Jumps More Than 11%: Data Center Royalty Growth Drives Post-Selloff Semiconductor Rally' (ticker-specifico, direzionale); SEDICI SECONDI dopo, 15:15:36, segnale 6330 +0.0082 conf 0.175 da 'Caterpillar, Wayfair, Zebra Technologies, Gartner And Other Big Stocks Moving Higher On Tuesday', rassegna in cui ARM e' un tag di fan-out. Il ciclo legge l'ultimo segnale per simbolo: seguono 17 righe consecutive di SKIP_THRESHOLD a score 0.007 (id 6253..6580) dalle 15:22 alle 19:52. ARM chiude +17.43%. CAT: +0.7470 conf 0.900 alle 14:00:35 da 'Caterpillar Cashes In On AI Buildout, Raises 2026 Sales Outlook' azzerato a 0.000 alle 14:30:21, pattern ripetuto 6 volte nel giorno (0.7177->0.000, 0.7200->0.006, 0.6932->0.000, 0.6605->0.058, 0.6484->0.013). COSTO 0.0 (non null): il controfattuale e' stato calcolato ed e' nullo. Sia ARM sia CAT erano gia' in book come posizioni S1 e il guard P0-05 (no pyramiding) ha bloccato esplicitamente il BUY a ogni ciclo indipendentemente dal punteggio - log worker 14:07:09, 14:22:09, 14:37:09, 14:52:09, 15:07:08, 15:22:08, 15:37:09, 15:52:07, 16:07:11, 16:22:09, 16:37:09, 16:52:08, 17:07:12, 17:22:09: 'P0-05: skipping BUY decision for ARM - already has an open trade'. Il difetto di segnale e' reale e documentato ma quel giorno non ha impedito alcun ordine.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-04.md §7"
+        },
+        {
+          "data": "2026-08-05",
+          "costo_usd": 33.46,
+          "nota": "Terza giornata consecutiva del pattern, e la prima in cui cambia effettivamente un ordine. DIS, unico mover tradato del giorno (+3.65%). Catena completa: news_log 6491 'Dow Jumps 500 Points; Disney Earnings Beat Views' (source_metadata, ticker-specifico) -> sentiment_signals 6491 alle 14:15:09, +0.5722 conf 0.775, ensemble non-fallback -> execution_decisions 6599 alle 14:22 BUY, trade 654, 16.516 az. a 100.87. Poi tre articoli generici attribuiti a DIS via org_lookup, nessuno dei quali parla di Disney: 6516 'S&P 500, Dow futures edge higher on Mideast hopes' (+0.0125), 6538 \"The S&P 500 just hit a new high. 'Big Short' investor Michael Burry...\" (-0.1200), 6543 'Baystreet.ca - Futures Muscle Higher Midweek' (0.0000, conf 0.175). Alle 16:07 la decisione 6747 vende, reason '[whipsaw] Portfolio rebalance: weight 0.0% - S4 signal present but not driving a position (score=+0.000, age=0.1h, generated 2026-08-05 16:00 UTC)'. DIS chiude a 101.76: realizzato -18.76 contro +14.70 tenendo fino alla chiusura (mtm_eod del dossier deterministico) = 33.46 $ di costo attribuito, controfattuale corto (stesso giorno, stessa size, stesso strumento). La stessa riga porta anti_whipsaw_shadow: would_suppress=True, streak=1/2 - il guard che l'avrebbe soppressa esiste ed e' in shadow per design. Il costo d'uscita anticipata non e' contato altrove: la penalita' di churn registrata oggi su F-013 riguarda BP, PLTR e SNOW, non DIS.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-05.md §7"
         }
       ],
-      "costo_cumulato_usd": 19.54,
+      "costo_cumulato_usd": 53.0,
       "occorrenze_non_stimate": 0,
       "stato": "aperto",
       "issue": null
@@ -244,9 +256,15 @@
           "costo_usd": 144.32,
           "nota": "Un solo caso oggi: AVGO +6.56%, segnale 6379 alle 16:45 +0.2762 conf 0.600 ensemble non-fallback, segno corretto e sotto il gate 0.300, SKIP_THRESHOLD id 6552. Costo stimato con size S4 tipica $2200 sul return pieno: 144.32 (82.28 sulla sola porzione intraday, il gap vale +2.71pp dei +6.56pp). NOTA CHE INDEBOLISCE L'ATTRIBUZIONE: l'articolo sorgente non e' su Broadcom ma e' 'Big Tech's $1.2 Trillion Hyperscaler AI Bet Could Ignite the Next Semiconductor ETF Rally', taggato in fan-out anche ad AMAT e SOXX - la magnitudine bassa puo' quindi essere la conseguenza corretta della genericita' della fonte e non una mis-calibrazione del gate. Il legame vero e' con F-012.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-04.md §7"
+        },
+        {
+          "data": "2026-08-05",
+          "costo_usd": 75.46,
+          "nota": "Un solo caso oggi: NVDA +3.43%, unico semiconduttore in positivo in una giornata di rotazione fuori dai semi. Massimo segnale +0.1543 (conf 0.550, ensemble non-fallback, id 6592 alle 17:15) - segno corretto e sotto il gate 0.300; SKIP_THRESHOLD id 6838 (0.154), 6905 (0.100), 6993 (0.000). Costo stimato con size S4 tipica 2200 $ sul return pieno: 75.46 $ (23.98 $ sulla sola porzione intraday, il gap vale +2.32pp dei +3.43pp). Uso il return pieno per non rompere la comparabilita' della serie e lascio qui il numero alternativo, come nell'occorrenza del 08-04. CAVEAT CHE INDEBOLISCE L'ATTRIBUZIONE, identico a quello di AVGO il 08-04: nessuno dei 6 articoli su NVDA e' ticker-specifico ('QQQ Pulls In Nearly $5 Billion in a Day', \"Michael Burry Pegs Palantir, Nvidia as 'Future Ghost Towns'\", 'AMD Stock Hit By Musks Nvidia Bet', 'What Is Going on with Taiwan Semiconductor Stock', 'SpaceX Lockup Expiry Could Send a Gentle Jolt Through QQQ', 'SpaceX Chooses Nvidia'). La magnitudine bassa puo' essere la conseguenza corretta della genericita' delle fonti e non una mis-calibrazione del gate. Il legame vero e' con F-012.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-05.md §7"
         }
       ],
-      "costo_cumulato_usd": 561.67,
+      "costo_cumulato_usd": 637.13,
       "occorrenze_non_stimate": 0,
       "stato": "aperto",
       "issue": null
@@ -294,10 +312,16 @@
           "costo_usd": null,
           "nota": "Ricorrenza: 389 righe su 392 di execution_decisions del 2026-08-04 hanno signal_id NULL. Solo 3 lo portano (PFE->6288, NVO->6461, PLTR->6480). Le 381 SKIP_THRESHOLD lo hanno NULL per costruzione (_record_gate_drops passa signal_id=None), ma anche 8 delle 11 decisioni BUY/SELL reali - incluse le due BUY S4 delle 18:37 su PFE e MCD, che un segnale ce l'hanno. L'attribuzione va fatta a mano incrociando timestamp e testo del reason: e' esattamente il lavoro che questo report ha dovuto fare. La provenienza e' gia' pinnata in RankingResult.provenance (ranking.py:49-66), va solo propagata.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-04.md section 10 [DAY-013]"
+        },
+        {
+          "data": "2026-08-05",
+          "costo_usd": null,
+          "nota": "Ricorrenza con un caso concreto nuovo. Tasso invariato: 487 righe su 488 di execution_decisions del 08-05 hanno signal_id NULL. Il caso: la decisione BUY id 6599 su DIS (14:22, l'unico BUY della giornata) porta signal_score = 0.6866898466006927 e reason 'S4 news-driven: sentiment +0.687 (ensemble:glm-5.2:cloud+gpt-oss:20b-cloud)', ma NESSUNA riga di sentiment_signals per DIS quel giorno ha quel valore - il massimo e' +0.5722 (id 6491, 14:15:09, conf 0.775) e una query su round(score,3)=0.687 per DIS restituisce zero righe su tutta la storia della tabella. Non e' possibile stabilire se sia una trasformazione applicata a valle dal ranking o un vero disallineamento score, PROPRIO PERCHE' signal_id e' NULL: manca il puntatore che permetterebbe di decidere. Costo non stimabile - e' un difetto di osservabilita' - ma la conseguenza e' che l'attribuzione di ogni ordine a una notizia resta non verificabile, il che tocca direttamente la domanda di uscita 1 della carta.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-05.md §7"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -325,10 +349,16 @@
           "costo_usd": null,
           "nota": "Ricorrenza con quota in crescita: 134 righe scorate su 204 (66%, contro il 50% del 08-03) provengono da 36 articoli multi-ticker su 106 URL totali. Un solo pezzo, 'How Anthropic and SpaceX Are Quietly Boosting Big Tech Profits', ha generato tre segnali (SPCX +0.450, MSFT +0.387, GOOGL +0.333); 'Big Tech's $1.2 Trillion Hyperscaler AI Bet' ne ha generati quattro (NVDA, AMD, SOXX, AMAT). Caso che tocca il money path: il BUY PLTR delle 19:37 nasce dal segnale 6480, la cui fonte e' l'articolo intitolato 'What Is Going on With Broadcom Stock on Tuesday?' (news_log id 6480, extraction_method=source_metadata), e il rationale persistito recita 'Palantir's strong earnings boosted confidence'. Nessun componente incrocia rationale e fonte. Il trade ha guadagnato (PLTR +29.17% nel giorno) ma non e' funzionalmente giustificato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-04.md section 10 [DAY-006]"
+        },
+        {
+          "data": "2026-08-05",
+          "costo_usd": null,
+          "nota": "Ricorrenza: 32 articoli su 124 (26%) taggati a 2+ ticker generano 102 delle 194 righe scorate (53%), con un massimo di 13 ticker su un singolo articolo. Serie a tre giorni: 51% (08-03), 66% (08-04), 53% (08-05) - la quota oscilla ma non scende mai sotto meta' dell'evidenza. Due casi che toccano il money path oggi: (a) la SELL di DIS delle 16:07 nasce da 'Baystreet.ca - Futures Muscle Higher Midweek', un pezzo su futures che non nomina Disney (dettaglio in F-008); (b) un singolo articolo, 'SpaceX Chooses Nvidia; Short Squeeze Drives Market Rally, But Extreme Positive Sentiment Flashes Warning' (pubblicato 17:17), genera righe scorate su CINQUE ticker - GOOGL (6656), NVDA (6660), SPCX (6662), DIS (6655) e LLY (6657) - e per NVDA e' l'unico pezzo di tutta la giornata che tocchi il vero catalizzatore del suo +3.43%. Costo non stimabile: l'affermazione non e' 'questi trade hanno perso' ma 'il meccanismo di attribuzione misura un'altra cosa'.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-05.md §7"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -350,9 +380,15 @@
           "costo_usd": 8.12,
           "nota": "Ricorrenza con tre roundtrip nella stessa giornata, due dei quali su S1 (il 08-03 il caso era su S4). SBUX: SELL 14:22 [s1_weight_drop] a 102.21 -> BUY 14:37 [S1 momentum] a 102.62, quindici minuti, stessa strategia; costo 6.826*(102.62-102.21)=2.80 + 0.756 di costi = 3.56 $. ABBV: SELL 17:52 [s1_weight_drop] a 242.64 -> BUY 18:52 a 243.91; costo 2.719*1.27=3.45 + 0.736 = 4.19 $. PFE: BUY 14:07 a 25.11 -> SELL 15:52 [whipsaw] a 25.46 -> BUY 18:37 a 25.44; la gamba sell->rebuy e' favorevole di 0.90 ma paga 1.27 di costi = -0.37 $. Totale 8.12 $, cioe' il 25% dei costi di transazione della giornata serve a rientrare in posizioni appena chiuse. Meccanismo confermato lato S1: il ranking momentum e' ricalcolato ogni 15 min e _last_rebalance non viene ripristinato da Redis (portfolio_scheduler.py:3268, scelta deliberata), quindi un simbolo che oscilla intorno al taglio viene venduto e ricomprato. Su S4 resta l'assenza di banda fra gate d'ingresso 0.30 e uscita 0: PFE e' stato comprato alle 14:07 e gia' alle 14:37 il sistema voleva venderlo (bloccato 4 volte dall'hold-minimum 90 min).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-04.md section 10 [DAY-002]"
+        },
+        {
+          "data": "2026-08-05",
+          "costo_usd": 8.38,
+          "nota": "Ricorrenza con severita' nuova: 4 rientri same-day (contro 2 il 08-03 e 3 il 08-04) e per la prima volta uno stesso simbolo venduto e ricomprato DUE volte nella stessa sessione. BP: SELL 15:52 a 41.64 (trade 285, chiusura di una posizione dal 07-10) -> BUY 16:07 a 41.761739 (trade 657) -> SELL 17:52 a 41.63 -> BUY 18:07 a 41.74 (trade 658) -> SELL 19:52 a 41.24. PLTR: SELL 14:22 a 160.27 (trade 652) -> BUY 15:37 a 159.87 (trade 656) -> SELL 19:52 a 158.72. SNOW: BUY 14:22 -> SELL 16:07 a 317.83 (trade 653) -> BUY 19:07 a 319.014 (trade 660, ancora aperta). Costo con lo stesso metodo delle occorrenze precedenti (sola penalita' di rientro a prezzi di fill reali dal DB, piu' i costi di transazione del rientro): BP-1 22.994*(41.761739-41.64)=2.80 + 1.97 di cost_usd; BP-2 23.061*(41.74-41.63)=2.54 + 1.97; PLTR 10.369*(159.87-160.27)=-4.15 (rientro favorevole) + 0.92; SNOW 1.728*(319.014-317.83)=2.05 + 0.28. Totale 8.38 $. Due strategie coinvolte: BP e SNOW sono S1 (ranking momentum ricalcolato ogni 15 min), PLTR e' S4 (nessuna banda fra gate d'ingresso 0.30 e uscita 0). NON include il costo d'uscita anticipata di DIS, gia' contato in F-008: nessun doppio conteggio. Fatto collaterale: tutte e cinque le uscite in perdita della giornata sono trade aperti e chiusi lo stesso giorno, mentre le quattro migliori sono posizioni tenute overnight.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-05.md §7"
         }
       ],
-      "costo_cumulato_usd": 18.19,
+      "costo_cumulato_usd": 26.57,
       "occorrenze_non_stimate": 0,
       "stato": "aperto",
       "issue": null
@@ -500,10 +536,16 @@
           "costo_usd": null,
           "nota": "Ricorrenza misurata sullo stesso giorno da un'altra angolazione: latenza di ingestione news mediana 105.8 min e massima 121.4 min contro una finestra MAX_NEWS_AGE_HOURS di 120 min, cioe' l'88% della finestra gia' consumato all'arrivo e la coda oltre la scadenza. Effetto sui cicli: il gate di entry-freshness ha scartato 26-32 segnali per ciclo su tutti e 24 i cicli. In piu' 273 articoli sono stati scartati in coda (news_queue_drops) con eta' media 8.7h. Costo_usd null per non doppio-conteggiare: la stessa giornata e' gia' costata 2.37 $ nell'occorrenza registrata da ALPHA_MISS_REPORT_2026-08-04.md.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-04.md section 10 [DAY-007]"
+        },
+        {
+          "data": "2026-08-05",
+          "costo_usd": null,
+          "nota": "Ricorrenza: la latenza non migliora. Mediana 100.2 min per alpaca_benzinga (n=77, media 93.9, max 120.1) e 90.8 min per gdelt_gkg (n=117, media 91.6, max 106.4) contro MAX_NEWS_AGE_HOURS=120 min, cioe' 83% e 76% della finestra gia' consumati alla nascita del segnale; 1 articolo su 77 e' gia' scaduto quando viene scorato. Il gate ha agito su tutti e 24 i cicli della giornata ('S4: dropped 30 signal(s) below entry-freshness (news_age_hours=2.0)' e varianti a 31). Serie a quattro giorni, sempre dello stesso ordine di grandezza del gate: 07-31 ~91/102 min, 08-03 ~80/74, 08-04 ~102/97, 08-05 ~100/91. Misura di dettaglio: sui 13 articoli LLY tracciati riga per riga la latenza published_at->fetched_at va da 76 a 107 minuti. COSTO NULL e non 0.0: oggi nessun segnale sopra gate su un simbolo non-detenuto e' stato scartato per sola freschezza, quindi non c'e' un'istanza prezzabile - ma questo non dimostra che il gate sia stato innocuo, solo che non e' isolabile su questa giornata.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-05.md §7"
         }
       ],
       "costo_cumulato_usd": 2.37,
-      "occorrenze_non_stimate": 1,
+      "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
     },
@@ -519,10 +561,16 @@
           "costo_usd": 60.5,
           "nota": "Tutte e 20 le righe news_log attribuite a MS e tutte e 8 quelle attribuite a GS il 2026-08-04 provengono da gdelt_gkg con extraction_method='org_lookup' e riguardano societa' terze: 'Energizer (NYSE:ENR) Releases Earnings Results, Misses Expectations By $0.08 EPS', 'Sysco (NYSE:SYY) Releases Q1 2027 Earnings Guidance', 'AON (NYSE:AON) Stock Price Expected to Rise, Keefe Bruyette & Woods Analyst Says', 'Apollo Global Management Issues Earnings Results', 'Jeff Bezos Filed To Sell Billions Worth Of Amazon Stock'. Meccanismo: gli aggregatori tipo tickerreport/marketbeat citano la banca come casa di analisi e org_lookup la risolve nel ticker della banca stessa. L'articolo su Energizer ha prodotto per MS (news_log 6440 -> sentiment_signals 6440) un sentiment di -0.325, sopra il gate 0.30 in valore assoluto. Su ~78 righe org_lookup della giornata ~32 (41%) sono attribuzioni false di questo tipo. E' l'errore che CLAUDE.md definisce il peggiore possibile. Nessun ordine ne e' nato il 08-04 perche' S4 e' long-only e il segnale era negativo, ma MS e' una posizione aperta del book (legacy 07-10) e il percorso di uscita per contro-segnale consuma segnali negativi. Costo congetturale sul controfattuale 'la reversal fosse scattata': size S4 tipica 2200 $ x il +2.75% che MS ha fatto nella giornata = 60.50 $. E' un limite superiore condizionato a un evento che non si e' verificato. NUOVO ID e non aggancio a F-012 (fan-out multi-ticker) perche' il meccanismo e la remediation sono diversi: qui l'articolo e' mono-ticker e l'attribuzione e' semplicemente FALSA (resolver/org_lookup), la' l'attribuzione e' corretta ma diluita (peso del fan-out). Tenerli insieme renderebbe impossibile misurare separatamente le due correzioni.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-04.md section 10 [DAY-001]"
+        },
+        {
+          "data": "2026-08-05",
+          "costo_usd": null,
+          "nota": "Ricorrenza in peggioramento: oggi org_lookup sui ticker bancari e' il PRIMO produttore di righe della watchlist. MS ha 33 articoli, il ticker piu' coperto della giornata, e riguardano SunocoCorp (NYSE:SUNC), Sysco (NYSE:SYY), SBA Communications (NASDAQ:SBAC), Macerich (NYSE:MAC), Pinterest (NYSE:PINS), AMETEK (NYSE:AME), Mettler-Toledo (NYSE:MTD), Mitsubishi UBE Cement, Shopify, Best Buy/Bristol Myers, piu' due avvisi societari su un ISIN ('ISM - MSBV - ISSUER CALL - XS2877627559', id 6521 e 6522). Con GS (13 righe) e DB (5) fanno 51 righe su 194 (26%) della copertura giornaliera concentrate su tre ticker bancari, tutte via org_lookup, e generano 51 righe in sentiment_signals (range -0.180...+0.150). Costo null: nessuna di queste righe ha superato il gate 0.300 oggi, quindi nessun ordine ne e' nato. Effetto collaterale che tocca F-001: la copertura news apparente e' gonfiata - dei 46 ticker con almeno una riga, escludendo MS/GS/DB ne restano 43, contro 51 simboli della watchlist a copertura zero.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-05.md §7"
         }
       ],
       "costo_cumulato_usd": 60.5,
-      "occorrenze_non_stimate": 0,
+      "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
     },
@@ -576,6 +624,12 @@
           "costo_usd": 6.86,
           "nota": "pg_store.py:2305 (fetch_signals_for_cycle: 'Fetch one signal per symbol... the most recent ensemble signal is preferred... among same-status signals the most recent wins') e ranking.py:171-174 (_filter_and_deduplicate: if prev is None or sig.generated_at > prev.generated_at). La selezione e' 'l'ultimo per simbolo', non il massimo ne' una media pesata. Poiche' lo stesso evento genera piu' articoli scorati in sequenza a pochi secondi, un pezzo generico che arriva dopo cancella la lettura forte. Casi misurati il 2026-08-04 (segnale ensemble >=0.30 seguito da uno <0.30 prima del ciclo successivo): 15, di cui quattro a meno di 30 secondi - CAT 6486 +0.6484 alle 19:45:37 sovrascritto da 6488 +0.0125 alle 19:45:47 (10 secondi), ARM +0.626 -> +0.008 in 16 s, GOOGL +0.333 -> +0.009 in 21 s. Verificato a valle: la riga execution_decisions delle 19:52:09 su CAT porta signal_score 0.012522 e reason 'score 0.013 < feedback threshold 0.300'. Su CAT il fenomeno si ripete sei volte nella stessa giornata e il titolo ha chiuso +5.54% senza mai raggiungere il ranking S4. Costo reale basso perche' quasi tutti i simboli colpiti erano gia' in portafoglio (il pyramiding guard avrebbe comunque bloccato l'ordine); l'unico non detenuto e' NVDA, +0.397 alle 16:45:44 sovrascritto da +0.070 alle 17:00:46 quindi mai valutato al ciclo 17:07: da 211.30 (17:07) a 211.96 di chiusura = +0.31% su size S4 tipica 2200 $ = 6.86 $. Il prezzo della giornata e' modesto, il meccanismo no: finche' e' attivo, l'evidenza su 'S4 reagisce alle notizie forti?' misura in realta' 'S4 reagisce all'ultima notizia arrivata'.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-04.md section 10 [DAY-016]"
+        },
+        {
+          "data": "2026-08-05",
+          "costo_usd": 0.0,
+          "nota": "Ricorrenza sull'evento piu' informativo della giornata. LLY (+4.86%, mover #1): sentiment_signals 6563 alle 16:30:46 score +0.618 da 'Lilly Reports Strong Q2 2026 Results, Raises Full-Year Guidance' viene sostituito da 6578 alle 16:46:27 score +0.013 da 'CVS Targets Affordable GLP-1 Access With New Eli Lilly Deal', e la decisione delle 16:52 (id 6794) porta 'score 0.013 < feedback threshold 0.300'. Stesso schema alle 17:45: 6616 +0.747 (il segnale piu' forte della giornata, da \"Eli Lilly's Weight-Loss Empire Keeps Expanding As Mounjaro, Zepbound Generate Nearly $15 Billion\") seguito 11 secondi dopo da 6618 +0.450. In tutta la giornata LLY produce 8 segnali ensemble fra +0.45 e +0.747, e OGNI riga di execution_decisions del giorno porta 0.051, 0.013 o 0.000 (id 6587, 6595, 6615, 6632, 6654, 6663, 6686, 6794, 6814, 6835, 6858, 6988, 7013, 7034, 7054). COSTO 0.0 (non null): il controfattuale e' stato calcolato ed e' nullo - LLY era gia' in book come posizione S1 dal 07-15 (trade 337, 0.690 az.) e il guard P0-05 no-pyramiding ha bloccato esplicitamente il BUY a ogni ciclo (log worker 14:07:12, 14:22:09, 14:37:10, 14:52:07, ...: 'P0-05: skipping BUY decision for LLY - already has an open trade'). Stessa dinamica di ARM e CAT il 08-04: il difetto di selezione e' reale e documentato ma non ha impedito alcun ordine.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-05.md §7"
         }
       ],
       "costo_cumulato_usd": 6.86,
