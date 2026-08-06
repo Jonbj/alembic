@@ -41,6 +41,15 @@ Ogni eccezione applicata va annotata qui con data, motivo e commit.
 | 2026-08-01 | Script deterministico di precalcolo per il report alpha-miner (`scripts/alpha_miner_dossier.py`, fase 2) | Senza precalcolo i numeri della roadmap pesata sono ri-derivati ogni mattina da un LLM diverso, e la sessione rischia il timeout silenzioso che farebbe fallire l'osservazione stessa. È strumentazione, non un difetto di correttezza: quindi deroga. | nessuno: deroga registrata in anticipo, fase 2 non ancora rilasciata |
 | 2026-08-04 | Conversione di `costo_usd` da `0.0` a `null` sulle 7 occorrenze già scritte, più il campo `occorrenze_non_stimate` | Il prompt dei cron non chiedeva di stimare il costo, quindi le sessioni scrivevano `0.0`. Ma le soglie di questa carta sono in dollari: con tutte le occorrenze a zero **nessuna evidenza avrebbe mai attraversato una soglia**, e la roadmap pesata del 28/09 sarebbe uscita vuota per un difetto dello strumento, non per assenza di evidenza. Passa il test di esenzione: se non lo correggo, l'evidenza raccolta è sbagliata. Unica modifica retroattiva ammessa su `findings.json`. | commit del 2026-08-04 |
 | 2026-08-01 | Riscrittura retroattiva di `market_daily.jsonl` all'innesto della fase 2 | Le righe scritte prima dell'innesto sono calcolate dalla sessione, quelle successive dallo script: lo script le ricalcola tutte perché la serie abbia una sola provenienza. Unica eccezione ammessa al "solo append"; **non si applica mai a `findings.json`**. | nessuno: deroga registrata in anticipo, fase 2 non ancora rilasciata |
+| 2026-08-06 | Il path live rispetta `rebalance_frequency` (#185) | S1 dichiara `MONTHLY`, il backtest la rispetta, il live ribilancia **ogni 15 minuti**. La domanda di uscita n.2 chiede se S1 abbia un edge: senza la correzione, i 40 giorni misurerebbero un oggetto diverso da quello della domanda, e dai dati stessi non ci sarebbe modo di accorgersene. Stesso profilo del gate S4 disarmato (#163). **Perimetro:** solo l'allineamento alla frequenza già dichiarata; `signal_threshold` e qualunque banda morta parametrica restano congelati. | vedi #185 |
+| 2026-08-06 | Alert sulle posizioni non proteggibili (#161) | Le 13 posizioni sotto 1 azione non possono avere stop e contengono tutto il rosso del libro (−$452 contro +$660). La condizione di revisione scritta in `config/trading.yaml:180-182` si è verificata su quattro di esse e nessuno se n'è accorto perché niente la sorvegliava. È **strumentazione**: non cambia cosa compriamo né con che size, quindi non è propriamente una deroga — registrata qui per tracciabilità. La correzione strutturale (size minima ≥ 1 azione) è **taratura** e resta al 28/09. | vedi #161 |
+
+### Discontinuità nella serie osservata
+
+La deroga #185 introduce una discontinuità: le evidenze su S1 raccolte dal 2026-08-03 alla data del
+deploy **non sono confrontabili** con quelle successive. Alla sintesi del giorno 40 le due parti
+vanno trattate separatamente, non mediate. Questa riga esiste perché fra sette settimane nessuno se
+ne ricorderebbe.
 
 ## Soglie: cosa guadagna diritto a lavoro alla scadenza
 

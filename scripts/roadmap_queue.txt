@@ -1,0 +1,36 @@
+# Coda della roadmap lavorabile durante il freeze di osservazione (#171).
+#
+# Letta dall'alto verso il basso da scripts/roadmap_agent_loop.sh: ogni run prende
+# la PRIMA issue ancora aperta, con label `freeze-ok`, e senza PR aperta.
+#
+# Questo file e' meta' del lucchetto. L'altra meta' e' la label `freeze-ok` su
+# GitHub. Una issue viene lavorata solo se compare in ENTRAMBI: la coda dice
+# l'ordine, la label dice il permesso. L'agente in loop non puo' modificare ne'
+# l'uno ne' l'altra — se lo facesse, deciderebbe da solo il proprio perimetro,
+# che e' esattamente cio' che questo impianto esiste per impedire.
+#
+# Ordine: prima cio' che corrompe l'evidenza mentre la raccogliamo, poi cio' che
+# serve alle decisioni di settembre, poi sicurezza e CI, poi il resto.
+#
+# Aggiornare l'ordine e' una decisione dell'operatore, non dell'agente.
+
+184  exit_mechanism dedotto dall'eta' del segnale: etichetta MALE le righe che stiamo raccogliendo adesso
+185  rebalance_frequency ignorata dal live: deroga approvata, corrompe l'evidenza S1 a ogni ciclo
+161  alert posizioni non proteggibili: perimetro ristretto alla sola sorveglianza (vedi commento sull'issue)
+180  IC di S4 ricorrente: alimenta la decisione #179, che ora ha una soglia pre-registrata
+176  backtest S4 non rappresentativo: il fallback sintetico silenzioso invalida ogni misura di backtest
+151  segnali solo-fallback scartati senza riga in execution_decisions: buco nella catena decisionale
+186  peso S4 azzerato con segnale preservato, sopra soglia e nei top-5
+123  trades.signal_score senza signal_id corrispondente
+177  dead config: from_yaml di S1/S3 non ha call site
+181  overlap S1 intersezione S4: misura che serve a decidere #182
+42   kill-switch resume non ripristina mode
+41   frontend XSS: DOMPurify + CSP + token storage
+43   rate limiting + CORS
+152  test dipendente da reports/ gitignored: non passa in CI ne' in un clone fresco
+50   frontend lint + test base
+54   QX-01: migration schema 2-annotator + kappa harness + sampler
+178  pulizia audit strategie: note stale, health_check no-op, milestone incoerente
+39   S2-1: Source P&L Funnel completion
+57   S2 VRP: fattibilita' strumento quotato, IBKR e dati
+37   Vettore A: earnings chain, Phase 0 discovery
