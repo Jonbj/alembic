@@ -21,10 +21,10 @@ def _make_registry(entry: StrategyEntry) -> StrategyRegistry:
     return reg
 
 
-def _make_market() -> MarketSnapshot:
+def _make_market(price: float = 150.0) -> MarketSnapshot:
     return MarketSnapshot(
         timestamp=datetime(2025, 6, 2, tzinfo=timezone.utc),
-        prices={"AAPL": 150.0},
+        prices={"AAPL": price},
         volumes={"AAPL": 1_000_000.0},
         adv_20d={"AAPL": 1_000_000.0},
     )
@@ -131,3 +131,102 @@ def test_orchestrator_calls_mark_rebalanced_after_compute():
 
     assert len(strategy.marked_ts) == 1
     assert strategy.marked_ts[0] == ts
+
+
+# ── #185: hold semantics while the rebalance gate is closed ───────────────────
+#
+# A blocked sleeve used to contribute {} to the merge, and the orchestrator reads
+# "symbol absent from merged_weights" as "sell the whole position". Enforcing the
+# declared cadence without these tests would liquidate the S1 book on the first
+# gated cycle instead of holding it.
+
+
+def _gated_setup(weights, allocation_pct=0.5, held_qty=None, price=150.0):
+    """Build (orchestrator, portfolio, market) for a strategy with a closed gate."""
+    strategy = _GatedStrategy(weights)
+    strategy._allow_rebalance = False
+    entry = StrategyEntry(
+        strategy_id="S1",
+        strategy_class=_GatedStrategy,
+        allocation_pct=allocation_pct,
+        schedule="30 14 * * 1-5",
+        enabled=True,
+    )
+    orc = PortfolioOrchestrator(
+        registry=_make_registry(entry),
+        strategy_instances={"S1": strategy},
+        constraint_enforcer=ConstraintEnforcer(),
+    )
+    portfolio = VirtualPortfolio(initial_cash=100_000.0)
+    if held_qty:
+        portfolio.load_position("AAPL", held_qty, price)
+    return strategy, orc, portfolio, _make_market(price)
+
+
+def test_blocked_gate_does_not_liquidate_the_held_book():
+    """The whole point of #185: no s1_weight_drop SELL between two rebalances."""
+    _, orc, portfolio, market = _gated_setup({"AAPL": 1.0}, held_qty=100.0)
+
+    result = orc.run_cycle(
+        datetime(2025, 6, 20, tzinfo=timezone.utc),
+        _make_data_replay(), portfolio, market,
+        last_target_weights={"S1": {"AAPL": 1.0}},
+    )
+
+    assert result.final_orders == []
+    assert "S1" in result.rebalance_skipped
+
+
+def test_blocked_gate_does_not_drift_trim_after_a_price_move():
+    """Holding means holding: a price move must not trigger a rebalance order."""
+    # Position loaded at 150, marked at 180 — a 20% drift against a frozen 1.2%
+    # target is far outside the orchestrator's 2% delta band.
+    _, orc, portfolio, _ = _gated_setup({"AAPL": 1.0}, held_qty=100.0)
+    market = _make_market(price=180.0)
+
+    result = orc.run_cycle(
+        datetime(2025, 6, 20, tzinfo=timezone.utc),
+        _make_data_replay(), portfolio, market,
+        last_target_weights={"S1": {"AAPL": 0.012}},
+    )
+
+    assert result.final_orders == []
+
+
+def test_blocked_gate_does_not_re_enter_a_symbol_it_no_longer_holds():
+    """A stop-out inside the window must not be undone by the frozen target."""
+    _, orc, portfolio, market = _gated_setup({"AAPL": 1.0}, held_qty=None)
+
+    result = orc.run_cycle(
+        datetime(2025, 6, 20, tzinfo=timezone.utc),
+        _make_data_replay(), portfolio, market,
+        last_target_weights={"S1": {"AAPL": 1.0}},
+    )
+
+    assert result.final_orders == []
+
+
+def test_open_gate_publishes_the_computed_weights_for_persistence():
+    """The scheduler persists these to seed the next cycle's frozen target."""
+    strategy = _GatedStrategy({"AAPL": 0.4})
+    strategy._allow_rebalance = True
+    entry = StrategyEntry(
+        strategy_id="S1",
+        strategy_class=_GatedStrategy,
+        allocation_pct=0.5,
+        schedule="30 14 * * 1-5",
+        enabled=True,
+    )
+    orc = PortfolioOrchestrator(
+        registry=_make_registry(entry),
+        strategy_instances={"S1": strategy},
+        constraint_enforcer=ConstraintEnforcer(),
+    )
+
+    result = orc.run_cycle(
+        datetime(2025, 6, 2, tzinfo=timezone.utc),
+        _make_data_replay(), VirtualPortfolio(initial_cash=100_000.0), _make_market(),
+    )
+
+    assert result.target_weights_per_strategy == {"S1": {"AAPL": 0.4}}
+    assert result.rebalance_skipped == []
