@@ -63,3 +63,15 @@ logs/
 /mobile/android/app/google-services.json
 /mobile/android/app/src/debug/google-services.json
 /mobile/android/app/src/release/google-services.json
+
+# Android SDK / Gradle cache / JDK scaricati in locale (~5 GB). Ricostruibili,
+# specifici della macchina, mai da versionare.
+/.android-toolchain/
+
+# Skill Claude Code installate da sorgenti esterne: sono una dipendenza,
+# ricostruibile da skills-lock.json (che invece e' versionato).
+/.claude/skills/
+/.agents/
+
+# Lock di sessione riscritto a ogni avvio: churn puro, non stato del progetto.
+.claude/scheduled_tasks.lock
