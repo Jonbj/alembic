@@ -454,8 +454,14 @@ def _format_feedback_stall_section(redis: "RedisStore") -> str:
     if is_elevated:
         wins_needed = max(0, recovery_win_streak - consecutive_wins)
         # Fraction of signal space filtered: signals between baseline and current
-        # threshold are blocked. Rough proxy: (current - baseline) / (max - baseline)
-        signal_filter_pct = (current_threshold - baseline) / (threshold_max - baseline) * 100
+        # threshold are blocked. Rough proxy: (current - baseline) / (max - baseline).
+        # #191: when the ratchet is frozen at the baseline (threshold_max ==
+        # threshold_baseline) the denominator is zero — saturate at 100% instead
+        # of crashing the weekly Telegram report.
+        if threshold_max > baseline:
+            signal_filter_pct = (current_threshold - baseline) / (threshold_max - baseline) * 100
+        else:
+            signal_filter_pct = 100.0
         stall_status = (
             f"🔴 ELEVATED: {current_threshold:.2f} (baseline {baseline:.2f})\n"
             f"~{signal_filter_pct:.0f}% of marginal signals suppressed | "
@@ -1726,6 +1732,12 @@ def _load_loss_feedback_config() -> dict:
         "threshold_step": 0.05,
         "threshold_max": 0.60,
         "threshold_baseline": 0.30,
+        # #191: ceiling for the ratchet. When False, the loss-feedback run keeps
+        # the threshold at the baseline (no step up) — used during observation
+        # windows where the lever must be measured, not auto-adjusted. True is
+        # the historical default (back-compat). Threshold step, cooldown, decay,
+        # and the regime_scale branch are NOT touched by this flag.
+        "threshold_ratchet_enabled": True,
         "threshold_decay_hours": 24,        # auto-decay threshold if no trigger
         "regime_scale_factor": 0.80,
         "regime_min_scale": 0.20,
@@ -1970,6 +1982,20 @@ def run_loss_feedback_check() -> dict:
                 "Loss feedback stale-evidence guard for %s: evidence trade id %d unchanged since last "
                 "adjustment — skipping re-ratchet",
                 strategy, evidence_id,
+            )
+
+        elif outcome.triggered and cooldown_ok and not cfg.get("threshold_ratchet_enabled", True):
+            # #191: ratchet frozen — keep the entry threshold at baseline. The
+            # scale branch and the stale-evidence guard stay live; only the
+            # upward step on `current_threshold` is suppressed. Logged so the
+            # weekly report and the Telegram feed show the freeze instead of
+            # silently doing nothing.
+            s_result["ratchet_frozen"] = True
+            log.info(
+                "Loss feedback ratchet frozen for %s: triggered (EWMA R %.2f, %d losses) "
+                "but threshold_ratchet_enabled=False — threshold stays at baseline %.2f",
+                strategy, outcome.ewma_r, outcome.consecutive_losses,
+                cfg["threshold_baseline"],
             )
 
         elif outcome.triggered and cooldown_ok:

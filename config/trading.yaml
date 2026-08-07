@@ -313,6 +313,15 @@ loss_feedback:
   threshold_step: 0.05           # amount to raise ENTRY_THRESHOLD per trigger
   threshold_max: 0.60            # ceiling for raised threshold
   threshold_baseline: 0.30       # baseline to recover toward
+  # #191: ceiling for the ratchet. False keeps the threshold at the baseline
+  # for the whole loss-feedback run — used during observation windows where
+  # the lever must be measured, not auto-adjusted. Shipping default is true
+  # (back-compat); the observation window (#171) will need an operator-driven
+  # flip plus a worker redeploy because trading.yaml is baked in the image.
+  # Perimetro: solo il ramo di innalzamento del threshold; threshold_step,
+  # consecutive_loss_trigger, threshold_decay_hours, regime_scale_factor e il
+  # ramo regime_scale restano invariati.
+  threshold_ratchet_enabled: true
   # 2026-07-09: auto-decay the raised gate every 24h without a new trigger, so a
   # transient loss does not keep the threshold stuck near 0.55 forever.
   threshold_decay_hours: 24
