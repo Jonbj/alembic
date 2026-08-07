@@ -37,7 +37,7 @@ def _forward_returns(client, symbol: str, published_at) -> dict:
     """Return {1h, 1d, 2d} close-to-close forward returns from published_at."""
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
-    from alpaca.data.enums import DataFeed
+    from alpaca.data.enums import Adjustment, DataFeed
 
     out: dict[str, float | None] = {"1h": None, "1d": None, "2d": None}
     try:
@@ -46,6 +46,7 @@ def _forward_returns(client, symbol: str, published_at) -> dict:
             symbol_or_symbols=symbol, timeframe=TimeFrame.Day,
             start=published_at - timedelta(days=1), end=published_at + timedelta(days=6),
             feed=DataFeed.IEX,
+            adjustment=Adjustment.ALL,
         )
         dbars = client.get_stock_bars(dreq).data.get(symbol, [])
         after = [b for b in dbars if b.timestamp >= published_at]
@@ -60,6 +61,7 @@ def _forward_returns(client, symbol: str, published_at) -> dict:
         mreq = StockBarsRequest(
             symbol_or_symbols=symbol, timeframe=TimeFrame.Minute,
             start=published_at, end=published_at + timedelta(hours=3), feed=DataFeed.IEX,
+            adjustment=Adjustment.ALL,
         )
         mbars = client.get_stock_bars(mreq).data.get(symbol, [])
         after = [b for b in mbars if b.timestamp >= published_at]

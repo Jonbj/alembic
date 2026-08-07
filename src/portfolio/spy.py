@@ -53,6 +53,7 @@ def fetch_spy_closes(
     if cached is not None:
         return cached
     try:
+        from alpaca.data.enums import Adjustment
         from alpaca.data.historical import StockHistoricalDataClient
         from alpaca.data.requests import StockBarsRequest
         from alpaca.data.timeframe import TimeFrame
@@ -86,6 +87,7 @@ def fetch_spy_closes(
                     59,
                     tzinfo=timezone.utc,
                 ),
+                adjustment=Adjustment.ALL,
             )
         )
         closes = {
