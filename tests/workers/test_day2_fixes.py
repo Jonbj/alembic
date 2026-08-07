@@ -277,12 +277,19 @@ class TestReasonForZeroWeightSell:
     """
 
     def test_expired_signal_includes_age_in_reason(self):
-        """Core case: stale signal → reason must mention expiry and age."""
+        """Core case: stale signal DISCARDED for age → reason mentions expiry and age.
+
+        #184: "expired" is now claimed only when the cycle says it discarded the
+        signal for age (disposition STALE_DROPPED), never inferred from the clock.
+        """
+        from src.portfolio.exit_classification import STALE_DROPPED
         from src.workers.portfolio_scheduler import _reason_for_zero_weight_sell
 
         gen_at = datetime.now(timezone.utc) - timedelta(hours=20.3)
         last_signal = {"generated_at": gen_at, "score": 0.60}
-        reason = _reason_for_zero_weight_sell("CAT", last_signal, max_age_hours=4)
+        reason = _reason_for_zero_weight_sell(
+            "CAT", last_signal, max_age_hours=4, disposition=STALE_DROPPED
+        )
 
         assert "expired" in reason.lower() or "expir" in reason.lower(), (
             "Reason must mention signal expiry when signal is older than max_age_hours"
@@ -344,8 +351,11 @@ class TestReasonForZeroWeightSell:
 class TestClassifyZeroWeightExit:
     """_classify_zero_weight_exit() — structured tag alongside the free-text reason.
 
-    #60: 3 buckets (no_signal / expired / whipsaw) so #61's anti-whipsaw
-    measurement doesn't need to parse free text.
+    #60: buckets so #61's anti-whipsaw measurement doesn't need to parse free text.
+    #184: the bucket comes from the disposition the cycle recorded for the signal,
+    so these tests pass one. The age-only variants are gone: they encoded the very
+    inference that mislabelled the 2026-08-05 exits — see
+    tests/workers/test_exit_mechanism_observed.py.
     """
 
     def test_no_signal_returns_no_signal_mechanism(self):
@@ -356,35 +366,42 @@ class TestClassifyZeroWeightExit:
         assert mechanism == "no_signal"
 
     def test_stale_signal_returns_expired_mechanism(self):
+        from src.portfolio.exit_classification import STALE_DROPPED
         from src.workers.portfolio_scheduler import _classify_zero_weight_exit
 
         gen_at = datetime.now(timezone.utc) - timedelta(hours=20.3)
         mechanism = _classify_zero_weight_exit(
-            {"generated_at": gen_at, "score": 0.60}, max_age_hours=4
+            {"generated_at": gen_at, "score": 0.60}, max_age_hours=4,
+            disposition=STALE_DROPPED,
         )
 
         assert mechanism == "expired"
 
     def test_fresh_weak_signal_returns_whipsaw_mechanism(self):
+        from src.portfolio.exit_classification import FRESH
         from src.workers.portfolio_scheduler import _classify_zero_weight_exit
 
         gen_at = datetime.now(timezone.utc) - timedelta(hours=1.0)
         mechanism = _classify_zero_weight_exit(
-            {"generated_at": gen_at, "score": 0.05}, max_age_hours=4
+            {"generated_at": gen_at, "score": 0.05}, max_age_hours=4, disposition=FRESH
         )
 
         assert mechanism == "whipsaw"
 
-    def test_boundary_age_just_under_max_is_not_expired(self):
-        """age_h > max_age_hours (strict) — matches _reason_for_zero_weight_sell's own boundary."""
+    def test_age_alone_never_decides_the_mechanism(self):
+        """#184: the max_age boundary lives in _filter_stale_signals, not here.
+
+        Same 20h-old signal, two dispositions, two labels — the clock contributes
+        nothing.
+        """
+        from src.portfolio.exit_classification import FRESH, STALE_DROPPED
         from src.workers.portfolio_scheduler import _classify_zero_weight_exit
 
-        gen_at = datetime.now(timezone.utc) - timedelta(hours=3.999)
-        mechanism = _classify_zero_weight_exit(
-            {"generated_at": gen_at, "score": 0.10}, max_age_hours=4
-        )
+        old = {"generated_at": datetime.now(timezone.utc) - timedelta(hours=20.3),
+               "score": 0.10}
 
-        assert mechanism == "whipsaw"
+        assert _classify_zero_weight_exit(old, 4, disposition=STALE_DROPPED) == "expired"
+        assert _classify_zero_weight_exit(old, 4, disposition=FRESH) == "whipsaw"
 
 
 class TestReasonForZeroWeightSellTags:
@@ -398,21 +415,25 @@ class TestReasonForZeroWeightSellTags:
         assert reason.startswith("[no_signal]")
 
     def test_expired_reason_tagged(self):
+        from src.portfolio.exit_classification import STALE_DROPPED
         from src.workers.portfolio_scheduler import _reason_for_zero_weight_sell
 
         gen_at = datetime.now(timezone.utc) - timedelta(hours=20.3)
         reason = _reason_for_zero_weight_sell(
-            "CAT", {"generated_at": gen_at, "score": 0.60}, max_age_hours=4
+            "CAT", {"generated_at": gen_at, "score": 0.60}, max_age_hours=4,
+            disposition=STALE_DROPPED,
         )
 
         assert reason.startswith("[expired]")
 
     def test_whipsaw_reason_tagged(self):
+        from src.portfolio.exit_classification import FRESH
         from src.workers.portfolio_scheduler import _reason_for_zero_weight_sell
 
         gen_at = datetime.now(timezone.utc) - timedelta(hours=1.0)
         reason = _reason_for_zero_weight_sell(
-            "AAPL", {"generated_at": gen_at, "score": 0.05}, max_age_hours=4
+            "AAPL", {"generated_at": gen_at, "score": 0.05}, max_age_hours=4,
+            disposition=FRESH,
         )
 
         assert reason.startswith("[whipsaw]")

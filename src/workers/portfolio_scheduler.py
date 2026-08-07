@@ -22,6 +22,18 @@ from typing import Any
 from uuid import uuid4
 
 from src.notifications.base import AlertLevel
+from src.portfolio.exit_classification import (
+    BELOW_ENTRY_GATE,
+    ENTRY_FRESHNESS_FILTERED,
+    FALLBACK_FILTERED,
+    FRESH,
+    MECHANISM_NO_SIGNAL,
+    MECHANISM_UNKNOWN,
+    STALE_DROPPED,
+    STALE_PRESERVED,
+    describe_disposition,
+    mechanism_for_disposition,
+)
 from src.portfolio.whipsaw_damping import evaluate_whipsaw_damping
 from src.workers.celery_app import app
 
@@ -580,25 +592,31 @@ def _preserve_stale_signals_for_open_positions(
 def _classify_zero_weight_exit(
     last_signal: dict | None,
     max_age_hours: int,
+    disposition: str | None = None,
 ) -> str:
-    """Classify why a weight-0 S4 SELL happened: "no_signal" | "expired" | "whipsaw".
+    """Classify why a weight-0 S4 SELL happened, from what the cycle DID to the signal.
 
-    #60: a structured tag alongside the free-text reason (`_reason_for_zero_weight_sell`)
-    so downstream measurement (#61 anti-whipsaw damping) doesn't need to parse free
-    text to tell the 3 cases apart. Same boundary rule as the reason text: age strictly
-    greater than max_age_hours is "expired", otherwise a fresh-but-weak signal is
-    "whipsaw".
+    #60 introduced the structured tag alongside the free-text reason
+    (`_reason_for_zero_weight_sell`) so downstream measurement (#61 anti-whipsaw
+    damping) doesn't need to parse free text. #184: it derived that tag from the
+    AGE of the last signal row in the DB, which reads as a fact and is a guess —
+    signals FIX-D had explicitly re-admitted came out labelled "expired"
+    (MCD/NVO/PFE/PLTR, 2026-08-05).
+
+    `disposition` is what the S4 pipeline observably did to the signal this cycle
+    (src/portfolio/exit_classification.py). When it is absent the cycle recorded
+    nothing about this symbol, and the answer is "unknown" — never the clock.
 
     Args:
         last_signal: dict with "generated_at" (datetime) and "score" (float), or None.
-        max_age_hours: S4 max_signal_age_hours threshold (default 4).
+        max_age_hours: S4 max_signal_age_hours threshold (kept for the reason text).
+        disposition: observed disposition of the S4 signal this cycle, or None.
     """
+    if disposition is not None:
+        return mechanism_for_disposition(disposition)
     if last_signal is None:
-        return "no_signal"
-    from datetime import datetime as _dt, timezone as _tz
-    now_utc = _dt.now(_tz.utc)
-    age_h = (now_utc - last_signal["generated_at"]).total_seconds() / 3600
-    return "expired" if age_h > max_age_hours else "whipsaw"
+        return MECHANISM_NO_SIGNAL
+    return MECHANISM_UNKNOWN
 
 
 def _reason_and_mechanism_for_non_s4_weight_drop(
@@ -625,49 +643,60 @@ def _reason_and_mechanism_for_non_s4_weight_drop(
     return exit_mechanism, reason
 
 
+def _last_signal_clause(last_signal: dict | None, max_age_hours: int) -> str:
+    """Age/score/timestamp of the last known signal, as a parenthetical clause.
+
+    Purely descriptive: #184 removed every classification decision from the age,
+    but the age is still the most useful thing to read in the Decision Log.
+    """
+    if last_signal is None:
+        return "no signal row found in the last 48h"
+    from datetime import datetime as _dt, timezone as _tz
+    age_h = (_dt.now(_tz.utc) - last_signal["generated_at"]).total_seconds() / 3600
+    gen_str = last_signal["generated_at"].strftime("%Y-%m-%d %H:%M UTC")
+    return (
+        f"age={age_h:.1f}h vs max_age={max_age_hours}h, generated {gen_str}, "
+        f"score={last_signal.get('score', 0.0):+.3f}"
+    )
+
+
 def _reason_for_zero_weight_sell(
     symbol: str,
     last_signal: dict | None,
     max_age_hours: int,
+    disposition: str | None = None,
 ) -> str:
     """Return an informative decision-log reason for a SELL order with weight 0.0%.
 
     FIX-F (Day 3): "Portfolio rebalance: weight 0.0%" gave no indication of why the
-    weight dropped to zero. For stale-signal SELLs (CAT/TSM on 2026-06-25) the true
-    cause is signal expiry overnight — visible here as age > max_age_hours — not an
-    operator rebalance or a counter-signal.
+    weight dropped to zero.
 
     #60: each branch is prefixed with the same tag `_classify_zero_weight_exit`
-    returns ("[no_signal]" / "[expired]" / "[whipsaw]"), so the reason text and the
-    structured `exit_mechanism` column always agree.
+    returns, so the reason text and the structured `exit_mechanism` column always
+    agree.
+
+    #184: the text now states the observed disposition instead of narrating an
+    expiry inferred from the clock. The old "[expired] ... no counter-signal found,
+    position closed" wording was doubly wrong on preserved signals: it named the
+    expiry that did not happen AND the FIX-D precondition that would have kept the
+    position open.
 
     Args:
         symbol: ticker being sold.
         last_signal: dict with "generated_at" (datetime) and "score" (float), or None.
         max_age_hours: S4 max_signal_age_hours threshold (default 4).
+        disposition: observed disposition of the S4 signal this cycle, or None.
     """
-    if last_signal is None:
+    mechanism = _classify_zero_weight_exit(last_signal, max_age_hours, disposition)
+    if mechanism == MECHANISM_NO_SIGNAL:
         return (
-            f"[no_signal] Portfolio rebalance: weight 0.0% — no S4 signal found in DB "
-            f"(signal may be older than the lookback window or never generated)."
+            f"[{MECHANISM_NO_SIGNAL}] Portfolio rebalance: weight 0.0% — no S4 signal "
+            f"found in DB (signal may be older than the lookback window or never generated)."
         )
-    from datetime import datetime as _dt, timezone as _tz
-    now_utc = _dt.now(_tz.utc)
-    age_h = (now_utc - last_signal["generated_at"]).total_seconds() / 3600
-    gen_str = last_signal["generated_at"].strftime("%Y-%m-%d %H:%M UTC")
-    score = last_signal.get("score", 0.0)
-
-    if age_h > max_age_hours:
-        return (
-            f"[expired] S4 signal expired (age={age_h:.1f}h > max_age={max_age_hours}h, "
-            f"generated {gen_str}, score={score:+.3f}): "
-            f"weight 0.0% — no counter-signal found, position closed."
-        )
-    # Signal is technically fresh but weight is still 0 (e.g. score below min_score,
-    # or the portfolio constraint forced it out). Show score so log is actionable.
     return (
-        f"[whipsaw] Portfolio rebalance: weight 0.0% — S4 signal present but not driving a position "
-        f"(score={score:+.3f}, age={age_h:.1f}h, generated {gen_str})."
+        f"[{mechanism}] {describe_disposition(disposition)} "
+        f"({_last_signal_clause(last_signal, max_age_hours)}): "
+        f"weight 0.0%, position closed."
     )
 
 
@@ -1861,9 +1890,13 @@ def _run_cycle_inner() -> dict:
 
     # Build strategy instances
     strategy_instances = {}
+    # #184: filled by the S4 branch with symbol → what this cycle did to its signal.
+    # Read back when a weight-0 SELL needs an exit_mechanism, so the label states an
+    # observation instead of a guess derived from the signal's age.
+    _s4_dispositions: dict[str, str] = {}
     for entry in active:
         try:
-            instance = _build_strategy_instance(entry, bars_df)
+            instance = _build_strategy_instance(entry, bars_df, dispositions=_s4_dispositions)
             if instance is not None:
                 strategy_instances[entry.strategy_id] = instance
         except Exception as exc:
@@ -2459,10 +2492,16 @@ def _run_cycle_inner() -> dict:
                             )
                     else:
                         _zero_sig = _zero_sell_signals.get(order.symbol)
-                        reason = _reason_for_zero_weight_sell(order.symbol, _zero_sig, _s4_max_age_h)
+                        # #184: what the S4 cycle actually did to this symbol's signal.
+                        _zero_disp = _s4_dispositions.get(order.symbol)
+                        reason = _reason_for_zero_weight_sell(
+                            order.symbol, _zero_sig, _s4_max_age_h, _zero_disp
+                        )
                         # #60: structured tag alongside the reason text (queryable
                         # without parsing free text — see #61 anti-whipsaw damping).
-                        exit_mechanism = _classify_zero_weight_exit(_zero_sig, _s4_max_age_h)
+                        exit_mechanism = _classify_zero_weight_exit(
+                            _zero_sig, _s4_max_age_h, _zero_disp
+                        )
 
                         # #61: require N consecutive "whipsaw" cycles before letting
                         # this SELL through. Streak is always tracked (so a later
@@ -3053,7 +3092,29 @@ def _record_stale_drops(stale_signals, max_age_hours: int, min_score: float) -> 
         log.warning("Failed to log stale-dropped signals: %s", exc)
 
 
-def _build_strategy_instance(entry, bars_df):
+def _record_dispositions(
+    dispositions: dict[str, str] | None,
+    symbols,
+    disposition: str,
+) -> None:
+    """Record what the S4 cycle did to these symbols' signals (#184).
+
+    Last write wins, and the calls below follow the pipeline order, so a symbol
+    ends the cycle tagged with the LAST thing that happened to its signal.
+    """
+    if dispositions is None:
+        return
+    for sym in symbols:
+        dispositions[sym] = disposition
+
+
+def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None = None):
+    """Build a strategy instance for `entry`.
+
+    #184: `dispositions` (S4 only) is filled in-place with symbol → observed
+    disposition of its signal in this cycle, so the weight-0 SELL classifier can
+    report what happened instead of inferring it from the signal's age.
+    """
     from src.strategies.s1.strategy import S1Config, TimeSeriesMomentum
     from src.strategies.s2.strategy import VRPStrategy
     from src.strategies.s4.strategy import NewsDrivenTactical
@@ -3109,8 +3170,14 @@ def _build_strategy_instance(entry, bars_df):
                 _open_syms = set()
             if signals:
                 _before_freshness = len(signals)
+                _pre_freshness_syms = {s.symbol for s in signals}
                 signals = _apply_entry_freshness_gate(
                     signals, _open_syms, _cfg.MAX_NEWS_AGE_HOURS, datetime.now(timezone.utc)
+                )
+                _record_dispositions(
+                    dispositions,
+                    _pre_freshness_syms - {s.symbol for s in signals},
+                    ENTRY_FRESHNESS_FILTERED,
                 )
                 _dropped_freshness = _before_freshness - len(signals)
                 if _dropped_freshness:
@@ -3124,6 +3191,9 @@ def _build_strategy_instance(entry, bars_df):
                 # reversal SELL path already excludes them (low reliability); the
                 # BUY side must match, or S4 buys on the weak local model.
                 signals, _fb_dropped = _filter_fallback_signals(signals)
+                _record_dispositions(
+                    dispositions, (s.symbol for s in _fb_dropped), FALLBACK_FILTERED
+                )
                 if _fb_dropped:
                     log.info(
                         "S4: dropped %d fallback signal(s) from BUY ranking (#108): %s",
@@ -3134,6 +3204,10 @@ def _build_strategy_instance(entry, bars_df):
                 _now_utc = datetime.now(timezone.utc)
                 fresh_signals, stale_signals = _filter_stale_signals(
                     signals, s4_config.max_signal_age_hours, _now_utc
+                )
+                _record_dispositions(dispositions, (s.symbol for s in fresh_signals), FRESH)
+                _record_dispositions(
+                    dispositions, (s.symbol for s in stale_signals), STALE_DROPPED
                 )
                 if stale_signals:
                     log.warning(
@@ -3173,6 +3247,11 @@ def _build_strategy_instance(entry, bars_df):
                             _dropped_stale, s4_config.max_signal_age_hours, s4_config.min_score
                         )
                     _preserved = [s for s in fresh_signals if s in stale_signals]
+                    # #184: overwrite the STALE_DROPPED tag set above — these were
+                    # re-admitted, and an exit on them is anything but an expiry.
+                    _record_dispositions(
+                        dispositions, (s.symbol for s in _preserved), STALE_PRESERVED
+                    )
                     if _preserved:
                         log.info(
                             "FIX-D: preserved %d stale signal(s) for open positions "
@@ -3252,6 +3331,9 @@ def _build_strategy_instance(entry, bars_df):
                 before = len(signals_df)
                 dropped_df = signals_df[signals_df["score"].abs() < _fb_threshold]
                 signals_df = signals_df[signals_df["score"].abs() >= _fb_threshold]
+                _record_dispositions(
+                    dispositions, dropped_df["symbol"].tolist(), BELOW_ENTRY_GATE
+                )
                 if len(dropped_df):
                     log.info(
                         "S4 feedback gate: dropped %d/%d signals below threshold %.3f",

@@ -245,6 +245,14 @@ Se i dati di prezzo non sono disponibili, non inventare performance.
 Indica chiaramente cosa manca e quale query servirebbe.
 
 SETTIMA FASE — CORRETTEZZA FUNZIONALE BUY/SELL
+
+Avvertenza obbligatoria su exit_mechanism (#184): fino alla correzione di #184 l'etichetta
+non era osservata ma dedotta dall'età dell'ultimo segnale in DB, quindi posizioni chiuse
+per altri motivi risultano `expired` o `whipsaw` a seconda dell'orologio. Le righe pre-fix
+si riconoscono dal testo del motivo (vedi docs/exit_mechanism_labels.md). Se il report
+conta o interpreta `exit_mechanism` su righe pre-fix, dillo esplicitamente nel report:
+è una stima per età, non una misura del meccanismo.
+
 Controlla:
 * buy generati solo quando consentito;
 * sell/exit generati correttamente;
