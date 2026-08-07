@@ -22,7 +22,7 @@
 134  ritiro di F8: premessa falsificata alla misura, leva gia' spenta (rimozione di codice inerte)
 180  IC di S4 ricorrente: alimenta la decisione #179, che ora ha una soglia pre-registrata
 176  backtest S4 non rappresentativo: il fallback sintetico silenzioso invalida ogni misura di backtest
-151  segnali solo-fallback scartati senza riga in execution_decisions: buco nella catena decisionale
+151  segnali solo-fallback invisibili in execution_decisions: ripartire dalla PR #154 chiusa (prior art)
 186  peso S4 azzerato con segnale preservato, sopra soglia e nei top-5
 123  trades.signal_score senza signal_id corrispondente
 177  dead config: from_yaml di S1/S3 non ha call site
