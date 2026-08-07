@@ -50,7 +50,9 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 issue per run in an isolated worktree, opening a PR and stopping.
 
 The work is delegated to models **other than** the one that designed this machinery — the
-`MOTORI` array (currently `codex`, `gemini`), rotated one per run. Two reasons, the second
+`MOTORI` array (`codex`, `glm52`, `minimax`), rotated one per run. `glm52` and `minimax` run
+Claude Code with a different model underneath (`ollama launch claude --model glm-5.2:cloud` /
+`minimax-m3:cloud`): same tool, different head. Two reasons, the second
 mattering more: whoever wrote the queue and the criteria is not the right observer to judge
 whether the output respects them; and different models fail differently, so a single model
 across twenty issues repeats one blind spot twenty times with nobody noticing. If no engine
@@ -73,10 +75,21 @@ what the loop is allowed to touch is an operator action.
 Operator commands:
 
 ```bash
-scripts/roadmap_agent_loop.sh --dry-run   # which issue is next, no session consumed
+scripts/roadmap_agent_loop.sh --dry-run       # which issue is next, no session consumed
+scripts/roadmap_agent_loop.sh --motori        # engine status, incl. who is rate-limited
+scripts/roadmap_agent_loop.sh --prova glm52   # smoke-test one engine (60s)
+scripts/roadmap_agent_loop.sh --sblocca glm52 # early return from the bench (rarely needed)
 gh issue list --label freeze-ok --state open
-cat logs/roadmap_agent_state.tsv          # issue <TAB> failed attempts (2 = out of rotation)
+cat logs/roadmap_agent_state.tsv              # issue <TAB> failed attempts (2 = out of rotation)
 ```
+
+**Rate limits.** An exhausted engine is not a broken engine. Its output is matched against a
+deliberately broad set of signatures; on a hit it is benched for 3h and the run **fails over to
+the next available engine instead of burning the slot**. Critically, a rate-limited run is *not*
+charged to the issue — otherwise two quota exhaustions would drop an issue out of rotation
+without anyone having actually looked at it. Benched engines return **on their own** at expiry;
+`--sblocca` only exists for when quota comes back early. If every engine is benched the run is
+postponed, not failed.
 
 An issue that yields no PR twice drops out of rotation rather than burning sessions. A run
 that concludes an issue isn't workable is expected to comment on it and open nothing — an

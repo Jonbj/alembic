@@ -41,8 +41,19 @@ TIMEOUT_SESSIONE=5400    # 90 minuti: oltre, la sessione e' bloccata, non lenta
 #   2. modelli diversi sbagliano in modo diverso. Un solo modello su venti issue
 #      ripete venti volte lo stesso punto cieco, e nessuno lo vede.
 # La rotazione avanza a ogni giro, indipendentemente dall'esito.
-MOTORI=(codex gemini)
+#
+# glm52 e minimax girano dentro Claude Code ma con un modello diverso sotto
+# (`ollama launch claude --model ...`): stesso utensile, testa diversa.
+MOTORI=(codex glm52 minimax)
 MOTORE_STATE="$LOG_DIR/roadmap_agent_engine.txt"
+
+# Rate limit: un motore esaurito non e' un motore rotto. Viene messo in panchina
+# per un po' e rientra da solo alla scadenza — nessun intervento manuale, che
+# altrimenti diventerebbe il vero collo di bottiglia del loop.
+RATE_LIMIT_COOLDOWN=$(( 3 * 3600 ))
+# Le firme sono volutamente larghe: un falso positivo costa una panchina di 3h,
+# un falso negativo brucia il giro e conta un fallimento a carico della issue.
+_RATE_LIMIT_RE='rate.?limit|429|quota exceeded|too many requests|usage limit|resource_exhausted|overloaded'
 
 mkdir -p "$LOG_DIR"
 touch "$STATE_FILE"
@@ -89,16 +100,55 @@ registra_tentativo() {
 # e nel log sembrerebbe tutto normale.
 # Imposta le globali MOTORE e N_DISPONIBILI. Non usa la sostituzione di comando
 # perche' girerebbe in una subshell e le globali non tornerebbero indietro.
+_panchina_file() { echo "$LOG_DIR/engine_blocked_$1"; }
+
+# Un motore e' in panchina finche' il file contiene un'epoca futura. Il rientro e'
+# automatico: nessun comando da ricordare, che sarebbe il modo piu' facile di
+# lasciare un motore spento per giorni senza accorgersene.
+motore_in_panchina() {
+    local f; f=$(_panchina_file "$1")
+    [[ -f "$f" ]] || return 1
+    local fino; fino=$(cat "$f" 2>/dev/null)
+    [[ "$fino" =~ ^[0-9]+$ ]] || { rm -f "$f"; return 1; }
+    if (( fino <= $(date +%s) )); then
+        rm -f "$f"
+        log "Motore $1: panchina scaduta, rientra in rotazione."
+        return 1
+    fi
+    return 0
+}
+
+metti_in_panchina() {
+    local m="$1" fino=$(( $(date +%s) + RATE_LIMIT_COOLDOWN ))
+    echo "$fino" > "$(_panchina_file "$m")"
+    log "Motore $m: rate limit — in panchina fino a $(date -d "@$fino" '+%H:%M')."
+}
+
+motore_installato() {
+    case "$1" in
+        codex|gemini|opencode) command -v "$1" >/dev/null 2>&1 ;;
+        glm52|minimax)        command -v ollama >/dev/null 2>&1 ;;
+        *)                    return 1 ;;
+    esac
+}
+
 scegli_motore() {
-    local indice disponibili=()
+    local indice disponibili=() in_panchina=()
     for m in "${MOTORI[@]}"; do
-        command -v "$m" >/dev/null 2>&1 && disponibili+=("$m")
+        motore_installato "$m" || continue
+        if motore_in_panchina "$m"; then in_panchina+=("$m"); else disponibili+=("$m"); fi
     done
     if (( ${#disponibili[@]} == 0 )); then
+        if (( ${#in_panchina[@]} > 0 )); then
+            log "Tutti i motori sono in panchina per rate limit: [${in_panchina[*]}] — giro rimandato."
+            tg_send "⏸ <b>Roadmap</b> — tutti i motori in rate limit ([${in_panchina[*]}]). Il giro riparte da solo alla scadenza."
+            exit 0
+        fi
         log "Nessun motore fra [${MOTORI[*]}] e' installato — giro annullato."
         tg_send "⛔ <b>Roadmap</b> — nessun motore disponibile fra [${MOTORI[*]}]. Nessun giro eseguito."
         exit 1
     fi
+    MOTORI_DISPONIBILI=("${disponibili[@]}")
     indice=$(cat "$MOTORE_STATE" 2>/dev/null || echo 0)
     [[ "$indice" =~ ^[0-9]+$ ]] || indice=0
     # La rotazione NON avanza qui: avanzarla adesso la farebbe avanzare anche in
@@ -129,6 +179,14 @@ esegui_agente() {
                 -c sandbox_workspace_write.network_access=true \
                 "$prompt" 2>&1)
             ;;
+        glm52|minimax)
+            # Claude Code con un modello diverso sotto. Gli argomenti dopo
+            # l'integrazione sono passati a claude cosi' come sono.
+            local _mod
+            [[ "$motore" == glm52 ]] && _mod="glm-5.2:cloud" || _mod="minimax-m3:cloud"
+            (cd "$wt" && timeout "$TIMEOUT_SESSIONE" ollama launch claude --model "$_mod" \
+                --allowedTools "Bash,Read,Write,Edit,Glob,Grep" -p "$prompt" 2>&1)
+            ;;
         gemini)
             (cd "$wt" && timeout "$TIMEOUT_SESSIONE" gemini --yolo -p "$prompt" 2>&1)
             ;;
@@ -141,9 +199,51 @@ esegui_agente() {
     esac
 }
 
+# --- comandi operatore ----------------------------------------------------------
+if [[ "${1:-}" == "--motori" ]]; then
+    printf '%-10s %-14s %s\n' MOTORE STATO NOTE
+    for m in "${MOTORI[@]}"; do
+        if ! motore_installato "$m"; then
+            printf '%-10s %-14s %s\n' "$m" "non-installato" "-"
+        elif motore_in_panchina "$m"; then
+            fino=$(cat "$(_panchina_file "$m")")
+            printf '%-10s %-14s rientra alle %s\n' "$m" "rate-limit" "$(date -d "@$fino" '+%H:%M')"
+        else
+            printf '%-10s %-14s %s\n' "$m" "disponibile" "-"
+        fi
+    done
+    exit 0
+fi
+if [[ "${1:-}" == "--sblocca" ]]; then
+    # Scorciatoia per quando la quota rientra prima della scadenza stimata. Non
+    # serve mai per correttezza: la panchina scade comunque da sola.
+    if [[ -n "${2:-}" ]]; then rm -f "$(_panchina_file "$2")"; echo "Motore $2 rimesso in rotazione."
+    else rm -f "$LOG_DIR"/engine_blocked_*; echo "Tutti i motori rimessi in rotazione."; fi
+    exit 0
+fi
+
+if [[ "${1:-}" == "--prova" ]]; then
+    # Verifica che il motore risponda e che gli argomenti arrivino davvero fino a
+    # lui. Serve soprattutto per glm52/minimax, dove il prompt passa attraverso
+    # `ollama launch` prima di raggiungere claude.
+    _m="${2:?uso: --prova <motore>}"
+    motore_installato "$_m" || { echo "Motore $_m non installato."; exit 1; }
+    _tmp=$(mktemp -d); echo "Provo $_m (60s)..."
+    set +e
+    _out=$(TIMEOUT_SESSIONE=60 esegui_agente "$_m" "Rispondi solo con la parola PRONTO, senza usare strumenti." "$_tmp")
+    _rc=$?
+    set -e
+    rmdir "$_tmp" 2>/dev/null || true
+    echo "--- uscita (codice $_rc) ---"; echo "$_out" | tail -5
+    if echo "$_out" | grep -qiE "$_RATE_LIMIT_RE"; then echo ">>> $_m e' in RATE LIMIT."
+    elif echo "$_out" | grep -qi "PRONTO"; then echo ">>> $_m risponde: OK."
+    else echo ">>> $_m non ha risposto come atteso — controlla l'invocazione."; fi
+    exit 0
+fi
+
 log "=== Giro roadmap ==="
 scegli_motore
-log "Motore del giro: $MOTORE (rotazione su [${MOTORI[*]}])"
+log "Motore del giro: $MOTORE (disponibili: [${MOTORI_DISPONIBILI[*]}] su [${MOTORI[*]}])"
 git fetch --quiet origin main
 
 # --- selezione della issue: primo elemento della coda che sia lavorabile --------
@@ -271,10 +371,43 @@ Un no-op onesto vale piu' di una PR che sembra lavoro.
 PROMPTEOF
 )
 
-set +e
-OUTPUT=$(esegui_agente "$MOTORE" "$PROMPT" "$WT")
-ESITO=$?
-set -e
+# Prova i motori disponibili partendo da quello di turno. Un rate limit non
+# consuma il giro: si passa al successivo. E non viene addebitato alla issue —
+# altrimenti due esaurimenti di quota basterebbero a buttarla fuori rotazione
+# senza che nessuno l'abbia mai davvero guardata.
+_ordine=()
+_start=$(cat "$MOTORE_STATE" 2>/dev/null || echo 0); [[ "$_start" =~ ^[0-9]+$ ]] || _start=0
+for _k in $(seq 0 $(( N_DISPONIBILI - 1 ))); do
+    _ordine+=("${MOTORI_DISPONIBILI[$(( (_start + _k) % N_DISPONIBILI ))]}")
+done
+
+OUTPUT=""; ESITO=0; RATE_LIMITED_TUTTI=1
+for _m in "${_ordine[@]}"; do
+    MOTORE="$_m"
+    log "#$ISSUE — provo con $MOTORE"
+    set +e
+    OUTPUT=$(esegui_agente "$MOTORE" "$PROMPT" "$WT")
+    ESITO=$?
+    set -e
+    if echo "$OUTPUT" | grep -qiE "$_RATE_LIMIT_RE"; then
+        metti_in_panchina "$MOTORE"
+        tg_send "⏸ <b>Roadmap</b> — $MOTORE in rate limit, in panchina 3h. Provo il motore successivo."
+        continue
+    fi
+    RATE_LIMITED_TUTTI=0
+    break
+done
+
+if (( RATE_LIMITED_TUTTI == 1 )); then
+    # Nessun motore ha potuto lavorare: la issue torna com'era, tentativi compresi.
+    grep -v -P "^${ISSUE}\t" "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null || true
+    mv "${STATE_FILE}.tmp" "$STATE_FILE"
+    log "#$ISSUE — tutti i motori in rate limit: tentativo NON addebitato, giro rimandato."
+    tg_send "⏸ <b>Roadmap</b> — tutti i motori in rate limit. #${ISSUE} resta in cima alla coda, nessun tentativo consumato."
+    git worktree remove --force "$WT" 2>/dev/null || true
+    git branch -D "$BRANCH" 2>/dev/null || true
+    exit 0
+fi
 
 echo "$OUTPUT" >> "$LOG_FILE"
 
