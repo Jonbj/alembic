@@ -20,7 +20,10 @@
 
 set -euo pipefail
 
-export PATH="$HOME/.local/bin:$PATH"
+# cron parte con un PATH minimo (/usr/bin:/bin). Senza /usr/local/bin `ollama`
+# non si trova, e glm52/minimax risulterebbero "non installati": il loop girerebbe
+# sul solo codex senza che nulla lo segnali.
+export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -135,7 +138,12 @@ motore_installato() {
 scegli_motore() {
     local indice disponibili=() in_panchina=()
     for m in "${MOTORI[@]}"; do
-        motore_installato "$m" || continue
+        if ! motore_installato "$m"; then
+            # Rumoroso di proposito: un motore configurato che sparisce dal PATH
+            # riduce la rotazione a uno solo, ed e' invisibile nel log del giro.
+            log "ATTENZIONE: motore $m configurato ma non trovato nel PATH — escluso dalla rotazione."
+            continue
+        fi
         if motore_in_panchina "$m"; then in_panchina+=("$m"); else disponibili+=("$m"); fi
     done
     if (( ${#disponibili[@]} == 0 )); then
