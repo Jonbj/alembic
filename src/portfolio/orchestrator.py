@@ -76,6 +76,14 @@ class CycleResult:
     # whose feedback regime scale was != 1.0 this cycle. Lets the scheduler log the
     # deployment delta (measure-before-enforce) without applying the scale live.
     feedback_shadow: dict[str, dict] = field(default_factory=dict)
+    # #185: strategies whose rebalance gate was closed this cycle — they held
+    # their book instead of re-deciding weights. The scheduler needs them to
+    # tell a legitimate hold apart from a silent death (_check_strategy_zero_weights).
+    rebalance_skipped: list[str] = field(default_factory=list)
+    # #185: sleeve-local weights each strategy actually DECIDED this cycle (absent
+    # for the ones that held). The scheduler persists these so the next cycle can
+    # rebuild the frozen target from Redis after the instance is thrown away.
+    target_weights_per_strategy: dict[str, dict[str, float]] = field(default_factory=dict)
     # B33-follow-up: per-symbol {signal_id, score, reasoning, model_id} pinned
     # by S4 at the exact moment it computed weights this cycle. The scheduler
     # must use this for decision logging + idempotency instead of re-fetching
@@ -121,6 +129,7 @@ class PortfolioOrchestrator:
         strategy_returns: dict[str, list[float]] | None = None,
         feedback_scales: dict[str, float] | None = None,
         apply_feedback_scale: bool = True,
+        last_target_weights: dict[str, dict[str, float]] | None = None,
     ) -> CycleResult:
         """Execute one portfolio cycle.
 
@@ -145,6 +154,12 @@ class PortfolioOrchestrator:
                 unscaled but `feedback_shadow` still records the would-be delta),
                 `True` → all, or a collection of strategy ids → only those.
                 Default True (passing scales applies them). See `_scale_gate`.
+            last_target_weights: Optional {strategy_id: sleeve-local weights} decided
+                at that strategy's last rebalance. Only read for strategies whose
+                `should_rebalance(ts)` gate is closed this cycle: they hold exactly
+                the symbols they targeted then and still own now (#185). Missing or
+                None → the sleeve contributes nothing, which is safe because a
+                strategy with no rebalance memory always has its gate open.
 
         Returns:
             CycleResult with strategies run, order counts, constraint violations, orders.
@@ -160,6 +175,8 @@ class PortfolioOrchestrator:
         symbol_strategies: dict[str, list[str]] = {}
         feedback_shadow: dict[str, dict] = {}
         symbol_signal_provenance: dict[str, dict] = {}
+        rebalance_skipped: list[str] = []
+        target_weights_per_strategy: dict[str, dict[str, float]] = {}
 
         # F8: per-strategy feedback regime scale (loss-feedback de-risk/re-risk
         # throttle). None / missing strategy → 1.0 (identity). Applied to each
@@ -181,12 +198,29 @@ class PortfolioOrchestrator:
                 continue
 
             try:
-                # Strategy returns a list[Order], but we need target weights.
-                # Strategies that have compute_target_weights() — use those directly.
-                # For strategies that only return orders, we extract implied weights.
-                tw = self._extract_target_weights(
-                    entry.strategy_id, callable_fn, ts, data_replay, portfolio, market, nav
-                )
+                # #185: the declared rebalance cadence gates the whole sleeve. When
+                # the gate is closed the strategy neither re-decides nor drifts —
+                # it re-declares what it already holds, so the merge below sees a
+                # zero delta instead of reading the missing symbols as "sell all".
+                if not self._gate_open(callable_fn, ts):
+                    tw = self._hold_weights(
+                        entry.strategy_id, entry.allocation_pct,
+                        portfolio, market, nav, last_target_weights,
+                    )
+                    rebalance_skipped.append(entry.strategy_id)
+                    log.info(
+                        "Strategy %s: rebalance gate closed — holding %d position(s), "
+                        "no weight re-decision this cycle",
+                        entry.strategy_id, len(tw),
+                    )
+                else:
+                    # Strategy returns a list[Order], but we need target weights.
+                    # Strategies that have compute_target_weights() — use those directly.
+                    # For strategies that only return orders, we extract implied weights.
+                    tw = self._extract_target_weights(
+                        entry.strategy_id, callable_fn, ts, data_replay, portfolio, market, nav
+                    )
+                    target_weights_per_strategy[entry.strategy_id] = tw
                 strategies_run.append(entry.strategy_id)
                 orders_per_strategy[entry.strategy_id] = len(tw)
 
@@ -317,9 +351,10 @@ class PortfolioOrchestrator:
             )
 
         log.info(
-            "Portfolio cycle complete: strategies=%s merged_weights=%d symbols "
+            "Portfolio cycle complete: strategies=%s held=%s merged_weights=%d symbols "
             "orders_before=%d orders_after=%d constraints=%d",
             strategies_run,
+            rebalance_skipped,
             len(merged_weights),
             orders_before,
             len(combined),
@@ -336,28 +371,63 @@ class PortfolioOrchestrator:
             symbol_strategies=symbol_strategies,
             feedback_shadow=feedback_shadow,
             symbol_signal_provenance=symbol_signal_provenance,
+            rebalance_skipped=rebalance_skipped,
+            target_weights_per_strategy=target_weights_per_strategy,
         )
 
     # ── Private ────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _gate_open(callable_fn, ts) -> bool:
+        """Whether the strategy's declared rebalance cadence allows a decision at ts.
+
+        Deliberately delegates to the strategy's own predicate — the same one the
+        backtest calls from __call__ — so live and backtest cannot drift apart on
+        cadence (#185). Strategies without the predicate rebalance every cycle.
+        """
+        if not hasattr(callable_fn, "should_rebalance"):
+            return True
+        return bool(callable_fn.should_rebalance(ts))
+
+    def _hold_weights(
+        self, strategy_id: str, alloc: float, portfolio, market, nav,
+        last_target_weights: dict[str, dict[str, float]] | None,
+    ) -> dict[str, float]:
+        """Sleeve-local weights that reproduce what the strategy already holds.
+
+        Derived from the *current* position value rather than from the frozen
+        target, so `wt * alloc * nav / price` lands back on the exact quantity in
+        the book: no drift trim, no re-entry, no liquidation. Restricted to the
+        symbols decided at the last rebalance, so a position another sleeve owns
+        is never claimed here — and a symbol closed meanwhile (a stop-out) is not
+        bought back before the next rebalance window.
+        """
+        frozen = (last_target_weights or {}).get(strategy_id) or {}
+        if nav <= 0 or alloc <= 0 or not frozen:
+            return {}
+
+        held: dict[str, float] = {}
+        for symbol in frozen:
+            pos = portfolio.position_of(symbol)
+            if pos is None or pos.quantity <= 0:
+                continue
+            price = market.price_of(symbol)
+            if price is None or price <= 0:
+                continue
+            held[symbol] = (pos.quantity * price / nav) / alloc
+        return held
 
     def _extract_target_weights(
         self, strategy_id: str, callable_fn, ts, data_replay, portfolio, market, nav
     ) -> dict[str, float]:
         """Extract target weights from a strategy.
 
-        Strategies that expose should_rebalance(ts) → check the gate first.
-        If the gate returns False, return {} (no rebalance this cycle).
+        Called only when the rebalance gate is open (see `_gate_open`).
         After computing weights, call mark_rebalanced(ts) if available.
 
         Strategies that expose compute_target_weights() → call that.
         Otherwise, run the callable to get orders → infer weights from order notional values.
         """
-        # Check rebalance gate before computing
-        if hasattr(callable_fn, 'should_rebalance'):
-            if not callable_fn.should_rebalance(ts):
-                log.debug("Strategy %s: rebalance gate blocked — skipping this cycle", strategy_id)
-                return {}
-
         if hasattr(callable_fn, 'compute_target_weights'):
             if strategy_id == "S1":
                 prices = data_replay.prices_until(ts)

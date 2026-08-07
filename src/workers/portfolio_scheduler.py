@@ -461,6 +461,119 @@ def _read_feedback_regime_scales(redis_url: str, strategy_ids) -> dict[str, floa
         return {}
 
 
+# ── #185: rebalance clock ─────────────────────────────────────────────────────
+#
+# Every cycle rebuilds its strategy instances from scratch (_build_strategy_instance),
+# so `_last_rebalance` was always None and the declared rebalance_frequency never bit:
+# S1 says MONTHLY, the backtest honours it, the live path re-decided the whole book
+# every 15 minutes. The clock lives in Redis because it has to outlive both the
+# instance and the worker process.
+_REBALANCE_STATE_KEY = "strategy:rebalance_state:{strategy_id}"
+_REBALANCE_STATE_TTL = 400 * 24 * 3600  # comfortably longer than a MONTHLY window
+
+# Scope of the fix. S4 is deliberately absent: its DAILY predicate is calendar-day
+# based (`ts.date() != last.date()`), so seeding its clock would collapse a
+# news-driven tactical sleeve to one decision per session — freezing its intraday
+# entries and its [expired]/[whipsaw] weight-drop exits. That is a strategy-level
+# change, not the churn defect #185 documents (all six observed round trips are S1),
+# and it lands on the sleeve whose observation question is measured on exactly that
+# intraday behaviour. Widening the fix to S4 is an operator decision: add "S4" here.
+_REBALANCE_CLOCK_STRATEGIES = frozenset({"S1"})
+
+
+def _load_rebalance_state(redis_url: str, strategy_ids) -> dict[str, dict]:
+    """Read {strategy_id: {last_rebalance, target_weights}} for the clocked strategies.
+
+    Fail-open: any error → {} → no seeding → every gate open, i.e. exactly the
+    pre-#185 behaviour. A frozen strategy that cannot read its own clock must
+    rebalance, never hold forever on a Redis hiccup.
+    """
+    wanted = [s for s in (strategy_ids or []) if s in _REBALANCE_CLOCK_STRATEGIES]
+    if not wanted:
+        return {}
+    try:
+        from redis import Redis as _R
+        _r = _R.from_url(redis_url, decode_responses=True)
+        try:
+            out: dict[str, dict] = {}
+            for sid in wanted:
+                raw = _r.get(_REBALANCE_STATE_KEY.format(strategy_id=sid))
+                if not raw:
+                    continue
+                try:
+                    parsed = _json.loads(raw)
+                except (TypeError, ValueError):
+                    log.warning("#185: unreadable rebalance state for %s — gate stays open", sid)
+                    continue
+                if isinstance(parsed, dict):
+                    out[sid] = parsed
+            return out
+        finally:
+            _r.close()
+    except Exception as exc:
+        log.warning("#185: could not read the rebalance clock (%s) — every gate stays open", exc)
+        return {}
+
+
+def _seed_rebalance_clock(strategy_instances: dict, state: dict[str, dict]) -> None:
+    """Restore `_last_rebalance` on freshly built instances from persisted state.
+
+    Without this the strategy's own gate answers True at every cycle, which is the
+    whole of #185. Anything unparseable leaves the instance untouched (gate open).
+    """
+    for sid, instance in strategy_instances.items():
+        if sid not in _REBALANCE_CLOCK_STRATEGIES:
+            continue
+        raw_ts = (state.get(sid) or {}).get("last_rebalance")
+        if not raw_ts:
+            continue
+        try:
+            last = datetime.fromisoformat(raw_ts)
+        except (TypeError, ValueError):
+            log.warning("#185: bad last_rebalance %r for %s — gate stays open", raw_ts, sid)
+            continue
+        instance._last_rebalance = last
+        log.info("#185: %s rebalance clock restored to %s", sid, last.isoformat())
+
+
+def _persist_rebalance_state(result, ts: datetime, redis_url: str) -> None:
+    """Store the clock and the target set for the strategies that just rebalanced.
+
+    Strategies that held (`rebalance_skipped`) keep their previous state untouched:
+    the stored target set is what the next held cycle re-declares, so overwriting it
+    with a hold snapshot would let the frozen target drift with the book.
+    """
+    decided = {
+        sid: weights
+        for sid, weights in (getattr(result, "target_weights_per_strategy", None) or {}).items()
+        if sid in _REBALANCE_CLOCK_STRATEGIES
+    }
+    if not decided:
+        return
+    try:
+        from redis import Redis as _R
+        _r = _R.from_url(redis_url, decode_responses=True)
+        try:
+            for sid, weights in decided.items():
+                payload = _json.dumps({
+                    "last_rebalance": ts.isoformat(),
+                    "target_weights": {k: float(v) for k, v in (weights or {}).items()},
+                })
+                _r.set(
+                    _REBALANCE_STATE_KEY.format(strategy_id=sid),
+                    payload,
+                    ex=_REBALANCE_STATE_TTL,
+                )
+                log.info(
+                    "#185: %s rebalanced at %s — %d target weight(s) frozen until the next window",
+                    sid, ts.isoformat(), len(weights or {}),
+                )
+        finally:
+            _r.close()
+    except Exception as exc:
+        log.warning("#185: could not persist the rebalance clock (%s) — next cycle rebalances", exc)
+
+
 def _build_vol_targeter():
     """Construct the PortfolioVolTargeter from config/trading.yaml `vol_target` (F6).
 
@@ -2004,6 +2117,19 @@ def _run_cycle_inner() -> dict:
         except Exception as exc:
             log.error("Failed to build instance for %s: %s", entry.strategy_id, exc)
 
+    # #185: the instances above are brand new, so their rebalance clock reads None
+    # and the declared rebalance_frequency never bites. Restore it from Redis before
+    # the orchestrator asks should_rebalance(), and carry the frozen target set so a
+    # gated sleeve can re-declare what it holds instead of being read as "sell all".
+    _rebalance_state = _load_rebalance_state(
+        config.REDIS_URL, list(strategy_instances.keys())
+    )
+    _seed_rebalance_clock(strategy_instances, _rebalance_state)
+    _last_target_weights = {
+        sid: (st.get("target_weights") or {})
+        for sid, st in _rebalance_state.items()
+    }
+
     # Build market snapshot — seed prices from daily bar closes.
     latest_prices = {}
     for sym in bars_df.columns:
@@ -2218,7 +2344,11 @@ def _run_cycle_inner() -> dict:
         strategy_returns=_strategy_returns,
         feedback_scales=_fb_scales or None,
         apply_feedback_scale=_apply_fb_scale,
+        last_target_weights=_last_target_weights or None,
     )
+
+    # #185: advance the clock only for the sleeves that actually re-decided weights.
+    _persist_rebalance_state(result, ts, config.REDIS_URL)
 
     # F8 shadow log: emit the would-be deployment delta per scaled strategy so the
     # forensic report / operator can see what regime_scale would do before it goes live.
@@ -2961,9 +3091,14 @@ def _check_strategy_zero_weights(
 
     try:
         # Strategies that ran but produced 0 weights, plus active strategies that
-        # did not run at all (instance build failed).
+        # did not run at all (instance build failed). #185: a sleeve outside its
+        # rebalance window legitimately reports 0 weights when it holds nothing —
+        # that is the declared cadence working, not a silent death.
+        _held = set(getattr(result, "rebalance_skipped", None) or [])
         zero_weight_ids: set[str] = set()
         for sid in active_strategy_ids:
+            if sid in _held:
+                continue
             if sid not in result.strategies_run:
                 zero_weight_ids.add(sid)
             elif result.orders_per_strategy.get(sid, 0) == 0:
