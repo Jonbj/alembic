@@ -69,7 +69,9 @@ loopback hosts.
 
 - Session JWTs and refresh tokens are encrypted at rest; the encryption key lives in Android Keystore and is non-exportable.
 - Cached financial data is encrypted before being written to Room.
-- `FLAG_SECURE` hides window content from the task switcher / screenshots.
+- Release builds apply `FLAG_SECURE` to hide window content from the task switcher
+  and screenshots. Debug builds intentionally omit it so operator acceptance
+  screenshots can be captured; they must never be distributed as production APKs.
 - Logout clears local tokens and cache even if server revocation fails, and reports
   that revocation failure to the caller.
 - The bundled debug `lan_ca.pem` is a self-signed test certificate and is never

@@ -101,6 +101,8 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.biometric)
+    // Espresso 3.7 calls Trace.forceEnableAppTracing() in the debug app process.
+    debugImplementation(libs.androidx.tracing)
 
     // Compose
     implementation(platform(libs.compose.bom))

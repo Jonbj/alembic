@@ -273,7 +273,7 @@ private fun StrategiesCard(strategies: List<StrategyRow>) {
             } else {
                 strategies.forEach { strategy ->
                     MetricRow(
-                        label = "${strategy.id} · ${strategy.mode}",
+                        label = "${strategy.id} · ${modeLabel(strategy.mode)}",
                         value = "${formatPercent(strategy.allocationPct)} · ${
                             if (strategy.approved) {
                                 stringResource(R.string.approved)

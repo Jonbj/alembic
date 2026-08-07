@@ -2,9 +2,11 @@ package com.jonbj.alembic.monitor.feature.biometric
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Fingerprint
 import androidx.compose.material3.Button
@@ -34,49 +36,60 @@ fun BiometricLockScreen(
     onLogout: suspend () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    Column(
+    BiometricLockContent(
+        onUnlock = {
+            biometricGate.authenticate(
+                activity = activity,
+                title = activity.getString(R.string.biometric_title),
+                subtitle = activity.getString(R.string.biometric_subtitle)
+            ) { result ->
+                if (result is BiometricResult.Success) onUnlocked()
+            }
+        },
+        onLogout = { scope.launch { onLogout() } }
+    )
+}
+
+@Composable
+fun BiometricLockContent(onUnlock: () -> Unit, onLogout: () -> Unit) {
+    LazyColumn(
         modifier = Modifier.fillMaxSize().padding(20.dp),
+        contentPadding = PaddingValues(vertical = 12.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        MonitorCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Icon(
-                    Icons.Rounded.Fingerprint,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    text = stringResource(R.string.biometric_title),
-                    style = MaterialTheme.typography.headlineMedium,
-                    textAlign = TextAlign.Center
-                )
-                Text(
-                    text = stringResource(R.string.biometric_subtitle),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-                Button(
-                    onClick = {
-                        biometricGate.authenticate(
-                            activity = activity,
-                            title = activity.getString(R.string.biometric_title),
-                            subtitle = activity.getString(R.string.biometric_subtitle)
-                        ) { result ->
-                            if (result is BiometricResult.Success) onUnlocked()
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth()
+        item {
+            MonitorCard(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(stringResource(R.string.unlock))
-                }
-                TextButton(onClick = { scope.launch { onLogout() } }) {
-                    Text(stringResource(R.string.logout))
+                    Icon(
+                        Icons.Rounded.Fingerprint,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = stringResource(R.string.biometric_title),
+                        style = MaterialTheme.typography.headlineMedium,
+                        textAlign = TextAlign.Center
+                    )
+                    Text(
+                        text = stringResource(R.string.biometric_subtitle),
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                    Button(
+                        onClick = onUnlock,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(stringResource(R.string.unlock))
+                    }
+                    TextButton(onClick = onLogout) {
+                        Text(stringResource(R.string.logout))
+                    }
                 }
             }
         }

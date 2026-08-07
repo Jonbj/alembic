@@ -42,11 +42,26 @@ import com.jonbj.alembic.monitor.ui.components.MonitorCard
 @Composable
 fun LoginScreen(viewModel: LoginViewModel) {
     val state by viewModel.state.collectAsState()
-    var serverUrl by remember { mutableStateOf(viewModel.defaultServerUrl) }
-    var deviceName by remember { mutableStateOf(viewModel.defaultDeviceName) }
+    LoginContent(
+        state = state,
+        defaultServerUrl = viewModel.defaultServerUrl,
+        defaultDeviceName = viewModel.defaultDeviceName,
+        onLogin = viewModel::login
+    )
+}
+
+@Composable
+fun LoginContent(
+    state: LoginUiState,
+    defaultServerUrl: String,
+    defaultDeviceName: String,
+    onLogin: (String, String, String, String) -> Unit
+) {
+    var serverUrl by remember { mutableStateOf(defaultServerUrl) }
+    var deviceName by remember { mutableStateOf(defaultDeviceName) }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    val submit = { viewModel.login(serverUrl, username, password, deviceName) }
+    val submit = { onLogin(serverUrl, username, password, deviceName) }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -137,7 +152,7 @@ fun LoginScreen(viewModel: LoginViewModel) {
                     }
                     if (state is LoginUiState.Error) {
                         Text(
-                            text = (state as LoginUiState.Error).message,
+                            text = state.message,
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodyMedium
                         )
