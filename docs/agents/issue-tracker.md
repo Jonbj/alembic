@@ -47,7 +47,15 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 ## Autonomous roadmap loop (active 2026-08-06 → 2026-09-28)
 
 `scripts/roadmap_agent_loop.sh` runs four times a day (cron: 07/12/17/21) and works **one**
-issue per run in an isolated worktree, opening a PR and stopping. It never merges: the CI
+issue per run in an isolated worktree, opening a PR and stopping.
+
+The work is delegated to models **other than** the one that designed this machinery — the
+`MOTORI` array (currently `codex`, `gemini`), rotated one per run. Two reasons, the second
+mattering more: whoever wrote the queue and the criteria is not the right observer to judge
+whether the output respects them; and different models fail differently, so a single model
+across twenty issues repeats one blind spot twenty times with nobody noticing. If no engine
+in the list is installed the run is **cancelled** — there is deliberately no fallback, since
+a silent one would put the work back exactly where it must not be. It never merges: the CI
 `test` job in this repo is chronically red for environmental reasons, so an automatic merge
 would be gating on a signal that isn't there.
 

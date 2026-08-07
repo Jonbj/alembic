@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Un giro di lavoro sulla roadmap, eseguito da Claude Code in un worktree isolato.
+# Un giro di lavoro sulla roadmap, eseguito in un worktree isolato da un modello
+# esterno a chi ha progettato l'impianto (vedi MOTORI piu' sotto).
 #
 # Prende UNA issue per run — la prima della coda ancora lavorabile — apre una PR e
 # si ferma. Non mergia mai: in questo repo la CI e' cronicamente rossa per motivi
@@ -31,6 +32,17 @@ LOG_FILE="$LOG_DIR/roadmap_agent_$(date +%Y-%m-%d).log"
 
 MAX_TENTATIVI=2          # dopo due fallimenti l'issue esce dalla rotazione
 TIMEOUT_SESSIONE=5400    # 90 minuti: oltre, la sessione e' bloccata, non lenta
+
+# --- chi lavora le issue --------------------------------------------------------
+# Il lavoro di roadmap e' demandato ad altri modelli, non alla sessione che ha
+# scritto questo impianto. Due ragioni, e la seconda conta piu' della prima:
+#   1. chi ha scritto la coda e i criteri non e' l'osservatore adatto a giudicare
+#      se il lavoro che ne esce li rispetta;
+#   2. modelli diversi sbagliano in modo diverso. Un solo modello su venti issue
+#      ripete venti volte lo stesso punto cieco, e nessuno lo vede.
+# La rotazione avanza a ogni giro, indipendentemente dall'esito.
+MOTORI=(codex gemini)
+MOTORE_STATE="$LOG_DIR/roadmap_agent_engine.txt"
 
 mkdir -p "$LOG_DIR"
 touch "$STATE_FILE"
@@ -71,7 +83,67 @@ registra_tentativo() {
     mv "${STATE_FILE}.tmp" "$STATE_FILE"
 }
 
+# Sceglie il motore del giro, ruotando fra quelli effettivamente installati.
+# Se nessuno lo e', il giro NON viene eseguito: non esiste un ripiego su `claude`.
+# Un ripiego silenzioso riporterebbe il lavoro esattamente dove non deve stare,
+# e nel log sembrerebbe tutto normale.
+# Imposta le globali MOTORE e N_DISPONIBILI. Non usa la sostituzione di comando
+# perche' girerebbe in una subshell e le globali non tornerebbero indietro.
+scegli_motore() {
+    local indice disponibili=()
+    for m in "${MOTORI[@]}"; do
+        command -v "$m" >/dev/null 2>&1 && disponibili+=("$m")
+    done
+    if (( ${#disponibili[@]} == 0 )); then
+        log "Nessun motore fra [${MOTORI[*]}] e' installato — giro annullato."
+        tg_send "⛔ <b>Roadmap</b> — nessun motore disponibile fra [${MOTORI[*]}]. Nessun giro eseguito."
+        exit 1
+    fi
+    indice=$(cat "$MOTORE_STATE" 2>/dev/null || echo 0)
+    [[ "$indice" =~ ^[0-9]+$ ]] || indice=0
+    # La rotazione NON avanza qui: avanzarla adesso la farebbe avanzare anche in
+    # --dry-run, che promette di non toccare lo stato.
+    N_DISPONIBILI=${#disponibili[@]}
+    MOTORE="${disponibili[$(( indice % N_DISPONIBILI ))]}"
+}
+
+avanza_rotazione() {
+    local indice
+    indice=$(cat "$MOTORE_STATE" 2>/dev/null || echo 0)
+    [[ "$indice" =~ ^[0-9]+$ ]] || indice=0
+    echo $(( (indice + 1) % N_DISPONIBILI )) > "$MOTORE_STATE"
+}
+
+# Ogni CLI ha la sua sintassi non interattiva e i suoi default di approvazione.
+# Il worktree e' isolato, ma il sandbox resta ristretto alla directory di lavoro:
+# l'accesso di rete serve solo perche' `gh` deve poter aprire la PR.
+esegui_agente() {
+    local motore="$1" prompt="$2" wt="$3"
+    case "$motore" in
+        codex)
+            # `exec` non chiede approvazioni per costruzione. Il sandbox resta
+            # workspace-write: l'accesso di rete e' abilitato solo perche' `gh`
+            # deve poter aprire la PR, non per dare mano libera.
+            (cd "$wt" && timeout "$TIMEOUT_SESSIONE" codex exec \
+                -s workspace-write \
+                -c sandbox_workspace_write.network_access=true \
+                "$prompt" 2>&1)
+            ;;
+        gemini)
+            (cd "$wt" && timeout "$TIMEOUT_SESSIONE" gemini --yolo -p "$prompt" 2>&1)
+            ;;
+        opencode)
+            (cd "$wt" && timeout "$TIMEOUT_SESSIONE" opencode run "$prompt" 2>&1)
+            ;;
+        *)
+            echo "Motore non riconosciuto: $motore"; return 2
+            ;;
+    esac
+}
+
 log "=== Giro roadmap ==="
+scegli_motore
+log "Motore del giro: $MOTORE (rotazione su [${MOTORI[*]}])"
 git fetch --quiet origin main
 
 # --- selezione della issue: primo elemento della coda che sia lavorabile --------
@@ -114,11 +186,13 @@ log "Issue selezionata: #$ISSUE — $TITOLO"
 # --dry-run: verifica la selezione senza consumare una sessione ne' toccare lo
 # stato. Serve dopo ogni modifica alla coda o alle label.
 if [[ "${1:-}" == "--dry-run" ]]; then
+    log "(dry-run) motore che sarebbe usato: $MOTORE"
     log "(dry-run) mi fermo qui: nessun worktree, nessuna sessione, stato invariato."
     exit 0
 fi
 
 registra_tentativo "$ISSUE"
+avanza_rotazione
 
 # --- worktree isolato ----------------------------------------------------------
 # Mai nell'albero principale: li' girano i cron dell'osservazione e vive il
@@ -131,13 +205,15 @@ git branch -D "$BRANCH" 2>/dev/null || true
 git worktree add -b "$BRANCH" "$WT" origin/main >>"$LOG_FILE" 2>&1
 
 tg_send "🧭 <b>Roadmap — giro avviato</b>
-Issue #${ISSUE}: ${TITOLO}"
+Issue #${ISSUE}: ${TITOLO}
+Motore: ${MOTORE}"
 
 PROMPT=$(cat <<PROMPTEOF
 Lavora la issue GitHub #${ISSUE} di questo repository (Alembic) fino ad aprire una pull request.
 
 Sei in un worktree dedicato: $WT, sul branch $BRANCH, basato su origin/main.
-Leggi CLAUDE.md prima di tutto.
+Leggi CLAUDE.md prima di tutto: e' il file di istruzioni di questo progetto, valido
+qualunque sia lo strumento con cui stai girando.
 
 ## Il vincolo che conta piu' di ogni altro
 
@@ -196,8 +272,7 @@ PROMPTEOF
 )
 
 set +e
-OUTPUT=$(cd "$WT" && timeout "$TIMEOUT_SESSIONE" \
-    claude --allowedTools "Bash,Read,Write,Edit,Glob,Grep" -p "$PROMPT" 2>&1)
+OUTPUT=$(esegui_agente "$MOTORE" "$PROMPT" "$WT")
 ESITO=$?
 set -e
 
@@ -213,19 +288,20 @@ fi
 PR_URL=$(gh pr list --state open --head "$BRANCH" --json url -q '.[0].url' 2>/dev/null || echo "")
 
 if [[ -n "$PR_URL" ]]; then
-    log "#$ISSUE — PR aperta: $PR_URL"
+    log "#$ISSUE — PR aperta da $MOTORE: $PR_URL"
     # Tentativo riuscito: lo tolgo dal conteggio dei fallimenti.
     grep -v -P "^${ISSUE}\t" "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null || true
     mv "${STATE_FILE}.tmp" "$STATE_FILE"
     tg_send "✅ <b>Roadmap — PR pronta per review</b>
 Issue #${ISSUE}: ${TITOLO}
+Motore: ${MOTORE}
 ${PR_URL}"
 else
     log "#$ISSUE — nessuna PR aperta."
     CODA=$(echo "$OUTPUT" | tail -c 1200)
     tg_send "⚠️ <b>Roadmap — nessuna PR</b>
 Issue #${ISSUE}: ${TITOLO}
-Esito sessione: ${ESITO}
+Motore: ${MOTORE} — esito sessione: ${ESITO}
 
 <pre>$(echo "$CODA" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')</pre>"
     # Il branch senza commit non serve a nessuno; se ha commit lo tengo per l'ispezione.
