@@ -94,8 +94,21 @@ cat logs/roadmap_agent_state.tsv              # issue <TAB> failed attempts (2 =
    denied permission are not the same thing. Its review is posted to the PR either way.
 
 Both gates green → the loop merges. Anything else — reject, CI that never finished, no second
-engine available — leaves the PR open with a Telegram. **A merge is not a deploy:** images are
-baked, so `main` moves ahead of production until someone rebuilds.
+engine available — leaves the PR open with a Telegram.
+
+**Deploy.** A merge is not a deploy: `src/`, `config/` and `scripts/` are `COPY`ed into the image,
+not mounted. `scripts/deploy_reconcile.sh` closes that gap — it is a *reconciler*, not a
+post-merge hook: it compares the commit actually running against `origin/main` and acts only if
+they differ, so it also self-heals after a human merge and does nothing on a second run. It skips
+the rebuild entirely when only docs/tests changed, **defers while the US market is open** (never
+restart a worker mid-cycle), and updates its recorded SHA only *after* verifying the containers
+came back — a failed deploy retries next time instead of believing itself. Cron runs it every two
+hours; the loop also calls it right after an auto-merge so a free window isn't wasted.
+
+```bash
+scripts/deploy_reconcile.sh --stato   # what runs vs origin/main — touches nothing
+scripts/deploy_reconcile.sh --forza   # ignore the market window (operator)
+```
 
 **Rate limits.** An exhausted engine is not a broken engine. Its output is matched against a
 deliberately broad set of signatures; on a hit it is benched for 3h and the run **fails over to

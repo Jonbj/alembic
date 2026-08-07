@@ -2,10 +2,16 @@
 # Un giro di lavoro sulla roadmap, eseguito in un worktree isolato da un modello
 # esterno a chi ha progettato l'impianto (vedi MOTORI piu' sotto).
 #
-# Prende UNA issue per run — la prima della coda ancora lavorabile — apre una PR e
-# si ferma. Non mergia mai: in questo repo la CI e' cronicamente rossa per motivi
-# ambientali (integration test senza DB), quindi un merge automatico si
-# appoggerebbe a un segnale che non c'e'.
+# Prende UNA issue per run — la prima della coda ancora lavorabile — apre una PR,
+# la fa rivedere a un modello diverso, e la mergia se DUE cancelli passano
+# entrambi: zero test rotti in piu' rispetto a main (stesso commit), e verdetto
+# positivo del recensore. Qualsiasi altro esito lascia la PR aperta.
+#
+# La CI qui e' cronicamente rossa per motivi ambientali, quindi il suo esito preso
+# da solo non dice nulla: e' la DIFFERENZA rispetto a main a essere il segnale.
+#
+# Dopo un merge chiama scripts/deploy_reconcile.sh, perche' le immagini sono baked
+# e un merge da solo lascerebbe la produzione indietro.
 #
 # Perimetro: dal 2026-08-03 al 2026-09-28 vige il freeze di osservazione (#171).
 # L'agente NON sceglie cosa sia compatibile col freeze. Due lucchetti indipendenti
@@ -593,7 +599,12 @@ Issue #${ISSUE}: ${TITOLO}
 ${MOTORE} ha implementato, ${REVISORE} ha approvato, 0 test rotti in piu&#39;.
 ${PR_URL}
 
-<i>Nota: il merge non e&#39; un deploy. Le immagini sono baked: serve rebuild.</i>"
+<i>Riconciliazione del deploy avviata: rimandata da sola se il mercato e&#39; aperto.</i>"
+            # Il riconciliatore decide da solo se e quando: se il mercato e' aperto
+            # rimanda, e il cron ripassa. Qui serve solo a non aspettare il cron
+            # quando la finestra e' gia' libera.
+            "$SCRIPT_DIR/deploy_reconcile.sh" >/dev/null 2>&1 || \
+                log "#$ISSUE — riconciliazione del deploy non riuscita: se ne occupa il cron."
         else
             log "#$ISSUE — merge rifiutato da GitHub (conflitto o protezione)."
             tg_send "⚠️ <b>Roadmap</b> — #${PR_NUM} approvata ma il merge e&#39; stato rifiutato da GitHub. Serve una mano.
