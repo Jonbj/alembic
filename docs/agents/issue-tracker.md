@@ -43,3 +43,41 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 - **Frontier query**: list the map's open children (`gh issue list --state open`, scoped to the map's sub-issues / task list), drop any with an open blocker (`issue_dependencies_summary.blocked_by > 0`, or an open issue in the `Blocked by` line) or an assignee; first in map order wins.
 - **Claim**: `gh issue edit <n> --add-assignee @me` — the session's first write.
 - **Resolve**: `gh issue comment <n> --body "<answer>"`, then `gh issue close <n>`, then append a context pointer (gist + link) to the map's Decisions-so-far.
+
+## Autonomous roadmap loop (active 2026-08-06 → 2026-09-28)
+
+`scripts/roadmap_agent_loop.sh` runs four times a day (cron: 07/12/17/21) and works **one**
+issue per run in an isolated worktree, opening a PR and stopping.
+
+The work is delegated to models **other than** the one that designed this machinery — the
+`MOTORI` array (currently `codex`, `gemini`), rotated one per run. Two reasons, the second
+mattering more: whoever wrote the queue and the criteria is not the right observer to judge
+whether the output respects them; and different models fail differently, so a single model
+across twenty issues repeats one blind spot twenty times with nobody noticing. If no engine
+in the list is installed the run is **cancelled** — there is deliberately no fallback, since
+a silent one would put the work back exactly where it must not be. It never merges: the CI
+`test` job in this repo is chronically red for environmental reasons, so an automatic merge
+would be gating on a signal that isn't there.
+
+During the observation freeze (#171) the agent does **not** decide its own scope. Two
+independent locks do, and an issue is worked only if it clears both:
+
+1. **`scripts/roadmap_queue.txt`** — the order, top-down.
+2. **the `freeze-ok` label** — the permission: correctness, instrumentation, measurement.
+   Never tuning.
+
+Neither the queue file nor the labels may be modified by the agent, and the prompt forbids it
+along with `docs/evidence/{OBSERVATION_CHARTER.md,findings.json,market_daily.jsonl}`. Changing
+what the loop is allowed to touch is an operator action.
+
+Operator commands:
+
+```bash
+scripts/roadmap_agent_loop.sh --dry-run   # which issue is next, no session consumed
+gh issue list --label freeze-ok --state open
+cat logs/roadmap_agent_state.tsv          # issue <TAB> failed attempts (2 = out of rotation)
+```
+
+An issue that yields no PR twice drops out of rotation rather than burning sessions. A run
+that concludes an issue isn't workable is expected to comment on it and open nothing — an
+honest no-op beats a filler PR.

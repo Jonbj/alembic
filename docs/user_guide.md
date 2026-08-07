@@ -738,4 +738,4 @@ Le notizie vengono acquisite dai feed GDELT/MarketAux. Se il mercato è chiuso (
 
 ---
 
-*Documento generato da Alembic v2. Per dettagli tecnici sui modelli, consulta i documenti in `docs/alembic_v2/`.*
+*Per i dettagli tecnici sui modelli vedi `docs/llm-config.md`; per l'architettura `docs/ARCHITECTURE.md`.*

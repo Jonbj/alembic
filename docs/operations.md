@@ -162,6 +162,88 @@ crontab -e
 
 ---
 
+## Periodo di osservazione e ledger delle evidenze (dal 2026-08-03)
+
+Dal 2026-08-03 al 2026-09-28 il sistema è in **sola osservazione**: ogni taratura è congelata.
+La carta pre-registrata è `docs/evidence/OBSERVATION_CHARTER.md` e vincola durata, esenzioni,
+soglie e criteri di uscita.
+
+**Cosa è esente dal freeze:** solo i difetti di correttezza, con questo test — *se non lo
+correggo, l'evidenza che raccolgo nelle prossime settimane è sbagliata?* Ogni eccezione va
+annotata nel registro delle deroghe della carta.
+
+### I due ledger
+
+| file | contenuto | chi scrive |
+|---|---|---|
+| `docs/evidence/findings.json` | evidenze con id stabile (`F-NNN`), occorrenze datate, costo cumulato e livello di confidenza | entrambi i cron giornalieri |
+| `docs/evidence/market_daily.jsonl` | una riga per giorno di borsa: regime, dispersione, mover, copertura news, conteggio miss, P&L | solo il cron alpha-miss |
+
+Le due regole che tengono in piedi l'impianto, scritte nei prompt dei cron:
+
+1. **Solo append.** Una sessione non può modificare o cancellare occorrenze già scritte.
+2. **Nel dubbio, aggancia.** Creare un id nuovo va giustificato: un'evidenza spezzata in più id
+   ha ricorrenza 1 ciascuno e sparisce sotto tutte le soglie.
+
+**I cron committano solo se `HEAD` è `main`.** Girano nella directory principale del repo, che può
+trovarsi sul branch di lavoro di un altro agente: in quel caso scrivono i file e stampano un avviso
+invece di disperdere il ledger su un branch casuale.
+
+### Scadenze armate (`scripts/deadline_reminders.conf`)
+
+| id | data | cosa |
+|---|---|---|
+| `OSS_PRIMO_COMMIT` | 2026-08-04 | verifica che il ledger si scriva **e si committi** da solo |
+| `OSS_MIDPOINT` | 2026-08-28 | controllo di salute del ledger; non decide nulla |
+| `OSS_SCADENZA` | 2026-09-28 | sintesi finale e roadmap pesata |
+
+Ack: `bash scripts/ack_deadline.sh <id>`.
+
+## Posizioni non proteggibili (#161)
+
+Alpaca accetta un ordine stop solo su almeno **1 azione intera**: una posizione sotto 1 azione non è
+proteggibile per costruzione, e nessun ciclo di riconciliazione le darà mai un floor. Dal 2026-08-07
+il ciclo portfolio lo dice invece di subirlo, subito dopo la sincronizzazione degli stop frazionari:
+
+- una riga di log per ciclo con quante posizioni sono sotto 1 azione e quali;
+- un **WARNING Telegram** quando una posizione senza stop supera la perdita di
+  `risk.unprotected_position_alert_pct` (0.15 — la stessa soglia già pre-registrata nel commento
+  `Revisit:` di `config/trading.yaml`), con il motivo per cui non è protetta: sotto 1 azione, oppure
+  qty ≥ 1 con lo stop atteso ma non presente (sync fallito / azioni riservate da un altro ordine).
+
+L'alert **non riduce il rischio**: toglie l'invisibilità. La correzione strutturale (size minima di
+ingresso ≥ 1 azione) è taratura e resta congelata fino al 2026-09-28 (#171).
+
+```bash
+# Quali simboli hanno già notificato oggi (dedup: una notifica per simbolo ogni 24h)
+docker compose exec redis redis-cli KEYS 'alert:unprotected_position:*'
+
+# Forzare la ri-notifica di un simbolo al prossimo ciclo
+docker compose exec redis redis-cli DEL alert:unprotected_position:NOK
+
+# Le stesse posizioni nei log del worker
+docker compose logs worker --since 1h | grep '#161'
+```
+
+## Analisi offline (non toccano il sistema di trading)
+
+| script | cosa fa | output |
+|---|---|---|
+| `scripts/compute_s4_ic.py` | Information Coefficient di S4: ricalcola l'intera serie a ogni esecuzione, quindi è idempotente | `docs/evidence/s4_ic.json` |
+| `scripts/run_calibration.py` | calibrazioni C1-C3 del programma di backtest | `docs/evidence/calibration/*.json` |
+
+Entrambi sono in **sola lettura** su Postgres e Alpaca.
+
+**Il loader dei backtest.** `src/backtest/data/alpaca_loader.py` usa il feed **SIP**, non IEX: i dati
+storici oltre i 15 minuti sono disponibili su ogni piano Alpaca, e IEX è un singolo mercato con
+volume parziale (misurato su SPY: 1512 barre dal 2018-11 con il 2019 assente, contro 2659 dal 2016-01
+su SIP). Il vecchio `src/backtest/data/loader.py` (yfinance) resta in uso da cinque backtest di
+strategia e non va sostituito.
+
+Il protocollo statistico in vigore è in `docs/evidence/PREREGISTRAZIONE_BACKTEST_S1.md`: soglia
+|t| ≥ 3,0 con correzione per test multipli, e distinzione fra calibrazioni, confermative e
+diagnostiche.
+
 ## Redis Operations
 
 ```bash

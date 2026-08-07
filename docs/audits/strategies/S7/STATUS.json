@@ -1,0 +1,11 @@
+{
+  "strategy_id": "S7",
+  "01_specification": "done",
+  "02_hypothesis": "done",
+  "03_literature": "done",
+  "04_alpha_assessment": "done",
+  "05_code_mapping": "done",
+  "06_implementation_audit": "done",
+  "07_bugs": "done",
+  "08_report": "done"
+}

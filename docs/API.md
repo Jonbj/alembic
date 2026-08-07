@@ -1130,7 +1130,7 @@ Operator cockpit: aggregates 8 health/alert flags from Redis and PostgreSQL. Alw
 | `last_signal_age_minutes` | any float | Minutes since last signal (null if no signals ever) |
 | `last_cycle_age_minutes` | any float | Minutes since last cycle (null if no cycles ever) |
 
-See `docs/RUNBOOK_OPERATOR_COCKPIT.md` (or `docs/operations.md` Cockpit Runbooks section) for remediation steps.
+See the Cockpit Runbooks section of `docs/operations.md` for remediation steps.
 
 ### `GET /api/system/decisions` *(P2-04)*
 

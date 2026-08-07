@@ -20,6 +20,13 @@ Net P&L per case is joined from `trades` on symbol + exit_time within a
 5-minute window of the decision's tick_time (there is no direct FK from
 execution_decisions to the trade it closed).
 
+CAVEAT (#184): rows written before the #184 fix carry a "whipsaw" label
+DEDUCED from the last signal's age, not observed — a weight-0 SELL whose
+signal was fresher than max_signal_age_hours was tagged "whipsaw" whatever
+actually zeroed the weight. Pre-fix rows start their reason with
+"[whipsaw] Portfolio rebalance:"; post-fix ones with "[whipsaw] S4 signal
+reached the portfolio engine fresh". See docs/exit_mechanism_labels.md.
+
 Flip-decision tracking: issue #83.
 
 Run inside the worker container:
@@ -93,6 +100,8 @@ def main() -> int:
                 "tick_time": r["tick_time"], "symbol": r["symbol"],
                 "would_suppress": would_suppress, "streak": streak,
                 "confirm_cycles": confirm_cycles, "net_pnl": net_pnl,
+                # #184: pre-fix rows carry a deduced label; keep the text to count them.
+                "reason": r["reason"],
             })
 
         n = len(cases)
@@ -102,7 +111,16 @@ def main() -> int:
         pnl_suppress = [c["net_pnl"] for c in cases if c["would_suppress"] and c["net_pnl"] is not None]
         pnl_suppress_total = sum(pnl_suppress) if pnl_suppress else None
 
-        print(f"== #61 whipsaw shadow evidence: {n} case(s) since deploy (2026-07-16) ==\n")
+        print(f"== #61 whipsaw shadow evidence: {n} case(s) since deploy (2026-07-16) ==")
+        n_pre_fix = sum(
+            1 for c in cases if c["reason"].startswith("[whipsaw] Portfolio rebalance:")
+        )
+        if n_pre_fix:
+            print(
+                f"   {n_pre_fix} of these carry a PRE-#184 label deduced from the signal's "
+                "age, not observed — see docs/exit_mechanism_labels.md"
+            )
+        print()
         print(f"{'date/time (UTC)':<20} {'symbol':<8} {'would_suppress':<15} {'streak':<8} {'net_pnl':>10}")
         for c in cases:
             pnl_str = f"{c['net_pnl']:.2f}" if c["net_pnl"] is not None else "n/a"

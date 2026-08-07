@@ -4,6 +4,23 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ---
 
+## 2026-08-07
+
+### #161 — il sistema distingue una posizione protetta da una non proteggibile
+Alpaca accetta uno stop solo su almeno 1 azione intera: le 13 posizioni sotto quella soglia
+(15% del libro, e **tutto** il P&L negativo: −$452 contro +$660) non erano proteggibili per
+costruzione, e nulla nel sistema le distingueva dalle 35 protette. `src/portfolio/unprotected_positions.py`
+classifica ogni posizione dopo la sincronizzazione degli stop frazionari (proteggibile /
+protetta / perché no); oltre `risk.unprotected_position_alert_pct` (0.15) parte un WARNING
+Telegram, una volta al giorno per simbolo (`SET NX` su `alert:unprotected_position:<sym>`),
+più una riga di log per ciclo.
+
+La soglia non è nuova: è il −15% già scritto nel commento `Revisit:` di `config/trading.yaml`,
+che si era verificato su quattro posizioni (NOK −24.6%, MRVL −22.0%, AMAT −21.7%, WDC −15.3%)
+senza che niente lo sorvegliasse. **Strumentazione, non taratura**: nessun ordine, nessuna size,
+nessun gate. Decisione operatore del 2026-08-06 (opzione 3 di #161); la size minima di ingresso
+≥ 1 azione è taratura e resta al 2026-09-28 (#171).
+
 ## 2026-07-27
 
 ### F8 regime_scale — gate per-strategia, evidenza dai dati registrati, leva OFF (#32, #134)

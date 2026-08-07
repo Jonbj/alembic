@@ -105,6 +105,34 @@ Limita l'analisi ESCLUSIVAMENTE ai simboli in config/trading.yaml -> symbols.wat
 (circa 96 simboli). Non è uno scan whole-market: la domanda è "abbiamo perso qualcosa che
 potevamo effettivamente tradare", non "cosa ha fatto il mercato in generale".
 
+FASE 0 — LEGGI IL DOSSIER E IL LEDGER PRIMA DI ANALIZZARE
+
+Un dossier deterministico con i numeri della giornata e' gia' stato calcolato:
+  __DOSSIER_FILE__
+Se il percorso e' "(non disponibile)" la generazione e' fallita: calcola i numeri
+tu come facevi prima e segnalalo nel report. Altrimenti LEGGILO e USALO.
+
+Contiene: rendimenti di tutti i simboli, dispersione cross-sectional, conteggio
+mover, copertura news, candidati miss con la loro evidenza, gli INGRESSI del
+giorno con entry_percentile/mtm_eod/vs_apertura, le CHIUSURE con
+drift_post_uscita, e tre aggregati (per ora d'ingresso, cause di miss cumulate,
+mediane mobili a 20 giorni).
+
+REGOLA: NON ricalcolare cio' che il dossier contiene gia'. Ogni numero che citi
+deve venire dal dossier, e in caso di discrepanza fra il tuo calcolo e il suo
+vince il dossier — e' deterministico, tu no. Il tuo compito e' interpretare:
+classificare le cause dei miss leggendo il testo degli articoli (cosa che il
+dossier non puo' fare), leggere il pattern della giornata, e scrivere le
+segnalazioni.
+
+FASE 0b — LEGGI IL LEDGER
+Leggi docs/evidence/findings.json. Contiene le evidenze già note, ciascuna con un id stabile
+(F-001, F-002, ...), un titolo e le occorrenze già registrate. Tienile presenti per tutta
+l'analisi: alla fine ogni segnalazione che produrrai andrà agganciata a una di queste o
+registrata come nuova.
+Leggi anche docs/evidence/OBSERVATION_CHARTER.md: sei dentro un periodo di sola osservazione,
+quindi NON proporre tarature né fix, solo evidenza.
+
 FASE 1 — RENDIMENTI DEL __DATE_TARGET__
 Scarica le barre giornaliere Alpaca per l'intera watchlist e calcola il rendimento
 percentuale (close vs close precedente). Credenziali in .env (ALPACA_API_KEY,
@@ -170,6 +198,120 @@ Salva un report Markdown in __REPORT_FILE__ usando il Write tool, con queste sez
 7. Non proporre fix di codice: se una causa (es. FILTERED) sembra un bug piuttosto che un limite
    noto, dillo esplicitamente e basta — la decisione se aprire un'issue è dell'operatore.
 
+FASE FINALE — AGGIORNA I DUE LEDGER
+
+A) Appendi UNA riga a docs/evidence/market_daily.jsonl.
+
+   FORMATO VINCOLANTE: JSON Lines. La riga deve stare su UNA SOLA RIGA FISICA, senza
+   indentazione e senza a capo interni, terminata da newline. Il file NON e' un JSON: e' una
+   sequenza di oggetti JSON uno per riga, e un oggetto spezzato su piu' righe lo rende
+   illeggibile. Lo schema qui sotto e' scritto su una riga sola apposta: copiane la FORMA, non
+   solo i campi.
+
+   {"data":"__DATE_TARGET__","spy":0.0,"qqq":0.0,"dispersione_sigma":0.0,"mover_3pct":0,"up":0,"down":0,"watchlist_zero_news":0,"tema":"","miss":{"NO_NEWS":0,"THIN_NEUTRAL":0,"WRONG_SIGN":0,"FILTERED":0,"OUT_OF_STRATEGY_SCOPE":0},"catturati":0,"book":{"equity":0.0,"realizzato":0.0,"mtm":null,"s1_realizzato":0.0,"s4_realizzato":0.0}}
+
+   Dopo aver scritto, VERIFICA che il file sia ancora JSON Lines valido:
+     python3 -c "import json;[json.loads(l) for l in open('docs/evidence/market_daily.jsonl') if l.strip()];print('JSONL ok')"
+   Se stampa un errore invece di "JSONL ok", hai spezzato la riga: correggila.
+
+   Definizioni:
+   - spy / qqq: rendimento giornaliero (close vs close precedente), come frazione non percentuale.
+   - dispersione_sigma: deviazione standard cross-sectional dei rendimenti dei 96 simboli.
+   - mover_3pct / up / down: quanti simboli con |return| >= 3%, e la ripartizione.
+   - watchlist_zero_news: quanti dei 96 simboli hanno ZERO righe in news_log quel giorno.
+   - tema: una riga di testo, la stessa lettura della tua sezione "Pattern osservato".
+     Ammesso "non chiaro".
+   - miss: i conteggi della tua tabella dei miss classificati.
+   - catturati: quanti mover erano in portafoglio o sono stati tradati.
+   - book: equity di fine giornata da Alpaca; realizzato = somma net_pnl dei trade chiusi quel
+     giorno; s1_realizzato / s4_realizzato = stessa somma per strategia; mtm = variazione
+     mark-to-market del book aperto se la calcoli, altrimenti null.
+   Se un valore non lo puoi calcolare, scrivi null. NON inventarlo e NON omettere la chiave.
+   Se esiste già una riga con la stessa "data", NON aggiungerne una seconda: significa che il
+   report è stato rigenerato. In quel caso lascia il file com'è e segnalalo a stdout.
+
+B) Aggiorna docs/evidence/findings.json per OGNI voce della tua sezione di segnalazioni.
+   Per ciascuna, decidi se è già nel ledger:
+   - SE corrisponde a un finding esistente: aggiungi UNA voce al suo array "occorrenze" e
+     ricalcola "costo_cumulato_usd" come somma di occorrenze[].costo_usd.
+   - SE è genuinamente nuova: crea un record con id "F-NNN" dove NNN è il valore corrente di
+     "prossimo_id" formattato a 3 cifre, poi incrementa "prossimo_id" di 1.
+
+   Schema di un record:
+   {"id":"F-001","titolo":"","tipo":"difetto|alpha_miss|osservazione",
+    "confidenza":"misurata|attribuita|congetturale","primo_avvistamento":"__DATE_TARGET__",
+    "occorrenze":[{"data":"__DATE_TARGET__","costo_usd":0.0,"nota":"","fonte":""}],
+    "costo_cumulato_usd":0.0,"occorrenze_non_stimate":0,"stato":"aperto","issue":null}
+
+   Livelli di confidenza:
+   - misurata: perdita reale tracciabile a righe di DB.
+   - attribuita: il trade esiste, il controfattuale è corto.
+   - congetturale: alpha mancato, nessun trade avvenuto. TUTTI i miss sono congetturali.
+
+   IL COSTO VA STIMATO. E' obbligatorio provarci: le soglie che decideranno cosa
+   merita lavoro sono espresse in dollari, quindi un'occorrenza senza costo non
+   pesa nulla e l'evidenza raccolta diventa inutilizzabile.
+
+   Come stimarlo, per livello:
+   - misurata: il P&L reale attribuibile al difetto. Esempio: un trade chiuso in
+     perdita per un exit sbagliato -> il suo net_pnl. Cita l'id del trade.
+   - attribuita: la differenza fra quanto e' successo e quanto sarebbe successo
+     senza il difetto, su un controfattuale CORTO. Esempio: uscita troppo presto
+     -> (close del giorno - exit_price) * qty. Cita i numeri usati.
+   - congetturale: il movimento non catturato per una size di posizione
+     plausibile. Usa la size tipica di una posizione S4 (~2% del NAV, cioe'
+     ~2.200 $ su un conto da ~110.000 $), NON il notional pieno del titolo.
+     Esempio: mover a +6% mancato -> 2200 * 0.06 = 132 $.
+
+   SE NON E' STIMABILE, scrivi "costo_usd": null — MAI 0.0. Zero significa "e'
+   costato zero", che e' un'affermazione; null significa "non l'ho stimato", che
+   e' un'altra cosa. Confonderle rende impossibile distinguere un difetto innocuo
+   da uno mai quantificato.
+
+   Un'osservazione strutturale (es. "la copertura news e' bassa") tipicamente NON
+   ha un costo giornaliero stimabile: usa null, e conta sulla ricorrenza.
+
+   "costo_cumulato_usd" e' la somma delle sole occorrenze con costo non-null.
+   Aggiungi anche "occorrenze_non_stimate": <quante hanno costo_usd null>.
+   Il campo "fonte" deve puntare al report e alla sezione che giustifica l'occorrenza, es.
+   "ALPHA_MISS_REPORT___DATE_TARGET__.md §7".
+
+   DUE REGOLE VINCOLANTI:
+   1. SOLO APPEND. Non modificare né cancellare occorrenze già presenti, né cambiare il titolo o
+      l'id di un finding esistente. Puoi solo aggiungere occorrenze, creare record nuovi, e
+      ricalcolare costo_cumulato_usd.
+   2. NEL DUBBIO, AGGANCIA. Creare un id nuovo va giustificato nella nota. Due record duplicati si
+      fondono a fine periodo; un'evidenza spezzata in cinque id diversi ha ricorrenza 1 ciascuno e
+      sparisce sotto tutte le soglie — errore silenzioso e non recuperabile.
+
+   Le CAUSE di miss (NO_NEWS, THIN_NEUTRAL, ...) NON diventano findings: sono già contate in
+   market_daily.jsonl. Diventa un finding solo un'affermazione strutturale, es. "39 simboli su 96
+   non hanno copertura news in un giorno tipico".
+
+C) Committa i due file SOLO SE il branch corrente e' main. Controlla PRIMA:
+
+     git rev-parse --abbrev-ref HEAD
+
+   - Se stampa "main": committa.
+       git add docs/evidence/findings.json docs/evidence/market_daily.jsonl
+       git commit -m "evidence: ledger __DATE_TARGET__"
+       git push origin main
+     Il PUSH e' obbligatorio quanto il commit: senza, il ledger vive solo su questa
+     macchina e un cambio di sessione o un guasto lo perde. Se il push fallisce (rete,
+     divergenza col remoto) NON forzarlo: lascia il commit locale e segnalalo a stdout.
+   - Se stampa QUALSIASI ALTRA COSA: NON committare. I file restano scritti sul disco (non
+     annullare le modifiche) e stampi su stdout, come ultima riga:
+       ATTENZIONE: ledger scritto ma NON committato — branch corrente <nome>, atteso main.
+
+   Motivo: questo cron gira nella directory principale del repo, che puo' trovarsi sul branch di
+   lavoro di un altro agente. Un commit del ledger su un branch casuale lo disperderebbe e
+   spezzerebbe la cronologia git, che e' l'audit del ledger stesso.
+
+   Se non c'e' nulla da committare, non forzare il commit.
+
+D) Nella sezione di segnalazioni del report, ogni voce deve riportare il suo id fra parentesi
+   quadre a inizio riga, es. "[F-004] Sembra un difetto — ...".
+
 REGOLE IMPORTANTI
 * Modalità read-only: nessuna modifica a codice, nessun commit, nessun ordine, nessun worker
   avviato. L'unico file che scrivi è __REPORT_FILE__.
@@ -181,10 +323,23 @@ REGOLE IMPORTANTI
 PROMPT
 )
 
+# Dossier deterministico (#174): i numeri si calcolano UNA volta, qui, e la
+# sessione li interpreta invece di ri-derivarli. Fallisce in modo morbido: se il
+# dossier non si genera la sessione lavora come prima, calcolandosi i numeri da
+# se'. Meglio un report senza dossier che nessun report.
+DOSSIER_FILE="$PROJECT_DIR/docs/evidence/dossier/${DATE_TARGET}.json"
+if uv run python "$PROJECT_DIR/scripts/alpha_miner_dossier.py" "$DATE_TARGET" >> "$LOG_FILE" 2>&1; then
+    echo "Dossier generato: $DOSSIER_FILE" | tee -a "$LOG_FILE"
+else
+    echo "ATTENZIONE: generazione dossier fallita — la sessione procede senza." | tee -a "$LOG_FILE"
+    DOSSIER_FILE="(non disponibile)"
+fi
+
 _CLAUDE_PROMPT="${_PROMPT_TEMPLATE//__DATE_TARGET__/$DATE_TARGET}"
+_CLAUDE_PROMPT="${_CLAUDE_PROMPT//__DOSSIER_FILE__/$DOSSIER_FILE}"
 _CLAUDE_PROMPT="${_CLAUDE_PROMPT//__REPORT_FILE__/$REPORT_FILE}"
 
-ANALYSIS_OUTPUT=$(claude --allowedTools "Bash,Write" -p "$_CLAUDE_PROMPT" 2>&1)
+ANALYSIS_OUTPUT=$(claude --allowedTools "Bash,Read,Write,Edit" -p "$_CLAUDE_PROMPT" 2>&1)
 
 echo "$ANALYSIS_OUTPUT" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"

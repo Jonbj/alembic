@@ -62,6 +62,7 @@ signal = cross_sectional_z_score(signal_raw)        # z-score across all symbols
 | `lookbacks` | (21, 63, 126, 252) | Lookback windows in trading days |
 | `vol_window_signal` | 63 | Rolling vol for return normalisation |
 | `target_vol` | 0.15 | Annualised vol target for sizing |
+| `rebalance_frequency` | `MONTHLY` | Cadenza di ribilanciamento — rispettata sia dal backtest sia dal path live (vedi *Rebalance cadence*) |
 
 ### Integration
 
@@ -186,12 +187,27 @@ The multiplier (0.2× to 1.0×) prevents full-size entries during bear markets o
 
 ### Key Parameters (`S4Config`)
 
+> **Verificato contro `src/strategies/s4/config.py` il 2026-08-03.** La tabella precedente
+> elencava quattro parametri (`score_threshold`, `signal_max_age_min`, `base_position_size`,
+> `stop_loss_pct`) di cui **nessuno esiste in `S4Config`**, e uno era fuorviante di un fattore
+> otto: dichiarava una scadenza segnale di 30 minuti contro le 4 ore reali.
+
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `score_threshold` | 0.3 | Minimum score to trigger BUY |
-| `signal_max_age_min` | 30 | Max signal age before stale |
-| `stop_loss_pct` | 0.02 (da config/trading.yaml risk.stop_loss) | 2% stop-loss from entry |
-| `base_position_size` | 0.02 | 2% of NAV per position |
+| `n_top` | 5 | Numero di ticker selezionati per ciclo |
+| `bucket_pct` | 0.10 | Quota di portafoglio assegnata alla sleeve S4 |
+| `min_score` | 0.1 | **Prefiltro del ranker**, NON la soglia d'ordine |
+| `min_confidence` | 0.3 | **Prefiltro del ranker**, NON la soglia d'ordine |
+| `min_stocks` | 1 | Minimo di titoli per emettere ordini (1 = ammesso il lone survivor) |
+| `fixed_slot_sizing` | True | Peso fisso 1/`n_top` per ticker; gli slot inutilizzati restano non investiti (#81) |
+| `signals_lookback_hours` | 96 | Finestra di lettura dei segnali dal DB (copre il ponte festivo Ven→Mar) |
+| `max_signal_age_hours` | 4 | Oltre questa età il segnale è scaduto e la posizione viene chiusa |
+| `rebalance_frequency` | DAILY | Cadenza di ribilanciamento della sleeve |
+
+**La soglia d'ordine non è in `S4Config`.** È `feedback:entry_threshold` in Redis (baseline 0.30,
+alzata dinamicamente dal loop di loss-feedback) ed è applicata a monte, nel portfolio scheduler.
+Confondere `min_score` con la soglia d'ordine è l'errore che nel luglio 2026 ha lasciato il gate
+disarmato per un giorno e mezzo (issue #163).
 
 ---
 
@@ -241,6 +257,36 @@ delta_orders = [BUY/SELL (target_qty - current_qty) for sym in merged]
 ```
 
 Allocation config is in `config/strategies.yaml` — that file is the **single source of truth**. `StrategyRegistry` reads it at startup with startup validation (sum ≤ 1.0, S4 ≤ 10%, S2 enabled requires explicit override).
+
+### Rebalance cadence
+
+Il portfolio cycle gira ogni 15 minuti, ma **non tutte le sleeve decidono a ogni ciclo**.
+Prima di calcolare i pesi l'orchestratore interroga `should_rebalance(ts)` della strategia —
+la stessa identica funzione che il backtest chiama da `__call__`, così le due cadenze non
+possono divergere in silenzio (#185).
+
+Fuori dalla propria finestra la sleeve **tiene il libro**: ridichiara i simboli che aveva
+in target all'ultimo ribilanciamento *e che detiene ancora*, con peso derivato dal valore
+corrente della posizione. Il delta contro il portafoglio è quindi esattamente zero — niente
+uscite `s1_weight_drop`, niente trim da drift di prezzo, e niente reingresso su un simbolo
+uscito nel frattempo per stop. Restano invece pienamente attivi i path che *non* sono
+ribilanciamento: stop-loss, `sentiment_reversal`, kill-switch di drawdown.
+
+L'orologio vive in Redis (`strategy:rebalance_state:{strategy_id}`), non nell'istanza: ogni
+ciclo ricostruisce le strategie da zero, quindi uno stato in memoria sarebbe sempre vuoto —
+che è precisamente il motivo per cui S1 dichiarava `MONTHLY` e ribilanciava ogni quarto d'ora.
+Fail-open: se la chiave manca o è illeggibile il gate resta aperto e la sleeve ribilancia.
+
+| sleeve | dichiarata | onorata dal live |
+|---|---|---|
+| S1 | `MONTHLY` | sì |
+| S4 | `DAILY` | **no** — vedi sotto |
+
+S4 è fuori dal perimetro di #185 (`_REBALANCE_CLOCK_STRATEGIES` nello scheduler). Il suo
+predicato `DAILY` è su data di calendario: applicarlo ridurrebbe una sleeve tattica
+news-driven a una decisione per seduta, congelando sia gli ingressi intraday sia le uscite
+`[expired]`/`[whipsaw]`. È un cambio di strategia, non la correzione di churn documentata
+nella issue — allargarlo a S4 è una decisione dell'operatore.
 
 ### Constraint Enforcement
 
