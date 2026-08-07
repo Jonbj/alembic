@@ -14,6 +14,7 @@
 #
 # Aggiornare l'ordine e' una decisione dell'operatore, non dell'agente.
 
+190  i cron dell'osservazione perdono i propri fallimenti: un giro morto e uno sano hanno la stessa firma
 184  exit_mechanism dedotto dall'eta' del segnale: etichetta MALE le righe che stiamo raccogliendo adesso
 185  rebalance_frequency ignorata dal live: deroga approvata, corrompe l'evidenza S1 a ogni ciclo
 161  alert posizioni non proteggibili: perimetro ristretto alla sola sorveglianza (vedi commento sull'issue)
