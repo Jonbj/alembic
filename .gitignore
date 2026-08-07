@@ -75,3 +75,6 @@ logs/
 
 # Lock di sessione riscritto a ogni avvio: churn puro, non stato del progetto.
 .claude/scheduled_tasks.lock
+
+# Backup di dati DB prodotti dagli script one-shot: dati di ambiente, non di repo
+backups/
