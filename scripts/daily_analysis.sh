@@ -18,6 +18,12 @@ LOG_DIR="$PROJECT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
 DATE=$(date +%Y-%m-%d)
+LOG_FILE="$LOG_DIR/daily_analysis_${DATE}.log"
+
+# Persist the whole cron process, including failures before the human-readable
+# header.  The host crontab does not provide a redirect of its own.
+exec >>"$LOG_FILE" 2>&1
+
 # Target the last TRADING day, not the calendar yesterday: with the Mon-Fri
 # 14:30 cron, "yesterday" made Monday analyze Sunday (empty) and Friday was
 # never analyzed at all (#74). Monday now targets Friday.
@@ -25,7 +31,6 @@ DATE_TARGET=$(date -d "yesterday" +%Y-%m-%d)
 if [[ $(date -d "yesterday" +%u) -ge 6 ]]; then
     DATE_TARGET=$(date -d "last friday" +%Y-%m-%d)
 fi
-LOG_FILE="$LOG_DIR/daily_analysis_${DATE}.log"
 REPORT_FILE="$PROJECT_DIR/docs/FORENSIC_DAILY_REPORT_${DATE_TARGET}.md"
 
 # Load Telegram credentials from .env
@@ -48,20 +53,25 @@ fi
 
 tg_send() {
     local text="$1"
+    local parse_mode="${2-HTML}"
     if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]]; then
         echo "[tg_send] Telegram credentials not set — skipping" >&2
         return
     fi
-    curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-        -d chat_id="${TELEGRAM_CHAT_ID}" \
-        -d parse_mode="HTML" \
-        -d text="$text" \
-        > /dev/null
+    local curl_args=(
+        -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
+        -d chat_id="${TELEGRAM_CHAT_ID}"
+        -d text="$text"
+    )
+    if [[ -n "$parse_mode" ]]; then
+        curl_args+=(-d parse_mode="$parse_mode")
+    fi
+    curl "${curl_args[@]}" > /dev/null
 }
 
-echo "=== Alembic Daily Analysis ${DATE} (target: ${DATE_TARGET}) ===" | tee "$LOG_FILE"
-echo "Started: $(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$LOG_FILE"
-echo "Report: ${REPORT_FILE}" | tee -a "$LOG_FILE"
+echo "=== Alembic Daily Analysis ${DATE} (target: ${DATE_TARGET}) ==="
+echo "Started: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+echo "Report: ${REPORT_FILE}"
 
 tg_send "⏳ <b>Analisi giornaliera Alembic avviata</b>
 Data analisi: ${DATE_TARGET}
@@ -394,12 +404,12 @@ DUE REGOLE VINCOLANTI:
 2. NEL DUBBIO, AGGANCIA. Creare un id nuovo va giustificato nella nota. Un'evidenza spezzata in
    più id ha ricorrenza 1 ciascuno e sparisce sotto tutte le soglie.
 
-Poi committa SOLO SE il branch corrente e' main. Controlla PRIMA:
+Poi committa il ledger e il report SOLO SE il branch corrente e' main. Controlla PRIMA:
 
    git rev-parse --abbrev-ref HEAD
 
 - Se stampa "main": committa.
-    git add docs/evidence/findings.json
+    git add docs/evidence/findings.json "__REPORT_FILE__"
     git commit -m "evidence: forensic __DATE_TARGET__"
    git push origin main
  Il PUSH e' obbligatorio quanto il commit: senza, il ledger vive solo su questa macchina
@@ -438,11 +448,24 @@ _CLAUDE_PROMPT="${_PROMPT_TEMPLATE//__ALEMBIC_API_KEY__/$ALEMBIC_API_KEY}"
 _CLAUDE_PROMPT="${_CLAUDE_PROMPT//__DATE_TARGET__/$DATE_TARGET}"
 _CLAUDE_PROMPT="${_CLAUDE_PROMPT//__REPORT_FILE__/$REPORT_FILE}"
 
+set +e
 ANALYSIS_OUTPUT=$(claude --allowedTools "Bash,Read,Write,Edit" -p "$_CLAUDE_PROMPT" 2>&1)
+ANALYSIS_STATUS=$?
+set -e
 
-echo "$ANALYSIS_OUTPUT" | tee -a "$LOG_FILE"
-echo "" | tee -a "$LOG_FILE"
-echo "Completed: $(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$LOG_FILE"
+printf '%s\n' "$ANALYSIS_OUTPUT"
+if (( ANALYSIS_STATUS != 0 )); then
+    echo "FAILED: sessione Claude terminata con codice $ANALYSIS_STATUS"
+    FAILURE_TAIL=$(printf '%s\n' "$ANALYSIS_OUTPUT" | tail -c 3000)
+    tg_send "🚨 Analisi forense ${DATE_TARGET} fallita con codice ${ANALYSIS_STATUS}.
+
+Coda output:
+${FAILURE_TAIL}" "" || true
+    exit "$ANALYSIS_STATUS"
+fi
+
+echo ""
+echo "Completed: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
 # Telegram message 1: executive summary (first output lines, max 3800 chars)
 HEADER="📊 <b>Analisi Trading Alembic — ${DATE_TARGET}</b>"

@@ -115,6 +115,48 @@ def test_forensic_error_before_header_is_persisted(tmp_path: Path):
     assert "ALEMBIC_API_KEY" in logs[0].read_text()
 
 
+def test_alpha_calendar_error_before_header_is_persisted(tmp_path: Path):
+    project = tmp_path / "project"
+    scripts_dir = project / "scripts"
+    bin_dir = tmp_path / "bin"
+    scripts_dir.mkdir(parents=True)
+    bin_dir.mkdir()
+    shutil.copy2(
+        ROOT / "scripts" / "daily_alpha_miss_analysis.sh",
+        scripts_dir / "daily_alpha_miss_analysis.sh",
+    )
+    _write_executable(
+        bin_dir / "uv",
+        "#!/usr/bin/env bash\n"
+        "printf 'CALENDARIO-NON-DISPONIBILE\\n' >&2\n"
+        "exit 17\n",
+    )
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(tmp_path / "home"),
+            "PATH": f"{bin_dir}:{env['PATH']}",
+        }
+    )
+    result = subprocess.run(
+        ["bash", str(scripts_dir / "daily_alpha_miss_analysis.sh")],
+        cwd=project,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    logs = list((project / "logs").glob("alpha_miss_analysis_*.log"))
+    assert len(logs) == 1
+    log = logs[0].read_text()
+    assert "CALENDARIO-NON-DISPONIBILE" in log
+    assert "codice 17" in log
+
+
 @pytest.mark.parametrize("script_name", SCRIPTS)
 def test_whole_script_redirect_starts_before_environment_setup(script_name: str):
     source = (ROOT / "scripts" / script_name).read_text()
