@@ -2134,6 +2134,98 @@ class TestSyncFractionalProtectiveStops:
         tc.submit_order.assert_not_called()
 
 
+# ── #161: surveillance of positions that carry no broker-side stop ──────────
+
+
+def _fake_unprotectable(symbol: str, qty: str, plpc: str):
+    """Sub-1-share position (no stop possible) with a broker-reported loss."""
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        symbol=symbol, qty=qty, avg_entry_price="100.0", unrealized_plpc=plpc
+    )
+
+
+class TestUnprotectedPositionAlert:
+    def _stop_policy(self):
+        from src.portfolio.stop_policy import StopPolicy
+        return StopPolicy({"stop_loss_mode": "fixed", "stop_loss": 0.0})
+
+    def _sync(self, tc, notifier, redis_inst):
+        from src.workers.portfolio_scheduler import _sync_fractional_protective_stops
+
+        with patch("redis.Redis") as mock_cls:
+            mock_cls.from_url.return_value = redis_inst
+            return _sync_fractional_protective_stops(
+                tc,
+                self._stop_policy(),
+                datetime(2026, 7, 16, tzinfo=timezone.utc),
+                notifier=notifier,
+            )
+
+    def test_alerts_when_a_sub_one_share_position_is_past_the_threshold(self):
+        tc = MagicMock()
+        tc.get_all_positions.return_value = [_fake_unprotectable("NOK", "0.563993", "-0.246")]
+        tc.get_orders.return_value = []
+        notifier = MagicMock()
+        redis_inst = MagicMock()
+        redis_inst.set.return_value = True  # first sighting of the symbol
+
+        summary = self._sync(tc, notifier, redis_inst)
+
+        assert summary["unprotected_alerts"] == ["NOK"]
+        message = notifier.send_alert.call_args.args[0]
+        assert "NOK" in message and "-24.6%" in message and "sub-1-share" in message
+
+    def test_does_not_realert_the_same_position_on_the_next_cycle(self):
+        tc = MagicMock()
+        tc.get_all_positions.return_value = [_fake_unprotectable("NOK", "0.563993", "-0.246")]
+        tc.get_orders.return_value = []
+        notifier = MagicMock()
+        redis_inst = MagicMock()
+        redis_inst.set.return_value = None  # SET NX failed: already alerted today
+
+        summary = self._sync(tc, notifier, redis_inst)
+
+        assert summary["unprotected_alerts"] == []
+        notifier.send_alert.assert_not_called()
+
+    def test_no_alert_below_the_threshold(self):
+        tc = MagicMock()
+        tc.get_all_positions.return_value = [_fake_unprotectable("INTC", "0.4", "-0.105")]
+        tc.get_orders.return_value = []
+        notifier = MagicMock()
+        redis_inst = MagicMock()
+        redis_inst.set.return_value = True
+
+        summary = self._sync(tc, notifier, redis_inst)
+
+        assert summary["unprotected_alerts"] == []
+        notifier.send_alert.assert_not_called()
+
+    def test_no_alert_for_a_protected_position_however_deep_the_loss(self):
+        """A qty >= 1 position gets a stop from this very sync — the alert is
+        about invisibility, not about losses."""
+        tc = MagicMock()
+        tc.get_all_positions.return_value = [_fake_unprotectable("AAPL", "2.4578", "-0.30")]
+        tc.get_orders.return_value = []
+        notifier = MagicMock()
+        redis_inst = MagicMock()
+        redis_inst.set.return_value = True
+
+        summary = self._sync(tc, notifier, redis_inst)
+
+        assert summary["created"] == 1
+        assert summary["unprotected_alerts"] == []
+        notifier.send_alert.assert_not_called()
+
+    def test_threshold_comes_from_trading_yaml(self):
+        """The -15% is the one pre-registered in config/trading.yaml:180-182,
+        not a new number invented for the alert."""
+        from src.workers.portfolio_scheduler import _unprotected_alert_threshold
+
+        assert _unprotected_alert_threshold() == pytest.approx(0.15)
+
+
 # ── #71: S1 re-entry cooldown after a self-excluded weight drop ─────────────
 
 

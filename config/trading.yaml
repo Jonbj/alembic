@@ -192,6 +192,13 @@ risk:
   stop_risk_budget_bp_aggregate: 100
   stop_gap_buffer_pct: 0.005
   stop_shadow_enabled: true       # 2026-07-15: on — observe d_hard / adverse excursion with protective stop disabled
+  # #161: loss at which a position WITHOUT a broker-side stop raises a Telegram
+  # WARNING (one per symbol per day). This is the -15% already written in the
+  # "Revisit:" note above, made machine-readable — not a new threshold: the
+  # condition had fired on four positions (NOK -24.6%, MRVL -22.0%, AMAT -21.7%,
+  # WDC -15.3%) with nothing watching it. Alert only: changes no order, no size,
+  # no gate, so it does not touch the observation window (#171).
+  unprotected_position_alert_pct: 0.15
   broker_disaster_stop:
     multiplier: 1.5
     sigma_multiple: 5.0
