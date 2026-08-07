@@ -199,6 +199,32 @@ invece di disperdere il ledger su un branch casuale.
 
 Ack: `bash scripts/ack_deadline.sh <id>`.
 
+## Posizioni non proteggibili (#161)
+
+Alpaca accetta un ordine stop solo su almeno **1 azione intera**: una posizione sotto 1 azione non è
+proteggibile per costruzione, e nessun ciclo di riconciliazione le darà mai un floor. Dal 2026-08-07
+il ciclo portfolio lo dice invece di subirlo, subito dopo la sincronizzazione degli stop frazionari:
+
+- una riga di log per ciclo con quante posizioni sono sotto 1 azione e quali;
+- un **WARNING Telegram** quando una posizione senza stop supera la perdita di
+  `risk.unprotected_position_alert_pct` (0.15 — la stessa soglia già pre-registrata nel commento
+  `Revisit:` di `config/trading.yaml`), con il motivo per cui non è protetta: sotto 1 azione, oppure
+  qty ≥ 1 con lo stop atteso ma non presente (sync fallito / azioni riservate da un altro ordine).
+
+L'alert **non riduce il rischio**: toglie l'invisibilità. La correzione strutturale (size minima di
+ingresso ≥ 1 azione) è taratura e resta congelata fino al 2026-09-28 (#171).
+
+```bash
+# Quali simboli hanno già notificato oggi (dedup: una notifica per simbolo ogni 24h)
+docker compose exec redis redis-cli KEYS 'alert:unprotected_position:*'
+
+# Forzare la ri-notifica di un simbolo al prossimo ciclo
+docker compose exec redis redis-cli DEL alert:unprotected_position:NOK
+
+# Le stesse posizioni nei log del worker
+docker compose logs worker --since 1h | grep '#161'
+```
+
 ## Analisi offline (non toccano il sistema di trading)
 
 | script | cosa fa | output |
