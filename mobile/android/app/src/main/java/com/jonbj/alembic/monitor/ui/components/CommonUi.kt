@@ -2,16 +2,18 @@ package com.jonbj.alembic.monitor.ui.components
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
@@ -20,6 +22,7 @@ import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -97,31 +100,47 @@ fun FreshnessBanner(
         ContentMode.UNAVAILABLE -> stringResource(R.string.unavailable)
     }
     val time = asOf.toLocalDateTime(TimeZone.currentSystemDefault())
-    Card(
+    val accent = if (mode == ContentMode.LIVE) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.error
+    }
+    Surface(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = if (mode == ContentMode.LIVE) {
-                MaterialTheme.colorScheme.surfaceVariant
-            } else {
-                MaterialTheme.colorScheme.errorContainer
-            }
-        )
+        shape = MaterialTheme.shapes.medium,
+        color = accent.copy(alpha = 0.11f),
+        contentColor = accent
     ) {
-        Text(
-            text = stringResource(
-                R.string.freshness_summary,
-                modeLabel,
-                "${time.hour.toString().padStart(2, '0')}:${time.minute.toString().padStart(2, '0')}",
-                formatDataAge(dataAgeSeconds)
-            ),
-            style = MaterialTheme.typography.labelLarge,
-            color = if (mode == ContentMode.LIVE) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onErrorContainer
-            },
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-        )
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(9.dp),
+                shape = MaterialTheme.shapes.extraLarge,
+                color = accent
+            ) {}
+            Spacer(Modifier.size(10.dp))
+            Text(
+                text = modeLabel,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = stringResource(
+                    R.string.freshness_compact,
+                    "${time.hour.toString().padStart(2, '0')}:${time.minute.toString().padStart(2, '0')}",
+                    formatDataAge(dataAgeSeconds)
+                ),
+                style = MaterialTheme.typography.labelMedium,
+                color = if (mode == ContentMode.LIVE) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    accent
+                },
+                textAlign = TextAlign.End
+            )
+        }
     }
 }
 
@@ -172,4 +191,19 @@ fun formatPercent(value: Double?, orEmpty: String = "Non disponibile"): String {
         minimumFractionDigits = 2
         maximumFractionDigits = 2
     }.format(value)
+}
+
+fun formatDateTime(instant: Instant): String {
+    val local = instant.toLocalDateTime(TimeZone.currentSystemDefault())
+    return buildString {
+        append(local.dayOfMonth.toString().padStart(2, '0'))
+        append('/')
+        append(local.monthNumber.toString().padStart(2, '0'))
+        append('/')
+        append(local.year)
+        append(" · ")
+        append(local.hour.toString().padStart(2, '0'))
+        append(':')
+        append(local.minute.toString().padStart(2, '0'))
+    }
 }

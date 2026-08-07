@@ -1,9 +1,11 @@
 package com.jonbj.alembic.monitor.app.navigation
 
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -11,8 +13,11 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -30,7 +35,7 @@ import com.jonbj.alembic.monitor.app.viewModelFactory
 import com.jonbj.alembic.monitor.feature.events.EventsScreen
 import com.jonbj.alembic.monitor.feature.events.EventDetailScreen
 import com.jonbj.alembic.monitor.feature.events.EventDetailViewModel
-import com.jonbj.alembic.monitor.feature.login.LogoutTopBarButton
+import com.jonbj.alembic.monitor.feature.login.AlembicTopBar
 import com.jonbj.alembic.monitor.feature.performance.PerformanceScreen
 import com.jonbj.alembic.monitor.feature.portfolio.PortfolioScreen
 import com.jonbj.alembic.monitor.feature.push.PushPermissionPrompt
@@ -46,6 +51,9 @@ fun MainScaffold(container: AppContainer) {
         .collectAsStateWithLifecycle()
     val pendingEventId by container.deepLinkCoordinator.pendingEventId
         .collectAsStateWithLifecycle()
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentDestination = navBackStackEntry?.destination
+    val showingDetail = currentDestination?.route == Destination.EventDetail.route
 
     PushPermissionPrompt(container.pushCoordinator)
 
@@ -78,29 +86,27 @@ fun MainScaffold(container: AppContainer) {
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
-                val navBackStackEntry by navController.currentBackStackEntryAsState()
-                val currentDestination = navBackStackEntry?.destination
-                bottomNavItems.forEach { item ->
-                    NavigationBarItem(
-                        icon = { Icon(item.icon, contentDescription = null) },
-                        label = { Text(stringResource(item.labelRes)) },
-                        selected = currentDestination?.hierarchy?.any { it.route == item.destination.route } == true,
-                        onClick = {
-                            navController.navigate(item.destination.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
-                                }
-                                launchSingleTop = true
-                                restoreState = true
+            if (!showingDetail) {
+                MonitorBottomBar(
+                    currentRoute = currentDestination?.route,
+                    onDestinationSelected = { destination ->
+                        navController.navigate(destination.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
                             }
+                            launchSingleTop = true
+                            restoreState = true
                         }
-                    )
-                }
+                    }
+                )
             }
         },
         topBar = {
-            LogoutTopBarButton { container.logout() }
+            AlembicTopBar(
+                detail = showingDetail,
+                onBack = { navController.popBackStack() },
+                onLogout = { container.logout() }
+            )
         }
     ) { innerPadding ->
         NavHost(
@@ -171,6 +177,46 @@ fun MainScaffold(container: AppContainer) {
                     )
                 )
             }
+        }
+    }
+}
+
+@Composable
+internal fun MonitorBottomBar(
+    currentRoute: String?,
+    onDestinationSelected: (Destination) -> Unit
+) {
+    val largeText = LocalDensity.current.fontScale >= 1.45f
+    NavigationBar(
+        modifier = Modifier.height(if (largeText) 96.dp else 80.dp),
+        tonalElevation = 0.dp
+    ) {
+        bottomNavItems.forEach { item ->
+            NavigationBarItem(
+                icon = {
+                    Icon(
+                        item.icon,
+                        contentDescription = stringResource(item.labelRes)
+                    )
+                },
+                label = {
+                    Text(
+                        text = stringResource(item.labelRes),
+                        style = if (largeText) {
+                            MaterialTheme.typography.labelMedium.copy(
+                                fontSize = 10.sp,
+                                lineHeight = 12.sp
+                            )
+                        } else {
+                            MaterialTheme.typography.labelMedium
+                        },
+                        maxLines = 2,
+                        textAlign = TextAlign.Center
+                    )
+                },
+                selected = currentRoute == item.destination.route,
+                onClick = { onDestinationSelected(item.destination) }
+            )
         }
     }
 }

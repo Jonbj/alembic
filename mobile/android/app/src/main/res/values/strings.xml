@@ -3,14 +3,16 @@
     <string name="app_name">Alembic Monitor</string>
 
     <!-- Auth -->
-    <string name="login_title">Accesso monitor Alembic</string>
-    <string name="username">Username</string>
-    <string name="server_url">Server HTTPS</string>
+    <string name="login_title">Il tuo monitor Alembic</string>
+    <string name="login_subtitle">Controlla stato, rischio e portafoglio in sola lettura.</string>
+    <string name="username">Nome utente</string>
+    <string name="server_url">Indirizzo del server</string>
     <string name="device_name">Nome dispositivo</string>
     <string name="password">Password</string>
     <string name="login">Accedi</string>
     <string name="login_error">Accesso fallito. Verifica le credenziali e la rete.</string>
     <string name="logout">Esci</string>
+    <string name="back">Indietro</string>
 
     <!-- Biometric -->
     <string name="biometric_title">Sblocca Alembic Monitor</string>
@@ -46,6 +48,7 @@
     <string name="unavailable">NON DISPONIBILE</string>
     <string name="session_expired">Sessione scaduta</string>
     <string name="freshness_summary">%1$s · aggiornato %2$s · età %3$s</string>
+    <string name="freshness_compact">%1$s · %2$s fa</string>
     <string name="degradations">Limitazioni attive</string>
     <string name="unknown_mode_reason">Modalità operativa sconosciuta: stato considerato bloccato.</string>
     <plurals name="active_incidents">
@@ -60,7 +63,7 @@
     <string name="not_approved">Non approvata</string>
     <string name="market_open">Mercato aperto</string>
     <string name="market_pre">Pre-market</string>
-    <string name="market_after">After-hours</string>
+    <string name="market_after">Dopo mercato</string>
     <string name="market_closed">Mercato chiuso</string>
     <string name="market_holiday">Festività di mercato</string>
     <string name="pipeline_fresh">Aggiornato</string>
@@ -78,7 +81,7 @@
     <string name="max_drawdown">Max drawdown</string>
     <string name="benchmark">Benchmark</string>
     <string name="alpha">Alpha</string>
-    <string name="realized_pnl">Realized P&amp;L</string>
+    <string name="realized_pnl">P&amp;L realizzato</string>
     <string name="performance_summary">Riepilogo andamento</string>
     <string name="nav_change">Variazione NAV</string>
     <string name="avg_exposure">Esposizione media</string>
@@ -90,9 +93,9 @@
     <!-- Portfolio -->
     <string name="position_weight">Peso</string>
     <string name="market_value">Valore</string>
-    <string name="unrealized_pnl">Unreal. P&amp;L</string>
+    <string name="unrealized_pnl">P&amp;L non realizzato</string>
     <string name="quantity">Quantità</string>
-    <string name="avg_entry">Entry medio</string>
+    <string name="avg_entry">Prezzo medio</string>
     <string name="current_price">Prezzo</string>
     <string name="entry_time">Data ingresso</string>
     <string name="data_age">Età dati</string>
@@ -110,6 +113,14 @@
     <string name="loading_more">Caricamento…</string>
     <string name="event_history_count">%1$d aggiornamenti nella cronologia</string>
     <string name="event_timeline">Cronologia incidente</string>
+    <string name="event_detail_title">Dettaglio evento</string>
+    <string name="event_status_open">Aperto</string>
+    <string name="event_status_escalated">In escalation</string>
+    <string name="event_status_recovered">Ripristinato</string>
+    <string name="event_status_closed">Chiuso</string>
+    <string name="event_severity_critical">Critico</string>
+    <string name="event_severity_warning">Attenzione</string>
+    <string name="event_severity_info">Informazione</string>
     <string name="push_enabled">Notifiche attive</string>
     <string name="push_registering">Attivazione notifiche…</string>
     <string name="push_disabled">Notifiche disattivate</string>

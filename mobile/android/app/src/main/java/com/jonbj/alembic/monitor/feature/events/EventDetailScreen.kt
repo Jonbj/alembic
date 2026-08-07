@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,8 +24,10 @@ import com.jonbj.alembic.monitor.core.model.EventItem
 import com.jonbj.alembic.monitor.core.model.LoadState
 import com.jonbj.alembic.monitor.ui.components.ErrorMessage
 import com.jonbj.alembic.monitor.ui.components.LoadingSpinner
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
+import com.jonbj.alembic.monitor.ui.components.MonitorCard
+import com.jonbj.alembic.monitor.ui.components.SectionHeading
+import com.jonbj.alembic.monitor.ui.components.StatusPill
+import com.jonbj.alembic.monitor.ui.components.formatDateTime
 
 @Composable
 fun EventDetailScreen(viewModel: EventDetailViewModel) {
@@ -66,38 +67,36 @@ private fun EventDetail(event: EventItem) {
             )
         }
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            MonitorCard(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("${event.severity.name} · ${event.status.name}")
+                    StatusPill(
+                        text = eventSeverityLabel(event.severity),
+                        color = eventSeverityColor(event.severity)
+                    )
+                    Text(
+                        eventStatusLabel(event.status),
+                        style = MaterialTheme.typography.labelLarge
+                    )
                     event.summary?.let { Text(it) }
                     Text(
-                        event.occurredAt
-                            .toLocalDateTime(TimeZone.currentSystemDefault())
-                            .toString()
+                        formatDateTime(event.occurredAt),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
         }
         if (event.history.isNotEmpty()) {
             item {
-                Text(
-                    stringResource(R.string.event_timeline),
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.semantics { heading() }
-                )
+                SectionHeading(stringResource(R.string.event_timeline))
             }
             items(event.history) { entry ->
-                Card(modifier = Modifier.fillMaxWidth()) {
+                MonitorCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
-                        Text(entry.state, fontWeight = FontWeight.Bold)
-                        Text(
-                            entry.at
-                                .toLocalDateTime(TimeZone.currentSystemDefault())
-                                .toString()
-                        )
+                        Text(eventHistoryStateLabel(entry.state), fontWeight = FontWeight.Bold)
+                        Text(formatDateTime(entry.at))
                     }
                 }
             }

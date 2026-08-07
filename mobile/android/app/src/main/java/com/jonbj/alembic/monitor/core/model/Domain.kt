@@ -124,7 +124,7 @@ data class PipelineComponent(
 
 data class StrategyRow(
     val id: String,
-    val mode: String,
+    val mode: Mode,
     val allocationPct: Double,
     val approved: Boolean
 )

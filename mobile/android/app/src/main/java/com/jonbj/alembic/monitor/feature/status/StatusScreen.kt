@@ -9,11 +9,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.PauseCircle
-import androidx.compose.material.icons.filled.Warning
-import androidx.compose.material3.Card
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.PauseCircle
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -43,7 +42,11 @@ import com.jonbj.alembic.monitor.core.model.StrategyRow
 import com.jonbj.alembic.monitor.ui.components.ErrorMessage
 import com.jonbj.alembic.monitor.ui.components.FreshnessBanner
 import com.jonbj.alembic.monitor.ui.components.LoadingSpinner
+import com.jonbj.alembic.monitor.ui.components.MetricRow
+import com.jonbj.alembic.monitor.ui.components.MonitorCard
 import com.jonbj.alembic.monitor.ui.components.PullRefreshContainer
+import com.jonbj.alembic.monitor.ui.components.SectionHeading
+import com.jonbj.alembic.monitor.ui.components.StatusPill
 import com.jonbj.alembic.monitor.ui.components.effectiveOperationalState
 import com.jonbj.alembic.monitor.ui.components.formatDataAge
 import com.jonbj.alembic.monitor.ui.components.formatMoney
@@ -117,17 +120,17 @@ private fun StateBanner(operational: Operational) {
     val modeText = modeLabel(operational.mode)
     val color = operationalStateColor(state)
     val icon = when (state) {
-        OperationalState.OPERATIONAL -> Icons.Default.CheckCircle
-        OperationalState.DEGRADED -> Icons.Default.Warning
-        OperationalState.BLOCKED -> Icons.Default.Error
-        OperationalState.PAUSED -> Icons.Default.PauseCircle
+        OperationalState.OPERATIONAL -> Icons.Rounded.CheckCircle
+        OperationalState.DEGRADED -> Icons.Rounded.Warning
+        OperationalState.BLOCKED -> Icons.Rounded.Error
+        OperationalState.PAUSED -> Icons.Rounded.PauseCircle
     }
     val reason = when {
         operational.mode == Mode.UNKNOWN -> stringResource(R.string.unknown_mode_reason)
         !operational.primaryReason.isNullOrBlank() -> reasonLabel(operational.primaryReason)
         else -> null
     }
-    Card(
+    MonitorCard(
         modifier = Modifier
             .fillMaxWidth()
             .semantics {
@@ -147,16 +150,14 @@ private fun StateBanner(operational: Operational) {
                 Text(
                     text = label,
                     style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
                     color = color,
                     modifier = Modifier
                         .weight(1f)
                         .semantics { heading() }
                 )
-                Text(
+                StatusPill(
                     text = modeText,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
+                    color = MaterialTheme.colorScheme.secondary
                 )
             }
             Text(
@@ -190,7 +191,7 @@ private fun StateBanner(operational: Operational) {
 
 @Composable
 private fun PortfolioCard(portfolio: Portfolio, currency: String) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    MonitorCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -227,7 +228,7 @@ private fun PortfolioCard(portfolio: Portfolio, currency: String) {
 
 @Composable
 private fun PipelineCard(components: List<PipelineComponent>) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    MonitorCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -261,7 +262,7 @@ private fun PipelineCard(components: List<PipelineComponent>) {
 
 @Composable
 private fun StrategiesCard(strategies: List<StrategyRow>) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    MonitorCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -272,7 +273,7 @@ private fun StrategiesCard(strategies: List<StrategyRow>) {
             } else {
                 strategies.forEach { strategy ->
                     MetricRow(
-                        label = "${strategy.id} · ${strategy.mode}",
+                        label = "${strategy.id} · ${modeLabel(strategy.mode)}",
                         value = "${formatPercent(strategy.allocationPct)} · ${
                             if (strategy.approved) {
                                 stringResource(R.string.approved)
@@ -289,7 +290,7 @@ private fun StrategiesCard(strategies: List<StrategyRow>) {
 
 @Composable
 private fun InfoCard(title: String, lines: List<String>) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    MonitorCard(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -297,33 +298,6 @@ private fun InfoCard(title: String, lines: List<String>) {
             SectionHeading(title)
             lines.forEach { Text(it) }
         }
-    }
-}
-
-@Composable
-private fun SectionHeading(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleLarge,
-        fontWeight = FontWeight.Bold,
-        modifier = Modifier.semantics { heading() }
-    )
-}
-
-@Composable
-private fun MetricRow(label: String, value: String) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text(label, modifier = Modifier.weight(1f))
-        Text(
-            text = value,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1.2f)
-        )
     }
 }
 

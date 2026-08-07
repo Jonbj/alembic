@@ -5,6 +5,7 @@ import com.jonbj.alembic.monitor.core.model.Mode
 import com.jonbj.alembic.monitor.core.model.Operational
 import com.jonbj.alembic.monitor.core.model.OperationalState
 import com.jonbj.alembic.monitor.core.model.Position
+import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -66,6 +67,16 @@ class MonitoringPresentationTest {
         assertEquals("8 minuti", formatDataAge(8 * 60))
         assertEquals("2 ore", formatDataAge(2 * 60 * 60))
         assertEquals("Non disponibile", formatDataAge(null))
+    }
+
+    @Test
+    fun eventDateFormattingDropsMachinePrecision() {
+        val formatted = formatDateTime(Instant.parse("2026-07-31T19:37:42.123456Z"))
+
+        assertEquals(false, formatted.contains('T'))
+        assertEquals(false, formatted.contains(".123456"))
+        assertEquals(true, formatted.contains(" · "))
+        assertEquals(18, formatted.length)
     }
 
     private fun position(symbol: String, returnValue: Double?, marketValue: Double) = Position(

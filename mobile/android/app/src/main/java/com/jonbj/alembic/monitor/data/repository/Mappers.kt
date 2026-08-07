@@ -86,7 +86,7 @@ private fun PipelineComponentDto.toDomain(name: String): PipelineComponent = Pip
 
 private fun StrategyDto.toDomain(): StrategyRow = StrategyRow(
     id = id,
-    mode = mode,
+    mode = parseMode(mode),
     allocationPct = allocationPct,
     approved = approved
 )
@@ -164,7 +164,7 @@ private fun parseOperationalState(value: String): OperationalState =
     OperationalState.entries.find { it.name.equals(value, ignoreCase = true) }
         ?: OperationalState.BLOCKED
 
-private fun parseMode(value: String): Mode =
+internal fun parseMode(value: String): Mode =
     Mode.entries.find { it.name.equals(value, ignoreCase = true) } ?: Mode.UNKNOWN
 
 private fun parseMarketPhase(value: String): MarketPhase =
