@@ -90,8 +90,11 @@ def test_worker_partial_horizons_when_future_bars_missing():
 def test_worker_requests_iex_feed():
     """The bars request must pin feed=IEX: the default (SIP) is rejected by the
     paper subscription during market hours ('recent SIP data'), silently zeroing
-    coverage for every symbol (194/196 failed on the 2026-07-13 backfill)."""
-    from alpaca.data.enums import DataFeed
+    coverage for every symbol (194/196 failed on the 2026-07-13 backfill).
+
+    It must also request adjustment=ALL: raw bars embed spurious split/dividend
+    drops that corrupt close-to-close forward returns (#192)."""
+    from alpaca.data.enums import Adjustment, DataFeed
 
     signal_rows = [(7, "AAPL", datetime(2026, 6, 1, 10, 0, tzinfo=timezone.utc))]
     bars = _bars([("2026-06-01", 100.0), ("2026-06-02", 101.0)])
@@ -112,3 +115,4 @@ def test_worker_requests_iex_feed():
 
     req = mock_client.get_stock_bars.call_args[0][0]
     assert req.feed == DataFeed.IEX
+    assert req.adjustment == Adjustment.ALL

@@ -1573,7 +1573,7 @@ def run_forward_return_worker() -> dict:
     from collections import defaultdict
 
     import psycopg2
-    from alpaca.data.enums import DataFeed
+    from alpaca.data.enums import Adjustment, DataFeed
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
@@ -1627,6 +1627,9 @@ def run_forward_return_worker() -> dict:
                     # subscription while the market is open ("recent SIP data"),
                     # which silently zeroes coverage for every symbol.
                     feed=DataFeed.IEX,
+                    # Adjusted bars: raw bars embed spurious split/dividend drops
+                    # that corrupt close-to-close forward returns (#192).
+                    adjustment=Adjustment.ALL,
                 )
                 bars_df = data_client.get_stock_bars(req).df
 
@@ -2145,6 +2148,7 @@ def run_counterfactual_worker() -> dict:
     """
     import psycopg2
     from collections import defaultdict
+    from alpaca.data.enums import Adjustment
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
@@ -2212,6 +2216,7 @@ def run_counterfactual_worker() -> dict:
                     timeframe=TimeFrame.Minute,
                     start=start,
                     end=end,
+                    adjustment=Adjustment.ALL,
                 )
                 bars_df = data_client.get_stock_bars(req).df
 
