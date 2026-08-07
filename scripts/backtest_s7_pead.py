@@ -108,7 +108,7 @@ def _market_caps(symbols: list[str], key: str) -> dict[str, float]:
 
 
 def _alpaca_bars(symbols: list[str]):
-    from alpaca.data.enums import DataFeed
+    from alpaca.data.enums import Adjustment, DataFeed
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
@@ -122,7 +122,8 @@ def _alpaca_bars(symbols: list[str]):
         batch = symbols[i:i + 100]
         try:
             req = StockBarsRequest(symbol_or_symbols=batch, timeframe=TimeFrame.Day,
-                                   start=start, end=end, feed=DataFeed.IEX)
+                                   start=start, end=end, feed=DataFeed.IEX,
+                                   adjustment=Adjustment.ALL)
             data = client.get_stock_bars(req).data
             for s in batch:
                 out[s] = sorted(data.get(s, []), key=lambda b: b.timestamp)

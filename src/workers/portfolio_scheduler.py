@@ -3804,7 +3804,10 @@ def _submit_portfolio_orders(
                             symbol=order.symbol,
                             qty=whole_qty,
                             side="buy",
-                            time_in_force="day",
+                            # GTC so the bracket TP/SL legs (which inherit the parent
+                            # TIF and cannot set their own) persist overnight; a DAY
+                            # parent cancels the broker-side stop at session close.
+                            time_in_force="gtc",
                         )
 
                     # P2-A: Bracket order — attach take-profit and broker disaster-stop legs.

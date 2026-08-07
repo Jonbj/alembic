@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 def _fetch_prices(symbols: list[str], days: int) -> pd.DataFrame:
     """Fetch daily close prices from Alpaca for the last N days."""
     from datetime import datetime, timezone
-    from alpaca.data.enums import DataFeed
+    from alpaca.data.enums import Adjustment, DataFeed
     from alpaca.data.historical import StockHistoricalDataClient
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
@@ -51,6 +51,7 @@ def _fetch_prices(symbols: list[str], days: int) -> pd.DataFrame:
         start=start,
         end=end,
         feed=DataFeed.IEX,
+        adjustment=Adjustment.ALL,
     )
     raw = client.get_stock_bars(request).df
     if raw.empty:

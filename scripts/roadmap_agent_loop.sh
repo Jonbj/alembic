@@ -211,6 +211,79 @@ esegui_agente() {
     esac
 }
 
+# Il recensore gira con gli strumenti di scrittura tolti. Il prompt gli dice di
+# non modificare nulla, ma un divieto scritto e un permesso negato non sono la
+# stessa cosa: il secondo regge anche se il modello non legge le istruzioni.
+esegui_revisore() {
+    local motore="$1" prompt="$2" wt="$3"
+    case "$motore" in
+        codex)
+            (cd "$wt" && timeout "$TIMEOUT_REVIEW" codex exec \
+                -s read-only -c sandbox_workspace_write.network_access=true \
+                "$prompt" </dev/null 2>&1)
+            ;;
+        glm52|minimax)
+            local _mod
+            [[ "$motore" == glm52 ]] && _mod="glm-5.2:cloud" || _mod="minimax-m3:cloud"
+            (cd "$wt" && timeout "$TIMEOUT_REVIEW" ollama launch claude --model "$_mod" -- \
+                -p "$prompt" --allowedTools "Bash,Read,Glob,Grep" </dev/null 2>&1)
+            ;;
+        *)  echo "Recensore non riconosciuto: $motore"; return 2 ;;
+    esac
+}
+
+# --- review e cancelli di merge -------------------------------------------------
+# La CI di questo repo e' rossa in modo cronico per motivi ambientali (integration
+# test senza DB/auth). Presa com'e' non dice nulla. Ma la DIFFERENZA fra i test
+# falliti nella PR e quelli falliti su main dice tutto: e' il controllo fatto a
+# mano il 2026-08-07, qui meccanizzato.
+CI_ATTESA_MAX=1200      # 20 min: oltre, la CI non e' lenta, e' ferma
+TIMEOUT_REVIEW=1800     # 30 min per la review
+
+_falliti_di_run() { gh run view "$1" --log-failed 2>/dev/null | grep -oE "FAILED [^ ]+" | sort -u; }
+
+_run_completato() {  # $1 = branch, $2 = sha atteso (opzionale)
+    # Con lo sha, accetta solo il run di QUEL commit. Senza, un run concluso di un
+    # push precedente verrebbe scambiato per l'esito della revisione in corso, e
+    # il cancello approverebbe guardando la CI sbagliata.
+    if [[ -n "${2:-}" ]]; then
+        gh run list --branch "$1" --workflow CI --status completed --limit 10 \
+            --json databaseId,headSha -q "[.[]|select(.headSha==\"$2\")][0].databaseId" 2>/dev/null
+    else
+        gh run list --branch "$1" --workflow CI --status completed --limit 1 \
+            --json databaseId -q '.[0].databaseId' 2>/dev/null
+    fi
+}
+
+attendi_ci() {  # $1 = branch. Esito: id del run per la testa del branch.
+    local branch="$1" scaduta=$(( $(date +%s) + CI_ATTESA_MAX )) rid="" sha
+    sha=$(git rev-parse "origin/$branch" 2>/dev/null || git rev-parse "$branch" 2>/dev/null)
+    while (( $(date +%s) < scaduta )); do
+        rid=$(_run_completato "$branch" "$sha")
+        [[ -n "$rid" && "$rid" != "null" ]] && { echo "$rid"; return 0; }
+        sleep 30
+    done
+    return 1
+}
+
+conta_regressioni() {  # $1 = run della PR. Esito: numero di test rotti NUOVI.
+    local rid_pr="$1" rid_main
+    rid_main=$(_run_completato main)
+    [[ -z "$rid_main" || "$rid_main" == "null" ]] && { echo "-1"; return; }
+    comm -13 <(_falliti_di_run "$rid_main") <(_falliti_di_run "$rid_pr") | grep -c . || true
+}
+
+# Il recensore non e' mai il modello che ha scritto la PR: e' l'argomento della
+# rotazione applicato alla review. Se resta un solo motore disponibile, la review
+# NON si fa — meglio nessuna review che un modello che si rilegge da solo.
+scegli_recensore() {
+    local implementatore="$1" c
+    for c in "${MOTORI_DISPONIBILI[@]}"; do
+        [[ "$c" != "$implementatore" ]] && { echo "$c"; return 0; }
+    done
+    return 1
+}
+
 # --- comandi operatore ----------------------------------------------------------
 if [[ "${1:-}" == "--motori" ]]; then
     printf '%-10s %-14s %s\n' MOTORE STATO NOTE
@@ -437,10 +510,103 @@ if [[ -n "$PR_URL" ]]; then
     # Tentativo riuscito: lo tolgo dal conteggio dei fallimenti.
     grep -v -P "^${ISSUE}\t" "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null || true
     mv "${STATE_FILE}.tmp" "$STATE_FILE"
-    tg_send "✅ <b>Roadmap — PR pronta per review</b>
+    PR_NUM=$(gh pr list --state open --head "$BRANCH" --json number -q '.[0].number')
+    tg_send "🔍 <b>Roadmap — PR aperta, review in corso</b>
 Issue #${ISSUE}: ${TITOLO}
-Motore: ${MOTORE}
+Implementata da: ${MOTORE}
 ${PR_URL}"
+
+    # ── cancello 1: nessun test rotto NUOVO rispetto a main ────────────────────
+    REGRESSIONI=-1
+    if RID=$(attendi_ci "$BRANCH"); then
+        REGRESSIONI=$(conta_regressioni "$RID")
+        log "#$ISSUE — CI conclusa (run $RID): $REGRESSIONI test rotti in piu' rispetto a main"
+    else
+        log "#$ISSUE — CI non conclusa entro ${CI_ATTESA_MAX}s: il cancello non e' calcolabile."
+    fi
+
+    # ── cancello 2: review di un modello diverso dall'implementatore ───────────
+    VERDETTO="NON_ESEGUITA"; REVISORE=""
+    if REVISORE=$(scegli_recensore "$MOTORE"); then
+        log "#$ISSUE — review affidata a $REVISORE"
+        REV_PROMPT="Rivedi la pull request #${PR_NUM} di questo repository, che chiude o riguarda la issue #${ISSUE}.
+
+Sei nel worktree $WT, sul branch $BRANCH. NON scrivere e NON modificare nulla: la tua uscita
+e' un giudizio, non una correzione. Non mergiare, non chiudere, non commentare via gh.
+
+Contesto che devi leggere prima di giudicare:
+- CLAUDE.md, per le convenzioni del progetto
+- \\`gh issue view ${ISSUE} --comments\\` — se un commento dell'operatore restringe il perimetro,
+  quella decisione vince sul testo originale della issue
+- docs/evidence/OBSERVATION_CHARTER.md — dal 2026-08-03 al 2026-09-28 ogni TARATURA e' congelata
+  (soglie, pesi, flag, cooldown, parametri di strategia). Sono ammessi solo correttezza,
+  strumentazione e misura.
+- \\`gh pr diff ${PR_NUM}\\` — il diff completo
+
+Dato oggettivo gia' calcolato, non ricalcolarlo: rispetto a main la CI di questa PR ha
+${REGRESSIONI} test rotti in piu' (-1 significa 'non calcolabile').
+
+Giudica in questo ordine, e fermati al primo che fallisce:
+1. La PR fa cio' che la issue chiede? Se ha ristretto il perimetro, lo ha DICHIARATO nel corpo?
+   Una restrizione dichiarata e motivata e' accettabile; una silenziosa no.
+2. Viola il freeze? Cerca soglie, pesi, flag e parametri di strategia modificati. Un valore in
+   config/trading.yaml o in un default di codice che cambia il comportamento di trading e' una
+   violazione, anche se il resto della PR e' corretto.
+3. I test aggiunti verificano davvero la correzione, o passerebbero anche senza? Un test che
+   passa anche sul codice pre-fix non sta testando niente.
+4. Ci sono difetti di correttezza nel diff: divisioni per zero, ordinamenti sbagliati, errori
+   off-by-one, gestione mancante del caso vuoto o del fallimento di rete?
+
+Sii concreto: cita file e riga. Se non trovi problemi dillo in una riga, senza inventarne per
+sembrare accurato.
+
+Chiudi la risposta con UNA SOLA di queste due righe, esattamente come scritta, in ultima posizione:
+VERDETTO: APPROVA
+VERDETTO: RESPINGI"
+
+        set +e
+        REV_OUT=$(esegui_revisore "$REVISORE" "$REV_PROMPT" "$WT")
+        set -e
+        if echo "$REV_OUT" | grep -qiE "$_RATE_LIMIT_RE"; then
+            metti_in_panchina "$REVISORE"; VERDETTO="NON_ESEGUITA"
+            log "#$ISSUE — recensore $REVISORE in rate limit: review saltata."
+        elif echo "$REV_OUT" | grep -qE "^VERDETTO: APPROVA[[:space:]]*$"; then
+            VERDETTO="APPROVA"
+        elif echo "$REV_OUT" | grep -qE "^VERDETTO: RESPINGI[[:space:]]*$"; then
+            VERDETTO="RESPINGI"
+        fi
+        log "#$ISSUE — verdetto di $REVISORE: $VERDETTO"
+        printf '## Review automatica — %s\n\nTest rotti in piu%s rispetto a main: **%s**\n\n---\n\n%s\n' \
+            "$REVISORE" "'" "$REGRESSIONI" "$REV_OUT" > "$LOG_DIR/.review_$PR_NUM.md"
+        gh pr comment "$PR_NUM" --body-file "$LOG_DIR/.review_$PR_NUM.md" >/dev/null 2>&1 || true
+        rm -f "$LOG_DIR/.review_$PR_NUM.md"
+    else
+        log "#$ISSUE — nessun motore diverso dall'implementatore disponibile: review non eseguita."
+    fi
+
+    # ── merge solo se ENTRAMBI i cancelli sono passati ─────────────────────────
+    if [[ "$VERDETTO" == "APPROVA" && "$REGRESSIONI" == "0" ]]; then
+        if gh pr merge "$PR_NUM" --merge --delete-branch >/dev/null 2>&1; then
+            log "#$ISSUE — PR #$PR_NUM mergiata (0 regressioni, $REVISORE approva)."
+            tg_send "🟢 <b>Roadmap — PR mergiata da sola</b>
+Issue #${ISSUE}: ${TITOLO}
+${MOTORE} ha implementato, ${REVISORE} ha approvato, 0 test rotti in piu&#39;.
+${PR_URL}
+
+<i>Nota: il merge non e&#39; un deploy. Le immagini sono baked: serve rebuild.</i>"
+        else
+            log "#$ISSUE — merge rifiutato da GitHub (conflitto o protezione)."
+            tg_send "⚠️ <b>Roadmap</b> — #${PR_NUM} approvata ma il merge e&#39; stato rifiutato da GitHub. Serve una mano.
+${PR_URL}"
+        fi
+    else
+        log "#$ISSUE — NON mergiata (verdetto=$VERDETTO, regressioni=$REGRESSIONI)."
+        tg_send "🟡 <b>Roadmap — PR da guardare</b>
+Issue #${ISSUE}: ${TITOLO}
+Implementata da ${MOTORE}${REVISORE:+, rivista da $REVISORE}
+Verdetto: <b>${VERDETTO}</b> · test rotti in piu&#39; rispetto a main: <b>${REGRESSIONI}</b>
+${PR_URL}"
+    fi
 else
     log "#$ISSUE — nessuna PR aperta."
     CODA=$(echo "$OUTPUT" | tail -c 1200)

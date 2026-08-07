@@ -27,6 +27,7 @@ import pandas as pd
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from alpaca.common.exceptions import APIError
+from alpaca.data.enums import Adjustment
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
@@ -181,6 +182,7 @@ def _fetch_intraday_bars(trades: list[dict], data_client: StockHistoricalDataCli
                 timeframe=TimeFrame(15, TimeFrameUnit.Minute),
                 start=start,
                 end=end,
+                adjustment=Adjustment.ALL,
             )
             bars = data_client.get_stock_bars(req).df
             if bars.empty:

@@ -47,7 +47,7 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 ## Autonomous roadmap loop (active 2026-08-06 → 2026-09-28)
 
 `scripts/roadmap_agent_loop.sh` runs four times a day (cron: 07/12/17/21) and works **one**
-issue per run in an isolated worktree, opening a PR and stopping.
+issue per run in an isolated worktree, then reviews the PR and merges it if two gates both pass.
 
 The work is delegated to models **other than** the one that designed this machinery — the
 `MOTORI` array (`codex`, `glm52`, `minimax`), rotated one per run. `glm52` and `minimax` run
@@ -82,6 +82,20 @@ scripts/roadmap_agent_loop.sh --sblocca glm52 # early return from the bench (rar
 gh issue list --label freeze-ok --state open
 cat logs/roadmap_agent_state.tsv              # issue <TAB> failed attempts (2 = out of rotation)
 ```
+
+**Review and merge (decided 2026-08-07).** After the PR is opened, two gates decide:
+
+1. **Mechanical** — the set of tests failing in the PR minus the set failing on `main`, for the
+   *same commit SHA*. This repo's CI is chronically red for environmental reasons, so its pass/fail
+   says nothing; the **difference** says everything. Zero new failures is the bar.
+2. **Human-shaped** — a model **other than the implementer** reviews the diff against the issue,
+   the operator's scoping comments, and the freeze charter, then emits `VERDETTO: APPROVA` or
+   `VERDETTO: RESPINGI`. It runs with write tools removed: a written instruction not to edit and a
+   denied permission are not the same thing. Its review is posted to the PR either way.
+
+Both gates green → the loop merges. Anything else — reject, CI that never finished, no second
+engine available — leaves the PR open with a Telegram. **A merge is not a deploy:** images are
+baked, so `main` moves ahead of production until someone rebuilds.
 
 **Rate limits.** An exhausted engine is not a broken engine. Its output is matched against a
 deliberately broad set of signatures; on a hit it is benched for 3h and the run **fails over to

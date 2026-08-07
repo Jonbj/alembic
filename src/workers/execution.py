@@ -726,7 +726,9 @@ def run_execution_cycle(
                 symbol=symbol,
                 qty=qty,
                 side=OrderSide.BUY,
-                time_in_force=TimeInForce.DAY,
+                # GTC so the OTO stop-loss leg (inherits the parent TIF) persists
+                # overnight; DAY cancels the broker-side stop at session close.
+                time_in_force=TimeInForce.GTC,
                 order_class=OrderClass.OTO,
                 stop_loss=StopLossRequest(stop_price=stop_price),
             )
