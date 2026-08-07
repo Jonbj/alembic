@@ -44,12 +44,26 @@ Ogni eccezione applicata va annotata qui con data, motivo e commit.
 | 2026-08-06 | Il path live rispetta `rebalance_frequency` (#185) | S1 dichiara `MONTHLY`, il backtest la rispetta, il live ribilancia **ogni 15 minuti**. La domanda di uscita n.2 chiede se S1 abbia un edge: senza la correzione, i 40 giorni misurerebbero un oggetto diverso da quello della domanda, e dai dati stessi non ci sarebbe modo di accorgersene. Stesso profilo del gate S4 disarmato (#163). **Perimetro:** solo l'allineamento alla frequenza già dichiarata; `signal_threshold` e qualunque banda morta parametrica restano congelati. | vedi #185 |
 | 2026-08-06 | Alert sulle posizioni non proteggibili (#161) | Le 13 posizioni sotto 1 azione non possono avere stop e contengono tutto il rosso del libro (−$452 contro +$660). La condizione di revisione scritta in `config/trading.yaml:180-182` si è verificata su quattro di esse e nessuno se n'è accorto perché niente la sorvegliava. È **strumentazione**: non cambia cosa compriamo né con che size, quindi non è propriamente una deroga — registrata qui per tracciabilità. La correzione strutturale (size minima ≥ 1 azione) è **taratura** e resta al 28/09. | vedi #161 |
 
+| 2026-08-07 | Il ratchet non alza il gate d'ingresso di S4 sopra il baseline 0,30 (#191) | La leva era salita da sola a **0,45** scartando il 93-97% dei segnali. Il freeze aveva congelato la taratura *manuale*, non questa leva *automatica*. Senza la deroga, la domanda di uscita n.1 si auto-risponde: con S4 che quasi non tratta, il suo P&L economico resta dentro ±$200 **per costruzione**, e al 28/09 concluderemmo «la news non ha alpha» quando la causa è il gate. Lo strumento risolverebbe la domanda al posto del fenomeno. **Perimetro:** solo il tetto della leva; `threshold_step`, il trigger, il decay e il ramo `regime_scale` restano intatti. | vedi #191 |
+| 2026-08-07 | Stopgap manuale sulla chiave Redis `feedback:entry_threshold:S4`, da 0,45 a 0,30 | La correzione di codice di #191 richiede rebuild e redeploy (`config/trading.yaml` è baked, non montato). Ogni giorno di attesa è un giorno di finestra speso al 5% dei segnali. **Temporaneo:** al prossimo trigger il ratchet la rialza finché #191 non è deployata. | nessuno: intervento su Redis, non sul repo |
+
+Il **ritiro di F8** deciso lo stesso giorno (#134) non compare qui: `apply_regime_scale: false`
+significa che la leva era già spenta, quindi è rimozione di codice inerte e non tocca il
+comportamento osservato.
+
 ### Discontinuità nella serie osservata
 
-La deroga #185 introduce una discontinuità: le evidenze su S1 raccolte dal 2026-08-03 alla data del
-deploy **non sono confrontabili** con quelle successive. Alla sintesi del giorno 40 le due parti
-vanno trattate separatamente, non mediate. Questa riga esiste perché fra sette settimane nessuno se
-ne ricorderebbe.
+Due deroghe introducono una discontinuità, e vanno trattate separatamente alla sintesi del giorno 40
+invece che mediate sull'intera finestra:
+
+- **#185** — le evidenze su S1 raccolte dal 2026-08-03 alla data del deploy non sono confrontabili
+  con quelle successive.
+- **#191** — le evidenze su S4 dal 2026-08-03 al 2026-08-07 provengono da un gate salito fino a 0,45,
+  cioè da una strategia che scartava ~19 segnali su 20. Il conteggio dei giorni di ricorrenza su
+  F-009 (*il gate scarta segnali col segno corretto*) è il più esposto: quelle occorrenze sono state
+  generate da una soglia che non era quella di design.
+
+Questa sezione esiste perché fra sette settimane nessuno se ne ricorderebbe.
 
 ## Soglie: cosa guadagna diritto a lavoro alla scadenza
 
