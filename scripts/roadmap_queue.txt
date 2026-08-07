@@ -37,3 +37,11 @@
 39   S2-1: Source P&L Funnel completion
 57   S2 VRP: fattibilita' strumento quotato, IBKR e dati
 37   Vettore A: earnings chain, Phase 0 discovery
+
+# Alpaca execution-layer hardening (audit 2026-08-07) — tutte freeze-ok.
+# Spec + piani sul branch docs/spec-alpaca-hardening (mergiare a main prima: il loop lavora off main).
+# #203 e' blocked_by #201: va lavorato DOPO che #201 e' mergiato+deployato (il loop lo salta finche' #201 resta aperta).
+201  client_order_id sui 6 siti submit: dedup broker-side, safety-net doppio-submit (sblocca #203)
+199  buying_power/multiplier mai gate-ati: pre-flight gate anti-reject-422 silenzioso
+200  riconciliazione posizioni DB↔broker: beat EOD + alert + auto-close orphan (classe #121)
+203  retry/backoff centralizzato retry_transient su reads+submit (blocked_by #201)
