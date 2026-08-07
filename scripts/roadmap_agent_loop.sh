@@ -185,15 +185,19 @@ esegui_agente() {
             (cd "$wt" && timeout "$TIMEOUT_SESSIONE" codex exec \
                 -s workspace-write \
                 -c sandbox_workspace_write.network_access=true \
-                "$prompt" 2>&1)
+                "$prompt" </dev/null 2>&1)
             ;;
         glm52|minimax)
             # Claude Code con un modello diverso sotto. Gli argomenti dopo
             # l'integrazione sono passati a claude cosi' come sono.
             local _mod
             [[ "$motore" == glm52 ]] && _mod="glm-5.2:cloud" || _mod="minimax-m3:cloud"
-            (cd "$wt" && timeout "$TIMEOUT_SESSIONE" ollama launch claude --model "$_mod" \
-                --allowedTools "Bash,Read,Write,Edit,Glob,Grep" -p "$prompt" 2>&1)
+            # Il `--` non e' opzionale: senza, `ollama launch` intercetta gli
+            # argomenti di claude e muore con "unknown flag". Verificato il
+            # 2026-08-07, insieme al fatto che il modello che risponde e' davvero
+            # quello richiesto e non un ripiego su Claude.
+            (cd "$wt" && timeout "$TIMEOUT_SESSIONE" ollama launch claude --model "$_mod" -- \
+                -p "$prompt" --allowedTools "Bash,Read,Write,Edit,Glob,Grep" </dev/null 2>&1)
             ;;
         gemini)
             (cd "$wt" && timeout "$TIMEOUT_SESSIONE" gemini --yolo -p "$prompt" 2>&1)
