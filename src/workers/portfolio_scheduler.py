@@ -498,7 +498,100 @@ def _get_fractionable_symbols(trading_client) -> set[str]:
     return {sym for sym, ok in _FRACTIONABLE_CACHE.items() if ok}
 
 
-def _sync_fractional_protective_stops(trading_client, stop_policy, cycle_ts) -> dict:
+_UNPROTECTED_ALERT_TTL = 86_400  # 24h — one Telegram per symbol per day, not per cycle
+_UNPROTECTED_ALERT_DEFAULT_PCT = 0.15
+
+
+def _unprotected_alert_threshold() -> float:
+    """Loss threshold for the #161 unprotected-position alert, from trading.yaml.
+
+    The value is not a new knob: it is the -15% already pre-registered in the
+    risk section comment ("if any position rides past -15/20% (d_hard shadow)"),
+    made machine-readable so the condition the project wrote for itself is
+    actually watched. It gates a Telegram message only — no order, no size.
+    """
+    try:
+        import yaml
+        with open(_TRADING_YAML) as f:
+            cfg = yaml.safe_load(f) or {}
+        return float(
+            (cfg.get("risk") or {}).get(
+                "unprotected_position_alert_pct", _UNPROTECTED_ALERT_DEFAULT_PCT
+            )
+        )
+    except Exception as exc:
+        log.warning("Could not load risk.unprotected_position_alert_pct (%s) — using default", exc)
+        return _UNPROTECTED_ALERT_DEFAULT_PCT
+
+
+def _claim_unprotected_alert(symbol: str) -> bool:
+    """SET NX on a per-symbol key so the same position alerts once a day, not every cycle.
+
+    Fail-open: if Redis is unreachable the alert still goes out — invisibility is
+    the defect #161 is about. (A dead Redis aborts the cycle earlier anyway.)
+    """
+    try:
+        from redis import Redis as _R
+
+        from src.config import config as _cfg
+        _r = _R.from_url(_cfg.REDIS_URL, decode_responses=True)
+        try:
+            return bool(
+                _r.set(
+                    f"alert:unprotected_position:{symbol}", "1",
+                    nx=True, ex=_UNPROTECTED_ALERT_TTL,
+                )
+            )
+        finally:
+            _r.close()
+    except Exception as exc:
+        log.warning("Unprotected-position alert dedup unavailable for %s: %s", symbol, exc)
+        return True
+
+
+def _alert_unprotected_positions(positions, plans, summary: dict, notifier) -> list[str]:
+    """#161: surveil the positions this cycle left without a broker-side stop.
+
+    Sub-1-share positions cannot receive one at all (Alpaca needs a whole share),
+    and on 2026-07-28 they held the entire red P&L of the book while looking
+    exactly like protected ones. This does not reduce the risk by a dollar — it
+    removes the invisibility. Operator decision of 2026-08-06 on #161: the
+    structural fix (minimum entry size >= 1 share) is tuning and stays frozen
+    until 2026-09-28 (#171).
+
+    Never raises: an alerting failure must not disturb the cycle.
+    """
+    from src.portfolio.unprotected_positions import (
+        classify_protection,
+        format_unprotected_alert,
+        select_unprotected_alerts,
+    )
+
+    threshold = _unprotected_alert_threshold()
+    failed = {e.get("symbol") for e in summary.get("errors", [])}
+    rows = classify_protection(positions, plans, failed_symbols=failed)
+
+    unprotectable = [r.symbol for r in rows if not r.protectable]
+    if unprotectable:
+        log.info(
+            "#161: %d/%d held positions are unprotectable (qty < 1): %s",
+            len(unprotectable), len(rows), sorted(unprotectable),
+        )
+
+    fired: list[str] = []
+    for row in select_unprotected_alerts(rows, threshold):
+        log.warning(
+            "#161: %s unprotected at %.1f%% (qty %.4f, status %s)",
+            row.symbol, row.loss_pct * 100, row.qty, row.status,
+        )
+        if not _claim_unprotected_alert(row.symbol):
+            continue  # already notified within the dedup window
+        _fire_alert(notifier, format_unprotected_alert(row, threshold), AlertLevel.WARNING)
+        fired.append(row.symbol)
+    return fired
+
+
+def _sync_fractional_protective_stops(trading_client, stop_policy, cycle_ts, notifier=None) -> dict:
     """#62/#63: reconcile broker-side protective stops for fractional positions.
 
     Alpaca rejects bracket orders on fractional/notional quantities, so
@@ -546,6 +639,15 @@ def _sync_fractional_protective_stops(trading_client, stop_policy, cycle_ts) -> 
     summary = execute_protective_stop_plans(plans, trading_client)
     if summary.get("created") or summary.get("replaced") or summary.get("errors"):
         log.info("Fractional protective stop sync: %s", summary)
+
+    # #161: whatever this sync could not protect is now known — report it.
+    try:
+        summary["unprotected_alerts"] = _alert_unprotected_positions(
+            positions, plans, summary, notifier
+        )
+    except Exception as exc:
+        log.warning("Unprotected-position surveillance failed (#161): %s", exc)
+        summary["unprotected_alerts"] = []
     return summary
 
 
@@ -2625,7 +2727,9 @@ def _run_cycle_inner() -> dict:
         # completed above) or the rest of the cycle.
         if _stop_policy is not None and config.ALPACA_FRACTIONAL_STOP_ENABLED:
             try:
-                _sync_fractional_protective_stops(trading_client, _stop_policy, ts)
+                _sync_fractional_protective_stops(
+                    trading_client, _stop_policy, ts, notifier=notifier
+                )
             except Exception as _sync_exc:
                 log.warning("Fractional protective stop sync failed: %s", _sync_exc)
 
