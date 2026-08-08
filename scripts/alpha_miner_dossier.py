@@ -39,6 +39,10 @@ from src.analysis.dossier.book import (
     compute_exits,
 )
 from src.analysis.dossier.market import compute_market, compute_miss_candidates
+from src.analysis.dossier.miss_cause import (
+    cause_del_giorno,
+    classify_miss_candidates,
+)
 
 log = logging.getLogger(__name__)
 
@@ -151,6 +155,12 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
         rendimenti=mercato["rendimenti"], news_counts=news, segnali=dict(segnali),
         in_portafoglio=in_portafoglio, soglia_mover=SOGLIA_MOVER)
 
+    # Causa deterministica per ogni candidato (#208): news_count, segnali,
+    # in_portafoglio sono gia' tutti nei candidati, il classificatore aggiunge
+    # solo il campo `causa`. Cosi' il report puo' calcolare la tabella della
+    # carta meccanicamente, senza re-derivarla dalla prosa.
+    candidati_classificati = classify_miss_candidates(candidati)
+
     # --- book: ingressi e chiusure ----------------------------------------
     ingressi_grezzi = [
         {"symbol": r[0], "strategia": r[1], "ora_utc": r[2],
@@ -191,13 +201,14 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
         "fonte_prezzi": "Alpaca SIP, adjustment=all",
         "soglia_mover": SOGLIA_MOVER,
         "mercato": mercato,
-        "candidati_miss": candidati,
+        "candidati_miss": candidati_classificati,
         "ingressi": ingressi,
         "chiusure": chiusure,
         "aggregati": {
             "per_ora_ingresso": aggregate_by_entry_hour(chiusi_storici),
             "miss_cumulati": _miss_cumulati(),
             "mediane_mobili_20g": _mediane_mobili(ingressi, chiusure),
+            "cause_del_giorno": cause_del_giorno(candidati_classificati),
         },
     }
 
@@ -255,14 +266,75 @@ def scrivi(dossier: dict) -> Path:
     return out
 
 
+def retroattivo_cause(dossier_files: list[Path]) -> int:
+    """Aggiunge `causa` ai candidati e `aggregati.cause_del_giorno` ai dossier
+    gia' scritti. Lavora solo sui file locali: nessun DB, nessuna Alpaca.
+
+    La carta di osservazione #171 autorizza la riscrittura retroattiva dei
+    dossier (non del ledger). I candidati contengono gia' tutti i dati che
+    servono al classificatore, quindi la rielaborazione e' puramente deterministica.
+    """
+    scritti = 0
+    for path in dossier_files:
+        try:
+            testo = path.read_text()
+            dossier = json.loads(testo)
+        except (OSError, json.JSONDecodeError) as exc:
+            log.warning("%s non rielaborato: %s", path.name, exc)
+            continue
+
+        candidati = dossier.get("candidati_miss", [])
+        if not candidati:
+            continue
+        # Se il file e' gia' classificato, salta: idempotente.
+        if all("causa" in c for c in candidati) and \
+                "cause_del_giorno" in dossier.get("aggregati", {}):
+            continue
+
+        classificati = classify_miss_candidates(candidati)
+        dossier["candidati_miss"] = classificati
+        aggregati = dossier.setdefault("aggregati", {})
+        aggregati["cause_del_giorno"] = cause_del_giorno(classificati)
+
+        # Mantiene la stessa struttura atomica di scrivi().
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(dossier, indent=2, ensure_ascii=False))
+        tmp.replace(path)
+        scritti += 1
+        cg = aggregati["cause_del_giorno"]
+        log.info("%s: %d candidati, dominante=%s, conteggi=%s",
+                 path.name, cg["totale_candidati"], cg["dominante"], cg["conteggi"])
+    return scritti
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("data", nargs="?", help="giorno da analizzare (YYYY-MM-DD)")
     ap.add_argument("--backfill-da", help="ricalcola da questa data a ieri")
+    ap.add_argument(
+        "--retroattivo-cause",
+        action="store_true",
+        help="aggiunge `causa` ai candidati e `aggregati.cause_del_giorno` "
+             "ai dossier gia' scritti (no I/O di rete).",
+    )
     args = ap.parse_args()
 
     simboli = _watchlist()
+
+    if args.retroattivo_cause:
+        if args.backfill_da or args.data:
+            raise SystemExit(
+                "--retroattivo-cause e' esclusivo: rielabora i dossier gia' scritti, "
+                "non serve una data."
+            )
+        files = sorted(OUT_DIR.glob("*.json"))
+        if not files:
+            log.info("Nessun dossier in %s", OUT_DIR)
+            return 0
+        n = retroattivo_cause(files)
+        log.info("dossier rielaborati: %d", n)
+        return 0
 
     if args.backfill_da:
         inizio = date.fromisoformat(args.backfill_da)
@@ -278,7 +350,7 @@ def main() -> int:
     elif args.data:
         giorni = [date.fromisoformat(args.data)]
     else:
-        raise SystemExit("Serve una data o --backfill-da.")
+        raise SystemExit("Serve una data, --backfill-da o --retroattivo-cause.")
 
     scritti = 0
     for g in giorni:
