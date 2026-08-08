@@ -23,6 +23,11 @@ LOG_DIR="$PROJECT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
 DATE=$(date +%Y-%m-%d)
+LOG_FILE="$LOG_DIR/alpha_miss_analysis_${DATE}.log"
+
+# Persist the whole cron process, including failures before the human-readable
+# header.  The host crontab does not provide a redirect of its own.
+exec >>"$LOG_FILE" 2>&1
 
 # Target the most recent actual TRADING day per Alpaca's market calendar — not
 # "yesterday" adjusted only for weekends (that still misfires on US market
@@ -37,7 +42,8 @@ if [[ -f "$PROJECT_DIR/.env" ]]; then
     source <(grep -E '^ALPACA_(API_KEY|SECRET_KEY)=' "$PROJECT_DIR/.env" | sed 's/#.*//')
     set +a
 fi
-DATE_TARGET=$(uv run python3 - <<'PYEOF' 2>/dev/null
+set +e
+DATE_TARGET=$(uv run python3 - <<'PYEOF'
 import os
 from datetime import date, timedelta
 from alpaca.trading.client import TradingClient
@@ -50,12 +56,13 @@ if cal:
     print(cal[-1].date.strftime("%Y-%m-%d"))
 PYEOF
 )
-if [[ -z "${DATE_TARGET:-}" ]]; then
-    echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Could not determine last trading day via Alpaca calendar (market closed run window or API error) — skipping this run." | tee -a "$LOG_DIR/alpha_miss_analysis_${DATE}.log"
+CALENDAR_STATUS=$?
+set -e
+if (( CALENDAR_STATUS != 0 )) || [[ -z "${DATE_TARGET:-}" ]]; then
+    echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Could not determine last trading day via Alpaca calendar (codice ${CALENDAR_STATUS}, market closed run window or API error) — skipping this run."
     exit 0
 fi
 
-LOG_FILE="$LOG_DIR/alpha_miss_analysis_${DATE}.log"
 REPORT_FILE="$PROJECT_DIR/docs/ALPHA_MISS_REPORT_${DATE_TARGET}.md"
 
 # Load Telegram credentials from .env
@@ -68,20 +75,25 @@ fi
 
 tg_send() {
     local text="$1"
+    local parse_mode="${2-HTML}"
     if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]]; then
         echo "[tg_send] Telegram credentials not set — skipping" >&2
         return
     fi
-    curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-        -d chat_id="${TELEGRAM_CHAT_ID}" \
-        -d parse_mode="HTML" \
-        -d text="$text" \
-        > /dev/null
+    local curl_args=(
+        -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
+        -d chat_id="${TELEGRAM_CHAT_ID}"
+        -d text="$text"
+    )
+    if [[ -n "$parse_mode" ]]; then
+        curl_args+=(-d parse_mode="$parse_mode")
+    fi
+    curl "${curl_args[@]}" > /dev/null
 }
 
-echo "=== Alembic Alpha-Miss Analysis ${DATE} (target: ${DATE_TARGET}) ===" | tee "$LOG_FILE"
-echo "Started: $(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$LOG_FILE"
-echo "Report: ${REPORT_FILE}" | tee -a "$LOG_FILE"
+echo "=== Alembic Alpha-Miss Analysis ${DATE} (target: ${DATE_TARGET}) ==="
+echo "Started: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+echo "Report: ${REPORT_FILE}"
 
 tg_send "⏳ <b>Analisi alpha-miss Alembic avviata</b>
 Data analisi: ${DATE_TARGET}
@@ -288,12 +300,12 @@ B) Aggiorna docs/evidence/findings.json per OGNI voce della tua sezione di segna
    market_daily.jsonl. Diventa un finding solo un'affermazione strutturale, es. "39 simboli su 96
    non hanno copertura news in un giorno tipico".
 
-C) Committa i due file SOLO SE il branch corrente e' main. Controlla PRIMA:
+C) Committa i ledger e il report SOLO SE il branch corrente e' main. Controlla PRIMA:
 
      git rev-parse --abbrev-ref HEAD
 
    - Se stampa "main": committa.
-       git add docs/evidence/findings.json docs/evidence/market_daily.jsonl
+       git add docs/evidence/findings.json docs/evidence/market_daily.jsonl "__REPORT_FILE__"
        git commit -m "evidence: ledger __DATE_TARGET__"
        git push origin main
      Il PUSH e' obbligatorio quanto il commit: senza, il ledger vive solo su questa
@@ -329,9 +341,9 @@ PROMPT
 # se'. Meglio un report senza dossier che nessun report.
 DOSSIER_FILE="$PROJECT_DIR/docs/evidence/dossier/${DATE_TARGET}.json"
 if uv run python "$PROJECT_DIR/scripts/alpha_miner_dossier.py" "$DATE_TARGET" >> "$LOG_FILE" 2>&1; then
-    echo "Dossier generato: $DOSSIER_FILE" | tee -a "$LOG_FILE"
+    echo "Dossier generato: $DOSSIER_FILE"
 else
-    echo "ATTENZIONE: generazione dossier fallita — la sessione procede senza." | tee -a "$LOG_FILE"
+    echo "ATTENZIONE: generazione dossier fallita — la sessione procede senza."
     DOSSIER_FILE="(non disponibile)"
 fi
 
@@ -339,11 +351,24 @@ _CLAUDE_PROMPT="${_PROMPT_TEMPLATE//__DATE_TARGET__/$DATE_TARGET}"
 _CLAUDE_PROMPT="${_CLAUDE_PROMPT//__DOSSIER_FILE__/$DOSSIER_FILE}"
 _CLAUDE_PROMPT="${_CLAUDE_PROMPT//__REPORT_FILE__/$REPORT_FILE}"
 
+set +e
 ANALYSIS_OUTPUT=$(claude --allowedTools "Bash,Read,Write,Edit" -p "$_CLAUDE_PROMPT" 2>&1)
+ANALYSIS_STATUS=$?
+set -e
 
-echo "$ANALYSIS_OUTPUT" | tee -a "$LOG_FILE"
-echo "" | tee -a "$LOG_FILE"
-echo "Completed: $(date -u '+%Y-%m-%dT%H:%M:%SZ')" | tee -a "$LOG_FILE"
+printf '%s\n' "$ANALYSIS_OUTPUT"
+if (( ANALYSIS_STATUS != 0 )); then
+    echo "FAILED: sessione Claude terminata con codice $ANALYSIS_STATUS"
+    FAILURE_TAIL=$(printf '%s\n' "$ANALYSIS_OUTPUT" | tail -c 3000)
+    tg_send "🚨 Analisi alpha-miss ${DATE_TARGET} fallita con codice ${ANALYSIS_STATUS}.
+
+Coda output:
+${FAILURE_TAIL}" "" || true
+    exit "$ANALYSIS_STATUS"
+fi
+
+echo ""
+echo "Completed: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
 HEADER="🔎 <b>Alpha-miss Alembic — ${DATE_TARGET}</b>"
 SUMMARY_TEXT="$(echo "$ANALYSIS_OUTPUT" | head -c 3800)"
