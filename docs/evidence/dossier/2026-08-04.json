@@ -151,14 +151,16 @@
           "fallback": false
         }
       ],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "NON_CLASSIFICATO"
     },
     {
       "symbol": "QCOM",
       "return": 0.07323348947680941,
       "news_count": 0,
       "segnali": [],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "NO_NEWS"
     },
     {
       "symbol": "AVGO",
@@ -186,7 +188,8 @@
           "fallback": false
         }
       ],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "BELOW_GATE"
     },
     {
       "symbol": "IBM",
@@ -199,42 +202,48 @@
           "fallback": true
         }
       ],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "THIN_NEUTRAL"
     },
     {
       "symbol": "HOOD",
       "return": 0.03508966127961033,
       "news_count": 0,
       "segnali": [],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "NO_NEWS"
     },
     {
       "symbol": "NOW",
       "return": 0.034591470356423626,
       "news_count": 0,
       "segnali": [],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "NO_NEWS"
     },
     {
       "symbol": "RDDT",
       "return": 0.033999095081119535,
       "news_count": 0,
       "segnali": [],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "NO_NEWS"
     },
     {
       "symbol": "SAP",
       "return": 0.030793567097284535,
       "news_count": 0,
       "segnali": [],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "NO_NEWS"
     },
     {
       "symbol": "SNOW",
       "return": 0.030045849185445395,
       "news_count": 0,
       "segnali": [],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "NO_NEWS"
     }
   ],
   "ingressi": [
@@ -429,6 +438,20 @@
       "drift_post_uscita": 3.3426720092922286,
       "n_ingressi": 20,
       "n_chiusure": 15
+    },
+    "cause_del_giorno": {
+      "totale_candidati": 9,
+      "conteggi": {
+        "NO_NEWS": 6,
+        "BELOW_GATE": 1,
+        "THIN_NEUTRAL": 1,
+        "NON_CLASSIFICATO": 1
+      },
+      "dominante": "NO_NEWS",
+      "soglie": {
+        "thin": 0.05,
+        "gate": 0.3
+      }
     }
   }
 }

@@ -115,7 +115,8 @@
       "return": 0.0375302663438255,
       "news_count": 0,
       "segnali": [],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "NO_NEWS"
     },
     {
       "symbol": "BA",
@@ -128,7 +129,8 @@
           "fallback": false
         }
       ],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "THIN_NEUTRAL"
     },
     {
       "symbol": "NVO",
@@ -146,7 +148,8 @@
           "fallback": false
         }
       ],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "BELOW_GATE"
     },
     {
       "symbol": "CRM",
@@ -159,7 +162,8 @@
           "fallback": false
         }
       ],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "THIN_NEUTRAL"
     }
   ],
   "ingressi": [
@@ -374,6 +378,19 @@
       "drift_post_uscita": 3.3426720092922286,
       "n_ingressi": 27,
       "n_chiusure": 29
+    },
+    "cause_del_giorno": {
+      "totale_candidati": 4,
+      "conteggi": {
+        "NO_NEWS": 1,
+        "BELOW_GATE": 1,
+        "THIN_NEUTRAL": 2
+      },
+      "dominante": "THIN_NEUTRAL",
+      "soglie": {
+        "thin": 0.05,
+        "gate": 0.3
+      }
     }
   }
 }

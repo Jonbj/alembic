@@ -121,14 +121,16 @@
           "fallback": false
         }
       ],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "BELOW_GATE"
     },
     {
       "symbol": "BA",
       "return": 0.08027204589617853,
       "news_count": 0,
       "segnali": [],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "NO_NEWS"
     },
     {
       "symbol": "AZN",
@@ -141,7 +143,8 @@
           "fallback": false
         }
       ],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "THIN_NEUTRAL"
     },
     {
       "symbol": "SPCX",
@@ -179,7 +182,8 @@
           "fallback": false
         }
       ],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "BELOW_GATE"
     },
     {
       "symbol": "SNOW",
@@ -192,14 +196,16 @@
           "fallback": false
         }
       ],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "BELOW_GATE"
     },
     {
       "symbol": "HOOD",
       "return": 0.0436691312384474,
       "news_count": 0,
       "segnali": [],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "NO_NEWS"
     },
     {
       "symbol": "BABA",
@@ -217,7 +223,8 @@
           "fallback": false
         }
       ],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "BELOW_GATE"
     },
     {
       "symbol": "TSLA",
@@ -230,14 +237,16 @@
           "fallback": false
         }
       ],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "THIN_NEUTRAL"
     },
     {
       "symbol": "SAP",
       "return": 0.03283955996078869,
       "news_count": 0,
       "segnali": [],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "NO_NEWS"
     }
   ],
   "ingressi": [
@@ -452,6 +461,19 @@
       "drift_post_uscita": 2.819827128028635,
       "n_ingressi": 19,
       "n_chiusure": 18
+    },
+    "cause_del_giorno": {
+      "totale_candidati": 9,
+      "conteggi": {
+        "NO_NEWS": 3,
+        "BELOW_GATE": 4,
+        "THIN_NEUTRAL": 2
+      },
+      "dominante": "BELOW_GATE",
+      "soglie": {
+        "thin": 0.05,
+        "gate": 0.3
+      }
     }
   }
 }

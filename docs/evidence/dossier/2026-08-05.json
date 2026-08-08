@@ -136,14 +136,16 @@
           "fallback": false
         }
       ],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "BELOW_GATE"
     },
     {
       "symbol": "AZN",
       "return": 0.0377843464850276,
       "news_count": 0,
       "segnali": [],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "NO_NEWS"
     },
     {
       "symbol": "NVDA",
@@ -181,14 +183,16 @@
           "fallback": false
         }
       ],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "BELOW_GATE"
     },
     {
       "symbol": "QCOM",
       "return": -0.031597713161615415,
       "news_count": 0,
       "segnali": [],
-      "in_portafoglio": false
+      "in_portafoglio": false,
+      "causa": "NO_NEWS"
     }
   ],
   "ingressi": [
@@ -463,6 +467,18 @@
       "drift_post_uscita": -0.02225640334506218,
       "n_ingressi": 21,
       "n_chiusure": 22
+    },
+    "cause_del_giorno": {
+      "totale_candidati": 4,
+      "conteggi": {
+        "NO_NEWS": 2,
+        "BELOW_GATE": 2
+      },
+      "dominante": null,
+      "soglie": {
+        "thin": 0.05,
+        "gate": 0.3
+      }
     }
   }
 }
