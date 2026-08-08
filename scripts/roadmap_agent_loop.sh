@@ -290,7 +290,164 @@ scegli_recensore() {
     return 1
 }
 
+# Review + cancelli, isolati in una funzione perche' servono in due punti: dentro
+# il giro, e in --rivedi per recuperare una PR rimasta senza verdetto. Senza il
+# secondo, una PR bloccata blocca la sua issue per sempre: il giro la salta
+# proprio perche' ha gia' una PR aperta.
+rivedi_e_mergia() {
+    local _PR="$1" _ISSUE="$2" _BRANCH="$3" _WT="$4" _IMPL="$5" _TIT="$6" _URL="$7"
+    local REGRESSIONI VERDETTO REVISORE RID REV_OUT REV_PROMPT _REV_TEMPLATE
+    tg_send "🔍 <b>Roadmap — PR aperta, review in corso</b>
+Issue #${_ISSUE}: ${_TIT}
+Implementata da: ${_IMPL}
+${_URL}"
+
+    # ── cancello 1: nessun test rotto NUOVO rispetto a main ────────────────────
+    REGRESSIONI=-1
+    if RID=$(attendi_ci "$_BRANCH"); then
+        REGRESSIONI=$(conta_regressioni "$RID")
+        log "#$_ISSUE — CI conclusa (run $RID): $REGRESSIONI test rotti in piu' rispetto a main"
+    else
+        log "#$_ISSUE — CI non conclusa entro ${CI_ATTESA_MAX}s: il cancello non e' calcolabile."
+    fi
+
+    # ── cancello 2: review di un modello diverso dall'implementatore ───────────
+    VERDETTO="NON_ESEGUITA"; REVISORE=""
+    if REVISORE=$(scegli_recensore "$_IMPL"); then
+        log "#$_ISSUE — review affidata a $REVISORE"
+        # Prompt costruito con heredoc QUOTATO + segnaposto, come fa gia' il cron
+        # alpha-miss. Non e' stile: in una stringa fra virgolette i backtick del
+        # testo aprono una sostituzione di comando, bash esegue davvero i `gh` che
+        # stiamo solo CITANDO, e con set -e l'assegnazione fallita uccide lo
+        # script. E' successo: tre review morte qui senza lasciare un verdetto.
+        _REV_TEMPLATE=$(cat <<'REVEOF'
+Rivedi la pull request #__PR_NUM__ di questo repository, che chiude o riguarda la issue #__ISSUE__.
+
+Sei nel worktree __WT__, sul branch __BRANCH__. NON scrivere e NON modificare nulla: la tua uscita
+e' un giudizio, non una correzione. Non mergiare, non chiudere, non commentare via gh.
+
+Contesto che devi leggere prima di giudicare:
+- CLAUDE.md, per le convenzioni del progetto
+- `gh issue view __ISSUE__ --comments` — se un commento dell'operatore restringe il perimetro,
+  quella decisione vince sul testo originale della issue
+- docs/evidence/OBSERVATION_CHARTER.md — dal 2026-08-03 al 2026-09-28 ogni TARATURA e' congelata
+  (soglie, pesi, flag, cooldown, parametri di strategia). Sono ammessi solo correttezza,
+  strumentazione e misura.
+- `gh pr diff __PR_NUM__` — il diff completo
+
+Dato oggettivo gia' calcolato, non ricalcolarlo: rispetto a main la CI di questa PR ha
+__REGRESSIONI__ test rotti in piu' (-1 significa "non calcolabile").
+
+Giudica in questo ordine, e fermati al primo che fallisce:
+1. La PR fa cio' che la issue chiede? Se ha ristretto il perimetro, lo ha DICHIARATO nel corpo?
+   Una restrizione dichiarata e motivata e' accettabile; una silenziosa no.
+2. Viola il freeze? Cerca soglie, pesi, flag e parametri di strategia modificati. Un valore in
+   config/trading.yaml o in un default di codice che cambia il comportamento di trading e' una
+   violazione, anche se il resto della PR e' corretto.
+3. I test aggiunti verificano davvero la correzione, o passerebbero anche senza? Un test che
+   passa anche sul codice pre-fix non sta testando niente.
+4. Ci sono difetti di correttezza nel diff: divisioni per zero, ordinamenti sbagliati, errori
+   off-by-one, gestione mancante del caso vuoto o del fallimento di rete?
+
+Sii concreto: cita file e riga. Se non trovi problemi dillo in una riga, senza inventarne per
+sembrare accurato.
+
+Chiudi la risposta con UNA SOLA di queste due righe, esattamente come scritta, in ultima posizione:
+VERDETTO: APPROVA
+VERDETTO: RESPINGI
+REVEOF
+)
+        REV_PROMPT="${_REV_TEMPLATE//__PR_NUM__/$_PR}"
+        REV_PROMPT="${REV_PROMPT//__ISSUE__/$_ISSUE}"
+        REV_PROMPT="${REV_PROMPT//__WT__/$_WT}"
+        REV_PROMPT="${REV_PROMPT//__BRANCH__/$_BRANCH}"
+        REV_PROMPT="${REV_PROMPT//__REGRESSIONI__/$REGRESSIONI}"
+
+        set +e
+        REV_OUT=$(esegui_revisore "$REVISORE" "$REV_PROMPT" "$_WT")
+        set -e
+        if echo "$REV_OUT" | grep -qiE "$_RATE_LIMIT_RE"; then
+            metti_in_panchina "$REVISORE"; VERDETTO="NON_ESEGUITA"
+            log "#$_ISSUE — recensore $REVISORE in rate limit: review saltata."
+        elif echo "$REV_OUT" | grep -qE "^VERDETTO: APPROVA[[:space:]]*$"; then
+            VERDETTO="APPROVA"
+        elif echo "$REV_OUT" | grep -qE "^VERDETTO: RESPINGI[[:space:]]*$"; then
+            VERDETTO="RESPINGI"
+        fi
+        log "#$_ISSUE — verdetto di $REVISORE: $VERDETTO"
+        printf '## Review automatica — %s\n\nTest rotti in piu%s rispetto a main: **%s**\n\n---\n\n%s\n' \
+            "$REVISORE" "'" "$REGRESSIONI" "$REV_OUT" > "$LOG_DIR/.review_$_PR.md"
+        gh pr comment "$_PR" --body-file "$LOG_DIR/.review_$_PR.md" >/dev/null 2>&1 || true
+        rm -f "$LOG_DIR/.review_$_PR.md"
+    else
+        log "#$_ISSUE — nessun motore diverso dall'implementatore disponibile: review non eseguita."
+    fi
+
+    # ── merge solo se ENTRAMBI i cancelli sono passati ─────────────────────────
+    if [[ "$VERDETTO" == "APPROVA" && "$REGRESSIONI" == "0" ]]; then
+        # Non ci si fida del codice di uscita di `gh pr merge`: esce non-zero anche
+        # quando il merge E' avvenuto e a fallire e' solo la cancellazione del
+        # branch. E' successo su #206: merge riuscito, esito "rifiutato", deploy
+        # mai lanciato. L'esito lo determina lo STATO della PR.
+        gh pr merge "$_PR" --merge >/dev/null 2>&1 || true
+        sleep 3
+        if [[ "$(gh pr view "$_PR" --json state -q .state 2>/dev/null)" == "MERGED" ]]; then
+            # La cancellazione del branch e' cosmetica: non deve mai decidere l'esito.
+            gh api -X DELETE "repos/{owner}/{repo}/git/refs/heads/$_BRANCH" >/dev/null 2>&1 || true
+            log "#$_ISSUE — PR #$_PR mergiata (0 regressioni, $REVISORE approva)."
+            tg_send "🟢 <b>Roadmap — PR mergiata da sola</b>
+Issue #${_ISSUE}: ${_TIT}
+${_IMPL} ha implementato, ${REVISORE} ha approvato, 0 test rotti in piu&#39;.
+${_URL}
+
+<i>Riconciliazione del deploy avviata: rimandata da sola se il mercato e&#39; aperto.</i>"
+            # Il riconciliatore decide da solo se e quando: se il mercato e' aperto
+            # rimanda, e il cron ripassa. Qui serve solo a non aspettare il cron
+            # quando la finestra e' gia' libera.
+            "$SCRIPT_DIR/deploy_reconcile.sh" >/dev/null 2>&1 || \
+                log "#$_ISSUE — riconciliazione del deploy non riuscita: se ne occupa il cron."
+        else
+            log "#$_ISSUE — merge rifiutato da GitHub (conflitto o protezione)."
+            tg_send "⚠️ <b>Roadmap</b> — #${_PR} approvata ma il merge e&#39; stato rifiutato da GitHub. Serve una mano.
+${_URL}"
+        fi
+    else
+        log "#$_ISSUE — NON mergiata (verdetto=$VERDETTO, regressioni=$REGRESSIONI)."
+        tg_send "🟡 <b>Roadmap — PR da guardare</b>
+Issue #${_ISSUE}: ${_TIT}
+Implementata da ${_IMPL}${REVISORE:+, rivista da $REVISORE}
+Verdetto: <b>${VERDETTO}</b> · test rotti in piu&#39; rispetto a main: <b>${REGRESSIONI}</b>
+${_URL}"
+    fi
+}
+
 # --- comandi operatore ----------------------------------------------------------
+if [[ "${1:-}" == "--rivedi" ]]; then
+    # Recupera una PR rimasta senza verdetto (review fallita, timeout, rate limit).
+    # Ricostruisce il minimo indispensabile e applica gli stessi due cancelli.
+    _pr="${2:?uso: --rivedi <numero PR>}"
+    scegli_motore
+    _b=$(gh pr view "$_pr" --json headRefName -q .headRefName)
+    _t=$(gh pr view "$_pr" --json title -q .title)
+    _u=$(gh pr view "$_pr" --json url -q .url)
+    _i=$(echo "$_b" | grep -oE '[0-9]+$')
+    [[ -z "$_i" ]] && { echo "Non ricavo il numero di issue dal branch '$_b'."; exit 1; }
+    # L'implementatore va escluso dalla review: se non e' ricavabile dal log, si
+    # assume il motore di turno, che e' l'ipotesi prudente (al massimo cambia
+    # recensore, mai lo fa coincidere con chi ha scritto).
+    _impl=$(grep -hoE "PR aperta da [a-z0-9]+: .*/${_pr}$" "$LOG_DIR"/roadmap_agent_*.log 2>/dev/null \
+            | tail -1 | awk '{print $4}' | tr -d ':')
+    _impl="${_impl:-$MOTORE}"
+    _wt="$PROJECT_DIR/.worktrees/rivedi-$_pr"
+    git fetch -q origin "$_b"
+    git worktree remove --force "$_wt" 2>/dev/null || true
+    git worktree add -q --detach "$_wt" "origin/$_b"
+    log "--rivedi #$_pr (issue #$_i, branch $_b, implementata da $_impl)"
+    rivedi_e_mergia "$_pr" "$_i" "$_b" "$_wt" "$_impl" "$_t" "$_u"
+    git worktree remove --force "$_wt" 2>/dev/null || true
+    exit 0
+fi
+
 if [[ "${1:-}" == "--motori" ]]; then
     printf '%-10s %-14s %s\n' MOTORE STATO NOTE
     for m in "${MOTORI[@]}"; do
@@ -517,107 +674,7 @@ if [[ -n "$PR_URL" ]]; then
     grep -v -P "^${ISSUE}\t" "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null || true
     mv "${STATE_FILE}.tmp" "$STATE_FILE"
     PR_NUM=$(gh pr list --state open --head "$BRANCH" --json number -q '.[0].number')
-    tg_send "🔍 <b>Roadmap — PR aperta, review in corso</b>
-Issue #${ISSUE}: ${TITOLO}
-Implementata da: ${MOTORE}
-${PR_URL}"
-
-    # ── cancello 1: nessun test rotto NUOVO rispetto a main ────────────────────
-    REGRESSIONI=-1
-    if RID=$(attendi_ci "$BRANCH"); then
-        REGRESSIONI=$(conta_regressioni "$RID")
-        log "#$ISSUE — CI conclusa (run $RID): $REGRESSIONI test rotti in piu' rispetto a main"
-    else
-        log "#$ISSUE — CI non conclusa entro ${CI_ATTESA_MAX}s: il cancello non e' calcolabile."
-    fi
-
-    # ── cancello 2: review di un modello diverso dall'implementatore ───────────
-    VERDETTO="NON_ESEGUITA"; REVISORE=""
-    if REVISORE=$(scegli_recensore "$MOTORE"); then
-        log "#$ISSUE — review affidata a $REVISORE"
-        REV_PROMPT="Rivedi la pull request #${PR_NUM} di questo repository, che chiude o riguarda la issue #${ISSUE}.
-
-Sei nel worktree $WT, sul branch $BRANCH. NON scrivere e NON modificare nulla: la tua uscita
-e' un giudizio, non una correzione. Non mergiare, non chiudere, non commentare via gh.
-
-Contesto che devi leggere prima di giudicare:
-- CLAUDE.md, per le convenzioni del progetto
-- \\`gh issue view ${ISSUE} --comments\\` — se un commento dell'operatore restringe il perimetro,
-  quella decisione vince sul testo originale della issue
-- docs/evidence/OBSERVATION_CHARTER.md — dal 2026-08-03 al 2026-09-28 ogni TARATURA e' congelata
-  (soglie, pesi, flag, cooldown, parametri di strategia). Sono ammessi solo correttezza,
-  strumentazione e misura.
-- \\`gh pr diff ${PR_NUM}\\` — il diff completo
-
-Dato oggettivo gia' calcolato, non ricalcolarlo: rispetto a main la CI di questa PR ha
-${REGRESSIONI} test rotti in piu' (-1 significa 'non calcolabile').
-
-Giudica in questo ordine, e fermati al primo che fallisce:
-1. La PR fa cio' che la issue chiede? Se ha ristretto il perimetro, lo ha DICHIARATO nel corpo?
-   Una restrizione dichiarata e motivata e' accettabile; una silenziosa no.
-2. Viola il freeze? Cerca soglie, pesi, flag e parametri di strategia modificati. Un valore in
-   config/trading.yaml o in un default di codice che cambia il comportamento di trading e' una
-   violazione, anche se il resto della PR e' corretto.
-3. I test aggiunti verificano davvero la correzione, o passerebbero anche senza? Un test che
-   passa anche sul codice pre-fix non sta testando niente.
-4. Ci sono difetti di correttezza nel diff: divisioni per zero, ordinamenti sbagliati, errori
-   off-by-one, gestione mancante del caso vuoto o del fallimento di rete?
-
-Sii concreto: cita file e riga. Se non trovi problemi dillo in una riga, senza inventarne per
-sembrare accurato.
-
-Chiudi la risposta con UNA SOLA di queste due righe, esattamente come scritta, in ultima posizione:
-VERDETTO: APPROVA
-VERDETTO: RESPINGI"
-
-        set +e
-        REV_OUT=$(esegui_revisore "$REVISORE" "$REV_PROMPT" "$WT")
-        set -e
-        if echo "$REV_OUT" | grep -qiE "$_RATE_LIMIT_RE"; then
-            metti_in_panchina "$REVISORE"; VERDETTO="NON_ESEGUITA"
-            log "#$ISSUE — recensore $REVISORE in rate limit: review saltata."
-        elif echo "$REV_OUT" | grep -qE "^VERDETTO: APPROVA[[:space:]]*$"; then
-            VERDETTO="APPROVA"
-        elif echo "$REV_OUT" | grep -qE "^VERDETTO: RESPINGI[[:space:]]*$"; then
-            VERDETTO="RESPINGI"
-        fi
-        log "#$ISSUE — verdetto di $REVISORE: $VERDETTO"
-        printf '## Review automatica — %s\n\nTest rotti in piu%s rispetto a main: **%s**\n\n---\n\n%s\n' \
-            "$REVISORE" "'" "$REGRESSIONI" "$REV_OUT" > "$LOG_DIR/.review_$PR_NUM.md"
-        gh pr comment "$PR_NUM" --body-file "$LOG_DIR/.review_$PR_NUM.md" >/dev/null 2>&1 || true
-        rm -f "$LOG_DIR/.review_$PR_NUM.md"
-    else
-        log "#$ISSUE — nessun motore diverso dall'implementatore disponibile: review non eseguita."
-    fi
-
-    # ── merge solo se ENTRAMBI i cancelli sono passati ─────────────────────────
-    if [[ "$VERDETTO" == "APPROVA" && "$REGRESSIONI" == "0" ]]; then
-        if gh pr merge "$PR_NUM" --merge --delete-branch >/dev/null 2>&1; then
-            log "#$ISSUE — PR #$PR_NUM mergiata (0 regressioni, $REVISORE approva)."
-            tg_send "🟢 <b>Roadmap — PR mergiata da sola</b>
-Issue #${ISSUE}: ${TITOLO}
-${MOTORE} ha implementato, ${REVISORE} ha approvato, 0 test rotti in piu&#39;.
-${PR_URL}
-
-<i>Riconciliazione del deploy avviata: rimandata da sola se il mercato e&#39; aperto.</i>"
-            # Il riconciliatore decide da solo se e quando: se il mercato e' aperto
-            # rimanda, e il cron ripassa. Qui serve solo a non aspettare il cron
-            # quando la finestra e' gia' libera.
-            "$SCRIPT_DIR/deploy_reconcile.sh" >/dev/null 2>&1 || \
-                log "#$ISSUE — riconciliazione del deploy non riuscita: se ne occupa il cron."
-        else
-            log "#$ISSUE — merge rifiutato da GitHub (conflitto o protezione)."
-            tg_send "⚠️ <b>Roadmap</b> — #${PR_NUM} approvata ma il merge e&#39; stato rifiutato da GitHub. Serve una mano.
-${PR_URL}"
-        fi
-    else
-        log "#$ISSUE — NON mergiata (verdetto=$VERDETTO, regressioni=$REGRESSIONI)."
-        tg_send "🟡 <b>Roadmap — PR da guardare</b>
-Issue #${ISSUE}: ${TITOLO}
-Implementata da ${MOTORE}${REVISORE:+, rivista da $REVISORE}
-Verdetto: <b>${VERDETTO}</b> · test rotti in piu&#39; rispetto a main: <b>${REGRESSIONI}</b>
-${PR_URL}"
-    fi
+    rivedi_e_mergia "$PR_NUM" "$ISSUE" "$BRANCH" "$WT" "$MOTORE" "$TITOLO" "$PR_URL"
 else
     log "#$ISSUE — nessuna PR aperta."
     CODA=$(echo "$OUTPUT" | tail -c 1200)

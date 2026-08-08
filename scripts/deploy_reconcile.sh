@@ -142,21 +142,37 @@ tg_send "🔧 <b>Deploy</b> — riallineo la produzione a <code>${TARGET:0:8}</c
 # Si ricostruisce da origin/main, non dall'albero di lavoro: un'altra sessione
 # potrebbe averci lasciato dentro un branch o modifiche non committate, e
 # finirebbero in produzione senza che nessuno le abbia mai mergiate.
-WT="$PROJECT_DIR/.worktrees/deploy"
-git worktree remove --force "$WT" 2>/dev/null || true
-git worktree add -q --detach "$WT" "$TARGET"
-# Il .env non e' versionato: senza, compose non riesce nemmeno a interpolare il
-# file. Collegato invece che copiato, per non lasciare in giro una seconda copia
-# dei segreti.
-ln -sf "$PROJECT_DIR/.env" "$WT/.env"
+# Un percorso NUOVO a ogni giro. Con un nome fisso, un residuo di un giro
+# interrotto blocca per sempre quelli successivi: `worktree remove` fallisce
+# perche' git non traccia piu' la directory, il `|| true` lo nasconde, e `add`
+# non puo' creare su una directory esistente. E' successo — 5 giri persi.
+# Peggio: `rm -rf` non basta, perche' compose ci lascia dentro directory di root
+# (reports/) che l'utente non puo' cancellare.
+WT="$PROJECT_DIR/.worktrees/deploy-$$"
+git worktree prune
+# Residui dei giri precedenti: si rimuove cio' che si puo', senza mai bloccarsi.
+for _vecchio in "$PROJECT_DIR"/.worktrees/deploy*; do
+    [[ -d "$_vecchio" ]] || continue
+    git worktree remove --force "$_vecchio" 2>/dev/null || true
+    rm -rf "$_vecchio" 2>/dev/null || true
+done
+git worktree prune
 
 fallisci() {
     log "FALLITO: $1"
     tg_send "🔴 <b>Deploy fallito</b> — $1
 La produzione resta su <code>${CORRENTE:0:8}</code>. Il riferimento NON è stato aggiornato: il prossimo giro riprova."
     git worktree remove --force "$WT" 2>/dev/null || true
+    rm -rf "$WT" 2>/dev/null || true
     exit 1
 }
+
+git worktree add -q --detach "$WT" "$TARGET" || fallisci "creazione del worktree di deploy"
+# Il .env non e' versionato: senza, compose non riesce nemmeno a interpolare il
+# file. Collegato invece che copiato, per non lasciare in giro una seconda copia
+# dei segreti.
+ln -sf "$PROJECT_DIR/.env" "$WT/.env"
+
 
 if [[ "$DA_FARE" == *backend* ]]; then
     (cd "$WT" && timeout 1800 docker compose -p "$COMPOSE_PROJ" build "${SERVIZI_BACKEND[@]}") >>"$LOG_FILE" 2>&1 \
@@ -190,5 +206,6 @@ fi
 
 echo "$TARGET" > "$SHA_FILE"
 git worktree remove --force "$WT" 2>/dev/null || true
+rm -rf "$WT" 2>/dev/null || true
 log "=== Riconciliato a ${TARGET:0:8} ==="
 tg_send "🟢 <b>Deploy completato</b> — produzione allineata a <code>${TARGET:0:8}</code> ($DIETRO commit, $DA_FARE)."
