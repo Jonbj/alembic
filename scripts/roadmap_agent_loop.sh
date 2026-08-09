@@ -346,7 +346,7 @@ scegli_recensore() {
 # proprio perche' ha gia' una PR aperta.
 rivedi_e_mergia() {
     local _PR="$1" _ISSUE="$2" _BRANCH="$3" _WT="$4" _IMPL="$5" _TIT="$6" _URL="$7"
-    local REGRESSIONI VERDETTO REVISORE RID REV_OUT REV_PROMPT _REV_TEMPLATE
+    local REGRESSIONI VERDETTO REVISORE RID REV_OUT REV_PROMPT _REV_TEMPLATE _REV_FILE
     tg_send "🔍 <b>Roadmap — PR aperta, review in corso</b>
 Issue #${_ISSUE}: ${_TIT}
 Implementata da: ${_IMPL}
@@ -425,10 +425,18 @@ REVEOF
         # diverse e vanno distinte nel log: la prima si recupera aspettando, la
         # seconda no.
         log "#$_ISSUE — verdetto di $REVISORE: $VERDETTO"
-        printf '## Review automatica — %s\n\nTest rotti in piu%s rispetto a main: **%s**\n\n---\n\n%s\n' \
-            "$REVISORE" "'" "$REGRESSIONI" "$REV_OUT" > "$LOG_DIR/.review_$_PR.md"
-        gh pr comment "$_PR" --body-file "$LOG_DIR/.review_$_PR.md" >/dev/null 2>&1 || true
-        rm -f "$LOG_DIR/.review_$_PR.md"
+        # Il giudizio si conserva su disco PRIMA di provare a pubblicarlo, e non si
+        # cancella. Finiva in un file temporaneo rimosso subito, con l'unica via di
+        # pubblicazione silenziata: un errore transitorio dell'API GitHub — che qui
+        # capita, `error connecting to api.github.com` si legge nelle trascrizioni —
+        # bastava a perdere per sempre la motivazione di un verdetto. E' successo su
+        # PR #207 il 2026-08-09: RESPINGI registrato, ragioni irrecuperabili.
+        _REV_FILE="$LOG_DIR/review_${_PR}_$(date +%Y-%m-%d).md"
+        printf '## Review automatica — %s\n\nTest rotti in piu%s rispetto a main: **%s**\n\nVerdetto letto: **%s**\n\n---\n\n%s\n' \
+            "$REVISORE" "'" "$REGRESSIONI" "$VERDETTO" "$REV_OUT" > "$_REV_FILE"
+        if ! gh pr comment "$_PR" --body-file "$_REV_FILE" >/dev/null 2>&1; then
+            log "#$_ISSUE — commento di review NON pubblicato su GitHub: resta in $_REV_FILE"
+        fi
     else
         log "#$_ISSUE — nessun motore diverso dall'implementatore disponibile: review non eseguita."
     fi
