@@ -64,6 +64,56 @@ RATE_LIMIT_COOLDOWN=$(( 3 * 3600 ))
 # un falso negativo brucia il giro e conta un fallimento a carico della issue.
 _RATE_LIMIT_RE='rate.?limit|429|quota exceeded|too many requests|usage limit|resource_exhausted|overloaded'
 
+# Quante righe finali contano come ESITO della sessione. Il resto dell'output non e'
+# un giudizio: e' la trascrizione di cio' che il recensore ha letto — prompt
+# riecheggiato, `gh issue list`, diff, sorgenti numerati.
+CODA_ESITO=40
+
+# Legge l'esito di una review dallo stdin. Unico punto in cui l'output di un
+# recensore viene interpretato (#211).
+#
+# L'ordine dei due controlli non e' arbitrario. Prima il verdetto, poi il rate
+# limit, perche' una sessione uccisa dalla quota non arriva a scrivere una riga
+# canonica in coda: se il verdetto c'e', la sessione e' viva e qualunque
+# "rate limit" nel testo e' roba che il recensore ha LETTO, non che ha subito.
+# Era l'errore inverso a bruciare i verdetti veri: il titolo della issue #43
+# ("B8: rate limiting + CORS"), un hunk `@@ -429,6` o la riga 3429 di un sorgente
+# bastavano a scartare un RESPINGI motivato e a mettere in panchina il recensore.
+#
+# `tail -1` chiude il difetto grave: codex riecheggia il prompt, che contiene
+# ENTRAMBE le righe canoniche, e le contiene PRIMA di aver giudicato. Un `grep -q`
+# su tutto l'output usciva al primo match — sempre l'eco, sempre APPROVA — e
+# mergiava in produzione PR che il recensore aveva respinto.
+#
+# La sicurezza non dipende dalla taratura di CODA_ESITO: nell'eco del prompt
+# RESPINGI viene DOPO APPROVA, quindi `tail -1` su un'eco isolata da' comunque
+# RESPINGI. Sbagliare la finestra puo' far perdere un verdetto, mai inventarne
+# uno positivo.
+estrai_verdetto() {
+    local _out _coda _v
+    _out=$(cat)
+    _coda=$(printf '%s\n' "$_out" | tail -n "$CODA_ESITO")
+
+    # `|| true`: nessun match e' l'esito normale di una sessione senza verdetto, non
+    # un errore. Con `set -euo pipefail` l'uscita 1 di grep ucciderebbe lo script.
+    _v=$(printf '%s\n' "$_coda" | grep -E "^VERDETTO: (APPROVA|RESPINGI)[[:space:]]*$" | tail -1 || true)
+    case "$_v" in
+        "VERDETTO: APPROVA")  echo "APPROVA";  return 0 ;;
+        "VERDETTO: RESPINGI") echo "RESPINGI"; return 0 ;;
+    esac
+
+    if printf '%s\n' "$_coda" | grep -qiE "$_RATE_LIMIT_RE"; then
+        echo "RATE_LIMIT"; return 0
+    fi
+    echo "NON_ESEGUITA"
+}
+
+# Prima del lock: e' una funzione pura sullo stdin, non un giro di lavoro.
+if [[ "${1:-}" == "--verdetto" ]]; then
+    estrai_verdetto
+    exit 0
+fi
+
 mkdir -p "$LOG_DIR"
 touch "$STATE_FILE"
 
@@ -366,14 +416,14 @@ REVEOF
         set +e
         REV_OUT=$(esegui_revisore "$REVISORE" "$REV_PROMPT" "$_WT")
         set -e
-        if echo "$REV_OUT" | grep -qiE "$_RATE_LIMIT_RE"; then
+        VERDETTO=$(printf '%s\n' "$REV_OUT" | estrai_verdetto)
+        if [[ "$VERDETTO" == "RATE_LIMIT" ]]; then
             metti_in_panchina "$REVISORE"; VERDETTO="NON_ESEGUITA"
             log "#$_ISSUE — recensore $REVISORE in rate limit: review saltata."
-        elif echo "$REV_OUT" | grep -qE "^VERDETTO: APPROVA[[:space:]]*$"; then
-            VERDETTO="APPROVA"
-        elif echo "$REV_OUT" | grep -qE "^VERDETTO: RESPINGI[[:space:]]*$"; then
-            VERDETTO="RESPINGI"
         fi
+        # NON_ESEGUITA da rate limit e NON_ESEGUITA da sessione morta sono due cose
+        # diverse e vanno distinte nel log: la prima si recupera aspettando, la
+        # seconda no.
         log "#$_ISSUE — verdetto di $REVISORE: $VERDETTO"
         printf '## Review automatica — %s\n\nTest rotti in piu%s rispetto a main: **%s**\n\n---\n\n%s\n' \
             "$REVISORE" "'" "$REGRESSIONI" "$REV_OUT" > "$LOG_DIR/.review_$_PR.md"
