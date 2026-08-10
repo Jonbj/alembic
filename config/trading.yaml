@@ -313,6 +313,15 @@ loss_feedback:
   threshold_step: 0.05           # amount to raise ENTRY_THRESHOLD per trigger
   threshold_max: 0.60            # ceiling for raised threshold
   threshold_baseline: 0.30       # baseline to recover toward
+  # #191: tetto del ratchet. false (congelato) ferma SOLO l'innalzamento
+  # dell'entry threshold (che resta ancorata al baseline, e una soglia già
+  # alzata viene riportata al baseline); regime_scale, stato e S1 restano
+  # vivi. Ship di default false — decisione operatore 2026-08-10: il freeze è
+  # attivo alla consegna senza richiedere azione manuale post-merge (deroga al
+  # freeze di osservazione #171 già approvata nel corpo della issue). true
+  # riattiva l'innalzamento storico (opt-in). trading.yaml è baked
+  # nell'immagine worker: serve rebuild+redeploy.
+  threshold_ratchet_enabled: false
   # 2026-07-09: auto-decay the raised gate every 24h without a new trigger, so a
   # transient loss does not keep the threshold stuck near 0.55 forever.
   threshold_decay_hours: 24

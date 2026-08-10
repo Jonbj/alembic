@@ -1726,6 +1726,13 @@ def _load_loss_feedback_config() -> dict:
         "threshold_step": 0.05,
         "threshold_max": 0.60,
         "threshold_baseline": 0.30,
+        # #191: tetto del ratchet. False (congelato) ferma SOLO l'innalzamento
+        # dell'entry threshold; regime_scale, stato e S1 restano vivi. Il
+        # default è False — decisione operatore 2026-08-10: il freeze è attivo
+        # alla consegna, senza richiedere azione manuale post-merge (deroga al
+        # freeze di osservazione #171 già approvata nel corpo della issue).
+        # True riattiva l'innalzamento storico (opt-in, non il default).
+        "threshold_ratchet_enabled": False,
         "threshold_decay_hours": 24,        # auto-decay threshold if no trigger
         "regime_scale_factor": 0.80,
         "regime_min_scale": 0.20,
@@ -1973,7 +1980,19 @@ def run_loss_feedback_check() -> dict:
             )
 
         elif outcome.triggered and cooldown_ok:
-            new_threshold = min(current_threshold + cfg["threshold_step"], cfg["threshold_max"])
+            ratchet_enabled = cfg.get("threshold_ratchet_enabled", False)
+            if ratchet_enabled:
+                new_threshold = min(current_threshold + cfg["threshold_step"], cfg["threshold_max"])
+            else:
+                # #191: ratchet congelato — si ferma SOLO l'innalzamento
+                # dell'entry threshold. regime_scale, stato e S1 restano vivi
+                # (il ramo di de-risking non si spegne). Se un innalzamento
+                # precedente (pre-freeze) ha lasciato la soglia elevata (es.
+                # Redis a 0,45), la riportiamo al baseline ora: sotto trigger
+                # persistente il ramo di decay non interviene, quindi senza
+                # questa riscrittura la produzione resterebbe bloccata sopra il
+                # baseline mentre il log dichiarerebbe "stays at baseline".
+                new_threshold = cfg["threshold_baseline"]
             new_scale = max(current_scale * cfg["regime_scale_factor"], cfg["regime_min_scale"])
 
             # S1 has no discrete entry-threshold gate; persist state only.
@@ -1999,23 +2018,50 @@ def run_loss_feedback_check() -> dict:
             )
 
             s_result.update({"adjusted": True, "new_threshold": new_threshold, "new_scale": new_scale})
+            s_result["ratchet_frozen"] = not ratchet_enabled
             any_adjusted = True
 
-            log.warning(
-                "Loss feedback triggered for %s: EWMA R %.2f, %d consecutive losses, rolling P&L $%.2f — "
-                "threshold %.2f→%.2f, regime scale %.2f→%.2f",
-                strategy, outcome.ewma_r, outcome.consecutive_losses, outcome.rolling_net_pnl,
-                current_threshold, new_threshold, current_scale, new_scale,
-            )
-
-            msg = (
-                f"⚠️ *Loss Feedback Triggered — {strategy}*\n"
-                f"Reason: {outcome.reason}\n"
-                f"EWMA R: {outcome.ewma_r:.2f}\n"
-                f"ENTRY\\_THRESHOLD: {current_threshold:.2f} → {new_threshold:.2f}\n"
-                f"Regime scale: {current_scale:.2f} → {new_scale:.2f}\n"
-                f"_Adjustments active for {cfg['feedback_ttl_hours']}h_"
-            )
+            if ratchet_enabled:
+                log.warning(
+                    "Loss feedback triggered for %s: EWMA R %.2f, %d consecutive losses, rolling P&L $%.2f — "
+                    "threshold %.2f→%.2f, regime scale %.2f→%.2f",
+                    strategy, outcome.ewma_r, outcome.consecutive_losses, outcome.rolling_net_pnl,
+                    current_threshold, new_threshold, current_scale, new_scale,
+                )
+                msg = (
+                    f"⚠️ *Loss Feedback Triggered — {strategy}*\n"
+                    f"Reason: {outcome.reason}\n"
+                    f"EWMA R: {outcome.ewma_r:.2f}\n"
+                    f"ENTRY\\_THRESHOLD: {current_threshold:.2f} → {new_threshold:.2f}\n"
+                    f"Regime scale: {current_scale:.2f} → {new_scale:.2f}\n"
+                    f"_Adjustments active for {cfg['feedback_ttl_hours']}h_"
+                )
+            else:
+                # Log accurato: distingue il ritorno al baseline di una soglia
+                # già alzata (il difetto #2 di #205) dalla soglia già al baseline.
+                if current_threshold > cfg["threshold_baseline"]:
+                    log.warning(
+                        "Loss feedback ratchet frozen for %s: triggered (EWMA R %.2f, %d losses) — "
+                        "threshold pulled back to baseline %.2f→%.2f, regime scale %.2f→%.2f",
+                        strategy, outcome.ewma_r, outcome.consecutive_losses,
+                        current_threshold, new_threshold, current_scale, new_scale,
+                    )
+                else:
+                    log.info(
+                        "Loss feedback ratchet frozen for %s: triggered (EWMA R %.2f, %d losses) — "
+                        "threshold stays at baseline %.2f, regime scale %.2f→%.2f",
+                        strategy, outcome.ewma_r, outcome.consecutive_losses,
+                        new_threshold, current_scale, new_scale,
+                    )
+                msg = (
+                    f"🔒 *Loss Feedback — Ratchet Frozen — {strategy}*\n"
+                    f"Reason: {outcome.reason}\n"
+                    f"EWMA R: {outcome.ewma_r:.2f}\n"
+                    f"ENTRY\\_THRESHOLD: {current_threshold:.2f} → {new_threshold:.2f} "
+                    f"(ratchet frozen at baseline {cfg['threshold_baseline']:.2f})\n"
+                    f"Regime scale: {current_scale:.2f} → {new_scale:.2f}\n"
+                    f"_Adjustments active for {cfg['feedback_ttl_hours']}h_"
+                )
             try:
                 notifier = TelegramNotifier()
                 run_async(notifier.send_alert(msg, level="warning"))

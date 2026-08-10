@@ -157,6 +157,11 @@ def _default_cfg():
         "threshold_step": 0.05,
         "threshold_max": 0.60,
         "threshold_baseline": 0.30,
+        # #191: questi test verificano la meccanica del ratchet (innalzamento,
+        # tetto, recovery, decay), che dopo il freeze è opt-in. Lo attivano
+        # esplicitamente: il default di consegna è congelato (false), vedi
+        # test_loss_feedback_threshold_ratchet_freeze.py.
+        "threshold_ratchet_enabled": True,
         "threshold_decay_hours": 24,
         "regime_scale_factor": 0.80,
         "regime_min_scale": 0.20,
