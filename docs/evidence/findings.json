@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 30,
+  "prossimo_id": 31,
   "findings": [
     {
       "id": "F-001",
@@ -38,9 +38,15 @@
           "costo_usd": 82.5,
           "nota": "40/96 simboli (42%) zero righe in news_log il 08-06, in miglioramento su 51/96 (08-05) ma dentro la stessa banda 42-57% dei quattro giorni precedenti. Uno dei quattro miss del giorno e' NO_NEWS puro: TMUS +3.75%, zero righe in news_log, zero in sentiment_signals, zero in execution_decisions - nessuna catena decisionale esiste. Costo con size S4 tipica 2200 $ sul return pieno: 82.50 (sulla sola porzione intraday realmente catturabile, +1.45% contro un gap di +2.27%, varrebbe 31.90). Nota che aggrava l'osservazione, come il 08-05: la copertura apparente e' gonfiata dal fan-out sui ticker bancari (F-020) - 40 delle 162 righe del giorno stanno su MS e GS e nessuna riguarda le due banche.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-06.md §3, §7"
+        },
+        {
+          "data": "2026-08-07",
+          "costo_usd": 246.84,
+          "nota": "52/96 simboli (54%) zero righe in news_log il 08-07, dentro la banda 42-57% delle cinque sedute precedenti (55/96 il 07-31, 41/96 il 08-03, 42/96 il 08-04, 51/96 il 08-05, 40/96 il 08-06). Tre dei sette miss del giorno sono NO_NEWS puri: QCOM +4.66%, SAP +3.36%, CRM +3.20% - zero righe in news_log, zero in sentiment_signals, zero in execution_decisions, nessuna catena decisionale esistente. Costo con size S4 tipica 2200 $ sul return pieno: 102.52+73.92+70.40 = 246.84 (sulla sola porzione intraday realmente catturabile 64.68+32.56+18.92 = 116.16; oggi il gap conta poco, il movimento e' quasi tutto intraday). Ricorrenza sugli stessi ticker, non copertura casuale: QCOM e' NO_NEWS per la TERZA volta in quattro sedute (08-04 a +7.32%, 08-05 a -3.16%, oggi a +4.66%); SAP e' mancato per assenza o genericita' di copertura il 07-24, 07-27, 07-28, 08-03, 08-04 e oggi; CRM alterna fra assenza (oggi) e copertura non informativa (il 08-06 il solo listicle whale-alert). Aggravante invariata: la copertura apparente e' gonfiata dal fan-out bancario di F-020, che oggi assorbe il 20% delle righe.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-07.md §7"
         }
       ],
-      "costo_cumulato_usd": 879.96,
+      "costo_cumulato_usd": 1126.8,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 1
@@ -69,12 +75,18 @@
           "costo_usd": null,
           "nota": "12 delle 52 posizioni aperte a fine 08-04 hanno trades.stop_strategy NULL (BAC, BP, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE, tutte aperte il 07-10) - stesso insieme del 08-03. Contribuiscono +40.24 di MTM sulla giornata. Fra queste ci sono entrambi gli estremi del giorno: RIO (+3.31%, un mover contato come catturato) e BP (-4.00%, il peggiore contributore del book con -29.51 di MTM). Finche' restano aperte, i due estremi del book restano fuori dallo split S1/S4 richiesto dalla domanda di uscita 2 della carta.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-04.md §4.3, §7"
+        },
+        {
+          "data": "2026-08-07",
+          "costo_usd": null,
+          "nota": "11 delle 48 posizioni aperte a fine 08-07 hanno trades.stop_strategy NULL (BAC, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE, tutte aperte il 07-10) - una in meno del 08-04 per la chiusura di BP. Fra queste c'e' PBR, -3.02%, uno dei due soli mover al ribasso del giorno e -22.17 $ di MTM sulla giornata. Costo null: non e' una perdita, e' una perdita non attribuibile. Finche' queste posizioni restano aperte una fetta del libro resta fuori dallo split S1/S4 richiesto dalla domanda di uscita 2 della carta, e oggi l'estremo negativo del giorno cade proprio li' dentro.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-07.md §7"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 3
+      "occorrenze_non_stimate": 4
     },
     {
       "id": "F-003",
@@ -317,6 +329,12 @@
           "costo_usd": 29.23,
           "nota": "Ricorrenza con caso di costo. Il worker sentiment somma 'finbert_fallbacks: 61' sui 24 cicli mentre una sola riga di sentiment_signals ha model_id='finbert' (le altre 60 sono single:gpt-oss 53 + single:glm-5.2 7, cioe' LLM cloud veri); llm_responses.eligible e' true su 48/204 per gpt-oss e 48/202 per glm mentre 143 segnali sono ensemble a due modelli. La regola #108 esclude dal ranking BUY tutti i 61 (29.9% della produzione) sul presupposto - falso in 60 casi su 61 - che siano FinBERT. Caso concreto: SPCX signal 6476, +0.450 alle 19:16 da single:gpt-oss:20b-cloud, sopra il gate 0.30, escluso. SPCX ha chiuso +10.06% ed e' uno dei 9 mover mancati del giorno. Controfattuale corto: ingresso al ciclo 19:22 a 124.30 contro chiusura 125.95 = +1.33% su size S4 tipica 2200 $ = 29.23 $ non catturati. Congetturale: nessun trade e' avvenuto.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-04.md section 10 [DAY-005]"
+        },
+        {
+          "data": "2026-08-07",
+          "costo_usd": 0.0,
+          "nota": "Ricorrenza del meccanismo con COSTO 0.00 VERIFICATO (non stimato per difetto). 54 dei 139 segnali del 08-07 (39%) sono single-model con fallback_used=true. Verifica diretta sulla catena, che il 08-03/08-04 era stata fatta per lettura di codice: SPCX ha segnali alle 15:00 (+0.020), 15:15 (+0.040) e 15:45 (+0.120), tutti model_id='single:gpt-oss:20b-cloud', e in execution_decisions NON ESISTE ALCUNA RIGA SPCX fra le 14:37 e le 18:22 - quei tre segnali non hanno nemmeno raggiunto il gate, coerentemente con la regola #108 che esclude dal ranking BUY i segnali fallback. Stesso schema su PLTR: segnale single:gpt-oss +0.120 alle 18:30, ultima riga di decisione alle 18:22. Il controfattuale e' stato calcolato ed e' nullo: tutti e quattro i punteggi sono sotto il gate 0.300 in vigore oggi, quindi anche entrando nel ranking non avrebbero prodotto ordine.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-07.md §7"
         }
       ],
       "costo_cumulato_usd": 29.23,
@@ -354,10 +372,16 @@
           "costo_usd": null,
           "nota": "Ricorrenza invariata: 703 righe su 705 di execution_decisions del 08-06 hanno signal_id NULL. Le due popolate sono i due BUY S4 (MSFT signal_id=6689, SPCX signal_id=6699); tutti e 7 i SELL, tutti i 690 SKIP_THRESHOLD e i 2 SKIP_STALE hanno il campo vuoto. Sui SELL la conseguenza e' concreta oggi: le uscite di MSFT e SPCX (vedi F-013 e F-024) non sono agganciabili per chiave al segnale che le ha decise, e la ricostruzione passa solo dal testo libero del reason - che oggi e' anche sbagliato (F-006).",
           "fonte": "ALPHA_MISS_REPORT_2026-08-06.md §6, §7"
+        },
+        {
+          "data": "2026-08-07",
+          "costo_usd": null,
+          "nota": "Ricorrenza al massimo storico: 588 righe su 588 di execution_decisions del 08-07 hanno signal_id NULL - il 100%, contro 703/705 il 08-06, 487/488 il 08-05 e 389/392 il 08-04. Comprese l'unica BUY (SBUX 14:07) e l'unica SELL (BRK.B 14:22) della giornata: sono entrambe S1 e quindi prive di segnale per costruzione, il che spiega quelle due righe ma non le 584 SKIP_THRESHOLD, ciascuna delle quali nasce da un segnale identificabile in sentiment_signals e non lo cita. Conseguenza concreta oggi: l'intera ricostruzione della catena news->segnale->decisione fatta in questo report e' stata eseguita a mano incrociando timestamp, simbolo e punteggio, perche' la chiave esterna non esiste su nessuna riga.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-07.md §7"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 4,
+      "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
     },
@@ -397,9 +421,15 @@
           "costo_usd": 0.0,
           "nota": "Ricorrenza sui due mover al ribasso del giorno, entrambi classificati THIN_NEUTRAL: BA -3.33% e CRM -3.22% hanno come UNICA copertura del giorno un articolo-lista generico multi-ticker ('10 Industrials Stocks With Whale Alerts In Today's Session' per BA, '10 Information Technology Stocks Whale Activity In Today's Session' per CRM), entrambi via alpaca_benzinga/source_metadata. Score ensemble non-fallback identicamente 0.000, confidence 0.20 e 0.15. COSTO 0.00 verificato, non stimato per difetto: sono mover al ribasso e il libro e' long-only, quindi non c'era alpha catturabile in nessun caso. La forma resta rilevante perche' e' quella che consuma la copertura apparente: due dei 57 ticker con almeno una riga hanno come unica riga un pezzo che non parla di loro.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-06.md §3, §7"
+        },
+        {
+          "data": "2026-08-07",
+          "costo_usd": 647.46,
+          "nota": "Ricorrenza, e per la prima volta con dollari sopra. 21 articoli su 84 (25%) taggati a 2+ ticker generano 76 delle 139 righe scorate (55%), in linea con la serie 51% (08-03) / 66% (08-04) / 53% (08-05). La forma che conta oggi e' quella gia' registrata il 08-06 su BA e CRM (articolo-lista generico come UNICA copertura), ma stavolta sui TRE MOVER MAGGIORI AL RIALZO invece che su mover al ribasso: RDDT +7.18% ha come unica riga del giorno '8 Communication Services Stocks With Whale Alerts In Today's Session' e il modello persiste la motivazione 'the article provides only a generic statement about whale alerts without any mention of RDDT'; NOW +6.42% ha come unica riga '10 Information Technology Stocks With Whale Alerts In Today's Session', motivazione 'no information in the article indicates NOW is referenced or affected'; SPCX +15.83% ha 6 articoli di cui cinque su altro (due su Kevin O'Leary che medita un ingresso, uno sui chip, uno whale-alert, uno su oro e argento) e il sesto ('SpaceX Stock Meltdown Takes $28 Billion Bite Out of Google's Portfolio') tratta SpaceX dal punto di vista del bilancio di Alphabet. Tutti via alpaca_benzinga/source_metadata. Il modello risponde correttamente 0.000, 0.000 e max +0.120: il difetto non e' nello scoring, e' che l'input non e' sulla societa'. Costo con size S4 tipica 2200 $ sul return pieno: 348.26+157.96+141.24 = 647.46 (sul solo residuo post-segnale, cioe' dal prezzo al momento in cui il segnale esiste fino alla chiusura, varrebbe 123.62+20.83+9.50 = 153.95). Uso il return pieno per comparabilita' con la serie e lascio qui il numero alternativo. Il 08-06 la stessa forma era costata 0.00 VERIFICATO perche' colpiva due mover al ribasso su un libro long-only: oggi colpisce il lato lungo ed e' la prima occorrenza di F-012 con un prezzo.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-07.md §7"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 647.46,
       "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
@@ -645,10 +675,16 @@
           "costo_usd": null,
           "nota": "Terzo giorno consecutivo. Il 08-06 news_log contiene 162 righe su 57 ticker, di cui 30 su MS e 10 su GS: 40 righe, il 24.7% della giornata, su due ticker bancari, e nessuna riguarda Morgan Stanley o Goldman Sachs. Campione dei titoli attribuiti a MS: 'Zacks Research Upgrades AMC Networks (NASDAQ:AMCX) to Strong-Buy', 'Archer Daniels Midland (NYSE:ADM) Issues FY 2026 Earnings Guidance', 'Klaviyo (NYSE:KVYO) Shares Gap Down on Analyst Downgrade', 'Cytek Biosciences (NASDAQ:CTKB) Issues Quarterly Earnings Results'. Tutte via extraction_method=org_lookup, la banca comparendo come casa di analisi nel boilerplate. Effetto composto con F-001: la copertura reale della watchlist e' peggiore di quella apparente.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-06.md §6, §7"
+        },
+        {
+          "data": "2026-08-07",
+          "costo_usd": null,
+          "nota": "Quarto giorno consecutivo. news_log del 08-07 contiene 139 righe su 44 ticker, di cui 19 su MS (il ticker piu' coperto dell'intera watchlist), 5 su DB e 4 su GS: 28 righe, il 20% della giornata, su tre ticker bancari, e NESSUNA riguarda Morgan Stanley, Deutsche Bank o Goldman Sachs. Campione dei titoli attribuiti: 'Appian (NASDAQ:APPN) Releases Q3 2026 Earnings Guidance', 'Cytokinetics (NASDAQ:CYTK) Price Target Raised to $110.00', 'Duolingo (NASDAQ:DUOL) Issues Earnings Results', 'Halozyme Therapeutics (NASDAQ:HALO) Upgraded to Outperform at Leerink Partners', 'Celanese (CE) - Analysts Recent Ratings Changes', 'Deutsche Bank lifts Next target to 16,000p'. La banca compare come casa di analisi nel boilerplate. Costo null: nessuna di queste righe ha superato il gate 0.300, nessun ordine ne e' nato. Effetto composto su F-001: dei 44 ticker con almeno una riga, tre ne assorbono il 20% con materiale che non li riguarda, quindi la copertura reale della watchlist e' peggiore di quella apparente.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-07.md §7"
         }
       ],
       "costo_cumulato_usd": 60.5,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -751,9 +787,15 @@
           "costo_usd": 51.77,
           "nota": "Ricorrenza in variante INTRADAY (il 08-04 era overnight). SPCX: BUY 14:37 a 113.069638 per 10.375 azioni su score ensemble +0.402, SELL 18:52 a 109.93 nella STESSA sessione, net -34.98, reason '[expired] S4 signal expired (age=4.4h > max_age=4h, generated 2026-08-06 14:30 UTC, score=+0.402): weight 0.0% - no counter-signal found, position closed'. SPCX ha chiuso a 114.92, cioe' +6.14% sul giorno ed e' il mover numero uno della watchlist: costo attribuito = drift post-uscita (114.92-109.93)*10.375022 = 51.77, e l'MTM a fine giornata sarebbe stato +19.20 invece di -34.98 realizzati. La regola chiude una posizione per assenza di informazione nuova, non per contro-segnale - esattamente il caso che il commento di _preserve_stale_signals_for_open_positions (src/workers/portfolio_scheduler.py:555-577) dichiara di voler evitare, ma la preservazione non e' scattata perche' nella finestra esistevano segnali piu' recenti, tutti fallback single-model (vedi F-006).",
           "fonte": "ALPHA_MISS_REPORT_2026-08-06.md §4, §7"
+        },
+        {
+          "data": "2026-08-07",
+          "costo_usd": 188.72,
+          "nota": "Ricorrenza con CONTROFATTUALE ESTESO A UN GIORNO - da pesare di meno delle due precedenti, che erano intragiornaliere. SPCX e' stata chiusa il 08-06 alle 18:52 a 109.93 (trade 667, 10.375022 azioni, reason '[expired] S4 signal expired (age=4.4h > max_age=4h, generated 2026-08-06 14:30 UTC, score=+0.402): weight 0.0% - no counter-signal found, position closed') e il 08-07 e' il mover numero uno della watchlist a +15.83%, con il movimento quasi interamente intraday (gap +0.04%, intraday +15.78%). L'occorrenza del 08-06 ha gia' contabilizzato 51.77 $ fino alla chiusura di quel giorno (114.92): registro qui SOLO L'INCREMENTO da 114.92 a 133.11, cioe' 10.375022 * 18.19 = 188.72, per non contare due volte gli stessi dollari. CAVEAT CHE INDEBOLISCE L'ATTRIBUZIONE: oltre alla lunghezza del controfattuale, S4 non avrebbe comunque ri-comprato SPCX il 08-07 (massimo punteggio del giorno 0.120 contro gate 0.300, vedi F-012), quindi il danno e' attribuibile alla regola di USCITA - la posizione era gia' in libro e la regola l'ha espulsa per assenza di informazione nuova alla vigilia del movimento - non alla regola d'ingresso.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-07.md §7"
         }
       ],
-      "costo_cumulato_usd": 63.71,
+      "costo_cumulato_usd": 252.43,
       "occorrenze_non_stimate": 0,
       "stato": "aperto",
       "issue": null
@@ -846,6 +888,25 @@
           "costo_usd": null,
           "nota": "Alle 2026-08-06T14:00:00Z il loop si e' attivato su S1 (feedback:state:S1 = reason '3 consecutive losses', ewma_r -0.4965, rolling_net_pnl -169.07, trade di evidenza 658). Le sue due leve sono entrambe nulle: (1) src/workers/performance.py:1978-1980 forza esplicitamente new_threshold=0.0 per S1 ('S1 has no discrete entry-threshold gate; persist state only'), e la chiave feedback:entry_threshold:S1 vale infatti 0.0; (2) la riduzione di regime_scale (0.25 -> 0.20) e' shadow-only perche' config/trading.yaml:350 ha apply_regime_scale: false (F8 ritirato con #134). S1 ha aperto tre posizioni DOPO l'attivazione (MMM 16:22, BRK.B 17:22, MMM 18:52). Asimmetria con S4, che nello stesso giorno ha visto la soglia salire due volte (0.350 -> 0.400 alle 16:37, -> 0.450 alle 20:30). Rilevante per la domanda di uscita n.2: il P&L economico di S1 sulla finestra va letto sapendo che S1 non e' mai stata frenata da alcun freno automatico. NESSUNA taratura proposta: cambiare il comportamento di S1 sarebbe congelato dalla carta.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-06.md §10 [DAY-004]"
+        }
+      ],
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-030",
+      "titolo": "La notizia arriva quando il movimento e' gia' avvenuto: al primo punteggio utile e' passato in mediana l'82% del movimento intraday della giornata",
+      "tipo": "osservazione",
+      "confidenza": "congetturale",
+      "primo_avvistamento": "2026-08-07",
+      "occorrenze": [
+        {
+          "data": "2026-08-07",
+          "costo_usd": null,
+          "nota": "Misura sui quattro mover del giorno che avevano copertura, come frazione del movimento apertura->chiusura gia' realizzata al prezzo del momento in cui il primo segnale esiste: SPCX 70.9% (segnale 14:15, prezzo 127.92, apertura 114.97, chiusura 133.24 - aveva gia' fatto +11.3% nei primi 45 minuti di seduta), RDDT 81.4% (18:15, 159.97, ap. 153.30, ch. 161.49), NOW 83.2% (18:30, 124.34, ap. 121.67, ch. 124.88), PLTR 95.7% (17:15, 171.15, ap. 160.07, ch. 171.65). Mediana 82.3%. Il residuo catturabile dal segnale alla chiusura, su size S4 tipica 2200 $, e' rispettivamente 91.58 (123.62 al migliore dei sei segnali SPCX), 20.83, 9.50 e 6.43-20.05 dollari, contro i 348.26/157.96/141.24/227.04 del return pieno. NUOVO ID GIUSTIFICATO PROPRIO DALLA GIORNATA DI OGGI: F-019 afferma che la latenza della NOSTRA ingestione consuma la finestra di entry-freshness, ed e' una grandezza che possiamo ridurre; oggi quella latenza e' scesa a 39.6 minuti mediani (p90 106.9), il valore migliore della finestra e due volte e mezzo meglio delle sedute 07-31->08-05 che stavano a ~100-105 minuti, e L'82% E' RIMASTO. Le due grandezze si muovono in modo indipendente, quindi non sono lo stesso fenomeno: questa riguarda l'istante in cui la fonte SCRIVE, non l'istante in cui noi LEGGIAMO. Il caso piu' netto e' PLTR, dove l'unico articolo ticker-specifico dell'intera giornata si intitola 'QUICK SPARK: Palantir Stock Up 38% This Week in Software Snapback' ed e' un resoconto del rialzo gia' avvenuto - la motivazione persistita dal modello lo riconosce ('the week-long rally reflects positive investor sentiment but shows no new company-specific driver'). Costo null: non separabile, e i dollari della giornata sono gia' contati su F-012 e F-001; contarli qui li conterebbe due volte. Tocca direttamente la domanda di uscita n.1 della carta: se la news editoriale su questa watchlist e' strutturalmente ex-post, l'alpha cercato non c'e' a prescindere dalla taratura del gate.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-07.md §7"
         }
       ],
       "costo_cumulato_usd": 0,
