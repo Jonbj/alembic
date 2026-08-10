@@ -9,7 +9,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.backtest.data.loader import DataLoader
 from src.backtest.metrics.performance import sharpe_ratio
 from src.backtest.engine.data_replay import DataReplay
 from src.backtest.gates.historical_stress import extract_historical_stress_periods
@@ -223,6 +222,7 @@ def run_s4_backtest_full(
     """
     from datetime import date
     from src.backtest.data.cache import ParquetCache
+    from src.backtest.data.loader import DataLoader
     from src.backtest.data.universe import load_universe
 
     output_dir = Path(output_dir)
