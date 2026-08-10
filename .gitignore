@@ -78,3 +78,8 @@ logs/
 
 # Backup di dati DB prodotti dagli script one-shot: dati di ambiente, non di repo
 backups/
+
+# Stato runtime della notifica one-shot del kill criterion S4 (#180): e'
+# informazione di quando l'ultimo PASS/FAIL e' stato annunciato, non un
+# artefatto decisionale (quello vive in docs/evidence/s4_ic.json).
+docs/evidence/s4_ic_notification.json
