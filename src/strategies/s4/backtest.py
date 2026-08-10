@@ -191,20 +191,19 @@ def _run_perturbation(
     wf_config: WalkForwardConfig,
 ) -> list[float]:
     """Run backtests with perturbed n_top and bucket_pct; return list of OOS Sharpes."""
-    perturbations = [
-        {"n_top": 3, "bucket_pct": 0.08},
-        {"n_top": 5, "bucket_pct": 0.10},
-        {"n_top": 7, "bucket_pct": 0.12},
-        {"n_top": 3, "bucket_pct": 0.12},
-        {"n_top": 7, "bucket_pct": 0.08},
+    perturbations: list[tuple[int, float]] = [
+        (3, 0.08),
+        (5, 0.10),
+        (7, 0.12),
+        (3, 0.12),
+        (7, 0.08),
     ]
     sharpes: list[float] = []
-    for params in perturbations:
+    for n_top, bucket_pct in perturbations:
         try:
-            n_top = params["n_top"]
             cfg = S4Config(
                 n_top=n_top,
-                bucket_pct=params["bucket_pct"],
+                bucket_pct=bucket_pct,
                 min_confidence=base_config.min_confidence,
                 min_score=base_config.min_score,
                 min_stocks=min(n_top, base_config.min_stocks),
