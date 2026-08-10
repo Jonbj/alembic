@@ -185,17 +185,6 @@ def _load_entry_threshold(redis_store: "RedisStore") -> float:
     return ENTRY_THRESHOLD
 
 
-def _load_feedback_regime_scale(redis_store: "RedisStore") -> float:
-    """Return feedback regime scale factor (0.0–1.0); defaults to 1.0 (no adjustment)."""
-    try:
-        value = redis_store.get_feedback_regime_scale()
-        if value is not None:
-            return float(value)
-    except Exception as exc:
-        log.warning("Could not read feedback:regime_scale (%s) — using 1.0", exc)
-    return 1.0
-
-
 SIGNAL_MAX_AGE_MIN = 30
 EMA_PERIOD = 20
 _EMA_BARS_FETCH = EMA_PERIOD + 10  # extra bars to warm up EMA
@@ -463,8 +452,6 @@ def run_execution_cycle(
 
     # --- Regime (needed for recovery check and position sizing) ---
     regime_mult = _regime_multiplier(redis_store, notifier)
-    feedback_scale = _load_feedback_regime_scale(redis_store)
-    regime_mult = regime_mult * feedback_scale
 
     # --- Condition-based kill-switch recovery ---
     # Attempts to auto-deactivate a drawdown-triggered freeze when the drawdown

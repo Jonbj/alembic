@@ -592,26 +592,6 @@ class RedisStore:
         except (ValueError, TypeError):
             return None
 
-    def set_feedback_regime_scale(self, value: float, ttl: int, strategy: str | None = None) -> None:
-        """Override regime multiplier scale factor in Redis (0.0–1.0)."""
-        key = self._feedback_key("feedback:regime_scale", strategy)
-        self._r.setex(key, ttl, str(value))
-        if strategy == "S4":
-            self._r.setex("feedback:regime_scale", ttl, str(value))
-
-    def get_feedback_regime_scale(self, strategy: str | None = None) -> float | None:
-        """Return feedback regime scale factor, or None if not set (default 1.0)."""
-        key = self._feedback_key("feedback:regime_scale", strategy)
-        raw = self._r.get(key)
-        if raw is None and strategy is not None:
-            raw = self._r.get("feedback:regime_scale")
-        if raw is None:
-            return None
-        try:
-            return float(raw)
-        except (ValueError, TypeError):
-            return None
-
     def refresh_feedback_ttl(self, strategy: str | None, ttl: int) -> bool:
         """Extend the lease on a sleeve's feedback keys WITHOUT changing their values.
 
@@ -626,17 +606,15 @@ class RedisStore:
         """
         keys = [
             self._feedback_key("feedback:entry_threshold", strategy),
-            self._feedback_key("feedback:regime_scale", strategy),
             self._feedback_key("feedback:state", strategy),
         ]
         existed = bool(self._r.expire(keys[0], ttl))
         for key in keys[1:]:
             self._r.expire(key, ttl)
-        # Keep the legacy bare mirrors (written by the S4 setters) on the same clock,
+        # Keep the legacy bare mirror (written by the S4 setters) on the same clock,
         # or get_feedback_entry_threshold's fallback could resurrect a stale value.
         if strategy == "S4":
             self._r.expire("feedback:entry_threshold", ttl)
-            self._r.expire("feedback:regime_scale", ttl)
         return existed
 
     def set_feedback_state(self, state: dict, ttl: int, strategy: str | None = None) -> None:

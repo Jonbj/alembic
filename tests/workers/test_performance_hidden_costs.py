@@ -105,10 +105,9 @@ class TestCapitalEfficiency:
 # Point 2 — Feedback Loop / Threshold Stall
 # ---------------------------------------------------------------------------
 class TestFeedbackStall:
-    def _make_redis(self, threshold=0.30, scale=1.0, state=None):
+    def _make_redis(self, threshold=0.30, state=None):
         r = MagicMock()
         r.get_feedback_entry_threshold.return_value = threshold
-        r.get_feedback_regime_scale.return_value = scale
         r.get_feedback_state.return_value = state or {}
         return r
 
@@ -119,7 +118,7 @@ class TestFeedbackStall:
         assert "Normal" in result or "✅" in result
 
     def test_elevated_threshold_shows_red(self):
-        redis = self._make_redis(threshold=0.55, scale=0.64)
+        redis = self._make_redis(threshold=0.55)
         result = _format_feedback_stall_section(redis)
         assert "ELEVATED" in result
         assert "0.55" in result

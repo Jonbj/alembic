@@ -2770,51 +2770,6 @@ class TestResolveBuyOriginStrategy:
         assert without_signal == "S1"
 
 
-# ── #32 F8 shadow persistence: build DB rows from result.feedback_shadow ──────
-
-
-def test_build_f8_shadow_rows_one_row_per_strategy():
-    from src.workers.portfolio_scheduler import _build_f8_shadow_rows
-
-    ts = datetime(2026, 7, 21, 14, 0, tzinfo=timezone.utc)
-    shadow = {
-        "S1": {"scale": 0.512, "unscaled_weight": 0.5, "scaled_weight": 0.256, "applied": False},
-        "S4": {"scale": 0.80, "unscaled_weight": 0.1, "scaled_weight": 0.08, "applied": False},
-    }
-
-    rows = _build_f8_shadow_rows(ts, shadow)
-
-    assert len(rows) == 2
-    by_strat = {r["strategy"]: r for r in rows}
-    assert by_strat["S1"]["cycle_ts"] == ts
-    assert by_strat["S1"]["scale"] == 0.512
-    assert by_strat["S1"]["unscaled_weight"] == 0.5
-    assert by_strat["S1"]["scaled_weight"] == 0.256
-    assert by_strat["S1"]["applied"] is False
-    assert by_strat["S4"]["scale"] == 0.80
-
-
-def test_build_f8_shadow_rows_empty_when_no_shadow():
-    from src.workers.portfolio_scheduler import _build_f8_shadow_rows
-
-    assert _build_f8_shadow_rows(datetime.now(timezone.utc), {}) == []
-    assert _build_f8_shadow_rows(datetime.now(timezone.utc), None) == []
-
-
-def test_build_f8_shadow_rows_tolerates_missing_keys():
-    """A malformed shadow entry must not crash the cycle — missing numeric
-    fields default to None, not a KeyError."""
-    from src.workers.portfolio_scheduler import _build_f8_shadow_rows
-
-    rows = _build_f8_shadow_rows(
-        datetime(2026, 7, 21, tzinfo=timezone.utc), {"S1": {"scale": 0.64}}
-    )
-    assert len(rows) == 1
-    assert rows[0]["scale"] == 0.64
-    assert rows[0]["unscaled_weight"] is None
-    assert rows[0]["applied"] is None
-
-
 # ── drawdown kill-switch peak seeding (bug 2026-07-22: peak never persisted) ──
 # portfolio:peak_equity was never written because the write condition was
 # `equity > peak` while peak defaulted to equity on an empty key — so the peak

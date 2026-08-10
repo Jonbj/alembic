@@ -58,7 +58,7 @@ class TestBuyAlwaysHasStopLoss:
         redis_store.get_regime.return_value = MagicMock(multiplier=1.0)
         redis_store.read_sentiment.return_value = _fresh_signal("SPY", score=0.8)
         redis_store.get_feedback_entry_threshold.return_value = None
-        redis_store.get_feedback_regime_scale.return_value = None
+        redis_store.get_feedback_entry_threshold.return_value = None
 
         trading_client = MagicMock()
         trading_client.get_account.return_value = _make_alpaca_account()
@@ -102,7 +102,7 @@ class TestBuyAlwaysHasStopLoss:
         redis_store.get_regime.return_value = MagicMock(multiplier=1.0)
         redis_store.read_sentiment.return_value = _fresh_signal("SPY", score=0.8)
         redis_store.get_feedback_entry_threshold.return_value = None
-        redis_store.get_feedback_regime_scale.return_value = None
+        redis_store.get_feedback_entry_threshold.return_value = None
 
         trading_client = MagicMock()
         trading_client.get_account.return_value = _make_alpaca_account()
@@ -135,7 +135,7 @@ class TestBuyAlwaysHasStopLoss:
         redis_store.get_regime.return_value = MagicMock(multiplier=1.0)
         redis_store.read_sentiment.return_value = _fresh_signal("SPY", score=0.9)
         redis_store.get_feedback_entry_threshold.return_value = None
-        redis_store.get_feedback_regime_scale.return_value = None
+        redis_store.get_feedback_entry_threshold.return_value = None
 
         trading_client = MagicMock()
         trading_client.get_account.return_value = _make_alpaca_account()
@@ -165,7 +165,7 @@ class TestBuyAlwaysHasStopLoss:
         redis_store.get_regime.return_value = MagicMock(multiplier=1.0)
         redis_store.read_sentiment.return_value = _fresh_signal("SPY", score=0.8)
         redis_store.get_feedback_entry_threshold.return_value = None
-        redis_store.get_feedback_regime_scale.return_value = None
+        redis_store.get_feedback_entry_threshold.return_value = None
 
         trading_client = MagicMock()
         trading_client.get_account.return_value = _make_alpaca_account()

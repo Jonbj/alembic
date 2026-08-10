@@ -1240,36 +1240,6 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
-    def insert_f8_shadow(self, rows: list[dict]) -> None:
-        """Persist per-cycle F8 regime_scale shadow rows (#32).
-
-        One row per scaled strategy. Best-effort caller — persists the shadow
-        trajectory that previously only lived in a 48h-TTL Redis key.
-        """
-        if not rows:
-            return
-        conn = self._get_connection()
-        try:
-            with conn.cursor() as cur:
-                cur.executemany(
-                    """
-                    INSERT INTO f8_regime_scale_shadow
-                        (cycle_ts, strategy, scale, unscaled_weight, scaled_weight, applied)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    """,
-                    [
-                        (
-                            r["cycle_ts"], r["strategy"], r.get("scale"),
-                            r.get("unscaled_weight"), r.get("scaled_weight"), r.get("applied"),
-                        )
-                        for r in rows
-                    ],
-                )
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-
     def record_news_queue_drops(self, rows: list[dict]) -> None:
         """Persist queue items discarded as stale by the sentiment worker (#149).
 

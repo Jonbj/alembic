@@ -121,9 +121,10 @@ The system runs as five loosely-coupled phases, each driven by a separate Celery
 ║                                                                              ║
 ║  Phase B — Loss Feedback Loop (every 30 min, market hours)                  ║
 ║    • Detects EWMA R ≤ −0.50 or 3 consecutive losing teaching trades         ║
-║    • Raises ENTRY_THRESHOLD (up to 0.60) and reduces regime_scale (→ 0.80×) ║
-║    • Redis TTL 96h; recovery after 3 wins, or decay after a quiet 24h        ║
-║    • regime_scale → portfolio sizing is gated by apply_regime_scale (OFF)   ║
+║    • Raises per-strategy ENTRY_THRESHOLD (up to 0.60, Redis 96h TTL)         ║
+║    • Recovery: 3 consecutive wins steps the threshold back down             ║
+║    • Decay: 24h without a trigger steps back one notch                      ║
+║    • The companion F8 regime_scale lever was retired 2026-08-10 (#134)      ║
 ║    • Surfaces via /api/feedback/status and Auto-Improve page                 ║
 ║                                                                              ║
 ║  Phase C — Counterfactual / Opportunity Cost (nightly 22:45 UTC)            ║

@@ -302,18 +302,17 @@ def get_feedback_status(
 ) -> dict:
     """Current loss-feedback adjustments active in Redis (Phase B).
 
-    Returns the live threshold override and regime scale factor.
-    If no adjustment is active, returns baseline defaults.
+    Returns the live threshold override. If no adjustment is active, returns
+    the baseline default. The companion `feedback:regime_scale:S*` lever that
+    used to be reported here was retired with F8 (#134).
     """
     from src.workers.execution import ENTRY_THRESHOLD
     threshold = redis.get_feedback_entry_threshold()
-    scale = redis.get_feedback_regime_scale()
     state = redis.get_feedback_state() or {}
     return {
         "entry_threshold": threshold if threshold is not None else ENTRY_THRESHOLD,
         "entry_threshold_baseline": ENTRY_THRESHOLD,
-        "regime_scale": scale if scale is not None else 1.0,
-        "adjustment_active": threshold is not None or scale is not None,
+        "adjustment_active": threshold is not None,
         "last_adjustment_ts": state.get("last_adjustment_ts"),
         "last_reason": state.get("reason"),
         "consecutive_losses": state.get("consecutive_losses"),

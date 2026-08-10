@@ -101,8 +101,6 @@ class LossFeedback:
             "threshold_baseline": 0.30,
             "threshold_max": 0.60,
             "threshold_step": 0.05,
-            "regime_scale_factor": 0.80,
-            "regime_min_scale": 0.20,
             "ewma_alpha": 0.30,
             "trigger_band": -0.50,
             "recovery_band": 0.50,
@@ -187,10 +185,6 @@ class LossFeedback:
         if strategy == "S1":
             return 0.0
         return self.config["threshold_baseline"]
-
-    def scale(self, _strategy: str) -> float:
-        """Return the regime scale factor. Per-strategy scale is not used in v1."""
-        return 1.0
 
     def state(self, strategy: str) -> dict:
         """Return serializable state for a strategy."""

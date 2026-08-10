@@ -4,6 +4,37 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ---
 
+## 2026-08-10
+
+### F8 regime_scale — RITIRATA. La premessa era falsa sull'unità giusta (#134)
+Decisione PO 2026-08-07. Documento di lifecycle: `docs/F8_LIFECYCLE_HISTORY_2026-08-10.md`.
+
+- **Rimozione completa della leva runtime** (era shadow-only, zero cambio di comportamento in
+  produzione: `apply_regime_scale: false` era già in piedi). Superficie rimossa:
+  `PortfolioOrchestrator._scale_gate` + `feedback_scales`/`apply_feedback_scale` su `run_cycle`
+  + `feedback_shadow` su `CycleResult`; scheduler `_read_feedback_regime_scales`,
+  `_build_f8_shadow_rows`, wiring in `run_portfolio_cycle` e persistenza shadow; performance
+  worker `regime_scale_factor`/`regime_min_scale`/`apply_regime_scale` defaults + ramificazioni
+  in `run_loss_feedback_check`, `_step_threshold_down`, `_refresh_feedback_ttl`,
+  `_format_feedback_stall_section`, `weekly_structured`; execution `_load_feedback_regime_scale`
+  + `regime_mult *= feedback_scale`; Redis `set/get_feedback_regime_scale` + ramo
+  `feedback:regime_scale` in `refresh_feedback_ttl`; pg_store `insert_f8_shadow`; API
+  `regime_scale` in `/api/feedback/status`; config `loss_feedback.{regime_scale_factor,
+  regime_min_scale, apply_regime_scale}`; script `ratchet_reachability.py`,
+  `f8_regime_scale_shadow_evidence.py`; porzioni F8 in `audit_deployment_decomposition.py`.
+- **Test rimossi**: `test_f8_feedback_regime_scale.py`, `test_f8_shadow_evidence.py`,
+  `test_ratchet_reachability.py`, `test_serial_dependence.py`, e tutte le porzioni F8 nei
+  test esistenti.
+- **Guard anti-reintroduzione**: `tests/test_f8_regime_scale_removed.py` (11 test, modello
+  `test_p0_13_strategy_containment.py::TestS7NotInOperationalRegistry`).
+- **Migration 045** (`migrations/045_drop_f8_regime_scale_shadow.sql`) preparata ma **NON
+  applicata automaticamente**: la tabella `f8_regime_scale_shadow` (migration 040) resta in
+  piedi finché l'operatore non decide di dropparla; le righe scritte 07-21 → 08-07 sono
+  l'evidenza locale della traiettoria che F8 avrebbe avuto.
+- **Modello di rimozione**: `docs/S7_LIFECYCLE_HISTORY_2026-07-15.md`. Tutto il wiring
+  recuperabile da git (commit `9171099` + `aef3828` + `77d2af9`) — la conoscenza consolidata
+  è il lifecycle doc + il verdetto.
+
 ## 2026-08-07
 
 ### #161 — il sistema distingue una posizione protetta da una non proteggibile
