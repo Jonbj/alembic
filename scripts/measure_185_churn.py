@@ -27,7 +27,7 @@ from typing import Any
 
 
 # Primo ciclo di portafoglio dopo il deploy del fix #188 (rebuild delle 11:08
-# UTC del 2026-08-07). Separra le evidenze "pre" (churn a 15 min) dalle "post"
+# UTC del 2026-08-07). Separa le evidenze "pre" (churn a 15 min) dalle "post"
 # (cadenza MONTHLY rispettata).
 DEFAULT_DEPLOY_CUTOFF = datetime(2026, 8, 7, 14, 7, tzinfo=timezone.utc)
 MIN_REENTRY_DELAY = timedelta(minutes=15)
