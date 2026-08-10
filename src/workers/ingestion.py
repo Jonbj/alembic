@@ -32,20 +32,28 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
+from functools import lru_cache
 
 import psycopg2
 from redis import Redis
 
+from src.analysis.watchlist_coverage import forma_confrontabile
 from src.config import config
 
 # Canonical ticker aliases: map non-watchlist symbols → watchlist symbol.
 # MarketAux/Alpaca APIs may return GOOG (Class C shares) while our watchlist
 # uses GOOGL (Class A). BRK.A → BRK.B for the same reason; FB retired 2021.
+#
+# Queste sono mappature SEMANTICHE: titoli diversi che decidiamo di trattare come
+# uno. Restano esplicite di proposito — se un giorno una viene tolta, il titolo
+# deve sparire dal flusso, non essere rimappato in silenzio da una somiglianza.
 _TICKER_ALIASES: dict[str, str] = {
     "GOOG": "GOOGL",
     "BRK.A": "BRK.B",
     "FB": "META",
 }
+
+
 from src.connectors.alpaca_news import AlpacaNewsConnector
 from src.connectors.finnhub_news import FinnhubNewsConnector
 from src.connectors.deduplicator import Deduplicator
@@ -60,6 +68,51 @@ from src.workers.celery_app import app
 from src.workers.market_clock import is_market_open
 
 log = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=1)
+def _mappa_forme_watchlist() -> dict[str, str]:
+    """Forma confrontabile → simbolo canonico di watchlist.
+
+    Costruita una volta sola: la watchlist e' baked nell'immagine, quindi cambia
+    solo con un redeploy. `cache_clear()` serve ai test.
+    """
+    return {forma_confrontabile(s): s for s in config.WATCHLIST_SYMBOLS}
+
+
+def canonicalizza_ticker(ticker: str) -> str:
+    """Riporta un ticker di provider alla forma esatta usata dalla watchlist.
+
+    Serve perche' i provider scrivono lo stesso titolo in modi diversi. `BRK.B` e'
+    l'unico simbolo puntato della watchlist ed e' rimasto **cieco al sentiment per
+    96 segnali** (#226): i provider lo restituiscono come `BRKB`, e nessun
+    confronto lo riportava a `BRK.B`. Sei di quei segnali erano sopra il gate.
+
+    Gli alias espliciti c'erano gia', ma sono un'altra cosa: mappano titoli
+    *diversi* (classi azionarie, ridenominazioni). Qui si tratta della stessa cosa
+    scritta in un altro modo, ed e' una regola, non un elenco — altrimenti il
+    prossimo simbolo con classe azionaria ripete il difetto in silenzio.
+
+    Ordine dei tentativi, dal piu' sicuro al piu' inferenziale:
+
+      1. gia' canonico → non si tocca;
+      2. alias esplicito → decisione dichiarata da un umano;
+      3. stessa forma a meno di punteggiatura → variante di scrittura;
+      4. altrimenti invariato.
+
+    Il passo 3 richiede corrispondenza **esatta** sulla forma normalizzata: `BRKA`
+    non diventa `BRK.B`, e un refuso come `APPL` resta `APPL`. Un ticker sbagliato
+    fa piazzare un ordine su un titolo che non c'entra — e' l'errore peggiore che
+    questo sistema possa fare, quindi si preferisce non mappare che mappare male.
+    """
+    if not ticker:
+        return ticker
+    if ticker in _mappa_forme_watchlist().values():
+        return ticker
+    alias = _TICKER_ALIASES.get(ticker)
+    if alias is not None:
+        return alias
+    return _mappa_forme_watchlist().get(forma_confrontabile(ticker), ticker)
 
 
 async def _fetch_gkg_items(connector: GDELTGKGConnector) -> list[GKGNewsItem]:
@@ -121,7 +174,7 @@ def _process_gkg_items(
         stats["tickers_found"] += len(tickers)
 
         # Step 2: apply canonical aliases and watchlist filter
-        normalised = [_TICKER_ALIASES.get(t, t) for t in tickers]
+        normalised = [canonicalizza_ticker(t) for t in tickers]
         if watchlist:
             before = len(normalised)
             normalised = [t for t in normalised if t in watchlist]
@@ -186,7 +239,7 @@ def _process_marketaux_items(
         stats["tickers_found"] += len(item.asset_tags)
 
         for ticker in item.asset_tags:
-            ticker = _TICKER_ALIASES.get(ticker, ticker)
+            ticker = canonicalizza_ticker(ticker)
             per_ticker = MarketAuxNewsItem(
                 id=f"{item.url}:{ticker}",
                 source=item.source,
@@ -285,7 +338,7 @@ def _process_alpaca_items(
         stats["tickers_found"] += len(item.asset_tags)
 
         for ticker in item.asset_tags:
-            ticker = _TICKER_ALIASES.get(ticker, ticker)
+            ticker = canonicalizza_ticker(ticker)
             per_ticker = NewsItem(
                 id=f"{item.id}:{ticker}",
                 source=item.source,
@@ -383,7 +436,7 @@ def _process_finnhub_items(
             continue
         stats["tickers_found"] += len(item.asset_tags)
         for ticker in item.asset_tags:
-            ticker = _TICKER_ALIASES.get(ticker, ticker)
+            ticker = canonicalizza_ticker(ticker)
             per_ticker = NewsItem(
                 id=f"{item.id}:{ticker}",
                 source=item.source,
@@ -496,7 +549,7 @@ def _process_gdelt_doc_items(
         stats["fetched"] += 1
         if not item.asset_tags:
             continue
-        ticker = _TICKER_ALIASES.get(item.asset_tags[0], item.asset_tags[0])
+        ticker = canonicalizza_ticker(item.asset_tags[0])
         per_ticker = NewsItem(
             id=item.id,
             source=item.source,
