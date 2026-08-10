@@ -9,13 +9,14 @@ Covers:
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
 from src.workers.performance import (
     _count_consecutive_losses,
     _count_consecutive_wins,
+    _format_feedback_stall_section,
     _load_loss_feedback_config,
     run_loss_feedback_check,
 )
@@ -146,6 +147,35 @@ def test_trading_yaml_ships_regime_scale_off_pending_the_premise_retest():
     )
 
 
+def test_threshold_ratchet_defaults_to_frozen_during_observation():
+    with patch("builtins.open", side_effect=FileNotFoundError):
+        cfg = _load_loss_feedback_config()
+    assert cfg.get("threshold_ratchet_enabled") is False
+
+
+def test_trading_yaml_ships_threshold_ratchet_frozen():
+    cfg = _load_loss_feedback_config()
+    assert cfg.get("threshold_ratchet_enabled") is False
+
+
+def test_feedback_stall_handles_degenerate_threshold_range():
+    redis = MagicMock()
+    redis.get_feedback_entry_threshold.return_value = 0.45
+    redis.get_feedback_regime_scale.return_value = 1.0
+    redis.get_feedback_state.return_value = {}
+    trading_yaml = """
+loss_feedback:
+  threshold_baseline: 0.30
+  threshold_max: 0.30
+  recovery_win_streak: 3
+"""
+
+    with patch("builtins.open", mock_open(read_data=trading_yaml)):
+        section = _format_feedback_stall_section(redis)
+
+    assert "100% of marginal signals suppressed" in section
+
+
 # ---------------------------------------------------------------------------
 # Integration: run_loss_feedback_check (per-strategy)
 # ---------------------------------------------------------------------------
@@ -157,6 +187,9 @@ def _default_cfg():
         "threshold_step": 0.05,
         "threshold_max": 0.60,
         "threshold_baseline": 0.30,
+        # Most mechanism tests exercise the historical ratchet. Freeze-specific
+        # tests override this explicitly; loader tests cover the shipped default.
+        "threshold_ratchet_enabled": True,
         "threshold_decay_hours": 24,
         "regime_scale_factor": 0.80,
         "regime_min_scale": 0.20,
@@ -241,6 +274,30 @@ class TestTriggerOnConsecutiveLosses:
 
         s4 = result["per_strategy"]["S4"]
         assert s4["new_scale"] == pytest.approx(0.80)
+
+    def test_frozen_ratchet_resets_elevated_s4_threshold_but_keeps_scale_live(self):
+        trades = _make_trades([-5, -10, -3, 8, 2], signal_id=123)
+        result, mock_redis = _patched_run(
+            trades,
+            redis_threshold=0.45,
+            redis_scale=0.80,
+            cfg_override={"threshold_ratchet_enabled": False},
+        )
+
+        s4 = result["per_strategy"]["S4"]
+        assert s4["adjusted"] is True
+        assert s4["ratchet_frozen"] is True
+        assert s4["new_threshold"] == pytest.approx(0.30)
+        assert s4["new_scale"] == pytest.approx(0.64)
+        mock_redis.set_feedback_entry_threshold.assert_called_once_with(
+            pytest.approx(0.30), ttl=48 * 3600, strategy="S4"
+        )
+        mock_redis.set_feedback_regime_scale.assert_called_once_with(
+            pytest.approx(0.64), ttl=48 * 3600, strategy="S4"
+        )
+        state = mock_redis.set_feedback_state.call_args.args[0]
+        assert state["threshold_before"] == pytest.approx(0.45)
+        assert state["threshold_after"] == pytest.approx(0.30)
 
     def test_2_consecutive_losses_does_not_trigger(self):
         trades = _make_trades([-5, -10, 8, 9, 10], signal_id=123)
