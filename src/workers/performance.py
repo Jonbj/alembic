@@ -454,8 +454,15 @@ def _format_feedback_stall_section(redis: "RedisStore") -> str:
     if is_elevated:
         wins_needed = max(0, recovery_win_streak - consecutive_wins)
         # Fraction of signal space filtered: signals between baseline and current
-        # threshold are blocked. Rough proxy: (current - baseline) / (max - baseline)
-        signal_filter_pct = (current_threshold - baseline) / (threshold_max - baseline) * 100
+        # threshold are blocked. Rough proxy: (current - baseline) / (max - baseline).
+        # A degenerate configured range has no meaningful interpolation; report
+        # the elevated threshold as fully saturated instead of dividing by zero.
+        threshold_range = threshold_max - baseline
+        signal_filter_pct = (
+            (current_threshold - baseline) / threshold_range * 100
+            if threshold_range > 0
+            else 100.0
+        )
         stall_status = (
             f"🔴 ELEVATED: {current_threshold:.2f} (baseline {baseline:.2f})\n"
             f"~{signal_filter_pct:.0f}% of marginal signals suppressed | "
@@ -1726,6 +1733,10 @@ def _load_loss_feedback_config() -> dict:
         "threshold_step": 0.05,
         "threshold_max": 0.60,
         "threshold_baseline": 0.30,
+        # #191: during the observation window S4's entry threshold must stay at
+        # baseline. This gates only the upward threshold step; regime_scale,
+        # trigger, cooldown, state persistence, and decay remain active.
+        "threshold_ratchet_enabled": False,
         "threshold_decay_hours": 24,        # auto-decay threshold if no trigger
         "regime_scale_factor": 0.80,
         "regime_min_scale": 0.20,
@@ -1973,7 +1984,15 @@ def run_loss_feedback_check() -> dict:
             )
 
         elif outcome.triggered and cooldown_ok:
-            new_threshold = min(current_threshold + cfg["threshold_step"], cfg["threshold_max"])
+            threshold_ratchet_frozen = (
+                strategy == "S4" and not cfg["threshold_ratchet_enabled"]
+            )
+            if threshold_ratchet_frozen:
+                # A threshold raised before the freeze must be actively pulled
+                # back: persistent triggers keep this branch out of time-decay.
+                new_threshold = cfg["threshold_baseline"]
+            else:
+                new_threshold = min(current_threshold + cfg["threshold_step"], cfg["threshold_max"])
             new_scale = max(current_scale * cfg["regime_scale_factor"], cfg["regime_min_scale"])
 
             # S1 has no discrete entry-threshold gate; persist state only.
@@ -1999,14 +2018,24 @@ def run_loss_feedback_check() -> dict:
             )
 
             s_result.update({"adjusted": True, "new_threshold": new_threshold, "new_scale": new_scale})
+            if threshold_ratchet_frozen:
+                s_result["ratchet_frozen"] = True
             any_adjusted = True
 
-            log.warning(
-                "Loss feedback triggered for %s: EWMA R %.2f, %d consecutive losses, rolling P&L $%.2f — "
-                "threshold %.2f→%.2f, regime scale %.2f→%.2f",
-                strategy, outcome.ewma_r, outcome.consecutive_losses, outcome.rolling_net_pnl,
-                current_threshold, new_threshold, current_scale, new_scale,
-            )
+            if threshold_ratchet_frozen:
+                log.warning(
+                    "Loss feedback threshold ratchet frozen for %s: EWMA R %.2f, %d consecutive losses, "
+                    "rolling P&L $%.2f — threshold %.2f→%.2f, regime scale %.2f→%.2f",
+                    strategy, outcome.ewma_r, outcome.consecutive_losses, outcome.rolling_net_pnl,
+                    current_threshold, new_threshold, current_scale, new_scale,
+                )
+            else:
+                log.warning(
+                    "Loss feedback triggered for %s: EWMA R %.2f, %d consecutive losses, rolling P&L $%.2f — "
+                    "threshold %.2f→%.2f, regime scale %.2f→%.2f",
+                    strategy, outcome.ewma_r, outcome.consecutive_losses, outcome.rolling_net_pnl,
+                    current_threshold, new_threshold, current_scale, new_scale,
+                )
 
             msg = (
                 f"⚠️ *Loss Feedback Triggered — {strategy}*\n"
