@@ -3362,6 +3362,119 @@ def _record_stale_drops(stale_signals, max_age_hours: int, min_score: float) -> 
         log.warning("Failed to log stale-dropped signals: %s", exc)
 
 
+# Idempotency store per i blocchi anti-pyramiding (#231). Stesso schema di
+# _STALE_LOGGED_SIGNALS_KEY: il TTL supera abbondantemente signals_lookback_hours (96h),
+# cosi' un segnale non esce dall'insieme mentre potrebbe ancora essere ri-scansionato.
+_PYRAMID_LOGGED_KEY = "s4:logged_pyramiding_blocks"
+_PYRAMID_LOGGED_TTL_SECONDS = 10 * 24 * 3600  # 10 giorni
+
+
+def _pyramiding_block_key(symbol: str, signal_id, giorno: str | None = None) -> str:
+    """Identita' di un blocco, per scriverne una riga sola.
+
+    La chiave e' il SEGNALE, non il ciclo: un simbolo a libro viene ri-valutato ogni 15
+    minuti, e una riga per ciclo ricreerebbe esattamente la pollution che il fix
+    precedente aveva eliminato (10-24 righe identiche al giorno per simbolo aperto).
+
+    Un BUY di solo momentum non ha `signal_id`: li' si ricade sul giorno, che tiene il
+    volume a una riga al giorno per simbolo invece di una per ciclo.
+    """
+    if signal_id is not None:
+        return f"{symbol}|{signal_id}"
+    if giorno is None:
+        from datetime import datetime, timezone
+        giorno = datetime.now(timezone.utc).date().isoformat()
+    return f"{symbol}|nosig|{giorno}"
+
+
+def _get_logged_pyramiding_keys(redis_url: str) -> set[str] | None:
+    """Blocchi gia' registrati, o None se Redis non risponde.
+
+    Fallisce APERTO come il gemello per SKIP_STALE: una riga duplicata e' una seccatura,
+    perdere la visibilita' su un segnale bloccato e' il difetto che questo insieme esiste
+    per chiudere.
+    """
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            return set(r.smembers(_PYRAMID_LOGGED_KEY))
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Could not read logged-pyramiding set from Redis: %s", exc)
+        return None
+
+
+def _mark_pyramiding_blocks_logged(keys: list[str], redis_url: str) -> None:
+    """Aggiunge le chiavi all'insieme di idempotenza e rinfresca il TTL. Fail-silent."""
+    if not keys:
+        return
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            r.sadd(_PYRAMID_LOGGED_KEY, *keys)
+            r.expire(_PYRAMID_LOGGED_KEY, _PYRAMID_LOGGED_TTL_SECONDS)
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Failed to mark pyramiding blocks as logged: %s", exc)
+
+
+def _record_pyramiding_blocks(pg, bloccati, gia_registrati: set[str], regime_mult: float) -> list[str]:
+    """Scrive una riga SKIP_PYRAMIDING per ogni BUY fermato dal guard P0-05 (#231).
+
+    Senza questa riga il candidato sparisce e basta: dal database «bloccato di proposito»
+    e «mai valutato» sono indistinguibili, e sono due cose opposte. Il 2026-08-10 sei
+    segnali sopra il gate sono scomparsi cosi', fra cui il piu' alto della giornata.
+
+    La decisione NON e' un BUY, di proposito. Loggare un BUY per un simbolo bloccato era
+    il difetto precedente: le righe apparivano come replay di segnali stale e inquinavano
+    il Decision Log. Qui la riga dichiara quello che e' successo davvero.
+
+    `score` porta il peso che SAREBBE stato allocato: e' il dato che serve a #230 per
+    misurare quanto capitale il blocco lascia non impiegato.
+
+    Restituisce le chiavi effettivamente scritte, perche' sia il chiamante a marcarle —
+    la funzione resta testabile senza Redis. Non solleva mai: la visibilita' e' preziosa,
+    ma non abbastanza da far cadere un ciclo di trading.
+    """
+    scritte: list[str] = []
+    try:
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        giorno = now.date().isoformat()
+        for b in bloccati or []:
+            chiave = _pyramiding_block_key(b["symbol"], b.get("signal_id"), giorno=giorno)
+            if chiave in gia_registrati:
+                continue
+            _score = b.get("signal_score")
+            _since = b.get("open_since")
+            _reason = (
+                f"P0-05 anti-pyramiding: gia' a libro"
+                f"{f' dal {_since}' if _since else ''}"
+                f"{f', sentiment {float(_score):+.3f}' if _score is not None else ''}"
+                f", peso non allocato {float(b.get('allocation_weight') or 0.0) * 100:.1f}%"
+            )
+            pg.write_execution_decision(
+                tick_time=now,
+                symbol=b["symbol"],
+                signal_id=b.get("signal_id"),
+                score=b.get("allocation_weight") or 0.0,
+                signal_score=_score,
+                regime_mult=regime_mult,
+                ema_pass=True,
+                decision="SKIP_PYRAMIDING",
+                reason=_reason,
+            )
+            scritte.append(chiave)
+    except Exception as exc:
+        log.warning("Failed to log pyramiding blocks: %s", exc)
+    return scritte
+
+
 # Idempotency store for SKIP_FALLBACK logging: same shape as the SKIP_STALE set above
 # (keyed by symbol+generated_at via _stale_signal_key, TTL beyond signals_lookback_hours)
 # but a separate Redis set, so a signal logged as stale does not suppress its fallback
@@ -3583,11 +3696,11 @@ def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None
                         "S4: dropped %d fallback signal(s) from BUY ranking (#108): %s",
                         len(_fb_dropped), sorted(s.symbol for s in _fb_dropped),
                     )
-                    # #151: surface the drop in the Decision Log (SKIP_FALLBACK) —
-                    # otherwise a symbol whose only signal today was a single-model
-                    # fallback is indistinguishable from NO_NEWS downstream.
-                    # #151: solo i simboli senza segnale ensemble — `signals` qui contiene
-                    # gia i non-fallback (vedi _filter_fallback_signals sopra).
+                    # #151: rendi visibile lo scarto nel Decision Log (SKIP_FALLBACK),
+                    # altrimenti un simbolo il cui unico segnale di oggi era un
+                    # fallback single-model e' indistinguibile da NO_NEWS a valle.
+                    # `signals` qui contiene gia' i soli non-fallback: serve a non
+                    # marcare chi e' stato valutato davvero (vedi la funzione).
                     _record_fallback_drops(_fb_dropped, non_fallback_signals=signals)
             if signals:
                 # P1-S4-FRESHNESS: drop signals older than max_signal_age_hours.
