@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -256,7 +255,9 @@ class TestGateReportGenerated:
             run_robustness=False,
         )
         data = json.loads((out_dir / "gate_report.json").read_text())
-        assert len(data) == 5
+        assert len([key for key in data if key.startswith("gate_")]) == 5
+        assert data["synthetic"] is False
+        assert data["decision_eligible"] is True
 
 
 # ---------------------------------------------------------------------------
