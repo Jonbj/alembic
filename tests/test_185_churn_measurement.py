@@ -302,3 +302,44 @@ def test_module_discloses_the_184_caveat_and_the_s1_weight_drop_exemption():
     # L'esenzione: s1_weight_drop deriva dall'origine osservata della posizione
     # (#72), non dall'eta' del segnale che il fix #184 ha corretto.
     assert "72" in caveat
+
+
+# ---------------------------------------------------------------------------
+# Giorno del deploy (rilievo bloccante della review su PR #218).
+# Il deploy cade a meta' seduta: aggregando per sola data, una singola uscita
+# pre-deploy marcava tutta la giornata come `pre` e scartava l'evidenza post
+# dello stesso giorno — con il verdetto che poteva dire `inconclusive` avendo
+# in mano dati che dicevano il contrario.
+# ---------------------------------------------------------------------------
+
+def test_il_giorno_del_deploy_si_divide_in_due_fasi():
+    from datetime import datetime, timezone
+    from scripts.measure_185_churn import per_session
+
+    cutoff = datetime(2026, 8, 7, 14, 7, tzinfo=timezone.utc)
+    drops = [
+        {"tick_time": datetime(2026, 8, 7, 13, 30, tzinfo=timezone.utc), "is_churn": True},
+        {"tick_time": datetime(2026, 8, 7, 15, 0, tzinfo=timezone.utc), "is_churn": False},
+        {"tick_time": datetime(2026, 8, 7, 16, 0, tzinfo=timezone.utc), "is_churn": False},
+    ]
+    righe = per_session(drops, cutoff)
+
+    assert len(righe) == 2, f"il giorno misto deve produrre due righe, non {len(righe)}"
+    pre = [r for r in righe if r["phase"] == "pre"][0]
+    post = [r for r in righe if r["phase"] == "post"][0]
+    assert pre["drops"] == 1 and pre["churn"] == 1
+    assert post["drops"] == 2 and post["churn"] == 0, (
+        "le due uscite post-deploy non devono finire nel bucket pre"
+    )
+
+
+def test_pre_viene_prima_di_post_nello_stesso_giorno():
+    from datetime import datetime, timezone
+    from scripts.measure_185_churn import per_session
+
+    cutoff = datetime(2026, 8, 7, 14, 7, tzinfo=timezone.utc)
+    drops = [
+        {"tick_time": datetime(2026, 8, 7, 16, 0, tzinfo=timezone.utc), "is_churn": False},
+        {"tick_time": datetime(2026, 8, 7, 13, 0, tzinfo=timezone.utc), "is_churn": True},
+    ]
+    assert [r["phase"] for r in per_session(drops, cutoff)] == ["pre", "post"]

@@ -108,20 +108,30 @@ def classify_drops(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def per_session(
     drops: list[dict[str, Any]], deploy_cutoff: datetime
 ) -> list[dict[str, Any]]:
-    """Aggrega le uscite per data UTC e le separa sul cutoff di deploy."""
-    sessions: dict[str, dict[str, Any]] = {}
+    """Aggrega le uscite per (data UTC, fase), separate sul cutoff di deploy.
+
+    La chiave include la FASE, non solo la data. Il deploy cade a meta' seduta
+    (07-08 alle 14:07), quindi il suo giorno contiene sia uscite pre sia post:
+    aggregando per sola data, una singola uscita pre-deploy marcava l'intera
+    giornata come `pre` e buttava via l'evidenza post-deploy dello stesso giorno.
+    Il verdetto poteva risultare `inconclusive` avendo in mano dati che dicevano
+    il contrario.
+
+    Un giorno misto produce quindi DUE righe, una per fase.
+    """
+    sessions: dict[tuple[str, str], dict[str, Any]] = {}
     for drop in drops:
         tick_time = drop["tick_time"].astimezone(timezone.utc)
         date = tick_time.date().isoformat()
+        phase = "pre" if tick_time < deploy_cutoff else "post"
         slot = sessions.setdefault(
-            date,
-            {"date": date, "phase": "post", "drops": 0, "churn": 0},
+            (date, phase),
+            {"date": date, "phase": phase, "drops": 0, "churn": 0},
         )
         slot["drops"] += 1
         slot["churn"] += int(drop["is_churn"])
-        if tick_time < deploy_cutoff:
-            slot["phase"] = "pre"
-    return sorted(sessions.values(), key=lambda row: row["date"])
+    # `pre` prima di `post` a parita' di data: la lettura segue il tempo.
+    return sorted(sessions.values(), key=lambda row: (row["date"], row["phase"] == "post"))
 
 
 def verdict(sessions: list[dict[str, Any]]) -> dict[str, Any]:
