@@ -75,3 +75,27 @@ def test_notification_state_e_in_gitignore():
         "informazione runtime di quando l'ultimo PASS/FAIL e' stato annunciato, "
         "l'artefatto decisionale e' docs/evidence/s4_ic.json."
     )
+
+
+# ---------------------------------------------------------------------------
+# Ambiente del cron (rilievo bloccante della review su PR #224).
+# Il cron parte con PATH minimo e senza le variabili del .env: senza correzione
+# il wrapper muore su `uv: command not found`, oppure gira e salta la notifica
+# Telegram in silenzio. E' gia' successo al loop roadmap (bb74fa4).
+# ---------------------------------------------------------------------------
+
+def test_il_wrapper_mette_local_bin_nel_path():
+    """Sotto cron `uv` sta in ~/.local/bin, che non e' nel PATH minimale."""
+    testo = (ROOT / "scripts" / "daily_s4_ic.sh").read_text()
+    assert 'export PATH="$HOME/.local/bin' in testo, (
+        "senza questo il cron non trova `uv` e il giro muore prima di cominciare"
+    )
+
+
+def test_il_wrapper_carica_le_credenziali_telegram():
+    """Senza le due chiavi la notifica del kill criterion viene saltata in silenzio."""
+    testo = (ROOT / "scripts" / "daily_s4_ic.sh").read_text()
+    assert "TELEGRAM_(BOT_TOKEN|CHAT_ID)" in testo, (
+        "l'annuncio richiesto da #180 resterebbe meta' fatto"
+    )
+    assert ".env" in testo

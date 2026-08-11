@@ -17,6 +17,11 @@
 
 set -euo pipefail
 
+# cron parte con un PATH minimo (/usr/bin:/bin): senza questo `uv` non si trova e
+# il giro muore prima di cominciare. Stesso motivo per cui daily_analysis.sh e
+# roadmap_agent_loop.sh lo fanno — e' gia' costato un guasto silenzioso (bb74fa4).
+export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 LOG_DIR="$PROJECT_DIR/logs"
@@ -33,6 +38,18 @@ echo "=== Alembic S4 IC daily ${DATE} ==="
 echo "Started: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
 cd "$PROJECT_DIR"
+
+# Le credenziali Telegram non sono nell'ambiente del cron: senza queste due righe
+# compute_s4_ic.py salta la notifica in silenzio, e il "run ricorrente + annuncio"
+# che #180 chiede resterebbe meta' fatto. Stesso caricamento selettivo degli altri
+# cron: solo le due chiavi che servono, niente altro dal .env.
+if [[ -f "$PROJECT_DIR/.env" ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source <(grep -E '^TELEGRAM_(BOT_TOKEN|CHAT_ID)=' "$PROJECT_DIR/.env" | sed 's/#.*//')
+    set +a
+fi
+
 if uv run python "$PROJECT_DIR/scripts/compute_s4_ic.py"; then
     echo "Completed: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     exit 0
