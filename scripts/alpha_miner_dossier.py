@@ -39,6 +39,11 @@ from src.analysis.dossier.book import (
     compute_exits,
 )
 from src.analysis.dossier.market import compute_market, compute_miss_candidates
+from src.analysis.dossier.miss_cause import (
+    DEFAULT_SOGLIA_GATE,
+    cause_del_giorno,
+    classify_miss_candidates,
+)
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +69,37 @@ def _psql(query: str) -> list[list[str]]:
 def _watchlist() -> list[str]:
     with open(PROJECT_DIR / "config" / "trading.yaml") as f:
         return list(yaml.safe_load(f)["symbols"]["watchlist"])
+
+
+def _soglia_gate_s4() -> float:
+    """Legge la soglia feedback di S4 da Redis con fallback al baseline (#208).
+
+    Il dossier osserva le evidenze, non comanda il gate: usa la STESSA fonte
+    del gate runtime (`feedback:entry_threshold:S4`, con fallback alla chiave
+    legacy) e lo stesso fallback al baseline (0.30). Se Redis e' irraggiungibile,
+    logga e usa il baseline: meglio un dossier sulla soglia baseline che un
+    crash che blocca il cron.
+
+    NON legge `threshold_ratchet_enabled` (#191): quella flag riguarda solo
+    l'innalzamento automatico della leva; il dossier deve sempre vedere il
+    valore EFFETTIVO del giorno, anche quando il ratchet e' bloccato.
+    """
+    try:
+        from redis import Redis as _R
+        _r = _R.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+                         decode_responses=True)
+        try:
+            raw = _r.get("feedback:entry_threshold:S4")
+            if raw is None:
+                raw = _r.get("feedback:entry_threshold")
+            if raw is not None:
+                return float(raw)
+        finally:
+            _r.close()
+    except Exception as exc:
+        log.warning("Redis non raggiungibile per la soglia S4 (%s) — uso baseline %.2f",
+                    exc, DEFAULT_SOGLIA_GATE)
+    return DEFAULT_SOGLIA_GATE
 
 
 def _barre(simboli: list[str], giorno: date) -> dict[str, dict]:
@@ -151,6 +187,19 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
         rendimenti=mercato["rendimenti"], news_counts=news, segnali=dict(segnali),
         in_portafoglio=in_portafoglio, soglia_mover=SOGLIA_MOVER)
 
+    # Causa deterministica per ogni candidato (#208): news_count, segnali,
+    # in_portafoglio sono gia' tutti nei candidati, il classificatore aggiunge
+    # solo il campo `causa`. La soglia e' letta da Redis (feedback:entry_threshold:S4,
+    # con fallback al baseline) perche' tra il 07-31 e il 08-07 il ratchet (#191)
+    # aveva spinto il gate fino a 0.40-0.45: con il default fisso 0.30, i candidati
+    # con score in [0.30, soglia_effettiva) sarebbero stati classificati come
+    # NON_CLASSIFICATO invece di BELOW_GATE — proprio nei giorni che il dossier
+    # deve spiegare.
+    soglia_gate = _soglia_gate_s4()
+    candidati_classificati = classify_miss_candidates(
+        candidati, soglia_gate=soglia_gate
+    )
+
     # --- book: ingressi e chiusure ----------------------------------------
     ingressi_grezzi = [
         {"symbol": r[0], "strategia": r[1], "ora_utc": r[2],
@@ -191,13 +240,15 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
         "fonte_prezzi": "Alpaca SIP, adjustment=all",
         "soglia_mover": SOGLIA_MOVER,
         "mercato": mercato,
-        "candidati_miss": candidati,
+        "candidati_miss": candidati_classificati,
+        "soglia_gate_usata": soglia_gate,
         "ingressi": ingressi,
         "chiusure": chiusure,
         "aggregati": {
             "per_ora_ingresso": aggregate_by_entry_hour(chiusi_storici),
             "miss_cumulati": _miss_cumulati(),
             "mediane_mobili_20g": _mediane_mobili(ingressi, chiusure),
+            "cause_del_giorno": cause_del_giorno(candidati_classificati),
         },
     }
 
