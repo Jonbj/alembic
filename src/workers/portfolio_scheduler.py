@@ -2462,6 +2462,13 @@ def _run_cycle_inner() -> dict:
     _open_trade_origin: dict[str, str] = {
         t["symbol"]: t["stop_strategy"] for t in _open_trades if t.get("stop_strategy")
     }
+    # #231: da quando il simbolo e' a libro. Serve alla riga SKIP_PYRAMIDING per dire
+    # *perche'* il BUY e' stato fermato senza costringere a una seconda query.
+    _open_trade_entry_dates: dict[str, str] = {
+        t["symbol"]: t["entry_time"].date().isoformat()
+        for t in _open_trades
+        if t.get("entry_time") is not None and hasattr(t["entry_time"], "date")
+    }
 
     # Anti-stale-ranker-sell: protect open positions with a fresh positive signal from
     # being sold when the S4 ranker returns no output due to min_stocks constraint.
@@ -2668,6 +2675,8 @@ def _run_cycle_inner() -> dict:
         _whipsaw_suppressed_symbols: set[str] = set()
         _anti_whipsaw_enabled = bool(_risk_cfg.get("s4_anti_whipsaw_damping_enabled", False))
         _anti_whipsaw_confirm_cycles = int(_risk_cfg.get("s4_anti_whipsaw_confirm_cycles", 2))
+        # #231: BUY fermati dal guard anti-pyramiding, registrati dopo il ciclo.
+        _pyramiding_blocked: list[dict] = []
         for order in result.final_orders:
             strats = _sym_strats.get(order.symbol, [])
             # P1-S4-IDEMPOTENCY: skip this order if its signal_id was already fired today.
@@ -2676,6 +2685,16 @@ def _run_cycle_inner() -> dict:
             # P0-05: skip BUY decision for symbols already in an open trade (no pyramiding).
             if order.side.value == "BUY" and isinstance(open_db_symbols, set) and order.symbol in open_db_symbols:
                 log.info("P0-05: skipping BUY decision for %s — already has an open trade", order.symbol)
+                # #231: il blocco deve lasciare traccia. Non come BUY — quello era il
+                # difetto precedente — ma come SKIP dedicato, scritto una volta per
+                # segnale dopo il ciclo.
+                _pyramiding_blocked.append({
+                    "symbol": order.symbol,
+                    "signal_id": _signal_ids.get(order.symbol),
+                    "signal_score": _s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
+                    "allocation_weight": order.allocation_weight,
+                    "open_since": _open_trade_entry_dates.get(order.symbol),
+                })
                 continue
             # Stop-loss cooldown: skip BUY for symbols stopped out earlier today.
             if order.side.value == "BUY" and order.symbol in stopped_today:
@@ -2789,6 +2808,17 @@ def _run_cycle_inner() -> dict:
             _fired_sig_id = _signal_ids.get(order.symbol)
             if _fired_sig_id is not None and "S4" in strats and order.side.value == "BUY":
                 _pending_s4_fires[order.symbol] = _fired_sig_id
+        # #231: una riga per ogni BUY fermato dal guard, una volta per segnale.
+        # Fuori dal ciclo per non allungare il percorso caldo, ma dentro il `try`
+        # perche' riusa la connessione gia' aperta.
+        if _pyramiding_blocked:
+            _pyr_logged = _get_logged_pyramiding_keys(config.REDIS_URL)
+            if _pyr_logged is None:
+                _pyr_logged = set()  # fail open: meglio una riga doppia che nessuna
+            _pyr_new = _record_pyramiding_blocks(
+                _pg, _pyramiding_blocked, _pyr_logged, _regime_mult
+            )
+            _mark_pyramiding_blocks_logged(_pyr_new, config.REDIS_URL)
     except Exception as _exc:
         log.warning("Failed to log portfolio decisions: %s", _exc)
     finally:

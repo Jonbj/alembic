@@ -9,7 +9,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src.backtest.data.loader import DataLoader
 from src.backtest.metrics.performance import sharpe_ratio
 from src.backtest.engine.data_replay import DataReplay
 from src.backtest.gates.historical_stress import extract_historical_stress_periods
@@ -29,12 +28,16 @@ def run_s4_backtest_from_prices_and_signals(
     s4_config: S4Config | None = None,
     gate_config: GateConfig | None = None,
     run_robustness: bool = True,
+    entry_threshold: float = 0.30,
+    synthetic: bool = False,
 ) -> dict:
     """Run full walk-forward backtest + validation gates for S4.
 
     prices must contain at least a few stock columns (SPY optional but expected).
     signals_df must have columns: symbol, score, confidence, generated_at.
     Optional columns: reasoning, model_id, ensemble_std, fallback_used.
+    entry_threshold mirrors the live order-gate floor; the runtime ratchet is not
+    replayed. synthetic must be explicit and makes the artifacts non-decisional.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -48,6 +51,7 @@ def run_s4_backtest_from_prices_and_signals(
         if hasattr(signals_df["generated_at"].dtype, "tz") and signals_df["generated_at"].dt.tz is not None:
             signals_df["generated_at"] = signals_df["generated_at"].dt.tz_localize(None)
 
+    signals_df = _apply_entry_threshold(signals_df, entry_threshold)
     strategy = NewsDrivenTactical(s4_config, signals=signals_df)
 
     data_replay = DataReplay(prices)
@@ -123,6 +127,8 @@ def run_s4_backtest_from_prices_and_signals(
         for name, g in gate_report.gate_results.items()
     }
     summary = {
+        "synthetic": synthetic,
+        "decision_eligible": not synthetic,
         "oos_sharpe": oos_sharpe,
         "is_oos_degradation_ratio": degradation_ratio,
         "hard_gates_pass": hard_gates_pass,
@@ -135,9 +141,14 @@ def run_s4_backtest_from_prices_and_signals(
         "gate_report": gate_dict,
         "note": "S4 enters portfolio at 10% R&D sleeve regardless of gate results",
     }
+    gate_artifact = {
+        **gate_dict,
+        "synthetic": synthetic,
+        "decision_eligible": not synthetic,
+    }
 
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
-    (output_dir / "gate_report.json").write_text(json.dumps(gate_dict, indent=2, default=str))
+    (output_dir / "gate_report.json").write_text(json.dumps(gate_artifact, indent=2, default=str))
 
     log.info(
         "S4 backtest complete. OOS Sharpe=%.4f, Hard gates=%s, All gates=%s",
@@ -155,9 +166,22 @@ def run_s4_backtest_from_prices_and_signals(
         "gate_report": gate_dict,
         "hard_gates_pass": hard_gates_pass,
         "all_gates_pass": gate_report.overall_passed,
+        "synthetic": synthetic,
+        "decision_eligible": not synthetic,
         "report_path": str(output_dir),
         "gate_report_id": gate_report_id,
     }
+
+
+def _apply_entry_threshold(
+    signals_df: pd.DataFrame,
+    entry_threshold: float,
+) -> pd.DataFrame:
+    """Keep only signals that would pass the live S4 positive-score entry gate."""
+    if signals_df.empty:
+        return signals_df.copy()
+    scores = pd.to_numeric(signals_df["score"], errors="coerce")
+    return signals_df.loc[scores >= entry_threshold].copy()
 
 
 def _run_perturbation(
@@ -167,20 +191,19 @@ def _run_perturbation(
     wf_config: WalkForwardConfig,
 ) -> list[float]:
     """Run backtests with perturbed n_top and bucket_pct; return list of OOS Sharpes."""
-    perturbations = [
-        {"n_top": 3, "bucket_pct": 0.08},
-        {"n_top": 5, "bucket_pct": 0.10},
-        {"n_top": 7, "bucket_pct": 0.12},
-        {"n_top": 3, "bucket_pct": 0.12},
-        {"n_top": 7, "bucket_pct": 0.08},
+    perturbations: list[tuple[int, float]] = [
+        (3, 0.08),
+        (5, 0.10),
+        (7, 0.12),
+        (3, 0.12),
+        (7, 0.08),
     ]
     sharpes: list[float] = []
-    for params in perturbations:
+    for n_top, bucket_pct in perturbations:
         try:
-            n_top = params["n_top"]
             cfg = S4Config(
                 n_top=n_top,
-                bucket_pct=params["bucket_pct"],
+                bucket_pct=bucket_pct,
                 min_confidence=base_config.min_confidence,
                 min_score=base_config.min_score,
                 min_stocks=min(n_top, base_config.min_stocks),
@@ -215,14 +238,16 @@ def _split_regime_returns(oos_returns: pd.Series) -> dict[str, pd.Series]:
 
 def run_s4_backtest_full(
     output_dir: Path | str = Path("reports/s4_backtest"),
+    allow_synthetic: bool = False,
 ) -> dict:
     """Full production run: load price data + sentiment signals, then run backtest + gates.
 
-    Loads prices from DataLoader and sentiment signals from PostgreSQL.
-    Falls back to synthetic signals if PostgreSQL is unavailable.
+    Loads prices from DataLoader and sentiment signals from PostgreSQL. Synthetic
+    signals are available only through the explicit allow_synthetic opt-in.
     """
     from datetime import date
     from src.backtest.data.cache import ParquetCache
+    from src.backtest.data.loader import DataLoader
     from src.backtest.data.universe import load_universe
 
     output_dir = Path(output_dir)
@@ -235,35 +260,68 @@ def run_s4_backtest_full(
     start = date(2010, 1, 1)
     prices_wide = loader.get_aligned_prices(universe, start=start, end=date.today())
 
-    signals_df = _load_sentiment_signals(prices_wide, start=start, end=date.today())
+    signals_df = _load_sentiment_signals(
+        prices_wide,
+        start=start,
+        end=date.today(),
+        allow_synthetic=allow_synthetic,
+    )
 
     return run_s4_backtest_from_prices_and_signals(
         prices=prices_wide,
         signals_df=signals_df,
         output_dir=output_dir,
+        synthetic=bool(signals_df.attrs.get("synthetic", False)),
     )
 
 
-def _load_sentiment_signals(prices: pd.DataFrame, start, end) -> pd.DataFrame:
-    """Load historical sentiment signals from PostgreSQL; fall back to synthetic."""
+def _load_sentiment_signals(
+    prices: pd.DataFrame,
+    start,
+    end,
+    allow_synthetic: bool = False,
+) -> pd.DataFrame:
+    """Load historical sentiment signals, failing closed unless RNG is explicit."""
     try:
         from src.store.pg_store import PostgreSQLStore
 
         with PostgreSQLStore() as store:
             tickers = [c for c in prices.columns if c != "SPY"]
             rows: list[dict] = store.fetch_signals_for_backtest_batch(tickers, str(start), str(end))
-        if rows:
-            df = pd.DataFrame(rows)
-            if "generated_at" not in df.columns:
-                df["generated_at"] = pd.Timestamp(start)
-            df["generated_at"] = pd.to_datetime(df["generated_at"])
-            if df["generated_at"].dt.tz is not None:
-                df["generated_at"] = df["generated_at"].dt.tz_localize(None)
-            return df
     except Exception as exc:
-        log.warning("PostgreSQL signals unavailable (%s); generating synthetic signals", exc)
+        if not allow_synthetic:
+            raise RuntimeError(
+                "S4 backtest requires real historical sentiment signals; "
+                f"PostgreSQL query failed: {exc}"
+            ) from exc
+        log.warning(
+            "PostgreSQL signals unavailable (%s); explicit synthetic fallback enabled",
+            exc,
+        )
+        return _generate_synthetic_signals(prices)
 
-    return _generate_synthetic_signals(prices)
+    if not rows:
+        if not allow_synthetic:
+            raise RuntimeError(
+                "S4 backtest requires real historical sentiment signals; "
+                f"PostgreSQL returned no rows for {start} through {end}"
+            )
+        log.warning(
+            "PostgreSQL returned no S4 signals for %s through %s; "
+            "explicit synthetic fallback enabled",
+            start,
+            end,
+        )
+        return _generate_synthetic_signals(prices)
+
+    df = pd.DataFrame(rows)
+    if "generated_at" not in df.columns:
+        df["generated_at"] = pd.Timestamp(start)
+    df["generated_at"] = pd.to_datetime(df["generated_at"])
+    if df["generated_at"].dt.tz is not None:
+        df["generated_at"] = df["generated_at"].dt.tz_localize(None)
+    df.attrs["synthetic"] = False
+    return df
 
 
 def _generate_synthetic_signals(prices: pd.DataFrame) -> pd.DataFrame:
@@ -286,4 +344,6 @@ def _generate_synthetic_signals(prices: pd.DataFrame) -> pd.DataFrame:
                 "generated_at": pd.Timestamp(ts),
             })
 
-    return pd.DataFrame(rows)
+    df = pd.DataFrame(rows)
+    df.attrs["synthetic"] = True
+    return df
