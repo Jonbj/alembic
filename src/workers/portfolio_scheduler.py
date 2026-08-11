@@ -2461,6 +2461,13 @@ def _run_cycle_inner() -> dict:
     _open_trade_origin: dict[str, str] = {
         t["symbol"]: t["stop_strategy"] for t in _open_trades if t.get("stop_strategy")
     }
+    # #231: da quando il simbolo e' a libro. Serve alla riga SKIP_PYRAMIDING per dire
+    # *perche'* il BUY e' stato fermato senza costringere a una seconda query.
+    _open_trade_entry_dates: dict[str, str] = {
+        t["symbol"]: t["entry_time"].date().isoformat()
+        for t in _open_trades
+        if t.get("entry_time") is not None and hasattr(t["entry_time"], "date")
+    }
 
     # Anti-stale-ranker-sell: protect open positions with a fresh positive signal from
     # being sold when the S4 ranker returns no output due to min_stocks constraint.
@@ -2667,6 +2674,8 @@ def _run_cycle_inner() -> dict:
         _whipsaw_suppressed_symbols: set[str] = set()
         _anti_whipsaw_enabled = bool(_risk_cfg.get("s4_anti_whipsaw_damping_enabled", False))
         _anti_whipsaw_confirm_cycles = int(_risk_cfg.get("s4_anti_whipsaw_confirm_cycles", 2))
+        # #231: BUY fermati dal guard anti-pyramiding, registrati dopo il ciclo.
+        _pyramiding_blocked: list[dict] = []
         for order in result.final_orders:
             strats = _sym_strats.get(order.symbol, [])
             # P1-S4-IDEMPOTENCY: skip this order if its signal_id was already fired today.
@@ -2675,6 +2684,16 @@ def _run_cycle_inner() -> dict:
             # P0-05: skip BUY decision for symbols already in an open trade (no pyramiding).
             if order.side.value == "BUY" and isinstance(open_db_symbols, set) and order.symbol in open_db_symbols:
                 log.info("P0-05: skipping BUY decision for %s — already has an open trade", order.symbol)
+                # #231: il blocco deve lasciare traccia. Non come BUY — quello era il
+                # difetto precedente — ma come SKIP dedicato, scritto una volta per
+                # segnale dopo il ciclo.
+                _pyramiding_blocked.append({
+                    "symbol": order.symbol,
+                    "signal_id": _signal_ids.get(order.symbol),
+                    "signal_score": _s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
+                    "allocation_weight": order.allocation_weight,
+                    "open_since": _open_trade_entry_dates.get(order.symbol),
+                })
                 continue
             # Stop-loss cooldown: skip BUY for symbols stopped out earlier today.
             if order.side.value == "BUY" and order.symbol in stopped_today:
@@ -2788,6 +2807,17 @@ def _run_cycle_inner() -> dict:
             _fired_sig_id = _signal_ids.get(order.symbol)
             if _fired_sig_id is not None and "S4" in strats and order.side.value == "BUY":
                 _pending_s4_fires[order.symbol] = _fired_sig_id
+        # #231: una riga per ogni BUY fermato dal guard, una volta per segnale.
+        # Fuori dal ciclo per non allungare il percorso caldo, ma dentro il `try`
+        # perche' riusa la connessione gia' aperta.
+        if _pyramiding_blocked:
+            _pyr_logged = _get_logged_pyramiding_keys(config.REDIS_URL)
+            if _pyr_logged is None:
+                _pyr_logged = set()  # fail open: meglio una riga doppia che nessuna
+            _pyr_new = _record_pyramiding_blocks(
+                _pg, _pyramiding_blocked, _pyr_logged, _regime_mult
+            )
+            _mark_pyramiding_blocks_logged(_pyr_new, config.REDIS_URL)
     except Exception as _exc:
         log.warning("Failed to log portfolio decisions: %s", _exc)
     finally:
@@ -3329,6 +3359,119 @@ def _record_stale_drops(stale_signals, max_age_hours: int, min_score: float) -> 
         _mark_stale_signals_logged(logged_keys, config.REDIS_URL)
     except Exception as exc:
         log.warning("Failed to log stale-dropped signals: %s", exc)
+
+
+# Idempotency store per i blocchi anti-pyramiding (#231). Stesso schema di
+# _STALE_LOGGED_SIGNALS_KEY: il TTL supera abbondantemente signals_lookback_hours (96h),
+# cosi' un segnale non esce dall'insieme mentre potrebbe ancora essere ri-scansionato.
+_PYRAMID_LOGGED_KEY = "s4:logged_pyramiding_blocks"
+_PYRAMID_LOGGED_TTL_SECONDS = 10 * 24 * 3600  # 10 giorni
+
+
+def _pyramiding_block_key(symbol: str, signal_id, giorno: str | None = None) -> str:
+    """Identita' di un blocco, per scriverne una riga sola.
+
+    La chiave e' il SEGNALE, non il ciclo: un simbolo a libro viene ri-valutato ogni 15
+    minuti, e una riga per ciclo ricreerebbe esattamente la pollution che il fix
+    precedente aveva eliminato (10-24 righe identiche al giorno per simbolo aperto).
+
+    Un BUY di solo momentum non ha `signal_id`: li' si ricade sul giorno, che tiene il
+    volume a una riga al giorno per simbolo invece di una per ciclo.
+    """
+    if signal_id is not None:
+        return f"{symbol}|{signal_id}"
+    if giorno is None:
+        from datetime import datetime, timezone
+        giorno = datetime.now(timezone.utc).date().isoformat()
+    return f"{symbol}|nosig|{giorno}"
+
+
+def _get_logged_pyramiding_keys(redis_url: str) -> set[str] | None:
+    """Blocchi gia' registrati, o None se Redis non risponde.
+
+    Fallisce APERTO come il gemello per SKIP_STALE: una riga duplicata e' una seccatura,
+    perdere la visibilita' su un segnale bloccato e' il difetto che questo insieme esiste
+    per chiudere.
+    """
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            return set(r.smembers(_PYRAMID_LOGGED_KEY))
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Could not read logged-pyramiding set from Redis: %s", exc)
+        return None
+
+
+def _mark_pyramiding_blocks_logged(keys: list[str], redis_url: str) -> None:
+    """Aggiunge le chiavi all'insieme di idempotenza e rinfresca il TTL. Fail-silent."""
+    if not keys:
+        return
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            r.sadd(_PYRAMID_LOGGED_KEY, *keys)
+            r.expire(_PYRAMID_LOGGED_KEY, _PYRAMID_LOGGED_TTL_SECONDS)
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Failed to mark pyramiding blocks as logged: %s", exc)
+
+
+def _record_pyramiding_blocks(pg, bloccati, gia_registrati: set[str], regime_mult: float) -> list[str]:
+    """Scrive una riga SKIP_PYRAMIDING per ogni BUY fermato dal guard P0-05 (#231).
+
+    Senza questa riga il candidato sparisce e basta: dal database «bloccato di proposito»
+    e «mai valutato» sono indistinguibili, e sono due cose opposte. Il 2026-08-10 sei
+    segnali sopra il gate sono scomparsi cosi', fra cui il piu' alto della giornata.
+
+    La decisione NON e' un BUY, di proposito. Loggare un BUY per un simbolo bloccato era
+    il difetto precedente: le righe apparivano come replay di segnali stale e inquinavano
+    il Decision Log. Qui la riga dichiara quello che e' successo davvero.
+
+    `score` porta il peso che SAREBBE stato allocato: e' il dato che serve a #230 per
+    misurare quanto capitale il blocco lascia non impiegato.
+
+    Restituisce le chiavi effettivamente scritte, perche' sia il chiamante a marcarle —
+    la funzione resta testabile senza Redis. Non solleva mai: la visibilita' e' preziosa,
+    ma non abbastanza da far cadere un ciclo di trading.
+    """
+    scritte: list[str] = []
+    try:
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        giorno = now.date().isoformat()
+        for b in bloccati or []:
+            chiave = _pyramiding_block_key(b["symbol"], b.get("signal_id"), giorno=giorno)
+            if chiave in gia_registrati:
+                continue
+            _score = b.get("signal_score")
+            _since = b.get("open_since")
+            _reason = (
+                f"P0-05 anti-pyramiding: gia' a libro"
+                f"{f' dal {_since}' if _since else ''}"
+                f"{f', sentiment {float(_score):+.3f}' if _score is not None else ''}"
+                f", peso non allocato {float(b.get('allocation_weight') or 0.0) * 100:.1f}%"
+            )
+            pg.write_execution_decision(
+                tick_time=now,
+                symbol=b["symbol"],
+                signal_id=b.get("signal_id"),
+                score=b.get("allocation_weight") or 0.0,
+                signal_score=_score,
+                regime_mult=regime_mult,
+                ema_pass=True,
+                decision="SKIP_PYRAMIDING",
+                reason=_reason,
+            )
+            scritte.append(chiave)
+    except Exception as exc:
+        log.warning("Failed to log pyramiding blocks: %s", exc)
+    return scritte
 
 
 def _record_dispositions(
