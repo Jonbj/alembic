@@ -3374,13 +3374,20 @@ def _mark_fallback_signals_logged(keys: list[str], redis_url: str) -> None:
         log.warning("Failed to mark fallback signals as logged: %s", exc)
 
 
-def _record_fallback_drops(fallback_signals) -> None:
+def _record_fallback_drops(fallback_signals, non_fallback_signals=()) -> None:
     """Write SKIP_FALLBACK rows for signals _filter_fallback_signals (#108) dropped
     from BUY ranking, so the Decision Log doesn't look identical to NO_NEWS for a
     symbol whose only signal that day was a single-model fallback (ERIC/AMAT,
     2026-07-27 — see docs/ALPHA_MISS_REPORT_2026-07-27.md §7 and issue #151). The
     drop itself is correct policy (#108, post-SPCX); this only makes it visible
     instead of silent — pure observability, no change to the BUY-ranking exclusion.
+
+    **Solo i simboli il cui UNICO segnale era fallback.** Un simbolo che ha anche un
+    segnale ensemble e' stato valutato normalmente: marcarlo SKIP_FALLBACK sarebbe una
+    riga falsa, e peggiorerebbe il silenzio che questa funzione esiste per togliere —
+    farebbe sembrare scartato un simbolo che e' stato considerato. Non e' un caso di
+    scuola: su 7 giorni di produzione 54 simboli su 62 con almeno un segnale fallback
+    ne avevano anche uno ensemble, cioe' l'87% delle righe sarebbe stato falso.
 
     Idempotent per symbol+generated_at (same _stale_signal_key as
     _record_stale_drops) — the same fallback signal is re-fetched every 15-min
@@ -3396,12 +3403,18 @@ def _record_fallback_drops(fallback_signals) -> None:
         if not fallback_signals:
             return
 
+        # Perimetro: solo chi non ha nessun segnale non-fallback nello stesso lotto.
+        _valutati = {getattr(s, "symbol", None) for s in (non_fallback_signals or ())}
+        solo_fallback = [s for s in fallback_signals if s.symbol not in _valutati]
+        if not solo_fallback:
+            return
+
         already_logged = _get_logged_fallback_signal_keys(config.REDIS_URL)
         if already_logged is None:
             already_logged = set()  # fail open: Redis down → log anyway, dedupe later
 
         to_log = [
-            s for s in fallback_signals
+            s for s in solo_fallback
             if _stale_signal_key(s.symbol, s.generated_at) not in already_logged
         ]
         if not to_log:
@@ -3543,7 +3556,9 @@ def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None
                     # #151: surface the drop in the Decision Log (SKIP_FALLBACK) —
                     # otherwise a symbol whose only signal today was a single-model
                     # fallback is indistinguishable from NO_NEWS downstream.
-                    _record_fallback_drops(_fb_dropped)
+                    # #151: solo i simboli senza segnale ensemble — `signals` qui contiene
+                    # gia i non-fallback (vedi _filter_fallback_signals sopra).
+                    _record_fallback_drops(_fb_dropped, non_fallback_signals=signals)
             if signals:
                 # P1-S4-FRESHNESS: drop signals older than max_signal_age_hours.
                 _now_utc = datetime.now(timezone.utc)

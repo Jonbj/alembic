@@ -135,3 +135,59 @@ def test_record_fallback_drops_is_fail_safe():
          patch("redis.Redis") as mock_cls:
         _mock_redis(mock_cls)
         portfolio_scheduler._record_fallback_drops(dropped)  # must not raise
+
+# ---------------------------------------------------------------------------
+# Perimetro (review di codex su PR #229): registrare SOLO i simboli il cui unico
+# segnale era fallback. Un simbolo che ha ANCHE un segnale ensemble e' stato
+# valutato normalmente, e marcarlo SKIP_FALLBACK e' una riga falsa — peggio del
+# silenzio che questa modifica vuole togliere, perche' fa sembrare scartato un
+# simbolo che e' stato considerato.
+#
+# Non e' un caso di scuola: sugli ultimi 7 giorni di produzione 54 simboli su 62
+# con almeno un segnale fallback avevano anche un ensemble. L'87% delle righe
+# sarebbe stato falso.
+# ---------------------------------------------------------------------------
+
+
+def _sig_ens(symbol, gen):
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        symbol=symbol, score=0.5, confidence=0.8, model_id="ensemble:x+y",
+        generated_at=gen, fallback_used=False,
+    )
+
+
+def test_simbolo_con_anche_un_ensemble_non_viene_registrato():
+    """AMD ha un fallback E un ensemble: e' stato valutato, non scartato."""
+    from datetime import datetime, timezone
+    gen = datetime(2026, 8, 10, 14, 0, tzinfo=timezone.utc)
+    mock_pg = MagicMock()
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_pg), \
+         patch.object(portfolio_scheduler, "_get_regime_multiplier_from_redis", return_value=1.0), \
+         patch("redis.Redis") as mock_redis_cls:
+        _mock_redis(mock_redis_cls)
+        portfolio_scheduler._record_fallback_drops(
+            [_sig("AMD", 0.2, 0.5, "single:finbert", gen)],
+            non_fallback_signals=[_sig_ens("AMD", gen)],
+        )
+    assert mock_pg.write_execution_decision.call_count == 0, (
+        "AMD ha un segnale ensemble: non deve risultare scartato per fallback."
+    )
+
+
+def test_registra_solo_i_solo_fallback_di_un_lotto_misto():
+    from datetime import datetime, timezone
+    gen = datetime(2026, 8, 10, 14, 0, tzinfo=timezone.utc)
+    mock_pg = MagicMock()
+    mock_pg.write_execution_decision.return_value = 1
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_pg), \
+         patch.object(portfolio_scheduler, "_get_regime_multiplier_from_redis", return_value=1.0), \
+         patch("redis.Redis") as mock_redis_cls:
+        _mock_redis(mock_redis_cls)
+        portfolio_scheduler._record_fallback_drops(
+            [_sig("AMD", 0.2, 0.5, "single:finbert", gen),
+             _sig("ERIC", 0.3, 0.6, "single:finbert", gen)],
+            non_fallback_signals=[_sig_ens("AMD", gen)],
+        )
+    simboli = [c.kwargs["symbol"] for c in mock_pg.write_execution_decision.call_args_list]
+    assert simboli == ["ERIC"], f"atteso solo ERIC, ottenuto {simboli}"
