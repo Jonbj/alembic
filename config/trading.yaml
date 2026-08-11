@@ -313,6 +313,11 @@ loss_feedback:
   threshold_step: 0.05           # amount to raise ENTRY_THRESHOLD per trigger
   threshold_max: 0.60            # ceiling for raised threshold
   threshold_baseline: 0.30       # baseline to recover toward
+  # #191: operator-approved exception for the observation window (#171).
+  # false freezes only S4's upward entry-threshold step and pulls an already
+  # elevated threshold back to baseline; regime_scale remains active.
+  # This file is baked into the worker image, so the change needs a redeploy.
+  threshold_ratchet_enabled: false
   # 2026-07-09: auto-decay the raised gate every 24h without a new trigger, so a
   # transient loss does not keep the threshold stuck near 0.55 forever.
   threshold_decay_hours: 24

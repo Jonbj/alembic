@@ -40,6 +40,19 @@ ENTRY_FRESHNESS_FILTERED = "entry_freshness_filtered"
 BELOW_ENTRY_GATE = "below_entry_gate"
 """Dropped because |score| was under the active feedback:entry_threshold."""
 
+# ─── Decisions: the value written to execution_decisions.decision for a SKIP ───
+# S4's skip paths persist a row in execution_decisions so a no-trade symbol is
+# distinguishable from NO_NEWS (issue #151). Each drop the ranking applies has a
+# matching decision label; FALLBACK_FILTERED (the in-memory disposition, per cycle)
+# and SKIP_FALLBACK (the persisted decision, cross-cycle) are two names for the same
+# concept at two levels — kept here together so the concept has one source of truth
+# and the scheduler imports the string instead of retyping it.
+DECISION_SKIP_FALLBACK = "SKIP_FALLBACK"
+"""execution_decisions.decision for a signal _filter_fallback_signals (#108) dropped
+from BUY ranking. The drop is correct policy (post-SPCX); the row only makes it
+visible so a fallback-only symbol (ERIC/AMAT, 2026-07-27) is not indistinguishable
+from NO_NEWS. See issue #151 and docs/ALPHA_MISS_REPORT_2026-07-27.md §7."""
+
 # ─── Mechanisms: the value written to execution_decisions.exit_mechanism ───
 MECHANISM_NO_SIGNAL = "no_signal"
 MECHANISM_EXPIRED = "expired"

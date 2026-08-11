@@ -108,9 +108,45 @@ estrai_verdetto() {
     echo "NON_ESEGUITA"
 }
 
-# Prima del lock: e' una funzione pura sullo stdin, non un giro di lavoro.
+# Ricava il numero di issue dal nome del branch. Legge il segmento `issue-<N>`, non
+# la coda della stringa: gli agenti che rifanno il lavoro pubblicano su branch
+# derivati, e `grep -oE '[0-9]+$'` su `agent/issue-191-v3` restituiva 3 (#221).
+# `--rivedi` ci costruiva sopra il prompt di review, che finiva per giudicare la PR
+# contro i requisiti della issue #3.
+issue_del_branch() {
+    printf '%s\n' "$1" | sed -nE 's|.*issue-([0-9]+).*|\1|p' | head -1
+}
+
+# Trova la PR prodotta dal giro. Il nome del branch e' un ripiego, non il criterio:
+# l'ancoraggio solido e' la issue che la PR dichiara di chiudere. Con la sola
+# corrispondenza esatta sul branch, PR #220 (`agent/issue-191-v3`) e #217
+# (`agent/issue-185-v2`) risultavano inesistenti — tentativo contato come
+# fallimento e, molto peggio, cancello di review mai raggiunto.
+#
+# Il ripiego sul nome resta per le PR che dichiarano `Part of #N` invece di
+# `closes`: li' closingIssuesReferences e' vuoto. Ancorato con `($|-)` perche'
+# `agent/issue-19` non deve rispondere per la issue #191.
+trova_pr_del_giro() {
+    local _issue="$1"
+    gh pr list --state open --json number,headRefName,closingIssuesReferences 2>/dev/null \
+        | jq -r --argjson i "$_issue" '
+            [ .[] | select(
+                ((.closingIssuesReferences // []) | any(.number == $i))
+                or (.headRefName | test("^agent/issue-\($i)($|-)"))
+            ) ] | .[0].number // ""' 2>/dev/null || true
+}
+
+# Prima del lock: sono funzioni pure, non giri di lavoro.
 if [[ "${1:-}" == "--verdetto" ]]; then
     estrai_verdetto
+    exit 0
+fi
+if [[ "${1:-}" == "--issue-del-branch" ]]; then
+    issue_del_branch "${2:?uso: --issue-del-branch <branch>}"
+    exit 0
+fi
+if [[ "${1:-}" == "--trova-pr" ]]; then
+    trova_pr_del_giro "${2:?uso: --trova-pr <numero issue>}"
     exit 0
 fi
 
@@ -488,7 +524,7 @@ if [[ "${1:-}" == "--rivedi" ]]; then
     _b=$(gh pr view "$_pr" --json headRefName -q .headRefName)
     _t=$(gh pr view "$_pr" --json title -q .title)
     _u=$(gh pr view "$_pr" --json url -q .url)
-    _i=$(echo "$_b" | grep -oE '[0-9]+$')
+    _i=$(issue_del_branch "$_b")
     [[ -z "$_i" ]] && { echo "Non ricavo il numero di issue dal branch '$_b'."; exit 1; }
     # L'implementatore va escluso dalla review: se non e' ricavabile dal log, si
     # assume il motore di turno, che e' l'ipotesi prudente (al massimo cambia
@@ -724,15 +760,24 @@ elif (( ESITO != 0 )); then
 fi
 
 # --- esito reale: la PR esiste o no. Non ci si fida del racconto della sessione.
-PR_URL=$(gh pr list --state open --head "$BRANCH" --json url -q '.[0].url' 2>/dev/null || echo "")
+PR_NUM=$(trova_pr_del_giro "$ISSUE")
+PR_URL=""
+if [[ -n "$PR_NUM" ]]; then
+    PR_URL=$(gh pr view "$PR_NUM" --json url -q .url 2>/dev/null || echo "")
+    # Il branch effettivo puo' non essere quello creato dal loop: gli agenti
+    # pubblicano anche su branch derivati. Review e merge devono lavorare su
+    # quello vero, non su quello atteso (#221).
+    BRANCH_PR=$(gh pr view "$PR_NUM" --json headRefName -q .headRefName 2>/dev/null || echo "$BRANCH")
+    [[ "$BRANCH_PR" != "$BRANCH" ]] && \
+        log "#$ISSUE — PR su branch derivato '$BRANCH_PR' (il giro aveva creato '$BRANCH')."
+fi
 
 if [[ -n "$PR_URL" ]]; then
     log "#$ISSUE — PR aperta da $MOTORE: $PR_URL"
     # Tentativo riuscito: lo tolgo dal conteggio dei fallimenti.
     grep -v -P "^${ISSUE}\t" "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null || true
     mv "${STATE_FILE}.tmp" "$STATE_FILE"
-    PR_NUM=$(gh pr list --state open --head "$BRANCH" --json number -q '.[0].number')
-    rivedi_e_mergia "$PR_NUM" "$ISSUE" "$BRANCH" "$WT" "$MOTORE" "$TITOLO" "$PR_URL"
+    rivedi_e_mergia "$PR_NUM" "$ISSUE" "$BRANCH_PR" "$WT" "$MOTORE" "$TITOLO" "$PR_URL"
 else
     log "#$ISSUE — nessuna PR aperta."
     CODA=$(echo "$OUTPUT" | tail -c 1200)
@@ -748,6 +793,9 @@ Motore: ${MOTORE} — esito sessione: ${ESITO}
         log "#$ISSUE — nessun commit prodotto: worktree e branch rimossi."
         exit 0
     fi
+    # Commit senza PR: non e' un giro a vuoto, e il log non deve farlo sembrare
+    # tale. Sono due situazioni diverse e vanno distinte a colpo d'occhio (#221).
+    log "#$ISSUE — ATTENZIONE: la sessione ha lasciato commit su '$BRANCH' ma nessuna PR. Lavoro da recuperare a mano."
 fi
 
 git worktree remove --force "$WT" 2>/dev/null || true
