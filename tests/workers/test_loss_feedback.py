@@ -117,36 +117,6 @@ def test_load_loss_feedback_config_returns_defaults_on_missing_section():
     assert cfg["threshold_baseline"] == pytest.approx(0.30)
 
 
-def test_apply_regime_scale_defaults_to_false():
-    """F8 ships shadow-only: apply_regime_scale must default to False so the
-    feedback regime scale is measured (shadow-logged) but NOT applied to sizing
-    until an operator flips it after the shadow gate passes (QX-01)."""
-    with patch("builtins.open", side_effect=FileNotFoundError):
-        cfg = _load_loss_feedback_config()
-    assert cfg.get("apply_regime_scale") is False, (
-        "apply_regime_scale must default False — measure-before-enforce"
-    )
-
-
-def test_trading_yaml_ships_regime_scale_off_pending_the_premise_retest():
-    """The shipped config must keep F8 shadow-only — no sleeve enabled.
-
-    2026-07-27: S4 passed the flip gate and S1 failed it, so [S4] was the
-    intended value. #134 then showed the gate is scored on counters that
-    double-count simultaneous same-day exits (80-89% of neighbours), and that
-    the serial dependence such a rule needs vanishes once observations are
-    aggregated by day. The mechanism ships; the lever stays off until the
-    counters aggregate by day and the premise is re-tested on that unit.
-
-    Guards against an accidental live flip in either form (bool or allowlist).
-    """
-    cfg = _load_loss_feedback_config()  # reads the real config/trading.yaml
-    applied = cfg.get("apply_regime_scale")
-    assert not applied, (
-        f"config/trading.yaml must ship F8 shadow-only pending #134, got {applied!r}"
-    )
-
-
 def test_threshold_ratchet_defaults_to_frozen_during_observation():
     with patch("builtins.open", side_effect=FileNotFoundError):
         cfg = _load_loss_feedback_config()
@@ -191,8 +161,6 @@ def _default_cfg():
         # tests override this explicitly; loader tests cover the shipped default.
         "threshold_ratchet_enabled": True,
         "threshold_decay_hours": 24,
-        "regime_scale_factor": 0.80,
-        "regime_min_scale": 0.20,
         "cooldown_hours": 4,
         "recovery_win_streak": 3,
         "feedback_ttl_hours": 48,
@@ -203,7 +171,6 @@ def _patched_run(
     trades: list[dict],
     *,
     redis_threshold: float | None = None,
-    redis_scale: float | None = None,
     redis_state: dict | None = None,
     cfg_override: dict | None = None,
     ttl_refresh_existed: bool = True,
@@ -218,7 +185,6 @@ def _patched_run(
 
     mock_redis = MagicMock()
     mock_redis.get_feedback_entry_threshold.return_value = redis_threshold
-    mock_redis.get_feedback_regime_scale.return_value = redis_scale
     mock_redis.get_feedback_state.return_value = redis_state
     mock_redis.refresh_feedback_ttl.return_value = ttl_refresh_existed
 
@@ -259,7 +225,6 @@ class TestTriggerOnConsecutiveLosses:
         assert s4["triggered"] is True
         assert s4["consecutive_losses"] == 3
         mock_redis.set_feedback_entry_threshold.assert_called_once()
-        mock_redis.set_feedback_regime_scale.assert_called_once()
 
     def test_threshold_raised_by_step(self):
         trades = _make_trades([-5, -10, -3, 8, 2], signal_id=123)
@@ -268,19 +233,13 @@ class TestTriggerOnConsecutiveLosses:
         s4 = result["per_strategy"]["S4"]
         assert s4["new_threshold"] == pytest.approx(0.35)
 
-    def test_regime_scale_reduced_by_factor(self):
-        trades = _make_trades([-5, -10, -3, 8, 2], signal_id=123)
-        result, _ = _patched_run(trades, redis_scale=1.0)
-
-        s4 = result["per_strategy"]["S4"]
-        assert s4["new_scale"] == pytest.approx(0.80)
-
-    def test_frozen_ratchet_resets_elevated_s4_threshold_but_keeps_scale_live(self):
+    def test_frozen_ratchet_resets_elevated_s4_threshold(self):
+        """#220: una soglia gia' alzata torna al baseline. Le asserzioni su
+        regime_scale sono cadute con il ritiro di F8 (#134)."""
         trades = _make_trades([-5, -10, -3, 8, 2], signal_id=123)
         result, mock_redis = _patched_run(
             trades,
             redis_threshold=0.45,
-            redis_scale=0.80,
             cfg_override={"threshold_ratchet_enabled": False},
         )
 
@@ -288,12 +247,8 @@ class TestTriggerOnConsecutiveLosses:
         assert s4["adjusted"] is True
         assert s4["ratchet_frozen"] is True
         assert s4["new_threshold"] == pytest.approx(0.30)
-        assert s4["new_scale"] == pytest.approx(0.64)
         mock_redis.set_feedback_entry_threshold.assert_called_once_with(
             pytest.approx(0.30), ttl=48 * 3600, strategy="S4"
-        )
-        mock_redis.set_feedback_regime_scale.assert_called_once_with(
-            pytest.approx(0.64), ttl=48 * 3600, strategy="S4"
         )
         state = mock_redis.set_feedback_state.call_args.args[0]
         assert state["threshold_before"] == pytest.approx(0.45)
@@ -351,13 +306,6 @@ class TestThresholdCap:
         s4 = result["per_strategy"]["S4"]
         assert s4["new_threshold"] == pytest.approx(0.60)
 
-    def test_regime_scale_floored_at_min(self):
-        trades = _make_trades([-5, -10, -3, 8, 2], signal_id=123)
-        result, _ = _patched_run(trades, redis_scale=0.22)
-
-        s4 = result["per_strategy"]["S4"]
-        assert s4["new_scale"] == pytest.approx(0.20)
-
 
 class TestCooldown:
     def test_adjustment_skipped_within_cooldown(self):
@@ -394,7 +342,6 @@ class TestRecovery:
         result, mock_redis = _patched_run(
             trades,
             redis_threshold=0.40,
-            redis_scale=0.80,
         )
 
         s4 = result["per_strategy"]["S4"]
@@ -407,7 +354,6 @@ class TestRecovery:
         result, mock_redis = _patched_run(
             trades,
             redis_threshold=0.30,
-            redis_scale=1.0,
         )
 
         s4 = result["per_strategy"]["S4"]
@@ -456,15 +402,10 @@ class TestTemporalDecay:
         assert s4["decayed"] is False
         mock_redis.set_feedback_entry_threshold.assert_not_called()
 
-    def test_s1_scale_decays_after_quiet_period(self):
-        """F8: S1's suppressed regime_scale must decay on the quiet period even
-        though S1's entry threshold is held at 0.0 (no entry gate).
-
-        Pre-fix the decay branch guard `current_threshold > baseline` excluded
-        S1 (0.0 > 0.30 is False), leaving its scale stuck until a 3-win streak —
-        a one-way suppressor on the strategy that bled most on 2026-07-10.
-        Post-fix decay fires when the scale is suppressed (current_scale < 1.0)
-        independent of the threshold.
+    def test_s1_threshold_does_not_decay_because_held_at_zero(self):
+        """S1's threshold is held at 0.0 (no entry gate), so the decay branch
+        must not fire — there is nothing to step down. F8's regime_scale is
+        retired, so we only check the threshold side now.
         """
         # S1 trades, not triggered, only 2 consecutive wins (< recovery_win_streak)
         trades = _make_trades([5, 3, -1, 2, 1], signal_id=None)
@@ -472,58 +413,14 @@ class TestTemporalDecay:
         result, mock_redis = _patched_run(
             trades,
             redis_threshold=0.0,   # S1 always 0.0
-            redis_scale=0.50,      # suppressed
             redis_state={"last_adjustment_ts": old_ts, "reason": "triggered"},
         )
 
         s1 = result["per_strategy"]["S1"]
-        assert s1["decayed"] is True, (
-            "S1 suppressed scale must decay on quiet period (F8) — pre-fix it was "
-            "stuck because the decay guard required threshold > baseline"
+        assert s1["decayed"] is False, (
+            "S1 threshold is held at 0.0 — no step down to perform, decay must skip"
         )
-        assert s1["new_scale"] == pytest.approx(0.625, rel=1e-4), (
-            "0.50 / 0.80 = 0.625"
-        )
-        mock_redis.set_feedback_regime_scale.assert_called_once()
-
-    def test_s4_scale_decays_when_threshold_at_baseline_but_scale_suppressed(self):
-        """F8: a non-S1 strategy whose threshold is already at baseline but
-        whose scale is still suppressed must decay the scale. Pre-fix the
-        early-return in _step_threshold_down (current_threshold <= baseline)
-        short-circuited and left the scale stuck."""
-        trades = _make_trades([5, 3, -1, 2, 1], signal_id=123)
-        old_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
-        result, mock_redis = _patched_run(
-            trades,
-            redis_threshold=0.30,  # at baseline
-            redis_scale=0.50,      # suppressed
-            redis_state={"last_adjustment_ts": old_ts, "reason": "triggered"},
-        )
-
-        s4 = result["per_strategy"]["S4"]
-        assert s4["decayed"] is True, (
-            "Suppressed scale must decay even when threshold is at baseline (F8)"
-        )
-        assert s4["new_scale"] == pytest.approx(0.625, rel=1e-4)
-        assert s4["new_threshold"] == pytest.approx(0.30, rel=1e-4), (
-            "threshold already at baseline — unchanged"
-        )
-
-    def test_no_decay_when_s1_fully_at_rest(self):
-        """S1 with threshold=0.0 and scale=1.0 has nothing to decay — guard
-        against the early-return change over-firing."""
-        trades = _make_trades([5, 3, -1, 2, 1], signal_id=None)
-        old_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
-        result, mock_redis = _patched_run(
-            trades,
-            redis_threshold=0.0,
-            redis_scale=1.0,       # at rest
-            redis_state={"last_adjustment_ts": old_ts, "reason": "triggered"},
-        )
-
-        s1 = result["per_strategy"]["S1"]
-        assert s1["decayed"] is False
-        mock_redis.set_feedback_regime_scale.assert_not_called()
+        mock_redis.set_feedback_entry_threshold.assert_not_called()
 
 
 class TestRedisWrites:
@@ -543,7 +440,6 @@ class TestRedisWrites:
         _, mock_redis = _patched_run(
             trades,
             redis_threshold=0.40,
-            redis_scale=0.80,
         )
 
         mock_redis.set_feedback_state.assert_called_once()
@@ -567,20 +463,6 @@ class TestExecutionThresholdIntegration:
         mock_redis = MagicMock()
         mock_redis.get_feedback_entry_threshold.return_value = 0.45
         assert _load_entry_threshold(mock_redis) == pytest.approx(0.45)
-
-    def test_load_feedback_regime_scale_defaults_to_one(self):
-        from src.workers.execution import _load_feedback_regime_scale
-
-        mock_redis = MagicMock()
-        mock_redis.get_feedback_regime_scale.return_value = None
-        assert _load_feedback_regime_scale(mock_redis) == pytest.approx(1.0)
-
-    def test_load_feedback_regime_scale_uses_redis_value(self):
-        from src.workers.execution import _load_feedback_regime_scale
-
-        mock_redis = MagicMock()
-        mock_redis.get_feedback_regime_scale.return_value = 0.64
-        assert _load_feedback_regime_scale(mock_redis) == pytest.approx(0.64)
 
 
 class TestStaleEvidenceGuard:
@@ -616,7 +498,6 @@ class TestStaleEvidenceGuard:
         assert s4["adjusted"] is False
         assert s4.get("skipped_stale_evidence") is True
         mock_redis.set_feedback_entry_threshold.assert_not_called()
-        mock_redis.set_feedback_regime_scale.assert_not_called()
 
     def test_reapplies_when_new_teaching_trade_closed(self):
         """A fresh teaching trade (different id) is new evidence — ratchet applies."""
@@ -635,7 +516,6 @@ class TestStaleEvidenceGuard:
         assert s4["adjusted"] is True
         assert s4.get("skipped_stale_evidence") is not True
         mock_redis.set_feedback_entry_threshold.assert_called_once()
-        mock_redis.set_feedback_regime_scale.assert_called_once()
 
     def test_applies_when_prior_state_has_no_evidence_id(self):
         """Backward compatibility: missing evidence id never blocks the ratchet."""
@@ -650,7 +530,6 @@ class TestStaleEvidenceGuard:
         assert s4["adjusted"] is True
         assert s4.get("skipped_stale_evidence") is not True
         mock_redis.set_feedback_entry_threshold.assert_called_once()
-        mock_redis.set_feedback_regime_scale.assert_called_once()
 
     def test_persists_evidence_id_on_apply(self):
         """The applied state must remember the evidence trade id that caused it."""
@@ -720,10 +599,10 @@ class TestFeedbackKeyHeartbeat:
     no self-heal. Every run must re-arm the lease for every sleeve."""
 
     def test_refreshes_ttl_for_every_sleeve_on_an_at_rest_run(self):
-        # 2 wins: under the 3-win recovery streak, threshold at baseline, scale at 1.0
+        # 2 wins: under the 3-win recovery streak, threshold at baseline
         # -> no branch fires, so nothing else would write these keys.
         trades = _make_trades([5, 3], signal_id=None)
-        result, mock_redis = _patched_run(trades, redis_threshold=0.30, redis_scale=1.0)
+        result, mock_redis = _patched_run(trades, redis_threshold=0.30)
 
         assert result["adjusted"] is False and result["recovered"] is False
         calls = mock_redis.refresh_feedback_ttl.call_args_list
@@ -731,7 +610,6 @@ class TestFeedbackKeyHeartbeat:
         assert all(c.kwargs["ttl"] == 48 * 3600 for c in calls)  # _default_cfg ttl hours
         # a live lease is extended, never rewritten
         mock_redis.set_feedback_entry_threshold.assert_not_called()
-        mock_redis.set_feedback_regime_scale.assert_not_called()
 
     def test_covers_a_sleeve_with_no_recent_teaching_trades(self):
         """THE regression that matters. The per-strategy loop iterates fb._history,
@@ -740,7 +618,7 @@ class TestFeedbackKeyHeartbeat:
         trades. A heartbeat placed inside that loop passes every other test here and
         fails this one: a quiet S4 would silently stop being refreshed."""
         trades = _make_trades([5, 3], signal_id=None)  # S1 only
-        result, mock_redis = _patched_run(trades, redis_threshold=0.30, redis_scale=1.0)
+        result, mock_redis = _patched_run(trades, redis_threshold=0.30)
 
         assert result["strategies_evaluated"] == ["S1"]  # S4 never entered the loop
         refreshed = {c.kwargs["strategy"] for c in mock_redis.refresh_feedback_ttl.call_args_list}
@@ -766,8 +644,6 @@ class TestFeedbackKeyHeartbeat:
         assert set(by_strategy) == {"S1", "S4"}
         assert by_strategy["S4"].args[0] == 0.30  # config baseline
         assert by_strategy["S1"].args[0] == 0.0   # S1 has no discrete entry gate
-        scales = {c.kwargs["strategy"]: c.args[0] for c in mock_redis.set_feedback_regime_scale.call_args_list}
-        assert scales == {"S1": 1.0, "S4": 1.0}
 
     def test_does_not_run_when_loss_feedback_is_disabled(self):
         """Disabled means no ratchet at all; the gate then relies on the code-level
@@ -781,7 +657,6 @@ class TestFeedbackKeyHeartbeat:
         mock_redis = MagicMock()
         mock_redis.refresh_feedback_ttl.side_effect = ConnectionError("redis down")
         mock_redis.get_feedback_entry_threshold.return_value = 0.30
-        mock_redis.get_feedback_regime_scale.return_value = 1.0
         mock_redis.get_feedback_state.return_value = None
         mock_pg = MagicMock()
         mock_pg.fetch_trades.return_value = trades

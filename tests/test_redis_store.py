@@ -568,7 +568,6 @@ class TestFeedbackTtlRefresh:
         touched = {c.args[0] for c in mock_redis.expire.call_args_list}
         assert {
             "feedback:entry_threshold:S4",
-            "feedback:regime_scale:S4",
             "feedback:state:S4",
         } <= touched
         assert all(c.args[1] == 345600 for c in mock_redis.expire.call_args_list)
@@ -595,7 +594,7 @@ class TestFeedbackTtlRefresh:
         store.refresh_feedback_ttl(strategy="S4", ttl=1000)
 
         touched = {c.args[0] for c in mock_redis.expire.call_args_list}
-        assert {"feedback:entry_threshold", "feedback:regime_scale"} <= touched
+        assert {"feedback:entry_threshold"} <= touched
 
     def test_does_not_touch_the_bare_mirror_for_other_sleeves(self):
         mock_redis = MagicMock()

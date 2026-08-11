@@ -242,12 +242,6 @@ export default function AutoImprove() {
                 highlight={feedback.adjustment_active && feedback.entry_threshold > feedback.entry_threshold_baseline}
               />
               <Stat
-                label="Regime Scale"
-                value={`${fmt(feedback.regime_scale, 2)}×`}
-                sub={feedback.regime_scale < 1 ? 'de-risked (shadow)' : 'normal'}
-                highlight={feedback.regime_scale < 1}
-              />
-              <Stat
                 label="Status"
                 value={
                   <span style={{ fontSize: 16 }}>
@@ -273,22 +267,6 @@ export default function AutoImprove() {
                     ({fmtDateTime(feedback.last_adjustment_ts)})
                   </span>
                 )}
-              </div>
-            )}
-
-            {feedback.regime_scale < 1 && (
-              <div style={{
-                background: 'rgba(59,130,246,0.08)',
-                border: '1px solid rgba(59,130,246,0.25)',
-                borderRadius: 8, padding: '10px 14px', fontSize: 13, marginTop: 10,
-                color: 'var(--text-muted)',
-              }}>
-                Portfolio path note: the entry threshold is enforced by the scheduler.
-                The regime scale IS wired into portfolio sizing per strategy, but ships
-                behind <code>loss_feedback.apply_regime_scale</code>, which is currently
-                off — so this value is recorded and shown, not applied to your positions.
-                The would-be effect is persisted per cycle in{' '}
-                <code>f8_regime_scale_shadow</code>.
               </div>
             )}
 

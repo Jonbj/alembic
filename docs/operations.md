@@ -94,7 +94,7 @@ Beat schedules are defined in `src/workers/celery_app.py`. All times are UTC.
 | `decay-monitor` | 23:00 1st of month | Actual vs backtest baseline |
 | `poll-telegram-updates` | every 5s | Process approve/reject callbacks |
 | `run-sec-edgar-ingestion` | */30 14-21 Mon-Fri | SEC EDGAR 8-K filings → news queue |
-| `loss-feedback-check` | */30 14-21 Mon-Fri | Phase B: detect loss patterns → raise feedback entry threshold; lower per-strategy `feedback:regime_scale:S*` (applied to sizing only where `loss_feedback.apply_regime_scale` allows — ships off, see F8/#134) |
+| `loss-feedback-check` | */30 14-21 Mon-Fri | Phase B: detect loss patterns → raise per-strategy `feedback:entry_threshold:S*` (the only surviving ratchet lever, governed by #191; the companion `feedback:regime_scale:S*` was retired 2026-08-10 — see F8/#134, lifecycle `docs/F8_LIFECYCLE_HISTORY_2026-08-10.md`) |
 | `counterfactual-worker` | 22:45 daily | Phase C: compute 1h counterfactual returns for SKIP_THRESHOLD/SKIP_EMA/SKIP_CAP rows |
 | `reconcile-fills-evening` | 21:30 Mon-Fri | Reconcile fill prices after NYSE close |
 | `mobile-alert-evaluation` | every minute | Evaluate mobile incidents and drain the leased FCM outbox; schedule-lag rules suppress themselves off-hours |

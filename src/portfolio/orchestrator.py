@@ -34,34 +34,6 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-def _scale_gate(apply_feedback_scale):
-    """Build the per-strategy predicate for the F8 apply gate (#32).
-
-    Accepts the historical bool (all / none) or a collection of strategy ids
-    (allowlist). The allowlist exists because the flip gate written in
-    config/trading.yaml is scored PER STRATEGY: on 2026-07-27 S4 satisfied it on
-    recorded evidence (a full trigger->recovery cycle, never floored) while S1
-    did not (zero observed cycles, sitting on the floor). With only a global
-    bool the choice was between shipping an un-gated de-risk on S1 or shipping
-    none at all.
-
-    Fail-safe: anything unrecognised (None, a bad YAML value) means SHADOW, so a
-    misconfiguration can never silently start shrinking live sizing.
-    """
-    if apply_feedback_scale is True:
-        return lambda _sid: True
-    if not apply_feedback_scale:  # False, None, empty collection
-        return lambda _sid: False
-    if isinstance(apply_feedback_scale, (list, tuple, set, frozenset)):
-        allowed = {str(s) for s in apply_feedback_scale}
-        return lambda sid: sid in allowed
-    log.warning(
-        "F8: unrecognised apply_regime_scale value %r — defaulting to shadow-only",
-        apply_feedback_scale,
-    )
-    return lambda _sid: False
-
-
 @dataclass
 class CycleResult:
     """Result from a single PortfolioOrchestrator cycle."""
@@ -72,10 +44,6 @@ class CycleResult:
     constraints_fired: list[ConstraintViolation]
     final_orders: list[CombinedOrder]
     symbol_strategies: dict[str, list[str]] = field(default_factory=dict)
-    # F8 shadow: per-strategy {scale, unscaled_weight, scaled_weight} for strategies
-    # whose feedback regime scale was != 1.0 this cycle. Lets the scheduler log the
-    # deployment delta (measure-before-enforce) without applying the scale live.
-    feedback_shadow: dict[str, dict] = field(default_factory=dict)
     # #185: strategies whose rebalance gate was closed this cycle — they held
     # their book instead of re-deciding weights. The scheduler needs them to
     # tell a legitimate hold apart from a silent death (_check_strategy_zero_weights).
@@ -127,8 +95,6 @@ class PortfolioOrchestrator:
         portfolio: VirtualPortfolio,
         market: MarketSnapshot,
         strategy_returns: dict[str, list[float]] | None = None,
-        feedback_scales: dict[str, float] | None = None,
-        apply_feedback_scale: bool = True,
         last_target_weights: dict[str, dict[str, float]] | None = None,
     ) -> CycleResult:
         """Execute one portfolio cycle.
@@ -143,17 +109,6 @@ class PortfolioOrchestrator:
             portfolio:        Current virtual portfolio state.
             market:           Current market snapshot (prices, volumes).
             strategy_returns: Optional per-strategy daily return series for vol targeting.
-            feedback_scales: Optional per-strategy sizing scale (F8 loss-feedback
-                de-risk/re-risk throttle). Each strategy's `wt * alloc` contribution
-                is multiplied by `feedback_scales.get(strategy_id, 1.0)` before the
-                weighted-sum merge, preserving per-strategy isolation (a loss in one
-                sleeve shrinks only that sleeve). None / missing strategy → 1.0
-                (identity, zero behavior change when the scheduler flag is off).
-            apply_feedback_scale: Which sleeves actually get their scale applied.
-                `False`/`None` → none (measure-before-enforce: weights stay
-                unscaled but `feedback_shadow` still records the would-be delta),
-                `True` → all, or a collection of strategy ids → only those.
-                Default True (passing scales applies them). See `_scale_gate`.
             last_target_weights: Optional {strategy_id: sleeve-local weights} decided
                 at that strategy's last rebalance. Only read for strategies whose
                 `should_rebalance(ts)` gate is closed this cycle: they hold exactly
@@ -173,17 +128,9 @@ class PortfolioOrchestrator:
         orders_per_strategy: dict[str, int] = {}
         merged_weights: dict[str, float] = {}
         symbol_strategies: dict[str, list[str]] = {}
-        feedback_shadow: dict[str, dict] = {}
         symbol_signal_provenance: dict[str, dict] = {}
         rebalance_skipped: list[str] = []
         target_weights_per_strategy: dict[str, dict[str, float]] = {}
-
-        # F8: per-strategy feedback regime scale (loss-feedback de-risk/re-risk
-        # throttle). None / missing strategy → 1.0 (identity). Applied to each
-        # strategy's sleeve contribution before the weighted-sum merge so a loss
-        # in one sleeve shrinks only that sleeve (Phase 5 decouple preserved).
-        _fb_scales = feedback_scales or {}
-        _applies_to = _scale_gate(apply_feedback_scale)
 
         nav = self._compute_nav(portfolio, market)
 
@@ -239,26 +186,9 @@ class PortfolioOrchestrator:
                 # Two strategies both holding a symbol correctly ADD their contributions —
                 # that symbol genuinely receives combined capital from both sleeves.
                 alloc = entry.allocation_pct
-                _fb_scale = float(_fb_scales.get(entry.strategy_id, 1.0) or 1.0)
-                _fb_applied = _applies_to(entry.strategy_id)
-                _effective_scale = _fb_scale if _fb_applied else 1.0
                 for sym, wt in tw.items():
-                    merged_weights[sym] = merged_weights.get(sym, 0.0) + wt * alloc * _effective_scale
+                    merged_weights[sym] = merged_weights.get(sym, 0.0) + wt * alloc
                     symbol_strategies.setdefault(sym, []).append(entry.strategy_id)
-
-                # F8 shadow: record this strategy's unscaled vs would-be-scaled
-                # sleeve contribution so the scheduler can log the deployment delta.
-                # Recorded whenever a non-identity scale is in play, regardless of
-                # apply_feedback_scale — so measure-before-enforce can observe the
-                # would-be effect without applying it.
-                if _fb_scale != 1.0:
-                    _unscaled = sum(wt * alloc for _, wt in tw.items())
-                    feedback_shadow[entry.strategy_id] = {
-                        "scale": _fb_scale,
-                        "unscaled_weight": _unscaled,
-                        "scaled_weight": _unscaled * _fb_scale,
-                        "applied": _fb_applied,
-                    }
 
             except Exception as exc:
                 log.error(
@@ -369,7 +299,6 @@ class PortfolioOrchestrator:
             constraints_fired=violations,
             final_orders=combined,
             symbol_strategies=symbol_strategies,
-            feedback_shadow=feedback_shadow,
             symbol_signal_provenance=symbol_signal_provenance,
             rebalance_skipped=rebalance_skipped,
             target_weights_per_strategy=target_weights_per_strategy,

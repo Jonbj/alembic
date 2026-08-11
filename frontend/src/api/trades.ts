@@ -74,10 +74,12 @@ export const fetchDecisions = (symbol?: string, limit = 20, decisionId?: number)
 }
 
 // Phase B: feedback loop status
+// F8 regime_scale was retired 2026-08-10 (#134, lifecycle
+// docs/F8_LIFECYCLE_HISTORY_2026-08-10.md); the entry threshold is now the only
+// surviving ratchet lever.
 export interface FeedbackStatus {
   entry_threshold: number
   entry_threshold_baseline: number
-  regime_scale: number
   adjustment_active: boolean
   last_adjustment_ts: string | null
   last_reason: string | null

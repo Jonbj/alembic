@@ -7,10 +7,9 @@ exposure (full conviction) and the observed gross exposure to each lever.
 
 This is the "measure" half of measure-before-enforce (QX-01). It writes
 nothing, flips no flag, changes no behavior. It only reads:
-  - Redis: regime:current, feedback:entry_threshold:S*, feedback:regime_scale:S*,
-    feedback:state:S*
+  - Redis: regime:current, feedback:entry_threshold:S*, feedback:state:S*
   - config: active strategy sleeve caps (strategies.yaml), max_portfolio_exposure,
-    target_vol, threshold_baseline, apply_regime_scale
+    target_vol, threshold_baseline
   - Alpaca (read-only market data + positions): daily bars for the active
     universe (to compute realized vol exactly as the scheduler does) and the
     current account/positions (to read observed gross exposure)
@@ -19,15 +18,19 @@ Decomposition model (multiplicative, top-down from NAV):
     ceiling       = min(max_portfolio_exposure, sum(active allocation_pct))
     after_regime  = ceiling * regime_mult            (Redis regime:current)
     after_vol     = after_regime * vol_scale          (0.10 / realized_vol, clamp [0.5,2.0])
-    after_f8      = after_vol * f8_portfolio_scale    (1.0 while apply_regime_scale=false)
-    theoretical_max_gross = after_f8                  (full-conviction max gross/NAV)
+    theoretical_max_gross = after_vol                  (full-conviction max gross/NAV)
     observed_gross       = sum(|position mv|) / NAV   (from Alpaca positions)
 
 Per-lever cut:
     regime_cut   = ceiling       - after_regime
     vol_cut      = after_regime  - after_vol
-    f8_cut       = after_vol     - after_f8          (0 while shadow-only)
-    residual     = after_f8      - observed_gross    (signal sparsity / ratchet / low conviction)
+    residual     = after_vol     - observed_gross    (signal sparsity / ratchet / low conviction)
+
+The companion F8 lever (feedback:regime_scale:S*) was retired 2026-08-10
+(#134, lifecycle: docs/F8_LIFECYCLE_HISTORY_2026-08-10.md) — premise falsified
+on the per-DAY unit, mechanism independently broken — so the decomposition
+no longer carries an f8 cut. Only the surviving entry_threshold ratchet
+remains in the residual.
 
 Interpretation:
   - If theoretical_max_gross ~= observed_gross: the levers fully explain current
@@ -98,7 +101,6 @@ def _read_redis_feedback(strategy_ids: list[str]) -> dict:
             # per-strategy feedback keys
             for sid in strategy_ids:
                 thr = r.get(f"feedback:entry_threshold:{sid}")
-                sca = r.get(f"feedback:regime_scale:{sid}")
                 st = r.get(f"feedback:state:{sid}")
                 state = None
                 if st:
@@ -108,15 +110,11 @@ def _read_redis_feedback(strategy_ids: list[str]) -> dict:
                         state = {"raw": st}
                 out["per_strategy"][sid] = {
                     "entry_threshold": float(thr) if thr is not None else None,
-                    "regime_scale": float(sca) if sca is not None else None,
                     "state": state,
                 }
-            # legacy (non-per-strategy) fallbacks, for context
+            # legacy (non-per-strategy) fallback, for context
             out["legacy_entry_threshold"] = (
                 float(r.get("feedback:entry_threshold")) if r.get("feedback:entry_threshold") else None
-            )
-            out["legacy_regime_scale"] = (
-                float(r.get("feedback:regime_scale")) if r.get("feedback:regime_scale") else None
             )
         finally:
             r.close()
@@ -251,13 +249,11 @@ def main() -> int:
     # read at import time into _TARGET_VOL / _VOL_CLAMP_* above.
     target_vol = _TARGET_VOL
     threshold_baseline = float(fb_cfg.get("threshold_baseline", 0.30))
-    apply_regime_scale = bool(fb_cfg.get("apply_regime_scale", False))
     print("\n[2] RISK / FEEDBACK CONFIG")
     print(f"    max_portfolio_exposure (hard cap) = {max_exposure:.2f}")
     print(f"    vol-targeter target_vol           = {target_vol:.2f}  (from trading.yaml vol_target)")
     print(f"    vol-targeter clamp                = [{_VOL_CLAMP_LOW}, {_VOL_CLAMP_HIGH}]")
     print(f"    ratchet threshold_baseline        = {threshold_baseline:.2f}")
-    print(f"    apply_regime_scale (F8)           = {apply_regime_scale}  (False=SHADOW ONLY)")
 
     ceiling = min(max_exposure, sum_caps)
     print(f"    -> ceiling = min(max_exposure, sum_caps) = {ceiling:.2f}")
@@ -274,15 +270,11 @@ def main() -> int:
     for sid in strategy_ids:
         ps = fb["per_strategy"].get(sid, {})
         thr = ps.get("entry_threshold")
-        sca = ps.get("regime_scale")
         state = ps.get("state") or {}
         thr_flag = ""
         if thr is not None and thr > threshold_baseline + 1e-9:
             thr_flag = f"  <-- RAISED vs baseline {threshold_baseline:.2f} (ratchet blocking low-conviction S4 entries)"
-        sca_flag = ""
-        if sca is not None and abs(sca - 1.0) > 1e-9:
-            sca_flag = f"  <-- {'suppressed' if sca < 1.0 else 'elevated'} (F8 shadow, apply={apply_regime_scale})"
-        print(f"    {sid}: entry_threshold={thr}  regime_scale={sca}{thr_flag}{sca_flag}")
+        print(f"    {sid}: entry_threshold={thr}{thr_flag}")
         if state:
             print(f"         state: reason={state.get('reason')} last_adjustment_ts={state.get('last_adjustment_ts')}")
     if fb["errors"]:
@@ -338,25 +330,14 @@ def main() -> int:
     print("\n[6] DECOMPOSITION (multiplicative, top-down from NAV)")
     after_regime = ceiling * regime_mult
     after_vol = after_regime * vol_scale
-    # F8 is per-strategy, not a portfolio-wide multiplier; while apply=false it
-    # contributes 0 to sizing. Report the would-be portfolio scale for context.
-    f8_scales = {
-        sid: fb["per_strategy"].get(sid, {}).get("regime_scale")
-        for sid in strategy_ids
-    }
-    f8_active_scales = {sid: s for sid, s in f8_scales.items() if s is not None and abs(s - 1.0) > 1e-9}
-    f8_portfolio_scale = 1.0  # sizing effect is 0 while apply=false
-    after_f8 = after_vol * f8_portfolio_scale
-    theoretical_max = after_f8
+    theoretical_max = after_vol
 
     regime_cut = ceiling - after_regime
     vol_cut = after_regime - after_vol
-    f8_cut = after_vol - after_f8  # 0 while shadow
 
     print(f"    ceiling              = {ceiling:.4f}   (= min(max_exposure, sum_caps))")
     print(f"    after regime  ×{regime_mult:.3f} = {after_regime:.4f}   regime_cut = {regime_cut:+.4f}")
     print(f"    after vol     ×{vol_scale:.3f} = {after_vol:.4f}   vol_cut    = {vol_cut:+.4f}")
-    print(f"    after F8      ×{f8_portfolio_scale:.3f} = {after_f8:.4f}   f8_cut     = {f8_cut:+.4f}  (shadow, apply={apply_regime_scale})")
     print(f"    -> theoretical_max_gross (full conviction) = {theoretical_max:.4f}  ({theoretical_max*100:.1f}%)")
 
     if observed_gross is not None:
@@ -370,14 +351,10 @@ def main() -> int:
         print(f"    observed_gross = <unavailable> (positions read failed)")
         print(f"    residual = <cannot compute without observed gross>")
 
-    if f8_active_scales:
-        print(f"\n    F8 shadow scales (per-strategy, NOT applied to sizing): {f8_active_scales}")
-    else:
-        print(f"\n    F8: no per-strategy regime_scale currently set (all at 1.0 / absent).")
-
     # --- interpretation ---
     print("\n[7] INTERPRETATION")
     if observed_gross is not None and theoretical_max > 0:
+        residual = theoretical_max - observed_gross
         if abs(residual) < 0.03:
             print(f"    theoretical_max ~= observed_gross ({theoretical_max*100:.1f}% vs {observed_gross*100:.1f}%).")
             print(f"    Levers FULLY EXPLAIN current deployment. The gap to 35% is a LEVER to move,")

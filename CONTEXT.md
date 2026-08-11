@@ -43,8 +43,8 @@ The mechanism that raises the feedback entry threshold and lowers the regime sca
 _Avoid:_ feedback loop (too generic), throttle.
 
 **Regime scale** (feedback):
-A per-strategy lever (`feedback:regime_scale:<strategy>`) that scales a sleeve's sizing down after that sleeve's own losses — ×0.80 per trigger, floored at 0.20. It **is** wired into the portfolio path (per-strategy, before the weighted-sum merge), gated by `loss_feedback.apply_regime_scale`, which accepts `false`, `true` or a list of strategy ids. Currently `false`: the would-be effect is recorded per cycle in `f8_regime_scale_shadow` and shown in Auto-Improve, but never applied to sizing.
-_Avoid:_ regime multiplier (that is the macro throttle; this is the loss-feedback overlay).
+~~A per-strategy lever (`feedback:regime_scale:<strategy>`) that scaled a sleeve's sizing down after that sleeve's own losses — ×0.80 per trigger, floored at 0.20. It was wired into the portfolio path (per-strategy, before the weighted-sum merge), gated by `loss_feedback.apply_regime_scale` (`false`/`true`/list of strategy ids). **Retired 2026-08-10** (#134, lifecycle: `docs/F8_LIFECYCLE_HISTORY_2026-08-10.md`): premise falsified on the per-DAY unit (S1 +0.065, S4 +0.017 — no detectable dependence), mechanism independently broken (trigger reset the same clock the decay branch read). Code recovered from git; the surviving lever is the entry threshold above, governed by #191.~~
+_Avoid:_ regime multiplier (that is the macro throttle; this name is free now — use only when describing the historical F8).
 
 **Teaching trade**:
 A closed trade the loss-feedback ratchet learns from — exits tagged `stop_loss` or `portfolio_sell` only. Other exits (`sentiment_reversal`, `LEGACY_FLATTEN`) are invisible to the ratchet, so a sleeve's teaching subset is not the same population as its P&L.
