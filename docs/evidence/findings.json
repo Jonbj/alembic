@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "prossimo_id": 35,
+ "prossimo_id": 39,
  "findings": [
   {
    "id": "F-001",
@@ -160,12 +160,18 @@
      "costo_usd": null,
      "nota": "[forense][DAY-016] Ricorrenza con una faccia NUOVA oltre all'incoerenza fra i drawdown: daily_pnl e' scollegato dal NAV e in almeno due giornate ha il segno invertito. risk_reports del 2026-08-10 22:30:01: combined_drawdown 0.012429 (1.24%), per_strategy_metrics.portfolio.drawdown 0.142574 (14.26%, quello che genera l'ALERT 'portfolio drawdown 14.3% exceeds 10%'), current_drawdown reale da portfolio_monitor_snapshots 0.002526 (0.25%) - tre numeri di drawdown per la stessa giornata. daily_pnl = -77.15 contro nav_change_today = +162.43 misurato dallo snapshot delle 20:00 (110181.63 -> 110344.06). Serie daily_pnl vs delta NAV reale: 08-03 +1807.84 contro +191.58; 08-04 -1645.86 contro +591.85 (segno invertito); 08-05 +616.57 contro -65.59; 08-06 -800.43 contro -157.07; 08-07 -446.52 contro +89.65; 08-10 -77.15 contro +176.40. Poiche' sharpe (-4.82) deriva dalla stessa serie, il CRITICAL di decay_reports (F-004) poggia su di essa. Costo null: difetto di sola osservabilita', nessun ordine ne dipende.",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-10.md §10"
+    },
+    {
+     "data": "2026-08-11",
+     "costo_usd": null,
+     "nota": "Ricorrenza identica al 08-10. risk_reports id 60 del 2026-08-11 22:30: combined_drawdown 0.012429 (1,24%) contro per_strategy_metrics.portfolio.drawdown 0.14765590197592068 (14,77%), ed e' il secondo a far scattare l'alerts [{'level':'ALERT','message':'Strategy portfolio drawdown 14.8% exceeds 10%'}]. Il daily_pnl del medesimo record e' -653.7584274773443 mentre il realizzato del giorno e' -14.29, la variazione NAV -46.42 e lo snapshot broker delle 20:00 riporta current_drawdown 0.002933 (0,29%) contro un limite di 0.05. Tre cifre di drawdown incompatibili nello stesso giorno. Costo non stimabile: nessun ordine dipende da questo record; il danno e' che l'ALERT serale e' rumore quotidiano e desensibilizza rispetto agli alert veri (vedi F-036). Ticket TK-G.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-11.md sezione 10 [DAY-008]"
     }
    ],
    "costo_cumulato_usd": 0,
    "stato": "aperto",
    "issue": null,
-   "occorrenze_non_stimate": 6
+   "occorrenze_non_stimate": 7
   },
   {
    "id": "F-004",
@@ -253,12 +259,18 @@
      "costo_usd": null,
      "nota": "Ricorrenza in forma nuova sul SELL di SPCX delle 18:52: il reason dice '[expired] S4 signal expired (age=4.4h > max_age=4h, generated 2026-08-06 14:30 UTC, score=+0.402)', ma fra le 14:30 e le 18:52 sentiment_signals contiene tre segnali SPCX piu' recenti (15:45 -0.120, 16:45 +0.560, 17:00 -0.360). Sono invisibili al testo della decisione perche' la query che compone last_signal filtra fallback_used = FALSE (src/store/pg_store.py:67-71) e i tre sono single-model fallback. Un'analisi solo-DB ricostruisce quindi la causa sbagliata: attribuisce l'uscita alla scadenza di un segnale ensemble delle 14:30 invece che allo stato dei segnali effettivamente presenti, uno dei quali (+0.560) era sopra la soglia d'ingresso del giorno. Causa isolata per lettura del codice, non per esperimento.",
      "fonte": "ALPHA_MISS_REPORT_2026-08-06.md §4, §7"
+    },
+    {
+     "data": "2026-08-11",
+     "costo_usd": null,
+     "nota": "Nuova faccia del finding: non un guard di cooldown/whipsaw ma la clausola di dedup del logger dei fallback. AVGO, in watchlist e senza posizione aperta, ha come unico segnale della giornata il 7186 (+0.330, single:gpt-oss, sopra il gate 0.30) e ZERO righe in execution_decisions per tutto il 2026-08-11, mentre gli altri fallback del giorno (IWM, MRVL, RIO, WDC, DIS) hanno la loro riga SKIP_FALLBACK. Causa: _record_fallback_drops(_fb_dropped, non_fallback_signals=signals) a portfolio_scheduler.py:3586 esclude dal log i simboli che hanno anche un segnale non-fallback in finestra, e la finestra e' signals_lookback_hours=96h: AVGO ha due segnali ensemble del 08-10 (0.271 e 0.059) che lo fanno considerare 'valutato davvero'. Quei due sono poi scartati per anzianita' e, essendo sotto min_score, non generano neppure la riga di _record_stale_drops. Risultato: un simbolo con segnale fresco sopra soglia e' indistinguibile a valle da NO_NEWS - esattamente cio' che l'issue #151 voleva impedire. Costo non stimabile: AVGO ha chiuso -1,50% e il libro e' long-only, quindi l'ingresso mancato non e' un alpha perso; il danno e' che la causa di miss dominante (la metrica su cui la domanda di uscita n.1 sara' falsificata) e' contaminata. Ticket TK-F.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-11.md sezione 10 [DAY-006]"
     }
    ],
    "costo_cumulato_usd": 0,
    "stato": "aperto",
    "issue": null,
-   "occorrenze_non_stimate": 2
+   "occorrenze_non_stimate": 3
   },
   {
    "id": "F-007",
@@ -290,12 +302,18 @@
      "costo_usd": null,
      "nota": "[forense][DAY-018] Ricorrenza con rapporto in CALO. ingestion_stats_daily 2026-08-10 alpaca_benzinga: fetched=844, queued=347, duplicates=3122, cioe' 3.7x il fetched (era 5.3x il 08-07, 4.8x il 08-04, 4.0x il 08-06). gdelt_gkg: fetched=2061, queued=158, duplicates=121, discarded_no_ticker=1810. Verifica indipendente che la deduplicazione FUNZIONA e il difetto e' solo nel contatore: news_log del 08-10 ha 131 content_hash distinti su 196 righe, nessuna riga con discarded_reason valorizzato, nessun parse_fail. Il contatore e' un UPSERT additivo cross-run (src/store/pg_store.py:369). Costo null: nessun articolo perso, difetto di sola lettura.",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-10.md §10"
+    },
+    {
+     "data": "2026-08-11",
+     "costo_usd": null,
+     "nota": "Quinta occorrenza. ingestion_stats_daily del 2026-08-11, source alpaca_benzinga: fetched 681, queued 292, duplicates 2628 - cioe' 3,9x i fetched. gdelt_gkg nello stesso giorno e' coerente (1772 fetched, 44 duplicates, 1625 discarded_no_ticker). Il contatore evidentemente non conta articoli ma coppie articolo x ticker, oppure accumula fra passate senza reset. Costo non stimabile: e' un contatore di telemetria. Ticket TK-K/T-06.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-11.md sezione 10 [DAY-009]"
     }
    ],
    "costo_cumulato_usd": 0,
    "stato": "aperto",
    "issue": null,
-   "occorrenze_non_stimate": 4
+   "occorrenze_non_stimate": 5
   },
   {
    "id": "F-008",
@@ -480,9 +498,15 @@
      "costo_usd": null,
      "nota": "Ricorrenza con un sintomo NUOVO che va oltre la FK mancante: il punteggio scritto nel reason non corrisponde ad alcuna riga di sentiment_signals. execution_decisions 8544 (SONY, BUY, 16:07:08) ha signal_id NULL e signal_score +0.541, ma nessun segnale SONY del giorno vale +0.541: il piu' vicino e' sentiment_signals 7046 delle 16:00:45 a +0.451 (ensemble non-fallback, conf 0.765), di cui la decisione cita VERBATIM il reasoning di glm-5.2 ('The $6.3B joint venture with TSMC directly expands Sony's image-sensor manufacturing capacity...'). Nessun altro segnale della giornata sta fra 0.53 e 0.56 tranne TSM 7137 (+0.5366, altro simbolo, altra ora). Controprova che isola il sintomo: le altre tre BUY del giorno hanno signal_id valorizzato e il punteggio coincide al millesimo (NVDA 8657 -> 7098 = 0.441, META 8680 -> 7109 = 0.515, MSFT 8703 -> 7116 = 0.470). Totale del giorno: 3 righe su 463 hanno la FK (454 SKIP_THRESHOLD tutte NULL, 4 BUY di cui 3 valorizzate, 4 SELL di cui 1, 1 SKIP_STALE). Quando signal_id non viene catturato non solo la catena non e' ricostruibile per chiave: il numero stampato nel reason non e' riconciliabile con nessuna riga. Costo null (auditabilita').",
      "fonte": "ALPHA_MISS_REPORT_2026-08-10.md §7"
+    },
+    {
+     "data": "2026-08-11",
+     "costo_usd": 0.0,
+     "nota": "CAUSA RADICE IDENTIFICATA, dopo sette giorni di occorrenze senza spiegazione. Il DataFrame costruito nel live a portfolio_scheduler.py:3651-3660 ha per chiavi symbol, score, confidence, reasoning, model_id, ensemble_std, fallback_used, generated_at: signal_id NON c'e'. Di conseguenza s4/strategy.py:172-174 ('raw_signal_id = row.get(\"signal_id\") if \"signal_id\" in row.index else None') lo legge None, la provenance del ranker lo propaga None e la riga di execution_decisions lo scrive NULL. Verifica sui dati del 2026-08-11: BUY 2 su 2 con signal_id NULL (HOOD 8852, IBM 9336), SELL 2 su 2 NULL, mentre le 13 righe SKIP_PYRAMIDING hanno TUTTE signal_id valorizzato - perche' quel percorso (_pyramiding_blocked) usa fetch_latest_signal_ids, una query separata. Coerente con i 3 su 508 storici. Conseguenza pratica misurata oggi: la BUY IBM registra conviction 0.38774 mentre sentiment_signals 7331 dice 0.32312 (differenza = boost velocity x1.2) e senza signal_id la verifica richiede un ragionamento indiretto. COSTO 0.00 VERIFICATO: nessun ordine sbagliato ne' e' derivato oggi; il danno e' sull'auditabilita', che e' esattamente cio' che la carta di osservazione esenta dal freeze. Fix da una riga. Ticket TK-B. AGGIORNAMENTO IN CORSA D'OPERA: mentre questo report veniva scritto, il commit f742343 ('fix: conserva il signal_id nella pipeline S4 (#123)', PR #234) e' stato mergiato su main il 2026-08-12 alle 12:03 CEST e aggiunge esattamente '\"signal_id\": s.signal_id' al dict. La correzione NON era in produzione il 2026-08-11 (l'immagine in esecuzione quel giorno la precede), quindi questa occorrenza resta valida e l'evidenza raccolta fino a oggi resta non verificabile a ritroso. Da confermare il deploy e la sparizione dei NULL sul primo giorno utile.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-11.md sezione 10 [DAY-005]"
     }
    ],
-   "costo_cumulato_usd": 0,
+   "costo_cumulato_usd": 0.0,
    "occorrenze_non_stimate": 7,
    "stato": "aperto",
    "issue": null
@@ -645,10 +669,16 @@
      "costo_usd": null,
      "nota": "[forense][DAY-008] Ricorrenza con rapporto in netto miglioramento ma difetto invariato. portfolio_cycles del 08-10: 24 cicli, sum(orders_count) = 70 contro 8 ordini realmente inviati (rapporto 8.8:1, contro 34:1 il 08-07). La firma e' netta sui cicli 18:07, 18:22, 18:37 e 18:52, che dichiarano 5 ordini ciascuno e ne inviano ZERO: il contatore misura la lista target prima dei guard (pyramiding, hold_minimum, exit_persistence, delta~0), non gli ordini emessi. Nota: il 08-11 e' stato mergiato #231/#232 che scrive SKIP_PYRAMIDING nel Decision Log, il che rende almeno una delle cause di divergenza visibile a DB dal giorno successivo a questo. Costo null (osservabilita').",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-10.md §10"
+    },
+    {
+     "data": "2026-08-11",
+     "costo_usd": null,
+     "nota": "Ricorrenza quantificata: 24 cicli, 73 ordini in orders_count e in final_orders, 4 effettivamente inviati al broker (rapporto 5,5%). Il divario non e' rumore ma ripetizione sistematica del medesimo rabbocco: HOOD compare come BUY in 13 cicli consecutivi pur essendo stato comprato una sola volta alle 14:07, NOK in 9, CSCO in 8, SHEL in 7, XLE in 6, IBM in 3. La causa a monte e' F-038 (regime_mult scala il notional ma non il target) piu' il guard P0-05 che blocca il rabbocco. Costo non stimabile: e' telemetria. Ticket TK-K.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-11.md sezione 10 [DAY-007]"
     }
    ],
    "costo_cumulato_usd": 0,
-   "occorrenze_non_stimate": 6,
+   "occorrenze_non_stimate": 7,
    "stato": "aperto",
    "issue": null
   },
@@ -688,10 +718,16 @@
      "costo_usd": null,
      "nota": "[forense][DAY-007] Ricorrenza verificata sui tre trade chiusi del giorno: trades 696/697/698 hanno slippage_est = 0.2368 / 0.2361 / 0.2363 e cost_usd = 0.2368 / 0.2361 / 0.2363, identici alla quarta cifra decimale. cost_bps 1.74 con spread_cost_bps 1.50 e impact_cost_bps 0.24 su tutti e tre: e' il modello di costo, non una misura di mercato. Il trade 695 (SONY) ha slippage_est NULL e cost_usd 2.4196 a 20.24 bps, cioe' 12x gli altri - vedi F-034. Causa a monte: nessun prezzo di riferimento pre-invio e' persistito, quindi lo scarto prezzo atteso/prezzo di fill non e' ricostruibile a posteriori da DB per nessuno degli 8 ordini della giornata. Costo null (osservabilita').",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-10.md §10"
+    },
+    {
+     "data": "2026-08-11",
+     "costo_usd": null,
+     "nota": "Sesta occorrenza, verificata su tutti e tre i trade toccati dalla giornata: SONY cost_usd 2.4541886081577977 e slippage_est 2.4541886081577977; HOOD 2.4927320942900550 e 2.4927320942900550; IBM 2.4417164480520968 e 2.4417164480520968. Differenza esattamente zero in tutti e tre. Il prezzo di riferimento al momento della decisione non e' persistito da nessuna parte, quindi lo slippage non e' nemmeno ricalcolabile a posteriori. Nota collaterale: cost_bps e' 20,24 su tutti e tre, cioe' i tre simboli cadono nel tier di default del modello di costo (F-034). Costo non stimabile: e' una metrica mancante, non una perdita. Ticket TK-J.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-11.md sezione 10 [DAY-012]"
     }
    ],
    "costo_cumulato_usd": 0,
-   "occorrenze_non_stimate": 5,
+   "occorrenze_non_stimate": 6,
    "stato": "aperto",
    "issue": null
   },
@@ -904,10 +940,16 @@
      "costo_usd": null,
      "nota": "[forense][DAY-006] Ricorrenza con una faccia NUOVA: il sistema RILEVA la condizione e la scarta come transitoria. mobile_events del 2026-08-10 13:30:01.286504 registra un incidente severity=critical 'Ciclo di portafoglio in ritardo' e alle 13:30:01.291967 un warning 'Segnali sentiment in ritardo', entrambi con status finale 'recovered' - si risolvono da soli quando il primo ciclo parte alle 14:07, quindi il sintomo strutturale (beat su hour='14-21' contro apertura EDT alle 13:30) e' indistinguibile da un ritardo occasionale, e si ripete ogni mattina di borsa. Costo null e giorno GIA' COPERTO dalla run alpha-miss dell'08:00, che porta la misura della conseguenza (AMAT 76.0% e MRVL 58.2% del movimento intraday gia' avvenuto al primo ciclo): NON contare due volte il giorno.",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-10.md §10"
+    },
+    {
+     "data": "2026-08-11",
+     "costo_usd": null,
+     "nota": "Sesta occorrenza, con la conferma dell'incidente quotidiano. Le crontab di celery_app.py (righe 78, 142, 153, 175, 201) usano hour='14-21' in UTC fisso; il 2026-08-11 il mercato ha aperto alle 13:30 UTC (EDT) ma il primo ciclo di portafoglio e' delle 14:07 e la prima fetch news delle 14:01: 37 minuti di sessione scoperti. mobile_events registra alle 13:30:01 un incidente CRITICAL 'Ciclo di portafoglio in ritardo' e un WARNING 'Segnali sentiment in ritardo', auto-risolti rispettivamente alle 14:08:00 e alle 14:02:00 - falso allarme strutturale quotidiano. All'altro capo i cicli programmati fino alle 21:52 cadono dopo la chiusura delle 20:00 e non producono nulla (l'ultimo osservato e' delle 19:52). Costo non stimabile per la giornata: l'apertura e' la finestra a piu' alta dispersione, ma nessun mover del 08-11 e' attribuibile ai 37 minuti scoperti. Ticket TK-I.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-11.md sezione 10 [DAY-011]"
     }
    ],
    "costo_cumulato_usd": 0,
-   "occorrenze_non_stimate": 5,
+   "occorrenze_non_stimate": 6,
    "stato": "aperto",
    "issue": null
   },
@@ -1090,10 +1132,16 @@
      "costo_usd": null,
      "nota": "[forense][DAY-017] SECONDA ricreazione dei container in 14 ore, sullo stesso giorno analizzato. La run alpha-miss delle 08:00 aveva log a partire dalle 22:13:38 del 08-10 (gia' dopo la chiusura di sessione); alle 12:20:10 UTC del 08-11 i 14 merge su main hanno ricreato tutto di nuovo e 'docker compose logs worker' restituisce ORA 120 righe totali, tutte successive alle 12:20, zero righe del 08-10. docker inspect: worker-1/beat-1/api-1/worker-inference-1/frontend-1 con StartedAt 2026-08-11T12:20:10Z e RestartCount=0 (ricreazione da deploy, non crash - quindi nessun restart durante la sessione analizzata). Categorie del prompt forense rese non verificabili: eccezioni silenziose, errori non propagati ad alert, latenza per-chiamata LLM, retry, guard che hanno bloccato ordini, idempotenza Celery. Costo null e giorno GIA' COPERTO dall'alpha-miss: NON contare due volte.",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-10.md §10"
+    },
+    {
+     "data": "2026-08-11",
+     "costo_usd": null,
+     "nota": "Quinta occorrenza. I quattro container applicativi (worker, worker-inference, beat, api) sono stati RICREATI - non riavviati: RestartCount=0 e Created=2026-08-12T10:13:04Z - la mattina del 08-12, e la prima riga di log disponibile per tutti e quattro e' 2026-08-12T10:13:12. I log dell'intera giornata 2026-08-11 sono persi. Conseguenza concreta su questo report: non e' stato possibile verificare la latenza per chiamata LLM, le eccezioni non propagate, i messaggi 'Signal velocity: N/M symbols adjusted', gli errori dei provider e i retry. Ogni affermazione del report del 08-11 deriva dal DB e dal codice, mai dai log. Costo non stimabile: e' perdita di osservabilita'. Ticket TK-D.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-11.md sezione 10 [DAY-013]"
     }
    ],
    "costo_cumulato_usd": 0,
-   "occorrenze_non_stimate": 4,
+   "occorrenze_non_stimate": 5,
    "stato": "aperto",
    "issue": null
   },
@@ -1121,10 +1169,16 @@
      "costo_usd": null,
      "nota": "[forense][DAY-009] Ricorrenza sul giorno analizzato piu' una sul giorno dell'analisi. ingestion_stats_daily 2026-08-10: source='reuters', fetched=12, queued=12, discarded_no_ticker=3, updated_at 22:05:37 UTC - due ore dopo la chiusura. Controprova: SELECT count(*) FROM news_log WHERE source='reuters' restituisce 0 su TUTTA la storia, e nessun task RSS/Reuters esiste in src/workers/celery_app.py. Serie delle righe fantasma: 08-05 (4, alle 22:06), 08-06 (4, alle 12:35), 08-07 (16, alle 09:02), 08-10 (12, alle 22:05), 08-11 (24, alle 10:52) - orari sparsi e fuori dalle finestre del beat, compatibili con esecuzioni della suite di test contro il DB di produzione. Effetto: la tabella che documenta la copertura delle fonti contiene una fonte inesistente, quindi ogni analisi di copertura fatta su ingestion_stats_daily e' contaminata. Costo null (integrita' dell'evidenza, nessun ordine coinvolto).",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-10.md §10"
+    },
+    {
+     "data": "2026-08-11",
+     "costo_usd": null,
+     "nota": "Quarta occorrenza. Riga ingestion_stats_daily del 2026-08-11 con source='reuters', fetched 24, queued 24, discarded_no_ticker 6, updated_at 10:52:53 UTC - orario di PRE-MARKET, fuori da ogni finestra beat (che va da hour=14 a hour=21). Zero righe in news_log con source='reuters' in tutta la storia del DB, e nessun connettore Reuters attivo nel codice. Serie degli orari sparsi che confermano l'origine da esecuzioni di test: 08-11 10:52, 08-10 22:05, 08-07 09:02, 08-06 12:35, 08-05 22:06, 08-03 07:04, 08-01 23:32. Costo non stimabile: nessun ordine ne dipende. Il rischio vero e' di perimetro - se la suite scrive qui, puo' scrivere altrove. Ticket TK-H.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-11.md sezione 10 [DAY-010]"
     }
    ],
    "costo_cumulato_usd": 0,
-   "occorrenze_non_stimate": 3,
+   "occorrenze_non_stimate": 4,
    "stato": "aperto",
    "issue": null
   },
@@ -1268,6 +1322,82 @@
     }
    ],
    "costo_cumulato_usd": 1.79,
+   "occorrenze_non_stimate": 0,
+   "stato": "aperto",
+   "issue": null
+  },
+  {
+   "id": "F-035",
+   "titolo": "FIX-D e' annullato da un secondo filtro di staleness dentro la strategia S4 (_signals_as_of): le posizioni con segnale ri-ammesso vengono chiuse comunque",
+   "tipo": "difetto",
+   "confidenza": "misurata",
+   "primo_avvistamento": "2026-08-11",
+   "occorrenze": [
+    {
+     "data": "2026-08-11",
+     "costo_usd": null,
+     "nota": "Primo avvistamento, meccanismo identificato nel codice. Entrambe le uscite del 2026-08-11 (SONY 14:22, HOOD 18:22, execution_decisions 8866 e 9260) portano la motivazione 'S4 signal was stale but FIX-D re-admitted it this cycle - open position, no counter-signal - and the weight is 0 anyway: the mechanism that zeroed it is not recorded, see #184' ed exit_mechanism='unknown'. La causa: portfolio_scheduler.py:714 _preserve_stale_signals_for_open_positions ri-ammette il segnale stale, poi src/strategies/s4/strategy.py:167-169 riapplica la STESSA finestra max_signal_age_hours=4 sullo stesso DataFrame e lo rielimina; il simbolo esce dai target_weights, il peso va a 0, exit_persistence_cycles=2 conferma e la SELL parte. Le eta' combaciano al minuto: SONY 19,6h (fuori dal 1o ciclo del giorno, SELL al 2o), HOOD 4,3h (fuori alle 18:07, SELL alle 18:22). Il commento nel codice dichiara che il filtro serve alla parita' backtest/live (QS-07), ma nel live la rompe perche' il live ha una deroga (FIX-D) che il backtest non ha. COSTO NULL DELIBERATO, NON NON-STIMATO: i dollari di questi due trade (SONY net -5,47, HOOD net -8,82, netto post-uscita 3,88) sono gia' contati sull'occorrenza 2026-08-11 di F-024; qui si registra il MECCANISMO, distinto da F-024 perche' sopravvivrebbe anche passando l'eta' a tempo di mercato. Ticket TK-A.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-11.md sezione 10 [DAY-001]"
+    }
+   ],
+   "costo_cumulato_usd": 0,
+   "occorrenze_non_stimate": 1,
+   "stato": "aperto",
+   "issue": null
+  },
+  {
+   "id": "F-036",
+   "titolo": "Il trigger di revisione documentato in trading.yaml (posizione oltre -15/20% su d_hard shadow) scatta e nessun alert lo segnala",
+   "tipo": "osservazione",
+   "confidenza": "congetturale",
+   "primo_avvistamento": "2026-08-11",
+   "occorrenze": [
+    {
+     "data": "2026-08-11",
+     "costo_usd": null,
+     "nota": "Primo avvistamento come finding, ma il fenomeno ricorre da settimane. Il 2026-08-11 WDC ha superato d_hard=0.20 in 9 cicli su 24, escursione peggiore -20,51% (stop_shadow_log, observed_price <= entry_price*(1-d_hard)); NOK a -19,84%, appena sotto. config/trading.yaml:180-182 scrive testualmente 'Revisit: if any position rides past -15/20% (d_hard shadow), wire d_hard to a real broker order'. mobile_events del giorno contiene SOLO tre incidenti operativi (ciclo in ritardo, segnali in ritardo, dati broker non aggiornati): zero alert su WDC. Ricorrenza storica verificata in tabella: NOK 07-30, 07-31, 08-03, 08-07, 08-10; WDC 07-28, 08-07, 08-10, 08-11. La stessa raccomandazione era gia' stata formulata come T-03 nel forense del 2026-07-29 e non e' stata attuata. Costo non stimabile: lo stop e' disattivato per decisione esplicita dell'operatore, quindi il danno non e' la perdita ma la perdita del PUNTO DI DECISIONE. Strumentazione, non taratura (stesso profilo della deroga #161). Ticket TK-E.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-11.md sezione 10 [DAY-004]"
+    }
+   ],
+   "costo_cumulato_usd": 0,
+   "occorrenze_non_stimate": 1,
+   "stato": "aperto",
+   "issue": null
+  },
+  {
+   "id": "F-037",
+   "titolo": "La varianza d'ensemble non e' mai un gate d'ingresso: ensemble_std e' letto solo dal postmortem, cioe' dopo la perdita",
+   "tipo": "difetto",
+   "confidenza": "congetturale",
+   "primo_avvistamento": "2026-08-11",
+   "occorrenze": [
+    {
+     "data": "2026-08-11",
+     "costo_usd": null,
+     "nota": "Primo avvistamento. CLAUDE.md prescrive 'Ensemble variance: flag high-variance outputs for human review or discard'; nel codice ensemble_std e' calcolato, persistito e poi letto SOLO da src/performance/postmortem.py (soglia DIVERGENCE_STD_THRESHOLD 0.30), che si attiva dopo una perdita >= 2%. Nessuna lettura nel percorso d'ingresso. Il 2026-08-11 il segnale con il massimo disaccordo della giornata e' diventato uno dei due soli BUY: HOOD signal 7185, score +0.360, ensemble_std 0.283, con glm-5.2 a polarity +0.70/conf 0.80 e gpt-oss a +0.30/conf 0.40 - i due modelli distanti 0.40 su entrambe le dimensioni. La media nasconde il disaccordo (0.70*0.80 e 0.30*0.40 mediano a 0.36, sopra il gate 0.30). Altri casi del giorno: SOXX std 0.247, TSM std 0.212 con i due modelli di SEGNO OPPOSTO. Non esiste supervisor agent ne' verifica RAG delle affermazioni quantitative: l'unica difesa contro un'allucinazione di un modello su due e' il gate sullo score. COSTO NULL: i dollari del trade HOOD sono gia' su F-024/F-035, e qualunque soglia di varianza io proponessi sarebbe TARATURA, congelata fino al 28/09 - quindi il controfattuale non e' costruibile senza violare la carta. Il finding vive per ricorrenza. Ticket TK-M (post-freeze) + TK-L (strumentazione subito).",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-11.md sezione 10 [DAY-003]"
+    }
+   ],
+   "costo_cumulato_usd": 0,
+   "occorrenze_non_stimate": 1,
+   "stato": "aperto",
+   "issue": null
+  },
+  {
+   "id": "F-038",
+   "titolo": "regime_mult scala il notional dell'ordine ma non il target del combiner: le posizioni S4 restano al 70% del peso obiettivo e il rabbocco e' bloccato da P0-05",
+   "tipo": "difetto",
+   "confidenza": "attribuita",
+   "primo_avvistamento": "2026-08-11",
+   "occorrenze": [
+    {
+     "data": "2026-08-11",
+     "costo_usd": 0.0,
+     "nota": "Primo avvistamento, verificato su entrambi gli ingressi del giorno. portfolio_scheduler.py:3914 'notional = round(price * order.quantity * regime_mult, 2)' con regime_mult=0.70 (regime sideways, regime:current del 13:30:44). HOOD: il combiner chiede 18,4418 azioni, eseguite 12,9174 (rapporto 0,7004); IBM: chiede 7,2399, eseguite 5,0672 (rapporto 0,6999). Al ciclo successivo il combiner ricalcola il delta residuo e riemette l'ordine, ma il guard P0-05 blocca OGNI BUY su simbolo con posizione aperta: HOOD BUY 14:07 -> SKIP_PYRAMIDING 15:37 'gia a libro dal 2026-08-11'; IBM BUY 19:07 -> SKIP_PYRAMIDING 19:22, stessa formula. La posizione resta quindi a ~1,4% di NAV invece del 2% dichiarato, in ogni regime != 1.0, e il backtest (che non ha ne' lo scaling ne' il guard) misura un oggetto diverso. E' anche la causa del grosso dei 69 ordini target mai inviati (73 target contro 4 inviati). COSTO 0.00 VERIFICATO, NON STIMATO: notional non allocato 520,03 su HOOD e 517,20 su IBM; HOOD e' andata 94,18 -> 93,69 (-0,52%), quindi i 520 mancanti hanno EVITATO 2,70 di perdita; IBM ha chiuso a +0,41/azione dall'ingresso, quindi i 517 mancanti sono costati 0,90. Netto della giornata +1,80 a FAVORE del difetto. Il finding vive per il meccanismo strutturale (sotto-deployment cronico del 30% della sleeve S4 e divergenza live/backtest), non per il costo di oggi. Ticket TK-C.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-11.md sezione 10 [DAY-002]"
+    }
+   ],
+   "costo_cumulato_usd": 0.0,
    "occorrenze_non_stimate": 0,
    "stato": "aperto",
    "issue": null
