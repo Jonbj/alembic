@@ -3,29 +3,41 @@
 Il 2026-08-05 alle 14:22 (UTC) quattro posizioni S4 i cui segnali stale erano
 stati ri-ammessi da FIX-D nello stesso ciclo (MCD/NVO/PFE/PLTR) sono state
 chiuse con motivazione "[expired] S4 signal expired (age=19.9h > max_age=4h,
-... no counter-signal found, position closed". La frase descrive esattamente
+... no counter-signal found, position closed)". La frase descrive esattamente
 la condizione che FIX-D usa per NON chiudere.
 
-#184 (merged) corregge solo l'etichetta → "unknown". #186 va oltre: trova
-**perché** il peso era 0. Risposta: la filter di freshness in
-`strategy.py:167-169` (`generated_at >= ts - max_age`) viene applicata nel
-metodo chiamato dall'orchestrator su `signals_df`, e quel `signals_df`
-contiene già i segnali preservati da FIX-D. Il filtro butta via MCD/NVO/PFE/
-PLTR; il ranker vede solo DIS; ogni simbolo non in `target_weights` viene
-venduto da `NewsDrivenTactical.__call__:101-114`.
+#184 (deployato ~2026-08-07) corregge solo l'etichetta → "unknown". #186 va
+oltre: trova **perché** il peso era 0. Risposta: il filtro di freshness in
+`strategy.py:167-169` (`generated_at >= ts - max_age`) viene applicato dentro
+`_signals_as_of`, che l'orchestrator chiama su `signals_df` — e quel
+`signals_df` contiene già i segnali preservati da FIX-D. Il filtro butta via
+MCD/NVO/PFE/PLTR; il ranker vede solo DIS; il peso merged del simbolo scende
+a 0 e `orchestrator.py:271-288` emette una SELL con `strategy_id="merged"`.
+(`NewsDrivenTactical.__call__:101-114` fa la stessa cosa, ma è il path di
+**backtest**: in live la SELL nasce nell'orchestrator.)
 
-La stessa filter è un deliberato backtest/live parity (QS-07, b4421f2) — non
-è un bug di per sé, ma non riconosce il contratto che `_build_strategy_instance`
-ha già onorato a monte. Il naming (`_signals_as_of`) e la sua vicinanza al
-filter obbligano a leggerlo come parity check, non come ri-filtro.
+Lo stesso filtro è un deliberato backtest/live parity (QS-07, b4421f2) — non è
+un bug di per sé, ed è indispensabile in backtest, dove nessuno ha già filtrato
+`signals_df` a monte. Il difetto è che non distingue i due chiamanti: dopo
+FIX-D il contratto di `signals_df` è "fresh **+ preserved**", e il filtro
+riscrive una decisione di ammissione già presa da `_build_strategy_instance`.
 
-Questi test falliscono oggi: la prima coppia codifica il comportamento
-osservato in produzione (4 SELL non volute), la seconda codifica il
-comportamento atteso (FIX-D preserved signals devono sopravvivere a
-`_signals_as_of` quando il segnale è già passato il filtro a monte).
+Forma del fix (fuori scope qui per il freeze #171): un marcatore di provenienza
+in `signals_df` — colonna booleana `fix_d_preserved` — che `_signals_as_of`
+deve rispettare, lasciando **intatto** il filtro d'età per i segnali non
+marcati (backtest). Questi test codificano esattamente quel contratto.
+
+Struttura: 2 test verdi + 5 xfail(strict).
+
+- verdi:  il bug-witness del ciclo 14:22 (oggi i marcati vengono scartati) e la
+          guardia di backtest (i non marcati stale vengono ancora scartati —
+          questo comportamento NON deve cambiare col fix).
+- xfail:  il contratto post-fix (marcatore rispettato in `_signals_as_of` e,
+          simbolo per simbolo, peso non nullo dal ranker). `strict=True`: se
+          uno di questi passa, il fix è arrivato e il test va promosso a verde.
 
 Per il freeze #171 non c'è fix nel codice — solo evidenza riproducibile.
-Il fix è un'issue separata (`#186 → fix`) da aprire al termine del freeze.
+Il fix è tracciato dall'issue separata #236.
 """
 from __future__ import annotations
 
@@ -37,115 +49,134 @@ import pytest
 from src.strategies.s4.config import S4Config
 from src.strategies.s4.strategy import NewsDrivenTactical
 
-
 _TS = datetime(2026, 8, 5, 14, 22, tzinfo=timezone.utc)
+
+_XFAIL_FIX = pytest.mark.xfail(
+    strict=True, reason="#186 — fix blocked by freeze #171 (tracked in #236)",
+)
+
+# Il ciclo 14:22 del 2026-08-05, punto per punto: 1 fresh (DIS) + 4 segnali
+# stale che `_preserve_stale_signals_for_open_positions` (FIX-D) ha ri-ammesso
+# in `signals_df` — marcati qui con `fix_d_preserved=True`.
+_CYCLE_14_22 = [
+    {"symbol": "DIS", "score": 0.572, "confidence": 0.775,
+     "age_h": 0.12, "fix_d_preserved": False},
+    {"symbol": "NVO", "score": 0.656, "confidence": 0.85,
+     "age_h": 19.62, "fix_d_preserved": True},
+    {"symbol": "PFE", "score": 0.514, "confidence": 0.80,
+     "age_h": 19.87, "fix_d_preserved": True},
+    {"symbol": "MCD", "score": 0.393, "confidence": 0.725,
+     "age_h": 19.87, "fix_d_preserved": True},
+    {"symbol": "PLTR", "score": 0.383, "confidence": 0.675,
+     "age_h": 18.87, "fix_d_preserved": True},
+]
+
+_PRESERVED = [r for r in _CYCLE_14_22 if r["fix_d_preserved"]]
 
 
 def _df(rows: list[dict]) -> pd.DataFrame:
-    return pd.DataFrame(rows)
+    """signals_df come lo costruisce `_build_strategy_instance`, con in più la
+    colonna di provenienza `fix_d_preserved` che il fix dovrà propagare."""
+    return pd.DataFrame([
+        {
+            "symbol": r["symbol"],
+            "score": r["score"],
+            "confidence": r["confidence"],
+            "generated_at": _TS - timedelta(hours=r["age_h"]),
+            "fix_d_preserved": r["fix_d_preserved"],
+        }
+        for r in rows
+    ])
+
+
+def _strategy(rows: list[dict]) -> NewsDrivenTactical:
+    return NewsDrivenTactical(config=S4Config(max_signal_age_hours=4), signals=_df(rows))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Caso di riferimento: 14:22 del 2026-08-05, replicato punto per punto.
+# Verdi — comportamento osservato oggi in produzione.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def test_2026_08_05_14_22_fix_d_preserved_signals_are_dropped_before_ranking():
-    """Replica del ciclo 14:22: 4 stale (preserved by FIX-D) + 1 fresh (DIS).
+    """Bug witness del ciclo 14:22: 4 preserved + 1 fresh → sopravvive solo DIS.
 
-    In produzione il ranker vede solo DIS, gli altri 4 finiscono in
-    `target_weights` = {} → SELL. Conferma che il path di uscita non passa
-    da FIX-D (FIX-D li preserva a monte, ma la freshness filter a
-    strategy.py:167-169 li scarta di nuovo).
+    Il marcatore `fix_d_preserved` è già nel DataFrame, ma `_signals_as_of` non
+    lo guarda: i 4 escono dal ranker, il peso merged va a 0 e l'orchestrator
+    (`orchestrator.py:271-288`) li vende. Questo test resta verde finché il
+    difetto è in produzione.
     """
-    df = _df([
-        {"symbol": "DIS",  "score": 0.572, "confidence": 0.775,
-         "generated_at": _TS - timedelta(hours=0,  minutes=7)},   # fresh
-        {"symbol": "NVO",  "score": 0.656, "confidence": 0.85,
-         "generated_at": _TS - timedelta(hours=19, minutes=37)},  # FIX-D preserved
-        {"symbol": "PFE",  "score": 0.514, "confidence": 0.80,
-         "generated_at": _TS - timedelta(hours=19, minutes=52)},  # FIX-D preserved
-        {"symbol": "MCD",  "score": 0.393, "confidence": 0.725,
-         "generated_at": _TS - timedelta(hours=19, minutes=52)},  # FIX-D preserved
-        {"symbol": "PLTR", "score": 0.383, "confidence": 0.675,
-         "generated_at": _TS - timedelta(hours=18, minutes=52)},  # FIX-D preserved
-    ])
-    strat = NewsDrivenTactical(config=S4Config(max_signal_age_hours=4), signals=df)
-    survivors = {r.symbol for r in strat._signals_as_of(_TS)}
+    survivors = {r.symbol for r in _strategy(_CYCLE_14_22)._signals_as_of(_TS)}
 
-    # Comportamento attuale (broken): solo DIS sopravvive.
     assert survivors == {"DIS"}, (
-        f"se FIX-D preservation è onorata nel strategy, expected DIS+MCD+NVO+PFE+PLTR, "
-        f"got {sorted(survivors)} — il filter a strategy.py:167-169 scarta i segnali "
-        f"che _build_strategy_instance ha appena preservato"
+        f"atteso il comportamento rotto (solo DIS sopravvive), got {sorted(survivors)}: "
+        f"se sono sopravvissuti anche i preserved il fix #236 è stato applicato e "
+        f"i test xfail di questo modulo vanno promossi a verdi"
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Comportamento atteso: _signals_as_of non deve re-filtrare ciò che il
-# costruttore (portfolio_scheduler._build_strategy_instance) ha già filtrato.
-# Un segnale è in `signals_df` perché ha passato FIX-D — il downstream
-# strategy non ha informazione per distinguerlo da un fresh, quindi al
-# momento si affida al timestamp. Il fix sarà un marcatore di provenienza
-# (FIX_D_PRESERVED) o un canale di segnali separato. Per ora il test
-# documenta l'expected.
-# ─────────────────────────────────────────────────────────────────────────────
+def test_age_filter_still_drops_unmarked_stale_signals():
+    """Guardia di backtest: senza marcatore, il filtro d'età deve restare.
 
-
-def test_signals_as_of_preserves_signals_already_admitted_by_caller():
-    """Il filter QS-07 presume che signals_df = "segnali freschi" — ma FIX-D
-    delega al chiamante la decisione di ammissione, e quindi dopo FIX-D
-    signals_df = "segnali che hanno passato fresh + preserved (FIX-D)".
-
-    Se il chiamante ha deciso di ammettere un segnale, lo strategy non ha
-    alcun motivo per scartarlo di nuovo basandosi solo sull'orologio.
+    In backtest nessuno filtra `signals_df` a monte, quindi QS-07 è l'unica
+    difesa contro la contaminazione T0 (usare a un tick segnali che il live
+    avrebbe scartato). Il fix #236 deve esentare **solo** i segnali marcati:
+    questo test deve restare verde prima e dopo il fix.
     """
-    df = _df([
+    rows = [
+        {"symbol": "DIS", "score": 0.572, "confidence": 0.775,
+         "age_h": 0.12, "fix_d_preserved": False},
         {"symbol": "MCD", "score": 0.393, "confidence": 0.725,
-         "generated_at": _TS - timedelta(hours=19, minutes=52)},
-    ])
-    strat = NewsDrivenTactical(config=S4Config(max_signal_age_hours=4), signals=df)
-    survivors = {r.symbol for r in strat._signals_as_of(_TS)}
+         "age_h": 19.87, "fix_d_preserved": False},  # stale, NON preservato
+    ]
+    survivors = {r.symbol for r in _strategy(rows)._signals_as_of(_TS)}
 
-    # La presenza di MCD in `signals_df` È il fatto che il chiamante l'ha
-    # promosso (FIX-D). Il filter a valle non ha autorità di sovrascriverlo.
-    assert "MCD" in survivors, (
-        "segnale presente in signals_df deve passare _signals_as_of: il filter "
-        "a strategy.py:167-169 contraddice il fatto che FIX-D lo ha ammesso"
+    assert survivors == {"DIS"}, (
+        f"un segnale stale senza `fix_d_preserved` deve essere scartato dal filtro "
+        f"QS-07 (parità backtest/live, strategy.py:167-169), got {sorted(survivors)}"
     )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Parametrize sui 4 simboli del caso 14:22 del 2026-08-05.
+# xfail(strict) — contratto post-fix: `_signals_as_of` rispetta il marcatore.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("symbol,score,confidence,age_h", [
-    ("MCD",  0.393, 0.725, 19.87),
-    ("NVO",  0.656, 0.85,  19.62),
-    ("PFE",  0.514, 0.80,  19.87),
-    ("PLTR", 0.383, 0.675, 18.87),
-])
-def test_fix_d_preserved_signal_loses_zero_weight(symbol, score, confidence, age_h):
-    """Ognuno dei 4 simboli del 14:22, da solo, deve entrare in target_weights.
+@_XFAIL_FIX
+def test_signals_as_of_honours_fix_d_preserved_marker():
+    """Sul ciclo 14:22 completo, tutti e 5 i segnali devono sopravvivere.
 
-    Questo è il check funzionale del fix: in isolamento, dopo FIX-D,
-    lo strategy deve poterli riclassificare. Con il filter QS-07 attivo,
-    ognuno esce dal ranker e diventa un SELL.
+    `fix_d_preserved=True` significa "il chiamante ha già deciso di ammettere
+    questo segnale, sapendo che è vecchio". `_signals_as_of` non ha autorità
+    per sovrascrivere quella decisione basandosi solo sull'orologio.
     """
-    df = _df([{
-        "symbol": symbol,
-        "score": score,
-        "confidence": confidence,
-        "generated_at": _TS - timedelta(hours=age_h),
-    }])
-    strat = NewsDrivenTactical(config=S4Config(max_signal_age_hours=4), signals=df)
-    weights = strat.compute_target_weights(
-        strat._signals_as_of(_TS), as_of=_TS,
+    expected = {r["symbol"] for r in _CYCLE_14_22}
+    survivors = {r.symbol for r in _strategy(_CYCLE_14_22)._signals_as_of(_TS)}
+
+    assert survivors == expected, (
+        f"atteso {sorted(expected)} (1 fresh + 4 marcati fix_d_preserved), "
+        f"got {sorted(survivors)}: il filtro d'età a strategy.py:167-169 scarta "
+        f"i segnali che FIX-D ha appena ri-ammesso in signals_df"
     )
 
-    assert symbol in weights, (
-        f"{symbol} era nel signals_df (ammesso dal chiamante) ma esce dal ranker "
-        f"con weight 0%: il segnale preservato da FIX-D è stato scartato dal "
-        f"filter QS-07 a strategy.py:167-169"
+
+@_XFAIL_FIX
+@pytest.mark.parametrize(
+    "row", _PRESERVED, ids=[r["symbol"] for r in _PRESERVED],
+)
+def test_fix_d_preserved_signal_keeps_non_zero_weight(row):
+    """Check funzionale, simbolo per simbolo: dal marcatore al peso.
+
+    Complementare al test precedente, che si ferma a `_signals_as_of`: qui si
+    verifica che il segnale marcato arrivi fino a `compute_target_weights`, cioè
+    che il ranker gli assegni un peso invece di lasciarlo fuori dal target (la
+    condizione che in live produce la SELL a `orchestrator.py:271-288`).
+    """
+    strat = _strategy([row])
+    weights = strat.compute_target_weights(strat._signals_as_of(_TS), as_of=_TS)
+
+    assert weights.get(row["symbol"], 0.0) > 0, (
+        f"{row['symbol']} (age={row['age_h']}h, fix_d_preserved=True) esce dal ranker "
+        f"con peso 0: il filtro QS-07 a strategy.py:167-169 lo scarta prima del ranking, "
+        f"quindi il peso merged va a 0 e la posizione viene venduta"
     )
