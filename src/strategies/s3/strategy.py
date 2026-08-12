@@ -3,12 +3,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import pandas as pd
-import yaml
 
 from src.backtest.engine.data_replay import DataReplay
 from src.backtest.engine.portfolio import VirtualPortfolio
@@ -23,6 +21,18 @@ from src.strategies.s3.signal import generate_s3_signals
 
 @dataclass
 class S3Config:
+    """Configurazione di S3.
+
+    Questi default **sono** la configurazione della strategia: non esiste alcun
+    override da file yaml. S3 è istanziata con il costruttore nudo (`S3Config()`)
+    sia dal path live (`portfolio_scheduler`) sia dal backtest, quindi i valori
+    effettivi a runtime sono esattamente i default qui sotto. Non esiste né è mai
+    esistito un `config/s3_strategy.yaml` letto dal runtime — editare un file del
+    genere non avrebbe effetto (issue #177). Se in futuro serve una
+    configurabilità esterna, va wired deliberatamente e post-freeze, con un test
+    che asserisca che il path runtime la legga.
+    """
+
     strategy_id: str = "S3"
     lookback: int = 252
     beta_window: int = 252
@@ -32,25 +42,6 @@ class S3Config:
     long_decile: int = 10
     short_decile: Optional[int] = 1
     rebalance_frequency: RebalanceFrequency = RebalanceFrequency.MONTHLY
-
-    @classmethod
-    def from_yaml(cls, path: Path | str) -> "S3Config":
-        with open(path) as f:
-            data = yaml.safe_load(f)
-        short_decile = data.get("short_decile", 1)
-        return cls(
-            strategy_id=data.get("strategy_id", "S3"),
-            lookback=int(data.get("lookback", 252)),
-            beta_window=int(data.get("beta_window", 252)),
-            n_deciles=int(data.get("n_deciles", 10)),
-            target_vol=float(data.get("target_vol", 0.10)),
-            max_weight=float(data.get("max_weight", 0.20)),
-            long_decile=int(data.get("long_decile", 10)),
-            short_decile=int(short_decile) if short_decile is not None else None,
-            rebalance_frequency=RebalanceFrequency(
-                data.get("rebalance_frequency", "MONTHLY")
-            ),
-        )
 
 
 class CrossSectionalMomentum:
