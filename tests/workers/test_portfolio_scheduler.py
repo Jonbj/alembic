@@ -266,6 +266,49 @@ def test_build_strategy_instance_s4_loads_signals_from_db():
     assert set(result._signals_df["symbol"]) == {"NVDA", "MSFT"}
 
 
+def test_build_strategy_instance_s4_preserves_signal_id_through_velocity():
+    """#123: a transformed score must stay linked to its source DB signal."""
+    from src.workers.portfolio_scheduler import _build_strategy_instance
+
+    entry = MagicMock()
+    entry.strategy_id = "S4"
+    bars_df = _make_bars_df(n=5, symbols=["SPY"])
+    now = datetime.now(timezone.utc)
+
+    mock_store = MagicMock()
+    mock_store.fetch_signals_for_cycle.return_value = [
+        SentimentResult(
+            symbol="VZ",
+            score=0.42,
+            confidence=0.9,
+            reasoning="bull case",
+            model_id="ensemble:test",
+            generated_at=now - timedelta(minutes=6),
+            signal_id=5050,
+        ),
+    ]
+    fake_redis = MagicMock()
+    fake_redis.get.return_value = "0.0"  # keep the feedback gate inactive
+
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_store), \
+         patch("redis.Redis.from_url", return_value=fake_redis), \
+         patch(
+             "src.workers.portfolio_scheduler._compute_signal_velocity",
+             return_value=1.2,
+         ):
+        strategy = _build_strategy_instance(entry, bars_df)
+
+    signals = strategy._signals_as_of(now)
+    strategy.compute_target_weights(signals, as_of=now)
+
+    assert strategy.last_signal_provenance["VZ"] == {
+        "signal_id": 5050,
+        "score": pytest.approx(0.504),
+        "reasoning": "bull case",
+        "model_id": "ensemble:test",
+    }
+
+
 def test_build_strategy_instance_s4_handles_db_error_gracefully():
     """S4 DB failure returns NewsDrivenTactical with signals=None — never crashes."""
     from src.strategies.s4.strategy import NewsDrivenTactical

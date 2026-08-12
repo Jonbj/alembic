@@ -3657,6 +3657,7 @@ def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None
                         "ensemble_std": s.ensemble_std,
                         "fallback_used": s.fallback_used,
                         "generated_at": s.generated_at,
+                        "signal_id": s.signal_id,
                     } for s in signals])
                     log.info("S4: loaded %d fresh signals (last %dh, max_age=%dh)",
                              len(signals), s4_config.signals_lookback_hours,
