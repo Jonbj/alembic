@@ -12,7 +12,7 @@ oltre: trova **perché** il peso era 0. Risposta: il filtro di freshness in
 `_signals_as_of`, che l'orchestrator chiama su `signals_df` — e quel
 `signals_df` contiene già i segnali preservati da FIX-D. Il filtro butta via
 MCD/NVO/PFE/PLTR; il ranker vede solo DIS; il peso merged del simbolo scende
-a 0 e `orchestrator.py:271-288` emette una SELL con `strategy_id="merged"`.
+a 0 e `orchestrator.py:247-265` emette una SELL con `strategy_id="merged"`.
 (`NewsDrivenTactical.__call__:101-114` fa la stessa cosa, ma è il path di
 **backtest**: in live la SELL nasce nell'orchestrator.)
 
@@ -103,7 +103,7 @@ def test_2026_08_05_14_22_fix_d_preserved_signals_are_dropped_before_ranking():
 
     Il marcatore `fix_d_preserved` è già nel DataFrame, ma `_signals_as_of` non
     lo guarda: i 4 escono dal ranker, il peso merged va a 0 e l'orchestrator
-    (`orchestrator.py:271-288`) li vende. Questo test resta verde finché il
+    (`orchestrator.py:247-265`) li vende. Questo test resta verde finché il
     difetto è in produzione.
     """
     survivors = {r.symbol for r in _strategy(_CYCLE_14_22)._signals_as_of(_TS)}
@@ -170,7 +170,7 @@ def test_fix_d_preserved_signal_keeps_non_zero_weight(row):
     Complementare al test precedente, che si ferma a `_signals_as_of`: qui si
     verifica che il segnale marcato arrivi fino a `compute_target_weights`, cioè
     che il ranker gli assegni un peso invece di lasciarlo fuori dal target (la
-    condizione che in live produce la SELL a `orchestrator.py:271-288`).
+    condizione che in live produce la SELL a `orchestrator.py:247-265`).
     """
     strat = _strategy([row])
     weights = strat.compute_target_weights(strat._signals_as_of(_TS), as_of=_TS)
