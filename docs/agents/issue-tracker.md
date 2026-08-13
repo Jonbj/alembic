@@ -110,6 +110,15 @@ scripts/deploy_reconcile.sh --stato   # what runs vs origin/main — touches not
 scripts/deploy_reconcile.sh --forza   # ignore the market window (operator)
 ```
 
+**Daily health check.** `scripts/roadmap_health_check.sh` runs every morning at 10:05 and asks one
+question: did yesterday's work reach merge *and* deploy? It exists because every stage of the chain
+fails by leaving the previous state intact — "no errors" and "stuck for three days" look identical
+from outside. It flags: loop PRs older than 18h (distinguishing *rejected* — healthy — from
+*approved but unmerged*, which means the merge broke, from *no verdict*, which means the review died
+mid-way); production behind `origin/main` on files that actually require a rebuild; a deploy
+reconciler that announces itself more often than it finishes; a day with zero loop runs; benched
+engines. Telegram either way, so silence itself is never the signal.
+
 **Rate limits.** An exhausted engine is not a broken engine. Its output is matched against a
 deliberately broad set of signatures; on a hit it is benched for 3h and the run **fails over to
 the next available engine instead of burning the slot**. Critically, a rate-limited run is *not*

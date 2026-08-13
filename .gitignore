@@ -83,3 +83,6 @@ backups/
 # informazione di quando l'ultimo PASS/FAIL e' stato annunciato, non un
 # artefatto decisionale (quello vive in docs/evidence/s4_ic.json).
 docs/evidence/s4_ic_notification.json
+
+# Worktree temporanei lasciati dalle sessioni
+.wt*/
