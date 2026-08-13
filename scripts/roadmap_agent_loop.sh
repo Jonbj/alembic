@@ -179,6 +179,30 @@ tg_send() {
         -d chat_id="${TELEGRAM_CHAT_ID}" -d parse_mode="HTML" -d text="$text" >/dev/null || true
 }
 
+RESPINTE_FILE="$LOG_DIR/roadmap_agent_respinte.tsv"
+MAX_RESPINTE=2           # oltre, il problema non e' l'esecuzione ma la specifica
+RIPRESA=0
+touch "$RESPINTE_FILE"
+
+respinte_di() { awk -F'\t' -v n="$1" '$1==n {print $2}' "$RESPINTE_FILE" | tail -1; }
+
+registra_respinta() {
+    local n="$1" prec; prec=$(respinte_di "$n"); prec=${prec:-0}
+    grep -v -P "^${n}\t" "$RESPINTE_FILE" > "${RESPINTE_FILE}.tmp" 2>/dev/null || true
+    printf '%s\t%s\n' "$n" "$((prec + 1))" >> "${RESPINTE_FILE}.tmp"
+    mv "${RESPINTE_FILE}.tmp" "$RESPINTE_FILE"
+}
+
+# Verdetto dell'ultima review sulla PR di questa issue, o vuoto se non c'e'.
+verdetto_pr_di() {
+    local corpo
+    corpo=$(gh pr list --state open --head "agent/issue-$1" --json number -q '.[0].number' 2>/dev/null)
+    [[ -z "$corpo" ]] && return 0
+    corpo=$(gh pr view "$corpo" --json comments -q '.comments[-1].body' 2>/dev/null || echo "")
+    if echo "$corpo" | grep -qiE 'VERDETTO:[[:space:]]*\**RESPINGI'; then echo "RESPINGI"
+    elif echo "$corpo" | grep -qiE 'VERDETTO:[[:space:]]*\**APPROVA'; then echo "APPROVA"; fi
+}
+
 tentativi_di() { awk -F'\t' -v n="$1" '$1==n {print $2}' "$STATE_FILE" | tail -1; }
 
 registra_tentativo() {
@@ -524,7 +548,14 @@ ${_URL}
 ${_URL}"
         fi
     else
-        log "#$_ISSUE — NON mergiata (verdetto=$VERDETTO, regressioni=$REGRESSIONI)."
+        [[ "$VERDETTO" == "RESPINGI" ]] && registra_respinta "$_ISSUE"
+        _n=$(respinte_di "$_ISSUE"); _n=${_n:-0}
+        log "#$_ISSUE — NON mergiata (verdetto=$VERDETTO, regressioni=$REGRESSIONI, respinte=$_n)."
+        if [[ "$VERDETTO" == "RESPINGI" ]] && (( _n >= MAX_RESPINTE )); then
+            tg_send "🛑 <b>Roadmap — #${_ISSUE} esce dalla rotazione</b>
+Respinta ${_n} volte da modelli diversi. Quando due modelli distinti non ci riescono il problema non e&#39; l&#39;esecuzione ma la specifica: serve una tua decisione, non un altro giro.
+${_URL}"
+        fi
         tg_send "🟡 <b>Roadmap — PR da guardare</b>
 Issue #${_ISSUE}: ${_TIT}
 Implementata da ${_IMPL}${REVISORE:+, rivista da $REVISORE}
@@ -625,7 +656,21 @@ while read -r numero _resto; do
         log "  #$numero — in coda ma SENZA label freeze-ok: salto e segnalo."; continue
     fi
     if echo "$PR_APERTE" | grep -qx "agent/issue-${numero}"; then
-        log "  #$numero — ha gia' una PR aperta, salto."; continue
+        # Una PR RESPINTA non deve bloccare la sua issue: senza questo ramo ogni
+        # bocciatura la congelava per sempre, perche' il giro salta cio' che ha
+        # una PR aperta. Si riprende lo stesso branch, con la review addosso.
+        _v=$(verdetto_pr_di "$numero")
+        _r=$(respinte_di "$numero"); _r=${_r:-0}
+        if [[ "$_v" != "RESPINGI" ]]; then
+            log "  #$numero — PR aperta in attesa di verdetto o gia' approvata, salto."; continue
+        fi
+        if (( _r >= MAX_RESPINTE )); then
+            # Se due modelli diversi non ci riescono, il problema non e'
+            # l'esecuzione: e' la specifica, e non la risolve un terzo giro.
+            log "  #$numero — $_r review respinte, esce dalla rotazione: serve l'operatore."; continue
+        fi
+        RIPRESA=1
+        log "  #$numero — PR respinta ($_r volte): la riprendo sullo stesso branch."
     fi
     t=$(tentativi_di "$numero"); t=${t:-0}
     if (( t >= MAX_TENTATIVI )); then
@@ -661,15 +706,43 @@ BRANCH="agent/issue-${ISSUE}"
 WT="$PROJECT_DIR/.worktrees/agent-${ISSUE}"
 
 git worktree remove --force "$WT" 2>/dev/null || true
-git branch -D "$BRANCH" 2>/dev/null || true
-git worktree add -b "$BRANCH" "$WT" origin/main >>"$LOG_FILE" 2>&1
+git worktree prune; rm -rf "$WT" 2>/dev/null || true
+if (( RIPRESA )); then
+    # Sul branch esistente: il lavoro gia' fatto e giudicato non si butta.
+    git fetch -q origin "$BRANCH"
+    git branch -D "$BRANCH" 2>/dev/null || true
+    git worktree add -q "$WT" -b "$BRANCH" "origin/$BRANCH" >>"$LOG_FILE" 2>&1
+else
+    git branch -D "$BRANCH" 2>/dev/null || true
+    git worktree add -b "$BRANCH" "$WT" origin/main >>"$LOG_FILE" 2>&1
+fi
 
 tg_send "🧭 <b>Roadmap — giro avviato</b>
 Issue #${ISSUE}: ${TITOLO}
 Motore: ${MOTORE}"
 
+# Su una ripresa, la review che ha bocciato entra nel prompt: ripartire senza
+# leggerla significherebbe rifare lo stesso errore con un modello diverso.
+CODA_REVIEW=""
+if (( RIPRESA )); then
+    _pr_rip=$(gh pr list --state open --head "$BRANCH" --json number -q '.[0].number' 2>/dev/null)
+    if [[ -n "$_pr_rip" ]]; then
+        CODA_REVIEW=$(gh pr view "$_pr_rip" --json comments -q '.comments[-1].body' 2>/dev/null | tail -c 6000)
+    fi
+fi
+
 PROMPT=$(cat <<PROMPTEOF
 Lavora la issue GitHub #${ISSUE} di questo repository (Alembic) fino ad aprire una pull request.
+
+${CODA_REVIEW:+ATTENZIONE — questa e' una RIPRESA. Esiste gia' una PR aperta su questo branch, con il
+lavoro precedente, ed e' stata RESPINTA da una review. Non ricominciare da zero: correggi cio' che la
+review contesta, sullo stesso branch. Se ritieni che un rilievo sia sbagliato, dillo nel corpo della
+PR con l'argomento, non ignorandolo. Questa e' la review da cui partire:
+
+--- inizio review precedente ---
+${CODA_REVIEW}
+--- fine review precedente ---
+}
 
 Sei in un worktree dedicato: $WT, sul branch $BRANCH, basato su origin/main.
 Leggi CLAUDE.md prima di tutto: e' il file di istruzioni di questo progetto, valido

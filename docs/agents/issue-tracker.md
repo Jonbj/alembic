@@ -96,6 +96,14 @@ cat logs/roadmap_agent_state.tsv              # issue <TAB> failed attempts (2 =
 Both gates green → the loop merges. Anything else — reject, CI that never finished, no second
 engine available — leaves the PR open with a Telegram.
 
+**After a rejection.** A rejected PR used to freeze its issue forever: the loop skips issues that
+already have an open PR, so nothing ever picked it back up. Now a `VERDETTO: RESPINGI` makes the
+issue workable again — the loop checks out **the same branch**, with the rejecting review pasted into
+the prompt, and fixes rather than restarts. After `MAX_RESPINTE` (2) rejections the issue leaves the
+rotation with a Telegram: when two different models fail on the same spec, the problem is the spec,
+and a third round won't find it. The counter lives in `logs/roadmap_agent_respinte.tsv` and is reset
+only when the *specification itself* changes — that is what the cap means, not a loophole.
+
 **Deploy.** A merge is not a deploy: `src/`, `config/` and `scripts/` are `COPY`ed into the image,
 not mounted. `scripts/deploy_reconcile.sh` closes that gap — it is a *reconciler*, not a
 post-merge hook: it compares the commit actually running against `origin/main` and acts only if
