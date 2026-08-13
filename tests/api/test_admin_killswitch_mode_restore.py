@@ -74,4 +74,3 @@ async def test_killswitch_deactivation_restores_mode_active_before_halt() -> Non
 
     assert result == {"killswitch": "deactivated", "mode": "semi_auto"}
     assert store.get_mode() == "semi_auto"
-

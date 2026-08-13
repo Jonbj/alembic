@@ -674,6 +674,29 @@ class RedisStore:
     # OPERATING MODE
     # =========================================================================
 
+    _MODE_BEFORE_HALT_KEY = "system:mode:before_halt"
+
+    def preserve_mode_before_halt(self) -> None:
+        """Snapshot the active mode before an operator halt.
+
+        A repeated activation must not replace the original snapshot with
+        ``halted``; the snapshot is cleared only after a successful resume.
+        """
+        mode = self.get_mode()
+        if isinstance(mode, bytes):
+            mode = mode.decode()
+        if mode and mode != "halted":
+            self._r.set(self._MODE_BEFORE_HALT_KEY, mode)
+
+    def get_mode_before_halt(self) -> str | None:
+        """Return the mode captured before the current operator halt."""
+        mode = self._r.get(self._MODE_BEFORE_HALT_KEY)
+        return mode.decode() if isinstance(mode, bytes) else mode
+
+    def clear_mode_before_halt(self) -> None:
+        """Clear the mode snapshot after the operator halt is resumed."""
+        self._r.delete(self._MODE_BEFORE_HALT_KEY)
+
     def set_mode(self, mode: str) -> None:
         """Set system operating mode.
 
