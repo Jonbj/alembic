@@ -4,12 +4,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import pandas as pd
-import yaml
 
 from src.backtest.engine.data_replay import DataReplay
 from src.backtest.engine.portfolio import VirtualPortfolio
@@ -26,6 +24,18 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class S1Config:
+    """Configurazione di S1.
+
+    Questi default **sono** la configurazione della strategia: non esiste alcun
+    override da file yaml. S1 è istanziata con il costruttore nudo (`S1Config()`)
+    sia dal path live (`portfolio_scheduler`) sia dal backtest, quindi i valori
+    effettivi a runtime sono esattamente i default qui sotto. Un eventuale
+    `config/s1_strategy.yaml` non viene letto da nessuna parte — editarlo non ha
+    effetto (issue #177). Se in futuro serve una configurabilità esterna, va
+    wired deliberatamente e post-freeze, con un test che asserisca che il path
+    runtime la legga.
+    """
+
     strategy_id: str = "S1"
     lookbacks: tuple[int, ...] = (21, 63, 126, 252)
     vol_window_signal: int = 63
@@ -34,23 +44,6 @@ class S1Config:
     max_weight: float = 0.20
     signal_threshold: float = 0.0
     rebalance_frequency: RebalanceFrequency = RebalanceFrequency.MONTHLY
-
-    @classmethod
-    def from_yaml(cls, path: Path | str) -> "S1Config":
-        with open(path) as f:
-            data = yaml.safe_load(f)
-        return cls(
-            strategy_id=data.get("strategy_id", "S1"),
-            lookbacks=tuple(int(x) for x in data.get("lookbacks", [21, 63, 126, 252])),
-            vol_window_signal=int(data.get("vol_window_signal", 63)),
-            vol_window_sizing=int(data.get("vol_window_sizing", 60)),
-            target_vol=float(data.get("target_vol", 0.10)),
-            max_weight=float(data.get("max_weight", 0.20)),
-            signal_threshold=float(data.get("signal_threshold", 0.0)),
-            rebalance_frequency=RebalanceFrequency(
-                data.get("rebalance_frequency", "MONTHLY")
-            ),
-        )
 
 
 class TimeSeriesMomentum:

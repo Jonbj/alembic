@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -112,36 +111,6 @@ class TestS1Config:
         assert cfg.lookbacks == (21, 63, 126, 252)
         assert cfg.signal_threshold == 0.0
         assert cfg.rebalance_frequency == RebalanceFrequency.MONTHLY
-
-    def test_from_yaml_custom(self, tmp_path: Path) -> None:
-        content = (
-            'strategy_id: "S1_TEST"\n'
-            "lookbacks: [21, 63]\n"
-            "vol_window_signal: 42\n"
-            "vol_window_sizing: 30\n"
-            "target_vol: 0.15\n"
-            "max_weight: 0.25\n"
-            "signal_threshold: 0.5\n"
-            "rebalance_frequency: DAILY\n"
-        )
-        cfg_file = tmp_path / "s1.yaml"
-        cfg_file.write_text(content)
-        cfg = S1Config.from_yaml(cfg_file)
-
-        assert cfg.strategy_id == "S1_TEST"
-        assert cfg.lookbacks == (21, 63)
-        assert cfg.vol_window_signal == 42
-        assert cfg.vol_window_sizing == 30
-        assert abs(cfg.target_vol - 0.15) < 1e-9
-        assert abs(cfg.max_weight - 0.25) < 1e-9
-        assert abs(cfg.signal_threshold - 0.5) < 1e-9
-        assert cfg.rebalance_frequency == RebalanceFrequency.DAILY
-
-    def test_from_project_yaml(self) -> None:
-        cfg = S1Config.from_yaml(Path("config/s1_strategy.yaml"))
-        assert cfg.strategy_id is not None
-        assert len(cfg.lookbacks) > 0
-        assert cfg.target_vol > 0
 
 
 # ---------------------------------------------------------------------------
