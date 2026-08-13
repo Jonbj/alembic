@@ -56,6 +56,12 @@
      "costo_usd": 0.0,
      "nota": "50/96 simboli (52%) zero righe in news_log il 08-11, dentro la banda 40-55 delle sei sedute precedenti (55 il 07-31, 41 il 08-03, 42 il 08-04, 51 il 08-05, 40 il 08-06, 52 il 08-07, 43 il 08-10). Quattro dei sei miss del giorno sono NO_NEWS puri: JD -4.63% (il mover piu' forte), ADBE -3.39%, BABA -3.38%, BIDU -3.25% - zero righe in news_log e zero segnali per tutti e quattro. COSTO 0.00 VERIFICATO, NON STIMATO: tutti e quattro sono mover al RIBASSO e il libro e' long-only, quindi nessuna delle quattro occasioni era tradabile nella direzione del movimento. Prima seduta della finestra con l'82% dei mover al ribasso (9 su 11): la stessa lacuna che il 08-03 e il 08-04 e' costata 344.92 e 452.54 di alpha stimato, oggi ha risparmiato quattro ingressi sbagliati. Il finding resta valido per ricorrenza strutturale, non per il costo di oggi.",
      "fonte": "ALPHA_MISS_REPORT_2026-08-11.md §7"
+    },
+    {
+     "data": "2026-08-12",
+     "costo_usd": 0.0,
+     "nota": "51/96 simboli (53%) zero righe in news_log il 08-12, dentro la banda 40-55 di tutta la finestra (55 il 07-31, 41 il 08-03, 42 il 08-04, 51 il 08-05, 40 il 08-06, 52 il 08-07, 43 il 08-10, 50 il 08-11). PRIMA SEDUTA DELLA FINESTRA CON ZERO MISS NO_NEWS: tutti e 11 i mover del giorno hanno copertura, e le tre cause di miss sono THIN_NEUTRAL. COSTO 0.00 VERIFICATO, NON stimato per difetto: nessun mover cade nel buco di copertura, quindi la lacuna strutturale oggi non e' costata nulla. Il dato interessante e' la SPIEGAZIONE, che qualifica il finding invece di indebolirlo: la coda del giorno cade su memoria e semiconduttori, cioe' il tema piu' coperto da Benzinga e GDELT. La copertura e' CORRELATA AL TEMA, non uniforme - le sedute in cui NO_NEWS domina (08-03, 08-04, 08-07, 08-11) sono quelle in cui la coda cade su BP, QCOM, SAP, HOOD, JD, BABA, cioe' fuori dal tema coperto. Il finding resta aperto per ricorrenza strutturale: la copertura non e' migliorata, e' la coda che oggi e' caduta nel punto illuminato.",
+     "fonte": "ALPHA_MISS_REPORT_2026-08-12.md §7"
     }
    ],
    "costo_cumulato_usd": 1259.85,
@@ -111,12 +117,18 @@
      "costo_usd": null,
      "nota": "11 delle 47 posizioni aperte a fine 08-11 hanno trades.stop_strategy NULL (BAC, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE, tutte entrate il 07-10) - stesso insieme del 08-07 e del 08-10. Rilevanza specifica del giorno: GOOGL e' il secondo peggior contributore MTM della giornata (-26.37 su un -3.84% di prezzo) e appartiene a questo insieme, quindi la sua perdita non e' attribuibile a nessuna sleeve nella serie per-strategia.",
      "fonte": "ALPHA_MISS_REPORT_2026-08-11.md §7"
+    },
+    {
+     "data": "2026-08-12",
+     "costo_usd": null,
+     "nota": "11 delle 49 posizioni aperte a fine 08-12 hanno trades.stop_strategy NULL (BAC, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE, tutte entrate il 07-10) - stesso insieme del 08-07, 08-10 e 08-11, ottava seduta consecutiva. Portano +29.02 dei +271.26 di MTM del giorno, cioe' l'11%. Costo null: non e' una perdita, e' P&L non attribuibile, e confligge con la domanda di uscita n.2 della carta (split P&L economico S1 vs SPY).",
+     "fonte": "ALPHA_MISS_REPORT_2026-08-12.md §7"
     }
    ],
    "costo_cumulato_usd": 0,
    "stato": "aperto",
    "issue": null,
-   "occorrenze_non_stimate": 7
+   "occorrenze_non_stimate": 8
   },
   {
    "id": "F-003",
@@ -265,12 +277,18 @@
      "costo_usd": null,
      "nota": "Nuova faccia del finding: non un guard di cooldown/whipsaw ma la clausola di dedup del logger dei fallback. AVGO, in watchlist e senza posizione aperta, ha come unico segnale della giornata il 7186 (+0.330, single:gpt-oss, sopra il gate 0.30) e ZERO righe in execution_decisions per tutto il 2026-08-11, mentre gli altri fallback del giorno (IWM, MRVL, RIO, WDC, DIS) hanno la loro riga SKIP_FALLBACK. Causa: _record_fallback_drops(_fb_dropped, non_fallback_signals=signals) a portfolio_scheduler.py:3586 esclude dal log i simboli che hanno anche un segnale non-fallback in finestra, e la finestra e' signals_lookback_hours=96h: AVGO ha due segnali ensemble del 08-10 (0.271 e 0.059) che lo fanno considerare 'valutato davvero'. Quei due sono poi scartati per anzianita' e, essendo sotto min_score, non generano neppure la riga di _record_stale_drops. Risultato: un simbolo con segnale fresco sopra soglia e' indistinguibile a valle da NO_NEWS - esattamente cio' che l'issue #151 voleva impedire. Costo non stimabile: AVGO ha chiuso -1,50% e il libro e' long-only, quindi l'ingresso mancato non e' un alpha perso; il danno e' che la causa di miss dominante (la metrica su cui la domanda di uscita n.1 sara' falsificata) e' contaminata. Ticket TK-F.",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-11.md sezione 10 [DAY-006]"
+    },
+    {
+     "data": "2026-08-12",
+     "costo_usd": null,
+     "nota": "Nuova faccia del finding, sul campo reason di SKIP_THRESHOLD invece che sui guard: IL SEGNO DEL SEGNALE E' PERSO NEL DECISION LOG. HD produce due segnali NEGATIVI il 08-12 - sentiment_signals delle 18:15 (-0.118 conf 0.450, da 'How To Earn $500 A Month From Home Depot Stock Ahead Of Q2 Earnings') e delle 19:15 (-0.204 conf 0.500, da 'Home Depot Stock Slips as Leadership Shift Lands Ahead of Earnings') - e le sei righe execution_decisions corrispondenti riportano 'score 0.118 < feedback threshold 0.300' e 'score 0.204 < feedback threshold 0.300', cioe' valori POSITIVI. Causa: portfolio_scheduler.py:3186 compone la reason con abs(sig_score), coerentemente col gate che e' anch'esso in valore assoluto (righe 3719-3720, commento esplicito 'so bearish signals are also gated'). Il gate non e' in discussione ed e' congelato; il difetto e' di sola OSSERVABILITA': a valle non si distingue una chiamata ribassista CORRETTA da una chiamata rialzista debole. Oggi la differenza e' sostanziale - HD ha chiuso -3.12% e il modello aveva ragione sul segno, ma dal DB la sua giornata e' indistinguibile da quella di un titolo scartato per tiepidezza. Rilevanza per la carta: la metrica su cui verra' falsificata la domanda di uscita n.1 e' la distribuzione delle cause di miss, e quella distribuzione legge questo campo. Costo non stimabile: nessun ordine ne dipende, il libro e' long-only e HD non era in portafoglio.",
+     "fonte": "ALPHA_MISS_REPORT_2026-08-12.md §7"
     }
    ],
    "costo_cumulato_usd": 0,
    "stato": "aperto",
    "issue": null,
-   "occorrenze_non_stimate": 3
+   "occorrenze_non_stimate": 4
   },
   {
    "id": "F-007",
@@ -351,9 +369,15 @@
      "costo_usd": 0.0,
      "nota": "Quinta giornata del pattern, prima volta con TRE uscite simultanee da un solo articolo. Alle 19:00 il morning-brief generico 'S&P 500 Earnings Growth May Be Less Impressive Than It Looks; SpaceX Short Squeeze; Inflation...' ha prodotto tre segnali distinti - sentiment_signals 7149 (META, conf 0.175), 7150 (MSFT, conf 0.050), 7151 (NVDA, conf 0.150), tutti score 0.000 - che hanno sovrascritto i tre segnali ticker-specifici su cui erano nate le posizioni poche ore prima: META +0.515 conf 0.775 alle 17:31 ('What's Going On With Meta Platforms Stock Monday?'), MSFT +0.470 conf 0.750 alle 17:45 ('Microsoft Stock Rises 2%: Upcoming Maia 300 Chip Launch...'), NVDA +0.441 conf 0.700 alle 17:15 ('Nvidia Stock's Rubin Era Begins: A Top Pick, BofA Says'). Ne sono seguite tre SELL con reason '[below_entry_gate] S4 signal fell below the active feedback entry threshold (... score=+0.000)' alle 19:07 (NVDA), 19:22 (META), 19:37 (MSFT), tutte dopo 1h45 di tenuta. COSTO 0.0 (non null): il controfattuale e' stato calcolato ed e' SFAVOREVOLE al mantenimento - tenendo fino alla chiusura NVDA -8.85, META +3.80, MSFT +2.59, netto -2.46 $, cioe' le uscite anticipate hanno fatto risparmiare denaro. Il meccanismo e' lo stesso di F-023 (vince l'ultimo segnale per simbolo a prescindere da confidenza e specificita'); registrato qui e non li' perche' l'effetto osservato e' sull'uscita, come nel titolo di questo finding, e per non doppio-contare il giorno.",
      "fonte": "ALPHA_MISS_REPORT_2026-08-10.md §7"
+    },
+    {
+     "data": "2026-08-12",
+     "costo_usd": 1.38,
+     "nota": "Sesta giornata del pattern. NVDA: BUY alle 17:22 su sentiment_signals delle 17:15 +0.343 conf 0.650 ensemble non-fallback, generato dall'UNICO pezzo su Nvidia della giornata ('What's Going On With Nvidia Stock on Wednesday?', news_log 15:44). Alle 18:30 arrivano DUE punteggi da articoli su societa' terze - 'Lumentum Posts Solid Q4, Set To Hit $1.25B Revenue Target 3 Months Early' (+0.023 conf 0.275, ensemble) e la rassegna macro 'Super Micro, Lumentum, CoreWeave Earnings Highlight AI Infrastructure Demand; CPI Data...' (+0.080 conf 0.400, fallback) - vince l'ultimo per simbolo e alle 19:07 la SELL cita testualmente '[below_entry_gate] ... score=+0.023', dopo 1h45 di tenuta. NVDA chiude +3.03% a 224.09 contro un exit_price di 223.84. COSTO ATTRIBUITO 1.38 = drift_post_uscita del dossier deterministico su 5.50004465 azioni, controfattuale corto (stessa giornata, stessa size, stesso strumento). Contesto che aggrava: delle 11 righe di news_log su NVDA oggi DIECI sono su CoreWeave (5), IREN, Lumentum, Shkreli e Musk/SpaceX - vedi F-012.",
+     "fonte": "ALPHA_MISS_REPORT_2026-08-12.md §7"
     }
    ],
-   "costo_cumulato_usd": 53.0,
+   "costo_cumulato_usd": 54.38,
    "occorrenze_non_stimate": 0,
    "stato": "aperto",
    "issue": null
@@ -571,6 +595,12 @@
      "costo_usd": 0.0,
      "nota": "Ricorrenza quantificata: 26 articoli su 109 (24%) taggati a 2+ ticker generano 79 delle 162 righe scorate del 08-11 (48.8%), in linea con la serie 51% (08-03), 66% (08-04), 53% (08-05), 55% (08-07), 51.5% (08-10). Caso del giorno: SPCX, mover a -3.93%, ha SEI righe di copertura e NESSUNA parla di SPCX - news_log 7184/7197/7239 sono su Rocket Lab, 7195 su Tesla, 7343 su SpaceX/AST SpaceMobile, 7335 e' la lista generica '10 Communication Services Stocks With Whale Alerts' che e' stata scorata sia su SPCX sia su GOOGL. COSTO 0.00 VERIFICATO: nessuno dei sei punteggi ha superato il gate (max +0.165, un fallback single-model), quindi il 08-11 nessun ordine e' nato da un pezzo su societa' terze - il meccanismo ricorre, il danno di giornata e' nullo.",
      "fonte": "ALPHA_MISS_REPORT_2026-08-11.md §7"
+    },
+    {
+     "data": "2026-08-12",
+     "costo_usd": 0.0,
+     "nota": "Ricorrenza quantificata: 27 articoli su 111 (24%) taggati a 2+ ticker generano 73 delle 157 righe scorate del 08-12 (46.5%), in linea con la serie 51% (08-03), 66% (08-04), 53% (08-05), 55% (08-07), 51.5% (08-10), 48.8% (08-11). Due casi estremi oggi, entrambi su mover: NVDA ha UNDICI righe di copertura e DIECI non parlano di Nvidia (cinque su CoreWeave, poi IREN, Lumentum, la tesi short di Shkreli su CoreWeave, Musk/SpaceX e la rassegna CPI) - l'unica specifica e' quella che ha generato il BUY. MU ha DIECI righe di cui NOVE via org_lookup, comprese due rassegne Baystreet sui futures ('Futures Inch up Ahead of U.S. Inflation Numbers', 'TSX Starts Wednesday on Right Foot') e un modulo 13F ('G&S Capital LLC Sells 4,094 Shares of Micron Technology, Inc. $MU'); il segnale piu' alto di MU (+0.330 alle 16:30) nasce da un pezzo su SK Hynix e SanDisk. COSTO 0.00 VERIFICATO, NON stimato per difetto: l'unico ordine nato oggi da un pezzo su societa' terza e' l'uscita NVDA delle 19:07, il cui costo (1.38) e' registrato su F-008 - contarlo anche qui sarebbe doppio conteggio.",
+     "fonte": "ALPHA_MISS_REPORT_2026-08-12.md §7"
     }
    ],
    "costo_cumulato_usd": 647.46,
@@ -897,6 +927,12 @@
      "costo_usd": null,
      "nota": "Ricorrenza in peggioramento e verificata titolo per titolo: GS 25 righe, MS 23, DB 7 - 55 su 162 della giornata (34%, contro il 30.1% del 08-10) - tutte via extraction_method='org_lookup' e NESSUNA riguarda le tre banche. A GS finiscono 'Hamilton Lane (HLNE) Q1 2027 Earnings Call Transcript', 'DuPont (DD) Q2 2026 Earnings Call Transcript', 'NRG Energy (NRG) Q2 2026 Earnings Call Transcript', 'Kimco (KIM) Q2 2026 Earnings Call Transcript'; a DB 'SpaceX analyst plots path to bold $100 billion claim', 'US-Iran impasse sends oil up, dents stocks', 'Neurogene (NASDAQ:NGNE) Shares Down 7.8% After Earnings Miss'. GS e MS restano i due ticker piu' coperti dell'intera watchlist mentre i sei mover mancati della giornata hanno fra zero e una riga a testa. Costo non stimabile: nessun ordine e' nato da queste righe.",
      "fonte": "ALPHA_MISS_REPORT_2026-08-11.md §7"
+    },
+    {
+     "data": "2026-08-12",
+     "costo_usd": 0.0,
+     "nota": "Prima occorrenza del difetto FUORI dal cluster bancario, e questo cambia la lettura della causa. news_log del 2026-08-12, extraction_method='org_lookup', fonte gdelt_gkg: 'Head to Head Survey: Iochpe-Maxion (OTCMKTS:IOCJY) vs. Nokian Renkaat Oyj (OTCMKTS:NKRKF)' e' attribuito a NOK. Nokian Renkaat e' un produttore finlandese di PNEUMATICI, non ha alcun rapporto con Nokia, e il titolo stesso cita il suo ticker OTC (NKRKF). Finora il finding era documentato solo su MS/GS/DB, il che lasciava aperta l'ipotesi di una peculiarita' dei nomi bancari; il caso NOK mostra che la causa e' la somiglianza del NOME SOCIETARIO in generale. Il cluster bancario resta comunque il piu' grosso: MS 18 righe, GS 12, DB 5 = 35 delle 87 righe org_lookup del giorno (40%), su articoli riguardanti easyJet, il Sensex, un 13F su Micron, ERock e Brookfield Infrastructure - nessuno sulle tre banche. COSTO 0.00 VERIFICATO: la riga NOK/Nokian ha prodotto un punteggio 0.000 alle 14:45 e nessun ordine; il BUY su NOK non e' mai avvenuto perche' il titolo era gia' a libro da S1 (vedi F-031).",
+     "fonte": "ALPHA_MISS_REPORT_2026-08-12.md §7"
     }
    ],
    "costo_cumulato_usd": 60.5,
@@ -1225,9 +1261,15 @@
      "costo_usd": null,
      "nota": "Terza occorrenza, misurata sui quattro mover del giorno che avevano copertura news. Quota del movimento intraday (apertura->chiusura) gia' avvenuta al prezzo del momento del PRIMO segnale del simbolo: GOOGL 34.4% (segnale 14:15, open 355.91, px 351.78, close 343.92), SPCX 57.1% (14:01, open 138.655, px 135.705, close 133.49), ORCL 110.8% (16:00, open 151.20, px 144.88, close 145.50), NOK 121.1% (16:00, open 9.380, px 9.465, close 9.450). Mediana 84%, in linea con l'82% del 08-07. Novita': su ORCL e NOK la frazione SUPERA il 100%, cioe' al primo segnale il prezzo aveva gia' oltrepassato il proprio livello di chiusura - la notizia non arriva solo in ritardo, arriva dopo l'estremo. Caso NOK esemplare: articolo 'Why Is Nokia Stock Surging on Tuesday?' pubblicato alle 15:44 su un +3.40% che era interamente gap di apertura (open 9.38 contro un close precedente di 9.14).",
      "fonte": "ALPHA_MISS_REPORT_2026-08-11.md §7"
+    },
+    {
+     "data": "2026-08-12",
+     "costo_usd": 41.31,
+     "nota": "Sesta occorrenza, e la prima in cui il difetto e' misurabile su ENTRAMBE le facce nello stesso giorno. (a) LATO MISS - la metrica solita (quota del movimento intraday gia' avvenuta al primo segnale) e' DEGENERE oggi e non la riporto: con denominatori close-open dell'ordine di 0.03%-0.31% produce valori fra -498% e +113% privi di significato. La forma corretta della stessa osservazione oggi e' la quota nel GAP di apertura: sui 9 mover al rialzo e' NOK 109%, WDC 118%, INTC 111%, MU 104%, AMAT 99%, ORCL 94%, DELL 42%, NVDA 54%, SPCX 14% - mediana 99%, e su 7 nomi su 9 la gamba intraday e' piatta o negativa. Il movimento era integralmente fuori dalla sessione. ORCL, unico miss con costo positivo, vale 117.95 sul return pieno con size S4 2200 $ ma solo 6.82 sulla porzione realmente catturabile (+0.31% apertura->chiusura). (b) LATO INGRESSO - i tre ingressi S4 del giorno cadono al 77mo, 71mo e 92mo percentile del range della giornata (NVDA 0.768, INTC 0.714, SPCX 0.920) contro una mediana mobile a 20 giorni di 0.535, e le tre posizioni sono TUTTE in perdita su tre titoli che hanno TUTTI chiuso in verde (+3.03%, +3.32%, +9.65%): SPCX -18.33 e INTC -16.16 di MTM aperto, NVDA -0.93 realizzato. Il titolo e' scelto bene, il momento no. COSTO 41.31 = 34.49 MISURATI sul MTM aperto dei due ingressi (SPCX+INTC) + 6.82 CONGETTURALI sulla porzione catturabile di ORCL; i -0.93 di NVDA NON sono qui, il suo caso e' su F-008. Precedente non registrato come finding: il 08-06 gia' MSFT 0.753 e SPCX 0.748 contro mediana 0.526, quindi quattro ingressi su quattro sopra la mediana in due sedute distinte.",
+     "fonte": "ALPHA_MISS_REPORT_2026-08-12.md §7"
     }
    ],
-   "costo_cumulato_usd": 0,
+   "costo_cumulato_usd": 41.31,
    "occorrenze_non_stimate": 3,
    "stato": "aperto",
    "issue": null
@@ -1256,6 +1298,12 @@
      "costo_usd": 2.2,
      "nota": "Terza occorrenza, e la prima su un mover con segnale largamente sopra il gate. NOK, +3.40%, unico titolo della giornata con articolo ticker-specifico e direzionale ('Why Is Nokia Stock Surging on Tuesday?', news_log 7253, pubblicato 15:44): sentiment ensemble non-fallback +0.725 al ciclo 16:07 e +0.605 al ciclo 18:07, entrambi SKIP_PYRAMIDING con reason 'P0-05 anti-pyramiding: gia' a libro dal 2026-07-14, peso non allocato 2.0%' (la posizione e' di S1). CAMBIAMENTO DA REGISTRARE: la traccia in execution_decisions ADESSO C'E' (righe SKIP_PYRAMIDING esplicite con score e peso non allocato), quindi la seconda meta' del titolo del finding - 'non lascia alcuna traccia in execution_decisions' - non descrive piu' il presente; resta il meccanismo di blocco. COSTO 2.20, non 75: alle 16:07 NOK quotava 9.465 contro un close di 9.450, cioe' l'intero +3.40% della giornata era gap di apertura e dopo il segnale il titolo e' rimasto piatto (2200 $ x +0.1%). Il costo e' basso per un motivo che appartiene a F-030, non a questo finding: il segnale e' arrivato a movimento concluso.",
      "fonte": "ALPHA_MISS_REPORT_2026-08-11.md §7"
+    },
+    {
+     "data": "2026-08-12",
+     "costo_usd": 0.0,
+     "nota": "Quarta occorrenza. 8 simboli hanno prodotto oggi un segnale S4 sopra il gate 0.300 e sono stati bloccati da SKIP_PYRAMIDING (P0-05), 12 righe in totale: AMD (+0.475, peso non allocato 2.4%), INTC (+0.083, 3.1%), MU (+0.396, 2.3%), NOK (+0.672, 2.0%), RIO (+0.465, 2.7%), SOXX (+0.318, 2.6%), SPY (+0.427, 2.6%), TSM (+0.382, 2.7%). Due sono mover del giorno: NOK (+9.32%, il punteggio +0.672 e' il piu' alto della giornata) e MU (+4.92%), entrambi gia' a libro da S1 da luglio. COSTO 0.00 VERIFICATO, NON stimato per difetto: entrambi i segnali arrivano alle 16:37, cioe' DOPO il gap di apertura che contiene il 109% e il 104% del rispettivo movimento, e le gambe intraday sono -0.72% (NOK) e -0.18% (MU) - gli ingressi bloccati avrebbero perso denaro. Oggi il guard ha risparmiato. Nota positiva sulla telemetria: a differenza delle occorrenze precedenti le righe SKIP_PYRAMIDING sono presenti e riportano peso non allocato e data di ingresso, quindi il blocco NON e' silenzioso in questa forma. Registro la ricorrenza strutturale, non un costo.",
+     "fonte": "ALPHA_MISS_REPORT_2026-08-12.md §7"
     }
    ],
    "costo_cumulato_usd": 12.47,
@@ -1338,9 +1386,15 @@
      "costo_usd": null,
      "nota": "Primo avvistamento, meccanismo identificato nel codice. Entrambe le uscite del 2026-08-11 (SONY 14:22, HOOD 18:22, execution_decisions 8866 e 9260) portano la motivazione 'S4 signal was stale but FIX-D re-admitted it this cycle - open position, no counter-signal - and the weight is 0 anyway: the mechanism that zeroed it is not recorded, see #184' ed exit_mechanism='unknown'. La causa: portfolio_scheduler.py:714 _preserve_stale_signals_for_open_positions ri-ammette il segnale stale, poi src/strategies/s4/strategy.py:167-169 riapplica la STESSA finestra max_signal_age_hours=4 sullo stesso DataFrame e lo rielimina; il simbolo esce dai target_weights, il peso va a 0, exit_persistence_cycles=2 conferma e la SELL parte. Le eta' combaciano al minuto: SONY 19,6h (fuori dal 1o ciclo del giorno, SELL al 2o), HOOD 4,3h (fuori alle 18:07, SELL alle 18:22). Il commento nel codice dichiara che il filtro serve alla parita' backtest/live (QS-07), ma nel live la rompe perche' il live ha una deroga (FIX-D) che il backtest non ha. COSTO NULL DELIBERATO, NON NON-STIMATO: i dollari di questi due trade (SONY net -5,47, HOOD net -8,82, netto post-uscita 3,88) sono gia' contati sull'occorrenza 2026-08-11 di F-024; qui si registra il MECCANISMO, distinto da F-024 perche' sopravvivrebbe anche passando l'eta' a tempo di mercato. Ticket TK-A.",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-11.md sezione 10 [DAY-001]"
+    },
+    {
+     "data": "2026-08-12",
+     "costo_usd": 13.71,
+     "nota": "Seconda giornata consecutiva, reason identica parola per parola a quella di SONY e HOOD del 08-11. IBM, execution_decisions delle 14:22 del 2026-08-12, decision=SELL con order_id d7656e42-8f6b-453e-8ff9-de5a901d5875 e reason '[unknown] S4 signal was stale but FIX-D re-admitted it this cycle - open position, no counter-signal - and the weight is 0 anyway: the mechanism that zeroed it is not recorded'. Posizione S4 aperta il 08-11 alle 19:07, tenuta 19.25h, chiusa a 233.27368 su 5.067182051 azioni con net_pnl -26.47. Dopo l'uscita IBM RISALE: chiude a 235.98, cioe' +13.71 sulla stessa quantita' (drift_post_uscita del dossier deterministico). COSTO ATTRIBUITO 13.71, controfattuale corto (stessa giornata, stessa size, stesso strumento) - e' il costo dell'uscita anticipata, non il -26.47 realizzato, che include la perdita gia' maturata prima. Il meccanismo e' quello isolato ieri nel codice: portfolio_scheduler.py:714 ri-ammette il segnale stale, src/strategies/s4/strategy.py:167-169 riapplica la stessa finestra max_signal_age_hours=4 e lo rielimina, il peso va a 0.",
+     "fonte": "ALPHA_MISS_REPORT_2026-08-12.md §7"
     }
    ],
-   "costo_cumulato_usd": 0,
+   "costo_cumulato_usd": 13.71,
    "occorrenze_non_stimate": 1,
    "stato": "aperto",
    "issue": null
