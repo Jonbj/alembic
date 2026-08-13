@@ -18,7 +18,9 @@ finisce in `signals_df`, ma viene buttato fuori da `_signals_as_of` perché
 
 Il ranker vede quindi solo i fresh (DIS nel caso 14:22). Il simbolo scartato
 esce da `target_weights` di S4, il suo peso merged scende a 0 e
-`src/portfolio/orchestrator.py:271-288` emette la SELL (`strategy_id="merged"`).
+`src/portfolio/orchestrator.py:247-265` emette la SELL (`strategy_id="merged"`):
+il loop "Sell any positions whose symbol dropped out of the merged target
+entirely" vende ogni posizione il cui simbolo non è più in `merged_weights`.
 Etichetta storica `expired` (pre-#184); #184 — **deployato**, ~2026-08-07 — la
 corregge a `unknown`, ma il meccanismo di uscita resta identico.
 
@@ -28,9 +30,11 @@ Una bozza di questo finding attribuiva la SELL a `NewsDrivenTactical.__call__:10
 È sbagliato: quel ramo è il path di **backtest** (lo strategy chiamato come
 callable, che emette `Order` propri). In live il portfolio-cycle non chiama
 `__call__`: l'orchestrator estrae i pesi via `_extract_target_weights`
-(`src/portfolio/orchestrator.py:435-437`, che per `strategy_id == "S4"` chiama
-`_signals_as_of(ts)` + `compute_target_weights`), li fonde in `merged_weights`
-e poi vende in `orchestrator.py:271-288` con `strategy_id="merged"`.
+(`src/portfolio/orchestrator.py:349-366`, che per `strategy_id == "S4"` chiama
+`_signals_as_of(ts)` + `compute_target_weights` — la chiamata a `_signals_as_of`
+è a `orchestrator.py:365`), li fonde in `merged_weights`
+(`orchestrator.py:190`) e poi vende in `orchestrator.py:247-265` con
+`strategy_id="merged"`.
 
 Due conseguenze non ovvie, entrambe visibili solo sul path live:
 
@@ -81,11 +85,11 @@ rompere; i cinque xfail fissano il contratto post-fix:
 ## Meccanismo (passo per passo)
 
 File coinvolti:
-- `src/workers/portfolio_scheduler.py:3621-3624` — FIX-D preserva MCD/NVO/PFE/PLTR
-- `src/workers/portfolio_scheduler.py:3644-3656` — `signals_df` include i preservati
+- `src/workers/portfolio_scheduler.py:3620-3628` — FIX-D preserva MCD/NVO/PFE/PLTR
+- `src/workers/portfolio_scheduler.py:3651-3661` — `signals_df` include i preservati
 - `src/strategies/s4/strategy.py:156-169` — `_signals_as_of` ri-filtra per età
-- `src/portfolio/orchestrator.py:435-437` — l'orchestrator chiama `_signals_as_of`
-- `src/portfolio/orchestrator.py:271-288` — peso merged ≤ 0 → SELL `strategy_id="merged"`
+- `src/portfolio/orchestrator.py:349-366` — `_extract_target_weights`, che chiama `_signals_as_of` (riga 365)
+- `src/portfolio/orchestrator.py:247-265` — peso merged ≤ 0 → SELL `strategy_id="merged"`
 
 I numeri del caso 14:22:
 
@@ -277,14 +281,14 @@ ma il suo autore ha ragionato sul contratto pre-FIX-D.
 ## Interazione col clock di rebalance (leva, non alternativa)
 
 S4 dichiara `RebalanceFrequency.DAILY` (`src/strategies/s4/config.py:40`) ma non
-è in `_REBALANCE_CLOCK_STRATEGIES` (`src/workers/portfolio_scheduler.py:481`,
+è in `_REBALANCE_CLOCK_STRATEGIES` (`src/workers/portfolio_scheduler.py:413`,
 oggi `frozenset({"S1"})`), e la sua istanza viene ricostruita a ogni ciclo con
-`_last_rebalance=None` (`portfolio_scheduler.py:3733`): in pratica S4 gira ogni
+`_last_rebalance=None` (`portfolio_scheduler.py:3732-3738`): in pratica S4 gira ogni
 15 minuti, non una volta al giorno.
 
 Clockare S4 ridurrebbe la frequenza con cui il difetto può scattare — ma **non è
 un'alternativa neutra al fix**. L'esclusione di S4 dal clock è deliberata e
-documentata sul posto (`portfolio_scheduler.py:474-480` e `3727-3732`): il
+documentata sul posto (`portfolio_scheduler.py:408-413` e `3732-3737`): il
 predicato DAILY è calendar-day based, quindi clockare S4 collasserebbe una
 sleeve tattica news-driven a una decisione per sessione, **congelandone gli
 ingressi intraday** — cioè esattamente il comportamento su cui è misurata la sua
@@ -309,12 +313,47 @@ tasso stazionario da estrapolare.
 - Cambio di comportamento di S4 (incluso il clock DAILY): decisione operatore.
 - Il DoD di #186 dice "indagine, non fix".
 
+## Verifica post-#233 (2026-08-13)
+
+#233 ha consegnato l'indagine (questo documento + gli xfail test) lasciando
+#186 aperto con `Part of #186`. Una ripassata post-merge conferma che ogni
+affermazione del finding regge contro il codice e il DB live, e chiude #186:
+
+- **Meccanismo verificato contro il codice.** Il filtro QS-07 a
+  `src/strategies/s4/strategy.py:167-169` (`df = df[df["generated_at"] >= ts -
+  timedelta(hours=max_age)]`) non guarda alcun marcatore di provenienza; il
+  `signals_df` costruito in `portfolio_scheduler.py:3651-3661` non ha colonna
+  `fix_d_preserved`. I preservati da FIX-D (age 19h) vengono quindi scartati.
+  La SELL live nasce nel loop "dropped out of the merged target entirely" a
+  `orchestrator.py:247-265`, non nel path backtest `__call__:101-114`.
+- **Test riprodotti.** `pytest tests/strategies/test_s4_fix_d_parity_defect.py`
+  dà `2 passed, 5 xfailed` (nessun XPASS: il fix #236 non è ancora applicato).
+- **Conteggi DB riprodotti.** La query di §"Verifica" contro `alembic-postgres-1`
+  restituisce `expired=27`, `unknown=3` — identico al finding (30 uscite S4 a
+  peso-zero in 40gg, tutte `expired` o `unknown`; il breakdown preserved-stale /
+  just-over-threshold di §"Quantificazione" è su `reason`, non su questa colonna).
+- **DoD #186 tutta soddisfatta**: caso riprodotto (test) ✓, difetto di design
+  stabilito ✓, occorrenze quantificate su 40gg con P&L ✓, issue di fix separata
+  aperta con meccanismo descritto (**#236**) ✓, periodo di detenzione effettivo
+  scritto (mediana 11-19h) ✓.
+- **Correzioni di accuratezza**: i riferimenti di riga originali del finding a
+  `orchestrator.py` puntavano fuori file (435-437 > 397 righe) e al blocco
+  vol-targeter/log (271-288) anziché al loop di SELL (247-265); alcuni refs di
+  `portfolio_scheduler.py` erano offset. Corretti in questo passaggio: il
+  meccanismo descritto era già giusto, i puntatori no. Nessuna modifica al
+  codice, solo a questo documento e ai docstring del test.
+
+Il fix resta tracciato in **#236**, bloccato dal freeze #171. La modifica del
+comportamento di S4 resta decisione dell'operatore. Con l'indagine completa e
+verificata, #186 si chiude qui.
+
 ## File toccati da questo lavoro
 
-- **Creato**: `tests/strategies/test_s4_fix_d_parity_defect.py` — 2 verdi +
+- **Creato (#233)**: `tests/strategies/test_s4_fix_d_parity_defect.py` — 2 verdi +
   5 xfail(strict). Da mantenere per il freeze #171 e da usare come acceptance
-  test di #236.
-- **Creato**: `docs/issues/186/FINDING.md` — questo file.
+  test di #236. Docstring corretti in questo passaggio (refs `orchestrator.py`).
+- **Creato (#233)**: `docs/issues/186/FINDING.md` — questo file. Riferimenti di
+  riga corretti in questo passaggio (§"Verifica post-#233").
 - Non modificato: `src/strategies/s4/strategy.py` (freeze #171),
   `src/workers/portfolio_scheduler.py`, `docs/evidence/findings.json` (vietato),
   `docs/evidence/OBSERVATION_CHARTER.md` (vietato),
