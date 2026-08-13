@@ -42,18 +42,30 @@ class _MemoryRedis:
         return []
 
 
+@pytest.mark.parametrize(
+    "original_mode",
+    ("backtest", "paper", "semi_auto", "full_auto", "dry_run"),
+)
 @pytest.mark.asyncio
-async def test_killswitch_deactivation_restores_mode_active_before_halt() -> None:
+async def test_killswitch_deactivation_restores_mode_active_before_halt(
+    original_mode: str,
+) -> None:
     redis = _MemoryRedis()
     store = RedisStore(redis_client=redis)
     pg = MagicMock()
-    store.set_mode("semi_auto")
+    store.set_mode(original_mode)
 
     await activate_killswitch(
         store=store,
         pg=pg,
         _="api_key",
         req=KillswitchRequest(reason="test halt"),
+    )
+    await activate_killswitch(
+        store=store,
+        pg=pg,
+        _="api_key",
+        req=KillswitchRequest(reason="repeated halt"),
     )
 
     old_activation = datetime.now(timezone.utc) - timedelta(seconds=300)
@@ -72,5 +84,6 @@ async def test_killswitch_deactivation_restores_mode_active_before_halt() -> Non
         confirm_token="valid_token",
     )
 
-    assert result == {"killswitch": "deactivated", "mode": "semi_auto"}
-    assert store.get_mode() == "semi_auto"
+    assert result == {"killswitch": "deactivated", "mode": original_mode}
+    assert store.get_mode() == original_mode
+    assert "system:mode:before_halt" not in redis.data
