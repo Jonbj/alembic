@@ -470,9 +470,27 @@ REVEOF
         _REV_FILE="$LOG_DIR/review_${_PR}_$(date +%Y-%m-%d).md"
         printf '## Review automatica — %s\n\nTest rotti in piu%s rispetto a main: **%s**\n\nVerdetto letto: **%s**\n\n---\n\n%s\n' \
             "$REVISORE" "'" "$REGRESSIONI" "$VERDETTO" "$REV_OUT" > "$_REV_FILE"
-        if ! gh pr comment "$_PR" --body-file "$_REV_FILE" >/dev/null 2>&1; then
+        # GitHub rifiuta i commenti oltre ~65k caratteri, e la trascrizione di un
+        # recensore che stampa il diff li supera senza sforzo (319k su #237). Il
+        # risultato era che le review PIU' approfondite erano proprio quelle che
+        # non venivano mai pubblicate. Si pubblica la coda — dove sta il giudizio,
+        # perche' il verdetto e' l'ultima riga — e il resto resta su disco.
+        _REV_BODY="$LOG_DIR/.rev_body_$_PR.md"
+        {
+            printf '## Review automatica — %s\n\nTest rotti in piu%s rispetto a main: **%s**\n\nVerdetto letto: **%s**\n\n---\n\n' \
+                "$REVISORE" "'" "$REGRESSIONI" "$VERDETTO"
+            if (( $(wc -c < "$_REV_FILE") > 50000 )); then
+                printf '_Trascrizione completa in `%s` (%s caratteri). Qui la parte conclusiva._\n\n' \
+                    "${_REV_FILE#"$PROJECT_DIR/"}" "$(wc -c < "$_REV_FILE")"
+                tail -c 40000 "$_REV_FILE"
+            else
+                cat "$_REV_FILE"
+            fi
+        } > "$_REV_BODY"
+        if ! gh pr comment "$_PR" --body-file "$_REV_BODY" >/dev/null 2>&1; then
             log "#$_ISSUE — commento di review NON pubblicato su GitHub: resta in $_REV_FILE"
         fi
+        rm -f "$_REV_BODY"
     else
         log "#$_ISSUE — nessun motore diverso dall'implementatore disponibile: review non eseguita."
     fi
