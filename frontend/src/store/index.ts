@@ -59,8 +59,16 @@ export const useStore = create<AppState>()(
       }),
       {
         name: 'alembic-store',
-        storage: createJSONStorage(() => sessionStorage),
-        partialize: (s) => ({ token: s.token, isAuthenticated: s.isAuthenticated, mode: s.mode, theme: s.theme }),
+        storage: createJSONStorage(() => localStorage),
+        // B5: il token NON è più persistito. sessionStorage era accessibile
+        // a qualsiasi script in caso di XSS, quindi il JWT poteva essere
+        // esfiltato. Ora il token vive solo in memoria: si riloggia al
+        // prossimo refresh. Mode/theme restano persistiti (UX).
+        // Migrazione storage: in passato il token era in sessionStorage —
+        // qui leggiamo localStorage (nuovo default), il vecchio dato in
+        // sessionStorage viene ignorato. Non c'è rollback necessario:
+        // l'utente si riloggia.
+        partialize: (s) => ({ mode: s.mode, theme: s.theme }),
       }
     ),
     { name: 'AlembicStore' }

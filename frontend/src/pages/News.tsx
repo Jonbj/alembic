@@ -1,18 +1,11 @@
 import { Fragment, useState, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { fmtDateTime } from '@/utils/format'
+import { sanitizeUrl } from '@/utils/sanitize'
 import { useQuery } from '@tanstack/react-query'
 import { fetchNews, fetchNewsSourceQuality, type NewsItem, type NewsSourceQualityRow } from '@/api/news'
 import { HelpButton } from '@/components/shared/HelpButton'
 import { SignalTraceLinks } from '@/components/shared/SignalTraceLinks'
-
-function safeUrl(url: string): string | undefined {
-  try {
-    const parsed = new URL(url)
-    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') return url
-  } catch {}
-  return undefined
-}
 
 const DECISION_LABELS: Record<string, string> = {
   BUY: 'BUY',
@@ -356,7 +349,7 @@ export default function News() {
                         </p>
                       )}
                       {(() => {
-                        const href = safeUrl(item.url)
+                        const href = sanitizeUrl(item.url)
                         return href
                           ? <a href={href} target="_blank" rel="noreferrer" style={{ color: 'var(--blue)', fontSize: 12 }}>{item.url}</a>
                           : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.url}</span>

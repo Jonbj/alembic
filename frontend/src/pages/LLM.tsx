@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { fmtDateTime } from '@/utils/format'
+import { sanitizeText } from '@/utils/sanitize'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchLLMFeedback, fetchWeights, approveWeights } from '@/api/llm'
 import { HelpButton } from '@/components/shared/HelpButton'
@@ -86,7 +87,7 @@ export default function LLM() {
                   <td>{f.ensemble_std?.toFixed(3) ?? '—'}</td>
                   <td>{f.fallback_used ? <span className="badge badge-yellow">FB</span> : '—'}</td>
                   <td style={{ maxWidth: 240, fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {f.reasoning}
+                    {sanitizeText(f.reasoning)}
                   </td>
                   <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmtDateTime(f.generated_at)}</td>
                 </tr>
