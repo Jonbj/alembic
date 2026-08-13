@@ -83,12 +83,31 @@ def _s4_blocked(symbol: str, weight: float, ts: datetime) -> dict:
         "tick_time": ts,
         "symbol": symbol,
         "decision": "SKIP_PYRAMIDING",
+        # Il reason NON nomina la sleeve, come in produzione: e' esattamente il
+        # motivo per cui esiste il fallback su `signal_score`. Con "S4" nel testo
+        # l'attribuzione passerebbe dal ramo testuale e il fallback resterebbe
+        # non esercitato — il test sembrerebbe verde senza verificare nulla.
         "reason": (
             "P0-05 anti-pyramiding: gia' a libro dal 2026-07-14, sentiment +0.396, "
-            "peso non allocato 2.3%. Segnale S4 valido."
+            "peso non allocato 2.3%."
         ),
         "score": weight,
+        "signal_score": 0.396,
         "signal_id": 12345,
+    }
+
+
+def _s1_blocked(symbol: str, weight: float, ts: datetime) -> dict:
+    """Blocco anti-pyramiding SENZA `signal_score`: e' l'altra meta' del
+    fallback, e senza questo caso il ramo S1 non verrebbe mai percorso."""
+    return {
+        "tick_time": ts,
+        "symbol": symbol,
+        "decision": "SKIP_PYRAMIDING",
+        "reason": "P0-05 anti-pyramiding: gia' a libro dal 2026-07-14, peso non allocato 1.2%.",
+        "score": weight,
+        "signal_score": None,
+        "signal_id": None,
     }
 
 
@@ -344,19 +363,33 @@ def test_disjoint_books_give_zero_jaccard_and_full_disagreement():
 def test_weight_correlation_uses_the_latest_target_weight_seen():
     # Il peso di una posizione a libro e' quello del suo ultimo intento,
     # non quello congelato all'ingresso: e' cio' che la sleeve vuole ora.
-    cycles = [_ts(2026, 8, 3, 14, 0), _ts(2026, 8, 3, 14, 15)]
+    #
+    # Il test deve FALLIRE se l'aggiornamento del peso viene rimosso, quindi
+    # entrambe le sleeve tengono gli stessi due nomi con pesi diversi fra loro:
+    # al primo ciclo i due vettori coincidono (correlazione 1), e solo
+    # l'applicazione dell'intento S1 su AMD li fa divergere nel secondo.
+    # Senza l'aggiornamento, il secondo ciclo resterebbe identico al primo.
+    # Servono TRE cicli. Con due soli, il peso aggiornato arriverebbe comunque
+    # dal ramo che applica l'intento del ciclo corrente, e il test non
+    # distinguerebbe: cio' che va verificato e' che il peso PERSISTA nei cicli
+    # successivi, quando l'intento non e' piu' quello corrente.
+    cycles = [_ts(2026, 8, 3, 14, 0), _ts(2026, 8, 3, 14, 15), _ts(2026, 8, 3, 14, 30)]
     positions = [
-        _pos("AMD", _S1_REASON, _ts(2026, 7, 14), 0.010),
-        _pos("NOK", _S1_REASON, _ts(2026, 7, 14), 0.010),
+        _pos("AMD", "S4+S1 news-driven: sentiment +0.5, portfolio weight 1.0%.",
+             _ts(2026, 7, 14), 0.010),
+        _pos("NOK", "S4+S1 news-driven: sentiment +0.5, portfolio weight 3.0%.",
+             _ts(2026, 7, 14), 0.030),
     ]
     decisions = [_s1_buy("AMD", 0.040, _ts(2026, 8, 3, 14, 15, 5))]
 
     serie = compute_target_overlap_per_cycle(cycles, positions, decisions)
 
-    assert serie[1]["n_s1"] == 2
-    # AMD e' salita a 0.040, NOK e' rimasta a 0.010: la varianza dei pesi
-    # S1 nel secondo ciclo esiste solo perche' l'intento e' stato applicato.
-    assert serie[0]["weight_correlation"] == 0.0
+    assert serie[2]["n_s1"] == 2
+    # Primo ciclo: nessun intento visto, i due vettori coincidono.
+    assert serie[0]["weight_correlation"] == pytest.approx(1.0)
+    # TERZO ciclo: l'intento e' vecchio di un ciclo. Se il peso non persistesse,
+    # AMD tornerebbe a 0.010 e la correlazione risalirebbe a 1.0.
+    assert serie[2]["weight_correlation"] < 0.0
 
 
 def test_cycles_without_any_target_are_excluded_from_the_summary_means():
@@ -475,3 +508,16 @@ def test_split_by_sleeve_includes_blocked_entry_intents():
     _, s4 = split_by_sleeve(rows)
 
     assert {row["symbol"] for row in s4} == {"AMD"}
+
+
+def test_blocked_entry_without_signal_score_is_attributed_to_s1():
+    # L'altra meta' del fallback strutturale: `signal_score` viene valorizzato
+    # solo per gli ordini con tag S4, quindi un blocco che ne e' privo viene
+    # dall'unica altra sleeve viva. Senza questo caso il ramo S1 del fallback
+    # non verrebbe mai percorso da nessun test.
+    rows = [_s1_blocked("AMD", 0.012, _ts(2026, 8, 11, 14, 37, 8))]
+
+    s1, s4 = split_by_sleeve(rows)
+
+    assert {row["symbol"] for row in s1} == {"AMD"}
+    assert s4 == []
