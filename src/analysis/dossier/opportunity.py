@@ -152,13 +152,13 @@ def compute_opportunity(inp: OpportunityInput) -> dict[str, Any]:
         gross = None
 
     # --- entry / accessible: vedi _accessible --------------------------------
-    accessible, entry_block, exit_block, formula, missingness = _accessible(
+    accessible, entry_block, exit_block, formula, missingness, trade_state = _accessible(
         inp, daily, rendimento, cutoff, exit_policy
     )
 
     # --- costi: solo se c'e' un trade accessibile -----------------------------
     cost_spec: CostSpec | None = inp.get("cost")
-    costi_block, net = _net_cost(accessible, cost_spec)
+    costi_block, net = _net_cost(accessible, cost_spec, trade_state)
 
     return {
         "estimator_version": ESTIMATOR_VERSION,
@@ -180,11 +180,22 @@ def compute_opportunity(inp: OpportunityInput) -> dict[str, Any]:
             "exit_policy": exit_policy,
         },
         "costi": costi_block,
+        "trade_state": trade_state,
         "gross_opportunity_usd": gross,
         "accessible_opportunity_usd": accessible,
         "net_opportunity_usd": net,
         "missingness": missingness,
     }
+
+
+# Trade-state canonici: permettono a _net_cost di distinguere "no trade
+# possibile" (long-only ribasso) da "trade simulato a pareggio" (P&L lordo 0
+# ma costo roundtrip reale). Senza questo segnale, accessible == 0.0 e' un
+# ambiguo fra i due casi (#280 review codex, opportunity.py riga 299).
+TRADE_STATE_NO_TRADE = "no_trade"            # long-only ribasso: non eseguibile
+TRADE_STATE_SIMULATED = "simulated"          # trade eseguito davvero, P&L puo' essere 0
+TRADE_STATE_HELD = "held"                    # posizione gia' detenuta: non e' un miss
+TRADE_STATE_MISSING = "missing"              # dati insufficienti (intraday, eligible_cycle)
 
 
 def _accessible(
@@ -193,10 +204,14 @@ def _accessible(
     rendimento: float | None,
     cutoff: datetime | None,
     exit_policy: str,
-) -> tuple[float | None, dict, dict, str, list[str]]:
+) -> tuple[float | None, dict, dict, str, list[str], str]:
     """Determina la quota accessibile, l'entry, l'exit e la formula applicata.
 
-    Ritorna (accessible_usd, entry_block, exit_block, formula, missingness).
+    Ritorna (accessible_usd, entry_block, exit_block, formula, missingness,
+    trade_state). Il trade_state distingue "no_trade" (long-only ribasso) da
+    "simulated" (trade davvero eseguito, anche con P&L lordo zero) — i due
+    casi producono entrambi accessible=0.0 ma semantiche opposte: il primo
+    non ha costi, il secondo ha il costo roundtrip.
     """
     held = bool(inp.get("held", False))
     book_side = inp.get("book_side", BOOK_SIDE_LONG)
@@ -213,6 +228,7 @@ def _accessible(
             {"price": None, "source": None, "policy": exit_policy},
             "held: not a miss — accessible measured as passive exposure (M4), not conjectured here",
             ["held_position_not_an_alpha_miss"],
+            TRADE_STATE_HELD,
         )
 
     # Ribasso non detenuto in book long-only: ZERO verificato, non null.
@@ -225,6 +241,7 @@ def _accessible(
             {"price": None, "source": "n/a — no trade (long-only, down, not held)", "policy": exit_policy},
             "gross = |close_to_close| x size; accessible = 0 (long_only, no short, not held); net = 0",
             [],
+            TRADE_STATE_NO_TRADE,
         )
 
     # Rialzo non detenuto: serve l'entry al primo ciclo eleggibile (intraday, #277).
@@ -242,6 +259,7 @@ def _accessible(
             exit_block,
             "gross = |close_to_close| x size; accessible = NOT COMPUTABLE without intraday bar at eligible cycle (blocked by #277); net = None",
             missingness,
+            TRADE_STATE_MISSING,
         )
 
     bar = _first_eligible_bar(bars, _as_utc(eligible_cycle_at), cutoff)
@@ -254,6 +272,7 @@ def _accessible(
             exit_block,
             "gross = |close_to_close| x size; accessible = NOT COMPUTABLE (no bar in [eligible_cycle, cutoff]); net = None",
             missingness,
+            TRADE_STATE_MISSING,
         )
 
     entry_price = float(bar["open"])
@@ -266,6 +285,7 @@ def _accessible(
             exit_block,
             "gross = |close_to_close| x size; accessible = NOT COMPUTABLE (entry price <= 0); net = None",
             missingness,
+            TRADE_STATE_MISSING,
         )
 
     shares = size_usd / entry_price if entry_price else None
@@ -285,23 +305,39 @@ def _accessible(
         "accessible = (exit_close - entry_open_at_eligible_cycle) x shares; "
         "net = accessible - roundtrip_cost"
     )
-    return accessible, entry_block, exit_block, formula, missingness
+    return accessible, entry_block, exit_block, formula, missingness, TRADE_STATE_SIMULATED
 
 
 def _net_cost(
-    accessible: float | None, cost_spec: CostSpec | None
+    accessible: float | None, cost_spec: CostSpec | None, trade_state: str
 ) -> tuple[dict, float | None]:
-    """Costi e net. Nessun trade (accessible None o 0) -> costo 0 verificato, net = accessible."""
-    if accessible is None:
-        return {"total_usd": None, "model": ESTIMATOR_MODEL,
-                "spread_bps": None, "impact_bps": None, "regulatory_usd": None,
-                "adv_source": None}, None
-    if accessible == 0.0:
-        # Nessun trade eseguito: costo zero verificato, non null.
+    """Costi e net, discriminati dallo stato del trade.
+
+    trade_state decide il contratto:
+    - "no_trade" (long-only ribasso, non eseguibile): costo 0.0 verificato,
+      net = 0.0. Non stiamo mentendo: il trade non e' avvenuto per vincolo
+      di costruzione, non per pareggio.
+    - "held" / "missing": non c'e' stima di opportunita', costo e net sono None.
+    - "simulated": trade davvero eseguito (anche con P&L lordo 0). Il costo
+      roundtrip va sottratto: net = accessible - cost. Se il modello di costo
+      non e' stato passato (cost_spec None), net resta None con costi None —
+      non inventiamo costi per non nascondere la mancanza.
+
+    Il check precedente `accessible == 0.0` collassava "no_trade" e "simulated
+    a pareggio" nello stesso ramo: per un trade davvero eseguito a P&L zero,
+    il costo roundtrip spariva e net tornava 0 invece di -cost (#280 review
+    codex, opportunity.py riga 299).
+    """
+    if trade_state == TRADE_STATE_NO_TRADE:
         return {"total_usd": 0.0, "model": ESTIMATOR_MODEL,
                 "spread_bps": 0.0, "impact_bps": 0.0, "regulatory_usd": 0.0,
                 "adv_source": "n/a — no trade"}, 0.0
-    if cost_spec is None:
+    if trade_state in (TRADE_STATE_HELD, TRADE_STATE_MISSING):
+        return {"total_usd": None, "model": ESTIMATOR_MODEL,
+                "spread_bps": None, "impact_bps": None, "regulatory_usd": None,
+                "adv_source": None}, None
+    # TRADE_STATE_SIMULATED: il trade c'e' stato, applico il costo roundtrip.
+    if accessible is None or cost_spec is None:
         return {"total_usd": None, "model": ESTIMATOR_MODEL,
                 "spread_bps": None, "impact_bps": None, "regulatory_usd": None,
                 "adv_source": None}, None

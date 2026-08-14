@@ -238,3 +238,99 @@ def test_pit_bar_dopo_cutoff_ignorato_e_bar_prima_del_ciclo_ignorato():
     # Nessun bar in [14:00, 20:00] -> accessible None con missingness esplicita.
     assert est["accessible_opportunity_usd"] is None
     assert "no_intraday_bar_in_eligible_window" in est["missingness"]
+
+
+def test_trade_simulato_a_pareggio_subisce_il_costo_roundtrip():
+    """Un trade realmente simulato con entry == exit (P&L lordo 0) deve comunque
+    portarsi dietro il costo roundtrip: net = 0 - cost = -cost, non 0.
+
+    Distingue 'ho eseguito il trade a pareggio' (costo reale) da 'long-only,
+    ribasso, non detenuto' (no trade possibile, costo zero verificato). Il bug
+    storico (opportunity.py riga 299) collassava entrambi i casi in accessible=0
+    -> costo 0 / net 0: i test coprivano solo il caso long-only, mancava il caso
+    'trade simulato a pareggio'.
+    """
+    # Rialzo close_prec 100 -> close 110 (+10%). open 110.00 (gap gia' consumato).
+    daily = _daily(110.0, 111.0, 109.0, 110.0, 100.0)
+    # Primo bar PIT al ciclo: open 110.00 = close 110.00 -> P&L lordo 0 ma trade c'e'.
+    bars = [
+        {"timestamp": "2026-08-12T13:55:00+00:00", "open": 105.0, "high": 106.0,
+         "low": 104.0, "close": 106.0},  # prima del ciclo: ignorato
+        {"timestamp": "2026-08-12T14:05:00+00:00", "open": 110.0, "high": 110.2,
+         "low": 109.8, "close": 110.0},  # entry == exit -> P&L lordo 0
+    ]
+    size = 2200.0
+    cost = {"total_usd": 1.30, "spread_bps": 5.0, "impact_bps": 0.4,
+            "regulatory_usd": 0.5, "model": "TradeCostCalculator/cost_model.yaml",
+            "adv_source": "default_fallback"}
+    est = compute_opportunity(
+        {
+            "symbol": "XYZ",
+            "book_side": "long",
+            "held": False,
+            "daily": daily,
+            "intraday_bars": bars,
+            "eligible_cycle_at": "2026-08-12T14:00:00+00:00",
+            "size_usd": size,
+            "slot_fraction": 0.02,
+            "cost": cost,
+            "cutoff": "2026-08-12T20:00:00+00:00",
+            "exit_policy": "EOD_close",
+            "confidenza": "congetturale",
+        }
+    )
+    # P&L lordo = (110 - 110) * shares = 0, MA il trade e' stato eseguito davvero.
+    assert est["accessible_opportunity_usd"] == pytest.approx(0.0)
+    # Il costo roundtrip va sottratto: net = 0 - 1.30 = -1.30.
+    assert est["net_opportunity_usd"] == pytest.approx(-1.30)
+    # Il blocco costi dichiara il roundtrip, NON 0.0.
+    assert est["costi"]["total_usd"] == pytest.approx(1.30)
+    assert est["costi"]["spread_bps"] == pytest.approx(5.0)
+    # L'entry block non deve essere quello del 'no trade' long-only.
+    assert est["entry"]["missing_reason"] is None
+    assert est["entry"]["price"] == 110.0
+    assert est["entry"]["bar_timestamp"] == "2026-08-12T14:05:00+00:00"
+
+
+def test_trade_state_no_trade_vs_simulated_distinti_nel_return():
+    """Lo stimatore deve dichiarare lo stato del trade cosi' l'orchestratore (e
+    i futuri ledger) possono distinguere i due zeri semanticamente opposti:
+    'no_trade' (long-only ribasso) e 'simulated' (ho eseguito davvero, anche a
+    pareggio). Per oggi il campo e' documentato ma non esposto nel return pubblico
+    di compute_opportunity: bastano le missing_reason e i costi per distinguerli."""
+    # Caso 1: long-only ribasso -> costi 0.0, net 0.0, missing_reason long_only_*
+    est_down = compute_opportunity(
+        {
+            "symbol": "META",
+            "book_side": "long",
+            "held": False,
+            "daily": _daily(190.0, 192.0, 184.0, 184.0, 195.0),
+            "size_usd": 2200.0,
+            "cutoff": "2026-08-12T20:00:00+00:00",
+            "confidenza": "congetturale",
+        }
+    )
+    assert est_down["entry"]["missing_reason"] == "long_only_no_short_downside_not_held"
+    assert est_down["costi"]["total_usd"] == 0.0
+    # Caso 2: trade simulato a pareggio -> costi dichiarati, net = -cost
+    est_flat = compute_opportunity(
+        {
+            "symbol": "XYZ",
+            "book_side": "long",
+            "held": False,
+            "daily": _daily(110.0, 111.0, 109.0, 110.0, 100.0),
+            "intraday_bars": [
+                {"timestamp": "2026-08-12T14:05:00+00:00", "open": 110.0,
+                 "high": 110.2, "low": 109.8, "close": 110.0},
+            ],
+            "eligible_cycle_at": "2026-08-12T14:00:00+00:00",
+            "size_usd": 2200.0,
+            "cost": {"total_usd": 1.30, "spread_bps": 5.0, "impact_bps": 0.4,
+                     "regulatory_usd": 0.5, "model": "x", "adv_source": "y"},
+            "cutoff": "2026-08-12T20:00:00+00:00",
+            "confidenza": "congetturale",
+        }
+    )
+    # Stesso accessible == 0.0, ma costo opposto: il return li distingue.
+    assert est_flat["entry"]["missing_reason"] is None
+    assert est_flat["costi"]["total_usd"] == pytest.approx(1.30)
