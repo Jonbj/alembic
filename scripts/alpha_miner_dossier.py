@@ -160,10 +160,12 @@ def _barre(simboli: list[str], giorno: date) -> dict[str, dict]:
 def _barre_intraday(
     simboli: list[str], giorno: date, primo_evento: datetime | None = None
 ) -> tuple[dict[str, list[dict]], datetime]:
-    """Barre SIP a 5 minuti dalle 04:00 alle 20:00 New York.
+    """Barre SIP a 5 minuti dal primo evento (o dalle 04:00) alle 20:00 New York.
 
     Il cutoff e' il minore fra fine after-market e l'istante corrente: anche
     una esecuzione accidentale sul giorno in corso non puo' leggere il futuro.
+    Anticipare l'inizio al primo evento conserva il vero primo prezzo per una
+    notizia pubblicata nella seduta precedente.
     """
     inizio_sessione = datetime.combine(giorno, time(4, 0), tzinfo=NEW_YORK).astimezone(
         timezone.utc
