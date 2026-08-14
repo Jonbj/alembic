@@ -83,3 +83,11 @@ backups/
 # informazione di quando l'ultimo PASS/FAIL e' stato annunciato, non un
 # artefatto decisionale (quello vive in docs/evidence/s4_ic.json).
 docs/evidence/s4_ic_notification.json
+
+# Worktree temporanei lasciati dalle sessioni
+.wt*/
+
+# Log dei container preservati prima di un redeploy (workaround F-027).
+# Servono alla sessione forense del giorno e poi diventano ridondanti: il report
+# li riassume. Fuori da git per non aggiungere ~440K per ogni redeploy.
+docs/evidence/logs_*/

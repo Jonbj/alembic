@@ -590,7 +590,12 @@ Every number below was chosen heuristically and has not been validated against h
 
 **Telegram poller duplicate processing.** `poll-telegram-updates` runs every 5 seconds as a Celery task. If two poll tasks run concurrently, both may process the same `callback_query_id` (approve/reject tap) and attempt to write weights twice. The token hash check mitigates but does not guarantee idempotency.
 
-**API rate limiting absent.** The public endpoints `/api/signals/history`, `/api/news/recent`, and `/api/llm/feedback` have no rate limiting. A client could exhaust the PostgreSQL connection pool with a burst of requests.
+**Public read API rate limiting remains limited.** Security-sensitive admin login,
+mode-change, and kill-switch activation endpoints use Redis-backed rate limiting,
+and browser origins are explicitly allowlisted. High-volume public read endpoints
+such as `/api/signals/history`, `/api/news/recent`, and `/api/llm/feedback` still do
+not have a general request budget; deployment-level ingress throttling remains
+recommended for those routes.
 
 **PostgreSQL connection pool release.** `_get_connection()` returns a connection from `ThreadedConnectionPool`. If a method raises an exception before the connection is returned via `putconn()`, the connection is leaked. Under sustained errors, the pool is exhausted and all subsequent operations fail.
 

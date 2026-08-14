@@ -50,7 +50,10 @@ def _check_live_data(strategy_id: str) -> bool:
         return False
 
 # ─── S1 — Time-Series Momentum (supervised_paper) ────────────────────────────
-# Source: config/s1_strategy.yaml + reports/s1_backtest/summary.json (2026-05-30 snapshot)
+# Source: reports/s1_backtest/summary.json (2026-05-30 snapshot) + S1Config defaults
+# (src/strategies/s1/strategy.py). Nota: non esiste un config/s1_strategy.yaml
+# wired al runtime — i parametri effettivi di S1 sono i default della dataclass
+# (issue #177).
 # Authorization state (2026-06-21): mode=supervised_paper, promotion_blocked=true.
 # Metrics below are a stale historical snapshot — they do NOT authorize promotion.
 

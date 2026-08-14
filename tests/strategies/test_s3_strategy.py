@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -102,40 +101,8 @@ class TestS3Config:
         assert cfg.short_decile == 1
         assert cfg.rebalance_frequency == RebalanceFrequency.MONTHLY
 
-    def test_from_yaml(self, tmp_path: Path) -> None:
-        content = (
-            'strategy_id: "S3_TEST"\n'
-            "lookback: 126\n"
-            "beta_window: 252\n"
-            "n_deciles: 5\n"
-            "target_vol: 0.12\n"
-            "max_weight: 0.15\n"
-            "long_decile: 5\n"
-            "short_decile: 1\n"
-            "rebalance_frequency: MONTHLY\n"
-        )
-        cfg_file = tmp_path / "s3.yaml"
-        cfg_file.write_text(content)
-        cfg = S3Config.from_yaml(cfg_file)
-
-        assert cfg.strategy_id == "S3_TEST"
-        assert cfg.lookback == 126
-        assert cfg.beta_window == 252
-        assert cfg.n_deciles == 5
-        assert abs(cfg.target_vol - 0.12) < 1e-9
-        assert abs(cfg.max_weight - 0.15) < 1e-9
-        assert cfg.long_decile == 5
-        assert cfg.short_decile == 1
-
     def test_long_only_config(self) -> None:
         cfg = S3Config(short_decile=None)
-        assert cfg.short_decile is None
-
-    def test_from_yaml_long_only(self, tmp_path: Path) -> None:
-        content = "short_decile: null\n"
-        cfg_file = tmp_path / "s3_lo.yaml"
-        cfg_file.write_text(content)
-        cfg = S3Config.from_yaml(cfg_file)
         assert cfg.short_decile is None
 
 

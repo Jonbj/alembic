@@ -1,0 +1,46 @@
+# Criterio di riattivazione di S4 — registrato dall'operatore, letto a ogni run
+# da scripts/compute_s4_ic.py.
+#
+# FONTE AUTOREVOLE: docs/evidence/PREREGISTRAZIONE_S4_ORIZZONTE_2026-08-14.md
+# Questo file è la parte del criterio che lo script sa valutare. NON è il
+# criterio completo: R1 (integrità), R3 (economia) e R4 (indipendenza da S1)
+# non sono calcolabili da compute_s4_ic.py e vivono solo nella
+# pre-registrazione. Il criterio è CONGIUNTIVO: un PASS di questo file non
+# autorizza la riattivazione di B da solo.
+#
+# Registrato: 2026-08-14
+# Sostituisce: il criterio nei commenti di #179 del 2026-08-06, ritirato per
+#   quattro errori di specificazione documentati (§1 della pre-registrazione).
+#   Il ritiro è avvenuto mentre il criterio precedente era FAVOREVOLE a S4
+#   (media +0,0078 > 0): non è stato ritirato perché il risultato non piaceva.
+#
+# ┌─ AVVERTENZA SU COSA QUESTO FILE NON PUÒ ANCORA FARE ─────────────────────┐
+# │ `_esito()` in compute_s4_ic.py:178-196 legge `sintesi["tutti"]["1g"]`,   │
+# │ cioè popolazione TUTTI (ensemble + FinBERT-fallback) a UN giorno.        │
+# │ La pre-registrazione dichiara invece popolazione SOLO-ENSEMBLE ∩         │
+# │ |score| ≥ 0,30, orizzonte primario 2 SEDUTE.                            │
+# │                                                                          │
+# │ Finché `_esito()` non è allineato (punto 2 della sequenza §8), l'esito   │
+# │ prodotto da questo file valuta una popolazione e un orizzonte DIVERSI    │
+# │ da quelli registrati, e va letto come diagnostica — non come criterio.   │
+# │ Motivo per cui il disallineamento è documentato invece di essere         │
+# │ corretto in silenzio: era il difetto E3 del criterio precedente, e       │
+# │ nasconderlo lo ripeterebbe.                                             │
+# └──────────────────────────────────────────────────────────────────────────┘
+
+# Sedute pulite (post-fix) richieste prima che l'esito sia decisionale.
+# Derivazione: (3 × 0,243 / 0,05)² ≈ 213, dove 0,243 è la deviazione standard
+# giornaliera degli IC ensemble osservata e 0,05 l'effetto minimo di R2.
+# DA RICALCOLARE sulla varianza post-fix prima di congelare il conteggio: può
+# solo aumentare. Rivederlo al ribasso dopo aver visto i dati è esattamente la
+# mossa che la pre-registrazione esiste per impedire.
+min_giorni: 213
+
+# Soglia di significatività (R2). Newey-West/HAC, non errori standard ingenui:
+# i forward return si sovrappongono.
+significativo_a_t: 3.0
+
+# Effetto minimo rilevabile a quella t. Se l'IC osservato è sotto questa
+# soglia, il campione non può distinguerlo da zero: l'esito onesto è
+# "non decidibile", non "nessun alpha".
+max_ic_rilevabile_a_t: 0.05

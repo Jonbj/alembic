@@ -1,6 +1,7 @@
 """Admin control endpoints for mode management and killswitch."""
 
 import json
+import logging
 import secrets
 from datetime import datetime, timezone
 from typing import Annotated
@@ -9,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from src.api.auth import require_api_key
+from src.api.rate_limit import require_rate_limited_admin
 from src.store.redis_store import RedisStore
 from src.store.pg_store import PostgreSQLStore
 from src.api.deps import get_redis_store, get_pg_store
@@ -21,6 +23,7 @@ from src.llm.model_registry import (
 )
 
 router = APIRouter(prefix="/api/admin")
+log = logging.getLogger(__name__)
 
 _VALID_MODES = frozenset({"backtest", "paper", "semi_auto", "full_auto", "halted", "dry_run"})
 _VALID_LLM_MODELS = frozenset(valid_selection_tokens())
@@ -48,7 +51,7 @@ async def get_mode(
 async def set_mode(
     req: ModeRequest,
     store: Annotated[RedisStore, Depends(get_redis_store)],
-    api_key: Annotated[str, Depends(require_api_key)]
+    api_key: Annotated[str, Depends(require_rate_limited_admin)],
 ) -> dict:
     """Set the system operating mode.
 
@@ -172,10 +175,11 @@ async def request_recovery_token(
 async def activate_killswitch(
     store: Annotated[RedisStore, Depends(get_redis_store)],
     pg: Annotated[PostgreSQLStore, Depends(get_pg_store)],
-    _: Annotated[str, Depends(require_api_key)],
+    _: Annotated[str, Depends(require_rate_limited_admin)],
     req: KillswitchRequest = KillswitchRequest(),
 ) -> dict:
     """Activate the emergency kill-switch with an optional operator-supplied reason."""
+    store.preserve_mode_before_halt()
     store.activate_operator_halt(req.reason)
     store.set_mode("halted")
     try:
@@ -226,14 +230,27 @@ async def deactivate_killswitch(
         )
     store._r.delete("ks:recovery_token")
 
+    resume_mode = store.get_mode_before_halt()
+    if resume_mode not in _VALID_MODES or resume_mode == "halted":
+        log.warning(
+            "Kill-switch mode snapshot missing or invalid (%r); resuming in paper mode",
+            resume_mode,
+        )
+        resume_mode = "paper"
+
+    store.set_mode(resume_mode)
     store.deactivate_killswitch()
     store.deactivate_operator_halt()
-    store.set_mode("paper")
+    store.clear_mode_before_halt()
     try:
         pg.write_audit_log(
             action="KILLSWITCH_DEACTIVATE",
-            details={"source": "api", "token_prefix": confirm_token[:4] + "..."},
+            details={
+                "source": "api",
+                "token_prefix": confirm_token[:4] + "...",
+                "restored_mode": resume_mode,
+            },
         )
     except Exception:
         pass  # audit failure must never block deactivation
-    return {"killswitch": "deactivated", "mode": "paper"}
+    return {"killswitch": "deactivated", "mode": resume_mode}

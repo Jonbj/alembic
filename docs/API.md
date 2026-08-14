@@ -2,7 +2,7 @@
 
 **FastAPI REST API**
 **Version:** 1.0.0
-**Updated:** 2026-06-26
+**Updated:** 2026-08-13
 
 ---
 
@@ -45,6 +45,23 @@ Generate an API key (minimum 32 characters):
 ```bash
 openssl rand -hex 20
 # Set as ADMIN_API_KEY in .env
+```
+
+### Browser admin security
+
+The browser admin API is same-origin by default. Cross-origin clients must be
+allowlisted explicitly; `*` is rejected at startup. Admin login attempts share
+budgets by normalized username and source, while mode changes and kill-switch
+activation are limited per source and endpoint. All limits are backed by Redis,
+return `429` with `Retry-After` when exhausted, and fail closed with `503` if the
+limiter is unavailable.
+
+```dotenv
+CORS_ALLOWED_ORIGINS=https://operator.example
+API_LOGIN_RATE_LIMIT=5
+API_LOGIN_RATE_WINDOW_SECONDS=300
+API_ADMIN_ACTION_RATE_LIMIT=5
+API_ADMIN_ACTION_RATE_WINDOW_SECONDS=60
 ```
 
 ---

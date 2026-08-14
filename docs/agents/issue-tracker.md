@@ -96,6 +96,14 @@ cat logs/roadmap_agent_state.tsv              # issue <TAB> failed attempts (2 =
 Both gates green → the loop merges. Anything else — reject, CI that never finished, no second
 engine available — leaves the PR open with a Telegram.
 
+**After a rejection.** A rejected PR used to freeze its issue forever: the loop skips issues that
+already have an open PR, so nothing ever picked it back up. Now a `VERDETTO: RESPINGI` makes the
+issue workable again — the loop checks out **the same branch**, with the rejecting review pasted into
+the prompt, and fixes rather than restarts. After `MAX_RESPINTE` (2) rejections the issue leaves the
+rotation with a Telegram: when two different models fail on the same spec, the problem is the spec,
+and a third round won't find it. The counter lives in `logs/roadmap_agent_respinte.tsv` and is reset
+only when the *specification itself* changes — that is what the cap means, not a loophole.
+
 **Deploy.** A merge is not a deploy: `src/`, `config/` and `scripts/` are `COPY`ed into the image,
 not mounted. `scripts/deploy_reconcile.sh` closes that gap — it is a *reconciler*, not a
 post-merge hook: it compares the commit actually running against `origin/main` and acts only if
@@ -109,6 +117,15 @@ hours; the loop also calls it right after an auto-merge so a free window isn't w
 scripts/deploy_reconcile.sh --stato   # what runs vs origin/main — touches nothing
 scripts/deploy_reconcile.sh --forza   # ignore the market window (operator)
 ```
+
+**Daily health check.** `scripts/roadmap_health_check.sh` runs every morning at 10:05 and asks one
+question: did yesterday's work reach merge *and* deploy? It exists because every stage of the chain
+fails by leaving the previous state intact — "no errors" and "stuck for three days" look identical
+from outside. It flags: loop PRs older than 18h (distinguishing *rejected* — healthy — from
+*approved but unmerged*, which means the merge broke, from *no verdict*, which means the review died
+mid-way); production behind `origin/main` on files that actually require a rebuild; a deploy
+reconciler that announces itself more often than it finishes; a day with zero loop runs; benched
+engines. Telegram either way, so silence itself is never the signal.
 
 **Rate limits.** An exhausted engine is not a broken engine. Its output is matched against a
 deliberately broad set of signatures; on a hit it is benched for 3h and the run **fails over to
