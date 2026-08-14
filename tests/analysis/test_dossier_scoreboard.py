@@ -53,17 +53,30 @@ def test_dominant_miss_copre_le_cause_del_ledger_non_solo_la_tassonomia_dossier(
 # --- SPY cumulative return -------------------------------------------------
 
 
-def test_spy_cumulative_return_e_composto():
+def test_spy_cumulative_return_e_composto_sul_primo_giorno_dopo_window_start():
+    """Allineamento con S1: il P&L economico di S1 vale 0 a window_start perche' la
+    baseline e' il close del primo giorno; SPY cum non puo' quindi includere il
+    rendimento di window_start (che andra' confrontato con 0, non con la variazione
+    dal close precedente). Il rendimento cumulato parte dal giorno *successivo*
+    a window_start."""
     rows = [_md(date(2026, 8, 3), spy=0.01), _md(date(2026, 8, 4), spy=0.02)]
     r = spy_cumulative_return(rows, W_START, date(2026, 8, 4))
-    assert r == pytest.approx((1.01 * 1.02) - 1.0)
+    assert r == pytest.approx(0.02)
 
 
-def test_spy_cumulative_return_ignora_la_riga_pre_finestra():
-    """La riga 2026-07-31 del ledger non conta (nota della carta)."""
+def test_spy_cumulative_return_ignora_la_riga_pre_finestra_e_il_window_start():
+    """La riga 2026-07-31 del ledger non conta (nota della carta); anche la riga
+    2026-08-03 (= window_start) non entra nel cum per allineamento con S1 = 0
+    a quella data."""
     rows = [_md(date(2026, 7, 31), spy=0.05), _md(date(2026, 8, 3), spy=0.01)]
     r = spy_cumulative_return(rows, W_START, date(2026, 8, 3))
-    assert r == pytest.approx(0.01)
+    assert r == pytest.approx(0.0)
+
+
+def test_spy_cumulative_return_as_of_uguale_a_window_start_restituisce_zero():
+    """Se as_of = window_start, SPY cum = 0 per allineamento con S1 = 0."""
+    rows = [_md(date(2026, 8, 3), spy=0.01)]
+    assert spy_cumulative_return(rows, W_START, date(2026, 8, 3)) == 0.0
 
 
 # --- compute_scoreboard: forma generale ------------------------------------
@@ -124,16 +137,33 @@ def test_scoreboard_s4_vs_200_dentro_e_fuori():
 
 
 def test_scoreboard_s1_vs_spy_in_dollari_sulla_base_capitale_s1():
-    """SPY benchmark in USD = spy_cum_return * capital_base S1, per confronto dollaro-contro-dollaro."""
+    """SPY benchmark in USD = spy_cum_return * capital_base S1, per confronto dollaro-contro-dollaro.
+    SPY cum parte dal giorno *dopo* window_start per allinearsi a S1 = 0 a window_start:
+    la riga 2026-08-03 non entra, la riga 2026-08-07 si' -> spy cum = 0.02."""
     rows = [_md(date(2026, 8, 3), spy=0.01), _md(date(2026, 8, 7), spy=0.02)]
-    # capital_base S1 = 10000, spy cum = (1.01*1.02)-1 = 0.0302 -> benchmark 302
     sb = compute_scoreboard(_economic([0, 0, 500.0], [0, 0, 0], [0, 0, 0], capital_s1=10000.0),
                             rows, W_START, date(2026, 8, 12))
     assert sb["s1_vs_spy"]["s1_cumulato"] == pytest.approx(500.0)
-    assert sb["s1_vs_spy"]["spy_cum_return"] == pytest.approx((1.01 * 1.02) - 1.0)
-    assert sb["s1_vs_spy"]["spy_benchmark_usd"] == pytest.approx(((1.01 * 1.02) - 1.0) * 10000.0)
-    assert sb["s1_vs_spy"]["delta_vs_spy"] == pytest.approx(500.0 - ((1.01 * 1.02) - 1.0) * 10000.0)
+    assert sb["s1_vs_spy"]["spy_cum_return"] == pytest.approx(0.02)
+    assert sb["s1_vs_spy"]["spy_benchmark_usd"] == pytest.approx(0.02 * 10000.0)
+    assert sb["s1_vs_spy"]["delta_vs_spy"] == pytest.approx(500.0 - 0.02 * 10000.0)
     assert sb["s1_vs_spy"]["capital_base"] == 10000.0
+
+
+def test_scoreboard_s1_e_spy_allineati_sul_primo_giorno():
+    """S1 cumulato[window_start] = 0 per definizione (mark dal close del primo giorno).
+    SPY cum[window_start] = 0 per la stessa convenzione: il primo rendimento utile
+    e' quello del giorno *successivo*, cosi' il confronto dollaro vs dollaro
+    parte dallo stesso livello."""
+    rows = [_md(W_START, spy=0.05)]
+    giorni = [W_START]
+    sb = compute_scoreboard(
+        _economic([0.0], [0.0], [0.0], capital_s1=10000.0, giorni=giorni),
+        rows, W_START, W_START,
+    )
+    assert sb["s1_vs_spy"]["s1_cumulato"] == 0.0
+    assert sb["s1_vs_spy"]["spy_cum_return"] == 0.0
+    assert sb["s1_vs_spy"]["delta_vs_spy"] == 0.0
 
 
 def test_scoreboard_book_e_la_somma_inclusa_contaminazione():

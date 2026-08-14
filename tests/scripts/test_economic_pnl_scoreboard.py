@@ -99,8 +99,9 @@ def test_orchestratore_s4_dentro_200_e_s1_vs_spy():
     assert sb["s4_vs_200"]["within"] is True
     # S1 capital_base = close 08-03 * qty = 100*10 = 1000
     assert sb["s1_vs_spy"]["capital_base"] == 1000.0
-    # SPY cum = (1.01)(0.995)(1.02)(1.003) - 1
-    spy = (1.01 * 0.995 * 1.02 * 1.003) - 1.0
+    # SPY cum = prodotto dei rendimenti *dopo* window_start (08-03 escluso per
+    # allineamento con S1 = 0 a window_start). Giorni inclusi: 08-04, 08-07, 08-12.
+    spy = (0.995 * 1.02 * 1.003) - 1.0
     assert sb["s1_vs_spy"]["spy_cum_return"] == spy
     assert sb["s1_vs_spy"]["spy_benchmark_usd"] == spy * 1000.0
 

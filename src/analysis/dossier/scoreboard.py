@@ -21,6 +21,14 @@ di un benchmark pubblico alla base di capitale reale di S1: strumentazione, non
 taratura. Il rendimento SPY grezzo resta esposto accanto, cosi' l'operatore puo'
 giudicare anche senza la conversione.
 
+Allineamento del primo giorno: il P&L economico di S1 vale 0 a ``window_start``
+per definizione (mark dal close del primo giorno); il rendimento cumulato SPY
+parte quindi dal giorno *successivo* a ``window_start`` (intervallo aperto a
+sinistra), cosi' la serie SPY in dollari parte dallo stesso livello (zero) di
+S1. Includere il rendimento di ``window_start`` significherebbe confrontare
+"variazione dal close precedente" (SPY) con "variazione dal close di
+window_start" (S1) -- due baseline diverse, off-by-one temporale.
+
 DISCONTINUITA' #185 / #191 (charter, sezione "Discontinuita' nella serie
 osservata"):
 
@@ -81,14 +89,17 @@ def spy_cumulative_return(
 ) -> float:
     """Rendimento cumulato composto di SPY sulla finestra.
 
-    Le righe anteriori al window_start (la riga 2026-07-31 del ledger) non
+    Allineamento con S1: il P&L economico di S1 vale 0 a ``window_start`` per
+    definizione (mark dal close del primo giorno); il rendimento cumulato SPY
+    parte quindi dal giorno *successivo* a ``window_start`` (intervallo aperto a
+    sinistra). Anche le righe anteriori a ``window_start`` (es. 2026-07-31) non
     contano, come dice la nota della carta. Restituisce 0.0 se nessun giorno
-    rientra nella finestra.
+    *strettamente successivo* a ``window_start`` rientra nella finestra.
     """
     rendimenti = [
         float(r["spy"])
         for r in market_rows
-        if window_start <= _to_date(r["data"]) <= as_of
+        if window_start < _to_date(r["data"]) <= as_of
     ]
     cum = 1.0
     for r in rendimenti:

@@ -136,9 +136,9 @@
     },
     "s1_vs_spy": {
       "s1_cumulato": 926.6884644244344,
-      "spy_cum_return": 0.03370358813555829,
-      "spy_benchmark_usd": 1121.0413245184689,
-      "delta_vs_spy": -194.35286009403444,
+      "spy_cum_return": 0.01919700753009579,
+      "spy_benchmark_usd": 638.5266358517088,
+      "delta_vs_spy": 288.16182857272565,
       "capital_base": 33261.779725338405
     },
     "book": {
