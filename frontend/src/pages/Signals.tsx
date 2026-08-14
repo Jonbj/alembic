@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { fmtDateTime } from '@/utils/format'
+import { sanitizeText } from '@/utils/sanitize'
 import { useQuery } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { fetchSignals, type Signal } from '@/api/signals'
@@ -225,7 +226,7 @@ export default function Signals() {
                     }}
                     emptyMessage="—"
                   />,
-                  <span style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.4 }}>{d.reason ?? '—'}</span>,
+                  <span style={{ color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.4 }}>{sanitizeText(d.reason ?? '')}</span>,
                 ],
               }
             })}

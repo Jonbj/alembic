@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchNextLabel, fetchLabelProgress, submitLabel } from '@/api/labeling'
 import { fmtDateTime } from '@/utils/format'
+import { sanitizeText } from '@/utils/sanitize'
 import { HelpButton } from '@/components/shared/HelpButton'
 
 const RELEVANCE = ['company_specific', 'sector', 'macro', 'irrelevant'] as const
@@ -110,8 +111,8 @@ export default function Labeling() {
               {item.published_at ? fmtDateTime(item.published_at) : '—'}
               {item.text_adequacy === 'headline_only' && <span style={{ marginLeft: 8, color: 'var(--amber, #d97706)' }}>solo titolo</span>}
             </div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>{item.title}</div>
-            {item.body_snippet && <p style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--text)' }}>{item.body_snippet}</p>}
+            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>{sanitizeText(item.title)}</div>
+            {item.body_snippet && <p style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--text)' }}>{sanitizeText(item.body_snippet)}</p>}
           </div>
 
           <div className="card" style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 14 }}>
