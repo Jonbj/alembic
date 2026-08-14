@@ -22,22 +22,26 @@ un bug di per sé, ed è indispensabile in backtest, dove nessuno ha già filtra
 FIX-D il contratto di `signals_df` è "fresh **+ preserved**", e il filtro
 riscrive una decisione di ammissione già presa da `_build_strategy_instance`.
 
-Forma del fix (fuori scope qui per il freeze #171): un marcatore di provenienza
-in `signals_df` — colonna booleana `fix_d_preserved` — che `_signals_as_of`
-deve rispettare, lasciando **intatto** il filtro d'età per i segnali non
-marcati (backtest). Questi test codificano esattamente quel contratto.
+Forma del fix: un marcatore di provenienza in `signals_df` — colonna booleana
+`fix_d_preserved` — che `_signals_as_of` rispetta, lasciando **intatto** il
+filtro d'età per i segnali non marcati (backtest). Questi test codificano
+esattamente quel contratto.
 
-Struttura: 2 test verdi + 5 xfail(strict).
+**Fix applicato il 2026-08-14 (#236).** Questo modulo nasce come evidenza
+riproducibile del difetto sotto il freeze #171, con 2 test verdi + 5
+`xfail(strict)`; alla deroga d'ambito i cinque sono diventati `XPASS` e sono
+stati promossi a verdi, e il bug-witness del ciclo 14:22 è stato invertito —
+descriveva il comportamento rotto, ora è il test di regressione.
 
-- verdi:  il bug-witness del ciclo 14:22 (oggi i marcati vengono scartati) e la
-          guardia di backtest (i non marcati stale vengono ancora scartati —
-          questo comportamento NON deve cambiare col fix).
-- xfail:  il contratto post-fix (marcatore rispettato in `_signals_as_of` e,
-          simbolo per simbolo, peso non nullo dal ranker). `strict=True`: se
-          uno di questi passa, il fix è arrivato e il test va promosso a verde.
+Struttura attuale: 7 test verdi, di cui due portano il peso del contratto:
 
-Per il freeze #171 non c'è fix nel codice — solo evidenza riproducibile.
-Il fix è tracciato dall'issue separata #236.
+- `test_age_filter_still_drops_unmarked_stale_signals` — il filtro d'età deve
+  restare per i segnali NON marcati. È la metà del contratto che si romperebbe
+  se qualcuno "semplificasse" il fix disattivando QS-07: in backtest nessuno
+  filtra `signals_df` a monte, quindi quello è l'unica difesa contro la
+  contaminazione T0.
+- `test_2026_08_05_14_22_regression_...` — l'incidente storico, ora al
+  contrario.
 """
 from __future__ import annotations
 
@@ -51,9 +55,11 @@ from src.strategies.s4.strategy import NewsDrivenTactical
 
 _TS = datetime(2026, 8, 5, 14, 22, tzinfo=timezone.utc)
 
-_XFAIL_FIX = pytest.mark.xfail(
-    strict=True, reason="#186 — fix blocked by freeze #171 (tracked in #236)",
-)
+# #236 applicato il 2026-08-14: il marcatore `fix_d_preserved` esenta dal filtro
+# d'età i segnali che FIX-D ha già ri-ammesso (strategy.py, `_signals_as_of`).
+# I test che erano xfail(strict) sono stati promossi a verdi, come istruiva il
+# docstring del modulo, e il test testimone del difetto è stato invertito:
+# descriveva il comportamento rotto, ora descrive quello corretto.
 
 # Il ciclo 14:22 del 2026-08-05, punto per punto: 1 fresh (DIS) + 4 segnali
 # stale che `_preserve_stale_signals_for_open_positions` (FIX-D) ha ri-ammesso
@@ -94,24 +100,35 @@ def _strategy(rows: list[dict]) -> NewsDrivenTactical:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Verdi — comportamento osservato oggi in produzione.
+# L'incidente storico e la guardia di backtest.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_2026_08_05_14_22_fix_d_preserved_signals_are_dropped_before_ranking():
-    """Bug witness del ciclo 14:22: 4 preserved + 1 fresh → sopravvive solo DIS.
+def test_2026_08_05_14_22_regression_preserved_signals_reach_the_ranker():
+    """Regressione sull'incidente del ciclo 14:22: nessuno dei 5 va perso.
 
-    Il marcatore `fix_d_preserved` è già nel DataFrame, ma `_signals_as_of` non
-    lo guarda: i 4 escono dal ranker, il peso merged va a 0 e l'orchestrator
-    (`orchestrator.py:247-265`) li vende. Questo test resta verde finché il
-    difetto è in produzione.
+    Prima di #236 questo test era il *testimone del difetto* e pretendeva
+    `{"DIS"}`: il marcatore `fix_d_preserved` era già nel DataFrame ma
+    `_signals_as_of` non lo guardava, quindi i 4 segnali che FIX-D aveva appena
+    ri-ammesso uscivano dal ranker, il peso merged andava a 0 e l'orchestrator
+    (`orchestrator.py:247-265`) vendeva la posizione senza alcun contro-segnale.
+
+    Costo storico del meccanismo, dal DB: 30 uscite S4 a peso-zero in 40 giorni
+    (27 etichettate `expired`, 3 `unknown`), fra cui SONY, HOOD, IBM e SPCX.
+    IBM chiusa a −26,47 $ e risalita di 13,71 $ sulla stessa quantità dopo
+    l'uscita.
+
+    Ora pretende l'inverso, ed è il test che si romperebbe se il difetto
+    tornasse: 1 fresh + 4 preserved = 5 sopravvissuti.
     """
+    expected = {r["symbol"] for r in _CYCLE_14_22}
     survivors = {r.symbol for r in _strategy(_CYCLE_14_22)._signals_as_of(_TS)}
 
-    assert survivors == {"DIS"}, (
-        f"atteso il comportamento rotto (solo DIS sopravvive), got {sorted(survivors)}: "
-        f"se sono sopravvissuti anche i preserved il fix #236 è stato applicato e "
-        f"i test xfail di questo modulo vanno promossi a verdi"
+    assert survivors == expected, (
+        f"atteso {sorted(expected)} (1 fresh + 4 marcati fix_d_preserved), "
+        f"got {sorted(survivors)}: se manca uno dei preserved il filtro d'età di "
+        f"`_signals_as_of` ha ripreso a scartare i segnali ri-ammessi da FIX-D, "
+        f"cioè il difetto #236 è regredito"
     )
 
 
@@ -138,11 +155,11 @@ def test_age_filter_still_drops_unmarked_stale_signals():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# xfail(strict) — contratto post-fix: `_signals_as_of` rispetta il marcatore.
+# Il contratto: `_signals_as_of` rispetta il marcatore.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@_XFAIL_FIX
+
 def test_signals_as_of_honours_fix_d_preserved_marker():
     """Sul ciclo 14:22 completo, tutti e 5 i segnali devono sopravvivere.
 
@@ -160,7 +177,7 @@ def test_signals_as_of_honours_fix_d_preserved_marker():
     )
 
 
-@_XFAIL_FIX
+
 @pytest.mark.parametrize(
     "row", _PRESERVED, ids=[r["symbol"] for r in _PRESERVED],
 )

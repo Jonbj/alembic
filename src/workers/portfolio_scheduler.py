@@ -736,6 +736,44 @@ def _preserve_stale_signals_for_open_positions(
     return fresh_signals + preserved
 
 
+def _signals_to_dataframe(signals: list, preserved: set | None = None):
+    """Build the S4 ``signals_df`` the ranker consumes, carrying FIX-D provenance.
+
+    #236: the ``fix_d_preserved`` column is the whole point of this helper existing
+    as a named function instead of an inline comprehension. ``_signals_as_of``
+    exempts marked rows from the age filter, so a signal that FIX-D deliberately
+    re-admitted survives to the ranker instead of being silently re-dropped on age
+    and closing the position with no counter-signal.
+
+    The column is written for **every** row, ``False`` included: without it the
+    strategy could not tell "not preserved" from "provenance unknown", and would
+    fall back to filtering everything on age — that is, back to the defect.
+
+    Args:
+        signals: admitted signals — fresh plus whatever FIX-D re-admitted.
+        preserved: symbols FIX-D re-admitted this cycle. Empty/None means the
+            cycle preserved nothing, which is the common case.
+
+    Returns:
+        DataFrame with one row per signal.
+    """
+    import pandas as pd
+
+    preserved = preserved or set()
+    return pd.DataFrame([{
+        "symbol": s.symbol,
+        "score": s.score,
+        "confidence": s.confidence,
+        "reasoning": s.reasoning,
+        "model_id": s.model_id,
+        "ensemble_std": s.ensemble_std,
+        "fallback_used": s.fallback_used,
+        "generated_at": s.generated_at,
+        "signal_id": s.signal_id,
+        "fix_d_preserved": s.symbol in preserved,
+    } for s in signals])
+
+
 def _classify_zero_weight_exit(
     last_signal: dict | None,
     max_age_hours: int,
@@ -3622,6 +3660,10 @@ def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None
                 # second open-trades query — same fail-open (empty set) behavior when
                 # that earlier fetch failed, so stale discard is unchanged when DB is
                 # unavailable.
+                # #236: which symbols FIX-D re-admitted, carried into signals_df so
+                # `_signals_as_of` does not re-drop them on age. Initialised here —
+                # outside the branch — because the DataFrame is built either way.
+                _preserved_syms: set[str] = set()
                 if stale_signals:
                     fresh_signals = _preserve_stale_signals_for_open_positions(
                         fresh_signals, stale_signals, _open_syms
@@ -3633,6 +3675,7 @@ def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None
                             _dropped_stale, s4_config.max_signal_age_hours, s4_config.min_score
                         )
                     _preserved = [s for s in fresh_signals if s in stale_signals]
+                    _preserved_syms = {s.symbol for s in _preserved}
                     # #184: overwrite the STALE_DROPPED tag set above — these were
                     # re-admitted, and an exit on them is anything but an expiry.
                     _record_dispositions(
@@ -3647,18 +3690,7 @@ def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None
                         )
                 signals = fresh_signals
                 if signals:
-                    import pandas as pd
-                    signals_df = pd.DataFrame([{
-                        "symbol": s.symbol,
-                        "score": s.score,
-                        "confidence": s.confidence,
-                        "reasoning": s.reasoning,
-                        "model_id": s.model_id,
-                        "ensemble_std": s.ensemble_std,
-                        "fallback_used": s.fallback_used,
-                        "generated_at": s.generated_at,
-                        "signal_id": s.signal_id,
-                    } for s in signals])
+                    signals_df = _signals_to_dataframe(signals, preserved=_preserved_syms)
                     log.info("S4: loaded %d fresh signals (last %dh, max_age=%dh)",
                              len(signals), s4_config.signals_lookback_hours,
                              s4_config.max_signal_age_hours)

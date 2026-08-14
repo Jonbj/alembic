@@ -164,9 +164,26 @@ class NewsDrivenTactical:
             # max_signal_age_hours at each tick (_filter_stale_signals). Apply the same
             # freshness window here so backtest IC is reproducible in live and does not
             # use stale signals the live engine would have discarded (T0 contamination).
+            #
+            # #236: EXCEPT the ones the caller has already decided to re-admit. FIX-D
+            # (_preserve_stale_signals_for_open_positions) puts a stale positive signal
+            # back into signals_df when the symbol has an open position and no
+            # counter-signal, because a signal expiry is not an exit — it means "no new
+            # information". Re-filtering it here on age alone silently overrode that
+            # decision: the symbol left the ranker, its merged weight went to 0, and
+            # the orchestrator sold the position with no counter-signal (SONY, HOOD,
+            # IBM, SPCX — see docs/issues/186/FINDING.md).
+            #
+            # The exemption is by PROVENANCE, not by age: only rows explicitly marked
+            # survive. An unmarked stale row is still dropped, which keeps QS-07 doing
+            # its real job in backtest — where nothing filters signals_df upstream and
+            # this is the only defence against T0 contamination.
             max_age = getattr(self._config, "max_signal_age_hours", 0) or 0
             if max_age > 0:
-                df = df[df["generated_at"] >= ts - timedelta(hours=max_age)]
+                fresh_enough = df["generated_at"] >= ts - timedelta(hours=max_age)
+                if "fix_d_preserved" in df.columns:
+                    fresh_enough = fresh_enough | df["fix_d_preserved"].fillna(False).astype(bool)
+                df = df[fresh_enough]
         results: list[SentimentResult] = []
         for _, row in df.iterrows():
             raw_signal_id = row.get("signal_id") if "signal_id" in row.index else None
