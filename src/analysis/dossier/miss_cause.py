@@ -12,7 +12,15 @@ Tassonomia (ordine di applicazione):
                      prevede e il classificatore non assorbe l'eccezione)
     NO_NEWS         — news_count == 0
     NO_SIGNAL       — news_count > 0 ma segnali vuoto
-    THIN_NEUTRAL    — segnali presenti ma |score| massimo < soglia_thin
+    THIN_NEUTRAL    — segnali presenti ma |score| massimo < soglia_thin, e almeno
+                     una riga di copertura parla davvero del titolo
+    OFF_TOPIC       — stessa banda di punteggio, ma TUTTA la copertura viene da
+                     articoli multi-ticker (#244). Bucket separato perche' le due
+                     diagnosi hanno rimedi opposti: THIN_NEUTRAL dice che il
+                     sentiment editoriale sul titolo non ha alpha, OFF_TOPIC dice
+                     che sul titolo non c'e' copertura e stiamo scorando pezzi su
+                     altre societa'. Richiede il campo `news_fanout`; senza, il
+                     candidato resta THIN_NEUTRAL come prima.
     BELOW_GATE      — |score| massimo in [soglia_thin, soglia_gate)
     NON_CLASSIFICATO — |score| massimo >= soglia_gate (segnale sopra il gate:
                      o non era un miss, o il dossier non sta filtrando bene)
@@ -58,7 +66,14 @@ ClassifiedCandidate = dict
 
 # Nomi delle cause: l'ordine in CAUSE_ORDER determina la dominante in caso di
 # pareggio (esclude NON_CLASSIFICATO, che non e' una causa del fenomeno).
-CAUSE_ORDER = ("NO_NEWS", "BELOW_GATE", "THIN_NEUTRAL", "NO_SIGNAL", "IN_PORTAFOGLIO")
+CAUSE_ORDER = (
+    "NO_NEWS",
+    "BELOW_GATE",
+    "THIN_NEUTRAL",
+    "OFF_TOPIC",
+    "NO_SIGNAL",
+    "IN_PORTAFOGLIO",
+)
 NON_CLASSIFICATO = "NON_CLASSIFICATO"
 
 DEFAULT_SOGLIA_THIN = 0.05
@@ -70,6 +85,30 @@ def _max_score(segnali: list[SignalEvidence]) -> float:
     if not segnali:
         return 0.0
     return max(abs(float(s.get("score", 0.0))) for s in segnali)
+
+
+def _tutta_copertura_fanout(candidato: MissCandidate) -> bool:
+    """True se OGNI riga di copertura del candidato viene da un articolo multi-ticker.
+
+    `news_fanout` conta le righe di `news_log` il cui URL e' taggato a 2+ ticker:
+    liste, rassegne di mercato, comparativi, 13F. Un articolo cosi' viene scorato
+    sotto ogni ticker a cui e' taggato, e produce correttamente ~0.000 per quelli di
+    cui non parla — indistinguibile, senza questo campo, da un pezzo che parla del
+    titolo e non dice nulla.
+
+    **Serve che siano TUTTE.** Se anche una sola riga parla davvero del titolo, la
+    copertura esiste e il giudizio "poco informativa" e' legittimo: riclassificare
+    sarebbe scaricare sulla pipeline un'assenza di alpha reale.
+
+    Retrocompatibile: un candidato senza `news_fanout` (i dossier scritti prima di
+    #244) torna sempre False, cioe' si comporta esattamente come prima. Il ricalcolo
+    storico resta confrontabile.
+    """
+    fanout = candidato.get("news_fanout")
+    if fanout is None:
+        return False
+    news_count = int(candidato.get("news_count", 0) or 0)
+    return news_count > 0 and int(fanout) >= news_count
 
 
 def classify_miss_candidate(
@@ -87,7 +126,7 @@ def classify_miss_candidate(
         return "NO_SIGNAL"
     massimo = _max_score(segnali)
     if massimo < soglia_thin:
-        return "THIN_NEUTRAL"
+        return "OFF_TOPIC" if _tutta_copertura_fanout(candidato) else "THIN_NEUTRAL"
     if massimo < soglia_gate:
         return "BELOW_GATE"
     return NON_CLASSIFICATO
