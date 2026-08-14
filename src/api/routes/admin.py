@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from src.api.auth import require_api_key
+from src.api.rate_limit import require_rate_limited_admin
 from src.store.redis_store import RedisStore
 from src.store.pg_store import PostgreSQLStore
 from src.api.deps import get_redis_store, get_pg_store
@@ -50,7 +51,7 @@ async def get_mode(
 async def set_mode(
     req: ModeRequest,
     store: Annotated[RedisStore, Depends(get_redis_store)],
-    api_key: Annotated[str, Depends(require_api_key)]
+    api_key: Annotated[str, Depends(require_rate_limited_admin)],
 ) -> dict:
     """Set the system operating mode.
 
@@ -174,7 +175,7 @@ async def request_recovery_token(
 async def activate_killswitch(
     store: Annotated[RedisStore, Depends(get_redis_store)],
     pg: Annotated[PostgreSQLStore, Depends(get_pg_store)],
-    _: Annotated[str, Depends(require_api_key)],
+    _: Annotated[str, Depends(require_rate_limited_admin)],
     req: KillswitchRequest = KillswitchRequest(),
 ) -> dict:
     """Activate the emergency kill-switch with an optional operator-supplied reason."""

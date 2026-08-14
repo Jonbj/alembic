@@ -1,7 +1,11 @@
-version: "0.1.0"
-last_modified: "2026-05-29"
+version: "0.2.0"
+last_modified: "2026-08-14"
 changelog:
   - "0.1.0: initial version"
+  - "0.2.0 (#245): assegnati i 25 simboli di watchlist che cadevano nel default
+     tier_d. 17 a tier_b, 8 a tier_c. Il default resta per i simboli davvero
+     sconosciuti; TradeCostCalculator.uncovered_symbols() ora permette di
+     accorgersi quando un simbolo tradabile lo raggiunge."
 
 equity:
   spread_tiers:
@@ -23,13 +27,22 @@ equity:
         WMT, COST, MCD, SBUX, NKE, DIS, CMCSA, HD, NFLX,
         JNJ, PFE, MRK, UNH, ABBV, LLY, NVO, PG,
         BA, GE, GM, F, CAT, MMM, CVX, XOM,
-        T, VZ, TMUS, PLTR
+        T, VZ, TMUS, PLTR,
+        # 2026-08-14 (#245): large-cap di watchlist che cadevano nel default tier_d
+        # ("small-cap, illiquid", 20 bps) solo perché non erano mai stati mappati.
+        # ADR large-cap ad alto volume + tech large-cap + ETF settoriale liquido.
+        IBM, PANW, SAP, SHEL, BP, AZN, UBS, DB, TM, SONY, BABA, RIO, VALE,
+        INFY, WDC, HOOD, SOXX
       ]
       spread_bps: 5.0
       stop_loss_pct: 0.035
     tier_c:
       description: "Mid-cap, niche ETF, less liquid"
-      symbols: []
+      symbols: [
+        # 2026-08-14 (#245): watchlist mid-cap / ADR a basso prezzo / ETF tematico.
+        # Meno liquidi di tier_b ma non "small-cap illiquid": 10 bps, non 20.
+        ERIC, NOK, BIDU, JD, PBR, ROKU, RDDT, SPCX
+      ]
       spread_bps: 10.0
       stop_loss_pct: 0.040
     tier_d:

@@ -6,6 +6,7 @@ backtest report builder (IC net-of-costs). Reads config/cost_model.yaml.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -55,6 +56,26 @@ class TradeCostCalculator:
 
     def _tier(self, symbol: str) -> dict:
         return self._symbol_tier.get(symbol.upper(), self._default_tier)
+
+    def uncovered_symbols(self, symbols: Iterable[str]) -> list[str]:
+        """Return the symbols that would fall back to the default tier.
+
+        The default tier is meant for genuinely unknown symbols. A symbol we
+        deliberately put in the watchlist reaching it is a configuration gap, not a
+        fallback: the modelled cost is subtracted from ``trades.net_pnl``, so pricing
+        a large-cap as "small-cap, illiquid" (20 bps) distorts the economic series the
+        observation period judges the strategies on (#245).
+
+        A symbol listed explicitly under the default tier is *covered* — it has been
+        audited and found illiquid. Only symbols listed nowhere are reported.
+
+        Args:
+            symbols: Ticker symbols to check. Case-insensitive, order preserved.
+
+        Returns:
+            The uncovered symbols, in input order. Empty means full coverage.
+        """
+        return [s for s in symbols if s.upper() not in self._symbol_tier]
 
     def stop_loss_pct(self, symbol: str) -> float:
         """Return stop-loss percentage for symbol based on liquidity tier."""

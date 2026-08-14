@@ -1,0 +1,240 @@
+{
+ "generato_il": "2026-08-14T06:37:37.709487+00:00",
+ "metodo": "una osservazione per simbolo-giorno (ultimo segnale, come il ranker); Spearman cross-sectional giornaliero; t sui giorni; min 5 simboli/giorno; gate |score| >= 0.3",
+ "osservazioni_simbolo_giorno": 2396,
+ "avvertenza": "La scomposizione risponde a UNA domanda: la riga alta-convinzione di s4_ic.json e' una miscela di due popolazioni con segno opposto a 1g e 3g. NON stabilisce la forma della struttura a termine dell'ensemble: vedi sensibilita_min_simboli, dove la forma si capovolge al variare dell'unico parametro arbitrario. Nessuno di questi numeri e' significativo, e sono calcolati su dati pre-fix (resolver, fan-out, copertura).",
+ "scomposizione_2x2": {
+  "ensemble_alta_convinzione": {
+   "1g": {
+    "ic_medio": 0.13720778868474548,
+    "dev_std": 0.3758721804705971,
+    "t_stat": 1.7506627848713776,
+    "giorni": 23,
+    "osservazioni": 303
+   },
+   "3g": {
+    "ic_medio": 0.060914636777752565,
+    "dev_std": 0.21955854316934442,
+    "t_stat": 1.3013156683496483,
+    "giorni": 22,
+    "osservazioni": 298
+   },
+   "5g": {
+    "ic_medio": 0.07421552602536183,
+    "dev_std": 0.24851267282836356,
+    "t_stat": 1.4007401269767883,
+    "giorni": 22,
+    "osservazioni": 298
+   }
+  },
+  "ensemble_sotto_gate": {
+   "1g": {
+    "ic_medio": 0.0004462940239611091,
+    "dev_std": 0.23687844605835753,
+    "t_stat": 0.01221012672393342,
+    "giorni": 42,
+    "osservazioni": 1094
+   },
+   "3g": {
+    "ic_medio": -0.008006162604669614,
+    "dev_std": 0.2666706031972231,
+    "t_stat": -0.18988001560635345,
+    "giorni": 40,
+    "osservazioni": 1028
+   },
+   "5g": {
+    "ic_medio": -0.0037653485183583666,
+    "dev_std": 0.2429149112227205,
+    "t_stat": -0.0955526649878865,
+    "giorni": 38,
+    "osservazioni": 963
+   }
+  },
+  "fallback_alta_convinzione": {
+   "1g": {
+    "ic_medio": -0.09945602966477912,
+    "dev_std": 0.2958588040341077,
+    "t_stat": -0.7516776248343239,
+    "giorni": 5,
+    "osservazioni": 51
+   },
+   "3g": {
+    "ic_medio": -0.08659618338058447,
+    "dev_std": 0.264724918509119,
+    "t_stat": -0.7314572187670888,
+    "giorni": 5,
+    "osservazioni": 51
+   },
+   "5g": {
+    "ic_medio": 0.052388856294722556,
+    "dev_std": 0.49890570348681734,
+    "t_stat": 0.2348039782262436,
+    "giorni": 5,
+    "osservazioni": 51
+   }
+  },
+  "fallback_sotto_gate": {
+   "1g": {
+    "ic_medio": -0.02687127840845471,
+    "dev_std": 0.236575937893523,
+    "t_stat": -0.7093328314341647,
+    "giorni": 39,
+    "osservazioni": 856
+   },
+   "3g": {
+    "ic_medio": -0.013151283534917513,
+    "dev_std": 0.19339425172070515,
+    "t_stat": -0.413642773762751,
+    "giorni": 37,
+    "osservazioni": 834
+   },
+   "5g": {
+    "ic_medio": -0.07739190015324723,
+    "dev_std": 0.1983654378350661,
+    "t_stat": -2.3081473308519693,
+    "giorni": 35,
+    "osservazioni": 804
+   }
+  },
+  "mista_alta_convinzione": {
+   "1g": {
+    "ic_medio": 0.08519051828112431,
+    "dev_std": 0.32546616537290196,
+    "t_stat": 1.4573580365664485,
+    "giorni": 31,
+    "osservazioni": 411
+   },
+   "3g": {
+    "ic_medio": 0.04853105602866867,
+    "dev_std": 0.21343753507471483,
+    "t_stat": 1.2244694209346696,
+    "giorni": 29,
+    "osservazioni": 400
+   },
+   "5g": {
+    "ic_medio": 0.10059765052906407,
+    "dev_std": 0.23351183377013343,
+    "t_stat": 2.3199463537372997,
+    "giorni": 29,
+    "osservazioni": 400
+   }
+  }
+ },
+ "sensibilita_min_simboli": {
+  "3": {
+   "1g": {
+    "ic_medio": 0.18185930465830488,
+    "dev_std": 0.46753096853932385,
+    "t_stat": 2.1305207602559038,
+    "giorni": 30,
+    "osservazioni": 326
+   },
+   "3g": {
+    "ic_medio": 0.12286150032537702,
+    "dev_std": 0.2776421574839142,
+    "t_stat": 2.341582261937739,
+    "giorni": 28,
+    "osservazioni": 317
+   },
+   "5g": {
+    "ic_medio": 0.11902648473421286,
+    "dev_std": 0.32837533743974323,
+    "t_stat": 1.9180154057381966,
+    "giorni": 28,
+    "osservazioni": 317
+   }
+  },
+  "5": {
+   "1g": {
+    "ic_medio": 0.13720778868474548,
+    "dev_std": 0.3758721804705971,
+    "t_stat": 1.7506627848713776,
+    "giorni": 23,
+    "osservazioni": 303
+   },
+   "3g": {
+    "ic_medio": 0.060914636777752565,
+    "dev_std": 0.21955854316934442,
+    "t_stat": 1.3013156683496483,
+    "giorni": 22,
+    "osservazioni": 298
+   },
+   "5g": {
+    "ic_medio": 0.07421552602536183,
+    "dev_std": 0.24851267282836356,
+    "t_stat": 1.4007401269767883,
+    "giorni": 22,
+    "osservazioni": 298
+   }
+  },
+  "8": {
+   "1g": {
+    "ic_medio": 0.0321517594778346,
+    "dev_std": 0.21126718750835863,
+    "t_stat": 0.5271853298670949,
+    "giorni": 12,
+    "osservazioni": 235
+   },
+   "3g": {
+    "ic_medio": 0.14162727965068084,
+    "dev_std": 0.1161295385408869,
+    "t_stat": 4.224689896729035,
+    "giorni": 12,
+    "osservazioni": 235
+   },
+   "5g": {
+    "ic_medio": 0.12820115702394805,
+    "dev_std": 0.13057158843837638,
+    "t_stat": 3.4012133912178175,
+    "giorni": 12,
+    "osservazioni": 235
+   }
+  },
+  "10": {
+   "1g": {
+    "ic_medio": 0.0321517594778346,
+    "dev_std": 0.21126718750835863,
+    "t_stat": 0.5271853298670949,
+    "giorni": 12,
+    "osservazioni": 235
+   },
+   "3g": {
+    "ic_medio": 0.14162727965068084,
+    "dev_std": 0.1161295385408869,
+    "t_stat": 4.224689896729035,
+    "giorni": 12,
+    "osservazioni": 235
+   },
+   "5g": {
+    "ic_medio": 0.12820115702394805,
+    "dev_std": 0.13057158843837638,
+    "t_stat": 3.4012133912178175,
+    "giorni": 12,
+    "osservazioni": 235
+   }
+  },
+  "15": {
+   "1g": {
+    "ic_medio": 0.07172164148974164,
+    "dev_std": 0.15462663947512956,
+    "t_stat": 1.3915126474945636,
+    "giorni": 9,
+    "osservazioni": 203
+   },
+   "3g": {
+    "ic_medio": 0.1416983257295273,
+    "dev_std": 0.12716570385032547,
+    "t_stat": 3.3428429546453846,
+    "giorni": 9,
+    "osservazioni": 203
+   },
+   "5g": {
+    "ic_medio": 0.15451425961131432,
+    "dev_std": 0.1096679419074678,
+    "t_stat": 4.226784699078758,
+    "giorni": 9,
+    "osservazioni": 203
+   }
+  }
+ }
+}

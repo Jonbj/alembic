@@ -109,6 +109,29 @@ class Config(BaseModel):
     JWT_EXPIRE_MINUTES: int = Field(
         default_factory=lambda: int(os.environ.get("JWT_EXPIRE_MINUTES", "1440"))
     )
+    CORS_ALLOWED_ORIGINS: list[str] = Field(
+        default_factory=lambda: [
+            origin.strip()
+            for origin in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
+            if origin.strip()
+        ]
+    )
+    API_LOGIN_RATE_LIMIT: int = Field(
+        default_factory=lambda: int(os.environ.get("API_LOGIN_RATE_LIMIT", "5"))
+    )
+    API_LOGIN_RATE_WINDOW_SECONDS: int = Field(
+        default_factory=lambda: int(
+            os.environ.get("API_LOGIN_RATE_WINDOW_SECONDS", "300")
+        )
+    )
+    API_ADMIN_ACTION_RATE_LIMIT: int = Field(
+        default_factory=lambda: int(os.environ.get("API_ADMIN_ACTION_RATE_LIMIT", "5"))
+    )
+    API_ADMIN_ACTION_RATE_WINDOW_SECONDS: int = Field(
+        default_factory=lambda: int(
+            os.environ.get("API_ADMIN_ACTION_RATE_WINDOW_SECONDS", "60")
+        )
+    )
 
     # Mobile monitor auth (MOB-02)
     MOBILE_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
@@ -366,6 +389,27 @@ class Config(BaseModel):
                 "Set it via environment variable."
             )
         return v
+
+    @field_validator("CORS_ALLOWED_ORIGINS")
+    @classmethod
+    def validate_cors_origins(cls, origins: list[str]) -> list[str]:
+        """Require an explicit origin allowlist; wildcard CORS is never valid here."""
+        if "*" in origins:
+            raise ValueError("CORS_ALLOWED_ORIGINS must not contain '*'")
+        return origins
+
+    @field_validator(
+        "API_LOGIN_RATE_LIMIT",
+        "API_LOGIN_RATE_WINDOW_SECONDS",
+        "API_ADMIN_ACTION_RATE_LIMIT",
+        "API_ADMIN_ACTION_RATE_WINDOW_SECONDS",
+    )
+    @classmethod
+    def validate_api_rate_limits(cls, value: int) -> int:
+        """Reject disabled or nonsensical security limits."""
+        if value < 1:
+            raise ValueError("API rate-limit values must be positive")
+        return value
 
     @field_validator("DATABASE_URL")
     @classmethod

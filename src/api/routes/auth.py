@@ -1,12 +1,16 @@
 """Authentication routes: login, logout, me."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
+from redis import RedisError
+from starlette.concurrency import run_in_threadpool
 
 from src.api.auth import require_api_key
-from src.api.jwt_utils import create_access_token, decode_access_token, verify_password
+from src.api.jwt_utils import create_access_token, verify_password
+from src.api.rate_limit import get_admin_login_rate_limiter
 from src.config import config
+from src.rate_limit import FixedWindowRateLimiter
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -26,8 +30,30 @@ class MeResponse(BaseModel):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest) -> TokenResponse:
+async def login(
+    request: Request,
+    body: LoginRequest,
+    limiter: FixedWindowRateLimiter = Depends(get_admin_login_rate_limiter),
+) -> TokenResponse:
     """Exchange username + password for a JWT access token."""
+    source = request.client.host if request.client is not None else "unknown"
+    try:
+        rate_limit = await run_in_threadpool(
+            limiter.check,
+            username=body.username.casefold(),
+            source=source,
+        )
+    except RedisError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication temporarily unavailable",
+        ) from None
+    if not rate_limit.allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts",
+            headers={"Retry-After": str(rate_limit.retry_after_seconds)},
+        )
     if not config.ADMIN_PASSWORD_HASH:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

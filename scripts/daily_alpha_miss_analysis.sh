@@ -367,6 +367,23 @@ ${FAILURE_TAIL}" "" || true
     exit "$ANALYSIS_STATUS"
 fi
 
+# Scoreboard del P&L economico della carta (#278, M3): misura deterministica
+# delle due domande di uscita pre-registrate. Fail-soft come il dossier: se non
+# si genera, il cron non si rompe -- ma a differenza del dossier questo gira DOPO
+# la sessione, cosi' il ledger di mercato (market_daily.jsonl) e' aggiornato al
+# DATE_TARGET e la quota NO_NEWS-dominante e il benchmark SPY sono correnti.
+set +e
+ECON_OUTPUT=$(uv run python "$PROJECT_DIR/scripts/economic_pnl_scoreboard.py" --as-of "$DATE_TARGET" 2>&1)
+ECON_STATUS=$?
+set -e
+if (( ECON_STATUS == 0 )); then
+    echo "Scoreboard economico generato: docs/evidence/economic_pnl.json"
+    printf '%s\n' "$ECON_OUTPUT"
+else
+    echo "ATTENZIONE: scoreboard economico fallito (codice ${ECON_STATUS}) — il cron prosegue."
+    printf '%s\n' "$ECON_OUTPUT" | tail -c 1500
+fi
+
 echo ""
 echo "Completed: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
