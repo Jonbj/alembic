@@ -45,6 +45,7 @@ Ogni eccezione applicata va annotata qui con data, motivo e commit.
 | 2026-08-06 | Alert sulle posizioni non proteggibili (#161) | Le 13 posizioni sotto 1 azione non possono avere stop e contengono tutto il rosso del libro (−$452 contro +$660). La condizione di revisione scritta in `config/trading.yaml:180-182` si è verificata su quattro di esse e nessuno se n'è accorto perché niente la sorvegliava. È **strumentazione**: non cambia cosa compriamo né con che size, quindi non è propriamente una deroga — registrata qui per tracciabilità. La correzione strutturale (size minima ≥ 1 azione) è **taratura** e resta al 28/09. | vedi #161 |
 
 | 2026-08-07 | Il ratchet non alza il gate d'ingresso di S4 sopra il baseline 0,30 (#191) | La leva era salita da sola a **0,45** scartando il 93-97% dei segnali. Il freeze aveva congelato la taratura *manuale*, non questa leva *automatica*. Senza la deroga, la domanda di uscita n.1 si auto-risponde: con S4 che quasi non tratta, il suo P&L economico resta dentro ±$200 **per costruzione**, e al 28/09 concluderemmo «la news non ha alpha» quando la causa è il gate. Lo strumento risolverebbe la domanda al posto del fenomeno. **Perimetro:** solo il tetto della leva; `threshold_step`, il trigger, il decay e il ramo `regime_scale` restano intatti. | vedi #191 |
+| 2026-08-14 | **#236 deployato**: il filtro QS-07 non riscarta più i segnali che FIX-D ha ri-ammesso | Dentro la deroga d'ambito concessa il 2026-08-13. È un difetto di correttezza e passa il test di esenzione: FIX-D decide di tenere aperta una posizione perché la scadenza di un segnale non è un contro-segnale, e un filtro a valle annullava quella decisione sull'orologio — 30 uscite a peso-zero in 40 giorni, fra cui IBM (−26,47 $ realizzati, +13,71 $ lasciati sul tavolo). Finché S4 esegue, ogni giorno di attesa ne produce altre, quindi il deploy è anticipato rispetto al batch unico. **Perimetro:** solo l'esenzione per provenienza; il filtro d'età resta intatto per i segnali non marcati (backtest) e il ramo `below_entry_gate` (#170) non è toccato. | vedi #236 |
 | 2026-08-07 | Stopgap manuale sulla chiave Redis `feedback:entry_threshold:S4`, da 0,45 a 0,30 | La correzione di codice di #191 richiede rebuild e redeploy (`config/trading.yaml` è baked, non montato). Ogni giorno di attesa è un giorno di finestra speso al 5% dei segnali. **Temporaneo:** al prossimo trigger il ratchet la rialza finché #191 non è deployata. | nessuno: intervento su Redis, non sul repo |
 
 Il **ritiro di F8** deciso lo stesso giorno (#134) non compare qui: `apply_regime_scale: false`
@@ -58,6 +59,11 @@ invece che mediate sull'intera finestra:
 
 - **#185** — le evidenze su S1 raccolte dal 2026-08-03 alla data del deploy non sono confrontabili
   con quelle successive.
+- **#236 (2026-08-14)** — da questo deploy in avanti S4 non chiude più una posizione perché il
+  suo segnale è invecchiato mentre FIX-D lo teneva in vita. Il mix delle uscite cambia per
+  costruzione: le righe `expired`/`unknown` a peso-zero devono calare, e la tenuta mediana salire.
+  Confrontare la durata delle posizioni o il conteggio delle uscite attraverso questa data misura
+  il deploy, non la strategia. Il P&L realizzato di S4 prima e dopo non è sommabile.
 - **#191** — le evidenze su S4 dal 2026-08-03 al 2026-08-07 provengono da un gate salito fino a 0,45,
   cioè da una strategia che scartava ~19 segnali su 20. Il conteggio dei giorni di ricorrenza su
   F-009 (*il gate scarta segnali col segno corretto*) è il più esposto: quelle occorrenze sono state
