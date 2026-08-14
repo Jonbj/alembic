@@ -8,7 +8,7 @@ della barra in corso, che conterrebbe informazione futura.
 
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -35,22 +35,44 @@ def _as_utc(value: datetime | str | None) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+def _required_utc(value: datetime | str) -> datetime:
+    parsed = _as_utc(value)
+    if parsed is None:  # pragma: no cover - il tipo esclude None
+        raise ValueError("timestamp mancante")
+    return parsed
+
+
 def _ratio(numerator: float, denominator: float) -> float | None:
     return numerator / denominator if denominator != 0 else None
 
 
 def _movement(daily: dict[str, float] | None) -> dict[str, float | None]:
     if not daily:
-        return {"gap_return": None, "intraday_return": None}
+        return {
+            "gap_return": None,
+            "intraday_return": None,
+            "mfe_from_open": None,
+            "mae_from_open": None,
+        }
     previous = daily.get("close_prec")
     open_ = daily.get("open")
     close = daily.get("close")
+    high = daily.get("high")
+    low = daily.get("low")
     return {
         "gap_return": (
-            None if previous in (None, 0) or open_ is None else open_ / previous - 1.0
+            None
+            if previous is None or previous == 0 or open_ is None
+            else open_ / previous - 1.0
         ),
         "intraday_return": (
-            None if open_ in (None, 0) or close is None else close / open_ - 1.0
+            None if open_ is None or open_ == 0 or close is None else close / open_ - 1.0
+        ),
+        "mfe_from_open": (
+            None if open_ is None or open_ == 0 or high is None else high / open_ - 1.0
+        ),
+        "mae_from_open": (
+            None if open_ is None or open_ == 0 or low is None else low / open_ - 1.0
         ),
     }
 
@@ -87,7 +109,7 @@ def _stage_metrics(
     subsequent = [
         bar
         for bar in bars
-        if stage_time <= _as_utc(bar["timestamp"]) <= cutoff
+        if stage_time <= _required_utc(bar["timestamp"]) <= cutoff
     ]
     if not subsequent:
         return _empty_stage(stage_time, "no_bar_before_cutoff")
@@ -104,7 +126,7 @@ def _stage_metrics(
 
     return {
         "timestamp": stage_time.isoformat(),
-        "bar_timestamp": _as_utc(first["timestamp"]).isoformat(),
+        "bar_timestamp": _required_utc(first["timestamp"]).isoformat(),
         "price": price,
         "price_source": "alpaca_sip_5min.open",
         "actual_price": actual_price,
@@ -128,7 +150,7 @@ def _stage_metrics(
 
 
 def _session_name(timestamp: datetime | str) -> str | None:
-    local_time = _as_utc(timestamp).astimezone(NEW_YORK).time()
+    local_time = _required_utc(timestamp).astimezone(NEW_YORK).time()
     if time(4, 0) <= local_time < time(9, 30):
         return "premarket"
     if time(9, 30) <= local_time < time(16, 0):
@@ -138,14 +160,22 @@ def _session_name(timestamp: datetime | str) -> str | None:
     return None
 
 
-def session_summary(bars: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def session_summary(
+    bars: list[dict[str, Any]], session_date: date | None = None
+) -> dict[str, dict[str, Any]]:
     """Copertura e rendimento delle sessioni US, incluse le ore estese."""
     grouped: dict[str, list[dict[str, Any]]] = {
         "premarket": [],
         "regular": [],
         "afterhours": [],
     }
-    for bar in sorted(bars, key=lambda item: _as_utc(item["timestamp"])):
+    for bar in sorted(bars, key=lambda item: _required_utc(item["timestamp"])):
+        if (
+            session_date is not None
+            and _required_utc(bar["timestamp"]).astimezone(NEW_YORK).date()
+            != session_date
+        ):
+            continue
         name = _session_name(bar["timestamp"])
         if name is not None:
             grouped[name].append(bar)
@@ -168,8 +198,8 @@ def session_summary(bars: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         result[name] = {
             "available": True,
             "bars": len(session_bars),
-            "first_bar_at": _as_utc(first["timestamp"]).isoformat(),
-            "last_bar_at": _as_utc(last["timestamp"]).isoformat(),
+            "first_bar_at": _required_utc(first["timestamp"]).isoformat(),
+            "last_bar_at": _required_utc(last["timestamp"]).isoformat(),
             "open": open_,
             "close": close,
             "return": None if open_ == 0 else close / open_ - 1.0,
@@ -185,7 +215,8 @@ def build_timeline(
     cutoff: datetime,
 ) -> list[dict[str, Any]]:
     """Costruisce una riga per segnale e uno stub per ogni mover senza segnali."""
-    cutoff_utc = _as_utc(cutoff)
+    cutoff_utc = _required_utc(cutoff)
+    session_date = cutoff_utc.astimezone(NEW_YORK).date()
     rows: list[dict[str, Any]] = []
     symbols_with_signal: set[str] = set()
 
@@ -194,7 +225,7 @@ def build_timeline(
         symbols_with_signal.add(symbol)
         bars = sorted(
             bars_by_symbol.get(symbol, []),
-            key=lambda item: _as_utc(item["timestamp"]),
+            key=lambda item: _required_utc(item["timestamp"]),
         )
         stages = {
             name: _stage_metrics(
@@ -216,8 +247,9 @@ def build_timeline(
             "fallback": event.get("fallback"),
             "order_id": event.get("order_id"),
             "trade_id": event.get("trade_id"),
+            "order_lookup_error": event.get("order_lookup_error"),
             "movimento": _movement(daily_bars.get(symbol)),
-            "sessioni": session_summary(bars),
+            "sessioni": session_summary(bars, session_date),
             "stages": stages,
         })
 
@@ -233,8 +265,9 @@ def build_timeline(
             "fallback": None,
             "order_id": None,
             "trade_id": None,
+            "order_lookup_error": None,
             "movimento": _movement(daily_bars.get(symbol)),
-            "sessioni": session_summary(bars),
+            "sessioni": session_summary(bars, session_date),
             "stages": {
                 name: _empty_stage(None, "timestamp_not_recorded")
                 for name in STAGE_NAMES

@@ -183,3 +183,37 @@ def test_session_summary_distingue_premarket_regular_e_afterhours():
     assert out["afterhours"]["available"] is True
     assert out["premarket"]["bars"] == 1
     assert out["afterhours"]["return"] == pytest.approx(111 / 110 - 1)
+
+
+def test_session_summary_della_timeline_non_mescola_barre_del_giorno_precedente():
+    previous = {
+        "timestamp": datetime(2026, 8, 11, 11, 0, tzinfo=UTC),
+        "open": 95.0,
+        "high": 96.0,
+        "low": 94.0,
+        "close": 95.5,
+    }
+    current = _bar(11, 0, 99.0, 100.0, 98.0, 99.5)
+    event = {
+        "symbol": "AAA",
+        "signal_id": 7,
+        "news_log_id": 3,
+        "score": 0.6,
+        "fallback": False,
+        "published_at": previous["timestamp"],
+        "first_seen_at": None,
+        "ingested_at": None,
+        "scored_at": None,
+        "eligible_cycle_at": None,
+        "order_submitted_at": None,
+        "filled_at": None,
+        "fill_price": None,
+    }
+
+    row = build_timeline(
+        [event], {"AAA"}, {"AAA": [previous, current]}, {"AAA": _daily()}, _ts(23, 59)
+    )[0]
+
+    assert row["stages"]["published_at"]["price"] == 95.0
+    assert row["sessioni"]["premarket"]["bars"] == 1
+    assert row["sessioni"]["premarket"]["open"] == 99.0
