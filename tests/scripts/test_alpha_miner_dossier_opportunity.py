@@ -8,7 +8,7 @@ che i rialzi senza barre intraday (#277 non in main) abbiano accessible None con
 missingness esplicita ma gross calcolato.
 """
 
-from datetime import date
+from datetime import date, datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -60,6 +60,12 @@ def _patch_io(canned):
     stack.enter_context(patch.object(dossier, "_psql", side_effect=fake_psql))
     stack.enter_context(patch.object(dossier, "_barre", return_value=canned["barre"]))
     stack.enter_context(patch.object(dossier, "_watchlist", return_value=["AAPL", "META"]))
+    # timeline PIT (#291): fuori scope per questi test opportunity_v2
+    stack.enter_context(patch.object(dossier, "_timeline_eventi", return_value=[]))
+    cutoff = datetime(2026, 8, 12, 23, 59, tzinfo=timezone.utc)
+    stack.enter_context(
+        patch.object(dossier, "_barre_intraday", return_value=({}, cutoff))
+    )
     return stack
 
 
