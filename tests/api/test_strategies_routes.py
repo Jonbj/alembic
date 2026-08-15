@@ -1,8 +1,34 @@
 """Tests for strategy routes (Bug 3 — S3 parameters/null rendering)."""
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from src.api.main import app
+from src.api.routes import strategies as strategies_routes
+
+# Fixture-backed reports dir so tests don't depend on the gitignored `reports/`
+# tree. The production route still reads from `reports/`; the redirect is local
+# to this test module and is restored automatically by `monkeypatch`.
+_FIXTURE_REPORTS_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "strategies_backtest"
+
+
+def test_get_s1_backtest_returns_equity_curve(monkeypatch):
+    """GET /api/strategies/s1/backtest returns non-empty equity curve.
+
+    Reads from a committed fixture under tests/fixtures/strategies_backtest/
+    instead of the gitignored `reports/` tree, so the test is deterministic in
+    worktrees, fresh clones and CI (#152).
+    """
+    monkeypatch.setattr(strategies_routes, "_REPORTS_DIR", _FIXTURE_REPORTS_DIR)
+    tc = TestClient(app)
+    resp = tc.get("/api/strategies/s1/backtest")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert len(data) > 0
+    assert "cumulative_return" in data[0]
+    assert "drawdown" in data[0]
 
 
 def test_list_strategies_returns_list():
@@ -54,18 +80,6 @@ def test_get_s3_backtest_returns_empty_list():
     resp = tc.get("/api/strategies/s3/backtest")
     assert resp.status_code == 200
     assert resp.json() == []
-
-
-def test_get_s1_backtest_returns_equity_curve():
-    """GET /api/strategies/s1/backtest returns non-empty equity curve."""
-    tc = TestClient(app)
-    resp = tc.get("/api/strategies/s1/backtest")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert isinstance(data, list)
-    assert len(data) > 0
-    assert "cumulative_return" in data[0]
-    assert "drawdown" in data[0]
 
 
 def test_get_s1_detail_parameters_has_lookback_fields():
