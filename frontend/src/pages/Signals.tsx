@@ -82,6 +82,9 @@ export default function Signals() {
   )
 
   const scrollRef = useRef<HTMLDivElement>(null)
+  // TanStack Virtual intentionally returns non-memoizable functions; React Compiler
+  // skips this component while virtualization remains correct at runtime.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: filtered.length,
     getScrollElement: () => scrollRef.current,

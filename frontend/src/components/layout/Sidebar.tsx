@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { ModeBadge } from './ModeBadge'
 import { useStore } from '@/store'
 import type { LLMModelInfo } from '@/store'
+import { activeModelLabel } from '@/utils/llm'
 import alembicLogo from '@/assets/alembic.png'
 
 const NAV = [
@@ -22,13 +23,6 @@ const NAV = [
   { to: '/docs',        label: 'Docs',        icon: '📖' },
 ]
 
-export function activeModelLabel(models: LLMModelInfo[]): string {
-  const active = models.filter(m => m.active)
-  if (active.length === 0) return 'No models'
-  if (active.length === 1) return active[0].label
-  return active.map(m => m.label.split(' ')[0]).join(' + ')
-}
-
 export function Sidebar() {
   const { token, logout, llmModels, setLlmModels, llmModelRegistry, setLlmModelRegistry } = useStore()
 
@@ -43,13 +37,12 @@ export function Sidebar() {
       .catch(() => { /* backend unreachable */ })
   }, [llmModelRegistry, setLlmModelRegistry, token])
 
-  const [pendingKeys, setPendingKeys] = useState<Set<string>>(new Set())
+  const [pendingSelection, setPendingSelection] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-
-  // Keep local pending selection in sync with canonical store value.
-  useEffect(() => {
-    setPendingKeys(new Set(llmModels.split(',').filter(Boolean)))
-  }, [llmModels])
+  const pendingKeys = useMemo(
+    () => new Set((pendingSelection ?? llmModels).split(',').filter(Boolean)),
+    [llmModels, pendingSelection],
+  )
 
   const applySelection = async (keys: Set<string>) => {
     const canonical = Array.from(keys).join(',') || 'all'
@@ -64,6 +57,7 @@ export function Sidebar() {
         const data = await res.json()
         setLlmModels(data.llm_models)
         if (data.model_registry) setLlmModelRegistry(data.model_registry)
+        setPendingSelection(null)
       } else {
         console.warn(`LLM model update failed: ${res.status}`)
       }
@@ -75,7 +69,7 @@ export function Sidebar() {
     const next = new Set(pendingKeys)
     if (next.has(key)) next.delete(key)
     else next.add(key)
-    setPendingKeys(next)
+    setPendingSelection(Array.from(next).join(','))
   }
 
   const applyEconomy = () => {

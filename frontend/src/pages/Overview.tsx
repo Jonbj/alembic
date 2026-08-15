@@ -67,7 +67,7 @@ function MiniMetric({ label, value, sub }: { label: string; value: string; sub?:
 }
 
 export default function Overview() {
-  const { data: signals = [] } = useQuery({ queryKey: ['signals'], queryFn: () => fetchSignals(), refetchInterval: 60000 })
+  const { data: signals = [], dataUpdatedAt: signalsUpdatedAt } = useQuery({ queryKey: ['signals'], queryFn: () => fetchSignals(), refetchInterval: 60000 })
   const { data: positions = [] } = useQuery({ queryKey: ['positions'], queryFn: fetchPositions, refetchInterval: 60000 })
   const { data: pnl } = useQuery({ queryKey: ['pnl'], queryFn: () => fetchPnL('6M'), refetchInterval: 300000 })
   const { data: readiness } = useQuery({ queryKey: ['readiness'], queryFn: fetchReadiness, refetchInterval: 30000 })
@@ -77,7 +77,7 @@ export default function Overview() {
   const { data: strategies = [] } = useQuery({ queryKey: ['overview-strategies'], queryFn: strategiesApi.list, staleTime: 60000 })
 
   const gateThreshold = feedback?.entry_threshold ?? 0.30
-  const now = Date.now()
+  const now = signalsUpdatedAt
   const freshSignals = signals.filter((s) => now - new Date(s.generated_at).getTime() <= SIGNAL_FRESH_HOURS * 3600_000)
   const staleSignals = signals.length - freshSignals.length
   const buys = signals.filter((s) => s.score > 0.1).length

@@ -33,6 +33,7 @@ export function HelpButton({ title, sections }: HelpButtonProps) {
 
   useEffect(() => {
     if (!open) return
+    const trigger = buttonRef.current
     drawerRef.current?.focus()
     function handleClick(e: MouseEvent) {
       if (drawerRef.current && !drawerRef.current.contains(e.target as Node)) {
@@ -50,7 +51,7 @@ export function HelpButton({ title, sections }: HelpButtonProps) {
     return () => {
       document.removeEventListener('mousedown', handleClick)
       document.removeEventListener('keydown', handleKeyDown)
-      buttonRef.current?.focus()
+      trigger?.focus()
     }
   }, [open])
 

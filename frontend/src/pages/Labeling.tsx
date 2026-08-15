@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchNextLabel, fetchLabelProgress, submitLabel } from '@/api/labeling'
 import { fmtDateTime } from '@/utils/format'
@@ -6,7 +6,6 @@ import { sanitizeText } from '@/utils/sanitize'
 import { HelpButton } from '@/components/shared/HelpButton'
 
 const RELEVANCE = ['company_specific', 'sector', 'macro', 'irrelevant'] as const
-const DIRECTION = ['positive', 'negative', 'neutral'] as const
 const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/
 
 function Btn({ active, onClick, children, color }: { active: boolean; onClick: () => void; children: React.ReactNode; color?: string }) {
@@ -36,16 +35,26 @@ export default function Labeling() {
     setTickers(''); setRelevance(''); setDirection(''); setStrength(0); setRationale(''); setErr('')
   }, [])
 
-  // relevance=irrelevant/macro implies no company tickers + neutral default
-  useEffect(() => {
-    if (relevance === 'irrelevant' || relevance === 'macro') { setTickers(''); if (!direction) setDirection('neutral') }
-  }, [relevance])
+  const selectRelevance = (next: string) => {
+    setRelevance(next)
+    if (next === 'irrelevant' || next === 'macro') {
+      setTickers('')
+      if (!direction) {
+        setDirection('neutral')
+        setStrength(0)
+      }
+    }
+  }
 
-  useEffect(() => {
-    if (direction === 'neutral') setStrength(0)
-    if (direction === 'positive' && strength <= 0) setStrength(0.1)
-    if (direction === 'negative' && strength >= 0) setStrength(-0.1)
-  }, [direction, strength])
+  const selectDirection = (next: string) => {
+    setDirection(next)
+    setStrength((current) => {
+      if (next === 'neutral') return 0
+      if (next === 'positive' && current <= 0) return 0.1
+      if (next === 'negative' && current >= 0) return -0.1
+      return current
+    })
+  }
 
   const parsedTickers = tickers.split(',').map((t) => t.trim().toUpperCase()).filter(Boolean)
   const validationErrors = [
@@ -124,15 +133,15 @@ export default function Labeling() {
             <div>
               <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Rilevanza</label>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {RELEVANCE.map((r) => <Btn key={r} active={relevance === r} onClick={() => setRelevance(r)}>{r}</Btn>)}
+                {RELEVANCE.map((r) => <Btn key={r} active={relevance === r} onClick={() => selectRelevance(r)}>{r}</Btn>)}
               </div>
             </div>
             <div>
               <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>Direzione sentiment</label>
               <div style={{ display: 'flex', gap: 8 }}>
-                <Btn active={direction === 'positive'} onClick={() => setDirection('positive')} color="#059669">positive</Btn>
-                <Btn active={direction === 'neutral'} onClick={() => setDirection('neutral')}>neutral</Btn>
-                <Btn active={direction === 'negative'} onClick={() => setDirection('negative')} color="#dc2626">negative</Btn>
+                <Btn active={direction === 'positive'} onClick={() => selectDirection('positive')} color="#059669">positive</Btn>
+                <Btn active={direction === 'neutral'} onClick={() => selectDirection('neutral')}>neutral</Btn>
+                <Btn active={direction === 'negative'} onClick={() => selectDirection('negative')} color="#dc2626">negative</Btn>
               </div>
             </div>
             <div>

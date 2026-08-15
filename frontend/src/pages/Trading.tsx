@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { fmtDateTime } from '@/utils/format'
 import { useQuery } from '@tanstack/react-query'
@@ -62,16 +62,11 @@ function orderTraceLinks(o: Order) {
 export default function Trading() {
   const [searchParams, setSearchParams] = useSearchParams()
   const orderId = searchParams.get('order_id') ?? ''
-  const [tab, setTab] = useState<Tab>(orderId ? 'orders' : 'positions')
-  const [symbolFilter, setSymbolFilter] = useState(searchParams.get('symbol') ?? '')
-
-  useEffect(() => {
-    if (orderId) setTab('orders')
-    setSymbolFilter((current) => {
-      const nextSymbol = searchParams.get('symbol') ?? ''
-      return current === nextSymbol ? current : nextSymbol
-    })
-  }, [orderId, searchParams])
+  const requestedTab = searchParams.get('tab')
+  const tab: Tab = requestedTab === 'positions' || requestedTab === 'orders' || requestedTab === 'fills'
+    ? requestedTab
+    : orderId ? 'orders' : 'positions'
+  const symbolFilter = searchParams.get('symbol') ?? ''
 
   const { data: positions = [], isLoading: posLoading } = useQuery({
     queryKey: ['positions'],
@@ -120,10 +115,15 @@ export default function Trading() {
   })
 
   const updateSymbolFilter = (value: string) => {
-    setSymbolFilter(value)
     const next = new URLSearchParams(searchParams)
     if (value.trim()) next.set('symbol', value.trim().toUpperCase())
     else next.delete('symbol')
+    setSearchParams(next, { replace: true })
+  }
+
+  const selectTab = (nextTab: Tab) => {
+    const next = new URLSearchParams(searchParams)
+    next.set('tab', nextTab)
     setSearchParams(next, { replace: true })
   }
 
@@ -206,13 +206,13 @@ export default function Trading() {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border)' }}>
-          <button style={tabStyle('positions')} onClick={() => setTab('positions')}>
+          <button style={tabStyle('positions')} onClick={() => selectTab('positions')}>
             Positions ({positions.length})
           </button>
-          <button style={tabStyle('orders')} onClick={() => setTab('orders')}>
+          <button style={tabStyle('orders')} onClick={() => selectTab('orders')}>
             Orders ({orders.length})
           </button>
-          <button style={tabStyle('fills')} onClick={() => setTab('fills')}>
+          <button style={tabStyle('fills')} onClick={() => selectTab('fills')}>
             Fills ({filteredFills.length})
           </button>
         </div>

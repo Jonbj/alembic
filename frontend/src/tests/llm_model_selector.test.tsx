@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest'
-import { activeModelLabel } from '@/components/layout/Sidebar'
+import { activeModelLabel } from '@/utils/llm'
 import type { LLMModelInfo } from '@/store'
 
 const MODELS: LLMModelInfo[] = [
