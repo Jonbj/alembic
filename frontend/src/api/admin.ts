@@ -1,4 +1,5 @@
 import { apiFetch } from './client'
+import type { Mode } from '@/types/system'
 
 export interface KillswitchStatus {
   active: boolean
@@ -23,6 +24,6 @@ export const requestKillswitchRecoveryToken = () =>
 export const deactivateKillswitch = (confirmToken: string) =>
   apiFetch(`/api/admin/killswitch?confirm_token=${encodeURIComponent(confirmToken)}`, { method: 'DELETE' })
 
-export const fetchMode = () => apiFetch<{ mode: string }>('/api/admin/mode')
-export const setMode = (mode: string) =>
+export const fetchMode = () => apiFetch<{ mode: Mode }>('/api/admin/mode')
+export const setMode = (mode: Mode) =>
   apiFetch('/api/admin/mode', { method: 'POST', body: JSON.stringify({ mode }) })

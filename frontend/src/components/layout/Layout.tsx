@@ -99,7 +99,7 @@ export function Layout() {
     sync()
     const id = setInterval(sync, 15_000)
     return () => clearInterval(id)
-  }, [])
+  }, [setKillswitch, setLlmModelRegistry, setLlmModels, setMode])
 
   return (
     <>

@@ -6,7 +6,7 @@ import {
   ResponsiveContainer, Cell, ReferenceLine,
 } from 'recharts'
 import { fetchPnL, fetchWeeklyReport, fetchDailyPnL } from '@/api/performance'
-import type { WeeklyReport, DailyPnLDay } from '@/api/performance'
+import type { WeeklyReport, PnLData } from '@/api/performance'
 import { fetchTradesSummary } from '@/api/trades'
 import { fetchAnalyticsByDimension, fetchAnalyticsBySymbol } from '@/api/analytics'
 import type { AnalyticsDim, DimensionRow } from '@/api/analytics'
@@ -18,6 +18,22 @@ const PERIODS = ['1M', '3M', '6M', '1Y'] as const
 type Period = typeof PERIODS[number]
 type PerformanceTab = 'pnl' | 'daily' | 'analytics' | 'weekly'
 type AnalyticsPeriod = 30 | 90 | 365
+
+function cumulativePnL(daily: PnLData['daily']) {
+  return daily.reduce<{
+    total: number
+    rows: Array<{ date: string; cumulative: number; equity: number | null }>
+  }>((acc, day) => {
+    const total = acc.total + (day.profit_loss ?? 0)
+    return {
+      total,
+      rows: [
+        ...acc.rows,
+        { date: day.date, cumulative: parseFloat(total.toFixed(2)), equity: day.equity },
+      ],
+    }
+  }, { total: 0, rows: [] }).rows
+}
 
 function WeeklyReportTab({
   weekly,
@@ -776,16 +792,10 @@ export default function Performance() {
     staleTime: 1000 * 60 * 60, // 1 hour — weekly report is static for 9 days
   })
 
-  const daily = pnl?.daily ?? []
+  const daily = useMemo(() => pnl?.daily ?? [], [pnl?.daily])
   const monthly = pnl?.monthly ?? []
 
-  const cumulativeData = useMemo(() => {
-    let cumPnL = 0
-    return daily.map((d) => {
-      cumPnL += d.profit_loss ?? 0
-      return { date: d.date, cumulative: parseFloat(cumPnL.toFixed(2)), equity: d.equity }
-    })
-  }, [daily])
+  const cumulativeData = useMemo(() => cumulativePnL(daily), [daily])
 
   return (
     <div style={{ position: 'relative' }}>
