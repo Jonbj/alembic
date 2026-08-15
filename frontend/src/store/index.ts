@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist, devtools, createJSONStorage } from 'zustand/middleware'
+import type { Mode } from '@/types/system'
 
-type Mode = 'backtest' | 'paper' | 'semi_auto' | 'full_auto' | 'halted'
 type Theme = 'dark' | 'light'
 
 export interface LLMModelInfo {

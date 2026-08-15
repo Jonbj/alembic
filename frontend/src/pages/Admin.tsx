@@ -12,15 +12,15 @@ import {
 import { HelpButton } from '@/components/shared/HelpButton'
 import { AccessibleModal } from '@/components/shared/AccessibleModal'
 import { useStore } from '@/store'
+import { OPERATING_MODES, type Mode } from '@/types/system'
 
-const MODES = ['backtest', 'paper', 'semi_auto', 'full_auto', 'halted'] as const
-type Mode = typeof MODES[number]
-const MODE_DESC: Record<string, string> = {
+const MODE_DESC: Record<Mode, string> = {
   backtest: 'Running historical simulation — no live orders',
   paper: 'Paper trading — simulated orders, no real capital',
   semi_auto: 'Each order requires Telegram approval before execution',
   full_auto: 'Fully automated — orders execute without confirmation',
   halted: 'All order execution stopped',
+  dry_run: 'Execution decisions are recorded, but no orders are submitted',
 }
 
 export default function Admin() {
@@ -83,7 +83,7 @@ export default function Admin() {
         },
         {
           heading: "Operating Mode",
-          content: "- **Backtest**: simulazione storica, nessun ordine reale\n- **Paper**: trading simulato con Alpaca paper, nessun capitale reale\n- **Semi-auto**: ogni ordine richiede conferma via Telegram\n- **Full-auto**: ⚠ NON AUTORIZZATO — live trading e strategy promotions restano disabilitati\n- **Halted**: tutto fermo\n\nIl mode corrente è mostrato nel sidebar.",
+          content: "- **Backtest**: simulazione storica, nessun ordine reale\n- **Paper**: trading simulato con Alpaca paper, nessun capitale reale\n- **Semi-auto**: ogni ordine richiede conferma via Telegram\n- **Full-auto**: ⚠ NON AUTORIZZATO — live trading e strategy promotions restano disabilitati\n- **Halted**: tutto fermo\n- **Dry-run**: registra le decisioni senza inviare ordini\n\nIl mode corrente è mostrato nel sidebar.",
         },
         {
           heading: "⚠ Attenzione",
@@ -128,7 +128,7 @@ export default function Admin() {
         <div className="card">
           <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 600 }}>Operating Mode</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {MODES.map((m) => {
+            {OPERATING_MODES.map((m) => {
               // F0-3: full_auto is disabled — not authorized; no casual selection
               const isFullAuto = m === 'full_auto'
               return (
