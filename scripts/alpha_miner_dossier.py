@@ -28,8 +28,9 @@ import os
 import statistics
 import subprocess
 from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import yaml
 
@@ -45,6 +46,7 @@ from src.analysis.dossier.miss_cause import (
     classify_miss_candidates,
 )
 from src.analysis.dossier.opportunity import ESTIMATOR_VERSION, compute_opportunity
+from src.analysis.dossier.timeline import build_timeline
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +55,8 @@ OUT_DIR = PROJECT_DIR / "docs" / "evidence" / "dossier"
 SOGLIA_MOVER = 0.03
 FINESTRA_MEDIANE = 20  # giorni, per le mediane mobili
 INIZIO_OSSERVAZIONE = date(2026, 8, 3)
+DOSSIER_SCHEMA_VERSION = "2.0"
+NEW_YORK = ZoneInfo("America/New_York")
 
 # Size plausibile di uno slot S4 per lo stimatore v2 (#280): fixed-slot sizing
 # = bucket_pct(0.10) / n_top(5) = 2% di NAV. ~$2.200 sul conto paper da ~$110k
@@ -160,6 +164,177 @@ def _barre(simboli: list[str], giorno: date) -> dict[str, dict]:
             "close_prec": float(righe[precedenti[-1]]["close"]) if precedenti else None,
         }
     return out
+
+
+def _barre_intraday(
+    simboli: list[str], giorno: date, primo_evento: datetime | None = None
+) -> tuple[dict[str, list[dict]], datetime]:
+    """Barre SIP a 5 minuti dal primo evento (o dalle 04:00) alle 20:00 New York.
+
+    Il cutoff e' il minore fra fine after-market e l'istante corrente: anche
+    una esecuzione accidentale sul giorno in corso non puo' leggere il futuro.
+    Anticipare l'inizio al primo evento conserva il vero primo prezzo per una
+    notizia pubblicata nella seduta precedente.
+    """
+    inizio_sessione = datetime.combine(giorno, time(4, 0), tzinfo=NEW_YORK).astimezone(
+        timezone.utc
+    )
+    inizio = min(inizio_sessione, primo_evento) if primo_evento else inizio_sessione
+    fine_sessione = datetime.combine(giorno, time(20, 0), tzinfo=NEW_YORK).astimezone(
+        timezone.utc
+    )
+    cutoff = min(fine_sessione, datetime.now(timezone.utc))
+    if not simboli or cutoff <= inizio:
+        return {}, cutoff
+
+    from alpaca.data.enums import Adjustment, DataFeed
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+
+    chiave, segreto = os.environ.get("ALPACA_API_KEY"), os.environ.get("ALPACA_SECRET_KEY")
+    if not chiave or not segreto:
+        raise SystemExit("ALPACA_API_KEY / ALPACA_SECRET_KEY mancanti (.env non caricato?)")
+
+    client = StockHistoricalDataClient(chiave, segreto)
+    req = StockBarsRequest(
+        symbol_or_symbols=simboli,
+        timeframe=TimeFrame(5, TimeFrameUnit.Minute),
+        start=inizio,
+        end=cutoff,
+        feed=DataFeed.SIP,
+        adjustment=Adjustment.ALL,
+    )
+    df = getattr(client.get_stock_bars(req), "df", None)
+    if df is None or df.empty:
+        return {}, cutoff
+
+    out: dict[str, list[dict]] = defaultdict(list)
+    unico = simboli[0] if len(simboli) == 1 else None
+    for indice, row in df.iterrows():
+        if isinstance(indice, tuple):
+            symbol, timestamp = str(indice[0]), indice[-1]
+        elif unico is not None:
+            symbol, timestamp = unico, indice
+        else:
+            continue
+        if hasattr(timestamp, "to_pydatetime"):
+            timestamp = timestamp.to_pydatetime()
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        out[symbol].append({
+            "timestamp": timestamp.astimezone(timezone.utc),
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+        })
+    for bars in out.values():
+        bars.sort(key=lambda bar: bar["timestamp"])
+    return dict(out), cutoff
+
+
+def _timestamp(value: str) -> datetime | None:
+    if not value:
+        return None
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _timeline_eventi(giorno: date) -> list[dict]:
+    """Join PIT articolo -> segnale -> prima decisione collegata -> trade."""
+    g = giorno.isoformat()
+    rows = _psql(
+        f"SELECT ss.id, ss.symbol, ss.news_log_id, ss.score, ss.fallback_used, "
+        f"nl.published_at, nl.raw_ingested_at, nl.fetched_at, ss.generated_at, "
+        f"ed.id, ed.tick_time, COALESCE(od.order_id, t.entry_order_id), t.id "
+        f"FROM sentiment_signals ss "
+        f"LEFT JOIN news_log nl ON nl.id = ss.news_log_id "
+        f"LEFT JOIN LATERAL ("
+        f"  SELECT id, tick_time, order_id FROM execution_decisions "
+        f"  WHERE signal_id = ss.id AND tick_time >= ss.generated_at "
+        f"    AND tick_time < '{g}'::date + 1 "
+        f"  ORDER BY tick_time LIMIT 1"
+        f") ed ON true "
+        f"LEFT JOIN LATERAL ("
+        f"  SELECT id, order_id FROM execution_decisions "
+        f"  WHERE signal_id = ss.id AND tick_time >= ss.generated_at "
+        f"    AND tick_time < '{g}'::date + 1 AND order_id IS NOT NULL "
+        f"  ORDER BY tick_time LIMIT 1"
+        f") od ON true "
+        f"LEFT JOIN LATERAL ("
+        f"  SELECT id, entry_order_id FROM trades "
+        f"  WHERE signal_id = ss.id AND entry_time >= ss.generated_at "
+        f"    AND entry_time < '{g}'::date + 1 "
+        f"  ORDER BY entry_time LIMIT 1"
+        f") t ON true "
+        f"WHERE ss.generated_at >= '{g}' "
+        f"AND ss.generated_at < '{g}'::date + 1 "
+        f"ORDER BY ss.symbol, ss.generated_at;"
+    )
+    return [{
+        "signal_id": int(r[0]),
+        "symbol": r[1],
+        "news_log_id": int(r[2]) if r[2] else None,
+        "score": float(r[3]),
+        "fallback": r[4] == "t",
+        "published_at": _timestamp(r[5]),
+        # raw_ingested_at e' l'istante in cui il connettore ha visto/scaricato
+        # l'articolo; fetched_at e' l'inserimento in news_log (migration 027/033).
+        "first_seen_at": _timestamp(r[6]),
+        "ingested_at": _timestamp(r[7]),
+        "scored_at": _timestamp(r[8]),
+        "eligible_cycle_at": _timestamp(r[10]),
+        "order_id": r[11] or None,
+        "trade_id": int(r[12]) if r[12] else None,
+    } for r in rows]
+
+
+def _dettagli_ordini(order_ids: list[str]) -> dict[str, dict]:
+    """Timestamp submission/fill reali dal broker, con errore per-order esplicito."""
+    if not order_ids:
+        return {}
+
+    from alpaca.trading.client import TradingClient
+    from src.config import config
+
+    if not config.ALPACA_API_KEY or not config.ALPACA_SECRET_KEY:
+        return {
+            order_id: {
+                "submitted_at": None,
+                "filled_at": None,
+                "filled_avg_price": None,
+                "lookup_error": "alpaca_credentials_missing",
+            }
+            for order_id in order_ids
+        }
+
+    client = TradingClient(
+        config.ALPACA_API_KEY,
+        config.ALPACA_SECRET_KEY,
+        paper=config.ALPACA_PAPER_MODE,
+    )
+    result: dict[str, dict] = {}
+    for order_id in sorted(set(order_ids)):
+        try:
+            order = client.get_order_by_id(order_id)
+            filled_avg = getattr(order, "filled_avg_price", None)
+            result[order_id] = {
+                "submitted_at": getattr(order, "submitted_at", None),
+                "filled_at": getattr(order, "filled_at", None),
+                "filled_avg_price": float(filled_avg) if filled_avg is not None else None,
+                "lookup_error": None,
+            }
+        except Exception as exc:
+            result[order_id] = {
+                "submitted_at": None,
+                "filled_at": None,
+                "filled_avg_price": None,
+                "lookup_error": f"{type(exc).__name__}: {str(exc)[:160]}",
+            }
+    return result
 
 
 def _e_giorno_di_borsa(barre: dict) -> bool:
@@ -295,6 +470,47 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
     ingressi = compute_entries(ingressi_grezzi, barre_ohlc)
     chiusure = compute_exits(chiusure_grezze, chiusure_close)
 
+    # --- timeline e barre intraday (#277) --------------------------------
+    eventi = _timeline_eventi(giorno)
+    mover_symbols = {
+        symbol
+        for symbol, rendimento in mercato["rendimenti"].items()
+        if abs(rendimento) >= SOGLIA_MOVER
+    }
+    simboli_timeline = sorted(mover_symbols | {e["symbol"] for e in eventi})
+    timestamps_eventi = [
+        e[stage]
+        for e in eventi
+        for stage in ("published_at", "first_seen_at", "ingested_at", "scored_at")
+        if e.get(stage) is not None
+    ]
+    primo_evento = min(timestamps_eventi) if timestamps_eventi else None
+    barre_intraday, cutoff_intraday = _barre_intraday(
+        simboli_timeline, giorno, primo_evento
+    )
+    dettagli_ordini = _dettagli_ordini(
+        [e["order_id"] for e in eventi if e.get("order_id")]
+    )
+    eventi_arricchiti = []
+    for evento in eventi:
+        row = dict(evento)
+        order_id = evento.get("order_id")
+        ordine = dettagli_ordini.get(order_id, {}) if order_id else {}
+        row.update({
+            "order_submitted_at": ordine.get("submitted_at"),
+            "filled_at": ordine.get("filled_at"),
+            "fill_price": ordine.get("filled_avg_price"),
+            "order_lookup_error": ordine.get("lookup_error"),
+        })
+        eventi_arricchiti.append(row)
+    timeline = build_timeline(
+        eventi_arricchiti,
+        mover_symbols,
+        barre_intraday,
+        barre,
+        cutoff_intraday,
+    )
+
     # --- aggregazioni ------------------------------------------------------
     chiusi_storici = [
         {"ora_ingresso": int(r[0]), "pnl_net": float(r[1])}
@@ -303,15 +519,48 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
             "WHERE exit_time IS NOT NULL AND net_pnl IS NOT NULL;")]
 
     return {
+        "schema_version": DOSSIER_SCHEMA_VERSION,
         "data": g,
         "generato_il": datetime.now(timezone.utc).isoformat(),
         "fonte_prezzi": "Alpaca SIP, adjustment=all",
+        "provenienza_dati": {
+            "daily": {
+                "source": "Alpaca Market Data API",
+                "feed": "SIP",
+                "timeframe": "1Day",
+                "adjustment": "all",
+            },
+            "intraday": {
+                "source": "Alpaca Market Data API",
+                "feed": "SIP",
+                "timeframe": "5Min",
+                "adjustment": "all",
+                "sessioni": "04:00-20:00 America/New_York",
+                "cutoff": cutoff_intraday.isoformat(),
+            },
+            "timeline": {
+                "published_at": "news_log.published_at",
+                "first_seen_at": "news_log.raw_ingested_at",
+                "ingested_at": "news_log.fetched_at",
+                "scored_at": "sentiment_signals.generated_at",
+                "eligible_cycle_at": "execution_decisions.tick_time (primo per signal_id)",
+                "order_submitted_at": "Alpaca Trading API order.submitted_at",
+                "filled_at": "Alpaca Trading API order.filled_at",
+                "fill_price": "Alpaca Trading API order.filled_avg_price",
+            },
+            "metriche": {
+                "first_price": "open della prima barra 5Min con timestamp >= stadio",
+                "mfe_mae": "high/low successivi allo stadio fino al cutoff, long-side",
+                "quote": "non clampate; valori <0 o >1 espongono reversal/overshoot",
+            },
+        },
         "soglia_mover": SOGLIA_MOVER,
         "mercato": mercato,
         "candidati_miss": candidati_classificati,
         "soglia_gate_usata": soglia_gate,
         "ingressi": ingressi,
         "chiusure": chiusure,
+        "timeline": timeline,
         "aggregati": {
             "per_ora_ingresso": aggregate_by_entry_hour(chiusi_storici),
             "miss_cumulati": _miss_cumulati(),
