@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   fetchReadiness: vi.fn(),
   isTradingWindow: vi.fn(),
   logout: vi.fn(),
+  strategiesList: vi.fn(),
   storeState: {
     token: 'jwt-test',
     logout: vi.fn(),
@@ -24,6 +25,16 @@ vi.mock('@/api/system', async (importOriginal) => {
 
 vi.mock('@/utils/market', () => ({
   isTradingWindow: mocks.isTradingWindow,
+}))
+
+vi.mock('@/api/strategies', () => ({
+  strategiesApi: {
+    list: mocks.strategiesList,
+    detail: vi.fn().mockResolvedValue(null),
+    backtest: vi.fn().mockResolvedValue([]),
+    gates: vi.fn().mockResolvedValue([]),
+    sensitivity: vi.fn().mockResolvedValue([]),
+  },
 }))
 
 function response(status: number, body: unknown = {}, statusText = ''): Response {
@@ -146,6 +157,8 @@ describe('ReadinessBanner', () => {
 })
 
 describe('ErrorBoundary', () => {
+  afterEach(() => vi.restoreAllMocks())
+
   test('isola un errore di rendering e mostra un fallback utile', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const { ErrorBoundary } = await import('@/components/ErrorBoundary')
@@ -162,5 +175,16 @@ describe('ErrorBoundary', () => {
     expect(screen.getByText('Something went wrong')).toBeInTheDocument()
     expect(screen.getByText('render fallito')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument()
+  })
+})
+
+describe('pagina Strategies', () => {
+  test('mostra uno stato vuoto esplicito quando la API non restituisce strategie', async () => {
+    mocks.strategiesList.mockResolvedValue([])
+    const { default: Strategies } = await import('@/pages/Strategies')
+
+    render(queryWrapper(<Strategies />))
+
+    expect(await screen.findByText('No strategies found.')).toBeInTheDocument()
   })
 })
