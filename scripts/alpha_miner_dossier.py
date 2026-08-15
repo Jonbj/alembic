@@ -45,6 +45,7 @@ from src.analysis.dossier.miss_cause import (
     cause_del_giorno,
     classify_miss_candidates,
 )
+from src.analysis.dossier.opportunity import ESTIMATOR_VERSION, compute_opportunity
 from src.analysis.dossier.timeline import build_timeline
 
 log = logging.getLogger(__name__)
@@ -56,6 +57,14 @@ FINESTRA_MEDIANE = 20  # giorni, per le mediane mobili
 INIZIO_OSSERVAZIONE = date(2026, 8, 3)
 DOSSIER_SCHEMA_VERSION = "2.0"
 NEW_YORK = ZoneInfo("America/New_York")
+
+# Size plausibile di uno slot S4 per lo stimatore v2 (#280): fixed-slot sizing
+# = bucket_pct(0.10) / n_top(5) = 2% di NAV. ~$2.200 sul conto paper da ~$110k
+# (la stessa base del prompt alpha-miner). La size e' un'assunzione congetturale
+# (nessun trade reale su un miss) ed e' dichiarata nella stima; la NAV dinamica
+# reale e' wiring post-freeze. Costante versionata, non una taratura.
+SLOT_FRACTION_S4 = 0.10 / 5  # bucket_pct / n_top (src/strategies/s4/config.py)
+SLOT_USD_DEFAULT = 2200.0
 
 
 def _psql(query: str) -> list[list[str]]:
@@ -333,6 +342,59 @@ def _e_giorno_di_borsa(barre: dict) -> bool:
     return len(barre) > 0
 
 
+def _cutoff_giorno(giorno: date) -> str:
+    """Bound point-in-time per l'exit: chiusura sessione regolare US (16:00 ET).
+
+    Nella finestra di osservazione (2026-08-03 -> 2026-09-28) l'ET e' EDT
+    (UTC-4), quindi 16:00 ET = 20:00 UTC. Deterministico e documentato: l'exit
+    policy dichiarata e' EOD_close, e il prezzo di exit e' il close daily.
+    """
+    return f"{giorno.isoformat()}T20:00:00+00:00"
+
+
+def _opportunity_v2(candidato: dict, barre: dict[str, dict], giorno: date) -> dict:
+    """Stima v2 parallela di opportunita' per un candidato miss (#280).
+
+    Deterministica e versionata; NON tocca la serie legacy (costo_usd del prompt
+    alpha-miner e findings.json restano intatti). Oggi usa solo la barra daily:
+    - ribasso non detenuto in book long-only -> accessible/net = 0.0 verificato;
+    - rialzo non detenuto -> accessible None con missingness esplicita, perche'
+      prezzare l'entry al primo ciclo realmente eleggibile richiede le barre
+      intraday + la timeline PIT di #277 (non ancora in main). Lo stimatore e'
+      intraday-ready: quando #277 fornira' `eligible_cycle_at` e `intraday_bars`,
+      questo wiring passera' quelli e il costo roundtrip (TradeCostCalculator).
+
+    Difensivo: un candidato che fallisce non blocca il dossier.
+    """
+    sym = candidato["symbol"]
+    daily = barre.get(sym)
+    if daily is None:
+        return {"estimator_version": ESTIMATOR_VERSION, "symbol": sym,
+                "error": "daily_bar_missing"}
+    try:
+        return compute_opportunity(
+            {
+                "symbol": sym,
+                "book_side": "long",
+                "held": bool(candidato.get("in_portafoglio", False)),
+                "daily": {k: daily[k] for k in ("open", "high", "low", "close", "close_prec")},
+                "size_usd": SLOT_USD_DEFAULT,
+                "slot_fraction": SLOT_FRACTION_S4,
+                "size_source": "S4 fixed slot = bucket_pct(0.10)/n_top(5) = 2% NAV ~$110k",
+                # Forniti da #277 (timeline PIT + barre intraday); oggi assenti.
+                "eligible_cycle_at": None,
+                "intraday_bars": [],
+                "cost": None,  # computato quando ci sono entry/exit (post-#277)
+                "cutoff": _cutoff_giorno(giorno),
+                "exit_policy": "EOD_close",
+                "confidenza": "congetturale",
+            }
+        )
+    except Exception as exc:  # pragma: no cover - difensivo
+        log.warning("opportunity_v2 %s fallita: %s", sym, exc)
+        return {"estimator_version": ESTIMATOR_VERSION, "symbol": sym, "error": str(exc)}
+
+
 def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
     g = giorno.isoformat()
     barre = _barre(simboli, giorno)
@@ -374,6 +436,12 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
     candidati_classificati = classify_miss_candidates(
         candidati, soglia_gate=soglia_gate
     )
+
+    # Stima v2 parallela di opportunita' per ogni candidato (#280): deterministica,
+    # versionata, series-legacy intatta. Vedi _opportunity_v2 per i limiti odierni
+    # (accessible per rialzi richiede le barre intraday di #277).
+    for c in candidati_classificati:
+        c["opportunity_v2"] = _opportunity_v2(c, barre, giorno)
 
     # --- book: ingressi e chiusure ----------------------------------------
     ingressi_grezzi = [
