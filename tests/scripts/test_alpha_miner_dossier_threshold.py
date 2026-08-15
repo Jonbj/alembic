@@ -12,7 +12,7 @@ Qui testiamo entrambi i rami: con soglia Redis a 0.45 il candidato BELOW_GATE,
 senza chiave il candidato NON_CLASSIFICATO.
 """
 
-from datetime import date
+from datetime import date, datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import scripts.alpha_miner_dossier as dossier
@@ -58,6 +58,13 @@ def _patch_io(canned):
     stack = ExitStack()
     stack.enter_context(patch.object(dossier, "_psql", side_effect=fake_psql))
     stack.enter_context(patch.object(dossier, "_barre", return_value=canned["barre"]))
+    stack.enter_context(patch.object(dossier, "_timeline_eventi", return_value=[]))
+    stack.enter_context(patch.object(
+        dossier,
+        "_barre_intraday",
+        return_value=({}, datetime(2026, 8, 5, 23, 59, tzinfo=timezone.utc)),
+    ))
+    stack.enter_context(patch.object(dossier, "_dettagli_ordini", return_value={}))
     stack.enter_context(patch.object(dossier, "_watchlist", return_value=["AAPL"]))
     return stack
 
