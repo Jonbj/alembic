@@ -1,0 +1,8 @@
+[
+  {"date": "2024-01-02", "cumulative_return": 0.0,    "drawdown":  0.0},
+  {"date": "2024-01-03", "cumulative_return": 0.0021, "drawdown":  0.0},
+  {"date": "2024-01-04", "cumulative_return": 0.0035, "drawdown": -0.0012},
+  {"date": "2024-01-05", "cumulative_return": 0.0018, "drawdown": -0.0041},
+  {"date": "2024-01-08", "cumulative_return": 0.0062, "drawdown": -0.0008},
+  {"date": "2024-01-09", "cumulative_return": 0.0094, "drawdown":  0.0}
+]
