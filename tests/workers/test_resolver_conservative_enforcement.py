@@ -21,6 +21,22 @@ def test_not_tradable_items_are_filtered():
     assert dropped == 1
 
 
+def test_not_tradable_drop_records_fix06_reason():
+    from src.workers.sentiment import _filter_enforced_items
+
+    rows = []
+    kept, dropped = _filter_enforced_items(
+        [_item("XLF")],
+        {"u:XLF": "NO_TRADE_NOT_TRADABLE"},
+        discard_rows=rows,
+    )
+
+    assert kept == []
+    assert dropped == 1
+    assert rows[0]["discarded_reason"] == "not_tradable"
+    assert rows[0]["discard_stage"] == "sentiment"
+
+
 def test_unknown_verdict_passes():
     """Only the hard NOT_TRADABLE verdict blocks; low-conf/ambiguous verdicts
     stay observational until QX-01 calibration."""

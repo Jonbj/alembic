@@ -221,6 +221,37 @@ def test_marketaux_process_dedup():
     assert stats["duplicates"] == 1
 
 
+@pytest.mark.parametrize(
+    ("id_duplicate", "content_duplicate", "expected_reason"),
+    [
+        (True, False, "duplicate_id"),
+        (False, True, "duplicate_content"),
+    ],
+)
+def test_marketaux_process_records_why_duplicate_was_discarded(
+    id_duplicate, content_duplicate, expected_reason
+):
+    """FIX-06: the two dedup gates must remain distinguishable in evidence."""
+    from src.workers.ingestion import _process_marketaux_items
+
+    items = [make_marketaux_item("https://ma.com/discard", ["AAPL"])]
+    mock_dedup = MagicMock()
+    mock_dedup.is_duplicate_by_id.return_value = id_duplicate
+    mock_dedup.is_duplicate_content_symbol.return_value = content_duplicate
+    discard_rows = []
+
+    stats = _process_marketaux_items(
+        items, mock_dedup, MagicMock(), discard_rows=discard_rows
+    )
+
+    assert stats["duplicates"] == 1
+    assert len(discard_rows) == 1
+    assert discard_rows[0]["discarded_reason"] == expected_reason
+    assert discard_rows[0]["discard_stage"] == "ingestion"
+    assert discard_rows[0]["source"] == "marketaux"
+    assert discard_rows[0]["symbol"] == "AAPL"
+
+
 def test_marketaux_process_skips_no_tickers():
     """Items with empty asset_tags are silently skipped."""
     from src.workers.ingestion import _process_marketaux_items
@@ -234,6 +265,22 @@ def test_marketaux_process_skips_no_tickers():
 
     assert stats["queued"] == 0
     mock_redis.rpush.assert_not_called()
+
+
+def test_marketaux_process_records_missing_ticker_discard():
+    """FIX-06: an untagged article must not disappear before the source funnel."""
+    from src.workers.ingestion import _process_marketaux_items
+
+    item = make_marketaux_item("https://ma.com/no-ticker", [], sentiment=0.8)
+    discard_rows = []
+
+    _process_marketaux_items(
+        [item], MagicMock(), MagicMock(), discard_rows=discard_rows
+    )
+
+    assert discard_rows[0]["discarded_reason"] == "no_ticker"
+    assert discard_rows[0]["item_id"] == item.id
+    assert discard_rows[0]["symbol"] is None
 
 
 # --- Alpaca ingestion ---
@@ -326,6 +373,28 @@ def test_alpaca_process_skips_no_tickers():
 
     assert stats["queued"] == 0
     mock_redis.rpush.assert_not_called()
+
+
+def test_gkg_watchlist_filter_records_not_tradable_discard():
+    """A resolved ticker outside the trading universe is not a no-ticker miss."""
+    from src.workers.ingestion import _process_gkg_items
+
+    item = make_gkg_item("https://gkg.com/off-watchlist", ["Acme Corp"])
+    extractor = MagicMock()
+    extractor.extract.return_value = ["ACME"]
+    discard_rows = []
+
+    _process_gkg_items(
+        [item],
+        extractor,
+        MagicMock(),
+        MagicMock(),
+        watchlist={"AAPL"},
+        discard_rows=discard_rows,
+    )
+
+    assert discard_rows[0]["discarded_reason"] == "not_tradable"
+    assert discard_rows[0]["symbol"] == "ACME"
 
 
 def test_alpaca_ingestion_skips_when_market_closed():

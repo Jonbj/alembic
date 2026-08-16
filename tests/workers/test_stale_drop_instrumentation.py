@@ -60,6 +60,8 @@ def test_row_carries_age_at_discard_not_age_now():
     item = _Item("alpaca:1:AAPL", NOW - timedelta(hours=3, minutes=30))
     row = build_stale_drop_row(item, NOW)
     assert row["age_hours"] == pytest.approx(3.5, abs=1e-6)
+    assert row["discarded_reason"] == "stale"
+    assert row["discard_stage"] == "sentiment"
 
 
 def test_row_groups_by_article_and_keeps_the_symbol():
