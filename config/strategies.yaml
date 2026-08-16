@@ -17,9 +17,10 @@ strategies:
     mode: supervised_paper
     promotion_blocked: true
     note: >
-      DEMOTED 2026-06-19 (P0-01). Backtest not valid: same-bar fill (t+0),
-      survivorship bias, zero-cost assumption, circular stress/regime (hindsight),
-      decorative walk-forward, DSR n_trials=1, no live stop-loss.
+      DEMOTED 2026-06-19 (P0-01). Backtest not valid: full-window universe
+      selection look-ahead (BUG-2), survivorship bias (BUG-3), circular
+      stress/regime split (OBS-4), and backtest/live path divergence (OBS-3).
+      Evidence: docs/audits/strategies/S1/07_bugs.md.
       Re-promotion requires P0-05/06/07 + P0-10/11 + P1-01/02/08/13 + positive SPA.
       Until then: paper observation only, no capital increase, no parameter tuning.
 
