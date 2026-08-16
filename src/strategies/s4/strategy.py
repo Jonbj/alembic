@@ -72,7 +72,31 @@ class NewsDrivenTactical:
         return self._last_signal_provenance
 
     def health_check(self) -> bool:
-        return True
+        """Return True when the preloaded signal frame is safe to consume."""
+        if self._signals_df is None or self._signals_df.empty:
+            return False
+
+        required = ("symbol", "score", "confidence", "generated_at")
+        if not set(required).issubset(self._signals_df.columns):
+            return False
+
+        signals = self._signals_df.loc[:, required]
+        if signals.isna().any().any():
+            return False
+        if not signals["symbol"].map(
+            lambda value: isinstance(value, str) and bool(value.strip())
+        ).all():
+            return False
+        if not signals["generated_at"].map(lambda value: isinstance(value, datetime)).all():
+            return False
+
+        scores = pd.to_numeric(signals["score"], errors="coerce")
+        confidences = pd.to_numeric(signals["confidence"], errors="coerce")
+        if scores.isna().any() or not scores.between(-1.0, 1.0).all():
+            return False
+        return bool(
+            not confidences.isna().any() and confidences.between(0.0, 1.0).all()
+        )
 
     def should_rebalance(self, ts: datetime) -> bool:
         """Public gate: returns True if it is time to rebalance at timestamp ts."""
