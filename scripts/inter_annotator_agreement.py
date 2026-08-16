@@ -12,6 +12,9 @@ gestisce il workflow di adjudication della specifica
     coincidenti) per l'adjudicator;
   - `--adjudicate <news_log_id> <adjudicator_id>` marca la coppia come risolta
     (adjudicated=true, adjudicator_id) dopo la decisione del terzo annotatore.
+    La coppia marcata esce dal dataset: non rientra nel calcolo del kappa
+    ne' nella worklist del run successivo (la decisione dell'adjudicator
+    chiude il disaccordo).
 
 Le metriche sono calcolate sugli articoli con esattamente 2 righe labeled
 (2 annotatori); i due slot sono ordinati per annotator_id (deterministico).
@@ -120,6 +123,10 @@ def disagreements(items: list[dict]) -> list[dict]:
 def _load_pairs(conn) -> dict[str, list[dict]]:
     """Articoli con esattamente 2 annotatori labeled, per source.
 
+    Esclude le coppie gia' adjudicated: dopo che l'adjudicator ha risolto un
+    disaccordo, il dato non entra piu' nel calcolo del kappa ne' nella worklist
+    (altrimenti il report riproporrebbe lo stesso articolo all'infinito).
+
     Ritorna {source: [item, ...]} dove item = {news_log_id, source, dir,
     tickers} con i due slot ordinati per annotator_id (deterministico)."""
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -129,7 +136,8 @@ def _load_pairs(conn) -> dict[str, list[dict]]:
                  FROM news_labels
                 WHERE status = 'labeled'
                   AND news_log_id IS NOT NULL
-                  AND gt_sentiment_dir IS NOT NULL"""
+                  AND gt_sentiment_dir IS NOT NULL
+                  AND (adjudicated IS FALSE OR adjudicated IS NULL)"""
         )
         rows = cur.fetchall()
     by_article: dict[int, list[dict]] = defaultdict(list)

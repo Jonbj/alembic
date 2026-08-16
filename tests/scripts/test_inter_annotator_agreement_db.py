@@ -164,3 +164,45 @@ def test_adjudicate_missing_article_marks_zero(db_url, capsys):
         rc = iaa.main(["--adjudicate", "999999", "adjudicator_y"])
     assert rc == 0
     assert "righe marcate=0" in capsys.readouterr().out
+
+
+def test_adjudicated_pair_drops_from_worklist(db_url, capsys):
+    """Il rilievo della review: dopo --adjudicate la coppia non deve piu'
+    comparire nella worklist del report successivo. Altrimenti adjudication
+    e' solo un flag estetico e i disaccordi vengono riproposti all'infinito."""
+    ids = _seed(db_url)
+    target = ids[3]  # l'articolo in disaccordo di direzione (vedi PAIRS[3])
+    with patch.dict(os.environ, {"DATABASE_URL": db_url}):
+        iaa.main(["--adjudicate", str(target), "adjudicator_x"])
+        capsys.readouterr().out  # scarta l'output di adjudicate
+        rc2 = iaa.main([])       # report dopo adjudication
+    out = capsys.readouterr().out
+    assert rc2 == 0
+    # La coppia marcata esce dal dataset: 4 coppie residue, 1 disaccordo
+    # residuo (PAIRS[4] = ticker overlap, l'unico non ancora adjudicated).
+    assert "4 coppie 2-annotator" in out
+    assert "Adjudication worklist — 1 disaccordi" in out
+    # La riga del worklist deve riferire l'altro news_log_id, non quello adjudicato.
+    # L'output formatta il news_log_id con padding, quindi confronto diretto
+    # solo sull'assenza del target adjudicated.
+    assert f"news_log_id={target}" not in out
+    assert f"news_log_id={ids[4]}" in out.replace(" ", "")
+
+
+def test_adjudicated_pair_excluded_from_kappa(db_url):
+    """Dopo adjudication la coppia non entra nemmeno nel calcolo del kappa
+    (altrimenti il dato 'risolto' continua a peggiorare la metrica)."""
+    ids = _seed(db_url)
+    target = ids[3]
+    with patch.dict(os.environ, {"DATABASE_URL": db_url}):
+        # kappa pre-adjudication: 5 coppie, 2 disaccordi (dir + ticker).
+        iaa.main([])
+        # adjudicate la sola coppia in disaccordo di direzione.
+        iaa.main(["--adjudicate", str(target), "adjudicator_x"])
+        conn = psycopg2.connect(db_url)
+        by_source_post = iaa._load_pairs(conn)
+        conn.close()
+    items_post = by_source_post["alpaca_benzinga"]
+    # 4 coppie residue (PAIRS[3] escluso).
+    assert len(items_post) == 4
+    assert all(it["news_log_id"] != target for it in items_post)
