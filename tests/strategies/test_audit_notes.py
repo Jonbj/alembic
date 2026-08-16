@@ -20,3 +20,10 @@ def test_s1_demotion_note_names_current_backtest_limitations() -> None:
     assert "regime" in note
     assert "backtest/live" in note
     assert "docs/audits/strategies/S1/07_bugs.md" in note
+
+
+def test_s3_milestone_comment_matches_implemented_guardrail() -> None:
+    source = (_ROOT / "src/strategies/s3/backtest.py").read_text()
+
+    assert "OOS Sharpe in broad guardrail range [0.0, 1.0]" in source
+    assert "shared gates enforce minimum performance thresholds" in source
