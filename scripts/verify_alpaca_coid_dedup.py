@@ -121,11 +121,15 @@ def main() -> int:
 
     result = probe_duplicate_submit(trading_client, request)
     print(json.dumps(asdict(result), indent=2, sort_keys=True))
-    try:
-        trading_client.cancel_order_by_id(result.first_order_id)
-        print("cleanup=cancel_requested")
-    except Exception as exc:
-        print(f"cleanup=best_effort_failed ({type(exc).__name__}: {exc})")
+    cleanup_ids = {result.first_order_id}
+    if result.second_order_id is not None:
+        cleanup_ids.add(result.second_order_id)
+    for order_id in cleanup_ids:
+        try:
+            trading_client.cancel_order_by_id(order_id)
+            print(f"cleanup={order_id}:cancel_requested")
+        except Exception as exc:
+            print(f"cleanup={order_id}:best_effort_failed ({type(exc).__name__}: {exc})")
     return 0 if result.verdict == "dedup_confirmed" else 2
 
 

@@ -61,7 +61,7 @@ def test_different_symbols_are_distinct():
 
 def test_very_long_tokens_stay_within_alpaca_limit():
     coid = build_client_order_id("purpose" * 300, "symbol" * 300, CYCLE_TS)
-    assert len(coid) <= 48
+    assert len(coid) <= 128
 
 
 def test_output_uses_only_alpaca_charset():

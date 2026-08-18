@@ -7,7 +7,7 @@ from datetime import datetime
 
 
 _INVALID_CHARS = re.compile(r"[^a-zA-Z0-9_-]")
-_MAX_CLIENT_ORDER_ID_LENGTH = 48
+_MAX_CLIENT_ORDER_ID_LENGTH = 128
 _FORMAT_REJECTION_MARKERS = (
     "invalid format",
     "invalid character",
@@ -16,8 +16,8 @@ _FORMAT_REJECTION_MARKERS = (
     "maximum length",
     "max length",
     "length must",
-    "at most 48",
-    "no more than 48",
+    "at most 128",
+    "no more than 128",
 )
 
 
