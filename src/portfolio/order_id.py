@@ -7,7 +7,18 @@ from datetime import datetime
 
 
 _INVALID_CHARS = re.compile(r"[^a-zA-Z0-9_-]")
-_MAX_CLIENT_ORDER_ID_LENGTH = 1024
+_MAX_CLIENT_ORDER_ID_LENGTH = 48
+_FORMAT_REJECTION_MARKERS = (
+    "invalid format",
+    "invalid character",
+    "must match",
+    "too long",
+    "maximum length",
+    "max length",
+    "length must",
+    "at most 48",
+    "no more than 48",
+)
 
 
 def _sanitize(token: str) -> str:
@@ -35,3 +46,38 @@ def build_client_order_id(
     digest = hashlib.sha256(value.encode("ascii")).hexdigest()[:16]
     prefix_length = _MAX_CLIENT_ORDER_ID_LENGTH - len(digest) - 1
     return f"{value[:prefix_length]}-{digest}"
+
+
+def _is_format_rejection(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "client_order_id" in message and any(
+        marker in message for marker in _FORMAT_REJECTION_MARKERS
+    )
+
+
+def submit_order_with_coid_fallback(trading_client, request, *, log=None, on_alert=None):
+    """Submit once, omitting the ID only when Alpaca rejects its format.
+
+    Duplicate-ID conflicts deliberately propagate: retrying those without the
+    ID would defeat idempotency and could create a second order.
+    """
+    try:
+        return trading_client.submit_order(request)
+    except Exception as exc:
+        client_order_id = getattr(request, "client_order_id", None)
+        if client_order_id is None or not _is_format_rejection(exc):
+            raise
+
+        message = f"Alpaca rejected client_order_id={client_order_id!r}; retrying without it"
+        if log is not None:
+            log.warning("%s: %s", message, exc)
+        if on_alert is not None:
+            try:
+                on_alert(message)
+            except Exception:
+                if log is not None:
+                    log.warning("client_order_id fallback alert failed", exc_info=True)
+
+        payload = request.model_dump(exclude_none=True)
+        payload.pop("client_order_id", None)
+        return trading_client.submit_order(type(request)(**payload))
