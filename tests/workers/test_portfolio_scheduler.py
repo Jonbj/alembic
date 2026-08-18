@@ -462,6 +462,33 @@ def test_submit_portfolio_orders_places_buy_orders():
     assert submitted_calls[0][0] == "SPY"
 
 
+def test_submit_portfolio_buy_uses_signal_id_for_client_order_id():
+    from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+    trading_client = MagicMock()
+    trading_client.submit_order.return_value.id = "alpaca-buy"
+    cycle_ts = datetime(2026, 8, 7, 14, 52, tzinfo=timezone.utc)
+
+    with patch(
+        "src.workers.portfolio_scheduler._get_reversal_cooldown_symbols",
+        return_value=set(),
+    ), patch(
+        "src.workers.portfolio_scheduler._get_stop_loss_cooldown_symbols",
+        return_value=set(),
+    ):
+        submitted = _submit_portfolio_orders(
+            [_make_combined_order("SPY")],
+            trading_client,
+            _make_market(),
+            cycle_ts=cycle_ts,
+            signal_ids={"SPY": 4427},
+        )
+
+    assert len(submitted) == 1
+    request = trading_client.submit_order.call_args.args[0]
+    assert request.client_order_id == "ambc-buy-SPY-4427"
+
+
 def test_submit_portfolio_orders_submits_sell_orders():
     """SELL-side orders are submitted to Alpaca like BUY orders."""
     from src.workers.portfolio_scheduler import _submit_portfolio_orders
@@ -472,6 +499,26 @@ def test_submit_portfolio_orders_submits_sell_orders():
 
     submitted = _submit_portfolio_orders(orders, trading_client, market, _submit_fn=lambda o, n, c: None)
     assert len(submitted) == 1
+
+
+def test_submit_portfolio_sell_uses_cycle_for_client_order_id():
+    from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+    trading_client = MagicMock()
+    trading_client.get_orders.return_value = []
+    trading_client.submit_order.return_value.id = "alpaca-sell"
+    cycle_ts = datetime(2026, 8, 7, 14, 52, tzinfo=timezone.utc)
+
+    submitted = _submit_portfolio_orders(
+        [_make_combined_order("SPY", OrderSide.SELL)],
+        trading_client,
+        _make_market(),
+        cycle_ts=cycle_ts,
+    )
+
+    assert len(submitted) == 1
+    request = trading_client.submit_order.call_args.args[0]
+    assert request.client_order_id == "ambc-sell-SPY-20260807T1452"
 
 
 def test_submit_portfolio_orders_returns_zero_for_empty_list():
@@ -2508,6 +2555,25 @@ def _make_alpaca_position(symbol: str, qty: float):
     return p
 
 
+def test_stop_loss_exit_uses_cycle_for_client_order_id():
+    from src.workers.portfolio_scheduler import _submit_stop_loss_exit_order
+
+    trading_client = MagicMock()
+    trading_client.submit_order.return_value.id = "stop-loss-order"
+    cycle_ts = datetime(2026, 8, 7, 14, 52, tzinfo=timezone.utc)
+
+    response = _submit_stop_loss_exit_order(
+        trading_client,
+        "SOXX",
+        1.13,
+        cycle_ts,
+    )
+
+    assert response.id == "stop-loss-order"
+    request = trading_client.submit_order.call_args.args[0]
+    assert request.client_order_id == "ambc-slstop-SOXX-20260807T1452"
+
+
 def test_reversal_force_sell_cancels_protective_stop_then_submits():
     """The force-sell frees the symbol's reserved shares before the market SELL."""
     from src.workers.portfolio_scheduler import _submit_reversal_force_sells
@@ -2546,6 +2612,30 @@ def test_reversal_force_sell_cancels_protective_stop_then_submits():
     assert _dec_kwargs["symbol"] == "SOXX"
     assert _dec_kwargs["order_id"] == "ord-9"
     assert "sentiment_reversal" in _dec_kwargs["reason"]
+
+
+def test_reversal_force_sell_uses_signal_id_for_client_order_id():
+    from src.workers.portfolio_scheduler import _submit_reversal_force_sells
+
+    trading_client = MagicMock()
+    trading_client.get_orders.return_value = []
+    trading_client.submit_order.return_value.id = "reversal-order"
+
+    with patch("src.store.pg_store.PostgreSQLStore"):
+        _submit_reversal_force_sells(
+            reversal_sell_symbols={"SOXX": {"score": -0.42, "signal_id": 3861}},
+            final_orders=[],
+            stop_loss_sells={},
+            alpaca_positions=[_make_alpaca_position("SOXX", 1.13)],
+            trading_client=trading_client,
+            submitted_orders=[],
+            ts=datetime(2026, 7, 16, 18, 22, tzinfo=timezone.utc),
+            regime_mult=0.7,
+            operating_mode="active",
+        )
+
+    request = trading_client.submit_order.call_args.args[0]
+    assert request.client_order_id == "ambc-revsell-SOXX-3861"
 
 
 def test_reversal_force_sell_skips_symbol_already_being_sold():

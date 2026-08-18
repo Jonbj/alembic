@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Sequence
 
+from src.portfolio.order_id import build_client_order_id, submit_order_with_coid_fallback
 from src.portfolio.stop_policy import StopPolicy
 
 log = logging.getLogger(__name__)
@@ -150,7 +151,13 @@ def build_protective_stop_plans(
     return plans
 
 
-def execute_protective_stop_plans(plans: Sequence[ProtectiveStopPlan], trading_client) -> dict:
+def execute_protective_stop_plans(
+    plans: Sequence[ProtectiveStopPlan],
+    trading_client,
+    cycle_ts: datetime | None = None,
+    *,
+    on_alert=None,
+) -> dict:
     """Cancel stale orders and submit fresh stop orders per plan.
 
     Never raises on a per-symbol broker failure — errors are collected so one
@@ -188,8 +195,18 @@ def execute_protective_stop_plans(plans: Sequence[ProtectiveStopPlan], trading_c
                 side=OrderSide.SELL,
                 time_in_force=TimeInForce.GTC,
                 stop_price=plan.stop_price,
+                client_order_id=(
+                    build_client_order_id("pstop", plan.symbol, cycle_ts)
+                    if cycle_ts is not None
+                    else None
+                ),
             )
-            trading_client.submit_order(req)
+            submit_order_with_coid_fallback(
+                trading_client,
+                req,
+                log=log,
+                on_alert=on_alert,
+            )
             summary["created" if plan.action == "create" else "replaced"] += 1
         except Exception as exc:
             log.warning("Failed to sync protective stop for %s: %s", plan.symbol, exc)

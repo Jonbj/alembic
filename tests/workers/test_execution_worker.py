@@ -153,6 +153,33 @@ def test_order_notional_uses_portfolio_and_regime():
     assert call_args.qty == pytest.approx(expected_qty)
 
 
+def test_buy_uses_signal_id_for_client_order_id():
+    signal = _signal(score=0.5)
+    signal["signal_id"] = 4427
+    redis = _make_redis(signal=signal)
+    client = _make_client(portfolio_value=100_000)
+    cache = {"AAPL": {"ema": 90.0, "price": 100.0}}
+
+    with patch("src.workers.execution._build_market_cache", return_value=cache):
+        run_execution_cycle(["AAPL"], redis, client, data_client=MagicMock())
+
+    request = client.submit_order.call_args.args[0]
+    assert request.client_order_id == "ambc-buy-AAPL-4427"
+
+
+def test_buy_without_signal_id_uses_cycle_for_client_order_id():
+    redis = _make_redis(signal=_signal(score=0.5))
+    client = _make_client(portfolio_value=100_000)
+    cache = {"AAPL": {"ema": 90.0, "price": 100.0}}
+
+    with patch("src.workers.execution._build_market_cache", return_value=cache):
+        run_execution_cycle(["AAPL"], redis, client, data_client=MagicMock())
+
+    client_order_id = client.submit_order.call_args.args[0].client_order_id
+    assert client_order_id.startswith("ambc-buy-AAPL-")
+    assert len(client_order_id.removeprefix("ambc-buy-AAPL-")) == 13
+
+
 def test_regime_absent_uses_conservative_fallback():
     """When no regime key is in Redis, execution uses 0.2× notional (high_vol fallback)."""
     redis = _make_redis(signal=_signal(score=0.6))

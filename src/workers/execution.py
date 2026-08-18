@@ -40,6 +40,7 @@ from src.config import config
 from src.costs.calculator import TradeCostCalculator
 from src.notifications.base import AlertLevel
 from src.performance.postmortem import TradeContext, diagnose_loss, should_trigger_postmortem
+from src.portfolio.order_id import build_client_order_id, submit_order_with_coid_fallback
 from src.store.redis_store import RedisStore
 from src.workers.celery_app import app
 
@@ -718,8 +719,18 @@ def run_execution_cycle(
                 time_in_force=TimeInForce.GTC,
                 order_class=OrderClass.OTO,
                 stop_loss=StopLossRequest(stop_price=stop_price),
+                client_order_id=build_client_order_id(
+                    "buy", symbol, tick_time, signal_id=signal_id
+                ),
             )
-            submitted_order = trading_client.submit_order(order)
+            submitted_order = submit_order_with_coid_fallback(
+                trading_client,
+                order,
+                log=log,
+                on_alert=lambda message: _fire_alert(
+                    notifier, message, AlertLevel.WARNING
+                ),
+            )
             order_id_str = str(submitted_order.id)
             cycle_notional += notional
             stats["orders_placed"] += 1

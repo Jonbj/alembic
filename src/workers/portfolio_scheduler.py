@@ -35,6 +35,7 @@ from src.portfolio.exit_classification import (
     describe_disposition,
     mechanism_for_disposition,
 )
+from src.portfolio.order_id import build_client_order_id, submit_order_with_coid_fallback
 from src.portfolio.whipsaw_damping import evaluate_whipsaw_damping
 from src.workers.celery_app import app
 
@@ -64,6 +65,43 @@ def _enqueue_mobile_broker_error(
         symbol=symbol,
         side=side,
         error_code=type(exc).__name__,
+    )
+
+
+def _coid_fallback_alert(callback, symbol: str, side: str):
+    if callback is None:
+        return None
+
+    def alert(message: str) -> None:
+        callback(symbol, side, RuntimeError(message))
+
+    return alert
+
+
+def _submit_stop_loss_exit_order(
+    trading_client,
+    symbol: str,
+    qty: float,
+    cycle_ts: datetime,
+    *,
+    on_broker_reject=None,
+):
+    """Submit the synthetic stop-loss SELL with a deterministic broker ID."""
+    from alpaca.trading.enums import OrderSide, TimeInForce
+    from alpaca.trading.requests import MarketOrderRequest
+
+    request = MarketOrderRequest(
+        symbol=symbol,
+        qty=qty,
+        side=OrderSide.SELL,
+        time_in_force=TimeInForce.DAY,
+        client_order_id=build_client_order_id("slstop", symbol, cycle_ts),
+    )
+    return submit_order_with_coid_fallback(
+        trading_client,
+        request,
+        log=log,
+        on_alert=_coid_fallback_alert(on_broker_reject, symbol, "sell"),
     )
 
 
@@ -681,7 +719,12 @@ def _sync_fractional_protective_stops(trading_client, stop_policy, cycle_ts, not
         )
 
     plans = build_protective_stop_plans(positions, stop_orders_by_symbol, stop_policy, cycle_ts)
-    summary = execute_protective_stop_plans(plans, trading_client)
+    summary = execute_protective_stop_plans(
+        plans,
+        trading_client,
+        cycle_ts=cycle_ts,
+        on_alert=lambda message: _fire_alert(notifier, message, AlertLevel.WARNING),
+    )
     if summary.get("created") or summary.get("replaced") or summary.get("errors"):
         log.info("Fractional protective stop sync: %s", summary)
 
@@ -2802,6 +2845,8 @@ def _run_cycle_inner() -> dict:
             open_trades=_open_trades,
             sym_strats=_sym_strats,
             _on_broker_reject=_enqueue_mobile_broker_error,
+            cycle_ts=ts,
+            signal_ids=_signal_ids,
         )
 
         # #62/#63: reconcile broker-side protective stops for fractional positions.
@@ -2883,8 +2928,6 @@ def _run_cycle_inner() -> dict:
     if stop_loss_sells and operating_mode not in ("dry_run", "halted"):
         for sym, _sl_dec in sorted(stop_loss_sells.items()):
             try:
-                from alpaca.trading.enums import OrderSide as _OSsl, TimeInForce as _TIFsl
-                from alpaca.trading.requests import MarketOrderRequest as _MORsl
                 qty_held = next(
                     (float(p.qty) for p in alpaca_positions if p.symbol == sym), None
                 )
@@ -2898,9 +2941,13 @@ def _run_cycle_inner() -> dict:
                             "Cancelled %d protective stop(s) for %s before stop-loss exit",
                             _n_freed_sl, sym,
                         )
-                    resp = trading_client.submit_order(_MORsl(
-                        symbol=sym, qty=qty_held, side=_OSsl.SELL, time_in_force=_TIFsl.DAY,
-                    ))
+                    resp = _submit_stop_loss_exit_order(
+                        trading_client,
+                        sym,
+                        qty_held,
+                        ts,
+                        on_broker_reject=_enqueue_mobile_broker_error,
+                    )
                     _order_id = str(resp.id)
                     submitted_orders.append({
                         "symbol": sym, "side": "sell", "order_id": _order_id,
@@ -2954,6 +3001,7 @@ def _run_cycle_inner() -> dict:
         ts=ts,
         regime_mult=_regime_mult,
         operating_mode=operating_mode,
+        on_broker_reject=_enqueue_mobile_broker_error,
     )
 
     # P2-04: fire divergence alerts if signals and submitted orders don't match.
@@ -3788,6 +3836,8 @@ def _submit_portfolio_orders(
     nav: float | None = None,
     open_trades: list[dict] | None = None,
     sym_strats: dict | None = None,
+    cycle_ts: datetime | None = None,
+    signal_ids: dict[str, int] | None = None,
 ) -> list[dict]:
     """Submit BUY and SELL orders to Alpaca.
 
@@ -4012,8 +4062,22 @@ def _submit_portfolio_orders(
                         base_kwargs["stop_loss"] = StopLossRequest(stop_price=sl_price)
                         log.debug("P2-A bracket %s: tp=%.2f sl=%.2f (d_hard=%.3f, entry≈%.2f)", order.symbol, tp_price, sl_price, _sl_d_hard, price)
 
+                    if cycle_ts is not None:
+                        base_kwargs["client_order_id"] = build_client_order_id(
+                            "buy",
+                            order.symbol,
+                            cycle_ts,
+                            signal_id=(signal_ids or {}).get(order.symbol),
+                        )
                     req = MarketOrderRequest(**base_kwargs)
-                    alpaca_order = trading_client.submit_order(req)
+                    alpaca_order = submit_order_with_coid_fallback(
+                        trading_client,
+                        req,
+                        log=log,
+                        on_alert=_coid_fallback_alert(
+                            _on_broker_reject, order.symbol, "buy"
+                        ),
+                    )
                     alpaca_id = str(alpaca_order.id)
                 submitted.append({"symbol": order.symbol, "side": "buy", "order_id": alpaca_id, "notional": notional})
             elif order.side == OrderSide.SELL:
@@ -4045,8 +4109,20 @@ def _submit_portfolio_orders(
                         qty=qty,
                         side="sell",
                         time_in_force="day",
+                        client_order_id=(
+                            build_client_order_id("sell", order.symbol, cycle_ts)
+                            if cycle_ts is not None
+                            else None
+                        ),
                     )
-                    alpaca_order = trading_client.submit_order(req)
+                    alpaca_order = submit_order_with_coid_fallback(
+                        trading_client,
+                        req,
+                        log=log,
+                        on_alert=_coid_fallback_alert(
+                            _on_broker_reject, order.symbol, "sell"
+                        ),
+                    )
                     alpaca_id = str(alpaca_order.id)
                 # allocation_weight propagates the target-weight intent so the
                 # trade-exit writer can tell a full-close SELL (weight == 0.0 =>
@@ -4080,6 +4156,7 @@ def _submit_reversal_force_sells(
     regime_mult: float,
     operating_mode: str,
     redis_client=None,
+    on_broker_reject=None,
 ) -> None:
     """Force-sell positions flagged by the sentiment-reversal check.
 
@@ -4122,8 +4199,19 @@ def _submit_reversal_force_sells(
                     qty=qty_held,
                     side=OrderSide.SELL,
                     time_in_force=TimeInForce.DAY,
+                    client_order_id=build_client_order_id(
+                        "revsell",
+                        sym,
+                        ts,
+                        signal_id=reversal_sell_symbols.get(sym, {}).get("signal_id"),
+                    ),
                 )
-                resp = trading_client.submit_order(req)
+                resp = submit_order_with_coid_fallback(
+                    trading_client,
+                    req,
+                    log=log,
+                    on_alert=_coid_fallback_alert(on_broker_reject, sym, "sell"),
+                )
                 _rev_order_id = str(resp.id)
                 submitted_orders.append({
                     "symbol": sym,

@@ -220,6 +220,17 @@ class TestExecuteProtectiveStopPlans:
         tc.cancel_order_by_id.assert_not_called()
         assert summary["created"] == 1
 
+    def test_create_uses_cycle_for_client_order_id(self, cycle_ts):
+        from src.portfolio.fractional_stop_orders import execute_protective_stop_plans, ProtectiveStopPlan
+
+        plan = ProtectiveStopPlan(action="create", symbol="AAPL", whole_qty=2, stop_price=88.0)
+        trading_client = MagicMock()
+
+        execute_protective_stop_plans([plan], trading_client, cycle_ts=cycle_ts)
+
+        request = trading_client.submit_order.call_args.args[0]
+        assert request.client_order_id == "ambc-pstop-AAPL-20260716T1500"
+
     def test_replace_cancels_then_submits(self):
         from src.portfolio.fractional_stop_orders import execute_protective_stop_plans, ProtectiveStopPlan
 
