@@ -104,6 +104,22 @@ watchlist rappresentativi: AAPL, MSFT, NVDA, JPM, PFE. Riproducibile con
 `scripts/probe_earnings_chain_phase0.py` (strumentazione read-only, nessun DB/worker,
 nessuna taratura — compatibile col freeze #171). Nessuna modifica live eseguita.
 
+**Onestà sul perimetro della sonda — issue #37 review (respinta 2026-08-18).** La prima
+versione dello script iterava le chiamate per-symbol solo su `SYMBOLS[0]` (= AAPL), non
+su tutti e cinque i simboli della watchlist. Cita il brief, ma il probe **non copriva
+MSFT/NVDA/JPM/PFE**. Il testo del report originale ne approfittava e dichiarava
+«sondato tutti e cinque»: imprecisione segnalata dal reviewer. La versione attuale
+dello script fa uno sweep esplicito su tutti i 5 simboli per ogni endpoint per-symbol
+(FMP stable/* e Finnhub stock/*); solo Alpha Vantage resta single-call perché la quota
+free tier = 25/day ed è già tirata per la Phase 2 (5 chiamate in più brucerebbero
+1/5 della quota giornaliera senza informazione utile, dato che l'endpoint richiede il
+fiscal quarter e ritorna `transcript: []` per ogni simbolo senza quarter). La forma del
+dato, le shape degli errori (402 premium, 403 legacy, 302 redirect) e i codici HTTP
+riportati nelle §§0.2-0.4 sono stati osservati su AAPL — sono **rappresentativi del
+piano e della copertura gratuita** ma non sono stati verificati simbolo-per-simbolo
+nella run originale; la sweep sui 5 ora inclusa nello script permetterà all'operatore
+di rifare la verifica end-to-end con una sola esecuzione.
+
 **Risultato in sintesi.** Il brief (2026-07-12) è invecchiato su due punti che cambiano il
 perimetro, non la direzione: (a) il codice S7/PEAD che il brief cita come esistente è
 stato **rimosso** il 2026-07-15 (PR #56, ALPHA-A3 confutato a decision-grade); (b)
@@ -194,10 +210,15 @@ one-stop deterministico è **Finnhub**, con FMP come sorgente storica di profond
 ### 0.4 Transcript (Phase 2) — Alpha Vantage, non FMP
 
 `scripts/fetch_s7_transcripts.py` già documenta la rotta: «I transcript FMP richiedono il
-piano Ultimate → si usa Alpha Vantage free tier». Verificato:
+piano Ultimate → si usa Alpha Vantage free tier». Verificato (single-symbol, AAPL):
 `EARNINGS_CALL_TRANSCRIPT?symbol=AAPL` → 200 ma `transcript: []` quando non si passa il
 `quarter` (AV key i transcript per fiscal quarter, non per data — lo script S7 itera i
 due trimestri candidati). `ALPHAVANTAGE_API_KEY` presente nell'`.env`.
+
+Lo script di probe fa **una sola** chiamata AV (su `SYMBOLS[0]`): iterare tutti e 5 i
+simboli mangerebbe 5/25 della quota daily free tier senza informazione aggiuntiva,
+dato che senza fiscal quarter tutti i simboli ritornano `transcript: []` (la shape
+dell'errore è già stabilita — il parametro mancante è la sola causa).
 
 **Costo Phase 2.** AV free = 25 chiamate/giorno (~5 req/min). Il brief stima ~5-15
 event-day di earnings season sulla watchlist: entra nel budget ma **stretto**, e il POC S7

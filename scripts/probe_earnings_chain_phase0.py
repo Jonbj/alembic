@@ -75,43 +75,67 @@ def main() -> None:
     print(f"FINNHUB_API_KEY: {'presente' if fh else 'ASSENTE'}")
     print(f"ALPHAVANTAGE_API_KEY: {'presente' if av else 'ASSENTE'}\n")
 
-    sym = SYMBOLS[0]  # AAPL per le sonde per-symbol
-
-    print("=== FMP (financialmodelingprep.com) ===")
+    # Endpoint globali (non per-symbol): una sola chiamata per categoria
+    print("=== FMP (financialmodelingprep.com) — endpoint globali ===")
     if fmp:
-        _probe("v3/earning-calendar/{sym}", f"{FMP}/api/v3/earning-calendar/{sym}", params={"apikey": fmp})
-        _probe("stable/earnings-calendar (no range)", f"{FMP}/stable/earnings-calendar", params={"apikey": fmp})
+        _probe("stable/earnings-calendar (no range)", f"{FMP}/stable/earnings-calendar",
+               params={"apikey": fmp})
         _probe("stable/earnings-calendar (range=premium)", f"{FMP}/stable/earnings-calendar",
                params={"from": "2024-01-01", "to": "2026-08-18", "apikey": fmp})
-        _probe("stable/earnings {sym}", f"{FMP}/stable/earnings", params={"symbol": sym, "apikey": fmp})
-        _probe("stable/analyst-estimates annual", f"{FMP}/stable/analyst-estimates",
-               params={"symbol": sym, "period": "annual", "apikey": fmp})
-        _probe("stable/analyst-estimates quarter", f"{FMP}/stable/analyst-estimates",
-               params={"symbol": sym, "period": "quarter", "apikey": fmp})
-        _probe("stable/earning-call-transcript {sym}", f"{FMP}/stable/earning-call-transcript",
-               params={"symbol": sym, "apikey": fmp})
-        _probe("stable/profile {sym} (sanity piano)", f"{FMP}/stable/profile",
-               params={"symbol": sym, "apikey": fmp})
+        print("\n  --- v3/earning-calendar (legacy, per-symbol sweep) ---")
+        for sym in SYMBOLS:
+            _probe(f"v3/earning-calendar/{sym}", f"{FMP}/api/v3/earning-calendar/{sym}",
+                   params={"apikey": fmp})
     else:
         print("  (saltato: FMP_API_KEY non in env)")
 
-    print("\n=== Finnhub (finnhub.io) ===")
+    # Endpoint per-symbol: una riga per simbolo × provider, su tutti i 5 della watchlist
+    print("\n=== FMP — per-symbol (uno per simbolo watchlist) ===")
+    if fmp:
+        for sym in SYMBOLS:
+            _probe(f"stable/earnings {sym}", f"{FMP}/stable/earnings",
+                   params={"symbol": sym, "apikey": fmp})
+            _probe(f"stable/analyst-estimates annual {sym}", f"{FMP}/stable/analyst-estimates",
+                   params={"symbol": sym, "period": "annual", "apikey": fmp})
+            _probe(f"stable/analyst-estimates quarter {sym}", f"{FMP}/stable/analyst-estimates",
+                   params={"symbol": sym, "period": "quarter", "apikey": fmp})
+            _probe(f"stable/earning-call-transcript {sym}", f"{FMP}/stable/earning-call-transcript",
+                   params={"symbol": sym, "apikey": fmp})
+            _probe(f"stable/profile {sym} (sanity piano)", f"{FMP}/stable/profile",
+                   params={"symbol": sym, "apikey": fmp})
+    else:
+        print("  (saltato: FMP_API_KEY non in env)")
+
+    print("\n=== Finnhub (finnhub.io) — globali ===")
     if fh:
         _probe("calendar/earnings (range)", f"{FH}/calendar/earnings",
                params={"from": "2026-08-18", "to": "2026-08-25", "token": fh})
-        _probe("stock/earnings {sym}", f"{FH}/stock/earnings", params={"symbol": sym, "token": fh})
-        _probe("stock/recommendation {sym}", f"{FH}/stock/recommendation", params={"symbol": sym, "token": fh})
-        _probe("stock/earnings-estimate {sym}", f"{FH}/stock/earnings-estimate",
-               params={"symbol": sym, "freq": "quarterly", "token": fh})
-        _probe("company-news {sym} (sanity wired)", f"{FH}/company-news",
-               params={"symbol": sym, "from": "2026-08-11", "to": "2026-08-18", "token": fh})
     else:
         print("  (saltato: FINNHUB_API_KEY non in env)")
 
-    print("\n=== Alpha Vantage (alphavantage.co) — fonte transcript del POC S7 ===")
+    print("\n=== Finnhub — per-symbol (uno per simbolo watchlist) ===")
+    if fh:
+        for sym in SYMBOLS:
+            _probe(f"stock/earnings {sym}", f"{FH}/stock/earnings",
+                   params={"symbol": sym, "token": fh})
+            _probe(f"stock/recommendation {sym}", f"{FH}/stock/recommendation",
+                   params={"symbol": sym, "token": fh})
+            _probe(f"stock/earnings-estimate {sym}", f"{FH}/stock/earnings-estimate",
+                   params={"symbol": sym, "freq": "quarterly", "token": fh})
+            _probe(f"company-news {sym} (sanity wired)", f"{FH}/company-news",
+                   params={"symbol": sym, "from": "2026-08-11", "to": "2026-08-18", "token": fh})
+    else:
+        print("  (saltato: FINNHUB_API_KEY non in env)")
+
+    print("\n=== Alpha Vantage (alphavantage.co) — transcript (POC S7) ===")
     if av:
-        _probe("EARNINGS_CALL_TRANSCRIPT {sym}", AV,
-               params={"function": "EARNINGS_CALL_TRANSCRIPT", "symbol": sym, "apikey": av})
+        # AV quota free tier = 25/day, già risicata in earnings season per la Phase 2.
+        # La sonda verifica solo shape/contenuto del payload su 1 simbolo
+        # (l'endpoint richiede fiscal quarter, non data singola): iterare 5 simboli
+        # mangerebbe 5/25 della quota senza aggiungere informazione.
+        _probe(f"EARNINGS_CALL_TRANSCRIPT {SYMBOLS[0]} (probe shape, no quarter — AV quota 25/day)",
+               AV, params={"function": "EARNINGS_CALL_TRANSCRIPT",
+                            "symbol": SYMBOLS[0], "apikey": av})
     else:
         print("  (saltato: ALPHAVANTAGE_API_KEY non in env)")
 
