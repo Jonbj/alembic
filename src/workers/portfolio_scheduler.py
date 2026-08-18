@@ -719,7 +719,12 @@ def _sync_fractional_protective_stops(trading_client, stop_policy, cycle_ts, not
         )
 
     plans = build_protective_stop_plans(positions, stop_orders_by_symbol, stop_policy, cycle_ts)
-    summary = execute_protective_stop_plans(plans, trading_client)
+    summary = execute_protective_stop_plans(
+        plans,
+        trading_client,
+        cycle_ts=cycle_ts,
+        on_alert=lambda message: _fire_alert(notifier, message, AlertLevel.WARNING),
+    )
     if summary.get("created") or summary.get("replaced") or summary.get("errors"):
         log.info("Fractional protective stop sync: %s", summary)
 
