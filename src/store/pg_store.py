@@ -654,7 +654,7 @@ class PostgreSQLStore:
                 cur.execute(
                     """SELECT id, tick_time, symbol, score, regime_mult, decision
                        FROM execution_decisions
-                       WHERE decision IN ('SKIP_THRESHOLD', 'SKIP_EMA', 'SKIP_CAP')
+                       WHERE decision IN ('SKIP_THRESHOLD', 'SKIP_EMA', 'SKIP_CAP', 'SKIP_PYRAMIDING')
                          AND counterfactual_computed_at IS NULL
                          AND tick_time >= now() - (%s || ' days')::interval
                        ORDER BY tick_time DESC

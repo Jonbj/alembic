@@ -89,18 +89,51 @@ class TestScritturaDellaRiga:
         assert "0.516" in reason
         assert "2026-07-10" in reason
 
-    def test_conserva_il_peso_che_sarebbe_stato_allocato(self) -> None:
-        """Serve a #230: senza questo non si puo' misurare quanto capitale
-        il blocco lascia non impiegato."""
+    def test_score_e_il_delta_di_nav_non_il_peso_target(self) -> None:
+        """#315: con fixed_slot_sizing=True allocation_weight e' sempre 1/n_top
+        (es. 0.20), un numero fisso indipendente dal capitale davvero bloccato.
+        `score` deve portare quantity * price / nav — il delta $ (come frazione
+        di NAV) realmente non allocato — non il peso target dello slot."""
         pg = self._pg()
         _record_pyramiding_blocks(
             pg,
             [{"symbol": "XLE", "signal_id": 77, "signal_score": 0.5,
-              "allocation_weight": 0.20, "open_since": None}],
+              "allocation_weight": 0.20, "open_since": None,
+              "quantity": 50.0, "price": 80.0, "nav": 100_000.0}],
             gia_registrati=set(),
             regime_mult=1.0,
         )
-        assert pg.write_execution_decision.call_args.kwargs["score"] == 0.20
+        # 50 * 80 / 100_000 = 0.04 — ben lontano dal peso target 0.20.
+        assert pg.write_execution_decision.call_args.kwargs["score"] == 0.04
+
+    def test_conserva_il_peso_target_nel_reason(self) -> None:
+        """allocation_weight resta leggibile nel testo per confronto (#315),
+        anche se non e' piu' il campo usato per l'aggregazione."""
+        pg = self._pg()
+        _record_pyramiding_blocks(
+            pg,
+            [{"symbol": "XLE", "signal_id": 77, "signal_score": 0.5,
+              "allocation_weight": 0.20, "open_since": None,
+              "quantity": 50.0, "price": 80.0, "nav": 100_000.0}],
+            gia_registrati=set(),
+            regime_mult=1.0,
+        )
+        reason = pg.write_execution_decision.call_args.kwargs["reason"]
+        assert "20.0%" in reason
+
+    def test_senza_prezzo_o_nav_il_delta_e_zero_non_esplode(self) -> None:
+        """Il P1-A snapshot puo' non aver prezzato il simbolo: fail-safe a 0.0
+        invece di sollevare (la visibilita' non deve mai far cadere il ciclo)."""
+        pg = self._pg()
+        _record_pyramiding_blocks(
+            pg,
+            [{"symbol": "XLE", "signal_id": 77, "signal_score": 0.5,
+              "allocation_weight": 0.20, "open_since": None,
+              "quantity": 50.0, "price": None, "nav": 100_000.0}],
+            gia_registrati=set(),
+            regime_mult=1.0,
+        )
+        assert pg.write_execution_decision.call_args.kwargs["score"] == 0.0
 
 
 class TestIdempotenza:

@@ -214,6 +214,10 @@ class TestPgStoreCounterfactual:
         assert "SKIP_THRESHOLD" in called_sql
         assert "SKIP_EMA" in called_sql
         assert "SKIP_CAP" in called_sql
+        # #315: senza questa riga SKIP_PYRAMIDING non riceve mai un
+        # counterfactual_return_1h — i blocchi anti-pyramiding restano
+        # illeggibili per la revisione di #230.
+        assert "SKIP_PYRAMIDING" in called_sql
         assert "counterfactual_computed_at IS NULL" in called_sql
 
     def test_bulk_set_counterfactual_empty_list_returns_zero(self):
