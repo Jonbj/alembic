@@ -2657,6 +2657,13 @@ def _run_cycle_inner() -> dict:
                     "signal_id": _signal_ids.get(order.symbol),
                     "signal_score": _s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
                     "allocation_weight": order.allocation_weight,
+                    # #315: quantita'/prezzo/NAV del ciclo per calcolare il delta $
+                    # di NAV effettivamente bloccato — allocation_weight resta solo
+                    # come peso *target* dello slot (fixed_slot_sizing = 1/n_top),
+                    # non il capitale davvero non allocato.
+                    "quantity": order.quantity,
+                    "price": latest_prices.get(order.symbol),
+                    "nav": equity,
                     "open_since": _open_trade_entry_dates.get(order.symbol),
                 })
                 continue
@@ -3402,8 +3409,12 @@ def _record_pyramiding_blocks(pg, bloccati, gia_registrati: set[str], regime_mul
     il difetto precedente: le righe apparivano come replay di segnali stale e inquinavano
     il Decision Log. Qui la riga dichiara quello che e' successo davvero.
 
-    `score` porta il peso che SAREBBE stato allocato: e' il dato che serve a #230 per
-    misurare quanto capitale il blocco lascia non impiegato.
+    `score` porta il delta di NAV effettivamente bloccato — `quantity * price / nav`,
+    non il peso *target* dello slot (#315). Con `fixed_slot_sizing=True` (default)
+    `allocation_weight` e' sempre 1/n_top (0.20): un numero fisso che non dipende da
+    quanto capitale il blocco lascia davvero non impiegato, quindi non e' sommabile
+    in una stima $ leggibile a query — vedi #230. `allocation_weight` resta nel testo
+    del `reason` per confronto, ma non e' piu' il campo usato per l'aggregazione.
 
     Restituisce le chiavi effettivamente scritte, perche' sia il chiamante a marcarle —
     la funzione resta testabile senza Redis. Non solleva mai: la visibilita' e' preziosa,
@@ -3421,6 +3432,10 @@ def _record_pyramiding_blocks(pg, bloccati, gia_registrati: set[str], regime_mul
                 continue
             _score = b.get("signal_score")
             _since = b.get("open_since")
+            _qty = b.get("quantity") or 0.0
+            _price = b.get("price") or 0.0
+            _nav = b.get("nav") or 0.0
+            _delta = (float(_qty) * float(_price) / float(_nav)) if _nav else 0.0
             _reason = (
                 f"P0-05 anti-pyramiding: gia' a libro"
                 f"{f' dal {_since}' if _since else ''}"
@@ -3431,7 +3446,7 @@ def _record_pyramiding_blocks(pg, bloccati, gia_registrati: set[str], regime_mul
                 tick_time=now,
                 symbol=b["symbol"],
                 signal_id=b.get("signal_id"),
-                score=b.get("allocation_weight") or 0.0,
+                score=_delta,
                 signal_score=_score,
                 regime_mult=regime_mult,
                 ema_pass=True,
