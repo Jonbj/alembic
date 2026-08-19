@@ -38,6 +38,7 @@ def _fresh_signal(symbol: str, score: float = 0.5) -> dict:
 def _make_alpaca_account(portfolio_value=100_000.0, last_equity=100_000.0):
     acc = MagicMock()
     acc.portfolio_value = str(portfolio_value)
+    acc.buying_power = str(portfolio_value)
     acc.last_equity = str(last_equity)
     return acc
 

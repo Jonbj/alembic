@@ -42,6 +42,7 @@ def _make_client(
     client = MagicMock()
     account = MagicMock()
     account.portfolio_value = str(portfolio_value)
+    account.buying_power = str(portfolio_value)
     account.last_equity = str(last_equity) if last_equity is not None else None
     client.get_account.return_value = account
     client.get_all_positions.return_value = list((positions or {}).values())
@@ -511,6 +512,7 @@ class TestDecisionLogging:
     def _make_account(self, portfolio_value=10000.0):
         account = MagicMock()
         account.portfolio_value = str(portfolio_value)
+        account.buying_power = str(portfolio_value)
         account.last_equity = str(portfolio_value)
         return account
 
