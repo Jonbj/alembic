@@ -1,7 +1,7 @@
 """EOD position reconciliation task (spec §2): alert on anomalies + flag-gated
 auto-close of genuinely_orphan trades. Mirrors run_reconcile_fills_intraday's
 credential guard + try/except shape."""
-from datetime import datetime, timezone
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 from src.workers.performance import run_reconcile_positions
@@ -111,10 +111,10 @@ def test_autoclose_live_calls_record_trade_exit_with_synthetic_id():
     assert isinstance(kwargs["exit_time"], datetime)
 
 
-def test_autoclose_recovers_real_exit_order_id_from_broker():
+def test_autoclose_does_not_attach_an_unlinked_broker_sell():
     pg = _mock_pg([_trade(9, "BBB", 3.0)])
     order = MagicMock()
-    order.id = "real-sell-123"
+    order.id = "historical-sell-123"
     order.status = MagicMock(value="filled")
     order.filled_avg_price = "150.00"
     tc = _mock_tc([], orders=[order])
@@ -126,7 +126,8 @@ def test_autoclose_recovers_real_exit_order_id_from_broker():
         result = run_reconcile_positions()
     assert result["autoclose"]["closed"] == 1
     _, kwargs = pg.record_trade_exit.call_args
-    assert kwargs["exit_order_id"] == "real-sell-123"
+    assert kwargs["exit_order_id"] == "orphan_reconcile:9"
+    tc.get_orders.assert_not_called()
 
 
 def test_over_held_and_untracked_are_alerted_not_closed():

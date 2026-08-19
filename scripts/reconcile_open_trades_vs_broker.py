@@ -127,10 +127,11 @@ def force_close_orphans(
     alerted only by the caller — auto-closing those needs broker orders, out of
     scope. untracked_position records have trade_id=None and are skipped.
 
-    If a record carries an "exit_order_id" (enriched by the Celery task from
-    the broker order history), it is used; otherwise a synthetic
-    "orphan_reconcile:<trade_id>" id is used so the existing reconcile_trade_fills
-    beat can later populate exit_price from the real fill.
+    Uses a pre-linked ``exit_order_id`` when the caller already has one;
+    otherwise uses a synthetic "orphan_reconcile:<trade_id>" id. The scheduled
+    reconciler does not infer that link from symbol-only broker history because
+    doing so could copy a historical fill into this trade and corrupt its price,
+    quantity and P&L. Those fields therefore remain unreconciled for synthetic ids.
 
     Args:
         records: output of classify_positions (all categories; filtered here).

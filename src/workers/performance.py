@@ -750,14 +750,6 @@ def run_reconcile_positions() -> dict:
 
         closed_summary: dict = {"planned": 0, "closed": 0, "errors": 0, "dry_run": True}
         if config.RECONCILE_AUTOCLOSE_ENABLED:
-            orphans = [r for r in records if r["category"] == "genuinely_orphan"]
-            # Best-effort: recover the real broker SELL order id for each orphan
-            # so the existing reconcile_trade_fills beat can populate exit_price
-            # from the fill. None -> force_close_orphans uses a synthetic id.
-            for r in orphans:
-                oid = _recover_exit_order_id(tc, r["symbol"])
-                if oid:
-                    r["exit_order_id"] = oid
             results = force_close_orphans(
                 records, writer=pg.record_trade_exit,
                 dry_run=config.RECONCILE_AUTOCLOSE_DRY_RUN,
@@ -787,33 +779,6 @@ def run_reconcile_positions() -> dict:
         return {"error": str(exc)}
     finally:
         pg.close()
-
-
-def _recover_exit_order_id(trading_client, symbol: str) -> str | None:
-    """Best-effort: return the most recent filled SELL order id for symbol, so
-    the existing reconcile_trade_fills beat can populate exit_price from the
-    fill. Returns None on any failure (force_close_orphans falls back to a
-    synthetic "orphan_reconcile:<trade_id>" id)."""
-    try:
-        from alpaca.trading.enums import OrderSide, QueryOrderStatus
-        from alpaca.trading.requests import GetOrdersRequest
-        orders = trading_client.get_orders(
-            GetOrdersRequest(
-                status=QueryOrderStatus.CLOSED,
-                symbols=[symbol],
-                side=OrderSide.SELL,
-                limit=1,
-            )
-        )
-        for o in orders:
-            status = getattr(getattr(o, "status", None), "value", None) or str(
-                getattr(o, "status", "")
-            )
-            if status in ("filled", "partially_filled") and getattr(o, "filled_avg_price", None):
-                return str(o.id)
-    except Exception as exc:
-        log.debug("exit_order_id recovery failed for %s: %s", symbol, exc)
-    return None
 
 
 def _format_reconcile_alert(anomalies: list[dict], counts: dict[str, int]) -> str:
