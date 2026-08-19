@@ -698,6 +698,143 @@ def run_reconcile_fills_intraday() -> dict:
         pg.close()
 
 
+@app.task(name="src.workers.performance.run_reconcile_positions")
+def run_reconcile_positions() -> dict:
+    """EOD position reconciliation (spec §2) — runs at 21:35 UTC Mon-Fri (after
+    reconcile-fills-evening at 21:30).
+
+    Classifies every open DB trade against the live broker position and:
+    - ALWAYS alerts (Telegram) on the three anomaly categories:
+      genuinely_orphan, over_held, untracked_position. The other two
+      (fully_held, partially_wound_down_coheld) are normal states -> no alert.
+    - Conditionally auto-closes genuinely_orphan trades (DB force-close only —
+      broker holds 0, no SELL order) when config.RECONCILE_AUTOCLOSE_ENABLED.
+      Dry-run by default (RECONCILE_AUTOCLOSE_DRY_RUN=true): logs only, no
+      writer calls. over_held / untracked_position are alerted only.
+
+    Mirrors run_reconcile_fills_intraday's credential guard + try/except shape.
+    A classify-time error is caught, a best-effort Telegram failure-alert is sent,
+    and {"error": ...} is returned — the worker never crashes (spec §2).
+    """
+    from scripts.reconcile_open_trades_vs_broker import (
+        classify_positions, force_close_orphans, summarize,
+    )
+
+    if not config.ALPACA_API_KEY or not config.ALPACA_SECRET_KEY:
+        return {"skipped": True, "reason": "no_credentials"}
+
+    pg = PostgreSQLStore()
+    try:
+        from alpaca.trading.client import TradingClient
+        tc = TradingClient(
+            api_key=config.ALPACA_API_KEY,
+            secret_key=config.ALPACA_SECRET_KEY,
+            paper=config.ALPACA_PAPER_MODE,
+        )
+        open_trades = pg.fetch_trades(status="open", limit=1000)
+        held = {p.symbol: float(p.qty) for p in tc.get_all_positions()}
+        records = classify_positions(
+            open_trades, held, now=datetime.now(timezone.utc)
+        )
+        counts = summarize(records)
+
+        anomaly_categories = ("genuinely_orphan", "over_held", "untracked_position")
+        anomalies = [r for r in records if r["category"] in anomaly_categories]
+        if anomalies:
+            try:
+                notifier = TelegramNotifier()
+                msg = _format_reconcile_alert(anomalies, counts)
+                run_async(notifier.send_alert(msg, level="warning"))
+            except Exception as exc:
+                log.warning("Reconcile Telegram alert failed: %s", exc)
+
+        closed_summary: dict = {"planned": 0, "closed": 0, "errors": 0, "dry_run": True}
+        if config.RECONCILE_AUTOCLOSE_ENABLED:
+            orphans = [r for r in records if r["category"] == "genuinely_orphan"]
+            # Best-effort: recover the real broker SELL order id for each orphan
+            # so the existing reconcile_trade_fills beat can populate exit_price
+            # from the fill. None -> force_close_orphans uses a synthetic id.
+            for r in orphans:
+                oid = _recover_exit_order_id(tc, r["symbol"])
+                if oid:
+                    r["exit_order_id"] = oid
+            results = force_close_orphans(
+                records, writer=pg.record_trade_exit,
+                dry_run=config.RECONCILE_AUTOCLOSE_DRY_RUN,
+            )
+            closed_summary = {
+                "planned": len(results),
+                "closed": sum(1 for x in results if x.get("closed")),
+                "errors": sum(1 for x in results if x.get("error")),
+                "dry_run": config.RECONCILE_AUTOCLOSE_DRY_RUN,
+            }
+            log.info(
+                "Reconcile autoclose: planned=%d closed=%d errors=%d dry_run=%s",
+                closed_summary["planned"], closed_summary["closed"],
+                closed_summary["errors"], closed_summary["dry_run"],
+            )
+
+        return {"counts": counts, "anomalies": len(anomalies), "autoclose": closed_summary}
+    except Exception as exc:
+        log.warning("Position reconciliation failed: %s", exc)
+        # spec §2: a classify error -> alert (best-effort), never crash the worker.
+        try:
+            notifier = TelegramNotifier()
+            run_async(notifier.send_alert(
+                f"<b>Position Reconciliation FAILED</b>\n{exc}", level="critical"))
+        except Exception as inner:
+            log.warning("Reconcile failure-alert Telegram send failed: %s", inner)
+        return {"error": str(exc)}
+    finally:
+        pg.close()
+
+
+def _recover_exit_order_id(trading_client, symbol: str) -> str | None:
+    """Best-effort: return the most recent filled SELL order id for symbol, so
+    the existing reconcile_trade_fills beat can populate exit_price from the
+    fill. Returns None on any failure (force_close_orphans falls back to a
+    synthetic "orphan_reconcile:<trade_id>" id)."""
+    try:
+        from alpaca.trading.enums import OrderSide, QueryOrderStatus
+        from alpaca.trading.requests import GetOrdersRequest
+        orders = trading_client.get_orders(
+            GetOrdersRequest(
+                status=QueryOrderStatus.CLOSED,
+                symbols=[symbol],
+                side=OrderSide.SELL,
+                limit=1,
+            )
+        )
+        for o in orders:
+            status = getattr(getattr(o, "status", None), "value", None) or str(
+                getattr(o, "status", "")
+            )
+            if status in ("filled", "partially_filled") and getattr(o, "filled_avg_price", None):
+                return str(o.id)
+    except Exception as exc:
+        log.debug("exit_order_id recovery failed for %s: %s", symbol, exc)
+    return None
+
+
+def _format_reconcile_alert(anomalies: list[dict], counts: dict[str, int]) -> str:
+    """Format the Telegram alert for the three anomaly categories (HTML)."""
+    lines = ["<b>Position Reconciliation — anomalies</b>", ""]
+    for cat in ("genuinely_orphan", "over_held", "untracked_position"):
+        n = counts.get(cat, 0)
+        if n:
+            lines.append(f"• {cat}: {n}")
+    lines.append("")
+    for r in anomalies[:20]:
+        tid = r.get("trade_id") or "—"
+        lines.append(
+            f"  #{tid} {r['symbol']} {r['category']} "
+            f"(db={r['db_qty']:.4f} held={r['held_qty']:.4f})"
+        )
+    if len(anomalies) > 20:
+        lines.append(f"  ... +{len(anomalies) - 20} more")
+    return "\n".join(lines)
+
+
 def _broker_mtm_snapshot(trading_client) -> dict | None:
     """Real-money numbers from the broker: NAV, day MTM change, open-book unrealized.
 
