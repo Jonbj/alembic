@@ -371,6 +371,9 @@ S2-1 Source Funnel & P&L (FIX-04): per-source ingestion funnel (`ingestion_stats
 signal latency p50/p95 (`generated_at − published_at`), near-zero rate, trade hit-rate and
 net P&L, plus `trace_coverage` (signals linked to a news source). Query param: `days`
 (default 14). Sources in `trades` without a `news_log` link report as `unknown`.
+FIX-06 records the event-level reason and stage for discarded items in
+`news_queue_drops`; stale and parse-failure events also increment the corresponding
+per-source funnel counters shown by this endpoint.
 
 ## Admin Endpoints
 

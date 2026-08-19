@@ -4,6 +4,23 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ---
 
+## 2026-08-16
+
+### #39 — gli scarti news hanno motivo e stadio persistiti
+
+- Il ledger `news_queue_drops`, nato in #149 per i soli scarti stale, registra ora anche
+  `no_ticker`, `duplicate_id`, `duplicate_content`, `not_tradable`, `parse_fail` e
+  `near_neutral`, distinguendo ingestione e sentiment. Le righe storiche sono backfillate
+  deterministicamente come `stale`/`sentiment` dalla migration 047.
+- Tutti i processor di ingestione alimentano il ledger senza rendere la telemetria un gate;
+  il sentiment worker registra anche payload non parsabili, filtri di freschezza, prefilter
+  MarketAux e resolver hard-NOT_TRADABLE. Gli stale e i parse failure aggiornano inoltre i
+  contatori per-fonte già esposti dal Source Funnel.
+- `news_log.discarded_reason` resta legacy-unused: la tabella è unica per `(url, ticker)` e
+  rappresenta articoli processati; usarla per eventi duplicati falserebbe l'attribuzione
+  news→segnale→trade. Il ledger separato conserva invece ogni evento senza sovrascritture.
+- Nessuna soglia, flag, peso, cooldown o parametro di strategia è cambiato.
+
 ## 2026-08-10
 
 ### F8 regime_scale — RITIRATA. La premessa era falsa sull'unità giusta (#134)

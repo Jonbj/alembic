@@ -1240,13 +1240,8 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
-    def record_news_queue_drops(self, rows: list[dict]) -> None:
-        """Persist queue items discarded as stale by the sentiment worker (#149).
-
-        Best-effort: the caller must never let a failure here break a run — the
-        instrumentation exists to measure the loss, not to become a new way of
-        losing news.
-        """
+    def record_news_discards(self, rows: list[dict]) -> None:
+        """Persist structured news discard events for FIX-06 measurement."""
         if not rows:
             return
         conn = self._get_connection()
@@ -1256,14 +1251,17 @@ class PostgreSQLStore:
                     """
                     INSERT INTO news_queue_drops
                         (item_id, article_id, symbol, source, published_at,
-                         age_hours, title)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                         age_hours, title, url, raw_ingested_at, content_hash,
+                         discarded_reason, discard_stage)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     [
                         (
                             r["item_id"], r["article_id"], r.get("symbol"),
                             r.get("source"), r.get("published_at"),
-                            r.get("age_hours"), r.get("title"),
+                            r.get("age_hours"), r.get("title"), r.get("url"),
+                            r.get("raw_ingested_at"), r.get("content_hash"),
+                            r["discarded_reason"], r["discard_stage"],
                         )
                         for r in rows
                     ],
@@ -1272,6 +1270,18 @@ class PostgreSQLStore:
         except Exception:
             conn.rollback()
             raise
+
+    def record_news_queue_drops(self, rows: list[dict]) -> None:
+        """Backward-compatible #149 writer; legacy callers mean stale/sentiment."""
+        normalized = [
+            {
+                **row,
+                "discarded_reason": row.get("discarded_reason", "stale"),
+                "discard_stage": row.get("discard_stage", "sentiment"),
+            }
+            for row in rows
+        ]
+        self.record_news_discards(normalized)
 
     def insert_stop_shadow(self, rows: list[dict]) -> None:
         """Persist per-cycle shadow log rows (high volume, batched)."""

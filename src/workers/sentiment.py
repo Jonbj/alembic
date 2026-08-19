@@ -40,6 +40,7 @@ Exported public API (used by backtest CLI):
 """
 
 import asyncio
+import hashlib
 import logging
 import os
 import time
@@ -109,21 +110,10 @@ _FALLBACK_COUNTER_NAME = "consecutive_fallback"
 _RESOLVER_SHADOW_ENABLED = os.environ.get("RESOLVER_SHADOW_ENABLED", "1") != "0"
 from src.store.pg_store import PostgreSQLStore
 from src.workers.market_clock import is_market_open
-
-
-def article_id_of(item_id: str) -> str:
-    """Collapse a queue-entry id to the article it is a fan-out copy of.
-
-    Ingestion explodes one article into one queue entry per tagged ticker
-    (``alpaca:60706041:JBS``, ``…:MU``, …). Grouping by the id minus its ticker
-    suffix is what makes fan-out visible: on 2026-07-27 three articles held 46 of
-    the 119 queued entries, one of them across 23 tickers (#149).
-
-    Ids without a ticker suffix are returned unchanged.
-    """
-    if ":" not in item_id:
-        return item_id
-    return item_id.rsplit(":", 1)[0]
+from src.workers.news_discards import (
+    article_id_of as article_id_of,
+    build_news_discard_row,
+)
 
 
 def build_stale_drop_row(item, now: datetime) -> dict:
@@ -138,15 +128,31 @@ def build_stale_drop_row(item, now: datetime) -> dict:
     ts = item.timestamp
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
-    tags = getattr(item, "asset_tags", None) or []
+    row = build_news_discard_row(
+        item, reason="stale", stage="sentiment", discarded_at=now
+    )
+    row["published_at"] = ts
+    row["age_hours"] = (now - ts).total_seconds() / 3600.0
+    return row
+
+
+def build_parse_failure_drop_row(payload: bytes | str) -> dict:
+    """Represent a malformed queue payload without persisting the raw content."""
+    raw = payload if isinstance(payload, bytes) else payload.encode()
+    digest = hashlib.sha256(raw).hexdigest()
     return {
-        "item_id": item.id,
-        "article_id": article_id_of(item.id),
-        "symbol": tags[0] if tags else None,
-        "source": getattr(item, "source", "") or "",
-        "published_at": ts,
-        "age_hours": (now - ts).total_seconds() / 3600.0,
-        "title": (getattr(item, "title", "") or "")[:300],
+        "item_id": f"unparseable:{digest}",
+        "article_id": f"unparseable:{digest}",
+        "symbol": None,
+        "source": "unknown",
+        "published_at": None,
+        "age_hours": None,
+        "title": "",
+        "url": "",
+        "raw_ingested_at": None,
+        "content_hash": digest,
+        "discarded_reason": "parse_fail",
+        "discard_stage": "sentiment",
     }
 
 
@@ -164,12 +170,73 @@ def _is_stale_news(item, now: datetime, max_age_hours: int = _SENTIMENT_MAX_NEWS
 _RESOLVER_ENFORCE_NOT_TRADABLE_VERDICT = "NO_TRADE_NOT_TRADABLE"
 
 
-def _filter_enforced_items(items: list, verdicts: dict[str, str]) -> tuple[list, int]:
+def _filter_enforced_items(
+    items: list,
+    verdicts: dict[str, str],
+    discard_rows: list[dict] | None = None,
+) -> tuple[list, int]:
     """Drop items whose resolver verdict is NO_TRADE_NOT_TRADABLE. Returns (kept, n_dropped)."""
     if os.environ.get("RESOLVER_ENFORCE_NOT_TRADABLE", "1") == "0":
         return items, 0
-    kept = [i for i in items if verdicts.get(i.id) != _RESOLVER_ENFORCE_NOT_TRADABLE_VERDICT]
+    kept = []
+    for item in items:
+        if verdicts.get(item.id) == _RESOLVER_ENFORCE_NOT_TRADABLE_VERDICT:
+            if discard_rows is not None:
+                discard_rows.append(build_news_discard_row(
+                    item, reason="not_tradable", stage="sentiment"
+                ))
+        else:
+            kept.append(item)
     return kept, len(items) - len(kept)
+
+
+def _filter_neutral_items(
+    items: list[NewsItem], discard_rows: list[dict] | None = None
+) -> tuple[list[NewsItem], int]:
+    """Apply the existing MarketAux pre-filter and retain its evidence."""
+    kept: list[NewsItem] = []
+    skipped = 0
+    for item in items:
+        if (
+            isinstance(item, MarketAuxNewsItem)
+            and item.marketaux_sentiment is not None
+            and abs(item.marketaux_sentiment) < _MARKETAUX_NEUTRAL_THRESHOLD
+        ):
+            skipped += 1
+            if discard_rows is not None:
+                discard_rows.append(build_news_discard_row(
+                    item, reason="near_neutral", stage="sentiment"
+                ))
+            log.debug(
+                "Skipping neutral MarketAux article (sentiment=%.3f): %s",
+                item.marketaux_sentiment,
+                item.title[:60],
+            )
+        else:
+            kept.append(item)
+    return kept, skipped
+
+
+def _persist_sentiment_discards(
+    pg_store: PostgreSQLStore, rows: list[dict]
+) -> None:
+    """Persist discard evidence and the existing per-source stale/parse counters."""
+    if not rows:
+        return
+    try:
+        pg_store.record_news_discards(rows)
+        by_source: dict[str, dict[str, int]] = {}
+        for row in rows:
+            reason = row["discarded_reason"]
+            if reason not in {"stale", "parse_fail"}:
+                continue
+            source_stats = by_source.setdefault(row.get("source") or "unknown", {})
+            key = "discarded_stale" if reason == "stale" else "parse_fail"
+            source_stats[key] = source_stats.get(key, 0) + 1
+        for source, stats in by_source.items():
+            pg_store.record_ingestion_stats(source, stats)
+    except Exception as exc:
+        log.warning("Could not persist news discard evidence: %s", exc)
 
 
 from src.store.redis_store import RedisStore
@@ -867,7 +934,7 @@ def run_sentiment_worker() -> dict:
         raw_items: list[bytes] = []
         failed_raw: list[bytes] = []
         skipped_stale = 0
-        stale_drop_rows: list[dict] = []
+        discard_rows: list[dict] = []
         _now = datetime.now(timezone.utc)
         # Pull until _SENTIMENT_BATCH_SIZE FRESH items (or queue empty / scan cap). Stale
         # items are skipped without an LLM call and left in news:processing → discarded by
@@ -892,10 +959,11 @@ def run_sentiment_worker() -> dict:
             except (json.JSONDecodeError, Exception) as e:
                 log.warning(f"Failed to parse news item from queue: {e}")
                 failed_raw.append(item_json)
+                discard_rows.append(build_parse_failure_drop_row(item_json))
                 continue
             if _is_stale_news(item, _now):
                 skipped_stale += 1
-                stale_drop_rows.append(build_stale_drop_row(item, _now))
+                discard_rows.append(build_stale_drop_row(item, _now))
                 continue
             news_items.append(item)
         if skipped_stale:
@@ -903,21 +971,6 @@ def run_sentiment_worker() -> dict:
                 "Skipped %d stale news items (> %dh old) without inference",
                 skipped_stale, _SENTIMENT_MAX_NEWS_AGE_HOURS,
             )
-        # #149: persist what was discarded. Without this the loss is invisible —
-        # a run that drops 200 items looks exactly like a quiet one, and the two
-        # candidate causes ("arrived already stale" vs "aged in the queue") are
-        # indistinguishable. Best-effort: never break the run over telemetry.
-        if stale_drop_rows:
-            try:
-                from src.store.pg_store import PostgreSQLStore as _PGSdrop
-                _pg_drop = _PGSdrop()
-                try:
-                    _pg_drop.record_news_queue_drops(stale_drop_rows)
-                finally:
-                    _pg_drop.close()
-            except Exception as _drop_exc:
-                log.warning("Could not persist stale news drops (#149): %s", _drop_exc)
-
         # Move unparseable items to dead-letter queue — prevents infinite retry loop
         # where the recovery block keeps re-queuing corrupt items on every invocation.
         if failed_raw:
@@ -931,6 +984,7 @@ def run_sentiment_worker() -> dict:
             )
 
         if not news_items:
+            _persist_sentiment_discards(pg_store, discard_rows)
             # No fresh items this run. If we scanned (and skipped stale) items, discard
             # them from news:processing so the crash-recovery block does NOT re-queue them
             # — otherwise a stale backlog would loop forever instead of draining.
@@ -945,22 +999,9 @@ def run_sentiment_worker() -> dict:
         # Pre-filter: skip near-neutral MarketAux articles before LLM inference.
         # This saves 60-80% of token spend on articles that are unlikely to
         # produce a tradeable signal.
-        skipped_neutral = 0
-        items_to_process: list[NewsItem] = []
-        for item in news_items:
-            if (
-                isinstance(item, MarketAuxNewsItem)
-                and item.marketaux_sentiment is not None
-                and abs(item.marketaux_sentiment) < _MARKETAUX_NEUTRAL_THRESHOLD
-            ):
-                skipped_neutral += 1
-                log.debug(
-                    "Skipping neutral MarketAux article (sentiment=%.3f): %s",
-                    item.marketaux_sentiment,
-                    item.title[:60],
-                )
-            else:
-                items_to_process.append(item)
+        items_to_process, skipped_neutral = _filter_neutral_items(
+            news_items, discard_rows=discard_rows
+        )
 
         # Resolver SHADOW (Fase A) + conservative enforcement (review §3.2): resolve
         # each item's ticker BEFORE inference so the hard NOT_TRADABLE verdict can drop
@@ -975,13 +1016,15 @@ def run_sentiment_worker() -> dict:
                 log.warning("Resolver shadow failed (fail-open): %s", _shadow_exc)
 
         items_to_process, skipped_not_tradable = _filter_enforced_items(
-            items_to_process, resolver_verdicts
+            items_to_process, resolver_verdicts, discard_rows=discard_rows
         )
         if skipped_not_tradable:
             log.info(
                 "Resolver enforcement: dropped %d NOT_TRADABLE item(s) pre-inference",
                 skipped_not_tradable,
             )
+
+        _persist_sentiment_discards(pg_store, discard_rows)
 
         # Process batch
         results = asyncio.run(

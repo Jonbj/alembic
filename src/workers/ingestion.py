@@ -66,6 +66,7 @@ from src.connectors.ticker_extractor import TickerExtractor
 from src.models.news import GKGNewsItem, MarketAuxNewsItem, NewsItem
 from src.workers.celery_app import app
 from src.workers.market_clock import is_market_open
+from src.workers.news_discards import build_news_discard_row
 
 log = logging.getLogger(__name__)
 
@@ -126,12 +127,36 @@ async def _fetch_gkg_items(connector: GDELTGKGConnector) -> list[GKGNewsItem]:
     return [item async for item in connector.fetch()]
 
 
+def _duplicate_reason(item: NewsItem, deduplicator: Deduplicator) -> str | None:
+    """Return the exact dedup gate that rejected an item, if any."""
+    if deduplicator.is_duplicate_by_id(item):
+        return "duplicate_id"
+    if deduplicator.is_duplicate_content_symbol(item):
+        return "duplicate_content"
+    return None
+
+
+def _persist_ingestion_observability(
+    source: str, stats: dict, discard_rows: list[dict]
+) -> None:
+    """Persist counters and discard events without making telemetry a gate."""
+    try:
+        from src.store.pg_store import PostgreSQLStore
+
+        with PostgreSQLStore() as pg_store:
+            pg_store.record_ingestion_stats(source, stats)
+            pg_store.record_news_discards(discard_rows)
+    except Exception as exc:
+        log.warning("Could not persist ingestion observability: %s", exc)
+
+
 def _process_gkg_items(
     gkg_items: list[GKGNewsItem],
     extractor: TickerExtractor,
     deduplicator: Deduplicator,
     redis_client: Redis,
     watchlist: set | None = None,
+    discard_rows: list[dict] | None = None,
 ) -> dict:
     """Extract tickers, deduplicate, and push annotated NewsItems to news:queue.
 
@@ -168,6 +193,10 @@ def _process_gkg_items(
             # Logged at DEBUG, not WARNING, because this is expected for many
             # generic financial news items (e.g. "Federal Reserve" has no ticker).
             stats["discarded"] += 1
+            if discard_rows is not None:
+                discard_rows.append(build_news_discard_row(
+                    gkg_item, reason="no_ticker", stage="ingestion"
+                ))
             log.debug("No ticker found for %s (org_names=%s), discarding", gkg_item.url, gkg_item.org_names)
             continue
 
@@ -177,8 +206,19 @@ def _process_gkg_items(
         normalised = [canonicalizza_ticker(t) for t in tickers]
         if watchlist:
             before = len(normalised)
+            filtered = [t for t in normalised if t not in watchlist]
             normalised = [t for t in normalised if t in watchlist]
             stats["watchlist_filtered"] += before - len(normalised)
+            if discard_rows is not None:
+                discard_rows.extend(
+                    build_news_discard_row(
+                        gkg_item,
+                        reason="not_tradable",
+                        stage="ingestion",
+                        symbol=ticker,
+                    )
+                    for ticker in filtered
+                )
         if not normalised:
             stats["discarded"] += 1
             continue
@@ -198,8 +238,13 @@ def _process_gkg_items(
             )
 
             # Step 4: deduplication
-            if deduplicator.is_duplicate_by_id(item) or deduplicator.is_duplicate_content_symbol(item):
+            duplicate_reason = _duplicate_reason(item, deduplicator)
+            if duplicate_reason is not None:
                 stats["duplicates"] += 1
+                if discard_rows is not None:
+                    discard_rows.append(build_news_discard_row(
+                        item, reason=duplicate_reason, stage="ingestion"
+                    ))
                 continue
 
             # Step 5: enqueue to Redis
@@ -219,6 +264,7 @@ def _process_marketaux_items(
     items: list[MarketAuxNewsItem],
     deduplicator: Deduplicator,
     redis_client: Redis,
+    discard_rows: list[dict] | None = None,
 ) -> dict:
     """Expand per-ticker, deduplicate, and push MarketAuxNewsItems to news:queue.
 
@@ -228,12 +274,17 @@ def _process_marketaux_items(
       Each per-ticker item carries the article-level marketaux_sentiment so
       the SentimentWorker can apply the neutral pre-filter independently.
     """
-    stats = {"fetched": 0, "tickers_found": 0, "queued": 0, "duplicates": 0}
+    stats = {"fetched": 0, "tickers_found": 0, "discarded": 0, "queued": 0, "duplicates": 0}
 
     for item in items:
         stats["fetched"] += 1
 
         if not item.asset_tags:
+            stats["discarded"] += 1
+            if discard_rows is not None:
+                discard_rows.append(build_news_discard_row(
+                    item, reason="no_ticker", stage="ingestion"
+                ))
             continue
 
         stats["tickers_found"] += len(item.asset_tags)
@@ -253,8 +304,13 @@ def _process_marketaux_items(
                 marketaux_sentiment=item.marketaux_sentiment,
             )
 
-            if deduplicator.is_duplicate_by_id(per_ticker) or deduplicator.is_duplicate_content_symbol(per_ticker):
+            duplicate_reason = _duplicate_reason(per_ticker, deduplicator)
+            if duplicate_reason is not None:
                 stats["duplicates"] += 1
+                if discard_rows is not None:
+                    discard_rows.append(build_news_discard_row(
+                        per_ticker, reason=duplicate_reason, stage="ingestion"
+                    ))
                 continue
 
             per_ticker.raw_ingested_at = datetime.now(timezone.utc)
@@ -297,15 +353,13 @@ def run_marketaux_ingestion_worker() -> dict:
         deduplicator = Deduplicator(redis_client)
 
         items = asyncio.run(_fetch_marketaux_items(connector))
-        stats = _process_marketaux_items(items, deduplicator, redis_client)
+        discard_rows: list[dict] = []
+        stats = _process_marketaux_items(
+            items, deduplicator, redis_client, discard_rows=discard_rows
+        )
 
         log.info("MarketAux ingestion stats: %s", stats)
-        try:
-            from src.store.pg_store import PostgreSQLStore
-            with PostgreSQLStore() as _pg:
-                _pg.record_ingestion_stats("marketaux", stats)
-        except Exception as _stats_exc:
-            log.warning("Could not persist ingestion stats: %s", _stats_exc)
+        _persist_ingestion_observability("marketaux", stats, discard_rows)
         return stats
 
     finally:
@@ -321,18 +375,24 @@ def _process_alpaca_items(
     items: list[NewsItem],
     deduplicator: Deduplicator,
     redis_client: Redis,
+    discard_rows: list[dict] | None = None,
 ) -> dict:
     """Expand per-ticker, deduplicate, and push Alpaca NewsItems to news:queue.
 
     Alpaca articles already contain US ticker symbols in asset_tags (from
     Benzinga metadata). No TickerExtractor needed.
     """
-    stats = {"fetched": 0, "tickers_found": 0, "queued": 0, "duplicates": 0}
+    stats = {"fetched": 0, "tickers_found": 0, "discarded": 0, "queued": 0, "duplicates": 0}
 
     for item in items:
         stats["fetched"] += 1
 
         if not item.asset_tags:
+            stats["discarded"] += 1
+            if discard_rows is not None:
+                discard_rows.append(build_news_discard_row(
+                    item, reason="no_ticker", stage="ingestion"
+                ))
             continue
 
         stats["tickers_found"] += len(item.asset_tags)
@@ -351,8 +411,13 @@ def _process_alpaca_items(
                 extraction_method=item.extraction_method,  # QT-03: carry provenance
             )
 
-            if deduplicator.is_duplicate_by_id(per_ticker) or deduplicator.is_duplicate_content_symbol(per_ticker):
+            duplicate_reason = _duplicate_reason(per_ticker, deduplicator)
+            if duplicate_reason is not None:
                 stats["duplicates"] += 1
+                if discard_rows is not None:
+                    discard_rows.append(build_news_discard_row(
+                        per_ticker, reason=duplicate_reason, stage="ingestion"
+                    ))
                 continue
 
             per_ticker.raw_ingested_at = datetime.now(timezone.utc)
@@ -398,15 +463,13 @@ def run_alpaca_ingestion_worker() -> dict:
         deduplicator = Deduplicator(redis_client)
 
         items = asyncio.run(_fetch_alpaca_items(connector))
-        stats = _process_alpaca_items(items, deduplicator, redis_client)
+        discard_rows: list[dict] = []
+        stats = _process_alpaca_items(
+            items, deduplicator, redis_client, discard_rows=discard_rows
+        )
 
         log.info("Alpaca ingestion stats: %s", stats)
-        try:
-            from src.store.pg_store import PostgreSQLStore
-            with PostgreSQLStore() as _pg:
-                _pg.record_ingestion_stats("alpaca_benzinga", stats)
-        except Exception as _stats_exc:
-            log.warning("Could not persist ingestion stats: %s", _stats_exc)
+        _persist_ingestion_observability("alpaca_benzinga", stats, discard_rows)
         return stats
 
     finally:
@@ -422,17 +485,23 @@ def _process_finnhub_items(
     items: list[NewsItem],
     deduplicator: Deduplicator,
     redis_client: Redis,
+    discard_rows: list[dict] | None = None,
 ) -> dict:
     """Deduplicate and push Finnhub NewsItems to news:queue.
 
     Finnhub articles already carry a single explicit ticker in asset_tags
     (extraction_method='source_metadata') — no TickerExtractor needed.
     """
-    stats = {"fetched": 0, "tickers_found": 0, "queued": 0, "duplicates": 0}
+    stats = {"fetched": 0, "tickers_found": 0, "discarded": 0, "queued": 0, "duplicates": 0}
 
     for item in items:
         stats["fetched"] += 1
         if not item.asset_tags:
+            stats["discarded"] += 1
+            if discard_rows is not None:
+                discard_rows.append(build_news_discard_row(
+                    item, reason="no_ticker", stage="ingestion"
+                ))
             continue
         stats["tickers_found"] += len(item.asset_tags)
         for ticker in item.asset_tags:
@@ -448,8 +517,13 @@ def _process_finnhub_items(
                 asset_tags=[ticker],
                 extraction_method=item.extraction_method,
             )
-            if deduplicator.is_duplicate_by_id(per_ticker) or deduplicator.is_duplicate_content_symbol(per_ticker):
+            duplicate_reason = _duplicate_reason(per_ticker, deduplicator)
+            if duplicate_reason is not None:
                 stats["duplicates"] += 1
+                if discard_rows is not None:
+                    discard_rows.append(build_news_discard_row(
+                        per_ticker, reason=duplicate_reason, stage="ingestion"
+                    ))
                 continue
             per_ticker.raw_ingested_at = datetime.now(timezone.utc)
             redis_client.rpush("news:queue", per_ticker.model_dump_json())
@@ -485,14 +559,12 @@ def run_finnhub_ingestion_worker() -> dict:
         )
         deduplicator = Deduplicator(redis_client)
         items = asyncio.run(_fetch_finnhub_items(connector))
-        stats = _process_finnhub_items(items, deduplicator, redis_client)
+        discard_rows: list[dict] = []
+        stats = _process_finnhub_items(
+            items, deduplicator, redis_client, discard_rows=discard_rows
+        )
         log.info("Finnhub ingestion stats: %s", stats)
-        try:
-            from src.store.pg_store import PostgreSQLStore
-            with PostgreSQLStore() as _pg:
-                _pg.record_ingestion_stats("finnhub", stats)
-        except Exception as _stats_exc:
-            log.warning("Could not persist ingestion stats: %s", _stats_exc)
+        _persist_ingestion_observability("finnhub", stats, discard_rows)
         return stats
     finally:
         redis_client.close()
@@ -537,17 +609,23 @@ def _process_gdelt_doc_items(
     items: list[NewsItem],
     deduplicator: Deduplicator,
     redis_client: Redis,
+    discard_rows: list[dict] | None = None,
 ) -> dict:
     """Deduplicate and push GDELT DOC NewsItems to news:queue.
 
     Articles are pre-tagged to a specific symbol (extraction_method='gdelt_doc') —
     no TickerExtractor needed. Mirrors _process_finnhub_items.
     """
-    stats = {"fetched": 0, "queued": 0, "duplicates": 0}
+    stats = {"fetched": 0, "queued": 0, "duplicates": 0, "discarded": 0}
 
     for item in items:
         stats["fetched"] += 1
         if not item.asset_tags:
+            stats["discarded"] += 1
+            if discard_rows is not None:
+                discard_rows.append(build_news_discard_row(
+                    item, reason="no_ticker", stage="ingestion"
+                ))
             continue
         ticker = canonicalizza_ticker(item.asset_tags[0])
         per_ticker = NewsItem(
@@ -561,8 +639,13 @@ def _process_gdelt_doc_items(
             asset_tags=[ticker],
             extraction_method=item.extraction_method,
         )
-        if deduplicator.is_duplicate_by_id(per_ticker) or deduplicator.is_duplicate_content_symbol(per_ticker):
+        duplicate_reason = _duplicate_reason(per_ticker, deduplicator)
+        if duplicate_reason is not None:
             stats["duplicates"] += 1
+            if discard_rows is not None:
+                discard_rows.append(build_news_discard_row(
+                    per_ticker, reason=duplicate_reason, stage="ingestion"
+                ))
             continue
         per_ticker.raw_ingested_at = datetime.now(timezone.utc)
         redis_client.rpush("news:queue", per_ticker.model_dump_json())
@@ -600,14 +683,12 @@ def run_gdelt_doc_ingestion_worker() -> dict:
         )
         deduplicator = Deduplicator(redis_client)
         items = asyncio.run(_fetch_gdelt_doc_items(connector))
-        stats = _process_gdelt_doc_items(items, deduplicator, redis_client)
+        discard_rows: list[dict] = []
+        stats = _process_gdelt_doc_items(
+            items, deduplicator, redis_client, discard_rows=discard_rows
+        )
         log.info("GDELT DOC ingestion stats: %s", stats)
-        try:
-            from src.store.pg_store import PostgreSQLStore
-            with PostgreSQLStore() as _pg:
-                _pg.record_ingestion_stats("gdelt", stats)
-        except Exception as _stats_exc:
-            log.warning("Could not persist ingestion stats: %s", _stats_exc)
+        _persist_ingestion_observability("gdelt", stats, discard_rows)
         return stats
     finally:
         redis_client.close()
@@ -623,6 +704,7 @@ def _process_sec_edgar_items(
     watchlist: set,
     deduplicator,
     redis_client,
+    discard_rows: list[dict] | None = None,
 ) -> dict:
     """Filter by watchlist, deduplicate, and push EDGAR NewsItems to news:queue."""
     stats = {"fetched": 0, "queued": 0, "filtered": 0, "duplicates": 0}
@@ -631,9 +713,21 @@ def _process_sec_edgar_items(
         ticker = item.asset_tags[0] if item.asset_tags else None
         if not ticker or ticker not in watchlist:
             stats["filtered"] += 1
+            if discard_rows is not None:
+                discard_rows.append(build_news_discard_row(
+                    item,
+                    reason="not_tradable" if ticker else "no_ticker",
+                    stage="ingestion",
+                    symbol=ticker,
+                ))
             continue
-        if deduplicator.is_duplicate_by_id(item) or deduplicator.is_duplicate_content_symbol(item):
+        duplicate_reason = _duplicate_reason(item, deduplicator)
+        if duplicate_reason is not None:
             stats["duplicates"] += 1
+            if discard_rows is not None:
+                discard_rows.append(build_news_discard_row(
+                    item, reason=duplicate_reason, stage="ingestion"
+                ))
             continue
         item.raw_ingested_at = datetime.now(timezone.utc)
         redis_client.rpush("news:queue", item.model_dump_json())
@@ -661,15 +755,13 @@ def run_sec_edgar_ingestion_worker() -> dict:
         deduplicator = Deduplicator(redis_client)
 
         items = asyncio.run(_fetch_sec_edgar_items(connector))
-        stats = _process_sec_edgar_items(items, watchlist, deduplicator, redis_client)
+        discard_rows: list[dict] = []
+        stats = _process_sec_edgar_items(
+            items, watchlist, deduplicator, redis_client, discard_rows=discard_rows
+        )
 
         log.info("SEC EDGAR ingestion stats: %s", stats)
-        try:
-            from src.store.pg_store import PostgreSQLStore
-            with PostgreSQLStore() as _pg:
-                _pg.record_ingestion_stats("sec_edgar", stats)
-        except Exception as _stats_exc:
-            log.warning("Could not persist ingestion stats: %s", _stats_exc)
+        _persist_ingestion_observability("sec_edgar", stats, discard_rows)
         return stats
     except Exception as exc:
         log.error("SEC EDGAR ingestion failed: %s", exc, exc_info=True)
@@ -741,6 +833,7 @@ def _process_rss_items(
     deduplicator,
     redis_client,
     source_name: str,
+    discard_rows: list[dict] | None = None,
 ) -> dict:
     """Extract tickers, expand per-ticker, deduplicate, push to news:queue."""
     stats = {"fetched": 0, "queued": 0, "filtered": 0, "duplicates": 0}
@@ -750,6 +843,10 @@ def _process_rss_items(
         tickers = _extract_tickers_from_text(search_text, watchlist)
         if not tickers:
             stats["filtered"] += 1
+            if discard_rows is not None:
+                discard_rows.append(build_news_discard_row(
+                    item, reason="no_ticker", stage="ingestion"
+                ))
             continue
         for ticker in tickers:
             per_ticker = NewsItem(
@@ -763,8 +860,13 @@ def _process_rss_items(
                 asset_tags=[ticker],
                 extraction_method="regex",  # QT-03: RSS bare-word watchlist match
             )
-            if deduplicator.is_duplicate_by_id(per_ticker) or deduplicator.is_duplicate_content_symbol(per_ticker):
+            duplicate_reason = _duplicate_reason(per_ticker, deduplicator)
+            if duplicate_reason is not None:
                 stats["duplicates"] += 1
+                if discard_rows is not None:
+                    discard_rows.append(build_news_discard_row(
+                        per_ticker, reason=duplicate_reason, stage="ingestion"
+                    ))
                 continue
             per_ticker.raw_ingested_at = datetime.now(timezone.utc)
             redis_client.rpush("news:queue", per_ticker.model_dump_json())
@@ -798,16 +900,19 @@ def run_rss_ingestion_worker() -> dict:
                     asset_tags=[],  # asset_tags handled by _process_rss_items per-ticker
                 )
                 items = asyncio.run(_fetch_rss_items(connector))
-                stats = _process_rss_items(items, watchlist, deduplicator, redis_client, source_name)
+                discard_rows: list[dict] = []
+                stats = _process_rss_items(
+                    items,
+                    watchlist,
+                    deduplicator,
+                    redis_client,
+                    source_name,
+                    discard_rows=discard_rows,
+                )
                 for k, v in stats.items():
                     total_stats[k] = total_stats.get(k, 0) + v
                 log.info("RSS [%s] stats: %s", source_name, stats)
-                try:
-                    from src.store.pg_store import PostgreSQLStore
-                    with PostgreSQLStore() as _pg:
-                        _pg.record_ingestion_stats(source_name, stats)
-                except Exception as _stats_exc:
-                    log.warning("Could not persist ingestion stats: %s", _stats_exc)
+                _persist_ingestion_observability(source_name, stats, discard_rows)
             except Exception as exc:
                 log.warning("RSS feed [%s] failed: %s — skipping", source_name, exc)
 
@@ -848,15 +953,18 @@ def run_news_ingestion_worker() -> dict:
         # Bridge async fetch into sync Celery task
         gkg_items = asyncio.run(_fetch_gkg_items(connector))
         watchlist = set(config.WATCHLIST_SYMBOLS or [])
-        stats = _process_gkg_items(gkg_items, extractor, deduplicator, redis_client, watchlist=watchlist)
+        discard_rows: list[dict] = []
+        stats = _process_gkg_items(
+            gkg_items,
+            extractor,
+            deduplicator,
+            redis_client,
+            watchlist=watchlist,
+            discard_rows=discard_rows,
+        )
 
         log.info("Ingestion stats: %s", stats)
-        try:
-            from src.store.pg_store import PostgreSQLStore
-            with PostgreSQLStore() as _pg:
-                _pg.record_ingestion_stats("gdelt_gkg", stats)
-        except Exception as _stats_exc:
-            log.warning("Could not persist ingestion stats: %s", _stats_exc)
+        _persist_ingestion_observability("gdelt_gkg", stats, discard_rows)
         return stats
 
     finally:

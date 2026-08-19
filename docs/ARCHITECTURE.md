@@ -594,7 +594,12 @@ the hot path):
 
 **Source funnel (S2-1, 2026-07-03):** `ingestion_stats_daily` (migr. 033) persists
 per-(day, source) counters (fetched/queued/duplicates/discarded); `news_log` gained
-`raw_ingested_at`, `content_hash`, `discarded_reason` (populated by S2-2, pending);
+`raw_ingested_at` and `content_hash`. FIX-06 (migr. 047) persists every explicit
+ingestion/sentiment discard in `news_queue_drops`, extending the stale-only ledger from
+#149 with `discarded_reason` and `discard_stage`. The original
+`news_log.discarded_reason` column remains unused intentionally: `news_log` is unique on
+`(url, ticker)` and represents processed articles, so inserting duplicate discard events
+there would either violate that contract or mark a successfully processed row as discarded.
 `GET /api/quality/sources` aggregates funnel + per-source latency
 (`generated_at − published_at`) + per-source trade P&L; the Quality page renders it with
 removal-threshold verdicts (roadmap §7.4). Legacy signals without `news_log_id` report
@@ -664,6 +669,29 @@ CREATE TABLE ingestion_stats_daily (
     PRIMARY KEY (day, source)
 );
 -- news_log also gained (migr. 033): raw_ingested_at, content_hash, discarded_reason
+-- (the last field is legacy-unused; discard events live in news_queue_drops).
+
+-- FIX-06 (migr. 047): event-level reasons at ingestion and sentiment gates.
+-- The table name is retained because migration 044 created it for stale queue drops.
+-- Reasons: no_ticker, stale, duplicate_id, duplicate_content, not_tradable,
+--          parse_fail, near_neutral.
+-- Stages: ingestion, sentiment.
+CREATE TABLE news_queue_drops (
+    id                 BIGSERIAL PRIMARY KEY,
+    dropped_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    item_id            TEXT NOT NULL,
+    article_id         TEXT NOT NULL,
+    symbol             TEXT,
+    source             TEXT,
+    published_at       TIMESTAMPTZ,
+    age_hours          DOUBLE PRECISION,
+    title              TEXT,
+    url                TEXT,
+    raw_ingested_at    TIMESTAMPTZ,
+    content_hash       VARCHAR(64),
+    discarded_reason   VARCHAR(30) NOT NULL,
+    discard_stage      VARCHAR(20) NOT NULL
+);
 
 CREATE TABLE llm_responses (
     id SERIAL PRIMARY KEY,
