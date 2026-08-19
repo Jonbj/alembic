@@ -44,3 +44,11 @@ def test_reconcile_fills_evening_points_to_reconcile_task():
     from src.workers.celery_app import app
     entry = app.conf.beat_schedule["reconcile-fills-evening"]
     assert entry["task"] == "src.workers.performance.run_reconcile_fills_intraday"
+
+
+def test_reconcile_positions_eod_beat_entry():
+    """spec §2: EOD position reconciliation beat entry at 21:35 UTC Mon-Fri,
+    pointing at the new run_reconcile_positions task."""
+    from src.workers.celery_app import app
+    entry = app.conf.beat_schedule["reconcile-positions-eod"]
+    assert entry["task"] == "src.workers.performance.run_reconcile_positions"

@@ -108,6 +108,76 @@ def summarize(records: list[dict]) -> dict[str, int]:
     return counts
 
 
+def force_close_orphans(
+    records: list[dict],
+    *,
+    writer,
+    dry_run: bool = True,
+    now: datetime | None = None,
+) -> list[dict]:
+    """Force-close genuinely_orphan trades via the writer callable (spec §2).
+
+    Pure coordinator — no DB, no broker. The writer is an abstraction over
+    PostgreSQLStore.record_trade_exit (caller passes pg.record_trade_exit or a
+    mock). Idempotent at the DB layer via record_trade_exit's COALESCE; this
+    function is deterministic (same inputs -> same writer calls).
+
+    Only acts on records with category == "genuinely_orphan" and a non-null
+    trade_id. The other anomaly categories (over_held, untracked_position) are
+    alerted only by the caller — auto-closing those needs broker orders, out of
+    scope. untracked_position records have trade_id=None and are skipped.
+
+    Uses a pre-linked ``exit_order_id`` when the caller already has one;
+    otherwise uses a synthetic "orphan_reconcile:<trade_id>" id. The scheduled
+    reconciler does not infer that link from symbol-only broker history because
+    doing so could copy a historical fill into this trade and corrupt its price,
+    quantity and P&L. Those fields therefore remain unreconciled for synthetic ids.
+
+    Args:
+        records: output of classify_positions (all categories; filtered here).
+        writer: callable matching record_trade_exit's signature, called as
+            writer(symbol=, exit_order_id=, exit_time=, exit_reason=, trade_id=).
+        dry_run: True -> plan only, do NOT call the writer.
+        now: exit_time (defaults to UTC now).
+
+    Returns:
+        List of result dicts, one per orphan:
+            {trade_id, symbol, exit_order_id, exit_reason, dry_run, closed, error?}
+    """
+    now = now or datetime.now(timezone.utc)
+    results: list[dict] = []
+    for r in records:
+        if r.get("category") != "genuinely_orphan" or r.get("trade_id") is None:
+            continue
+        trade_id = int(r["trade_id"])
+        symbol = r["symbol"]
+        exit_order_id = r.get("exit_order_id") or f"orphan_reconcile:{trade_id}"
+        result = {
+            "trade_id": trade_id,
+            "symbol": symbol,
+            "exit_order_id": exit_order_id,
+            "exit_reason": "orphan_reconcile",
+            "dry_run": dry_run,
+            "closed": False,
+        }
+        if dry_run:
+            results.append(result)
+            continue
+        try:
+            writer(
+                symbol=symbol,
+                exit_order_id=exit_order_id,
+                exit_time=now,
+                exit_reason="orphan_reconcile",
+                trade_id=trade_id,
+            )
+            result["closed"] = True
+        except Exception as exc:
+            result["error"] = str(exc)
+        results.append(result)
+    return results
+
+
 def _fetch_inputs() -> tuple[list[dict], dict[str, float]]:
     """Read open trades from the DB and held quantities from the broker."""
     from alpaca.trading.client import TradingClient

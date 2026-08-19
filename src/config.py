@@ -347,6 +347,16 @@ class Config(BaseModel):
     AUTO_APPLY_VIX_FRED_SERIES: str = Field(
         default_factory=lambda: os.environ.get("AUTO_APPLY_VIX_FRED_SERIES", "VIXCLS")
     )  # FRED series ID for daily VIX data
+
+    # Reconcile EOD position autoclose — money-path DB write (spec §2).
+    # Default OFF + dry-run: first runs only log what would be closed. Flip to
+    # live only after the operator reviews a dry-run + backs up the trades table.
+    RECONCILE_AUTOCLOSE_ENABLED: bool = Field(
+        default_factory=lambda: os.environ.get("RECONCILE_AUTOCLOSE_ENABLED", "false").lower() == "true"
+    )  # Master switch — false = alert-only, never close
+    RECONCILE_AUTOCLOSE_DRY_RUN: bool = Field(
+        default_factory=lambda: os.environ.get("RECONCILE_AUTOCLOSE_DRY_RUN", "true").lower() == "true"
+    )  # True = plan only (no writer calls); false = live force-close
     MIN_TRADE_PNL_THRESHOLD: float = Field(
         default_factory=lambda: float(
             _load_trading_yaml().get("risk", {}).get("min_trade_pnl_threshold", 5.0)
