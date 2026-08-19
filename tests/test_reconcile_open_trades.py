@@ -1,6 +1,7 @@
 """#121: read-only classifier distinguishing legit co-held residuals from
 genuinely-stuck orphan trades. Pure-function tests (no DB, no broker)."""
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 from scripts.reconcile_open_trades_vs_broker import classify_positions, summarize
 
@@ -71,3 +72,113 @@ def test_summarize_counts_by_category():
     assert counts["genuinely_orphan"] == 1
     assert counts["partially_wound_down_coheld"] == 1
     assert counts["untracked_position"] == 1
+
+
+# ---------------------------------------------------------------------------
+# force_close_orphans — pure coordinator over record_trade_exit (spec §2)
+# ---------------------------------------------------------------------------
+
+def test_force_close_orphans_dry_run_writes_nothing():
+    from scripts.reconcile_open_trades_vs_broker import force_close_orphans
+    writer = MagicMock()
+    orphans = [
+        {"trade_id": 9, "symbol": "BBB", "category": "genuinely_orphan"},
+        {"trade_id": 11, "symbol": "DDD", "category": "genuinely_orphan"},
+    ]
+    results = force_close_orphans(
+        orphans, writer=writer, dry_run=True,
+        now=datetime(2026, 7, 27, 21, 35, tzinfo=timezone.utc),
+    )
+    assert len(results) == 2
+    assert all(r["dry_run"] is True and r["closed"] is False for r in results)
+    assert all(r["exit_reason"] == "orphan_reconcile" for r in results)
+    assert results[0]["exit_order_id"] == "orphan_reconcile:9"
+    writer.assert_not_called()
+
+
+def test_force_close_orphans_calls_writer_with_orphan_reconcile_reason():
+    from scripts.reconcile_open_trades_vs_broker import force_close_orphans
+    writer = MagicMock()
+    orphans = [{"trade_id": 9, "symbol": "BBB", "category": "genuinely_orphan"}]
+    now = datetime(2026, 7, 27, 21, 35, tzinfo=timezone.utc)
+    results = force_close_orphans(orphans, writer=writer, dry_run=False, now=now)
+    assert len(results) == 1
+    r = results[0]
+    assert r["closed"] is True
+    assert r["dry_run"] is False
+    assert r["exit_reason"] == "orphan_reconcile"
+    assert r["exit_order_id"] == "orphan_reconcile:9"
+    writer.assert_called_once_with(
+        symbol="BBB",
+        exit_order_id="orphan_reconcile:9",
+        exit_time=now,
+        exit_reason="orphan_reconcile",
+        trade_id=9,
+    )
+
+
+def test_force_close_orphans_uses_record_exit_order_id_when_present():
+    """If the caller enriched the record with a real broker order id (recovered
+    by the Celery task), force_close_orphans must use it, not the synthetic id."""
+    from scripts.reconcile_open_trades_vs_broker import force_close_orphans
+    writer = MagicMock()
+    orphans = [{"trade_id": 9, "symbol": "BBB", "category": "genuinely_orphan",
+                "exit_order_id": "real-sell-123"}]
+    force_close_orphans(orphans, writer=writer, dry_run=False,
+                        now=datetime(2026, 7, 27, 21, 35, tzinfo=timezone.utc))
+    _, kwargs = writer.call_args
+    assert kwargs["exit_order_id"] == "real-sell-123"
+
+
+def test_force_close_orphans_ignores_non_orphan_categories():
+    from scripts.reconcile_open_trades_vs_broker import force_close_orphans
+    writer = MagicMock()
+    records = [
+        {"trade_id": 1, "symbol": "AAA", "category": "fully_held"},
+        {"trade_id": 2, "symbol": "CCC", "category": "over_held"},
+        {"symbol": "ZZZ", "category": "untracked_position", "trade_id": None},
+        {"trade_id": 3, "symbol": "WDC", "category": "partially_wound_down_coheld"},
+    ]
+    results = force_close_orphans(records, writer=writer, dry_run=False)
+    assert results == []
+    writer.assert_not_called()
+
+
+def test_force_close_orphans_idempotent_rerun_is_noop():
+    """Re-run with the same records: the writer (record_trade_exit) is idempotent
+    via COALESCE — first write wins, the second call does not overwrite
+    exit_time. The closed set after the second call equals the first."""
+    from scripts.reconcile_open_trades_vs_broker import force_close_orphans
+    closed_times: dict[int, datetime] = {}
+
+    def writer(*, symbol, exit_order_id, exit_time, exit_reason, trade_id):
+        # Simulate record_trade_exit's COALESCE(exit_time, %s): first write wins.
+        if trade_id not in closed_times:
+            closed_times[trade_id] = exit_time
+        return trade_id
+
+    orphans = [{"trade_id": 9, "symbol": "BBB", "category": "genuinely_orphan"}]
+    now1 = datetime(2026, 7, 27, 21, 35, tzinfo=timezone.utc)
+    force_close_orphans(orphans, writer=writer, dry_run=False, now=now1)
+    now2 = datetime(2026, 7, 28, 21, 35, tzinfo=timezone.utc)
+    force_close_orphans(orphans, writer=writer, dry_run=False, now=now2)
+    # First-write-wins: the second call did not overwrite exit_time.
+    assert closed_times[9] == now1
+
+
+def test_force_close_orphans_continues_on_per_trade_error():
+    from scripts.reconcile_open_trades_vs_broker import force_close_orphans
+
+    def writer(*, symbol, exit_order_id, exit_time, exit_reason, trade_id):
+        if trade_id == 9:
+            raise RuntimeError("db error")
+        return trade_id
+
+    orphans = [
+        {"trade_id": 9, "symbol": "BBB", "category": "genuinely_orphan"},
+        {"trade_id": 11, "symbol": "DDD", "category": "genuinely_orphan"},
+    ]
+    results = force_close_orphans(orphans, writer=writer, dry_run=False)
+    assert results[0]["closed"] is False
+    assert "db error" in results[0]["error"]
+    assert results[1]["closed"] is True
