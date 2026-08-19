@@ -1,6 +1,6 @@
 {
  "schema_version": 1,
- "prossimo_id": 41,
+ "prossimo_id": 42,
  "findings": [
   {
    "id": "F-001",
@@ -153,12 +153,18 @@
      "costo_usd": null,
      "nota": "11 delle 47 posizioni aperte a fine 08-17 hanno trades.stop_strategy NULL (BAC, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE, tutte entrate il 07-10) - stesso insieme dall08-07, undicesima seduta consecutiva. Portano +21.53 dei +37.28 di nav_change_today (58%), la quota piu alta osservata finora nella serie di occorrenze di questo finding. Nessuno dei nomi coinvolti e un mover >=3% oggi. Costo null: non e una perdita, e P&L non attribuibile, e confligge con la domanda di uscita n.2 della carta (split P&L economico S1 vs SPY).",
      "fonte": "ALPHA_MISS_REPORT_2026-08-17.md §7"
+    },
+    {
+     "data": "2026-08-18",
+     "costo_usd": null,
+     "nota": "11 delle 48 posizioni aperte a fine 08-18 hanno trades.stop_strategy NULL (BAC, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE, tutte entrate il 07-10) - stesso insieme di tutte le occorrenze precedenti, dodicesima seduta consecutiva. Contributo MTM stimato oggi (qty x delta-close dai rendimenti giornalieri): BAC +3.89, GOOGL +0.38, GS -7.00, MS -2.01, PBR -2.80, RIO -3.95, ROKU -2.45, SPY -4.73, UBS -6.24, UNH -2.70, XLE +13.68, totale circa -13.93 $ su una variazione NAV di -293.39 $ (4.7%), la quota piu' bassa osservata nella serie. Costo null: non e' una perdita, e' P&L non attribuibile, e confligge con la domanda di uscita n.2 della carta (split P&L economico S1 vs SPY).",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-18.md §8, §10 [DAY-409]"
     }
    ],
    "costo_cumulato_usd": 0,
    "stato": "aperto",
    "issue": null,
-   "occorrenze_non_stimate": 10
+   "occorrenze_non_stimate": 11
   },
   {
    "id": "F-003",
@@ -226,12 +232,18 @@
      "costo_usd": null,
      "nota": "Ricorrenza con il divario piu' ampio della serie: risk_reports id 66, 22:30:01 UTC, combined_drawdown=0,012429 (1,24%, invariato dal 07-31) contro per_strategy_metrics.portfolio.drawdown=0,177548 (17,75%, il valore piu' alto mai osservato, in crescita monotona dal 13,9% del 07-31) che genera l'ALERT 'portfolio drawdown 17.8% exceeds 10%'. current_drawdown reale da portfolio_monitor_snapshots delle 20:00 = 0,001537 (0,15%, fra i minimi della serie): tre numeri di drawdown, divario in aumento non in diminuzione. daily_pnl=-1.980,38 contro nav_change_today=+37,28 (o -11,30 sul calcolo diretto apertura-chiusura). Nota positiva separata: nav_change_today stesso e' oggi internamente coerente (stesso NAV di riferimento implicito su tutta la giornata) - a differenza dell'08-14 il difetto oggi resta confinato al triangolo drawdown/daily_pnl di risk_reports, non contamina nav_change_today. Costo null: nessun ordine dipende da questo record.",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-17.md §10 [DAY-302], §8"
+    },
+    {
+     "data": "2026-08-18",
+     "costo_usd": null,
+     "nota": "Undicesima occorrenza. risk_reports id 67, 22:30:01 UTC: combined_drawdown=0.012429 (1.24%, invariato dal 07-31) contro per_strategy_metrics.portfolio.drawdown=0.1775475695171766 (17.75%) che genera l'ALERT 'portfolio drawdown 17.8% exceeds 10%'. current_drawdown reale da portfolio_monitor_snapshots delle 20:00 = 0.004209 (0.42%): tre numeri di drawdown, valore quasi identico all'occorrenza dell'08-17 (17.75% oggi contro 17.75% ieri) come se la serie fosse bloccata su un calcolo che non si aggiorna piu' in modo coerente col NAV. Costo null: nessun ordine dipende da questo record.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-18.md §10 [DAY-403]"
     }
    ],
    "costo_cumulato_usd": 0,
    "stato": "aperto",
    "issue": null,
-   "occorrenze_non_stimate": 10
+   "occorrenze_non_stimate": 11
   },
   {
    "id": "F-004",
@@ -281,12 +293,18 @@
      "costo_usd": null,
      "nota": "Settima occorrenza. decay_reports del 2026-08-17 21:00: 12 righe, actual_value IDENTICO su S1/S2/S4 per tutte e quattro le metriche (hit_rate 0,3204, ic 0,0273, max_drawdown 0,1194, sharpe -8,0015 - il piu' negativo osservato finora nella serie), confrontato contro tre baseline distinte, producendo CRITICAL su sharpe per tutte e tre le strategie. S2 (disabilitata, mai un trade in tabella trades) riceve comunque due WARNING e un CRITICAL. Costo null: e' il meccanismo di sorveglianza del decadimento stesso, nessun ordine ne dipende.",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-17.md §10"
+    },
+    {
+     "data": "2026-08-18",
+     "costo_usd": null,
+     "nota": "Ottava occorrenza. decay_reports del 2026-08-18 21:00:00: 12 righe, actual_value IDENTICO su S1/S2/S4 per tutte e quattro le metriche (hit_rate 0.31773127753303965, ic 0.027736240419207043, max_drawdown 0.11936300173505804, sharpe -7.582520691151624), confrontato contro tre baseline distinte, CRITICAL su sharpe per tutte e tre. S2 (disabilitata, mai un trade in tabella trades) riceve comunque CRITICAL/WARNING. Costo null: e' il meccanismo di sorveglianza del decadimento stesso, nessun ordine ne dipende.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-18.md §10 [DAY-404]"
     }
    ],
    "costo_cumulato_usd": 0,
    "stato": "aperto",
    "issue": null,
-   "occorrenze_non_stimate": 7
+   "occorrenze_non_stimate": 8
   },
   {
    "id": "F-005",
@@ -410,12 +428,18 @@
      "costo_usd": null,
      "nota": "Ricorrenza esatta: ingestion_stats_daily del 08-17, alpaca_benzinga fetched=747, duplicates=3.694 - duplicates supera fetched di quasi 5x, stesso pattern strutturale gia' tracciato (probabile finestra di dedup cross-day piu' ampia del contatore giornaliero). Costo null.",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-17.md §4"
+    },
+    {
+     "data": "2026-08-18",
+     "costo_usd": null,
+     "nota": "Ottava occorrenza. ingestion_stats_daily del 08-18, alpaca_benzinga: fetched=698, duplicates=3278, cioe' 4.7x i fetched. gdelt_gkg nello stesso giorno resta coerente (fetched 1970, duplicates 49, discarded_no_ticker 1800). Le righe realmente persistite non confermano il contatore: 164 righe news_log totali (84 Benzinga, 80 gdelt). Costo null: telemetria.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-18.md §4, §10 [DAY-405]"
     }
    ],
    "costo_cumulato_usd": 0,
    "stato": "aperto",
    "issue": null,
-   "occorrenze_non_stimate": 7
+   "occorrenze_non_stimate": 8
   },
   {
    "id": "F-008",
@@ -648,10 +672,16 @@
      "costo_usd": null,
      "nota": "Ricorrenza al valore piu' alto osservato: execution_decisions del 08-17, 473 righe totali, 465 con signal_id NULL (98,3%). Le due sole SELL del giorno (JD, BA) hanno anch'esse signal_id NULL nonostante il reason citi score e orario di generazione del segnale causante - la prova esiste solo nel testo, non in una join verificabile. Costo null.",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-17.md §9, §10 [DAY-303]"
+    },
+    {
+     "data": "2026-08-18",
+     "costo_usd": null,
+     "nota": "Ricorrenza al valore piu' alto mai osservato: execution_decisions del 08-18, 514 righe totali, 509 con signal_id NULL (99.0%, supera il precedente massimo del 98.3% dell'08-17). Le due SELL del giorno (HD, NVDA) hanno anch'esse signal_id NULL nonostante il reason citi score e orario di generazione del segnale causante - la prova esiste solo nel testo, non in una join verificabile. Costo null.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-18.md §10 [DAY-406]"
     }
    ],
    "costo_cumulato_usd": 0.0,
-   "occorrenze_non_stimate": 8,
+   "occorrenze_non_stimate": 9,
    "stato": "aperto",
    "issue": null
   },
@@ -788,6 +818,12 @@
      "costo_usd": null,
      "nota": "[forense][DAY-003] Settima giornata del pattern. NVDA, trades 701: BUY 17:22 a 223.9655 su score ensemble +0.343 (conf 0.650, std 0.141), SELL 19:07 a 223.84, roundtrip 1h45, net -0.93. execution_decisions 9775 riporta testualmente '[below_entry_gate] S4 signal fell below the active feedback entry threshold (age=0.6h vs max_age=4h, generated 2026-08-12 18:30 UTC, score=+0.023): weight 0.0%, position closed'. Stesso meccanismo gia' isolato nel codice: portfolio_scheduler.py:3715-3722 applica il filtro all'INTERO signals_df, non ai soli candidati nuovi, quindi entrata e uscita condividono la soglia 0.300 e la banda di isteresi non esiste come concetto. I guard anti-churn hanno funzionato senza bastare: hold_minimum_minutes=90 rispettato (105 min) ed exit_persistence_cycles=2 rispettato (il segnale e' sotto gate dalle 18:30, la SELL arriva al terzo ciclo). COSTO NULL per non doppio-contare: 1.38 e' gia' iscritto su F-008, che porta la causa prossima (l'articolo macro multi-ticker). Il finding vive per ricorrenza; la banda e' taratura, congelata al 28/09.",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-12.md §10"
+    },
+    {
+     "data": "2026-08-18",
+     "costo_usd": 0.0,
+     "nota": "Ottava giornata del pattern. Due roundtrip oggi via below_entry_gate: HD (trade 737, BUY 14:22 a 339.98, SELL 16:07 a 340.88, 105 min, net +0.70) e NVDA (trade 738, BUY 16:37 a 219.65, SELL 18:22 a 220.23, 105 min, net +0.25). Stesso meccanismo gia' isolato in portfolio_scheduler.py:3715-3722 (il filtro entry/exit condivide la soglia 0.300 sull'intero signals_df, nessuna banda di isteresi). COSTO 0.00 VERIFICATO: a differenza di altre occorrenze della serie (es. NVDA 08-12 net -0.93), entrambi i roundtrip di oggi hanno chiuso in utile netto, quindi il pattern strutturale e' ricorso senza generare una perdita misurabile oggi.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-18.md §7, §10 [DAY-408]"
     }
    ],
    "costo_cumulato_usd": 53.91,
@@ -916,10 +952,16 @@
      "costo_usd": null,
      "nota": "Ricorrenza esatta sulle uniche 2 righe trades chiuse oggi: JD (id 725) slippage_est=1,9119981359083036 == cost_usd=1,9119981359083036; BA (id 726) slippage_est=0,9976091403319385 == cost_usd=0,9976091403319385. La colonna dedicata non misura nulla di indipendente dal costo stimato. Costo null.",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-17.md §7"
+    },
+    {
+     "data": "2026-08-18",
+     "costo_usd": null,
+     "nota": "Ricorrenza esatta sulle uniche 2 righe trades chiuse oggi: HD (id 737) slippage_est=cost_usd=0.7024910133744303; NVDA (id 738) slippage_est=cost_usd=0.2537252983105616. La colonna dedicata non misura nulla di indipendente dal costo stimato. Costo null.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-18.md §8, §10 [DAY-407]"
     }
    ],
    "costo_cumulato_usd": 0,
-   "occorrenze_non_stimate": 8,
+   "occorrenze_non_stimate": 9,
    "stato": "aperto",
    "issue": null
   },
@@ -1384,10 +1426,16 @@
      "costo_usd": null,
      "nota": "Ottava occorrenza, con un MECCANISMO NUOVO rispetto a tutte le precedenti: non un redeploy che ricrea i container (Created invariato al 2026-08-15 per tutti e 5), ma un riavvio dell'HOST (uptime -s = 2026-08-17 14:03:37 UTC, 34 minuti dopo l'apertura del mercato) che ha portato al riavvio simultaneo dei processi in tutti e 5 i container (StartedAt worker/beat/worker-inference 14:04:22Z, api 14:04:24Z, RestartCount=0 su tutti). La pipeline applicativa ha continuato a funzionare correttamente secondo il DB (24/24 cicli portfolio regolari, 82/82 snapshot regolari, nessun buco), ma il recupero storico dei log Docker di worker/beat/worker-inference (non di api) si e' dimostrato inaffidabile in questa sessione per gran parte del pomeriggio: sia la lettura completa sia il filtro --since si fermano all'ultima riga pre-riavvio (14:02:01 UTC) o restituiscono 0 righe, anche quando --tail prova che il container produce log correnti regolarmente. Causa non isolata con certezza (possibile buffer stdout non flushato dopo il riavvio del processo Celery, oppure limite del driver json-file con rotazione su --since). Effetto pratico identico alle occorrenze precedenti: il giorno analizzato resta in gran parte cieco sui log applicativi. Costo null (perdita di osservabilita', non di P&L).",
      "fonte": "FORENSIC_DAILY_REPORT_2026-08-17.md §3, §10 [DAY-301]"
+    },
+    {
+     "data": "2026-08-18",
+     "costo_usd": null,
+     "nota": "Nona occorrenza, con un MECCANISMO NUOVO rispetto a tutte le precedenti: non un riavvio host (come l'08-17, container non ricreati) ma un vero REDEPLOY. docker inspect su worker/api/worker-inference/beat: Created=StartedAt=2026-08-19T08:20:07-11Z per tutti e 4 (container ricreati, non solo riavviati); alembic-postgres-1 invece ha Created al 21/05 e StartedAt al 17/08 (riavvio host precedente), non toccato oggi. Risultato pratico identico alle occorrenze precedenti: zero righe di log Docker (ERROR/WARNING/CRITICAL) per l'intera giornata del 18/08 sui 4 container applicativi, mentre le tabelle DB (portfolio_cycles, execution_decisions, sentiment_signals, portfolio_monitor_snapshots) mostrano continuita' completa senza buchi. Costo null: difetto di sola osservabilita', nessun ordine ne dipende.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-18.md §10 [DAY-401]"
     }
    ],
    "costo_cumulato_usd": 0,
-   "occorrenze_non_stimate": 7,
+   "occorrenze_non_stimate": 8,
    "stato": "aperto",
    "issue": null
   },
@@ -1733,6 +1781,25 @@
    "occorrenze_non_stimate": 0,
    "stato": "aperto",
    "issue": null
+  },
+  {
+   "id": "F-041",
+   "titolo": "Il bearer token del protocollo forense viene rifiutato su tutti gli endpoint REST (\"Invalid or expired JWT token\") - header sbagliato nel prompt, non chiave scaduta",
+   "tipo": "difetto",
+   "confidenza": "congetturale",
+   "primo_avvistamento": "2026-08-18",
+   "occorrenze": [
+    {
+     "data": "2026-08-18",
+     "costo_usd": null,
+     "nota": "curl -H 'Authorization: Bearer <token>' su /api/decisions|trades|signals|positions|orders restituisce 403 'Invalid or expired JWT token' su tutti gli endpoint. Causa isolata in src/api/auth.py:15-46 (require_api_key): se l'header Authorization e' presente prova SEMPRE il path JWT (righe 27-37) e se il decode fallisce non ripiega mai sul controllo X-API-Key (raggiungibile solo se Authorization e' assente). Il token fornito da questo protocollo e' la chiave statica legacy: docker exec alembic-api-1 printenv ADMIN_API_KEY == il token esatto fornito nel prompt. Riprovando con 'X-API-Key: <stesso token>' la stessa richiesta risponde 200 OK. Non e' una chiave scaduta: e' il meccanismo di trasporto sbagliato nelle istruzioni curl di questo stesso protocollo cron. Impatto pratico: questa sessione ha dovuto ricostruire i dati via query dirette a Postgres (fallback gia' previsto dal protocollo) invece che via REST come da istruzioni. Costo null: bug di tooling forense, non del sistema di trading.",
+     "fonte": "FORENSIC_DAILY_REPORT_2026-08-18.md §10 [DAY-402]"
+    }
+   ],
+   "costo_cumulato_usd": 0,
+   "stato": "aperto",
+   "issue": null,
+   "occorrenze_non_stimate": 1
   }
  ],
  "_nota_migrazione": "2026-08-04: le occorrenze scritte prima di questa data avevano costo_usd 0.0 perche' il prompt non chiedeva di stimarlo. Convertite a null: zero significa 'e' costato zero', null significa 'non stimato'. Deroga al solo-append registrata nella carta di osservazione."
