@@ -225,6 +225,60 @@ def _fire_alert(notifier, message: str, level: AlertLevel) -> None:
         log.warning("Telegram alert send failed: %s", exc)
 
 
+_BUYING_POWER_UNSET = object()
+
+
+def _write_buying_power_gate_decision(
+    *,
+    ts,
+    symbol: str,
+    signal_id: int | None,
+    regime_mult: float,
+    decision: str,
+    reason: str,
+) -> None:
+    """Best-effort Decision Log write for a buying-power gate event."""
+    try:
+        from src.store.pg_store import PostgreSQLStore
+
+        pg_store = PostgreSQLStore()
+        try:
+            pg_store.write_execution_decision(
+                tick_time=ts,
+                symbol=symbol,
+                signal_id=signal_id,
+                score=0.0,
+                regime_mult=regime_mult,
+                ema_pass=True,
+                decision=decision,
+                reason=reason,
+            )
+        finally:
+            pg_store.close()
+    except Exception as exc:
+        log.warning(
+            "buying_power gate: failed to write decision for %s: %s",
+            symbol,
+            exc,
+        )
+
+
+def _account_debug_line(
+    equity: float,
+    cash: float,
+    buying_power: float | None,
+    multiplier: float,
+) -> str:
+    """Format account buying power and multiplier for observability."""
+    buying_power_text = (
+        f"{buying_power:.2f}" if buying_power is not None else "unavailable"
+    )
+    return (
+        f"Account: equity={equity:.2f}, cash={cash:.2f}, "
+        f"buying_power={buying_power_text}, multiplier={multiplier:.1f}"
+    )
+
+
 def _divergence_alert_enabled() -> bool:
     """Read notifications.send_signal_order_divergence_alert from config/trading.yaml.
 
@@ -2081,8 +2135,13 @@ def _run_cycle_inner() -> dict:
                   account.trading_blocked, account.account_blocked)
         return {"skipped": True, "reason": "account_blocked"}
 
-    buying_power = float(account.buying_power) if account.buying_power else cash
-    log.debug("Account: equity=%.2f, cash=%.2f, buying_power=%.2f", equity, cash, buying_power)
+    raw_buying_power = account.buying_power
+    buying_power = (
+        float(raw_buying_power) if raw_buying_power not in (None, "") else None
+    )
+    raw_multiplier = account.multiplier
+    multiplier = float(raw_multiplier) if raw_multiplier not in (None, "") else 1.0
+    log.debug(_account_debug_line(equity, cash, buying_power, multiplier))
 
     # Fetch price history
     data_client = StockHistoricalDataClient(
@@ -2854,6 +2913,8 @@ def _run_cycle_inner() -> dict:
             _on_broker_reject=_enqueue_mobile_broker_error,
             cycle_ts=ts,
             signal_ids=_signal_ids,
+            buying_power=buying_power,
+            notifier=notifier,
         )
 
         # #62/#63: reconcile broker-side protective stops for fractional positions.
@@ -3853,6 +3914,9 @@ def _submit_portfolio_orders(
     sym_strats: dict | None = None,
     cycle_ts: datetime | None = None,
     signal_ids: dict[str, int] | None = None,
+    buying_power=_BUYING_POWER_UNSET,
+    notifier=None,
+    gate_mode: str | None = None,
 ) -> list[dict]:
     """Submit BUY and SELL orders to Alpaca.
 
@@ -3873,6 +3937,8 @@ def _submit_portfolio_orders(
         regime_mult: Regime multiplier from Redis (P0-09). Scales BUY notional so
             high-volatility regimes (mult=0.2) result in smaller position sizes.
         open_trades: Open DB trade rows; used for aggregate stop-risk budget enforcement.
+        buying_power: Alpaca buying power for the BUY pre-flight gate. Omitting it
+            preserves compatibility for callers that do not own an account snapshot.
 
     Returns:
         List of dicts for successfully submitted orders, each containing:
@@ -4019,6 +4085,94 @@ def _submit_portfolio_orders(
                 _accepted_risk += (_frozen_sizing.d_init if _frozen_sizing is not None else 0.02) * notional
                 # P1-B: Non-fractionable symbols require whole-share qty instead of notional.
                 is_fractionable = (fractionable_symbols is None or order.symbol in fractionable_symbols)
+                capped_qty: int | None = None
+                if buying_power is not _BUYING_POWER_UNSET:
+                    from src.config import config as _cfg_gate
+                    from src.portfolio.buying_power_gate import (
+                        evaluate_buying_power_gate,
+                    )
+
+                    effective_gate_mode = (
+                        gate_mode
+                        if gate_mode is not None
+                        else _cfg_gate.BUYING_POWER_GATE_MODE
+                    )
+                    gate = evaluate_buying_power_gate(
+                        notional=notional,
+                        buying_power=buying_power,
+                        is_fractionable=is_fractionable,
+                        mode=effective_gate_mode,
+                        price=price,
+                    )
+                    signal_id = (signal_ids or {}).get(order.symbol)
+                    if gate.action == "skip":
+                        reason = (
+                            "cannot size BUY safely "
+                            f"(buying_power={buying_power}, price={price}) — order skipped"
+                        )
+                        log.warning("buying_power gate SKIP %s: %s", order.symbol, reason)
+                        _fire_alert(
+                            notifier,
+                            f"⚠️ buying_power gate SKIP {order.symbol}: {reason}",
+                            AlertLevel.WARNING,
+                        )
+                        _write_buying_power_gate_decision(
+                            ts=cycle_ts,
+                            symbol=order.symbol,
+                            signal_id=signal_id,
+                            regime_mult=regime_mult,
+                            decision="SKIP_BUY_POWER",
+                            reason=reason,
+                        )
+                        continue
+                    if gate.action == "shadow":
+                        reason = (
+                            f"would_cap delta=${gate.delta:.2f} "
+                            f"(notional=${notional:.2f}, "
+                            f"buying_power=${buying_power:.2f})"
+                        )
+                        log.info(
+                            "buying_power gate SHADOW %s: %s — notional unchanged",
+                            order.symbol,
+                            reason,
+                        )
+                        _fire_alert(
+                            notifier,
+                            f"⚠️ buying_power gate SHADOW {order.symbol}: {reason}",
+                            AlertLevel.WARNING,
+                        )
+                        _write_buying_power_gate_decision(
+                            ts=cycle_ts,
+                            symbol=order.symbol,
+                            signal_id=signal_id,
+                            regime_mult=regime_mult,
+                            decision="BUY_POWER_SHADOW",
+                            reason=reason,
+                        )
+                    elif gate.action == "cap":
+                        original_notional = notional
+                        assert gate.capped_notional is not None
+                        notional = gate.capped_notional
+                        capped_qty = gate.capped_qty
+                        reason = (
+                            f"capped delta=${gate.delta:.2f} "
+                            f"(notional ${original_notional:.2f} -> ${notional:.2f}, "
+                            f"buying_power=${buying_power:.2f})"
+                        )
+                        log.info("buying_power gate CAP %s: %s", order.symbol, reason)
+                        _fire_alert(
+                            notifier,
+                            f"⚠️ buying_power gate CAP {order.symbol}: {reason}",
+                            AlertLevel.WARNING,
+                        )
+                        _write_buying_power_gate_decision(
+                            ts=cycle_ts,
+                            symbol=order.symbol,
+                            signal_id=signal_id,
+                            regime_mult=regime_mult,
+                            decision="BUY_POWER_CAP",
+                            reason=reason,
+                        )
                 if _submit_fn is not None:
                     _submit_fn(order, notional, trading_client)
                     alpaca_id = f"test-{order.symbol}-buy"
@@ -4040,7 +4194,11 @@ def _submit_portfolio_orders(
                         # int(order.quantity) here silently bypassed regime_mult on
                         # whole-share names (mega-caps), leaking full-size deployment in
                         # risk-off regimes. Zero behavior change when regime_mult == 1.0.
-                        whole_qty = max(1, int(notional / price))
+                        whole_qty = (
+                            capped_qty
+                            if capped_qty is not None
+                            else max(1, int(notional / price))
+                        )
                         log.info(
                             "P1-B: %s not fractionable — using qty=%d (regime_mult=%.2f, notional=$%.2f)",
                             order.symbol, whole_qty, regime_mult, notional,
