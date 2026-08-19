@@ -235,6 +235,12 @@ class Config(BaseModel):
         default_factory=lambda: os.environ.get("ALPACA_FRACTIONAL_STOP_ENABLED", "true").lower() == "true"
     )
 
+    # #199: shadow observes insufficient buying power without changing order size;
+    # the operator may opt into cap only after reviewing a full shadow session.
+    BUYING_POWER_GATE_MODE: str = Field(
+        default_factory=lambda: os.environ.get("BUYING_POWER_GATE_MODE", "shadow")
+    )
+
     # Telegram notifications
     TELEGRAM_BOT_TOKEN: str = Field(default_factory=lambda: os.environ.get("TELEGRAM_BOT_TOKEN", ""))
     TELEGRAM_CHAT_ID: str = Field(default_factory=lambda: os.environ.get("TELEGRAM_CHAT_ID", ""))
@@ -495,6 +501,17 @@ class Config(BaseModel):
         """Validate MAX_CONSECUTIVE_FALLBACKS is positive."""
         if v <= 0:
             raise ValueError("MAX_CONSECUTIVE_FALLBACKS must be positive")
+        return v
+
+    @field_validator("BUYING_POWER_GATE_MODE")
+    @classmethod
+    def validate_buying_power_gate_mode(cls, v: str) -> str:
+        """Validate the buying-power gate rollout mode."""
+        allowed = {"shadow", "cap", "off"}
+        if v not in allowed:
+            raise ValueError(
+                f"BUYING_POWER_GATE_MODE must be one of {sorted(allowed)} (got {v!r})"
+            )
         return v
 
 
