@@ -93,7 +93,8 @@ def run_s3_backtest_from_prices(
         config=gate_config,
     )
 
-    # Milestone C: OOS Sharpe in expected range [0.4, 0.6] and gates pass
+    # Milestone C: OOS Sharpe in broad guardrail range [0.0, 1.0] and gates pass.
+    # The shared gates enforce minimum performance thresholds.
     milestone_c_pass = (0.0 <= oos_sharpe <= 1.0) and gate_report.overall_passed
 
     degradation_ratio = aggregate.get("is_oos_degradation_ratio")

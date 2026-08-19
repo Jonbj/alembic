@@ -111,9 +111,47 @@ class TestConstructor:
         assert strat._signals_df is not None
         assert len(strat._signals_df) == 3
 
-    def test_health_check_always_true(self) -> None:
-        assert NewsDrivenTactical(S4Config()).health_check() is True
-        assert NewsDrivenTactical(S4Config(), signals=pd.DataFrame()).health_check() is True
+
+
+class TestHealthCheck:
+    def test_valid_signals_pass(self) -> None:
+        signals = _make_signals_df(["AAPL", "MSFT"])
+
+        assert NewsDrivenTactical(S4Config(), signals=signals).health_check() is True
+
+    @pytest.mark.parametrize("signals", [None, pd.DataFrame()])
+    def test_missing_signals_fail(self, signals: pd.DataFrame | None) -> None:
+        assert NewsDrivenTactical(S4Config(), signals=signals).health_check() is False
+
+    @pytest.mark.parametrize("column", ["symbol", "score", "confidence", "generated_at"])
+    def test_missing_required_column_fails(self, column: str) -> None:
+        signals = _make_signals_df(["AAPL"]).drop(columns=column)
+
+        assert NewsDrivenTactical(S4Config(), signals=signals).health_check() is False
+
+    @pytest.mark.parametrize(
+        ("column", "value"),
+        [
+            ("symbol", None),
+            ("symbol", " "),
+            ("score", float("nan")),
+            ("score", float("inf")),
+            ("score", 1.01),
+            ("confidence", float("nan")),
+            ("confidence", float("inf")),
+            ("confidence", -0.01),
+            ("generated_at", None),
+            ("generated_at", "2024-01-08"),
+        ],
+    )
+    def test_invalid_required_value_fails(self, column: str, value: object) -> None:
+        signals = _make_signals_df(["AAPL"])
+        if column == "generated_at" and isinstance(value, str):
+            signals[column] = pd.Series([value], dtype=object)
+        else:
+            signals.loc[0, column] = value
+
+        assert NewsDrivenTactical(S4Config(), signals=signals).health_check() is False
 
 
 # ---------------------------------------------------------------------------
