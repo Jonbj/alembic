@@ -83,4 +83,4 @@ def sanitize_ticker(symbol: str) -> str:
     ascii_only = normalized.encode("ASCII", "ignore").decode("ASCII")
 
     # Remove any non-alphanumeric chars
-    return re.sub(r"[^A-Z0-9]", "", ascii_only)
+    return re.sub(r"[^A-Z0-9.]", "", ascii_only)
