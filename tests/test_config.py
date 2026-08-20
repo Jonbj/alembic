@@ -54,6 +54,53 @@ class TestWatchlistSymbols:
         assert cfg.WATCHLIST_SYMBOLS == ["TSLA", "AMZN"]
 
 
+class TestBuyingPowerGateMode:
+    def test_default_is_shadow(self):
+        from src.config import Config
+
+        cfg = Config(
+            ADMIN_API_KEY="a" * 32,
+            DATABASE_URL="postgresql://localhost:5432/test",
+        )
+
+        assert cfg.BUYING_POWER_GATE_MODE == "shadow"
+
+    @pytest.mark.parametrize("mode", ["shadow", "cap", "off"])
+    def test_accepts_supported_modes(self, mode):
+        from src.config import Config
+
+        cfg = Config(
+            ADMIN_API_KEY="a" * 32,
+            DATABASE_URL="postgresql://localhost:5432/test",
+            BUYING_POWER_GATE_MODE=mode,
+        )
+
+        assert cfg.BUYING_POWER_GATE_MODE == mode
+
+    def test_invalid_mode_is_rejected(self):
+        from pydantic import ValidationError
+
+        from src.config import Config
+
+        with pytest.raises(ValidationError, match="BUYING_POWER_GATE_MODE"):
+            Config(
+                ADMIN_API_KEY="a" * 32,
+                DATABASE_URL="postgresql://localhost:5432/test",
+                BUYING_POWER_GATE_MODE="bogus",
+            )
+
+    def test_environment_override(self, monkeypatch):
+        from src.config import Config
+
+        monkeypatch.setenv("BUYING_POWER_GATE_MODE", "cap")
+        cfg = Config(
+            ADMIN_API_KEY="a" * 32,
+            DATABASE_URL="postgresql://localhost:5432/test",
+        )
+
+        assert cfg.BUYING_POWER_GATE_MODE == "cap"
+
+
 class TestReconcileAutocloseFlags:
     """spec §2: auto-close is a money-path DB write -> default OFF + dry-run ON."""
 

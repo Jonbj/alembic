@@ -305,6 +305,77 @@ def _write_decision(
         return None
 
 
+def _apply_buying_power_gate_legacy(
+    *,
+    notional: float,
+    buying_power: float | None,
+    price: float,
+    symbol: str,
+    signal_id: "int | None",
+    score: float,
+    regime_mult: float,
+    tick_time,
+    pg_store,
+    notifier: "Notifier | None",
+    mode: str,
+) -> "float | None":
+    """Apply #199 to one legacy BUY, returning notional or None to skip."""
+    from src.portfolio.buying_power_gate import evaluate_buying_power_gate
+
+    gate = evaluate_buying_power_gate(
+        notional=notional,
+        buying_power=buying_power,
+        is_fractionable=True,
+        mode=mode,
+        price=price,
+    )
+    if gate.action == "pass":
+        return notional
+
+    if gate.action == "skip":
+        reason = (
+            "cannot size BUY safely "
+            f"(buying_power={buying_power}, price={price}) — order skipped"
+        )
+        decision = "SKIP_BUY_POWER"
+        result = None
+    elif gate.action == "shadow":
+        reason = (
+            f"would_cap delta=${gate.delta:.2f} "
+            f"(notional=${notional:.2f}, buying_power=${buying_power:.2f})"
+        )
+        decision = "BUY_POWER_SHADOW"
+        result = notional
+    else:
+        assert gate.capped_notional is not None
+        reason = (
+            f"capped delta=${gate.delta:.2f} "
+            f"(notional ${notional:.2f} -> ${gate.capped_notional:.2f}, "
+            f"buying_power=${buying_power:.2f})"
+        )
+        decision = "BUY_POWER_CAP"
+        result = gate.capped_notional
+
+    log.warning("buying_power gate %s %s: %s", gate.action.upper(), symbol, reason)
+    _fire_alert(
+        notifier,
+        f"⚠️ buying_power gate {gate.action.upper()} {symbol}: {reason}",
+        AlertLevel.WARNING,
+    )
+    _write_decision(
+        pg_store,
+        tick_time,
+        symbol,
+        signal_id,
+        score,
+        regime_mult,
+        ema_pass=True,
+        decision=decision,
+        reason=reason,
+    )
+    return result
+
+
 def _regime_label(regime_mult: float) -> str:
     """Convert a numeric regime multiplier to the string label expected by TradeContext."""
     if regime_mult <= 0.3:
@@ -418,7 +489,8 @@ def run_execution_cycle(
 
     Returns:
         Stats dict: checked, skipped_stale, skipped_killswitch, skipped_position,
-                    skipped_momentum, skipped_cycle_cap, orders_placed, stop_losses_triggered, errors.
+                    skipped_momentum, skipped_cycle_cap, skipped_buy_power,
+                    orders_placed, stop_losses_triggered, errors.
     """
     from alpaca.trading.enums import OrderClass, OrderSide, QueryOrderStatus, TimeInForce
     from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest, StopLossRequest
@@ -430,6 +502,7 @@ def run_execution_cycle(
         "skipped_position": 0,
         "skipped_momentum": 0,
         "skipped_cycle_cap": 0,
+        "skipped_buy_power": 0,
         "orders_placed": 0,
         "stop_losses_triggered": 0,
         "errors": 0,
@@ -445,6 +518,10 @@ def run_execution_cycle(
     try:
         account = retry_transient(trading_client.get_account)
         portfolio_value = float(account.portfolio_value)
+        raw_buying_power = account.buying_power
+        buying_power = (
+            float(raw_buying_power) if raw_buying_power not in (None, "") else None
+        )
         redis_store.set_portfolio_value(portfolio_value)
     except Exception as e:
         log.error("Failed to fetch account from Alpaca: %s", e)
@@ -707,6 +784,24 @@ def run_execution_cycle(
                     reason="price unavailable — cannot compute stop-loss price for bracket",
                 )
                 continue
+
+            gated_notional = _apply_buying_power_gate_legacy(
+                notional=notional,
+                buying_power=buying_power,
+                price=price,
+                symbol=symbol,
+                signal_id=signal_id,
+                score=score,
+                regime_mult=regime_mult,
+                tick_time=tick_time,
+                pg_store=pg_store,
+                notifier=notifier,
+                mode=config.BUYING_POWER_GATE_MODE,
+            )
+            if gated_notional is None:
+                stats["skipped_buy_power"] += 1
+                continue
+            notional = gated_notional
 
             qty = round(notional / price, 4)
             sym_stop_pct = _cost_calc.stop_loss_pct(symbol)
