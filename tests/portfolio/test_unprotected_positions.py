@@ -17,6 +17,7 @@ from src.portfolio.unprotected_positions import (
     classify_protection,
     format_unprotected_alert,
     select_unprotected_alerts,
+    summarize_protection,
 )
 
 
@@ -163,3 +164,86 @@ class TestFormatUnprotectedAlert:
 
         assert "sub-1-share" not in msg
         assert "stop sync failed" in msg
+
+
+class TestSummarizeProtection:
+    """The sleeve-level aggregate the 2026-08-06 operator decision depends on.
+
+    That decision defers the structural fix to 2026-09-28 but reserves the right
+    to reopen it early "se il rosso si allarga in modo marcato" — a statement
+    about the unprotectable sleeve as a whole, not about any single symbol. The
+    per-symbol alert cannot answer it: it fires at -15% on one position and says
+    nothing about the sleeve's total P&L.
+    """
+
+    def _book(self):
+        # The 2026-07-28 shape of the book, reduced: all the red on the wrong
+        # side of the 1-share line.
+        return classify_protection(
+            [
+                _position(
+                    "NOK", "0.563993", unrealized_plpc="-0.246",
+                    market_value="82.00", unrealized_pl="-26.80",
+                ),
+                _position(
+                    "WDC", "0.334697", unrealized_plpc="-0.153",
+                    market_value="41.00", unrealized_pl="-7.40",
+                ),
+                _position(
+                    "AAPL", "2.4578", unrealized_plpc="0.12",
+                    market_value="600.00", unrealized_pl="64.30",
+                ),
+            ],
+            [
+                _plan("NOK", "skip_no_whole_share"),
+                _plan("WDC", "skip_no_whole_share"),
+                _plan("AAPL", "noop", whole_qty=2),
+            ],
+        )
+
+    def test_splits_the_book_on_the_one_share_line(self):
+        summary = summarize_protection(self._book())
+
+        assert summary.protectable.n == 1
+        assert summary.unprotectable.n == 2
+
+    def test_sums_value_and_unrealized_pnl_per_sleeve(self):
+        summary = summarize_protection(self._book())
+
+        assert summary.protectable.market_value == pytest.approx(600.0)
+        assert summary.protectable.unrealized_pl == pytest.approx(64.30)
+        assert summary.unprotectable.market_value == pytest.approx(123.0)
+        assert summary.unprotectable.unrealized_pl == pytest.approx(-34.20)
+
+    def test_reports_the_unprotectable_share_of_the_book_by_value(self):
+        summary = summarize_protection(self._book())
+
+        assert summary.unprotectable_value_share == pytest.approx(123.0 / 723.0)
+
+    def test_missing_broker_figures_count_as_zero_not_as_a_crash(self):
+        """A position Alpaca returned without market_value must not sink the report."""
+        rows = classify_protection(
+            [_position("CAT", "0.821012")], [_plan("CAT", "skip_no_whole_share")]
+        )
+
+        summary = summarize_protection(rows)
+
+        assert summary.unprotectable.n == 1
+        assert summary.unprotectable.market_value == pytest.approx(0.0)
+        assert summary.unprotectable.unrealized_pl == pytest.approx(0.0)
+
+    def test_empty_book_has_no_share_instead_of_dividing_by_zero(self):
+        summary = summarize_protection([])
+
+        assert summary.protectable.n == 0
+        assert summary.unprotectable.n == 0
+        assert summary.unprotectable_value_share is None
+
+    def test_classification_carries_the_broker_figures_through(self):
+        rows = classify_protection(
+            [_position("NOK", "0.563993", market_value="82.00", unrealized_pl="-26.80")],
+            [_plan("NOK", "skip_no_whole_share")],
+        )
+
+        assert rows[0].market_value == pytest.approx(82.0)
+        assert rows[0].unrealized_pl == pytest.approx(-26.80)
