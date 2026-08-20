@@ -698,7 +698,7 @@ def _sync_fractional_protective_stops(trading_client, stop_policy, cycle_ts, not
     )
 
     try:
-        positions = trading_client.get_all_positions()
+        positions = retry_transient(trading_client.get_all_positions)
     except Exception as exc:
         log.warning("Fractional protective stop sync: failed to fetch positions: %s", exc)
         return {"skipped": "positions_fetch_failed"}
@@ -2224,7 +2224,7 @@ def _run_cycle_inner() -> dict:
     alpaca_entry_prices: dict[str, float] = {}
     alpaca_positions: list = []
     try:
-        alpaca_positions = trading_client.get_all_positions()
+        alpaca_positions = retry_transient(trading_client.get_all_positions)
         for ap in alpaca_positions:
             qty = float(ap.qty)
             avg_cost = float(ap.avg_entry_price)

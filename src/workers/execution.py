@@ -487,7 +487,7 @@ def run_execution_cycle(
     # Fetch open positions + pending orders (only when not frozen)
     try:
         open_positions = {
-            p.symbol: p for p in trading_client.get_all_positions()
+            p.symbol: p for p in retry_transient(trading_client.get_all_positions)
         }
     except Exception as e:
         log.error("Failed to fetch positions from Alpaca: %s", e)

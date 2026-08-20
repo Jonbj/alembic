@@ -733,7 +733,7 @@ def run_reconcile_positions() -> dict:
             paper=config.ALPACA_PAPER_MODE,
         )
         open_trades = pg.fetch_trades(status="open", limit=1000)
-        held = {p.symbol: float(p.qty) for p in tc.get_all_positions()}
+        held = {p.symbol: float(p.qty) for p in retry_transient(tc.get_all_positions)}
         records = classify_positions(
             open_trades, held, now=datetime.now(timezone.utc)
         )

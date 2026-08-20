@@ -111,3 +111,87 @@ def test_mobile_snapshot_get_account_uses_retry(monkeypatch):
     account, positions = asyncio.run(b._broker_snapshot([]))
     assert account is not None
     assert any(c[0] == b.alpaca.get_account for c in calls)
+
+# --- get_all_positions wiring ------------------------------------------------
+
+def test_portfolio_scheduler_positions_load_uses_retry(monkeypatch):
+    """The protective-stop sync path (portfolio_scheduler get_all_positions) routes
+    through retry_transient."""
+    from datetime import datetime, timezone
+    from src.workers import portfolio_scheduler
+    calls = _spy_retry(monkeypatch, "src.workers.portfolio_scheduler")
+
+    client = MagicMock()
+    client.get_all_positions.return_value = []
+    client.get_orders.return_value = []
+
+    from src.portfolio.stop_policy import StopPolicy
+    summary = portfolio_scheduler._sync_fractional_protective_stops(
+        client,
+        StopPolicy({"stop_loss_mode": "fixed", "stop_loss": 0.0,
+                    "broker_disaster_stop": {"multiplier": 1.5, "sigma_multiple": 5.0,
+                                             "floor_pct": 0.12, "cap_pct": 0.20}}),
+        cycle_ts=datetime(2026, 8, 7, 15, 0, tzinfo=timezone.utc),
+    )
+    assert any(c[0] == client.get_all_positions for c in calls)
+
+
+def test_execution_get_all_positions_uses_retry(monkeypatch):
+    from src.workers import execution
+    calls = _spy_retry(monkeypatch, "src.workers.execution")
+
+    client = MagicMock()
+    acct = MagicMock()
+    acct.portfolio_value = "100000"
+    acct.last_equity = "99000"
+    acct.buying_power = "100000"
+    client.get_account.return_value = acct
+    client.get_all_positions.return_value = []
+    client.get_orders.return_value = []
+
+    redis = MagicMock()
+    redis.is_killswitch_active.return_value = False
+    redis.read_sentiment.return_value = None  # no signal -> skip symbol, clean return
+    regime = MagicMock()
+    regime.multiplier = 1.0
+    redis.get_regime.return_value = regime
+    redis.get_feedback_entry_threshold.return_value = None
+    redis.get_feedback_regime_scale.return_value = None
+    notifier = MagicMock()
+    notifier.send_alert = MagicMock()
+
+    execution.run_execution_cycle(
+        ["AAPL"], redis, client, data_client=MagicMock(), notifier=notifier
+    )
+    assert any(c[0] == client.get_all_positions for c in calls)
+
+
+def test_performance_reconcile_get_all_positions_uses_retry(monkeypatch):
+    """run_reconcile_positions (PR #318, post-plan) reads broker positions via
+    get_all_positions; assert it routes through retry_transient."""
+    from types import SimpleNamespace
+    from src.workers import performance
+    calls = _spy_retry(monkeypatch, "src.workers.performance")
+
+    # config is a frozen pydantic model; swap the module name for a plain object
+    # with just the attrs run_reconcile_positions reads.
+    monkeypatch.setattr(
+        "src.workers.performance.config",
+        SimpleNamespace(
+            ALPACA_API_KEY="test-key", ALPACA_SECRET_KEY="test-secret",
+            ALPACA_PAPER_MODE=True, RECONCILE_AUTOCLOSE_ENABLED=False,
+            RECONCILE_AUTOCLOSE_DRY_RUN=True,
+        ),
+    )
+
+    client = MagicMock()
+    client.get_all_positions.return_value = []
+    monkeypatch.setattr("alpaca.trading.client.TradingClient", lambda **kw: client)
+
+    pg_mock = MagicMock()
+    pg_mock.fetch_trades.return_value = []
+    monkeypatch.setattr("src.workers.performance.PostgreSQLStore", lambda *a, **kw: pg_mock)
+
+    result = performance.run_reconcile_positions()
+    assert "error" not in result  # did not hit the function-level degrade
+    assert any(c[0] == client.get_all_positions for c in calls)
