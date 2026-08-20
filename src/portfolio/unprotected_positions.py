@@ -39,6 +39,8 @@ class PositionProtection:
     protected: bool
     status: str  # "protected" | "sub_one_share" | "stop_pending_qty" | "stop_sync_failed"
     loss_pct: float | None  # unrealized return as a fraction; negative = loss
+    market_value: float | None = None  # broker figure, None when not reported
+    unrealized_pl: float | None = None  # broker figure, in dollars
 
 
 def _num(value) -> float | None:
@@ -106,6 +108,8 @@ def classify_protection(
                 protected=status == "protected",
                 status=status,
                 loss_pct=_loss_pct(position),
+                market_value=_num(getattr(position, "market_value", None)),
+                unrealized_pl=_num(getattr(position, "unrealized_pl", None)),
             )
         )
     return rows
@@ -138,4 +142,59 @@ def format_unprotected_alert(row: PositionProtection, loss_threshold_pct: float)
     return (
         f"⚠️ Unprotected position past -{abs(loss_threshold_pct):.0%}: "
         f"{row.symbol} {row.loss_pct:.1%} (qty {row.qty:.4f}) — {why}"
+    )
+
+
+@dataclass(frozen=True)
+class SleeveTotals:
+    """How much of the book sits on one side of the 1-share line."""
+
+    n: int
+    market_value: float
+    unrealized_pl: float
+
+
+@dataclass(frozen=True)
+class ProtectionSummary:
+    """The book split in two sleeves, protectable and not.
+
+    `unprotectable_value_share` is None on an empty book rather than 0.0: no
+    position at all is not the same statement as "no unprotectable exposure".
+    """
+
+    protectable: SleeveTotals
+    unprotectable: SleeveTotals
+    unprotectable_value_share: float | None
+
+
+def _totals(rows: Sequence[PositionProtection]) -> SleeveTotals:
+    return SleeveTotals(
+        n=len(rows),
+        market_value=sum(r.market_value or 0.0 for r in rows),
+        unrealized_pl=sum(r.unrealized_pl or 0.0 for r in rows),
+    )
+
+
+def summarize_protection(rows: Sequence[PositionProtection]) -> ProtectionSummary:
+    """Aggregate the classified book into the protectable / unprotectable sleeves.
+
+    The per-symbol alert answers "is this position bleeding past -15% with no
+    floor under it". It cannot answer the question the operator's 2026-08-06
+    decision on #161 actually reserved the right to reopen on — whether the red
+    in the unprotectable sleeve *as a whole* is widening — because that is a
+    statement about a sum, not about any one symbol. This computes that sum.
+
+    A position the broker reported without market_value or unrealized_pl counts
+    as zero in the totals instead of raising: a missing figure must not cost the
+    whole measurement, and the position is still counted in `n`.
+    """
+    protectable = [r for r in rows if r.protectable]
+    unprotectable = [r for r in rows if not r.protectable]
+    prot, unprot = _totals(protectable), _totals(unprotectable)
+
+    total_value = prot.market_value + unprot.market_value
+    share = unprot.market_value / total_value if total_value else None
+
+    return ProtectionSummary(
+        protectable=prot, unprotectable=unprot, unprotectable_value_share=share
     )

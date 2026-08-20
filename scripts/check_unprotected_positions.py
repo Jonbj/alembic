@@ -26,6 +26,47 @@ import yaml
 _TRADING_YAML = Path(__file__).resolve().parents[1] / "config" / "trading.yaml"
 
 
+# Il libro del 2026-07-28, come misurato nel corpo di #161. Serve solo da termine
+# di paragone stampato accanto a quello di oggi: la decisione dell'operatore del
+# 2026-08-06 rimanda la correzione strutturale al 28/09 ma si riserva di riaprirla
+# prima "se il rosso si allarga in modo marcato", e senza il punto di partenza
+# accanto quella frase non e' misurabile.
+_BASELINE_20260728 = {
+    "protectable": (35, 26_816.0, 659.79),
+    "unprotectable": (13, 5_224.0, -452.40),
+}
+
+
+def _print_sleeves(summary) -> None:
+    """Il libro diviso sulla linea di 1 azione, con il confronto col 28/07.
+
+    L'alert per simbolo risponde a "questa posizione sta perdendo oltre il -15%
+    senza pavimento sotto". Non risponde alla domanda su cui la decisione si
+    riserva di riaprire, che riguarda la sleeve nel suo insieme: quella e' una
+    somma, e finora nessuno strumento la calcolava.
+    """
+    base_p = _BASELINE_20260728["protectable"]
+    base_u = _BASELINE_20260728["unprotectable"]
+    print()
+    print("sleeve (linea = 1 azione intera, sotto cui Alpaca non accetta stop):")
+    print(f"  {'':16s} {'n':>4s} {'valore':>12s} {'P&L non real.':>14s}")
+    for label, s, b in (
+        ("proteggibili", summary.protectable, base_p),
+        ("NON protegg.", summary.unprotectable, base_u),
+    ):
+        print(
+            f"  {label:16s} {s.n:4d} {s.market_value:12,.2f} {s.unrealized_pl:14,.2f}"
+            f"    (28/07: n={b[0]} ${b[1]:,.0f} ${b[2]:+,.2f})"
+        )
+    if summary.unprotectable_value_share is None:
+        print("  quota non proteggibile del libro: n/d (libro vuoto)")
+    else:
+        print(
+            f"  quota non proteggibile del libro: "
+            f"{summary.unprotectable_value_share:.1%} (28/07: 16.3%)"
+        )
+
+
 def main() -> None:
     from alpaca.trading.client import TradingClient
     from alpaca.trading.enums import OrderSide, OrderType, QueryOrderStatus
@@ -41,6 +82,7 @@ def main() -> None:
         classify_protection,
         format_unprotected_alert,
         select_unprotected_alerts,
+        summarize_protection,
     )
 
     risk_cfg = (yaml.safe_load(open(_TRADING_YAML)) or {}).get("risk", {}) or {}
@@ -76,6 +118,7 @@ def main() -> None:
         f"posizioni: {len(rows)} | non proteggibili (qty < 1): {n_unprotectable} "
         f"| senza stop attivo: {n_unprotected}"
     )
+    _print_sleeves(summarize_protection(rows))
     for r in sorted(rows, key=lambda r: (r.loss_pct if r.loss_pct is not None else 0.0)):
         pct = "     n/d" if r.loss_pct is None else f"{r.loss_pct * 100:7.2f}%"
         print(f"  {r.symbol:6s} qty={r.qty:10.4f} pnl={pct}  {r.status}")

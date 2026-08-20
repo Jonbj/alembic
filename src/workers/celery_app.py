@@ -97,6 +97,15 @@ app.conf.beat_schedule = {
         "task": "src.workers.performance.run_reconcile_fills_intraday",
         "schedule": crontab(hour=21, minute=30, day_of_week="1-5"),
     },
+    # §2: EOD position reconciliation at 21:35 UTC Mon-Fri (5 min after
+    # reconcile-fills-evening). Classifies open DB trades vs broker positions,
+    # alerts on anomalies (genuinely_orphan/over_held/untracked_position), and
+    # (flag-gated, default OFF + dry-run) force-closes genuinely_orphan trades
+    # in the DB. Auto-close is a money-path DB write -> backup + operator sign-off.
+    "reconcile-positions-eod": {
+        "task": "src.workers.performance.run_reconcile_positions",
+        "schedule": crontab(hour=21, minute=35, day_of_week="1-5"),
+    },
     # Performance daily report at 03:00 UTC
     "performance-daily": {
         "task": "src.workers.performance.run_daily_report",
