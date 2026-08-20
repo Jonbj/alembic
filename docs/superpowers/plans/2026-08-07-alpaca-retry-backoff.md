@@ -1144,301 +1144,58 @@ before the existing degrade path fires. Part of #21. freeze-ok."
 
 ---
 
-### Task 6: Wire `submit_order` retry (GATED on §3 — `blocked_by` `docs/superpowers/plans/2026-08-07-alpaca-client-order-id.md`)
-
-**DEPENDENCY:** This task is `blocked_by` the §3 `client_order_id` plan. Do NOT start until §3 is merged and deployed. `submit_order` retry is only safe once every submit site attaches a deterministic `client_order_id` (so the broker dedupes a retried submit — one fill, not two). Tasks 1-5 (read-retry) can ship without §3.
-
-Wrap every `submit_order` call site with `retry_transient(lambda: trading_client.submit_order(req))`. On final failure, `retry_transient` re-raises the `APIError`; the call site's existing error handling (or a new try/except where absent) fires the Telegram alert. The protective-stop sync at `fractional_stop_orders.py:192` is fail-open by design (existing try/except logs + continues), so its retry re-raises into that existing handler.
-
-**Files:**
-- Modify: `src/workers/portfolio_scheduler.py:2949, :3836, :3869, :3946`
-- Modify: `src/workers/execution.py:735`
-- Modify: `src/portfolio/fractional_stop_orders.py:192`
-- Test: `tests/workers/test_retry_wiring.py` (append)
-
-- [ ] **Step 1: Write the failing test for submit retry + no-double-submit**
-
-Append to `tests/workers/test_retry_wiring.py`:
-
-```python
-# --- submit_order wiring (GATED on §3 client_order_id) -----------------------
-
-def _make_submit_api_error(status_code: int):
-    """Build a real APIError for a submit_order failure."""
-    from alpaca.common.exceptions import APIError
-    response = MagicMock()
-    response.status_code = status_code
-    response.headers = {}
-    response.text = "{}"
-    http_error = MagicMock()
-    http_error.response = response
-    return APIError("{}", http_error)
-
-
-def test_submit_order_retries_on_429_then_succeeds(monkeypatch):
-    """A transient 429 on submit_order is retried; the second attempt succeeds.
-
-    Safety: with §3's client_order_id on the request, the broker dedupes the
-    retried submit (same client_order_id -> one fill). This test asserts the
-    retry happens (2 submit_order calls) and the second succeeds.
-    """
-    monkeypatch.setattr("src.util.retry.time.sleep", lambda s: None)
-    monkeypatch.setattr("src.util.retry.random.uniform", lambda a, b: b)
-
-    from src.util.retry import retry_transient
-
-    success_resp = MagicMock(id="order-123")
-    client = MagicMock()
-    client.submit_order.side_effect = [_make_submit_api_error(429), success_resp]
-
-    req = MagicMock()
-    req.client_order_id = "ambc-buy-AAPL-20260807T1452"  # §3 idempotency key
-    resp = retry_transient(lambda: client.submit_order(req))
-    assert resp.id == "order-123"
-    assert client.submit_order.call_count == 2
-    # Both calls carry the same client_order_id -> broker dedupes -> no double-submit.
-    first_req = client.submit_order.call_args_list[0].args[0]
-    second_req = client.submit_order.call_args_list[1].args[0]
-    assert first_req.client_order_id == second_req.client_order_id == "ambc-buy-AAPL-20260807T1452"
-
-
-def test_submit_order_exhausts_then_raises(monkeypatch):
-    """On sustained 429, retry_transient exhausts and re-raises so the caller alerts."""
-    monkeypatch.setattr("src.util.retry.time.sleep", lambda s: None)
-    monkeypatch.setattr("src.util.retry.random.uniform", lambda a, b: b)
-
-    from src.util.retry import retry_transient
-    from alpaca.common.exceptions import APIError
-
-    client = MagicMock()
-    client.submit_order.side_effect = _make_submit_api_error(429)
-    with pytest.raises(APIError):
-        retry_transient(lambda: client.submit_order(MagicMock()), max_attempts=3)
-    assert client.submit_order.call_count == 3
-
-
-def test_submit_order_non_retryable_raises_immediately(monkeypatch):
-    """A 422 (insufficient buying power) is non-retryable: no retry, raise immediately."""
-    monkeypatch.setattr("src.util.retry.time.sleep", lambda s: None)
-
-    from src.util.retry import retry_transient
-    from alpaca.common.exceptions import APIError
-
-    client = MagicMock()
-    client.submit_order.side_effect = _make_submit_api_error(422)
-    with pytest.raises(APIError):
-        retry_transient(lambda: client.submit_order(MagicMock()))
-    client.submit_order.assert_called_once_with()
-
-
-def test_fractional_stop_submit_uses_retry(monkeypatch):
-    """fractional_stop_orders.execute_protective_stop_plans (:192) routes through retry_transient."""
-    from src.portfolio import fractional_stop_orders
-    calls = _spy_retry(monkeypatch, "src.portfolio.fractional_stop_orders")
-
-    client = MagicMock()
-    client.submit_order.return_value = MagicMock(id="stop-1")
-    from src.portfolio.fractional_stop_orders import execute_protective_stop_plans
-    from types import SimpleNamespace
-    plan = SimpleNamespace(
-        action="create", symbol="AAPL", whole_qty=2, stop_price=98.0,
-        cancel_order_ids=[],
-    )
-    summary = execute_protective_stop_plans([plan], client)
-    assert summary["created"] == 1
-    assert any(callable(c[0]) for c in calls)
-```
-
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `pytest tests/workers/test_retry_wiring.py -v -k "submit_order or fractional_stop"`
-Expected: FAIL — `submit_order` sites not yet wrapped (the `fractional_stop` spy test fails because `retry_transient` is not imported/used in `fractional_stop_orders.py`). The pure `retry_transient` tests (`test_submit_order_retries_on_429_then_succeeds`, `test_submit_order_exhausts_then_raises`, `test_submit_order_non_retryable_raises_immediately`) PASS (they test the util directly, already implemented in Task 1).
-
-- [ ] **Step 3: Wire `submit_order` in `src/portfolio/fractional_stop_orders.py:192`**
-
-Add at the top of `src/portfolio/fractional_stop_orders.py`, after the first `from src.` import line (or near the existing top-level imports):
-
-```python
-from src.util.retry import retry_transient
-```
-
-Modify `src/portfolio/fractional_stop_orders.py:192` — replace:
-
-```python
-            trading_client.submit_order(req)
-```
-
-with:
-
-```python
-            retry_transient(lambda: trading_client.submit_order(req))
-```
-
-- [ ] **Step 4: Wire `submit_order` in `src/workers/portfolio_scheduler.py:2949`**
-
-The import was added in Task 3 Step 6. Modify `src/workers/portfolio_scheduler.py:2949-2951` — replace:
-
-```python
-                    resp = trading_client.submit_order(_MORsl(
-                        symbol=sym, qty=qty_held, side=_OSsl.SELL, time_in_force=_TIFsl.DAY,
-                    ))
-```
-
-with:
-
-```python
-                    resp = retry_transient(lambda: trading_client.submit_order(_MORsl(
-                        symbol=sym, qty=qty_held, side=_OSsl.SELL, time_in_force=_TIFsl.DAY,
-                    )))
-```
-
-- [ ] **Step 5: Wire `submit_order` in `src/workers/portfolio_scheduler.py:3836`**
-
-Modify `src/workers/portfolio_scheduler.py:3836` — replace:
-
-```python
-                    alpaca_order = trading_client.submit_order(req)
-```
-
-with:
-
-```python
-                    alpaca_order = retry_transient(lambda: trading_client.submit_order(req))
-```
-
-- [ ] **Step 6: Wire `submit_order` in `src/workers/portfolio_scheduler.py:3869`**
-
-Modify `src/workers/portfolio_scheduler.py:3869` — replace:
-
-```python
-                    alpaca_order = trading_client.submit_order(req)
-```
-
-with:
-
-```python
-                    alpaca_order = retry_transient(lambda: trading_client.submit_order(req))
-```
-
-- [ ] **Step 7: Wire `submit_order` in `src/workers/portfolio_scheduler.py:3946`**
-
-Modify `src/workers/portfolio_scheduler.py:3946` — replace:
-
-```python
-                resp = trading_client.submit_order(req)
-```
-
-with:
-
-```python
-                resp = retry_transient(lambda: trading_client.submit_order(req))
-```
-
-- [ ] **Step 8: Wire `submit_order` in `src/workers/execution.py:735`**
-
-The import was added in Task 3 Step 5. Modify `src/workers/execution.py:735` — replace:
-
-```python
-            submitted_order = trading_client.submit_order(order)
-```
-
-with:
-
-```python
-            submitted_order = retry_transient(lambda: trading_client.submit_order(order))
-```
-
-- [ ] **Step 9: Add final-failure Telegram alert at the four portfolio_scheduler submit sites**
-
-The four `portfolio_scheduler.py` submit sites (`:2949, :3836, :3869, :3946`) must never fail silently: a final `APIError` after retries must fire a CRITICAL Telegram alert then re-raise (fail the cycle). `notifier`, `_fire_alert`, and `AlertLevel` are all in scope at these sites (the cycle signature includes `notifier`; `_fire_alert` is defined at `:180`; `AlertLevel` imported at `:24`). Wrap each `retry_transient(...)` call (from Steps 4-7) in a try/except that alerts + re-raises. The post-submit lines (`_order_id = str(resp.id)` / `alpaca_id = str(alpaca_order.id)`) move after the try/except — they only run on success.
-
-At `:2949` (stop-loss SELL, 20-space indent), replace the Step 4 form with:
-
-```python
-                    try:
-                        resp = retry_transient(lambda: trading_client.submit_order(_MORsl(
-                            symbol=sym, qty=qty_held, side=_OSsl.SELL, time_in_force=_TIFsl.DAY,
-                        )))
-                    except Exception as _sl_submit_exc:
-                        _fire_alert(
-                            notifier,
-                            f"🚨 Stop-loss SELL submit failed for {sym}: {_sl_submit_exc}",
-                            AlertLevel.CRITICAL,
-                        )
-                        raise
-                    _order_id = str(resp.id)
-```
-
-At `:3836` (BUY bracket, 20-space indent), replace the Step 5 form with:
-
-```python
-                    try:
-                        alpaca_order = retry_transient(lambda: trading_client.submit_order(req))
-                    except Exception as _buy_submit_exc:
-                        _fire_alert(
-                            notifier,
-                            f"🚨 BUY submit failed for {order.symbol}: {_buy_submit_exc}",
-                            AlertLevel.CRITICAL,
-                        )
-                        raise
-                    alpaca_id = str(alpaca_order.id)
-```
-
-At `:3869` (SELL market, 20-space indent), replace the Step 6 form with:
-
-```python
-                    try:
-                        alpaca_order = retry_transient(lambda: trading_client.submit_order(req))
-                    except Exception as _sell_submit_exc:
-                        _fire_alert(
-                            notifier,
-                            f"🚨 SELL submit failed for {order.symbol}: {_sell_submit_exc}",
-                            AlertLevel.CRITICAL,
-                        )
-                        raise
-                    alpaca_id = str(alpaca_order.id)
-```
-
-At `:3946` (reversal SELL, 16-space indent), replace the Step 7 form with:
-
-```python
-                try:
-                    resp = retry_transient(lambda: trading_client.submit_order(req))
-                except Exception as _rev_submit_exc:
-                    _fire_alert(
-                        notifier,
-                        f"🚨 Reversal SELL submit failed for {sym}: {_rev_submit_exc}",
-                        AlertLevel.CRITICAL,
-                    )
-                    raise
-                _rev_order_id = str(resp.id)
-```
-
-The `execution.py:735` submit site (Step 8) already sits inside `run_execution_cycle`'s per-symbol loop whose enclosing `try/except Exception` logs + counts the error (see `tests/workers/test_execution_worker.py:210` `test_alpaca_error_counted_not_raised`); `retry_transient` re-raising into that handler preserves the existing fail-soft behavior, so no extra alert wrapper is needed there. The `fractional_stop_orders.py:192` site (Step 3) is fail-open by design (existing `try/except` logs + continues, retried next cycle), so no alert wrapper is added there either.
-
-- [ ] **Step 10: Run tests to verify they pass**
-
-Run: `pytest tests/workers/test_retry_wiring.py -v -k "submit_order or fractional_stop"`
-Expected: PASS (4 tests green — the `fractional_stop` spy sees `retry_transient`, and the direct `retry_transient` submit tests pass).
-
-Run the full retry + wiring suite:
-Run: `pytest tests/util/test_retry.py tests/workers/test_retry_wiring.py -v`
-Expected: PASS (no regression).
-
-- [ ] **Step 11: Commit**
-
-```bash
-git add src/portfolio/fractional_stop_orders.py src/workers/portfolio_scheduler.py src/workers/execution.py tests/workers/test_retry_wiring.py
-git commit -m "feat(retry): wrap submit_order with retry_transient + final-fail alert
-
-submit_order at portfolio_scheduler:2949,3836,3869,3946, execution:735, and
-fractional_stop_orders:192 now retry on 429/500-504. Final failure fires a
-CRITICAL Telegram alert then re-raises (never silent). Safe because §3
-client_order_id dedupes retried submits (one fill, not two). Part of #21.
-freeze-ok. blocked_by: §3 coid plan."
-```
-
----
+### Task 6 — SUPERSEDED 2026-08-20 (eseguito, ma non come scritto qui)
+
+> **Questa task era stale al momento di eseguirla.** Il testo originale e' conservato
+> in git (`git show 43c51aa:docs/superpowers/plans/2026-08-07-alpaca-retry-backoff.md`).
+> Il gate `blocked_by #201` e' sciolto: lo spike sandbox del 2026-08-20 ha misurato
+> `dedup_confirmed`. Sotto, cosa e' cambiato e cosa e' stato implementato davvero.
+
+**Tre cose che il piano del 07-08 dava per assodate e che non reggevano piu':**
+
+1. **I sei siti submit non chiamano piu' `trading_client.submit_order`.** Dopo #313
+   (mergiata 2026-08-18) passano tutti da `submit_order_with_coid_fallback`
+   (`src/portfolio/order_id.py`). Avvolgere i sei siti con `retry_transient`, come
+   prescrivevano gli Step 3-8, avrebbe messo il retry al livello sbagliato: la
+   sicurezza del retry dipende dal `client_order_id`, che solo il choke point conosce.
+
+2. **Il rifiuto per duplicato e' 422, non 409, ed e' un esito da risolvere, non un
+   errore.** Misura diretta dello spike #201: HTTP 422, codice Alpaca `40010001`
+   `client_order_id must be unique`. `retry_transient` classifica 422 come fail-fast,
+   che in generale e' corretto; ma un 422-dedup che arriva *dopo* un nostro tentativo
+   significa "l'ordine e' gia' passato". Trattarlo come errore secco farebbe segnalare
+   un fallimento su un ordine realmente eseguito.
+
+3. **`notifier` non e' in scope ai siti scheduler.** Lo Step 9 affermava che
+   "notifier, `_fire_alert` e `AlertLevel` sono tutti in scope" ai quattro siti:
+   `_submit_portfolio_orders` e `_submit_reversal_force_sells` ricevono
+   `_on_broker_reject` / `on_broker_reject`, non `notifier`. L'allarme di
+   esaurimento tentativi passa quindi dall'hook `on_alert` gia' cablato dal choke
+   point, che ai siti scheduler finisce sull'evento durevole mobile e in
+   `execution.py` su Telegram.
+
+**Implementato (commit `ecf360f`, `58a4f2d`):** il retry vive dentro
+`submit_order_with_coid_fallback`, un solo posto per tutti e sei i siti.
+
+- Retry solo se la richiesta porta un `client_order_id`. Senza chiave di idempotenza
+  il submit resta a tentativo singolo: un retry potrebbe produrre due fill.
+- 422/`40010001` **dopo** un nostro tentativo → `get_order_by_client_id` → si
+  restituisce l'ordine esistente. Se la lookup non trova o non risponde, si rilancia
+  l'errore originale: mai restituire un ordine non confermato.
+- 422/`40010001` **al primo** tentativo → propaga invariato. Non l'abbiamo causato
+  noi (e' un duplicato di un ciclo precedente), e cosi' il percorso senza retry —
+  la quasi totalita' dei submit — ha esattamente il comportamento di oggi.
+- Il fallback di formato (submit senza la chiave) resta a tentativo singolo: butta
+  via l'idempotenza, ritentarlo creerebbe un secondo ordine.
+- Esaurimento tentativi → log ERROR + `on_alert` + re-raise nei gestori esistenti.
+
+**Test:** `tests/portfolio/test_order_id_submit_retry.py` (11), piu' i 16 di
+`tests/portfolio/test_order_id.py` invariati. Un test blocca l'invariante del choke
+point: nessun modulo di `src/` oltre `order_id.py` puo' chiamare `submit_order`.
+
+**Fuori scope, con motivo:** il budget di attesa per ciclo (fino a ~14s per submit
+con i default 4/2.0/30.0) non e' stato toccato — sarebbe una taratura, vietata dal
+freeze #171.
 
 ### Task 7: Plan-level notes (no code)
 
