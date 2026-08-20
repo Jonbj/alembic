@@ -91,3 +91,10 @@ docs/evidence/s4_ic_notification.json
 # Servono alla sessione forense del giorno e poi diventano ridondanti: il report
 # li riassume. Fuori da git per non aggiungere ~440K per ogni redeploy.
 docs/evidence/logs_*/
+
+# Chiavi SSH personali finite per errore nella root del repo (P8): vanno in
+# ~/.ssh/, mai committate. Safety net anche dopo lo spostamento.
+/stefano-nb1
+/stefano-nb1.pub
+/stefano-nb2
+/stefano-nb2.pub
