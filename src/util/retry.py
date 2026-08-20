@@ -68,13 +68,12 @@ def _compute_backoff(
     """Exponential backoff with full jitter, floored by Retry-After.
 
     raw = min(base * 2**attempt, cap)
-    if retry_after is not None: raw = max(raw, retry_after)
     wait = random.uniform(0, raw)   # full jitter
+    if retry_after is not None: wait = max(wait, retry_after)
     """
     raw = min(base * (2 ** attempt), cap)
-    if retry_after is not None:
-        raw = max(raw, retry_after)
-    return random.uniform(0.0, raw)
+    wait = random.uniform(0.0, raw)
+    return max(wait, retry_after) if retry_after is not None else wait
 
 
 def retry_transient(

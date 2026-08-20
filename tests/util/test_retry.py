@@ -185,13 +185,13 @@ def test_backoff_capped_at_cap(monkeypatch):
 def test_respects_retry_after_as_floor(monkeypatch):
     sleeps: list[float] = []
     monkeypatch.setattr("src.util.retry.time.sleep", lambda s: sleeps.append(s))
-    monkeypatch.setattr("src.util.retry.random.uniform", lambda a, b: b)
+    # Force jitter to zero: Retry-After must still be the minimum wait.
+    monkeypatch.setattr("src.util.retry.random.uniform", lambda a, b: a)
 
     err = _make_api_error(429, retry_after="10")
     fn = MagicMock(side_effect=err)
     with pytest.raises(APIError):
         retry_transient(fn, max_attempts=2, base=2.0, cap=30.0)
-    # attempt 0: raw=max(2, 10)=10 -> sleep 10
     assert sleeps == [10.0]
 
 
@@ -228,7 +228,7 @@ def test_jitter_within_bounds(monkeypatch):
 def test_compute_backoff_unit():
     assert _compute_backoff(0, 2.0, 30.0, None) <= 2.0
     assert _compute_backoff(3, 2.0, 30.0, None) <= 30.0
-    assert _compute_backoff(0, 2.0, 30.0, 10.0) <= 10.0
+    assert _compute_backoff(0, 2.0, 30.0, 10.0) == 10.0
 
 
 # --- retry_read_or_degrade ---------------------------------------------------
