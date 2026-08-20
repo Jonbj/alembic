@@ -22,9 +22,22 @@
 # nessuno dei due (e il prompt glielo vieta esplicitamente).
 #
 # Log      : logs/roadmap_agent_YYYY-MM-DD.log
-# Stato    : logs/roadmap_agent_state.tsv   (issue <TAB> tentativi)
+# Stato    : logs/roadmap_agent_state.tsv   (issue <TAB> tentativi FALLITI)
 # Risultati: logs/roadmap_results.jsonl (una riga JSON per evento significativo,
 #            append-only — vedi log_evento piu' sotto)
+#
+# Esito di un giro di lavoro (`action: "work"`), ternario. La distinzione non e'
+# cosmetica: solo `failed` e' a carico della issue e la avvicina all'uscita di
+# rotazione.
+#   result: "pr_opened"        PR aperta — il giro entra nella fase di review
+#   result: "noop"             no-op dichiarato: la sessione ha commentato la
+#                              issue spiegando perche' non e' lavorabile e non
+#                              ha aperto PR. Esito legittimo, tentativo stornato
+#   result: "failed"           giro a vuoto: nessuna PR e nessun no-op dichiarato
+#                              (crash, timeout, sessione persa). Tentativo addebitato
+#   result: "all_rate_limited" nessun motore disponibile, giro rimandato
+# Le altre azioni: `queue` (result: empty), `engine_select`, `review`
+# (result: merged | merge_rejected | not_merged).
 
 set -euo pipefail
 
@@ -244,6 +257,43 @@ registra_tentativo() {
     grep -v -P "^${n}\t" "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null || true
     printf '%s\t%s\n' "$n" "$((prec + 1))" >> "${STATE_FILE}.tmp"
     mv "${STATE_FILE}.tmp" "$STATE_FILE"
+}
+
+# Storna il tentativo addebitato a inizio giro. Si usa quando il giro NON e' un
+# fallimento della issue: PR aperta, rate limit, no-op dichiarato. Il conteggio
+# in $STATE_FILE misura una cosa sola — quante volte la issue e' stata provata
+# davvero e non ne e' uscito nulla — e ogni altra cosa contata li' dentro la
+# butta fuori rotazione con una motivazione falsa.
+storna_tentativo() {
+    local n="$1"
+    grep -v -P "^${n}\t" "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null || true
+    mv "${STATE_FILE}.tmp" "$STATE_FILE"
+}
+
+# Un no-op DICHIARATO e' un esito, non un fallimento: la sessione ha letto il
+# codice e ha concluso che la issue non e' lavorabile com'e' scritta — ed e'
+# esattamente cio' che il prompt le chiede di fare in quel caso. Contarlo come
+# tentativo fallito punisce le issue piu' mature: due no-op onesti e la issue
+# esce di rotazione etichettata "2 tentativi falliti", che e' semplicemente
+# falso. E' successo a #161 e #201 (reintegrate il 2026-08-20).
+#
+# Come per la PR, l'esito non si legge dal racconto della sessione ma da un
+# artefatto. Due segnali indipendenti devono valere insieme:
+#   1. un commento NUOVO sulla issue, comparso durante il giro — il prompt
+#      impone di lasciarlo, ed e' la parte verificabile del no-op;
+#   2. la dichiarazione "NESSUNA PR" nella coda dell'output.
+# Nessuno dei due basta da solo. Il commento perche' una sessione puo'
+# commentare e poi morire a meta'; la dichiarazione perche' codex riecheggia il
+# prompt, che contiene quella stessa frase — un output di sola eco la
+# matcherebbe (e' lo stesso difetto chiuso in estrai_verdetto con `tail -1`).
+# Una sessione uccisa dal timeout non ha "terminato dicendo" nulla: e' un
+# fallimento, qualunque cosa ci sia nell'output.
+commento_nuovo_su_issue() {
+    local _issue="$1" _da="$2" _ultimo _epoca
+    _ultimo=$(gh issue view "$_issue" --json comments -q '.comments[-1].createdAt' 2>/dev/null || echo "")
+    [[ -z "$_ultimo" || "$_ultimo" == "null" ]] && return 1
+    _epoca=$(date -d "$_ultimo" +%s 2>/dev/null || echo 0)
+    (( _epoca >= _da ))
 }
 
 # Sceglie il motore del giro, ruotando fra quelli effettivamente installati.
@@ -876,8 +926,7 @@ done
 
 if (( RATE_LIMITED_TUTTI == 1 )); then
     # Nessun motore ha potuto lavorare: la issue torna com'era, tentativi compresi.
-    grep -v -P "^${ISSUE}\t" "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null || true
-    mv "${STATE_FILE}.tmp" "$STATE_FILE"
+    storna_tentativo "$ISSUE"
     log "#$ISSUE — tutti i motori in rate limit: tentativo NON addebitato, giro rimandato."
     tg_send "⏸ <b>Roadmap</b> — tutti i motori in rate limit. #${ISSUE} resta in cima alla coda, nessun tentativo consumato."
     log_evento "work" "result=all_rate_limited" "issue=#$ISSUE"
@@ -911,19 +960,40 @@ fi
 if [[ -n "$PR_URL" ]]; then
     log "#$ISSUE — PR aperta da $MOTORE: $PR_URL"
     # Tentativo riuscito: lo tolgo dal conteggio dei fallimenti.
-    grep -v -P "^${ISSUE}\t" "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null || true
-    mv "${STATE_FILE}.tmp" "$STATE_FILE"
+    storna_tentativo "$ISSUE"
     log_evento "work" "result=pr_opened" "engine=$MOTORE" "issue=#$ISSUE" "pr=#$PR_NUM" "duration_s=#$_DURATA"
     rivedi_e_mergia "$PR_NUM" "$ISSUE" "$BRANCH_PR" "$WT" "$MOTORE" "$TITOLO" "$PR_URL"
 else
-    log "#$ISSUE — nessuna PR aperta."
+    # Senza PR l'esito non e' uno solo: o la sessione ha dichiarato un no-op
+    # motivato (esito legittimo, non a carico della issue), o e' andata a vuoto.
+    # Vedi commento_nuovo_su_issue per il perche' servono due segnali.
+    NOOP=0
+    if (( ESITO != 124 )) \
+        && printf '%s\n' "$OUTPUT" | tail -n "$CODA_ESITO" | grep -qiE 'NESSUNA PR' \
+        && commento_nuovo_su_issue "$ISSUE" "$_T0"; then
+        NOOP=1
+    fi
+
     CODA=$(echo "$OUTPUT" | tail -c 1200)
-    tg_send "⚠️ <b>Roadmap — nessuna PR</b>
+    if (( NOOP )); then
+        log "#$ISSUE — no-op DICHIARATO da $MOTORE (issue commentata, nessuna PR): tentativo NON addebitato."
+        storna_tentativo "$ISSUE"
+        tg_send "🟡 <b>Roadmap — no-op dichiarato</b>
+Issue #${ISSUE}: ${TITOLO}
+Motore: ${MOTORE} — la issue non e' lavorabile com'e' scritta, motivo nel commento sulla issue.
+Nessun tentativo addebitato: serve l'operatore, non un altro giro.
+
+<pre>$(echo "$CODA" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')</pre>"
+        log_evento "work" "result=noop" "engine=$MOTORE" "issue=#$ISSUE" "esito=#$ESITO" "duration_s=#$_DURATA"
+    else
+        log "#$ISSUE — nessuna PR aperta."
+        tg_send "⚠️ <b>Roadmap — nessuna PR</b>
 Issue #${ISSUE}: ${TITOLO}
 Motore: ${MOTORE} — esito sessione: ${ESITO}
 
 <pre>$(echo "$CODA" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')</pre>"
-    log_evento "work" "result=no_pr" "engine=$MOTORE" "issue=#$ISSUE" "esito=#$ESITO" "duration_s=#$_DURATA"
+        log_evento "work" "result=failed" "engine=$MOTORE" "issue=#$ISSUE" "esito=#$ESITO" "duration_s=#$_DURATA"
+    fi
     # Il branch senza commit non serve a nessuno; se ha commit lo tengo per l'ispezione.
     if [[ -z "$(git log --oneline origin/main.."$BRANCH" 2>/dev/null)" ]]; then
         git worktree remove --force "$WT" 2>/dev/null || true
