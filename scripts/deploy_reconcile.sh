@@ -44,6 +44,8 @@ if ! flock -n 9; then
     exit 0
 fi
 
+log "Lock acquisito — avvio riconciliazione."
+
 cd "$PROJECT_DIR"
 
 if [[ -f "$PROJECT_DIR/.env" ]]; then
@@ -59,8 +61,19 @@ tg_send() {
         -d chat_id="${TELEGRAM_CHAT_ID}" -d parse_mode="HTML" -d text="$1" >/dev/null || true
 }
 
-git fetch --quiet origin main
-TARGET=$(git rev-parse origin/main)
+# Fra il lock e qui non c'era nessuna log(): con `set -e` un git fetch/rev-parse
+# fallito (rete, auth) uccideva il giro senza lasciare traccia e senza alert —
+# e' cosi' che e' morto il giro delle 10:20 del 2026-08-20.
+if ! git fetch --quiet origin main; then
+    log "FALLITO: git fetch origin main non riuscito."
+    tg_send "🔴 <b>Deploy reconcile fallito</b> — git fetch origin main non riuscito. Nessun riallineamento in questo giro."
+    exit 1
+fi
+if ! TARGET=$(git rev-parse origin/main); then
+    log "FALLITO: git rev-parse origin/main non riuscito."
+    tg_send "🔴 <b>Deploy reconcile fallito</b> — impossibile risolvere origin/main dopo il fetch."
+    exit 1
+fi
 CORRENTE=$(cat "$SHA_FILE" 2>/dev/null || echo "")
 
 # --- cosa è cambiato, e serve davvero ricostruire? ------------------------------
