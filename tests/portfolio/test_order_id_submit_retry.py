@@ -183,3 +183,31 @@ def test_lookup_is_skipped_when_the_client_cannot_do_it():
 
     with pytest.raises(APIError):
         submit_order_with_coid_fallback(trading_client, _request())
+
+
+# --- il choke point deve restare l'unica porta verso il broker --------------
+
+def test_no_production_code_calls_submit_order_outside_the_choke_point():
+    """Un settimo sito submit diretto salterebbe retry E idempotenza.
+
+    La copertura dei sei siti non e' un elenco da tenere aggiornato a mano: e'
+    una conseguenza del fatto che src/portfolio/order_id.py sia l'unico modulo
+    che parla di submit_order al broker. Questo test blocca quell'invariante.
+    (scripts/verify_alpaca_coid_dedup.py e' escluso: quella sonda deve inviare
+    il duplicato apposta, saltare il choke point e' il suo scopo.)
+    """
+    import pathlib
+
+    src_root = pathlib.Path(__file__).resolve().parents[2] / "src"
+    choke_point = src_root / "portfolio" / "order_id.py"
+
+    offenders = [
+        str(path.relative_to(src_root.parent))
+        for path in sorted(src_root.rglob("*.py"))
+        if path != choke_point and ".submit_order(" in path.read_text()
+    ]
+
+    assert offenders == [], (
+        "questi moduli chiamano submit_order fuori dal choke point, "
+        f"senza retry ne' client_order_id: {offenders}"
+    )
