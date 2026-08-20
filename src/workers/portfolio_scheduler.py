@@ -22,6 +22,7 @@ from typing import Any
 from uuid import uuid4
 
 from src.notifications.base import AlertLevel
+from src.util.retry import retry_transient
 from src.portfolio.exit_classification import (
     BELOW_ENTRY_GATE,
     DECISION_SKIP_FALLBACK,
@@ -2063,7 +2064,7 @@ def _run_cycle_inner() -> dict:
 
     # P0-D: Account pre-flight — abort if Alpaca has blocked the account.
     try:
-        account = trading_client.get_account()
+        account = retry_transient(trading_client.get_account)
         cash = float(account.cash)
         equity = float(account.equity)
     except Exception as exc:

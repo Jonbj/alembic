@@ -39,6 +39,7 @@ from src.mobile_monitoring.models import (
 from src.mobile_monitoring.read_model import MobileReadBundle
 from src.mobile_monitoring.state import MARKET_TIMEZONE, resolve_market_context
 from src.store.redis_store import RedisStore
+from src.util.retry import retry_transient
 
 logger = logging.getLogger(__name__)
 
@@ -459,8 +460,8 @@ class MobileSnapshotBuilder:
     ) -> tuple[Any, list[Any]]:
         try:
             account, positions = await asyncio.gather(
-                asyncio.to_thread(self.alpaca.get_account),
-                asyncio.to_thread(self.alpaca.get_all_positions),
+                asyncio.to_thread(retry_transient, self.alpaca.get_account),
+                asyncio.to_thread(retry_transient, self.alpaca.get_all_positions),
             )
             # Treat as fresh because it was just read.
             return account, cast(list[Any], positions)

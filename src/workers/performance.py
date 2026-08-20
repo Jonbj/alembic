@@ -71,6 +71,7 @@ from src.portfolio.loss_feedback import (
 from src.llm.model_registry import default_weights, model_ids_for_keys, normalize_model_selection, normalize_weights_for_active_models
 from src.store.pg_store import PostgreSQLStore, SHADOW_COMPARISON_COLUMNS
 from src.store.redis_store import RedisStore
+from src.util.retry import retry_transient
 from src.workers.celery_app import app
 from src.workers.execution import ENTRY_THRESHOLD
 
@@ -809,8 +810,8 @@ def _broker_mtm_snapshot(trading_client) -> dict | None:
     returns None on any broker error so the report still goes out without it.
     """
     try:
-        acct = trading_client.get_account()
-        positions = trading_client.get_all_positions()
+        acct = retry_transient(trading_client.get_account)
+        positions = retry_transient(trading_client.get_all_positions)
         nav = float(acct.equity)
         # Day change: prefer the last trading SESSION's P&L from portfolio history.
         # At the 03:00 UTC report time equity−last_equity measures only after-hours

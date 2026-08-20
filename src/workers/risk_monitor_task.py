@@ -11,6 +11,7 @@ import logging
 from dataclasses import asdict
 from datetime import datetime, timezone
 
+from src.util.retry import retry_transient
 from src.workers.celery_app import app
 
 log = logging.getLogger(__name__)
@@ -104,8 +105,8 @@ def _fetch_account_state() -> tuple[float, float]:
             secret_key=config.ALPACA_SECRET_KEY,
             paper=config.ALPACA_PAPER_MODE,
         )
-        equity = float(client.get_account().equity)
-        gross = sum(abs(float(p.market_value)) for p in client.get_all_positions())
+        equity = float(retry_transient(client.get_account).equity)
+        gross = sum(abs(float(p.market_value)) for p in retry_transient(client.get_all_positions))
         exposure = gross / equity if equity > 0 else 0.0
         return equity, exposure
     except Exception as e:
@@ -162,7 +163,7 @@ def _fetch_position_weights() -> dict[str, float]:
             paper=config.ALPACA_PAPER_MODE,
         )
         market_values = {
-            p.symbol: abs(float(p.market_value)) for p in client.get_all_positions()
+            p.symbol: abs(float(p.market_value)) for p in retry_transient(client.get_all_positions)
         }
         gross = sum(market_values.values())
         if gross <= 0:

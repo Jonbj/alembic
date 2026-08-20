@@ -42,6 +42,7 @@ from src.notifications.base import AlertLevel
 from src.performance.postmortem import TradeContext, diagnose_loss, should_trigger_postmortem
 from src.portfolio.order_id import build_client_order_id, submit_order_with_coid_fallback
 from src.store.redis_store import RedisStore
+from src.util.retry import retry_transient
 from src.workers.celery_app import app
 
 if TYPE_CHECKING:
@@ -442,7 +443,7 @@ def run_execution_cycle(
     # Keeps portfolio:value fresh in Redis for recovery checks and reporting.
     # Open positions are fetched later, only when not frozen.
     try:
-        account = trading_client.get_account()
+        account = retry_transient(trading_client.get_account)
         portfolio_value = float(account.portfolio_value)
         redis_store.set_portfolio_value(portfolio_value)
     except Exception as e:
