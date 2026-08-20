@@ -46,3 +46,44 @@
 199  buying_power/multiplier mai gate-ati: pre-flight gate anti-reject-422 silenzioso
 200  riconciliazione posizioni DB↔broker: beat EOD + alert + auto-close orphan (classe #121)
 203  retry/backoff centralizzato retry_transient su reads+submit (blocked_by #201)
+
+# Aggiunte del 2026-08-20 — le issue open con `freeze-ok` + `ready-for-agent`
+# che non erano ancora in coda.
+#
+# Stesso criterio dell'header: prima cio' che corrompe l'evidenza mentre la
+# raccogliamo, poi la strumentazione che serve alle decisioni del 28/09, poi il
+# resto.
+#
+# Le due catene (alpha-miss, S4 exit trial) sono in ordine topologico: ogni
+# issue compare DOPO i propri blocker. Il loop non legge `blocked_by`, quindi
+# una issue bloccata in testa alla coda non fallisce — dichiara un no-op, e da
+# quando il no-op non e' piu' un tentativo fallito quel no-op si ripete a ogni
+# giro finche' il blocker non chiude. Un blocker che non chiudera' mai da solo
+# e' quindi un muro permanente, non un'attesa: per questo NON compaiono qui le
+# issue bloccate da una decisione umana (#297, #299, #300, #301 → #293/#244/#246)
+# ne' quelle bloccate da una issue fuori rotazione (#287 → #281, 2 tentativi).
+243  org_lookup attribuisce articoli a ticker che non compaiono nel testo: 97% di falsi positivi su MS e GS
+245  cost model: 25 simboli di watchlist cadono nel fallback tier_d a 20 bps e falsano net_pnl a ogni trade nuovo
+210  il realizzato di S1 e' un campione selezionato dalla regola d'uscita: il 28/09 lo leggerebbe come assenza di alpha
+279  alpha-miss: copertura effettiva e attribution issuer-specific vs fan-out (radice della catena alpha-miss)
+294  S4 exit trial: registrare gli intenti prima dei guard (radice della catena exit-trial)
+282  alpha-miss: pannelli longitudinali e occurrence ledger (dopo #279)
+284  alpha-miss: attribuzione P&L active/passive e qualita' decisionale (dopo #282)
+283  alpha-miss: signal diagnostics e controlli negativi (dopo #279 e #282)
+285  alpha-miss: contesto evento, regime e microstruttura (dopo #279)
+286  alpha-miss: findings falsificabili e sintesi deterministica (dopo #282)
+295  S4 exit trial: lifecycle, fill e sleeve virtuali (dopo #294)
+296  S4 exit trial: riprodurre P0 come baseline shadow (dopo #295 e #245)
+298  S4 exit trial: misurare replacement e opportunity cost (dopo #295 e #296)
+214  le review verbose non arrivano su GitHub: il cancello di merge resta senza verbale
+
+# Fuori coda di proposito, decisione dell'operatore (non dell'agente):
+#   #281 alpha-miss funnel v2 — 2 tentativi falliti nello state.tsv, fuori
+#        rotazione. Erano no-op onesti ("bloccata da #279/#280") addebitati
+#        prima del fix del 2026-08-20: per rimetterla in rotazione va tolta la
+#        riga da logs/roadmap_agent_state.tsv. #287 dipende da lei.
+#   #314 SKIP_PYRAMIDING logga il peso target — gia' risolta nei fatti da #315
+#        (PR #316 mergiata il 19/08: `score = quantity*price/nav` e
+#        SKIP_PYRAMIDING nel counterfactual sono in main). Duplicato da chiudere.
+#   #161, #199, #203 — gia' in coda sopra, ancora aperte con la loro PR mergiata.
+#   #242, #244, #246, #293 — `ready-for-human` + `wayfinder:decision`.
