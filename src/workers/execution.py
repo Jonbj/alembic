@@ -42,6 +42,7 @@ from src.notifications.base import AlertLevel
 from src.performance.postmortem import TradeContext, diagnose_loss, should_trigger_postmortem
 from src.portfolio.order_id import build_client_order_id, submit_order_with_coid_fallback
 from src.store.redis_store import RedisStore
+from src.util.retry import retry_transient
 from src.workers.celery_app import app
 
 if TYPE_CHECKING:
@@ -241,7 +242,7 @@ def _build_market_cache(symbols: list[str], data_client) -> dict[str, dict]:
             feed=DataFeed.IEX,
             adjustment=Adjustment.ALL,
         )
-        bars_df = data_client.get_stock_bars(request).df
+        bars_df = retry_transient(lambda: data_client.get_stock_bars(request)).df
 
         for symbol in symbols:
             try:
@@ -442,7 +443,7 @@ def run_execution_cycle(
     # Keeps portfolio:value fresh in Redis for recovery checks and reporting.
     # Open positions are fetched later, only when not frozen.
     try:
-        account = trading_client.get_account()
+        account = retry_transient(trading_client.get_account)
         portfolio_value = float(account.portfolio_value)
         redis_store.set_portfolio_value(portfolio_value)
     except Exception as e:
@@ -486,7 +487,7 @@ def run_execution_cycle(
     # Fetch open positions + pending orders (only when not frozen)
     try:
         open_positions = {
-            p.symbol: p for p in trading_client.get_all_positions()
+            p.symbol: p for p in retry_transient(trading_client.get_all_positions)
         }
     except Exception as e:
         log.error("Failed to fetch positions from Alpaca: %s", e)

@@ -71,6 +71,7 @@ from src.portfolio.loss_feedback import (
 from src.llm.model_registry import default_weights, model_ids_for_keys, normalize_model_selection, normalize_weights_for_active_models
 from src.store.pg_store import PostgreSQLStore, SHADOW_COMPARISON_COLUMNS
 from src.store.redis_store import RedisStore
+from src.util.retry import retry_transient
 from src.workers.celery_app import app
 from src.workers.execution import ENTRY_THRESHOLD
 
@@ -732,7 +733,7 @@ def run_reconcile_positions() -> dict:
             paper=config.ALPACA_PAPER_MODE,
         )
         open_trades = pg.fetch_trades(status="open", limit=1000)
-        held = {p.symbol: float(p.qty) for p in tc.get_all_positions()}
+        held = {p.symbol: float(p.qty) for p in retry_transient(tc.get_all_positions)}
         records = classify_positions(
             open_trades, held, now=datetime.now(timezone.utc)
         )
@@ -809,8 +810,8 @@ def _broker_mtm_snapshot(trading_client) -> dict | None:
     returns None on any broker error so the report still goes out without it.
     """
     try:
-        acct = trading_client.get_account()
-        positions = trading_client.get_all_positions()
+        acct = retry_transient(trading_client.get_account)
+        positions = retry_transient(trading_client.get_all_positions)
         nav = float(acct.equity)
         # Day change: prefer the last trading SESSION's P&L from portfolio history.
         # At the 03:00 UTC report time equity−last_equity measures only after-hours
@@ -1736,7 +1737,7 @@ def run_forward_return_worker() -> dict:
                     # that corrupt close-to-close forward returns (#192).
                     adjustment=Adjustment.ALL,
                 )
-                bars_df = data_client.get_stock_bars(req).df
+                bars_df = retry_transient(lambda: data_client.get_stock_bars(req)).df
 
                 # Flatten multi-index if present (symbol, timestamp) → just timestamp.
                 if hasattr(bars_df.index, "levels"):
@@ -2309,7 +2310,7 @@ def run_counterfactual_worker() -> dict:
                     end=end,
                     adjustment=Adjustment.ALL,
                 )
-                bars_df = data_client.get_stock_bars(req).df
+                bars_df = retry_transient(lambda: data_client.get_stock_bars(req)).df
 
                 if bars_df.empty:
                     log.debug("No 1-min bars for %s — marking as no_data", symbol)

@@ -22,6 +22,7 @@ from typing import Any
 from uuid import uuid4
 
 from src.notifications.base import AlertLevel
+from src.util.retry import retry_transient
 from src.portfolio.exit_classification import (
     BELOW_ENTRY_GATE,
     DECISION_SKIP_FALLBACK,
@@ -697,7 +698,7 @@ def _sync_fractional_protective_stops(trading_client, stop_policy, cycle_ts, not
     )
 
     try:
-        positions = trading_client.get_all_positions()
+        positions = retry_transient(trading_client.get_all_positions)
     except Exception as exc:
         log.warning("Fractional protective stop sync: failed to fetch positions: %s", exc)
         return {"skipped": "positions_fetch_failed"}
@@ -2063,7 +2064,7 @@ def _run_cycle_inner() -> dict:
 
     # P0-D: Account pre-flight — abort if Alpaca has blocked the account.
     try:
-        account = trading_client.get_account()
+        account = retry_transient(trading_client.get_account)
         cash = float(account.cash)
         equity = float(account.equity)
     except Exception as exc:
@@ -2105,7 +2106,7 @@ def _run_cycle_inner() -> dict:
             feed=DataFeed.IEX,
             adjustment=Adjustment.ALL,
         )
-        raw = data_client.get_stock_bars(request).df
+        raw = retry_transient(lambda: data_client.get_stock_bars(request)).df
         if not raw.empty:
             raw = raw.reset_index()
             bars_df = raw.pivot(index="timestamp", columns="symbol", values="close")
@@ -2154,7 +2155,7 @@ def _run_cycle_inner() -> dict:
     try:
         from alpaca.data.requests import StockSnapshotRequest
         snap_req = StockSnapshotRequest(symbol_or_symbols=symbols, feed=DataFeed.IEX)
-        snapshots = data_client.get_stock_snapshot(snap_req)
+        snapshots = retry_transient(lambda: data_client.get_stock_snapshot(snap_req))
         refreshed = 0
         for sym, snap in snapshots.items():
             price = None
@@ -2223,7 +2224,7 @@ def _run_cycle_inner() -> dict:
     alpaca_entry_prices: dict[str, float] = {}
     alpaca_positions: list = []
     try:
-        alpaca_positions = trading_client.get_all_positions()
+        alpaca_positions = retry_transient(trading_client.get_all_positions)
         for ap in alpaca_positions:
             qty = float(ap.qty)
             avg_cost = float(ap.avg_entry_price)
