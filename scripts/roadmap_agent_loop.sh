@@ -69,6 +69,10 @@ TIMEOUT_SESSIONE=5400    # 90 minuti: oltre, la sessione e' bloccata, non lenta
 # glm52 e minimax girano dentro Claude Code ma con un modello diverso sotto
 # (`ollama launch claude --model ...`): stesso utensile, testa diversa.
 MOTORI=(codex glm52 minimax)
+# Se l'operatore forza un motore via env var, quello e' l'unico che gira.
+if [[ -n "${ROADMAP_FORCE_ENGINE:-}" ]]; then
+    MOTORI=("$ROADMAP_FORCE_ENGINE")
+fi
 MOTORE_STATE="$LOG_DIR/roadmap_agent_engine.txt"
 
 # Rate limit: un motore esaurito non e' un motore rotto. Viene messo in panchina
