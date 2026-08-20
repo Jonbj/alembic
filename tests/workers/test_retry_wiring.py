@@ -195,3 +195,56 @@ def test_performance_reconcile_get_all_positions_uses_retry(monkeypatch):
     result = performance.run_reconcile_positions()
     assert "error" not in result  # did not hit the function-level degrade
     assert any(c[0] == client.get_all_positions for c in calls)
+
+
+# --- get_stock_bars / get_stock_snapshot wiring ------------------------------
+
+def test_execution_build_market_cache_uses_retry(monkeypatch):
+    """execution._build_market_cache (get_stock_bars) routes through retry_transient."""
+    from src.workers import execution
+    calls = _spy_retry(monkeypatch, "src.workers.execution")
+
+    data_client = MagicMock()
+    bars_df = MagicMock()
+    bars_df.empty = True
+    data_client.get_stock_bars.return_value = MagicMock(df=bars_df)
+
+    execution._build_market_cache(["AAPL"], data_client)
+    assert any(callable(c[0]) for c in calls)
+    data_client.get_stock_bars.assert_called()
+
+
+def test_performance_forward_return_worker_uses_retry(monkeypatch):
+    """run_forward_return_worker (get_stock_bars) routes through retry_transient."""
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from src.workers import performance
+    calls = _spy_retry(monkeypatch, "src.workers.performance")
+
+    monkeypatch.setattr(
+        "src.workers.performance.config",
+        SimpleNamespace(
+            ALPACA_API_KEY="test-key", ALPACA_SECRET_KEY="test-secret",
+            DATABASE_URL="postgresql://u:p@localhost:5432/db",
+        ),
+    )
+
+    monkeypatch.setattr("psycopg2.connect", lambda *a, **kw: MagicMock())
+
+    pg_mock = MagicMock()
+    pg_mock.fetch_signals_pending_forward_return.return_value = [
+        (1, "AAPL", datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc))
+    ]
+    monkeypatch.setattr("src.workers.performance.PostgreSQLStore", lambda **kw: pg_mock)
+
+    data_client_mock = MagicMock()
+    bars_df = MagicMock()
+    bars_df.empty = True
+    bars_df.index.get_level_values.return_value = []
+    data_client_mock.get_stock_bars.return_value = MagicMock(df=bars_df)
+    monkeypatch.setattr(
+        "alpaca.data.historical.StockHistoricalDataClient", lambda **kw: data_client_mock
+    )
+
+    performance.run_forward_return_worker()
+    assert any(callable(c[0]) for c in calls)

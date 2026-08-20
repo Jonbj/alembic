@@ -2106,7 +2106,7 @@ def _run_cycle_inner() -> dict:
             feed=DataFeed.IEX,
             adjustment=Adjustment.ALL,
         )
-        raw = data_client.get_stock_bars(request).df
+        raw = retry_transient(lambda: data_client.get_stock_bars(request)).df
         if not raw.empty:
             raw = raw.reset_index()
             bars_df = raw.pivot(index="timestamp", columns="symbol", values="close")
@@ -2155,7 +2155,7 @@ def _run_cycle_inner() -> dict:
     try:
         from alpaca.data.requests import StockSnapshotRequest
         snap_req = StockSnapshotRequest(symbol_or_symbols=symbols, feed=DataFeed.IEX)
-        snapshots = data_client.get_stock_snapshot(snap_req)
+        snapshots = retry_transient(lambda: data_client.get_stock_snapshot(snap_req))
         refreshed = 0
         for sym, snap in snapshots.items():
             price = None

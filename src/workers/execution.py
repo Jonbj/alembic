@@ -242,7 +242,7 @@ def _build_market_cache(symbols: list[str], data_client) -> dict[str, dict]:
             feed=DataFeed.IEX,
             adjustment=Adjustment.ALL,
         )
-        bars_df = data_client.get_stock_bars(request).df
+        bars_df = retry_transient(lambda: data_client.get_stock_bars(request)).df
 
         for symbol in symbols:
             try:

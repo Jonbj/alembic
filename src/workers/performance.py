@@ -1737,7 +1737,7 @@ def run_forward_return_worker() -> dict:
                     # that corrupt close-to-close forward returns (#192).
                     adjustment=Adjustment.ALL,
                 )
-                bars_df = data_client.get_stock_bars(req).df
+                bars_df = retry_transient(lambda: data_client.get_stock_bars(req)).df
 
                 # Flatten multi-index if present (symbol, timestamp) → just timestamp.
                 if hasattr(bars_df.index, "levels"):
@@ -2310,7 +2310,7 @@ def run_counterfactual_worker() -> dict:
                     end=end,
                     adjustment=Adjustment.ALL,
                 )
-                bars_df = data_client.get_stock_bars(req).df
+                bars_df = retry_transient(lambda: data_client.get_stock_bars(req)).df
 
                 if bars_df.empty:
                     log.debug("No 1-min bars for %s — marking as no_data", symbol)
