@@ -145,6 +145,43 @@ class TestBuyingPowerGateWiring:
 
         assert captured == [pytest.approx(500.0)]
 
+    def test_cap_uses_remaining_buying_power_across_the_cycle(self, monkeypatch):
+        _suppress_cooldowns(monkeypatch)
+        monkeypatch.setattr(
+            "src.workers.portfolio_scheduler._fire_alert", lambda *args, **kwargs: None
+        )
+        monkeypatch.setattr(
+            "src.workers.portfolio_scheduler._write_buying_power_gate_decision",
+            lambda *args, **kwargs: None,
+        )
+        from src.backtest.engine.types import MarketSnapshot
+        from src.workers.portfolio_scheduler import _submit_portfolio_orders
+
+        market = MarketSnapshot(
+            timestamp=_ts(),
+            prices={"AAPL": 100.0, "MSFT": 100.0},
+            volumes={"AAPL": 1_000_000.0, "MSFT": 1_000_000.0},
+            adv_20d={"AAPL": 1_000_000.0, "MSFT": 1_000_000.0},
+        )
+        captured = []
+        _submit_portfolio_orders(
+            [_make_order(qty=6.0), _make_order(symbol="MSFT", qty=6.0)],
+            MagicMock(),
+            market,
+            _submit_fn=lambda order, notional, _client: captured.append(
+                (order.symbol, notional)
+            ),
+            buying_power=1000.0,
+            notifier=MagicMock(),
+            cycle_ts=_ts(),
+            gate_mode="cap",
+        )
+
+        assert captured == [
+            ("AAPL", pytest.approx(600.0)),
+            ("MSFT", pytest.approx(400.0)),
+        ]
+
     def test_shadow_preserves_notional_and_emits_observability(self, monkeypatch):
         _suppress_cooldowns(monkeypatch)
         alerts = []
