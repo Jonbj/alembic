@@ -309,6 +309,7 @@ def _apply_buying_power_gate_legacy(
     *,
     notional: float,
     buying_power: float | None,
+    committed_notional: float = 0.0,
     price: float,
     symbol: str,
     signal_id: "int | None",
@@ -325,9 +326,15 @@ def _apply_buying_power_gate_legacy(
     gate = evaluate_buying_power_gate(
         notional=notional,
         buying_power=buying_power,
+        committed_notional=committed_notional,
         is_fractionable=True,
         mode=mode,
         price=price,
+    )
+    available_buying_power = (
+        None
+        if buying_power is None
+        else max(0.0, buying_power - committed_notional)
     )
     if gate.action == "pass":
         return notional
@@ -335,14 +342,14 @@ def _apply_buying_power_gate_legacy(
     if gate.action == "skip":
         reason = (
             "cannot size BUY safely "
-            f"(buying_power={buying_power}, price={price}) — order skipped"
+            f"(buying_power={available_buying_power}, price={price}) — order skipped"
         )
         decision = "SKIP_BUY_POWER"
         result = None
     elif gate.action == "shadow":
         reason = (
             f"would_cap delta=${gate.delta:.2f} "
-            f"(notional=${notional:.2f}, buying_power=${buying_power:.2f})"
+            f"(notional=${notional:.2f}, buying_power=${available_buying_power:.2f})"
         )
         decision = "BUY_POWER_SHADOW"
         result = notional
@@ -351,7 +358,7 @@ def _apply_buying_power_gate_legacy(
         reason = (
             f"capped delta=${gate.delta:.2f} "
             f"(notional ${notional:.2f} -> ${gate.capped_notional:.2f}, "
-            f"buying_power=${buying_power:.2f})"
+            f"buying_power=${available_buying_power:.2f})"
         )
         decision = "BUY_POWER_CAP"
         result = gate.capped_notional
@@ -788,6 +795,7 @@ def run_execution_cycle(
             gated_notional = _apply_buying_power_gate_legacy(
                 notional=notional,
                 buying_power=buying_power,
+                committed_notional=cycle_notional,
                 price=price,
                 symbol=symbol,
                 signal_id=signal_id,

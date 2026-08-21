@@ -3940,6 +3940,8 @@ def _submit_portfolio_orders(
         open_trades: Open DB trade rows; used for aggregate stop-risk budget enforcement.
         buying_power: Alpaca buying power for the BUY pre-flight gate. Omitting it
             preserves compatibility for callers that do not own an account snapshot.
+            Successful BUY submissions consume this cycle-local budget before the
+            next order is evaluated.
 
     Returns:
         List of dicts for successfully submitted orders, each containing:
@@ -3960,6 +3962,7 @@ def _submit_portfolio_orders(
     _current_open_risk = _open_stop_risk(open_trades)
     _agg_budget = _aggregate_stop_budget(nav, risk_cfg or {}) if nav is not None and nav > 0 else None
     _accepted_risk = 0.0
+    _committed_buy_notional = 0.0
     for order in orders:
         try:
             if order.side == OrderSide.BUY:
@@ -4101,15 +4104,22 @@ def _submit_portfolio_orders(
                     gate = evaluate_buying_power_gate(
                         notional=notional,
                         buying_power=buying_power,
+                        committed_notional=_committed_buy_notional,
                         is_fractionable=is_fractionable,
                         mode=effective_gate_mode,
                         price=price,
+                    )
+                    available_buying_power = (
+                        None
+                        if buying_power is None
+                        else max(0.0, buying_power - _committed_buy_notional)
                     )
                     signal_id = (signal_ids or {}).get(order.symbol)
                     if gate.action == "skip":
                         reason = (
                             "cannot size BUY safely "
-                            f"(buying_power={buying_power}, price={price}) — order skipped"
+                            f"(buying_power={available_buying_power}, price={price}) "
+                            "— order skipped"
                         )
                         log.warning("buying_power gate SKIP %s: %s", order.symbol, reason)
                         _fire_alert(
@@ -4130,7 +4140,7 @@ def _submit_portfolio_orders(
                         reason = (
                             f"would_cap delta=${gate.delta:.2f} "
                             f"(notional=${notional:.2f}, "
-                            f"buying_power=${buying_power:.2f})"
+                            f"buying_power=${available_buying_power:.2f})"
                         )
                         log.info(
                             "buying_power gate SHADOW %s: %s — notional unchanged",
@@ -4158,7 +4168,7 @@ def _submit_portfolio_orders(
                         reason = (
                             f"capped delta=${gate.delta:.2f} "
                             f"(notional ${original_notional:.2f} -> ${notional:.2f}, "
-                            f"buying_power=${buying_power:.2f})"
+                            f"buying_power=${available_buying_power:.2f})"
                         )
                         log.info("buying_power gate CAP %s: %s", order.symbol, reason)
                         _fire_alert(
@@ -4253,6 +4263,8 @@ def _submit_portfolio_orders(
                         ),
                     )
                     alpaca_id = str(alpaca_order.id)
+                if buying_power is not _BUYING_POWER_UNSET:
+                    _committed_buy_notional += notional
                 submitted.append({"symbol": order.symbol, "side": "buy", "order_id": alpaca_id, "notional": notional})
             elif order.side == OrderSide.SELL:
                 qty = abs(order.quantity)
