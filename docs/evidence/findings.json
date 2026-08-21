@@ -86,9 +86,15 @@
           "costo_usd": 488.23,
           "nota": "40/96 simboli (42%) zero righe in news_log il 08-19, dentro la banda 38-57% osservata dal 07-31. 6 dei 8 miss del giorno sono NO_NEWS: NOW (+6.45%), CRM (+5.07%), F (+4.09%), ADBE (+3.55%), AZN (+3.03%), RDDT (-4.13%). Cinque hanno direzione accessibile a un libro long-only: costo con size S4 tipica 2200 $ sul return pieno (dal dossier opportunity_v2.gross_opportunity_usd) 141.95+111.60+90.02+78.00+66.65 = 488.23. RDDT e un mover al ribasso non detenuto: costo 0.00 verificato. AGGRAVANTE, stesso schema del 08-10 (ARM/XOM): tre delle otto posizioni semi/hardware gia detenute che oggi perdono terreno - GE (-5.03%), DELL (-6.64%) e WDC (-6.87%), due dei tre peggiori mover della giornata - hanno zero righe in news_log e zero sentiment_signals: l assenza di notizia non impedisce solo l ingresso, impedisce anche qualunque segnale di uscita o riduzione su posizioni gia in perdita marcata. Nessun costo aggiuntivo stimato su questo punto: non e un nuovo ingresso mancato, e un osservazione sul lato uscita.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-19.md §3, §7"
+        },
+        {
+          "data": "2026-08-20",
+          "costo_usd": 70.94,
+          "nota": "41/96 simboli (43%) zero righe in news_log il 08-20, dentro la banda 38-57% osservata dal 07-31. Due dei quattro miss del giorno sono NO_NEWS puri: BP (+3.22%) e BA (-3.20%), zero righe in news_log, zero in sentiment_signals, zero in execution_decisions per entrambi. Solo BP ha un controfattuale reale: mover al rialzo, size S4 tipica $2200, opportunity_v2.gross_opportunity_usd=$70.94 (accessible non calcolabile, bloccato da #277). BA e' un mover al ribasso su libro long-only, non detenuto: costo $0 verificato. AGGRAVANTE, stesso schema del 08-19 (GE/DELL/WDC): GE, posizione S1 aperta dal 07-22 e mover del giorno (-3.25%), ha zero righe in news_log e zero sentiment_signals - l'assenza di notizia impedisce anche il segnale d'uscita su una posizione gia' detenuta in perdita marcata, non solo un nuovo ingresso.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-20.md §3, §4, §7"
         }
       ],
-      "costo_cumulato_usd": 1824.11,
+      "costo_cumulato_usd": 1895.05,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 1
@@ -171,12 +177,18 @@
           "costo_usd": null,
           "nota": "Tredicesima sessione consecutiva con lo stesso insieme di 11 posizioni legacy senza stop_strategy/stop_mode (BAC, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE, tutte entrate 2026-07-10). Nessuna di esse e' un mover del giorno (rout semiconduttori/hardware su WDC/INTC/AMD/AMAT, tutte posizioni S4/S1 diverse da questo insieme). Costo null: non e' una perdita, e' P&L non attribuibile, e confligge con la domanda di uscita n.2 della carta (split P&L economico S1 vs SPY).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-19.md §10 [DAY-501]"
+        },
+        {
+          "data": "2026-08-20",
+          "costo_usd": null,
+          "nota": "14a sessione consecutiva con lo stesso insieme di 11 posizioni legacy senza stop_strategy/stop_mode (BAC, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE, tutte entrate il 2026-07-10). Rilevanza specifica del giorno: MS, uno di questi 11, e' un mover del giorno (-3.16%) e uno dei quattro peggiori contributori del book. Contributo stimato del set di 11 al nav_change_today (qty x delta-close su barre Alpaca 08-19->08-20): BAC -14.99, GOOGL -7.79, GS -12.71, MS -20.70, PBR +18.61, RIO +12.96, ROKU +1.44, SPY -5.85, UBS +0.92, UNH -5.99, XLE +2.10, totale circa -31.99 $ su una variazione NAV di -245.52 $ (13%). Costo null: non e' una perdita, e' P&L non attribuibile, e confligge con la domanda di uscita n.2 della carta (split P&L economico S1 vs SPY).",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-20.md §4, §6"
         }
       ],
       "costo_cumulato_usd": 0.0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 12
+      "occorrenze_non_stimate": 13
     },
     {
       "id": "F-003",
@@ -1233,10 +1245,16 @@
           "costo_usd": null,
           "nota": "Ricorrenza verificata titolo per titolo: MS 14 righe, GS 15, DB 4 (33 su 170, 19%) via extraction_method='org_lookup'. 32 delle 33 righe riguardano societa' terze (Sysco, Lithium Argentina, NHI, Alphabet, Moderna/Baidu, Anthropic, Nebius, ecc.); una sola (Goldman Sachs che compra azioni Shiprocket) riguarda davvero la banca. Costo null: nessuna riga ha superato il gate 0.300 oggi, nessun ordine ne e' nato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-19.md §4, §10 [DAY-511]"
+        },
+        {
+          "data": "2026-08-20",
+          "costo_usd": null,
+          "nota": "Ricorrenza esatta: MS 19/19 righe in news_log il 2026-08-20 tutte con extraction_method='org_lookup', nessuna riguarda davvero Morgan Stanley (campione: Honeywell Aerospace, Aegon, Cencora, RTX Corporation, Birkenstock - tutte societa' terze coperte dalla banca come casa di analisi nel boilerplate). MS e' un mover del giorno (-3.16%, posizione S1 legacy dal 07-10) e il suo sentiment resta quasi tutto a zero (un solo segnale debole +0.143 alle 17:30): la copertura apparente (19 righe) e' interamente fan-out, non informazione reale sul titolo. Costo null: nessuna riga ha superato il gate 0.30, nessun ordine ne e' nato (la posizione era comunque gia' detenuta).",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-20.md §4, §6"
         }
       ],
       "costo_cumulato_usd": 60.5,
-      "occorrenze_non_stimate": 7,
+      "occorrenze_non_stimate": 8,
       "stato": "aperto",
       "issue": null
     },
