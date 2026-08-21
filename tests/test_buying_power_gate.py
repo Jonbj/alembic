@@ -76,6 +76,38 @@ def test_caps_fractionable_notional_to_buying_power():
     assert result.delta == pytest.approx(500.0)
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected_action", "expected_notional"),
+    [("shadow", "shadow", None), ("cap", "cap", 400.0)],
+)
+def test_accounts_for_buying_power_committed_by_prior_orders(
+    mode, expected_action, expected_notional
+):
+    result = evaluate_buying_power_gate(
+        notional=600.0,
+        buying_power=1000.0,
+        committed_notional=600.0,
+        is_fractionable=True,
+        mode=mode,
+    )
+
+    assert result.action == expected_action
+    assert result.capped_notional == expected_notional
+    assert result.delta == pytest.approx(200.0)
+
+
+def test_skips_cap_when_prior_orders_exhausted_buying_power():
+    result = evaluate_buying_power_gate(
+        notional=100.0,
+        buying_power=1000.0,
+        committed_notional=1000.0,
+        is_fractionable=True,
+        mode="cap",
+    )
+
+    assert result.action == "skip"
+
+
 def test_caps_non_fractionable_notional_to_whole_shares():
     result = evaluate_buying_power_gate(
         notional=15000.0,
