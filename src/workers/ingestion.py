@@ -136,6 +136,54 @@ def _duplicate_reason(item: NewsItem, deduplicator: Deduplicator) -> str | None:
     return None
 
 
+_QUALIFIED_TICKER_AFTER_ORG_RE = (
+    r"\s*\(\s*"
+    r"(?:NASDAQ|NYSE|NYSEARCA|NYSEAMERICAN|AMEX|BATS|OTCMKTS)\s*:\s*"
+    r"([a-z][a-z0-9.-]{0,9})\s*\)"
+)
+
+
+def _org_names_supported_by_article(
+    item: GKGNewsItem, watchlist: set | None
+) -> list[str]:
+    """Keep only GDELT organisations supported by the article text.
+
+    GKG lists every organisation recognised in a document, including secondary
+    analyst/underwriter mentions and occasional NER prefix errors.  The GKG feed
+    gives us only the page title as article text, so an organisation absent from
+    that text is not strong enough evidence for ticker attribution.
+
+    An exchange-qualified ticker immediately attached to the organisation name
+    is stronger still.  If it identifies a security outside the operating
+    universe, the similar watchlist company must not inherit the article.
+    """
+    normalized_text = TickerExtractor.normalize(f"{item.title} {item.body}")
+    supported: list[str] = []
+
+    for org_name in item.org_names:
+        normalized_org = TickerExtractor.normalize(org_name)
+        if not normalized_org:
+            continue
+
+        org_pattern = rf"(?<!\w){re.escape(normalized_org)}(?!\w)"
+        if re.search(org_pattern, normalized_text) is None:
+            continue
+
+        qualified = re.search(
+            org_pattern + _QUALIFIED_TICKER_AFTER_ORG_RE,
+            normalized_text,
+            re.IGNORECASE,
+        )
+        if qualified is not None and watchlist:
+            explicit_ticker = canonicalizza_ticker(qualified.group(1).upper())
+            if explicit_ticker not in watchlist:
+                continue
+
+        supported.append(org_name)
+
+    return supported
+
+
 def _persist_ingestion_observability(
     source: str, stats: dict, discard_rows: list[dict]
 ) -> None:
@@ -186,8 +234,11 @@ def _process_gkg_items(
     for gkg_item in gkg_items:
         stats["fetched"] += 1
 
-        # Step 1: ticker extraction from organisation names
-        tickers = extractor.extract(gkg_item.org_names)
+        # Step 1: require textual evidence before resolving a GDELT organisation.
+        # GKG metadata includes secondary mentions and can confuse "Nokian" with
+        # "Nokia"; neither is sufficient evidence for a tradable ticker (#243).
+        supported_orgs = _org_names_supported_by_article(gkg_item, watchlist)
+        tickers = extractor.extract(supported_orgs) if supported_orgs else []
         if not tickers:
             # No recognised company → article is irrelevant for trading signals.
             # Logged at DEBUG, not WARNING, because this is expected for many
