@@ -28,7 +28,10 @@ def make_marketaux_item(
     )
 
 
-def make_gkg_item(url: str, org_names: list[str], title: str = "Tech news") -> GKGNewsItem:
+def make_gkg_item(
+    url: str, org_names: list[str], title: str | None = None
+) -> GKGNewsItem:
+    title = title if title is not None else " ".join(org_names) or "Tech news"
     return GKGNewsItem(
         id=url,
         source="gdelt_gkg",
@@ -104,6 +107,123 @@ def test_ingestion_worker_multi_ticker_article():
     ids = [json.loads(c[0][1])["id"] for c in mock_redis.rpush.call_args_list]
     assert "https://example.com/3:AAPL" in ids
     assert "https://example.com/3:MSFT" in ids
+
+
+def test_gkg_does_not_resolve_nokian_renkaat_to_nokia():
+    """#243: a GDELT prefix false positive must not enqueue the similar issuer."""
+    from src.workers.ingestion import _process_gkg_items
+
+    headline = (
+        "Head to Head Survey: Iochpe-Maxion (OTCMKTS:IOCJY) vs. "
+        "Nokian Renkaat Oyj (OTCMKTS:NKRKF)"
+    )
+    item = make_gkg_item("https://example.com/nokian", ["Nokia"], headline)
+    extractor = MagicMock()
+    extractor.extract.return_value = ["NOK"]
+    deduplicator = MagicMock()
+    deduplicator.is_duplicate_by_id.return_value = False
+    deduplicator.is_duplicate_content_symbol.return_value = False
+    redis_client = MagicMock()
+
+    stats = _process_gkg_items(
+        [item], extractor, deduplicator, redis_client, watchlist={"NOK"}
+    )
+
+    assert stats["queued"] == 0
+    assert stats["discarded"] == 1
+    redis_client.rpush.assert_not_called()
+
+
+def test_gkg_prefers_out_of_universe_otc_ticker_linked_to_org_name():
+    """#243: an explicit OTC ticker prevents a similar watchlist attribution."""
+    from src.workers.ingestion import _process_gkg_items
+
+    headline = "Nokian Renkaat Oyj (OTCMKTS:NKRKF) reports earnings"
+    item = make_gkg_item(
+        "https://example.com/nokian-explicit", ["Nokian Renkaat Oyj"], headline
+    )
+    extractor = MagicMock()
+    extractor.extract.return_value = ["NOK"]
+    deduplicator = MagicMock()
+    deduplicator.is_duplicate_by_id.return_value = False
+    deduplicator.is_duplicate_content_symbol.return_value = False
+    redis_client = MagicMock()
+
+    stats = _process_gkg_items(
+        [item], extractor, deduplicator, redis_client, watchlist={"NOK"}
+    )
+
+    assert stats["queued"] == 0
+    assert stats["discarded"] == 1
+    redis_client.rpush.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "headline",
+    [
+        "Invesco S&P 500 Revenue ETF (NYSEARCA:RWL) Reaches New 52-Week High",
+        "Bank of America (NYSE:BAC) Reaches New 1-Year High - Here's Why",
+        "Intel plans $15 billion share sale as turnaround rally lifts stock",
+        "Versigent (NYSE:VGNT) Announces Earnings Results",
+        "Cerebras slumps as mixed quarterly results test AI growth narrative",
+        "Aflac (NYSE:AFL) Director Joseph Moskowitz Sells 600 Shares of Stock",
+        "Brenntag (OTCMKTS:BNTGY) Posts Earnings Results, Beats Expectations",
+        "Where Is Elon Musk Spending His Money in 2026?",
+    ],
+)
+def test_gkg_rejects_observed_morgan_stanley_false_positives(headline):
+    """#243: the issue's adjudicated-negative MS sample stays out of the queue."""
+    from src.workers.ingestion import _process_gkg_items
+
+    item = make_gkg_item(
+        f"https://example.com/ms-false/{headline}", ["Morgan Stanley"], headline
+    )
+    extractor = MagicMock()
+    extractor.extract.return_value = ["MS"]
+    redis_client = MagicMock()
+
+    stats = _process_gkg_items(
+        [item], extractor, MagicMock(), redis_client, watchlist={"MS"}
+    )
+
+    assert stats["queued"] == 0
+    assert stats["discarded"] == 1
+    extractor.extract.assert_not_called()
+    redis_client.rpush.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "headline",
+    [
+        "HPE Stock Jumps 6% on a Morgan Stanley Upgrade",
+        "Morgan Stanley (MS) Stock News & Articles",
+        "SpaceX shares can double, Morgan Stanley says",
+        "Morgan Stanley Issues Pessimistic Forecast for BridgeBio Pharma (NASDAQ:BBIO) Stock Price",
+        "Grocery Outlet (NASDAQ:GO) Price Target Raised to $11.00 at Morgan Stanley",
+        "Morgan Stanley doubles down on SpaceX stock for investors",
+        "HPE Stock Hits a 52-Week High After the Morgan Stanley Upgrade",
+    ],
+)
+def test_gkg_keeps_observed_morgan_stanley_mentions(headline):
+    """#243: the seven observed MS rows with textual evidence retain coverage."""
+    from src.workers.ingestion import _process_gkg_items
+
+    item = make_gkg_item(
+        f"https://example.com/ms/{headline}", ["Morgan Stanley"], headline
+    )
+    extractor = MagicMock()
+    extractor.extract.return_value = ["MS"]
+    deduplicator = MagicMock()
+    deduplicator.is_duplicate_by_id.return_value = False
+    deduplicator.is_duplicate_content_symbol.return_value = False
+    redis_client = MagicMock()
+
+    stats = _process_gkg_items(
+        [item], extractor, deduplicator, redis_client, watchlist={"MS"}
+    )
+
+    assert stats["queued"] == 1
+    assert stats["discarded"] == 0
 
 
 def test_ingestion_worker_dedup_blocks_second():
