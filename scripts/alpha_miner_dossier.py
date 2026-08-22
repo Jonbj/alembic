@@ -66,6 +66,20 @@ NEW_YORK = ZoneInfo("America/New_York")
 SLOT_FRACTION_S4 = 0.10 / 5  # bucket_pct / n_top (src/strategies/s4/config.py)
 SLOT_USD_DEFAULT = 2200.0
 
+# Cicli da 15 minuti in cui il motore puo' agire: il beat di `portfolio-cycle`
+# gira a :07/:22/:37/:52 fra le 14 e le 21 UTC (src/workers/celery_app.py).
+# Il primo istante in cui il motore avrebbe POTUTO comprare qualcosa e' 14:07 UTC.
+CICLI_MINUTI_UTC = (7, 22, 37, 52)
+CICLI_ORE_UTC = range(14, 22)
+PRIMO_CICLO_SEDUTA_UTC = time(14, 7)
+
+# Tre fonti dichiarate per il ciclo eleggibile, mai fuse fra loro: sono tre
+# popolazioni diverse e vanno lette come tali (#246).
+ELIGIBLE_SOURCE_DECISION = "execution_decisions.tick_time"      # decisione osservata
+ELIGIBLE_SOURCE_SEGNALE = "primo_ciclo_dopo_segnale"            # segnale, nessuna decisione
+ELIGIBLE_SOURCE_SESSION_OPEN = "session_open"                   # nessun segnale (NO_NEWS)
+ELIGIBLE_SOURCE_NESSUN_CICLO = "nessun_ciclo_dopo_il_segnale"   # segnale a seduta finita
+
 
 def _psql(query: str) -> list[list[str]]:
     """Query read-only su Postgres. Righe come liste di stringhe."""
@@ -352,17 +366,107 @@ def _cutoff_giorno(giorno: date) -> str:
     return f"{giorno.isoformat()}T20:00:00+00:00"
 
 
-def _opportunity_v2(candidato: dict, barre: dict[str, dict], giorno: date) -> dict:
-    """Stima v2 parallela di opportunita' per un candidato miss (#280).
+def _cicli_eleggibili(eventi: list[dict], giorno: date) -> dict[str, dict]:
+    """Primo ciclo realmente eleggibile per simbolo, con la fonte dichiarata.
+
+    Due fonti, mai confuse fra loro:
+    - `execution_decisions.tick_time`: il ciclo in cui il motore ha davvero
+      valutato quel segnale. E' il dato misurato.
+    - `primo_ciclo_dopo_segnale`: il candidato ha un punteggio ma nessuna
+      decisione registrata. Il ciclo e' il primo :07/:22/:37/:52 successivo al
+      primo punteggio: prima di quello il motore non aveva niente da valutare.
+    - `session_open`: il primo ciclo da 15 minuti della seduta (14:07 UTC), per i
+      candidati senza nessun punteggio — i NO_NEWS. Non e' una decisione
+      osservata ma un bound superiore sull'accessibilita': "anche volendo
+      comprare appena possibile, non prima di qui".
+
+    Il `source` distinto tiene le tre popolazioni separate in analisi: mediarle
+    produrrebbe un numero che non descrive nessuna delle tre.
+    """
+    per_symbol: dict[str, dict] = {}
+    for evento in eventi:
+        istante = evento.get("eligible_cycle_at")
+        if istante is None:
+            continue
+        precedente = per_symbol.get(evento["symbol"])
+        if precedente is None or istante < precedente["at"]:
+            per_symbol[evento["symbol"]] = {
+                "at": istante,
+                "source": ELIGIBLE_SOURCE_DECISION,
+            }
+    return per_symbol
+
+
+def _ciclo_apertura(giorno: date) -> dict:
+    """Fallback dichiarato: primo ciclo da 15 minuti della seduta.
+
+    Vale per i candidati che non hanno NESSUN punteggio — i NO_NEWS. Non e' una
+    decisione osservata ma un bound: "anche comprando appena possibile, non
+    prima di qui".
+    """
+    return {
+        "at": datetime.combine(giorno, PRIMO_CICLO_SEDUTA_UTC, tzinfo=timezone.utc),
+        "source": ELIGIBLE_SOURCE_SESSION_OPEN,
+    }
+
+
+def _primo_ciclo_utile(giorno: date, istante: datetime) -> datetime | None:
+    """Primo ciclo :07/:22/:37/:52 non anteriore a `istante`. None a seduta finita."""
+    for ora in CICLI_ORE_UTC:
+        for minuto in CICLI_MINUTI_UTC:
+            ciclo = datetime.combine(giorno, time(ora, minuto), tzinfo=timezone.utc)
+            if ciclo >= istante:
+                return ciclo
+    return None
+
+
+def _ciclo_dal_segnale(candidato: dict, giorno: date) -> dict | None:
+    """Ciclo eleggibile ricostruito dal primo punteggio del candidato.
+
+    Serve ai candidati che hanno un punteggio ma nessuna riga in
+    `execution_decisions` — hanno notizie e segnali, semplicemente nessuna
+    decisione e' stata registrata contro di essi. Per questi il motore NON
+    avrebbe potuto agire all'apertura: prima delle 16:30 il segnale su ORCL non
+    esisteva. Usare `session_open` qui gonfierebbe la quota accessibile
+    esattamente nel modo che #246 contesta (55,63 $ invece di ~7 $).
+
+    None se il candidato non ha segnali: quel caso ricade su `session_open`.
+    """
+    ore = [s.get("ora") for s in (candidato.get("segnali") or []) if s.get("ora")]
+    if not ore:
+        return None
+    ora, minuto = (int(x) for x in min(ore).split(":")[:2])
+    primo_segnale = datetime.combine(giorno, time(ora, minuto), tzinfo=timezone.utc)
+    ciclo = _primo_ciclo_utile(giorno, primo_segnale)
+    if ciclo is None:
+        # Punteggio arrivato dopo l'ultimo ciclo della seduta: non c'era nessun
+        # momento per agirci. Dichiararlo e' l'unica risposta onesta.
+        return {"at": None, "source": ELIGIBLE_SOURCE_NESSUN_CICLO}
+    return {"at": ciclo, "source": ELIGIBLE_SOURCE_SEGNALE}
+
+
+def _opportunity_v2(
+    candidato: dict,
+    barre: dict[str, dict],
+    giorno: date,
+    barre_intraday: dict[str, list[dict]] | None = None,
+    cicli: dict[str, dict] | None = None,
+) -> dict:
+    """Stima v2 parallela di opportunita' per un candidato miss (#280, #246).
 
     Deterministica e versionata; NON tocca la serie legacy (costo_usd del prompt
-    alpha-miner e findings.json restano intatti). Oggi usa solo la barra daily:
+    alpha-miner e findings.json restano intatti): la stima v2 si affianca, il
+    conteggio legacy resta come traccia dentro il blocco `legacy` della stima.
+
+    Cablata alle barre intraday (#246 Q1). Le tre strade:
     - ribasso non detenuto in book long-only -> accessible/net = 0.0 verificato;
-    - rialzo non detenuto -> accessible None con missingness esplicita, perche'
-      prezzare l'entry al primo ciclo realmente eleggibile richiede le barre
-      intraday + la timeline PIT di #277 (non ancora in main). Lo stimatore e'
-      intraday-ready: quando #277 fornira' `eligible_cycle_at` e `intraday_bars`,
-      questo wiring passera' quelli e il costo roundtrip (TradeCostCalculator).
+    - rialzo non detenuto -> entry prezzata sull'apertura del primo bar 5Min
+      successivo al primo ciclo eleggibile, exit al close: e' la porzione
+      davvero catturabile da un motore RTH. ORCL il 12/08 vale 117,95 $
+      close-to-close e ~6,82 $ su questa gamba: la differenza non e' un
+      dettaglio, e' la misura;
+    - barre o ciclo mancanti -> accessible resta None con missingness esplicita,
+      mai confuso con gross e mai inventato.
 
     Difensivo: un candidato che fallisce non blocca il dossier.
     """
@@ -371,6 +475,19 @@ def _opportunity_v2(candidato: dict, barre: dict[str, dict], giorno: date) -> di
     if daily is None:
         return {"estimator_version": ESTIMATOR_VERSION, "symbol": sym,
                 "error": "daily_bar_missing"}
+    # Tre fonti in cascata, ognuna marcata: decisione osservata -> primo ciclo
+    # dopo il punteggio -> primo ciclo della seduta (solo per chi non ha segnali).
+    ciclo = (
+        (cicli or {}).get(sym)
+        or _ciclo_dal_segnale(candidato, giorno)
+        or _ciclo_apertura(giorno)
+    )
+    # Le barre arrivano da _barre_intraday con timestamp datetime; lo stimatore
+    # e' puro e il dossier viene serializzato in JSON: passiamo ISO 8601.
+    intraday = [
+        {**bar, "timestamp": bar["timestamp"].isoformat()}
+        for bar in (barre_intraday or {}).get(sym, [])
+    ]
     try:
         return compute_opportunity(
             {
@@ -381,10 +498,10 @@ def _opportunity_v2(candidato: dict, barre: dict[str, dict], giorno: date) -> di
                 "size_usd": SLOT_USD_DEFAULT,
                 "slot_fraction": SLOT_FRACTION_S4,
                 "size_source": "S4 fixed slot = bucket_pct(0.10)/n_top(5) = 2% NAV ~$110k",
-                # Forniti da #277 (timeline PIT + barre intraday); oggi assenti.
-                "eligible_cycle_at": None,
-                "intraday_bars": [],
-                "cost": None,  # computato quando ci sono entry/exit (post-#277)
+                "eligible_cycle_at": ciclo["at"].isoformat() if ciclo["at"] else None,
+                "eligible_cycle_source": ciclo["source"],
+                "intraday_bars": intraday,
+                "cost": None,  # roundtrip reale: wiring TradeCostCalculator, fuori da #246
                 "cutoff": _cutoff_giorno(giorno),
                 "exit_policy": "EOD_close",
                 "confidenza": "congetturale",
@@ -437,39 +554,6 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
         candidati, soglia_gate=soglia_gate
     )
 
-    # Stima v2 parallela di opportunita' per ogni candidato (#280): deterministica,
-    # versionata, series-legacy intatta. Vedi _opportunity_v2 per i limiti odierni
-    # (accessible per rialzi richiede le barre intraday di #277).
-    for c in candidati_classificati:
-        c["opportunity_v2"] = _opportunity_v2(c, barre, giorno)
-
-    # --- book: ingressi e chiusure ----------------------------------------
-    ingressi_grezzi = [
-        {"symbol": r[0], "strategia": r[1], "ora_utc": r[2],
-         "entry_price": float(r[3]), "qty": float(r[4])}
-        for r in _psql(
-            f"SELECT symbol, COALESCE(stop_strategy, CASE WHEN signal_id IS NOT NULL "
-            f"THEN 'S4' ELSE 'S1' END), to_char(entry_time,'HH24:MI'), entry_price, qty "
-            f"FROM trades WHERE entry_time >= '{g}' AND entry_time < '{g}'::date + 1 "
-            f"AND entry_price IS NOT NULL AND qty IS NOT NULL ORDER BY entry_time;")]
-
-    chiusure_grezze = [
-        {"symbol": r[0], "strategia": r[1], "exit_price": float(r[2]), "qty": float(r[3]),
-         "pnl_net": float(r[4]), "exit_reason": r[5] or "", "ore_tenuta": float(r[6])}
-        for r in _psql(
-            f"SELECT symbol, COALESCE(stop_strategy, CASE WHEN signal_id IS NOT NULL "
-            f"THEN 'S4' ELSE 'S1' END), exit_price, qty, net_pnl, exit_reason, "
-            f"EXTRACT(epoch FROM (exit_time-entry_time))/3600 "
-            f"FROM trades WHERE exit_time >= '{g}' AND exit_time < '{g}'::date + 1 "
-            f"AND exit_price IS NOT NULL AND qty IS NOT NULL AND net_pnl IS NOT NULL "
-            f"ORDER BY exit_time;")]
-
-    barre_ohlc = {s: {k: b[k] for k in ("open", "high", "low", "close")} for s, b in barre.items()}
-    chiusure_close = {s: b["close"] for s, b in barre.items()}
-
-    ingressi = compute_entries(ingressi_grezzi, barre_ohlc)
-    chiusure = compute_exits(chiusure_grezze, chiusure_close)
-
     # --- timeline e barre intraday (#277) --------------------------------
     eventi = _timeline_eventi(giorno)
     mover_symbols = {
@@ -511,11 +595,58 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
         cutoff_intraday,
     )
 
-    # --- aggregazioni ------------------------------------------------------
-    chiusi_storici = [
-        {"ora_ingresso": int(r[0]), "pnl_net": float(r[1])}
+    # Stima v2 parallela di opportunita' per ogni candidato (#280): deterministica,
+    # versionata, serie legacy intatta. Le barre intraday e i cicli eleggibili
+    # sono gia' stati caricati sopra proprio per questo (#246 Q1): l'ordine del
+    # blocco timeline non e' cosmetico, la stima accessible dipende da entrambi.
+    cicli_eleggibili = _cicli_eleggibili(eventi, giorno)
+    for c in candidati_classificati:
+        c["opportunity_v2"] = _opportunity_v2(
+            c, barre, giorno, barre_intraday, cicli_eleggibili
+        )
+
+    # --- book: ingressi e chiusure ----------------------------------------
+    ingressi_grezzi = [
+        {"symbol": r[0], "strategia": r[1], "ora_utc": r[2],
+         "entry_price": float(r[3]), "qty": float(r[4])}
         for r in _psql(
-            "SELECT EXTRACT(hour FROM entry_time)::int, net_pnl FROM trades "
+            f"SELECT symbol, COALESCE(stop_strategy, CASE WHEN signal_id IS NOT NULL "
+            f"THEN 'S4' ELSE 'S1' END), to_char(entry_time,'HH24:MI'), entry_price, qty "
+            f"FROM trades WHERE entry_time >= '{g}' AND entry_time < '{g}'::date + 1 "
+            f"AND entry_price IS NOT NULL AND qty IS NOT NULL ORDER BY entry_time;")]
+
+    chiusure_grezze = [
+        {"symbol": r[0], "strategia": r[1], "exit_price": float(r[2]), "qty": float(r[3]),
+         "pnl_net": float(r[4]), "exit_reason": r[5] or "", "ore_tenuta": float(r[6])}
+        for r in _psql(
+            f"SELECT symbol, COALESCE(stop_strategy, CASE WHEN signal_id IS NOT NULL "
+            f"THEN 'S4' ELSE 'S1' END), exit_price, qty, net_pnl, exit_reason, "
+            f"EXTRACT(epoch FROM (exit_time-entry_time))/3600 "
+            f"FROM trades WHERE exit_time >= '{g}' AND exit_time < '{g}'::date + 1 "
+            f"AND exit_price IS NOT NULL AND qty IS NOT NULL AND net_pnl IS NOT NULL "
+            f"ORDER BY exit_time;")]
+
+    # close_prec entra nelle barre del book perche' `quota_nel_gap` misura il
+    # salto di apertura contro la chiusura precedente (#246 Q4).
+    barre_ohlc = {
+        s: {k: b[k] for k in ("open", "high", "low", "close", "close_prec")}
+        for s, b in barre.items()
+    }
+    chiusure_close = {s: b["close"] for s, b in barre.items()}
+
+    ingressi = compute_entries(ingressi_grezzi, barre_ohlc)
+    chiusure = compute_exits(chiusure_grezze, chiusure_close)
+
+    # --- aggregazioni ------------------------------------------------------
+    # stop_strategy GREZZA, senza COALESCE su S1/S4: la coorte legacy (F-002,
+    # stop_strategy NULL) deve restare riconoscibile nel bucket orario, non
+    # essere assorbita in una sleeve che non l'ha prodotta (#246 Q3).
+    chiusi_storici = [
+        {"ora_ingresso": int(r[0]), "pnl_net": float(r[1]),
+         "stop_strategy": r[2] or None}
+        for r in _psql(
+            "SELECT EXTRACT(hour FROM entry_time)::int, net_pnl, "
+            "COALESCE(stop_strategy, '') FROM trades "
             "WHERE exit_time IS NOT NULL AND net_pnl IS NOT NULL;")]
 
     return {
@@ -544,6 +675,12 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
                 "ingested_at": "news_log.fetched_at",
                 "scored_at": "sentiment_signals.generated_at",
                 "eligible_cycle_at": "execution_decisions.tick_time (primo per signal_id)",
+                "opportunity_v2.eligible_cycle": (
+                    "execution_decisions.tick_time se il candidato ha una decisione "
+                    "collegata; altrimenti primo_ciclo_dopo_segnale (:07/:22/:37/:52 dal "
+                    "primo punteggio); altrimenti session_open = 14:07 UTC per i candidati "
+                    "senza segnali. Il source e' dichiarato nel blocco entry."
+                ),
                 "order_submitted_at": "Alpaca Trading API order.submitted_at",
                 "filled_at": "Alpaca Trading API order.filled_at",
                 "fill_price": "Alpaca Trading API order.filled_avg_price",

@@ -69,6 +69,18 @@ invece che mediate sull'intera finestra:
   F-009 (*il gate scarta segnali col segno corretto*) è il più esposto: quelle occorrenze sono state
   generate da una soglia che non era quella di design.
 
+- **#293 / trial exit S4 (deroga registrata in anticipo, 2026-08-22)** — **data** = `n=0` del trial
+  exit, non ancora fissata: coincide col batch atomico che apre la raccolta (§ Sequenza punto 3 della
+  decisione del 2026-08-14 su #242). **Perimetro** = solo il ramo shadow: P0/P1 (e P2, se ammessa)
+  sono valutate su lifecycle virtuali costruiti sugli stessi intenti, fill e costi del runtime.
+  **Il comportamento live non cambia, quindi la serie osservata non si spezza**: le evidenze S4
+  raccolte prima e dopo `n=0` restano confrontabili e sommabili, a differenza di #185, #236 e #191.
+  Registrata qui in anticipo, col pattern delle voci del 2026-08-01, perché al giorno 40 la presenza
+  di un trial in corso non venga scambiata per una discontinuità che non c'è. Se il trial dovesse
+  mai toccare il ramo live, quella sarebbe una modifica materiale ai sensi del
+  `CONTRATTO_TRIAL_EXIT_S4_2026-08-22.md` § Modifiche materiali, imporrebbe restart del campione e
+  **andrebbe annotata qui come discontinuità vera**.
+
 Questa sezione esiste perché fra sette settimane nessuno se ne ricorderebbe.
 
 ## Soglie: cosa guadagna diritto a lavoro alla scadenza
@@ -115,6 +127,20 @@ Falsificazione: se alla scadenza `NO_NEWS` resta la causa di miss dominante in *
 Conseguenza pre-registrata: S4 cambia fonte dati (vettori strutturati Tier A in
 `docs/RESEARCH_SYNTHESIS_ALPHA_AND_TOOLING_2026-07-26.md`) oppure esce. Nessuna ulteriore taratura.
 Precedente: `docs/S7_LIFECYCLE_HISTORY_2026-07-15.md`.
+
+**1-bis. Condizione pre-registrata sul momento del movimento (#246).**
+
+Se al 28/09 la mediana per seduta di `quota_movimento_precedente_al_segnale` resta ≥ 70% su ≥ 15
+sedute a denominatore non degenere, e il trial d'uscita (#301) non produce PROMOTE su P1, la
+conseguenza pre-registrata è il cambio di fonte verso vettori event-driven — non un'altra taratura
+di S4 (soglia #170, orizzonte #242, copertura #159).
+
+Dove si legge: `ingressi[].quota_movimento_precedente_al_segnale` e
+`ingressi[].denominatore_degenere` nei dossier `docs/evidence/dossier/*.json`. Il denominatore è la
+gamba intraday (close − open); è dichiarato degenere sotto lo 0,5% del prezzo di apertura
+(`SOGLIA_DENOMINATORE_DEGENERE` in `src/analysis/dossier/book.py`), e le sedute degeneri non
+contano verso le 15. `quota_nel_gap` è una misura **diversa**, con un altro denominatore: non entra
+in questo criterio e non va mediata con la prima.
 
 **2. S1 ha un edge una volta corretta la misura?**
 

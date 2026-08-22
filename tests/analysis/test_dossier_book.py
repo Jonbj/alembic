@@ -201,3 +201,129 @@ def test_ordinamento_per_ora_crescente():
         {"ora_ingresso": 14, "pnl_net": 1.0},
     ]
     assert [r["ora"] for r in aggregate_by_entry_hour(chiusi)] == [14, 19]
+
+
+# --- #246 Q4: due campi distinti per la quota di movimento -------------------
+# Non sono la stessa grandezza e non vanno mediate: la prima ha per denominatore
+# la gamba intraday (close - open), la seconda il movimento close-to-close.
+
+
+def test_quota_movimento_precedente_al_segnale_su_gamba_intraday():
+    """Comprato a meta' della gamba intraday: quota 0,5, denominatore sano."""
+    trades = [{"symbol": "AAA", "strategia": "S4", "ora_utc": "17:22",
+               "entry_price": 105.0, "qty": 10.0}]
+    bars = {"AAA": {"open": 100.0, "high": 112.0, "low": 99.0, "close": 110.0,
+                    "close_prec": 98.0}}
+    out = compute_entries(trades, bars)[0]
+    assert out["quota_movimento_precedente_al_segnale"] == pytest.approx(0.5)
+    assert out["denominatore_degenere"] is False
+
+
+def test_quota_sopra_uno_non_e_clampata():
+    """ORCL 08-11 valeva 110,8%: al primo segnale il prezzo aveva gia' superato
+    la chiusura. Clampare a 1 cancellerebbe proprio il fatto da misurare."""
+    trades = [{"symbol": "ORCL", "strategia": "S4", "ora_utc": "15:00",
+               "entry_price": 112.0, "qty": 1.0}]
+    bars = {"ORCL": {"open": 100.0, "high": 113.0, "low": 99.0, "close": 110.0,
+                     "close_prec": 99.0}}
+    out = compute_entries(trades, bars)[0]
+    assert out["quota_movimento_precedente_al_segnale"] == pytest.approx(1.2)
+
+
+def test_denominatore_degenere_quando_la_gamba_intraday_e_piatta():
+    """08-12: gamba intraday piatta su 7 mover su 9. La quota esce ancora, ma
+    marcata: e' il flag, non l'assenza del numero, a dire che non si legge."""
+    trades = [{"symbol": "BBB", "strategia": "S4", "ora_utc": "17:22",
+               "entry_price": 100.1, "qty": 1.0}]
+    bars = {"BBB": {"open": 100.0, "high": 100.4, "low": 99.8, "close": 100.2,
+                    "close_prec": 95.0}}
+    out = compute_entries(trades, bars)[0]
+    assert out["denominatore_degenere"] is True
+    assert out["quota_movimento_precedente_al_segnale"] is not None
+
+
+def test_quota_nel_gap_e_una_misura_diversa_con_un_altro_denominatore():
+    """(open - close_prec) / (close - close_prec): il 08-12 valeva 99% mediano."""
+    trades = [{"symbol": "CCC", "strategia": "S4", "ora_utc": "17:22",
+               "entry_price": 100.1, "qty": 1.0}]
+    bars = {"CCC": {"open": 100.0, "high": 100.4, "low": 99.8, "close": 100.2,
+                    "close_prec": 95.0}}
+    out = compute_entries(trades, bars)[0]
+    assert out["quota_nel_gap"] == pytest.approx(5.0 / 5.2)
+    # Le due quote restano campi separati con nomi diversi: nessuna media.
+    assert out["quota_nel_gap"] != out["quota_movimento_precedente_al_segnale"]
+
+
+def test_quota_nel_gap_none_senza_chiusura_precedente():
+    """Senza close_prec la quota nel gap non esiste: None, non zero, e non
+    sostituita dalla quota intraday."""
+    trades = [{"symbol": "DDD", "strategia": "S1", "ora_utc": "14:07",
+               "entry_price": 105.0, "qty": 1.0}]
+    out = compute_entries(trades, {"DDD": _bar()})[0]
+    assert out["quota_nel_gap"] is None
+    assert out["quota_movimento_precedente_al_segnale"] is not None
+
+
+def test_gamba_intraday_nulla_da_quota_none_e_flag_degenere():
+    """close == open: il denominatore e' zero, la quota non esiste."""
+    trades = [{"symbol": "EEE", "strategia": "S1", "ora_utc": "14:07",
+               "entry_price": 100.0, "qty": 1.0}]
+    bars = {"EEE": {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0,
+                    "close_prec": 100.0}}
+    out = compute_entries(trades, bars)[0]
+    assert out["quota_movimento_precedente_al_segnale"] is None
+    assert out["denominatore_degenere"] is True
+
+
+# --- #246 Q3: t_stat_is_test, n_legacy, scomposizione per sleeve -------------
+
+
+def test_t_stat_is_test_e_sempre_falso():
+    """Il t dell'ora 14 (-4,96) non e' un test: 87 su 129 sono coorte legacy e
+    33 vengono da un solo giorno. Il flag lo dice a chi legge il JSON."""
+    chiusi = [{"ora_ingresso": 14, "pnl_net": p, "stop_strategy": "S1"}
+              for p in (-10.0, -5.0, 3.0)]
+    assert all(r["t_stat_is_test"] is False for r in aggregate_by_entry_hour(chiusi))
+
+
+def test_n_legacy_conta_i_trade_senza_stop_strategy():
+    """La coorte F-002 (stop_strategy NULL) va contata, non fusa nelle sleeve."""
+    chiusi = (
+        [{"ora_ingresso": 14, "pnl_net": -1.0, "stop_strategy": None} for _ in range(87)]
+        + [{"ora_ingresso": 14, "pnl_net": -1.0, "stop_strategy": "S1"} for _ in range(27)]
+        + [{"ora_ingresso": 14, "pnl_net": -1.0, "stop_strategy": "S4"} for _ in range(15)]
+    )
+    out = aggregate_by_entry_hour(chiusi)[0]
+    assert out["n"] == 129
+    assert out["n_legacy"] == 87
+
+
+def test_scomposizione_per_sleeve_rende_visibile_s1_2_su_27():
+    """Il fatto che resta dopo il ridimensionamento: S1 all'ora 14 fa 2 su 27."""
+    chiusi = (
+        [{"ora_ingresso": 14, "pnl_net": 5.0, "stop_strategy": "S1"} for _ in range(2)]
+        + [{"ora_ingresso": 14, "pnl_net": -20.0, "stop_strategy": "S1"} for _ in range(25)]
+        + [{"ora_ingresso": 14, "pnl_net": -10.0, "stop_strategy": None} for _ in range(87)]
+    )
+    per_sleeve = {r["stop_strategy"]: r for r in aggregate_by_entry_hour(chiusi)[0]["per_stop_strategy"]}
+    assert per_sleeve["S1"]["n"] == 27
+    assert per_sleeve["S1"]["win"] == 2
+    # La coorte legacy c'e' ancora, sotto la sua chiave: mai eliminata in silenzio.
+    assert per_sleeve[None]["n"] == 87
+
+
+def test_coorte_legacy_riportata_in_coda_dopo_le_sleeve_attribuite():
+    chiusi = [
+        {"ora_ingresso": 14, "pnl_net": 1.0, "stop_strategy": None},
+        {"ora_ingresso": 14, "pnl_net": 1.0, "stop_strategy": "S4"},
+        {"ora_ingresso": 14, "pnl_net": 1.0, "stop_strategy": "S1"},
+    ]
+    ordine = [r["stop_strategy"] for r in aggregate_by_entry_hour(chiusi)[0]["per_stop_strategy"]]
+    assert ordine == ["S1", "S4", None]
+
+
+def test_trade_senza_stop_strategy_dichiarata_conta_come_legacy():
+    """Un input privo del campo (dossier vecchi) e' coorte legacy, non un errore."""
+    out = aggregate_by_entry_hour([{"ora_ingresso": 14, "pnl_net": -1.0}])[0]
+    assert out["n_legacy"] == 1
+    assert out["per_stop_strategy"][0]["stop_strategy"] is None
