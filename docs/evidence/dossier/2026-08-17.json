@@ -198,7 +198,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "NOW",
@@ -255,7 +256,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "SPCX",
@@ -265,22 +267,34 @@
         {
           "ora": "15:15",
           "score": 0.188182735915197,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Launches 2 Rockets Just 38 Minutes Apart, Setting New Record for Musk’s Launch Machine",
+          "n_ticker_articolo": 2
         },
         {
           "ora": "16:31",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Stock of the Day: SpaceX Is Climbing — But Sellers Are Waiting Above",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "18:00",
           "score": 0.18,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Stock Is Everywhere: Google, Nvidia, AMD, Harvard Disclose Stakes",
+          "n_ticker_articolo": 4
         },
         {
           "ora": "19:15",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "xAI Faces Fresh Allegation Over Grok’s Role in Creating Child Abuse Material",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -334,7 +348,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.5
     },
     {
       "symbol": "NKE",
@@ -344,7 +359,10 @@
         {
           "ora": "17:45",
           "score": -0.12459621423321968,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Why Is Nike Stock Falling on Monday?",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -397,7 +415,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.0
     },
     {
       "symbol": "INFY",
@@ -407,27 +426,42 @@
         {
           "ora": "16:45",
           "score": 0.42,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "org_lookup",
+          "testo_scorato": "India Inc. delivers strongest earnings in 10 quarters; markets stay in the red",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "17:45",
           "score": -0.10000000000000002,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "org_lookup",
+          "testo_scorato": "Sensex, Nifty end lower as IT stocks drag markets",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "18:30",
           "score": -0.11000000000000001,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "org_lookup",
+          "testo_scorato": "IT Stocks Today: Why Nifty IT Declined 1.50%; Infosys, TCS, LTM, Mphasis Under Pressure",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "19:15",
           "score": -0.020000000000000004,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "org_lookup",
+          "testo_scorato": "Nifty, Sensex close lower for fifth session, Experts say energy-led pressure to influence markets in near term",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "19:45",
           "score": -0.165,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "org_lookup",
+          "testo_scorato": "Spark earnings preview: One analyst sees company as hugely undervalued; others see big problems",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -480,7 +514,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.0
     },
     {
       "symbol": "ADBE",
@@ -490,11 +525,14 @@
         {
           "ora": "19:00",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SanDisk Rips 10%, Micron Rises 6% as AI Memory Frenzy Builds: Stock Market Today",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
-      "causa": "THIN_NEUTRAL",
+      "causa": "OFF_TOPIC_NON_DECIDIBILE",
       "opportunity_v2": {
         "estimator_version": "2.0",
         "symbol": "ADBE",
@@ -543,7 +581,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.0
     },
     {
       "symbol": "META",
@@ -553,27 +592,42 @@
         {
           "ora": "14:15",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "David Tepper's Latest AI Bet Is CoreWeave",
+          "n_ticker_articolo": 12
         },
         {
           "ora": "14:45",
           "score": 0.04927467901467632,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "David Tepper Cuts Micron Stake, Exits SanDisk as Appaloosa Goes Big on These Magnificent 7 Stocks in Q2",
+          "n_ticker_articolo": 5
         },
         {
           "ora": "17:30",
           "score": 0.04000000000000001,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Why Is Netflix Stock Falling on Monday?",
+          "n_ticker_articolo": 4
         },
         {
           "ora": "18:15",
           "score": 0.24,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Bill Ackman Bets Big on Magnificent 7 Stocks, But Only Loves 3 of Them",
+          "n_ticker_articolo": 7
         },
         {
           "ora": "19:30",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Anthropic's Revenue Jumps 14x; Chinese AI Targets Nvidia's Moat",
+          "n_ticker_articolo": 12
         }
       ],
       "in_portafoglio": false,
@@ -626,7 +680,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "DIS",
@@ -636,17 +691,26 @@
         {
           "ora": "16:15",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "org_lookup",
+          "testo_scorato": "Ackman's Biggest Portfolio Overhaul in Years Includes a Return to Netflix",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "16:15",
           "score": -0.06,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "org_lookup",
+          "testo_scorato": "Ackman's Biggest Portfolio Overhaul in Years Includes a Return to Netflix",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "18:45",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "org_lookup",
+          "testo_scorato": "Lowe's Halloween animatronics 2026: Shop the new collection online",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -699,7 +763,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.0
     },
     {
       "symbol": "MSFT",
@@ -709,32 +774,50 @@
         {
           "ora": "14:15",
           "score": -0.001261245394366786,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "David Tepper's Latest AI Bet Is CoreWeave",
+          "n_ticker_articolo": 12
         },
         {
           "ora": "14:16",
           "score": -0.0675,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "'Big Short' Investor Steve Eisman Says AI Has an 'Achilles' Heel' — But It's Too Early to Short the Boom",
+          "n_ticker_articolo": 5
         },
         {
           "ora": "15:16",
           "score": -0.04000000000000001,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "org_lookup",
+          "testo_scorato": "'Big Short' Investor Steve Eisman Says AI Has an 'Achilles' Heel' &#x2014; But It's Too Early to Short the Boom",
+          "n_ticker_articolo": 2
         },
         {
           "ora": "17:30",
           "score": -0.04000000000000001,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Why Is Netflix Stock Falling on Monday?",
+          "n_ticker_articolo": 4
         },
         {
           "ora": "18:15",
           "score": 0.3,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Bill Ackman Bets Big on Magnificent 7 Stocks, But Only Loves 3 of Them",
+          "n_ticker_articolo": 7
         },
         {
           "ora": "19:30",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Anthropic's Revenue Jumps 14x; Chinese AI Targets Nvidia's Moat",
+          "n_ticker_articolo": 12
         }
       ],
       "in_portafoglio": false,
@@ -787,7 +870,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     }
   ],
   "soglia_gate_usata": 0.3,
@@ -29341,14 +29425,15 @@
       "conteggi": {
         "NO_NEWS": 2,
         "BELOW_GATE": 4,
-        "THIN_NEUTRAL": 1,
+        "OFF_TOPIC_NON_DECIDIBILE": 1,
         "NON_CLASSIFICATO": 2
       },
       "dominante": "BELOW_GATE",
       "soglie": {
         "thin": 0.05,
         "gate": 0.3
-      }
+      },
+      "quota_righe_fanout": 0.52
     }
   }
 }

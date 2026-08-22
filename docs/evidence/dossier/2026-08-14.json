@@ -151,16 +151,22 @@
         {
           "ora": "14:15",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Heartflow, Eton Pharmaceuticals, Nu Holdings And Other Big Stocks Moving Higher On Friday",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "18:00",
           "score": 0.04,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Russell 2000 Extends Records, SanDisk Rallies 7%: Stock Market Today",
+          "n_ticker_articolo": 11
         }
       ],
       "in_portafoglio": false,
-      "causa": "THIN_NEUTRAL",
+      "causa": "OFF_TOPIC_NON_DECIDIBILE",
       "opportunity_v2": {
         "estimator_version": "2.0",
         "symbol": "RDDT",
@@ -210,7 +216,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.5
     },
     {
       "symbol": "AVGO",
@@ -220,12 +227,18 @@
         {
           "ora": "17:30",
           "score": -0.28197403225376616,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Broadcom Plunges 5% as Its AI Boom Faces a $370 Billion Financing Question",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "17:45",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Russell 2000 Extends Records, SanDisk Rallies 7%: Stock Market Today",
+          "n_ticker_articolo": 11
         }
       ],
       "in_portafoglio": false,
@@ -278,7 +291,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.5
     },
     {
       "symbol": "HOOD",
@@ -288,12 +302,18 @@
         {
           "ora": "15:45",
           "score": -0.04,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Micron and 15 Other Stocks To Play The AI Buildout Race: They Are Still 20% Below Highs",
+          "n_ticker_articolo": 4
         },
         {
           "ora": "17:01",
           "score": 0.072,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Robinhood Exec Says AI Boom Could Keep Stocks Ripping Higher but Bonds Could Crash the Party",
+          "n_ticker_articolo": 2
         }
       ],
       "in_portafoglio": false,
@@ -346,7 +366,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "ORCL",
@@ -356,12 +377,18 @@
         {
           "ora": "15:15",
           "score": -0.11201731183082253,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Michael Burry Doubles Down on Oracle, Micron Nebius Shorts After Saying It's Like 'Shooting Fish in a Barrel'",
+          "n_ticker_articolo": 3
         },
         {
           "ora": "15:45",
           "score": -0.03933235052004883,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Micron and 15 Other Stocks To Play The AI Buildout Race: They Are Still 20% Below Highs",
+          "n_ticker_articolo": 4
         }
       ],
       "in_portafoglio": false,
@@ -414,7 +441,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "F",
@@ -472,7 +500,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     }
   ],
   "soglia_gate_usata": 0.3,
@@ -24692,13 +24721,14 @@
       "conteggi": {
         "NO_NEWS": 1,
         "BELOW_GATE": 3,
-        "THIN_NEUTRAL": 1
+        "OFF_TOPIC_NON_DECIDIBILE": 1
       },
       "dominante": "BELOW_GATE",
       "soglie": {
         "thin": 0.05,
         "gate": 0.3
-      }
+      },
+      "quota_righe_fanout": 0.75
     }
   }
 }

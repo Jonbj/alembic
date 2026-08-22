@@ -198,7 +198,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "SPCX",
@@ -208,32 +209,50 @@
         {
           "ora": "14:01",
           "score": 0.165,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Rocket Lab CEO Sees AI Data Centers Moving Into Space as Computing Demand Explodes: ‘Real Opportunity’ (UPDATED)",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "14:15",
           "score": 0.01573294020801953,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Tesla's AI Future Is Starting to Look a Lot Less Electric",
+          "n_ticker_articolo": 2
         },
         {
           "ora": "14:30",
           "score": 0.012017311830822532,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "RKLB Stock Pares Losses, Last Down Over 2% in Tuesday Pre-Market: What's Going On? (UPDATED)",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "15:30",
           "score": -0.12,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Rocket Lab's Neutron Timeline Wobbles, Overshadowing Record Revenue",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "19:15",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "10 Communication Services Stocks With Whale Alerts In Today’s Session",
+          "n_ticker_articolo": 4
         },
         {
           "ora": "19:45",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Is Helping AST SpaceMobile Chase Its $1 Billion Revenue Goal",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -286,7 +305,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.3333333333333333
     },
     {
       "symbol": "ORCL",
@@ -296,7 +316,10 @@
         {
           "ora": "16:00",
           "score": -0.051588371718504965,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "What's Going On With Oracle Stock Tuesday?",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -349,7 +372,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.0
     },
     {
       "symbol": "ADBE",
@@ -406,7 +430,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "BABA",
@@ -463,7 +488,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "BIDU",
@@ -520,7 +546,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     }
   ],
   "soglia_gate_usata": 0.3,
@@ -24486,7 +24513,8 @@
       "soglie": {
         "thin": 0.05,
         "gate": 0.3
-      }
+      },
+      "quota_righe_fanout": 0.2857142857142857
     }
   }
 }

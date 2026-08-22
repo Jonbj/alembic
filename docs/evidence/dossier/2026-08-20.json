@@ -151,22 +151,34 @@
         {
           "ora": "14:00",
           "score": -0.13999999999999999,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX's Second Unlock Hits: 319 Million Shares Go Loose Today",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "15:45",
           "score": 0.07598488347010958,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Elon Musk Says Starship Reuse Is Near After Years of Delays: What Do Prediction Markets Say?",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "16:45",
           "score": -0.2260867498162689,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Stock Slides as Second Lockup Expires",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "19:45",
           "score": -0.0825,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "xAI Just Did in 2.3 Years What Took SpaceX Nearly Two Decades",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -219,7 +231,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.0
     },
     {
       "symbol": "F",
@@ -229,7 +242,10 @@
         {
           "ora": "14:30",
           "score": 0.1479150158519702,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Trump Could Reportedly Cut Canadian Auto Tariffs to 15%, Aluminum and Steel to 25%: NUE, STLD, CENX in Focus (UPDATED)",
+          "n_ticker_articolo": 3
         }
       ],
       "in_portafoglio": false,
@@ -282,7 +298,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "BP",
@@ -340,7 +357,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "BA",
@@ -397,7 +415,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     }
   ],
   "soglia_gate_usata": 0.3,
@@ -21889,7 +21908,8 @@
       "soglie": {
         "thin": 0.05,
         "gate": 0.3
-      }
+      },
+      "quota_righe_fanout": 0.2
     }
   }
 }

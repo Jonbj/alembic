@@ -12,10 +12,12 @@ UTC = timezone.utc
 
 
 def _fake_psql(query):
+    # #244: la query dei segnali fa join+sottoquery su news_log, quindi va
+    # riconosciuta PRIMA del conteggio news, altrimenti il match e' ambiguo.
+    if "FROM sentiment_signals" in query:
+        return [["AAA", "14:10", "0.60", "f", "org_lookup", "AAA beats on revenue", "1"]]
     if "FROM news_log" in query:
         return [["AAA", "1"]]
-    if "FROM sentiment_signals" in query:
-        return [["AAA", "14:10", "0.60", "f"]]
     return []
 
 
