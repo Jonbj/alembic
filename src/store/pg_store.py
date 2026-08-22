@@ -646,20 +646,44 @@ class PostgreSQLStore:
         self,
         days_back: int = 7,
         limit: int = 500,
+        before: tuple | None = None,
     ) -> list[dict]:
-        """Return trade-filter skip rows from the last N days that have no counterfactual yet."""
+        """Return one page of trade-filter skip rows with no counterfactual yet.
+
+        Args:
+            days_back: how far back to look.
+            limit: page size.
+            before: keyset cursor ``(tick_time, id)`` from the previous page —
+                only rows strictly older than it are returned. ``None`` starts
+                from the newest row.
+
+        Rows come back newest-first, ordered by ``(tick_time DESC, id DESC)``
+        so the cursor is total: no row is skipped or returned twice across
+        pages. #337: the old caller took a single ``LIMIT 500`` page and dropped
+        everything older, which systematically starved the first hour of each
+        session. Use fetch_all_skip_decisions_without_counterfactual() to page
+        to exhaustion.
+        """
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
+                params: list = [str(days_back)]
+                cursor_clause = ""
+                if before is not None:
+                    cursor_clause = "AND (tick_time, id) < (%s, %s)"
+                    params.extend([before[0], before[1]])
+                params.append(limit)
                 cur.execute(
-                    """SELECT id, tick_time, symbol, score, regime_mult, decision
+                    f"""SELECT id, tick_time, symbol, score, regime_mult, decision,
+                               COALESCE(counterfactual_attempts, 0) AS counterfactual_attempts
                        FROM execution_decisions
                        WHERE decision IN ('SKIP_THRESHOLD', 'SKIP_EMA', 'SKIP_CAP', 'SKIP_PYRAMIDING')
                          AND counterfactual_computed_at IS NULL
                          AND tick_time >= now() - (%s || ' days')::interval
-                       ORDER BY tick_time DESC
+                         {cursor_clause}
+                       ORDER BY tick_time DESC, id DESC
                        LIMIT %s""",
-                    (str(days_back), limit),
+                    params,
                 )
                 cols = [d[0] for d in cur.description]
                 return [dict(zip(cols, row)) for row in cur.fetchall()]
@@ -667,28 +691,83 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def fetch_all_skip_decisions_without_counterfactual(
+        self,
+        days_back: int = 7,
+        page_size: int = 500,
+        max_rows: int = 20000,
+    ) -> list[dict]:
+        """Page through every pending skip row in the window until exhaustion.
+
+        #337: replaces the single ``LIMIT 500`` batch. Because the pages are
+        keyset-driven rather than offset-driven, rows the worker deliberately
+        leaves pending (PENDING_OVERNIGHT) do not re-enter later pages of the
+        same run, so this terminates.
+
+        ``max_rows`` is a safety bound on a pathological backlog, not an
+        expected limit: a 7-day window at ~600 skips/day is ~4200 rows.
+        """
+        collected: list[dict] = []
+        before: tuple | None = None
+        while len(collected) < max_rows:
+            requested = min(page_size, max_rows - len(collected))
+            page = self.fetch_skip_decisions_without_counterfactual(
+                days_back=days_back,
+                limit=requested,
+                before=before,
+            )
+            if not page:
+                break
+            page = page[:requested]  # keep max_rows a hard bound
+            collected.extend(page)
+            last = page[-1]
+            before = (last["tick_time"], last["id"])
+            if len(page) < requested:
+                break
+        return collected
+
     def bulk_set_counterfactual(
         self,
         updates: list[tuple],
     ) -> int:
-        """Bulk-write counterfactual_return_1h and counterfactual_computed_at.
+        """Bulk-write the counterfactual outcome of a set of decisions.
 
         Args:
-            updates: list of (decision_id, return_1h_or_None, computed_at)
+            updates: list of tuples, either
+                ``(decision_id, return_1h_or_None, computed_at)`` — legacy 3-tuple,
+                writes no reason/overnight/attempt state — or the full
+                ``(decision_id, return_1h_or_None, computed_at_or_None,
+                skip_reason_or_None, return_overnight_or_None, attempts)``.
+
+                #337: ``computed_at=None`` means "deliberately left pending, retry
+                on the next run"; ``attempts`` is what stops that from looping
+                forever. ``skip_reason`` records *why* a NULL return is NULL, so
+                the censoring is readable at query time instead of inferred.
         Returns:
             Number of rows updated.
         """
         if not updates:
             return 0
+
+        def _normalise(u: tuple) -> tuple:
+            if len(u) == 3:
+                did, ret, ts = u
+                return (ret, ts, None, None, 0, did)
+            did, ret, ts, reason, overnight, attempts = u
+            return (ret, ts, reason, overnight, attempts, did)
+
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
                 cur.executemany(
                     """UPDATE execution_decisions
                        SET counterfactual_return_1h = %s,
-                           counterfactual_computed_at = %s
+                           counterfactual_computed_at = %s,
+                           counterfactual_skip_reason = %s,
+                           counterfactual_return_overnight = %s,
+                           counterfactual_attempts = %s
                        WHERE id = %s""",
-                    [(ret, ts, did) for did, ret, ts in updates],
+                    [_normalise(u) for u in updates],
                 )
                 count = cur.rowcount
             conn.commit()
