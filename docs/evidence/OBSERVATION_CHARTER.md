@@ -81,6 +81,20 @@ invece che mediate sull'intera finestra:
   `CONTRATTO_TRIAL_EXIT_S4_2026-08-22.md` § Modifiche materiali, imporrebbe restart del campione e
   **andrebbe annotata qui come discontinuità vera**.
 
+- **#315 / significato di `score` su `SKIP_PYRAMIDING` (2026-08-19)** — **perimetro** = la sola
+  colonna `score` sulle righe `decision='SKIP_PYRAMIDING'` di `execution_decisions`; nessun'altra
+  decisione, nessun'altra colonna. Prima del 19/08 `score` porta il peso target dello slot dopo
+  scalatura sleeve/regime (osservato 0,020–0,031); dal 19/08 porta `quantity*price/nav`, la frazione
+  di NAV davvero non impiegata (osservato 0,0024–0,0170). **Non sommabili.** Il calo di livello è il
+  cambio di definizione, non un calo del fenomeno: chi confronta le due metà della serie sta
+  misurando la ridefinizione, non il pyramiding scartato. Vale anche l'inverso: prima del 19/08
+  `counterfactual_return_1h` è NULL su `SKIP_PYRAMIDING` **per costruzione** (la decisione era
+  esclusa dal filtro della query che alimenta il controfattuale), non per dato mancante — quei NULL
+  non vanno letti come fallimenti di calcolo né imputati.
+  **Il comportamento live non cambia, quindi la serie osservata non si spezza**: come per #293, e a
+  differenza di #185, #236 e #191, ciò che si spezza è la serie della *misura*, non quella del
+  fenomeno. Le decisioni di pyramiding prese prima e dopo il 19/08 restano confrontabili fra loro.
+
 Questa sezione esiste perché fra sette settimane nessuno se ne ricorderebbe.
 
 ## Soglie: cosa guadagna diritto a lavoro alla scadenza
