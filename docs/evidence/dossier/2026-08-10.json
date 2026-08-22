@@ -151,22 +151,34 @@
         {
           "ora": "14:02",
           "score": 0.1875,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Will Fly the Same Falcon 9 Booster for an 18th Time Monday: Why Reusability Is Its Biggest Advantage",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "14:45",
           "score": -0.18,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Veteran Investor Calls SpaceX a ‘Highly Speculative Game,’ Says Its Valuation Already Assumes Elon Musk Hits ‘Pie in the Sky Goals’",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "17:01",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Rocket Lab Stock Up 41% From Its July Low: Can Q2 Clear a Sky-High Bar?",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "19:15",
           "score": 0.04104995608750303,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Earnings Highlights from Cathie Wood's ARK Invest",
+          "n_ticker_articolo": 4
         }
       ],
       "in_portafoglio": false,
@@ -220,7 +232,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.25
     },
     {
       "symbol": "QCOM",
@@ -230,11 +243,14 @@
         {
           "ora": "19:30",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "7 Information Technology Stocks With Whale Alerts In Today’s Session",
+          "n_ticker_articolo": 4
         }
       ],
       "in_portafoglio": false,
-      "causa": "THIN_NEUTRAL",
+      "causa": "OFF_TOPIC_NON_DECIDIBILE",
       "opportunity_v2": {
         "estimator_version": "2.0",
         "symbol": "QCOM",
@@ -283,7 +299,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "BABA",
@@ -341,7 +358,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     }
   ],
   "soglia_gate_usata": 0.3,
@@ -28548,13 +28566,14 @@
       "conteggi": {
         "NO_NEWS": 1,
         "BELOW_GATE": 1,
-        "THIN_NEUTRAL": 1
+        "OFF_TOPIC_NON_DECIDIBILE": 1
       },
       "dominante": null,
       "soglie": {
         "thin": 0.05,
         "gate": 0.3
-      }
+      },
+      "quota_righe_fanout": 0.4
     }
   }
 }

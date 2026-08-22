@@ -199,7 +199,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "CRM",
@@ -257,7 +258,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "AVGO",
@@ -267,17 +269,26 @@
         {
           "ora": "14:00",
           "score": 0.08919242846643936,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Stripe’s $8 Billion OpenRouter Deal Reveals Where the AI ETF Trade Is Actually Expanding",
+          "n_ticker_articolo": 6
         },
         {
           "ora": "15:30",
           "score": -0.135,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Taiwan Semiconductor’s AI Bottleneck Hands Samsung a Powerful Pricing Opportunity",
+          "n_ticker_articolo": 7
         },
         {
           "ora": "16:00",
           "score": -0.15872892464735458,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Broadcom Rival Marvell Surges After Google Strikes AI Chip Deal, Gets Option to Buy $12.2B Stake",
+          "n_ticker_articolo": 4
         }
       ],
       "in_portafoglio": false,
@@ -330,7 +341,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "RDDT",
@@ -387,7 +399,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "F",
@@ -445,7 +458,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "PFE",
@@ -455,7 +469,10 @@
         {
           "ora": "19:45",
           "score": 0.12,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Pfizer Stock Rises Wednesday: What's Going On?",
+          "n_ticker_articolo": 2
         }
       ],
       "in_portafoglio": false,
@@ -509,7 +526,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "ADBE",
@@ -567,7 +585,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "AZN",
@@ -625,7 +644,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     }
   ],
   "soglia_gate_usata": 0.3,
@@ -26004,7 +26024,8 @@
       "soglie": {
         "thin": 0.05,
         "gate": 0.3
-      }
+      },
+      "quota_righe_fanout": 1.0
     }
   }
 }

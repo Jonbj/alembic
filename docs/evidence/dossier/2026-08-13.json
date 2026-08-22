@@ -151,16 +151,22 @@
         {
           "ora": "14:01",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "JD.com Q2 2026 Earnings Call: Complete Transcript",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "19:15",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "9 Consumer Discretionary Stocks With Whale Alerts In Today’s Session",
+          "n_ticker_articolo": 4
         }
       ],
       "in_portafoglio": false,
-      "causa": "THIN_NEUTRAL",
+      "causa": "OFF_TOPIC_NON_DECIDIBILE",
       "opportunity_v2": {
         "estimator_version": "2.0",
         "symbol": "JD",
@@ -209,7 +215,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.5
     },
     {
       "symbol": "NFLX",
@@ -219,22 +226,34 @@
         {
           "ora": "14:15",
           "score": 0.13756764873755672,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Bill Ackman Lost $400 Million on NFLX Stock in 2022 — Now He’s Back With a 3.15M-Share Bet, Saying Netflix Has ‘Won the Streaming Wars’ (UPDATED)",
+          "n_ticker_articolo": 5
         },
         {
           "ora": "17:00",
           "score": 0.36,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Bill Ackman Bets on Netflix as the Chart Shows Early Signs of a Rebound",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "19:30",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "10 Communication Services Stocks Whale Activity In Today’s Session",
+          "n_ticker_articolo": 5
         },
         {
           "ora": "19:45",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Bill Ackman Vs. Buffett Successor: Mastercard, Visa Stock Battle Lines Drawn — Who Wins?",
+          "n_ticker_articolo": 3
         }
       ],
       "in_portafoglio": false,
@@ -288,7 +307,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.75
     },
     {
       "symbol": "HOOD",
@@ -298,11 +318,14 @@
         {
           "ora": "15:45",
           "score": 0.012837257287120216,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Why Is Robinhood Stock Surging on Thursday?",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
-      "causa": "THIN_NEUTRAL",
+      "causa": "OFF_TOPIC_NON_DECIDIBILE",
       "opportunity_v2": {
         "estimator_version": "2.0",
         "symbol": "HOOD",
@@ -352,7 +375,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.0
     },
     {
       "symbol": "PLTR",
@@ -362,7 +386,10 @@
         {
           "ora": "17:15",
           "score": 0.385,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Palantir Shares Edge Higher Thursday: What's Driving the Action?",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -416,7 +443,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.0
     },
     {
       "symbol": "ADBE",
@@ -474,7 +502,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "CRM",
@@ -532,7 +561,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "TSLA",
@@ -542,27 +572,42 @@
         {
           "ora": "14:46",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "‘Tesla Is Going All In on Nuclear’: Chamath Palihapitiya Weighs In on Elon Musk’s $10 Billiom Solar Manufacturing Bet (UPDATED)",
+          "n_ticker_articolo": 2
         },
         {
           "ora": "14:46",
           "score": 0.03,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "‘Tesla Is Going All In on Nuclear’: Chamath Palihapitiya Weighs In on Elon Musk’s $10 Billiom Solar Manufacturing Bet (UPDATED)",
+          "n_ticker_articolo": 2
         },
         {
           "ora": "16:00",
           "score": -0.15,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Gary Black Says Tesla Needs to Work on Branding: ‘Without Great Marketing, Apple Would Not Be a $4.4T Market Cap Company’",
+          "n_ticker_articolo": 4
         },
         {
           "ora": "16:46",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Smart Money Sells #1 Dow Stock; Hidden Inflation In PPI; Applied Materials Earnings To Tell A Key AI Story",
+          "n_ticker_articolo": 12
         },
         {
           "ora": "19:16",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "9 Consumer Discretionary Stocks With Whale Alerts In Today’s Session",
+          "n_ticker_articolo": 4
         }
       ],
       "in_portafoglio": false,
@@ -616,7 +661,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "TMUS",
@@ -674,7 +720,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "RDDT",
@@ -732,7 +779,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     }
   ],
   "soglia_gate_usata": 0.3,
@@ -28610,14 +28658,15 @@
       "conteggi": {
         "NO_NEWS": 4,
         "BELOW_GATE": 1,
-        "THIN_NEUTRAL": 2,
+        "OFF_TOPIC_NON_DECIDIBILE": 2,
         "NON_CLASSIFICATO": 2
       },
       "dominante": "NO_NEWS",
       "soglie": {
         "thin": 0.05,
         "gate": 0.3
-      }
+      },
+      "quota_righe_fanout": 0.6923076923076923
     }
   }
 }

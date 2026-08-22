@@ -151,12 +151,18 @@
         {
           "ora": "14:15",
           "score": 0.09,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "China’s AI Agents Race To Become Digital Employees",
+          "n_ticker_articolo": 2
         },
         {
           "ora": "17:15",
           "score": -0.31499999999999995,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Alibaba Stock Falls 7% on Profit Miss, but Analyst Stays Bullish on AI Cloud",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -209,7 +215,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.5
     },
     {
       "symbol": "TSLA",
@@ -219,27 +226,42 @@
         {
           "ora": "14:16",
           "score": -0.3603241851802329,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Wall Street Expects SpaceX to Outgrow Nvidia 7-to-1. Musk Says That's Too Low.",
+          "n_ticker_articolo": 7
         },
         {
           "ora": "14:16",
           "score": 0.012560521544648817,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Wall Street Expects SpaceX to Outgrow Nvidia 7-to-1. Musk Says That's Too Low.",
+          "n_ticker_articolo": 7
         },
         {
           "ora": "14:30",
           "score": -0.2180433749081344,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Tesla’s FSD Dream Hits a Roadblock? Ross Gerber Says Current Hardware May Never Reach Level 3-5 Autonomy (UPDATED)",
+          "n_ticker_articolo": 3
         },
         {
           "ora": "14:30",
           "score": -0.1363282417953312,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Tesla’s FSD Dream Hits a Roadblock? Ross Gerber Says Current Hardware May Never Reach Level 3-5 Autonomy (UPDATED)",
+          "n_ticker_articolo": 3
         },
         {
           "ora": "18:15",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Bond Buyback Is Simply A Band-Aid for $40T US Debt; Warsh Faces Jackson Hole Test",
+          "n_ticker_articolo": 9
         }
       ],
       "in_portafoglio": false,
@@ -293,7 +315,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "PLTR",
@@ -351,7 +374,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "ORCL",
@@ -361,16 +385,22 @@
         {
           "ora": "14:30",
           "score": -0.02767074101237214,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Bond Yields Are Rising Everywhere: Why This Isn't a US Debt Crisis",
+          "n_ticker_articolo": 5
         },
         {
           "ora": "16:30",
           "score": 0.014842718859573806,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "org_lookup",
+          "testo_scorato": "Oracle Shares Rise as Dip Buyers Return Despite Stock Remaining Down Nearly 60% From Its September Peak",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
-      "causa": "THIN_NEUTRAL",
+      "causa": "OFF_TOPIC",
       "opportunity_v2": {
         "estimator_version": "2.0",
         "symbol": "ORCL",
@@ -420,7 +450,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.5
     },
     {
       "symbol": "F",
@@ -478,7 +509,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     }
   ],
   "soglia_gate_usata": 0.3,
@@ -26935,14 +26967,15 @@
       "totale_candidati": 5,
       "conteggi": {
         "NO_NEWS": 2,
-        "THIN_NEUTRAL": 1,
+        "OFF_TOPIC": 1,
         "NON_CLASSIFICATO": 2
       },
       "dominante": "NO_NEWS",
       "soglie": {
         "thin": 0.05,
         "gate": 0.3
-      }
+      },
+      "quota_righe_fanout": 0.7777777777777778
     }
   }
 }

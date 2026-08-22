@@ -151,7 +151,10 @@
         {
           "ora": "14:15",
           "score": -0.45423656693270575,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Baidu’s AI Pivot Hits the Gas, but Its Advertising Cash Cow Is Losing Steam",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -204,7 +207,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.0
     },
     {
       "symbol": "HOOD",
@@ -214,7 +218,10 @@
         {
           "ora": "16:15",
           "score": -0.43500000000000005,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Why Is Robinhood Stock Falling on Tuesday?",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -267,7 +274,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.0
     },
     {
       "symbol": "META",
@@ -277,27 +285,42 @@
         {
           "ora": "14:30",
           "score": -0.12,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "J.P. Morgan’s Bill Eigen Sounds 2008 Crash Alarm Over AI Boom — Says Investors Are Missing One Warning Sign That Could Change Everything: ‘What I’m Terrified of Is…’ (UPDATED)",
+          "n_ticker_articolo": 7
         },
         {
           "ora": "15:30",
           "score": -0.312243432106159,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Meta’s AI Spending Math Is 'Astonishing,' Steve Eisman Says: Why Are Expenses Up 55%?",
+          "n_ticker_articolo": 2
         },
         {
           "ora": "17:15",
           "score": -0.2749833740214787,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "What's Going On With Meta Platforms Stock Tuesday?",
+          "n_ticker_articolo": 3
         },
         {
           "ora": "17:30",
           "score": -0.18,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Nvidia, AMD, Broadcom, Meta Slide as Bond Yields Surge: Why Tech Stocks Are Getting Hit",
+          "n_ticker_articolo": 4
         },
         {
           "ora": "17:45",
           "score": -0.05923915627296639,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "AI's Half-Trillion-Dollar Borrowing Binge Is Competing With Uncle Sam for Bond Buyers",
+          "n_ticker_articolo": 7
         }
       ],
       "in_portafoglio": false,
@@ -350,7 +373,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "RDDT",
@@ -407,7 +431,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "ADBE",
@@ -417,11 +442,14 @@
         {
           "ora": "18:15",
           "score": -0.011552839325085242,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Nasdaq Drops, Chip Stocks Crater As Bond Yields Bite: Stock Market Today",
+          "n_ticker_articolo": 3
         }
       ],
       "in_portafoglio": false,
-      "causa": "THIN_NEUTRAL",
+      "causa": "OFF_TOPIC_NON_DECIDIBILE",
       "opportunity_v2": {
         "estimator_version": "2.0",
         "symbol": "ADBE",
@@ -471,7 +499,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "AVGO",
@@ -481,7 +510,10 @@
         {
           "ora": "17:30",
           "score": -0.18931703595051144,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Nvidia, AMD, Broadcom, Meta Slide as Bond Yields Surge: Why Tech Stocks Are Getting Hit",
+          "n_ticker_articolo": 4
         }
       ],
       "in_portafoglio": false,
@@ -534,7 +566,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     }
   ],
   "soglia_gate_usata": 0.3,
@@ -24928,14 +24961,15 @@
       "conteggi": {
         "NO_NEWS": 1,
         "BELOW_GATE": 1,
-        "THIN_NEUTRAL": 1,
+        "OFF_TOPIC_NON_DECIDIBILE": 1,
         "NON_CLASSIFICATO": 3
       },
       "dominante": null,
       "soglie": {
         "thin": 0.05,
         "gate": 0.3
-      }
+      },
+      "quota_righe_fanout": 0.7777777777777778
     }
   }
 }

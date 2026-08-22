@@ -526,12 +526,44 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
     mercato = compute_market(closes=closes, news_counts=news, soglia_mover=SOGLIA_MOVER)
 
     # --- candidati miss ----------------------------------------------------
+    # #244: ogni riga scorata porta anche la propria PROVENIENZA, altrimenti la
+    # partizione di THIN_NEUTRAL in tre bucket non e' decidibile a valle. Il
+    # join su news_log e' LEFT: i segnali senza `news_log_id` (fallback FinBERT,
+    # righe pre-#030) restano senza `extraction_method` e ricadono sul
+    # comportamento pre-#244, che e' esattamente cio' che vogliamo.
+    #   testo_scorato    — il titolo. Per org_lookup/gdelt_doc il connettore
+    #                      costruisce l'item con `body = title`
+    #                      (src/connectors/gdelt_gkg.py:208), quindi il titolo
+    #                      E' il testo scorato; per source_metadata e' solo lo
+    #                      snippet troncato, e il classificatore infatti non
+    #                      lo usa per decidere.
+    #   n_ticker_articolo — fan-out: quanti ticker condividono lo stesso
+    #                      articolo. Il vincolo uq_news_log_url_ticker rende
+    #                      `count(*) per url` esattamente il numero di ticker
+    #                      distinti. Metrica propria (#169), MAI un input di
+    #                      OFF_TOPIC.
+    # I titoli passano per translate(): `_psql` splitta su '|' e '\n', e un
+    # titolo tipo «Stocks | Reuters» sfaserebbe le colonne di tutta la riga.
     segnali: dict[str, list[dict]] = defaultdict(list)
     for r in _psql(
-        f"SELECT symbol, to_char(generated_at,'HH24:MI'), score, fallback_used "
-        f"FROM sentiment_signals WHERE generated_at >= '{g}' "
-        f"AND generated_at < '{g}'::date + 1 ORDER BY generated_at;"):
-        segnali[r[0]].append({"ora": r[1], "score": float(r[2]), "fallback": r[3] == "t"})
+        f"SELECT ss.symbol, to_char(ss.generated_at,'HH24:MI'), ss.score, ss.fallback_used, "
+        f"COALESCE(nl.extraction_method,''), "
+        f"translate(COALESCE(nl.title,''), '|' || chr(10) || chr(13), '   '), "
+        f"CASE WHEN COALESCE(nl.url,'') = '' THEN '' ELSE "
+        f"  (SELECT count(*)::text FROM news_log n2 WHERE n2.url = nl.url) END "
+        f"FROM sentiment_signals ss LEFT JOIN news_log nl ON nl.id = ss.news_log_id "
+        f"WHERE ss.generated_at >= '{g}' "
+        f"AND ss.generated_at < '{g}'::date + 1 ORDER BY ss.generated_at;"):
+        segnale = {"ora": r[1], "score": float(r[2]), "fallback": r[3] == "t"}
+        # Chiavi presenti solo se il dato esiste: assente != vuoto, e il
+        # classificatore distingue i due casi (senza_provenienza -> THIN_NEUTRAL).
+        if r[4]:
+            segnale["extraction_method"] = r[4]
+        if r[5]:
+            segnale["testo_scorato"] = r[5]
+        if r[6]:
+            segnale["n_ticker_articolo"] = int(r[6])
+        segnali[r[0]].append(segnale)
 
     in_portafoglio = {r[0] for r in _psql(
         f"SELECT DISTINCT symbol FROM trades "

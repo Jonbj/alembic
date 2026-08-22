@@ -151,37 +151,58 @@
         {
           "ora": "14:45",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Earnings Prediction Market Preview: What Will Elon Musk Say?",
+          "n_ticker_articolo": 3
         },
         {
           "ora": "14:45",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Earnings Prediction Market Preview: What Will Elon Musk Say?",
+          "n_ticker_articolo": 3
         },
         {
           "ora": "17:16",
           "score": 0.019322116925807844,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Is Stuffing Its Rockets With Starlink — And Everyone Else Is Getting Shut Out",
+          "n_ticker_articolo": 2
         },
         {
           "ora": "17:30",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "EXCLUSIVE: Top 12 Most-Searched Tickers in July on Benzinga Pro – SpaceX, Tesla, Micron Stay Hot, Nebius Rejoins List",
+          "n_ticker_articolo": 9
         },
         {
           "ora": "18:00",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "47% Earnings Growth? Not Really; Bezos Sells Amazon Stock; Strong Earnings From Palantir, Caterpillar",
+          "n_ticker_articolo": 13
         },
         {
           "ora": "19:16",
           "score": 0.44999999999999996,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "How Anthropic and SpaceX Are Quietly Boosting Big Tech Profits",
+          "n_ticker_articolo": 4
         },
         {
           "ora": "19:45",
           "score": -0.3001298387311689,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX's $24.6 Billion Short Bet Sets Up High-Stakes Week for Leveraged ETFs",
+          "n_ticker_articolo": 2
         }
       ],
       "in_portafoglio": false,
@@ -235,7 +256,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "QCOM",
@@ -293,7 +315,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "AVGO",
@@ -303,22 +326,34 @@
         {
           "ora": "16:45",
           "score": 0.2761817742236365,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Big Tech's $1.2 Trillion Hyperscaler AI Bet Could Ignite the Next Semiconductor ETF Rally",
+          "n_ticker_articolo": 8
         },
         {
           "ora": "17:45",
           "score": -0.12,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Marvell Stock Surges 10%: Next-Gen AI Storage Unveiled Ahead of Q2 Earnings",
+          "n_ticker_articolo": 3
         },
         {
           "ora": "18:46",
           "score": 0.12,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "S&P 500 Hits Record Highs, Palantir Jumps 27%: Stock Market Today",
+          "n_ticker_articolo": 6
         },
         {
           "ora": "19:30",
           "score": 0.13315390630753113,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "What Is Going on With Broadcom Stock on Tuesday?",
+          "n_ticker_articolo": 2
         }
       ],
       "in_portafoglio": false,
@@ -372,7 +407,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "IBM",
@@ -382,11 +418,14 @@
         {
           "ora": "19:16",
           "score": 0.0,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Why Is Rigetti Stock Surging on Tuesday?",
+          "n_ticker_articolo": 2
         }
       ],
       "in_portafoglio": false,
-      "causa": "THIN_NEUTRAL",
+      "causa": "OFF_TOPIC_NON_DECIDIBILE",
       "opportunity_v2": {
         "estimator_version": "2.0",
         "symbol": "IBM",
@@ -436,7 +475,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "HOOD",
@@ -494,7 +534,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "NOW",
@@ -552,7 +593,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "RDDT",
@@ -610,7 +652,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "SAP",
@@ -668,7 +711,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "SNOW",
@@ -726,7 +770,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     }
   ],
   "soglia_gate_usata": 0.3,
@@ -31492,14 +31537,15 @@
       "conteggi": {
         "NO_NEWS": 6,
         "BELOW_GATE": 1,
-        "THIN_NEUTRAL": 1,
+        "OFF_TOPIC_NON_DECIDIBILE": 1,
         "NON_CLASSIFICATO": 1
       },
       "dominante": "NO_NEWS",
       "soglie": {
         "thin": 0.05,
         "gate": 0.3
-      }
+      },
+      "quota_righe_fanout": 1.0
     }
   }
 }

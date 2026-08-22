@@ -151,17 +151,26 @@
         {
           "ora": "16:30",
           "score": 0.04069243586947101,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Nebius Jumps 20% Days After Michael Burry Said His AI Shorts Were Like ‘Shooting Fish in a Barrel’",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "17:00",
           "score": 0.18605193549246754,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "What's Going On With Oracle Stock on Monday?",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "18:45",
           "score": 0.04,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Quantinuum Is a ‘Core Quantum Name to Own,’ Analyst Says",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -215,7 +224,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.0
     },
     {
       "symbol": "META",
@@ -225,7 +235,10 @@
         {
           "ora": "18:30",
           "score": 0.08,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Super Micro, Lumentum, CoreWeave Earnings Highlight AI Infrastructure Demand; CPI Data Shows Stagflation Risks Remain",
+          "n_ticker_articolo": 9
         }
       ],
       "in_portafoglio": false,
@@ -278,7 +291,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "HD",
@@ -288,17 +302,26 @@
         {
           "ora": "18:15",
           "score": -0.11753854174337487,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "How To Earn $500 A Month From Home Depot Stock Ahead Of Q2 Earnings",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "19:00",
           "score": 0.02,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Stock Market Today: Nasdaq 100 Rises on Strong AI Earnings, Benign Inflation",
+          "n_ticker_articolo": 5
         },
         {
           "ora": "19:15",
           "score": -0.20396135697011905,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Home Depot Stock Slips as Leadership Shift Lands Ahead of Earnings",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -351,7 +374,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.3333333333333333
     }
   ],
   "soglia_gate_usata": 0.3,
@@ -22929,7 +22953,8 @@
       "soglie": {
         "thin": 0.05,
         "gate": 0.3
-      }
+      },
+      "quota_righe_fanout": 0.2857142857142857
     }
   }
 }

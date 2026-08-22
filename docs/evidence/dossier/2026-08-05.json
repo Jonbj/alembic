@@ -151,22 +151,34 @@
         {
           "ora": "14:30",
           "score": 0.10784483788207738,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Latest Pentagon Deal Is Bigger Than Half a Year of Rocket Revenue",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "17:30",
           "score": -0.17056626883806367,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "QUICK SPARK: SpaceX's Biggest Growth Story Comes with a Concentration Risk",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "18:31",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Lockup Expiry Could Send a Gentle Jolt Through QQQ, Nasdaq ETFs",
+          "n_ticker_articolo": 6
         },
         {
           "ora": "19:00",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Chooses Nvidia; Short Squeeze Drives Market Rally, But Extreme Positive Sentiment Flashes Warning",
+          "n_ticker_articolo": 13
         }
       ],
       "in_portafoglio": false,
@@ -219,7 +231,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.5
     },
     {
       "symbol": "AZN",
@@ -277,7 +290,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "NVDA",
@@ -287,32 +301,50 @@
         {
           "ora": "14:45",
           "score": 0.04,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "QUICK SPARK: QQQ Pulls In Nearly $5 Billion in a Day as Investors Pile Into Big Tech",
+          "n_ticker_articolo": 9
         },
         {
           "ora": "16:45",
           "score": -0.16,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "QUICK SPARK: Michael Burry Pegs Palantir, Nvidia as 'Future Ghost Towns'",
+          "n_ticker_articolo": 3
         },
         {
           "ora": "17:15",
           "score": 0.15434909336254102,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "AMD Stock Hit By Musk’s Nvidia Bet: BofA Says 'Ignore the Noise'",
+          "n_ticker_articolo": 2
         },
         {
           "ora": "18:00",
           "score": 0.10004509915837118,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "What Is Going on with Taiwan Semiconductor Stock on Wednesday?",
+          "n_ticker_articolo": 4
         },
         {
           "ora": "18:30",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Lockup Expiry Could Send a Gentle Jolt Through QQQ, Nasdaq ETFs",
+          "n_ticker_articolo": 6
         },
         {
           "ora": "19:00",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Chooses Nvidia; Short Squeeze Drives Market Rally, But Extreme Positive Sentiment Flashes Warning",
+          "n_ticker_articolo": 13
         }
       ],
       "in_portafoglio": false,
@@ -366,7 +398,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "QCOM",
@@ -423,7 +456,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     }
   ],
   "soglia_gate_usata": 0.3,
@@ -28897,7 +28931,8 @@
       "soglie": {
         "thin": 0.05,
         "gate": 0.3
-      }
+      },
+      "quota_righe_fanout": 0.8
     }
   }
 }

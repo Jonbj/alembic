@@ -199,7 +199,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "BA",
@@ -209,11 +210,14 @@
         {
           "ora": "18:15",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "10 Industrials Stocks With Whale Alerts In Today’s Session",
+          "n_ticker_articolo": 2
         }
       ],
       "in_portafoglio": false,
-      "causa": "THIN_NEUTRAL",
+      "causa": "OFF_TOPIC_NON_DECIDIBILE",
       "opportunity_v2": {
         "estimator_version": "2.0",
         "symbol": "BA",
@@ -262,7 +266,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "NVO",
@@ -272,12 +277,18 @@
         {
           "ora": "14:16",
           "score": 0.2082384761414428,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Bank of America Spends $250 Million a Year on Ozempic and Other GLP-1 Drugs, CEO Calls It 'a Good Investment'",
+          "n_ticker_articolo": 3
         },
         {
           "ora": "14:46",
           "score": 0.22145530561114543,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Novo Nordisk Scores Major Court Win, Dutch Judge Halts Compounded Semaglutide Nasal Spray",
+          "n_ticker_articolo": 2
         }
       ],
       "in_portafoglio": false,
@@ -331,7 +342,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "CRM",
@@ -341,11 +353,14 @@
         {
           "ora": "18:30",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "10 Information Technology Stocks Whale Activity In Today’s Session",
+          "n_ticker_articolo": 3
         }
       ],
       "in_portafoglio": false,
-      "causa": "THIN_NEUTRAL",
+      "causa": "OFF_TOPIC_NON_DECIDIBILE",
       "opportunity_v2": {
         "estimator_version": "2.0",
         "symbol": "CRM",
@@ -394,7 +409,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     }
   ],
   "soglia_gate_usata": 0.3,
@@ -23897,13 +23913,14 @@
       "conteggi": {
         "NO_NEWS": 1,
         "BELOW_GATE": 1,
-        "THIN_NEUTRAL": 2
+        "OFF_TOPIC_NON_DECIDIBILE": 2
       },
-      "dominante": "THIN_NEUTRAL",
+      "dominante": "OFF_TOPIC_NON_DECIDIBILE",
       "soglie": {
         "thin": 0.05,
         "gate": 0.3
-      }
+      },
+      "quota_righe_fanout": 1.0
     }
   }
 }

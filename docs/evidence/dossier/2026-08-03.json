@@ -151,7 +151,10 @@
         {
           "ora": "15:45",
           "score": 0.16930757131341273,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Reddit Stock Gains Monday: What's Driving the Post-Earnings Rebound?",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -205,7 +208,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.0
     },
     {
       "symbol": "BA",
@@ -263,7 +267,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "AZN",
@@ -273,11 +278,14 @@
         {
           "ora": "18:45",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Yen Intervention And Falling Oil Help Stocks, But Selling In Korea Throws A Monkey Wrench",
+          "n_ticker_articolo": 10
         }
       ],
       "in_portafoglio": false,
-      "causa": "THIN_NEUTRAL",
+      "causa": "OFF_TOPIC_NON_DECIDIBILE",
       "opportunity_v2": {
         "estimator_version": "2.0",
         "symbol": "AZN",
@@ -326,7 +334,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "SPCX",
@@ -336,32 +345,50 @@
         {
           "ora": "14:15",
           "score": -0.10086043934256653,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Could Burn Through Billions More as Elon Musk Ramps Up AI Spending With Tesla: Analyst Says Free Cash Flow is 'Just Not Part of the Story'",
+          "n_ticker_articolo": 4
         },
         {
           "ora": "14:45",
           "score": 0.12,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Elon Musk's SpaceX Faces Its Biggest Public Test Yet As First Earnings Near",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "16:01",
           "score": -0.12,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Amazon, Alphabet Lead 'AI Debt Tsunami' Now Blamed for 20-Year-High Rates",
+          "n_ticker_articolo": 7
         },
         {
           "ora": "16:16",
           "score": 0.11,
-          "fallback": true
+          "fallback": true,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Dodges 456 Million‑Share Supply Shock Ahead Of First-Ever Earnings",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "16:46",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Q2 Earnings Preview: Expert Says Report ‘Less About The Numbers and More About Elon Musk’s Vision’",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "19:45",
           "score": -0.25017065145059014,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Stock Faces Most Dangerous Moment Since IPO — Earnings and $100B Unlock Collide",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -415,7 +442,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.3333333333333333
     },
     {
       "symbol": "SNOW",
@@ -425,7 +453,10 @@
         {
           "ora": "16:30",
           "score": 0.19560454235310937,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "Snowflake Stock Surges: What's Driving the Rebound?",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -479,7 +510,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.0
     },
     {
       "symbol": "HOOD",
@@ -537,7 +569,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     },
     {
       "symbol": "BABA",
@@ -547,12 +580,18 @@
         {
           "ora": "17:00",
           "score": 0.0,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "org_lookup",
+          "testo_scorato": "Retail Stocks To Follow Today &#x2013; August 2nd",
+          "n_ticker_articolo": 1
         },
         {
           "ora": "17:30",
           "score": 0.23000000000000004,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "org_lookup",
+          "testo_scorato": "Alibaba shares climb 4% after launch of most powerful Qwen model yet",
+          "n_ticker_articolo": 1
         }
       ],
       "in_portafoglio": false,
@@ -606,7 +645,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 0.0
     },
     {
       "symbol": "TSLA",
@@ -616,11 +656,14 @@
         {
           "ora": "14:16",
           "score": -0.012522549579185586,
-          "fallback": false
+          "fallback": false,
+          "extraction_method": "source_metadata",
+          "testo_scorato": "SpaceX Could Burn Through Billions More as Elon Musk Ramps Up AI Spending With Tesla: Analyst Says Free Cash Flow is 'Just Not Part of the Story'",
+          "n_ticker_articolo": 4
         }
       ],
       "in_portafoglio": false,
-      "causa": "THIN_NEUTRAL",
+      "causa": "OFF_TOPIC_NON_DECIDIBILE",
       "opportunity_v2": {
         "estimator_version": "2.0",
         "symbol": "TSLA",
@@ -670,7 +713,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": 1.0
     },
     {
       "symbol": "SAP",
@@ -728,7 +772,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "quota_righe_fanout": null
     }
   ],
   "soglia_gate_usata": 0.3,
@@ -30251,13 +30296,14 @@
       "conteggi": {
         "NO_NEWS": 3,
         "BELOW_GATE": 4,
-        "THIN_NEUTRAL": 2
+        "OFF_TOPIC_NON_DECIDIBILE": 2
       },
       "dominante": "BELOW_GATE",
       "soglie": {
         "thin": 0.05,
         "gate": 0.3
-      }
+      },
+      "quota_righe_fanout": 0.3333333333333333
     }
   }
 }
