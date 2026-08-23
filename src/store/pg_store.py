@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import timedelta
 from typing import TYPE_CHECKING, Any
-
-log = logging.getLogger(__name__)
 
 import psycopg2
 from psycopg2 import pool
@@ -18,8 +15,12 @@ from src.costs.calculator import TradeCostCalculator
 from src.models.signals import SentimentResult
 
 if TYPE_CHECKING:
-    from src.models.news import NewsItem
     from src.llm.ensemble import ModelOutput
+    from src.models.news import NewsItem
+    from src.portfolio.stop_policy import FrozenStop, StopDecision
+    from src.strategies.s4.intent_ledger import S4IntentEvent
+
+log = logging.getLogger(__name__)
 
 # Global connection pool - lazy initialized
 _db_pool: pool.ThreadedConnectionPool | None = None
@@ -451,6 +452,59 @@ class PostgreSQLStore:
                 row = cur.fetchone()
             conn.commit()
             return int(row[0])
+        except Exception:
+            conn.rollback()
+            raise
+
+    _INSERT_S4_INTENT_EVENT = """
+        INSERT INTO s4_intent_events (
+            event_id, intent_id, causal_event_id, event_type, occurred_at,
+            decision_slot, symbol, signal_id, published_at, first_seen_at,
+            model_generated_at, decision_at, rank, competing_candidates,
+            s1_state, anti_pyramiding, reason_code, is_tradable, versions,
+            snapshot, missingness
+        ) VALUES (
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s::jsonb,
+            %s::jsonb, %s, %s, %s, %s::jsonb,
+            %s::jsonb, %s::jsonb
+        )
+        ON CONFLICT (event_id) DO NOTHING
+    """
+
+    def write_s4_intent_events(self, events: list["S4IntentEvent"]) -> None:
+        """Append S4 intent events; deterministic event IDs make retries idempotent."""
+        if not events:
+            return
+        params = [(
+            event.event_id,
+            event.intent_id,
+            event.causal_event_id,
+            event.event_type,
+            event.occurred_at,
+            event.decision_slot,
+            event.symbol,
+            event.signal_id,
+            event.published_at,
+            event.first_seen_at,
+            event.model_generated_at,
+            event.decision_at,
+            event.rank,
+            json.dumps(list(event.competing_candidates)),
+            json.dumps(event.s1_state, sort_keys=True),
+            event.anti_pyramiding,
+            event.reason_code,
+            event.is_tradable,
+            json.dumps(event.versions, sort_keys=True),
+            json.dumps(event.snapshot, sort_keys=True),
+            json.dumps(event.missingness, sort_keys=True),
+        ) for event in events]
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.executemany(self._INSERT_S4_INTENT_EVENT, params)
+            conn.commit()
         except Exception:
             conn.rollback()
             raise
@@ -2345,16 +2399,29 @@ class PostgreSQLStore:
     # generated after a strong ensemble signal must NOT overwrite it (the ensemble is the
     # more reliable read of current sentiment). Among same-status signals, most recent wins.
     _FETCH_SIGNALS_FOR_CYCLE = """
-        SELECT DISTINCT ON (symbol)
-            id, symbol, score, confidence,
-            COALESCE(reasoning, '') AS reasoning,
-            model_id, ensemble_std, fallback_used, generated_at, published_at
-        FROM sentiment_signals
-        WHERE generated_at >= NOW() - (%s || ' hours')::interval
-          AND (published_at IS NULL
-               OR published_at >= NOW() - (%s || ' hours')::interval)
-          AND symbol = ANY(%s)
-        ORDER BY symbol, fallback_used ASC, generated_at DESC
+        SELECT DISTINCT ON (ss.symbol)
+            ss.id, ss.symbol, ss.score, ss.confidence,
+            COALESCE(ss.reasoning, '') AS reasoning,
+            ss.model_id, ss.ensemble_std, ss.fallback_used,
+            ss.generated_at, ss.published_at, ss.news_log_id,
+            COALESCE(nl.raw_ingested_at, nl.fetched_at, nl.created_at) AS first_seen_at,
+            nl.source AS news_source, nl.content_hash, nl.extraction_method,
+            resolver.decision AS resolver_decision,
+            resolver.extraction_method AS resolver_method
+        FROM sentiment_signals AS ss
+        LEFT JOIN news_log AS nl ON nl.id = ss.news_log_id
+        LEFT JOIN LATERAL (
+            SELECT nre.decision, nre.extraction_method
+            FROM news_resolved_entities AS nre
+            WHERE nre.news_log_id = ss.news_log_id
+            ORDER BY nre.created_at DESC, nre.id DESC
+            LIMIT 1
+        ) AS resolver ON TRUE
+        WHERE ss.generated_at >= NOW() - (%s || ' hours')::interval
+          AND (ss.published_at IS NULL
+               OR ss.published_at >= NOW() - (%s || ' hours')::interval)
+          AND ss.symbol = ANY(%s)
+        ORDER BY ss.symbol, ss.fallback_used ASC, ss.generated_at DESC
     """
 
     def fetch_signals_for_cycle(
@@ -2405,6 +2472,9 @@ class PostgreSQLStore:
             published_at = row.get("published_at")
             if published_at is not None and published_at.tzinfo is None:
                 published_at = published_at.replace(tzinfo=_tz.utc)
+            first_seen_at = row.get("first_seen_at")
+            if first_seen_at is not None and first_seen_at.tzinfo is None:
+                first_seen_at = first_seen_at.replace(tzinfo=_tz.utc)
             results.append(
                 SentimentResult(
                     symbol=row["symbol"],
@@ -2417,6 +2487,13 @@ class PostgreSQLStore:
                     generated_at=generated_at,
                     published_at=published_at,
                     signal_id=row.get("id"),
+                    news_log_id=row.get("news_log_id"),
+                    first_seen_at=first_seen_at,
+                    news_source=row.get("news_source"),
+                    content_hash=row.get("content_hash"),
+                    extraction_method=row.get("extraction_method"),
+                    resolver_decision=row.get("resolver_decision"),
+                    resolver_method=row.get("resolver_method"),
                 )
             )
         return results
