@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from src.models.signals import SentimentResult
 from src.strategies.s4.config import S4Config
 from src.strategies.s4.ranking import CrossSectionalRanker
@@ -44,7 +46,7 @@ def test_diagnostics_conservano_rank_oltre_top_n_e_reason_dei_filtri():
 def test_diagnostics_segnalano_dedup_e_minimo_di_popolazione():
     old = _signal("AAA", 10, 0.9)
     new = _signal("AAA", 11, 0.8)
-    new.generated_at = old.generated_at.replace(microsecond=1)
+    new.generated_at = old.generated_at + timedelta(seconds=1)
     result = CrossSectionalRanker(S4Config(n_top=5, min_stocks=2)).rank([old, new])
     diagnostics = {row.signal_id: row for row in result.diagnostics}
 

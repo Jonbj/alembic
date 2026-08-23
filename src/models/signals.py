@@ -24,3 +24,12 @@ class SentimentResult(BaseModel):
     # decision time, instead of re-querying "latest" later and racing a signal
     # that arrived in between (see the 2026-07-15 MSFT incident).
     signal_id: int | None = None
+    # #294: provenance point-in-time for the S4 entry-intent ledger. Nullable
+    # fields keep legacy rows and synthetic/backtest signals compatible.
+    news_log_id: int | None = None
+    first_seen_at: datetime | None = None
+    news_source: str | None = None
+    content_hash: str | None = None
+    extraction_method: str | None = None
+    resolver_decision: str | None = None
+    resolver_method: str | None = None

@@ -13,7 +13,6 @@ from src.strategies.s4.intent_ledger import (
     build_component_versions,
 )
 
-
 _DECISION_AT = datetime(2026, 8, 24, 14, 7, 31, tzinfo=timezone.utc)
 
 
