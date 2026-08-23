@@ -143,6 +143,7 @@ def test_copertura_deduplica_articoli_separa_relevance_e_attribuisce_ogni_segnal
     }
     assert out["per_ticker"]["AAPL"]["articoli_unici"] == 3
     assert out["per_ticker"]["AAPL"]["effective_timely_articles"] == 1
+    assert out["per_ticker"]["AAPL"]["quota_effective_timely"] == 1 / 3
     assert out["per_ticker"]["MSFT"]["effective_timely_articles"] == 0
     assert out["per_ticker"]["NVDA"]["effective_timely_articles"] == 1
     assert out["per_ticker"]["AAPL"]["max_score_own"] == 0.42
@@ -158,6 +159,7 @@ def test_copertura_deduplica_articoli_separa_relevance_e_attribuisce_ogni_segnal
     assert out["per_settore"]["tech"]["ticker_coperti"] == 1
     assert out["per_settore"]["semis"]["ticker_coperti"] == 1
     assert sum(v["articoli_unici"] for v in out["per_fonte"].values()) == 5
+    assert out["per_fonte"]["wire_a"]["quota_effective_timely"] == 1.0
 
     segnali = {row["signal_id"]: row for row in out["segnali"]}
     assert set(segnali) == set(range(101, 109))

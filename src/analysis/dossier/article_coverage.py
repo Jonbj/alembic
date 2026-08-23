@@ -91,6 +91,10 @@ def canonical_article_id(row: dict) -> str:
     if news_log_id is not None:
         return f"news_log:{news_log_id}"
 
+    signal_id = row.get("signal_id")
+    if signal_id is not None:
+        return f"signal:{signal_id}"
+
     stable = "|".join(
         _normalise_text(row.get(key)) for key in ("source", "ticker", "published_at")
     )
@@ -320,12 +324,16 @@ def build_article_coverage(
             and signal.get("score") is not None
         ]
         counts = Counter(mapping["relevance"] for mapping in ticker_mappings)
+        effective_count = sum(
+            bool(mapping["effective_timely"]) for mapping in ticker_mappings
+        )
         per_ticker[ticker] = {
             "settore": sector_by_ticker.get(ticker, "UNKNOWN"),
             "articoli_unici": len(ticker_mappings),
             "rilevanza": {category: counts.get(category, 0) for category in RELEVANCE_CATEGORIES},
-            "effective_timely_articles": sum(
-                bool(mapping["effective_timely"]) for mapping in ticker_mappings
+            "effective_timely_articles": effective_count,
+            "quota_effective_timely": (
+                effective_count / len(ticker_mappings) if ticker_mappings else None
             ),
             "max_score_own": _strongest(own_scores),
             "max_score_fanout": _strongest(fanout_scores),
@@ -336,7 +344,7 @@ def build_article_coverage(
     for sector in sectors:
         members = {ticker for ticker in universe if sector_by_ticker.get(ticker, "UNKNOWN") == sector}
         covered = {ticker for ticker in members if per_ticker[ticker]["effective_timely_articles"] > 0}
-        canonical = {
+        sector_canonical = {
             key[0] for key, mapping in mappings.items()
             if key[1] in members and mapping["effective_timely"]
         }
@@ -344,7 +352,7 @@ def build_article_coverage(
             "ticker_universo": len(members),
             "ticker_coperti": len(covered),
             "quota": len(covered) / len(members) if members else None,
-            "articoli_effective_timely": len(canonical),
+            "articoli_effective_timely": len(sector_canonical),
         }
 
     effective_canonical = {
@@ -352,15 +360,18 @@ def build_article_coverage(
     }
     per_source_counts: Counter[str] = Counter()
     per_source_effective: Counter[str] = Counter()
-    for canonical, primary in primary_by_canonical.items():
+    for canonical_id, primary in primary_by_canonical.items():
         source = str(primary.get("source") or "UNKNOWN")
         per_source_counts[source] += 1
-        if canonical in effective_canonical:
+        if canonical_id in effective_canonical:
             per_source_effective[source] += 1
     per_source = {
         source: {
             "articoli_unici": per_source_counts[source],
             "articoli_effective_timely": per_source_effective[source],
+            "quota_effective_timely": (
+                per_source_effective[source] / per_source_counts[source]
+            ),
         }
         for source in sorted(per_source_counts)
     }
@@ -376,7 +387,7 @@ def build_article_coverage(
         if metrics["articoli_effective_timely"] > 0
     }
     source_effective = {
-        source: metrics["articoli_effective_timely"]
+        source: int(metrics["articoli_effective_timely"])
         for source, metrics in per_source.items()
         if metrics["articoli_effective_timely"] > 0
     }
@@ -395,11 +406,20 @@ def build_article_coverage(
     )
 
     articles = []
-    for canonical, canonical_rows in sorted(by_canonical.items()):
-        primary = primary_by_canonical[canonical]
-        article_mappings = [mapping for key, mapping in mappings.items() if key[0] == canonical]
+    for canonical_id, canonical_rows in sorted(by_canonical.items()):
+        primary = primary_by_canonical[canonical_id]
+        published = [
+            value
+            for value in (
+                _as_datetime(row.get("published_at")) for row in canonical_rows
+            )
+            if value is not None
+        ]
+        article_mappings = [
+            mapping for key, mapping in mappings.items() if key[0] == canonical_id
+        ]
         articles.append({
-            "canonical_article_id": canonical,
+            "canonical_article_id": canonical_id,
             "source": primary.get("source") or "UNKNOWN",
             "sources": sorted({str(row.get("source") or "UNKNOWN") for row in canonical_rows}),
             "tickers": sorted({mapping["ticker"] for mapping in article_mappings if mapping["ticker"]}),
@@ -411,7 +431,11 @@ def build_article_coverage(
                 mapping["ticker"]: mapping["relevance"] for mapping in article_mappings
                 if mapping["ticker"]
             },
-            "timing": classify_timing(primary.get("published_at"), session_open, session_close),
+            "timing": (
+                classify_timing(min(published), session_open, session_close)
+                if published
+                else "UNKNOWN"
+            ),
         })
 
     return {
