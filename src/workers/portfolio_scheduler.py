@@ -226,6 +226,80 @@ def _fire_alert(notifier, message: str, level: AlertLevel) -> None:
         log.warning("Telegram alert send failed: %s", exc)
 
 
+def _write_s4_intent_events_fail_open(store, events, *, phase: str) -> bool:
+    """Persist ledger telemetry without ever changing the portfolio path (#294)."""
+    try:
+        store.write_s4_intent_events(events)
+        return True
+    except Exception as exc:
+        log.warning("#294: failed to write S4 %s intent events: %s", phase, exc)
+        return False
+
+
+def _mark_s4_intent_signals(ledger, signals, reason_code: str) -> None:
+    if ledger is None:
+        return
+    for signal in signals:
+        if signal.signal_id is not None:
+            ledger.set_disposition(signal_id=signal.signal_id, reason_code=reason_code)
+
+
+def _finalize_s4_intent_ledger(
+    ledger,
+    *,
+    store,
+    symbol_signal_provenance: dict,
+    symbol_strategies: dict,
+    open_db_symbols: set[str] | None,
+    open_trade_origin: dict[str, str],
+    order_dispositions: dict[str, tuple[str, dict]],
+) -> bool:
+    """Append final outcomes after every live guard, reconciled by intent_id."""
+    if ledger is None:
+        return True
+
+    for symbol, signal_ids in ledger.signal_ids_by_symbol.items():
+        if open_db_symbols is None:
+            s1_state = {
+                "status": "missing",
+                "reason": "open_trade_guard_unavailable",
+            }
+        else:
+            s1_state = {
+                "held": symbol in open_db_symbols,
+                "origin": open_trade_origin.get(symbol),
+                "targeted": "S1" in symbol_strategies.get(symbol, []),
+            }
+        for signal_id in signal_ids:
+            ledger.set_s1_state(signal_id=signal_id, s1_state=s1_state)
+
+    for symbol, provenance in symbol_signal_provenance.items():
+        signal_id = provenance.get("signal_id")
+        if signal_id is None:
+            continue
+        reason_code, details = order_dispositions.get(symbol, ("NO_ENTRY_ORDER", {}))
+        ledger.set_disposition(
+            signal_id=signal_id,
+            reason_code=reason_code,
+            is_tradable=reason_code == "SUBMITTED",
+            anti_pyramiding=reason_code == "SKIP_PYRAMIDING",
+            details=details,
+        )
+
+    events = ledger.disposition_events(default_reason="UNCLASSIFIED_PRE_RANK_GUARD")
+    return _write_s4_intent_events_fail_open(store, events, phase="disposition")
+
+
+def _emit_order_disposition(callback, symbol: str, reason: str, **details) -> None:
+    """Best-effort callback used only by the observational intent ledger."""
+    if callback is None:
+        return
+    try:
+        callback(symbol, reason, details)
+    except Exception as exc:
+        log.warning("#294: order-disposition telemetry failed for %s: %s", symbol, exc)
+
+
 _BUYING_POWER_UNSET = object()
 
 
@@ -2184,7 +2258,12 @@ def _run_cycle_inner() -> dict:
     _s4_dispositions: dict[str, str] = {}
     for entry in active:
         try:
-            instance = _build_strategy_instance(entry, bars_df, dispositions=_s4_dispositions)
+            instance = _build_strategy_instance(
+                entry,
+                bars_df,
+                dispositions=_s4_dispositions,
+                decision_at=end,
+            )
             if instance is not None:
                 strategy_instances[entry.strategy_id] = instance
         except Exception as exc:
@@ -2394,6 +2473,9 @@ def _run_cycle_inner() -> dict:
         strategy_returns=_strategy_returns,
         last_target_weights=_last_target_weights or None,
     )
+    _s4_intent_ledger = getattr(
+        strategy_instances.get("S4"), "_intent_ledger", None
+    )
 
     # #185: advance the clock only for the sleeves that actually re-decided weights.
     _persist_rebalance_state(result, ts, config.REDIS_URL)
@@ -2581,6 +2663,11 @@ def _run_cycle_inner() -> dict:
     _symbol_decisions: dict[str, dict] = {}  # {symbol: {decision_id, score, signal_id}}
     _pending_s4_fires: dict[str, int] = {}   # B27-FIX: {symbol: signal_id} to mark after Alpaca confirm
     _s4_signals: dict[str, dict] = {}
+    _sym_strats = result.symbol_strategies
+    _s4_provenance: dict[str, dict] = result.symbol_signal_provenance or {}
+    _idempotency_skip: set[str] = set()
+    _whipsaw_suppressed_symbols: set[str] = set()
+    _order_dispositions: dict[str, tuple[str, dict]] = {}
     # P0-09: read actual regime multiplier once; used in both decisions and trade writes.
     _regime_mult: float = _get_regime_multiplier_from_redis(config.REDIS_URL)
     _pg = None
@@ -2589,7 +2676,6 @@ def _run_cycle_inner() -> dict:
         _pg = PostgreSQLStore()
         # symbol_strategies maps each symbol to the list of strategies that contributed
         # to its merged weight (e.g. {"AAPL": ["S4"], "SPY": ["S2"]}).
-        _sym_strats = result.symbol_strategies
         _s4_symbols = [sym for sym, strats in _sym_strats.items() if "S4" in strats]
         # B33-follow-up: use the signal pinned by the ranker at weight-computation
         # time (result.symbol_signal_provenance) instead of re-querying "latest
@@ -2600,7 +2686,6 @@ def _run_cycle_inner() -> dict:
         # a -0.110 signal that arrived 34s later). Fall back to the live re-fetch
         # only for S4 symbols the orchestrator did not pin (should not happen in
         # practice — defensive only).
-        _s4_provenance: dict[str, dict] = result.symbol_signal_provenance or {}
         _unpinned_s4_symbols = [s for s in _s4_symbols if s not in _s4_provenance]
         _signal_ids = dict(_pg.fetch_latest_signal_ids(_unpinned_s4_symbols)) if _unpinned_s4_symbols else {}
         for _sym in _s4_symbols:
@@ -2610,7 +2695,6 @@ def _run_cycle_inner() -> dict:
         # P1-S4-IDEMPOTENCY: skip S4 orders whose signal_id already fired today.
         _session_date = ts.strftime("%Y-%m-%d")
         _fired_ids = _get_fired_signal_ids(_session_date, config.REDIS_URL)
-        _idempotency_skip: set[str] = set()
         if _fired_ids is None:
             # P2-05-A: Redis unavailable — fail-closed: skip ALL S4 BUY signals this cycle.
             # We cannot verify whether any signal has already been executed today, so we
@@ -2705,6 +2789,8 @@ def _run_cycle_inner() -> dict:
             strats = _sym_strats.get(order.symbol, [])
             # P1-S4-IDEMPOTENCY: skip this order if its signal_id was already fired today.
             if order.symbol in _idempotency_skip:
+                if "S4" in strats:
+                    _order_dispositions[order.symbol] = ("SKIP_IDEMPOTENCY", {})
                 continue
             # P0-05: skip BUY decision for symbols already in an open trade (no pyramiding).
             if order.side.value == "BUY" and isinstance(open_db_symbols, set) and order.symbol in open_db_symbols:
@@ -2726,10 +2812,14 @@ def _run_cycle_inner() -> dict:
                     "nav": equity,
                     "open_since": _open_trade_entry_dates.get(order.symbol),
                 })
+                if "S4" in strats:
+                    _order_dispositions[order.symbol] = ("SKIP_PYRAMIDING", {})
                 continue
             # Stop-loss cooldown: skip BUY for symbols stopped out earlier today.
             if order.side.value == "BUY" and order.symbol in stopped_today:
                 log.info("Stop-loss cooldown: skipping BUY for %s — stopped out today", order.symbol)
+                if "S4" in strats:
+                    _order_dispositions[order.symbol] = ("SKIP_STOP_COOLDOWN", {})
                 continue
             wt_pct = f"{order.allocation_weight * 100:.1f}%"
             exit_mechanism: str | None = None
@@ -2871,6 +2961,10 @@ def _run_cycle_inner() -> dict:
 
     if operating_mode in ("dry_run", "halted"):
         log.info("Skipping order submission - %s mode", operating_mode)
+        for _symbol in _s4_provenance:
+            _order_dispositions.setdefault(
+                _symbol, ("SKIP_OPERATING_MODE", {"mode": operating_mode})
+            )
         submitted_orders: list[dict] = []
     elif _is_ks_active_failclosed(config.REDIS_URL):
         # P0-06: re-check kill-switch immediately before submission to close the race window.
@@ -2891,6 +2985,8 @@ def _run_cycle_inner() -> dict:
             _pg_ks.close()
         except Exception as _ks_audit_exc:
             log.warning("P0-06: Failed to write KS pre-submission audit row: %s", _ks_audit_exc)
+        for _symbol in _s4_provenance:
+            _order_dispositions.setdefault(_symbol, ("SKIP_KILL_SWITCH", {}))
         submitted_orders = []
     else:
         fractionable = _get_fractionable_symbols(trading_client)
@@ -2899,6 +2995,10 @@ def _run_cycle_inner() -> dict:
         # (Redis unavailable). SELLs and non-S4 orders are not affected.
         _orders_to_submit = _apply_idempotency_filter(result.final_orders, _idempotency_skip)
         _orders_to_submit = _apply_whipsaw_damping_filter(_orders_to_submit, _whipsaw_suppressed_symbols)
+
+        def _capture_s4_order_disposition(symbol, reason, details):
+            if symbol in _s4_provenance:
+                _order_dispositions[symbol] = (reason, details)
 
         submitted_orders = _submit_portfolio_orders(
             _orders_to_submit, trading_client, market,
@@ -2916,6 +3016,7 @@ def _run_cycle_inner() -> dict:
             signal_ids=_signal_ids,
             buying_power=buying_power,
             notifier=notifier,
+            _on_disposition=_capture_s4_order_disposition,
         )
 
         # #62/#63: reconcile broker-side protective stops for fractional positions.
@@ -2928,6 +3029,27 @@ def _run_cycle_inner() -> dict:
                 )
             except Exception as _sync_exc:
                 log.warning("Fractional protective stop sync failed: %s", _sync_exc)
+
+    if _s4_intent_ledger is not None:
+        _pg_intents = None
+        try:
+            from src.store.pg_store import PostgreSQLStore as _PGIntents
+
+            _pg_intents = _PGIntents()
+            _finalize_s4_intent_ledger(
+                _s4_intent_ledger,
+                store=_pg_intents,
+                symbol_signal_provenance=_s4_provenance,
+                symbol_strategies=_sym_strats,
+                open_db_symbols=open_db_symbols,
+                open_trade_origin=_open_trade_origin,
+                order_dispositions=_order_dispositions,
+            )
+        except Exception as _intent_exc:
+            log.warning("#294: failed to finalize S4 intent ledger: %s", _intent_exc)
+        finally:
+            if _pg_intents is not None:
+                _pg_intents.close()
 
     # B27-FIX: mark S4 signals fired only for orders that were actually submitted to Alpaca.
     # Previously this happened during decision logging (before submission), causing signals
@@ -3651,7 +3773,12 @@ def _record_dispositions(
         dispositions[sym] = disposition
 
 
-def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None = None):
+def _build_strategy_instance(
+    entry,
+    bars_df,
+    dispositions: dict[str, str] | None = None,
+    decision_at: datetime | None = None,
+):
     """Build a strategy instance for `entry`.
 
     #184: `dispositions` (S4 only) is filled in-place with symbol → observed
@@ -3680,8 +3807,25 @@ def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None
     if sid == "S4":
         from src.store.pg_store import PostgreSQLStore
         # #81: lone-survivor concentration cap, off by default.
-        _fixed_slot = bool(_load_risk_config().get("s4_fixed_slot_sizing_enabled", True))
+        _risk_for_s4 = _load_risk_config()
+        _fixed_slot = bool(_risk_for_s4.get("s4_fixed_slot_sizing_enabled", True))
         s4_config = S4Config(fixed_slot_sizing=_fixed_slot)
+        intent_ledger = None
+        try:
+            from src.strategies.s4.intent_ledger import (
+                S4IntentLedger,
+                build_runtime_component_versions,
+            )
+
+            intent_ledger = S4IntentLedger(
+                decision_at or datetime.now(timezone.utc),
+                build_runtime_component_versions(
+                    config=s4_config,
+                    risk_config=_risk_for_s4,
+                ),
+            )
+        except Exception as exc:
+            log.warning("#294: could not initialize S4 intent ledger: %s", exc)
         signals_df = None
         store = None
         try:
@@ -3700,6 +3844,11 @@ def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None
                 symbols=s4_symbols,
                 news_age_hours=None,
             )
+            if intent_ledger is not None and signals:
+                candidate_events = intent_ledger.capture(signals)
+                _write_s4_intent_events_fail_open(
+                    store, candidate_events, phase="candidate"
+                )
             try:
                 _open_syms = {
                     t["symbol"] for t in store.fetch_trades(status="open", limit=1000)
@@ -3713,6 +3862,7 @@ def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None
                 _open_syms = set()
             if signals:
                 _before_freshness = len(signals)
+                _before_freshness_signals = list(signals)
                 _pre_freshness_syms = {s.symbol for s in signals}
                 signals = _apply_entry_freshness_gate(
                     signals, _open_syms, _cfg.MAX_NEWS_AGE_HOURS, datetime.now(timezone.utc)
@@ -3721,6 +3871,12 @@ def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None
                     dispositions,
                     _pre_freshness_syms - {s.symbol for s in signals},
                     ENTRY_FRESHNESS_FILTERED,
+                )
+                _kept_freshness_ids = {s.signal_id for s in signals}
+                _mark_s4_intent_signals(
+                    intent_ledger,
+                    (s for s in _before_freshness_signals if s.signal_id not in _kept_freshness_ids),
+                    "SKIP_ENTRY_FRESHNESS",
                 )
                 _dropped_freshness = _before_freshness - len(signals)
                 if _dropped_freshness:
@@ -3734,6 +3890,9 @@ def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None
                 # reversal SELL path already excludes them (low reliability); the
                 # BUY side must match, or S4 buys on the weak local model.
                 signals, _fb_dropped = _filter_fallback_signals(signals)
+                _mark_s4_intent_signals(
+                    intent_ledger, _fb_dropped, "SKIP_FALLBACK"
+                )
                 _record_dispositions(
                     dispositions, (s.symbol for s in _fb_dropped), FALLBACK_FILTERED
                 )
@@ -3795,6 +3954,9 @@ def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None
                     )
                     # Surface notable signals lost to staleness in the Decision Log.
                     _dropped_stale = [s for s in stale_signals if s not in fresh_signals]
+                    _mark_s4_intent_signals(
+                        intent_ledger, _dropped_stale, "SKIP_STALE"
+                    )
                     if _dropped_stale:
                         _record_stale_drops(
                             _dropped_stale, s4_config.max_signal_age_hours, s4_config.min_score
@@ -3841,6 +4003,13 @@ def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None
             # "raw scores, gate still enforced" — never to an ungated stream.
             from src.config import config as _cfg_fb
             _fb_threshold = _get_feedback_threshold(_cfg_fb.REDIS_URL, strategy="S4")
+            if intent_ledger is not None:
+                intent_ledger.update_component_for_disposition(
+                    "gate",
+                    active_feedback_threshold=_fb_threshold,
+                    signal_velocity_threshold=_cfg_fb.SIGNAL_VELOCITY_THRESHOLD,
+                    signal_velocity_boost=_cfg_fb.SIGNAL_VELOCITY_BOOST,
+                )
 
             # Apply velocity multipliers (best-effort; failures fall back to raw scores).
             try:
@@ -3879,6 +4048,12 @@ def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None
                     dispositions, dropped_df["symbol"].tolist(), BELOW_ENTRY_GATE
                 )
                 if len(dropped_df):
+                    for _dropped_signal_id in dropped_df["signal_id"].dropna().tolist():
+                        if intent_ledger is not None:
+                            intent_ledger.set_disposition(
+                                signal_id=int(_dropped_signal_id),
+                                reason_code="SKIP_ENTRY_GATE",
+                            )
                     log.info(
                         "S4 feedback gate: dropped %d/%d signals below threshold %.3f",
                         len(dropped_df), before, _fb_threshold,
@@ -3892,7 +4067,11 @@ def _build_strategy_instance(entry, bars_df, dispositions: dict[str, str] | None
         # cycle it blocks all subsequent same-day runs, causing BUY→SELL churn.
         # Delta-ordering in the orchestrator is idempotent: if we already hold the
         # target quantity, delta≈0 and no order is generated.
-        return NewsDrivenTactical(config=s4_config, signals=signals_df)
+        return NewsDrivenTactical(
+            config=s4_config,
+            signals=signals_df,
+            intent_ledger=intent_ledger,
+        )
 
     log.warning("Unknown strategy_id '%s' — skipping", sid)
     return None
@@ -3918,6 +4097,7 @@ def _submit_portfolio_orders(
     buying_power=_BUYING_POWER_UNSET,
     notifier=None,
     gate_mode: str | None = None,
+    _on_disposition=None,
 ) -> list[dict]:
     """Submit BUY and SELL orders to Alpaca.
 
@@ -3970,11 +4150,19 @@ def _submit_portfolio_orders(
                         "P0-05: pyramiding guard unavailable — skipping BUY for %s (fail-closed)",
                         order.symbol,
                     )
+                    _emit_order_disposition(
+                        _on_disposition,
+                        order.symbol,
+                        "SKIP_PYRAMIDING_GUARD_UNAVAILABLE",
+                    )
                     continue
                 if order.symbol in open_trade_symbols:
                     log.warning(
                         "P0-05 pyramiding guard: skipping BUY for %s — open trade exists in DB",
                         order.symbol,
+                    )
+                    _emit_order_disposition(
+                        _on_disposition, order.symbol, "SKIP_PYRAMIDING"
                     )
                     continue
                 # Stop-loss cooldown: block re-entry for the rest of the session.
@@ -3986,6 +4174,9 @@ def _submit_portfolio_orders(
                         "Stop-loss cooldown: skipping BUY for %s — stopped out today",
                         order.symbol,
                     )
+                    _emit_order_disposition(
+                        _on_disposition, order.symbol, "SKIP_STOP_COOLDOWN"
+                    )
                     continue
                 # #68: reversal cooldown — a symbol force-sold on strong bearish
                 # sentiment must not be re-bought by ANY strategy while it lives.
@@ -3996,6 +4187,9 @@ def _submit_portfolio_orders(
                     log.warning(
                         "Reversal cooldown: skipping BUY for %s — force-sold on sentiment reversal",
                         order.symbol,
+                    )
+                    _emit_order_disposition(
+                        _on_disposition, order.symbol, "SKIP_REVERSAL_COOLDOWN"
                     )
                     continue
                 # #71: S1 re-entry cooldown — only blocks a BUY that is S1's OWN
@@ -4013,10 +4207,18 @@ def _submit_portfolio_orders(
                                 "recently excluded by S1's own signal",
                                 order.symbol,
                             )
+                            _emit_order_disposition(
+                                _on_disposition,
+                                order.symbol,
+                                "SKIP_S1_REENTRY_COOLDOWN",
+                            )
                             continue
                 price = market.prices.get(order.symbol)
                 if price is None or price <= 0:
                     log.warning("No market price for %s — skipping BUY order", order.symbol)
+                    _emit_order_disposition(
+                        _on_disposition, order.symbol, "SKIP_NO_MARKET_PRICE"
+                    )
                     continue
 
                 # Phase 4: stop-risk sizing — cap notional so per-position loss at the
@@ -4066,6 +4268,11 @@ def _submit_portfolio_orders(
                                 "(open=%.2f, accepted=%.2f, budget=%.2f)",
                                 order.symbol, _current_open_risk, _accepted_risk, _agg_budget,
                             )
+                            _emit_order_disposition(
+                                _on_disposition,
+                                order.symbol,
+                                "SKIP_STOP_RISK_BUDGET",
+                            )
                             continue
                         if abs(order.quantity) > _max_qty_agg:
                             order = order.with_quantity(min(abs(order.quantity), max(0.0, _max_qty_agg)))
@@ -4081,6 +4288,13 @@ def _submit_portfolio_orders(
                     log.info(
                         "Min notional skip: %s BUY $%.2f < $%.0f threshold",
                         order.symbol, notional, _MIN_ORDER_NOTIONAL,
+                    )
+                    _emit_order_disposition(
+                        _on_disposition,
+                        order.symbol,
+                        "SKIP_MIN_NOTIONAL",
+                        notional=notional,
+                        threshold=_MIN_ORDER_NOTIONAL,
                     )
                     continue
                 _accepted_risk += (_frozen_sizing.d_init if _frozen_sizing is not None else 0.02) * notional
@@ -4124,6 +4338,13 @@ def _submit_portfolio_orders(
                             regime_mult=regime_mult,
                             decision="SKIP_BUY_POWER",
                             reason=reason,
+                        )
+                        _emit_order_disposition(
+                            _on_disposition,
+                            order.symbol,
+                            "SKIP_BUY_POWER",
+                            buying_power=buying_power,
+                            notional=notional,
                         )
                         continue
                     if gate.action == "shadow":
@@ -4254,6 +4475,13 @@ def _submit_portfolio_orders(
                     )
                     alpaca_id = str(alpaca_order.id)
                 submitted.append({"symbol": order.symbol, "side": "buy", "order_id": alpaca_id, "notional": notional})
+                _emit_order_disposition(
+                    _on_disposition,
+                    order.symbol,
+                    "SUBMITTED",
+                    order_id=alpaca_id,
+                    notional=notional,
+                )
             elif order.side == OrderSide.SELL:
                 qty = abs(order.quantity)
                 if qty < 1e-6:
@@ -4310,6 +4538,12 @@ def _submit_portfolio_orders(
                 continue
         except Exception as exc:
             log.warning("Failed to submit order for %s: %s", order.symbol, exc)
+            _emit_order_disposition(
+                _on_disposition,
+                order.symbol,
+                "BROKER_REJECT",
+                error_type=type(exc).__name__,
+            )
             # P2-05-D: notify caller of broker reject so an audit row can be written.
             if _on_broker_reject is not None:
                 try:

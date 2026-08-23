@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
+import pandas as pd
+
 from src.backtest.engine.types import MarketSnapshot, OrderSide
 from src.models.signals import SentimentResult
 from src.portfolio.types import CombinedOrder
@@ -12,10 +14,11 @@ from src.strategies.s4.config import S4Config
 from src.strategies.s4.intent_ledger import S4IntentLedger, build_component_versions
 from src.strategies.s4.strategy import NewsDrivenTactical
 from src.workers.portfolio_scheduler import (
+    _build_strategy_instance,
+    _finalize_s4_intent_ledger,
     _submit_portfolio_orders,
     _write_s4_intent_events_fail_open,
 )
-
 
 _TS = datetime(2026, 8, 24, 14, 7, tzinfo=timezone.utc)
 
@@ -65,7 +68,7 @@ def test_strategy_trasferisce_i_diagnostics_del_ranker_al_ledger():
         intent_ledger=ledger,
     )
 
-    assert strategy.compute_target_weights(signals, as_of=_TS) == {"AMD": 0.2}
+    assert strategy.compute_target_weights(signals, as_of=_TS) == {"AMD": 1.0}
     dispositions = {event.signal_id: event for event in ledger.disposition_events(
         default_reason="UNCLASSIFIED"
     )}
@@ -84,9 +87,79 @@ def test_writer_intenti_fail_open_non_interrompe_il_path_live():
     assert _write_s4_intent_events_fail_open(store, [MagicMock()], phase="candidate") is False
 
 
+def test_builder_scrive_i_candidate_prima_della_valutazione(mocker):
+    signal = _signal("AMD", 1, 0.8)
+    store = MagicMock()
+    store.fetch_signals_for_cycle.return_value = [signal]
+    store.fetch_trades.return_value = []
+    mocker.patch("src.store.pg_store.PostgreSQLStore", return_value=store)
+    mocker.patch(
+        "src.workers.portfolio_scheduler._load_risk_config",
+        return_value={"s4_fixed_slot_sizing_enabled": True},
+    )
+    mocker.patch(
+        "src.workers.portfolio_scheduler._get_feedback_threshold", return_value=0.0
+    )
+    mocker.patch(
+        "src.workers.portfolio_scheduler._compute_signal_velocity", return_value=1.0
+    )
+    redis = MagicMock()
+    mocker.patch("redis.Redis.from_url", return_value=redis)
+    entry = MagicMock(strategy_id="S4")
+    bars = pd.DataFrame(
+        {"AMD": [100.0, 101.0]},
+        index=pd.date_range("2026-08-21", periods=2, freq="B"),
+    )
+
+    strategy = _build_strategy_instance(entry, bars, decision_at=_TS)
+
+    written = store.write_s4_intent_events.call_args.args[0]
+    assert [event.event_type for event in written] == ["candidate"]
+    assert written[0].signal_id == 1
+    assert strategy._intent_ledger is not None
+
+
+def test_finalizer_scrive_disposition_riconciliata_con_s1_e_pyramiding():
+    ledger = S4IntentLedger(_TS, _versions())
+    ledger.capture([_signal("AMD", 1, 0.8)])
+    ledger.set_disposition(
+        signal_id=1,
+        reason_code="RANK_SELECTED",
+        rank=1,
+    )
+    store = MagicMock()
+
+    assert _finalize_s4_intent_ledger(
+        ledger,
+        store=store,
+        symbol_signal_provenance={"AMD": {"signal_id": 1}},
+        symbol_strategies={"AMD": ["S1", "S4"]},
+        open_db_symbols={"AMD"},
+        open_trade_origin={"AMD": "S1"},
+        order_dispositions={"AMD": ("SKIP_PYRAMIDING", {})},
+    ) is True
+
+    [event] = store.write_s4_intent_events.call_args.args[0]
+    assert event.event_type == "disposition"
+    assert event.reason_code == "SKIP_PYRAMIDING"
+    assert event.rank == 1
+    assert event.anti_pyramiding is True
+    assert event.s1_state == {
+        "held": True,
+        "origin": "S1",
+        "targeted": True,
+    }
+    assert event.is_tradable is False
+
+
 def test_callback_disposition_non_modifica_gli_ordini_inviati():
     orders = [_buy("AMD", 1.0), _buy("NVDA", 0.01)]
-    market = MarketSnapshot(timestamp=_TS, prices={"AMD": 100.0, "NVDA": 100.0})
+    market = MarketSnapshot(
+        timestamp=_TS,
+        prices={"AMD": 100.0, "NVDA": 100.0},
+        volumes={},
+        adv_20d={},
+    )
     submit = MagicMock()
 
     baseline = _submit_portfolio_orders(
@@ -117,7 +190,12 @@ def test_callback_disposition_non_modifica_gli_ordini_inviati():
 
 def test_callback_disposition_guasta_non_modifica_gli_ordini():
     order = _buy("AMD", 1.0)
-    market = MarketSnapshot(timestamp=_TS, prices={"AMD": 100.0})
+    market = MarketSnapshot(
+        timestamp=_TS,
+        prices={"AMD": 100.0},
+        volumes={},
+        adv_20d={},
+    )
 
     submitted = _submit_portfolio_orders(
         [order],

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Optional, Sequence
+from typing import TYPE_CHECKING, Optional, Sequence
 
 import pandas as pd
 
@@ -17,6 +17,9 @@ from src.backtest.engine.types import (
 from src.models.signals import SentimentResult
 from src.strategies.s4.config import S4Config
 from src.strategies.s4.ranking import CrossSectionalRanker
+
+if TYPE_CHECKING:
+    from src.strategies.s4.intent_ledger import S4IntentLedger
 
 
 class NewsDrivenTactical:
@@ -38,10 +41,12 @@ class NewsDrivenTactical:
         self,
         config: S4Config,
         signals: pd.DataFrame | None = None,
+        intent_ledger: "S4IntentLedger | None" = None,
     ) -> None:
         self._config = config
         self._ranker = CrossSectionalRanker(config)
         self._signals_df = signals
+        self._intent_ledger = intent_ledger
         self._last_rebalance: Optional[datetime] = None
         # B33-follow-up: provenance (signal_id/score/reasoning/model_id) of the
         # signal that drove each ticker's weight in the most recent
@@ -63,6 +68,15 @@ class NewsDrivenTactical:
         """Return {ticker: weight} for top-ranked tickers from given signals."""
         result = self._ranker.rank(signals, as_of=as_of)
         self._last_signal_provenance = result.provenance
+        if self._intent_ledger is not None:
+            for diagnostic in result.diagnostics:
+                if diagnostic.signal_id is None:
+                    continue
+                self._intent_ledger.set_disposition(
+                    signal_id=diagnostic.signal_id,
+                    reason_code=diagnostic.reason_code,
+                    rank=diagnostic.rank,
+                )
         return result.weights
 
     @property

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import subprocess
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Iterable
 from uuid import UUID, uuid5
 
@@ -42,6 +45,7 @@ def build_component_versions(
         "gate": {
             "version": "s4-entry-gates:v1",
             "config_hash": config_hash,
+            "active_feedback_threshold": None,
             "min_score": config.min_score,
             "min_confidence": config.min_confidence,
             "max_signal_age_hours": config.max_signal_age_hours,
@@ -69,6 +73,52 @@ def build_component_versions(
     }
 
 
+def build_runtime_component_versions(
+    *, config: S4Config, risk_config: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
+    """Resolve deployed code/config/policy versions without touching decisions."""
+    root = Path(__file__).resolve().parents[3]
+    files = (root / "config" / "trading.yaml", root / "config" / "s4_exit_trial.yaml")
+    digest = hashlib.sha256()
+    try:
+        for path in files:
+            digest.update(path.read_bytes())
+        config_hash = digest.hexdigest()[:16]
+    except OSError:
+        config_hash = "unknown"
+
+    code_version = os.environ.get("ALEMBIC_CODE_VERSION", "").strip()
+    if not code_version:
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            code_version = result.stdout.strip() or "unknown"
+        except Exception:
+            code_version = "unknown"
+
+    policy_version = "unknown"
+    try:
+        import yaml
+
+        payload = yaml.safe_load(files[1].read_text()) or {}
+        policy_version = f"s4-exit-trial:{payload.get('version', 'unknown')}"
+    except Exception:
+        pass
+
+    return build_component_versions(
+        config=config,
+        risk_config=risk_config,
+        code_version=code_version,
+        config_hash=config_hash,
+        policy_version=policy_version,
+    )
+
+
 def _utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
@@ -77,8 +127,9 @@ def _utc(value: datetime) -> datetime:
 
 def _decision_slot(value: datetime) -> datetime:
     value = _utc(value)
-    minute = value.minute - value.minute % _DECISION_SLOT_MINUTES
-    return value.replace(minute=minute, second=0, microsecond=0)
+    anchored = value - timedelta(minutes=7)
+    minute = anchored.minute - anchored.minute % _DECISION_SLOT_MINUTES
+    return anchored.replace(minute=minute, second=0, microsecond=0) + timedelta(minutes=7)
 
 
 def _signal_key(signal: SentimentResult) -> str:
@@ -148,6 +199,7 @@ class S4IntentLedger:
         self.decision_slot = _decision_slot(decision_at)
         self.component_versions = component_versions
         self._states: dict[str, _IntentState] = {}
+        self._disposition_component_updates: dict[str, dict[str, Any]] = {}
 
     def capture(self, signals: Iterable[SentimentResult]) -> list[S4IntentEvent]:
         signals = list(signals)
@@ -168,6 +220,10 @@ class S4IntentLedger:
             versions["model"].update({"model_id": signal.model_id})
 
             missingness: dict[str, str] = {}
+            if versions["gate"].get("active_feedback_threshold") is None:
+                missingness["active_feedback_threshold"] = (
+                    "evaluated_after_candidate_capture"
+                )
             for field, value in (
                 ("content_hash", signal.content_hash),
                 ("first_seen_at", signal.first_seen_at),
@@ -189,8 +245,8 @@ class S4IntentLedger:
                 decision_slot=self.decision_slot,
                 symbol=signal.symbol,
                 signal_id=signal.signal_id,
-                published_at=signal.published_at,
-                first_seen_at=signal.first_seen_at,
+                published_at=_utc(signal.published_at) if signal.published_at else None,
+                first_seen_at=_utc(signal.first_seen_at) if signal.first_seen_at else None,
                 model_generated_at=_utc(signal.generated_at),
                 decision_at=self.decision_at,
                 rank=None,
@@ -234,11 +290,36 @@ class S4IntentLedger:
         if state is None:
             return
         state.reason_code = reason_code
-        state.rank = rank
+        if rank is not None:
+            state.rank = rank
         state.is_tradable = is_tradable
-        state.s1_state = s1_state
-        state.anti_pyramiding = anti_pyramiding
-        state.disposition_details = details
+        if s1_state is not None:
+            state.s1_state = s1_state
+        if anti_pyramiding is not None:
+            state.anti_pyramiding = anti_pyramiding
+        if details is not None:
+            state.disposition_details = details
+
+    @property
+    def signal_ids_by_symbol(self) -> dict[str, tuple[int, ...]]:
+        by_symbol: dict[str, list[int]] = {}
+        for state in self._states.values():
+            candidate = state.candidate
+            if candidate.signal_id is not None:
+                by_symbol.setdefault(candidate.symbol, []).append(candidate.signal_id)
+        return {symbol: tuple(ids) for symbol, ids in by_symbol.items()}
+
+    def set_s1_state(self, *, signal_id: int, s1_state: dict[str, Any]) -> None:
+        state = self._states.get(f"signal:{signal_id}")
+        if state is not None:
+            state.s1_state = s1_state
+
+    def update_component_for_disposition(
+        self, component: str, **values: Any
+    ) -> None:
+        if component not in REQUIRED_VERSION_COMPONENTS:
+            raise ValueError(f"unknown S4 intent version component: {component}")
+        self._disposition_component_updates.setdefault(component, {}).update(values)
 
     def disposition_events(self, *, default_reason: str) -> list[S4IntentEvent]:
         events: list[S4IntentEvent] = []
@@ -252,6 +333,13 @@ class S4IntentLedger:
             snapshot = dict(candidate.snapshot)
             if state.disposition_details:
                 snapshot["disposition"] = state.disposition_details
+            versions = {name: dict(value) for name, value in candidate.versions.items()}
+            for component, values in self._disposition_component_updates.items():
+                versions[component].update(values)
+            if versions["gate"].get("active_feedback_threshold") is not None:
+                missingness.pop("active_feedback_threshold", None)
+            if state.reason_code is None:
+                missingness["reason_code"] = "not_classified_before_cycle_end"
             events.append(replace(
                 candidate,
                 event_id=str(uuid5(_INTENT_NAMESPACE, f"{candidate.intent_id}|disposition")),
@@ -261,6 +349,7 @@ class S4IntentLedger:
                 anti_pyramiding=state.anti_pyramiding,
                 reason_code=state.reason_code or default_reason,
                 is_tradable=state.is_tradable,
+                versions=versions,
                 snapshot=snapshot,
                 missingness=dict(sorted(missingness.items())),
             ))

@@ -51,7 +51,7 @@ def _versions() -> dict:
 def test_intent_id_e_stabile_nella_stessa_finestra_decisionale():
     first = S4IntentLedger(_DECISION_AT, _versions()).capture([_signal()])[0]
     retry = S4IntentLedger(
-        _DECISION_AT + timedelta(minutes=6), _versions()
+        _DECISION_AT + timedelta(minutes=10), _versions()
     ).capture([_signal()])[0]
 
     assert first.intent_id == retry.intent_id
@@ -96,11 +96,28 @@ def test_candidate_conserva_tempi_versioni_concorrenti_e_missingness():
         "reason": "not_evaluated_before_rank",
     }
     assert event.missingness == {
+        "active_feedback_threshold": "evaluated_after_candidate_capture",
         "content_hash": "not_available_at_decision",
         "first_seen_at": "not_available_at_decision",
         "published_at": "not_available_at_decision",
         "resolver": "not_available_at_decision",
     }
+
+
+def test_disposition_aggiunge_il_gate_effettivamente_osservato_senza_mutare_candidate():
+    ledger = S4IntentLedger(_DECISION_AT, _versions())
+    [candidate] = ledger.capture([_signal()])
+    ledger.update_component_for_disposition(
+        "gate",
+        active_feedback_threshold=0.30,
+        signal_velocity_threshold=0.15,
+        signal_velocity_boost=1.2,
+    )
+    [disposition] = ledger.disposition_events(default_reason="SKIP_NOT_SELECTED")
+
+    assert candidate.versions["gate"]["active_feedback_threshold"] is None
+    assert disposition.versions["gate"]["active_feedback_threshold"] == 0.30
+    assert "active_feedback_threshold" not in disposition.missingness
 
 
 def test_disposition_riconcilia_rank_collisione_e_guard_con_il_candidate():
@@ -137,4 +154,3 @@ def test_migrazione_impone_append_only_idempotenza_e_due_popolazioni():
     assert "CREATE VIEW s4_candidate_population" in migration
     assert "CREATE VIEW s4_tradable_intent_population" in migration
     assert "intent_id" in migration
-
