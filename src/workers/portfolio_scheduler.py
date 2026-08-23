@@ -244,6 +244,14 @@ def _mark_s4_intent_signals(ledger, signals, reason_code: str) -> None:
             ledger.set_disposition(signal_id=signal.signal_id, reason_code=reason_code)
 
 
+def _s4_intent_provenance(strategy, live_provenance: dict) -> dict:
+    """Keep ranked provenance for telemetry if a later result copy omits it."""
+    ranked_provenance = (
+        getattr(strategy, "last_signal_provenance", None) if strategy is not None else None
+    )
+    return dict(ranked_provenance or live_provenance)
+
+
 def _finalize_s4_intent_ledger(
     ledger,
     *,
@@ -265,9 +273,11 @@ def _finalize_s4_intent_ledger(
                 "reason": "open_trade_guard_unavailable",
             }
         else:
+            origin = open_trade_origin.get(symbol)
             s1_state = {
-                "held": symbol in open_db_symbols,
-                "origin": open_trade_origin.get(symbol),
+                "held_by_s1": origin == "S1",
+                "origin": origin,
+                "position_present": symbol in open_db_symbols,
                 "targeted": "S1" in symbol_strategies.get(symbol, []),
             }
         for signal_id in signal_ids:
@@ -278,10 +288,16 @@ def _finalize_s4_intent_ledger(
         if signal_id is None:
             continue
         reason_code, details = order_dispositions.get(symbol, ("NO_ENTRY_ORDER", {}))
+        details = {
+            **details,
+            "ranked_signal": {
+                "model_id": provenance.get("model_id"),
+                "score": provenance.get("score"),
+            },
+        }
         ledger.set_disposition(
             signal_id=signal_id,
             reason_code=reason_code,
-            is_tradable=reason_code == "SUBMITTED",
             anti_pyramiding=reason_code == "SKIP_PYRAMIDING",
             details=details,
         )
@@ -2473,8 +2489,10 @@ def _run_cycle_inner() -> dict:
         strategy_returns=_strategy_returns,
         last_target_weights=_last_target_weights or None,
     )
-    _s4_intent_ledger = getattr(
-        strategy_instances.get("S4"), "_intent_ledger", None
+    _s4_strategy_instance = strategy_instances.get("S4")
+    _s4_intent_ledger = getattr(_s4_strategy_instance, "_intent_ledger", None)
+    _s4_observed_provenance = _s4_intent_provenance(
+        _s4_strategy_instance, result.symbol_signal_provenance
     )
 
     # #185: advance the clock only for the sleeves that actually re-decided weights.
@@ -2961,7 +2979,7 @@ def _run_cycle_inner() -> dict:
 
     if operating_mode in ("dry_run", "halted"):
         log.info("Skipping order submission - %s mode", operating_mode)
-        for _symbol in _s4_provenance:
+        for _symbol in _s4_observed_provenance:
             _order_dispositions.setdefault(
                 _symbol, ("SKIP_OPERATING_MODE", {"mode": operating_mode})
             )
@@ -2985,7 +3003,7 @@ def _run_cycle_inner() -> dict:
             _pg_ks.close()
         except Exception as _ks_audit_exc:
             log.warning("P0-06: Failed to write KS pre-submission audit row: %s", _ks_audit_exc)
-        for _symbol in _s4_provenance:
+        for _symbol in _s4_observed_provenance:
             _order_dispositions.setdefault(_symbol, ("SKIP_KILL_SWITCH", {}))
         submitted_orders = []
     else:
@@ -2997,7 +3015,7 @@ def _run_cycle_inner() -> dict:
         _orders_to_submit = _apply_whipsaw_damping_filter(_orders_to_submit, _whipsaw_suppressed_symbols)
 
         def _capture_s4_order_disposition(symbol, reason, details):
-            if symbol in _s4_provenance:
+            if symbol in _s4_observed_provenance:
                 _order_dispositions[symbol] = (reason, details)
 
         submitted_orders = _submit_portfolio_orders(
@@ -3039,7 +3057,7 @@ def _run_cycle_inner() -> dict:
             _finalize_s4_intent_ledger(
                 _s4_intent_ledger,
                 store=_pg_intents,
-                symbol_signal_provenance=_s4_provenance,
+                symbol_signal_provenance=_s4_observed_provenance,
                 symbol_strategies=_sym_strats,
                 open_db_symbols=open_db_symbols,
                 open_trade_origin=_open_trade_origin,

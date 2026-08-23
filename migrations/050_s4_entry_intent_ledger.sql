@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS s4_intent_events (
     s1_state               JSONB NOT NULL,
     anti_pyramiding        BOOLEAN,
     reason_code            TEXT NOT NULL,
-    is_tradable            BOOLEAN,
+    is_tradable            BOOLEAN,  -- passed entry gates + ranking; independent of execution
     versions               JSONB NOT NULL,
     snapshot               JSONB NOT NULL,
     missingness            JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -31,6 +31,8 @@ CREATE INDEX IF NOT EXISTS idx_s4_intent_events_slot
     ON s4_intent_events (decision_slot DESC, event_type);
 CREATE INDEX IF NOT EXISTS idx_s4_intent_events_signal
     ON s4_intent_events (signal_id, decision_slot DESC);
+CREATE INDEX IF NOT EXISTS idx_news_resolved_entities_intent_lookup
+    ON news_resolved_entities (news_log_id, candidate_ticker, created_at DESC, id DESC);
 
 CREATE OR REPLACE FUNCTION prevent_s4_intent_event_mutation()
 RETURNS trigger AS $$

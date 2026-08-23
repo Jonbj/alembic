@@ -50,7 +50,7 @@ def test_write_intent_events_e_batch_idempotente_append_only():
     cursor.executemany.assert_called_once()
     sql, params = cursor.executemany.call_args.args
     assert "INSERT INTO s4_intent_events" in sql
-    assert "ON CONFLICT (event_id) DO NOTHING" in sql
+    assert "ON CONFLICT DO NOTHING" in sql
     assert len(params) == 2
     assert params[0][0] == _event().event_id
     conn.commit.assert_called_once()
@@ -75,6 +75,7 @@ def test_fetch_signals_for_cycle_include_provenance_senza_cambiare_ordinamento()
 
     assert "LEFT JOIN news_log" in query
     assert "LEFT JOIN LATERAL" in query
+    assert "nre.candidate_ticker = ss.symbol" in query
     assert "raw_ingested_at" in query
     assert "content_hash" in query
     assert "resolver_decision" in query
@@ -111,3 +112,13 @@ def test_fetch_signals_for_cycle_mappa_la_provenance_point_in_time():
     assert signal.content_hash == "a" * 64
     assert signal.resolver_decision == "RESOLVED"
     assert signal.resolver_method == "source_metadata"
+
+
+def test_migrazione_indicizza_il_join_resolver_per_ticker():
+    from pathlib import Path
+
+    migration = (
+        Path(__file__).resolve().parents[2] / "migrations" / "050_s4_entry_intent_ledger.sql"
+    ).read_text()
+
+    assert "news_resolved_entities (news_log_id, candidate_ticker" in migration

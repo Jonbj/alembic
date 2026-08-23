@@ -16,6 +16,7 @@ from src.strategies.s4.strategy import NewsDrivenTactical
 from src.workers.portfolio_scheduler import (
     _build_strategy_instance,
     _finalize_s4_intent_ledger,
+    _s4_intent_provenance,
     _submit_portfolio_orders,
     _write_s4_intent_events_fail_open,
 )
@@ -74,6 +75,8 @@ def test_strategy_trasferisce_i_diagnostics_del_ranker_al_ledger():
     )}
 
     assert (dispositions[1].rank, dispositions[1].reason_code) == (1, "RANK_SELECTED")
+    assert dispositions[1].is_tradable is True
+    assert dispositions[2].is_tradable is False
     assert (dispositions[2].rank, dispositions[2].reason_code) == (
         2,
         "RANK_OUTSIDE_TOP_N",
@@ -126,6 +129,7 @@ def test_finalizer_scrive_disposition_riconciliata_con_s1_e_pyramiding():
         signal_id=1,
         reason_code="RANK_SELECTED",
         rank=1,
+        is_tradable=True,
     )
     store = MagicMock()
 
@@ -145,11 +149,30 @@ def test_finalizer_scrive_disposition_riconciliata_con_s1_e_pyramiding():
     assert event.rank == 1
     assert event.anti_pyramiding is True
     assert event.s1_state == {
-        "held": True,
+        "held_by_s1": True,
         "origin": "S1",
+        "position_present": True,
         "targeted": True,
     }
-    assert event.is_tradable is False
+    assert event.snapshot["disposition"]["ranked_signal"] == {
+        "model_id": None,
+        "score": None,
+    }
+    # La popolazione post-gate resta distinta dalla disposizione operativa:
+    # anti-pyramiding censura un intento che aveva superato gate e ranking.
+    assert event.is_tradable is True
+
+
+def test_provenance_intenti_sopravvive_alla_ricostruzione_del_risultato():
+    strategy = MagicMock()
+    strategy.last_signal_provenance = {
+        "AMD": {"signal_id": 1, "score": 0.8, "model_id": "ensemble:test"}
+    }
+
+    observed = _s4_intent_provenance(strategy, live_provenance={})
+
+    assert observed == strategy.last_signal_provenance
+    assert observed is not strategy.last_signal_provenance
 
 
 def test_callback_disposition_non_modifica_gli_ordini_inviati():

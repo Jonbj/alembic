@@ -470,7 +470,7 @@ class PostgreSQLStore:
             %s::jsonb, %s, %s, %s, %s::jsonb,
             %s::jsonb, %s::jsonb
         )
-        ON CONFLICT (event_id) DO NOTHING
+        ON CONFLICT DO NOTHING
     """
 
     def write_s4_intent_events(self, events: list["S4IntentEvent"]) -> None:
@@ -2414,6 +2414,7 @@ class PostgreSQLStore:
             SELECT nre.decision, nre.extraction_method
             FROM news_resolved_entities AS nre
             WHERE nre.news_log_id = ss.news_log_id
+              AND nre.candidate_ticker = ss.symbol
             ORDER BY nre.created_at DESC, nre.id DESC
             LIMIT 1
         ) AS resolver ON TRUE

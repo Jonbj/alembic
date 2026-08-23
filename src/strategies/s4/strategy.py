@@ -76,6 +76,7 @@ class NewsDrivenTactical:
                     signal_id=diagnostic.signal_id,
                     reason_code=diagnostic.reason_code,
                     rank=diagnostic.rank,
+                    is_tradable=diagnostic.reason_code == "RANK_SELECTED",
                 )
         return result.weights
 

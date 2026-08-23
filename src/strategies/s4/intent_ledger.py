@@ -281,7 +281,7 @@ class S4IntentLedger:
         signal_id: int,
         reason_code: str,
         rank: int | None = None,
-        is_tradable: bool = False,
+        is_tradable: bool | None = None,
         s1_state: dict[str, Any] | None = None,
         anti_pyramiding: bool | None = None,
         details: dict[str, Any] | None = None,
@@ -292,7 +292,8 @@ class S4IntentLedger:
         state.reason_code = reason_code
         if rank is not None:
             state.rank = rank
-        state.is_tradable = is_tradable
+        if is_tradable is not None:
+            state.is_tradable = is_tradable
         if s1_state is not None:
             state.s1_state = s1_state
         if anti_pyramiding is not None:
