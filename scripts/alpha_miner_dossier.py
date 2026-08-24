@@ -1008,7 +1008,7 @@ def costruisci_dossier(
     sector_by_ticker = _sector_by_ticker()
     benchmark_symbols = {"SPY", *SECTOR_ETF_BY_SECTOR.values()}
     barre = _barre(sorted(set(simboli) | benchmark_symbols), giorno)
-    if not _e_giorno_di_borsa(barre):
+    if not any(symbol in barre for symbol in simboli):
         raise SystemExit(f"{g}: nessuna barra per l'intera watchlist — non e' un giorno di borsa.")
 
     # --- mercato -----------------------------------------------------------
