@@ -313,6 +313,33 @@ def test_signal_panel_tollera_dossier_2_0_senza_copertura():
     assert s["trade_id"] == 726  # arriva comunque dalla timeline
 
 
+def test_signal_panel_assegna_causal_event_id_deterministico():
+    # Il pannello signals partecipa del contratto anti-doppio conteggio: ogni
+    # segnale riceve un causal_event_id stabile da (data, signal_id), univoco
+    # per costruzione (signal_id e' la PK di news_log).
+    rows = panels.build_signal_panel(_dossier_2_1(), dossier_hash="h")
+    by_id = {r["signal_id"]: r for r in rows}
+    assert by_id[101]["causal_event_id"] == "signal:2026-08-12:101"
+    assert by_id[102]["causal_event_id"] == "signal:2026-08-12:102"
+    # univocita' nel pannello di un singolo dossier.
+    ids = [r["causal_event_id"] for r in rows]
+    assert len(ids) == len(set(ids))
+
+
+def test_signal_panel_causal_event_id_distingue_due_dossier_stesso_signal_id():
+    # Lo stesso signal_id in due dossier diversi (es. un replay) collide se non
+    # si incorpora la data: con la data nel kind=signal l'id resta univoco.
+    d_a = _dossier_2_1()
+    d_b = _dossier_2_1()
+    d_b["data"] = "2026-08-13"
+    rows = (
+        panels.build_signal_panel(d_a, dossier_hash="h-a")
+        + panels.build_signal_panel(d_b, dossier_hash="h-b")
+    )
+    ids = [r["causal_event_id"] for r in rows]
+    assert len(ids) == len(set(ids)), "causal_event_id deve restare univoco fra dossier"
+
+
 # ---------------------------------------------------------------------------
 # decision / trade panel
 # ---------------------------------------------------------------------------

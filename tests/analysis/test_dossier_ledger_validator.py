@@ -273,7 +273,7 @@ def test_validate_panels_segnala_ticker_day_mancante_nel_pannello():
 # ---------------------------------------------------------------------------
 
 
-def test_validate_ledger_accetta_snapshot_sano():
+def test_validate_ledger_acceta_snapshot_sano():
     f = _findings_ok()
     defs = panels.build_definitions(f)
     occ = [_occ_ok()]
@@ -285,3 +285,62 @@ def test_validate_ledger_accetta_snapshot_sano():
         window=WINDOW,
     )
     assert res["ok"], res["errors"]
+
+
+# ---------------------------------------------------------------------------
+# signal panel: causal_event_id obbligatorio e univoco anche qui'
+# ---------------------------------------------------------------------------
+
+
+def _signal_ok(**overrides) -> dict:
+    base = {
+        "schema_version": panels.PANELS_SCHEMA_VERSION,
+        "data": "2026-08-04",
+        "signal_id": 101,
+        "ticker": "AAPL",
+        "score": 0.31,
+        "fallback": False,
+        "causal_event_id": "signal:2026-08-04:101",
+        "dossier_hash": "h-0804",
+    }
+    base.update(overrides)
+    return base
+
+
+def test_validate_panels_segnala_signal_senza_causal_event_id():
+    # Il pannello signals partecipa del contratto anti-doppio conteggio:
+    # causal_event_id obbligatorio anche qui' (era il criterio 1 della review).
+    bad = _signal_ok()
+    bad.pop("causal_event_id")
+    res = lv.validate_panels(
+        {"occurrences": [_occ_ok()], "definitions": [], "signals": [bad]},
+        dossier_hashes={"2026-08-04": "h-0804"},
+        window=WINDOW,
+    )
+    assert not res["ok"]
+    assert any("signal" in e.lower() or "causal" in e.lower() for e in res["errors"])
+
+
+def test_validate_panels_segnala_signal_con_causal_event_id_duplicato():
+    # Due righe signal con lo stesso causal_event_id: doppio conteggio.
+    a = _signal_ok()
+    b = _signal_ok()
+    res = lv.validate_panels(
+        {"occurrences": [_occ_ok()], "definitions": [], "signals": [a, b]},
+        dossier_hashes={"2026-08-04": "h-0804"},
+        window=WINDOW,
+    )
+    assert not res["ok"]
+    assert any("signal" in e.lower() and "duplic" in e.lower() for e in res["errors"])
+
+
+def test_validate_panels_segnala_signal_con_causal_event_id_malformato():
+    # kind sconosciuto: la regex del pattern non matcha e l'helper rifiuta la riga.
+    bad = _signal_ok(causal_event_id="seg:2026-08-04:101")
+    res = lv.validate_panels(
+        {"occurrences": [_occ_ok()], "definitions": [], "signals": [bad]},
+        dossier_hashes={"2026-08-04": "h-0804"},
+        window=WINDOW,
+    )
+    assert not res["ok"]
+    assert any("segnale" in e.lower() and "causal_event_id" in e.lower() for e in res["errors"])

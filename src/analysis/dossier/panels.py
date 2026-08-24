@@ -211,6 +211,12 @@ def build_signal_panel(dossier: dict, *, dossier_hash: str = "") -> list[dict]:
                 "order_id": event.get("order_id"),
                 "trade_id": event.get("trade_id"),
                 "order_lookup_error": event.get("order_lookup_error"),
+                # causal_event_id: il segnale e' un evento del dataset e partecipa
+                # del contratto anti-doppio conteggio (kind=signal, data, signal_id).
+                # signal_id e' la PK di news_log, quindi univoco per costruzione;
+                # la data distingue due dossier diversi con lo stesso signal_id
+                # (es. replay cross-day).
+                "causal_event_id": f"signal:{data}:{signal_id}",
                 "dossier_hash": dossier_hash,
             }
         )

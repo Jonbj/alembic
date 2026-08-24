@@ -29,7 +29,7 @@ CAUSAL_ID_PATTERN = re.compile(
     r"^(?P<kind>miss|trade|decision|entry|exit|signal):[A-Za-z0-9._:\-]+$"
 )
 # kind che incorporano la data come secondo token (per il check di coerenza).
-DATE_EMBEDDING_KINDS = frozenset({"miss", "entry", "exit"})
+DATE_EMBEDDING_KINDS = frozenset({"miss", "entry", "exit", "signal"})
 
 
 def _result() -> dict:
@@ -42,6 +42,75 @@ def _fail(res: dict, msg: str) -> None:
 
 def _warn(res: dict, msg: str) -> None:
     res["warnings"].append(msg)
+
+
+def _check_causal_row(
+    res: dict,
+    row: dict,
+    *,
+    seen_causal: set[str],
+    row_kind_label: str,
+    dossier_hashes: dict[str, str],
+    win_start,
+    win_end,
+) -> str | None:
+    """Controlla un singolo ``causal_event_id``: formato, kind ammesso, coerenza
+    della data, finestra, dossier_hash, univocita' cross-row. Ritorna il
+    ``prev_key`` (per il check append-only delle occurrences) oppure None se la
+    riga non porta una data sortabile.
+
+    ``row_kind_label`` distingue le occorrenze del ledger (``"occorrenza"``)
+    dalle righe del pannello ``signals``: la label entra nel messaggio d'errore
+    cosi' il destinatario sa dove guardare.
+    """
+    cid = row.get("causal_event_id")
+    match = CAUSAL_ID_PATTERN.match(cid) if isinstance(cid, str) else None
+    if match is None:
+        _fail(res, f"{row_kind_label} senza causal_event_id valido: {cid!r}")
+    else:
+        kind = match.group("kind")
+        if kind not in CAUSAL_KINDS:
+            _fail(res, f"{row_kind_label} con kind non ammesso: {cid!r}")
+
+    data = row.get("data")
+    data_parsed = _parse_date(data)
+    if data is not None and data_parsed is None:
+        _fail(res, f"{row_kind_label} con data non leggibile: {data!r} (id {cid})")
+    if (
+        isinstance(cid, str)
+        and match is not None
+        and match.group("kind") in DATE_EMBEDDING_KINDS
+    ):
+        tokens = cid.split(":")
+        if len(tokens) >= 3 and tokens[1] != str(data):
+            _fail(res, f"data {data} incoerente con causal_event_id {cid} ({row_kind_label})")
+
+    if data_parsed is not None and win_start is not None:
+        if data_parsed < win_start or data_parsed > win_end:
+            _fail(
+                res,
+                f"{row_kind_label} {data} fuori dalla finestra di osservazione (id {cid})",
+            )
+
+    if data is not None and data in dossier_hashes:
+        actual = dossier_hashes[data]
+        if actual is not None and row.get("dossier_hash") != actual:
+            _fail(
+                res,
+                f"dossier_hash non corrispondente per {data} ({row_kind_label}): "
+                f"atteso {actual}, trovato {row.get('dossier_hash')}",
+            )
+
+    if isinstance(cid, str):
+        if cid in seen_causal:
+            _fail(
+                res,
+                f"causal_event_id duplicato (doppio conteggio) su {row_kind_label}: {cid}",
+            )
+        seen_causal.add(cid)
+
+    sort_key = (data or "", cid or "")
+    return sort_key
 
 
 def _parse_date(value) -> dt.date | None:
@@ -134,35 +203,18 @@ def validate_panels(
     primary_count: dict[tuple, int] = defaultdict(int)
 
     for occ in occurrences:
+        sort_key = _check_causal_row(
+            res,
+            occ,
+            seen_causal=seen_causal,
+            row_kind_label="occorrenza",
+            dossier_hashes=dossier_hashes,
+            win_start=win_start,
+            win_end=win_end,
+        )
+
         cid = occ.get("causal_event_id")
-        match = CAUSAL_ID_PATTERN.match(cid) if isinstance(cid, str) else None
-        if match is None:
-            _fail(res, f"causal_event_id malformato: {cid!r}")
-        else:
-            kind = match.group("kind")
-            if kind not in CAUSAL_KINDS:
-                _fail(res, f"causal_event_id con kind non ammesso: {cid!r}")
-
-        # data coerente con l'id (per i kind che incorporano la data).
         data = occ.get("data")
-        data_parsed = _parse_date(data)
-        if data is not None and data_parsed is None:
-            _fail(res, f"occorrenza con data non leggibile: {data!r} (id {cid})")
-        if (
-            isinstance(cid, str)
-            and match is not None
-            and match.group("kind") in DATE_EMBEDDING_KINDS
-        ):
-            tokens = cid.split(":")
-            if len(tokens) >= 3 and tokens[1] != str(data):
-                _fail(res, f"data {data} incoerente con causal_event_id {cid}")
-
-        if data_parsed is not None and win_start is not None:
-            if data_parsed < win_start or data_parsed > win_end:
-                _fail(
-                    res,
-                    f"occorrenza {data} fuori dalla finestra di osservazione (id {cid})",
-                )
 
         # primary_finding: se assegnato, deve esistere nelle definizioni.
         primary = occ.get("primary_finding")
@@ -182,29 +234,27 @@ def validate_panels(
                         f"un solo finding primario puo' ricevere il costo",
                     )
 
-        # dossier_hash: se la giornata ha un dossier reale, l'hash deve matchare.
-        if data is not None and data in dossier_hashes:
-            actual = dossier_hashes[data]
-            if actual is not None and occ.get("dossier_hash") != actual:
-                _fail(
-                    res,
-                    f"dossier_hash non corrispondente per {data}: "
-                    f"atteso {actual}, trovato {occ.get('dossier_hash')}",
-                )
-
-        # duplicati: causal_event_id univoco (anti-doppio-conteggio).
-        if isinstance(cid, str):
-            if cid in seen_causal:
-                _fail(res, f"causal_event_id duplicato (doppio conteggio): {cid}")
-            seen_causal.add(cid)
-
         # append-only: le occorrenze sono ordinate per data crescente.
-        sort_key = (data or "", cid or "")
-        if prev_key is not None and sort_key < prev_key:
+        if prev_key is not None and sort_key is not None and sort_key < prev_key:
             _fail(
                 res, f"ledger non append-only: occorrenza {sort_key} precede {prev_key}"
             )
-        prev_key = sort_key
+        if sort_key is not None:
+            prev_key = sort_key
+
+    # Pannello signals: stesso contratto anti-doppio conteggio sulle righe del
+    # segnale (kind=signal, data, signal_id). L'append-only e' gia' coperto
+    # dalle occurrences del ledger; qui' conta solo univocita' e formato.
+    for sig in panels.get("signals") or []:
+        _check_causal_row(
+            res,
+            sig,
+            seen_causal=seen_causal,
+            row_kind_label="segnale",
+            dossier_hashes=dossier_hashes,
+            win_start=win_start,
+            win_end=win_end,
+        )
 
     # completeness: ogni giornata con dossier e movers deve produrre occorrenze
     # (una giornata con candidati ma zero occorrenze = tutti NON_CLASSIFICATO, e'
