@@ -290,6 +290,11 @@ def test_guard_senza_notional_non_diventa_zero_dollari():
     assert panel["summary"]["guard_cost_usd"] is None
     assert panel["summary"]["guard_avoided_loss_usd"] is None
     assert panel["guards"][0]["guard_cost_return"] is not None
+    rollup = build_decision_quality_rollup([panel])
+    assert rollup["totali_usd"]["guard_cost_usd"] is None
+    assert rollup["totali_usd"]["guard_avoided_loss_usd"] is None
+    assert rollup["n_guard_cost_usd_mancanti"] == 1
+    assert rollup["n_guard_avoided_loss_usd_mancanti"] == 1
 
 
 def test_rollup_cumulativo_non_imputa_il_passivo_mancante():

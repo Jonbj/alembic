@@ -267,10 +267,6 @@ def build_opening_snapshot(
     return rows
 
 
-def _sum_present(values: list[float | None]) -> float:
-    return sum(value for value in values if value is not None)
-
-
 def _strict_sum(values: list[float | None]) -> float | None:
     """Somma completa: lista vuota=zero, un solo missing rende il totale missing."""
     if not values:
@@ -607,7 +603,7 @@ def build_decision_quality_panel(dossier: dict, *, dossier_hash: str = "") -> di
                 else None
             ),
             "market_beta_1_usd": (
-                _sum_present(
+                _strict_sum(
                     [
                         _float((row.get("beta_1_attribution") or {}).get("market_usd"))
                         for row in opening
@@ -617,7 +613,7 @@ def build_decision_quality_panel(dossier: dict, *, dossier_hash: str = "") -> di
                 else None
             ),
             "sector_beta_1_incremental_usd": (
-                _sum_present(
+                _strict_sum(
                     [
                         _float(
                             (row.get("beta_1_attribution") or {}).get(
@@ -660,6 +656,8 @@ def build_decision_quality_rollup(panels: list[dict]) -> dict:
     guard_benefit_values: list[float] = []
     missing_opening = 0
     missing_guards = 0
+    missing_guard_cost_usd = 0
+    missing_guard_benefit_usd = 0
     duplicate_guards = 0
     seen_guard_ids: set[str] = set()
 
@@ -672,6 +670,8 @@ def build_decision_quality_rollup(panels: list[dict]) -> dict:
         )
         daily_guard_cost = 0.0
         daily_guard_benefit = 0.0
+        daily_guard_cost_missing = False
+        daily_guard_benefit_missing = False
         for guard in panel.get("guards") or []:
             causal_id = guard.get("causal_event_id")
             if causal_id in seen_guard_ids:
@@ -683,10 +683,24 @@ def build_decision_quality_rollup(panels: list[dict]) -> dict:
             benefit = _float(guard.get("avoided_loss_usd"))
             if cost is not None:
                 daily_guard_cost += cost
+            else:
+                daily_guard_cost_missing = True
+                missing_guard_cost_usd += 1
             if benefit is not None:
                 daily_guard_benefit += benefit
-        guard_cost = None if guard_source_missing else daily_guard_cost
-        guard_benefit = None if guard_source_missing else daily_guard_benefit
+            else:
+                daily_guard_benefit_missing = True
+                missing_guard_benefit_usd += 1
+        guard_cost = (
+            None
+            if guard_source_missing or daily_guard_cost_missing
+            else daily_guard_cost
+        )
+        guard_benefit = (
+            None
+            if guard_source_missing or daily_guard_benefit_missing
+            else daily_guard_benefit
+        )
         if passive is None:
             missing_opening += 1
         else:
@@ -721,12 +735,25 @@ def build_decision_quality_rollup(panels: list[dict]) -> dict:
         "n_giorni": len(ordered),
         "n_giorni_snapshot_apertura_mancante": missing_opening,
         "n_giorni_guard_mancanti": missing_guards,
+        "n_guard_cost_usd_mancanti": missing_guard_cost_usd,
+        "n_guard_avoided_loss_usd_mancanti": missing_guard_benefit_usd,
         "n_guard_duplicati_scartati": duplicate_guards,
         "totali_usd": {
-            "passive_pnl_usd": sum(passive_values),
+            "passive_pnl_usd": (
+                None if not passive_values and missing_opening else sum(passive_values)
+            ),
             "active_decision_pnl_usd": sum(active_values),
-            "guard_cost_usd": sum(guard_cost_values),
-            "guard_avoided_loss_usd": sum(guard_benefit_values),
+            "guard_cost_usd": (
+                None
+                if not guard_cost_values and (missing_guards or missing_guard_cost_usd)
+                else sum(guard_cost_values)
+            ),
+            "guard_avoided_loss_usd": (
+                None
+                if not guard_benefit_values
+                and (missing_guards or missing_guard_benefit_usd)
+                else sum(guard_benefit_values)
+            ),
         },
         "serie": series,
         "policy_output": "descriptive_only_no_live_tuning",

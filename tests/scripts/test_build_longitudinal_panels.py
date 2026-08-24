@@ -81,3 +81,7 @@ def test_decision_quality_e_una_serie_giornaliera_con_rollup(report):
         if "opening_snapshot_not_available_in_legacy_dossier" in row["missingness"]
     )
     assert legacy["summary"]["passive_pnl_usd"] is None
+    if report["decision_quality_rollup"]["n_giorni_snapshot_apertura_mancante"] == report[
+        "n_giorni"
+    ]:
+        assert report["decision_quality_rollup"]["totali_usd"]["passive_pnl_usd"] is None
