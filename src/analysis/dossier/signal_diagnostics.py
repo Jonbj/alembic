@@ -224,3 +224,242 @@ def _return_block(entry: float, exit_price: float, exit_ts: str | None,
 def _none_return(missingness: list[str]) -> dict[str, Any]:
     return {"return": None, "exit_price": None, "exit_bar_ts": None,
             "missingness": missingness}
+
+
+# ---------------------------------------------------------------------------
+# IC, residualizzazione, hit/precision/recall, quintili, falsi positivi
+# ---------------------------------------------------------------------------
+# La IC Spearman e il p-value sono calcolati con ``src.backtest.metrics.
+# signal_quality`` (gia' validato in #180 e usato da compute_s4_ic.py): non si
+# reinventa la formula. Qui si aggiungono n, CI bootstrap e la residualizzazione
+# vs benchmark di libro (SPY/settore), che e' la parte nuova richiesta da #283.
+
+import numpy as np
+
+from src.backtest.metrics.signal_quality import (
+    ic_pvalue,
+    information_coefficient,
+)
+
+# IC con pochi punti e' rumore: sotto questa soglia la metrica e' debole.
+_MIN_IC_N = 3
+# Seed del bootstrap: fisso per riproducibilita'. Non e' una taratura, e' la
+# determinazione di un intervallo di confidenza descrittivo.
+_BOOTSTRAP_SEED = 20260803
+
+
+def _pairs(scores, returns) -> list[tuple[float, float]]:
+    """Coppie (score, return) con entrambi i valori finiti: drop dei missing."""
+    out = []
+    for s, r in zip(scores, returns):
+        sf, rf = _float(s), _float(r)
+        if sf is None or rf is None:
+            continue
+        out.append((sf, rf))
+    return out
+
+
+def residualize(
+    signal_returns: list[float | None], benchmark_returns: list[float | None]
+) -> list[float | None]:
+    """Residuo beta=1: ``signal_fwd - benchmark_fwd`` sulla stessa finestra.
+
+    Puro, elemento per elemento. Se uno dei due e' None il residuo e' None:
+    non si inventa il benchmark mancante. Il benchmark e' il fattore sistematico
+    (SPY o ETF settoriale) sulla STESSA finestra [signal_ts, signal_ts+orizzonte]:
+    e' il ``book benchmark``, distinto dal ``matched control`` (ticker non
+    segnalato) che vive in ``matched_controls``.
+    """
+    out: list[float | None] = []
+    for s, b in zip(signal_returns, benchmark_returns):
+        sf, bf = _float(s), _float(b)
+        if sf is None or bf is None:
+            out.append(None)
+        else:
+            out.append(sf - bf)
+    return out
+
+
+def rank_ic_with_ci(
+    scores: list[float],
+    returns: list[float | None],
+    *,
+    n_bootstrap: int = 1000,
+    seed: int = _BOOTSTRAP_SEED,
+) -> dict[str, Any]:
+    """Rank IC Spearman fra score e forward return, con n, p-value e CI bootstrap.
+
+    Puro. Riporta sempre ``n`` (coppie valide) e marcatore ``weak`` quando n e'
+    sotto la soglia minima: una IC su 2 punti non e' una stima, e non si spaccia
+    per tale. Il CI e' bootstrap (percentile 2.5/97.5), seed fisso per
+    riproducibilita' — e' un intervallo descrittivo, non una scelta operativa.
+    """
+    pairs = _pairs(scores, returns)
+    n = len(pairs)
+    if n < _MIN_IC_N:
+        return {"ic": None, "n": n, "pvalue": None, "ci_lo": None, "ci_hi": None,
+                "weak": True, "method": "spearman_bootstrap"}
+    xs = [p[0] for p in pairs]
+    ys = [p[1] for p in pairs]
+    ic = information_coefficient(xs, ys)
+    pvalue = ic_pvalue(xs, ys)
+    ci_lo, ci_hi = _bootstrap_ic_ci(pairs, n_bootstrap, seed)
+    return {"ic": ic, "n": n, "pvalue": pvalue, "ci_lo": ci_lo, "ci_hi": ci_hi,
+            "weak": False, "method": "spearman_bootstrap"}
+
+
+def _bootstrap_ic_ci(
+    pairs: list[tuple[float, float]], n_bootstrap: int, seed: int
+) -> tuple[float | None, float | None]:
+    """CI percentile (2.5/97.5) della IC via resampling con replacement."""
+    arr = np.asarray(pairs, dtype=float)
+    n = len(arr)
+    rng = np.random.default_rng(seed)
+    ics = []
+    for _ in range(n_bootstrap):
+        idx = rng.integers(0, n, size=n)
+        sample = arr[idx]
+        xs, ys = sample[:, 0], sample[:, 1]
+        if np.std(xs) == 0 or np.std(ys) == 0:
+            continue  # campione degenere (costante): IC non definita, salta
+        ic = information_coefficient(xs.tolist(), ys.tolist())
+        if ic is not None and not (isinstance(ic, float) and np.isnan(ic)):
+            ics.append(ic)
+    if len(ics) < 2:
+        return None, None
+    lo = float(np.percentile(ics, 2.5))
+    hi = float(np.percentile(ics, 97.5))
+    return lo, hi
+
+
+def hit_rate(scores: list[float], returns: list[float | None]) -> dict[str, Any]:
+    """Hit rate del segno: frazione di segnali con sign(score)==sign(return).
+
+    Zero score o zero return contano come miss (non si predice niente). ``n`` e'
+    il numero di coppie valide (entrambi finiti).
+    """
+    pairs = _pairs(scores, returns)
+    n = len(pairs)
+    if n == 0:
+        return {"hit_rate": None, "n": 0}
+    hits = sum(1 for s, r in pairs if s != 0 and r != 0 and (s > 0) == (r > 0))
+    return {"hit_rate": hits / n, "n": n}
+
+
+def precision_recall(
+    rows: list[dict],
+    threshold: float,
+    *,
+    mover_threshold: float,
+    direction: str = "long",
+) -> dict[str, Any]:
+    """Precision/recall dei mover azionabili a una soglia di score.
+
+    ``direction="long"`` (book long-only, l'azione catturabile): segnale positivo
+    = score >= threshold, esito positivo = return >= +mover_threshold.
+    ``direction="short"``: segnale positivo = score <= -threshold, esito = return
+    <= -mover_threshold (descrittivo: il book long-only non potra' eseguirlo).
+
+    La soglia mover e' quella DICHIARATA dal dossier (``soglia_mover``): non e' una
+    nuova taratura. La soglia di score e' un punto di una griglia predefinita e
+    descrittiva: nessuna soglia viene scelta qui.
+
+    recall con denominatore 0 (nessun mover) -> None, non NaN: e' indefinito, non
+    zero. precision con nessun segnale -> None.
+    """
+    tp = fp = fn = tn = 0
+    for row in rows:
+        score = _float(row.get("score"))
+        ret = _float(row.get("return"))
+        if score is None or ret is None:
+            continue
+        if direction == "long":
+            signal = score >= threshold
+            outcome = ret >= mover_threshold
+        else:  # short
+            signal = score <= -threshold
+            outcome = ret <= -mover_threshold
+        if signal and outcome:
+            tp += 1
+        elif signal and not outcome:
+            fp += 1
+        elif not signal and outcome:
+            fn += 1
+        else:
+            tn += 1
+    n_signals = tp + fp
+    n_movers = tp + fn
+    precision = tp / n_signals if n_signals else None
+    recall = tp / n_movers if n_movers else None
+    return {
+        "tp": tp, "fp": fp, "fn": fn, "tn": tn,
+        "precision": precision, "recall": recall,
+        "n_signals": n_signals, "n_movers": n_movers,
+        "threshold": threshold, "mover_threshold": mover_threshold,
+        "direction": direction,
+    }
+
+
+def quintile_analysis(
+    scores: list[float], returns: list[float | None], *, n_buckets: int = 5
+) -> list[dict[str, Any]]:
+    """Bucketta per score quintile e riporta forward return medio per bucket.
+
+    Puro, descrittivo. Ordina per score crescente, assegna bucket =
+    ``floor(rank * n_buckets / n)`` (riempimento il piu' uniforme possibile). I
+    bucket vuoti (pochi dati) hanno n=0 e mean_return=None. Ogni bucket porta n,
+    mean_score, mean_return: una cella con pochi n non si spaccia per stima.
+    """
+    pairs = _pairs(scores, returns)
+    n = len(pairs)
+    if n == 0:
+        return [_empty_bucket(i + 1) for i in range(n_buckets)]
+    pairs.sort(key=lambda p: p[0])
+    buckets: list[list[tuple[float, float]]] = [[] for _ in range(n_buckets)]
+    for rank, (s, r) in enumerate(pairs):
+        b = min(int(rank * n_buckets / n), n_buckets - 1)
+        buckets[b].append((s, r))
+    out = []
+    for i, group in enumerate(buckets):
+        if not group:
+            out.append(_empty_bucket(i + 1))
+            continue
+        rets = [r for _, r in group]
+        scs = [s for s, _ in group]
+        out.append({
+            "bucket": i + 1,
+            "n": len(group),
+            "mean_score": sum(scs) / len(scs),
+            "mean_return": sum(rets) / len(rets),
+        })
+    return out
+
+
+def _empty_bucket(i: int) -> dict[str, Any]:
+    return {"bucket": i, "n": 0, "mean_score": None, "mean_return": None}
+
+
+def false_positives(rows: list[dict], threshold: float) -> dict[str, Any]:
+    """Falsi positivi: score alto (>= threshold) con rendimento avverso (< 0).
+
+    Puro, descrittivo. ``mean_adverse_return`` e' la media dei rendimenti negativi
+    dei falsi positivi (None se nessun FP). ``n_signals`` e' il totale dei segnali
+    sopra soglia (denominatore della precision sui soli FP-di-segno).
+    """
+    adverse: list[float] = []
+    n_signals = 0
+    for row in rows:
+        score = _float(row.get("score"))
+        ret = _float(row.get("return"))
+        if score is None or ret is None:
+            continue
+        if score >= threshold:
+            n_signals += 1
+            if ret < 0:
+                adverse.append(ret)
+    return {
+        "n_fp": len(adverse),
+        "mean_adverse_return": (sum(adverse) / len(adverse)) if adverse else None,
+        "n_signals": n_signals,
+        "threshold": threshold,
+    }

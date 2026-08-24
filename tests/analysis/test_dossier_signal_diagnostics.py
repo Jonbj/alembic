@@ -223,3 +223,157 @@ class TestForwardReturnsPIT:
             assert h in out
             assert "return" in out[h]
             assert "missingness" in out[h]
+
+# ---------------------------------------------------------------------------
+# 2. IC residualizzata, hit/precision/recall, quintili, falsi positivi
+# ---------------------------------------------------------------------------
+
+
+class TestICResidualizzazione:
+    def test_ic_spearman_perfetta_monotona(self):
+        scores = [0.1, 0.2, 0.3, 0.4, 0.5]
+        returns = [0.01, 0.02, 0.03, 0.04, 0.05]
+        ic = sd.rank_ic_with_ci(scores, returns)
+        assert ic["ic"] == pytest.approx(1.0, abs=1e-9)
+        assert ic["n"] == 5
+        assert ic["pvalue"] is not None
+        # CI bootstrap contiene l'IC puntuale.
+        assert ic["ci_lo"] <= ic["ic"] <= ic["ci_hi"]
+
+    def test_ic_negativa_per_antitrend(self):
+        scores = [0.5, 0.4, 0.3, 0.2, 0.1]
+        returns = [0.01, 0.02, 0.03, 0.04, 0.05]
+        ic = sd.rank_ic_with_ci(scores, returns)
+        assert ic["ic"] == pytest.approx(-1.0, abs=1e-9)
+
+    def test_ic_riporta_n_e_ci_finiti(self):
+        ic = sd.rank_ic_with_ci([0.1, 0.2, 0.3, 0.4, 0.5], [0.05, 0.04, 0.03, 0.02, 0.01])
+        assert ic["n"] == 5
+        assert ic["ci_lo"] is not None and ic["ci_hi"] is not None
+        assert ic["ci_lo"] <= ic["ci_hi"]
+
+    def test_residualize_sottrae_benchmark_sulla_stessa_finestra(self):
+        res = sd.residualize([0.05, 0.03, None], [0.02, 0.01, 0.04])
+        assert res[0] == pytest.approx(0.03)
+        assert res[1] == pytest.approx(0.02)
+        # missing propaga: nessun valore inventato.
+        assert res[2] is None
+
+    def test_ic_residualizzata_sottrae_il_book_benchmark(self):
+        # score e return perfettamente correlati, ma il benchmark spiega meta':
+        # la IC residualizzata deve essere minore di quella grezza.
+        scores = [0.1, 0.2, 0.3, 0.4, 0.5]
+        signal_ret = [0.02, 0.04, 0.06, 0.08, 0.10]
+        benchmark = [0.01, 0.02, 0.03, 0.04, 0.05]  # meta' del movimento
+        raw = sd.rank_ic_with_ci(scores, signal_ret)["ic"]
+        resid = sd.rank_ic_with_ci(scores, sd.residualize(signal_ret, benchmark))["ic"]
+        assert raw == pytest.approx(1.0)
+        # residualizzata: signal_ret - benchmark = [0.01,0.02,...] ancora monotona
+        # con score -> IC resta 1.0, ma il punto e' che la metrica e' NETTA dal
+        # fattore sistematico. Verifichiamo che residualize effettivamente toglie
+        # il benchmark e che la funzione accetti la lista residualizzata.
+        assert resid == pytest.approx(1.0)
+        assert sd.residualize(signal_ret, benchmark) == [pytest.approx(0.01), pytest.approx(0.02),
+                                                         pytest.approx(0.03), pytest.approx(0.04),
+                                                         pytest.approx(0.05)]
+
+    def test_ic_con_pochi_punti_riporta_n_basso(self):
+        ic = sd.rank_ic_with_ci([0.1, 0.2], [0.01, 0.02])
+        assert ic["n"] == 2
+        # sotto la soglia minima la IC e' None o marcata debole.
+        assert ic["ic"] is None or ic["weak"] is True
+
+
+class TestHitPrecisionRecall:
+    def _rows(self):
+        return [
+            {"score": 0.5, "return": 0.05},
+            {"score": 0.4, "return": 0.02},
+            {"score": 0.2, "return": 0.06},
+            {"score": 0.35, "return": 0.01},
+        ]
+
+    def test_precision_recall_valori_esatti_lato_long(self):
+        # threshold=0.3, mover_threshold=0.03, long.
+        # signal>=0.3: idx0(0.05 up-mover TP), idx1(0.02 FP), idx3(0.01 FP) -> TP=1 FP=2
+        # up-movers (ret>=0.03): idx0(0.05), idx2(0.06) -> total=2; FN=idx2(score<0.3)=1
+        out = sd.precision_recall(self._rows(), threshold=0.3,
+                                  mover_threshold=0.03, direction="long")
+        assert out["tp"] == 1
+        assert out["fp"] == 2
+        assert out["fn"] == 1
+        assert out["precision"] == pytest.approx(1 / 3)
+        assert out["recall"] == pytest.approx(0.5)
+        assert out["n_signals"] == 3
+        assert out["n_movers"] == 2
+
+    def test_hit_rate_sign_agreement(self):
+        # sign(score)==sign(return): idx0(+,+),idx1(+,+),idx2(+,+),idx3(+,+) tutte
+        # hit (tutti score>0 e return>0). Ma idx2 ha return 0.06>0: hit.
+        hr = sd.hit_rate([0.5, 0.4, 0.2, 0.35], [0.05, 0.02, 0.06, 0.01])
+        assert hr["hit_rate"] == pytest.approx(1.0)
+        assert hr["n"] == 4
+        # con un controesempio: score positivo, return negativo -> miss.
+        hr2 = sd.hit_rate([0.5, -0.4], [0.05, 0.02])
+        assert hr2["hit_rate"] == pytest.approx(0.5)
+
+    def test_precision_recall_lato_short(self):
+        # short: positive_signal = score<=-threshold; positive_outcome = return<=-mt
+        rows = [
+            {"score": -0.5, "return": -0.05},  # TP
+            {"score": -0.4, "return": -0.01},  # FP (non down-mover)
+            {"score": -0.2, "return": -0.06},  # FN (down-mover non segnalato)
+        ]
+        out = sd.precision_recall(rows, threshold=0.3, mover_threshold=0.03, direction="short")
+        assert out["tp"] == 1
+        assert out["fp"] == 1
+        assert out["fn"] == 1
+        assert out["recall"] == pytest.approx(0.5)
+
+    def test_senza_movers_recall_zero_e_non_nan(self):
+        rows = [{"score": 0.5, "return": 0.01}, {"score": 0.4, "return": 0.02}]
+        out = sd.precision_recall(rows, threshold=0.3, mover_threshold=0.03, direction="long")
+        assert out["n_movers"] == 0
+        # recall con denominatore 0: None (non definito), non NaN o crash.
+        assert out["recall"] is None
+        assert out["precision"] == 0.0  # nessun TP
+
+
+class TestQuintili:
+    def test_quintili_monotoni_su_dato_costruito(self):
+        # 10 segnali: score crescente, return crescente. Bucket 5 (top) > bucket 1.
+        scores = [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50]
+        returns = [0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009, 0.010]
+        q = sd.quintile_analysis(scores, returns)
+        assert len(q) == 5
+        assert q[0]["n"] == 2
+        assert q[-1]["mean_return"] > q[0]["mean_return"]
+        # ogni bucket porta n.
+        for bucket in q:
+            assert "n" in bucket and "mean_score" in bucket and "mean_return" in bucket
+
+    def test_quintili_con_pochi_dati_collapse_gracefully(self):
+        q = sd.quintile_analysis([0.1, 0.2, 0.3], [0.01, 0.02, 0.03])
+        # 3 punti in 5 bucket: alcuni vuoti, ma nessun crash.
+        assert len(q) == 5
+        assert sum(b["n"] for b in q) == 3
+
+
+class TestFalsiPositivi:
+    def test_falsi_positivi_score_alto_rendimento_avverso(self):
+        rows = [
+            {"score": 0.5, "return": -0.05},
+            {"score": 0.4, "return": -0.03},
+            {"score": 0.2, "return": 0.01},
+        ]
+        fp = sd.false_positives(rows, threshold=0.3)
+        # score>=0.3 con return<0: idx0, idx1 -> n_fp=2
+        assert fp["n_fp"] == 2
+        assert fp["mean_adverse_return"] == pytest.approx(-0.04)
+        assert fp["n_signals"] == 2
+
+    def test_falsi_positivi_zero_se_tutti_corretti(self):
+        rows = [{"score": 0.5, "return": 0.05}, {"score": 0.4, "return": 0.02}]
+        fp = sd.false_positives(rows, threshold=0.3)
+        assert fp["n_fp"] == 0
+        assert fp["mean_adverse_return"] is None
