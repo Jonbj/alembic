@@ -87,6 +87,11 @@ docs/evidence/s4_ic_notification.json
 # Worktree temporanei lasciati dalle sessioni
 .wt*/
 
+# Pannelli longitudinali derivati (#282): rigenerabili da
+# scripts/build_longitudinal_panels.py che legge i dossier (read-only). Non e'
+# evidenza primaria e il timestamp generato_il lo farebbe churnare a ogni run.
+docs/evidence/longitudinal_panels.json
+
 # Log dei container preservati prima di un redeploy (workaround F-027).
 # Servono alla sessione forense del giorno e poi diventano ridondanti: il report
 # li riassume. Fuori da git per non aggiungere ~440K per ogni redeploy.
