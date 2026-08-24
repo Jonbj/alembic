@@ -206,6 +206,24 @@ def test_regime_legge_moltiplicatore_persistito_senza_interpolarlo():
     assert "regime_mult IS NOT NULL" in psql.call_args.args[0]
 
 
+def test_calendario_senza_credenziali_dichiara_fonti_mancanti():
+    with patch.dict(
+        "os.environ",
+        {"FMP_API_KEY": "", "ALPACA_API_KEY": "", "ALPACA_SECRET_KEY": ""},
+    ):
+        out = dossier._corporate_calendar(date(2026, 8, 12), ["NVDA"])
+
+    assert out == {
+        "events": [],
+        "sources_succeeded": [],
+        "complete": False,
+        "missingness": [
+            "earnings_calendar_unavailable",
+            "corporate_actions_calendar_unavailable",
+        ],
+    }
+
+
 def test_soli_benchmark_non_mascherano_watchlist_senza_barre():
     only_benchmark = {
         "SPY": {

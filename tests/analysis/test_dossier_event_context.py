@@ -135,6 +135,20 @@ def test_calendario_corporate_prevale_sulla_classificazione_lessicale():
     assert row["corporate_calendar"]["events"][0]["source"] == "FMP earnings-calendar"
 
 
+def test_calendario_parziale_non_diventa_assenza_di_eventi_verificata():
+    out = _build(corporate_events={
+        "events": [],
+        "sources_succeeded": ["Alpaca Corporate Actions API"],
+        "complete": False,
+        "missingness": ["earnings_calendar_unavailable"],
+    })
+
+    calendar = out["per_symbol"]["NVDA"]["corporate_calendar"]
+    assert calendar["status"] == "UNKNOWN"
+    assert calendar["events"] == []
+    assert calendar["missingness"] == ["earnings_calendar_unavailable"]
+
+
 def test_opportunita_macro_stesso_tema_contano_come_un_cluster_indipendente():
     candidates = [
         {"symbol": "NVDA", "return": 0.10},
