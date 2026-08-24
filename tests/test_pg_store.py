@@ -1,7 +1,8 @@
 """Tests for PostgreSQL store - SQL injection fix verification."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.store.pg_store import PostgreSQLStore
 
@@ -83,11 +84,11 @@ class TestPostgreSQLStoreInterface:
     def test_fetch_signals_for_cycle_query_structure(self):
         """fetch_signals_for_cycle uses DISTINCT ON, parameterized interval, watchlist filter."""
         query = PostgreSQLStore._FETCH_SIGNALS_FOR_CYCLE
-        assert "DISTINCT ON (symbol)" in query
+        assert "DISTINCT ON (ss.symbol)" in query
         assert "INTERVAL '%s'" not in query
         assert "(%s || ' hours')::interval" in query or "%s || ' hours'" in query
         # Prefer ensemble over FinBERT fallback within the window, then most recent.
-        assert "ORDER BY symbol, fallback_used ASC, generated_at DESC" in query
+        assert "ORDER BY ss.symbol, ss.fallback_used ASC, ss.generated_at DESC" in query
         assert "ANY(%s)" in query
 
     def test_fetch_signals_for_cycle_signature(self):
@@ -105,6 +106,7 @@ class TestWriteSignalReturnsId:
     def test_write_signal_returns_signal_id(self):
         """write_signal must return the integer id of the inserted row."""
         from datetime import datetime, timezone
+
         from src.models.signals import SentimentResult
 
         mock_conn = MagicMock()
@@ -362,7 +364,8 @@ class TestPoolFallbackConnection:
 
     def test_fallback_connection_close_on_pool_error(self):
         """When pool raises PoolError, fallback conn is closed (not put back to pool)."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         import psycopg2.pool
 
         mock_direct_conn = MagicMock()
@@ -1179,6 +1182,7 @@ class TestCloseTradeCostBreakdown:
 
     def test_close_trade_accepts_entry_notional_and_qty(self):
         import inspect
+
         from src.store.pg_store import PostgreSQLStore
         sig = inspect.signature(PostgreSQLStore.close_trade)
         assert "entry_notional" in sig.parameters
@@ -1237,6 +1241,7 @@ class TestFetchDecisionsSignalScore:
     def test_fetch_decisions_returns_signal_score(self):
         """Returned dicts must include a 'signal_score' key."""
         from datetime import datetime, timezone
+
         from src.store.pg_store import PostgreSQLStore
 
         mock_conn = MagicMock()
@@ -1381,6 +1386,7 @@ class TestSchedulerStoreLeakB7:
         """The _pg_stop store in the stop-loss section must be closed (with or
         finally), not bare-and-abandoned as it was on 2026-07-14."""
         import inspect
+
         import src.workers.portfolio_scheduler as ps
 
         src = inspect.getsource(ps)
@@ -1395,6 +1401,7 @@ class TestSchedulerStoreLeakB7:
         in a finally. Catches re-introduction of bare-and-abandoned stores."""
         import inspect
         import re
+
         import src.workers.portfolio_scheduler as ps
 
         src = inspect.getsource(ps)

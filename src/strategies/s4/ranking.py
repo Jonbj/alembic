@@ -33,11 +33,22 @@ class RankedTicker:
 
 
 @dataclass(frozen=True)
+class RankingDiagnostic:
+    """Point-in-time reason and full ordinal rank for one input signal (#294)."""
+
+    ticker: str
+    signal_id: int | None
+    rank: int | None
+    reason_code: str
+
+
+@dataclass(frozen=True)
 class RankingResult:
     as_of: datetime
     rankings: tuple[RankedTicker, ...]
     bucket_weight: float
     n_selected: int
+    diagnostics: tuple[RankingDiagnostic, ...] = ()
 
     @property
     def tickers(self) -> list[str]:
@@ -102,19 +113,31 @@ class CrossSectionalRanker:
             as_of = datetime.utcnow()
 
         cfg = self._config
-        candidates = self._filter_and_deduplicate(signals)
+        candidates, diagnostics = self._filter_and_deduplicate_with_diagnostics(signals)
 
         if len(candidates) < cfg.min_stocks:
+            diagnostics.extend(
+                RankingDiagnostic(sig.symbol, sig.signal_id, None, "RANK_MIN_STOCKS")
+                for sig, _ in candidates
+            )
             return RankingResult(
                 as_of=as_of,
                 rankings=(),
                 bucket_weight=cfg.bucket_pct,
                 n_selected=0,
+                diagnostics=tuple(diagnostics),
             )
 
         # Sort descending by effective_strength; take top n_top
         candidates.sort(key=lambda x: x[1], reverse=True)
         selected = candidates[: cfg.n_top]
+        for rank, (sig, _) in enumerate(candidates, start=1):
+            diagnostics.append(RankingDiagnostic(
+                ticker=sig.symbol,
+                signal_id=sig.signal_id,
+                rank=rank,
+                reason_code="RANK_SELECTED" if rank <= cfg.n_top else "RANK_OUTSIDE_TOP_N",
+            ))
 
         if len(selected) < cfg.min_stocks:
             return RankingResult(
@@ -122,6 +145,7 @@ class CrossSectionalRanker:
                 rankings=(),
                 bucket_weight=cfg.bucket_pct,
                 n_selected=0,
+                diagnostics=tuple(diagnostics),
             )
 
         n = len(selected)
@@ -152,6 +176,7 @@ class CrossSectionalRanker:
             rankings=ranked,
             bucket_weight=cfg.bucket_pct,
             n_selected=n,
+            diagnostics=tuple(diagnostics),
         )
 
     # ------------------------------------------------------------------
@@ -166,6 +191,12 @@ class CrossSectionalRanker:
         Returns list of (SentimentResult, effective_strength) for qualifying,
         positive-strength signals.
         """
+        result, _ = self._filter_and_deduplicate_with_diagnostics(signals)
+        return result
+
+    def _filter_and_deduplicate_with_diagnostics(
+        self, signals: Sequence[SentimentResult]
+    ) -> tuple[list[tuple[SentimentResult, float]], list[RankingDiagnostic]]:
         cfg = self._config
         best: dict[str, SentimentResult] = {}
 
@@ -174,11 +205,24 @@ class CrossSectionalRanker:
             if prev is None or sig.generated_at > prev.generated_at:
                 best[sig.symbol] = sig
 
+        diagnostics: list[RankingDiagnostic] = []
+        for sig in signals:
+            if best.get(sig.symbol) is not sig:
+                diagnostics.append(RankingDiagnostic(
+                    sig.symbol, sig.signal_id, None, "RANK_DEDUPLICATED"
+                ))
+
         result: list[tuple[SentimentResult, float]] = []
         for sig in best.values():
             if sig.confidence < cfg.min_confidence:
+                diagnostics.append(RankingDiagnostic(
+                    sig.symbol, sig.signal_id, None, "RANK_MIN_CONFIDENCE"
+                ))
                 continue
             if abs(sig.score) < cfg.min_score:
+                diagnostics.append(RankingDiagnostic(
+                    sig.symbol, sig.signal_id, None, "RANK_MIN_SCORE"
+                ))
                 continue
             # effective_strength = score. score already = polarity × confidence
             # (set by the sentiment worker, CLAUDE.md). Multiplying by confidence
@@ -186,7 +230,10 @@ class CrossSectionalRanker:
             strength = sig.score
             if strength <= 0:
                 # long-only: skip neutral or net-negative signals
+                diagnostics.append(RankingDiagnostic(
+                    sig.symbol, sig.signal_id, None, "RANK_LONG_ONLY"
+                ))
                 continue
             result.append((sig, strength))
 
-        return result
+        return result, diagnostics

@@ -25,11 +25,21 @@ def test_fetch_signals_passes_news_age_parameter():
 
 
 def test_fetch_signals_sql_selects_id():
-    """B33-follow-up: id must be selected so SentimentResult.signal_id can be pinned."""
+    """B33-follow-up: id must be selected so SentimentResult.signal_id can be pinned.
+
+    #294 joins news_log/news_resolved_entities, both of which also have an `id`
+    column, so the reference is now qualified (`ss.id`) to stay unambiguous.
+    """
     query = PostgreSQLStore._FETCH_SIGNALS_FOR_CYCLE
     # id must appear in the SELECT list (before FROM), not just anywhere in the query.
     select_clause = query.split("FROM", 1)[0]
-    assert "id" in [c.strip().split(" ")[0] for c in select_clause.replace("SELECT DISTINCT ON (symbol)", "").split(",")]
+    columns = [
+        c.strip().split(" ")[0]
+        for c in select_clause.replace("SELECT DISTINCT ON (symbol)", "")
+        .replace("SELECT DISTINCT ON (ss.symbol)", "")
+        .split(",")
+    ]
+    assert "id" in columns or "ss.id" in columns
 
 
 def test_fetch_signals_populates_signal_id_from_row():
@@ -87,8 +97,13 @@ def test_fetch_signals_sql_selects_published_at():
     layer, where it would also narrow the hold/exit path for open positions."""
     query = PostgreSQLStore._FETCH_SIGNALS_FOR_CYCLE
     select_clause = query.split("FROM", 1)[0]
-    columns = [c.strip().split(" ")[0] for c in select_clause.replace("SELECT DISTINCT ON (symbol)", "").split(",")]
-    assert "published_at" in columns
+    columns = [
+        c.strip().split(" ")[0]
+        for c in select_clause.replace("SELECT DISTINCT ON (symbol)", "")
+        .replace("SELECT DISTINCT ON (ss.symbol)", "")
+        .split(",")
+    ]
+    assert "published_at" in columns or "ss.published_at" in columns
 
 
 def test_fetch_signals_populates_published_at_from_row():
