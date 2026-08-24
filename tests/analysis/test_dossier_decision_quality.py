@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
+
 import pytest
 
 from src.analysis.dossier.decision_quality import (
@@ -158,6 +161,7 @@ def test_snapshot_apertura_isola_il_passivo_e_scompone_beta_uno():
     assert msft["passive_pnl_usd"] == pytest.approx(5.0)
     assert msft["actual_intraday_pnl_usd"] == pytest.approx(15.0)
     assert msft["exit_active_effect_usd"] == pytest.approx(10.0)
+    assert msft["qty_close"] == pytest.approx(0.0)
 
 
 def test_selection_timing_sizing_exit_sono_controfattuali_separati():
@@ -228,6 +232,64 @@ def test_missingness_non_diventa_zero():
     assert rows[0]["passive_pnl_usd"] is None
     assert rows[0]["actual_intraday_pnl_usd"] is None
     assert rows[0]["missingness"] == ["daily_bar_missing"]
+    panel = build_decision_quality_panel(
+        {"data": "2026-08-12", "snapshot_apertura": rows, "guard_decisions": []}
+    )
+    assert panel["summary"]["passive_pnl_usd"] is None
+    assert panel["summary"]["actual_intraday_pnl_usd"] is None
+
+
+def test_variazione_quantita_intraday_corregge_il_baseline_passivo():
+    trade = {
+        **_opening_trades()[0],
+        "qty": 10.0,
+        "exit_fills": [
+            {
+                "order_id": "prior",
+                "filled_at": "2026-08-11T18:00:00+00:00",
+                "filled_qty": 2.0,
+                "filled_avg_price": 99.0,
+            },
+            {
+                "order_id": "partial-today",
+                "filled_at": datetime(2026, 8, 12, 18, 0, tzinfo=timezone.utc),
+                "filled_qty": 3.0,
+                "filled_avg_price": 104.0,
+            },
+        ],
+    }
+    rows = build_opening_snapshot(
+        [trade],
+        _bars(),
+        data="2026-08-12",
+        sector_by_ticker={"AAPL": "tech"},
+    )
+    row = rows[0]
+
+    assert row["qty_open"] == pytest.approx(8.0)
+    assert row["qty_close"] == pytest.approx(5.0)
+    assert row["passive_pnl_usd"] == pytest.approx(40.0)
+    assert row["actual_intraday_pnl_usd"] == pytest.approx(37.0)
+    assert row["exit_active_effect_usd"] == pytest.approx(-3.0)
+    assert row["quantity_changes_intraday"][0]["order_id"] == "partial-today"
+    json.dumps(rows)  # i datetime del broker devono essere normalizzati a ISO
+
+    panel = build_decision_quality_panel(
+        {"data": "2026-08-12", "snapshot_apertura": rows, "guard_decisions": []}
+    )
+    assert panel["summary"]["exit_effect_usd"] == pytest.approx(-3.0)
+    assert panel["summary"]["actual_intraday_pnl_usd"] == pytest.approx(37.0)
+
+
+def test_guard_senza_notional_non_diventa_zero_dollari():
+    dossier = _dossier()
+    for guard in dossier["guard_decisions"]:
+        guard["intended_notional_usd"] = None
+    panel = build_decision_quality_panel(dossier)
+
+    assert panel["summary"]["guard_cost_usd"] is None
+    assert panel["summary"]["guard_avoided_loss_usd"] is None
+    assert panel["guards"][0]["guard_cost_return"] is not None
 
 
 def test_rollup_cumulativo_non_imputa_il_passivo_mancante():

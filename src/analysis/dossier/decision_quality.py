@@ -17,7 +17,7 @@ formula e' dichiarata in ogni riga e non influenza alcuna decisione di trading.
 from __future__ import annotations
 
 import statistics
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date, datetime
 from math import sqrt
 from typing import Any
@@ -44,7 +44,7 @@ def _intraday_return(bar: dict | None) -> float | None:
     if not bar:
         return None
     open_, close = _float(bar.get("open")), _float(bar.get("close"))
-    if open_ in (None, 0.0) or close is None:
+    if open_ is None or open_ == 0.0 or close is None:
         return None
     return close / open_ - 1.0
 
@@ -61,6 +61,26 @@ def _same_day(value: str | datetime | None, expected: str) -> bool:
             return date.fromisoformat(value[:10]).isoformat() == expected
         except ValueError:
             return False
+
+
+def _date_iso(value: str | datetime | None) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    try:
+        return datetime.fromisoformat(value).date().isoformat()
+    except ValueError:
+        try:
+            return date.fromisoformat(value[:10]).isoformat()
+        except ValueError:
+            return None
+
+
+def _timestamp_iso(value: str | datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat() if isinstance(value, datetime) else str(value)
 
 
 def build_opening_snapshot(
@@ -83,7 +103,7 @@ def build_opening_snapshot(
         trades, key=lambda row: (row.get("trade_id") is None, row.get("trade_id") or 0)
     ):
         ticker = trade["symbol"]
-        qty = _float(trade.get("qty"))
+        qty_initial = _float(trade.get("qty"))
         bar = bars.get(ticker)
         open_ = _float(bar.get("open")) if bar else None
         close = _float(bar.get("close")) if bar else None
@@ -92,28 +112,92 @@ def build_opening_snapshot(
             missingness.append("daily_bar_missing")
         elif open_ is None or close is None:
             missingness.append("daily_open_or_close_missing")
-        if qty is None:
+        if qty_initial is None:
             missingness.append("qty_missing")
 
+        seen_order_ids: set[str] = set()
+        prior_fills: list[dict] = []
+        current_fills: list[dict] = []
+        for fill in sorted(
+            trade.get("exit_fills") or [],
+            key=lambda row: str(row.get("filled_at") or ""),
+        ):
+            order_id = str(fill.get("order_id") or "")
+            if order_id and order_id in seen_order_ids:
+                continue
+            if order_id:
+                seen_order_ids.add(order_id)
+            fill_day = _date_iso(fill.get("filled_at"))
+            fill_qty = _float(fill.get("filled_qty"))
+            fill_price = _float(fill.get("filled_avg_price"))
+            if fill_day is None or fill_qty is None or fill_price is None:
+                missingness.append(f"exit_fill_incomplete:{order_id or 'unknown'}")
+                continue
+            normalised = {
+                "order_id": order_id or None,
+                "filled_at": _timestamp_iso(fill.get("filled_at")),
+                "filled_qty": fill_qty,
+                "filled_avg_price": fill_price,
+            }
+            if fill_day < data:
+                prior_fills.append(normalised)
+            elif fill_day == data:
+                current_fills.append(normalised)
+
+        prior_qty = sum(fill["filled_qty"] for fill in prior_fills)
+        qty_open = (
+            max(qty_initial - prior_qty, 0.0) if qty_initial is not None else None
+        )
+        current_qty = sum(fill["filled_qty"] for fill in current_fills)
+        qty_close = max(qty_open - current_qty, 0.0) if qty_open is not None else None
+        if qty_initial is not None and prior_qty + current_qty > qty_initial + 1e-9:
+            missingness.append("exit_fill_qty_exceeds_trade_qty")
+
         passive = (
-            (close - open_) * qty
-            if close is not None and open_ is not None and qty is not None
+            (close - open_) * qty_open
+            if close is not None and open_ is not None and qty_open is not None
             else None
         )
         exited_today = _same_day(trade.get("exit_time"), data)
-        exit_price = _float(trade.get("exit_price")) if exited_today else None
-        actual_mark = exit_price if exit_price is not None else close
-        actual = (
-            (actual_mark - open_) * qty
-            if actual_mark is not None and open_ is not None and qty is not None
-            else None
-        )
-        exit_effect = (
-            actual - passive if actual is not None and passive is not None else None
-        )
+        if current_fills:
+            exit_price = (
+                sum(
+                    fill["filled_avg_price"] * fill["filled_qty"]
+                    for fill in current_fills
+                )
+                / current_qty
+            )
+            exit_effect = (
+                sum(
+                    (fill["filled_avg_price"] - close) * fill["filled_qty"]
+                    for fill in current_fills
+                )
+                if close is not None
+                else None
+            )
+            actual = (
+                passive + exit_effect
+                if passive is not None and exit_effect is not None
+                else None
+            )
+        else:
+            exit_price = _float(trade.get("exit_price")) if exited_today else None
+            if exited_today and exit_price is not None:
+                qty_close = 0.0
+            actual_mark = exit_price if exit_price is not None else close
+            actual = (
+                (actual_mark - open_) * qty_open
+                if actual_mark is not None
+                and open_ is not None
+                and qty_open is not None
+                else None
+            )
+            exit_effect = (
+                actual - passive if actual is not None and passive is not None else None
+            )
 
         opening_notional = (
-            open_ * qty if open_ is not None and qty is not None else None
+            open_ * qty_open if open_ is not None and qty_open is not None else None
         )
         market_usd = (
             opening_notional * market_return
@@ -121,10 +205,10 @@ def build_opening_snapshot(
             else None
         )
         sector = sector_by_ticker.get(ticker)
-        sector_benchmark = SECTOR_BENCHMARK.get(sector)
-        sector_return = (
-            _intraday_return(bars.get(sector_benchmark)) if sector_benchmark else None
-        )
+        sector_benchmark = SECTOR_BENCHMARK.get(sector) if sector is not None else None
+        sector_return = None
+        if sector_benchmark is not None:
+            sector_return = _intraday_return(bars.get(sector_benchmark))
         sector_incremental = (
             opening_notional * (sector_return - market_return)
             if opening_notional is not None
@@ -148,12 +232,15 @@ def build_opening_snapshot(
                 "strategia": trade.get("strategia"),
                 "trade_id": trade_id,
                 "causal_event_id": f"opening-trade:{cid_payload}:{data}",
-                "qty_open": qty,
+                "qty_initial": qty_initial,
+                "qty_open": qty_open,
+                "qty_close": qty_close,
                 "open_price": open_,
                 "close_price": close,
                 "opening_notional_usd": opening_notional,
-                "exited_intraday": exited_today,
+                "exited_intraday": exited_today or bool(current_fills),
                 "exit_price": exit_price,
+                "quantity_changes_intraday": current_fills,
                 "passive_pnl_usd": passive,
                 "actual_intraday_pnl_usd": actual,
                 "exit_active_effect_usd": exit_effect,
@@ -184,6 +271,15 @@ def _sum_present(values: list[float | None]) -> float:
     return sum(value for value in values if value is not None)
 
 
+def _strict_sum(values: list[float | None]) -> float | None:
+    """Somma completa: lista vuota=zero, un solo missing rende il totale missing."""
+    if not values:
+        return 0.0
+    if any(value is None for value in values):
+        return None
+    return sum(value for value in values if value is not None)
+
+
 def _correlation(xs: list[float], ys: list[float]) -> float | None:
     if len(xs) < 2 or len(xs) != len(ys):
         return None
@@ -207,9 +303,9 @@ def _entry_rows(dossier: dict) -> list[dict]:
         open_counterfactual = _float(entry.get("vs_apertura"))
         price, qty = _float(entry.get("entry_price")), _float(entry.get("qty"))
         notional = price * qty if price is not None and qty is not None else None
-        trade_return = (
-            mtm / notional if mtm is not None and notional not in (None, 0.0) else None
-        )
+        trade_return = None
+        if mtm is not None and notional is not None and notional != 0.0:
+            trade_return = mtm / notional
         sizing_counterfactual = (
             trade_return * reference
             if trade_return is not None and reference is not None
@@ -265,11 +361,20 @@ def _entry_rows(dossier: dict) -> list[dict]:
     return rows
 
 
-def _exit_rows(dossier: dict) -> list[dict]:
+def _exit_rows(dossier: dict, opening: list[dict]) -> list[dict]:
     data = dossier["data"]
     rows: list[dict] = []
+    exact_exit_counts: Counter[tuple] = Counter(
+        (row.get("ticker"), row.get("strategia"))
+        for row in opening
+        if row.get("quantity_changes_intraday")
+    )
     for index, closed in enumerate(dossier.get("chiusure") or []):
         drift = _float(closed.get("drift_post_uscita"))
+        key = (closed.get("symbol"), closed.get("strategia"))
+        exact_order_level = exact_exit_counts[key] > 0
+        if exact_order_level:
+            exact_exit_counts[key] -= 1
         rows.append(
             {
                 "schema_version": DECISION_QUALITY_SCHEMA_VERSION,
@@ -282,6 +387,7 @@ def _exit_rows(dossier: dict) -> list[dict]:
                 "pnl_net": _float(closed.get("pnl_net")),
                 "holding_hours": _float(closed.get("ore_tenuta")),
                 "exit_reason": closed.get("exit_reason"),
+                "included_in_additive_decomposition": not exact_order_level,
                 "exit": {
                     "baseline": "same_qty_hold_to_eod",
                     "drift_post_exit_usd": drift,
@@ -359,15 +465,23 @@ def _guard_rows(dossier: dict) -> list[dict]:
                 "intended_notional_usd": notional,
                 "guard_cost_return": cost_return,
                 "guard_cost_usd": (
-                    cost_return * notional
-                    if cost_return is not None and notional is not None
-                    else None
+                    0.0
+                    if cost_return == 0.0
+                    else (
+                        cost_return * notional
+                        if cost_return is not None and notional is not None
+                        else None
+                    )
                 ),
                 "avoided_loss_return": avoided_return,
                 "avoided_loss_usd": (
-                    avoided_return * notional
-                    if avoided_return is not None and notional is not None
-                    else None
+                    0.0
+                    if avoided_return == 0.0
+                    else (
+                        avoided_return * notional
+                        if avoided_return is not None and notional is not None
+                        else None
+                    )
                 ),
                 "confidenza": "attribuita",
                 "formula": (
@@ -440,13 +554,35 @@ def build_decision_quality_panel(dossier: dict, *, dossier_hash: str = "") -> di
     has_guards = "guard_decisions" in dossier
     opening = list(dossier.get("snapshot_apertura") or [])
     entries = _entry_rows(dossier)
-    exits = _exit_rows(dossier)
+    exits = _exit_rows(dossier, opening)
     guards = _guard_rows(dossier)
 
-    passive = _sum_present([_float(row.get("passive_pnl_usd")) for row in opening])
-    selection = _sum_present([row["selection"]["effect_usd"] for row in entries])
-    exit_effect = _sum_present([row["exit"]["effect_usd"] for row in exits])
-    active = selection + exit_effect
+    passive = _strict_sum([_float(row.get("passive_pnl_usd")) for row in opening])
+    selection = _strict_sum([row["selection"]["effect_usd"] for row in entries])
+    order_level_exit = _strict_sum(
+        [
+            _float(row.get("exit_active_effect_usd"))
+            for row in opening
+            if row.get("quantity_changes_intraday")
+        ]
+    )
+    coarse_exit = _strict_sum(
+        [
+            row["exit"]["effect_usd"]
+            for row in exits
+            if row["included_in_additive_decomposition"]
+        ]
+    )
+    exit_effect = (
+        order_level_exit + coarse_exit
+        if order_level_exit is not None and coarse_exit is not None
+        else None
+    )
+    active = (
+        selection + exit_effect
+        if selection is not None and exit_effect is not None
+        else None
+    )
     missingness = []
     if not has_snapshot:
         missingness.append("opening_snapshot_not_available_in_legacy_dossier")
@@ -465,7 +601,11 @@ def build_decision_quality_panel(dossier: dict, *, dossier_hash: str = "") -> di
             "selection_pnl_usd": selection,
             "exit_effect_usd": exit_effect,
             "active_decision_pnl_usd": active,
-            "actual_intraday_pnl_usd": passive + active if has_snapshot else None,
+            "actual_intraday_pnl_usd": (
+                passive + active
+                if has_snapshot and passive is not None and active is not None
+                else None
+            ),
             "market_beta_1_usd": (
                 _sum_present(
                     [
@@ -490,10 +630,10 @@ def build_decision_quality_panel(dossier: dict, *, dossier_hash: str = "") -> di
                 if has_snapshot
                 else None
             ),
-            "guard_cost_usd": _sum_present(
+            "guard_cost_usd": _strict_sum(
                 [row.get("guard_cost_usd") for row in guards]
             ),
-            "guard_avoided_loss_usd": _sum_present(
+            "guard_avoided_loss_usd": _strict_sum(
                 [row.get("avoided_loss_usd") for row in guards]
             ),
             "counterfactual_axes_are_additive": False,

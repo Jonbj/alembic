@@ -22,6 +22,7 @@ def test_opening_positions_usa_l_open_rth_e_non_attribuisce_null_a_s1(monkeypatc
                 "2026-08-01 14:00:00+00",
                 "",
                 "",
+                f"order-1{chr(31)}order-2",
             ]
         ]
 
@@ -31,6 +32,7 @@ def test_opening_positions_usa_l_open_rth_e_non_attribuisce_null_a_s1(monkeypatc
     assert rows[0]["trade_id"] == 7
     assert rows[0]["strategia"] == "CONTAMINAZIONE"
     assert rows[0]["exit_time"] is None
+    assert rows[0]["exit_order_ids"] == ["order-1", "order-2"]
     sql = queries[0]
     assert "entry_time < '2026-08-12T13:30:00+00:00'" in sql
     assert "exit_time >= '2026-08-12T13:30:00+00:00'" in sql

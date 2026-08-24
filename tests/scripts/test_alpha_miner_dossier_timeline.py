@@ -148,6 +148,7 @@ def test_dettagli_ordini_usano_timestamp_e_fill_reali_del_broker():
         submitted_at=datetime(2026, 8, 12, 14, 15, 2, tzinfo=UTC),
         filled_at=datetime(2026, 8, 12, 14, 15, 3, tzinfo=UTC),
         filled_avg_price="105.75",
+        filled_qty="2.5",
     )
     fake_config = SimpleNamespace(
         ALPACA_API_KEY="key", ALPACA_SECRET_KEY="secret", ALPACA_PAPER_MODE=True
@@ -163,6 +164,7 @@ def test_dettagli_ordini_usano_timestamp_e_fill_reali_del_broker():
     assert out["order-1"]["submitted_at"] == order.submitted_at
     assert out["order-1"]["filled_at"] == order.filled_at
     assert out["order-1"]["filled_avg_price"] == 105.75
+    assert out["order-1"]["filled_qty"] == 2.5
     client_cls.assert_called_once_with("key", "secret", paper=True)
 
 

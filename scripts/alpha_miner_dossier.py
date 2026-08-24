@@ -294,7 +294,10 @@ def _opening_positions(giorno: date) -> list[dict]:
         f"CASE WHEN stop_strategy IS NOT NULL THEN stop_strategy "
         f"WHEN signal_id IS NOT NULL THEN 'S4' ELSE 'CONTAMINAZIONE' END, "
         f"qty::text, entry_price::text, entry_time::text, "
-        f"COALESCE(exit_time::text,''), COALESCE(exit_price::text,'') "
+        f"COALESCE(exit_time::text,''), COALESCE(exit_price::text,''), "
+        f"COALESCE(array_to_string(COALESCE(exit_order_ids, "
+        f"CASE WHEN exit_order_id IS NULL THEN ARRAY[]::text[] "
+        f"ELSE ARRAY[exit_order_id] END), chr(31)),'') "
         f"FROM trades WHERE entry_time < '{open_iso}' "
         f"AND (exit_time IS NULL OR exit_time >= '{open_iso}') ORDER BY id;"
     )
@@ -308,6 +311,7 @@ def _opening_positions(giorno: date) -> list[dict]:
             "entry_time": row[5] or None,
             "exit_time": row[6] or None,
             "exit_price": float(row[7]) if row[7] else None,
+            "exit_order_ids": [value for value in row[8].split(chr(31)) if value],
         }
         for row in rows
     ]
@@ -522,6 +526,7 @@ def _dettagli_ordini(order_ids: list[str]) -> dict[str, dict]:
                 "submitted_at": None,
                 "filled_at": None,
                 "filled_avg_price": None,
+                "filled_qty": None,
                 "lookup_error": "alpaca_credentials_missing",
             }
             for order_id in order_ids
@@ -537,10 +542,12 @@ def _dettagli_ordini(order_ids: list[str]) -> dict[str, dict]:
         try:
             order = client.get_order_by_id(order_id)
             filled_avg = getattr(order, "filled_avg_price", None)
+            filled_qty = getattr(order, "filled_qty", None)
             result[order_id] = {
                 "submitted_at": getattr(order, "submitted_at", None),
                 "filled_at": getattr(order, "filled_at", None),
                 "filled_avg_price": float(filled_avg) if filled_avg is not None else None,
+                "filled_qty": float(filled_qty) if filled_qty is not None else None,
                 "lookup_error": None,
             }
         except Exception as exc:
@@ -548,6 +555,7 @@ def _dettagli_ordini(order_ids: list[str]) -> dict[str, dict]:
                 "submitted_at": None,
                 "filled_at": None,
                 "filled_avg_price": None,
+                "filled_qty": None,
                 "lookup_error": f"{type(exc).__name__}: {str(exc)[:160]}",
             }
     return result
@@ -912,6 +920,18 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
     # Lo snapshot e' prospettico/parallelo: i dossier storici restano intatti.
     # Nessun valore qui entra nel runtime; size e holding sono solo descritti.
     posizioni_apertura = _opening_positions(giorno)
+    exit_order_details = _dettagli_ordini(
+        [
+            order_id
+            for posizione in posizioni_apertura
+            for order_id in posizione.get("exit_order_ids") or []
+        ]
+    )
+    for posizione in posizioni_apertura:
+        posizione["exit_fills"] = [
+            {"order_id": order_id, **exit_order_details.get(order_id, {})}
+            for order_id in posizione.get("exit_order_ids") or []
+        ]
     snapshot_apertura = build_opening_snapshot(
         posizioni_apertura,
         barre,
