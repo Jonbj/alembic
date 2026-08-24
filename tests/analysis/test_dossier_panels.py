@@ -13,9 +13,6 @@ Il modulo e' puro: riceve il dossier (dict) e restituisce dict, niente I/O.
 
 from __future__ import annotations
 
-import hashlib
-import json
-
 from src.analysis.dossier import panels
 
 
@@ -24,6 +21,7 @@ from src.analysis.dossier import panels
 # segnali) e uno 2.0 (senza). Il builder deve digerire entrambi: i dossier
 # storici su disco sono 2.0, quelli freschi dallo script corrente 2.1.
 # ---------------------------------------------------------------------------
+
 
 def _opp(candidate: dict) -> dict:
     """Riempie opportunity_v2 con i soli campi che il pannello legge."""
@@ -59,10 +57,16 @@ def _dossier_2_1() -> dict:
                 "causa": "BELOW_GATE",
                 "in_portafoglio": False,
                 "segnali": [
-                    _signal(101, "AAPL", canonical_article_id="content:" + "a" * 64,
-                            attribution="ISSUER_SPECIFIC", relevance="ISSUER_SPECIFIC",
-                            timing="CONCURRENT", source="alpaca_benzinga",
-                            subject_ticker="AAPL"),
+                    _signal(
+                        101,
+                        "AAPL",
+                        canonical_article_id="content:" + "a" * 64,
+                        attribution="ISSUER_SPECIFIC",
+                        relevance="ISSUER_SPECIFIC",
+                        timing="CONCURRENT",
+                        source="alpaca_benzinga",
+                        subject_ticker="AAPL",
+                    ),
                 ],
                 "opportunity_v2": _opp({}),
             },
@@ -73,48 +77,98 @@ def _dossier_2_1() -> dict:
                 "causa": "NO_NEWS",
                 "in_portafoglio": False,
                 "segnali": [],
-                "opportunity_v2": _opp({}) | {
+                "opportunity_v2": _opp({})
+                | {
                     "gross_opportunity_usd": 88.0,
                     "accessible_opportunity_usd": -12.0,
                 },
             },
         ],
         "ingressi": [
-            {"symbol": "AAPL", "strategia": "S4", "ora_utc": "14:37",
-             "entry_price": 190.0, "qty": 10.0, "mtm_eod": 5.0, "vs_apertura": 3.0,
-             "entry_percentile": 0.8, "quota_movimento_precedente_al_segnale": 0.5,
-             "denominatore_degenere": False, "quota_nel_gap": 0.2},
+            {
+                "symbol": "AAPL",
+                "strategia": "S4",
+                "ora_utc": "14:37",
+                "entry_price": 190.0,
+                "qty": 10.0,
+                "mtm_eod": 5.0,
+                "vs_apertura": 3.0,
+                "entry_percentile": 0.8,
+                "quota_movimento_precedente_al_segnale": 0.5,
+                "denominatore_degenere": False,
+                "quota_nel_gap": 0.2,
+            },
         ],
         "chiusure": [
-            {"symbol": "AAPL", "strategia": "S4", "exit_price": 195.0, "qty": 10.0,
-             "pnl_net": 12.5, "exit_reason": "portfolio_sell", "ore_tenuta": 2.75,
-             "drift_post_uscita": -3.0},
+            {
+                "symbol": "AAPL",
+                "strategia": "S4",
+                "exit_price": 195.0,
+                "qty": 10.0,
+                "pnl_net": 12.5,
+                "exit_reason": "portfolio_sell",
+                "ore_tenuta": 2.75,
+                "drift_post_uscita": -3.0,
+            },
         ],
         "timeline": [
-            {"kind": "signal", "symbol": "AAPL", "is_mover": True, "signal_id": 101,
-             "news_log_id": 101, "score": 0.31, "fallback": False,
-             "order_id": "ord-1", "trade_id": 726, "order_lookup_error": None,
-             "movimento": {}, "sessioni": {}, "stages": {}},
-            {"kind": "signal", "symbol": "MSFT", "is_mover": True, "signal_id": 102,
-             "news_log_id": None, "score": None, "fallback": False,
-             "order_id": None, "trade_id": None, "order_lookup_error": None,
-             "movimento": {}, "sessioni": {}, "stages": {}},
+            {
+                "kind": "signal",
+                "symbol": "AAPL",
+                "is_mover": True,
+                "signal_id": 101,
+                "news_log_id": 101,
+                "score": 0.31,
+                "fallback": False,
+                "order_id": "ord-1",
+                "trade_id": 726,
+                "order_lookup_error": None,
+                "movimento": {},
+                "sessioni": {},
+                "stages": {},
+            },
+            {
+                "kind": "signal",
+                "symbol": "MSFT",
+                "is_mover": True,
+                "signal_id": 102,
+                "news_log_id": None,
+                "score": None,
+                "fallback": False,
+                "order_id": None,
+                "trade_id": None,
+                "order_lookup_error": None,
+                "movimento": {},
+                "sessioni": {},
+                "stages": {},
+            },
         ],
         "copertura_articoli": {
             "segnali": [
-                {"signal_id": 101, "news_log_id": 101,
-                 "canonical_article_id": "content:" + "a" * 64,
-                 "source": "alpaca_benzinga", "ticker": "AAPL",
-                 "subject_ticker": "AAPL", "relevance": "ISSUER_SPECIFIC",
-                 "timing": "CONCURRENT", "attribution": "ISSUER_SPECIFIC",
-                 "score": 0.31},
+                {
+                    "signal_id": 101,
+                    "news_log_id": 101,
+                    "canonical_article_id": "content:" + "a" * 64,
+                    "source": "alpaca_benzinga",
+                    "ticker": "AAPL",
+                    "subject_ticker": "AAPL",
+                    "relevance": "ISSUER_SPECIFIC",
+                    "timing": "CONCURRENT",
+                    "attribution": "ISSUER_SPECIFIC",
+                    "score": 0.31,
+                },
             ],
             "per_ticker": {
-                "AAPL": {"effective_timely_articles": 1,
-                         "quota_effective_timely": 0.5,
-                         "articoli_unici": 2},
-                "MSFT": {"effective_timely_articles": 0,
-                         "quota_effective_timely": 0.0, "articoli_unici": 0},
+                "AAPL": {
+                    "effective_timely_articles": 1,
+                    "quota_effective_timely": 0.5,
+                    "articoli_unici": 2,
+                },
+                "MSFT": {
+                    "effective_timely_articles": 0,
+                    "quota_effective_timely": 0.0,
+                    "articoli_unici": 0,
+                },
             },
         },
     }
@@ -127,8 +181,14 @@ def _dossier_2_0() -> dict:
     d.pop("copertura_articoli", None)
     for c in d["candidati_miss"]:
         for s in c.get("segnali") or []:
-            for k in ("canonical_article_id", "attribution", "relevance",
-                     "timing", "source", "subject_ticker"):
+            for k in (
+                "canonical_article_id",
+                "attribution",
+                "relevance",
+                "timing",
+                "source",
+                "subject_ticker",
+            ):
                 s.pop(k, None)
     return d
 
@@ -137,6 +197,7 @@ def _dossier_2_0() -> dict:
 # causal_event_id
 # ---------------------------------------------------------------------------
 
+
 def test_causal_event_id_e_deterministico_e_stabile():
     a = panels.causal_event_id("miss", "2026-08-12", "AAPL")
     b = panels.causal_event_id("miss", "2026-08-12", "AAPL")
@@ -144,15 +205,18 @@ def test_causal_event_id_e_deterministico_e_stabile():
 
 
 def test_causal_event_id_distingue_ticker_giorno_e_kind():
-    assert panels.causal_event_id("miss", "2026-08-12", "AAPL") != \
-        panels.causal_event_id("miss", "2026-08-13", "AAPL")
-    assert panels.causal_event_id("miss", "2026-08-12", "AAPL") != \
-        panels.causal_event_id("trade", "2026-08-12", "AAPL")
+    assert panels.causal_event_id(
+        "miss", "2026-08-12", "AAPL"
+    ) != panels.causal_event_id("miss", "2026-08-13", "AAPL")
+    assert panels.causal_event_id(
+        "miss", "2026-08-12", "AAPL"
+    ) != panels.causal_event_id("trade", "2026-08-12", "AAPL")
 
 
 # ---------------------------------------------------------------------------
 # ticker-day panel
 # ---------------------------------------------------------------------------
+
 
 def test_ticker_day_panel_una_riga_per_candidato_con_schema_versionato():
     rows = panels.build_ticker_day_panel(_dossier_2_1(), dossier_hash="h")
@@ -209,7 +273,9 @@ def test_ticker_day_panel_tollera_dossier_2_0_senza_attribution():
 def test_ticker_day_panel_salta_candidati_senza_opportunity():
     d = _dossier_2_1()
     d["candidati_miss"][0]["opportunity_v2"] = {
-        "estimator_version": "2.0", "error": "daily_bar_missing"}
+        "estimator_version": "2.0",
+        "error": "daily_bar_missing",
+    }
     rows = panels.build_ticker_day_panel(d, dossier_hash="h")
     aapl = next(r for r in rows if r["ticker"] == "AAPL")
     # opportunity fallita: si registra la missingness, non si inventa un importo
@@ -220,6 +286,7 @@ def test_ticker_day_panel_salta_candidati_senza_opportunity():
 # ---------------------------------------------------------------------------
 # signal panel
 # ---------------------------------------------------------------------------
+
 
 def test_signal_panel_una_riga_per_segnale_con_attribution():
     rows = panels.build_signal_panel(_dossier_2_1(), dossier_hash="h")
@@ -250,6 +317,7 @@ def test_signal_panel_tollera_dossier_2_0_senza_copertura():
 # decision / trade panel
 # ---------------------------------------------------------------------------
 
+
 def test_decision_trade_panel_una_riga_per_decisione_con_id_db():
     rows = panels.build_decision_trade_panel(_dossier_2_1(), dossier_hash="h")
     # Una decisione che e' diventata trade (timeline event con order_id/trade_id)
@@ -271,6 +339,7 @@ def test_decision_trade_panel_una_riga_per_decisione_con_id_db():
 # ---------------------------------------------------------------------------
 # occurrence ledger
 # ---------------------------------------------------------------------------
+
 
 def test_occurrence_ledger_miss_e_trade_con_causal_event_id_univoci():
     ledger = panels.build_occurrence_ledger(_dossier_2_1(), dossier_hash="h")
@@ -318,25 +387,56 @@ def test_occurrence_ledger_salta_non_classificato_e_in_portafoglio():
 # definitions + status events (vista read-only da findings.json)
 # ---------------------------------------------------------------------------
 
+
 def _findings() -> dict:
     return {
         "schema_version": 1,
         "prossimo_id": 3,
         "findings": [
-            {"id": "F-001", "titolo": "copertura news bassa", "tipo": "osservazione",
-             "confidenza": "congetturale", "primo_avvistamento": "2026-07-31",
-             "occorrenze": [
-                 {"data": "2026-07-31", "costo_usd": None, "nota": "...", "fonte": "R1"},
-                 {"data": "2026-08-03", "costo_usd": 10.0, "nota": "...", "fonte": "R2"},
-             ],
-             "costo_cumulato_usd": 10.0, "stato": "aperto", "issue": None,
-             "occorrenze_non_stimate": 1},
-            {"id": "F-002", "titolo": "S4 ora 14", "tipo": "difetto",
-             "confidenza": "attribuita", "primo_avvistamento": "2026-07-30",
-             "occorrenze": [{"data": "2026-07-30", "costo_usd": 5.0, "nota": "...",
-                             "fonte": "R0"}],
-             "costo_cumulato_usd": 5.0, "stato": "in_roadmap", "issue": 226,
-             "occorrenze_non_stimate": 0},
+            {
+                "id": "F-001",
+                "titolo": "copertura news bassa",
+                "tipo": "osservazione",
+                "confidenza": "congetturale",
+                "primo_avvistamento": "2026-07-31",
+                "occorrenze": [
+                    {
+                        "data": "2026-07-31",
+                        "costo_usd": None,
+                        "nota": "...",
+                        "fonte": "R1",
+                    },
+                    {
+                        "data": "2026-08-03",
+                        "costo_usd": 10.0,
+                        "nota": "...",
+                        "fonte": "R2",
+                    },
+                ],
+                "costo_cumulato_usd": 10.0,
+                "stato": "aperto",
+                "issue": None,
+                "occorrenze_non_stimate": 1,
+            },
+            {
+                "id": "F-002",
+                "titolo": "S4 ora 14",
+                "tipo": "difetto",
+                "confidenza": "attribuita",
+                "primo_avvistamento": "2026-07-30",
+                "occorrenze": [
+                    {
+                        "data": "2026-07-30",
+                        "costo_usd": 5.0,
+                        "nota": "...",
+                        "fonte": "R0",
+                    }
+                ],
+                "costo_cumulato_usd": 5.0,
+                "stato": "in_roadmap",
+                "issue": 226,
+                "occorrenze_non_stimate": 0,
+            },
         ],
     }
 
@@ -370,6 +470,7 @@ def test_status_events_snapshot_da_stato_corrente():
 # ---------------------------------------------------------------------------
 # derived views (cross-day)
 # ---------------------------------------------------------------------------
+
 
 def test_derived_views_aggrega_per_causa_e_per_confidenza():
     d = _dossier_2_1()

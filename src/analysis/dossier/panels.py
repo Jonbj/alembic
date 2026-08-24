@@ -98,7 +98,9 @@ def _opp_view(opp: dict) -> dict:
             "accessible_usd": None,
             "net_usd": None,
             "confidenza": (opp.get("confidenza") if isinstance(opp, dict) else None),
-            "estimator_version": (opp.get("estimator_version") if isinstance(opp, dict) else None),
+            "estimator_version": (
+                opp.get("estimator_version") if isinstance(opp, dict) else None
+            ),
             "formula": None,
             "missingness": [error] if error else [],
         }
@@ -126,10 +128,12 @@ def build_ticker_day_panel(dossier: dict, *, dossier_hash: str = "") -> list[dic
     for candidato in dossier.get("candidati_miss") or []:
         ticker = candidato["symbol"]
         tl_events = timeline.get(ticker, [])
-        signal_ids = sorted({e["signal_id"] for e in tl_events if e.get("signal_id") is not None})
-        news_log_ids = sorted({
-            e["news_log_id"] for e in tl_events if e.get("news_log_id") is not None
-        })
+        signal_ids = sorted(
+            {e["signal_id"] for e in tl_events if e.get("signal_id") is not None}
+        )
+        news_log_ids = sorted(
+            {e["news_log_id"] for e in tl_events if e.get("news_log_id") is not None}
+        )
 
         canonical_article_ids: list[str] = []
         attribution = None
@@ -145,31 +149,35 @@ def build_ticker_day_panel(dossier: dict, *, dossier_hash: str = "") -> list[dic
                     attrs.append(entry["attribution"])
             canonical_article_ids = sorted(set(canonical_article_ids))
             if attrs:
-                attribution = max(attrs, key=lambda a: _ATTRIBUTION_PRECEDENCE.get(a, 0))
+                attribution = max(
+                    attrs, key=lambda a: _ATTRIBUTION_PRECEDENCE.get(a, 0)
+                )
             effective = per_ticker.get(ticker, {}).get("effective_timely_articles")
         else:
             # dossier 2.0 storico: niente copertura. I campi articolo-centrici
             # sono assenti (None/[]), mai confusi con zero: missingness esplicita.
             effective = None
 
-        rows.append({
-            "schema_version": PANELS_SCHEMA_VERSION,
-            "data": data,
-            "ticker": ticker,
-            "causal_event_id": causal_event_id("miss", data, ticker),
-            "segment": candidato.get("causa"),
-            "return": candidato.get("return"),
-            "news_count": candidato.get("news_count"),
-            "signal_ids": signal_ids,
-            "news_log_ids": news_log_ids,
-            "canonical_article_ids": canonical_article_ids,
-            "attribution": attribution,
-            "effective_timely_articles": effective,
-            "in_portafoglio": bool(candidato.get("in_portafoglio")),
-            "opportunity": _opp_view(candidato.get("opportunity_v2") or {}),
-            "primary_finding": None,
-            "dossier_hash": dossier_hash,
-        })
+        rows.append(
+            {
+                "schema_version": PANELS_SCHEMA_VERSION,
+                "data": data,
+                "ticker": ticker,
+                "causal_event_id": causal_event_id("miss", data, ticker),
+                "segment": candidato.get("causa"),
+                "return": candidato.get("return"),
+                "news_count": candidato.get("news_count"),
+                "signal_ids": signal_ids,
+                "news_log_ids": news_log_ids,
+                "canonical_article_ids": canonical_article_ids,
+                "attribution": attribution,
+                "effective_timely_articles": effective,
+                "in_portafoglio": bool(candidato.get("in_portafoglio")),
+                "opportunity": _opp_view(candidato.get("opportunity_v2") or {}),
+                "primary_finding": None,
+                "dossier_hash": dossier_hash,
+            }
+        )
     return rows
 
 
@@ -185,25 +193,27 @@ def build_signal_panel(dossier: dict, *, dossier_hash: str = "") -> list[dict]:
         if signal_id is None:
             continue
         cov = by_signal.get(signal_id, {}) if has_coverage else {}
-        rows.append({
-            "schema_version": PANELS_SCHEMA_VERSION,
-            "data": data,
-            "signal_id": signal_id,
-            "ticker": event.get("symbol"),
-            "score": event.get("score"),
-            "fallback": event.get("fallback"),
-            "news_log_id": event.get("news_log_id"),
-            "canonical_article_id": cov.get("canonical_article_id"),
-            "source": cov.get("source"),
-            "subject_ticker": cov.get("subject_ticker"),
-            "relevance": cov.get("relevance"),
-            "timing": cov.get("timing"),
-            "attribution": cov.get("attribution"),
-            "order_id": event.get("order_id"),
-            "trade_id": event.get("trade_id"),
-            "order_lookup_error": event.get("order_lookup_error"),
-            "dossier_hash": dossier_hash,
-        })
+        rows.append(
+            {
+                "schema_version": PANELS_SCHEMA_VERSION,
+                "data": data,
+                "signal_id": signal_id,
+                "ticker": event.get("symbol"),
+                "score": event.get("score"),
+                "fallback": event.get("fallback"),
+                "news_log_id": event.get("news_log_id"),
+                "canonical_article_id": cov.get("canonical_article_id"),
+                "source": cov.get("source"),
+                "subject_ticker": cov.get("subject_ticker"),
+                "relevance": cov.get("relevance"),
+                "timing": cov.get("timing"),
+                "attribution": cov.get("attribution"),
+                "order_id": event.get("order_id"),
+                "trade_id": event.get("trade_id"),
+                "order_lookup_error": event.get("order_lookup_error"),
+                "dossier_hash": dossier_hash,
+            }
+        )
     return rows
 
 
@@ -224,76 +234,105 @@ def build_decision_trade_panel(dossier: dict, *, dossier_hash: str = "") -> list
             kind, cid = "trade", f"trade:{trade_id}"
         else:
             kind, cid = "decision", f"decision:{order_id}"
-        rows.append({
-            "schema_version": PANELS_SCHEMA_VERSION,
-            "data": data,
-            "kind": kind,
-            "ticker": event.get("symbol"),
-            "signal_id": event.get("signal_id"),
-            "order_id": order_id,
-            "trade_id": trade_id,
-            "score": event.get("score"),
-            "order_lookup_error": event.get("order_lookup_error"),
-            "causal_event_id": cid,
-            "dossier_hash": dossier_hash,
-        })
+        rows.append(
+            {
+                "schema_version": PANELS_SCHEMA_VERSION,
+                "data": data,
+                "kind": kind,
+                "ticker": event.get("symbol"),
+                "signal_id": event.get("signal_id"),
+                "order_id": order_id,
+                "trade_id": trade_id,
+                "score": event.get("score"),
+                "order_lookup_error": event.get("order_lookup_error"),
+                "causal_event_id": cid,
+                "dossier_hash": dossier_hash,
+            }
+        )
 
     for ing in dossier.get("ingressi") or []:
-        rows.append({
-            "schema_version": PANELS_SCHEMA_VERSION,
-            "data": data,
-            "kind": "entry",
-            "ticker": ing["symbol"],
-            "strategia": ing.get("strategia"),
-            "ora_utc": ing.get("ora_utc"),
-            "entry_price": ing.get("entry_price"),
-            "qty": ing.get("qty"),
-            "mtm_eod": ing.get("mtm_eod"),
-            "vs_apertura": ing.get("vs_apertura"),
-            "entry_percentile": ing.get("entry_percentile"),
-            "provvisorio": True,
-            "confidenza": "congetturale",
-            "causal_event_id": f"entry:{data}:{ing['symbol']}:{ing.get('ora_utc')}",
-            "dossier_hash": dossier_hash,
-        })
+        rows.append(
+            {
+                "schema_version": PANELS_SCHEMA_VERSION,
+                "data": data,
+                "kind": "entry",
+                "ticker": ing["symbol"],
+                "strategia": ing.get("strategia"),
+                "ora_utc": ing.get("ora_utc"),
+                "entry_price": ing.get("entry_price"),
+                "qty": ing.get("qty"),
+                "mtm_eod": ing.get("mtm_eod"),
+                "vs_apertura": ing.get("vs_apertura"),
+                "entry_percentile": ing.get("entry_percentile"),
+                "provvisorio": True,
+                "confidenza": "congetturale",
+                "causal_event_id": f"entry:{data}:{ing['symbol']}:{ing.get('ora_utc')}",
+                "dossier_hash": dossier_hash,
+            }
+        )
 
     for ch in dossier.get("chiusure") or []:
-        rows.append({
-            "schema_version": PANELS_SCHEMA_VERSION,
-            "data": data,
-            "kind": "exit",
-            "ticker": ch["symbol"],
-            "strategia": ch.get("strategia"),
-            "exit_price": ch.get("exit_price"),
-            "qty": ch.get("qty"),
-            "pnl_net": ch.get("pnl_net"),
-            "exit_reason": ch.get("exit_reason"),
-            "ore_tenuta": ch.get("ore_tenuta"),
-            "drift_post_uscita": ch.get("drift_post_uscita"),
-            "provvisorio": False,
-            "confidenza": "misurata",
-            "causal_event_id": f"exit:{data}:{ch['symbol']}:{ch.get('strategia')}",
-            "dossier_hash": dossier_hash,
-        })
+        rows.append(
+            {
+                "schema_version": PANELS_SCHEMA_VERSION,
+                "data": data,
+                "kind": "exit",
+                "ticker": ch["symbol"],
+                "strategia": ch.get("strategia"),
+                "exit_price": ch.get("exit_price"),
+                "qty": ch.get("qty"),
+                "pnl_net": ch.get("pnl_net"),
+                "exit_reason": ch.get("exit_reason"),
+                "ore_tenuta": ch.get("ore_tenuta"),
+                "drift_post_uscita": ch.get("drift_post_uscita"),
+                "provvisorio": False,
+                "confidenza": "misurata",
+                "causal_event_id": f"exit:{data}:{ch['symbol']}:{ch.get('strategia')}",
+                "dossier_hash": dossier_hash,
+            }
+        )
     return rows
 
 
 def build_occurrence_ledger(dossier: dict, *, dossier_hash: str = "") -> list[dict]:
     """Ledger append-only: una riga per evento causale. I miss vengono dai
     candidati (causa non in NON_OCCORRENZA); i trade vengono dalle chiusure
-    (verdetto definitivo, pnl_net), arricchiti con trade_id dalla timeline.
-    L'ingresso provvisorio NON produce occorrenza: il design vieta costo sull'esito
-    non definitivo. ``primary_finding`` parte nullo: l'attribuzione ad F-NNN e'
-    dell'LLM/operatore, non meccanica."""
+    (verdetto definitivo, pnl_net). L'ingresso provvisorio NON produce
+    occorrenza: il design vieta costo sull'esito non definitivo.
+    ``primary_finding`` parte nullo: l'attribuzione ad F-NNN e' dell'LLM/
+    operatore, non meccanica.
+
+    Sul ``causal_event_id`` dei trade: le chiusure NON portano ``trade_id`` (e'
+    nella timeline, non nel book). Si usa ``trade:{trade_id}`` solo quando il
+    join e' UNIVOCO — esattamente una chiusura per (giorno, ticker, strategia) e
+    esattamente un trade nella timeline di quel ticker — perche' altrimenti una
+    chiusura parziale di una posizione multi-fill, o due trade distinti sullo
+    stesso ticker, colliderebbero sullo stesso id = doppio conteggio. Nei casi
+    ambigui si ricade su un id per-riga ``exit:{data}:{ticker}:{strategia}:{idx}``,
+    univoco per costruzione: ogni chiusura resta una sua occorrenza, mai fusa."""
     data = dossier["data"]
     fonte = f"dossier/{data}.json"
     timeline = _timeline_by_ticker(dossier)
-    trade_by_ticker = {
-        symbol: e
-        for symbol, events in timeline.items()
-        for e in events
-        if e.get("trade_id") is not None
-    }
+
+    # trade_id per ticker nella timeline di questo dossier, con conteggio per
+    # decidere l'univocita' del join.
+    tl_trade_counts: Counter[str] = Counter()
+    tl_trade_id: dict[str, int] = {}
+    tl_signal_id: dict[str, int] = {}
+    for events in timeline.values():
+        for e in events:
+            if e.get("trade_id") is not None:
+                tkr = e.get("symbol")
+                tl_trade_counts[tkr] += 1
+                tl_trade_id[tkr] = e["trade_id"]
+                if e.get("signal_id") is not None:
+                    tl_signal_id[tkr] = e["signal_id"]
+
+    chiusure = dossier.get("chiusure") or []
+    chiusure_group_count: Counter[tuple] = Counter(
+        (ch.get("symbol"), ch.get("strategia")) for ch in chiusure
+    )
+    chiusure_group_idx: dict[tuple, int] = defaultdict(int)
 
     occurrences: list[dict] = []
 
@@ -303,71 +342,84 @@ def build_occurrence_ledger(dossier: dict, *, dossier_hash: str = "") -> list[di
             continue
         ticker = candidato["symbol"]
         tl_events = timeline.get(ticker, [])
-        signal_ids = sorted({e["signal_id"] for e in tl_events if e.get("signal_id") is not None})
-        news_log_ids = sorted({
-            e["news_log_id"] for e in tl_events if e.get("news_log_id") is not None
-        })
+        signal_ids = sorted(
+            {e["signal_id"] for e in tl_events if e.get("signal_id") is not None}
+        )
+        news_log_ids = sorted(
+            {e["news_log_id"] for e in tl_events if e.get("news_log_id") is not None}
+        )
         opp = _opp_view(candidato.get("opportunity_v2") or {})
         gross = opp["gross_usd"]
         accessible = opp["accessible_usd"]
         missed_usd = gross if gross is not None else None
         # accessible < 0 = avremmo perso entrando: perdita evitata (segno positivo).
-        avoided_usd = -accessible if (accessible is not None and accessible < 0) else None
-        occurrences.append({
-            "schema_version": LEDGER_SCHEMA_VERSION,
-            "causal_event_id": causal_event_id("miss", data, ticker),
-            "data": data,
-            "tickers": [ticker],
-            "signal_ids": signal_ids,
-            "trade_ids": [],
-            "news_log_ids": news_log_ids,
-            "segment": causa,
-            "confidenza": opp["confidenza"] or "congetturale",
-            "actual_usd": None,
-            "attributed_usd": None,
-            "missed_usd": missed_usd,
-            "avoided_usd": avoided_usd,
-            "formula": opp["formula"],
-            "estimator_version": opp["estimator_version"],
-            "primary_finding": None,
-            "primary": True,
-            "fonte": fonte,
-            "dossier_hash": dossier_hash,
-        })
+        avoided_usd = (
+            -accessible if (accessible is not None and accessible < 0) else None
+        )
+        occurrences.append(
+            {
+                "schema_version": LEDGER_SCHEMA_VERSION,
+                "causal_event_id": causal_event_id("miss", data, ticker),
+                "data": data,
+                "tickers": [ticker],
+                "signal_ids": signal_ids,
+                "trade_ids": [],
+                "news_log_ids": news_log_ids,
+                "segment": causa,
+                "confidenza": opp["confidenza"] or "congetturale",
+                "actual_usd": None,
+                "attributed_usd": None,
+                "missed_usd": missed_usd,
+                "avoided_usd": avoided_usd,
+                "formula": opp["formula"],
+                "estimator_version": opp["estimator_version"],
+                "primary_finding": None,
+                "primary": True,
+                "fonte": fonte,
+                "dossier_hash": dossier_hash,
+            }
+        )
 
-    for ch in dossier.get("chiusure") or []:
+    for ch in chiusure:
         ticker = ch["symbol"]
-        tl = trade_by_ticker.get(ticker)
-        trade_id = tl.get("trade_id") if tl else None
-        if trade_id is not None:
+        strat = ch.get("strategia")
+        group = (ticker, strat)
+        idx = chiusure_group_idx[group]
+        chiusure_group_idx[group] += 1
+        # join univoco: una sola chiusura per il gruppo e un solo trade nella
+        # timeline di quel ticker. Altrimenti id per-riga (mai doppio conteggio).
+        if chiusure_group_count[group] == 1 and tl_trade_counts.get(ticker, 0) == 1:
+            trade_id = tl_trade_id[ticker]
             cid = f"trade:{trade_id}"
             trade_ids = [trade_id]
-            signal_ids = [tl["signal_id"]] if tl and tl.get("signal_id") is not None else []
+            signal_ids = [tl_signal_id[ticker]] if ticker in tl_signal_id else []
         else:
-            cid = f"exit:{data}:{ticker}:{ch.get('strategia')}"
+            cid = f"exit:{data}:{ticker}:{strat}:{idx}"
             trade_ids = []
             signal_ids = []
-        occurrences.append({
-            "schema_version": LEDGER_SCHEMA_VERSION,
-            "causal_event_id": cid,
-            "data": data,
-            "tickers": [ticker],
-            "signal_ids": signal_ids,
-            "trade_ids": trade_ids,
-            "news_log_ids": [],
-            "segment": "trade",
-            "confidenza": "misurata",
-            "actual_usd": ch.get("pnl_net"),
-            "attributed_usd": None,
-            "missed_usd": None,
-            "avoided_usd": None,
-            "formula": None,
-            "estimator_version": None,
-            "primary_finding": None,
-            "primary": True,
-            "fonte": fonte,
-            "dossier_hash": dossier_hash,
-        })
+        occurrences.append(
+            {
+                "schema_version": LEDGER_SCHEMA_VERSION,
+                "causal_event_id": cid,
+                "data": data,
+                "tickers": [ticker],
+                "signal_ids": signal_ids,
+                "trade_ids": trade_ids,
+                "news_log_ids": [],
+                "segment": "trade",
+                "confidenza": "misurata",
+                "actual_usd": ch.get("pnl_net"),
+                "attributed_usd": None,
+                "missed_usd": None,
+                "avoided_usd": None,
+                "formula": None,
+                "estimator_version": None,
+                "primary_finding": None,
+                "primary": True,
+                "fonte": fonte,
+                "dossier_hash": dossier_hash,
+            }
+        )
     return occurrences
 
 
@@ -379,18 +431,20 @@ def build_definitions(findings: dict) -> list[dict]:
     out: list[dict] = []
     for finding in findings.get("findings") or []:
         occorrenze = finding.get("occorrenze") or []
-        out.append({
-            "id": finding.get("id"),
-            "titolo": finding.get("titolo"),
-            "tipo": finding.get("tipo"),
-            "confidenza": finding.get("confidenza"),
-            "primo_avvistamento": finding.get("primo_avvistamento"),
-            "stato": finding.get("stato"),
-            "issue": finding.get("issue"),
-            "n_occorrenze": len(occorrenze),
-            "n_occorrenze_non_stimate": finding.get("occorrenze_non_stimate", 0),
-            "costo_cumulato_usd": finding.get("costo_cumulato_usd"),
-        })
+        out.append(
+            {
+                "id": finding.get("id"),
+                "titolo": finding.get("titolo"),
+                "tipo": finding.get("tipo"),
+                "confidenza": finding.get("confidenza"),
+                "primo_avvistamento": finding.get("primo_avvistamento"),
+                "stato": finding.get("stato"),
+                "issue": finding.get("issue"),
+                "n_occorrenze": len(occorrenze),
+                "n_occorrenze_non_stimate": finding.get("occorrenze_non_stimate", 0),
+                "costo_cumulato_usd": finding.get("costo_cumulato_usd"),
+            }
+        )
     return out
 
 
@@ -402,13 +456,15 @@ def build_status_events(findings: dict) -> list[dict]:
     log di stato append-only separato (wiring post-freeze, fuori perimetro)."""
     out: list[dict] = []
     for finding in findings.get("findings") or []:
-        out.append({
-            "kind": "status_snapshot",
-            "finding_id": finding.get("id"),
-            "data": finding.get("primo_avvistamento"),
-            "stato": finding.get("stato"),
-            "issue": finding.get("issue"),
-        })
+        out.append(
+            {
+                "kind": "status_snapshot",
+                "finding_id": finding.get("id"),
+                "data": finding.get("primo_avvistamento"),
+                "stato": finding.get("stato"),
+                "issue": finding.get("issue"),
+            }
+        )
     return out
 
 
