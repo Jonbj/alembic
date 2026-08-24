@@ -19,34 +19,44 @@ def evaluate_buying_power_gate(
     *,
     notional: float,
     buying_power: float | None,
+    committed_notional: float = 0.0,
     is_fractionable: bool,
     mode: str,
     price: float | None = None,
 ) -> BuyingPowerGateResult:
-    """Return pass, shadow, cap, or skip without performing side effects."""
+    """Return pass, shadow, cap, or skip without performing side effects.
+
+    ``buying_power`` is the account snapshot fetched before the cycle, while
+    ``committed_notional`` reserves BUY orders already submitted in that cycle.
+    """
     if mode == "off":
         return BuyingPowerGateResult("pass", None, None, 0.0)
     if buying_power is None or buying_power <= 0:
         return BuyingPowerGateResult("skip", None, None, 0.0)
-    if notional <= buying_power:
+    available_buying_power = max(
+        0.0, buying_power - max(0.0, committed_notional)
+    )
+    if notional <= available_buying_power:
         return BuyingPowerGateResult("pass", None, None, 0.0)
 
-    delta = round(notional - buying_power, 2)
+    delta = round(notional - available_buying_power, 2)
     if mode == "shadow":
         return BuyingPowerGateResult("shadow", None, None, delta)
     if mode != "cap":
         # Config validation rejects unknown modes; remain backward-compatible if
         # this pure helper is called directly with an invalid value.
         return BuyingPowerGateResult("pass", None, None, 0.0)
+    if available_buying_power <= 0:
+        return BuyingPowerGateResult("skip", None, None, delta)
 
     if is_fractionable:
         return BuyingPowerGateResult(
-            "cap", round(buying_power, 2), None, delta
+            "cap", round(available_buying_power, 2), None, delta
         )
     if price is None or price <= 0:
         return BuyingPowerGateResult("skip", None, None, delta)
 
-    capped_qty = int(buying_power / price)
+    capped_qty = int(available_buying_power / price)
     if capped_qty < 1:
         return BuyingPowerGateResult("skip", None, None, delta)
     return BuyingPowerGateResult(

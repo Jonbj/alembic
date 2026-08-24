@@ -1,6 +1,7 @@
 """Buying-power gate on the legacy sentiment execution BUY path."""
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -125,3 +126,53 @@ def test_execution_cycle_threads_zero_buying_power_and_skips_buy():
     assert stats["skipped_buy_power"] == 1
     assert stats["orders_placed"] == 0
     trading_client.submit_order.assert_not_called()
+
+
+def test_execution_cycle_caps_against_remaining_buying_power(monkeypatch):
+    from src.store.redis_store import RedisStore
+    from src.workers import execution
+
+    redis_store = MagicMock(spec=RedisStore)
+    redis_store.is_killswitch_active.return_value = False
+    redis_store.get_regime.return_value = MagicMock(multiplier=1.0)
+    redis_store.get_feedback_entry_threshold.return_value = None
+    redis_store.read_sentiment.return_value = {
+        "score": 0.8,
+        "signal_id": 42,
+        "fallback_used": False,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    account = MagicMock()
+    account.portfolio_value = "10000"
+    account.buying_power = "1500"
+    account.last_equity = "10000"
+    trading_client = MagicMock()
+    trading_client.get_account.return_value = account
+    trading_client.get_all_positions.return_value = []
+    trading_client.get_orders.return_value = []
+    trading_client.submit_order.return_value.id = "order-1"
+
+    monkeypatch.setattr(
+        execution, "config", SimpleNamespace(BUYING_POWER_GATE_MODE="cap")
+    )
+    monkeypatch.setattr(execution, "_load_risk_params", lambda: (0.02, 0.10, 0.10))
+    cache = {
+        "AAPL": {"ema": 90.0, "price": 100.0},
+        "MSFT": {"ema": 90.0, "price": 100.0},
+    }
+    monkeypatch.setattr(execution, "_build_market_cache", lambda *_args: cache)
+
+    stats = execution.run_execution_cycle(
+        ["AAPL", "MSFT"],
+        redis_store,
+        trading_client,
+        data_client=MagicMock(),
+        pg_store=MagicMock(),
+    )
+
+    submitted_qty = [
+        call.args[0].qty for call in trading_client.submit_order.call_args_list
+    ]
+    assert submitted_qty == [pytest.approx(10.0), pytest.approx(5.0)]
+    assert stats["orders_placed"] == 2
