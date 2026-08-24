@@ -580,10 +580,11 @@ def _vix_observation(giorno: date) -> dict | None:
         return None
 
 
-def _corporate_calendar(giorno: date, simboli: list[str]) -> list[dict] | None:
+def _corporate_calendar(giorno: date, simboli: list[str]) -> dict:
     """Calendario earnings FMP + corporate actions Alpaca, senza scritture."""
     events: list[dict] = []
-    successful_sources = 0
+    successful_sources: list[str] = []
+    missingness: list[str] = []
     universe = {str(symbol).upper() for symbol in simboli}
 
     fmp_key = os.environ.get("FMP_API_KEY", "")
@@ -599,7 +600,7 @@ def _corporate_calendar(giorno: date, simboli: list[str]) -> list[dict] | None:
             response.raise_for_status()
             payload = response.json()
             if isinstance(payload, list):
-                successful_sources += 1
+                successful_sources.append("FMP earnings-calendar")
                 for row in payload:
                     symbol = str(row.get("symbol") or "").upper()
                     if symbol in universe:
@@ -610,8 +611,13 @@ def _corporate_calendar(giorno: date, simboli: list[str]) -> list[dict] | None:
                             "time": row.get("time"),
                             "source": "FMP earnings-calendar",
                         })
+            else:
+                missingness.append("earnings_calendar_invalid_response")
         except Exception as exc:
             log.warning("Calendario earnings FMP non disponibile per %s: %s", giorno, exc)
+            missingness.append("earnings_calendar_unavailable")
+    else:
+        missingness.append("earnings_calendar_unavailable")
 
     alpaca_key = os.environ.get("ALPACA_API_KEY", "")
     alpaca_secret = os.environ.get("ALPACA_SECRET_KEY", "")
@@ -624,7 +630,7 @@ def _corporate_calendar(giorno: date, simboli: list[str]) -> list[dict] | None:
             result = client.get_corporate_actions(CorporateActionsRequest(
                 symbols=sorted(universe), start=giorno, end=giorno
             ))
-            successful_sources += 1
+            successful_sources.append("Alpaca Corporate Actions API")
             for action_type, actions in (getattr(result, "data", {}) or {}).items():
                 for action in actions:
                     symbol = next(
@@ -665,14 +671,21 @@ def _corporate_calendar(giorno: date, simboli: list[str]) -> list[dict] | None:
                     })
         except Exception as exc:
             log.warning("Corporate actions Alpaca non disponibili per %s: %s", giorno, exc)
+            missingness.append("corporate_actions_calendar_unavailable")
+    else:
+        missingness.append("corporate_actions_calendar_unavailable")
 
-    if successful_sources == 0:
-        return None
     unique = {
         (row["symbol"], row["event_type"], row["event_date"], row["source"]): row
         for row in events
     }
-    return [unique[key] for key in sorted(unique)]
+    required = {"FMP earnings-calendar", "Alpaca Corporate Actions API"}
+    return {
+        "events": [unique[key] for key in sorted(unique)],
+        "sources_succeeded": successful_sources,
+        "complete": required <= set(successful_sources),
+        "missingness": missingness,
+    }
 
 
 def _halt_events(articles: list[dict]) -> list[dict]:

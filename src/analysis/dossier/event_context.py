@@ -310,7 +310,7 @@ def build_event_market_context(
     daily_bars: dict[str, dict],
     sector_by_ticker: dict[str, str],
     articles: list[dict],
-    corporate_events: list[dict] | None,
+    corporate_events: list[dict] | dict | None,
     regime_observations: list[dict],
     vix_observation: dict | None,
     intraday_bars: dict[str, list[dict]],
@@ -320,6 +320,23 @@ def build_event_market_context(
     """Costruisce contesto normalizzato e cluster di opportunita' correlate."""
     regime = _regime_context(regime_observations, vix_observation)
     per_symbol: dict[str, dict] = {}
+    if isinstance(corporate_events, dict):
+        calendar_events = list(corporate_events.get("events") or [])
+        calendar_complete = bool(corporate_events.get("complete"))
+        calendar_sources = list(corporate_events.get("sources_succeeded") or [])
+        calendar_missingness = list(corporate_events.get("missingness") or [])
+    elif corporate_events is not None:
+        calendar_events = list(corporate_events)
+        calendar_complete = True
+        calendar_sources = sorted({
+            str(event.get("source") or "UNKNOWN") for event in calendar_events
+        })
+        calendar_missingness = []
+    else:
+        calendar_events = []
+        calendar_complete = False
+        calendar_sources = []
+        calendar_missingness = ["corporate_calendar_unavailable"]
 
     for candidate in candidates:
         symbol = str(candidate["symbol"]).upper()
@@ -329,7 +346,7 @@ def build_event_market_context(
         spy_return = _daily_return(daily_bars.get("SPY"))
         sector_return = _daily_return(daily_bars.get(sector_etf)) if sector_etf else None
         symbol_articles = _rows_for_symbol(articles, symbol)
-        symbol_events = _rows_for_symbol(corporate_events or [], symbol)
+        symbol_events = _rows_for_symbol(calendar_events, symbol)
         symbol_halts = _rows_for_symbol(halt_events, symbol)
         catalyst = _classify_catalyst(symbol_articles, symbol_events)
         theme = THEME_BY_SECTOR.get(sector or "", "UNKNOWN")
@@ -362,9 +379,12 @@ def build_event_market_context(
             },
             "catalyst": catalyst,
             "corporate_calendar": {
-                "status": "OBSERVED" if symbol_events else ("NOT_OBSERVED" if corporate_events is not None else "UNKNOWN"),
+                "status": "OBSERVED" if symbol_events else ("NOT_OBSERVED" if calendar_complete else "UNKNOWN"),
                 "events": symbol_events,
-                "missing_reason": None if corporate_events is not None else "corporate_calendar_unavailable",
+                "sources_succeeded": calendar_sources,
+                "complete": calendar_complete,
+                "missingness": calendar_missingness,
+                "missing_reason": calendar_missingness[0] if calendar_missingness else None,
             },
             "regime": dict(regime),
             "theme": {"type": theme, "source": "config/trading.yaml sectors" if sector else None},
