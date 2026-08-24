@@ -374,9 +374,11 @@ Configured in `config/trading.yaml` under `loss_feedback:`.
 Answers: *"For each trade we skipped, what would the 1-hour return have been?"*
 
 - `SKIP_THRESHOLD`, `SKIP_EMA` and `SKIP_CAP` decisions are analysed. `SKIP_POSITION` is excluded (position was already open — it's not a missed opportunity). `SKIP_STALE` and `SKIP_FALLBACK` are excluded because they are signal freshness/reliability failures.
-- Runs nightly at 22:45 UTC. Processes SKIP decisions from the last 7 days that don't have a counterfactual yet (`counterfactual_computed_at IS NULL`).
+- Runs nightly at 22:45 UTC. Processes SKIP decisions from the last 7 days that don't have a counterfactual yet (`counterfactual_computed_at IS NULL`). Since #337 the batch is **paged to exhaustion** (keyset on `(tick_time, id)`, 500/page) rather than a single `LIMIT 500` — the old cap silently starved the first hour of any session with >500 skips.
 - Fetches 1-minute Alpaca bars per symbol. Computes: `return = (close_{T+60min} − close_T) / close_T`.
 - Stores result in `execution_decisions.counterfactual_return_1h`.
+- Every processed row ends in an explicit state (#337). When `counterfactual_return_1h` is NULL, `counterfactual_skip_reason` says why. Rows whose +1h window falls past the close get `HORIZON_AFTER_CLOSE` plus an entry→next-open return in `counterfactual_return_overnight`; if the next session hasn't happened yet at run time they stay `PENDING_OVERNIGHT` with `counterfactual_computed_at` NULL and are retried on the next run, bounded by `counterfactual_attempts` (max 3).
+- Coverage check for a day: `count(*) = count(counterfactual_computed_at) + count(*) FILTER (WHERE counterfactual_skip_reason = 'PENDING_OVERNIGHT')`. The pending term drains on the following night's run.
 - `GET /api/trades/analytics/counterfactual` aggregates by decision type: avg return, % profitable, total upside missed.
 
 **Interpretation:**
@@ -410,6 +412,9 @@ CREATE TABLE execution_decisions (
     reason                   TEXT,                  -- human-readable explanation (migration 020)
     counterfactual_return_1h DOUBLE PRECISION,      -- Phase C: NULL until computed nightly
     counterfactual_computed_at TIMESTAMPTZ,
+    counterfactual_skip_reason TEXT,               -- #337: why return_1h is NULL (migration 049)
+    counterfactual_return_overnight DOUBLE PRECISION, -- #337: entry -> next open, for tail-of-session rows
+    counterfactual_attempts  INTEGER NOT NULL DEFAULT 0,  -- #337: retry budget for pending rows
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

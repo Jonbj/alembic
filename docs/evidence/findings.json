@@ -92,9 +92,15 @@
           "costo_usd": 70.94,
           "nota": "41/96 simboli (43%) zero righe in news_log il 08-20, dentro la banda 38-57% osservata dal 07-31. Due dei quattro miss del giorno sono NO_NEWS puri: BP (+3.22%) e BA (-3.20%), zero righe in news_log, zero in sentiment_signals, zero in execution_decisions per entrambi. Solo BP ha un controfattuale reale: mover al rialzo, size S4 tipica $2200, opportunity_v2.gross_opportunity_usd=$70.94 (accessible non calcolabile, bloccato da #277). BA e' un mover al ribasso su libro long-only, non detenuto: costo $0 verificato. AGGRAVANTE, stesso schema del 08-19 (GE/DELL/WDC): GE, posizione S1 aperta dal 07-22 e mover del giorno (-3.25%), ha zero righe in news_log e zero sentiment_signals - l'assenza di notizia impedisce anche il segnale d'uscita su una posizione gia' detenuta in perdita marcata, non solo un nuovo ingresso.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-20.md §3, §4, §7"
+        },
+        {
+          "data": "2026-08-21",
+          "costo_usd": 141.68,
+          "nota": "43/96 simboli (45%) zero righe in news_log il 08-21, dentro la banda 38-57% osservata dal 07-31. Due dei cinque miss del giorno sono NO_NEWS puri: PLTR (+3.44%) e F (+3.00%), entrambi mover al rialzo su libro long-only, zero righe in news_log e zero in sentiment_signals. Costo congetturale con size S4 tipica 2200$ sul return pieno (dal dossier opportunity_v2.gross_opportunity_usd): PLTR 75.63 + F 66.05 = 141.68.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-21.md §3, §7"
         }
       ],
-      "costo_cumulato_usd": 1895.05,
+      "costo_cumulato_usd": 2036.73,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 1
@@ -183,12 +189,18 @@
           "costo_usd": null,
           "nota": "14a sessione consecutiva con lo stesso insieme di 11 posizioni legacy senza stop_strategy/stop_mode (BAC, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE, tutte entrate il 2026-07-10). Rilevanza specifica del giorno: MS, uno di questi 11, e' un mover del giorno (-3.16%) e uno dei quattro peggiori contributori del book. Contributo stimato del set di 11 al nav_change_today (qty x delta-close su barre Alpaca 08-19->08-20): BAC -14.99, GOOGL -7.79, GS -12.71, MS -20.70, PBR +18.61, RIO +12.96, ROKU +1.44, SPY -5.85, UBS +0.92, UNH -5.99, XLE +2.10, totale circa -31.99 $ su una variazione NAV di -245.52 $ (13%). Costo null: non e' una perdita, e' P&L non attribuibile, e confligge con la domanda di uscita n.2 della carta (split P&L economico S1 vs SPY).",
           "fonte": "ALPHA_MISS_REPORT_2026-08-20.md §4, §6"
+        },
+        {
+          "data": "2026-08-21",
+          "costo_usd": null,
+          "nota": "Stesso insieme di 11 posizioni legacy senza stop_strategy (BAC, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE, tutte entrate il 2026-07-10). Rilevanza specifica del giorno: GS (+3.73%), MS (+3.25%) e RIO (+3.06%), tre di questi 11, sono mover del giorno e verrebbero esclusi dai candidati miss ('gia' in portafoglio') senza che nessuna riga tracci quale strategia li possieda davvero. Contributo stimato del set di 11 al nav_change_today (qty x delta-close su barre Alpaca 08-20->08-21): BAC -1.95, GOOGL +7.98, GS +24.08, MS +20.61, PBR +5.54, RIO +23.45, ROKU +1.76, SPY +2.82, UBS +1.18, UNH +8.38, XLE -1.36, totale +92.49$ su una variazione NAV di +288.06$ (32%). Costo null: non e' una perdita, e' P&L non attribuibile a nessuna strategia per costruzione.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-21.md §4, §6"
         }
       ],
       "costo_cumulato_usd": 0.0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 13
+      "occorrenze_non_stimate": 14
     },
     {
       "id": "F-003",
@@ -604,6 +616,12 @@
           "costo_usd": 79.93,
           "nota": "Due casi oggi, entrambi generati al gate di design 0.30 (nessuna deroga attiva): PFE +3.63%, segnale 19:45 score 0.12 (fallback), segno corretto, ben sotto soglia; AVGO -4.61%, tre segnali fra le 14:00 e le 16:00 (+0.089 non-fallback, -0.135 fallback, -0.158 non-fallback), ultimo valore col segno corretto ma sotto soglia in valore assoluto. Costo: PFE 79.93 congetturale (size S4 tipica 2200 $ sul return pieno, dal dossier opportunity_v2.gross_opportunity_usd). AVGO costo 0.00 verificato: mover al ribasso, libro long-only, non detenuto - qui il gate e comunque irrilevante perche il vincolo binding sarebbe stato long-only anche a segnale sopra soglia.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-19.md §3, §7"
+        },
+        {
+          "data": "2026-08-21",
+          "costo_usd": 0.0,
+          "nota": "BABA (-8.57%, mover piu' forte al ribasso della giornata): articolo dedicato alle 17:15 ('Alibaba Stock Falls 7% on Profit Miss...', ISSUER_SPECIFIC, non-fallback) segna -0.315, segno corretto rispetto al calo. Il combiner applica pero' un decay/velocity fra la generazione e il ciclo successivo: al primo controllo del gate (17:22) il signal_score e' gia' sceso a -0.252 in valore assoluto, sotto la soglia di design 0.30 (execution_decisions: 3 righe SKIP_THRESHOLD, 17:22-17:52). Costo 0.00 verificato: mover al ribasso, libro long-only, BABA non detenuto - il gate qui e' comunque irrilevante perche' il vincolo binding sarebbe stato long-only anche a segnale sopra soglia (vedi F-040).",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-21.md §3, §7"
         }
       ],
       "costo_cumulato_usd": 788.12,
@@ -853,6 +871,12 @@
           "costo_usd": null,
           "nota": "Ricorrenza CON NOVITA': 21 content_hash condivisi coprono 68/148 righe (46%). A differenza dell'08-19 (nessun BUY da fan-out), oggi 2 dei 4 BUY nascono da articoli condivisi: NOW (articolo listicle 'Software's AI Panic Is Fading', condiviso con ADBE/SNOW) e AVGO (articolo 'Broadcom's AI Competition Fears Look Overblown', condiviso con 7 altri ticker ma genuinamente su Broadcom). Costo null: la perdita NOW (-19.60 $) e' spiegata da whipsaw (F-013/F-006), non da attribuzione errata del ticker; nessun costo isolabile specificamente sul fan-out oggi.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-20.md §4, §10 [DAY-605]"
+        },
+        {
+          "data": "2026-08-21",
+          "costo_usd": 0.0,
+          "nota": "Quota righe fanout del giorno 55.6% (dossier aggregati.cause_del_giorno), in linea con la banda storica. COSTO 0.00 VERIFICATO SUL MONEY PATH: l'unico nuovo ordine della giornata (HOOD, BUY 17:07) nasce dal segnale delle 17:00:25 (+0.372), collegato all'articolo dedicato 'Why Is Robinhood Stock Surging Friday?' (content_hash esclusivo HOOD, non condiviso) - non da uno dei due articoli fanout su HOOD della stessa giornata (9 ticker condivisi con ARM/INTC/MRVL/QQQ/WMT/XLE/XLK/IWM). Il caso ORCL (+3.10%, miss OFF_TOPIC) illustra il lato costo del fenomeno: l'unico articolo del mattino e' un pezzo generico a 5 ticker sui bond yield che non cita ORCL nel testo, segnale risultante -0.028, ben sotto soglia.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-21.md §3, §7"
         }
       ],
       "costo_cumulato_usd": 925.31,
@@ -1434,6 +1458,12 @@
           "costo_usd": 0.0,
           "nota": "Ricorrenza in forma nuova: non un segnale forte sovrascritto da uno debole pochi secondi dopo, ma un segnale correttamente negativo (WMT id 8407, 14:15, score -0.248, coerente con l'articolo sugli utili deboli 'Weakest Pace Since 2020') sostituito 2h15m dopo da un segnale positivo (id 8472, 16:30, score +0.318) generato da un comunicato PR secondario sui rimborsi tariffari — S4 usa solo l'ultimo segnale per simbolo, quindi il BUY delle 16:37 ignora che il titolo era gia' sceso pesantemente. Un articolo delle 17:15 conferma il calo post-Q2 prima ancora della SELL delle 17:37 (sentiment_reversal, score -0.704). Costo 0.0 VERIFICATO: il trade ha chiuso con net_pnl +2.38 $ perche' il prezzo si era gia' mosso prima dell'ingresso, ma il pattern espone strutturalmente il sistema al rischio di comprare in mezzo a un crollo guidato da notizie reali concorrenti nello stesso giorno.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-20.md §10 [DAY-603]"
+        },
+        {
+          "data": "2026-08-21",
+          "costo_usd": 0.0,
+          "nota": "Ricorrenza con l'intervallo piu' breve finora osservato (2 secondi, non piu' minuti/ore): su TSLA alle 14:16:24 un segnale -0.360 (articolo dedicato sul recall di quasi 3 milioni di veicoli in Cina) e' sovrascritto alle 14:16:26 da +0.0126 (articolo fanout SpaceX/Nvidia, n_ticker_articolo=7, non su TSLA). Il titolo ha chiuso +5.14% (miglior mover del giorno dopo HOOD): nessuno dei due segnali era comunque utilizzabile per un ordine (il primo per segno opposto al prezzo, il secondo per magnitudine trascurabile), quindi l'overwrite non ha spostato l'esito - costo 0.00 verificato, non l'assenza di stima.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-21.md §3, §7"
         }
       ],
       "costo_cumulato_usd": 6.86,

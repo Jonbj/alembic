@@ -28,7 +28,9 @@ def _cand_data():
             }
         },
         "news_counts": {"AAPL": 1},
-        "segnali_rows": [["AAPL", "15:30", "0.35", "f"]],
+        "segnali_rows": [
+            ["AAPL", "15:30", "0.35", "f", "org_lookup", "AAPL hits record high", "1"],
+        ],
         "in_portafoglio_rows": [],
         "ingressi_rows": [],
         "chiusure_rows": [],
@@ -41,10 +43,14 @@ def _patch_io(canned):
     from contextlib import ExitStack
 
     def fake_psql(query):
-        if "FROM news_log" in query:
-            return [[sym, str(n)] for sym, n in canned["news_counts"].items()]
+        if "article_coverage_279" in query:
+            return []
+        # #244: la query dei segnali fa join+sottoquery su news_log, quindi va
+        # riconosciuta PRIMA del conteggio news, altrimenti il match e' ambiguo.
         if "FROM sentiment_signals" in query:
             return canned["segnali_rows"]
+        if "FROM news_log" in query:
+            return [[sym, str(n)] for sym, n in canned["news_counts"].items()]
         if "FROM trades" in query and "entry_time <" in query and "DISTINCT symbol" in query:
             return canned["in_portafoglio_rows"]
         if "FROM trades" in query and "entry_time >=" in query:

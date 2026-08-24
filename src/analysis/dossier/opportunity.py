@@ -19,11 +19,20 @@ riscrive le occurrence legacy ne' la serie `costo_usd` del prompt: il dossier
 pubblica `opportunity_v2` accanto ai conteggi legacy.
 
 Intraday: la quota accessibile richiede il prezzo al primo bar successivo al
-primo ciclo realmente eleggibile (issue #277 — barre intraday + timeline PIT,
-non ancora in main). Lo stimatore e' intraday-ready: quando `intraday_bars` e
-`eligible_cycle_at` sono forniti, prezza l'entry sul primo bar PIT successivo
-al ciclo; quando mancano, `accessible_opportunity_usd` resta `None` con
-missingness esplicita — mai confuso con `gross`, mai inventato.
+primo ciclo realmente eleggibile. Dal #246 il dossier lo caba davvero: passa le
+barre 5Min SIP e il ciclo eleggibile, che ha due fonti dichiarate e mai fuse —
+`execution_decisions.tick_time` per i candidati con una decisione collegata,
+`session_open` (primo ciclo da 15 minuti della seduta) per gli altri, tipicamente
+i NO_NEWS. Quando barre o ciclo mancano, `accessible_opportunity_usd` resta
+`None` con missingness esplicita — mai confuso con `gross`, mai inventato.
+
+Serie legacy (#246 Q2): il ricalcolo del pregresso AFFIANCA, non sovrascrive.
+Ogni stima porta un blocco `legacy` con il costo close-to-close calcolato come
+lo calcolava il prompt alpha-miner, esplicitamente etichettato. La sintesi del
+28/09 legge `opportunity_v2`; la serie legacy resta leggibile come traccia di
+come il numero era stato prodotto prima. Nessuna occurrence di findings.json e
+nessuna serie `costo_usd` viene riscritta da questo modulo — e' puro, non
+scrive niente.
 """
 
 from __future__ import annotations
@@ -38,6 +47,11 @@ ESTIMATOR_MODEL = "TradeCostCalculator/cost_model.yaml"
 # Un ribasso non detenuto ha costo/opportunità accessibile ZERO verificato, non
 # null: e' un'affermazione (non avremmo potuto guadagnare), non un dato mancante.
 BOOK_SIDE_LONG = "long"
+# Formula del prompt alpha-miner (serie legacy): rendimento close-to-close per
+# una size plausibile. Sovrastima sistematicamente i miss di un motore RTH —
+# ORCL 12/08: 117,95 $ contro ~6,82 $ realmente accessibili — ma resta pubblicata
+# accanto alla v2, mai riscritta: e' la traccia di come il numero era nato (#246).
+LEGACY_FORMULA = "costo_usd = |close_to_close| x size (prompt alpha-miner)"
 EXIT_POLICY_EOD_CLOSE = "EOD_close"
 FUNGIBILITY_NONE = "none — per-ticker, nessuna sostituzione tematica"
 
@@ -89,6 +103,7 @@ class OpportunityInput(TypedDict, total=False):
     daily: DailyBar
     intraday_bars: list[IntradayBar]  # ordinato per timestamp crescente
     eligible_cycle_at: str | None  # ISO UTC, primo ciclo realmente eleggibile
+    eligible_cycle_source: str | None  # "execution_decisions.tick_time" | "session_open"
     size_usd: float  # size plausibile (slot S4 ~2% NAV)
     slot_fraction: float  # frazione di NAV (es. 0.02)
     cost: CostSpec | None  # costo roundtrip precomputato
@@ -185,6 +200,16 @@ def compute_opportunity(inp: OpportunityInput) -> dict[str, Any]:
         "accessible_opportunity_usd": accessible,
         "net_opportunity_usd": net,
         "missingness": missingness,
+        # Serie legacy AFFIANCATA (#246 Q2): stesso numero che il prompt
+        # alpha-miner avrebbe scritto, etichettato per quello che e'. Non
+        # sostituisce le occurrence gia' scritte e non viene sostituito dalla v2:
+        # le due serie convivono, e la sintesi del 28/09 legge la v2.
+        "legacy": {
+            "costo_usd": gross,
+            "formula": LEGACY_FORMULA,
+            "serie": "affiancata — la v2 non riscrive le occurrence legacy",
+            "letta_dalla_sintesi_28_09": False,
+        },
     }
 
 
@@ -297,6 +322,9 @@ def _accessible(
         "price": entry_price,
         "source": "intraday_open_at_first_eligible_bar",
         "timestamp": eligible_cycle_at,
+        # Da dove viene il ciclo: una decisione osservata o il primo ciclo della
+        # seduta. Le due popolazioni non vanno mischiate in analisi (#246).
+        "eligible_cycle_source": inp.get("eligible_cycle_source"),
         "bar_timestamp": bar.get("timestamp"),
         "missing_reason": None,
     }

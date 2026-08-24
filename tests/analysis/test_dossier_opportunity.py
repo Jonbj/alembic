@@ -334,3 +334,90 @@ def test_trade_state_no_trade_vs_simulated_distinti_nel_return():
     # Stesso accessible == 0.0, ma costo opposto: il return li distingue.
     assert est_flat["entry"]["missing_reason"] is None
     assert est_flat["costi"]["total_usd"] == pytest.approx(1.30)
+
+# --- #246: il wiring intraday e la serie legacy affiancata -------------------
+
+
+def _bars_5min(prezzi: list[tuple[str, float]]) -> list[dict]:
+    return [{"timestamp": ts, "open": p, "high": p, "low": p, "close": p}
+            for ts, p in prezzi]
+
+
+def test_accessible_ora_si_calcola_quando_barre_e_ciclo_sono_cablati():
+    """Il caso ORCL 12/08: il close-to-close vale ~118$ di size, ma il tratto
+    davvero catturabile dal primo ciclo eleggibile e' una frazione di quello."""
+    est = compute_opportunity(
+        {
+            "symbol": "ORCL",
+            "book_side": "long",
+            "held": False,
+            "daily": _daily(240.0, 246.0, 239.0, 245.0, 232.5),
+            "intraday_bars": _bars_5min([
+                ("2026-08-12T13:35:00+00:00", 241.0),   # pre-ciclo: non usabile
+                ("2026-08-12T14:10:00+00:00", 244.25),  # primo bar >= ciclo
+                ("2026-08-12T15:00:00+00:00", 244.8),
+            ]),
+            "eligible_cycle_at": "2026-08-12T14:07:00+00:00",
+            "eligible_cycle_source": "session_open",
+            "size_usd": 2200.0,
+            "slot_fraction": 0.02,
+            "cutoff": "2026-08-12T20:00:00+00:00",
+            "exit_policy": "EOD_close",
+            "confidenza": "congetturale",
+        }
+    )
+    assert est["accessible_opportunity_usd"] is not None
+    # entry sull'apertura del primo bar successivo al ciclo, non sulla barra 13:35
+    assert est["entry"]["price"] == pytest.approx(244.25)
+    assert est["entry"]["bar_timestamp"] == "2026-08-12T14:10:00+00:00"
+    shares = 2200.0 / 244.25
+    assert est["accessible_opportunity_usd"] == pytest.approx((245.0 - 244.25) * shares)
+    # ...e resta molto sotto il gross close-to-close: e' la misura del #246.
+    assert est["accessible_opportunity_usd"] < est["gross_opportunity_usd"] / 10
+
+
+def test_la_fonte_del_ciclo_eleggibile_e_dichiarata_nella_stima():
+    """`session_open` e `execution_decisions.tick_time` sono due popolazioni
+    diverse: la stima porta la fonte, cosi' non si mischiano in analisi."""
+    base = {
+        "symbol": "AAA",
+        "book_side": "long",
+        "held": False,
+        "daily": _daily(100.0, 106.0, 99.0, 105.0, 100.0),
+        "intraday_bars": _bars_5min([("2026-08-12T14:10:00+00:00", 101.0)]),
+        "eligible_cycle_at": "2026-08-12T14:07:00+00:00",
+        "size_usd": 2200.0,
+        "slot_fraction": 0.02,
+        "cutoff": "2026-08-12T20:00:00+00:00",
+        "exit_policy": "EOD_close",
+        "confidenza": "congetturale",
+    }
+    apertura = compute_opportunity({**base, "eligible_cycle_source": "session_open"})
+    decisione = compute_opportunity(
+        {**base, "eligible_cycle_source": "execution_decisions.tick_time"}
+    )
+    assert apertura["entry"]["eligible_cycle_source"] == "session_open"
+    assert decisione["entry"]["eligible_cycle_source"] == "execution_decisions.tick_time"
+
+
+def test_serie_legacy_affiancata_non_sostituita():
+    """La v2 pubblica il numero legacy accanto al proprio, etichettato: il
+    ricalcolo del pregresso affianca, non riscrive (#246 Q2)."""
+    est = compute_opportunity(
+        {
+            "symbol": "ORCL",
+            "book_side": "long",
+            "held": False,
+            "daily": _daily(240.0, 246.0, 239.0, 245.0, 232.5),
+            "size_usd": 2200.0,
+            "slot_fraction": 0.02,
+            "cutoff": "2026-08-12T20:00:00+00:00",
+            "exit_policy": "EOD_close",
+            "confidenza": "congetturale",
+        }
+    )
+    assert est["legacy"]["costo_usd"] == pytest.approx(est["gross_opportunity_usd"])
+    assert "close_to_close" in est["legacy"]["formula"]
+    assert est["legacy"]["letta_dalla_sintesi_28_09"] is False
+    # La v2 resta il numero della sintesi, e non e' il numero legacy.
+    assert est["accessible_opportunity_usd"] != est["legacy"]["costo_usd"]

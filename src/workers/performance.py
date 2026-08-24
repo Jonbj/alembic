@@ -2191,6 +2191,44 @@ def run_loss_feedback_check() -> dict:
 
 _COUNTERFACTUAL_HORIZON_MIN = 60  # forward window in minutes
 
+# #337 — pagination. The worker used to take a single LIMIT 500 batch ordered by
+# tick_time DESC. On days with more than 500 eligible skips (SKIP_THRESHOLD alone
+# runs ~550/day) the batch filled from the newest rows and everything before the
+# cut was never computed; by the next night the batch was full of newer rows
+# again, so those rows aged out of the 7-day window uncomputed. The cut landed
+# about an hour after the open — exactly where overnight news lands — so the
+# censoring was not independent of signal quality. We now page to exhaustion.
+_COUNTERFACTUAL_PAGE_SIZE = 500
+_COUNTERFACTUAL_MAX_ROWS = 20000  # safety bound on a pathological backlog
+
+# #337 — retry budget for rows deliberately left pending (see reasons below).
+# Without a cap a permanently unresolvable row would be re-picked every night.
+_COUNTERFACTUAL_MAX_ATTEMPTS = 3
+
+# Bars are fetched per symbol over the whole window, so widening the range costs
+# no extra API calls. Reaching into the next session is what lets a tail-of-day
+# row get an overnight return instead of a silent NULL.
+_COUNTERFACTUAL_LOOKAHEAD_DAYS = 4  # Fri tick -> Tue open, covers a Monday holiday
+_COUNTERFACTUAL_FEED_DELAY_MIN = 20  # don't ask Alpaca for data newer than this
+
+# counterfactual_skip_reason values. NULL means "return_1h is populated".
+_CF_HORIZON_AFTER_CLOSE = "HORIZON_AFTER_CLOSE"
+_CF_PENDING_OVERNIGHT = "PENDING_OVERNIGHT"
+_CF_MISSING_ENTRY_BAR = "MISSING_ENTRY_BAR"
+_CF_MISSING_EXIT_BAR = "MISSING_EXIT_BAR"
+_CF_ZERO_ENTRY_PRICE = "ZERO_ENTRY_PRICE"
+_CF_NO_BARS = "NO_BARS"
+_CF_FETCH_ERROR = "FETCH_ERROR"
+_CF_NO_BARS_AFTER_HORIZON = "NO_BARS_AFTER_HORIZON"
+
+# Reasons worth another run: the data may simply not exist yet.
+_COUNTERFACTUAL_RETRYABLE = frozenset({_CF_PENDING_OVERNIGHT, _CF_NO_BARS, _CF_FETCH_ERROR})
+
+# PENDING_OVERNIGHT means "come back tomorrow", so it must not survive as the
+# stored reason once the row is finalised — the pair (computed_at set,
+# reason=PENDING_OVERNIGHT) would be self-contradictory.
+_COUNTERFACTUAL_TERMINAL_REASON = {_CF_PENDING_OVERNIGHT: _CF_NO_BARS_AFTER_HORIZON}
+
 
 def _compute_1h_return(
     bars_by_minute: dict,
@@ -2221,6 +2259,62 @@ def _compute_1h_return(
     return (exit_price - entry_price) / entry_price
 
 
+def _counterfactual_outcome(
+    bars_by_minute: dict,
+    tick_time: datetime,
+    horizon_min: int = _COUNTERFACTUAL_HORIZON_MIN,
+) -> tuple[float | None, float | None, str | None]:
+    """Resolve one decision into (return_1h, return_overnight, skip_reason).
+
+    Exactly one of the three outcomes holds:
+
+    * the +1h bar exists          -> (return, None, None)
+    * the session closed first    -> (None, overnight_return_or_None, HORIZON_AFTER_CLOSE
+                                      or PENDING_OVERNIGHT)
+    * the data is missing         -> (None, None, <reason>)
+
+    #337: the old code returned a bare ``None`` for all three, and the caller
+    stamped ``counterfactual_computed_at`` regardless. A row after ~19:00 UTC
+    therefore recorded "tried and failed" — indistinguishable from a genuine
+    data gap, and never retried even though its overnight price was knowable the
+    next morning.
+
+    Session boundaries are read off the bars rather than a hardcoded close: a US
+    session runs 13:30-21:00 UTC, so it never crosses UTC midnight, and the first
+    bar after the horizon falling on a later date means the close came first.
+    """
+    def _floor_minute(ts: datetime) -> datetime:
+        return ts.replace(second=0, microsecond=0)
+
+    entry_key = _floor_minute(tick_time)
+    exit_key = _floor_minute(tick_time + timedelta(minutes=horizon_min))
+
+    entry_price = bars_by_minute.get(entry_key)
+    if entry_price is None:
+        return None, None, _CF_MISSING_ENTRY_BAR
+    if entry_price == 0:
+        return None, None, _CF_ZERO_ENTRY_PRICE
+
+    exit_price = bars_by_minute.get(exit_key)
+    if exit_price is not None:
+        return (exit_price - entry_price) / entry_price, None, None
+
+    later_keys = [k for k in bars_by_minute if k > exit_key]
+    if not later_keys:
+        # Nothing at all past the horizon. Either the next session has not
+        # happened yet (the common case for the last ~40min of a session, since
+        # the worker runs the same night) or the feed is short. Retryable.
+        return None, None, _CF_PENDING_OVERNIGHT
+
+    next_key = min(later_keys)
+    if next_key.date() > entry_key.date():
+        overnight = (bars_by_minute[next_key] - entry_price) / entry_price
+        return None, overnight, _CF_HORIZON_AFTER_CLOSE
+
+    # A gap inside the same session — genuinely missing data, not a closed market.
+    return None, None, _CF_MISSING_EXIT_BAR
+
+
 @app.task(name="src.workers.performance.run_counterfactual_worker")
 def run_counterfactual_worker() -> dict:
     """Compute 1-hour counterfactual returns for trade-filter skip decisions.
@@ -2233,10 +2327,22 @@ def run_counterfactual_worker() -> dict:
     signals are data-quality/reliability issues, not filters to relax for alpha.
 
     Scheduled daily at 22:45 UTC (after market close and forward-return worker).
-    Only processes decisions from the last 7 days with no counterfactual yet.
+    Processes every decision from the last 7 days with no counterfactual yet —
+    #337: paged to exhaustion, not a single LIMIT 500 batch, which used to starve
+    the first hour of each session.
+
+    Every row processed ends in one of three states, and the state is legible
+    from the row itself:
+      * counterfactual_return_1h set, skip_reason NULL
+      * computed_at set, skip_reason explaining the NULL return (possibly with
+        counterfactual_return_overnight populated for tail-of-session rows)
+      * computed_at NULL, skip_reason PENDING_OVERNIGHT/NO_BARS/FETCH_ERROR and
+        counterfactual_attempts bumped — retried on the next run, up to
+        _COUNTERFACTUAL_MAX_ATTEMPTS
 
     Returns:
-        Dict: updated, skipped_no_data, errors, total_decisions.
+        Dict: updated, skipped_no_data, errors, total_decisions,
+        overnight_computed, pending_retry, attempts_exhausted.
     """
     import psycopg2
     from collections import defaultdict
@@ -2245,7 +2351,15 @@ def run_counterfactual_worker() -> dict:
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
 
-    stats: dict = {"updated": 0, "skipped_no_data": 0, "errors": 0, "total_decisions": 0}
+    stats: dict = {
+        "updated": 0,
+        "skipped_no_data": 0,
+        "errors": 0,
+        "total_decisions": 0,
+        "overnight_computed": 0,
+        "pending_retry": 0,
+        "attempts_exhausted": 0,
+    }
     started_at = datetime.now(timezone.utc)
 
     def _record_run(status: str, reason: str | None = None) -> None:
@@ -2271,7 +2385,11 @@ def run_counterfactual_worker() -> dict:
     pg = PostgreSQLStore(conn=pg_conn)
 
     try:
-        rows = pg.fetch_skip_decisions_without_counterfactual(days_back=7, limit=500)
+        rows = pg.fetch_all_skip_decisions_without_counterfactual(
+            days_back=7,
+            page_size=_COUNTERFACTUAL_PAGE_SIZE,
+            max_rows=_COUNTERFACTUAL_MAX_ROWS,
+        )
         if not rows:
             log.info("No SKIP decisions pending counterfactual")
             _record_run("ok", "no_pending_decisions")
@@ -2291,7 +2409,45 @@ def run_counterfactual_worker() -> dict:
         )
 
         computed_at = datetime.now(timezone.utc)
-        updates: list[tuple] = []  # (decision_id, return_1h_or_None, computed_at)
+        # (decision_id, return_1h, computed_at, skip_reason, return_overnight, attempts)
+        updates: list[tuple] = []
+
+        def _record(d: dict, ret: float | None, overnight: float | None, reason: str | None) -> None:
+            """Apply the resolved outcome to a decision row, honouring the retry budget.
+
+            A retryable reason leaves computed_at NULL so the next run picks the
+            row up again — but only until the attempt budget runs out, after
+            which the reason is frozen in place with computed_at set. That is
+            what keeps a permanently unresolvable row from being re-fetched
+            every night forever (#337).
+            """
+            attempts = int(d.get("counterfactual_attempts") or 0)
+            retrying = (
+                reason in _COUNTERFACTUAL_RETRYABLE
+                and attempts + 1 < _COUNTERFACTUAL_MAX_ATTEMPTS
+            )
+            if retrying:
+                updates.append((d["id"], None, None, reason, overnight, attempts + 1))
+            else:
+                stored_reason = _COUNTERFACTUAL_TERMINAL_REASON.get(reason, reason)
+                updates.append((d["id"], ret, computed_at, stored_reason, overnight, attempts + 1))
+
+            # The counters partition total_decisions: every row lands in exactly
+            # one of them. FETCH_ERROR rows stay in `errors` whether or not they
+            # will be retried, so that counter keeps its pre-#337 meaning.
+            if reason == _CF_FETCH_ERROR:
+                stats["errors"] += 1
+            elif retrying:
+                stats["pending_retry"] += 1
+            elif reason is None:
+                stats["updated"] += 1
+            elif reason == _CF_HORIZON_AFTER_CLOSE:
+                stats["overnight_computed"] += 1
+            else:
+                stats["skipped_no_data"] += 1
+
+            if not retrying and reason in _COUNTERFACTUAL_RETRYABLE:
+                stats["attempts_exhausted"] += 1
 
         for symbol, decisions in by_symbol.items():
             try:
@@ -2301,7 +2457,17 @@ def run_counterfactual_worker() -> dict:
                     for d in decisions
                 ]
                 start = min(tick_times) - timedelta(minutes=5)
-                end = max(tick_times) + timedelta(minutes=_COUNTERFACTUAL_HORIZON_MIN + 10)
+                # #337: reach into the next session so a tail-of-day row can get an
+                # overnight return. One request per symbol either way, so the wider
+                # range costs no extra Alpaca calls. Clamp to just behind the feed's
+                # delay: asking for data that does not exist yet is what leaves a
+                # row PENDING_OVERNIGHT for one more night, which is intended.
+                end = min(
+                    max(tick_times) + timedelta(days=_COUNTERFACTUAL_LOOKAHEAD_DAYS),
+                    datetime.now(timezone.utc) - timedelta(minutes=_COUNTERFACTUAL_FEED_DELAY_MIN),
+                )
+                if end <= start:
+                    end = max(tick_times) + timedelta(minutes=_COUNTERFACTUAL_HORIZON_MIN + 10)
 
                 req = StockBarsRequest(
                     symbol_or_symbols=symbol,
@@ -2315,8 +2481,7 @@ def run_counterfactual_worker() -> dict:
                 if bars_df.empty:
                     log.debug("No 1-min bars for %s — marking as no_data", symbol)
                     for d in decisions:
-                        updates.append((d["id"], None, computed_at))
-                    stats["skipped_no_data"] += len(decisions)
+                        _record(d, None, None, _CF_NO_BARS)
                     continue
 
                 # Flatten multi-index (symbol, timestamp) → timestamp only.
@@ -2326,8 +2491,7 @@ def run_counterfactual_worker() -> dict:
                         bars_df = bars_df.loc[symbol]
                     else:
                         for d in decisions:
-                            updates.append((d["id"], None, computed_at))
-                        stats["skipped_no_data"] += len(decisions)
+                            _record(d, None, None, _CF_NO_BARS)
                         continue
 
                 bars_df = bars_df.sort_index()
@@ -2345,25 +2509,22 @@ def run_counterfactual_worker() -> dict:
                     tick = d["tick_time"]
                     if tick.tzinfo is None:
                         tick = tick.replace(tzinfo=timezone.utc)
-                    ret = _compute_1h_return(bars_by_minute, tick)
-                    updates.append((d["id"], ret, computed_at))
-                    if ret is None:
-                        stats["skipped_no_data"] += 1
-                    else:
-                        stats["updated"] += 1
+                    ret, overnight, reason = _counterfactual_outcome(bars_by_minute, tick)
+                    _record(d, ret, overnight, reason)
 
             except Exception as e:
                 log.warning("Counterfactual: failed to fetch bars for %s — %s", symbol, e)
                 for d in decisions:
-                    updates.append((d["id"], None, computed_at))
-                stats["errors"] += len(decisions)
+                    _record(d, None, None, _CF_FETCH_ERROR)
 
         if updates:
             pg.bulk_set_counterfactual(updates)
 
         log.info(
-            "Counterfactual worker complete: updated=%d skipped=%d errors=%d",
-            stats["updated"], stats["skipped_no_data"], stats["errors"],
+            "Counterfactual worker complete: total=%d updated=%d overnight=%d "
+            "pending_retry=%d skipped=%d errors=%d",
+            stats["total_decisions"], stats["updated"], stats["overnight_computed"],
+            stats["pending_retry"], stats["skipped_no_data"], stats["errors"],
         )
         _record_run("ok")
 

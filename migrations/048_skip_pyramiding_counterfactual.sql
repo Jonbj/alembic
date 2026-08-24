@@ -1,3 +1,8 @@
+-- #337: renamed from 046_skip_pyramiding_counterfactual.sql — the 046 prefix
+-- collided with 046_news_labels_2annotator.sql (that one is referenced by name
+-- from tests/, so this file is the one that moved). Applicata a mano sul live il 2026-08-22, sotto il nome
+-- precedente 046_skip_pyramiding_counterfactual.sql.
+--
 -- #315: SKIP_PYRAMIDING enters the counterfactual pipeline like the other skip
 -- reasons. fetch_skip_decisions_without_counterfactual() now includes
 -- 'SKIP_PYRAMIDING' in its IN (...) filter (it already covered SKIP_THRESHOLD,

@@ -1,0 +1,227 @@
+# Contratto del trial exit S4 — parametri congelati, forma macchina.
+#
+# FONTE AUTOREVOLE: docs/evidence/CONTRATTO_TRIAL_EXIT_S4_2026-08-22.md
+# Questo file è la parte del contratto che un gate sa valutare (#301). NON è il
+# contratto completo: la definizione di modifica materiale, la nota Q7 e il
+# registro delle modifiche vivono solo nel documento. In caso di divergenza fra
+# i due, è una divergenza MATERIALE e va risolta prima di n=0, non arbitrata dopo.
+#
+# Firmato: 2026-08-22, prima di n=0. Chiude #293.
+# Base documentale: docs/s4-exit-research-2026-08-14/consolidato_exit.md §5-§8.
+# Decisione a monte: #242 (opzione C, shadow reversibile) —
+#   docs/evidence/PREREGISTRAZIONE_S4_ORIZZONTE_2026-08-14.md
+#
+# PERIMETRO: solo il ramo shadow. Questo file non autorizza alcun cambiamento
+# alle uscite live. Discontinuità registrata in anticipo in
+# docs/evidence/OBSERVATION_CHARTER.md § Discontinuità.
+
+version: "1.0.0"
+signed_at: "2026-08-22"
+issue: 293
+changelog:
+  - "1.0.0 (#293): creazione, parametri congelati prima di n=0."
+
+contract:
+  document: "docs/evidence/CONTRATTO_TRIAL_EXIT_S4_2026-08-22.md"
+  source: "docs/s4-exit-research-2026-08-14/consolidato_exit.md"
+  source_sections: ["5", "6", "7", "8"]
+  scope: "shadow_only"
+  live_behaviour_changed: false
+
+# n=0 non è ancora fissato: coincide col batch atomico che apre la raccolta
+# (§ Sequenza punto 3 della decisione del 2026-08-14 su #242).
+sample:
+  n0_date: null
+  n0_fixed: false
+  restart_on_material_change: true
+
+# ── Famiglia confirmatory ────────────────────────────────────────────────────
+policies:
+  P0:
+    status: active
+    role: benchmark
+    promotable: false
+    spec: >-
+      E0 congelata: comportamento as-is versionato al sample start (target-weight
+      zero e relativi guard), riprodotto in shadow sugli stessi ingressi.
+  P1:
+    status: active
+    role: treatment
+    promotable: true
+    spec: >-
+      D+2 time-only. Nessuna uscita per silenzio fonte, max_signal_age, assenza
+      dal top-5, rank drop, expired, unknown, crossing sotto l'entry gate o
+      target-weight zero. Nessun counter ordinario.
+  P2:
+    status: omitted           # dichiarata nella famiglia, NON attivata a n=0
+    role: treatment
+    promotable: false
+    spec: >-
+      P1 + contro-segnale qualificato (ensemble non-fallback, ticker-valid,
+      informazione nuova e pertinente, score <= -0.30, confermato su due
+      valutazioni consecutive).
+    activation_requires: "pre-registrazione propria, con MDE_counter fissato prima di guardare dati P2"
+
+# Fuori dalla famiglia confirmatory: diagnostici, NON promuovibili.
+# Le analisi D+1/D+3 non diventano out-of-sample per rinomina (§8.4).
+diagnostics_not_promotable:
+  - "D+1"
+  - "D+3"
+  - "decomposizione intraday/overnight"
+  - "E4 aggregata"
+  - "posterior/VIX"
+  - "trailing"
+  - "event-type"
+  - "de-risking"
+
+# ── Soglie economiche ────────────────────────────────────────────────────────
+thresholds:
+  MDE_time:
+    value: 25
+    unit: "bps_net_initial_notional"
+    tail: "one_sided"
+    applies_to: "delta1 = r_net(P1) - r_net(P0)"
+    provenance: "scelto ex ante dal capital owner; NON ricavato dal miglior backtest"
+  MDE_counter:
+    value: null
+    fixed: false
+    reason: "segue P2, che è omitted a n=0. Si fissa nella pre-registrazione che attiverà P2."
+
+primary_metric:
+  definition: "media dei delta appaiati netti"
+  unit: "bps_net_initial_notional"
+  denominator: "notional iniziale dell'intento, identico fra le policy"
+  hierarchy: ["delta1_P1_vs_P0", "delta2_P2_vs_P1"]
+
+false_exit_budget:
+  role: diagnostic          # NON è un gate a n=0 (P2 omitted)
+  gate_at_n0: false
+  computed_and_published_for: ["P0", "P1"]
+  metrics: ["false_exit_rate", "recovery_within_horizon", "giveback_from_MFE"]
+
+# ── Semantica temporale ──────────────────────────────────────────────────────
+horizon:
+  D0: "primo fill RTH eseguibile"
+  D0_excludes: ["data articolo", "decision_at", "broker ack"]
+  exit: "close di D0+2 sedute"
+  calendar: "alpaca"
+  calendar_source: "GetCalendarRequest"
+  exit_price_rule: >-
+    ordine di chiusura solo se realmente presentabile entro il cutoff; altrimenti
+    primo prezzo eseguibile successivo, mai il closing print teorico.
+  gap_beyond_stop: "fill al primo prezzo eseguibile, non al trigger"
+  half_days_and_holidays: "seguono la close effettiva del calendario"
+  max_signal_age_drives_exit: false
+
+# ── Overlay di rischio ───────────────────────────────────────────────────────
+risk_overlay:
+  d_hard:
+    enabled: true
+    identical_across_policies: true
+    attributed_to_alpha_policy: false
+  take_profit:
+    enabled: false
+  trailing:
+    enabled: false
+  scale_out:
+    enabled: false
+  tight_synthetic_stop:
+    enabled: false
+  # Q7 — verifica del 2026-08-22 sul codice attuale. Il TP live è acceso di
+  # default ma sul perimetro OPPOSTO a quello ipotizzato in Q7: il bracket è
+  # attaccato solo ai submit NON frazionabili
+  # (portfolio_scheduler.py:4219, `and not is_fractionable`; commit 54d3be3).
+  # Dettaglio in § 2 del contratto.
+  live_tp_check:
+    verified_at: "2026-08-22"
+    q7_premise_confirmed: false
+    q7_premise: "bracket con TP sui submit frazionabili"
+    actual: "bracket con TP solo sui submit NON frazionabili (whole-share)"
+    code_ref: "src/workers/portfolio_scheduler.py:4219"
+    ALPACA_BRACKET_ENABLED_default: true
+    ALPACA_TAKE_PROFIT_PCT_default: 0.06
+    obligation_before_n0: >-
+      Pubblicare quanti lifecycle P0 sarebbero stati toccati dal TP live. Se >5%
+      degli intenti, P0 non è più il benchmark operativo reale e la definizione
+      va corretta.
+    threshold_pct_of_intents: 5
+    measurement_perimeter: "whole_share_non_fractionable"
+    status: pending
+
+# ── Inferenza e potenza ──────────────────────────────────────────────────────
+inference:
+  cluster_unit: "event-day"
+  not_independent_replicates: ["ticker-day", "articoli dello stesso evento"]
+  bootstrap: "block/stationary, schema e lunghezza fissati ex ante, coerenti con D+2"
+  interval: "unilaterale 95%"
+  multiplicity: "ordine gerarchico chiuso: P1 vs P0, poi P2 vs P1 solo se P1 supera il gate"
+
+power:
+  sigma_delta:
+    estimated_on: "segmento pre-fix"
+    mode: "blinded"
+    uses: ["varianza"]
+    must_not_use: ["media", "ranking fra le policy"]
+  alpha: 0.05
+  alpha_tail: "one_sided"
+  power: 0.90
+  inflation_for: ["dipendenza", "missingness"]
+  N_cluster:
+    value: null
+    derived_from: "sigma_delta blinded + alpha 5% unilaterale + potenza 90%"
+    blinded_reestimation:
+      allowed: 1
+      at_fraction_of_N_cluster: 0.50
+      pre_registered: true
+  # Le ~213 sedute sono una stima di numerosità per l'IC (#179 /
+  # pre-registrazione del 14/08), NON un requisito per il paired exit delta,
+  # che ha varianza propria.
+  sessions_213_is_N_cluster: false
+
+stopping:
+  early_efficacy_stop: false
+  decision_analysis_count: 1
+  decision_analysis_at: "N_cluster"
+  interim_reviews_limited_to: ["integrità", "sicurezza", "statistiche blinded"]
+  safety_halt:
+    allowed: true
+    only_for: "danno operativo"
+    must_be_documented: true
+
+outcomes:
+  P1_promotable_if: "LCB95(delta1) > MDE_time AND tutti i gate non-inferenziali di §8.5 tengono"
+  P1_falsified_if: "UCB95(delta1) <= MDE_time"
+  inconclusive_if: "l'intervallo attraversa MDE_time"
+  inconclusive_forbids: ["promozione", "dichiarazione di equivalenza", "ricerca di D+1/D+3 sullo stesso campione"]
+
+# ── Controfattuali ───────────────────────────────────────────────────────────
+counterfactuals:
+  shared_across_policies: ["intenti", "fill", "notional", "costi d'ingresso"]
+  policy_may_change_entry: false
+  first_observable_trigger_wins: true
+  ambiguous_case: "marcato ambiguo, mai il percorso favorevole"
+  freed_capital_reinvested: false
+  opportunity_cost_reported: "separatamente, a livello di portafoglio"
+
+# ── Modifiche materiali (definizione completa nel documento, § 3) ────────────
+material_change:
+  material_if_touches:
+    - source
+    - resolver
+    - modello
+    - gate
+    - ranking
+    - sizing
+    - slot
+    - cost_model
+    - calendario
+    - fill
+    - orizzonte
+  not_material: "strumentazione che non tocca le decisioni (logging, telemetria, dashboard, export, test)"
+  test: >-
+    Se applico questa modifica, un intento già raccolto sarebbe stato deciso
+    diversamente, o il suo outcome per policy sarebbe diverso? Sì o "non lo so"
+    => materiale.
+  uncertainty_resolves_to: "restart"
+
+unblocks: [297, 299, 300, 301]
