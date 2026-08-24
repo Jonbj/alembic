@@ -29,7 +29,7 @@ def _make_base_mocks(redis_inst=None, clock=None):
 class TestClockFailureAbortsCycle:
     """get_clock() failure must abort the cycle, not proceed with order submission."""
 
-    def test_clock_failure_aborts_cycle(self):
+    def test_clock_failure_aborts_cycle(self, approved_strategy):
         """When get_clock() raises, cycle must return error and NOT submit orders."""
         from src.workers.portfolio_scheduler import _run_cycle_inner
 
@@ -54,7 +54,8 @@ class TestClockFailureAbortsCycle:
             mock_tc.return_value.get_all_positions.return_value = []
             mock_redis_cls.from_url.return_value = redis_inst
 
-            result = _run_cycle_inner()
+            with approved_strategy("S1"):
+                result = _run_cycle_inner()
 
         # Must abort with a specific clock-related reason, not just any error.
         assert result.get("error") == "clock_unavailable" or (
@@ -66,7 +67,7 @@ class TestClockFailureAbortsCycle:
         )
         mock_submit.assert_not_called()
 
-    def test_market_closed_aborts_cycle(self):
+    def test_market_closed_aborts_cycle(self, approved_strategy):
         """is_open=False must skip cycle — existing behaviour preserved."""
         from src.workers.portfolio_scheduler import _run_cycle_inner
 
@@ -91,7 +92,8 @@ class TestClockFailureAbortsCycle:
             mock_tc.return_value.get_clock.return_value = clock
             mock_redis_cls.from_url.return_value = redis_inst
 
-            result = _run_cycle_inner()
+            with approved_strategy("S1"):
+                result = _run_cycle_inner()
 
         assert result == {"skipped": True, "reason": "market_closed", "next_open": "2026-06-20T13:30:00+00:00"}
         mock_submit.assert_not_called()
