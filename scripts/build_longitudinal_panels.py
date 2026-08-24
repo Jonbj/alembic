@@ -41,6 +41,15 @@ from src.analysis.dossier.decision_quality import (
     build_decision_quality_panel,
     build_decision_quality_rollup,
 )
+from src.analysis.dossier.falsifiability import (
+    FALSIFIABILITY_SCHEMA_VERSION,
+    build_contamination_summary,
+    build_falsifiability_views,
+    build_status_events_falsifiability,
+    build_synthesis,
+    build_weekly_rollup,
+    validate_falsifiability,
+)
 from src.analysis.dossier.panels import (
     LEDGER_SCHEMA_VERSION,
     PANELS_SCHEMA_VERSION,
@@ -60,6 +69,26 @@ DOSSIER_DIR = PROJECT_DIR / "docs" / "evidence" / "dossier"
 FINDINGS = PROJECT_DIR / "docs" / "evidence" / "findings.json"
 MARKET_DAILY = PROJECT_DIR / "docs" / "evidence" / "market_daily.jsonl"
 OUT = PROJECT_DIR / "docs" / "evidence" / "longitudinal_panels.json"
+# Annotazioni parallele dell'operatore per i campi di giudizio di #286
+# (stato_falsificazione, prova_decisiva, meccanismo, strategia,
+# relazione_finding_causa, contamination). File OPZIONALE e nuovo: non e' tra
+# i vietati e non e' il ledger primario. Default vuoto => tutti i campi di
+# giudizio nulli e stato not_exposed (struttura pronta, wiring prompt post-freeze).
+#
+# Schema atteso (due forme accettate, entrambe indicizzate per finding_id):
+#   {"F-001": {"stato_falsificazione": "supported",
+#              "prova_decisiva": "test X conferma (read-only)",
+#              "meccanismo": "NO_NEWS", "strategia": "S4",
+#              "relazione_finding_causa": "NO_NEWS",
+#              "contamination": "attribution"}}
+# oppure {"findings": [{"id": "F-001", ...}, ...]}.
+# stato_falsificazione in {supported, contradicted, not_exposed} (default
+# not_exposed). prova_decisiva obbligatoria con un verdetto e read-only una
+# volta registrata.
+ANNOTATIONS = PROJECT_DIR / "docs" / "evidence" / "finding_annotations.json"
+# P&L economico (#278): file derivato read-only, fonte della headline del
+# synthesis. Opzionale: se assente la headline e' None con missingness.
+ECONOMIC_PNL = PROJECT_DIR / "docs" / "evidence" / "economic_pnl.json"
 
 # Fine del periodo di osservazione dichiarata nella carta (#171): non e' una
 # taratura, e' una data documentata. L'inizio si deriva dai dati (include le
@@ -87,9 +116,107 @@ def _movers_from_dossier(dossier: dict) -> dict[str, float]:
     }
 
 
-def costruisci() -> dict:
+def _segments_by_day(ticker_day: list[dict]) -> dict[str, set[str]]:
+    """Segmenti (cause) presenti per giorno, dal pannello ticker-day. Serve ai
+    denominatori di esposizione di #286 (giorni_esposti / non_occorrenze) quando
+    e' nota la relazione finding->causa."""
+    out: dict[str, set[str]] = {}
+    for row in ticker_day:
+        day = row.get("data")
+        seg = row.get("segment")
+        if day is None or seg is None:
+            continue
+        out.setdefault(day, set()).add(seg)
+    return out
+
+
+def _load_economic_pnl() -> dict | None:
+    """Carica il file derivato del P&L economico (#278), read-only. None se
+    assente o non leggibile (missingness dichiarata a valle)."""
+    if not ECONOMIC_PNL.exists():
+        return None
+    try:
+        return _load_json(ECONOMIC_PNL)
+    except (OSError, ValueError):
+        return None
+
+
+def _economic_pnl_headline(epnl: dict | None) -> dict | None:
+    """Headline del P&L economico per il synthesis: ultimo cumulato per sleeve
+    (S1 / S4 / BOOK) sulla finestra. File derivato read-only."""
+    if not epnl:
+        return None
+    cumulato = (epnl.get("pnl_economico") or {}).get("cumulato") or {}
+    headline: dict[str, float | None] = {}
+    for sleeve in ("S1", "S4", "BOOK"):
+        serie = cumulato.get(sleeve)
+        if not serie:
+            headline[sleeve] = None
+            continue
+        # ultimo valore della serie (chiave data ordinata).
+        headline[sleeve] = sorted(serie.items())[-1][1]
+    headline["finestra_inizio"] = epnl.get("finestra_inizio")
+    headline["fonte"] = str(ECONOMIC_PNL.relative_to(PROJECT_DIR))
+    headline["missingness"] = [] if any(
+        v is not None for k, v in headline.items() if k in ("S1", "S4", "BOOK")
+    ) else ["economic_pnl_non_disponibile"]
+    return headline
+
+
+def _economic_pnl_for_window(epnl: dict | None, start: dt.date, end: dt.date) -> dict | None:
+    """P&L economico di una sotto-finestra (somma del giornaliero sui giorni di
+    borsa presenti in [start, end]). Per il weekly rollup: il contributo
+    economico di quella settimana, non il cumulato totale."""
+    if not epnl:
+        return None
+    giornaliero = (epnl.get("pnl_economico") or {}).get("giornaliero") or {}
+    out: dict[str, float | None] = {}
+    any_value = False
+    for sleeve in ("S1", "S4", "BOOK"):
+        serie = giornaliero.get(sleeve) or {}
+        totale = 0.0
+        found = False
+        for day_str, val in serie.items():
+            try:
+                day = dt.date.fromisoformat(day_str)
+            except ValueError:
+                continue
+            if start <= day <= end and val is not None:
+                totale += float(val)
+                found = True
+        out[sleeve] = totale if found else None
+        any_value = any_value or found
+    out["finestra"] = f"{start.isoformat()}..{end.isoformat()}"
+    out["fonte"] = str(ECONOMIC_PNL.relative_to(PROJECT_DIR))
+    out["missingness"] = [] if any_value else ["economic_pnl_non_disponibile_nella_sotto_finestra"]
+    return out
+
+
+def _iso_week(day_str: str) -> str:
+    """Etichetta ISO week (es. ``2026-W33``) per il weekly rollup."""
+    cal = dt.date.fromisoformat(day_str).isocalendar()
+    return f"{cal[0]}-W{cal[1]:02d}"
+
+
+def _week_window(week_label: str) -> tuple[dt.date, dt.date]:
+    """Finestra (lunedi'->domenica) di una ISO week label ``YYYY-Www``."""
+    year, week = week_label.split("-W")
+    # lunedi' della ISO week
+    monday = dt.date.fromisocalendar(int(year), int(week), 1)
+    sunday = dt.date.fromisocalendar(int(year), int(week), 7)
+    return monday, sunday
+
+
+def costruisci(*, previous_report: dict | None = None) -> dict:
     """Legge i dossier, costruisce pannelli + ledger, valida, restituisce il
-    report completo (dict) e l'esito della validazione."""
+    report completo (dict) e l'esito della validazione.
+
+    ``previous_report`` e' l'output della run precedente (lo stesso file
+    derivato): fonte dei ``cambi`` del synthesis e della baseline read-only
+    della prova decisiva. E' iniettato da ``main()`` che lo legge da ``OUT``;
+    qui' resta un parametro esplicito cosi' ``costruisci()`` e' deterministica
+    e testabile senza dipendere da file su disco. Default ``None`` => primo run:
+    tutto nuovo, nessun vincolo read-only."""
     dossier_paths = sorted(DOSSIER_DIR.glob("*.json"))
     if not dossier_paths:
         raise SystemExit(f"Nessun dossier in {DOSSIER_DIR}.")
@@ -163,6 +290,95 @@ def costruisci() -> dict:
         "warnings": validation_findings["warnings"] + validation_panels["warnings"],
     }
 
+    # --- #286: falsificabilita' e sintesi (viste parallele, read-only su
+    # findings.json). Annotazioni opzionali dell'operatore; previous_report per
+    # i cambi e per il check read-only della prova decisiva. ---
+    annotations = _load_json(ANNOTATIONS) if ANNOTATIONS.exists() else {}
+    # assicura che le annotazioni siano indicizzate per finding_id.
+    if annotations and "findings" in annotations:
+        annotations = {f.get("id"): f for f in annotations["findings"] if f.get("id")}
+    segments_day = _segments_by_day(ticker_day_all)
+
+    # run precedente (lo stesso file derivato, iniettato da main): fonte dei
+    # cambi e della prova decisiva read-only. Su primo run e' None => tutto
+    # nuovo, niente vincoli.
+    previous_fals = (previous_report or {}).get("falsifiability") or None
+    previous_annotations = None
+    if previous_fals and previous_fals.get("annotations_used"):
+        previous_annotations = previous_fals["annotations_used"]
+
+    fals_views = build_falsifiability_views(
+        findings,
+        window=window,
+        annotations=annotations,
+        segments_by_day=segments_day,
+    )
+    contamination_summary = build_contamination_summary(fals_views)
+    fals_status_events = build_status_events_falsifiability(fals_views)
+    validation_fals = validate_falsifiability(
+        fals_views,
+        annotations=annotations,
+        previous_annotations=previous_annotations,
+    )
+
+    epnl = _load_economic_pnl()
+    economic_headline = _economic_pnl_headline(epnl)
+    integrity = {
+        "ok": validation["ok"] and validation_fals["ok"],
+        "n_errori": len(validation["errors"]) + len(validation_fals["errors"]),
+        "n_warning": len(validation["warnings"]) + len(validation_fals["warnings"]),
+        "errori": validation["errors"] + validation_fals["errors"],
+        "warning": validation["warnings"] + validation_fals["warnings"],
+    }
+    synthesis = build_synthesis(
+        fals_views,
+        contamination_summary,
+        # previous_digest = le VISTE della run precedente (hanno ``findings``
+        # top-level, dove ``_cambi`` li legge). Non il blocco ``falsifiability``
+        # intero: quello ha ``views`` annidate, e ``_cambi`` non le troverebbe.
+        previous_digest=(previous_fals or {}).get("views"),
+        economic_pnl=economic_headline,
+        integrity=integrity,
+    )
+
+    # weekly rollup: per ogni ISO week con dossier, i "cambi della settimana"
+    # sono la DIFF CUMULATIVA (viste a fine settimana meno viste a inizio
+    # settimana): cio' che e' mutato durante la settimana, non il rumore di un
+    # finding dormiente che resetta a zero. Una settimana senza variazioni vs
+    # l'inizio produce cambi vuoti: e' il punto (nessuna nuova evidenza).
+    weekly: dict[str, dict] = {}
+    for week_label in sorted({_iso_week(g) for g in giorni}):
+        w_start, w_end = _week_window(week_label)
+        # vista cumulativa a fine settimana (inizio finestra..domenica).
+        w_views = build_falsifiability_views(
+            findings,
+            window=(inizio, w_end),
+            annotations=annotations,
+            segments_by_day=segments_day,
+        )
+        # vista cumulativa a inizio settimana (inizio..giorno prima del
+        # lunedi'): la baseline rispetto a cui misurare i cambi della settimana.
+        prev_sunday = w_start - dt.timedelta(days=1)
+        if prev_sunday >= inizio:
+            prev_week_views = build_falsifiability_views(
+                findings,
+                window=(inizio, prev_sunday),
+                annotations=annotations,
+                segments_by_day=segments_day,
+            )
+        else:
+            prev_week_views = None
+        w_cont = build_contamination_summary(w_views)
+        w_pnl = _economic_pnl_for_window(epnl, w_start, w_end)
+        weekly[week_label] = build_weekly_rollup(
+            w_views,
+            w_cont,
+            settimana=week_label,
+            previous_digest=prev_week_views,
+            economic_pnl=w_pnl,
+            integrity=integrity,
+        )
+
     report = {
         "schema_version": PANELS_SCHEMA_VERSION,
         "ledger_schema_version": LEDGER_SCHEMA_VERSION,
@@ -181,6 +397,39 @@ def costruisci() -> dict:
         "derived_views": derived,
         "dossier_hashes": dossier_hashes,
         "validation": validation,
+        "falsifiability": {
+            "schema_version": FALSIFIABILITY_SCHEMA_VERSION,
+            "views": fals_views,
+            "contamination_summary": contamination_summary,
+            "status_events": fals_status_events,
+            "validation": validation_fals,
+            "synthesis": synthesis,
+            "weekly_rollup": weekly,
+            # annotazioni usate questa run: registra la baseline per il check
+            # read-only della prova decisiva alla prossima run.
+            "annotations_used": annotations,
+            "provenance": {
+                "findings": "docs/evidence/findings.json (read-only)",
+                "annotations": (
+                    f"{ANNOTATIONS.relative_to(PROJECT_DIR)} (operatore, opzionale)"
+                    if ANNOTATIONS.exists()
+                    else "assente (tutti i campi di giudizio nulli, stato not_exposed)"
+                ),
+                "economic_pnl": (
+                    f"{ECONOMIC_PNL.relative_to(PROJECT_DIR)} (read-only, headline)"
+                    if economic_headline is not None
+                    else "assente (headline None, missingness dichiarata)"
+                ),
+                "note": (
+                    "Viste parallele di falsificabilita' (#286): nessuna modifica "
+                    "a findings.json. I campi di giudizio (stato_falsificazione, "
+                    "prova_decisiva, meccanismo, strategia, relazione_finding_causa, "
+                    "contamination) vivono nelle annotazioni dell'operatore e "
+                    "restano null/not_exposed finche' il prompt cron non le "
+                    "popola (wiring post-freeze)."
+                ),
+            },
+        },
         "provenance": {
             "dossier": "docs/evidence/dossier/*.json (read-only, hash sha256)",
             "findings": "docs/evidence/findings.json (read-only, vista definitions)",
@@ -206,7 +455,13 @@ def main() -> int:
     ap.add_argument("--out", default=str(OUT), help="percorso del file di output")
     args = ap.parse_args()
 
-    report = costruisci()
+    # run precedente (lo stesso file derivato): fonte dei cambi del synthesis
+    # (#286) e della baseline read-only della prova decisiva. Iniettato in
+    # costruisci() per mantenerla deterministica e testabile.
+    out_path = Path(args.out)
+    previous_report = _load_json(out_path) if out_path.exists() else None
+
+    report = costruisci(previous_report=previous_report)
     v = report["validation"]
     log.info(
         "giorni: %d | ticker-day %d | segnali %d | decisioni/trade %d | occorrenze %d",

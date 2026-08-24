@@ -85,3 +85,94 @@ def test_decision_quality_e_una_serie_giornaliera_con_rollup(report):
         "n_giorni"
     ]:
         assert report["decision_quality_rollup"]["totali_usd"]["passive_pnl_usd"] is None
+
+
+# ---------------------------------------------------------------------------
+# #286 — falsificabilita' e sintesi cablate nell'orchestratore.
+# ---------------------------------------------------------------------------
+
+
+def test_il_report_ha_le_sezioni_di_falsificabilita(report):
+    f = report["falsifiability"]
+    for k in ("views", "contamination_summary", "status_events", "validation",
+              "synthesis", "weekly_rollup", "annotations_used", "provenance"):
+        assert k in f, f"manca falsifiability.{k}"
+
+
+def test_le_viste_di_falsificabilita_arricchiscono_ogni_finding(report):
+    fs = report["falsifiability"]["views"]["findings"]
+    assert fs, "nessun finding nelle viste di falsificabilita'"
+    for f in fs:
+        # campi misurati (carta):
+        assert "giorni_distinti" in f
+        assert "costo_cumulato_in_finestra_usd" in f
+        assert "dimensione" in f
+        assert "oltre_soglia" in f
+        # campi di giudizio (default null / not_exposed):
+        assert f["stato_falsificazione"] == "not_exposed"
+        assert f["prova_decisiva"] is None
+        # esposizione null finche' non c'e' relazione_finding_causa:
+        assert "giorni_esposti" in f
+
+
+def test_il_31_luglio_non_conta_verso_i_giorni_distinti(report):
+    # AC1: il 31/07 e' escluso. F-001 ha un'occorrenza 2026-07-31 nei dati reali:
+    # non deve gonfiare giorni_distinti ne' costo.
+    import json
+    fj = json.load(open(PROJECT_DIR / "docs" / "evidence" / "findings.json"))
+    f001 = next(x for x in fj["findings"] if x["id"] == "F-001")
+    has_31 = any(o.get("data") == "2026-07-31" for o in f001["occorrenze"])
+    assert has_31, "premessa: F-001 ha un'occorrenza 2026-07-31 nei dati reali"
+    view = next(
+        f for f in report["falsifiability"]["views"]["findings"] if f["id"] == "F-001"
+    )
+    # ricalcola i giorni distinti senza il 31/07: la vista non lo conta.
+    giorni_senza_31 = {
+        o["data"] for o in f001["occorrenze"]
+        if o.get("data") != "2026-07-31"
+    }
+    assert view["giorni_distinti"] == len(giorni_senza_31)
+
+
+def test_la_synthesis_ha_le_quattro_sezioni(report):
+    syn = report["falsifiability"]["synthesis"]
+    for k in ("cambi", "soglie", "pnl_economico", "integrita"):
+        assert k in syn, f"manca synthesis.{k}"
+    assert syn["scope"]["tipo"] == "synthesis"
+
+
+def test_il_weekly_rollup_copre_ogni_settimana_con_dossier(report):
+    weekly = report["falsifiability"]["weekly_rollup"]
+    assert weekly, "nessun weekly rollup prodotto"
+    for label, roll in weekly.items():
+        assert roll["scope"]["tipo"] == "weekly"
+        assert roll["scope"]["settimana"] == label
+        for k in ("cambi", "soglie", "pnl_economico", "integrita"):
+            assert k in roll
+
+
+def test_la_validazione_di_falsificabilita_passa_sui_dati_reali(report):
+    vf = report["falsifiability"]["validation"]
+    assert vf["ok"], vf["errors"]
+
+
+def test_la_provenanza_dichiara_findings_json_non_modificato(report):
+    note = report["falsifiability"]["provenance"]["note"]
+    assert "findings.json" in note and "non" in note.lower() or "read-only" in note
+
+
+def test_la_synthesis_diffa_contro_la_run_precedente(report):
+    # #286: il synthesis calcola i cambi contro la run precedente iniettata.
+    # Due run sugli stessi dati non producono cambi (nulla e' mutato); la prima
+    # run senza precedente li produce tutti come nuovi. Questo fissa che il
+    # previous e' letto dalla posizione giusta (views.findings, non il blocco
+    # falsifiability intero).
+    import importlib
+    mod = importlib.import_module("build_longitudinal_panels")
+    # seconda run con la prima come precedente: nessun cambiamento atteso.
+    r2 = mod.costruisci(previous_report=report)
+    cambi = r2["falsifiability"]["synthesis"]["cambi"]
+    assert cambi == [], (
+        "la seconda run sugli stessi dati non deve produrre cambi; trovati: "
+        f"{cambi[:3]}"
+    )
