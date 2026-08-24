@@ -238,6 +238,7 @@ import numpy as np
 
 from src.backtest.metrics.signal_quality import (
     ic_pvalue,
+    icir_from_series,
     information_coefficient,
 )
 
@@ -462,4 +463,161 @@ def false_positives(rows: list[dict], threshold: float) -> dict[str, Any]:
         "mean_adverse_return": (sum(adverse) / len(adverse)) if adverse else None,
         "n_signals": n_signals,
         "threshold": threshold,
+    }
+
+# ---------------------------------------------------------------------------
+# Matched controls, splits, score stability
+# ---------------------------------------------------------------------------
+# Il ``matched control`` e' un controllo NEGATIVO ticker-level: un ticker non
+# segnalato, stesso giorno/settore, nearest per magnitudo di movimento. E'
+# DISTINTO dal ``book benchmark`` (SPY/settore, fattore sistematico, in
+# ``residualize``): due controlli separati, mai fusi (AC2 #283). Il matching e'
+# DETERMINISTICO (nearest by |return|, tie-break per ticker): niente random,
+# riproducibile al byte.
+
+
+def matched_controls(
+    signal_rows: list[dict],
+    pool_rows: list[dict],
+    *,
+    horizon: str,
+    sector_key: str = "sector",
+    date_key: str = "data",
+    return_key: str = "return",
+) -> dict[str, Any]:
+    """Per ogni segnale-mover, trova un ticker non segnalato matched e confronta
+    il forward return allo stesso orizzonte.
+
+    Puro. ``signal_rows`` e ``pool_rows`` portano ``ticker, data, sector, return``
+    (movimento del giorno, usato per il matching) e ``forward_returns`` (dict
+    per orizzonte, l'esito da confrontare). Il match e' con-replacement (ogni
+    segnale sceglie indipendentemente il miglior controllo): descrittivo, non un
+    esperimento controllato. Riproducibile perche' l'ordinamento e' deterministico.
+
+    Restituisce ``matches`` (con ``delta = signal_fwd - matched_fwd``) e
+    ``unmatched`` (nessun candidato stesso giorno/settore, o forward return
+    mancante). Il summary porta ``mean_delta`` (None se nessun delta calcolabile).
+    Il risultato NON porta campi SPY/residual: quelli vivono in ``residualize``.
+    """
+    signal_ids = {(r.get(date_key), r.get("ticker")) for r in signal_rows}
+    pool_by_key: dict[tuple, list[dict]] = {}
+    for r in pool_rows:
+        pool_by_key.setdefault((r.get(date_key), r.get(sector_key)), []).append(r)
+
+    matches: list[dict] = []
+    unmatched: list[dict] = []
+    deltas: list[float] = []
+
+    for s in signal_rows:
+        key = (s.get(date_key), s.get(sector_key))
+        s_ret = _float(s.get(return_key))
+        cands = [
+            c for c in pool_by_key.get(key, [])
+            if (c.get(date_key), c.get("ticker")) not in signal_ids
+            and c.get("ticker") != s.get("ticker")
+        ]
+        if not cands or s_ret is None:
+            unmatched.append({
+                "signal_ticker": s.get("ticker"),
+                "data": s.get(date_key),
+                "missingness": ["no_matched_control"],
+            })
+            continue
+        chosen = min(
+            cands,
+            key=lambda c: (abs((_float(c.get(return_key)) or 0.0) - s_ret), c.get("ticker") or ""),
+        )
+        s_fwd = _float((s.get("forward_returns") or {}).get(horizon))
+        m_fwd = _float((chosen.get("forward_returns") or {}).get(horizon))
+        match = {
+            "signal_ticker": s.get("ticker"),
+            "matched_ticker": chosen.get("ticker"),
+            "data": s.get(date_key),
+            "match_distance": abs((_float(chosen.get(return_key)) or 0.0) - s_ret),
+            "signal_fwd": s_fwd,
+            "matched_fwd": m_fwd,
+            "missingness": [],
+        }
+        if s_fwd is None or m_fwd is None:
+            match["delta"] = None
+            match["missingness"].append("forward_return_missing")
+        else:
+            match["delta"] = s_fwd - m_fwd
+            deltas.append(match["delta"])
+        matches.append(match)
+
+    return {
+        "matches": matches,
+        "unmatched": unmatched,
+        "summary": {
+            "n_matched": len(matches),
+            "n_unmatched": len(unmatched),
+            "mean_delta": (sum(deltas) / len(deltas)) if deltas else None,
+            "n_delta_calcolabile": len(deltas),
+            "matching": "deterministic_nearest_by_return_con_replacement",
+            "control_kind": "ticker_level_non_signaled (separato dal book benchmark SPY/settore)",
+        },
+    }
+
+
+def splits_by_dimension(
+    rows: list[dict], dim_key: str, *, horizon: str
+) -> dict[str, dict[str, Any]]:
+    """Splits per source/model/fallback/extraction/ensemble_std_bucket: per ogni
+    valore della dimensione, IC + hit rate con ``n`` per cella.
+
+    Puro, descrittivo. Le celle piccole (n<_MIN_IC_N) sono marcate ``weak`` dalla
+    ``rank_ic_with_ci`` e l'``n`` e' sempre riportato: la moltiplcita' delle celle
+    e' dichiarata, non nascosta (AC3 #283). ``ensemble_std`` e' continuo: il
+    pannello lo bucketizza (terzile) in ``ensemble_std_bucket`` prima di chiamare
+    questa funzione, cosi' il split e' uniforme sulle dimensioni categoriche.
+    """
+    groups: dict[str, list[dict]] = {}
+    for r in rows:
+        v = r.get(dim_key)
+        if v is None:
+            continue
+        groups.setdefault(str(v), []).append(r)
+
+    out: dict[str, dict[str, Any]] = {}
+    for v, grp in groups.items():
+        scores = [r.get("score") for r in grp]
+        fwd = [(r.get("forward_returns") or {}).get(horizon) for r in grp]
+        out[v] = {
+            "n": len(grp),
+            "ic": rank_ic_with_ci(scores, fwd),
+            "hit_rate": hit_rate(scores, fwd),
+        }
+    return out
+
+
+def score_stability(ic_series: list[float | None]) -> dict[str, Any]:
+    """Stability della IC nel tempo: mean/std/ICIR della serie di IC per giorno.
+
+    Puro. Riporta ``n_days``, ``mean_ic``, ``std_ic`` (ddof=1), ``icir``
+    (mean/std, via ``icir_from_series`` annualisation=1) e ``positive_fraction``
+    (quota di giorni con IC>0). Con n<2, std e ICIR sono None: una deviazione su
+    un punto non e' definita. La metrica e' descrittiva: dice se il segnale e'
+    costante o se la sua prediczione va e viene, senza decidere nulla.
+    """
+    arr = [x for x in ic_series if x is not None]
+    n = len(arr)
+    if n == 0:
+        return {"n_days": 0, "mean_ic": None, "std_ic": None, "icir": None,
+                "positive_fraction": None}
+    mean_ic = sum(arr) / n
+    positive = sum(1 for x in arr if x > 0)
+    if n < 2:
+        std_ic = None
+        icir = None
+    else:
+        std_ic = float(np.std(arr, ddof=1))
+        raw_icir = icir_from_series(arr, annualisation=1)
+        icir = None if (raw_icir is None or np.isnan(raw_icir)) else float(raw_icir)
+    return {
+        "n_days": n,
+        "mean_ic": mean_ic,
+        "std_ic": std_ic,
+        "icir": icir,
+        "positive_fraction": positive / n,
     }

@@ -377,3 +377,156 @@ class TestFalsiPositivi:
         fp = sd.false_positives(rows, threshold=0.3)
         assert fp["n_fp"] == 0
         assert fp["mean_adverse_return"] is None
+
+
+# ---------------------------------------------------------------------------
+# 3. Matched controls, splits, score stability
+# ---------------------------------------------------------------------------
+
+
+def _row(ticker, data="2026-08-12", sector="tech", ret=0.0, score=None,
+         fwd=None, **kw):
+    r = {"ticker": ticker, "data": data, "sector": sector, "return": ret,
+         "score": score, "forward_returns": fwd or {}}
+    r.update(kw)
+    return r
+
+
+class TestMatchedControls:
+    def test_match_deterministico_stesso_giorno_e_settore(self):
+        signal = _row("AAPL", ret=0.05, score=0.5, fwd={"T+1": 0.04})
+        pool = [
+            _row("MSFT", ret=0.05, fwd={"T+1": 0.02}),   # |0.05-0.05|=0 nearest
+            _row("NVDA", ret=-0.05, fwd={"T+1": 0.01}),   # |−0.05-0.05|=0.10
+        ]
+        out = sd.matched_controls([signal], pool, horizon="T+1")
+        assert len(out["matches"]) == 1
+        m = out["matches"][0]
+        assert m["matched_ticker"] == "MSFT"
+        assert m["delta"] == pytest.approx(0.02)  # 0.04 - 0.02
+
+    def test_match_riproducibile_chiamate_identiche(self):
+        signal = _row("AAPL", ret=0.05, score=0.5, fwd={"T+1": 0.04})
+        pool = [_row("MSFT", ret=0.05, fwd={"T+1": 0.02}),
+                _row("GOOG", ret=0.05, fwd={"T+1": 0.03})]  # parita' di distanza
+        out1 = sd.matched_controls([signal], pool, horizon="T+1")
+        out2 = sd.matched_controls([signal], pool, horizon="T+1")
+        # tie-break deterministico per ticker (GOOG < MSFT): stesso risultato.
+        assert out1["matches"][0]["matched_ticker"] == out2["matches"][0]["matched_ticker"]
+        assert out1["matches"][0]["matched_ticker"] == "GOOG"
+
+    def test_il_match_esclude_il_ticker_segnalato_stesso(self):
+        # il pool contiene anche AAPL (il ticker segnalato): non si matcha con se'.
+        signal = _row("AAPL", ret=0.05, score=0.5, fwd={"T+1": 0.04})
+        pool = [
+            _row("AAPL", ret=0.05, fwd={"T+1": 0.99}),  # se stesso: escluso
+            _row("MSFT", ret=0.06, fwd={"T+1": 0.02}),
+        ]
+        out = sd.matched_controls([signal], pool, horizon="T+1")
+        assert out["matches"][0]["matched_ticker"] == "MSFT"
+
+    def test_match_mancante_se_nessun_candidato_stesso_settore(self):
+        signal = _row("AAPL", sector="tech", ret=0.05, score=0.5, fwd={"T+1": 0.04})
+        pool = [_row("JPM", sector="financials", ret=0.05, fwd={"T+1": 0.02})]
+        out = sd.matched_controls([signal], pool, horizon="T+1")
+        assert out["matches"] == []
+        assert out["summary"]["n_unmatched"] == 1
+        assert "no_matched_control" in out["unmatched"][0]["missingness"]
+
+    def test_il_matched_control_e_separato_dal_book_benchmark(self):
+        """Il matched control e' un ticker non segnalato, NON il benchmark SPY:
+        il risultato non porta campi SPY/residual — quelli vivono in residualize()."""
+        signal = _row("AAPL", ret=0.05, score=0.5, fwd={"T+1": 0.04})
+        pool = [_row("MSFT", ret=0.05, fwd={"T+1": 0.02})]
+        out = sd.matched_controls([signal], pool, horizon="T+1")
+        m = out["matches"][0]
+        assert "spy_return" not in m
+        assert "residual" not in m
+        assert "matched_ticker" in m and "delta" in m
+        # il book benchmark e' una funzione separata:
+        assert sd.residualize([0.04], [0.01]) == [pytest.approx(0.03)]
+
+    def test_summary_riporta_delta_medio_per_orizzonte(self):
+        signals = [_row("AAPL", ret=0.05, score=0.5, fwd={"T+1": 0.04}),
+                   _row("CSCO", ret=0.04, score=0.4, fwd={"T+1": 0.03})]
+        pool = [_row("MSFT", ret=0.05, fwd={"T+1": 0.02}),
+                _row("ORCL", ret=0.04, fwd={"T+1": 0.05})]
+        out = sd.matched_controls(signals, pool, horizon="T+1")
+        # delta: AAPL 0.04-0.02=0.02; CSCO 0.03-0.05=-0.02 -> medio 0.0
+        assert out["summary"]["mean_delta"] == pytest.approx(0.0)
+        assert out["summary"]["n_matched"] == 2
+
+
+class TestSplits:
+    def _split_rows(self):
+        return [
+            _row("A", score=0.5, fwd={"T+1": 0.05}, source="benzinga"),
+            _row("B", score=0.4, fwd={"T+1": 0.04}, source="benzinga"),
+            _row("C", score=0.1, fwd={"T+1": -0.02}, source="gdelt"),
+            _row("D", score=-0.3, fwd={"T+1": -0.05}, source="gdelt"),
+        ]
+
+    def test_splits_per_fonte_con_n_per_cella(self):
+        out = sd.splits_by_dimension(self._split_rows(), "source", horizon="T+1")
+        assert set(out.keys()) == {"benzinga", "gdelt"}
+        # benzinga: score [0.5,0.4] fwd [0.05,0.04] IC=1.0 (monotona)
+        assert out["benzinga"]["n"] == 2
+        assert out["benzinga"]["ic"]["n"] == 2
+        assert out["benzinga"]["ic"]["weak"] is True  # n<3
+        assert out["gdelt"]["n"] == 2
+
+    def test_splits_per_fallback_e_model(self):
+        rows = [
+            _row("A", score=0.5, fwd={"T+1": 0.05}, fallback=True, model="glm52"),
+            _row("B", score=0.4, fwd={"T+1": 0.04}, fallback=False, model="gptoss"),
+        ]
+        fb = sd.splits_by_dimension(rows, "fallback", horizon="T+1")
+        assert set(fb.keys()) == {"True", "False"}
+        md = sd.splits_by_dimension(rows, "model", horizon="T+1")
+        assert set(md.keys()) == {"glm52", "gptoss"}
+
+    def test_splits_ensemble_std_bucket(self):
+        # il pannello assegna un bucket di ensemble_std (terzile); lo split e'
+        # uniforme sulle dimensioni categoriche, incluso il bucket.
+        rows = [
+            _row("A", score=0.5, fwd={"T+1": 0.05}, ensemble_std_bucket="low"),
+            _row("B", score=0.4, fwd={"T+1": 0.04}, ensemble_std_bucket="high"),
+        ]
+        out = sd.splits_by_dimension(rows, "ensemble_std_bucket", horizon="T+1")
+        assert set(out.keys()) == {"low", "high"}
+        assert out["low"]["n"] == 1
+
+    def test_splits_marca_debole_le_celle_piccole(self):
+        rows = [_row("A", score=0.5, fwd={"T+1": 0.05}, source="x")]
+        out = sd.splits_by_dimension(rows, "source", horizon="T+1")
+        # n=1: IC non definita (weak), ma n e' riportato.
+        assert out["x"]["n"] == 1
+        assert out["x"]["ic"]["ic"] is None
+
+
+class TestScoreStability:
+    def test_score_stability_da_serie_ic_per_giorno(self):
+        series = [0.10, 0.20, 0.30, 0.40]
+        out = sd.score_stability(series)
+        assert out["n_days"] == 4
+        assert out["mean_ic"] == pytest.approx(0.25)
+        assert out["std_ic"] is not None
+        assert out["icir"] is not None
+        # positive_fraction: tutti > 0 -> 1.0
+        assert out["positive_fraction"] == 1.0
+
+    def test_score_stability_serie_vuota_o_breve(self):
+        out = sd.score_stability([0.1])
+        assert out["n_days"] == 1
+        # std con 1 punto: non definito.
+        assert out["std_ic"] is None
+        assert out["icir"] is None
+
+    def test_score_stability_icir_maggiore_per_serie_consistente(self):
+        # serie stabile (bassa std) ha ICIR maggiore di serie instabile a pari mean.
+        stable = [0.20, 0.21, 0.19, 0.20, 0.20]
+        noisy = [0.40, -0.30, 0.50, -0.20, 0.35]
+        s_out = sd.score_stability(stable)
+        n_out = sd.score_stability(noisy)
+        assert s_out["icir"] is not None and n_out["icir"] is not None
+        assert abs(s_out["icir"]) > abs(n_out["icir"])
