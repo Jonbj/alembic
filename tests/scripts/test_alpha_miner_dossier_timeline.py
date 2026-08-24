@@ -74,7 +74,7 @@ def test_dossier_espone_schema_provenienza_e_timeline_end_to_end():
     ):
         payload = dossier.costruisci_dossier(date(2026, 8, 12), ["AAA"])
 
-    assert payload["schema_version"] == "2.1"
+    assert payload["schema_version"] == "2.2"
     assert payload["provenienza_dati"]["timeline"]["first_seen_at"] == (
         "news_log.raw_ingested_at"
     )
@@ -148,6 +148,7 @@ def test_dettagli_ordini_usano_timestamp_e_fill_reali_del_broker():
         submitted_at=datetime(2026, 8, 12, 14, 15, 2, tzinfo=UTC),
         filled_at=datetime(2026, 8, 12, 14, 15, 3, tzinfo=UTC),
         filled_avg_price="105.75",
+        filled_qty="2.5",
     )
     fake_config = SimpleNamespace(
         ALPACA_API_KEY="key", ALPACA_SECRET_KEY="secret", ALPACA_PAPER_MODE=True
@@ -163,6 +164,7 @@ def test_dettagli_ordini_usano_timestamp_e_fill_reali_del_broker():
     assert out["order-1"]["submitted_at"] == order.submitted_at
     assert out["order-1"]["filled_at"] == order.filled_at
     assert out["order-1"]["filled_avg_price"] == 105.75
+    assert out["order-1"]["filled_qty"] == 2.5
     client_cls.assert_called_once_with("key", "secret", paper=True)
 
 

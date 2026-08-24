@@ -68,3 +68,20 @@ def test_ogni_occorrenza_di_trade_ha_un_id_univoco_e_actual_usd_misurato(report)
 def test_la_provenienza_dichiara_primary_finding_non_attribuito(report):
     # costruito senza --write: la funzione restituisce il report, non scrive.
     assert "primary_finding resta null" in report["provenance"]["note"]
+
+
+def test_decision_quality_e_una_serie_giornaliera_con_rollup(report):
+    assert len(report["decision_quality"]) == report["n_giorni"]
+    assert report["decision_quality_rollup"]["n_giorni"] == report["n_giorni"]
+    # I dossier storici non vengono riscritti: il buco dello snapshot apertura
+    # resta esplicito invece di diventare passivo=0.
+    legacy = next(
+        row
+        for row in report["decision_quality"]
+        if "opening_snapshot_not_available_in_legacy_dossier" in row["missingness"]
+    )
+    assert legacy["summary"]["passive_pnl_usd"] is None
+    if report["decision_quality_rollup"]["n_giorni_snapshot_apertura_mancante"] == report[
+        "n_giorni"
+    ]:
+        assert report["decision_quality_rollup"]["totali_usd"]["passive_pnl_usd"] is None
