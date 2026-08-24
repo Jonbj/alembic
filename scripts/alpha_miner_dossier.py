@@ -39,6 +39,7 @@ from src.analysis.dossier.book import (
     compute_entries,
     compute_exits,
 )
+from src.analysis.dossier.article_coverage import build_article_coverage
 from src.analysis.dossier.market import compute_market, compute_miss_candidates
 from src.analysis.dossier.miss_cause import (
     DEFAULT_SOGLIA_GATE,
@@ -55,7 +56,7 @@ OUT_DIR = PROJECT_DIR / "docs" / "evidence" / "dossier"
 SOGLIA_MOVER = 0.03
 FINESTRA_MEDIANE = 20  # giorni, per le mediane mobili
 INIZIO_OSSERVAZIONE = date(2026, 8, 3)
-DOSSIER_SCHEMA_VERSION = "2.0"
+DOSSIER_SCHEMA_VERSION = "2.1"
 NEW_YORK = ZoneInfo("America/New_York")
 
 # Size plausibile di uno slot S4 per lo stimatore v2 (#280): fixed-slot sizing
@@ -96,6 +97,17 @@ def _psql(query: str) -> list[list[str]]:
 def _watchlist() -> list[str]:
     with open(PROJECT_DIR / "config" / "trading.yaml") as f:
         return list(yaml.safe_load(f)["symbols"]["watchlist"])
+
+
+def _sector_by_ticker() -> dict[str, str]:
+    """Inverte la tassonomia settoriale gia' dichiarata in trading.yaml."""
+    with open(PROJECT_DIR / "config" / "trading.yaml") as f:
+        sectors = yaml.safe_load(f).get("sectors") or {}
+    return {
+        str(symbol): str(sector)
+        for sector, symbols in sectors.items()
+        for symbol in (symbols or [])
+    }
 
 
 def _soglia_gate_s4() -> float:
@@ -255,6 +267,120 @@ def _timestamp(value: str) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _regular_session_bounds(giorno: date) -> tuple[datetime, datetime]:
+    """Apertura/chiusura regular session NY, convertite in UTC.
+
+    La conversione via ZoneInfo conserva automaticamente EDT/EST. I dossier
+    vengono prodotti solo dopo che `_barre` ha verificato il giorno di borsa;
+    nella finestra #171 non cadono sedute half-day.
+    """
+    open_ny = datetime.combine(giorno, time(9, 30), tzinfo=NEW_YORK)
+    close_ny = datetime.combine(giorno, time(16, 0), tzinfo=NEW_YORK)
+    return open_ny.astimezone(timezone.utc), close_ny.astimezone(timezone.utc)
+
+
+def _news_label_columns() -> set[str]:
+    """Colonne disponibili: il DB live puo' precedere migration 046.
+
+    Sul vecchio schema ogni URL ha una sola label umana; sul nuovo schema le
+    annotazioni sono due e solo la riga adjudicated e' ground truth. Il reader
+    deve capire entrambe le forme senza applicare migrazioni o scrivere dati.
+    """
+    return {
+        row[0]
+        for row in _psql(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'news_labels';"
+        )
+    }
+
+
+def _article_coverage_rows(giorno: date) -> list[dict]:
+    """Righe articolo+ticker e tutti i segnali del giorno per #279.
+
+    Il FULL JOIN include sia news ingerite ma mai scorate, sia segnali collegati
+    ad articoli ingeriti prima della giornata. Sullo schema multi-annotatore le
+    label entrano solo dopo adjudication; lo schema legacy aveva invece una
+    singola label finale per URL.
+    """
+    g = giorno.isoformat()
+    label_columns = _news_label_columns()
+    if "adjudicated" in label_columns:
+        news_log_match = (
+            "l.news_log_id = nl.id OR (l.news_log_id IS NULL AND l.url = nl.url)"
+            if "news_log_id" in label_columns
+            else "l.url = nl.url"
+        )
+        label_lateral = (
+            "LEFT JOIN LATERAL ("
+            "  SELECT l.gt_relevance, l.gt_tickers FROM news_labels l "
+            "  WHERE l.status = 'labeled' AND l.adjudicated "
+            f"    AND ({news_log_match}) "
+            "  ORDER BY l.label_date DESC NULLS LAST, l.label_id DESC LIMIT 1"
+            ") lbl ON true "
+        )
+    elif {"gt_relevance", "gt_tickers", "url"} <= label_columns:
+        # Schema 029: UNIQUE(url), un solo annotatore. Questa e' gia' la label
+        # finale; `adjudicated` non esiste ancora.
+        label_lateral = (
+            "LEFT JOIN LATERAL ("
+            "  SELECT l.gt_relevance, l.gt_tickers FROM news_labels l "
+            "  WHERE l.status = 'labeled' AND l.url = nl.url "
+            "  ORDER BY l.label_date DESC NULLS LAST, l.label_id DESC LIMIT 1"
+            ") lbl ON true "
+        )
+    else:
+        label_lateral = (
+            "LEFT JOIN LATERAL (SELECT NULL::text AS gt_relevance, "
+            "NULL::text[] AS gt_tickers WHERE false) lbl ON true "
+        )
+    rows = _psql(
+        f"/* article_coverage_279 */ SELECT COALESCE(nl.id::text,''), COALESCE(ss.id::text,''), "
+        f"COALESCE(ss.symbol,nl.ticker,''), "
+        f"translate(COALESCE(nl.title,''), '|' || chr(10) || chr(13), '   '), "
+        f"translate(COALESCE(nl.body_snippet,''), '|' || chr(10) || chr(13), '   '), "
+        f"translate(COALESCE(nl.url,''), '|' || chr(10) || chr(13), '   '), "
+        f"COALESCE(nl.source,''), COALESCE(nl.published_at::text,''), "
+        f"COALESCE(nl.raw_ingested_at::text,''), COALESCE(nl.content_hash,''), "
+        f"COALESCE(nl.extraction_method,''), COALESCE(ss.score::text,''), "
+        f"COALESCE(lbl.gt_relevance,''), "
+        f"COALESCE(array_to_string(lbl.gt_tickers, ','),''), "
+        f"COALESCE(issuer.terms,'') "
+        f"FROM news_log nl "
+        f"FULL JOIN sentiment_signals ss ON ss.news_log_id = nl.id "
+        f"AND ss.generated_at >= '{g}' AND ss.generated_at < '{g}'::date + 1 "
+        f"{label_lateral}"
+        f"LEFT JOIN LATERAL ("
+        f"  SELECT string_agg(concat_ws(chr(31), t.company_name, "
+        f"         array_to_string(t.aliases, chr(31))), chr(31) ORDER BY t.company_name) terms "
+        f"  FROM ticker_lookup t WHERE t.ticker = COALESCE(ss.symbol,nl.ticker)"
+        f") issuer ON true "
+        f"WHERE (nl.fetched_at >= '{g}' AND nl.fetched_at < '{g}'::date + 1) "
+        f"OR (ss.generated_at >= '{g}' AND ss.generated_at < '{g}'::date + 1) "
+        f"ORDER BY COALESCE(nl.id,0), COALESCE(ss.id,0);"
+    )
+    out: list[dict] = []
+    for row in rows:
+        out.append({
+            "news_log_id": int(row[0]) if row[0] else None,
+            "signal_id": int(row[1]) if row[1] else None,
+            "ticker": row[2],
+            "title": row[3],
+            "body_snippet": row[4],
+            "url": row[5],
+            "source": row[6],
+            "published_at": _timestamp(row[7]),
+            "first_seen_at": _timestamp(row[8]),
+            "content_hash": row[9],
+            "extraction_method": row[10],
+            "score": float(row[11]) if row[11] else None,
+            "ground_truth_relevance": row[12] or None,
+            "ground_truth_tickers": [v for v in row[13].split(",") if v],
+            "issuer_terms": [v for v in row[14].split(chr(31)) if v],
+        })
+    return out
 
 
 def _timeline_eventi(giorno: date) -> list[dict]:
@@ -550,7 +676,8 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
         f"COALESCE(nl.extraction_method,''), "
         f"translate(COALESCE(nl.title,''), '|' || chr(10) || chr(13), '   '), "
         f"CASE WHEN COALESCE(nl.url,'') = '' THEN '' ELSE "
-        f"  (SELECT count(*)::text FROM news_log n2 WHERE n2.url = nl.url) END "
+        f"  (SELECT count(*)::text FROM news_log n2 WHERE n2.url = nl.url) END, "
+        f"ss.id::text "
         f"FROM sentiment_signals ss LEFT JOIN news_log nl ON nl.id = ss.news_log_id "
         f"WHERE ss.generated_at >= '{g}' "
         f"AND ss.generated_at < '{g}'::date + 1 ORDER BY ss.generated_at;"):
@@ -563,6 +690,8 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
             segnale["testo_scorato"] = r[5]
         if r[6]:
             segnale["n_ticker_articolo"] = int(r[6])
+        if len(r) > 7 and r[7]:
+            segnale["signal_id"] = int(r[7])
         segnali[r[0]].append(segnale)
 
     in_portafoglio = {r[0] for r in _psql(
@@ -585,6 +714,40 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
     candidati_classificati = classify_miss_candidates(
         candidati, soglia_gate=soglia_gate
     )
+
+    # --- copertura articolo-centrica (#279) ------------------------------
+    session_open, session_close = _regular_session_bounds(giorno)
+    copertura_articoli = build_article_coverage(
+        _article_coverage_rows(giorno),
+        universe=simboli,
+        sector_by_ticker=_sector_by_ticker(),
+        session_open=session_open,
+        session_close=session_close,
+    )
+    attribution_by_signal = {
+        row["signal_id"]: row for row in copertura_articoli["segnali"]
+    }
+    for candidato in candidati_classificati:
+        metriche_ticker = copertura_articoli["per_ticker"].get(candidato["symbol"], {})
+        candidato["max_score_own"] = metriche_ticker.get("max_score_own")
+        candidato["max_score_fanout"] = metriche_ticker.get("max_score_fanout")
+        for segnale in candidato.get("segnali") or []:
+            attribution = attribution_by_signal.get(segnale.get("signal_id"))
+            if attribution is None:
+                continue
+            for campo in (
+                "canonical_article_id",
+                "source",
+                "subject_ticker",
+                "relevance",
+                "timing",
+                "attribution",
+            ):
+                segnale[campo] = attribution[campo]
+            # I due massimi sono metriche per ticker, ripetute accanto al
+            # segnale per rendere l'attribution leggibile senza join esterni.
+            segnale["max_score_own"] = metriche_ticker.get("max_score_own")
+            segnale["max_score_fanout"] = metriche_ticker.get("max_score_fanout")
 
     # --- timeline e barre intraday (#277) --------------------------------
     eventi = _timeline_eventi(giorno)
@@ -721,6 +884,10 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
                 "first_price": "open della prima barra 5Min con timestamp >= stadio",
                 "mfe_mae": "high/low successivi allo stadio fino al cutoff, long-side",
                 "quote": "non clampate; valori <0 o >1 espongono reversal/overshoot",
+                "effective_timely_coverage": (
+                    "articolo canonicale ISSUER_SPECIFIC pubblicato entro il close RTH; "
+                    "UNKNOWN non entra nel numeratore"
+                ),
             },
         },
         "soglia_mover": SOGLIA_MOVER,
@@ -730,6 +897,7 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
         "ingressi": ingressi,
         "chiusure": chiusure,
         "timeline": timeline,
+        "copertura_articoli": copertura_articoli,
         "aggregati": {
             "per_ora_ingresso": aggregate_by_entry_hour(chiusi_storici),
             "miss_cumulati": _miss_cumulati(),
