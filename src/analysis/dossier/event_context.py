@@ -8,9 +8,10 @@ l'assenza di un feed halt autorevole non viene trasformata in ``nessun halt``.
 from __future__ import annotations
 
 import re
-from collections import defaultdict
-from datetime import datetime
+from collections import Counter, defaultdict
+from datetime import date, datetime, time, timezone
 from typing import Iterable
+from zoneinfo import ZoneInfo
 
 
 CONTEXT_VERSION = "event_market_context_v1"
@@ -172,11 +173,36 @@ def _regime_context(observations: list[dict], vix_observation: dict | None) -> d
     }
 
 
-def _bar_microstructure(symbol: str, daily: dict | None, intraday: list[dict]) -> dict:
-    volumes = [int(row["volume"]) for row in intraday if row.get("volume") is not None]
+def _bar_microstructure(
+    symbol: str, daily: dict | None, intraday: list[dict], data: str
+) -> dict:
+    target = date.fromisoformat(data)
+    new_york = ZoneInfo("America/New_York")
+    session_start = datetime.combine(target, time(4, 0), tzinfo=new_york).astimezone(timezone.utc)
+    session_end = datetime.combine(target, time(20, 0), tzinfo=new_york).astimezone(timezone.utc)
+    volumes = []
+    for row in intraday:
+        timestamp = row.get("timestamp")
+        if isinstance(timestamp, str):
+            try:
+                timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            except ValueError:
+                timestamp = None
+        if isinstance(timestamp, datetime) and timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        if (
+            row.get("volume") is not None
+            and isinstance(timestamp, datetime)
+            and session_start <= timestamp.astimezone(timezone.utc) < session_end
+        ):
+            volumes.append(int(row["volume"]))
     session_volume = sum(volumes) if volumes else (int(daily["volume"]) if daily and daily.get("volume") is not None else None)
     adv = float(daily["adv_20d"]) if daily and daily.get("adv_20d") is not None else None
-    ratio = session_volume / adv if session_volume is not None and adv not in (None, 0.0) else None
+    ratio = (
+        session_volume / adv
+        if session_volume is not None and adv is not None and adv != 0.0
+        else None
+    )
     missingness = []
     if session_volume is None:
         missingness.append("volume_missing")
@@ -215,8 +241,11 @@ def _nbbo_microstructure(symbol: str, quote: dict | None) -> dict:
         }
     bid = float(quote["bid_price"]) if quote.get("bid_price") is not None else None
     ask = float(quote["ask_price"]) if quote.get("ask_price") is not None else None
-    spread = ask - bid if bid is not None and ask is not None and ask >= bid else None
-    mid = (ask + bid) / 2.0 if spread is not None else None
+    if bid is not None and ask is not None and ask >= bid:
+        spread = ask - bid
+        mid = (ask + bid) / 2.0
+    else:
+        spread, mid = None, None
     return {
         "basis": "NBBO",
         "symbol": symbol,
@@ -248,18 +277,28 @@ def _halt_context(events: list[dict]) -> dict:
     }
 
 
-def _cluster_key(row: dict) -> tuple[str, str]:
+def _cluster_key(row: dict, shared_article_ids: set[str]) -> tuple[str, str]:
     articles = row.pop("_articles")
     shared_ids = sorted({
         str(article.get("canonical_article_id"))
         for article in articles
         if article.get("canonical_article_id")
+        and str(article.get("canonical_article_id")) in shared_article_ids
         and str(article.get("relevance") or "").upper() == "SECTOR_MACRO"
     })
     if shared_ids and row["theme"]["type"] != "UNKNOWN":
         return (
             f"article:{shared_ids[0]}|theme:{row['theme']['type']}",
             "shared_canonical_article_and_theme",
+        )
+    if row["catalyst"]["type"] == "MACRO" and row["theme"]["type"] != "UNKNOWN":
+        symbol_return = row["returns"]["symbol"]
+        direction = "UP" if symbol_return is not None and symbol_return > 0 else (
+            "DOWN" if symbol_return is not None and symbol_return < 0 else "FLAT_OR_UNKNOWN"
+        )
+        return (
+            f"theme:{row['theme']['type']}|catalyst:MACRO|direction:{direction}",
+            "same_theme_macro_direction",
         )
     return f"symbol:{row['symbol']}", "symbol_specific_or_unresolved"
 
@@ -330,7 +369,9 @@ def build_event_market_context(
             "regime": dict(regime),
             "theme": {"type": theme, "source": "config/trading.yaml sectors" if sector else None},
             "microstructure": {
-                "bar_based": _bar_microstructure(symbol, daily_bars.get(symbol), intraday_bars.get(symbol, [])),
+                "bar_based": _bar_microstructure(
+                    symbol, daily_bars.get(symbol), intraday_bars.get(symbol, []), data
+                ),
                 "nbbo": _nbbo_microstructure(symbol, nbbo_quotes.get(symbol)),
                 "halt": _halt_context(symbol_halts),
             },
@@ -339,9 +380,19 @@ def build_event_market_context(
         }
         per_symbol[symbol] = row
 
+    macro_article_counts = Counter(
+        str(article.get("canonical_article_id"))
+        for row in per_symbol.values()
+        for article in row.get("_articles") or []
+        if article.get("canonical_article_id")
+        and str(article.get("relevance") or "").upper() == "SECTOR_MACRO"
+    )
+    shared_article_ids = {
+        canonical_id for canonical_id, count in macro_article_counts.items() if count >= 2
+    }
     grouped: dict[tuple[str, str], list[str]] = defaultdict(list)
     for symbol, row in per_symbol.items():
-        grouped[_cluster_key(row)].append(symbol)
+        grouped[_cluster_key(row, shared_article_ids)].append(symbol)
     clusters = [
         {
             "cluster_id": key[0],
