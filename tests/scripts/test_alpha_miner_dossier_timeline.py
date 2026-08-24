@@ -12,6 +12,8 @@ UTC = timezone.utc
 
 
 def _fake_psql(query):
+    if "article_coverage_279" in query:
+        return []
     # #244: la query dei segnali fa join+sottoquery su news_log, quindi va
     # riconosciuta PRIMA del conteggio news, altrimenti il match e' ambiguo.
     if "FROM sentiment_signals" in query:
@@ -72,7 +74,7 @@ def test_dossier_espone_schema_provenienza_e_timeline_end_to_end():
     ):
         payload = dossier.costruisci_dossier(date(2026, 8, 12), ["AAA"])
 
-    assert payload["schema_version"] == "2.0"
+    assert payload["schema_version"] == "2.1"
     assert payload["provenienza_dati"]["timeline"]["first_seen_at"] == (
         "news_log.raw_ingested_at"
     )
