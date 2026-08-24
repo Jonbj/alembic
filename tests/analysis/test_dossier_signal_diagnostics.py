@@ -718,3 +718,30 @@ class TestRollup:
         roll = sd.build_signal_diagnostics_rollup([p1])
         assert roll["policy_output"] == "descriptive_only"
         assert roll["freeze"]["mode"] == "read_only_measurement"
+
+
+# ---------------------------------------------------------------------------
+# 5a. Bucket ensemble_std (terzile descrittivo, per gli split)
+# ---------------------------------------------------------------------------
+
+
+class TestEnsembleStdBucket:
+    def test_bucket_terzili_sulla_distribuzione(self):
+        rows = [{"ensemble_std": v} for v in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]]
+        buckets, edges = sd.assign_ensemble_std_buckets(rows)
+        assert len(buckets) == 6
+        assert set(buckets) <= {"low", "med", "high"}
+        # i tre bucket sono tutti presenti (distribuzione continua).
+        assert "low" in buckets and "high" in buckets
+        assert edges[0] <= edges[1]
+
+    def test_bucket_unknown_per_ensemble_std_mancante(self):
+        rows = [{"ensemble_std": 0.1}, {"ensemble_std": None}, {"ensemble_std": 0.4}]
+        buckets, _ = sd.assign_ensemble_std_buckets(rows)
+        assert buckets[1] == "unknown"
+
+    def test_bucket_niente_variabilita_tutti_nello_stesso(self):
+        rows = [{"ensemble_std": 0.2}, {"ensemble_std": 0.2}, {"ensemble_std": 0.2}]
+        buckets, edges = sd.assign_ensemble_std_buckets(rows)
+        # terzili degeneri (tutto uguale): un solo bucket, edges uguali.
+        assert len(set(buckets)) == 1

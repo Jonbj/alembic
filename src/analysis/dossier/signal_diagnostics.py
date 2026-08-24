@@ -640,6 +640,46 @@ def score_stability(ic_series: list[float | None]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Bucketizzazione di ensemble_std (terzile descrittivo, per gli split)
+# ---------------------------------------------------------------------------
+
+
+def assign_ensemble_std_buckets(
+    rows: list[dict], *, edges: tuple[float | None, float | None] | None = None,
+) -> tuple[list[str], tuple[float | None, float | None]]:
+    """Bucketizza ``ensemble_std`` (continuo) in terzili low/med/high.
+
+    Puro e descrittivo: i tagli sono i terzili della distribuzione *osservata*
+    (33.33% / 66.67%), non una taratura fissa. ``edges=None`` calcola i terzili
+    sui valori presenti; passare ``edges`` rende il bucketing riproducibile tra
+    giorni. I valori mancanti diventano ``"unknown"`` (mai confusi con un bucket
+    numerico). Restituisce ``(buckets, edges)`` allineati a ``rows``; non muta
+    l'input.
+    """
+    vals = [_float(r.get("ensemble_std")) for r in rows]
+    present = [v for v in vals if v is not None]
+    if not present:
+        return ["unknown"] * len(rows), (None, None)
+    if edges is None:
+        edges = (
+            float(np.percentile(present, 33.33)),
+            float(np.percentile(present, 66.67)),
+        )
+    lo, hi = edges
+    buckets: list[str] = []
+    for v in vals:
+        if v is None:
+            buckets.append("unknown")
+        elif v <= lo:
+            buckets.append("low")
+        elif v <= hi:
+            buckets.append("med")
+        else:
+            buckets.append("high")
+    return buckets, tuple(edges)
+
+
+# ---------------------------------------------------------------------------
 # Panel per-day e rollup cross-day (shadow curves, moltiplcita')
 # ---------------------------------------------------------------------------
 
