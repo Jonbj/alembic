@@ -176,3 +176,37 @@ def test_la_synthesis_diffa_contro_la_run_precedente(report):
         "la seconda run sugli stessi dati non deve produrre cambi; trovati: "
         f"{cambi[:3]}"
     )
+
+
+def test_main_non_sovrascrive_la_baseline_se_la_prova_decisiva_e_mutata(
+    monkeypatch, tmp_path
+):
+    # Regressione review #286: il validatore di falsificabilita' rilevava la
+    # mutazione, ma main() guardava solo la validazione primaria, restituiva 0
+    # e promuoveva il report invalido a nuova baseline.
+    mod = importlib.import_module("build_longitudinal_panels")
+    out = tmp_path / "longitudinal_panels.json"
+    baseline = '{"baseline": true}\n'
+    out.write_text(baseline, encoding="utf-8")
+    invalid_report = {
+        "validation": {"ok": True, "errors": [], "warnings": []},
+        "falsifiability": {
+            "validation": {
+                "ok": False,
+                "errors": ["prova_decisiva mutata per F-001"],
+                "warnings": [],
+            }
+        },
+        "n_giorni": 0,
+        "ticker_day": [],
+        "signals": [],
+        "decisions_trades": [],
+        "occurrences": [],
+        "definitions": [],
+        "derived_views": {"per_causa": {}},
+    }
+    monkeypatch.setattr(mod, "costruisci", lambda **_: invalid_report)
+    monkeypatch.setattr(sys, "argv", [mod.__file__, "--out", str(out)])
+
+    assert mod.main() == 1
+    assert out.read_text(encoding="utf-8") == baseline

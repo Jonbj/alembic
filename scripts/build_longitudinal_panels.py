@@ -462,7 +462,15 @@ def main() -> int:
     previous_report = _load_json(out_path) if out_path.exists() else None
 
     report = costruisci(previous_report=previous_report)
-    v = report["validation"]
+    # Entrambi i validator sono gate di pubblicazione: promuovere un report
+    # con prova_decisiva mutata renderebbe la mutazione la baseline successiva.
+    validation_primary = report["validation"]
+    validation_fals = report["falsifiability"]["validation"]
+    v = {
+        "ok": validation_primary["ok"] and validation_fals["ok"],
+        "errors": validation_primary["errors"] + validation_fals["errors"],
+        "warnings": validation_primary["warnings"] + validation_fals["warnings"],
+    }
     log.info(
         "giorni: %d | ticker-day %d | segnali %d | decisioni/trade %d | occorrenze %d",
         report["n_giorni"],
@@ -476,7 +484,7 @@ def main() -> int:
         len(report["definitions"]),
         report["derived_views"]["per_causa"],
     )
-    if v["errors"]:
+    if not v["ok"]:
         log.error("VALIDAZIONE FALLITA (%d errori):", len(v["errors"]))
         for e in v["errors"]:
             log.error("  - %s", e)
@@ -485,7 +493,7 @@ def main() -> int:
     for w in v["warnings"]:
         log.warning("  - %s", w)
 
-    if not args.no_write:
+    if not args.no_write and v["ok"]:
         out = Path(args.out)
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_suffix(out.suffix + ".tmp")
@@ -494,7 +502,7 @@ def main() -> int:
         )
         tmp.replace(out)  # atomica
         log.info("scritto: %s", out)
-    return 1 if v["errors"] else 0
+    return 0 if v["ok"] else 1
 
 
 if __name__ == "__main__":
