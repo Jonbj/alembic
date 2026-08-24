@@ -41,6 +41,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import numpy as np
+
+from src.backtest.metrics.signal_quality import (
+    ic_pvalue,
+    icir_from_series,
+    information_coefficient,
+)
+
 SIGNAL_DIAGNOSTICS_SCHEMA_VERSION = "1.0"
 
 # Orizzonti richiesti dalla issue (#283), dal piu' breve al piu' lungo. Tutti
@@ -234,14 +242,6 @@ def _none_return(missingness: list[str]) -> dict[str, Any]:
 # reinventa la formula. Qui si aggiungono n, CI bootstrap e la residualizzazione
 # vs benchmark di libro (SPY/settore), che e' la parte nuova richiesta da #283.
 
-import numpy as np
-
-from src.backtest.metrics.signal_quality import (
-    ic_pvalue,
-    icir_from_series,
-    information_coefficient,
-)
-
 # IC con pochi punti e' rumore: sotto questa soglia la metrica e' debole.
 _MIN_IC_N = 3
 # Seed del bootstrap: fisso per riproducibilita'. Non e' una taratura, e' la
@@ -309,10 +309,29 @@ def rank_ic_with_ci(
             "weak": False, "method": "spearman_bootstrap"}
 
 
+def _spearman_fast(xs: np.ndarray, ys: np.ndarray) -> float | None:
+    """Spearman veloce: Pearson sui rank. Usato solo dentro il bootstrap (1000x):
+    la stima puntuale e il p-value restano su ``signal_quality`` (scipy), per DRY
+    e coerenza col resto del codebase. Qui si evita di chiamare scipy.stats
+    1000 volte per cella. Ritorna None su input costante (IC non definita)."""
+    if np.std(xs) == 0 or np.std(ys) == 0:
+        return None
+    from scipy.stats import rankdata
+    rx = rankdata(xs)
+    ry = rankdata(ys)
+    corr = float(np.corrcoef(rx, ry)[0, 1])
+    return None if np.isnan(corr) else corr
+
+
 def _bootstrap_ic_ci(
     pairs: list[tuple[float, float]], n_bootstrap: int, seed: int
 ) -> tuple[float | None, float | None]:
-    """CI percentile (2.5/97.5) della IC via resampling con replacement."""
+    """CI percentile (2.5/97.5) della IC via resampling con replacement.
+
+    Usa ``_spearman_fast`` (Pearson sui rank) per le 1000 iterazioni: il CI e'
+    descrittivo e non richiede la macchina pesante di ``spearmanr``. La stima
+    puntuale resta su ``signal_quality``.
+    """
     arr = np.asarray(pairs, dtype=float)
     n = len(arr)
     rng = np.random.default_rng(seed)
@@ -320,11 +339,8 @@ def _bootstrap_ic_ci(
     for _ in range(n_bootstrap):
         idx = rng.integers(0, n, size=n)
         sample = arr[idx]
-        xs, ys = sample[:, 0], sample[:, 1]
-        if np.std(xs) == 0 or np.std(ys) == 0:
-            continue  # campione degenere (costante): IC non definita, salta
-        ic = information_coefficient(xs.tolist(), ys.tolist())
-        if ic is not None and not (isinstance(ic, float) and np.isnan(ic)):
+        ic = _spearman_fast(sample[:, 0], sample[:, 1])
+        if ic is not None:
             ics.append(ic)
     if len(ics) < 2:
         return None, None
@@ -620,4 +636,216 @@ def score_stability(ic_series: list[float | None]) -> dict[str, Any]:
         "std_ic": std_ic,
         "icir": icir,
         "positive_fraction": positive / n,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Panel per-day e rollup cross-day (shadow curves, moltiplcita')
+# ---------------------------------------------------------------------------
+
+
+_SPLIT_DIMENSIONS = (
+    "source", "model", "fallback", "extraction_method", "ensemble_std_bucket",
+)
+_BENCHMARKS = ("raw", "spy_residual", "sector_residual")
+
+
+def _benchmark_fwd(row: dict, horizon: str, kind: str) -> float | None:
+    bench = (row.get("benchmark_returns") or {}).get(horizon) or {}
+    return _float(bench.get(kind))
+
+
+def build_signal_diagnostics_panel(
+    signal_rows: list[dict],
+    *,
+    pool_rows: list[dict],
+    mover_threshold: float,
+    threshold_grid: tuple[float, ...] = DEFAULT_THRESHOLD_GRID,
+) -> dict[str, Any]:
+    """Pannello di diagnostica dei segnali per un giorno.
+
+    Puro. ``signal_rows`` sono i segnali arricchiti (score, forward_returns per
+    orizzonte, benchmark_returns per orizzonte, return del giorno, settore,
+    source/model/fallback/extraction_method/ensemble_std_bucket). ``pool_rows``
+    sono i ticker NON segnalati dello stesso giorno, per i matched controls.
+    ``mover_threshold`` e' la soglia mover DICHIARATA dal dossier (non una nuova
+    taratura): definisce l'up-mover azionabile in book long-only.
+
+    Mappa issue -> blocco:
+      * rank IC per orizzonte, raw + residualizzata vs SPY/settore (AC1).
+      * hit/precision/recall: sweep sul mover del giorno (azione catturabile),
+        singolo sweep sulla griglia predefinita, descrittivo (AC4).
+      * quintili per orizzonte.
+      * false positivi per orizzonte (score alto, forward return avverso).
+      * matched controls per orizzonte (AC2), separati dal book benchmark.
+      * splits per source/model/fallback/extraction/ensemble_std_bucket (AC3).
+    """
+    data = signal_rows[0].get("data") if signal_rows else None
+    n_signals = len(signal_rows)
+    n_movers = sum(1 for r in signal_rows if r.get("is_mover"))
+
+    rank_ic: dict[str, Any] = {}
+    quintiles: dict[str, Any] = {}
+    false_pos: dict[str, Any] = {}
+    matched: dict[str, Any] = {}
+    missingness: list[str] = []
+
+    for h in HORIZONS:
+        scores = [r.get("score") for r in signal_rows]
+        fwd = [(r.get("forward_returns") or {}).get(h) for r in signal_rows]
+        spy = [_benchmark_fwd(r, h, "spy") for r in signal_rows]
+        sector = [_benchmark_fwd(r, h, "sector") for r in signal_rows]
+
+        if n_signals and all(f is None for f in fwd):
+            missingness.append(f"all_forward_return_missing:{h}")
+
+        rank_ic[h] = {
+            "raw": rank_ic_with_ci(scores, fwd),
+            "spy_residual": rank_ic_with_ci(scores, residualize(fwd, spy)),
+            "sector_residual": rank_ic_with_ci(scores, residualize(fwd, sector)),
+        }
+        quintiles[h] = quintile_analysis(scores, fwd)
+        # false positivi: score alto, forward return avverso (<0) a questo orizzonte.
+        fp_rows = [{"score": s, "return": f} for s, f in zip(scores, fwd)]
+        false_pos[h] = [false_positives(fp_rows, threshold=t) for t in threshold_grid]
+        # matched controls: solo i mover del giorno, confronto forward return.
+        movers = [r for r in signal_rows if r.get("is_mover")]
+        matched[h] = matched_controls(movers, pool_rows, horizon=h)
+
+    # hit/precision/recall: sweep sul mover del GIORNO (azione catturabile long).
+    day_rows = [{"score": r.get("score"), "return": r.get("return")} for r in signal_rows]
+    hit_pr = [
+        precision_recall(day_rows, threshold=t, mover_threshold=mover_threshold,
+                         direction="long")
+        for t in threshold_grid
+    ]
+
+    # splits per dimensione, per orizzonte.
+    splits: dict[str, Any] = {}
+    for dim in _SPLIT_DIMENSIONS:
+        splits[dim] = {h: splits_by_dimension(signal_rows, dim, horizon=h) for h in HORIZONS}
+
+    return {
+        "schema_version": SIGNAL_DIAGNOSTICS_SCHEMA_VERSION,
+        "data": data,
+        "n_signals": n_signals,
+        "n_movers": n_movers,
+        "mover_threshold": mover_threshold,
+        "threshold_grid": list(threshold_grid),
+        "rank_ic": rank_ic,
+        "hit_precision_recall": hit_pr,
+        "quintiles": quintiles,
+        "false_positives": false_pos,
+        "matched_controls": matched,
+        "splits": splits,
+        "missingness": missingness,
+        "policy_output": "descriptive_only",
+        "freeze": {
+            "mode": "read_only_measurement",
+            "live_thresholds_weights_flags_changed": False,
+            "mover_threshold_source": "dossier.soglia_mover (declared, not tuned here)",
+            "threshold_grid_is_predefined_and_descriptive": True,
+        },
+    }
+
+
+def _bh_adjust(pvalues: list[float | None]) -> list[float | None]:
+    """Benjamini-Hochberg FDR adjustment (descrittivo).
+
+    Ritorna i p-value aggiustati per la moltiplcita' della famiglia. I None
+    restano None. E' una correzione descrittiva: non seleziona nulla, rende il
+    numero di test esplicito (AC3 #283).
+    """
+    m = sum(1 for p in pvalues if p is not None)
+    if m == 0:
+        return list(pvalues)
+    indexed = sorted(
+        [(i, p) for i, p in enumerate(pvalues) if p is not None],
+        key=lambda ip: ip[1],
+    )
+    raw_adj = [None] * len(pvalues)
+    prev = 1.0
+    # dal piu' grande al piu' piccolo: p_adj = min(p_i * m / rank, prev)
+    for rank_from_top, (orig_i, p) in enumerate(reversed(indexed), start=1):
+        rank = m - rank_from_top + 1
+        val = min(p * m / rank, prev)
+        raw_adj[orig_i] = val
+        prev = val
+    return raw_adj
+
+
+def build_signal_diagnostics_rollup(panels: list[dict]) -> dict[str, Any]:
+    """Rollup cross-day: shadow curves (serie + cumulati), score stability e
+    moltiplcita' (n_trials + BH descrittivo).
+
+    Puro. Le shadow curve sono serie temporali descrittive della IC per giorno,
+    per orizzonte e benchmark, con cumulato della media. La score stability e'
+    la ICIR della serie di IC per giorno. La moltiplcita' dichiara ``n_trials``
+    (orizzonti x benchmark x soglie x dimensioni) e aggiusta i p-value della
+    famiglia di IC con Benjamini-Hochberg, marcata descrittiva: nessuna soglia
+    viene scelta (AC3, AC4 #283).
+    """
+    ordered = sorted([p for p in panels if p.get("data")], key=lambda p: p["data"])
+
+    shadow_curves: dict[str, Any] = {}
+    stability: dict[str, Any] = {}
+    for h in HORIZONS:
+        shadow_curves[h] = {}
+        stability[h] = {}
+        for bench in _BENCHMARKS:
+            series: list[dict] = []
+            ic_values: list[float | None] = []
+            cum = 0.0
+            n_cum = 0
+            for p in ordered:
+                ic = (p.get("rank_ic", {}).get(h, {}).get(bench, {}) or {}).get("ic")
+                if ic is not None:
+                    cum += ic
+                    n_cum += 1
+                ic_values.append(ic)
+                series.append({
+                    "data": p["data"],
+                    "ic": ic,
+                    "cumulative_mean_ic": (cum / n_cum) if n_cum else None,
+                })
+            shadow_curves[h][bench] = series
+            stability[h][bench] = score_stability(ic_values)
+
+    # moltiplcita': famiglia di IC p-value (orizzonti x benchmark) + n_trials.
+    pvalues: list[float | None] = []
+    test_labels: list[str] = []
+    for p in ordered:
+        for h in HORIZONS:
+            for bench in _BENCHMARKS:
+                pv = (p.get("rank_ic", {}).get(h, {}).get(bench, {}) or {}).get("pvalue")
+                pvalues.append(pv)
+                test_labels.append(f"{p['data']}:{h}:{bench}")
+    adjusted = _bh_adjust(pvalues)
+    n_trials = (
+        len(HORIZONS) * len(_BENCHMARKS) * len(DEFAULT_THRESHOLD_GRID)
+        * len(_SPLIT_DIMENSIONS)
+    )
+    multiplicity = {
+        "n_trials": n_trials,
+        "n_ic_tests": sum(1 for pv in pvalues if pv is not None),
+        "method": "benjamini_hochberg_descriptive",
+        "adjusted_pvalues": [
+            {"test": label, "raw_p": raw, "bh_adjusted_p": adj}
+            for label, raw, adj in zip(test_labels, pvalues, adjusted)
+        ],
+        "policy": "descriptive_only_no_threshold_selected",
+    }
+
+    return {
+        "schema_version": SIGNAL_DIAGNOSTICS_SCHEMA_VERSION,
+        "n_giorni": len(ordered),
+        "giorni": [p["data"] for p in ordered],
+        "shadow_curves": shadow_curves,
+        "score_stability": stability,
+        "multiplicity": multiplicity,
+        "policy_output": "descriptive_only",
+        "freeze": {
+            "mode": "read_only_measurement",
+            "live_thresholds_weights_flags_changed": False,
+        },
     }

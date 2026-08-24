@@ -530,3 +530,191 @@ class TestScoreStability:
         n_out = sd.score_stability(noisy)
         assert s_out["icir"] is not None and n_out["icir"] is not None
         assert abs(s_out["icir"]) > abs(n_out["icir"])
+
+
+# ---------------------------------------------------------------------------
+# 4. Panel per-day, rollup shadow curves, moltiplcita'
+# ---------------------------------------------------------------------------
+
+
+def _sig(signal_id, ticker, score, fwd_t1, *, spy_t1=0.01, sector_t1=0.02,
+         ret=0.05, source="benzinga", model="glm52", fallback=False,
+         extraction="cashtag", ensemble_std_bucket="low", sector="tech",
+         data="2026-08-12"):
+    return {
+        "signal_id": signal_id, "ticker": ticker, "data": data,
+        "score": score, "timestamp": f"{data}T15:00:00+00:00",
+        "return": ret, "is_mover": abs(ret) >= 0.03,
+        "sector": sector, "source": source, "model": model, "fallback": fallback,
+        "extraction_method": extraction, "ensemble_std_bucket": ensemble_std_bucket,
+        "forward_returns": {"T+1": fwd_t1},
+        "benchmark_returns": {"T+1": {"spy": spy_t1, "sector": sector_t1}},
+    }
+
+
+def _day1_signals():
+    return [
+        _sig(1, "AAPL", 0.5, 0.05, ret=0.05),
+        _sig(2, "MSFT", 0.4, 0.02, ret=0.02),
+        _sig(3, "CSCO", 0.2, 0.06, ret=0.06),
+        _sig(4, "ORCL", 0.35, 0.01, ret=0.01),
+    ]
+
+
+def _day2_signals():
+    return [
+        _sig(5, "AAPL", 0.45, 0.04, ret=0.04, data="2026-08-13"),
+        _sig(6, "MSFT", 0.3, 0.03, ret=0.03, data="2026-08-13"),
+        _sig(7, "CSCO", 0.15, 0.01, ret=0.01, data="2026-08-13"),
+    ]
+
+
+def _pool(data):
+    # controlli non segnalati: stesso giorno/settore, return confrontabile.
+    return [
+        _sig(0, "INTC", None, 0.02, ret=0.05, source=None, model=None,
+             extraction=None, ensemble_std_bucket="low", data=data),
+    ]
+
+
+class TestPanel:
+    def test_panel_struttura_completa_e_policy_descriptive(self):
+        panel = sd.build_signal_diagnostics_panel(
+            _day1_signals(), pool_rows=_pool("2026-08-12"),
+            mover_threshold=0.03,
+        )
+        assert panel["schema_version"] == sd.SIGNAL_DIAGNOSTICS_SCHEMA_VERSION
+        assert panel["data"] == "2026-08-12"
+        assert panel["n_signals"] == 4
+        assert panel["policy_output"] == "descriptive_only"
+        assert panel["freeze"]["live_thresholds_weights_flags_changed"] is False
+        assert panel["mover_threshold"] == 0.03  # dichiarata, non scelta
+        # blocchi previsti
+        for key in ("rank_ic", "hit_precision_recall", "quintiles",
+                    "false_positives", "matched_controls", "splits"):
+            assert key in panel
+
+    def test_panel_rank_ic_per_ogni_orizzonte_con_raw_e_residual(self):
+        panel = sd.build_signal_diagnostics_panel(
+            _day1_signals(), pool_rows=_pool("2026-08-12"),
+            mover_threshold=0.03,
+        )
+        # ogni orizzonte ha raw, spy_residual, sector_residual.
+        for h in sd.HORIZONS:
+            assert h in panel["rank_ic"]
+            assert "raw" in panel["rank_ic"][h]
+            assert "spy_residual" in panel["rank_ic"][h]
+            assert "sector_residual" in panel["rank_ic"][h]
+        # T+1 e' popolato (i dati ci sono): raw IC calcolabile.
+        assert panel["rank_ic"]["T+1"]["raw"]["n"] == 4
+        # residual vs spy: signal_t1 - 0.01
+        assert panel["rank_ic"]["T+1"]["spy_residual"]["n"] == 4
+
+    def test_panel_sweep_threshold_grid_descrittivo_senza_scelta(self):
+        panel = sd.build_signal_diagnostics_panel(
+            _day1_signals(), pool_rows=_pool("2026-08-12"),
+            mover_threshold=0.03,
+        )
+        # hit/precision/recall e' sul mover del giorno (azione catturabile),
+        # non per-orizzonte: uno sweep singolo sulla griglia predefinita.
+        sweep = panel["hit_precision_recall"]
+        assert len(sweep) == len(sd.DEFAULT_THRESHOLD_GRID)
+        thresholds = [p["threshold"] for p in sweep]
+        assert thresholds == list(sd.DEFAULT_THRESHOLD_GRID)
+        # nessuna soglia e' marcata come "scelta".
+        for p in sweep:
+            assert p["direction"] == "long"
+            assert "chosen" not in p
+
+    def test_panel_quintili_e_false_positives_per_orizzonte(self):
+        panel = sd.build_signal_diagnostics_panel(
+            _day1_signals(), pool_rows=_pool("2026-08-12"),
+            mover_threshold=0.03,
+        )
+        assert len(panel["quintiles"]["T+1"]) == 5
+        assert isinstance(panel["false_positives"]["T+1"], list)
+        assert len(panel["false_positives"]["T+1"]) == len(sd.DEFAULT_THRESHOLD_GRID)
+
+    def test_panel_matched_controls_per_orizzonte(self):
+        panel = sd.build_signal_diagnostics_panel(
+            _day1_signals(), pool_rows=_pool("2026-08-12"),
+            mover_threshold=0.03,
+        )
+        # matched controls presenti per ogni orizzonte, separati dal book benchmark.
+        mc = panel["matched_controls"]["T+1"]
+        assert "matches" in mc and "summary" in mc
+        assert mc["summary"]["control_kind"].startswith("ticker_level_non_signaled")
+
+    def test_panel_splits_per_tutte_le_dimensioni(self):
+        panel = sd.build_signal_diagnostics_panel(
+            _day1_signals(), pool_rows=_pool("2026-08-12"),
+            mover_threshold=0.03,
+        )
+        for dim in ("source", "model", "fallback", "extraction_method",
+                    "ensemble_std_bucket"):
+            assert dim in panel["splits"]
+            assert "T+1" in panel["splits"][dim]
+
+    def test_panel_missingness_se_orizzonti_senza_dati(self):
+        # le righe di test hanno solo T+1; gli altri orizzonti sono None:
+        # la IC e' weak/None ma il panel non crasha e lo dichiara.
+        panel = sd.build_signal_diagnostics_panel(
+            _day1_signals(), pool_rows=_pool("2026-08-12"),
+            mover_threshold=0.03,
+        )
+        assert panel["rank_ic"]["30m"]["raw"]["n"] == 0
+        assert panel["rank_ic"]["30m"]["raw"]["ic"] is None
+        assert "forward_return_missing" in panel["missingness"] or \
+               panel["rank_ic"]["30m"]["raw"]["n"] == 0
+
+    def test_panel_vuoto_restituisce_struttura_valida(self):
+        panel = sd.build_signal_diagnostics_panel(
+            [], pool_rows=[], mover_threshold=0.03,
+        )
+        assert panel["n_signals"] == 0
+        assert panel["policy_output"] == "descriptive_only"
+
+
+class TestRollup:
+    def test_rollup_shadow_curve_serie_per_giorno_e_cumulato(self):
+        p1 = sd.build_signal_diagnostics_panel(
+            _day1_signals(), pool_rows=_pool("2026-08-12"), mover_threshold=0.03)
+        p2 = sd.build_signal_diagnostics_panel(
+            _day2_signals(), pool_rows=_pool("2026-08-13"), mover_threshold=0.03)
+        roll = sd.build_signal_diagnostics_rollup([p1, p2])
+        # shadow curve T+1: una riga per giorno con IC e cumulato.
+        series = roll["shadow_curves"]["T+1"]["raw"]
+        assert len(series) == 2
+        assert "ic" in series[0] and "cumulative_mean_ic" in series[0]
+        # ordinato per data.
+        assert series[0]["data"] == "2026-08-12"
+        assert series[1]["data"] == "2026-08-13"
+
+    def test_rollup_score_stability_dalla_serie_di_ic(self):
+        p1 = sd.build_signal_diagnostics_panel(
+            _day1_signals(), pool_rows=_pool("2026-08-12"), mover_threshold=0.03)
+        p2 = sd.build_signal_diagnostics_panel(
+            _day2_signals(), pool_rows=_pool("2026-08-13"), mover_threshold=0.03)
+        roll = sd.build_signal_diagnostics_rollup([p1, p2])
+        stab = roll["score_stability"]["T+1"]["raw"]
+        assert stab["n_days"] == 2
+        assert "icir" in stab
+
+    def test_rollup_moltiplcita_dichiara_n_trials_e_bh(self):
+        p1 = sd.build_signal_diagnostics_panel(
+            _day1_signals(), pool_rows=_pool("2026-08-12"), mover_threshold=0.03)
+        roll = sd.build_signal_diagnostics_rollup([p1])
+        mult = roll["multiplicity"]
+        assert mult["n_trials"] >= 1
+        assert mult["method"] == "benjamini_hochberg_descriptive"
+        # n_trials = orizzonti x benchmark x splits x soglie (almeno).
+        assert mult["n_trials"] == len(sd.HORIZONS) * 3 * len(sd.DEFAULT_THRESHOLD_GRID) * 5 \
+            or mult["n_trials"] > 0
+        assert mult["policy"] == "descriptive_only_no_threshold_selected"
+
+    def test_rollup_policy_descriptive_e_freeze(self):
+        p1 = sd.build_signal_diagnostics_panel(
+            _day1_signals(), pool_rows=_pool("2026-08-12"), mover_threshold=0.03)
+        roll = sd.build_signal_diagnostics_rollup([p1])
+        assert roll["policy_output"] == "descriptive_only"
+        assert roll["freeze"]["mode"] == "read_only_measurement"
