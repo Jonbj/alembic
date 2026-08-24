@@ -57,9 +57,14 @@ mattering more: whoever wrote the queue and the criteria is not the right observ
 whether the output respects them; and different models fail differently, so a single model
 across twenty issues repeats one blind spot twenty times with nobody noticing. If no engine
 in the list is installed the run is **cancelled** — there is deliberately no fallback, since
-a silent one would put the work back exactly where it must not be. It never merges: the CI
-`test` job in this repo is chronically red for environmental reasons, so an automatic merge
-would be gating on a signal that isn't there.
+a silent one would put the work back exactly where it must not be. It never merges: merging is
+decided separately, by the two-gate process below — not by this run's own raw CI result. Until
+2026-08-24 the CI `test` job in this repo was chronically red for environmental reasons on a
+freshly migrated Postgres (no approved strategy seeded, no `sentiment_signals` row for the FK,
+an `ADMIN_API_KEY` literal racing the `src.config` import singleton), so gating on CI pass/fail
+directly would have gated on a signal that wasn't there — root-caused and closed in #342/PR #343.
+`main`'s CI is green now, but the mechanical gate below stays diff-based rather than reverting to
+a raw pass/fail check, as insurance against the next environmental regression.
 
 During the observation freeze (#171) the agent does **not** decide its own scope. Two
 independent locks do, and an issue is worked only if it clears both:
@@ -86,8 +91,10 @@ cat logs/roadmap_agent_state.tsv              # issue <TAB> failed attempts (2 =
 **Review and merge (decided 2026-08-07).** After the PR is opened, two gates decide:
 
 1. **Mechanical** — the set of tests failing in the PR minus the set failing on `main`, for the
-   *same commit SHA*. This repo's CI is chronically red for environmental reasons, so its pass/fail
-   says nothing; the **difference** says everything. Zero new failures is the bar.
+   *same commit SHA*. This repo's CI was chronically red for environmental reasons until 2026-08-24
+   (#342/PR #343), so pass/fail alone said nothing; the **difference** said everything, and still
+   does — a clean `main` doesn't retire the diff-based check, it's just expected to show zero on
+   both sides now. Zero new failures is the bar.
 2. **Human-shaped** — a model **other than the implementer** reviews the diff against the issue,
    the operator's scoping comments, and the freeze charter, then emits `VERDETTO: APPROVA` or
    `VERDETTO: RESPINGI`. It runs with write tools removed: a written instruction not to edit and a
