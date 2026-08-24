@@ -74,7 +74,7 @@ def test_dossier_espone_schema_provenienza_e_timeline_end_to_end():
     ):
         payload = dossier.costruisci_dossier(date(2026, 8, 12), ["AAA"])
 
-    assert payload["schema_version"] == "2.2"
+    assert payload["schema_version"] == "2.3"
     assert payload["provenienza_dati"]["timeline"]["first_seen_at"] == (
         "news_log.raw_ingested_at"
     )

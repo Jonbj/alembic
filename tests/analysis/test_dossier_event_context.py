@@ -166,6 +166,27 @@ def test_opportunita_macro_stesso_tema_contano_come_un_cluster_indipendente():
     assert ai_cluster["correlation_basis"] == "shared_canonical_article_and_theme"
 
 
+def test_macro_stesso_tema_e_direzione_clusterizza_anche_articoli_distinti():
+    out = _build(
+        candidates=[{"symbol": "NVDA", "return": 0.10}, {"symbol": "AMD", "return": 0.08}],
+        daily_bars={
+            "NVDA": _bar(100.0, 110.0), "AMD": _bar(100.0, 108.0),
+            "SPY": _bar(500.0, 510.0), "SOXX": _bar(300.0, 315.0),
+        },
+        sector_by_ticker={"NVDA": "semis", "AMD": "semis"},
+        articles=[
+            {"ticker": "NVDA", "title": "Chipmakers rally on tariffs", "canonical_article_id": "content:one", "relevance": "SECTOR_MACRO"},
+            {"ticker": "AMD", "title": "Semis gain after macro data", "canonical_article_id": "content:two", "relevance": "SECTOR_MACRO"},
+        ],
+        intraday_bars={},
+        nbbo_quotes={},
+    )
+
+    assert out["statistics"]["independent_clusters"] == 1
+    assert out["clusters"][0]["member_symbols"] == ["AMD", "NVDA"]
+    assert out["clusters"][0]["correlation_basis"] == "same_theme_macro_direction"
+
+
 def test_microstruttura_separa_barre_e_nbbo_con_provenienza():
     row = _build()["per_symbol"]["NVDA"]["microstructure"]
 
@@ -182,3 +203,14 @@ def test_microstruttura_separa_barre_e_nbbo_con_provenienza():
     assert "SIP quotes" in row["nbbo"]["provenance"]["source"]
     assert row["halt"]["status"] == "UNKNOWN"
     assert row["halt"]["missing_reason"] == "authoritative_halt_feed_unavailable"
+
+
+def test_volume_bar_based_esclude_barre_della_seduta_precedente():
+    out = _build(intraday_bars={"NVDA": [
+        {"timestamp": datetime(2026, 8, 11, 19, 55, tzinfo=UTC), "volume": 9_000_000},
+        {"timestamp": datetime(2026, 8, 12, 14, 30, tzinfo=UTC), "volume": 600_000},
+        {"timestamp": datetime(2026, 8, 12, 19, 55, tzinfo=UTC), "volume": 400_000},
+    ]})
+
+    bar = out["per_symbol"]["NVDA"]["microstructure"]["bar_based"]
+    assert bar["session_volume"] == 1_000_000
