@@ -37,6 +37,10 @@ import logging
 from pathlib import Path
 
 from src.analysis.dossier.ledger_validator import validate_findings, validate_panels
+from src.analysis.dossier.decision_quality import (
+    build_decision_quality_panel,
+    build_decision_quality_rollup,
+)
 from src.analysis.dossier.panels import (
     LEDGER_SCHEMA_VERSION,
     PANELS_SCHEMA_VERSION,
@@ -95,6 +99,7 @@ def costruisci() -> dict:
     signal_all: list[dict] = []
     decision_all: list[dict] = []
     ledger_all: list[dict] = []
+    decision_quality_all: list[dict] = []
     panels_by_day: dict[str, list[dict]] = {}
     occ_by_day: dict[str, list[dict]] = {}
     dossier_movers: dict[str, dict[str, float]] = {}
@@ -111,11 +116,13 @@ def costruisci() -> dict:
         sp = build_signal_panel(dossier, dossier_hash=h)
         dp = build_decision_trade_panel(dossier, dossier_hash=h)
         occ = build_occurrence_ledger(dossier, dossier_hash=h)
+        dq = build_decision_quality_panel(dossier, dossier_hash=h)
 
         ticker_day_all.extend(td)
         signal_all.extend(sp)
         decision_all.extend(dp)
         ledger_all.extend(occ)
+        decision_quality_all.append(dq)
         panels_by_day[data] = td
         occ_by_day[data] = occ
         dossier_movers[data] = _movers_from_dossier(dossier)
@@ -127,6 +134,7 @@ def costruisci() -> dict:
     definitions = build_definitions(findings)
     status_events = build_status_events(findings)
     derived = build_derived_views(panels_by_day, occ_by_day)
+    decision_quality_rollup = build_decision_quality_rollup(decision_quality_all)
 
     # Finestra: inizio derivato dai dati (include le osservazioni pre-start del
     # 2026-07-31), fine = fine periodo dichiarata.
@@ -168,6 +176,8 @@ def costruisci() -> dict:
         "signals": signal_all,
         "decisions_trades": decision_all,
         "occurrences": ledger_all,
+        "decision_quality": decision_quality_all,
+        "decision_quality_rollup": decision_quality_rollup,
         "derived_views": derived,
         "dossier_hashes": dossier_hashes,
         "validation": validation,

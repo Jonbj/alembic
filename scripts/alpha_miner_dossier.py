@@ -39,6 +39,10 @@ from src.analysis.dossier.book import (
     compute_entries,
     compute_exits,
 )
+from src.analysis.dossier.decision_quality import (
+    build_decision_quality_panel,
+    build_opening_snapshot,
+)
 from src.analysis.dossier.article_coverage import build_article_coverage
 from src.analysis.dossier.market import compute_market, compute_miss_candidates
 from src.analysis.dossier.miss_cause import (
@@ -56,7 +60,7 @@ OUT_DIR = PROJECT_DIR / "docs" / "evidence" / "dossier"
 SOGLIA_MOVER = 0.03
 FINESTRA_MEDIANE = 20  # giorni, per le mediane mobili
 INIZIO_OSSERVAZIONE = date(2026, 8, 3)
-DOSSIER_SCHEMA_VERSION = "2.1"
+DOSSIER_SCHEMA_VERSION = "2.2"
 NEW_YORK = ZoneInfo("America/New_York")
 
 # Size plausibile di uno slot S4 per lo stimatore v2 (#280): fixed-slot sizing
@@ -279,6 +283,78 @@ def _regular_session_bounds(giorno: date) -> tuple[datetime, datetime]:
     open_ny = datetime.combine(giorno, time(9, 30), tzinfo=NEW_YORK)
     close_ny = datetime.combine(giorno, time(16, 0), tzinfo=NEW_YORK)
     return open_ny.astimezone(timezone.utc), close_ny.astimezone(timezone.utc)
+
+
+def _opening_positions(giorno: date) -> list[dict]:
+    """Posizioni vive all'apertura RTH, lette senza modificare il book."""
+    session_open, _session_close = _regular_session_bounds(giorno)
+    open_iso = session_open.isoformat()
+    rows = _psql(
+        f"SELECT id::text, symbol, "
+        f"CASE WHEN stop_strategy IS NOT NULL THEN stop_strategy "
+        f"WHEN signal_id IS NOT NULL THEN 'S4' ELSE 'CONTAMINAZIONE' END, "
+        f"qty::text, entry_price::text, entry_time::text, "
+        f"COALESCE(exit_time::text,''), COALESCE(exit_price::text,'') "
+        f"FROM trades WHERE entry_time < '{open_iso}' "
+        f"AND (exit_time IS NULL OR exit_time >= '{open_iso}') ORDER BY id;"
+    )
+    return [
+        {
+            "trade_id": int(row[0]),
+            "symbol": row[1],
+            "strategia": row[2],
+            "qty": float(row[3]) if row[3] else None,
+            "entry_price": float(row[4]) if row[4] else None,
+            "entry_time": row[5] or None,
+            "exit_time": row[6] or None,
+            "exit_price": float(row[7]) if row[7] else None,
+        }
+        for row in rows
+    ]
+
+
+def _guard_decisions(giorno: date) -> list[dict]:
+    """Controfattuali osservati dei guard, con missingness del notional onesta.
+
+    Solo SKIP_PYRAMIDING dal 19/08 porta in ``score`` la frazione di NAV
+    effettivamente bloccata (#315 e carta #171). Per le altre righe il return e'
+    misurabile ma il notional non lo e': resta NULL, mai sostituito da una size
+    inventata. Lo snapshot NAV e' il piu' recente entro dieci minuti dal guard.
+    """
+    g = giorno.isoformat()
+    rows = _psql(
+        f"SELECT ed.id::text, ed.tick_time::text, ed.symbol, "
+        f"COALESCE(ed.signal_id::text,''), ed.decision, "
+        f"COALESCE(ed.counterfactual_return_1h::text,''), "
+        f"COALESCE(ed.counterfactual_return_overnight::text,''), "
+        f"COALESCE(ed.counterfactual_skip_reason,''), "
+        f"COALESCE(ed.counterfactual_computed_at::text,''), "
+        f"COALESCE(CASE WHEN ed.decision = 'SKIP_PYRAMIDING' "
+        f"AND ed.tick_time::date >= DATE '2026-08-19' AND snap.nav IS NOT NULL "
+        f"THEN ABS(ed.score) * snap.nav END::text,'') "
+        f"FROM execution_decisions ed "
+        f"LEFT JOIN LATERAL (SELECT nav FROM portfolio_monitor_snapshots "
+        f"WHERE as_of <= ed.tick_time AND as_of >= ed.tick_time - INTERVAL '10 minutes' "
+        f"AND nav IS NOT NULL ORDER BY as_of DESC LIMIT 1) snap ON true "
+        f"WHERE ed.tick_time >= '{g}' AND ed.tick_time < '{g}'::date + 1 "
+        f"AND ed.decision IN ('SKIP_THRESHOLD','SKIP_EMA','SKIP_CAP','SKIP_PYRAMIDING') "
+        f"ORDER BY ed.tick_time, ed.id;"
+    )
+    return [
+        {
+            "decision_id": int(row[0]),
+            "tick_time": row[1],
+            "symbol": row[2],
+            "signal_id": int(row[3]) if row[3] else None,
+            "decision": row[4],
+            "counterfactual_return_1h": float(row[5]) if row[5] else None,
+            "counterfactual_return_overnight": float(row[6]) if row[6] else None,
+            "counterfactual_skip_reason": row[7] or None,
+            "counterfactual_computed_at": row[8] or None,
+            "intended_notional_usd": float(row[9]) if row[9] else None,
+        }
+        for row in rows
+    ]
 
 
 def _news_label_columns() -> set[str]:
@@ -832,6 +908,34 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
     ingressi = compute_entries(ingressi_grezzi, barre_ohlc)
     chiusure = compute_exits(chiusure_grezze, chiusure_close)
 
+    # --- qualita' decisionale read-only (#284) ----------------------------
+    # Lo snapshot e' prospettico/parallelo: i dossier storici restano intatti.
+    # Nessun valore qui entra nel runtime; size e holding sono solo descritti.
+    posizioni_apertura = _opening_positions(giorno)
+    snapshot_apertura = build_opening_snapshot(
+        posizioni_apertura,
+        barre,
+        data=g,
+        sector_by_ticker=_sector_by_ticker(),
+    )
+    guard_decisions = _guard_decisions(giorno)
+    decision_quality_assumptions = {
+        "sizing_reference_usd": SLOT_USD_DEFAULT,
+        "sizing_reference_source": (
+            "S4 fixed slot osservato: bucket_pct(0.10)/n_top(5), solo controfattuale read-only"
+        ),
+    }
+    decision_quality = build_decision_quality_panel(
+        {
+            "data": g,
+            "snapshot_apertura": snapshot_apertura,
+            "decision_quality_assumptions": decision_quality_assumptions,
+            "ingressi": ingressi,
+            "chiusure": chiusure,
+            "guard_decisions": guard_decisions,
+        }
+    )
+
     # --- aggregazioni ------------------------------------------------------
     # stop_strategy GREZZA, senza COALESCE su S1/S4: la coorte legacy (F-002,
     # stop_strategy NULL) deve restare riconoscibile nel bucket orario, non
@@ -889,6 +993,14 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
                     "UNKNOWN non entra nel numeratore"
                 ),
             },
+            "decision_quality": {
+                "snapshot_apertura": "trades vivi all'open RTH + barre Alpaca SIP",
+                "guard_counterfactual": (
+                    "execution_decisions.counterfactual_return_1h/overnight; "
+                    "notional USD solo SKIP_PYRAMIDING post-2026-08-19 con NAV osservata"
+                ),
+                "freeze": "misura read-only; nessuna taratura live emessa",
+            },
         },
         "soglia_mover": SOGLIA_MOVER,
         "mercato": mercato,
@@ -896,6 +1008,10 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
         "soglia_gate_usata": soglia_gate,
         "ingressi": ingressi,
         "chiusure": chiusure,
+        "snapshot_apertura": snapshot_apertura,
+        "guard_decisions": guard_decisions,
+        "decision_quality_assumptions": decision_quality_assumptions,
+        "decision_quality": decision_quality,
         "timeline": timeline,
         "copertura_articoli": copertura_articoli,
         "aggregati": {

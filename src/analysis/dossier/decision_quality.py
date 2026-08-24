@@ -506,3 +506,88 @@ def build_decision_quality_panel(dossier: dict, *, dossier_hash: str = "") -> di
             "live_size_holding_exit_policy_changed": False,
         },
     }
+
+
+def build_decision_quality_rollup(panels: list[dict]) -> dict:
+    """Serie ordinata e cumulati, senza imputare a zero i giorni incompleti."""
+    ordered = sorted(panels, key=lambda panel: panel["data"])
+    cumulative_passive = 0.0
+    cumulative_active = 0.0
+    series: list[dict] = []
+    passive_values: list[float] = []
+    active_values: list[float] = []
+    guard_cost_values: list[float] = []
+    guard_benefit_values: list[float] = []
+    missing_opening = 0
+    missing_guards = 0
+    duplicate_guards = 0
+    seen_guard_ids: set[str] = set()
+
+    for panel in ordered:
+        summary = panel.get("summary") or {}
+        passive = _float(summary.get("passive_pnl_usd"))
+        active = _float(summary.get("active_decision_pnl_usd"))
+        guard_source_missing = "guard_decisions_not_available_in_legacy_dossier" in (
+            panel.get("missingness") or []
+        )
+        daily_guard_cost = 0.0
+        daily_guard_benefit = 0.0
+        for guard in panel.get("guards") or []:
+            causal_id = guard.get("causal_event_id")
+            if causal_id in seen_guard_ids:
+                duplicate_guards += 1
+                continue
+            if causal_id is not None:
+                seen_guard_ids.add(causal_id)
+            cost = _float(guard.get("guard_cost_usd"))
+            benefit = _float(guard.get("avoided_loss_usd"))
+            if cost is not None:
+                daily_guard_cost += cost
+            if benefit is not None:
+                daily_guard_benefit += benefit
+        guard_cost = None if guard_source_missing else daily_guard_cost
+        guard_benefit = None if guard_source_missing else daily_guard_benefit
+        if passive is None:
+            missing_opening += 1
+        else:
+            passive_values.append(passive)
+            cumulative_passive += passive
+        if active is not None:
+            active_values.append(active)
+            cumulative_active += active
+        if guard_source_missing:
+            missing_guards += 1
+        if guard_cost is not None:
+            guard_cost_values.append(guard_cost)
+        if guard_benefit is not None:
+            guard_benefit_values.append(guard_benefit)
+        series.append(
+            {
+                "data": panel["data"],
+                "passive_pnl_usd": passive,
+                "active_decision_pnl_usd": active,
+                "guard_cost_usd": guard_cost,
+                "guard_avoided_loss_usd": guard_benefit,
+                "cumulative_passive_pnl_usd": (
+                    cumulative_passive if passive is not None else None
+                ),
+                "cumulative_active_decision_pnl_usd": cumulative_active,
+                "opening_snapshot_complete": passive is not None,
+            }
+        )
+
+    return {
+        "schema_version": DECISION_QUALITY_SCHEMA_VERSION,
+        "n_giorni": len(ordered),
+        "n_giorni_snapshot_apertura_mancante": missing_opening,
+        "n_giorni_guard_mancanti": missing_guards,
+        "n_guard_duplicati_scartati": duplicate_guards,
+        "totali_usd": {
+            "passive_pnl_usd": sum(passive_values),
+            "active_decision_pnl_usd": sum(active_values),
+            "guard_cost_usd": sum(guard_cost_values),
+            "guard_avoided_loss_usd": sum(guard_benefit_values),
+        },
+        "serie": series,
+        "policy_output": "descriptive_only_no_live_tuning",
+    }

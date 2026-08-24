@@ -248,3 +248,16 @@ def test_rollup_cumulativo_non_imputa_il_passivo_mancante():
     assert rollup["totali_usd"]["active_decision_pnl_usd"] == pytest.approx(34.0)
     assert rollup["serie"][0]["passive_pnl_usd"] is None
     assert rollup["serie"][1]["cumulative_passive_pnl_usd"] == pytest.approx(55.0)
+
+
+def test_rollup_deduplica_lo_stesso_guard_anche_fra_due_giorni():
+    first = build_decision_quality_panel(_dossier())
+    next_day_dossier = _dossier()
+    next_day_dossier["data"] = "2026-08-13"
+    second = build_decision_quality_panel(next_day_dossier)
+
+    rollup = build_decision_quality_rollup([first, second])
+
+    assert rollup["totali_usd"]["guard_cost_usd"] == pytest.approx(40.0)
+    assert rollup["totali_usd"]["guard_avoided_loss_usd"] == pytest.approx(60.0)
+    assert rollup["n_guard_duplicati_scartati"] == 2
