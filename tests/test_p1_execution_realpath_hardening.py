@@ -194,7 +194,7 @@ class TestBuyAlwaysHasStopLoss:
 
 class TestMarketClockFailClosedAbortsCycle:
 
-    def test_clock_exception_aborts_cycle(self):
+    def test_clock_exception_aborts_cycle(self, approved_strategy):
         """When get_clock() raises, _run_cycle_inner must return error='clock_unavailable'.
 
         The portfolio_scheduler already implements this (P0-07 fail-closed). This test
@@ -219,7 +219,8 @@ class TestMarketClockFailClosedAbortsCycle:
             redis_inst.get.return_value = None
             mock_redis_cls.from_url.return_value = redis_inst
 
-            result = _run_cycle_inner()
+            with approved_strategy("S1"):
+                result = _run_cycle_inner()
 
         assert result.get("error") == "clock_unavailable", (
             "When get_clock() raises, cycle must abort with error='clock_unavailable'. "
