@@ -1032,7 +1032,7 @@ def test_emergency_cancel_called_when_killswitch_active():
 # ── P0-B: market clock pre-flight ────────────────────────────────────────────
 
 
-def test_cycle_skips_when_market_closed():
+def test_cycle_skips_when_market_closed(approved_strategy):
     """Cycle returns market_closed when get_clock().is_open is False."""
     from src.workers.portfolio_scheduler import _run_cycle_inner
 
@@ -1056,7 +1056,8 @@ def test_cycle_skips_when_market_closed():
         redis_inst.get.return_value = None
         mock_redis_cls.from_url.return_value = redis_inst
 
-        result = _run_cycle_inner()
+        with approved_strategy("S1"):
+            result = _run_cycle_inner()
 
     assert result == {"skipped": True, "reason": "market_closed",
                       "next_open": "2026-06-16T13:30:00+00:00"}
@@ -1121,7 +1122,7 @@ def test_cycle_proceeds_when_market_open():
 # ── P0-D: account blocking flags ─────────────────────────────────────────────
 
 
-def test_cycle_aborts_when_trading_blocked():
+def test_cycle_aborts_when_trading_blocked(approved_strategy):
     """Cycle returns account_blocked when account.trading_blocked is True."""
     from src.workers.portfolio_scheduler import _run_cycle_inner
 
@@ -1156,7 +1157,8 @@ def test_cycle_aborts_when_trading_blocked():
         redis_inst.get.return_value = None
         mock_redis_cls.from_url.return_value = redis_inst
 
-        result = _run_cycle_inner()
+        with approved_strategy("S1"):
+            result = _run_cycle_inner()
 
     assert result == {"skipped": True, "reason": "account_blocked"}
 

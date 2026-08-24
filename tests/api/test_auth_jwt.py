@@ -11,6 +11,7 @@ os.environ["JWT_SECRET_KEY"] = "test-jwt-secret-key-for-testing-only-not-for-pro
 os.environ["JWT_EXPIRE_MINUTES"] = "60"
 
 from src.api.main import app  # noqa: E402
+from src.config import config  # noqa: E402
 
 
 @pytest.fixture()
@@ -81,9 +82,14 @@ def test_protected_endpoint_accepts_bearer_token(client, valid_token):
 
 @pytest.mark.require_auth
 def test_protected_endpoint_accepts_api_key(client):
+    # Read from the live config singleton, not a hardcoded literal: config
+    # freezes ADMIN_API_KEY from os.environ at first import of src.config, and
+    # test-collection order determines which of several competing test-only
+    # literals scattered across tests/ happens to still be in os.environ at
+    # that moment. config.ADMIN_API_KEY is always the value the app compares against.
     resp = client.get(
         "/api/signals",
-        headers={"X-API-Key": "test-api-key-for-testing-only-12345678"},
+        headers={"X-API-Key": config.ADMIN_API_KEY},
     )
     assert resp.status_code != 403
 
