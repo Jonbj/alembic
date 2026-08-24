@@ -31,6 +31,13 @@ sono calcolati (manca un anchor per signal comparable): il pannello riporta
 missingness esplicita e il diff forward-return del matched pair e' None. Non e'
 un buco nascosto, e' dichiarato nel pannello e nella PR.
 
+Limitazione onesta (arricchimento DB): la PK reale di ``sentiment_signals`` e'
+``id`` (001_initial.sql:38) e la JOIN e' via ``news_log_id`` (016_trade_
+observability.sql). Se il DB non e' raggiungibile o mancano le env vars, il
+fail-soft restituisce ``{}`` e gli split per source/model/extraction riportano
+missingness (dichiarata nel pannello, NON silenziosa). Sull'arricchimento si
+misura, non si sceglie.
+
 Uso:
     uv run python scripts/build_signal_diagnostics.py
     uv run python scripts/build_signal_diagnostics.py --no-write   # solo stdout
@@ -157,11 +164,15 @@ def _default_db_enricher(signal_ids: list[int]) -> dict[int, dict]:
     if not signal_ids:
         return {}
     ids = ",".join(str(int(i)) for i in signal_ids)
+    # NB: la PK di sentiment_signals e' ``id`` (001_initial.sql:38), non
+    # ``signal_id``. Filtrare per una colonna inesistente fallisce su DB reale
+    # e il fail-soft mascherava la rottura lasciando vuoti gli split per
+    # source/model/extraction (rilievo bloccante review 2026-08-24).
     query = (
-        "SELECT s.signal_id, s.model_id, s.ensemble_std, "
+        "SELECT s.id, s.model_id, s.ensemble_std, "
         "n.extraction_method, n.source, n.published_at "
         "FROM sentiment_signals s LEFT JOIN news_log n ON n.id = s.news_log_id "
-        f"WHERE s.signal_id IN ({ids})"
+        f"WHERE s.id IN ({ids})"
     )
     try:
         res = subprocess.run(

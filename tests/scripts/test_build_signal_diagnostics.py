@@ -235,3 +235,50 @@ def test_provenance_dichiara_le_fonti_read_only(report):
     assert "dossier" in pr and "sectors" in pr
     assert "read-only" in pr["dossier"]
     assert pr["note"].startswith("File derivato")
+
+
+# ---------------------------------------------------------------------------
+# Test di contratto sulla query SQL dell'arricchitore.
+# (Il wiring sopra usa un mock, ma la query REALE deve riferirsi alla PK
+#  reale di sentiment_signals: colonna ``id`` — NON ``signal_id`` che non
+#  esiste. Questo test e' bloccante: se cambia, lo rivedo.)
+# ---------------------------------------------------------------------------
+
+
+def test_query_db_enricher_referenzia_pk_id_di_sentiment_signals(monkeypatch):
+    """La query SQL di ``_default_db_enricher`` deve usare ``s.id`` (PK reale di
+    sentiment_signals, vedi 001_initial.sql riga 38) in SELECT e WHERE, NON
+    ``s.signal_id`` (colonna inesistente). Riafferma il rilievo bloccante del
+    review: il fail-soft del 2026-08-24 mascherava la rottura lasciando vuoti
+    gli split per source/model/extraction.
+    """
+    importlib.invalidate_caches()
+    if str(PROJECT_DIR / "scripts") not in sys.path:
+        sys.path.insert(0, str(PROJECT_DIR / "scripts"))
+    mod = importlib.import_module("build_signal_diagnostics")
+
+    catturata: dict = {}
+
+    class _FakeCompleted:
+        def __init__(self):
+            self.returncode = 0
+            self.stdout = "1|glm52|0.05|ner|test|2026-08-12T15:00:00+00:00\n"
+            self.stderr = ""
+
+    def _fake_run(cmd, **kwargs):
+        catturata["cmd"] = cmd
+        return _FakeCompleted()
+
+    monkeypatch.setattr(mod.subprocess, "run", _fake_run)
+    out = mod._default_db_enricher([1])
+
+    # la query deve contenere 's.id' (PK reale) e NON 's.signal_id' (colonna inesistente).
+    psql_cmd = [a for a in catturata["cmd"] if isinstance(a, str)]
+    query = psql_cmd[-1]
+    assert "s.id" in query, f"query non referenza la PK reale 's.id': {query!r}"
+    assert "s.signal_id" not in query, (
+        f"query referenzia la colonna inesistente 's.signal_id': {query!r}"
+    )
+    # e l'arricchimento, dato un psql che ha successo, valorizza davvero il dict.
+    assert out[1]["model_id"] == "glm52"
+    assert out[1]["extraction_method"] == "ner"
