@@ -65,6 +65,29 @@ def _connect_or_skip() -> psycopg2.extensions.connection:
         pytest.skip(f"Database unreachable: {exc}")
 
 
+def _seed_signal(signal_id: int) -> None:
+    """Ensure a sentiment_signals row exists for signal_id.
+
+    trades.signal_id carries a FK to sentiment_signals (trades_signal_id_fkey).
+    Tests below hardcode signal_id=123 to exercise open_trade/save_frozen_stop;
+    on a freshly migrated DB (e.g. CI) no such row exists yet, unlike a local
+    dev DB with accumulated real signal history. Idempotent — safe to call
+    against either.
+    """
+    conn = _connect_or_skip()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO sentiment_signals (id, symbol, score, confidence, model_id) "
+                "VALUES (%s, 'TEST_STOP_SIGNAL', 0.5, 0.9, 'test-fixture') "
+                "ON CONFLICT (id) DO NOTHING",
+                (signal_id,),
+            )
+            conn.commit()
+    finally:
+        conn.close()
+
+
 @pytest.mark.skipif(os.environ.get("SKIP_DB_TESTS"), reason="SKIP_DB_TESTS set")
 def test_load_frozen_stop_round_trip() -> None:
     """open_trade with frozen_stop can be reloaded via load_frozen_stop."""
@@ -75,6 +98,7 @@ def test_load_frozen_stop_round_trip() -> None:
         strategy="S4", mode="vol_scaled", vol_at_entry=0.025, sigma_eff=0.025,
         k=2.0, floor=0.03, cap=0.08, d_init=0.05, vol_source="bars_df",
     )
+    _seed_signal(123)
     try:
         store.open_trade(
             symbol=symbol, signal_id=123, decision_id=None,
@@ -140,6 +164,7 @@ def test_save_frozen_stop_round_trip() -> None:
     store = PostgreSQLStore(use_pool=False)
     ts = datetime(2026, 7, 10, 14, 0, tzinfo=timezone.utc)
     symbol = "TEST_STOP_3"
+    _seed_signal(123)
     try:
         store.open_trade(
             symbol=symbol, signal_id=123, decision_id=None,

@@ -21,7 +21,15 @@ import pytest
 
 os.environ.setdefault("ADMIN_API_KEY", "test-api-key-for-testing-only-12345678")
 
-_API_KEY = "test-api-key-for-testing-only-12345678"
+from src.config import config  # noqa: E402
+
+# Read from the live config singleton rather than hardcoding a literal: `config`
+# freezes ADMIN_API_KEY from os.environ at first import of src.config (module-level
+# `config = Config()`), and test-collection order determines which of several
+# competing test-only literals scattered across tests/ happens to still be in
+# os.environ at that moment. Using config.ADMIN_API_KEY directly is immune to
+# that race — it's always the value the app itself compares against.
+_API_KEY = config.ADMIN_API_KEY
 _AUTH = {"X-API-Key": _API_KEY}
 
 _REQUIRED_ALERT_KEYS = {

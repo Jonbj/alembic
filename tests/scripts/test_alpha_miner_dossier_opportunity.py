@@ -42,6 +42,8 @@ def _patch_io(canned):
     from contextlib import ExitStack
 
     def fake_psql(query):
+        if "article_coverage_279" in query:
+            return []
         # #244: la query dei segnali fa join+sottoquery su news_log, quindi va
         # riconosciuta PRIMA del conteggio news, altrimenti il match e' ambiguo.
         if "FROM sentiment_signals" in query:
