@@ -204,3 +204,21 @@ def test_regime_legge_moltiplicatore_persistito_senza_interpolarlo():
     assert out[0]["multiplier"] == 0.7
     assert out[0]["source"] == "execution_decisions.regime_mult"
     assert "regime_mult IS NOT NULL" in psql.call_args.args[0]
+
+
+def test_soli_benchmark_non_mascherano_watchlist_senza_barre():
+    only_benchmark = {
+        "SPY": {
+            "open": 500.0,
+            "high": 510.0,
+            "low": 499.0,
+            "close": 505.0,
+            "close_prec": 500.0,
+        }
+    }
+    with (
+        patch.object(dossier, "_barre", return_value=only_benchmark),
+        patch.object(dossier, "_sector_by_ticker", return_value={}),
+    ):
+        with pytest.raises(SystemExit, match="nessuna barra per l'intera watchlist"):
+            dossier.costruisci_dossier(date(2026, 8, 12), ["ZZZ"])
