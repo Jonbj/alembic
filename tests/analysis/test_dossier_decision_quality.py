@@ -7,6 +7,7 @@ import pytest
 from src.analysis.dossier.decision_quality import (
     DECISION_QUALITY_SCHEMA_VERSION,
     build_decision_quality_panel,
+    build_decision_quality_rollup,
     build_opening_snapshot,
 )
 
@@ -227,3 +228,23 @@ def test_missingness_non_diventa_zero():
     assert rows[0]["passive_pnl_usd"] is None
     assert rows[0]["actual_intraday_pnl_usd"] is None
     assert rows[0]["missingness"] == ["daily_bar_missing"]
+
+
+def test_rollup_cumulativo_non_imputa_il_passivo_mancante():
+    complete = build_decision_quality_panel(_dossier())
+    legacy = build_decision_quality_panel(
+        {
+            "data": "2026-08-11",
+            "ingressi": [],
+            "chiusure": [],
+        }
+    )
+
+    rollup = build_decision_quality_rollup([legacy, complete])
+
+    assert rollup["n_giorni"] == 2
+    assert rollup["n_giorni_snapshot_apertura_mancante"] == 1
+    assert rollup["totali_usd"]["passive_pnl_usd"] == pytest.approx(55.0)
+    assert rollup["totali_usd"]["active_decision_pnl_usd"] == pytest.approx(34.0)
+    assert rollup["serie"][0]["passive_pnl_usd"] is None
+    assert rollup["serie"][1]["cumulative_passive_pnl_usd"] == pytest.approx(55.0)
