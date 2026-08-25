@@ -93,6 +93,7 @@ class S4VirtualExitEvent:
     virtual_exit_quantity: float
     s1_virtual_quantity: float
     s4_virtual_quantity: float
+    policy_version: str
     broker_order_id: None = None
 
 
@@ -284,6 +285,7 @@ def apply_virtual_s4_exit(
         virtual_exit_quantity=quantity,
         s1_virtual_quantity=lifecycle.s1_virtual_quantity,
         s4_virtual_quantity=remaining,
+        policy_version=lifecycle.policy_version,
     )
 
 

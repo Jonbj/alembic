@@ -19,6 +19,11 @@ if TYPE_CHECKING:
     from src.models.news import NewsItem
     from src.portfolio.stop_policy import FrozenStop, StopDecision
     from src.strategies.s4.intent_ledger import S4IntentEvent
+    from src.strategies.s4.lifecycle import (
+        S4LifecycleEvent,
+        S4VirtualExitEvent,
+        SubmittedIntent,
+    )
 
 log = logging.getLogger(__name__)
 
@@ -505,6 +510,124 @@ class PostgreSQLStore:
             with conn.cursor() as cur:
                 cur.executemany(self._INSERT_S4_INTENT_EVENT, params)
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    _INSERT_S4_LIFECYCLE_EVENT = """
+        INSERT INTO s4_lifecycle_events (
+            event_id, intent_id, event_type, observed_at, symbol, order_id,
+            status, reason_code, fill_id, filled_at, filled_quantity,
+            filled_notional, first_executable_price,
+            first_executable_price_source, d0, due_session, policy_version,
+            s1_virtual_quantity, s4_virtual_quantity, broker_quantity,
+            unattributed_quantity, virtual_exit_quantity, virtual_exit_price,
+            reconstructible, details
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s,
+            %s, %s, %s, %s,
+            %s, %s, %s,
+            %s, %s, %s,
+            %s, %s::jsonb
+        )
+        ON CONFLICT (event_id) DO NOTHING
+    """
+
+    def write_s4_lifecycle_events(
+        self, events: list["S4LifecycleEvent | S4VirtualExitEvent"]
+    ) -> None:
+        """Append shadow lifecycle observations; deterministic IDs dedupe retries."""
+        if not events:
+            return
+        params = []
+        for event in events:
+            params.append((
+                event.event_id,
+                event.intent_id,
+                event.event_type,
+                event.observed_at,
+                event.symbol,
+                getattr(event, "order_id", None),
+                event.status,
+                event.reason_code,
+                getattr(event, "fill_id", None),
+                getattr(event, "filled_at", None),
+                getattr(event, "filled_quantity", 0.0),
+                getattr(event, "filled_notional", 0.0),
+                getattr(event, "first_executable_price", None),
+                getattr(event, "first_executable_price_source", None),
+                getattr(event, "d0", None),
+                getattr(event, "due_session", None),
+                event.policy_version,
+                event.s1_virtual_quantity,
+                event.s4_virtual_quantity,
+                getattr(event, "broker_quantity", None),
+                getattr(event, "unattributed_quantity", None),
+                getattr(event, "virtual_exit_quantity", None),
+                getattr(event, "price", None),
+                getattr(event, "reconstructible", True),
+                json.dumps(getattr(event, "details", {}), sort_keys=True),
+            ))
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.executemany(self._INSERT_S4_LIFECYCLE_EVENT, params)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    def fetch_s4_submitted_intents(self) -> list["SubmittedIntent"]:
+        """Read submitted #294 intents without inventing missing broker metadata."""
+        from src.strategies.s4.lifecycle import SubmittedIntent
+
+        conn = self._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        intent_id::text AS intent_id,
+                        symbol,
+                        snapshot->'disposition'->>'order_id' AS order_id,
+                        occurred_at AS submitted_at,
+                        (snapshot->'disposition'->>'requested_quantity')::DOUBLE PRECISION
+                            AS requested_quantity,
+                        (snapshot->'disposition'->>'notional')::DOUBLE PRECISION
+                            AS requested_notional,
+                        (snapshot->'disposition'->>'first_executable_price')::DOUBLE PRECISION
+                            AS first_executable_price,
+                        snapshot->'disposition'->>'first_executable_price_source'
+                            AS first_executable_price_source,
+                        versions->'policy'->>'version' AS policy_version,
+                        COALESCE(
+                            snapshot->'disposition'->'sleeve_contributions',
+                            '{}'::jsonb
+                        ) AS sleeve_contributions
+                    FROM s4_intent_events
+                    WHERE event_type = 'disposition'
+                      AND reason_code = 'SUBMITTED'
+                      AND occurred_at > now() - '7 days'::interval
+                    ORDER BY occurred_at, intent_id
+                    """
+                )
+                rows = cur.fetchall()
+            return [SubmittedIntent(
+                intent_id=str(row["intent_id"]),
+                symbol=row["symbol"],
+                order_id=row["order_id"],
+                submitted_at=row["submitted_at"],
+                requested_quantity=float(row["requested_quantity"] or 0.0),
+                requested_notional=float(row["requested_notional"] or 0.0),
+                first_executable_price=float(row["first_executable_price"] or 0.0),
+                first_executable_price_source=(
+                    row["first_executable_price_source"] or "not_recorded"
+                ),
+                policy_version=row["policy_version"] or "unknown",
+                sleeve_contributions=dict(row["sleeve_contributions"] or {}),
+            ) for row in rows]
         except Exception:
             conn.rollback()
             raise
