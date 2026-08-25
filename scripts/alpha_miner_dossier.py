@@ -41,6 +41,7 @@ from src.analysis.dossier.book import (
     aggregate_contradiction_guard,
     compute_entries,
     compute_exits,
+    compute_s4_entry_intents,
 )
 from src.analysis.dossier.decision_quality import (
     build_decision_quality_panel,
@@ -69,7 +70,7 @@ OUT_DIR = PROJECT_DIR / "docs" / "evidence" / "dossier"
 SOGLIA_MOVER = 0.03
 FINESTRA_MEDIANE = 20  # giorni, per le mediane mobili
 INIZIO_OSSERVAZIONE = date(2026, 8, 3)
-DOSSIER_SCHEMA_VERSION = "2.4"
+DOSSIER_SCHEMA_VERSION = "2.5"
 NEW_YORK = ZoneInfo("America/New_York")
 
 # Size plausibile di uno slot S4 per lo stimatore v2 (#280): fixed-slot sizing
@@ -803,6 +804,48 @@ def _timeline_eventi(giorno: date) -> list[dict]:
     } for r in rows]
 
 
+def _s4_entry_intents(giorno: date) -> list[dict]:
+    """Intenti S4 tradabili #294, inclusi quelli mai arrivati a un fill.
+
+    Il join al trade e' confinato allo stesso decision slot da 15 minuti. In
+    questo modo un segnale ri-osservato in cicli successivi non eredita il fill
+    di un altro intento. `net_pnl` resta None sia per un intento non eseguito
+    sia per un trade ancora aperto; `trade_id` distingue i due casi.
+    """
+    g = giorno.isoformat()
+    rows = _psql(
+        f"SELECT intent_id::text, COALESCE(signal_id::text,''), symbol, "
+        f"model_generated_at::text, decision_at::text, "
+        f"COALESCE(snapshot->>'score',''), COALESCE(final_reason_code,''), "
+        f"'t', COALESCE(trade.id::text,''), COALESCE(trade.net_pnl::text,'') "
+        f"FROM s4_tradable_intent_population intent "
+        f"LEFT JOIN LATERAL ("
+        f"  SELECT id, net_pnl FROM trades "
+        f"  WHERE signal_id = intent.signal_id "
+        f"    AND entry_time >= intent.decision_slot "
+        f"    AND entry_time < intent.decision_slot + INTERVAL '15 minutes' "
+        f"  ORDER BY entry_time, id LIMIT 1"
+        f") trade ON true "
+        f"WHERE decision_at >= '{g}' AND decision_at < '{g}'::date + 1 "
+        f"ORDER BY decision_at, intent_id;"
+    )
+    return [
+        {
+            "intent_id": row[0],
+            "signal_id": int(row[1]) if row[1] else None,
+            "symbol": row[2],
+            "signal_at": row[3],
+            "decision_at": row[4],
+            "signal_score": float(row[5]) if row[5] else None,
+            "final_reason_code": row[6] or None,
+            "is_tradable": row[7] == "t",
+            "trade_id": int(row[8]) if row[8] else None,
+            "pnl_realizzato": float(row[9]) if row[9] else None,
+        }
+        for row in rows
+    ]
+
+
 def _dettagli_ordini(order_ids: list[str]) -> dict[str, dict]:
     """Timestamp submission/fill reali dal broker, con errore per-order esplicito."""
     if not order_ids:
@@ -1138,18 +1181,28 @@ def costruisci_dossier(
 
     # --- timeline e barre intraday (#277) --------------------------------
     eventi = _timeline_eventi(giorno)
+    intenti_s4_grezzi = _s4_entry_intents(giorno)
     mover_symbols = {
         symbol
         for symbol, rendimento in mercato["rendimenti"].items()
         if abs(rendimento) >= SOGLIA_MOVER
     }
-    simboli_timeline = sorted(mover_symbols | {e["symbol"] for e in eventi})
+    simboli_timeline = sorted(
+        mover_symbols
+        | {e["symbol"] for e in eventi}
+        | {intent["symbol"] for intent in intenti_s4_grezzi}
+    )
     timestamps_eventi = [
         e[stage]
         for e in eventi
         for stage in ("published_at", "first_seen_at", "ingested_at", "scored_at")
         if e.get(stage) is not None
     ]
+    timestamps_eventi.extend(
+        timestamp
+        for intent in intenti_s4_grezzi
+        if (timestamp := _timestamp(intent.get("signal_at"))) is not None
+    )
     primo_evento = min(timestamps_eventi) if timestamps_eventi else None
     barre_intraday, cutoff_intraday = _barre_intraday(
         simboli_timeline, giorno, primo_evento
@@ -1226,12 +1279,10 @@ def costruisci_dossier(
     # --- book: ingressi e chiusure ----------------------------------------
     ingressi_grezzi = [
         {"symbol": r[0], "strategia": r[1], "ora_utc": r[2],
-         "entry_price": float(r[3]), "qty": float(r[4]),
-         "signal_score": float(r[5]) if r[5] not in (None, "") else None}
+         "entry_price": float(r[3]), "qty": float(r[4])}
         for r in _psql(
             f"SELECT symbol, COALESCE(stop_strategy, CASE WHEN signal_id IS NOT NULL "
-            f"THEN 'S4' ELSE 'S1' END), to_char(entry_time,'HH24:MI'), entry_price, qty, "
-            f"signal_score "
+            f"THEN 'S4' ELSE 'S1' END), to_char(entry_time,'HH24:MI'), entry_price, qty "
             f"FROM trades WHERE entry_time >= '{g}' AND entry_time < '{g}'::date + 1 "
             f"AND entry_price IS NOT NULL AND qty IS NOT NULL ORDER BY entry_time;")]
 
@@ -1260,23 +1311,31 @@ def costruisci_dossier(
     # earnings down): `giorno_di_earnings` resta UNKNOWN, non False per difetto.
     earnings_symbols = _earnings_symbols_from_calendar(corporate_calendar)
 
-    # `signal_score` e' arrivato da trades (migration 023): lo score LLM reale
-    # che ha motivato l'ingresso, distinto dal peso di allocazione. Serve alla
-    # guardia ombra contraddizione (#335 step 2).
     soglia_guardia = _soglia_guardia_contraddizione()
     ingressi = compute_entries(
         ingressi_grezzi,
         barre_ohlc,
-        earnings_symbols=earnings_symbols,
-        soglia_guardia=soglia_guardia,
     )
     chiusure = compute_exits(chiusure_grezze, chiusure_close)
 
+    # #335: la popolazione e' il ledger degli intenti tradabili #294, non la
+    # tabella trades. Il prezzo e' PIT al segnale; gli intenti non eseguiti
+    # restano quindi misurabili senza inventare un fill.
+    intenti_ingresso_s4 = compute_s4_entry_intents(
+        intenti_s4_grezzi,
+        barre_intraday,
+        barre_ohlc,
+        earnings_symbols=earnings_symbols,
+        soglia_guardia=soglia_guardia,
+    )
+
     # #335 step 2: aggregato ombra giornaliero + sweep sulla finestra di
     # osservazione. Misura read-only: nessun ordine cambiato.
-    guardia_giorno = aggregate_contradiction_guard(ingressi, chiusure)
+    guardia_giorno = aggregate_contradiction_guard(intenti_ingresso_s4)
     guardia_giorno["soglia"] = soglia_guardia
-    guardia_finestra = _guardia_contraddizione_finestra(guardia_giorno, giorno)
+    guardia_finestra = _guardia_contraddizione_finestra(
+        intenti_ingresso_s4, giorno
+    )
 
     # --- qualita' decisionale read-only (#284) ----------------------------
     # Lo snapshot e' prospettico/parallelo: i dossier storici restano intatti.
@@ -1378,21 +1437,23 @@ def costruisci_dossier(
                     "UNKNOWN non entra nel numeratore"
                 ),
                 "ritorno_sessione_al_segnale": (
-                    "(entry_price - close_prec) / close_prec da barra daily "
-                    "Alpaca SIP; delta sulla chiusura precedente al momento "
-                    "dell'ingresso, GAP-INCLUSO. Una misura vs-open vedrebbe "
-                    "solo la gamba RTH e perderebbe il gap di apertura (WMT "
-                    "2026-08-20: -2% intraday contro -9% reale) (#335)"
+                    "(prezzo_al_segnale - close_prec) / close_prec per ogni "
+                    "intento tradabile del ledger #294. prezzo_al_segnale e' "
+                    "l'open della prima barra Alpaca SIP 5Min con timestamp >= "
+                    "s4_intent_events.model_generated_at: mai il fill e mai "
+                    "OHLC della barra in corso (#335)"
                 ),
                 "giorno_di_earnings": (
                     "simbolo con evento event_type=earnings nel calendario "
-                    "FMP/Alpaca della sedata; None se il calendario non era "
-                    "disponibile (UNKNOWN, non False per difetto) (#335)"
+                    "FMP/Alpaca della seduta, per ogni intento S4; None se il "
+                    "calendario non era disponibile (UNKNOWN, non False per "
+                    "difetto) (#335)"
                 ),
                 "guardia_contraddizione_ombra": (
-                    "ombra read-only: True se signal_score (trades.signal_score, "
-                    "migration 023) > 0 e ritorno_sessione_al_segnale <= -soglia; "
-                    "None se score o close_prec mancanti. Non blocca nessun ordine (#335)"
+                    "ombra read-only sull'intera s4_tradable_intent_population: "
+                    "True se snapshot.score > 0 e ritorno_sessione_al_segnale "
+                    "<= -soglia; include intenti non eseguiti. None se score, "
+                    "prezzo PIT o close_prec mancanti. Non blocca ordini (#335)"
                 ),
                 "motivo_guardia_contraddizione": (
                     "stringa esplicativa quando la guardia ombra (#335) fa firing "
@@ -1429,6 +1490,7 @@ def costruisci_dossier(
         "candidati_miss": candidati_classificati,
         "soglia_gate_usata": soglia_gate,
         "ingressi": ingressi,
+        "intenti_ingresso_s4": intenti_ingresso_s4,
         "chiusure": chiusure,
         "snapshot_apertura": snapshot_apertura,
         "guard_decisions": guard_decisions,
@@ -1491,57 +1553,63 @@ def _soglia_guardia_contraddizione() -> float:
         return SOGLIA_GUARDIA_CONTRADDIZIONE
 
 
-def _guardia_contraddizione_finestra(guardia_giorno: dict, giorno: date) -> dict:
-    """Somma della guardia ombra su questo giorno piu' i dossier gia' scritti
-    nella finestra di osservazione (#335 step 2).
+def _guardia_contraddizione_finestra(
+    intenti_giorno: list[dict], giorno: date
+) -> dict:
+    """Ricalcola il cumulato #335 dagli intenti PIT conservati nei dossier.
 
-    Copertura onesta: i dossier scritti prima del deploy di questa misura
-    (schema < 2.4) non portano il blocco `aggregati.guardia_contraddizione`, e
-    restano fuori dalla somma. La finestra cresce da oggi in avanti: e' una
-    misura che parte col deploy, non una ricostruzione retrospettiva.
-
-    A differenza di `_mediane_mobili` (finestra mobile a 20 giorni), qui si
-    somma sull'intera finestra di osservazione: e' un totale cumulato, non una
-    mediana recente. Il dossier del giorno corrente e' saltato dallo sweep
-    (usa il `guardia_giorno` in memoria, fresco): evita il doppio-conteggio su
-    backfill quando il file esiste gia'.
+    Il P&L dei trade eseguiti viene riletto per `trade_id`: un intento ancora
+    aperto nel dossier del giorno d'ingresso acquisisce il P&L realizzato appena
+    il trade chiude, senza riscrivere il dossier storico e senza matching FIFO.
+    I dossier pre-schema 2.5 non hanno la popolazione #294 e restano fuori con
+    copertura esplicita.
     """
-    somma = defaultdict(float)
-
-    def _accumula(blocco: dict | None) -> None:
-        if not blocco:
-            return
-        for chiave in ("n_valutabili", "n_soppressi",
-                       "n_soppressi_con_uscita", "n_soppressi_aperti"):
-            somma[chiave] += int(blocco.get(chiave) or 0)
-        somma["somma_pnl_realizzato_soppressi"] += float(
-            blocco.get("somma_pnl_realizzato_soppressi") or 0.0
-        )
-
-    _accumula(guardia_giorno)
-    n_giorni = 1  # il giorno corrente e' coperto: sta producendo il suo blocco
+    intenti_finestra = list(intenti_giorno)
+    giorni_coperti = {giorno.isoformat()}
     oggi_iso = giorno.isoformat()
     for f in sorted(OUT_DIR.glob("*.json")):
         if f.stem == oggi_iso:
+            continue
+        if f.stem < INIZIO_OSSERVAZIONE.isoformat() or f.stem > oggi_iso:
             continue
         try:
             d = json.loads(f.read_text())
         except (json.JSONDecodeError, OSError):
             continue
-        blocco = ((d.get("aggregati") or {}).get("guardia_contraddizione") or {}).get("giorno")
-        if blocco:
-            _accumula(blocco)
-            n_giorni += 1
+        intenti = d.get("intenti_ingresso_s4")
+        if isinstance(intenti, list):
+            intenti_finestra.extend(intenti)
+            giorni_coperti.add(f.stem)
 
-    return {
-        "n_giorni_coperti": n_giorni,
-        "n_valutabili": int(somma["n_valutabili"]),
-        "n_soppressi": int(somma["n_soppressi"]),
-        "n_soppressi_con_uscita": int(somma["n_soppressi_con_uscita"]),
-        "n_soppressi_aperti": int(somma["n_soppressi_aperti"]),
-        "somma_pnl_realizzato_soppressi": round(somma["somma_pnl_realizzato_soppressi"], 6),
-        "copertura": "da schema 2.4 in avanti; dossier pre-deploy esclusi",
-    }
+    trade_ids = sorted({
+        int(intent["trade_id"])
+        for intent in intenti_finestra
+        if intent.get("trade_id") is not None
+    })
+    pnl_per_trade: dict[int, float | None] = {}
+    if trade_ids:
+        id_sql = ",".join(str(trade_id) for trade_id in trade_ids)
+        for row in _psql(
+            f"SELECT id::text, COALESCE(net_pnl::text,'') FROM trades "
+            f"WHERE id IN ({id_sql}) ORDER BY id;"
+        ):
+            pnl_per_trade[int(row[0])] = float(row[1]) if row[1] else None
+
+    aggiornati = []
+    for intent in intenti_finestra:
+        row = dict(intent)
+        trade_id = row.get("trade_id")
+        if trade_id is not None and int(trade_id) in pnl_per_trade:
+            row["pnl_realizzato"] = pnl_per_trade[int(trade_id)]
+        aggiornati.append(row)
+
+    aggregato = aggregate_contradiction_guard(aggiornati)
+    aggregato.update({
+        "n_giorni_coperti": len(giorni_coperti),
+        "copertura": "da schema 2.5 in avanti; dossier pre-ledger esclusi",
+        "pnl_refresh": "trades.net_pnl riletto per trade_id alla generazione",
+    })
+    return aggregato
 
 
 def _miss_cumulati() -> dict[str, int]:

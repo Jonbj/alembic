@@ -6,6 +6,7 @@ Modulo puro: riceve trade e barre gia' caricati, non tocca rete ne' DB.
 from __future__ import annotations
 
 import statistics
+from datetime import datetime, timezone
 from typing import TypedDict
 
 # Soglia DICHIARATA sotto la quale la gamba intraday (close - open) e' troppo
@@ -27,11 +28,8 @@ SOGLIA_GUARDIA_CONTRADDIZIONE = 0.04
 class EntryTrade(TypedDict, total=False):
     """Campi di un ingresso necessari alle metriche del dossier.
 
-    `total=False` perche' `signal_score` e' facoltativo: i trade legacy (F-002)
-    e i dossier senza la colonna non lo portano, e la guardia ombra resta None.
-    I campi strutturali (symbol, strategia, ora_utc, entry_price, qty) restano
-    di fatto sempre presenti ma non vengono marcati required per non rompere i
-    dict letterali dei dossier storici.
+    `total=False` preserva i dict letterali dei dossier storici; i campi qui
+    elencati sono strutturali nel wiring corrente.
     """
 
     symbol: str
@@ -39,7 +37,6 @@ class EntryTrade(TypedDict, total=False):
     ora_utc: str
     entry_price: float
     qty: float
-    signal_score: float | None
 
 
 class DailyBar(TypedDict, total=False):
@@ -71,23 +68,34 @@ class EntryMetrics(EntryTrade):
     quota_movimento_precedente_al_segnale: float | None
     denominatore_degenere: bool
     quota_nel_gap: float | None
-    # #335: strumentazione entry-gate. Misura read-only: nessuno di questi
-    # campi entra in una decisione di trading.
-    # `ritorno_sessione_al_segnale` e' il delta del prezzo sulla chiusura del
-    # giorno precedente al momento dell'ingresso: il "down X% on the session"
-    # che un entry gate dovrebbe vedere. E' GAP-INCLUSIVO di proposito: WMT
-    # 2026-08-20 scese ~9% sulla seduta, ma solo ~2% dentro l'RTH — il resto
-    # fu nel gap di apertura (quota_nel_gap=0.757). Una misura vs-open
-    # vedrebbe -2% e lascerebbe passare il BUY a +0.318 nel crash reale.
+
+
+class S4EntryIntent(TypedDict, total=False):
+    """Intento S4 tradabile catturato dal ledger point-in-time #294."""
+
+    intent_id: str
+    signal_id: int | None
+    symbol: str
+    signal_at: str
+    decision_at: str
+    signal_score: float | None
+    final_reason_code: str | None
+    is_tradable: bool
+    trade_id: int | None
+    pnl_realizzato: float | None
+
+
+class S4EntryIntentMetrics(S4EntryIntent):
+    """Intento S4 arricchito senza usare il prezzo di fill."""
+
+    prezzo_al_segnale: float | None
+    prezzo_al_segnale_timestamp: str | None
+    prezzo_al_segnale_fonte: str | None
     ritorno_sessione_al_segnale: float | None
-    # True/False se il calendario earnings era disponibile, None se non lo era
-    # (UNKNOWN): il dossier non imputa False per difetto di fonte.
     giorno_di_earnings: bool | None
-    # Guardia ombra (#335 step 2): True se score positivo e titolo gia' sceso
-    # oltre la soglia nella seduta. None se score o ritorno mancanti (non
-    # decidibile). `motivo_guardia_contraddizione` spiega il firing, None altrimenti.
     guardia_contraddizione_ombra: bool | None
     motivo_guardia_contraddizione: str | None
+    missingness: dict[str, str]
 
 
 class ExitTrade(TypedDict):
@@ -160,9 +168,6 @@ class EntryHourAggregate(TypedDict):
 def compute_entries(
     trades: list[EntryTrade],
     bars: dict[str, DailyBar],
-    *,
-    earnings_symbols: set[str] | None = None,
-    soglia_guardia: float = SOGLIA_GUARDIA_CONTRADDIZIONE,
 ) -> list[EntryMetrics]:
     """Metriche degli ingressi del giorno, con esito PROVVISORIO di fine giornata.
 
@@ -191,13 +196,6 @@ def compute_entries(
     08-12 la prima era degenere e la seconda valeva 99% mediano — fonderle
     avrebbe prodotto un numero che non descrive niente.
 
-    #335 (strumentazione entry-gate, misura read-only): `ritorno_sessione_al_segnale`
-    e' il delta vs chiusura precedente (gap-incluso) al momento dell'ingresso;
-    `giorno_di_earnings` riporta se il simbolo aveva earnings nella seduta
-    (None se il calendario non era disponibile); `guardia_contraddizione_ombra`
-    segna un BUY lungo il cui score e' positivo mentre il titolo e' gia' sceso
-    oltre `soglia_guardia` sulla seduta. Nessuno di questi tre entra in una
-    decisione di trading.
     """
     result: list[EntryMetrics] = []
     for trade in trades:
@@ -214,38 +212,109 @@ def compute_entries(
             "quota_movimento_precedente_al_segnale": None,
             "denominatore_degenere": True,
             "quota_nel_gap": None,
-            "ritorno_sessione_al_segnale": None,
-            "giorno_di_earnings": None,
-            "guardia_contraddizione_ombra": None,
-            "motivo_guardia_contraddizione": None,
         }
-        # `giorno_di_earnings` non dipende dalla barra, solo dal calendario:
-        # None quando il calendario non era disponibile (UNKNOWN), mai False
-        # imposto per difetto di fonte.
-        if earnings_symbols is not None:
-            row["giorno_di_earnings"] = trade["symbol"] in earnings_symbols
         if bar is not None:
             rng = bar["high"] - bar["low"]
             if rng > 0:
                 row["entry_percentile"] = (trade["entry_price"] - bar["low"]) / rng
             row["mtm_eod"] = (bar["close"] - trade["entry_price"]) * trade["qty"]
             row["vs_apertura"] = (bar["close"] - bar["open"]) * trade["qty"]
-            close_prec = bar.get("close_prec")
-            row["ritorno_sessione_al_segnale"] = (
-                (trade["entry_price"] - close_prec) / close_prec
-                if close_prec
-                else None
-            )
             row.update(_quote_movimento(trade["entry_price"], bar))
-        # La guardia ombra vive dopo il calcolo del ritorno: legge score e
-        # ritorno gia' risolti (None su entrambi i lati se assenti).
+        result.append(row)
+    return result
+
+
+def compute_s4_entry_intents(
+    intents: list[S4EntryIntent],
+    bars_by_symbol: dict[str, list[dict]],
+    daily_bars: dict[str, DailyBar],
+    *,
+    earnings_symbols: set[str] | None = None,
+    soglia_guardia: float = SOGLIA_GUARDIA_CONTRADDIZIONE,
+) -> list[S4EntryIntentMetrics]:
+    """Misura ogni intento S4 tradabile al timestamp point-in-time del segnale.
+
+    Il prezzo e' l'open della prima barra 5Min con timestamp >= `signal_at`, lo
+    stesso contratto PIT della timeline del dossier: una barra gia' iniziata
+    contiene futuro rispetto al segnale e non puo' essere letta. Il fill non e'
+    mai usato come proxy; per un intento non eseguito non esiste proprio.
+    """
+    result: list[S4EntryIntentMetrics] = []
+    for intent in intents:
+        row: S4EntryIntentMetrics = {
+            **intent,
+            "prezzo_al_segnale": None,
+            "prezzo_al_segnale_timestamp": None,
+            "prezzo_al_segnale_fonte": None,
+            "ritorno_sessione_al_segnale": None,
+            "giorno_di_earnings": None,
+            "guardia_contraddizione_ombra": None,
+            "motivo_guardia_contraddizione": None,
+            "missingness": {},
+        }
+        symbol = str(intent.get("symbol") or "")
+        if earnings_symbols is not None:
+            row["giorno_di_earnings"] = symbol in earnings_symbols
+
+        signal_at = _as_utc(intent.get("signal_at"))
+        if signal_at is None:
+            row["missingness"]["prezzo_al_segnale"] = "signal_timestamp_missing"
+        else:
+            for bar in sorted(
+                bars_by_symbol.get(symbol, []),
+                key=lambda item: _as_utc(item.get("timestamp")) or datetime.max.replace(
+                    tzinfo=timezone.utc
+                ),
+            ):
+                bar_at = _as_utc(bar.get("timestamp"))
+                if bar_at is None or bar_at < signal_at:
+                    continue
+                price = _optional_float(bar.get("open"))
+                if price is None or price <= 0:
+                    continue
+                row["prezzo_al_segnale"] = price
+                row["prezzo_al_segnale_timestamp"] = bar_at.isoformat()
+                row["prezzo_al_segnale_fonte"] = "alpaca_sip_5min.open"
+                break
+            if row["prezzo_al_segnale"] is None:
+                row["missingness"]["prezzo_al_segnale"] = (
+                    "no_observable_bar_at_or_after_signal"
+                )
+
+        close_prec = (daily_bars.get(symbol) or {}).get("close_prec")
+        price = row["prezzo_al_segnale"]
+        if price is not None and close_prec not in (None, 0):
+            row["ritorno_sessione_al_segnale"] = (price - close_prec) / close_prec
+        elif close_prec in (None, 0):
+            row["missingness"]["ritorno_sessione_al_segnale"] = (
+                "previous_close_missing"
+            )
+
         guardia, motivo = _guardia_contraddizione(
-            trade.get("signal_score"), row["ritorno_sessione_al_segnale"], soglia_guardia
+            intent.get("signal_score"),
+            row["ritorno_sessione_al_segnale"],
+            soglia_guardia,
         )
         row["guardia_contraddizione_ombra"] = guardia
         row["motivo_guardia_contraddizione"] = motivo
         result.append(row)
     return result
+
+
+def _as_utc(value: str | datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _optional_float(value) -> float | None:
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _quote_movimento(entry_price: float, bar: DailyBar) -> dict:
@@ -305,9 +374,8 @@ def _guardia_contraddizione(
 
     Tre stati, mai None confuso con False:
 
-    - None: score o ritorno mancanti -> non decidibile. I trade legacy senza
-      `signal_score` e gli ingressi senza close_prec restano qui, non forzati
-      a False.
+    - None: score, prezzo PIT o close precedente mancanti -> non decidibile.
+      Gli intenti restano visibili con missingness, non forzati a False.
     - True: score > 0 e ritorno <= -soglia -> il segno dello score contraddice
       il movimento di prezzo gia' avvenuto. `motivo` spiega il firing.
     - False: score e ritorno presenti, nessuna contraddizione (score positivo su
@@ -324,58 +392,48 @@ def _guardia_contraddizione(
     return False, None
 
 
-def aggregate_contradiction_guard(
-    ingressi: list[dict], chiusure: list[dict]
-) -> dict:
-    """Conteggio ombra della guardia contraddizione su un set di ingressi (#335).
+def aggregate_contradiction_guard(intents: list[dict]) -> dict:
+    """Conta gli intenti che la guardia avrebbe soppresso e il loro P&L reale.
 
-    Misura read-only: conta quanti ingressi la guardia avrebbe soppresso e
-    somma il P&L che hanno realizzato. Il matching ingresso->chiusura e' per
-    (symbol, strategia) in ordine FIFO: e' un'approssimazione STESSO TURNO,
-    adeguata per S4 (tipicamente in/out nella stessa seduta, come WMT 16:37 ->
-    17:37). Un ingresso il cui titolo resta aperto oltre il dossier del giorno
-    non ha uscita qui, e resta tra gli `n_soppressi_aperti`: il suo P&L
-    realizzato si raccoglie nel dossier del giorno di uscita.
-
-    `n_valutabili` conta solo gli ingressi con guardia decidibile (non None):
-    i trade legacy senza score o senza barra non entrano nel denominatore.
+    L'identita' arriva dal ledger #294 e l'esecuzione dal `trade_id` collegato:
+    nessun matching FIFO e nessuna imputazione di un fill a un intento scartato.
     """
-    per_chiave: dict[tuple[str, str], list[float]] = {}
-    for chiusura in chiusure:
-        chiave = (str(chiusura.get("symbol") or ""), str(chiusura.get("strategia") or ""))
-        per_chiave.setdefault(chiave, []).append(float(chiusura.get("pnl_net") or 0.0))
-
     n_valutabili = 0
     n_soppressi = 0
-    n_soppressi_con_uscita = 0
-    n_soppressi_aperti = 0
+    n_soppressi_eseguiti = 0
+    n_soppressi_non_eseguiti = 0
+    n_soppressi_con_pnl = 0
+    n_soppressi_senza_pnl = 0
     somma_pnl = 0.0
-    cursor: dict[tuple[str, str], int] = {k: 0 for k in per_chiave}
-    for ingresso in ingressi:
-        guardia = ingresso.get("guardia_contraddizione_ombra")
+    for intent in intents:
+        guardia = intent.get("guardia_contraddizione_ombra")
         if guardia is None:
             continue
         n_valutabili += 1
         if guardia is not True:
             continue
         n_soppressi += 1
-        chiave = (str(ingresso.get("symbol") or ""), str(ingresso.get("strategia") or ""))
-        coda = per_chiave.get(chiave)
-        if coda and cursor.get(chiave, 0) < len(coda):
-            pnl = coda[cursor[chiave]]
-            cursor[chiave] = cursor.get(chiave, 0) + 1
-            somma_pnl += pnl
-            n_soppressi_con_uscita += 1
+        if intent.get("trade_id") is None:
+            n_soppressi_non_eseguiti += 1
+            continue
+        n_soppressi_eseguiti += 1
+        pnl = _optional_float(intent.get("pnl_realizzato"))
+        if pnl is None:
+            n_soppressi_senza_pnl += 1
         else:
-            n_soppressi_aperti += 1
+            somma_pnl += pnl
+            n_soppressi_con_pnl += 1
 
     return {
+        "n_intenti": len(intents),
         "n_valutabili": n_valutabili,
         "n_soppressi": n_soppressi,
-        "n_soppressi_con_uscita": n_soppressi_con_uscita,
-        "n_soppressi_aperti": n_soppressi_aperti,
+        "n_soppressi_eseguiti": n_soppressi_eseguiti,
+        "n_soppressi_non_eseguiti": n_soppressi_non_eseguiti,
+        "n_soppressi_con_pnl": n_soppressi_con_pnl,
+        "n_soppressi_senza_pnl": n_soppressi_senza_pnl,
         "somma_pnl_realizzato_soppressi": round(somma_pnl, 6),
-        "matching": "symbol+strategia FIFO, stesso turno (approx)",
+        "matching": "s4_intent_events.intent_id -> trades nel decision_slot",
     }
 
 

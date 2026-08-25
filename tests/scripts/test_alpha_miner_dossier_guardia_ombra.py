@@ -14,7 +14,7 @@ UTC = timezone.utc
 
 def _fake_psql(query):
     """Risponde alle query del book e del ledger degli intenti S4."""
-    if "FROM s4_candidate_population" in query:
+    if "FROM s4_tradable_intent_population" in query:
         # intent_id, signal_id, symbol, model_generated_at, decision_at, score,
         # final_reason_code, is_tradable, trade_id, pnl_net
         return [
@@ -25,7 +25,7 @@ def _fake_psql(query):
             ],
             [
                 "intent-msft", "7002", "MSFT", "2026-08-20T16:38:00+00:00",
-                "2026-08-20T16:52:00+00:00", "0.410", "SKIP_PYRAMIDING", "f",
+                "2026-08-20T16:52:00+00:00", "0.410", "RANK_SELECTED", "t",
                 "", "",
             ],
         ]
