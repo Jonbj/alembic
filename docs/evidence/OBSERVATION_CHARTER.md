@@ -47,6 +47,7 @@ Ogni eccezione applicata va annotata qui con data, motivo e commit.
 | 2026-08-07 | Il ratchet non alza il gate d'ingresso di S4 sopra il baseline 0,30 (#191) | La leva era salita da sola a **0,45** scartando il 93-97% dei segnali. Il freeze aveva congelato la taratura *manuale*, non questa leva *automatica*. Senza la deroga, la domanda di uscita n.1 si auto-risponde: con S4 che quasi non tratta, il suo P&L economico resta dentro ±$200 **per costruzione**, e al 28/09 concluderemmo «la news non ha alpha» quando la causa è il gate. Lo strumento risolverebbe la domanda al posto del fenomeno. **Perimetro:** solo il tetto della leva; `threshold_step`, il trigger, il decay e il ramo `regime_scale` restano intatti. | vedi #191 |
 | 2026-08-14 | **#236 deployato**: il filtro QS-07 non riscarta più i segnali che FIX-D ha ri-ammesso | Dentro la deroga d'ambito concessa il 2026-08-13. È un difetto di correttezza e passa il test di esenzione: FIX-D decide di tenere aperta una posizione perché la scadenza di un segnale non è un contro-segnale, e un filtro a valle annullava quella decisione sull'orologio — 30 uscite a peso-zero in 40 giorni, fra cui IBM (−26,47 $ realizzati, +13,71 $ lasciati sul tavolo). Finché S4 esegue, ogni giorno di attesa ne produce altre, quindi il deploy è anticipato rispetto al batch unico. **Perimetro:** solo l'esenzione per provenienza; il filtro d'età resta intatto per i segnali non marcati (backtest) e il ramo `below_entry_gate` (#170) non è toccato. | vedi #236 |
 | 2026-08-07 | Stopgap manuale sulla chiave Redis `feedback:entry_threshold:S4`, da 0,45 a 0,30 | La correzione di codice di #191 richiede rebuild e redeploy (`config/trading.yaml` è baked, non montato). Ogni giorno di attesa è un giorno di finestra speso al 5% dei segnali. **Temporaneo:** al prossimo trigger il ratchet la rialza finché #191 non è deployata. | nessuno: intervento su Redis, non sul repo |
+| 2026-08-25 | **#182(a)**: `sentiment_reversal` di S4 non chiude più posizioni che S4 non ha aperto | La regola di precedenza sulle uscite era decisa dal 2026-08-22 con implementazione rinviata al 28/09. Ma il meccanismo era spento **per caso** — il ratchet a 0,45 (#191) silenziava S4 dal 31/07 — e col gate rimesso a 0,30 si è ri-armato: le sedute che restano sono le prime della finestra in cui l'overlay può davvero liquidare il core, quindi il P&L S4 raccolto per la domanda 1 conterrebbe per costruzione il costo di un meccanismo già deciso da togliere. Costo misurato: 22 uscite `sentiment_reversal` su 22 hanno liquidato core o legacy, **zero** posizioni S4; −$350,90 su titoli altrui (58% delle perdite realizzate della finestra da 16% dei trade) contro **+$1,30** sui titoli propri. Stesso test di esenzione di #236. **Perimetro:** solo il titolo a chiudere posizioni altrui; posizioni proprie di S4, veto sugli ingressi, `stop_loss`, `portfolio_sell` e il clock di #334 restano intatti. Attribuzione dubbia → **non si chiude** (fail-closed). | **deroga concessa il 2026-08-25; deploy non ancora avvenuto — hash da inserire al merge** |
 
 Il **ritiro di F8** deciso lo stesso giorno (#134) non compare qui: `apply_regime_scale: false`
 significa che la leva era già spenta, quindi è rimozione di codice inerte e non tocca il
@@ -68,6 +69,17 @@ invece che mediate sull'intera finestra:
   cioè da una strategia che scartava ~19 segnali su 20. Il conteggio dei giorni di ricorrenza su
   F-009 (*il gate scarta segnali col segno corretto*) è il più esposto: quelle occorrenze sono state
   generate da una soglia che non era quella di design.
+
+- **#182(a) — pre-registrata il 2026-08-25, deploy non ancora avvenuto.** Annotata *prima* del
+  cambiamento invece che dopo, così che la discontinuità sia dichiarata e non ricostruita a
+  posteriori. Dal deploy in avanti `sentiment_reversal` non chiude più posizioni che S4 non ha
+  aperto, e il mix delle uscite cambia **per costruzione**: le righe `sentiment_reversal` su
+  posizioni non-S4 vanno a zero, la tenuta mediana delle posizioni S1 sale, il conteggio delle
+  uscite per seduta cala. Il P&L **realizzato di S1** prima e dopo il deploy **non è sommabile**;
+  durata delle posizioni e conteggio uscite attraverso quella data misurano il deploy, non la
+  strategia. Terza discontinuità della finestra dopo #185 e #236. **Al merge va sostituita la
+  dicitura «deploy non ancora avvenuto» con la data reale e l'hash**, qui e nel registro delle
+  deroghe.
 
 - **#293 / trial exit S4 (deroga registrata in anticipo, 2026-08-22)** — **data** = `n=0` del trial
   exit, non ancora fissata: coincide col batch atomico che apre la raccolta (§ Sequenza punto 3 della
