@@ -1,7 +1,7 @@
 """Wiring della guardia ombra contraddizione e di `giorno_di_earnings` nel
-dossier (#335). Verifica che lo score LLM (trades.signal_score) e il ritorno
-di sessione arrivino a `compute_entries` e che l'aggregato ombra compaia in
-`aggregati`. Misura read-only: nessun ordine cambiato.
+dossier (#335). Verifica che ogni entry intent del ledger #294, anche non
+eseguito, venga misurato al prezzo PIT del segnale e compaia nell'aggregato
+ombra. Misura read-only: nessun ordine cambiato.
 """
 
 from datetime import date, datetime, timezone
@@ -13,8 +13,22 @@ UTC = timezone.utc
 
 
 def _fake_psql(query):
-    """Risponde solo alle query del book; il resto a lista vuota come il test
-    della timeline. 6 colonne per gli ingressi (signal_score incluso)."""
+    """Risponde alle query del book e del ledger degli intenti S4."""
+    if "FROM s4_candidate_population" in query:
+        # intent_id, signal_id, symbol, model_generated_at, decision_at, score,
+        # final_reason_code, is_tradable, trade_id, pnl_net
+        return [
+            [
+                "intent-wmt", "7001", "WMT", "2026-08-20T16:36:00+00:00",
+                "2026-08-20T16:37:00+00:00", "0.318", "RANK_SELECTED", "t",
+                "42", "2.38",
+            ],
+            [
+                "intent-msft", "7002", "MSFT", "2026-08-20T16:38:00+00:00",
+                "2026-08-20T16:52:00+00:00", "0.410", "SKIP_PYRAMIDING", "f",
+                "", "",
+            ],
+        ]
     if "FROM trades WHERE entry_time >=" in query:
         # symbol, strategia, ora, entry_price, qty, signal_score
         return [["WMT", "S4", "16:37", "103.79", "17.95", "0.318"]]
@@ -30,10 +44,9 @@ def _fake_psql(query):
     return []
 
 
-def test_dossier_attacha_guardia_ombra_e_aggregato_soppressi():
-    """Caso WMT 2026-08-20: score +0.318, titolo gia' sceso ~9% sulla seduta.
-    Il dossier marca l'ingresso con la guardia ombra e l'aggregato conta 1
-    soppresso con P&L realizzato +$2.38 (stesso turno)."""
+def test_dossier_misura_tutti_gli_intenti_al_prezzo_pit_del_segnale():
+    """Il ledger porta sia WMT eseguito sia MSFT scartato. WMT va misurato a
+    104.25 (prima barra dopo le 16:36), non al fill 103.79 della tabella trades."""
     daily = {
         "WMT": {
             "open": 114.0,
@@ -42,13 +55,26 @@ def test_dossier_attacha_guardia_ombra_e_aggregato_soppressi():
             "close": 103.98,
             "close_prec": 114.0,
         },
+        "MSFT": {
+            "open": 100.0,
+            "high": 101.0,
+            "low": 94.0,
+            "close": 95.0,
+            "close_prec": 100.0,
+        },
         "SPY": {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0,
                 "close_prec": 100.0},
     }
-    intraday = {"WMT": [{
-        "timestamp": datetime(2026, 8, 20, 16, 37, tzinfo=UTC),
-        "open": 104.0, "high": 104.5, "low": 103.0, "close": 103.79,
-    }]}
+    intraday = {
+        "WMT": [{
+            "timestamp": datetime(2026, 8, 20, 16, 40, tzinfo=UTC),
+            "open": 104.25, "high": 104.5, "low": 103.0, "close": 103.79,
+        }],
+        "MSFT": [{
+            "timestamp": datetime(2026, 8, 20, 16, 40, tzinfo=UTC),
+            "open": 95.0, "high": 95.5, "low": 94.0, "close": 94.5,
+        }],
+    }
     cutoff = datetime(2026, 8, 20, 23, 59, tzinfo=UTC)
 
     with (
@@ -63,18 +89,30 @@ def test_dossier_attacha_guardia_ombra_e_aggregato_soppressi():
     ):
         payload = dossier.costruisci_dossier(date(2026, 8, 20), ["WMT"])
 
-    ingresso = payload["ingressi"][0]
-    assert ingresso["symbol"] == "WMT"
-    assert ingresso["ritorno_sessione_al_segnale"] is not None
-    assert ingresso["ritorno_sessione_al_segnale"] < -0.04
-    assert ingresso["guardia_contraddizione_ombra"] is True
-    assert ingresso["motivo_guardia_contraddizione"] is not None
+    assert len(payload["intenti_ingresso_s4"]) == 2
+    wmt, msft = payload["intenti_ingresso_s4"]
+    assert wmt["symbol"] == "WMT"
+    assert wmt["prezzo_al_segnale"] == 104.25
+    assert wmt["prezzo_al_segnale"] != payload["ingressi"][0]["entry_price"]
+    assert wmt["prezzo_al_segnale_fonte"] == "alpaca_sip_5min.open"
+    assert wmt["ritorno_sessione_al_segnale"] < -0.04
+    assert wmt["guardia_contraddizione_ombra"] is True
+    assert wmt["trade_id"] == 42
+    assert wmt["pnl_realizzato"] == 2.38
     # fetch_remote_context=False -> calendario non disponibile -> UNKNOWN, non False
-    assert ingresso["giorno_di_earnings"] is None
+    assert wmt["giorno_di_earnings"] is None
+
+    assert msft["symbol"] == "MSFT"
+    assert msft["trade_id"] is None
+    assert msft["pnl_realizzato"] is None
+    assert msft["guardia_contraddizione_ombra"] is True
 
     giorno = payload["aggregati"]["guardia_contraddizione"]["giorno"]
-    assert giorno["n_soppressi"] == 1
-    assert giorno["n_soppressi_con_uscita"] == 1
+    assert giorno["n_intenti"] == 2
+    assert giorno["n_soppressi"] == 2
+    assert giorno["n_soppressi_eseguiti"] == 1
+    assert giorno["n_soppressi_non_eseguiti"] == 1
+    assert giorno["n_soppressi_con_pnl"] == 1
     assert giorno["somma_pnl_realizzato_soppressi"] == 2.38
 
     finestra = payload["aggregati"]["guardia_contraddizione"]["finestra_osservazione"]
