@@ -67,7 +67,7 @@ class EntryMetrics(EntryTrade):
 
 
 class S4EntryIntent(TypedDict, total=False):
-    """Intento S4 tradabile catturato dal ledger point-in-time #294."""
+    """Candidate intent S4 catturato dal ledger point-in-time #294."""
 
     intent_id: str
     signal_id: int | None
@@ -76,7 +76,7 @@ class S4EntryIntent(TypedDict, total=False):
     decision_at: str
     signal_score: float | None
     final_reason_code: str | None
-    is_tradable: bool
+    is_tradable: bool | None
     trade_id: int | None
     pnl_realizzato: float | None
 
@@ -233,7 +233,7 @@ def compute_s4_entry_intents(
     earnings_symbols: set[str] | None = None,
     soglia_guardia: float = SOGLIA_GUARDIA_CONTRADDIZIONE,
 ) -> list[S4EntryIntentMetrics]:
-    """Misura ogni intento S4 tradabile al timestamp point-in-time del segnale.
+    """Misura ogni candidate intent S4 al timestamp point-in-time del segnale.
 
     Il prezzo e' l'open della prima barra 5Min con timestamp >= `signal_at`, lo
     stesso contratto PIT della timeline del dossier: una barra gia' iniziata
@@ -253,6 +253,8 @@ def compute_s4_entry_intents(
             "motivo_guardia_contraddizione": None,
             "missingness": {},
         }
+        if intent.get("is_tradable") is None:
+            row["missingness"]["disposition"] = "not_recorded"
         symbol = str(intent.get("symbol") or "")
         if earnings_symbols is not None:
             row["giorno_di_earnings"] = symbol in earnings_symbols
@@ -400,6 +402,9 @@ def aggregate_contradiction_guard(
     L'identita' arriva dal ledger #294 e l'esecuzione dal `trade_id` collegato:
     nessun matching FIFO e nessuna imputazione di un fill a un intento scartato.
     """
+    n_intenti_tradabili = 0
+    n_intenti_non_tradabili = 0
+    n_intenti_disposizione_mancante = 0
     n_valutabili = 0
     n_soppressi = 0
     n_soppressi_eseguiti = 0
@@ -408,6 +413,14 @@ def aggregate_contradiction_guard(
     n_soppressi_senza_pnl = 0
     somma_pnl = 0.0
     for intent in intents:
+        is_tradable = intent.get("is_tradable")
+        if is_tradable is None:
+            n_intenti_disposizione_mancante += 1
+            continue
+        if is_tradable is not True:
+            n_intenti_non_tradabili += 1
+            continue
+        n_intenti_tradabili += 1
         guardia = intent.get("guardia_contraddizione_ombra")
         if guardia is None:
             continue
@@ -428,6 +441,9 @@ def aggregate_contradiction_guard(
 
     return {
         "n_intenti": len(intents),
+        "n_intenti_tradabili": n_intenti_tradabili,
+        "n_intenti_non_tradabili": n_intenti_non_tradabili,
+        "n_intenti_disposizione_mancante": n_intenti_disposizione_mancante,
         "n_valutabili": n_valutabili,
         "n_soppressi": n_soppressi,
         "n_soppressi_eseguiti": n_soppressi_eseguiti,

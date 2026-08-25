@@ -806,7 +806,7 @@ def _timeline_eventi(giorno: date) -> list[dict]:
 
 
 def _s4_entry_intents(giorno: date) -> list[dict]:
-    """Intenti S4 tradabili #294, inclusi quelli mai arrivati a un fill.
+    """Tutti i candidate intent S4 #294, inclusi scarti e mancati fill.
 
     Il join al trade e' confinato allo stesso decision slot da 15 minuti. In
     questo modo un segnale ri-osservato in cicli successivi non eredita il fill
@@ -815,11 +815,16 @@ def _s4_entry_intents(giorno: date) -> list[dict]:
     """
     g = giorno.isoformat()
     rows = _psql(
-        f"SELECT intent_id::text, COALESCE(signal_id::text,''), symbol, "
-        f"model_generated_at::text, decision_at::text, "
-        f"COALESCE(snapshot->>'score',''), COALESCE(final_reason_code,''), "
-        f"'t', COALESCE(trade.id::text,''), COALESCE(trade.net_pnl::text,'') "
-        f"FROM s4_tradable_intent_population intent "
+        f"SELECT intent.intent_id::text, COALESCE(intent.signal_id::text,''), "
+        f"intent.symbol, intent.model_generated_at::text, intent.decision_at::text, "
+        f"COALESCE(intent.snapshot->>'score',''), "
+        f"COALESCE(disposition.reason_code,''), "
+        f"COALESCE(disposition.is_tradable::text,''), "
+        f"COALESCE(trade.id::text,''), COALESCE(trade.net_pnl::text,'') "
+        f"FROM s4_candidate_population intent "
+        f"LEFT JOIN s4_intent_events disposition "
+        f"  ON disposition.intent_id = intent.intent_id "
+        f" AND disposition.event_type = 'disposition' "
         f"LEFT JOIN LATERAL ("
         f"  SELECT id, net_pnl FROM trades "
         f"  WHERE signal_id = intent.signal_id "
@@ -839,7 +844,7 @@ def _s4_entry_intents(giorno: date) -> list[dict]:
             "decision_at": row[4],
             "signal_score": float(row[5]) if row[5] else None,
             "final_reason_code": row[6] or None,
-            "is_tradable": row[7] == "t",
+            "is_tradable": row[7] == "t" if row[7] else None,
             "trade_id": int(row[8]) if row[8] else None,
             "pnl_realizzato": float(row[9]) if row[9] else None,
         }
@@ -1439,7 +1444,7 @@ def costruisci_dossier(
                 ),
                 "ritorno_sessione_al_segnale": (
                     "(prezzo_al_segnale - close_prec) / close_prec per ogni "
-                    "intento tradabile del ledger #294. prezzo_al_segnale e' "
+                    "candidate intent del ledger #294. prezzo_al_segnale e' "
                     "l'open della prima barra Alpaca SIP 5Min con timestamp >= "
                     "s4_intent_events.model_generated_at: mai il fill e mai "
                     "OHLC della barra in corso (#335)"
@@ -1451,10 +1456,12 @@ def costruisci_dossier(
                     "difetto) (#335)"
                 ),
                 "guardia_contraddizione_ombra": (
-                    "ombra read-only sull'intera s4_tradable_intent_population: "
+                    "ombra read-only sull'intera s4_candidate_population: "
                     "True se snapshot.score > 0 e ritorno_sessione_al_segnale "
-                    "<= -soglia; include intenti non eseguiti. None se score, "
-                    "prezzo PIT o close_prec mancanti. Non blocca ordini (#335)"
+                    "<= -soglia; l'aggregato 'soppressi' include solo gli intenti "
+                    "con disposition.is_tradable=true, anche se non eseguiti. "
+                    "None se score, prezzo PIT o close_prec mancanti. Non blocca "
+                    "ordini (#335)"
                 ),
                 "motivo_guardia_contraddizione": (
                     "stringa esplicativa quando la guardia ombra (#335) fa firing "

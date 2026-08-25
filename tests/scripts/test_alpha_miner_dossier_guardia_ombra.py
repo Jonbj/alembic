@@ -14,7 +14,7 @@ UTC = timezone.utc
 
 def _fake_psql(query):
     """Risponde alle query del book e del ledger degli intenti S4."""
-    if "FROM s4_tradable_intent_population" in query:
+    if "FROM s4_candidate_population" in query:
         # intent_id, signal_id, symbol, model_generated_at, decision_at, score,
         # final_reason_code, is_tradable, trade_id, pnl_net
         return [
@@ -26,6 +26,11 @@ def _fake_psql(query):
             [
                 "intent-msft", "7002", "MSFT", "2026-08-20T16:38:00+00:00",
                 "2026-08-20T16:52:00+00:00", "0.410", "RANK_SELECTED", "t",
+                "", "",
+            ],
+            [
+                "intent-nvda", "7003", "NVDA", "2026-08-20T16:39:00+00:00",
+                "2026-08-20T16:52:00+00:00", "0.420", "SKIP_ENTRY_GATE", "f",
                 "", "",
             ],
         ]
@@ -45,8 +50,8 @@ def _fake_psql(query):
 
 
 def test_dossier_misura_tutti_gli_intenti_al_prezzo_pit_del_segnale():
-    """Il ledger porta sia WMT eseguito sia MSFT scartato. WMT va misurato a
-    104.25 (prima barra dopo le 16:36), non al fill 103.79 della tabella trades."""
+    """Il ledger porta WMT eseguito, MSFT tradabile non eseguito e NVDA
+    scartato. WMT usa la barra PIT, non il fill della tabella trades."""
     daily = {
         "WMT": {
             "open": 114.0,
@@ -56,6 +61,13 @@ def test_dossier_misura_tutti_gli_intenti_al_prezzo_pit_del_segnale():
             "close_prec": 114.0,
         },
         "MSFT": {
+            "open": 100.0,
+            "high": 101.0,
+            "low": 94.0,
+            "close": 95.0,
+            "close_prec": 100.0,
+        },
+        "NVDA": {
             "open": 100.0,
             "high": 101.0,
             "low": 94.0,
@@ -74,6 +86,10 @@ def test_dossier_misura_tutti_gli_intenti_al_prezzo_pit_del_segnale():
             "timestamp": datetime(2026, 8, 20, 16, 40, tzinfo=UTC),
             "open": 95.0, "high": 95.5, "low": 94.0, "close": 94.5,
         }],
+        "NVDA": [{
+            "timestamp": datetime(2026, 8, 20, 16, 40, tzinfo=UTC),
+            "open": 95.0, "high": 95.5, "low": 94.0, "close": 94.5,
+        }],
     }
     cutoff = datetime(2026, 8, 20, 23, 59, tzinfo=UTC)
 
@@ -89,8 +105,8 @@ def test_dossier_misura_tutti_gli_intenti_al_prezzo_pit_del_segnale():
     ):
         payload = dossier.costruisci_dossier(date(2026, 8, 20), ["WMT"])
 
-    assert len(payload["intenti_ingresso_s4"]) == 2
-    wmt, msft = payload["intenti_ingresso_s4"]
+    assert len(payload["intenti_ingresso_s4"]) == 3
+    wmt, msft, nvda = payload["intenti_ingresso_s4"]
     assert wmt["symbol"] == "WMT"
     assert wmt["prezzo_al_segnale"] == 104.25
     assert wmt["prezzo_al_segnale"] != payload["ingressi"][0]["entry_price"]
@@ -107,8 +123,14 @@ def test_dossier_misura_tutti_gli_intenti_al_prezzo_pit_del_segnale():
     assert msft["pnl_realizzato"] is None
     assert msft["guardia_contraddizione_ombra"] is True
 
+    assert nvda["is_tradable"] is False
+    assert nvda["final_reason_code"] == "SKIP_ENTRY_GATE"
+    assert nvda["guardia_contraddizione_ombra"] is True
+
     giorno = payload["aggregati"]["guardia_contraddizione"]["giorno"]
-    assert giorno["n_intenti"] == 2
+    assert giorno["n_intenti"] == 3
+    assert giorno["n_intenti_tradabili"] == 2
+    assert giorno["n_intenti_non_tradabili"] == 1
     assert giorno["n_soppressi"] == 2
     assert giorno["n_soppressi_eseguiti"] == 1
     assert giorno["n_soppressi_non_eseguiti"] == 1

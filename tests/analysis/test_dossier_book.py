@@ -162,6 +162,19 @@ def test_intento_espone_missingness_senza_barra_o_close_precedente():
     }
 
 
+def test_intento_senza_disposition_non_diventa_non_tradabile_per_difetto():
+    intent = _intent()
+    intent["is_tradable"] = None
+    bars = {"WMT": [{"timestamp": "2026-08-20T16:40:00+00:00", "open": 104.25}]}
+
+    out = compute_s4_entry_intents(
+        [intent], bars, {"WMT": _bar_cp(close_prec=114.0)}
+    )[0]
+
+    assert out["is_tradable"] is None
+    assert out["missingness"]["disposition"] == "not_recorded"
+
+
 def test_guardia_ombra_soglia_configurabile_sugli_intenti():
     bars = {"WMT": [{"timestamp": "2026-08-20T16:40:00+00:00", "open": 97.0}]}
     daily = {"WMT": _bar_cp(close_prec=100.0)}
@@ -176,21 +189,28 @@ def test_guardia_ombra_soglia_configurabile_sugli_intenti():
 
 def test_aggregato_distingue_eseguiti_non_eseguiti_e_pnl_mancante():
     intents = [
-        {"guardia_contraddizione_ombra": True, "trade_id": 42,
+        {"is_tradable": True, "guardia_contraddizione_ombra": True, "trade_id": 42,
          "pnl_realizzato": 2.38},
-        {"guardia_contraddizione_ombra": True, "trade_id": 43,
+        {"is_tradable": True, "guardia_contraddizione_ombra": True, "trade_id": 43,
          "pnl_realizzato": None},
-        {"guardia_contraddizione_ombra": True, "trade_id": None,
+        {"is_tradable": True, "guardia_contraddizione_ombra": True, "trade_id": None,
          "pnl_realizzato": None},
-        {"guardia_contraddizione_ombra": False, "trade_id": 44,
+        {"is_tradable": True, "guardia_contraddizione_ombra": False, "trade_id": 44,
          "pnl_realizzato": -5.0},
-        {"guardia_contraddizione_ombra": None, "trade_id": None,
+        {"is_tradable": True, "guardia_contraddizione_ombra": None, "trade_id": None,
          "pnl_realizzato": None},
+        {"is_tradable": False, "guardia_contraddizione_ombra": True,
+         "trade_id": None, "pnl_realizzato": None},
+        {"is_tradable": None, "guardia_contraddizione_ombra": True,
+         "trade_id": None, "pnl_realizzato": None},
     ]
 
     out = aggregate_contradiction_guard(intents)
 
-    assert out["n_intenti"] == 5
+    assert out["n_intenti"] == 7
+    assert out["n_intenti_tradabili"] == 5
+    assert out["n_intenti_non_tradabili"] == 1
+    assert out["n_intenti_disposizione_mancante"] == 1
     assert out["n_valutabili"] == 4
     assert out["n_soppressi"] == 3
     assert out["n_soppressi_eseguiti"] == 2
