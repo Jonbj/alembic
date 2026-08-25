@@ -21,7 +21,7 @@ def _fake_psql(query):
     return []
 
 
-def test_dossier_23_collega_benchmark_calendario_regime_e_microstruttura():
+def test_dossier_24_collega_benchmark_calendario_regime_e_microstruttura():
     daily = {
         "NVDA": {
             "open": 105.0, "high": 112.0, "low": 103.0, "close": 110.0,
@@ -97,7 +97,7 @@ def test_dossier_23_collega_benchmark_calendario_regime_e_microstruttura():
     nbbo_cycles = nbbo_loader.call_args.args[0]
     assert nbbo_cycles["NVDA"]["at"] == datetime(2026, 8, 12, 14, 22, tzinfo=UTC)
     assert nbbo_cycles["NVDA"]["source"] == dossier.ELIGIBLE_SOURCE_SEGNALE
-    assert out["schema_version"] == "2.3"
+    assert out["schema_version"] == "2.4"
     assert out["provenienza_dati"]["event_market_context"]["version"] == (
         "event_market_context_v1"
     )

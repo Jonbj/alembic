@@ -24,6 +24,19 @@ STAGE_NAMES = (
     "order_submitted_at",
     "filled_at",
 )
+LATENCY_PAIRS = {
+    "published_to_first_seen": ("published_at", "first_seen_at"),
+    "first_seen_to_ingested": ("first_seen_at", "ingested_at"),
+    "ingested_to_scored": ("ingested_at", "scored_at"),
+    "published_to_scored": ("published_at", "scored_at"),
+    "scored_to_eligible_cycle": ("scored_at", "eligible_cycle_at"),
+    "eligible_cycle_to_order_submitted": (
+        "eligible_cycle_at",
+        "order_submitted_at",
+    ),
+    "order_submitted_to_filled": ("order_submitted_at", "filled_at"),
+    "scored_to_filled": ("scored_at", "filled_at"),
+}
 
 
 def _as_utc(value: datetime | str | None) -> datetime | None:
@@ -40,6 +53,22 @@ def _required_utc(value: datetime | str) -> datetime:
     if parsed is None:  # pragma: no cover - il tipo esclude None
         raise ValueError("timestamp mancante")
     return parsed
+
+
+def _latenze_secondi(event: dict[str, Any]) -> dict[str, float | None]:
+    """Durate osservate fra le tappe persistite, senza imputare i mancanti.
+
+    Le durate restano signed: un valore negativo rende visibile una violazione
+    dell'ordine temporale nei dati invece di correggerla silenziosamente.
+    """
+    result: dict[str, float | None] = {}
+    for name, (start_name, end_name) in LATENCY_PAIRS.items():
+        start = _as_utc(event.get(start_name))
+        end = _as_utc(event.get(end_name))
+        result[name] = (
+            None if start is None or end is None else (end - start).total_seconds()
+        )
+    return result
 
 
 def _ratio(numerator: float, denominator: float) -> float | None:
@@ -248,6 +277,7 @@ def build_timeline(
             "order_id": event.get("order_id"),
             "trade_id": event.get("trade_id"),
             "order_lookup_error": event.get("order_lookup_error"),
+            "latenze_secondi": _latenze_secondi(event),
             "movimento": _movement(daily_bars.get(symbol)),
             "sessioni": session_summary(bars, session_date),
             "stages": stages,
@@ -266,6 +296,7 @@ def build_timeline(
             "order_id": None,
             "trade_id": None,
             "order_lookup_error": None,
+            "latenze_secondi": _latenze_secondi({}),
             "movimento": _movement(daily_bars.get(symbol)),
             "sessioni": session_summary(bars, session_date),
             "stages": {

@@ -67,7 +67,7 @@ OUT_DIR = PROJECT_DIR / "docs" / "evidence" / "dossier"
 SOGLIA_MOVER = 0.03
 FINESTRA_MEDIANE = 20  # giorni, per le mediane mobili
 INIZIO_OSSERVAZIONE = date(2026, 8, 3)
-DOSSIER_SCHEMA_VERSION = "2.3"
+DOSSIER_SCHEMA_VERSION = "2.4"
 NEW_YORK = ZoneInfo("America/New_York")
 
 # Size plausibile di uno slot S4 per lo stimatore v2 (#280): fixed-slot sizing
@@ -1340,6 +1340,9 @@ def costruisci_dossier(
                 "order_submitted_at": "Alpaca Trading API order.submitted_at",
                 "filled_at": "Alpaca Trading API order.filled_at",
                 "fill_price": "Alpaca Trading API order.filled_avg_price",
+                "latenze_secondi": (
+                    "differenze signed fra timestamp persistiti; None se una tappa manca"
+                ),
             },
             "metriche": {
                 "first_price": "open della prima barra 5Min con timestamp >= stadio",

@@ -74,13 +74,14 @@ def test_dossier_espone_schema_provenienza_e_timeline_end_to_end():
     ):
         payload = dossier.costruisci_dossier(date(2026, 8, 12), ["AAA"])
 
-    assert payload["schema_version"] == "2.3"
+    assert payload["schema_version"] == "2.4"
     assert payload["provenienza_dati"]["timeline"]["first_seen_at"] == (
         "news_log.raw_ingested_at"
     )
     assert payload["provenienza_dati"]["timeline"]["ingested_at"] == (
         "news_log.fetched_at"
     )
+    assert "signed" in payload["provenienza_dati"]["timeline"]["latenze_secondi"]
     assert payload["provenienza_dati"]["intraday"]["timeframe"] == "5Min"
 
     row = payload["timeline"][0]
@@ -88,6 +89,8 @@ def test_dossier_espone_schema_provenienza_e_timeline_end_to_end():
     assert row["stages"]["eligible_cycle_at"]["timestamp"].endswith("14:15:00+00:00")
     assert row["stages"]["order_submitted_at"]["timestamp"].endswith("14:15:02+00:00")
     assert row["stages"]["filled_at"]["actual_price"] == 105.75
+    assert row["latenze_secondi"]["scored_to_eligible_cycle"] == 300.0
+    assert row["latenze_secondi"]["scored_to_filled"] == 303.0
 
 
 def test_mapping_sql_usa_timestamp_persistiti_e_primo_ordine_separato():
