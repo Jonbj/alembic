@@ -1,6 +1,6 @@
 """Wiring della guardia ombra contraddizione e di `giorno_di_earnings` nel
 dossier (#335). Verifica che lo score LLM (trades.signal_score) e il ritorno
-intraday arrivino a `compute_entries` e che l'aggregato ombra compaia in
+di sessione arrivino a `compute_entries` e che l'aggregato ombra compaia in
 `aggregati`. Misura read-only: nessun ordine cambiato.
 """
 

@@ -1263,18 +1263,19 @@ def costruisci_dossier(
     # `signal_score` e' arrivato da trades (migration 023): lo score LLM reale
     # che ha motivato l'ingresso, distinto dal peso di allocazione. Serve alla
     # guardia ombra contraddizione (#335 step 2).
+    soglia_guardia = _soglia_guardia_contraddizione()
     ingressi = compute_entries(
         ingressi_grezzi,
         barre_ohlc,
         earnings_symbols=earnings_symbols,
-        soglia_guardia=_soglia_guardia_contraddizione(),
+        soglia_guardia=soglia_guardia,
     )
     chiusure = compute_exits(chiusure_grezze, chiusure_close)
 
     # #335 step 2: aggregato ombra giornaliero + sweep sulla finestra di
     # osservazione. Misura read-only: nessun ordine cambiato.
     guardia_giorno = aggregate_contradiction_guard(ingressi, chiusure)
-    guardia_giorno["soglia"] = _soglia_guardia_contraddizione()
+    guardia_giorno["soglia"] = soglia_guardia
     guardia_finestra = _guardia_contraddizione_finestra(guardia_giorno, giorno)
 
     # --- qualita' decisionale read-only (#284) ----------------------------
@@ -1392,6 +1393,10 @@ def costruisci_dossier(
                     "ombra read-only: True se signal_score (trades.signal_score, "
                     "migration 023) > 0 e ritorno_sessione_al_segnale <= -soglia; "
                     "None se score o close_prec mancanti. Non blocca nessun ordine (#335)"
+                ),
+                "motivo_guardia_contraddizione": (
+                    "stringa esplicativa quando la guardia ombra (#335) fa firing "
+                    "(score e ritorno); None negli altri casi"
                 ),
             },
             "decision_quality": {
