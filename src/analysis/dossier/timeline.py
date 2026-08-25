@@ -55,7 +55,7 @@ def _required_utc(value: datetime | str) -> datetime:
     return parsed
 
 
-def _latenze_secondi(event: dict[str, Any]) -> dict[str, float | None]:
+def compute_latency_seconds(event: dict[str, Any]) -> dict[str, float | None]:
     """Durate osservate fra le tappe persistite, senza imputare i mancanti.
 
     Le durate restano signed: un valore negativo rende visibile una violazione
@@ -277,7 +277,7 @@ def build_timeline(
             "order_id": event.get("order_id"),
             "trade_id": event.get("trade_id"),
             "order_lookup_error": event.get("order_lookup_error"),
-            "latenze_secondi": _latenze_secondi(event),
+            "latenze_secondi": compute_latency_seconds(event),
             "movimento": _movement(daily_bars.get(symbol)),
             "sessioni": session_summary(bars, session_date),
             "stages": stages,
@@ -296,7 +296,7 @@ def build_timeline(
             "order_id": None,
             "trade_id": None,
             "order_lookup_error": None,
-            "latenze_secondi": _latenze_secondi({}),
+            "latenze_secondi": compute_latency_seconds({}),
             "movimento": _movement(daily_bars.get(symbol)),
             "sessioni": session_summary(bars, session_date),
             "stages": {

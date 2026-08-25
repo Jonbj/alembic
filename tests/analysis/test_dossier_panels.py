@@ -320,6 +320,24 @@ def test_signal_panel_tollera_dossier_2_0_senza_copertura():
     assert s["trade_id"] == 726  # arriva comunque dalla timeline
 
 
+def test_signal_panel_deriva_le_latenze_dagli_stages_dei_dossier_storici():
+    dossier = _dossier_2_0()
+    event = dossier["timeline"][0]
+    event.pop("latenze_secondi", None)
+    event["stages"] = {
+        "scored_at": {"timestamp": "2026-08-12T14:10:00+00:00"},
+        "eligible_cycle_at": {"timestamp": "2026-08-12T14:15:00+00:00"},
+        "order_submitted_at": {"timestamp": "2026-08-12T14:15:02+00:00"},
+        "filled_at": {"timestamp": "2026-08-12T14:15:03+00:00"},
+    }
+
+    rows = panels.build_signal_panel(dossier, dossier_hash="h")
+    signal = next(row for row in rows if row["signal_id"] == 101)
+
+    assert signal["latenze_secondi"]["scored_to_eligible_cycle"] == 300.0
+    assert signal["latenze_secondi"]["scored_to_filled"] == 303.0
+
+
 def test_signal_panel_assegna_causal_event_id_deterministico():
     # Il pannello signals partecipa del contratto anti-doppio conteggio: ogni
     # segnale riceve un causal_event_id stabile da (data, signal_id), univoco

@@ -35,6 +35,8 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
+from src.analysis.dossier.timeline import compute_latency_seconds
+
 PANELS_SCHEMA_VERSION = "1.1"
 LEDGER_SCHEMA_VERSION = "1.0"
 
@@ -85,6 +87,20 @@ def _coverage_index(dossier: dict) -> tuple[dict, dict, bool]:
     }
     per_ticker = cov.get("per_ticker") or {}
     return by_signal, per_ticker, bool(cov)
+
+
+def _signal_latencies(event: dict) -> dict[str, float | None]:
+    """Usa il derivato 2.4 o lo ricostruisce dagli stages dei dossier storici."""
+    latencies = event.get("latenze_secondi")
+    if isinstance(latencies, dict):
+        return latencies
+    stages = event.get("stages") or {}
+    timestamps = {
+        name: stage.get("timestamp")
+        for name, stage in stages.items()
+        if isinstance(stage, dict)
+    }
+    return compute_latency_seconds(timestamps)
 
 
 def _opp_view(opp: dict) -> dict:
@@ -211,7 +227,7 @@ def build_signal_panel(dossier: dict, *, dossier_hash: str = "") -> list[dict]:
                 "order_id": event.get("order_id"),
                 "trade_id": event.get("trade_id"),
                 "order_lookup_error": event.get("order_lookup_error"),
-                "latenze_secondi": event.get("latenze_secondi"),
+                "latenze_secondi": _signal_latencies(event),
                 # causal_event_id: il segnale e' un evento del dataset e partecipa
                 # del contratto anti-doppio conteggio (kind=signal, data, signal_id).
                 # signal_id e' la PK di news_log, quindi univoco per costruzione;
