@@ -88,6 +88,15 @@ _RATE_LIMIT_RE='rate.?limit|429|quota exceeded|too many requests|usage limit|res
 # riecheggiato, `gh issue list`, diff, sorgenti numerati.
 CODA_ESITO=40
 
+# Quante righe finali si pubblicano su GitHub. Stessa nozione di coda del verdetto,
+# solo un po' piu' generosa: nel commento serve anche il ragionamento che il verdetto
+# riassume, non la sola riga canonica.
+CODA_PUBBLICAZIONE_RIGHE=$(( CODA_ESITO * 2 ))
+
+# Tetto finale in caratteri. GitHub rifiuta i commenti oltre 65536 caratteri: poche
+# righe bastano a superarlo se una sola e' un dump di sorgente o un diff.
+CODA_PUBBLICAZIONE_MAX_CHAR=40000
+
 # Legge l'esito di una review dallo stdin. Unico punto in cui l'output di un
 # recensore viene interpretato (#211).
 #
@@ -155,6 +164,19 @@ trova_pr_del_giro() {
             ) ] | .[0].number // ""' 2>/dev/null || true
 }
 
+# Riduce la trascrizione di una review a cio' che entra in un commento GitHub.
+# Si tiene la CODA per lo stesso motivo per cui la tiene `estrai_verdetto`: il
+# giudizio sta in fondo, il resto e' cio' che il recensore ha letto. Il tetto in
+# caratteri e' l'ultima rete: `tail -n` da solo non basta, perche' una singola riga
+# anomala (un sorgente stampato, un diff) puo' superare il limite da sola.
+tronca_coda_review() {
+    local _out
+    _out=$(cat)
+    printf '%s\n' "$_out" \
+        | tail -n "$CODA_PUBBLICAZIONE_RIGHE" \
+        | tail -c "$CODA_PUBBLICAZIONE_MAX_CHAR"
+}
+
 # Prima del lock: sono funzioni pure, non giri di lavoro.
 if [[ "${1:-}" == "--verdetto" ]]; then
     estrai_verdetto
@@ -166,6 +188,10 @@ if [[ "${1:-}" == "--issue-del-branch" ]]; then
 fi
 if [[ "${1:-}" == "--trova-pr" ]]; then
     trova_pr_del_giro "${2:?uso: --trova-pr <numero issue>}"
+    exit 0
+fi
+if [[ "${1:-}" == "--tronca-coda" ]]; then
+    tronca_coda_review
     exit 0
 fi
 
@@ -592,10 +618,10 @@ REVEOF
         {
             printf '## Review automatica — %s\n\nTest rotti in piu%s rispetto a main: **%s**\n\nVerdetto letto: **%s**\n\n---\n\n' \
                 "$REVISORE" "'" "$REGRESSIONI" "$VERDETTO"
-            if (( $(wc -c < "$_REV_FILE") > 50000 )); then
+            if (( $(wc -c < "$_REV_FILE") > CODA_PUBBLICAZIONE_MAX_CHAR )); then
                 printf '_Trascrizione completa in `%s` (%s caratteri). Qui la parte conclusiva._\n\n' \
                     "${_REV_FILE#"$PROJECT_DIR/"}" "$(wc -c < "$_REV_FILE")"
-                tail -c 40000 "$_REV_FILE"
+                tronca_coda_review < "$_REV_FILE"
             else
                 cat "$_REV_FILE"
             fi
