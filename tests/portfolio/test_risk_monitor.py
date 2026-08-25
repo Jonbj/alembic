@@ -369,6 +369,10 @@ class TestHerfindahlOverride:
         report = _make_report(herfindahl_override=0.25)
         assert report.herfindahl_index == 0.25
 
+    def test_explicit_none_marks_metric_unavailable(self):
+        report = _make_report(herfindahl_override=None)
+        assert report.herfindahl_index is None
+
     def test_falls_back_to_current_weights_without_override(self):
         # No override → uses _herfindahl(current_weights). With the same synthetic
         # single-entry dict that risk_monitor_task passes, HHI = 1.0.

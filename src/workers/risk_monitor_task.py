@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict
-from datetime import datetime, timezone
 
 from src.util.retry import retry_transient
 from src.workers.celery_app import app
@@ -49,42 +47,6 @@ def _serialize_report(report) -> dict:
         "per_strategy_metrics": per_strategy,
         "alerts": alerts,
     }
-
-
-def _fetch_strategy_data(pg) -> tuple[dict[str, list[float]], dict[str, float]]:
-    """Fetch portfolio returns and weights from PostgreSQL.
-
-    The portfolio_daily_state view aggregates all strategies as a single portfolio
-    (columns: snapshot_date, daily_return, net_pnl, n_trades).  We expose it to
-    the risk monitor under the synthetic key "portfolio" so existing metrics
-    (Sharpe, drawdown) are computed at the portfolio level.
-
-    Returns (strategy_returns, current_weights).
-    Falls back to empty data if the view is empty or unavailable.
-    """
-    strategy_returns: dict[str, list[float]] = {}
-
-    try:
-        conn = pg._get_connection()
-        with conn.cursor() as cur:
-            # Rolling 60-day daily returns for Sharpe / drawdown calculation.
-            cur.execute(
-                """
-                SELECT snapshot_date, daily_return, net_pnl
-                FROM portfolio_daily_state
-                WHERE snapshot_date >= now()::date - INTERVAL '60 days'
-                ORDER BY snapshot_date ASC
-                """
-            )
-            rows = cur.fetchall()
-        if rows:
-            strategy_returns["portfolio"] = [float(r[1] or 0.0) for r in rows]
-    except Exception as e:
-        log.warning("Could not fetch portfolio_daily_state: %s — skipping risk report", e)
-        return {}, {}
-
-    current_weights = {"portfolio": 1.0} if strategy_returns else {}
-    return strategy_returns, current_weights
 
 
 def _fetch_account_state() -> tuple[float, float]:
@@ -146,11 +108,12 @@ def _fetch_equity_curve(pg, current_equity: float) -> list[float]:
     return curve
 
 
-def _fetch_position_weights() -> dict[str, float]:
+def _fetch_position_weights() -> dict[str, float] | None:
     """Per-symbol portfolio weights (|market value| / gross) from Alpaca, for a
     meaningful concentration (Herfindahl) metric. #75: the report previously fed
     {"portfolio": 1.0}, making HHI a constant 1.0 that measured nothing. Returns
-    {} on any broker error / no positions → caller falls back to the old value.
+    An empty dict means the broker reported no positions; None means the broker
+    request failed and concentration is unavailable.
     """
     from alpaca.trading.client import TradingClient
 
@@ -171,7 +134,7 @@ def _fetch_position_weights() -> dict[str, float]:
         return {sym: mv / gross for sym, mv in market_values.items()}
     except Exception as e:
         log.warning("Could not fetch position weights for HHI (#75): %s", e)
-        return {}
+        return None
 
 
 def _store_risk_report(pg, report) -> int:
@@ -218,7 +181,6 @@ def compute_risk_report() -> dict:
     """
     from src.portfolio.risk_monitor import AlertLevel, PortfolioRiskMonitor
     from src.store.pg_store import PostgreSQLStore
-    from src.config import config
 
     log.info("Starting daily risk monitor computation...")
 
@@ -226,34 +188,54 @@ def compute_risk_report() -> dict:
     try:
         pg = PostgreSQLStore()
 
-        strategy_returns, current_weights = _fetch_strategy_data(pg)
         nav, total_exposure = _fetch_account_state()
 
-        # Use target weights from config if available, else equal-weight
-        target_weights: dict[str, float] = getattr(config, "PORTFOLIO_TARGET_WEIGHTS", {})
-        if not target_weights and current_weights:
-            n = len(current_weights)
-            target_weights = {sid: 1.0 / n for sid in current_weights}
-
-        monitor = PortfolioRiskMonitor(target_weights=target_weights)
-
-        if not strategy_returns:
-            log.info("No strategy return data available — skipping risk report")
-            return {"skipped": True, "reason": "no_data"}
-
+        # Whole-book drawdown comes from the real Alpaca equity curve (#107),
+        # not from a per-strategy return series. We deliberately pass NO
+        # strategy_returns: the only "strategy" the DB view portfolio_daily_state
+        # can describe is the whole book, and its daily_return is
+        # SUM(net_pnl)/SUM(entry_notional) over the trades closed that day — a
+        # closed-trades-only notional return, not a NAV-based portfolio return.
+        # Feeding that into the per-strategy drawdown machinery (_compute_drawdown
+        # cumprod's it) produced a bogus ~17% 'Strategy portfolio drawdown' ALERT
+        # every night (F-003, 14 occurrences 07-31 → 08-21) while the real drawdown
+        # was ~1.2%. The whole-book drawdown is reported as combined_drawdown
+        # below; no synthetic per-strategy entry is registered.
         from src.portfolio.risk_monitor import max_drawdown_from_equity
 
         equity_curve = _fetch_equity_curve(pg, nav)
+        if not equity_curve:
+            # No historical snapshots and broker unreachable (nav == 0) — the
+            # equity curve is empty and there is nothing meaningful to report.
+            log.info("No equity curve and broker unreachable — skipping risk report")
+            return {"skipped": True, "reason": "no_data"}
+
         equity_dd = max_drawdown_from_equity(equity_curve)
+
+        # Stale-drawdown instrumentation (F-003, point 3): when the live equity
+        # could not be appended (broker unreachable → nav == 0) the curve holds
+        # historical snapshots only, so combined_drawdown is frozen at whatever
+        # the last reachable peak implies — it does not reflect today. Surface
+        # that so a frozen value is not read as a live measurement.
+        if nav <= 0:
+            log.warning(
+                "Broker unreachable (nav=0): combined_drawdown=%.4f computed from "
+                "historical snapshots only — may be stale, not today's drawdown",
+                equity_dd,
+            )
 
         from src.portfolio.risk_monitor import _herfindahl
 
         position_weights = _fetch_position_weights()
-        hhi_override = _herfindahl(position_weights) if position_weights else None
+        hhi_override = (
+            None if position_weights is None else _herfindahl(position_weights)
+        )
+
+        monitor = PortfolioRiskMonitor(target_weights={})
 
         report = monitor.compute_report(
-            strategy_returns=strategy_returns,
-            current_weights=current_weights,
+            strategy_returns={},
+            current_weights={},
             total_exposure=total_exposure,
             nav=nav,
             combined_drawdown_override=equity_dd,
@@ -271,11 +253,16 @@ def compute_risk_report() -> dict:
 
         try:
             report_id = _store_risk_report(pg, report)
+            hhi_log = (
+                f"{report.herfindahl_index:.3f}"
+                if report.herfindahl_index is not None
+                else "unavailable"
+            )
             log.info(
-                "Risk report stored (id=%d): combined_dd=%.2f%% HHI=%.3f alerts=%d",
+                "Risk report stored (id=%d): combined_dd=%.2f%% HHI=%s alerts=%d",
                 report_id,
                 report.combined_drawdown * 100,
-                report.herfindahl_index,
+                hhi_log,
                 len(report.alerts),
             )
         except Exception as e:

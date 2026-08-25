@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import enum
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -38,7 +38,7 @@ class RiskReport:
     timestamp: datetime
     nav: float
     total_exposure: float
-    herfindahl_index: float
+    herfindahl_index: float | None
     combined_drawdown: float
     per_strategy_metrics: dict[str, StrategyRiskMetrics]
     strategy_correlations: dict[str, float]   # "S1:S2" → correlation
@@ -54,6 +54,13 @@ _CORRELATION_WARNING = 0.80          # correlation >0.80 → WARNING
 _TOTAL_EXPOSURE_ALERT = 0.50         # >50% total exposure → ALERT
 
 _TRADING_DAYS_PER_YEAR = 252
+
+
+class _UseCurrentWeights:
+    """Sentinel distinguishing an omitted HHI override from unavailable data."""
+
+
+_USE_CURRENT_WEIGHTS = _UseCurrentWeights()
 
 
 def _compute_drawdown(returns: list[float]) -> float:
@@ -153,7 +160,7 @@ class PortfolioRiskMonitor:
         total_exposure: float,
         nav: float,
         combined_drawdown_override: float | None = None,
-        herfindahl_override: float | None = None,
+        herfindahl_override: float | None | _UseCurrentWeights = _USE_CURRENT_WEIGHTS,
     ) -> RiskReport:
         """Compute full risk report.
 
@@ -182,10 +189,14 @@ class PortfolioRiskMonitor:
                 target_weight=target,
             )
 
-        if herfindahl_override is not None:
-            hhi = herfindahl_override
-        else:
+        hhi: float | None
+        if isinstance(herfindahl_override, _UseCurrentWeights):
             hhi = _herfindahl(current_weights)
+        else:
+            # Explicit None means that the upstream measurement failed. This is
+            # distinct from an omitted override, which retains the legacy
+            # calculation from current_weights.
+            hhi = herfindahl_override
 
         if combined_drawdown_override is not None:
             combined_dd = combined_drawdown_override
