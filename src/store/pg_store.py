@@ -24,6 +24,7 @@ if TYPE_CHECKING:
         S4VirtualExitEvent,
         SubmittedIntent,
     )
+    from src.strategies.s4.p0_baseline import P0ReplayEvent
 
 log = logging.getLogger(__name__)
 
@@ -579,6 +580,123 @@ class PostgreSQLStore:
         except Exception:
             conn.rollback()
             raise
+
+    _INSERT_S4_EXIT_POLICY_EVENT = """
+        INSERT INTO s4_exit_policy_events (
+            event_id, intent_id, policy_id, policy_version, event_type,
+            observed_at, d0, symbol, status, reason_code, trigger_at,
+            virtual_exit_quantity, runtime_quantity, first_executable_at,
+            first_executable_price, first_executable_price_source, filled_at,
+            fill_price, initial_notional, gross_pnl, entry_cost_usd,
+            exit_cost_usd, net_pnl, cost_model_version, runtime_decision_id,
+            runtime_order_id, comparable, divergence_reasons, details
+        ) VALUES (
+            %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s,
+            %s, %s, %s,
+            %s, %s, %s,
+            %s, %s, %s, %s,
+            %s, %s, %s, %s,
+            %s, %s, %s, %s::jsonb
+        )
+        ON CONFLICT (event_id) DO NOTHING
+    """
+
+    def write_s4_exit_policy_events(self, events: list["P0ReplayEvent"]) -> None:
+        """Append policy shadow events; no field can request a broker action."""
+        if not events:
+            return
+        params = [(
+            event.event_id,
+            event.intent_id,
+            event.policy_id,
+            event.policy_version,
+            event.event_type,
+            event.observed_at,
+            event.d0,
+            event.symbol,
+            event.status,
+            event.reason_code,
+            event.trigger_at,
+            event.virtual_exit_quantity,
+            event.runtime_quantity,
+            event.first_executable_at,
+            event.first_executable_price,
+            event.first_executable_price_source,
+            event.filled_at,
+            event.fill_price,
+            event.initial_notional,
+            event.gross_pnl,
+            event.entry_cost_usd,
+            event.exit_cost_usd,
+            event.net_pnl,
+            event.cost_model_version,
+            event.runtime_decision_id,
+            event.runtime_order_id,
+            event.comparable,
+            list(event.divergence_reasons),
+            json.dumps(event.details, sort_keys=True),
+        ) for event in events]
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.executemany(self._INSERT_S4_EXIT_POLICY_EVENT, params)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    def fetch_s4_p0_replay_candidates(self) -> list[dict]:
+        """Read closed E0 lifecycles not yet terminally projected into P0."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        lc.*,
+                        t.id AS runtime_trade_id,
+                        COALESCE(
+                            t.exit_order_ids,
+                            ARRAY[t.exit_order_id]::TEXT[]
+                        ) AS runtime_order_ids,
+                        t.exit_time AS runtime_exit_time,
+                        t.exit_reason AS runtime_exit_reason,
+                        runtime_decision.id AS runtime_decision_id,
+                        COALESCE(runtime_decision.tick_time, t.exit_time) AS trigger_at,
+                        runtime_decision.exit_mechanism,
+                        runtime_decision.reason AS runtime_reason
+                    FROM s4_lifecycle_current lc
+                    JOIN trades t ON t.entry_order_id = lc.order_id
+                    LEFT JOIN LATERAL (
+                        SELECT ed.id, ed.tick_time, ed.exit_mechanism, ed.reason
+                        FROM execution_decisions ed
+                        WHERE ed.decision = 'SELL'
+                          AND ed.symbol = lc.symbol
+                          AND ed.order_id = ANY(COALESCE(
+                              t.exit_order_ids,
+                              ARRAY[t.exit_order_id]::TEXT[]
+                          ))
+                        ORDER BY ed.tick_time, ed.id
+                        LIMIT 1
+                    ) runtime_decision ON TRUE
+                    LEFT JOIN s4_exit_policy_current p0
+                      ON p0.intent_id = lc.intent_id
+                     AND p0.policy_id = 'P0'
+                    WHERE t.exit_time IS NOT NULL
+                      AND (
+                          p0.intent_id IS NULL
+                          OR p0.status NOT IN ('CLOSED', 'RISK_EXITED', 'CENSORED')
+                      )
+                    ORDER BY t.exit_time, lc.intent_id
+                    """
+                )
+                return [dict(row) for row in cur.fetchall()]
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.rollback()
 
     def fetch_s4_submitted_intents(self) -> list["SubmittedIntent"]:
         """Read submitted #294 intents without inventing missing broker metadata."""

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -22,8 +22,6 @@ from src.strategies.s4.p0_baseline import (
     replay_p0,
 )
 
-
-UTC = timezone.utc
 ENTRY_AT = datetime(2026, 8, 25, 15, 7, 4, tzinfo=UTC)
 TRIGGER_AT = datetime(2026, 8, 25, 17, 52, tzinfo=UTC)
 EXIT_AT = TRIGGER_AT + timedelta(seconds=3)

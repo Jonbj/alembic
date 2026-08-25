@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 from collections import Counter
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Protocol
 from uuid import UUID, uuid5
@@ -18,7 +18,6 @@ from uuid import UUID, uuid5
 import yaml
 
 from src.strategies.s4.lifecycle import S4LifecycleEvent
-
 
 _P0_NAMESPACE = UUID("10ad4bc3-ce9f-5b34-9f3d-9f8678f82960")
 _QTY_TOLERANCE = 1e-9
@@ -43,8 +42,8 @@ _DISABLED_REASONS = {
 
 def _utc(value: datetime) -> datetime:
     if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 @dataclass(frozen=True)
