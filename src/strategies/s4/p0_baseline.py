@@ -73,6 +73,7 @@ class RuntimeExitObservation:
     filled_quantity: float
     fill_price: float | None
     raw_reason: str | None = None
+    runtime_order_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -147,6 +148,7 @@ def load_p0_policy_snapshot(
     contract = payload.get("contract") or {}
     p0 = (payload.get("policies") or {}).get("P0") or {}
     overlay = payload.get("risk_overlay") or {}
+    d_hard = overlay.get("d_hard") or {}
 
     if contract.get("scope") != "shadow_only" or contract.get("live_behaviour_changed"):
         raise ValueError("P0 contract must remain shadow-only")
@@ -158,7 +160,7 @@ def load_p0_policy_snapshot(
     snapshot = P0PolicySnapshot(
         version=f"s4-exit-trial:{payload.get('version', 'unknown')}",
         scope=contract["scope"],
-        d_hard_enabled=bool((overlay.get("d_hard") or {}).get("enabled")),
+        d_hard_enabled=bool(d_hard.get("enabled")),
         take_profit_enabled=bool((overlay.get("take_profit") or {}).get("enabled")),
         trailing_enabled=bool((overlay.get("trailing") or {}).get("enabled")),
         scale_out_enabled=bool((overlay.get("scale_out") or {}).get("enabled")),
@@ -169,6 +171,10 @@ def load_p0_policy_snapshot(
     )
     if not snapshot.d_hard_enabled:
         raise ValueError("P0 contract requires the common d_hard overlay")
+    if d_hard.get("identical_across_policies") is not True:
+        raise ValueError("P0 d_hard must remain identical across policies")
+    if d_hard.get("attributed_to_alpha_policy") is not False:
+        raise ValueError("P0 d_hard cannot be attributed to the alpha policy")
     if any((
         snapshot.take_profit_enabled,
         snapshot.trailing_enabled,
@@ -223,6 +229,80 @@ def compare_p0_to_runtime(
     return tuple(divergences)
 
 
+def observe_p0_open(
+    lifecycle: S4LifecycleEvent,
+    snapshot: P0PolicySnapshot,
+    cost_model: CostModel,
+    *,
+    runtime_trade_id: int | None,
+) -> P0ReplayEvent:
+    """Registra un lifecycle non ancora chiuso senza inventare un exit trigger."""
+    divergences: list[str] = []
+    status = "OPEN"
+    reason_code = "P0_RUNTIME_OPEN"
+    if runtime_trade_id is None:
+        status = "CENSORED"
+        reason_code = "P0_RUNTIME_TRADE_MISSING"
+        divergences.append("RUNTIME_TRADE_MISSING")
+    if lifecycle.policy_version != snapshot.version:
+        status = "CENSORED"
+        reason_code = "P0_POLICY_VERSION_MISMATCH"
+        divergences.append("POLICY_VERSION_MISMATCH")
+    if not lifecycle.reconstructible:
+        status = "CENSORED"
+        reason_code = "P0_ENTRY_NOT_RECONSTRUCTIBLE"
+        divergences.append("ENTRY_NOT_RECONSTRUCTIBLE")
+
+    observed_at = _utc(lifecycle.observed_at)
+    fingerprint = "|".join((
+        lifecycle.intent_id,
+        snapshot.version,
+        snapshot.source_hash,
+        "open",
+        str(runtime_trade_id),
+        reason_code,
+    ))
+    return P0ReplayEvent(
+        event_id=str(uuid5(_P0_NAMESPACE, fingerprint)),
+        intent_id=lifecycle.intent_id,
+        policy_id="P0",
+        policy_version=snapshot.version,
+        event_type="P0_OPEN_SNAPSHOT",
+        observed_at=observed_at,
+        d0=lifecycle.d0,
+        symbol=lifecycle.symbol,
+        status=status,
+        reason_code=reason_code,
+        trigger_at=_utc(lifecycle.filled_at or lifecycle.observed_at),
+        virtual_exit_quantity=0.0,
+        runtime_quantity=0.0,
+        first_executable_at=None,
+        first_executable_price=None,
+        first_executable_price_source="not_applicable:runtime_open",
+        filled_at=None,
+        fill_price=None,
+        initial_notional=(
+            lifecycle.s4_virtual_quantity * float(lifecycle.fill_price or 0.0)
+        ),
+        gross_pnl=None,
+        entry_cost_usd=None,
+        exit_cost_usd=None,
+        net_pnl=None,
+        cost_model_version=cost_model.version,
+        runtime_decision_id=None,
+        runtime_order_id=None,
+        shadow_order_id=None,
+        comparable=not divergences,
+        divergence_reasons=tuple(divergences),
+        details={
+            "entry_fill_id": lifecycle.fill_id,
+            "entry_policy_version": lifecycle.policy_version,
+            "runtime_trade_id": runtime_trade_id,
+            "snapshot_hash": snapshot.source_hash,
+        },
+    )
+
+
 def replay_p0(
     lifecycle: S4LifecycleEvent,
     runtime: RuntimeExitObservation,
@@ -238,11 +318,12 @@ def replay_p0(
     filled_at = _utc(runtime.filled_at) if runtime.filled_at else None
     virtual_quantity = lifecycle.s4_virtual_quantity if status != "CENSORED" else 0.0
     initial_notional = lifecycle.s4_virtual_quantity * (lifecycle.fill_price or 0.0)
+    runtime_fill_price = runtime.fill_price
 
     gross_pnl = entry_cost = exit_cost = net_pnl = None
     if status != "CENSORED" and (
         filled_at is None
-        or runtime.fill_price is None
+        or runtime_fill_price is None
         or runtime.filled_quantity <= 0
         or first_at is None
         or runtime.first_executable_price is None
@@ -250,6 +331,7 @@ def replay_p0(
         status = "TRIGGERED"
         reason_code = "P0_EXIT_FILL_MISSING"
     elif status != "CENSORED":
+        assert runtime_fill_price is not None
         entry = cost_model.compute(
             symbol=lifecycle.symbol,
             notional=initial_notional,
@@ -257,16 +339,16 @@ def replay_p0(
             fill_price=float(lifecycle.fill_price or 0.0),
             side="BUY",
         )
-        exit_notional = virtual_quantity * float(runtime.fill_price)
+        exit_notional = virtual_quantity * runtime_fill_price
         exit_breakdown = cost_model.compute(
             symbol=lifecycle.symbol,
             notional=exit_notional,
             qty=virtual_quantity,
-            fill_price=float(runtime.fill_price),
+            fill_price=runtime_fill_price,
             side="SELL",
         )
         gross_pnl = (
-            float(runtime.fill_price) - float(lifecycle.fill_price or 0.0)
+            runtime_fill_price - float(lifecycle.fill_price or 0.0)
         ) * virtual_quantity
         entry_cost = float(entry.total_cost_usd)
         exit_cost = float(exit_breakdown.total_cost_usd)
@@ -275,12 +357,21 @@ def replay_p0(
     fingerprint = "|".join((
         lifecycle.intent_id,
         snapshot.version,
+        snapshot.source_hash,
         str(runtime.runtime_decision_id),
-        runtime.runtime_order_id or "no-order",
+        ",".join(runtime.runtime_order_ids)
+        or runtime.runtime_order_id
+        or "no-order",
         reason_code,
         trigger_at.isoformat(),
         "no-fill" if filled_at is None else filled_at.isoformat(),
         f"{runtime.filled_quantity:.12g}",
+        "no-fill-price" if runtime_fill_price is None else f"{runtime_fill_price:.12g}",
+        (
+            "no-first-price"
+            if runtime.first_executable_price is None
+            else f"{runtime.first_executable_price:.12g}"
+        ),
     ))
     event = P0ReplayEvent(
         event_id=str(uuid5(_P0_NAMESPACE, fingerprint)),
@@ -300,7 +391,7 @@ def replay_p0(
         first_executable_price=runtime.first_executable_price,
         first_executable_price_source=runtime.first_executable_price_source,
         filled_at=filled_at,
-        fill_price=runtime.fill_price,
+        fill_price=runtime_fill_price,
         initial_notional=initial_notional,
         gross_pnl=gross_pnl,
         entry_cost_usd=entry_cost,
@@ -317,15 +408,19 @@ def replay_p0(
             "entry_first_executable_price": lifecycle.first_executable_price,
             "entry_policy_version": lifecycle.policy_version,
             "raw_runtime_reason": runtime.raw_reason,
+            "runtime_order_ids": list(runtime.runtime_order_ids),
             "snapshot_hash": snapshot.source_hash,
         },
     )
+    divergences: tuple[str, ...]
     if status == "TRIGGERED":
         divergences = ("EXIT_FILL_MISSING",)
     elif status == "CENSORED":
         divergences = (reason_code.removeprefix("P0_"),)
     else:
         divergences = compare_p0_to_runtime(event, runtime)
+        if lifecycle.policy_version != snapshot.version:
+            divergences += ("POLICY_VERSION_MISMATCH",)
         if not lifecycle.reconstructible:
             divergences += ("ENTRY_NOT_RECONSTRUCTIBLE",)
     return replace(

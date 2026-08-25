@@ -26,6 +26,8 @@ def test_report_passa_esattamente_al_95_percento_e_classifica_il_residuo():
     assert report["comparable"] == 95
     assert report["coverage"] == 0.95
     assert report["meets_minimum"] is True
+    assert report["take_profit_live_count"] == 2
+    assert report["take_profit_live_rate"] == 0.02
     assert report["residual_by_reason"] == {
         "P0_EXIT_FILL_MISSING": 3,
         "P0_TAKE_PROFIT_DISABLED": 2,

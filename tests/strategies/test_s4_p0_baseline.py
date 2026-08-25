@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 
 import pytest
+import yaml
 
 from src.costs.calculator import CostBreakdown
 from src.strategies.s4.lifecycle import (
@@ -19,6 +21,7 @@ from src.strategies.s4.p0_baseline import (
     build_p0_replay_report,
     compare_p0_to_runtime,
     load_p0_policy_snapshot,
+    observe_p0_open,
     replay_p0,
 )
 
@@ -108,6 +111,21 @@ def test_snapshot_p0_legge_il_contratto_congelato_senza_parametri_live():
     assert snapshot.scale_out_enabled is False
 
 
+def test_snapshot_rifiuta_un_dhard_non_comune_alle_policy(tmp_path):
+    contract_path = (
+        Path(__file__).resolve().parents[2]
+        / "config"
+        / "s4_exit_trial.yaml"
+    )
+    payload = yaml.safe_load(contract_path.read_text())
+    payload["risk_overlay"]["d_hard"]["identical_across_policies"] = False
+    drifted = tmp_path / "s4_exit_trial.yaml"
+    drifted.write_text(yaml.safe_dump(payload))
+
+    with pytest.raises(ValueError, match="identical across policies"):
+        load_p0_policy_snapshot(drifted)
+
+
 def test_golden_replay_riproduce_trigger_quantita_tempo_prezzo_costi_e_outcome():
     runtime = _runtime()
     event = replay_p0(_entry(), runtime, load_p0_policy_snapshot(), _CostModel())
@@ -129,6 +147,51 @@ def test_golden_replay_riproduce_trigger_quantita_tempo_prezzo_costi_e_outcome()
     assert event.shadow_order_id is None
     assert event.comparable is True
     assert compare_p0_to_runtime(event, runtime) == ()
+
+
+def test_lifecycle_runtime_ancora_aperto_entra_nel_denominatore_come_comparabile():
+    event = observe_p0_open(
+        _entry(),
+        load_p0_policy_snapshot(),
+        _CostModel(),
+        runtime_trade_id=77,
+    )
+
+    assert event.event_type == "P0_OPEN_SNAPSHOT"
+    assert event.status == "OPEN"
+    assert event.reason_code == "P0_RUNTIME_OPEN"
+    assert event.virtual_exit_quantity == 0.0
+    assert event.runtime_order_id is None
+    assert event.shadow_order_id is None
+    assert event.comparable is True
+
+
+def test_runtime_trade_mancante_e_un_residuo_non_un_lifecycle_omesso():
+    event = observe_p0_open(
+        _entry(),
+        load_p0_policy_snapshot(),
+        _CostModel(),
+        runtime_trade_id=None,
+    )
+
+    assert event.status == "CENSORED"
+    assert event.reason_code == "P0_RUNTIME_TRADE_MISSING"
+    assert event.comparable is False
+    assert event.divergence_reasons == ("RUNTIME_TRADE_MISSING",)
+
+
+def test_versione_policy_diversa_dallo_snapshot_rende_il_replay_non_comparabile():
+    lifecycle = replace(_entry(), policy_version="s4-exit-trial:0.9.0")
+
+    event = replay_p0(
+        lifecycle,
+        _runtime(),
+        load_p0_policy_snapshot(),
+        _CostModel(),
+    )
+
+    assert event.comparable is False
+    assert event.divergence_reasons == ("POLICY_VERSION_MISMATCH",)
 
 
 @pytest.mark.parametrize(

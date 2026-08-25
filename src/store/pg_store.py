@@ -658,7 +658,10 @@ class PostgreSQLStore:
                         t.id AS runtime_trade_id,
                         COALESCE(
                             t.exit_order_ids,
-                            ARRAY[t.exit_order_id]::TEXT[]
+                            CASE
+                                WHEN t.exit_order_id IS NULL THEN ARRAY[]::TEXT[]
+                                ELSE ARRAY[t.exit_order_id]::TEXT[]
+                            END
                         ) AS runtime_order_ids,
                         t.exit_time AS runtime_exit_time,
                         t.exit_reason AS runtime_exit_reason,
@@ -667,7 +670,7 @@ class PostgreSQLStore:
                         runtime_decision.exit_mechanism,
                         runtime_decision.reason AS runtime_reason
                     FROM s4_lifecycle_current lc
-                    JOIN trades t ON t.entry_order_id = lc.order_id
+                    LEFT JOIN trades t ON t.entry_order_id = lc.order_id
                     LEFT JOIN LATERAL (
                         SELECT ed.id, ed.tick_time, ed.exit_mechanism, ed.reason
                         FROM execution_decisions ed
@@ -675,7 +678,10 @@ class PostgreSQLStore:
                           AND ed.symbol = lc.symbol
                           AND ed.order_id = ANY(COALESCE(
                               t.exit_order_ids,
-                              ARRAY[t.exit_order_id]::TEXT[]
+                              CASE
+                                  WHEN t.exit_order_id IS NULL THEN ARRAY[]::TEXT[]
+                                  ELSE ARRAY[t.exit_order_id]::TEXT[]
+                              END
                           ))
                         ORDER BY ed.tick_time, ed.id
                         LIMIT 1
@@ -683,12 +689,12 @@ class PostgreSQLStore:
                     LEFT JOIN s4_exit_policy_current p0
                       ON p0.intent_id = lc.intent_id
                      AND p0.policy_id = 'P0'
-                    WHERE t.exit_time IS NOT NULL
+                    WHERE lc.filled_quantity > 0
                       AND (
                           p0.intent_id IS NULL
-                          OR p0.status NOT IN ('CLOSED', 'RISK_EXITED', 'CENSORED')
+                          OR p0.status NOT IN ('CLOSED', 'RISK_EXITED')
                       )
-                    ORDER BY t.exit_time, lc.intent_id
+                    ORDER BY COALESCE(t.exit_time, lc.observed_at), lc.intent_id
                     """
                 )
                 return [dict(row) for row in cur.fetchall()]

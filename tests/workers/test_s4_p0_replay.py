@@ -103,6 +103,29 @@ def test_worker_riproduce_p0_senza_submit_cancel_o_replace():
     broker.replace_order_by_id.assert_not_called()
 
 
+def test_worker_persiste_il_lifecycle_runtime_ancora_aperto_senza_leggere_ordini():
+    store = MagicMock()
+    store.fetch_s4_p0_replay_candidates.return_value = [_candidate(
+        runtime_order_ids=[],
+        runtime_exit_time=None,
+        runtime_exit_reason=None,
+        runtime_decision_id=None,
+        trigger_at=None,
+        exit_mechanism=None,
+        runtime_reason=None,
+    )]
+    broker = MagicMock()
+
+    count = replay_p0_candidates(store, broker)
+
+    assert count == 1
+    [event] = store.write_s4_exit_policy_events.call_args.args[0]
+    assert event.status == "OPEN"
+    assert event.reason_code == "P0_RUNTIME_OPEN"
+    assert event.comparable is True
+    broker.get_order_by_id.assert_not_called()
+
+
 def test_stop_broker_e_overlay_dhard_comune_non_stop_stretto():
     store = MagicMock()
     store.fetch_s4_p0_replay_candidates.return_value = [_candidate(
@@ -135,6 +158,31 @@ def test_take_profit_live_e_censurato_secondo_il_contratto_comune():
     assert event.status == "CENSORED"
     assert event.reason_code == "P0_TAKE_PROFIT_DISABLED"
     assert event.comparable is False
+
+
+def test_scale_out_conserva_tutti_gli_ordini_runtime_nella_provenance():
+    store = MagicMock()
+    store.fetch_s4_p0_replay_candidates.return_value = [_candidate(
+        runtime_order_ids=["exit-order-1", "exit-order-2"],
+        exit_mechanism=None,
+    )]
+    broker = MagicMock()
+    broker.get_order_by_id.side_effect = [
+        _filled_order(filled_qty="0.5", filled_avg_price="109.0"),
+        _filled_order(
+            id="exit-order-2",
+            filled_at=EXIT_AT + timedelta(minutes=15),
+            filled_qty="1.5",
+            filled_avg_price="111.0",
+        ),
+    ]
+
+    replay_p0_candidates(store, broker)
+
+    [event] = store.write_s4_exit_policy_events.call_args.args[0]
+    assert event.status == "CENSORED"
+    assert event.reason_code == "P0_SCALE_OUT_DISABLED"
+    assert event.details["runtime_order_ids"] == ["exit-order-1", "exit-order-2"]
 
 
 def test_lookup_fill_fallito_resta_residuo_esplicito():

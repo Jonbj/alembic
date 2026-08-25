@@ -50,6 +50,8 @@ def summarize(
         for row in rows
         if not row.get("comparable")
     )
+    take_profit_count = residuals.get("P0_TAKE_PROFIT_DISABLED", 0)
+    take_profit_rate = take_profit_count / total if total else None
     return {
         "window_start": start,
         "window_end": end,
@@ -58,6 +60,11 @@ def summarize(
         "comparable": comparable,
         "coverage": coverage,
         "meets_minimum": coverage is not None and coverage >= minimum_coverage,
+        "take_profit_live_count": take_profit_count,
+        "take_profit_live_rate": take_profit_rate,
+        "take_profit_exceeds_contract_threshold": (
+            take_profit_rate is not None and take_profit_rate > 0.05
+        ),
         "residual_by_reason": dict(sorted(residuals.items())),
     }
 

@@ -60,7 +60,18 @@ DROP VIEW IF EXISTS s4_exit_policy_current;
 CREATE VIEW s4_exit_policy_current AS
 SELECT DISTINCT ON (intent_id, policy_id) *
 FROM s4_exit_policy_events
-ORDER BY intent_id, policy_id, observed_at DESC, event_id DESC;
+ORDER BY
+    intent_id,
+    policy_id,
+    observed_at DESC,
+    CASE status
+        WHEN 'CLOSED' THEN 4
+        WHEN 'RISK_EXITED' THEN 4
+        WHEN 'OPEN' THEN 3
+        WHEN 'TRIGGERED' THEN 2
+        ELSE 1
+    END DESC,
+    event_id DESC;
 
 CREATE VIEW s4_p0_validation AS
 SELECT
@@ -78,8 +89,9 @@ CREATE VIEW s4_p0_residuals AS
 SELECT
     COALESCE(d0, observed_at::date) AS lifecycle_date,
     reason_code,
-    unnest(divergence_reasons) AS divergence_reason,
+    residual.divergence_reason,
     COUNT(*) AS lifecycle_count
 FROM s4_exit_policy_current
+JOIN LATERAL unnest(divergence_reasons) AS residual(divergence_reason) ON TRUE
 WHERE policy_id = 'P0' AND NOT comparable
-GROUP BY COALESCE(d0, observed_at::date), reason_code, divergence_reason;
+GROUP BY COALESCE(d0, observed_at::date), reason_code, residual.divergence_reason;

@@ -87,7 +87,7 @@ def test_writer_persistente_e_idempotente_non_espone_un_ordine_shadow():
     conn.commit.assert_called_once()
 
 
-def test_fetch_replay_candidates_unisce_entry_fill_trade_e_primo_trigger_runtime():
+def test_fetch_replay_candidates_include_aperti_e_trade_mancanti_nel_denominatore():
     store, conn, cursor = _store_and_cursor()
     cursor.fetchall.return_value = [{
         "intent_id": _event().intent_id,
@@ -103,10 +103,11 @@ def test_fetch_replay_candidates_unisce_entry_fill_trade_e_primo_trigger_runtime
     assert rows == cursor.fetchall.return_value
     sql = cursor.execute.call_args.args[0]
     assert "FROM s4_lifecycle_current lc" in sql
-    assert "JOIN trades t ON t.entry_order_id = lc.order_id" in sql
+    assert "LEFT JOIN trades t ON t.entry_order_id = lc.order_id" in sql
     assert "LEFT JOIN LATERAL" in sql
     assert "s4_exit_policy_current" in sql
-    assert "t.exit_time IS NOT NULL" in sql
+    assert "lc.filled_quantity > 0" in sql
+    assert "t.exit_time IS NOT NULL" not in sql
     conn.rollback.assert_called_once()
 
 

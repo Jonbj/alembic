@@ -11,6 +11,7 @@ from src.strategies.s4.p0_baseline import (
     RuntimeExitObservation,
     VersionedTradeCostModel,
     load_p0_policy_snapshot,
+    observe_p0_open,
     replay_p0,
 )
 
@@ -143,6 +144,7 @@ def _runtime_observation(
         filled_quantity=total_quantity,
         fill_price=fill_price,
         raw_reason=row.get("runtime_reason") or row.get("runtime_exit_reason"),
+        runtime_order_ids=tuple(runtime_order_ids),
     )
 
 
@@ -153,14 +155,23 @@ def replay_p0_candidates(store, trading_client) -> int:
         return 0
     snapshot = load_p0_policy_snapshot()
     cost_model = VersionedTradeCostModel()
-    events = [
-        replay_p0(
-            _lifecycle_from_row(row),
-            _runtime_observation(row, trading_client),
-            snapshot,
-            cost_model,
-        )
-        for row in rows
-    ]
+    events = []
+    for row in rows:
+        lifecycle = _lifecycle_from_row(row)
+        if row.get("runtime_exit_time") is None:
+            event = observe_p0_open(
+                lifecycle,
+                snapshot,
+                cost_model,
+                runtime_trade_id=row.get("runtime_trade_id"),
+            )
+        else:
+            event = replay_p0(
+                lifecycle,
+                _runtime_observation(row, trading_client),
+                snapshot,
+                cost_model,
+            )
+        events.append(event)
     store.write_s4_exit_policy_events(events)
     return len(events)
