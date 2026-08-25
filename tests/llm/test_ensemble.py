@@ -134,6 +134,34 @@ class TestRelevanceEvidencePreservation:
         assert outputs[0].risk_flags is None
         assert outputs[0].evidence_sentences is None
 
+    def test_relevance_evidence_does_not_change_aggregation(self):
+        aggregator = EnsembleAggregator(
+            min_confidence=0.4, divergence_threshold=0.4
+        )
+        baseline = [
+            _mo(0.6, 0.8, "glm"),
+            _mo(0.2, 0.6, "gptoss"),
+        ]
+        enriched = [
+            output.model_copy(update={
+                "event_type": "macro",
+                "directness": "sector",
+                "materiality": 0.2,
+                "novelty": 0.3,
+                "risk_flags": ["already_priced_in"],
+                "evidence_sentences": ["Sector-level context."],
+            })
+            for output in baseline
+        ]
+
+        baseline_result = aggregator.aggregate(baseline)
+        enriched_result = aggregator.aggregate(enriched)
+
+        assert baseline_result is not None
+        assert enriched_result is not None
+        assert enriched_result.polarity == pytest.approx(baseline_result.polarity)
+        assert enriched_result.confidence == pytest.approx(baseline_result.confidence)
+
 
 class TestEnsembleAggregator:
     """Test ensemble aggregation logic."""
