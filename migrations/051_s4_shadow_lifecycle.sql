@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS s4_lifecycle_events (
     first_executable_price_source  TEXT,
     d0                             DATE,
     due_session                    DATE,
-    policy_version                 TEXT,
+    policy_version                 TEXT NOT NULL,
     s1_virtual_quantity            DOUBLE PRECISION NOT NULL DEFAULT 0,
     s4_virtual_quantity            DOUBLE PRECISION NOT NULL DEFAULT 0,
     broker_quantity                DOUBLE PRECISION,
@@ -62,17 +62,20 @@ ORDER BY intent_id, observed_at DESC, event_id DESC;
 
 CREATE VIEW s4_lifecycle_validation AS
 SELECT
-    d0,
+    COALESCE(d0, observed_at::date) AS lifecycle_date,
     COUNT(*) AS total,
     COUNT(*) FILTER (WHERE reconstructible) AS reconstructible,
     COUNT(*) FILTER (WHERE NOT reconstructible) AS residual,
     COUNT(*) FILTER (WHERE reconstructible)::DOUBLE PRECISION
         / NULLIF(COUNT(*), 0) AS coverage
 FROM s4_lifecycle_current
-GROUP BY d0;
+GROUP BY COALESCE(d0, observed_at::date);
 
 CREATE VIEW s4_lifecycle_residuals AS
-SELECT d0, reason_code, COUNT(*) AS lifecycle_count
+SELECT
+    COALESCE(d0, observed_at::date) AS lifecycle_date,
+    reason_code,
+    COUNT(*) AS lifecycle_count
 FROM s4_lifecycle_current
 WHERE NOT reconstructible
-GROUP BY d0, reason_code;
+GROUP BY COALESCE(d0, observed_at::date), reason_code;

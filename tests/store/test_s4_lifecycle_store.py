@@ -112,6 +112,8 @@ def test_fetch_submitted_intents_mappa_snapshot_e_versione_senza_inferenze():
         "first_executable_price_source": "alpaca_snapshot.latest_trade",
         "policy_version": "s4-exit-trial:1.0.0",
         "sleeve_contributions": {"S1": 0.05, "S4": 0.01},
+        "submission_reason_code": "SUBMITTED",
+        "submission_error": None,
     }]
 
     [intent] = store.fetch_s4_submitted_intents()
@@ -127,10 +129,36 @@ def test_fetch_submitted_intents_mappa_snapshot_e_versione_senza_inferenze():
         first_executable_price_source="alpaca_snapshot.latest_trade",
         policy_version="s4-exit-trial:1.0.0",
         sleeve_contributions={"S1": 0.05, "S4": 0.01},
+        submission_reason_code="SUBMITTED",
+        submission_error=None,
     )
     sql = cursor.execute.call_args.args[0]
     assert "event_type = 'disposition'" in sql
-    assert "reason_code = 'SUBMITTED'" in sql
+    assert "reason_code IN ('SUBMITTED', 'BROKER_REJECT')" in sql
+
+
+def test_fetch_include_reject_pre_ack_senza_inventare_un_order_id():
+    store, _, cursor = _store_and_cursor()
+    cursor.fetchall.return_value = [{
+        "intent_id": "34d6c4c0-bcb2-55ef-a0f4-e3db1a4a13b0",
+        "symbol": "AMD",
+        "order_id": None,
+        "submitted_at": TS,
+        "requested_quantity": 2.0,
+        "requested_notional": 210.0,
+        "first_executable_price": 105.0,
+        "first_executable_price_source": "portfolio_market_snapshot.latest_price",
+        "policy_version": "s4-exit-trial:1.0.0",
+        "sleeve_contributions": {"S4": 0.01},
+        "submission_reason_code": "BROKER_REJECT",
+        "submission_error": "APIError",
+    }]
+
+    [intent] = store.fetch_s4_submitted_intents()
+
+    assert intent.order_id is None
+    assert intent.submission_reason_code == "BROKER_REJECT"
+    assert intent.submission_error == "APIError"
 
 
 def test_writer_rollback_su_errore():

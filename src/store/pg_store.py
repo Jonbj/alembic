@@ -605,10 +605,12 @@ class PostgreSQLStore:
                         COALESCE(
                             snapshot->'disposition'->'sleeve_contributions',
                             '{}'::jsonb
-                        ) AS sleeve_contributions
+                        ) AS sleeve_contributions,
+                        reason_code AS submission_reason_code,
+                        snapshot->'disposition'->>'error_type' AS submission_error
                     FROM s4_intent_events
                     WHERE event_type = 'disposition'
-                      AND reason_code = 'SUBMITTED'
+                      AND reason_code IN ('SUBMITTED', 'BROKER_REJECT')
                       AND occurred_at > now() - '7 days'::interval
                     ORDER BY occurred_at, intent_id
                     """
@@ -627,6 +629,8 @@ class PostgreSQLStore:
                 ),
                 policy_version=row["policy_version"] or "unknown",
                 sleeve_contributions=dict(row["sleeve_contributions"] or {}),
+                submission_reason_code=row["submission_reason_code"],
+                submission_error=row["submission_error"],
             ) for row in rows]
         except Exception:
             conn.rollback()

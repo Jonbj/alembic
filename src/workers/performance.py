@@ -129,33 +129,44 @@ def _reconcile_s4_lifecycles(
 
     events = []
     for intent in intents:
-        try:
-            broker_order = trading_client.get_order_by_id(intent.order_id)
-            raw_status = getattr(broker_order, "status", "unknown")
-            status = getattr(raw_status, "value", raw_status)
-            filled_at = getattr(broker_order, "filled_at", None)
-            if isinstance(filled_at, str):
-                filled_at = datetime.fromisoformat(filled_at)
+        if intent.submission_reason_code == "BROKER_REJECT":
             order = BrokerOrderSnapshot(
-                order_id=str(getattr(broker_order, "id", intent.order_id)),
-                status=str(status),
-                filled_at=filled_at,
-                filled_quantity=float(getattr(broker_order, "filled_qty", 0.0) or 0.0),
-                filled_avg_price=(
-                    float(broker_order.filled_avg_price)
-                    if getattr(broker_order, "filled_avg_price", None) is not None
-                    else None
-                ),
-            )
-        except Exception as exc:
-            order = BrokerOrderSnapshot(
-                order_id=intent.order_id,
-                status="lookup_failed",
+                order_id=None,
+                status="rejected",
                 filled_at=None,
                 filled_quantity=0.0,
                 filled_avg_price=None,
-                lookup_error=type(exc).__name__,
             )
+        else:
+            try:
+                broker_order = trading_client.get_order_by_id(intent.order_id)
+                raw_status = getattr(broker_order, "status", "unknown")
+                status = getattr(raw_status, "value", raw_status)
+                filled_at = getattr(broker_order, "filled_at", None)
+                if isinstance(filled_at, str):
+                    filled_at = datetime.fromisoformat(filled_at)
+                order = BrokerOrderSnapshot(
+                    order_id=str(getattr(broker_order, "id", intent.order_id)),
+                    status=str(status),
+                    filled_at=filled_at,
+                    filled_quantity=float(
+                        getattr(broker_order, "filled_qty", 0.0) or 0.0
+                    ),
+                    filled_avg_price=(
+                        float(broker_order.filled_avg_price)
+                        if getattr(broker_order, "filled_avg_price", None) is not None
+                        else None
+                    ),
+                )
+            except Exception as exc:
+                order = BrokerOrderSnapshot(
+                    order_id=intent.order_id,
+                    status="lookup_failed",
+                    filled_at=None,
+                    filled_quantity=0.0,
+                    filled_avg_price=None,
+                    lookup_error=type(exc).__name__,
+                )
         position_qty = (
             None if broker_positions is None else broker_positions.get(intent.symbol, 0.0)
         )

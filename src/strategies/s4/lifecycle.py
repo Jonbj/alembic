@@ -34,7 +34,7 @@ class MarketSession:
 class SubmittedIntent:
     intent_id: str
     symbol: str
-    order_id: str
+    order_id: str | None
     submitted_at: datetime
     requested_quantity: float
     requested_notional: float
@@ -42,11 +42,13 @@ class SubmittedIntent:
     first_executable_price_source: str
     policy_version: str
     sleeve_contributions: dict[str, float]
+    submission_reason_code: str = "SUBMITTED"
+    submission_error: str | None = None
 
 
 @dataclass(frozen=True)
 class BrokerOrderSnapshot:
-    order_id: str
+    order_id: str | None
     status: str
     filled_at: datetime | None
     filled_quantity: float
@@ -61,7 +63,7 @@ class S4LifecycleEvent:
     event_type: str
     observed_at: datetime
     symbol: str
-    order_id: str
+    order_id: str | None
     status: str
     reason_code: str
     fill_id: str | None
@@ -115,7 +117,7 @@ def _fill_id(order: BrokerOrderSnapshot) -> str | None:
     if order.filled_quantity <= 0 or order.filled_at is None:
         return None
     raw = "|".join((
-        order.order_id,
+        order.order_id or "missing-order-id",
         _utc(order.filled_at).isoformat(),
         f"{order.filled_quantity:.12g}",
         "" if order.filled_avg_price is None else f"{order.filled_avg_price:.12g}",
@@ -224,7 +226,7 @@ def reconcile_entry(
     fill_id = _fill_id(order)
     fingerprint = "|".join((
         intent.intent_id,
-        order.order_id,
+        order.order_id or "missing-order-id",
         status,
         reason,
         fill_id or "no-fill",

@@ -4187,6 +4187,9 @@ def _submit_portfolio_orders(
     _accepted_risk = 0.0
     _committed_buy_notional = 0.0
     for order in orders:
+        price = None
+        notional = None
+        submitted_quantity = None
         try:
             if order.side == OrderSide.BUY:
                 # P0-05: skip BUY if guard is unavailable (None = fail-closed) or if an open
@@ -4604,11 +4607,33 @@ def _submit_portfolio_orders(
                 continue
         except Exception as exc:
             log.warning("Failed to submit order for %s: %s", order.symbol, exc)
+            reject_details = {"error_type": type(exc).__name__}
+            if (
+                order.side == OrderSide.BUY
+                and price is not None
+                and price > 0
+                and notional is not None
+            ):
+                reject_details.update({
+                    "notional": notional,
+                    "requested_quantity": (
+                        submitted_quantity
+                        if submitted_quantity is not None
+                        else notional / price
+                    ),
+                    "first_executable_price": float(price),
+                    "first_executable_price_source": (
+                        "portfolio_market_snapshot.latest_price"
+                    ),
+                    "sleeve_contributions": dict(sorted(
+                        (sleeve_contributions or {}).get(order.symbol, {}).items()
+                    )),
+                })
             _emit_order_disposition(
                 _on_disposition,
                 order.symbol,
                 "BROKER_REJECT",
-                error_type=type(exc).__name__,
+                **reject_details,
             )
             # P2-05-D: notify caller of broker reject so an audit row can be written.
             if _on_broker_reject is not None:

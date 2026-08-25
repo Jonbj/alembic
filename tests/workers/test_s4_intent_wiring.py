@@ -280,3 +280,34 @@ def test_contributi_sleeve_derivano_dai_target_point_in_time_e_allocazioni():
 
     assert contributions["AMD"] == pytest.approx({"S1": 0.05, "S4": 0.02})
     assert contributions["NVDA"] == pytest.approx({"S4": 0.03})
+
+
+def test_reject_al_submit_conserva_i_dati_del_broker_boundary():
+    order = _buy("AMD", 2.0)
+    market = MarketSnapshot(
+        timestamp=_TS,
+        prices={"AMD": 105.0},
+        volumes={},
+        adv_20d={},
+    )
+    dispositions = []
+
+    _submit_portfolio_orders(
+        [order],
+        MagicMock(),
+        market,
+        _submit_fn=MagicMock(side_effect=RuntimeError("broker rejected")),
+        sleeve_contributions={"AMD": {"S4": 0.01}},
+        _on_disposition=lambda symbol, reason, details: dispositions.append(
+            (symbol, reason, details)
+        ),
+    )
+
+    assert dispositions == [("AMD", "BROKER_REJECT", {
+        "error_type": "RuntimeError",
+        "notional": 210.0,
+        "requested_quantity": 2.0,
+        "first_executable_price": 105.0,
+        "first_executable_price_source": "portfolio_market_snapshot.latest_price",
+        "sleeve_contributions": {"S4": 0.01},
+    })]
