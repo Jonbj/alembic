@@ -164,6 +164,39 @@ esplicitamente ignorata**.
 **Esito legittimo previsto:** se alla scadenza nessun criterio è soddisfatto, la conclusione corretta
 è **estendere la finestra**, non agire comunque.
 
+## Stop di rischio, pre-registrato
+
+Registrato il **2026-08-25** (#329), al giorno 15 di 40. Tutti i criteri sopra sono **epistemici** —
+*c'è alpha?* Questo è l'unico **di rischio**: *quanto siamo disposti a perdere per scoprirlo?*
+
+> **Se il P&L economico cumulato della sleeve S4 sulla finestra tocca −$1.000, S4 passa a shadow
+> immediatamente.** Continua a produrre segnali e a misurarsi, smette di eseguire. Nessuna
+> discussione, nessuna deroga, nessuna taratura come alternativa.
+
+Dove si legge: `pnl_economico.cumulato.S4` in `docs/evidence/economic_pnl.json` — la stessa grandezza
+e la stessa fonte della domanda 1. **Non** sul realizzato, che per S1 è strutturalmente distorto e
+per S4 non è sommabile attraverso il deploy #236.
+
+Taratura del livello, dichiarata ora e non a posteriori: ≈0,9% del NAV (~$110k) e ≈9% del capitale
+della sleeve (~$11k). Alla registrazione S4 vale **−$505,34** (2026-08-24, giorno 15/40), quindi lo
+stop dista ≈$495, cioè ≈2,0× la perdita in essere. Il livello è scelto in valore assoluto sul
+capitale a rischio, **non** come multiplo della perdita corrente: se fosse un multiplo si
+sposterebbe insieme alla perdita, che è il modo esatto in cui uno stop smette di essere uno stop.
+
+**Lo stop è di rischio, non di merito.** Se scatta non dice che la news editoriale non ha alpha —
+dice che non lo scopriremo con questi soldi. La domanda 1 resta in quel caso **aperta e senza
+risposta**, e va registrata come tale alla sintesi del giorno 40: un'uscita per stop di rischio non
+è una falsificazione, e il campione troncato non va confuso con un campione completo.
+
+### Nota sulla banda ±$200
+
+La banda della domanda 1 **non è uno stop di perdita** e non va letta come tale: misura «S4 ha mosso
+l'ago?», e la falsificazione richiede di stare **dentro** la banda *insieme* a `NO_NEWS ≥60%`.
+Uscire dalla banda è la gamba che *non* si avvera. Al 2026-08-24 entrambe le gambe falliscono
+(S4 −$505,34, fuori banda; `no_news_dominant` 5/15 = 33%): sul criterio scritto S4 non è
+falsificata. Confondere le due cose — leggere il breach come un kill trigger — è l'errore che questa
+sezione esiste per impedire, ed è l'errore da cui è nata #329.
+
 ## Stato
 
 | data | evento |
