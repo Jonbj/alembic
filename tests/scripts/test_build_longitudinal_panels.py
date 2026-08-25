@@ -210,3 +210,57 @@ def test_main_non_sovrascrive_la_baseline_se_la_prova_decisiva_e_mutata(
 
     assert mod.main() == 1
     assert out.read_text(encoding="utf-8") == baseline
+
+
+def test_main_blocca_la_baseline_end2end_sulla_catena_reale(monkeypatch):
+    # Review #286: la contestazione era "end-to-end". Il test qui' sopra mocka
+    # costruisci per iniettare una validazione falsifiability fallita; questo
+    # esercita la CATENA REALE: validate_falsifiability rileva la prova_decisiva
+    # mutata -> main() restituisce 1 e non sostituisce la baseline. Usa i dossier
+    # reali (findings.json read-only) e un file di annotazioni temporaneo: prima
+    # registra una prova_decisiva legittima (baseline scritta), poi la muta
+    # (read-only violato). Senza il gate, la mutazione diventerebbe la nuova
+    # baseline e l'errore sparirebbe alla run successiva.
+    import json
+    import shutil
+
+    mod = importlib.import_module("build_longitudinal_panels")
+    # le annotazioni devono stare sotto PROJECT_DIR per la provenance
+    # (ANNOTATIONS.relative_to(PROJECT_DIR)); si crea una dir temporanea nel
+    # worktree e si pulisce in finally.
+    work_tmp = PROJECT_DIR / ".e2e_286_tmp"
+    work_tmp.mkdir(exist_ok=True)
+    ann = work_tmp / "finding_annotations.json"
+    out = work_tmp / "longitudinal_panels.json"
+    monkeypatch.setattr(mod, "ANNOTATIONS", ann)
+    try:
+        def scrivi_annot(prova):
+            ann.write_text(
+                json.dumps({
+                    "F-001": {
+                        "stato_falsificazione": "supported",
+                        "prova_decisiva": prova,
+                        "meccanismo": "NO_NEWS",
+                        "strategia": "S4",
+                        "relazione_finding_causa": "NO_NEWS",
+                        "contamination": "attribution",
+                    }
+                }),
+                encoding="utf-8",
+            )
+
+        # run 1: prova_decisiva registrata legittimamente -> exit 0, baseline
+        # scritta (previous_report assente => nessun vincolo read-only).
+        scrivi_annot("test X conferma (v1)")
+        monkeypatch.setattr(sys, "argv", [mod.__file__, "--out", str(out)])
+        assert mod.main() == 0
+        assert out.exists()
+        baseline = out.read_text(encoding="utf-8")
+
+        # run 2: prova_decisiva mutata (read-only violato). Il validatore reale
+        # la rileva e main() restituisce 1 SENZA sovrascrivere la baseline.
+        scrivi_annot("test Y diverso (v2 MUTATA)")
+        assert mod.main() == 1
+        assert out.read_text(encoding="utf-8") == baseline
+    finally:
+        shutil.rmtree(work_tmp, ignore_errors=True)
