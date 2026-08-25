@@ -158,8 +158,8 @@ class TestLogLlmResponses:
 
         _, batch = pg_store._conn.cursor.return_value.executemany.call_args[0]
         batch = list(batch)
-        assert batch[0][5] is True    # eligible column, 0.85 >= 0.4
-        assert batch[1][5] is False   # 0.30 < 0.4 → NOT eligible (was hardcoded True)
+        assert batch[0][11] is True    # eligible column, 0.85 >= 0.4
+        assert batch[1][11] is False   # 0.30 < 0.4 → NOT eligible (was hardcoded True)
 
     def test_log_llm_responses_force_ineligible_overrides_confidence(self, pg_store):
         """Divergence-fallback outputs are audit-only: eligible must be False even
@@ -174,8 +174,42 @@ class TestLogLlmResponses:
 
         _, batch = pg_store._conn.cursor.return_value.executemany.call_args[0]
         batch = list(batch)
-        assert batch[0][5] is False
-        assert batch[1][5] is False
+        assert batch[0][11] is False
+        assert batch[1][11] is False
+
+    def test_log_llm_responses_persists_relevance_evidence(self, pg_store):
+        output = ModelOutput(
+            symbol="F",
+            polarity=-0.6,
+            confidence=0.8,
+            reasoning="Tariffs hurt this issuer directly.",
+            model_id="glm-5.2:cloud",
+            event_type="regulatory",
+            directness="direct",
+            materiality=0.7,
+            novelty=0.4,
+            risk_flags=["already_priced_in"],
+            evidence_sentences=["The tariff applies to Ford imports."],
+        )
+
+        pg_store.log_llm_responses(signal_id=42, outputs=[output])
+
+        sql, batch = pg_store._conn.cursor.return_value.executemany.call_args[0]
+        assert "event_type" in sql
+        assert "directness" in sql
+        assert "materiality" in sql
+        assert "novelty" in sql
+        assert "risk_flags" in sql
+        assert "evidence_sentences" in sql
+        params = list(batch)[0]
+        assert params[5:11] == (
+            "regulatory",
+            "direct",
+            0.7,
+            0.4,
+            ["already_priced_in"],
+            ["The tariff applies to Ford imports."],
+        )
 
     def test_log_llm_responses_empty_list_is_noop(self, pg_store):
         """log_llm_responses with empty list writes nothing and does not raise."""
