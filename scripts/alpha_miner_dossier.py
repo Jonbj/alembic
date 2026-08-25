@@ -25,6 +25,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import statistics
 import subprocess
 from collections import defaultdict
@@ -44,6 +45,12 @@ from src.analysis.dossier.decision_quality import (
     build_opening_snapshot,
 )
 from src.analysis.dossier.article_coverage import build_article_coverage
+from src.analysis.dossier.article_coverage import canonical_article_id
+from src.analysis.dossier.event_context import (
+    CONTEXT_VERSION,
+    SECTOR_ETF_BY_SECTOR,
+    build_event_market_context,
+)
 from src.analysis.dossier.market import compute_market, compute_miss_candidates
 from src.analysis.dossier.miss_cause import (
     DEFAULT_SOGLIA_GATE,
@@ -60,7 +67,7 @@ OUT_DIR = PROJECT_DIR / "docs" / "evidence" / "dossier"
 SOGLIA_MOVER = 0.03
 FINESTRA_MEDIANE = 20  # giorni, per le mediane mobili
 INIZIO_OSSERVAZIONE = date(2026, 8, 3)
-DOSSIER_SCHEMA_VERSION = "2.2"
+DOSSIER_SCHEMA_VERSION = "2.3"
 NEW_YORK = ZoneInfo("America/New_York")
 
 # Size plausibile di uno slot S4 per lo stimatore v2 (#280): fixed-slot sizing
@@ -146,7 +153,7 @@ def _soglia_gate_s4() -> float:
 
 
 def _barre(simboli: list[str], giorno: date) -> dict[str, dict]:
-    """Barre giornaliere del giorno richiesto e del precedente.
+    """Barre giornaliere, precedente e ADV20 per universo e soli benchmark.
 
     Feed SIP: e' la consolidata che copre il 100% del volume. IEX e' un singolo
     mercato e su storico lungo ha giorni interi mancanti (misurato su SPY: manca
@@ -166,7 +173,9 @@ def _barre(simboli: list[str], giorno: date) -> dict[str, dict]:
     req = StockBarsRequest(
         symbol_or_symbols=simboli,
         timeframe=TimeFrame.Day,
-        start=datetime.combine(giorno - timedelta(days=10), datetime.min.time()),
+        # 45 giorni di calendario coprono almeno 20 sedute anche attorno alle
+        # festivita'. L'ADV resta None se il feed non ne fornisce comunque 20.
+        start=datetime.combine(giorno - timedelta(days=45), datetime.min.time()),
         # mai oltre oggi: il SIP rifiuta le richieste che toccano gli ultimi 15
         # minuti, e il rifiuto uccide l'intera chiamata, non la sola ultima barra.
         end=datetime.combine(min(giorno + timedelta(days=1), date.today()), datetime.min.time()),
@@ -188,10 +197,22 @@ def _barre(simboli: list[str], giorno: date) -> dict[str, dict]:
             continue
         precedenti = sorted(d for d in righe if d < giorno)
         r = righe[giorno]
+        volumi_precedenti = [
+            float(righe[d]["volume"])
+            for d in precedenti[-20:]
+            if righe[d].get("volume") is not None
+        ]
         out[sym] = {
             "open": float(r["open"]), "high": float(r["high"]),
             "low": float(r["low"]), "close": float(r["close"]),
             "close_prec": float(righe[precedenti[-1]]["close"]) if precedenti else None,
+            "volume": int(r["volume"]) if r.get("volume") is not None else None,
+            "adv_20d": (
+                statistics.fmean(volumi_precedenti)
+                if len(volumi_precedenti) == 20
+                else None
+            ),
+            "adv_20d_observations": len(volumi_precedenti),
         }
     return out
 
@@ -258,6 +279,7 @@ def _barre_intraday(
             "high": float(row["high"]),
             "low": float(row["low"]),
             "close": float(row["close"]),
+            "volume": int(row["volume"]) if row.get("volume") is not None else None,
         })
     for bars in out.values():
         bars.sort(key=lambda bar: bar["timestamp"])
@@ -460,6 +482,273 @@ def _article_coverage_rows(giorno: date) -> list[dict]:
             "ground_truth_tickers": [v for v in row[13].split(",") if v],
             "issuer_terms": [v for v in row[14].split(chr(31)) if v],
         })
+    return out
+
+
+def _context_articles(rows: list[dict], coverage: dict) -> list[dict]:
+    """Proietta le righe #279 nel contratto evento senza riclassificarle."""
+    relevance: dict[tuple[str, str], str] = {}
+    for article in coverage.get("articoli") or []:
+        canonical_id = str(article["canonical_article_id"])
+        for ticker, category in (article.get("relevance_by_ticker") or {}).items():
+            relevance[(canonical_id, str(ticker).upper())] = str(category)
+
+    return [
+        {
+            "ticker": str(row.get("ticker") or "").upper(),
+            "title": row.get("title") or "",
+            "canonical_article_id": canonical_article_id(row),
+            "relevance": relevance.get(
+                (canonical_article_id(row), str(row.get("ticker") or "").upper()),
+                "UNKNOWN",
+            ),
+            "source": row.get("source") or "UNKNOWN",
+        }
+        for row in rows
+        if row.get("ticker")
+    ]
+
+
+def _regime_observations(giorno: date) -> list[dict]:
+    """Moltiplicatori realmente osservati nei cicli del giorno, sola lettura."""
+    g = giorno.isoformat()
+    return [
+        {
+            "observed_at": _timestamp(row[0]),
+            "multiplier": float(row[1]),
+            "source": "execution_decisions.regime_mult",
+        }
+        for row in _psql(
+            f"SELECT tick_time::text, regime_mult::text FROM execution_decisions "
+            f"WHERE tick_time >= '{g}' AND tick_time < '{g}'::date + 1 "
+            f"AND regime_mult IS NOT NULL ORDER BY tick_time, id;"
+        )
+    ]
+
+
+def _vix_observation(giorno: date) -> dict | None:
+    """Ultimo VIX FRED disponibile non successivo al giorno analizzato."""
+    import httpx
+
+    inizio = (giorno - timedelta(days=7)).isoformat()
+    fine = giorno.isoformat()
+    api_key = os.environ.get("FRED_API_KEY", "")
+    try:
+        if api_key:
+            response = httpx.get(
+                "https://api.stlouisfed.org/fred/series/observations",
+                params={
+                    "series_id": "VIXCLS",
+                    "api_key": api_key,
+                    "file_type": "json",
+                    "observation_start": inizio,
+                    "observation_end": fine,
+                    "sort_order": "desc",
+                    "limit": 10,
+                },
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            observations = response.json().get("observations") or []
+            valid = [row for row in observations if row.get("value") not in (None, ".")]
+            if not valid:
+                return None
+            row = valid[0]
+            return {
+                "value": float(row["value"]),
+                "observed_on": row["date"],
+                "source": "FRED:VIXCLS",
+            }
+
+        response = httpx.get(
+            "https://fred.stlouisfed.org/graph/fredgraph.csv",
+            params={"id": "VIXCLS", "cosd": inizio, "coed": fine},
+            timeout=10.0,
+        )
+        response.raise_for_status()
+        valid_rows = []
+        for line in response.text.strip().splitlines()[1:]:
+            parts = line.split(",", 1)
+            if len(parts) == 2 and parts[1] not in ("", "."):
+                valid_rows.append(parts)
+        if not valid_rows:
+            return None
+        observed_on, value = valid_rows[-1]
+        return {"value": float(value), "observed_on": observed_on, "source": "FRED:VIXCLS"}
+    except Exception as exc:
+        log.warning("VIX FRED non disponibile per %s: %s", giorno, exc)
+        return None
+
+
+def _corporate_calendar(giorno: date, simboli: list[str]) -> dict:
+    """Calendario earnings FMP + corporate actions Alpaca, senza scritture."""
+    events: list[dict] = []
+    successful_sources: list[str] = []
+    missingness: list[str] = []
+    universe = {str(symbol).upper() for symbol in simboli}
+
+    fmp_key = os.environ.get("FMP_API_KEY", "")
+    if fmp_key:
+        try:
+            import httpx
+
+            response = httpx.get(
+                "https://financialmodelingprep.com/stable/earnings-calendar",
+                params={"from": giorno.isoformat(), "to": giorno.isoformat(), "apikey": fmp_key},
+                timeout=15.0,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, list):
+                successful_sources.append("FMP earnings-calendar")
+                for row in payload:
+                    symbol = str(row.get("symbol") or "").upper()
+                    if symbol in universe:
+                        events.append({
+                            "symbol": symbol,
+                            "event_type": "earnings",
+                            "event_date": str(row.get("date") or giorno.isoformat()),
+                            "time": row.get("time"),
+                            "source": "FMP earnings-calendar",
+                        })
+            else:
+                missingness.append("earnings_calendar_invalid_response")
+        except Exception as exc:
+            log.warning("Calendario earnings FMP non disponibile per %s: %s", giorno, exc)
+            missingness.append("earnings_calendar_unavailable")
+    else:
+        missingness.append("earnings_calendar_unavailable")
+
+    alpaca_key = os.environ.get("ALPACA_API_KEY", "")
+    alpaca_secret = os.environ.get("ALPACA_SECRET_KEY", "")
+    if alpaca_key and alpaca_secret:
+        try:
+            from alpaca.data.historical.corporate_actions import CorporateActionsClient
+            from alpaca.data.requests import CorporateActionsRequest
+
+            client = CorporateActionsClient(alpaca_key, alpaca_secret)
+            result = client.get_corporate_actions(CorporateActionsRequest(
+                symbols=sorted(universe), start=giorno, end=giorno
+            ))
+            successful_sources.append("Alpaca Corporate Actions API")
+            for action_type, actions in (getattr(result, "data", {}) or {}).items():
+                for action in actions:
+                    symbol = next(
+                        (
+                            str(getattr(action, field)).upper()
+                            for field in ("symbol", "source_symbol", "old_symbol", "new_symbol")
+                            if getattr(action, field, None)
+                        ),
+                        "",
+                    )
+                    if symbol not in universe:
+                        continue
+                    event_date = next(
+                        (
+                            getattr(action, field)
+                            for field in ("process_date", "ex_date", "payable_date", "record_date")
+                            if getattr(action, field, None)
+                        ),
+                        giorno,
+                    )
+                    normalised = str(action_type).casefold()
+                    if "merger" in normalised:
+                        event_type = "merger"
+                    elif "split" in normalised:
+                        event_type = "split"
+                    elif "dividend" in normalised:
+                        event_type = "dividend"
+                    elif "spin" in normalised:
+                        event_type = "spinoff"
+                    else:
+                        event_type = "corporate_action"
+                    events.append({
+                        "symbol": symbol,
+                        "event_type": event_type,
+                        "event_date": event_date.isoformat() if hasattr(event_date, "isoformat") else str(event_date),
+                        "action_type": action_type,
+                        "source": "Alpaca Corporate Actions API",
+                    })
+        except Exception as exc:
+            log.warning("Corporate actions Alpaca non disponibili per %s: %s", giorno, exc)
+            missingness.append("corporate_actions_calendar_unavailable")
+    else:
+        missingness.append("corporate_actions_calendar_unavailable")
+
+    unique = {
+        (row["symbol"], row["event_type"], row["event_date"], row["source"]): row
+        for row in events
+    }
+    required = {"FMP earnings-calendar", "Alpaca Corporate Actions API"}
+    return {
+        "events": [unique[key] for key in sorted(unique)],
+        "sources_succeeded": successful_sources,
+        "complete": required <= set(successful_sources),
+        "missingness": missingness,
+    }
+
+
+def _halt_events(articles: list[dict]) -> list[dict]:
+    """Soli halt affermati da una fonte; l'assenza resta UNKNOWN a valle."""
+    pattern = re.compile(r"\b(trading halt(?:ed)?|halted trading|trading resumes?)\b", re.I)
+    return [
+        {
+            "symbol": article["ticker"],
+            "event_type": "halt_news_evidence",
+            "canonical_article_id": article.get("canonical_article_id"),
+            "source": article.get("source") or "UNKNOWN",
+        }
+        for article in articles
+        if pattern.search(str(article.get("title") or ""))
+    ]
+
+
+def _nbbo_at_cycles(cycles: dict[str, dict], cutoff: datetime) -> dict[str, dict]:
+    """Prima quota SIP dopo il ciclo eleggibile, una finestra di cinque minuti."""
+    if not cycles:
+        return {}
+    from alpaca.data.enums import DataFeed
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockQuotesRequest
+
+    key = os.environ.get("ALPACA_API_KEY", "")
+    secret = os.environ.get("ALPACA_SECRET_KEY", "")
+    if not key or not secret:
+        return {}
+    client = StockHistoricalDataClient(key, secret)
+    out: dict[str, dict] = {}
+    for symbol, cycle in sorted(cycles.items()):
+        at = cycle.get("at")
+        if at is None or at >= cutoff:
+            continue
+        try:
+            response = client.get_stock_quotes(StockQuotesRequest(
+                symbol_or_symbols=symbol,
+                start=at,
+                end=min(at + timedelta(minutes=5), cutoff),
+                limit=1,
+                feed=DataFeed.SIP,
+            ))
+            frame = getattr(response, "df", None)
+            if frame is None or frame.empty:
+                continue
+            row = frame.iloc[0]
+            index = frame.index[0]
+            timestamp = index[-1] if isinstance(index, tuple) else index
+            if hasattr(timestamp, "to_pydatetime"):
+                timestamp = timestamp.to_pydatetime()
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            out[symbol] = {
+                "timestamp": timestamp.astimezone(timezone.utc),
+                "bid_price": float(row["bid_price"]),
+                "ask_price": float(row["ask_price"]),
+                "bid_size": float(row["bid_size"]) if row.get("bid_size") is not None else None,
+                "ask_size": float(row["ask_size"]) if row.get("ask_size") is not None else None,
+                "source": "Alpaca Market Data API / SIP quotes",
+            }
+        except Exception as exc:
+            log.warning("NBBO %s non disponibile al ciclo %s: %s", symbol, at, exc)
     return out
 
 
@@ -722,14 +1011,25 @@ def _opportunity_v2(
         return {"estimator_version": ESTIMATOR_VERSION, "symbol": sym, "error": str(exc)}
 
 
-def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
+def costruisci_dossier(
+    giorno: date,
+    simboli: list[str],
+    *,
+    fetch_remote_context: bool = False,
+) -> dict:
     g = giorno.isoformat()
-    barre = _barre(simboli, giorno)
-    if not _e_giorno_di_borsa(barre):
+    sector_by_ticker = _sector_by_ticker()
+    benchmark_symbols = {"SPY", *SECTOR_ETF_BY_SECTOR.values()}
+    barre = _barre(sorted(set(simboli) | benchmark_symbols), giorno)
+    if not any(symbol in barre for symbol in simboli):
         raise SystemExit(f"{g}: nessuna barra per l'intera watchlist — non e' un giorno di borsa.")
 
     # --- mercato -----------------------------------------------------------
-    closes = {s: (b["close_prec"], b["close"]) for s, b in barre.items()}
+    closes = {
+        s: (barre[s]["close_prec"], barre[s]["close"])
+        for s in simboli
+        if s in barre
+    }
     news = {r[0]: int(r[1]) for r in _psql(
         f"SELECT ticker, count(*) FROM news_log "
         f"WHERE fetched_at >= '{g}' AND fetched_at < '{g}'::date + 1 GROUP BY 1;")}
@@ -801,10 +1101,11 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
 
     # --- copertura articolo-centrica (#279) ------------------------------
     session_open, session_close = _regular_session_bounds(giorno)
+    article_rows = _article_coverage_rows(giorno)
     copertura_articoli = build_article_coverage(
-        _article_coverage_rows(giorno),
+        article_rows,
         universe=simboli,
-        sector_by_ticker=_sector_by_ticker(),
+        sector_by_ticker=sector_by_ticker,
         session_open=session_open,
         session_close=session_close,
     )
@@ -884,6 +1185,42 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
             c, barre, giorno, barre_intraday, cicli_eleggibili
         )
 
+    # --- contesto evento/mercato/microstruttura (#285) -------------------
+    # Le chiamate remote sono attive nel CLI, ma disaccoppiate dal costruttore
+    # puro usato dai test. Un fallimento lascia null/missingness, non impedisce
+    # la produzione del dossier e non viene imputato come zero.
+    context_articles = _context_articles(article_rows, copertura_articoli)
+    regime_observations = _regime_observations(giorno)
+    vix_observation = _vix_observation(giorno) if fetch_remote_context else None
+    corporate_calendar = (
+        _corporate_calendar(giorno, simboli) if fetch_remote_context else None
+    )
+    context_cycles = dict(cicli_eleggibili)
+    for candidate in candidati_classificati:
+        symbol = candidate["symbol"]
+        if symbol not in context_cycles:
+            context_cycles[symbol] = (
+                _ciclo_dal_segnale(candidate, giorno) or _ciclo_apertura(giorno)
+            )
+    nbbo_quotes = (
+        _nbbo_at_cycles(context_cycles, cutoff_intraday)
+        if fetch_remote_context
+        else {}
+    )
+    event_market_context = build_event_market_context(
+        data=g,
+        candidates=candidati_classificati,
+        daily_bars=barre,
+        sector_by_ticker=sector_by_ticker,
+        articles=context_articles,
+        corporate_events=corporate_calendar,
+        regime_observations=regime_observations,
+        vix_observation=vix_observation,
+        intraday_bars=barre_intraday,
+        nbbo_quotes=nbbo_quotes,
+        halt_events=_halt_events(context_articles),
+    )
+
     # --- book: ingressi e chiusure ----------------------------------------
     ingressi_grezzi = [
         {"symbol": r[0], "strategia": r[1], "ora_utc": r[2],
@@ -936,7 +1273,7 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
         posizioni_apertura,
         barre,
         data=g,
-        sector_by_ticker=_sector_by_ticker(),
+        sector_by_ticker=sector_by_ticker,
     )
     guard_decisions = _guard_decisions(giorno)
     decision_quality_assumptions = {
@@ -1021,6 +1358,22 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
                 ),
                 "freeze": "misura read-only; nessuna taratura live emessa",
             },
+            "event_market_context": {
+                "version": CONTEXT_VERSION,
+                "sector_map": "config/trading.yaml sectors",
+                "sector_etf_map": "SECTOR_ETF_BY_SECTOR (dichiarativo, benchmark-only)",
+                "returns": "beta_1_arithmetic_v1: r_symbol - r_benchmark",
+                "corporate_calendar": "FMP earnings-calendar + Alpaca Corporate Actions API",
+                "regime": "execution_decisions.regime_mult; ultima osservazione del giorno",
+                "vix": "FRED VIXCLS, ultima osservazione non successiva alla data",
+                "bar_microstructure": "Alpaca SIP 5Min + ADV su 20 barre daily complete precedenti",
+                "nbbo": "Alpaca SIP quotes, prima quota entro 5 minuti dal ciclo eleggibile",
+                "halt": (
+                    "solo evidenza positiva da articoli; senza feed halt storico autorevole "
+                    "lo stato resta UNKNOWN"
+                ),
+                "remote_context_loaded": fetch_remote_context,
+            },
         },
         "soglia_mover": SOGLIA_MOVER,
         "mercato": mercato,
@@ -1034,6 +1387,7 @@ def costruisci_dossier(giorno: date, simboli: list[str]) -> dict:
         "decision_quality": decision_quality,
         "timeline": timeline,
         "copertura_articoli": copertura_articoli,
+        "event_market_context": event_market_context,
         "aggregati": {
             "per_ora_ingresso": aggregate_by_entry_hour(chiusi_storici),
             "miss_cumulati": _miss_cumulati(),
@@ -1124,7 +1478,7 @@ def main() -> int:
     scritti = 0
     for g in giorni:
         try:
-            d = costruisci_dossier(g, simboli)
+            d = costruisci_dossier(g, simboli, fetch_remote_context=True)
         except SystemExit as exc:
             log.info("%s saltato: %s", g, exc)
             continue
