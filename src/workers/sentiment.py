@@ -95,12 +95,22 @@ _SENTIMENT_BATCH_SIZE = 12
 #   task_soft_time_limit=780s -> 137s margin left (vs. the original 197s the
 #     live-only budget was sized with — this fix spends well under half of it)
 #   task_time_limit=840s      -> 197s margin left
-# 60s itself = the existing per-candidate _score_one timeout (45s, see
-# _shadow_query_candidates) + ~15s slack for asyncio.gather sequencing and the
-# pg_store.log_shadow_responses write inside it — enough for a shadow round that
-# hits its own internal timeout to still finish and get logged, not be cut off right
-# at the wire, while keeping comfortable margin under both Celery limits above.
-_SHADOW_BOUNDED_WAIT_S = 60
+# 110s itself = the per-candidate _score_one budget + ~15s slack for
+# asyncio.gather sequencing and the pg_store.log_shadow_responses write inside
+# it — enough for a shadow round that hits its own internal timeout to still
+# finish and get logged, not be cut off right at the wire.
+#
+# #358: era 60 = 45 (tetto cablato) + 15. Il tetto cablato e' stato rimosso: il
+# candidato riceve ora il budget del suo client (90s per-modello, come i modelli
+# live) + 5s di slack esterno, quindi 95 + 15 = 110. Aritmetica rifatta:
+#   583s (live worst case, invariato) + 110s (questa attesa)      = 693s
+#   task_soft_time_limit=780s -> 87s di margine  (erano 137s con 60)
+#   task_time_limit=840s      -> 147s di margine (erano 197s con 60)
+# Il margine si stringe di 50s ed e' una scelta deliberata: con 45s i candidati
+# fallivano nel 100% dei casi, quindi il margine largo comprava dati inesistenti.
+# Se il worst case live cresce, questo numero va rivisto INSIEME a quello, non
+# tagliato per fare spazio — tagliarlo riporta il difetto che #358 ha corretto.
+_SHADOW_BOUNDED_WAIT_S = 110
 # Single named row in the fallback_counters table (Postgres mirror of the Redis
 # consecutive-fallback counter — kept in sync so the count survives a Redis flush
 # and is queryable for audit/dashboards).
@@ -444,6 +454,48 @@ async def run_inference(
         return None
 
 
+# #358: budget di tempo dei candidati shadow. Il valore vero viene dal client
+# (`_OLLAMA_TIMEOUT`, per-modello, allineato ai 90s del path live); questi due
+# servono solo come rete quando il client non lo espone e come slack esterno.
+_SHADOW_DEFAULT_TIMEOUT_S = 90
+_SHADOW_TIMEOUT_SLACK_S = 5
+
+
+def _shadow_budget_for(client) -> float:
+    """#358: budget di tempo del candidato, preso dal SUO client.
+
+    Fail-safe sul tipo di proposito: un `_OLLAMA_TIMEOUT` assente, non numerico
+    o non positivo degrada al default invece di propagare. Senza questa
+    conversione un attributo inatteso finirebbe dentro `asyncio.wait_for`, che
+    solleverebbe, e ogni chiamata del candidato verrebbe registrata come
+    fallimento del modello — cioe' di nuovo un guasto dello strumento scambiato
+    per un difetto della cosa misurata, che e' il difetto che #358 corregge.
+    """
+    grezzo = getattr(client, "_OLLAMA_TIMEOUT", None)
+    try:
+        budget = float(grezzo)
+    except (TypeError, ValueError):
+        return _SHADOW_DEFAULT_TIMEOUT_S
+    if budget <= 0:
+        return _SHADOW_DEFAULT_TIMEOUT_S
+    return budget
+
+
+def _classify_shadow_failure(exc: BaseException) -> str:
+    """#358: separa un timeout da un errore di parsing/schema.
+
+    Prima erano entrambi `parse_error=True` con `reasoning` NULL, e distinguerli
+    richiedeva di guardare a mano la distribuzione delle latenze — che e'
+    esattamente come il guasto e' rimasto invisibile per sei settimane.
+    """
+    if isinstance(exc, asyncio.TimeoutError):
+        return "timeout"
+    nome = type(exc).__name__
+    if "Timeout" in nome:
+        return "timeout"
+    return f"error:{nome}"
+
+
 def build_shadow_clients(redis_store):
     """Instantiate Stage-2 shadow candidate clients: the registry pool minus the
     currently active (live) selection — pair-swap-proof (re-reads Redis every call
@@ -520,11 +572,21 @@ async def _shadow_query_candidates(
 
         async def _score_one(client) -> dict:
             model_id = getattr(client, "model_id", "?")
+            # #358: il budget di tempo del candidato e' quello del SUO client,
+            # non un letterale. Un tetto piu' basso di quello dei modelli live
+            # non misura i modelli: misura il tetto — con 45s fissi contro i 90s
+            # per-modello del path live, i candidati fallivano nel 100% dei casi
+            # dal 2026-08-03, e i loro IC finivano calcolati sul 5-11% che era
+            # riuscito a rispondere in tempo (campione selezionato per velocita').
+            # Lo slack esterno lascia scattare per primo il timeout interno del
+            # client, che produce un errore diagnosticabile invece di un taglio
+            # secco a meta' chiamata.
+            budget = _shadow_budget_for(client)
             t0 = time.monotonic()
             try:
                 out = await asyncio.wait_for(
                     client.complete(prompt, response_schema=LLMSentimentOutput),
-                    timeout=45,
+                    timeout=budget + _SHADOW_TIMEOUT_SLACK_S,
                 )
                 return {
                     "news_log_id": news_log_id,
@@ -534,6 +596,7 @@ async def _shadow_query_candidates(
                     "confidence": out.confidence,
                     "reasoning": out.reasoning,
                     "parse_error": False,
+                    "failure_reason": None,
                     "latency_ms": int((time.monotonic() - t0) * 1000),
                 }
             except Exception as _model_exc:
@@ -541,6 +604,10 @@ async def _shadow_query_candidates(
                     "shadow candidate model failed: model=%s error=%s",
                     model_id, _model_exc,
                 )
+                # #358: un timeout e un output non parsabile hanno cause e
+                # rimedi diversi, ma finivano entrambi come parse_error=True con
+                # reasoning NULL — indistinguibili senza ispezionare le latenze
+                # a mano. failure_reason li separa nel dato.
                 return {
                     "news_log_id": news_log_id,
                     "symbol": clean_symbol,
@@ -549,6 +616,7 @@ async def _shadow_query_candidates(
                     "confidence": None,
                     "reasoning": None,
                     "parse_error": True,
+                    "failure_reason": _classify_shadow_failure(_model_exc),
                     "latency_ms": int((time.monotonic() - t0) * 1000),
                 }
 

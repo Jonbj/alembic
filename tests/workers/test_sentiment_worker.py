@@ -15,6 +15,7 @@ from src.store.pg_store import PostgreSQLStore
 from src.store.redis_store import RedisStore
 from src.workers.sentiment import (
     _DK_COT_PROMPT,
+    _shadow_query_candidates,
     process_news_batch,
     process_news_item,
     run_inference,
@@ -1338,3 +1339,125 @@ def test_run_sentiment_worker_skips_when_market_closed():
     assert result["reason"] == "market_closed"
     mock_redis_cls.from_url.return_value.close.assert_called_once()
     mock_pg_connect.return_value.close.assert_called_once()
+
+
+class TestShadowTimeoutSymmetry:
+    """#358: i candidati shadow devono ricevere lo stesso budget di tempo dei
+    modelli live. Un tetto piu' basso non misura i modelli: misura il tetto.
+    """
+
+    @staticmethod
+    def _redis_armato():
+        redis = MagicMock(spec=RedisStore)
+        redis.get_shadow_comparison_start.return_value = "2026-08-24T07:00:00+00:00"
+        return redis
+
+    @staticmethod
+    def _client(model_id, timeout):
+        client = MagicMock()
+        client.model_id = model_id
+        client._OLLAMA_TIMEOUT = timeout
+        client.complete = AsyncMock(
+            return_value=MagicMock(polarity=0.4, confidence=0.7, reasoning="ok")
+        )
+        return client
+
+    @pytest.mark.asyncio
+    async def test_il_candidato_riceve_il_budget_del_proprio_client(self, mocker):
+        """Il timeout applicato deriva da _OLLAMA_TIMEOUT del client, non da 45."""
+        visti = []
+        vero_wait_for = asyncio.wait_for
+
+        async def _spia(coro, timeout=None):
+            visti.append(timeout)
+            return await vero_wait_for(coro, timeout=timeout)
+
+        mocker.patch(
+            "src.workers.sentiment.build_shadow_clients",
+            return_value=[self._client("lento:cloud", 90)],
+        )
+        mocker.patch.object(asyncio, "wait_for", _spia)
+        pg = MagicMock(spec=PostgreSQLStore)
+
+        await _shadow_query_candidates("corpo", "AAPL", 1, pg, self._redis_armato())
+
+        assert visti, "wait_for non e' stato chiamato"
+        assert min(visti) >= 90, (
+            f"il candidato ha ricevuto {min(visti)}s invece dei 90s del suo client"
+        )
+
+    @pytest.mark.asyncio
+    async def test_budget_diverso_per_client_diverso(self, mocker):
+        """Due candidati con timeout diversi ricevono budget diversi: il tetto
+        non e' un letterale condiviso."""
+        visti = []
+        vero_wait_for = asyncio.wait_for
+
+        async def _spia(coro, timeout=None):
+            visti.append(timeout)
+            return await vero_wait_for(coro, timeout=timeout)
+
+        mocker.patch(
+            "src.workers.sentiment.build_shadow_clients",
+            return_value=[self._client("a:cloud", 60), self._client("b:cloud", 120)],
+        )
+        mocker.patch.object(asyncio, "wait_for", _spia)
+        pg = MagicMock(spec=PostgreSQLStore)
+
+        await _shadow_query_candidates("corpo", "AAPL", 1, pg, self._redis_armato())
+
+        assert len(set(visti)) == 2, f"stesso tetto per client diversi: {visti}"
+
+    @pytest.mark.asyncio
+    async def test_timeout_distinguibile_da_parse_error(self, mocker):
+        """Un timeout e un output non parsabile devono lasciare tracce diverse:
+        oggi entrambi finiscono come parse_error=True con reasoning NULL, e la
+        diagnosi post-hoc e' impossibile senza guardare le latenze."""
+        scaduto = self._client("scaduto:cloud", 1)
+        scaduto.complete = AsyncMock(side_effect=asyncio.TimeoutError())
+        rotto = self._client("rotto:cloud", 90)
+        rotto.complete = AsyncMock(side_effect=ValueError("schema non valido"))
+
+        mocker.patch(
+            "src.workers.sentiment.build_shadow_clients",
+            return_value=[scaduto, rotto],
+        )
+        pg = MagicMock(spec=PostgreSQLStore)
+
+        await _shadow_query_candidates("corpo", "AAPL", 1, pg, self._redis_armato())
+
+        righe = {r["model_id"]: r for r in pg.log_shadow_responses.call_args[0][0]}
+        assert righe["scaduto:cloud"]["failure_reason"] == "timeout"
+        assert righe["rotto:cloud"]["failure_reason"] != "timeout"
+        assert righe["rotto:cloud"]["failure_reason"] is not None
+
+    @pytest.mark.asyncio
+    async def test_timeout_non_numerico_degrada_al_default(self, mocker):
+        """#358: un _OLLAMA_TIMEOUT assente o non numerico non deve trasformare
+        ogni chiamata in un fallimento del modello — sarebbe di nuovo un guasto
+        dello strumento scambiato per un difetto della cosa misurata."""
+        visti = []
+        vero_wait_for = asyncio.wait_for
+
+        async def _spia(coro, timeout=None):
+            visti.append(timeout)
+            return await vero_wait_for(coro, timeout=timeout)
+
+        senza = self._client("senza:cloud", None)
+        del senza._OLLAMA_TIMEOUT
+        assurdo = self._client("assurdo:cloud", -3)
+
+        mocker.patch(
+            "src.workers.sentiment.build_shadow_clients",
+            return_value=[senza, assurdo],
+        )
+        mocker.patch.object(asyncio, "wait_for", _spia)
+        pg = MagicMock(spec=PostgreSQLStore)
+
+        await _shadow_query_candidates("corpo", "AAPL", 1, pg, self._redis_armato())
+
+        assert set(visti) == {95.0}, f"atteso il default 90+5, visto {visti}"
+        righe = pg.log_shadow_responses.call_args[0][0]
+        assert all(r["parse_error"] is False for r in righe), (
+            "un timeout mal tipizzato ha prodotto falsi fallimenti del modello"
+        )
