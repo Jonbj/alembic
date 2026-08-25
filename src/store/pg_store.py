@@ -275,8 +275,8 @@ class PostgreSQLStore:
     _INSERT_SHADOW_RESPONSE = """
         INSERT INTO llm_shadow_responses
             (news_log_id, symbol, model_id, polarity, confidence, reasoning,
-             parse_error, latency_ms)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+             parse_error, latency_ms, failure_reason)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
 
     def log_news_item(
@@ -2046,7 +2046,8 @@ class PostgreSQLStore:
                     [
                         (r.get("news_log_id"), r["symbol"], r["model_id"],
                          r.get("polarity"), r.get("confidence"), r.get("reasoning"),
-                         bool(r.get("parse_error", False)), r.get("latency_ms"))
+                         bool(r.get("parse_error", False)), r.get("latency_ms"),
+                         r.get("failure_reason"))
                         for r in rows
                     ],
                 )
