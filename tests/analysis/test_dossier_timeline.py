@@ -141,6 +141,7 @@ def test_missingness_esplicita_e_stub_per_mover_senza_segnale():
         "order_submitted_at",
         "filled_at",
     }
+    assert all(value is None for value in rows[0]["latenze_secondi"].values())
 
 
 def test_fill_espone_prezzo_reale_senza_sostituire_il_primo_bar_successivo():
@@ -167,6 +168,67 @@ def test_fill_espone_prezzo_reale_senza_sostituire_il_primo_bar_successivo():
     assert fill["price"] == 106.0
     assert fill["actual_price"] == 105.75
     assert fill["actual_price_source"] == "alpaca_order.filled_avg_price"
+
+
+def test_latenze_scompongono_il_percorso_dal_segnale_al_fill():
+    """Il delta scored->filled da solo non localizza il ritardo: il dossier
+    espone anche le tappe ciclo, submit e broker, senza cambiare il runtime."""
+    events = [{
+        "symbol": "AAA",
+        "signal_id": 7,
+        "news_log_id": 3,
+        "score": 0.6,
+        "fallback": False,
+        "published_at": _ts(14, 0),
+        "first_seen_at": _ts(14, 1),
+        "ingested_at": _ts(14, 2),
+        "scored_at": _ts(14, 3),
+        "eligible_cycle_at": _ts(14, 7),
+        "order_submitted_at": _ts(14, 7).replace(second=10),
+        "filled_at": _ts(14, 7).replace(second=11),
+        "fill_price": 105.75,
+    }]
+
+    row = build_timeline(
+        events,
+        set(),
+        {"AAA": [_bar(14, 10, 106.0, 108.0, 105.0, 107.0)]},
+        {"AAA": _daily()},
+        _ts(23, 59),
+    )[0]
+
+    assert row["latenze_secondi"] == {
+        "published_to_first_seen": 60.0,
+        "first_seen_to_ingested": 60.0,
+        "ingested_to_scored": 60.0,
+        "published_to_scored": 180.0,
+        "scored_to_eligible_cycle": 240.0,
+        "eligible_cycle_to_order_submitted": 10.0,
+        "order_submitted_to_filled": 1.0,
+        "scored_to_filled": 251.0,
+    }
+
+
+def test_latenza_negativa_rende_visibile_un_ordine_temporale_incoerente():
+    events = [{
+        "symbol": "AAA",
+        "signal_id": 7,
+        "news_log_id": 3,
+        "score": 0.6,
+        "fallback": False,
+        "published_at": None,
+        "first_seen_at": None,
+        "ingested_at": _ts(14, 2),
+        "scored_at": _ts(14, 1),
+        "eligible_cycle_at": None,
+        "order_submitted_at": None,
+        "filled_at": None,
+        "fill_price": None,
+    }]
+
+    row = build_timeline(events, set(), {}, {}, _ts(23, 59))[0]
+
+    assert row["latenze_secondi"]["ingested_to_scored"] == -60.0
 
 
 def test_session_summary_distingue_premarket_regular_e_afterhours():

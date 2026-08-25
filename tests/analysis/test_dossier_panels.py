@@ -123,6 +123,12 @@ def _dossier_2_1() -> dict:
                 "order_id": "ord-1",
                 "trade_id": 726,
                 "order_lookup_error": None,
+                "latenze_secondi": {
+                    "scored_to_eligible_cycle": 240.0,
+                    "eligible_cycle_to_order_submitted": 10.0,
+                    "order_submitted_to_filled": 1.0,
+                    "scored_to_filled": 251.0,
+                },
                 "movimento": {},
                 "sessioni": {},
                 "stages": {},
@@ -299,6 +305,7 @@ def test_signal_panel_una_riga_per_segnale_con_attribution():
     assert s["attribution"] == "ISSUER_SPECIFIC"
     assert s["relevance"] == "ISSUER_SPECIFIC"
     assert s["timing"] == "CONCURRENT"
+    assert s["latenze_secondi"]["scored_to_filled"] == 251.0
     # linkage al trade/decision
     assert s["order_id"] == "ord-1"
     assert s["trade_id"] == 726
@@ -311,6 +318,24 @@ def test_signal_panel_tollera_dossier_2_0_senza_copertura():
     assert s["canonical_article_id"] is None
     assert s["attribution"] is None
     assert s["trade_id"] == 726  # arriva comunque dalla timeline
+
+
+def test_signal_panel_deriva_le_latenze_dagli_stages_dei_dossier_storici():
+    dossier = _dossier_2_0()
+    event = dossier["timeline"][0]
+    event.pop("latenze_secondi", None)
+    event["stages"] = {
+        "scored_at": {"timestamp": "2026-08-12T14:10:00+00:00"},
+        "eligible_cycle_at": {"timestamp": "2026-08-12T14:15:00+00:00"},
+        "order_submitted_at": {"timestamp": "2026-08-12T14:15:02+00:00"},
+        "filled_at": {"timestamp": "2026-08-12T14:15:03+00:00"},
+    }
+
+    rows = panels.build_signal_panel(dossier, dossier_hash="h")
+    signal = next(row for row in rows if row["signal_id"] == 101)
+
+    assert signal["latenze_secondi"]["scored_to_eligible_cycle"] == 300.0
+    assert signal["latenze_secondi"]["scored_to_filled"] == 303.0
 
 
 def test_signal_panel_assegna_causal_event_id_deterministico():
@@ -361,6 +386,15 @@ def test_decision_trade_panel_una_riga_per_decisione_con_id_db():
     assert exits[0]["confidenza"] == "misurata"
     assert entries and entries[0]["mtm_eod"] == 5.0
     assert entries[0]["provvisorio"] is True
+
+
+def test_entry_panel_conserva_la_misura_direzionale_e_il_suo_flag():
+    rows = panels.build_decision_trade_panel(_dossier_2_1(), dossier_hash="h")
+    entry = next(row for row in rows if row["kind"] == "entry")
+
+    assert entry["quota_movimento_precedente_al_segnale"] == 0.5
+    assert entry["denominatore_degenere"] is False
+    assert entry["quota_nel_gap"] == 0.2
 
 
 # ---------------------------------------------------------------------------
