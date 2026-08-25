@@ -4,6 +4,7 @@ eseguito, venga misurato al prezzo PIT del segnale e compaia nell'aggregato
 ombra. Misura read-only: nessun ordine cambiato.
 """
 
+import json
 from datetime import date, datetime, timezone
 from unittest.mock import patch
 
@@ -174,3 +175,33 @@ def test_earnings_symbols_accetta_lista_nuda_di_eventi():
     """I test possono passare una lista (forma tollerata da build_event_context)."""
     cal = [{"symbol": "NVDA", "event_type": "earnings", "event_date": "2026-08-12"}]
     assert dossier._earnings_symbols_from_calendar(cal) == {"NVDA"}
+
+
+def test_cumulato_rilegge_il_pnl_di_un_intento_storico_chiuso_dopo(tmp_path):
+    storico = {
+        "schema_version": "2.5",
+        "intenti_ingresso_s4": [{
+            "intent_id": "intent-old",
+            "is_tradable": True,
+            "guardia_contraddizione_ombra": True,
+            "trade_id": 99,
+            "pnl_realizzato": None,
+        }],
+    }
+    (tmp_path / "2026-08-24.json").write_text(json.dumps(storico))
+
+    def psql(query):
+        if "WHERE id IN (99)" in query:
+            return [["99", "-7.50"]]
+        return []
+
+    with (
+        patch.object(dossier, "OUT_DIR", tmp_path),
+        patch.object(dossier, "_psql", side_effect=psql),
+    ):
+        out = dossier._guardia_contraddizione_finestra([], date(2026, 8, 25))
+
+    assert out["n_giorni_coperti"] == 2
+    assert out["n_soppressi"] == 1
+    assert out["n_soppressi_con_pnl"] == 1
+    assert out["somma_pnl_realizzato_soppressi"] == -7.5
