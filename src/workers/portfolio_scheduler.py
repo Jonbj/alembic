@@ -253,25 +253,39 @@ def _s4_intent_provenance(strategy, live_provenance: dict) -> dict:
 
 
 def _s4_sleeve_contributions(result, registry) -> dict[str, dict[str, float]]:
-    """Freeze portfolio-level S1/S4 contributions for every S4 entry target."""
-    targets = getattr(result, "target_weights_per_strategy", None) or {}
-    s4_symbols = set(targets.get("S4", {}))
-    if not s4_symbols:
+    """Freeze portfolio-level S1/S4 contributions for every S4 entry target.
+
+    #355: fail-open. Questo valore è diagnostica — arricchisce le disposition
+    degli ordini, non le decide. Un guasto qui deve costare un campo mancante
+    nel ledger, mai una seduta: qualunque eccezione degrada a {} e il ciclo
+    prosegue. Il chiamante tratta già {} come "nessuna contribuzione nota".
+    """
+    try:
+        targets = getattr(result, "target_weights_per_strategy", None) or {}
+        s4_symbols = set(targets.get("S4", {}))
+        if not s4_symbols:
+            return {}
+        allocations = {
+            entry.strategy_id: float(entry.allocation_pct)
+            for entry in registry.get_active_strategies()
+        }
+        by_symbol: dict[str, dict[str, float]] = {}
+        for strategy_id, weights in targets.items():
+            allocation = allocations.get(strategy_id)
+            if allocation is None:
+                continue
+            for symbol, weight in (weights or {}).items():
+                contribution = float(weight) * allocation
+                if symbol in s4_symbols and contribution > 0:
+                    by_symbol.setdefault(symbol, {})[strategy_id] = contribution
+        return by_symbol
+    except Exception as exc:
+        log.warning(
+            "#355: contribuzioni sleeve S4 non calcolabili (%s: %s) — "
+            "il ciclo prosegue senza il campo diagnostico",
+            type(exc).__name__, exc,
+        )
         return {}
-    allocations = {
-        entry.strategy_id: float(entry.allocation_pct)
-        for entry in registry.get_active_strategies()
-    }
-    by_symbol: dict[str, dict[str, float]] = {}
-    for strategy_id, weights in targets.items():
-        allocation = allocations.get(strategy_id)
-        if allocation is None:
-            continue
-        for symbol, weight in (weights or {}).items():
-            contribution = float(weight) * allocation
-            if symbol in s4_symbols and contribution > 0:
-                by_symbol.setdefault(symbol, {})[strategy_id] = contribution
-    return by_symbol
 
 
 def _finalize_s4_intent_ledger(

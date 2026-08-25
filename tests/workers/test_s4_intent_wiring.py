@@ -311,3 +311,69 @@ def test_reject_al_submit_conserva_i_dati_del_broker_boundary():
         "first_executable_price_source": "portfolio_market_snapshot.latest_price",
         "sleeve_contributions": {"S4": 0.01},
     })]
+
+
+# --- #355: la strumentazione delle sleeve non deve poter rompere il ciclo ---
+
+
+def test_contributi_sleeve_registry_guasto_non_propaga():
+    """Un registry che solleva degrada a {}, non interrompe il ciclo."""
+    result = MagicMock()
+    result.target_weights_per_strategy = {"S4": {"AMD": 0.20}}
+    registry = MagicMock()
+    registry.get_active_strategies.side_effect = RuntimeError("registry down")
+
+    assert _s4_sleeve_contributions(result, registry) == {}
+
+
+def test_contributi_sleeve_allocazione_mancante_non_propaga():
+    """Una strategia priva di allocation_pct degrada a {} invece di sollevare."""
+
+    class _SenzaAllocazione:
+        strategy_id = "S1"
+
+    result = MagicMock()
+    result.target_weights_per_strategy = {"S4": {"AMD": 0.20}}
+    registry = MagicMock()
+    registry.get_active_strategies.return_value = [_SenzaAllocazione()]
+
+    assert _s4_sleeve_contributions(result, registry) == {}
+
+
+def test_contributi_sleeve_peso_non_numerico_non_propaga():
+    """Un peso non convertibile degrada a {} invece di sollevare."""
+    result = MagicMock()
+    result.target_weights_per_strategy = {"S4": {"AMD": "non-un-numero"}}
+    registry = MagicMock()
+    registry.get_active_strategies.return_value = [
+        MagicMock(strategy_id="S4", allocation_pct=0.10),
+    ]
+
+    assert _s4_sleeve_contributions(result, registry) == {}
+
+
+def test_submit_con_contributi_vuoti_invia_comunque_l_ordine():
+    """Il fallback {} arriva fino alla disposition senza bloccare il submit."""
+    order = _buy("AMD", 2.0)
+    market = MarketSnapshot(
+        timestamp=_TS,
+        prices={"AMD": 105.0},
+        volumes={},
+        adv_20d={},
+    )
+    dispositions = []
+
+    submitted = _submit_portfolio_orders(
+        [order],
+        MagicMock(),
+        market,
+        _submit_fn=MagicMock(),
+        sleeve_contributions={},
+        _on_disposition=lambda symbol, reason, details: dispositions.append(
+            (symbol, reason, details)
+        ),
+    )
+
+    assert [row["symbol"] for row in submitted] == ["AMD"]
+    assert dispositions[0][1] == "SUBMITTED"
+    assert dispositions[0][2]["sleeve_contributions"] == {}
