@@ -51,22 +51,32 @@ class TestFetchPositionWeights:
     """#75: per-symbol notional weights for a meaningful concentration metric."""
 
     def test_normalizes_by_gross(self):
-        from unittest.mock import MagicMock, patch
         from src.workers.risk_monitor_task import _fetch_position_weights
 
-        p1 = MagicMock(); p1.symbol = "AAPL"; p1.market_value = "3000"
-        p2 = MagicMock(); p2.symbol = "MSFT"; p2.market_value = "1000"
+        p1 = MagicMock()
+        p1.symbol = "AAPL"
+        p1.market_value = "3000"
+        p2 = MagicMock()
+        p2.symbol = "MSFT"
+        p2.market_value = "1000"
         client = MagicMock()
         client.get_all_positions.return_value = [p1, p2]
         with patch("alpaca.trading.client.TradingClient", return_value=client):
             weights = _fetch_position_weights()
         assert weights == {"AAPL": 0.75, "MSFT": 0.25}
 
-    def test_empty_on_broker_error(self):
-        from unittest.mock import patch
+    def test_none_on_broker_error(self):
         from src.workers.risk_monitor_task import _fetch_position_weights
 
         with patch("alpaca.trading.client.TradingClient", side_effect=RuntimeError("down")):
+            assert _fetch_position_weights() is None
+
+    def test_empty_when_broker_reports_no_positions(self):
+        from src.workers.risk_monitor_task import _fetch_position_weights
+
+        client = MagicMock()
+        client.get_all_positions.return_value = []
+        with patch("alpaca.trading.client.TradingClient", return_value=client):
             assert _fetch_position_weights() == {}
 
 
@@ -94,6 +104,32 @@ class TestComputeRiskReportUsesRealAccountState:
         assert report.total_exposure == pytest.approx(0.42)
         assert not any("exposure" in a.message.lower() for a in report.alerts)
         assert result["total_exposure"] == pytest.approx(0.42)
+
+    def test_report_marks_hhi_unavailable_when_position_fetch_fails(self, monkeypatch):
+        """A broker error is not an empty portfolio and must not be stored as HHI=0."""
+        monkeypatch.setattr(rmt, "_fetch_account_state", lambda: (100000.0, 0.42))
+        monkeypatch.setattr(
+            rmt, "_fetch_equity_curve", lambda pg, ce: [100000.0, 101000.0]
+        )
+        stored = {}
+
+        def fake_store(pg, report):
+            stored["report"] = report
+            return 1
+
+        monkeypatch.setattr(rmt, "_store_risk_report", fake_store)
+        with (
+            patch("src.store.pg_store.PostgreSQLStore"),
+            patch(
+                "alpaca.trading.client.TradingClient",
+                side_effect=OSError("network down"),
+            ),
+        ):
+            result = rmt.compute_risk_report()
+
+        assert stored["report"].herfindahl_index is None
+        assert result["herfindahl_index"] is None
+
 
 class TestF003NoFalsePortfolioDrawdownAlert:
     """F-003: portfolio_daily_state.daily_return is SUM(net_pnl)/SUM(entry_notional)

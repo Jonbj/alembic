@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict
-from datetime import datetime, timezone
 
 from src.util.retry import retry_transient
 from src.workers.celery_app import app
@@ -110,11 +108,12 @@ def _fetch_equity_curve(pg, current_equity: float) -> list[float]:
     return curve
 
 
-def _fetch_position_weights() -> dict[str, float]:
+def _fetch_position_weights() -> dict[str, float] | None:
     """Per-symbol portfolio weights (|market value| / gross) from Alpaca, for a
     meaningful concentration (Herfindahl) metric. #75: the report previously fed
     {"portfolio": 1.0}, making HHI a constant 1.0 that measured nothing. Returns
-    {} on any broker error / no positions → caller falls back to the old value.
+    An empty dict means the broker reported no positions; None means the broker
+    request failed and concentration is unavailable.
     """
     from alpaca.trading.client import TradingClient
 
@@ -135,7 +134,7 @@ def _fetch_position_weights() -> dict[str, float]:
         return {sym: mv / gross for sym, mv in market_values.items()}
     except Exception as e:
         log.warning("Could not fetch position weights for HHI (#75): %s", e)
-        return {}
+        return None
 
 
 def _store_risk_report(pg, report) -> int:
@@ -228,7 +227,9 @@ def compute_risk_report() -> dict:
         from src.portfolio.risk_monitor import _herfindahl
 
         position_weights = _fetch_position_weights()
-        hhi_override = _herfindahl(position_weights) if position_weights else None
+        hhi_override = (
+            None if position_weights is None else _herfindahl(position_weights)
+        )
 
         monitor = PortfolioRiskMonitor(target_weights={})
 
@@ -252,11 +253,16 @@ def compute_risk_report() -> dict:
 
         try:
             report_id = _store_risk_report(pg, report)
+            hhi_log = (
+                f"{report.herfindahl_index:.3f}"
+                if report.herfindahl_index is not None
+                else "unavailable"
+            )
             log.info(
-                "Risk report stored (id=%d): combined_dd=%.2f%% HHI=%.3f alerts=%d",
+                "Risk report stored (id=%d): combined_dd=%.2f%% HHI=%s alerts=%d",
                 report_id,
                 report.combined_drawdown * 100,
-                report.herfindahl_index,
+                hhi_log,
                 len(report.alerts),
             )
         except Exception as e:
