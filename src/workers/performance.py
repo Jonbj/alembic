@@ -802,10 +802,25 @@ def run_reconcile_fills_intraday() -> dict:
         except Exception as exc:
             lifecycle_error = str(exc)
             log.warning("S4 lifecycle reconciliation failed: %s", exc)
+        p0_events = 0
+        p0_error = None
+        try:
+            from src.strategies.s4.p0_runtime import replay_p0_candidates
+
+            p0_events = replay_p0_candidates(pg, tc)
+        except Exception as exc:
+            p0_error = str(exc)
+            log.warning("S4 P0 shadow replay failed: %s", exc)
         log.info("Intraday reconcile: %d fill(s) updated", updated)
-        result = {"updated": updated, "s4_lifecycle_events": lifecycle_events}
+        result = {
+            "updated": updated,
+            "s4_lifecycle_events": lifecycle_events,
+            "s4_p0_events": p0_events,
+        }
         if lifecycle_error is not None:
             result["s4_lifecycle_error"] = lifecycle_error
+        if p0_error is not None:
+            result["s4_p0_error"] = p0_error
         return result
     except Exception as exc:
         log.warning("Intraday fill reconciliation failed: %s", exc)
