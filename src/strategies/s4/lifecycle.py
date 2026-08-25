@@ -236,6 +236,8 @@ def reconcile_entry(
     details: dict[str, object] = {
         "broker_status": order.status,
         "broker_lookup_error": order.lookup_error,
+        "submission_reason_code": intent.submission_reason_code,
+        "submission_error": intent.submission_error,
         "requested_quantity": intent.requested_quantity,
         "requested_notional": intent.requested_notional,
         "sleeve_contributions": dict(sorted(intent.sleeve_contributions.items())),

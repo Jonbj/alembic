@@ -126,3 +126,5 @@ def test_reject_pre_ack_e_terminal_senza_lookup_di_un_order_inesistente():
     assert event.status == "REJECTED"
     assert event.reason_code == "BROKER_REJECTED"
     assert event.reconstructible is True
+    assert event.details["submission_reason_code"] == "BROKER_REJECT"
+    assert event.details["submission_error"] == "APIError"
