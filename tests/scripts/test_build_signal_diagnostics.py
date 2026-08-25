@@ -104,13 +104,13 @@ def _mock_bar_loader(symbol, day):
 def _mock_db_enricher(signal_ids):
     return {
         1: {"model_id": "glm52", "ensemble_std": 0.05, "extraction_method": "ner",
-            "source": "test", "published_at": _ANCHOR.isoformat()},
+            "source": "test", "published_at": _ANCHOR.isoformat(), "n_ticker_articolo": 1},
         2: {"model_id": "gptoss", "ensemble_std": 0.12, "extraction_method": "source_metadata",
-            "source": "test", "published_at": _ANCHOR.isoformat()},
+            "source": "test", "published_at": _ANCHOR.isoformat(), "n_ticker_articolo": 9},
         3: {"model_id": "glm52", "ensemble_std": 0.20, "extraction_method": "fallback_finbert",
-            "source": "test", "published_at": _ANCHOR.isoformat()},
+            "source": "test", "published_at": _ANCHOR.isoformat(), "n_ticker_articolo": 1},
         4: {"model_id": "gptoss", "ensemble_std": 0.08, "extraction_method": "ner",
-            "source": "test", "published_at": _ANCHOR.isoformat()},
+            "source": "test", "published_at": _ANCHOR.isoformat()},  # n_ticker_articolo assente
     }
 
 
@@ -158,9 +158,24 @@ def test_report_ha_un_pannello_per_giorno_con_tutti_i_blocchi(report):
     p = report["panels"][0]
     assert p["data"] == _DAY
     for blocco in ("rank_ic", "hit_precision_recall", "quintiles",
-                   "false_positives", "matched_controls", "splits"):
+                   "false_positives", "matched_controls", "splits",
+                   "fanout_sweep"):
         assert blocco in p, f"blocco {blocco} mancante nel pannello"
     assert p["policy_output"] == "descriptive_only"
+
+
+def test_fanout_sweep_arricchito_da_db_enricher(report):
+    # Regressione review #283 (criterio 1, 2 volte respinta): n_ticker_articolo
+    # arriva dall'arricchimento DB (_default_db_enricher) fino al fanout_sweep
+    # del pannello. AAA/CCC single-ticker (n=1), BBB multi-ticker (n=9),
+    # DDD senza dato (assente, escluso da ogni cutoff filtrato).
+    p = report["panels"][0]
+    fanout = p["fanout_sweep"]
+    assert fanout["n_fanout_missing"] == 1  # DDD
+    cutoff_1 = next(s for s in fanout["sweeps"] if s["max_fanout"] == 1)
+    assert cutoff_1["n_rows"] == 2  # AAA, CCC
+    cutoff_wide = next(s for s in fanout["sweeps"] if s["max_fanout"] >= 9)
+    assert cutoff_wide["n_rows"] == 3  # AAA, BBB, CCC (DDD resta escluso)
 
 
 def test_rank_ic_per_giorno_ha_tre_benchmark_per_orizzonte(report):
@@ -262,7 +277,7 @@ def test_query_db_enricher_referenzia_pk_id_di_sentiment_signals(monkeypatch):
     class _FakeCompleted:
         def __init__(self):
             self.returncode = 0
-            self.stdout = "1|glm52|0.05|ner|test|2026-08-12T15:00:00+00:00\n"
+            self.stdout = "1|glm52|0.05|ner|test|2026-08-12T15:00:00+00:00|3\n"
             self.stderr = ""
 
     def _fake_run(cmd, **kwargs):
@@ -282,3 +297,5 @@ def test_query_db_enricher_referenzia_pk_id_di_sentiment_signals(monkeypatch):
     # e l'arricchimento, dato un psql che ha successo, valorizza davvero il dict.
     assert out[1]["model_id"] == "glm52"
     assert out[1]["extraction_method"] == "ner"
+    # n_ticker_articolo (fan-out, #169): regressione review #283 criterio 1.
+    assert out[1]["n_ticker_articolo"] == 3

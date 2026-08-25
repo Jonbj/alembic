@@ -16,6 +16,10 @@ Cosa misura (tutto time-forward, PIT dal timestamp osservabile del segnale):
   osservabile.
 * **hit rate / precision / recall** dei mover azionabili. La soglia mover arriva
   dal dossier (gia' dichiarata, ``soglia_mover``): non e' una nuova taratura.
+* **fanout sweep**: lo stesso sweep hit/precision/recall ripetuto per ogni
+  cutoff predefinito di fan-out (``n_ticker_articolo``, #169) — quanti ticker
+  condividono lo stesso articolo. Righe senza il dato sono escluse da ogni
+  cutoff e contate a parte (``n_fanout_missing``).
 * **quintili** per score -> forward return medio per bucket.
 * **splits** per source/model/fallback/extraction/ensemble_std, con ``n`` per
   cella.
@@ -27,9 +31,10 @@ Cosa misura (tutto time-forward, PIT dal timestamp osservabile del segnale):
 * **score stability** (ICIR della serie di IC per giorno).
 * **shadow curves** descrittive (serie + cumulati cross-day).
 
-Freeze (#171): solo misura. ``policy_output = "descriptive_only"``. La griglia di
-sweep sulle soglie e' una costante dichiarata (``DEFAULT_THRESHOLD_GRID``) e
-nessuna soglia viene scelta qui: si riporta precision/recall a OGNI soglia. La
+Freeze (#171): solo misura. ``policy_output = "descriptive_only"``. Le griglie di
+sweep sulle soglie (``DEFAULT_THRESHOLD_GRID``) e sul fan-out
+(``DEFAULT_FANOUT_GRID``) sono costanti dichiarate e nessuna soglia/cutoff viene
+scelto qui: si riporta precision/recall a OGNI soglia. La
 moltiplcita' (orizzonti x splits x soglie) e' dichiarata (``n_trials``) e la
 significativita' e' riportata col Deflated Sharpe Ratio di
 ``src/backtest/metrics/signal_quality`` (Bailey & Lopez de Prado 2014), marcata
@@ -62,6 +67,13 @@ _HORIZON_MINUTES = {"30m": 30, "60m": 60}
 # precision/recall a ciascuna soglia senza sceglierne alcuna. 0.30 e' il gate S4
 # dichiarato (config/trading.yaml) incluso come riferimento, non come scelta.
 DEFAULT_THRESHOLD_GRID = (0.10, 0.20, 0.30, 0.40, 0.50, 0.60)
+
+# Griglia di sweep del fan-out (n_ticker_articolo, #169/#244): quanti ticker
+# condividono lo stesso articolo. Ogni punto e' il fan-out MASSIMO ammesso
+# (cutoff <=): 1 = solo articoli single-ticker, valori crescenti includono
+# via via gli articoli multi-ticker. PREDEFINITA e fissa come la soglia di
+# score: nessun cutoff viene scelto qui, si riporta precision/recall a ognuno.
+DEFAULT_FANOUT_GRID = (1, 2, 3, 5, 10)
 
 UTC = timezone.utc
 
@@ -417,6 +429,50 @@ def precision_recall(
     }
 
 
+def fanout_sweep(
+    rows: list[dict],
+    *,
+    mover_threshold: float,
+    score_threshold_grid: tuple[float, ...] = DEFAULT_THRESHOLD_GRID,
+    fanout_grid: tuple[int, ...] = DEFAULT_FANOUT_GRID,
+    direction: str = "long",
+) -> dict[str, Any]:
+    """Sweep predefinito e descrittivo sul fan-out (AC #283, criterio 4).
+
+    Per ogni cutoff della griglia (fan-out MASSIMO ammesso, ``<=``), filtra le
+    righe a quelle con ``n_ticker_articolo`` noto e sotto il cutoff, poi
+    riporta precision/recall del mover del giorno sull'INTERA griglia di soglie
+    di score — lo stesso sweep gia' fatto senza filtro, ripetuto per ogni
+    cutoff. Nessun cutoff o soglia viene scelto: si riportano tutti i punti.
+
+    Le righe senza ``n_ticker_articolo`` (assente != zero) sono escluse da OGNI
+    cutoff filtrato e contate a parte in ``n_fanout_missing``: un buco di dato
+    non deve mai far apparire un articolo come single-ticker.
+    """
+    n_missing = sum(1 for r in rows if r.get("n_ticker_articolo") is None)
+    sweeps = []
+    for cutoff in fanout_grid:
+        subset = [
+            r for r in rows
+            if r.get("n_ticker_articolo") is not None and r["n_ticker_articolo"] <= cutoff
+        ]
+        sweeps.append({
+            "max_fanout": cutoff,
+            "n_rows": len(subset),
+            "hit_precision_recall": [
+                precision_recall(subset, threshold=t, mover_threshold=mover_threshold,
+                                 direction=direction)
+                for t in score_threshold_grid
+            ],
+        })
+    return {
+        "fanout_grid": list(fanout_grid),
+        "n_fanout_missing": n_missing,
+        "sweeps": sweeps,
+        "policy": "descriptive_only_no_threshold_selected",
+    }
+
+
 def quintile_analysis(
     scores: list[float], returns: list[float | None], *, n_buckets: int = 5
 ) -> list[dict[str, Any]]:
@@ -701,20 +757,25 @@ def build_signal_diagnostics_panel(
     pool_rows: list[dict],
     mover_threshold: float,
     threshold_grid: tuple[float, ...] = DEFAULT_THRESHOLD_GRID,
+    fanout_grid: tuple[int, ...] = DEFAULT_FANOUT_GRID,
 ) -> dict[str, Any]:
     """Pannello di diagnostica dei segnali per un giorno.
 
     Puro. ``signal_rows`` sono i segnali arricchiti (score, forward_returns per
     orizzonte, benchmark_returns per orizzonte, return del giorno, settore,
-    source/model/fallback/extraction_method/ensemble_std_bucket). ``pool_rows``
-    sono i ticker NON segnalati dello stesso giorno, per i matched controls.
-    ``mover_threshold`` e' la soglia mover DICHIARATA dal dossier (non una nuova
-    taratura): definisce l'up-mover azionabile in book long-only.
+    source/model/fallback/extraction_method/ensemble_std_bucket,
+    n_ticker_articolo). ``pool_rows`` sono i ticker NON segnalati dello stesso
+    giorno, per i matched controls. ``mover_threshold`` e' la soglia mover
+    DICHIARATA dal dossier (non una nuova taratura): definisce l'up-mover
+    azionabile in book long-only.
 
     Mappa issue -> blocco:
       * rank IC per orizzonte, raw + residualizzata vs SPY/settore (AC1).
       * hit/precision/recall: sweep sul mover del giorno (azione catturabile),
         singolo sweep sulla griglia predefinita, descrittivo (AC4).
+      * fanout_sweep: stesso sweep, ripetuto per ogni cutoff di fan-out
+        (n_ticker_articolo) della griglia predefinita — AC4 copre "gate/
+        fan-out", non solo il gate di score (rilievo review 2026-08-24).
       * quintili per orizzonte.
       * false positivi per orizzonte (score alto, forward return avverso).
       * matched controls per orizzonte (AC2), separati dal book benchmark.
@@ -753,12 +814,22 @@ def build_signal_diagnostics_panel(
         matched[h] = matched_controls(movers, pool_rows, horizon=h)
 
     # hit/precision/recall: sweep sul mover del GIORNO (azione catturabile long).
-    day_rows = [{"score": r.get("score"), "return": r.get("return")} for r in signal_rows]
+    day_rows = [
+        {"score": r.get("score"), "return": r.get("return"),
+         "n_ticker_articolo": r.get("n_ticker_articolo")}
+        for r in signal_rows
+    ]
     hit_pr = [
         precision_recall(day_rows, threshold=t, mover_threshold=mover_threshold,
                          direction="long")
         for t in threshold_grid
     ]
+    # sweep predefinito e descrittivo sul fan-out (AC #283, criterio 4): stesso
+    # sweep di soglia, ripetuto per ogni cutoff di n_ticker_articolo.
+    fanout = fanout_sweep(
+        day_rows, mover_threshold=mover_threshold,
+        score_threshold_grid=threshold_grid, fanout_grid=fanout_grid,
+    )
 
     # splits per dimensione, per orizzonte.
     splits: dict[str, Any] = {}
@@ -778,6 +849,7 @@ def build_signal_diagnostics_panel(
         "false_positives": false_pos,
         "matched_controls": matched,
         "splits": splits,
+        "fanout_sweep": fanout,
         "missingness": missingness,
         "policy_output": "descriptive_only",
         "freeze": {
@@ -785,6 +857,7 @@ def build_signal_diagnostics_panel(
             "live_thresholds_weights_flags_changed": False,
             "mover_threshold_source": "dossier.soglia_mover (declared, not tuned here)",
             "threshold_grid_is_predefined_and_descriptive": True,
+            "fanout_grid_is_predefined_and_descriptive": True,
         },
     }
 

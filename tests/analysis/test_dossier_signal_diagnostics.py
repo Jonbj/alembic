@@ -540,7 +540,7 @@ class TestScoreStability:
 def _sig(signal_id, ticker, score, fwd_t1, *, spy_t1=0.01, sector_t1=0.02,
          ret=0.05, source="benzinga", model="glm52", fallback=False,
          extraction="cashtag", ensemble_std_bucket="low", sector="tech",
-         data="2026-08-12"):
+         data="2026-08-12", n_ticker_articolo=None):
     return {
         "signal_id": signal_id, "ticker": ticker, "data": data,
         "score": score, "timestamp": f"{data}T15:00:00+00:00",
@@ -549,15 +549,16 @@ def _sig(signal_id, ticker, score, fwd_t1, *, spy_t1=0.01, sector_t1=0.02,
         "extraction_method": extraction, "ensemble_std_bucket": ensemble_std_bucket,
         "forward_returns": {"T+1": fwd_t1},
         "benchmark_returns": {"T+1": {"spy": spy_t1, "sector": sector_t1}},
+        "n_ticker_articolo": n_ticker_articolo,
     }
 
 
 def _day1_signals():
     return [
-        _sig(1, "AAPL", 0.5, 0.05, ret=0.05),
-        _sig(2, "MSFT", 0.4, 0.02, ret=0.02),
-        _sig(3, "CSCO", 0.2, 0.06, ret=0.06),
-        _sig(4, "ORCL", 0.35, 0.01, ret=0.01),
+        _sig(1, "AAPL", 0.5, 0.05, ret=0.05, n_ticker_articolo=1),
+        _sig(2, "MSFT", 0.4, 0.02, ret=0.02, n_ticker_articolo=1),
+        _sig(3, "CSCO", 0.2, 0.06, ret=0.06, n_ticker_articolo=8),
+        _sig(4, "ORCL", 0.35, 0.01, ret=0.01, n_ticker_articolo=None),
     ]
 
 
@@ -591,8 +592,34 @@ class TestPanel:
         assert panel["mover_threshold"] == 0.03  # dichiarata, non scelta
         # blocchi previsti
         for key in ("rank_ic", "hit_precision_recall", "quintiles",
-                    "false_positives", "matched_controls", "splits"):
+                    "false_positives", "matched_controls", "splits",
+                    "fanout_sweep"):
             assert key in panel
+
+    def test_panel_sweep_fanout_grid_descrittivo_senza_scelta(self):
+        # Regressione review #283 (criterio 1, 2 volte respinta): la issue
+        # richiede lo sweep predefinito e descrittivo anche del fan-out
+        # (n_ticker_articolo), non solo della soglia di score.
+        panel = sd.build_signal_diagnostics_panel(
+            _day1_signals(), pool_rows=_pool("2026-08-12"),
+            mover_threshold=0.03,
+        )
+        fanout = panel["fanout_sweep"]
+        assert fanout["fanout_grid"] == list(sd.DEFAULT_FANOUT_GRID)
+        # ORCL non porta n_ticker_articolo: assente != zero, dichiarato a parte.
+        assert fanout["n_fanout_missing"] == 1
+        assert len(fanout["sweeps"]) == len(sd.DEFAULT_FANOUT_GRID)
+        for point in fanout["sweeps"]:
+            assert point["max_fanout"] in sd.DEFAULT_FANOUT_GRID
+            assert len(point["hit_precision_recall"]) == len(sd.DEFAULT_THRESHOLD_GRID)
+        # cutoff=1: solo AAPL e MSFT (n_ticker_articolo==1); CSCO (8) escluso,
+        # ORCL (mancante) escluso.
+        cutoff_1 = next(p for p in fanout["sweeps"] if p["max_fanout"] == 1)
+        assert cutoff_1["n_rows"] == 2
+        # un cutoff che include anche CSCO (8) porta 3 righe.
+        cutoff_wide = next(p for p in fanout["sweeps"] if p["max_fanout"] >= 8)
+        assert cutoff_wide["n_rows"] == 3
+        assert fanout["policy"] == "descriptive_only_no_threshold_selected"
 
     def test_panel_rank_ic_per_ogni_orizzonte_con_raw_e_residual(self):
         panel = sd.build_signal_diagnostics_panel(

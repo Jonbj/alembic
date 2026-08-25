@@ -155,7 +155,8 @@ def _default_bar_loader(symbol: str, day: dt.date) -> dict:
 
 def _default_db_enricher(signal_ids: list[int]) -> dict[int, dict]:
     """Arricchisce i signal_id da Postgres: model_id, extraction_method,
-    ensemble_std, source (fonte news), published_at.
+    ensemble_std, source (fonte news), published_at, n_ticker_articolo
+    (fan-out: quanti ticker condividono lo stesso articolo, #169).
 
     Via ``docker exec alembic-postgres-1 psql`` (pattern compute_s4_ic.py).
     Fail-soft: se il DB non e' raggiungibile restituisce {} (il pannello usa
@@ -168,9 +169,14 @@ def _default_db_enricher(signal_ids: list[int]) -> dict[int, dict]:
     # ``signal_id``. Filtrare per una colonna inesistente fallisce su DB reale
     # e il fail-soft mascherava la rottura lasciando vuoti gli split per
     # source/model/extraction (rilievo bloccante review 2026-08-24).
+    # n_ticker_articolo: stesso pattern di scripts/alpha_miner_dossier.py —
+    # il vincolo uq_news_log_url_ticker rende count(*) per url esattamente il
+    # numero di ticker distinti che condividono l'articolo.
     query = (
         "SELECT s.id, s.model_id, s.ensemble_std, "
-        "n.extraction_method, n.source, n.published_at "
+        "n.extraction_method, n.source, n.published_at, "
+        "CASE WHEN COALESCE(n.url,'') = '' THEN NULL ELSE "
+        "  (SELECT count(*) FROM news_log n2 WHERE n2.url = n.url) END "
         "FROM sentiment_signals s LEFT JOIN news_log n ON n.id = s.news_log_id "
         f"WHERE s.id IN ({ids})"
     )
@@ -191,15 +197,16 @@ def _default_db_enricher(signal_ids: list[int]) -> dict[int, dict]:
         if not line.strip():
             continue
         parts = line.split("|")
-        if len(parts) < 6:
+        if len(parts) < 7:
             continue
-        sid, model_id, ensemble_std, extraction_method, source, published_at = parts[:6]
+        sid, model_id, ensemble_std, extraction_method, source, published_at, n_ticker = parts[:7]
         out[int(sid)] = {
             "model_id": model_id if model_id else None,
             "ensemble_std": _maybe_float(ensemble_std),
             "extraction_method": extraction_method if extraction_method else None,
             "source": source if source else None,
             "published_at": published_at if published_at else None,
+            "n_ticker_articolo": int(n_ticker) if n_ticker else None,
         }
     return out
 
@@ -286,6 +293,7 @@ def _build_signal_rows(
             "source": None, "model": None, "fallback": None,
             "extraction_method": None, "ensemble_std": None,
             "ensemble_std_bucket": "unknown",
+            "n_ticker_articolo": None,
             "forward_returns": {},
             "benchmark_returns": {},
             "control_kind": "ticker_level_non_signaled",
@@ -342,6 +350,7 @@ def _build_signal_rows(
             "extraction_method": e.get("extraction_method"),
             "ensemble_std": e.get("ensemble_std"),
             "ensemble_std_bucket": "unknown",  # riassegnato dopo (terzile)
+            "n_ticker_articolo": e.get("n_ticker_articolo"),
             "forward_returns": {
                 h: (fwd.get(h) or {}).get("return") for h in HORIZONS
             },
