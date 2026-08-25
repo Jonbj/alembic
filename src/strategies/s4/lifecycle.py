@@ -200,15 +200,15 @@ def reconcile_entry(
         status, reason, reconstructible = "CENSORED", session_error, False
     elif sleeve_error is not None:
         status, reason, reconstructible = "CENSORED", sleeve_error, False
-    elif intent.first_executable_price <= 0:
+    elif order.filled_quantity > 0 and intent.first_executable_price <= 0:
         status, reason, reconstructible = (
             "CENSORED",
             "FIRST_EXECUTABLE_PRICE_MISSING",
             False,
         )
-    elif broker_position_quantity is None:
+    elif order.filled_quantity > 0 and broker_position_quantity is None:
         reason, reconstructible = "BROKER_POSITION_MISSING", False
-    elif abs(difference or 0.0) > _QTY_EPSILON:
+    elif order.filled_quantity > 0 and abs(difference or 0.0) > _QTY_EPSILON:
         reason = (
             "BROKER_SURPLUS_UNATTRIBUTED"
             if difference is not None and difference > 0

@@ -122,6 +122,25 @@ def test_stati_broker_hanno_reason_code_deterministici(
     assert (event.status, event.reason_code) == (expected_status, expected_reason)
 
 
+def test_reject_senza_fill_non_dipende_da_prezzo_calendario_o_posizione():
+    event = reconcile_entry(
+        _intent(first_executable_price=0.0),
+        _order(
+            status="rejected",
+            filled_quantity=0.0,
+            filled_at=None,
+            filled_avg_price=None,
+        ),
+        sessions=[],
+        observed_at=OBSERVED_AT,
+        broker_position_quantity=None,
+    )
+
+    assert event.status == "REJECTED"
+    assert event.reason_code == "BROKER_REJECTED"
+    assert event.reconstructible is True
+
+
 def test_corporate_action_e_gap_sono_espliciti_e_non_scompaiono_dal_campione():
     corporate_action = reconcile_entry(
         _intent(),
