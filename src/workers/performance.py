@@ -84,6 +84,100 @@ _MIN_ABS_MEAN_ICIR = 0.05  # G3.5: freeze if mean ICIR < -this (ensemble anti-pr
 _SLIPPAGE_WARN_PCT = 0.30   # ⚠️ if estimated slippage > 30% of gross P&L
 
 
+def _reconcile_s4_lifecycles(
+    pg: PostgreSQLStore,
+    trading_client,
+    *,
+    observed_at: datetime | None = None,
+) -> int:
+    """Project submitted S4 intents onto broker fills, positions and sessions."""
+    from alpaca.trading.requests import GetCalendarRequest
+
+    from src.strategies.s4.lifecycle import (
+        BrokerOrderSnapshot,
+        MarketSession,
+        reconcile_entry,
+    )
+
+    now = observed_at or datetime.now(timezone.utc)
+    intents = pg.fetch_s4_submitted_intents()
+    if not intents:
+        return 0
+
+    try:
+        broker_positions = {
+            position.symbol: float(position.qty)
+            for position in retry_transient(trading_client.get_all_positions)
+        }
+    except Exception as exc:
+        log.warning("#295: broker positions unavailable during lifecycle reconcile: %s", exc)
+        broker_positions = None
+
+    try:
+        calendar_rows = trading_client.get_calendar(GetCalendarRequest(
+            start=(now - timedelta(days=7)).date(),
+            end=(now + timedelta(days=14)).date(),
+        ))
+        sessions = [MarketSession(
+            session_date=row.date,
+            open_at=row.open,
+            close_at=row.close,
+        ) for row in calendar_rows]
+    except Exception as exc:
+        log.warning("#295: Alpaca calendar unavailable during lifecycle reconcile: %s", exc)
+        sessions = []
+
+    events = []
+    for intent in intents:
+        try:
+            broker_order = trading_client.get_order_by_id(intent.order_id)
+            raw_status = getattr(broker_order, "status", "unknown")
+            status = getattr(raw_status, "value", raw_status)
+            filled_at = getattr(broker_order, "filled_at", None)
+            if isinstance(filled_at, str):
+                filled_at = datetime.fromisoformat(filled_at)
+            order = BrokerOrderSnapshot(
+                order_id=str(getattr(broker_order, "id", intent.order_id)),
+                status=str(status),
+                filled_at=filled_at,
+                filled_quantity=float(getattr(broker_order, "filled_qty", 0.0) or 0.0),
+                filled_avg_price=(
+                    float(broker_order.filled_avg_price)
+                    if getattr(broker_order, "filled_avg_price", None) is not None
+                    else None
+                ),
+            )
+        except Exception as exc:
+            order = BrokerOrderSnapshot(
+                order_id=intent.order_id,
+                status="lookup_failed",
+                filled_at=None,
+                filled_quantity=0.0,
+                filled_avg_price=None,
+                lookup_error=type(exc).__name__,
+            )
+        position_qty = (
+            None if broker_positions is None else broker_positions.get(intent.symbol, 0.0)
+        )
+        market_event = (
+            "gap"
+            if order.filled_at is not None
+            and order.filled_at.date() > intent.submitted_at.date()
+            else None
+        )
+        events.append(reconcile_entry(
+            intent,
+            order,
+            sessions,
+            now,
+            broker_position_quantity=position_qty,
+            market_event=market_event,
+        ))
+
+    pg.write_s4_lifecycle_events(events)
+    return len(events)
+
+
 def _fetch_all_per_model_signals_for_loo(
     pg: PostgreSQLStore,
     days: int,
@@ -690,8 +784,18 @@ def run_reconcile_fills_intraday() -> dict:
             paper=_cfg.ALPACA_PAPER_MODE,
         )
         updated = pg.reconcile_trade_fills(tc)
+        lifecycle_events = 0
+        lifecycle_error = None
+        try:
+            lifecycle_events = _reconcile_s4_lifecycles(pg, tc)
+        except Exception as exc:
+            lifecycle_error = str(exc)
+            log.warning("S4 lifecycle reconciliation failed: %s", exc)
         log.info("Intraday reconcile: %d fill(s) updated", updated)
-        return {"updated": updated}
+        result = {"updated": updated, "s4_lifecycle_events": lifecycle_events}
+        if lifecycle_error is not None:
+            result["s4_lifecycle_error"] = lifecycle_error
+        return result
     except Exception as exc:
         log.warning("Intraday fill reconciliation failed: %s", exc)
         return {"error": str(exc)}

@@ -51,6 +51,7 @@ class BrokerOrderSnapshot:
     filled_at: datetime | None
     filled_quantity: float
     filled_avg_price: float | None
+    lookup_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -185,12 +186,24 @@ def reconcile_entry(
         else float(broker_position_quantity) - virtual_total
     )
 
-    if market_event == "corporate_action":
+    if order.lookup_error is not None:
+        status, reason, reconstructible = (
+            "MISSING_FILL",
+            "BROKER_ORDER_LOOKUP_FAILED",
+            False,
+        )
+    elif market_event == "corporate_action":
         status, reason, reconstructible = "CENSORED", "CORPORATE_ACTION", False
     elif session_error is not None:
         status, reason, reconstructible = "CENSORED", session_error, False
     elif sleeve_error is not None:
         status, reason, reconstructible = "CENSORED", sleeve_error, False
+    elif intent.first_executable_price <= 0:
+        status, reason, reconstructible = (
+            "CENSORED",
+            "FIRST_EXECUTABLE_PRICE_MISSING",
+            False,
+        )
     elif broker_position_quantity is None:
         reason, reconstructible = "BROKER_POSITION_MISSING", False
     elif abs(difference or 0.0) > _QTY_EPSILON:
@@ -218,8 +231,9 @@ def reconcile_entry(
         "missing" if broker_position_quantity is None else f"{broker_position_quantity:.12g}",
         market_event or "no-market-event",
     ))
-    details = {
+    details: dict[str, object] = {
         "broker_status": order.status,
+        "broker_lookup_error": order.lookup_error,
         "requested_quantity": intent.requested_quantity,
         "requested_notional": intent.requested_notional,
         "sleeve_contributions": dict(sorted(intent.sleeve_contributions.items())),

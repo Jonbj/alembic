@@ -252,6 +252,28 @@ def _s4_intent_provenance(strategy, live_provenance: dict) -> dict:
     return dict(ranked_provenance or live_provenance)
 
 
+def _s4_sleeve_contributions(result, registry) -> dict[str, dict[str, float]]:
+    """Freeze portfolio-level S1/S4 contributions for every S4 entry target."""
+    targets = getattr(result, "target_weights_per_strategy", None) or {}
+    s4_symbols = set(targets.get("S4", {}))
+    if not s4_symbols:
+        return {}
+    allocations = {
+        entry.strategy_id: float(entry.allocation_pct)
+        for entry in registry.get_active_strategies()
+    }
+    by_symbol: dict[str, dict[str, float]] = {}
+    for strategy_id, weights in targets.items():
+        allocation = allocations.get(strategy_id)
+        if allocation is None:
+            continue
+        for symbol, weight in (weights or {}).items():
+            contribution = float(weight) * allocation
+            if symbol in s4_symbols and contribution > 0:
+                by_symbol.setdefault(symbol, {})[strategy_id] = contribution
+    return by_symbol
+
+
 def _finalize_s4_intent_ledger(
     ledger,
     *,
@@ -2494,6 +2516,7 @@ def _run_cycle_inner() -> dict:
     _s4_observed_provenance = _s4_intent_provenance(
         _s4_strategy_instance, result.symbol_signal_provenance
     )
+    _s4_virtual_sleeves = _s4_sleeve_contributions(result, registry)
 
     # #185: advance the clock only for the sleeves that actually re-decided weights.
     _persist_rebalance_state(result, ts, config.REDIS_URL)
@@ -3035,6 +3058,7 @@ def _run_cycle_inner() -> dict:
             buying_power=buying_power,
             notifier=notifier,
             _on_disposition=_capture_s4_order_disposition,
+            sleeve_contributions=_s4_virtual_sleeves,
         )
 
         # #62/#63: reconcile broker-side protective stops for fractional positions.
@@ -4116,6 +4140,7 @@ def _submit_portfolio_orders(
     notifier=None,
     gate_mode: str | None = None,
     _on_disposition=None,
+    sleeve_contributions: dict[str, dict[str, float]] | None = None,
 ) -> list[dict]:
     """Submit BUY and SELL orders to Alpaca.
 
@@ -4426,12 +4451,14 @@ def _submit_portfolio_orders(
                 if _submit_fn is not None:
                     _submit_fn(order, notional, trading_client)
                     alpaca_id = f"test-{order.symbol}-buy"
+                    submitted_quantity = notional / price
                 else:
                     from alpaca.trading.requests import MarketOrderRequest, StopLossRequest, TakeProfitRequest
                     from alpaca.trading.enums import OrderClass
                     from src.config import config as _cfg_order
 
                     if is_fractionable:
+                        submitted_quantity = notional / price
                         base_kwargs: dict = dict(
                             symbol=order.symbol,
                             notional=notional,
@@ -4449,6 +4476,7 @@ def _submit_portfolio_orders(
                             if capped_qty is not None
                             else max(1, int(notional / price))
                         )
+                        submitted_quantity = float(whole_qty)
                         log.info(
                             "P1-B: %s not fractionable — using qty=%d (regime_mult=%.2f, notional=$%.2f)",
                             order.symbol, whole_qty, regime_mult, notional,
@@ -4511,6 +4539,14 @@ def _submit_portfolio_orders(
                     "SUBMITTED",
                     order_id=alpaca_id,
                     notional=notional,
+                    requested_quantity=submitted_quantity,
+                    first_executable_price=float(price),
+                    first_executable_price_source=(
+                        "portfolio_market_snapshot.latest_price"
+                    ),
+                    sleeve_contributions=dict(sorted(
+                        (sleeve_contributions or {}).get(order.symbol, {}).items()
+                    )),
                 )
             elif order.side == OrderSide.SELL:
                 qty = abs(order.quantity)
