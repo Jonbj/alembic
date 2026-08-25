@@ -23,6 +23,9 @@ Cosa misura (tutto time-forward, PIT dal timestamp osservabile del segnale):
 * **quintili** per score -> forward return medio per bucket.
 * **splits** per source/model/fallback/extraction/ensemble_std, con ``n`` per
   cella.
+* **wrong-sign audit** per provenienza ensemble/fallback e fan-out
+  single/multi-ticker, incluse le interazioni. Score neutri, return piatti e
+  missing restano separati dai veri errori di segno (#328).
 * **falsi positivi** (score alto, rendimento avverso).
 * **controlli matched** riproducibili (stesso giorno/settore, matching
   deterministico nearest-by-return, senza random) — separati dal benchmark di
@@ -54,7 +57,7 @@ from src.backtest.metrics.signal_quality import (
     information_coefficient,
 )
 
-SIGNAL_DIAGNOSTICS_SCHEMA_VERSION = "1.0"
+SIGNAL_DIAGNOSTICS_SCHEMA_VERSION = "1.1"
 
 # Orizzonti richiesti dalla issue (#283), dal piu' breve al piu' lungo. Tutti
 # ancorati allo stesso entry price PIT (prezzo al timestamp del segnale).
@@ -373,6 +376,112 @@ def hit_rate(scores: list[float], returns: list[float | None]) -> dict[str, Any]
         return {"hit_rate": None, "n": 0}
     hits = sum(1 for s, r in pairs if s != 0 and r != 0 and (s > 0) == (r > 0))
     return {"hit_rate": hits / n, "n": n}
+
+
+def _wrong_sign_stats(rows: list[dict], horizon: str) -> dict[str, Any]:
+    """Conta esiti di segno senza trasformare neutralita' o missing in errori."""
+    stats: dict[str, Any] = {
+        "n_rows": len(rows),
+        "n_score_missing": 0,
+        "n_return_missing": 0,
+        "n_score_neutral": 0,
+        "n_return_flat": 0,
+        "n_directional": 0,
+        "n_correct_sign": 0,
+        "n_wrong_sign": 0,
+        "sign_accuracy": None,
+    }
+    for row in rows:
+        score = _float(row.get("score"))
+        forward_return = _float((row.get("forward_returns") or {}).get(horizon))
+        if score is None:
+            stats["n_score_missing"] += 1
+        if forward_return is None:
+            stats["n_return_missing"] += 1
+        if score is None or forward_return is None:
+            continue
+        if score == 0:
+            stats["n_score_neutral"] += 1
+            continue
+        if forward_return == 0:
+            stats["n_return_flat"] += 1
+            continue
+        stats["n_directional"] += 1
+        if (score > 0) == (forward_return > 0):
+            stats["n_correct_sign"] += 1
+        else:
+            stats["n_wrong_sign"] += 1
+    if stats["n_directional"]:
+        stats["sign_accuracy"] = stats["n_correct_sign"] / stats["n_directional"]
+    return stats
+
+
+def _signal_provenance(row: dict) -> str:
+    fallback = row.get("fallback")
+    if fallback is True:
+        return "fallback"
+    if fallback is False:
+        return "ensemble"
+    return "unknown"
+
+
+def _fanout_kind(row: dict) -> str:
+    fanout = _float(row.get("n_ticker_articolo"))
+    if fanout is None or fanout < 1:
+        return "unknown"
+    return "single_ticker" if fanout == 1 else "multi_ticker"
+
+
+def wrong_sign_audit(rows: list[dict], *, horizon: str) -> dict[str, Any]:
+    """Audit descrittivo dei segni per provenienza e fan-out (#328).
+
+    L'esito e' sempre il forward return PIT dell'orizzonte richiesto: non il
+    close-to-close del giorno, che per un segnale intraday incorpora movimento
+    precedente e introduce reverse causality. ``fallback`` segue il contratto
+    live: comprende FinBERT e letture single-model, entrambe marcate
+    ``fallback_used=True``; ``model`` resta disponibile nello split separato.
+
+    Nessuna banda di neutralita' viene inventata durante il freeze: solo lo zero
+    esatto e' neutro. Missing, score neutri e return piatti sono contati fuori
+    dal denominatore direzionale, quindi THIN_NEUTRAL non diventa WRONG_SIGN.
+    """
+    provenance_names = ("ensemble", "fallback", "unknown")
+    fanout_names = ("single_ticker", "multi_ticker", "unknown")
+    by_provenance = {
+        name: _wrong_sign_stats(
+            [row for row in rows if _signal_provenance(row) == name], horizon
+        )
+        for name in provenance_names
+    }
+    by_fanout = {
+        name: _wrong_sign_stats(
+            [row for row in rows if _fanout_kind(row) == name], horizon
+        )
+        for name in fanout_names
+    }
+    interaction = {
+        provenance: {
+            fanout: _wrong_sign_stats(
+                [
+                    row for row in rows
+                    if _signal_provenance(row) == provenance
+                    and _fanout_kind(row) == fanout
+                ],
+                horizon,
+            )
+            for fanout in fanout_names
+        }
+        for provenance in provenance_names
+    }
+    return {
+        "outcome": f"forward_return:{horizon}",
+        "overall": _wrong_sign_stats(rows, horizon),
+        "by_provenance": by_provenance,
+        "by_fanout": by_fanout,
+        "by_provenance_and_fanout": interaction,
+        "neutral_definition": "score == 0 or forward_return == 0 (no tuned band)",
+        "policy": "descriptive_only_no_gate_or_discount",
+    }
 
 
 def precision_recall(
@@ -780,6 +889,7 @@ def build_signal_diagnostics_panel(
       * false positivi per orizzonte (score alto, forward return avverso).
       * matched controls per orizzonte (AC2), separati dal book benchmark.
       * splits per source/model/fallback/extraction/ensemble_std_bucket (AC3).
+      * wrong_sign_audit forward per provenienza x fan-out (#328).
     """
     data = signal_rows[0].get("data") if signal_rows else None
     n_signals = len(signal_rows)
@@ -789,6 +899,7 @@ def build_signal_diagnostics_panel(
     quintiles: dict[str, Any] = {}
     false_pos: dict[str, Any] = {}
     matched: dict[str, Any] = {}
+    wrong_sign: dict[str, Any] = {}
     missingness: list[str] = []
 
     for h in HORIZONS:
@@ -812,6 +923,7 @@ def build_signal_diagnostics_panel(
         # matched controls: solo i mover del giorno, confronto forward return.
         movers = [r for r in signal_rows if r.get("is_mover")]
         matched[h] = matched_controls(movers, pool_rows, horizon=h)
+        wrong_sign[h] = wrong_sign_audit(signal_rows, horizon=h)
 
     # hit/precision/recall: sweep sul mover del GIORNO (azione catturabile long).
     day_rows = [
@@ -850,6 +962,7 @@ def build_signal_diagnostics_panel(
         "matched_controls": matched,
         "splits": splits,
         "fanout_sweep": fanout,
+        "wrong_sign_audit": wrong_sign,
         "missingness": missingness,
         "policy_output": "descriptive_only",
         "freeze": {

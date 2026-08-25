@@ -17,6 +17,11 @@ segnale (``stages.scored_at.bar_timestamp`` del dossier: prima barra SIP 5Min
 allineata allo score), e i controlli matched sono ticker NON segnalati dello
 stesso giorno, separati dal benchmark di libro (SPY/settore).
 
+L'audit WRONG_SIGN (#328) usa gli stessi forward return PIT e separa
+ensemble/fallback, articoli single/multi-ticker e la loro interazione. Score
+neutri, return piatti e missing sono contati a parte: non entrano come errori di
+segno e non viene applicato alcun gate o discount al percorso live.
+
 Compatibile con il freeze #171: e' strumentazione/misura. Nessuna soglia/gate/
 modello/fonte live viene scelta. La soglia mover arriva dal dossier
 (``soglia_mover``, gia' dichiarata), la griglia di sweep e' una costante
@@ -54,7 +59,6 @@ import json
 import logging
 import os
 import subprocess
-from collections import defaultdict
 from pathlib import Path
 
 from src.analysis.dossier.decision_quality import SECTOR_BENCHMARK
