@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-PANELS_SCHEMA_VERSION = "1.0"
+PANELS_SCHEMA_VERSION = "1.1"
 LEDGER_SCHEMA_VERSION = "1.0"
 
 # Cause che NON sono miss e non generano occorrenza di costo: NON_CLASSIFICATO
@@ -211,6 +211,7 @@ def build_signal_panel(dossier: dict, *, dossier_hash: str = "") -> list[dict]:
                 "order_id": event.get("order_id"),
                 "trade_id": event.get("trade_id"),
                 "order_lookup_error": event.get("order_lookup_error"),
+                "latenze_secondi": event.get("latenze_secondi"),
                 # causal_event_id: il segnale e' un evento del dataset e partecipa
                 # del contratto anti-doppio conteggio (kind=signal, data, signal_id).
                 # signal_id e' la PK di news_log, quindi univoco per costruzione;
@@ -270,6 +271,11 @@ def build_decision_trade_panel(dossier: dict, *, dossier_hash: str = "") -> list
                 "mtm_eod": ing.get("mtm_eod"),
                 "vs_apertura": ing.get("vs_apertura"),
                 "entry_percentile": ing.get("entry_percentile"),
+                "quota_movimento_precedente_al_segnale": ing.get(
+                    "quota_movimento_precedente_al_segnale"
+                ),
+                "denominatore_degenere": ing.get("denominatore_degenere"),
+                "quota_nel_gap": ing.get("quota_nel_gap"),
                 "provvisorio": True,
                 "confidenza": "congetturale",
                 "causal_event_id": f"entry:{data}:{ing['symbol']}:{ing.get('ora_utc')}",
