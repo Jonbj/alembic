@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import statistics
 from datetime import datetime, timezone
-from typing import TypedDict
+from typing import Any, Mapping, Sequence, TypedDict
 
 # Soglia DICHIARATA sotto la quale la gamba intraday (close - open) e' troppo
 # piccola perche' una quota su quel denominatore significhi qualcosa: 0,5% del
@@ -25,12 +25,8 @@ SOGLIA_DENOMINATORE_DEGENERE = 0.005
 SOGLIA_GUARDIA_CONTRADDIZIONE = 0.04
 
 
-class EntryTrade(TypedDict, total=False):
-    """Campi di un ingresso necessari alle metriche del dossier.
-
-    `total=False` preserva i dict letterali dei dossier storici; i campi qui
-    elencati sono strutturali nel wiring corrente.
-    """
+class EntryTrade(TypedDict):
+    """Campi di un ingresso necessari alle metriche del dossier."""
 
     symbol: str
     strategia: str
@@ -219,7 +215,12 @@ def compute_entries(
                 row["entry_percentile"] = (trade["entry_price"] - bar["low"]) / rng
             row["mtm_eod"] = (bar["close"] - trade["entry_price"]) * trade["qty"]
             row["vs_apertura"] = (bar["close"] - bar["open"]) * trade["qty"]
-            row.update(_quote_movimento(trade["entry_price"], bar))
+            quote = _quote_movimento(trade["entry_price"], bar)
+            row["quota_movimento_precedente_al_segnale"] = quote[
+                "quota_movimento_precedente_al_segnale"
+            ]
+            row["denominatore_degenere"] = quote["denominatore_degenere"]
+            row["quota_nel_gap"] = quote["quota_nel_gap"]
         result.append(row)
     return result
 
@@ -283,7 +284,7 @@ def compute_s4_entry_intents(
 
         close_prec = (daily_bars.get(symbol) or {}).get("close_prec")
         price = row["prezzo_al_segnale"]
-        if price is not None and close_prec not in (None, 0):
+        if price is not None and close_prec is not None and close_prec != 0:
             row["ritorno_sessione_al_segnale"] = (price - close_prec) / close_prec
         elif close_prec in (None, 0):
             row["missingness"]["ritorno_sessione_al_segnale"] = (
@@ -310,7 +311,7 @@ def _as_utc(value: str | datetime | None) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def _optional_float(value) -> float | None:
+def _optional_float(value: Any) -> float | None:
     try:
         return None if value is None else float(value)
     except (TypeError, ValueError):
@@ -335,22 +336,21 @@ def _quote_movimento(entry_price: float, bar: DailyBar) -> dict:
         if gamba_intraday is None or not apertura
         else abs(gamba_intraday) / abs(apertura) < SOGLIA_DENOMINATORE_DEGENERE
     )
-    quota_intraday = (
-        (entry_price - apertura) / gamba_intraday
-        if gamba_intraday not in (None, 0)
-        else None
-    )
+    quota_intraday = None
+    if gamba_intraday is not None and gamba_intraday != 0 and apertura is not None:
+        quota_intraday = (entry_price - apertura) / gamba_intraday
 
-    movimento_totale = (
-        chiusura - close_prec
-        if chiusura is not None and close_prec not in (None, 0)
-        else None
-    )
-    quota_gap = (
-        (apertura - close_prec) / movimento_totale
-        if movimento_totale not in (None, 0) and apertura is not None
-        else None
-    )
+    movimento_totale = None
+    if chiusura is not None and close_prec is not None and close_prec != 0:
+        movimento_totale = chiusura - close_prec
+    quota_gap = None
+    if (
+        movimento_totale is not None
+        and movimento_totale != 0
+        and apertura is not None
+        and close_prec is not None
+    ):
+        quota_gap = (apertura - close_prec) / movimento_totale
 
     return {
         "quota_movimento_precedente_al_segnale": quota_intraday,
@@ -392,7 +392,9 @@ def _guardia_contraddizione(
     return False, None
 
 
-def aggregate_contradiction_guard(intents: list[dict]) -> dict:
+def aggregate_contradiction_guard(
+    intents: Sequence[Mapping[str, Any]],
+) -> dict:
     """Conta gli intenti che la guardia avrebbe soppresso e il loro P&L reale.
 
     L'identita' arriva dal ledger #294 e l'esecuzione dal `trade_id` collegato:

@@ -31,6 +31,7 @@ import subprocess
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
 import yaml
@@ -289,7 +290,7 @@ def _barre_intraday(
     return dict(out), cutoff
 
 
-def _timestamp(value: str) -> datetime | None:
+def _timestamp(value: str | None) -> datetime | None:
     if not value:
         return None
     parsed = datetime.fromisoformat(value)
@@ -1554,7 +1555,7 @@ def _soglia_guardia_contraddizione() -> float:
 
 
 def _guardia_contraddizione_finestra(
-    intenti_giorno: list[dict], giorno: date
+    intenti_giorno: Sequence[Mapping[str, Any]], giorno: date
 ) -> dict:
     """Ricalcola il cumulato #335 dagli intenti PIT conservati nei dossier.
 
@@ -1589,19 +1590,21 @@ def _guardia_contraddizione_finestra(
     pnl_per_trade: dict[int, float | None] = {}
     if trade_ids:
         id_sql = ",".join(str(trade_id) for trade_id in trade_ids)
-        for row in _psql(
+        for db_row in _psql(
             f"SELECT id::text, COALESCE(net_pnl::text,'') FROM trades "
             f"WHERE id IN ({id_sql}) ORDER BY id;"
         ):
-            pnl_per_trade[int(row[0])] = float(row[1]) if row[1] else None
+            pnl_per_trade[int(db_row[0])] = (
+                float(db_row[1]) if db_row[1] else None
+            )
 
     aggiornati = []
     for intent in intenti_finestra:
-        row = dict(intent)
-        trade_id = row.get("trade_id")
+        intent_row = dict(intent)
+        trade_id = intent_row.get("trade_id")
         if trade_id is not None and int(trade_id) in pnl_per_trade:
-            row["pnl_realizzato"] = pnl_per_trade[int(trade_id)]
-        aggiornati.append(row)
+            intent_row["pnl_realizzato"] = pnl_per_trade[int(trade_id)]
+        aggiornati.append(intent_row)
 
     aggregato = aggregate_contradiction_guard(aggiornati)
     aggregato.update({
