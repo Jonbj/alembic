@@ -26,7 +26,7 @@ vuote). Lo stato è enforced nelle issue.
 
 - **tier:** `tier0` (bloccante sistemico) .. `tier5` (backlog)
 - **tipo:** `wayfinder:task` | `wayfinder:decision` | `wayfinder:backlog`
-- **triage:** `ready-for-agent` (codice pronto) | `ready-for-human` (serve PO) | `needs-triage`
+- **triage:** `ready-for-agent` (codice pronto) | `ready-for-human` (serve PO) | `waiting` (si sblocca da sola: data o campione — la condizione di risveglio va scritta nel corpo) | `needs-triage`
 - **severità:** `critical` | `high` | `medium` | `pre-live-blocker` | `paper-monitoring`
 
 ## Operazioni (gh CLI)

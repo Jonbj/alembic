@@ -111,11 +111,11 @@ When LLM ensemble variance is high or timeout occurs, fall back to deterministic
 
 Issues for this repo are tracked as GitHub issues (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
 
-**Roadmap = Wayfinder map issue #21** ("Alembic Roadmap"). Every piece of open work is a child issue labelled by tier (`tier0`..`tier5`) + wayfinder type (`wayfinder:task`/`wayfinder:decision`/`wayfinder:backlog`) + triage role (`ready-for-agent`/`ready-for-human`/`needs-triage`). The execution order is encoded as native `blocked_by` dependencies (fallback: a `Blocked by: #N` line in the body). **Plan docs in `docs/superpowers/plans/` are design specs (the "how"), NOT status trackers** — they link to their child issue (`Part of #21`) and never serve as the source of truth for "what's done". `gh issue list` is the live todo; closing a child via `closes #N` in a merged PR is the single done-signal.
+**Roadmap = Wayfinder map issue #21** ("Alembic Roadmap"). Every piece of open work is a child issue labelled by tier (`tier0`..`tier5`) + wayfinder type (`wayfinder:task`/`wayfinder:decision`/`wayfinder:backlog`) + triage role (`ready-for-agent`/`ready-for-human`/`waiting`/`needs-triage`). The execution order is encoded as native `blocked_by` dependencies (fallback: a `Blocked by: #N` line in the body). **Plan docs in `docs/superpowers/plans/` are design specs (the "how"), NOT status trackers** — they link to their child issue (`Part of #21`) and never serve as the source of truth for "what's done". `gh issue list` is the live todo; closing a child via `closes #N` in a merged PR is the single done-signal.
 
 ### Triage labels
 
-Five canonical triage roles, label strings equal to their names. See `docs/agents/triage-labels.md`.
+Cinque ruoli canonici di triage più `waiting` (locale, aggiunto il 2026-08-25: si sblocca da sola, nessuna azione richiesta). Label strings equal to their names. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
