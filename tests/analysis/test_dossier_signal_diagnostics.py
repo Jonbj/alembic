@@ -523,7 +523,8 @@ class TestWrongSignAudit:
 
         assert out["overall"] == {
             "n_rows": 5,
-            "n_outcome_missing": 1,
+            "n_score_missing": 0,
+            "n_return_missing": 1,
             "n_score_neutral": 1,
             "n_return_flat": 0,
             "n_directional": 3,
@@ -532,7 +533,7 @@ class TestWrongSignAudit:
             "sign_accuracy": pytest.approx(1 / 3),
         }
         assert out["by_provenance"]["ensemble"]["n_correct_sign"] == 1
-        assert out["by_provenance"]["ensemble"]["n_outcome_missing"] == 1
+        assert out["by_provenance"]["ensemble"]["n_return_missing"] == 1
         assert out["by_provenance"]["fallback"]["n_wrong_sign"] == 1
         assert out["by_provenance"]["fallback"]["n_score_neutral"] == 1
         assert out["by_provenance"]["unknown"]["n_wrong_sign"] == 1
@@ -540,7 +541,8 @@ class TestWrongSignAudit:
         assert out["by_fanout"]["multi_ticker"]["n_wrong_sign"] == 1
         assert out["by_provenance_and_fanout"]["fallback"]["multi_ticker"] == {
             "n_rows": 2,
-            "n_outcome_missing": 0,
+            "n_score_missing": 0,
+            "n_return_missing": 0,
             "n_score_neutral": 1,
             "n_return_flat": 0,
             "n_directional": 1,
@@ -565,7 +567,8 @@ class TestWrongSignAudit:
         assert overall["n_directional"] == 0
         assert overall["n_score_neutral"] == 1
         assert overall["n_return_flat"] == 1
-        assert overall["n_outcome_missing"] == 2
+        assert overall["n_score_missing"] == 1
+        assert overall["n_return_missing"] == 1
         assert overall["sign_accuracy"] is None
 
 
