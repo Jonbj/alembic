@@ -70,6 +70,7 @@ class S4LifecycleEvent:
     filled_at: datetime | None
     filled_quantity: float
     filled_notional: float
+    fill_price: float | None
     first_executable_price: float
     first_executable_price_source: str
     d0: date | None
@@ -238,6 +239,9 @@ def reconcile_entry(
         "broker_lookup_error": order.lookup_error,
         "submission_reason_code": intent.submission_reason_code,
         "submission_error": intent.submission_error,
+        "fill_id_source": (
+            "derived:alpaca_order_snapshot" if fill_id is not None else None
+        ),
         "requested_quantity": intent.requested_quantity,
         "requested_notional": intent.requested_notional,
         "sleeve_contributions": dict(sorted(intent.sleeve_contributions.items())),
@@ -256,6 +260,7 @@ def reconcile_entry(
         filled_at=_utc(order.filled_at) if order.filled_at else None,
         filled_quantity=order.filled_quantity,
         filled_notional=filled_notional,
+        fill_price=order.filled_avg_price,
         first_executable_price=intent.first_executable_price,
         first_executable_price_source=intent.first_executable_price_source,
         d0=d0,

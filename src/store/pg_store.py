@@ -518,7 +518,7 @@ class PostgreSQLStore:
         INSERT INTO s4_lifecycle_events (
             event_id, intent_id, event_type, observed_at, symbol, order_id,
             status, reason_code, fill_id, filled_at, filled_quantity,
-            filled_notional, first_executable_price,
+            filled_notional, fill_price, first_executable_price,
             first_executable_price_source, d0, due_session, policy_version,
             s1_virtual_quantity, s4_virtual_quantity, broker_quantity,
             unattributed_quantity, virtual_exit_quantity, virtual_exit_price,
@@ -526,7 +526,7 @@ class PostgreSQLStore:
         ) VALUES (
             %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s,
-            %s, %s,
+            %s, %s, %s,
             %s, %s, %s, %s,
             %s, %s, %s,
             %s, %s, %s,
@@ -556,6 +556,7 @@ class PostgreSQLStore:
                 getattr(event, "filled_at", None),
                 getattr(event, "filled_quantity", 0.0),
                 getattr(event, "filled_notional", 0.0),
+                getattr(event, "fill_price", None),
                 getattr(event, "first_executable_price", None),
                 getattr(event, "first_executable_price_source", None),
                 getattr(event, "d0", None),

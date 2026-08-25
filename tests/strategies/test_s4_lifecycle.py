@@ -82,7 +82,9 @@ def test_fill_conserva_identita_d0_due_session_e_sleeve_senza_assorbire_residui(
     assert event.reason_code == "BROKER_SURPLUS_UNATTRIBUTED"
     assert event.fill_id is not None
     assert event.filled_quantity == 6.0
+    assert event.fill_price == 105.25
     assert event.filled_notional == pytest.approx(631.5)
+    assert event.details["fill_id_source"] == "derived:alpaca_order_snapshot"
     assert event.first_executable_price == 105.0
     assert event.d0 == date(2026, 8, 25)
     assert event.due_session == date(2026, 8, 27)

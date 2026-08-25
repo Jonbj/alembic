@@ -73,6 +73,7 @@ def test_migrazione_rende_eventi_append_only_e_offre_viste_di_coverage():
     assert "CREATE VIEW s4_lifecycle_residuals" in migration
     assert "reconstructible" in migration
     assert "unattributed_quantity" in migration
+    assert "fill_price" in migration
 
 
 def test_writer_accetta_entry_ed_exit_virtuale_con_idempotenza():

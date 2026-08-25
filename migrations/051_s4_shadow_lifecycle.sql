@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS s4_lifecycle_events (
     filled_at                      TIMESTAMPTZ,
     filled_quantity                DOUBLE PRECISION NOT NULL DEFAULT 0,
     filled_notional                DOUBLE PRECISION NOT NULL DEFAULT 0,
+    fill_price                     DOUBLE PRECISION,
     first_executable_price         DOUBLE PRECISION,
     first_executable_price_source  TEXT,
     d0                             DATE,
