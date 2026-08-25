@@ -81,6 +81,19 @@ invece che mediate sull'intera finestra:
   dicitura «deploy non ancora avvenuto» con la data reale e l'hash**, qui e nel registro delle
   deroghe.
 
+- **Strumenti di misura del dossier (2026-08-25)** — deploy congiunto di #351, #352, #353, #354 e
+  #350. Nessuna di queste tocca soglie, pesi, flag o parametri di strategia, e nessuna cambia il
+  comportamento degli ordini: sono strumentazione, quindi dentro il perimetro d'esenzione. Ma
+  **cambiano l'oggetto con cui osserviamo**, e questo va tenuto presente alla sintesi del giorno 40:
+  i pannelli longitudinali guadagnano le latenze segnale→fill (#352), gli ingressi guadagnano
+  ritorno di sessione, contesto earnings e guardia ombra (#354), la diagnostica dei segnali separa
+  i `WRONG_SIGN` per provenienza e fan-out (#353), e gli intenti S4 acquistano un lifecycle
+  ricostruito fino al confine broker (#350). **Le serie dei dossier prima e dopo questa data non
+  hanno le stesse colonne**: un campo assente prima del 25/08 significa «non misurato», non «zero».
+  Le migration 050 e 051 sono state applicate al live lo stesso giorno; 050 era su main dal merge di
+  #294 ma non era mai stata applicata, quindi il ledger degli intenti S4 comincia a popolarsi da
+  qui, non dal merge di #294.
+
 - **#293 / trial exit S4 (deroga registrata in anticipo, 2026-08-22)** — **data** = `n=0` del trial
   exit, non ancora fissata: coincide col batch atomico che apre la raccolta (§ Sequenza punto 3 della
   decisione del 2026-08-14 su #242). **Perimetro** = solo il ramo shadow: P0/P1 (e P2, se ammessa)
