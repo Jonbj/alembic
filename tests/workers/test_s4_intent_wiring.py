@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pandas as pd
+import pytest
 
 from src.backtest.engine.types import MarketSnapshot, OrderSide
 from src.models.signals import SentimentResult
@@ -16,6 +17,7 @@ from src.strategies.s4.strategy import NewsDrivenTactical
 from src.workers.portfolio_scheduler import (
     _build_strategy_instance,
     _finalize_s4_intent_ledger,
+    _s4_sleeve_contributions,
     _s4_intent_provenance,
     _submit_portfolio_orders,
     _write_s4_intent_events_fail_open,
@@ -229,3 +231,83 @@ def test_callback_disposition_guasta_non_modifica_gli_ordini():
     )
 
     assert [row["symbol"] for row in submitted] == ["AMD"]
+
+
+def test_submit_conserva_prezzo_quantita_e_contributi_sleeve_nella_disposition():
+    order = _buy("AMD", 2.0)
+    market = MarketSnapshot(
+        timestamp=_TS,
+        prices={"AMD": 105.0},
+        volumes={},
+        adv_20d={},
+    )
+    dispositions = []
+
+    _submit_portfolio_orders(
+        [order],
+        MagicMock(),
+        market,
+        _submit_fn=MagicMock(),
+        sleeve_contributions={"AMD": {"S1": 0.05, "S4": 0.01}},
+        _on_disposition=lambda symbol, reason, details: dispositions.append(
+            (symbol, reason, details)
+        ),
+    )
+
+    assert dispositions == [("AMD", "SUBMITTED", {
+        "order_id": "test-AMD-buy",
+        "notional": 210.0,
+        "requested_quantity": 2.0,
+        "first_executable_price": 105.0,
+        "first_executable_price_source": "portfolio_market_snapshot.latest_price",
+        "sleeve_contributions": {"S1": 0.05, "S4": 0.01},
+    })]
+
+
+def test_contributi_sleeve_derivano_dai_target_point_in_time_e_allocazioni():
+    result = MagicMock()
+    result.target_weights_per_strategy = {
+        "S1": {"AMD": 0.10},
+        "S4": {"AMD": 0.20, "NVDA": 0.30},
+    }
+    registry = MagicMock()
+    registry.get_active_strategies.return_value = [
+        MagicMock(strategy_id="S1", allocation_pct=0.50),
+        MagicMock(strategy_id="S4", allocation_pct=0.10),
+    ]
+
+    contributions = _s4_sleeve_contributions(result, registry)
+
+    assert contributions["AMD"] == pytest.approx({"S1": 0.05, "S4": 0.02})
+    assert contributions["NVDA"] == pytest.approx({"S4": 0.03})
+
+
+def test_reject_al_submit_conserva_i_dati_del_broker_boundary():
+    order = _buy("AMD", 2.0)
+    market = MarketSnapshot(
+        timestamp=_TS,
+        prices={"AMD": 105.0},
+        volumes={},
+        adv_20d={},
+    )
+    dispositions = []
+
+    _submit_portfolio_orders(
+        [order],
+        MagicMock(),
+        market,
+        _submit_fn=MagicMock(side_effect=RuntimeError("broker rejected")),
+        sleeve_contributions={"AMD": {"S4": 0.01}},
+        _on_disposition=lambda symbol, reason, details: dispositions.append(
+            (symbol, reason, details)
+        ),
+    )
+
+    assert dispositions == [("AMD", "BROKER_REJECT", {
+        "error_type": "RuntimeError",
+        "notional": 210.0,
+        "requested_quantity": 2.0,
+        "first_executable_price": 105.0,
+        "first_executable_price_source": "portfolio_market_snapshot.latest_price",
+        "sleeve_contributions": {"S4": 0.01},
+    })]
