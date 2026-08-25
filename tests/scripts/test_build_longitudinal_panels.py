@@ -85,3 +85,182 @@ def test_decision_quality_e_una_serie_giornaliera_con_rollup(report):
         "n_giorni"
     ]:
         assert report["decision_quality_rollup"]["totali_usd"]["passive_pnl_usd"] is None
+
+
+# ---------------------------------------------------------------------------
+# #286 — falsificabilita' e sintesi cablate nell'orchestratore.
+# ---------------------------------------------------------------------------
+
+
+def test_il_report_ha_le_sezioni_di_falsificabilita(report):
+    f = report["falsifiability"]
+    for k in ("views", "contamination_summary", "status_events", "validation",
+              "synthesis", "weekly_rollup", "annotations_used", "provenance"):
+        assert k in f, f"manca falsifiability.{k}"
+
+
+def test_le_viste_di_falsificabilita_arricchiscono_ogni_finding(report):
+    fs = report["falsifiability"]["views"]["findings"]
+    assert fs, "nessun finding nelle viste di falsificabilita'"
+    for f in fs:
+        # campi misurati (carta):
+        assert "giorni_distinti" in f
+        assert "costo_cumulato_in_finestra_usd" in f
+        assert "dimensione" in f
+        assert "oltre_soglia" in f
+        # campi di giudizio (default null / not_exposed):
+        assert f["stato_falsificazione"] == "not_exposed"
+        assert f["prova_decisiva"] is None
+        # esposizione null finche' non c'e' relazione_finding_causa:
+        assert "giorni_esposti" in f
+
+
+def test_il_31_luglio_non_conta_verso_i_giorni_distinti(report):
+    # AC1: il 31/07 e' escluso. F-001 ha un'occorrenza 2026-07-31 nei dati reali:
+    # non deve gonfiare giorni_distinti ne' costo.
+    import json
+    fj = json.load(open(PROJECT_DIR / "docs" / "evidence" / "findings.json"))
+    f001 = next(x for x in fj["findings"] if x["id"] == "F-001")
+    has_31 = any(o.get("data") == "2026-07-31" for o in f001["occorrenze"])
+    assert has_31, "premessa: F-001 ha un'occorrenza 2026-07-31 nei dati reali"
+    view = next(
+        f for f in report["falsifiability"]["views"]["findings"] if f["id"] == "F-001"
+    )
+    # ricalcola i giorni distinti senza il 31/07: la vista non lo conta.
+    giorni_senza_31 = {
+        o["data"] for o in f001["occorrenze"]
+        if o.get("data") != "2026-07-31"
+    }
+    assert view["giorni_distinti"] == len(giorni_senza_31)
+
+
+def test_la_synthesis_ha_le_quattro_sezioni(report):
+    syn = report["falsifiability"]["synthesis"]
+    for k in ("cambi", "soglie", "pnl_economico", "integrita"):
+        assert k in syn, f"manca synthesis.{k}"
+    assert syn["scope"]["tipo"] == "synthesis"
+
+
+def test_il_weekly_rollup_copre_ogni_settimana_con_dossier(report):
+    weekly = report["falsifiability"]["weekly_rollup"]
+    assert weekly, "nessun weekly rollup prodotto"
+    for label, roll in weekly.items():
+        assert roll["scope"]["tipo"] == "weekly"
+        assert roll["scope"]["settimana"] == label
+        for k in ("cambi", "soglie", "pnl_economico", "integrita"):
+            assert k in roll
+
+
+def test_la_validazione_di_falsificabilita_passa_sui_dati_reali(report):
+    vf = report["falsifiability"]["validation"]
+    assert vf["ok"], vf["errors"]
+
+
+def test_la_provenanza_dichiara_findings_json_non_modificato(report):
+    note = report["falsifiability"]["provenance"]["note"]
+    assert "findings.json" in note and "non" in note.lower() or "read-only" in note
+
+
+def test_la_synthesis_diffa_contro_la_run_precedente(report):
+    # #286: il synthesis calcola i cambi contro la run precedente iniettata.
+    # Due run sugli stessi dati non producono cambi (nulla e' mutato); la prima
+    # run senza precedente li produce tutti come nuovi. Questo fissa che il
+    # previous e' letto dalla posizione giusta (views.findings, non il blocco
+    # falsifiability intero).
+    import importlib
+    mod = importlib.import_module("build_longitudinal_panels")
+    # seconda run con la prima come precedente: nessun cambiamento atteso.
+    r2 = mod.costruisci(previous_report=report)
+    cambi = r2["falsifiability"]["synthesis"]["cambi"]
+    assert cambi == [], (
+        "la seconda run sugli stessi dati non deve produrre cambi; trovati: "
+        f"{cambi[:3]}"
+    )
+
+
+def test_main_non_sovrascrive_la_baseline_se_la_prova_decisiva_e_mutata(
+    monkeypatch, tmp_path
+):
+    # Regressione review #286: il validatore di falsificabilita' rilevava la
+    # mutazione, ma main() guardava solo la validazione primaria, restituiva 0
+    # e promuoveva il report invalido a nuova baseline.
+    mod = importlib.import_module("build_longitudinal_panels")
+    out = tmp_path / "longitudinal_panels.json"
+    baseline = '{"baseline": true}\n'
+    out.write_text(baseline, encoding="utf-8")
+    invalid_report = {
+        "validation": {"ok": True, "errors": [], "warnings": []},
+        "falsifiability": {
+            "validation": {
+                "ok": False,
+                "errors": ["prova_decisiva mutata per F-001"],
+                "warnings": [],
+            }
+        },
+        "n_giorni": 0,
+        "ticker_day": [],
+        "signals": [],
+        "decisions_trades": [],
+        "occurrences": [],
+        "definitions": [],
+        "derived_views": {"per_causa": {}},
+    }
+    monkeypatch.setattr(mod, "costruisci", lambda **_: invalid_report)
+    monkeypatch.setattr(sys, "argv", [mod.__file__, "--out", str(out)])
+
+    assert mod.main() == 1
+    assert out.read_text(encoding="utf-8") == baseline
+
+
+def test_main_blocca_la_baseline_end2end_sulla_catena_reale(monkeypatch):
+    # Review #286: la contestazione era "end-to-end". Il test qui' sopra mocka
+    # costruisci per iniettare una validazione falsifiability fallita; questo
+    # esercita la CATENA REALE: validate_falsifiability rileva la prova_decisiva
+    # mutata -> main() restituisce 1 e non sostituisce la baseline. Usa i dossier
+    # reali (findings.json read-only) e un file di annotazioni temporaneo: prima
+    # registra una prova_decisiva legittima (baseline scritta), poi la muta
+    # (read-only violato). Senza il gate, la mutazione diventerebbe la nuova
+    # baseline e l'errore sparirebbe alla run successiva.
+    import json
+    import shutil
+
+    mod = importlib.import_module("build_longitudinal_panels")
+    # le annotazioni devono stare sotto PROJECT_DIR per la provenance
+    # (ANNOTATIONS.relative_to(PROJECT_DIR)); si crea una dir temporanea nel
+    # worktree e si pulisce in finally.
+    work_tmp = PROJECT_DIR / ".e2e_286_tmp"
+    work_tmp.mkdir(exist_ok=True)
+    ann = work_tmp / "finding_annotations.json"
+    out = work_tmp / "longitudinal_panels.json"
+    monkeypatch.setattr(mod, "ANNOTATIONS", ann)
+    try:
+        def scrivi_annot(prova):
+            ann.write_text(
+                json.dumps({
+                    "F-001": {
+                        "stato_falsificazione": "supported",
+                        "prova_decisiva": prova,
+                        "meccanismo": "NO_NEWS",
+                        "strategia": "S4",
+                        "relazione_finding_causa": "NO_NEWS",
+                        "contamination": "attribution",
+                    }
+                }),
+                encoding="utf-8",
+            )
+
+        # run 1: prova_decisiva registrata legittimamente -> exit 0, baseline
+        # scritta (previous_report assente => nessun vincolo read-only).
+        scrivi_annot("test X conferma (v1)")
+        monkeypatch.setattr(sys, "argv", [mod.__file__, "--out", str(out)])
+        assert mod.main() == 0
+        assert out.exists()
+        baseline = out.read_text(encoding="utf-8")
+
+        # run 2: prova_decisiva mutata (read-only violato). Il validatore reale
+        # la rileva e main() restituisce 1 SENZA sovrascrivere la baseline.
+        scrivi_annot("test Y diverso (v2 MUTATA)")
+        assert mod.main() == 1
+        assert out.read_text(encoding="utf-8") == baseline
+    finally:
+        shutil.rmtree(work_tmp, ignore_errors=True)
