@@ -36,7 +36,9 @@ from zoneinfo import ZoneInfo
 import yaml
 
 from src.analysis.dossier.book import (
+    SOGLIA_GUARDIA_CONTRADDIZIONE,
     aggregate_by_entry_hour,
+    aggregate_contradiction_guard,
     compute_entries,
     compute_exits,
 )
@@ -1224,10 +1226,12 @@ def costruisci_dossier(
     # --- book: ingressi e chiusure ----------------------------------------
     ingressi_grezzi = [
         {"symbol": r[0], "strategia": r[1], "ora_utc": r[2],
-         "entry_price": float(r[3]), "qty": float(r[4])}
+         "entry_price": float(r[3]), "qty": float(r[4]),
+         "signal_score": float(r[5]) if r[5] not in (None, "") else None}
         for r in _psql(
             f"SELECT symbol, COALESCE(stop_strategy, CASE WHEN signal_id IS NOT NULL "
-            f"THEN 'S4' ELSE 'S1' END), to_char(entry_time,'HH24:MI'), entry_price, qty "
+            f"THEN 'S4' ELSE 'S1' END), to_char(entry_time,'HH24:MI'), entry_price, qty, "
+            f"signal_score "
             f"FROM trades WHERE entry_time >= '{g}' AND entry_time < '{g}'::date + 1 "
             f"AND entry_price IS NOT NULL AND qty IS NOT NULL ORDER BY entry_time;")]
 
@@ -1250,8 +1254,28 @@ def costruisci_dossier(
     }
     chiusure_close = {s: b["close"] for s, b in barre.items()}
 
-    ingressi = compute_entries(ingressi_grezzi, barre_ohlc)
+    # #335 step 1: simboli con un rilascio earnings datato la seduta, derivati
+    # dal calendario corporate gia' caricato per l'event_market_context. None
+    # quando il calendario non era disponibile (fetch remote off / fonte
+    # earnings down): `giorno_di_earnings` resta UNKNOWN, non False per difetto.
+    earnings_symbols = _earnings_symbols_from_calendar(corporate_calendar)
+
+    # `signal_score` e' arrivato da trades (migration 023): lo score LLM reale
+    # che ha motivato l'ingresso, distinto dal peso di allocazione. Serve alla
+    # guardia ombra contraddizione (#335 step 2).
+    ingressi = compute_entries(
+        ingressi_grezzi,
+        barre_ohlc,
+        earnings_symbols=earnings_symbols,
+        soglia_guardia=_soglia_guardia_contraddizione(),
+    )
     chiusure = compute_exits(chiusure_grezze, chiusure_close)
+
+    # #335 step 2: aggregato ombra giornaliero + sweep sulla finestra di
+    # osservazione. Misura read-only: nessun ordine cambiato.
+    guardia_giorno = aggregate_contradiction_guard(ingressi, chiusure)
+    guardia_giorno["soglia"] = _soglia_guardia_contraddizione()
+    guardia_finestra = _guardia_contraddizione_finestra(guardia_giorno, giorno)
 
     # --- qualita' decisionale read-only (#284) ----------------------------
     # Lo snapshot e' prospettico/parallelo: i dossier storici restano intatti.
@@ -1352,6 +1376,23 @@ def costruisci_dossier(
                     "articolo canonicale ISSUER_SPECIFIC pubblicato entro il close RTH; "
                     "UNKNOWN non entra nel numeratore"
                 ),
+                "ritorno_sessione_al_segnale": (
+                    "(entry_price - close_prec) / close_prec da barra daily "
+                    "Alpaca SIP; delta sulla chiusura precedente al momento "
+                    "dell'ingresso, GAP-INCLUSO. Una misura vs-open vedrebbe "
+                    "solo la gamba RTH e perderebbe il gap di apertura (WMT "
+                    "2026-08-20: -2% intraday contro -9% reale) (#335)"
+                ),
+                "giorno_di_earnings": (
+                    "simbolo con evento event_type=earnings nel calendario "
+                    "FMP/Alpaca della sedata; None se il calendario non era "
+                    "disponibile (UNKNOWN, non False per difetto) (#335)"
+                ),
+                "guardia_contraddizione_ombra": (
+                    "ombra read-only: True se signal_score (trades.signal_score, "
+                    "migration 023) > 0 e ritorno_sessione_al_segnale <= -soglia; "
+                    "None se score o close_prec mancanti. Non blocca nessun ordine (#335)"
+                ),
             },
             "decision_quality": {
                 "snapshot_apertura": "trades vivi all'open RTH + barre Alpaca SIP",
@@ -1396,7 +1437,105 @@ def costruisci_dossier(
             "miss_cumulati": _miss_cumulati(),
             "mediane_mobili_20g": _mediane_mobili(ingressi, chiusure),
             "cause_del_giorno": cause_del_giorno(candidati_classificati),
+            "guardia_contraddizione": {
+                "giorno": guardia_giorno,
+                "finestra_osservazione": guardia_finestra,
+            },
         },
+    }
+
+
+def _earnings_symbols_from_calendar(corporate_calendar: dict | list | None) -> set[str] | None:
+    """Simboli con evento earnings nella seduta, dal calendario corporate.
+
+    Tollerante sulla forma come `build_event_market_context`: il calendario reale
+    e' un dict `{"events": [...], "missingness": [...], ...}`, ma i test possono
+    passare una lista nuda di eventi. Restituisce None (UNKNOWN) quando la fonte
+    earnings specifica e' assente o fallita, cosi' `giorno_di_earnings` non viene
+    forzato a False per difetto di fonte.
+    """
+    if corporate_calendar is None:
+        return None
+    if isinstance(corporate_calendar, dict):
+        eventi = corporate_calendar.get("events") or []
+        missingness = corporate_calendar.get("missingness") or []
+        if any("earnings_calendar" in str(m) for m in missingness):
+            return None
+    else:
+        eventi = corporate_calendar
+    return {
+        str(ev.get("symbol") or "").upper()
+        for ev in eventi
+        if str(ev.get("event_type") or "").casefold() == "earnings"
+    }
+
+
+def _soglia_guardia_contraddizione() -> float:
+    """Soglia della guardia ombra (#335): strumento di MISURA, non taratura di
+    strategia. Default `SOGLIA_GUARDIA_CONTRADDIZIONE` (-4%); overridable via
+    env `SOGLIA_GUARDIA_CONTRADDIZIONE` per analisi di sensibilita' senza
+    toccare il codice. Non entra in nessuna decisione di trading."""
+    raw = os.environ.get("SOGLIA_GUARDIA_CONTRADDIZIONE", "")
+    if not raw:
+        return SOGLIA_GUARDIA_CONTRADDIZIONE
+    try:
+        valore = float(raw)
+        return abs(valore) if valore < 0 else valore
+    except ValueError:
+        log.warning("SOGLIA_GUARDIA_CONTRADDIZIONE=%r non valido, uso il default", raw)
+        return SOGLIA_GUARDIA_CONTRADDIZIONE
+
+
+def _guardia_contraddizione_finestra(guardia_giorno: dict, giorno: date) -> dict:
+    """Somma della guardia ombra su questo giorno piu' i dossier gia' scritti
+    nella finestra di osservazione (#335 step 2).
+
+    Copertura onesta: i dossier scritti prima del deploy di questa misura
+    (schema < 2.4) non portano il blocco `aggregati.guardia_contraddizione`, e
+    restano fuori dalla somma. La finestra cresce da oggi in avanti: e' una
+    misura che parte col deploy, non una ricostruzione retrospettiva.
+
+    A differenza di `_mediane_mobili` (finestra mobile a 20 giorni), qui si
+    somma sull'intera finestra di osservazione: e' un totale cumulato, non una
+    mediana recente. Il dossier del giorno corrente e' saltato dallo sweep
+    (usa il `guardia_giorno` in memoria, fresco): evita il doppio-conteggio su
+    backfill quando il file esiste gia'.
+    """
+    somma = defaultdict(float)
+
+    def _accumula(blocco: dict | None) -> None:
+        if not blocco:
+            return
+        for chiave in ("n_valutabili", "n_soppressi",
+                       "n_soppressi_con_uscita", "n_soppressi_aperti"):
+            somma[chiave] += int(blocco.get(chiave) or 0)
+        somma["somma_pnl_realizzato_soppressi"] += float(
+            blocco.get("somma_pnl_realizzato_soppressi") or 0.0
+        )
+
+    _accumula(guardia_giorno)
+    n_giorni = 1  # il giorno corrente e' coperto: sta producendo il suo blocco
+    oggi_iso = giorno.isoformat()
+    for f in sorted(OUT_DIR.glob("*.json")):
+        if f.stem == oggi_iso:
+            continue
+        try:
+            d = json.loads(f.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        blocco = ((d.get("aggregati") or {}).get("guardia_contraddizione") or {}).get("giorno")
+        if blocco:
+            _accumula(blocco)
+            n_giorni += 1
+
+    return {
+        "n_giorni_coperti": n_giorni,
+        "n_valutabili": int(somma["n_valutabili"]),
+        "n_soppressi": int(somma["n_soppressi"]),
+        "n_soppressi_con_uscita": int(somma["n_soppressi_con_uscita"]),
+        "n_soppressi_aperti": int(somma["n_soppressi_aperti"]),
+        "somma_pnl_realizzato_soppressi": round(somma["somma_pnl_realizzato_soppressi"], 6),
+        "copertura": "da schema 2.4 in avanti; dossier pre-deploy esclusi",
     }
 
 
