@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 43,
+  "prossimo_id": 44,
   "findings": [
     {
       "id": "F-001",
@@ -98,12 +98,18 @@
           "costo_usd": 141.68,
           "nota": "43/96 simboli (45%) zero righe in news_log il 08-21, dentro la banda 38-57% osservata dal 07-31. Due dei cinque miss del giorno sono NO_NEWS puri: PLTR (+3.44%) e F (+3.00%), entrambi mover al rialzo su libro long-only, zero righe in news_log e zero in sentiment_signals. Costo congetturale con size S4 tipica 2200$ sul return pieno (dal dossier opportunity_v2.gross_opportunity_usd): PLTR 75.63 + F 66.05 = 141.68.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-21.md §3, §7"
+        },
+        {
+          "data": "2026-08-24",
+          "costo_usd": null,
+          "nota": "51 dei 96 simboli watchlist senza una sola riga in news_log: minimo della serie recente, che peggiora in modo monotono (40 il 08-19, 41 il 08-20, 43 il 08-21, 51 oggi). Copertura effective-timely 21/96 = 21.9%; 124 righe scorate da 57 articoli unici, 28 effective-timely. Copertura nulla su energy (0/6), industrials (0/4) e materials (0/2) — e proprio da materials arriva VALE +3.08%, secondo rialzo della giornata, colto solo perche' gia' a libro da S1 dal 14/07. Costo non stimabile: VALE era detenuto, quindi nessun alpha perso in dollari oggi.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-24.md §7"
         }
       ],
       "costo_cumulato_usd": 2036.73,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 1
+      "occorrenze_non_stimate": 2
     },
     {
       "id": "F-002",
@@ -195,12 +201,18 @@
           "costo_usd": null,
           "nota": "Stesso insieme di 11 posizioni legacy senza stop_strategy (BAC, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE, tutte entrate il 2026-07-10). Rilevanza specifica del giorno: GS (+3.73%), MS (+3.25%) e RIO (+3.06%), tre di questi 11, sono mover del giorno e verrebbero esclusi dai candidati miss ('gia' in portafoglio') senza che nessuna riga tracci quale strategia li possieda davvero. Contributo stimato del set di 11 al nav_change_today (qty x delta-close su barre Alpaca 08-20->08-21): BAC -1.95, GOOGL +7.98, GS +24.08, MS +20.61, PBR +5.54, RIO +23.45, ROKU +1.76, SPY +2.82, UBS +1.18, UNH +8.38, XLE -1.36, totale +92.49$ su una variazione NAV di +288.06$ (32%). Costo null: non e' una perdita, e' P&L non attribuibile a nessuna strategia per costruzione.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-21.md §4, §6"
+        },
+        {
+          "data": "2026-08-24",
+          "costo_usd": null,
+          "nota": "Delle 46 posizioni aperte a fine 2026-08-24, 11 sono legacy senza stop_strategy (BAC, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE), tutte entrate il 2026-07-10. Il realizzato del giorno e' attribuibile (-53,91, tutto S4), ma l'MTM del book aperto (-282,77, cinque volte il realizzato) non lo e': quattro di quelle posizioni legacy (RIO, PBR, UBS, XLE) sono energia/materiali e nessuna sleeve ne assume il risultato.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-24.md §7"
         }
       ],
       "costo_cumulato_usd": 0.0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 14
+      "occorrenze_non_stimate": 15
     },
     {
       "id": "F-003",
@@ -286,12 +298,18 @@
           "costo_usd": null,
           "nota": "Ricorrenza esatta. risk_reports 22:30:00: combined_drawdown=0.012429 (1.24%, invariato dal 07-31) contro per_strategy_metrics.portfolio.drawdown=0.1775 (17.75%) che genera l'ALERT 'portfolio drawdown 17.8% exceeds 10%'; current_drawdown reale da portfolio_monitor_snapshots delle 20:00 = 0.007159 (0.72%). Scarto NAV fra risk_reports (109.825,70) e ultimo snapshot (109.853,92) = -28,22 $, contenuto rispetto alla serie recente. Costo null: nessun ordine dipende da questo record.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-20.md §10 [DAY-606]"
+        },
+        {
+          "data": "2026-08-21",
+          "costo_usd": null,
+          "nota": "Ricorrenza esatta. risk_reports id=70, timestamp 22:30:01 UTC (unica riga del giorno): combined_drawdown=0.012429 (1.24%) contro per_strategy_metrics.portfolio.drawdown=0.1775475695171766 (17.75%), che genera l'ALERT 'Strategy portfolio drawdown 17.8% exceeds 10%'. Il drawdown realmente osservato nel monitor e' molto piu' vicino al primo numero: portfolio_monitor_snapshots delle 20:00:00 riporta current_drawdown=0.004648 (0.46%). NAV del risk_report=110.140,41 contro NAV dell'ultimo snapshot 20:00=110.131,84, scarto $8,57 (contenuto, in linea con la serie recente). Costo null: nessun ordine dipende da questo record.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-21.md §Anomalie [DAY-822]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
-      "issue": null,
-      "occorrenze_non_stimate": 13
+      "issue": "#349",
+      "occorrenze_non_stimate": 14
     },
     {
       "id": "F-004",
@@ -506,12 +524,18 @@
           "costo_usd": null,
           "nota": "Ricorrenza. ingestion_stats_daily 2026-08-20: alpaca_benzinga fetched=628, duplicates=2848 (4.5x fetched). 148 righe reali in news_log (90+58), dedup per content_hash funziona (21 hash duplicati = fan-out multi-ticker legittimo su 68/148 righe, non contatore rotto). Costo null: il contatore non e' utilizzabile come metrica di copertura ma nessun ordine ne dipende.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-20.md §4, §10 [DAY-609]"
+        },
+        {
+          "data": "2026-08-21",
+          "costo_usd": null,
+          "nota": "Ricorrenza. ingestion_stats_daily 2026-08-21, alpaca_benzinga: fetched=673, queued=375, duplicates=3356, cioe' 4.99x i fetched. gdelt_gkg nello stesso giorno resta coerente (fetched=1977, queued=127, duplicates=10, discarded_no_ticker=1852). Verifica indipendente che la deduplicazione funziona: 184 righe reali in news_log (94 gdelt+90 benzinga), i content_hash ripetuti (fino a 9 ticker sullo stesso hash, es. articolo macro SPY/TSLA/QQQ/AAPL/GOOGL/META/NVDA/MSFT/AMZN) sono fan-out multi-ticker legittimo (F-012), non contatore rotto. Costo null: telemetria.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-21.md §4"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 10
+      "occorrenze_non_stimate": 11
     },
     {
       "id": "F-008",
@@ -622,9 +646,15 @@
           "costo_usd": 0.0,
           "nota": "BABA (-8.57%, mover piu' forte al ribasso della giornata): articolo dedicato alle 17:15 ('Alibaba Stock Falls 7% on Profit Miss...', ISSUER_SPECIFIC, non-fallback) segna -0.315, segno corretto rispetto al calo. Il combiner applica pero' un decay/velocity fra la generazione e il ciclo successivo: al primo controllo del gate (17:22) il signal_score e' gia' sceso a -0.252 in valore assoluto, sotto la soglia di design 0.30 (execution_decisions: 3 righe SKIP_THRESHOLD, 17:22-17:52). Costo 0.00 verificato: mover al ribasso, libro long-only, BABA non detenuto - il gate qui e' comunque irrilevante perche' il vincolo binding sarebbe stato long-only anche a segnale sopra soglia (vedi F-040).",
           "fonte": "ALPHA_MISS_REPORT_2026-08-21.md §3, §7"
+        },
+        {
+          "data": "2026-08-24",
+          "costo_usd": 140.28,
+          "nota": "MA +3.31% e V +3.06%, gli unici due mover azionabili (rialzo, non detenuti): segnale del segno corretto ma a +0.054 e +0.025 contro gate 0.30, SKIP_THRESHOLD con causale esplicita 'score 0.054 < feedback threshold 0.300'. Costo lordo close-to-close x size S4 2% NAV ($2.200): MA $72.86 + V $67.42. Sull'orizzonte realmente accessibile (ingresso al primo ciclo eleggibile 17:22 -> close) resta $29.97, cioe' il 21% del lordo: il gate e' solo meta' del problema, l'altra meta' e' la latenza (F-030).",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-24.md §7"
         }
       ],
-      "costo_cumulato_usd": 788.12,
+      "costo_cumulato_usd": 928.4,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -683,10 +713,16 @@
           "costo_usd": 38.38,
           "nota": "[forense][DAY-002] Ricorrenza con costo ATTRIBUITO e con un caso che mostra la seconda meta' del difetto: non solo eligible mislabella, ma lo scarto e' INVISIBILE. sentiment_signals id 7393, 2026-08-12 16:01:51, SPCX, score +0.385, confidence 0.550, model_id single:gpt-oss:20b-cloud, fallback_used=true, dall'articolo 'Elon Musk Says AI Will Be SpaceX's Biggest Business by September' (published 14:37). Sopra il gate 0.300, scartato dal filtro #108, e in execution_decisions NON esiste alcuna riga SPCX fra le 15:07 e il BUY delle 18:52 - perche' _record_fallback_drops (portfolio_scheduler.py:3433-3437) logga SKIP_FALLBACK solo per i simboli il cui UNICO segnale del lotto e' fallback, e SPCX aveva anche il segnale 7354 (14:30, ensemble, score 0.000). Il segnale e' single-model perche' glm-5.2 e' rimasto sotto min_confidence 0.40: il retry a floor 0 di #90, che sana esattamente questo caso nel ramo ensemble (73 dei 104 ensemble di oggi nascono da li'), NON e' propagato al ramo single-model. CONTROFATTUALE CORTO, stessa giornata, stesso strumento, con il nozionale S4 REALMENTE usato oggi (1230.59 $, non i 2200 generici): 1230.59/141.73 = 8.6828 azioni al ciclo delle 16:07 contro le 8.294554 comprate alle 18:52 a 148.36, cioe' il 4.7% piu' in alto; a chiusura 146.15 l'ingresso anticipato valeva +38.38 invece dei -18.33 di MTM registrati. COSTO 38.38 = solo l'alpha mancato; i -18.33 sono gia' su F-030 e non sono contati due volte. Gli altri tre scarti #108 del giorno NON costano: NVDA 14:15 (+0.385) avrebbe reso -0.17% da li' a fine giornata, TSM (+0.450) e MS (+0.420) delle 19:15 erano entrambi gia' a libro e P0-05 li avrebbe fermati comunque. Contesto sui contatori: eligible=31 su 157 righe per ciascun modello, cioe' solo il 19.7% dei segnali ha due letture sopra il floor. Ticket TK-R3.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-12.md §10"
+        },
+        {
+          "data": "2026-08-21",
+          "costo_usd": null,
+          "nota": "Ricorrenza con rapporto quasi identico all'origine del difetto (08-03: 16.8%). llm_responses del 2026-08-21: eligible=true su 31/184 (16.85%) sia per glm-5.2:cloud sia per gpt-oss:20b-cloud (153 false ciascuno); 184 segnali totali, di cui 131 ensemble a due modelli, 53 single-model (50 gpt-oss + 3 glm). ensemble:weights:current in Redis resta {glm-5.2:cloud: 0.70, gpt-oss:20b-cloud: 0.30, source: auto_apply}: il ribilanciamento LOO-ICIR continua a girare sul sottocampione non casuale ad alta confidenza che il floor asimmetrico produce. Costo null: difetto di misura che altera i pesi live, non un P&L attribuibile a un trade specifico di oggi.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-21.md §4"
         }
       ],
       "costo_cumulato_usd": 74.31,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -877,10 +913,16 @@
           "costo_usd": 0.0,
           "nota": "Quota righe fanout del giorno 55.6% (dossier aggregati.cause_del_giorno), in linea con la banda storica. COSTO 0.00 VERIFICATO SUL MONEY PATH: l'unico nuovo ordine della giornata (HOOD, BUY 17:07) nasce dal segnale delle 17:00:25 (+0.372), collegato all'articolo dedicato 'Why Is Robinhood Stock Surging Friday?' (content_hash esclusivo HOOD, non condiviso) - non da uno dei due articoli fanout su HOOD della stessa giornata (9 ticker condivisi con ARM/INTC/MRVL/QQQ/WMT/XLE/XLK/IWM). Il caso ORCL (+3.10%, miss OFF_TOPIC) illustra il lato costo del fenomeno: l'unico articolo del mattino e' un pezzo generico a 5 ticker sui bond yield che non cita ORCL nel testo, segnale risultante -0.028, ben sotto soglia.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-21.md §3, §7"
+        },
+        {
+          "data": "2026-08-24",
+          "costo_usd": null,
+          "nota": "quota_righe_fanout di giornata 0.7647 (67 mapping fan-out extra su 124 righe). Il segnale di F e' fanout al 100% (max_score_own null) e nasce interamente dai pezzi sul dazio Canada 50%; TSLA e' fanout su 3 righe su 4 e il suo unico articolo issuer-specific e' un filler retrospettivo da +0.008. Un singolo pezzo a 13 ticker ('Memory Stocks Slide as Trump Threatens 50% Tariffs...') produce righe su AMD, INTC, MU, WDC e F. Costo non stimato: oggi nessun ordine e' nato da un fanout improprio (i due articoli che hanno generato ordini, NVDA e SPCX, hanno entrambi due soggetti legittimi), quindi l'occorrenza e' strutturale.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-24.md §7"
         }
       ],
       "costo_cumulato_usd": 925.31,
-      "occorrenze_non_stimate": 8,
+      "occorrenze_non_stimate": 9,
       "stato": "aperto",
       "issue": null
     },
@@ -950,6 +992,12 @@
           "costo_usd": null,
           "nota": "Decima giornata del pattern, due roundtrip via meccanismi diversi. NVDA: BUY 15:22 a 217.238836 (score +0.321), SELL 17:07 below_entry_gate (score fresco +0.035, age 1.1h), roundtrip 1h45, net -1.03. NOW: BUY 16:52 a 130.80 (score +0.464), SELL 18:37 exit_mechanism='whipsaw' ('rank cutoff, min_score or a portfolio constraint'), roundtrip 1h45, net -19.60. NOVITA': il reason di NOW porta un flag esplicito anti_whipsaw_shadow: would_suppress=True, streak=1/2 — un meccanismo di soppressione anti-whipsaw esiste gia' in codice ma opera solo in modalita' shadow, quindi non ha impedito l'uscita reale. Costo null per convenzione della serie (net negativo non separabile in modo pulito dal rischio di mercato normale della posizione), ma -20.63 $ netti sommati sui due roundtrip sono osservabili direttamente da trades.net_pnl.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-20.md §3, §10 [DAY-604]"
+        },
+        {
+          "data": "2026-08-24",
+          "costo_usd": 0.0,
+          "nota": "Churn intraday su NVDA: BUY 14:37 (score +0.380) -> SELL 16:22 below_entry_gate -> BUY 17:07 (score +0.378) -> SELL 18:52 below_entry_gate; due round-trip completi sullo stesso simbolo in quattro ore. Piu' SPCX comprata 17:07 e venduta 19:37 con la stessa causale dopo 2,5 ore. Costi espliciti dei tre round-trip $0,38+$0,38+$1,99 = $2,75 (trades 782, 784, 783). COSTO ZERO, NON NON-STIMATO: i drift_post_uscita delle tre uscite sono -22,42, -9,24 e +1,60, cioe' uscire ha evitato in netto ~$30 di ribasso — oggi il churn ha guadagnato. Occorrenza registrata perche' il meccanismo (nessuna banda fra gate 0.30 e condizione d'uscita) e' indipendente dal segno del giorno.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-24.md §7"
         }
       ],
       "costo_cumulato_usd": 53.91,
@@ -1029,10 +1077,16 @@
           "costo_usd": null,
           "nota": "Ricorrenza. portfolio_cycles 2026-08-20: 24 cicli, sum(orders_count)=119, 12 ordini regolari realmente inviati al broker (rapporto ~9.9:1, +1 ordine anomalo KO fuori conteggio normale, vedi F-042).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-20.md §7, §10 [DAY-611]"
+        },
+        {
+          "data": "2026-08-21",
+          "costo_usd": null,
+          "nota": "Ricorrenza. 24 righe portfolio_cycles per il 2026-08-21 (14:07-19:52 UTC, cadenza 15 min), orders_count=5 e constraints_fired=[] identici su TUTTE le 24 righe, indipendentemente dall'attivita' reale: execution_decisions mostra solo 2 decisioni non-skip nell'intera giornata (1 BUY HOOD ore 17:07, 1 SELL INTC ore 16:37). orders_count resta una costante di telemetria (candidati del target portfolio, non ordini inviati) e non varia mai col traffico reale del giorno.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-21.md §Timeline/§7"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 11,
+      "occorrenze_non_stimate": 12,
       "stato": "aperto",
       "issue": null
     },
@@ -1108,10 +1162,16 @@
           "costo_usd": null,
           "nota": "Ricorrenza esatta su tutte e 4 le chiusure di oggi: trades id 749 (HOOD), 752 (NVDA), 753 (WMT), 754 (NOW) hanno slippage_est identico bit-per-bit a cost_usd.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-20.md §8, §10 [DAY-610]"
+        },
+        {
+          "data": "2026-08-21",
+          "costo_usd": null,
+          "nota": "Ricorrenza esatta. trades.id=702 (INTC, chiusa oggi 16:37): cost_usd=0.6461655744586391 = slippage_est=0.6461655744586391, identici bit per bit. trades.id=756 (HOOD, aperta oggi 17:07): slippage_est ancora NULL (calcolato solo alla chiusura). Nessuna misura indipendente della qualita' di esecuzione anche oggi.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-21.md §6"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 11,
+      "occorrenze_non_stimate": 12,
       "stato": "aperto",
       "issue": null
     },
@@ -1329,10 +1389,16 @@
           "costo_usd": null,
           "nota": "Ricorrenza esatta: MS 19/19 righe in news_log il 2026-08-20 tutte con extraction_method='org_lookup', nessuna riguarda davvero Morgan Stanley (campione: Honeywell Aerospace, Aegon, Cencora, RTX Corporation, Birkenstock - tutte societa' terze coperte dalla banca come casa di analisi nel boilerplate). MS e' un mover del giorno (-3.16%, posizione S1 legacy dal 07-10) e il suo sentiment resta quasi tutto a zero (un solo segnale debole +0.143 alle 17:30): la copertura apparente (19 righe) e' interamente fan-out, non informazione reale sul titolo. Costo null: nessuna riga ha superato il gate 0.30, nessun ordine ne e' nato (la posizione era comunque gia' detenuta).",
           "fonte": "ALPHA_MISS_REPORT_2026-08-20.md §4, §6"
+        },
+        {
+          "data": "2026-08-21",
+          "costo_usd": null,
+          "nota": "Ricorrenza in peggioramento. news_log del 2026-08-21: MS 34 righe, GS 17, DB 10 - 61/184 (33%) su tre ticker bancari via extraction_method='org_lookup' (gdelt_gkg), stesso meccanismo (la banca compare come casa di analisi nel boilerplate, non come soggetto dell'articolo). Verifica indipendente dal dossier: copertura_articoli.mapping_rilevanza mostra FALSE_ENTITY_MATCH=79/184 (43%), il valore piu' alto osservato finora nella serie. Nota supplementare (non abbastanza materiale per un ID proprio, gia' segnalata cosi' in ALPHA_MISS_REPORT_2026-08-21.md §3): un articolo ORCL delle 16:30 che CITA esplicitamente il titolo ('Oracle Shares Rise as Dip Buyers Return...') viene comunque marcato FALSE_ENTITY_MATCH dal resolver - il testo troncato di source_metadata non basta per isolare la causa. Costo null: nessun ordine di oggi nasce da uno di questi 61 record.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-21.md §4/§10"
         }
       ],
       "costo_cumulato_usd": 60.5,
-      "occorrenze_non_stimate": 8,
+      "occorrenze_non_stimate": 9,
       "stato": "aperto",
       "issue": null
     },
@@ -1396,10 +1462,16 @@
           "costo_usd": null,
           "nota": "Ricorrenza esatta. Primo ciclo portfolio_cycles/execution_decisions alle 14:07:00 UTC, 37 minuti dopo l'apertura NYSE (13:30 UTC in EDT). Falso allarme quotidiano in mobile_events (13:30:00-13:30:01) auto-risolto al primo ciclo.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-20.md §3, §10 [DAY-613]"
+        },
+        {
+          "data": "2026-08-24",
+          "costo_usd": null,
+          "nota": "Primo ciclo portfolio alle 14:07 UTC (10:07 ET) contro apertura 13:30 UTC (09:30 ET): 37 minuti. Anche lo scoring parte tardi, primo dei 124 segnali della giornata alle 14:00:37 UTC, con soli 5 segnali nella finestra 13:30-14:07. 24 cicli totali, ultimo 19:52 UTC, nessun gap oltre i 16 minuti. Costo non stimabile: la finestra persa non conteneva segnali sopra gate, i piu' forti (MU +0.430/+0.539, SOXX +0.360) arrivano alle 14:30-14:31.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-24.md §7"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 9,
+      "occorrenze_non_stimate": 10,
       "stato": "aperto",
       "issue": null
     },
@@ -1759,10 +1831,16 @@
           "costo_usd": 52.22,
           "nota": "Lato ingresso, stesso schema del 08-12: dei tre ingressi S4 del giorno, i due con percentile d ingresso nel range di giornata sopra la mediana mobile 20gg (0.538) sono entrambi in perdita o piatti a fine giornata - HOOD (percentile 0.866, entry 16:07 a 98.46, MTM eod -50.16 nonostante il titolo chiuda +4.63%) e NFLX (percentile 0.722, entry 17:07 a 80.31, MTM eod -2.06, titolo +3.15%). L unico ingresso sotto mediana, HD (percentile 0.229, entry 16:37 a 343.48), e l unico chiuso in utile lo stesso giorno (+3.91 $, uscita 18:22 a 344.40). Costo misurato sul MTM aperto dei due ingressi tardivi: 50.16+2.06 = 52.22.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-19.md §3, §4, §7"
+        },
+        {
+          "data": "2026-08-24",
+          "costo_usd": null,
+          "nota": "Sui due ingressi NVDA il dossier misura quota_movimento_precedente_al_segnale 0.750 (14:37) e 0.786 (17:07): tre quarti del movimento gia' avvenuti quando il segnale diventa azionabile. Stesso quadro sui miss: i segnali issuer-specific di MA e V sono entrambi delle 19:15 e il primo ciclo eleggibile e' alle 17:22 — da li' alla chiusura resta il 21.6% (MA) e il 21.1% (V) del movimento, cioe' $15.75 e $14.21 di opportunita' accessibile su $72.86 e $67.42 lordi. L'ingresso SPCX ha denominatore_degenere true ed e' escluso. Costo non stimato separatamente per non doppiare quello gia' imputato a F-009 sugli stessi due titoli.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-24.md §7"
         }
       ],
       "costo_cumulato_usd": 93.53,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -1796,6 +1874,12 @@
           "costo_usd": 0.0,
           "nota": "Quarta occorrenza. 8 simboli hanno prodotto oggi un segnale S4 sopra il gate 0.300 e sono stati bloccati da SKIP_PYRAMIDING (P0-05), 12 righe in totale: AMD (+0.475, peso non allocato 2.4%), INTC (+0.083, 3.1%), MU (+0.396, 2.3%), NOK (+0.672, 2.0%), RIO (+0.465, 2.7%), SOXX (+0.318, 2.6%), SPY (+0.427, 2.6%), TSM (+0.382, 2.7%). Due sono mover del giorno: NOK (+9.32%, il punteggio +0.672 e' il piu' alto della giornata) e MU (+4.92%), entrambi gia' a libro da S1 da luglio. COSTO 0.00 VERIFICATO, NON stimato per difetto: entrambi i segnali arrivano alle 16:37, cioe' DOPO il gap di apertura che contiene il 109% e il 104% del rispettivo movimento, e le gambe intraday sono -0.72% (NOK) e -0.18% (MU) - gli ingressi bloccati avrebbero perso denaro. Oggi il guard ha risparmiato. Nota positiva sulla telemetria: a differenza delle occorrenze precedenti le righe SKIP_PYRAMIDING sono presenti e riportano peso non allocato e data di ingresso, quindi il blocco NON e' silenzioso in questa forma. Registro la ricorrenza strutturale, non un costo.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-12.md §7"
+        },
+        {
+          "data": "2026-08-24",
+          "costo_usd": 0.0,
+          "nota": "10 SKIP_PYRAMIDING il 2026-08-24, cinque su segnali sopra gate: MU +0.539, MRVL +0.442, SOXX +0.360, SNOW +0.327, LLY +0.322, tutti su simboli detenuti da S1/legacy con 'peso non allocato 2.0-2.5%'. COSTO ZERO, NON NON-STIMATO: i cinque titoli bloccati hanno chiuso a -5.83%, -3.27%, -2.67%, -3.00% e -0.67%, quindi a size S4 standard ($2.200) i cinque ingressi mancati avrebbero perso circa $340. Il difetto oggi ha protetto il book.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-24.md §7"
         }
       ],
       "costo_cumulato_usd": 12.47,
@@ -2071,6 +2155,25 @@
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 0
+    },
+    {
+      "id": "F-043",
+      "titolo": "Tutti i segnali che superano il gate d'ingresso 0.30 in una giornata sono rialzisti e i titoli corrispondenti scendono: il gate seleziona magnitudine, non direzione",
+      "tipo": "osservazione",
+      "confidenza": "congetturale",
+      "primo_avvistamento": "2026-08-24",
+      "occorrenze": [
+        {
+          "data": "2026-08-24",
+          "costo_usd": null,
+          "nota": "9 segnali generati il 2026-08-24 con score >= 0.30 su 7 ticker distinti — MU +0.539 e +0.430, DIS +0.413, MRVL +0.368, SOXX +0.360, NVDA +0.378 e +0.316, LLY +0.322, SPCX +0.320 — e NESSUNO ribassista. Alla chiusura: MU -5.83%, MRVL -3.27%, NVDA -2.91%, SOXX -2.67%, SPCX -1.44%, LLY -0.67%, DIS +2.63%; media -2.02%, 6 su 7 negativi. Cinque fermati dal guard anti-pyramiding, due diventati ordini (NVDA, SPCX). Non e' un artefatto di fanout: MU +0.539 viene da 'Micron CEO Sounds Alarm on AI Memory Crunch' e MRVL +0.368 da 'Analyst Calls Marvell A Top Chip Pick', entrambi issuer-specific e correttamente attribuiti. Costo non stimato: e' un'affermazione strutturale sul potere predittivo, e imputarle il P&L dei due ordini effettivi (NVDA +1,62 netto sui due round-trip, SPCX -21,82) doppierebbe quanto gia' attribuito a F-013. ID NUOVO E NON AGGANCIATO A F-009 PERCHE' L'AFFERMAZIONE E' SPECULARE, NON UGUALE: F-009 dice che il gate scarta segnali del segno giusto (falso negativo di magnitudine), questa dice che quelli che il gate lascia passare non hanno segno affidabile (falso positivo di direzione). Le due possono essere vere insieme e vanno misurate separatamente; se la ricorrenza mostra che descrivono lo stesso fenomeno, si fondono in sintesi.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-24.md §7"
+        }
+      ],
+      "costo_cumulato_usd": 0.0,
+      "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
     }
   ],
   "_nota_migrazione": "2026-08-04: le occorrenze scritte prima di questa data avevano costo_usd 0.0 perche' il prompt non chiedeva di stimarlo. Convertite a null: zero significa 'e' costato zero', null significa 'non stimato'. Deroga al solo-append registrata nella carta di osservazione."
