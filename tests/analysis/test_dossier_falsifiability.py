@@ -639,6 +639,26 @@ def test_weekly_rollup_e_un_digest_con_scope_weekly():
         assert k in roll
 
 
+def test_synthesis_mostra_solo_le_quattro_sezioni_dell_acceptance_criterion():
+    # Regressione review #286 (criterio 1): l'AC dichiara SOLO cambi, soglie,
+    # P&L economico e integrita'. Il contamination_summary e' gia' esposto
+    # top-level dall'orchestratore (scripts/build_longitudinal_panels.py) —
+    # una sua copia annidata nel digest non e' dichiarata e viola l'AC.
+    views = _views_due_findings()
+    cont = F.build_contamination_summary(views)
+    syn = F.build_synthesis(views, cont)
+    sezioni = set(syn) - {"schema_version", "scope"}
+    assert sezioni == {"cambi", "soglie", "pnl_economico", "integrita"}
+
+
+def test_weekly_rollup_mostra_solo_le_quattro_sezioni_dell_acceptance_criterion():
+    views = _views_due_findings()
+    cont = F.build_contamination_summary(views)
+    roll = F.build_weekly_rollup(views, cont, settimana="2026-W33")
+    sezioni = set(roll) - {"schema_version", "scope"}
+    assert sezioni == {"cambi", "soglie", "pnl_economico", "integrita"}
+
+
 def test_weekly_rollup_con_precedente_mostra_cambi_della_settimana():
     views = _views_due_findings()
     cont = F.build_contamination_summary(views)

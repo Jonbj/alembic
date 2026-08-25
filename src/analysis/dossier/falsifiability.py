@@ -619,6 +619,12 @@ def _build_digest(
     economic_pnl: dict | None = None,
     integrity: dict | None = None,
 ) -> dict:
+    # contamination_summary resta un parametro (firma stabile, usato dai
+    # chiamanti) ma non viene piu' proiettato nel digest: l'AC (#286,
+    # criterio 1) dichiara SOLO le 4 sezioni sotto. Il contamination summary
+    # e' gia' esposto top-level dall'orchestratore
+    # (scripts/build_longitudinal_panels.py, falsifiability.contamination_summary):
+    # una copia annidata qui era una quinta sezione non dichiarata.
     return {
         "schema_version": FALSIFIABILITY_SCHEMA_VERSION,
         "scope": scope,
@@ -626,11 +632,6 @@ def _build_digest(
         "soglie": _soglie(views),
         "pnl_economico": economic_pnl,
         "integrita": integrity,
-        "contamination_summary": {
-            "findings_contaminati": [
-                c["id"] for c in contamination_summary.get("findings_contaminati") or []
-            ],
-        },
     }
 
 
