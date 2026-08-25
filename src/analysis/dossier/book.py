@@ -6,7 +6,8 @@ Modulo puro: riceve trade e barre gia' caricati, non tocca rete ne' DB.
 from __future__ import annotations
 
 import statistics
-from typing import TypedDict
+from datetime import datetime, timezone
+from typing import Any, Mapping, Sequence, TypedDict
 
 # Soglia DICHIARATA sotto la quale la gamba intraday (close - open) e' troppo
 # piccola perche' una quota su quel denominatore significhi qualcosa: 0,5% del
@@ -15,6 +16,13 @@ from typing import TypedDict
 # come il 2026-08-12, quando la gamba intraday era piatta su 7 mover su 9 e la
 # quota (a) andava dichiarata degenere invece che riportata (#246).
 SOGLIA_DENOMINATORE_DEGENERE = 0.005
+
+# Soglia della guardia ombra contraddizione (#335): segna (NON blocca) un BUY
+# lungo il cui score e' positivo mentre il titolo e' gia' sceso oltre questo
+# delta nella seduta. E' uno strumento di MISURA, non una taratura di strategia:
+# non entra in nessuna decisione di trading e non e' congelato dal freeze #171.
+# Configurabile via `soglia_guardia` per analisi di sensibilita'.
+SOGLIA_GUARDIA_CONTRADDIZIONE = 0.04
 
 
 class EntryTrade(TypedDict):
@@ -56,6 +64,34 @@ class EntryMetrics(EntryTrade):
     quota_movimento_precedente_al_segnale: float | None
     denominatore_degenere: bool
     quota_nel_gap: float | None
+
+
+class S4EntryIntent(TypedDict, total=False):
+    """Candidate intent S4 catturato dal ledger point-in-time #294."""
+
+    intent_id: str
+    signal_id: int | None
+    symbol: str
+    signal_at: str
+    decision_at: str
+    signal_score: float | None
+    final_reason_code: str | None
+    is_tradable: bool | None
+    trade_id: int | None
+    pnl_realizzato: float | None
+
+
+class S4EntryIntentMetrics(S4EntryIntent):
+    """Intento S4 arricchito senza usare il prezzo di fill."""
+
+    prezzo_al_segnale: float | None
+    prezzo_al_segnale_timestamp: str | None
+    prezzo_al_segnale_fonte: str | None
+    ritorno_sessione_al_segnale: float | None
+    giorno_di_earnings: bool | None
+    guardia_contraddizione_ombra: bool | None
+    motivo_guardia_contraddizione: str | None
+    missingness: dict[str, str]
 
 
 class ExitTrade(TypedDict):
@@ -126,7 +162,8 @@ class EntryHourAggregate(TypedDict):
 
 
 def compute_entries(
-    trades: list[EntryTrade], bars: dict[str, DailyBar]
+    trades: list[EntryTrade],
+    bars: dict[str, DailyBar],
 ) -> list[EntryMetrics]:
     """Metriche degli ingressi del giorno, con esito PROVVISORIO di fine giornata.
 
@@ -154,6 +191,7 @@ def compute_entries(
     Non calcolare mai una media, una somma o una serie unica fra i due: il
     08-12 la prima era degenere e la seconda valeva 99% mediano — fonderle
     avrebbe prodotto un numero che non descrive niente.
+
     """
     result: list[EntryMetrics] = []
     for trade in trades:
@@ -177,9 +215,109 @@ def compute_entries(
                 row["entry_percentile"] = (trade["entry_price"] - bar["low"]) / rng
             row["mtm_eod"] = (bar["close"] - trade["entry_price"]) * trade["qty"]
             row["vs_apertura"] = (bar["close"] - bar["open"]) * trade["qty"]
-            row.update(_quote_movimento(trade["entry_price"], bar))
+            quote = _quote_movimento(trade["entry_price"], bar)
+            row["quota_movimento_precedente_al_segnale"] = quote[
+                "quota_movimento_precedente_al_segnale"
+            ]
+            row["denominatore_degenere"] = quote["denominatore_degenere"]
+            row["quota_nel_gap"] = quote["quota_nel_gap"]
         result.append(row)
     return result
+
+
+def compute_s4_entry_intents(
+    intents: list[S4EntryIntent],
+    bars_by_symbol: dict[str, list[dict]],
+    daily_bars: dict[str, DailyBar],
+    *,
+    earnings_symbols: set[str] | None = None,
+    soglia_guardia: float = SOGLIA_GUARDIA_CONTRADDIZIONE,
+) -> list[S4EntryIntentMetrics]:
+    """Misura ogni candidate intent S4 al timestamp point-in-time del segnale.
+
+    Il prezzo e' l'open della prima barra 5Min con timestamp >= `signal_at`, lo
+    stesso contratto PIT della timeline del dossier: una barra gia' iniziata
+    contiene futuro rispetto al segnale e non puo' essere letta. Il fill non e'
+    mai usato come proxy; per un intento non eseguito non esiste proprio.
+    """
+    result: list[S4EntryIntentMetrics] = []
+    for intent in intents:
+        row: S4EntryIntentMetrics = {
+            **intent,
+            "prezzo_al_segnale": None,
+            "prezzo_al_segnale_timestamp": None,
+            "prezzo_al_segnale_fonte": None,
+            "ritorno_sessione_al_segnale": None,
+            "giorno_di_earnings": None,
+            "guardia_contraddizione_ombra": None,
+            "motivo_guardia_contraddizione": None,
+            "missingness": {},
+        }
+        if intent.get("is_tradable") is None:
+            row["missingness"]["disposition"] = "not_recorded"
+        symbol = str(intent.get("symbol") or "")
+        if earnings_symbols is not None:
+            row["giorno_di_earnings"] = symbol in earnings_symbols
+
+        signal_at = _as_utc(intent.get("signal_at"))
+        if signal_at is None:
+            row["missingness"]["prezzo_al_segnale"] = "signal_timestamp_missing"
+        else:
+            for bar in sorted(
+                bars_by_symbol.get(symbol, []),
+                key=lambda item: _as_utc(item.get("timestamp")) or datetime.max.replace(
+                    tzinfo=timezone.utc
+                ),
+            ):
+                bar_at = _as_utc(bar.get("timestamp"))
+                if bar_at is None or bar_at < signal_at:
+                    continue
+                price = _optional_float(bar.get("open"))
+                if price is None or price <= 0:
+                    continue
+                row["prezzo_al_segnale"] = price
+                row["prezzo_al_segnale_timestamp"] = bar_at.isoformat()
+                row["prezzo_al_segnale_fonte"] = "alpaca_sip_5min.open"
+                break
+            if row["prezzo_al_segnale"] is None:
+                row["missingness"]["prezzo_al_segnale"] = (
+                    "no_observable_bar_at_or_after_signal"
+                )
+
+        close_prec = (daily_bars.get(symbol) or {}).get("close_prec")
+        price = row["prezzo_al_segnale"]
+        if price is not None and close_prec is not None and close_prec != 0:
+            row["ritorno_sessione_al_segnale"] = (price - close_prec) / close_prec
+        elif close_prec in (None, 0):
+            row["missingness"]["ritorno_sessione_al_segnale"] = (
+                "previous_close_missing"
+            )
+
+        guardia, motivo = _guardia_contraddizione(
+            intent.get("signal_score"),
+            row["ritorno_sessione_al_segnale"],
+            soglia_guardia,
+        )
+        row["guardia_contraddizione_ombra"] = guardia
+        row["motivo_guardia_contraddizione"] = motivo
+        result.append(row)
+    return result
+
+
+def _as_utc(value: str | datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _optional_float(value: Any) -> float | None:
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _quote_movimento(entry_price: float, bar: DailyBar) -> dict:
@@ -200,27 +338,120 @@ def _quote_movimento(entry_price: float, bar: DailyBar) -> dict:
         if gamba_intraday is None or not apertura
         else abs(gamba_intraday) / abs(apertura) < SOGLIA_DENOMINATORE_DEGENERE
     )
-    quota_intraday = (
-        (entry_price - apertura) / gamba_intraday
-        if gamba_intraday not in (None, 0)
-        else None
-    )
+    quota_intraday = None
+    if gamba_intraday is not None and gamba_intraday != 0 and apertura is not None:
+        quota_intraday = (entry_price - apertura) / gamba_intraday
 
-    movimento_totale = (
-        chiusura - close_prec
-        if chiusura is not None and close_prec not in (None, 0)
-        else None
-    )
-    quota_gap = (
-        (apertura - close_prec) / movimento_totale
-        if movimento_totale not in (None, 0) and apertura is not None
-        else None
-    )
+    movimento_totale = None
+    if chiusura is not None and close_prec is not None and close_prec != 0:
+        movimento_totale = chiusura - close_prec
+    quota_gap = None
+    if (
+        movimento_totale is not None
+        and movimento_totale != 0
+        and apertura is not None
+        and close_prec is not None
+    ):
+        quota_gap = (apertura - close_prec) / movimento_totale
 
     return {
         "quota_movimento_precedente_al_segnale": quota_intraday,
         "denominatore_degenere": degenere,
         "quota_nel_gap": quota_gap,
+    }
+
+
+def _guardia_contraddizione(
+    signal_score: float | None,
+    ritorno_sessione: float | None,
+    soglia: float,
+) -> tuple[bool | None, str | None]:
+    """Guardia ombra: segna (NON blocca) un BUY lungo il cui score e' positivo
+    mentre il titolo e' gia' sceso oltre `soglia` sulla seduta (#335).
+
+    `ritorno_sessione` e' il delta vs chiusura precedente (gap-incluso): e'
+    il "down X% on the session" che un entry gate dovrebbe consultare, non il
+    solo delta sull'apertura RTH (che per WMT 2026-08-20 valeva -2% contro un
+    -9% reale, con il resto nel gap di apertura).
+
+    Tre stati, mai None confuso con False:
+
+    - None: score, prezzo PIT o close precedente mancanti -> non decidibile.
+      Gli intenti restano visibili con missingness, non forzati a False.
+    - True: score > 0 e ritorno <= -soglia -> il segno dello score contraddice
+      il movimento di prezzo gia' avvenuto. `motivo` spiega il firing.
+    - False: score e ritorno presenti, nessuna contraddizione (score positivo su
+      titolo su, oppure score non positivo).
+    """
+    if signal_score is None or ritorno_sessione is None:
+        return None, None
+    if signal_score > 0 and ritorno_sessione <= -soglia:
+        motivo = (
+            f"score=+{signal_score:.4g} positivo, ritorno_sessione="
+            f"{ritorno_sessione:+.4g} <= -{soglia:.4g}"
+        )
+        return True, motivo
+    return False, None
+
+
+def aggregate_contradiction_guard(
+    intents: Sequence[Mapping[str, Any]],
+) -> dict:
+    """Conta gli intenti che la guardia avrebbe soppresso e il loro P&L reale.
+
+    L'identita' arriva dal ledger #294 e l'esecuzione dal `trade_id` collegato:
+    nessun matching FIFO e nessuna imputazione di un fill a un intento scartato.
+    """
+    n_intenti_tradabili = 0
+    n_intenti_non_tradabili = 0
+    n_intenti_disposizione_mancante = 0
+    n_valutabili = 0
+    n_soppressi = 0
+    n_soppressi_eseguiti = 0
+    n_soppressi_non_eseguiti = 0
+    n_soppressi_con_pnl = 0
+    n_soppressi_senza_pnl = 0
+    somma_pnl = 0.0
+    for intent in intents:
+        is_tradable = intent.get("is_tradable")
+        if is_tradable is None:
+            n_intenti_disposizione_mancante += 1
+            continue
+        if is_tradable is not True:
+            n_intenti_non_tradabili += 1
+            continue
+        n_intenti_tradabili += 1
+        guardia = intent.get("guardia_contraddizione_ombra")
+        if guardia is None:
+            continue
+        n_valutabili += 1
+        if guardia is not True:
+            continue
+        n_soppressi += 1
+        if intent.get("trade_id") is None:
+            n_soppressi_non_eseguiti += 1
+            continue
+        n_soppressi_eseguiti += 1
+        pnl = _optional_float(intent.get("pnl_realizzato"))
+        if pnl is None:
+            n_soppressi_senza_pnl += 1
+        else:
+            somma_pnl += pnl
+            n_soppressi_con_pnl += 1
+
+    return {
+        "n_intenti": len(intents),
+        "n_intenti_tradabili": n_intenti_tradabili,
+        "n_intenti_non_tradabili": n_intenti_non_tradabili,
+        "n_intenti_disposizione_mancante": n_intenti_disposizione_mancante,
+        "n_valutabili": n_valutabili,
+        "n_soppressi": n_soppressi,
+        "n_soppressi_eseguiti": n_soppressi_eseguiti,
+        "n_soppressi_non_eseguiti": n_soppressi_non_eseguiti,
+        "n_soppressi_con_pnl": n_soppressi_con_pnl,
+        "n_soppressi_senza_pnl": n_soppressi_senza_pnl,
+        "somma_pnl_realizzato_soppressi": round(somma_pnl, 6),
+        "matching": "s4_intent_events.intent_id -> trades nel decision_slot",
     }
 
 

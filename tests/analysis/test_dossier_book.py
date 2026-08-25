@@ -4,8 +4,10 @@ import pytest
 
 from src.analysis.dossier.book import (
     aggregate_by_entry_hour,
+    aggregate_contradiction_guard,
     compute_entries,
     compute_exits,
+    compute_s4_entry_intents,
 )
 
 
@@ -87,6 +89,135 @@ def test_range_degenere_da_percentile_none_non_divisione_per_zero():
     ]
     bars = {"AAA": {"open": 100.0, "high": 100.0, "low": 100.0, "close": 100.0}}
     assert compute_entries(trades, bars)[0]["entry_percentile"] is None
+
+
+# --- #335: intenti S4 PIT + guardia ombra contraddizione --------------------
+# La popolazione e' il ledger degli intenti tradabili #294, non i soli fill.
+
+
+def _bar_cp(
+    open_: float = 100.0,
+    high: float = 110.0,
+    low: float = 90.0,
+    close: float = 105.0,
+    close_prec: float = 100.0,
+) -> dict[str, float]:
+    """Barra con chiusura precedente, per le metriche #335 che la richiedono."""
+    return {"open": open_, "high": high, "low": low, "close": close,
+            "close_prec": close_prec}
+
+
+def _intent(symbol="WMT", score=0.318, trade_id=None, pnl=None):
+    return {
+        "intent_id": f"intent-{symbol}",
+        "signal_id": 7001,
+        "symbol": symbol,
+        "signal_at": "2026-08-20T16:36:00+00:00",
+        "decision_at": "2026-08-20T16:37:00+00:00",
+        "signal_score": score,
+        "final_reason_code": "RANK_SELECTED",
+        "is_tradable": True,
+        "trade_id": trade_id,
+        "pnl_realizzato": pnl,
+    }
+
+
+def test_intento_usa_prima_barra_osservabile_non_fill_ne_barra_in_corso():
+    bars = {"WMT": [
+        {"timestamp": "2026-08-20T16:35:00+00:00", "open": 105.0},
+        {"timestamp": "2026-08-20T16:40:00+00:00", "open": 104.25},
+    ]}
+    out = compute_s4_entry_intents(
+        [_intent(trade_id=42, pnl=2.38)], bars, {"WMT": _bar_cp(close_prec=114.0)}
+    )[0]
+
+    assert out["prezzo_al_segnale"] == 104.25
+    assert out["prezzo_al_segnale_timestamp"] == "2026-08-20T16:40:00+00:00"
+    assert out["ritorno_sessione_al_segnale"] == pytest.approx(104.25 / 114.0 - 1)
+    assert out["guardia_contraddizione_ombra"] is True
+
+
+def test_intento_non_eseguito_resta_misurabile_senza_fill():
+    bars = {"WMT": [{"timestamp": "2026-08-20T16:40:00+00:00", "open": 104.25}]}
+    out = compute_s4_entry_intents(
+        [_intent()], bars, {"WMT": _bar_cp(close_prec=114.0)},
+        earnings_symbols={"WMT"},
+    )[0]
+
+    assert out["trade_id"] is None
+    assert out["pnl_realizzato"] is None
+    assert out["giorno_di_earnings"] is True
+    assert out["guardia_contraddizione_ombra"] is True
+
+
+def test_intento_espone_missingness_senza_barra_o_close_precedente():
+    out = compute_s4_entry_intents([_intent()], {}, {"WMT": _bar()})[0]
+
+    assert out["prezzo_al_segnale"] is None
+    assert out["ritorno_sessione_al_segnale"] is None
+    assert out["guardia_contraddizione_ombra"] is None
+    assert out["missingness"] == {
+        "prezzo_al_segnale": "no_observable_bar_at_or_after_signal",
+        "ritorno_sessione_al_segnale": "previous_close_missing",
+    }
+
+
+def test_intento_senza_disposition_non_diventa_non_tradabile_per_difetto():
+    intent = _intent()
+    intent["is_tradable"] = None
+    bars = {"WMT": [{"timestamp": "2026-08-20T16:40:00+00:00", "open": 104.25}]}
+
+    out = compute_s4_entry_intents(
+        [intent], bars, {"WMT": _bar_cp(close_prec=114.0)}
+    )[0]
+
+    assert out["is_tradable"] is None
+    assert out["missingness"]["disposition"] == "not_recorded"
+
+
+def test_guardia_ombra_soglia_configurabile_sugli_intenti():
+    bars = {"WMT": [{"timestamp": "2026-08-20T16:40:00+00:00", "open": 97.0}]}
+    daily = {"WMT": _bar_cp(close_prec=100.0)}
+
+    assert compute_s4_entry_intents([_intent(score=0.4)], bars, daily)[0][
+        "guardia_contraddizione_ombra"
+    ] is False
+    assert compute_s4_entry_intents(
+        [_intent(score=0.4)], bars, daily, soglia_guardia=0.02
+    )[0]["guardia_contraddizione_ombra"] is True
+
+
+def test_aggregato_distingue_eseguiti_non_eseguiti_e_pnl_mancante():
+    intents = [
+        {"is_tradable": True, "guardia_contraddizione_ombra": True, "trade_id": 42,
+         "pnl_realizzato": 2.38},
+        {"is_tradable": True, "guardia_contraddizione_ombra": True, "trade_id": 43,
+         "pnl_realizzato": None},
+        {"is_tradable": True, "guardia_contraddizione_ombra": True, "trade_id": None,
+         "pnl_realizzato": None},
+        {"is_tradable": True, "guardia_contraddizione_ombra": False, "trade_id": 44,
+         "pnl_realizzato": -5.0},
+        {"is_tradable": True, "guardia_contraddizione_ombra": None, "trade_id": None,
+         "pnl_realizzato": None},
+        {"is_tradable": False, "guardia_contraddizione_ombra": True,
+         "trade_id": None, "pnl_realizzato": None},
+        {"is_tradable": None, "guardia_contraddizione_ombra": True,
+         "trade_id": None, "pnl_realizzato": None},
+    ]
+
+    out = aggregate_contradiction_guard(intents)
+
+    assert out["n_intenti"] == 7
+    assert out["n_intenti_tradabili"] == 5
+    assert out["n_intenti_non_tradabili"] == 1
+    assert out["n_intenti_disposizione_mancante"] == 1
+    assert out["n_valutabili"] == 4
+    assert out["n_soppressi"] == 3
+    assert out["n_soppressi_eseguiti"] == 2
+    assert out["n_soppressi_non_eseguiti"] == 1
+    assert out["n_soppressi_con_pnl"] == 1
+    assert out["n_soppressi_senza_pnl"] == 1
+    assert out["somma_pnl_realizzato_soppressi"] == pytest.approx(2.38)
 
 
 def test_simbolo_senza_barra_e_saltato_non_inventato():

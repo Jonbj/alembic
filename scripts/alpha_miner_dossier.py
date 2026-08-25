@@ -31,14 +31,18 @@ import subprocess
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from typing import Any, Mapping, Sequence
 from zoneinfo import ZoneInfo
 
 import yaml
 
 from src.analysis.dossier.book import (
+    SOGLIA_GUARDIA_CONTRADDIZIONE,
     aggregate_by_entry_hour,
+    aggregate_contradiction_guard,
     compute_entries,
     compute_exits,
+    compute_s4_entry_intents,
 )
 from src.analysis.dossier.decision_quality import (
     build_decision_quality_panel,
@@ -67,7 +71,7 @@ OUT_DIR = PROJECT_DIR / "docs" / "evidence" / "dossier"
 SOGLIA_MOVER = 0.03
 FINESTRA_MEDIANE = 20  # giorni, per le mediane mobili
 INIZIO_OSSERVAZIONE = date(2026, 8, 3)
-DOSSIER_SCHEMA_VERSION = "2.4"
+DOSSIER_SCHEMA_VERSION = "2.5"
 NEW_YORK = ZoneInfo("America/New_York")
 
 # Size plausibile di uno slot S4 per lo stimatore v2 (#280): fixed-slot sizing
@@ -286,7 +290,7 @@ def _barre_intraday(
     return dict(out), cutoff
 
 
-def _timestamp(value: str) -> datetime | None:
+def _timestamp(value: str | None) -> datetime | None:
     if not value:
         return None
     parsed = datetime.fromisoformat(value)
@@ -801,6 +805,53 @@ def _timeline_eventi(giorno: date) -> list[dict]:
     } for r in rows]
 
 
+def _s4_entry_intents(giorno: date) -> list[dict]:
+    """Tutti i candidate intent S4 #294, inclusi scarti e mancati fill.
+
+    Il join al trade e' confinato allo stesso decision slot da 15 minuti. In
+    questo modo un segnale ri-osservato in cicli successivi non eredita il fill
+    di un altro intento. `net_pnl` resta None sia per un intento non eseguito
+    sia per un trade ancora aperto; `trade_id` distingue i due casi.
+    """
+    g = giorno.isoformat()
+    rows = _psql(
+        f"SELECT intent.intent_id::text, COALESCE(intent.signal_id::text,''), "
+        f"intent.symbol, intent.model_generated_at::text, intent.decision_at::text, "
+        f"COALESCE(intent.snapshot->>'score',''), "
+        f"COALESCE(disposition.reason_code,''), "
+        f"COALESCE(disposition.is_tradable::text,''), "
+        f"COALESCE(trade.id::text,''), COALESCE(trade.net_pnl::text,'') "
+        f"FROM s4_candidate_population intent "
+        f"LEFT JOIN s4_intent_events disposition "
+        f"  ON disposition.intent_id = intent.intent_id "
+        f" AND disposition.event_type = 'disposition' "
+        f"LEFT JOIN LATERAL ("
+        f"  SELECT id, net_pnl FROM trades "
+        f"  WHERE signal_id = intent.signal_id "
+        f"    AND entry_time >= intent.decision_slot "
+        f"    AND entry_time < intent.decision_slot + INTERVAL '15 minutes' "
+        f"  ORDER BY entry_time, id LIMIT 1"
+        f") trade ON true "
+        f"WHERE decision_at >= '{g}' AND decision_at < '{g}'::date + 1 "
+        f"ORDER BY decision_at, intent_id;"
+    )
+    return [
+        {
+            "intent_id": row[0],
+            "signal_id": int(row[1]) if row[1] else None,
+            "symbol": row[2],
+            "signal_at": row[3],
+            "decision_at": row[4],
+            "signal_score": float(row[5]) if row[5] else None,
+            "final_reason_code": row[6] or None,
+            "is_tradable": row[7] == "t" if row[7] else None,
+            "trade_id": int(row[8]) if row[8] else None,
+            "pnl_realizzato": float(row[9]) if row[9] else None,
+        }
+        for row in rows
+    ]
+
+
 def _dettagli_ordini(order_ids: list[str]) -> dict[str, dict]:
     """Timestamp submission/fill reali dal broker, con errore per-order esplicito."""
     if not order_ids:
@@ -1136,18 +1187,28 @@ def costruisci_dossier(
 
     # --- timeline e barre intraday (#277) --------------------------------
     eventi = _timeline_eventi(giorno)
+    intenti_s4_grezzi = _s4_entry_intents(giorno)
     mover_symbols = {
         symbol
         for symbol, rendimento in mercato["rendimenti"].items()
         if abs(rendimento) >= SOGLIA_MOVER
     }
-    simboli_timeline = sorted(mover_symbols | {e["symbol"] for e in eventi})
+    simboli_timeline = sorted(
+        mover_symbols
+        | {e["symbol"] for e in eventi}
+        | {intent["symbol"] for intent in intenti_s4_grezzi}
+    )
     timestamps_eventi = [
         e[stage]
         for e in eventi
         for stage in ("published_at", "first_seen_at", "ingested_at", "scored_at")
         if e.get(stage) is not None
     ]
+    timestamps_eventi.extend(
+        timestamp
+        for intent in intenti_s4_grezzi
+        if (timestamp := _timestamp(intent.get("signal_at"))) is not None
+    )
     primo_evento = min(timestamps_eventi) if timestamps_eventi else None
     barre_intraday, cutoff_intraday = _barre_intraday(
         simboli_timeline, giorno, primo_evento
@@ -1250,8 +1311,37 @@ def costruisci_dossier(
     }
     chiusure_close = {s: b["close"] for s, b in barre.items()}
 
-    ingressi = compute_entries(ingressi_grezzi, barre_ohlc)
+    # #335 step 1: simboli con un rilascio earnings datato la seduta, derivati
+    # dal calendario corporate gia' caricato per l'event_market_context. None
+    # quando il calendario non era disponibile (fetch remote off / fonte
+    # earnings down): `giorno_di_earnings` resta UNKNOWN, non False per difetto.
+    earnings_symbols = _earnings_symbols_from_calendar(corporate_calendar)
+
+    soglia_guardia = _soglia_guardia_contraddizione()
+    ingressi = compute_entries(
+        ingressi_grezzi,
+        barre_ohlc,
+    )
     chiusure = compute_exits(chiusure_grezze, chiusure_close)
+
+    # #335: la popolazione e' il ledger degli intenti tradabili #294, non la
+    # tabella trades. Il prezzo e' PIT al segnale; gli intenti non eseguiti
+    # restano quindi misurabili senza inventare un fill.
+    intenti_ingresso_s4 = compute_s4_entry_intents(
+        intenti_s4_grezzi,
+        barre_intraday,
+        barre_ohlc,
+        earnings_symbols=earnings_symbols,
+        soglia_guardia=soglia_guardia,
+    )
+
+    # #335 step 2: aggregato ombra giornaliero + sweep sulla finestra di
+    # osservazione. Misura read-only: nessun ordine cambiato.
+    guardia_giorno = aggregate_contradiction_guard(intenti_ingresso_s4)
+    guardia_giorno["soglia"] = soglia_guardia
+    guardia_finestra = _guardia_contraddizione_finestra(
+        intenti_ingresso_s4, giorno
+    )
 
     # --- qualita' decisionale read-only (#284) ----------------------------
     # Lo snapshot e' prospettico/parallelo: i dossier storici restano intatti.
@@ -1352,6 +1442,31 @@ def costruisci_dossier(
                     "articolo canonicale ISSUER_SPECIFIC pubblicato entro il close RTH; "
                     "UNKNOWN non entra nel numeratore"
                 ),
+                "ritorno_sessione_al_segnale": (
+                    "(prezzo_al_segnale - close_prec) / close_prec per ogni "
+                    "candidate intent del ledger #294. prezzo_al_segnale e' "
+                    "l'open della prima barra Alpaca SIP 5Min con timestamp >= "
+                    "s4_intent_events.model_generated_at: mai il fill e mai "
+                    "OHLC della barra in corso (#335)"
+                ),
+                "giorno_di_earnings": (
+                    "simbolo con evento event_type=earnings nel calendario "
+                    "FMP/Alpaca della seduta, per ogni intento S4; None se il "
+                    "calendario non era disponibile (UNKNOWN, non False per "
+                    "difetto) (#335)"
+                ),
+                "guardia_contraddizione_ombra": (
+                    "ombra read-only sull'intera s4_candidate_population: "
+                    "True se snapshot.score > 0 e ritorno_sessione_al_segnale "
+                    "<= -soglia; l'aggregato 'soppressi' include solo gli intenti "
+                    "con disposition.is_tradable=true, anche se non eseguiti. "
+                    "None se score, prezzo PIT o close_prec mancanti. Non blocca "
+                    "ordini (#335)"
+                ),
+                "motivo_guardia_contraddizione": (
+                    "stringa esplicativa quando la guardia ombra (#335) fa firing "
+                    "(score e ritorno); None negli altri casi"
+                ),
             },
             "decision_quality": {
                 "snapshot_apertura": "trades vivi all'open RTH + barre Alpaca SIP",
@@ -1383,6 +1498,7 @@ def costruisci_dossier(
         "candidati_miss": candidati_classificati,
         "soglia_gate_usata": soglia_gate,
         "ingressi": ingressi,
+        "intenti_ingresso_s4": intenti_ingresso_s4,
         "chiusure": chiusure,
         "snapshot_apertura": snapshot_apertura,
         "guard_decisions": guard_decisions,
@@ -1396,8 +1512,114 @@ def costruisci_dossier(
             "miss_cumulati": _miss_cumulati(),
             "mediane_mobili_20g": _mediane_mobili(ingressi, chiusure),
             "cause_del_giorno": cause_del_giorno(candidati_classificati),
+            "guardia_contraddizione": {
+                "giorno": guardia_giorno,
+                "finestra_osservazione": guardia_finestra,
+            },
         },
     }
+
+
+def _earnings_symbols_from_calendar(corporate_calendar: dict | list | None) -> set[str] | None:
+    """Simboli con evento earnings nella seduta, dal calendario corporate.
+
+    Tollerante sulla forma come `build_event_market_context`: il calendario reale
+    e' un dict `{"events": [...], "missingness": [...], ...}`, ma i test possono
+    passare una lista nuda di eventi. Restituisce None (UNKNOWN) quando la fonte
+    earnings specifica e' assente o fallita, cosi' `giorno_di_earnings` non viene
+    forzato a False per difetto di fonte.
+    """
+    if corporate_calendar is None:
+        return None
+    if isinstance(corporate_calendar, dict):
+        eventi = corporate_calendar.get("events") or []
+        missingness = corporate_calendar.get("missingness") or []
+        if any("earnings_calendar" in str(m) for m in missingness):
+            return None
+    else:
+        eventi = corporate_calendar
+    return {
+        str(ev.get("symbol") or "").upper()
+        for ev in eventi
+        if str(ev.get("event_type") or "").casefold() == "earnings"
+    }
+
+
+def _soglia_guardia_contraddizione() -> float:
+    """Soglia della guardia ombra (#335): strumento di MISURA, non taratura di
+    strategia. Default `SOGLIA_GUARDIA_CONTRADDIZIONE` (-4%); overridable via
+    env `SOGLIA_GUARDIA_CONTRADDIZIONE` per analisi di sensibilita' senza
+    toccare il codice. Non entra in nessuna decisione di trading."""
+    raw = os.environ.get("SOGLIA_GUARDIA_CONTRADDIZIONE", "")
+    if not raw:
+        return SOGLIA_GUARDIA_CONTRADDIZIONE
+    try:
+        valore = float(raw)
+        return abs(valore) if valore < 0 else valore
+    except ValueError:
+        log.warning("SOGLIA_GUARDIA_CONTRADDIZIONE=%r non valido, uso il default", raw)
+        return SOGLIA_GUARDIA_CONTRADDIZIONE
+
+
+def _guardia_contraddizione_finestra(
+    intenti_giorno: Sequence[Mapping[str, Any]], giorno: date
+) -> dict:
+    """Ricalcola il cumulato #335 dagli intenti PIT conservati nei dossier.
+
+    Il P&L dei trade eseguiti viene riletto per `trade_id`: un intento ancora
+    aperto nel dossier del giorno d'ingresso acquisisce il P&L realizzato appena
+    il trade chiude, senza riscrivere il dossier storico e senza matching FIFO.
+    I dossier pre-schema 2.5 non hanno la popolazione #294 e restano fuori con
+    copertura esplicita.
+    """
+    intenti_finestra = list(intenti_giorno)
+    giorni_coperti = {giorno.isoformat()}
+    oggi_iso = giorno.isoformat()
+    for f in sorted(OUT_DIR.glob("*.json")):
+        if f.stem == oggi_iso:
+            continue
+        if f.stem < INIZIO_OSSERVAZIONE.isoformat() or f.stem > oggi_iso:
+            continue
+        try:
+            d = json.loads(f.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        intenti = d.get("intenti_ingresso_s4")
+        if isinstance(intenti, list):
+            intenti_finestra.extend(intenti)
+            giorni_coperti.add(f.stem)
+
+    trade_ids = sorted({
+        int(intent["trade_id"])
+        for intent in intenti_finestra
+        if intent.get("trade_id") is not None
+    })
+    pnl_per_trade: dict[int, float | None] = {}
+    if trade_ids:
+        id_sql = ",".join(str(trade_id) for trade_id in trade_ids)
+        for db_row in _psql(
+            f"SELECT id::text, COALESCE(net_pnl::text,'') FROM trades "
+            f"WHERE id IN ({id_sql}) ORDER BY id;"
+        ):
+            pnl_per_trade[int(db_row[0])] = (
+                float(db_row[1]) if db_row[1] else None
+            )
+
+    aggiornati = []
+    for intent in intenti_finestra:
+        intent_row = dict(intent)
+        trade_id = intent_row.get("trade_id")
+        if trade_id is not None and int(trade_id) in pnl_per_trade:
+            intent_row["pnl_realizzato"] = pnl_per_trade[int(trade_id)]
+        aggiornati.append(intent_row)
+
+    aggregato = aggregate_contradiction_guard(aggiornati)
+    aggregato.update({
+        "n_giorni_coperti": len(giorni_coperti),
+        "copertura": "da schema 2.5 in avanti; dossier pre-ledger esclusi",
+        "pnl_refresh": "trades.net_pnl riletto per trade_id alla generazione",
+    })
+    return aggregato
 
 
 def _miss_cumulati() -> dict[str, int]:
