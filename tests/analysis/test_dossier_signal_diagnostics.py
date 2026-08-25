@@ -504,6 +504,71 @@ class TestSplits:
         assert out["x"]["ic"]["ic"] is None
 
 
+class TestWrongSignAudit:
+    def test_separa_wrong_sign_neutral_missing_per_provenienza_e_fanout(self):
+        rows = [
+            _row("A", score=0.5, fwd={"30m": 0.02}, fallback=False,
+                 n_ticker_articolo=1),
+            _row("B", score=0.4, fwd={"30m": -0.03}, fallback=True,
+                 n_ticker_articolo=4),
+            _row("C", score=0.0, fwd={"30m": -0.02}, fallback=True,
+                 n_ticker_articolo=2),
+            _row("D", score=-0.2, fwd={"30m": None}, fallback=False,
+                 n_ticker_articolo=None),
+            _row("E", score=-0.3, fwd={"30m": 0.01}, fallback=None,
+                 n_ticker_articolo=None),
+        ]
+
+        out = sd.wrong_sign_audit(rows, horizon="30m")
+
+        assert out["overall"] == {
+            "n_rows": 5,
+            "n_outcome_missing": 1,
+            "n_score_neutral": 1,
+            "n_return_flat": 0,
+            "n_directional": 3,
+            "n_correct_sign": 1,
+            "n_wrong_sign": 2,
+            "sign_accuracy": pytest.approx(1 / 3),
+        }
+        assert out["by_provenance"]["ensemble"]["n_correct_sign"] == 1
+        assert out["by_provenance"]["ensemble"]["n_outcome_missing"] == 1
+        assert out["by_provenance"]["fallback"]["n_wrong_sign"] == 1
+        assert out["by_provenance"]["fallback"]["n_score_neutral"] == 1
+        assert out["by_provenance"]["unknown"]["n_wrong_sign"] == 1
+        assert out["by_fanout"]["single_ticker"]["n_correct_sign"] == 1
+        assert out["by_fanout"]["multi_ticker"]["n_wrong_sign"] == 1
+        assert out["by_provenance_and_fanout"]["fallback"]["multi_ticker"] == {
+            "n_rows": 2,
+            "n_outcome_missing": 0,
+            "n_score_neutral": 1,
+            "n_return_flat": 0,
+            "n_directional": 1,
+            "n_correct_sign": 0,
+            "n_wrong_sign": 1,
+            "sign_accuracy": 0.0,
+        }
+        assert out["outcome"] == "forward_return:30m"
+        assert out["policy"] == "descriptive_only_no_gate_or_discount"
+
+    def test_zero_non_e_wrong_sign_e_missing_non_diventa_zero(self):
+        rows = [
+            _row("ZERO_SCORE", score=0.0, fwd={"60m": -0.02}, fallback=True),
+            _row("FLAT_RETURN", score=0.4, fwd={"60m": 0.0}, fallback=False),
+            _row("NO_SCORE", score=None, fwd={"60m": 0.03}, fallback=False),
+            _row("NO_RETURN", score=-0.4, fwd={"60m": None}, fallback=True),
+        ]
+
+        overall = sd.wrong_sign_audit(rows, horizon="60m")["overall"]
+
+        assert overall["n_wrong_sign"] == 0
+        assert overall["n_directional"] == 0
+        assert overall["n_score_neutral"] == 1
+        assert overall["n_return_flat"] == 1
+        assert overall["n_outcome_missing"] == 2
+        assert overall["sign_accuracy"] is None
+
+
 class TestScoreStability:
     def test_score_stability_da_serie_ic_per_giorno(self):
         series = [0.10, 0.20, 0.30, 0.40]
@@ -661,6 +726,18 @@ class TestPanel:
         assert len(panel["quintiles"]["T+1"]) == 5
         assert isinstance(panel["false_positives"]["T+1"], list)
         assert len(panel["false_positives"]["T+1"]) == len(sd.DEFAULT_THRESHOLD_GRID)
+
+    def test_panel_espone_wrong_sign_audit_per_orizzonte(self):
+        panel = sd.build_signal_diagnostics_panel(
+            _day1_signals(), pool_rows=_pool("2026-08-12"),
+            mover_threshold=0.03,
+        )
+
+        assert set(panel["wrong_sign_audit"]) == set(sd.HORIZONS)
+        t1 = panel["wrong_sign_audit"]["T+1"]
+        assert t1["outcome"] == "forward_return:T+1"
+        assert t1["by_provenance"]["ensemble"]["n_rows"] == 4
+        assert t1["policy"] == "descriptive_only_no_gate_or_discount"
 
     def test_panel_matched_controls_per_orizzonte(self):
         panel = sd.build_signal_diagnostics_panel(

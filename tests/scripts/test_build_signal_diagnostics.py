@@ -159,7 +159,7 @@ def test_report_ha_un_pannello_per_giorno_con_tutti_i_blocchi(report):
     assert p["data"] == _DAY
     for blocco in ("rank_ic", "hit_precision_recall", "quintiles",
                    "false_positives", "matched_controls", "splits",
-                   "fanout_sweep"):
+                   "fanout_sweep", "wrong_sign_audit"):
         assert blocco in p, f"blocco {blocco} mancante nel pannello"
     assert p["policy_output"] == "descriptive_only"
 
@@ -218,6 +218,16 @@ def test_splits_per_source_model_fallback_extraction_ensemble_bucket(report):
         assert dim in s, f"split {dim} mancante"
         # ogni dimensione ha un orizzonte (almeno 30m) con gruppi.
         assert "30m" in s[dim]
+
+
+def test_wrong_sign_audit_arriva_al_report_con_interazione_fallback_fanout(report):
+    audit = report["panels"][0]["wrong_sign_audit"]["30m"]
+
+    assert audit["by_provenance"]["ensemble"]["n_rows"] == 2
+    assert audit["by_provenance"]["fallback"]["n_rows"] == 2
+    assert audit["by_fanout"]["multi_ticker"]["n_rows"] == 1
+    assert audit["by_provenance_and_fanout"]["fallback"]["multi_ticker"]["n_rows"] == 1
+    assert audit["policy"] == "descriptive_only_no_gate_or_discount"
 
 
 def test_ensemble_std_bucket_assegnato_da_terzile(report):
