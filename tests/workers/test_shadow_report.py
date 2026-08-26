@@ -60,3 +60,56 @@ def test_report_with_nontrivial_rows_does_not_crash():
     df_arg = bc.call_args[0][0]
     assert df_arg.shape[0] == 2
     assert list(df_arg.columns) == ["news_log_id", "model_id", "polarity", "confidence", "parse_error"]
+
+
+# --- il report deve sopravvivere all'invio: tre finestre sono andate perse ---
+
+
+def test_report_scritto_su_file_oltre_che_su_telegram(tmp_path):
+    """Il report va persistito in docs/evidence/, non solo inviato.
+
+    Tre finestre (27/07, 10/08, 24/08) sono state prodotte e perse perche'
+    l'unica copia viveva in un messaggio Telegram. Un'evidenza che esiste solo
+    in una chat non e' recuperabile.
+    """
+    ts = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+    redis = MagicMock()
+    redis.get_shadow_comparison_start.return_value = ts
+    pg = MagicMock()
+    pg.fetch_shadow_rows.return_value = []
+    pg.fetch_live_response_rows.return_value = []
+    with patch("src.workers.performance.RedisStore", return_value=redis), \
+         patch("src.workers.performance.PostgreSQLStore", return_value=pg), \
+         patch("src.workers.performance.TelegramNotifier"), \
+         patch("src.workers.performance.run_async"), \
+         patch("src.workers.performance._SHADOW_REPORT_DIR", tmp_path):
+        result = run_shadow_comparison_report()
+
+    scritti = list(tmp_path.glob("STAGE2_MODEL_COMPARISON_*.md"))
+    assert len(scritti) == 1, f"atteso un report su file, trovati {scritti}"
+    assert scritti[0].read_text().strip(), "report scritto vuoto"
+    assert result.get("report_path") == str(scritti[0])
+
+
+def test_scrittura_su_file_fallita_non_impedisce_il_disarm(tmp_path):
+    """La scrittura e' best-effort come l'invio: se fallisce, il disarm deve
+    comunque avvenire — altrimenti un disco pieno lascia lo shadow armato per
+    sempre, che e' l'invariante che il task esisteva per garantire."""
+    ts = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+    redis = MagicMock()
+    redis.get_shadow_comparison_start.return_value = ts
+    pg = MagicMock()
+    pg.fetch_shadow_rows.return_value = []
+    pg.fetch_live_response_rows.return_value = []
+    inesistente = tmp_path / "non" / "creabile"
+    with patch("src.workers.performance.RedisStore", return_value=redis), \
+         patch("src.workers.performance.PostgreSQLStore", return_value=pg), \
+         patch("src.workers.performance.TelegramNotifier"), \
+         patch("src.workers.performance.run_async"), \
+         patch("src.workers.performance._SHADOW_REPORT_DIR", inesistente), \
+         patch("pathlib.Path.mkdir", side_effect=OSError("disco pieno")):
+        result = run_shadow_comparison_report()
+
+    assert result.get("reported") is True
+    redis.clear_shadow_comparison_start.assert_called_once()
+    assert result.get("report_path") is None
