@@ -37,6 +37,7 @@ from src.workers._async_utils import run_async
 import logging
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
 import httpx
 import numpy as np
@@ -2677,6 +2678,41 @@ def run_daily_trading_analysis(target_date: str | None = None) -> dict:
     return stats_out
 
 
+# Dove atterra il report Stage-2. Sovrascrivibile nei test.
+_SHADOW_REPORT_DIR = Path(__file__).resolve().parents[2] / "docs" / "evidence"
+
+
+def _persist_shadow_report(md: str, started: datetime) -> str | None:
+    """Scrive il report Stage-2 su file. Best-effort come l'invio Telegram.
+
+    Il nome porta la data di CHIUSURA della finestra, non quella di apertura:
+    e' il giorno in cui il report descrive un periodo concluso, ed e' come lo
+    cerchera' chi legge. Un file gia' presente viene sovrascritto — il task
+    gira una volta per finestra, quindi un secondo passaggio sullo stesso
+    giorno e' un rerun, non una finestra diversa.
+
+    Ritorna il percorso scritto, o None se la scrittura fallisce: un disco
+    pieno non deve impedire il disarm, che e' l'invariante per cui il task
+    esiste. Per questo l'eccezione e' assorbita qui e non risale.
+    """
+    try:
+        _SHADOW_REPORT_DIR.mkdir(parents=True, exist_ok=True)
+        chiusura = datetime.now(timezone.utc).date().isoformat()
+        percorso = _SHADOW_REPORT_DIR / f"STAGE2_MODEL_COMPARISON_{chiusura}.md"
+        intestazione = (
+            f"# Stage-2: confronto modelli in shadow\n\n"
+            f"**Finestra:** {started.date().isoformat()} -> {chiusura}  \n"
+            f"**Generato da:** `run_shadow_comparison_report` "
+            f"(#34, persistenza aggiunta il 2026-08-26)\n\n---\n\n"
+        )
+        percorso.write_text(intestazione + md, encoding="utf-8")
+        log.info("shadow report scritto in %s", percorso)
+        return str(percorso)
+    except Exception as exc:
+        log.warning("shadow report: scrittura su file fallita: %s", exc)
+        return None
+
+
 @app.task(name="src.workers.performance.run_shadow_comparison_report")
 def run_shadow_comparison_report() -> dict:
     """Stage-2 auto-report: after >=7 days armed, build the ranked comparison,
@@ -2717,6 +2753,13 @@ def run_shadow_comparison_report() -> dict:
         report = build_comparison(rows, fwd, divergence_threshold=config.ENSEMBLE_DIVERGENCE_STD)
         md = render_markdown(report)
 
+        # Il report va scritto PRIMA di essere inviato: tre finestre (27/07,
+        # 10/08, 24/08) sono state prodotte e perse perche' l'unica copia viveva
+        # in un messaggio Telegram, e #28 e' rimasta in attesa di un'evidenza
+        # che era gia' stata generata due volte. Un'evidenza che esiste solo in
+        # una chat non e' recuperabile.
+        report_path = _persist_shadow_report(md, started)
+
         try:
             notifier = TelegramNotifier()
             run_async(notifier.send_alert(md, level="info"))
@@ -2724,6 +2767,10 @@ def run_shadow_comparison_report() -> dict:
             log.warning("shadow report Telegram send failed: %s", exc)
 
         redis.clear_shadow_comparison_start()
-        return {"reported": True, "models": len(report["models"])}
+        return {
+            "reported": True,
+            "models": len(report["models"]),
+            "report_path": report_path,
+        }
     finally:
         redis.close()
