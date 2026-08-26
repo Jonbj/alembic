@@ -6,7 +6,7 @@ from pathlib import Path
 MIGRATION = (
     Path(__file__).resolve().parents[2]
     / "migrations"
-    / "052_llm_response_relevance.sql"
+    / "054_llm_response_relevance.sql"
 )
 
 
