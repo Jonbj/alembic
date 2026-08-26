@@ -600,12 +600,13 @@ def build_portfolio_counterfactual(
 class Reconciliation:
     """Il ponte fra vista trade-level e vista portfolio-level, senza residui.
 
-    L'identita' in dollari e' `portfolio = trade + reinvestimento`: il
-    controfattuale aggiunge al test appaiato solo cio' che il capitale liberato
-    avrebbe reso. La differenza di *occupazione* non e' in dollari — sono
-    capitale-giorni — e resta riportata a parte, perche' e' proprio il caso in
-    cui il delta per trade migliora mentre il rendimento sul capitale occupato
-    peggiora (consolidato §7 punto 7).
+    L'identita' in dollari e' `portfolio_delta = trade_delta +
+    replacement_challenger - replacement_baseline`: il controfattuale aggiunge
+    al test appaiato la differenza fra cio' che il capitale liberato avrebbe
+    reso sotto le due policy. La differenza di *occupazione* non e' in dollari
+    — sono capitale-giorni — e resta riportata a parte, perche' e' proprio il
+    caso in cui il delta per trade migliora mentre il rendimento sul capitale
+    occupato peggiora (consolidato §7 punto 7).
     """
 
     policy_id: str
@@ -642,16 +643,23 @@ def reconcile_views(
     # appaiato spiega, ed e' quello il residuo che la riconciliazione deve
     # esporre invece di assorbire nel totale.
     paired_intents = {pair.intent_id for pair in comparable}
+    policy_sign = {
+        comparison.baseline_policy_id: -1.0,
+        policy_id: 1.0,
+    }
     replacements = [
-        record for record in records if record.reason_code == REASON_REPLACEMENT
+        record
+        for record in records
+        if record.reason_code == REASON_REPLACEMENT
+        and record.policy_id in policy_sign
     ]
     reinvestment = sum(
-        record.incremental_pnl
+        policy_sign[record.policy_id] * record.incremental_pnl
         for record in replacements
         if record.intent_id in paired_intents
     )
     unattributed = sum(
-        record.incremental_pnl
+        policy_sign[record.policy_id] * record.incremental_pnl
         for record in replacements
         if record.intent_id not in paired_intents
     )

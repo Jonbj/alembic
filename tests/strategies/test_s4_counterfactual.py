@@ -488,7 +488,7 @@ def test_il_paired_misura_i_capitale_giorni_occupati_da_ciascuna_policy():
     assert pair.challenger_capital_days == pytest.approx(2000.0)
 
 
-def test_la_riconciliazione_attribuisce_la_differenza_al_reinvestimento():
+def test_la_riconciliazione_sottrae_il_replacement_della_baseline():
     comparison = build_paired_comparison(
         [_outcome("P0", net_pnl=10.0)],
         [_outcome("P1", net_pnl=35.0, exit_at=EXIT_AT + timedelta(days=2))],
@@ -498,11 +498,44 @@ def test_la_riconciliazione_attribuisce_la_differenza_al_reinvestimento():
     reconciliation = reconcile_views(comparison, records, policy_id="P1")
 
     assert reconciliation.trade_level_net_usd == pytest.approx(25.0)
-    assert reconciliation.reinvestment_usd == pytest.approx(40.0)
-    assert reconciliation.portfolio_level_net_usd == pytest.approx(65.0)
+    # Lo slot appartiene a P0: il suo replacement entra nella baseline del
+    # delta P1-P0, non puo' essere accreditato alla challenger.
+    assert reconciliation.reinvestment_usd == pytest.approx(-40.0)
+    assert reconciliation.portfolio_level_net_usd == pytest.approx(-15.0)
     assert reconciliation.unattributed_usd == pytest.approx(0.0)
     assert reconciliation.reconciled is True
     assert reconciliation.slot_occupancy_capital_days_delta == pytest.approx(2000.0)
+
+
+def test_la_riconciliazione_aggiunge_il_replacement_della_challenger():
+    comparison = build_paired_comparison(
+        [_outcome("P0", net_pnl=10.0)],
+        [_outcome("P1", net_pnl=35.0, exit_at=EXIT_AT + timedelta(days=2))],
+    )
+    records = build_portfolio_counterfactual(
+        [_slot(policy_id="P1")], {"intent-1": [_candidate()]}
+    )
+
+    reconciliation = reconcile_views(comparison, records, policy_id="P1")
+
+    assert reconciliation.reinvestment_usd == pytest.approx(40.0)
+    assert reconciliation.portfolio_level_net_usd == pytest.approx(65.0)
+    assert reconciliation.reconciled is True
+
+
+def test_la_riconciliazione_ignora_i_replacement_di_policy_estranee():
+    comparison = build_paired_comparison(
+        [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
+    )
+    records = build_portfolio_counterfactual(
+        [_slot(policy_id="P2")], {"intent-1": [_candidate()]}
+    )
+
+    reconciliation = reconcile_views(comparison, records, policy_id="P1")
+
+    assert reconciliation.reinvestment_usd == pytest.approx(0.0)
+    assert reconciliation.unattributed_usd == pytest.approx(0.0)
+    assert reconciliation.portfolio_level_net_usd == pytest.approx(25.0)
 
 
 def test_senza_sostituto_le_due_viste_coincidono():
@@ -630,8 +663,8 @@ def test_un_sostituto_su_uno_slot_non_appaiato_resta_non_attribuito():
     reconciliation = reconcile_views(comparison, records, policy_id="P1")
 
     assert reconciliation.reinvestment_usd == pytest.approx(0.0)
-    assert reconciliation.unattributed_usd == pytest.approx(40.0)
+    assert reconciliation.unattributed_usd == pytest.approx(-40.0)
     assert reconciliation.reconciled is False
     assert "UNATTRIBUTED_RESIDUAL" in reconciliation.blocking_reasons
     # la vista portfolio-level continua a mostrare il totale, non lo nasconde
-    assert reconciliation.portfolio_level_net_usd == pytest.approx(65.0)
+    assert reconciliation.portfolio_level_net_usd == pytest.approx(-15.0)
