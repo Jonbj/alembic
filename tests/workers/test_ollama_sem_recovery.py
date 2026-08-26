@@ -8,33 +8,42 @@ Safety guarantee: worker-inference has concurrency=1, so if a new task is
 starting, the previous one has already terminated (dead = no longer holding
 slots). Resetting at task startup is always safe.
 """
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
+
+
+def _redis(per_chiave):
+    """Redis finto con LLEN diverso per pool: la recovery ora ne sorveglia due."""
+    redis = MagicMock()
+    redis.llen.side_effect = lambda k: per_chiave.get(k, 0)
+    redis.exists.return_value = 1
+    return redis
 
 
 def test_resets_semaphore_when_all_slots_leaked():
-    """0 slots + init flag present → DEL both keys so next acquire re-initializes."""
+    """0 slots + init flag present → DEL both keys so next acquire re-initializes.
+
+    #368: ora vale per ENTRAMBI i pool, non solo per quello live.
+    """
     from src.workers.sentiment import _recover_ollama_semaphore_if_leaked
 
-    mock_redis = MagicMock()
-    mock_redis.llen.return_value = 0    # no slots available
-    mock_redis.exists.return_value = 1  # init flag set (semaphore was initialized)
+    redis = _redis({"ollama:sem": 0, "ollama:sem:shadow": 0})
 
-    _recover_ollama_semaphore_if_leaked(mock_redis)
+    _recover_ollama_semaphore_if_leaked(redis)
 
-    mock_redis.delete.assert_called_once_with("ollama:sem", "ollama:sem:init")
+    chiavi = {c.args for c in redis.delete.call_args_list}
+    assert ("ollama:sem", "ollama:sem:init") in chiavi
+    assert ("ollama:sem:shadow", "ollama:sem:shadow:init") in chiavi
 
 
 def test_no_action_when_slots_available():
-    """Slots still available → semaphore is healthy, do not touch it."""
+    """Dotazione piena su entrambi i pool → sani, non toccarli."""
     from src.workers.sentiment import _recover_ollama_semaphore_if_leaked
 
-    mock_redis = MagicMock()
-    mock_redis.llen.return_value = 2    # 2 of 3 slots free (1 in use)
-    mock_redis.exists.return_value = 1
+    redis = _redis({"ollama:sem": 2, "ollama:sem:shadow": 3})
 
-    _recover_ollama_semaphore_if_leaked(mock_redis)
+    _recover_ollama_semaphore_if_leaked(redis)
 
-    mock_redis.delete.assert_not_called()
+    redis.delete.assert_not_called()
 
 
 def test_no_action_on_first_ever_init():
@@ -50,17 +59,29 @@ def test_no_action_on_first_ever_init():
     mock_redis.delete.assert_not_called()
 
 
-def test_partial_slot_loss_not_recovered():
-    """1 slot still present (partial leak) → leave it alone, avoid false positives."""
+def test_partial_slot_loss_is_recovered():
+    """#368: una perdita PARZIALE ora viene ripristinata — inversione voluta.
+
+    La versione precedente lasciava stare 1-2 slot mancanti «per evitare falsi
+    positivi». Ma il falso positivo che si temeva non puo' esistere: a
+    concurrency=1, all'avvio del task nessun altro detiene token, quindi un
+    ammanco e' una perdita per definizione.
+
+    Il costo del vecchio comportamento non era teorico: un pool che scende a
+    1 slot su 3 non blocca nulla — quindi nessuno se ne accorge — ma ha un
+    terzo della capacita', e continua a perderne finche' arriva a zero. E' la
+    traiettoria che ha ucciso il pool shadow.
+    """
     from src.workers.sentiment import _recover_ollama_semaphore_if_leaked
 
-    mock_redis = MagicMock()
-    mock_redis.llen.return_value = 1    # 1 slot remains (2 leaked)
-    mock_redis.exists.return_value = 1
+    redis = _redis({"ollama:sem": 2, "ollama:sem:shadow": 1})
 
-    _recover_ollama_semaphore_if_leaked(mock_redis)
+    _recover_ollama_semaphore_if_leaked(redis)
 
-    mock_redis.delete.assert_not_called()
+    chiavi = {c.args for c in redis.delete.call_args_list}
+    assert chiavi == {("ollama:sem:shadow", "ollama:sem:shadow:init")}, (
+        "deve ripristinare solo il pool in ammanco, non quello sano"
+    )
 
 
 def test_redis_error_does_not_crash_worker():

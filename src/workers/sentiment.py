@@ -824,28 +824,56 @@ _OLLAMA_TIMEOUT_ALERT_COOLDOWN_S = 1800  # one alert per 30 minutes max
 _OLLAMA_SEM_KEY = "ollama:sem"
 _OLLAMA_SEM_INIT_KEY = "ollama:sem:init"
 
+# #368: i pool da sorvegliare, con la loro dotazione nominale. Il pool shadow
+# mancava da questa lista, ed e' il motivo per cui e' morto (0 slot su 3 il
+# 2026-08-26) mentre quello live e' rimasto sano: nessuna recovery lo guardava.
+# Le dotazioni devono restare allineate a _OllamaSemaphore in src/llm/client.py.
+_OLLAMA_SEM_POOLS = (
+    (_OLLAMA_SEM_KEY, _OLLAMA_SEM_INIT_KEY, 2),
+    ("ollama:sem:shadow", "ollama:sem:shadow:init", 3),
+)
+
 
 def _recover_ollama_semaphore_if_leaked(redis_client) -> None:
-    """Reset the Ollama semaphore if all slots have been leaked by a killed task.
+    """Ripristina i pool del semaforo Ollama che hanno perso token.
 
-    Safe to call at task startup: worker-inference has concurrency=1, so a
-    starting task is guaranteed to be the only live holder — any prior task
-    that leaked tokens has already terminated.
+    Sicura all'avvio del task: worker-inference gira a concurrency=1, quindi un
+    task che parte e' l'unico detentore possibile — qualunque task precedente
+    che avesse perso token e' gia' terminato. Ne segue che, in questo istante,
+    un pool con meno token della sua dotazione ha *perso* quei token: non e' un
+    falso positivo, e non c'e' nessuno a cui toglierli.
 
-    Only resets when LLEN==0 AND init flag is set (semaphore was ever initialized).
-    Partial leaks (1-2 slots missing) are left alone to avoid false positives.
+    Ripristina cancellando la chiave e il flag di init, cosi' che il prossimo
+    `_ensure_slots` risemini la dotazione piena.
+
+    #368: due allargamenti rispetto alla versione precedente.
+
+    1. **Copre il pool shadow.** Prima guardava solo `ollama:sem`. Il pool
+       shadow non era sorvegliato da nulla, e infatti e' l'unico morto.
+    2. **Ripristina anche una perdita parziale.** Prima interveniva solo a
+       LLEN==0, per «evitare falsi positivi». Ma a concurrency=1 e all'avvio
+       del task un ammanco non puo' essere un falso positivo, e lasciarlo
+       degradare significa un pool che perde capacita' in silenzio: 1 slot su 3
+       non blocca nulla, dimezza il throughput e non lo dice a nessuno.
     """
-    try:
-        slots = redis_client.llen(_OLLAMA_SEM_KEY)
-        init_exists = redis_client.exists(_OLLAMA_SEM_INIT_KEY)
-        if init_exists and slots == 0:
+    for key, init_key, slots in _OLLAMA_SEM_POOLS:
+        try:
+            disponibili = redis_client.llen(key)
+            if not redis_client.exists(init_key):
+                continue  # mai inizializzato: non c'e' nulla da recuperare
+            if disponibili >= slots:
+                continue  # dotazione piena
             log.warning(
-                "Ollama semaphore exhausted (0 slots) — auto-recovering leaked tokens "
-                "(safe: worker-inference concurrency=1 guarantees no concurrent holder)"
+                "Semaforo Ollama %s: %d slot su %d — ripristino i token persi "
+                "(sicuro: worker-inference a concurrency=1, nessun detentore concorrente)",
+                key, disponibili, slots,
             )
-            redis_client.delete(_OLLAMA_SEM_KEY, _OLLAMA_SEM_INIT_KEY)
-    except Exception as exc:
-        log.warning("_recover_ollama_semaphore_if_leaked: Redis error (%s) — skipping", exc)
+            redis_client.delete(key, init_key)
+        except Exception as exc:
+            log.warning(
+                "_recover_ollama_semaphore_if_leaked: errore Redis su %s (%s) — salto",
+                key, exc,
+            )
 
 
 def _maybe_notify_ollama_timeout(redis_client, timeout_count: int, total: int) -> None:
