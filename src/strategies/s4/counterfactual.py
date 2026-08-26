@@ -386,3 +386,176 @@ class FreedSlot:
     freed_at: datetime
     freed_notional: float
     slot_closes_at: datetime
+
+
+@dataclass(frozen=True)
+class ReplacementRecord:
+    """Una riga per slot liberato: cosa lo avrebbe occupato, e a che prezzo."""
+
+    intent_id: str
+    freed_symbol: str
+    policy_id: str
+    freed_at: datetime
+    freed_notional: float
+    slot_available: bool
+    slot_days: float
+    capital_days: float
+    idle_capital_days: float
+    substitute_symbol: str | None
+    substitute_signal_id: int | None
+    point_in_time_rank: int | None
+    gross_pnl: float
+    incremental_pnl: float
+    entry_cost_usd: float | None
+    exit_cost_usd: float | None
+    cost_model_version: str | None
+    reason_code: str
+    candidates_considered: int
+    rejected_candidates: tuple[tuple[str, str], ...]
+
+
+def _candidate_rejection(
+    candidate: SubstituteCandidate, slot: FreedSlot
+) -> str | None:
+    """Motivo di esclusione di un candidato, in ordine deterministico.
+
+    L'ordine conta solo per la leggibilita' del report: un candidato escluso
+    non rientra comunque. Il guard point-in-time viene per primo perche' e'
+    l'unico che invaliderebbe la misura invece di limitarla.
+    """
+    if _utc(candidate.observed_at) > _utc(slot.freed_at):
+        return "CANDIDATE_LOOKAHEAD"
+    if _utc(candidate.universe_as_of) > _utc(slot.freed_at):
+        return "CANDIDATE_UNIVERSE_NOT_POINT_IN_TIME"
+    if candidate.rank is None:
+        return "CANDIDATE_RANK_MISSING"
+    if candidate.collides_with_s1:
+        return "CANDIDATE_S1_COLLISION"
+    if not candidate.investable:
+        return "CANDIDATE_CAPITAL_NOT_INVESTABLE"
+    if candidate.entry_price <= 0:
+        return "CANDIDATE_ENTRY_PRICE_MISSING"
+    if candidate.exit_price is None:
+        return "CANDIDATE_EXIT_PRICE_MISSING"
+    return None
+
+
+def build_portfolio_counterfactual(
+    slots: list[FreedSlot],
+    candidates_by_intent: dict[str, list[SubstituteCandidate]],
+    *,
+    cost_model: CostModel | None = None,
+) -> tuple[ReplacementRecord, ...]:
+    """Misura, slot per slot, cosa avrebbe reso il capitale liberato.
+
+    Vive separata dal test trade-level per costruzione: il contratto impone
+    `opportunity_cost_reported: separatamente, a livello di portafoglio`. Un
+    pari-merito fra candidati non sceglie il ramo favorevole: viene marcato
+    ambiguo e non accredita nulla (`ambiguous_case` del contratto).
+    """
+    records: list[ReplacementRecord] = []
+
+    for slot in slots:
+        candidates = list(candidates_by_intent.get(slot.intent_id, ()))
+        slot_days = max(
+            0.0,
+            (_utc(slot.slot_closes_at) - _utc(slot.freed_at)).total_seconds() / 86400.0,
+        )
+        slot_available = slot_days > 0
+        capital_days = slot.freed_notional * slot_days if slot_available else 0.0
+
+        rejected: list[tuple[str, str]] = []
+        eligible: list[SubstituteCandidate] = []
+        if slot_available:
+            for candidate in candidates:
+                reason = _candidate_rejection(candidate, slot)
+                if reason is None:
+                    eligible.append(candidate)
+                else:
+                    rejected.append((candidate.symbol, reason))
+
+        chosen: SubstituteCandidate | None = None
+        reason_code = "NO_SUBSTITUTE_AVAILABLE"
+        if not slot_available:
+            reason_code = "SLOT_NOT_AVAILABLE"
+        elif eligible:
+            best_rank = min(int(c.rank or 0) for c in eligible)
+            tied = [c for c in eligible if int(c.rank or 0) == best_rank]
+            if len(tied) > 1:
+                # Pari rank point-in-time: non c'e' un sostituto determinato, e
+                # sceglierne uno significherebbe scegliere un P&L.
+                reason_code = "AMBIGUOUS_SUBSTITUTE"
+                rejected.extend(
+                    (c.symbol, "CANDIDATE_AMBIGUOUS_RANK") for c in tied
+                )
+                rejected.extend(
+                    (c.symbol, "CANDIDATE_OUTRANKED")
+                    for c in eligible
+                    if int(c.rank or 0) != best_rank
+                )
+            else:
+                chosen = tied[0]
+                reason_code = REASON_REPLACEMENT
+                rejected.extend(
+                    (c.symbol, "CANDIDATE_OUTRANKED")
+                    for c in eligible
+                    if c is not chosen
+                )
+
+        gross = 0.0
+        entry_cost = exit_cost = None
+        if chosen is not None:
+            assert chosen.exit_price is not None
+            # Il capitale liberato e' la size del sostituto: lo slot non
+            # cambia dimensione, cambia solo cosa lo occupa.
+            quantity = slot.freed_notional / chosen.entry_price
+            gross = (chosen.exit_price - chosen.entry_price) * quantity
+            if cost_model is not None:
+                entry_cost = float(
+                    cost_model.compute(
+                        symbol=chosen.symbol,
+                        notional=slot.freed_notional,
+                        qty=quantity,
+                        fill_price=chosen.entry_price,
+                        side="BUY",
+                    ).total_cost_usd
+                )
+                exit_cost = float(
+                    cost_model.compute(
+                        symbol=chosen.symbol,
+                        notional=quantity * chosen.exit_price,
+                        qty=quantity,
+                        fill_price=chosen.exit_price,
+                        side="SELL",
+                    ).total_cost_usd
+                )
+
+        incremental = gross - (entry_cost or 0.0) - (exit_cost or 0.0)
+        records.append(
+            ReplacementRecord(
+                intent_id=slot.intent_id,
+                freed_symbol=slot.symbol,
+                policy_id=slot.policy_id,
+                freed_at=_utc(slot.freed_at),
+                freed_notional=slot.freed_notional,
+                slot_available=slot_available,
+                slot_days=slot_days,
+                capital_days=capital_days,
+                idle_capital_days=capital_days if chosen is None else 0.0,
+                substitute_symbol=None if chosen is None else chosen.symbol,
+                substitute_signal_id=None if chosen is None else chosen.signal_id,
+                point_in_time_rank=None if chosen is None else chosen.rank,
+                gross_pnl=gross,
+                incremental_pnl=incremental,
+                entry_cost_usd=entry_cost,
+                exit_cost_usd=exit_cost,
+                cost_model_version=(
+                    None if cost_model is None else cost_model.version
+                ),
+                reason_code=reason_code,
+                candidates_considered=len(candidates),
+                rejected_candidates=tuple(rejected),
+            )
+        )
+
+    return tuple(records)

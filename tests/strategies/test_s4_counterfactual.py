@@ -22,6 +22,7 @@ from src.strategies.s4.counterfactual import (
     SubstituteCandidate,
     active_policy_hierarchy,
     build_paired_comparison,
+    build_portfolio_counterfactual,
     classify_exit_reason,
     outcome_from_p0_event,
 )
@@ -331,3 +332,139 @@ def test_un_esito_p2_non_entra_nel_paired_finche_p2_e_omitted():
     pair = comparison.pairs[0]
     assert pair.comparable is False
     assert "POLICY_OMITTED_BY_CONTRACT" in pair.exclusion_reasons
+
+
+# ── Criteri 3 e 4: controfattuale portfolio-level, solo dati point-in-time ──
+
+
+def test_il_controfattuale_registra_candidato_rank_slot_capitale_e_pnl():
+    record = build_portfolio_counterfactual([_slot()], {"intent-1": [_candidate()]})[0]
+
+    assert record.substitute_symbol == "NVDA"
+    assert record.substitute_signal_id == 5001
+    assert record.point_in_time_rank == 2
+    assert record.slot_available is True
+    # 1000 USD di notional per 2 giorni di slot
+    assert record.capital_days == pytest.approx(2000.0)
+    # +4% su 1000 USD di capitale liberato
+    assert record.incremental_pnl == pytest.approx(40.0)
+    assert record.reason_code == "REPLACEMENT_SLOT_REALLOCATED"
+
+
+def test_nessun_candidato_lascia_il_capitale_inerte_senza_pnl_incrementale():
+    record = build_portfolio_counterfactual([_slot()], {})[0]
+
+    assert record.substitute_symbol is None
+    assert record.slot_available is True
+    assert record.incremental_pnl == pytest.approx(0.0)
+    assert record.reason_code == "NO_SUBSTITUTE_AVAILABLE"
+    # il capitale resta impegnato dallo slot anche se non investito
+    assert record.capital_days == pytest.approx(2000.0)
+    assert record.idle_capital_days == pytest.approx(2000.0)
+
+
+def test_piu_candidati_selezionano_il_rank_migliore_e_registrano_gli_scartati():
+    candidates = [
+        _candidate(symbol="NVDA", rank=3, signal_id=1),
+        _candidate(symbol="AVGO", rank=1, signal_id=2, exit_price=101.0),
+    ]
+
+    record = build_portfolio_counterfactual([_slot()], {"intent-1": candidates})[0]
+
+    assert record.substitute_symbol == "AVGO"
+    assert record.point_in_time_rank == 1
+    assert record.candidates_considered == 2
+    assert ("NVDA", "CANDIDATE_OUTRANKED") in record.rejected_candidates
+
+
+def test_un_pari_rank_e_ambiguo_e_non_prende_il_percorso_favorevole():
+    """Il contratto impone: caso ambiguo marcato, mai il percorso favorevole."""
+    candidates = [
+        _candidate(symbol="NVDA", rank=1, signal_id=1, exit_price=130.0),
+        _candidate(symbol="AVGO", rank=1, signal_id=2, exit_price=101.0),
+    ]
+
+    record = build_portfolio_counterfactual([_slot()], {"intent-1": candidates})[0]
+
+    assert record.reason_code == "AMBIGUOUS_SUBSTITUTE"
+    assert record.substitute_symbol is None
+    assert record.incremental_pnl == pytest.approx(0.0)
+
+
+def test_un_candidato_osservato_dopo_la_decisione_e_lookahead():
+    late = _candidate(observed_at=EXIT_AT + timedelta(hours=1))
+
+    record = build_portfolio_counterfactual([_slot()], {"intent-1": [late]})[0]
+
+    assert record.substitute_symbol is None
+    assert ("NVDA", "CANDIDATE_LOOKAHEAD") in record.rejected_candidates
+    assert record.reason_code == "NO_SUBSTITUTE_AVAILABLE"
+
+
+def test_una_universe_non_point_in_time_squalifica_il_candidato():
+    drifted = _candidate(universe_as_of=EXIT_AT + timedelta(minutes=1))
+
+    record = build_portfolio_counterfactual([_slot()], {"intent-1": [drifted]})[0]
+
+    assert record.substitute_symbol is None
+    assert (
+        "NVDA",
+        "CANDIDATE_UNIVERSE_NOT_POINT_IN_TIME",
+    ) in record.rejected_candidates
+
+
+def test_la_collisione_s1_esclude_il_candidato():
+    record = build_portfolio_counterfactual(
+        [_slot()], {"intent-1": [_candidate(collides_with_s1=True)]}
+    )[0]
+
+    assert record.substitute_symbol is None
+    assert ("NVDA", "CANDIDATE_S1_COLLISION") in record.rejected_candidates
+
+
+def test_il_capitale_non_investibile_non_produce_un_sostituto():
+    record = build_portfolio_counterfactual(
+        [_slot()],
+        {
+            "intent-1": [
+                _candidate(investable=False, investable_reason="sub_share_notional")
+            ]
+        },
+    )[0]
+
+    assert record.substitute_symbol is None
+    assert (
+        "NVDA",
+        "CANDIDATE_CAPITAL_NOT_INVESTABLE",
+    ) in record.rejected_candidates
+    assert record.reason_code == "NO_SUBSTITUTE_AVAILABLE"
+
+
+def test_uno_slot_gia_chiuso_non_e_disponibile_e_non_riceve_sostituti():
+    closed = _slot(slot_closes_at=EXIT_AT)
+
+    record = build_portfolio_counterfactual([closed], {"intent-1": [_candidate()]})[0]
+
+    assert record.slot_available is False
+    assert record.reason_code == "SLOT_NOT_AVAILABLE"
+    assert record.substitute_symbol is None
+    assert record.capital_days == pytest.approx(0.0)
+
+
+def test_un_prezzo_di_uscita_mancante_censura_il_pnl_incrementale():
+    record = build_portfolio_counterfactual(
+        [_slot()], {"intent-1": [_candidate(exit_price=None)]}
+    )[0]
+
+    assert record.substitute_symbol is None
+    assert ("NVDA", "CANDIDATE_EXIT_PRICE_MISSING") in record.rejected_candidates
+
+
+def test_il_pnl_incrementale_e_netto_dei_costi_quando_il_cost_model_e_dato():
+    record = build_portfolio_counterfactual(
+        [_slot()], {"intent-1": [_candidate()]}, cost_model=_CostModel()
+    )[0]
+
+    # 40 USD lordi meno 1 di ingresso e 2 di uscita
+    assert record.incremental_pnl == pytest.approx(37.0)
+    assert record.cost_model_version == "cost-model:test-golden"
