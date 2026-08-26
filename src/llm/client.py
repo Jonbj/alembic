@@ -654,15 +654,60 @@ class _OllamaSemaphore:
         """
         r.eval(lua, 2, self._key, self._init_key, str(self._slots), self._SLOT)
 
+    def _restore_token(self) -> None:
+        """#368: rimette un token nel pool su una connessione propria.
+
+        Serve quando il ripristino avviene DOPO che `acquire` ha gia' chiuso la
+        sua connessione — cioe' esattamente nel caso della cancellazione.
+        """
+        try:
+            r = self._connect()
+            try:
+                r.lpush(self._key, self._SLOT)
+            finally:
+                r.close()
+        except Exception:
+            pass
+
     @contextlib.asynccontextmanager
     async def acquire(self):
         loop = asyncio.get_running_loop()
         r = await loop.run_in_executor(None, self._connect)
         try:
             await loop.run_in_executor(None, self._ensure_slots, r)
-            got = await loop.run_in_executor(
-                None, lambda: r.blpop(self._key, timeout=_OLLAMA_SEM_WAIT_S),
-            )
+            # #368: il BLPOP gira in un thread dell'executor. Se il task viene
+            # cancellato mentre e' li' dentro — ed e' precisamente cio' che fa
+            # il bounded wait dei candidati shadow — l'await solleva
+            # CancelledError, ma il thread NON si ferma: prosegue, estrae un
+            # token, e nessuno lo rimette. Il try/finally attorno allo `yield`
+            # piu' sotto non viene mai raggiunto, perche' la cancellazione
+            # arriva prima che `got` sia assegnato.
+            #
+            # E' cosi' che il pool shadow e' arrivato a 0 slot su 3, e perche'
+            # il pool live e' rimasto sano: le chiamate live non vengono
+            # cancellate a meta' attesa. Il done-callback restituisce il token
+            # che il thread estrae dopo la cancellazione.
+            # La responsabilita' del ripristino sta nel THREAD, non nel futuro:
+            # cancellare il task marca il futuro come cancellato, quindi il
+            # token che il thread estrae dopo non e' piu' raggiungibile da li'.
+            stato = {"abbandonato": False}
+
+            def _prendi_slot():
+                got_ = r.blpop(self._key, timeout=_OLLAMA_SEM_WAIT_S)
+                if got_ is not None and stato["abbandonato"]:
+                    # Nessuno raccogliera' questo token: rimettilo subito, su
+                    # una connessione propria (quella di `acquire` potrebbe
+                    # essere gia' chiusa dal suo finally).
+                    self._restore_token()
+                    return None
+                return got_
+
+            fut = loop.run_in_executor(None, _prendi_slot)
+            try:
+                got = await fut
+            except asyncio.CancelledError:
+                stato["abbandonato"] = True
+                raise
             if got is None:
                 raise RuntimeError(
                     f"Ollama semaphore: no slot after {_OLLAMA_SEM_WAIT_S}s — "
