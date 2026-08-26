@@ -84,6 +84,21 @@ def _utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+def _capital_days(
+    notional: float, d0: date | None, exit_at: datetime | None
+) -> float | None:
+    """Capitale-giorni occupati, contati in sedute come l'orizzonte del contratto.
+
+    L'orizzonte e' definito in sedute ("close di D0+2 sedute"), quindi la
+    granularita' resta quella: un'uscita intraday a D0 vale zero sedute, la
+    scadenza D+2 ne vale due. Non computabile => None, mai zero implicito.
+    """
+    if d0 is None or exit_at is None:
+        return None
+    sessions = (_utc(exit_at).date() - d0).days
+    return notional * max(0, sessions)
+
+
 # ── Esito per-policy: la forma che P0 in main soddisfa gia' ─────────────────
 
 
@@ -165,6 +180,8 @@ class PairedDelta:
     delta_bps: float | None
     baseline_exit_family: str | None
     challenger_exit_family: str | None
+    baseline_capital_days: float | None
+    challenger_capital_days: float | None
     comparable: bool
     exclusion_reasons: tuple[str, ...]
 
@@ -249,6 +266,10 @@ def build_paired_comparison(
                     challenger_exit_family=classify_exit_reason(
                         challenger.exit_reason_code
                     ),
+                    baseline_capital_days=None,
+                    challenger_capital_days=_capital_days(
+                        challenger.initial_notional, challenger.d0, challenger.exit_at
+                    ),
                     comparable=False,
                     exclusion_reasons=tuple(reasons),
                 )
@@ -300,14 +321,21 @@ def build_paired_comparison(
                 challenger_exit_family=classify_exit_reason(
                     challenger.exit_reason_code
                 ),
+                baseline_capital_days=_capital_days(
+                    base.initial_notional, base.d0, base.exit_at
+                ),
+                challenger_capital_days=_capital_days(
+                    challenger.initial_notional, challenger.d0, challenger.exit_at
+                ),
                 comparable=comparable,
                 exclusion_reasons=tuple(reasons),
             )
         )
 
     covered = {
-        pair.intent_id for pair in pairs if "PAIRED_UNSHARED_INTENT" not in
-        pair.exclusion_reasons
+        pair.intent_id
+        for pair in pairs
+        if "PAIRED_UNSHARED_INTENT" not in pair.exclusion_reasons
     }
     for intent_id, base in by_intent.items():
         if intent_id in covered:
@@ -326,6 +354,10 @@ def build_paired_comparison(
                 delta_bps=None,
                 baseline_exit_family=classify_exit_reason(base.exit_reason_code),
                 challenger_exit_family=None,
+                baseline_capital_days=_capital_days(
+                    base.initial_notional, base.d0, base.exit_at
+                ),
+                challenger_capital_days=None,
                 comparable=False,
                 exclusion_reasons=("PAIRED_CHALLENGER_MISSING",),
             )
@@ -559,3 +591,192 @@ def build_portfolio_counterfactual(
         )
 
     return tuple(records)
+
+
+# ── Riconciliazione delle due viste (criterio 5) ────────────────────────────
+
+
+@dataclass(frozen=True)
+class Reconciliation:
+    """Il ponte fra vista trade-level e vista portfolio-level, senza residui.
+
+    L'identita' in dollari e' `portfolio = trade + reinvestimento`: il
+    controfattuale aggiunge al test appaiato solo cio' che il capitale liberato
+    avrebbe reso. La differenza di *occupazione* non e' in dollari — sono
+    capitale-giorni — e resta riportata a parte, perche' e' proprio il caso in
+    cui il delta per trade migliora mentre il rendimento sul capitale occupato
+    peggiora (consolidato §7 punto 7).
+    """
+
+    policy_id: str
+    trade_level_net_usd: float
+    reinvestment_usd: float
+    portfolio_level_net_usd: float
+    unattributed_usd: float
+    reconciled: bool
+    blocking_reasons: tuple[str, ...]
+    pairs_comparable: int
+    pairs_excluded: int
+    excluded_by_reason: dict[str, int]
+    baseline_capital_days: float
+    challenger_capital_days: float
+    slot_occupancy_capital_days_delta: float
+    idle_capital_days: float
+    slots_total: int
+    substitutes_selected: int
+
+
+def reconcile_views(
+    comparison: PairedComparison,
+    records: tuple[ReplacementRecord, ...],
+    *,
+    policy_id: str,
+) -> Reconciliation:
+    """Riconcilia trade-level e portfolio-level attribuendo ogni differenza."""
+    pairs = [pair for pair in comparison.pairs if pair.policy_id == policy_id]
+    comparable = [pair for pair in pairs if pair.comparable]
+    trade_level = sum(pair.delta_usd or 0.0 for pair in comparable)
+
+    # Il reinvestimento conta solo se lo slot liberato appartiene a una coppia
+    # comparabile: altrimenti c'e' un P&L di replacement che nessun delta
+    # appaiato spiega, ed e' quello il residuo che la riconciliazione deve
+    # esporre invece di assorbire nel totale.
+    paired_intents = {pair.intent_id for pair in comparable}
+    replacements = [
+        record for record in records if record.reason_code == REASON_REPLACEMENT
+    ]
+    reinvestment = sum(
+        record.incremental_pnl
+        for record in replacements
+        if record.intent_id in paired_intents
+    )
+    unattributed = sum(
+        record.incremental_pnl
+        for record in replacements
+        if record.intent_id not in paired_intents
+    )
+    portfolio_level = trade_level + reinvestment + unattributed
+
+    blocking: list[str] = []
+    if not comparison.entries_frozen:
+        # Il contratto vieta il reinvestimento nel test appaiato: se e'
+        # avvenuto, la vista trade-level non misura piu' la sola exit.
+        blocking.append("ENTRIES_NOT_FROZEN")
+    if abs(unattributed) > _USD_TOLERANCE:
+        blocking.append("UNATTRIBUTED_RESIDUAL")
+
+    excluded = Counter(
+        reason
+        for pair in pairs
+        if not pair.comparable
+        for reason in pair.exclusion_reasons
+    )
+    baseline_days = sum(pair.baseline_capital_days or 0.0 for pair in comparable)
+    challenger_days = sum(pair.challenger_capital_days or 0.0 for pair in comparable)
+
+    return Reconciliation(
+        policy_id=policy_id,
+        trade_level_net_usd=trade_level,
+        reinvestment_usd=reinvestment,
+        portfolio_level_net_usd=portfolio_level,
+        unattributed_usd=unattributed,
+        reconciled=not blocking,
+        blocking_reasons=tuple(blocking),
+        pairs_comparable=len(comparable),
+        pairs_excluded=len(pairs) - len(comparable),
+        excluded_by_reason=dict(sorted(excluded.items())),
+        baseline_capital_days=baseline_days,
+        challenger_capital_days=challenger_days,
+        slot_occupancy_capital_days_delta=challenger_days - baseline_days,
+        idle_capital_days=sum(record.idle_capital_days for record in records),
+        slots_total=len(records),
+        substitutes_selected=sum(
+            1 for record in records if record.substitute_symbol is not None
+        ),
+    )
+
+
+# ── Report (criterio 6) ────────────────────────────────────────────────────
+
+
+def build_replacement_report(
+    comparison: PairedComparison,
+    records: tuple[ReplacementRecord, ...],
+    *,
+    policy_id: str,
+    window_start: date,
+    window_end: date,
+    contract_path: Path | None = None,
+) -> dict[str, object]:
+    """Le due viste in una riga logica per finestra, con i residui contati."""
+    if window_end < window_start:
+        raise ValueError("validation window ends before it starts")
+
+    in_window = tuple(
+        pair
+        for pair in comparison.pairs
+        if pair.d0 is not None and window_start <= pair.d0 <= window_end
+    )
+    windowed = PairedComparison(
+        baseline_policy_id=comparison.baseline_policy_id,
+        pairs=in_window,
+        entries_frozen=comparison.entries_frozen,
+        new_trades_created=comparison.new_trades_created,
+        excluded_by_reason=comparison.excluded_by_reason,
+    )
+    slots = tuple(
+        record
+        for record in records
+        if window_start <= record.freed_at.date() <= window_end
+    )
+    reconciliation = reconcile_views(windowed, slots, policy_id=policy_id)
+    hierarchy = active_policy_hierarchy(contract_path)
+
+    return {
+        "window_start": window_start.isoformat(),
+        "window_end": window_end.isoformat(),
+        "policy_id": policy_id,
+        "baseline_policy_id": comparison.baseline_policy_id,
+        "policy_hierarchy": list(hierarchy),
+        "p2_omitted_by_contract": "P2" not in hierarchy,
+        "paired": {
+            "total": len([p for p in in_window if p.policy_id == policy_id]),
+            "comparable": reconciliation.pairs_comparable,
+            "excluded": reconciliation.pairs_excluded,
+            "excluded_by_reason": reconciliation.excluded_by_reason,
+            "entries_frozen": windowed.entries_frozen,
+            "new_trades_created": windowed.new_trades_created,
+            "mean_delta_bps": windowed.mean_delta_bps(policy_id),
+            "net_delta_usd": windowed.net_delta_usd(policy_id),
+        },
+        "slots": {
+            "total": len(slots),
+            "substitutes_selected": reconciliation.substitutes_selected,
+            "by_reason": dict(
+                sorted(Counter(record.reason_code for record in slots).items())
+            ),
+            "rejected_by_reason": dict(
+                sorted(
+                    Counter(
+                        reason
+                        for record in slots
+                        for _, reason in record.rejected_candidates
+                    ).items()
+                )
+            ),
+            "capital_days": sum(record.capital_days for record in slots),
+            "idle_capital_days": reconciliation.idle_capital_days,
+            "incremental_pnl_usd": reconciliation.reinvestment_usd,
+        },
+        "reconciliation": {
+            "trade_level_net_usd": reconciliation.trade_level_net_usd,
+            "reinvestment_usd": reconciliation.reinvestment_usd,
+            "portfolio_level_net_usd": reconciliation.portfolio_level_net_usd,
+            "unattributed_usd": reconciliation.unattributed_usd,
+            "slot_occupancy_capital_days_delta": (
+                reconciliation.slot_occupancy_capital_days_delta
+            ),
+            "reconciled": reconciliation.reconciled,
+            "blocking_reasons": list(reconciliation.blocking_reasons),
+        },
+    }

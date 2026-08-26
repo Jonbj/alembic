@@ -23,8 +23,10 @@ from src.strategies.s4.counterfactual import (
     active_policy_hierarchy,
     build_paired_comparison,
     build_portfolio_counterfactual,
+    build_replacement_report,
     classify_exit_reason,
     outcome_from_p0_event,
+    reconcile_views,
 )
 from src.strategies.s4.lifecycle import (
     BrokerOrderSnapshot,
@@ -468,3 +470,168 @@ def test_il_pnl_incrementale_e_netto_dei_costi_quando_il_cost_model_e_dato():
     # 40 USD lordi meno 1 di ingresso e 2 di uscita
     assert record.incremental_pnl == pytest.approx(37.0)
     assert record.cost_model_version == "cost-model:test-golden"
+
+
+# ── Criterio 5: le due viste si riconciliano ────────────────────────────────
+
+
+def test_il_paired_misura_i_capitale_giorni_occupati_da_ciascuna_policy():
+    baseline = [_outcome("P0", exit_at=EXIT_AT)]
+    challenger = [
+        _outcome("P1", exit_at=EXIT_AT + timedelta(days=2), net_pnl=35.0)
+    ]
+
+    pair = build_paired_comparison(baseline, challenger).pairs[0]
+
+    # P0 esce il giorno del fill, P1 alla scadenza D+2: 0 contro 2 sedute
+    assert pair.baseline_capital_days == pytest.approx(0.0)
+    assert pair.challenger_capital_days == pytest.approx(2000.0)
+
+
+def test_la_riconciliazione_attribuisce_la_differenza_al_reinvestimento():
+    comparison = build_paired_comparison(
+        [_outcome("P0", net_pnl=10.0)],
+        [_outcome("P1", net_pnl=35.0, exit_at=EXIT_AT + timedelta(days=2))],
+    )
+    records = build_portfolio_counterfactual([_slot()], {"intent-1": [_candidate()]})
+
+    reconciliation = reconcile_views(comparison, records, policy_id="P1")
+
+    assert reconciliation.trade_level_net_usd == pytest.approx(25.0)
+    assert reconciliation.reinvestment_usd == pytest.approx(40.0)
+    assert reconciliation.portfolio_level_net_usd == pytest.approx(65.0)
+    assert reconciliation.unattributed_usd == pytest.approx(0.0)
+    assert reconciliation.reconciled is True
+    assert reconciliation.slot_occupancy_capital_days_delta == pytest.approx(2000.0)
+
+
+def test_senza_sostituto_le_due_viste_coincidono():
+    comparison = build_paired_comparison(
+        [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
+    )
+    records = build_portfolio_counterfactual([_slot()], {})
+
+    reconciliation = reconcile_views(comparison, records, policy_id="P1")
+
+    assert reconciliation.reinvestment_usd == pytest.approx(0.0)
+    assert reconciliation.portfolio_level_net_usd == pytest.approx(25.0)
+    assert reconciliation.reconciled is True
+    assert reconciliation.idle_capital_days == pytest.approx(2000.0)
+
+
+def test_un_reinvestimento_nel_paired_impedisce_la_riconciliazione():
+    """Se il cash liberato ha creato un trade, il test primario non e' valido."""
+    comparison = build_paired_comparison(
+        [_outcome("P0")], [_outcome("P1"), _outcome("P1", intent_id="intent-nuovo")]
+    )
+    records = build_portfolio_counterfactual([_slot()], {})
+
+    reconciliation = reconcile_views(comparison, records, policy_id="P1")
+
+    assert reconciliation.reconciled is False
+    assert "ENTRIES_NOT_FROZEN" in reconciliation.blocking_reasons
+
+
+def test_la_riconciliazione_non_perde_le_coppie_escluse():
+    comparison = build_paired_comparison(
+        [_outcome("P0"), _outcome("P0", intent_id="intent-2")],
+        [_outcome("P1"), _outcome("P1", intent_id="intent-2", net_pnl=None)],
+    )
+
+    reconciliation = reconcile_views(comparison, (), policy_id="P1")
+
+    assert reconciliation.pairs_excluded == 1
+    assert reconciliation.excluded_by_reason["PAIRED_NET_PNL_MISSING"] == 1
+
+
+# ── Criterio 6: il report copre i quattro casi limite ───────────────────────
+
+
+def test_il_report_copre_assenza_piu_sostituti_collisione_s1_e_capitale():
+    slots = [
+        _slot(intent_id="intent-assente"),
+        _slot(intent_id="intent-multi"),
+        _slot(intent_id="intent-s1"),
+        _slot(intent_id="intent-capitale"),
+    ]
+    candidates = {
+        "intent-multi": [
+            _candidate(symbol="NVDA", rank=3),
+            _candidate(symbol="AVGO", rank=1),
+        ],
+        "intent-s1": [_candidate(collides_with_s1=True)],
+        "intent-capitale": [
+            _candidate(investable=False, investable_reason="sub_share_notional")
+        ],
+    }
+    baseline = [_outcome("P0", intent_id=s.intent_id) for s in slots]
+    challenger = [
+        _outcome("P1", intent_id=s.intent_id, net_pnl=20.0, exit_reason_code="P1_TIME_DUE")
+        for s in slots
+    ]
+
+    report = build_replacement_report(
+        build_paired_comparison(baseline, challenger),
+        build_portfolio_counterfactual(slots, candidates),
+        policy_id="P1",
+        window_start=date(2026, 8, 1),
+        window_end=date(2026, 8, 31),
+    )
+
+    assert report["slots"]["total"] == 4
+    assert report["slots"]["by_reason"] == {
+        "NO_SUBSTITUTE_AVAILABLE": 3,
+        "REPLACEMENT_SLOT_REALLOCATED": 1,
+    }
+    assert report["slots"]["substitutes_selected"] == 1
+    assert report["paired"]["comparable"] == 4
+    assert report["paired"]["mean_delta_bps"] == pytest.approx(100.0)
+    assert report["reconciliation"]["reconciled"] is True
+    assert report["policy_hierarchy"] == ["P0", "P1"]
+    assert report["p2_omitted_by_contract"] is True
+
+
+def test_il_report_filtra_la_finestra_di_osservazione():
+    baseline = [_outcome("P0", d0=date(2026, 7, 1))]
+    challenger = [_outcome("P1", d0=date(2026, 7, 1), net_pnl=20.0)]
+
+    report = build_replacement_report(
+        build_paired_comparison(baseline, challenger),
+        (),
+        policy_id="P1",
+        window_start=date(2026, 8, 1),
+        window_end=date(2026, 8, 31),
+    )
+
+    assert report["paired"]["comparable"] == 0
+
+
+def test_il_report_rifiuta_una_finestra_invertita():
+    with pytest.raises(ValueError, match="window ends before it starts"):
+        build_replacement_report(
+            build_paired_comparison([], []),
+            (),
+            policy_id="P1",
+            window_start=date(2026, 8, 31),
+            window_end=date(2026, 8, 1),
+        )
+
+
+def test_un_sostituto_su_uno_slot_non_appaiato_resta_non_attribuito():
+    """Un P&L di replacement che non tocca una coppia comparabile e' un residuo."""
+    comparison = build_paired_comparison(
+        [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
+    )
+    records = build_portfolio_counterfactual(
+        [_slot(intent_id="intent-non-appaiato")],
+        {"intent-non-appaiato": [_candidate()]},
+    )
+
+    reconciliation = reconcile_views(comparison, records, policy_id="P1")
+
+    assert reconciliation.reinvestment_usd == pytest.approx(0.0)
+    assert reconciliation.unattributed_usd == pytest.approx(40.0)
+    assert reconciliation.reconciled is False
+    assert "UNATTRIBUTED_RESIDUAL" in reconciliation.blocking_reasons
+    # la vista portfolio-level continua a mostrare il totale, non lo nasconde
+    assert reconciliation.portfolio_level_net_usd == pytest.approx(65.0)
