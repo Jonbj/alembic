@@ -538,6 +538,48 @@ def test_la_riconciliazione_ignora_i_replacement_di_policy_estranee():
     assert reconciliation.portfolio_level_net_usd == pytest.approx(25.0)
 
 
+def test_le_diagnostiche_di_slot_escludono_le_policy_estranee():
+    comparison = build_paired_comparison(
+        [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
+    )
+    records = build_portfolio_counterfactual(
+        [
+            _slot(policy_id="P2"),
+            _slot(policy_id="P1", intent_id="intent-2", symbol="TSLA"),
+        ],
+        {"intent-1": [_candidate()]},
+    )
+
+    reconciliation = reconcile_views(comparison, records, policy_id="P1")
+
+    # Lo slot P2 non appartiene alla coppia P1-P0: contarlo gonfierebbe
+    # l'occupazione con capitale che questo confronto non ha mai mosso.
+    assert reconciliation.slots_total == 1
+    assert reconciliation.substitutes_selected == 0
+    assert reconciliation.idle_capital_days == pytest.approx(2000.0)
+
+
+def test_i_capitale_giorni_inattivi_restano_separati_per_policy():
+    comparison = build_paired_comparison(
+        [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
+    )
+    records = build_portfolio_counterfactual(
+        [
+            _slot(policy_id="P0"),
+            _slot(policy_id="P1", intent_id="intent-2", symbol="TSLA"),
+        ],
+        {},
+    )
+
+    reconciliation = reconcile_views(comparison, records, policy_id="P1")
+
+    # Capitale fermo sotto la baseline e capitale fermo sotto la challenger
+    # hanno segno opposto per l'opportunity cost: sommarli li cancella.
+    assert reconciliation.baseline_idle_capital_days == pytest.approx(2000.0)
+    assert reconciliation.challenger_idle_capital_days == pytest.approx(2000.0)
+    assert reconciliation.idle_capital_days == pytest.approx(4000.0)
+
+
 def test_senza_sostituto_le_due_viste_coincidono():
     comparison = build_paired_comparison(
         [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
@@ -622,6 +664,29 @@ def test_il_report_copre_assenza_piu_sostituti_collisione_s1_e_capitale():
     assert report["reconciliation"]["reconciled"] is True
     assert report["policy_hierarchy"] == ["P0", "P1"]
     assert report["p2_omitted_by_contract"] is True
+
+
+def test_il_report_conta_solo_gli_slot_della_coppia_confrontata():
+    baseline = [_outcome("P0", net_pnl=10.0)]
+    challenger = [_outcome("P1", net_pnl=35.0)]
+    slots = [
+        _slot(policy_id="P1"),
+        _slot(policy_id="P2", intent_id="intent-2", symbol="TSLA"),
+    ]
+
+    report = build_replacement_report(
+        build_paired_comparison(baseline, challenger),
+        build_portfolio_counterfactual(slots, {"intent-1": [_candidate()]}),
+        policy_id="P1",
+        window_start=date(2026, 8, 1),
+        window_end=date(2026, 8, 31),
+    )
+
+    # Il blocco `slots` descrive lo stesso perimetro del netto riconciliato:
+    # uno slot P2 nella finestra resta fuori da entrambi, non solo dal netto.
+    assert report["slots"]["total"] == 1
+    assert report["slots"]["by_reason"] == {"REPLACEMENT_SLOT_REALLOCATED": 1}
+    assert report["slots"]["capital_days"] == pytest.approx(2000.0)
 
 
 def test_il_report_filtra_la_finestra_di_osservazione():

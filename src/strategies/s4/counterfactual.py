@@ -623,6 +623,8 @@ class Reconciliation:
     challenger_capital_days: float
     slot_occupancy_capital_days_delta: float
     idle_capital_days: float
+    baseline_idle_capital_days: float
+    challenger_idle_capital_days: float
     slots_total: int
     substitutes_selected: int
 
@@ -647,11 +649,12 @@ def reconcile_views(
         comparison.baseline_policy_id: -1.0,
         policy_id: 1.0,
     }
+    # Gli slot di una policy estranea alla coppia non appartengono a questo
+    # confronto: ne' il loro P&L ne' la loro occupazione. Restringere una sola
+    # delle due meta' renderebbe le diagnostiche incoerenti col netto.
+    pair_records = [record for record in records if record.policy_id in policy_sign]
     replacements = [
-        record
-        for record in records
-        if record.reason_code == REASON_REPLACEMENT
-        and record.policy_id in policy_sign
+        record for record in pair_records if record.reason_code == REASON_REPLACEMENT
     ]
     reinvestment = sum(
         policy_sign[record.policy_id] * record.incremental_pnl
@@ -696,10 +699,20 @@ def reconcile_views(
         baseline_capital_days=baseline_days,
         challenger_capital_days=challenger_days,
         slot_occupancy_capital_days_delta=challenger_days - baseline_days,
-        idle_capital_days=sum(record.idle_capital_days for record in records),
-        slots_total=len(records),
+        idle_capital_days=sum(record.idle_capital_days for record in pair_records),
+        baseline_idle_capital_days=sum(
+            record.idle_capital_days
+            for record in pair_records
+            if record.policy_id == comparison.baseline_policy_id
+        ),
+        challenger_idle_capital_days=sum(
+            record.idle_capital_days
+            for record in pair_records
+            if record.policy_id == policy_id
+        ),
+        slots_total=len(pair_records),
         substitutes_selected=sum(
-            1 for record in records if record.substitute_symbol is not None
+            1 for record in pair_records if record.substitute_symbol is not None
         ),
     )
 
@@ -732,10 +745,15 @@ def build_replacement_report(
         new_trades_created=comparison.new_trades_created,
         excluded_by_reason=comparison.excluded_by_reason,
     )
+    # Stesso perimetro del netto riconciliato: finestra *e* coppia di policy.
+    # Uno slot liberato da una policy fuori dal confronto non descrive questo
+    # report, e contarlo qui lo renderebbe incoerente col blocco `reconciliation`.
+    pair_policies = {comparison.baseline_policy_id, policy_id}
     slots = tuple(
         record
         for record in records
         if window_start <= record.freed_at.date() <= window_end
+        and record.policy_id in pair_policies
     )
     reconciliation = reconcile_views(windowed, slots, policy_id=policy_id)
     hierarchy = active_policy_hierarchy(contract_path)
@@ -774,6 +792,10 @@ def build_replacement_report(
             ),
             "capital_days": sum(record.capital_days for record in slots),
             "idle_capital_days": reconciliation.idle_capital_days,
+            "baseline_idle_capital_days": reconciliation.baseline_idle_capital_days,
+            "challenger_idle_capital_days": (
+                reconciliation.challenger_idle_capital_days
+            ),
             "incremental_pnl_usd": reconciliation.reinvestment_usd,
         },
         "reconciliation": {
