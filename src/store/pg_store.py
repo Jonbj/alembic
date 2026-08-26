@@ -269,8 +269,12 @@ class PostgreSQLStore:
     """
 
     _INSERT_LLM_RESPONSE = """
-        INSERT INTO llm_responses (signal_id, model_id, polarity, confidence, reasoning, eligible, generated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, now())
+        INSERT INTO llm_responses (
+            signal_id, model_id, polarity, confidence, reasoning,
+            event_type, directness, materiality, novelty, risk_flags,
+            evidence_sentences, eligible, generated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
     """
 
     _INSERT_SHADOW_RESPONSE = """
@@ -2142,7 +2146,9 @@ class PostgreSQLStore:
                     [
                         (
                             signal_id, out.model_id, out.polarity, out.confidence,
-                            out.reasoning,
+                            out.reasoning, out.event_type, out.directness,
+                            out.materiality, out.novelty, out.risk_flags,
+                            out.evidence_sentences,
                             False if force_ineligible else out.confidence >= min_confidence,
                         )
                         for out in outputs

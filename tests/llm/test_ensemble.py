@@ -69,6 +69,100 @@ class TestQS10FailureLogging:
         assert "model=kimi-k2.6:cloud" in caplog.text
 
 
+class TestRelevanceEvidencePreservation:
+    """#328: issuer-relevance evidence must survive the response adapter."""
+
+    @pytest.mark.asyncio
+    async def test_run_ensemble_query_preserves_explicit_relevance_fields(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.llm.ensemble import run_ensemble_query
+        from src.models.news import LLMSentimentOutput
+
+        client = MagicMock()
+        client.model_id = "glm-5.2:cloud"
+        client.complete = AsyncMock(return_value=LLMSentimentOutput(
+            polarity=-0.6,
+            confidence=0.8,
+            reasoning="Tariffs hurt this issuer directly.",
+            event_type="regulatory",
+            directness="direct",
+            materiality=0.7,
+            novelty=0.4,
+            risk_flags=["already_priced_in"],
+            evidence_sentences=["The tariff applies to Ford imports."],
+        ))
+
+        outputs = await run_ensemble_query(
+            "prompt", [client], LLMSentimentOutput, "F"
+        )
+
+        assert len(outputs) == 1
+        assert outputs[0].event_type == "regulatory"
+        assert outputs[0].directness == "direct"
+        assert outputs[0].materiality == pytest.approx(0.7)
+        assert outputs[0].novelty == pytest.approx(0.4)
+        assert outputs[0].risk_flags == ["already_priced_in"]
+        assert outputs[0].evidence_sentences == [
+            "The tariff applies to Ford imports."
+        ]
+
+    @pytest.mark.asyncio
+    async def test_run_ensemble_query_does_not_persist_schema_defaults_as_evidence(self):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.llm.ensemble import run_ensemble_query
+        from src.models.news import LLMSentimentOutput
+
+        client = MagicMock()
+        client.model_id = "legacy-model"
+        client.complete = AsyncMock(return_value=LLMSentimentOutput(
+            polarity=0.1,
+            confidence=0.2,
+            reasoning="Legacy response without enriched fields.",
+        ))
+
+        outputs = await run_ensemble_query(
+            "prompt", [client], LLMSentimentOutput, "ADBE"
+        )
+
+        assert len(outputs) == 1
+        assert outputs[0].event_type is None
+        assert outputs[0].directness is None
+        assert outputs[0].materiality is None
+        assert outputs[0].novelty is None
+        assert outputs[0].risk_flags is None
+        assert outputs[0].evidence_sentences is None
+
+    def test_relevance_evidence_does_not_change_aggregation(self):
+        aggregator = EnsembleAggregator(
+            min_confidence=0.4, divergence_threshold=0.4
+        )
+        baseline = [
+            _mo(0.6, 0.8, "glm"),
+            _mo(0.2, 0.6, "gptoss"),
+        ]
+        enriched = [
+            output.model_copy(update={
+                "event_type": "macro",
+                "directness": "sector",
+                "materiality": 0.2,
+                "novelty": 0.3,
+                "risk_flags": ["already_priced_in"],
+                "evidence_sentences": ["Sector-level context."],
+            })
+            for output in baseline
+        ]
+
+        baseline_result = aggregator.aggregate(baseline)
+        enriched_result = aggregator.aggregate(enriched)
+
+        assert baseline_result is not None
+        assert enriched_result is not None
+        assert enriched_result.polarity == pytest.approx(baseline_result.polarity)
+        assert enriched_result.confidence == pytest.approx(baseline_result.confidence)
+
+
 class TestEnsembleAggregator:
     """Test ensemble aggregation logic."""
 

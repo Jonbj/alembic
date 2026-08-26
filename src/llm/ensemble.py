@@ -103,6 +103,15 @@ class ModelOutput(BaseModel):
     confidence: float
     reasoning: str
     model_id: str
+    # #328: issuer-relevance evidence is measurement-only. Nullable distinguishes
+    # a model that omitted an enriched field from one that explicitly returned
+    # the schema's backward-compatible default.
+    event_type: str | None = None
+    directness: str | None = None
+    materiality: float | None = None
+    novelty: float | None = None
+    risk_flags: list[str] | None = None
+    evidence_sentences: list[str] | None = None
 
 
 class AggregatedResult(BaseModel):
@@ -373,6 +382,7 @@ async def run_ensemble_query(
                 client.model_id, _classify_failure(result), result,
             )
             continue
+        explicit_fields: set[str] = result.model_fields_set
         raw_outputs.append(
             ModelOutput(
                 symbol=symbol,
@@ -380,6 +390,24 @@ async def run_ensemble_query(
                 confidence=result.confidence,
                 reasoning=result.reasoning,
                 model_id=client.model_id,
+                event_type=(
+                    result.event_type if "event_type" in explicit_fields else None
+                ),
+                directness=(
+                    result.directness if "directness" in explicit_fields else None
+                ),
+                materiality=(
+                    result.materiality if "materiality" in explicit_fields else None
+                ),
+                novelty=result.novelty if "novelty" in explicit_fields else None,
+                risk_flags=(
+                    result.risk_flags if "risk_flags" in explicit_fields else None
+                ),
+                evidence_sentences=(
+                    result.evidence_sentences
+                    if "evidence_sentences" in explicit_fields
+                    else None
+                ),
             )
         )
 
