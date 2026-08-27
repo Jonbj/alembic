@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+
+from alpaca.trading.models import Calendar
 
 from src.strategies.s4.lifecycle import SubmittedIntent
 from src.workers.performance import _reconcile_s4_lifecycles
@@ -30,12 +32,16 @@ def _intent() -> SubmittedIntent:
     )
 
 
-def _calendar(day: int):
-    return SimpleNamespace(
-        date=date(2026, 8, day),
-        open=datetime.combine(date(2026, 8, day), time(13, 30), tzinfo=UTC),
-        close=datetime.combine(date(2026, 8, day), time(20, 0), tzinfo=UTC),
-    )
+def _calendar(day: int) -> Calendar:
+    """La riga di calendario come la restituisce davvero alpaca-py.
+
+    Il modello costruisce `open`/`close` con
+    `datetime.strptime(f"{date} {HH:MM}")`: orari di parete **naive** in
+    `America/New_York`, non UTC. La fixture precedente li fabbricava tz-aware a
+    13:30/20:00Z e passava mentre la produzione censurava ogni fill del
+    pomeriggio: usare il modello vero e' cio' che rende il test una guardia.
+    """
+    return Calendar(date=f"2026-08-{day:02d}", open="09:30", close="16:00")
 
 
 def test_reconciler_scrive_fill_d0_due_session_e_quantita_broker():
@@ -128,3 +134,61 @@ def test_reject_pre_ack_e_terminal_senza_lookup_di_un_order_inesistente():
     assert event.reconstructible is True
     assert event.details["submission_reason_code"] == "BROKER_REJECT"
     assert event.details["submission_error"] == "APIError"
+
+
+def test_un_fill_del_pomeriggio_resta_dentro_la_seduta_e_produce_d0():
+    """Il calendario Alpaca e' in orario di mercato: leggerlo come UTC censurava.
+
+    Un fill alle 19:07Z e' le 15:07 a New York, dentro RTH. Con i confini di
+    seduta trattati come UTC la finestra diventava 09:30-16:00Z e ogni fill
+    dopo mezzogiorno di New York usciva come `FILL_OUTSIDE_RTH`: senza `d0` non
+    esistono orizzonte D+2, baseline P0 comparabile, ne' capitale-giorni.
+    """
+    store = MagicMock()
+    store.fetch_s4_submitted_intents.return_value = [_intent()]
+    broker = MagicMock()
+    broker.get_order_by_id.return_value = SimpleNamespace(
+        id="alpaca-order-1",
+        status="filled",
+        filled_at=datetime(2026, 8, 25, 19, 7, 5, tzinfo=UTC),
+        filled_qty="2.0",
+        filled_avg_price="105.25",
+    )
+    broker.get_all_positions.return_value = [SimpleNamespace(symbol="AMD", qty="2.0")]
+    broker.get_calendar.return_value = [_calendar(25), _calendar(26), _calendar(27)]
+
+    _reconcile_s4_lifecycles(
+        store, broker, observed_at=datetime(2026, 8, 25, 19, 12, tzinfo=UTC)
+    )
+
+    [event] = store.write_s4_lifecycle_events.call_args.args[0]
+    assert event.status == "FILLED"
+    assert event.reason_code == "BROKER_FILLED"
+    assert event.d0 == date(2026, 8, 25)
+    assert event.due_session == date(2026, 8, 27)
+    assert event.reconstructible is True
+
+
+def test_un_fill_fuori_rth_resta_censurato():
+    """La correzione allinea la finestra, non la allarga: il pre-market esce."""
+    store = MagicMock()
+    store.fetch_s4_submitted_intents.return_value = [_intent()]
+    broker = MagicMock()
+    broker.get_order_by_id.return_value = SimpleNamespace(
+        id="alpaca-order-1",
+        status="filled",
+        filled_at=datetime(2026, 8, 25, 12, 0, tzinfo=UTC),
+        filled_qty="2.0",
+        filled_avg_price="105.25",
+    )
+    broker.get_all_positions.return_value = [SimpleNamespace(symbol="AMD", qty="2.0")]
+    broker.get_calendar.return_value = [_calendar(25), _calendar(26), _calendar(27)]
+
+    _reconcile_s4_lifecycles(
+        store, broker, observed_at=datetime(2026, 8, 25, 12, 5, tzinfo=UTC)
+    )
+
+    [event] = store.write_s4_lifecycle_events.call_args.args[0]
+    assert event.status == "CENSORED"
+    assert event.reason_code == "FILL_OUTSIDE_RTH"
+    assert event.d0 is None

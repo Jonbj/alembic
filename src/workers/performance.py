@@ -36,8 +36,9 @@ import json
 from src.workers._async_utils import run_async
 import logging
 from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 import numpy as np
@@ -84,6 +85,38 @@ _MIN_SAMPLES_PER_MODEL = 30
 _MIN_ABS_MEAN_ICIR = 0.05  # G3.5: freeze if mean ICIR < -this (ensemble anti-predictive)
 _SLIPPAGE_WARN_PCT = 0.30   # ⚠️ if estimated slippage > 30% of gross P&L
 
+# Il calendario Alpaca parla orari di parete di mercato, non UTC.
+_MARKET_TZ = ZoneInfo("America/New_York")
+
+
+def _session_boundary(value, session_date: date):
+    """Confine di seduta Alpaca reso esplicito nel fuso di mercato.
+
+    `alpaca.trading.models.Calendar` costruisce `open`/`close` con
+    `datetime.strptime(f"{date} {HH:MM}")`: sono orari di parete **naive**, in
+    `America/New_York`. Trattarli come UTC sposta la finestra RTH di quattro o
+    cinque ore e censura ogni fill del pomeriggio. E' la stessa conversione che
+    `src/mobile_monitoring/state.py::_aware_datetime` applica gia' al medesimo
+    payload.
+    """
+    if value is None:
+        return None
+    if isinstance(value, time):
+        value = datetime.combine(session_date, value)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=_MARKET_TZ)
+    return value
+
+
+def _market_session(row):
+    from src.strategies.s4.lifecycle import MarketSession
+
+    return MarketSession(
+        session_date=row.date,
+        open_at=_session_boundary(row.open, row.date),
+        close_at=_session_boundary(row.close, row.date),
+    )
+
 
 def _reconcile_s4_lifecycles(
     pg: PostgreSQLStore,
@@ -96,7 +129,6 @@ def _reconcile_s4_lifecycles(
 
     from src.strategies.s4.lifecycle import (
         BrokerOrderSnapshot,
-        MarketSession,
         reconcile_entry,
     )
 
@@ -119,11 +151,7 @@ def _reconcile_s4_lifecycles(
             start=(now - timedelta(days=7)).date(),
             end=(now + timedelta(days=14)).date(),
         ))
-        sessions = [MarketSession(
-            session_date=row.date,
-            open_at=row.open,
-            close_at=row.close,
-        ) for row in calendar_rows]
+        sessions = [_market_session(row) for row in calendar_rows]
     except Exception as exc:
         log.warning("#295: Alpaca calendar unavailable during lifecycle reconcile: %s", exc)
         sessions = []
