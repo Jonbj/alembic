@@ -136,6 +136,27 @@ def _exited_quantity(trading_client, exit_order_ids) -> float:
     return total
 
 
+def _market_sessions(trading_client, *, now: datetime | None = None) -> list:
+    """Sedute Alpaca attorno a oggi; una lista vuota e' un guasto, non un festivo.
+
+    Condivisa fra il reconciler del lifecycle (#295) e la challenger P1 (#297):
+    entrambi devono leggere gli stessi confini di seduta, altrimenti `d0` e il
+    cutoff di scadenza potrebbero venire da due calendari diversi.
+    """
+    from alpaca.trading.requests import GetCalendarRequest
+
+    at = now or datetime.now(timezone.utc)
+    try:
+        rows = trading_client.get_calendar(GetCalendarRequest(
+            start=(at - timedelta(days=7)).date(),
+            end=(at + timedelta(days=14)).date(),
+        ))
+    except Exception as exc:
+        log.warning("#295: Alpaca calendar unavailable: %s", exc)
+        return []
+    return [_market_session(row) for row in rows]
+
+
 def _market_session(row):
     from src.strategies.s4.lifecycle import MarketSession
 
@@ -153,8 +174,6 @@ def _reconcile_s4_lifecycles(
     observed_at: datetime | None = None,
 ) -> int:
     """Project submitted S4 intents onto broker fills, positions and sessions."""
-    from alpaca.trading.requests import GetCalendarRequest
-
     from src.strategies.s4.lifecycle import (
         BrokerOrderSnapshot,
         reconcile_entry,
@@ -174,15 +193,7 @@ def _reconcile_s4_lifecycles(
         log.warning("#295: broker positions unavailable during lifecycle reconcile: %s", exc)
         broker_positions = None
 
-    try:
-        calendar_rows = trading_client.get_calendar(GetCalendarRequest(
-            start=(now - timedelta(days=7)).date(),
-            end=(now + timedelta(days=14)).date(),
-        ))
-        sessions = [_market_session(row) for row in calendar_rows]
-    except Exception as exc:
-        log.warning("#295: Alpaca calendar unavailable during lifecycle reconcile: %s", exc)
-        sessions = []
+    sessions = _market_sessions(trading_client, now=now)
 
     try:
         exit_orders_by_entry = pg.fetch_s4_exit_order_ids()
@@ -878,16 +889,37 @@ def run_reconcile_fills_intraday() -> dict:
         except Exception as exc:
             p0_error = str(exc)
             log.warning("S4 P0 shadow replay failed: %s", exc)
+        p1_events = 0
+        p1_error = None
+        try:
+            from alpaca.data.historical import StockHistoricalDataClient
+
+            from src.strategies.s4.p1_runtime import project_p1_candidates
+
+            p1_events = project_p1_candidates(
+                pg,
+                StockHistoricalDataClient(
+                    api_key=_cfg.ALPACA_API_KEY,
+                    secret_key=_cfg.ALPACA_SECRET_KEY,
+                ),
+                _market_sessions(tc),
+            )
+        except Exception as exc:
+            p1_error = str(exc)
+            log.warning("S4 P1 shadow projection failed: %s", exc)
         log.info("Intraday reconcile: %d fill(s) updated", updated)
         result = {
             "updated": updated,
             "s4_lifecycle_events": lifecycle_events,
             "s4_p0_events": p0_events,
+            "s4_p1_events": p1_events,
         }
         if lifecycle_error is not None:
             result["s4_lifecycle_error"] = lifecycle_error
         if p0_error is not None:
             result["s4_p0_error"] = p0_error
+        if p1_error is not None:
+            result["s4_p1_error"] = p1_error
         return result
     except Exception as exc:
         log.warning("Intraday fill reconciliation failed: %s", exc)
