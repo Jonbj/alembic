@@ -110,11 +110,11 @@ def _candidate_is_investable(row: Mapping[str, Any]) -> bool:
     reason = str(row.get("reason_code") or "")
     # Il primo escluso dal top-N e' proprio il sostituto potenziale: la sua
     # ``is_tradable`` e' falsa soltanto perche' lo slot non era ancora libero.
-    if reason == "RANK_OUTSIDE_TOP_N":
-        return True
-    if reason.startswith("SKIP_") or reason == "BROKER_REJECT":
-        return False
-    return bool(row.get("is_tradable"))
+    # Al contrario, ``is_tradable`` resta vero anche dopo una disposizione
+    # SUBMITTED: descrive il superamento del rank, non capitale ancora libero.
+    return reason == "RANK_OUTSIDE_TOP_N" and not bool(
+        row.get("anti_pyramiding")
+    )
 
 
 def _s1_collision(row: Mapping[str, Any]) -> bool:
