@@ -304,13 +304,22 @@ C) Committa i ledger e il report SOLO SE il branch corrente e' main. Controlla P
 
      git rev-parse --abbrev-ref HEAD
 
-   - Se stampa "main": committa.
+   - Se stampa "main": sincronizza origin/main PRIMA di committare. Report e ledger sono gia'
+     modificati, quindi preservali durante il rebase con autostash:
+       git pull --rebase --autostash origin main
+     Se il pull fallisce, NON aggiungere o committare nulla e segnalalo a stdout. Se riesce:
        git add docs/evidence/findings.json docs/evidence/market_daily.jsonl "__REPORT_FILE__"
        git commit -m "evidence: ledger __DATE_TARGET__"
        git push origin main
+     Se questo primo push fallisce perche' origin/main e' avanzato ancora, sincronizza il commit
+     appena creato e ritenta il push UNA SOLA VOLTA:
+       git pull --rebase origin main
+       git push origin main
      Il PUSH e' obbligatorio quanto il commit: senza, il ledger vive solo su questa
-     macchina e un cambio di sessione o un guasto lo perde. Se il push fallisce (rete,
-     divergenza col remoto) NON forzarlo: lascia il commit locale e segnalalo a stdout.
+     macchina e un cambio di sessione o un guasto lo perde. Se il rebase del retry va in conflitto,
+     esegui `git rebase --abort` per tornare al commit locale valido. Se il retry fallisce (rete,
+     divergenza o conflitto) NON forzarlo: lascia il commit locale e segnala chiaramente il
+     fallimento a stdout.
    - Se stampa QUALSIASI ALTRA COSA: NON committare. I file restano scritti sul disco (non
      annullare le modifiche) e stampi su stdout, come ultima riga:
        ATTENZIONE: ledger scritto ma NON committato — branch corrente <nome>, atteso main.
