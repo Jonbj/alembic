@@ -146,9 +146,10 @@ sync_worktree() {
 }
 
 # Copia i file dalla tree principale nella worktree e li mette in staging.
-# Restituisce 1 se un ledger append-only si accorcerebbe: significa che la copia
-# su disco e' piu' vecchia di main, e committarla cancellerebbe righe gia' sul
-# remoto.
+# findings.json viene fuso semanticamente sopra main: il cron puo' partire da
+# uno snapshot vecchio, ma le occorrenze gia' pubblicate non devono sparire. I
+# JSONL conservano la guardia per righe cancellate. Restituisce 1 per qualunque
+# regressione append-only, 2 per un errore operativo.
 stage_paths() {
     local rel src dest deleted
     local staged=0
@@ -160,7 +161,14 @@ stage_paths() {
         fi
         dest="$WORKTREE/$rel"
         mkdir -p "$(dirname "$dest")"
-        cp "$src" "$dest" || return 2
+        if [[ "$rel" == "docs/evidence/findings.json" ]]; then
+            if ! python3 "$SCRIPT_DIR/merge_evidence_findings.py" "$dest" "$src" "$dest"; then
+                log "RIFIUTO: impossibile fondere $rel senza perdere evidenza."
+                return 1
+            fi
+        else
+            cp "$src" "$dest" || return 2
+        fi
         git -C "$WORKTREE" add -- "$rel" || return 2
         staged=1
         if [[ "$rel" == *.jsonl ]]; then
@@ -199,7 +207,7 @@ for attempt in 1 2; do
     stage_status=$?
     if (( stage_status == 1 )); then
         write_pending
-        finish not_committed "commit annullato: ledger append-only in regressione"
+        finish not_committed "commit annullato: ledger append-only in regressione o conflitto"
     elif (( stage_status == 2 )); then
         write_pending
         finish not_committed "errore nello staging dei file"

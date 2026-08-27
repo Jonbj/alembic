@@ -8,10 +8,11 @@ dedicata appuntata su main, quindi il branch della tree principale non conta.
 
 from __future__ import annotations
 
+import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +20,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 REAL_GIT = shutil.which("git") or "/usr/bin/git"
 HELPER = ROOT / "scripts" / "commit_evidence_ledger.sh"
+MERGER = ROOT / "scripts" / "merge_evidence_findings.py"
 REPORT = "docs/ALPHA_MISS_REPORT_2026-08-26.md"
 LEDGER = "docs/evidence/findings.json"
 JSONL = "docs/evidence/market_daily.jsonl"
@@ -58,7 +60,12 @@ def repo(tmp_path: Path) -> dict:
     _git(project, "config", "user.email", "cron@alembic.test")
     _git(project, "config", "user.name", "Cron Alembic")
 
-    _write(project / LEDGER, '{"findings": []}\n')
+    _write(
+        project / LEDGER,
+        json.dumps(
+            {"schema_version": 1, "prossimo_id": 1, "findings": []}, indent=2
+        ) + "\n",
+    )
     _write(project / JSONL, '{"data": "2026-08-25"}\n')
     _git(project, "add", "-A")
     _git(project, "commit", "-m", "base")
@@ -69,11 +76,37 @@ def repo(tmp_path: Path) -> dict:
 
     (project / "scripts").mkdir(exist_ok=True)
     shutil.copy2(HELPER, project / "scripts" / HELPER.name)
+    shutil.copy2(MERGER, project / "scripts" / MERGER.name)
     return {"remote": remote, "project": project, "tmp": tmp_path}
 
 
 def _dirty_the_ledger(project: Path) -> None:
-    _write(project / LEDGER, '{"findings": ["F-001"]}\n')
+    _write(
+        project / LEDGER,
+        json.dumps(
+            {
+                "schema_version": 1,
+                "prossimo_id": 2,
+                "findings": [
+                    {
+                        "id": "F-001",
+                        "titolo": "Finding di test",
+                        "occorrenze": [
+                            {
+                                "data": "2026-08-26",
+                                "costo_usd": 1.0,
+                                "nota": "test",
+                                "fonte": "REPORT_TEST.md",
+                            }
+                        ],
+                        "costo_cumulato_usd": 1.0,
+                        "occorrenze_non_stimate": 0,
+                    }
+                ],
+            },
+            indent=2,
+        ) + "\n",
+    )
     with (project / JSONL).open("a") as handle:
         handle.write('{"data": "2026-08-26"}\n')
     _write(project / REPORT, "# Alpha miss 2026-08-26\n")
@@ -149,6 +182,32 @@ def test_push_rejected_is_retried_after_resync(repo):
     _git(side, "config", "user.email", "altro@alembic.test")
     _git(side, "config", "user.name", "Altro Agente")
     _write(side / "docs/altro.md", "lavoro concorrente\n")
+    _write(
+        side / LEDGER,
+        json.dumps(
+            {
+                "schema_version": 1,
+                "prossimo_id": 3,
+                "findings": [
+                    {
+                        "id": "F-002",
+                        "titolo": "Finding concorrente",
+                        "occorrenze": [
+                            {
+                                "data": "2026-08-26",
+                                "costo_usd": 2.0,
+                                "nota": "pubblicato mentre il cron pusha",
+                                "fonte": "REPORT_CONCORRENTE.md",
+                            }
+                        ],
+                        "costo_cumulato_usd": 2.0,
+                        "occorrenze_non_stimate": 0,
+                    }
+                ],
+            },
+            indent=2,
+        ) + "\n",
+    )
     _git(side, "add", "-A")
     _git(side, "commit", "-m", "concorrente")
 
@@ -178,6 +237,119 @@ def test_push_rejected_is_retried_after_resync(repo):
     assert _remote_file(remote, REPORT) == "# Alpha miss 2026-08-26\n"
     # il lavoro concorrente non e' stato sovrascritto
     assert _remote_file(remote, "docs/altro.md") == "lavoro concorrente\n"
+    findings = json.loads(_remote_file(remote, LEDGER))["findings"]
+    assert [finding["id"] for finding in findings] == ["F-002", "F-001"]
+
+
+def test_remote_findings_occurrence_is_preserved_when_source_branch_is_stale(repo):
+    """Una nuova occorrenza su main non deve sparire copiando lo snapshot locale."""
+    project, remote, tmp = repo["project"], repo["remote"], repo["tmp"]
+    base_occurrence = {
+        "data": "2026-08-25",
+        "costo_usd": 10.0,
+        "nota": "base",
+        "fonte": "REPORT_BASE.md",
+    }
+    local_occurrence = {
+        "data": "2026-08-26",
+        "costo_usd": 20.0,
+        "nota": "cron alpha-miss",
+        "fonte": "REPORT_ALPHA.md",
+    }
+    remote_occurrence = {
+        "data": "2026-08-26",
+        "costo_usd": 30.0,
+        "nota": "analisi concorrente gia' su main",
+        "fonte": "REPORT_CONCORRENTE.md",
+    }
+
+    def ledger(*occurrences: dict) -> str:
+        return json.dumps(
+            {
+                "schema_version": 1,
+                "prossimo_id": 2,
+                "findings": [
+                    {
+                        "id": "F-001",
+                        "titolo": "Copertura news bassa",
+                        "tipo": "osservazione",
+                        "occorrenze": list(occurrences),
+                        "costo_cumulato_usd": sum(
+                            occurrence["costo_usd"] for occurrence in occurrences
+                        ),
+                        "occorrenze_non_stimate": 0,
+                    }
+                ],
+            },
+            indent=2,
+        ) + "\n"
+
+    # La feature branch conserva lo snapshot da cui il cron e' partito e vi
+    # aggiunge la propria occorrenza.
+    _write(project / LEDGER, ledger(base_occurrence, local_occurrence))
+
+    # Nel frattempo main acquisisce un'altra occorrenza sullo stesso finding.
+    side = tmp / "side-findings"
+    subprocess.run(["git", "clone", str(remote), str(side)], check=True, capture_output=True)
+    _git(side, "config", "user.email", "altro@alembic.test")
+    _git(side, "config", "user.name", "Altro Agente")
+    _write(side / LEDGER, ledger(base_occurrence, remote_occurrence))
+    _git(side, "add", LEDGER)
+    _git(side, "commit", "-m", "evidence concorrente")
+    _git(side, "push", "origin", "main")
+
+    result = _run_helper(repo, LEDGER)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _status_line(result.stdout) == "GIT_STATUS=pushed"
+    merged = json.loads(_remote_file(remote, LEDGER))["findings"][0]
+    assert merged["occorrenze"] == [
+        base_occurrence,
+        remote_occurrence,
+        local_occurrence,
+    ]
+    assert merged["costo_cumulato_usd"] == 60.0
+
+
+def test_conflicting_change_to_published_occurrence_is_refused(tmp_path):
+    """Stessa data/fonte con contenuto diverso non e' una nuova occorrenza."""
+    canonical = {
+        "schema_version": 1,
+        "prossimo_id": 2,
+        "findings": [
+            {
+                "id": "F-001",
+                "titolo": "Copertura news bassa",
+                "occorrenze": [
+                    {
+                        "data": "2026-08-26",
+                        "costo_usd": 10.0,
+                        "nota": "gia' pubblicata",
+                        "fonte": "REPORT.md",
+                    }
+                ],
+                "costo_cumulato_usd": 10.0,
+                "occorrenze_non_stimate": 0,
+            }
+        ],
+    }
+    stale = json.loads(json.dumps(canonical))
+    stale["findings"][0]["occorrenze"][0]["nota"] = "riscritta dal cron"
+    remote_file = tmp_path / "remote.json"
+    source_file = tmp_path / "source.json"
+    _write(remote_file, json.dumps(canonical))
+    _write(source_file, json.dumps(stale))
+
+    result = subprocess.run(
+        ["python3", str(MERGER), str(remote_file), str(source_file), str(remote_file)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "modifica dati gia' presenti su main" in result.stderr
+    assert json.loads(remote_file.read_text()) == canonical
 
 
 def _failing_push_bin(tmp: Path) -> Path:
@@ -285,7 +457,7 @@ def _run_cron(repo: dict, extra_path: Path | None = None) -> tuple[subprocess.Co
         bin_dir / "claude",
         "#!/usr/bin/env bash\n"
         "printf 'Executive summary fittizio\\n'\n"
-        "printf '%s\\n' '{\"findings\": [\"F-001\"]}' > docs/evidence/findings.json\n"
+        "printf '%s\\n' '{\"schema_version\":1,\"prossimo_id\":2,\"findings\":[{\"id\":\"F-001\",\"titolo\":\"Finding di test\",\"occorrenze\":[{\"data\":\"2026-08-26\",\"costo_usd\":1.0,\"nota\":\"test\",\"fonte\":\"REPORT_TEST.md\"}],\"costo_cumulato_usd\":1.0,\"occorrenze_non_stimate\":0}]}' > docs/evidence/findings.json\n"
         "printf '%s\\n' '{\"data\": \"2026-08-26\"}' >> docs/evidence/market_daily.jsonl\n"
         f"printf '# Alpha miss 2026-08-26\\n' > {REPORT}\n",
     )
