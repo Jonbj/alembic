@@ -68,6 +68,14 @@ def d_hard_distance(row: dict[str, Any], cfg: dict[str, float]) -> float | None:
     oggi per decidere un'uscita di due giorni fa e' look-ahead, e falserebbe
     proprio il confronto che il trial deve misurare.
 
+    Dalla riga di trade vengono **solo** `stop_d_init` e `stop_vol_at_entry`.
+    I confini restano quelli di `broker_disaster_stop`, come in
+    `StopPolicy.d_hard`: `stop_floor` e `stop_cap` sulla stessa riga sono i
+    confini dello stop **protettivo** di sleeve (S4: 0.03-0.08), un'altra cosa.
+    Clipparci il disaster stop darebbe a P1 una soglia molto piu' stretta di
+    quella comune — una violazione di `identical_across_policies`, con P1 che
+    esce per rischio dove nessun'altra policy lo farebbe.
+
     Senza `stop_d_init` la distanza non e' ricostruibile e vale `None`: la
     decisione lo dichiara con `D_HARD_NOT_EVALUABLE` invece di inventare uno
     stop che nessun prezzo puo' bucare.
@@ -80,8 +88,8 @@ def d_hard_distance(row: dict[str, Any], cfg: dict[str, float]) -> float | None:
         float(cfg.get("multiplier", _D_HARD_MULTIPLIER)) * float(d_init),
         float(cfg.get("sigma_multiple", _D_HARD_SIGMA_MULTIPLE)) * float(sigma or 0.0),
     )
-    floor = float(row.get("stop_floor") or cfg.get("floor_pct", _D_HARD_FLOOR))
-    cap = float(row.get("stop_cap") or cfg.get("cap_pct", _D_HARD_CAP))
+    floor = float(cfg.get("floor_pct", _D_HARD_FLOOR))
+    cap = float(cfg.get("cap_pct", _D_HARD_CAP))
     return min(max(base, floor), cap)
 
 
