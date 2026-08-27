@@ -480,3 +480,47 @@ def test_nessun_campo_dell_esito_puo_chiedere_un_ordine():
     assert event.runtime_order_id is None
     assert event.runtime_decision_id is None
     assert event.runtime_quantity == 0.0
+
+
+def test_una_distanza_di_stop_diversa_e_una_decisione_diversa():
+    """La policy dipende dal trigger: se cambia, l'esito e' un evento nuovo.
+
+    Senza questo il fingerprint ignorerebbe l'unico parametro che distingue una
+    P1 con lo stop comune da una con uno stop di sleeve, e in una tabella
+    append-only `ON CONFLICT DO NOTHING` scarterebbe la correzione — lo stesso
+    modo in cui #374 lasciava corrente una proiezione P0 superata.
+    """
+    lifecycle = _lifecycle()
+    snapshot = load_p1_policy_snapshot(CONTRACT_PATH)
+    window = _window(quotes=(_quote(400, 101.0),), complete=False)
+    prima = datetime(2026, 8, 26, 15, 7, tzinfo=UTC)
+
+    stretto = decide_p1(
+        lifecycle, window, snapshot, _CostModel(),
+        d_hard_distance=0.08, observed_at=prima,
+    )
+    comune = decide_p1(
+        lifecycle, window, snapshot, _CostModel(),
+        d_hard_distance=0.12, observed_at=prima,
+    )
+
+    assert stretto.reason_code == comune.reason_code == "P1_HOLDING"
+    assert stretto.event_id != comune.event_id
+
+
+def test_una_distanza_ignota_non_collide_con_una_nota():
+    lifecycle = _lifecycle()
+    snapshot = load_p1_policy_snapshot(CONTRACT_PATH)
+    window = _window(quotes=(_quote(400, 101.0),), complete=False)
+    prima = datetime(2026, 8, 26, 15, 7, tzinfo=UTC)
+
+    nota = decide_p1(
+        lifecycle, window, snapshot, _CostModel(),
+        d_hard_distance=0.12, observed_at=prima,
+    )
+    ignota = decide_p1(
+        lifecycle, window, snapshot, _CostModel(),
+        d_hard_distance=None, observed_at=prima,
+    )
+
+    assert nota.event_id != ignota.event_id
