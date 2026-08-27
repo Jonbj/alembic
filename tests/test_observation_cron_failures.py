@@ -183,3 +183,20 @@ def test_report_is_staged_in_the_same_commit_as_its_ledger(script_name: str, exp
     source = (ROOT / "scripts" / script_name).read_text()
 
     assert expected_add in source
+
+
+def test_alpha_miss_syncs_before_commit_and_retries_a_rejected_push():
+    source = (ROOT / "scripts" / "daily_alpha_miss_analysis.sh").read_text()
+    commit_protocol = source[source.index("C) Committa") : source.index("D) Nella sezione")]
+
+    branch_guard = commit_protocol.index("git rev-parse --abbrev-ref HEAD")
+    pre_commit_sync = commit_protocol.index("git pull --rebase --autostash origin main")
+    stage = commit_protocol.index(
+        'git add docs/evidence/findings.json docs/evidence/market_daily.jsonl "__REPORT_FILE__"'
+    )
+    commit = commit_protocol.index('git commit -m "evidence: ledger __DATE_TARGET__"')
+    first_push = commit_protocol.index("git push origin main", commit)
+    retry_sync = commit_protocol.index("git pull --rebase origin main", first_push)
+    retry_push = commit_protocol.index("git push origin main", retry_sync)
+
+    assert branch_guard < pre_commit_sync < stage < commit < first_push < retry_sync < retry_push
