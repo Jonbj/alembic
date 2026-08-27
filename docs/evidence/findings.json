@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 48,
+  "prossimo_id": 49,
   "findings": [
     {
       "id": "F-001",
@@ -110,9 +110,15 @@
           "costo_usd": 222.13,
           "nota": "55 dei 96 simboli watchlist senza una sola riga in news_log: peggior valore della serie e QUINTA seduta consecutiva di peggioramento monotono (40 il 08-19, 41 il 08-20, 43 il 08-21, 51 il 08-24, 55 oggi). Copertura effective-timely 17/96 = 17.7% (21 articoli issuer-specific tempestivi su 55 articoli unici, 98 righe news_log). Due dei quattro miss del giorno sono NO_NEWS puri: RDDT +6.39% e NVO +3.71%, entrambi zero righe e zero segnali. Su NVO il buco e' netto perche' il dossier registra corporate_calendar.status=OBSERVED (cash_dividends del 2026-08-25, Alpaca Corporate Actions API): l'evento societario era osservabile da una fonte gia' integrata e la pipeline news non lo ha visto. Zero copertura anche su NOK +3.92% e WDC +3.53%, entrambi mover, entrambi detenuti. Costo lordo close-to-close x size S4 2% NAV ($2.200): RDDT $140.47 + NVO $81.59 = $222.13; sull'orizzonte realmente accessibile (ingresso al primo ciclo eleggibile -> close) $86.42 + $36.31 = $122.73.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-25.md §7"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": 67.06,
+          "nota": "PRIMA INTERRUZIONE del peggioramento monotono: 45 dei 96 simboli watchlist senza una riga in news_log, contro 40 (08-19) -> 41 -> 43 -> 51 -> 55 (08-25). Effective-timely coverage risale da 17.7% a 25.0% (24/96 ticker; 34 articoli issuer-specific tempestivi su 63 unici, 114 righe). Non chiamo una tendenza su un punto: il 08-25 era un massimo della serie e questo puo' essere ritorno alla media. Tre dei cinque miss sono NO_NEWS puri - DB +3.05%, RDDT -4.36%, ERIC -3.08% - e su tutti e tre non esiste nemmeno un segnale da scartare. Copertura di settore a zero su energy (0/6), industrials (0/4), materials (0/2) e telecom, e proprio da telecom arriva ERIC, terzo mover, con volume_surprise +1.25 (unico mover con anomalia di volume visibile da una fonte non-news). Concentrazione invariata: top-5 ticker 32.4% delle righe, top-5 settori 85.3%. COSTO: $67.06 lordo e SOLO su DB, unico dei tre NO_NEWS al rialzo e quindi unico azionabile con book long-only (per RDDT ed ERIC opportunity_v2 calcola accessible=0.0 con missing_reason long_only_no_short_downside_not_held). Sull'orizzonte realmente accessibile il costo e' NEGATIVO, -$7.90: DB ha aperto a 40.53 sopra la chiusura di 40.23, l'intero +3.05% era gap notturno e qualunque ingresso intraday avrebbe perso denaro. Registro il lordo per confrontabilita' con la serie, ma il numero onesto e' che oggi la copertura news mancante non e' costata nulla.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-26.md §7"
         }
       ],
-      "costo_cumulato_usd": 2258.86,
+      "costo_cumulato_usd": 2325.92,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 2
@@ -213,12 +219,18 @@
           "costo_usd": null,
           "nota": "Delle 46 posizioni aperte a fine 2026-08-24, 11 sono legacy senza stop_strategy (BAC, GOOGL, GS, MS, PBR, RIO, ROKU, SPY, UBS, UNH, XLE), tutte entrate il 2026-07-10. Il realizzato del giorno e' attribuibile (-53,91, tutto S4), ma l'MTM del book aperto (-282,77, cinque volte il realizzato) non lo e': quattro di quelle posizioni legacy (RIO, PBR, UBS, XLE) sono energia/materiali e nessuna sleeve ne assume il risultato.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-24.md §7"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "10 posizioni su 48 nello snapshot_apertura del dossier restano senza attribuzione di sleeve (strategia='CONTAMINAZIONE'), contro 34 S1 e 4 S4: il 21% del book e' fuori da qualunque attribuzione per strategia, e ogni confronto S1-vs-S4 costruito su questa serie eredita il buco. Verificato che su trades la colonna 'strategy' non esiste affatto: l'attribuzione passa dal campo stop_strategy, che e' un effetto collaterale del sistema di stop e non un'anagrafica. Costo null: strumentazione.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-26.md §7"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 15
+      "occorrenze_non_stimate": 16
     },
     {
       "id": "F-003",
@@ -973,10 +985,16 @@
           "costo_usd": null,
           "nota": "43 mapping fan-out extra su 98 righe news_log (44%), 55 articoli unici, mapping_rilevanza 77 UNKNOWN contro 21 ISSUER_SPECIFIC. Due casi puliti: (a) l'articolo 'What's Going On With Dell Technologies Stock Tuesday?', per costruzione un pezzo su DELL, e' mappato anche su AMD e concorre a formarne il punteggio; (b) 'Bitcoin Tops $80,000, Oil Sinks As Navy Clears Hormuz Mines: Stock Market Today', 10 ticker, produce il max_score_fanout +0.040 di HOOD, piu' alto del suo max_score_own di -0.0098. Sul titolo che ha fatto +8.17% il segnale proveniente da terzi batte quello dell'articolo dedicato. quota_righe_fanout dei candidati miss 0.1429.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-25.md §7"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "quota di mapping fan-out 51 extra su 114 righe da 63 articoli unici (44.7%). mapping_rilevanza: 80 UNKNOWN contro 34 ISSUER_SPECIFIC, e zero righe classificate SECTOR_MACRO, FALSE_ENTITY_MATCH o IRRELEVANT_FANOUT - la classificazione manda in UNKNOWN tutto cio' che non riconosce, quindi il 70% delle righe non e' caratterizzato (peggioramento rispetto al 08-21, che distingueva 79 FALSE_ENTITY_MATCH). Casi leggibili: 'The Fed Faces A Dangerous Choice For Investors; Nvidia Earnings Ahead' su 9 ticker, 'Nasdaq 100 Falls as Hot PCE Inflation Stirs Rate-Hike Bets' su 7 (IWM, LLY, NVDA, QQQ, XLE, XLK, XLV), '10 Information Technology Stocks With Whale Alerts' su 6. Su HOOD quota_righe_fanout = 0.5 con max_score_own = null: meta' dei punteggi nasce da pezzi condivisi e nessuno da un pezzo di cui sia il soggetto. Costo null: nessun ordine aperto oggi, quindi nessun dollaro attribuibile al fan-out.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-26.md §7"
         }
       ],
       "costo_cumulato_usd": 925.31,
-      "occorrenze_non_stimate": 10,
+      "occorrenze_non_stimate": 11,
       "stato": "aperto",
       "issue": null
     },
@@ -1467,10 +1485,16 @@
           "costo_usd": null,
           "nota": "news_log 8899, fonte gdelt_gkg, extraction_method=org_lookup: 'Buy this stock to play boom in one area of AI, Morgan Stanley says' attribuito al ticker MS. Ha prodotto lo SCORE PIU' ALTO DELLA GIORNATA (+0,680, conf 0,85). Costo realizzato ZERO perche' scartato da SKIP_FALLBACK (execution_decisions 14600, 18:37) - ma per una ragione accidentale: glm-5.2 era sotto il floor di confidence 0,4, non perche' il ticker fosse riconosciuto sbagliato. Con l'ensemble completo MS sarebbe stato il candidato #1 al ranking BUY. Difetto armato che oggi non ha sparato per coincidenza.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-25.md [DAY-013] §10"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "ATTRIBUZIONE ERRATA SU UN PERCORSO NUOVO: source_metadata con n_ticker=1, non org_lookup. L'articolo 'Boston Scientific Reports Global Disruption After Cybersecurity Incident' e' mappato su NVO E SOLO NVO (n_ticker=1, quindi non e' fan-out) tramite extraction_method='source_metadata', cioe' i metadati del provider Benzinga, non il lookup delle organizzazioni. Stesso ESITO di F-020 (un articolo su una societa' estranea forma il punteggio di un ticker) per un MECCANISMO diverso; ha prodotto il segnale -0.5533 di F-040. Secondo caso pulito nella stessa giornata: 'Ohio Rep. Michael Rulli Sold Up to $100K Worth of Alphabet Stock' mappato su GOOGL E LLY (n_ticker=2); LLY chiude -3.59% e 2 dei suoi 4 articoli non parlano di Eli Lilly (l'altro non-LLY e' il pezzo macro sul PCE, fanout a 7 ticker). AGGANCIATO QUI E NON A UN ID NUOVO per non spezzare l'evidenza, ma con una condizione esplicita: SE la ricorrenza mostra che il percorso source_metadata ha un tasso di errore proprio, va scorporato, perche' il rimedio sarebbe diverso (validare i tag del provider contro il soggetto del testo, non correggere il lookup). Costo null: nessun ordine e' nato oggi da un'attribuzione errata (intent NVO fermi su SKIP_FALLBACK, intent LLY su SKIP_PYRAMIDING).",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-26.md §7"
         }
       ],
       "costo_cumulato_usd": 60.5,
-      "occorrenze_non_stimate": 10,
+      "occorrenze_non_stimate": 11,
       "stato": "aperto",
       "issue": null
     },
@@ -1994,9 +2018,15 @@
           "costo_usd": 0.0,
           "nota": "Due segnali sopra gate bloccati su mover forti: DELL +0.5813 (il piu' alto della giornata) per 15 cicli consecutivi e MRVL +0.3683 per 5, entrambi su titoli gia' detenuti da S1 con posizioni minuscole (DELL 0.930 azioni ~$420, MRVL 1.552 ~$373, contro uno slot S4 da $2.200). COSTO ZERO, NON NON-STIMATO: l'opportunita' lorda dei due vale $199.54 (DELL $93.06 + MRVL $106.48) ma sull'orizzonte realmente accessibile vale -$41.49 (DELL +$1.32 con ingresso 16:25 @451.23 -> close 451.50; MRVL -$42.81 con ingresso 14:10 @245.15 -> close 240.38). MRVL alle 14:10 aveva gia' fatto e superato tutto il proprio movimento. Il guard ha impedito due ingressi che avrebbero perso denaro. Stessa conclusione del 08-24 con segno del movimento opposto.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-25.md §7, §3b"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": 47.91,
+          "nota": "PRIMA OCCORRENZA IN CUI IL GUARD COSTA INVECE DI RISPARMIARE: la serie protettiva si interrompe. 108 SKIP_PYRAMIDING su 6 simboli. Caso piu' vistoso LLY: segnale +0.3220 (generato il 08-24 alle 13:00, gia' vecchio di due sedute), sopra gate, bloccato 17 volte perche' detenuto da S1, e LLY ha chiuso -3.59%, peggiore posizione della giornata - li' il blocco ha protetto. Ma gli altri cinque bloccati sono tutti positivi: CSCO +1.13%, DELL +2.73%, MU +0.58%, SOXX +0.26%, META +1.07%, e la somma ribalta il segno. COSTO $47.91: a size S4 standard $2.200 e su base close-to-close, CSCO +$24.75, DELL +$60.03, MU +$12.80, SOXX +$5.73, META +$23.50 contro LLY -$78.91, netto +$47.91 di guadagno mancato. AVVERTENZA: e' un lordo close-to-close, non l'orizzonte accessibile - l'ingresso reale sarebbe avvenuto intraday e su DELL, che apre a 449.58 sotto la chiusura precedente di 451.50, il lordo sovrastima. Registrato su questa base perche' le occorrenze 08-24 (-$340, risparmio) e 08-25 ($0) usano la stessa e vanno confrontabili. Lettura: il costo di questo difetto e' il rendimento condizionale dei titoli gia' detenuti, cioe' una variabile che cambia segno col regime; va misurato su orizzonte lungo, non giornata per giornata. Difetto strutturale invariato: nessuna traccia in execution_decisions, scarti ricostruibili solo da s4_intent_events.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-26.md §7"
         }
       ],
-      "costo_cumulato_usd": 12.47,
+      "costo_cumulato_usd": 60.38,
       "occorrenze_non_stimate": 0,
       "stato": "aperto",
       "issue": null
@@ -2225,6 +2255,12 @@
           "costo_usd": 0.0,
           "nota": "Tre mover al ribasso con segnale ensemble sopra il gate 0.30 in valore assoluto e segno concorde col prezzo: BIDU -12.73% (mover piu' forte della giornata), articolo dedicato sul miss di utili Q2, segnale 14:15 -0.454 (non-fallback); HOOD -4.90%, articolo dedicato sul calo dei volumi crypto, segnale 16:15 -0.435 (non-fallback); META -4.45%, 5 articoli fra cui uno META-specifico sul processo per la sicurezza minori (fino a 1.4 trilioni di responsabilita'), segnale 15:30 -0.312 (non-fallback). In tutti e tre i casi copertura presente, segno corretto, magnitudine sopra soglia - la pipeline ha funzionato correttamente end-to-end - eppure zero probabilita' di generare un ordine perche' S4/S1 comprano solo su score positivo (long-only per costruzione, nessun ramo short nel codice). Distinto da F-009 (li' il segnale NON supera il gate; qui lo supera abbondantemente ed e' comunque strutturalmente inagibile). Costo 0.00 VERIFICATO (non null): opportunity_v2 conferma accessible_opportunity_usd=0 per tutti e tre (gross aggregato 279.97+107.89+97.83=485.69 $, azzerato non per assenza di dato ma per costruzione long-only). Prima giornata della finestra osservata con tre casi simultanei di segnale corretto e sopra soglia bloccato solo dalla direzione.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-18.md §3, §7"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": 0.0,
+          "nota": "Seconda occorrenza. Il segnale piu' forte della giornata e' ribassista, ha il segno giusto ed e' strutturalmente inutilizzabile: NVO score -0.5533 (fallback FinBERT, 15:30 ET), ampiamente sopra il gate 0.30 in modulo, e NVO ha chiuso a -3.02%. Nessun ordine possibile: book long-only, titolo non detenuto; i 2 intent S4 si fermano su SKIP_FALLBACK. Aggravante separata dal merito del finding: il segnale ha il segno giusto PER L'ARTICOLO SBAGLIATO - l'unico pezzo attribuito a NVO e' 'Boston Scientific Reports Global Disruption After Cybersecurity Incident', che non nomina Novo Nordisk (vedi occorrenza F-020 di oggi). Il segno corretto e' coincidenza, non lettura. COSTO $0.00 MISURATO: opportunity_v2 calcola accessible_opportunity_usd = 0.0 con missing_reason long_only_no_short_downside_not_held; il vincolo e' di mandato, non un difetto, e il lordo teorico $66.46 non e' raggiungibile da nessuna configurazione attuale del book.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-26.md §7"
         }
       ],
       "costo_cumulato_usd": 0.0,
@@ -2325,10 +2361,16 @@
           "costo_usd": null,
           "nota": "ID NUOVO GIUSTIFICATO: nessun finding esistente copre la generazione del dossier. F-026 riguarda il ciclo FORENSE che scrive il report ma non aggiorna findings.json; F-027 la perdita dei log dei container al redeploy. Qui salta il precalcolo deterministico stesso, cioe' lo strumento su cui poggia tutta la serie di market_daily.jsonl. Riproduzione: 'uv run python scripts/alpha_miner_dossier.py 2026-08-25' -> 'INFO 2026-08-25 saltato: Query fallita: ERROR: column reference \"decision_at\" is ambiguous' seguito da 'INFO dossier scritti: 0'. Causa in _s4_entry_intents (scripts/alpha_miner_dossier.py:835-836): WHERE e ORDER BY usano decision_at NON qualificato mentre il join espone quella colonna sia in s4_candidate_population sia in s4_intent_events (verificato con \\d su entrambe). E' un errore di PARSING, quindi deterministico e indipendente dai dati: non fallisce 'a volte'. Aggravante: l'eccezione e' catturata per-giorno e degrada in un INFO con exit code 0, quindi il cron puo' scrivere 'dossier scritti: 0' senza che nulla se ne accorga - stessa classe di guasto del 'timeout silenzioso' che la deroga del 2026-08-01 cita come motivo per cui lo script esiste. I dossier 08-21 e 08-24, rigenerati il 2026-08-26 alle 09:24, NON contengono la chiave intenti_ingresso_s4: il blocco intent non e' mai stato prodotto in produzione da quando e' stato innestato. Il dossier di oggi e' stato ottenuto da una copia usa-e-getta in /tmp con le sole due referenze qualificate (intent.decision_at); il repo non e' stato modificato. Costo null: e' strumentazione, non P&L - il danno e' la perdita della giornata di osservazione e si conta per ricorrenza.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-25.md §7, nota di provenienza"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "Seconda occorrenza consecutiva, ora databile a un commit preciso. 'uv run python scripts/alpha_miner_dossier.py 2026-08-26' -> 'INFO 2026-08-26 saltato: Query fallita: ERROR: column reference \"decision_at\" is ambiguous' + 'dossier scritti: 0', exit code 0. git log -S 'LEFT JOIN s4_intent_events disposition' -- scripts/alpha_miner_dossier.py restituisce UN SOLO commit, d5dacc3 (PR #354, 2026-08-25 13:12:27), che ha introdotto il join senza qualificare le due referenze a decision_at gia' presenti alle righe 835-836; information_schema conferma che sia s4_candidate_population sia s4_intent_events espongono la colonna. Errore di parsing, deterministico. Il dossier 2026-08-25 nel repo ha mtime successivo al commit ma NON e' prodotto da questo codice: porta la chiave 'intenti_ingresso_s4' (schema vecchio) e l'mtime viene da backfill_provenienza_dossier.py, che riscrive senza rigenerare. Quindi il blocco intent non e' mai stato prodotto in produzione da quando e' stato innestato. Dossier di oggi generato da copia usa-e-getta con le sole due referenze qualificate; repo non modificato. Costo null: strumentazione, il danno e' la ricorrenza (due sedute di osservazione salvate solo a mano).",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-26.md §7"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 1,
+      "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
     },
@@ -2344,10 +2386,16 @@
           "costo_usd": null,
           "nota": "NUOVO ID GIUSTIFICATO: nessun finding esistente riguarda il parser del dossier. F-026 e' 'il ciclo forense non aggiorna findings.json', F-044 e' 'la query degli intent fallisce e il giorno viene saltato' - qui il dossier si genera correttamente e la query gira, ma un confronto di stringa nel parser Python azzera un campo. scripts/alpha_miner_dossier.py:822 seleziona COALESCE(disposition.is_tradable::text,''), che in PostgreSQL rende 'true'/'false'; :847 testa row[7]=='t'. Verificato: SELECT true::text -> 'true'. Risultato: is_tradable=False su tutte le 1494 righe del dossier 2026-08-25, comprese le 3 con reason_code=SUBMITTED che hanno prodotto ordini eseguiti e riempiti (NVDA, CSCO, META). Il DB dice il contrario: 76 dispositions con is_tradable=true (70 SKIP_PYRAMIDING + 3 SKIP_IDEMPOTENCY + 3 SUBMITTED). L'aggregato aggregati.guardia_contraddizione, la cui definizione dichiarata a :1461 e' \"l'aggregato 'soppressi' include solo gli intenti con disposition.is_tradable=true\", filtra su un insieme sempre vuoto: n_intenti_tradabili=0, n_valutabili=0, n_soppressi=0, somma_pnl_realizzato_soppressi=0.0. La strumentazione step-2 di #335, deployata il 2026-08-25 (commit d5dacc3), misura ZERO PER COSTRUZIONE dal primo giorno di vita, e uno zero e' indistinguibile da 'la guardia non scatta mai'. Difetto retroattivo su tutti i dossier schema 2.5 e sul cumulato di finestra, che rilegge i file gia' scritti. Costo non stimabile: non tocca il denaro, azzera uno strumento di misura. Passa il test di esenzione della OBSERVATION_CHARTER.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-25.md [DAY-001] §10"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "Ricorrenza confermata sui dati 2026-08-26. aggregati.guardia_contraddizione: n_intenti 1518, n_intenti_tradabili 0, n_intenti_non_tradabili 1518, n_valutabili 0, n_soppressi 0. Finestra di osservazione cumulata (2 giorni, schema 2.5): 3012 intent, zero tradabili. Un partizionamento che assegna il 100% delle righe a un lato solo per due giorni su due non descrive i dati: e' il confronto is_tradable::text che non puo' mai essere vero. Conseguenza: la guardia non ha mai valutato nulla da quando esiste, e i suoi zeri sono indistinguibili da 'nessuna soppressione'. Costo null: strumentazione.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-26.md §7"
         }
       ],
-      "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 1,
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
     },
@@ -2363,6 +2411,12 @@
           "costo_usd": 30.85,
           "nota": "NUOVO ID GIUSTIFICATO: non e' F-012 (fan-out) - l'articolo ha n_ticker=1, relevance ISSUER_SPECIFIC e attribution ISSUER_SPECIFIC secondo il dossier stesso, il ticker e' corretto; non e' F-020 (org_lookup); non e' F-030 (ritardo) - qui il testo era disponibile e sbagliato, non tardivo. Il difetto e' nel prompt: src/workers/sentiment.py:356 costruisce _DK_COT_PROMPT.format(text=clean_body[...], symbol=...) e il titolo non compare mai; src/connectors/alpaca_news.py:156-166 imposta body=summary (o content ripulito) e usa headline solo per news_log.title. Caso del 2026-08-25: news_log 8902, title 'Why Is Robinhood Stock Surging on Tuesday?', body_snippet 'Robinhood Markets Inc. (NASDAQ: HOOD) stock traded lower Thursday after a White House crypto summit and analyst debate.' - giorno diverso, direzione opposta. glm-5.2 pol 0,00 conf 0,20; gpt-oss pol -0,10 conf 0,30; score finale -0,0098. HOOD ha chiuso a +8,17%, mover #1 della seduta, ed e' l'UNICO articolo issuer-specific su HOOD della giornata. Costo congetturale su controfattuale corto: primo ciclo dopo il segnale delle 16:45 e' 17:05, HOOD open 110,54, close 112,09 -> +1,40% x size tipica S4 $2.200 = 30,85 USD. Nessun trade avvenuto. Struttura del difetto: ogni articolo in cui il titolo porta il segnale e il corpo e' un teaser generico produce un punteggio vicino a zero, e la finestra lo registra come 'la news non ha alpha' quando la news non e' mai stata letta per intero. SOVRAPPOSIZIONE DICHIARATA: l'ALPHA_MISS_REPORT_2026-08-25 ha gia' registrato il miss HOOD su F-009 (gate/magnitudine) con costo 179,83 misurato dal PRIMO segnale del giorno (14:15). I 30,85 qui contabilizzati sono un SOTTOINSIEME di quella finestra (dal ciclo 17:05 alla chiusura) e vanno letti come attribuzione di meccanismo, non come costo aggiuntivo: F-009 dice 'la soglia ha scartato un segnale di segno corretto ma debole', F-046 dice 'il segnale issuer-specific delle 16:45 aveva il segno SBAGLIATO perche' il modello non ha mai visto il titolo'. Alla sintesi del 28/09 sommare F-009, non entrambi.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-25.md [DAY-002] §10"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": 0.0,
+          "nota": "RICORRENZA PER PERSISTENZA, NON PER RIPETIZIONE. Lo score -0.0098 prodotto il 08-25 su news_log 8902 (title 'Why Is Robinhood Stock Surging on Tuesday?', body 'Robinhood ... traded lower Thursday ...') e' ancora quello che il sistema usa il 08-26: tutti i 24 intent S4 su HOOD portano snapshot->>'score' = -0.0098, perche' nella giornata non e' arrivato nessun articolo issuer-specific a sostituirlo (i due di oggi sono un pezzo su SHIB in Giappone, score +0.12, e un listicle 'whale alerts' fanout con GS, score +0.0057; max_score_own = null). Il difetto quindi non dura una giornata: entra nello stato e ci resta finche' non arriva un pezzo migliore. Meccanismo invariato (src/workers/sentiment.py, prompt con solo text=clean_body). Nota collaterale sulla stessa classe: su DB il body_snippet di gdelt_gkg E' il titolo (84 caratteri identici a news_log.title, signal 8876) - la stessa pipeline da' al modello o solo il corpo o solo il titolo a seconda della fonte, mai entrambi. COSTO $0.00 MISURATO, NON NON-STIMATO: HOOD ha chiuso a -3.17% e il book e' long-only, quindi uno score corretto e positivo avrebbe potuto solo far comprare un titolo in caduta; il difetto oggi ha protetto il book. Il costo vero di F-046 resta i $30.85 dell'occorrenza 08-25.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-26.md §7"
         }
       ],
       "costo_cumulato_usd": 30.85,
@@ -2385,6 +2439,25 @@
         }
       ],
       "costo_cumulato_usd": 0.0,
+      "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-048",
+      "titolo": "Le uscite parziali (inclusi i fill degli stop protettivi) non vengono riscritte su trades: la quantita' a DB resta quella d'ingresso e diverge da quella reale al broker",
+      "tipo": "difetto",
+      "confidenza": "misurata",
+      "primo_avvistamento": "2026-08-26",
+      "occorrenze": [
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "Confronto diretto fra GET /v2/positions e le righe trades con exit_time IS NULL: stesso numero di posizioni (46 e 46), stesse chiavi, ma tre quantita' divergono - MRVL 0.552 al broker contro 1.552 a DB, NOK 0.564 contro 41.564, WDC 0.335 contro 2.981. Su NOK il DB dichiara 74 volte la posizione reale. La storia ordini Alpaca ricostruisce il caso WDC per intero: BUY 2.981065 il 07-21 (trade 373), poi SELL 1.580640 (07-21), SELL 0.065727 (07-22) e SELL 1 di tipo STOP (07-27); totale uscito 2.646368, residuo 0.334697, esattamente la posizione attuale. Su MRVL lo stesso schema con una STOP SELL 1 del 07-20. Le uscite parziali, inclusi i fill degli stop protettivi, non sono mai state riscritte su trades: la riga resta aperta alla quantita' d'ingresso originale. La divergenza precede il 2026-08-26 (nessun ordine sui tre simboli dopo il 07-27), quindi contamina retroattivamente la serie. IMPATTO MISURATO OGGI: il contributo close-to-close delle tre quantita' inesistenti vale -$55.17, contro un MTM del book aperto di +$21.66 calcolato sulle quantita' DB. Il MTM vero e' -$33.51, e la riconciliazione torna al centesimo: -33.51 (book aperto) + 38.87 (NVDA e META da close precedente a prezzo d'uscita) = +5.36 contro +5.28 di variazione equity Alpaca (delta $0.08). Con le quantita' DB il conto sarebbe stato +$60.53, oltre dieci volte il movimento reale. Conseguenza concreta: WDC risulta il mover #1 'catturato' con +$25.37 di passive_pnl nello snapshot_apertura del dossier, mentre la posizione reale ne ha guadagnati circa $6.36 - $19 su $25 sono fantasma. ID NUOVO GIUSTIFICATO: nessun finding esistente parla di QUANTITA'. F-022 riguarda il dimensionamento dello stop (copre solo la parte intera), non la scrittura del fill a valle - le due STOP SELL 1 su WDC e MRVL sono la firma di F-022, ma questo e' il difetto successivo nella catena. F-042 e' un ordine BUY al broker SENZA riga trades: qui la riga c'e' e ha il numero sbagliato, difetto opposto. F-039 sono righe inserite e cancellate pre-market. F-002 e' l'attribuzione di sleeve mancante, non la quantita'. Se la ricorrenza mostrera' che F-022 e questo sono lo stesso guasto visto da due lati, si fondono in sintesi. COSTO null: nessun dollaro e' stato perso o guadagnato dalla mismisura in se' - il conto e' quello che e'. Il danno e' che $55.17 su $60.53 di movimento di book (il 91%) erano fantasma oggi, quindi ogni 'mtm' della serie market_daily.jsonl e ogni attribuzione per sleeve costruita su trades e' sbagliata di una quantita' che nessuno stava misurando.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-26.md §7"
+        }
+      ],
+      "costo_cumulato_usd": 0,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
