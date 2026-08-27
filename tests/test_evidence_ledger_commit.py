@@ -358,3 +358,18 @@ def test_cron_hands_report_and_ledgers_to_the_helper_in_one_commit():
     invocation = source.rsplit("commit_evidence_ledger.sh", 1)[1].split("\n\n", 1)[0]
     for path in ("docs/evidence/findings.json", "docs/evidence/market_daily.jsonl", ECON, "REPORT_FILE"):
         assert path in invocation
+
+
+def test_broken_worktree_registration_is_rebuilt(repo):
+    project, tmp = repo["project"], repo["tmp"]
+    _dirty_the_ledger(project)
+    _run_helper(repo, LEDGER, JSONL, REPORT)
+
+    # worktree registrata ma inservibile: il puntatore al repo non risolve piu'
+    (tmp / "wt-evidence" / ".git").write_text("gitdir: /percorso/che/non/esiste\n")
+    _write(project / REPORT, "# Alpha miss 2026-08-26 (v3)\n")
+
+    result = _run_helper(repo, REPORT)
+
+    assert _status_line(result.stdout) == "GIT_STATUS=pushed"
+    assert _remote_file(repo["remote"], REPORT) == "# Alpha miss 2026-08-26 (v3)\n"

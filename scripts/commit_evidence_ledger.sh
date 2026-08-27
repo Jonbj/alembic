@@ -124,11 +124,14 @@ fetch_main() {
 }
 
 ensure_worktree() {
-    if [[ -e "$WORKTREE/.git" ]]; then
+    # Una worktree registrata ma rotta (cancellata a mano, repo spostato) e' il
+    # modo piu' facile di incastrare il cron: si ricrea invece di fallire.
+    if [[ -e "$WORKTREE/.git" ]] \
+        && git -C "$WORKTREE" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
         return 0
     fi
-    git -C "$PROJECT_DIR" worktree prune
     rm -rf "$WORKTREE"
+    git -C "$PROJECT_DIR" worktree prune
     mkdir -p "$(dirname "$WORKTREE")"
     git -C "$PROJECT_DIR" worktree add --quiet -B "$WT_BRANCH" \
         "$WORKTREE" "refs/remotes/${REMOTE}/${BRANCH}"
