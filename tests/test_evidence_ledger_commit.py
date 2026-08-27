@@ -253,3 +253,108 @@ def test_missing_worktree_is_recreated(repo):
 
     assert _status_line(result.stdout) == "GIT_STATUS=pushed"
     assert _remote_file(repo["remote"], REPORT) == "# Alpha miss 2026-08-26 (v2)\n"
+
+
+# --- cablaggio del cron alpha-miss (#336) ----------------------------------
+
+CRON = ROOT / "scripts" / "daily_alpha_miss_analysis.sh"
+ECON = "docs/evidence/economic_pnl.json"
+
+
+def _run_cron(repo: dict, extra_path: Path | None = None) -> tuple[subprocess.CompletedProcess[str], str, str]:
+    project, tmp = repo["project"], repo["tmp"]
+    shutil.copy2(CRON, project / "scripts" / CRON.name)
+    (project / "docs" / "evidence" / "dossier").mkdir(parents=True, exist_ok=True)
+    bin_dir = tmp / "bin-cron"
+
+    _write_executable(
+        bin_dir / "uv",
+        "#!/usr/bin/env bash\n"
+        "if [[ \"$*\" == 'run python3 -' ]]; then\n"
+        "    printf '2026-08-26\\n'\n"
+        "fi\n"
+        'if [[ "$*" == *economic_pnl_scoreboard.py* ]]; then\n'
+        "    printf '{\"aggiornato\": \"2026-08-26\"}\\n' > docs/evidence/economic_pnl.json\n"
+        "fi\n"
+        "exit 0\n",
+    )
+    _write_executable(
+        bin_dir / "claude",
+        "#!/usr/bin/env bash\n"
+        "printf 'Executive summary fittizio\\n'\n"
+        "printf '%s\\n' '{\"findings\": [\"F-001\"]}' > docs/evidence/findings.json\n"
+        "printf '%s\\n' '{\"data\": \"2026-08-26\"}' >> docs/evidence/market_daily.jsonl\n"
+        f"printf '# Alpha miss 2026-08-26\\n' > {REPORT}\n",
+    )
+    _write_executable(
+        bin_dir / "curl",
+        "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$TELEGRAM_CAPTURE\"\n",
+    )
+
+    telegram = tmp / "telegram.log"
+    env = os.environ.copy()
+    env.update(
+        {
+            "ALPACA_API_KEY": "k",
+            "ALPACA_SECRET_KEY": "s",
+            "HOME": str(tmp / "home"),
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "TELEGRAM_BOT_TOKEN": "t",
+            "TELEGRAM_CHAT_ID": "c",
+            "TELEGRAM_CAPTURE": str(telegram),
+            "EVIDENCE_WORKTREE": str(tmp / "wt-evidence"),
+            "EVIDENCE_PENDING_FILE": str(tmp / "pending.txt"),
+        }
+    )
+    if extra_path is not None:
+        env["PATH"] = f"{extra_path}:{env['PATH']}"
+    result = subprocess.run(
+        ["bash", str(project / "scripts" / CRON.name)],
+        cwd=project,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    logs = list((project / "logs").glob("alpha_miss_analysis_*.log"))
+    assert len(logs) == 1
+    return result, logs[0].read_text(), telegram.read_text()
+
+
+def test_cron_commits_the_ledger_from_a_feature_branch(repo):
+    shutil.copy2(HELPER, repo["project"] / "scripts" / HELPER.name)
+
+    result, log, telegram = _run_cron(repo)
+
+    assert result.returncode == 0, log[-2000:]
+    assert log.strip().splitlines()[-1] == "GIT_STATUS=pushed"
+    assert _remote_file(repo["remote"], REPORT) == "# Alpha miss 2026-08-26\n"
+    assert "F-001" in _remote_file(repo["remote"], LEDGER)
+    assert "2026-08-26" in _remote_file(repo["remote"], ECON)
+    assert "GIT_STATUS=pushed" in telegram
+
+
+def test_cron_alerts_when_the_ledger_does_not_reach_main(repo):
+    shutil.copy2(HELPER, repo["project"] / "scripts" / HELPER.name)
+    _, log, telegram = _run_cron(repo, extra_path=_failing_push_bin(repo["tmp"]))
+
+    assert log.strip().splitlines()[-1] == "GIT_STATUS=committed_not_pushed"
+    assert "committed_not_pushed" in telegram
+    assert "⚠️" in telegram or "🚨" in telegram
+
+
+def test_cron_prompt_no_longer_asks_the_session_to_commit():
+    source = CRON.read_text()
+
+    assert "git commit -m" not in source
+    assert "atteso main" not in source
+
+
+def test_cron_hands_report_and_ledgers_to_the_helper_in_one_commit():
+    source = CRON.read_text()
+
+    assert "scripts/commit_evidence_ledger.sh" in source
+    invocation = source.rsplit("commit_evidence_ledger.sh", 1)[1].split("\n\n", 1)[0]
+    for path in ("docs/evidence/findings.json", "docs/evidence/market_daily.jsonl", ECON, "REPORT_FILE"):
+        assert path in invocation

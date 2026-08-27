@@ -166,18 +166,15 @@ def test_whole_script_redirect_starts_before_environment_setup(script_name: str)
     )
 
 
+# daily_alpha_miss_analysis.sh non committa piu' dalla sessione (#336): lo stesso
+# invariante e' verificato su commit_evidence_ledger.sh in
+# tests/test_evidence_ledger_commit.py::test_cron_hands_report_and_ledgers_to_the_helper_in_one_commit
 @pytest.mark.parametrize(
     ("script_name", "expected_add"),
-    (
-        (
-            "daily_alpha_miss_analysis.sh",
-            'git add docs/evidence/findings.json docs/evidence/market_daily.jsonl "__REPORT_FILE__"',
-        ),
-        (
-            "daily_analysis.sh",
-            'git add docs/evidence/findings.json "__REPORT_FILE__"',
-        ),
-    ),
+    ((
+        "daily_analysis.sh",
+        'git add docs/evidence/findings.json "__REPORT_FILE__"',
+    ),),
 )
 def test_report_is_staged_in_the_same_commit_as_its_ledger(script_name: str, expected_add: str):
     source = (ROOT / "scripts" / script_name).read_text()
