@@ -308,12 +308,15 @@ C) Committa i ledger e il report SOLO SE il branch corrente e' main. Controlla P
        git add docs/evidence/findings.json docs/evidence/market_daily.jsonl "__REPORT_FILE__"
        git commit -m "evidence: ledger __DATE_TARGET__"
        git push origin main
+      GIT_STATUS=pushed
      Il PUSH e' obbligatorio quanto il commit: senza, il ledger vive solo su questa
      macchina e un cambio di sessione o un guasto lo perde. Se il push fallisce (rete,
      divergenza col remoto) NON forzarlo: lascia il commit locale e segnalalo a stdout.
+      In questo caso stampa come ultima riga: GIT_STATUS=committed_not_pushed
    - Se stampa QUALSIASI ALTRA COSA: NON committare. I file restano scritti sul disco (non
      annullare le modifiche) e stampi su stdout, come ultima riga:
        ATTENZIONE: ledger scritto ma NON committato — branch corrente <nome>, atteso main.
+      Segui con: GIT_STATUS=not_committed
 
    Motivo: questo cron gira nella directory principale del repo, che puo' trovarsi sul branch di
    lavoro di un altro agente. Un commit del ledger su un branch casuale lo disperderebbe e
