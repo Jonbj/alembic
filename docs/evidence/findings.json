@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 49,
+  "prossimo_id": 51,
   "findings": [
     {
       "id": "F-001",
@@ -566,12 +566,18 @@
           "costo_usd": null,
           "nota": "ingestion_stats_daily 2026-08-25 alpaca_benzinga: fetched=579, duplicates=2589 (4,5x), queued=345. Prima verifica indipendente della finestra: news_queue_drops contiene esattamente 2589 righe duplicate_id/ingestion/alpaca_benzinga nella stessa giornata, quindi il contatore e' additivo sui run intra-giornata mentre fetched conta l'ultima pagina - le due grandezze non sono comparabili benche' vivano nella stessa riga. Tasso 82% plausibile per polling ogni 15 min su finestra scorrevole. Costo non stimabile.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-25.md [DAY-019] §10"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "Tredicesima occorrenza. ingestion_stats_daily(2026-08-26,'alpaca_benzinga'): fetched 585, queued 287, duplicates 2366, discarded_stale 71 - il contatore dei duplicati e' 4.04 volte quello dei fetch. news_queue_drops conferma il numero in modo indipendente (alpaca_benzinga | duplicate_id | ingestion | 2366), quindi non e' un errore di scrittura ma una semantica non dichiarata: 'duplicates' sembra additivo cross-run (24 cicli di ingest rivedono la stessa finestra e ricontano gli scarti) mentre 'fetched' si riferisce a un insieme diverso. NOTA DI CONFIDENZA: l'ipotesi additiva e' coerente coi numeri ma NON e' stata verificata leggendo il codice di ingest in questa sessione. Costo null: qualunque tasso di duplicazione calcolato come duplicates/fetched da' 404% ed e' privo di significato, quindi il dato di copertura per fonte non e' utilizzabile senza sapere quale contatore e' per-run e quale per-giorno.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-26.md [DAY-011] §10"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 12
+      "occorrenze_non_stimate": 13
     },
     {
       "id": "F-008",
@@ -621,10 +627,16 @@
           "costo_usd": -5.44,
           "nota": "MISURATA. L'articolo market-wrap 'Bitcoin Tops $80,000, Oil Sinks As Navy Clears Hormuz Mines: Stock Market Today' (news_log 8914, 10 ticker: AMD/HOOD/IWM/MRVL/MU/NVDA/QQQ/XLE/XLK/XLV) produce su XLE score -0,357 conf 0,70 std 0,212, che supera di 7 millesimi la soglia di uscita -0,35 e liquida il trade 282 (XLE, S1, aperto il 2026-07-10 @55,05, tenuta 1108h). Exit @62,50, net_pnl +91,80. Costo = drift_post_uscita del trade 282 = -5,44 USD: entro il close XLE e' sceso ancora, quindi QUESTA VOLTA l'uscita ha evitato una perdita. Il difetto resta (decisione presa da un articolo che non parla del titolo; unico riferimento all'energia: 'Brent slid below $90'), l'esito favorevole e' coincidenza - XLE ha chiuso -1,66% in una giornata di rotazione fuori dall'energia.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-25.md [DAY-009] §10"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "NVDA chiusa alle 14:22:00 sul segnale 8960 (score -0.0056, conf 0.175, ensemble non-fallback), prodotto dall'articolo 'Goldman Sachs Executive Sounds The Alarm, Warns AI Could Cause \"Cognitive Atrophy\" on Wall Street' - un pezzo macro sul settore finanziario, mappato su NVDA dal fan-out, che non contiene informazione sull'emittente. Tre minuti prima, alle 14:00:41, l'articolo genuinamente ticker-specifico ('Nvidia Earnings Prediction Market Preview: What Will Jensen Huang Say?', corpo: 'Traders give Nvidia a 98% chance of beating earnings') aveva prodotto il segnale 8954 a +0.078. S4 usa solo il piu' recente eleggibile (F-023) e ha preso il macro invece dello specifico. Alle 14:16:12 un terzo pezzo su NVDA valeva +0.22 (8967) ma era single:gpt-oss quindi ineleggibile (F-010). COSTO null e non 0.0: l'uscita ha realizzato -$18.73 (trade 829) ma il drift post-uscita misurato nel dossier e' -$9.21, quindi ex post la decisione sbagliata ha EVITATO $9.21 di ulteriore perdita. Non c'e' un dollaro di danno attribuibile oggi e scrivere 0.0 affermerebbe che il difetto e' costato zero, mentre il punto e' che il segno dell'esito e' casuale rispetto alla regola. La ricorrenza, non il costo, e' cio' che pesa su questa occorrenza.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-26.md [DAY-002] §10"
         }
       ],
       "costo_cumulato_usd": 48.94,
-      "occorrenze_non_stimate": 0,
+      "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
     },
@@ -773,10 +785,16 @@
           "costo_usd": 0.89,
           "nota": "ATTRIBUITA. Due facce nella stessa giornata. (1) eligible non identifica i contributori: su 98 segnali solo 26 hanno entrambe le risposte eligible; 33 segnali etichettati 'ensemble:' hanno ZERO contributori eligible e tutti i 39 single-model ne hanno zero, compresa la risposta che ha prodotto lo score (src/workers/sentiment.py:707-711, force_ineligible=result.fallback_used marca entrambe). (2) ENSEMBLE_MIN_CONFIDENCE=0.4 elimina il modello sotto floor invece di pesarlo: glm-5.2 (conf mediana 0,322, PESO 0,70, purified_icir +0,104) escluso 30 volte, gpt-oss (0,410, peso 0,30, purified_icir -0,029) solo 9 - in 30 casi su 98 decide il modello meno pesato con ICIR negativo, poi scartato da SKIP_FALLBACK. 39/98 = 39,8% del lavoro di scoring buttato, inclusi 4 dei 9 segnali sopra soglia. Costo su controfattuale corto, solo caso ben attribuito (NVDA signal 8858 +0,330 delle 14:15, primo ciclo 14:22 open 213,20, close 213,30, slot $1.903): +0,89 USD lasciati sul tavolo. NON contabilizzato il caso MS 8899 (+0,680, stesso calcolo -> +7,97 USD) perche' il ticker era sbagliato (F-020): comprarlo sarebbe stato un errore, non un guadagno mancato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-25.md [DAY-006] §10"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "Undicesima occorrenza, misurata sul disaccoppiamento fra eligible e contributori reali. llm_responses del giorno: 35 righe per glm-5.2:cloud e 35 per gpt-oss:20b-cloud, con eligible=true su 7 righe ciascuno (14 totali). Ma sentiment_signals riporta 21 segnali con model_id 'ensemble:glm-5.2:cloud+gpt-oss:20b-cloud', cioe' 42 risposte che hanno effettivamente formato un punteggio: 28 contributori reali su 42 sono etichettati eligible=false. Ogni LOO-ICIR e ogni ricostruzione di 'chi ha deciso' su questa colonna misura un insieme diverso da quello che ha deciso. Sul lato decisionale il ramo single-model ha scartato il segnale NVDA 8967 (+0.22, single:gpt-oss:20b-cloud, 14:16:12), il piu' informativo della finestra, e la posizione e' stata chiusa 6 minuti dopo sul segnale precedente a -0.0056. ONESTA' CONTROFATTUALE: 0.22 e' comunque sotto il gate 0.30, quindi below_entry_gate avrebbe chiuso anche con 8967 eleggibile - il difetto cambia il motivo registrato, non l'esito di questa uscita. Per questo costo null e non una stima: il controfattuale corto e' neutro.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-26.md [DAY-004] §10"
         }
       ],
       "costo_cumulato_usd": 75.2,
-      "occorrenze_non_stimate": 4,
+      "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
     },
@@ -870,10 +888,16 @@
           "costo_usd": null,
           "nota": "466 righe su 474 (98,3%) con signal_id NULL il 2026-08-25: SKIP_THRESHOLD 456/456, SKIP_FALLBACK 7/7, SKIP_STALE 3/3, SKIP_PYRAMIDING 1/4. Solo le 4 decisioni operative (3 BUY + 1 SELL) e 3 SKIP_PYRAMIDING lo portano. Lo score vive nel campo reason come testo libero ('score 0.267 < feedback threshold 0.300'). Il nuovo ledger s4_intent_events (#294, attivo dal 25) copre parzialmente il buco per S4, ma execution_decisions resta la tabella su cui poggia la serie dal 2026-08-03. Costo non stimabile.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-25.md [DAY-007] §10"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "Quindicesima occorrenza. execution_decisions del 2026-08-26: 336 righe totali, signal_id popolato su 3. Ripartizione per decisione (tot | con signal_id): SKIP_THRESHOLD 312|0, SKIP_FALLBACK 17|0, SKIP_PYRAMIDING 4|3, SELL 2|0, SKIP_STALE 1|0. Le DUE SOLE operazioni della giornata - le SELL su NVDA (14:22) e META (15:07), $3.805 di nozionale complessivo - hanno signal_id NULL e sono collegate al proprio segnale solo dal testo libero del campo reason ('generated 2026-08-26 14:03 UTC, score=-0.006'). Ho ricostruito i segnali 8960 e 8975 leggendo quella stringa e cercando per (symbol, generated_at): funziona, ma non e' una chiave e si rompe al primo cambio di formato del messaggio. Aggravante specifica: il ramo below_entry_gate HA il segnale in mano, dato che ne stampa timestamp e score - e' un campo da riempire, non un dato da ricostruire. Costo null: nessun dollaro perso, ma e' il vincolo che limita l'automatizzabilita' del ledger sulle 40 sedute.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-26.md [DAY-009] §10"
         }
       ],
       "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 12,
+      "occorrenze_non_stimate": 13,
       "stato": "aperto",
       "issue": null
     },
@@ -1070,10 +1094,16 @@
           "costo_usd": 0.0,
           "nota": "Churn intraday su NVDA: BUY 14:37 (score +0.380) -> SELL 16:22 below_entry_gate -> BUY 17:07 (score +0.378) -> SELL 18:52 below_entry_gate; due round-trip completi sullo stesso simbolo in quattro ore. Piu' SPCX comprata 17:07 e venduta 19:37 con la stessa causale dopo 2,5 ore. Costi espliciti dei tre round-trip $0,38+$0,38+$1,99 = $2,75 (trades 782, 784, 783). COSTO ZERO, NON NON-STIMATO: i drift_post_uscita delle tre uscite sono -22,42, -9,24 e +1,60, cioe' uscire ha evitato in netto ~$30 di ribasso — oggi il churn ha guadagnato. Occorrenza registrata perche' il meccanismo (nessuna banda fra gate 0.30 e condizione d'uscita) e' indipendente dal segno del giorno.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-24.md §7"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "META chiusa alle 15:07:00 sul segnale 8975: polarity 0, confidence 0.20, score ESATTAMENTE 0.0000, ensemble non-fallback, eta' 0.4h. L'articolo e' 'Here's How Much $1000 Invested In Meta Platforms 10 Years Ago Would Be Worth Today', un listicle sul rendimento decennale senza alcuna notizia: il modello lo ha valutato correttamente come informazione nulla e il sistema ha eseguito quel giudizio come 'vendi', perche' fra il gate che apre (0.30) e la condizione che chiude non c'e' banda e 0.000 sta sotto 0.30. Reason integrale: '[below_entry_gate] S4 signal fell below the active feedback entry threshold (age=0.4h vs max_age=4h, generated 2026-08-26 14:45 UTC, score=+0.000): weight 0.0%, position closed.' INTENTO INVERTITO IN 60 MINUTI SULLO STESSO SIMBOLO: alle 14:07:04 il combiner emetteva un target BUY su META al 2.0% del NAV con signal_score +0.3855 (bloccato da P0-05, riga SKIP_PYRAMIDING), alle 15:07 la vendeva. La confidence 0.20 - il modello che dichiara di non sapere - non attenua nulla a valle. COSTO null e non 0.0: il trade 831 ha realizzato +$61.68 e il drift post-uscita e' -$39.65, quindi ex post e' stata la decisione migliore della giornata; nessun dollaro e' attribuibile al difetto oggi. Fatto strutturale da registrare: le DUE SOLE decisioni della seduta sono entrambe di questo tipo.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-26.md [DAY-003] §10"
         }
       ],
       "costo_cumulato_usd": 53.91,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -1161,10 +1191,16 @@
           "costo_usd": null,
           "nota": "sum(orders_count)=76 su 24 cicli portfolio del 2026-08-25 (valori 2/3/5, mai 0) contro 4 ordini realmente inviati + 2 stop protettivi: sovrastima 19x. Il ciclo delle 19:07, che ha prodotto 2 BUY, riporta orders_count=5. constraints_fired=[] in tutti e 24 i cicli, anche in quelli che hanno scritto 4 decisioni di SKIP nella stessa transazione. Costo non stimabile: telemetria, non denaro.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-25.md [DAY-011] §10"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "Quattordicesima occorrenza, con corrispondenza esatta fra target e blocchi. SUM(portfolio_cycles.orders_count) per il 2026-08-26 e' 110 su 24 cicli; il parsing di final_orders da 108 BUY e 2 SELL. I 108 BUY per simbolo sono CSCO 24, DELL 24, SOXX 24, LLY 17, MU 16, META 3 e coincidono UNO A UNO con le 108 disposizioni SKIP_PYRAMIDING di s4_intent_events (stessi simboli, stessi conteggi): erano tutti su titoli gia' a libro e nessuno e' mai stato inviato. COUNT(*) FROM trades WHERE entry_time::date='2026-08-26' e' 0. In execution_decisions di quelle 108 disposizioni ne compaiono 4. Chi legge la telemetria del ciclo vede 110 ordini in una giornata da 2 ordini: errore di 55x. Costo null - non si perdono dollari - ma si perde la capacita' di accorgersi di una seduta a zero ingressi, che e' esattamente la seduta di oggi. Il dato corretto esiste gia' nel ledger s4_intent_events (108/108): va solo esposto dove viene letto.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-26.md [DAY-007] §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 13,
+      "occorrenze_non_stimate": 14,
       "stato": "aperto",
       "issue": null
     },
@@ -1570,10 +1606,16 @@
           "costo_usd": null,
           "nota": "Confermato su codice e dati: celery_app.py:51 timezone='UTC'; :210 crontab(minute='7,22,37,52', hour='14-21') per portfolio-cycle; :78/:151/:162/:184 crontab(minute='*/15', hour='14-21') per l'ingest. Apertura RTH 2026-08-25 alle 13:30 UTC (EDT), primo portfolio_cycles.timestamp 14:07:00 (37 min persi), primo news_log.fetched_at 14:00:35 (30 min persi). HOOD, mover #1 della seduta, aveva gia' fatto +4,5% entro le 14:20 (13:30 open 103,20 -> 14:20 open 108,27; close 112,20): oltre meta' del movimento e' avvenuta prima che il sistema potesse osservarlo. Costo non separabile da F-030, non attribuito qui per evitare doppio conteggio.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-25.md [DAY-014] §10"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "Dodicesima occorrenza. portfolio_cycles del 2026-08-26: 24 righe, prima alle 14:07:00.656458+00, ultima alle 19:52:00.674211+00, cadenza 15 min esatta senza gap. L'apertura RTH e' 13:30:00+00 (dossier sessioni.regular.first_bar_at, EDT), quindi i primi 37 minuti di sessione non hanno avuto ne' ciclo portfolio ne' ingest news: min(news_log.fetched_at) e' 14:00:30 e i 3 articoli pubblicati fra 12:31 e 13:30 UTC sono entrati solo col fetch delle 14:00. Causa invariata: src/workers/celery_app.py:210 crontab(minute='7,22,37,52', hour='14-21') piu' le righe 78, 151, 162, 184, 228 per ingest e altri task, tutte a ora UTC costante. Gli 8 slot fra 20:07 e 21:52 non producono righe in portfolio_cycles (un guard a valle li assorbe), quindi oggi lo spreco e' di scheduling e non di ordini. Costo non stimabile: nessun segnale identificato nella finestra 13:30-14:07 di questa seduta, ma la distorsione e' strutturale - aggregati.per_ora_ingresso del dossier non ha e non puo' avere una riga per l'ora 13. Stesso vizio di F-047 (calendario trattato come UTC) visto sul lato scheduler.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-26.md [DAY-005] §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 11,
+      "occorrenze_non_stimate": 12,
       "stato": "aperto",
       "issue": null
     },
@@ -1840,10 +1882,16 @@
           "costo_usd": null,
           "nota": "docker compose logs worker|worker-inference|beat|api --since 72h: ZERO righe contenenti '2026-08-25'. Container api/beat/worker/worker-inference tutti 'Up 2 hours' (ricreati il 2026-08-26 ~10:30). Non ricostruibili per la giornata: latenza per-chiamata LLM, retry HTTP, eccezioni gestite, warning del semaforo Ollama, warning _sync_fractional_protective_stops, riavvii worker. Le sezioni 5 (latenza) e 16 (restart events) del report restano parzialmente non verificabili; la continuita' e' stata inferita indirettamente (24/24 cicli portfolio, 93 snapshot mobile, task serali tutti eseguiti). Costo non stimabile.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-25.md [DAY-005] §10"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "Dodicesima occorrenza, e la prima in cui il costo si materializza su un'anomalia grave. docker inspect: StartedAt 2026-08-27T10:13:59Z su worker, worker-inference, beat e api (ricreazione per il deploy di c9f77d2, c885643, 2be7b32), RestartCount=0 su tutti e quattro. Prima riga di log disponibile: '[2026-08-27 10:14:04'. 'docker compose logs worker-inference --no-color | grep -c 2026-08-26' restituisce 0. IMPATTO SPECIFICO OGGI: l'anomalia principale della seduta (F-049, ensemble Ollama giu' dalle 15:31 alla chiusura) e' databile al secondo dai contatori a DB ma NON e' diagnosticabile - nessuno status HTTP, nessuna eccezione, nessun timeout registrato da nessuna parte, perche' l'unico posto dove sarebbero finiti erano i log. L'unico dato sullo stato dei worker che sopravvive e' RestartCount=0, che almeno esclude un riavvio durante la seduta. Costo null in dollari; il danno e' che la causa radice del difetto piu' grave della giornata e' persa in modo definitivo.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-26.md [DAY-012] §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 11,
+      "occorrenze_non_stimate": 12,
       "stato": "aperto",
       "issue": null
     },
@@ -2236,10 +2284,16 @@
           "costo_usd": null,
           "nota": "Seconda occorrenza, stesso pattern esatto della prima (08-14). audit_log id 12255-12262: 8 INSERT su trades (record_id 740-743 e 745-748, 744 mancante - stesso schema a batch di 4 con un id 'buco' per batch) fra le 06:05:45 e le 06:07:51 UTC, new_value senza symbol/entry_time valorizzati. Le 8 righe non esistono piu' in trades (SELECT su quegli id = 0 righe) e audit_log non contiene MAI un'azione DELETE su table_name='trades' in tutta la sua storia (487 righe, solo INSERT). Orario e struttura compatibili con tests/store/test_pg_store_stop_methods.py in esecuzione contro DATABASE_URL di produzione, coerente con la co-occorrenza su F-028 (riga fantasma reuters alle 06:08:50). Nessun trade reale toccato, costo non stimabile in dollari: e' integrita' dell'evidenza futura.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-19.md §10 [DAY-516]"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "Terza occorrenza, ora con la catena completa e la correlazione temporale fra le tre tabelle colpite. audit_log del 2026-08-26 contiene 12 INSERT su trades in tre lotti - 07:13:54 (id 14912-14915), 08:14:55 (14916-14919), 08:36:30 (14920-14923) - tutti con simboli TEST_STOP_1, TEST_STOP_2, TEST_STOP_3, TEST_STOP_FIXED_AUD e entry_notional 1000.0. Le righe NON esistono piu': SELECT id FROM trades WHERE symbol LIKE 'TEST%' restituisce 0 righe e MAX(trades.id) e' 831 mentre gli id 832-846 sono stati consumati; in audit_log ci sono gli INSERT e NESSUN DELETE. Gli stessi tre run hanno scritto anche news_queue_drops con la fixture url='https://reuters.com/article/foo', title='Federal Reserve holds rates steady' alle 07:14:58, 08:15:59 e 08:37:34, e la riga ingestion_stats_daily(2026-08-26,'reuters',fetched=12,queued=12,discarded_no_ticker=3) con updated_at 08:37:34.524613 - mentre news_log ha ZERO righe reuters per la giornata. La correlazione e' stretta (07:13:54 vs 07:14:58; 08:36:30 vs 08:37:34): un'unica suite, tre lanci. NON RI-APPENDO F-028 per questa data: e' lo stesso evento visto sulla tabella ingestion_stats_daily e contarlo due volte gonfierebbe la ricorrenza di un difetto solo. Costo null: nessun ordine e' nato dalle righe di test, ma ingestion_stats_daily contiene tuttora una fonte fantasma per 2026-08-15, 08-19, 08-22, 08-25, 08-26 e 08-27, quindi ogni copertura per fonte calcolata su quella tabella e' contaminata, e un audit trail che registra l'inserimento ma non la cancellazione non e' un audit trail.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-26.md [DAY-006] §10"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -2436,10 +2490,16 @@
           "costo_usd": null,
           "nota": "NUOVO ID GIUSTIFICATO: non e' F-021, che riguarda le finestre del beat scheduler espresse a ora UTC fissa (celery_app.py, crontab hour='14-21') e produce la perdita dei primi 37 minuti di sessione. Qui il codice e' un altro (src/strategies/s4/lifecycle.py chiamato da src/workers/performance.py), il meccanismo e' un altro (coercizione di un datetime naive invece che una finestra hardcoded) e l'effetto colpisce tabelle diverse (s4_lifecycle_events, s4_exit_policy_events). Meccanismo: alpaca/trading/models.py:374-385 costruisce Calendar.open/close con datetime.strptime(f'{date} {HH:MM}', '%Y-%m-%d %H:%M') - naive, in ora locale di New York. lifecycle.py:20-23 _utc() fa value.replace(tzinfo=timezone.utc) su input naive, senza convertire. La finestra RTH diventa quindi 09:30-16:00 UTC invece di 13:30-20:00 UTC: un fill e' 'dentro sessione' solo fra 13:30 e 16:00 UTC, cioe' nelle prime 2,5 ore su 6,5. Riproduzione numerica: _utc(strptime('2026-08-25 09:30')) -> 2026-08-25 09:30:00+00:00; fill 19:07:05Z fuori finestra. Osservato il 2026-08-25: 3 fill su 3 (NVDA 19:07:05Z, CSCO 19:07:05Z, META 19:52:04Z) usciti CENSORED / FILL_OUTSIDE_RTH con d0 NULL, due_session NULL, reconstructible=false; s4_exit_policy_events ha ZERO righe per la giornata, quindi l'orologio D+2 di #334 non si e' armato. La riconciliazione shadow #295, deployata il 2026-08-25, non produce una sola osservazione utilizzabile al primo giorno. Censura selettivamente il 62% della sessione, quindi qualunque statistica sulle righe non censurate e' distorta verso il mattino. Costo non stimabile: nessuna perdita, azzera uno strumento di misura. Passa il test di esenzione della OBSERVATION_CHARTER.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-25.md [DAY-003] §10"
+        },
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "Seconda occorrenza e, per costruzione, l'ultima attesa. s4_lifecycle_events del 2026-08-26: 4 righe ENTRY_RECONCILIATION / CENSORED / FILL_OUTSIDE_RTH, osservate alle 14:12:00.022 (CSCO, META, NVDA) e 15:12:00.516 (META). I fill censurati sono del 2026-08-25 alle 19:07:05 (NVDA e CSCO) e 19:52:04 (META), cioe' 15:07 e 15:52 ET: DENTRO la sessione regolare 13:30-20:00 UTC. Meccanismo invariato rispetto al 2026-08-25: Calendar.open/close di alpaca-py e' naive in ora di New York e lifecycle.py::_utc() fa value.replace(tzinfo=timezone.utc) senza convertire, spostando la finestra a 09:30-16:00 UTC. Conseguenza a valle nella stessa giornata: s4_exit_policy_events riporta 2 righe P0_OPEN_SNAPSHOT / CENSORED / P0_ENTRY_NOT_RECONSTRUCTIBLE (piu' 4 P0_RUNTIME_REPLAY / CLOSED / P0_TARGET_ZERO_BELOW_ENTRY_GATE). NOTA DI CHIUSURA: la correzione c9f77d2 (PR #373, issue #372) e' stata mergiata il 2026-08-27 alle 10:18:29 +0200, cioe' DOPO la seduta analizzata, quindi il 2026-08-26 e' interamente pre-fix. Se la seduta del 2026-08-27 non produce FILL_OUTSIDE_RTH su fill pomeridiani, questo finding si chiude. Costo null: nessuna perdita, azzera uno strumento di misura (riconciliazione shadow #295 e orologio D+2 di #334).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-26.md [DAY-008] §10"
         }
       ],
-      "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 1,
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
     },
@@ -2455,6 +2515,44 @@
           "costo_usd": null,
           "nota": "Confronto diretto fra GET /v2/positions e le righe trades con exit_time IS NULL: stesso numero di posizioni (46 e 46), stesse chiavi, ma tre quantita' divergono - MRVL 0.552 al broker contro 1.552 a DB, NOK 0.564 contro 41.564, WDC 0.335 contro 2.981. Su NOK il DB dichiara 74 volte la posizione reale. La storia ordini Alpaca ricostruisce il caso WDC per intero: BUY 2.981065 il 07-21 (trade 373), poi SELL 1.580640 (07-21), SELL 0.065727 (07-22) e SELL 1 di tipo STOP (07-27); totale uscito 2.646368, residuo 0.334697, esattamente la posizione attuale. Su MRVL lo stesso schema con una STOP SELL 1 del 07-20. Le uscite parziali, inclusi i fill degli stop protettivi, non sono mai state riscritte su trades: la riga resta aperta alla quantita' d'ingresso originale. La divergenza precede il 2026-08-26 (nessun ordine sui tre simboli dopo il 07-27), quindi contamina retroattivamente la serie. IMPATTO MISURATO OGGI: il contributo close-to-close delle tre quantita' inesistenti vale -$55.17, contro un MTM del book aperto di +$21.66 calcolato sulle quantita' DB. Il MTM vero e' -$33.51, e la riconciliazione torna al centesimo: -33.51 (book aperto) + 38.87 (NVDA e META da close precedente a prezzo d'uscita) = +5.36 contro +5.28 di variazione equity Alpaca (delta $0.08). Con le quantita' DB il conto sarebbe stato +$60.53, oltre dieci volte il movimento reale. Conseguenza concreta: WDC risulta il mover #1 'catturato' con +$25.37 di passive_pnl nello snapshot_apertura del dossier, mentre la posizione reale ne ha guadagnati circa $6.36 - $19 su $25 sono fantasma. ID NUOVO GIUSTIFICATO: nessun finding esistente parla di QUANTITA'. F-022 riguarda il dimensionamento dello stop (copre solo la parte intera), non la scrittura del fill a valle - le due STOP SELL 1 su WDC e MRVL sono la firma di F-022, ma questo e' il difetto successivo nella catena. F-042 e' un ordine BUY al broker SENZA riga trades: qui la riga c'e' e ha il numero sbagliato, difetto opposto. F-039 sono righe inserite e cancellate pre-market. F-002 e' l'attribuzione di sleeve mancante, non la quantita'. Se la ricorrenza mostrera' che F-022 e questo sono lo stesso guasto visto da due lati, si fondono in sintesi. COSTO null: nessun dollaro e' stato perso o guadagnato dalla mismisura in se' - il conto e' quello che e'. Il danno e' che $55.17 su $60.53 di movimento di book (il 91%) erano fantasma oggi, quindi ogni 'mtm' della serie market_daily.jsonl e ogni attribuzione per sleeve costruita su trades e' sbagliata di una quantita' che nessuno stava misurando.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-26.md §7"
+        }
+      ],
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-049",
+      "titolo": "L'ensemble Ollama cade a meta' sessione e il circuit breaker che dovrebbe segnalarlo e' codice morto: 4h14m senza valutazione LLM, zero alert, sizing multiplier senza consumatori",
+      "tipo": "difetto",
+      "confidenza": "misurata",
+      "primo_avvistamento": "2026-08-26",
+      "occorrenze": [
+        {
+          "data": "2026-08-26",
+          "costo_usd": 10.66,
+          "nota": "ID NUOVO GIUSTIFICATO: nessun finding esistente copre un'interruzione del provider LLM ne' l'inerzia del circuit breaker. F-010 riguarda il floor del retry #90 e la mislabellatura di llm_responses.eligible, cioe' un difetto di contabilita' quando l'ensemble FUNZIONA; qui l'ensemble non risponde affatto. F-037 riguarda ensemble_std mai usata come gate. F-017 e' il fallimento silenzioso della rilevazione di regime (task Celery registrato come succeeded), meccanismo diverso e tabella diversa. F-005 e' un alert Telegram rifiutato con 400 dal trasporto; qui l'alert NON E' MAI STATO TENTATO perche' la callback non e' cablata. MECCANISMO E DATI. Ultima risposta di entrambi i modelli: 2026-08-26 15:31:00.458558+00 (MAX(llm_responses.generated_at) identico per glm-5.2:cloud e gpt-oss:20b-cloud, 35 righe ciascuno). llm_budget.updated_at 15:31:00.446940, fallback_counters.reset_at 15:31:00.449297, last_increment_at 19:45:07.786854, counter_value 79. Primo scoring FinBERT alle 15:45:06.324154. Downtime 4h14m su una sessione RTH di 6h30m = 65%. ESAURIMENTO BUDGET ESCLUSO: $0.0377 spesi contro ~$0.20 tipici delle sedute precedenti, budget_exhausted=false, 19551 token input / 2378 output. Composizione dei 114 segnali: finbert 79 (69.3%), ensemble 21, single:gpt-oss 12, single:glm 2 - fallback_used complessivo 93/114 = 81.6% contro 0.0% il 2026-08-25 e 28-40% nelle otto sedute precedenti. Per ora: 14h 0 finbert su 23, 15h 6 su 18, 16h 15 su 15, 17h 10 su 10, 18h 25 su 25, 19h 23 su 23. IL BREAKER E' INERTE SU TUTTI E TRE I RAMI, provato per grep. (a) _on_fallback_threshold_reached scrive qc:sizing_multiplier=0.5, ma 'grep -rn get_qc_sizing_multiplier src/ | grep -v test' restituisce solo src/store/redis_store.py:29 (docstring) e :336 (definizione): NESSUN consumatore. (b) invoca self._on_fallback_alert, che e' sempre None perche' nessuno dei 16 chiamanti di RedisStore(...) in src/ passa quel kwarg, e 'grep -rn send_fallback_alert src/ | grep -v telegram.py' non restituisce nulla. (c) spinge UNA riga in ensemble:divergence:log con TTL 24h, verificata: {\"symbol\":\"SYSTEM\",\"scores\":{\"fallback_threshold_reached\":3},\"ts\":\"2026-08-26T15:45:07.379684+00:00\",\"event_type\":\"fallback_circuit_breaker\"}. In piu' il trigger e' 'if new_value == self._max_fallbacks' (uguaglianza esatta con 3, redis_store.py:274-275): se il contatore salta il valore 3 - riavvio del worker, ramo OOM che fa ritornare 0 da increment_fallback_counter, batch concorrente - non scatta mai piu', perche' a 79 la condizione e' falsa. Alert Telegram consegnati: 0, tentati: 0. DANNO COLLATERALE OLTRE IL PUNTEGGIO: FinBERT non produce directness/event_type (verificato: 79 segnali finbert -> 0 righe con directness; 42+24+4 righe LLM -> 100% popolate), quindi il dossier riporta mapping_rilevanza UNKNOWN 80 su 114 e ZERO righe SECTOR_MACRO / FALSE_ENTITY_MATCH / IRRELEVANT_FANOUT. L'outage ha spento anche il classificatore di rilevanza, cioe' il rail su cui poggia il gating QT/QX. EFFETTO SULLE DECISIONI: la regola #108 esclude i fallback dal ranking BUY, quindi dalle 15:45 alla chiusura NESSUN ingresso era strutturalmente possibile. Sei degli otto segnali sopra gate della giornata vengono da questa finestra: MS +0.3421 (17:15, finbert), NKE -0.3025, SPCX -0.3356 poi +0.5609 a 30 minuti di distanza, NVO -0.5533 (il piu' forte del giorno), LLY -0.5462. Sull'intera seduta UN SOLO segnale non-fallback ha superato il gate 0.30 (MU +0.3084, id 8972) ed e' stato bloccato da P0-05 perche' il titolo era gia' a libro dal 2026-07-28. STIMA DEL COSTO, congetturale nel metodo ma ancorata a barre reali. Dei sei segnali sopra gate prodotti durante l'outage, uno solo era rialzista e quindi utilizzabile da un libro long-only: MS +0.3421, scorato alle 17:15:04. Dal dossier (timeline signal_id 9016, Alpaca SIP 5Min): prezzo allo stadio scored_at = 213.01 (open della barra 17:20), close RTH = 214.08. Rendimento dall'ingresso accessibile alla chiusura = (214.08-213.01)/213.01 = +0.502%. Size tipica S4 = 2% del NAV = $2200 su NAV osservato $110073.75. Guadagno lordo mancato = 2200 x 0.00502 = $11.05; costo modellato di andata e ritorno stimato sulle due gambe reali della giornata (1.81 bps per gamba, $0.39 su $1900 di nozionale, riscalato a $2200 = ~$0.39). NETTO MANCATO = $10.66. SPCX +0.5609 non e' contato: scorato alle 19:45:05, quindi 15 minuti prima della chiusura e privo di finestra d'esecuzione utile. I cinque segnali ribassisti non sono contati: inaccessibili per il vincolo long-only, che e' F-040 e non questo difetto. AVVERTENZA SULLA STIMA: $10.66 e' il costo di UNA giornata e sottostima strutturalmente il danno, perche' misura solo cio' che sarebbe passato attraverso il gate. Il costo vero e' di misura: una seduta su 40 in cui la domanda di uscita n.1 - la news ha alpha? - non e' stata posta al sistema per due terzi del tempo, senza che il ledger potesse distinguerla da una seduta senza segnali. Passa il test di esenzione della OBSERVATION_CHARTER: se non lo correggo, l'evidenza raccolta nelle prossime settimane e' sbagliata, perche' contiene giornate vuote indistinguibili da giornate senza opportunita'.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-26.md [DAY-001] §10"
+        }
+      ],
+      "costo_cumulato_usd": 10.66,
+      "occorrenze_non_stimate": 0,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-050",
+      "titolo": "Dopo la rimozione del drawdown fittizio 'portfolio' nessun drawdown per sleeve e' piu' monitorato: per_strategy_metrics e' vuoto e alerts non puo' scattare per S1 ne' per S4",
+      "tipo": "osservazione",
+      "confidenza": "misurata",
+      "primo_avvistamento": "2026-08-26",
+      "occorrenze": [
+        {
+          "data": "2026-08-26",
+          "costo_usd": null,
+          "nota": "ID NUOVO GIUSTIFICATO E NON AGGANCIATO A F-003 DI PROPOSITO. F-003 e' 'combined_drawdown incoerente col drawdown effettivo usato per l'ALERT (per_strategy_metrics.portfolio.drawdown)' e su questi dati risulta RISOLTO: risk_reports del 2026-08-25 e 2026-08-26 hanno alerts=[] e non contengono piu' l'ALERT notturno 'Strategy portfolio drawdown 17.9% exceeds 10%' presente il 08-23 e il 08-24. Appendere un'occorrenza a F-003 direbbe che il difetto e' RICORSO, che e' falso. Cio' che descrivo qui e' lo STATO SUCCESSIVO alla correzione, con meccanismo e rimedio diversi. DATI. SELECT timestamp::date, alerts::text, per_strategy_metrics::text FROM risk_reports WHERE timestamp >= '2026-08-23': 08-23 e 08-24 hanno alerts con un ALERT e per_strategy_metrics {\"portfolio\":{sharpe,drawdown,daily_pnl,...}}; 08-25 e 08-26 hanno alerts=[] e per_strategy_metrics={}. Causa in src/workers/risk_monitor_task.py:236-238 (commit 8c61a44, fix #349, PR #366): compute_report(strategy_returns={}, current_weights={}, ...). In src/portfolio/risk_monitor.py:176-190 il ciclo 'for sid, rets in strategy_returns.items()' non itera su nulla, quindi per_strategy resta vuoto e _check_alerts riceve un dizionario vuoto. La scelta e' DICHIARATA nel commento del codice ('no synthetic per-strategy entry is registered'), quindi e' una lacuna assunta, non un incidente, e la motivazione e' corretta: portfolio_daily_state.daily_return e' SUM(net_pnl)/SUM(entry_notional) sui soli trade chiusi, non un rendimento su NAV, e darlo in pasto a _compute_drawdown produceva il 17.8% fittizio. COSA RESTA COPERTO E COSA NO. combined_drawdown resta corretto e ancorato alla curva equity reale (#107): 1.24% il 2026-08-26, su NAV $110073.75, esposizione 29.34%, HHI 0.0250. E' la copertura per S1 e per S4 SEPARATAMENTE a essere a zero. Rilevanza: i due sleeve hanno profili molto diversi - aggregati.per_ora_ingresso del dossier riporta per l'ora 14 S1 -$448.78 di realizzato su 27 righe contro S4 -$189.95 su 18 - e nessun meccanismo si accorgerebbe se uno dei due entrasse in drawdown profondo mentre l'altro lo compensa. COSTO null e non 0.0: nessuna perdita oggi, il drawdown di libro e' ampiamente sotto soglia e il libro e' paper. E' una lacuna di copertura del controllo di rischio, il cui costo si materializzerebbe solo in uno scenario che non si e' verificato; contare sulla ricorrenza. NON PASSA il test di esenzione della OBSERVATION_CHARTER - la sua assenza non rende sbagliata l'evidenza raccolta - quindi il rimedio va DOPO il 28/09. Rimedio corretto: NON ripristinare la vecchia serie, ma costruire una curva equity per sleeve sul modello di _fetch_equity_curve (#107) e solo allora ricablare strategy_returns. Nel frattempo un monitor read-only che scriva il drawdown per sleeve nel dossier, cosi' che la serie esista quando il gate verra' ricablato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-26.md [DAY-010] §10"
         }
       ],
       "costo_cumulato_usd": 0,
