@@ -261,6 +261,10 @@ def observe_p0_open(
         "open",
         str(runtime_trade_id),
         reason_code,
+        # L'osservazione di lifecycle da cui questa proiezione nasce. Senza,
+        # una correzione a monte produce lo stesso event_id e `ON CONFLICT DO
+        # NOTHING` la scarta: la riga sbagliata resterebbe corrente per sempre.
+        lifecycle.event_id,
     ))
     return P0ReplayEvent(
         event_id=str(uuid5(_P0_NAMESPACE, fingerprint)),
@@ -296,6 +300,7 @@ def observe_p0_open(
         divergence_reasons=tuple(divergences),
         details={
             "entry_fill_id": lifecycle.fill_id,
+            "entry_lifecycle_event_id": lifecycle.event_id,
             "entry_policy_version": lifecycle.policy_version,
             "runtime_trade_id": runtime_trade_id,
             "snapshot_hash": snapshot.source_hash,
@@ -372,6 +377,10 @@ def replay_p0(
             if runtime.first_executable_price is None
             else f"{runtime.first_executable_price:.12g}"
         ),
+        # Vedi `observe_p0_open`: la proiezione e' identificata anche
+        # dall'osservazione di lifecycle che la genera, cosi' un ingresso
+        # ricostruito dopo una correzione puo' riscrivere lo stato corrente.
+        lifecycle.event_id,
     ))
     event = P0ReplayEvent(
         event_id=str(uuid5(_P0_NAMESPACE, fingerprint)),
@@ -405,6 +414,7 @@ def replay_p0(
         divergence_reasons=(),
         details={
             "entry_fill_id": lifecycle.fill_id,
+            "entry_lifecycle_event_id": lifecycle.event_id,
             "entry_first_executable_price": lifecycle.first_executable_price,
             "entry_policy_version": lifecycle.policy_version,
             "raw_runtime_reason": runtime.raw_reason,

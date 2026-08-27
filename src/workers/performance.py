@@ -108,6 +108,34 @@ def _session_boundary(value, session_date: date):
     return value
 
 
+def _exited_quantity(trading_client, exit_order_ids) -> float:
+    """Quote di questo ingresso gia' uscite al broker, lette ordine per ordine.
+
+    Somma i `filled_qty` degli ordini di uscita legati all'ingresso, non la
+    quantita' del trade: un'uscita parziale deve restare parziale, altrimenti
+    un ammanco vero verrebbe spiegato da un'uscita che non e' avvenuta per
+    intero. Un ordine illeggibile vale zero — segnala il deficit invece di
+    accreditare quote mai viste.
+    """
+    total = 0.0
+    for order_id in exit_order_ids:
+        if not order_id:
+            continue
+        try:
+            order = trading_client.get_order_by_id(order_id)
+        except Exception as exc:  # noqa: BLE001 - il client Alpaca non ha una base comune
+            log.warning("#374: exit order %s unavailable for S4 reconcile: %s", order_id, exc)
+            continue
+        raw_qty = getattr(order, "filled_qty", None)
+        if raw_qty is None:
+            continue
+        try:
+            total += max(0.0, float(raw_qty))
+        except (TypeError, ValueError):
+            log.warning("#374: exit order %s has a non-numeric filled_qty", order_id)
+    return total
+
+
 def _market_session(row):
     from src.strategies.s4.lifecycle import MarketSession
 
@@ -156,6 +184,12 @@ def _reconcile_s4_lifecycles(
         log.warning("#295: Alpaca calendar unavailable during lifecycle reconcile: %s", exc)
         sessions = []
 
+    try:
+        exit_orders_by_entry = pg.fetch_s4_exit_order_ids()
+    except Exception as exc:
+        log.warning("#374: S4 exit orders unavailable during lifecycle reconcile: %s", exc)
+        exit_orders_by_entry = {}
+
     events = []
     for intent in intents:
         if intent.submission_reason_code == "BROKER_REJECT":
@@ -196,6 +230,9 @@ def _reconcile_s4_lifecycles(
                     filled_avg_price=None,
                     lookup_error=type(exc).__name__,
                 )
+        exited_qty = _exited_quantity(
+            trading_client, exit_orders_by_entry.get(intent.order_id or "", ())
+        )
         position_qty = (
             None if broker_positions is None else broker_positions.get(intent.symbol, 0.0)
         )
@@ -211,6 +248,7 @@ def _reconcile_s4_lifecycles(
             sessions,
             now,
             broker_position_quantity=position_qty,
+            broker_exited_quantity=exited_qty,
             market_event=market_event,
         ))
 

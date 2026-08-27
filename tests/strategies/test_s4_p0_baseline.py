@@ -329,3 +329,59 @@ def test_report_validation_window_applica_il_95_percento_e_classifica_residui():
     assert report["coverage"] == pytest.approx(0.95)
     assert report["meets_minimum"] is True
     assert report["residual_by_reason"] == {"P0_EXIT_FILL_MISSING": 5}
+
+
+def test_una_proiezione_di_un_lifecycle_corretto_e_un_evento_distinto():
+    """Senza questo, `ON CONFLICT DO NOTHING` scarta ogni correzione a monte.
+
+    La riga P0 e' la *proiezione* di una precisa osservazione di lifecycle. Se
+    quell'osservazione viene corretta — un ingresso prima non ricostruibile che
+    lo diventa — la proiezione vecchia resta valida come storia ma non come
+    stato corrente, e per poter essere riscritta in una tabella append-only
+    deve avere un `event_id` proprio.
+    """
+    runtime = _runtime()
+    snapshot = load_p0_policy_snapshot()
+    non_ricostruibile = replace(_entry(), reconstructible=False, event_id="lc-vecchio")
+    ricostruibile = replace(_entry(), reconstructible=True, event_id="lc-corretto")
+
+    prima = replay_p0(non_ricostruibile, runtime, snapshot, _CostModel())
+    dopo = replay_p0(ricostruibile, runtime, snapshot, _CostModel())
+
+    assert prima.comparable is False
+    assert "ENTRY_NOT_RECONSTRUCTIBLE" in prima.divergence_reasons
+    assert dopo.comparable is True
+    assert dopo.event_id != prima.event_id
+
+
+def test_la_proiezione_dichiara_da_quale_osservazione_di_lifecycle_nasce():
+    """Il consumatore deve poter dire se la proiezione e' ferma a un'osservazione vecchia."""
+    entry = _entry()
+
+    event = replay_p0(entry, _runtime(), load_p0_policy_snapshot(), _CostModel())
+
+    assert event.details["entry_lifecycle_event_id"] == entry.event_id
+
+
+def test_lo_snapshot_aperto_segue_la_stessa_regola():
+    snapshot = load_p0_policy_snapshot()
+    vecchio = replace(_entry(), reconstructible=False, event_id="lc-vecchio")
+    corretto = replace(_entry(), reconstructible=True, event_id="lc-corretto")
+
+    prima = observe_p0_open(vecchio, snapshot, _CostModel(), runtime_trade_id=7)
+    dopo = observe_p0_open(corretto, snapshot, _CostModel(), runtime_trade_id=7)
+
+    assert prima.event_id != dopo.event_id
+    assert dopo.details["entry_lifecycle_event_id"] == "lc-corretto"
+
+
+def test_riproiettare_la_stessa_osservazione_resta_idempotente():
+    """La correzione non deve trasformarsi in una riga nuova a ogni ciclo."""
+    entry = _entry()
+    runtime = _runtime()
+    snapshot = load_p0_policy_snapshot()
+
+    assert (
+        replay_p0(entry, runtime, snapshot, _CostModel()).event_id
+        == replay_p0(entry, runtime, snapshot, _CostModel()).event_id
+    )

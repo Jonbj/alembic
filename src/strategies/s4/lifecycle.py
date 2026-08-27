@@ -169,9 +169,23 @@ def reconcile_entry(
     observed_at: datetime,
     *,
     broker_position_quantity: float | None,
+    broker_exited_quantity: float = 0.0,
     market_event: Literal["corporate_action", "gap"] | None = None,
 ) -> S4LifecycleEvent:
-    """Riconcilia un intento con uno snapshot broker senza correggere residui."""
+    """Riconcilia un intento con uno snapshot broker senza correggere residui.
+
+    `broker_position_quantity` e' una fotografia del *presente*, mentre il fill
+    da riconciliare e' nel passato: fra i due c'e' tutto cio' che ha
+    legittimamente tolto quote alla posizione. `broker_exited_quantity` e'
+    quella parte, e deve provenire dagli ordini di uscita legati a *questo*
+    ingresso — mai da un totale per simbolo, che accrediterebbe all'intento
+    l'uscita di un altro.
+
+    Il default e' zero, cioe' il comportamento di prima: un chiamante che non
+    osserva le uscite continua a vedere un ammanco. La direzione conta, perche'
+    l'errore pericoloso qui non e' segnalare un deficit di troppo, ma spiegarne
+    uno vero.
+    """
     if order.order_id != intent.order_id:
         raise ValueError("broker order does not belong to the submitted S4 intent")
 
@@ -183,10 +197,14 @@ def reconcile_entry(
         order.filled_quantity, intent.sleeve_contributions
     )
     virtual_total = s1_qty + s4_qty
+    exited = max(0.0, float(broker_exited_quantity))
+    # Quota dell'ingresso che nessuna osservazione spiega: cio' che il broker
+    # tiene ancora, piu' cio' che risulta uscito, meno cio' che l'ingresso ha
+    # portato. Zero significa riconciliato, non "posizione vuota".
     difference = (
         None
         if broker_position_quantity is None
-        else float(broker_position_quantity) - virtual_total
+        else float(broker_position_quantity) + exited - virtual_total
     )
 
     if order.lookup_error is not None:
@@ -232,6 +250,7 @@ def reconcile_entry(
         reason,
         fill_id or "no-fill",
         "missing" if broker_position_quantity is None else f"{broker_position_quantity:.12g}",
+        f"{exited:.12g}",
         market_event or "no-market-event",
     ))
     details: dict[str, object] = {
@@ -245,6 +264,7 @@ def reconcile_entry(
         "requested_quantity": intent.requested_quantity,
         "requested_notional": intent.requested_notional,
         "sleeve_contributions": dict(sorted(intent.sleeve_contributions.items())),
+        "broker_exited_quantity": exited,
         "market_event": market_event,
     }
     return S4LifecycleEvent(

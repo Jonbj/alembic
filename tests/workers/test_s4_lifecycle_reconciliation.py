@@ -192,3 +192,98 @@ def test_un_fill_fuori_rth_resta_censurato():
     assert event.status == "CENSORED"
     assert event.reason_code == "FILL_OUTSIDE_RTH"
     assert event.d0 is None
+
+
+def _exited_order(qty: str):
+    return SimpleNamespace(id="alpaca-exit-1", status="filled", filled_qty=qty)
+
+
+def test_una_posizione_venduta_non_diventa_un_ammanco_inspiegato():
+    """Lo snapshot delle posizioni e' il presente; il fill da riconciliare e' il passato.
+
+    Un simbolo uscito non compare piu' fra le posizioni aperte e il default
+    `0.0` lo faceva passare per una posizione vuota. Siccome solo gli intenti
+    chiusi portano un `net_pnl`, il trial exit escludeva per costruzione le
+    uniche coppie misurabili.
+    """
+    store = MagicMock()
+    store.fetch_s4_submitted_intents.return_value = [_intent()]
+    store.fetch_s4_exit_order_ids.return_value = {"alpaca-order-1": ("alpaca-exit-1",)}
+    broker = MagicMock()
+    broker.get_order_by_id.side_effect = lambda order_id: (
+        _exited_order("2.0")
+        if order_id == "alpaca-exit-1"
+        else SimpleNamespace(
+            id="alpaca-order-1",
+            status="filled",
+            filled_at=datetime(2026, 8, 25, 19, 7, 5, tzinfo=UTC),
+            filled_qty="2.0",
+            filled_avg_price="105.25",
+        )
+    )
+    broker.get_all_positions.return_value = []
+    broker.get_calendar.return_value = [_calendar(25), _calendar(26), _calendar(27)]
+
+    _reconcile_s4_lifecycles(
+        store, broker, observed_at=datetime(2026, 8, 27, 8, 19, tzinfo=UTC)
+    )
+
+    [event] = store.write_s4_lifecycle_events.call_args.args[0]
+    assert event.reason_code == "BROKER_FILLED"
+    assert event.reconstructible is True
+    assert event.unattributed_quantity == 0.0
+
+
+def test_un_ammanco_senza_uscita_corrispondente_resta_segnalato():
+    store = MagicMock()
+    store.fetch_s4_submitted_intents.return_value = [_intent()]
+    store.fetch_s4_exit_order_ids.return_value = {}
+    broker = MagicMock()
+    broker.get_order_by_id.return_value = SimpleNamespace(
+        id="alpaca-order-1",
+        status="filled",
+        filled_at=datetime(2026, 8, 25, 19, 7, 5, tzinfo=UTC),
+        filled_qty="2.0",
+        filled_avg_price="105.25",
+    )
+    broker.get_all_positions.return_value = []
+    broker.get_calendar.return_value = [_calendar(25), _calendar(26), _calendar(27)]
+
+    _reconcile_s4_lifecycles(
+        store, broker, observed_at=datetime(2026, 8, 27, 8, 19, tzinfo=UTC)
+    )
+
+    [event] = store.write_s4_lifecycle_events.call_args.args[0]
+    assert event.reason_code == "BROKER_DEFICIT_UNEXPLAINED"
+    assert event.reconstructible is False
+
+
+def test_un_ordine_di_uscita_illeggibile_non_accredita_quote_mai_viste():
+    """Un lookup fallito vale zero uscite: il deficit resta, non viene spiegato."""
+    store = MagicMock()
+    store.fetch_s4_submitted_intents.return_value = [_intent()]
+    store.fetch_s4_exit_order_ids.return_value = {"alpaca-order-1": ("alpaca-exit-1",)}
+    broker = MagicMock()
+
+    def _lookup(order_id):
+        if order_id == "alpaca-exit-1":
+            raise RuntimeError("404 order not found")
+        return SimpleNamespace(
+            id="alpaca-order-1",
+            status="filled",
+            filled_at=datetime(2026, 8, 25, 19, 7, 5, tzinfo=UTC),
+            filled_qty="2.0",
+            filled_avg_price="105.25",
+        )
+
+    broker.get_order_by_id.side_effect = _lookup
+    broker.get_all_positions.return_value = []
+    broker.get_calendar.return_value = [_calendar(25), _calendar(26), _calendar(27)]
+
+    _reconcile_s4_lifecycles(
+        store, broker, observed_at=datetime(2026, 8, 27, 8, 19, tzinfo=UTC)
+    )
+
+    [event] = store.write_s4_lifecycle_events.call_args.args[0]
+    assert event.reason_code == "BROKER_DEFICIT_UNEXPLAINED"
+    assert event.reconstructible is False

@@ -697,6 +697,16 @@ class PostgreSQLStore:
                       AND (
                           p0.intent_id IS NULL
                           OR p0.status NOT IN ('CLOSED', 'RISK_EXITED')
+                          -- La proiezione P0 nasce da una precisa osservazione
+                          -- di lifecycle. Se a monte ne e' arrivata una nuova
+                          -- — un ingresso prima non ricostruibile che lo
+                          -- diventa — quella corrente e' ferma a un'osservazione
+                          -- superata e va riproiettata, anche se terminale.
+                          -- Il confronto e' sull'identita' dell'osservazione,
+                          -- non su `comparable`: un intento che resta non
+                          -- comparabile non viene riofferto a ogni ciclo.
+                          OR p0.details->>'entry_lifecycle_event_id'
+                             IS DISTINCT FROM lc.event_id::text
                       )
                     ORDER BY COALESCE(t.exit_time, lc.observed_at), lc.intent_id
                     """
@@ -761,6 +771,47 @@ class PostgreSQLStore:
                 submission_reason_code=row["submission_reason_code"],
                 submission_error=row["submission_error"],
             ) for row in rows]
+        except Exception:
+            conn.rollback()
+            raise
+
+    def fetch_s4_exit_order_ids(self) -> dict[str, tuple[str, ...]]:
+        """Ordini di uscita legati a ciascun ingresso S4, per entry_order_id.
+
+        La chiave e' l'ordine d'ingresso, non il simbolo: legare le uscite al
+        simbolo accrediterebbe a un intento l'uscita di un altro sullo stesso
+        ticker, che e' esattamente il modo in cui un ammanco vero verrebbe
+        spiegato via.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        entry_order_id,
+                        COALESCE(
+                            exit_order_ids,
+                            CASE
+                                WHEN exit_order_id IS NULL THEN ARRAY[]::TEXT[]
+                                ELSE ARRAY[exit_order_id]::TEXT[]
+                            END
+                        ) AS exit_order_ids
+                    FROM trades
+                    WHERE entry_order_id IS NOT NULL
+                      AND entry_time > now() - '30 days'::interval
+                    """
+                )
+                rows = cur.fetchall()
+            return {
+                str(row["entry_order_id"]): tuple(
+                    str(order_id)
+                    for order_id in (row["exit_order_ids"] or ())
+                    if order_id
+                )
+                for row in rows
+                if row["exit_order_ids"]
+            }
         except Exception:
             conn.rollback()
             raise

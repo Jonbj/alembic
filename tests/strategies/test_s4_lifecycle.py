@@ -224,3 +224,87 @@ def test_report_validation_window_quantifica_il_residuo_per_motivo():
     assert report["coverage"] == pytest.approx(0.95)
     assert report["meets_minimum"] is True
     assert report["residual_by_reason"] == {"BROKER_POSITION_MISSING": 5}
+
+
+def test_una_posizione_uscita_resta_ricostruibile_se_l_uscita_la_spiega():
+    """Il fill d'ingresso non diventa inspiegabile perche' la posizione e' uscita.
+
+    Il reconciler confronta l'ingresso con lo snapshot delle posizioni
+    *correnti*: un simbolo venduto non compare piu', e senza l'uscita osservata
+    il suo `0.0` e' indistinguibile da un ammanco. Poiche' solo gli intenti
+    chiusi portano un `net_pnl`, trattarli come non ricostruibili escludeva per
+    costruzione le uniche coppie che il trial puo' misurare.
+    """
+    event = reconcile_entry(
+        _intent(),
+        _order(),
+        _sessions(),
+        OBSERVED_AT,
+        broker_position_quantity=0.0,
+        broker_exited_quantity=6.0,
+    )
+
+    assert event.status == "FILLED"
+    assert event.reason_code == "BROKER_FILLED"
+    assert event.reconstructible is True
+    assert event.unattributed_quantity == pytest.approx(0.0)
+
+
+def test_un_ammanco_non_spiegato_da_un_uscita_resta_segnalato():
+    """La correzione spiega i deficit osservati, non li assorbe tutti."""
+    event = reconcile_entry(
+        _intent(),
+        _order(),
+        _sessions(),
+        OBSERVED_AT,
+        broker_position_quantity=0.0,
+        broker_exited_quantity=4.0,
+    )
+
+    assert event.reason_code == "BROKER_DEFICIT_UNEXPLAINED"
+    assert event.reconstructible is False
+    assert event.unattributed_quantity == pytest.approx(-2.0)
+
+
+def test_un_uscita_parziale_lascia_il_resto_in_posizione():
+    event = reconcile_entry(
+        _intent(),
+        _order(),
+        _sessions(),
+        OBSERVED_AT,
+        broker_position_quantity=2.5,
+        broker_exited_quantity=3.5,
+    )
+
+    assert event.reason_code == "BROKER_FILLED"
+    assert event.reconstructible is True
+
+
+def test_un_uscita_osservata_non_maschera_un_surplus():
+    """Se l'uscita e' avvenuta ma le quote ci sono ancora, qualcuno ne ha aggiunte."""
+    event = reconcile_entry(
+        _intent(),
+        _order(),
+        _sessions(),
+        OBSERVED_AT,
+        broker_position_quantity=6.0,
+        broker_exited_quantity=3.0,
+    )
+
+    assert event.reason_code == "BROKER_SURPLUS_UNATTRIBUTED"
+    assert event.reconstructible is False
+    assert event.unattributed_quantity == pytest.approx(3.0)
+
+
+def test_senza_uscita_osservata_il_comportamento_non_cambia():
+    """Il default e' zero: un chiamante che non osserva le uscite vede l'ammanco."""
+    event = reconcile_entry(
+        _intent(),
+        _order(),
+        _sessions(),
+        OBSERVED_AT,
+        broker_position_quantity=0.0,
+    )
+
+    assert event.reason_code == "BROKER_DEFICIT_UNEXPLAINED"
+    assert event.reconstructible is False
