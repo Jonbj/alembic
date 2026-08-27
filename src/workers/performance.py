@@ -35,7 +35,7 @@ import asyncio
 import json
 from src.workers._async_utils import run_async
 import logging
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -201,6 +201,11 @@ def _reconcile_s4_lifecycles(
         log.warning("#374: S4 exit orders unavailable during lifecycle reconcile: %s", exc)
         exit_orders_by_entry = {}
 
+    # Piu' ingressi vivi sullo stesso simbolo rendono lo snapshot di posizione
+    # non attribuibile a un singolo intento: senza questo, il rientro su un
+    # titolo faceva risultare un surplus agli intenti gia' usciti.
+    intents_per_symbol = Counter(intent.symbol for intent in intents)
+
     events = []
     for intent in intents:
         if intent.submission_reason_code == "BROKER_REJECT":
@@ -260,6 +265,7 @@ def _reconcile_s4_lifecycles(
             now,
             broker_position_quantity=position_qty,
             broker_exited_quantity=exited_qty,
+            shares_symbol_with_other_intents=intents_per_symbol[intent.symbol] > 1,
             market_event=market_event,
         ))
 

@@ -170,6 +170,7 @@ def reconcile_entry(
     *,
     broker_position_quantity: float | None,
     broker_exited_quantity: float = 0.0,
+    shares_symbol_with_other_intents: bool = False,
     market_event: Literal["corporate_action", "gap"] | None = None,
 ) -> S4LifecycleEvent:
     """Riconcilia un intento con uno snapshot broker senza correggere residui.
@@ -185,6 +186,11 @@ def reconcile_entry(
     osserva le uscite continua a vedere un ammanco. La direzione conta, perche'
     l'errore pericoloso qui non e' segnalare un deficit di troppo, ma spiegarne
     uno vero.
+
+    `shares_symbol_with_other_intents` dice che sul simbolo vivono piu'
+    ingressi: in quel caso la posizione non e' attribuibile a questo intento e
+    un surplus non e' giudicabile. Il default e' `False`, cioe' il caso in cui
+    la posizione parla solo di questo intento e ogni scostamento e' reale.
     """
     if order.order_id != intent.order_id:
         raise ValueError("broker order does not belong to the submitted S4 intent")
@@ -201,11 +207,25 @@ def reconcile_entry(
     # Quota dell'ingresso che nessuna osservazione spiega: cio' che il broker
     # tiene ancora, piu' cio' che risulta uscito, meno cio' che l'ingresso ha
     # portato. Zero significa riconciliato, non "posizione vuota".
-    difference = (
-        None
-        if broker_position_quantity is None
-        else float(broker_position_quantity) + exited - virtual_total
-    )
+    #
+    # Il credito dalla posizione e' limitato a cio' che *questo* intento
+    # attende ancora. Lo snapshot e' per simbolo, l'intento e' uno solo:
+    # quando il sistema rientra sullo stesso titolo, le azioni del nuovo
+    # ingresso comparirebbero anche qui e farebbero risultare un surplus a un
+    # intento gia' uscito per intero. Il cap agisce solo verso l'alto, quindi
+    # un ammanco vero resta visibile: e' il caso che non si puo' mascherare.
+    difference = None
+    if broker_position_quantity is not None:
+        position = float(broker_position_quantity)
+        if shares_symbol_with_other_intents:
+            # Lo snapshot e' per simbolo: con piu' ingressi vivi sullo stesso
+            # titolo, le azioni di uno comparirebbero anche negli altri. Il
+            # credito si limita a cio' che *questo* intento attende ancora,
+            # quindi un surplus non e' giudicabile e non viene inventato. Il
+            # cap agisce solo verso l'alto: un ammanco resta visibile, ed e' il
+            # caso che non si puo' mascherare.
+            position = min(position, max(0.0, virtual_total - exited))
+        difference = position + exited - virtual_total
 
     if order.lookup_error is not None:
         status, reason, reconstructible = (
@@ -251,6 +271,7 @@ def reconcile_entry(
         fill_id or "no-fill",
         "missing" if broker_position_quantity is None else f"{broker_position_quantity:.12g}",
         f"{exited:.12g}",
+        "shared" if shares_symbol_with_other_intents else "exclusive",
         market_event or "no-market-event",
     ))
     details: dict[str, object] = {
@@ -265,6 +286,7 @@ def reconcile_entry(
         "requested_notional": intent.requested_notional,
         "sleeve_contributions": dict(sorted(intent.sleeve_contributions.items())),
         "broker_exited_quantity": exited,
+        "shares_symbol_with_other_intents": shares_symbol_with_other_intents,
         "market_event": market_event,
     }
     return S4LifecycleEvent(
