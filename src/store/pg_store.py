@@ -775,6 +775,51 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    def fetch_s4_p1_candidates(self) -> list[dict]:
+        """Lifecycle su cui la challenger P1 (#297) deve ancora dire la sua.
+
+        Riofferti finche' la decisione non e' terminale — P1 puo' restare
+        aperta per due sedute dopo che il runtime ha gia' venduto — e ogni
+        volta che l'osservazione di lifecycle a monte cambia (stessa regola di
+        #374: senza, una correzione dell'ingresso non si propagherebbe mai).
+
+        Lo stop congelato all'ingresso viaggia con la riga: il controfattuale
+        deve applicare la distanza point-in-time, non una ricalcolata oggi.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        lc.*,
+                        t.stop_mode,
+                        t.stop_d_init,
+                        t.stop_vol_at_entry,
+                        t.stop_floor,
+                        t.stop_cap
+                    FROM s4_lifecycle_current lc
+                    LEFT JOIN trades t ON t.entry_order_id = lc.order_id
+                    LEFT JOIN s4_exit_policy_current p1
+                      ON p1.intent_id = lc.intent_id
+                     AND p1.policy_id = 'P1'
+                    WHERE lc.filled_quantity > 0
+                      AND (
+                          p1.intent_id IS NULL
+                          OR p1.status NOT IN ('CLOSED', 'RISK_EXITED', 'CENSORED')
+                          OR p1.details->>'entry_lifecycle_event_id'
+                             IS DISTINCT FROM lc.event_id::text
+                      )
+                    ORDER BY lc.d0, lc.intent_id
+                    """
+                )
+                return [dict(row) for row in cur.fetchall()]
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.rollback()
+
     def fetch_s4_exit_order_ids(self) -> dict[str, tuple[str, ...]]:
         """Ordini di uscita legati a ciascun ingresso S4, per entry_order_id.
 
