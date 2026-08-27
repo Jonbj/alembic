@@ -273,6 +273,9 @@ def _run_cron(repo: dict, extra_path: Path | None = None) -> tuple[subprocess.Co
         "if [[ \"$*\" == 'run python3 -' ]]; then\n"
         "    printf '2026-08-26\\n'\n"
         "fi\n"
+        'if [[ "$*" == *alpha_miner_dossier.py* ]]; then\n'
+        "    printf '{\"dossier\": \"2026-08-26\"}\\n' > docs/evidence/dossier/2026-08-26.json\n"
+        "fi\n"
         'if [[ "$*" == *economic_pnl_scoreboard.py* ]]; then\n'
         "    printf '{\"aggiornato\": \"2026-08-26\"}\\n' > docs/evidence/economic_pnl.json\n"
         "fi\n"
@@ -332,6 +335,7 @@ def test_cron_commits_the_ledger_from_a_feature_branch(repo):
     assert _remote_file(repo["remote"], REPORT) == "# Alpha miss 2026-08-26\n"
     assert "F-001" in _remote_file(repo["remote"], LEDGER)
     assert "2026-08-26" in _remote_file(repo["remote"], ECON)
+    assert "2026-08-26" in _remote_file(repo["remote"], "docs/evidence/dossier/2026-08-26.json")
     assert "GIT_STATUS=pushed" in telegram
 
 
@@ -355,9 +359,15 @@ def test_cron_hands_report_and_ledgers_to_the_helper_in_one_commit():
     source = CRON.read_text()
 
     assert "scripts/commit_evidence_ledger.sh" in source
-    invocation = source.rsplit("commit_evidence_ledger.sh", 1)[1].split("\n\n", 1)[0]
-    for path in ("docs/evidence/findings.json", "docs/evidence/market_daily.jsonl", ECON, "REPORT_FILE"):
-        assert path in invocation
+    block = source.rsplit("COMMIT_PATHS=(", 1)[1].split("commit_evidence_ledger.sh", 1)[0]
+    for path in (
+        "docs/evidence/findings.json",
+        "docs/evidence/market_daily.jsonl",
+        ECON,
+        "REPORT_FILE",
+        "DOSSIER_FILE",
+    ):
+        assert path in block
 
 
 def test_broken_worktree_registration_is_rebuilt(repo):

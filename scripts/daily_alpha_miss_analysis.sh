@@ -387,13 +387,20 @@ fi
 # su cui e' parcheggiata questa directory di lavoro non conta piu' nulla. Il
 # risultato e' esplicito su Telegram e nell'ultima riga del log, perche' finora
 # un mancato commit era visibile solo rileggendo il log a mano.
+COMMIT_PATHS=(
+    docs/evidence/findings.json
+    docs/evidence/market_daily.jsonl
+    docs/evidence/economic_pnl.json
+    "$REPORT_FILE"
+)
+# Il dossier e' un output di questo stesso run: senza questa riga resta su disco
+# (gli ultimi finiti su main erano stati committati a mano).
+if [[ -f "$DOSSIER_FILE" ]]; then
+    COMMIT_PATHS+=("$DOSSIER_FILE")
+fi
 set +e
 GIT_OUTPUT=$("$PROJECT_DIR/scripts/commit_evidence_ledger.sh" \
-    --message "evidence: ledger ${DATE_TARGET}" \
-    docs/evidence/findings.json \
-    docs/evidence/market_daily.jsonl \
-    docs/evidence/economic_pnl.json \
-    "$REPORT_FILE" 2>&1)
+    --message "evidence: ledger ${DATE_TARGET}" "${COMMIT_PATHS[@]}" 2>&1)
 set -e
 printf '%s\n' "$GIT_OUTPUT"
 GIT_STATUS=$(printf '%s\n' "$GIT_OUTPUT" | sed -n 's/^GIT_STATUS=//p' | tail -1)
