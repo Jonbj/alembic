@@ -14,6 +14,15 @@
 #
 # Aggiornare l'ordine e' una decisione dell'operatore, non dell'agente.
 
+# === PRIORITA' PERDITE S4 (aggiunte 2026-08-25) ===
+# Bug che chiudono cause dirette di perdita giornaliera su S4.
+# Tutte freeze-ok + ready-for-agent. In cima perche' ogni giorno di ritardo costa MTM.
+327  S4: entrate sistematicamente tardie (percentile alto del range di giornata) — $52 MTM perso
+328  S4: segnali WRONG_SIGN dal modello fallback + fan-out multi-ticker — rischio entrata nel verso sbagliato
+335  S4: manca guard pre-trade earnings/price-action — aperto long su WMT in crollo -9,16% earnings
+# 349 e' solo telemetria (alert falsa), non causale di perdite — in fondo al blocco
+349  F-003: falsa alert di drawdown serale — costo_usd null, nessun impatto su ordini o P&L reale
+
 191  il ratchet ha portato il gate S4 a 0,45: la finestra sta misurando la leva, non la strategia
 208  il dossier non classifica la causa dei miss: la domanda di uscita n.1 non e' calcolabile al 28/09
 190  i cron dell'osservazione perdono i propri fallimenti: un giro morto e uno sano hanno la stessa firma
@@ -41,7 +50,7 @@
 
 # Alpaca execution-layer hardening (audit 2026-08-07) — tutte freeze-ok.
 # Spec + piani sul branch docs/spec-alpaca-hardening (mergiare a main prima: il loop lavora off main).
-# #203 e' blocked_by #201: va lavorato DOPO che #201 e' mergiato+deployato (il loop lo salta finche' #201 resta aperta).
+# #203 e' blocked_by #201: va lavorato DOPO che #201 e' mergiato+deployato (il loop lo salta finche' #201 resta aperto).
 201  client_order_id sui 6 siti submit: dedup broker-side, safety-net doppio-submit (sblocca #203)
 199  buying_power/multiplier mai gate-ati: pre-flight gate anti-reject-422 silenzioso
 200  riconciliazione posizioni DB↔broker: beat EOD + alert + auto-close orphan (classe #121)
@@ -76,6 +85,21 @@
 296  S4 exit trial: riprodurre P0 come baseline shadow (dopo #295 e #245)
 298  S4 exit trial: misurare replacement e opportunity cost (dopo #295 e #296)
 214  le review verbose non arrivano su GitHub: il cancello di merge resta senza verbale
+
+# Aggiunte del 2026-08-27 — issue open con `freeze-ok` + `ready-for-agent`
+# non ancora in coda. Rilevate a coda vuota: il loop girava ma non pescava nulla.
+#
+# Prima la catena alpha-miss: #330 e #336 sono bug dell'infrastruttura del cron
+# stesso (commit non pushati, worktree condiviso) — se la pipeline e' rotta le
+# analisi a valle (#282-#286) lavorano su dati incompleti. Poi #333 (report
+# omesse), poi i finding F-001/F-002 (qualita' dei dati di evidenza), infine
+# #363 (PoC second broker, tier2).
+330  Weekly: 2 alpha-miss reports stuck in local commits — automated analysis job does not sync before push (Aug 18-19 reports not on remote)
+336  Alpha-miss cron runs in the shared working tree and inherits whatever branch is checked out: 2 of 5 runs never committed at all (corrects #330's 2-of-5 accounting to 4-of-5)
+333  Alpha-miss report for Aug 20 omits 3 of 4 S4 entries and 3 of 4 exits, including the day's largest loss (HOOD -$60.32) — no report/dossier reconciliation
+325  F-002 Weekly: 11 legacy positions missing stop_strategy for 14+ consecutive sessions — P&L attribution contamination at 58% of NAV on Aug 17
+324  F-001 Weekly: 40% of watchlist has zero news coverage across Aug 17-20 — NO_NEWS is dominant miss cause (11/27 misses, $639+ lost alpha)
+363  Second-broker PoC: congelare contratto comparabile e kill criteria
 
 # Fuori coda di proposito, decisione dell'operatore (non dell'agente):
 #   #281 alpha-miss funnel v2 — 2 tentativi falliti nello state.tsv, fuori
