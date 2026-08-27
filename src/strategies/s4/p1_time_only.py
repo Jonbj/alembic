@@ -290,6 +290,11 @@ def decide_p1(
         # correzione del lifecycle produrrebbe lo stesso event_id e la
         # scrittura append-only la scarterebbe.
         lifecycle.event_id,
+        # Il trigger di rischio e' un parametro della policy, non un dettaglio
+        # del report: due decisioni con stop diversi sono decisioni diverse
+        # anche quando oggi coincidono nel `reason_code`. Ometterlo faceva
+        # scartare la correzione dalla scrittura append-only, come in #374.
+        "no-d-hard" if trigger_price is None else f"{trigger_price:.12g}",
         "no-exit" if exit_quote is None else _utc(exit_quote.at).isoformat(),
         "no-exit" if exit_quote is None else f"{exit_quote.price:.12g}",
     ))
