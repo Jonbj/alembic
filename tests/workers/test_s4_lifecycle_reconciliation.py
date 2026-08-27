@@ -287,3 +287,81 @@ def test_un_ordine_di_uscita_illeggibile_non_accredita_quote_mai_viste():
     [event] = store.write_s4_lifecycle_events.call_args.args[0]
     assert event.reason_code == "BROKER_DEFICIT_UNEXPLAINED"
     assert event.reconstructible is False
+
+
+def _second_intent():
+    return replace(
+        _intent(),
+        intent_id="7a1b2c3d-4e5f-5a6b-8c9d-0e1f2a3b4c5d",
+        order_id="alpaca-order-2",
+    )
+
+
+def test_due_intenti_sullo_stesso_simbolo_non_si_censurano_a_vicenda():
+    """Sul live tre intenti su otto uscivano BROKER_SURPLUS_UNATTRIBUTED.
+
+    CRM era entrato tre volte in giornata: due chiusi, uno aperto con 5.4
+    azioni. Quelle 5.4 comparivano nello snapshot anche per i due chiusi, che
+    risultavano avere piu' azioni di quante ne avessero comprate.
+    """
+    store = MagicMock()
+    store.fetch_s4_submitted_intents.return_value = [_intent(), _second_intent()]
+    store.fetch_s4_exit_order_ids.return_value = {
+        "alpaca-order-1": ("alpaca-exit-1",),
+    }
+    broker = MagicMock()
+
+    def _lookup(order_id):
+        if order_id == "alpaca-exit-1":
+            return SimpleNamespace(id=order_id, status="filled", filled_qty="2.0")
+        return SimpleNamespace(
+            id=order_id,
+            status="filled",
+            filled_at=datetime(2026, 8, 25, 19, 7, 5, tzinfo=UTC),
+            filled_qty="2.0",
+            filled_avg_price="105.25",
+        )
+
+    broker.get_order_by_id.side_effect = _lookup
+    # Il primo intento e' uscito per intero; le 2.0 azioni presenti ora sul
+    # simbolo appartengono al secondo, ancora aperto.
+    broker.get_all_positions.return_value = [SimpleNamespace(symbol="AMD", qty="2.0")]
+    broker.get_calendar.return_value = [_calendar(25), _calendar(26), _calendar(27)]
+
+    _reconcile_s4_lifecycles(
+        store, broker, observed_at=datetime(2026, 8, 27, 8, 19, tzinfo=UTC)
+    )
+
+    eventi = {e.intent_id: e for e in store.write_s4_lifecycle_events.call_args.args[0]}
+    uscito = eventi[_intent().intent_id]
+    aperto = eventi[_second_intent().intent_id]
+
+    assert uscito.reason_code == "BROKER_FILLED"
+    assert uscito.reconstructible is True
+    assert aperto.reason_code == "BROKER_FILLED"
+    assert aperto.reconstructible is True
+
+
+def test_un_solo_intento_sul_simbolo_conserva_il_controllo_sul_surplus():
+    """La correzione si applica solo dove serve: altrove il surplus resta reale."""
+    store = MagicMock()
+    store.fetch_s4_submitted_intents.return_value = [_intent()]
+    store.fetch_s4_exit_order_ids.return_value = {}
+    broker = MagicMock()
+    broker.get_order_by_id.return_value = SimpleNamespace(
+        id="alpaca-order-1",
+        status="filled",
+        filled_at=datetime(2026, 8, 25, 19, 7, 5, tzinfo=UTC),
+        filled_qty="2.0",
+        filled_avg_price="105.25",
+    )
+    broker.get_all_positions.return_value = [SimpleNamespace(symbol="AMD", qty="5.0")]
+    broker.get_calendar.return_value = [_calendar(25), _calendar(26), _calendar(27)]
+
+    _reconcile_s4_lifecycles(
+        store, broker, observed_at=datetime(2026, 8, 27, 8, 19, tzinfo=UTC)
+    )
+
+    [event] = store.write_s4_lifecycle_events.call_args.args[0]
+    assert event.reason_code == "BROKER_SURPLUS_UNATTRIBUTED"
+    assert event.reconstructible is False

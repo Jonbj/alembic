@@ -308,3 +308,83 @@ def test_senza_uscita_osservata_il_comportamento_non_cambia():
 
     assert event.reason_code == "BROKER_DEFICIT_UNEXPLAINED"
     assert event.reconstructible is False
+
+
+def test_la_posizione_di_un_altro_intento_non_diventa_un_surplus():
+    """Lo snapshot delle posizioni e' per simbolo, l'intento e' uno solo.
+
+    Quando il sistema rientra sullo stesso titolo, le azioni del nuovo intento
+    comparivano nello snapshot anche per quelli vecchi, gia' usciti per intero:
+    risultavano avere piu' azioni di quante ne avessero comprate. Sul live tre
+    intenti su otto erano censurati cosi', e il difetto peggiora a ogni
+    rientro. E' lo specchio dell'ammanco corretto in #374: la stessa posizione
+    per simbolo attribuita a un singolo intento.
+    """
+    event = reconcile_entry(
+        _intent(),
+        _order(),
+        _sessions(),
+        OBSERVED_AT,
+        # L'intento e' uscito per intero; le 5.4 azioni presenti ora sul
+        # simbolo appartengono a un ingresso successivo.
+        broker_position_quantity=5.4,
+        shares_symbol_with_other_intents=True,
+        broker_exited_quantity=6.0,
+    )
+
+    assert event.status == "FILLED"
+    assert event.reason_code == "BROKER_FILLED"
+    assert event.reconstructible is True
+    assert event.unattributed_quantity == pytest.approx(0.0)
+
+
+def test_un_surplus_vero_su_un_intento_ancora_aperto_resta_segnalato():
+    """La correzione limita il credito, non spegne il controllo."""
+    event = reconcile_entry(
+        _intent(),
+        _order(),
+        _sessions(),
+        OBSERVED_AT,
+        broker_position_quantity=9.0,
+        broker_exited_quantity=0.0,
+    )
+
+    assert event.reason_code == "BROKER_SURPLUS_UNATTRIBUTED"
+    assert event.reconstructible is False
+    assert event.unattributed_quantity == pytest.approx(3.0)
+
+
+def test_un_uscita_parziale_accredita_solo_quello_che_resta_atteso():
+    """Uscite 3.5 su 6: il broker puo' garantire per le 2.5 che mancano, non oltre."""
+    event = reconcile_entry(
+        _intent(),
+        _order(),
+        _sessions(),
+        OBSERVED_AT,
+        # 8.0 sul simbolo, ma questo intento ne attende solo 2.5: il resto e'
+        # di un altro ingresso.
+        broker_position_quantity=8.0,
+        shares_symbol_with_other_intents=True,
+        broker_exited_quantity=3.5,
+    )
+
+    assert event.reason_code == "BROKER_FILLED"
+    assert event.reconstructible is True
+    assert event.unattributed_quantity == pytest.approx(0.0)
+
+
+def test_un_ammanco_resta_visibile_anche_con_un_altro_intento_sul_simbolo():
+    """Il cap non puo' nascondere un deficit: e' il caso pericoloso."""
+    event = reconcile_entry(
+        _intent(),
+        _order(),
+        _sessions(),
+        OBSERVED_AT,
+        broker_position_quantity=1.0,
+        shares_symbol_with_other_intents=True,
+        broker_exited_quantity=2.0,
+    )
+
+    assert event.reason_code == "BROKER_DEFICIT_UNEXPLAINED"
+    assert event.reconstructible is False
+    assert event.unattributed_quantity == pytest.approx(-3.0)
