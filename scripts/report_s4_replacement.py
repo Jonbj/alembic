@@ -147,6 +147,7 @@ def _empty_report(start: date, end: date, policy_id: str) -> dict[str, object]:
         window_start=start,
         window_end=end,
     )
+    payload["paired_records"] = []
     payload["replacement_records"] = []
     return payload
 
@@ -227,6 +228,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         window_start=args.start,
         window_end=args.end,
     )
+    payload["paired_records"] = [
+        asdict(pair)
+        for pair in comparison.pairs
+        if pair.policy_id == policy_id
+        and pair.d0 is not None
+        and args.start <= pair.d0 <= args.end
+    ]
     payload["replacement_records"] = [asdict(record) for record in records]
     print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
 

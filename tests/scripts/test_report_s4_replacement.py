@@ -82,6 +82,9 @@ def test_cli_stampa_report_e_dettaglio_sostituto(monkeypatch, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert payload["paired"]["comparable"] == 1
+    assert payload["paired_records"][0]["intent_id"] == "intent-1"
+    assert payload["paired_records"][0]["initial_notional"] == 1000.0
+    assert payload["paired_records"][0]["exclusion_reasons"] == []
     assert payload["slots"]["substitutes_selected"] == 1
     assert payload["replacement_records"][0]["substitute_symbol"] == "NVDA"
     assert payload["replacement_records"][0]["point_in_time_rank"] == 6
