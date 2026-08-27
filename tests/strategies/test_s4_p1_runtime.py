@@ -58,8 +58,12 @@ def _row(**overrides) -> dict:
         "stop_mode": "vol_scaled",
         "stop_d_init": 0.08,
         "stop_vol_at_entry": 0.02,
-        "stop_floor": 0.12,
-        "stop_cap": 0.20,
+        # Floor e cap del **protective stop** S4 (`stop_strategy_params`), che
+        # e' cio' che la riga di trade porta davvero. Non sono i confini del
+        # disaster stop: la fixture precedente scriveva 0.12/0.20 — i valori
+        # del disaster stop — e nascondeva proprio il difetto.
+        "stop_floor": 0.03,
+        "stop_cap": 0.08,
     }
     values.update(overrides)
     return values
@@ -76,23 +80,55 @@ def _bar(minute: int, close: float, low: float | None = None):
 # ── Lo stop congelato, non uno ricalcolato oggi ────────────────────────────
 
 
+_DISASTER_STOP = {
+    "multiplier": 1.5,
+    "sigma_multiple": 5.0,
+    "floor_pct": 0.12,
+    "cap_pct": 0.20,
+}
+
+
 def test_la_distanza_di_stop_viene_dai_parametri_congelati_all_ingresso():
     """Usare la sigma di oggi per un'uscita di due giorni fa sarebbe look-ahead."""
-    distanza = d_hard_distance(_row(), {})
+    distanza = d_hard_distance(_row(), _DISASTER_STOP)
 
-    # max(1.5 × 0.08, 5.0 × 0.02) = 0.12, dentro [floor, cap]
+    # max(1.5 × 0.08, 5.0 × 0.02) = 0.12, dentro [floor, cap] del disaster stop
     assert distanza == pytest.approx(0.12)
 
 
+def test_floor_e_cap_vengono_dal_disaster_stop_non_dal_protective():
+    """`stop_floor`/`stop_cap` sulla riga di trade sono un'altra cosa.
+
+    Sono i confini dello stop protettivo di sleeve (S4: 0.03–0.08). Il disaster
+    stop vive in `broker_disaster_stop` (0.12–0.20) e `StopPolicy.d_hard` legge
+    solo quello. Clippare a 0.08 darebbe a P1 uno stop molto piu' stretto di
+    quello comune, cioe' una violazione di `identical_across_policies`: P1
+    uscirebbe per rischio dove nessun'altra policy lo farebbe.
+    """
+    distanza = d_hard_distance(
+        _row(stop_d_init=0.0, stop_vol_at_entry=0.0237), _DISASTER_STOP
+    )
+
+    assert distanza == pytest.approx(0.12)
+    assert distanza > 0.08
+
+
 def test_la_distanza_resta_dentro_floor_e_cap():
-    assert d_hard_distance(_row(stop_d_init=0.5), {}) == pytest.approx(0.20)
-    assert d_hard_distance(_row(stop_d_init=0.001, stop_vol_at_entry=0.0), {}) == (
+    assert d_hard_distance(_row(stop_d_init=0.5), _DISASTER_STOP) == pytest.approx(0.20)
+    assert d_hard_distance(
+        _row(stop_d_init=0.001, stop_vol_at_entry=0.0), _DISASTER_STOP
+    ) == pytest.approx(0.12)
+
+
+def test_una_config_del_disaster_stop_mancante_non_inventa_confini():
+    """Senza config i default sono quelli di `StopPolicy`, mai quelli di sleeve."""
+    assert d_hard_distance(_row(stop_d_init=0.0, stop_vol_at_entry=0.0), {}) == (
         pytest.approx(0.12)
     )
 
 
 def test_senza_stop_congelato_la_distanza_e_ignota_non_zero():
-    assert d_hard_distance(_row(stop_d_init=None), {}) is None
+    assert d_hard_distance(_row(stop_d_init=None), _DISASTER_STOP) is None
 
 
 # ── La finestra: completa solo quando il cutoff e' davvero passato ─────────
