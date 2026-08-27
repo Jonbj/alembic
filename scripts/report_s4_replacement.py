@@ -238,7 +238,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     payload["replacement_records"] = [asdict(record) for record in records]
     print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
 
-    if payload["paired"]["total"] == 0:  # type: ignore[index]
+    # Il criterio e' `comparable`, non `total`: riconciliare zero con zero
+    # riesce sempre, quindi `reconciled` non porta informazione su una finestra
+    # senza coppie misurabili. Uscire 0 li' significherebbe dire "a posto"
+    # proprio quando la metrica primaria non esiste.
+    if payload["paired"]["comparable"] == 0:  # type: ignore[index]
         return 2
     return 0 if payload["reconciliation"]["reconciled"] else 1  # type: ignore[index]
 

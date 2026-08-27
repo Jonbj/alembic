@@ -47,6 +47,10 @@ EXIT_FAMILY_RISK_CATASTROPHE = "risk_catastrophe"
 EXIT_FAMILY_REPLACEMENT = "replacement"
 EXIT_FAMILY_COUNTER_UNQUALIFIED = "counter_unqualified"
 EXIT_FAMILY_FRESHNESS = "freshness_or_silence"
+# Un intento ancora aperto non e' un'uscita che non sappiamo leggere: e'
+# un'uscita che non c'e'. Tenerli distinti evita che il conteggio per famiglia
+# faccia sembrare non classificata una policy che sta semplicemente tenendo.
+EXIT_FAMILY_OPEN = "not_exited"
 EXIT_FAMILY_UNCLASSIFIED = "unclassified"
 
 # Reason code emesso da questo modulo quando il controfattuale attribuisce
@@ -72,6 +76,9 @@ _EXIT_FAMILIES: dict[str, str] = {
     "P0_TARGET_ZERO_BELOW_ENTRY_GATE": EXIT_FAMILY_FRESHNESS,
     "P0_TARGET_ZERO_FALLBACK_FILTERED": EXIT_FAMILY_FRESHNESS,
     "P0_TARGET_ZERO_ENTRY_FRESHNESS_FILTERED": EXIT_FAMILY_FRESHNESS,
+    # Stati di attesa: la policy non e' uscita, non ha deciso male.
+    "P1_HOLDING": EXIT_FAMILY_OPEN,
+    "P0_RUNTIME_OPEN": EXIT_FAMILY_OPEN,
 }
 
 

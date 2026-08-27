@@ -99,3 +99,78 @@ def test_cli_distingue_una_finestra_senza_esiti(monkeypatch, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 2
     assert payload["paired"]["total"] == 0
+
+
+def _holding_rows() -> list[dict]:
+    """P0 chiusa, P1 ancora aperta: la coppia esiste ma non e' misurabile."""
+    common = {
+        "intent_id": "intent-1",
+        "symbol": "AMD",
+        "d0": date(2026, 8, 25),
+        "initial_notional": 1000.0,
+        "virtual_exit_quantity": 10.0,
+        "comparable": True,
+        "details": {"entry_fill_id": "fill-1"},
+    }
+    return [
+        {
+            **common,
+            "policy_id": "P0",
+            "status": "CLOSED",
+            "reason_code": "P0_TARGET_ZERO_EXPIRED",
+            "trigger_at": P0_EXIT,
+            "filled_at": P0_EXIT,
+            "net_pnl": 10.0,
+        },
+        {
+            **common,
+            "policy_id": "P1",
+            "status": "OPEN",
+            "reason_code": "P1_HOLDING",
+            "trigger_at": P0_EXIT,
+            "filled_at": None,
+            "net_pnl": None,
+        },
+    ]
+
+
+def test_una_finestra_senza_coppie_comparabili_non_e_un_successo(monkeypatch, capsys):
+    """Riconciliare zero con zero riesce sempre: non e' una misura.
+
+    Lo stato precedente ritornava 0 con `comparable: 0` e `mean_delta_bps:
+    null`, perche' guardava `total` invece di `comparable`. Un cron che usa
+    l'exit code come gate avrebbe letto "finestra a posto" proprio quando la
+    metrica primaria non esiste.
+    """
+    monkeypatch.setattr(
+        report_script, "_fetch_policy_rows", lambda start, end: _holding_rows()
+    )
+    monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
+    monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_session_dates",
+        lambda start, end: [date(2026, 8, d) for d in (25, 26, 27)],
+    )
+
+    exit_code = report_script.main(["--start", "2026-08-25", "--end", "2026-08-27"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["paired"]["total"] == 1
+    assert payload["paired"]["comparable"] == 0
+    assert payload["paired"]["mean_delta_bps"] is None
+    assert payload["reconciliation"]["reconciled"] is True
+    assert exit_code == 2
+
+
+def test_un_intento_ancora_aperto_non_e_un_uscita_non_classificata():
+    """`unclassified` e' per un'uscita che non sappiamo leggere, non per una che manca."""
+    from src.strategies.s4.counterfactual import (
+        EXIT_FAMILY_OPEN,
+        EXIT_FAMILY_UNCLASSIFIED,
+        classify_exit_reason,
+    )
+
+    assert classify_exit_reason("P1_HOLDING") == EXIT_FAMILY_OPEN
+    assert classify_exit_reason("P0_RUNTIME_OPEN") == EXIT_FAMILY_OPEN
+    assert classify_exit_reason("QUALCOSA_DI_IGNOTO") == EXIT_FAMILY_UNCLASSIFIED
