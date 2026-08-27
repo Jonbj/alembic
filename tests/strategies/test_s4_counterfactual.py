@@ -46,6 +46,14 @@ EXIT_AT = TRIGGER_AT + timedelta(seconds=3)
 D0 = date(2026, 8, 25)
 CONTRACT_PATH = Path(__file__).resolve().parents[2] / "config" / "s4_exit_trial.yaml"
 
+# Calendario di borsa della finestra: i capitale-giorni si contano in sedute,
+# quindi il modulo lo riceve invece di dedurlo dai giorni solari.
+SESSIONS = tuple(
+    date(2026, 8, 17) + timedelta(days=offset)
+    for offset in range(26)
+    if (date(2026, 8, 17) + timedelta(days=offset)).weekday() < 5
+)
+
 
 class _CostModel:
     version = "cost-model:test-golden"
@@ -134,6 +142,12 @@ def _outcome(policy_id: str, **overrides) -> PolicyOutcome:
     return PolicyOutcome(**values)
 
 
+def _paired(baseline, challengers, **overrides):
+    """`build_paired_comparison` col calendario di borsa gia' fornito."""
+    overrides.setdefault("sessions", SESSIONS)
+    return build_paired_comparison(baseline, challengers, **overrides)
+
+
 def _candidate(**overrides) -> SubstituteCandidate:
     values = {
         "symbol": "NVDA",
@@ -187,7 +201,7 @@ def test_paired_congela_gli_ingressi_e_calcola_il_delta_in_bps():
     baseline = [_outcome("P0", net_pnl=10.0)]
     challenger = [_outcome("P1", net_pnl=35.0, exit_reason_code="P1_TIME_DUE")]
 
-    comparison = build_paired_comparison(baseline, challenger)
+    comparison = _paired(baseline, challenger)
 
     assert comparison.new_trades_created == 0
     pair = comparison.pairs[0]
@@ -202,7 +216,7 @@ def test_paired_scarta_la_coppia_se_il_notional_iniziale_differisce():
     baseline = [_outcome("P0")]
     challenger = [_outcome("P1", initial_notional=1200.0)]
 
-    comparison = build_paired_comparison(baseline, challenger)
+    comparison = _paired(baseline, challenger)
 
     pair = comparison.pairs[0]
     assert pair.comparable is False
@@ -214,7 +228,7 @@ def test_paired_scarta_la_coppia_se_il_fill_di_ingresso_differisce():
     baseline = [_outcome("P0", entry_fill_id="fill-1")]
     challenger = [_outcome("P1", entry_fill_id="fill-2")]
 
-    comparison = build_paired_comparison(baseline, challenger)
+    comparison = _paired(baseline, challenger)
 
     assert comparison.pairs[0].comparable is False
     assert "PAIRED_ENTRY_FILL_MISMATCH" in comparison.pairs[0].exclusion_reasons
@@ -225,7 +239,7 @@ def test_paired_segnala_un_intento_challenger_assente_dalla_baseline():
     baseline = [_outcome("P0")]
     challenger = [_outcome("P1"), _outcome("P1", intent_id="intent-nuovo")]
 
-    comparison = build_paired_comparison(baseline, challenger)
+    comparison = _paired(baseline, challenger)
 
     assert comparison.new_trades_created == 1
     unshared = [p for p in comparison.pairs if p.intent_id == "intent-nuovo"]
@@ -238,7 +252,7 @@ def test_paired_dichiara_gli_ingressi_congelati_quando_gli_intenti_combaciano():
     baseline = [_outcome("P0"), _outcome("P0", intent_id="intent-2")]
     challenger = [_outcome("P1"), _outcome("P1", intent_id="intent-2")]
 
-    comparison = build_paired_comparison(baseline, challenger)
+    comparison = _paired(baseline, challenger)
 
     assert comparison.entries_frozen is True
     assert comparison.new_trades_created == 0
@@ -248,7 +262,7 @@ def test_paired_scarta_un_esito_non_comparabile_a_monte():
     baseline = [_outcome("P0", comparable=False)]
     challenger = [_outcome("P1")]
 
-    comparison = build_paired_comparison(baseline, challenger)
+    comparison = _paired(baseline, challenger)
 
     assert comparison.pairs[0].comparable is False
     assert "PAIRED_BASELINE_NOT_COMPARABLE" in comparison.pairs[0].exclusion_reasons
@@ -258,7 +272,7 @@ def test_paired_scarta_una_coppia_senza_pnl_netto():
     baseline = [_outcome("P0", net_pnl=None)]
     challenger = [_outcome("P1")]
 
-    comparison = build_paired_comparison(baseline, challenger)
+    comparison = _paired(baseline, challenger)
 
     assert "PAIRED_NET_PNL_MISSING" in comparison.pairs[0].exclusion_reasons
 
@@ -267,11 +281,60 @@ def test_paired_registra_il_challenger_mancante_senza_inventarlo():
     baseline = [_outcome("P0"), _outcome("P0", intent_id="intent-2")]
     challenger = [_outcome("P1")]
 
-    comparison = build_paired_comparison(baseline, challenger)
+    comparison = _paired(baseline, challenger)
 
     missing = [p for p in comparison.pairs if p.intent_id == "intent-2"]
     assert missing[0].comparable is False
     assert "PAIRED_CHALLENGER_MISSING" in missing[0].exclusion_reasons
+
+
+def test_il_challenger_mancante_e_nominato_e_resta_nel_filtro_della_sua_policy():
+    """Una riga senza `policy_id` sparirebbe dai filtri e falserebbe la copertura."""
+    baseline = [_outcome("P0"), _outcome("P0", intent_id="intent-2")]
+    challenger = [_outcome("P1", net_pnl=35.0)]
+
+    comparison = _paired(baseline, challenger)
+
+    missing = next(p for p in comparison.pairs if p.intent_id == "intent-2")
+    assert missing.policy_id == "P1"
+
+    reconciliation = reconcile_views(comparison, (), policy_id="P1")
+
+    # Due intenti baseline, un solo challenger: la copertura e' 1 su 2, e
+    # dichiararla piena restringerebbe il campione proprio sugli intenti che
+    # la challenger tiene piu' a lungo.
+    assert reconciliation.pairs_comparable == 1
+    assert reconciliation.pairs_excluded == 1
+    assert reconciliation.excluded_by_reason == {"PAIRED_CHALLENGER_MISSING": 1}
+
+
+def test_il_challenger_mancante_e_dichiarato_per_ogni_policy_in_perimetro():
+    baseline = [_outcome("P0")]
+
+    comparison = _paired(baseline, [], challenger_policy_ids=("P1", "P2"))
+
+    assert {(p.policy_id, p.exclusion_reasons) for p in comparison.pairs} == {
+        ("P1", ("PAIRED_CHALLENGER_MISSING",)),
+        ("P2", ("PAIRED_CHALLENGER_MISSING",)),
+    }
+
+
+def test_il_report_non_dichiara_copertura_piena_su_un_campione_dimezzato():
+    baseline = [_outcome("P0"), _outcome("P0", intent_id="intent-2")]
+    challenger = [_outcome("P1", net_pnl=35.0)]
+
+    report = build_replacement_report(
+        _paired(baseline, challenger),
+        (),
+        policy_id="P1",
+        window_start=date(2026, 8, 1),
+        window_end=date(2026, 8, 31),
+    )
+
+    assert report["paired"]["total"] == 2
+    assert report["paired"]["comparable"] == 1
+    assert report["paired"]["excluded"] == 1
+    assert report["paired"]["excluded_by_reason"] == {"PAIRED_CHALLENGER_MISSING": 1}
 
 
 # ── Criterio 2: replacement ha un reason code dedicato ──────────────────────
@@ -327,7 +390,7 @@ def test_un_esito_p2_non_entra_nel_paired_finche_p2_e_omitted():
     baseline = [_outcome("P0")]
     challenger = [_outcome("P2", exit_reason_code="P2_COUNTER_QUALIFIED")]
 
-    comparison = build_paired_comparison(
+    comparison = _paired(
         baseline, challenger, active_policies=active_policy_hierarchy(CONTRACT_PATH)
     )
 
@@ -481,15 +544,68 @@ def test_il_paired_misura_i_capitale_giorni_occupati_da_ciascuna_policy():
         _outcome("P1", exit_at=EXIT_AT + timedelta(days=2), net_pnl=35.0)
     ]
 
-    pair = build_paired_comparison(baseline, challenger).pairs[0]
+    pair = _paired(baseline, challenger).pairs[0]
 
     # P0 esce il giorno del fill, P1 alla scadenza D+2: 0 contro 2 sedute
     assert pair.baseline_capital_days == pytest.approx(0.0)
     assert pair.challenger_capital_days == pytest.approx(2000.0)
 
 
-def test_la_riconciliazione_sottrae_il_replacement_della_baseline():
+def test_i_capitale_giorni_contano_sedute_e_non_giorni_di_calendario():
+    """D0 venerdi', uscita martedi': due sedute, non quattro giorni solari."""
+    venerdi = date(2026, 8, 28)
+    baseline = [_outcome("P0", d0=venerdi, exit_at=datetime(2026, 8, 28, 20, tzinfo=UTC))]
+    challenger = [
+        _outcome(
+            "P1",
+            d0=venerdi,
+            exit_at=datetime(2026, 9, 1, 20, tzinfo=UTC),
+            net_pnl=35.0,
+            exit_reason_code="P1_TIME_DUE",
+        )
+    ]
+
+    pair = _paired(baseline, challenger).pairs[0]
+
+    assert pair.baseline_capital_days == pytest.approx(0.0)
+    assert pair.challenger_capital_days == pytest.approx(2000.0)
+
+
+def test_senza_calendario_i_capitale_giorni_sono_ignoti_non_zero():
+    """Uno zero implicito sarebbe indistinguibile da un'occupazione nulla."""
     comparison = build_paired_comparison(
+        [_outcome("P0", net_pnl=10.0)],
+        [_outcome("P1", net_pnl=35.0, exit_at=EXIT_AT + timedelta(days=2))],
+    )
+
+    pair = comparison.pairs[0]
+    assert pair.baseline_capital_days is None
+    assert pair.challenger_capital_days is None
+
+    reconciliation = reconcile_views(comparison, (), policy_id="P1")
+
+    assert reconciliation.slot_occupancy_capital_days_delta is None
+    assert reconciliation.reconciled is False
+    assert "CAPITAL_DAYS_NOT_COMPUTABLE" in reconciliation.blocking_reasons
+
+
+def test_un_calendario_che_non_copre_l_uscita_non_indovina_le_sedute():
+    challenger = [
+        _outcome(
+            "P1",
+            exit_at=datetime(2026, 12, 1, 20, tzinfo=UTC),
+            net_pnl=35.0,
+            exit_reason_code="P1_TIME_DUE",
+        )
+    ]
+
+    pair = _paired([_outcome("P0", net_pnl=10.0)], challenger).pairs[0]
+
+    assert pair.challenger_capital_days is None
+
+
+def test_la_riconciliazione_sottrae_il_replacement_della_baseline():
+    comparison = _paired(
         [_outcome("P0", net_pnl=10.0)],
         [_outcome("P1", net_pnl=35.0, exit_at=EXIT_AT + timedelta(days=2))],
     )
@@ -508,7 +624,7 @@ def test_la_riconciliazione_sottrae_il_replacement_della_baseline():
 
 
 def test_la_riconciliazione_aggiunge_il_replacement_della_challenger():
-    comparison = build_paired_comparison(
+    comparison = _paired(
         [_outcome("P0", net_pnl=10.0)],
         [_outcome("P1", net_pnl=35.0, exit_at=EXIT_AT + timedelta(days=2))],
     )
@@ -524,7 +640,7 @@ def test_la_riconciliazione_aggiunge_il_replacement_della_challenger():
 
 
 def test_la_riconciliazione_ignora_i_replacement_di_policy_estranee():
-    comparison = build_paired_comparison(
+    comparison = _paired(
         [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
     )
     records = build_portfolio_counterfactual(
@@ -539,7 +655,7 @@ def test_la_riconciliazione_ignora_i_replacement_di_policy_estranee():
 
 
 def test_le_diagnostiche_di_slot_escludono_le_policy_estranee():
-    comparison = build_paired_comparison(
+    comparison = _paired(
         [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
     )
     records = build_portfolio_counterfactual(
@@ -560,7 +676,7 @@ def test_le_diagnostiche_di_slot_escludono_le_policy_estranee():
 
 
 def test_i_capitale_giorni_inattivi_restano_separati_per_policy():
-    comparison = build_paired_comparison(
+    comparison = _paired(
         [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
     )
     records = build_portfolio_counterfactual(
@@ -581,7 +697,7 @@ def test_i_capitale_giorni_inattivi_restano_separati_per_policy():
 
 
 def test_senza_sostituto_le_due_viste_coincidono():
-    comparison = build_paired_comparison(
+    comparison = _paired(
         [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
     )
     records = build_portfolio_counterfactual([_slot()], {})
@@ -596,7 +712,7 @@ def test_senza_sostituto_le_due_viste_coincidono():
 
 def test_un_reinvestimento_nel_paired_impedisce_la_riconciliazione():
     """Se il cash liberato ha creato un trade, il test primario non e' valido."""
-    comparison = build_paired_comparison(
+    comparison = _paired(
         [_outcome("P0")], [_outcome("P1"), _outcome("P1", intent_id="intent-nuovo")]
     )
     records = build_portfolio_counterfactual([_slot()], {})
@@ -608,7 +724,7 @@ def test_un_reinvestimento_nel_paired_impedisce_la_riconciliazione():
 
 
 def test_la_riconciliazione_non_perde_le_coppie_escluse():
-    comparison = build_paired_comparison(
+    comparison = _paired(
         [_outcome("P0"), _outcome("P0", intent_id="intent-2")],
         [_outcome("P1"), _outcome("P1", intent_id="intent-2", net_pnl=None)],
     )
@@ -646,7 +762,7 @@ def test_il_report_copre_assenza_piu_sostituti_collisione_s1_e_capitale():
     ]
 
     report = build_replacement_report(
-        build_paired_comparison(baseline, challenger),
+        _paired(baseline, challenger),
         build_portfolio_counterfactual(slots, candidates),
         policy_id="P1",
         window_start=date(2026, 8, 1),
@@ -675,7 +791,7 @@ def test_il_report_conta_solo_gli_slot_della_coppia_confrontata():
     ]
 
     report = build_replacement_report(
-        build_paired_comparison(baseline, challenger),
+        _paired(baseline, challenger),
         build_portfolio_counterfactual(slots, {"intent-1": [_candidate()]}),
         policy_id="P1",
         window_start=date(2026, 8, 1),
@@ -694,7 +810,7 @@ def test_il_report_filtra_la_finestra_di_osservazione():
     challenger = [_outcome("P1", d0=date(2026, 7, 1), net_pnl=20.0)]
 
     report = build_replacement_report(
-        build_paired_comparison(baseline, challenger),
+        _paired(baseline, challenger),
         (),
         policy_id="P1",
         window_start=date(2026, 8, 1),
@@ -707,7 +823,7 @@ def test_il_report_filtra_la_finestra_di_osservazione():
 def test_il_report_rifiuta_una_finestra_invertita():
     with pytest.raises(ValueError, match="window ends before it starts"):
         build_replacement_report(
-            build_paired_comparison([], []),
+            _paired([], []),
             (),
             policy_id="P1",
             window_start=date(2026, 8, 31),
@@ -717,7 +833,7 @@ def test_il_report_rifiuta_una_finestra_invertita():
 
 def test_un_sostituto_su_uno_slot_non_appaiato_resta_non_attribuito():
     """Un P&L di replacement che non tocca una coppia comparabile e' un residuo."""
-    comparison = build_paired_comparison(
+    comparison = _paired(
         [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
     )
     records = build_portfolio_counterfactual(

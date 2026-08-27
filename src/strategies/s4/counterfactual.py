@@ -21,7 +21,9 @@ esclusa con un reason code, non misurata male.
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -84,19 +86,60 @@ def _utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+def normalize_sessions(sessions: Sequence[date] | None) -> tuple[date, ...] | None:
+    """Calendario di sedute in ordine crescente e senza duplicati; None resta None."""
+    if sessions is None:
+        return None
+    return tuple(sorted(set(sessions)))
+
+
+def _sessions_elapsed(
+    d0: date, exit_date: date, sessions: tuple[date, ...]
+) -> int | None:
+    """Sedute trascorse fra D0 e l'uscita, contate sul calendario dato.
+
+    Nessuna approssimazione a giorni di calendario: un D0 di venerdi' con
+    uscita al martedi' successivo vale due sedute, non quattro giorni. Se il
+    calendario non copre D0, o si ferma prima dell'uscita, il conteggio non e'
+    determinato e vale None: e' la stessa scelta di `lifecycle.py`, che emette
+    `CALENDAR_INCOMPLETE` invece di indovinare la seduta di scadenza.
+    """
+    if not sessions:
+        return None
+    if exit_date < d0:
+        return 0
+    start = bisect_left(sessions, d0)
+    if start >= len(sessions) or sessions[start] != d0:
+        return None
+    if exit_date > sessions[-1]:
+        return None
+    end = bisect_right(sessions, exit_date) - 1
+    return max(0, end - start)
+
+
 def _capital_days(
-    notional: float, d0: date | None, exit_at: datetime | None
+    notional: float,
+    d0: date | None,
+    exit_at: datetime | None,
+    sessions: tuple[date, ...] | None,
 ) -> float | None:
     """Capitale-giorni occupati, contati in sedute come l'orizzonte del contratto.
 
     L'orizzonte e' definito in sedute ("close di D0+2 sedute"), quindi la
     granularita' resta quella: un'uscita intraday a D0 vale zero sedute, la
-    scadenza D+2 ne vale due. Non computabile => None, mai zero implicito.
+    scadenza D+2 ne vale due. Contarle richiede un calendario, che il modulo
+    non puo' dedurre: senza calendario la misura non esiste e vale None, mai
+    un conteggio di giorni solari travestito da sedute. Il bias sarebbe
+    monodirezionale — colpisce solo i D0 che attraversano un weekend — quindi
+    proprio la forma che `slot_occupancy_capital_days_delta` non distingue dal
+    segnale.
     """
-    if d0 is None or exit_at is None:
+    if d0 is None or exit_at is None or sessions is None:
         return None
-    sessions = (_utc(exit_at).date() - d0).days
-    return notional * max(0, sessions)
+    elapsed = _sessions_elapsed(d0, _utc(exit_at).date(), sessions)
+    if elapsed is None:
+        return None
+    return notional * elapsed
 
 
 # ── Esito per-policy: la forma che P0 in main soddisfa gia' ─────────────────
@@ -216,12 +259,40 @@ class PairedComparison:
         return sum(values) / len(values) if values else None
 
 
+def _challenger_scope(
+    challengers: list[PolicyOutcome],
+    baseline_policy_id: str,
+    active_policies: tuple[str, ...] | None,
+    challenger_policy_ids: tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    """Le policy challenger di cui il confronto deve rendere conto per ogni intento.
+
+    Serve a nominare la policy di una riga `PAIRED_CHALLENGER_MISSING`: senza
+    un nome quella riga non appartiene a nessun confronto e sparisce dai
+    filtri per policy, facendo dichiarare copertura piena su un campione
+    dimezzato. L'ordine di preferenza va dall'esplicito all'osservato.
+    """
+    if challenger_policy_ids is not None:
+        candidates: tuple[str, ...] = tuple(challenger_policy_ids)
+    elif active_policies is not None:
+        candidates = tuple(active_policies)
+    else:
+        candidates = tuple(outcome.policy_id for outcome in challengers)
+    return tuple(
+        dict.fromkeys(
+            name for name in candidates if name and name != baseline_policy_id
+        )
+    )
+
+
 def build_paired_comparison(
     baseline: list[PolicyOutcome],
     challengers: list[PolicyOutcome],
     *,
     baseline_policy_id: str = "P0",
     active_policies: tuple[str, ...] | None = None,
+    challenger_policy_ids: tuple[str, ...] | None = None,
+    sessions: Sequence[date] | None = None,
 ) -> PairedComparison:
     """Appaia baseline e challenger sullo stesso intento e verifica gli invarianti.
 
@@ -229,12 +300,26 @@ def build_paired_comparison(
     condivisi fra le policy e che il capitale liberato non venga reinvestito
     (`freed_capital_reinvested: false`). Qui l'invariante e' *controllato*: una
     coppia che lo viola viene esclusa con reason code, non mediata comunque.
+
+    `sessions` e' il calendario di borsa su cui si contano i capitale-giorni:
+    e' lo stesso input che `lifecycle.reconcile_entry` gia' riceve. Omesso, i
+    capitale-giorni restano `None` e la riconciliazione lo dichiara invece di
+    pubblicare uno zero.
+
+    Un intento della baseline senza controparte challenger produce una riga
+    `PAIRED_CHALLENGER_MISSING` **per ogni** policy challenger in perimetro,
+    nominata: e' l'unico modo perche' la copertura resti quella vera quando la
+    challenger tiene alcuni intenti piu' a lungo degli altri.
     """
+    calendar = normalize_sessions(sessions)
     by_intent = {
         outcome.intent_id: outcome
         for outcome in baseline
         if outcome.policy_id == baseline_policy_id
     }
+    scope = _challenger_scope(
+        challengers, baseline_policy_id, active_policies, challenger_policy_ids
+    )
     pairs: list[PairedDelta] = []
     new_trades = 0
 
@@ -268,7 +353,10 @@ def build_paired_comparison(
                     ),
                     baseline_capital_days=None,
                     challenger_capital_days=_capital_days(
-                        challenger.initial_notional, challenger.d0, challenger.exit_at
+                        challenger.initial_notional,
+                        challenger.d0,
+                        challenger.exit_at,
+                        calendar,
                     ),
                     comparable=False,
                     exclusion_reasons=tuple(reasons),
@@ -322,46 +410,52 @@ def build_paired_comparison(
                     challenger.exit_reason_code
                 ),
                 baseline_capital_days=_capital_days(
-                    base.initial_notional, base.d0, base.exit_at
+                    base.initial_notional, base.d0, base.exit_at, calendar
                 ),
                 challenger_capital_days=_capital_days(
-                    challenger.initial_notional, challenger.d0, challenger.exit_at
+                    challenger.initial_notional,
+                    challenger.d0,
+                    challenger.exit_at,
+                    calendar,
                 ),
                 comparable=comparable,
                 exclusion_reasons=tuple(reasons),
             )
         )
 
+    # La copertura e' per coppia (policy, intento): un intento che la P1 ha e la
+    # P2 no resta scoperto per la P2, e la sua riga deve dirlo.
     covered = {
-        pair.intent_id
+        (pair.policy_id, pair.intent_id)
         for pair in pairs
         if "PAIRED_UNSHARED_INTENT" not in pair.exclusion_reasons
     }
-    for intent_id, base in by_intent.items():
-        if intent_id in covered:
-            continue
-        pairs.append(
-            PairedDelta(
-                intent_id=intent_id,
-                symbol=base.symbol,
-                d0=base.d0,
-                policy_id="",
-                baseline_policy_id=baseline_policy_id,
-                initial_notional=base.initial_notional,
-                baseline_net_pnl=base.net_pnl,
-                challenger_net_pnl=None,
-                delta_usd=None,
-                delta_bps=None,
-                baseline_exit_family=classify_exit_reason(base.exit_reason_code),
-                challenger_exit_family=None,
-                baseline_capital_days=_capital_days(
-                    base.initial_notional, base.d0, base.exit_at
-                ),
-                challenger_capital_days=None,
-                comparable=False,
-                exclusion_reasons=("PAIRED_CHALLENGER_MISSING",),
+    for policy in scope:
+        for intent_id, base in by_intent.items():
+            if (policy, intent_id) in covered:
+                continue
+            pairs.append(
+                PairedDelta(
+                    intent_id=intent_id,
+                    symbol=base.symbol,
+                    d0=base.d0,
+                    policy_id=policy,
+                    baseline_policy_id=baseline_policy_id,
+                    initial_notional=base.initial_notional,
+                    baseline_net_pnl=base.net_pnl,
+                    challenger_net_pnl=None,
+                    delta_usd=None,
+                    delta_bps=None,
+                    baseline_exit_family=classify_exit_reason(base.exit_reason_code),
+                    challenger_exit_family=None,
+                    baseline_capital_days=_capital_days(
+                        base.initial_notional, base.d0, base.exit_at, calendar
+                    ),
+                    challenger_capital_days=None,
+                    comparable=False,
+                    exclusion_reasons=("PAIRED_CHALLENGER_MISSING",),
+                )
             )
-        )
 
     excluded = Counter(
         reason for pair in pairs for reason in pair.exclusion_reasons
@@ -607,6 +701,11 @@ class Reconciliation:
     — sono capitale-giorni — e resta riportata a parte, perche' e' proprio il
     caso in cui il delta per trade migliora mentre il rendimento sul capitale
     occupato peggiora (consolidato §7 punto 7).
+
+    I capitale-giorni sono `None` — non zero — quando il calendario di borsa
+    manca o non copre l'intera coppia: in quel caso `reconciled` e' falso con
+    `CAPITAL_DAYS_NOT_COMPUTABLE`, cosi' la misura del criterio 3 non viene
+    pubblicata al posto di un'occupazione davvero nulla.
     """
 
     policy_id: str
@@ -619,9 +718,9 @@ class Reconciliation:
     pairs_comparable: int
     pairs_excluded: int
     excluded_by_reason: dict[str, int]
-    baseline_capital_days: float
-    challenger_capital_days: float
-    slot_occupancy_capital_days_delta: float
+    baseline_capital_days: float | None
+    challenger_capital_days: float | None
+    slot_occupancy_capital_days_delta: float | None
     idle_capital_days: float
     baseline_idle_capital_days: float
     challenger_idle_capital_days: float
@@ -682,8 +781,28 @@ def reconcile_views(
         if not pair.comparable
         for reason in pair.exclusion_reasons
     )
-    baseline_days = sum(pair.baseline_capital_days or 0.0 for pair in comparable)
-    challenger_days = sum(pair.challenger_capital_days or 0.0 for pair in comparable)
+    # I capitale-giorni sono la misura del criterio 3: se anche una sola coppia
+    # non li ha (calendario assente o incompleto) il totale non e' zero, non
+    # esiste. Sommare con `or 0.0` pubblicherebbe un'occupazione piu' bassa del
+    # vero proprio sulle coppie che restano aperte piu' a lungo.
+    capital_days_known = all(
+        pair.baseline_capital_days is not None
+        and pair.challenger_capital_days is not None
+        for pair in comparable
+    )
+    if capital_days_known:
+        baseline_days: float | None = sum(
+            pair.baseline_capital_days or 0.0 for pair in comparable
+        )
+        challenger_days: float | None = sum(
+            pair.challenger_capital_days or 0.0 for pair in comparable
+        )
+        occupancy_delta: float | None = (challenger_days or 0.0) - (
+            baseline_days or 0.0
+        )
+    else:
+        baseline_days = challenger_days = occupancy_delta = None
+        blocking.append("CAPITAL_DAYS_NOT_COMPUTABLE")
 
     return Reconciliation(
         policy_id=policy_id,
@@ -698,7 +817,7 @@ def reconcile_views(
         excluded_by_reason=dict(sorted(excluded.items())),
         baseline_capital_days=baseline_days,
         challenger_capital_days=challenger_days,
-        slot_occupancy_capital_days_delta=challenger_days - baseline_days,
+        slot_occupancy_capital_days_delta=occupancy_delta,
         idle_capital_days=sum(record.idle_capital_days for record in pair_records),
         baseline_idle_capital_days=sum(
             record.idle_capital_days
