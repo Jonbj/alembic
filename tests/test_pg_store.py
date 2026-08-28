@@ -585,6 +585,35 @@ class TestOpenTrade:
         assert any("INSERT INTO audit_log" in sql for sql in executed_sqls)
         assert mock_conn.commit.called
 
+    @pytest.mark.parametrize(
+        ("signal_id", "expected_strategy"),
+        [(None, "S1"), (7, "S4")],
+    )
+    def test_open_trade_persists_origin_without_frozen_stop(
+        self, signal_id, expected_strategy
+    ):
+        """Strategy attribution must not disappear when stop freezing is unavailable."""
+        from datetime import datetime, timezone
+
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+        store = PostgreSQLStore(conn=mock_conn)
+        store.open_trade(
+            symbol="TSLA",
+            signal_id=signal_id,
+            decision_id=55,
+            entry_order_id="order-abc",
+            entry_time=datetime(2026, 8, 28, 15, tzinfo=timezone.utc),
+            entry_notional=500.0,
+            score=0.55,
+            regime_mult=1.0,
+        )
+
+        trade_params = mock_cur.execute.call_args_list[0].args[1]
+        assert trade_params[10] == expected_strategy
+
 
 class TestCloseTrade:
     def test_close_trade_updates_open_row(self):

@@ -1322,6 +1322,7 @@ class PostgreSQLStore:
         qty: float | None = None,
         signal_score: float | None = None,
         frozen_stop: "FrozenStop | None" = None,
+        strategy: str | None = None,
     ) -> None:
         """Insert an open trade row (entry_price populated later by reconcile).
 
@@ -1330,16 +1331,21 @@ class PostgreSQLStore:
             signal_score: Actual LLM sentiment score that motivated the trade.
                 Stored separately so IC / score-bucket analytics are meaningful.
             frozen_stop: Optional frozen stop parameters (migration 034).
+            strategy: Origin sleeve. When omitted, infer S4 from a signal-backed
+                trade and S1 otherwise; attribution must not depend on stop freezing.
         """
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
                 fs = frozen_stop
+                origin_strategy = strategy or (
+                    fs.strategy if fs else ("S4" if signal_id is not None else "S1")
+                )
                 cur.execute(
                     self._INSERT_TRADE,
                     (symbol, signal_id, decision_id, entry_order_id,
                      entry_time, entry_notional, score, regime_mult, qty, signal_score,
-                     fs.strategy if fs else None,
+                     origin_strategy,
                      fs.mode if fs else None,
                      fs.vol_at_entry if fs else None,
                      fs.k if fs else None,
@@ -1363,6 +1369,7 @@ class PostgreSQLStore:
                             "entry_order_id": entry_order_id,
                             "entry_notional": entry_notional,
                             "score": score,
+                            "stop_strategy": origin_strategy,
                         }),
                     ),
                 )

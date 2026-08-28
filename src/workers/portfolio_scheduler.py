@@ -1987,6 +1987,7 @@ def _persist_trade_fills(
                             regime_mult=regime_mult,
                             signal_score=dec.get("signal_score"),
                             frozen_stop=_frozen_stop_legacy,
+                            strategy=_strategy_l,
                         )
                 else:
                     # WS-5 fix-back: target the open trade by id and tell
@@ -3164,6 +3165,7 @@ def _run_cycle_inner() -> dict:
                     regime_mult=_regime_mult,
                     signal_score=_dec_b.get("signal_score"),
                     frozen_stop=_frozen_stop,
+                    strategy=_strategy_b,
                 )
                 _written_buy_order_ids.add(_sub_b["order_id"])
             _pg_early.close()

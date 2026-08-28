@@ -863,6 +863,7 @@ def run_execution_cycle(
                         score=score,
                         regime_mult=regime_mult,
                         qty=qty,
+                        strategy="S4",
                     )
                 except Exception as trade_exc:
                     log.warning("Failed to open trade record for %s: %s", symbol, trade_exc)
