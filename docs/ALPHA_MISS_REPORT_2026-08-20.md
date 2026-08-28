@@ -122,7 +122,24 @@ Conteggi del giorno: NO_NEWS=2, THIN_NEUTRAL=1, WRONG_SIGN=1, FILTERED=0, OUT_OF
 
 ## 4. Titoli catturati: esito
 
-**Tradato oggi:**
+<!-- alpha-miss-book:start -->
+<!-- alpha-miss-book-manifest: {"schema":1,"ingressi":["NVDA","WMT","NOW","AVGO"],"chiusure":["HOOD","NVDA","WMT","NOW"]} -->
+
+Dati deterministici dal dossier; la prosa seguente li annota e non li sostituisce.
+
+| Tipo | Simbolo | Strategia | Ora UTC | Prezzo | Quantità | P&L netto | Motivo / qualità |
+|---|---|---|---|---:|---:|---:|---|
+| IN | NVDA | S4 | 15:22 | $217.2388 | 8.5960 | — | percentile 37.59%; denominatore intraday valido |
+| IN | WMT | S4 | 16:37 | $103.7900 | 17.9510 | — | percentile 28.74%; denominatore intraday valido |
+| IN | NOW | S4 | 16:52 | $130.8000 | 14.2791 | — | percentile 91.36%; denominatore intraday valido |
+| IN | AVGO | S4 | 17:07 | $363.1300 | 5.1360 | — | percentile 18.07%; denominatore intraday degenere: quota non interpretabile |
+| OUT | HOOD | S4 | — | $95.2800 | 18.6485 | −$60.32 | portfolio_sell |
+| OUT | NVDA | S4 | — | $217.1630 | 8.5960 | −$1.03 | portfolio_sell |
+| OUT | WMT | S4 | — | $103.9800 | 17.9510 | +$2.38 | sentiment_reversal |
+| OUT | NOW | S4 | — | $129.5000 | 14.2791 | −$19.60 | portfolio_sell |
+<!-- alpha-miss-book:end -->
+
+**Annotazione narrativa — WMT:**
 - **WMT** (S4) — entrata 16:37 UTC @ $103,79 (score +0,318, sopra gate, subito dopo una serie di notizie negative sugli utili Q2: *"Walmart's US Sales Growth Hits Weakest Pace Since 2020"*, *"Crude Oil Gains 3%; Walmart Shares Drop After Q2 Results"*, *"Walmart Craters 9%"* — tutte pubblicate prima delle 17:03). Segnale ribaltato a **−0,704** alle 17:30 → uscita `sentiment_reversal` alle 17:37 @ $103,98, `net_pnl` **+$2,38**, tenuta ~1h. `drift_post_uscita` = **−7,00%**: il titolo ha continuato a scendere dopo l'uscita, quindi la strategia ha evitato la parte più ampia del tracollo pur essendo entrata in una giornata fortemente negativa — esito piccolo ma non peggiorativo, nonostante l'ingresso sia arrivato su un rimbalzo temporaneo dentro un crollo del −9,16% guidato da utili.
 
 **Già in portafoglio (nessun nuovo ordine oggi):**

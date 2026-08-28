@@ -363,6 +363,28 @@ ${FAILURE_TAIL}" "" || true
     exit "$ANALYSIS_STATUS"
 fi
 
+# Il modello interpreta il dossier, ma non gli affidiamo l'enumerazione dei
+# trade: #333 ha mostrato che una prosa plausibile puo' omettere il 75% del
+# book pur citando correttamente l'aggregato. Quando il dossier e' disponibile,
+# la sezione 4 viene resa da dati deterministici e verificata 1:1 (duplicati
+# inclusi). Un report non riconciliabile fallisce esplicitamente il job.
+if [[ "$DOSSIER_FILE" != "(non disponibile)" ]]; then
+    set +e
+    RECONCILIATION_OUTPUT=$(uv run python \
+        "$PROJECT_DIR/scripts/reconcile_alpha_miss_report.py" \
+        "$DOSSIER_FILE" "$REPORT_FILE" 2>&1)
+    RECONCILIATION_STATUS=$?
+    set -e
+    printf '%s\n' "$RECONCILIATION_OUTPUT"
+    if (( RECONCILIATION_STATUS != 0 )); then
+        echo "FAILED: riconciliazione dossier/report terminata con codice ${RECONCILIATION_STATUS}"
+        tg_send "🚨 Riconciliazione dossier/report ${DATE_TARGET} fallita con codice ${RECONCILIATION_STATUS}.
+
+${RECONCILIATION_OUTPUT}" "" || true
+        exit "$RECONCILIATION_STATUS"
+    fi
+fi
+
 # Scoreboard del P&L economico della carta (#278, M3): misura deterministica
 # delle due domande di uscita pre-registrate. Fail-soft come il dossier: se non
 # si genera, il cron non si rompe -- ma a differenza del dossier questo gira DOPO
