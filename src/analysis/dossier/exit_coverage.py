@@ -26,8 +26,9 @@ from typing import Any, Mapping, Sequence
 
 EXIT_COVERAGE_SCHEMA_VERSION = "1.0"
 
-# Perdita mark-to-close dall'ingresso oltre la quale una posizione ha qualcosa da
-# decidere. -3% e' la stessa grandezza della soglia mover del dossier (#174).
+# Perdita dal prezzo d'ingresso al mark terminale della detenzione nella seduta
+# (exit_price se uscita intraday, close altrimenti). -3% e' la stessa grandezza
+# della soglia mover del dossier (#174).
 SOGLIA_PERDITA_DA_INGRESSO = -0.03
 
 # Sedute consecutive a zero righe richieste perche' la cecita' sia ricorrenza e non
@@ -35,7 +36,8 @@ SOGLIA_PERDITA_DA_INGRESSO = -0.03
 SEDUTE_MINIME_CIECHE = 2
 
 DEFINIZIONE = (
-    "posizione viva all'open RTH, in perdita mark-to-close >= |soglia| dall'ingresso, "
+    "posizione viva all'open RTH, in perdita al termine della detenzione nella seduta "
+    ">= |soglia| dall'ingresso, "
     "con zero righe news_log e zero sentiment_signals nella seduta e zero righe per "
     "almeno `sedute_minime` sedute consecutive. Dato insufficiente resta None (UNKNOWN), "
     "mai False per difetto."
@@ -46,7 +48,7 @@ def _float(value: object) -> float | None:
     if value is None or isinstance(value, bool):
         return None
     try:
-        return float(value)
+        return float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
 
@@ -115,7 +117,7 @@ def build_exit_coverage(
             significa zero **resa** del provider, non fonte non configurata (#324 §2).
         copertura_per_ticker: `copertura_articoli["per_ticker"]` della seduta (#279).
         segnali_per_ticker: {ticker: segnali di sentiment scritti nella seduta}.
-        barre: barre giornaliere per il mark to close.
+        barre: barre giornaliere per il mark delle posizioni ancora aperte al close.
     """
     calendario_assente = not sedute
     righe: list[dict] = []
@@ -138,6 +140,12 @@ def build_exit_coverage(
         if entry_price is None or entry_price == 0:
             missingness.append("entry_price_missing")
             entry_price = None
+        uscita_nella_seduta = _data_iso(posizione.get("exit_time")) == data
+        exit_price = (
+            _float(posizione.get("exit_price")) if uscita_nella_seduta else None
+        )
+        if uscita_nella_seduta and exit_price is None:
+            missingness.append("exit_price_missing")
         barra = barre.get(ticker)
         close = _float(barra.get("close")) if barra else None
         if barra is None:
@@ -145,9 +153,14 @@ def build_exit_coverage(
         elif close is None:
             missingness.append("daily_close_missing")
 
+        # Una posizione uscita intraday non subisce il movimento successivo fino al
+        # close. Se il prezzo d'uscita non e' ancora riconciliato, il mark resta
+        # UNKNOWN: usare il close attribuirebbe al book P&L posteriore alla detenzione.
+        mark_valutazione = exit_price if uscita_nella_seduta else close
+        mark_valutazione_fonte = "exit_price" if uscita_nella_seduta else "daily_close"
         ritorno = (
-            close / entry_price - 1.0
-            if close is not None and entry_price is not None
+            mark_valutazione / entry_price - 1.0
+            if mark_valutazione is not None and entry_price is not None
             else None
         )
         perdita_marcata = ritorno <= soglia_perdita if ritorno is not None else None
@@ -159,7 +172,7 @@ def build_exit_coverage(
         close_prec = _float(barra.get("close_prec")) if barra else None
         ritorno_seduta = (
             close / close_prec - 1.0
-            if close is not None and close_prec not in (None, 0)
+            if close is not None and close_prec is not None and close_prec != 0
             else None
         )
 
@@ -205,8 +218,15 @@ def build_exit_coverage(
             "causal_event_id": f"exit-coverage:{cid}:{data}",
             "qty": qty,
             "entry_price": entry_price,
+            "exit_price": exit_price,
             "mark_close": close,
-            "notional_usd": qty * close if qty is not None and close is not None else None,
+            "mark_valutazione": mark_valutazione,
+            "mark_valutazione_fonte": mark_valutazione_fonte,
+            "notional_usd": (
+                qty * mark_valutazione
+                if qty is not None and mark_valutazione is not None
+                else None
+            ),
             "ritorno_da_ingresso": ritorno,
             "ritorno_seduta": ritorno_seduta,
             "perdita_marcata": perdita_marcata,
@@ -219,7 +239,7 @@ def build_exit_coverage(
             "sedute_consecutive_senza_righe": streak,
             "streak_troncato_da": troncato,
             "fonti_osservate_finestra": sorted(fonti_finestra.get(ticker) or []),
-            "uscita_nella_seduta": _data_iso(posizione.get("exit_time")) == data,
+            "uscita_nella_seduta": uscita_nella_seduta,
             "cieco_lato_uscita": cieco,
             "missingness": missingness,
         })

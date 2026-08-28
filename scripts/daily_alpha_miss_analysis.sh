@@ -200,15 +200,15 @@ le ha impedito qualunque segnale di uscita o riduzione.
 Leggi `copertura_uscita` nel dossier — NON ricalcolarla. Riporta le righe con
 `cieco_lato_uscita: true`: ticker, `ritorno_da_ingresso`, `sedute_consecutive_senza_righe`
 e `fonti_osservate_finestra`. Attenzione a non confondere le due misure di ritorno:
-`ritorno_seduta` e' il movimento della giornata (quello delle tabelle della FASE 1),
-`ritorno_da_ingresso` e' la perdita accumulata dall'ingresso, ed e' quella che una
-decisione d'uscita guarderebbe. Un titolo puo' fare -5% nella seduta ed essere ancora in
-profitto dall'ingresso: quello non e' un caso di cecita'.
+`ritorno_da_ingresso` termina al prezzo d'uscita se la posizione e' uscita intraday,
+altrimenti al close; e' la perdita subita mentre era detenuta. `ritorno_seduta` e'
+invece il movimento del titolo fino al close. Non confonderli e non attribuire al book
+movimenti successivi all'uscita.
 
 `fonti_osservate_finestra` vuota significa zero RESA dei provider su quel ticker, non
 fonte non configurata: i connettori per-ticker vivi interrogano l'intera watchlist.
-`cieco_lato_uscita: null` significa dato insufficiente (barra, prezzo d'ingresso o
-calendario mancanti), mai "no".
+`cieco_lato_uscita: null` significa dato insufficiente (barra, prezzo d'ingresso,
+prezzo d'uscita o calendario mancanti), mai "no".
 
 FASE 4 — PATTERN
 Osserva se i mover del giorno si raggruppano per settore/tema (es. rotazione da un gruppo verso

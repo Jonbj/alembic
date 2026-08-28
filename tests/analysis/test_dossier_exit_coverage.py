@@ -34,6 +34,7 @@ def _posizione(
     entry_price: float | None = 100.0,
     entry_time: str | None = "2026-07-22T14:00:00+00:00",
     exit_time: str | None = None,
+    exit_price: float | None = None,
 ) -> dict:
     return {
         "trade_id": trade_id,
@@ -43,6 +44,7 @@ def _posizione(
         "entry_price": entry_price,
         "entry_time": entry_time,
         "exit_time": exit_time,
+        "exit_price": exit_price,
     }
 
 
@@ -197,8 +199,33 @@ def test_lo_streak_dichiara_il_troncamento_dalla_finestra():
     assert riga["streak_troncato_da"] == "finestra"
 
 
-def test_uscita_nella_seduta_resta_misurata_ma_fuori_dalle_cieche_aperte():
-    """Una posizione uscita oggi ha comunque avuto un'uscita: si distingue."""
+def test_uscita_intraday_in_profitto_non_diventa_cieca_per_il_close_successivo():
+    """Dopo l'uscita il book non subisce il successivo crollo fino al close."""
+    payload = _build(
+        [_posizione(
+            "CRM",
+            exit_time="2026-08-19T18:00:00+00:00",
+            exit_price=105.0,
+        )],
+        barre={"CRM": {"close": 90.0}},
+    )
+
+    (riga,) = payload["posizioni"]
+    assert riga["uscita_nella_seduta"] is True
+    assert riga["exit_price"] == 105.0
+    assert riga["mark_close"] == 90.0
+    assert riga["mark_valutazione"] == 105.0
+    assert riga["mark_valutazione_fonte"] == "exit_price"
+    assert riga["ritorno_da_ingresso"] == pytest.approx(0.05)
+    assert riga["perdita_marcata"] is False
+    assert riga["cieco_lato_uscita"] is False
+    aggregato = payload["aggregato"]
+    assert aggregato["n_cieche_lato_uscita"] == 0
+    assert aggregato["n_cieche_ancora_aperte"] == 0
+
+
+def test_uscita_intraday_senza_prezzo_lascia_il_verdetto_indeterminato():
+    """Un fill non ancora riconciliato non autorizza il fallback al close EOD."""
     payload = _build(
         [_posizione("CRM", exit_time="2026-08-19T18:00:00+00:00")],
         barre={"CRM": {"close": 90.0}},
@@ -206,10 +233,13 @@ def test_uscita_nella_seduta_resta_misurata_ma_fuori_dalle_cieche_aperte():
 
     (riga,) = payload["posizioni"]
     assert riga["uscita_nella_seduta"] is True
-    assert riga["cieco_lato_uscita"] is True
-    aggregato = payload["aggregato"]
-    assert aggregato["n_cieche_lato_uscita"] == 1
-    assert aggregato["n_cieche_ancora_aperte"] == 0
+    assert riga["mark_valutazione"] is None
+    assert riga["mark_valutazione_fonte"] == "exit_price"
+    assert riga["ritorno_da_ingresso"] is None
+    assert riga["perdita_marcata"] is None
+    assert riga["cieco_lato_uscita"] is None
+    assert "exit_price_missing" in riga["missingness"]
+    assert payload["aggregato"]["n_indeterminati"] == 1
 
 
 def test_le_fonti_osservate_distinguono_zero_resa_da_zero_configurazione():

@@ -32,8 +32,9 @@ close del 2026-08-19:
 
 Una posizione che perde il 5% in giornata ma e' ancora in profitto dall'ingresso non ha
 la stessa domanda d'uscita di una che perde il 16% dall'ingresso. La misura introdotta
-qualifica sulla **perdita dall'ingresso** — la formulazione del punto 3 della issue
-stessa — e riporta entrambe le grandezze separate, cosi' che l'errore non si ripeta.
+qualifica sulla **perdita dall'ingresso fino al termine della detenzione nella seduta**
+(prezzo d'uscita intraday, close se ancora aperta) — la formulazione del punto 3 della
+issue stessa — e riporta entrambe le grandezze separate, cosi' che l'errore non si ripeta.
 Sul 2026-08-19 la misura trova **3 posizioni cieche** (WDC, UNH, VALE), non le tre
 nominate: una si sovrappone, due sono nuove, due erano falsi positivi.
 
