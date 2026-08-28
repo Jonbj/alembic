@@ -316,6 +316,29 @@ def test_due_conditional_si_ordinano_col_primo_tie_breaker_del_contratto(contrac
     assert comparison.tie_breaker_used == contract.tie_breakers[0].metric
 
 
+def test_due_pass_non_si_ordinano_con_i_tie_breaker_dei_conditional(contract):
+    """Due promozioni piene tornano al gate anche se, per esempio, i costi differiscono."""
+    saxo_result = _full_pass_result(contract, "saxo")
+    ibkr_result = _full_pass_result(contract, "ibkr")
+    saxo_result = replace(
+        saxo_result,
+        metrics={**saxo_result.metrics, "monthly_cost_usd": 10},
+    )
+    ibkr_result = replace(
+        ibkr_result,
+        metrics={**ibkr_result.metrics, "monthly_cost_usd": 20},
+    )
+    saxo = evaluate_broker(contract, saxo_result)
+    ibkr = evaluate_broker(contract, ibkr_result)
+    assert saxo.verdict == ibkr.verdict == VERDICT_PASS
+
+    comparison = compare_candidates(contract, (saxo, ibkr))
+
+    assert comparison.recommendation == RECOMMEND_NO_DECISION
+    assert comparison.winner is None
+    assert comparison.tie_breaker_used is None
+
+
 def test_due_conditional_identici_non_producono_un_vincitore(contract):
     """Un pareggio pieno è NO_DECISION: il valutatore non inventa un preferito."""
     saxo = _conditional(contract, "saxo", 1)

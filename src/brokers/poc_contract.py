@@ -505,6 +505,13 @@ def compare_candidates(
             _recommendation(winner.broker), winner.broker, None, tuple(rationale)
         )
 
+    if finalists[0].verdict == VERDICT_PASS:
+        rationale.append(
+            "più candidati hanno verdetto PASS: i tie-breaker congelati si "
+            "applicano solo fra CONDITIONAL_PASS, la scelta torna all'operatore"
+        )
+        return GateComparison(RECOMMEND_NO_DECISION, None, None, tuple(rationale))
+
     for tie_breaker in contract.tie_breakers:
         values = {v.broker: _metric_value(v, tie_breaker) for v in finalists}
         target = (
