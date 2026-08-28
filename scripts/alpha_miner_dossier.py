@@ -335,7 +335,11 @@ def _sedute_di_borsa(giorno: date, n: int) -> list[str]:
         segreto = os.environ.get("ALPACA_SECRET_KEY")
         if not chiave or not segreto:
             raise RuntimeError("ALPACA_API_KEY / ALPACA_SECRET_KEY mancanti")
-        client = TradingClient(chiave, segreto, paper=True)
+        # Il calendario di borsa e' identico su paper e live: si segue comunque la
+        # modalita' dichiarata, per non aprire una sessione live da uno strumento
+        # di sola misura.
+        paper = os.environ.get("ALPACA_PAPER_MODE", "true").lower() == "true"
+        client = TradingClient(chiave, segreto, paper=paper)
         # 3n giorni di calendario coprono n sedute anche con una settimana di feste.
         righe = client.get_calendar(
             GetCalendarRequest(start=giorno - timedelta(days=3 * n), end=giorno)
