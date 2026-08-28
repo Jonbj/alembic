@@ -325,6 +325,16 @@ PROMPT
 # sessione li interpreta invece di ri-derivarli. Fallisce in modo morbido: se il
 # dossier non si genera la sessione lavora come prima, calcolandosi i numeri da
 # se'. Meglio un report senza dossier che nessun report.
+# Prima di leggere qualsiasi cosa, riallinea i ledger a main (#336): questa
+# working tree e' condivisa e un `git checkout` altrui riporta findings.json e
+# market_daily.jsonl alla versione del branch di turno. Il dossier ne ricava le
+# mediane a 20 giorni e lo scoreboard i giorni osservati, quindi una copia
+# monca falsa le misure prima ancora che la sessione parta. E' un'unione, non
+# una sostituzione, e non fallisce mai: al massimo si lavora sulla copia
+# vecchia, come oggi.
+"$PROJECT_DIR/scripts/refresh_evidence_ledger.sh" \
+    docs/evidence/findings.json docs/evidence/market_daily.jsonl || true
+
 DOSSIER_FILE="$PROJECT_DIR/docs/evidence/dossier/${DATE_TARGET}.json"
 if uv run python "$PROJECT_DIR/scripts/alpha_miner_dossier.py" "$DATE_TARGET" >> "$LOG_FILE" 2>&1; then
     echo "Dossier generato: $DOSSIER_FILE"

@@ -193,6 +193,15 @@ delega a `scripts/commit_evidence_ledger.sh`, che committa da una worktree dedic
 `origin/main` (`.worktrees/evidence-cron`, ricreata da sola se manca), risincronizza e riprova una volta
 sul push rifiutato, e non tocca mai la directory principale.
 
+La stessa directory condivisa rende i ledger su disco vecchi al primo `git checkout` altrui, e il
+dossier (mediane a 20 giorni) e lo scoreboard economico (giorni osservati) li leggono da lì. Perciò il
+cron chiama `scripts/refresh_evidence_ledger.sh` **prima** di generare il dossier: riallinea
+`findings.json` e `market_daily.jsonl` a `origin/main` per **unione** — quello che è su disco e non
+ancora su `main` resta — ed è fail-open, se non riesce lo dice e l'analisi prosegue sulla copia
+vecchia. In fase di commit i due ledger sono fusi sopra `main` allo stesso modo
+(`merge_evidence_findings.py` per occorrenza, `merge_evidence_jsonl.py` per giorno): lì invece è
+fail-closed, un conflitto annulla il commit invece di scegliere una versione.
+
 L'esito è esplicito: l'**ultima riga del log** è `GIT_STATUS=pushed|committed_not_pushed|not_committed|nothing_to_commit`,
 lo stesso valore arriva su Telegram, e i path non ancora finiti su `main` restano in
 `logs/.evidence_cron_pending` per essere ritentati al giro dopo. Per contare i fallimenti di una

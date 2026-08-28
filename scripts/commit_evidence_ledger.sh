@@ -146,10 +146,10 @@ sync_worktree() {
 }
 
 # Copia i file dalla tree principale nella worktree e li mette in staging.
-# findings.json viene fuso semanticamente sopra main: il cron puo' partire da
-# uno snapshot vecchio, ma le occorrenze gia' pubblicate non devono sparire. I
-# JSONL conservano la guardia per righe cancellate. Restituisce 1 per qualunque
-# regressione append-only, 2 per un errore operativo.
+# I due ledger append-only non vengono mai sovrascritti ma fusi sopra main: il
+# cron puo' partire da uno snapshot vecchio, e cio' che e' gia' pubblicato non
+# deve sparire. Restituisce 1 per qualunque regressione append-only, 2 per un
+# errore operativo.
 stage_paths() {
     local rel src dest deleted
     local staged=0
@@ -166,16 +166,24 @@ stage_paths() {
                 log "RIFIUTO: impossibile fondere $rel senza perdere evidenza."
                 return 1
             fi
+        elif [[ "$rel" == *.jsonl ]]; then
+            if ! python3 "$SCRIPT_DIR/merge_evidence_jsonl.py" "$dest" "$src" "$dest"; then
+                log "RIFIUTO: impossibile fondere $rel senza perdere evidenza."
+                return 1
+            fi
         else
             cp "$src" "$dest" || return 2
         fi
         git -C "$WORKTREE" add -- "$rel" || return 2
         staged=1
         if [[ "$rel" == *.jsonl ]]; then
+            # Invariante, non guardia: dopo la fusione le righe del remoto ci
+            # sono tutte. Se ne mancasse una, la fusione ha un difetto e il
+            # commit non deve partire lo stesso.
             deleted=$(git -C "$WORKTREE" diff --cached --numstat -- "$rel" | awk '{print $2}')
             if [[ -n "$deleted" && "$deleted" != "-" ]] && (( deleted > 0 )); then
                 log "RIFIUTO: $rel perderebbe ${deleted} righe rispetto a ${REMOTE}/${BRANCH}."
-                log "La copia su disco e' piu' vecchia del remoto: risolvere a mano."
+                log "La fusione append-only non ha tenuto: risolvere a mano."
                 return 1
             fi
         fi

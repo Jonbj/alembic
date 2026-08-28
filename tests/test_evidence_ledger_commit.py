@@ -21,6 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 REAL_GIT = shutil.which("git") or "/usr/bin/git"
 HELPER = ROOT / "scripts" / "commit_evidence_ledger.sh"
 MERGER = ROOT / "scripts" / "merge_evidence_findings.py"
+JSONL_MERGER = ROOT / "scripts" / "merge_evidence_jsonl.py"
+REFRESHER = ROOT / "scripts" / "refresh_evidence_ledger.sh"
+SCRIPTS = (HELPER, MERGER, JSONL_MERGER, REFRESHER)
 REPORT = "docs/ALPHA_MISS_REPORT_2026-08-26.md"
 LEDGER = "docs/evidence/findings.json"
 JSONL = "docs/evidence/market_daily.jsonl"
@@ -75,8 +78,8 @@ def repo(tmp_path: Path) -> dict:
     _git(project, "checkout", "-b", "agent/issue-999")
 
     (project / "scripts").mkdir(exist_ok=True)
-    shutil.copy2(HELPER, project / "scripts" / HELPER.name)
-    shutil.copy2(MERGER, project / "scripts" / MERGER.name)
+    for script in SCRIPTS:
+        shutil.copy2(script, project / "scripts" / script.name)
     return {"remote": remote, "project": project, "tmp": tmp_path}
 
 
@@ -396,7 +399,7 @@ def test_nothing_to_commit_is_its_own_status(repo):
     assert _status_line(result.stdout) == "GIT_STATUS=nothing_to_commit"
 
 
-def test_shrinking_an_append_only_jsonl_is_refused(repo):
+def test_a_stale_local_jsonl_cannot_truncate_main(repo):
     """Una copia su disco piu' vecchia di main non deve troncare il ledger."""
     project, remote = repo["project"], repo["remote"]
     _dirty_the_ledger(project)
@@ -408,9 +411,61 @@ def test_shrinking_an_append_only_jsonl_is_refused(repo):
 
     result = _run_helper(repo, JSONL)
 
-    assert result.returncode != 0
-    assert _status_line(result.stdout) == "GIT_STATUS=not_committed"
+    # niente da aggiungere: le righe di main restano, il cron non si incastra
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _status_line(result.stdout) == "GIT_STATUS=nothing_to_commit"
     assert _remote_file(remote, JSONL) == before
+
+
+def test_jsonl_day_published_on_main_survives_a_stale_local_copy(repo):
+    """Il giorno pubblicato su main e quello nuovo del cron devono coesistere."""
+    project, remote, tmp = repo["project"], repo["remote"], repo["tmp"]
+
+    # main acquisisce un giorno che la copia sulla feature branch non ha
+    side = tmp / "side-jsonl"
+    subprocess.run(["git", "clone", str(remote), str(side)], check=True, capture_output=True)
+    _git(side, "config", "user.email", "altro@alembic.test")
+    _git(side, "config", "user.name", "Altro Agente")
+    with (side / JSONL).open("a") as handle:
+        handle.write('{"data": "2026-08-24", "spy": 0.01}\n')
+    _git(side, "add", JSONL)
+    _git(side, "commit", "-m", "giorno concorrente")
+    _git(side, "push", "origin", "main")
+
+    # la sessione appende il proprio giorno alla copia (vecchia) su disco
+    with (project / JSONL).open("a") as handle:
+        handle.write('{"data": "2026-08-26"}\n')
+
+    result = _run_helper(repo, JSONL)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert _status_line(result.stdout) == "GIT_STATUS=pushed"
+    days = [
+        json.loads(line)["data"]
+        for line in _remote_file(remote, JSONL).splitlines()
+        if line.strip()
+    ]
+    assert days == ["2026-08-25", "2026-08-24", "2026-08-26"]
+
+
+def test_jsonl_conflicting_day_is_refused(tmp_path):
+    """Stesso giorno con numeri diversi non e' una riga nuova: decide un umano."""
+    remote_file = tmp_path / "remote.jsonl"
+    source_file = tmp_path / "source.jsonl"
+    canonical = '{"data": "2026-08-26", "spy": 0.01}\n'
+    _write(remote_file, canonical)
+    _write(source_file, '{"data": "2026-08-26", "spy": 0.99}\n')
+
+    result = subprocess.run(
+        ["python3", str(JSONL_MERGER), str(remote_file), str(source_file), str(remote_file)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "2026-08-26" in result.stderr
+    assert remote_file.read_text() == canonical
 
 
 def test_missing_worktree_is_recreated(repo):
@@ -457,6 +512,8 @@ def _run_cron(repo: dict, extra_path: Path | None = None) -> tuple[subprocess.Co
         bin_dir / "claude",
         "#!/usr/bin/env bash\n"
         "printf 'Executive summary fittizio\\n'\n"
+        'cp docs/evidence/findings.json "$LEDGER_SNAPSHOT"\n'
+        'cp docs/evidence/market_daily.jsonl "$JSONL_SNAPSHOT"\n'
         "printf '%s\\n' '{\"schema_version\":1,\"prossimo_id\":2,\"findings\":[{\"id\":\"F-001\",\"titolo\":\"Finding di test\",\"occorrenze\":[{\"data\":\"2026-08-26\",\"costo_usd\":1.0,\"nota\":\"test\",\"fonte\":\"REPORT_TEST.md\"}],\"costo_cumulato_usd\":1.0,\"occorrenze_non_stimate\":0}]}' > docs/evidence/findings.json\n"
         "printf '%s\\n' '{\"data\": \"2026-08-26\"}' >> docs/evidence/market_daily.jsonl\n"
         f"printf '# Alpha miss 2026-08-26\\n' > {REPORT}\n",
@@ -477,6 +534,8 @@ def _run_cron(repo: dict, extra_path: Path | None = None) -> tuple[subprocess.Co
             "TELEGRAM_BOT_TOKEN": "t",
             "TELEGRAM_CHAT_ID": "c",
             "TELEGRAM_CAPTURE": str(telegram),
+            "LEDGER_SNAPSHOT": str(tmp / "ledger_visto_dalla_sessione.json"),
+            "JSONL_SNAPSHOT": str(tmp / "market_daily_visto_dalla_sessione.jsonl"),
             "EVIDENCE_WORKTREE": str(tmp / "wt-evidence"),
             "EVIDENCE_PENDING_FILE": str(tmp / "pending.txt"),
         }
@@ -498,8 +557,6 @@ def _run_cron(repo: dict, extra_path: Path | None = None) -> tuple[subprocess.Co
 
 
 def test_cron_commits_the_ledger_from_a_feature_branch(repo):
-    shutil.copy2(HELPER, repo["project"] / "scripts" / HELPER.name)
-
     result, log, telegram = _run_cron(repo)
 
     assert result.returncode == 0, log[-2000:]
@@ -512,7 +569,6 @@ def test_cron_commits_the_ledger_from_a_feature_branch(repo):
 
 
 def test_cron_alerts_when_the_ledger_does_not_reach_main(repo):
-    shutil.copy2(HELPER, repo["project"] / "scripts" / HELPER.name)
     _, log, telegram = _run_cron(repo, extra_path=_failing_push_bin(repo["tmp"]))
 
     assert log.strip().splitlines()[-1] == "GIT_STATUS=committed_not_pushed"
@@ -555,3 +611,131 @@ def test_broken_worktree_registration_is_rebuilt(repo):
 
     assert _status_line(result.stdout) == "GIT_STATUS=pushed"
     assert _remote_file(repo["remote"], REPORT) == "# Alpha miss 2026-08-26 (v3)\n"
+
+
+# --- riallineamento dei ledger prima della sessione (#336) -----------------
+
+
+def _publish_on_main(repo: dict, finding_id: str, day: str) -> None:
+    """Pubblica su main un finding e un giorno che la tree condivisa non ha."""
+    side = repo["tmp"] / f"side-{finding_id}"
+    subprocess.run(
+        ["git", "clone", str(repo["remote"]), str(side)], check=True, capture_output=True
+    )
+    _git(side, "config", "user.email", "altro@alembic.test")
+    _git(side, "config", "user.name", "Altro Agente")
+    _write(
+        side / LEDGER,
+        json.dumps(
+            {
+                "schema_version": 1,
+                "prossimo_id": 3,
+                "findings": [
+                    {
+                        "id": finding_id,
+                        "titolo": "Finding pubblicato da un altro autore",
+                        "occorrenze": [
+                            {
+                                "data": day,
+                                "costo_usd": 5.0,
+                                "nota": "arrivato su main dopo il checkout",
+                                "fonte": "REPORT_ALTRO.md",
+                            }
+                        ],
+                        "costo_cumulato_usd": 5.0,
+                        "occorrenze_non_stimate": 0,
+                    }
+                ],
+            },
+            indent=2,
+        )
+        + "\n",
+    )
+    with (side / JSONL).open("a") as handle:
+        handle.write(json.dumps({"data": day, "spy": 0.01}) + "\n")
+    _git(side, "add", "-A")
+    _git(side, "commit", "-m", f"evidence: {finding_id}")
+    _git(side, "push", "origin", "main")
+
+
+def test_cron_realigns_the_ledger_to_main_before_the_session_reads_it(repo):
+    """La tree condivisa e' indietro: dossier e sessione devono vedere main."""
+    _publish_on_main(repo, "F-002", "2026-08-24")
+
+    result, log, _ = _run_cron(repo)
+
+    assert result.returncode == 0, log[-2000:]
+    seen = json.loads((repo["tmp"] / "ledger_visto_dalla_sessione.json").read_text())
+    assert [finding["id"] for finding in seen["findings"]] == ["F-002"]
+    assert seen["prossimo_id"] == 3
+    days = [
+        json.loads(line)["data"]
+        for line in (repo["tmp"] / "market_daily_visto_dalla_sessione.jsonl")
+        .read_text()
+        .splitlines()
+        if line.strip()
+    ]
+    assert days == ["2026-08-25", "2026-08-24"]
+
+
+def test_refresh_never_discards_local_work_not_yet_on_main(repo):
+    """Il riallineamento e' un'unione: cio' che non e' ancora su main resta."""
+    project = repo["project"]
+    _dirty_the_ledger(project)
+    _publish_on_main(repo, "F-002", "2026-08-24")
+
+    result = subprocess.run(
+        ["bash", str(project / "scripts" / REFRESHER.name), LEDGER, JSONL],
+        cwd=project,
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    ids = [finding["id"] for finding in json.loads((project / LEDGER).read_text())["findings"]]
+    assert ids == ["F-002", "F-001"]
+    days = [
+        json.loads(line)["data"]
+        for line in (project / JSONL).read_text().splitlines()
+        if line.strip()
+    ]
+    assert days == ["2026-08-25", "2026-08-24", "2026-08-26"]
+
+
+def test_refresh_leaves_the_local_ledger_alone_when_it_cannot_merge(repo):
+    """Fail-open: un conflitto non deve far saltare l'analisi del giorno."""
+    project = repo["project"]
+    _publish_on_main(repo, "F-002", "2026-08-24")
+    # stesso id, titolo diverso: il riallineamento non puo' decidere
+    conflicting = json.dumps(
+        {
+            "schema_version": 1,
+            "prossimo_id": 3,
+            "findings": [
+                {
+                    "id": "F-002",
+                    "titolo": "Titolo incompatibile",
+                    "occorrenze": [],
+                    "costo_cumulato_usd": 0.0,
+                    "occorrenze_non_stimate": 0,
+                }
+            ],
+        },
+        indent=2,
+    ) + "\n"
+    _write(project / LEDGER, conflicting)
+
+    result = subprocess.run(
+        ["bash", str(project / "scripts" / REFRESHER.name), LEDGER],
+        cwd=project,
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ATTENZIONE" in result.stdout
+    assert (project / LEDGER).read_text() == conflicting
