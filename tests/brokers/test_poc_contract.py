@@ -8,6 +8,7 @@ dichiarato `PASS` — e verificano che il contratto li rifiuti.
 """
 
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -119,6 +120,18 @@ def test_le_contingenze_sono_nominate_senza_poc_autorizzato(contract):
     for name, contingency in contract.contingencies.items():
         assert contingency.trigger, name
         assert contingency.poc_authorized is False, name
+
+
+def test_la_fonte_autorevole_del_contratto_esiste(contract):
+    """La forma macchina rinvia al documento: se il puntatore si rompe, il
+    contratto perde la parte che un valutatore non sa leggere."""
+    root = Path(__file__).resolve().parents[2]
+    yaml_text = (root / "config" / "broker_poc_contract.yaml").read_text()
+    prefix = "# FONTE AUTOREVOLE: "
+    line = next(
+        l for l in yaml_text.splitlines() if l.startswith(prefix)
+    )
+    assert (root / line[len(prefix):].strip()).is_file()
 
 
 def test_le_dimensioni_bloccanti_e_pesate_sono_disgiunte_e_complete(contract):
