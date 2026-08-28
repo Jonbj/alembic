@@ -1,0 +1,675 @@
+# Contratto PoC del secondo broker — parametri congelati, forma macchina.
+#
+# FONTE AUTOREVOLE: docs/superpowers/specs/2026-08-28-second-broker-poc-contract-design.md
+# Questo file è la parte del contratto che un valutatore sa decidere (#363). NON è
+# il contratto completo: la procedura di ogni scenario, il razionale delle scelte
+# e il registro delle modifiche vivono solo nel documento. In caso di divergenza
+# fra i due è una divergenza MATERIALE, e va risolta prima del primo accesso ai
+# provider — non arbitrata dopo aver visto i risultati.
+#
+# Firmato: 2026-08-28, PRIMA di qualunque accesso a Saxo SIM o IBKR paper.
+# Base documentale: docs/research/2026-08-25-broker-provider-alternatives.md (#359).
+# Consuma: #361 (PoC IBKR), #364 (PoC Saxo). Alimenta: #360 (gate PO).
+#
+# PERIMETRO: questo file non autorizza apertura o finanziamento di conti, acquisto
+# di market data, ordini live o alcun cambiamento al percorso Alpaca. Nessuna
+# dimensione è verificabile in `LIVE_ORDER`, e il valutatore lo rifiuta.
+
+version: "1.0.0"
+signed_at: "2026-08-28"
+issue: 363
+changelog:
+  - "1.0.0 (#363): creazione, contratto congelato prima dei PoC."
+
+# I due candidati strategici della shortlist #359. L'ordine non esprime
+# preferenza: il verdetto lo decidono i tie-breaker dichiarati sotto.
+brokers: ["saxo", "ibkr"]
+
+# La dimensione che valuta lo scenario obbligatorio e quella che valuta il
+# paniere sono nominate qui perché il valutatore ne applica regole speciali.
+ambiguous_timeout_dimension: "D-AMBIG"
+basket_gate_dimension: "D-MAP"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Paniere minimo di strumenti
+#
+# Lo stesso paniere per entrambi i candidati: se i due PoC provassero strumenti
+# diversi, il confronto misurerebbe il paniere e non il broker. Gli ISIN sono
+# `null` perché fissarli a memoria introdurrebbe un errore silenzioso: vanno
+# risolti al primo accesso, registrati nel report e confrontati fra i due PoC.
+# Uno slot conta come risolto solo se lo strumento è **ordinabile sul conto**,
+# non se compare nel catalogo di marketing.
+# ─────────────────────────────────────────────────────────────────────────────
+basket:
+  - id: "IT-EQ"
+    market: "Euronext Milan"
+    mic: "XMIL"
+    asset_class: "CASH_EQUITY"
+    currency: "EUR"
+    reference_name: "Enel SpA"
+    isin: null
+    mandatory: true
+    why: "Mercato domestico dell'operatore: se il secondo broker non compra Milano, l'espansione Europa non esiste."
+
+  - id: "DE-EQ"
+    market: "Xetra"
+    mic: "XETR"
+    asset_class: "CASH_EQUITY"
+    currency: "EUR"
+    reference_name: "SAP SE"
+    isin: null
+    mandatory: true
+    why: "Prima borsa europea per volume azionario; listino e calendario distinti da Euronext."
+
+  - id: "FR-EQ"
+    market: "Euronext Paris"
+    mic: "XPAR"
+    asset_class: "CASH_EQUITY"
+    currency: "EUR"
+    reference_name: "TotalEnergies SE"
+    isin: null
+    mandatory: true
+    why: "Stesso gruppo Euronext di Milano ma MIC e permission separati: verifica che l'entitlement sia per borsa, non per gruppo."
+
+  - id: "GB-EQ"
+    market: "London Stock Exchange"
+    mic: "XLON"
+    asset_class: "CASH_EQUITY"
+    currency: "GBP"
+    quoted_minor_unit: "GBX"
+    isin: null
+    reference_name: "Shell plc"
+    mandatory: true
+    why: >-
+      Quotazione in penny (GBX) con valuta di regolamento GBP: è la trappola di
+      unità minore. Un adapter che confonde GBX e GBP sbaglia il notional di
+      cento volte, e lo sbaglia in silenzio.
+
+  - id: "US-EQ"
+    market: "Nasdaq"
+    mic: "XNAS"
+    asset_class: "CASH_EQUITY"
+    currency: "USD"
+    reference_name: "Apple Inc."
+    isin: null
+    mandatory: true
+    why: >-
+      Controllo: è l'unico slot già negoziabile su Alpaca. Serve a distinguere
+      una differenza di broker da una differenza di mercato, e a misurare il
+      costo del secondo broker dove esiste un termine di confronto.
+
+  - id: "JP-EQ"
+    market: "Tokyo Stock Exchange"
+    mic: "XJPX"
+    asset_class: "CASH_EQUITY"
+    currency: "JPY"
+    round_lot: 100
+    reference_name: "Toyota Motor Corp (7203)"
+    isin: null
+    mandatory: true
+    why: >-
+      Il mercato APAC richiesto. Lotto di 100 azioni e valuta senza decimali:
+      due vincoli che nessuno slot europeo o USA esercita.
+
+  - id: "EU-ETF"
+    market: "Xetra"
+    mic: "XETR"
+    asset_class: "ETF"
+    currency: "EUR"
+    reference_name: "ETF UCITS azionario globale ad accumulazione"
+    isin: null
+    mandatory: true
+    why: >-
+      Asset class distinta dall'azione cash e unico slot che attraversa il
+      percorso KID/disclaimer UCITS — cioè il rischio Saxo del 2025 sui
+      pre-trade disclaimer. Senza uno slot ETF quel rischio non viene provato.
+
+  - id: "HK-EQ"
+    market: "Hong Kong Stock Exchange"
+    mic: "XHKG"
+    asset_class: "CASH_EQUITY"
+    currency: "HKD"
+    reference_name: "titolo HSI con board lot pubblicato"
+    isin: null
+    mandatory: false
+    why: "Secondo mercato APAC con board lot variabile per titolo. Opzionale: la copertura APAC minima è già coperta da JP-EQ."
+
+  - id: "NEG-CTRL"
+    market: "fuori entitlement del conto"
+    mic: "XXXX"
+    asset_class: "ANY"
+    currency: "ANY"
+    reference_name: "strumento che il conto NON è abilitato a negoziare"
+    isin: null
+    mandatory: true
+    expected_outcome: "REFUSE_FAIL_CLOSED"
+    why: >-
+      Controllo negativo. Un broker che accetta un ordine su uno strumento non
+      abilitato, o che degrada silenziosamente su un altro listing, è più
+      pericoloso di uno che ne copre meno: sarebbe il `false_positive_ticker`
+      del multi-mercato. L'esito atteso è un rifiuto esplicito e diagnosticabile.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Matrice comune
+#
+# `kind: blocking` → il fallimento è un FAIL, non un successo parziale.
+# `kind: graded`   → il fallimento è un rischio residuo da accettare al gate.
+# `verifiable_in`  → dove il fatto è dimostrabile: SIM (paper/sandbox),
+#                    LIVE_READONLY (letture su conto live approvato),
+#                    OPERATOR (decisione o documento dell'operatore),
+#                    DOC (documentazione contrattuale del provider).
+#                    `LIVE_ORDER` non compare mai e il valutatore lo vieta.
+# `feeds_final_gate` → l'evidenza entra nel gate #360.
+# ─────────────────────────────────────────────────────────────────────────────
+dimensions:
+  D-AMBIG:
+    title: "submit → timeout ambiguo → reconcile"
+    kind: blocking
+    verifiable_in: ["SIM"]
+    feeds_final_gate: true
+    question: "Dopo un esito ignoto, il sistema riconcilia prima di ritrasmettere, e resta un solo ordine?"
+    procedure: >-
+      5 prove per broker: submit con chiave d'esecuzione deterministica, poi
+      interruzione della risposta lato client (timeout forzato, socket chiuso,
+      processo terminato in volo). Nessuna ritrasmissione prima di una query
+      sullo stato per order reference. Almeno una prova con restart del processo
+      fra submit e riconciliazione.
+    pass_criteria:
+      duplicate_orders: 0
+      blind_resends: 0
+      unknown_outcomes_resolved_by_query: "100%"
+    evidence: "journal append-only con request, timeout, query di riconciliazione, stato finale e lista ordini lato broker"
+    kill_criteria: ["K-DUP"]
+
+  D-MAP:
+    title: "Mapping strumenti canonico e stabile"
+    kind: blocking
+    verifiable_in: ["SIM", "LIVE_READONLY"]
+    feeds_final_gate: true
+    question: "Ogni slot del paniere si risolve in un identificatore unico, stabile e ordinabile sul conto?"
+    procedure: >-
+      Risolvere ogni slot obbligatorio a identificatore broker (`Uic+AssetType`
+      per Saxo, `conid` per IBKR) più ISIN, MIC, valuta, unità di quotazione,
+      lotto e tick. Ripetere la risoluzione a distanza di 24h per verificarne la
+      stabilità. Registrare le ambiguità (più listing, più conid) e come sono
+      state risolte in modo deterministico.
+    pass_criteria:
+      mandatory_slots_resolved: "tutti"
+      ambiguous_resolutions_left_unresolved: 0
+      identifier_stable_over_24h: true
+    evidence: "tabella slot → identificatore, con le due risoluzioni a 24h di distanza"
+    kill_criteria: ["K-MAP"]
+
+  D-AUDIT:
+    title: "Audit trail ricostruibile"
+    kind: blocking
+    verifiable_in: ["SIM"]
+    feeds_final_gate: true
+    question: "L'evidenza grezza raccolta basta a spiegare ogni posizione e ogni fill senza chiedere al broker?"
+    procedure: >-
+      Per ogni ordine del PoC: intent, payload normalizzato, payload broker, ack,
+      warning, fill parziali e totali, cancel, reconcile. Un revisore diverso
+      deve ricostruire quantità, prezzo medio e commissioni di ogni posizione
+      leggendo solo il journal.
+    pass_criteria:
+      positions_explained_from_journal_only: "100%"
+      redaction_of_secrets_and_account_ids: true
+    evidence: "journal redatto + ricostruzione indipendente delle posizioni"
+    kill_criteria: ["K-AUDIT"]
+
+  D-RECOVERY:
+    title: "Ricostruzione dello stato dopo perdita eventi"
+    kind: blocking
+    verifiable_in: ["SIM"]
+    feeds_final_gate: true
+    question: "Perdendo gli eventi, lo stato completo si ricostruisce interrogando l'API?"
+    procedure: >-
+      Interrompere lo stream/consumer per una finestra che contenga almeno un
+      fill e un cancel, poi ricostruire ordini aperti, esecuzioni e posizioni
+      dalle sole query. Confrontare con la verità nota del PoC.
+    pass_criteria:
+      state_divergence_after_rebuild: 0
+      events_lost_but_unrecoverable: 0
+    evidence: "diff fra stato ricostruito e verità nota"
+    kill_criteria: ["K-RECON"]
+
+  D-RESTART:
+    title: "Stato dopo restart"
+    kind: blocking
+    verifiable_in: ["SIM"]
+    feeds_final_gate: true
+    question: "Un riavvio del processo lascia ordini o posizioni non riconosciuti?"
+    procedure: >-
+      Restart con ordini aperti, con un ordine in volo e a mercato chiuso.
+      Verificare che ogni ordine preesistente sia riconosciuto come proprio
+      tramite l'order reference, e che nessuno venga ri-emesso.
+    pass_criteria:
+      orphan_orders_after_restart: 0
+      reemitted_orders_after_restart: 0
+    evidence: "log dei tre restart con inventario ordini prima e dopo"
+    kill_criteria: ["K-RECON"]
+
+  D-PARTIAL:
+    title: "Fill parziali"
+    kind: blocking
+    verifiable_in: ["SIM"]
+    feeds_final_gate: true
+    question: "Quantità, prezzo medio e costi di un fill parziale sono ricostruibili senza doppio conteggio?"
+    procedure: >-
+      Provocare almeno un fill parziale per broker (ordine limite sopra il size
+      disponibile in SIM), poi completarlo o cancellare il residuo. Verificare
+      cumulativi contro somma delle esecuzioni.
+    pass_criteria:
+      double_counted_quantity: 0
+      average_price_reconciles: true
+      residual_after_cancel_explained: true
+    evidence: "esecuzioni + cumulativi + posizione finale"
+    kill_criteria: []
+
+  D-AUTH:
+    title: "Auth e lifecycle della sessione"
+    kind: blocking
+    verifiable_in: ["SIM", "LIVE_READONLY", "OPERATOR"]
+    feeds_final_gate: true
+    question: "La sessione si ottiene e si rinnova in modo deterministico, e il suo esaurimento è fail-closed?"
+    procedure: >-
+      Misurare la catena token/sessione per almeno 7 giorni consecutivi, inclusi
+      un downtime forzato, una revoca e un recovery. Registrare ogni intervento
+      umano necessario, con durata e cadenza. Un intervento umano documentato e
+      limitato NON è un fallimento: è un costo operativo da dichiarare.
+    pass_criteria:
+      consecutive_days_measured: 7
+      human_interventions_documented: true
+      session_exhaustion_fails_closed: true
+      undetected_session_loss: 0
+    evidence: "diario della sessione giorno per giorno + esito di revoca e recovery"
+    kill_criteria: ["K-FAILOPEN", "KS-AUTH", "KI-REAUTH"]
+
+  D-SESSION:
+    title: "Sessioni concorrenti"
+    kind: blocking
+    verifiable_in: ["SIM"]
+    feeds_final_gate: true
+    question: "Se un'altra sessione sottrae la connessione, il sistema se ne accorge e si ferma?"
+    procedure: >-
+      Aprire una seconda sessione con le stesse credenziali (TWS/Portal/Mobile
+      per IBKR, seconda app/sessione per Saxo) mentre un ordine è aperto.
+      Verificare che la perdita sia rilevata entro un ciclo e che nessun ordine
+      venga emesso su una sessione non confermata.
+    pass_criteria:
+      detection_within_one_cycle: true
+      orders_submitted_on_unconfirmed_session: 0
+    evidence: "traccia della contesa di sessione con timestamp"
+    kill_criteria: ["KI-SESSION"]
+
+  D-PAPER:
+    title: "Fedeltà di paper/SIM al live"
+    kind: graded
+    verifiable_in: ["SIM", "DOC"]
+    feeds_final_gate: true
+    question: "Quali differenze fra ambiente di prova e live rendono un PASS in SIM non trasferibile?"
+    procedure: >-
+      Elencare le differenze dichiarate e quelle osservate: order type mancanti,
+      modello di fill, dati assenti, reset periodici, strumenti non presenti.
+      Ogni differenza va marcata come irrilevante, mitigabile o bloccante per
+      Alembic.
+    pass_criteria:
+      differences_enumerated: true
+      blocking_differences: 0
+    evidence: "tabella differenze SIM/live con classificazione"
+    kill_criteria: []
+
+  D-DATA:
+    title: "Market data entitlement"
+    kind: graded
+    verifiable_in: ["LIVE_READONLY", "OPERATOR", "DOC"]
+    feeds_final_gate: true
+    question: "Quali abbonamenti servono per il paniere, a che costo, e cosa succede senza?"
+    procedure: >-
+      Raccogliere entitlement e preventivi per ogni MIC del paniere, senza
+      acquistare. Verificare il comportamento con dati assenti o stanchi: deve
+      essere un rifiuto esplicito, non un prezzo vecchio usato come fresco.
+    pass_criteria:
+      entitlement_per_mic_documented: true
+      stale_or_missing_data_fails_closed: true
+      purchases_made: 0
+    evidence: "preventivi e schermate entitlement, redatte"
+    kill_criteria: ["K-FAILOPEN", "KI-ENTITLE"]
+
+  D-PREVIEW:
+    title: "Order preview / what-if"
+    kind: graded
+    verifiable_in: ["SIM"]
+    feeds_final_gate: true
+    question: "Esiste una validazione pre-submit affidabile, e la sua assenza è sostituibile?"
+    procedure: >-
+      Provare preview/what-if su ogni slot obbligatorio, incluso un caso che
+      deve essere rifiutato (size oltre buying power, lotto non valido, tick
+      non valido). Dove il preview non esiste, documentare il controllo
+      deterministico che lo sostituisce.
+    pass_criteria:
+      preview_available_or_substitute_documented: true
+      invalid_orders_caught_pre_submit: "tutti i casi provati"
+    evidence: "richieste e risposte di preview, inclusi i rifiuti"
+    kill_criteria: []
+
+  D-REPLACE:
+    title: "Cancel / replace"
+    kind: graded
+    verifiable_in: ["SIM"]
+    feeds_final_gate: true
+    question: "Cancel e replace hanno un esito univoco anche in gara con un fill?"
+    procedure: >-
+      Cancel su ordine aperto, cancel su ordine già eseguito, replace di prezzo
+      e quantità, replace su ordine parzialmente eseguito. Verificare che
+      l'esito sia distinguibile e che non nascano due ordini vivi.
+    pass_criteria:
+      live_orders_after_replace: 1
+      ambiguous_cancel_outcomes: 0
+    evidence: "traccia dei quattro casi"
+    kill_criteria: []
+
+  D-PROTECT:
+    title: "Protezione broker-side"
+    kind: graded
+    verifiable_in: ["SIM", "DOC"]
+    feeds_final_gate: true
+    question: "Stop e take-profit vivono lato broker, e su quali strumenti del paniere?"
+    procedure: >-
+      Provare stop/limite di protezione e, dove esistono, bracket/OCO su ogni
+      slot obbligatorio. Registrare per quali mercati e asset class non sono
+      disponibili, e per quali il GTC non attraversa la notte.
+    pass_criteria:
+      protection_available_per_slot_documented: true
+      gtc_survives_overnight_where_offered: true
+    evidence: "matrice slot → tipi di protezione disponibili"
+    kill_criteria: []
+
+  D-STREAM:
+    title: "Stream e reconnect"
+    kind: graded
+    verifiable_in: ["SIM"]
+    feeds_final_gate: true
+    question: "Dopo una disconnessione lo stream riprende senza buchi silenziosi?"
+    procedure: >-
+      Disconnessione forzata dello stream con eventi in corso, reset delle
+      subscription, verifica di snapshot+delta e dell'ordinamento. Confrontare
+      gli eventi ricevuti con la verità ricostruita via query.
+    pass_criteria:
+      silent_gaps_after_reconnect: 0
+      subscription_reset_documented: true
+    evidence: "log stream con la finestra di disconnessione e il diff post-reconnect"
+    kill_criteria: []
+
+  D-UNATTENDED:
+    title: "Operatività unattended"
+    kind: graded
+    verifiable_in: ["SIM", "OPERATOR"]
+    feeds_final_gate: true
+    question: "Quanti interventi umani servono in una settimana, e quanto costano in attenzione?"
+    procedure: >-
+      Contare gli interventi umani osservati nella finestra di 7 giorni di
+      D-AUTH, con durata e prevedibilità di ciascuno, e cosa accade se uno
+      viene mancato.
+    pass_criteria:
+      interventions_counted: true
+      missed_intervention_consequence_documented: true
+      unmanaged_position_on_missed_intervention: false
+    evidence: "conteggio interventi + esito della prova di intervento mancato"
+    kill_criteria: []
+    note: >-
+      Deliberatamente `graded`, non `blocking`. IBKR richiede per progetto
+      un'autenticazione manuale settimanale e l'operatore l'ha già accettata:
+      renderla bloccante scarterebbe IBKR per costruzione, cioè adatterebbe il
+      contratto al candidato preferito — il difetto che questo documento esiste
+      per prevenire. Ciò che resta bloccante è il fail-closed della sessione
+      (D-AUTH) e la sorveglianza della posizione, non l'assenza di intervento.
+
+  D-COST:
+    title: "Costo reale per un conto italiano"
+    kind: graded
+    verifiable_in: ["OPERATOR", "DOC"]
+    feeds_final_gate: true
+    question: "Quanto costa un mese rappresentativo, tutto compreso, sul contratto vero?"
+    procedure: >-
+      Estrarre dal preventivo o dal contratto: commissioni per ogni MIC del
+      paniere, FX, custodia, market data, imposte ed exchange fee. Applicarli al
+      turnover di un mese rappresentativo del libro Alembic. Nessuna cifra copiata
+      da una pagina globale di marketing.
+    pass_criteria:
+      italian_contractual_source: true
+      monthly_cost_computed_on_real_turnover: true
+    evidence: "preventivo redatto + foglio di calcolo del mese rappresentativo"
+    kill_criteria: ["KS-COST"]
+
+  D-RATE:
+    title: "Rate limit e quote"
+    kind: graded
+    verifiable_in: ["SIM", "DOC"]
+    feeds_final_gate: true
+    question: "I limiti sono osservabili e il superamento è gestito senza perdere ordini?"
+    procedure: >-
+      Misurare i limiti dichiarati contro quelli osservati, verificare gli header
+      di quota, e provocare un superamento controllato su un endpoint di lettura.
+      Verificare che il backoff non trasformi un rifiuto in una ritrasmissione
+      cieca di un ordine.
+    pass_criteria:
+      declared_vs_observed_documented: true
+      orders_lost_or_duplicated_on_throttle: 0
+    evidence: "misura dei limiti + traccia del superamento controllato"
+    kill_criteria: []
+
+  D-SUPPORT:
+    title: "Supportabilità della configurazione"
+    kind: graded
+    verifiable_in: ["DOC", "OPERATOR"]
+    feeds_final_gate: true
+    question: "La configurazione provata è quella che il provider supporta ufficialmente?"
+    procedure: >-
+      Confrontare la configurazione del PoC con quella dichiarata supportata dal
+      provider. Ogni scostamento va nominato come tale, con il canale di supporto
+      che si perde e il rischio che si accetta.
+    pass_criteria:
+      configuration_officially_supported_or_deviation_named: true
+      undocumented_workaround_presented_as_supported: false
+    evidence: "citazione della documentazione del provider + elenco degli scostamenti"
+    kill_criteria: ["KI-HEADLESS"]
+
+  D-TOS:
+    title: "Termini d'uso per l'automazione personale"
+    kind: blocking
+    verifiable_in: ["DOC", "OPERATOR"]
+    feeds_final_gate: true
+    question: "L'uso automatico personale previsto da Alembic è permesso per iscritto?"
+    procedure: >-
+      Individuare la clausola che autorizza (o vieta) un sistema che decide
+      iniziativa, timing, prezzo e quantità con intervento umano limitato.
+      Citazione testuale, non parafrasi. È la dimensione che ha escluso
+      Trading 212 in #359, e va verificata anche sui candidati preferiti.
+    pass_criteria:
+      clause_quoted: true
+      automated_personal_use_permitted: true
+    evidence: "citazione dei termini con data di consultazione"
+    kill_criteria: ["K-TOS"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Kill criteria
+#
+# Uno kill scattato è un FAIL, e nessun'altra evidenza lo compensa. I comuni si
+# applicano a entrambi i candidati; gli altri sono per costruzione specifici,
+# perché i due broker hanno rischi diversi. Un kill di un broker registrato sul
+# report dell'altro è un errore, non un dato.
+# ─────────────────────────────────────────────────────────────────────────────
+kill_criteria:
+  K-DUP:
+    applies_to: ["saxo", "ibkr"]
+    title: "Un ordine duplicato nello scenario di timeout ambiguo"
+    detail: >-
+      Anche una sola occorrenza su 5 prove. Non esiste CONDITIONAL su questo:
+      il duplicato è capitale mosso due volte su una decisione presa una volta.
+
+  K-RECON:
+    applies_to: ["saxo", "ibkr"]
+    title: "Lo stato non è ricostruibile dall'API dopo perdita eventi o restart"
+    detail: "Senza ricostruzione non esiste riconciliazione, e senza riconciliazione il divieto di ritrasmissione cieca non è applicabile."
+
+  K-MAP:
+    applies_to: ["saxo", "ibkr"]
+    title: "Uno slot obbligatorio del paniere non è risolvibile in modo univoco e stabile"
+    detail: >-
+      Include il caso in cui lo strumento è raggiungibile ma solo attraverso una
+      disambiguazione non deterministica. Uno strumento sbagliato è l'errore
+      peggiore possibile (CLAUDE.md § Ticker Resolution).
+
+  K-AUDIT:
+    applies_to: ["saxo", "ibkr"]
+    title: "L'audit trail non basta a spiegare una posizione o un fill"
+    detail: "Un P&L non spiegabile non è misurabile, e il gate #360 si baserebbe su numeri non verificabili."
+
+  K-FAILOPEN:
+    applies_to: ["saxo", "ibkr"]
+    title: "Un fail-open su auth, entitlement, dati stanchi, warning o disclaimer"
+    detail: "Procedere in assenza di conferma è peggio di fermarsi: l'errore diventa invisibile."
+
+  K-TOS:
+    applies_to: ["saxo", "ibkr"]
+    title: "L'uso automatico personale previsto non è permesso per iscritto"
+    detail: "Il criterio che ha escluso Trading 212 vale anche per i candidati preferiti."
+
+  KS-AUTH:
+    applies_to: ["saxo"]
+    title: "Saxo: la catena OAuth/refresh non sopravvive 7 giorni più un downtime forzato"
+    detail: >-
+      Oppure: credenziali LIVE per uso personale non ottenibili da un residente
+      italiano. Il certificate-based login è riservato a Introducing Broker e
+      White Label, quindi la via retail è l'unica in perimetro.
+
+  KS-DISCL:
+    applies_to: ["saxo"]
+    title: "Saxo: un pre-trade disclaimer può bloccare il submit senza segnale rilevabile"
+    detail: >-
+      Un disclaimer che richiede accettazione è un costo operativo accettabile;
+      un disclaimer che ferma l'automazione in silenzio, o che non ha percorso
+      di accettazione programmatico né notificabile, no.
+
+  KS-CAT:
+    applies_to: ["saxo"]
+    title: "Saxo: gli strumenti obbligatori non sono nel catalogo del conto"
+    detail: "Il catalogo restituito dall'API dipende dalle abilitazioni dell'utente, non dal listino pubblicato."
+
+  KS-COST:
+    applies_to: ["saxo"]
+    title: "Saxo: il costo italiano contrattuale non è ottenibile prima del gate"
+    detail: >-
+      Un costo ignoto non è un costo basso. La custodia varia per paese e la
+      pagina globale non è una fonte per un conto italiano.
+
+  KI-REAUTH:
+    applies_to: ["ibkr"]
+    title: "IBKR: la riautenticazione domenicale non ha runbook, o mancarla lascia posizioni non sorvegliate"
+    detail: >-
+      L'intervento manuale in sé è accettato dall'operatore. Il kill scatta se
+      non è delimitato nel tempo, se non è allertato, o se durante la finestra
+      una posizione resta senza sorveglianza né protezione broker-side.
+
+  KI-SESSION:
+    applies_to: ["ibkr"]
+    title: "IBKR: una sessione concorrente sottrae la connessione senza segnale rilevabile"
+    detail: "Un username ha una sola brokerage session: la contesa fra TWS, Portal, Mobile e Web API è un rischio di progetto, non un incidente."
+
+  KI-CONTRACT:
+    applies_to: ["ibkr"]
+    title: "IBKR: la contract qualification resta ambigua su uno slot obbligatorio"
+    detail: "Più conid per lo stesso strumento senza una regola deterministica di scelta (primary exchange, valuta) è ambiguità, non copertura."
+
+  KI-ENTITLE:
+    applies_to: ["ibkr"]
+    title: "IBKR: l'entitlement market data per i mercati del paniere non è ottenibile nel budget dichiarato dall'operatore"
+    detail: >-
+      Il budget è una decisione dell'operatore e non è fissato in questo file.
+      Il kill scatta sul confronto fra preventivo raccolto e budget dichiarato
+      al momento del gate.
+
+  KI-HEADLESS:
+    applies_to: ["ibkr"]
+    title: "IBKR: il PoC passa solo attraverso una configurazione headless non supportata, presentata come supportata"
+    detail: >-
+      Sperimentare un controller di terze parti è legittimo; descriverlo come
+      supportato non lo è. Se il PASS dipende da quel percorso, l'esito massimo
+      è CONDITIONAL con il rischio nominato.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Regola di confronto per un candidato che passa solo parzialmente
+#
+# Nessun punteggio scalare: un numero unico permette di scegliere i pesi dopo
+# aver visto i risultati. L'ordine è lessicografico e congelato qui. Si applica
+# solo fra due CONDITIONAL_PASS: un FAIL non si confronta, e un pareggio pieno
+# non produce un vincitore.
+# ─────────────────────────────────────────────────────────────────────────────
+tie_breakers:
+  - metric: "graded_failed_count"
+    direction: "min"
+    best_possible: 0
+    worst_possible: 99
+    why: "Meno dimensioni pesate fallite è la differenza più diretta fra due candidati che hanno superato tutto il bloccante."
+
+  - metric: "graded_not_tested_count"
+    direction: "min"
+    best_possible: 0
+    worst_possible: 99
+    why: "Un'evidenza non raccolta è un rischio, non un successo (#360). Viene dopo un fallimento misurato, perché è meno informativa."
+
+  - metric: "mandatory_slots_resolved_count"
+    direction: "max"
+    best_possible: 8
+    worst_possible: 0
+    why: "Copertura effettiva del paniere obbligatorio, verificata sul conto e non sul listino."
+
+  - metric: "unattended_days_measured"
+    direction: "max"
+    best_possible: 30
+    worst_possible: 0
+    why: "Giorni consecutivi di sessione misurati, non promessi. Premia la misura, non la dichiarazione."
+
+  - metric: "monthly_cost_usd"
+    direction: "min"
+    best_possible: 0
+    worst_possible: 1000000
+    why: "Ultimo, e solo se calcolato sul contratto italiano vero: il costo è la variabile più facile da rinegoziare e la meno legata alla sicurezza."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Contingenze
+#
+# Nominate perché #359 le ha trovate, non promosse a PoC. `poc_authorized: false`
+# su tutte: la promozione è una decisione del gate #360, con un trigger esplicito
+# per non trasformarle in backlog perpetuo.
+# ─────────────────────────────────────────────────────────────────────────────
+contingencies:
+  tradier:
+    scope: "USA equities/ETF e opzioni"
+    trigger: "Entrambi i globali FAIL e serve un failover USA, oppure serve validare il seam multi-broker a rischio d'integrazione minimo."
+    poc_authorized: false
+
+  tastytrade:
+    scope: "derivati USA (opzioni, futures, FOP)"
+    trigger: "Opzioni o futures diventano priorità prima dell'espansione geografica (oggi non lo sono: vedi S2 in #57)."
+    poc_authorized: false
+
+  tradestation_europe:
+    scope: "USA equities/opzioni/futures con API e SIM di qualità"
+    trigger: "Serve un secondo broker USA ricco di derivati e Tradier non basta. Non risolve Europa/APAC."
+    poc_authorized: false
+
+  directa:
+    scope: "Italia più una selezione UE/USA"
+    trigger: "Entrambi i globali FAIL e l'obiettivo si restringe all'Italia. Richiede abilitazione prima di qualunque discovery: non esiste conto API di prova."
+    poc_authorized: false
+
+  schwab:
+    scope: "prevalentemente USA"
+    trigger: "Solo se compare una sandbox Trader API verificabile e l'eleggibilità italiana è confermata. Oggi discovery risk troppo alto per un primo PoC."
+    poc_authorized: false
+
+excluded:
+  trading212: "I termini API §4.2 vietano l'Algorithmic Trading e gli endpoint ordine non sono idempotenti. Riapribile solo con consenso scritto specifico o termini cambiati."
+  swissquote: "REST e FIX titoli sono riservate a utenti professionali: non è una via retail."
