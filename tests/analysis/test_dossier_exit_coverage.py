@@ -268,3 +268,28 @@ def test_definizione_e_parametri_sono_dichiarati_nel_payload():
     assert "definizione" in payload
     assert payload["aggregato"]["n_posizioni"] == 0
     assert payload["aggregato"]["notional_cieco_usd"] == 0.0
+
+
+def test_ritorno_di_seduta_e_distinto_dal_ritorno_da_ingresso():
+    """Il 2026-08-19 GE ha fatto -5,03% nella seduta ma era +4,25% dall'ingresso: la
+    perdita da tenere sotto osservazione per un'uscita e' la seconda, non la prima.
+    Il dossier riporta entrambe perche' rispondono a due domande diverse."""
+    payload = _build(
+        [_posizione("GE", entry_price=90.0)],
+        barre={"GE": {"close": 94.0, "close_prec": 99.0}},
+    )
+
+    (riga,) = payload["posizioni"]
+    assert riga["ritorno_da_ingresso"] == pytest.approx(0.0444, abs=1e-4)
+    assert riga["ritorno_seduta"] == pytest.approx(-0.0505, abs=1e-4)
+    assert riga["perdita_marcata"] is False
+    assert riga["cieco_lato_uscita"] is False
+
+
+def test_ritorno_di_seduta_none_senza_close_precedente():
+    payload = _build(
+        [_posizione("GE")],
+        barre={"GE": {"close": 94.0}},
+    )
+    (riga,) = payload["posizioni"]
+    assert riga["ritorno_seduta"] is None

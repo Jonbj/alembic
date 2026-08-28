@@ -152,6 +152,17 @@ def build_exit_coverage(
         )
         perdita_marcata = ritorno <= soglia_perdita if ritorno is not None else None
 
+        # Il ritorno di seduta e' una grandezza DIVERSA e non va confusa con la
+        # precedente: il 2026-08-19 GE ha fatto -5,03% nella giornata ma era +4,25%
+        # dall'ingresso. Per decidere un'uscita conta la seconda; la prima e' quella
+        # che i report alpha-miss citano, quindi il dossier riporta entrambe.
+        close_prec = _float(barra.get("close_prec")) if barra else None
+        ritorno_seduta = (
+            close / close_prec - 1.0
+            if close is not None and close_prec not in (None, 0)
+            else None
+        )
+
         righe_ticker = righe_per_seduta.get(ticker) or {}
         righe_giorno = int(righe_ticker.get(data, 0) or 0)
         copertura = copertura_per_ticker.get(ticker) or {}
@@ -197,6 +208,7 @@ def build_exit_coverage(
             "mark_close": close,
             "notional_usd": qty * close if qty is not None and close is not None else None,
             "ritorno_da_ingresso": ritorno,
+            "ritorno_seduta": ritorno_seduta,
             "perdita_marcata": perdita_marcata,
             "righe_news_log_giorno": righe_giorno,
             "articoli_unici_giorno": articoli_unici,
