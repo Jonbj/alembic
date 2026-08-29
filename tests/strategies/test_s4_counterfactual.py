@@ -516,6 +516,23 @@ def test_uno_slot_gia_chiuso_non_e_disponibile_e_non_riceve_sostituti():
     assert record.capital_days == pytest.approx(0.0)
 
 
+def test_i_capitale_giorni_degli_slot_contano_sedute_non_wall_clock():
+    """Uno slot venerdi'→martedi' occupa due sedute, non quattro giorni."""
+    venerdi = datetime(2026, 8, 28, 17, 52, tzinfo=UTC)
+    martedi = datetime(2026, 9, 1, 19, 59, tzinfo=UTC)
+
+    record = build_portfolio_counterfactual(
+        [_slot(freed_at=venerdi, slot_closes_at=martedi)],
+        {},
+        sessions=SESSIONS,
+    )[0]
+
+    assert record.slot_available is True
+    assert record.slot_days == pytest.approx(2.0)
+    assert record.capital_days == pytest.approx(2000.0)
+    assert record.idle_capital_days == pytest.approx(2000.0)
+
+
 def test_un_prezzo_di_uscita_mancante_censura_il_pnl_incrementale():
     record = build_portfolio_counterfactual(
         [_slot()], {"intent-1": [_candidate(exit_price=None)]}
