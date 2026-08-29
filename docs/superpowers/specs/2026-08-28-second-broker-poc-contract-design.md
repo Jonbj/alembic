@@ -253,9 +253,14 @@ visto i risultati. L'ordine è congelato qui e letto dal contratto, non dal codi
 Una metrica di tie-break non misurata vale il **peggio possibile**: non misurare non può essere
 un vantaggio.
 
-**Un pareggio pieno non produce un vincitore.** Se i candidati sono pari su tutti e cinque i
-tie-breaker, l'esito è `NO_DECISION` e la scelta torna all'operatore. Il valutatore non inventa
-un preferito.
+**I tie-breaker si applicano solo fra due `CONDITIONAL_PASS`.** Se entrambi i candidati sono
+`PASS` pieno, l'ordine lessicografico non li tocca: l'esito è `NO_DECISION`. Ordinare due
+promozioni piene sul costo, o su qualunque altra metrica, sarebbe una regola che il contratto
+non autorizza — fra due candidati che hanno superato tutto la scelta è del gate #360.
+
+**Un pareggio pieno non produce un vincitore.** Se due `CONDITIONAL_PASS` sono pari su tutti e
+cinque i tie-breaker, l'esito è `NO_DECISION` e la scelta torna all'operatore. Il valutatore non
+inventa un preferito.
 
 Se nessuno dei due è ammissibile, la raccomandazione è `ALPACA_ONLY`. Il valutatore **non**
 produce mai `NEW CONTINGENCY MAP`: promuovere una contingenza è una decisione dell'operatore
@@ -302,11 +307,12 @@ market data, che è una decisione `OPERATOR`.
 python3 -m pytest tests/brokers/test_poc_contract.py -q
 ```
 
-Attesi 29 test verdi. Non provano che i PoC andranno bene — non ci sono ancora dati: provano
+Attesi 30 test verdi. Non provano che i PoC andranno bene — non ci sono ancora dati: provano
 che il contratto rifiuta i modi tipici di aggiustare un verdetto. I test sono scritti come
 tentativi di aggiustamento: un report con un hash di contratto diverso, una dimensione omessa,
 un fatto `OPERATOR` dichiarato provato in SIM, un paniere incompleto con il mapping dichiarato
-`PASS`, una metrica di tie-break non misurata, un pareggio pieno.
+`PASS`, una metrica di tie-break non misurata, un pareggio pieno, due `PASS` separati solo dal
+costo.
 
 ## 13. Fuori scope
 
