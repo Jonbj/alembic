@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
+from src.strategies.s4.counterfactual import build_portfolio_counterfactual
 from src.strategies.s4.counterfactual_runtime import (
     build_freed_slots,
     build_point_in_time_candidates,
@@ -182,3 +183,41 @@ def test_collisione_s1_e_capitale_non_investibile_restano_reason_distinti():
     assert candidates[0].collides_with_s1 is True
     assert candidates[1].investable is False
     assert candidates[1].investable_reason == "SKIP_MIN_NOTIONAL"
+
+
+def test_un_ordine_gia_inviato_non_scavalca_il_primo_candidato_non_finanziato():
+    [slot] = build_freed_slots(
+        [
+            policy_outcome_from_row(_policy_row("P0")),
+            policy_outcome_from_row(_policy_row("P1")),
+        ],
+        baseline_policy_id="P0",
+        policy_id="P1",
+    )
+    rows = [
+        _intent_row(
+            "META",
+            2,
+            reason_code="SUBMITTED",
+            is_tradable=True,
+        ),
+        _intent_row("NVDA", 6),
+    ]
+    bars = {
+        symbol: [(P0_EXIT, 100.0), (P1_EXIT, 104.0)]
+        for symbol in ("META", "NVDA")
+    }
+
+    candidates = build_point_in_time_candidates([slot], rows, bars)["intent-1"]
+    [record] = build_portfolio_counterfactual(
+        [slot], {"intent-1": candidates}
+    )
+
+    assert candidates[0].symbol == "META"
+    assert candidates[0].investable is False
+    assert candidates[0].investable_reason == "SUBMITTED"
+    assert record.substitute_symbol == "NVDA"
+    assert record.point_in_time_rank == 6
+    assert record.rejected_candidates == (
+        ("META", "CANDIDATE_CAPITAL_NOT_INVESTABLE"),
+    )
