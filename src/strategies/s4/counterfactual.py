@@ -846,6 +846,32 @@ def reconcile_views(
 # ── Report (criterio 6) ────────────────────────────────────────────────────
 
 
+def replacement_records_for_window(
+    comparison: PairedComparison,
+    records: tuple[ReplacementRecord, ...],
+    *,
+    policy_id: str,
+    window_start: date,
+    window_end: date,
+) -> tuple[ReplacementRecord, ...]:
+    """Restringe il dettaglio portfolio alla stessa coorte D0 del paired."""
+    if window_end < window_start:
+        raise ValueError("validation window ends before it starts")
+    cohort_intents = {
+        pair.intent_id
+        for pair in comparison.pairs
+        if pair.policy_id == policy_id
+        and pair.d0 is not None
+        and window_start <= pair.d0 <= window_end
+    }
+    pair_policies = {comparison.baseline_policy_id, policy_id}
+    return tuple(
+        record
+        for record in records
+        if record.intent_id in cohort_intents and record.policy_id in pair_policies
+    )
+
+
 def build_replacement_report(
     comparison: PairedComparison,
     records: tuple[ReplacementRecord, ...],
@@ -877,14 +903,12 @@ def build_replacement_report(
     # mentre uno entrato prima potrebbe rientrare soltanto perche' esce dentro
     # la finestra. La coorte e' gia' congelata dagli intent_id della vista
     # paired, quindi anche la vista portfolio-level usa quelli.
-    pair_policies = {comparison.baseline_policy_id, policy_id}
-    cohort_intents = {
-        pair.intent_id for pair in in_window if pair.policy_id == policy_id
-    }
-    slots = tuple(
-        record
-        for record in records
-        if record.intent_id in cohort_intents and record.policy_id in pair_policies
+    slots = replacement_records_for_window(
+        comparison,
+        records,
+        policy_id=policy_id,
+        window_start=window_start,
+        window_end=window_end,
     )
     reconciliation = reconcile_views(windowed, slots, policy_id=policy_id)
     hierarchy = active_policy_hierarchy(contract_path)
