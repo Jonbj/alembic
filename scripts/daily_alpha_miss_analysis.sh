@@ -127,8 +127,9 @@ tu come facevi prima e segnalalo nel report. Altrimenti LEGGILO e USALO.
 Contiene: rendimenti di tutti i simboli, dispersione cross-sectional, conteggio
 mover, copertura news, candidati miss con la loro evidenza, gli INGRESSI del
 giorno con entry_percentile/mtm_eod/vs_apertura, le CHIUSURE con
-drift_post_uscita, e tre aggregati (per ora d'ingresso, cause di miss cumulate,
-mediane mobili a 20 giorni).
+drift_post_uscita, la COPERTURA LATO USCITA delle posizioni detenute
+(`copertura_uscita`), e tre aggregati (per ora d'ingresso, cause di miss
+cumulate, mediane mobili a 20 giorni).
 
 REGOLA: NON ricalcolare cio' che il dossier contiene gia'. Ogni numero che citi
 deve venire dal dossier, e in caso di discrepanza fra il tuo calcolo e il suo
@@ -190,6 +191,25 @@ categorie, con evidenza a supporto:
 
 Per i titoli CATTURATI, riporta comunque brevemente l'esito (net P&L, exit_reason).
 
+FASE 3b — CECITA' LATO USCITA (posizioni detenute)
+I candidati miss della FASE 3 escludono per costruzione i simboli in portafoglio: li'
+finiscono solo i mover che Alembic NON detiene. Una posizione detenuta a zero righe
+news_log non compare quindi in nessuna riga della FASE 3, anche se l'assenza di notizia
+le ha impedito qualunque segnale di uscita o riduzione.
+
+Leggi `copertura_uscita` nel dossier — NON ricalcolarla. Riporta le righe con
+`cieco_lato_uscita: true`: ticker, `ritorno_da_ingresso`, `sedute_consecutive_senza_righe`
+e `fonti_osservate_finestra`. Attenzione a non confondere le due misure di ritorno:
+`ritorno_da_ingresso` termina al prezzo d'uscita se la posizione e' uscita intraday,
+altrimenti al close; e' la perdita subita mentre era detenuta. `ritorno_seduta` e'
+invece il movimento del titolo fino al close. Non confonderli e non attribuire al book
+movimenti successivi all'uscita.
+
+`fonti_osservate_finestra` vuota significa zero RESA dei provider su quel ticker, non
+fonte non configurata: i connettori per-ticker vivi interrogano l'intera watchlist.
+`cieco_lato_uscita: null` significa dato insufficiente (barra, prezzo d'ingresso,
+prezzo d'uscita o calendario mancanti), mai "no".
+
 FASE 4 — PATTERN
 Osserva se i mover del giorno si raggruppano per settore/tema (es. rotazione da un gruppo verso
 un altro — confronta i migliori vs i peggiori). Non inventare un settore per ogni titolo se non
@@ -203,11 +223,13 @@ Salva un report Markdown in __REPORT_FILE__ usando il Write tool, con queste sez
 2. Tabella completa rendimenti (simbolo, return%, catturato sì/no).
 3. Tabella dei miss classificati (simbolo, return%, categoria, evidenza breve).
 4. Titoli catturati: esito.
-5. Pattern osservato (o "non chiaro").
-6. Se emergono pattern ricorrenti rispetto a giorni precedenti (puoi guardare eventuali
+5. Cecita' lato uscita: le posizioni detenute con `cieco_lato_uscita: true`, o "nessuna".
+   Se il campo e' null su qualche riga, dillo: e' dato mancante, non assenza del fenomeno.
+6. Pattern osservato (o "non chiaro").
+7. Se emergono pattern ricorrenti rispetto a giorni precedenti (puoi guardare eventuali
    docs/ALPHA_MISS_REPORT_*.md già esistenti per confronto, se presenti), segnalali — altrimenti
    non speculare oltre il singolo giorno.
-7. Non proporre fix di codice: se una causa (es. FILTERED) sembra un bug piuttosto che un limite
+8. Non proporre fix di codice: se una causa (es. FILTERED) sembra un bug piuttosto che un limite
    noto, dillo esplicitamente e basta — la decisione se aprire un'issue è dell'operatore.
 
 FASE FINALE — AGGIORNA I DUE LEDGER

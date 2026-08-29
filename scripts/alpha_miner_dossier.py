@@ -50,6 +50,7 @@ from src.analysis.dossier.decision_quality import (
 )
 from src.analysis.dossier.article_coverage import build_article_coverage
 from src.analysis.dossier.article_coverage import canonical_article_id
+from src.analysis.dossier.exit_coverage import build_exit_coverage
 from src.analysis.dossier.event_context import (
     CONTEXT_VERSION,
     SECTOR_ETF_BY_SECTOR,
@@ -70,8 +71,12 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 OUT_DIR = PROJECT_DIR / "docs" / "evidence" / "dossier"
 SOGLIA_MOVER = 0.03
 FINESTRA_MEDIANE = 20  # giorni, per le mediane mobili
+# Sedute su cui si misura lo streak di copertura nulla lato uscita (#324).
+# Dieci sedute bastano a distinguere una giornata muta da un buco strutturale
+# senza far crescere la query oltre un indice su (ticker, fetched_at).
+FINESTRA_SEDUTE_COPERTURA = 10
 INIZIO_OSSERVAZIONE = date(2026, 8, 3)
-DOSSIER_SCHEMA_VERSION = "2.5"
+DOSSIER_SCHEMA_VERSION = "2.6"
 NEW_YORK = ZoneInfo("America/New_York")
 
 # Size plausibile di uno slot S4 per lo stimatore v2 (#280): fixed-slot sizing
@@ -309,6 +314,75 @@ def _regular_session_bounds(giorno: date) -> tuple[datetime, datetime]:
     open_ny = datetime.combine(giorno, time(9, 30), tzinfo=NEW_YORK)
     close_ny = datetime.combine(giorno, time(16, 0), tzinfo=NEW_YORK)
     return open_ny.astimezone(timezone.utc), close_ny.astimezone(timezone.utc)
+
+
+def _sedute_di_borsa(giorno: date, n: int) -> list[str]:
+    """Ultime `n` sedute di borsa che finiscono nel `giorno`, dal calendario Alpaca.
+
+    Serve allo streak di copertura nulla (#324): contare giorni di calendario
+    conterebbe i weekend come sedute mute. `Calendar.date` e' gia' una data di
+    calendario di borsa (New York), non un timestamp da convertire (#372).
+
+    Fallisce APERTO: se il calendario non risponde restituisce la lista vuota, e il
+    modulo puro lascia lo streak a None (UNKNOWN). Un dossier senza streak vale piu'
+    di un cron che si ferma.
+    """
+    try:
+        from alpaca.trading.client import TradingClient
+        from alpaca.trading.requests import GetCalendarRequest
+
+        chiave = os.environ.get("ALPACA_API_KEY")
+        segreto = os.environ.get("ALPACA_SECRET_KEY")
+        if not chiave or not segreto:
+            raise RuntimeError("ALPACA_API_KEY / ALPACA_SECRET_KEY mancanti")
+        # Il calendario di borsa e' identico su paper e live: si segue comunque la
+        # modalita' dichiarata, per non aprire una sessione live da uno strumento
+        # di sola misura.
+        paper = os.environ.get("ALPACA_PAPER_MODE", "true").lower() == "true"
+        client = TradingClient(chiave, segreto, paper=paper)
+        # 3n giorni di calendario coprono n sedute anche con una settimana di feste.
+        righe = client.get_calendar(
+            GetCalendarRequest(start=giorno - timedelta(days=3 * n), end=giorno)
+        )
+        sedute = sorted(
+            riga.date.isoformat() for riga in righe if not isinstance(riga, str)
+        )
+        return sedute[-n:]
+    except Exception as exc:
+        log.warning("Calendario di borsa non disponibile (%s) — streak copertura UNKNOWN", exc)
+        return []
+
+
+def _righe_news_per_seduta(
+    tickers: Sequence[str], sedute: Sequence[str]
+) -> tuple[dict[str, dict[str, int]], dict[str, list[str]]]:
+    """Righe `news_log` per (ticker, seduta) e fonti che hanno prodotto qualcosa.
+
+    `fetched_at` e' l'istante di ingestione, non di pubblicazione: e' la stessa colonna
+    del conteggio giornaliero che alimenta `mercato.watchlist_zero_news`, quindi le due
+    misure restano confrontabili. L'ingestione gira 14:00-21:00 UTC (10:00-17:00 New
+    York), percio' bucket UTC e data di seduta NY coincidono su ogni riga reale;
+    `AT TIME ZONE 'UTC'` lo rende indipendente dal fuso della sessione psql.
+
+    Le fonti servono a distinguere *zero resa del provider* da *fonte non configurata*
+    (#324 §2): i connettori per-ticker vivi interrogano l'INTERA watchlist, quindi una
+    lista vuota qui e' una resa nulla, non un buco di configurazione.
+    """
+    if not tickers or not sedute:
+        return {}, {}
+    lista = ",".join("'" + t.replace("'", "''") + "'" for t in sorted(set(tickers)))
+    righe: dict[str, dict[str, int]] = defaultdict(dict)
+    fonti: dict[str, set[str]] = defaultdict(set)
+    for row in _psql(
+        f"SELECT ticker, (fetched_at AT TIME ZONE 'UTC')::date::text, source, "
+        f"count(*)::text FROM news_log WHERE ticker IN ({lista}) "
+        f"AND fetched_at >= '{sedute[0]}' "
+        f"AND fetched_at < '{sedute[-1]}'::date + 1 GROUP BY 1,2,3;"
+    ):
+        ticker, seduta, fonte, conteggio = row[0], row[1], row[2], int(row[3])
+        righe[ticker][seduta] = righe[ticker].get(seduta, 0) + conteggio
+        fonti[ticker].add(fonte)
+    return dict(righe), {t: sorted(v) for t, v in fonti.items()}
 
 
 def _opening_positions(giorno: date) -> list[dict]:
@@ -1383,6 +1457,27 @@ def costruisci_dossier(
         }
     )
 
+    # --- copertura news lato uscita (#324) --------------------------------
+    # I candidati miss escludono per costruzione i simboli in portafoglio, quindi una
+    # posizione detenuta a zero righe news_log non era contata da nessuna parte. Qui
+    # la stessa assenza viene misurata sul libro, non sui soli mover non detenuti.
+    sedute_copertura = _sedute_di_borsa(giorno, FINESTRA_SEDUTE_COPERTURA)
+    righe_news_finestra, fonti_news_finestra = _righe_news_per_seduta(
+        [posizione["symbol"] for posizione in posizioni_apertura], sedute_copertura
+    )
+    copertura_uscita = build_exit_coverage(
+        posizioni_apertura,
+        data=g,
+        sedute=sedute_copertura,
+        righe_per_seduta=righe_news_finestra,
+        fonti_finestra=fonti_news_finestra,
+        copertura_per_ticker=copertura_articoli.get("per_ticker") or {},
+        segnali_per_ticker={
+            symbol: len(righe) for symbol, righe in segnali.items()
+        },
+        barre=barre,
+    )
+
     # --- aggregazioni ------------------------------------------------------
     # stop_strategy GREZZA, senza COALESCE su S1/S4: la coorte legacy (F-002,
     # stop_strategy NULL) deve restare riconoscibile nel bucket orario, non
@@ -1468,6 +1563,30 @@ def costruisci_dossier(
                     "(score e ritorno); None negli altri casi"
                 ),
             },
+            "copertura_uscita": {
+                "posizioni": "trades vivi all'open RTH (stesse righe di snapshot_apertura)",
+                "righe_news": "news_log.fetched_at bucket UTC, per (ticker, seduta)",
+                "segnali": "sentiment_signals.generated_at nella seduta",
+                "sedute": (
+                    f"Alpaca GetCalendarRequest, ultime {FINESTRA_SEDUTE_COPERTURA} "
+                    "sedute fino al giorno"
+                ),
+                "mark": (
+                    "close daily Alpaca SIP. ritorno_da_ingresso = close/entry_price - 1 "
+                    "(la grandezza che una decisione d'uscita guarda); ritorno_seduta = "
+                    "close/close_prec - 1 (quella citata dai report alpha-miss). Sono due "
+                    "misure diverse e non vanno confuse"
+                ),
+                "cecita": (
+                    "perdita marcata + zero righe + zero segnali + streak >= sedute_minime; "
+                    "None quando barra, prezzo d'ingresso o calendario mancano"
+                ),
+                "notional_cieco_usd": (
+                    "esposizione a rischio, NON un costo: nessun controfattuale dice "
+                    "che un'uscita sarebbe stata migliore"
+                ),
+                "freeze": "misura read-only; nessuna soglia di strategia toccata",
+            },
             "decision_quality": {
                 "snapshot_apertura": "trades vivi all'open RTH + barre Alpaca SIP",
                 "guard_counterfactual": (
@@ -1502,6 +1621,7 @@ def costruisci_dossier(
         "chiusure": chiusure,
         "snapshot_apertura": snapshot_apertura,
         "guard_decisions": guard_decisions,
+        "copertura_uscita": copertura_uscita,
         "decision_quality_assumptions": decision_quality_assumptions,
         "decision_quality": decision_quality,
         "timeline": timeline,
@@ -1512,6 +1632,7 @@ def costruisci_dossier(
             "miss_cumulati": _miss_cumulati(),
             "mediane_mobili_20g": _mediane_mobili(ingressi, chiusure),
             "cause_del_giorno": cause_del_giorno(candidati_classificati),
+            "copertura_uscita": copertura_uscita["aggregato"],
             "guardia_contraddizione": {
                 "giorno": guardia_giorno,
                 "finestra_osservazione": guardia_finestra,
