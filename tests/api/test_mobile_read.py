@@ -679,11 +679,11 @@ class TestMobileRead:
                 """
                 INSERT INTO trades (
                     symbol, entry_order_id, entry_price, entry_time,
-                    entry_notional, score, regime_mult, qty
+                    entry_notional, score, regime_mult, qty, stop_strategy
                 )
                 VALUES (
                     'MOB03POS', 'mob03-fill', 10.0, $1,
-                    100.0, 0.5, 1.0, 10.0
+                    100.0, 0.5, 1.0, 10.0, 'S1'
                 )
                 RETURNING id
                 """,
