@@ -864,12 +864,31 @@ def build_replacement_report(
         for pair in comparison.pairs
         if pair.d0 is not None and window_start <= pair.d0 <= window_end
     )
+    # Anche gli invarianti vanno riletti sulla coorte: un intento challenger
+    # senza baseline e' un trade nato dal cash liberato, ma se il suo D0 cade
+    # fuori dalla finestra appartiene a un altro report, dove ha una coppia e
+    # uno slot. Ereditarlo qui dichiarerebbe `ENTRIES_NOT_FROZEN` — e quindi
+    # non riconciliata — una finestra in cui nessun ingresso e' stato creato,
+    # cioe' esattamente il contrario di cio' che la guardia deve dire.
+    new_trades = sum(
+        1
+        for pair in in_window
+        if "PAIRED_UNSHARED_INTENT" in pair.exclusion_reasons
+    )
     windowed = PairedComparison(
         baseline_policy_id=comparison.baseline_policy_id,
         pairs=in_window,
-        entries_frozen=comparison.entries_frozen,
-        new_trades_created=comparison.new_trades_created,
-        excluded_by_reason=comparison.excluded_by_reason,
+        entries_frozen=new_trades == 0,
+        new_trades_created=new_trades,
+        excluded_by_reason=dict(
+            sorted(
+                Counter(
+                    reason
+                    for pair in in_window
+                    for reason in pair.exclusion_reasons
+                ).items()
+            )
+        ),
     )
     # Stesso perimetro del netto riconciliato: coorte D0 *e* coppia di policy.
     # Filtrare gli slot sulla data di liberazione mescolerebbe due coorti: un
