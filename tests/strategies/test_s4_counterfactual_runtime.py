@@ -210,7 +210,9 @@ def test_un_ordine_gia_inviato_non_scavalca_il_primo_candidato_non_finanziato():
 
     candidates = build_point_in_time_candidates([slot], rows, bars)["intent-1"]
     [record] = build_portfolio_counterfactual(
-        [slot], {"intent-1": candidates}
+        [slot],
+        {"intent-1": candidates},
+        sessions=[date(2026, 8, day) for day in (25, 26, 27)],
     )
 
     assert candidates[0].symbol == "META"
