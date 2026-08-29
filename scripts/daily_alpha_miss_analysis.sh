@@ -300,26 +300,12 @@ B) Aggiorna docs/evidence/findings.json per OGNI voce della tua sezione di segna
    market_daily.jsonl. Diventa un finding solo un'affermazione strutturale, es. "39 simboli su 96
    non hanno copertura news in un giorno tipico".
 
-C) Committa i ledger e il report SOLO SE il branch corrente e' main. Controlla PRIMA:
-
-     git rev-parse --abbrev-ref HEAD
-
-   - Se stampa "main": committa.
-       git add docs/evidence/findings.json docs/evidence/market_daily.jsonl "__REPORT_FILE__"
-       git commit -m "evidence: ledger __DATE_TARGET__"
-       git push origin main
-     Il PUSH e' obbligatorio quanto il commit: senza, il ledger vive solo su questa
-     macchina e un cambio di sessione o un guasto lo perde. Se il push fallisce (rete,
-     divergenza col remoto) NON forzarlo: lascia il commit locale e segnalalo a stdout.
-   - Se stampa QUALSIASI ALTRA COSA: NON committare. I file restano scritti sul disco (non
-     annullare le modifiche) e stampi su stdout, come ultima riga:
-       ATTENZIONE: ledger scritto ma NON committato — branch corrente <nome>, atteso main.
-
-   Motivo: questo cron gira nella directory principale del repo, che puo' trovarsi sul branch di
-   lavoro di un altro agente. Un commit del ledger su un branch casuale lo disperderebbe e
-   spezzerebbe la cronologia git, che e' l'audit del ledger stesso.
-
-   Se non c'e' nulla da committare, non forzare il commit.
+C) NON committare e NON pushare nulla: limitati a scrivere i file su disco.
+   Al commit ci pensa lo script chiamante, dopo la sessione, con
+   scripts/commit_evidence_ledger.sh: committa i ledger e il report insieme su main
+   da una worktree dedicata, quindi non importa su quale branch si trovi questa
+   directory di lavoro (di solito e' quella di un altro agente). Un tuo commit qui
+   finirebbe sul branch sbagliato e disperderebbe il ledger.
 
 D) Nella sezione di segnalazioni del report, ogni voce deve riportare il suo id fra parentesi
    quadre a inizio riga, es. "[F-004] Sembra un difetto — ...".
@@ -339,6 +325,16 @@ PROMPT
 # sessione li interpreta invece di ri-derivarli. Fallisce in modo morbido: se il
 # dossier non si genera la sessione lavora come prima, calcolandosi i numeri da
 # se'. Meglio un report senza dossier che nessun report.
+# Prima di leggere qualsiasi cosa, riallinea i ledger a main (#336): questa
+# working tree e' condivisa e un `git checkout` altrui riporta findings.json e
+# market_daily.jsonl alla versione del branch di turno. Il dossier ne ricava le
+# mediane a 20 giorni e lo scoreboard i giorni osservati, quindi una copia
+# monca falsa le misure prima ancora che la sessione parta. E' un'unione, non
+# una sostituzione, e non fallisce mai: al massimo si lavora sulla copia
+# vecchia, come oggi.
+"$PROJECT_DIR/scripts/refresh_evidence_ledger.sh" \
+    docs/evidence/findings.json docs/evidence/market_daily.jsonl || true
+
 DOSSIER_FILE="$PROJECT_DIR/docs/evidence/dossier/${DATE_TARGET}.json"
 if uv run python "$PROJECT_DIR/scripts/alpha_miner_dossier.py" "$DATE_TARGET" >> "$LOG_FILE" 2>&1; then
     echo "Dossier generato: $DOSSIER_FILE"
@@ -384,9 +380,6 @@ else
     printf '%s\n' "$ECON_OUTPUT" | tail -c 1500
 fi
 
-echo ""
-echo "Completed: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-
 HEADER="🔎 <b>Alpha-miss Alembic — ${DATE_TARGET}</b>"
 SUMMARY_TEXT="$(echo "$ANALYSIS_OUTPUT" | head -c 3800)"
 tg_send "${HEADER}
@@ -398,3 +391,48 @@ if [[ -f "$REPORT_FILE" ]]; then
 else
     tg_send "⚠️ Report file non trovato: <code>${REPORT_FILE}</code> — controlla il log."
 fi
+
+# Commit deterministico del ledger (#336). La sessione scrive soltanto i file:
+# il commit lo fa qui una worktree dedicata appuntata su main, cosi' il branch
+# su cui e' parcheggiata questa directory di lavoro non conta piu' nulla. Il
+# risultato e' esplicito su Telegram e nell'ultima riga del log, perche' finora
+# un mancato commit era visibile solo rileggendo il log a mano.
+COMMIT_PATHS=(
+    docs/evidence/findings.json
+    docs/evidence/market_daily.jsonl
+    docs/evidence/economic_pnl.json
+    "$REPORT_FILE"
+)
+# Il dossier e' un output di questo stesso run: senza questa riga resta su disco
+# (gli ultimi finiti su main erano stati committati a mano).
+if [[ -f "$DOSSIER_FILE" ]]; then
+    COMMIT_PATHS+=("$DOSSIER_FILE")
+fi
+set +e
+GIT_OUTPUT=$("$PROJECT_DIR/scripts/commit_evidence_ledger.sh" \
+    --message "evidence: ledger ${DATE_TARGET}" "${COMMIT_PATHS[@]}" 2>&1)
+set -e
+printf '%s\n' "$GIT_OUTPUT"
+GIT_STATUS=$(printf '%s\n' "$GIT_OUTPUT" | sed -n 's/^GIT_STATUS=//p' | tail -1)
+GIT_STATUS="${GIT_STATUS:-not_committed}"
+
+case "$GIT_STATUS" in
+    pushed)
+        tg_send "✅ Ledger e report su <code>main</code> (GIT_STATUS=pushed)."
+        ;;
+    nothing_to_commit)
+        tg_send "ℹ️ Nessuna modifica al ledger da committare (GIT_STATUS=nothing_to_commit)."
+        ;;
+    *)
+        tg_send "⚠️ Ledger ${DATE_TARGET} NON arrivato su <code>main</code> (GIT_STATUS=${GIT_STATUS}) — serve un intervento manuale, vedi <code>${LOG_FILE}</code>."
+        ;;
+esac
+
+echo ""
+echo "Completed: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+# Ultima riga del log, leggibile a macchina dalla review settimanale.
+echo "GIT_STATUS=${GIT_STATUS}"
+case "$GIT_STATUS" in
+    pushed|nothing_to_commit) exit 0 ;;
+    *) exit 1 ;;
+esac

@@ -185,9 +185,30 @@ Le due regole che tengono in piedi l'impianto, scritte nei prompt dei cron:
 2. **Nel dubbio, aggancia.** Creare un id nuovo va giustificato: un'evidenza spezzata in più id
    ha ricorrenza 1 ciascuno e sparisce sotto tutte le soglie.
 
-**I cron committano solo se `HEAD` è `main`.** Girano nella directory principale del repo, che può
-trovarsi sul branch di lavoro di un altro agente: in quel caso scrivono i file e stampano un avviso
-invece di disperdere il ledger su un branch casuale.
+**Il commit non dipende più dal branch della directory di lavoro (cron alpha-miss).** I cron girano
+nella directory principale del repo, che è abitualmente parcheggiata sul branch di un altro agente:
+la vecchia guardia "committa solo se `HEAD` è `main`" era corretta ma si limitava a rifiutare, e nella
+settimana 2026-34 due run su cinque non hanno committato nulla (#336). Ora `daily_alpha_miss_analysis.sh`
+delega a `scripts/commit_evidence_ledger.sh`, che committa da una worktree dedicata appuntata su
+`origin/main` (`.worktrees/evidence-cron`, ricreata da sola se manca), risincronizza e riprova una volta
+sul push rifiutato, e non tocca mai la directory principale.
+
+La stessa directory condivisa rende i ledger su disco vecchi al primo `git checkout` altrui, e il
+dossier (mediane a 20 giorni) e lo scoreboard economico (giorni osservati) li leggono da lì. Perciò il
+cron chiama `scripts/refresh_evidence_ledger.sh` **prima** di generare il dossier: riallinea
+`findings.json` e `market_daily.jsonl` a `origin/main` per **unione** — quello che è su disco e non
+ancora su `main` resta — ed è fail-open, se non riesce lo dice e l'analisi prosegue sulla copia
+vecchia. In fase di commit i due ledger sono fusi sopra `main` allo stesso modo
+(`merge_evidence_findings.py` per occorrenza, `merge_evidence_jsonl.py` per giorno): lì invece è
+fail-closed, un conflitto annulla il commit invece di scegliere una versione.
+
+L'esito è esplicito: l'**ultima riga del log** è `GIT_STATUS=pushed|committed_not_pushed|not_committed|nothing_to_commit`,
+lo stesso valore arriva su Telegram, e i path non ancora finiti su `main` restano in
+`logs/.evidence_cron_pending` per essere ritentati al giro dopo. Per contare i fallimenti di una
+settimana: `grep -h '^GIT_STATUS=' logs/alpha_miss_analysis_*.log`.
+
+`daily_analysis.sh` (forense) usa ancora la guardia vecchia: scrive i file e stampa un avviso se non è
+su `main`.
 
 ### Scadenze armate (`scripts/deadline_reminders.conf`)
 
