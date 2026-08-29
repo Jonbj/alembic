@@ -191,6 +191,33 @@ def test_i_candidati_usano_solo_l_ultimo_universo_gia_osservato_e_barre_nella_fi
     assert candidates[0].exit_price == pytest.approx(104.0)
 
 
+def test_una_sola_barra_non_inventa_anche_il_prezzo_di_uscita():
+    [slot] = build_freed_slots(
+        [
+            policy_outcome_from_row(_policy_row("P0")),
+            policy_outcome_from_row(_policy_row("P1")),
+        ],
+        baseline_policy_id="P0",
+        policy_id="P1",
+    )
+
+    candidates = build_point_in_time_candidates(
+        [slot],
+        [_intent_row("NVDA", 6)],
+        {"NVDA": [(P0_EXIT + timedelta(minutes=1), 100.0)]},
+    )["intent-1"]
+    [record] = build_portfolio_counterfactual(
+        [slot], {"intent-1": candidates}
+    )
+
+    assert candidates[0].entry_price == pytest.approx(100.0)
+    assert candidates[0].exit_price is None
+    assert record.substitute_symbol is None
+    assert record.rejected_candidates == (
+        ("NVDA", "CANDIDATE_EXIT_PRICE_MISSING"),
+    )
+
+
 def test_collisione_s1_e_capitale_non_investibile_restano_reason_distinti():
     [slot] = build_freed_slots(
         [
