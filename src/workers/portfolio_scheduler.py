@@ -1965,6 +1965,13 @@ def _persist_trade_fills(
                     if sub["order_id"] not in written_buy_order_ids:
                         # Freeze stop metadata at entry for the legacy batch path too.
                         _frozen_stop_legacy: "FrozenStop | None" = None
+                        # L'attribuzione della sleeve sta FUORI dal ramo del freeze:
+                        # e' il punto dell'issue #325. Dentro, con stop_policy None,
+                        # _strategy_l resterebbe non associato al primo giro (riga
+                        # scartata dal try esterno) o conserverebbe il valore del
+                        # simbolo precedente ai giri successivi — la contaminazione
+                        # F-002 che questa correzione esiste per chiudere.
+                        _strategy_l = _resolve_buy_origin_strategy(sym, sym_strats or {}, dec)
                         if stop_policy is not None:
                             _raw_px_l = market.prices.get(sym) if market and getattr(market, "prices", None) else None
                             _entry_px_l = float(_raw_px_l) if isinstance(_raw_px_l, (int, float)) and not isinstance(_raw_px_l, bool) else None
@@ -1972,7 +1979,6 @@ def _persist_trade_fills(
                                 _entry_px_l = sub["notional"] / sub["qty"]
                             if _entry_px_l is None:
                                 _entry_px_l = float(sub["notional"]) if sub.get("notional") else 0.0
-                            _strategy_l = _resolve_buy_origin_strategy(sym, sym_strats or {}, dec)
                             _frozen_stop_legacy = stop_policy.freeze(
                                 sym, _strategy_l, float(_entry_px_l), tick_time
                             )
