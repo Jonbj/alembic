@@ -24,6 +24,10 @@ from src.strategies.s4.counterfactual_runtime import (
     build_point_in_time_candidates,
     policy_outcome_from_row,
 )
+from src.strategies.s4.evaluator_bridge import (
+    load_evaluation_settings,
+    run_evaluation,
+)
 from src.strategies.s4.p0_baseline import VersionedTradeCostModel
 
 
@@ -148,6 +152,13 @@ def _empty_report(start: date, end: date, policy_id: str) -> dict[str, object]:
         window_end=end,
     )
     payload["paired_records"] = []
+    payload["evaluation"] = run_evaluation(
+        (),
+        policy_id=policy_id,
+        mde_time_bps=load_evaluation_settings().mde_time_bps,
+        scheme=load_evaluation_settings().scheme,
+        n_cluster=load_evaluation_settings().n_cluster,
+    )
     payload["replacement_records"] = []
     return payload
 
@@ -236,6 +247,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         and args.start <= pair.d0 <= args.end
     ]
     payload["replacement_records"] = [asdict(record) for record in records]
+    # Il valutatore confirmatory (#299) legge le stesse coppie del blocco
+    # `paired`: una sola sorgente, cosi' il verdetto non puo' divergere dalla
+    # misura pubblicata sopra.
+    settings = load_evaluation_settings()
+    payload["evaluation"] = run_evaluation(
+        comparison.pairs,
+        policy_id=policy_id,
+        mde_time_bps=settings.mde_time_bps,
+        scheme=settings.scheme,
+        n_cluster=settings.n_cluster,
+        mde_counter_bps=settings.mde_counter_bps,
+    )
     print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
 
     # Il criterio e' `comparable`, non `total`: riconciliare zero con zero
