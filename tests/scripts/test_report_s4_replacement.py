@@ -201,6 +201,33 @@ def test_il_report_pubblica_il_verdetto_del_valutatore(monkeypatch, capsys):
     assert evaluation["promoted_policy_id"] is None
 
 
+def test_il_dettaglio_replacement_usa_la_stessa_coorte_d0_del_riepilogo(
+    monkeypatch, capsys
+):
+    rows = _policy_rows()
+    for row in _policy_rows():
+        rows.append({**row, "intent_id": "intent-senza-d0", "d0": None})
+
+    monkeypatch.setattr(report_script, "_fetch_policy_rows", lambda start, end: rows)
+    monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
+    monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_session_dates",
+        lambda start, end: [date(2026, 8, d) for d in (25, 26, 27)],
+    )
+
+    exit_code = report_script.main(["--start", "2026-08-25", "--end", "2026-08-27"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["paired"]["total"] == 1
+    assert payload["slots"]["total"] == 1
+    assert [row["intent_id"] for row in payload["replacement_records"]] == [
+        "intent-1"
+    ]
+
+
 def test_anche_una_finestra_vuota_espone_il_blocco_di_valutazione(monkeypatch, capsys):
     """Una chiave che appare solo a volte costringe il consumatore a indovinare."""
     monkeypatch.setattr(report_script, "_fetch_policy_rows", lambda start, end: [])
