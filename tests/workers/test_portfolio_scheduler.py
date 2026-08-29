@@ -2084,6 +2084,57 @@ def test_persist_trade_fills_legacy_buy_path_uses_sym_strats_for_origin_strategy
     assert frozen_stop.strategy == "S4"
 
 
+def test_persist_trade_fills_attributes_the_sleeve_without_a_stop_policy():
+    """#325: l'attribuzione non deve dipendere dal freeze dello stop.
+
+    Con `stop_policy=None` (costruzione della StopPolicy fallita a monte) il
+    ramo del freeze non viene eseguito. Se l'attribuzione vivesse li' dentro,
+    il primo ordine perderebbe la riga per NameError e i successivi
+    erediterebbero la sleeve del simbolo precedente: due varianti della
+    contaminazione F-002 che il vincolo NOT NULL della migration 056
+    trasformerebbe in un fallimento di scrittura.
+    """
+    from src.workers.portfolio_scheduler import _persist_trade_fills
+
+    pg = MagicMock()
+    pg.open_trade.return_value = None
+
+    submitted = [
+        {"symbol": "DB", "side": "buy", "order_id": "ord-db",
+         "notional": 6181.23, "qty": 175.7, "reason": "portfolio_buy"},
+        {"symbol": "SPY", "side": "buy", "order_id": "ord-spy",
+         "notional": 1000.0, "qty": 2.0, "reason": "portfolio_buy"},
+    ]
+    market = MagicMock()
+    market.prices = {"DB": 35.18, "SPY": 500.0}
+
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=pg), \
+         patch("src.workers.portfolio_scheduler._portfolio_postmortem"):
+        failures = _persist_trade_fills(
+            submitted,
+            open_trades=[],
+            symbol_decisions={"DB": {"decision_id": "dec-db"},
+                              "SPY": {"decision_id": "dec-spy"}},
+            written_buy_order_ids=set(),
+            stop_policy=None,
+            market=market,
+            alpaca_entry_prices={},
+            s4_signals={},
+            regime_mult=1.0,
+            tick_time=datetime(2026, 7, 17, 18, 52, tzinfo=timezone.utc),
+            sym_strats={"DB": ["S4"], "SPY": ["S1"]},
+        )
+
+    assert not failures
+    per_simbolo = {
+        call.kwargs["symbol"]: call.kwargs["strategy"]
+        for call in pg.open_trade.call_args_list
+    }
+    assert per_simbolo == {"DB": "S4", "SPY": "S1"}
+    assert all(call.kwargs["frozen_stop"] is None
+               for call in pg.open_trade.call_args_list)
+
+
 # ── #62/#63: broker-side protective stop sync for fractional positions ──────
 
 
