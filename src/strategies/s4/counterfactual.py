@@ -871,15 +871,20 @@ def build_replacement_report(
         new_trades_created=comparison.new_trades_created,
         excluded_by_reason=comparison.excluded_by_reason,
     )
-    # Stesso perimetro del netto riconciliato: finestra *e* coppia di policy.
-    # Uno slot liberato da una policy fuori dal confronto non descrive questo
-    # report, e contarlo qui lo renderebbe incoerente col blocco `reconciliation`.
+    # Stesso perimetro del netto riconciliato: coorte D0 *e* coppia di policy.
+    # Filtrare gli slot sulla data di liberazione mescolerebbe due coorti: un
+    # intento entrato a fine finestra perderebbe l'opportunity cost D+1/D+2,
+    # mentre uno entrato prima potrebbe rientrare soltanto perche' esce dentro
+    # la finestra. La coorte e' gia' congelata dagli intent_id della vista
+    # paired, quindi anche la vista portfolio-level usa quelli.
     pair_policies = {comparison.baseline_policy_id, policy_id}
+    cohort_intents = {
+        pair.intent_id for pair in in_window if pair.policy_id == policy_id
+    }
     slots = tuple(
         record
         for record in records
-        if window_start <= record.freed_at.date() <= window_end
-        and record.policy_id in pair_policies
+        if record.intent_id in cohort_intents and record.policy_id in pair_policies
     )
     reconciliation = reconcile_views(windowed, slots, policy_id=policy_id)
     hierarchy = active_policy_hierarchy(contract_path)

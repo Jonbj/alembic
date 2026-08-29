@@ -820,6 +820,67 @@ def test_il_report_filtra_la_finestra_di_osservazione():
     assert report["paired"]["comparable"] == 0
 
 
+def test_il_report_applica_agli_slot_la_stessa_coorte_d0_delle_coppie():
+    """La data di uscita non deve cambiare la coorte del controfattuale."""
+    d0 = date(2026, 8, 31)
+    freed_at = datetime(2026, 9, 1, 17, 52, tzinfo=UTC)
+    comparison = _paired(
+        [_outcome("P0", d0=d0)],
+        [_outcome("P1", d0=d0, net_pnl=20.0)],
+    )
+    records = build_portfolio_counterfactual(
+        [
+            _slot(
+                freed_at=freed_at,
+                slot_closes_at=freed_at + timedelta(days=1),
+            )
+        ],
+        {
+            "intent-1": [
+                _candidate(
+                    observed_at=freed_at - timedelta(minutes=1),
+                    universe_as_of=freed_at - timedelta(minutes=1),
+                )
+            ]
+        },
+    )
+
+    report = build_replacement_report(
+        comparison,
+        records,
+        policy_id="P1",
+        window_start=date(2026, 8, 1),
+        window_end=date(2026, 8, 31),
+    )
+
+    assert report["paired"]["comparable"] == 1
+    assert report["slots"]["total"] == 1
+    assert report["slots"]["substitutes_selected"] == 1
+
+
+def test_il_report_esclude_slot_di_una_coorte_d0_esterna_alla_finestra():
+    d0 = date(2026, 7, 31)
+    comparison = _paired(
+        [_outcome("P0", d0=d0)],
+        [_outcome("P1", d0=d0, net_pnl=20.0)],
+    )
+    records = build_portfolio_counterfactual(
+        [_slot(freed_at=datetime(2026, 8, 1, 17, 52, tzinfo=UTC))],
+        {"intent-1": [_candidate()]},
+    )
+
+    report = build_replacement_report(
+        comparison,
+        records,
+        policy_id="P1",
+        window_start=date(2026, 8, 1),
+        window_end=date(2026, 8, 31),
+    )
+
+    assert report["paired"]["comparable"] == 0
+    assert report["slots"]["total"] == 0
+
+
 def test_il_report_rifiuta_una_finestra_invertita():
     with pytest.raises(ValueError, match="window ends before it starts"):
         build_replacement_report(
