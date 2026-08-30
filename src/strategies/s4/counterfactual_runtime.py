@@ -121,6 +121,11 @@ def _s1_collision(row: Mapping[str, Any]) -> bool:
     return bool(state.get("held_by_s1") or state.get("targeted"))
 
 
+def _s1_state_missing(row: Mapping[str, Any]) -> bool:
+    state = dict(row.get("s1_state") or {})
+    return state.get("status") == "missing"
+
+
 def _prices_in_window(
     bars: Sequence[tuple[datetime, float]],
     start: datetime,
@@ -202,6 +207,7 @@ def build_point_in_time_candidates(
                     investable_reason=(
                         None if investable else str(row.get("reason_code") or "UNKNOWN")
                     ),
+                    s1_state_missing=_s1_state_missing(row),
                 )
             )
         result[slot.intent_id] = candidates

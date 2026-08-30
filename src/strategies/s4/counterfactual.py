@@ -522,6 +522,7 @@ class SubstituteCandidate:
     investable: bool
     collides_with_s1: bool
     investable_reason: str | None = None
+    s1_state_missing: bool = False
 
 
 @dataclass(frozen=True)
@@ -577,6 +578,8 @@ def _candidate_rejection(
         return "CANDIDATE_UNIVERSE_NOT_POINT_IN_TIME"
     if candidate.rank is None:
         return "CANDIDATE_RANK_MISSING"
+    if candidate.s1_state_missing:
+        return "CANDIDATE_S1_STATE_MISSING"
     if candidate.collides_with_s1:
         return "CANDIDATE_S1_COLLISION"
     if not candidate.investable:
