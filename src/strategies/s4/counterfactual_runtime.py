@@ -53,6 +53,16 @@ def policy_outcome_from_row(row: Mapping[str, Any]) -> PolicyOutcome:
             None if row.get("net_pnl") is None else float(row["net_pnl"])
         ),
         comparable=bool(row.get("comparable")),
+        entry_cost_usd=(
+            None
+            if row.get("entry_cost_usd") is None
+            else float(row["entry_cost_usd"])
+        ),
+        cost_model_version=(
+            None
+            if row.get("cost_model_version") is None
+            else str(row["cost_model_version"])
+        ),
     )
 
 

@@ -14,9 +14,9 @@ firmato il 2026-08-22) e da `docs/s4-exit-research-2026-08-14/consolidato_exit.m
 §5 e §7.2. Il modulo e' puro: non conosce broker, DB, ne' universo live, e non
 tocca alcuna taratura.
 
-Invariante di misura: il confronto paired **verifica** che ingressi, fill e
-notional siano condivisi, invece di assumerlo. Una policy che li cambia viene
-esclusa con un reason code, non misurata male.
+Invariante di misura: il confronto paired **verifica** che ingressi, fill,
+notional e costi d'ingresso siano condivisi, invece di assumerlo. Una policy
+che li cambia viene esclusa con un reason code, non misurata male.
 """
 
 from __future__ import annotations
@@ -193,6 +193,8 @@ class PolicyOutcome:
     virtual_exit_quantity: float
     net_pnl: float | None
     comparable: bool
+    entry_cost_usd: float | None = None
+    cost_model_version: str | None = None
 
 
 def outcome_from_p0_event(event: P0ReplayEvent) -> PolicyOutcome:
@@ -214,6 +216,12 @@ def outcome_from_p0_event(event: P0ReplayEvent) -> PolicyOutcome:
         virtual_exit_quantity=float(event.virtual_exit_quantity),
         net_pnl=None if event.net_pnl is None else float(event.net_pnl),
         comparable=bool(event.comparable),
+        entry_cost_usd=(
+            None
+            if event.entry_cost_usd is None
+            else float(event.entry_cost_usd)
+        ),
+        cost_model_version=event.cost_model_version,
     )
 
 
@@ -414,6 +422,17 @@ def build_paired_comparison(
             > _NOTIONAL_TOLERANCE
         ):
             reasons.append("PAIRED_NOTIONAL_MISMATCH")
+        if base.entry_cost_usd is None or challenger.entry_cost_usd is None:
+            reasons.append("PAIRED_ENTRY_COST_MISSING")
+        elif (
+            abs(base.entry_cost_usd - challenger.entry_cost_usd)
+            > _USD_TOLERANCE
+        ):
+            reasons.append("PAIRED_ENTRY_COST_MISMATCH")
+        if not base.cost_model_version or not challenger.cost_model_version:
+            reasons.append("PAIRED_COST_MODEL_MISSING")
+        elif base.cost_model_version != challenger.cost_model_version:
+            reasons.append("PAIRED_COST_MODEL_MISMATCH")
         if base.initial_notional <= 0:
             reasons.append("PAIRED_NOTIONAL_NOT_POSITIVE")
         if not base.comparable:
