@@ -756,14 +756,14 @@ def build_portfolio_counterfactual(
             }
             if not contested:
                 break
-            for index, candidate in wants.items():
-                if candidate is None:
+            for index, wanted in wants.items():
+                if wanted is None:
                     continue
-                if (slots[index].policy_id, candidate.symbol) not in contested:
+                if (slots[index].policy_id, wanted.symbol) not in contested:
                     continue
-                eligible_by_slot[index].remove(candidate)
+                eligible_by_slot[index].remove(wanted)
                 rejected_by_slot[index].append(
-                    (candidate.symbol, "CANDIDATE_CONTENDED_BY_SLOT")
+                    (wanted.symbol, "CANDIDATE_CONTENDED_BY_SLOT")
                 )
         for index in group:
             chosen, reason, outranked = _choose_substitute(eligible_by_slot[index])
