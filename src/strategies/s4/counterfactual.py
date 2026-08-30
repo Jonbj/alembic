@@ -53,6 +53,12 @@ EXIT_FAMILY_FRESHNESS = "freshness_or_silence"
 EXIT_FAMILY_OPEN = "not_exited"
 EXIT_FAMILY_UNCLASSIFIED = "unclassified"
 
+# Stati in cui la policy ha davvero lasciato la posizione. Fuori da questi
+# `exit_at` porta l'ultimo trigger osservato — un'osservazione, non un'uscita —
+# e va trattato come tale. `TRIGGERED` e `CENSORED` restano fuori: la prima non
+# ha ancora un prezzo eseguibile, la seconda non e' ricostruibile.
+TERMINAL_STATUSES = frozenset({"CLOSED", "RISK_EXITED"})
+
 # Reason code emesso da questo modulo quando il controfattuale attribuisce
 # l'uscita alla riallocazione di uno slot. Non riusa nessun codice P0/P1/P2:
 # l'attribuzione replacement e' portfolio-level, non trade-level.
@@ -147,6 +153,25 @@ def _capital_days(
     if elapsed is None:
         return None
     return notional * elapsed
+
+
+def _outcome_capital_days(
+    outcome: PolicyOutcome, sessions: tuple[date, ...] | None
+) -> float | None:
+    """Capitale-giorni di un intento sotto una policy, solo se e' davvero uscita.
+
+    Una policy ancora aperta non ha occupato zero sedute: non lo sappiamo
+    ancora. Il ledger le assegna comunque un `exit_at` — l'ultimo trigger
+    osservato — e prenderlo per un'uscita pubblicherebbe uno zero proprio sulla
+    policy che sta occupando il capitale piu' a lungo, invertendo il confronto
+    di occupazione del criterio 3. La stessa nozione di uscita che
+    `build_freed_slots` usa per aprire uno slot vale qui per misurarlo.
+    """
+    if outcome.status not in TERMINAL_STATUSES:
+        return None
+    return _capital_days(
+        outcome.initial_notional, outcome.d0, outcome.exit_at, sessions
+    )
 
 
 # ── Esito per-policy: la forma che P0 in main soddisfa gia' ─────────────────
@@ -359,11 +384,8 @@ def build_paired_comparison(
                         challenger.exit_reason_code
                     ),
                     baseline_capital_days=None,
-                    challenger_capital_days=_capital_days(
-                        challenger.initial_notional,
-                        challenger.d0,
-                        challenger.exit_at,
-                        calendar,
+                    challenger_capital_days=_outcome_capital_days(
+                        challenger, calendar
                     ),
                     comparable=False,
                     exclusion_reasons=tuple(reasons),
@@ -416,14 +438,9 @@ def build_paired_comparison(
                 challenger_exit_family=classify_exit_reason(
                     challenger.exit_reason_code
                 ),
-                baseline_capital_days=_capital_days(
-                    base.initial_notional, base.d0, base.exit_at, calendar
-                ),
-                challenger_capital_days=_capital_days(
-                    challenger.initial_notional,
-                    challenger.d0,
-                    challenger.exit_at,
-                    calendar,
+                baseline_capital_days=_outcome_capital_days(base, calendar),
+                challenger_capital_days=_outcome_capital_days(
+                    challenger, calendar
                 ),
                 comparable=comparable,
                 exclusion_reasons=tuple(reasons),
@@ -455,9 +472,7 @@ def build_paired_comparison(
                     delta_bps=None,
                     baseline_exit_family=classify_exit_reason(base.exit_reason_code),
                     challenger_exit_family=None,
-                    baseline_capital_days=_capital_days(
-                        base.initial_notional, base.d0, base.exit_at, calendar
-                    ),
+                    baseline_capital_days=_outcome_capital_days(base, calendar),
                     challenger_capital_days=None,
                     comparable=False,
                     exclusion_reasons=("PAIRED_CHALLENGER_MISSING",),

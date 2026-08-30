@@ -13,12 +13,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.strategies.s4.counterfactual import (
+    TERMINAL_STATUSES,
     FreedSlot,
     PolicyOutcome,
     SubstituteCandidate,
 )
-
-_TERMINAL_STATUSES = frozenset({"CLOSED", "RISK_EXITED"})
 
 
 def _utc(value: datetime) -> datetime:
@@ -82,8 +81,8 @@ def build_freed_slots(
         if baseline is None or challenger is None:
             continue
         if (
-            baseline.status not in _TERMINAL_STATUSES
-            or challenger.status not in _TERMINAL_STATUSES
+            baseline.status not in TERMINAL_STATUSES
+            or challenger.status not in TERMINAL_STATUSES
             or baseline.exit_at is None
             or challenger.exit_at is None
             or baseline.exit_at == challenger.exit_at
