@@ -10,7 +10,8 @@ Uso:
         [--gia-notificate RI_STIMA_BLINDED,...]
 
 Stampa un JSON su stdout. Exit 0 se nessuna milestone e' scattata, 10 se una
-e' scattata (cosi' il chiamante non deve interpretare il testo).
+e' scattata, 11 se il report a monte non riconcilia (cosi' il chiamante non
+deve interpretare il testo).
 """
 
 from __future__ import annotations
@@ -24,6 +25,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from scripts.report_s4_replacement import (
+    EXIT_NO_COMPARABLE_PAIRS,
+    EXIT_NOT_RECONCILED,
+    EXIT_RECONCILED,
+)
 from src.strategies.s4.evaluator_bridge import load_evaluation_settings
 from src.strategies.s4.paired_evaluator import derive_n_cluster
 from src.strategies.s4.trial_milestones import (
@@ -33,10 +39,23 @@ from src.strategies.s4.trial_milestones import (
 )
 
 USCITA_MILESTONE = 10
+USCITA_NON_RICONCILIATO = 11
+
+# I tre esiti in cui il report ha misurato la finestra e stampato il payload.
+# Solo `EXIT_RECONCILED` e' un successo, ma nessuno dei tre e' un guasto: una
+# finestra senza coppie misurabili e' lo stato normale della raccolta, ed e'
+# proprio quello che le milestone devono poter sorvegliare.
+_CODICI_CON_REPORT = frozenset(
+    {EXIT_RECONCILED, EXIT_NOT_RECONCILED, EXIT_NO_COMPARABLE_PAIRS}
+)
 
 
-def _report(start: str, end: str) -> dict:
-    """Il report di #298, eseguito cosi' com'e' per non duplicarne le query."""
+def _report(start: str, end: str) -> tuple[dict, int]:
+    """Il report di #298, eseguito cosi' com'e' per non duplicarne le query.
+
+    Restituisce anche il codice d'uscita: e' il codice, non il payload, a dire
+    se la finestra e' riconciliata, e chi chiama deve deciderne di conseguenza.
+    """
     radice = Path(__file__).resolve().parents[1]
     completato = subprocess.run(
         [
@@ -51,7 +70,11 @@ def _report(start: str, end: str) -> dict:
         text=True,
         cwd=radice,
     )
-    if completato.returncode != 0:
+    try:
+        report = json.loads(completato.stdout)
+    except json.JSONDecodeError:
+        report = None
+    if report is None or completato.returncode not in _CODICI_CON_REPORT:
         # Senza questo, un fallimento del report arriva al log come un
         # CalledProcessError che nomina il comando e nasconde la causa —
         # tipicamente una credenziale assente, che si riconosce in una riga.
@@ -60,7 +83,7 @@ def _report(start: str, end: str) -> dict:
             "il report di #298 e' fallito con codice "
             f"{completato.returncode}:\n" + "\n".join(coda[-5:])
         )
-    return json.loads(completato.stdout)
+    return report, completato.returncode
 
 
 def _sigma_delta_bps(report: dict) -> float | None:
@@ -108,13 +131,42 @@ def main() -> int:
     args = parser.parse_args()
 
     settings = load_evaluation_settings()
-    report = _report(args.start, args.end)
+    report, codice = _report(args.start, args.end)
     evaluation = report.get("evaluation") or {}
+    conteggi = {
+        "clusters_observed": int(evaluation.get("clusters_observed") or 0),
+        "observations": int(evaluation.get("observations") or 0),
+        "n_cluster": settings.n_cluster,
+    }
+
+    if codice == EXIT_NOT_RECONCILED:
+        # Le due viste si contraddicono: la sigma di questa finestra non e'
+        # quella che il contratto vuole stimare, e derivarne `N_cluster`
+        # fisserebbe il traguardo del trial su una misura che il report stesso
+        # dichiara rotta — consumando l'unica ri-stima blinded concessa. Va
+        # detto per quello che e', non fatto passare per un guasto del monitor.
+        print(
+            json.dumps(
+                {
+                    "milestone": None,
+                    "blocco": "REPORT_NON_RICONCILIATO",
+                    "blocking_reasons": list(
+                        (report.get("reconciliation") or {}).get(
+                            "blocking_reasons"
+                        )
+                        or []
+                    ),
+                    **conteggi,
+                },
+                indent=2,
+            )
+        )
+        return USCITA_NON_RICONCILIATO
 
     raggiunta = milestone_raggiunta(
-        n_cluster=settings.n_cluster,
-        clusters_observed=int(evaluation.get("clusters_observed") or 0),
-        observations=int(evaluation.get("observations") or 0),
+        n_cluster=conteggi["n_cluster"],
+        clusters_observed=conteggi["clusters_observed"],
+        observations=conteggi["observations"],
         gia_notificate=[
             voce.strip() for voce in args.gia_notificate.split(",") if voce.strip()
         ],
@@ -122,17 +174,7 @@ def main() -> int:
     )
 
     if raggiunta is None:
-        print(
-            json.dumps(
-                {
-                    "milestone": None,
-                    "clusters_observed": int(evaluation.get("clusters_observed") or 0),
-                    "observations": int(evaluation.get("observations") or 0),
-                    "n_cluster": settings.n_cluster,
-                },
-                indent=2,
-            )
-        )
+        print(json.dumps({"milestone": None, **conteggi}, indent=2))
         return 0
 
     sigma = _sigma_delta_bps(report)

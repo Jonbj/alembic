@@ -74,6 +74,21 @@ if (( STATO == 0 )); then
     echo "MILESTONE=none"
     exit 0
 fi
+if (( STATO == 11 )); then
+    # Il monitor ha funzionato: sono le due viste di #298 a non riconciliare,
+    # quindi nessuna milestone e' valutabile su questa finestra. Chiamarlo
+    # "controllo fallito" manderebbe l'operatore a cercare un guasto nel job
+    # invece che nella misura. Esce 0 perche' il job ha fatto il suo lavoro.
+    echo "BLOCCATO: il report di #298 non riconcilia — nessuna milestone valutata."
+    tg_send "⚠️ <b>Trial exit S4 — report non riconciliato</b>
+
+<pre>${USCITA_JSON}</pre>
+
+Le due viste di #298 non riconciliano: fino a qui nessuna milestone e' valutabile.
+Log: <code>${LOG_FILE}</code>"
+    echo "MILESTONE=blocked"
+    exit 0
+fi
 if (( STATO != 10 )); then
     echo "FAILED: il controllo e' uscito con codice ${STATO}"
     tg_send "🚨 Controllo milestone trial S4 fallito (codice ${STATO}) — vedi <code>${LOG_FILE}</code>."
