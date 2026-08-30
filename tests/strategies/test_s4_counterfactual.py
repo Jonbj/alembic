@@ -980,3 +980,56 @@ def test_un_sostituto_su_uno_slot_non_appaiato_resta_non_attribuito():
     assert "UNATTRIBUTED_RESIDUAL" in reconciliation.blocking_reasons
     # la vista portfolio-level continua a mostrare il totale, non lo nasconde
     assert reconciliation.portfolio_level_net_usd == pytest.approx(-15.0)
+
+
+def test_una_violazione_fuori_coorte_non_blocca_la_finestra_riportata():
+    """Il freeze degli ingressi si legge sulla coorte pubblicata, non su tutte.
+
+    Un intento challenger senza baseline e' un trade nato dal cash liberato, ma
+    se il suo D0 cade fuori dalla finestra appartiene a un altro report: qui
+    non ha ne' coppia ne' slot, e contarlo dichiarerebbe non riconciliata una
+    finestra in cui nessun ingresso e' stato creato.
+    """
+    comparison = _paired(
+        [_outcome("P0")],
+        [
+            _outcome("P1", net_pnl=35.0),
+            _outcome("P1", intent_id="intent-luglio", d0=date(2026, 7, 1)),
+        ],
+    )
+
+    report = build_replacement_report(
+        comparison,
+        (),
+        policy_id="P1",
+        window_start=date(2026, 8, 1),
+        window_end=date(2026, 8, 31),
+    )
+
+    assert report["paired"]["total"] == 1
+    assert report["paired"]["comparable"] == 1
+    assert report["paired"]["new_trades_created"] == 0
+    assert report["paired"]["entries_frozen"] is True
+    assert report["reconciliation"]["blocking_reasons"] == []
+    assert report["reconciliation"]["reconciled"] is True
+
+
+def test_una_violazione_dentro_la_coorte_blocca_ancora_la_riconciliazione():
+    """Restringere alla coorte non deve spegnere la guardia dove serve."""
+    comparison = _paired(
+        [_outcome("P0")],
+        [_outcome("P1", net_pnl=35.0), _outcome("P1", intent_id="intent-nuovo")],
+    )
+
+    report = build_replacement_report(
+        comparison,
+        (),
+        policy_id="P1",
+        window_start=date(2026, 8, 1),
+        window_end=date(2026, 8, 31),
+    )
+
+    assert report["paired"]["new_trades_created"] == 1
+    assert report["paired"]["entries_frozen"] is False
+    assert "ENTRIES_NOT_FROZEN" in report["reconciliation"]["blocking_reasons"]
+    assert report["reconciliation"]["reconciled"] is False
