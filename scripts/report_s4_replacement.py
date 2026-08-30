@@ -18,6 +18,7 @@ from src.strategies.s4.counterfactual import (
     build_paired_comparison,
     build_portfolio_counterfactual,
     build_replacement_report,
+    replacement_records_for_window,
 )
 from src.strategies.s4.counterfactual_runtime import (
     build_freed_slots,
@@ -246,7 +247,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         and pair.d0 is not None
         and args.start <= pair.d0 <= args.end
     ]
-    payload["replacement_records"] = [asdict(record) for record in records]
+    payload["replacement_records"] = [
+        asdict(record)
+        for record in replacement_records_for_window(
+            comparison,
+            records,
+            policy_id=policy_id,
+            window_start=args.start,
+            window_end=args.end,
+        )
+    ]
     # Il valutatore confirmatory (#299) legge le stesse coppie del blocco
     # `paired`: una sola sorgente, cosi' il verdetto non puo' divergere dalla
     # misura pubblicata sopra.
