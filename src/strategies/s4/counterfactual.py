@@ -592,6 +592,7 @@ def build_portfolio_counterfactual(
     slots: list[FreedSlot],
     candidates_by_intent: dict[str, list[SubstituteCandidate]],
     *,
+    sessions: Sequence[date],
     cost_model: CostModel | None = None,
 ) -> tuple[ReplacementRecord, ...]:
     """Misura, slot per slot, cosa avrebbe reso il capitale liberato.
@@ -600,16 +601,31 @@ def build_portfolio_counterfactual(
     `opportunity_cost_reported: separatamente, a livello di portafoglio`. Un
     pari-merito fra candidati non sceglie il ramo favorevole: viene marcato
     ambiguo e non accredita nulla (`ambiguous_case` del contratto).
+
+    `sessions` e' lo stesso calendario esplicito usato dalla vista paired. Gli
+    slot si misurano in sedute, non in giorni wall-clock: senza questo input un
+    intervallo venerdi'→martedi' sembrerebbe occupare quattro giorni invece di
+    due e gonfierebbe in modo sistematico il capitale-giorni.
     """
+    calendar = normalize_sessions(sessions)
+    assert calendar is not None
     records: list[ReplacementRecord] = []
 
     for slot in slots:
         candidates = list(candidates_by_intent.get(slot.intent_id, ()))
-        slot_days = max(
-            0.0,
-            (_utc(slot.slot_closes_at) - _utc(slot.freed_at)).total_seconds() / 86400.0,
-        )
-        slot_available = slot_days > 0
+        slot_available = _utc(slot.slot_closes_at) > _utc(slot.freed_at)
+        slot_days = 0.0
+        if slot_available:
+            elapsed = _sessions_elapsed(
+                _utc(slot.freed_at).date(),
+                _utc(slot.slot_closes_at).date(),
+                calendar,
+            )
+            if elapsed is None:
+                raise ValueError(
+                    f"market sessions do not cover freed slot {slot.intent_id}"
+                )
+            slot_days = float(elapsed)
         capital_days = slot.freed_notional * slot_days if slot_available else 0.0
 
         rejected: list[tuple[str, str]] = []

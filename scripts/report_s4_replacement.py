@@ -231,6 +231,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     records = build_portfolio_counterfactual(
         slots,
         candidates,
+        sessions=sessions,
         cost_model=VersionedTradeCostModel(),
     )
     payload = build_replacement_report(

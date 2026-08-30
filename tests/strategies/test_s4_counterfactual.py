@@ -177,6 +177,12 @@ def _slot(**overrides) -> FreedSlot:
     return FreedSlot(**values)
 
 
+def _portfolio(slots, candidates, **overrides):
+    """`build_portfolio_counterfactual` sullo stesso calendario del paired."""
+    overrides.setdefault("sessions", SESSIONS)
+    return build_portfolio_counterfactual(slots, candidates, **overrides)
+
+
 # ── Adattatore: il contratto degli esiti esiste gia' in main ─────────────────
 
 
@@ -403,7 +409,7 @@ def test_un_esito_p2_non_entra_nel_paired_finche_p2_e_omitted():
 
 
 def test_il_controfattuale_registra_candidato_rank_slot_capitale_e_pnl():
-    record = build_portfolio_counterfactual([_slot()], {"intent-1": [_candidate()]})[0]
+    record = _portfolio([_slot()], {"intent-1": [_candidate()]})[0]
 
     assert record.substitute_symbol == "NVDA"
     assert record.substitute_signal_id == 5001
@@ -417,7 +423,7 @@ def test_il_controfattuale_registra_candidato_rank_slot_capitale_e_pnl():
 
 
 def test_nessun_candidato_lascia_il_capitale_inerte_senza_pnl_incrementale():
-    record = build_portfolio_counterfactual([_slot()], {})[0]
+    record = _portfolio([_slot()], {})[0]
 
     assert record.substitute_symbol is None
     assert record.slot_available is True
@@ -434,7 +440,7 @@ def test_piu_candidati_selezionano_il_rank_migliore_e_registrano_gli_scartati():
         _candidate(symbol="AVGO", rank=1, signal_id=2, exit_price=101.0),
     ]
 
-    record = build_portfolio_counterfactual([_slot()], {"intent-1": candidates})[0]
+    record = _portfolio([_slot()], {"intent-1": candidates})[0]
 
     assert record.substitute_symbol == "AVGO"
     assert record.point_in_time_rank == 1
@@ -449,7 +455,7 @@ def test_un_pari_rank_e_ambiguo_e_non_prende_il_percorso_favorevole():
         _candidate(symbol="AVGO", rank=1, signal_id=2, exit_price=101.0),
     ]
 
-    record = build_portfolio_counterfactual([_slot()], {"intent-1": candidates})[0]
+    record = _portfolio([_slot()], {"intent-1": candidates})[0]
 
     assert record.reason_code == "AMBIGUOUS_SUBSTITUTE"
     assert record.substitute_symbol is None
@@ -459,7 +465,7 @@ def test_un_pari_rank_e_ambiguo_e_non_prende_il_percorso_favorevole():
 def test_un_candidato_osservato_dopo_la_decisione_e_lookahead():
     late = _candidate(observed_at=EXIT_AT + timedelta(hours=1))
 
-    record = build_portfolio_counterfactual([_slot()], {"intent-1": [late]})[0]
+    record = _portfolio([_slot()], {"intent-1": [late]})[0]
 
     assert record.substitute_symbol is None
     assert ("NVDA", "CANDIDATE_LOOKAHEAD") in record.rejected_candidates
@@ -469,7 +475,7 @@ def test_un_candidato_osservato_dopo_la_decisione_e_lookahead():
 def test_una_universe_non_point_in_time_squalifica_il_candidato():
     drifted = _candidate(universe_as_of=EXIT_AT + timedelta(minutes=1))
 
-    record = build_portfolio_counterfactual([_slot()], {"intent-1": [drifted]})[0]
+    record = _portfolio([_slot()], {"intent-1": [drifted]})[0]
 
     assert record.substitute_symbol is None
     assert (
@@ -479,7 +485,7 @@ def test_una_universe_non_point_in_time_squalifica_il_candidato():
 
 
 def test_la_collisione_s1_esclude_il_candidato():
-    record = build_portfolio_counterfactual(
+    record = _portfolio(
         [_slot()], {"intent-1": [_candidate(collides_with_s1=True)]}
     )[0]
 
@@ -488,7 +494,7 @@ def test_la_collisione_s1_esclude_il_candidato():
 
 
 def test_il_capitale_non_investibile_non_produce_un_sostituto():
-    record = build_portfolio_counterfactual(
+    record = _portfolio(
         [_slot()],
         {
             "intent-1": [
@@ -508,7 +514,7 @@ def test_il_capitale_non_investibile_non_produce_un_sostituto():
 def test_uno_slot_gia_chiuso_non_e_disponibile_e_non_riceve_sostituti():
     closed = _slot(slot_closes_at=EXIT_AT)
 
-    record = build_portfolio_counterfactual([closed], {"intent-1": [_candidate()]})[0]
+    record = _portfolio([closed], {"intent-1": [_candidate()]})[0]
 
     assert record.slot_available is False
     assert record.reason_code == "SLOT_NOT_AVAILABLE"
@@ -516,8 +522,25 @@ def test_uno_slot_gia_chiuso_non_e_disponibile_e_non_riceve_sostituti():
     assert record.capital_days == pytest.approx(0.0)
 
 
+def test_i_capitale_giorni_degli_slot_contano_sedute_non_wall_clock():
+    """Uno slot venerdi'→martedi' occupa due sedute, non quattro giorni."""
+    venerdi = datetime(2026, 8, 28, 17, 52, tzinfo=UTC)
+    martedi = datetime(2026, 9, 1, 19, 59, tzinfo=UTC)
+
+    record = _portfolio(
+        [_slot(freed_at=venerdi, slot_closes_at=martedi)],
+        {},
+        sessions=SESSIONS,
+    )[0]
+
+    assert record.slot_available is True
+    assert record.slot_days == pytest.approx(2.0)
+    assert record.capital_days == pytest.approx(2000.0)
+    assert record.idle_capital_days == pytest.approx(2000.0)
+
+
 def test_un_prezzo_di_uscita_mancante_censura_il_pnl_incrementale():
-    record = build_portfolio_counterfactual(
+    record = _portfolio(
         [_slot()], {"intent-1": [_candidate(exit_price=None)]}
     )[0]
 
@@ -526,7 +549,7 @@ def test_un_prezzo_di_uscita_mancante_censura_il_pnl_incrementale():
 
 
 def test_il_pnl_incrementale_e_netto_dei_costi_quando_il_cost_model_e_dato():
-    record = build_portfolio_counterfactual(
+    record = _portfolio(
         [_slot()], {"intent-1": [_candidate()]}, cost_model=_CostModel()
     )[0]
 
@@ -679,7 +702,7 @@ def test_la_riconciliazione_sottrae_il_replacement_della_baseline():
         [_outcome("P0", net_pnl=10.0)],
         [_outcome("P1", net_pnl=35.0, exit_at=EXIT_AT + timedelta(days=2))],
     )
-    records = build_portfolio_counterfactual([_slot()], {"intent-1": [_candidate()]})
+    records = _portfolio([_slot()], {"intent-1": [_candidate()]})
 
     reconciliation = reconcile_views(comparison, records, policy_id="P1")
 
@@ -698,7 +721,7 @@ def test_la_riconciliazione_aggiunge_il_replacement_della_challenger():
         [_outcome("P0", net_pnl=10.0)],
         [_outcome("P1", net_pnl=35.0, exit_at=EXIT_AT + timedelta(days=2))],
     )
-    records = build_portfolio_counterfactual(
+    records = _portfolio(
         [_slot(policy_id="P1")], {"intent-1": [_candidate()]}
     )
 
@@ -713,7 +736,7 @@ def test_la_riconciliazione_ignora_i_replacement_di_policy_estranee():
     comparison = _paired(
         [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
     )
-    records = build_portfolio_counterfactual(
+    records = _portfolio(
         [_slot(policy_id="P2")], {"intent-1": [_candidate()]}
     )
 
@@ -728,7 +751,7 @@ def test_le_diagnostiche_di_slot_escludono_le_policy_estranee():
     comparison = _paired(
         [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
     )
-    records = build_portfolio_counterfactual(
+    records = _portfolio(
         [
             _slot(policy_id="P2"),
             _slot(policy_id="P1", intent_id="intent-2", symbol="TSLA"),
@@ -749,7 +772,7 @@ def test_i_capitale_giorni_inattivi_restano_separati_per_policy():
     comparison = _paired(
         [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
     )
-    records = build_portfolio_counterfactual(
+    records = _portfolio(
         [
             _slot(policy_id="P0"),
             _slot(policy_id="P1", intent_id="intent-2", symbol="TSLA"),
@@ -770,7 +793,7 @@ def test_senza_sostituto_le_due_viste_coincidono():
     comparison = _paired(
         [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
     )
-    records = build_portfolio_counterfactual([_slot()], {})
+    records = _portfolio([_slot()], {})
 
     reconciliation = reconcile_views(comparison, records, policy_id="P1")
 
@@ -785,7 +808,7 @@ def test_un_reinvestimento_nel_paired_impedisce_la_riconciliazione():
     comparison = _paired(
         [_outcome("P0")], [_outcome("P1"), _outcome("P1", intent_id="intent-nuovo")]
     )
-    records = build_portfolio_counterfactual([_slot()], {})
+    records = _portfolio([_slot()], {})
 
     reconciliation = reconcile_views(comparison, records, policy_id="P1")
 
@@ -833,7 +856,7 @@ def test_il_report_copre_assenza_piu_sostituti_collisione_s1_e_capitale():
 
     report = build_replacement_report(
         _paired(baseline, challenger),
-        build_portfolio_counterfactual(slots, candidates),
+        _portfolio(slots, candidates),
         policy_id="P1",
         window_start=date(2026, 8, 1),
         window_end=date(2026, 8, 31),
@@ -862,7 +885,7 @@ def test_il_report_conta_solo_gli_slot_della_coppia_confrontata():
 
     report = build_replacement_report(
         _paired(baseline, challenger),
-        build_portfolio_counterfactual(slots, {"intent-1": [_candidate()]}),
+        _portfolio(slots, {"intent-1": [_candidate()]}),
         policy_id="P1",
         window_start=date(2026, 8, 1),
         window_end=date(2026, 8, 31),
@@ -898,7 +921,7 @@ def test_il_report_applica_agli_slot_la_stessa_coorte_d0_delle_coppie():
         [_outcome("P0", d0=d0)],
         [_outcome("P1", d0=d0, net_pnl=20.0)],
     )
-    records = build_portfolio_counterfactual(
+    records = _portfolio(
         [
             _slot(
                 freed_at=freed_at,
@@ -934,8 +957,8 @@ def test_il_report_esclude_slot_di_una_coorte_d0_esterna_alla_finestra():
         [_outcome("P0", d0=d0)],
         [_outcome("P1", d0=d0, net_pnl=20.0)],
     )
-    records = build_portfolio_counterfactual(
-        [_slot(freed_at=datetime(2026, 8, 1, 17, 52, tzinfo=UTC))],
+    records = _portfolio(
+        [_slot(freed_at=datetime(2026, 8, 25, 17, 52, tzinfo=UTC))],
         {"intent-1": [_candidate()]},
     )
 
@@ -967,7 +990,7 @@ def test_un_sostituto_su_uno_slot_non_appaiato_resta_non_attribuito():
     comparison = _paired(
         [_outcome("P0", net_pnl=10.0)], [_outcome("P1", net_pnl=35.0)]
     )
-    records = build_portfolio_counterfactual(
+    records = _portfolio(
         [_slot(intent_id="intent-non-appaiato")],
         {"intent-non-appaiato": [_candidate()]},
     )
