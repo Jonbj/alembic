@@ -1,9 +1,9 @@
 """Alert EOD per posizioni in perdita senza copertura news (#324).
 
 Il dossier misura gia' la cecita' lato uscita con una definizione dichiarata:
-perdita di almeno il 3% dall'ingresso, zero righe ``news_log``, zero segnali e
-almeno due sedute consecutive senza righe. Questo worker riusa quella misura e
-la proietta nel registro incidenti mobile una volta a fine seduta.
+perdita di almeno il 3% dall'ingresso, almeno due sedute consecutive senza righe
+``news_log`` e zero segnali nella seduta corrente. Questo worker riusa quella
+misura e la proietta nel registro incidenti mobile una volta a fine seduta.
 
 E' sola strumentazione: non scrive segnali, non cambia ordini e non e' importato
 dal money path. Se calendario, broker o DB non sono leggibili, fallisce aperto e
@@ -164,8 +164,9 @@ async def evaluate_held_news_loss_alerts(
             severity=Severity.WARNING,
             title=f"Copertura news assente su {symbol}",
             summary=(
-                f"{symbol} e' in perdita marcata e non ha news ne' segnali "
-                f"da {row.get('sedute_consecutive_senza_righe')} sedute."
+                f"{symbol} e' in perdita marcata, non ha news da "
+                f"{row.get('sedute_consecutive_senza_righe')} sedute ne' "
+                "segnali nella seduta corrente."
             ),
             details={
                 "symbol": symbol,

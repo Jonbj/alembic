@@ -199,7 +199,7 @@ app.conf.beat_schedule = {
         "schedule": crontab(minute="*/1"),
     },
     # #324: EOD warning for held positions down >=3% from entry with no news
-    # and no sentiment signals for at least two consecutive market sessions.
+    # for at least two sessions and no sentiment signal in the current session.
     # Instrumentation only: it writes mobile incidents, never signals or orders.
     # 22:50 UTC is after the US close in both EDT and EST.
     "held-news-loss-alert": {
