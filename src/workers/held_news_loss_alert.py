@@ -28,6 +28,7 @@ from src.api.dependencies import init_asyncpg_pool
 from src.config import config
 from src.mobile_monitoring.incidents import IncidentStore
 from src.mobile_monitoring.models import EventCategory, EventKind, Severity
+from src.util.retry import retry_transient
 from src.workers._async_utils import run_async
 from src.workers.celery_app import app
 
@@ -212,7 +213,10 @@ async def _market_sessions(
         start=market_day - timedelta(days=3 * _COVERAGE_WINDOW_SESSIONS),
         end=market_day,
     )
-    rows = await run_in_threadpool(trading_client.get_calendar, request)
+    rows = await run_in_threadpool(
+        retry_transient,
+        lambda: trading_client.get_calendar(request),
+    )
     sessions = sorted(
         session
         for row in rows
@@ -295,7 +299,7 @@ async def _collect_held_news_loss_coverage(
 
     positions = cast(
         Sequence[object],
-        await run_in_threadpool(trading_client.get_all_positions),
+        await run_in_threadpool(retry_transient, trading_client.get_all_positions),
     )
     symbols = sorted(
         {
