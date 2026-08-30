@@ -275,7 +275,7 @@ def test_stato_s1_mancante_non_prende_il_percorso_favorevole():
 
     candidates = build_point_in_time_candidates([slot], rows, bars)["intent-1"]
     [record] = build_portfolio_counterfactual(
-        [slot], {"intent-1": candidates}
+        [slot], {"intent-1": candidates}, sessions=SESSIONS
     )
 
     assert record.substitute_symbol is None
