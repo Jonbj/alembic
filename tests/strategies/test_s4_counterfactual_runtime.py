@@ -252,6 +252,39 @@ def test_collisione_s1_e_capitale_non_investibile_restano_reason_distinti():
     assert candidates[1].investable_reason == "SKIP_MIN_NOTIONAL"
 
 
+def test_stato_s1_mancante_non_prende_il_percorso_favorevole():
+    [slot] = build_freed_slots(
+        [
+            policy_outcome_from_row(_policy_row("P0")),
+            policy_outcome_from_row(_policy_row("P1")),
+        ],
+        baseline_policy_id="P0",
+        policy_id="P1",
+    )
+    rows = [
+        _intent_row(
+            "UNKNOWN",
+            6,
+            s1_state={
+                "status": "missing",
+                "reason": "open_trade_guard_unavailable",
+            },
+        )
+    ]
+    bars = {"UNKNOWN": [(P0_EXIT, 100.0), (P1_EXIT, 104.0)]}
+
+    candidates = build_point_in_time_candidates([slot], rows, bars)["intent-1"]
+    [record] = build_portfolio_counterfactual(
+        [slot], {"intent-1": candidates}
+    )
+
+    assert record.substitute_symbol is None
+    assert record.incremental_pnl == pytest.approx(0.0)
+    assert record.rejected_candidates == (
+        ("UNKNOWN", "CANDIDATE_S1_STATE_MISSING"),
+    )
+
+
 def test_un_ordine_gia_inviato_non_scavalca_il_primo_candidato_non_finanziato():
     [slot] = build_freed_slots(
         [
