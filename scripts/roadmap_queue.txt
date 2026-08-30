@@ -83,7 +83,16 @@
 286  alpha-miss: findings falsificabili e sintesi deterministica (dopo #282)
 295  S4 exit trial: lifecycle, fill e sleeve virtuali (dopo #294)
 296  S4 exit trial: riprodurre P0 come baseline shadow (dopo #295 e #245)
-298  S4 exit trial: misurare replacement e opportunity cost (dopo #295 e #296)
+# 298 e' USCITA dalla coda il 2026-08-30. Non e' finita: i sei criteri di
+#     accettazione sono soddisfatti e verificati sul live (le due viste girano
+#     e riconciliano), e cio' che manca non e' codice ma campione — n=2 coppie
+#     comparabili, `n0_fixed: false` nel contratto congelato. Il loop non
+#     poteva accorgersene: pescandola trovava sempre qualcosa da limare, e in
+#     36 ore ha aperto 11 PR sullo stesso modulo di misura.
+#     A rimetterla in coda ci pensa scripts/check_s4_trial_milestones.sh
+#     quando scatta ANALISI_DECISIONALE, cioe' quando c'e' di nuovo un lavoro
+#     con un traguardo. Le altre due milestone chiedono un atto dell'operatore
+#     sul contratto congelato, che un agente non puo' compiere.
 214  le review verbose non arrivano su GitHub: il cancello di merge resta senza verbale
 
 # Aggiunte del 2026-08-27 — issue open con `freeze-ok` + `ready-for-agent`
