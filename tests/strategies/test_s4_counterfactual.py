@@ -604,6 +604,76 @@ def test_un_calendario_che_non_copre_l_uscita_non_indovina_le_sedute():
     assert pair.challenger_capital_days is None
 
 
+def test_una_policy_ancora_aperta_non_ha_capitale_giorni():
+    """Un intento non uscito non ha occupato zero sedute: non lo sappiamo ancora.
+
+    Sul live la baseline P0 puo' restare `OPEN` mentre la challenger P1 e' gia'
+    uscita a D+2. La riga `OPEN` porta comunque un `exit_at`, perche' e' l'ultimo
+    trigger osservato, non un'uscita: contarlo come uscita pubblicherebbe zero
+    capitale-giorni proprio sulla policy che sta occupando il capitale piu' a
+    lungo, invertendo il confronto di occupazione del criterio 3.
+    """
+    baseline = [
+        _outcome(
+            "P0",
+            status="OPEN",
+            exit_reason_code="P0_RUNTIME_OPEN",
+            exit_at=TRIGGER_AT,
+            net_pnl=None,
+        )
+    ]
+    challenger = [
+        _outcome(
+            "P1",
+            exit_at=EXIT_AT + timedelta(days=2),
+            net_pnl=35.0,
+            exit_reason_code="P1_TIME_DUE",
+        )
+    ]
+
+    pair = _paired(baseline, challenger).pairs[0]
+
+    assert pair.baseline_capital_days is None
+    assert pair.challenger_capital_days == pytest.approx(2000.0)
+
+
+def test_una_challenger_che_tiene_ancora_non_ha_capitale_giorni():
+    """Il caso speculare: P1 tiene fino a D+2 mentre P0 e' gia' uscita."""
+    baseline = [_outcome("P0", exit_at=EXIT_AT + timedelta(days=1))]
+    challenger = [
+        _outcome(
+            "P1",
+            status="OPEN",
+            exit_reason_code="P1_HOLDING",
+            exit_at=TRIGGER_AT,
+            net_pnl=None,
+        )
+    ]
+
+    pair = _paired(baseline, challenger).pairs[0]
+
+    assert pair.baseline_capital_days == pytest.approx(1000.0)
+    assert pair.challenger_capital_days is None
+
+
+def test_un_uscita_di_rischio_conserva_i_suoi_capitale_giorni():
+    """La guardia distingue "non uscita" da "uscita": `RISK_EXITED` e' uscita."""
+    challenger = [
+        _outcome(
+            "P1",
+            status="RISK_EXITED",
+            exit_reason_code="P1_D_HARD",
+            exit_at=EXIT_AT + timedelta(days=2),
+            net_pnl=35.0,
+        )
+    ]
+
+    pair = _paired([_outcome("P0", net_pnl=10.0)], challenger).pairs[0]
+
+    assert pair.challenger_capital_days == pytest.approx(2000.0)
+    assert pair.comparable is True
+
+
 def test_la_riconciliazione_sottrae_il_replacement_della_baseline():
     comparison = _paired(
         [_outcome("P0", net_pnl=10.0)],
