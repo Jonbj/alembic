@@ -381,3 +381,34 @@ def test_lo_stesso_sostituto_non_viene_accreditato_a_due_slot(monkeypatch, capsy
     assert ["NVDA", "CANDIDATE_SUBSTITUTE_ALREADY_HELD"] in occupato[0][
         "rejected_candidates"
     ]
+
+
+def test_il_verdetto_legge_la_stessa_coorte_d0_del_riepilogo(monkeypatch, capsys):
+    """L'ultimo blocco che leggeva le coppie intere invece della coorte.
+
+    Il valutatore riceveva `comparison.pairs`, non le coppie pubblicate dalla
+    finestra: oggi coincidono solo perche' la SQL filtra sullo stesso D0, ma il
+    verdetto e' l'unico blocco che diventa una decisione, quindi non puo'
+    dipendere da un filtro che vive in un'altra funzione.
+    """
+    rows = _policy_rows()
+    for row in _policy_rows():
+        rows.append(
+            {**row, "intent_id": "intent-coorte-precedente", "d0": date(2026, 8, 21)}
+        )
+
+    monkeypatch.setattr(report_script, "_fetch_policy_rows", lambda start, end: rows)
+    monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
+    monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_session_dates",
+        lambda start, end: [date(2026, 8, d) for d in (21, 24, 25, 26, 27)],
+    )
+
+    report_script.main(["--start", "2026-08-25", "--end", "2026-08-27"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["paired"]["comparable"] == 1
+    assert payload["evaluation"]["observations"] == 1
+    assert payload["evaluation"]["clusters_observed"] == 1

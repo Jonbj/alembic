@@ -993,6 +993,28 @@ def reconcile_views(
 # ── Report (criterio 6) ────────────────────────────────────────────────────
 
 
+def pairs_for_window(
+    comparison: PairedComparison,
+    *,
+    policy_id: str,
+    window_start: date,
+    window_end: date,
+) -> tuple[PairedDelta, ...]:
+    """Le coppie della policy la cui coorte D0 cade dentro la finestra.
+
+    E' l'unico ritaglio del report: riepilogo, dettaglio, slot, buchi e
+    verdetto devono derivare da qui, altrimenti tornano a descrivere campioni
+    diversi — il difetto ricorrente di questa issue.
+    """
+    return tuple(
+        pair
+        for pair in comparison.pairs
+        if pair.policy_id == policy_id
+        and pair.d0 is not None
+        and window_start <= pair.d0 <= window_end
+    )
+
+
 def cohort_intents_for_window(
     comparison: PairedComparison,
     *,
@@ -1000,19 +1022,15 @@ def cohort_intents_for_window(
     window_start: date,
     window_end: date,
 ) -> set[str]:
-    """Gli intent_id della coorte D0 pubblicata da questa finestra.
-
-    Una sola definizione perche' i consumatori sono due — il dettaglio degli
-    slot misurati e l'elenco di quelli che mancano — e due copie basterebbero a
-    far descrivere loro campioni diversi, che e' il difetto che #333 e #412
-    hanno gia' corretto altrove.
-    """
+    """Gli intent_id della coorte D0 pubblicata da questa finestra."""
     return {
         pair.intent_id
-        for pair in comparison.pairs
-        if pair.policy_id == policy_id
-        and pair.d0 is not None
-        and window_start <= pair.d0 <= window_end
+        for pair in pairs_for_window(
+            comparison,
+            policy_id=policy_id,
+            window_start=window_start,
+            window_end=window_end,
+        )
     }
 
 
