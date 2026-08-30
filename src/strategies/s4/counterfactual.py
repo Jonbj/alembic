@@ -607,6 +607,37 @@ def _candidate_rejection(
     return None
 
 
+def _slots_overlap(left: FreedSlot, right: FreedSlot) -> bool:
+    """Vero se le due finestre liberate condividono anche un solo istante."""
+    return _utc(left.freed_at) < _utc(right.slot_closes_at) and _utc(
+        right.freed_at
+    ) < _utc(left.slot_closes_at)
+
+
+def _choose_substitute(
+    eligible: list[SubstituteCandidate],
+) -> tuple[SubstituteCandidate | None, str, list[tuple[str, str]]]:
+    """Il candidato che occupa lo slot, o il motivo per cui nessuno lo occupa."""
+    if not eligible:
+        return None, "NO_SUBSTITUTE_AVAILABLE", []
+    best_rank = min(int(c.rank or 0) for c in eligible)
+    tied = [c for c in eligible if int(c.rank or 0) == best_rank]
+    outranked = [
+        (c.symbol, "CANDIDATE_OUTRANKED")
+        for c in eligible
+        if int(c.rank or 0) != best_rank
+    ]
+    if len(tied) > 1:
+        # Pari rank point-in-time: non c'e' un sostituto determinato, e
+        # sceglierne uno significherebbe scegliere un P&L.
+        return (
+            None,
+            "AMBIGUOUS_SUBSTITUTE",
+            [(c.symbol, "CANDIDATE_AMBIGUOUS_RANK") for c in tied] + outranked,
+        )
+    return tied[0], REASON_REPLACEMENT, outranked
+
+
 def build_portfolio_counterfactual(
     slots: list[FreedSlot],
     candidates_by_intent: dict[str, list[SubstituteCandidate]],
@@ -625,13 +656,27 @@ def build_portfolio_counterfactual(
     slot si misurano in sedute, non in giorni wall-clock: senza questo input un
     intervallo venerdi'→martedi' sembrerebbe occupare quattro giorni invece di
     due e gonfierebbe in modo sistematico il capitale-giorni.
+
+    La vista e' portfolio-level, quindi gli slot non sono indipendenti: un
+    sostituto ne occupa **uno solo alla volta**. Due slot che si sovrappongono
+    leggono lo stesso universo point-in-time e sceglierebbero lo stesso primo
+    candidato, accreditando due volte un capitale che il portafoglio non
+    aveva. Gli slot si servono in ordine di liberazione — quando il primo si
+    libera il secondo non esiste ancora, che e' la stessa regola point-in-time
+    dei candidati — e quelli liberati nello stesso istante non hanno una
+    precedenza: un simbolo conteso non va a nessuno dei due, come per il pari
+    rank. L'esclusiva vale dentro una policy: P0 e P1 sono due controfattuali
+    distinti, non un portafoglio solo.
     """
     calendar = normalize_sessions(sessions)
     assert calendar is not None
-    records: list[ReplacementRecord] = []
 
+    # Fase 1 — geometria dello slot e ammissibilita' del singolo candidato:
+    # dipendono solo dallo slot, quindi restano fuori dall'allocazione.
+    geometry: list[tuple[bool, float, float]] = []
+    eligible_by_slot: list[list[SubstituteCandidate]] = []
+    rejected_by_slot: list[list[tuple[str, str]]] = []
     for slot in slots:
-        candidates = list(candidates_by_intent.get(slot.intent_id, ()))
         slot_available = _utc(slot.slot_closes_at) > _utc(slot.freed_at)
         slot_days = 0.0
         if slot_available:
@@ -646,45 +691,95 @@ def build_portfolio_counterfactual(
                 )
             slot_days = float(elapsed)
         capital_days = slot.freed_notional * slot_days if slot_available else 0.0
+        geometry.append((slot_available, slot_days, capital_days))
 
         rejected: list[tuple[str, str]] = []
         eligible: list[SubstituteCandidate] = []
         if slot_available:
-            for candidate in candidates:
+            for candidate in candidates_by_intent.get(slot.intent_id, ()):
                 reason = _candidate_rejection(candidate, slot)
                 if reason is None:
                     eligible.append(candidate)
                 else:
                     rejected.append((candidate.symbol, reason))
+        eligible_by_slot.append(eligible)
+        rejected_by_slot.append(rejected)
 
-        chosen: SubstituteCandidate | None = None
-        reason_code = "NO_SUBSTITUTE_AVAILABLE"
-        if not slot_available:
-            reason_code = "SLOT_NOT_AVAILABLE"
-        elif eligible:
-            best_rank = min(int(c.rank or 0) for c in eligible)
-            tied = [c for c in eligible if int(c.rank or 0) == best_rank]
-            if len(tied) > 1:
-                # Pari rank point-in-time: non c'e' un sostituto determinato, e
-                # sceglierne uno significherebbe scegliere un P&L.
-                reason_code = "AMBIGUOUS_SUBSTITUTE"
-                rejected.extend(
-                    (c.symbol, "CANDIDATE_AMBIGUOUS_RANK") for c in tied
-                )
-                rejected.extend(
-                    (c.symbol, "CANDIDATE_OUTRANKED")
-                    for c in eligible
-                    if int(c.rank or 0) != best_rank
-                )
-            else:
-                chosen = tied[0]
-                reason_code = REASON_REPLACEMENT
-                rejected.extend(
-                    (c.symbol, "CANDIDATE_OUTRANKED")
-                    for c in eligible
-                    if c is not chosen
-                )
+    # Fase 2 — allocazione cronologica: gli slot liberati nello stesso istante
+    # formano un gruppo, perche' fra loro nessuno viene prima.
+    order = sorted(
+        range(len(slots)),
+        key=lambda index: (_utc(slots[index].freed_at), slots[index].intent_id),
+    )
+    groups: list[list[int]] = []
+    for index in order:
+        if groups and _utc(slots[groups[-1][0]].freed_at) == _utc(
+            slots[index].freed_at
+        ):
+            groups[-1].append(index)
+        else:
+            groups.append([index])
 
+    held: list[tuple[str, FreedSlot]] = []
+    chosen_by_slot: list[SubstituteCandidate | None] = [None] * len(slots)
+    reason_by_slot: list[str] = ["NO_SUBSTITUTE_AVAILABLE"] * len(slots)
+    for group in groups:
+        for index in group:
+            taken = [
+                candidate
+                for candidate in eligible_by_slot[index]
+                if any(
+                    symbol == candidate.symbol
+                    and other.policy_id == slots[index].policy_id
+                    and _slots_overlap(other, slots[index])
+                    for symbol, other in held
+                )
+            ]
+            for candidate in taken:
+                eligible_by_slot[index].remove(candidate)
+                rejected_by_slot[index].append(
+                    (candidate.symbol, "CANDIDATE_SUBSTITUTE_ALREADY_HELD")
+                )
+        while True:
+            wants = {
+                index: _choose_substitute(eligible_by_slot[index])[0]
+                for index in group
+            }
+            contested = {
+                key
+                for key, count in Counter(
+                    (slots[index].policy_id, candidate.symbol)
+                    for index, candidate in wants.items()
+                    if candidate is not None
+                ).items()
+                if count > 1
+            }
+            if not contested:
+                break
+            for index, candidate in wants.items():
+                if candidate is None:
+                    continue
+                if (slots[index].policy_id, candidate.symbol) not in contested:
+                    continue
+                eligible_by_slot[index].remove(candidate)
+                rejected_by_slot[index].append(
+                    (candidate.symbol, "CANDIDATE_CONTENDED_BY_SLOT")
+                )
+        for index in group:
+            chosen, reason, outranked = _choose_substitute(eligible_by_slot[index])
+            rejected_by_slot[index].extend(outranked)
+            chosen_by_slot[index] = chosen
+            reason_by_slot[index] = (
+                reason if geometry[index][0] else "SLOT_NOT_AVAILABLE"
+            )
+            if chosen is not None:
+                held.append((chosen.symbol, slots[index]))
+
+    # Fase 3 — le righe, nell'ordine in cui gli slot sono stati dati.
+    records: list[ReplacementRecord] = []
+    for index, slot in enumerate(slots):
+        slot_available, slot_days, capital_days = geometry[index]
+        chosen = chosen_by_slot[index]
         gross = 0.0
         entry_cost = exit_cost = None
         if chosen is not None:
@@ -735,9 +830,11 @@ def build_portfolio_counterfactual(
                 cost_model_version=(
                     None if cost_model is None else cost_model.version
                 ),
-                reason_code=reason_code,
-                candidates_considered=len(candidates),
-                rejected_candidates=tuple(rejected),
+                reason_code=reason_by_slot[index],
+                candidates_considered=len(
+                    candidates_by_intent.get(slot.intent_id, ())
+                ),
+                rejected_candidates=tuple(rejected_by_slot[index]),
             )
         )
 
@@ -896,6 +993,28 @@ def reconcile_views(
 # ── Report (criterio 6) ────────────────────────────────────────────────────
 
 
+def pairs_for_window(
+    comparison: PairedComparison,
+    *,
+    policy_id: str,
+    window_start: date,
+    window_end: date,
+) -> tuple[PairedDelta, ...]:
+    """Le coppie della policy la cui coorte D0 cade dentro la finestra.
+
+    E' l'unico ritaglio del report: riepilogo, dettaglio, slot, buchi e
+    verdetto devono derivare da qui, altrimenti tornano a descrivere campioni
+    diversi — il difetto ricorrente di questa issue.
+    """
+    return tuple(
+        pair
+        for pair in comparison.pairs
+        if pair.policy_id == policy_id
+        and pair.d0 is not None
+        and window_start <= pair.d0 <= window_end
+    )
+
+
 def cohort_intents_for_window(
     comparison: PairedComparison,
     *,
@@ -903,19 +1022,15 @@ def cohort_intents_for_window(
     window_start: date,
     window_end: date,
 ) -> set[str]:
-    """Gli intent_id della coorte D0 pubblicata da questa finestra.
-
-    Una sola definizione perche' i consumatori sono due — il dettaglio degli
-    slot misurati e l'elenco di quelli che mancano — e due copie basterebbero a
-    far descrivere loro campioni diversi, che e' il difetto che #333 e #412
-    hanno gia' corretto altrove.
-    """
+    """Gli intent_id della coorte D0 pubblicata da questa finestra."""
     return {
         pair.intent_id
-        for pair in comparison.pairs
-        if pair.policy_id == policy_id
-        and pair.d0 is not None
-        and window_start <= pair.d0 <= window_end
+        for pair in pairs_for_window(
+            comparison,
+            policy_id=policy_id,
+            window_start=window_start,
+            window_end=window_end,
+        )
     }
 
 

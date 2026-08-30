@@ -559,6 +559,105 @@ def test_il_pnl_incrementale_e_netto_dei_costi_quando_il_cost_model_e_dato():
     assert record.cost_model_version == "cost-model:test-golden"
 
 
+# ── Un sostituto occupa un solo slot alla volta ─────────────────────────────
+
+
+def test_un_sostituto_non_occupa_due_slot_sovrapposti_della_stessa_policy():
+    """Il controfattuale e' un portafoglio: lo stesso simbolo non si compra due volte.
+
+    Due slot liberati dalla stessa policy mentre il primo e' ancora aperto
+    vedono lo stesso universo point-in-time, quindi lo stesso primo candidato.
+    Accreditandolo a entrambi il replacement varrebbe il doppio del capitale
+    che il portafoglio aveva davvero libero.
+    """
+    prima = _slot(intent_id="intent-1")
+    dopo = _slot(
+        intent_id="intent-2",
+        symbol="MSFT",
+        freed_at=EXIT_AT + timedelta(hours=1),
+    )
+    candidati = {"intent-1": [_candidate()], "intent-2": [_candidate()]}
+
+    primo, secondo = _portfolio([prima, dopo], candidati)
+
+    assert primo.substitute_symbol == "NVDA"
+    assert primo.incremental_pnl == pytest.approx(40.0)
+    assert secondo.substitute_symbol is None
+    assert secondo.reason_code == "NO_SUBSTITUTE_AVAILABLE"
+    assert secondo.incremental_pnl == pytest.approx(0.0)
+    assert (
+        "NVDA",
+        "CANDIDATE_SUBSTITUTE_ALREADY_HELD",
+    ) in secondo.rejected_candidates
+
+
+def test_due_slot_consecutivi_riusano_lo_stesso_sostituto():
+    """Il capitale si ricicla: chiuso il primo slot il simbolo torna libero."""
+    prima = _slot(intent_id="intent-1", slot_closes_at=EXIT_AT + timedelta(days=1))
+    dopo = _slot(
+        intent_id="intent-2",
+        symbol="MSFT",
+        freed_at=EXIT_AT + timedelta(days=1),
+        slot_closes_at=EXIT_AT + timedelta(days=2),
+    )
+    candidati = {"intent-1": [_candidate()], "intent-2": [_candidate()]}
+
+    primo, secondo = _portfolio([prima, dopo], candidati)
+
+    assert primo.substitute_symbol == "NVDA"
+    assert secondo.substitute_symbol == "NVDA"
+
+
+def test_due_slot_simultanei_non_si_contendono_lo_stesso_sostituto():
+    """Nessuno dei due viene prima: sceglierne uno sceglierebbe un P&L."""
+    prima = _slot(intent_id="intent-1")
+    dopo = _slot(intent_id="intent-2", symbol="MSFT")
+    candidati = {"intent-1": [_candidate()], "intent-2": [_candidate()]}
+
+    primo, secondo = _portfolio([prima, dopo], candidati)
+
+    assert primo.substitute_symbol is None
+    assert secondo.substitute_symbol is None
+    for record in (primo, secondo):
+        assert (
+            "NVDA",
+            "CANDIDATE_CONTENDED_BY_SLOT",
+        ) in record.rejected_candidates
+        assert record.incremental_pnl == pytest.approx(0.0)
+
+
+def test_una_contesa_lascia_a_ciascuno_slot_il_candidato_successivo():
+    """La contesa toglie il simbolo conteso, non l'intero universo."""
+    prima = _slot(intent_id="intent-1")
+    dopo = _slot(intent_id="intent-2", symbol="MSFT")
+    candidati = {
+        "intent-1": [_candidate(), _candidate(symbol="AVGO", rank=5, signal_id=7)],
+        "intent-2": [_candidate()],
+    }
+
+    primo, secondo = _portfolio([prima, dopo], candidati)
+
+    assert primo.substitute_symbol == "AVGO"
+    assert secondo.substitute_symbol is None
+
+
+def test_due_policy_diverse_occupano_lo_stesso_sostituto():
+    """P0 e P1 sono due mondi controfattuali distinti, non un solo portafoglio."""
+    baseline = _slot(intent_id="intent-1", policy_id="P0")
+    challenger = _slot(
+        intent_id="intent-2",
+        symbol="MSFT",
+        policy_id="P1",
+        freed_at=EXIT_AT + timedelta(hours=1),
+    )
+    candidati = {"intent-1": [_candidate()], "intent-2": [_candidate()]}
+
+    primo, secondo = _portfolio([baseline, challenger], candidati)
+
+    assert primo.substitute_symbol == "NVDA"
+    assert secondo.substitute_symbol == "NVDA"
+
+
 # ── Criterio 5: le due viste si riconciliano ────────────────────────────────
 
 

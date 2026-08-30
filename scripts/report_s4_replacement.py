@@ -18,6 +18,7 @@ from src.strategies.s4.counterfactual import (
     build_paired_comparison,
     build_portfolio_counterfactual,
     build_replacement_report,
+    pairs_for_window,
     replacement_records_for_window,
 )
 from src.strategies.s4.counterfactual_runtime import (
@@ -243,13 +244,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         window_end=args.end,
         without_slot=scan.without_slot,
     )
-    payload["paired_records"] = [
-        asdict(pair)
-        for pair in comparison.pairs
-        if pair.policy_id == policy_id
-        and pair.d0 is not None
-        and args.start <= pair.d0 <= args.end
-    ]
+    cohort = pairs_for_window(
+        comparison,
+        policy_id=policy_id,
+        window_start=args.start,
+        window_end=args.end,
+    )
+    payload["paired_records"] = [asdict(pair) for pair in cohort]
     payload["replacement_records"] = [
         asdict(record)
         for record in replacement_records_for_window(
@@ -261,11 +262,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     ]
     # Il valutatore confirmatory (#299) legge le stesse coppie del blocco
-    # `paired`: una sola sorgente, cosi' il verdetto non puo' divergere dalla
-    # misura pubblicata sopra.
+    # `paired`: la coorte D0 ritagliata, non il confronto intero. Fino a qui il
+    # ritaglio era di fatto delegato alla SQL, che filtra sulla stessa
+    # finestra; ma il verdetto e' l'unico blocco che diventa una decisione, e
+    # non puo' dipendere da un filtro che vive in un'altra funzione.
     settings = load_evaluation_settings()
     payload["evaluation"] = run_evaluation(
-        comparison.pairs,
+        cohort,
         policy_id=policy_id,
         mde_time_bps=settings.mde_time_bps,
         scheme=settings.scheme,

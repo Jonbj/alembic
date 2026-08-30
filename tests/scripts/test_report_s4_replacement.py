@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from datetime import UTC, date, datetime, timedelta
 
+import pytest
+
 import scripts.report_s4_replacement as report_script
 
 P0_EXIT = datetime(2026, 8, 25, 17, 52, tzinfo=UTC)
@@ -270,3 +272,143 @@ def test_una_finestra_di_sole_attese_dichiara_gli_slot_non_ancora_misurati(
         "SLOT_CHALLENGER_STILL_OPEN": 1
     }
     assert payload["slots"]["without_slot"] == payload["paired"]["total"]
+
+
+def _overlapping_rows() -> list[dict]:
+    """Due intenti liberati dalla stessa policy mentre il primo slot e' aperto."""
+    common = {
+        "d0": date(2026, 8, 25),
+        "initial_notional": 1000.0,
+        "status": "CLOSED",
+        "virtual_exit_quantity": 10.0,
+        "comparable": True,
+    }
+    rows: list[dict] = []
+    for index, (intent_id, symbol, freed_at) in enumerate(
+        (
+            ("intent-1", "AMD", P0_EXIT),
+            ("intent-2", "MSFT", P0_EXIT + timedelta(hours=1)),
+        )
+    ):
+        rows.append(
+            {
+                **common,
+                "intent_id": intent_id,
+                "symbol": symbol,
+                "details": {"entry_fill_id": f"fill-{index}"},
+                "policy_id": "P0",
+                "reason_code": "P0_TARGET_ZERO_EXPIRED",
+                "trigger_at": freed_at,
+                "filled_at": freed_at,
+                "net_pnl": 10.0,
+            }
+        )
+        rows.append(
+            {
+                **common,
+                "intent_id": intent_id,
+                "symbol": symbol,
+                "details": {"entry_fill_id": f"fill-{index}"},
+                "policy_id": "P1",
+                "reason_code": "P1_TIME_DUE",
+                "trigger_at": P1_EXIT,
+                "filled_at": P1_EXIT,
+                "net_pnl": 35.0,
+            }
+        )
+    return rows
+
+
+def test_lo_stesso_sostituto_non_viene_accreditato_a_due_slot(monkeypatch, capsys):
+    """Il replacement non puo' valere piu' del capitale davvero libero.
+
+    Due slot sovrapposti leggono lo stesso universo point-in-time: senza
+    esclusiva il primo candidato veniva comprato due volte e il P&L
+    incrementale pubblicato dal report valeva il doppio.
+    """
+    monkeypatch.setattr(
+        report_script, "_fetch_policy_rows", lambda start, end: _overlapping_rows()
+    )
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_intent_rows",
+        lambda until: [
+            {
+                "intent_id": "candidate-nvda",
+                "symbol": "NVDA",
+                "signal_id": 5001,
+                "rank": 6,
+                "occurred_at": P0_EXIT - timedelta(seconds=1),
+                "decision_slot": P0_EXIT,
+                "decision_at": P0_EXIT - timedelta(seconds=1),
+                "is_tradable": False,
+                "reason_code": "RANK_OUTSIDE_TOP_N",
+                "s1_state": {},
+                "anti_pyramiding": False,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_candidate_bars",
+        lambda symbols, start, end: {
+            "NVDA": [
+                (P0_EXIT, 100.0),
+                (P0_EXIT + timedelta(hours=1), 100.0),
+                (P1_EXIT, 104.0),
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_session_dates",
+        lambda start, end: [date(2026, 8, day) for day in (25, 26, 27)],
+    )
+    monkeypatch.setattr(report_script, "VersionedTradeCostModel", lambda: None)
+
+    report_script.main(["--start", "2026-08-25", "--end", "2026-08-27"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["slots"]["total"] == 2
+    assert payload["slots"]["substitutes_selected"] == 1
+    # +4% su un solo slot da 1000 USD, non su due
+    assert payload["slots"]["incremental_pnl_usd"] == pytest.approx(-40.0)
+    occupato = [
+        row
+        for row in payload["replacement_records"]
+        if row["substitute_symbol"] is None
+    ]
+    assert ["NVDA", "CANDIDATE_SUBSTITUTE_ALREADY_HELD"] in occupato[0][
+        "rejected_candidates"
+    ]
+
+
+def test_il_verdetto_legge_la_stessa_coorte_d0_del_riepilogo(monkeypatch, capsys):
+    """L'ultimo blocco che leggeva le coppie intere invece della coorte.
+
+    Il valutatore riceveva `comparison.pairs`, non le coppie pubblicate dalla
+    finestra: oggi coincidono solo perche' la SQL filtra sullo stesso D0, ma il
+    verdetto e' l'unico blocco che diventa una decisione, quindi non puo'
+    dipendere da un filtro che vive in un'altra funzione.
+    """
+    rows = _policy_rows()
+    for row in _policy_rows():
+        rows.append(
+            {**row, "intent_id": "intent-coorte-precedente", "d0": date(2026, 8, 21)}
+        )
+
+    monkeypatch.setattr(report_script, "_fetch_policy_rows", lambda start, end: rows)
+    monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
+    monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_session_dates",
+        lambda start, end: [date(2026, 8, d) for d in (21, 24, 25, 26, 27)],
+    )
+
+    report_script.main(["--start", "2026-08-25", "--end", "2026-08-27"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["paired"]["comparable"] == 1
+    assert payload["evaluation"]["observations"] == 1
+    assert payload["evaluation"]["clusters_observed"] == 1
