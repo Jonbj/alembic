@@ -896,6 +896,29 @@ def reconcile_views(
 # ── Report (criterio 6) ────────────────────────────────────────────────────
 
 
+def cohort_intents_for_window(
+    comparison: PairedComparison,
+    *,
+    policy_id: str,
+    window_start: date,
+    window_end: date,
+) -> set[str]:
+    """Gli intent_id della coorte D0 pubblicata da questa finestra.
+
+    Una sola definizione perche' i consumatori sono due — il dettaglio degli
+    slot misurati e l'elenco di quelli che mancano — e due copie basterebbero a
+    far descrivere loro campioni diversi, che e' il difetto che #333 e #412
+    hanno gia' corretto altrove.
+    """
+    return {
+        pair.intent_id
+        for pair in comparison.pairs
+        if pair.policy_id == policy_id
+        and pair.d0 is not None
+        and window_start <= pair.d0 <= window_end
+    }
+
+
 def replacement_records_for_window(
     comparison: PairedComparison,
     records: tuple[ReplacementRecord, ...],
@@ -907,13 +930,12 @@ def replacement_records_for_window(
     """Restringe il dettaglio portfolio alla stessa coorte D0 del paired."""
     if window_end < window_start:
         raise ValueError("validation window ends before it starts")
-    cohort_intents = {
-        pair.intent_id
-        for pair in comparison.pairs
-        if pair.policy_id == policy_id
-        and pair.d0 is not None
-        and window_start <= pair.d0 <= window_end
-    }
+    cohort_intents = cohort_intents_for_window(
+        comparison,
+        policy_id=policy_id,
+        window_start=window_start,
+        window_end=window_end,
+    )
     pair_policies = {comparison.baseline_policy_id, policy_id}
     return tuple(
         record
@@ -983,6 +1005,12 @@ def build_replacement_report(
     # Stessa coorte anche per i buchi: un intento fuori finestra non porta
     # dentro il proprio motivo, altrimenti il blocco `slots` tornerebbe a
     # descrivere un campione diverso da quello pubblicato sopra.
+    cohort_intents = cohort_intents_for_window(
+        comparison,
+        policy_id=policy_id,
+        window_start=window_start,
+        window_end=window_end,
+    )
     gaps = tuple(gap for gap in without_slot if gap.intent_id in cohort_intents)
     reconciliation = reconcile_views(windowed, slots, policy_id=policy_id)
     hierarchy = active_policy_hierarchy(contract_path)
