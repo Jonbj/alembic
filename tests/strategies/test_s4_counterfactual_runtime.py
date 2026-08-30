@@ -6,7 +6,10 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from src.strategies.s4.counterfactual import build_portfolio_counterfactual
+from src.strategies.s4.counterfactual import (
+    build_paired_comparison,
+    build_portfolio_counterfactual,
+)
 from src.strategies.s4.counterfactual_runtime import (
     build_freed_slots,
     build_point_in_time_candidates,
@@ -15,6 +18,13 @@ from src.strategies.s4.counterfactual_runtime import (
 
 P0_EXIT = datetime(2026, 8, 25, 17, 52, 3, tzinfo=UTC)
 P1_EXIT = datetime(2026, 8, 27, 19, 59, tzinfo=UTC)
+# Sedute della finestra osservata: i capitale-giorni si contano su queste.
+SESSIONS = (
+    date(2026, 8, 25),
+    date(2026, 8, 26),
+    date(2026, 8, 27),
+    date(2026, 8, 28),
+)
 
 
 def _policy_row(policy_id: str, **overrides) -> dict:
@@ -104,6 +114,36 @@ def test_un_esito_non_terminale_non_inventa_uno_slot():
     ]
 
     assert build_freed_slots(outcomes, baseline_policy_id="P0", policy_id="P1") == []
+
+
+def test_una_baseline_ancora_aperta_non_dichiara_zero_capitale_giorni():
+    """Il caso live: P0 tiene ancora CSCO mentre P1 e' uscita a D+2.
+
+    La riga `OPEN` di ``s4_exit_policy_current`` porta comunque un ``trigger_at``,
+    quindi l'adattatore le assegna un ``exit_at``. Contarlo come uscita
+    pubblicherebbe zero capitale-giorni per la policy che il capitale lo sta
+    ancora occupando, e il confronto di occupazione risulterebbe invertito.
+    """
+    baseline = [
+        policy_outcome_from_row(
+            _policy_row(
+                "P0",
+                status="OPEN",
+                reason_code="P0_RUNTIME_OPEN",
+                filled_at=None,
+                trigger_at=P0_EXIT,
+                net_pnl=None,
+            )
+        )
+    ]
+    challenger = [policy_outcome_from_row(_policy_row("P1"))]
+
+    pair = build_paired_comparison(
+        baseline, challenger, sessions=SESSIONS
+    ).pairs[0]
+
+    assert pair.baseline_capital_days is None
+    assert pair.challenger_capital_days == pytest.approx(2000.0)
 
 
 def test_i_candidati_usano_solo_l_ultimo_universo_gia_osservato_e_barre_nella_finestra():
