@@ -32,6 +32,14 @@ from src.strategies.s4.evaluator_bridge import (
 )
 from src.strategies.s4.p0_baseline import VersionedTradeCostModel
 
+# Codici d'uscita. Il report stampa un JSON valido in tutti e tre i casi:
+# distinguerli e' l'unico modo perche' un chiamante sappia se la finestra e'
+# misurabile senza rileggere il payload — e perche' non confonda "non ancora
+# misurabile", che e' lo stato normale della raccolta, con un guasto.
+EXIT_RECONCILED = 0
+EXIT_NOT_RECONCILED = 1
+EXIT_NO_COMPARABLE_PAIRS = 2
+
 
 def _fetch_policy_rows(start: date, end: date) -> list[dict]:
     with (
@@ -187,7 +195,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 default=_json_default,
             )
         )
-        return 2
+        return EXIT_NO_COMPARABLE_PAIRS
 
     outcomes = [policy_outcome_from_row(row) for row in rows]
     hierarchy = active_policy_hierarchy()
@@ -283,8 +291,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     # senza coppie misurabili. Uscire 0 li' significherebbe dire "a posto"
     # proprio quando la metrica primaria non esiste.
     if payload["paired"]["comparable"] == 0:  # type: ignore[index]
-        return 2
-    return 0 if payload["reconciliation"]["reconciled"] else 1  # type: ignore[index]
+        return EXIT_NO_COMPARABLE_PAIRS
+    if payload["reconciliation"]["reconciled"]:  # type: ignore[index]
+        return EXIT_RECONCILED
+    return EXIT_NOT_RECONCILED
 
 
 if __name__ == "__main__":
