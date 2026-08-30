@@ -228,6 +228,8 @@ def test_il_dettaglio_replacement_usa_la_stessa_coorte_d0_del_riepilogo(
     assert [row["intent_id"] for row in payload["replacement_records"]] == [
         "intent-1"
     ]
+    # Ritagliata fuori, ma non taciuta: la coorte senza data ha una riga sua.
+    assert payload["undated"]["pairs"] == 1
 
 
 def test_anche_una_finestra_vuota_espone_il_blocco_di_valutazione(monkeypatch, capsys):
@@ -412,3 +414,30 @@ def test_il_verdetto_legge_la_stessa_coorte_d0_del_riepilogo(monkeypatch, capsys
     assert payload["paired"]["comparable"] == 1
     assert payload["evaluation"]["observations"] == 1
     assert payload["evaluation"]["clusters_observed"] == 1
+
+
+def test_una_coppia_senza_d0_e_nominata_invece_di_sparire(monkeypatch, capsys):
+    """La SQL ammette la riga con `COALESCE(d0, observed_at)`, il report no."""
+    rows = [dict(row, d0=None) for row in _policy_rows()]
+    monkeypatch.setattr(report_script, "_fetch_policy_rows", lambda start, end: rows)
+    monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
+    monkeypatch.setattr(
+        report_script, "_fetch_candidate_bars", lambda symbols, start, end: {}
+    )
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_session_dates",
+        lambda start, end: [date(2026, 8, day) for day in (25, 26, 27)],
+    )
+    monkeypatch.setattr(report_script, "VersionedTradeCostModel", lambda: None)
+
+    exit_code = report_script.main(["--start", "2026-08-25", "--end", "2026-08-27"])
+
+    payload = json.loads(capsys.readouterr().out)
+    # Nessuna finestra puo' pubblicarla: il ritaglio e' su D0.
+    assert payload["paired"]["total"] == 0
+    assert payload["paired"]["comparable"] == 0
+    # Ma il report la conta, invece di lasciare credere che non esista.
+    assert payload["undated"]["pairs"] == 1
+    # Senza coppie misurabili la finestra non e' un successo.
+    assert exit_code == 2
