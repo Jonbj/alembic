@@ -238,3 +238,35 @@ def test_anche_una_finestra_vuota_espone_il_blocco_di_valutazione(monkeypatch, c
     assert exit_code == 2
     assert payload["evaluation"]["observations"] == 0
     assert "no_comparable_pairs" in payload["evaluation"]["steps"][0]["notes"]
+
+
+def test_una_finestra_di_sole_attese_dichiara_gli_slot_non_ancora_misurati(
+    monkeypatch, capsys
+):
+    """`slots.total: 0` da solo si legge come "nessun opportunity cost".
+
+    Con la P1 che tiene fino a D+2, ogni intento ancora aperto spariva dal
+    blocco portfolio-level: il report pubblicava zero slot, zero capitale
+    inattivo e `reconciled: true` su una coorte in cui nessuno slot era
+    determinato. Il buco ora e' nominato e conta quanto le coppie pubblicate.
+    """
+    monkeypatch.setattr(
+        report_script, "_fetch_policy_rows", lambda start, end: _holding_rows()
+    )
+    monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
+    monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_session_dates",
+        lambda start, end: [date(2026, 8, d) for d in (25, 26, 27)],
+    )
+
+    report_script.main(["--start", "2026-08-25", "--end", "2026-08-27"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["slots"]["total"] == 0
+    assert payload["slots"]["without_slot"] == 1
+    assert payload["slots"]["without_slot_by_reason"] == {
+        "SLOT_CHALLENGER_STILL_OPEN": 1
+    }
+    assert payload["slots"]["without_slot"] == payload["paired"]["total"]

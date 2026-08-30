@@ -14,6 +14,7 @@ from src.strategies.s4.counterfactual_runtime import (
     build_freed_slots,
     build_point_in_time_candidates,
     policy_outcome_from_row,
+    scan_freed_slots,
 )
 
 P0_EXIT = datetime(2026, 8, 25, 17, 52, 3, tzinfo=UTC)
@@ -323,3 +324,38 @@ def test_un_ordine_gia_inviato_non_scavalca_il_primo_candidato_non_finanziato():
     assert record.rejected_candidates == (
         ("META", "CANDIDATE_CAPITAL_NOT_INVESTABLE"),
     )
+
+
+def test_lo_scan_nomina_gli_intenti_che_non_hanno_prodotto_uno_slot():
+    """Un intento senza slot non e' un opportunity cost nullo: e' uno non ancora misurato."""
+    outcomes = [
+        policy_outcome_from_row(_policy_row("P0")),
+        policy_outcome_from_row(
+            _policy_row("P1", status="OPEN", filled_at=None, net_pnl=None)
+        ),
+        policy_outcome_from_row(_policy_row("P0", intent_id="intent-2")),
+        policy_outcome_from_row(_policy_row("P1", intent_id="intent-3")),
+    ]
+
+    scan = scan_freed_slots(outcomes, baseline_policy_id="P0", policy_id="P1")
+
+    assert scan.slots == ()
+    assert {(gap.intent_id, gap.reason_code) for gap in scan.without_slot} == {
+        ("intent-1", "SLOT_CHALLENGER_STILL_OPEN"),
+        ("intent-2", "SLOT_CHALLENGER_MISSING"),
+        ("intent-3", "SLOT_BASELINE_MISSING"),
+    }
+    # Il costruttore storico resta la vista sui soli slot esistenti.
+    assert build_freed_slots(outcomes, baseline_policy_id="P0", policy_id="P1") == []
+
+
+def test_due_uscite_simultanee_non_lasciano_una_finestra_da_misurare():
+    outcomes = [
+        policy_outcome_from_row(_policy_row("P0")),
+        policy_outcome_from_row(_policy_row("P1", filled_at=P0_EXIT, trigger_at=P0_EXIT)),
+    ]
+
+    scan = scan_freed_slots(outcomes, baseline_policy_id="P0", policy_id="P1")
+
+    assert scan.slots == ()
+    assert [gap.reason_code for gap in scan.without_slot] == ["SLOT_SIMULTANEOUS_EXIT"]

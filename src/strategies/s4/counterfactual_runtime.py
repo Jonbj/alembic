@@ -9,6 +9,7 @@ che esisteva quando il capitale si e' liberato.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -16,6 +17,7 @@ from src.strategies.s4.counterfactual import (
     TERMINAL_STATUSES,
     FreedSlot,
     PolicyOutcome,
+    SlotGap,
     SubstituteCandidate,
 )
 
@@ -54,40 +56,82 @@ def policy_outcome_from_row(row: Mapping[str, Any]) -> PolicyOutcome:
     )
 
 
-def build_freed_slots(
+@dataclass(frozen=True)
+class FreedSlotScan:
+    """Gli slot misurabili di una coorte e, accanto, quelli che non lo sono.
+
+    Le due meta' nascono dalla stessa passata proprio perche' non possano
+    descrivere campioni diversi: e' il difetto ricorrente di questa issue.
+    """
+
+    slots: tuple[FreedSlot, ...]
+    without_slot: tuple[SlotGap, ...]
+
+
+def _slot_gap_reason(
+    baseline: PolicyOutcome | None, challenger: PolicyOutcome | None
+) -> str | None:
+    """Perche' una coppia non produce una finestra da misurare, o None se la produce.
+
+    L'ordine e' dal dato assente al dato presente ma non ancora definitivo:
+    una policy che manca del tutto non e' la stessa cosa di una che sta ancora
+    tenendo la posizione, e la seconda diventera' misurabile da sola.
+    """
+    if baseline is None:
+        return "SLOT_BASELINE_MISSING"
+    if challenger is None:
+        return "SLOT_CHALLENGER_MISSING"
+    if baseline.status not in TERMINAL_STATUSES:
+        return "SLOT_BASELINE_STILL_OPEN"
+    if challenger.status not in TERMINAL_STATUSES:
+        return "SLOT_CHALLENGER_STILL_OPEN"
+    if baseline.exit_at is None or challenger.exit_at is None:
+        return "SLOT_EXIT_TIME_MISSING"
+    if _utc(baseline.exit_at) == _utc(challenger.exit_at):
+        # Determinato, non pendente: uscendo insieme le due policy non lasciano
+        # alcun intervallo in cui una sola delle due ha capitale libero.
+        return "SLOT_SIMULTANEOUS_EXIT"
+    return None
+
+
+def scan_freed_slots(
     outcomes: Sequence[PolicyOutcome],
     *,
     baseline_policy_id: str,
     policy_id: str,
-) -> list[FreedSlot]:
+) -> FreedSlotScan:
     """Costruisce la finestra liberata dalla policy che esce per prima.
 
     Lo slot termina quando esce anche l'altra policy della coppia: oltre quel
     punto entrambe avrebbero di nuovo lo stesso capitale disponibile e non
     esiste piu' un opportunity cost attribuibile alla regola di uscita.
+
+    Gli intenti che non producono uno slot non spariscono: restano nominati in
+    `without_slot` con il motivo, perche' zero slot misurati e zero opportunity
+    cost sono affermazioni diverse.
     """
     by_key = {
         (outcome.policy_id, outcome.intent_id): outcome for outcome in outcomes
     }
     intent_ids = sorted(
-        outcome.intent_id
-        for outcome in outcomes
-        if outcome.policy_id == baseline_policy_id
+        {
+            outcome.intent_id
+            for outcome in outcomes
+            if outcome.policy_id in (baseline_policy_id, policy_id)
+        }
     )
     slots: list[FreedSlot] = []
+    gaps: list[SlotGap] = []
     for intent_id in intent_ids:
         baseline = by_key.get((baseline_policy_id, intent_id))
         challenger = by_key.get((policy_id, intent_id))
-        if baseline is None or challenger is None:
+        reason = _slot_gap_reason(baseline, challenger)
+        if reason is not None:
+            observed = baseline or challenger
+            assert observed is not None
+            gaps.append(SlotGap(intent_id, observed.symbol, reason))
             continue
-        if (
-            baseline.status not in TERMINAL_STATUSES
-            or challenger.status not in TERMINAL_STATUSES
-            or baseline.exit_at is None
-            or challenger.exit_at is None
-            or baseline.exit_at == challenger.exit_at
-        ):
-            continue
+        assert baseline is not None and challenger is not None
         earlier, later = sorted(
             (baseline, challenger), key=lambda outcome: _utc(outcome.exit_at)  # type: ignore[arg-type]
         )
@@ -102,7 +146,21 @@ def build_freed_slots(
                 slot_closes_at=_utc(later.exit_at),
             )
         )
-    return slots
+    return FreedSlotScan(slots=tuple(slots), without_slot=tuple(gaps))
+
+
+def build_freed_slots(
+    outcomes: Sequence[PolicyOutcome],
+    *,
+    baseline_policy_id: str,
+    policy_id: str,
+) -> list[FreedSlot]:
+    """I soli slot misurabili della scansione, per i consumatori che non leggono i buchi."""
+    return list(
+        scan_freed_slots(
+            outcomes, baseline_policy_id=baseline_policy_id, policy_id=policy_id
+        ).slots
+    )
 
 
 def _candidate_is_investable(row: Mapping[str, Any]) -> bool:

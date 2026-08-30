@@ -21,9 +21,9 @@ from src.strategies.s4.counterfactual import (
     replacement_records_for_window,
 )
 from src.strategies.s4.counterfactual_runtime import (
-    build_freed_slots,
     build_point_in_time_candidates,
     policy_outcome_from_row,
+    scan_freed_slots,
 )
 from src.strategies.s4.evaluator_bridge import (
     load_evaluation_settings,
@@ -209,9 +209,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         sessions=sessions,
     )
 
-    slots = build_freed_slots(
+    scan = scan_freed_slots(
         outcomes, baseline_policy_id="P0", policy_id=policy_id
     )
+    slots = list(scan.slots)
     if slots:
         intent_rows = _fetch_intent_rows(max(slot.freed_at for slot in slots))
         unpriced = build_point_in_time_candidates(slots, intent_rows, {})
@@ -240,6 +241,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         policy_id=policy_id,
         window_start=args.start,
         window_end=args.end,
+        without_slot=scan.without_slot,
     )
     payload["paired_records"] = [
         asdict(pair)

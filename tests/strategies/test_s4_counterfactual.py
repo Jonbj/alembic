@@ -19,6 +19,7 @@ from src.strategies.s4.counterfactual import (
     EXIT_FAMILY_TIME_STOP,
     FreedSlot,
     PolicyOutcome,
+    SlotGap,
     SubstituteCandidate,
     active_policy_hierarchy,
     build_paired_comparison,
@@ -1056,3 +1057,73 @@ def test_una_violazione_dentro_la_coorte_blocca_ancora_la_riconciliazione():
     assert report["paired"]["entries_frozen"] is False
     assert "ENTRIES_NOT_FROZEN" in report["reconciliation"]["blocking_reasons"]
     assert report["reconciliation"]["reconciled"] is False
+
+
+def test_gli_slot_mancanti_sono_nominati_invece_di_sparire_dal_report():
+    """`slots.total` da solo non distingue "nessun costo" da "non ancora misurato"."""
+    baseline = [_outcome("P0"), _outcome("P0", intent_id="intent-2")]
+    challenger = [
+        _outcome("P1", net_pnl=35.0, exit_reason_code="P1_TIME_DUE"),
+        _outcome(
+            "P1",
+            intent_id="intent-2",
+            status="OPEN",
+            exit_reason_code="P1_HOLDING",
+            net_pnl=None,
+        ),
+    ]
+    records = build_portfolio_counterfactual(
+        [_slot()], {"intent-1": [_candidate()]}, sessions=SESSIONS
+    )
+
+    report = build_replacement_report(
+        _paired(baseline, challenger),
+        records,
+        policy_id="P1",
+        window_start=date(2026, 8, 1),
+        window_end=date(2026, 8, 31),
+        without_slot=(SlotGap("intent-2", "AMD", "SLOT_CHALLENGER_STILL_OPEN"),),
+    )
+
+    assert report["slots"]["total"] == 1
+    assert report["slots"]["without_slot"] == 1
+    assert report["slots"]["without_slot_by_reason"] == {
+        "SLOT_CHALLENGER_STILL_OPEN": 1
+    }
+    # L'identita' che rende leggibile il blocco: ogni coppia pubblicata ha uno
+    # slot misurato oppure un motivo per cui non ce l'ha.
+    assert (
+        report["slots"]["total"] + report["slots"]["without_slot"]
+        == report["paired"]["total"]
+    )
+
+
+def test_gli_slot_mancanti_sono_ritagliati_sulla_stessa_coorte_d0():
+    """Un intento fuori finestra non porta il suo buco dentro il report."""
+    baseline = [_outcome("P0", d0=date(2026, 7, 31), intent_id="intent-fuori")]
+    challenger = [
+        _outcome(
+            "P1",
+            d0=date(2026, 7, 31),
+            intent_id="intent-fuori",
+            status="OPEN",
+            exit_reason_code="P1_HOLDING",
+            net_pnl=None,
+        )
+    ]
+
+    report = build_replacement_report(
+        _paired(baseline, challenger),
+        (),
+        policy_id="P1",
+        window_start=date(2026, 8, 1),
+        window_end=date(2026, 8, 31),
+        without_slot=(
+            SlotGap("intent-fuori", "AMD", "SLOT_CHALLENGER_STILL_OPEN"),
+        ),
+    )
+
+    assert report["paired"]["total"] == 0
+    assert report["slots"]["total"] == 0
+    assert report["slots"]["without_slot"] == 0
+    assert report["slots"]["without_slot_by_reason"] == {}
