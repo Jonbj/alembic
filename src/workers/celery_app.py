@@ -40,6 +40,7 @@ app = Celery(
         "src.workers.telegram_poller",
         "src.workers.mobile_alert_task",
         "src.workers.mobile_monitor_task",
+        "src.workers.held_news_loss_alert",
     ],
 )
 
@@ -196,6 +197,14 @@ app.conf.beat_schedule = {
     "mobile-alert-evaluation": {
         "task": "src.workers.mobile_alert_task.run_mobile_alert_evaluation",
         "schedule": crontab(minute="*/1"),
+    },
+    # #324: EOD warning for held positions down >=3% from entry with no news
+    # and no sentiment signals for at least two consecutive market sessions.
+    # Instrumentation only: it writes mobile incidents, never signals or orders.
+    # 22:50 UTC is after the US close in both EDT and EST.
+    "held-news-loss-alert": {
+        "task": "src.workers.held_news_loss_alert.run_held_news_loss_alert",
+        "schedule": crontab(hour=22, minute=50, day_of_week="1-5"),
     },
     # Nightly retention sweep at 03:30 UTC
     "run-retention-sweep": {

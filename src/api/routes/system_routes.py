@@ -68,6 +68,14 @@ _SCHEDULE = [
         "db_col": None,
     },
     {
+        "task": "held-news-loss-alert",
+        "description": "Held losses with no news coverage for 2+ sessions",
+        "cron": "50 22 * * 1-5",
+        "human": "22:50 UTC Mon–Fri (after US close in EDT and EST)",
+        "db_table": None,
+        "db_col": None,
+    },
+    {
         "task": "regime-detector",
         "description": "Macro → LLM pair → regime multiplier (premarket rerun 13:30)",
         "cron": "0 7 * * 1-5",

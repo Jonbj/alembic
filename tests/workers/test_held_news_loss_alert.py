@@ -135,6 +135,8 @@ def test_alert_ha_un_run_eod_separato_dal_money_path() -> None:
 
     entry = app.conf.beat_schedule["held-news-loss-alert"]
     assert entry["task"] == run_held_news_loss_alert.name
-    assert set(entry["schedule"].hour) == {21}
+    # 22:50 UTC resta dopo il close sia in EDT sia in EST: l'alert non eredita
+    # il difetto DST del beat intraday tracciato in #404.
+    assert set(entry["schedule"].hour) == {22}
     assert set(entry["schedule"].minute) == {50}
     assert set(entry["schedule"].day_of_week) == {1, 2, 3, 4, 5}
