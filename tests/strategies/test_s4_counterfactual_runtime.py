@@ -207,7 +207,7 @@ def test_una_sola_barra_non_inventa_anche_il_prezzo_di_uscita():
         {"NVDA": [(P0_EXIT + timedelta(minutes=1), 100.0)]},
     )["intent-1"]
     [record] = build_portfolio_counterfactual(
-        [slot], {"intent-1": candidates}
+        [slot], {"intent-1": candidates}, sessions=SESSIONS
     )
 
     assert candidates[0].entry_price == pytest.approx(100.0)
