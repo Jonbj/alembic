@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, date, datetime, timedelta
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -19,6 +20,8 @@ def _policy_rows() -> list[dict]:
         "symbol": "AMD",
         "d0": date(2026, 8, 25),
         "initial_notional": 1000.0,
+        "entry_cost_usd": 1.0,
+        "cost_model_version": "cost-model:test-golden",
         "status": "CLOSED",
         "virtual_exit_quantity": 10.0,
         "comparable": True,
@@ -42,6 +45,23 @@ def _policy_rows() -> list[dict]:
             "net_pnl": 35.0,
         },
     ]
+
+
+def test_query_legge_i_costi_di_ingresso_condivisi(monkeypatch):
+    connection = MagicMock()
+    cursor = MagicMock()
+    connection.__enter__.return_value = connection
+    connection.cursor.return_value.__enter__.return_value = cursor
+    cursor.fetchall.return_value = []
+    monkeypatch.setattr(
+        report_script.psycopg2, "connect", lambda *args, **kwargs: connection
+    )
+
+    report_script._fetch_policy_rows(date(2026, 8, 25), date(2026, 8, 27))
+
+    sql = cursor.execute.call_args.args[0]
+    assert "entry_cost_usd" in sql
+    assert "cost_model_version" in sql
 
 
 def test_cli_stampa_report_e_dettaglio_sostituto(monkeypatch, capsys):
@@ -281,6 +301,8 @@ def _overlapping_rows() -> list[dict]:
     common = {
         "d0": date(2026, 8, 25),
         "initial_notional": 1000.0,
+        "entry_cost_usd": 1.0,
+        "cost_model_version": "cost-model:test-golden",
         "status": "CLOSED",
         "virtual_exit_quantity": 10.0,
         "comparable": True,

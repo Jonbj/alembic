@@ -132,6 +132,8 @@ def _outcome(policy_id: str, **overrides) -> PolicyOutcome:
         "d0": D0,
         "entry_fill_id": "fill-1",
         "initial_notional": 1000.0,
+        "entry_cost_usd": 1.0,
+        "cost_model_version": "cost-model:test-golden",
         "status": "CLOSED",
         "exit_reason_code": "P0_TARGET_ZERO_EXPIRED",
         "exit_at": EXIT_AT,
@@ -196,6 +198,8 @@ def test_outcome_si_deriva_da_un_evento_p0_reale_senza_nuovo_contratto():
     assert outcome.intent_id == event.intent_id
     assert outcome.entry_fill_id == event.details["entry_fill_id"]
     assert outcome.initial_notional == pytest.approx(event.initial_notional)
+    assert outcome.entry_cost_usd == pytest.approx(event.entry_cost_usd)
+    assert outcome.cost_model_version == event.cost_model_version
     assert outcome.net_pnl == pytest.approx(event.net_pnl)
     assert outcome.exit_reason_code == event.reason_code
     assert outcome.d0 == event.d0
@@ -239,6 +243,51 @@ def test_paired_scarta_la_coppia_se_il_fill_di_ingresso_differisce():
 
     assert comparison.pairs[0].comparable is False
     assert "PAIRED_ENTRY_FILL_MISMATCH" in comparison.pairs[0].exclusion_reasons
+
+
+def test_paired_scarta_la_coppia_se_il_costo_di_ingresso_differisce():
+    baseline = [_outcome("P0", entry_cost_usd=1.0)]
+    challenger = [_outcome("P1", entry_cost_usd=1.5)]
+
+    comparison = _paired(baseline, challenger)
+
+    pair = comparison.pairs[0]
+    assert pair.comparable is False
+    assert "PAIRED_ENTRY_COST_MISMATCH" in pair.exclusion_reasons
+    assert pair.delta_bps is None
+
+
+def test_paired_non_assume_condiviso_un_costo_di_ingresso_mancante():
+    baseline = [_outcome("P0", entry_cost_usd=None)]
+    challenger = [_outcome("P1", entry_cost_usd=None)]
+
+    comparison = _paired(baseline, challenger)
+
+    pair = comparison.pairs[0]
+    assert pair.comparable is False
+    assert "PAIRED_ENTRY_COST_MISSING" in pair.exclusion_reasons
+
+
+def test_paired_scarta_modelli_di_costo_diversi_anche_se_il_costo_coincide():
+    baseline = [_outcome("P0", cost_model_version="cost-model:v1")]
+    challenger = [_outcome("P1", cost_model_version="cost-model:v2")]
+
+    comparison = _paired(baseline, challenger)
+
+    pair = comparison.pairs[0]
+    assert pair.comparable is False
+    assert "PAIRED_COST_MODEL_MISMATCH" in pair.exclusion_reasons
+
+
+def test_paired_non_assume_condiviso_un_modello_di_costo_mancante():
+    baseline = [_outcome("P0", cost_model_version=None)]
+    challenger = [_outcome("P1", cost_model_version=None)]
+
+    comparison = _paired(baseline, challenger)
+
+    pair = comparison.pairs[0]
+    assert pair.comparable is False
+    assert "PAIRED_COST_MODEL_MISSING" in pair.exclusion_reasons
 
 
 def test_paired_segnala_un_intento_challenger_assente_dalla_baseline():

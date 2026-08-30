@@ -35,6 +35,8 @@ def _policy_row(policy_id: str, **overrides) -> dict:
         "symbol": "AMD",
         "d0": date(2026, 8, 25),
         "initial_notional": 1000.0,
+        "entry_cost_usd": 1.0,
+        "cost_model_version": "cost-model:test-golden",
         "status": "CLOSED",
         "reason_code": (
             "P0_TARGET_ZERO_EXPIRED" if policy_id == "P0" else "P1_TIME_DUE"
@@ -73,6 +75,8 @@ def test_policy_row_diventa_outcome_senza_reinterpretare_la_provenance():
 
     assert outcome.intent_id == "intent-1"
     assert outcome.entry_fill_id == "fill-1"
+    assert outcome.entry_cost_usd == pytest.approx(1.0)
+    assert outcome.cost_model_version == "cost-model:test-golden"
     assert outcome.exit_at == P0_EXIT
     assert outcome.net_pnl == pytest.approx(10.0)
     assert outcome.comparable is True
