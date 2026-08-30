@@ -133,6 +133,10 @@ def _prices_in_window(
     )
     if not observed:
         return 0.0, None
+    # Una sola osservazione puo' valorizzare l'ingresso, non anche un'uscita
+    # successiva: riusarla trasformerebbe una barra mancante in rendimento zero.
+    if observed[-1][0] == observed[0][0]:
+        return observed[0][1], None
     return observed[0][1], observed[-1][1]
 
 
