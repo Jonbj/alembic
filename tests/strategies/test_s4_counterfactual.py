@@ -1226,3 +1226,108 @@ def test_gli_slot_mancanti_sono_ritagliati_sulla_stessa_coorte_d0():
     assert report["slots"]["total"] == 0
     assert report["slots"]["without_slot"] == 0
     assert report["slots"]["without_slot_by_reason"] == {}
+
+
+# ── Coppie senza D0: fuori da ogni finestra, quindi nominate ────────────────
+
+
+def test_una_coppia_senza_d0_non_e_comparabile_perche_nessuna_finestra_la_pubblica():
+    """Senza seduta d'ingresso la coppia non ha ne' coorte ne' cluster."""
+    baseline = [_outcome("P0", d0=None)]
+    challenger = [
+        _outcome("P1", d0=None, net_pnl=90.0, exit_reason_code="P1_TIME_DUE")
+    ]
+
+    comparison = _paired(baseline, challenger)
+
+    pair = comparison.pairs[0]
+    assert pair.comparable is False
+    assert "PAIRED_D0_MISSING" in pair.exclusion_reasons
+    # Il delta esisteva e finiva nella metrica primaria del confronto intero
+    # pur non potendo comparire in nessun report per finestra.
+    assert comparison.net_delta_usd("P1") == pytest.approx(0.0)
+    assert comparison.mean_delta_bps("P1") is None
+
+
+def test_un_solo_lato_senza_d0_non_diventa_una_semplice_discordanza():
+    baseline = [_outcome("P0")]
+    challenger = [
+        _outcome("P1", d0=None, net_pnl=35.0, exit_reason_code="P1_TIME_DUE")
+    ]
+
+    pair = _paired(baseline, challenger).pairs[0]
+
+    assert "PAIRED_D0_MISSING" in pair.exclusion_reasons
+    assert "PAIRED_D0_MISMATCH" not in pair.exclusion_reasons
+
+
+def test_il_report_nomina_le_coppie_senza_data_invece_di_farle_sparire():
+    """Una coorte senza D0 non appartiene a nessuna finestra: va detto."""
+    baseline = [_outcome("P0", intent_id="intent-senza-d0", d0=None)]
+    challenger = [
+        _outcome(
+            "P1",
+            intent_id="intent-senza-d0",
+            d0=None,
+            net_pnl=90.0,
+            exit_reason_code="P1_TIME_DUE",
+        )
+    ]
+    records = _portfolio(
+        [_slot(intent_id="intent-senza-d0")],
+        {"intent-senza-d0": [_candidate()]},
+    )
+
+    report = build_replacement_report(
+        _paired(baseline, challenger),
+        records,
+        policy_id="P1",
+        window_start=date(2026, 8, 1),
+        window_end=date(2026, 8, 31),
+        without_slot=(
+            SlotGap("intent-senza-d0", "AMD", "SLOT_CHALLENGER_STILL_OPEN"),
+        ),
+    )
+
+    # Il ritaglio resta quello: una coppia senza D0 non entra nella finestra.
+    assert report["paired"]["total"] == 0
+    assert report["slots"]["total"] == 0
+    assert report["slots"]["without_slot"] == 0
+    # Ma smette di sparire: il report dichiara cosa nessuna finestra pubblica.
+    assert report["undated"] == {"pairs": 1, "slots": 1, "without_slot": 1}
+
+
+def test_un_trade_nato_dal_cash_liberato_senza_d0_resta_dichiarato():
+    """`entries_frozen` non deve tacere su un intento che nessuna finestra vede."""
+    challenger = [
+        _outcome(
+            "P1",
+            intent_id="intent-nuovo",
+            d0=None,
+            net_pnl=35.0,
+            exit_reason_code="P1_TIME_DUE",
+        )
+    ]
+
+    report = build_replacement_report(
+        _paired([], challenger),
+        (),
+        policy_id="P1",
+        window_start=date(2026, 8, 1),
+        window_end=date(2026, 8, 31),
+    )
+
+    assert report["paired"]["entries_frozen"] is True
+    assert report["undated"]["pairs"] == 1
+
+
+def test_una_finestra_senza_coppie_senza_data_dichiara_zero():
+    report = build_replacement_report(
+        _paired([_outcome("P0")], [_outcome("P1", net_pnl=35.0)]),
+        (),
+        policy_id="P1",
+        window_start=date(2026, 8, 1),
+        window_end=date(2026, 8, 31),
+    )
+
+    assert report["undated"] == {"pairs": 0, "slots": 0, "without_slot": 0}

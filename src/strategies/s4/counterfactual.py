@@ -395,7 +395,17 @@ def build_paired_comparison(
 
         if base.symbol != challenger.symbol:
             reasons.append("PAIRED_SYMBOL_MISMATCH")
-        if base.d0 != challenger.d0:
+        if base.d0 is None or challenger.d0 is None:
+            # D0 non e' un attributo descrittivo: e' il ritaglio del report
+            # (`pairs_for_window`) e il cluster del valutatore
+            # (`observations_from_pairs`). Senza, la coppia non appartiene ad
+            # alcuna finestra e ad alcun cluster, quindi nessun report la
+            # pubblichera' mai — ma `None != None` e' falso, cosi' due lati
+            # entrambi senza data superavano il confronto e il loro delta
+            # entrava nella metrica del confronto intero. Dichiararla esclusa
+            # allinea il confronto a chi lo legge.
+            reasons.append("PAIRED_D0_MISSING")
+        elif base.d0 != challenger.d0:
             reasons.append("PAIRED_D0_MISMATCH")
         if base.entry_fill_id != challenger.entry_fill_id:
             reasons.append("PAIRED_ENTRY_FILL_MISMATCH")
@@ -1069,7 +1079,14 @@ def build_replacement_report(
     without_slot: Sequence[SlotGap] = (),
     contract_path: Path | None = None,
 ) -> dict[str, object]:
-    """Le due viste in una riga logica per finestra, con i residui contati."""
+    """Le due viste in una riga logica per finestra, con i residui contati.
+
+    Il blocco `undated` sta accanto ai due, non dentro: raccoglie le coppie —
+    e i loro slot — che nessuna finestra puo' pubblicare perche' non portano
+    un D0 su cui ritagliare. Restano fuori da `paired` e da `slots`, che
+    devono continuare a descrivere una coorte sola, ma vengono contate: una
+    coppia irreportabile e una coppia inesistente non sono la stessa cosa.
+    """
     if window_end < window_start:
         raise ValueError("validation window ends before it starts")
 
@@ -1127,6 +1144,33 @@ def build_replacement_report(
         window_end=window_end,
     )
     gaps = tuple(gap for gap in without_slot if gap.intent_id in cohort_intents)
+    # Le coppie senza D0 non cadono fuori da *questa* finestra: cadono fuori da
+    # tutte, perche' il ritaglio e' proprio su D0. Senza una riga che le conti,
+    # una coppia irreportabile si legge come una coppia inesistente — la stessa
+    # confusione che `without_slot` toglie agli slot. Restano fuori dai blocchi
+    # per finestra, che devono continuare a descrivere una coorte sola.
+    undated_intents = {
+        pair.intent_id
+        for pair in comparison.pairs
+        if pair.policy_id == policy_id and pair.d0 is None
+    }
+    undated_policies = {comparison.baseline_policy_id, policy_id}
+    undated = {
+        "pairs": sum(
+            1
+            for pair in comparison.pairs
+            if pair.policy_id == policy_id and pair.d0 is None
+        ),
+        "slots": sum(
+            1
+            for record in records
+            if record.intent_id in undated_intents
+            and record.policy_id in undated_policies
+        ),
+        "without_slot": sum(
+            1 for gap in without_slot if gap.intent_id in undated_intents
+        ),
+    }
     reconciliation = reconcile_views(windowed, slots, policy_id=policy_id)
     hierarchy = active_policy_hierarchy(contract_path)
 
@@ -1176,6 +1220,8 @@ def build_replacement_report(
             ),
             "incremental_pnl_usd": reconciliation.reinvestment_usd,
         },
+        # Cio' che nessuna finestra puo' pubblicare, contato una volta sola.
+        "undated": undated,
         "reconciliation": {
             "trade_level_net_usd": reconciliation.trade_level_net_usd,
             "reinvestment_usd": reconciliation.reinvestment_usd,
