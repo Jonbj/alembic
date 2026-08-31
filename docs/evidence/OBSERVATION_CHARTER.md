@@ -47,6 +47,7 @@ Ogni eccezione applicata va annotata qui con data, motivo e commit.
 | 2026-08-07 | Il ratchet non alza il gate d'ingresso di S4 sopra il baseline 0,30 (#191) | La leva era salita da sola a **0,45** scartando il 93-97% dei segnali. Il freeze aveva congelato la taratura *manuale*, non questa leva *automatica*. Senza la deroga, la domanda di uscita n.1 si auto-risponde: con S4 che quasi non tratta, il suo P&L economico resta dentro ±$200 **per costruzione**, e al 28/09 concluderemmo «la news non ha alpha» quando la causa è il gate. Lo strumento risolverebbe la domanda al posto del fenomeno. **Perimetro:** solo il tetto della leva; `threshold_step`, il trigger, il decay e il ramo `regime_scale` restano intatti. | vedi #191 |
 | 2026-08-14 | **#236 deployato**: il filtro QS-07 non riscarta più i segnali che FIX-D ha ri-ammesso | Dentro la deroga d'ambito concessa il 2026-08-13. È un difetto di correttezza e passa il test di esenzione: FIX-D decide di tenere aperta una posizione perché la scadenza di un segnale non è un contro-segnale, e un filtro a valle annullava quella decisione sull'orologio — 30 uscite a peso-zero in 40 giorni, fra cui IBM (−26,47 $ realizzati, +13,71 $ lasciati sul tavolo). Finché S4 esegue, ogni giorno di attesa ne produce altre, quindi il deploy è anticipato rispetto al batch unico. **Perimetro:** solo l'esenzione per provenienza; il filtro d'età resta intatto per i segnali non marcati (backtest) e il ramo `below_entry_gate` (#170) non è toccato. | vedi #236 |
 | 2026-08-07 | Stopgap manuale sulla chiave Redis `feedback:entry_threshold:S4`, da 0,45 a 0,30 | La correzione di codice di #191 richiede rebuild e redeploy (`config/trading.yaml` è baked, non montato). Ogni giorno di attesa è un giorno di finestra speso al 5% dei segnali. **Temporaneo:** al prossimo trigger il ratchet la rialza finché #191 non è deployata. | nessuno: intervento su Redis, non sul repo |
+| 2026-08-31 | Alert EOD sulle posizioni detenute in perdita e senza copertura news (#324) | Il caso esplicito della issue non aveva un canale: una posizione ancora detenuta, in perdita marcata dall'ingresso, può restare più sedute senza una riga `news_log` e quindi senza alcuna possibilità di produrre un segnale sentiment di uscita — e nessuno se ne accorge, perché i candidati miss della FASE 3 escludono per costruzione i simboli in portafoglio. Stesso profilo di #161: è **strumentazione** — non cambia cosa compriamo, con che size, né quando vendiamo — quindi non è propriamente una deroga, registrata qui per tracciabilità. La soglia (perdita ≥ 3% dall'ingresso, ≥ 2 sedute consecutive senza righe, zero segnali nella seduta) **non è una nuova taratura**: è la definizione di misura già introdotta da #394, e il job la riusa importando `build_exit_coverage`, non ricopiandola. **Perimetro:** scrive incidenti mobile WARNING deduplicati per ticker e nient'altro; nessun segnale, nessun ordine, non è letto dal ciclo di portafoglio. Dato incompleto → `UNKNOWN`, che **preserva** l'incidente attivo invece di dichiarare una falsa rientranza. **Vedi la voce corrispondente fra le discontinuità: l'alert apre un percorso operatore-nel-ciclo che prima non esisteva.** | merged `e62619a`; **deploy non ancora avvenuto al momento della scrittura — hash e data da confermare al primo giro delle 22:50 UTC** |
 | 2026-08-25 | **#182(a)**: `sentiment_reversal` di S4 non chiude più posizioni che S4 non ha aperto | La regola di precedenza sulle uscite era decisa dal 2026-08-22 con implementazione rinviata al 28/09. Ma il meccanismo era spento **per caso** — il ratchet a 0,45 (#191) silenziava S4 dal 31/07 — e col gate rimesso a 0,30 si è ri-armato: le sedute che restano sono le prime della finestra in cui l'overlay può davvero liquidare il core, quindi il P&L S4 raccolto per la domanda 1 conterrebbe per costruzione il costo di un meccanismo già deciso da togliere. Costo misurato: 22 uscite `sentiment_reversal` su 22 hanno liquidato core o legacy, **zero** posizioni S4; −$350,90 su titoli altrui (58% delle perdite realizzate della finestra da 16% dei trade) contro **+$1,30** sui titoli propri. Stesso test di esenzione di #236. **Perimetro:** solo il titolo a chiudere posizioni altrui; posizioni proprie di S4, veto sugli ingressi, `stop_loss`, `portfolio_sell` e il clock di #334 restano intatti. Attribuzione dubbia → **non si chiude** (fail-closed). | **deroga concessa il 2026-08-25; deploy non ancora avvenuto — hash da inserire al merge** |
 
 Il **ritiro di F8** deciso lo stesso giorno (#134) non compare qui: `apply_regime_scale: false`
@@ -93,6 +94,31 @@ invece che mediate sull'intera finestra:
   Le migration 050 e 051 sono state applicate al live lo stesso giorno; 050 era su main dal merge di
   #294 ma non era mai stata applicata, quindi il ledger degli intenti S4 comincia a popolarsi da
   qui, non dal merge di #294.
+
+- **#324 / copertura news lato uscita (deploy `34940df` il 2026-08-29, 09:28 UTC)** — **perimetro**
+  = la sola chiave `copertura_uscita` del dossier (schema 2.5 → 2.6) e le colonne che porta con se':
+  `cieco_lato_uscita`, `ritorno_da_ingresso`, `sedute_consecutive_senza_righe`,
+  `fonti_osservate_finestra`. Nessuna soglia, peso, flag o parametro di strategia è toccato, e il
+  comportamento degli ordini non cambia: è strumentazione, dentro il perimetro d'esenzione. Ma
+  **cambia l'oggetto con cui osserviamo**, ed è il caso già visto col batch del 2026-08-25: i
+  dossier fino a `2026-08-27.json` **non hanno il campo**, e il primo a portarlo è quello generato
+  dal primo giro feriale dopo il deploy. Al giorno 40, «nessuna posizione cieca a inizio agosto»
+  significa **non misurato**, non «zero»: la serie di `copertura_uscita` comincia qui e va letta
+  solo in avanti. La misura nasce da un difetto reale e verificato sul live —
+  `compute_miss_candidates` filtra `sym not in in_portafoglio`, quindi una posizione detenuta a zero
+  righe news non compariva in **nessuna** riga del dossier (il 2026-08-19: 48 posizioni vive
+  all'open, 18 a zero righe news).
+
+- **#324 / alert EOD e percorso operatore-nel-ciclo (registrato in anticipo, 2026-08-31)** —
+  annotato *prima* del deploy, col pattern di #182(a) e delle voci del 2026-08-01, perché la
+  discontinuità sia dichiarata e non ricostruita a posteriori. Il job (`e62619a`, beat 22:50 UTC
+  Lun–Ven) **non tocca il comportamento live**: scrive incidenti mobile e nulla più, quindi di per
+  sé **non spezza la serie osservata**, come #293. La discontinuità possibile è di un altro tipo
+  e riguarda noi: dal primo giro in avanti l'operatore **vede** una classe di posizioni che prima
+  non gli era segnalata, e se in reazione ne chiude una a mano, quella uscita ha per causa l'alert,
+  non la strategia. Un'uscita manuale su un ticker che l'alert aveva segnalato **va annotata qui
+  con data e ticker**, altrimenti al 28/09 entra nel P&L di S1 o S4 come se fosse loro. Se nessuna
+  avviene, questa voce resta senza seguito e la serie è continua.
 
 - **#293 / trial exit S4 (deroga registrata in anticipo, 2026-08-22)** — **data** = `n=0` del trial
   exit, non ancora fissata: coincide col batch atomico che apre la raccolta (§ Sequenza punto 3 della
