@@ -79,6 +79,18 @@ INIZIO_OSSERVAZIONE = date(2026, 8, 3)
 DOSSIER_SCHEMA_VERSION = "2.6"
 NEW_YORK = ZoneInfo("America/New_York")
 
+
+class GiornoNonBorsa(SystemExit):
+    """Giorno saltato legittimamente: non e' una seduta di borsa (nessuna barra).
+
+    Distingue lo skip benigno dal fallimento di query (#396): ``main()`` la tratta
+    come giorno non lavorabile, mentre una ``SystemExit`` generica (es.
+    "Query fallita: ...") e' un errore reale che deve far uscire il cron non-zero.
+    Resta sottoclasse di ``SystemExit`` per compatibilita' con i chiamanti che
+    catturavano gia' ``SystemExit`` come skip di giornata.
+    """
+
+
 # Size plausibile di uno slot S4 per lo stimatore v2 (#280): fixed-slot sizing
 # = bucket_pct(0.10) / n_top(5) = 2% di NAV. ~$2.200 sul conto paper da ~$110k
 # (la stessa base del prompt alpha-miner). La size e' un'assunzione congetturale
@@ -193,7 +205,7 @@ def _barre(simboli: list[str], giorno: date) -> dict[str, dict]:
     )
     df = client.get_stock_bars(req).df
     if df is None or df.empty:
-        raise SystemExit(f"Nessuna barra per il {giorno}: data non di borsa o dati assenti.")
+        raise GiornoNonBorsa(f"Nessuna barra per il {giorno}: data non di borsa o dati assenti.")
 
     out: dict[str, dict] = {}
     for sym in simboli:
@@ -906,8 +918,8 @@ def _s4_entry_intents(giorno: date) -> list[dict]:
         f"    AND entry_time < intent.decision_slot + INTERVAL '15 minutes' "
         f"  ORDER BY entry_time, id LIMIT 1"
         f") trade ON true "
-        f"WHERE decision_at >= '{g}' AND decision_at < '{g}'::date + 1 "
-        f"ORDER BY decision_at, intent_id;"
+        f"WHERE intent.decision_at >= '{g}' AND intent.decision_at < '{g}'::date + 1 "
+        f"ORDER BY intent.decision_at, intent_id;"
     )
     return [
         {
@@ -1147,7 +1159,7 @@ def costruisci_dossier(
     benchmark_symbols = {"SPY", *SECTOR_ETF_BY_SECTOR.values()}
     barre = _barre(sorted(set(simboli) | benchmark_symbols), giorno)
     if not any(symbol in barre for symbol in simboli):
-        raise SystemExit(f"{g}: nessuna barra per l'intera watchlist — non e' un giorno di borsa.")
+        raise GiornoNonBorsa(f"{g}: nessuna barra per l'intera watchlist — non e' un giorno di borsa.")
 
     # --- mercato -----------------------------------------------------------
     closes = {
@@ -1796,12 +1808,12 @@ def scrivi(dossier: dict) -> Path:
     return out
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("data", nargs="?", help="giorno da analizzare (YYYY-MM-DD)")
     ap.add_argument("--backfill-da", help="ricalcola da questa data a ieri")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     simboli = _watchlist()
 
@@ -1821,12 +1833,26 @@ def main() -> int:
     else:
         raise SystemExit("Serve una data o --backfill-da.")
 
+    # #396: un giorno saltato per errore di query NON e' uno skip benigno. Prima
+    # della qualifica di decision_at, il parse error veniva catturato qui come
+    # SystemExit, degenerato a ``INFO ... saltato`` e lo script usciva 0: il cron
+    # non vedeva il fallimento e il dossier moriva in silenzio per 3 sedute.
+    # ``GiornoNonBorsa`` e' lo skip legittimo (non e' una seduta); ogni altra
+    # ``SystemExit`` (query fallita, credenziali, ...) e' un fallimento reale: si
+    # continua a provare gli altri giorni del batch, ma il cron esce non-zero.
     scritti = 0
+    saltati = 0
+    falliti = 0
     for g in giorni:
         try:
             d = costruisci_dossier(g, simboli, fetch_remote_context=True)
-        except SystemExit as exc:
+        except GiornoNonBorsa as exc:
             log.info("%s saltato: %s", g, exc)
+            saltati += 1
+            continue
+        except SystemExit as exc:
+            log.error("%s FALLITO (non e' un giorno non di borsa): %s", g, exc)
+            falliti += 1
             continue
         p = scrivi(d)
         scritti += 1
@@ -1834,7 +1860,10 @@ def main() -> int:
         log.info("%s -> %s | mover %d (up %d, down %d) | zero-news %d | ingressi %d | chiusure %d",
                  g, p.name, m["mover_3pct"], m["up"], m["down"], m["watchlist_zero_news"],
                  len(d["ingressi"]), len(d["chiusure"]))
-    log.info("dossier scritti: %d", scritti)
+    log.info("dossier scritti: %d (saltati non-borsa: %d, falliti: %d)",
+             scritti, saltati, falliti)
+    if falliti:
+        return 1
     return 0
 
 
