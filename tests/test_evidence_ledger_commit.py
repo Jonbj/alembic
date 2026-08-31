@@ -613,6 +613,143 @@ def test_broken_worktree_registration_is_rebuilt(repo):
     assert _remote_file(repo["remote"], REPORT) == "# Alpha miss 2026-08-26 (v3)\n"
 
 
+# --- cablaggio del cron forense (#411) ---------------------------------------
+# Il gemello daily_analysis.sh ha le stesse tre modalita' di fallimento che
+# #336 aveva riscontrato sull'alpha-miss: commit nel prompt condizionato al
+# branch della tree condivisa, esito del commit mai verificato, e sessione che
+# finisce senza aver scritto il report facendo comunque uscire il cron con 0.
+
+FORENSIC_CRON = ROOT / "scripts" / "daily_analysis.sh"
+
+
+def _run_forensic_cron(
+    repo: dict, *, claude_writes_report: bool = True, extra_path: Path | None = None
+) -> tuple[subprocess.CompletedProcess[str], str, str]:
+    project, tmp = repo["project"], repo["tmp"]
+    shutil.copy2(FORENSIC_CRON, project / "scripts" / FORENSIC_CRON.name)
+    bin_dir = tmp / "bin-forensic"
+
+    session_body = (
+        "#!/usr/bin/env bash\n"
+        "printf 'Executive summary fittizio\\n'\n"
+        'cp docs/evidence/findings.json "$LEDGER_SNAPSHOT"\n'
+        "printf '%s\\n' '{\"schema_version\":1,\"prossimo_id\":2,\"findings\":[{\"id\":\"F-001\",\"titolo\":\"Finding di test\",\"occorrenze\":[{\"data\":\"2026-08-26\",\"costo_usd\":1.0,\"nota\":\"test\",\"fonte\":\"FORENSIC_DAILY_REPORT_TEST.md\"}],\"costo_cumulato_usd\":1.0,\"occorrenze_non_stimate\":0}]}' > docs/evidence/findings.json\n"
+    )
+    if claude_writes_report:
+        # Il percorso del report e' l'unico dato che serve alla sessione fittizia:
+        # lo estrae dal prompt, cosi' il test non duplica l'aritmetica dei giorni
+        # feriali del cron (lunedi' punta a venerdi'). Corrisponde solo il percorso
+        # assoluto: nel prompt c'e' anche l'esempio "FORENSIC_DAILY_REPORT_....md"
+        # della sezione fonte, quotato e relativo.
+        session_body += (
+            "REPORT_PATH=$(printf '%s' \"$*\" "
+            "| grep -oE \"/[^ ]*FORENSIC_DAILY_REPORT_[0-9-]+\\.md\")\n"
+            "printf '# Forensic\\n' > \"$REPORT_PATH\"\n"
+        )
+    _write_executable(bin_dir / "claude", session_body + "exit 0\n")
+    _write_executable(
+        bin_dir / "curl",
+        "#!/usr/bin/env bash\nprintf '%s\\n' \"$*\" >> \"$TELEGRAM_CAPTURE\"\n",
+    )
+
+    telegram = tmp / "telegram-forensic.log"
+    env = os.environ.copy()
+    env.update(
+        {
+            "ALEMBIC_API_KEY": "test-admin-key",
+            "HOME": str(tmp / "home"),
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "TELEGRAM_BOT_TOKEN": "t",
+            "TELEGRAM_CHAT_ID": "c",
+            "TELEGRAM_CAPTURE": str(telegram),
+            "LEDGER_SNAPSHOT": str(tmp / "ledger_visto_dalla_sessione.json"),
+            "EVIDENCE_WORKTREE": str(tmp / "wt-evidence"),
+            "EVIDENCE_PENDING_FILE": str(tmp / "pending.txt"),
+        }
+    )
+    if extra_path is not None:
+        env["PATH"] = f"{extra_path}:{env['PATH']}"
+    result = subprocess.run(
+        ["bash", str(project / "scripts" / FORENSIC_CRON.name)],
+        cwd=project,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+    logs = list((project / "logs").glob("daily_analysis_*.log"))
+    assert len(logs) == 1
+    return result, logs[0].read_text(), telegram.read_text()
+
+
+def _report_path_from_log(project: Path, log: str) -> str:
+    """Il cron stampa 'Report: <percorso>' prima della sessione: e' il nome file."""
+    for line in log.splitlines():
+        if line.startswith("Report: "):
+            report = line.removeprefix("Report: ")
+            return report.removeprefix(f"{project}/")
+    raise AssertionError(f"nessuna riga 'Report:' nel log:\n{log}")
+
+
+def test_forensic_cron_commits_the_report_from_a_feature_branch(repo):
+    result, log, telegram = _run_forensic_cron(repo)
+    report = _report_path_from_log(repo["project"], log)
+
+    assert result.returncode == 0, log[-2000:]
+    assert log.strip().splitlines()[-1] == "GIT_STATUS=pushed"
+    assert _remote_file(repo["remote"], report) == "# Forensic\n"
+    assert "F-001" in _remote_file(repo["remote"], LEDGER)
+    assert "GIT_STATUS=pushed" in telegram
+
+
+def test_forensic_cron_alerts_when_the_ledger_does_not_reach_main(repo):
+    _, log, telegram = _run_forensic_cron(
+        repo, extra_path=_failing_push_bin(repo["tmp"])
+    )
+
+    assert log.strip().splitlines()[-1] == "GIT_STATUS=committed_not_pushed"
+    assert "committed_not_pushed" in telegram
+    assert "⚠️" in telegram or "🚨" in telegram
+
+
+def test_forensic_cron_fails_loudly_when_the_report_is_missing(repo):
+    """Modalita' 2 della issue: sessione ok ma nessun report non puo' uscire 0."""
+    result, log, telegram = _run_forensic_cron(repo, claude_writes_report=False)
+
+    assert result.returncode != 0, log[-2000:]
+    assert "GIT_STATUS=" not in log.strip().splitlines()[-1]
+    assert "senza scrivere il report" in telegram
+    assert "⚠️" in telegram or "🚨" in telegram
+    # nessun commit di un ledger senza il report che lo giustifica
+    assert "F-001" not in _remote_file(repo["remote"], LEDGER)
+
+
+def test_forensic_cron_realigns_the_ledger_before_the_session_reads_it(repo):
+    """La sessione forense aggiorna findings.json: deve partire da main, non da
+    una copia riportata indietro da un checkout altrui (prossimo_id gia' usato)."""
+    _publish_on_main(repo, "F-002", "2026-08-24")
+
+    result, log, _ = _run_forensic_cron(repo)
+
+    assert result.returncode == 0, log[-2000:]
+    seen = json.loads((repo["tmp"] / "ledger_visto_dalla_sessione.json").read_text())
+    assert [finding["id"] for finding in seen["findings"]] == ["F-002"]
+    assert seen["prossimo_id"] == 3
+
+
+def test_forensic_prompt_no_longer_asks_the_session_to_commit():
+    source = FORENSIC_CRON.read_text()
+
+    # la guardia condizionata al branch e tutto il plumbing git escono dal prompt
+    assert "atteso main" not in source
+    assert "git rev-parse --abbrev-ref HEAD" not in source
+    assert "git push origin main" not in source
+    # e il commit passa all'helper deterministico, come nell'alpha-miss
+    assert "scripts/commit_evidence_ledger.sh" in source
+    assert "scripts/refresh_evidence_ledger.sh" in source
+
+
 # --- riallineamento dei ledger prima della sessione (#336) -----------------
 
 
