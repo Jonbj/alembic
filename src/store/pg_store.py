@@ -2391,6 +2391,13 @@ class PostgreSQLStore:
                             merged_ids.append(oid)
 
                     exhausted = remaining <= _QUANTITY_EPS
+                    if exhausted:
+                        log.info(
+                            "#397: closing trade %s (%s): position exhausted by "
+                            "broker SELL fill(s) %s newly linked to exit_order_ids",
+                            trade_id, symbol,
+                            ",".join(new_ids) or "(all already recorded)",
+                        )
                     with conn.cursor() as cur:
                         if exhausted:
                             cur.execute(
