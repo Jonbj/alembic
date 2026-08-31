@@ -207,8 +207,10 @@ lo stesso valore arriva su Telegram, e i path non ancora finiti su `main` restan
 `logs/.evidence_cron_pending` per essere ritentati al giro dopo. Per contare i fallimenti di una
 settimana: `grep -h '^GIT_STATUS=' logs/alpha_miss_analysis_*.log`.
 
-`daily_analysis.sh` (forense) usa ancora la guardia vecchia: scrive i file e stampa un avviso se non è
-su `main`.
+`daily_analysis.sh` (forense) segue lo stesso percorso (#411): la sessione scrive solo i file, il
+commit lo fa `commit_evidence_ledger.sh` con report e `findings.json` insieme, e l'esito è
+`GIT_STATUS=` in ultima riga. Per il forense inoltre il cron esce non-zero se la sessione
+termina senza aver prodotto il report.
 
 ### Scadenze armate (`scripts/deadline_reminders.conf`)
 
