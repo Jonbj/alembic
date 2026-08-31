@@ -81,7 +81,7 @@ NEW_YORK = ZoneInfo("America/New_York")
 
 
 class GiornoNonBorsa(SystemExit):
-    """Giorno saltato legittimamente: non e' una seduta di borsa (nessuna barra).
+    """Giorno saltato legittimamente: il calendario conferma il mercato chiuso.
 
     Distingue lo skip benigno dal fallimento di query (#396): ``main()`` la tratta
     come giorno non lavorabile, mentre una ``SystemExit`` generica (es.
@@ -205,7 +205,10 @@ def _barre(simboli: list[str], giorno: date) -> dict[str, dict]:
     )
     df = client.get_stock_bars(req).df
     if df is None or df.empty:
-        raise GiornoNonBorsa(f"Nessuna barra per il {giorno}: data non di borsa o dati assenti.")
+        # Un feed vuoto non prova che il mercato fosse chiuso: puo' essere un
+        # guasto o un buco dati. La classificazione autorevole viene fatta da
+        # ``costruisci_dossier`` contro il calendario Alpaca (#396).
+        return {}
 
     out: dict[str, dict] = {}
     for sym in simboli:
@@ -987,9 +990,32 @@ def _dettagli_ordini(order_ids: list[str]) -> dict[str, dict]:
     return result
 
 
-def _e_giorno_di_borsa(barre: dict) -> bool:
-    """Se nemmeno un simbolo della watchlist ha una barra, non era giorno di borsa."""
-    return len(barre) > 0
+def _e_giorno_di_borsa(giorno: date) -> bool:
+    """Verifica una data contro il calendario di mercato autorevole di Alpaca.
+
+    Questa verifica e' stretta: se il calendario non e' disponibile non possiamo
+    qualificare l'assenza di barre come skip benigno, quindi il dossier deve
+    fallire ad alta voce anziche' uscire 0 (#396).
+    """
+    from alpaca.trading.client import TradingClient
+    from alpaca.trading.requests import GetCalendarRequest
+
+    chiave = os.environ.get("ALPACA_API_KEY")
+    segreto = os.environ.get("ALPACA_SECRET_KEY")
+    if not chiave or not segreto:
+        raise SystemExit("ALPACA_API_KEY / ALPACA_SECRET_KEY mancanti (.env non caricato?)")
+
+    paper = os.environ.get("ALPACA_PAPER_MODE", "true").lower() == "true"
+    try:
+        righe = TradingClient(chiave, segreto, paper=paper).get_calendar(
+            GetCalendarRequest(start=giorno, end=giorno)
+        )
+    except Exception as exc:
+        raise SystemExit(f"Calendario di borsa non disponibile per il {giorno}: {exc}") from exc
+
+    if any(isinstance(riga, str) for riga in righe):
+        raise SystemExit(f"Calendario di borsa non valido per il {giorno}: {righe}")
+    return any(getattr(riga, "date", None) == giorno for riga in righe)
 
 
 def _cutoff_giorno(giorno: date) -> str:
@@ -1159,7 +1185,17 @@ def costruisci_dossier(
     benchmark_symbols = {"SPY", *SECTOR_ETF_BY_SECTOR.values()}
     barre = _barre(sorted(set(simboli) | benchmark_symbols), giorno)
     if not any(symbol in barre for symbol in simboli):
-        raise GiornoNonBorsa(f"{g}: nessuna barra per l'intera watchlist — non e' un giorno di borsa.")
+        # Una barra benchmark dimostra gia' che la seduta era aperta. Se manca
+        # anche quella, il calendario distingue mercato chiuso da missing data:
+        # solo il primo caso puo' restare uno skip con exit 0 (#396).
+        seduta_aperta = any(symbol in barre for symbol in benchmark_symbols)
+        if not seduta_aperta:
+            seduta_aperta = _e_giorno_di_borsa(giorno)
+        if seduta_aperta:
+            raise SystemExit(
+                f"{g}: seduta di borsa senza barre per l'intera watchlist."
+            )
+        raise GiornoNonBorsa(f"{g}: il calendario conferma che non e' un giorno di borsa.")
 
     # --- mercato -----------------------------------------------------------
     closes = {
