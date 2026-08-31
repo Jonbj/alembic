@@ -9,7 +9,6 @@ import pytest
 
 import scripts.alpha_miner_dossier as dossier
 
-
 UTC = timezone.utc
 
 
