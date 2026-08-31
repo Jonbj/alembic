@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 56,
+  "prossimo_id": 57,
   "findings": [
     {
       "id": "F-001",
@@ -122,9 +122,15 @@
           "costo_usd": 375.29,
           "nota": "53 dei 96 simboli watchlist a zero righe in news_log (45 il 08-26, 55 il 08-25, 51 il 08-24): l'interruzione del peggioramento registrata ieri NON si conferma. 133 righe da 69 articoli unici; effective-timely 26/96 = 27,1%. Per settore la copertura resta strutturalmente assente dove non c'e' flusso Benzinga: healthcare 0/9, financials 2/14, energy 1/6. Costo = somma lorda dei quattro miss NO_NEWS della giornata (PLTR $104,48 + SAP $98,63 + BIDU $86,81 + IBM $85,37); nota che SAP e' rimasto scoperto nel giorno in cui il suo catalizzatore diretto (CRM) era l'evento del mercato.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-27.md §7"
+        },
+        {
+          "data": "2026-08-13",
+          "costo_usd": 336.01,
+          "nota": "41/96 simboli (43%) zero righe in news_log il 13/08. Quattro dei nove miss del giorno sono NO_NEWS puri: ADBE (+4.54%), CRM (+4.16%), TMUS (+3.53%), RDDT (+3.04%) - zero righe in news_log, zero in sentiment_signals, zero in execution_decisions. Costo stimato con size S4 tipica $2200 sul return pieno: 99.82+91.61+77.63+66.95 = 336.01.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-13.md §3, §8"
         }
       ],
-      "costo_cumulato_usd": 2701.21,
+      "costo_cumulato_usd": 3037.22,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 2
@@ -342,7 +348,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-27.md §10 [DAY-013]"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": "#349",
       "occorrenze_non_stimate": 16
@@ -592,7 +598,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-27.md §4"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 14
@@ -742,9 +748,15 @@
           "costo_usd": 194.67,
           "nota": "Giornata di massima dispersione della finestra (sigma 3,49%) e il gate taglia due mover con segno corretto ed ensemble pieno: AVGO +0,230 su articolo issuer-specific ('rises nearly 2% premarket following strong NVIDIA earnings'), titolo +4,49%; INTC +0,228 ('is surging Thursday following Nvidia's strong Q2'), titolo +4,36%. Firma riconoscibile e nuova: sono notizie di SECONDO ORDINE - il soggetto della frase causale e' un terzo emittente, e la magnitudine assegnata resta piccola mentre il movimento e' grande. Stessa forma su ADBE (+0,060) e NOW (+0,143). Costo lordo close-to-close x $2.200: $98,68 + $95,99.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-27.md §7"
+        },
+        {
+          "data": "2026-08-28",
+          "costo_usd": 87.31,
+          "nota": "AMZN +3,97%, mover non detenuto e pienamente azionabile. Unico articolo del giorno (Anthropic/Claude, fan-out su 3 ticker) scorato +0,066: segno corretto, magnitudine un ordine di grandezza sotto il gate 0,30. Costo lordo close-to-close x $2.200 (dal campo opportunity_v2.legacy.costo_usd del dossier rigenerato) = $87,31.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-28.md §3, §7"
         }
       ],
-      "costo_cumulato_usd": 1302.9,
+      "costo_cumulato_usd": 1390.21,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -1063,10 +1075,16 @@
           "costo_usd": null,
           "nota": "64 mapping fan-out extra su 133 righe da 69 articoli unici (48,1%). mapping_rilevanza: 92 UNKNOWN contro 41 ISSUER_SPECIFIC, e ancora ZERO righe classificate SECTOR_MACRO, FALSE_ENTITY_MATCH o IRRELEVANT_FANOUT - il 69% delle righe non e' caratterizzato. Fra i candidati miss la quota di righe fan-out e' 0,889. Caso concreto: su INTC tre articoli fan-out scorati 0,000 sovrascrivono il segnale issuer-specific +0,228 (vedi F-023).",
           "fonte": "ALPHA_MISS_REPORT_2026-08-27.md §7"
+        },
+        {
+          "data": "2026-08-28",
+          "costo_usd": null,
+          "nota": "Entrambi i miss THIN_NEUTRAL della giornata sono fan-out-dominati: HOOD 2/3 righe fan-out (quota 0,667), i due articoli non riguardano HOOD (Kevin Durant/Nvidia, Tom Lee/Ethereum); AMZN 1/1 riga fan-out (quota 1,0, pezzo su Anthropic/Claude). Nessun articolo issuer-specific disponibile su nessuno dei due nella finestra osservata: non e' un caso di misclassificazione isolato ma assenza di segnale primario. Costo non stimabile separatamente da F-009 (stesso caso AMZN).",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-28.md §3, §7"
         }
       ],
       "costo_cumulato_usd": 925.31,
-      "occorrenze_non_stimate": 12,
+      "occorrenze_non_stimate": 13,
       "stato": "aperto",
       "issue": null
     },
@@ -1154,9 +1172,15 @@
           "costo_usd": 34.8,
           "nota": "Prima occorrenza con TRE round trip sullo stesso titolo nella stessa seduta, e su quello che e' stato il miglior titolo della watchlist. CRM: BUY 14:22 a 247,97 -> SELL 16:07 a 244,84 (trade 893, -$18,02, drift post-uscita +$39,83) -> BUY 17:07 a 249,26 -> SELL 18:52 a 251,61 (trade 894, +$12,13) -> BUY 19:37 a 253,23 (trade 895, MTM EOD -$6,38). Netto giornata -$12,27 su un titolo chiuso a +22,58%. Controfattuale corto: tenere il primo lotto (5,524 az. da 247,97 al close 252,05) valeva +$22,53. Costo attribuito = 22,53 - (-12,27) = $34,80.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-27.md §7"
+        },
+        {
+          "data": "2026-08-13",
+          "costo_usd": 17.23,
+          "nota": "META: BUY S4 16:37 UTC (percentile ingresso 0.467, sotto la mediana mobile 20g 0.625) -> SELL portfolio_sell ~18:22 UTC (1.75h di tenuta), net_pnl +$6.82. mtm_eod se tenuta a fine seduta sarebbe stato +$24.05 (drift_post_uscita +$16.86, il prezzo ha continuato a salire dopo l'uscita). Round-trip nella stessa seduta: costo attribuito $17.23 (differenza fra mtm_eod e realizzato), controfattuale corto (stesso simbolo, stessa quantita', nessuna riapertura). Primo caso di questo finding su META.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-13.md §4, §8"
         }
       ],
-      "costo_cumulato_usd": 88.71,
+      "costo_cumulato_usd": 105.94,
       "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
@@ -1259,7 +1283,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-27.md §7"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "occorrenze_non_stimate": 15,
       "stato": "aperto",
       "issue": null
@@ -1356,7 +1380,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-27.md §10 [DAY-014]"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "occorrenze_non_stimate": 14,
       "stato": "aperto",
       "issue": null
@@ -1393,7 +1417,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-27.md §10 [DAY-017]"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
@@ -2047,7 +2071,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-27.md §10 [DAY-006]"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "occorrenze_non_stimate": 8,
       "stato": "aperto",
       "issue": null
@@ -2319,7 +2343,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-27.md §10 [DAY-012]"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
@@ -2492,7 +2516,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-27.md §10 [DAY-011]"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 5
@@ -2565,10 +2589,16 @@
           "costo_usd": null,
           "nota": "Terza occorrenza consecutiva, causa e riga invariate dal 08-25. 'uv run python scripts/alpha_miner_dossier.py 2026-08-27' -> 'INFO 2026-08-27 saltato: Query fallita: ERROR: column reference \"decision_at\" is ambiguous' + 'dossier scritti: 0', exit code 0. Il dossier del giorno esiste solo perche' prodotto da una copia usa-e-getta in /tmp con le due referenze qualificate (intent.decision_at) e PROJECT_DIR assoluto; il repo non e' stato toccato. Un cron che non ispezioni lo stdout continua a non accorgersene.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-27.md §7"
+        },
+        {
+          "data": "2026-08-28",
+          "costo_usd": null,
+          "nota": "Quarta occorrenza consecutiva (25, 26, 27, 28 agosto), causa e riga invariate: 'column reference \"decision_at\" is ambiguous' in _s4_entry_intents (scripts/alpha_miner_dossier.py:909-910), exit code 0. Issue #396 aperta con diagnosi e fix proposto, non ancora deployato. Dossier di oggi ottenuto da copia usa-e-getta in /tmp con le due referenze qualificate (intent.decision_at); repo non modificato. Costo null: strumentazione, il danno e' la ricorrenza.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-28.md, nota di provenienza + §7"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -2596,10 +2626,16 @@
           "costo_usd": null,
           "nota": "Terza occorrenza, e la prima FALSIFICATA direttamente sui dati dello stesso giorno. aggregati.guardia_contraddizione riporta n_intenti 1700, n_intenti_tradabili 0, n_valutabili 0. La query diretta 'SELECT reason_code, count(*) FILTER (WHERE is_tradable) FROM s4_intent_events WHERE decision_slot::date=2026-08-27 AND event_type=disposition' restituisce 1700 disposition di cui 112 con is_tradable = true: 106 SKIP_PYRAMIDING, 5 SUBMITTED, 1 SKIP_IDEMPOTENCY. Lo zero e' del parser, non dei dati.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-27.md §7"
+        },
+        {
+          "data": "2026-08-28",
+          "costo_usd": null,
+          "nota": "Quarta occorrenza consecutiva. aggregati.guardia_contraddizione.giorno.n_intenti_tradabili = 0 su 1.711 intent nel dossier rigenerato di oggi, ma 'SELECT count(*) FILTER (WHERE is_tradable = true) FROM s4_intent_events WHERE decision_at::date = 2026-08-28' restituisce 86 su 3.422 righe totali. Lo zero resta del parser (is_tradable::text confrontato a 't'), non dei dati. Issue #398 aperta con la stessa diagnosi. Costo null: strumentazione.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-28.md §7"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -2723,7 +2759,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-27.md §10 [DAY-013]"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
@@ -2799,7 +2835,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-27.md §10 [DAY-004]"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -2818,8 +2854,27 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-27.md §10 [DAY-019]"
         }
       ],
-      "costo_cumulato_usd": 0.0,
+      "costo_cumulato_usd": 0,
       "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-056",
+      "titolo": "fetch_signals_for_cycle preferisce sempre il segnale non-fallback piu' recente a un segnale fallback, indipendentemente da recency o forza: un segnale fallback sopra gate puo' non essere mai valutato da S4 se esiste un segnale ensemble piu' vecchio (fino a 96h) nella stessa finestra",
+      "tipo": "difetto",
+      "confidenza": "congetturale",
+      "primo_avvistamento": "2026-08-13",
+      "occorrenze": [
+        {
+          "data": "2026-08-13",
+          "costo_usd": 56.05,
+          "nota": "Due casi indipendenti verificati via query diretta su sentiment_signals + execution_decisions. NFLX: id 7510 (14:15, score 0.138, ensemble, fallback_used=false) resta nella finestra di 96h tutto il giorno; id 7610 (17:00, score 0.36 > gate 0.30, single:glm-5.2:cloud, fallback_used=true) arriva dopo ma e' sistematicamente scartato dalla query 'DISTINCT ON (symbol) ORDER BY symbol, fallback_used ASC, generated_at DESC' (src/store/pg_store.py:2763-2788): execution_decisions per NFLX si ferma alle 15:07:10 e non produce piu' nulla dopo, nonostante 19 cicli successivi. PLTR: id 7390 (2026-08-12 16:00, score -0.012, ensemble) batte id 7613 (2026-08-13 17:15, score 0.385 > gate, single:gpt-oss:20b-cloud, fallback_used=true) per lo stesso motivo; siccome 7390 ha |score|<min_score(0.10) non produce nemmeno una riga SKIP_STALE quando invecchia oltre max_signal_age_hours=4 - risultato: zero righe in execution_decisions per PLTR in tutta la giornata del 13/08, verificato unico su 22 giorni con dati storici per quel simbolo. Costo verificato basso oggi (accessible_opportunity_usd dal dossier: NFLX $19.57 + PLTR $36.48 = $56.05) perche' gran parte del movimento era gia' avvenuta prima del primo ciclo eleggibile; il costo lordo potenziale (gross_opportunity_usd: $119.47+$102.51= $221.99) e' quasi 4x quello accessibile osservato. Distinto da F-023 (segnale forte sovrascritto da uno debole generato pochi secondi dopo, ma entrambi visibili in execution_decisions): qui il segnale forte non produce mai nessuna riga, nemmeno di skip.",
+          "fonte": "ALPHA_MISS_REPORT_2026-08-13.md §3, §8"
+        }
+      ],
+      "costo_cumulato_usd": 56.05,
+      "occorrenze_non_stimate": 0,
       "stato": "aperto",
       "issue": null
     }
