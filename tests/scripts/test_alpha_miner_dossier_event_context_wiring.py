@@ -224,7 +224,7 @@ def test_calendario_senza_credenziali_dichiara_fonti_mancanti():
     }
 
 
-def test_soli_benchmark_non_mascherano_watchlist_senza_barre():
+def test_main_fallisce_se_la_seduta_ha_solo_barre_benchmark():
     only_benchmark = {
         "SPY": {
             "open": 500.0,
@@ -235,8 +235,12 @@ def test_soli_benchmark_non_mascherano_watchlist_senza_barre():
         }
     }
     with (
+        patch.object(dossier, "_watchlist", return_value=["ZZZ"]),
         patch.object(dossier, "_barre", return_value=only_benchmark),
         patch.object(dossier, "_sector_by_ticker", return_value={}),
+        patch.object(dossier, "scrivi") as scrivi,
     ):
-        with pytest.raises(SystemExit, match="nessuna barra per l'intera watchlist"):
-            dossier.costruisci_dossier(date(2026, 8, 12), ["ZZZ"])
+        rc = dossier.main(["2026-08-12"])
+
+    assert rc == 1
+    scrivi.assert_not_called()

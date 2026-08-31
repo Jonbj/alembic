@@ -6,7 +6,11 @@ query falliva con un parse error deterministico, ma l'eccezione veniva degenerat
 a un ``INFO ... saltato`` e lo script usciva 0 — il cron non vedeva il fallimento.
 """
 
+from types import SimpleNamespace
 from unittest.mock import patch
+
+import pandas as pd
+import pytest
 
 import scripts.alpha_miner_dossier as dossier
 
@@ -59,3 +63,63 @@ def test_main_esce_zero_se_il_giorno_non_e_di_borsa():
         rc = dossier.main(["2026-08-23"])
 
     assert rc == 0
+
+
+def test_barre_vuote_non_vengono_classificate_come_giorno_non_borsa():
+    """Il feed vuoto e' missing data, non una prova che il mercato fosse chiuso.
+
+    La classificazione spetta al calendario autorevole in ``costruisci_dossier``.
+    """
+    with (
+        patch.dict("os.environ", {"ALPACA_API_KEY": "key", "ALPACA_SECRET_KEY": "secret"}),
+        patch("alpaca.data.historical.StockHistoricalDataClient") as client_cls,
+    ):
+        client_cls.return_value.get_stock_bars.return_value = SimpleNamespace(
+            df=pd.DataFrame()
+        )
+        barre = dossier._barre(["NVDA", "SPY"], dossier.date(2026, 8, 12))
+
+    assert barre == {}
+
+
+def test_main_fallisce_se_il_calendario_conferma_la_seduta_ma_mancano_tutte_le_barre():
+    with (
+        patch.object(dossier, "_watchlist", return_value=["NVDA"]),
+        patch.object(dossier, "_barre", return_value={}),
+        patch.object(dossier, "_e_giorno_di_borsa", return_value=True) as calendario,
+        patch.object(dossier, "_sector_by_ticker", return_value={}),
+        patch.object(dossier, "scrivi") as scrivi,
+    ):
+        rc = dossier.main(["2026-08-12"])
+
+    assert rc == 1
+    calendario.assert_called_once_with(dossier.date(2026, 8, 12))
+    scrivi.assert_not_called()
+
+
+def test_main_salta_solo_se_il_calendario_conferma_che_il_mercato_era_chiuso():
+    with (
+        patch.object(dossier, "_watchlist", return_value=["NVDA"]),
+        patch.object(dossier, "_barre", return_value={}),
+        patch.object(dossier, "_e_giorno_di_borsa", return_value=False) as calendario,
+        patch.object(dossier, "_sector_by_ticker", return_value={}),
+        patch.object(dossier, "scrivi") as scrivi,
+    ):
+        rc = dossier.main(["2026-08-23"])
+
+    assert rc == 0
+    calendario.assert_called_once_with(dossier.date(2026, 8, 23))
+    scrivi.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "righe, atteso",
+    [([SimpleNamespace(date=dossier.date(2026, 8, 12))], True), ([], False)],
+)
+def test_giorno_di_borsa_usa_il_calendario_alpaca(righe, atteso):
+    with (
+        patch.dict("os.environ", {"ALPACA_API_KEY": "key", "ALPACA_SECRET_KEY": "secret"}),
+        patch("alpaca.trading.client.TradingClient") as client_cls,
+    ):
+        client_cls.return_value.get_calendar.return_value = righe
+        assert dossier._e_giorno_di_borsa(dossier.date(2026, 8, 12)) is atteso
