@@ -41,6 +41,66 @@ _db_pool: pool.ThreadedConnectionPool | None = None
 SHADOW_COMPARISON_COLUMNS = ["news_log_id", "model_id", "polarity", "confidence", "parse_error"]
 
 
+# Epsilon for "the position is exhausted" comparisons. Fractional Alpaca fills
+# carry tiny float residue (e.g. 2.981064744 - 2.981064 = 7e-7); anything below
+# this is rounding noise, not a real residual. NOT a calibration knob — it is a
+# float-tolerance, fixed by the broker's quantity precision, not tuned to P&L.
+_QUANTITY_EPS = 1e-6
+
+
+def remaining_after_exits(
+    entry_qty: float,
+    recorded_ids,
+    fills: list[tuple[str, float]],
+    *,
+    eps: float = _QUANTITY_EPS,
+) -> tuple[float, list[str]]:
+    """Recompute the live open quantity of a trade from authoritative broker fills.
+
+    #397: ``trades.qty`` is overloaded (entry fill qty while open, exit fill qty
+    once closed), so it can never answer "how much is still held" for a
+    partially-wound-down trade. This pure function recomputes that quantity from
+    the broker's SELL fills so an open row always states the live position.
+
+    Both holes in #397 are closed here by the same recompute:
+    - Hole 1 (partial portfolio SELL tranches): their order ids already sit in
+      ``recorded_ids`` (exit_order_ids); their filled qty decrements the total.
+    - Hole 2 (broker-side protective-stop fills): orders NOT yet in
+      ``recorded_ids`` still decrement the total and are returned in ``new_ids``
+      so the caller can append them to exit_order_ids (and price them on the
+      next closed-trade reconcile pass).
+
+    Idempotent: re-running with the same fills yields the same remaining and an
+    empty ``new_ids`` (recorded ids are never re-appended). A fill with zero
+    filled_qty (cancelled/replaced) is ignored — it is not an exit.
+
+    Args:
+        entry_qty: entry fill quantity (trades.qty while the row is open).
+        recorded_ids: exit_order_ids already on the row (None = no exits yet).
+        fills: broker SELL fills for the symbol since entry, as (order_id,
+            filled_qty). May include ids already recorded (deduped).
+
+    Returns:
+        (remaining, new_ids): remaining clamped to >= 0; new_ids the filled SELL
+        order ids not already in recorded_ids, in first-seen order.
+    """
+    recorded = set(recorded_ids or ())
+    counted: set[str] = set()
+    total = 0.0
+    new_ids: list[str] = []
+    for oid, fq in fills:
+        if oid in counted:
+            continue  # same order reported twice by the broker — count once
+        if fq is None or float(fq) <= eps:
+            continue  # cancelled/replaced order with no fill is not an exit
+        counted.add(oid)
+        total += float(fq)
+        if oid not in recorded:
+            new_ids.append(oid)
+    remaining = max(0.0, float(entry_qty) - total)
+    return remaining, new_ids
+
+
 def _get_pool() -> pool.ThreadedConnectionPool:
     """Get or create the global connection pool."""
     global _db_pool
