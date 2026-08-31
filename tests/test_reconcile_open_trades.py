@@ -99,6 +99,33 @@ def test_quantity_divergence_when_remaining_exceeds_held():
     assert round(r["held_qty"], 3) == 0.564
 
 
+def test_live_quantity_two_percent_below_broker_is_divergence():
+    """Every live DB/broker mismatch beyond rounding epsilon is an anomaly."""
+    recs = classify_positions(
+        [_trade_with_remaining(5, "NOK", 100.0, 100.0)],
+        {"NOK": 98.0}, now=NOW,
+    )
+    assert _one(recs, "NOK")["category"] == "quantity_divergence"
+
+
+def test_live_quantity_excess_beyond_epsilon_is_over_held():
+    """The broker side of the same invariant is alerted as over_held."""
+    recs = classify_positions(
+        [_trade_with_remaining(5, "NOK", 100.0, 100.0)],
+        {"NOK": 100.0002}, now=NOW,
+    )
+    assert _one(recs, "NOK")["category"] == "over_held"
+
+
+def test_live_quantity_difference_within_epsilon_is_fully_held():
+    """Only float/rounding noise at or below epsilon is accepted as a match."""
+    recs = classify_positions(
+        [_trade_with_remaining(5, "NOK", 100.0, 100.0)],
+        {"NOK": 99.99995}, now=NOW,
+    )
+    assert _one(recs, "NOK")["category"] == "fully_held"
+
+
 def test_quantity_divergence_not_fired_when_remaining_absent():
     """Without quantity_remaining the pre-#397 logic holds: entry qty > broker is
     partially_wound_down_coheld (informational), never quantity_divergence."""

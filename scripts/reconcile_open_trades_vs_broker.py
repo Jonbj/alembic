@@ -8,13 +8,13 @@ trading_client.get_all_positions(). It never closes a trade, never touches
 trades.qty (the P&L cost-basis), never submits/cancels orders.
 
 Categories (per open trade; pyramiding guard => at most one open trade/symbol):
-  fully_held                    broker holds ~ the entry qty (nothing sold)
+  fully_held                    DB live qty and broker qty agree within epsilon
   partially_wound_down_coheld   0 < held < entry qty — partial exits, residual
                                 still held (legit under the 2026-07-27 operator
                                 decision to leave residuals to the co-holder)
   genuinely_orphan              DB says open but broker holds nothing (real stuck
                                 trade — the state worth flagging/acting on)
-  over_held                     broker holds materially MORE than the entry basis
+  over_held                     broker holds more than DB beyond epsilon
   untracked_position            broker holds a symbol with no open trade row
   quantity_divergence           trades.quantity_remaining (the live DB view, set
                                 by reconcile_open_positions) disagrees with the
@@ -54,7 +54,6 @@ def classify_positions(
     *,
     now: datetime,
     eps: float = 1e-4,
-    match_tol_pct: float = 0.02,
 ) -> list[dict]:
     """Classify each open trade vs the held broker qty, plus untracked positions.
 
@@ -78,9 +77,9 @@ def classify_positions(
 
         if held <= eps:
             category = "genuinely_orphan"
-        elif held >= db_qty * (1 + match_tol_pct):
+        elif held > db_qty + eps:
             category = "over_held"
-        elif held >= db_qty * (1 - match_tol_pct):
+        elif held >= db_qty - eps:
             category = "fully_held"
         elif remaining is not None:
             # DB's live quantity exceeds the broker position and the two could
