@@ -99,7 +99,7 @@ def test_quantity_divergence_when_remaining_exceeds_held():
     assert round(r["held_qty"], 3) == 0.564
 
 
-def test_live_quantity_two_percent_below_broker_is_divergence():
+def test_broker_quantity_two_percent_below_live_db_is_divergence():
     """Every live DB/broker mismatch beyond rounding epsilon is an anomaly."""
     recs = classify_positions(
         [_trade_with_remaining(5, "NOK", 100.0, 100.0)],
