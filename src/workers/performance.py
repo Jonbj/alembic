@@ -1222,18 +1222,19 @@ def run_daily_report():
 
         # Reconcile fill prices from Alpaca for trades placed in last 24h
         if trading_client is not None:
+            # #397: first link any unrecorded broker SELL fills (incl. protective
+            # stop fills) into open trades and close exhausted positions, THEN
+            # price fills — so a position closed by a stop in this pass is priced
+            # in the same run rather than waiting a cycle.
+            try:
+                pg.reconcile_open_positions(trading_client)
+            except Exception as e:
+                log.warning("#397: open-position reconcile failed in daily report: %s", e)
             try:
                 updated = pg.reconcile_trade_fills(trading_client)
                 log.info("Reconciled %d trade fill(s) from Alpaca", updated)
             except Exception as e:
                 log.warning("Fill reconciliation failed: %s", e)
-            # #397: refresh quantity_remaining from broker SELL fills before any
-            # book measurement so the daily report's MTM uses live quantities,
-            # not the entry-qty never decremented by partial exits / stop fills.
-            try:
-                pg.reconcile_open_positions(trading_client)
-            except Exception as e:
-                log.warning("#397: open-position reconcile failed in daily report: %s", e)
 
     except Exception as e:
         log.exception(f"Daily performance report failed: {e}")
