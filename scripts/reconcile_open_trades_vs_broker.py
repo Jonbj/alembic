@@ -16,6 +16,14 @@ Categories (per open trade; pyramiding guard => at most one open trade/symbol):
                                 trade — the state worth flagging/acting on)
   over_held                     broker holds materially MORE than the entry basis
   untracked_position            broker holds a symbol with no open trade row
+  quantity_divergence           trades.quantity_remaining (the live DB view, set
+                                by reconcile_open_positions) disagrees with the
+                                broker position beyond epsilon — exits the
+                                reconcile pass could not attribute/write back.
+                                The #397 phantom-quantity signature (DB 74x the
+                                broker) survives only when reconcile could not
+                                fix it; this is the automatic net that caught
+                                the bug by hand.
 
 Exit code: non-zero iff any genuinely_orphan is found (usable as a cron gate);
 zero otherwise.
@@ -58,7 +66,14 @@ def classify_positions(
     for t in open_trades:
         symbol = t["symbol"]
         trade_symbols.add(symbol)
-        db_qty = float(t.get("qty") or 0.0)
+        entry_qty = float(t.get("qty") or 0.0)
+        # quantity_remaining is the live DB view of the position (set by
+        # reconcile_open_positions from broker SELL fills). When present it is
+        # the right basis for "does DB agree with the broker?"; entry qty
+        # (trades.qty) is the fallback when the column is still NULL (not yet
+        # reconciled) — preserving the pre-#397 behaviour.
+        remaining = t.get("quantity_remaining")
+        db_qty = float(remaining) if remaining is not None else entry_qty
         held = float(held_qty_by_symbol.get(symbol, 0.0))
 
         if held <= eps:
@@ -67,6 +82,11 @@ def classify_positions(
             category = "over_held"
         elif held >= db_qty * (1 - match_tol_pct):
             category = "fully_held"
+        elif remaining is not None:
+            # DB's live quantity exceeds the broker position and the two could
+            # not be reconciled: exits the reconcile pass could not attribute
+            # (lookback miss, un-matchable fill, …). The #397 phantom signature.
+            category = "quantity_divergence"
         else:
             category = "partially_wound_down_coheld"
 
@@ -77,6 +97,7 @@ def classify_positions(
             "symbol": symbol,
             "strategy": t.get("stop_strategy"),
             "db_qty": db_qty,
+            "entry_qty": entry_qty,
             "held_qty": held,
             "sold_qty": max(0.0, db_qty - held),
             "days_open": days_open,
@@ -212,8 +233,8 @@ def main() -> int:
     header = f"{'trade_id':>8} {'symbol':<8} {'strat':<6} {'db_qty':>12} {'held':>12} {'sold':>12} {'days':>5}  category"
     print(header)
     order = {
-        "genuinely_orphan": 0, "untracked_position": 1, "over_held": 2,
-        "partially_wound_down_coheld": 3, "fully_held": 4,
+        "genuinely_orphan": 0, "quantity_divergence": 1, "untracked_position": 2,
+        "over_held": 3, "partially_wound_down_coheld": 4, "fully_held": 5,
     }
     for r in sorted(records, key=lambda x: (order.get(x["category"], 9), x["symbol"])):
         tid = "" if r["trade_id"] is None else r["trade_id"]

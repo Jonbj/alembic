@@ -940,13 +940,15 @@ def run_reconcile_positions() -> dict:
     reconcile-fills-evening at 21:30).
 
     Classifies every open DB trade against the live broker position and:
-    - ALWAYS alerts (Telegram) on the three anomaly categories:
-      genuinely_orphan, over_held, untracked_position. The other two
-      (fully_held, partially_wound_down_coheld) are normal states -> no alert.
+    - ALWAYS alerts (Telegram) on the four anomaly categories:
+      genuinely_orphan, over_held, untracked_position, quantity_divergence.
+      The other two (fully_held, partially_wound_down_coheld) are normal
+      states -> no alert.
     - Conditionally auto-closes genuinely_orphan trades (DB force-close only —
       broker holds 0, no SELL order) when config.RECONCILE_AUTOCLOSE_ENABLED.
       Dry-run by default (RECONCILE_AUTOCLOSE_DRY_RUN=true): logs only, no
-      writer calls. over_held / untracked_position are alerted only.
+      writer calls. over_held / untracked_position / quantity_divergence are
+      alerted only.
 
     Mirrors run_reconcile_fills_intraday's credential guard + try/except shape.
     A classify-time error is caught, a best-effort Telegram failure-alert is sent,
@@ -969,12 +971,26 @@ def run_reconcile_positions() -> dict:
         )
         open_trades = pg.fetch_trades(status="open", limit=1000)
         held = {p.symbol: float(p.qty) for p in retry_transient(tc.get_all_positions)}
+        # #397: refresh trades.quantity_remaining from broker SELL fills (incl.
+        # protective-stop fills) BEFORE classifying, so the divergence check
+        # below compares the live DB view against the live broker position.
+        # Best-effort: a reconcile failure is logged and falls through to the
+        # pre-reconcile classification (still correct, just less current).
+        try:
+            pg.reconcile_open_positions(tc)
+            # Re-fetch so classify sees the just-refreshed quantity_remaining.
+            open_trades = pg.fetch_trades(status="open", limit=1000)
+        except Exception as exc:
+            log.warning("#397: reconcile_open_positions before classify failed: %s", exc)
         records = classify_positions(
             open_trades, held, now=datetime.now(timezone.utc)
         )
         counts = summarize(records)
 
-        anomaly_categories = ("genuinely_orphan", "over_held", "untracked_position")
+        anomaly_categories = (
+            "genuinely_orphan", "over_held", "untracked_position",
+            "quantity_divergence",
+        )
         anomalies = [r for r in records if r["category"] in anomaly_categories]
         if anomalies:
             try:
@@ -1020,7 +1036,10 @@ def run_reconcile_positions() -> dict:
 def _format_reconcile_alert(anomalies: list[dict], counts: dict[str, int]) -> str:
     """Format the Telegram alert for the three anomaly categories (HTML)."""
     lines = ["<b>Position Reconciliation — anomalies</b>", ""]
-    for cat in ("genuinely_orphan", "over_held", "untracked_position"):
+    for cat in (
+        "genuinely_orphan", "quantity_divergence",
+        "over_held", "untracked_position",
+    ):
         n = counts.get(cat, 0)
         if n:
             lines.append(f"• {cat}: {n}")
@@ -1208,6 +1227,13 @@ def run_daily_report():
                 log.info("Reconciled %d trade fill(s) from Alpaca", updated)
             except Exception as e:
                 log.warning("Fill reconciliation failed: %s", e)
+            # #397: refresh quantity_remaining from broker SELL fills before any
+            # book measurement so the daily report's MTM uses live quantities,
+            # not the entry-qty never decremented by partial exits / stop fills.
+            try:
+                pg.reconcile_open_positions(trading_client)
+            except Exception as e:
+                log.warning("#397: open-position reconcile failed in daily report: %s", e)
 
     except Exception as e:
         log.exception(f"Daily performance report failed: {e}")
