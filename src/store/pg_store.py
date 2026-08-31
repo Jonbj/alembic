@@ -1896,7 +1896,8 @@ class PostgreSQLStore:
                                entry_price, entry_time, entry_notional, score, regime_mult,
                                exit_price, exit_time, exit_reason, qty,
                                gross_pnl, slippage_est, net_pnl, postmortem_diagnosis, created_at,
-                               stop_strategy, stop_d_init
+                               stop_strategy, stop_d_init,
+                               quantity_remaining, exit_order_ids
                         FROM trades {where}
                         ORDER BY entry_time DESC LIMIT %s""",
                     params,
@@ -2192,11 +2193,12 @@ class PostgreSQLStore:
                                SET entry_price = %s,
                                    qty         = %s,
                                    cost_usd    = %s,
-                                   cost_bps    = %s
+                                   cost_bps    = %s,
+                                   quantity_remaining = %s
                                WHERE id = %s""",
                             (fill_price, fill_qty,
                              entry_costs.total_cost_usd, entry_costs.total_cost_bps,
-                             trade_id),
+                             fill_qty, trade_id),
                         )
                     updated += 1
                 except Exception as e:
@@ -2264,19 +2266,158 @@ class PostgreSQLStore:
                                spread_cost_bps = %s,
                                impact_cost_bps = %s,
                                regulatory_cost_usd = %s,
-                               slippage_est = %s
+                               slippage_est = %s,
+                               quantity_remaining = GREATEST(0, qty - %s)
                                WHERE id = %s""",
                             (avg_exit_price, qty_f, gross_pnl, net_pnl,
                              costs.total_cost_bps, costs.total_cost_usd,
                              costs.spread_cost_bps, costs.impact_cost_bps,
                              costs.regulatory_cost_usd, costs.total_cost_usd,
-                             trade_id),
+                             qty_f, trade_id),
                         )
                     exit_updated += 1
                 except Exception as e:
                     log.warning("Failed to reconcile exit order(s) %s for trade %s: %s", order_ids, trade_id, e)
             conn.commit()
             return updated + exit_updated
+        except Exception:
+            conn.rollback()
+            raise
+
+    def reconcile_open_positions(
+        self,
+        trading_client,
+        *,
+        lookback_days: int = 30,
+        symbols: list[str] | None = None,
+    ) -> int:
+        """#397: maintain ``quantity_remaining`` for OPEN trades and write back
+        broker-side SELL fills (incl. protective-stop fills) that never reached
+        ``record_trade_exit``.
+
+        ``trades.qty`` is the entry fill qty while a trade is open; partial exits
+        and broker-side stop fills were never decremented, so an open row could
+        state 74x the live broker position (NOK/WDC/MRVL, [F-048]). This method
+        recomputes the live quantity from authoritative broker SELL fills:
+
+        For every open trade (``exit_time IS NULL``) with a reconciled entry
+        (``qty IS NOT NULL``) within ``lookback_days``:
+          - pull the broker's CLOSED orders for the symbol since entry,
+          - take every filled SELL (the portfolio tranches already in
+            ``exit_order_ids`` AND the protective-stop fills that are not),
+          - ``quantity_remaining = entry_qty - sum(filled SELL qty)`` (clamped 0),
+          - append any newly-discovered SELL order id to ``exit_order_ids`` so the
+            next ``reconcile_trade_fills`` prices it from the real fill,
+          - if the position is exhausted (remaining <= eps), close the trade
+            (``exit_time``/``exit_reason='reconcile_close'``).
+
+        Idempotent recompute, not accumulate: re-running with the same broker
+        state yields the same ``quantity_remaining`` and appends nothing. It never
+        touches ``exit_price``/``gross_pnl``/``net_pnl`` — those stay with
+        ``reconcile_trade_fills``, which prices from the real order ids now linked
+        in ``exit_order_ids``. So closing here is backed by a real broker fill,
+        not the synthetic-id inference that ``force_close_orphans`` deliberately
+        avoids for genuinely-orphan trades.
+
+        Returns the count of open-trade rows updated (remaining set and/or
+        trade closed). Best-effort per trade: one symbol's broker fetch failure
+        is logged and skipped, never aborting the rest.
+        """
+        from alpaca.trading.enums import QueryOrderStatus
+        from alpaca.trading.requests import GetOrdersRequest
+
+        conn = self._get_connection()
+        updated = 0
+        try:
+            with conn.cursor() as cur:
+                filters = ["exit_time IS NULL", "qty IS NOT NULL"]
+                params: list = []
+                if symbols:
+                    filters.append("symbol = ANY(%s)")
+                    params.append(list(symbols))
+                if lookback_days:
+                    filters.append(f"entry_time > now() - '{int(lookback_days)} days'::interval")
+                where = " AND ".join(filters)
+                cur.execute(
+                    f"""SELECT id, symbol, qty, entry_time, exit_order_ids
+                        FROM trades
+                        WHERE {where}""",
+                    params,
+                )
+                open_rows = cur.fetchall()
+
+            for trade_id, symbol, qty, entry_time, exit_order_ids in open_rows:
+                try:
+                    entry_qty = float(qty)
+                    # Pull the broker's closed orders for this symbol since
+                    # entry. `after` bounds by created_at; we re-bound by
+                    # filled_at >= entry_time below so a stop placed before a
+                    # later re-entry cannot steal an earlier trade's fill
+                    # (pyramiding guard => one open trade/symbol anyway).
+                    request = GetOrdersRequest(
+                        status=QueryOrderStatus.CLOSED,
+                        symbols=[symbol],
+                        after=entry_time,
+                        limit=500,
+                    )
+                    broker_orders = trading_client.get_orders(request)
+                    fills: list[tuple[str, float]] = []
+                    for o in broker_orders:
+                        side = getattr(o, "side", None)
+                        side_val = getattr(side, "value", side)
+                        if str(side_val).lower() != "sell":
+                            continue
+                        raw_qty = getattr(o, "filled_qty", None)
+                        if raw_qty is None:
+                            continue
+                        filled_at = getattr(o, "filled_at", None)
+                        if filled_at is not None and filled_at < entry_time:
+                            continue  # fill predates this trade's entry
+                        fills.append((str(o.id), float(raw_qty)))
+
+                    remaining, new_ids = remaining_after_exits(
+                        entry_qty, exit_order_ids, fills,
+                    )
+                    # No exits recorded and none discovered: a fresh, fully-held
+                    # position — quantity_remaining is set at entry reconcile, so
+                    # there is nothing to write here. Keeps the common case off
+                    # the write path.
+                    if not exit_order_ids and not new_ids:
+                        continue
+
+                    merged_ids = list(exit_order_ids or [])
+                    for oid in new_ids:
+                        if oid not in merged_ids:
+                            merged_ids.append(oid)
+
+                    exhausted = remaining <= _QUANTITY_EPS
+                    with conn.cursor() as cur:
+                        if exhausted:
+                            cur.execute(
+                                """UPDATE trades
+                                   SET quantity_remaining = %s,
+                                       exit_order_ids = %s,
+                                       exit_time = COALESCE(exit_time, now()),
+                                       exit_reason = COALESCE(exit_reason, 'reconcile_close')
+                                   WHERE id = %s""",
+                                (remaining, merged_ids or None, trade_id),
+                            )
+                        else:
+                            cur.execute(
+                                """UPDATE trades
+                                   SET quantity_remaining = %s,
+                                       exit_order_ids = %s
+                                   WHERE id = %s""",
+                                (remaining, merged_ids or None, trade_id),
+                            )
+                    updated += 1
+                except Exception as e:
+                    log.warning(
+                        "#397: open-position reconcile failed for trade %s (%s): %s",
+                        trade_id, symbol, e,
+                    )
+            conn.commit()
+            return updated
         except Exception:
             conn.rollback()
             raise
