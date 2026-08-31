@@ -16,22 +16,30 @@ UTC = timezone.utc
 def _fake_psql(query):
     """Risponde alle query del book e del ledger degli intenti S4."""
     if "FROM s4_candidate_population" in query:
+        # `psql` rende il booleano nativo come t/f, ma boolean::text come
+        # true/false. Simulare il round-trip reale evita che il fixture
+        # nasconda un disaccordo fra SELECT e parser (#398).
+        vero, falso = (
+            ("true", "false")
+            if "disposition.is_tradable::text" in query
+            else ("t", "f")
+        )
         # intent_id, signal_id, symbol, model_generated_at, decision_at, score,
         # final_reason_code, is_tradable, trade_id, pnl_net
         return [
             [
                 "intent-wmt", "7001", "WMT", "2026-08-20T16:36:00+00:00",
-                "2026-08-20T16:37:00+00:00", "0.318", "RANK_SELECTED", "t",
+                "2026-08-20T16:37:00+00:00", "0.318", "RANK_SELECTED", vero,
                 "42", "2.38",
             ],
             [
                 "intent-msft", "7002", "MSFT", "2026-08-20T16:38:00+00:00",
-                "2026-08-20T16:52:00+00:00", "0.410", "RANK_SELECTED", "t",
+                "2026-08-20T16:52:00+00:00", "0.410", "RANK_SELECTED", vero,
                 "", "",
             ],
             [
                 "intent-nvda", "7003", "NVDA", "2026-08-20T16:39:00+00:00",
-                "2026-08-20T16:52:00+00:00", "0.420", "SKIP_ENTRY_GATE", "f",
+                "2026-08-20T16:52:00+00:00", "0.420", "SKIP_ENTRY_GATE", falso,
                 "", "",
             ],
         ]
@@ -141,6 +149,33 @@ def test_dossier_misura_tutti_gli_intenti_al_prezzo_pit_del_segnale():
     finestra = payload["aggregati"]["guardia_contraddizione"]["finestra_osservazione"]
     assert "n_giorni_coperti" in finestra
     assert "copertura" in finestra
+
+
+def test_dossier_avvisa_sulla_partizione_tradabilita_perfettamente_unilaterale(
+    caplog,
+):
+    aggregato = {
+        "n_intenti": 1700,
+        "n_intenti_tradabili": 0,
+        "n_intenti_non_tradabili": 1700,
+    }
+
+    dossier._avvisa_partizione_tradabilita_unilaterale(
+        aggregato, date(2026, 8, 27)
+    )
+
+    assert "partizione is_tradable unilaterale" in caplog.text
+    assert "1700 intenti non tradabili su 1700" in caplog.text
+
+
+def test_query_intenti_qualifica_decision_at_tra_tabelle_omonime():
+    def psql(query):
+        assert "WHERE intent.decision_at >=" in query
+        assert "ORDER BY intent.decision_at, intent.intent_id" in query
+        return []
+
+    with patch.object(dossier, "_psql", side_effect=psql):
+        assert dossier._s4_entry_intents(date(2026, 8, 27)) == []
 
 
 # --- _earnings_symbols_from_calendar: tre forme, UNKNOWN on earnings-failure ---
