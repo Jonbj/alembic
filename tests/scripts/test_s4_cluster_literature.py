@@ -129,7 +129,7 @@ def test_retry_campaign_reopens_an_unavailable_source_without_rewriting_history(
     assert events[-1]["event"] == "RUN_COMPLETE"
 
 
-def test_cli_repairs_invalid_model_json_before_consuming_another_job_attempt(
+def test_cli_regenerates_invalid_json_with_a_schema_before_another_job_attempt(
     tmp_path: Path, monkeypatch
 ) -> None:
     manifest, output_dir, cache_dir = _write_fixture(tmp_path)
@@ -138,8 +138,8 @@ def test_cli_repairs_invalid_model_json_before_consuming_another_job_attempt(
     def fake_post(url: str, *, json: dict[str, object], timeout: int) -> _ChatResponse:
         del url, timeout
         calls.append(json)
-        system = str(json["messages"][0]["content"])
-        if "Repair invalid JSON" not in system:
+        response_format = json["response_format"]
+        if response_format["type"] != "json_schema":
             return _ChatResponse('{"source_id":"SRC001","chunk_id":0,"claims":[')
         return _ChatResponse(
             {
@@ -172,6 +172,9 @@ def test_cli_repairs_invalid_model_json_before_consuming_another_job_attempt(
         for line in (output_dir / "node1_cards.jsonl").read_text().splitlines()
     ]
     assert len(calls) == 2
+    assert calls[0]["response_format"] == {"type": "json_object"}
+    assert calls[1]["response_format"]["type"] == "json_schema"
+    assert calls[1]["messages"] == calls[0]["messages"]
     assert cards[0]["chunk_id"] == 0
     assert _ledger_events(output_dir)[-2]["event"] == "SOURCE_NO_RELEVANT_CLAIMS"
 
@@ -228,8 +231,136 @@ def test_cli_splits_only_an_overflowing_chunk_and_records_parent_recovery(
     ]
     assert [card["chunk_id"] for card in cards] == ["0.0", "0.1"]
     events = _ledger_events(output_dir)
-    assert any(event["event"] == "CHUNK_SPLIT" for event in events)
-    assert any(event["event"] == "CHUNK_RECOVERED" for event in events)
+    split_event = next(event for event in events if event["event"] == "CHUNK_SPLIT")
+    recovered_event = next(
+        event for event in events if event["event"] == "CHUNK_RECOVERED"
+    )
+    assert split_event["parent_sha256"] == coordinator.hash_text(source_text)
+    assert split_event["children"][0]["start"] == 0
+    assert split_event["children"][1]["end"] == len(source_text)
+    assert recovered_event["coverage_sha256"] == split_event["parent_sha256"]
+    assert recovered_event["coverage_verified"] is True
+    assert events[-2]["event"] == "SOURCE_NO_RELEVANT_CLAIMS"
+
+
+def test_cli_keeps_source_incomplete_when_every_claim_fails_quote_validation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    manifest, output_dir, cache_dir = _write_fixture(tmp_path)
+    calls = 0
+
+    def fake_post(url: str, *, json: dict[str, object], timeout: int) -> _ChatResponse:
+        nonlocal calls
+        del url, json, timeout
+        calls += 1
+        return _ChatResponse(
+            {
+                "source_id": "SRC001",
+                "chunk_id": 0,
+                "claims": [
+                    {
+                        "claim_id": "SRC001-C0-01",
+                        "hypotheses": ["H01"],
+                        "stance": "SUPPORTS",
+                        "claim": "Unsupported fixture claim.",
+                        "evidence_lines": [999, 1000],
+                        "limitations": "Fixture only.",
+                        "transferability": "Fixture only.",
+                    }
+                ],
+                "unverified_followups": [],
+            }
+        )
+
+    monkeypatch.setattr(coordinator.requests, "post", fake_post)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "s4_cluster_literature.py",
+            "--manifest",
+            str(manifest),
+            "--output-dir",
+            str(output_dir),
+            "--cache-dir",
+            str(cache_dir),
+        ],
+    )
+
+    assert coordinator.main() == 0
+
+    assert calls == 2
+    assert not (output_dir / "node1_cards.jsonl").exists()
+    events = _ledger_events(output_dir)
+    assert [event["event"] for event in events].count("NODE1_ATTEMPT_FAILED") == 2
+    assert events[-2]["event"] == "SOURCE_INCOMPLETE"
+
+
+def test_invalidated_campaign_artifacts_are_ignored_by_a_new_retry(
+    tmp_path: Path, monkeypatch
+) -> None:
+    manifest, output_dir, cache_dir = _write_fixture(tmp_path)
+    (output_dir / "node1_cards.jsonl").write_text(
+        json.dumps(
+            {
+                "source_id": "SRC001",
+                "chunk_id": 0,
+                "protocol_version": 4,
+                "retry_campaign": "bad-campaign",
+                "claims": [],
+            }
+        )
+        + "\n"
+    )
+    (output_dir / "run_ledger.jsonl").write_text(
+        json.dumps(
+            {
+                "event": "CAMPAIGN_INVALIDATED",
+                "protocol_version": 4,
+                "invalidated_campaign": "bad-campaign",
+                "reason": "failed integrity review",
+            }
+        )
+        + "\n"
+    )
+    calls = 0
+
+    def fake_post(url: str, *, json: dict[str, object], timeout: int) -> _ChatResponse:
+        nonlocal calls
+        del url, json, timeout
+        calls += 1
+        return _ChatResponse(
+            {
+                "source_id": "SRC001",
+                "chunk_id": 0,
+                "claims": [],
+                "unverified_followups": [],
+            }
+        )
+
+    monkeypatch.setattr(coordinator.requests, "post", fake_post)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "s4_cluster_literature.py",
+            "--manifest",
+            str(manifest),
+            "--output-dir",
+            str(output_dir),
+            "--cache-dir",
+            str(cache_dir),
+            "--source",
+            "SRC001",
+            "--retry-campaign",
+            "good-campaign",
+        ],
+    )
+
+    assert coordinator.main() == 0
+
+    assert calls == 1
+    events = _ledger_events(output_dir)
     assert events[-2]["event"] == "SOURCE_NO_RELEVANT_CLAIMS"
 
 
