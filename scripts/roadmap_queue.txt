@@ -45,7 +45,18 @@
 
 # === 2. IL SEGNALE FINISCE SUL TICKER SBAGLIATO ===
 # Classe di errore peggiore per costruzione: un ordine su un titolo che non c'entra.
-405  attribuzione ticker sbagliata via `source_metadata` (89% delle righe scorate): un articolo Boston Scientific ha prodotto -0,5533 su NVO con n_ticker=1 — non e' fan-out, sono tag del provider non validati
+#
+# USCITA DEL 2026-09-01: #405 tolta dalla coda dall'operatore.
+# La parte lavorabile e' gia' in main (#448 TAG_UNCONFIRMED, #449 ground truth
+# canonica per extraction_method). Cio' che resta e' misura umana e una decisione
+# di enforcement congelata, quindi il loop la ripescava a ogni giro e chiudeva
+# ogni volta con un no-op onesto — 4 selezioni il 2026-09-01, 2 no-op dichiarati,
+# tentativi stornati per costruzione: senza questa rimozione il giro restava
+# incastrato su #405 all'infinito, e le issue sotto non venivano mai raggiunte.
+# Un no-op dichiarato non e' una condizione di uscita dalla coda: solo l'operatore
+# lo e'. La issue e' ora `waiting`, blocked_by #30, con la condizione di risveglio
+# scritta nel commento di decisione (label post-QT-03 stratificate per
+# extraction_method). Rientra in coda quando quella condizione e' soddisfatta.
 
 # === 3. LA SELEZIONE S4 NON FA ENTRARE NULLA ===
 # Alpha perso a ogni sessione, misurato in dollari sulle sessioni di Week 35.
@@ -91,6 +102,8 @@
 454  Alpaca/Benzinga chiede il riassunto (~160 char) quando lo stesso endpoint, stesse chiavi, offre il testo completo (3.930-15.757 char) con `include_content=true` mai passato — costo zero, due righe, sull'88% del volume utile del sistema (deroga concessa 2026-09-01)
 455  il worker WebSocket Alpaca esiste testato ma nessun processo consuma la coda `news_stream`: p50 lag ~1,2h invece di <1s, 16.254 scarti `duplicate_id` + 2.640 `stale` su 30gg di puro spreco da re-fetch (deroga concessa 2026-09-01)
 456  SEC EDGAR legge un campo `ticker_symbol` inesistente nell'API: zero segnali da sempre per un bug banale, il ticker e' in `display_names` — fonte gratuita deterministica ad alto segnale (8-K/6-K) mai davvero provata (deroga concessa 2026-09-01)
+458  PoC shadow Twelve Data press_releases (10-20 simboli, 5 sedute): nessuna scrittura sul path live, tabella dedicata `news_poc_samples` — misura copertura/latenza/qualita' prima di decidere l'integrazione
+459  PoC shadow Tiingo News API: vincolo di licenza sul piano gratuito vieta di persistere il payload, solo aggregati per (simbolo, giorno) non ricostruibili — stessa misura di #458, schema dati piu' stretto
 281  alpha-miss: funnel actionability e pipeline v2 — rientra in rotazione, i suoi 2 tentativi falliti non sono piu' in logs/roadmap_agent_state.tsv (sblocca #287)
 
 # === 6. IL RESTO ===
@@ -120,6 +133,10 @@
 #   #287, #298, #328, #361, #362, #364, #34 — `waiting` (si sbloccano da sole).
 #   #22, #24, #28, #29, #179, #230, #288, #326, #334, #338, #360 — `wayfinder:decision`
 #        in attesa di un atto dell'operatore.
+#   #457 — Massive/Polygon.io bloccato da licenza (termini verificati sul testo
+#        ufficiale: vietano uso non-display/"investment strategy" senza licenza
+#        separata, nessuna distinzione free/paid). Non e' una issue di build:
+#        decisione se acquisire una licenza commerciale o abbandonare il candidato.
 #   #98, #99 — Android monitor, di proprieta' di un altro agente.
 #
 #   #298 e' uscita dalla coda il 2026-08-30 e ci resta: i sei criteri di
