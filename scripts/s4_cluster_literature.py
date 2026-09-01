@@ -40,6 +40,7 @@ ChunkId = int | str
 
 
 def normalize(text: str) -> str:
+    """Normalize extracted text without changing its semantic content."""
     text = text.replace("\x00", " ").replace("\r", "\n")
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -47,6 +48,7 @@ def normalize(text: str) -> str:
 
 
 def fetch_text(row: dict[str, str], cache: Path) -> tuple[str, str]:
+    """Fetch and mechanically extract one manifested source, with a local cache."""
     cache.mkdir(parents=True, exist_ok=True)
     raw_path = cache / f"{row['source_id']}.raw"
     text_path = cache / f"{row['source_id']}.txt"
@@ -90,6 +92,7 @@ def fetch_text(row: dict[str, str], cache: Path) -> tuple[str, str]:
 
 
 def chunks(text: str, size: int = 9000, overlap: int = 500):
+    """Yield stable overlapping source chunks with integer identifiers."""
     start = 0
     idx = 0
     while start < len(text):
@@ -130,14 +133,132 @@ def split_for_context(text: str) -> tuple[str, str] | None:
         key=lambda position: abs(position - midpoint),
         default=midpoint,
     )
-    left = text[:split_at].strip()
-    right = text[split_at:].strip()
+    left = text[:split_at]
+    right = text[split_at:]
     if not left or not right:
         return None
+    if left + right != text:
+        raise AssertionError("context split must preserve the parent byte-for-byte")
     return left, right
 
 
-def chat(url: str, model: str, system: str, user: str, max_tokens: int) -> str:
+def hash_text(text: str) -> str:
+    """Return the UTF-8 SHA-256 used for source and chunk coverage proofs."""
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def node1_response_format(source_id: str, chunk_id: ChunkId) -> dict[str, Any]:
+    """Build the strict JSON schema for one node-1 evidence card."""
+    claim_schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "claim_id",
+            "hypotheses",
+            "stance",
+            "claim",
+            "evidence_lines",
+            "limitations",
+            "transferability",
+        ],
+        "properties": {
+            "claim_id": {"type": "string"},
+            "hypotheses": {
+                "type": "array",
+                "items": {"type": "string", "enum": sorted(ALLOWED_HYPOTHESES)},
+            },
+            "stance": {"type": "string", "enum": sorted(ALLOWED_STANCES)},
+            "claim": {"type": "string"},
+            "evidence_lines": {
+                "type": "array",
+                "items": {"type": "integer"},
+                "minItems": 2,
+                "maxItems": 2,
+            },
+            "limitations": {"type": "string"},
+            "transferability": {"type": "string"},
+        },
+    }
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "node1_evidence_card",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["source_id", "chunk_id", "claims", "unverified_followups"],
+                "properties": {
+                    "source_id": {"const": source_id},
+                    "chunk_id": {"const": chunk_id},
+                    "claims": {"type": "array", "items": claim_schema},
+                    "unverified_followups": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+            },
+        },
+    }
+
+
+def node2_response_format(source_id: str, claim_ids: list[str]) -> dict[str, Any]:
+    """Build the strict JSON schema for one complete adversarial review batch."""
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "node2_review_batch",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["source_id", "reviews"],
+                "properties": {
+                    "source_id": {"const": source_id},
+                    "reviews": {
+                        "type": "array",
+                        "minItems": len(claim_ids),
+                        "maxItems": len(claim_ids),
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": [
+                                "claim_id",
+                                "verdict",
+                                "reason_codes",
+                                "reason",
+                                "minimal_correction",
+                            ],
+                            "properties": {
+                                "claim_id": {"type": "string", "enum": claim_ids},
+                                "verdict": {
+                                    "type": "string",
+                                    "enum": sorted(ALLOWED_REVIEW_VERDICTS),
+                                },
+                                "reason_codes": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                                "reason": {"type": "string"},
+                                "minimal_correction": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    }
+
+
+def chat(
+    url: str,
+    model: str,
+    system: str,
+    user: str,
+    max_tokens: int,
+    response_format: dict[str, Any] | None = None,
+) -> str:
+    """Call one llama.cpp chat-completions endpoint and return message content."""
     payload: dict[str, Any] = {
         "model": model,
         "messages": [
@@ -148,7 +269,7 @@ def chat(url: str, model: str, system: str, user: str, max_tokens: int) -> str:
         "top_p": 0.9,
         "max_tokens": max_tokens,
         "stream": False,
-        "response_format": {"type": "json_object"},
+        "response_format": response_format or {"type": "json_object"},
         "chat_template_kwargs": {"enable_thinking": False},
     }
     response = requests.post(url, json=payload, timeout=4 * 60 * 60)
@@ -159,6 +280,7 @@ def chat(url: str, model: str, system: str, user: str, max_tokens: int) -> str:
 
 
 def parse_json(text: str) -> dict:
+    """Parse a single JSON object, tolerating only surrounding Markdown fences."""
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.S)
@@ -171,56 +293,84 @@ def parse_json(text: str) -> dict:
         return json.loads(match.group(0))
 
 
-JSON_REPAIR_SYSTEM = """Repair invalid JSON syntax. Preserve every key and value from the
-candidate; do not add facts, claims, reviews, citations, or explanations. Return exactly one
-valid JSON object and no surrounding prose."""
-
-
 def chat_json(
     url: str,
     model: str,
     system: str,
     user: str,
     max_tokens: int,
+    response_format: dict[str, Any],
 ) -> dict:
-    """Request JSON and make one syntax-only repair request when parsing fails."""
+    """Regenerate invalid JSON once under a strict schema, then parse it."""
     raw = chat(url, model, system, user, max_tokens)
     try:
         return parse_json(raw)
     except json.JSONDecodeError:
-        repaired = chat(
+        regenerated = chat(
             url,
             model,
-            JSON_REPAIR_SYSTEM,
-            f"Repair this candidate without changing its meaning:\n<<<\n{raw}\n>>>",
+            system,
+            user,
             max_tokens,
+            response_format,
         )
-        return parse_json(repaired)
+        return parse_json(regenerated)
 
 
 def append_jsonl(path: Path, item: dict) -> None:
+    """Append one JSON object atomically with respect to coordinator threads."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with JSONL_LOCK:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
-def completed_keys(path: Path) -> set[tuple[str, str]]:
+def invalidated_campaigns(path: Path) -> set[str]:
+    """Return retry campaigns explicitly excluded by append-only audit events."""
+    campaigns: set[str] = set()
+    if not path.exists():
+        return campaigns
+    for line in path.read_text().splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        campaign = item.get("invalidated_campaign")
+        if (
+            item.get("protocol_version") == PROTOCOL_VERSION
+            and item.get("event") == "CAMPAIGN_INVALIDATED"
+            and isinstance(campaign, str)
+        ):
+            campaigns.add(campaign)
+    return campaigns
+
+
+def completed_keys(
+    path: Path, excluded_campaigns: set[str] | None = None
+) -> set[tuple[str, str]]:
+    """Return completed source/chunk identities excluding invalidated campaigns."""
+    excluded_campaigns = excluded_campaigns or set()
     if not path.exists():
         return set()
     keys = set()
     for line in path.read_text().splitlines():
         try:
             item = json.loads(line)
-            if item.get("protocol_version") == PROTOCOL_VERSION:
+            if (
+                item.get("protocol_version") == PROTOCOL_VERSION
+                and item.get("retry_campaign") not in excluded_campaigns
+            ):
                 keys.add((str(item["source_id"]), str(item["chunk_id"])))
         except (json.JSONDecodeError, KeyError):
             continue
     return keys
 
 
-def recovered_chunk_keys(path: Path) -> set[tuple[str, str]]:
+def recovered_chunk_keys(
+    path: Path, excluded_campaigns: set[str] | None = None
+) -> set[tuple[str, str]]:
     """Return parent chunks fully covered by append-only split-child records."""
+    excluded_campaigns = excluded_campaigns or set()
     recovered: set[tuple[str, str]] = set()
     if not path.exists():
         return recovered
@@ -233,6 +383,8 @@ def recovered_chunk_keys(path: Path) -> set[tuple[str, str]]:
             continue
         if item.get("event") != "CHUNK_RECOVERED":
             continue
+        if item.get("retry_campaign") in excluded_campaigns:
+            continue
         source_id = item.get("source_id")
         chunk_id = item.get("chunk_id")
         if source_id is not None and chunk_id is not None:
@@ -240,7 +392,13 @@ def recovered_chunk_keys(path: Path) -> set[tuple[str, str]]:
     return recovered
 
 
-def prior_claims(path: Path, source_id: str) -> list[dict]:
+def prior_claims(
+    path: Path,
+    source_id: str,
+    excluded_campaigns: set[str] | None = None,
+) -> list[dict]:
+    """Return prior valid claims for a source outside invalidated campaigns."""
+    excluded_campaigns = excluded_campaigns or set()
     if not path.exists():
         return []
     claims = []
@@ -252,17 +410,21 @@ def prior_claims(path: Path, source_id: str) -> list[dict]:
         if (
             item.get("source_id") == source_id
             and item.get("protocol_version") == PROTOCOL_VERSION
+            and item.get("retry_campaign") not in excluded_campaigns
         ):
             claims.extend(item.get("claims", []))
     return claims
 
 
-def reviewed_claim_ids(path: Path) -> set[str]:
+def reviewed_claim_ids(
+    path: Path, excluded_campaigns: set[str] | None = None
+) -> set[str]:
     """Return claim ids already reviewed under the current protocol.
 
     Resume must be idempotent at claim level: a source may have gained claims from
     chunks that failed during an earlier pass, so batch ids alone are not stable.
     """
+    excluded_campaigns = excluded_campaigns or set()
     if not path.exists():
         return set()
     claim_ids: set[str] = set()
@@ -273,6 +435,8 @@ def reviewed_claim_ids(path: Path) -> set[str]:
             continue
         if item.get("protocol_version") != PROTOCOL_VERSION:
             continue
+        if item.get("retry_campaign") in excluded_campaigns:
+            continue
         for review in item.get("reviews", []):
             claim_id = review.get("claim_id")
             if isinstance(claim_id, str) and claim_id:
@@ -280,8 +444,13 @@ def reviewed_claim_ids(path: Path) -> set[str]:
     return claim_ids
 
 
-def next_review_batch_id(path: Path, source_id: str) -> int:
+def next_review_batch_id(
+    path: Path,
+    source_id: str,
+    excluded_campaigns: set[str] | None = None,
+) -> int:
     """Choose a monotonic per-source batch id for append-only review output."""
+    excluded_campaigns = excluded_campaigns or set()
     if not path.exists():
         return 0
     batch_ids = []
@@ -293,6 +462,8 @@ def next_review_batch_id(path: Path, source_id: str) -> int:
         if item.get("protocol_version") != PROTOCOL_VERSION:
             continue
         if item.get("source_id") != source_id:
+            continue
+        if item.get("retry_campaign") in excluded_campaigns:
             continue
         try:
             batch_ids.append(int(item["batch_id"]))
@@ -311,6 +482,7 @@ The orchestrator, not you, will copy the quotation from those lines. Conservativ
 def node1_prompt(
     row: dict[str, str], chunk_id: ChunkId, text: str, hypothesis_registry: str
 ) -> str:
+    """Build the evidence-bound extraction prompt for one source chunk."""
     numbered = "\n".join(
         f"L{line_no:04d}: {line}" for line_no, line in enumerate(text.splitlines(), 1)
     )
@@ -348,6 +520,7 @@ def validate_card(
     chunk_id: ChunkId,
     text: str,
 ) -> tuple[list[dict], list[dict]]:
+    """Partition candidate claims into evidence-valid and rejected records."""
     valid, rejected = [], []
     lines = text.splitlines()
     for claim in card.get("claims", []):
@@ -397,6 +570,7 @@ claim is not sufficient."""
 
 
 def review_claims(source_id: str, claims: list[dict], hypothesis_registry: str) -> dict:
+    """Ask node 2 to adversarially review one compact batch of claims."""
     compact = [
         {
             "claim_id": c.get("claim_id"),
@@ -421,10 +595,19 @@ Review every claim below. Output schema:
 
 CLAIMS_AND_CONTEXT:
 {json.dumps(compact, ensure_ascii=False)}"""
-    return chat_json(NODE2, MODEL2, NODE2_SYSTEM, prompt, 900)
+    claim_ids = [str(claim.get("claim_id")) for claim in claims]
+    return chat_json(
+        NODE2,
+        MODEL2,
+        NODE2_SYSTEM,
+        prompt,
+        900,
+        node2_response_format(source_id, claim_ids),
+    )
 
 
 def review_batch_key(claims: list[dict]) -> str:
+    """Return a stable identity for a set of claim IDs sent to node 2."""
     claim_ids = sorted(str(claim.get("claim_id", "")) for claim in claims)
     return hashlib.sha256("|".join(claim_ids).encode()).hexdigest()[:16]
 
@@ -468,9 +651,11 @@ def terminal_sources(
     path: Path,
     retry_sources: set[str] | None = None,
     retry_campaign: str | None = None,
+    excluded_campaigns: set[str] | None = None,
 ) -> set[str]:
     """Sources that should not be visited in this protocol campaign."""
     retry_sources = retry_sources or set()
+    excluded_campaigns = excluded_campaigns or set()
     sources: set[str] = set()
     if not path.exists():
         return sources
@@ -480,6 +665,8 @@ def terminal_sources(
         except json.JSONDecodeError:
             continue
         if item.get("protocol_version") != PROTOCOL_VERSION:
+            continue
+        if item.get("retry_campaign") in excluded_campaigns:
             continue
         source_id = item.get("source_id")
         event = item.get("event")
@@ -519,6 +706,7 @@ def validate_review(review: dict, source_id: str, claims: list[dict]) -> None:
 
 
 def main() -> int:
+    """Run or administratively invalidate one append-only coordinator campaign."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
@@ -530,9 +718,21 @@ def main() -> int:
         "--retry-campaign",
         help="Append-only retry namespace for explicitly selected failed sources",
     )
+    parser.add_argument(
+        "--invalidate-campaign",
+        help="Append an audit event excluding every artifact from this campaign",
+    )
+    parser.add_argument(
+        "--invalidation-reason",
+        help="Required explanation for --invalidate-campaign",
+    )
     args = parser.parse_args()
     if args.retry_campaign and not args.source:
         parser.error("--retry-campaign requires at least one --source")
+    if args.invalidate_campaign and not args.invalidation_reason:
+        parser.error("--invalidate-campaign requires --invalidation-reason")
+    if args.invalidate_campaign and args.retry_campaign:
+        parser.error("campaign invalidation and retry cannot run together")
 
     node1_path = args.output_dir / "node1_cards.jsonl"
     node2_path = args.output_dir / "node2_reviews.jsonl"
@@ -560,6 +760,19 @@ def main() -> int:
     lock_handle.write(f"run_id={run_id}\n")
     lock_handle.flush()
 
+    if args.invalidate_campaign:
+        record_event(
+            {
+                "event": "CAMPAIGN_INVALIDATED",
+                "protocol_version": PROTOCOL_VERSION,
+                "run_id": run_id,
+                "invalidated_campaign": args.invalidate_campaign,
+                "reason": args.invalidation_reason,
+                "ts": time.time(),
+            }
+        )
+        return 0
+
     record_event(
         {
             "event": "RUN_START",
@@ -571,15 +784,23 @@ def main() -> int:
             "ts": time.time(),
         },
     )
-    done = completed_keys(node1_path) | recovered_chunk_keys(ledger_path)
-    reviewed = reviewed_claim_ids(node2_path)
+    excluded_campaigns = invalidated_campaigns(ledger_path)
+    done = completed_keys(node1_path, excluded_campaigns) | recovered_chunk_keys(
+        ledger_path, excluded_campaigns
+    )
+    reviewed = reviewed_claim_ids(node2_path, excluded_campaigns)
     node1_failures = attempt_counts(
         ledger_path, "NODE1_ATTEMPT_FAILED", "chunk_id", args.retry_campaign
     )
     node2_failures = attempt_counts(
         ledger_path, "NODE2_REVIEW_FAILED", "batch_key", args.retry_campaign
     )
-    terminal = terminal_sources(ledger_path, retry_sources, args.retry_campaign)
+    terminal = terminal_sources(
+        ledger_path,
+        retry_sources,
+        args.retry_campaign,
+        excluded_campaigns,
+    )
 
     with args.manifest.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle, delimiter="\t"))
@@ -669,7 +890,7 @@ def main() -> int:
             )
             continue
 
-        source_claims = prior_claims(node1_path, row["source_id"])
+        source_claims = prior_claims(node1_path, row["source_id"], excluded_campaigns)
         source_chunks = list(chunks(text))
         pending_chunks = [
             (chunk_id, chunk_text)
@@ -698,8 +919,18 @@ def main() -> int:
                         NODE1_SYSTEM,
                         node1_prompt(row, chunk_id, chunk_text, hypothesis_registry),
                         1200,
+                        node1_response_format(row["source_id"], chunk_id),
                     )
                     valid, rejected = validate_card(card, row, chunk_id, chunk_text)
+                    if card.get("claims") and not valid:
+                        reasons = sorted(
+                            {
+                                reason
+                                for rejected_claim in rejected
+                                for reason in rejected_claim.get("reasons", [])
+                            }
+                        )
+                        raise ValueError(f"all candidate claims rejected: {reasons}")
                     record = {
                         "source_id": row["source_id"],
                         "chunk_id": chunk_id,
@@ -743,6 +974,27 @@ def main() -> int:
                     )
                     if split is not None:
                         child_ids = [f"{chunk_id}.0", f"{chunk_id}.1"]
+                        parent_sha256 = hash_text(chunk_text)
+                        children = []
+                        offset = 0
+                        for child_id, child_text in zip(child_ids, split, strict=True):
+                            end = offset + len(child_text)
+                            children.append(
+                                {
+                                    "chunk_id": child_id,
+                                    "start": offset,
+                                    "end": end,
+                                    "sha256": hash_text(child_text),
+                                }
+                            )
+                            offset = end
+                        coverage_text = "".join(split)
+                        coverage_sha256 = hash_text(coverage_text)
+                        coverage_verified = coverage_text == chunk_text
+                        if not coverage_verified or coverage_sha256 != parent_sha256:
+                            raise AssertionError(
+                                "split children do not cover their parent"
+                            )
                         record_event(
                             {
                                 "event": "CHUNK_SPLIT",
@@ -750,7 +1002,8 @@ def main() -> int:
                                 "run_id": run_id,
                                 "source_id": row["source_id"],
                                 "chunk_id": chunk_id,
-                                "child_chunk_ids": child_ids,
+                                "parent_sha256": parent_sha256,
+                                "children": children,
                                 "ts": time.time(),
                             }
                         )
@@ -766,7 +1019,10 @@ def main() -> int:
                                     "run_id": run_id,
                                     "source_id": row["source_id"],
                                     "chunk_id": chunk_id,
-                                    "child_chunk_ids": child_ids,
+                                    "parent_sha256": parent_sha256,
+                                    "children": children,
+                                    "coverage_sha256": coverage_sha256,
+                                    "coverage_verified": coverage_verified,
                                     "ts": time.time(),
                                 }
                             )
@@ -795,7 +1051,9 @@ def main() -> int:
             ]
         review_futures: list[tuple[str, Future[str | None]]] = []
         if pending_reviews:
-            first_batch_id = next_review_batch_id(node2_path, row["source_id"])
+            first_batch_id = next_review_batch_id(
+                node2_path, row["source_id"], excluded_campaigns
+            )
             for batch_offset, start in enumerate(
                 range(0, len(pending_reviews), NODE2_BATCH_SIZE)
             ):
