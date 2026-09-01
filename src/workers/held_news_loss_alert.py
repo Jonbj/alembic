@@ -1,4 +1,4 @@
-"""Alert EOD per posizioni in perdita senza copertura news (#324).
+"""Osservabilita' EOD: copertura news detenute (#324) e griglia cicli (#428).
 
 Il dossier misura gia' la cecita' lato uscita con una definizione dichiarata:
 perdita di almeno il 3% dall'ingresso, almeno due sedute consecutive senza righe
@@ -31,6 +31,7 @@ from src.mobile_monitoring.models import EventCategory, EventKind, Severity
 from src.util.retry import retry_transient
 from src.workers._async_utils import run_async
 from src.workers.celery_app import app
+from src.workers.session_grid_monitor import run_session_grid_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -328,7 +329,7 @@ async def _collect_held_news_loss_coverage(
 
 @app.task(name="src.workers.held_news_loss_alert.run_held_news_loss_alert")
 def run_held_news_loss_alert() -> dict[str, Any]:
-    """Valuta la cecita' EOD e la pubblica come incidente mobile durevole."""
+    """Esegue misure EOD indipendenti e pubblica gli incidenti durevoli."""
 
     async def _run() -> dict[str, Any]:
         pool = await init_asyncpg_pool()
@@ -337,19 +338,39 @@ def run_held_news_loss_alert() -> dict[str, Any]:
             secret_key=config.ALPACA_SECRET_KEY,
             paper=config.ALPACA_PAPER_MODE,
         )
+        observed_at = datetime.now(timezone.utc)
+        try:
+            session_grid = await run_session_grid_monitor(
+                pool,
+                trading_client,
+                observed_at=observed_at,
+            )
+        except Exception as exc:
+            logger.warning("#428: session-grid monitor unavailable: %s", exc)
+            session_grid = {"status": "skipped", "reason": "measurement_unavailable"}
+
         try:
             coverage = await _collect_held_news_loss_coverage(
                 pool,
                 trading_client,
-                observed_at=datetime.now(timezone.utc),
+                observed_at=observed_at,
             )
         except Exception as exc:
             logger.warning("#324: held news-loss alert unavailable: %s", exc)
-            return {"status": "skipped", "reason": "coverage_data_unavailable"}
+            return {
+                "status": "skipped",
+                "reason": "coverage_data_unavailable",
+                "session_grid": session_grid,
+            }
 
         alerted = await evaluate_held_news_loss_alerts(
             IncidentStore(pool), coverage
         )
-        return {"status": "ok", "alerted": len(alerted), "symbols": alerted}
+        return {
+            "status": "ok",
+            "alerted": len(alerted),
+            "symbols": alerted,
+            "session_grid": session_grid,
+        }
 
     return run_async(_run())
