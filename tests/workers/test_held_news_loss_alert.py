@@ -140,3 +140,28 @@ def test_alert_ha_un_run_eod_separato_dal_money_path() -> None:
     assert set(entry["schedule"].hour) == {22}
     assert set(entry["schedule"].minute) == {50}
     assert set(entry["schedule"].day_of_week) == {1, 2, 3, 4, 5}
+
+
+def test_giro_eod_isola_la_misura_griglia_dall_alert_copertura(monkeypatch) -> None:
+    from src.workers import held_news_loss_alert as worker
+
+    pool = MagicMock()
+    monkeypatch.setattr(worker, "init_asyncpg_pool", AsyncMock(return_value=pool))
+    monkeypatch.setattr(worker, "TradingClient", MagicMock())
+    monitor = AsyncMock(side_effect=RuntimeError("metric DB unavailable"))
+    monkeypatch.setattr(worker, "run_session_grid_monitor", monitor)
+    collect_coverage = AsyncMock(return_value={"posizioni": []})
+    monkeypatch.setattr(worker, "_collect_held_news_loss_coverage", collect_coverage)
+    evaluate_coverage = AsyncMock(return_value=[])
+    monkeypatch.setattr(worker, "evaluate_held_news_loss_alerts", evaluate_coverage)
+
+    result = worker.run_held_news_loss_alert.run()
+
+    assert result["status"] == "ok"
+    assert result["session_grid"] == {
+        "status": "skipped",
+        "reason": "measurement_unavailable",
+    }
+    monitor.assert_awaited_once()
+    collect_coverage.assert_awaited_once()
+    evaluate_coverage.assert_awaited_once()
