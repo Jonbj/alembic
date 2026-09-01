@@ -422,11 +422,13 @@ esegui_agente() {
             # Claude Code con un modello diverso sotto. Gli argomenti dopo
             # l'integrazione sono passati a claude cosi' come sono.
             local _mod
-            [[ "$motore" == glm53 ]] && _mod="glm-5.2:cloud" || _mod="minimax-m3:cloud"
+            [[ "$motore" == glm53 ]] && _mod="glm-5.3:cloud" || _mod="minimax-m3:cloud"
             # Il `--` non e' opzionale: senza, `ollama launch` intercetta gli
             # argomenti di claude e muore con "unknown flag". Verificato il
             # 2026-08-07, insieme al fatto che il modello che risponde e' davvero
-            # quello richiesto e non un ripiego su Claude.
+            # quello richiesto e non un ripiego su Claude. Il modello di glm53 e'
+            # passato da glm-5.2:cloud a glm-5.3:cloud il 2026-09-01: fino a quel
+            # giorno l'etichetta glm53 designava lavoro svolto da GLM-5.2.
             (cd "$wt" && timeout "$TIMEOUT_SESSIONE" ollama launch claude --model "$_mod" -- \
                 -p "$prompt" --allowedTools "Bash,Read,Write,Edit,Glob,Grep" </dev/null 2>&1)
             ;;
@@ -455,7 +457,7 @@ esegui_revisore() {
             ;;
         glm53|minimax)
             local _mod
-            [[ "$motore" == glm53 ]] && _mod="glm-5.2:cloud" || _mod="minimax-m3:cloud"
+            [[ "$motore" == glm53 ]] && _mod="glm-5.3:cloud" || _mod="minimax-m3:cloud"
             (cd "$wt" && timeout "$TIMEOUT_REVIEW" ollama launch claude --model "$_mod" -- \
                 -p "$prompt" --allowedTools "Bash,Read,Glob,Grep" </dev/null 2>&1)
             ;;
