@@ -915,7 +915,7 @@ def _s4_entry_intents(giorno: date) -> list[dict]:
         f"intent.symbol, intent.model_generated_at::text, intent.decision_at::text, "
         f"COALESCE(intent.snapshot->>'score',''), "
         f"COALESCE(disposition.reason_code,''), "
-        f"COALESCE(disposition.is_tradable::text,''), "
+        f"disposition.is_tradable, "
         f"COALESCE(trade.id::text,''), COALESCE(trade.net_pnl::text,'') "
         f"FROM s4_candidate_population intent "
         f"LEFT JOIN s4_intent_events disposition "
@@ -928,8 +928,9 @@ def _s4_entry_intents(giorno: date) -> list[dict]:
         f"    AND entry_time < intent.decision_slot + INTERVAL '15 minutes' "
         f"  ORDER BY entry_time, id LIMIT 1"
         f") trade ON true "
-        f"WHERE intent.decision_at >= '{g}' AND intent.decision_at < '{g}'::date + 1 "
-        f"ORDER BY intent.decision_at, intent_id;"
+        f"WHERE intent.decision_at >= '{g}' "
+        f"AND intent.decision_at < '{g}'::date + 1 "
+        f"ORDER BY intent.decision_at, intent.intent_id;"
     )
     return [
         {
@@ -1467,6 +1468,7 @@ def costruisci_dossier(
     # #335 step 2: aggregato ombra giornaliero + sweep sulla finestra di
     # osservazione. Misura read-only: nessun ordine cambiato.
     guardia_giorno = aggregate_contradiction_guard(intenti_ingresso_s4)
+    _avvisa_partizione_tradabilita_unilaterale(guardia_giorno, giorno)
     guardia_giorno["soglia"] = soglia_guardia
     guardia_finestra = _guardia_contraddizione_finestra(
         intenti_ingresso_s4, giorno
@@ -1735,6 +1737,23 @@ def _soglia_guardia_contraddizione() -> float:
     except ValueError:
         log.warning("SOGLIA_GUARDIA_CONTRADDIZIONE=%r non valido, uso il default", raw)
         return SOGLIA_GUARDIA_CONTRADDIZIONE
+
+
+def _avvisa_partizione_tradabilita_unilaterale(
+    aggregato: Mapping[str, Any], giorno: date
+) -> None:
+    """Segnala una seduta in cui ogni disposition risulta non tradabile."""
+    n_intenti = int(aggregato.get("n_intenti") or 0)
+    n_tradabili = int(aggregato.get("n_intenti_tradabili") or 0)
+    n_non_tradabili = int(aggregato.get("n_intenti_non_tradabili") or 0)
+    if n_intenti > 0 and n_tradabili == 0 and n_non_tradabili == n_intenti:
+        log.warning(
+            "Guardia contraddizione %s: partizione is_tradable unilaterale, "
+            "%d intenti non tradabili su %d; verificare query e parser",
+            giorno.isoformat(),
+            n_non_tradabili,
+            n_intenti,
+        )
 
 
 def _guardia_contraddizione_finestra(
