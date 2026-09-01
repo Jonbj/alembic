@@ -42,7 +42,7 @@
 set -euo pipefail
 
 # cron parte con un PATH minimo (/usr/bin:/bin). Senza /usr/local/bin `ollama`
-# non si trova, e glm52/minimax risulterebbero "non installati": il loop girerebbe
+# non si trova, e glm53/minimax risulterebbero "non installati": il loop girerebbe
 # sul solo codex senza che nulla lo segnali.
 export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 
@@ -66,7 +66,7 @@ TIMEOUT_SESSIONE=5400    # 90 minuti: oltre, la sessione e' bloccata, non lenta
 #      ripete venti volte lo stesso punto cieco, e nessuno lo vede.
 # La rotazione avanza a ogni giro, indipendentemente dall'esito.
 #
-# glm52 e minimax girano dentro Claude Code ma con un modello diverso sotto
+# glm53 e minimax girano dentro Claude Code ma con un modello diverso sotto
 # (`ollama launch claude --model ...`): stesso utensile, testa diversa.
 MOTORI=(codex glm53 minimax)
 # Se l'operatore forza un motore via env var, quello e' l'unico che gira.
@@ -359,7 +359,7 @@ metti_in_panchina() {
 motore_installato() {
     case "$1" in
         codex|gemini|opencode) command -v "$1" >/dev/null 2>&1 ;;
-        glm52|minimax)        command -v ollama >/dev/null 2>&1 ;;
+        glm53|minimax)        command -v ollama >/dev/null 2>&1 ;;
         *)                    return 1 ;;
     esac
 }
@@ -418,11 +418,11 @@ esegui_agente() {
                 -c sandbox_workspace_write.network_access=true \
                 "$prompt" </dev/null 2>&1)
             ;;
-        glm52|minimax)
+        glm53|minimax)
             # Claude Code con un modello diverso sotto. Gli argomenti dopo
             # l'integrazione sono passati a claude cosi' come sono.
             local _mod
-            [[ "$motore" == glm52 ]] && _mod="glm-5.2:cloud" || _mod="minimax-m3:cloud"
+            [[ "$motore" == glm53 ]] && _mod="glm-5.2:cloud" || _mod="minimax-m3:cloud"
             # Il `--` non e' opzionale: senza, `ollama launch` intercetta gli
             # argomenti di claude e muore con "unknown flag". Verificato il
             # 2026-08-07, insieme al fatto che il modello che risponde e' davvero
@@ -453,9 +453,9 @@ esegui_revisore() {
                 -s read-only -c sandbox_workspace_write.network_access=true \
                 "$prompt" </dev/null 2>&1)
             ;;
-        glm52|minimax)
+        glm53|minimax)
             local _mod
-            [[ "$motore" == glm52 ]] && _mod="glm-5.2:cloud" || _mod="minimax-m3:cloud"
+            [[ "$motore" == glm53 ]] && _mod="glm-5.2:cloud" || _mod="minimax-m3:cloud"
             (cd "$wt" && timeout "$TIMEOUT_REVIEW" ollama launch claude --model "$_mod" -- \
                 -p "$prompt" --allowedTools "Bash,Read,Glob,Grep" </dev/null 2>&1)
             ;;
@@ -736,7 +736,7 @@ fi
 
 if [[ "${1:-}" == "--prova" ]]; then
     # Verifica che il motore risponda e che gli argomenti arrivino davvero fino a
-    # lui. Serve soprattutto per glm52/minimax, dove il prompt passa attraverso
+    # lui. Serve soprattutto per glm53/minimax, dove il prompt passa attraverso
     # `ollama launch` prima di raggiungere claude.
     _m="${2:?uso: --prova <motore>}"
     motore_installato "$_m" || { echo "Motore $_m non installato."; exit 1; }
