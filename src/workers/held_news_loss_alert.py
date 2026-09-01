@@ -1,4 +1,4 @@
-"""Alert EOD per posizioni in perdita senza copertura news (#324).
+"""Osservabilita' EOD: copertura news detenute (#324) e griglia cicli (#428).
 
 Il dossier misura gia' la cecita' lato uscita con una definizione dichiarata:
 perdita di almeno il 3% dall'ingresso, almeno due sedute consecutive senza righe
@@ -329,7 +329,7 @@ async def _collect_held_news_loss_coverage(
 
 @app.task(name="src.workers.held_news_loss_alert.run_held_news_loss_alert")
 def run_held_news_loss_alert() -> dict[str, Any]:
-    """Valuta la cecita' EOD e la pubblica come incidente mobile durevole."""
+    """Esegue misure EOD indipendenti e pubblica gli incidenti durevoli."""
 
     async def _run() -> dict[str, Any]:
         pool = await init_asyncpg_pool()

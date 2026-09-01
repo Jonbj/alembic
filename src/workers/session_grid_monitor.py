@@ -265,4 +265,3 @@ async def run_session_grid_monitor(
         "close_gap_minutes": measurement.close_gap_minutes,
         "alert_required": measurement.alert_required,
     }
-

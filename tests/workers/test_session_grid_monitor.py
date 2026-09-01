@@ -138,4 +138,3 @@ async def test_collettore_usa_calendario_alpaca_in_ora_di_mercato() -> None:
     assert measurement.open_gap_minutes == pytest.approx(37.0)
     trading_client.get_calendar.assert_called_once()
     connection.fetch.assert_awaited_once()
-
