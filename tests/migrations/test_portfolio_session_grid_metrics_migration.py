@@ -28,4 +28,3 @@ def test_migration_conserva_confini_cicli_gap_e_soglia() -> None:
     ):
         assert column in sql
     assert "PRIMARY KEY (session_date)" in sql
-
