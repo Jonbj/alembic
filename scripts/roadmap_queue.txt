@@ -38,6 +38,7 @@
 
 # === 1. L'IMPIANTO DI MISURA E' FERMO O MENTE (tier0/tier1) ===
 # Finche' questi non chiudono, ogni analisi a valle lavora su dati assenti o falsi.
+453  misurare l'effetto reale della Variante A del prompt sentiment (#399/#408, deployata in deroga al freeze il 2026-09-01, bf5bef2e) sulla distribuzione |score|/gate-pass S4: la proiezione pre-deploy (~2,4x piu' segnali sopra gate) va confermata o corretta sui dati veri, non assunta
 396  il dossier alpha-miner non si genera dal 2026-08-25: `decision_at` ambiguo in _s4_entry_intents e il fallimento esce 0 (tier0 — la pipeline e' morta e in silenzio)
 397  uscite parziali e stop del broker mai riscritti su `trades`: quantita' fantasma 74x su NOK, il 91% del MTM di libro era fittizio il 26/08 (tier0)
 411  il cron forense non ha la correzione di #336: commit condizionato al branch, esito mai verificato, 2 giorni di forense persi
@@ -87,6 +88,7 @@
 408  la news di secondo ordine e' sistematicamente sotto-scorata: segno giusto, magnitudine un ordine sotto il gate (ADBE +0,060 su +5,73%, NOW +0,143 su +10,04%) — 8 dei 22 miss di Week 35 sono THIN_NEUTRAL
 409  NO_NEWS e' la causa dominante dei miss di Week 35 (9/22) mentre il sistema osserva gia' catalizzatori che non usa: NVO aveva una corporate action OBSERVED, ERIC una volume surprise +1,25
 451  motore momentum shadow sulla popolazione NO_NEWS/THIN_NEUTRAL (77-78% dei miss settimanali in Week 34/35): segnale prezzo/volume pre-registrato, confrontato con l'opportunita' accessibile gia' calcolata dai report — solo misura, nessun gate toccato (segue #409)
+452  `OllamaCloudClient` non invia `format` (schema JSON) ne' `temperature=0` all'API pur essendo raccomandati: candidato root-cause della deriva sugli enum osservata (`supplier_readthrough` inesistente, separatori di lista ricopiati) — ortogonale al testo del prompt, riduce anche il rischio di parse failure di un'eventuale Variante B
 281  alpha-miss: funnel actionability e pipeline v2 — rientra in rotazione, i suoi 2 tentativi falliti non sono piu' in logs/roadmap_agent_state.tsv (sblocca #287)
 
 # === 6. IL RESTO ===
