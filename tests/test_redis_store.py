@@ -26,15 +26,13 @@ class TestFallbackCounter:
         assert result == 1
 
     def test_reset_fallback_counter(self):
-        """Test resetting fallback counter (#427: also clears the fired latch)."""
+        """Reset the streak without rearming either 24-hour alert latch."""
         mock_redis = MagicMock()
 
         store = RedisStore(redis_client=mock_redis)
         store.reset_fallback_counter()
 
-        mock_redis.delete.assert_called_once_with(
-            "fallback:consecutive:count", "fallback:breaker_fired_at"
-        )
+        mock_redis.delete.assert_called_once_with("fallback:consecutive:count")
 
     def test_get_fallback_count(self):
         """Test getting current fallback count."""
@@ -84,7 +82,7 @@ class TestFallbackCounter:
         """
         mock_redis = MagicMock()
         mock_redis.incr.return_value = 4
-        mock_redis.exists.return_value = False  # latch not yet fired
+        mock_redis.set.return_value = True  # both atomic latches acquired
 
         fired = []
         store = RedisStore(
@@ -95,8 +93,12 @@ class TestFallbackCounter:
 
         assert result == 4
         assert fired == [4]
-        mock_redis.set.assert_any_call("fallback:breaker_fired_at", "1")
-        mock_redis.expire.assert_any_call("fallback:breaker_fired_at", 24 * 3600)
+        mock_redis.set.assert_any_call(
+            "fallback:breaker_fired_at", "1", nx=True, ex=24 * 3600
+        )
+        mock_redis.set.assert_any_call(
+            "fallback:alert_sent", "1", nx=True, ex=24 * 3600
+        )
 
     def test_increment_does_not_refire_when_latch_is_set(self):
         """#427: once the breaker has fired in this 24h window, additional
@@ -104,7 +106,7 @@ class TestFallbackCounter:
         """
         mock_redis = MagicMock()
         mock_redis.incr.return_value = 5
-        mock_redis.exists.return_value = True  # latch already armed
+        mock_redis.set.return_value = None  # atomic latch already armed
 
         fired = []
         store = RedisStore(
@@ -114,11 +116,15 @@ class TestFallbackCounter:
         store.increment_fallback_counter()
 
         assert fired == []
+        mock_redis.set.assert_called_once_with(
+            "fallback:breaker_fired_at", "1", nx=True, ex=24 * 3600
+        )
 
-    def test_reset_clears_the_fired_latch(self):
-        """#427: reset must clear the latch as well as the counter, otherwise
-        a new streak climbing to 3 after a reset would not re-fire — the
-        second streak is observationally identical to the first.
+    def test_reset_preserves_the_fired_latch_for_the_full_24h_window(self):
+        """#427: a healthy row resets the streak, not the 24-hour fire window.
+
+        Clearing the latch here lets alternating streaks alert repeatedly inside
+        one day, contradicting the issue's fired-once acceptance criterion.
         """
         mock_redis = MagicMock()
         store = RedisStore(redis_client=mock_redis)
@@ -126,7 +132,8 @@ class TestFallbackCounter:
 
         called_with = mock_redis.delete.call_args.args
         assert "fallback:consecutive:count" in called_with
-        assert "fallback:breaker_fired_at" in called_with
+        assert "fallback:breaker_fired_at" not in called_with
+        assert "fallback:alert_sent" not in called_with
 
     def test_increment_at_exact_threshold_still_fires(self):
         """Regression guard for the historical exact-equality path: a counter
@@ -135,7 +142,7 @@ class TestFallbackCounter:
         """
         mock_redis = MagicMock()
         mock_redis.incr.return_value = 3
-        mock_redis.exists.return_value = False
+        mock_redis.set.return_value = True
 
         fired = []
         store = RedisStore(

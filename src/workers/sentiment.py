@@ -249,7 +249,11 @@ def _persist_sentiment_discards(
         log.warning("Could not persist news discard evidence: %s", exc)
 
 
-from src.store.redis_store import RedisStore
+from src.store.redis_store import (
+    FALLBACK_ALERT_SENT_KEY,
+    FALLBACK_ALERT_TTL_SECONDS,
+    RedisStore,
+)
 from src.workers.celery_app import app
 
 log = logging.getLogger(__name__)
@@ -946,8 +950,8 @@ def _maybe_notify_ollama_timeout(redis_client, timeout_count: int, total: int) -
     ):
         return  # cooldown active: suppress duplicate alert
     try:
-        from src.notifications.telegram import TelegramNotifier
         from src.notifications.base import AlertLevel
+        from src.notifications.telegram import TelegramNotifier
 
         notifier = TelegramNotifier()
         asyncio.run(
@@ -962,8 +966,6 @@ def _maybe_notify_ollama_timeout(redis_client, timeout_count: int, total: int) -
         log.warning("Failed to send Ollama timeout Telegram alert: %s", exc)
 
 
-_ENSEMBLE_DEGRADATION_LATCH_KEY = "ensemble:degradation_alert:last_sent"
-_ENSEMBLE_DEGRADATION_LATCH_COOLDOWN_S = 1800  # 30 min — same pattern as Ollama timeout latch
 # #427 item 3: <50% full-ensemble share over the last 2 RTH cycles. Below this
 # the market is being scored mostly by FinBERT or single-model reads, which
 # the dossier flags as a non-tradeable observation window. Two cycles is the
@@ -982,10 +984,10 @@ def _maybe_notify_sustained_degradation(
 ) -> None:
     """#427: alert when full-ensemble share has been below 50% for >=2 RTH cycles.
 
-    Reads the two most recent ensemble_cycle_health rows written by prior
-    cycles, computes the share, and dispatches a single Telegram alert
-    rate-limited by a 30-minute Redis latch. Pure observability: never reads
-    or writes anything used by execution, sizing, or strategy state.
+    Reads the two most recent RTH ensemble_cycle_health rows, computes the
+    share, then claims the existing fallback:alert_sent 24-hour latch before
+    dispatching Telegram. Pure observability: never reads or writes anything
+    used by execution, sizing, or strategy state.
     """
     if aggregate <= 0:
         # An empty cycle says nothing about degradation; skip.
@@ -994,12 +996,6 @@ def _maybe_notify_sustained_degradation(
         # Pure Ollama outage is already covered by _maybe_notify_ollama_timeout.
         # A second alert would be noise.
         return
-    # Cooldown gate (same shape as the Ollama timeout alert above).
-    if not redis_client.set(
-        _ENSEMBLE_DEGRADATION_LATCH_KEY, "1",
-        nx=True, ex=_ENSEMBLE_DEGRADATION_LATCH_COOLDOWN_S,
-    ):
-        return
     try:
         import psycopg2
         conn = psycopg2.connect(config.DATABASE_URL)
@@ -1007,8 +1003,9 @@ def _maybe_notify_sustained_degradation(
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT cycle_started_at, n_ensemble, aggregate, rth
+                    SELECT cycle_started_at, n_ensemble, aggregate
                     FROM ensemble_cycle_health
+                    WHERE rth
                     ORDER BY cycle_started_at DESC
                     LIMIT %s
                     """,
@@ -1021,15 +1018,30 @@ def _maybe_notify_sustained_degradation(
         log.warning("Sustained-degradation query failed: %s", _query_exc)
         return
 
-    rth_rows = [r for r in rows if r[3]]
-    if len(rth_rows) < _ENSEMBLE_DEGRADATION_RTH_MIN_CYCLES:
+    if len(rows) < _ENSEMBLE_DEGRADATION_RTH_MIN_CYCLES:
         return
-    total_ensemble = sum(int(r[1]) for r in rth_rows)
-    total_aggregate = sum(int(r[2]) for r in rth_rows)
-    if total_aggregate <= 0:
+    aggregates = [int(r[2]) for r in rows]
+    if any(total <= 0 for total in aggregates):
+        # An empty cycle has no defined share and cannot prove a sustained drop.
         return
+    cycle_shares = [int(row[1]) / total for row, total in zip(rows, aggregates)]
+    if any(
+        cycle_share >= _ENSEMBLE_DEGRADATION_RTH_SHARE_THRESHOLD
+        for cycle_share in cycle_shares
+    ):
+        # "Sustained" means every consecutive cycle is below the threshold;
+        # one recovered cycle must clear the condition even if the pooled rows
+        # are still dominated by an earlier, much larger degraded batch.
+        return
+    total_ensemble = sum(int(r[1]) for r in rows)
+    total_aggregate = sum(aggregates)
     share = total_ensemble / total_aggregate
-    if share >= _ENSEMBLE_DEGRADATION_RTH_SHARE_THRESHOLD:
+    if not redis_client.set(
+        FALLBACK_ALERT_SENT_KEY,
+        "1",
+        nx=True,
+        ex=FALLBACK_ALERT_TTL_SECONDS,
+    ):
         return
 
     try:

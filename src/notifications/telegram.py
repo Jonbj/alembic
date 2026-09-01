@@ -144,7 +144,7 @@ class TelegramNotifier:
             f"• qc:sizing_multiplier key written to 0.5 (NOT consumed by the live "
             f"sizing path — QuantConnect-era artefact, see issue #427)\n"
             f"• Latch `fallback:breaker_fired_at` set (24h TTL — suppresses re-fires "
-            f"until the streak is reset or the TTL expires)\n\n"
+            f"for the full window, independently of streak resets)\n\n"
             f"<b>Not changed:</b>\n"
             f"• Position sizing, regime, thresholds, strategy state\n\n"
             f"<i>Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"

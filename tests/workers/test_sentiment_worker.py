@@ -992,6 +992,93 @@ class TestEnsembleCycleHealthWiring:
         assert _is_full_fallback(single) is False
         assert _is_full_fallback(ens) is False
 
+    def test_healthy_window_does_not_consume_the_alert_latch(self):
+        """A healthy two-cycle window must leave the latch available.
+
+        The alert decision has to precede SET NX; otherwise every healthy cycle
+        suppresses a real degradation that starts during the cooldown.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from src.workers.sentiment import _maybe_notify_sustained_degradation
+
+        redis = MagicMock()
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [(object(), 3, 4), (object(), 2, 4)]
+        conn = MagicMock()
+        conn.cursor.return_value.__enter__.return_value = cursor
+
+        with patch("psycopg2.connect", return_value=conn):
+            _maybe_notify_sustained_degradation(
+                redis, n_ensemble=3, aggregate=4, ollama_timeout_count=0
+            )
+
+        redis.set.assert_not_called()
+
+    def test_sustained_degradation_uses_shared_atomic_alert_latch(self):
+        """Two degraded RTH cycles alert through fallback:alert_sent once."""
+        import sys
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from src.workers.sentiment import _maybe_notify_sustained_degradation
+
+        redis = MagicMock()
+        redis.set.return_value = True
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [(object(), 1, 4), (object(), 1, 4)]
+        conn = MagicMock()
+        conn.cursor.return_value.__enter__.return_value = cursor
+        send_alert = AsyncMock(return_value=True)
+        notifier_cls = MagicMock()
+        notifier_cls.return_value.send_alert = send_alert
+
+        with (
+            patch("psycopg2.connect", return_value=conn),
+            patch.dict(
+                sys.modules,
+                {
+                    "src.notifications.telegram": SimpleNamespace(
+                        TelegramNotifier=notifier_cls
+                    ),
+                    "src.notifications.base": SimpleNamespace(
+                        AlertLevel=SimpleNamespace(WARNING="warning")
+                    ),
+                },
+            ),
+        ):
+            _maybe_notify_sustained_degradation(
+                redis, n_ensemble=1, aggregate=4, ollama_timeout_count=0
+            )
+
+        sql = cursor.execute.call_args.args[0]
+        assert "WHERE rth" in sql
+        redis.set.assert_called_once_with(
+            "fallback:alert_sent", "1", nx=True, ex=24 * 3600
+        )
+        send_alert.assert_awaited_once()
+
+    def test_recovered_latest_cycle_is_not_sustained_degradation(self):
+        """Both consecutive cycles, not only their pooled rows, must be below 50%."""
+        from unittest.mock import MagicMock, patch
+
+        from src.workers.sentiment import _maybe_notify_sustained_degradation
+
+        redis = MagicMock()
+        cursor = MagicMock()
+        # Pooled share is 4/104 (<50%), but the latest cycle has recovered to
+        # 4/4. This is not two consecutive degraded cycles.
+        cursor.fetchall.return_value = [(object(), 4, 4), (object(), 0, 100)]
+        conn = MagicMock()
+        conn.cursor.return_value.__enter__.return_value = cursor
+
+        with patch("psycopg2.connect", return_value=conn):
+            _maybe_notify_sustained_degradation(
+                redis, n_ensemble=4, aggregate=4, ollama_timeout_count=0
+            )
+
+        redis.set.assert_not_called()
+
 
 class TestDKCoTPrompt:
     """Tests for Domain Knowledge Chain-of-Thought prompt."""
