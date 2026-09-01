@@ -4,6 +4,8 @@
 # Session log : logs/daily_analysis_YYYY-MM-DD.log   (full tool output)
 # Report file : docs/FORENSIC_DAILY_REPORT_YYYY-MM-DD.md  (clean Markdown report)
 # Sends a Telegram summary after the analysis completes.
+# Il commit di report e ledger su main avviene DOPO la sessione, deterministicamente,
+# con scripts/commit_evidence_ledger.sh (#411): la sessione scrive solo i file.
 
 set -euo pipefail
 
@@ -78,6 +80,13 @@ Data analisi: ${DATE_TARGET}
 Claude Code sta eseguendo l'analisi forense..."
 
 cd "$PROJECT_DIR"
+
+# Prima che la sessione legga findings.json, riallinealo a origin/main (#411): questa
+# working tree e' condivisa e un `git checkout` altrui riporta il ledger alla versione
+# del branch di turno. Il forense lo AGGIORNA, quindi partire da una copia riportata
+# indietro significa ripartire da un prossimo_id gia' consumato su main. E' un'unione,
+# non una sostituzione, ed e' fail-open: al massimo si lavora sulla copia vecchia.
+"$PROJECT_DIR/scripts/refresh_evidence_ledger.sh" docs/evidence/findings.json || true
 
 # The heredoc uses single-quoted delimiter so no shell expansion occurs inside.
 # Placeholders __ALEMBIC_API_KEY__, __DATE_TARGET__, __REPORT_FILE__ are replaced
@@ -404,26 +413,12 @@ DUE REGOLE VINCOLANTI:
 2. NEL DUBBIO, AGGANCIA. Creare un id nuovo va giustificato nella nota. Un'evidenza spezzata in
    più id ha ricorrenza 1 ciascuno e sparisce sotto tutte le soglie.
 
-Poi committa il ledger e il report SOLO SE il branch corrente e' main. Controlla PRIMA:
-
-   git rev-parse --abbrev-ref HEAD
-
-- Se stampa "main": committa.
-    git add docs/evidence/findings.json "__REPORT_FILE__"
-    git commit -m "evidence: forensic __DATE_TARGET__"
-   git push origin main
- Il PUSH e' obbligatorio quanto il commit: senza, il ledger vive solo su questa macchina
- e un cambio di sessione lo perde. Se il push fallisce NON forzarlo: lascia il commit
- locale e segnalalo a stdout.
-- Se stampa QUALSIASI ALTRA COSA: NON committare. Il file resta scritto sul disco (non annullare
-  le modifiche) e stampi su stdout, come ultima riga:
-    ATTENZIONE: findings scritto ma NON committato — branch corrente <nome>, atteso main.
-
-Motivo: questo cron gira nella directory principale del repo, che puo' trovarsi sul branch di
-lavoro di un altro agente. Un commit del ledger su un branch casuale lo disperderebbe e
-spezzerebbe la cronologia git, che e' l'audit del ledger stesso.
-
-Se non c'e' nulla da committare, non forzare il commit.
+Poi NON committare e NON pushare nulla: limitati a scrivere i file su disco (il report e
+docs/evidence/findings.json). Al commit ci pensa lo script chiamante, dopo la sessione,
+con scripts/commit_evidence_ledger.sh: committa il ledger e il report insieme su main
+da una worktree dedicata, quindi non importa su quale branch si trovi questa directory
+di lavoro (di solito e' quella di un altro agente). Un tuo commit qui finirebbe sul
+branch sbagliato e disperderebbe il ledger, che e' la cronologia dell'audit stesso.
 
 Nel report, ogni anomalia riportata deve avere il suo id fra parentesi quadre a inizio riga.
 
@@ -464,8 +459,14 @@ ${FAILURE_TAIL}" "" || true
     exit "$ANALYSIS_STATUS"
 fi
 
-echo ""
-echo "Completed: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+# Il report e' l'uscita primaria del cron: una sessione che termina bene senza averlo
+# scritto non e' un giro sano. Fino al 2026-08-24 questo caso mandava solo l'avviso
+# Telegram e usciva comunque 0, nascondendo il buco a chi sorveglia l'exit code (#411).
+if [[ ! -f "$REPORT_FILE" ]]; then
+    echo "FAILED: report ${REPORT_FILE} non prodotto dalla sessione"
+    tg_send "🚨 Analisi forense ${DATE_TARGET}: la sessione è terminata senza scrivere il report (${REPORT_FILE}) — vedi <code>${LOG_FILE}</code>." "" || true
+    exit 1
+fi
 
 # Telegram message 1: executive summary (first output lines, max 3800 chars)
 HEADER="📊 <b>Analisi Trading Alembic — ${DATE_TARGET}</b>"
@@ -474,17 +475,51 @@ tg_send "${HEADER}
 
 <pre>${SUMMARY_TEXT}</pre>"
 
-# Telegram message 2: recommendations and tickets (separate message for visibility)
-FIXES=$(echo "$ANALYSIS_OUTPUT" | grep -A 25 -E "Raccomandazioni immediate|Ticket tecnici|TOP 3 FIX" | head -30)
-if [[ -n "$FIXES" ]]; then
+# Telegram message 2: recommendations and tickets (separate message for visibility).
+# La sezione e' facoltativa: un summary senza quelle parole non deve ammazzare il cron
+# (grep senza match vale 1 e set -e uscirebbe qui).
+FIXES=$(echo "$ANALYSIS_OUTPUT" | grep -A 25 -E "Raccomandazioni immediate|Ticket tecnici|TOP 3 FIX" | head -30 || true)
+if [[ -n "${FIXES:-}" ]]; then
     tg_send "🔧 <b>Fix prioritari — ${DATE_TARGET}</b>
 
 <pre>${FIXES}</pre>"
 fi
 
 # Telegram message 3: report file path confirmation
-if [[ -f "$REPORT_FILE" ]]; then
-    tg_send "📄 Report salvato: <code>${REPORT_FILE}</code>"
-else
-    tg_send "⚠️ Report file non trovato: <code>${REPORT_FILE}</code> — controlla il log."
-fi
+tg_send "📄 Report salvato: <code>${REPORT_FILE}</code>"
+
+# Commit deterministico del ledger (#411), come gia' fa l'alpha-miss (#336). La
+# sessione scrive soltanto i file: il commit lo fa qui una worktree dedicata
+# appuntata su main, cosi' il branch su cui e' parcheggiata questa directory di
+# lavoro non conta piu' nulla. L'esito e' esplicito su Telegram e nell'ultima
+# riga del log, perche' finora un mancato commit era visibile solo rileggendo il
+# log a mano.
+COMMIT_PATHS=(docs/evidence/findings.json "$REPORT_FILE")
+set +e
+GIT_OUTPUT=$("$PROJECT_DIR/scripts/commit_evidence_ledger.sh" \
+    --message "evidence: forensic ${DATE_TARGET}" "${COMMIT_PATHS[@]}" 2>&1)
+set -e
+printf '%s\n' "$GIT_OUTPUT"
+GIT_STATUS=$(printf '%s\n' "$GIT_OUTPUT" | sed -n 's/^GIT_STATUS=//p' | tail -1)
+GIT_STATUS="${GIT_STATUS:-not_committed}"
+
+case "$GIT_STATUS" in
+    pushed)
+        tg_send "✅ Report e ledger su <code>main</code> (GIT_STATUS=pushed)."
+        ;;
+    nothing_to_commit)
+        tg_send "ℹ️ Nessuna modifica al ledger da committare (GIT_STATUS=nothing_to_commit)."
+        ;;
+    *)
+        tg_send "⚠️ Report forense ${DATE_TARGET} NON arrivato su <code>main</code> (GIT_STATUS=${GIT_STATUS}) — serve un intervento manuale, vedi <code>${LOG_FILE}</code>."
+        ;;
+esac
+
+echo ""
+echo "Completed: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+# Ultima riga del log, leggibile a macchina dalla review settimanale.
+echo "GIT_STATUS=${GIT_STATUS}"
+case "$GIT_STATUS" in
+    pushed|nothing_to_commit) exit 0 ;;
+    *) exit 1 ;;
+esac

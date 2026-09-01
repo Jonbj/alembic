@@ -24,6 +24,7 @@ def _row(
     ticker: str,
     title: str,
     *,
+    body_snippet: str | None = None,
     content_hash: str = "",
     source: str = "alpaca_benzinga",
     published_at: datetime | None = OPEN,
@@ -39,7 +40,7 @@ def _row(
         "news_log_id": news_log_id,
         "ticker": ticker,
         "title": title,
-        "body_snippet": title,
+        "body_snippet": title if body_snippet is None else body_snippet,
         "url": f"https://{source}.example/{news_log_id}",
         "source": source,
         "published_at": published_at,
@@ -132,6 +133,7 @@ def test_copertura_deduplica_articoli_separa_relevance_e_attribuisce_ogni_segnal
             "SECTOR_MACRO": 2,
             "FALSE_ENTITY_MATCH": 1,
             "IRRELEVANT_FANOUT": 2,
+            "TAG_UNCONFIRMED": 0,
             "UNKNOWN": 0,
         },
         "articoli_effective_timely": 2,
@@ -171,7 +173,10 @@ def test_copertura_deduplica_articoli_separa_relevance_e_attribuisce_ogni_segnal
     assert segnali[108]["timing"] == "CONCURRENT"
 
 
-def test_dati_non_sufficienti_restano_unknown_invece_di_essere_indovinati():
+def test_timestamp_mancante_resta_unknown_e_il_tag_non_confermato_e_marcato():
+    """Il dato che manca (timestamp) resta UNKNOWN; il dato che c'e' (un testo
+    che non cita l'emittente taggata dal provider) dal #405 e' marcato, non
+    indovinato."""
     row = _row(
         9,
         "MSFT",
@@ -188,7 +193,181 @@ def test_dati_non_sufficienti_restano_unknown_invece_di_essere_indovinati():
         session_open=OPEN,
         session_close=CLOSE,
     )
-    assert out["totali"]["mapping_rilevanza"]["UNKNOWN"] == 1
-    assert out["segnali"][0]["relevance"] == "UNKNOWN"
+    assert out["totali"]["mapping_rilevanza"]["TAG_UNCONFIRMED"] == 1
+    assert out["segnali"][0]["relevance"] == "TAG_UNCONFIRMED"
     assert out["segnali"][0]["timing"] == "UNKNOWN"
     assert out["effective_timely_coverage"]["quota"] == 0.0
+
+
+def test_tag_provider_non_confermato_dal_testo_diventa_tag_unconfirmed():
+    """#405 — caso NVO 2026-08-26: un articolo di Boston Scientific, taggato NVO
+    dal provider con ``n_ticker=1``, segna -0.5533 su Novo Nordisk.
+
+    Il percorso ``source_metadata`` era l'unico mai validato (89% delle righe
+    scorate): la riga va marcata come tag non confermato dal testo persistito,
+    non lasciata nel recipiente UNKNOWN dove il tasso d'errore del percorso non
+    e' accumulabile. Non e' FALSE_ENTITY_MATCH: lo snippet e' troncato a 500
+    caratteri, quindi l'assenza dell'emittente e' un limite inferiore, non una
+    prova.
+    """
+    rows = [
+        _row(
+            11,
+            "NVO",
+            "Boston Scientific Reports Global Disruption After Cybersecurity Incident",
+            content_hash="6" * 64,
+            signal_id=201,
+            score=-0.5533,
+            issuer_terms=["Novo Nordisk"],
+        ),
+    ]
+    out = build_article_coverage(
+        rows,
+        universe=["NVO"],
+        sector_by_ticker={"NVO": "farmaceutici"},
+        session_open=OPEN,
+        session_close=CLOSE,
+    )
+
+    assert out["totali"]["mapping_rilevanza"] == {
+        "ISSUER_SPECIFIC": 0,
+        "SECTOR_MACRO": 0,
+        "FALSE_ENTITY_MATCH": 0,
+        "IRRELEVANT_FANOUT": 0,
+        "TAG_UNCONFIRMED": 1,
+        "UNKNOWN": 0,
+    }
+    # La riga marcata non e' copertura effettiva e non puo' impostare
+    # max_score_own: il punteggio piu' forte del ticker resta quello meritato.
+    segnale = out["segnali"][0]
+    assert segnale["relevance"] == "TAG_UNCONFIRMED"
+    assert segnale["attribution"] == "UNKNOWN"
+    assert segnale["score"] == -0.5533
+    assert out["per_ticker"]["NVO"]["max_score_own"] is None
+    assert out["per_ticker"]["NVO"]["effective_timely_articles"] == 0
+    assert out["per_ticker"]["NVO"]["rilevanza"]["TAG_UNCONFIRMED"] == 1
+
+
+def test_tag_non_confermato_su_articolo_fanout_va_in_fanout_mai_in_own():
+    """#405 — caso LLY 2026-08-26: l'articolo Rulli/Alphabet mappato anche su LLY.
+
+    Il fan-out resta leggibile come tale (l'articolo e' davvero multi-ticker),
+    ma la riga che non cita l'emittente conferma al massimo il punteggio
+    fan-out, mai quello issuer-specific.
+    """
+    titolo = "Ohio Rep. Michael Rulli Sold Up to $100K Worth of Alphabet Stock"
+    rows = [
+        _row(21, "GOOGL", titolo, content_hash="7" * 64, signal_id=301, score=0.40,
+             issuer_terms=["Alphabet", "GOOGL"]),
+        _row(22, "LLY", titolo, content_hash="7" * 64, signal_id=302, score=-0.20,
+             issuer_terms=["Eli Lilly", "LLY"]),
+    ]
+    out = build_article_coverage(
+        rows,
+        universe=["GOOGL", "LLY"],
+        sector_by_ticker={"GOOGL": "tech", "LLY": "farmaceutici"},
+        session_open=OPEN,
+        session_close=CLOSE,
+    )
+
+    segnali = {row["signal_id"]: row for row in out["segnali"]}
+    assert segnali[301]["relevance"] == "ISSUER_SPECIFIC"
+    assert segnali[301]["attribution"] == "ISSUER_SPECIFIC"
+    assert segnali[302]["relevance"] == "TAG_UNCONFIRMED"
+    assert segnali[302]["attribution"] == "FANOUT"
+    assert out["per_ticker"]["LLY"]["max_score_own"] is None
+    assert out["per_ticker"]["LLY"]["max_score_fanout"] == -0.20
+
+
+def test_prova_positiva_e_gt_prevalgono_sul_tag_non_confermato():
+    """La fusione dei mapping resta conservativa: una sola riga che cita
+    l'emittente, o una label adjudicata, vincono sul tag non confermato di una
+    syndication con snippet troncato. GT e prova positiva sono evidenza
+    piu' forte del limite inferiore #405."""
+    righe_stesso_articolo = [
+        _row(31, "MSFT", "Microsoft raises Azure prices", content_hash="8" * 64,
+             signal_id=401, score=0.30, issuer_terms=["Microsoft", "MSFT"]),
+        _row(32, "MSFT", "Microsoft raises Azure prices", content_hash="8" * 64,
+             source="wire_b", signal_id=None, score=None,
+             issuer_terms=["Microsoft", "MSFT"],
+             body_snippet="Azure prices rise across regions, analysts say the"),
+    ]
+    out = build_article_coverage(
+        righe_stesso_articolo,
+        universe=["MSFT"],
+        sector_by_ticker={"MSFT": "tech"},
+        session_open=OPEN,
+        session_close=CLOSE,
+    )
+    assert out["totali"]["mapping_rilevanza"]["TAG_UNCONFIRMED"] == 0
+    assert out["totali"]["mapping_rilevanza"]["ISSUER_SPECIFIC"] == 1
+
+    gt = [
+        _row(33, "NVO", "Boston Scientific Reports Global Disruption",
+             content_hash="9" * 64, signal_id=402, score=-0.10,
+             issuer_terms=["Novo Nordisk"],
+             ground_truth_relevance="company_specific",
+             ground_truth_tickers=["BSX"]),
+    ]
+    out_gt = build_article_coverage(
+        gt,
+        universe=["NVO"],
+        sector_by_ticker={"NVO": "farmaceutici"},
+        session_open=OPEN,
+        session_close=CLOSE,
+    )
+    # La label dice l'emittente: il verdetto e' deciso, non un limite inferiore.
+    assert out_gt["segnali"][0]["relevance"] == "FALSE_ENTITY_MATCH"
+
+
+def test_source_metadata_senza_testo_persistito_resta_unknown():
+    """Senza titolo ne snippet la domanda «il tag e' confermato dal testo?» non
+    ha materiale: resta UNKNOWN, non si indovina ne' si marca per assenza."""
+    row = _row(
+        41,
+        "MSFT",
+        "",
+        body_snippet="",
+        published_at=None,
+        signal_id=501,
+        score=0.10,
+        issuer_terms=["Microsoft", "MSFT"],
+    )
+    out = build_article_coverage(
+        [row],
+        universe=["MSFT"],
+        sector_by_ticker={"MSFT": "tech"},
+        session_open=OPEN,
+        session_close=CLOSE,
+    )
+    assert out["totali"]["mapping_rilevanza"]["UNKNOWN"] == 1
+    assert out["segnali"][0]["relevance"] == "UNKNOWN"
+
+
+def test_provenienze_diverse_da_source_metadata_non_marcano_il_tag():
+    """Il verdetto TAG_UNCONFIRMED e' specifico del percorso provider-tagged
+    (#405); ``gdelt_doc`` (query per nome societario) e le righe senza
+    provenienza mantengono il contratto storico UNKNOWN."""
+    rows = [
+        _row(51, "NVO", "Boston Scientific Reports Global Disruption",
+             content_hash="a" * 64, extraction_method="gdelt_doc",
+             signal_id=601, score=-0.10, issuer_terms=["Novo Nordisk"]),
+        _row(52, "NVO", "Boston Scientific Reports Global Disruption",
+             content_hash="b" * 64, extraction_method="",
+             signal_id=602, score=-0.10, issuer_terms=["Novo Nordisk"]),
+    ]
+    out = build_article_coverage(
+        rows,
+        universe=["NVO"],
+        sector_by_ticker={"NVO": "farmaceutici"},
+        session_open=OPEN,
+        session_close=CLOSE,
+    )
+    assert out["totali"]["mapping_rilevanza"] == {
+        "ISSUER_SPECIFIC": 0,
+        "SECTOR_MACRO": 0,
+        "FALSE_ENTITY_MATCH": 0,
+        "IRRELEVANT_FANOUT": 0,
+        "TAG_UNCONFIRMED": 0,
+        "UNKNOWN": 2,
+    }

@@ -164,3 +164,48 @@ def test_classify_error_never_crashes_worker_and_alerts():
     assert "error" in result
     assert "db down" in result["error"]
     tn.assert_called_once()  # failure alert sent
+
+
+# ---------------------------------------------------------------------------
+# #397: quantity_divergence anomaly + reconcile_open_positions called before classify
+# ---------------------------------------------------------------------------
+
+def _trade_with_remaining(tid, symbol, qty, remaining):
+    t = _trade(tid, symbol, qty)
+    t["quantity_remaining"] = remaining
+    return t
+
+
+def test_reconcile_open_positions_called_before_classify():
+    """run_reconcile_positions must refresh quantity_remaining from broker SELL
+    fills before classifying, so the divergence net compares live views."""
+    pg = _mock_pg([_trade_with_remaining(5, "NOK", 41.564, 41.564)])
+    held = [MagicMock(symbol="NOK", qty="0.564")]
+    tc = _mock_tc(held)
+    with patch("src.workers.performance.config", _cfg(enabled=False)), \
+         patch("src.workers.performance.PostgreSQLStore", return_value=pg), \
+         patch("alpaca.trading.client.TradingClient", return_value=tc), \
+         patch("src.workers.performance.TelegramNotifier"), \
+         patch("src.workers.performance.run_async"):
+        run_reconcile_positions()
+    pg.reconcile_open_positions.assert_called_once()
+
+
+def test_quantity_divergence_is_alerted():
+    """#397 phantom signature (DB 74x broker) -> Telegram alert mentions it."""
+    pg = _mock_pg([_trade_with_remaining(5, "NOK", 41.564, 41.564)])
+    held = [MagicMock(symbol="NOK", qty="0.564")]
+    tc = _mock_tc(held)
+    with patch("src.workers.performance.config", _cfg(enabled=False)), \
+         patch("src.workers.performance.PostgreSQLStore", return_value=pg), \
+         patch("alpaca.trading.client.TradingClient", return_value=tc), \
+         patch("src.workers.performance.TelegramNotifier") as tn, \
+         patch("src.workers.performance.run_async"):
+        result = run_reconcile_positions()
+    assert result["counts"]["quantity_divergence"] == 1
+    assert result["anomalies"] == 1
+    tn.assert_called_once()
+    msg = tn.return_value.send_alert.call_args.args[0]
+    assert "quantity_divergence" in msg
+    # Not force-closed (alerted only, like over_held).
+    pg.record_trade_exit.assert_not_called()

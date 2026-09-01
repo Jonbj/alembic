@@ -166,17 +166,12 @@ def test_whole_script_redirect_starts_before_environment_setup(script_name: str)
     )
 
 
-# daily_alpha_miss_analysis.sh non committa piu' dalla sessione (#336): lo stesso
-# invariante e' verificato su commit_evidence_ledger.sh in
-# tests/test_evidence_ledger_commit.py::test_cron_hands_report_and_ledgers_to_the_helper_in_one_commit
-@pytest.mark.parametrize(
-    ("script_name", "expected_add"),
-    ((
-        "daily_analysis.sh",
-        'git add docs/evidence/findings.json "__REPORT_FILE__"',
-    ),),
-)
-def test_report_is_staged_in_the_same_commit_as_its_ledger(script_name: str, expected_add: str):
+# Anche daily_analysis.sh non committa piu' dalla sessione (#411), come gia'
+# l'alpha-miss (#336): report e ledger finiscono su main nello stesso commit,
+# ma lo staging lo fa scripts/commit_evidence_ledger.sh, non il prompt.
+@pytest.mark.parametrize("script_name", SCRIPTS)
+def test_the_session_is_no_longer_asked_to_commit(script_name: str):
     source = (ROOT / "scripts" / script_name).read_text()
 
-    assert expected_add in source
+    assert "git commit -m" not in source
+    assert "git push origin main" not in source
