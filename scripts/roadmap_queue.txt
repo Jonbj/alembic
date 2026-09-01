@@ -13,110 +13,114 @@
 # serve alle decisioni di settembre, poi sicurezza e CI, poi il resto.
 #
 # Aggiornare l'ordine e' una decisione dell'operatore, non dell'agente.
-
-# === PRIORITA' PERDITE S4 (aggiunte 2026-08-25) ===
-# Bug che chiudono cause dirette di perdita giornaliera su S4.
-# Tutte freeze-ok + ready-for-agent. In cima perche' ogni giorno di ritardo costa MTM.
-327  S4: entrate sistematicamente tardie (percentile alto del range di giornata) — $52 MTM perso
-328  S4: segnali WRONG_SIGN dal modello fallback + fan-out multi-ticker — rischio entrata nel verso sbagliato
-335  S4: manca guard pre-trade earnings/price-action — aperto long su WMT in crollo -9,16% earnings
-# 349 e' solo telemetria (alert falsa), non causale di perdite — in fondo al blocco
-349  F-003: falsa alert di drawdown serale — costo_usd null, nessun impatto su ordini o P&L reale
-
-191  il ratchet ha portato il gate S4 a 0,45: la finestra sta misurando la leva, non la strategia
-208  il dossier non classifica la causa dei miss: la domanda di uscita n.1 non e' calcolabile al 28/09
-190  i cron dell'osservazione perdono i propri fallimenti: un giro morto e uno sano hanno la stessa firma
-184  exit_mechanism dedotto dall'eta' del segnale: etichetta MALE le righe che stiamo raccogliendo adesso
-185  rebalance_frequency ignorata dal live: deroga approvata, corrompe l'evidenza S1 a ogni ciclo
-161  alert posizioni non proteggibili: perimetro ristretto alla sola sorveglianza (vedi commento sull'issue)
-134  ritiro di F8: premessa falsificata alla misura, leva gia' spenta (rimozione di codice inerte)
-180  IC di S4 ricorrente: alimenta la decisione #179, che ora ha una soglia pre-registrata
-176  backtest S4 non rappresentativo: il fallback sintetico silenzioso invalida ogni misura di backtest
-151  segnali solo-fallback invisibili in execution_decisions: ripartire dalla PR #154 chiusa (prior art)
-186  peso S4 azzerato con segnale preservato, sopra soglia e nei top-5
-123  trades.signal_score senza signal_id corrispondente
-177  dead config: from_yaml di S1/S3 non ha call site
-181  overlap S1 intersezione S4: misura che serve a decidere #182
-42   kill-switch resume non ripristina mode
-41   frontend XSS: DOMPurify + CSP + token storage
-43   rate limiting + CORS
-152  test dipendente da reports/ gitignored: non passa in CI ne' in un clone fresco
-50   frontend lint + test base
-54   QX-01: migration schema 2-annotator + kappa harness + sampler
-178  pulizia audit strategie: note stale, health_check no-op, milestone incoerente
-39   S2-1: Source P&L Funnel completion
-57   S2 VRP: fattibilita' strumento quotato, IBKR e dati
-37   Vettore A: earnings chain, Phase 0 discovery
-
-# Alpaca execution-layer hardening (audit 2026-08-07) — tutte freeze-ok.
-# Spec + piani sul branch docs/spec-alpaca-hardening (mergiare a main prima: il loop lavora off main).
-# #203 e' blocked_by #201: va lavorato DOPO che #201 e' mergiato+deployato (il loop lo salta finche' #201 resta aperto).
-201  client_order_id sui 6 siti submit: dedup broker-side, safety-net doppio-submit (sblocca #203)
-199  buying_power/multiplier mai gate-ati: pre-flight gate anti-reject-422 silenzioso
-200  riconciliazione posizioni DB↔broker: beat EOD + alert + auto-close orphan (classe #121)
-203  retry/backoff centralizzato retry_transient su reads+submit (blocked_by #201)
-
-# Aggiunte del 2026-08-20 — le issue open con `freeze-ok` + `ready-for-agent`
-# che non erano ancora in coda.
 #
-# Stesso criterio dell'header: prima cio' che corrompe l'evidenza mentre la
-# raccogliamo, poi la strumentazione che serve alle decisioni del 28/09, poi il
-# resto.
+# ============================================================================
+# RIORDINO COMPLETO DEL 2026-08-31.
 #
-# Le due catene (alpha-miss, S4 exit trial) sono in ordine topologico: ogni
-# issue compare DOPO i propri blocker. Il loop non legge `blocked_by`, quindi
-# una issue bloccata in testa alla coda non fallisce — dichiara un no-op, e da
-# quando il no-op non e' piu' un tentativo fallito quel no-op si ripete a ogni
-# giro finche' il blocker non chiude. Un blocker che non chiudera' mai da solo
-# e' quindi un muro permanente, non un'attesa: per questo NON compaiono qui le
-# issue bloccate da una decisione umana (#297, #299, #300, #301 → #293/#244/#246)
-# ne' quelle bloccate da una issue fuori rotazione (#287 → #281, 2 tentativi).
-243  org_lookup attribuisce articoli a ticker che non compaiono nel testo: 97% di falsi positivi su MS e GS
-245  cost model: 25 simboli di watchlist cadono nel fallback tier_d a 20 bps e falsano net_pnl a ogni trade nuovo
-210  il realizzato di S1 e' un campione selezionato dalla regola d'uscita: il 28/09 lo leggerebbe come assenza di alpha
-279  alpha-miss: copertura effettiva e attribution issuer-specific vs fan-out (radice della catena alpha-miss)
-294  S4 exit trial: registrare gli intenti prima dei guard (radice della catena exit-trial)
-282  alpha-miss: pannelli longitudinali e occurrence ledger (dopo #279)
-284  alpha-miss: attribuzione P&L active/passive e qualita' decisionale (dopo #282)
-283  alpha-miss: signal diagnostics e controlli negativi (dopo #279 e #282)
-285  alpha-miss: contesto evento, regime e microstruttura (dopo #279)
-286  alpha-miss: findings falsificabili e sintesi deterministica (dopo #282)
-295  S4 exit trial: lifecycle, fill e sleeve virtuali (dopo #294)
-296  S4 exit trial: riprodurre P0 come baseline shadow (dopo #295 e #245)
-# 298 e' USCITA dalla coda il 2026-08-30. Non e' finita: i sei criteri di
-#     accettazione sono soddisfatti e verificati sul live (le due viste girano
-#     e riconciliano), e cio' che manca non e' codice ma campione — n=2 coppie
-#     comparabili, `n0_fixed: false` nel contratto congelato. Il loop non
-#     poteva accorgersene: pescandola trovava sempre qualcosa da limare, e in
-#     36 ore ha aperto 11 PR sullo stesso modulo di misura.
-#     A rimetterla in coda ci pensa scripts/check_s4_trial_milestones.sh
-#     quando scatta ANALISI_DECISIONALE, cioe' quando c'e' di nuovo un lavoro
-#     con un traguardo. Le altre due milestone chiedono un atto dell'operatore
-#     sul contratto congelato, che un agente non puo' compiere.
-214  le review verbose non arrivano su GitHub: il cancello di merge resta senza verbale
-
-# Aggiunte del 2026-08-27 — issue open con `freeze-ok` + `ready-for-agent`
-# non ancora in coda. Rilevate a coda vuota: il loop girava ma non pescava nulla.
+# La coda precedente era esaurita: 40 delle 44 issue elencate risultano CHIUSE
+# (tutta la catena alpha-miss #279-#286, la catena exit-trial #294-#296, il
+# blocco Alpaca #199-#203, sicurezza/CI #41-#54, e le perdite S4 #327/#349).
+# Le sopravvissute non lavorabili sono uscite: #161/#335/#383 sono
+# `ready-for-human`, #287/#298/#328/#361/#362/#364 sono `waiting`.
 #
-# Prima la catena alpha-miss: #330 e #336 sono bug dell'infrastruttura del cron
-# stesso (commit non pushati, worktree condiviso) — se la pipeline e' rotta le
-# analisi a valle (#282-#286) lavorano su dati incompleti. Poi #333 (report
-# omesse), poi i finding F-001/F-002 (qualita' dei dati di evidenza), infine
-# #363 (PoC second broker, tier2).
-330  Weekly: 2 alpha-miss reports stuck in local commits — automated analysis job does not sync before push (Aug 18-19 reports not on remote)
-336  Alpha-miss cron runs in the shared working tree and inherits whatever branch is checked out: 2 of 5 runs never committed at all (corrects #330's 2-of-5 accounting to 4-of-5)
-333  Alpha-miss report for Aug 20 omits 3 of 4 S4 entries and 3 of 4 exits, including the day's largest loss (HOOD -$60.32) — no report/dossier reconciliation
-325  F-002 Weekly: 11 legacy positions missing stop_strategy for 14+ consecutive sessions — P&L attribution contamination at 58% of NAV on Aug 17
-324  F-001 Weekly: 40% of watchlist has zero news coverage across Aug 17-20 — NO_NEWS is dominant miss cause (11/27 misses, $639+ lost alpha)
-363  Second-broker PoC: congelare contratto comparabile e kill criteria
+# Il contenuto nuovo e' quasi tutto la review alpha-miss di Week 35 (#396-#411,
+# sessioni 2026-08-24 → 2026-08-27). Nessuna di queste ha `blocked_by` aperti:
+# l'ordine qui sotto e' una priorita', non una topologia.
+#
+# Criterio applicato, nell'ordine:
+#   1. l'impianto di misura e' fermo o mente  → senza questo non sappiamo nulla
+#   2. il segnale finisce sul ticker sbagliato → errore peggiore (vedi CLAUDE.md)
+#   3. la selezione S4 non fa entrare nulla    → alpha perso ogni sessione
+#   4. l'evidenza non e' ricostruibile a posteriori
+#   5. copertura/qualita' del segnale (miglioramenti, non bug)
+#   6. il resto
+# ============================================================================
 
+# === 1. L'IMPIANTO DI MISURA E' FERMO O MENTE (tier0/tier1) ===
+# Finche' questi non chiudono, ogni analisi a valle lavora su dati assenti o falsi.
+396  il dossier alpha-miner non si genera dal 2026-08-25: `decision_at` ambiguo in _s4_entry_intents e il fallimento esce 0 (tier0 — la pipeline e' morta e in silenzio)
+397  uscite parziali e stop del broker mai riscritti su `trades`: quantita' fantasma 74x su NOK, il 91% del MTM di libro era fittizio il 26/08 (tier0)
+411  il cron forense non ha la correzione di #336: commit condizionato al branch, esito mai verificato, 2 giorni di forense persi
+398  la guardia di contraddizione del dossier e' cieca: `is_tradable::text` contro 't' non puo' mai essere vero (0 intent tradable su 3.012)
+
+# === 2. IL SEGNALE FINISCE SUL TICKER SBAGLIATO ===
+# Classe di errore peggiore per costruzione: un ordine su un titolo che non c'entra.
+405  attribuzione ticker sbagliata via `source_metadata` (89% delle righe scorate): un articolo Boston Scientific ha prodotto -0,5533 su NVO con n_ticker=1 — non e' fan-out, sono tag del provider non validati
+
+# === 3. LA SELEZIONE S4 NON FA ENTRARE NULLA ===
+# Alpha perso a ogni sessione, misurato in dollari sulle sessioni di Week 35.
+# ATTENZIONE: #400, #399, #404, #403 sono `ready-for-agent` ma NON hanno la label
+# `freeze-ok`. Il loop le salta e lo segnala (secondo lucchetto). Restano in coda
+# nella posizione che meritano, ma l'assenza della label NON e' una dimenticanza:
+# e' deliberata e motivata in docs/WEEKLY_FINDINGS_2026-35.md § Freeze status —
+# tutte e quattro cambiano il comportamento live sul money path e romperebbero la
+# serie osservata di #171. Non aggiungere `freeze-ok` in blocco. Ogni issue ha
+# pero' una meta' separabile che e' strumentazione pura, e quella si puo'
+# scorporare in una sotto-issue freeze-ok senza aspettare il 28/09:
+# SCORPORO FATTO IL 2026-08-31: le meta' lavorabili di #403, #404 e #400 sono
+# uscite come sotto-issue freeze-ok e sono in coda qui sotto (#427, #428, #429).
+# Resta senza scorporo solo:
+#   #399 — nessuna meta' separabile: l'intero scope e' cio' che il modello legge.
+#          Shadow dietro flag + misura sul golden set QX-01 (#30), flip dopo il 28/09.
+400  ranking S4: segnali vecchi di due sessioni su nomi gia' a libro occupano tutti e 5 gli slot top-N e tagliano l'unico candidato fresco sopra gate (NOW +10,04%, 6 cicli, 0 ordini) — resta solo il cambio di popolazione del ranking, da risolvere insieme a #230 [MANCA freeze-ok]
+169  S4: il ranker usa l'ultimo segnale per ticker, non il piu' forte — MU a +18,4% skippato con score 0.005 (stessa famiglia di #400)
+399  il prompt di sentiment non include mai il titolo dell'articolo: «Why Is Robinhood Stock Surging» scorato -0,0098 in un giorno a +8,17%, e lo score sbagliato e' sopravvissuto alla sessione dopo [MANCA freeze-ok]
+428  misura e alert quando la griglia di portfolio-cycle non abbraccia la sessione reale (meta' osservabile di #404) — apertura→primo ciclo effettivo e ultimo→chiusura, persistiti
+404  il beat di portfolio-cycle e' inchiodato a ore UTC fisse: i primi 37 minuti di ogni sessione non sono mai negoziati (tutto il +10% intraday di NOW, $134) [MANCA freeze-ok — e la premessa DST e' stata corretta: `clock.is_open` filtra i cicli fuori sessione, sotto EST la griglia calza meglio, non peggio]
+427  metrica di salute dell'ensemble + fix del circuit breaker inerte (meta' strumentale di #403): trigger `== 3` che non scatta mai, callback mai cablata, nessun consumer. Verificato: la mitigazione scrive `qc:sizing_multiplier`, chiave che nessuno legge — non tocca il money path
+403  l'ensemble Ollama degrada a modello singolo per finestre di un'ora senza alcun alert: 70% di fallback nell'ora 18:00 UTC, ADBE scorato +0,060 in un giorno a +5,73% ($126) — resta solo il re-scoring alla ripresa [MANCA freeze-ok]
+
+# === 4. L'EVIDENZA NON E' RICOSTRUIBILE A POSTERIORI ===
+# Non perdono soldi oggi, ma rendono non decidibile la lettura del 28/09.
+401  il `rank` persistito nel ledger degli intent S4 non e' funzione dello `score` nello stesso record: le decisioni di selezione non si ricostruiscono
+429  metrica dello slot bruciato: quanti slot top-N vanno a nomi gia' a libro o a segnali stantii, e quanti candidati sopra gate vengono tagliati a zero ordini (meta' strumentale di #400) — `blocked_by #401`, sta qui sotto apposta: la metrica e' funzione del `rank` persistito
+406  execution_decisions.signal_id e' NULL sul 97% delle righe, incluse tutte le SELL: le uscite non si possono agganciare al segnale che le ha causate
+450  counterfactual mai calcolato sulle uscite forzate (`sentiment_reversal`): la query di pg_store.py filtra solo le SKIP di ingresso, le 31 uscite storiche restano senza contro fattuale — non si puo' verificare se la regola risparmia piu' di quanto costa (companion di #406, stessa area: strumentazione delle SELL)
+407  i log dei container non sopravvivono al restart: la sessione da analizzare non esiste piu' quando gira il job alpha-miss del mattino
+402  l'endpoint di storico P&L etichetta ogni sessione col giorno di calendario successivo: totali mensili sbagliati a entrambi i bordi, righe di sabato in una serie giornaliera
+
+# === 5. COPERTURA E QUALITA' DEL SEGNALE (miglioramenti, non bug) ===
+434  i test scrivono nella telemetria di ingestione di produzione: tutte e 24 le righe `reuters` di `ingestion_stats_daily` sono fixture di test (root cause di #158) — `_persist_ingestion_observability` costruisce lo store dentro la funzione, quindi non e' patchabile
+432  alert quando la quota di news scartate come stale supera una soglia, separando "gia' stale al fetch" da "invecchiata in coda" (punto 3 di #149, mai fatto) — le due cause hanno rimedi opposti
+433  caratterizzare la latenza pubblicazione->ingestione per sorgente: perche' il 73% dei drop stale del 28/08 nasce gia' fuori finestra (misura sola, cadenza non toccata)
+430  dossier: istogramma `ore_tenuta` + reason code `hold_minimum_expiry`, con backfill dal 03/08 (meta' strumentale di #334) — il backfill E' l'evidenza shadow su cui #83 e' bloccata
+408  la news di secondo ordine e' sistematicamente sotto-scorata: segno giusto, magnitudine un ordine sotto il gate (ADBE +0,060 su +5,73%, NOW +0,143 su +10,04%) — 8 dei 22 miss di Week 35 sono THIN_NEUTRAL
+409  NO_NEWS e' la causa dominante dei miss di Week 35 (9/22) mentre il sistema osserva gia' catalizzatori che non usa: NVO aveva una corporate action OBSERVED, ERIC una volume surprise +1,25
+451  motore momentum shadow sulla popolazione NO_NEWS/THIN_NEUTRAL (77-78% dei miss settimanali in Week 34/35): segnale prezzo/volume pre-registrato, confrontato con l'opportunita' accessibile gia' calcolata dai report — solo misura, nessun gate toccato (segue #409)
+281  alpha-miss: funnel actionability e pipeline v2 — rientra in rotazione, i suoi 2 tentativi falliti non sono piu' in logs/roadmap_agent_state.tsv (sblocca #287)
+
+# === 6. IL RESTO ===
+165  S1: esiste una coorte che nessuna regola d'uscita raggiunge — eta' media del libro 14,5→41,8 gg in 32 giorni, coorte 07-14 ancora tutta aperta a 48 gg, mentre le chiusure continuano a 1,6-5,2 gg di durata media. Solo diagnosi, nessun fix
+182  nessuna gerarchia di uscita fra S1 e S4: un overlay al 10% puo' liquidare posizioni del core (tier3, decisione di design — il sizing e' scorporato in #338)
+84   S3 design-alignment POC: A/B pre-registrato su universo PIT (tier2)
+
+# ============================================================================
 # Fuori coda di proposito, decisione dell'operatore (non dell'agente):
-#   #281 alpha-miss funnel v2 — 2 tentativi falliti nello state.tsv, fuori
-#        rotazione. Erano no-op onesti ("bloccata da #279/#280") addebitati
-#        prima del fix del 2026-08-20: per rimetterla in rotazione va tolta la
-#        riga da logs/roadmap_agent_state.tsv. #287 dipende da lei.
-#   #314 SKIP_PYRAMIDING logga il peso target — gia' risolta nei fatti da #315
-#        (PR #316 mergiata il 19/08: `score = quantity*price/nav` e
-#        SKIP_PYRAMIDING nel counterfactual sono in main). Duplicato da chiudere.
-#   #161, #199, #203 — gia' in coda sopra, ancora aperte con la loro PR mergiata.
-#   #242, #244, #246, #293 — `ready-for-human` + `wayfinder:decision`.
+#
+#   #324 F-001 copertura news — il perimetro freeze-ok e' gia' stato consegnato
+#        da #394 e #425. Il residuo (accendere GDELT DOC, scegliere altre fonti,
+#        backfill) e' una decisione sorgente `ready-for-human`, delegata a #159
+#        e #409. Un agente in loop qui puo' solo aprire PR di ripiego.
+#
+#   #30 QX-01 (tier0), #171, #22 — `ready-for-human`: lavoro o decisione umana.
+#        #30 in particolare NON aspetta piu' una decisione (il suo blocker #25 e'
+#        chiuso): aspetta annotazione, ed e' l'unico tier0 lavorabile adesso.
+#   #161, #326, #334, #335, #159, #383 — ri-triagiate a `waiting` il 2026-08-31:
+#        erano `ready-for-human` ma nessuna e' decidibile prima del 28/09.
+#        Le meta' freeze-ok sono uscite: #430 da #334; #335 le aveva gia' avute
+#        da PR #354; #383 e' risolta nel contratto e non blocca piu' #301.
+#   #149 — ri-triagiata il 2026-08-31: tre premesse su quattro non reggevano piu'
+#        (coda a 3 non 119, tetto di batch rimosso, funnel gia' persistito in
+#        `news_queue_drops`). Residuo = il knob `MAX_NEWS_AGE_HOURS` condiviso fra
+#        filtro sentiment e gate S4 → `waiting` 28/09. Meta' lavorabili: #432, #433.
+#   #287, #298, #328, #361, #362, #364, #34 — `waiting` (si sbloccano da sole).
+#   #22, #24, #28, #29, #179, #230, #288, #326, #334, #338, #360 — `wayfinder:decision`
+#        in attesa di un atto dell'operatore.
+#   #98, #99 — Android monitor, di proprieta' di un altro agente.
+#
+#   #298 e' uscita dalla coda il 2026-08-30 e ci resta: i sei criteri di
+#        accettazione sono soddisfatti e verificati sul live, cio' che manca non
+#        e' codice ma campione (n=2 coppie, `n0_fixed: false`). A rimetterla in
+#        coda pensa scripts/check_s4_trial_milestones.sh quando scatta
+#        ANALISI_DECISIONALE.
+# ============================================================================
