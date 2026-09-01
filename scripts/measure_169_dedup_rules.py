@@ -338,27 +338,16 @@ def varianza_intraday(osservazioni: list[dict]) -> dict:
     }
 
 
-# ─── Driver: legge DB, riduce, misura, scrive evidence ───────────────────────
+# ─── Assemblaggio e riepilogo: puri, testabili senza DB ──────────────────────
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument(
-        "--since",
-        default="2026-06-15",
-        help="Inizio della finestra (default 2026-06-15, inizio della serie S4).",
-    )
-    args = parser.parse_args()
+def misura(osservazioni: list[dict], since: str) -> dict:
+    """Da simbolo-giorni a risultato: varianza, IC, gate.
 
-    segnali = leggi_segnali(args.since)
-    if not segnali:
-        raise SystemExit("Nessun segnale nella finestra: niente da misurare.")
-    osservazioni = riduci_a_simbolo_giorno(segnali)
-    print(
-        f"{len(segnali)} segnali -> {len(osservazioni)} simbolo-giorni "
-        f"(dal {args.since})"
-    )
-
+    Tutto tranne il DB: `main` fa solo `segnali` -> `osservazioni` e poi
+    chiama qui. E' la parte che decide il numero, quindi deve essere
+    testabile senza docker; `since` e' solo etichetta nella sezione finestra.
+    """
     per_giorno: dict[str, list[dict]] = defaultdict(list)
     for o in osservazioni:
         per_giorno[o["giorno"]].append(o)
@@ -373,7 +362,7 @@ def main() -> int:
     risultato: dict = {
         "generato_il": datetime.now(timezone.utc).isoformat(),
         "finestra": {
-            "since": args.since,
+            "since": since,
             "mezza_vita_ore": MEZZA_VITA_ORE,
             "soglia_gate": SOGLIA_GATE,
             "min_simboli_giorno": MIN_SIMBOLI_GIORNO,
@@ -417,6 +406,88 @@ def main() -> int:
                      for g, ic, n in serie_ic_giornaliera(giorni, regola, 1)]
             for regola in RULES
         }
+    return risultato
+
+
+def fmt_numero(valore: float | None, spec: str) -> str:
+    """Formatta `valore` con `spec`; None (numero non definito) diventa 'n/d'."""
+    return f"{valore:{spec}}" if valore is not None else "n/d"
+
+
+def riepilogo_leggibile(risultato: dict) -> str:
+    """Il riepilogo leggibile (stdout) costruito dal risultato.
+
+    Separato da `main` e difeso da `fmt_numero` perche' i casi limite della
+    review sono qui: una finestra recente senza forward return fa tornare
+    None da `media_fwd`, un campione senza simbolo-giorni multi-segnale fa
+    tornare None da `varianza_intraday` — il riepilogo non deve esplodere
+    su nessuno dei due.
+    """
+    def fmt(ic: dict) -> str:
+        return f"{ic['ic_medio']:+.4f}" if ic["ic_medio"] is not None else "   -   "
+    def fmt_t(ic: dict) -> str:
+        return f"{ic['t_stat']:+6.2f}" if ic["t_stat"] is not None else "    -"
+    def fmt_f(x: float | None) -> str:
+        return f"{x:+.4f}" if x is not None else "     -"
+
+    v = risultato["varianza_intraday"]
+    righe = [
+        "Varianza intraday (contesto):",
+        (
+            f"  simbolo-giorni {v['simbolo_giorni']}, con piu' segnali "
+            f"{v['con_piu_segnali']} ({(v['quota_con_piu_segnali'] or 0):.1%}), "
+            f"n segnali mediano {fmt_numero(v['n_segnali_mediano'], '')}, "
+            f"range (max-min) mediano {fmt_numero(v['range_mediano'], '+.3f')} "
+            f"(max {fmt_numero(v['range_massimo'], '+.3f')})"
+        ),
+    ]
+    for nome in risultato["ic_sintesi"]:
+        gate = risultato["gate_0.30"][nome]
+        righe.append(f"\nSottoinsieme: {nome}")
+        righe.append(
+            f"  campione {gate['n_campione']} simbolo-giorni con fwd 1g, "
+            f"media incondizionata {fmt_numero(gate['media_fwd_1d_campione'], '+.4f')}"
+        )
+        righe.append(
+            f"{'regola':12} {'IC 1g':>8} {'t':>6} {'IC 3g':>8} {'IC 5g':>8} "
+            f"{'| gate':>5} {'fwd pass':>9} {'| flip persi':>12} {'fwd persi':>9} "
+            f"{'| flip evit.':>12} {'fwd evit.':>9}")
+        for regola in RULES:
+            s1 = risultato["ic_sintesi"][nome][regola]["1g"]
+            s3 = risultato["ic_sintesi"][nome][regola]["3g"]
+            s5 = risultato["ic_sintesi"][nome][regola]["5g"]
+            g = gate[regola]
+            righe.append(
+                f"{regola:12} {fmt(s1):>8} {fmt_t(s1):>6} {fmt(s3):>8} {fmt(s5):>8} "
+                f"{g['n_sopra_soglia']:>5} {fmt_f(g['media_fwd_1d_sopra_soglia']):>9} "
+                f"{g['n_flip_persi']:>12} {fmt_f(g['media_fwd_1d_flip_persi']):>9} "
+                f"{g['n_flip_evitati']:>12} {fmt_f(g['media_fwd_1d_flip_evitati']):>9}"
+            )
+    return "\n".join(righe)
+
+
+# ─── Driver: legge DB, riduce, misura, scrive evidence ───────────────────────
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--since",
+        default="2026-06-15",
+        help="Inizio della finestra (default 2026-06-15, inizio della serie S4).",
+    )
+    args = parser.parse_args()
+
+    segnali = leggi_segnali(args.since)
+    if not segnali:
+        raise SystemExit("Nessun segnale nella finestra: niente da misurare.")
+    osservazioni = riduci_a_simbolo_giorno(segnali)
+    print(
+        f"{len(segnali)} segnali -> {len(osservazioni)} simbolo-giorni "
+        f"(dal {args.since})"
+    )
+
+    risultato = misura(osservazioni, args.since)
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     tmp = OUT.with_suffix(".json.tmp")
@@ -424,40 +495,7 @@ def main() -> int:
     tmp.replace(OUT)  # atomica: mai un file mezzo scritto
     print(f"Scritto: {OUT}\n")
 
-    # Riepilogo leggibile: prima la varianza, poi il confronto IC, poi il gate
-    v = risultato["varianza_intraday"]
-    print("Varianza intraday (contesto):")
-    print(
-        f"  simbolo-giorni {v['simbolo_giorni']}, con piu' segnali "
-        f"{v['con_piu_segnali']} ({(v['quota_con_piu_segnali'] or 0):.1%}), "
-        f"n segnali mediano {v['n_segnali_mediano']}, "
-        f"range (max-min) mediano {v['range_mediano']:+.3f} "
-        f"(max {v['range_massimo']:+.3f})"
-    )
-    for nome in sottoinsiemi:
-        gate = risultato["gate_0.30"][nome]
-        print(f"\nSottoinsieme: {nome}")
-        print(
-            f"  campione {gate['n_campione']} simbolo-giorni con fwd 1g, "
-            f"media incondizionata {gate['media_fwd_1d_campione']:+.4f}"
-        )
-        print(f"{'regola':12} {'IC 1g':>8} {'t':>6} {'IC 3g':>8} {'IC 5g':>8} "
-              f"{'| gate':>5} {'fwd pass':>9} {'| flip persi':>12} {'fwd persi':>9} "
-              f"{'| flip evit.':>12} {'fwd evit.':>9}")
-        for regola in RULES:
-            s1 = risultato["ic_sintesi"][nome][regola]["1g"]
-            s3 = risultato["ic_sintesi"][nome][regola]["3g"]
-            s5 = risultato["ic_sintesi"][nome][regola]["5g"]
-            g = gate[regola]
-            fmt = lambda s: f"{s['ic_medio']:+.4f}" if s["ic_medio"] is not None else "   -   "
-            fmt_t = lambda s: f"{s['t_stat']:+6.2f}" if s["t_stat"] is not None else "    -"
-            fmt_f = lambda x: f"{x:+.4f}" if x is not None else "     -"
-            print(
-                f"{regola:12} {fmt(s1):>8} {fmt_t(s1):>6} {fmt(s3):>8} {fmt(s5):>8} "
-                f"{g['n_sopra_soglia']:>5} {fmt_f(g['media_fwd_1d_sopra_soglia']):>9} "
-                f"{g['n_flip_persi']:>12} {fmt_f(g['media_fwd_1d_flip_persi']):>9} "
-                f"{g['n_flip_evitati']:>12} {fmt_f(g['media_fwd_1d_flip_evitati']):>9}"
-            )
+    print(riepilogo_leggibile(risultato))
     return 0
 
 
