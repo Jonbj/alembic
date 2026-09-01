@@ -10,6 +10,12 @@ riproducibile e separa misura da comportamento live.
 articolo ``ISSUER_SPECIFIC`` pubblicato prima della chiusura della seduta target
 (``ANTICIPATORY`` o ``CONCURRENT``). Un dato insufficiente resta ``UNKNOWN``;
 non viene promosso a copertura effettiva per colmare un buco informativo.
+
+#405: le righe ``source_metadata`` il cui tag del provider non trova riscontro
+nel testo persistito sono marcate ``TAG_UNCONFIRMED``. Non e' un verdetto di
+falso positivo (lo snippet e' troncato a 500 caratteri: l'assenza e' un limite
+inferiore) ma rende accumulabile il tasso d'errore del percorso provider-tagged,
+che altrimenti spariva nel recipiente ``UNKNOWN``.
 """
 
 from __future__ import annotations
@@ -28,6 +34,7 @@ RELEVANCE_CATEGORIES = (
     "SECTOR_MACRO",
     "FALSE_ENTITY_MATCH",
     "IRRELEVANT_FANOUT",
+    "TAG_UNCONFIRMED",
     "UNKNOWN",
 )
 TIMING_CATEGORIES = ("ANTICIPATORY", "CONCURRENT", "RETROSPECTIVE", "UNKNOWN")
@@ -168,12 +175,25 @@ def _classify_relevance(row: dict, fanout_degree: int) -> tuple[str, str | None]
     if any(_contains_term(text, term) for term in issuer_terms):
         return "ISSUER_SPECIFIC", ticker or None
 
+    method = str(row.get("extraction_method") or "").strip()
     # org_lookup conserva per intero il testo scorato (title == body): l'assenza
-    # di ticker/ragione sociale e' quindi decidibile, come nel seam #244. Sugli
-    # snippet source_metadata e su gdelt_doc (query per nome societario) sarebbe
-    # invece un salto inferenziale: resta UNKNOWN.
-    if str(row.get("extraction_method") or "").strip() == "org_lookup" and text:
+    # di ticker/ragione sociale e' quindi decidibile, come nel seam #244.
+    if method == "org_lookup" and text:
         return "FALSE_ENTITY_MATCH", None
+    # #405: il percorso source_metadata accetta i tag del provider sulla parola
+    # (89% delle righe scorate) e nessuno verifica che l'emittente taggata sia
+    # davvero il soggetto del testo — cosi' un articolo su Boston Scientific ha
+    # prodotto un -0.5533 su NVO. L'assenza dell'emittente nel testo persistito
+    # NON e' FALSE_ENTITY_MATCH: lo snippet e' troncato a 500 caratteri
+    # (pg_store, _INSERT_NEWS_LOG), quindi e' un limite inferiore, non una
+    # prova. La riga viene marcata TAG_UNCONFIRMED — conteggiata nel
+    # mapping_rilevanza per far accumulare il tasso d'errore del percorso, ed
+    # esclusa da max_score_own perche' l'attribution non e' ISSUER_SPECIFIC —
+    # ma il verdetto deciso resta alle label (QX-01).
+    if method == "source_metadata" and text:
+        return "TAG_UNCONFIRMED", None
+    # gdelt_doc (query per nome societario) e provenienze assenti: un salto
+    # inferenziale, resta UNKNOWN.
     return "UNKNOWN", None
 
 
