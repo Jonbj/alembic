@@ -37,11 +37,13 @@ from scripts.measure_169_dedup_rules import (
     SOGLIA_GATE,
     dedup_score,
     media_fwd,
+    misura,
     raggruppa_per_simbolo_giorno,
     riduci_a_simbolo_giorno,
     serie_ic_giornaliera,
     sintesi_ic,
     statistiche_gate,
+    riepilogo_leggibile,
     varianza_intraday,
 )
 
@@ -179,6 +181,7 @@ def _oss(giorno: date, symbol: str, score: float, fwd: float,
     return {
         "giorno": giorno.isoformat(), "symbol": symbol, "n": 1,
         "scores": scores, "min_score": score, "max_score": score,
+        "ensemble_ultimo": True,  # un solo segnale: non fallback
         "fwd_1d": fwd, "fwd_3d": None, "fwd_5d": None,
     }
 
@@ -370,3 +373,43 @@ def test_raggruppa_separa_per_giorno_e_simbolo():
     gruppi = raggruppa_per_simbolo_giorno(segnali)
     assert set(gruppi) == {(D, "MU"), (date(2026, 8, 26), "MU")}
     assert len(gruppi[(D, "MU")]) == 2
+
+
+# ── Casi limite del --since: i due TypeError della review #460 ────────────────
+
+
+def test_misura_e_riepilogo_finestra_recente_senza_fwd_non_crashano():
+    # Finestra recente (--since a pochi giorni dal run): segnali ci sono ma il
+    # worker quotidiano non ha ancora scritto i forward return. media_fwd
+    # restituisce None sul campione vuoto e il riepilogo non deve esplodere —
+    # era il primo TypeError della review (formattare None come float sul
+    # campo media_fwd_1d_campione).
+    segnali = [
+        _sig(D, "MU", 15.0, 0.565), _sig(D, "MU", 16.0, 0.037),  # n=2
+        _sig(D, "NVDA", 14.0, 0.629),
+    ]
+    osservazioni = riduci_a_simbolo_giorno(segnali)
+    assert all(o["fwd_1d"] is None for o in osservazioni)
+
+    risultato = misura(osservazioni, since="2026-08-28")
+    gate = risultato["gate_0.30"]["tutti"]
+    assert gate["n_campione"] == 0
+    assert gate["media_fwd_1d_campione"] is None
+    assert "media incondizionata n/d" in riepilogo_leggibile(risultato)
+
+
+def test_misura_e_riepilogo_senza_simbolo_giorni_multi_segnale_non_crashano():
+    # Neanche un simbolo-giorno con piu' di un segnale: il range intraday non
+    # e' definito (varianza_intraday restituisce None) e il riepilogo non deve
+    # esplodere — il secondo TypeError della review sui campi range_mediano/
+    # range_massimo.
+    osservazioni = [
+        _oss(D, "MU", 0.037, 0.02),
+        _oss(D, "NVDA", 0.629, 0.01),
+    ]
+    risultato = misura(osservazioni, since="2026-06-15")
+    v = risultato["varianza_intraday"]
+    assert v["simbolo_giorni"] == 2
+    assert v["con_piu_segnali"] == 0
+    assert v["range_mediano"] is None and v["range_massimo"] is None
+    assert "range (max-min) mediano n/d (max n/d)" in riepilogo_leggibile(risultato)
