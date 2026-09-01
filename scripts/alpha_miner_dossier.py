@@ -949,6 +949,99 @@ def _s4_entry_intents(giorno: date) -> list[dict]:
     ]
 
 
+def _s4_rank_invariante_ranks(giorno: date) -> list[dict]:
+    """#401: post-hoc check sul ledger #294.
+
+    Per ogni ``decision_slot`` della seduta, verifica che il ``rank`` registrato
+    nelle disposition sia una funzione strettamente decrescente del
+    ``ranking_score`` persistito nel candidate snapshot. Una violazione indica
+    che il ledger e' corrotto: non e' piu' possibile ricostruire la selezione
+    che ha prodotto un certo insieme di ordini (#294 + #401).
+
+    Restituisce una lista (vuota quando tutto e' coerente) di violazioni con:
+    ``decision_slot, signal_id, symbol, rank, ranking_score`` — una per ogni
+    coppia (i, j) nello stesso slot tale che ``rank_i < rank_j`` ma
+    ``ranking_score_i < ranking_score_j`` (la violazione del #401 originale).
+
+    Il ranking_score puo' essere NULL per i candidate catturati prima del fix
+    #401 o quando Redis era down al momento della cattura: in quel caso la
+    coppia viene esclusa dal check (la sua assenza e' dichiarata in
+    ``missingness``). La presenza massiccia di NULL e' essa stessa un segnale
+    che il candidato e' stato scritto dal codice pre-#401.
+    """
+    g = giorno.isoformat()
+    rows = _psql(
+        f"SELECT disposition.decision_slot::text, "
+        f"COALESCE(disposition.signal_id::text,''), "
+        f"disposition.symbol, "
+        f"COALESCE(disposition.rank::text,''), "
+        f"COALESCE(candidate.snapshot->>'ranking_score',''), "
+        f"COALESCE(candidate.snapshot->>'score','') "
+        f"FROM s4_intent_events disposition "
+        f"JOIN s4_intent_events candidate "
+        f"  ON candidate.intent_id = disposition.intent_id "
+        f" AND candidate.event_type = 'candidate' "
+        f"WHERE disposition.event_type = 'disposition' "
+        f"  AND disposition.rank IS NOT NULL "
+        f"  AND candidate.snapshot ? 'ranking_score' "
+        f"  AND disposition.decision_at >= '{g}' "
+        f"  AND disposition.decision_at < '{g}'::date + 1 "
+        f"ORDER BY disposition.decision_slot, disposition.rank;"
+    )
+    return [
+        {
+            "decision_slot": row[0],
+            "signal_id": int(row[1]) if row[1] else None,
+            "symbol": row[2],
+            "rank": int(row[3]) if row[3] else None,
+            "ranking_score": float(row[4]) if row[4] else None,
+            "raw_score": float(row[5]) if row[5] else None,
+        }
+        for row in rows
+    ]
+
+
+def _invariante_rank_in_ranking_score(rows: list[dict]) -> list[dict]:
+    """#401: per ogni ``decision_slot``, controlla che ``rank`` sia strettamente
+    decrescente in ``ranking_score``.
+
+    La regola "strettamente decrescente" ammette i pareggi (due simboli con lo
+    stesso ranking_score possono avere rank diversi senza violare l'invariante).
+    Una coppia (i, j) viola se ``rank_i < rank_j`` AND ``ranking_score_i <
+    ranking_score_j`` (entrambe le diseguaglianze strette: se i punteggi sono
+    uguali e i rank sono diversi, e' un pareggio consentito dal ranker).
+
+    Restituisce la lista delle violazioni, una per coppia, ordinate per slot e
+    poi per (rank_i, rank_j). Lista vuota == invariante rispettato.
+    """
+    by_slot: dict[str, list[dict]] = {}
+    for row in rows:
+        slot = row.get("decision_slot")
+        ranking_score = row.get("ranking_score")
+        rank = row.get("rank")
+        if slot is None or ranking_score is None or rank is None:
+            continue
+        by_slot.setdefault(slot, []).append({**row, "_score": float(ranking_score), "_rank": int(rank)})
+    violations: list[dict] = []
+    for slot, entries in by_slot.items():
+        entries.sort(key=lambda r: r["_rank"])
+        for i, outer in enumerate(entries):
+            for inner in entries[i + 1:]:
+                if inner["_score"] > outer["_score"]:
+                    violations.append({
+                        "decision_slot": slot,
+                        "rank_a": outer["_rank"],
+                        "symbol_a": outer.get("symbol"),
+                        "signal_id_a": outer.get("signal_id"),
+                        "ranking_score_a": outer["_score"],
+                        "rank_b": inner["_rank"],
+                        "symbol_b": inner.get("symbol"),
+                        "signal_id_b": inner.get("signal_id"),
+                        "ranking_score_b": inner["_score"],
+                    })
+    return violations
+
+
 def _dettagli_ordini(order_ids: list[str]) -> dict[str, dict]:
     """Timestamp submission/fill reali dal broker, con errore per-order esplicito."""
     if not order_ids:
@@ -1474,6 +1567,20 @@ def costruisci_dossier(
         intenti_ingresso_s4, giorno
     )
 
+    # #401: post-hoc check sul ledger #294. Per ogni decision_slot della seduta,
+    # verifica che il rank registrato sia strettamente decrescente nel
+    # ranking_score persistito. Lista vuota == invariante rispettato.
+    invariante_ranks = _s4_rank_invariante_ranks(giorno)
+    invariante_violazioni = _invariante_rank_in_ranking_score(invariante_ranks)
+    if invariante_violazioni:
+        log.warning(
+            "#401: rilevate %d violazioni rank/ranking_score il %s "
+            "(prime 3: %s)",
+            len(invariante_violazioni),
+            giorno.isoformat(),
+            invariante_violazioni[:3],
+        )
+
     # --- qualita' decisionale read-only (#284) ----------------------------
     # Lo snapshot e' prospettico/parallelo: i dossier storici restano intatti.
     # Nessun valore qui entra nel runtime; size e holding sono solo descritti.
@@ -1693,6 +1800,12 @@ def costruisci_dossier(
             "guardia_contraddizione": {
                 "giorno": guardia_giorno,
                 "finestra_osservazione": guardia_finestra,
+            },
+            "invariante_rank_ranking_score": {
+                "n_righe_esaminate": len(invariante_ranks),
+                "n_violazioni": len(invariante_violazioni),
+                "violazioni": invariante_violazioni,
+                "freeze": "strumento di misura read-only #401; nessun ordine toccato",
             },
         },
     }

@@ -3908,8 +3908,44 @@ def _build_strategy_instance(
                 symbols=s4_symbols,
                 news_age_hours=None,
             )
+            # #401: compute velocity multipliers BEFORE the candidate capture so
+            # the ledger can persist the score the ranker will actually use as
+            # `ranking_score`. The multipliers depend only on the symbol and
+            # Redis history (no filter chain involved), so it is safe to
+            # evaluate them at this point. If Redis is down we degrade to
+            # multipliers = {sym: 1.0} — same fail-open the ranker already
+            # uses a few lines below.
+            _ranking_multipliers: dict[str, float] = {}
+            if signals:
+                try:
+                    from redis import Redis as _RedisSV
+                    from src.config import config as _cfg_sv
+                    _r_sv = _RedisSV.from_url(_cfg_sv.REDIS_URL, decode_responses=True)
+                    try:
+                        _ranking_multipliers = {
+                            sig.symbol: _compute_signal_velocity(
+                                sig.symbol, _r_sv,
+                                threshold=_cfg_sv.SIGNAL_VELOCITY_THRESHOLD,
+                                boost=_cfg_sv.SIGNAL_VELOCITY_BOOST,
+                            )
+                            for sig in signals
+                        }
+                    finally:
+                        _r_sv.close()
+                except Exception as exc:
+                    log.warning(
+                        "Signal velocity multipliers unavailable at capture: %s — "
+                        "candidates will record ranking_score == raw score",
+                        exc,
+                    )
+                    _ranking_multipliers = {}
             if intent_ledger is not None and signals:
-                candidate_events = intent_ledger.capture(signals)
+                ranking_scores = {
+                    sig.signal_id: float(sig.score) * _ranking_multipliers.get(sig.symbol, 1.0)
+                    for sig in signals
+                    if sig.signal_id is not None
+                }
+                candidate_events = intent_ledger.capture(signals, ranking_scores=ranking_scores)
                 _write_s4_intent_events_fail_open(
                     store, candidate_events, phase="candidate"
                 )
@@ -4076,21 +4112,15 @@ def _build_strategy_instance(
                 )
 
             # Apply velocity multipliers (best-effort; failures fall back to raw scores).
-            try:
-                from redis import Redis as _RedisSV
-                from src.config import config as _cfg_sv
-                _r_sv = _RedisSV.from_url(_cfg_sv.REDIS_URL, decode_responses=True)
-                try:
-                    multipliers = {
-                        sym: _compute_signal_velocity(
-                            sym, _r_sv,
-                            threshold=_cfg_sv.SIGNAL_VELOCITY_THRESHOLD,
-                            boost=_cfg_sv.SIGNAL_VELOCITY_BOOST,
-                        )
-                        for sym in signals_df["symbol"].unique()
-                    }
-                finally:
-                    _r_sv.close()
+            # #401: reuse the multipliers already computed before the candidate
+            # capture (they are symbol-only, no filter chain involved) instead of
+            # re-querying Redis. If the earlier computation failed, fall back to
+            # raw scores — the warning was already emitted at capture time.
+            multipliers = {
+                sym: mult for sym, mult in _ranking_multipliers.items()
+                if sym in set(signals_df["symbol"].unique())
+            }
+            if multipliers:
                 signals_df = signals_df.copy()
                 signals_df["score"] = signals_df.apply(
                     lambda row: row["score"] * multipliers.get(row["symbol"], 1.0),
@@ -4099,8 +4129,6 @@ def _build_strategy_instance(
                 n_boosted = sum(1 for m in multipliers.values() if m != 1.0)
                 if n_boosted:
                     log.info("Signal velocity: %d/%d symbols adjusted", n_boosted, len(multipliers))
-            except Exception as exc:
-                log.warning("Signal velocity application failed: %s — using raw scores", exc)
 
             # Drop signals below the active feedback threshold (absolute value check
             # so bearish signals are also gated, consistent with BUY-only logic).
