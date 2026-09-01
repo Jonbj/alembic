@@ -8,6 +8,7 @@ import pytest
 from src.notifications.telegram import (
     TelegramNotifier,
     format_auto_apply_message,
+    format_fallback_alert,
     format_freeze_message,
     format_freeze_message_with_keyboard,
 )
@@ -344,3 +345,27 @@ class TestFormatZeygosSummary:
     def test_empty_rows_returns_fallback(self):
         from src.workers.telegram_poller import _format_zeygos_summary
         assert "0 righe" in _format_zeygos_summary([], 0)
+
+
+class TestFallbackAlert:
+    """#427: the fallback-breaker alert text must NOT claim that position
+    sizing was reduced — that mitigation has been a dead Redis write since
+    the QuantConnect era (qc:sizing_multiplier is written but
+    get_qc_sizing_multiplier has zero callers in src/, and the live sizing
+    path reads regime:current via get_regime() — see
+    src/workers/execution.py:_regime_multiplier).
+    """
+
+    def test_format_fallback_alert_does_not_claim_sizing_change(self):
+        """The historic 'Position sizing: 50%' line would lie to an operator
+        reading the alert — #427 explicitly disconnects this claim from the
+        actual side effects."""
+        out = format_fallback_alert(count=3)
+        assert "Position sizing" not in out
+        assert "50%" not in out or "no live-sizing" in out.lower()
+
+    def test_format_fallback_alert_explains_dead_key(self):
+        """A reader unfamiliar with the QuantConnect-era artefact should still
+        learn why no live-sizing impact is mentioned."""
+        out = format_fallback_alert(count=3)
+        assert "QuantConnect" in out or "qc:sizing_multiplier" in out

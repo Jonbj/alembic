@@ -9,6 +9,10 @@ from redis import Redis
 from src.config import config
 from src.models.signals import SentimentResult
 
+FALLBACK_ALERT_SENT_KEY = "fallback:alert_sent"
+FALLBACK_ALERT_TTL_SECONDS = 24 * 3600
+_FALLBACK_BREAKER_FIRED_KEY = "fallback:breaker_fired_at"
+
 
 class RedisStore:
     """
@@ -271,8 +275,19 @@ class RedisStore:
             # This ensures "consecutive" means within a trading day
             self._r.expire("fallback:consecutive:count", 24 * 3600)
 
-            # Check if we hit the threshold - trigger ONLY ONCE at exact threshold
-            if new_value == self._max_fallbacks:
+            # #427: trigger when the streak reaches the threshold OR jumps past
+            # it in a single INCR (e.g. INCR returns 5 directly after a backlog).
+            # Latch with fallback:breaker_fired_at so we fire once per 24h window
+            # even if the streak keeps growing — the original 2026-08-26 forensic
+            # found this branch dead because (a) the `== self._max_fallbacks`
+            # equality missed any streak > 3, and (b) `_on_fallback_threshold_reached`
+            # was wired with no caller, so the breaker never delivered its alert.
+            if new_value >= self._max_fallbacks and self._r.set(
+                _FALLBACK_BREAKER_FIRED_KEY,
+                "1",
+                nx=True,
+                ex=FALLBACK_ALERT_TTL_SECONDS,
+            ):
                 self._on_fallback_threshold_reached(new_value)
 
             return new_value
@@ -285,7 +300,12 @@ class RedisStore:
                 raise
 
     def reset_fallback_counter(self) -> None:
-        """Reset the consecutive fallback counter."""
+        """Reset the streak without rearming the 24-hour fired-once latch.
+
+        The streak resets on every non-full-fallback signal. Clearing the latch
+        here would therefore allow repeated breaker fires inside the acceptance
+        window whenever degraded and healthy rows alternate.
+        """
         self._r.delete("fallback:consecutive:count")
 
     def get_fallback_count(self) -> int:
@@ -306,10 +326,6 @@ class RedisStore:
         self._r.set("qc:sizing_multiplier", "0.5")
         self._r.expire("qc:sizing_multiplier", 24 * 3600)  # Reset after 24h
 
-        # Mark that alert has been sent to prevent duplicates
-        self._r.set("fallback:alert_sent", "1")
-        self._r.expire("fallback:alert_sent", 24 * 3600)
-
         # Log the event
         self.log_divergence(
             symbol="SYSTEM",
@@ -319,7 +335,13 @@ class RedisStore:
         )
 
         # Invoke callback for Telegram alert if configured
-        if self._on_fallback_alert is not None:
+        alert_claimed = self._r.set(
+            FALLBACK_ALERT_SENT_KEY,
+            "1",
+            nx=True,
+            ex=FALLBACK_ALERT_TTL_SECONDS,
+        )
+        if alert_claimed and self._on_fallback_alert is not None:
             try:
                 self._on_fallback_alert(count)
             except Exception as e:
@@ -327,11 +349,11 @@ class RedisStore:
 
     def is_fallback_alert_sent(self) -> bool:
         """Check if fallback alert has been sent (for deduplication)."""
-        return bool(self._r.get("fallback:alert_sent"))
+        return bool(self._r.get(FALLBACK_ALERT_SENT_KEY))
 
     def reset_fallback_alert_flag(self) -> None:
         """Reset the alert sent flag (called when counter is reset)."""
-        self._r.delete("fallback:alert_sent")
+        self._r.delete(FALLBACK_ALERT_SENT_KEY)
 
     def get_qc_sizing_multiplier(self) -> float:
         """Get current QuantConnect position sizing multiplier."""

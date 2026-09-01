@@ -123,14 +123,30 @@ class TelegramNotifier:
 
         Args:
             count: Number of consecutive fallbacks
+
+        Notes:
+            #427: the alert's historical message claimed "QuantConnect position
+            sizing reduced to 50%". That mitigation has been a dead Redis write
+            since the QuantConnect era ended (regime.py still writes
+            qc:sizing_multiplier, but get_qc_sizing_multiplier has zero callers
+            in src/ and the live sizing path reads regime:current via get_regime()
+            — see src/workers/execution.py:_regime_multiplier). The text now
+            states the actual side effects so an operator reading the alert
+            learns what really happened.
         """
         message = (
             f"<b>Ensemble Fallback Alert</b>\n\n"
-            f"Consecutive fallbacks: <b>{count}</b>\n"
+            f"Consecutive full-fallback signals: <b>{count}</b>\n"
             f"Threshold: {config.MAX_CONSECUTIVE_FALLBACKS}\n\n"
-            f"<b>Action taken:</b>\n"
-            f"• QuantConnect position sizing reduced to 50%\n"
-            f"• System will auto-recover after 24h without fallbacks\n\n"
+            f"<b>Side effects on this fire:</b>\n"
+            f"• Telegram alert (this message)\n"
+            f"• Ensemble divergence log entry (event_type=fallback_circuit_breaker)\n"
+            f"• qc:sizing_multiplier key written to 0.5 (NOT consumed by the live "
+            f"sizing path — QuantConnect-era artefact, see issue #427)\n"
+            f"• Latch `fallback:breaker_fired_at` set (24h TTL — suppresses re-fires "
+            f"for the full window, independently of streak resets)\n\n"
+            f"<b>Not changed:</b>\n"
+            f"• Position sizing, regime, thresholds, strategy state\n\n"
             f"<i>Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</i>"
         )
         return await self.send_alert(message, level="warning")
@@ -345,10 +361,12 @@ class TelegramNotifier:
 
 def format_fallback_alert(count: int) -> str:
     """Format fallback alert message for Telegram."""
+    # #427: see send_fallback_alert() for why "Position sizing: 50%" was dropped.
     return (
         f"⚠️ <b>Ensemble Fallback Alert</b>\n\n"
-        f"Consecutive fallbacks: <b>{count}</b>/{config.MAX_CONSECUTIVE_FALLBACKS}\n"
-        f"Position sizing: 50%"
+        f"Consecutive full-fallback signals: <b>{count}</b>/{config.MAX_CONSECUTIVE_FALLBACKS}\n"
+        f"No live-sizing impact — qc:sizing_multiplier is a QuantConnect-era key, "
+        f"not read by the live path (src/workers/execution.py:_regime_multiplier)."
     )
 
 

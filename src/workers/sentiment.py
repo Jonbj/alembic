@@ -249,7 +249,11 @@ def _persist_sentiment_discards(
         log.warning("Could not persist news discard evidence: %s", exc)
 
 
-from src.store.redis_store import RedisStore
+from src.store.redis_store import (
+    FALLBACK_ALERT_SENT_KEY,
+    FALLBACK_ALERT_TTL_SECONDS,
+    RedisStore,
+)
 from src.workers.celery_app import app
 
 log = logging.getLogger(__name__)
@@ -946,8 +950,8 @@ def _maybe_notify_ollama_timeout(redis_client, timeout_count: int, total: int) -
     ):
         return  # cooldown active: suppress duplicate alert
     try:
-        from src.notifications.telegram import TelegramNotifier
         from src.notifications.base import AlertLevel
+        from src.notifications.telegram import TelegramNotifier
 
         notifier = TelegramNotifier()
         asyncio.run(
@@ -960,6 +964,104 @@ def _maybe_notify_ollama_timeout(redis_client, timeout_count: int, total: int) -
         )
     except Exception as exc:
         log.warning("Failed to send Ollama timeout Telegram alert: %s", exc)
+
+
+# #427 item 3: <50% full-ensemble share over the last 2 RTH cycles. Below this
+# the market is being scored mostly by FinBERT or single-model reads, which
+# the dossier flags as a non-tradeable observation window. Two cycles is the
+# minimum needed to distinguish "this batch was bad" from "the model is down":
+# one slow cycle with bad Ollama luck is normal; two in a row during RTH is
+# the operator's signal.
+_ENSEMBLE_DEGRADATION_RTH_SHARE_THRESHOLD = 0.5
+_ENSEMBLE_DEGRADATION_RTH_MIN_CYCLES = 2
+
+
+def _maybe_notify_sustained_degradation(
+    redis_client,
+    n_ensemble: int,
+    aggregate: int,
+    ollama_timeout_count: int,
+) -> None:
+    """#427: alert when full-ensemble share has been below 50% for >=2 RTH cycles.
+
+    Reads the two most recent RTH ensemble_cycle_health rows, computes the
+    share, then claims the existing fallback:alert_sent 24-hour latch before
+    dispatching Telegram. Pure observability: never reads or writes anything
+    used by execution, sizing, or strategy state.
+    """
+    if aggregate <= 0:
+        # An empty cycle says nothing about degradation; skip.
+        return
+    if ollama_timeout_count == aggregate:
+        # Pure Ollama outage is already covered by _maybe_notify_ollama_timeout.
+        # A second alert would be noise.
+        return
+    try:
+        import psycopg2
+        conn = psycopg2.connect(config.DATABASE_URL)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT cycle_started_at, n_ensemble, aggregate
+                    FROM ensemble_cycle_health
+                    WHERE rth
+                    ORDER BY cycle_started_at DESC
+                    LIMIT %s
+                    """,
+                    (_ENSEMBLE_DEGRADATION_RTH_MIN_CYCLES,),
+                )
+                rows = cur.fetchall()
+        finally:
+            conn.close()
+    except Exception as _query_exc:
+        log.warning("Sustained-degradation query failed: %s", _query_exc)
+        return
+
+    if len(rows) < _ENSEMBLE_DEGRADATION_RTH_MIN_CYCLES:
+        return
+    aggregates = [int(r[2]) for r in rows]
+    if any(total <= 0 for total in aggregates):
+        # An empty cycle has no defined share and cannot prove a sustained drop.
+        return
+    cycle_shares = [int(row[1]) / total for row, total in zip(rows, aggregates)]
+    if any(
+        cycle_share >= _ENSEMBLE_DEGRADATION_RTH_SHARE_THRESHOLD
+        for cycle_share in cycle_shares
+    ):
+        # "Sustained" means every consecutive cycle is below the threshold;
+        # one recovered cycle must clear the condition even if the pooled rows
+        # are still dominated by an earlier, much larger degraded batch.
+        return
+    total_ensemble = sum(int(r[1]) for r in rows)
+    total_aggregate = sum(aggregates)
+    share = total_ensemble / total_aggregate
+    if not redis_client.set(
+        FALLBACK_ALERT_SENT_KEY,
+        "1",
+        nx=True,
+        ex=FALLBACK_ALERT_TTL_SECONDS,
+    ):
+        return
+
+    try:
+        from src.notifications.telegram import TelegramNotifier
+        from src.notifications.base import AlertLevel
+
+        notifier = TelegramNotifier()
+        asyncio.run(
+            notifier.send_alert(
+                f"Ensemble degradation: full-ensemble share {share:.0%} "
+                f"({total_ensemble}/{total_aggregate}) over the last "
+                f"{_ENSEMBLE_DEGRADATION_RTH_MIN_CYCLES} RTH cycles "
+                f"(threshold {_ENSEMBLE_DEGRADATION_RTH_SHARE_THRESHOLD:.0%}). "
+                f"Most recent cycle: {n_ensemble}/{aggregate} full-ensemble. "
+                f"No sizing or execution impact — observability only (#427).",
+                level=AlertLevel.WARNING,
+            )
+        )
+    except Exception as _alert_exc:
+        log.warning("Failed to send sustained-degradation Telegram alert: %s", _alert_exc)
 
 
 @app.task(name="src.workers.sentiment.run_sentiment_worker", acks_late=True)
@@ -988,7 +1090,32 @@ def run_sentiment_worker() -> dict:
     # Initialize connections
     redis_client = Redis.from_url(config.REDIS_URL)
     pg_conn = psycopg2.connect(config.DATABASE_URL)
-    redis_store = RedisStore(redis_client)
+    # #427: wire the inert breaker to the Telegram callback. Historical state:
+    # _on_fallback_threshold_reached() at src/store/redis_store.py received no
+    # `on_fallback_alert=` and the 2026-08-26 forensic found the breaker inert
+    # on all three branches. The callback is constructed lazily because
+    # asyncio.run() is not yet in scope at this synchronous Celery entry point;
+    # we capture the notifier and dispatch the async send via a fresh loop on
+    # each call so a Telegram outage cannot poison the breaker.
+    _telegram_notifier = None
+
+    def _on_fallback_alert_sync(count: int) -> None:
+        nonlocal _telegram_notifier
+        try:
+            from src.notifications.telegram import TelegramNotifier
+            if _telegram_notifier is None:
+                _telegram_notifier = TelegramNotifier()
+            asyncio.run(_telegram_notifier.send_fallback_alert(count))
+        except Exception as _alert_exc:
+            log.warning(
+                "Fallback breaker alert callback failed for count=%s: %s",
+                count, _alert_exc,
+            )
+
+    redis_store = RedisStore(
+        redis_client,
+        on_fallback_alert=_on_fallback_alert_sync,
+    )
     pg_store = PostgreSQLStore(conn=pg_conn)
 
     if not is_market_open():
@@ -1089,6 +1216,11 @@ def run_sentiment_worker() -> dict:
         skipped_stale = 0
         discard_rows: list[dict] = []
         _now = datetime.now(timezone.utc)
+        # #427: per-cycle ensemble-health row anchor. Captured before the
+        # LMOVE loop so a slow drain from news:queue cannot compress the
+        # reported window; recorded by record_ensemble_cycle_health after
+        # process_news_batch returns (so the cycle_ended_at is honest).
+        _cycle_started_at = _now
         # Pull until _SENTIMENT_BATCH_SIZE FRESH items (or queue empty / scan cap). Stale
         # items are skipped without an LLM call and left in news:processing → discarded by
         # the delete() at run end. This drains a backlog of old news fast instead of
@@ -1203,6 +1335,38 @@ def run_sentiment_worker() -> dict:
                 redis_client,
                 timeout_count=ollama_timeout_count,
                 total=len(items_to_process),
+            )
+
+        # #427: persist per-cycle ensemble-health counts. The three buckets are
+        # disjoint and union to len(results), mirroring the worker's own return
+        # dict (ensemble_success + finbert_fallbacks + single-model signals).
+        # n_ensemble: >=2 models; n_single: model_id starts with "single:";
+        # n_finbert: full FinBERT fallback (model_id="finbert" and fallback_used).
+        cycle_ended_at = datetime.now(timezone.utc)
+        n_single = sum(1 for r in results if r.model_id.startswith("single:"))
+        n_finbert = sum(1 for r in results if _is_full_fallback(r))
+        n_ensemble = len(results) - n_single - n_finbert
+        # Defensive invariant — n_ensemble + n_single + n_finbert must equal
+        # len(results). If this fails, the worker has a bug, not a data drift,
+        # and we'd rather skip the row than poison the aggregate metric.
+        if n_ensemble + n_single + n_finbert == len(results):
+            try:
+                pg_store.record_ensemble_cycle_health(
+                    cycle_started_at=_cycle_started_at,
+                    cycle_ended_at=cycle_ended_at,
+                    n_ensemble=n_ensemble,
+                    n_single=n_single,
+                    n_finbert=n_finbert,
+                    rth=is_market_open(),
+                )
+            except Exception as _health_exc:
+                log.warning("record_ensemble_cycle_health failed: %s", _health_exc)
+            # Sustained-degradation alert (#427, item 3): <50% full-ensemble
+            # over the last 2 cycles during RTH, deduplicated by a 30-minute
+            # Redis latch. Pure observability — never touches execution.
+            _maybe_notify_sustained_degradation(
+                redis_client, n_ensemble=n_ensemble, aggregate=len(results),
+                ollama_timeout_count=ollama_timeout_count,
             )
 
         # All items processed successfully — clear from processing queue

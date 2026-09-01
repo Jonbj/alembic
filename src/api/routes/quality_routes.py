@@ -182,3 +182,65 @@ def _extraction_metrics(rows: list[dict], watch: set[str]) -> dict:
         "fp_per_article": d(fp, len(rows)),
         "macro_fp_per_article": d(rel_fp, n_macro),
     }
+
+
+@router.get("/ensemble_health")
+def quality_ensemble_health(days: int = 7) -> dict:
+    """Per-cycle ensemble-health rollup (#427).
+
+    Reads `ensemble_cycle_health` and returns per-cycle rows + an aggregate
+    bucket share for the window. The Quality dashboard can plot the share
+    over time; the threshold (50% full-ensemble over 2 RTH cycles) is the
+    same number the in-worker Telegram alert uses, so an operator can see
+    whether an alert is going to fire before it does.
+
+    `days` defaults to 7 because the table is high-frequency: a 30-day window
+    can be thousands of rows. Callers asking for more rows should be explicit.
+    """
+    from src.store.pg_store import PostgreSQLStore
+
+    out: dict = {"window_days": days, "cycles": [], "summary": {}}
+    try:
+        with PostgreSQLStore() as store:
+            with store._get_connection().cursor() as cur:
+                # Per-cycle detail (newest first). Capped at the caller's
+                # window to avoid pulling the whole table on the dashboard.
+                out["cycles"] = _rows(cur, """
+                    SELECT cycle_started_at,
+                           cycle_ended_at,
+                           n_ensemble::int AS n_ensemble,
+                           n_single::int   AS n_single,
+                           n_finbert::int  AS n_finbert,
+                           aggregate::int  AS aggregate,
+                           rth
+                    FROM ensemble_cycle_health
+                    WHERE cycle_started_at > now() - (%s || ' days')::interval
+                    ORDER BY cycle_started_at DESC
+                """, (str(days),))
+                # Aggregate window summary. full_ensemble_share is the number
+                # the in-worker alert compares against 0.5; it is None when the
+                # window produced zero signals (rare but possible during
+                # maintenance).
+                agg = _rows(cur, """
+                    SELECT COUNT(*)::int                    AS n_cycles,
+                           SUM(n_ensemble)::int             AS total_ensemble,
+                           SUM(n_single)::int               AS total_single,
+                           SUM(n_finbert)::int              AS total_finbert,
+                           SUM(aggregate)::int              AS total_aggregate,
+                           SUM((rth)::int)::int             AS rth_cycles,
+                           ROUND(AVG(rth::int)::numeric, 3) AS rth_share
+                    FROM ensemble_cycle_health
+                    WHERE cycle_started_at > now() - (%s || ' days')::interval
+                """, (str(days),))
+                if agg:
+                    a = agg[0]
+                    total = a.get("total_aggregate") or 0
+                    out["summary"] = {
+                        **a,
+                        "full_ensemble_share": (
+                            round(a["total_ensemble"] / total, 3) if total else None
+                        ),
+                    }
+    except Exception as exc:
+        log.warning("quality_ensemble_health failed: %s", exc)
+    return out
