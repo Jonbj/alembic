@@ -945,7 +945,8 @@ for _m in "${_ordine[@]}"; do
     OUTPUT=$(esegui_agente "$MOTORE" "$PROMPT" "$WT")
     ESITO=$?
     set -e
-    if echo "$OUTPUT" | grep -qiE "$_RATE_LIMIT_RE"; then
+    if printf "%s
+" "$OUTPUT" | tail -n "$CODA_ESITO" | grep -qiE "$_RATE_LIMIT_RE"; then
         metti_in_panchina "$MOTORE"
         tg_send "⏸ <b>Roadmap</b> — $MOTORE in rate limit, in panchina 3h. Provo il motore successivo."
         continue
