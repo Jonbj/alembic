@@ -12,22 +12,26 @@ ranker e non cambia alcun parametro di produzione.
 
 METODO — la parte che decide la validita' del numero.
 
-  1. Riduzione a UNA osservazione per simbolo-giorno, la stessa di
-     `compute_s4_ic.py` (che tiene l'ultimo segnale del giorno). I forward
-     return orizzonte 1/3/5 giorni sono quelli che il worker quotidiano
-     (`run_forward_return_worker`) scrive su `sentiment_signals` presi dal
-     segnale scelto dal ranker: nessuna nuova fonte dati, nessuna Alpaca call.
-     I simbolo-giorni il cui ultimo segnale non ha ancora il forward return
-     restano fuori (troppe recenti), senza ribie' la scelta verso un segnale
-     piu' vecchio.
+  1. Riduzione a UNA osservazione per simbolo-giorno. Il segnale scelto e il
+     forward return che fa da target sono quelli del ranker DI PRODUZIONE:
+     `DISTINCT ON (symbol) ... ORDER BY symbol, fallback_used ASC,
+     generated_at DESC` (`_FETCH_SIGNALS_FOR_CYCLE`, src/store/pg_store.py) —
+     vince prima il non-fallback, e solo a parita' di stato il piu' recente.
+     I forward return 1/3/5 giorni sono quelli che il worker quotidiano
+     (`run_forward_return_worker`) scrive su `sentiment_signals`: nessuna
+     nuova fonte dati, nessuna Alpaca call. I simbolo-giorni il cui segnale
+     scelto non ha ancora il forward return restano fuori (troppo recenti),
+     senza spostare la scelta verso un segnale piu' vecchio.
 
   2. Per ogni simbolo-giorno le regole candidate assegnano un punteggio:
-       - `ultimo`   : il segnale piu' recente del giorno — cosa fa il ranker
-                     oggi. Come `compute_s4_ic.py` e' il semplice ultimo per
-                     orario, SENZA la preferenza ensemble del ranker vero
-                     (`fallback_used ASC` prima di `generated_at DESC`):
-                     e' una approssimazione dichiarata, uguale per le due
-                     misure perche' i numeri restino confrontabili;
+       - `ultimo_prod` : cosa fa il ranker OGGI, alla lettera — preferenza
+                     ensemble e poi recenza. E' la BASELINE contro cui si
+                     contano i flip;
+       - `ultimo`   : l'ultimo per solo orario, cioe' la riduzione di
+                     `compute_s4_ic.py`. NON e' il ranker: ignora la
+                     preferenza ensemble. Resta misurata perche' la distanza
+                     fra le sue righe e quelle di `ultimo_prod` quantifica
+                     quanto quell'approssimazione costa;
        - `massimo` : il picco del giorno, ignora la sequenza;
        - `media_conf` : media degli score pesata per confidenza;
        - `media_decay` : la "finestra temporale" — media pesata con
@@ -43,7 +47,7 @@ METODO — la parte che decide la validita' del numero.
          guardie di `compute_s4_ic.py`;
        - gate a SOGLIA_GATE (il floor di produzione, NON una taratura: qui si
          misura, non si cambia): per ogni regola quanti simbolo-giorni passa e
-         con che forward return medio, e i **flip** contro `ultimo`: quanti
+         con che forward return medio, e i **flip** contro `ultimo_prod`: quanti
          ingressi il ranker attuale perde (regola >= soglia > ultimo) e quanti
          falsi positivi eviterebbe (ultimo >= soglia > regola), con il forward
          return medio di ciascun lato.
@@ -73,7 +77,10 @@ OUT = PROJECT_DIR / "docs" / "evidence" / "s4_dedup_rules_169.json"
 
 # Le candidate della issue, esattamente quelle: la decisione su quale adottare
 # e' dell'operatore (ready-for-human), non dello script.
-RULES = ("ultimo", "massimo", "media_conf", "media_decay")
+RULES = ("ultimo_prod", "ultimo", "massimo", "media_conf", "media_decay")
+# La baseline contro cui si contano i flip: la regola che il ranker applica
+# davvero (`ultimo_prod`), non l'approssimazione di compute_s4_ic.py.
+BASELINE = "ultimo_prod"
 
 # Parametri di STRUMENTAZIONE, non di taratura: il ranker in produzione non
 # cambia. Il gate misura i flip alla soglia di produzione; la mezza vita e' il
@@ -148,6 +155,20 @@ def raggruppa_per_simbolo_giorno(segnali: list[dict]) -> dict[tuple[date, str], 
     return dict(gruppi)
 
 
+def scelta_produzione(gruppo: list[dict]) -> dict:
+    """Il segnale che il ranker sceglierebbe: l'ordinamento di produzione.
+
+    `_FETCH_SIGNALS_FOR_CYCLE` in `src/store/pg_store.py` fa
+    `ORDER BY ss.symbol, ss.fallback_used ASC, ss.generated_at DESC` con
+    `DISTINCT ON (ss.symbol)`: fra i segnali del simbolo vince PRIMA il non
+    fallback, e solo a parita' di stato il piu' recente. Un fallback FinBERT
+    arrivato dopo un ensemble NON lo sovrascrive.
+    """
+    if not gruppo:
+        raise ValueError("gruppo vuoto")
+    return min(gruppo, key=lambda s: (s["fallback"], -s["generated_at"].timestamp()))
+
+
 def dedup_score(gruppo: list[dict], regola: str, mezza_vita_ore: float = MEZZA_VITA_ORE) -> float:
     """Punteggio del simbolo-giorno secondo la regola `regola`.
 
@@ -158,7 +179,15 @@ def dedup_score(gruppo: list[dict], regola: str, mezza_vita_ore: float = MEZZA_V
     if not gruppo:
         raise ValueError("gruppo vuoto")
 
+    if regola == "ultimo_prod":
+        # La regola VERA di produzione: preferenza ensemble, poi recenza.
+        return scelta_produzione(gruppo)["score"]
+
     if regola == "ultimo":
+        # L'ultimo per solo orario: NON e' cio' che fa il ranker (ignora la
+        # preferenza ensemble). Resta misurata perche' e' la riduzione di
+        # `compute_s4_ic.py`, e la distanza fra le due righe dice quanto
+        # quell'approssimazione costa.
         return gruppo[-1]["score"]
 
     if regola == "massimo":
@@ -189,18 +218,21 @@ def dedup_score(gruppo: list[dict], regola: str, mezza_vita_ore: float = MEZZA_V
 def riduci_a_simbolo_giorno(segnali: list[dict]) -> list[dict]:
     """Una osservazione per (giorno, simbolo): score per ogni regola + fwd.
 
-    I forward return sono quelli del segnale che sceglie il ranker (l'ultimo
-    del giorno): e' il punteggio che sarebbe stato usato per decidere, quindi
-    e' contro quel futuro che la scelta va misurata. Se quell'ultimo segnale
-    non ha ancora il forward return, l'osservazione resta nel campione con
-    fwd a None (esce dalle medie condizionate, non dalle IC dove manca il
-    target dell'orizzonte).
+    Il TARGET (forward return 1/3/5g) e' quello del segnale che il ranker
+    sceglie davvero — `scelta_produzione`, cioe' `fallback_used ASC,
+    generated_at DESC` — non quello dell'ultimo per solo orario. E' il segnale
+    su cui la decisione sarebbe stata presa, quindi e' contro quel futuro che
+    ogni regola va misurata; usarne un altro darebbe alle candidate un target
+    che il ranker non avrebbe mai visto. Il target e' lo STESSO per tutte le
+    regole: le righe restano confrontabili. Se quel segnale non ha ancora il
+    forward return, l'osservazione resta nel campione con fwd a None (esce
+    dalle medie condizionate e dagli IC dell'orizzonte mancante).
     """
     oss: list[dict] = []
     for (giorno, symbol), gruppo in sorted(
         raggruppa_per_simbolo_giorno(segnali).items()
     ):
-        ultimo = gruppo[-1]
+        scelto = scelta_produzione(gruppo)
         oss.append(
             {
                 "giorno": giorno.isoformat(),
@@ -209,10 +241,14 @@ def riduci_a_simbolo_giorno(segnali: list[dict]) -> list[dict]:
                 "scores": {regola: dedup_score(gruppo, regola) for regola in RULES},
                 "min_score": min(s["score"] for s in gruppo),
                 "max_score": max(s["score"] for s in gruppo),
-                "ensemble_ultimo": not ultimo["fallback"],
-                "fwd_1d": ultimo["fwd_1d"],
-                "fwd_3d": ultimo["fwd_3d"],
-                "fwd_5d": ultimo["fwd_5d"],
+                # Il sottoinsieme "ensemble" = giorni in cui il ranker avrebbe
+                # agito su un segnale ensemble (ne esiste almeno uno non
+                # fallback), che e' la condizione vera di produzione.
+                "ensemble_prod": not scelto["fallback"],
+                "ensemble_ultimo": not gruppo[-1]["fallback"],
+                "fwd_1d": scelto["fwd_1d"],
+                "fwd_3d": scelto["fwd_3d"],
+                "fwd_5d": scelto["fwd_5d"],
             }
         )
     return oss
@@ -292,13 +328,13 @@ def statistiche_gate(osservazioni: list[dict], soglia: float = SOGLIA_GATE) -> d
         # il caso INTC/NOW della Week 35, il picco sovrascritto dal fan-out
         perso = [
             o for o in campione
-            if o["scores"][regola] >= soglia and o["scores"]["ultimo"] < soglia
+            if o["scores"][regola] >= soglia and o["scores"][BASELINE] < soglia
         ]
         # flip "evitato": il ranker passa dove la candidata non passerebbe —
         # un eventuale vantaggio della regola, non solo il costo
         evitato = [
             o for o in campione
-            if o["scores"]["ultimo"] >= soglia and o["scores"][regola] < soglia
+            if o["scores"][BASELINE] >= soglia and o["scores"][regola] < soglia
         ]
         st[regola] = {
             "n_sopra_soglia": len(sopra),
@@ -352,11 +388,12 @@ def misura(osservazioni: list[dict], since: str) -> dict:
     for o in osservazioni:
         per_giorno[o["giorno"]].append(o)
 
-    # Sottoinsiemi: tutti, e solo ensemble (l'ultimo segnale del giorno non e'
-    # fallback FinBERT). Stesso campione per ogni regola dentro il sottoinsieme.
+    # Sottoinsiemi: tutti, e solo ensemble (il segnale che il ranker sceglie
+    # non e' un fallback FinBERT). Stesso campione per ogni regola dentro il
+    # sottoinsieme.
     sottoinsiemi = {
         "tutti": lambda o: True,
-        "ensemble": lambda o: o["ensemble_ultimo"],
+        "ensemble": lambda o: o["ensemble_prod"],
     }
 
     risultato: dict = {
@@ -368,12 +405,17 @@ def misura(osservazioni: list[dict], since: str) -> dict:
             "min_simboli_giorno": MIN_SIMBOLI_GIORNO,
         },
         "metodo": (
-            "una osservazione per simbolo-giorno (riduzione identica a compute_s4_ic.py: "
-            "semplice ultimo segnale del giorno, senza la preferenza ensemble del ranker "
-            "vero — approssimazione dichiarata per mantenere i due numeri confrontabili); "
-            "regole ultimo/massimo/media_conf/media_decay sullo stesso campione; "
+            "una osservazione per simbolo-giorno; il segnale scelto (e il forward "
+            "return che fa da target) e' quello del ranker di produzione: "
+            "fallback_used ASC, generated_at DESC (_FETCH_SIGNALS_FOR_CYCLE); "
+            "regole ultimo_prod/ultimo/massimo/media_conf/media_decay sullo stesso "
+            "campione, dove `ultimo` (ultimo per solo orario) e' la riduzione di "
+            "compute_s4_ic.py, misurata per quantificarne lo scarto dal ranker vero; "
             "IC Spearman cross-sectional giornaliero con t sui giorni; "
-            "gate 0.30 (floor di produzione) con flip persi/evitati vs `ultimo`"
+            "gate 0.30 (floor di produzione) con flip persi/evitati vs `ultimo_prod`. "
+            "Limite dichiarato: l'aggregazione e' il giorno solare, non la finestra "
+            "mobile di freschezza del singolo ciclo — il forward return esiste a "
+            "orizzonte giorni sul segnale, non per ciclo di portfolio"
         ),
         "simbolo_giorni_totali": len(osservazioni),
         "osservazioni_con_fwd_1g": sum(1 for o in osservazioni if o["fwd_1d"] is not None),

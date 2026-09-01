@@ -32,10 +32,12 @@ import math
 from datetime import date, datetime, timezone
 
 from scripts.measure_169_dedup_rules import (
+    BASELINE,
     MEZZA_VITA_ORE,
     RULES,
     SOGLIA_GATE,
     dedup_score,
+    scelta_produzione,
     media_fwd,
     misura,
     raggruppa_per_simbolo_giorno,
@@ -78,7 +80,15 @@ D = date(2026, 8, 27)
 
 
 def test_le_regole_candidate_sono_esattamente_quelle_della_issue():
-    assert set(RULES) == {"ultimo", "massimo", "media_conf", "media_decay"}
+    assert set(RULES) == {"ultimo_prod", "ultimo", "massimo", "media_conf", "media_decay"}
+
+
+def test_la_baseline_e_la_regola_del_ranker_di_produzione():
+    # I flip si contano contro cio' che il ranker fa DAVVERO, non contro
+    # l'approssimazione di compute_s4_ic.py: altrimenti il conteggio dei
+    # flip include casi che in produzione non sarebbero mai avvenuti.
+    assert BASELINE == "ultimo_prod"
+    assert BASELINE in RULES
 
 
 def test_ultimo_usa_il_segnale_piu_recente_del_simbolo_giorno():
@@ -87,13 +97,52 @@ def test_ultimo_usa_il_segnale_piu_recente_del_simbolo_giorno():
 
 
 def test_ultimo_non_preferisce_lessemble_sul_segnale_giorno():
-    # Come compute_s4_ic.py: l'ultima riga del giorno vince anche se e'
-    # fallback. Il ranker vero preferisce l'ensemble (fallback ASC prima di
-    # generated_at DESC); la riduzione simbolo-giorno e' una approssimazione
-    # dichiarata, uguale per entrambe le misure perche' siano confrontabili.
+    # `ultimo` e' la riduzione di compute_s4_ic.py: l'ultima riga del giorno
+    # vince anche se e' fallback. NON e' il ranker — resta misurata solo per
+    # quantificare lo scarto da `ultimo_prod`.
     gruppo = [_sig(D, "INTC", 16.5, 0.228, fallback=False),
               _sig(D, "INTC", 17.0, 0.000, fallback=True)]
     assert dedup_score(gruppo, "ultimo") == 0.000
+
+
+# ── `ultimo_prod`: l'ordinamento vero di _FETCH_SIGNALS_FOR_CYCLE ────────────
+
+
+def test_ultimo_prod_preferisce_lensemble_al_fallback_piu_recente():
+    # `ORDER BY symbol, fallback_used ASC, generated_at DESC`: un fallback
+    # FinBERT arrivato DOPO non sovrascrive un ensemble. E' il caso che la
+    # review ha segnalato: contando i flip contro `ultimo` finivano nel
+    # conteggio sovrascritture che in produzione non avvengono.
+    gruppo = [_sig(D, "INTC", 16.5, 0.228, fallback=False),
+              _sig(D, "INTC", 17.0, 0.000, fallback=True)]
+    assert dedup_score(gruppo, "ultimo_prod") == 0.228
+
+
+def test_ultimo_prod_a_parita_di_stato_prende_il_piu_recente():
+    gruppo = [_sig(D, "MU", 15.0, 0.565), _sig(D, "MU", 16.0, 0.037)]
+    assert dedup_score(gruppo, "ultimo_prod") == 0.037
+
+
+def test_ultimo_prod_su_giornata_tutta_fallback_prende_il_piu_recente():
+    # Se non esiste alcun ensemble, la preferenza non ha nulla da preferire:
+    # vince la recenza, esattamente come in SQL.
+    gruppo = [_sig(D, "MU", 15.0, 0.500, fallback=True),
+              _sig(D, "MU", 16.0, 0.020, fallback=True)]
+    assert dedup_score(gruppo, "ultimo_prod") == 0.020
+
+
+def test_ultimo_prod_fra_piu_ensemble_ignora_i_fallback_interposti():
+    gruppo = [_sig(D, "MU", 14.0, 0.100, fallback=False),
+              _sig(D, "MU", 15.0, 0.900, fallback=True),
+              _sig(D, "MU", 16.0, 0.300, fallback=False),
+              _sig(D, "MU", 17.0, 0.800, fallback=True)]
+    assert dedup_score(gruppo, "ultimo_prod") == 0.300
+
+
+def test_scelta_produzione_restituisce_il_segnale_non_solo_lo_score():
+    ensemble = _sig(D, "INTC", 16.5, 0.228, fallback=False, fwd_1d=0.05)
+    gruppo = [ensemble, _sig(D, "INTC", 17.0, 0.000, fallback=True, fwd_1d=-0.02)]
+    assert scelta_produzione(gruppo) is ensemble
 
 
 def test_massimo_prende_il_picco_del_giorno():
@@ -159,8 +208,24 @@ def test_riduci_mantiene_un_osservazione_per_simbolo_giorno_con_fwd_dellultimo()
     assert mu["n"] == 2
     assert mu["scores"]["ultimo"] == 0.037
     assert mu["scores"]["massimo"] == 0.565
-    assert mu["fwd_1d"] == 0.184  # dal segnale scelto dal ranker (l'ultimo)
+    assert mu["fwd_1d"] == 0.184  # dal segnale scelto dal ranker
     assert len(oss) == 3
+
+
+def test_riduci_prende_il_fwd_del_segnale_scelto_dal_ranker_non_dellultimo():
+    # Il target deve essere il futuro del segnale su cui la decisione sarebbe
+    # stata presa. Con un fallback FinBERT che chiude la giornata, quel
+    # segnale e' l'ensemble precedente, non l'ultima riga per orario.
+    segnali = [
+        _sig(D, "INTC", 16.5, 0.228, fallback=False, fwd_1d=0.05),
+        _sig(D, "INTC", 17.0, 0.000, fallback=True, fwd_1d=-0.02),
+    ]
+    oss = riduci_a_simbolo_giorno(segnali)
+    assert oss[0]["fwd_1d"] == 0.05
+    assert oss[0]["scores"]["ultimo_prod"] == 0.228
+    assert oss[0]["scores"]["ultimo"] == 0.000
+    assert oss[0]["ensemble_prod"] is True
+    assert oss[0]["ensemble_ultimo"] is False
 
 
 def test_riduci_registra_range_e_min_per_la_varianza():
@@ -175,13 +240,14 @@ def test_riduci_registra_range_e_min_per_la_varianza():
 
 def _oss(giorno: date, symbol: str, score: float, fwd: float,
          regole_extra: dict | None = None) -> dict:
-    scores = {"ultimo": score, "massimo": score, "media_conf": score,
-              "media_decay": score}
+    scores = {"ultimo_prod": score, "ultimo": score, "massimo": score,
+              "media_conf": score, "media_decay": score}
     scores.update(regole_extra or {})
     return {
         "giorno": giorno.isoformat(), "symbol": symbol, "n": 1,
         "scores": scores, "min_score": score, "max_score": score,
-        "ensemble_ultimo": True,  # un solo segnale: non fallback
+        "ensemble_prod": True,  # un solo segnale: non fallback
+        "ensemble_ultimo": True,
         "fwd_1d": fwd, "fwd_3d": None, "fwd_5d": None,
     }
 
@@ -319,6 +385,31 @@ def test_statistiche_gate_conteggia_i_flip_evitati():
     assert st["massimo"]["n_flip_evitati"] == 2
     assert math.isclose(st["massimo"]["media_fwd_1d_flip_evitati"], -0.04)
     assert st["massimo"]["n_flip_persi"] == 0
+
+
+def test_statistiche_gate_conta_i_flip_contro_ultimo_prod_non_contro_ultimo():
+    """Il rilievo della review, come test.
+
+    INTC: un fallback FinBERT a 0.00 chiude la giornata dopo un ensemble a
+    0.40. `ultimo` (ultimo per orario) vede 0.00 e crede che il ranker skippi
+    il titolo; il ranker vero (`ultimo_prod`) usa l'ensemble a 0.40 e il
+    titolo passa. Contando i flip contro `ultimo`, `massimo` risulterebbe
+    "recuperare" un ingresso che in produzione non era mai stato perso.
+    """
+    oss = [
+        _oss(D, "INTC", 0.00, 0.03,
+             {"ultimo_prod": 0.40, "massimo": 0.55}),
+        _oss(D, "TSLA", 0.10, -0.02, {"ultimo_prod": 0.10, "massimo": 0.60}),
+    ]
+    st = statistiche_gate(oss)
+    # INTC passa gia' con il ranker vero: non e' un flip perso.
+    assert st["massimo"]["n_flip_persi"] == 1  # solo TSLA
+    assert math.isclose(st["massimo"]["media_fwd_1d_flip_persi"], -0.02)
+    # `ultimo` sotto soglia su INTC dove il ranker vero passa: e' `ultimo`
+    # (non il ranker) a "perdere" l'ingresso — lo scarto dell'approssimazione.
+    assert st["ultimo"]["n_flip_evitati"] == 1
+    assert st["ultimo_prod"]["n_flip_persi"] == 0
+    assert st["ultimo_prod"]["n_flip_evitati"] == 0
 
 
 def test_soglia_gate_default_e_quella_di_produzione():
