@@ -61,6 +61,94 @@ def test_entry_time_accepts_iso_string():
     assert _one(recs, "AAA")["days_open"] == 2
 
 
+# ---------------------------------------------------------------------------
+# #397: quantity_remaining-aware classification. When the live DB view
+# (quantity_remaining, set by reconcile_open_positions) is present it is the
+# basis for "does DB agree with the broker?"; entry qty is the fallback.
+# ---------------------------------------------------------------------------
+
+def _trade_with_remaining(tid, symbol, qty, remaining, strategy="S4"):
+    t = _trade(tid, symbol, qty, strategy=strategy)
+    t["quantity_remaining"] = remaining
+    return t
+
+
+def test_remaining_matches_held_is_fully_held_not_divergence():
+    """A correctly-tracked residual (remaining ≈ held) is consistent, not an anomaly."""
+    # entry 2.981, reconciled remaining 1.334, broker holds 1.334.
+    recs = classify_positions(
+        [_trade_with_remaining(373, "WDC", 2.981064744, 1.334697164, strategy="S1")],
+        {"WDC": 1.334697164}, now=NOW,
+    )
+    r = _one(recs, "WDC")
+    assert r["category"] == "fully_held"
+    assert r["entry_qty"] == 2.981064744
+    assert round(r["db_qty"], 4) == round(1.334697164, 4)  # db_qty is the live remaining
+
+
+def test_quantity_divergence_when_remaining_exceeds_held():
+    """#397 signature: DB remaining 41.564 vs broker 0.564 — exits not written back
+    that reconcile could not fix -> quantity_divergence anomaly."""
+    recs = classify_positions(
+        [_trade_with_remaining(5, "NOK", 41.564, 41.564)],
+        {"NOK": 0.564}, now=NOW,
+    )
+    r = _one(recs, "NOK")
+    assert r["category"] == "quantity_divergence"
+    assert round(r["db_qty"], 3) == 41.564
+    assert round(r["held_qty"], 3) == 0.564
+
+
+def test_broker_quantity_two_percent_below_live_db_is_divergence():
+    """Every live DB/broker mismatch beyond rounding epsilon is an anomaly."""
+    recs = classify_positions(
+        [_trade_with_remaining(5, "NOK", 100.0, 100.0)],
+        {"NOK": 98.0}, now=NOW,
+    )
+    assert _one(recs, "NOK")["category"] == "quantity_divergence"
+
+
+def test_live_quantity_excess_beyond_epsilon_is_over_held():
+    """The broker side of the same invariant is alerted as over_held."""
+    recs = classify_positions(
+        [_trade_with_remaining(5, "NOK", 100.0, 100.0)],
+        {"NOK": 100.0002}, now=NOW,
+    )
+    assert _one(recs, "NOK")["category"] == "over_held"
+
+
+def test_live_quantity_difference_within_epsilon_is_fully_held():
+    """Only float/rounding noise at or below epsilon is accepted as a match."""
+    recs = classify_positions(
+        [_trade_with_remaining(5, "NOK", 100.0, 100.0)],
+        {"NOK": 99.99995}, now=NOW,
+    )
+    assert _one(recs, "NOK")["category"] == "fully_held"
+
+
+def test_quantity_divergence_not_fired_when_remaining_absent():
+    """Without quantity_remaining the pre-#397 logic holds: entry qty > broker is
+    partially_wound_down_coheld (informational), never quantity_divergence."""
+    recs = classify_positions([_trade(5, "NOK", 41.564)], {"NOK": 0.564}, now=NOW)
+    assert _one(recs, "NOK")["category"] == "partially_wound_down_coheld"
+
+
+def test_over_held_uses_remaining_when_present():
+    """Broker holds MORE than the DB live view -> over_held (untracked buy)."""
+    recs = classify_positions(
+        [_trade_with_remaining(2, "CCC", 3.0, 1.0)], {"CCC": 3.0}, now=NOW,
+    )
+    assert _one(recs, "CCC")["category"] == "over_held"
+
+
+def test_genuinely_orphan_with_remaining_still_orphan():
+    """Broker holds nothing but DB still shows an open remaining -> orphan."""
+    recs = classify_positions(
+        [_trade_with_remaining(9, "BBB", 3.0, 3.0)], {}, now=NOW,
+    )
+    assert _one(recs, "BBB")["category"] == "genuinely_orphan"
+
+
 def test_summarize_counts_by_category():
     recs = classify_positions(
         [_trade(1, "AAA", 2.0), _trade(9, "BBB", 3.0), _trade(373, "WDC", 2.98, strategy="S1")],

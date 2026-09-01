@@ -408,7 +408,14 @@ def _opening_positions(giorno: date) -> list[dict]:
         f"SELECT id::text, symbol, "
         f"CASE WHEN stop_strategy IS NOT NULL THEN stop_strategy "
         f"WHEN signal_id IS NOT NULL THEN 'S4' ELSE 'CONTAMINAZIONE' END, "
-        f"qty::text, entry_price::text, entry_time::text, "
+        # #397: per le righe ancora aperte usa la quantita' viva
+        # (quantity_remaining, ricalcolata dai fill SELL broker) non quella
+        # d'ingresso mai decrementata (firma fantasma 74x). Per le righe gia'
+        # chiuse oggi mantiene qty (= quantita' fill di uscita): COALESCE qui
+        # renderebbe 0 e cancellerebbe la posizione dal book MTM della giornata.
+        f"CASE WHEN exit_time IS NULL THEN COALESCE(quantity_remaining, qty) "
+        f"ELSE qty END::text, "
+        f"entry_price::text, entry_time::text, "
         f"COALESCE(exit_time::text,''), COALESCE(exit_price::text,''), "
         f"COALESCE(array_to_string(COALESCE(exit_order_ids, "
         f"CASE WHEN exit_order_id IS NULL THEN ARRAY[]::text[] "
