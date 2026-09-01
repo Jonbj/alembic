@@ -362,6 +362,11 @@ if uv run python "$PROJECT_DIR/scripts/alpha_miner_dossier.py" "$DATE_TARGET" >>
     echo "Dossier generato: $DOSSIER_FILE"
 else
     echo "ATTENZIONE: generazione dossier fallita — la sessione procede senza."
+    # #396: prima della qualifica di decision_at il dossier falliva con un parse
+    # error ma usciva 0, e il cron non se ne accorgeva per 3 sedute. Ora lo
+    # script esce non-zero e questo ramo lo surfacea anche su Telegram, oltre
+    # che nel log — come gia' fanno la sessione Claude e la riconciliazione.
+    tg_send "⚠️ Generazione dossier ${DATE_TARGET} fallita — la sessione procede senza dossier. Controlla <code>${LOG_FILE}</code>." "" || true
     DOSSIER_FILE="(non disponibile)"
 fi
 
