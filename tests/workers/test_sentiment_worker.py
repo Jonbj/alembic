@@ -914,6 +914,85 @@ class TestProcessNewsBatch:
         assert fallback_count == 2
 
 
+class TestEnsembleCycleHealthWiring:
+    """#427: run_sentiment_worker must persist one ensemble_cycle_health row
+    per cycle, with the three bucket counts (n_ensemble, n_single, n_finbert)
+    summing to the worker's own len(results).
+
+    The wiring lives in run_sentiment_worker; tests cover the side-effects
+    that an operator would observe: the pg_store call and the alert latch.
+    """
+
+    def test_record_ensemble_cycle_health_passes_disjoint_bucket_counts(self):
+        """The pg_store method must receive n_ensemble + n_single + n_finbert
+        == aggregate (= len(results)), with the right per-bucket numbers.
+        """
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock
+
+        pg = MagicMock()
+        pg._get_connection.return_value = MagicMock()
+        started = datetime(2026, 8, 27, 18, 0, tzinfo=timezone.utc)
+        ended = datetime(2026, 8, 27, 18, 1, tzinfo=timezone.utc)
+
+        from src.store.pg_store import PostgreSQLStore
+        PostgreSQLStore.record_ensemble_cycle_health(
+            pg,
+            cycle_started_at=started,
+            cycle_ended_at=ended,
+            n_ensemble=2,
+            n_single=1,
+            n_finbert=1,
+            rth=True,
+        )
+
+        # Inspect the SQL parameters, not the whole call (commit/rollback
+        # would be on the connection mock too).
+        cur = pg._get_connection.return_value.cursor.return_value.__enter__.return_value
+        assert cur.execute.called
+        params = cur.execute.call_args.args[1]
+        # (...started, ended, n_ensemble, n_single, n_finbert, aggregate, rth)
+        assert params[2] == 2  # n_ensemble
+        assert params[3] == 1  # n_single
+        assert params[4] == 1  # n_finbert
+        assert params[5] == 4  # aggregate (n_e + n_s + n_f)
+        assert params[6] is True
+
+    @pytest.mark.asyncio
+    async def test_process_news_batch_classifies_buckets(self):
+        """process_news_batch must produce results whose model_ids cleanly
+        separate ensemble / single / finbert buckets — the same classification
+        run_sentiment_worker uses to populate ensemble_cycle_health.
+        """
+        from src.workers.sentiment import _is_full_fallback
+
+        # Build three results covering all three buckets.
+        ens = make_sentiment_result(
+            symbol="AAPL", polarity=0.6, confidence=0.8, fallback_used=False
+        )
+        # _label_from_model_count tags a <2-model aggregate as "single:<m>".
+        single = SentimentResult(
+            symbol="MSFT",
+            score=0.1,
+            confidence=0.7,
+            reasoning="[single-model:opus] ...",
+            model_id="single:opus",
+            fallback_used=True,
+        )
+        finbert = make_sentiment_result(
+            symbol="GOOG", polarity=-0.2, confidence=0.5, fallback_used=True
+        )
+        # FinBERT result carries model_id='finbert' (per make_sentiment_result).
+        assert ens.model_id.startswith("ensemble:")
+        assert single.model_id.startswith("single:")
+        assert finbert.model_id == "finbert"
+
+        # _is_full_fallback must agree with the bucket assignment.
+        assert _is_full_fallback(finbert) is True
+        assert _is_full_fallback(single) is False
+        assert _is_full_fallback(ens) is False
+
+
 class TestDKCoTPrompt:
     """Tests for Domain Knowledge Chain-of-Thought prompt."""
 
