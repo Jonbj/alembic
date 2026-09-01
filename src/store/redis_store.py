@@ -271,8 +271,18 @@ class RedisStore:
             # This ensures "consecutive" means within a trading day
             self._r.expire("fallback:consecutive:count", 24 * 3600)
 
-            # Check if we hit the threshold - trigger ONLY ONCE at exact threshold
-            if new_value == self._max_fallbacks:
+            # #427: trigger when the streak reaches the threshold OR jumps past
+            # it in a single INCR (e.g. INCR returns 5 directly after a backlog).
+            # Latch with fallback:breaker_fired_at so we alert once per 24h window
+            # even if the streak keeps growing — the original 2026-08-26 forensic
+            # found this branch dead because (a) the `== self._max_fallbacks`
+            # equality missed any streak > 3, and (b) `_on_fallback_threshold_reached`
+            # was wired with no caller, so the breaker never delivered its alert.
+            if new_value >= self._max_fallbacks and not self._r.exists(
+                "fallback:breaker_fired_at"
+            ):
+                self._r.set("fallback:breaker_fired_at", "1")
+                self._r.expire("fallback:breaker_fired_at", 24 * 3600)
                 self._on_fallback_threshold_reached(new_value)
 
             return new_value
@@ -285,8 +295,16 @@ class RedisStore:
                 raise
 
     def reset_fallback_counter(self) -> None:
-        """Reset the consecutive fallback counter."""
-        self._r.delete("fallback:consecutive:count")
+        """Reset the consecutive fallback counter and the fired-once latch (#427).
+
+        Without clearing the latch here, a streak that hits 3, gets reset, and
+        climbs to 3 again would NOT re-fire the breaker — the second streak is
+        observationally identical to the first from the operator's perspective,
+        so the alerting behavior has to be the same. The latch's only purpose
+        is to suppress duplicates within a 24h firing window, and the reset is
+        exactly the moment the "consecutive" streak is broken.
+        """
+        self._r.delete("fallback:consecutive:count", "fallback:breaker_fired_at")
 
     def get_fallback_count(self) -> int:
         """Get current consecutive fallback count."""

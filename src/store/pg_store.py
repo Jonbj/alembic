@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import psycopg2
@@ -291,6 +292,50 @@ class PostgreSQLStore:
         ON CONFLICT (counter_name) DO UPDATE
         SET counter_value = EXCLUDED.counter_value, last_increment_at = now()
     """
+
+    _INSERT_ENSEMBLE_CYCLE_HEALTH = """
+        INSERT INTO ensemble_cycle_health (
+            cycle_started_at, cycle_ended_at,
+            n_ensemble, n_single, n_finbert, aggregate, rth
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """
+
+    def record_ensemble_cycle_health(
+        self,
+        cycle_started_at: datetime,
+        cycle_ended_at: datetime,
+        n_ensemble: int,
+        n_single: int,
+        n_finbert: int,
+        rth: bool,
+    ) -> None:
+        """Persist one row per SentimentWorker run (#427).
+
+        Pure observability: not read by execution, sizing, or any money-path
+        code. `aggregate = n_ensemble + n_single + n_finbert` matches the worker's
+        own len(results), so a CHECK constraint violation is a worker-level bug,
+        not a data-quality concern.
+        """
+        conn = self._get_connection()
+        aggregate = n_ensemble + n_single + n_finbert
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    self._INSERT_ENSEMBLE_CYCLE_HEALTH,
+                    (
+                        cycle_started_at,
+                        cycle_ended_at,
+                        n_ensemble,
+                        n_single,
+                        n_finbert,
+                        aggregate,
+                        rth,
+                    ),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
     def record_fallback_increment(self, counter_name: str, value: int) -> None:
         """Persist the consecutive-fallback count (audit/durability alongside Redis)."""
