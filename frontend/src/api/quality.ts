@@ -72,3 +72,31 @@ export interface QualitySources {
 
 export const fetchQualitySources = (days = 14) =>
   apiFetch<QualitySources>(`/api/quality/sources?days=${days}`)
+
+export interface EnsembleHealthCycle {
+  cycle_started_at: string
+  cycle_ended_at: string
+  n_ensemble: number
+  n_single: number
+  n_finbert: number
+  aggregate: number
+  rth: boolean
+}
+
+export interface QualityEnsembleHealth {
+  window_days: number
+  cycles: EnsembleHealthCycle[]
+  summary: {
+    n_cycles?: number
+    total_ensemble?: number
+    total_single?: number
+    total_finbert?: number
+    total_aggregate?: number
+    rth_cycles?: number
+    rth_share?: number | null
+    full_ensemble_share?: number | null
+  }
+}
+
+export const fetchQualityEnsembleHealth = (days = 7) =>
+  apiFetch<QualityEnsembleHealth>(`/api/quality/ensemble_health?days=${days}`)

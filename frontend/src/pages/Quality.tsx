@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchQualityMetrics, fetchQualitySources } from '@/api/quality'
+import {
+  fetchQualityEnsembleHealth,
+  fetchQualityMetrics,
+  fetchQualitySources,
+} from '@/api/quality'
 import { KPICard } from '@/components/shared/KPICard'
 import { HelpButton } from '@/components/shared/HelpButton'
 import { sourceVerdict } from './qualitySourceVerdict'
@@ -10,6 +14,12 @@ function n3(v: number | null | undefined): string {
 }
 function pct(v: number | null | undefined): string {
   return v == null ? '—' : (Number(v) * 100).toFixed(1) + '%'
+}
+function utcMinute(v: string): string {
+  const date = new Date(v)
+  return Number.isNaN(date.getTime())
+    ? v
+    : `${date.toISOString().slice(0, 16).replace('T', ' ')} UTC`
 }
 
 type VerdictTone = 'good' | 'warn' | 'bad' | 'neutral'
@@ -90,6 +100,11 @@ export default function Quality() {
     queryFn: () => fetchQualitySources(days),
     refetchInterval: 120000,
   })
+  const ensembleHealthQ = useQuery({
+    queryKey: ['quality-ensemble-health', days],
+    queryFn: () => fetchQualityEnsembleHealth(days),
+    refetchInterval: 120000,
+  })
 
   return (
     <div>
@@ -156,6 +171,62 @@ export default function Quality() {
           <p style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 16 }}>Finestra {data.window_days}g · auto-refresh 2 min</p>
         </>
       )}
+
+      <h3 style={{ fontSize: 14, fontWeight: 600, margin: '24px 0 8px' }}>Ensemble health</h3>
+      {ensembleHealthQ.isLoading && <p style={{ color: 'var(--text-muted)' }}>Loading…</p>}
+      {ensembleHealthQ.error != null && <p style={{ color: 'var(--red)' }}>Error loading ensemble health</p>}
+      {ensembleHealthQ.data && (() => {
+        const health = ensembleHealthQ.data
+        return (
+          <>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+              <KPICard
+                label="Full-ensemble share"
+                value={pct(health.summary.full_ensemble_share)}
+                sub={`${health.summary.total_ensemble ?? 0}/${health.summary.total_aggregate ?? 0} segnali`}
+                tooltip="Quota dei segnali prodotti dall'ensemble completo nella finestra selezionata."
+              />
+              <KPICard
+                label="Single-model rows"
+                value={String(health.summary.total_single ?? 0)}
+                sub="degradazione parziale"
+                tooltip="Righe prodotte da un solo modello LLM disponibile."
+              />
+              <KPICard
+                label="FinBERT rows"
+                value={String(health.summary.total_finbert ?? 0)}
+                sub="full fallback"
+                tooltip="Righe prodotte dal fallback FinBERT durante un outage completo dell'ensemble."
+              />
+            </div>
+            {health.cycles.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                Nessun ciclo misurato nella finestra selezionata.
+              </p>
+            ) : (
+              <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
+                <table aria-label="Full-ensemble share over time">
+                  <thead>
+                    <tr><th>Ciclo</th><th>Full-ensemble share</th><th>Ensemble</th><th>Single</th><th>FinBERT</th><th>RTH</th></tr>
+                  </thead>
+                  <tbody>
+                    {health.cycles.slice(0, 48).map((cycle) => (
+                      <tr key={cycle.cycle_started_at}>
+                        <td>{utcMinute(cycle.cycle_started_at)}</td>
+                        <td>{pct(cycle.aggregate > 0 ? cycle.n_ensemble / cycle.aggregate : null)}</td>
+                        <td>{cycle.n_ensemble}</td>
+                        <td>{cycle.n_single}</td>
+                        <td>{cycle.n_finbert}</td>
+                        <td>{cycle.rth ? 'sì' : 'no'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )
+      })()}
 
       <h3 style={{ fontSize: 14, fontWeight: 600, margin: '24px 0 8px' }}>Source Funnel &amp; P&amp;L</h3>
       {sourcesQ.isLoading && <p style={{ color: 'var(--text-muted)' }}>Loading…</p>}
