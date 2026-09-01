@@ -286,6 +286,55 @@ Ticker: {symbol}
 Respond ONLY with valid JSON matching this schema:
 {{"polarity": <float -1.0..1.0>, "confidence": <float 0.0..1.0>, "reasoning": "<bull/bear analysis, one sentence>", "event_type": "earnings|guidance|mna|regulatory|lawsuit|analyst_rating|product|management|macro|other", "directness": "direct|customer_supplier|competitor_readthrough|sector|macro|unclear", "materiality": <0.0..1.0>, "novelty": <0.0..1.0>, "risk_flags": ["rumor"|"already_priced_in"|"ambiguous_entity"|"low_source_quality"], "evidence_sentences": ["<key sentence>"]}}"""
 
+# Variante A (#399/#408, docs/research/2026-09-01-prompt-sentiment-soluzione-finale.md):
+# adds the headline (thrown away today even though it's populated in 99.94% of news_log
+# rows — see the Robinhood case in #399) and reframes the task as expected PRICE impact
+# rather than pure fundamentals, so a correctly-signed second-order/read-through move
+# (#408: measured ~2.2x magnitude gap, ~5-6x gate-pass gap vs direct news) isn't
+# structurally under-scored. Schema unchanged byte-for-byte from _DK_COT_PROMPT — gated
+# behind SENTIMENT_PROMPT_VARIANT=a (default stays on _DK_COT_PROMPT untouched).
+_DK_COT_PROMPT_A = """You are a buy-side equity analyst. Assess this news item's impact on the trading of the SPECIFIC issuer below.
+
+Think step-by-step:
+1. What does this news mean for how the market will price {symbol}? Consider BOTH (a) direct effects on {symbol}'s revenue, cash flows and competitive position, AND (b) indirect read-through effects — peer or sector earnings signaling, sector sentiment, flows and index effects — which can move {symbol} even when its own fundamentals are unchanged.
+2. Is the impact direct, or only an indirect read-through (customer/supplier/competitor/sector/macro)?
+3. How material and how novel (not already priced in) is it? What is the bull/bear case?
+4. How far, and in which direction, is the market likely to move {symbol} on this news?
+
+Rules:
+- Sentiment must be issuer-specific (about {symbol}, not the news in general).
+- polarity and confidence score the expected PRICE reaction of {symbol}, not only the change in its own fundamentals. An indirect event (peer or sector earnings, customer/supplier news, macro) that moves {symbol} in sympathy must be scored on the size of that expected move; record the channel in "directness" and the fundamental relevance in "materiality". Do not shrink polarity only because the cause is a third party.
+- The headline is the freshest signal about what this article claims. If the headline and the body disagree, or refer to different days or events, base polarity on the most recent and most specific information and set confidence low.
+- Do NOT output a trading action (no buy/sell/hold) — only the signal features below.
+- Use only evidence in the article (headline and body); if the market impact is unclear, set polarity=0, confidence low.
+
+Headline: {title}
+News: {text}
+Ticker: {symbol}
+
+Respond ONLY with valid JSON matching this schema:
+{{"polarity": <float -1.0..1.0>, "confidence": <float 0.0..1.0>, "reasoning": "<bull/bear analysis, one sentence>", "event_type": "earnings|guidance|mna|regulatory|lawsuit|analyst_rating|product|management|macro|other", "directness": "direct|customer_supplier|competitor_readthrough|sector|macro|unclear", "materiality": <0.0..1.0>, "novelty": <0.0..1.0>, "risk_flags": ["rumor"|"already_priced_in"|"ambiguous_entity"|"low_source_quality"], "evidence_sentences": ["<key sentence>"]}}"""
+
+
+def _sentiment_prompt_variant() -> str:
+    return os.environ.get("SENTIMENT_PROMPT_VARIANT", "legacy").strip().lower()
+
+
+def _build_sentiment_prompt(
+    clean_body: str, clean_symbol: str, clean_title: str, body_limit: int
+) -> str:
+    """Select and format the DK-CoT sentiment prompt for the active variant.
+
+    Shared by the live ensemble path and the Stage-2 shadow path so the two can
+    never drift apart on title/variant handling.
+    """
+    if _sentiment_prompt_variant() == "a":
+        title_field = clean_title[:200] or "(no headline)"
+        return _DK_COT_PROMPT_A.format(
+            text=clean_body[:body_limit], symbol=clean_symbol, title=title_field
+        )
+    return _DK_COT_PROMPT.format(text=clean_body[:body_limit], symbol=clean_symbol)
+
 
 def _label_from_model_count(model_ids: list[str], reasoning: str) -> tuple[str, bool, str]:
     """#111: a single-model read has no cross-model agreement signal, so it must
@@ -348,12 +397,17 @@ async def run_inference(
     raw_symbol = item.asset_tags[0]
     # Sanitize text BEFORE truncation to ensure proper handling of unicode/homoglyphs
     clean_body = sanitize_text(item.body or "")
+    clean_title = sanitize_text(item.title or "")
+    # #399 companion: FinBERT is a classifier, not an instruction-following LLM — it
+    # never sees _DK_COT_PROMPT, so the headline must reach it a different way (it's
+    # exactly the path the system relies on most, when the ensemble is unavailable).
+    finbert_text = f"{clean_title}. {clean_body}" if clean_title else clean_body
     clean_symbol = sanitize_ticker(raw_symbol) if raw_symbol else "UNKNOWN"
     if clean_symbol == "UNKNOWN":
         log.debug("Skipping news item with unresolvable ticker (raw=%r)", raw_symbol)
         return None
     _body_limit = int(os.environ.get("SENTIMENT_LLM_BODY_CHARS", "600"))
-    prompt = _DK_COT_PROMPT.format(text=clean_body[:_body_limit], symbol=clean_symbol)
+    prompt = _build_sentiment_prompt(clean_body, clean_symbol, clean_title, _body_limit)
 
     try:
         await budget_tracker.check_budget()
@@ -392,7 +446,7 @@ async def run_inference(
                 log.info(f"Ensemble diverged for {clean_symbol}, using FinBERT fallback")
             loop = asyncio.get_running_loop()
             fb_result = await loop.run_in_executor(
-                None, finbert.analyze, clean_body[:512]
+                None, finbert.analyze, finbert_text[:512]
             )
             # Preserve the divergent raw outputs (empty on timeout): the caller
             # persists them to llm_responses with eligible=False so the
@@ -438,7 +492,7 @@ async def run_inference(
     except LLMBudgetExhaustedError:
         log.info(f"Budget exhausted for {clean_symbol}, using FinBERT fallback")
         loop = asyncio.get_running_loop()
-        fb_result = await loop.run_in_executor(None, finbert.analyze, clean_body[:512])
+        fb_result = await loop.run_in_executor(None, finbert.analyze, finbert_text[:512])
         return SentimentResult(
             symbol=clean_symbol,
             score=fb_result.polarity * fb_result.confidence,
@@ -534,6 +588,7 @@ async def _shadow_query_candidates(
     news_log_id: int | None,
     pg_store,
     redis_store,
+    clean_title: str = "",
 ) -> None:
     """Stage-2 shadow-mode candidate scoring (spec 2026-07-09).
 
@@ -568,7 +623,7 @@ async def _shadow_query_candidates(
         # the live models saw, biasing the IC/hit-rate comparison this feature
         # exists to produce, with no trace left in the data.
         _body_limit = int(os.environ.get("SENTIMENT_LLM_BODY_CHARS", "600"))
-        prompt = _DK_COT_PROMPT.format(text=clean_body[:_body_limit], symbol=clean_symbol)
+        prompt = _build_sentiment_prompt(clean_body, clean_symbol, clean_title, _body_limit)
 
         async def _score_one(client) -> dict:
             model_id = getattr(client, "model_id", "?")
@@ -722,6 +777,7 @@ async def process_news_item(
                 news_log_id=news_log_id,
                 pg_store=pg_store,
                 redis_store=redis_store,
+                clean_title=sanitize_text(item.title or ""),
             )
             shadow_tasks.append(asyncio.create_task(shadow_coro))
         else:
@@ -736,6 +792,7 @@ async def process_news_item(
                     news_log_id=news_log_id,
                     pg_store=pg_store,
                     redis_store=redis_store,
+                    clean_title=sanitize_text(item.title or ""),
                 )
             except Exception as _sh_exc:
                 log.debug("shadow hook swallowed: %s", _sh_exc)

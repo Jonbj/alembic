@@ -499,6 +499,92 @@ class TestRunInference:
         mock_finbert.analyze.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_run_inference_variant_a_prompt_includes_title(self, monkeypatch):
+        """#399 fix: with SENTIMENT_PROMPT_VARIANT=a, the headline reaches the
+        ensemble prompt (today it never does — the template has no slot for it)."""
+        monkeypatch.setenv("SENTIMENT_PROMPT_VARIANT", "a")
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+        mock_aggregator.aggregate.return_value = MagicMock(
+            polarity=0.5, confidence=0.7, reasoning="ok",
+            model_ids=["glm-5.2:cloud"], ensemble_std=0.0,
+        )
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock()
+        mock_budget.record_spending = AsyncMock()
+        mock_finbert = MagicMock(spec=FinBERTClient)
+
+        item = make_news_item("AAPL", 7)
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock) as mock_eq:
+            mock_eq.return_value = [MagicMock()]
+            await run_inference(
+                item=item, clients=[], aggregator=mock_aggregator,
+                finbert=mock_finbert, budget_tracker=mock_budget,
+            )
+
+        sent_prompt = mock_eq.call_args.kwargs["prompt"]
+        assert item.title in sent_prompt
+
+    @pytest.mark.asyncio
+    async def test_run_inference_default_prompt_unchanged(self, monkeypatch):
+        """Regression lock: with the flag unset (default), the ensemble prompt
+        stays byte-identical to the legacy _DK_COT_PROMPT — no title, no drift."""
+        monkeypatch.delenv("SENTIMENT_PROMPT_VARIANT", raising=False)
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+        mock_aggregator.aggregate.return_value = MagicMock(
+            polarity=0.5, confidence=0.7, reasoning="ok",
+            model_ids=["glm-5.2:cloud"], ensemble_std=0.0,
+        )
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock()
+        mock_budget.record_spending = AsyncMock()
+        mock_finbert = MagicMock(spec=FinBERTClient)
+
+        item = make_news_item("AAPL", 8)
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock) as mock_eq:
+            mock_eq.return_value = [MagicMock()]
+            await run_inference(
+                item=item, clients=[], aggregator=mock_aggregator,
+                finbert=mock_finbert, budget_tracker=mock_budget,
+            )
+
+        sent_prompt = mock_eq.call_args.kwargs["prompt"]
+        expected = _DK_COT_PROMPT.format(text=item.body, symbol="AAPL")
+        assert sent_prompt == expected
+        assert item.title not in sent_prompt
+
+    @pytest.mark.asyncio
+    async def test_run_inference_variant_a_empty_title_uses_placeholder(self, monkeypatch):
+        """Empty NewsItem.title must not render as a blank 'Headline:' line."""
+        monkeypatch.setenv("SENTIMENT_PROMPT_VARIANT", "a")
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+        mock_aggregator.aggregate.return_value = MagicMock(
+            polarity=0.5, confidence=0.7, reasoning="ok",
+            model_ids=["glm-5.2:cloud"], ensemble_std=0.0,
+        )
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock()
+        mock_budget.record_spending = AsyncMock()
+        mock_finbert = MagicMock(spec=FinBERTClient)
+
+        item = make_news_item("AAPL", 9)
+        item.title = ""
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock) as mock_eq:
+            mock_eq.return_value = [MagicMock()]
+            await run_inference(
+                item=item, clients=[], aggregator=mock_aggregator,
+                finbert=mock_finbert, budget_tracker=mock_budget,
+            )
+
+        sent_prompt = mock_eq.call_args.kwargs["prompt"]
+        assert "Headline: (no headline)" in sent_prompt
+
+    @pytest.mark.asyncio
     async def test_run_inference_divergence_uses_finbert(self):
         """run_inference uses FinBERT when ensemble diverges (aggregate returns None)."""
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
@@ -531,6 +617,55 @@ class TestRunInference:
         # audited in llm_responses (they were silently discarded before).
         assert raw_outputs == mock_raw
         mock_finbert.analyze.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_run_inference_finbert_divergence_fallback_includes_title(self):
+        """#399 companion: FinBERT never runs the DK-CoT prompt (it's a classifier,
+        not an instruction-following LLM), but the text it classifies must still
+        carry the headline. This is exactly the path where the ensemble is
+        unavailable and the system relies on FinBERT the most."""
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+        mock_aggregator.aggregate.return_value = None  # divergence
+
+        mock_finbert = MagicMock(spec=FinBERTClient)
+        mock_finbert.analyze.return_value = MagicMock(polarity=0.3, confidence=0.7)
+
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock()
+
+        item = make_news_item("MSFT", 1)
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock, return_value=[MagicMock()]):
+            await run_inference(
+                item=item, clients=[], aggregator=mock_aggregator,
+                finbert=mock_finbert, budget_tracker=mock_budget,
+            )
+
+        mock_finbert.analyze.assert_called_once()
+        finbert_text = mock_finbert.analyze.call_args[0][0]
+        assert item.title in finbert_text
+
+    @pytest.mark.asyncio
+    async def test_run_inference_finbert_budget_exhausted_fallback_includes_title(self):
+        """Same companion fix, second FinBERT call site (budget-exhausted path)."""
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock(
+            side_effect=LLMBudgetExhaustedError("exhausted")
+        )
+        mock_finbert = MagicMock(spec=FinBERTClient)
+        mock_finbert.analyze.return_value = MagicMock(polarity=-0.2, confidence=0.6)
+
+        item = make_news_item("SPY", 2)
+
+        await run_inference(
+            item=item, clients=[], aggregator=MagicMock(spec=EnsembleAggregator),
+            finbert=mock_finbert, budget_tracker=mock_budget,
+        )
+
+        mock_finbert.analyze.assert_called_once()
+        finbert_text = mock_finbert.analyze.call_args[0][0]
+        assert item.title in finbert_text
 
     @pytest.mark.asyncio
     async def test_run_inference_low_confidence_agreement_skips_finbert(self):
@@ -1201,7 +1336,7 @@ class TestProcessNewsBatchShadowDecoupling:
         mock_pg = MagicMock(spec=PostgreSQLStore)
         news_items = [make_news_item("AAPL", 0)]
 
-        async def fast_shadow(*, clean_body, clean_symbol, news_log_id, pg_store, redis_store):
+        async def fast_shadow(*, clean_body, clean_symbol, news_log_id, pg_store, redis_store, clean_title=""):
             await asyncio.sleep(0.01)
             pg_store.log_shadow_responses([{"symbol": clean_symbol}])
 
@@ -1407,6 +1542,22 @@ class TestShadowTimeoutSymmetry:
         await _shadow_query_candidates("corpo", "AAPL", 1, pg, self._redis_armato())
 
         assert len(set(visti)) == 2, f"stesso tetto per client diversi: {visti}"
+
+    @pytest.mark.asyncio
+    async def test_shadow_prompt_uses_variant_a_title_when_flag_set(self, mocker, monkeypatch):
+        """#399: the shadow path must build its prompt through the same helper
+        as the live path, so a title/variant fix can't leave the two diverging."""
+        monkeypatch.setenv("SENTIMENT_PROMPT_VARIANT", "a")
+        client = self._client("candidato:cloud", 90)
+        mocker.patch("src.workers.sentiment.build_shadow_clients", return_value=[client])
+        pg = MagicMock(spec=PostgreSQLStore)
+
+        await _shadow_query_candidates(
+            "corpo", "AAPL", 1, pg, self._redis_armato(), clean_title="Some Headline",
+        )
+
+        sent_prompt = client.complete.call_args.args[0]
+        assert "Some Headline" in sent_prompt
 
     @pytest.mark.asyncio
     async def test_timeout_distinguibile_da_parse_error(self, mocker):
