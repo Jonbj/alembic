@@ -36,6 +36,8 @@ from scripts.measure_169_dedup_rules import (
     MEZZA_VITA_ORE,
     RULES,
     SOGLIA_GATE,
+    analizza_uscite_sotto_soglia,
+    costruisci_eventi_uscita,
     dedup_score,
     scelta_produzione,
     media_fwd,
@@ -46,6 +48,7 @@ from scripts.measure_169_dedup_rules import (
     sintesi_ic,
     statistiche_gate,
     riepilogo_leggibile,
+    riepilogo_uscite_leggibile,
     varianza_intraday,
 )
 
@@ -504,3 +507,238 @@ def test_misura_e_riepilogo_senza_simbolo_giorni_multi_segnale_non_crashano():
     assert v["con_piu_segnali"] == 0
     assert v["range_mediano"] is None and v["range_massimo"] is None
     assert "range (max-min) mediano n/d (max n/d)" in riepilogo_leggibile(risultato)
+
+
+# ── Uscite l'via below_entry_gate (#169 follow-up 2026-09-01) ─────────────────
+#
+# La misura del corpo della issue era sugli (vince/salta al gate 0.30).
+# L'evidenza del 2026-09-01 (HOOD whipsaw: +0,4815 → +0,0228 → SELL a 105 min)
+# ha aggiunto un costo che l'ingresso-gate non vedeva: la sostituzione di un
+# segnale forte chiude POSIZIONI APERTE via `below_entry_gate`. Questi test
+# misurano l'uscita, sullo stesso campione di regole e la stessa soglia di
+# produzione. Il ranker non cambia, nessun parametro cambia: è misura.
+
+
+def _evento_uscita(
+    decision_at: datetime, symbol: str, segnali: list[dict],
+    realized: float,
+) -> dict:
+    """Una chiusura S4 con exit_mechanism=below_entry_gate.
+
+    `segnali` sono tutti i segnali del simbolo con generated_at <= decision_at
+    nello stesso giorno (la finestra di freschezza del ranker è hours=4, ma
+    l'analisi usa l'intero storico del giorno per non nascondere il caso HOOD,
+    in cui il segnale forte era di soli 14 min prima).
+    """
+    return {
+        "decision_at": decision_at,
+        "symbol": symbol,
+        "segnali": segnali,
+        "net_pnl": realized,
+    }
+
+
+def test_costruisci_eventi_uscita_isola_segnali_strettamente_precedenti():
+    """Al tick di uscita si guardano i segnali GENERATI prima o uguale.
+
+    Il caso HOOD: +0.4815 a 10:47, decision tick 12:37 — il segnale forte è
+    105 minuti prima. Un filtro > decision_at lo escluderebbe per costruzione
+    e maschererebbe proprio il caso che vogliamo misurare.
+    """
+    segnali = [
+        _sig(D, "HOOD", 10.78, 0.4815),      # 10:47
+        _sig(D, "HOOD", 11.02, 0.0228),      # 11:01 — sovrascrive
+        _sig(D, "HOOD", 13.50, -0.10),       # 13:30 — DOPO l'uscita, fuori
+    ]
+    decision_at = datetime(2026, 8, 27, 12, 37, tzinfo=UTC)
+    eventi = costruisci_eventi_uscita(
+        [{"decision_at": decision_at, "symbol": "HOOD", "segnali": segnali}]
+    )
+    assert len(eventi) == 1
+    orari = [s["generated_at"].strftime("%H:%M") for s in eventi[0]["segnali"]]
+    assert orari == ["10:47", "11:01"]
+
+
+def test_analizza_uscite_baseline_e_unflip_per_regola_come_negli_ingressi():
+    """L'analisi delle uscite usa la stessa baseline e le stesse regole.
+
+    Coerenza: la baseline è la stessa degli ingressi (`ultimo_prod`); le
+    regole sono le stesse (issue la stessa); cambia solo il campione (le
+    chiusure `below_entry_gate` invece dei simbolo-giorni totali).
+
+    Il test data ha entrambi i segnali come ensemble (per consentire a
+    `ultimo_prod` di leggere il piu' recente, 0.10, sotto soglia — esattamente
+    la condizione che ha fatto scattare l'uscita via below_entry_gate).
+    """
+    decision_at = datetime(2026, 8, 27, 12, 37, tzinfo=UTC)
+    eventi = [
+        _evento_uscita(decision_at, "X", [
+            _sig(D, "X", 10.0, 0.40),  # ensemble
+            _sig(D, "X", 11.0, 0.10),  # ensemble piu' recente, sotto soglia
+        ], realized=-23.06),
+    ]
+    risultato = analizza_uscite_sotto_soglia(eventi)
+    assert set(risultato["regole"].keys()) == set(RULES)
+    # `ultimo_prod` è la baseline: per costruzione ha lo stesso score letto
+    # dal ranker vero al tick di decisione (0.10 < 0.30). Non salva l'uscita.
+    assert risultato["regole"][BASELINE]["n_uscite"] == 1
+    assert risultato["regole"][BASELINE]["n_uscite_salve"] == 0
+
+
+def test_analizza_uscite_massimo_salva_le_posizioni_con_picco_sopra_soglia():
+    """HOOD 2026-09-01: il picco ensemble (+0,4815) passava il gate 0,30.
+
+    Sotto `massimo` la posizione NON sarebbe uscita per `below_entry_gate`:
+    è il flip "salvato" lato uscita, simmetrico al flip "perso" lato ingresso
+    (la candidata passa dove la baseline skippa).
+
+    Entrambi i segnali sono ensemble (lo dice l'evidenza 2026-09-01: il
+    10:47 era l' upgrade Morgan Stanley, il 11:02 era un articolo sul meme
+    coin BONER — entrambi passati dal resolver, entrambi ensemble, ma a
+    confidence molto diversa). Il ranker VEDe entrambi come non-fallback,
+    quindi `ultimo_prod` sceglie il piu' recente (0.0228) per la regola
+    ensemble-pari-tie-recenza. L'uscita e' scattata per quello.
+    """
+    decision_at = datetime(2026, 9, 1, 12, 37, tzinfo=UTC)
+    eventi = [
+        _evento_uscita(decision_at, "HOOD", [
+            _sig(date(2026, 9, 1), "HOOD", 10.78, 0.4815, conf=0.70),
+            _sig(date(2026, 9, 1), "HOOD", 11.02, 0.0228, conf=0.25),
+        ], realized=-23.06),
+    ]
+    risultato = analizza_uscite_sotto_soglia(eventi)
+    # massimo = +0.4815 >= 0.30: l'uscita NON scatta sotto questa regola
+    assert risultato["regole"]["massimo"]["n_uscite_salve"] == 1
+    assert math.isclose(risultato["regole"]["massimo"]["realized_uscite_salve"], -23.06)
+    # La baseline (`ultimo_prod`) per costruzione ha lo stesso score del
+    # segnale scelto dal ranker vero: anche lei legge 0.0228, anche lei ha
+    # fatto scattare l'uscita. Per costruzione n_salve = 0 su `ultimo_prod`.
+    assert risultato["regole"]["ultimo_prod"]["n_uscite_salve"] == 0
+
+
+def test_analizza_uscite_nessun_segnale_disponibile_non_salva_niente():
+    """Una chiusura senza segnali precedenti è un caso patologico.
+
+    Se manca il campione (segnali vuoto o tutti successivi al decision_at),
+    nessuna regola può produrre uno score: l'uscita resta "non salvata" da
+    tutte, e il caso va contato ma non contribuisce al realized medio delle
+    salvate.
+    """
+    decision_at = datetime(2026, 9, 1, 12, 37, tzinfo=UTC)
+    eventi = [
+        _evento_uscita(decision_at, "EMPTY", [], realized=-10.0),
+    ]
+    risultato = analizza_uscite_sotto_soglia(eventi)
+    assert risultato["regole"]["massimo"]["n_uscite"] == 1
+    assert risultato["regole"]["massimo"]["n_uscite_salve"] == 0
+    assert risultato["regole"]["massimo"]["realized_uscite_salve"] is None
+
+
+def test_analizza_uscite_conta_salvi_e_non_salvi_sullo_stesso_campione():
+    """Per ogni evento del campione (chiusura below_entry_gate), la candidata
+    o legge uno score >= soglia (salva) oppure < soglia (non salva). Le due
+    categorie partizionano il campione per ogni regola, con la baseline che
+    ha n_salve = 0 per costruzione.
+
+    Una uscita "salvata" dalla candidata = costo evitato. Una uscita "non
+    salvata" = costo subito come nel ranker attuale. La somma dei realized
+    condizionati pesati per le frequenze da' il realized totale sotto la
+    regola candidata: confrontato col realized totale del ranker attuale dice
+    se la candidata, sulla finestra, avrebbe migliorato il P&L realized delle
+    chiusure below_entry_gate.
+    """
+    decision_at = datetime(2026, 9, 1, 12, 37, tzinfo=UTC)
+    # A: picco 0.40, massimo salva (>= 0.30). B: entrambi i segnali sotto
+    # soglia (massimo 0.20 < 0.30), massimo NON salva.
+    eventi = [
+        _evento_uscita(decision_at, "A", [
+            _sig(date(2026, 9, 1), "A", 10.0, 0.40),
+            _sig(date(2026, 9, 1), "A", 11.0, 0.10),
+        ], realized=-5.0),
+        _evento_uscita(decision_at, "B", [
+            _sig(date(2026, 9, 1), "B", 10.0, 0.20),
+            _sig(date(2026, 9, 1), "B", 11.0, 0.05),
+        ], realized=-3.0),
+    ]
+    risultato = analizza_uscite_sotto_soglia(eventi)
+    m = risultato["regole"]["massimo"]
+    assert m["n_uscite"] == 2
+    assert m["n_uscite_salve"] == 1  # solo A
+    assert math.isclose(m["realized_uscite_salve"], -5.0)
+
+
+def test_analizza_uscite_realized_salve_e_media_campione():
+    """Coerenza di aggregazione: il realized medio del campione e' la media
+    pesata per frequenza del realized_salve e del realized_non_salve.
+
+    Una candidata "non salva" niente: il realized della candidata e' il
+    realized_medio_uscite del campione (identico al ranker attuale, per
+    costruzione). Una candidata che salva k uscite ha realized =
+    (somma_salve + somma_non_salve) / N, dove somma_non_salve e' la
+    realizzazione del ranker sulle restanti N − k. La differenza
+    realized_candidata − realized_attuale dice il valore aggiunto della regola.
+    """
+    decision_at = datetime(2026, 9, 1, 12, 37, tzinfo=UTC)
+    eventi = [
+        _evento_uscita(decision_at, "A", [
+            _sig(date(2026, 9, 1), "A", 10.0, 0.40),
+            _sig(date(2026, 9, 1), "A", 11.0, 0.10),
+        ], realized=-5.0),
+        _evento_uscita(decision_at, "B", [
+            _sig(date(2026, 9, 1), "B", 10.0, 0.10),
+            _sig(date(2026, 9, 1), "B", 11.0, 0.05),
+        ], realized=-3.0),
+    ]
+    risultato = analizza_uscite_sotto_soglia(eventi)
+    # media del campione: (-5 + -3) / 2 = -4
+    assert math.isclose(risultato["realized_medio_uscite"], -4.0)
+    # massimo salva A (picco 0.40 >= 0.30): realized_salve = -5
+    assert math.isclose(risultato["regole"]["massimo"]["realized_uscite_salve"], -5.0)
+
+
+def test_analizza_uscite_soglia_default_e_quella_di_produzione():
+    """Coerenza con la misura degli ingressi: stessa soglia 0.30."""
+    decision_at = datetime(2026, 9, 1, 12, 37, tzinfo=UTC)
+    eventi = [
+        _evento_uscita(decision_at, "HOOD", [
+            _sig(date(2026, 9, 1), "HOOD", 10.78, 0.4815, conf=0.70),
+            _sig(date(2026, 9, 1), "HOOD", 11.02, 0.0228, conf=0.25),
+        ], realized=-23.06),
+    ]
+    # Soglia custom = 0.50 (sopra il picco 0.4815): nessuna salva.
+    r_alta = analizza_uscite_sotto_soglia(eventi, soglia=0.50)
+    assert r_alta["regole"]["massimo"]["n_uscite_salve"] == 0
+    # Soglia default = 0.30: il picco 0.4815 salva.
+    r_bassa = analizza_uscite_sotto_soglia(eventi)
+    assert r_bassa["regole"]["massimo"]["n_uscite_salve"] == 1
+
+
+def test_riepilogo_uscite_leggibile_menziona_caso_vuoto_senza_crashare():
+    """Stesso pattern del riepilogo ingressi: i None non esplodono."""
+    risultato = {
+        "n_uscite_totali": 0,
+        "realized_medio_uscite": None,
+        "regole": {
+            r: {"n_uscite": 0, "n_uscite_salve": 0,
+                "realized_uscite_salve": None}
+            for r in RULES
+        },
+    }
+    testo = riepilogo_uscite_leggibile(risultato)
+    assert "0 chiusure" in testo
+    assert "salve" in testo  # la colonna c'e', anche se tutti zeri
+
+
+def test_riepilogo_uscite_leggibile_riporta_salve_per_regola():
+    decision_at = datetime(2026, 9, 1, 12, 37, tzinfo=UTC)
+    eventi = [
+        _evento_uscita(decision_at, "A", [
+            _sig(date(2026, 9, 1), "A", 10.0, 0.40),
+            _sig(date(2026, 9, 1), "A", 11.0, 0.10),
+        ], realized=-5.0),
+    ]
+    risultato = analizza_uscite_sotto_soglia(eventi)
+    testo = riepilogo_uscite_leggibile(risultato)
+    # massimo salva A (0.40 >= 0.30): la riga di massimo contiene "1" fra salve e fwd
+    righe_m = [r for r in testo.splitlines() if r.startswith("massimo")]
+    assert "1" in righe_m[0]
