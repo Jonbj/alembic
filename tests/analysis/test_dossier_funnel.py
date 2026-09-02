@@ -328,7 +328,10 @@ def _kpi_fixture():
 def test_kpi_held_at_open_distinto_dal_funnel_di_ingresso():
     funnel = build_funnel(_kpi_fixture(), soglia_gate=0.30)
     kpi = funnel["kpi"]["held_at_open"]
-    assert kpi == {"mover_held": 1, "exit_risk": 0, "passive_exposure": 1}
+    assert kpi["mover_held"] == 1
+    assert kpi["exit_risk"] == 0
+    assert kpi["passive_exposure"] == 1
+    assert kpi["definizione"]
 
 
 def test_kpi_active_signal_recall():

@@ -56,6 +56,7 @@ from src.analysis.dossier.event_context import (
     SECTOR_ETF_BY_SECTOR,
     build_event_market_context,
 )
+from src.analysis.dossier.funnel import build_funnel
 from src.analysis.dossier.market import compute_market, compute_miss_candidates
 from src.analysis.dossier.miss_cause import (
     DEFAULT_SOGLIA_GATE,
@@ -76,7 +77,7 @@ FINESTRA_MEDIANE = 20  # giorni, per le mediane mobili
 # senza far crescere la query oltre un indice su (ticker, fetched_at).
 FINESTRA_SEDUTE_COPERTURA = 10
 INIZIO_OSSERVAZIONE = date(2026, 8, 3)
-DOSSIER_SCHEMA_VERSION = "2.6"
+DOSSIER_SCHEMA_VERSION = "2.7"
 NEW_YORK = ZoneInfo("America/New_York")
 
 
@@ -998,6 +999,112 @@ def _dettagli_ordini(order_ids: list[str]) -> dict[str, dict]:
     return result
 
 
+def _risk_decisions(giorno: date) -> list[dict]:
+    """Guard di rischio del giorno per il funnel v2 (#281), sola lettura.
+
+    NON sono guard gli scarti che il funnel classifica gia' a monte dal
+    punteggio firmato: SKIP_THRESHOLD e' lo stadio del gate (la stessa soglia
+    letta da `_soglia_gate_s4`), SKIP_FALLBACK e' il filtro #108. Caricarli
+    qui significherebbe contare due volte lo stesso scarto, una volta come
+    BELOW_GATE/FALLBACK_REJECT e una come RISK_BLOCK. Restano fuori anche le
+    righe ombra (BUY_POWER_SHADOW): misurano, non bloccano.
+    """
+    g = giorno.isoformat()
+    rows = _psql(
+        f"/* risk_blocks_281 */ SELECT tick_time::text, symbol, "
+        f"COALESCE(signal_id::text,''), decision "
+        f"FROM execution_decisions "
+        f"WHERE tick_time >= '{g}' AND tick_time < '{g}'::date + 1 "
+        f"AND (decision LIKE 'SKIP\\_%' OR decision = 'BUY_POWER_CAP') "
+        f"AND decision NOT IN ('SKIP_THRESHOLD','SKIP_FALLBACK') "
+        f"ORDER BY tick_time, id;"
+    )
+    return [
+        {
+            "tick_time": row[0],
+            "symbol": row[1],
+            "signal_id": int(row[2]) if row[2] else None,
+            "decision": row[3],
+        }
+        for row in rows
+    ]
+
+
+def _funnel_v2(
+    *,
+    rendimenti: dict[str, float],
+    in_portafoglio: set[str],
+    universo: list[str],
+    copertura: dict,
+    segnali: dict[str, list[dict]],
+    intenti: list[dict],
+    eventi: list[dict],
+    guard: list[dict],
+    barre: dict[str, dict],
+    candidati_classificati: list[dict],
+    soglia_gate: float,
+) -> dict:
+    """Vista funnel v2 parallela (#281): assembla i mover della seduta dai
+    dati che il dossier ha gia' caricato e delega ogni decisione al modulo
+    puro. Nessuna formula vive qui (stessa regola del resto dell'orchestratore).
+
+    La pipeline d'ingresso si valuta sui mover non detenuti in rialzo; gli
+    altri ricevono comunque l'asse actionability, cosi' la partizione copre
+    tutta la giornata e la somma dei conteggi fa i mover del giorno.
+    """
+    universo_set = set(universo)
+    per_ticker = copertura.get("per_ticker") or {}
+    causa_by_symbol = {
+        str(c.get("symbol")): c.get("causa") for c in candidati_classificati
+    }
+    intenti_by_symbol: dict[str, list[dict]] = defaultdict(list)
+    for intento in intenti:
+        intenti_by_symbol[intento["symbol"]].append(intento)
+    guard_by_symbol: dict[str, list[dict]] = defaultdict(list)
+    for riga in guard:
+        guard_by_symbol[riga["symbol"]].append(riga)
+    # Primo evento con ordine per simbolo: e' la catena ordine->fill vista
+    # dal #277, gia' arricchita con i dettagli Alpaca del broker.
+    ordine_by_symbol: dict[str, dict] = {}
+    for evento in eventi:
+        if evento.get("symbol") in ordine_by_symbol or not evento.get("order_id"):
+            continue
+        ordine_by_symbol[evento["symbol"]] = {
+            "order_id": evento.get("order_id"),
+            "submitted_at": evento.get("order_submitted_at"),
+            "filled_at": evento.get("filled_at"),
+            "fill_price": evento.get("fill_price"),
+            "lookup_error": evento.get("order_lookup_error"),
+            "trade_id": evento.get("trade_id"),
+        }
+
+    movers = [
+        (sym, rendimento)
+        for sym, rendimento in rendimenti.items()
+        if abs(rendimento) >= SOGLIA_MOVER
+    ]
+    # Ordinati per |rendimento| decrescente: stessa convenzione dei candidati
+    # miss legacy (compute_miss_candidates), i mover piu' ampi per primi.
+    movers.sort(key=lambda coppia: abs(coppia[1]), reverse=True)
+    movers_input = [
+        {
+            "symbol": sym,
+            "return": rendimento,
+            "held": sym in in_portafoglio,
+            "in_universo": sym in universo_set,
+            "articoli": per_ticker.get(sym),
+            "segnali": segnali.get(sym) or [],
+            "intenti": intenti_by_symbol.get(sym) or [],
+            "guard": guard_by_symbol.get(sym) or [],
+            "ordine": ordine_by_symbol.get(sym),
+            "close": (barre.get(sym) or {}).get("close"),
+            "legacy_causa": causa_by_symbol.get(sym),
+        }
+        for sym, rendimento in movers
+    ]
+    return build_funnel(movers_input, soglia_gate=soglia_gate)
+
+
 def _e_giorno_di_borsa(giorno: date) -> bool:
     """Verifica una data contro il calendario di mercato autorevole di Alpaca.
 
@@ -1376,6 +1483,26 @@ def costruisci_dossier(
             c, barre, giorno, barre_intraday, cicli_eleggibili
         )
 
+    # --- funnel v2 a due assi (#281) -------------------------------------
+    # Vista parallela alla serie legacy: stessa soglia gate letta sopra,
+    # stessi dati gia' caricati. I conteggi legacy (`candidati_miss`,
+    # `aggregati.cause_del_giorno`) e la NO_NEWS pre-registrata restano
+    # esattamente dove sono (freeze #171): questo blocco si affianca.
+    risk_decisions = _risk_decisions(giorno)
+    funnel_v2 = _funnel_v2(
+        rendimenti=mercato["rendimenti"],
+        in_portafoglio=in_portafoglio,
+        universo=simboli,
+        copertura=copertura_articoli,
+        segnali=dict(segnali),
+        intenti=intenti_s4_grezzi,
+        eventi=eventi_arricchiti,
+        guard=risk_decisions,
+        barre=barre,
+        candidati_classificati=candidati_classificati,
+        soglia_gate=soglia_gate,
+    )
+
     # --- contesto evento/mercato/microstruttura (#285) -------------------
     # Le chiamate remote sono attive nel CLI, ma disaccoppiate dal costruttore
     # puro usato dai test. Un fallimento lascia null/missingness, non impedisce
@@ -1620,8 +1747,30 @@ def costruisci_dossier(
                     "(score e ritorno); None negli altri casi"
                 ),
             },
+            "funnel_v2": {
+                "version": "vista parallela alla serie legacy (freeze #171)",
+                "actionability": (
+                    "mover vs book long-only: EXIT_RISK/PASSIVE_EXPOSURE se "
+                    "detenuto, ENTRY_OPPORTUNITY se rialzo non detenuto, "
+                    "NON_ACTIONABLE se ribasso non detenuto, OUT_OF_SCOPE se "
+                    "fuori universo"
+                ),
+                "pipeline": (
+                    "stadio della catena d'ingresso per i soli "
+                    "ENTRY_OPPORTUNITY, dal campo firmato dello score; gate = "
+                    "stessa soglia di soglia_gate_usata; risk_block = righe "
+                    "execution_decisions SKIP_* eccetto SKIP_THRESHOLD (gate) "
+                    "e SKIP_FALLBACK (filtro #108); ordine/fill = dettagli "
+                    "broker Alpaca della timeline #277"
+                ),
+                "net_profitable": (
+                    "P&L realizzato del trade collegato (#294); None se il "
+                    "trade e' ancora aperto o ambiguo"
+                ),
+                "freeze": "nessun conteggio legacy sostituito; nessun dato storico riscritto",
+            },
             "copertura_uscita": {
-                "posizioni": "trades vivi all'open RTH (stesse righe di snapshot_apertura)",
+                "posizioni": "trade vivi all'open RTH (stesse righe di snapshot_apertura)",
                 "righe_news": "news_log.fetched_at bucket UTC, per (ticker, seduta)",
                 "segnali": "sentiment_signals.generated_at nella seduta",
                 "sedute": (
@@ -1683,6 +1832,7 @@ def costruisci_dossier(
         "decision_quality": decision_quality,
         "timeline": timeline,
         "copertura_articoli": copertura_articoli,
+        "funnel_v2": funnel_v2,
         "event_market_context": event_market_context,
         "aggregati": {
             "per_ora_ingresso": aggregate_by_entry_hour(chiusi_storici),
