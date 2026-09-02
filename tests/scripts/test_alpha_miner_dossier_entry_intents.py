@@ -123,3 +123,96 @@ def test_giorno_di_borsa_usa_il_calendario_alpaca(righe, atteso):
     ):
         client_cls.return_value.get_calendar.return_value = righe
         assert dossier._e_giorno_di_borsa(dossier.date(2026, 8, 12)) is atteso
+
+
+# --- #401: invariante rank/ranking_score ------------------------------------
+# Lo slot 15:52 UTC del 2026-08-27 mostrava SOXX (score 0.36) classificato
+# rank=6 mentre MRVL (0.3578) aveva rank=4 — il rank non era funzione dello
+# score. Questi test costruiscono in memoria lo scenario reale e verificano che
+# la funzione di invariante lo catturi.
+
+
+def test_invariante_rank_in_ranking_score_segnala_inversione_reale():
+    """La triade MRVL/CSCO/SOXX dello slot 15:52 UTC del 2026-08-27.
+
+    SOXX ha ranking_score piu' alto di MRVL ma rank peggiore: violazione. Con
+    i dati odierni (ranking_score == raw score post-fix) la violazione permane
+    perche' il ledger pre-fix non e' stato backfillato: la funzione di check
+    deve saperla trovare."""
+    slot = "2026-08-27 15:52:00+00:00"
+    righe = [
+        {"decision_slot": slot, "signal_id": 1, "symbol": "MRVL",
+         "rank": 4, "ranking_score": 0.3578, "raw_score": 0.3578},
+        {"decision_slot": slot, "signal_id": 2, "symbol": "CSCO",
+         "rank": 5, "ranking_score": 0.3199, "raw_score": 0.3199},
+        {"decision_slot": slot, "signal_id": 3, "symbol": "SOXX",
+         "rank": 6, "ranking_score": 0.3600, "raw_score": 0.3600},
+    ]
+
+    violazioni = dossier._invariante_rank_in_ranking_score(righe)
+
+    # Le coppie sono ordinate per rank crescente, quindi "a" ha rank migliore
+    # di "b". SOXX (rank 6, score 0.36) precede CSCO (rank 5, score 0.3199)
+    # nella catena: la coppia anomala e' (CSCO, SOXX) — la firma del #401.
+    simboli = {(v["symbol_a"], v["symbol_b"]) for v in violazioni}
+    assert ("CSCO", "SOXX") in simboli
+    # Anche la coppia MRVL/SOXX (rank 4/6, score 0.3578/0.36) e' violazione.
+    assert ("MRVL", "SOXX") in simboli
+
+
+def test_invariante_rank_in_ranking_score_non_segnala_ordinamento_corretto():
+    """Il caso normale post-fix: rank decrescente in ranking_score."""
+    slot = "2026-08-27 16:00:00+00:00"
+    righe = [
+        {"decision_slot": slot, "signal_id": 1, "symbol": "AAA",
+         "rank": 1, "ranking_score": 0.50, "raw_score": 0.50},
+        {"decision_slot": slot, "signal_id": 2, "symbol": "BBB",
+         "rank": 2, "ranking_score": 0.45, "raw_score": 0.45},
+        {"decision_slot": slot, "signal_id": 3, "symbol": "CCC",
+         "rank": 3, "ranking_score": 0.40, "raw_score": 0.40},
+    ]
+
+    assert dossier._invariante_rank_in_ranking_score(righe) == []
+
+
+def test_invariante_rank_in_ranking_score_ignora_righe_senza_ranking_score():
+    """Righe pre-fix senza ``ranking_score`` non generano violazioni (la loro
+    assenza e' dichiarata in ``missingness``; non e' un'inversione)."""
+    slot = "2026-08-27 15:52:00+00:00"
+    righe = [
+        {"decision_slot": slot, "signal_id": 1, "symbol": "AAA",
+         "rank": 1, "ranking_score": None, "raw_score": 0.50},
+        {"decision_slot": slot, "signal_id": 2, "symbol": "BBB",
+         "rank": 2, "ranking_score": 0.45, "raw_score": 0.45},
+    ]
+
+    assert dossier._invariante_rank_in_ranking_score(righe) == []
+
+
+def test_invariante_rank_in_ranking_score_ammette_pareggio():
+    """Due simboli con lo stesso ranking_score e rank diversi non sono una
+    violazione (la tie rule del ranker lo permette)."""
+    slot = "2026-08-27 16:00:00+00:00"
+    righe = [
+        {"decision_slot": slot, "signal_id": 1, "symbol": "AAA",
+         "rank": 1, "ranking_score": 0.50, "raw_score": 0.50},
+        {"decision_slot": slot, "signal_id": 2, "symbol": "BBB",
+         "rank": 2, "ranking_score": 0.50, "raw_score": 0.50},
+    ]
+
+    assert dossier._invariante_rank_in_ranking_score(righe) == []
+
+
+def test_s4_rank_invariante_ranks_query_isola_event_type_disposition_con_rank():
+    """#401: la query deve filtrare solo le disposition con rank non-NULL e
+    candidati che hanno ``ranking_score`` nel snapshot. Le righe pre-fix non
+    hanno ranking_score e la query non le include — un fallimento qui
+    significherebbe che lo sweep non funziona."""
+    with patch.object(dossier, "_psql", return_value=[]) as psql:
+        dossier._s4_rank_invariante_ranks(dossier.date(2026, 8, 27))
+
+    query = psql.call_args.args[0]
+    assert "disposition.event_type = 'disposition'" in query
+    assert "candidate.event_type = 'candidate'" in query
+    assert "disposition.rank IS NOT NULL" in query
+    assert "candidate.snapshot ? 'ranking_score'" in query
