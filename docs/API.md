@@ -334,7 +334,7 @@ When `signal_id` is provided, returns the exact historical signal row. This is u
     "score": 0.42,
     "confidence": 0.78,
     "reasoning": "Strong bullish tone from earnings beat",
-    "model_id": "ensemble:kimi-k2.6+glm-5.2",
+    "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
     "ensemble_std": 0.11,
     "fallback_used": false,
     "generated_at": "2026-06-03T10:30:00Z"
@@ -348,15 +348,15 @@ Get latest signal for a single symbol (Redis → PostgreSQL fallback).
 
 **Response 404:** `{"detail": "No signal found for symbol: AAPL"}`
 
-### `GET /api/signals/history`
+### ~~`GET /api/signals/history`~~ — NON ESISTE
 
-Paginated signal history from PostgreSQL.
-
-**Query parameters:** `symbol` (required), `limit` (default 50, max 500), `offset` (default 0)
-
-```bash
-curl "http://localhost:8001/api/signals/history?symbol=AAPL&limit=100"
-```
+> **Rimosso dalla documentazione il 2026-09-02.** Questa rotta non e' mai stata registrata:
+> `src/api/routes/signals.py` espone solo `GET ""` e `GET "/{symbol}"`. Peggio, una chiamata a
+> `/api/signals/history` non da' 404 di rotta ma viene catturata da `/{symbol}` con
+> `symbol="history"`, quindi risponde `404 No signal found for symbol: history` — un messaggio
+> che sembra "nessun dato" invece di "endpoint inesistente".
+>
+> Per lo storico dei segnali usare `GET /api/signals` (lista) con i suoi filtri.
 
 ---
 
@@ -374,6 +374,41 @@ net P&L, plus `trace_coverage` (signals linked to a news source). Query param: `
 FIX-06 records the event-level reason and stage for discarded items in
 `news_queue_drops`; stale and parse-failure events also increment the corresponding
 per-source funnel counters shown by this endpoint.
+
+### `GET /api/quality/ensemble_health`
+
+Rollup per-ciclo della salute dell'ensemble (#427, PR #463 — deployata il 2026-09-01).
+Legge `ensemble_cycle_health`: una riga per esecuzione del `SentimentWorker` con i conteggi
+`n_ensemble` / `n_single` / `n_finbert` / `aggregate` e il flag `rth`.
+
+**Query parameters:** `days` (default **7** — la tabella e' ad alta frequenza, una finestra a
+30 giorni sono migliaia di righe)
+
+**Response 200:**
+
+```json
+{
+  "window_days": 7,
+  "cycles": [
+    {"cycle_started_at": "...", "cycle_ended_at": "...", "n_ensemble": 8,
+     "n_single": 2, "n_finbert": 1, "aggregate": 11, "rth": true}
+  ],
+  "summary": {
+    "n_cycles": 96, "total_ensemble": 512, "total_single": 180, "total_finbert": 44,
+    "total_aggregate": 736, "rth_cycles": 52, "rth_share": 0.542,
+    "full_ensemble_share": 0.696
+  }
+}
+```
+
+`full_ensemble_share` e' esattamente il numero che l'alert Telegram nel worker confronta con
+0.5 (soglia: 50% di ensemble pieno su 2 cicli RTH), cosi' l'operatore vede arrivare un alert
+prima che scatti. Vale `null` quando la finestra non ha prodotto segnali.
+
+> **Nota di stato (2026-09-02):** la tabella e' ancora **vuota**. Il deploy e' atterrato alle
+> 20:20 UTC del 2026-09-01, venti minuti dopo la chiusura, e fuori orario il worker esce con
+> `{"skipped": true, "reason": "market_closed"}` prima di scrivere. Le prime righe sono attese
+> dalla seduta del 2026-09-02.
 
 ## Admin Endpoints
 
@@ -417,14 +452,16 @@ System status snapshot (no auth): kill-switch state, operating mode, LLM model s
 {
   "killswitch": false,
   "mode": "paper",
-  "llm_models": "all",
+  "llm_models": "glm52,gptoss",
   "llm_model_registry": {
-    "selection": "all",
-    "active_model_ids": ["kimi-k2.6:cloud", "glm-5.2:cloud"],
+    "selection": "glm52,gptoss",
+    "active_model_ids": ["glm-5.2:cloud", "gpt-oss:20b-cloud"],
     "economy_model": "glm52",
     "models": [
-      {"key": "kimi", "model_id": "kimi-k2.6:cloud", "label": "Kimi K2.6", "active": true},
-      {"key": "glm52", "model_id": "glm-5.2:cloud", "label": "GLM-5.2", "active": true}
+      {"key": "kimi", "model_id": "kimi-k2.6:cloud", "label": "Kimi K2.6", "active": false},
+      {"key": "glm52", "model_id": "glm-5.2:cloud", "label": "GLM-5.2", "active": true},
+      {"key": "qwen35", "model_id": "qwen3.5:cloud", "label": "Qwen3.5", "active": false},
+      {"key": "gptoss", "model_id": "gpt-oss:20b-cloud", "label": "GPT-OSS 20B", "active": true}
     ]
   }
 }
@@ -447,18 +484,28 @@ Valid values are provided by the runtime registry (`src/llm/model_registry.py`).
 
 Authenticated endpoint returning the model registry used by the frontend. The UI should use this endpoint instead of hardcoding model names, because Ollama model availability can change over time.
 
+Esempio di risposta reale, catturata dal container `alembic-api-1` il **2026-09-02**:
+
 ```json
 {
-  "selection": "all",
-  "active_model_ids": ["kimi-k2.6:cloud", "glm-5.2:cloud"],
+  "selection": "glm52,gptoss",
+  "active_model_ids": ["glm-5.2:cloud", "gpt-oss:20b-cloud"],
   "economy_model": "glm52",
   "invalid": [],
   "models": [
-    {"key": "kimi", "model_id": "kimi-k2.6:cloud", "label": "Kimi K2.6", "active": true, "economy_default": false},
-    {"key": "glm52", "model_id": "glm-5.2:cloud", "label": "GLM-5.2", "active": true, "economy_default": true}
+    {"key": "kimi",   "model_id": "kimi-k2.6:cloud",    "label": "Kimi K2.6",   "active": false, "economy_default": false},
+    {"key": "glm52",  "model_id": "glm-5.2:cloud",      "label": "GLM-5.2",     "active": true,  "economy_default": true},
+    {"key": "qwen35", "model_id": "qwen3.5:cloud",      "label": "Qwen3.5",     "active": false, "economy_default": false},
+    {"key": "gptoss", "model_id": "gpt-oss:20b-cloud",  "label": "GPT-OSS 20B", "active": true,  "economy_default": false}
   ]
 }
 ```
+
+> **Corretto il 2026-09-02.** Gli esempi precedenti mostravano `selection: "all"` con Kimi K2.6
+> `active: true`: era la coppia di prima del 2026-07-11. Kimi resta *registrato* (quindi presente
+> nella lista `models`) ma non e' attivo. Nota che il payload elenca **quattro** modelli, non due:
+> `qwen35` e `gptoss` sono registrati con `in_all=False`, quindi selezionabili esplicitamente ma
+> esclusi dall'espansione di `"all"`.
 
 ---
 
@@ -474,15 +521,17 @@ Latest PerformanceWorker report from Redis (IC, ICIR, drift alerts, post-mortems
 
 Current ensemble weights, filtered and normalized against the active sentiment model registry. Returns equal defaults across active models if no valid weights have been set.
 
+Esempio di risposta reale (valori live al **2026-09-02**, riequilibrati dal LOO-ICIR):
+
 ```json
 {
   "weights": {
-    "kimi-k2.6:cloud": 0.5,
-    "glm-5.2:cloud": 0.5
+    "glm-5.2:cloud": 0.70,
+    "gpt-oss:20b-cloud": 0.30
   },
-  "source": "default",
+  "source": "auto_apply",
   "dropped_models": [],
-  "model_registry": {"selection": "all", "...": "..."}
+  "model_registry": {"selection": "glm52,gptoss", "...": "..."}
 }
 ```
 
@@ -496,8 +545,8 @@ Current weight suggestion from LOO ICIR (if available, expires after 7 days).
 
 ```json
 {
-  "suggested_weights": {"kimi-k2.6:cloud": 0.32, "...": "..."},
-  "purified_icir": {"kimi-k2.6:cloud": 1.15, "...": "..."},
+  "suggested_weights": {"glm-5.2:cloud": 0.68, "gpt-oss:20b-cloud": 0.32},
+  "purified_icir": {"glm-5.2:cloud": 1.15, "gpt-oss:20b-cloud": 0.54},
   "freeze_reason": "VIX = 32.4 >= 30.0",
   "computed_at": "2026-06-02T04:00:12Z",
   "expires_at": "2026-06-09T04:00:12Z"
@@ -525,7 +574,7 @@ Validation: each weight in `[0.10, 0.70]`, sum = 1.0 ± 0.001, model IDs active 
 **Response:**
 ```json
 {
-  "applied_weights": {"kimi-k2.6:cloud": 0.50, "glm-5.2:cloud": 0.50},
+  "applied_weights": {"glm-5.2:cloud": 0.50, "gpt-oss:20b-cloud": 0.50},
   "source": "suggestion",
   "log_id": 42,
   "dropped_models": []
@@ -635,7 +684,6 @@ Max range: 365 days.
 | `net_pnl` | P&L netto dopo i costi |
 | `costs` | Calcolato dal frontend: `gross_pnl − net_pnl` (non nel payload JSON) |
 | `exit_reason` | Motivo di chiusura (es. `portfolio_sell`, `stop_loss`) |
-```
 
 **Example:**
 ```bash
@@ -653,9 +701,12 @@ Structured weekly report from Redis cache (computed every Monday at 04:00 UTC, T
 
 **Response 404:** No weekly report cached yet (first Monday hasn't run, or cache expired).
 
-### `GET /api/performance/positions`
+### `GET /api/positions`
 
 Current open positions from Alpaca.
+
+> **Corretto il 2026-09-02:** documentato fino a ieri come `/api/performance/positions`, che non
+> esiste. La rotta e' registrata in `src/api/routes/trading.py` sotto il prefisso `/api` nudo.
 
 ---
 
@@ -705,17 +756,51 @@ Execution decision log from `execution_decisions`, enriched with originating sig
 
 ## Portfolio Endpoints
 
-### `GET /api/portfolio/cycles`
+> **Riscritta il 2026-09-02.** Questa sezione documentava tre rotte sotto `/api/portfolio/`
+> (`cycles`, `risk`, `decay`) di cui **nessuna esiste**. Il router e' montato su `/portfolio`
+> **senza** il prefisso `/api` (`src/api/routes/portfolio.py`) ed espone due sole rotte.
 
-Recent portfolio orchestration cycles (strategy run, orders before/after constraints).
+### `GET /portfolio/status`
 
-### `GET /api/portfolio/risk`
+Stato corrente del portafoglio: strategie attive con `allocation_pct`, `schedule`, `enabled`,
+piu' `mode` e `approved` letti da `strategy_lifecycle` (null se il DB non risponde — fail-open,
+l'endpoint risponde comunque), `promotion_blocked` da `config/strategies.yaml`,
+`live_authorized` derivato fail-closed, e l'ultimo ciclo eseguito.
 
-Latest risk report (Herfindahl index, combined drawdown, per-strategy metrics, alerts).
+Dal 2026-09-02 questa e' **l'unica** superficie di autorizzazione delle strategie: la pagina
+Strategies e le sue rotte di lettura sono state eliminate.
 
-### `GET /api/portfolio/decay`
+**Response 200:**
 
-Latest decay monitor report (actual vs backtest baseline per strategy).
+```json
+{
+  "active_strategies": 2,
+  "strategies": [
+    {"strategy_id": "S1", "allocation_pct": 0.50, "schedule": "...", "enabled": true,
+     "mode": "supervised_paper", "approved": true,
+     "promotion_blocked": true, "live_authorized": false}
+  ],
+  "last_cycle": {"timestamp": "...", "strategies_run": [], "orders_count": 0,
+                 "constraints_fired": []}
+}
+```
+
+### `GET /portfolio/cycle-history`
+
+Ultimi N cicli di portafoglio da `portfolio_cycles`, con `final_orders` completo.
+
+**Query parameters:** `limit` (default 30)
+
+> Attenzione a `orders_count` e `final_orders`: contano gli ordini **target**, non quelli
+> effettivamente inviati al broker (issue #437). I re-BUY su simboli gia' a libro compaiono in
+> `final_orders` a ogni ciclo e vengono soppressi solo al momento della submit dalla guardia
+> anti-pyramiding.
+
+### Rapporti di rischio e decay — nessuna rotta HTTP
+
+`risk_reports` e `decay_reports` sono tabelle PostgreSQL scritte dai task `risk-monitor` e
+`decay-monitor`. **Non hanno un endpoint API.** Si leggono via SQL, oppure — per il rischio —
+attraverso il campo `db_table` esposto da `/api/system/readiness`.
 
 ---
 
@@ -755,13 +840,35 @@ Per-model LLM outputs joined to signals (for model quality analysis). Query para
 
 List backtest run summaries from `backtest_signals`.
 
-### `GET /api/backtest/runs/{run_id}/signals`
+### `GET /api/backtest/{run_id}/signals`
 
 Signals for a specific backtest run.
 
-### `GET /api/backtest/runs/{run_id}/report`
+### `GET /api/backtest/{run_id}/summary`
 
-IC/ICIR backtest report for a specific run.
+Riepilogo di un run: metriche aggregate.
+
+### `GET /api/backtest/{run_id}/pnl_curve`
+
+Curva di P&L del run.
+
+### `GET /api/backtest/{run_id}/model_ic`
+
+IC per modello sul run.
+
+### `GET /api/backtest/{run_id}/symbol_ic`
+
+IC per simbolo sul run.
+
+### `GET /api/backtest/{run_id}/bucket_analysis`
+
+Analisi per bucket di score.
+
+> **Corretto il 2026-09-02.** La documentazione precedente aveva il prefisso sbagliato
+> (`/api/backtest/runs/{run_id}/...`: `runs` e' una rotta a se', non un segmento del path dei
+> dettagli) e citava un `/report` che non esiste — le metriche IC/ICIR sono divise fra
+> `model_ic`, `symbol_ic` e `bucket_analysis`. Verificato contro `src/api/routes/backtest*.py`
+> e contro `openapi.json` del container `alembic-api-1`.
 
 ---
 
@@ -1087,33 +1194,85 @@ Decision labels include `BUY`, `SELL`, `SKIP_THRESHOLD` (below active feedback g
 
 ---
 
-## PEAD Routes
+## ~~PEAD Routes~~ — RIMOSSE il 2026-07-15 con S7
 
-### `GET /api/pead/signals`
+> **Sezione eliminata il 2026-09-02.** `GET /api/pead/signals` e `GET /api/pead/events` sono
+> state documentate per sette settimane dopo essere state cancellate dal codice. S7 (PEAD,
+> classificazione 8-K) e' stata ritirata il 2026-07-15 — edge ALPHA-A3 confutato, POC-2 FAIL —
+> insieme a strategia, worker, task del beat, config e route API. Oggi `pead` compare in
+> `src/` solo dentro i commenti che ne registrano la rimozione, e un test di guardia
+> (`tests/test_p0_13_strategy_containment.py`) impedisce la re-introduzione accidentale.
+>
+> Storia completa: `docs/S7_LIFECYCLE_HISTORY_2026-07-15.md`. Configurazione di allora:
+> `docs/llm-config.md`, sezione finale.
 
-Segnali PEAD recenti (8-K filing classificati). Richiede `X-API-Key`.
+---
 
-**Query parameters:** `limit` (default 50, max 200), `symbol` (optional)
+## Auth Endpoints
 
-**Response 200:**
-```json
-[
-  {
-    "id": 1,
-    "symbol": "AAPL",
-    "score": 0.72,
-    "direction": "positive",
-    "confidence": 0.72,
-    "category": "earnings_beat",
-    "filing_url": "https://www.sec.gov/...",
-    "classified_at": "2026-06-17T14:35:00Z"
-  }
-]
-```
+Autenticazione dell'operatore per il frontend React. Il token restituito da `/api/auth/login`
+e' un JWT con scadenza `JWT_EXPIRE_MINUTES` (default 1440, cioe' 24h).
 
-### `GET /api/pead/events`
+### `POST /api/auth/login`
 
-Eventi earnings classificati (aggregati per simbolo). Richiede `X-API-Key`.
+Credenziali operatore (`ADMIN_USERNAME` / `ADMIN_PASSWORD_HASH`, bcrypt) → token.
+
+### `GET /api/auth/me`
+
+Identita' corrente. Richiede `X-API-Key`.
+
+> Da non confondere con `/api/mobile/v1/auth/*`, che e' il flusso separato del client Android
+> (login/logout/refresh/me + registrazione dispositivi) documentato piu' sopra.
+
+---
+
+## Strategies Endpoints — solo promotion gate
+
+**Le rotte di lettura sono state eliminate il 2026-09-02**, insieme alla pagina Strategies
+del frontend. `GET /api/strategies`, `/{id}`, `/{id}/backtest`, `/{id}/gates` e
+`/{id}/sensitivity` servivano dizionari Python congelati al 2026-05-30 (S1) e al 2026-06-15
+(S4), presentati come stato corrente accanto a un badge `LIVE`:
+
+- `total_trades` 1247 per S1 contro **103** righe reali in `trades`; 223 per S4 contro **114**
+- l'`universe` di S1 era quello del *backtest* (15 ETF: SPY, QQQ, TLT, GLD…) mentre S1 in
+  produzione compra azioni singole dalla watchlist di 96 simboli — **zero sovrapposizione**
+- la "Parameter Sensitivity" era generata da una gaussiana in codice, non misurata
+- il pannello dei gate mostrava soglie inventate *piu' severe* di quelle vere in
+  `reports/s1_backtest/gate_report.json` (che sono ~0.0), e due gate riportavano PASS con un
+  `metric_value` sotto la propria soglia dichiarata
+- la coppia dell'ensemble era descritta come "Kimi K2.6 + GLM-5.2", ritirata il 2026-07-11
+
+Restano le tre POST del promotion gate (P2-02), che non contengono snapshot: scrivono su
+`strategy_lifecycle` attraverso `src/strategies/promotion.py`. Richiedono `X-API-Key` e
+`strategy_id` e' case-insensitive (normalizzato a maiuscolo).
+
+| Endpoint | Metodo | Corpo | Descrizione |
+|---|---|---|---|
+| `/api/strategies/{strategy_id}/promote` | POST | `target_mode`, `gate_report_id?`, `requested_by` | Richiede una promozione di modo. 422 se il gate la rifiuta |
+| `/api/strategies/{strategy_id}/approve` | POST | `approved_by` | Approva una promozione pendente. 422 se non ce n'e' una |
+| `/api/strategies/{strategy_id}/demote` | POST | `new_mode`, `reason`, `demoted_by` | Retrocessione (sempre permessa, e' l'azione da circuit breaker) |
+
+> **Difetto noto, non introdotto dalla rimozione:** `promotion.py::_fetch_lifecycle_row`
+> seleziona `promotion_blocked` da `strategy_lifecycle`, ma **quella colonna non esiste sul DB
+> live** (verificato il 2026-09-02). `promote` e `approve` falliscono quindi con HTTP 500. E'
+> fail-closed — nessuna promozione puo' avvenire per errore — ma il gate non e' mai stato
+> esercitato contro il DB reale. `demote` non tocca quel campo e funziona.
+
+### Dov'e' finito lo stato di autorizzazione
+
+In **`GET /portfolio/status`**, che lo legge da fonti vive: `mode` e `approved` da
+`strategy_lifecycle`, `allocation_pct`, `enabled` e `promotion_blocked` da
+`config/strategies.yaml`. `live_authorized` e' derivato fail-closed
+(`mode == "live" AND GLOBAL_LIVE_PROMOTION_ENABLED`): un `mode` sconosciuto — DB
+irraggiungibile, riga mancante — non e' `live`, quindi la risposta e' `false`.
+
+---
+
+## Validation Endpoint
+
+### `GET /api/validation/metrics`
+
+Metriche della pagina Validation. **Query parameters:** `days` (default 7).
 
 ---
 
@@ -1205,7 +1364,7 @@ Read-only sentiment + extraction quality. **Query parameters:** `days` (default 
 ```json
 {
   "window_days": 14,
-  "per_model": [ { "model_id": "kimi-k2.6:cloud", "n": 911, "mean_polarity": 0.044, "mean_confidence": 0.661, "near_zero_rate": 0.188, "eligible_rate": 1.0 } ],
+  "per_model": [ { "model_id": "glm-5.2:cloud", "n": 911, "mean_polarity": 0.044, "mean_confidence": 0.661, "near_zero_rate": 0.188, "eligible_rate": 1.0 } ],
   "signals": { "near_zero_rate": 0.341, "fallback_rate": 0.236, "mean_ensemble_std": 0.05 },
   "extraction": { "n_labeled": 17, "precision": 0.24, "recall": 0.40, "recall_in_watchlist": 1.0, "fp_per_article": 1.12, "macro_fp_per_article": 2.0 }
 }
@@ -1247,11 +1406,13 @@ returns HTTP 200 by design — the status code only says the endpoint ran; read 
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 7.1.0 | 2026-09-02 | **Rotte di lettura `/api/strategies` rimosse** (servivano snapshot hardcoded contraddetti dai dati reali) insieme alla pagina Strategies del frontend. Restano le tre POST del promotion gate. Lo stato di autorizzazione passa a `GET /portfolio/status`, che guadagna `promotion_blocked` e `live_authorized`. |
+| 7.0.0 | 2026-09-02 | **Allineamento al runtime.** Rimosse le rotte PEAD (S7 ritirata il 2026-07-15). Corretto il prefisso backtest (`/api/backtest/{run_id}/...`) e sostituito l'inesistente `/report` con `summary`/`model_ic`/`symbol_ic`/`pnl_curve`/`bucket_analysis`. Riscritta la sezione Portfolio: le rotte reali sono `GET /portfolio/status` e `GET /portfolio/cycle-history`, **senza** prefisso `/api`; `/api/portfolio/{cycles,risk,decay}` non sono mai esistite e `risk_reports`/`decay_reports` non hanno superficie HTTP. `/api/performance/positions` → `/api/positions`. `/api/signals/history` marcata come inesistente. Aggiunte: `GET /api/quality/ensemble_health` (#427), sezioni **Auth**, **Strategies**, **Validation**. Tutti gli esempi di modello aggiornati alla coppia live `glm52,gptoss`. Verificato contro `openapi.json` di `alembic-api-1`. Corretta anche una fence di codice spuria dopo la tabella dei campi trade di `/api/performance/daily`: mandava in blocco di codice l'esempio `curl` e tutto il testo che seguiva. |
 | 6.1.1 | 2026-06-26 | GET /api/performance/daily: trade-level detail now includes Costi column (gross_pnl − net_pnl per trade) in frontend drill-down |
 | 6.1.0 | 2026-06-26 | GET /api/performance/daily: add total_gross_pnl and total_costs fields (gross/net breakdown); remove gross_profit/gross_loss fields |
 | 6.0.0 | 2026-06-26 | GET /api/performance/daily (per-day P&L from trades table, with trade-level detail); documented GET /api/performance/weekly and GET /api/performance/pnl schemas |
 | 5.0.0 | 2026-06-06 | Phase B: GET /api/feedback/status; Phase C: GET /api/trades/analytics/counterfactual |
 | 4.0.0 | 2026-06-06 | Phase A analytics: trades, decisions, analytics/by-symbol, analytics/by-dimension, postmortem endpoints; kill switch GET+DELETE; trades/decisions require auth |
-| 3.0.0 | 2026-06-03 | Full English rewrite; Phase G portfolio, risk, decay endpoints; new admin/llm-models, config endpoints |
+| 3.0.0 | 2026-06-03 | Full English rewrite; Phase G portfolio, risk, decay endpoints (**mai implementate come rotte HTTP** — vedi 7.0.0); new admin/llm-models, config endpoints |
 | 2.0.0 | 2026-05-12 | Added GET /api/weights/suggestion; updated POST /api/weights/approve |
 | 1.0.0 | 2026-05-04 | Initial release |

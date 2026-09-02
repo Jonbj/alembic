@@ -7,7 +7,8 @@ import { fetchPnL } from '@/api/performance'
 import { fetchReadiness } from '@/api/system'
 import { fetchDecisions, fetchFeedbackStatus } from '@/api/trades'
 import { fetchQualityMetrics } from '@/api/quality'
-import { strategiesApi } from '@/api/strategies'
+import { fetchPortfolioStatus } from '@/api/portfolio'
+import { StrategyAuthStatus } from '@/components/shared/StrategyAuthStatus'
 import { KPICard } from '@/components/shared/KPICard'
 import { DirectionBadge } from '@/components/shared/DirectionBadge'
 import { HelpButton } from '@/components/shared/HelpButton'
@@ -74,7 +75,7 @@ export default function Overview() {
   const { data: decisions = [] } = useQuery({ queryKey: ['overview-decisions'], queryFn: () => fetchDecisions(undefined, 40), refetchInterval: 60000 })
   const { data: feedback } = useQuery({ queryKey: ['feedback-status'], queryFn: fetchFeedbackStatus, refetchInterval: 120000 })
   const { data: quality } = useQuery({ queryKey: ['overview-quality', 14], queryFn: () => fetchQualityMetrics(14), refetchInterval: 120000 })
-  const { data: strategies = [] } = useQuery({ queryKey: ['overview-strategies'], queryFn: strategiesApi.list, staleTime: 60000 })
+  const { data: portfolio } = useQuery({ queryKey: ['overview-portfolio-status'], queryFn: fetchPortfolioStatus, staleTime: 60000 })
 
   const gateThreshold = feedback?.entry_threshold ?? 0.30
   const now = signalsUpdatedAt
@@ -89,8 +90,10 @@ export default function Overview() {
   const deployedNotional = positions.reduce((acc, p) => acc + Math.abs(p.market_value || 0), 0)
   const monthlyPnL = pnl?.monthly ?? []
   const currentMonthPnL = monthlyPnL[monthlyPnL.length - 1]?.pnl ?? 0
-  const s4 = strategies.find((s) => s.id.toLowerCase() === 's4')
-  const s1 = strategies.find((s) => s.id.toLowerCase() === 's1')
+  const strategies = portfolio?.strategies ?? []
+  const s4 = strategies.find((s) => s.strategy_id.toUpperCase() === 'S4')
+  const s1 = strategies.find((s) => s.strategy_id.toUpperCase() === 'S1')
+  const pctOrDash = (v: number | undefined) => (v == null ? '—' : `${(v * 100).toFixed(0)}%`)
 
   const decisionCounts = decisions.reduce<Record<string, number>>((acc, d) => {
     acc[d.decision] = (acc[d.decision] ?? 0) + 1
@@ -165,15 +168,32 @@ export default function Overview() {
 
         <div className="card">
           <h3 style={{ margin: '0 0 14px', fontSize: 14, fontWeight: 700 }}>Authorization</h3>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-            <StatusPill label={`S1 ${s1?.mode ?? 'unknown'}`} tone={s1?.live_authorized ? 'good' : 'warn'} />
-            <StatusPill label={`S4 ${s4?.mode ?? 'unknown'}`} tone={s4?.promotion_blocked ? 'warn' : s4?.live_authorized ? 'good' : 'neutral'} />
-            <StatusPill label={s4?.promotion_blocked ? 'S4 promotion blocked' : 'S4 promotion open'} tone={s4?.promotion_blocked ? 'warn' : 'good'} />
+          {/* Fed by GET /portfolio/status since 2026-09-02: mode/approved from
+              strategy_lifecycle, allocation and promotion_blocked from
+              config/strategies.yaml. No snapshot values on this card. */}
+          <div style={{ display: 'grid', gap: 10, marginBottom: 12 }}>
+            {strategies.length === 0 ? (
+              <StrategyAuthStatus />
+            ) : (
+              strategies.map((s) => (
+                <div key={s.strategy_id}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, fontWeight: 700 }}>
+                    {s.strategy_id} · {pctOrDash(s.allocation_pct)} sleeve
+                    {s.approved === false ? ' · not approved' : ''}
+                  </div>
+                  <StrategyAuthStatus
+                    mode={s.mode ?? undefined}
+                    promotion_blocked={s.promotion_blocked}
+                    live_authorized={s.live_authorized}
+                  />
+                </div>
+              ))
+            )}
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <MiniMetric label="S4 Allocation" value="10%" sub="paper overlay cap" />
+            <MiniMetric label="S4 Allocation" value={pctOrDash(s4?.allocation_pct)} sub="config/strategies.yaml" />
             <MiniMetric label="Live authorized" value={strategies.some((s) => s.live_authorized) ? 'Some' : 'No'} sub="fail-closed display" />
-            <MiniMetric label="Data source" value={s4?.data_source ?? '—'} sub="S4 metrics" />
+            <MiniMetric label="S1 mode" value={s1?.mode ?? 'unknown'} sub="strategy_lifecycle" />
             <MiniMetric label="Engine" value="Portfolio" sub="authoritative path" />
           </div>
         </div>

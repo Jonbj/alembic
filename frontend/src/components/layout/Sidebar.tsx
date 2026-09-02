@@ -14,7 +14,6 @@ const NAV = [
   { to: '/quality',     label: 'Quality',     icon: '🔬' },
   { to: '/trading',     label: 'Trading',     icon: '📈' },
   { to: '/performance',   label: 'Performance',  icon: '📊' },
-  { to: '/strategies',  label: 'Strategies',  icon: '🎯' },
   { to: '/auto-improve',  label: 'Auto-Improve', icon: '🔧' },
   { to: '/validation',  label: 'Validation',  icon: '🧪' },
   { to: '/labeling',    label: 'Labeling',    icon: '🏷️' },

@@ -72,8 +72,14 @@ Riduce il footprint RAM di ~50% con perdita trascurabile di accuratezza sul task
 
 | Worker | Concurrency | Queue | Task assegnati |
 |--------|-------------|-------|----------------|
-| `worker` | 4 | `celery` | ingestion, performance, retention, portfolio-cycle, execution, telegram-poller |
-| `worker-inference` | 1 | `inference` | sentiment-worker, regime-detector, pead-ingestion |
+| `worker` | 4 | `celery` | ingestion (`run-news-ingestion`, `run-alpaca-ingestion`), performance (`forward-return-worker`, `reconcile-fills-*`, `reconcile-positions-eod`, `performance-daily/weekly`, `drift-detection`, `check-suggestion-expiry`, `loss-feedback-check`, `shadow-comparison-report`, `counterfactual-worker`), `run-retention-sweep`, `portfolio-cycle`, `run-execution`, `decay-monitor`, `risk-monitor`, `held-news-loss-alert`, mobile (`mobile-monitor-snapshot`, `mobile-alert-evaluation`) |
+| `worker-inference` | 1 | `inference` | `sentiment-worker`, `regime-detector` (+ `regime-detector-premarket`), `poll-telegram-updates` |
+
+> **Corretto il 2026-09-02** contro `src/workers/celery_app.py`: la tabella precedente
+> assegnava `pead-ingestion` a `worker-inference` (task ritirato col resto di S7 il
+> 2026-07-15, vedi la sezione in fondo a questo file) e metteva `telegram-poller` sulla coda
+> `celery`, mentre gira sulla coda `inference` — e' li' apposta, perche' con concurrency=1
+> un solo processo fa polling e la tastiera di approvazione non si sdoppia.
 
 Il `worker-inference` ha concurrency=1 per garantire un singolo processo Python con una singola istanza FinBERT in memoria. Con concurrency>1, ogni subprocess fork allocava una copia completa del modello causando OOM.
 
