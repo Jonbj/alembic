@@ -21,7 +21,7 @@ Tracking manuale delle migrazioni PostgreSQL applicate al database di produzione
 | 055 | 055_s4_exit_policy_current_tiebreak.sql | 2026-08-27 | Applicata a mano insieme al deploy di #374/PR #375. Vista `s4_exit_policy_current` con tie-break deterministico. Presenza verificata sul live il 2026-09-02. |
 | 056 | 056_stop_strategy_attribution.sql | 2026-08-29 | Applicata col merge di #393. Attribuisce la coorte legacy e vieta `trades.stop_strategy` NULL (vincolo `NOT VALID`, non retroattivo). Colonna verificata sul live il 2026-09-02. |
 | 057 | 057_quantity_remaining.sql | 2026-09-01 | Applicata a mano con deploy + repair (#397/PR #445): `ADD COLUMN IF NOT EXISTS trades.quantity_remaining`. NOK/WDC/MRVL riconciliati col broker lo stesso giorno. Colonna verificata sul live il 2026-09-02. |
-| 058 | 058_portfolio_session_grid_metrics.sql | **NON applicata** | Merge di #428 il 2026-09-01, ma la tabella `portfolio_session_grid_metrics` **non esiste sul live** (verificato il 2026-09-02). Finche' resta cosi', la misura dei margini dei cicli sulla seduta non ha dove scrivere. |
+| 058 | 058_portfolio_session_grid_metrics.sql | 2026-09-02 | Applicata a mano (`psql --single-transaction`, non `apply_migrations.py` che rigioca l'intera sequenza e non e' sicuro su un DB gia' popolato). Tabella `portfolio_session_grid_metrics` per la misura #428 dei margini dei cicli sulla seduta. Era su main dal 2026-09-01 e non applicata: il writer in `src/workers/session_grid_monitor.py` e' **fail-open**, quindi il giro EOD registrava `{status: skipped, reason: measurement_unavailable}` con una sola `log.warning` — nessun errore visibile. Verificata rigiocando in transazione la INSERT esatta di `persist_session_grid_measurement` (upsert `ON CONFLICT (session_date)`) e facendo ROLLBACK: nomi, tipi e vincoli combaciano. Tabella vuota per costruzione, la popola il task `held-news-loss-alert` (22:50 UTC, lun-ven). |
 | 059 | 059_ensemble_cycle_health.sql | 2026-09-01 | Applicata col deploy di #427/PR #463 (container ripartiti alle 20:20 UTC, cioe' 20 minuti **dopo** la chiusura). Tabella presente e vuota al 2026-09-02: e' atteso, il worker esce con `market_closed` prima di scrivere. Le prime righe sono attese dalla seduta del 2026-09-02. |
 
 ## Convenzione
@@ -44,3 +44,5 @@ docker exec alembic-postgres-1 psql -U trading -d trading -t -A -c \
 ```
 
 Ultima verifica completa dello stato di questo file contro il live: **2026-09-02**.
+
+> Al 2026-09-02 non restano migrazioni non applicate: 001-059 sono tutte sul live.
