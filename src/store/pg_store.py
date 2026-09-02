@@ -575,13 +575,14 @@ class PostgreSQLStore:
         INSERT INTO s4_intent_events (
             event_id, intent_id, causal_event_id, event_type, occurred_at,
             decision_slot, symbol, signal_id, published_at, first_seen_at,
-            model_generated_at, decision_at, rank, competing_candidates,
+            model_generated_at, decision_at, rank, held_at_rank,
+            signal_age_at_slot, competing_candidates,
             s1_state, anti_pyramiding, reason_code, is_tradable, versions,
             snapshot, missingness
         ) VALUES (
             %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s,
-            %s, %s, %s, %s::jsonb,
+            %s, %s, %s, %s, %s, %s::jsonb,
             %s::jsonb, %s, %s, %s, %s::jsonb,
             %s::jsonb, %s::jsonb
         )
@@ -606,6 +607,8 @@ class PostgreSQLStore:
             event.model_generated_at,
             event.decision_at,
             event.rank,
+            event.held_at_rank,
+            event.signal_age_at_slot,
             json.dumps(list(event.competing_candidates)),
             json.dumps(event.s1_state, sort_keys=True),
             event.anti_pyramiding,
