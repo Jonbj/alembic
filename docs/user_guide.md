@@ -86,9 +86,6 @@ Settimanalmente
 ├── Backtest
 │   └── IC, ICIR, hit rate — la qualità predittiva si mantiene?
 │
-├── Strategies
-│   └── I gate sono ancora tutti PASS? La sensitivity è stabile?
-│
 ├── Operations → Config/Admin
 │   └── Verifica watchlist, rischio, modalità e kill-switch
 ```
@@ -104,7 +101,7 @@ Settimanalmente
 
 ## 3. Le pagine della dashboard
 
-L'applicazione è accessibile all'indirizzo **http://192.168.178.144:3000**. Il menu laterale segue il flusso operativo: Overview, News, LLM, Signals, Quality, Trading, Performance, Strategies, Auto-Improve, Validation, Labeling, Backtest, Admin e Docs. La vecchia pagina Dashboard/Grafana non è più una superficie utente: `/dashboard` reindirizza a Overview. La vecchia pagina Trades è stata rimossa: `/trades` reindirizza a Trading, mentre analytics e P&L restano in Performance.
+L'applicazione è accessibile all'indirizzo **http://192.168.178.144:3000**. Il menu laterale segue il flusso operativo: Overview, News, LLM, Signals, Quality, Trading, Performance, Auto-Improve, Validation, Labeling, Backtest, Admin e Docs. La vecchia pagina Dashboard/Grafana non è più una superficie utente: `/dashboard` reindirizza a Overview. La vecchia pagina Trades è stata rimossa: `/trades` reindirizza a Trading, mentre analytics e P&L restano in Performance. La pagina Strategies è stata eliminata il 2026-09-02 — le sue metriche erano snapshot hardcoded contraddetti dai dati reali (equity curve vuota, heatmap sintetica, gate con soglie inventate, universo del backtest): `/strategies` reindirizza a Overview, dove lo stato di autorizzazione delle sleeve vive ora nella card Authorization.
 
 I pulsanti **Trace** seguono la catena causale `News -> Signal -> Decision -> Order -> Performance`: aprono una drawer con i passaggi disponibili e marcano come non tracciati quelli non generati dal sistema.
 
@@ -308,33 +305,7 @@ I dati del giorno corrente appariranno il giorno successivo. La tabella è vuota
 
 ---
 
-### 3.5 Strategies 🎯
-
-**A cosa serve**: Ispezionare ogni strategia del v2 framework — parametri, validation gate, equity curve e sensitivity.
-
-**Cosa trovi per ogni strategia:**
-
-| Sezione | Cosa mostra |
-|---------|------------|
-| **Lifecycle verdict** | Mode corrente, stato promotion/live authorization e fonte metriche LIVE/BACKTEST |
-| **KPI Cards** | OOS Sharpe (performance fuori campione), Max Drawdown, Annual Return, Total Trades |
-| **Equity Curve** | Grafico del ritorno cumulativo e del drawdown nel tempo |
-| **Validation Gates** | Tabella con 5 gate: Significance, Walk-Forward, Robustness, Regime, Stress — ognuno con PASS/FAIL |
-| **Parameter Sensitivity** | Heatmap dello Sharpe ratio al variare dei parametri (lookback, vol_window) |
-| **Strategy Parameters** | Valori dei parametri della strategia (lookback, vol target, leverage, etc.) |
-| **Universe** | Lista dei ticker utilizzati dalla strategia |
-
-**Come usarla:**
-
-1. Seleziona la strategia dal menu a tendina
-2. Controlla prima il **Lifecycle verdict** — se promotion/live sono false o blocked, i KPI sono solo evidenza
-3. Controlla i **KPI** — OOS Sharpe ≥ 0.5 è il minimo per discutere promozione, non un'autorizzazione
-4. Poi controlla i **gates** — devono essere tutti PASS (o con eccezioni documentate)
-5. La **sensitivity** ti dice se la strategia è robusta o se funziona solo con parametri perfetti
-
----
-
-### 3.6 Backtest 🔬
+### 3.5 Backtest 🔬
 
 **A cosa serve**: Analizzare la qualità predittiva dei segnali LLM su dati storici.
 
@@ -366,7 +337,7 @@ Se il grafico è **monotonamente crescente** (da sinistra a destra), il modello 
 
 ---
 
-### 3.7 News 📰
+### 3.6 News 📰
 
 **A cosa serve**: Vedere le notizie finanziarie che alimentano il sistema di sentiment.
 
@@ -392,7 +363,7 @@ Se il grafico è **monotonamente crescente** (da sinistra a destra), il modello 
 
 ---
 
-### 3.8 LLM 🤖
+### 3.7 LLM 🤖
 
 **A cosa serve**: Monitorare e gestire i modelli AI che producono i segnali.
 
@@ -434,7 +405,7 @@ Non approvare se:
 
 ---
 
-### 3.9 Operations ⚙
+### 3.8 Operations ⚙
 
 **A cosa serve**: Unifica System, Config e Admin in un unico punto operativo.
 
@@ -446,7 +417,7 @@ Non approvare se:
 
 ---
 
-### 3.9a Config
+### 3.8a Config
 
 **A cosa serve**: Configurare il comportamento del sistema in tempo reale.
 
@@ -464,7 +435,7 @@ Non approvare se:
 
 ---
 
-### 3.9b Admin
+### 3.8b Admin
 
 **A cosa serve**: Controllare e modificare il funzionamento del sistema. **Richiede API key.**
 
@@ -497,7 +468,7 @@ Il bottone in basso a sinistra nella sidebar permette di commutare tra:
 - **Full ensemble** (⚡): Tutti e 4 i modelli LLM analizzano ogni articolo. Più accurato ma più costoso.
 - **Economy** (🪙): Solo il modello GLM analizza. Più economico ma meno accurato. Utile per risparmiare token quando il mercato è chiuso.
 
-### 3.11 Labeling 🏷️
+### 3.9 Labeling 🏷️
 
 **A cosa serve**: Costruire il *golden label set* (QX-01) — la verità di riferimento contro cui si misura la qualità dell'estrazione ticker e del sentiment. È l'**unico passo umano** che sblocca calibrazione ed enforcement.
 
@@ -512,7 +483,7 @@ Il bottone in basso a sinistra nella sidebar permette di commutare tra:
 
 ~30-60s a news. La progress si salva. I **forward return** (1h/1d/2d) vengono calcolati automaticamente da Alpaca dopo l'annotazione — non li inserisci tu.
 
-### 3.12 Quality 🔬
+### 3.10 Quality 🔬
 
 **A cosa serve**: Vedere empiricamente la qualità del segnale — i problemi che il quality review ha trovato, ora misurabili e aggiornati in tempo reale.
 

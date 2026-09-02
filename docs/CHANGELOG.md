@@ -4,6 +4,46 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ---
 
+## 2026-09-02 (seguito)
+
+### Rimossi i riferimenti residui alla pagina Strategies, e corrette le soglie dei gate
+
+Coda della rimozione del mattino (PR #471): la pagina era sparita ma continuava a essere
+descritta in tre posti, e uno di questi ripeteva la stessa finzione che l'aveva fatta
+eliminare.
+
+- **`frontend/src/pages/Docs.tsx`** — la guida in-app elencava ancora «**Strategies** — gate
+  di validazione OOS» fra le pagine disponibili. Rimossa la voce. Corretta anche la
+  descrizione di S1, che diceva «momentum su ETF/azionario»: i 15 ETF erano l'universo del
+  *backtest*, non quello che S1 compra dal vivo (watchlist azionaria, 96 simboli).
+- **`frontend/src/pages/Docs.tsx` §"Gate di Validazione Strategie"** — elencava soglie che il
+  sistema **non applica**: «OOS Sharpe > 0.5», «> 0.8 × IS Sharpe», «IC OOS > 0.05», e chiamava
+  *Sensitivity* il quarto gate che in realtà è *Regime*. Erano le stesse soglie inventate della
+  pagina eliminata, sopravvissute nella guida dell'operatore. Sostituite con quelle vere lette
+  da `reports/s1_backtest/gate_report.json`:
+
+  | Gate | Soglia reale |
+  |---|---|
+  | 1 Significance | Sharpe ≥ **0.0**, p-value ≤ 0.05, DSR ≥ 0.5 |
+  | 2 Walk-Forward | OOS Sharpe ≥ **0.0**, finestre positive ≥ 50% |
+  | 3 Robustness | CV dello Sharpe ≤ 0.5 sulle perturbazioni |
+  | 4 **Regime** | Sharpe ≥ **0.0** in 2 regimi su 2 |
+  | 5 Stress | ritorno cumulato ≥ −10%, max drawdown ≥ −30% |
+
+  Con una nota esplicita in pagina: le soglie vere sullo Sharpe sono **0.0**, quindi «5/5 PASS»
+  significa «Sharpe non negativo più i criteri accessori», non «strategia validata». La
+  documentazione precedente faceva sembrare guadagnato un risultato che non lo era.
+- **`docs/user_guide.md`** — eliminata la §3.5 Strategies (descriveva Equity Curve, Validation
+  Gates, Parameter Sensitivity e Universe, cioè esattamente i quattro riquadri fabbricati), la
+  voce nella routine settimanale («I gate sono ancora tutti PASS? La sensitivity è stabile?») e
+  la pagina dall'elenco della sidebar. Le sottosezioni successive sono state rinumerate, il che
+  chiude anche il buco preesistente della 3.10 mancante: ora la sequenza è 3.1 → 3.10 continua.
+- **`docs/ARCHITECTURE.md`** — la riga «Strategies API placeholder … Phase D» nelle Known
+  Limitations è marcata **RESOLVED by removal**. Vale la pena notare che quella riga
+  documentava il difetto da mesi: era noto e rimandato a una fase che non è mai arrivata.
+
+Frontend 48/48, build ok. Nessun cambiamento di comportamento.
+
 ## 2026-09-02
 
 ### Pagina Strategies e rotte di lettura `/api/strategies` — ELIMINATE
