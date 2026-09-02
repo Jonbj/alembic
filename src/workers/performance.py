@@ -2647,23 +2647,26 @@ def run_counterfactual_worker() -> dict:
     pg = PostgreSQLStore(conn=pg_conn)
 
     try:
-        rows = pg.fetch_all_skip_decisions_without_counterfactual(
+        # #450: SKIP_* and force-exit SELL rows are both processed by this
+        # worker, but they live in separate universes (different partial
+        # indexes, different reasons, different sign conventions). We fetch
+        # each, group by symbol, and let _process_batch() drive the per-symbol
+        # Alpaca call. The two batches share the same `updates` list and
+        # `stats` dict so the writer and counters are unchanged.
+        skip_rows = pg.fetch_all_skip_decisions_without_counterfactual(
             days_back=7,
             page_size=_COUNTERFACTUAL_PAGE_SIZE,
             max_rows=_COUNTERFACTUAL_MAX_ROWS,
         )
-        if not rows:
-            log.info("No SKIP decisions pending counterfactual")
+        force_exit_rows = pg.fetch_all_force_exit_decisions_without_counterfactual(
+            days_back=7,
+            page_size=_COUNTERFACTUAL_PAGE_SIZE,
+            max_rows=_COUNTERFACTUAL_MAX_ROWS,
+        )
+        if not skip_rows and not force_exit_rows:
+            log.info("No decisions pending counterfactual")
             _record_run("ok", "no_pending_decisions")
             return stats
-
-        stats["total_decisions"] = len(rows)
-        log.info("Counterfactual worker: %d decisions to process", len(rows))
-
-        # Group by symbol to minimise Alpaca API calls.
-        by_symbol: dict[str, list[dict]] = defaultdict(list)
-        for row in rows:
-            by_symbol[row["symbol"]].append(row)
 
         data_client = StockHistoricalDataClient(
             api_key=config.ALPACA_API_KEY,
@@ -2711,73 +2714,100 @@ def run_counterfactual_worker() -> dict:
             if not retrying and reason in _COUNTERFACTUAL_RETRYABLE:
                 stats["attempts_exhausted"] += 1
 
-        for symbol, decisions in by_symbol.items():
-            try:
-                tick_times = [
-                    d["tick_time"] if d["tick_time"].tzinfo is not None
-                    else d["tick_time"].replace(tzinfo=timezone.utc)
-                    for d in decisions
-                ]
-                start = min(tick_times) - timedelta(minutes=5)
-                # #337: reach into the next session so a tail-of-day row can get an
-                # overnight return. One request per symbol either way, so the wider
-                # range costs no extra Alpaca calls. Clamp to just behind the feed's
-                # delay: asking for data that does not exist yet is what leaves a
-                # row PENDING_OVERNIGHT for one more night, which is intended.
-                end = min(
-                    max(tick_times) + timedelta(days=_COUNTERFACTUAL_LOOKAHEAD_DAYS),
-                    datetime.now(timezone.utc) - timedelta(minutes=_COUNTERFACTUAL_FEED_DELAY_MIN),
-                )
-                if end <= start:
-                    end = max(tick_times) + timedelta(minutes=_COUNTERFACTUAL_HORIZON_MIN + 10)
+        def _process_batch(rows: list[dict], *, invert_sign: bool) -> None:
+            """Group rows by symbol, fetch bars, resolve each row to an outcome.
 
-                req = StockBarsRequest(
-                    symbol_or_symbols=symbol,
-                    timeframe=TimeFrame.Minute,
-                    start=start,
-                    end=end,
-                    adjustment=Adjustment.ALL,
-                )
-                bars_df = retry_transient(lambda: data_client.get_stock_bars(req)).df
+            ``invert_sign=True`` for force-exit SELLs: a future NEGATIVE return
+            after the SELL is a CONFIRMATION of the decision (we already exited
+            before the drop), so the value stored must read as a positive
+            "saved" return — same axis as SKIP_*, where positive means "the
+            gate skipped a winner". This is the same sign convention
+            ``fetch_force_exit_pnl_vs_counterfactual`` documents, and the only
+            way to make a single dashboard query read uniformly across
+            decision types.
+            """
+            by_symbol: dict[str, list[dict]] = defaultdict(list)
+            for row in rows:
+                by_symbol[row["symbol"]].append(row)
 
-                if bars_df.empty:
-                    log.debug("No 1-min bars for %s — marking as no_data", symbol)
-                    for d in decisions:
-                        _record(d, None, None, _CF_NO_BARS)
-                    continue
+            for symbol, decisions in by_symbol.items():
+                try:
+                    tick_times = [
+                        d["tick_time"] if d["tick_time"].tzinfo is not None
+                        else d["tick_time"].replace(tzinfo=timezone.utc)
+                        for d in decisions
+                    ]
+                    start = min(tick_times) - timedelta(minutes=5)
+                    end = min(
+                        max(tick_times) + timedelta(days=_COUNTERFACTUAL_LOOKAHEAD_DAYS),
+                        datetime.now(timezone.utc) - timedelta(minutes=_COUNTERFACTUAL_FEED_DELAY_MIN),
+                    )
+                    if end <= start:
+                        end = max(tick_times) + timedelta(minutes=_COUNTERFACTUAL_HORIZON_MIN + 10)
 
-                # Flatten multi-index (symbol, timestamp) → timestamp only.
-                if hasattr(bars_df.index, "levels"):
-                    sym_vals = bars_df.index.get_level_values(0)
-                    if symbol in sym_vals:
-                        bars_df = bars_df.loc[symbol]
-                    else:
+                    req = StockBarsRequest(
+                        symbol_or_symbols=symbol,
+                        timeframe=TimeFrame.Minute,
+                        start=start,
+                        end=end,
+                        adjustment=Adjustment.ALL,
+                    )
+                    bars_df = retry_transient(lambda: data_client.get_stock_bars(req)).df
+
+                    if bars_df.empty:
+                        log.debug("No 1-min bars for %s — marking as no_data", symbol)
                         for d in decisions:
                             _record(d, None, None, _CF_NO_BARS)
                         continue
 
-                bars_df = bars_df.sort_index()
+                    if hasattr(bars_df.index, "levels"):
+                        sym_vals = bars_df.index.get_level_values(0)
+                        if symbol in sym_vals:
+                            bars_df = bars_df.loc[symbol]
+                        else:
+                            for d in decisions:
+                                _record(d, None, None, _CF_NO_BARS)
+                            continue
 
-                # Build minute → close lookup with UTC-normalised keys.
-                bars_by_minute: dict[datetime, float] = {}
-                for idx, row in bars_df.iterrows():
-                    ts = idx if hasattr(idx, "tzinfo") else idx.to_pydatetime()
-                    if ts.tzinfo is None:
-                        ts = ts.replace(tzinfo=timezone.utc)
-                    key = ts.replace(second=0, microsecond=0)
-                    bars_by_minute[key] = float(row["close"])
+                    bars_df = bars_df.sort_index()
 
-                for d in decisions:
-                    tick = d["tick_time"]
-                    if tick.tzinfo is None:
-                        tick = tick.replace(tzinfo=timezone.utc)
-                    ret, overnight, reason = _counterfactual_outcome(bars_by_minute, tick)
-                    _record(d, ret, overnight, reason)
+                    bars_by_minute: dict[datetime, float] = {}
+                    for idx, row in bars_df.iterrows():
+                        ts = idx if hasattr(idx, "tzinfo") else idx.to_pydatetime()
+                        if ts.tzinfo is None:
+                            ts = ts.replace(tzinfo=timezone.utc)
+                        key = ts.replace(second=0, microsecond=0)
+                        bars_by_minute[key] = float(row["close"])
 
-            except Exception as e:
-                log.warning("Counterfactual: failed to fetch bars for %s — %s", symbol, e)
-                for d in decisions:
-                    _record(d, None, None, _CF_FETCH_ERROR)
+                    for d in decisions:
+                        tick = d["tick_time"]
+                        if tick.tzinfo is None:
+                            tick = tick.replace(tzinfo=timezone.utc)
+                        ret, overnight, reason = _counterfactual_outcome(bars_by_minute, tick)
+                        if invert_sign:
+                            ret = -ret if ret is not None else None
+                            overnight = -overnight if overnight is not None else overnight
+                        _record(d, ret, overnight, reason)
+
+                except Exception as e:
+                    log.warning("Counterfactual: failed to fetch bars for %s — %s", symbol, e)
+                    for d in decisions:
+                        _record(d, None, None, _CF_FETCH_ERROR)
+
+        # Process the two universes. Each goes through the same per-symbol
+        # path; only the sign flip differs. Order is irrelevant: both batches
+        # are written to the same `updates` list in a single transaction.
+        if skip_rows:
+            log.info("Counterfactual worker: %d SKIP decisions to process", len(skip_rows))
+            stats["total_decisions"] += len(skip_rows)
+            _process_batch(skip_rows, invert_sign=False)
+        if force_exit_rows:
+            log.info(
+                "Counterfactual worker: %d force-exit SELL decisions to process",
+                len(force_exit_rows),
+            )
+            stats["total_decisions"] += len(force_exit_rows)
+            _process_batch(force_exit_rows, invert_sign=True)
 
         if updates:
             pg.bulk_set_counterfactual(updates)
