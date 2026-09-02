@@ -45,11 +45,11 @@ export default function Docs() {
         },
         {
           heading: "Le strategie in breve",
-          content: "**S1 (50%)**: momentum multi-lookback su ETF/azionario — usa solo prezzi storici, nessun LLM.\n\n**S4 (10%)**: news sentiment via LLM ensemble — legge segnali pre-calcolati da Redis, filtra con EMA e regime.\n\n**S2**: DISABILITATA (OOS Sharpe −0.55, tutti i gate falliti).\n\n**S3**: R&D sleeve, non in produzione.\n\n**S7 (PEAD)**: RIMOSSA 2026-07-15 — edge transcript-tone confutato a decision-grade (POC-2 FAIL).",
+          content: "**S1 (50%)**: momentum multi-lookback sulla watchlist azionaria — usa solo prezzi storici, nessun LLM. (I 15 ETF che si leggevano qui erano l'universo del *backtest*, non quello che S1 compra dal vivo.)\n\n**S4 (10%)**: news sentiment via LLM ensemble — legge segnali pre-calcolati da Redis, filtra con EMA e regime.\n\n**S2**: DISABILITATA (OOS Sharpe −0.55, tutti i gate falliti).\n\n**S3**: R&D sleeve, non in produzione.\n\n**S7 (PEAD)**: RIMOSSA 2026-07-15 — edge transcript-tone confutato a decision-grade (POC-2 FAIL).",
         },
         {
           heading: "Dove guardare",
-          content: "• **Overview** — P&L live, stato operativo, segnali e decisioni recenti\n• **Operations** — scheduler, activity log, configurazione, kill switch e mode\n• **News** — articoli per fonte (Reuters, CNBC, EDGAR, GDELT…)\n• **Signals** — segnali LLM per ticker e decision log\n• **Quality** — metriche ticker/sentiment e fallback\n• **Trading** — posizioni, ordini e fills\n• **Performance → Analytics** — P&L per regime/simbolo/ora/score/durata\n• **Performance → Weekly Report** — costi, cash drag, infrastruttura\n• **Strategies** — gate di validazione OOS\n• **Auto-Improve** — feedback gate e counterfactual\n• **LLM** — pesi ensemble e ICIR per modello",
+          content: "• **Overview** — P&L live, stato operativo, segnali e decisioni recenti\n• **Operations** — scheduler, activity log, configurazione, kill switch e mode\n• **News** — articoli per fonte (Reuters, CNBC, EDGAR, GDELT…)\n• **Signals** — segnali LLM per ticker e decision log\n• **Quality** — metriche ticker/sentiment e fallback\n• **Trading** — posizioni, ordini e fills\n• **Performance → Analytics** — P&L per regime/simbolo/ora/score/durata\n• **Performance → Weekly Report** — costi, cash drag, infrastruttura\n• **Auto-Improve** — feedback gate e counterfactual\n• **LLM** — pesi ensemble e ICIR per modello",
         },
         {
           heading: "Catena causale",
@@ -424,13 +424,21 @@ high_vol ×0.2   sleeve=0.4% → ordine ~$4`}</div>
         <h2 style={h2}>✅ Gate di Validazione Strategie</h2>
         <p style={p}>
           Ogni strategia deve superare 5 gate prima di entrare nel portfolio live. Il fallimento demote la strategia al sleeve R&D.
+          Le soglie qui sotto sono quelle <strong>realmente applicate</strong>, lette da <code>reports/&lt;strategia&gt;_backtest/gate_report.json</code>.
+        </p>
+        <p style={{ ...p, background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.35)', borderRadius: 6, padding: '8px 12px' }}>
+          <strong>Corretto il 2026-09-02.</strong> Questa tabella elencava soglie che il sistema non applica
+          («OOS Sharpe &gt; 0.5», «&gt; 0.8 × IS Sharpe», «IC OOS &gt; 0.05»), e chiamava «Sensitivity» il quarto
+          gate che in realtà è <em>Regime</em>. Erano le stesse soglie inventate della pagina Strategies,
+          eliminata lo stesso giorno. Nota che le soglie vere su Sharpe sono <strong>0.0</strong>: «5/5 PASS»
+          significa «Sharpe non negativo più i criteri accessori», non «strategia validata».
         </p>
         {[
-          { gate: 'Gate 1', name: 'Significance', desc: 'OOS Sharpe > 0.5. La strategia batte il caso?' },
-          { gate: 'Gate 2', name: 'Walk-Forward OOS', desc: 'OOS Sharpe > 0.8 × IS Sharpe. Il rendimento regge out-of-sample?' },
-          { gate: 'Gate 3', name: 'Robustness', desc: 'IC OOS > 0.05 su ≥3 finestre walk-forward. Segnale generalizzabile?' },
-          { gate: 'Gate 4', name: 'Sensitivity', desc: 'Sharpe stabile con ±20% variazione parametri (CV < 0.5). Nessun overfitting.' },
-          { gate: 'Gate 5', name: 'Stress Test', desc: 'Non collassa in 2008, COVID 2020, 2022 rate shock. Cost drag < gross P&L.' },
+          { gate: 'Gate 1', name: 'Significance', desc: 'Sharpe ≥ 0.0, p-value ≤ 0.05, Deflated Sharpe Ratio ≥ 0.5. Il risultato non è rumore?' },
+          { gate: 'Gate 2', name: 'Walk-Forward', desc: 'OOS Sharpe ≥ 0.0 e ≥ 50% di finestre walk-forward positive. Regge fuori campione?' },
+          { gate: 'Gate 3', name: 'Robustness', desc: 'Coefficiente di variazione dello Sharpe ≤ 0.5 sulle perturbazioni dei parametri. Nessun overfitting.' },
+          { gate: 'Gate 4', name: 'Regime', desc: 'Sharpe ≥ 0.0 in almeno 2 regimi su 2 (alta e bassa volatilità). Non dipende da un solo contesto.' },
+          { gate: 'Gate 5', name: 'Stress Test', desc: 'Ritorno cumulato ≥ −10% e max drawdown ≥ −30% sui periodi di stress.' },
         ].map(({ gate, name, desc }) => (
           <div key={gate} style={{ ...inner, display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 6 }}>
             <div style={{ background: '#1d4ed8', color: 'white', borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{gate}</div>
