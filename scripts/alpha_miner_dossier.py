@@ -44,6 +44,9 @@ from src.analysis.dossier.book import (
     compute_exits,
     compute_s4_entry_intents,
 )
+from src.analysis.dossier.decision_signal_id_coverage import (
+    build_signal_id_coverage as build_signal_id_coverage_panel,
+)
 from src.analysis.dossier.decision_quality import (
     build_decision_quality_panel,
     build_opening_snapshot,
@@ -478,6 +481,31 @@ def _guard_decisions(giorno: date) -> list[dict]:
             "counterfactual_skip_reason": row[7] or None,
             "counterfactual_computed_at": row[8] or None,
             "intended_notional_usd": float(row[9]) if row[9] else None,
+        }
+        for row in rows
+    ]
+
+
+def _execution_decisions_signal_id_rows(giorno: date) -> list[dict]:
+    """#406 — tutte le righe di execution_decisions nella seduta, con solo i
+    due campi che il panel ``build_signal_id_coverage`` consuma. Nessun join,
+    nessun aggregato: il panel aggrega localmente, cosi' la stessa query serve
+    sia il dossier live sia i test del modulo senza dipendere dal DB.
+
+    Carichiamo TUTTE le reason_code (non solo i guard) perche' il difetto
+    principale — il 100% di SELL con signal_id NULL — era proprio su una riga
+    che ``_guard_decisions`` non include.
+    """
+    g = giorno.isoformat()
+    rows = _psql(
+        f"SELECT ed.decision, ed.signal_id::text "
+        f"FROM execution_decisions ed "
+        f"WHERE ed.tick_time >= '{g}' AND ed.tick_time < '{g}'::date + 1"
+    )
+    return [
+        {
+            "reason_code": row[0],
+            "signal_id": int(row[1]) if row[1] else None,
         }
         for row in rows
     ]
@@ -1604,6 +1632,9 @@ def costruisci_dossier(
         sector_by_ticker=sector_by_ticker,
     )
     guard_decisions = _guard_decisions(giorno)
+    decision_signal_id_coverage = build_signal_id_coverage_panel(
+        _execution_decisions_signal_id_rows(giorno)
+    )
     decision_quality_assumptions = {
         "sizing_reference_usd": SLOT_USD_DEFAULT,
         "sizing_reference_source": (
@@ -1618,6 +1649,7 @@ def costruisci_dossier(
             "ingressi": ingressi,
             "chiusure": chiusure,
             "guard_decisions": guard_decisions,
+            "decision_signal_id_coverage": decision_signal_id_coverage,
         }
     )
 
@@ -1788,6 +1820,7 @@ def costruisci_dossier(
         "copertura_uscita": copertura_uscita,
         "decision_quality_assumptions": decision_quality_assumptions,
         "decision_quality": decision_quality,
+        "decision_signal_id_coverage": decision_signal_id_coverage,
         "timeline": timeline,
         "copertura_articoli": copertura_articoli,
         "event_market_context": event_market_context,

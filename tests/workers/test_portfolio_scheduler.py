@@ -2667,6 +2667,35 @@ def test_reversal_force_sell_cancels_protective_stop_then_submits():
     assert "sentiment_reversal" in _dec_kwargs["reason"]
 
 
+def test_reversal_force_sell_propagates_signal_id_to_decision_row():
+    """#406 regression: every SELL was 0/3 on 2026-08-27 — the reversal signal_id
+    read from Redis must reach execution_decisions.signal_id, otherwise exit
+    attribution stays impossible. The path was already instrumented in #67 but
+    no test pinned the contract end-to-end."""
+    from src.workers.portfolio_scheduler import _submit_reversal_force_sells
+
+    trading_client = MagicMock()
+    trading_client.get_orders.return_value = []
+    trading_client.submit_order.return_value.id = "ord-rev-1"
+
+    with patch("src.store.pg_store.PostgreSQLStore") as _pgs:
+        _submit_reversal_force_sells(
+            reversal_sell_symbols={"SOXX": {"score": -0.42, "signal_id": 3861}},
+            final_orders=[],
+            stop_loss_sells={},
+            alpaca_positions=[_make_alpaca_position("SOXX", 1.13)],
+            trading_client=trading_client,
+            submitted_orders=[],
+            ts=datetime(2026, 7, 16, 18, 22, tzinfo=timezone.utc),
+            regime_mult=0.7,
+            operating_mode="active",
+        )
+
+    dec_kwargs = _pgs.return_value.write_execution_decision.call_args.kwargs
+    assert dec_kwargs["signal_id"] == 3861
+    assert dec_kwargs["decision"] == "SELL"
+
+
 def test_reversal_force_sell_uses_signal_id_for_client_order_id():
     from src.workers.portfolio_scheduler import _submit_reversal_force_sells
 

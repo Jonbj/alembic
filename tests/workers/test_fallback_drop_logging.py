@@ -12,11 +12,11 @@ from unittest.mock import MagicMock, patch
 from src.workers import portfolio_scheduler
 
 
-def _sig(symbol, score, confidence, model_id, gen):
+def _sig(symbol, score, confidence, model_id, gen, signal_id=None):
     from types import SimpleNamespace
     return SimpleNamespace(
         symbol=symbol, score=score, confidence=confidence, model_id=model_id,
-        generated_at=gen, fallback_used=True,
+        generated_at=gen, fallback_used=True, signal_id=signal_id,
     )
 
 
@@ -70,6 +70,28 @@ def test_record_fallback_drops_writes_skip_fallback_per_signal():
     assert "-0.080" in eric.kwargs["reason"]
     assert eric.kwargs["signal_score"] == -0.08
     assert eric.kwargs["regime_mult"] == 0.7
+
+
+def test_record_fallback_drops_propagates_signal_id_when_present():
+    """#406: SKIP_FALLBACK was 0/4 populated on 2026-08-27. The SentimentResult
+    already carries a signal_id (set by write_signal() in pg_store); the function
+    just needs to pass it through."""
+    from datetime import datetime, timezone
+    gen = datetime.now(timezone.utc)
+    dropped = [
+        _sig("ERIC", -0.08, 0.4, "single:gpt-oss:20b-cloud", gen, signal_id=7777),
+        _sig("AMAT", 0.36, 0.6, "single:gpt-oss:20b-cloud", gen, signal_id=None),
+    ]
+    mock_pg = MagicMock()
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_pg), \
+         patch.object(portfolio_scheduler, "_get_regime_multiplier_from_redis", return_value=0.7), \
+         patch("redis.Redis") as mock_cls:
+        _mock_redis(mock_cls)
+        portfolio_scheduler._record_fallback_drops(dropped)
+
+    calls_by_symbol = {c.kwargs["symbol"]: c for c in mock_pg.write_execution_decision.call_args_list}
+    assert calls_by_symbol["ERIC"].kwargs["signal_id"] == 7777
+    assert calls_by_symbol["AMAT"].kwargs["signal_id"] is None
 
 
 def test_record_fallback_drops_no_signals_is_noop():

@@ -8,8 +8,8 @@ from src.workers import portfolio_scheduler
 
 def test_record_gate_drops_writes_skip_threshold_per_signal():
     dropped = pd.DataFrame([
-        {"symbol": "AMAT", "score": 0.18},
-        {"symbol": "VZ", "score": -0.05},
+        {"symbol": "AMAT", "score": 0.18, "signal_id": 123},
+        {"symbol": "VZ", "score": -0.05, "signal_id": 456},
     ])
     mock_pg = MagicMock()
     with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_pg), \
@@ -27,6 +27,32 @@ def test_record_gate_drops_writes_skip_threshold_per_signal():
     assert amat.kwargs["regime_mult"] == 0.7
 
 
+def test_record_gate_drops_propagates_signal_id_from_dropped_df():
+    """#406: SKIP_THRESHOLD is the largest Decision Log bucket and was 0/487 populated
+    on 2026-08-27 because the function hard-coded signal_id=None even though the
+    caller passes a DataFrame that already carries signal_id per row. The signal
+    is by definition known at the moment the gate rejects it — there is no path
+    where a SKIP_THRESHOLD row has no signal_id except this bug."""
+    import numpy as np
+    dropped = pd.DataFrame([
+        {"symbol": "AMAT", "score": 0.18, "signal_id": 123},
+        {"symbol": "VZ", "score": -0.05, "signal_id": 456},
+        {"symbol": "MSFT", "score": 0.20, "signal_id": None},  # NaN signal_id possible
+    ])
+    mock_pg = MagicMock()
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_pg), \
+         patch.object(portfolio_scheduler, "_get_regime_multiplier_from_redis", return_value=0.7):
+        portfolio_scheduler._record_gate_drops(dropped, threshold=0.35)
+
+    calls_by_symbol = {c.kwargs["symbol"]: c for c in mock_pg.write_execution_decision.call_args_list}
+    assert calls_by_symbol["AMAT"].kwargs["signal_id"] == 123
+    assert calls_by_symbol["VZ"].kwargs["signal_id"] == 456
+    # NaN/None in the DataFrame must NOT silently become NoneType — leave it as the
+    # caller's responsibility (None is the natural "missing" sentry for the DB).
+    msft_sid = calls_by_symbol["MSFT"].kwargs["signal_id"]
+    assert msft_sid is None or (isinstance(msft_sid, float) and np.isnan(msft_sid))
+
+
 def test_record_gate_drops_is_fail_safe():
     """A store failure must not propagate — the trading cycle must not break."""
     dropped = pd.DataFrame([{"symbol": "AMAT", "score": 0.18}])
@@ -35,9 +61,9 @@ def test_record_gate_drops_is_fail_safe():
         portfolio_scheduler._record_gate_drops(dropped, threshold=0.35)  # must not raise
 
 
-def _sig(symbol, score, gen):
+def _sig(symbol, score, gen, signal_id=None):
     from types import SimpleNamespace
-    return SimpleNamespace(symbol=symbol, score=score, generated_at=gen)
+    return SimpleNamespace(symbol=symbol, score=score, generated_at=gen, signal_id=signal_id)
 
 
 def _mock_redis(mock_cls, existing_keys=None):
@@ -72,6 +98,28 @@ def test_record_stale_drops_logs_all_notable_signals_regardless_of_age():
     amat = next(c for c in mock_pg.write_execution_decision.call_args_list if c.kwargs["symbol"] == "AMAT")
     assert amat.kwargs["decision"] == "SKIP_STALE"
     assert "max_age 4h" in amat.kwargs["reason"]
+
+
+def test_record_stale_drops_propagates_signal_id_when_present():
+    """#406: SKIP_STALE rows were instrumented with signal_id=None, so post-hoc
+    tracing from a stale-row back to the signal that aged out was impossible.
+    The SentimentResult already carries a signal_id (set by write_signal in pg_store)."""
+    from datetime import datetime, timedelta, timezone
+    gen = datetime.now(timezone.utc) - timedelta(hours=5)
+    stale = [
+        _sig("AMAT", 0.42, gen, signal_id=9876),
+        _sig("VZ", 0.45, gen, signal_id=None),
+    ]
+    mock_pg = MagicMock()
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=mock_pg), \
+         patch.object(portfolio_scheduler, "_get_regime_multiplier_from_redis", return_value=0.7), \
+         patch("redis.Redis") as mock_cls:
+        _mock_redis(mock_cls)
+        portfolio_scheduler._record_stale_drops(stale, max_age_hours=4, min_score=0.1)
+
+    calls_by_symbol = {c.kwargs["symbol"]: c for c in mock_pg.write_execution_decision.call_args_list}
+    assert calls_by_symbol["AMAT"].kwargs["signal_id"] == 9876
+    assert calls_by_symbol["VZ"].kwargs["signal_id"] is None
 
 
 def test_record_stale_drops_does_not_relog_already_logged_signal():
