@@ -51,6 +51,8 @@ def test_write_intent_events_e_batch_idempotente_append_only():
     sql, params = cursor.executemany.call_args.args
     assert "INSERT INTO s4_intent_events" in sql
     assert "ON CONFLICT DO NOTHING" in sql
+    assert "held_at_rank" in sql
+    assert "signal_age_at_slot" in sql
     assert len(params) == 2
     assert params[0][0] == _event().event_id
     conn.commit.assert_called_once()
