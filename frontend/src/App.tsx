@@ -14,7 +14,6 @@ const News        = lazy(() => import('@/pages/News'))
 const LLM         = lazy(() => import('@/pages/LLM'))
 const Operations  = lazy(() => import('@/pages/Operations'))
 const AutoImprove = lazy(() => import('@/pages/AutoImprove'))
-const Strategies  = lazy(() => import('@/pages/Strategies'))
 const Docs        = lazy(() => import('@/pages/Docs'))
 const LoginPage   = lazy(() => import('@/pages/LoginPage'))
 const Validation  = lazy(() => import('@/pages/Validation'))
@@ -49,7 +48,10 @@ export default function App() {
                 <Route path="/trading"      element={<Trading />} />
                 <Route path="/trades"       element={<Navigate to="/trading" replace />} />
                 <Route path="/performance"  element={<Performance />} />
-                <Route path="/strategies"   element={<Strategies />} />
+                {/* Strategies page removed 2026-09-02 — its metrics were hardcoded
+                    snapshots. Authorization state now lives on Overview, fed by
+                    GET /portfolio/status. Redirect kept so old links do not 404. */}
+                <Route path="/strategies"   element={<Navigate to="/" replace />} />
                 <Route path="/backtest"     element={<Backtest />} />
                 <Route path="/news"         element={<News />} />
                 <Route path="/llm"          element={<LLM />} />

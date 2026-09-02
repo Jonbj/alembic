@@ -1,6 +1,6 @@
 # Alembic — Frontend & Operator Guide
 
-**Last updated:** 2026-08-03 (rev 4 — verificata contro `frontend/src/pages/`, il router e la sidebar)
+**Last updated:** 2026-09-02 (rev 6 — pagina Strategies **eliminata**, vedi §2.0; rev 5 — inventario pagine ri-verificato contro `frontend/src/pages/`, il router e la sidebar; **endpoint di ogni pagina ri-verificati contro `frontend/src/api/*.ts`**, non piu' dedotti)
 **Scope:** P2-04 operator surfaces and frontend page inventory
 **Authorization:** Controlled paper trading IS running on the live Alpaca paper stack. `GLOBAL_LIVE_PROMOTION_ENABLED = False` (paper, not live money). Live go-live still requires 90-day supervised_paper + PO sign-off.
 
@@ -83,27 +83,65 @@ curl -X POST -H "X-API-Key: $ADMIN_API_KEY" \
 
 ---
 
+## 2.0 Pagina Strategies — ELIMINATA il 2026-09-02
+
+La pagina `/strategies` e la voce di sidebar non esistono piu'. `/strategies` fa redirect a
+`/` (Overview), come gia' `/trades` → Trading e `/dashboard` → Overview.
+
+**Perche'.** Tutto cio' che mostrava, tranne lo stato di autorizzazione, veniva da dizionari
+Python congelati in `src/api/routes/strategies.py` (S1 al 2026-05-30, S4 al 2026-06-15) e
+veniva presentato accanto a un badge `LIVE`:
+
+| Elemento della pagina | Cosa mostrava | Realta' |
+|---|---|---|
+| Equity Curve | grafico vuoto, senza empty-state — si leggeva come "performance piatta" | il mount `reports` del container puntava a una worktree cancellata |
+| Parameter Sensitivity | heatmap Sharpe | valori generati da una gaussiana in codice; quella di S3 marcata `# placeholder`; didascalia hardcoded che contraddiceva i dati |
+| Validation Gates | 5/5 PASS con soglie 0.5 / 0.8 / 0.5 / 0.3 / 0.20 | soglie vere ~0.0; due gate riportavano PASS con metrica **sotto** la soglia mostrata |
+| Universe S1 | 15 ETF (SPY, QQQ, TLT, GLD…) | S1 compra azioni singole dalla watchlist di 96 — zero sovrapposizione |
+| Total trades | S1 1247 · S4 223 | **103** e **114** righe reali in `trades` |
+| Ensemble S4 | "Kimi K2.6 + GLM-5.2" | `glm52,gptoss` dal 2026-07-11 |
+
+**Cosa e' sopravvissuto e dove.** Lo stato di autorizzazione — l'unica parte corretta — e'
+ora nella card **Authorization della Overview**, alimentata da `GET /portfolio/status`
+(`mode`/`approved` da `strategy_lifecycle`, `allocation_pct` e `promotion_blocked` da
+`config/strategies.yaml`, `live_authorized` derivato fail-closed). Il componente
+`StrategyAuthStatus` e i suoi test F0 sono rimasti: hanno solo cambiato pagina.
+
+**Cosa NON e' stato toccato.** Le tre POST del promotion gate
+(`/api/strategies/{id}/{promote,approve,demote}`) restano nell'API. Non erano e non sono
+raggiungibili dalla UI, e un test di guardia
+(`frontend/src/tests/f0_safety_hygiene.test.tsx`) verifica che nessuna pagina le cabli.
+
+---
+
 ## 2. Frontend Page Inventory
 
 The React frontend (`frontend/src/pages/`) exposes the operator pages below. Authorization: login required for all pages.
 
 | Page | File | API endpoints used | Operator usefulness |
 |------|------|-------------------|---------------------|
-| Overview | `Overview.tsx` | `/api/health`, `/api/admin/status` | Quick system status |
-| Signals | `Signals.tsx` | `/api/signals/{symbol}`, `/history` | Live sentiment signals |
-| Strategies | `Strategies.tsx` | `/api/strategies/*` | Strategy metrics, gates, lifecycle mode and authorization status |
+| Overview | `Overview.tsx` | `/api/system/readiness`, `/api/signals`, `/api/positions`, `/api/performance/pnl`, `/api/decisions`, `/api/feedback/status`, `/api/quality/metrics`, **`/portfolio/status`** | Quick system status **+ unica superficie di autorizzazione delle strategie** |
+| Signals | `Signals.tsx` | `/api/signals` (lista, con filtri), `/api/signals/{symbol}` | Live sentiment signals |
 | Trading | `Trading.tsx` | `/api/positions`, `/api/orders` | Positions, orders and true fills from filled orders |
 | Performance | `Performance.tsx` | `/api/performance/pnl`, `/api/performance/daily`, `/api/performance/weekly`, `/api/trades/analytics/by-symbol`, `/api/trades/analytics/by-dimension`, `/weights/*` | P&L storico, breakdown giornaliero, Phase A trade analytics, report settimanale |
 | News | `News.tsx` | `/api/news/recent`, `/api/news/source-quality` | Recent ingested articles and per-source quality funnel |
 | LLM | `LLM.tsx` | `/api/llm/feedback`, `/api/llm/models`, `/api/weights/*` | Model feedback loop and dynamic ensemble weights |
 | Auto-Improve | `AutoImprove.tsx` | `/api/feedback/status`, `/api/trades/analytics/counterfactual`, `/api/trades/analytics/counterfactual/status` | Feedback gate + counterfactual opportunity cost with worker freshness and raw skip counts |
 | Operations | `Operations.tsx` | `/api/system/*`, `/api/config`, `/api/admin/*` | Unified System / Config / Admin operator surface |
-| Quality | `Quality.tsx` | `/api/quality/metrics`, `/api/quality/sources` | QX-02 signal/extraction quality + **Source Funnel & P&L (S2-1, 2026-07-03)**: per-source funnel→latency→P&L table with removal-threshold verdicts (roadmap §7.4) and trace coverage |
+| Quality | `Quality.tsx` | `/api/quality/metrics`, `/api/quality/sources`, `/api/quality/ensemble_health` | QX-02 signal/extraction quality + **Source Funnel & P&L (S2-1, 2026-07-03)**: per-source funnel→latency→P&L table with removal-threshold verdicts (roadmap §7.4) and trace coverage |
 | Labeling | `Labeling.tsx` | `/api/labeling/*` | QX-01 blind annotation UI (golden label set) |
-| Validation | `Validation.tsx` | `/api/validation/*` | Paper-validation progress metrics |
-| Backtest | `Backtest.tsx` | Backtest API | Strategy backtesting |
+| Validation | `Validation.tsx` | `/api/validation/metrics` | Paper-validation progress metrics |
+| Backtest | `Backtest.tsx` | `/api/backtest/runs`, `/api/backtest/{run_id}/{summary,signals,model_ic,symbol_ic,pnl_curve,bucket_analysis}` | Strategy backtesting |
 | Docs | `Docs.tsx` | Static | Documentation viewer |
 | Login | `LoginPage.tsx` | `/api/auth/login` | Authentication |
+
+> **Corretto il 2026-09-02.** La colonna "API endpoints used" era in parte dedotta e in parte
+> vecchia. Tre errori concreti: Overview veniva descritta su `/api/health` e
+> `/api/admin/status` (nessuna delle due e' chiamata dalla pagina, che parte da
+> `/api/system/readiness`); Signals citava `/history`, **una rotta che non esiste**
+> (`src/api/routes/signals.py` espone solo la lista e `/{symbol}`); Quality non menzionava
+> `/api/quality/ensemble_health`, aggiunta il 2026-09-01 con #427/PR #463 e gia' cablata nella
+> pagina. Ora ogni riga e' estratta da `frontend/src/api/*.ts`.
 
 **Rotte esistenti ma NON in sidebar** (raggiungibili solo per URL diretta, verificato il 2026-08-03
 contro `frontend/src/components/layout/Sidebar.tsx`, che espone 15 voci):
@@ -174,7 +212,8 @@ curl -H "X-API-Key: $ADMIN_API_KEY" \
 The P2-04 operator cockpit is now partially surfaced in the frontend:
 
 - `Overview.tsx` polls `GET /api/system/readiness` and shows high-level operational state.
-- `Operations.tsx` groups the System tab (`/api/system/scheduler`, `/api/system/activity`, PEAD signals), Config tab and Admin tab.
+- `Operations.tsx` groups the System tab (`/api/system/scheduler`, `/api/system/activity`), Config tab and Admin tab.
+  *(Corretto il 2026-09-02: questa riga elencava anche "PEAD signals". S7/PEAD e' stata ritirata il 2026-07-15 e nel frontend non esiste alcun riferimento a PEAD — verificato con grep su `Operations.tsx` e `SystemLog.tsx`.)*
 
 **Remaining gap:** there is still no dedicated full 8-flag readiness matrix with direct runbook links for each unhealthy flag.
 
@@ -182,12 +221,30 @@ Use the `curl` commands from operations.md when a full readiness payload is requ
 
 ### 2.3 Strategy Mode / Lifecycle — Frontend Coverage
 
-`Strategies.tsx` now displays the lifecycle fields returned by `/api/strategies/*`:
-- Current lifecycle mode per strategy
-- `promotion_blocked`, `promotion_authorized`, and `live_authorized`
-- Whether displayed metrics are `LIVE` or `BACKTEST`
+Dal 2026-09-02 la copertura vive nella card **Authorization della Overview**
+(`Overview.tsx`), non piu' in `Strategies.tsx` (eliminata — §2.0). La sorgente e'
+`GET /portfolio/status`, e ogni campo arriva da una fonte viva:
 
-Fail-closed rule: absent or false authorization fields must be treated as not authorized. Backtest gates are evidence only and do not authorize promotion or live trading.
+| Campo mostrato | Da dove |
+|---|---|
+| `mode` per strategia | tabella `strategy_lifecycle` |
+| `approved` | tabella `strategy_lifecycle` |
+| `promotion_blocked` | `config/strategies.yaml` |
+| `allocation_pct` (sleeve) | `config/strategies.yaml` |
+| `live_authorized` | derivato: `mode == "live" AND GLOBAL_LIVE_PROMOTION_ENABLED` |
+
+Non c'e' piu' alcun badge `LIVE`/`BACKTEST`, perche' non c'e' piu' alcuna metrica da
+etichettare: la card dice solo *cosa e' attivo e cosa non e' autorizzato*.
+
+**Regola fail-closed, invariata e ora testata su due livelli:** campi di autorizzazione
+assenti o falsi valgono "non autorizzato". Lato server `_live_authorized(None)` e' `False`
+per costruzione (`tests/api/test_portfolio_routes.py`); lato client, se l'elenco delle
+strategie arriva vuoto, `StrategyAuthStatus` rende l'avviso esplicito
+*"Authorization status unavailable — do not treat as approved"* invece di un vuoto silenzioso
+(`frontend/src/tests/frontend_baseline.test.tsx`).
+
+I gate di backtest non sono piu' mostrati da nessuna parte: erano evidenza storica presentata
+con soglie inventate, vedi §2.0.
 
 ### 2.4 Block 1 Product Decisions Reflected in Frontend
 

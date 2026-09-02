@@ -57,8 +57,8 @@ A same-day re-entry lockout: a symbol stopped out today cannot be re-bought unti
 _Avoid:_ lockout (ambiguous), stop-out window.
 
 **Sentiment reversal exit**:
-A forced exit of a held position when its current LLM score drops below −0.20, regardless of news age.
-_Avoid:_ reversal sell, score exit.
+A forced exit of a held position when its current LLM score drops below the reversal threshold, regardless of news age. The threshold is **−0.35 in the running system** (docker-compose override on `worker` and `worker-inference`); `src/config.py`'s default is −0.20 and is not what production uses. The exit additionally requires a non-fallback signal generated in the last 60 minutes, and fires at most once per signal identity.
+_Avoid:_ reversal sell, score exit; quoting −0.20 as the operative value.
 
 **Pyramiding guard**:
 Prevents a second entry on a symbol already held (no pyramiding). Keys on open trades; fail-closed on DB failure.

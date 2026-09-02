@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   fetchReadiness: vi.fn(),
   isTradingWindow: vi.fn(),
   logout: vi.fn(),
-  strategiesList: vi.fn(),
+  portfolioStatus: vi.fn(),
   storeState: {
     token: 'jwt-test',
     logout: vi.fn(),
@@ -27,14 +27,10 @@ vi.mock('@/utils/market', () => ({
   isTradingWindow: mocks.isTradingWindow,
 }))
 
-vi.mock('@/api/strategies', () => ({
-  strategiesApi: {
-    list: mocks.strategiesList,
-    detail: vi.fn().mockResolvedValue(null),
-    backtest: vi.fn().mockResolvedValue([]),
-    gates: vi.fn().mockResolvedValue([]),
-    sensitivity: vi.fn().mockResolvedValue([]),
-  },
+// Strategies page and @/api/strategies removed 2026-09-02; Overview now reads
+// the authorization surface from GET /portfolio/status.
+vi.mock('@/api/portfolio', () => ({
+  fetchPortfolioStatus: mocks.portfolioStatus,
 }))
 
 function response(status: number, body: unknown = {}, statusText = ''): Response {
@@ -178,13 +174,43 @@ describe('ErrorBoundary', () => {
   })
 })
 
-describe('pagina Strategies', () => {
-  test('mostra uno stato vuoto esplicito quando la API non restituisce strategie', async () => {
-    mocks.strategiesList.mockResolvedValue([])
-    const { default: Strategies } = await import('@/pages/Strategies')
+// La pagina Strategies e' stata eliminata il 2026-09-02 (metriche hardcoded, non live).
+// Il test che qui verificava il suo stato vuoto e' stato riscritto sulla superficie che
+// l'ha sostituita: la card Authorization di Overview, alimentata da GET /portfolio/status.
+// La garanzia da preservare e' la stessa e vale piu' di prima, perche' ora e' l'unico
+// posto che dice se una strategia e' autorizzata: quando l'elenco arriva vuoto la UI
+// deve dirlo esplicitamente, mai lasciare il vuoto a suggerire "nessun problema".
+describe('Overview — superficie di autorizzazione', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline in test')))
+  })
+  afterEach(() => vi.unstubAllGlobals())
 
-    render(queryWrapper(<Strategies />))
+  test('senza strategie mostra l\'avviso esplicito, non un vuoto silenzioso', async () => {
+    mocks.portfolioStatus.mockResolvedValue({ active_strategies: 0, strategies: [], last_cycle: null })
+    const { default: Overview } = await import('@/pages/Overview')
 
-    expect(await screen.findByText('No strategies found.')).toBeInTheDocument()
+    render(queryWrapper(<Overview />))
+
+    expect(await screen.findByTestId('auth-unavailable')).toBeInTheDocument()
+  })
+
+  test('con una strategia non live mostra mode e live_authorized: false', async () => {
+    mocks.portfolioStatus.mockResolvedValue({
+      active_strategies: 1,
+      strategies: [{
+        strategy_id: 'S1', allocation_pct: 0.5, schedule: '', enabled: true,
+        mode: 'supervised_paper', approved: true,
+        promotion_blocked: true, live_authorized: false,
+      }],
+      last_cycle: null,
+    })
+    const { default: Overview } = await import('@/pages/Overview')
+
+    render(queryWrapper(<Overview />))
+
+    expect(await screen.findByTestId('mode-badge')).toHaveTextContent('supervised_paper')
+    expect(screen.getByTestId('not-live-authorized')).toBeInTheDocument()
+    expect(screen.getByTestId('promotion-blocked-badge')).toBeInTheDocument()
   })
 })

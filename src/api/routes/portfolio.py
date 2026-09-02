@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 
 from src.api.auth import require_api_key
 from src.api.deps import get_pg_store
+from src.strategies.promotion import GLOBAL_LIVE_PROMOTION_ENABLED
 from src.strategies.registry import StrategyRegistry
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,17 @@ def _fetch_lifecycle_fields(strategy_ids: list[str], pg) -> dict[str, dict]:
         return {}
 
 
+def _live_authorized(mode: str | None) -> bool:
+    """True only when the strategy is in 'live' mode AND the global promotion flag is on.
+
+    Fail-closed by construction: an unknown mode (DB unreachable, missing lifecycle
+    row) is not 'live', so the answer is False. Never returns True by omission —
+    the frontend renders "live_authorized: false" from this, and a display that
+    guesses "authorized" when it cannot tell is the one failure mode that matters.
+    """
+    return mode == "live" and GLOBAL_LIVE_PROMOTION_ENABLED
+
+
 @router.get("/status")
 async def portfolio_status(pg=Depends(get_pg_store)):
     """Return current portfolio status: active strategies, allocations, last cycle.
@@ -62,6 +74,12 @@ async def portfolio_status(pg=Depends(get_pg_store)):
             "enabled": e.enabled,
             "mode": lifecycle.get(e.strategy_id, {}).get("mode"),
             "approved": lifecycle.get(e.strategy_id, {}).get("approved"),
+            # Governance flags, added 2026-09-02 when the Strategies page was removed
+            # and this endpoint became the only authorization surface. Both are derived
+            # from real sources — config/strategies.yaml and the lifecycle row — never
+            # from a hardcoded snapshot, which is exactly what the deleted page did.
+            "promotion_blocked": bool(e.promotion_blocked),
+            "live_authorized": _live_authorized(lifecycle.get(e.strategy_id, {}).get("mode")),
         }
         for e in active
     ]

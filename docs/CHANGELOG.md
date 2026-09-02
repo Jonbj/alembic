@@ -4,6 +4,176 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ---
 
+## 2026-09-02
+
+### Pagina Strategies e rotte di lettura `/api/strategies` — ELIMINATE
+
+Decisione dell'operatore dopo l'audit della pagina. Tutto cio' che mostrava, tranne lo stato
+di autorizzazione, veniva da dizionari Python in `src/api/routes/strategies.py` congelati al
+2026-05-30 (S1) e al 2026-06-15 (S4), serviti accanto a un badge `LIVE`:
+
+| Elemento | Mostrava | Realta' |
+|---|---|---|
+| Equity Curve | grafico vuoto senza empty-state | il mount `reports` del container puntava a `.worktrees/deploy-199620/`, worktree **cancellata**; e `reports/` e' gitignored |
+| Parameter Sensitivity | heatmap Sharpe | valori da una gaussiana in codice; S3 marcata `# placeholder`; didascalia hardcoded che contraddiceva la propria griglia |
+| Validation Gates | 5/5 PASS, soglie 0.5–0.8 | soglie vere ~0.0 in `reports/s1_backtest/gate_report.json`; **due gate riportavano PASS con metrica sotto la soglia mostrata** |
+| Universe S1 | 15 ETF | S1 compra azioni singole dalla watchlist di 96 — zero sovrapposizione |
+| Total trades | S1 1247 · S4 223 | 103 e 114 righe reali |
+| Ensemble S4 | "Kimi K2.6 + GLM-5.2" | `glm52,gptoss` dal 2026-07-11 |
+| `entry_threshold` S4 | 0.35 | 0.30 (`feedback:entry_threshold` in Redis) |
+
+**Rimosso:** `frontend/src/pages/Strategies.tsx`, `frontend/src/api/strategies.ts`, la voce di
+sidebar, i dizionari e le 5 rotte GET di `src/api/routes/strategies.py` (595 → 164 righe), la
+fixture orfana `tests/fixtures/strategies_backtest/`. `/strategies` fa redirect a `/`, come
+gia' `/trades` e `/dashboard`.
+
+**Conservato:** le tre POST del promotion gate (P2-02), che non contengono snapshot. E lo
+stato di autorizzazione, spostato sulla card Authorization della Overview e alimentato da
+`GET /portfolio/status`, che guadagna due campi derivati da fonti vive: `promotion_blocked`
+(da `config/strategies.yaml`) e `live_authorized` (`mode == "live" AND
+GLOBAL_LIVE_PROMOTION_ENABLED`, fail-closed su `mode` sconosciuto). Il componente
+`StrategyAuthStatus` e i suoi test F0 sono rimasti: hanno cambiato pagina.
+
+**Test.** Il guard F0 che leggeva `Strategies.tsx` con `readFileSync` sarebbe passato per
+ENOENT — una guardia che muore invece di reggere: sostituito da una scansione di *tutte* le
+pagine piu' un check di non-riesistenza dei due file. `tests/api/test_strategies_routes.py`
+riscritto da test delle rotte a **guardia contro il loro ritorno** (verificata rossa
+reintroducendo temporaneamente una GET). Nuovi test sul fail-closed di `_live_authorized` e
+sulla card della Overview. Backend 232 passati; frontend 48/48.
+
+### Difetto trovato e NON corretto (fuori perimetro)
+
+`promotion.py::_fetch_lifecycle_row` seleziona `promotion_blocked` da `strategy_lifecycle`,
+ma **quella colonna non esiste sul DB live**. `POST /promote` e `/approve` falliscono quindi
+con HTTP 500: fail-closed, nessuna promozione accidentale possibile, ma il gate non e' mai
+stato esercitato contro il DB reale. `demote` non tocca quel campo e funziona.
+
+## 2026-09-02 (allineamento documentazione)
+
+### Allineamento documentazione — drift corretto su otto file
+
+Nessun cambio di codice. Sweep di verifica della documentazione viva contro il codice, lo
+schema live e `openapi.json` del container `alembic-api-1`. Le correzioni con impatto reale:
+
+- **`docs/MIGRATIONS_APPLIED.md`**: mancavano le migrazioni **055–059**. Inoltre la riga della
+  **046** diceva ancora "NON applicata" mentre la migrazione era stata applicata a mano il
+  2026-09-01 lavorando a #405 — sul live ci sono tutte le colonne, l'indice, lo scambio del
+  vincolo e la tabella `news_label_splits`. La **058** e' invece davvero **non applicata**:
+  `portfolio_session_grid_metrics` non esiste sul live, quindi la misura di #428 non ha dove
+  scrivere.
+- **`docs/API.md`**: rimossa la sezione **PEAD Routes** (`/api/pead/signals`, `/api/pead/events`),
+  documentata per sette settimane dopo la cancellazione di S7 il 2026-07-15. Corrette le rotte
+  backtest (`/api/backtest/runs/{id}/...` → `/api/backtest/{id}/...`, e `/report` non esiste:
+  sono `summary`, `model_ic`, `symbol_ic`, `pnl_curve`, `bucket_analysis`), la sezione Portfolio
+  (le tre rotte `/api/portfolio/{cycles,risk,decay}` **non esistono**: il router e' su
+  `/portfolio` senza `/api` ed espone `status` e `cycle-history`; `risk_reports` e
+  `decay_reports` non hanno superficie HTTP), `/api/performance/positions` → `/api/positions`, e
+  `/api/signals/history` che non esiste e viene catturata da `/{symbol}` restituendo un 404
+  fuorviante. Aggiunte le sezioni mancanti: **Auth**, **Strategies**, **Validation** e
+  `GET /api/quality/ensemble_health`. Tutti gli esempi con Kimi K2.6 `active: true` sostituiti
+  con la coppia reale, catturata dal container.
+- **`docs/strategies.md`**: la coppia dell'ensemble era ancora "Kimi K2.6 + GLM-5.2" (sostituita
+  il 2026-07-11); la soglia di divergenza era 0.30 invece di 0.40.
+- **`CONTEXT.md`**: la soglia di sentiment reversal era data per −0,20 (default del codice)
+  mentre in produzione e' **−0,35** per override di docker-compose.
+- **`docs/operations.md`**: `SENTIMENT_PROMPT_VARIANT=a` non compariva nella tabella degli
+  override, pur essendo quello con l'impatto piu' grande sul comportamento; il Governance
+  Reminder elencava ancora come pendenti due precondizioni soddisfatte dal 2026-07-14.
+- **`docs/llm-config.md`**: la tabella dei worker assegnava `pead-ingestion` (task ritirato) a
+  `worker-inference` e metteva `telegram-poller` sulla coda sbagliata.
+- **`docs/FRONTEND_OPERATOR_GUIDE.md`** e **`README.md`**: endpoint per pagina ri-estratti da
+  `frontend/src/api/*.ts` invece che dedotti; corretto l'albero delle route nel README
+  (`trades.py`/`news.py` non esistono, sono `trading.py`/`news_routes.py`).
+- **Bug di rendering corretto**: in `docs/API.md` una fence di codice spuria dopo la tabella dei
+  campi trade di `/api/performance/daily` lasciava l'esempio `curl` e il testo seguente dentro un
+  blocco di codice. Le fence dei 121 file di documentazione sono ora tutte bilanciate.
+
+## 2026-09-01
+
+### Variante A del prompt sentiment in produzione — **deroga esplicita al freeze #171** (#399/#408)
+
+`SENTIMENT_PROMPT_VARIANT=a` attivo dalle 10:33Z (`bf5bef2e`). Il prompt DK-CoT ora include il
+**titolo** dell'articolo (popolato nel 99,94% delle righe `news_log` e prima mai passato al
+modello) e riformula lo step 1 su *impatto di prezzo* invece che su *fondamentali*, perche' le
+notizie di secondo ordine erano sotto-scorate di un ordine di grandezza per costruzione.
+Companion fix: entrambi i path di fallback FinBERT ricevono ora titolo + corpo.
+
+**Non e' una correzione indolore.** Cambia la *distribuzione* degli score, non solo la loro
+correttezza: stimati ~2,4x segnali sopra il gate 0,30 a parita' di soglia. Ogni lettura di S4
+che attraversa questa data va segmentata prima/dopo. Deroga registrata in
+`docs/evidence/OBSERVATION_CHARTER.md`; dati a supporto in
+`docs/research/2026-09-01-prompt-sentiment-soluzione-finale.md`. Perimetro: solo il testo dei
+prompt (schema JSON identico byte-per-byte) — soglia, sizing ed execution non toccati.
+
+### Metrica di salute dell'ensemble + breaker del fallback riparato (#427, PR #463)
+
+Migrazione **059**: `ensemble_cycle_health`, una riga per esecuzione del `SentimentWorker` con
+`n_ensemble` / `n_single` / `n_finbert`, cosi' che i log del container non siano piu' l'unico
+posto dove vive il grado di degrado di una seduta. Nuovo endpoint
+`GET /api/quality/ensemble_health` e pannello nella pagina Quality.
+
+`RedisStore.increment_fallback_counter`: la condizione di trigger passa da `== self._max_fallbacks`
+a `>=` con latch `fallback:breaker_fired_at`. L'uguaglianza esatta mancava silenziosamente
+qualsiasi streak che superasse 3 in un solo INCR — la forense del 2026-08-26 aveva confermato
+che la callback non era mai stata cablata.
+
+### Quantita' fantasma sulle uscite parziali (#397, PR #445)
+
+Migrazione **057**: `trades.quantity_remaining`. `trades.qty` era sovraccaricata (quantita'
+d'ingresso *e* quantita' residua) e non veniva mai decrementata sulle uscite parziali e sui fill
+di stop lato broker, gonfiando il mark-to-market del libro. NOK/WDC/MRVL riconciliati col broker
+lo stesso giorno.
+
+### Dossier: `decision_at` qualificato, e il cron fallisce ad alta voce (#396/PR #435, #411/PR #446)
+
+Il join introdotto da PR #354 esponeva `decision_at` su entrambi i lati → parse error, e
+l'eccezione degenerava in un `exit 0` silenzioso che ha lasciato il dossier morto per tre
+sedute. Ora la colonna e' qualificata, i giorni di non-borsa sono un esito esplicito, il cron
+esce non-zero e manda un alert Telegram. Il cron forense passa dal trittico di #336
+(refresh → sessione scrivi-solo → helper di commit).
+
+## 2026-08-31
+
+### Alert EOD sulle posizioni in perdita senza copertura news (#324, PR #425)
+
+Il libro puo' contenere posizioni in perdita su cui il sistema non ha alcuna notizia recente:
+adesso lo dice a fine giornata invece di lasciarlo dedurre. Colonna `copertura_uscita`
+registrata nella carta di osservazione (PR #426).
+
+## 2026-08-29
+
+### `trades.stop_strategy` non puo' piu' essere NULL (#393)
+
+Migrazione **056**: attribuzione della coorte legacy + vincolo `NOT NULL` (`NOT VALID`, quindi
+non retroattivo sulle righe storiche). Senza attribuzione di strategia, il P&L per sleeve non e'
+ricostruibile.
+
+## 2026-08-27
+
+### Un'uscita osservata spiega l'ammanco, e la proiezione P0 sa correggersi (#374, PR #375)
+
+Migrazione **055**: vista `s4_exit_policy_current` con tie-break deterministico. Copertura P0
+da 0% a 100%. Il principio generale che ne esce: **in un ledger append-only l'identita'
+dell'evento derivato deve includere quella dell'osservazione a monte**, altrimenti una
+correzione a monte non puo' propagarsi.
+
+## 2026-08-22 → 2026-08-26
+
+### Ledger degli intenti S4 e strumentazione della qualita' (migrazioni 047–054)
+
+- **047** `news_discard_reasons` (backfill 3477 righe) · **048** counterfactual su
+  `SKIP_PYRAMIDING` · **049** copertura counterfactual
+- **050** `s4_entry_intent_ledger` (#294) e **051** `s4_shadow_lifecycle` (#295/#350): tabelle
+  append-only + viste. La 050 era su `main` dal merge di #294 ma non era mai stata applicata al
+  live — scoperta durante la review di #350, che ci costruisce sopra.
+- **052** `failure_reason` sullo shadow (#358): le righe pre-25/08 restano NULL, e li' NULL
+  significa «non classificato», non «successo».
+- **053** ledger della policy P0 + viste di validazione shadow (#296/PR #367)
+- **054** 6 colonne di rilevanza su `llm_responses` (#328/PR #357): NULL = campo omesso dal
+  modello, distinto dal default dello schema.
+
+Dettaglio dello stato di applicazione al live: `docs/MIGRATIONS_APPLIED.md`.
+
 ## 2026-08-16
 
 ### #39 — gli scarti news hanno motivo e stadio persistiti

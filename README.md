@@ -352,12 +352,17 @@ Alembic/
 │   │   ├── auth.py            # X-API-Key dependency
 │   │   ├── deps.py            # Dependency injection (RedisStore, PostgreSQLStore)
 │   │   └── routes/
-│   │       ├── signals.py     # GET /api/signals/{symbol}, /history
-│   │       ├── admin.py       # POST /api/admin/killswitch, /mode
-│   │       ├── performance.py # GET/POST /api/performance/*, /weights/*
+│   │       ├── signals.py     # GET /api/signals, /api/signals/{symbol}
+│   │       ├── admin.py       # POST /api/admin/killswitch, /mode, /llm-models
+│   │       ├── performance.py # GET /api/performance/*, GET|POST /api/weights/*
 │   │       ├── system_routes.py # GET /api/system/readiness, /decisions, /scheduler (P2-04)
-│   │       ├── trades.py      # GET /api/trades/*, /analytics/*
-│   │       └── news.py        # GET /api/news/recent
+│   │       ├── trading.py     # GET /api/positions, /orders, /trades*, /decisions
+│   │       ├── portfolio.py   # GET /portfolio/status, /cycle-history (senza prefisso /api)
+│   │       ├── strategies.py  # POST /api/strategies/{id}/{promote,approve,demote} (solo governance)
+│   │       ├── quality_routes.py # GET /api/quality/metrics, /sources, /ensemble_health
+│   │       ├── validation_routes.py # GET /api/validation/metrics
+│   │       ├── auth.py        # POST /api/auth/login, GET /api/auth/me
+│   │       └── news_routes.py # GET /api/news/recent, /source-quality
 │   ├── notifications/
 │   │   ├── base.py            # AlertLevel enum + Notifier Protocol
 │   │   └── telegram.py        # TelegramNotifier + format helpers
@@ -496,8 +501,13 @@ weight_cap: 0.70
 
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
-| `/api/signals/{symbol}` | GET | — | Latest signal for symbol |
-| `/api/signals/history` | GET | — | Paginated signal history |
+| `/api/signals` | GET | — | Signal list with filters (`symbol`, `news_id`, `signal_id`) |
+| `/api/signals/{symbol}` | GET | — | Latest signal for symbol (Redis → PostgreSQL fallback) |
+
+> `/api/signals/history` **non esiste** ed e' stato rimosso da questa tabella il 2026-09-02.
+> Non dava nemmeno un errore onesto: `/{symbol}` lo catturava come `symbol="history"` e
+> rispondeva `404 No signal found for symbol: history`, che si legge come "nessun dato" invece
+> che come "rotta inesistente".
 
 ### Admin Endpoints
 
@@ -593,7 +603,7 @@ Every number below was chosen heuristically and has not been validated against h
 **Public read API rate limiting remains limited.** Security-sensitive admin login,
 mode-change, and kill-switch activation endpoints use Redis-backed rate limiting,
 and browser origins are explicitly allowlisted. High-volume public read endpoints
-such as `/api/signals/history`, `/api/news/recent`, and `/api/llm/feedback` still do
+such as `/api/signals`, `/api/news/recent`, and `/api/llm/feedback` still do
 not have a general request budget; deployment-level ingress throttling remains
 recommended for those routes.
 
