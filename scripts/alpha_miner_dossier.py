@@ -65,6 +65,7 @@ from src.analysis.dossier.miss_cause import (
 )
 from src.analysis.dossier.opportunity import ESTIMATOR_VERSION, compute_opportunity
 from src.analysis.dossier.timeline import build_timeline
+from src.costs.calculator import TradeCostCalculator
 
 log = logging.getLogger(__name__)
 
@@ -1033,7 +1034,7 @@ def _risk_decisions(giorno: date) -> list[dict]:
 def _funnel_v2(
     *,
     rendimenti: dict[str, float],
-    in_portafoglio: set[str],
+    held_at_open: set[str],
     universo: list[str],
     copertura: dict,
     segnali: dict[str, list[dict]],
@@ -1057,19 +1058,31 @@ def _funnel_v2(
     causa_by_symbol = {
         str(c.get("symbol")): c.get("causa") for c in candidati_classificati
     }
+    opportunity_by_symbol = {
+        str(c.get("symbol")): c.get("opportunity_v2")
+        for c in candidati_classificati
+    }
     intenti_by_symbol: dict[str, list[dict]] = defaultdict(list)
     for intento in intenti:
         intenti_by_symbol[intento["symbol"]].append(intento)
     guard_by_symbol: dict[str, list[dict]] = defaultdict(list)
     for riga in guard:
         guard_by_symbol[riga["symbol"]].append(riga)
-    # Primo evento con ordine per simbolo: e' la catena ordine->fill vista
-    # dal #277, gia' arricchita con i dettagli Alpaca del broker.
+    # Esito ordine piu' profondo per simbolo: un ordine fillato prevale su uno
+    # soltanto inviato e su un lookup fallito. Gli eventi sono gia' ordinati;
+    # a parita' resta il primo, rendendo la scelta riproducibile.
     ordine_by_symbol: dict[str, dict] = {}
+
+    def profondita_ordine(ordine: dict) -> tuple[int, int]:
+        return (
+            int(bool(ordine.get("filled_at"))),
+            int(bool(ordine.get("submitted_at"))),
+        )
+
     for evento in eventi:
-        if evento.get("symbol") in ordine_by_symbol or not evento.get("order_id"):
+        if not evento.get("order_id"):
             continue
-        ordine_by_symbol[evento["symbol"]] = {
+        candidato = {
             "order_id": evento.get("order_id"),
             "submitted_at": evento.get("order_submitted_at"),
             "filled_at": evento.get("filled_at"),
@@ -1077,6 +1090,9 @@ def _funnel_v2(
             "lookup_error": evento.get("order_lookup_error"),
             "trade_id": evento.get("trade_id"),
         }
+        corrente = ordine_by_symbol.get(evento["symbol"])
+        if corrente is None or profondita_ordine(candidato) > profondita_ordine(corrente):
+            ordine_by_symbol[evento["symbol"]] = candidato
 
     movers = [
         (sym, rendimento)
@@ -1090,7 +1106,7 @@ def _funnel_v2(
         {
             "symbol": sym,
             "return": rendimento,
-            "held": sym in in_portafoglio,
+            "held": sym in held_at_open,
             "in_universo": sym in universo_set,
             "articoli": per_ticker.get(sym),
             "segnali": segnali.get(sym) or [],
@@ -1099,6 +1115,7 @@ def _funnel_v2(
             "ordine": ordine_by_symbol.get(sym),
             "close": (barre.get(sym) or {}).get("close"),
             "legacy_causa": causa_by_symbol.get(sym),
+            "opportunity_v2": opportunity_by_symbol.get(sym),
         }
         for sym, rendimento in movers
     ]
@@ -1228,6 +1245,8 @@ def _opportunity_v2(
     giorno: date,
     barre_intraday: dict[str, list[dict]] | None = None,
     cicli: dict[str, dict] | None = None,
+    *,
+    cost_calc: TradeCostCalculator | None = None,
 ) -> dict:
     """Stima v2 parallela di opportunita' per un candidato miss (#280, #246).
 
@@ -1238,7 +1257,8 @@ def _opportunity_v2(
     Cablata alle barre intraday (#246 Q1). Le tre strade:
     - ribasso non detenuto in book long-only -> accessible/net = 0.0 verificato;
     - rialzo non detenuto -> entry prezzata sull'apertura del primo bar 5Min
-      successivo al primo ciclo eleggibile, exit al close: e' la porzione
+      successivo al primo ciclo eleggibile, exit al close e costo roundtrip
+      dallo stesso TradeCostCalculator della contabilita' live: e' la porzione
       davvero catturabile da un motore RTH. ORCL il 12/08 vale 117,95 $
       close-to-close e ~6,82 $ su questa gamba: la differenza non e' un
       dettaglio, e' la misura;
@@ -1266,24 +1286,46 @@ def _opportunity_v2(
         for bar in (barre_intraday or {}).get(sym, [])
     ]
     try:
-        return compute_opportunity(
-            {
-                "symbol": sym,
-                "book_side": "long",
-                "held": bool(candidato.get("in_portafoglio", False)),
-                "daily": {k: daily[k] for k in ("open", "high", "low", "close", "close_prec")},
-                "size_usd": SLOT_USD_DEFAULT,
-                "slot_fraction": SLOT_FRACTION_S4,
-                "size_source": "S4 fixed slot = bucket_pct(0.10)/n_top(5) = 2% NAV ~$110k",
-                "eligible_cycle_at": ciclo["at"].isoformat() if ciclo["at"] else None,
-                "eligible_cycle_source": ciclo["source"],
-                "intraday_bars": intraday,
-                "cost": None,  # roundtrip reale: wiring TradeCostCalculator, fuori da #246
-                "cutoff": _cutoff_giorno(giorno),
-                "exit_policy": "EOD_close",
-                "confidenza": "congetturale",
+        opportunity_input = {
+            "symbol": sym,
+            "book_side": "long",
+            "held": bool(candidato.get("in_portafoglio", False)),
+            "daily": {k: daily[k] for k in ("open", "high", "low", "close", "close_prec")},
+            "size_usd": SLOT_USD_DEFAULT,
+            "slot_fraction": SLOT_FRACTION_S4,
+            "size_source": "S4 fixed slot = bucket_pct(0.10)/n_top(5) = 2% NAV ~$110k",
+            "eligible_cycle_at": ciclo["at"].isoformat() if ciclo["at"] else None,
+            "eligible_cycle_source": ciclo["source"],
+            "intraday_bars": intraday,
+            "cost": None,
+            "cutoff": _cutoff_giorno(giorno),
+            "exit_policy": "EOD_close",
+            "confidenza": "congetturale",
+        }
+        estimate = compute_opportunity(opportunity_input)
+        entry_price = estimate.get("entry", {}).get("price")
+        if estimate.get("trade_state") == "simulated" and entry_price is not None:
+            calculator = cost_calc or TradeCostCalculator(
+                config_path=PROJECT_DIR / "config" / "cost_model.yaml"
+            )
+            qty = SLOT_USD_DEFAULT / float(entry_price)
+            costs = calculator.compute(
+                sym,
+                notional=SLOT_USD_DEFAULT,
+                qty=qty,
+                fill_price=float(entry_price),
+                side="SELL",
+            )
+            opportunity_input["cost"] = {
+                "spread_bps": costs.spread_cost_bps,
+                "impact_bps": costs.impact_cost_bps,
+                "regulatory_usd": costs.regulatory_cost_usd,
+                "total_usd": costs.total_cost_usd,
+                "model": "TradeCostCalculator/cost_model.yaml",
+                "adv_source": "TradeCostCalculator default ADV fallback",
             }
-        )
+            estimate = compute_opportunity(opportunity_input)
+        return estimate
     except Exception as exc:  # pragma: no cover - difensivo
         log.warning("opportunity_v2 %s fallita: %s", sym, exc)
         return {"estimator_version": ESTIMATOR_VERSION, "symbol": sym, "error": str(exc)}
@@ -1478,9 +1520,13 @@ def costruisci_dossier(
     # sono gia' stati caricati sopra proprio per questo (#246 Q1): l'ordine del
     # blocco timeline non e' cosmetico, la stima accessible dipende da entrambi.
     cicli_eleggibili = _cicli_eleggibili(eventi, giorno)
+    opportunity_cost_calc = TradeCostCalculator(
+        config_path=PROJECT_DIR / "config" / "cost_model.yaml"
+    )
     for c in candidati_classificati:
         c["opportunity_v2"] = _opportunity_v2(
-            c, barre, giorno, barre_intraday, cicli_eleggibili
+            c, barre, giorno, barre_intraday, cicli_eleggibili,
+            cost_calc=opportunity_cost_calc,
         )
 
     # --- funnel v2 a due assi (#281) -------------------------------------
@@ -1489,9 +1535,15 @@ def costruisci_dossier(
     # `aggregati.cause_del_giorno`) e la NO_NEWS pre-registrata restano
     # esattamente dove sono (freeze #171): questo blocco si affianca.
     risk_decisions = _risk_decisions(giorno)
+    # La vista legacy usa intenzionalmente la posizione osservata durante la
+    # giornata. Il funnel v2 deve invece distinguere esposizione passiva da
+    # ingresso nuovo: usa lo snapshot PIT all'open RTH gia' richiesto dal
+    # pannello decision_quality, senza cambiare i conteggi legacy.
+    posizioni_apertura = _opening_positions(giorno)
+    held_at_open = {posizione["symbol"] for posizione in posizioni_apertura}
     funnel_v2 = _funnel_v2(
         rendimenti=mercato["rendimenti"],
-        in_portafoglio=in_portafoglio,
+        held_at_open=held_at_open,
         universo=simboli,
         copertura=copertura_articoli,
         segnali=dict(segnali),
@@ -1604,7 +1656,6 @@ def costruisci_dossier(
     # --- qualita' decisionale read-only (#284) ----------------------------
     # Lo snapshot e' prospettico/parallelo: i dossier storici restano intatti.
     # Nessun valore qui entra nel runtime; size e holding sono solo descritti.
-    posizioni_apertura = _opening_positions(giorno)
     exit_order_details = _dettagli_ordini(
         [
             order_id
@@ -1766,6 +1817,10 @@ def costruisci_dossier(
                 "net_profitable": (
                     "P&L realizzato del trade collegato (#294); None se il "
                     "trade e' ancora aperto o ambiguo"
+                ),
+                "avoidable_miss_count": (
+                    "ENTRY_OPPORTUNITY non CAUGHT con net_opportunity_usd > 0; "
+                    "i net non misurabili sono contati separatamente come unknown"
                 ),
                 "freeze": "nessun conteggio legacy sostituito; nessun dato storico riscritto",
             },

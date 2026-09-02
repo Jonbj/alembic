@@ -9,6 +9,7 @@ missingness esplicita ma gross calcolato.
 """
 
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -126,3 +127,50 @@ def test_fungibilita_none_e_size_dichiarata():
     assert ov["fungibility_rule"].startswith("none")
     assert ov["size"]["usd"] == 2200.0
     assert ov["size"]["slot_fraction"] is not None
+
+
+def test_rialzista_intraday_applica_il_cost_model_live_e_pubblica_il_netto():
+    class FakeCostCalculator:
+        def __init__(self):
+            self.calls = []
+
+        def compute(self, symbol, notional, qty, fill_price, side):
+            self.calls.append((symbol, notional, qty, fill_price, side))
+            return SimpleNamespace(
+                spread_cost_bps=1.5,
+                impact_cost_bps=0.2,
+                regulatory_cost_usd=0.1,
+                total_cost_usd=2.0,
+            )
+
+    calc = FakeCostCalculator()
+    estimate = dossier._opportunity_v2(
+        {"symbol": "AAPL", "in_portafoglio": False, "segnali": []},
+        {"AAPL": {"open": 100.0, "high": 108.0, "low": 99.0,
+                  "close": 107.0, "close_prec": 100.0}},
+        date(2026, 8, 12),
+        {"AAPL": [{"timestamp": datetime(2026, 8, 12, 14, 22,
+                                           tzinfo=timezone.utc),
+                   "open": 101.0, "high": 103.0, "low": 100.5,
+                   "close": 102.0}]},
+        {"AAPL": {"at": datetime(2026, 8, 12, 14, 7,
+                                   tzinfo=timezone.utc),
+                  "source": "execution_decisions.tick_time"}},
+        cost_calc=calc,
+    )
+
+    assert calc.calls == [("AAPL", 2200.0, 2200.0 / 101.0, 101.0, "SELL")]
+    assert estimate["accessible_opportunity_usd"] == pytest.approx(
+        (107.0 - 101.0) * (2200.0 / 101.0)
+    )
+    assert estimate["net_opportunity_usd"] == pytest.approx(
+        estimate["accessible_opportunity_usd"] - 2.0
+    )
+    assert estimate["costi"] == {
+        "total_usd": 2.0,
+        "model": "TradeCostCalculator/cost_model.yaml",
+        "spread_bps": 1.5,
+        "impact_bps": 0.2,
+        "regulatory_usd": 0.1,
+        "adv_source": "TradeCostCalculator default ADV fallback",
+    }

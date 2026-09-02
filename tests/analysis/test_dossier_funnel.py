@@ -225,6 +225,29 @@ def test_selezionato_ma_bloccato_dal_guard_risk_block():
     assert row["evidence"]["guard"] == ["SKIP_PYRAMIDING"]
 
 
+def test_un_fill_osservato_prevale_su_un_guard_di_un_altro_tentativo():
+    """Una riga per simbolo riassume l'esito piu' profondo della seduta: un
+    guard osservato in un ciclo non puo' cancellare un fill successivo."""
+    ordine = {
+        "order_id": "abc",
+        "submitted_at": "2026-08-12T15:22:00+00:00",
+        "filled_at": "2026-08-12T15:22:02+00:00",
+        "fill_price": 117.10,
+        "lookup_error": None,
+    }
+    row = _row(_mover(
+        guard=[{"decision": "SKIP_PYRAMIDING", "signal_id": 41}],
+        ordine=ordine,
+        intenti=[{
+            "final_reason_code": "RANK_SELECTED",
+            "is_tradable": True,
+            "trade_id": 7,
+            "pnl_realizzato": 12.5,
+        }],
+    ))
+    assert row["pipeline"] == "CAUGHT"
+
+
 def test_ordine_inviato_mai_eseguito_order_fail():
     ordine = {
         "order_id": "abc",
@@ -305,23 +328,27 @@ def _kpi_fixture():
     }
     return [
         # A: notizia tempestiva, nessun segnale (recall: denominatore, no num)
-        _mover(symbol="A", rend=0.05, articoli=tempestiva, segnali=[]),
+        _mover(symbol="A", rend=0.05, articoli=tempestiva, segnali=[],
+               opportunity_v2={"net_opportunity_usd": 5.0}),
         # B: catturato e profittevole
         _mover(symbol="B", rend=0.05, articoli=tempestiva, ordine=fill_ok,
                intenti=[{"final_reason_code": "RANK_SELECTED",
                          "is_tradable": True, "trade_id": 7,
                          "pnl_realizzato": 12.5}]),
         # C: segnale qualificante, ranker lo scarta
-        _mover(symbol="C", rend=0.05, articoli=tempestiva, intenti=outside),
+        _mover(symbol="C", rend=0.05, articoli=tempestiva, intenti=outside,
+               opportunity_v2={"net_opportunity_usd": -2.0}),
         # D: selezionato, ordine mai eseguito
         _mover(symbol="D", rend=0.05, articoli=tempestiva, intenti=selected,
-               ordine=fill_mai),
+               ordine=fill_mai,
+               opportunity_v2={"net_opportunity_usd": 8.0}),
         # E: detenuto in rialzo
         _mover(symbol="E", rend=0.05, held=True),
         # F: ribasso non detenuto
         _mover(symbol="F", rend=-0.05, articoli=nessuna, segnali=[]),
         # G: rialzo senza nessuna notizia rilevante
-        _mover(symbol="G", rend=0.05, articoli=nessuna, segnali=[]),
+        _mover(symbol="G", rend=0.05, articoli=nessuna, segnali=[],
+               opportunity_v2={"net_opportunity_usd": None}),
     ]
 
 
@@ -332,6 +359,10 @@ def test_kpi_held_at_open_distinto_dal_funnel_di_ingresso():
     assert kpi["exit_risk"] == 0
     assert kpi["passive_exposure"] == 1
     assert kpi["definizione"]
+    rate = funnel["kpi"]["held_at_open_rate"]
+    assert rate["numeratore"] == 1
+    assert rate["denominatore"] == 7
+    assert rate["valore"] == 1 / 7
 
 
 def test_kpi_active_signal_recall():
@@ -348,7 +379,7 @@ def test_kpi_execution_conversion():
     """Denominatore: chi e' arrivato allo stadio dell'ordine (B,D).
     Numeratore: chi e' stato eseguito (B)."""
     funnel = build_funnel(_kpi_fixture(), soglia_gate=0.30)
-    conv = funnel["kpi"]["execution_conversion"]
+    conv = funnel["kpi"]["execution_conversion_rate"]
     assert conv["numeratore"] == 1
     assert conv["denominatore"] == 2
     assert conv["valore"] == 0.5
@@ -358,18 +389,27 @@ def test_kpi_profitable_capture_end_to_end():
     """Cattura profittevole end-to-end: ingressi net-profit sul totale delle
     entry opportunity (A,B,C,D,G = 5), non solo sui catturati."""
     funnel = build_funnel(_kpi_fixture(), soglia_gate=0.30)
-    capture = funnel["kpi"]["profitable_capture"]
+    capture = funnel["kpi"]["profitable_capture_rate"]
     assert capture["numeratore"] == 1
     assert capture["denominatore"] == 5
     assert capture["valore"] == 0.2
+
+
+def test_kpi_avoidable_miss_conta_solo_opportunita_nette_positive_non_catturate():
+    """A e D hanno alpha accessibile positivo e non sono CAUGHT; C ha
+    opportunity netta negativa e G e' non misurabile, quindi non si inventano
+    altri miss economicamente evitabili."""
+    funnel = build_funnel(_kpi_fixture(), soglia_gate=0.30)
+    assert funnel["kpi"]["avoidable_miss_count"] == 2
+    assert funnel["kpi"]["avoidable_miss_unknown_count"] == 1
 
 
 def test_kpi_denominatore_nullo_resta_none():
     """Nessun mover: il KPI e' None, non 0.0 — un rapporto senza denominatori
     non dice niente."""
     funnel = build_funnel([], soglia_gate=0.30)
-    for nome in ("active_signal_recall", "execution_conversion",
-                 "profitable_capture"):
+    for nome in ("held_at_open_rate", "active_signal_recall",
+                 "execution_conversion_rate", "profitable_capture_rate"):
         assert funnel["kpi"][nome]["valore"] is None
     assert funnel["kpi"]["held_at_open"]["mover_held"] == 0
 

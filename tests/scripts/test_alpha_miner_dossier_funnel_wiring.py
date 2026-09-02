@@ -79,7 +79,7 @@ def test_funnel_v2_costruisce_le_righe_per_ogni_mover():
 
     funnel = dossier._funnel_v2(
         rendimenti=rendimenti,
-        in_portafoglio={"HOOD"},
+        held_at_open={"HOOD"},
         universo=["ORCL", "HOOD"],
         copertura=copertura,
         segnali=segnali,
@@ -104,14 +104,14 @@ def test_funnel_v2_costruisce_le_righe_per_ogni_mover():
     # SPY non e' in universo: fuori dal perimetro
     assert righe["SPY"]["actionability"] == "OUT_OF_SCOPE"
     # KPI end-to-end: 1 catturato profittevole su 1 entry opportunity
-    assert funnel["kpi"]["profitable_capture"]["valore"] == 1.0
+    assert funnel["kpi"]["profitable_capture_rate"]["valore"] == 1.0
     assert funnel["soglia_gate"] == 0.30
 
 
 def test_funnel_v2_niente_mover_righe_vuote_kpi_none():
     funnel = dossier._funnel_v2(
         rendimenti={"AAPL": 0.001},
-        in_portafoglio=set(),
+        held_at_open=set(),
         universo=["AAPL"],
         copertura={"per_ticker": {}},
         segnali={},
@@ -123,8 +123,8 @@ def test_funnel_v2_niente_mover_righe_vuote_kpi_none():
         soglia_gate=0.30,
     )
     assert funnel["righe"] == []
-    for nome in ("active_signal_recall", "execution_conversion",
-                 "profitable_capture"):
+    for nome in ("held_at_open_rate", "active_signal_recall",
+                 "execution_conversion_rate", "profitable_capture_rate"):
         assert funnel["kpi"][nome]["valore"] is None
 
 
@@ -150,6 +150,11 @@ def test_dossier_pubblica_il_blocco_funnel_v2_affiancato_al_legacy():
             return [["WMT", "16:36", "0.45", "f", "", "", "", "7001"]]
         if "SELECT ticker, count(*) FROM news_log" in query:
             return [["WMT", "1"]]
+        if "SELECT DISTINCT symbol FROM trades" in query:
+            # Vista legacy a fine giornata: WMT e' in portafoglio perche' e'
+            # entrato intraday. Non era pero' detenuto all'open e il funnel v2
+            # deve continuare a riconoscerlo come ingresso attivo.
+            return [["WMT"]]
         return []
 
     cutoff = datetime(2026, 8, 20, 23, 59, tzinfo=timezone.utc)
@@ -176,6 +181,7 @@ def test_dossier_pubblica_il_blocco_funnel_v2_affiancato_al_legacy():
                    "lookup_error": None},
         }),
         patch.object(dossier, "_barre_intraday", return_value=({}, cutoff)),
+        patch.object(dossier, "_opening_positions", return_value=[]),
         patch.object(dossier, "_sedute_di_borsa", return_value=[]),
     ):
         payload = dossier.costruisci_dossier(date(2026, 8, 20), ["WMT"])
@@ -190,9 +196,39 @@ def test_dossier_pubblica_il_blocco_funnel_v2_affiancato_al_legacy():
     # 0.45 non fallback, selezionato, eseguito a 117.10 sotto il close 117.95
     assert wmt["actionability"] == "ENTRY_OPPORTUNITY"
     assert wmt["pipeline"] == "CAUGHT"
-    assert wmt["legacy_causa"] == "NON_CLASSIFICATO"
+    assert wmt["legacy_causa"] is None
     assert wmt["net_profitable"] is True
     # KPI end-to-end cablati, non solo il modulo puro
-    assert funnel["kpi"]["profitable_capture"]["valore"] == 1.0
+    assert funnel["kpi"]["profitable_capture_rate"]["valore"] == 1.0
     # il funnel dichiara la sua natura nel blocco provenienza del dossier
     assert "funnel_v2" in payload["provenienza_dati"]
+
+
+def test_funnel_sceglie_il_tentativo_fillato_se_un_simbolo_ha_piu_ordini():
+    eventi = [
+        {"symbol": "ORCL", "order_id": "o1", "order_submitted_at": "t1",
+         "filled_at": None, "fill_price": None, "order_lookup_error": None,
+         "trade_id": None},
+        {"symbol": "ORCL", "order_id": "o2", "order_submitted_at": "t2",
+         "filled_at": "t3", "fill_price": 117.10, "order_lookup_error": None,
+         "trade_id": 7},
+    ]
+    funnel = dossier._funnel_v2(
+        rendimenti={"ORCL": 0.05},
+        held_at_open=set(),
+        universo=["ORCL"],
+        copertura={"per_ticker": {"ORCL": {
+            "rilevanza": {"ISSUER_SPECIFIC": 1},
+            "effective_timely_articles": 1,
+        }}},
+        segnali={"ORCL": [{"score": 0.45, "fallback": False}]},
+        intenti=[{"symbol": "ORCL", "final_reason_code": "RANK_SELECTED",
+                  "is_tradable": True, "trade_id": 7,
+                  "pnl_realizzato": 12.5}],
+        eventi=eventi,
+        guard=[],
+        barre={"ORCL": _barra("ORCL", 117.95)},
+        candidati_classificati=[],
+        soglia_gate=0.30,
+    )
+    assert funnel["righe"][0]["pipeline"] == "CAUGHT"

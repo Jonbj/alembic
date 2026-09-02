@@ -171,7 +171,12 @@ def _stage_notizia(articoli: dict | None) -> tuple[str, dict]:
 def _punteggi(segnali: list[dict]) -> list[float]:
     """Punteggi firmati del candidato. Il campo e' gia' firmato: si copia il
     valore, non si ricostruisce il segno (criterio 3)."""
-    return [float(s.get("score")) for s in (segnali or []) if s.get("score") is not None]
+    punteggi = []
+    for segnale in segnali or []:
+        score = segnale.get("score")
+        if score is not None:
+            punteggi.append(float(score))
+    return punteggi
 
 
 def _selezionato(intenti: list[dict]) -> tuple[bool, list[str], dict | None]:
@@ -240,33 +245,43 @@ def classify_pipeline(mover: dict, soglia_gate: float) -> tuple[str | None, dict
             "intenti_assenti": not bool(mover.get("intenti")),
         }
 
+    # --- ordine e fill --------------------------------------------------------
+    # Una riga riassume il punto piu' profondo raggiunto dal simbolo nella
+    # seduta. Se un tentativo precedente e' stato bloccato ma un tentativo
+    # successivo ha generato un ordine, il guard non puo' cancellare l'esito
+    # osservato a valle.
+    ordine = mover.get("ordine") or {}
+    if ordine:
+        if not ordine.get("submitted_at"):
+            return "ORDER_FAIL", {
+                "ordine": "mai_inviato",
+                "order_id": ordine.get("order_id"),
+                "lookup_error": ordine.get("lookup_error"),
+            }
+        if not ordine.get("filled_at"):
+            return "ORDER_FAIL", {
+                "order_id": ordine.get("order_id"),
+                "lookup_error": ordine.get("lookup_error"),
+            }
+
+        close = mover.get("close")
+        fill_price = ordine.get("fill_price")
+        if close is not None and fill_price is not None and float(fill_price) > float(close):
+            return "BAD_FILL", {
+                "fill_price": float(fill_price), "close": float(close),
+                "exit_policy": "EOD_close",
+            }
+        return "CAUGHT", {
+            "fill_price": fill_price, "close": close,
+            "trade_id": ordine.get("trade_id") or (eseguito or {}).get("trade_id"),
+        }
+
     # --- guard ---------------------------------------------------------------
     guard = [str(g.get("decision")) for g in (mover.get("guard") or [])
              if g.get("decision")]
     if guard:
         return "RISK_BLOCK", {"guard": guard, "reason_codes": reason_codes}
-
-    # --- ordine e fill --------------------------------------------------------
-    ordine = mover.get("ordine") or {}
-    if not ordine or not ordine.get("submitted_at"):
-        return "ORDER_FAIL", {"ordine": "mai_inviato"}
-    if not ordine.get("filled_at"):
-        return "ORDER_FAIL", {
-            "order_id": ordine.get("order_id"),
-            "lookup_error": ordine.get("lookup_error"),
-        }
-
-    close = mover.get("close")
-    fill_price = ordine.get("fill_price")
-    if close is not None and fill_price is not None and float(fill_price) > float(close):
-        return "BAD_FILL", {
-            "fill_price": float(fill_price), "close": float(close),
-            "exit_policy": "EOD_close",
-        }
-    return "CAUGHT", {
-        "fill_price": fill_price, "close": close,
-        "trade_id": ordine.get("trade_id") or (eseguito or {}).get("trade_id"),
-    }
+    return "ORDER_FAIL", {"ordine": "mai_inviato"}
 
 
 def _net_profitable(mover: dict) -> bool | None:
@@ -313,6 +328,7 @@ def build_funnel(movers: list[dict], soglia_gate: float) -> dict:
         evidence: dict = {}
         if actionability == "ENTRY_OPPORTUNITY":
             pipeline, evidence = classify_pipeline(mover, soglia_gate)
+            assert pipeline is not None
             conteggi_pipeline[pipeline] += 1
         else:
             motivo = {
@@ -322,6 +338,7 @@ def build_funnel(movers: list[dict], soglia_gate: float) -> dict:
                 "NON_ACTIONABLE": "non_actionable_long_only",
             }[actionability]
             esclusi[motivo] = esclusi.get(motivo, 0) + 1
+        opportunity = mover.get("opportunity_v2") or {}
         righe.append({
             "symbol": mover.get("symbol"),
             "rendimento": mover.get("return"),
@@ -332,6 +349,7 @@ def build_funnel(movers: list[dict], soglia_gate: float) -> dict:
             "evidence": evidence,
             "legacy_causa": mover.get("legacy_causa"),
             "net_profitable": _net_profitable(mover) if pipeline == "CAUGHT" else None,
+            "net_opportunity_usd": opportunity.get("net_opportunity_usd"),
         })
 
     # --- KPI distinti (criterio 2) -------------------------------------------
@@ -352,6 +370,15 @@ def build_funnel(movers: list[dict], soglia_gate: float) -> dict:
                 if r["pipeline"] in ("BAD_FILL", "CAUGHT")]
     catturati_profittevoli = [r for r in eseguiti if r["pipeline"] == "CAUGHT"
                               and r["net_profitable"] is True]
+    miss_non_catturati = [r for r in entry_rows if r["pipeline"] != "CAUGHT"]
+    miss_evitabili = [
+        r for r in miss_non_catturati
+        if r["net_opportunity_usd"] is not None
+        and float(r["net_opportunity_usd"]) > 0
+    ]
+    miss_evitabilita_ignota = [
+        r for r in miss_non_catturati if r["net_opportunity_usd"] is None
+    ]
 
     kpi = {
         # I mover gia' a libro non sono miss: contarli insieme ai candidati
@@ -367,22 +394,30 @@ def build_funnel(movers: list[dict], soglia_gate: float) -> dict:
                 "non entrano nei KPI del funnel"
             ),
         },
+        "held_at_open_rate": _rapporto(
+            conteggi_actionability["EXIT_RISK"]
+            + conteggi_actionability["PASSIVE_EXPOSURE"],
+            len(righe),
+            "mover gia' detenuti all'apertura / tutti i mover della seduta",
+        ),
         "active_signal_recall": _rapporto(
             len(con_segnale_qualificante), len(notizia_agibile),
             "mover ENTRY_OPPORTUNITY con notizia tempestiva che hanno prodotto "
             "un punteggio qualificante (segno giusto, sopra il gate, non "
             "fallback) / tutti i mover ENTRY_OPPORTUNITY con notizia tempestiva",
         ),
-        "execution_conversion": _rapporto(
+        "execution_conversion_rate": _rapporto(
             len(eseguiti), len(arrivati_all_ordine),
             "mover arrivati allo stadio dell'ordine che sono stati eseguiti "
             "(fill, anche cattivo) / tutti i mover arrivati all'ordine",
         ),
-        "profitable_capture": _rapporto(
+        "profitable_capture_rate": _rapporto(
             len(catturati_profittevoli), len(entry_rows),
             "ingressi catturati con P&L realizzato positivo / tutti i mover "
             "ENTRY_OPPORTUNITY della seduta (end-to-end)",
         ),
+        "avoidable_miss_count": len(miss_evitabili),
+        "avoidable_miss_unknown_count": len(miss_evitabilita_ignota),
     }
 
     # Pubblica solo gli stadi osservati, nell'ordine canonico.
