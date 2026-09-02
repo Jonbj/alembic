@@ -294,6 +294,30 @@ def test_fill_sotto_il_close_caught_con_pnl_profittevole():
     assert row["net_profitable"] is True
 
 
+def test_profitto_giornaliero_usa_il_mark_eod_netto_prima_del_realizzato():
+    """Un trade ancora aperto deve essere giudicabile nel funnel del giorno;
+    quando il mark fill->close netto e' disponibile prevale sul net_pnl finale
+    del trade, che appartiene a un orizzonte diverso."""
+    ordine = {
+        "order_id": "abc",
+        "submitted_at": "2026-08-12T15:07:00+00:00",
+        "filled_at": "2026-08-12T15:07:02+00:00",
+        "fill_price": 117.10,
+        "eod_net_pnl": -0.25,
+        "lookup_error": None,
+    }
+    intenti = [{
+        "final_reason_code": "RANK_SELECTED",
+        "is_tradable": True,
+        "trade_id": 7,
+        "pnl_realizzato": 12.5,
+    }]
+    row = _row(_mover(ordine=ordine, intenti=intenti))
+    assert row["pipeline"] == "CAUGHT"
+    assert row["net_profitable"] is False
+    assert row["evidence"]["eod_net_pnl"] == -0.25
+
+
 # --- KPI distinti (criterio 2) ------------------------------------------------
 
 

@@ -270,10 +270,12 @@ def classify_pipeline(mover: dict, soglia_gate: float) -> tuple[str | None, dict
             return "BAD_FILL", {
                 "fill_price": float(fill_price), "close": float(close),
                 "exit_policy": "EOD_close",
+                "eod_net_pnl": ordine.get("eod_net_pnl"),
             }
         return "CAUGHT", {
             "fill_price": fill_price, "close": close,
             "trade_id": ordine.get("trade_id") or (eseguito or {}).get("trade_id"),
+            "eod_net_pnl": ordine.get("eod_net_pnl"),
         }
 
     # --- guard ---------------------------------------------------------------
@@ -285,8 +287,15 @@ def classify_pipeline(mover: dict, soglia_gate: float) -> tuple[str | None, dict
 
 
 def _net_profitable(mover: dict) -> bool | None:
-    """True/False dal P&L realizzato dell'intento eseguito; None se il trade e'
-    ancora aperto o ambiguo. Nessun P&L congetturale."""
+    """True/False dal mark fill->close netto di costi del giorno.
+
+    Il P&L realizzato e' solo un fallback per le righe storiche senza quantita'
+    di fill: puo' appartenere a una seduta successiva e non deve sovrascrivere
+    il verdetto EOD quando questo e' misurabile.
+    """
+    eod_net = (mover.get("ordine") or {}).get("eod_net_pnl")
+    if eod_net is not None:
+        return float(eod_net) > 0
     eseguiti = [i for i in (mover.get("intenti") or []) if i.get("trade_id") is not None]
     if len(eseguiti) != 1:
         return None
@@ -348,7 +357,11 @@ def build_funnel(movers: list[dict], soglia_gate: float) -> dict:
             "pipeline_escluso_motivo": motivo,
             "evidence": evidence,
             "legacy_causa": mover.get("legacy_causa"),
-            "net_profitable": _net_profitable(mover) if pipeline == "CAUGHT" else None,
+            "net_profitable": (
+                _net_profitable(mover)
+                if pipeline in ("BAD_FILL", "CAUGHT")
+                else None
+            ),
             "net_opportunity_usd": opportunity.get("net_opportunity_usd"),
         })
 
@@ -413,8 +426,8 @@ def build_funnel(movers: list[dict], soglia_gate: float) -> dict:
         ),
         "profitable_capture_rate": _rapporto(
             len(catturati_profittevoli), len(entry_rows),
-            "ingressi catturati con P&L realizzato positivo / tutti i mover "
-            "ENTRY_OPPORTUNITY della seduta (end-to-end)",
+            "ingressi catturati con mark fill->close EOD positivo dopo i costi "
+            "/ tutti i mover ENTRY_OPPORTUNITY della seduta (end-to-end)",
         ),
         "avoidable_miss_count": len(miss_evitabili),
         "avoidable_miss_unknown_count": len(miss_evitabilita_ignota),

@@ -1044,6 +1044,7 @@ def _funnel_v2(
     barre: dict[str, dict],
     candidati_classificati: list[dict],
     soglia_gate: float,
+    cost_calc: TradeCostCalculator | None = None,
 ) -> dict:
     """Vista funnel v2 parallela (#281): assembla i mover della seduta dai
     dati che il dossier ha gia' caricato e delega ogni decisione al modulo
@@ -1087,12 +1088,39 @@ def _funnel_v2(
             "submitted_at": evento.get("order_submitted_at"),
             "filled_at": evento.get("filled_at"),
             "fill_price": evento.get("fill_price"),
+            "filled_qty": evento.get("filled_qty"),
             "lookup_error": evento.get("order_lookup_error"),
             "trade_id": evento.get("trade_id"),
         }
         corrente = ordine_by_symbol.get(evento["symbol"])
         if corrente is None or profondita_ordine(candidato) > profondita_ordine(corrente):
             ordine_by_symbol[evento["symbol"]] = candidato
+
+    # Mark giornaliero dell'ingresso effettivo: il funnel e' EOD, quindi una
+    # posizione ancora aperta resta giudicabile senza aspettare il P&L finale.
+    # Il costo usa la stessa convention roundtrip della contabilita' live.
+    for symbol, ordine in ordine_by_symbol.items():
+        close = (barre.get(symbol) or {}).get("close")
+        fill_price = ordine.get("fill_price")
+        filled_qty = ordine.get("filled_qty")
+        if close is None or fill_price is None or filled_qty is None:
+            continue
+        calculator = cost_calc or TradeCostCalculator(
+            config_path=PROJECT_DIR / "config" / "cost_model.yaml"
+        )
+        notional = float(fill_price) * float(filled_qty)
+        costs = calculator.compute(
+            symbol,
+            notional=notional,
+            qty=float(filled_qty),
+            fill_price=float(fill_price),
+            side="SELL",
+        )
+        ordine["eod_gross_pnl"] = (
+            float(close) - float(fill_price)
+        ) * float(filled_qty)
+        ordine["eod_cost_usd"] = costs.total_cost_usd
+        ordine["eod_net_pnl"] = ordine["eod_gross_pnl"] - costs.total_cost_usd
 
     movers = [
         (sym, rendimento)
@@ -1504,6 +1532,7 @@ def costruisci_dossier(
             "order_submitted_at": ordine.get("submitted_at"),
             "filled_at": ordine.get("filled_at"),
             "fill_price": ordine.get("filled_avg_price"),
+            "filled_qty": ordine.get("filled_qty"),
             "order_lookup_error": ordine.get("lookup_error"),
         })
         eventi_arricchiti.append(row)
@@ -1553,6 +1582,7 @@ def costruisci_dossier(
         barre=barre,
         candidati_classificati=candidati_classificati,
         soglia_gate=soglia_gate,
+        cost_calc=opportunity_cost_calc,
     )
 
     # --- contesto evento/mercato/microstruttura (#285) -------------------
@@ -1815,8 +1845,9 @@ def costruisci_dossier(
                     "broker Alpaca della timeline #277"
                 ),
                 "net_profitable": (
-                    "P&L realizzato del trade collegato (#294); None se il "
-                    "trade e' ancora aperto o ambiguo"
+                    "mark fill->close EOD meno costo roundtrip del "
+                    "TradeCostCalculator live; P&L realizzato solo come fallback "
+                    "storico se la quantita' di fill manca"
                 ),
                 "avoidable_miss_count": (
                     "ENTRY_OPPORTUNITY non CAUGHT con net_opportunity_usd > 0; "

@@ -140,7 +140,7 @@ def test_dossier_pubblica_il_blocco_funnel_v2_affiancato_al_legacy():
         if "FROM s4_candidate_population" in query:
             return [["intent-wmt", "7001", "WMT",
                      "2026-08-20T16:36:00+00:00", "2026-08-20T16:37:00+00:00",
-                     "0.45", "RANK_SELECTED", "true", "42", "2.38"]]
+                     "0.45", "RANK_SELECTED", "true", "42", ""]]
         if "article_coverage_279" in query:
             return [["1", "7001", "WMT", "WMT beats earnings expectations",
                      "", "https://example.com/wmt", "gdelt_gkg",
@@ -197,6 +197,8 @@ def test_dossier_pubblica_il_blocco_funnel_v2_affiancato_al_legacy():
     assert wmt["actionability"] == "ENTRY_OPPORTUNITY"
     assert wmt["pipeline"] == "CAUGHT"
     assert wmt["legacy_causa"] is None
+    # Il trade e' ancora aperto (net_pnl realizzato NULL): il verdetto viene
+    # dal mark fill->close al netto del cost model, quindi resta misurabile EOD.
     assert wmt["net_profitable"] is True
     # KPI end-to-end cablati, non solo il modulo puro
     assert funnel["kpi"]["profitable_capture_rate"]["valore"] == 1.0
