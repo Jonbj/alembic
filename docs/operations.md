@@ -586,7 +586,7 @@ Poll `GET /api/system/readiness` at the start of each trading day and after any 
 
 **Action:**
 1. `GET /api/system/decisions?limit=20` — review recent decisions
-2. `GET /api/portfolio/cycles` — inspect `constraints_fired`
+2. `GET /portfolio/cycle-history?limit=10` — inspect `constraints_fired` (nota: **niente** prefisso `/api`; e anche `GET /portfolio/status` per l'ultimo ciclo soltanto)
 3. If divergence from constraints firing (position cap, exposure cap): expected behavior, no action needed
 4. If divergence from broker rejects / connectivity: investigate worker logs
 5. Document; escalate if pattern repeats across more than 2 consecutive cycles
@@ -610,10 +610,19 @@ Poll `GET /api/system/readiness` at the start of each trading day and after any 
 Before any trading session:
 - `GLOBAL_LIVE_PROMOTION_ENABLED` must be `False`
 - No strategy should have `mode: live`
-- P2-05 must be resolved before controlled paper trading begins
-- Kimi P2 Acceptance Audit must complete before controlled paper trading begins
 
 **No live trading, strategy promotions, or P3/P4 work without explicit PO sign-off.**
+
+> **Aggiornato il 2026-09-02.** Questa lista conteneva ancora due precondizioni *all'avvio* del
+> controlled paper trading — "P2-05 must be resolved" e "Kimi P2 Acceptance Audit must
+> complete" — entrambe soddisfatte da sette settimane: il verdetto dell'audit e'
+> `P2_ACCEPTED_WITH_RUNTIME_MONITORING` e il paper trading controllato gira sullo stack Alpaca
+> paper **dal 2026-07-14** (`docs/ARCHITECTURE.md` §P2-05). Lasciarle in un checklist
+> pre-sessione le faceva leggere come blocchi ancora aperti. I due requisiti che restano
+> davvero da controllare a ogni sessione sono i due sopra.
+>
+> Il go-live vero resta subordinato al clock di 90 giorni di `supervised_paper` piu' il sign-off
+> esplicito del PO.
 
 
 ## Environment Overrides (docker-compose)
@@ -624,3 +633,12 @@ Before any trading session:
 | `MAX_NEWS_AGE_HOURS` | `2` | — | FIX-03 event-time freshness: news older than this is skipped pre-inference and gated at cycle time |
 | `RESOLVER_ENFORCE_NOT_TRADABLE` | `1` (on) | — | Conservative resolver enforcement; set `0` to disable pre-inference drops |
 | `MARKETAUX_INGESTION_ENABLED` / `RSS_INGESTION_ENABLED` | `0` (off) | — | FIX-01/02: net-negative sources removed from beat; re-enable only with per-source IC > 0 evidence |
+| `SENTIMENT_PROMPT_VARIANT` | `legacy` | **`a`** (via `.env`, non docker-compose) | **Variante A del prompt sentiment**, attiva in produzione dal 2026-09-01T10:33Z (`bf5bef2e`, #399/#408). Include il titolo dell'articolo nel prompt e riformula lo step 1 su *impatto di prezzo* invece che su *fondamentali*. Deployata **in deroga esplicita al freeze #171** — registrata in `docs/evidence/OBSERVATION_CHARTER.md`. Non e' indolore: cambia la **distribuzione** degli score, non solo la loro correttezza (stimati ~2,4x segnali sopra il gate 0,30 a parita' di soglia). Ogni analisi di S4 che attraversa il 2026-09-01 va segmentata prima/dopo. |
+| `SENTIMENT_LLM_BODY_CHARS` | `600` | `600` (`.env`, ridondante) | Caratteri di corpo articolo passati al prompt. Il valore in `.env` coincide col default del codice: non e' un override. |
+
+> **Nota sullo scope, 2026-09-02.** Il titolo dice "docker-compose" ma la tabella e' l'elenco
+> degli scostamenti fra `src/config.py` e ciò che gira davvero, indipendentemente da dove
+> arriva la variabile. `SENTIMENT_PROMPT_VARIANT` arriva da `.env` (non versionato) ed e' il
+> singolo override con l'impatto piu' grande sul comportamento del sistema: non compariva qui
+> fino a oggi. Per rileggere lo stato reale:
+> `docker exec alembic-worker-inference-1 env | grep -E 'SENTIMENT|MAX_NEWS|RESOLVER'`.

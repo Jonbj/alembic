@@ -155,10 +155,20 @@ Where `polarity ∈ [-1, +1]` is the direction of sentiment and `confidence ∈ 
 
 ### LLM Ensemble
 
-Due modelli attivi via Ollama Cloud:
-- Kimi K2.6 + GLM-5.2
+Due modelli attivi via Ollama Cloud, **selezionati a runtime** dalla chiave Redis
+`config:sentiment_llm_models` (fallback env `SENTIMENT_LLM_MODELS`, poi `"all"`):
 
-> Qwen3.5 sostituito da GLM-5.2 il 2026-06-29 (estrazione ticker troppo aggressiva su news macro). DeepSeek-V4-Pro e GLM-5.1 rimossi il 2026-06-16. Vedi `docs/llm-config.md` e `docs/CHANGELOG.md`.
+- **GLM-5.2 + GPT-OSS 20B** (`glm52,gptoss`) — coppia live dal 2026-07-11, verificata sul
+  Redis di produzione il 2026-09-02.
+
+> **Corretto il 2026-09-02:** questa riga diceva "Kimi K2.6 + GLM-5.2", coppia sostituita il
+> 2026-07-11. Kimi K2.6 e' ancora *registrato* in `src/llm/model_registry.py` ma non e' nella
+> coppia attiva: fu tolto per disaccordo direzionale sistematico con GLM-5.2 (fallback 75-80%)
+> e per la peggior accuracy di Stage 1 (0,29 a 29s di latenza).
+>
+> Storia precedente: Qwen3.5 sostituito da GLM-5.2 il 2026-06-29 (estrazione ticker troppo
+> aggressiva su news macro); DeepSeek-V4-Pro e GLM-5.1 rimossi il 2026-06-16. Vedi
+> `docs/llm-config.md` (tabella dei modelli sempre aggiornata) e `docs/CHANGELOG.md`.
 
 Each uses **DK-CoT** (Domain Knowledge Chain-of-Thought) prompting:
 1. Act as buy-side analyst
@@ -166,7 +176,17 @@ Each uses **DK-CoT** (Domain Knowledge Chain-of-Thought) prompting:
 3. Provide explicit bull/bear cases
 4. Return structured JSON (`polarity`, `confidence`, `reasoning`)
 
-**Divergence check:** If `std(scores) > 0.30` → discard ensemble, use FinBERT local fallback.
+**Divergence check:** If `std(scores) > 0.40` → discard ensemble, use FinBERT local fallback.
+La soglia e' `config.ENSEMBLE_DIVERGENCE_STD` (default 0.40, alzata da 0.30 il 2026-07-09).
+
+> **Corretto il 2026-09-02:** qui era scritto 0.30, il valore pre-2026-07-09. Nota misurata
+> allora: alzare la soglia 0.30→0.40 **non** ha ridotto il fallback rate — il disaccordo fra i
+> modelli e' direzionale/bimodale, non una nuvola gaussiana da allargare. La leva efficace e'
+> la scelta della coppia, non la soglia.
+>
+> Attenzione a non confondere questo controllo con un *gate d'ingresso*: `ensemble_std` fa
+> scattare il fallback FinBERT dentro l'aggregatore del sentiment worker, ma non e' mai
+> consultato dal portfolio scheduler prima di un ordine (issue #443).
 
 ### FinBERT Fallback
 

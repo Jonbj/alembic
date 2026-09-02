@@ -11,7 +11,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import React from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { readFileSync } from 'fs'
+import { readFileSync, readdirSync, existsSync } from 'fs'
 import { resolve } from 'path'
 
 // ── Mocks (hoisted by Vitest) ────────────────────────────────────────────────
@@ -151,16 +151,30 @@ describe('F0-3 Admin and Config Safety Guardrails', () => {
     expect(screen.getByText(/does not authorize live trading/i)).toBeInTheDocument()
   })
 
-  test('Strategies page does not introduce promote/approve/demote UI elements', () => {
-    const src = readFileSync(resolve(__dirname, '../pages/Strategies.tsx'), 'utf-8')
-    // Promotion endpoints must not be wired
-    expect(src).not.toContain('/promote')
-    expect(src).not.toContain('/demote')
-    // Visible promotion action buttons must not exist
-    expect(src).not.toMatch(/Promote Strategy/)
-    expect(src).not.toMatch(/Demote Strategy/)
-    expect(src).not.toMatch(/Approve Strategy/)
-    // No direct strategy promotion API calls
-    expect(src).not.toMatch(/strategiesApi\.(promote|demote|approve)/)
+  // The Strategies page was deleted on 2026-09-02 (its metrics were hardcoded
+  // snapshots, not live data). The original guard read Strategies.tsx and asserted
+  // it wired no promotion controls; with the file gone that assertion would pass by
+  // ENOENT, which is a guard dying rather than a guard holding. It is replaced by two
+  // checks that keep the same guarantee against the pages that still exist.
+
+  test('no page wires strategy promote/approve/demote controls', () => {
+    const pagesDir = resolve(__dirname, '../pages')
+    const offenders: string[] = []
+    for (const file of readdirSync(pagesDir).filter((f) => f.endsWith('.tsx'))) {
+      const src = readFileSync(resolve(pagesDir, file), 'utf-8')
+      if (
+        src.includes('/promote') ||
+        src.includes('/demote') ||
+        /Promote Strategy|Demote Strategy|Approve Strategy/.test(src)
+      ) {
+        offenders.push(file)
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+
+  test('the removed Strategies page and its snapshot API client stay removed', () => {
+    expect(existsSync(resolve(__dirname, '../pages/Strategies.tsx'))).toBe(false)
+    expect(existsSync(resolve(__dirname, '../api/strategies.ts'))).toBe(false)
   })
 })

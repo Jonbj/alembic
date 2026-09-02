@@ -14,7 +14,13 @@ React + TypeScript + Vite single-page app — the operator monitoring/control su
 
 ## Pages (`src/pages/`)
 
-Overview, Signals, Strategies, Trading, Performance, News, LLM, AutoImprove, Operations, Quality, Labeling, Validation, Backtest, Docs, SystemLog, Admin, Config, Login.
+Overview, Signals, Trading, Performance, News, LLM, AutoImprove, Operations, Quality, Labeling, Validation, Backtest, Docs, SystemLog, Admin, Config, Login.
+
+`Strategies.tsx` e' stata rimossa il 2026-09-02: le sue metriche erano snapshot hardcoded
+(equity curve vuota, heatmap sintetica, gate con soglie inventate, universo del backtest,
+conteggi trade di un ordine di grandezza sbagliati). La rotta `/strategies` fa redirect a
+Overview, dove lo stato di autorizzazione vive ora nella card Authorization alimentata da
+`GET /portfolio/status`. Vedi `docs/FRONTEND_OPERATOR_GUIDE.md` §2.0.
 
 Trace model is shared across pages: `News -> Signal -> Decision -> Order -> Performance` (Trace drawer shows the full chain with `origin_strategy` for non-news orders).
 
@@ -38,5 +44,5 @@ The frontend is built into a static bundle and served by nginx in the `frontend`
 ## Notes
 
 - Authorization: controlled paper trading is running; `GLOBAL_LIVE_PROMOTION_ENABLED = False` (paper, not live money). See the operator guide §4.
-- The legacy `/trades` and `/dashboard` routes redirect to `Trading` and `Overview` respectively (`Trades.tsx` / `DashboardPage.tsx` removed).
+- The legacy `/trades`, `/dashboard` and `/strategies` routes redirect to `Trading`, `Overview` and `Overview` respectively (`Trades.tsx` / `DashboardPage.tsx` / `Strategies.tsx` removed).
 - NUMERIC columns from Postgres are serialized as JSON numbers by the backend (since 2026-07-09) — frontend `.toFixed()` calls are safe; the old Decimal-as-string crash on the Quality page is resolved.
