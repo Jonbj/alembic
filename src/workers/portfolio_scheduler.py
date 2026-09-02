@@ -3516,10 +3516,19 @@ def _record_gate_drops(dropped_df, threshold: float) -> None:
         pg = PostgreSQLStore()
         for _, row in dropped_df.iterrows():
             sig_score = float(row["score"])
+            # #406: the gate drop carries a known signal_id — propagate it so the
+            # Decision Log row joins back to the signal that caused it. NaN is
+            # the pandas sentinel for a missing int column; int(NaN) raises,
+            # which is exactly the None-mapping we want.
+            raw_sid = row.get("signal_id")
+            try:
+                sid: int | None = int(raw_sid) if raw_sid is not None else None
+            except (TypeError, ValueError):
+                sid = None
             pg.write_execution_decision(
                 tick_time=now,
                 symbol=str(row["symbol"]),
-                signal_id=None,
+                signal_id=sid,
                 score=0.0,  # no allocation weight — it never reached ranking
                 regime_mult=regime_mult,
                 ema_pass=False,
@@ -3572,7 +3581,7 @@ def _record_stale_drops(stale_signals, max_age_hours: int, min_score: float) -> 
             pg.write_execution_decision(
                 tick_time=now,
                 symbol=sig.symbol,
-                signal_id=None,
+                signal_id=getattr(sig, "signal_id", None),
                 score=0.0,
                 regime_mult=regime_mult,
                 ema_pass=False,
@@ -3803,7 +3812,7 @@ def _record_fallback_drops(fallback_signals, non_fallback_signals=()) -> None:
             pg.write_execution_decision(
                 tick_time=now,
                 symbol=sig.symbol,
-                signal_id=None,
+                signal_id=getattr(sig, "signal_id", None),
                 score=0.0,  # no allocation weight — excluded before ranking
                 regime_mult=regime_mult,
                 ema_pass=False,
