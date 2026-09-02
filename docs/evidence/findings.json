@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 60,
+  "prossimo_id": 61,
   "findings": [
     {
       "id": "F-001",
@@ -140,12 +140,24 @@
           "costo_usd": 74.63,
           "nota": "60/96 simboli watchlist (62,5%) a zero righe news_log oggi, massimo della serie osservata (41 13/08, 45 26/08, 51 24/08, 53 27/08, 54 28/08, 55 25/08). Un solo candidato miss NO_NEWS puro: RDDT -3,39%, zero righe news e zero sentiment_signals. Costo lordo close-to-close x $2.200 = $74,63, ma il titolo e' sceso e il book e' long-only: opportunity_v2 calcola accessible_opportunity_usd=0,0 (missing_reason long_only_no_short_downside_not_held), quindi il costo realmente accessibile e' $0.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-31.md §3, §Segnalazioni"
+        },
+        {
+          "data": "2026-08-13",
+          "costo_usd": null,
+          "nota": "[RESTAURATA 2026-09-02 da stash@{0}, mai committata] 41/96 simboli (43%) zero righe in news_log il 08-13, dentro la banda 40-57% osservata dal 07-31. Quattro dei nove candidati miss del dossier deterministico sono NO_NEWS puri, tutti al rialzo (book long-only, tradabili): ADBE +4.54%, CRM +4.16%, TMUS +3.53%, RDDT +3.04% - zero righe in news_log, zero segnali. Costo con size S4 tipica 2200$ sul return pieno: 99.82+91.61+77.62+66.95 = 336.00. || COSTO AZZERATO A null IN FASE DI RESTAURO: findings.json su main registra gia' un'occorrenza F-001 del 2026-08-13 da 336,01 $ (ALPHA_MISS_REPORT_2026-08-13.md) per lo stesso giorno; sommare i 336,00 $ della vista forense raddoppierebbe il costo dello stesso fenomeno. Testo conservato, dollari no.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-13.md sezione 4, 10 [DAY-006]"
+        },
+        {
+          "data": "2026-09-01",
+          "costo_usd": 164.39,
+          "nota": "48/96 simboli (50,0%) zero righe news_log il 09-01. Miglior valore da due settimane (60 l'08-31, 54 l'08-28, 53 l'08-27, 55 l'08-25, 45 l'08-26, 51 l'08-24, 43 l'08-21, 41 l'08-13) ma la banda 40-60 non si e' mai spezzata in tutta la finestra: oscillazione, non tendenza; i connettori #454/#455/#456 non risultano deployati. IL DATO DELLA GIORNATA E' DOVE CADE IL BUCO: i due mover migliori dell'universo, PBR +5,06% e BP +3,73%, hanno ENTRAMBI zero articoli, e PBR ha fonti_osservate_finestra vuoto su tutte e 10 le sedute della finestra. Sono stati presi lo stesso, ma da S1 momentum ('S1 momentum: time-series momentum signal' a DB), che le notizie non le legge: se la cattura fosse dipesa da S4 sarebbero stati due miss NO_NEWS sull'unico lato accessibile del libro. Costo = lordo close-to-close x 2.200 $ dei due miss NO_NEWS effettivi, SAP -4,01% (88,14 $) + PLTR -3,47% (76,25 $) = 164,39 $, registrato per confrontabilita' con la serie; entrambi ribassisti e non detenuti, quindi opportunity_v2 accessible = 0 e il costo realmente accessibile e' 0 $.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-01.md §Segnalazioni"
         }
       ],
-      "costo_cumulato_usd": 3349.45,
+      "costo_cumulato_usd": 3513.84,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 2
+      "occorrenze_non_stimate": 3
     },
     {
       "id": "F-002",
@@ -364,12 +376,18 @@
           "costo_usd": null,
           "nota": "Rinforzo dell'evidenza: risk_reports.combined_drawdown = 0,012429 su TUTTE le 11 righe giornaliere dal 2026-08-20 al 2026-08-30 incluso il 28/08, mentre portfolio_monitor_snapshots.current_drawdown alle 20:00 del 28/08 e' 0,007627 (0,76%), diverso e coerente col NAV. Non e' solo un disallineamento fra due fonti (gia' noto): il valore e' costante per 11 sedute con NAV, esposizione e P&L diversi ogni giorno, quindi la metrica non sta misurando nulla del portafoglio reale.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-28.md §3, §10 [DAY-003]"
+        },
+        {
+          "data": "2026-08-13",
+          "costo_usd": null,
+          "nota": "[RESTAURATA 2026-09-02 da stash@{0}, mai committata] Nona occorrenza. risk_reports id 62, 2026-08-13 22:30:01: combined_drawdown=0.012429 (1.24%, invariato da settimane) contro per_strategy_metrics.portfolio.drawdown=0.171901 (17.2%, quello che genera l'ALERT 'Strategy portfolio drawdown 17.2% exceeds 10%') contro current_drawdown reale da portfolio_monitor_snapshots a chiusura (20:00) = 0.001621 (0.16%). Tre cifre di drawdown incompatibili nello stesso giorno, come nelle otto occorrenze precedenti. Costo null: nessun ordine dipende da questo record.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-13.md sezione 10 [DAY-004]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": "#349",
-      "occorrenze_non_stimate": 17
+      "occorrenze_non_stimate": 18
     },
     {
       "id": "F-004",
@@ -449,12 +467,18 @@
           "costo_usd": null,
           "nota": "Ricorrenza esatta: decay_reports del 2026-08-28 21:00 riporta sharpe=2,2147, hit_rate=0,2864, ic=-0,0020, max_drawdown=0,0734 identici su S1, S2 e S4 (12 righe, 4 metriche x 3 strategie), confrontati contro baseline diverse (0,95/1,10/0,80 sharpe). 4 CRITICAL meccanici (hit_rate e ic su due strategie). S2 assente da strategies_run in tutti e 24 i cicli del giorno ma continua a generare allarmi.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-28.md §3, §10 [DAY-004]"
+        },
+        {
+          "data": "2026-08-13",
+          "costo_usd": null,
+          "nota": "[RESTAURATA 2026-09-02 da stash@{0}, mai committata] Settima occorrenza. decay_reports del 2026-08-13 21:00:00: 12 righe, actual_value IDENTICO fra S1/S2/S4 su tutte e 4 le metriche (hit_rate 0.3281, ic 0.02193, max_drawdown 0.11518, sharpe -6.98706), confrontato contro tre baseline distinte, con CRITICAL su sharpe per tutte e tre. S2 (dead, 0% allocazione dall'audit 2026-08-04) riceve gli stessi alert di S1/S4. Radice invariata: _fetch_actual_metrics non filtra per strategy_id.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-13.md sezione 10 [DAY-005]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 12
+      "occorrenze_non_stimate": 13
     },
     {
       "id": "F-005",
@@ -632,12 +656,18 @@
           "costo_usd": null,
           "nota": "[DAY-012] Riga ingestion_stats_daily 2026-08-31/alpaca_benzinga: fetched=700, queued=353, duplicates=2773, discarded_stale=97, parse_fail=0 (updated_at 19:45:03). duplicates e' 3,96x i fetched sulla stessa riga. Corroborato da news_queue_drops: 2.773 righe duplicate_id in stage 'ingestion', piu' 1.620 no_ticker (gdelt), 114 not_tradable e 97 stale (stage sentiment), 2 duplicate_content. Denominatori diversi: duplicates accumula gli scarti su tutte le finestre di poll sovrapposte, fetched conta solo gli item nuovi dell'ultima. Resa reale del connettore illeggibile dalla riga: 700 fetched -> 353 queued -> 97 righe persistite = 13,9%. Nessun effetto sul money path.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-31.md §10 [DAY-012]"
+        },
+        {
+          "data": "2026-08-13",
+          "costo_usd": null,
+          "nota": "[RESTAURATA 2026-09-02 da stash@{0}, mai committata] Ricorrenza. ingestion_stats_daily 2026-08-13 alpaca_benzinga: fetched=737, duplicates=3261 (4.4x fetched). news_log finale (193 righe) non mostra righe scartate (discarded_reason sempre NULL), quindi il contatore resta inaffidabile come metrica ma la dedup a valle non mostra perdita.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-13.md sezione 4, 10 [DAY-007]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 16
+      "occorrenze_non_stimate": 17
     },
     {
       "id": "F-008",
@@ -699,9 +729,15 @@
           "costo_usd": null,
           "nota": "Terza faccia dello stesso giorno gia' registrato su F-013: TUTTE E TRE le uscite della seduta sono innescate da articoli generici multi-ticker scorati 0,000. SELL CRM 16:07 -> segnale 9085 (14:45, conf 0,200) dall'articolo 'Stock Market Today: S&P 500, Nasdaq 100 Futures Gain Following NVDA Blockbuster Q2 Report- CRM, CRWD, HPQ in Focus'; SELL NVDA 16:52 -> segnale 9129 (16:47, conf 0,250) da 'Musk, Altman, Huang All Set to Speak at US-Hosted G20 Tech Meeting'; SELL CRM 18:52 -> segnale 9150 (17:45, conf 0,200) da 'Nvidia's Unusual Move Answers AI Trade's Key Question; $40 Trillion US Debt Bomb Ticks'. Nessuno dei tre contiene informazione issuer-specific sul titolo chiuso: il modello ha ragione a dire 0,000, e' la pipeline che tratta 'nessuna informazione' come 'informazione negativa'. COSTO NON RIPETUTO QUI: i $34,80 del churn CRM sono gia' contabilizzati sull'occorrenza F-013 di questa stessa data - contarli anche qui gonfierebbe due cumulati con gli stessi dollari.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-27.md §10 [DAY-001]"
+        },
+        {
+          "data": "2026-08-13",
+          "costo_usd": 16.86,
+          "nota": "[RESTAURATA 2026-09-02 da stash@{0}, mai committata] Settima giornata del pattern. META: BUY 16:37:11 su sentiment_signals 7595 (score ensemble 0.442-0.531, non-fallback, generato dall'articolo ticker-specifico 'What Is Going on With Meta Platforms Stock on Thursday?', news_log 7595, pubblicato 15:41). Alle 16:45:30 arriva sentiment_signals 7601, score 0.000, dall'articolo macro multi-ticker 'Smart Money Sells #1 Dow Stock; Hidden Inflation In PPI; Applied Materials Earnings To Tell A Key AI Story' (news_log 7601, pubblicato 15:35 - PRIMA del pezzo specifico ma processato/scorato dopo). Vince l'ultimo segnale per simbolo (F-023): la SELL alle 18:22:15 cita testualmente '[below_entry_gate] ... score=+0.000', dopo 1h45 di tenuta (trades id 704). COSTO ATTRIBUITO 16.86 = mtm_eod (24.05, dossier deterministico) meno net_pnl realizzato (6.82): tenendo la posizione fino a chiusura il guadagno sarebbe stato 3.5x superiore. Controfattuale corto (stessa giornata, stesso strumento, stessa size).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-13.md sezione 10 [DAY-002]"
         }
       ],
-      "costo_cumulato_usd": 48.94,
+      "costo_cumulato_usd": 65.8,
       "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
@@ -796,9 +832,15 @@
           "costo_usd": 205.4,
           "nota": "TSLA +5,51% (punteggio massimo 0,281 su articolo issuer-specific 'Tesla Stock Surges Ahead of Cybercab Event' — scarto piu' piccolo dal gate 0,30 osservato finora nella serie, 0,019) e QCOM +3,83% (punteggio 0,18, unico articolo 100% fan-out). Segno corretto su entrambi, nessuno detenuto. Costo lordo close-to-close x $2.200 (opportunity_v2.legacy.costo_usd del dossier): TSLA $121,12 + QCOM $84,28 = $205,40.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-31.md §3, §Segnalazioni"
+        },
+        {
+          "data": "2026-09-01",
+          "costo_usd": 190.75,
+          "nota": "Il gate 0,30 scarta due segnali col SEGNO CORRETTO su mover forti: NOW -3,44% con punteggio massimo -0,271 (scarto dal gate 0,029, il secondo piu' stretto della serie dopo lo 0,019 di TSLA l'08-31 - due sedute consecutive in cui il segnale piu' informativo della giornata cade entro 0,03 dalla soglia) e ORCL -5,23% con -0,180. Entrambi provengono dallo stesso articolo macro 'Oil Surges, Treasury Yields Climb a Fifth Day, Software Retreats'. Costo lordo close-to-close x 2.200 $: 75,67 + 115,08 = 190,75 $, di cui ACCESSIBILE 0 $ - a differenza dell'occorrenza dell'08-31 (TSLA e QCOM, entrambi rialzisti) oggi i due titoli scendono e non sono detenuti, quindi anche superando il gate non sarebbe successo nulla. Registrato per la serie, ma oggi il vincolo che morde e' F-040, non la soglia.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-01.md §Segnalazioni"
         }
       ],
-      "costo_cumulato_usd": 1595.61,
+      "costo_cumulato_usd": 1786.36,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -1008,10 +1050,16 @@
           "costo_usd": null,
           "nota": "[DAY-013a] 443 righe execution_decisions il 2026-08-31, di cui 430 con signal_id NULL (97,1%). Ripartizione: SKIP_THRESHOLD 423 -> 0 popolati, SKIP_PYRAMIDING 11 -> 10, BUY 2 -> 2, SELL 2 -> 1, SKIP_STALE 3 -> 0, SKIP_FALLBACK 2 -> 0. La SELL AVGO delle 19:07 — la decisione piu' costosa della giornata — ha signal_id NULL: l'id 9356 e' ricostruibile solo parsando il testo di reason ('generated 2026-08-31 18:16 UTC'). Ogni analisi causale di questo report ha dovuto ricongiungere per timestamp e testo. Costo di audit, non stimabile in dollari.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-31.md §10 [DAY-013a]"
+        },
+        {
+          "data": "2026-08-13",
+          "costo_usd": null,
+          "nota": "[RESTAURATA 2026-09-02 da stash@{0}, mai committata] Ricorrenza. execution_decisions 2026-08-13: 556 righe totali, 546 con signal_id NULL (98.2%), soprattutto le 540 SKIP_THRESHOLD. La catena segnale->decisione non e' ricostruibile per chiave esterna sulla quasi totalita' delle righe del giorno.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-13.md sezione 10 [DAY-008]"
         }
       ],
       "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 15,
+      "occorrenze_non_stimate": 16,
       "stato": "aperto",
       "issue": null
     },
@@ -1147,10 +1195,16 @@
           "costo_usd": null,
           "nota": "QCOM +3,83%: unico articolo del giorno 100% fan-out (quota_righe_fanout=1,0, pezzo generico 'Analysts Eye Data Center Growth'), nessuna alternativa issuer-specific nella finestra osservata. Stessa firma di AMZN il 08-28. Costo non stimabile separatamente da F-009 (stesso trade).",
           "fonte": "ALPHA_MISS_REPORT_2026-08-31.md §3, §Segnalazioni"
+        },
+        {
+          "data": "2026-09-01",
+          "costo_usd": null,
+          "nota": "L'articolo che descrive la rotazione della giornata e' mappato su 9 ticker e nessuno e' un petrolifero: 'Oil Surges, Treasury Yields Climb a Fifth Day, Software Retreats: Stock Market Today' (content:26524ae4...) -> DELL, IWM, NOW, ORCL, PANW, QQQ, XLE, XLK, XLV. La meta' 'Software Retreats' produce segnali su 5 titoli, la meta' 'Oil Surges' non produce NULLA su PBR, BP, XOM, CVX, SHEL - cioe' proprio i mover migliori dell'universo. Totali del giorno: 106 righe news_log per 59 articoli unici, 76 mappature TAG_UNCONFIRMED contro 28 ISSUER_SPECIFIC, 47 mappature fan-out extra, copertura effective-timely 21/96 = 21,9%. NOW ha quota_righe_fanout = 1,0 (unica fonte disponibile e' un fan-out): terza occorrenza della stessa firma in cinque sedute, dopo QCOM l'08-31 e AMZN l'08-28. Costo null: non separabile da F-009 e F-023, che insistono sugli stessi titoli.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-01.md §Segnalazioni"
         }
       ],
       "costo_cumulato_usd": 925.31,
-      "occorrenze_non_stimate": 14,
+      "occorrenze_non_stimate": 15,
       "stato": "aperto",
       "issue": null
     },
@@ -1250,10 +1304,16 @@
           "costo_usd": 0.41,
           "nota": "NVDA: BUY 14:07:00 (segnale +0,361) -> SELL 15:52:00 [below_entry_gate], tenuta 1h45, roundtrip completo trade 902. Costo di esecuzione puro del roundtrip: cost_usd = 0,41 $ (il segno della posizione, -22,94 $ netti, e' dovuto al movimento di mercato di NVDA nella seduta, non al meccanismo di uscita in se').",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-28.md §3, §10 [DAY-002]"
+        },
+        {
+          "data": "2026-09-01",
+          "costo_usd": null,
+          "nota": "Round-trip intraday sullo stesso simbolo nella stessa seduta: HOOD BUY 14:52 @ 106,40 -> SELL 16:37 @ 104,73 -> BUY 19:37 @ 103,42, ore_tenuta 1,75. Manifestazione dell'assenza di banda fra gate d'ingresso (0,30) e soglia d'uscita (0): a punteggio 0,023 il sistema non e' 'neutrale' ma 'fuori'. Costo null DELIBERATO per non duplicare: i -23,06 $ realizzati sono gia' attribuiti a F-023, che e' il meccanismo a monte (sostituzione del segnale forte con uno debole). Qui si registra la ricorrenza della firma churn, non un secondo addebito.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-01.md §Segnalazioni"
         }
       ],
       "costo_cumulato_usd": 106.35,
-      "occorrenze_non_stimate": 4,
+      "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
     },
@@ -1804,10 +1864,16 @@
           "costo_usd": null,
           "nota": "[DAY-009] Ri-verificato su codice e dati: celery_app.py timezone='UTC', enable_utc=True, e crontab(minute='*/15', hour='14-21', day_of_week='1-5') su sentiment-worker/run-news-ingestion/run-alpaca-ingestion/run-execution, crontab(minute='7,22,37,52', hour='14-21') su portfolio-cycle. In EDT il mercato apre alle 13:30 UTC: fra 13:30 e 14:00 ZERO righe in news_log, sentiment_signals, execution_decisions e portfolio_cycles; primo ciclo alle 14:07:00, 37 minuti dopo l'apertura. Il sistema se ne accorge da solo (2 incidenti aperti alle 13:30:01, auto-recuperati alle 14:02 e 14:08). Gli 8 cicli schedulati fra 20:07 e 21:52 sono correttamente saltati dal guard get_clock(). Costo della singola giornata non stimabile: il valore e' nella ricorrenza.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-31.md §10 [DAY-009]"
+        },
+        {
+          "data": "2026-08-13",
+          "costo_usd": null,
+          "nota": "[RESTAURATA 2026-09-02 da stash@{0}, mai committata] Ottava occorrenza. Primo ciclo portfolio del giorno alle 14:07:00 UTC contro apertura NYSE (EDT) alle 13:30:00 UTC: 37 minuti di sessione senza alcun ciclo. 24 cicli totali, cadenza regolare 14:07-19:52, nessun gap >16 minuti, nessun ciclo eseguito dopo la chiusura. Costo non stimabile: nessun segnale utile nato prima delle 14:01.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-13.md sezione 3, 10 [DAY-011]"
         }
       ],
       "costo_cumulato_usd": 134.05,
-      "occorrenze_non_stimate": 13,
+      "occorrenze_non_stimate": 14,
       "stato": "aperto",
       "issue": null
     },
@@ -1896,9 +1962,15 @@
           "costo_usd": 4.42,
           "nota": "[DAY-001] Tre listicle Benzinga 'N <settore> Stocks Whale Activity In Today's Session' (18:01-18:31 UTC) producono 13 segnali a score 0,000 su BAC/GS/HOOD/MS/BABA/AMZN/NKE/TSLA/AVGO/DELL/MRVL/MU/NVDA (sentiment_signals id 9348-9360). Entrambi i modelli li giudicano non informativi (polarity 0, conf 0,10-0,20, materiality 0, novelty 0, risk_flags {ambiguous_entity,low_source_quality}, eligible=false su entrambi) ma il segnale e' persistito come 'ensemble:...' con fallback_used=false, quindi vince il last-wins di fetch_signals_for_cycle. AVGO, aperta 17:22 su +0,6526 conf 0,785 (nota JPMorgan issuer-specific), passa a 0,000 alle 18:16 ed e' liquidata alle 19:07 con reason [below_entry_gate]. Costo attribuito su controfattuale corto: -1,27 $ realizzati (trade id 921) contro +3,15 $ di MTM se mantenuta al close = 4,42 $; il dossier misura lo stesso effetto come drift_post_exit=3,65 $. Collaterale non conteggiato qui: TSLA, miglior punteggio issuer-specific del giorno (0,281 alle 18:00), azzerata alle 18:22 e chiusa +5,51%.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-31.md §10 [DAY-001]"
+        },
+        {
+          "data": "2026-09-01",
+          "costo_usd": 23.06,
+          "nota": "Un pezzo di colore sostituisce un upgrade Morgan Stanley e chiude la posizione in perdita. Segnale 9400 alle 14:47:17, +0,4815, ensemble glm-5.2+gpt-oss non-fallback, su 'Robinhood Stock Rises as Morgan Stanley Upgrades Target to $150' -> BUY 14:52 @ 106,39976, 13,34 azioni. Alle 15:01:06 il segnale 9404 (+0,0228, stesso ensemble) su 'How Did BONER Meme Coin Create One of Robinhood's Biggest Stories?' diventa lo stato del sistema: 14 minuti dopo, un pezzo di colore ha sostituito l'upgrade. Cinque cicli consecutivi 15:07-16:22 con reason 'score 0.023 < feedback threshold 0.300'; alle 16:37 SELL @ 104,73 con reason '[below_entry_gate] S4 signal fell below the active feedback entry threshold (age=1.6h vs max_age=4h, score=+0.023)'. COSTO MISURATO 23,06 $ (perdita; convenzione della serie: il costo e' registrato come magnitudine positiva) = trades.net_pnl del trade 927 (non stimato: riga di DB). Coda: alle 19:34:11 la STESSA notizia Morgan Stanley ricompare con altro titolo ('Morgan Stanley Upgrades HOOD, Cites Prediction Market Boom for $150 Target', segnale 9477, +0,5395) e il sistema ricompra @ 103,42, cioe' 2,98 $ sotto il prezzo a cui aveva venduto la stessa tesi 3h prima.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-01.md §Segnalazioni"
         }
       ],
-      "costo_cumulato_usd": 11.28,
+      "costo_cumulato_usd": 34.34,
       "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
@@ -2007,10 +2079,16 @@
           "costo_usd": null,
           "nota": "Il run del 2026-08-06T12:30:01Z (target 08-05) ha prodotto FORENSIC_DAILY_REPORT_2026-08-05.md per intero (1079 righe, 15 anomalie) ma non ha mai committato il ledger: git log su docs/evidence/findings.json non contiene alcun 'evidence: forensic 2026-08-05' fra 13e87af (08-04) e 58058aa (alpha-miss 08-06), e logs/daily_analysis_2026-08-06.log si ferma dopo 3 righe senza 'Completed:'. Persi: 4 anomalie NUOVE (test che scrivono nel DB di produzione, guasto DNS tradotto in 'mercato chiuso', segnali scritti BRKB invece di BRK.B, soglia S4 che si muove da sola) e le ricorrenze 08-05 su F-003, F-004, F-010, F-014, F-015, F-016, F-018, F-021, F-022, F-024. In piu' quel report cita gli id F-025..F-028, ma F-025 e' stato nel frattempo assegnato dall'alpha-miss del 08-07 a un finding diverso: due documenti nel repo usano lo stesso id per due cose diverse. Costo non stimabile in dollari (difetto dello strumento di misura, non del trading): conta per ricorrenza.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-06.md §10 [DAY-001]"
+        },
+        {
+          "data": "2026-09-01",
+          "costo_usd": null,
+          "nota": "Un giorno intero di evidenza forense perso e lo spazio degli id biforcato. Le 12 occorrenze scritte da FORENSIC_DAILY_REPORT_2026-08-13.md non sono MAI state committate in nessun punto della storia del repo (verificato scandendo tutti i commit che toccano findings.json): sono rimaste dentro stash@{0} ('WIP on main: 4eebb89') e sono riemerse oggi come conflitto git non risolto, rendendo findings.json NON PARSABILE all'apertura della sessione (marcatori alle righe 2-17 e 723-4722). Conseguenza aggiuntiva gia' prevista dal titolo del finding: ID DUPLICATO - F-039 designa due finding diversi nei due rami (su main 'righe trades cancellate pre-market', nello stash 'il classificatore causale del dossier'). Risoluzione conservativa applicata in questa sessione, solo-append: base = lato Updated upstream (== HEAD, 59 finding), 11 occorrenze orfane restaurate previa verifica che il titolo coincida su entrambi i lati, l'orfano F-039 restaurato come F-060, nessuna occorrenza esistente modificata o cancellata. Dettaglio in ALPHA_MISS_REPORT_2026-09-01.md §9. Meccanismo diverso da quello descritto in origine (li' il ciclo non scriveva affatto; qui scriveva in un ramo che non e' mai arrivato a main), stessa identica conseguenza: agganciato qui invece di aprire un id nuovo. Costo null: e' perdita di evidenza, non di denaro - il peso viene dalla ricorrenza.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-01.md §Segnalazioni"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 1,
+      "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
     },
@@ -2110,10 +2188,16 @@
           "costo_usd": null,
           "nota": "[DAY-010] Il forense del 2026-08-31 gira il 2026-09-01 dopo il redeploy delle 14:20:07 +0200 (fix prompt Variante A bf5bef2e) che ha ricreato api/worker/worker-inference/beat. `docker compose logs worker --since 60h` restituisce 115 righe, la piu' vecchia del 2026-09-01 ~12:32 UTC: nessuna riga della seduta analizzata. L'intera FASE 4 (latenza per modello, timeout, refusal, retry, eccezioni non propagate) e' ricostruibile solo da cio' che e' finito a database, e llm_responses non ha colonna di durata. Costo non stimabile: il costo e' la non-verificabilita'.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-31.md §10 [DAY-010]"
+        },
+        {
+          "data": "2026-08-13",
+          "costo_usd": null,
+          "nota": "[RESTAURATA 2026-09-02 da stash@{0}, mai committata] Ricorrenza, ma con causa specifica identificata: alembic-worker-1 e alembic-worker-inference-1 riavviati il 2026-08-14T08:20:11 UTC per il deploy del fix #236 (commit 60c6ae0), cancellando tutti i log Docker del 2026-08-13 (0 righe con prefisso 2026-08-13 su 'docker compose logs worker --since 48h'). L'analisi forense del 08-13 si e' dovuta basare solo su DB, senza verifica incrociata di errori/timeout/retry via log.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-13.md sezione 10 [DAY-009]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 15,
+      "occorrenze_non_stimate": 16,
       "stato": "aperto",
       "issue": null
     },
@@ -2324,10 +2408,22 @@
           "costo_usd": 19.88,
           "nota": "[DAY-011] 11 blocchi SKIP_PYRAMIDING su 7 simboli (14:07:04 -> 19:52:03 UTC), fra cui CRM +0,740 — il punteggio piu' alto dell'intera seduta — bloccato perche' gia' a libro dal 2026-08-28. Poi AMD +0,591 e +0,504, CVX +0,544, DELL +0,504, SOXX +0,405, MU +0,407, XLF +0,346, MRVL 0,000. Costo ri-calcolato dal dossier 2026-08-31 (decision_quality.guards, orizzonte 1h, nozionale inteso noto): somma guard_cost_usd = 19,88 $ su 6 casi stimabili (DELL 9,79 $, AMD 5,05 $, CVX 2,45 $, CRM 1,32 $ + 0,46 $, MU 0,81 $), 1 caso AMD con guard_cost_usd null, 4 casi a 0,0. Rendimenti di seduta dei bloccati: CVX +2,12%, MU +2,77%, AMD +1,10%, SOXX +0,48%, CRM +0,60%, XLF -0,67%, MRVL -2,29%. NOTA: a differenza delle occorrenze precedenti di F-031, oggi i blocchi HANNO lasciato traccia in execution_decisions.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-31.md §10 [DAY-011]"
+        },
+        {
+          "data": "2026-08-13",
+          "costo_usd": null,
+          "nota": "[RESTAURATA 2026-09-02 da stash@{0}, mai committata] Quinta occorrenza. 8 simboli bloccati da SKIP_PYRAMIDING con reason esplicita e peso non allocato: MU, CSCO, AMD, IWM, NOK, PANW, QQQ, XLK (execution_decisions 9843, 9859, 9879, 10124, 10208, 10237, 10260, 10284). La traccia resta presente (dal 08-11), confermando che il difetto originario ('nessuna traccia') non descrive piu' il presente. Costo NON stimato in questa sessione: servirebbero barre intraday Alpaca ai timestamp dei segnali, non interrogate per limiti di tempo.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-13.md sezione 10 [DAY-012]"
+        },
+        {
+          "data": "2026-09-01",
+          "costo_usd": 41.25,
+          "nota": "44 righe SKIP_PYRAMIDING nella giornata, fra cui PBR, il mover numero uno dell'universo (+5,06%): 'P0-05 anti-pyramiding: gia' a libro dal 2026-07-10, peso non allocato 1,2%'. Costo NETTO misurato dal dossier su orizzonte controfattuale 1h sull'insieme delle guardie (44 SKIP_PYRAMIDING + 35 SKIP_THRESHOLD): 72,53 $ di guard_cost contro 31,28 $ di avoided_loss = -41,25 $. Confidenza attribuita e valore da leggere come LIMITE INFERIORE: l'orizzonte 1h cattura solo +0,35% dei +5,06% di PBR (guard_cost 1,63 $ su un movimento da 111 $ a size 2.200 $). Parte del titolo del finding e' oggi superata: le righe hanno un reason esplicito, sono in execution_decisions e finiscono nel dossier - la traccia esiste. Resta l'effetto economico. 25 delle 79 righe guard hanno guard_cost_usd null.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-01.md §Segnalazioni"
         }
       ],
-      "costo_cumulato_usd": 204.56,
-      "occorrenze_non_stimate": 0,
+      "costo_cumulato_usd": 245.81,
+      "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
     },
@@ -2386,10 +2482,16 @@
           "costo_usd": 1.31,
           "nota": "[DAY-003] sentiment_reversal di S4 chiude alle 19:37 UTC GOOGL (trades id 258), posizione S1 aperta il 2026-07-10, su segnale -0,3551 (conf 0,650, directness=competitor_readthrough su entrambi i modelli) tratto da 'ChatGPT Ads Surge: How OpenAI's Rapid Expansion Imperils Google and Meta'. -30,21 $ realizzati iscritti alla sleeve S1 ma generati da un segnale S4. Costo attribuito sul controfattuale corto (stessa qty tenuta al close): exit_active_effect_usd = -1,31 $ (dossier 2026-08-31); i -30,21 $ NON sono attribuibili al difetto (posizione tenuta 52 giorni). E' il caso pre-registrato dalla deroga #182(a) del 2026-08-25, al 2026-08-31 non ancora deployata.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-31.md §10 [DAY-003]"
+        },
+        {
+          "data": "2026-08-13",
+          "costo_usd": null,
+          "nota": "[RESTAURATA 2026-09-02 da stash@{0}, mai committata] Seconda occorrenza. trades id 334, CSCO, stop_strategy='S1' (aperta 07-15), exit_reason='sentiment_reversal' su sentiment_signals -0.520 (17:52), regola globale senza filtro di strategia (portfolio_scheduler.py _sentiment_reversal_sells). net_pnl -18.97, confluisce nel realizzato S1 pur essendo una decisione S4-style. drift_post_uscita = +6.89 (dossier): il prezzo e' risalito dopo l'uscita. Costo null per coerenza con l'occorrenza 08-10 (e' contaminazione di attribuzione, non perdita).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-13.md sezione 10 [DAY-010]"
         }
       ],
       "costo_cumulato_usd": 1.31,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -2436,6 +2538,12 @@
           "costo_usd": 13.71,
           "nota": "Seconda giornata consecutiva, reason identica parola per parola a quella di SONY e HOOD del 08-11. IBM, execution_decisions delle 14:22 del 2026-08-12, decision=SELL con order_id d7656e42-8f6b-453e-8ff9-de5a901d5875 e reason '[unknown] S4 signal was stale but FIX-D re-admitted it this cycle - open position, no counter-signal - and the weight is 0 anyway: the mechanism that zeroed it is not recorded'. Posizione S4 aperta il 08-11 alle 19:07, tenuta 19.25h, chiusa a 233.27368 su 5.067182051 azioni con net_pnl -26.47. Dopo l'uscita IBM RISALE: chiude a 235.98, cioe' +13.71 sulla stessa quantita' (drift_post_uscita del dossier deterministico). COSTO ATTRIBUITO 13.71, controfattuale corto (stessa giornata, stessa size, stesso strumento) - e' il costo dell'uscita anticipata, non il -26.47 realizzato, che include la perdita gia' maturata prima. Il meccanismo e' quello isolato ieri nel codice: portfolio_scheduler.py:714 ri-ammette il segnale stale, src/strategies/s4/strategy.py:167-169 riapplica la stessa finestra max_signal_age_hours=4 e lo rielimina, il peso va a 0.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-12.md §7"
+        },
+        {
+          "data": "2026-08-13",
+          "costo_usd": 0.0,
+          "nota": "[RESTAURATA 2026-09-02 da stash@{0}, mai committata] Terza giornata del pattern, PRE-FIX (il fix #236 e' stato deployato il 2026-08-14T08:20 UTC, dopo questo trade). SPCX, execution_decisions 9842, SELL alle 14:22:11 con reason identica parola per parola a SONY/HOOD/IBM: '[unknown] S4 signal was stale but FIX-D re-admitted it this cycle - open position, no counter-signal - and the weight is 0 anyway: the mechanism that zeroed it is not recorded, see #184 (age=19.6h vs max_age=4h, generated 2026-08-12 18:45 UTC, score=+0.628)'. Posizione S4 aperta 08-12 18:52, chiusa 08-13 14:22, trades id 703, net_pnl -54.02. COSTO 0.0 VERIFICATO, NON NULL: drift_post_uscita del dossier deterministico = -7.14 (il prezzo ha CONTINUATO A SCENDERE dopo l'uscita forzata), quindi il controfattuale (restare in posizione) sarebbe stato peggiore, non migliore - a differenza di IBM (08-12, +13.71) qui il meccanismo difettoso non ha avuto costo economico su questa occorrenza specifica. Il commit del fix (60c6ae0) cita esplicitamente SPCX fra i simboli colpiti nello storico. Nessuna occorrenza precedente su F-035 copriva il 08-13.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-13.md sezione 10 [DAY-001]"
         }
       ],
       "costo_cumulato_usd": 13.71,
@@ -2603,9 +2711,15 @@
           "costo_usd": 29.7,
           "nota": "[DAY-016] NKE ha prodotto il secondo punteggio assoluto della giornata (-0,4050, conf 0,675, ensemble, dall'articolo 'JPMorgan Cuts Nike 2027 Earnings Outlook, Flags China, Rising Competition' delle 17:17) con il segno CORRETTO: NKE ha chiuso -1,35%. 4 righe RANK_LONG_ONLY in s4_intent_events fra 17:22 e 18:07, zero ordini. NKE non era a libro, quindi non c'era nemmeno una posizione da proteggere. Il segnale e' poi stato azzerato alle 18:15 dal listicle di [DAY-001]. Costo congetturale su slot S4 tipico (2.200 $ ~ 2% del NAV): 2.200 x 1,35% = 29,70 $. Il vincolo long-only e' scelta di design, non difetto: registrato per la sintesi del 28/09.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-31.md §10 [DAY-016]"
+        },
+        {
+          "data": "2026-09-01",
+          "costo_usd": 27.99,
+          "nota": "Il segnale ribassista piu' forte della giornata supera il gate, ha il segno corretto e non produce nulla sul lato ingresso: QQQ -0,407 alle 16:00 e -0,303 alle 18:16, entrambi sopra 0,30 in magnitudine contro un QQQ che chiude -1,27%; entrambi terminati in RANK_LONG_ONLY (8 righe nel giorno). QUALIFICAZIONE che rende il finding piu' preciso invece che piu' grave: lo stesso segnale HA funzionato sul lato uscita - trade 593 chiuso alle 16:07 per sentiment_reversal a +25,70 $, l'unica chiusura in utile delle sei della giornata. Il vincolo long-only costa la gamba corta, non l'informazione. Costo lordo x 2.200 $ = 27,99 $, accessibile 0 $.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-01.md §Segnalazioni"
         }
       ],
-      "costo_cumulato_usd": 29.7,
+      "costo_cumulato_usd": 57.69,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -3102,6 +3216,25 @@
           "costo_usd": null,
           "nota": "[DAY-007] Per APRIRE una posizione S4 un segnale deve superare tre condizioni: |score| >= feedback:entry_threshold (0,30), score >= min_score (0,10) e confidence >= min_confidence (0,30) — src/strategies/s4/config.py:18 e ranking.py:217 (`if sig.confidence < cfg.min_confidence: continue`). Per CHIUDERE non ne serve nessuna: il gate in portfolio_scheduler.py:4107-4127 elimina il simbolo da signals_df PRIMA che il ranker lo veda, il simbolo sparisce da target_weights e NewsDrivenTactical chiude qualunque simbolo assente. Il segnale che ha chiuso AVGO alle 19:07 (sentiment_signals id 9356) aveva confidence = 0,15, cioe' META' del minimo che il ranker richiede per comprare lo stesso ticker. Un segnale troppo incerto per essere azionabile in acquisto e' pienamente azionabile in vendita. DISTINTO da F-013 (banda di isteresi sullo score) e da F-023 (aggregazione al posto del last-wins): nessuna delle due correzioni impedirebbe un'uscita comandata da un segnale a confidenza 0,15 con score, poniamo, -0,40. Il costo in dollari del caso AVGO del giorno (4,42 $) e' gia' iscritto a F-023 e non e' ri-conteggiato qui.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-31.md §10 [DAY-007]"
+        }
+      ],
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-060",
+      "titolo": "Il classificatore causale del dossier alpha-miss non distingue segnale fallback sopra soglia (escluso dal ranking per design) da causa realmente ignota (NON_CLASSIFICATO)",
+      "tipo": "osservazione",
+      "confidenza": "congetturale",
+      "primo_avvistamento": "2026-08-13",
+      "occorrenze": [
+        {
+          "data": "2026-08-13",
+          "costo_usd": null,
+          "nota": "[RESTAURATO 2026-09-02 da stash@{0}, mai committato; RI-NUMERATO F-039 -> F-060] Lo spazio degli id si era biforcato: su main F-039 designa un finding diverso ('Righe trades inserite e cancellate pre-market senza audit trail'), quindi agganciare qui sarebbe stato scorretto e nessun finding esistente su main copre il classificatore causale del dossier (verificati tutti i 59 titoli; F-056 riguarda la preferenza non-fallback di fetch_signals_for_cycle nel path live, non la classificazione del dossier). Nuovo id giustificato dall'assenza di un aggancio, non da una nuova osservazione. || ID nuovo, giustificato: nessun finding esistente copre il classificatore causale del dossier stesso (F-001 copre la copertura news, non la classificazione). NFLX e PLTR nei candidati_miss del 2026-08-13 sono etichettati NON_CLASSIFICATO nonostante abbiano un segnale single-model SOPRA il gate 0.30 (NFLX +0.36 alle 17:00, PLTR +0.385 alle 17:15, entrambi sentiment_signals fallback=true). I segnali fallback sono esclusi per design dal ranking BUY (congelato, confermato da altre righe SKIP_FALLBACK dello stesso giorno con reason esplicita), ma il classificatore del dossier non ha una categoria per questo caso e ricade su NON_CLASSIFICATO, indistinguibile da un vero buco. Rilevante per la domanda di uscita n.1 della carta (falsificazione su NO_NEWS come causa dominante >=60% dei giorni): un bucket NON_CLASSIFICATO gonfiato da esclusioni-per-design inquina quel conteggio. Coerente con l'issue #208 gia' in roadmap ('il dossier non classifica la causa dei miss'). Costo null: e' difetto di misura, non di esecuzione; codice del classificatore non letto in questa sessione, ipotesi dedotta dai dati.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-13.md sezione 10 [DAY-003]"
         }
       ],
       "costo_cumulato_usd": 0,
