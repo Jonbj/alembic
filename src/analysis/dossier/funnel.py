@@ -63,7 +63,10 @@ pubblicato nel dossier:
 Le soglie NON vivono qui: `soglia_gate` e' un argomento, la stessa letta a monte
 dalla Redis del feedback (fallback al baseline, #208). Il gate e' inclusivo
 (score >= soglia passa), la stessa convenzione di `miss_cause`. La decisione
-e' deterministica: stessi input, stesso output.
+e' deterministica: stessi input, stesso output. I KPI pubblicati mantengono i
+nomi della specifica consolidata: `held_at_open_rate`, `active_signal_recall`,
+`execution_conversion_rate`, `profitable_capture_rate` e
+`avoidable_miss_count` (con missingness separata).
 """
 
 from __future__ import annotations
@@ -402,9 +405,8 @@ def build_funnel(movers: list[dict], soglia_gate: float) -> dict:
             "exit_risk": conteggi_actionability["EXIT_RISK"],
             "passive_exposure": conteggi_actionability["PASSIVE_EXPOSURE"],
             "definizione": (
-                "mover gia' a libro nella seduta (trades vivi, stessa "
-                "popolazione di in_portafoglio): non sono miss d'ingresso e "
-                "non entrano nei KPI del funnel"
+                "mover gia' a libro nello snapshot PIT all'open RTH: non sono "
+                "miss d'ingresso e non entrano nei KPI del funnel"
             ),
         },
         "held_at_open_rate": _rapporto(
