@@ -27,7 +27,7 @@ services:
 
   api:
     build: .
-    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+    command: python scripts/run_with_durable_logs.py --service api -- uvicorn src.api.main:app --host 0.0.0.0 --port 8000
     env_file: .env
     environment:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/trading
@@ -39,6 +39,7 @@ services:
     ports: ["8001:8000"]
     volumes:
       - ./reports:/app/reports:ro
+      - ${ALEMBIC_DURABLE_LOG_DIR:-./logs/containers}:/var/log/alembic
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
@@ -58,12 +59,14 @@ services:
     build: .
     # General tasks: news ingestion, portfolio, execution, performance, etc.
     # --concurrency 4: enough for I/O-bound tasks, no LLM model loaded here.
-    command: celery -A src.workers.celery_app worker --loglevel=info --concurrency 4 -Q celery --hostname=general@%h
+    command: python scripts/run_with_durable_logs.py --service worker -- celery -A src.workers.celery_app worker --loglevel=info --concurrency 4 -Q celery --hostname=general@%h
     env_file: .env
     environment:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/trading
       REDIS_URL: redis://redis:6379/0
       SENTIMENT_REVERSAL_EXIT_THRESHOLD: "-0.35"
+    volumes:
+      - ${ALEMBIC_DURABLE_LOG_DIR:-./logs/containers}:/var/log/alembic
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
@@ -78,12 +81,14 @@ services:
     build: .
     # LLM/FinBERT tasks: sentiment, PEAD, regime. concurrency=1 → single process,
     # single FinBERT load (~500MB vs N×500MB with prefork).
-    command: celery -A src.workers.celery_app worker --loglevel=info --concurrency 1 -Q inference --hostname=inference@%h
+    command: python scripts/run_with_durable_logs.py --service worker-inference -- celery -A src.workers.celery_app worker --loglevel=info --concurrency 1 -Q inference --hostname=inference@%h
     env_file: .env
     environment:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/trading
       REDIS_URL: redis://redis:6379/0
       SENTIMENT_REVERSAL_EXIT_THRESHOLD: "-0.35"
+    volumes:
+      - ${ALEMBIC_DURABLE_LOG_DIR:-./logs/containers}:/var/log/alembic
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
@@ -96,11 +101,13 @@ services:
 
   beat:
     build: .
-    command: celery -A src.workers.celery_app beat --loglevel=info
+    command: python scripts/run_with_durable_logs.py --service beat -- celery -A src.workers.celery_app beat --loglevel=info
     env_file: .env
     environment:
       DATABASE_URL: postgresql://trading:trading@postgres:5432/trading
       REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ${ALEMBIC_DURABLE_LOG_DIR:-./logs/containers}:/var/log/alembic
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }

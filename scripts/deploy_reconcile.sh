@@ -23,6 +23,8 @@ export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 LOG_DIR="$PROJECT_DIR/logs"
+ALEMBIC_DURABLE_LOG_DIR="$PROJECT_DIR/logs/containers"
+export ALEMBIC_DURABLE_LOG_DIR
 SHA_FILE="$LOG_DIR/deployed_sha"
 LOCK_FILE="$LOG_DIR/.deploy_reconcile.lock"
 LOG_FILE="$LOG_DIR/deploy_reconcile_$(date +%Y-%m-%d).log"
@@ -35,7 +37,7 @@ SERVIZI_BACKEND=(worker worker-inference api beat)
 # tirerebbe su uno STACK NUOVO accanto a quello vivo, invece di sostituirlo.
 COMPOSE_PROJ="alembic"
 
-mkdir -p "$LOG_DIR"
+mkdir -p "$LOG_DIR" "$ALEMBIC_DURABLE_LOG_DIR"
 log() { echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') $*" | tee -a "$LOG_FILE"; }
 
 exec 9>"$LOCK_FILE"
