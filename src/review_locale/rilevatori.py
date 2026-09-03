@@ -25,8 +25,9 @@ import re
 # Sotto le 60 battute una riga e' un frammento, non un passo di ragionamento.
 LUNGHEZZA_MINIMA_RIGA = 60
 
-# 12 parole: abbastanza lungo perche' una coincidenza sia improbabile,
-# abbastanza corto per cogliere un paragrafo riformulato.
+# 12 parole bastano perche' una coincidenza casuale sia improbabile; il
+# conteggio pesa un paragrafo duplicato lungo piu' di uno corto, ma non
+# rileva parafrasi — solo righe gia' identiche vengono considerate.
 AMPIEZZA_GRAMMA = 12
 
 SOGLIA_DODICI_GRAMMI = 10
@@ -55,11 +56,13 @@ def misura_ripetizione(ragionamento: str) -> dict[str, int]:
     righe_ripetute = sum(n - 1 for n in conteggio_righe.values() if n > 1)
 
     righe_duplicate = [riga for riga in righe if conteggio_righe[riga] > 1]
-    parole = re.findall(r"\w+", " ".join(righe_duplicate).lower())
-    grammi = collections.Counter(
-        tuple(parole[i:i + AMPIEZZA_GRAMMA])
-        for i in range(max(0, len(parole) - AMPIEZZA_GRAMMA))
-    )
+    grammi: collections.Counter[tuple[str, ...]] = collections.Counter()
+    for riga in righe_duplicate:
+        parole = re.findall(r"\w+", riga.lower())
+        grammi.update(
+            tuple(parole[i:i + AMPIEZZA_GRAMMA])
+            for i in range(max(0, len(parole) - AMPIEZZA_GRAMMA))
+        )
     dodici_grammi_ripetuti = sum(1 for n in grammi.values() if n > 2)
 
     return {

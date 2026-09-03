@@ -44,7 +44,8 @@ def test_loop_vero_e_rilevato():
     """Lo stesso paragrafo ripetuto molte volte supera la soglia."""
     paragrafo = (
         "Devo verificare se il ramo OUT_OF_SCOPE sia raggiungibile oppure no, "
-        "quindi torno a controllare la condizione in universo del mover."
+        "quindi torno a controllare la condizione in universo del mover prima "
+        "di decidere come proseguire con il prossimo passo del ragionamento."
     )
     testo = "\n".join([paragrafo] * 30)
 
@@ -54,8 +55,34 @@ def test_loop_vero_e_rilevato():
     assert e_loop(misure)
 
 
+def test_righe_duplicate_distinte_non_si_mescolano():
+    """Due frasi diverse, ciascuna ripetuta ma mai adiacente nel testo
+    originale (in mezzo c'e' sempre una riga unica), non devono fondersi in
+    un 12-gramma fabbricato al bordo fra l'una e l'altra: quel bordo non e'
+    mai comparso nel testo sorgente. Ciascuna frase ha esattamente 12
+    parole, quindi presa da sola non produce alcuna finestra interna: se
+    compare un 12-gramma ripetuto, viene per forza dal bordo fabbricato
+    dal join, non dal contenuto reale.
+    """
+    frase_a = "Il ramo NO_SIGNAL resta plausibile su questo mover quindi proseguo con analisi"
+    frase_b = "Controllo ora se ENTITY_ERROR sia coerente col resto ragionamento fin qui svolto"
+    righe = []
+    for i in range(6):
+        righe.append(frase_a)
+        righe.append(f"Passo unico numero {i} che non si ripete mai nel testo qui sopra o sotto davvero.")
+        righe.append(frase_b)
+    testo = "\n".join(righe)
+
+    misure = misura_ripetizione(testo)
+
+    assert misure["dodici_grammi_ripetuti"] == 0
+    assert misure["righe_ripetute"] == 10
+
+
 def test_soglia_loop_e_configurabile():
-    testo = "\n".join(["la stessa frase ripetuta molte volte senza mai avanzare di un passo"] * 15)
+    testo = "\n".join(
+        ["la stessa frase ripetuta molte volte senza mai avanzare di un solo passo del ragionamento vero e proprio"] * 15
+    )
     misure = misura_ripetizione(testo)
 
     assert e_loop(misure, soglia_dodici_grammi=5)
