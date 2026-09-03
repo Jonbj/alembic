@@ -23,6 +23,11 @@ ESTENSIONI_CODICE = (".py", ".sh", ".sql")
 # prompt unico.
 TETTO_BYTE = 35_000
 
+# Limite noto: per un file rinominato cattura il percorso pre-rename (a/), quindi
+# _e_codice classifica sul nome vecchio. Un file spostato da tests/ a produzione
+# viene scartato per errore, uno spostato da produzione a tests/ viene incluso per
+# errore. Un percorso quotato da git (spazi o non-ASCII, es. "a/foo bar.py") non
+# soddisfa affatto la regex e il blocco non viene riconosciuto come inizio file.
 _INIZIO_FILE = re.compile(r"^diff --git a/(\S+) b/\S+", re.MULTILINE)
 
 _INTESTAZIONE = """Sei un ingegnere senior che fa la review di una pull request su un sistema di
