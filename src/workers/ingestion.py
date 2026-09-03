@@ -31,6 +31,7 @@ import asyncio
 import logging
 import os
 import re
+from collections.abc import Callable
 from datetime import datetime, timezone
 from functools import lru_cache
 
@@ -39,6 +40,7 @@ from redis import Redis
 
 from src.analysis.watchlist_coverage import forma_confrontabile
 from src.config import config
+from src.store.pg_store import PostgreSQLStore
 
 # Canonical ticker aliases: map non-watchlist symbols → watchlist symbol.
 # MarketAux/Alpaca APIs may return GOOG (Class C shares) while our watchlist
@@ -185,13 +187,15 @@ def _org_names_supported_by_article(
 
 
 def _persist_ingestion_observability(
-    source: str, stats: dict, discard_rows: list[dict]
+    source: str,
+    stats: dict,
+    discard_rows: list[dict],
+    store_factory: Callable[[], PostgreSQLStore] | None = None,
 ) -> None:
     """Persist counters and discard events without making telemetry a gate."""
     try:
-        from src.store.pg_store import PostgreSQLStore
-
-        with PostgreSQLStore() as pg_store:
+        factory = PostgreSQLStore if store_factory is None else store_factory
+        with factory() as pg_store:
             pg_store.record_ingestion_stats(source, stats)
             pg_store.record_news_discards(discard_rows)
     except Exception as exc:
