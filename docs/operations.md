@@ -49,7 +49,8 @@ docker compose --profile backtest run --rm backtest \
 `logs/containers/<servizio>-YYYY-MM-DD.log`, con giorno UTC e retention di 60
 giorni. `docker compose logs` resta utile per seguire l'istanza corrente, ma i
 file host sono la fonte forense: sopravvivono alla ricreazione dei container e
-coprono l'intero periodo di osservazione.
+la finestra di retention copre un intero periodo di osservazione. La raccolta
+non e' retroattiva: comincia dal primo deploy che include #407.
 
 Il riconciliatore di deploy imposta `ALEMBIC_DURABLE_LOG_DIR` alla directory
 `logs/containers` del progetto principale. Questo evita che il bind mount punti

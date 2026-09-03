@@ -40,7 +40,10 @@ def test_il_runner_duplica_stdout_e_conserva_il_file_giornaliero(tmp_path: Path)
             "--",
             sys.executable,
             "-c",
-            "print('evento-forense-407')",
+            (
+                "import sys; print('evento-forense-407', flush=True); "
+                "print('errore-forense-407', file=sys.stderr, flush=True)"
+            ),
         ],
         text=True,
         capture_output=True,
@@ -48,7 +51,7 @@ def test_il_runner_duplica_stdout_e_conserva_il_file_giornaliero(tmp_path: Path)
     )
 
     assert result.returncode == 0
-    assert result.stdout == "evento-forense-407\n"
+    assert result.stdout == "evento-forense-407\nerrore-forense-407\n"
     giorno = datetime.now(UTC).date().isoformat()
     assert (tmp_path / f"worker-{giorno}.log").read_text() == result.stdout
 
