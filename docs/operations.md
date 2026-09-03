@@ -43,6 +43,28 @@ docker compose --profile backtest run --rm backtest \
   python scripts/run_backtest.py --start 2025-10-01 --end 2026-04-30 --run-id gkg-6m-v1
 ```
 
+### Log applicativi persistenti
+
+`api`, `worker`, `worker-inference` e `beat` duplicano stdout/stderr in
+`logs/containers/<servizio>-YYYY-MM-DD.log`, con giorno UTC e retention di 60
+giorni. `docker compose logs` resta utile per seguire l'istanza corrente, ma i
+file host sono la fonte forense: sopravvivono alla ricreazione dei container e
+coprono l'intero periodo di osservazione.
+
+Il riconciliatore di deploy imposta `ALEMBIC_DURABLE_LOG_DIR` alla directory
+`logs/containers` del progetto principale. Questo evita che il bind mount punti
+alla worktree temporanea usata per la build; avviando Compose manualmente dalla
+root del repository viene usato lo stesso percorso come default.
+
+```bash
+# Errori del worker nella seduta del 2026-09-02, anche dopo un redeploy
+grep -E "ERROR|WARNING|CRITICAL" logs/containers/worker-2026-09-02.log
+
+# File disponibili e spazio occupato
+find logs/containers -maxdepth 1 -type f -name '*.log' -print
+du -sh logs/containers
+```
+
 ### Health Checks
 
 ```bash
