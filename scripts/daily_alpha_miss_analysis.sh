@@ -117,6 +117,12 @@ Limita l'analisi ESCLUSIVAMENTE ai simboli in config/trading.yaml -> symbols.wat
 (circa 96 simboli). Non è uno scan whole-market: la domanda è "abbiamo perso qualcosa che
 potevamo effettivamente tradare", non "cosa ha fatto il mercato in generale".
 
+LOG APPLICATIVI DELLA SEDUTA
+I log persistenti sono in `logs/containers/<servizio>-__DATE_TARGET__.log`, per
+`worker`, `worker-inference`, `api` e `beat`. Usa questi file per ricostruire le
+decisioni: sopravvivono ai redeploy, mentre `docker compose logs` mostra soltanto
+l'istanza corrente del container e puo' avere gia' perso la seduta target.
+
 FASE 0 — LEGGI IL DOSSIER E IL LEDGER PRIMA DI ANALIZZARE
 
 Un dossier deterministico con i numeri della giornata e' gia' stato calcolato:
@@ -184,7 +190,7 @@ categorie, con evidenza a supporto:
 (b) THIN_NEUTRAL — news presente ma segnale vicino a zero / coverage troppo bassa per un segnale forte
 (c) WRONG_SIGN — segnale generato con segno opposto al movimento di prezzo
 (d) FILTERED — segnale valido, sopra soglia, ma scartato da ranking/breadth (min_stocks)/hysteresis/
-    altro meccanismo della strategia (verifica se possibile nei log worker, se disponibili)
+    altro meccanismo della strategia (verifica nel log persistente del worker, se disponibile)
 (e) OUT_OF_STRATEGY_SCOPE — riguarda un simbolo che S1/S4 non tradano per costruzione (es. ETF
     settoriali usati solo come benchmark, se presenti nella watchlist)
 (f) CAUGHT — Alembic lo ha effettivamente tradato: nota comunque se con timing/size subottimale
