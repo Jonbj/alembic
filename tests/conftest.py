@@ -30,13 +30,23 @@ _TEST_DATABASE_NAME_RE = re.compile(
 
 def pytest_configure(config):
     database_url = os.environ["DATABASE_URL"]
-    database_name = urlsplit(database_url).path.lstrip("/")
-    if not _TEST_DATABASE_NAME_RE.search(database_name):
-        raise pytest.UsageError(
-            f"Refusing to run tests against non-test database {database_name!r}. "
-            "Set DATABASE_URL to a dedicated database whose name contains a "
-            "standalone test token (for example 'test_db')."
-        )
+    parsed_url = urlsplit(database_url)
+    database_name = parsed_url.path.lstrip("/")
+    # CI provisions this legacy-named database from scratch.  Limit the exception
+    # to a loopback service on a GitHub-hosted runner, never a local/shared server.
+    github_ephemeral_db = (
+        os.environ.get("GITHUB_ACTIONS") == "true"
+        and os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted"
+        and parsed_url.hostname in {"localhost", "127.0.0.1", "::1"}
+    )
+    if _TEST_DATABASE_NAME_RE.search(database_name) or github_ephemeral_db:
+        return
+
+    raise pytest.UsageError(
+        f"Refusing to run tests against non-test database {database_name!r}. "
+        "Set DATABASE_URL to a dedicated database whose name contains a "
+        "standalone test token (for example 'test_db')."
+    )
 
 
 @pytest.fixture

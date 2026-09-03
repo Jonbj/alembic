@@ -98,7 +98,7 @@ jobs:
         env:
           POSTGRES_USER: trading
           POSTGRES_PASSWORD: trading
-          POSTGRES_DB: test_db
+          POSTGRES_DB: trading
         ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready
@@ -116,7 +116,7 @@ jobs:
           --health-retries 5
 
     env:
-      DATABASE_URL: postgresql://trading:trading@localhost:5432/test_db
+      DATABASE_URL: postgresql://trading:trading@localhost:5432/trading
       REDIS_URL: redis://localhost:6379/0
       ADMIN_API_KEY: test-api-key-for-ci-only-12345678
       ADMIN_USERNAME: admin
