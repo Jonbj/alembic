@@ -1,7 +1,7 @@
 """Tests for RSS ingestion worker."""
 import os
-from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 
 from src.models.news import NewsItem
 
