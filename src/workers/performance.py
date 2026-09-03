@@ -2659,7 +2659,12 @@ def run_counterfactual_worker() -> dict:
             max_rows=_COUNTERFACTUAL_MAX_ROWS,
         )
         force_exit_rows = pg.fetch_all_force_exit_decisions_without_counterfactual(
-            days_back=7,
+            # #450: no time window on force-exit SELLs — the universe is small
+            # and append-only (33 live rows, oldest 2026-07-01), and a window
+            # would leave the pre-fix history NULL forever. The migration-060
+            # partial index bounds the steady-state scan. SKIP_* keep their
+            # 7-day window: at ~550 rows/day there the cost bound is real.
+            days_back=None,
             page_size=_COUNTERFACTUAL_PAGE_SIZE,
             max_rows=_COUNTERFACTUAL_MAX_ROWS,
         )

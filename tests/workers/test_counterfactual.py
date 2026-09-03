@@ -697,6 +697,32 @@ class TestFetchForceExitDecisions:
         # the new partial index on (tick_time, id) must keep its WHERE shape
         assert "counterfactual_computed_at IS NULL" in called_sql
 
+    def test_default_fetch_has_no_time_window(self):
+        """days_back=None (the default) drops the tick_time window entirely.
+
+        #450 acceptance criterion #1: the ~30 historical rows (oldest
+        2026-07-01) must get a counterfactual too, so the worker must not
+        clamp the force-exit universe to the last 7 days the way the SKIP
+        fetcher does. Boundedness comes from the migration-060 partial index
+        (processed rows leave it), not from a time window.
+        """
+        store = self._make_store()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = lambda s: s
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchall.return_value = []
+        mock_cursor.description = [
+            ("id",), ("tick_time",), ("symbol",), ("score",), ("regime_mult",),
+            ("decision",), ("counterfactual_attempts",)
+        ]
+        store._conn.cursor.return_value = mock_cursor
+
+        store.fetch_force_exit_decisions_without_counterfactual(limit=100)
+
+        sql, params = mock_cursor.execute.call_args[0]
+        assert "tick_time >= now()" not in sql
+        assert list(params) == [100]
+
     def test_keyset_cursor_is_total_order(self):
         store = self._make_store()
         mock_cursor = MagicMock()
@@ -735,6 +761,15 @@ class TestFetchAllForceExitPagination:
         store.fetch_force_exit_decisions_without_counterfactual = fake_fetch
         return store, calls
 
+    def test_default_days_back_is_unbounded(self):
+        """The paged wrapper forwards days_back=None: pagination must not
+        reintroduce a window the single-page query doesn't have."""
+        store, calls = self._store_with_pages([[]])
+
+        store.fetch_all_force_exit_decisions_without_counterfactual(page_size=10)
+
+        assert calls[0]["days_back"] is None
+
     def test_pages_until_short_page(self):
         base = datetime(2026, 8, 20, 20, 0, tzinfo=timezone.utc)
         pages = [
@@ -763,6 +798,35 @@ class TestWorkerProcessesForceExitSells:
     the negative of the realised return, letting a dashboard read "saved vs
     paid" uniformly across SKIP and SELL decisions.
     """
+
+    def test_worker_fetches_full_force_exit_history(self):
+        """#450 acceptance criterion #1: the worker must not clamp force-exit
+        SELLs to a 7-day window. With the clamp, only 4 of the 33 live rows
+        (oldest 2026-07-01) would ever get a counterfactual and the rest stay
+        NULL forever. The force-exit fetch must be unbounded; the SKIP fetch
+        keeps its 7-day window (its universe is ~550 rows/day, the cost bound
+        there is real)."""
+        mock_pg = MagicMock()
+        mock_pg.fetch_all_skip_decisions_without_counterfactual.return_value = []
+        mock_pg.fetch_all_force_exit_decisions_without_counterfactual.return_value = []
+
+        with (
+            patch("src.workers.performance.PostgreSQLStore", return_value=mock_pg),
+            patch("psycopg2.connect"),
+            patch("src.workers.performance.RedisStore"),
+            patch("src.workers.performance.config") as mock_cfg,
+        ):
+            mock_cfg.ALPACA_API_KEY = "key"
+            mock_cfg.ALPACA_SECRET_KEY = "secret"
+            mock_cfg.DATABASE_URL = "postgresql://test"
+            run_counterfactual_worker()
+
+        skip_kwargs = mock_pg.fetch_all_skip_decisions_without_counterfactual.call_args.kwargs
+        force_kwargs = (
+            mock_pg.fetch_all_force_exit_decisions_without_counterfactual.call_args.kwargs
+        )
+        assert skip_kwargs.get("days_back") == 7
+        assert force_kwargs.get("days_back") is None
 
     def test_force_exit_sell_is_picked_up_and_return_is_inverted(self):
         """A SELL at 100 with price 95 one hour later: the realised P&L is +5%,
@@ -900,6 +964,11 @@ class TestForceExitVsRealizedView:
         # actually was for THIS exit (not for some other historical close)
         assert "FROM execution_decisions ed" in called_sql
         assert "JOIN trades t" in called_sql
+        # record_trade_exit keeps the FIRST tranche's order in exit_order_id
+        # (COALESCE) and appends later tranches to exit_order_ids: a reversal
+        # SELL that closes a position already partially exited lands only in
+        # the array, so the join must reach it too
+        assert "ed.order_id = ANY(t.exit_order_ids)" in called_sql
         # SELL from the sentiment_reversal path is the only universe we expose
         assert "decision = 'SELL'" in called_sql
         assert "sentiment_reversal" in called_sql

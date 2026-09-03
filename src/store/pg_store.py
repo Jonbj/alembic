@@ -1239,7 +1239,7 @@ class PostgreSQLStore:
 
     def fetch_force_exit_decisions_without_counterfactual(
         self,
-        days_back: int = 7,
+        days_back: int | None = None,
         limit: int = 500,
         before: tuple | None = None,
     ) -> list[dict]:
@@ -1256,13 +1256,28 @@ class PostgreSQLStore:
         ``sentiment_reversal`` (the score and threshold suffix is parseable
         but not used for routing).
 
-        Args: identical contract to ``fetch_skip_decisions_without_counterfactual``
-        so the two paths share the keyset paged-iteration pattern (#337).
+        ``days_back=None`` (the default) means NO time window, unlike the
+        SKIP fetcher's 7 days. The force-exit universe is small and
+        append-only (33 rows over two months of live record), but it
+        predates this fix, so a window would leave the historical rows NULL
+        forever — the acceptance criterion asks for all of them. Boundedness
+        comes from the migration-060 partial index: processed rows leave it
+        because ``counterfactual_computed_at`` is set, and terminal-reason
+        rows are frozen by the attempt budget (#337), so the steady-state
+        scan reads only the genuinely pending handful.
+
+        Args: otherwise identical contract to
+        ``fetch_skip_decisions_without_counterfactual`` so the two paths
+        share the keyset paged-iteration pattern (#337).
         """
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
-                params: list = [str(days_back)]
+                params: list = []
+                window_clause = ""
+                if days_back is not None:
+                    window_clause = "AND tick_time >= now() - (%s || ' days')::interval"
+                    params.append(str(days_back))
                 cursor_clause = ""
                 if before is not None:
                     cursor_clause = "AND (tick_time, id) < (%s, %s)"
@@ -1275,7 +1290,7 @@ class PostgreSQLStore:
                        WHERE decision = 'SELL'
                          AND reason LIKE 'sentiment_reversal%'
                          AND counterfactual_computed_at IS NULL
-                         AND tick_time >= now() - (%s || ' days')::interval
+                         {window_clause}
                          {cursor_clause}
                        ORDER BY tick_time DESC, id DESC
                        LIMIT %s""",
@@ -1289,15 +1304,17 @@ class PostgreSQLStore:
 
     def fetch_all_force_exit_decisions_without_counterfactual(
         self,
-        days_back: int = 7,
+        days_back: int | None = None,
         page_size: int = 500,
         max_rows: int = 20000,
     ) -> list[dict]:
-        """Page through every pending force-exit SELL row in the window.
+        """Page through every pending force-exit SELL row.
 
         #450: same keyset exhaustion pattern as
-        ``fetch_all_skip_decisions_without_counterfactual``. Rows the worker
-        deliberately leaves pending (PENDING_OVERNIGHT) are pruned by the
+        ``fetch_all_skip_decisions_without_counterfactual``. ``days_back``
+        defaults to None (no time window — see the single-page method) so one
+        run also backfills the pre-fix history. Rows the worker deliberately
+        leaves pending (PENDING_OVERNIGHT) are pruned by the
         ``counterfactual_computed_at IS NULL`` predicate in the inner page
         query, so they do not re-enter later pages of the same run.
         """
@@ -1493,8 +1510,9 @@ class PostgreSQLStore:
             ed.counterfactual_skip_reason
         FROM execution_decisions ed
         JOIN trades t
-          ON t.exit_order_id = ed.order_id
-         AND t.exit_reason   = 'sentiment_reversal'
+          ON t.exit_reason   = 'sentiment_reversal'
+         AND (t.exit_order_id = ed.order_id
+              OR ed.order_id = ANY(t.exit_order_ids))
         WHERE ed.decision = 'SELL'
           AND ed.reason LIKE 'sentiment_reversal%'
           AND ed.tick_time >= now() - (%s || ' days')::interval
@@ -1504,11 +1522,15 @@ class PostgreSQLStore:
     def fetch_force_exit_pnl_vs_counterfactual(self, days: int = 30) -> list[dict]:
         """Return one row per sentiment_reversal exit, paired with its counterfactual.
 
-        #450: ``trades.exit_reason='sentiment_reversal'`` rows whose
-        ``exit_order_id`` matches a ``SELL`` execution_decision with reason
-        ``sentiment_reversal``. The pair carries the realised P&L, the exit
-        price, the entry price, and the worker's two counterfactual returns
-        (1h or overnight depending on when the SELL fired).
+        #450: ``trades.exit_reason='sentiment_reversal'`` rows whose exit
+        order matches a ``SELL`` execution_decision with reason
+        ``sentiment_reversal`` — on ``exit_order_id`` or, for a position
+        already partially exited, on ``exit_order_ids`` (record_trade_exit
+        keeps the FIRST tranche's id in ``exit_order_id``, so a later
+        reversal SELL lands only in the array). The pair carries the
+        realised P&L, the exit price, the entry price, and the worker's two
+        counterfactual returns (1h or overnight depending on when the SELL
+        fired).
 
         Sign convention reminder: for a SELL, the counterfactual_return_1h
         stored in the row is the *negative* of the underlying price move
