@@ -1,7 +1,5 @@
 """Tests for RSS ingestion worker."""
 import os
-import re
-import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
 
@@ -93,6 +91,7 @@ def test_rss_worker_queues_items_with_ticker_match():
     with patch("src.workers.ingestion.RSSConnector") as mock_rss_cls, \
          patch("src.workers.ingestion.Deduplicator", return_value=mock_dedup), \
          patch("src.workers.ingestion.Redis") as mock_redis_cls, \
+         patch("src.workers.ingestion.PostgreSQLStore") as mock_store_cls, \
          patch("src.workers.ingestion.config") as mock_cfg, \
          patch.dict(os.environ, {"RSS_INGESTION_ENABLED": "1"}):  # FIX-02: source is gated off by default
 
@@ -112,6 +111,7 @@ def test_rss_worker_queues_items_with_ticker_match():
     # AAPL article → 1 push; MSFT article → 1 push; Federal Reserve → filtered
     assert result["queued"] == 2
     assert result["filtered"] == 1
+    assert mock_store_cls.call_count == 2
 
 
 def test_rss_worker_expands_per_ticker():
@@ -126,6 +126,7 @@ def test_rss_worker_expands_per_ticker():
     with patch("src.workers.ingestion.RSSConnector") as mock_rss_cls, \
          patch("src.workers.ingestion.Deduplicator", return_value=mock_dedup), \
          patch("src.workers.ingestion.Redis") as mock_redis_cls, \
+         patch("src.workers.ingestion.PostgreSQLStore") as mock_store_cls, \
          patch("src.workers.ingestion.config") as mock_cfg, \
          patch.dict(os.environ, {"RSS_INGESTION_ENABLED": "1"}):  # FIX-02: source is gated off by default
 
@@ -144,3 +145,26 @@ def test_rss_worker_expands_per_ticker():
 
     assert result["queued"] == 2  # un item per AAPL, uno per MSFT
     assert mock_redis.rpush.call_count == 2
+    assert mock_store_cls.call_count == 2
+
+
+def test_ingestion_observability_accepts_an_injected_store_factory():
+    """La persistenza e' testabile senza risolvere DATABASE_URL."""
+    from src.workers.ingestion import _persist_ingestion_observability
+
+    mock_store = MagicMock()
+    mock_store_factory = MagicMock()
+    mock_store_factory.return_value.__enter__.return_value = mock_store
+
+    _persist_ingestion_observability(
+        "reuters",
+        {"fetched": 1, "queued": 1},
+        [],
+        store_factory=mock_store_factory,
+    )
+
+    mock_store_factory.assert_called_once_with()
+    mock_store.record_ingestion_stats.assert_called_once_with(
+        "reuters", {"fetched": 1, "queued": 1}
+    )
+    mock_store.record_news_discards.assert_called_once_with([])
