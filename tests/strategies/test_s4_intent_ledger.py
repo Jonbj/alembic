@@ -101,10 +101,30 @@ def test_candidate_conserva_tempi_versioni_concorrenti_e_missingness():
         "active_feedback_threshold": "evaluated_after_candidate_capture",
         "content_hash": "not_available_at_decision",
         "first_seen_at": "not_available_at_decision",
+        "held_at_rank": "open_positions_unavailable_at_capture",
         "published_at": "not_available_at_decision",
         "ranking_score": "not_recorded_at_capture",
         "resolver": "not_available_at_decision",
     }
+
+
+def test_candidate_misura_posizione_aperta_ed_eta_al_decision_slot():
+    signal = _signal(generated_at=_DECISION_AT - timedelta(hours=5))
+
+    [event] = S4IntentLedger(_DECISION_AT, _versions()).capture(
+        [signal],
+        open_symbols={"AMD"},
+    )
+
+    assert event.held_at_rank is True
+    assert event.signal_age_at_slot == event.decision_slot - signal.generated_at
+
+
+def test_candidate_non_dichiara_non_detenuto_se_lo_snapshot_posizioni_manca():
+    [event] = S4IntentLedger(_DECISION_AT, _versions()).capture([_signal()])
+
+    assert event.held_at_rank is None
+    assert event.missingness["held_at_rank"] == "open_positions_unavailable_at_capture"
 
 
 def test_disposition_aggiunge_il_gate_effettivamente_osservato_senza_mutare_candidate():

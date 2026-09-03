@@ -126,7 +126,37 @@ def test_builder_scrive_i_candidate_prima_della_valutazione(mocker):
     assert written[0].snapshot["score"] == pytest.approx(0.8)
     assert written[0].snapshot["ranking_score"] == pytest.approx(0.8)
     assert "ranking_score" not in written[0].missingness
+    assert written[0].held_at_rank is False
     assert strategy._intent_ledger is not None
+
+
+def test_builder_cattura_held_at_rank_dallo_snapshot_posizioni_aperte(mocker):
+    signal = _signal("AMD", 1, 0.8)
+    store = MagicMock()
+    store.fetch_signals_for_cycle.return_value = [signal]
+    store.fetch_trades.return_value = [{"symbol": "AMD"}]
+    mocker.patch("src.store.pg_store.PostgreSQLStore", return_value=store)
+    mocker.patch(
+        "src.workers.portfolio_scheduler._load_risk_config",
+        return_value={"s4_fixed_slot_sizing_enabled": True},
+    )
+    mocker.patch(
+        "src.workers.portfolio_scheduler._get_feedback_threshold", return_value=0.0
+    )
+    mocker.patch(
+        "src.workers.portfolio_scheduler._compute_signal_velocity", return_value=1.0
+    )
+    mocker.patch("redis.Redis.from_url", return_value=MagicMock())
+    entry = MagicMock(strategy_id="S4")
+    bars = pd.DataFrame(
+        {"AMD": [100.0, 101.0]},
+        index=pd.date_range("2026-08-21", periods=2, freq="B"),
+    )
+
+    _build_strategy_instance(entry, bars, decision_at=_TS)
+
+    [candidate] = store.write_s4_intent_events.call_args.args[0]
+    assert candidate.held_at_rank is True
 
 
 def test_builder_candidate_ranking_score_riflette_velocity_multiplier(mocker):

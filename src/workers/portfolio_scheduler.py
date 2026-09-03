@@ -3948,20 +3948,11 @@ def _build_strategy_instance(
                         exc,
                     )
                     _ranking_multipliers = {}
-            if intent_ledger is not None and signals:
-                ranking_scores = {
-                    sig.signal_id: float(sig.score) * _ranking_multipliers.get(sig.symbol, 1.0)
-                    for sig in signals
-                    if sig.signal_id is not None
-                }
-                candidate_events = intent_ledger.capture(signals, ranking_scores=ranking_scores)
-                _write_s4_intent_events_fail_open(
-                    store, candidate_events, phase="candidate"
-                )
             try:
                 _open_syms = {
                     t["symbol"] for t in store.fetch_trades(status="open", limit=1000)
                 }
+                _open_syms_at_rank = _open_syms
             except Exception as _os_exc:
                 log.warning(
                     "#150: open-trade query failed (%s) — entry-freshness gate "
@@ -3969,6 +3960,21 @@ def _build_strategy_instance(
                     _os_exc,
                 )
                 _open_syms = set()
+                _open_syms_at_rank = None
+            if intent_ledger is not None and signals:
+                ranking_scores = {
+                    sig.signal_id: float(sig.score) * _ranking_multipliers.get(sig.symbol, 1.0)
+                    for sig in signals
+                    if sig.signal_id is not None
+                }
+                candidate_events = intent_ledger.capture(
+                    signals,
+                    ranking_scores=ranking_scores,
+                    open_symbols=_open_syms_at_rank,
+                )
+                _write_s4_intent_events_fail_open(
+                    store, candidate_events, phase="candidate"
+                )
             if signals:
                 _before_freshness = len(signals)
                 _before_freshness_signals = list(signals)

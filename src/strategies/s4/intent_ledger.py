@@ -167,6 +167,8 @@ class S4IntentEvent:
     model_generated_at: datetime
     decision_at: datetime
     rank: int | None
+    held_at_rank: bool | None
+    signal_age_at_slot: timedelta
     competing_candidates: tuple[str, ...]
     s1_state: dict[str, Any]
     anti_pyramiding: bool | None
@@ -205,6 +207,7 @@ class S4IntentLedger:
         self,
         signals: Iterable[SentimentResult],
         ranking_scores: dict[int, float] | None = None,
+        open_symbols: set[str] | None = None,
     ) -> list[S4IntentEvent]:
         """Append-only candidate events for every observed signal (#294, #401).
 
@@ -220,6 +223,9 @@ class S4IntentLedger:
                 (the field the rank can be reconstructed from). Absent means
                 the caller did not compute it; this is declared in ``missingness``
                 so the dossier knows it cannot audit this row.
+            open_symbols: point-in-time snapshot of symbols with an open
+                position. ``None`` means the snapshot was unavailable; it must
+                not be interpreted as an empty book.
         """
         signals = list(signals)
         competitors = tuple(sorted({signal.symbol for signal in signals}))
@@ -255,6 +261,8 @@ class S4IntentLedger:
                 signal.resolver_method is None and signal.extraction_method is None
             ):
                 missingness["resolver"] = "not_available_at_decision"
+            if open_symbols is None:
+                missingness["held_at_rank"] = "open_positions_unavailable_at_capture"
 
             snapshot: dict[str, Any] = {
                 "symbol": signal.symbol,
@@ -290,6 +298,12 @@ class S4IntentLedger:
                 model_generated_at=_utc(signal.generated_at),
                 decision_at=self.decision_at,
                 rank=None,
+                held_at_rank=(
+                    signal.symbol in open_symbols if open_symbols is not None else None
+                ),
+                signal_age_at_slot=(
+                    self.decision_slot - _utc(signal.generated_at)
+                ),
                 competing_candidates=competitors,
                 s1_state={
                     "status": "missing",
