@@ -83,7 +83,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     assert child.stdout is not None
     try:
-        while chunk := child.stdout.read(65536):
+        while chunk := os.read(child.stdout.fileno(), 65536):
             current_day = datetime.now(UTC).date()
             if current_day != today:
                 durable_log.close()

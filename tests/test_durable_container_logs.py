@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+import selectors
 import subprocess
 import sys
 
@@ -51,6 +52,65 @@ def test_il_runner_duplica_stdout_e_conserva_il_file_giornaliero(tmp_path: Path)
     assert result.stdout == "evento-forense-407\n"
     giorno = datetime.now(UTC).date().isoformat()
     assert (tmp_path / f"worker-{giorno}.log").read_text() == result.stdout
+
+
+def test_il_runner_elimina_solo_i_log_del_servizio_oltre_sessanta_giorni(
+    tmp_path: Path,
+):
+    giorno_scaduto = (datetime.now(UTC).date() - timedelta(days=61)).isoformat()
+    worker_scaduto = tmp_path / f"worker-{giorno_scaduto}.log"
+    api_scaduto = tmp_path / f"api-{giorno_scaduto}.log"
+    worker_scaduto.write_text("vecchio worker\n")
+    api_scaduto.write_text("vecchia api\n")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(RUNNER),
+            "--service",
+            "worker",
+            "--log-dir",
+            str(tmp_path),
+            "--",
+            sys.executable,
+            "-c",
+            "raise SystemExit(17)",
+        ],
+        check=False,
+    )
+
+    assert result.returncode == 17
+    assert not worker_scaduto.exists()
+    assert api_scaduto.exists()
+
+
+def test_il_runner_non_trattiene_l_output_finche_il_servizio_termina(tmp_path: Path):
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            str(RUNNER),
+            "--service",
+            "worker",
+            "--log-dir",
+            str(tmp_path),
+            "--",
+            sys.executable,
+            "-c",
+            "import time; print('subito', flush=True); time.sleep(5)",
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    assert process.stdout is not None
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ)
+
+    try:
+        assert selector.select(timeout=1), "l'output e' rimasto bloccato nel runner"
+        assert process.stdout.readline() == "subito\n"
+    finally:
+        process.terminate()
+        process.wait(timeout=2)
 
 
 def test_il_deploy_usa_una_directory_stabile_fuori_dal_worktree_temporaneo():
