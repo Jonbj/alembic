@@ -74,12 +74,12 @@ def test_get_pnl_maps_history_stamps_to_market_sessions():
     app.dependency_overrides.clear()
 
     assert resp.status_code == 200
-    assert [row["date"] for row in resp.json()["daily"]] == [
-        "2026-08-21",
-        "2026-08-25",
-        "2026-08-26",
-        "2026-08-27",
-        "2026-08-31",
+    assert resp.json()["daily"] == [
+        {"date": "2026-08-21", "equity": 109861.38, "profit_loss": 10.0},
+        {"date": "2026-08-25", "equity": 109959.77, "profit_loss": 98.39},
+        {"date": "2026-08-26", "equity": 109965.05, "profit_loss": 5.28},
+        {"date": "2026-08-27", "equity": 110041.95, "profit_loss": 76.90},
+        {"date": "2026-08-31", "equity": 110061.95, "profit_loss": 20.0},
     ]
     assert resp.json()["monthly"] == [{"month": "2026-08", "pnl": 210.57}]
     mock_client.get_calendar.assert_called_once()
