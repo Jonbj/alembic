@@ -60,9 +60,13 @@ def test_righe_duplicate_distinte_non_si_mescolano():
     originale (in mezzo c'e' sempre una riga unica), non devono fondersi in
     un 12-gramma fabbricato al bordo fra l'una e l'altra: quel bordo non e'
     mai comparso nel testo sorgente. Ciascuna frase ha esattamente 12
-    parole, quindi presa da sola non produce alcuna finestra interna: se
-    compare un 12-gramma ripetuto, viene per forza dal bordo fabbricato
-    dal join, non dal contenuto reale.
+    parole, quindi presa da sola produce esattamente una finestra interna
+    (la riga stessa, per intero): con 6 ripetizioni ciascuna, il suo unico
+    12-gramma supera la soglia di conteggio e viene contato una volta. Il
+    punto del test resta lo stesso: il totale deve essere tracciabile al
+    gramma proprio di A piu' al gramma proprio di B (2 in tutto) e non di
+    piu' — un gramma in eccesso rivelerebbe un bordo fabbricato dal join fra
+    le righe, che nel testo sorgente non e' mai comparso.
     """
     frase_a = "Il ramo NO_SIGNAL resta plausibile su questo mover quindi proseguo con analisi"
     frase_b = "Controllo ora se ENTITY_ERROR sia coerente col resto ragionamento fin qui svolto"
@@ -75,7 +79,7 @@ def test_righe_duplicate_distinte_non_si_mescolano():
 
     misure = misura_ripetizione(testo)
 
-    assert misure["dodici_grammi_ripetuti"] == 0
+    assert misure["dodici_grammi_ripetuti"] == 2
     assert misure["righe_ripetute"] == 10
 
 

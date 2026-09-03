@@ -61,7 +61,7 @@ def misura_ripetizione(ragionamento: str) -> dict[str, int]:
         parole = re.findall(r"\w+", riga.lower())
         grammi.update(
             tuple(parole[i:i + AMPIEZZA_GRAMMA])
-            for i in range(max(0, len(parole) - AMPIEZZA_GRAMMA))
+            for i in range(max(0, len(parole) - AMPIEZZA_GRAMMA + 1))
         )
     dodici_grammi_ripetuti = sum(1 for n in grammi.values() if n > 2)
 
