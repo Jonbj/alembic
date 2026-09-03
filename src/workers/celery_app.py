@@ -41,6 +41,7 @@ app = Celery(
         "src.workers.mobile_alert_task",
         "src.workers.mobile_monitor_task",
         "src.workers.held_news_loss_alert",
+        "src.workers.stale_drop_alert",
     ],
 )
 
@@ -205,6 +206,12 @@ app.conf.beat_schedule = {
     "held-news-loss-alert": {
         "task": "src.workers.held_news_loss_alert.run_held_news_loss_alert",
         "schedule": crontab(hour=22, minute=50, day_of_week="1-5"),
+    },
+    # #432: persist the daily stale-drop share and alert on >25%, split by
+    # already stale at fetch vs aged while queued. Measurement only.
+    "stale-drop-alert": {
+        "task": "src.workers.stale_drop_alert.run_stale_drop_alert",
+        "schedule": crontab(hour=22, minute=55, day_of_week="1-5"),
     },
     # Nightly retention sweep at 03:30 UTC
     "run-retention-sweep": {
