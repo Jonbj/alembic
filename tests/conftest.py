@@ -1,13 +1,15 @@
 # tests/conftest.py
 import contextlib
 import os
+import re
+from urllib.parse import urlsplit
 
 import pytest
 
 # Set env vars before any src.* import so src.config reads correct values
 # regardless of test collection order.
 os.environ.setdefault("ADMIN_API_KEY", "test-api-key-for-testing-only-12345678")
-os.environ.setdefault("DATABASE_URL", "postgresql://trading:trading@localhost:5432/trading")
+os.environ.setdefault("DATABASE_URL", "postgresql://trading:trading@localhost:5432/test_db")
 # JWT_SECRET_KEY must be set for the API lifespan to start (P0-02 fail-fast).
 # Tests use a fixed test secret; production must supply a real one via env.
 os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret-do-not-use-in-production-000")
@@ -19,6 +21,22 @@ os.environ.setdefault(
     "$2b$12$i6qSOhZRTLWbWoSTukGsw.p2y0hEJEKmEqjHGwjuv3dXqB2Gy2WHO",
 )
 os.environ.setdefault("MOBILE_TOKEN_PEPPER", "test-pepper")
+
+
+_TEST_DATABASE_NAME_RE = re.compile(
+    r"(?:^|[_-])(?:test|tests|testing|pytest)(?:[_-]|$)", re.IGNORECASE
+)
+
+
+def pytest_configure(config):
+    database_url = os.environ["DATABASE_URL"]
+    database_name = urlsplit(database_url).path.lstrip("/")
+    if not _TEST_DATABASE_NAME_RE.search(database_name):
+        raise pytest.UsageError(
+            f"Refusing to run tests against non-test database {database_name!r}. "
+            "Set DATABASE_URL to a dedicated database whose name contains a "
+            "standalone test token (for example 'test_db')."
+        )
 
 
 @pytest.fixture
