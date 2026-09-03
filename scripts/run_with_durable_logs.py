@@ -4,14 +4,14 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, date, datetime, timedelta
 import os
-from pathlib import Path
 import signal
 import subprocess
 import sys
-from typing import BinaryIO, Sequence
-
+from collections.abc import Sequence
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
+from typing import BinaryIO
 
 DEFAULT_LOG_DIR = Path("/var/log/alembic")
 DEFAULT_RETENTION_DAYS = 60

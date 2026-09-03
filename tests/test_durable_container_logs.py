@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
 import selectors
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import yaml
-
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "docker-compose.yml"
