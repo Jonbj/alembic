@@ -2,6 +2,7 @@
 
 import json
 
+import httpx
 import pytest
 
 import review_notturna_locale as orch
@@ -117,3 +118,70 @@ def test_il_server_viene_sempre_fermato(finti):
 
     assert finti.server_avviato == 1
     assert finti.server_fermato == 1
+
+
+def test_avvio_server_fallito_ferma_e_registra_e_rilancia(finti, monkeypatch):
+    """Issue 3: se avvia_server() esplode, ferma_server() gira comunque e il
+    ledger riceve una riga NON_ESAMINATA invece di sparire nel nulla."""
+
+    def esplodi():
+        raise RuntimeError("il server locale non ha risposto a /health entro 5 minuti")
+
+    monkeypatch.setattr(orch, "avvia_server", esplodi)
+
+    with pytest.raises(RuntimeError, match="non ha risposto a /health"):
+        orch.main([])
+
+    assert finti.server_fermato == 1
+    assert finti.commenti == []
+    assert finti.ledger[-1]["stato"] == "NON_ESAMINATA"
+    assert "guasto durante avvio del server" in finti.ledger[-1]["causa"]
+
+
+def test_pubblicazione_fallita_ferma_e_registra_e_rilancia(finti, monkeypatch):
+    """Issue 4: se pubblica_commento() esplode, i rilievi gia' trovati non
+    scompaiono senza lasciare traccia nel ledger."""
+
+    def esplodi(numero, corpo):
+        raise RuntimeError("gh pr comment: rete irraggiungibile")
+
+    monkeypatch.setattr(orch, "pubblica_commento", esplodi)
+
+    with pytest.raises(RuntimeError, match="rete irraggiungibile"):
+        orch.main([])
+
+    assert finti.server_avviato == 1
+    assert finti.server_fermato == 1
+    ultima = finti.ledger[-1]
+    assert ultima["stato"] == "NON_ESAMINATA"
+    assert "guasto durante pubblicazione del commento" in ultima["causa"]
+    assert ultima["rilievi"] == 1
+
+
+def test_interroga_modello_propaga_errore_http(monkeypatch):
+    """Issue 5: un 4xx/5xx dal server non deve diventare silenziosamente
+    ("", "", 0) — che a valle e' indistinguibile da un JSON rotto del modello."""
+
+    class _RispostaFinta:
+        def raise_for_status(self):
+            richiesta = httpx.Request("POST", "http://127.0.0.1:8080/v1/chat/completions")
+            raise httpx.HTTPStatusError(
+                "500 Internal Server Error",
+                request=richiesta,
+                response=httpx.Response(500, request=richiesta),
+            )
+
+        def iter_lines(self):
+            raise AssertionError("non si deve iterare il corpo dopo un errore HTTP")
+
+    class _StreamFinto:
+        def __enter__(self):
+            return _RispostaFinta()
+
+        def __exit__(self, *_exc):
+            return False
+
+    monkeypatch.setattr(orch.httpx, "stream", lambda *a, **k: _StreamFinto())
+
+    with pytest.raises(httpx.HTTPStatusError):
+        orch.interroga_modello("prompt qualunque")

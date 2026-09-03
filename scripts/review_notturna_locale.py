@@ -25,7 +25,7 @@ import httpx
 from src.review_locale.estrazione import costruisci_prompt
 from src.review_locale.referto import NON_VALIDO, PUBBLICABILE, SENZA_RILIEVI, prepara
 from src.review_locale.rilevatori import e_corsa_condannata, e_loop, misura_ripetizione
-from src.review_locale.selezione import PrCandidata, scegli
+from src.review_locale.selezione import STATO_FALLITO, PrCandidata, scegli
 
 log = logging.getLogger("review_notturna")
 
@@ -42,7 +42,10 @@ TIMEOUT_HTTP = 32_400
 # Nel ledger lo stato di un tentativo fallito e' NON_ESAMINATA, distinto dallo
 # stato NON_VALIDO che il modulo `referto` usa per il singolo referto: sono due
 # cose diverse — un referto invalido e un tentativo che non ha prodotto nulla.
-NON_VALIDO_LEDGER = "NON_ESAMINATA"
+# La stringa vive in un posto solo: `selezione.STATO_FALLITO`, che e' anche cio'
+# che `scegli()` conta per il tetto dei tentativi. L'alias resta perche' qui si
+# legge meglio nel contesto del ledger.
+NON_VALIDO_LEDGER = STATO_FALLITO
 
 INTESTAZIONE_COMMENTO = """## Rilievi da una review sul modello locale
 
@@ -157,6 +160,10 @@ def interroga_modello(prompt: str) -> tuple[str, str, int]:
         headers={"Authorization": "Bearer not-needed"},
         timeout=TIMEOUT_HTTP,
     ) as risposta:
+        # Senza questo controllo un 4xx/5xx (crash a meta' generazione, OOM,
+        # richiesta malformata) produce silenziosamente ("", "", 0): a valle
+        # sembra un JSON non parsabile del modello, non un guasto del server.
+        risposta.raise_for_status()
         for riga in risposta.iter_lines():
             if not riga.startswith("data: "):
                 continue
@@ -233,13 +240,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     iniziato = datetime.now().astimezone()
-    avvia_server()
+    rilievi: list[dict] = []
+    stato = SENZA_RILIEVI
+    causa = None
+    misure = {}
+    # `fase` racconta, se si arriva all'`except`, quale confine esterno ha
+    # fallito: avvio server, interrogazione di un dato prompt, o pubblicazione
+    # del commento. E' l'unica cosa che distingue "il modello ha risposto con
+    # JSON rotto" (gestito da `prepara`, sopra) da "systemctl/httpx/gh sono
+    # esplosi" (gestito qui).
+    fase = "avvio del server"
     try:
-        rilievi: list[dict] = []
-        stato = SENZA_RILIEVI
-        causa = None
-        misure = {}
+        avvia_server()
         for indice, singolo in enumerate(prompt):
+            fase = f"interrogazione del modello (prompt {indice + 1}/{len(prompt)})"
             log.info("prompt %d/%d, %d byte", indice + 1, len(prompt), len(singolo))
             content, reasoning, generati = interroga_modello(singolo)
             misure = misura_ripetizione(reasoning)
@@ -254,20 +268,30 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if rilievi:
             stato = "ESAMINATA_CON_RILIEVI"
+            fase = "pubblicazione del commento"
             pubblica_commento(scelta.numero, _corpo_commento(rilievi))
         elif stato == SENZA_RILIEVI:
             stato = "ESAMINATA_SENZA_RILIEVI"
+    except Exception as exc:
+        # Qualunque guasto in un confine esterno (avvio server, HTTP verso il
+        # modello, `gh pr comment`) deve comunque lasciare una riga nel ledger
+        # — altrimenti `scegli()` non lo conta come tentativo fallito e una PR
+        # puo' restare in coda per sempre, o un run di ore che ha davvero
+        # trovato rilievi sparisce senza traccia. Il processo esce comunque
+        # non-zero: si rilancia, non si inghiotte.
+        stato, causa = NON_VALIDO_LEDGER, f"guasto durante {fase}: {exc}"
+        raise
     finally:
         ferma_server()
+        scrivi_ledger({
+            "pr": scelta.numero, "sha": scelta.sha,
+            "iniziato": iniziato.isoformat(),
+            "concluso": datetime.now().astimezone().isoformat(),
+            "stato": stato, "causa": causa,
+            "rilievi": len(rilievi),
+            "misure_loop": misure,
+        })
 
-    scrivi_ledger({
-        "pr": scelta.numero, "sha": scelta.sha,
-        "iniziato": iniziato.isoformat(),
-        "concluso": datetime.now().astimezone().isoformat(),
-        "stato": stato, "causa": causa,
-        "rilievi": len(rilievi),
-        "misure_loop": misure,
-    })
     log.info("esito: %s (%d rilievi)", stato, len(rilievi))
     return 0
 
