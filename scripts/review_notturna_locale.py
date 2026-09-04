@@ -134,6 +134,11 @@ def scrivi_ledger(voce: dict) -> None:
         f.write(json.dumps(voce, ensure_ascii=False) + "\n")
 
 
+def salva_diagnosi(numero: int, indice: int, reasoning: str) -> None:
+    DIAGNOSI.mkdir(parents=True, exist_ok=True)
+    (DIAGNOSI / f"ragionamento_pr{numero}_{indice}.txt").write_text(reasoning)
+
+
 def interroga_modello(prompt: str) -> tuple[str, str, int]:
     """Manda il prompt e restituisce (content, reasoning, token generati).
 
@@ -257,8 +262,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             log.info("prompt %d/%d, %d byte", indice + 1, len(prompt), len(singolo))
             content, reasoning, generati = interroga_modello(singolo)
             misure = misura_ripetizione(reasoning)
-            DIAGNOSI.mkdir(parents=True, exist_ok=True)
-            (DIAGNOSI / f"ragionamento_pr{scelta.numero}_{indice}.txt").write_text(reasoning)
+            salva_diagnosi(scelta.numero, indice, reasoning)
             esito = prepara(content)
             if esito.stato == PUBBLICABILE:
                 rilievi.extend(esito.rilievi)

@@ -44,6 +44,7 @@ def finti(monkeypatch):
     monkeypatch.setattr(orch, "scrivi_ledger", lambda voce: f.ledger.append(voce))
     monkeypatch.setattr(orch, "pubblica_commento", lambda numero, corpo: f.commenti.append((numero, corpo)))
     monkeypatch.setattr(orch, "interroga_modello", lambda prompt: (f.risposta, "ragionamento", 1000))
+    monkeypatch.setattr(orch, "salva_diagnosi", lambda *a, **k: None)
     return f
 
 
