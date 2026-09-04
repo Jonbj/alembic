@@ -1,0 +1,12 @@
+[Unit]
+Description=Review notturna sul worker locale, ogni notte all'01:07
+
+[Timer]
+# 01:07 sta nel buco fra il giro del loop roadmap delle 23:00 e quello delle
+# 07:00. Il minuto spostato evita di accodarsi a tutto cio' che parte allo
+# scoccare dell'ora.
+OnCalendar=*-*-* 01:07:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target
