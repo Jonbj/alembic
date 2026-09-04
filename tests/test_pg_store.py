@@ -100,6 +100,52 @@ class TestPostgreSQLStoreInterface:
         assert "symbols" in params
 
 
+class TestStrategyRebalanceSnapshotStore:
+    def test_insert_snapshot_usa_un_batch_atomico(self):
+        from datetime import datetime, timezone
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_conn.cursor.return_value = mock_cursor
+        store = PostgreSQLStore(conn=mock_conn, use_pool=False)
+        ts = datetime(2026, 9, 1, 14, 7, tzinfo=timezone.utc)
+
+        store.insert_strategy_rebalance_snapshot([
+            {
+                "strategy_id": "S1",
+                "rebalance_ts": ts,
+                "symbol": "AAPL",
+                "signal_z": 1.2,
+                "weight": 0.6,
+                "in_target": True,
+                "held": True,
+                "position_market_value": 600.0,
+                "target_notional": 300.0,
+            },
+            {
+                "strategy_id": "S1",
+                "rebalance_ts": ts,
+                "symbol": "NVDA",
+                "signal_z": -0.7,
+                "weight": 0.0,
+                "in_target": False,
+                "held": False,
+                "position_market_value": 0.0,
+                "target_notional": 0.0,
+            },
+        ])
+
+        mock_cursor.executemany.assert_called_once()
+        sql, params = mock_cursor.executemany.call_args.args
+        assert "INSERT INTO strategy_rebalance_snapshots" in sql
+        assert len(params) == 2
+        assert params[0][0:3] == ("S1", ts, "AAPL")
+        mock_conn.commit.assert_called_once()
+
+
+
 class TestWriteSignalReturnsId:
     """Test that write_signal returns the inserted/updated signal id."""
 
