@@ -1291,7 +1291,7 @@ class PostgreSQLStore:
                                COALESCE(counterfactual_attempts, 0) AS counterfactual_attempts
                        FROM execution_decisions
                        WHERE decision = 'SELL'
-                         AND reason LIKE 'sentiment_reversal%'
+                         AND reason LIKE 'sentiment_reversal%%'
                          AND counterfactual_computed_at IS NULL
                          {window_clause}
                          {cursor_clause}
@@ -1517,7 +1517,7 @@ class PostgreSQLStore:
          AND (t.exit_order_id = ed.order_id
               OR ed.order_id = ANY(t.exit_order_ids))
         WHERE ed.decision = 'SELL'
-          AND ed.reason LIKE 'sentiment_reversal%'
+          AND ed.reason LIKE 'sentiment_reversal%%'
           AND ed.tick_time >= now() - (%s || ' days')::interval
         ORDER BY ed.tick_time DESC
     """

@@ -1,9 +1,11 @@
 """Tests for run_counterfactual_worker and helpers (Phase C)."""
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
+import psycopg2
 import pytest
 
 from src.workers.performance import (
@@ -978,3 +980,78 @@ class TestForceExitVsRealizedView:
         assert "realized_net_pnl" in called_sql
         assert "ed.counterfactual_return_1h" in called_sql
         assert "ed.counterfactual_return_overnight" in called_sql
+
+
+class TestForceExitLikeEscaping:
+    """Regression for #493.
+
+    ``reason LIKE 'sentiment_reversal%'`` has an unescaped literal ``%``.
+    psycopg2 interpolates ``%s`` parameters into the query client-side using
+    Python's printf-style ``%`` formatting *before* the query ever reaches
+    Postgres; a bare ``%`` that isn't part of a placeholder makes it
+    miscount how many positional params the query needs and raise
+    ``IndexError: list index out of range`` -- not a SQL error, a formatting
+    error. Every other test in this file uses ``cursor = MagicMock()``,
+    which records call args without ever performing that substitution, so
+    it cannot see this bug class. Only a real psycopg2 cursor can.
+
+    The assertion is narrow on purpose: these tests don't require
+    `execution_decisions`/`trades` to exist (CI provisions schema via
+    migrations; a bare `postgres` connection may not). Any error *other*
+    than IndexError (e.g. UndefinedTable) means the query reached the
+    server, which is all this regression cares about.
+    """
+
+    @staticmethod
+    def _connect():
+        for url in (
+            os.environ.get("DATABASE_URL", ""),
+            "postgresql://trading:trading@localhost:5432/postgres",
+        ):
+            if not url:
+                continue
+            try:
+                return psycopg2.connect(url, connect_timeout=3)
+            except psycopg2.OperationalError:
+                continue
+        pytest.skip("Postgres non raggiungibile")
+
+    def test_fetch_force_exit_decisions_does_not_raise_indexerror(self):
+        from src.store.pg_store import PostgreSQLStore
+
+        conn = self._connect()
+        try:
+            store = PostgreSQLStore(conn=conn)
+            try:
+                store.fetch_force_exit_decisions_without_counterfactual(
+                    days_back=None, limit=1
+                )
+            except IndexError:
+                pytest.fail(
+                    "unescaped '%' in \"LIKE 'sentiment_reversal%'\" breaks "
+                    "psycopg2's client-side parameter substitution"
+                )
+            except Exception:
+                pass  # a real DB/schema error is fine; only IndexError is the regression
+        finally:
+            conn.rollback()
+            conn.close()
+
+    def test_fetch_force_exit_pnl_vs_counterfactual_does_not_raise_indexerror(self):
+        from src.store.pg_store import PostgreSQLStore
+
+        conn = self._connect()
+        try:
+            store = PostgreSQLStore(conn=conn)
+            try:
+                store.fetch_force_exit_pnl_vs_counterfactual(days=30)
+            except IndexError:
+                pytest.fail(
+                    "unescaped '%' in \"LIKE 'sentiment_reversal%'\" breaks "
+                    "psycopg2's client-side parameter substitution"
+                )
+            except Exception:
+                pass  # a real DB/schema error is fine; only IndexError is the regression
+        finally:
+            conn.rollback()
+            conn.close()
