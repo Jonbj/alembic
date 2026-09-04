@@ -120,30 +120,80 @@ S2 runs as `(ts, data_replay, portfolio, market) → list[Order]`. The orchestra
 
 The authoritative execution path is `execution.engine: portfolio` — only the portfolio
 cycle submits orders. S4 reads pre-computed ensemble sentiment from Redis/PostgreSQL
-(written by SentimentWorker every 15 min) and gates it through a **documented chain**:
+(written by SentimentWorker every 15 min) and gates it through the chain below.
 
-1. **Freshness** — only signals within `max_signal_age_hours` (4h) of the cycle tick;
-   staler ones are dropped (Decision Log: `SKIP_STALE`). Per symbol, the most recent
-   **ensemble** signal is preferred over a later FinBERT fallback.
-2. **Prefilter (ranker)** — `CrossSectionalRanker` keeps signals with
-   `score ≥ S4Config.min_score` (0.10) and `confidence ≥ S4Config.min_confidence`
-   (0.30). These are **prefilters**, NOT the order threshold.
-3. **Feedback gate = the order threshold** — a signal must clear the live
-   `feedback:entry_threshold` (baseline **0.30**, currently raised to **0.35** by the
-   loss-feedback loop, up to 0.60). Below it → dropped (Decision Log: `SKIP_THRESHOLD`).
-4. **Cross-sectional ranking** — top-N (`n_top=5`) of the survivors, minimum 2 stocks,
-   equal-weight within the bucket.
+> **Verificato contro il codice il 2026-09-04.** La versione precedente elencava quattro
+> passi in ordine sbagliato e ometteva tre filtri che nella pratica scartano la maggior
+> parte dei candidati (freschezza news, esclusione fallback, moltiplicatore di velocity).
+> L'ordine qui sotto è quello eseguito da `_build_strategy_instance` in
+> `src/workers/portfolio_scheduler.py:3960-4160`.
 
-> **Threshold map — three distinct concepts, do not conflate:**
-> | Name | Value | Role |
+| # | passo | dove | codice emesso quando scarta |
+|---|---|---|---|
+| 0 | **Lettura** dei segnali dal DB, finestra `signals_lookback_hours` = **96h** | `fetch_signals_for_cycle` | — |
+| 1 | **Freschezza della notizia** (#150): `published_at` più vecchio di `MAX_NEWS_AGE_HOURS` (**2h**) → scartato. **Solo per i simboli senza posizione aperta**: un simbolo già a libro salta questo gate | `_apply_entry_freshness_gate` | `SKIP_ENTRY_FRESHNESS` / `entry_freshness_filtered` |
+| 2 | **Esclusione fallback** (#108): i segnali con `fallback_used=true` (FinBERT locale) non partecipano al ranking BUY | `_filter_fallback_signals` | `SKIP_FALLBACK` |
+| 3 | **Staleness del segnale**: `generated_at` più vecchio di `max_signal_age_hours` (**4h**) → scaduto. **FIX-D** ri-ammette i segnali stale *positivi* sui simboli con posizione aperta e nessun contro-segnale | `_filter_stale_signals` + `_preserve_stale_signals_for_open_positions` | `SKIP_STALE` / `expired` |
+| 4 | **Signal velocity** (#401): `velocity = score[0] − score[−1]` sulle ultime 3 voci di `signal:{sym}:history`; se `|velocity| > SIGNAL_VELOCITY_THRESHOLD` (**0.30**) lo score è moltiplicato per `1 ± SIGNAL_VELOCITY_BOOST` (**±0.20**). **Applicato PRIMA del gate**: la soglia vede lo score post-velocity | `portfolio_scheduler.py:4114-4146` | — (modifica lo score, non scarta) |
+| 5 | **Feedback gate = la soglia d'ordine**: `|score| ≥ feedback:entry_threshold:S4` | `_get_feedback_threshold` | `SKIP_THRESHOLD` / `SKIP_ENTRY_GATE` / `below_entry_gate` |
+| 6 | **Ranker** — dedup per simbolo, prefiltri, long-only, top-N | `CrossSectionalRanker` | `RANK_DEDUPLICATED`, `RANK_MIN_CONFIDENCE`, `RANK_MIN_SCORE`, `RANK_LONG_ONLY`, `RANK_OUTSIDE_TOP_N` |
+| 7 | **Guardie a valle**: anti-pyramiding P0-05 (un simbolo già a libro non riceve un secondo BUY, **nemmeno per riportarlo a peso**), idempotenza per `signal_id`/giorno, hold-minimum 90 min | `portfolio_scheduler.py:2857`, `_apply_idempotency_filter` | `SKIP_PYRAMIDING`, `SKIP_IDEMPOTENCY` |
+| 8 | **Submit**: `notional × regime_multiplier` | `_submit_orders` | `SUBMITTED` |
+
+I codici della colonna di destra sono scritti in due posti con vocabolari diversi:
+`execution_decisions.decision` (Decision Log della UI: solo `BUY`, `SELL`, `SKIP_THRESHOLD`,
+`SKIP_STALE`, `SKIP_FALLBACK`, `SKIP_PYRAMIDING` — `SKIP_EMA`, `SKIP_CAP` e `SKIP_POSITION`
+appartengono al path legacy e **non sono mai stati emessi** sotto `engine=portfolio`) e
+`s4_intent_events.reason_code`, che è il ledger completo per intento e contiene anche
+`CANDIDATE_OBSERVED`, `SKIP_ENTRY_FRESHNESS`, `SKIP_ENTRY_GATE`, `SKIP_IDEMPOTENCY`,
+`RANK_*` e `SUBMITTED`.
+
+**Il ranker (passo 6) in dettaglio** — `src/strategies/s4/ranking.py`:
+
+1. **Dedup**: un solo segnale per simbolo, **il più recente per `generated_at`** — *non* il
+   più forte. È un comportamento noto e discusso in **#169**: un pezzo di colore pubblicato
+   dopo una notizia forte la sovrascrive per quel ciclo.
+2. **Prefiltri**: `confidence ≥ min_confidence` (0.30) e `|score| ≥ min_score` (0.10). Sono
+   **prefiltri del ranker, NON la soglia d'ordine** (che è il passo 5).
+3. **Long-only**: `score ≤ 0` scartato — S4 non apre short.
+4. **Top-N**: ordinamento decrescente per score, primi `n_top` (5).
+5. **Peso**: `1/n_top` fisso (`fixed_slot_sizing=True`, #81) — con 2 sopravvissuti su 5 slot,
+   i 3 slot liberi restano **non investiti**, non redistribuiti.
+
+> **Threshold map — tre concetti distinti, da non confondere:**
+> | Nome | Valore | Ruolo |
 > |---|---|---|
-> | `S4Config.min_score` / `min_confidence` | 0.10 / 0.30 | ranker **prefilter** |
-> | `feedback:entry_threshold` | baseline 0.30, dynamic (→0.60) | **order gate (source of truth)** |
-> | legacy `ENTRY_THRESHOLD` + `score>0.30 AND price>EMA20` | — | old `legacy_sentiment` path, **INACTIVE** under `engine=portfolio` |
+> | `S4Config.min_score` / `min_confidence` | 0.10 / 0.30 | **prefiltro** del ranker |
+> | `feedback:entry_threshold:S4` | baseline 0.30, dinamico (→0.60) | **soglia d'ordine (fonte di verità)** |
+> | legacy `ENTRY_THRESHOLD` + `score>0.30 AND price>EMA20` | — | vecchio path `legacy_sentiment`, **INATTIVO** con `engine=portfolio` |
+>
+> **Non esiste nessun filtro EMA20 nel path portfolio.** L'unico posto in cui il prezzo è
+> confrontato con la EMA20 è `src/workers/execution.py`, cioè il path legacy che non gira.
 
-Exit conditions:
-- Stop-loss: position closed if price falls to `entry_price × (1 - stop_loss_pct)`
-- Positions absent from the new target weights are closed at the next rebalance.
+**La chiave del gate è per-strategia** dallo scaffolding del 2026-07-11 (`de2e915`).
+`_get_feedback_threshold` legge `feedback:entry_threshold:<strategia>`; se manca ripiega
+sulla vecchia chiave nuda `feedback:entry_threshold`, e infine sul pavimento
+`loss_feedback.threshold_baseline` (`config/trading.yaml`, 0.30). Valori vivi al 2026-09-04:
+`:S4` = **0.30**, `:S1` = **0.0** (S1 non ha un gate d'ingresso discreto, e lo 0.0 è
+deliberato: clampare al pavimento armerebbe un gate su una sleeve progettata per non averlo).
+Il ratchet scrive per-strategia (`feedback:state:<strategia>`), quindi una perdita di S1 non
+alza la soglia di S4. Il pannello e `GET /api/trading/feedback-status` leggevano invece la
+vecchia chiave globale: corretto il 2026-09-04 con #474/PR #495, che ora restituisce una voce
+per sleeve.
+
+### Uscite
+
+| meccanismo | condizione | dove |
+|---|---|---|
+| peso target a 0 | il simbolo non è più nel target del ciclo. L'etichetta (`below_entry_gate`, `expired`, `whipsaw`, `no_signal`, `fallback_filtered`, `entry_freshness_filtered`, `unknown`) è la **disposizione osservata** del segnale, non una deduzione dall'età — vedi `docs/exit_mechanism_labels.md` | `src/portfolio/exit_classification.py` |
+| `sentiment_reversal` | un segnale **ensemble** (mai un fallback FinBERT) con `score ≤ SENTIMENT_REVERSAL_EXIT_THRESHOLD` (**−0.35**) e non più vecchio di `SENTIMENT_REVERSAL_MAX_AGE_MINUTES` (60 min) forza la chiusura. Consume-on-fire (#67: lo stesso segnale non spara due volte) e cooldown di re-ingresso di 2h (#68) | `_sentiment_reversal_sells` |
+| stop-loss | **disattivato** dal 2026-07-15: `risk.stop_loss: 0.0` in `config/trading.yaml` fa uscire `_stop_loss_breached_symbols` con `{}`. Resta la telemetria shadow (`stop_shadow_log`, `stop_shadow_enabled: true`) e l'allarme Telegram a `unprotected_position_alert_pct` (−15%, #161). Coerentemente `stop_decisions` non ha righe dal 2026-07-14 | `config/trading.yaml:172-206` |
+
+> **`sentiment_reversal` non è un'uscita di S4 soltanto.** `_sentiment_reversal_sells` cicla su
+> **tutte** le posizioni del broker, senza filtrare per sleeve: un contro-segnale news può
+> liquidare una posizione aperta da S1 e tenuta da settimane. È il tema di **#182** (nessuna
+> gerarchia d'uscita fra core e overlay); il P&L realizzato viene accreditato alla sleeve
+> proprietaria della posizione, non a S4.
 
 ### Scoring Formula
 
@@ -170,11 +220,28 @@ Due modelli attivi via Ollama Cloud, **selezionati a runtime** dalla chiave Redi
 > aggressiva su news macro); DeepSeek-V4-Pro e GLM-5.1 rimossi il 2026-06-16. Vedi
 > `docs/llm-config.md` (tabella dei modelli sempre aggiornata) e `docs/CHANGELOG.md`.
 
-Each uses **DK-CoT** (Domain Knowledge Chain-of-Thought) prompting:
-1. Act as buy-side analyst
-2. Reason through cash flows, competition, profitability
-3. Provide explicit bull/bear cases
-4. Return structured JSON (`polarity`, `confidence`, `reasoning`)
+Each uses **DK-CoT** (Domain Knowledge Chain-of-Thought) prompting. Il prompt vivo è la
+**Variante A** (`SENTIMENT_PROMPT_VARIANT=a` in `.env`, in produzione dal 2026-09-01T10:33Z,
+`bf5bef2e`, #399/#408) — non il `_DK_COT_PROMPT` storico, che resta il default del codice:
+
+1. ruolo: analista buy-side, impatto sul **singolo emittente**;
+2. **il titolo dell'articolo è nel prompt** (`Headline: {title}`, primi 200 caratteri). Prima
+   veniva scartato pur essendo popolato nel 99,94% delle righe `news_log` — è il difetto di
+   #399 («Why Is Robinhood Stock Surging» valutato −0,0098 in una giornata a +8,17%);
+3. lo step 1 chiede **come il mercato prezzerà il titolo**, non solo l'effetto sui
+   fondamentali, e impone esplicitamente di non ridurre la polarity solo perché la causa è
+   di terzi (#408: le notizie di secondo ordine erano sotto-pesate di ~2,2× in magnitudine);
+4. bull/bear case esplicito;
+5. output JSON strutturato — oltre a `polarity`/`confidence`/`reasoning` il modello restituisce
+   `event_type`, `directness`, `materiality`, `novelty`, `risk_flags`, `evidence_sentences`.
+   Questi campi sono **feature del segnale**, non ancora consumati dallo scoring, e per contratto
+   il modello non produce mai un'azione di trading (no buy/sell/hold).
+
+> **Deroga al freeze.** La Variante A è stata deployata in deroga esplicita a #171, registrata
+> in `docs/evidence/OBSERVATION_CHARTER.md`. Cambia la **distribuzione** degli score, non solo
+> la loro correttezza (stimati ~2,4× segnali sopra il gate 0,30 a parità di soglia): **ogni
+> analisi di S4 che attraversa il 2026-09-01 va segmentata prima/dopo.** La misura dell'effetto
+> reale è l'issue aperta #453.
 
 **Divergence check:** If `std(scores) > 0.40` → discard ensemble, use FinBERT local fallback.
 La soglia e' `config.ENSEMBLE_DIVERGENCE_STD` (default 0.40, alzata da 0.30 il 2026-07-09).
@@ -224,10 +291,31 @@ The multiplier (0.2× to 1.0×) prevents full-size entries during bear markets o
 | `max_signal_age_hours` | 4 | Oltre questa età il segnale è scaduto e la posizione viene chiusa |
 | `rebalance_frequency` | DAILY | Cadenza di ribilanciamento della sleeve |
 
-**La soglia d'ordine non è in `S4Config`.** È `feedback:entry_threshold` in Redis (baseline 0.30,
-alzata dinamicamente dal loop di loss-feedback) ed è applicata a monte, nel portfolio scheduler.
-Confondere `min_score` con la soglia d'ordine è l'errore che nel luglio 2026 ha lasciato il gate
-disarmato per un giorno e mezzo (issue #163).
+**La soglia d'ordine non è in `S4Config`.** È `feedback:entry_threshold:S4` in Redis (baseline
+0.30, alzata dinamicamente dal loop di loss-feedback) ed è applicata a monte, nel portfolio
+scheduler. Confondere `min_score` con la soglia d'ordine è l'errore che nel luglio 2026 ha
+lasciato il gate disarmato per un giorno e mezzo (issue #163).
+
+#### I parametri che mordono davvero stanno fuori da `S4Config`
+
+`S4Config` copre solo il ranker. Metà della catena dei passi 1-8 è governata da `src/config.py`,
+`config/trading.yaml` e Redis — leggere solo la tabella qui sopra dà un'idea sbagliata di quanto
+sia filtrato un candidato.
+
+| Parametro | Valore vivo (2026-09-04) | Dove | Effetto |
+|---|---|---|---|
+| `MAX_NEWS_AGE_HOURS` | 2 | `src/config.py` (env) | passo 1: età massima della **notizia** per un nuovo ingresso |
+| `SIGNAL_VELOCITY_THRESHOLD` | 0.30 | `src/config.py` (env) | passo 4: soglia oltre cui scatta il boost |
+| `SIGNAL_VELOCITY_BOOST` | 0.20 | `src/config.py` (env) | passo 4: entità del boost (`×1.20` / `×0.80`) |
+| `feedback:entry_threshold:S4` | 0.30 | Redis (TTL 96h) | passo 5: **la soglia d'ordine** |
+| `loss_feedback.threshold_baseline` | 0.30 | `config/trading.yaml` | pavimento del gate quando la chiave Redis è assente |
+| `ENSEMBLE_DIVERGENCE_STD` | 0.40 | `src/config.py` | a monte: sopra questo `std` l'ensemble degrada a FinBERT (che poi il passo 2 scarta) |
+| `SENTIMENT_REVERSAL_EXIT_THRESHOLD` | −0.35 | `docker-compose.yml` | uscita forzata |
+| `SENTIMENT_REVERSAL_MAX_AGE_MINUTES` | 60 | env (default) | età massima del contro-segnale che può forzare l'uscita |
+| `SENTIMENT_REVERSAL_REENTRY_COOLDOWN_HOURS` | 2.0 | env (default) | blocco al rientro dopo un'uscita forzata (#68) |
+| `execution.hold_minimum_minutes` | 90 | `config/trading.yaml` | passo 7: una posizione appena aperta non può essere venduta da un ribilanciamento |
+| `risk.stop_loss` | **0.0 (disattivato)** | `config/trading.yaml` | nessuno stop protettivo: solo shadow + allarme a −15% |
+| `SENTIMENT_PROMPT_VARIANT` | `a` | `.env` | prompt DK-CoT Variante A (#399/#408) — vedi sotto |
 
 ---
 
