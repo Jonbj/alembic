@@ -89,11 +89,15 @@ def test_report_conta_la_popolazione_forward_return_e_agreement_indipendenti():
     assert report["forward_returns"]["other"]["forward_return"]["mean"] == -0.01
 
     agreement = report["directness_agreement"]
-    assert agreement["unit"] == "llm_response"
-    assert agreement["responses_with_directness"] == 2
+    assert agreement["unit"] == "news_row"
+    assert agreement["rows_with_directness"] == 1
     assert agreement["spillover_labels"] == ["competitor_readthrough", "sector"]
-    assert agreement["spillover"] == {"n": 1, "rate": 0.5}
-    assert agreement["by_bucket"] == {"competitor_readthrough": 1, "direct": 1}
+    assert agreement["concordant"] == {"n": 1, "rate": 1.0}
+    assert agreement["model_response_cross_tab"] == {
+        "responses_with_directness": 2,
+        "spillover": {"n": 1, "rate": 0.5},
+        "by_bucket": {"competitor_readthrough": 1, "direct": 1},
+    }
 
     assert report["classifications"] == [{
         "news_log_id": 1,
@@ -133,4 +137,8 @@ def test_report_senza_popolazione_non_inventa_tassi():
 
     assert report["window"] == {"start": None, "end": None}
     assert report["population"]["second_order_rate"] is None
-    assert report["directness_agreement"]["spillover"]["rate"] is None
+    assert report["directness_agreement"]["concordant"]["rate"] is None
+    assert (
+        report["directness_agreement"]["model_response_cross_tab"]["spillover"]["rate"]
+        is None
+    )

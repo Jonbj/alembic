@@ -183,7 +183,7 @@ def build_report(
         })
 
     classifications.sort(key=lambda row: (int(row["news_log_id"]), row["ticker"]))
-    signal_category: dict[object, bool] = {}
+    second_order_news_by_signal: dict[object, object] = {}
     second_order_signals: list[dict] = []
     other_signals: list[dict] = []
     for row in signals:
@@ -191,16 +191,28 @@ def build_report(
         if news_log_id not in known_news_ids:
             continue
         is_second_order = news_log_id in second_order_ids
-        signal_category[row.get("signal_id")] = is_second_order
+        if is_second_order:
+            second_order_news_by_signal[row.get("signal_id")] = news_log_id
         (second_order_signals if is_second_order else other_signals).append(row)
 
-    directness = [
-        str(row.get("directness")).strip().casefold()
+    directness_rows = [
+        (
+            second_order_news_by_signal[row.get("signal_id")],
+            str(row.get("directness")).strip().casefold(),
+        )
         for row in responses
-        if signal_category.get(row.get("signal_id")) is True and row.get("directness")
+        if row.get("signal_id") in second_order_news_by_signal and row.get("directness")
     ]
+    directness = [label for _, label in directness_rows]
     directness_counts = Counter(directness)
     spillover_count = sum(directness_counts[label] for label in SPILLOVER_DIRECTNESS)
+    directness_by_news: dict[object, set[str]] = {}
+    for news_log_id, label in directness_rows:
+        directness_by_news.setdefault(news_log_id, set()).add(label)
+    concordant_news = sum(
+        any(label in SPILLOVER_DIRECTNESS for label in labels)
+        for labels in directness_by_news.values()
+    )
 
     known_count = len(known_news_ids)
     second_order_count = len(second_order_ids)
@@ -215,15 +227,19 @@ def build_report(
     end = max(timestamps) if timestamps else None
     second_order_distribution = _distribution(second_order_signals)
     other_distribution = _distribution(other_signals)
-    agreement_rate = spillover_count / len(directness) if directness else None
+    response_agreement_rate = spillover_count / len(directness) if directness else None
+    news_agreement_rate = (
+        concordant_news / len(directness_by_news) if directness_by_news else None
+    )
     summary = (
         f"Il detector deterministico ha classificato {second_order_count} su "
         f"{known_count} righe news con ticker noto come secondo ordine "
         f"({second_order_count / known_count:.2%}). Il forward return medio a 1 giorno "
         f"e' {_pct(second_order_distribution['forward_return']['mean'])} sui segnali "
         f"classificati e {_pct(other_distribution['forward_return']['mean'])} sugli altri; "
-        f"directness concorda nei bucket competitor_readthrough/sector in "
-        f"{spillover_count} su {len(directness)} risposte ({_pct(agreement_rate)}). "
+        f"almeno un directness concorda nei bucket competitor_readthrough/sector in "
+        f"{concordant_news} su {len(directness_by_news)} articoli con il campo "
+        f"disponibile ({_pct(news_agreement_rate)}). "
         "Il confronto e' descrittivo, non causale; l'assenza di match significa non "
         "classificato, non notizia diretta."
         if known_count
@@ -258,14 +274,21 @@ def build_report(
             "other": other_distribution,
         },
         "directness_agreement": {
-            "unit": "llm_response",
-            "responses_with_directness": len(directness),
+            "unit": "news_row",
+            "rows_with_directness": len(directness_by_news),
             "spillover_labels": list(SPILLOVER_DIRECTNESS),
-            "spillover": {
-                "n": spillover_count,
-                "rate": agreement_rate,
+            "concordant": {
+                "n": concordant_news,
+                "rate": news_agreement_rate,
             },
-            "by_bucket": dict(sorted(directness_counts.items())),
+            "model_response_cross_tab": {
+                "responses_with_directness": len(directness),
+                "spillover": {
+                    "n": spillover_count,
+                    "rate": response_agreement_rate,
+                },
+                "by_bucket": dict(sorted(directness_counts.items())),
+            },
         },
         "classifications": classifications,
         "sintesi": summary,
