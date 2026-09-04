@@ -97,7 +97,7 @@ def test_la_posizione_detenuta_cieca_compare_nel_dossier():
 
 def test_schema_e_provenienza_dichiarano_la_nuova_misura():
     payload = _dossier()
-    assert payload["schema_version"] == "2.7"
+    assert payload["schema_version"] == "2.8"
     assert "copertura_uscita" in payload["provenienza_dati"]
 
 
