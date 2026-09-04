@@ -75,7 +75,7 @@ connector), which are fan-out/other-cause cases, not this pattern.
 - `sentiment_signals`: already carries `forward_return`, `forward_return_3d`,
   `forward_return_5d` per `news_log_id` (94-97% populated across ~9,750
   rows). Reused directly — no need to re-fetch bars from Alpaca.
-- `llm_responses.directness`: joined via `sentiment_signals.id = 
+- `llm_responses.directness`: joined via `sentiment_signals.id =
   llm_responses.signal_id`, for the bonus agreement cross-tab.
 
 Everything is read-only against existing tables. No new table, no migration,
