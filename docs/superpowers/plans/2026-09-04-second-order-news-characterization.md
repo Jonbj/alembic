@@ -1,6 +1,11 @@
 # Second-order/spillover news characterization — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Verification note (2026-09-04):** this plan was written before checking the
+> four seed rows against the live database. Their quoted causal sentences are
+> in `news_log.body_snippet`, while `news_log.title` is generic. The normative
+> spec and implementation therefore inspect `title` and `body_snippet`
+> separately. The steps and unchecked boxes below preserve the original design
+> sequence; they are not a roadmap/status tracker and must not be updated.
 
 **Goal:** Close the residual scope of #408 — an independent, deterministic detector that labels "second-order/spillover" news headlines (correctly names our ticker's company but the causal driver is a third party), plus a script that counts how often it occurs in `news_log` and reports the realised forward return, joined against the existing `sentiment_signals` columns.
 
