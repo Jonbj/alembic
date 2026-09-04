@@ -1,10 +1,9 @@
 """Contratto deterministico della misura di latenza d'uscita S1 (#489)."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 import pytest
-
 from measure_s1_exit_latency import measure_trade_latency
 
 
@@ -21,9 +20,9 @@ def test_misura_flip_ritardo_e_scomposizione_del_pnl() -> None:
     trade = {
         "trade_id": 17,
         "symbol": "TXN",
-        "entry_time": datetime(2026, 1, 2, 15, 0, tzinfo=timezone.utc),
+        "entry_time": datetime(2026, 1, 2, 15, 0, tzinfo=UTC),
         "entry_price": 100.0,
-        "exit_time": datetime(2026, 1, 8, 15, 0, tzinfo=timezone.utc),
+        "exit_time": datetime(2026, 1, 8, 15, 0, tzinfo=UTC),
         "exit_price": 95.0,
         "qty": 2.0,
         "gross_pnl": -10.0,
@@ -64,4 +63,3 @@ def test_un_segnale_non_negativo_all_uscita_non_inventa_un_flip() -> None:
     assert measured["delay_sessions"] is None
     assert measured["pnl_before_flip_usd"] is None
     assert measured["pnl_after_flip_usd"] is None
-

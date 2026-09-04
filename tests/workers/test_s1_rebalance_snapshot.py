@@ -1,6 +1,6 @@
 """Snapshot persistente delle decisioni mensili S1 (#489)."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -22,8 +22,10 @@ def test_snapshot_copre_segnali_target_e_posizioni() -> None:
         SimpleNamespace(symbol="AAPL", quantity=2.0),
         SimpleNamespace(symbol="TSLA", quantity=1.0),
     ]
-    market = SimpleNamespace(prices={"AAPL": 50.0, "MSFT": 25.0, "NVDA": 10.0, "TSLA": 100.0})
-    ts = datetime(2026, 9, 1, 14, 7, tzinfo=timezone.utc)
+    market = SimpleNamespace(
+        prices={"AAPL": 50.0, "MSFT": 25.0, "NVDA": 10.0, "TSLA": 100.0}
+    )
+    ts = datetime(2026, 9, 1, 14, 7, tzinfo=UTC)
 
     rows = _build_s1_rebalance_snapshot_rows(
         result=result,
@@ -60,7 +62,7 @@ def test_snapshot_non_viene_costruito_quando_s1_non_ribilancia() -> None:
 
     rows = _build_s1_rebalance_snapshot_rows(
         result=SimpleNamespace(target_weights_per_strategy={}),
-        ts=datetime(2026, 9, 2, 14, 7, tzinfo=timezone.utc),
+        ts=datetime(2026, 9, 2, 14, 7, tzinfo=UTC),
         instance=SimpleNamespace(last_signal_snapshot={"AAPL": 1.0}),
         portfolio=MagicMock(),
         market=SimpleNamespace(prices={"AAPL": 100.0}),
@@ -69,3 +71,20 @@ def test_snapshot_non_viene_costruito_quando_s1_non_ribilancia() -> None:
 
     assert rows == []
 
+
+def test_un_errore_nello_snapshot_non_blocca_il_ciclo_live() -> None:
+    from src.workers.portfolio_scheduler import _persist_s1_rebalance_snapshot
+
+    portfolio = MagicMock()
+    portfolio.all_positions.side_effect = RuntimeError("posizioni indisponibili")
+
+    # La misura e' fail-open: nessun errore di osservabilita' deve impedire la
+    # successiva submission degli ordini gia' decisi dall'orchestratore.
+    _persist_s1_rebalance_snapshot(
+        result=SimpleNamespace(target_weights_per_strategy={"S1": {"AAPL": 1.0}}),
+        ts=datetime(2026, 9, 1, 14, 7, tzinfo=UTC),
+        instance=SimpleNamespace(last_signal_snapshot={"AAPL": 1.0}),
+        portfolio=portfolio,
+        market=SimpleNamespace(prices={"AAPL": 100.0}),
+        allocation_pct=0.50,
+    )

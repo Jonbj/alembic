@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-
 MIGRATION = (
     Path(__file__).resolve().parents[2]
     / "migrations"
@@ -27,4 +26,3 @@ def test_migration_persiste_tutto_il_contesto_della_decisione() -> None:
     ):
         assert column in sql
     assert "UNIQUE (strategy_id, rebalance_ts, symbol)" in sql
-
