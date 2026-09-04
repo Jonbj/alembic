@@ -116,18 +116,41 @@ def _prompt(diff: str, issue: str) -> str:
     )
 
 
+def _impacchetta(blocchi: list[tuple[str, str]], tetto_byte: int) -> list[str]:
+    """Raggruppa i blocchi (nell'ordine del diff) in buffer di testo.
+
+    Bin-packing greedy: il file successivo entra nel buffer corrente se ci
+    sta, altrimenti apre un nuovo buffer. Un file da solo gia' sopra il tetto
+    diventa comunque un buffer proprio (non lo spezziamo), ma non impedisce
+    ai file successivi di raggrupparsi fra loro.
+    """
+    gruppi: list[str] = []
+    buffer = ""
+    for _, testo in blocchi:
+        if not buffer:
+            buffer = testo
+        elif len(buffer) + len(testo) <= tetto_byte:
+            buffer += testo
+        else:
+            gruppi.append(buffer)
+            buffer = testo
+    if buffer:
+        gruppi.append(buffer)
+    return gruppi
+
+
 def costruisci_prompt(diff: str, issue: str, tetto_byte: int = TETTO_BYTE) -> list[str]:
     """Uno o piu' prompt pronti da mandare al modello.
 
-    Sotto il tetto: un prompt unico, che conserva la visione d'insieme. Sopra:
-    un prompt per file di codice, perche' una PR troppo grande esaminata a
-    pezzi vale piu' di una PR saltata.
+    Sotto il tetto: un prompt unico, che conserva la visione d'insieme. Sopra,
+    bin-packing greedy nell'ordine del diff: i file piccoli condividono un
+    prompt finche' ci stanno, un file da solo sopra il tetto occupa un prompt
+    tutto suo senza bloccare l'impacchettamento degli altri (PR #477: 14 file,
+    i sei piu' piccoli sommavano meno di 15 KB e finivano comunque in sei
+    prompt separati).
     """
     blocchi = [(percorso, testo) for percorso, testo in _blocchi(diff) if _e_codice(percorso)]
     if not blocchi:
         return []
 
-    intero = "".join(testo for _, testo in blocchi)
-    if len(intero) <= tetto_byte:
-        return [_prompt(intero, issue)]
-    return [_prompt(testo, issue) for _, testo in blocchi]
+    return [_prompt(testo, issue) for testo in _impacchetta(blocchi, tetto_byte)]

@@ -93,3 +93,66 @@ def test_il_prompt_chiede_di_non_approvare():
     prompt = costruisci_prompt(_hunk("src/a.py", 10), ISSUE)
 
     assert "NON e' approvare" in prompt[0]
+
+
+def test_file_piccoli_si_impacchettano_in_meno_prompt_dei_file():
+    """La forma di PR #477: 14 file, i sei piu' piccoli stavano insieme sotto i 15 KB.
+
+    Cinque file da ~390 byte l'uno (_hunk con 10 righe) con tetto_byte=1_000:
+    due stanno insieme (780 <= 1000), un terzo li farebbe sforare (1170 > 1000).
+    Impacchettamento greedy nell'ordine del diff:
+      a+b -> 780 (c li farebbe sforare) => prompt 1: [a, b]
+      c+d -> 780 (e lo farebbe sforare)  => prompt 2: [c, d]
+      e                                   => prompt 3: [e]
+    """
+    diff = (
+        _hunk("src/a.py", 10)
+        + _hunk("src/b.py", 10)
+        + _hunk("src/c.py", 10)
+        + _hunk("src/d.py", 10)
+        + _hunk("src/e.py", 10)
+    )
+
+    prompt = costruisci_prompt(diff, ISSUE, tetto_byte=1_000)
+
+    assert len(prompt) == 3
+    assert len(prompt) < 5
+    assert "src/a.py" in prompt[0] and "src/b.py" in prompt[0]
+    assert "src/c.py" not in prompt[0] and "src/d.py" not in prompt[0] and "src/e.py" not in prompt[0]
+    assert "src/c.py" in prompt[1] and "src/d.py" in prompt[1]
+    assert "src/a.py" not in prompt[1] and "src/b.py" not in prompt[1] and "src/e.py" not in prompt[1]
+    assert "src/e.py" in prompt[2]
+    assert "src/a.py" not in prompt[2] and "src/c.py" not in prompt[2]
+
+
+def test_file_enorme_isolato_non_blocca_limpacchettamento_degli_altri():
+    """Un file da solo gia' sopra il tetto resta isolato, ma non spezza i piccoli.
+
+    huge (~1562 byte) supera da solo tetto_byte=1_000; le due small (~390 byte
+    l'una) stanno insieme (780 <= 1000). Ordine nel diff: huge, small1, small2.
+    """
+    diff = _hunk("src/huge.py", 50) + _hunk("src/small1.py", 10) + _hunk("src/small2.py", 10)
+
+    prompt = costruisci_prompt(diff, ISSUE, tetto_byte=1_000)
+
+    assert len(prompt) == 2
+    assert "src/huge.py" in prompt[0]
+    assert "src/small1.py" not in prompt[0] and "src/small2.py" not in prompt[0]
+    assert "src/small1.py" in prompt[1] and "src/small2.py" in prompt[1]
+    assert "src/huge.py" not in prompt[1]
+
+
+def test_nessun_file_perso_o_duplicato_nellimpacchettamento():
+    diff = (
+        _hunk("src/a.py", 10)
+        + _hunk("src/b.py", 10)
+        + _hunk("src/c.py", 10)
+        + _hunk("src/d.py", 10)
+        + _hunk("src/e.py", 10)
+    )
+
+    prompt = costruisci_prompt(diff, ISSUE, tetto_byte=1_000)
+
+    for marcatore in ("src/a.py", "src/b.py", "src/c.py", "src/d.py", "src/e.py"):
+        occorrenze = sum(1 for singolo in prompt if marcatore in singolo)
+        assert occorrenze == 1, f"{marcatore} compare {occorrenze} volte, atteso 1"
