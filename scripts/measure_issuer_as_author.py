@@ -191,8 +191,14 @@ QUERY_TRADES = """\
 SELECT row_to_json(q)::text
 FROM (
     SELECT id, signal_id, decision_id, symbol, entry_notional, entry_price,
-           entry_time, exit_order_id, exit_order_ids, exit_price, exit_time,
-           qty, net_pnl, exit_reason
+           entry_time,
+           CASE WHEN exit_time < '{until}' THEN exit_order_id END AS exit_order_id,
+           CASE WHEN exit_time < '{until}' THEN exit_order_ids ELSE ARRAY[]::text[] END AS exit_order_ids,
+           CASE WHEN exit_time < '{until}' THEN exit_price END AS exit_price,
+           CASE WHEN exit_time < '{until}' THEN exit_time END AS exit_time,
+           qty,
+           CASE WHEN exit_time < '{until}' THEN net_pnl END AS net_pnl,
+           CASE WHEN exit_time < '{until}' THEN exit_reason END AS exit_reason
     FROM trades
     WHERE entry_time < '{until}'
       AND (entry_time >= '{since}' OR exit_time >= '{since}')
@@ -751,6 +757,9 @@ def misura(
             "reversal_threshold": REVERSAL_THRESHOLD,
             "entry_threshold": entry_threshold,
             "entry_threshold_source": threshold_source,
+            "entry_threshold_temporalita": (
+                "snapshot al momento del run; Redis non conserva la serie storica del gate"
+            ),
             "fonte_prezzi": price_source,
             "proposta_non_applicata": (
                 "Nel prompt distinguere esplicitamente l'azienda fonte dell'affermazione "
@@ -834,14 +843,15 @@ def render_markdown(payload: dict) -> str:
         (
             f"Il lato lungo usa `{method['entry_threshold_source']}` = "
             f"{method['entry_threshold']:.3f}; il reversal usa {method['reversal_threshold']:.2f}. "
+            "Il gate lungo e' uno snapshot del run: Redis non ne conserva la serie storica. "
             f"Prezzi: {method['fonte_prezzi']}. Decisioni collegate solo dalla FK `signal_id`; "
             "nessun match per vicinanza di score/orario."
         ),
         "",
         "## Candidati",
         "",
-        "| signal | data UTC | ticker | manuale | score | soglia | decisioni | P&L | fwd 1 seduta | titolo |",
-        "|---:|---|---|---|---:|---|---|---:|---:|---|",
+        "| signal | data UTC | ticker | manuale | score | conf. | model | std | soglia | decisioni | P&L | fwd 1 seduta | titolo | URL |",
+        "|---:|---|---|---|---:|---:|---|---:|---|---|---:|---:|---|---|",
     ]
     for row in payload["candidati"]:
         cf = row["controfattuale_1_seduta"]["rendimento_1_seduta"]
@@ -849,9 +859,12 @@ def render_markdown(payload: dict) -> str:
         lines.append(
             f"| {row['signal_id']} | {_escape_md(row['generated_at'])} | {row['symbol']} | "
             f"{'CLASSE' if row['classe_validata_manualmente'] else 'NON CLASSE'} | "
-            f"{row['score']:+.3f} | {_escape_md(row['soglia_operativa_superata'])} | "
+            f"{row['score']:+.3f} | {row['confidence']:.3f} | {_escape_md(row['model_id'])} | "
+            f"{row['ensemble_std'] if row['ensemble_std'] is not None else '—'} | "
+            f"{_escape_md(row['soglia_operativa_superata'])} | "
             f"{decisions} | {row['pnl_realizzato_usd']:+.2f} | "
-            f"{f'{cf:+.2%}' if cf is not None else '—'} | {_escape_md(row['title'])} |"
+            f"{f'{cf:+.2%}' if cf is not None else '—'} | {_escape_md(row['title'])} | "
+            f"<{_escape_md(row['url'])}> |"
         )
     candidate_by_id = {int(row["signal_id"]): row for row in payload["candidati"]}
     lines.extend(
