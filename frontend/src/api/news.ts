@@ -44,11 +44,12 @@ export interface NewsSourceQualityRow {
   order_rate: number | null
 }
 
-export const fetchNews = (params?: { limit?: number; ticker?: string; source?: string }) => {
+export const fetchNews = (params?: { limit?: number; ticker?: string; source?: string; newsId?: number }) => {
   const q = new URLSearchParams()
   if (params?.limit) q.set('limit', String(params.limit))
   if (params?.ticker) q.set('ticker', params.ticker)
   if (params?.source) q.set('source', params.source)
+  if (params?.newsId) q.set('news_id', String(params.newsId))
   return apiFetch<NewsItem[]>(`/api/news/recent?${q}`)
 }
 
