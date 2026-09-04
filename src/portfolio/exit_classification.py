@@ -21,6 +21,8 @@ weights were zeroed is a separate investigation, deliberately out of #184's scop
 """
 from __future__ import annotations
 
+import math
+
 # ─── Dispositions: what the S4 pipeline did to the signal, recorded where it did it ───
 FRESH = "fresh"
 """Passed every gate and was handed to the portfolio engine as a fresh signal."""
@@ -58,6 +60,38 @@ MECHANISM_NO_SIGNAL = "no_signal"
 MECHANISM_EXPIRED = "expired"
 MECHANISM_WHIPSAW = "whipsaw"
 MECHANISM_UNKNOWN = "unknown"
+
+# Reason diagnostico del ledger trades (#430). Non e' un nuovo percorso di
+# uscita: descrive soltanto una portfolio_sell avvenuta al primo beat in cui la
+# posizione non era piu' protetta dal hold minimum.
+REASON_HOLD_MINIMUM_EXPIRY = "hold_minimum_expiry"
+
+
+def reason_for_hold_minimum_expiry(
+    exit_reason: str,
+    holding_seconds: float | None,
+    hold_minimum_minutes: int,
+    *,
+    cycle_seconds: int = 900,
+    tolerance_seconds: int = 60,
+) -> str:
+    """Distingui il primo beat post-hold dalle altre ``portfolio_sell``.
+
+    Il filtro considera ancora recente una posizione esattamente sul confine;
+    il primo beat eleggibile e' quindi il multiplo di ciclo strettamente
+    successivo al hold. La tolleranza assorbe soltanto il jitter dei timestamp
+    di worker/fill e non partecipa ad alcuna decisione di trading.
+    """
+    if exit_reason != "portfolio_sell" or holding_seconds is None:
+        return exit_reason
+    hold_seconds = hold_minimum_minutes * 60
+    first_eligible_cycle = (
+        math.floor(hold_seconds / cycle_seconds) + 1
+    ) * cycle_seconds
+    if abs(holding_seconds - first_eligible_cycle) <= tolerance_seconds:
+        return REASON_HOLD_MINIMUM_EXPIRY
+    return exit_reason
+
 
 _MECHANISM_BY_DISPOSITION = {
     FRESH: MECHANISM_WHIPSAW,

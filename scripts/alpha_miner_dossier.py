@@ -40,6 +40,7 @@ from src.analysis.dossier.book import (
     SOGLIA_GUARDIA_CONTRADDIZIONE,
     aggregate_by_entry_hour,
     aggregate_contradiction_guard,
+    aggregate_holding_time_histogram,
     compute_entries,
     compute_exits,
     compute_s4_entry_intents,
@@ -81,7 +82,7 @@ FINESTRA_MEDIANE = 20  # giorni, per le mediane mobili
 # senza far crescere la query oltre un indice su (ticker, fetched_at).
 FINESTRA_SEDUTE_COPERTURA = 10
 INIZIO_OSSERVAZIONE = date(2026, 8, 3)
-DOSSIER_SCHEMA_VERSION = "2.7"
+DOSSIER_SCHEMA_VERSION = "2.8"
 NEW_YORK = ZoneInfo("America/New_York")
 
 
@@ -2026,6 +2027,11 @@ def costruisci_dossier(
                 ),
                 "freeze": "misura read-only; nessuna taratura live emessa",
             },
+            "ore_tenuta_s4": {
+                "source": "trades.exit_time - trades.entry_time",
+                "bucket": "multiplo nominale piu' vicino, ampiezza 15 minuti",
+                "freeze": "misura read-only; nessuna logica di uscita modificata",
+            },
             "event_market_context": {
                 "version": CONTEXT_VERSION,
                 "sector_map": "config/trading.yaml sectors",
@@ -2064,6 +2070,7 @@ def costruisci_dossier(
             "per_ora_ingresso": aggregate_by_entry_hour(chiusi_storici),
             "miss_cumulati": _miss_cumulati(),
             "mediane_mobili_20g": _mediane_mobili(ingressi, chiusure),
+            "ore_tenuta_s4": aggregate_holding_time_histogram(chiusure),
             "cause_del_giorno": cause_del_giorno(candidati_classificati),
             "copertura_uscita": copertura_uscita["aggregato"],
             "guardia_contraddizione": {
