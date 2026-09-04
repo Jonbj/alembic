@@ -64,10 +64,13 @@
 
 ## 5.6 Divergenze spec↔codice↔docs
 
+> **Aggiornamento 2026-09-04 (#490):** D1 e D2 sono risolte nella
+> documentazione; la tabella conserva il risultato dell'audit e il relativo esito.
+
 | # | Punto | Spec (01) / Docs | Codice | Tipo |
 |---|---|---|---|---|
-| D1 | `target_vol` | `docs/strategies.md` tabella param dice **0.15** | `strategy.py:33` = **0.10**; `s1_strategy.yaml` = 0.10 | docs↔code drift |
-| D2 | Sizing "∝ signal" | `docs/strategies.md`: "raw_weight ∝ signal × (target_vol/realised_vol)" | `sizing.py:31`: peso = target_vol/ann_vol, **nessun fattore signal**; `strategy.py:135-144`: signal è solo gate | **docs implica scaling per signal, codice no** — divergenza materiale |
+| D1 | `target_vol` | `docs/strategies.md` tabella param dice **0.10** | `strategy.py:33` = **0.10**; `s1_strategy.yaml` = 0.10 | **risolta da #490** |
+| D2 | Sizing indipendente dal segnale | `docs/strategies.md`: `min(target_vol/realised_vol_60d, max_weight)`; signal solo gate | `sizing.py`: peso = target_vol/ann_vol, **nessun fattore signal**; `strategy.py`: signal è solo gate | **risolta da #490** |
 | D3 | Look-ahead filtro universo | (non in spec esplicita) | `signal.py:92-116` usa statistiche full-window; **ammesso nel docstring** `signal.py:54-57` | look-ahead bias (per 06/07) |
 | D4 | **`config/s1_strategy.yaml` non wired** | `docs/strategies.md` + commenti yaml lo presentano come config di S1 | `portfolio_scheduler.py:3068` usa `S1Config()` **defaults**; `from_yaml` (`strategy.py:38-53`) **mai chiamato** nel path runtime (grep: solo def + doc-reference in `api/routes/strategies.py:53`) | **dead config** — editare il yaml non ha effetto sul live |
 | D5 | Backtest condivide i defaults | (n/a) | `backtest.py:39` `s1_config = s1_config or S1Config()` — anche il backtest usa defaults, non yaml | consistente live↔backtest, ma entrambi ignorano yaml |
