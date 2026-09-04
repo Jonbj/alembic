@@ -123,6 +123,12 @@ def _impacchetta(blocchi: list[tuple[str, str]], tetto_byte: int) -> list[str]:
     sta, altrimenti apre un nuovo buffer. Un file da solo gia' sopra il tetto
     diventa comunque un buffer proprio (non lo spezziamo), ma non impedisce
     ai file successivi di raggrupparsi fra loro.
+
+    Non ordiniamo per dimensione: l'ordine del diff tiene il contesto di
+    review vicino alla struttura naturale della PR. Il prezzo e' che file
+    piccoli ma sparsi fra file grandi (come su PR #477) non collassano nel
+    minor numero di prompt possibile — e' un compromesso deliberato, non un
+    limite da correggere ordinando.
     """
     gruppi: list[str] = []
     buffer = ""
