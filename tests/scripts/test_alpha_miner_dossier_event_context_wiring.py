@@ -96,10 +96,14 @@ def test_dossier_24_collega_benchmark_calendario_regime_e_microstruttura():
     nbbo_cycles = nbbo_loader.call_args.args[0]
     assert nbbo_cycles["NVDA"]["at"] == datetime(2026, 8, 12, 14, 22, tzinfo=UTC)
     assert nbbo_cycles["NVDA"]["source"] == dossier.ELIGIBLE_SOURCE_SEGNALE
-    assert out["schema_version"] == "2.7"
+    assert out["schema_version"] == "2.8"
     assert out["provenienza_dati"]["event_market_context"]["version"] == (
         "event_market_context_v1"
     )
+    assert out["provenienza_dati"]["no_news_backstop"]["version"] == (
+        "no_news_backstop_v1"
+    )
+    assert out["no_news_backstop"]["population"]["zero_news"] == 0
 
     row = out["event_market_context"]["per_symbol"]["NVDA"]
     assert row["returns"]["residual_vs_spy"] == pytest.approx(0.08)
