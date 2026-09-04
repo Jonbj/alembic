@@ -1,8 +1,8 @@
 """#490: lo script di misura S1 resta deterministico e separa I/O/calcolo."""
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
 import json
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import numpy as np
@@ -64,7 +64,7 @@ def test_build_report_measures_live_target_and_monthly_history() -> None:
         prices,
         live_state,
         since=prices.index[-45].date(),
-        generated_at=datetime(2026, 9, 4, 12, 0, tzinfo=timezone.utc),
+        generated_at=datetime(2026, 9, 4, 12, 0, tzinfo=UTC),
     )
 
     assert report["generated_at"] == "2026-09-04T12:00:00+00:00"

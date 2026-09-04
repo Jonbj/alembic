@@ -163,7 +163,7 @@ class TimeSeriesMomentum:
                 raw_weights=raw_target_weights,
                 max_weight=self._config.max_weight,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - diagnostics must remain fail-open
             self._last_sizing_metrics = None
             log.warning("#490: S1 sizing metrics unavailable (%s)", exc)
         return weights

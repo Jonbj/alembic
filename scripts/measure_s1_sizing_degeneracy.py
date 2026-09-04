@@ -21,7 +21,7 @@ import argparse
 import json
 import subprocess
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -143,7 +143,7 @@ def build_report(
     generated_at: datetime | None = None,
 ) -> dict:
     """Build the JSON report from already-loaded inputs; no external I/O."""
-    generated_at = generated_at or datetime.now(timezone.utc)
+    generated_at = generated_at or datetime.now(UTC)
     prices = prices.sort_index()
     live_ts = pd.Timestamp(live_state["last_rebalance"])
     target = {
@@ -204,7 +204,7 @@ def _load_live_state(redis_container: str) -> dict:
             raw = client.get("strategy:rebalance_state:S1")
         finally:
             client.close()
-    except Exception:
+    except Exception:  # noqa: BLE001 - local Redis is optional; Docker is the fallback
         result = subprocess.run(
             [
                 "docker",
@@ -217,6 +217,7 @@ def _load_live_state(redis_container: str) -> dict:
             ],
             capture_output=True,
             text=True,
+            check=False,
         )
         if result.returncode != 0:
             raise SystemExit(f"Redis non leggibile: {result.stderr.strip()[:300]}")
@@ -312,6 +313,7 @@ print(json.dumps(records, separators=(",", ":")))
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode != 0:
         raise SystemExit(f"Fetch Alpaca nel worker fallita: {result.stderr.strip()[:300]}")
@@ -330,7 +332,7 @@ def load_prices(
     return _load_prices_from_worker(symbols, start, end, worker_container)
 
 
-def _format_number(value: float | int | None, digits: int = 3) -> str:
+def _format_number(value: float | None, digits: int = 3) -> str:
     if value is None:
         return "n/d"
     if isinstance(value, int):
@@ -366,9 +368,9 @@ def main() -> None:
     symbols = list(config.WATCHLIST_SYMBOLS or [])
     if not symbols:
         raise SystemExit("Watchlist S1 vuota in config/trading.yaml")
-    start = datetime.combine(args.since - timedelta(days=620), datetime.min.time(), timezone.utc)
-    end_date = max(date.today(), pd.Timestamp(live_state["last_rebalance"]).date())
-    end = datetime.combine(end_date + timedelta(days=1), datetime.min.time(), timezone.utc)
+    start = datetime.combine(args.since - timedelta(days=620), datetime.min.time(), UTC)
+    end_date = max(datetime.now(UTC).date(), pd.Timestamp(live_state["last_rebalance"]).date())
+    end = datetime.combine(end_date + timedelta(days=1), datetime.min.time(), UTC)
     prices = load_prices(symbols, start, end, worker_container=args.worker_container)
     report = build_report(prices, live_state, since=args.since)
 
