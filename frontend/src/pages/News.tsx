@@ -25,11 +25,17 @@ export default function News() {
   const [limit, setLimit] = useState(Number(searchParams.get('limit') ?? 50))
   const [qualityDays, setQualityDays] = useState(Number(searchParams.get('quality_days') ?? 30))
   const [actionableOnly, setActionableOnly] = useState(searchParams.get('actionable') === '1')
-  const [expanded, setExpanded] = useState<number | null>(null)
+  const newsIdParam = searchParams.get('news_id')
+  const newsId = newsIdParam ? Number(newsIdParam) : undefined
+  const [manualExpanded, setManualExpanded] = useState<number | null>(null)
+  // A news_id deep link always shows exactly that one article (filtered
+  // server-side), so it stays expanded for as long as the link is active —
+  // derived directly from the URL instead of synced into state via effect.
+  const expanded = newsId ?? manualExpanded
 
   const { data: news = [], isLoading, error } = useQuery({
-    queryKey: ['news', ticker, source, limit],
-    queryFn: () => fetchNews({ limit, ticker: ticker || undefined, source: source || undefined }),
+    queryKey: ['news', ticker, source, limit, newsId],
+    queryFn: () => fetchNews({ limit, ticker: ticker || undefined, source: source || undefined, newsId }),
     refetchInterval: 300000,
   })
 
@@ -46,7 +52,7 @@ export default function News() {
   , [news, actionableOnly])
 
   const toggleExpanded = useCallback((id: number) => {
-    setExpanded((prev) => (prev === id ? null : id))
+    setManualExpanded((prev) => (prev === id ? null : id))
   }, [])
 
   const updateTicker = (value: string) => {
@@ -92,6 +98,12 @@ export default function News() {
     setSource('')
     setActionableOnly(false)
     setSearchParams(new URLSearchParams(), { replace: true })
+  }
+
+  const clearNewsId = () => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('news_id')
+    setSearchParams(next, { replace: true })
   }
 
   function sentimentBadge(raw: number | null) {
@@ -204,6 +216,27 @@ export default function News() {
           {visibleNews.length} shown · {news.length} fetched
         </span>
       </div>
+
+      {newsId && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          marginBottom: 16,
+          padding: '8px 10px',
+          border: '1px solid var(--border)',
+          borderRadius: 6,
+          background: '#f8fafc',
+          color: 'var(--text-muted)',
+          fontSize: 12,
+        }}>
+          <span>Showing news #{newsId}, expanded below.</span>
+          <button className="btn-ghost" onClick={clearNewsId} style={{ fontSize: 12, padding: '4px 8px' }}>
+            Show latest news
+          </button>
+        </div>
+      )}
 
       <div className="card" style={{ padding: 0, marginBottom: 16, overflowX: 'auto' }}>
         <div style={{

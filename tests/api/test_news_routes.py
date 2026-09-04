@@ -36,7 +36,7 @@ def test_get_news_recent_passes_ticker_filter():
     tc = TestClient(app)
     tc.get("/api/news/recent?ticker=MSFT&limit=20")
     app.dependency_overrides.clear()
-    mock_pg.get_news_recent.assert_called_once_with(limit=20, ticker="MSFT", source=None)
+    mock_pg.get_news_recent.assert_called_once_with(limit=20, ticker="MSFT", source=None, news_id=None)
 
 
 def test_get_news_recent_passes_source_filter():
@@ -48,7 +48,7 @@ def test_get_news_recent_passes_source_filter():
     tc = TestClient(app)
     tc.get("/api/news/recent?source=gdelt_gkg")
     app.dependency_overrides.clear()
-    mock_pg.get_news_recent.assert_called_once_with(limit=100, ticker=None, source="gdelt_gkg")
+    mock_pg.get_news_recent.assert_called_once_with(limit=100, ticker=None, source="gdelt_gkg", news_id=None)
 
 
 def test_get_news_recent_caps_limit():
@@ -60,7 +60,24 @@ def test_get_news_recent_caps_limit():
     tc = TestClient(app)
     tc.get("/api/news/recent?limit=1000")
     app.dependency_overrides.clear()
-    mock_pg.get_news_recent.assert_called_once_with(limit=500, ticker=None, source=None)
+    mock_pg.get_news_recent.assert_called_once_with(limit=500, ticker=None, source=None, news_id=None)
+
+
+def test_get_news_recent_passes_news_id_filter():
+    """GET /api/news/recent?news_id=9279 deep-links a single article.
+
+    Regression: the causal trace panel (SignalTraceLinks) linked to /news
+    with only the ticker, dumping the operator into the whole feed with no
+    way to tell which article a signal/decision/order traced back to.
+    """
+    mock_pg = MagicMock()
+    mock_pg.get_news_recent.return_value = []
+    app.dependency_overrides[get_pg_store] = lambda: mock_pg
+    app.dependency_overrides[require_api_key] = _skip_auth
+    tc = TestClient(app)
+    tc.get("/api/news/recent?news_id=9279")
+    app.dependency_overrides.clear()
+    mock_pg.get_news_recent.assert_called_once_with(limit=100, ticker=None, source=None, news_id=9279)
 
 
 def test_get_news_source_quality_returns_list():
