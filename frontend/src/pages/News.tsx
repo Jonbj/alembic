@@ -1,4 +1,4 @@
-import { Fragment, useState, useCallback, useMemo, useEffect } from 'react'
+import { Fragment, useState, useCallback, useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { fmtDateTime } from '@/utils/format'
 import { sanitizeUrl } from '@/utils/sanitize'
@@ -27,11 +27,11 @@ export default function News() {
   const [actionableOnly, setActionableOnly] = useState(searchParams.get('actionable') === '1')
   const newsIdParam = searchParams.get('news_id')
   const newsId = newsIdParam ? Number(newsIdParam) : undefined
-  const [expanded, setExpanded] = useState<number | null>(newsId ?? null)
-
-  useEffect(() => {
-    if (newsId) setExpanded(newsId)
-  }, [newsId])
+  const [manualExpanded, setManualExpanded] = useState<number | null>(null)
+  // A news_id deep link always shows exactly that one article (filtered
+  // server-side), so it stays expanded for as long as the link is active —
+  // derived directly from the URL instead of synced into state via effect.
+  const expanded = newsId ?? manualExpanded
 
   const { data: news = [], isLoading, error } = useQuery({
     queryKey: ['news', ticker, source, limit, newsId],
@@ -52,7 +52,7 @@ export default function News() {
   , [news, actionableOnly])
 
   const toggleExpanded = useCallback((id: number) => {
-    setExpanded((prev) => (prev === id ? null : id))
+    setManualExpanded((prev) => (prev === id ? null : id))
   }, [])
 
   const updateTicker = (value: string) => {
