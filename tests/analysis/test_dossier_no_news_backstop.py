@@ -37,12 +37,14 @@ def _build(**overrides) -> dict:
             "AAPL": _bar(volume=1_200_000, adv_20d=1_000_000),
         },
         "corporate_events": {
-            "events": [{
-                "symbol": "NVO",
-                "event_type": "cash_dividends",
-                "event_date": "2026-08-25",
-                "source": "Alpaca Corporate Actions API",
-            }],
+            "events": [
+                {
+                    "symbol": "NVO",
+                    "event_type": "cash_dividends",
+                    "event_date": "2026-08-25",
+                    "source": "Alpaca Corporate Actions API",
+                }
+            ],
             "sources_succeeded": [
                 "FMP earnings-calendar",
                 "Alpaca Corporate Actions API",
@@ -122,15 +124,15 @@ def test_copertura_raw_per_settore_rende_visibili_anche_gli_zero_su_n():
 
 
 def test_calendario_parziale_non_certifica_assenza_di_eventi():
-    out = _build(corporate_events={
-        "events": [],
-        "sources_succeeded": ["Alpaca Corporate Actions API"],
-        "complete": False,
-        "missingness": ["earnings_calendar_unavailable"],
-    })
+    out = _build(
+        corporate_events={
+            "events": [],
+            "sources_succeeded": ["Alpaca Corporate Actions API"],
+            "complete": False,
+            "missingness": ["earnings_calendar_unavailable"],
+        }
+    )
 
-    assert {
-        row["calendar"]["status"] for row in out["per_symbol"]
-    } == {"UNKNOWN"}
+    assert {row["calendar"]["status"] for row in out["per_symbol"]} == {"UNKNOWN"}
     assert out["calendar_observation"]["mover_rate"] is None
     assert out["calendar_observation"]["non_mover_rate"] is None

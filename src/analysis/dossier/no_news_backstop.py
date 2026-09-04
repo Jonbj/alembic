@@ -23,9 +23,7 @@ def _calendar(
     if isinstance(corporate_events, dict):
         return {
             "events": list(corporate_events.get("events") or []),
-            "sources_succeeded": list(
-                corporate_events.get("sources_succeeded") or []
-            ),
+            "sources_succeeded": list(corporate_events.get("sources_succeeded") or []),
             "complete": bool(corporate_events.get("complete")),
             "missingness": list(corporate_events.get("missingness") or []),
         }
@@ -34,10 +32,7 @@ def _calendar(
         return {
             "events": events,
             "sources_succeeded": sorted(
-                {
-                    str(event.get("source") or "UNKNOWN")
-                    for event in events
-                }
+                {str(event.get("source") or "UNKNOWN") for event in events}
             ),
             "complete": True,
             "missingness": [],
@@ -55,8 +50,7 @@ def _events_for_symbol(events: Iterable[dict], symbol: str) -> list[dict]:
         (
             dict(event)
             for event in events
-            if str(event.get("symbol") or event.get("ticker") or "").upper()
-            == symbol
+            if str(event.get("symbol") or event.get("ticker") or "").upper() == symbol
         ),
         key=lambda event: (
             str(event.get("event_date") or ""),
@@ -79,9 +73,7 @@ def _volume(bar: dict | None) -> dict:
         missingness.append("adv_20d_zero")
     ratio = (
         float(session_volume) / float(adv_20d)
-        if session_volume is not None
-        and adv_20d is not None
-        and float(adv_20d) != 0.0
+        if session_volume is not None and adv_20d is not None and float(adv_20d) != 0.0
         else None
     )
     return {
@@ -166,9 +158,7 @@ def build_no_news_backstop(
     movers = [row for row in rows if row["is_mover"] is True]
     non_movers = [row for row in rows if row["is_mover"] is False]
     missing_returns = [row for row in rows if row["is_mover"] is None]
-    calendar_movers = sum(
-        row["calendar"]["status"] == "OBSERVED" for row in movers
-    )
+    calendar_movers = sum(row["calendar"]["status"] == "OBSERVED" for row in movers)
     calendar_non_movers = sum(
         row["calendar"]["status"] == "OBSERVED" for row in non_movers
     )
@@ -189,8 +179,7 @@ def build_no_news_backstop(
                 len(members) - len(zero_news), len(members)
             ),
             "zero_news_movers": sum(
-                measured_by_symbol[symbol]["is_mover"] is True
-                for symbol in zero_news
+                measured_by_symbol[symbol]["is_mover"] is True for symbol in zero_news
             ),
             "calendar_observed_zero_news": sum(
                 measured_by_symbol[symbol]["calendar"]["status"] == "OBSERVED"
