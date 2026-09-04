@@ -7,7 +7,7 @@ controfattuale a una seduta senza modificare prompt, gate o segnali live.
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date
 
 import pytest
 
@@ -16,12 +16,11 @@ from scripts.measure_issuer_as_author import (
     calcola_impatto,
     classifica_titolo,
     controfattuali_una_seduta,
+    riepilogo_segmenti_prompt,
     stato_validazione_manuale,
     supera_soglia_operativa,
 )
 
-
-UTC = timezone.utc
 ALIASES = {
     "GS": ["Goldman Sachs Group Inc", "Goldman Sachs", "Goldman"],
     "JPM": ["JPMorgan Chase & Co", "JPMorgan Chase", "JPMorgan"],
@@ -39,7 +38,11 @@ ALIASES = {
             "Goldman Sachs warns investors to expect lower returns over the next year",
             "investors to expect lower returns over the next year",
         ),
-        ("JPM", "JPMorgan Says Markets Are 'Extremely Risk-On'", "Markets Are 'Extremely Risk-On'"),
+        (
+            "JPM",
+            "JPMorgan Says Markets Are 'Extremely Risk-On'",
+            "Markets Are 'Extremely Risk-On'",
+        ),
         (
             "MS",
             "AI investors may pivot to hyperscalers from chipmakers, Morgan Stanley says",
@@ -140,7 +143,7 @@ def test_impatto_collega_solo_fk_dirette_e_order_id_di_uscita():
         "candidati_con_decisione_buy_sell": 2,
         "decisioni_buy_sell": 2,
         "trade_collegati": 2,
-        "notional_mosso_usd": pytest.approx(1146.3485731),
+        "notional_mosso_usd": pytest.approx(500.0 + 1002.15 * 0.645154),
         "pnl_realizzato_usd": pytest.approx(-34.91728666563865),
     }
 
@@ -148,11 +151,20 @@ def test_impatto_collega_solo_fk_dirette_e_order_id_di_uscita():
 def test_un_trade_raggiunto_da_piu_link_viene_contato_una_sola_volta():
     candidates = [{"signal_id": 100}]
     decisions = [{"id": 20, "signal_id": 100, "decision": "BUY", "order_id": "buy-x"}]
-    trades = [{
-        "id": 300, "signal_id": 100, "decision_id": 20, "entry_notional": 500.0,
-        "exit_order_id": None, "exit_order_ids": [], "exit_price": 260.0, "qty": 2.0,
-        "exit_time": "2026-09-03T20:00:00+00:00", "net_pnl": 20.0,
-    }]
+    trades = [
+        {
+            "id": 300,
+            "signal_id": 100,
+            "decision_id": 20,
+            "entry_notional": 500.0,
+            "exit_order_id": None,
+            "exit_order_ids": [],
+            "exit_price": 260.0,
+            "qty": 2.0,
+            "exit_time": "2026-09-03T20:00:00+00:00",
+            "net_pnl": 20.0,
+        }
+    ]
 
     _, summary = calcola_impatto(candidates, decisions, trades)
 
@@ -169,7 +181,11 @@ def test_controfattuale_usa_close_della_seduta_del_segnale_e_della_successiva():
     ]
     closes = {
         "GS": [(date(2026, 9, 2), 1002.15), (date(2026, 9, 3), 1037.36)],
-        "NVDA": [(date(2026, 9, 4), 180.0), (date(2026, 9, 8), 181.0), (date(2026, 9, 9), 184.62)],
+        "NVDA": [
+            (date(2026, 9, 4), 180.0),
+            (date(2026, 9, 8), 181.0),
+            (date(2026, 9, 9), 184.62),
+        ],
     }
 
     result = controfattuali_una_seduta(candidates, closes)
@@ -190,7 +206,7 @@ def test_validazione_manuale_richiede_almeno_20_candidati_classificati():
     assert result["n_classificati"] == 20
     assert result["classe"] == 15
     assert result["non_classe"] == 5
-    assert result["precisione_ euristica".replace(" ", "")] == 0.75
+    assert result["precisione_euristica"] == 0.75
 
 
 def test_validazione_manuale_fallisce_se_il_campione_e_insufficiente():
@@ -200,3 +216,44 @@ def test_validazione_manuale_fallisce_se_il_campione_e_insufficiente():
             {i: {"classe": True, "nota": ""} for i in range(1, 20)},
             minimum=20,
         )
+
+
+def test_segmenta_variante_a_senza_mescolare_il_caso_gs_col_precedente():
+    candidates = [
+        {
+            "signal_id": 1,
+            "segmento_prompt": "pre_variante_a",
+            "soglia_operativa_superata": None,
+            "classe_validata_manualmente": True,
+        },
+        {
+            "signal_id": 9593,
+            "segmento_prompt": "variante_a",
+            "soglia_operativa_superata": "reversal",
+            "classe_validata_manualmente": True,
+        },
+    ]
+    decisions = [
+        {"id": 10, "signal_id": 9593, "decision": "SELL", "order_id": "sell-gs"},
+    ]
+    trades = [
+        {
+            "id": 259,
+            "signal_id": None,
+            "decision_id": 999,
+            "entry_notional": 680.0,
+            "exit_order_id": "sell-gs",
+            "exit_order_ids": [],
+            "exit_price": 1002.15,
+            "qty": 0.645154,
+            "exit_time": "2026-09-02T19:07:00+00:00",
+            "net_pnl": -34.92,
+        }
+    ]
+
+    result = riepilogo_segmenti_prompt(candidates, decisions, trades)
+
+    assert result["pre_variante_a"]["candidati"] == 1
+    assert result["pre_variante_a"]["decisioni_buy_sell"] == 0
+    assert result["variante_a"]["candidati_sopra_soglia"] == 1
+    assert result["variante_a"]["classe_validata"]["pnl_realizzato_usd"] == -34.92
