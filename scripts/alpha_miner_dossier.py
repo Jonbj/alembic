@@ -2030,6 +2030,10 @@ def costruisci_dossier(
             "ore_tenuta_s4": {
                 "source": "trades.exit_time - trades.entry_time",
                 "bucket": "multiplo nominale piu' vicino, ampiezza 15 minuti",
+                "reason_code": (
+                    "hold_minimum_expiry per portfolio_sell al primo ciclo nominale "
+                    "successivo al hold di 90 minuti"
+                ),
                 "freeze": "misura read-only; nessuna logica di uscita modificata",
             },
             "event_market_context": {

@@ -67,6 +67,12 @@
       "nbbo": "Alpaca SIP quotes, prima quota entro 5 minuti dal ciclo eleggibile",
       "halt": "solo evidenza positiva da articoli; senza feed halt storico autorevole lo stato resta UNKNOWN",
       "remote_context_loaded": true
+    },
+    "ore_tenuta_s4": {
+      "source": "trades.exit_time - trades.entry_time",
+      "bucket": "multiplo nominale piu' vicino, ampiezza 15 minuti",
+      "reason_code": "hold_minimum_expiry per portfolio_sell al primo ciclo nominale successivo al hold di 90 minuti",
+      "freeze": "misura read-only; nessuna logica di uscita modificata"
     }
   },
   "soglia_mover": 0.03,
@@ -29394,7 +29400,7 @@
       "exit_price": 224.38,
       "qty": 6.308554651,
       "pnl_net": -2.870315462310164,
-      "exit_reason": "portfolio_sell",
+      "exit_reason": "hold_minimum_expiry",
       "ore_tenuta": 1.7500071919444444,
       "drift_post_uscita": 0.18925663953000715
     }
@@ -69432,6 +69438,31 @@
       "n_violazioni": 0,
       "violazioni": [],
       "freeze": "strumento di misura read-only #401; nessun ordine toccato"
+    },
+    "ore_tenuta_s4": {
+      "strategia": "S4",
+      "ampiezza_bucket_minuti": 15,
+      "n_chiusure": 3,
+      "buckets": [
+        {
+          "durata_minuti": 105,
+          "n": 1,
+          "pnl_net": -2.870315,
+          "drift_post_uscita": 0.189257
+        },
+        {
+          "durata_minuti": 1170,
+          "n": 1,
+          "pnl_net": 41.77229,
+          "drift_post_uscita": 5.745865
+        },
+        {
+          "durata_minuti": 1485,
+          "n": 1,
+          "pnl_net": -19.116769,
+          "drift_post_uscita": 7.26784
+        }
+      ]
     }
   }
 }
