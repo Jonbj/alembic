@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from src.api.main import app
 from src.api.auth import require_api_key
-from src.api.deps import get_alpaca_trading_client, get_pg_store
+from src.api.deps import get_alpaca_trading_client, get_pg_store, get_redis_store
 
 _skip_auth = lambda: "test-key"
 
@@ -375,3 +375,90 @@ def test_get_orders_serializes_none_qty_as_null():
     data = resp.json()
     assert data[0]["qty"] is None
     assert data[0]["qty"] != "None"
+
+
+class TestFeedbackStatus:
+    """#474: the ratchet writes threshold/state per-strategy (S1, S4 each
+    with their own Redis keys); the endpoint must read the same per-strategy
+    keys instead of a bare global one that only ever mirrored S4."""
+
+    def test_reports_each_strategy_independently(self):
+        """Regression for #474: 2026-09-01, the ratchet fired on BOTH sleeves
+        the same day. The old bare-key read returned null for everything
+        because `feedback:state` (no suffix) was never written."""
+        mock_redis = MagicMock()
+        mock_redis.get_feedback_entry_threshold.side_effect = (
+            lambda strategy=None: {"S1": 0.0, "S4": 0.30}.get(strategy)
+        )
+        mock_redis.get_feedback_state.side_effect = lambda strategy=None: {
+            "S1": {
+                "last_adjustment_ts": "2026-09-01T14:30:00+00:00",
+                "reason": "EWMA R -0.99 <= -0.5 + 3 consecutive losses",
+                "consecutive_losses": 3,
+                "rolling_net_pnl": -86.71,
+            },
+            "S4": {
+                "last_adjustment_ts": "2026-09-01T17:00:01+00:00",
+                "reason": "4 consecutive losses",
+                "consecutive_losses": 4,
+                "rolling_net_pnl": -283.23,
+            },
+        }.get(strategy)
+
+        app.dependency_overrides[get_redis_store] = lambda: mock_redis
+        app.dependency_overrides[require_api_key] = _skip_auth
+        tc = TestClient(app)
+        resp = tc.get("/api/feedback/status")
+        app.dependency_overrides.clear()
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["baseline"] == pytest.approx(0.30)
+
+        s1 = data["strategies"]["S1"]
+        assert s1["entry_threshold"] == pytest.approx(0.0)
+        # S1 has no discrete gate by design — 0.0 must NOT read as "elevated".
+        assert s1["is_elevated"] is False
+        assert s1["consecutive_losses"] == 3
+        assert s1["rolling_net_pnl"] == pytest.approx(-86.71)
+
+        s4 = data["strategies"]["S4"]
+        assert s4["entry_threshold"] == pytest.approx(0.30)
+        assert s4["consecutive_losses"] == 4
+        assert s4["rolling_net_pnl"] == pytest.approx(-283.23)
+
+    def test_elevated_threshold_flagged_per_strategy(self):
+        mock_redis = MagicMock()
+        mock_redis.get_feedback_entry_threshold.side_effect = (
+            lambda strategy=None: {"S1": 0.0, "S4": 0.45}.get(strategy)
+        )
+        mock_redis.get_feedback_state.side_effect = lambda strategy=None: {}
+
+        app.dependency_overrides[get_redis_store] = lambda: mock_redis
+        app.dependency_overrides[require_api_key] = _skip_auth
+        tc = TestClient(app)
+        resp = tc.get("/api/feedback/status")
+        app.dependency_overrides.clear()
+
+        data = resp.json()
+        assert data["strategies"]["S4"]["is_elevated"] is True
+        assert data["strategies"]["S1"]["is_elevated"] is False
+
+    def test_no_state_falls_back_to_baseline_with_nulls(self):
+        mock_redis = MagicMock()
+        mock_redis.get_feedback_entry_threshold.return_value = None
+        mock_redis.get_feedback_state.return_value = None
+
+        app.dependency_overrides[get_redis_store] = lambda: mock_redis
+        app.dependency_overrides[require_api_key] = _skip_auth
+        tc = TestClient(app)
+        resp = tc.get("/api/feedback/status")
+        app.dependency_overrides.clear()
+
+        data = resp.json()
+        for strategy in ("S1", "S4"):
+            s = data["strategies"][strategy]
+            assert s["entry_threshold"] == pytest.approx(data["baseline"])
+            assert s["is_elevated"] is False
+            assert s["last_adjustment_ts"] is None
+            assert s["consecutive_losses"] is None

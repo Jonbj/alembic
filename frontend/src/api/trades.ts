@@ -77,14 +77,21 @@ export const fetchDecisions = (symbol?: string, limit = 20, decisionId?: number)
 // F8 regime_scale was retired 2026-08-10 (#134, lifecycle
 // docs/F8_LIFECYCLE_HISTORY_2026-08-10.md); the entry threshold is now the only
 // surviving ratchet lever.
-export interface FeedbackStatus {
+// #474: the ratchet writes threshold and state per-strategy (S1, S4 each have
+// their own Redis keys, with genuinely different thresholds and triggers), so
+// the endpoint reports one entry per sleeve instead of a single blended value.
+export interface FeedbackStrategyStatus {
   entry_threshold: number
-  entry_threshold_baseline: number
-  adjustment_active: boolean
+  is_elevated: boolean
   last_adjustment_ts: string | null
   last_reason: string | null
   consecutive_losses: number | null
   rolling_net_pnl: number | null
+}
+
+export interface FeedbackStatus {
+  baseline: number
+  strategies: Record<string, FeedbackStrategyStatus>
 }
 
 export const fetchFeedbackStatus = () =>
