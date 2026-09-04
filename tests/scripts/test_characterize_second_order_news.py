@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 import scripts.characterize_second_order_news as script
 from src.analysis.second_order_news import CompanyIdentity
 
-
 UTC = timezone.utc
 NOW = datetime(2026, 9, 4, 10, 0, tzinfo=UTC)
 
@@ -21,19 +20,22 @@ def _fixture_inputs():
         {
             "news_log_id": 1,
             "ticker": "ADBE",
-            "title": "Adobe stock rises following Salesforce earnings",
+            "title": "Why Is Adobe Stock Surging on Thursday?",
+            "body_snippet": "Adobe stock rises following Salesforce earnings",
             "fetched_at": datetime(2026, 8, 27, 14, 0, tzinfo=UTC),
         },
         {
             "news_log_id": 2,
             "ticker": "V",
             "title": "Visa raises full-year guidance",
+            "body_snippet": "Visa raises its outlook after reporting quarterly results",
             "fetched_at": datetime(2026, 8, 28, 14, 0, tzinfo=UTC),
         },
         {
             "news_log_id": 3,
             "ticker": "MISSING",
             "title": "Missing rises following Salesforce earnings",
+            "body_snippet": "",
             "fetched_at": datetime(2026, 8, 29, 14, 0, tzinfo=UTC),
         },
     ]
@@ -96,9 +98,10 @@ def test_report_conta_la_popolazione_forward_return_e_agreement_indipendenti():
     assert report["classifications"] == [{
         "news_log_id": 1,
         "ticker": "ADBE",
-        "title": "Adobe stock rises following Salesforce earnings",
+        "title": "Why Is Adobe Stock Surging on Thursday?",
         "fetched_at": "2026-08-27T14:00:00+00:00",
         "category": "second_order",
+        "text_source": "body_snippet",
         "connector": "following",
         "third_party_ticker": "CRM",
         "third_party_company": "Salesforce Inc",

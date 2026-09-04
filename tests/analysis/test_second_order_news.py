@@ -4,7 +4,6 @@ import pytest
 
 from src.analysis.second_order_news import CompanyIdentity, SecondOrderDetector
 
-
 COMPANIES = [
     CompanyIdentity("ADBE", "Adobe Inc", ("Adobe Systems",)),
     CompanyIdentity("AVGO", "Broadcom Inc", ("Broadcom Corporation",)),
@@ -78,6 +77,14 @@ def test_dopo_il_connettore_serve_unaltra_societa_nota():
 def test_la_stessa_societa_dopo_il_connettore_non_e_una_terza_parte():
     match = SecondOrderDetector(COMPANIES).classify(
         "CRM", "Salesforce stock rises following Salesforce's own earnings beat"
+    )
+
+    assert match is None
+
+
+def test_lemittente_deve_precedere_la_clausola_causale():
+    match = SecondOrderDetector(COMPANIES).classify(
+        "NVDA", "After NVIDIA earnings, Adobe stock rises sharply"
     )
 
     assert match is None
