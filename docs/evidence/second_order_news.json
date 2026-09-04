@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0",
-  "generated_at": "2026-09-04T10:11:45.186391+00:00",
+  "generated_at": "2026-09-04T10:17:12.650169+00:00",
   "window": {
     "start": "2026-06-15T17:31:34.943915+00:00",
     "end": "2026-09-03T19:46:07.674699+00:00"
@@ -69,22 +69,29 @@
     }
   },
   "directness_agreement": {
-    "unit": "llm_response",
-    "responses_with_directness": 14,
+    "unit": "news_row",
+    "rows_with_directness": 7,
     "spillover_labels": [
       "competitor_readthrough",
       "sector"
     ],
-    "spillover": {
-      "n": 10,
-      "rate": 0.7142857142857143
+    "concordant": {
+      "n": 7,
+      "rate": 1.0
     },
-    "by_bucket": {
-      "competitor_readthrough": 6,
-      "competitor_readthrough|macro": 1,
-      "customer_supplier": 2,
-      "direct": 1,
-      "sector": 4
+    "model_response_cross_tab": {
+      "responses_with_directness": 14,
+      "spillover": {
+        "n": 10,
+        "rate": 0.7142857142857143
+      },
+      "by_bucket": {
+        "competitor_readthrough": 6,
+        "competitor_readthrough|macro": 1,
+        "customer_supplier": 2,
+        "direct": 1,
+        "sector": 4
+      }
     }
   },
   "classifications": [
@@ -419,5 +426,5 @@
       "third_party_company": "NVIDIA Corporation"
     }
   ],
-  "sintesi": "Il detector deterministico ha classificato 30 su 8364 righe news con ticker noto come secondo ordine (0.36%). Il forward return medio a 1 giorno e' 0.44% sui segnali classificati e -0.05% sugli altri; directness concorda nei bucket competitor_readthrough/sector in 10 su 14 risposte (71.43%). Il confronto e' descrittivo, non causale; l'assenza di match significa non classificato, non notizia diretta."
+  "sintesi": "Il detector deterministico ha classificato 30 su 8364 righe news con ticker noto come secondo ordine (0.36%). Il forward return medio a 1 giorno e' 0.44% sui segnali classificati e -0.05% sugli altri; almeno un directness concorda nei bucket competitor_readthrough/sector in 7 su 7 articoli con il campo disponibile (100.00%). Il confronto e' descrittivo, non causale; l'assenza di match significa non classificato, non notizia diretta."
 }
