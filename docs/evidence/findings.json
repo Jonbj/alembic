@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 66,
+  "prossimo_id": 67,
   "findings": [
     {
       "id": "F-001",
@@ -158,9 +158,15 @@
           "costo_usd": 285.18,
           "nota": "45/96 simboli (46,9%) zero righe news_log il 09-02. Serie: 41 (08-13), 43 (08-21), 45 (08-26 e oggi), 48 (09-01), 51 (08-24), 53 (08-27), 54 (08-28), 55 (08-25), 60 (08-31): valore migliore della finestra a pari merito con l'08-26, ma la banda 40-60 non si e' spezzata in nessuna delle 9 sedute misurate. I DUE SOLI MISS CON DENARO SUL TAVOLO SONO NO_NEWS PURI: RDDT +9,31% (secondo mover dell'universo) e NVO +3,66%, zero righe e zero segnali. RDDT non ha UNA SOLA RIGA in tutta la finestra a 10 sedute (nessuna dal 2026-08-20); NVO ne ha 3 in 14 giorni, ultima 08-27. Stessa cecita' su VALE +4,03%, catturata solo perche' detenuta da S1 momentum (zero righe oggi e su tutta la finestra). FACCIA LATO USCITA: ASML a 9 sedute consecutive senza righe mentre e' a -4,89% dall'ingresso (era 8 ieri), e 36 posizioni su 48 a copertura EFFETTIVA nulla (zero articoli ISSUER_SPECIFIC entro il close) = tre quarti del libro attraversato senza input ticker-specifico tempestivo. Costo = lordo close-to-close x 2.200 $ dei due miss NO_NEWS (204,73 + 80,45), per confrontabilita' con la serie; accessibile misurato dal dossier 60,19 + 8,50 = 68,69 $.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-02.md §7 e §Segnalazioni"
+        },
+        {
+          "data": "2026-09-03",
+          "costo_usd": 149.42,
+          "nota": "50/96 simboli (52,1%) zero righe news_log il 09-03, valore piu' alto della finestra osservata dal 07-31 (precedente massimo 60 l'08-31). I due miss NO_NEWS puri sono entrambi rialzisti e non detenuti: SAP +3,50% e ARM +3,29%, zero righe, zero segnali per entrambi. Costo = lordo close-to-close x 2.200$, SAP 77,01 + ARM 72,41 = 149,42$, per confrontabilita' con la serie; l'accessibile misurato dal dossier e' -3,25$ (SAP, negativo: al primo ciclo eleggibile avrebbe perso) e +132,54$ (ARM, il singolo candidato con piu' denaro potenzialmente sul tavolo dell'intera giornata). Faccia lato uscita: ASML a 10 sedute consecutive senza una riga (fonti_osservate_finestra vuoto su tutta la finestra a 10 sedute, la serie di silenzio e' piu' lunga del denominatore), a -6,93% dall'ingresso.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-03.md §1, §3, §5, §Segnalazioni"
         }
       ],
-      "costo_cumulato_usd": 3799.02,
+      "costo_cumulato_usd": 3948.44,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 3
@@ -886,9 +892,15 @@
           "costo_usd": 24.11,
           "nota": "Il gate 0,30 impedisce il RIENTRO su HOOD dopo la liquidazione delle 15:07, per 0,040. L'articolo ticker-specifico arriva alle 16:45 ('Robinhood Stock Edges Higher Wednesday: What's Happening?', Scotiabank inizia la copertura Sector Outperform a $136), punteggio +0,260 conf 0,68 ensemble non-fallback -- segno CORRETTO su un titolo che chiude +3,36% -- e resta sotto gate per cinque cicli consecutivi (16:52, 17:07, 17:22, 17:37, e 16:52 in poi tutte SKIP_THRESHOLD 'score 0.260 < feedback threshold 0.300'). Terza seduta consecutiva in cui il segnale piu' informativo della giornata cade entro 0,04 dalla soglia: 0,019 TSLA 08-31, 0,029 NOW 09-01, 0,040 HOOD oggi. Costo 24,11 $ congetturale: slot S4 da 2.200 $ dalla barra 16:50 (open 105,83) al close 106,99, +1,10%. OVERLAP DICHIARATO CON F-020: le due voci sono rami ALTERNATIVI dello stesso percorso di prezzo (mancata uscita OPPURE rientro), non addebiti additivi; l'unione e' limitata dal maggiore dei due (24,11 $), non dalla somma. NOTA SU DELL: i suoi 14 cicli SKIP_THRESHOLD (score 0,222-0,278, segno corretto, titolo +15,81%) NON sono addebitati qui, perche' nei cicli in cui il punteggio passava il vincolo binding era l'anti-pyramiding: costo su F-031.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-02.md §Segnalazioni e §8.1"
+        },
+        {
+          "data": "2026-09-03",
+          "costo_usd": 26.39,
+          "nota": "Il gate 0,30 scarta segnali col segno corretto su quattro mover oggi: NOW (+0,121, scarto 0,179), SPCX (+0,18, scarto 0,12), ORCL (+0,10, scarto 0,20) e TSLA (score ensemble non-fallback 0,277, scarto 0,023 - il piu' stretto della serie dopo lo 0,019 di TSLA l'08-31, quarta occorrenza in quattro sedute dello schema 'segnale piu' informativo entro 0,04 dal gate': 0,019/0,029/0,040/0,023). Ma solo NOW ha accessible_opportunity_usd positiva (26,39$, dal dossier): SPCX (-32,90$), ORCL (-23,28$) e TSLA (-35,29$) avrebbero perso denaro anche disarmando il gate, perche' il movimento era gia' scontato al primo ciclo eleggibile. Costo registrato 26,39$ (solo NOW, unico caso con opportunita' reale). TSLA ha un secondo profilo distinto su F-056/F-060 (segnale sopra gate ma mai valutato dal ciclo): non sommare, sono facce alternative dello stesso ticker sullo stesso giorno.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-03.md §3, §7, §Segnalazioni"
         }
       ],
-      "costo_cumulato_usd": 1810.47,
+      "costo_cumulato_usd": 1836.86,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -1279,10 +1291,16 @@
           "costo_usd": null,
           "nota": "Due terzi delle mappature restano non confermate, e i DUE TITOLI TRADATI OGGI non hanno una sola riga ISSUER_SPECIFIC. Totali: 128 righe news_log per 71 articoli unici, 82 mappature TAG_UNCONFIRMED contro 44 ISSUER_SPECIFIC (64,1% non confermate), 57 mappature fan-out extra, copertura effective-timely 22/96 = 22,9%. IL DETTAGLIO CHE CONTA: HOOD 2 articoli su 2 TAG_UNCONFIRMED e NVDA 9 su 9 TAG_UNCONFIRMED, effective_timely_articles = 0 per entrambi -- entrambe le posizioni movimentate oggi (una liquidata, una aperta e chiusa) sono state decise senza UNA SOLA riga a rilevanza confermata. NOW ha quota_righe_fanout = 1,0: quarta occorrenza della firma 'fan-out come unica fonte' in sei sedute (QCOM 08-31, AMZN 08-28, NOW 09-01). Concentrazione: 2 sole fonti (alpaca_benzinga 49 articoli unici, gdelt_gkg 22), HHI fonte 0,504; top_5_share ticker 0,477. Costo null: non separabile dagli altri finding sugli stessi titoli.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-02.md §Segnalazioni"
+        },
+        {
+          "data": "2026-09-03",
+          "costo_usd": null,
+          "nota": "Quattro simboli con fan-out come UNICA fonte nella stessa seduta, mai osservato prima nella serie: NOW (quota_righe_fanout=1,0, terza sessione consecutiva con questa firma dopo il 09-01 e il 09-02, in entrambi i casi ribassista, oggi rialzista - la struttura del difetto e' indipendente dal segno del movimento), SPCX, ORCL e META, tutti a zero righe ISSUER_SPECIFIC/SECTOR_MACRO. Tre dei quattro condividono lo stesso articolo fan-out ('Wall Street Rallies as Fed's Waller Hints at September Rate Hold'). Totali giornata: 134 righe news_log per 61 articoli unici, 101 mappature TAG_UNCONFIRMED contro 32 ISSUER_SPECIFIC (75,9% non confermate), copertura effective-timely 21,9% (21/96). Costo null: non separabile da F-009, che insiste sugli stessi titoli.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-03.md §3, §7, §Segnalazioni"
         }
       ],
       "costo_cumulato_usd": 925.31,
-      "occorrenze_non_stimate": 16,
+      "occorrenze_non_stimate": 17,
       "stato": "aperto",
       "issue": null
     },
@@ -2521,9 +2539,15 @@
           "costo_usd": 2.87,
           "nota": "NVDA comprata a movimento PIU' CHE COMPLETO. BUY 18:07 @ 224,79 (trade 966), entry_percentile 0,666, quota_movimento_precedente_al_segnale 1,0676 con denominatore_degenere=false, vs_apertura +35,49 $: al momento del segnale il titolo aveva gia' fatto piu' del suo movimento di giornata. Chiusa 1,75 ore dopo @ 224,38: -2,87 $ realizzati (trades.net_pnl a DB), che e' il costo registrato. SECONDA FACCIA SULLO STESSO ASSE: ORCL +3,13% ha il suo unico articolo alle 19:15 (45 minuti dal close) e il dossier misura accessible_opportunity_usd = -4,82 $, NEGATIVA: al primo ciclo eleggibile comprare avrebbe perso. Su ORCL il ritardo non e' un costo d'opportunita', e' l'annullamento dell'opportunita'. Mediana mobile a 20 giorni dell'entry_percentile: 0,562.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-02.md §4 e §3"
+        },
+        {
+          "data": "2026-09-03",
+          "costo_usd": 4.92,
+          "nota": "PLTR comprata quando il movimento era gia' oltre il 100% completo. BUY 18:37 @ 183,08 (trade S4, non ancora chiuso al cutoff), entry_percentile 0,802 (sopra la mediana mobile a 20 giorni di 0,629), quota_movimento_precedente_al_segnale 1,055 con denominatore_degenere=false: il titolo aveva gia' superato il proprio massimo di seduta al momento dell'ingresso. Fill sopra il close (182,53): MTM a fine giornata -4,92$ (funnel_v2, pipeline BAD_FILL). Costo attribuito (trade esiste, controfattuale corto: mark fill->close), non realizzato perche' la posizione resta aperta al cutoff.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-03.md §4, §Segnalazioni"
         }
       ],
-      "costo_cumulato_usd": 116.61,
+      "costo_cumulato_usd": 121.53,
       "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
@@ -2606,9 +2630,15 @@
           "costo_usd": 54.52,
           "nota": "L'anti-pyramiding blocca peso sul mover NUMERO UNO dell'universo, tre volte, con capitale dichiarato disponibile. DELL +15,81%: SKIP_PYRAMIDING alle 15:22, 15:52 e 16:22, reason 'P0-05 anti-pyramiding: gia' a libro dal 2026-07-13, sentiment +0,364 / +0,303 / +0,764, peso non allocato 2,4%'. Il dossier misura guard_cost_usd su orizzonte controfattuale 1h per i tre eventi causali (guard:signal:9527 = 46,98 $, 9528 = 30,21 $, 9543 = 22,15 $; nozionale inteso ~2.026 $ ciascuno). I tre eventi NON sono indipendenti (un solo slot incrementale), quindi registro il MAGGIORE (46,98 $) piu' HOOD SKIP_PYRAMIDING 14:07 (7,54 $, nozionale inteso 720,82 $) = 54,52 $. E' un limite inferiore stretto: tenendo lo slot da 2.200 $ dal ciclo 15:22 (barra 15:20 open 445,70) al close 492,20 il controfattuale a fine giornata vale 229,53 $. Conto economico reale: la posizione DELL effettiva (S1 trade 293, 429,50 $ di nozionale all'open) ha reso 28,02 $ su un movimento del 15,81%. 68 righe SKIP_PYRAMIDING nella giornata.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-02.md §Segnalazioni e §4"
+        },
+        {
+          "data": "2026-09-03",
+          "costo_usd": 12.89,
+          "nota": "Anti-pyramiding blocca peso su DELL e SNOW, con segno del controfattuale opposto fra i due - prima occorrenza della serie con segno misto sullo stesso giorno. DELL: SKIP_PYRAMIDING alle 19:52, sentiment +0,478, controfattuale 1h +12,89$ (nozionale inteso 1.997,53$, guard_decisions dossier) - denaro lasciato sul tavolo, coerente col pattern del 09-02. SNOW: due blocchi (16:37, 16:52) con controfattuale 1h NEGATIVO (-14,99$ e -17,99$, nozionale inteso ~2.000$ ciascuno): SNOW stava gia' perdendo terreno intraday dopo un gap d'apertura enorme (passivo open->close -35,90$ pur chiudendo +16,55% sul giorno precedente), quindi qui il guard ha evitato una perdita, non causato un miss - il meccanismo non guarda il segno del controfattuale, ha funzionato nella direzione giusta per puro effetto del timing di mercato. Costo registrato 12,89$ (solo DELL; i controfattuali negativi di SNOW non sono un costo).",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-03.md §4, §7, §8.3, §Segnalazioni"
         }
       ],
-      "costo_cumulato_usd": 300.33,
+      "costo_cumulato_usd": 313.22,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -3459,10 +3489,16 @@
           "costo_usd": 56.05,
           "nota": "Due casi indipendenti verificati via query diretta su sentiment_signals + execution_decisions. NFLX: id 7510 (14:15, score 0.138, ensemble, fallback_used=false) resta nella finestra di 96h tutto il giorno; id 7610 (17:00, score 0.36 > gate 0.30, single:glm-5.2:cloud, fallback_used=true) arriva dopo ma e' sistematicamente scartato dalla query 'DISTINCT ON (symbol) ORDER BY symbol, fallback_used ASC, generated_at DESC' (src/store/pg_store.py:2763-2788): execution_decisions per NFLX si ferma alle 15:07:10 e non produce piu' nulla dopo, nonostante 19 cicli successivi. PLTR: id 7390 (2026-08-12 16:00, score -0.012, ensemble) batte id 7613 (2026-08-13 17:15, score 0.385 > gate, single:gpt-oss:20b-cloud, fallback_used=true) per lo stesso motivo; siccome 7390 ha |score|<min_score(0.10) non produce nemmeno una riga SKIP_STALE quando invecchia oltre max_signal_age_hours=4 - risultato: zero righe in execution_decisions per PLTR in tutta la giornata del 13/08, verificato unico su 22 giorni con dati storici per quel simbolo. Costo verificato basso oggi (accessible_opportunity_usd dal dossier: NFLX $19.57 + PLTR $36.48 = $56.05) perche' gran parte del movimento era gia' avvenuta prima del primo ciclo eleggibile; il costo lordo potenziale (gross_opportunity_usd: $119.47+$102.51= $221.99) e' quasi 4x quello accessibile osservato. Distinto da F-023 (segnale forte sovrascritto da uno debole generato pochi secondi dopo, ma entrambi visibili in execution_decisions): qui il segnale forte non produce mai nessuna riga, nemmeno di skip.",
           "fonte": "ALPHA_MISS_REPORT_2026-08-13.md §3, §8"
+        },
+        {
+          "data": "2026-09-03",
+          "costo_usd": null,
+          "nota": "TSLA non riceve ALCUNA riga in execution_decisions al ciclo delle 19:52:03/04, non solo un segnale fallback scartato. Verificato con query diretta (log persistente del giorno non disponibile, vedi nota in testa al report): alle 19:45:44 sentiment_signals riceve per TSLA un punteggio 0,468 (single:gpt-oss:20b-cloud, fallback_used=true, sopra gate 0,30); il segnale ensemble precedente, 0,221 (19:15:59, non-fallback, ancora dentro la finestra di 96h), e' l'ultimo per cui esiste una riga (19:37:04, SKIP_THRESHOLD). Il ciclo delle 19:52 valuta 31 simboli e produce una riga per ciascuno (verificato: ogni altro mover e ogni altro simbolo della watchlist ha SKIP_THRESHOLD o una decisione quel ciclo) tranne TSLA, che ne e' completamente assente - non e' SKIP_FALLBACK esplicito ne' SKIP_STALE, e' l'assenza totale di riga. Coerente con la meccanica gia' documentata (fetch_signals_for_cycle preferisce il non-fallback piu' recente indipendentemente da forza/recency del fallback), ma prima verifica diretta della serie recente (09-01, 09-02) con zero righe di qualunque tipo anziche' solo assenza di SKIP_STALE come nei casi 08-13 (NFLX/PLTR). Costo null: net_opportunity_usd di TSLA e' negativa (-35,29$), quindi il difetto non ha avuto conseguenza economica oggi, a differenza dell'occorrenza dell'08-13 (56,05$ su NFLX+PLTR).",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-03.md §1, §3, §7, §8.1, §Segnalazioni"
         }
       ],
       "costo_cumulato_usd": 56.05,
-      "occorrenze_non_stimate": 0,
+      "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
     },
@@ -3577,10 +3613,16 @@
           "costo_usd": null,
           "nota": "NON_CLASSIFICATO ricompare UNA SEDUTA dopo essere stato dichiarato apparentemente risolto. Il report del 09-01 §9 annotava che la categoria era sparita dal classificatore causale del dossier e che il difetto sembrava risolto; oggi PLTR -5,81% esce come causa='NON_CLASSIFICATO' benche' il caso sia perfettamente noto al ledger degli intent: 15 righe SKIP_FALLBACK sul solo PLTR (85 in totale nella giornata), e tutti e tre i suoi punteggi generati da single:gpt-oss:20b-cloud con reason esplicita 'single-model fallback ... excluded from BUY ranking (#108)'. Il difetto non era risolto: era senza casi. Il segnale PLTR delle 17:00 valeva -0,420, sopra la magnitudine del gate e col segno corretto. Costo null.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-02.md §3 e §7"
+        },
+        {
+          "data": "2026-09-03",
+          "costo_usd": null,
+          "nota": "NON_CLASSIFICATO su TSLA oggi (score qualificante 0,468, single-model fallback, sopra gate), stesso bucket ambiguo di NFLX/PLTR (08-13) e PLTR (09-02). Novita' rispetto alle occorrenze precedenti: il campo funnel_v2.righe[].pipeline del dossier - schema piu' recente della serie legacy candidati_miss.causa - etichetta correttamente lo stesso caso FALLBACK_REJECT, con evidence.score_firmato=0,468 esplicito. Il difetto di misura persiste sul campo legacy, che e' quello che alimenta cause_del_giorno e quindi il criterio di falsificazione della domanda 1 della carta (NO_NEWS >=60% dei giorni); ma esiste gia', nello stesso dossier generato dallo stesso script, un campo che disambigua correttamente lo stesso evento. Non e' una chiusura del finding (il campo legacy non e' stato tolto, e cause_del_giorno lo usa ancora), solo una nota che la correzione esiste gia' altrove nello stesso output. Costo null.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-03.md §1, §3, §7, §Segnalazioni"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -3646,10 +3688,16 @@
           "costo_usd": null,
           "nota": "Primo avvistamento, con la serie che dimostra una regressione e non un limite di design. giorno_di_earnings vale None su 1438 intent S4 su 1438, dove None significa calendario NON DISPONIBILE (UNKNOWN, non False per difetto) come dichiara provenienza_dati.metriche.giorno_di_earnings del dossier. Serie sui dossier disponibili: 08-25 False su 1494/1494; 08-26 False su 1494 e TRUE SU 24 (giorno di earnings NVDA -- il campo funzionava E discriminava); 08-27 False su 1700/1700; poi None su TUTTO l'08-31 (1237), il 09-01 (1189) e il 09-02 (1438). Il dossier dell'08-28 non esiste, quindi la regressione cade fra il 08-27 e il 08-31. EFFETTO: il qualificatore earnings-day della guardia ombra di contraddizione (#335) e' cieco su ogni intento proprio nella seduta in cui i TRE mover piu' grandi dell'universo sono tutti reazioni a trimestrali -- DELL +15,81% (riportato il 01/09 a mercati chiusi), PANW -9,28% e SNOW -4,37%. Fonti dichiarate del campo: FMP earnings-calendar + Alpaca Corporate Actions API. Costo null: e' perdita di capacita' osservativa, non di denaro diretto; il costo e' la ricorrenza. ID NUOVO GIUSTIFICATO: nessuno dei 62 finding esistenti riguarda la DISPONIBILITA' del calendario corporate -- F-047 e' la lettura timezone del calendario RTH Alpaca (percorso e difetto diversi), F-021 sono le finestre beat in ora UTC fissa, F-036 e' il trigger di revisione documentato in trading.yaml.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-02.md §8.3"
+        },
+        {
+          "data": "2026-09-03",
+          "costo_usd": null,
+          "nota": "giorno_di_earnings vale None su 1594 intent S4 su 1594 oggi (era 1438/1438 il 09-02, tutto None anche l'08-31 e il 09-01): quarta seduta consecutiva a None, nessun segnale di ripristino. A differenza del 09-02 (dove i tre mover principali erano tutti reazioni a trimestrali), oggi non ho trovato evidenza che i mover principali (HOOD, SNOW) siano earnings-driven - la copertura letta parla di upgrade analisti, prediction market, meme-coin fees, non di trimestrali - quindi l'impatto pratico della cecita' e' minore oggi. La causa strutturale (calendario non disponibile) non e' pero' cambiata. Costo null: perdita di capacita' osservativa, il costo e' la ricorrenza.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-03.md §6, §Segnalazioni"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 1,
+      "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
     },
@@ -3688,6 +3736,25 @@
       ],
       "costo_cumulato_usd": 0,
       "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-066",
+      "titolo": "Un articolo 'content-mill' con ticker correttamente taggato ma zero contenuto informativo passa ISSUER_SPECIFIC e diluisce il segnale a rumore",
+      "tipo": "osservazione",
+      "confidenza": "congetturale",
+      "primo_avvistamento": "2026-09-03",
+      "occorrenze": [
+        {
+          "data": "2026-09-03",
+          "costo_usd": 10.54,
+          "nota": "GS: 'If You Invested $100 In Goldman Sachs Group Stock 15 Years Ago, You Would Have This Much Today', tag ISSUER_SPECIFIC corretto (l'articolo e' genuinamente su GS, non un'attribuzione errata come in F-020), punteggio 0,002 - indistinguibile da assenza di segnale. E' un pezzo evergreen di rendimento storico, generato indipendentemente da qualunque notizia del giorno. Il secondo articolo del giorno su GS ('6 Financials Stocks Whale Activity In Today's Session', fan-out, punteggio 0,0) e' nella stessa categoria. Nessuno dei due tocca il vero motivo del +3,34% (probabile rialzo di settore financials, comune a JPM/MS/C/DB oggi). Distinto sia da F-020 (ticker sbagliato) sia da F-057 (rilevatore falsa entita' non copre source_metadata): qui l'entita' e' corretta e il rilevamento di rilevanza ha funzionato come da design, ma il contenuto stesso non porta informazione su alcun catalizzatore. Id nuovo giustificato: nessuno dei 65 finding esistenti al momento della scrittura copre contenuto correttamente taggato ma strutturalmente vuoto (evergreen/listicle). Costo congetturale = net_opportunity_usd di GS dal dossier (10,54$), unico articolo del giorno rilevante ai fini del punteggio sul ticker.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-03.md §3, §8.2, §Segnalazioni"
+        }
+      ],
+      "costo_cumulato_usd": 10.54,
+      "occorrenze_non_stimate": 0,
       "stato": "aperto",
       "issue": null
     }
