@@ -68,7 +68,8 @@ export default function Signals() {
     queryFn: fetchFeedbackStatus,
     refetchInterval: 120000,
   })
-  const gateThreshold = feedback?.entry_threshold ?? 0.35
+  // #474: SKIP_THRESHOLD is S4's sentiment gate — read strategies.S4 explicitly.
+  const gateThreshold = feedback?.strategies?.S4?.entry_threshold ?? 0.35
 
   const filtered = useMemo(() =>
     signals.filter((s: Signal) => {

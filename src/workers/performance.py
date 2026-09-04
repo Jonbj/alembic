@@ -618,7 +618,12 @@ def _format_capital_efficiency_section(
 
 
 def _format_feedback_stall_section(redis: "RedisStore") -> str:
-    """Format loss-feedback / threshold-stall section for the weekly report."""
+    """Format loss-feedback / threshold-stall section for the weekly report.
+
+    #474: reads one sleeve at a time via `FEEDBACK_STRATEGIES` — the ratchet
+    writes threshold and state per-strategy, so a global (no-strategy) read
+    is blind on any sleeve whose bare-key mirror doesn't exist.
+    """
     import yaml
     from pathlib import Path
     _TRADING_YAML = Path(__file__).resolve().parents[2] / "config" / "trading.yaml"
@@ -633,35 +638,46 @@ def _format_feedback_stall_section(redis: "RedisStore") -> str:
     threshold_max = float(fb_cfg.get("threshold_max", 0.60))
     recovery_win_streak = int(fb_cfg.get("recovery_win_streak", 3))
 
-    current_threshold = redis.get_feedback_entry_threshold() or baseline
-    feedback_state = redis.get_feedback_state() or {}
+    lines: list[str] = []
+    for strategy in FEEDBACK_STRATEGIES:
+        if strategy == "S1":
+            # S1 has no discrete entry-threshold gate by design (see
+            # _step_threshold_down / the S1 trigger branches): its threshold
+            # key is deliberately pinned to 0.0, which is NOT a disarmed gate.
+            lines.append(f"{strategy}: — no discrete entry gate (state-only tracking)")
+            continue
 
-    is_elevated = current_threshold > baseline + 0.001
-    consecutive_wins = int(feedback_state.get("consecutive_wins") or 0)
-    last_ts = feedback_state.get("last_adjustment_ts", "")
+        current_threshold = redis.get_feedback_entry_threshold(strategy=strategy) or baseline
+        feedback_state = redis.get_feedback_state(strategy=strategy) or {}
+        is_elevated = current_threshold > baseline + 0.001
+        consecutive_wins = int(feedback_state.get("consecutive_wins") or 0)
+        last_ts = feedback_state.get("last_adjustment_ts", "")
 
-    if is_elevated:
-        wins_needed = max(0, recovery_win_streak - consecutive_wins)
-        # Fraction of signal space filtered: signals between baseline and current
-        # threshold are blocked. Rough proxy: (current - baseline) / (max - baseline).
-        # A degenerate configured range has no meaningful interpolation; report
-        # the elevated threshold as fully saturated instead of dividing by zero.
-        threshold_range = threshold_max - baseline
-        signal_filter_pct = (
-            (current_threshold - baseline) / threshold_range * 100
-            if threshold_range > 0
-            else 100.0
-        )
-        stall_status = (
-            f"🔴 ELEVATED: {current_threshold:.2f} (baseline {baseline:.2f})\n"
-            f"~{signal_filter_pct:.0f}% of marginal signals suppressed\n"
-            f"Recovery: {consecutive_wins}/{recovery_win_streak} wins ({wins_needed} more needed)"
-        )
-    else:
-        stall_status = f"✅ Normal: threshold {current_threshold:.2f} (baseline {baseline:.2f})"
+        if is_elevated:
+            wins_needed = max(0, recovery_win_streak - consecutive_wins)
+            # Fraction of signal space filtered: signals between baseline and current
+            # threshold are blocked. Rough proxy: (current - baseline) / (max - baseline).
+            # A degenerate configured range has no meaningful interpolation; report
+            # the elevated threshold as fully saturated instead of dividing by zero.
+            threshold_range = threshold_max - baseline
+            signal_filter_pct = (
+                (current_threshold - baseline) / threshold_range * 100
+                if threshold_range > 0
+                else 100.0
+            )
+            status = (
+                f"{strategy}: 🔴 ELEVATED {current_threshold:.2f} (baseline {baseline:.2f}), "
+                f"~{signal_filter_pct:.0f}% of marginal signals suppressed, "
+                f"recovery {consecutive_wins}/{recovery_win_streak} ({wins_needed} more needed)"
+            )
+        else:
+            status = f"{strategy}: ✅ Normal {current_threshold:.2f} (baseline {baseline:.2f})"
 
-    last_str = f" | Last trigger: {last_ts[:10]}" if last_ts else ""
-    return f"\n🧠 *Feedback Loop*\n{stall_status}{last_str}"
+        if last_ts:
+            status += f" | last trigger {last_ts[:10]}"
+        lines.append(status)
+
+    return "\n🧠 *Feedback Loop*\n" + "\n".join(lines)
 
 
 def _format_regime_section(redis: "RedisStore", portfolio_value_usd: float = 0.0) -> str:
@@ -820,19 +836,26 @@ def _build_weekly_structured(
         log.warning("weekly_structured: regime fetch failed: %s", e)
 
     try:
+        # #474: per-strategy, mirroring what the ratchet actually writes — a
+        # single global read is blind on any sleeve without a bare-key mirror.
         fb_cfg = _cfg_yaml.get("loss_feedback", {})
         baseline = float(fb_cfg.get("threshold_baseline", 0.30))
         recovery_win_streak = int(fb_cfg.get("recovery_win_streak", 3))
-        current_thr = redis.get_feedback_entry_threshold() or baseline
-        fb_state = redis.get_feedback_state() or {}
+        fb_strategies: dict[str, dict] = {}
+        for strategy in FEEDBACK_STRATEGIES:
+            current_thr = redis.get_feedback_entry_threshold(strategy=strategy) or baseline
+            fb_state = redis.get_feedback_state(strategy=strategy) or {}
+            fb_strategies[strategy] = {
+                "current_threshold": current_thr,
+                "is_elevated": current_thr > baseline + 0.001,
+                "consecutive_wins": int(fb_state.get("consecutive_wins") or 0),
+                "last_adjustment_ts": fb_state.get("last_adjustment_ts", ""),
+            }
         data["feedback"] = {
             "threshold_baseline": baseline,
             "threshold_max": float(fb_cfg.get("threshold_max", 0.60)),
-            "current_threshold": current_thr,
-            "is_elevated": current_thr > baseline + 0.001,
-            "consecutive_wins": int(fb_state.get("consecutive_wins") or 0),
             "recovery_win_streak": recovery_win_streak,
-            "last_adjustment_ts": fb_state.get("last_adjustment_ts", ""),
+            "strategies": fb_strategies,
         }
     except Exception as e:
         log.warning("weekly_structured: feedback fetch failed: %s", e)
@@ -2181,7 +2204,7 @@ def _step_threshold_down(
 # silently stop having its lease renewed — the exact failure #163 guards against.
 # Deriving this from StrategyRegistry.get_active_strategies() would be better, but it
 # would add a DB round-trip to a task that currently needs none.
-_FEEDBACK_STRATEGIES = ("S1", "S4")
+FEEDBACK_STRATEGIES = ("S1", "S4")
 
 
 def _refresh_feedback_ttl(redis, cfg: dict) -> None:
@@ -2195,7 +2218,7 @@ def _refresh_feedback_ttl(redis, cfg: dict) -> None:
     take down the loss-feedback run.
     """
     ttl_seconds = int(cfg["feedback_ttl_hours"] * 3600)
-    for strategy in _FEEDBACK_STRATEGIES:
+    for strategy in FEEDBACK_STRATEGIES:
         try:
             if redis.refresh_feedback_ttl(strategy=strategy, ttl=ttl_seconds):
                 continue

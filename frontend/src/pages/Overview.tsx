@@ -77,7 +77,10 @@ export default function Overview() {
   const { data: quality } = useQuery({ queryKey: ['overview-quality', 14], queryFn: () => fetchQualityMetrics(14), refetchInterval: 120000 })
   const { data: portfolio } = useQuery({ queryKey: ['overview-portfolio-status'], queryFn: fetchPortfolioStatus, staleTime: 60000 })
 
-  const gateThreshold = feedback?.entry_threshold ?? 0.30
+  // #474: gateThreshold counts sentiment signals against the entry gate, which is
+  // S4's — read strategies.S4 explicitly rather than a blended/global value.
+  const gateThreshold = feedback?.strategies?.S4?.entry_threshold ?? 0.30
+  const gateElevated = feedback?.strategies?.S4?.is_elevated ?? false
   const now = signalsUpdatedAt
   const freshSignals = signals.filter((s) => now - new Date(s.generated_at).getTime() <= SIGNAL_FRESH_HOURS * 3600_000)
   const staleSignals = signals.length - freshSignals.length
@@ -201,7 +204,7 @@ export default function Overview() {
         <div className="card">
           <h3 style={{ margin: '0 0 14px', fontSize: 14, fontWeight: 700 }}>Signal Gate</h3>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <MiniMetric label="Threshold" value={gateThreshold.toFixed(2)} sub={feedback?.adjustment_active ? 'feedback active' : 'baseline / current'} />
+            <MiniMetric label="Threshold" value={gateThreshold.toFixed(2)} sub={gateElevated ? 'feedback active (S4)' : 'baseline / current'} />
             <MiniMetric label="Gate pass" value={String(gatePass)} sub="fresh non-FB score ≥ threshold" />
             <MiniMetric label="Stale latest" value={String(staleSignals)} sub={`>${SIGNAL_FRESH_HOURS}h old`} />
             <MiniMetric label="Deployed" value={`$${deployedNotional.toFixed(0)}`} sub="open market value" />
