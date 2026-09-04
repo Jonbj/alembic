@@ -25,4 +25,3 @@ CREATE INDEX IF NOT EXISTS idx_strategy_rebalance_snapshots_lookup
 
 COMMENT ON TABLE strategy_rebalance_snapshots IS
     'Una riga per simbolo a ogni decisione di ribilanciamento; misura append-only #489.';
-
