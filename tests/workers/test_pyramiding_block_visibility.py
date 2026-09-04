@@ -105,13 +105,13 @@ class TestScritturaDellaRiga:
         )
         assert pg.write_execution_decision.call_args.kwargs["score"] == pytest.approx(623 / 100_000)
 
-    def test_posizione_gia_a_target_ha_gap_zero(self) -> None:
+    def test_posizione_gia_a_target_o_sovrappeso_ha_gap_zero(self) -> None:
         pg = self._pg()
         _record_pyramiding_blocks(
             pg,
             [{"symbol": "XLE", "signal_id": 77, "signal_score": 0.5,
               "allocation_weight": 0.20, "open_since": None,
-              "target_notional": 629.0, "current_value": 629.0,
+              "target_notional": 629.0, "current_value": 650.0,
               "nav": 100_000.0}],
             gia_registrati=set(),
             regime_mult=1.0,

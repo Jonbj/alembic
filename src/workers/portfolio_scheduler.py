@@ -2874,10 +2874,9 @@ def _run_cycle_inner() -> dict:
                     "signal_id": _signal_ids.get(order.symbol),
                     "signal_score": _s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
                     "allocation_weight": order.allocation_weight,
-                    # #315: quantita'/prezzo/NAV del ciclo per calcolare il delta $
-                    # di NAV effettivamente bloccato — allocation_weight resta solo
-                    # come peso *target* dello slot (fixed_slot_sizing = 1/n_top),
-                    # non il capitale davvero non allocato.
+                    # #491: target pieno e valore broker corrente rendono esplicito
+                    # il gap; quantity/price restano solo per compatibilita' col
+                    # fallback difensivo di _record_pyramiding_blocks.
                     "quantity": order.quantity,
                     "price": latest_prices.get(order.symbol),
                     "nav": equity,

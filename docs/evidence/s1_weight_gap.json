@@ -1,0 +1,486 @@
+{
+  "as_of": "2026-09-04T07:08:34.955970+00:00",
+  "last_rebalance": "2026-09-01T14:07:00.764017+00:00",
+  "rows": [
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 804.123477,
+      "gap_usd": -28.276522999999997,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.9660301261412783,
+      "symbol": "AAPL",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 755.787497,
+      "gap_usd": -76.61250299999995,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.9079619137433926,
+      "symbol": "ABBV",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 377.987646,
+      "gap_usd": -113.79705628412927,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.7686039119240784,
+      "symbol": "AMAT",
+      "target_usd": 491.78470228412925,
+      "target_weight": 0.013915123811755695
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 375.032538,
+      "gap_usd": -177.9955529252382,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.6781437401715987,
+      "symbol": "AMD",
+      "target_usd": 553.0280909252382,
+      "target_weight": 0.01564801491559515
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 630.891202,
+      "gap_usd": -135.0195433023614,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.8237137367108497,
+      "symbol": "ASML",
+      "target_usd": 765.9107453023614,
+      "target_weight": 0.021671562372997354
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 718.845703,
+      "gap_usd": -113.55429700000002,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.8635820555021624,
+      "symbol": "BAC",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 834.097272,
+      "gap_usd": 1.6972719999999981,
+      "open_trade_sleeve": "S1",
+      "ratio": 1.0020390100913024,
+      "symbol": "BP",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 816.775169,
+      "gap_usd": -15.624830999999972,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.9812291794810187,
+      "symbol": "C",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 734.923501,
+      "gap_usd": -97.47649899999999,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.8828970458913984,
+      "symbol": "CAT",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": true,
+      "current_usd": 1867.790474,
+      "gap_usd": 1035.3904739999998,
+      "open_trade_sleeve": "S4",
+      "ratio": 2.243861693897165,
+      "symbol": "CSCO",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 896.928272,
+      "gap_usd": 64.52827200000002,
+      "open_trade_sleeve": "S1",
+      "ratio": 1.0775207496395964,
+      "symbol": "CVX",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 482.032006,
+      "gap_usd": -94.14022450389291,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.8366109654025459,
+      "symbol": "DELL",
+      "target_usd": 576.1722305038929,
+      "target_weight": 0.016302881905677875
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 882.143871,
+      "gap_usd": 49.74387100000001,
+      "open_trade_sleeve": "S1",
+      "ratio": 1.059759575925036,
+      "symbol": "GM",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 850.644275,
+      "gap_usd": 18.244275000000016,
+      "open_trade_sleeve": "S1",
+      "ratio": 1.021917677799135,
+      "symbol": "GOOGL",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 0.0,
+      "gap_usd": -832.4,
+      "open_trade_sleeve": null,
+      "ratio": 0.0,
+      "symbol": "GS",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 548.689689,
+      "gap_usd": 36.09886491376119,
+      "open_trade_sleeve": "S1",
+      "ratio": 1.0704243291481315,
+      "symbol": "INTC",
+      "target_usd": 512.5908240862389,
+      "target_weight": 0.01450383622914918
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 777.001921,
+      "gap_usd": -55.39807899999994,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.9334477666987027,
+      "symbol": "IWM",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 866.464503,
+      "gap_usd": 34.06450300000006,
+      "open_trade_sleeve": "S1",
+      "ratio": 1.0409232376261413,
+      "symbol": "JNJ",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 825.270073,
+      "gap_usd": -7.129926999999952,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.9914344942335416,
+      "symbol": "JPM",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 799.925969,
+      "gap_usd": -32.47403099999997,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.9609874687650168,
+      "symbol": "LLY",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 972.763794,
+      "gap_usd": 140.36379399999998,
+      "open_trade_sleeve": "S1",
+      "ratio": 1.1686254132628544,
+      "symbol": "MRK",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 116.35987,
+      "gap_usd": -308.37320318468096,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.2739599935731984,
+      "symbol": "MRVL",
+      "target_usd": 424.73307318468096,
+      "target_weight": 0.012017887650555049
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 662.925565,
+      "gap_usd": -169.47443499999997,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.7964026489668429,
+      "symbol": "MS",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 0.0,
+      "gap_usd": -416.12921456263393,
+      "open_trade_sleeve": null,
+      "ratio": 0.0,
+      "symbol": "MU",
+      "target_usd": 416.12921456263393,
+      "target_weight": 0.011774440147148455
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 5.538413,
+      "gap_usd": -623.9627131196571,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.008798098637471293,
+      "symbol": "NOK",
+      "target_usd": 629.5011261196571,
+      "target_weight": 0.017811831211727695
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 0.0,
+      "gap_usd": -745.059838042724,
+      "open_trade_sleeve": null,
+      "ratio": 0.0,
+      "symbol": "PANW",
+      "target_usd": 745.059838042724,
+      "target_weight": 0.021081582744192917
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 810.180314,
+      "gap_usd": -22.219686000000024,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.9733064800576645,
+      "symbol": "PBR",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 835.581457,
+      "gap_usd": 3.181457000000023,
+      "open_trade_sleeve": "S1",
+      "ratio": 1.0038220290725612,
+      "symbol": "PFE",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": true,
+      "current_usd": 1399.373828,
+      "gap_usd": 566.973828,
+      "open_trade_sleeve": "S4",
+      "ratio": 1.6811314608361365,
+      "symbol": "QQQ",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 763.8308,
+      "gap_usd": -68.56920000000002,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.9176246996636233,
+      "symbol": "RIO",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 733.625561,
+      "gap_usd": -98.77443900000003,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.8813377715040845,
+      "symbol": "ROKU",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 696.348515,
+      "gap_usd": -136.05148499999996,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.8365551597789525,
+      "symbol": "SBUX",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 858.047781,
+      "gap_usd": 25.64778100000001,
+      "open_trade_sleeve": "S1",
+      "ratio": 1.0308118464680442,
+      "symbol": "SHEL",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 618.316318,
+      "gap_usd": -214.08368199999995,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.7428115305141759,
+      "symbol": "SNOW",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 586.057809,
+      "gap_usd": -96.40941362077433,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.8587340015384943,
+      "symbol": "SOXX",
+      "target_usd": 682.4672226207744,
+      "target_weight": 0.01931051506101227
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 699.888074,
+      "gap_usd": -132.51192600000002,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.8408073930802499,
+      "symbol": "SPY",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 766.061726,
+      "gap_usd": -66.33827399999996,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.920304812590101,
+      "symbol": "TSM",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 719.632404,
+      "gap_usd": -112.76759600000003,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.8645271552138395,
+      "symbol": "UBS",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 638.550741,
+      "gap_usd": -193.84925899999996,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.7671200636713119,
+      "symbol": "UNH",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 810.952254,
+      "gap_usd": -21.44774599999994,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.9742338467083134,
+      "symbol": "VALE",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": true,
+      "current_usd": 149.348569,
+      "gap_usd": -261.01540261464595,
+      "open_trade_sleeve": "S4",
+      "ratio": 0.3639417184027218,
+      "symbol": "WDC",
+      "target_usd": 410.36397161464595,
+      "target_weight": 0.011611311710957785
+    },
+    {
+      "covered_by_other_sleeve": true,
+      "current_usd": 1420.46389,
+      "gap_usd": 588.06389,
+      "open_trade_sleeve": "S4",
+      "ratio": 1.706467912061509,
+      "symbol": "XLE",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 798.227629,
+      "gap_usd": -34.172371,
+      "open_trade_sleeve": "S1",
+      "ratio": 0.9589471756367132,
+      "symbol": "XLF",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 836.416533,
+      "gap_usd": 4.016532999999981,
+      "open_trade_sleeve": "S1",
+      "ratio": 1.004825243873138,
+      "symbol": "XLK",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 859.007605,
+      "gap_usd": 26.607605000000035,
+      "open_trade_sleeve": "S1",
+      "ratio": 1.031964926717924,
+      "symbol": "XLV",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    },
+    {
+      "covered_by_other_sleeve": false,
+      "current_usd": 893.421371,
+      "gap_usd": 61.021371000000045,
+      "open_trade_sleeve": "S1",
+      "ratio": 1.0733077498798655,
+      "symbol": "XOM",
+      "target_usd": 832.4,
+      "target_weight": 0.023552886063978005
+    }
+  ],
+  "schema_version": 1,
+  "sleeve_implicit_usd": 35341.74103924699,
+  "sleeve_samples_usd": [
+    35341.68422074561,
+    35341.74103924699,
+    35341.74103924699,
+    35341.74103924699
+  ],
+  "totals": {
+    "excluding_other_sleeves": {
+      "current_usd": 27659.299118000003,
+      "gap_usd": -4774.877949632344,
+      "target_usd": 32434.177067632347
+    },
+    "gross": {
+      "current_usd": 32496.275879000004,
+      "gap_usd": -2845.465160246993,
+      "target_usd": 35341.741039247
+    }
+  }
+}
