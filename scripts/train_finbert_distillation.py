@@ -203,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         device=device,
         batch_size=args.batch_size,
         max_tokens=args.max_tokens,
+        progress=lambda message: print(f"Baseline: {message}", flush=True),
     )
     base_metrics = compute_metrics(base_predictions, validation)
 
@@ -217,6 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         learning_rate=args.learning_rate,
         max_tokens=args.max_tokens,
         seed=args.seed,
+        progress=lambda message: print(f"Training: {message}", flush=True),
     )
     tuned_predictions = predict_polarities(
         model,
@@ -225,6 +227,7 @@ def main(argv: list[str] | None = None) -> int:
         device=device,
         batch_size=args.batch_size,
         max_tokens=args.max_tokens,
+        progress=lambda message: print(f"Tuned: {message}", flush=True),
     )
     tuned_metrics = compute_metrics(tuned_predictions, validation)
 

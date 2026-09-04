@@ -13,7 +13,7 @@ import random
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
 
 import numpy as np
 import torch
@@ -234,6 +234,7 @@ def train_model(
     learning_rate: float = 2e-5,
     max_tokens: int = MAX_TOKENS,
     seed: int = 466,
+    progress: Callable[[str], None] | None = None,
 ) -> list[float]:
     """Fine-tune all FinBERT parameters and return mean loss for each epoch."""
     if epochs < 1 or batch_size < 1 or learning_rate <= 0:
@@ -253,10 +254,11 @@ def train_model(
     history: list[float] = []
     label2id = model.config.label2id
 
-    for _epoch in range(epochs):
+    progress_interval = max(1, len(loader) // 10)
+    for epoch in range(epochs):
         total_loss = 0.0
         observations = 0
-        for batch in loader:
+        for batch_number, batch in enumerate(loader, start=1):
             targets = batch.pop("teacher_polarity").to(device)
             inputs = {name: tensor.to(device) for name, tensor in batch.items()}
             optimizer.zero_grad(set_to_none=True)
@@ -268,6 +270,12 @@ def train_model(
             count = len(targets)
             total_loss += float(loss.detach()) * count
             observations += count
+            if progress and (
+                batch_number % progress_interval == 0 or batch_number == len(loader)
+            ):
+                progress(
+                    f"epoch {epoch + 1}/{epochs}: batch {batch_number}/{len(loader)}"
+                )
         history.append(total_loss / observations)
     return history
 
@@ -280,6 +288,7 @@ def predict_polarities(
     device: torch.device,
     batch_size: int = 16,
     max_tokens: int = MAX_TOKENS,
+    progress: Callable[[str], None] | None = None,
 ) -> list[float]:
     """Return continuous polarities without quantisation or live-path side effects."""
     loader = DataLoader(
@@ -291,13 +300,18 @@ def predict_polarities(
     model.to(device)
     model.eval()
     predictions: list[float] = []
+    progress_interval = max(1, len(loader) // 10)
     with torch.inference_mode():
-        for batch in loader:
+        for batch_number, batch in enumerate(loader, start=1):
             batch.pop("teacher_polarity")
             inputs = {name: tensor.to(device) for name, tensor in batch.items()}
             logits = model(**inputs).logits
             polarities = polarity_from_logits(logits, model.config.label2id)
             predictions.extend(float(value) for value in polarities.cpu())
+            if progress and (
+                batch_number % progress_interval == 0 or batch_number == len(loader)
+            ):
+                progress(f"batch {batch_number}/{len(loader)}")
     return predictions
 
 
