@@ -91,6 +91,7 @@ class SecCompanyTickers:
         self._timeout = timeout
         self._name_to_ticker: dict[str, str] = {}
         self._ticker_to_name: dict[str, str] = {}
+        self._cik_to_tickers: dict[str, list[str]] = {}
         self._loaded = False
 
     def load(self) -> None:
@@ -105,9 +106,15 @@ class SecCompanyTickers:
             for row in resp.json().values():
                 t = str(row.get("ticker", "")).upper()
                 name = _normalize_name(str(row.get("title", "")))
+                raw_cik = str(row.get("cik_str", "")).strip()
                 if t and name:
                     self._name_to_ticker.setdefault(name, t)
                     self._ticker_to_name.setdefault(t, name)
+                if t and raw_cik.isdigit():
+                    cik = raw_cik.zfill(10)
+                    tickers = self._cik_to_tickers.setdefault(cik, [])
+                    if t not in tickers:
+                        tickers.append(t)
             log.info("SEC company_tickers loaded: %d issuers", len(self._ticker_to_name))
         except Exception as exc:
             log.warning("SEC company_tickers load failed: %s", exc)
@@ -115,6 +122,14 @@ class SecCompanyTickers:
     def ticker_for_name(self, name: str) -> str | None:
         self.load()
         return self._name_to_ticker.get(_normalize_name(name))
+
+    def tickers_for_cik(self, cik: str | int) -> list[str]:
+        """Return every listed share class associated with an SEC CIK."""
+        self.load()
+        raw_cik = str(cik).strip()
+        if not raw_cik.isdigit():
+            return []
+        return list(self._cik_to_tickers.get(raw_cik.zfill(10), []))
 
     def confirms(self, ticker: str, name: str | None = None) -> bool:
         """True if SEC knows this ticker and (if a name is given) it maps to it."""
