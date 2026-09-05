@@ -173,10 +173,17 @@ class AlpacaNewsConnector(NewsConnector):
         created_at = article.get("created_at", "")
         symbols = article.get("symbols") or []
 
-        try:
-            ts = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-        except (ValueError, AttributeError):
-            ts = datetime.now(timezone.utc)
+        if isinstance(created_at, datetime):
+            ts = created_at
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+        else:
+            try:
+                ts = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                ts = datetime.now(timezone.utc)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
 
         # QT-01: never fall back to the whole watchlist (mass false positives).
         # No source symbols → try explicit cashtags in the text, else no ticker

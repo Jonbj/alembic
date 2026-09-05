@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -108,31 +108,41 @@ def test_stream_event_uses_rest_ingestion_contract_and_triggers_inference():
         "summary": "Demand remains strong.",
         "content": "",
         "url": "https://example.test/apple-guidance",
-        "created_at": "2026-09-04T14:03:00Z",
+        # alpaca-py model_dump() emits datetime, while the REST API emits text.
+        "created_at": datetime(2026, 9, 4, 14, 3, tzinfo=timezone.utc),
         "symbols": ["AAPL"],
     }
 
     with patch("src.workers.news_stream.config") as mock_config, \
          patch("src.workers.news_stream.Redis") as mock_redis_cls, \
          patch("src.workers.news_stream.Deduplicator") as mock_dedup_cls, \
+         patch("src.workers.news_stream._process_alpaca_items") as mock_process, \
          patch("src.workers.news_stream._persist_ingestion_observability") as mock_persist, \
-         patch("src.workers.news_stream.run_sentiment_worker") as mock_sentiment:
+         patch("src.workers.news_stream.app.send_task") as mock_send_task:
         mock_config.REDIS_URL = "redis://redis:6379/0"
         mock_config.WATCHLIST_SYMBOLS = ["AAPL"]
         mock_redis = mock_redis_cls.from_url.return_value
         mock_dedup = mock_dedup_cls.return_value
-        mock_dedup.is_duplicate_by_id.return_value = False
-        mock_dedup.is_duplicate_content_symbol.return_value = False
+        mock_process.return_value = {
+            "fetched": 1,
+            "tickers_found": 1,
+            "discarded": 0,
+            "queued": 1,
+            "duplicates": 0,
+        }
 
         asyncio.run(_on_news(article))
 
-    payload = json.loads(mock_redis.rpush.call_args.args[1])
-    assert mock_redis.rpush.call_args.args[0] == "news:queue"
-    assert payload["id"] == "alpaca:123:AAPL"
-    assert payload["source"] == "alpaca_benzinga"
-    assert payload["asset_tags"] == ["AAPL"]
-    assert payload["extraction_method"] == "source_metadata"
-    assert payload["raw_ingested_at"] is not None
+    items, dedup, redis = mock_process.call_args.args
+    assert len(items) == 1
+    assert items[0].id == "alpaca:123"
+    assert items[0].source == "alpaca_benzinga"
+    assert items[0].asset_tags == ["AAPL"]
+    assert items[0].extraction_method == "source_metadata"
+    assert items[0].timestamp == article["created_at"]
+    assert dedup is mock_dedup
+    assert redis is mock_redis
+    assert mock_process.call_args.kwargs["discard_rows"] == []
     mock_persist.assert_called_once_with(
         "alpaca_benzinga",
         {
@@ -144,7 +154,9 @@ def test_stream_event_uses_rest_ingestion_contract_and_triggers_inference():
         },
         [],
     )
-    mock_sentiment.apply_async.assert_called_once_with(queue="inference")
+    mock_send_task.assert_called_once_with(
+        "src.workers.sentiment.run_sentiment_worker", queue="inference"
+    )
     mock_redis.close.assert_called_once()
 
 
@@ -163,13 +175,24 @@ def test_duplicate_stream_event_is_measured_without_triggering_inference():
     with patch("src.workers.news_stream.config") as mock_config, \
          patch("src.workers.news_stream.Redis") as mock_redis_cls, \
          patch("src.workers.news_stream.Deduplicator") as mock_dedup_cls, \
+         patch("src.workers.news_stream._process_alpaca_items") as mock_process, \
          patch("src.workers.news_stream._persist_ingestion_observability") as mock_persist, \
-         patch("src.workers.news_stream.run_sentiment_worker") as mock_sentiment:
+         patch("src.workers.news_stream.app.send_task") as mock_send_task:
         mock_config.REDIS_URL = "redis://redis:6379/0"
         mock_config.WATCHLIST_SYMBOLS = ["AAPL"]
         mock_redis = mock_redis_cls.from_url.return_value
-        mock_dedup = mock_dedup_cls.return_value
-        mock_dedup.is_duplicate_by_id.return_value = True
+
+        def duplicate(_items, _dedup, _redis, *, discard_rows):
+            discard_rows.append({"discarded_reason": "duplicate_id"})
+            return {
+                "fetched": 1,
+                "tickers_found": 1,
+                "discarded": 0,
+                "queued": 0,
+                "duplicates": 1,
+            }
+
+        mock_process.side_effect = duplicate
 
         asyncio.run(_on_news(article))
 
@@ -178,7 +201,7 @@ def test_duplicate_stream_event_is_measured_without_triggering_inference():
     discards = mock_persist.call_args.args[2]
     assert stats["duplicates"] == 1
     assert discards[0]["discarded_reason"] == "duplicate_id"
-    mock_sentiment.apply_async.assert_not_called()
+    mock_send_task.assert_not_called()
     mock_redis.close.assert_called_once()
 
 
