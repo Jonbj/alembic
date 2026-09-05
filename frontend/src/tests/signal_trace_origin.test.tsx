@@ -55,3 +55,24 @@ describe('SignalTraceLinks strategy origin', () => {
     expect(screen.queryByText('S1 · momentum')).not.toBeInTheDocument()
   })
 })
+
+describe('SignalTraceLinks news deep link', () => {
+  test('Open News points at the exact article, not just the ticker feed', async () => {
+    renderTrace({
+      newsId: 9279,
+      signalId: 9279,
+      decisionId: 16131,
+      orderId: '711c0240-4d6c-4a61-9edf-688723e48265',
+      orderCount: 1,
+      signalCount: 1,
+      decisionCount: 1,
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Trace' }))
+
+    const openNews = screen.getByRole('link', { name: 'Open News' })
+    const href = openNews.getAttribute('href') ?? ''
+    expect(href).toContain('news_id=9279')
+    expect(href).toContain('ticker=AAPL')
+  })
+})

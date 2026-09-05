@@ -16,9 +16,15 @@ def get_news_recent(
     limit: int = 100,
     ticker: str | None = None,
     source: str | None = None,
+    news_id: int | None = None,
 ) -> list[dict]:
-    """Return recent news articles processed by the sentiment pipeline."""
-    return pg.get_news_recent(limit=min(limit, 500), ticker=ticker, source=source)
+    """Return recent news articles processed by the sentiment pipeline.
+
+    `news_id` deep-links a single article — used by the causal trace panel
+    (SignalTraceLinks) to open the exact news item a signal/decision/order
+    traces back to, instead of just the ticker's whole feed.
+    """
+    return pg.get_news_recent(limit=min(limit, 500), ticker=ticker, source=source, news_id=news_id)
 
 
 @router.get("/source-quality")

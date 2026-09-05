@@ -2786,10 +2786,18 @@ class PostgreSQLStore:
         limit: int = 100,
         ticker: str | None = None,
         source: str | None = None,
+        news_id: int | None = None,
     ) -> list[dict]:
-        """Return recent news_log rows with downstream trace counts, newest first."""
+        """Return recent news_log rows with downstream trace counts, newest first.
+
+        `news_id` deep-links a single article (e.g. from a trace panel that
+        already knows the id) the same way `/api/signals?news_id=` does.
+        """
         filters = []
         params: list = []
+        if news_id is not None:
+            filters.append("nl.id = %s")
+            params.append(news_id)
         if ticker:
             filters.append("nl.ticker = %s")
             params.append(ticker)

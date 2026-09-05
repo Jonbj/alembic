@@ -288,6 +288,24 @@ class TestGetNewsRecent:
         assert "source = %s" in query
         assert "gdelt_gkg" in params
 
+    def test_get_news_recent_filters_by_news_id(self, pg_store):
+        """get_news_recent(news_id=...) deep-links a single article by id.
+
+        Regression: the trace panel already knows the exact news id but had
+        nowhere to pass it, so it could only filter the News page by ticker.
+        """
+        mock_cursor = pg_store._conn.cursor.return_value
+        mock_cursor.fetchall.return_value = []
+
+        pg_store.get_news_recent(limit=10, news_id=9279)
+
+        mock_cursor = pg_store._conn.cursor.return_value
+        call_args = mock_cursor.execute.call_args[0]
+        query = call_args[0]
+        params = call_args[1]
+        assert "nl.id = %s" in query
+        assert 9279 in params
+
 
 class TestGetNewsSourceQuality:
     """Test PostgreSQLStore.get_news_source_quality()."""

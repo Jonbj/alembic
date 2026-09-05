@@ -136,7 +136,7 @@ export default function Overview() {
         },
         {
           heading: "Operational State",
-          content: "Mostra se il sistema è READY/DEGRADED/BLOCKED, l'età dell'ultimo signal e dell'ultimo portfolio cycle, la soglia attiva del feedback gate, e lo stato di autorizzazione di S1/S4. La home non autorizza trading: guarda sempre i badge lifecycle.",
+          content: "Mostra se il sistema è READY/DEGRADED/BLOCKED, l'età dell'ultimo signal e dell'ultimo portfolio cycle, la soglia attiva del feedback gate, e lo stato di autorizzazione di S1/S4. La home non autorizza trading: guarda sempre i badge lifecycle.\n\n**Threshold**: è la soglia di **S4** (`feedback:entry_threshold:S4`), letta esplicitamente e non come valore globale — dal 2026-09-03 il ratchet scrive una chiave per strategia (#474), e S1 vale 0.0 perché non ha un gate d'ingresso discreto. Baseline 0.30, il feedback loop la alza fino a 0.60 dopo perdite consecutive e la fa decadere verso la baseline.",
         },
         {
           heading: "Signal Quality e Decisioni",
