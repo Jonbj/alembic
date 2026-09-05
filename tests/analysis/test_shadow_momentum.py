@@ -120,6 +120,19 @@ def test_manifest_usa_la_classificazione_dei_report_non_il_nome_nativo_dossier()
             _candidate("BBB", "BELOW_GATE", 30.0),
         ),
     )
+    event["candidati_miss"][0]["opportunity_v2"].update(
+        {
+            "estimator_version": "2.0",
+            "cutoff": "2026-08-17T20:00:00+00:00",
+            "entry": {
+                "timestamp": "2026-08-17T14:22:00+00:00",
+                "bar_timestamp": "2026-08-17T14:25:00+00:00",
+                "source": "intraday_open_at_first_eligible_bar",
+                "eligible_cycle_source": "primo_ciclo_dopo_segnale",
+            },
+            "exit": {"source": "daily_close", "policy": "EOD_close"},
+        }
+    )
     manifest = [
         {
             "data": "2026-08-17",
@@ -140,6 +153,16 @@ def test_manifest_usa_la_classificazione_dei_report_non_il_nome_nativo_dossier()
     assert rows[0]["causa"] == "THIN_NEUTRAL"
     assert rows[0]["dossier_causa"] == "BELOW_GATE"
     assert rows[0]["classification_source"].endswith("2026-08-17.md")
+    assert rows[0]["opportunity_provenance"] == {
+        "estimator_version": "2.0",
+        "cutoff": "2026-08-17T20:00:00+00:00",
+        "entry_timestamp": "2026-08-17T14:22:00+00:00",
+        "entry_bar_timestamp": "2026-08-17T14:25:00+00:00",
+        "entry_source": "intraday_open_at_first_eligible_bar",
+        "eligible_cycle_source": "primo_ciclo_dopo_segnale",
+        "exit_source": "daily_close",
+        "exit_policy": "EOD_close",
+    }
 
 
 def test_manifest_con_riga_assente_dal_dossier_fallisce_esplicitamente():

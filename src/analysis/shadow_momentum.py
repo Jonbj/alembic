@@ -96,6 +96,8 @@ def build_observations(
             )
 
             opportunity = candidate.get("opportunity_v2") or {}
+            entry = opportunity.get("entry") or {}
+            exit_block = opportunity.get("exit") or {}
             accessible = _finite_number(opportunity.get("accessible_opportunity_usd"))
             positive_accessible = max(accessible, 0.0) if accessible is not None else None
             missingness: list[str] = []
@@ -119,6 +121,16 @@ def build_observations(
                     "return": _finite_number(candidate.get("return")),
                     "accessible_opportunity_usd": accessible,
                     "positive_accessible_opportunity_usd": positive_accessible,
+                    "opportunity_provenance": {
+                        "estimator_version": opportunity.get("estimator_version"),
+                        "cutoff": opportunity.get("cutoff"),
+                        "entry_timestamp": entry.get("timestamp"),
+                        "entry_bar_timestamp": entry.get("bar_timestamp"),
+                        "entry_source": entry.get("source"),
+                        "eligible_cycle_source": entry.get("eligible_cycle_source"),
+                        "exit_source": exit_block.get("source"),
+                        "exit_policy": exit_block.get("policy"),
+                    },
                     "missingness": missingness,
                 }
             )

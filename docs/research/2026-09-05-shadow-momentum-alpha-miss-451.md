@@ -74,6 +74,16 @@ Gli otto LONG finiti su sedute negative sono quindi contati, ma la loro perdita
 non e' monetizzabile dai dati versionati. Chiamare 196,45 $ "P&L" ignorerebbe i
 falsi positivi e sarebbe scorretto.
 
+La tempistica dell'outcome ha un secondo limite. Per `NO_NEWS`, l'entry
+pubblicata da `opportunity_v2` parte dal `session_open`; per `THIN_NEUTRAL` puo'
+partire dal primo ciclo successivo al segnale sentiment osservato. Un momentum
+calcolato sui cinque close precedenti sarebbe invece disponibile gia' al primo
+ciclo. I dossier non conservano tutte le barre necessarie per riprezzare a quel
+ciclo le 38 righe senza tornare alla fonte Alpaca. Percio' ogni osservazione
+espone `eligible_cycle_source`, timestamp e bar dell'entry: la stima riusa
+fedelmente l'outcome versionato, ma non va interpretata come simulazione
+sincronizzata dell'ipotetico motore momentum.
+
 Durante il freeze #171 restano deliberatamente fuori: ricerca su altri
 lookback, scelta di una soglia, sizing, ranking, gate live e qualunque flag di
 attivazione. Sono taratura e appartengono, se mai giustificati dopo nuova
