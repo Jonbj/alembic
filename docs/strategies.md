@@ -51,9 +51,16 @@ signal = cross_sectional_z_score(signal_raw)        # z-score across all symbols
 ### Sizing
 
 `src/strategies/s1/sizing.py`:
-- `raw_weight ∝ signal × (target_vol / realised_vol)` — inverse-vol sizing
-- Normalised to sum ≤ 1.0 across all long positions (sleeve-local weights)
+- `raw_weight = min(target_vol / realised_vol_60d, max_weight)` — inverse-vol sizing
+- The signal is only an eligibility filter (`z > signal_threshold`, whose live default is `0.0`);
+  its magnitude does **not** scale the weight
+- Raw weights are normalised only when their sum exceeds 1.0, so the resulting sleeve-local
+  target has sum ≤ 1.0
 - Output: `{symbol: sleeve_weight}` — orchestrator scales by `allocation_pct=0.50`
+
+With the live defaults (`target_vol=0.10`, `max_weight=0.20`), the cap binds whenever annualised
+volatility is ≤50%. On the 2026-09-01 live universe this covered about 77% of names, flattening most
+of the inverse-vol differentiation; this is measured by `scripts/measure_s1_sizing_degeneracy.py`.
 
 ### Key Parameters (`S1Config`)
 
@@ -61,7 +68,10 @@ signal = cross_sectional_z_score(signal_raw)        # z-score across all symbols
 |-----------|---------|-------------|
 | `lookbacks` | (21, 63, 126, 252) | Lookback windows in trading days |
 | `vol_window_signal` | 63 | Rolling vol for return normalisation |
-| `target_vol` | 0.15 | Annualised vol target for sizing |
+| `vol_window_sizing` | 60 | Rolling vol for inverse-vol sizing |
+| `target_vol` | 0.10 | Annualised per-position vol target for sizing |
+| `max_weight` | 0.20 | Cap applied to each raw inverse-vol weight |
+| `signal_threshold` | 0.0 | Eligibility gate; signal strength does not scale weight |
 | `rebalance_frequency` | `MONTHLY` | Cadenza di ribilanciamento — rispettata sia dal backtest sia dal path live (vedi *Rebalance cadence*) |
 
 ### Integration
