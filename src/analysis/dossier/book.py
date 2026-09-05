@@ -5,9 +5,13 @@ Modulo puro: riceve trade e barre gia' caricati, non tocca rete ne' DB.
 
 from __future__ import annotations
 
+import math
 import statistics
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence, TypedDict
+
+from src.portfolio.exit_classification import reason_for_hold_minimum_expiry
 
 # Soglia DICHIARATA sotto la quale la gamba intraday (close - open) e' troppo
 # piccola perche' una quota su quel denominatore significhi qualcosa: 0,5% del
@@ -467,6 +471,11 @@ def compute_exits(
     result: list[ExitMetrics] = []
     for trade in trades:
         close = closes.get(trade["symbol"])
+        exit_reason = reason_for_hold_minimum_expiry(
+            trade["exit_reason"],
+            trade["ore_tenuta"] * 3600,
+            hold_minimum_minutes=90,
+        )
         result.append(
             {
                 "symbol": trade["symbol"],
@@ -474,7 +483,7 @@ def compute_exits(
                 "exit_price": trade["exit_price"],
                 "qty": trade["qty"],
                 "pnl_net": trade["pnl_net"],
-                "exit_reason": trade["exit_reason"],
+                "exit_reason": exit_reason,
                 "ore_tenuta": trade["ore_tenuta"],
                 "drift_post_uscita": (
                     None
@@ -484,6 +493,52 @@ def compute_exits(
             }
         )
     return result
+
+
+def aggregate_holding_time_histogram(
+    exits: Sequence[Mapping[str, Any]],
+    *,
+    strategy: str = "S4",
+    bucket_minutes: int = 15,
+) -> dict[str, Any]:
+    """Distribuzione per seduta delle durate chiuse, sui beat nominali.
+
+    I timestamp reali oscillano di pochi millisecondi attorno al beat. Il
+    bucket e' percio' il multiplo di 15 minuti piu' vicino: 104.999 e 105.001
+    devono raccontare lo stesso ciclo, non finire in due intervalli diversi.
+    """
+    buckets: dict[int, dict[str, Any]] = defaultdict(
+        lambda: {"n": 0, "pnl_net": 0.0, "drift_post_uscita": 0.0,
+                 "n_drift": 0}
+    )
+    selected = [row for row in exits if row.get("strategia") == strategy]
+    for row in selected:
+        minutes = float(row["ore_tenuta"]) * 60
+        nominal = int(math.floor(minutes / bucket_minutes + 0.5) * bucket_minutes)
+        bucket = buckets[nominal]
+        bucket["n"] += 1
+        bucket["pnl_net"] += float(row["pnl_net"])
+        if row.get("drift_post_uscita") is not None:
+            bucket["drift_post_uscita"] += float(row["drift_post_uscita"])
+            bucket["n_drift"] += 1
+
+    rows = []
+    for duration, values in sorted(buckets.items()):
+        rows.append({
+            "durata_minuti": duration,
+            "n": values["n"],
+            "pnl_net": round(values["pnl_net"], 6),
+            "drift_post_uscita": (
+                round(values["drift_post_uscita"], 6)
+                if values["n_drift"] else None
+            ),
+        })
+    return {
+        "strategia": strategy,
+        "ampiezza_bucket_minuti": bucket_minutes,
+        "n_chiusure": len(selected),
+        "buckets": rows,
+    }
 
 
 def aggregate_by_entry_hour(

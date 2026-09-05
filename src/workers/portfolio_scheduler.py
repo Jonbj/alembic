@@ -35,6 +35,7 @@ from src.portfolio.exit_classification import (
     STALE_PRESERVED,
     describe_disposition,
     mechanism_for_disposition,
+    reason_for_hold_minimum_expiry,
 )
 from src.portfolio.order_id import build_client_order_id, submit_order_with_coid_fallback
 from src.portfolio.whipsaw_damping import evaluate_whipsaw_damping
@@ -2018,6 +2019,7 @@ def _persist_trade_fills(
     regime_mult,
     tick_time,
     sym_strats: dict | None = None,
+    hold_minimum_minutes: int | None = None,
 ) -> int:
     """Persist trade entry/exit rows + back-fill Alpaca order_ids, one order at a time.
 
@@ -2045,6 +2047,9 @@ def _persist_trade_fills(
         # same symbol). open_trades was fetched at the top of the cycle
         # (exit_time IS NULL => positions still open at submit time).
         _open_trade_ids = {t["symbol"]: t["id"] for t in open_trades}
+        _open_trade_entry_times = {
+            t["symbol"]: t.get("entry_time") for t in open_trades
+        }
         for sub in submitted_orders:
             sym = sub["symbol"]
             dec = symbol_decisions.get(sym, {})
@@ -2097,11 +2102,32 @@ def _persist_trade_fills(
                     # full close (final tranche); stop-loss / reversal SELLs carry
                     # no allocation_weight and default to 0.0 => final (full close).
                     _is_final = float(sub.get("allocation_weight", 0.0) or 0.0) == 0.0
+                    _exit_reason = sub.get("reason", "portfolio_sell")
+                    _entry_time = _open_trade_entry_times.get(sym)
+                    try:
+                        _holding_seconds = (
+                            (tick_time - _entry_time).total_seconds()
+                            if _entry_time is not None else None
+                        )
+                    except (AttributeError, TypeError):
+                        # Una entry legacy malformata non deve mai impedire la
+                        # persistenza dell'uscita: perdiamo solo il marker #430.
+                        _holding_seconds = None
+                    _exit_reason = reason_for_hold_minimum_expiry(
+                        _exit_reason,
+                        _holding_seconds,
+                        hold_minimum_minutes=(
+                            hold_minimum_minutes
+                            if hold_minimum_minutes is not None
+                            else _get_hold_minimum_minutes()
+                        ),
+                        cycle_seconds=_CYCLE_SECONDS,
+                    )
                     _trade_id = _pg_trades.record_trade_exit(
                         symbol=sym,
                         exit_order_id=sub["order_id"],
                         exit_time=tick_time,
-                        exit_reason=sub.get("reason", "portfolio_sell"),
+                        exit_reason=_exit_reason,
                         trade_id=_open_trade_ids.get(sym),
                         is_final=_is_final,
                     )
@@ -2627,6 +2653,15 @@ def _run_cycle_inner() -> dict:
         strategy_returns=_strategy_returns,
         last_target_weights=_last_target_weights or None,
     )
+    # #491: the orchestrator sizes target weights against this NAV. Keep it so
+    # SKIP_PYRAMIDING can report the full target and subtract the actual broker
+    # position, instead of assuming the order quantity alone has that meaning.
+    _cycle_nav = orchestrator._compute_nav(portfolio, market)
+    _broker_position_values = {
+        ap.symbol: max(0.0, float(ap.qty) * float(latest_prices[ap.symbol]))
+        for ap in alpaca_positions
+        if ap.symbol in latest_prices
+    }
     _s4_strategy_instance = strategy_instances.get("S4")
     _s4_intent_ledger = getattr(_s4_strategy_instance, "_intent_ledger", None)
     _s4_observed_provenance = _s4_intent_provenance(
@@ -2972,13 +3007,14 @@ def _run_cycle_inner() -> dict:
                     "signal_id": _signal_ids.get(order.symbol),
                     "signal_score": _s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
                     "allocation_weight": order.allocation_weight,
-                    # #315: quantita'/prezzo/NAV del ciclo per calcolare il delta $
-                    # di NAV effettivamente bloccato — allocation_weight resta solo
-                    # come peso *target* dello slot (fixed_slot_sizing = 1/n_top),
-                    # non il capitale davvero non allocato.
+                    # #491: target pieno e valore broker corrente rendono esplicito
+                    # il gap; quantity/price restano solo per compatibilita' col
+                    # fallback difensivo di _record_pyramiding_blocks.
                     "quantity": order.quantity,
                     "price": latest_prices.get(order.symbol),
                     "nav": equity,
+                    "target_notional": float(order.allocation_weight) * _cycle_nav,
+                    "current_value": _broker_position_values.get(order.symbol, 0.0),
                     "open_since": _open_trade_entry_dates.get(order.symbol),
                 })
                 if "S4" in strats:
@@ -3392,6 +3428,7 @@ def _run_cycle_inner() -> dict:
             regime_mult=_regime_mult,
             tick_time=ts,
             sym_strats=_sym_strats,
+            hold_minimum_minutes=_hold_min,
         )
 
     # Alert when an approved strategy consistently produces zero target weights.
@@ -3773,12 +3810,10 @@ def _record_pyramiding_blocks(pg, bloccati, gia_registrati: set[str], regime_mul
     il difetto precedente: le righe apparivano come replay di segnali stale e inquinavano
     il Decision Log. Qui la riga dichiara quello che e' successo davvero.
 
-    `score` porta il delta di NAV effettivamente bloccato — `quantity * price / nav`,
-    non il peso *target* dello slot (#315). Con `fixed_slot_sizing=True` (default)
-    `allocation_weight` e' sempre 1/n_top (0.20): un numero fisso che non dipende da
-    quanto capitale il blocco lascia davvero non impiegato, quindi non e' sommabile
-    in una stima $ leggibile a query — vedi #230. `allocation_weight` resta nel testo
-    del `reason` per confronto, ma non e' piu' il campo usato per l'aggregazione.
+    `score` porta il gap positivo `(target_notional - current_value) / nav`, non il
+    notional target intero (#491). Una posizione stub da $6 verso un target da $629
+    registra quindi $623 di NAV non allocato; una posizione gia' a target registra
+    zero. `allocation_weight` e target pieno restano nel `reason` per confronto.
 
     Restituisce le chiavi effettivamente scritte, perche' sia il chiamante a marcarle —
     la funzione resta testabile senza Redis. Non solleva mai: la visibilita' e' preziosa,
@@ -3796,15 +3831,22 @@ def _record_pyramiding_blocks(pg, bloccati, gia_registrati: set[str], regime_mul
                 continue
             _score = b.get("signal_score")
             _since = b.get("open_since")
-            _qty = b.get("quantity") or 0.0
-            _price = b.get("price") or 0.0
+            # Compatibilita' difensiva per chiamanti vecchi/test: prima di #491 il
+            # solo notional disponibile era quantity * price ed era trattato come
+            # intero gap. Il path live passa sempre i due valori espliciti.
+            _target = b.get("target_notional")
+            if _target is None:
+                _target = (b.get("quantity") or 0.0) * (b.get("price") or 0.0)
+            _current = b.get("current_value") or 0.0
             _nav = b.get("nav") or 0.0
-            _delta = (float(_qty) * float(_price) / float(_nav)) if _nav else 0.0
+            _gap = max(0.0, float(_target) - float(_current))
+            _delta = (_gap / float(_nav)) if _nav else 0.0
             _reason = (
                 f"P0-05 anti-pyramiding: gia' a libro"
                 f"{f' dal {_since}' if _since else ''}"
                 f"{f', sentiment {float(_score):+.3f}' if _score is not None else ''}"
-                f", peso non allocato {float(b.get('allocation_weight') or 0.0) * 100:.1f}%"
+                f", peso target {float(b.get('allocation_weight') or 0.0) * 100:.1f}%"
+                f", target ${float(_target):.2f}, posizione ${float(_current):.2f}"
             )
             pg.write_execution_decision(
                 tick_time=now,
