@@ -4,10 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.connectors.alpaca_news import AlpacaNewsConnector, AlpacaNewsAuthError
+from src.connectors.alpaca_news import AlpacaNewsAuthError, AlpacaNewsConnector
 from src.models.news import NewsItem
 from src.text.sanitizer import sanitize_text
-
 
 # --- skeleton ---
 
@@ -107,7 +106,7 @@ _FAKE_RESPONSE = {
 
 @pytest.mark.asyncio
 async def test_fetch_historical_yields_news_items():
-    """Connector yields NewsItem with body=summary (Benzinga articles)."""
+    """Connector yields NewsItem with the full Benzinga article body."""
     mock_resp = AsyncMock()
     mock_resp.status = 200
     mock_resp.raise_for_status = MagicMock()
