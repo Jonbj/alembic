@@ -128,7 +128,7 @@ class AlpacaNewsConnector(NewsConnector):
         limit: int = 50,
         page_token: str | None = None,
     ) -> dict:
-        params: dict = {"limit": limit, "sort": "desc"}
+        params: dict = {"limit": limit, "sort": "desc", "include_content": "true"}
         if self._symbols:
             params["symbols"] = ",".join(self._symbols)
         if start:
@@ -150,20 +150,18 @@ class AlpacaNewsConnector(NewsConnector):
     def _parse_article(self, article: dict) -> NewsItem | None:
         """Convert an Alpaca news article dict to a NewsItem.
 
-        Body: summary (preferred) or content (HTML-stripped fallback).
+        Body: content (HTML-stripped) or summary fallback.
         Returns None if both are empty.
         """
         summary = (article.get("summary") or "").strip()
         content_raw = (article.get("content") or "").strip()
 
-        # Strip basic HTML tags from content if summary is empty
-        if not summary and content_raw:
+        body = summary
+        if content_raw:
             import re
             content_clean = re.sub(r"<[^>]+>", " ", content_raw).strip()
             content_clean = re.sub(r"\s+", " ", content_clean)
-            body = content_clean
-        else:
-            body = summary
+            body = content_clean or summary
 
         if not body:
             return None
