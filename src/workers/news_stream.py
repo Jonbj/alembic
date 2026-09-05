@@ -67,9 +67,7 @@ async def _on_news(article) -> None:
             redis_client,
             discard_rows=discard_rows,
         )
-        _persist_ingestion_observability(
-            "alpaca_benzinga", stats, discard_rows
-        )
+        _persist_ingestion_observability("alpaca_benzinga", stats, discard_rows)
 
         if stats["queued"]:
             # The stream process never loads FinBERT/Ollama: inference remains
@@ -120,7 +118,6 @@ def run_news_stream(self) -> dict:
 
 
 if __name__ == "__main__":
-    import asyncio
     import logging as _logging
 
     from src.config import config

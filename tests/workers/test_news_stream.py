@@ -1,11 +1,10 @@
 """Tests for P2-D: AlpacaNewsStreamConnector and news_stream worker."""
+
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 
 # ── AlpacaNewsStreamConnector ─────────────────────────────────────────────────
@@ -109,7 +108,7 @@ def test_stream_event_uses_rest_ingestion_contract_and_triggers_inference():
         "content": "",
         "url": "https://example.test/apple-guidance",
         # alpaca-py model_dump() emits datetime, while the REST API emits text.
-        "created_at": datetime(2026, 9, 4, 14, 3, tzinfo=timezone.utc),
+        "created_at": datetime(2026, 9, 4, 14, 3, tzinfo=UTC),
         "symbols": ["AAPL"],
     }
 
@@ -174,7 +173,7 @@ def test_duplicate_stream_event_is_measured_without_triggering_inference():
 
     with patch("src.workers.news_stream.config") as mock_config, \
          patch("src.workers.news_stream.Redis") as mock_redis_cls, \
-         patch("src.workers.news_stream.Deduplicator") as mock_dedup_cls, \
+         patch("src.workers.news_stream.Deduplicator"), \
          patch("src.workers.news_stream._process_alpaca_items") as mock_process, \
          patch("src.workers.news_stream._persist_ingestion_observability") as mock_persist, \
          patch("src.workers.news_stream.app.send_task") as mock_send_task:

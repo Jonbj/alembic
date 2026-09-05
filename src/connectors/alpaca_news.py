@@ -13,7 +13,7 @@ news days some articles may be missed; use MarketAux as primary source.
 
 import logging
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import aiohttp
 
@@ -175,15 +175,13 @@ class AlpacaNewsConnector(NewsConnector):
 
         if isinstance(created_at, datetime):
             ts = created_at
-            if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
         else:
             try:
-                ts = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                ts = datetime.fromisoformat(created_at)
             except (ValueError, AttributeError):
-                ts = datetime.now(timezone.utc)
+                ts = datetime.now(UTC)
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
 
         # QT-01: never fall back to the whole watchlist (mass false positives).
         # No source symbols → try explicit cashtags in the text, else no ticker
