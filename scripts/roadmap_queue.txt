@@ -53,6 +53,16 @@
 # `blocked_by` aperto: #510/#507/#509/#461 (impianto di misura), #469/#468
 # (evidenza — stessa sessione forense del 2026-09-01), #431/#512 (S4 non fa
 # entrare nulla), #508/#511/#453/#514 (copertura/qualita'), #470 (il resto).
+#
+# Decisioni PO prese lo stesso giorno: #22 (universo resta large-cap US only),
+# #24 (sleeve biotech, conseguenza diretta di #22), #288 (tassonomia legacy
+# invariata + viste v2 separate) — tutte chiuse.
+#
+# Sweep dei `waiting` con `blocked_by` nativo ormai a zero (stesso difetto di
+# #288: il blocker era chiuso da giorni, nessuno aveva ri-triagiato): #287
+# (blocked_by #281, chiuso 03/09), #299/#300 (blocked_by #296/#297, entrambe
+# chiuse), #34 (l'ultimo item della sua DoD dipendeva da #368, chiuso). Tutte
+# e quattro ri-etichettate `ready-for-agent` e aggiunte qui sotto.
 # ============================================================================
 
 # === 1. L'IMPIANTO DI MISURA E' FERMO O MENTE (tier0/tier1) ===
@@ -61,6 +71,7 @@
 507  `giorno_di_earnings` e' UNKNOWN sul 100% degli intent S4 per 4 sessioni consecutive: il calendario FMP non arriva mai al dossier dal cron (F-063)
 509  il classificatore legacy di miss-cause dice `NON_CLASSIFICATO` per casi che `funnel_v2` nello stesso dossier ha gia' risolto (PLTR 09-02, TSLA 09-03, F-060)
 461  il sampler del golden set QX-01 non ha finestra temporale, l'intero campione e' pre-QT-03: sblocca la misura error-rate per `extraction_method` che #405 aspetta
+34   riverificare il tasso di `parse_fail` dello shadow Stage-2 con il pool del semaforo sano e budget a 90s: la misura precedente (100% fail) era falsata dal pool a 0/3 di #368, ora chiuso
 
 # === 2. IL SEGNALE FINISCE SUL TICKER SBAGLIATO ===
 # Classe di errore peggiore per costruzione: un ordine su un titolo che non c'entra.
@@ -104,6 +115,10 @@
 469  unico buco di sequenza mai osservato in `portfolio_cycles` (32 cicli, 2026-09-01): errori DB ingoiati in silenzio, l'unica traccia e' il buco
 468  il ribilanciamento mensile S1 si spezza su due cicli consecutivi: 45 BUY alle 10:07, i 4 SELL `s1_weight_drop` solo alle 10:22 — stessa sessione forense di #469
 
+# --- S4 exit trial, risvegliate il 2026-09-05 (blocked_by chiusi, waiting stale) ---
+299  S4 exit trial: costruire il valutatore statistico appaiato — blocked_by #296+#297 (baseline P0 + challenger P1), entrambe chiuse
+300  S4 exit trial: eseguire P2 con contro-segnale qualificato — blocked_by #297 (P1 D+2 time-only), chiusa il 27/08
+
 # === 5. COPERTURA E QUALITA' DEL SEGNALE (miglioramenti, non bug) ===
 409  NO_NEWS e' la causa dominante dei miss di Week 35 (9/22) mentre il sistema osserva gia' catalizzatori che non usa: NVO aveva una corporate action OBSERVED, ERIC una volume surprise +1,25
 452  `OllamaCloudClient` non invia `format` (schema JSON) ne' `temperature=0` all'API pur essendo raccomandati: candidato root-cause della deriva sugli enum osservata (`supplier_readthrough` inesistente, separatori di lista ricopiati) — ortogonale al testo del prompt, riduce anche il rischio di parse failure di un'eventuale Variante B [PR #522 aperta]
@@ -116,6 +131,7 @@
 458  PoC shadow Twelve Data press_releases (10-20 simboli, 5 sedute): nessuna scrittura sul path live, tabella dedicata `news_poc_samples` — misura copertura/latenza/qualita' prima di decidere l'integrazione
 459  PoC shadow Tiingo News API: vincolo di licenza sul piano gratuito vieta di persistere il payload, solo aggregati per (simbolo, giorno) non ricostruibili — stessa misura di #458, schema dati piu' stretto
 514  weekly alpha-miss: versionare nel repository prompt/orchestrazione/formato/controlli del job, e sostituire l'orario fisso con un trigger di completezza — testa della nuova catena #515-#521 (il resto e' `waiting`/decisione PO, vedi fuori coda)
+287  alpha-miss: rendere coerente il contratto prompt/output — dossier unica fonte numerica, fallback DATA_INCOMPLETE esplicito, ledger deterministico — blocked_by #281 (funnel v2), chiusa il 03/09
 
 # === 6. IL RESTO ===
 470  il promotion gate non gira: `_fetch_lifecycle_row` seleziona `promotion_blocked`, colonna che su `strategy_lifecycle` non esiste — promote e approve rispondono 500
@@ -136,7 +152,7 @@
 #        backfill) e' una decisione sorgente `ready-for-human`, delegata a #159
 #        e #409. Un agente in loop qui puo' solo aprire PR di ripiego.
 #
-#   #30 QX-01 (tier0), #171, #22 — `ready-for-human`: lavoro o decisione umana.
+#   #30 QX-01 (tier0), #171 — `ready-for-human`: lavoro o decisione umana.
 #        #30 in particolare NON aspetta piu' una decisione (il suo blocker #25 e'
 #        chiuso): aspetta annotazione, ed e' l'unico tier0 lavorabile adesso.
 #   #161, #326, #334, #335, #159, #383 — ri-triagiate a `waiting` il 2026-08-31:
@@ -148,14 +164,17 @@
 #        `news_queue_drops`). Residuo = il knob `MAX_NEWS_AGE_HOURS` condiviso fra
 #        filtro sentiment e gate S4 → `waiting` 28/09. Meta' lavorabili: #432, #433
 #        (entrambe chiuse).
-#   #287, #298, #328, #361, #362, #364, #34 — `waiting` (si sbloccano da sole).
+#   #298, #328, #361, #362, #364 — `waiting` (si sbloccano da sole). #287 e #34
+#        uscite da questo elenco il 2026-09-05 (vedi sopra, `blocked_by` a zero).
 #   #179 — decisione PO gia' presa il 2026-08-14 (pre-registrazione + criterio
 #        registrato in config/s4_kill_criterion.yaml), ri-etichettata `waiting`
 #        il 2026-08-25: si risveglia da sola a n=213 sedute pulite. Il corpo
 #        della issue era rimasto non aggiornato dopo il ritiro del criterio
 #        precedente — corretto il 2026-09-05 con una nota in cima.
-#   #22, #24, #28, #29, #230, #288, #326, #334, #338, #360 — `wayfinder:decision`
-#        in attesa di un atto dell'operatore.
+#   #28, #29, #230, #326, #334, #338, #360 — `wayfinder:decision` in attesa di
+#        un atto dell'operatore (nessuna decidibile ora, vedi analisi 2026-09-05:
+#        evidenza ancora in raccolta o freeze fino al 28/09). #22, #24, #288
+#        decise e chiuse lo stesso giorno (vedi sopra).
 #   #515-#521 — nuova catena "weekly alpha-miss v2" (inserita 2026-09-05): #514
 #        (in coda sopra) e' l'unica meta' `ready-for-agent`. #515 e' `waiting`
 #        (pilot di due settimane in corso); #517 e #520 sono decisioni PO;
