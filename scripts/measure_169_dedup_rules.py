@@ -52,7 +52,9 @@ METODO — la parte che decide la validita' del numero.
          falsi positivi eviterebbe (ultimo >= soglia > regola), con il forward
          return medio di ciascun lato.
 
-Output: `docs/evidence/s4_dedup_rules_169.json`. Idempotente, sola lettura
+Output: `docs/evidence/s4_dedup_rules_169.json` (corpo della issue, gate
+d'ingresso) e `docs/evidence/s4_dedup_rules_169_uscite.json` (follow-up
+2026-09-01, gate d'uscita via below_entry_gate). Idempotente, sola lettura
 sul DB. NON e' un test, NON ha soglie pre-registrate, NON decide la regola.
 
 Uso:
@@ -74,6 +76,7 @@ from scipy.stats import spearmanr
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 OUT = PROJECT_DIR / "docs" / "evidence" / "s4_dedup_rules_169.json"
+OUT_USCITE = PROJECT_DIR / "docs" / "evidence" / "s4_dedup_rules_169_uscite.json"
 
 # Le candidate della issue, esattamente quelle: la decisione su quale adottare
 # e' dell'operatore (ready-for-human), non dello script.
@@ -374,6 +377,136 @@ def varianza_intraday(osservazioni: list[dict]) -> dict:
     }
 
 
+# ─── Uscite via below_entry_gate (#169 follow-up 2026-09-01) ─────────────────
+#
+# L'evidenza del 2026-09-01 (HOOD whipsaw: +0,4815 sostituito da +0,0228,
+# SELL a 105 min, −$23.06) ha aggiunto un costo che la misura del corpo della
+# issue non vedeva: la sostituzione di un segnale forte non skippava solo
+# ingressi — chiudeva posizioni aperte via `below_entry_gate`. Il punto dove
+# la sostituzione pesa non è il gate 0.30, è il MOMENTO DELL'USCITA: qualunque
+# regola si scelga deve valere anche in uscita, non solo nel ranking d'ingresso
+# (testo dell'evidenza, 2026-09-01).
+#
+# Stesse regole, stessa soglia, stessa logica: per ogni chiusura S4 con
+# exit_mechanism='below_entry_gate' si guarda che score avrebbe letto il
+# ranker VERO al tick di decisione applicando quella regola. Se la candidata
+# sarebbe restata >= soglia, l'uscita NON sarebbe scattata — è il flip
+# "salvato" lato uscita, simmetrico al flip "perso" lato ingresso.
+#
+# Convenzione del realized:
+#   * `salve` = uscite che la candidata AVREBBE EVITATO: la candidata
+#     avrebbe tenuto la posizione aperta, quindi il realized negativo è un
+#     costo che non si è preso (segno: negativo, costo evitato).
+#   * `perse` = uscite che la candidata AVREBBE AGGIUNTO: il ranker attuale
+#     ha tenuto aperto (baseline >= soglia), la candidata avrebbe chiuso —
+#     è un costo aggiuntivo (segno: positivo se la tenuta era in gain).
+#   * `saldo` = realized_salve + realized_perse: dice se la regola, sulla
+#     finestra, avrebbe migliorato/peggiorato il P&L realized delle chiusure
+#     below_entry_gate.
+
+
+def costruisci_eventi_uscita(eventi_raw: list[dict]) -> list[dict]:
+    """Filtra i segnali di ogni evento a quelli con generated_at <= decision_at.
+
+    `eventi_raw` e' la lista di chiusure lette dal DB (decision_at, symbol,
+    segnali, net_pnl). Un segnale DOPO l'uscita non era visibile al ranker:
+    va scartato. Il caso HOOD 09-01 ha il segnale forte a 10:47 e l'uscita
+    alle 12:37 — un filtro >= decision_at lo escluderebbe per costruzione.
+
+    Le altre chiavi dell'evento sono passate attraverso (incluso `net_pnl`,
+    facoltativo nei test).
+    """
+    out: list[dict] = []
+    for ev in eventi_raw:
+        orario = ev["decision_at"]
+        ev_out = {k: v for k, v in ev.items() if k != "segnali"}
+        ev_out["segnali"] = [s for s in ev["segnali"] if s["generated_at"] <= orario]
+        out.append(ev_out)
+    return out
+
+
+def analizza_uscite_sotto_soglia(
+    eventi: list[dict], soglia: float = SOGLIA_GATE,
+) -> dict:
+    """Per ogni regola, quante uscite avrebbe salvato al gate `soglia`.
+
+    Ogni evento è una chiusura S4 con exit_mechanism='below_entry_gate': per
+    costruzione la baseline (`ultimo_prod`) ha letto un punteggio < soglia al
+    tick di decisione, e il portafoglio ha chiuso la posizione. Le regole
+    candidate sono applicate agli stessi segnali; se la candidata >= soglia,
+    l'uscita NON sarebbe scattata sotto quella regola.
+
+    Il campione di questa funzione e' SOLO le chiusure effettive via
+    below_entry_gate (baseline < soglia per costruzione). Una candidata puo'
+    solo SALVARE queste uscite (tenere la posizione aperta). Il lato opposto
+    del flip (la candidata CHIUDE una posizione che il ranker attuale ha
+    tenuto) non esiste in questo campione: e' un evento diverso, e per
+    misurarlo servono osservazioni di posizioni tenute aperte — fuori
+    perimetro di questo script.
+
+    Restituisce un dizionario per regola con:
+      * n_uscite: numero di chiusure nel campione (uguale per tutte);
+      * n_uscite_salve: uscite EVITATE dalla candidata (la candidata avrebbe
+        tenuto, costo non preso);
+      * realized_uscite_salve: media condizionata del net_pnl sulle uscite
+        salvate (None se il campione e' vuoto). Segno negativo = costo evitato.
+
+    La baseline (`ultimo_prod`) ha per costruzione n_salve = 0: e' esattamente
+    la regola che ha prodotto le uscite del campione.
+    """
+    st: dict[str, dict] = {}
+    for regola in RULES:
+        salve: list[dict] = []
+        for ev in eventi:
+            segnali = ev["segnali"]
+            if not segnali:
+                # Caso patologico: nessun segnale visibile al ranker a quel
+                # tick. La candidata non puo' produrre uno score: l'uscita
+                # resta "non salvata". Non viene contato fra i salvi.
+                continue
+            score = dedup_score(segnali, regola)
+            if score >= soglia:
+                salve.append(ev)
+        st[regola] = {
+            "n_uscite": len(eventi),
+            "n_uscite_salve": len(salve),
+            "realized_uscite_salve": (
+                statistics.mean(e["net_pnl"] for e in salve) if salve else None
+            ),
+        }
+    return {
+        "n_uscite_totali": len(eventi),
+        "realized_medio_uscite": (
+            statistics.mean(e["net_pnl"] for e in eventi) if eventi else None
+        ),
+        "regole": st,
+    }
+
+
+def riepilogo_uscite_leggibile(risultato: dict) -> str:
+    """Riepilogo testuale del lato uscite, allineato allo stile del corpo."""
+    def fmt_f(x: float | None) -> str:
+        return f"{x:+.2f}" if x is not None else "    -"
+
+    n = risultato["n_uscite_totali"]
+    righe = [
+        (
+            f"Uscite below_entry_gate: {n} chiusure, "
+            f"realized medio {fmt_f(risultato['realized_medio_uscite'])}$"
+        ),
+        (
+            f"{'regola':12} {'salve':>6} {'fwd salve':>10}"
+        ),
+    ]
+    for regola in RULES:
+        s = risultato["regole"][regola]
+        righe.append(
+            f"{regola:12} {s['n_uscite_salve']:>6} "
+            f"{fmt_f(s['realized_uscite_salve']):>10}"
+        )
+    return "\n".join(righe)
+
+
 # ─── Assemblaggio e riepilogo: puri, testabili senza DB ──────────────────────
 
 
@@ -511,6 +644,131 @@ def riepilogo_leggibile(risultato: dict) -> str:
 # ─── Driver: legge DB, riduce, misura, scrive evidence ───────────────────────
 
 
+def leggi_uscite_below_entry_gate(since: str) -> list[dict]:
+    """Le chiusure S4 con exit_mechanism='below_entry_gate' dal `since`.
+
+    Il join e' `trades.decision_id = execution_decisions.id`: la decision e'
+    la riga che ha registrato l'exit_mechanism al momento della chiusura, e
+    `tick_time` e' il momento in cui il gate d'ingresso e' stato valutato
+    (cioe' l'istante in cui il ranker ha letto il segnale "sotto soglia").
+    Per ogni chiusura si raccolgono TUTTI i segnali del simbolo con
+    `generated_at <= tick_time` nello stesso giorno UTC: la finestra mobile
+    del ranker (4h) taglierebbe il caso HOOD, in cui il segnale forte era di
+    105 min prima e quindi dentro la finestra, ma il segnale 'fan-out'
+    immediatamente successivo ne era dentro da 14 min.
+
+    NB: serve anche `trades.net_pnl` per la misura del realized salvato.
+
+    Il join NON e' `decision_id = id`: `trades.decision_id` punta alla
+    decisione di INGRESSO, mentre la decisione di uscita e' una riga
+    separata. Il match e' per `(symbol, exit_time)` (entrambi timestamptz
+    con la stessa precisione del broker). Verificato contro la tabella live:
+    tutti e 24 i `below_entry_gate` di produzione sono agganciati.
+    """
+    query = (
+        "SELECT ed.tick_time, t.symbol, t.net_pnl "
+        "FROM trades t "
+        "JOIN execution_decisions ed "
+        "  ON ed.symbol = t.symbol AND ed.tick_time = t.exit_time "
+        "WHERE ed.exit_mechanism = 'below_entry_gate' "
+        f"  AND t.exit_time >= '{since}'::timestamptz "
+        "ORDER BY ed.tick_time;"
+    )
+    res = subprocess.run(
+        ["docker", "exec", "alembic-postgres-1", "psql", "-U", "trading", "-d",
+         "trading", "-t", "-A", "-F", "|", "-c", query],
+        capture_output=True, text=True,
+    )
+    if res.returncode != 0:
+        raise SystemExit(f"Query uscite fallita: {res.stderr.strip()[:200]}")
+
+    out: list[dict] = []
+    for riga in res.stdout.splitlines():
+        if not riga.strip():
+            continue
+        p = riga.split("|", 2)
+        if len(p) < 3:
+            continue
+        tick_time = datetime.fromisoformat(p[0])
+        if tick_time.tzinfo is None:
+            tick_time = tick_time.replace(tzinfo=timezone.utc)
+        try:
+            net_pnl = float(p[2])
+        except ValueError:
+            net_pnl = 0.0
+        out.append({
+            "decision_at": tick_time,
+            "symbol": p[1],
+            "net_pnl": net_pnl,
+        })
+    return out
+
+
+def segnali_per_uscita(eventi: list[dict]) -> list[dict]:
+    """Per ogni evento di uscita, recupera i segnali del simbolo <= decision_at.
+
+    Una query unica per simbolo e' molto piu' efficiente di N query. La
+    finestra e' l'intero giorno del decision_at (in UTC), coerente con la
+    misura degli ingressi.
+    """
+    if not eventi:
+        return []
+    # Range giorni coperti dai decision_at.
+    giorni = sorted({e["decision_at"].date() for e in eventi})
+    giorno_min = min(giorni)
+    giorno_max = max(giorni) + timedelta(days=1)
+    simbuli_unici = sorted({e["symbol"] for e in eventi})
+
+    # Query: tutti i segnali di quei simboli nelle date di interesse. Poi
+    # filtriamo lato Python per generated_at <= decision_at (per uscita).
+    query = (
+        "SELECT date_trunc('day', generated_at)::date, symbol, score, confidence, "
+        "       fallback_used, "
+        "       extract(epoch from generated_at)::bigint "
+        f"FROM sentiment_signals "
+        f"WHERE generated_at >= '{giorno_min.isoformat()}'::date "
+        f"  AND generated_at < '{giorno_max.isoformat()}'::date "
+        f"  AND symbol = ANY(ARRAY[{','.join(repr(s) for s in simbuli_unici)}]) "
+        f"ORDER BY generated_at;"
+    )
+    res = subprocess.run(
+        ["docker", "exec", "alembic-postgres-1", "psql", "-U", "trading", "-d",
+         "trading", "-t", "-A", "-F", "|", "-c", query],
+        capture_output=True, text=True,
+    )
+    if res.returncode != 0:
+        raise SystemExit(f"Query segnali-uscite fallita: {res.stderr.strip()[:200]}")
+
+    # Indicizza per (giorno, simbolo) per il filtro lato uscita.
+    per_giorno_simbolo: dict[tuple[date, str], list[dict]] = defaultdict(list)
+    for riga in res.stdout.splitlines():
+        if not riga.strip():
+            continue
+        p = riga.split("|", 6)
+        if len(p) < 6:
+            continue
+        g = date.fromisoformat(p[0])
+        sym = p[1]
+        per_giorno_simbolo[(g, sym)].append({
+            "giorno": g,
+            "symbol": sym,
+            "generated_at": datetime.fromtimestamp(int(p[5]), tz=timezone.utc),
+            "score": float(p[2]),
+            "confidence": float(p[3]),
+            "fallback": p[4] == "t",
+            "fwd_1d": None, "fwd_3d": None, "fwd_5d": None,
+        })
+
+    out: list[dict] = []
+    for ev in eventi:
+        g = ev["decision_at"].date()
+        segnali = list(per_giorno_simbolo.get((g, ev["symbol"]), []))
+        ev_out = dict(ev)
+        ev_out["segnali"] = segnali
+        out.append(ev_out)
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
@@ -538,6 +796,32 @@ def main() -> int:
     print(f"Scritto: {OUT}\n")
 
     print(riepilogo_leggibile(risultato))
+
+    # ── Misura lato uscite (#169 follow-up 2026-09-01) ──────────────────────
+    uscite_raw = leggi_uscite_below_entry_gate(args.since)
+    uscite_con_segnali = segnali_per_uscita(uscite_raw)
+    uscite_eventi = costruisci_eventi_uscita(uscite_con_segnali)
+    risultato_uscite = analizza_uscite_sotto_soglia(uscite_eventi)
+    risultato_uscite["finestra"] = {
+        "since": args.since,
+        "soglia_gate": SOGLIA_GATE,
+    }
+    risultato_uscite["metodo"] = (
+        "una chiusura per evento (trades JOIN execution_decisions su decision_id "
+        "con exit_mechanism='below_entry_gate'); segnali del simbolo con "
+        "generated_at <= decision_at nello stesso giorno UTC; stesse regole e "
+        "stessa soglia 0.30 della misura ingressi. Una uscita e' 'salva' se la "
+        "candidata >= soglia (la candidata avrebbe tenuto aperto, costo non "
+        "preso). Baseline (ultimo_prod) per costruzione n_salve=0."
+    )
+
+    tmp_u = OUT_USCITE.with_suffix(".json.tmp")
+    tmp_u.write_text(json.dumps(risultato_uscite, indent=2, ensure_ascii=False,
+                                 default=str))
+    tmp_u.replace(OUT_USCITE)
+    print(f"\nScritto: {OUT_USCITE}")
+    print(f"\n{riepilogo_uscite_leggibile(risultato_uscite)}")
+
     return 0
 
 
