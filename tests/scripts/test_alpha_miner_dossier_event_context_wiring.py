@@ -100,6 +100,10 @@ def test_dossier_24_collega_benchmark_calendario_regime_e_microstruttura():
     assert out["provenienza_dati"]["event_market_context"]["version"] == (
         "event_market_context_v1"
     )
+    assert out["provenienza_dati"]["no_news_backstop"]["version"] == (
+        "no_news_backstop_v1"
+    )
+    assert out["no_news_backstop"]["population"]["zero_news"] == 0
 
     row = out["event_market_context"]["per_symbol"]["NVDA"]
     assert row["returns"]["residual_vs_spy"] == pytest.approx(0.08)
