@@ -2,13 +2,14 @@
 
 Part of #21. Closes the residual scope of #408 after the Variant A prompt fix
 (#399/#408, `bf5bef2e`, 2026-09-01) shipped in deroga. The operator's comment on
-#408 (2026-09-01T10:35Z) explicitly scoped what remains:
+#408 (2026-09-01T10:35Z) explicitly scoped what remained at that time:
 
 > "Il funnel actionability v2 e la classificazione 'secondo ordine' come
 > categoria a sé (punto 1 della tua investigation) restano da fare — non
 > deployati qui, solo il fix del prompt sottostante."
 
-This spec covers point 1 only: **characterise the class** — add an
+The funnel half was subsequently completed by #281 on 2026-09-03. This spec
+covers point 1 only: **characterise the class** — add an
 independent label for "second-order/spillover" articles, count how often it
 occurs, and measure its realised forward return. It is a measurement ticket.
 It changes no gate, threshold, prompt, or config, and is `freeze-ok` under
@@ -30,25 +31,27 @@ reality (reported as a bonus cross-tab, not a primary deliverable).
 
 New pure module: `src/analysis/second_order_news.py`.
 
-For a `news_log` row `(ticker, title)`:
+For a `news_log` row `(ticker, title, body_snippet)`:
 
 1. Look up the tagged ticker's own company name + aliases from
    `ticker_lookup` (`company_name`, `aliases[]`, keyed by `ticker`).
-2. **Self-reference check**: the headline must mention the ticker's own
+2. **Self-reference check**: one persisted text field must mention the ticker's own
    company (name, an alias, or a `"$TICKER"`/word-boundary ticker mention).
    This is what keeps the detector from overlapping with #405's fan-out /
    wrong-ticker-tag bug — e.g. "Why Is Mastercard Stock Surging?" mistagged
    onto `V` mentions no Visa entity at all, so it is correctly *not* flagged
    here (it belongs to #405, a different failure mode: wrong ticker, not
    under-scored magnitude on a correctly-tagged spillover).
-3. **Causal connector check**: the headline must contain one of a short,
+3. **Causal connector check**: that same field must contain one of a short,
    precision-biased connector list (case-insensitive, word-boundary):
    `following`, `after`, `on the back of`, `amid`, `on news of`, `thanks to`,
    `as a result of`. Deliberately excludes bare `as`/`on`, which are too
    common and would blow out false positives.
-4. **Third-party check**: in the headline text following the matched
+4. **Third-party check**: in the same field, after the matched
    connector, a *different* company's name/alias from `ticker_lookup` must
-   appear (i.e. not the ticker's own company from step 1).
+   appear (i.e. not the ticker's own company from step 1). The own-company
+   reference must precede the connector, so a provider tag on the company
+   named inside the causal clause does not become a false positive.
 5. If 2-4 all hold → classify `second_order`, recording the matched
    connector and the matched third-party ticker/company. Otherwise, the
    article is left unclassified by this detector (it makes no claim that
@@ -56,9 +59,11 @@ For a `news_log` row `(ticker, title)`:
    classifier by design: false positives are more costly here than false
    negatives, since we want confidence in what gets counted).
 
-Sanity-checked against real `news_log` rows before writing this spec:
-correctly flags all four seed headlines from #408 (ADBE/Salesforce,
-AVGO/NVIDIA, INTC/Nvidia, NOW/Salesforce — all via the `following` connector)
+Verified against the real `news_log` rows: the four quoted causal strings are
+in `body_snippet`, not `title` (whose values are generic, for example “Why Is
+Adobe Stock Surging on Thursday?”). Inspecting the two fields separately
+correctly flags all four seeds from #408 (ADBE/Salesforce, AVGO/NVIDIA,
+INTC/Nvidia, NOW/Salesforce — all via the `following` connector)
 and correctly stays silent on the MA/V "Why Is Mastercard Stock Surging?"
 and HOOD headlines from the 08-24/08-25 reports (no self-reference or no
 connector), which are fan-out/other-cause cases, not this pattern.
@@ -70,7 +75,7 @@ connector), which are fan-out/other-cause cases, not this pattern.
 - `sentiment_signals`: already carries `forward_return`, `forward_return_3d`,
   `forward_return_5d` per `news_log_id` (94-97% populated across ~9,750
   rows). Reused directly — no need to re-fetch bars from Alpaca.
-- `llm_responses.directness`: joined via `sentiment_signals.id = 
+- `llm_responses.directness`: joined via `sentiment_signals.id =
   llm_responses.signal_id`, for the bonus agreement cross-tab.
 
 Everything is read-only against existing tables. No new table, no migration,
@@ -81,10 +86,12 @@ protects.
 
 `scripts/characterize_second_order_news.py`:
 
-1. Load all `news_log` rows (ticker, title, id, fetched_at) in range.
+1. Load all `news_log` rows (ticker, title, body_snippet, id, fetched_at) in range.
 2. Load `ticker_lookup` once (company_name, aliases, ticker) for the
    self-reference / third-party checks.
-3. Run the detector per row.
+3. Run the detector on `title` and `body_snippet` separately per row, recording
+   which field produced the match; never concatenate them into a synthetic
+   sentence.
 4. For rows classified `second_order`, join to `sentiment_signals` (via
    `news_log_id`) for forward returns, and to `llm_responses` (via
    `signal_id`) for `directness`.
@@ -115,7 +122,7 @@ scripts/characterize_second_order_news.py`).
 Unit tests for the detector (`tests/analysis/test_second_order_news.py` or
 matching existing test layout):
 
-- Positive: the four seed headlines from #408, each classified
+- Positive: the four seed causal strings from #408, each classified
   `second_order` with the correct connector and third-party ticker.
 - Negative — no connector: e.g. "Why Is Mastercard Stock Surging on
   Monday?" tagged `MA` (own company, no connector) → unclassified.
@@ -140,8 +147,8 @@ evidence-JSON shape end to end on a handful of rows.
 - Verifying whether Variant A's deployed effect matches the pre-deploy
   projection — that is #453, a separate ticket with its own acceptance
   criteria, not duplicated here.
-- The "funnel actionability v2" half of the operator's comment — not part
-  of this ticket's literal point 1, left for a separate issue if wanted.
+- The "funnel actionability v2" half of the operator's comment — completed by
+  #281 and therefore not duplicated here.
 - Persisting the classification back into any live table read by the
   trading pipeline (would be a live schema change, out of scope for a
   measurement ticket and unnecessary for the stated goal).

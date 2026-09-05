@@ -1,0 +1,430 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-09-04T10:17:12.650169+00:00",
+  "window": {
+    "start": "2026-06-15T17:31:34.943915+00:00",
+    "end": "2026-09-03T19:46:07.674699+00:00"
+  },
+  "method": {
+    "classification": "self-reference + causal connector + different ticker_lookup company after the connector; precision-biased lower bound",
+    "independent_from_llm_directness": true,
+    "text_fields": [
+      "title",
+      "body_snippet"
+    ],
+    "causal_connectors": [
+      "following",
+      "after",
+      "on the back of",
+      "amid",
+      "on news of",
+      "thanks to",
+      "as a result of"
+    ],
+    "forward_return_source": "sentiment_signals (existing columns, read-only)"
+  },
+  "population": {
+    "news_rows_total": 9270,
+    "news_rows_with_known_ticker": 8364,
+    "second_order": 30,
+    "other": 8334,
+    "unknown_ticker": 906,
+    "second_order_rate": 0.003586800573888092
+  },
+  "forward_returns": {
+    "unit": "sentiment_signal",
+    "second_order": {
+      "forward_return": {
+        "n": 32,
+        "mean": 0.004442674330091034,
+        "median": 0.003526834794547567
+      },
+      "forward_return_3d": {
+        "n": 32,
+        "mean": -0.0009684765166904548,
+        "median": -0.005957234664166193
+      },
+      "forward_return_5d": {
+        "n": 32,
+        "mean": 0.010242663768104636,
+        "median": 0.009369599394250352
+      }
+    },
+    "other": {
+      "forward_return": {
+        "n": 8256,
+        "mean": -0.00045372618720359583,
+        "median": -0.0007999663172077348
+      },
+      "forward_return_3d": {
+        "n": 8049,
+        "mean": -6.251459363801119e-06,
+        "median": 0.00037425149700604654
+      },
+      "forward_return_5d": {
+        "n": 7884,
+        "mean": -0.0009464725104123718,
+        "median": -0.000879597241790097
+      }
+    }
+  },
+  "directness_agreement": {
+    "unit": "news_row",
+    "rows_with_directness": 7,
+    "spillover_labels": [
+      "competitor_readthrough",
+      "sector"
+    ],
+    "concordant": {
+      "n": 7,
+      "rate": 1.0
+    },
+    "model_response_cross_tab": {
+      "responses_with_directness": 14,
+      "spillover": {
+        "n": 10,
+        "rate": 0.7142857142857143
+      },
+      "by_bucket": {
+        "competitor_readthrough": 6,
+        "competitor_readthrough|macro": 1,
+        "customer_supplier": 2,
+        "direct": 1,
+        "sector": 4
+      }
+    }
+  },
+  "classifications": [
+    {
+      "news_log_id": 2,
+      "ticker": "MU",
+      "title": "Micron's Broadcom‑Driven Drop Never Made Sense — Dip Buyers Are Up 40%",
+      "fetched_at": "2026-06-15T17:33:05.967029+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "following",
+      "third_party_ticker": "AVGO",
+      "third_party_company": "Broadcom Inc"
+    },
+    {
+      "news_log_id": 182,
+      "ticker": "ORCL",
+      "title": "Why Is Oracle Stock Surging On Monday?",
+      "fetched_at": "2026-06-17T14:02:15.638435+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "following",
+      "third_party_ticker": "GS",
+      "third_party_company": "Goldman Sachs Group Inc"
+    },
+    {
+      "news_log_id": 1558,
+      "ticker": "PLTR",
+      "title": "Why Is Palantir Stock Surging On Wednesday?",
+      "fetched_at": "2026-07-01T21:01:46.259405+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "after",
+      "third_party_ticker": "NVDA",
+      "third_party_company": "NVIDIA Corporation"
+    },
+    {
+      "news_log_id": 1705,
+      "ticker": "META",
+      "title": "After Tesla, Samsung Eyes Meta Platforms for $6.5 Billion AI Chip Agreement: Report",
+      "fetched_at": "2026-07-03T14:16:25.354241+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "after",
+      "third_party_ticker": "TSLA",
+      "third_party_company": "Tesla Inc"
+    },
+    {
+      "news_log_id": 1862,
+      "ticker": "AVGO",
+      "title": "Broadcom Stock Climbs on Report of Apple Chip Deal Extension to 2031",
+      "fetched_at": "2026-07-06T14:19:04.622107+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "following",
+      "third_party_ticker": "AAPL",
+      "third_party_company": "Apple Inc"
+    },
+    {
+      "news_log_id": 2492,
+      "ticker": "IBM",
+      "title": "IBM Stock Drops After Report That Starbucks Is Using AI to Cut Its $400 Million Software Bill",
+      "fetched_at": "2026-07-09T14:31:12.009112+00:00",
+      "category": "second_order",
+      "text_source": "title",
+      "connector": "after",
+      "third_party_ticker": "SBUX",
+      "third_party_company": "Starbucks Corporation"
+    },
+    {
+      "news_log_id": 2679,
+      "ticker": "SBUX",
+      "title": "Starbucks Stock Rises Amid In-House Software Push",
+      "fetched_at": "2026-07-09T19:45:40.114308+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "after",
+      "third_party_ticker": "MSFT",
+      "third_party_company": "Microsoft Corporation"
+    },
+    {
+      "news_log_id": 3350,
+      "ticker": "PLTR",
+      "title": "Why Is Palantir Stock Falling on Tuesday?",
+      "fetched_at": "2026-07-14T14:30:22.309754+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "amid",
+      "third_party_ticker": "MSFT",
+      "third_party_company": "Microsoft Corporation"
+    },
+    {
+      "news_log_id": 3394,
+      "ticker": "CRM",
+      "title": "Salesforce (CRM) Stock Falls After IBM Warns of Software Weakness",
+      "fetched_at": "2026-07-14T16:00:46.399333+00:00",
+      "category": "second_order",
+      "text_source": "title",
+      "connector": "after",
+      "third_party_ticker": "IBM",
+      "third_party_company": "International Business Machines Corporation"
+    },
+    {
+      "news_log_id": 3676,
+      "ticker": "INTC",
+      "title": "What Is Going on With Intel Stock on Wednesday?",
+      "fetched_at": "2026-07-15T16:03:47.684736+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "after",
+      "third_party_ticker": "ASML",
+      "third_party_company": "ASML Holding NV"
+    },
+    {
+      "news_log_id": 3769,
+      "ticker": "MMM",
+      "title": "3M Expands AI Push with Microsoft Azure Data Center Partnership",
+      "fetched_at": "2026-07-15T18:30:11.276979+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "after",
+      "third_party_ticker": "MSFT",
+      "third_party_company": "Microsoft Corporation"
+    },
+    {
+      "news_log_id": 4259,
+      "ticker": "AAPL",
+      "title": "What Is Going On With Apple Stock On Monday?",
+      "fetched_at": "2026-07-20T16:45:13.040776+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "after",
+      "third_party_ticker": "NVDA",
+      "third_party_company": "NVIDIA Corporation"
+    },
+    {
+      "news_log_id": 4301,
+      "ticker": "AMD",
+      "title": "AMD Rises After Microsoft's Helios Win: Is Nvidia Finally Facing Real Competition?",
+      "fetched_at": "2026-07-20T17:46:06.657834+00:00",
+      "category": "second_order",
+      "text_source": "title",
+      "connector": "after",
+      "third_party_ticker": "MSFT",
+      "third_party_company": "Microsoft Corporation"
+    },
+    {
+      "news_log_id": 4423,
+      "ticker": "ADBE",
+      "title": "Why Is Adobe Stock Falling on Tuesday?",
+      "fetched_at": "2026-07-21T15:17:46.368422+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "after",
+      "third_party_ticker": "MS",
+      "third_party_company": "Morgan Stanley"
+    },
+    {
+      "news_log_id": 4498,
+      "ticker": "CRM",
+      "title": "Why Is Salesforce Stock Falling on Tuesday?",
+      "fetched_at": "2026-07-21T18:00:12.951823+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "after",
+      "third_party_ticker": "MS",
+      "third_party_company": "Morgan Stanley"
+    },
+    {
+      "news_log_id": 5474,
+      "ticker": "ADBE",
+      "title": "Adobe Stock Rises as Enterprise Software Sentiment Rebounds",
+      "fetched_at": "2026-07-28T18:46:04.024645+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "after",
+      "third_party_ticker": "IBM",
+      "third_party_company": "International Business Machines Corporation"
+    },
+    {
+      "news_log_id": 5813,
+      "ticker": "ORCL",
+      "title": "Why Is Oracle Stock Surging on Thursday?",
+      "fetched_at": "2026-07-30T17:30:45.041930+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "after",
+      "third_party_ticker": "GOOGL",
+      "third_party_company": "Alphabet Inc"
+    },
+    {
+      "news_log_id": 5919,
+      "ticker": "ORCL",
+      "title": "Why Is Oracle Stock Gaining Friday?",
+      "fetched_at": "2026-07-31T14:45:45.537473+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "amid",
+      "third_party_ticker": "GOOGL",
+      "third_party_company": "Alphabet Inc"
+    },
+    {
+      "news_log_id": 6131,
+      "ticker": "ORCL",
+      "title": "What Is Going on With Oracle Stock on Monday?",
+      "fetched_at": "2026-08-03T15:31:40.586141+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "after",
+      "third_party_ticker": "GOOGL",
+      "third_party_company": "Alphabet Inc"
+    },
+    {
+      "news_log_id": 6591,
+      "ticker": "AMD",
+      "title": "AMD Stock Hit By Musk’s Nvidia Bet: BofA Says 'Ignore the Noise'",
+      "fetched_at": "2026-08-05T17:01:24.587415+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "after",
+      "third_party_ticker": "NVDA",
+      "third_party_company": "NVIDIA Corporation"
+    },
+    {
+      "news_log_id": 7116,
+      "ticker": "MSFT",
+      "title": "Microsoft Stock Rises 2%: Upcoming Maia 300 Chip Launch Targets Reduced Nvidia Reliance",
+      "fetched_at": "2026-08-10T17:45:42.450532+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "following",
+      "third_party_ticker": "TSM",
+      "third_party_company": "Taiwan Semiconductor Manufacturing"
+    },
+    {
+      "news_log_id": 7331,
+      "ticker": "IBM",
+      "title": "IBM Lands $240 Million AI Deal with Together AI to Scale Inference",
+      "fetched_at": "2026-08-11T19:00:52.692239+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "after",
+      "third_party_ticker": "NVDA",
+      "third_party_company": "NVIDIA Corporation"
+    },
+    {
+      "news_log_id": 8281,
+      "ticker": "AVGO",
+      "title": "Broadcom Rival Marvell Surges After Google Strikes AI Chip Deal, Gets Option to Buy $12.2B Stake",
+      "fetched_at": "2026-08-19T16:00:47.151635+00:00",
+      "category": "second_order",
+      "text_source": "title",
+      "connector": "after",
+      "third_party_ticker": "GOOGL",
+      "third_party_company": "Alphabet Inc"
+    },
+    {
+      "news_log_id": 9067,
+      "ticker": "NOW",
+      "title": "ServiceNow Stock Climbs Thursday: What's Going On?",
+      "fetched_at": "2026-08-27T14:00:37.847060+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "following",
+      "third_party_ticker": "CRM",
+      "third_party_company": "Salesforce Inc"
+    },
+    {
+      "news_log_id": 9069,
+      "ticker": "AVGO",
+      "title": "What's Going On With Broadcom Stock Thursday?",
+      "fetched_at": "2026-08-27T14:00:59.093187+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "following",
+      "third_party_ticker": "NVDA",
+      "third_party_company": "NVIDIA Corporation"
+    },
+    {
+      "news_log_id": 9092,
+      "ticker": "ARM",
+      "title": "Why Is Arm Stock Surging on Thursday?",
+      "fetched_at": "2026-08-27T15:15:15.069941+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "following",
+      "third_party_ticker": "NVDA",
+      "third_party_company": "NVIDIA Corporation"
+    },
+    {
+      "news_log_id": 9120,
+      "ticker": "INTC",
+      "title": "Why Is Intel Stock Surging on Thursday?",
+      "fetched_at": "2026-08-27T16:31:56.511551+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "following",
+      "third_party_ticker": "NVDA",
+      "third_party_company": "NVIDIA Corporation"
+    },
+    {
+      "news_log_id": 9146,
+      "ticker": "NOW",
+      "title": "ServiceNow Stock Jumps on Enterprise AI Momentum",
+      "fetched_at": "2026-08-27T17:30:33.379124+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "following",
+      "third_party_ticker": "CRM",
+      "third_party_company": "Salesforce Inc"
+    },
+    {
+      "news_log_id": 9170,
+      "ticker": "ADBE",
+      "title": "Why Is Adobe Stock Surging on Thursday?",
+      "fetched_at": "2026-08-27T18:46:03.635401+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "following",
+      "third_party_ticker": "CRM",
+      "third_party_company": "Salesforce Inc"
+    },
+    {
+      "news_log_id": 9173,
+      "ticker": "MU",
+      "title": "Why Is Micron Stock Falling on Thursday?",
+      "fetched_at": "2026-08-27T18:47:06.863294+00:00",
+      "category": "second_order",
+      "text_source": "body_snippet",
+      "connector": "amid",
+      "third_party_ticker": "NVDA",
+      "third_party_company": "NVIDIA Corporation"
+    }
+  ],
+  "sintesi": "Il detector deterministico ha classificato 30 su 8364 righe news con ticker noto come secondo ordine (0.36%). Il forward return medio a 1 giorno e' 0.44% sui segnali classificati e -0.05% sugli altri; almeno un directness concorda nei bucket competitor_readthrough/sector in 7 su 7 articoli con il campo disponibile (100.00%). Il confronto e' descrittivo, non causale; l'assenza di match significa non classificato, non notizia diretta."
+}
