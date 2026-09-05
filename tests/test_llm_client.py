@@ -166,6 +166,48 @@ class TestOllamaCloudClients:
         assert result.polarity == pytest.approx(0.7)
         assert result.confidence == pytest.approx(0.8)
 
+    @pytest.mark.asyncio
+    async def test_ollama_client_sends_json_schema_format_and_zero_temperature(self, monkeypatch):
+        """#452: the request body must constrain output via `format` (JSON
+        schema) and pin `options.temperature=0` — Ollama's own structured-
+        outputs guidance, not applied today. Without it, `parse_json_response`
+        is the only thing standing between the model and garbage output."""
+        from contextlib import asynccontextmanager
+        from unittest.mock import AsyncMock, MagicMock, patch
+        import src.llm.client as client_mod
+        import src.config as cfg_mod
+
+        patched_config = cfg_mod.config.model_copy(update={"OLLAMA_API_KEY": "test-key"})
+        monkeypatch.setattr(client_mod, "config", patched_config)
+
+        @asynccontextmanager
+        async def _noop_acquire():
+            yield
+        monkeypatch.setattr(client_mod._ollama_sem, "acquire", _noop_acquire)
+
+        fake_response_data = {
+            "message": {"content": '{"polarity": 0.1, "confidence": 0.2, "reasoning": "x"}'}
+        }
+        mock_resp = AsyncMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json = AsyncMock(return_value=fake_response_data)
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.post = MagicMock(return_value=mock_resp)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        from src.models.news import LLMSentimentOutput
+        with patch("src.llm.client.aiohttp.ClientSession", return_value=mock_session):
+            await OllamaGlmClient().complete("test", LLMSentimentOutput)
+
+        _, kwargs = mock_session.post.call_args
+        payload = kwargs["json"]
+        assert payload["format"] == LLMSentimentOutput.model_json_schema()
+        assert payload["options"]["temperature"] == 0
+
 
 class TestEnsembleAggregator:
     """Test ensemble aggregation logic."""
