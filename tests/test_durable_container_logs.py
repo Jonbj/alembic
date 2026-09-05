@@ -13,7 +13,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 COMPOSE = ROOT / "docker-compose.yml"
 RUNNER = ROOT / "scripts" / "run_with_durable_logs.py"
-SERVICES = ("api", "worker", "worker-inference", "beat")
+SERVICES = ("api", "worker", "worker-inference", "worker-news-stream", "beat")
 
 
 def test_i_servizi_applicativi_scrivono_sul_log_host_persistente():

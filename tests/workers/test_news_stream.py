@@ -1,9 +1,10 @@
 """Tests for P2-D: AlpacaNewsStreamConnector and news_stream worker."""
+
 from __future__ import annotations
 
+import asyncio
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 
 # ── AlpacaNewsStreamConnector ─────────────────────────────────────────────────
@@ -95,6 +96,112 @@ def test_run_news_stream_starts_connector():
     mock_cls.assert_called_once()
     mock_connector.run.assert_called_once()
     assert result == {"status": "stream_ended"}
+
+
+def test_stream_event_uses_rest_ingestion_contract_and_triggers_inference():
+    from src.workers.news_stream import _on_news
+
+    article = {
+        "id": 123,
+        "headline": "Apple raises guidance",
+        "summary": "Demand remains strong.",
+        "content": "",
+        "url": "https://example.test/apple-guidance",
+        # alpaca-py model_dump() emits datetime, while the REST API emits text.
+        "created_at": datetime(2026, 9, 4, 14, 3, tzinfo=UTC),
+        "symbols": ["AAPL"],
+    }
+
+    with patch("src.workers.news_stream.config") as mock_config, \
+         patch("src.workers.news_stream.Redis") as mock_redis_cls, \
+         patch("src.workers.news_stream.Deduplicator") as mock_dedup_cls, \
+         patch("src.workers.news_stream._process_alpaca_items") as mock_process, \
+         patch("src.workers.news_stream._persist_ingestion_observability") as mock_persist, \
+         patch("src.workers.news_stream.app.send_task") as mock_send_task:
+        mock_config.REDIS_URL = "redis://redis:6379/0"
+        mock_config.WATCHLIST_SYMBOLS = ["AAPL"]
+        mock_redis = mock_redis_cls.from_url.return_value
+        mock_dedup = mock_dedup_cls.return_value
+        mock_process.return_value = {
+            "fetched": 1,
+            "tickers_found": 1,
+            "discarded": 0,
+            "queued": 1,
+            "duplicates": 0,
+        }
+
+        asyncio.run(_on_news(article))
+
+    items, dedup, redis = mock_process.call_args.args
+    assert len(items) == 1
+    assert items[0].id == "alpaca:123"
+    assert items[0].source == "alpaca_benzinga"
+    assert items[0].asset_tags == ["AAPL"]
+    assert items[0].extraction_method == "source_metadata"
+    assert items[0].timestamp == article["created_at"]
+    assert dedup is mock_dedup
+    assert redis is mock_redis
+    assert mock_process.call_args.kwargs["discard_rows"] == []
+    mock_persist.assert_called_once_with(
+        "alpaca_benzinga",
+        {
+            "fetched": 1,
+            "tickers_found": 1,
+            "discarded": 0,
+            "queued": 1,
+            "duplicates": 0,
+        },
+        [],
+    )
+    mock_send_task.assert_called_once_with(
+        "src.workers.sentiment.run_sentiment_worker", queue="inference"
+    )
+    mock_redis.close.assert_called_once()
+
+
+def test_duplicate_stream_event_is_measured_without_triggering_inference():
+    from src.workers.news_stream import _on_news
+
+    article = {
+        "id": 123,
+        "headline": "Apple raises guidance",
+        "summary": "Demand remains strong.",
+        "url": "https://example.test/apple-guidance",
+        "created_at": "2026-09-04T14:03:00Z",
+        "symbols": ["AAPL"],
+    }
+
+    with patch("src.workers.news_stream.config") as mock_config, \
+         patch("src.workers.news_stream.Redis") as mock_redis_cls, \
+         patch("src.workers.news_stream.Deduplicator"), \
+         patch("src.workers.news_stream._process_alpaca_items") as mock_process, \
+         patch("src.workers.news_stream._persist_ingestion_observability") as mock_persist, \
+         patch("src.workers.news_stream.app.send_task") as mock_send_task:
+        mock_config.REDIS_URL = "redis://redis:6379/0"
+        mock_config.WATCHLIST_SYMBOLS = ["AAPL"]
+        mock_redis = mock_redis_cls.from_url.return_value
+
+        def duplicate(_items, _dedup, _redis, *, discard_rows):
+            discard_rows.append({"discarded_reason": "duplicate_id"})
+            return {
+                "fetched": 1,
+                "tickers_found": 1,
+                "discarded": 0,
+                "queued": 0,
+                "duplicates": 1,
+            }
+
+        mock_process.side_effect = duplicate
+
+        asyncio.run(_on_news(article))
+
+    mock_redis.rpush.assert_not_called()
+    stats = mock_persist.call_args.args[1]
+    discards = mock_persist.call_args.args[2]
+    assert stats["duplicates"] == 1
+    assert discards[0]["discarded_reason"] == "duplicate_id"
+    mock_send_task.assert_not_called()
+    mock_redis.close.assert_called_once()
 
 
 # ── P2-A: Bracket order configuration ────────────────────────────────────────

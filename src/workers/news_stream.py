@@ -4,29 +4,41 @@ Connects to the Alpaca news WebSocket and pipes real-time articles into the
 ingestion + sentiment pipeline, reducing news→signal latency from minutes
 (REST polling every 15 min) to < 1 second.
 
-How to run (dedicated long-lived process):
-    celery -A src.workers.celery_app worker --loglevel=info -Q news_stream -c 1
-
-The task `run_news_stream` is long-lived. Use a dedicated queue with concurrency=1.
-
-Alternatively, standalone mode (for testing):
+How to run (dedicated long-lived process, as deployed by Docker Compose):
     python -m src.workers.news_stream
+
+The Celery task `run_news_stream` remains available for installations that use
+a dedicated `news_stream` queue with concurrency=1. Do not run it on a shared
+worker: the task blocks for the lifetime of the WebSocket connection.
 """
 
 import logging
 
+from redis import Redis
+
+from src.config import config
+from src.connectors.alpaca_news import AlpacaNewsConnector
+from src.connectors.deduplicator import Deduplicator
 from src.workers.celery_app import app
 
 log = logging.getLogger(__name__)
 
 
-async def _on_news(article) -> None:
-    """Callback: persist article to DB then trigger sentiment worker."""
-    from datetime import datetime, timezone
+def _process_alpaca_items(*args, **kwargs):
+    from src.workers.ingestion import _process_alpaca_items as process
 
-    from src.models.news import NewsItem
-    from src.store.pg_store import PostgreSQLStore
-    from src.workers.sentiment import run_sentiment_worker
+    return process(*args, **kwargs)
+
+
+def _persist_ingestion_observability(*args, **kwargs) -> None:
+    from src.workers.ingestion import _persist_ingestion_observability as persist
+
+    persist(*args, **kwargs)
+
+
+async def _on_news(article) -> None:
+    """Callback: apply the REST ingestion contract, then trigger inference."""
+    redis_client = None
 
     try:
         if hasattr(article, "model_dump"):
@@ -36,37 +48,40 @@ async def _on_news(article) -> None:
         else:
             data = dict(article)
 
-        headline = data.get("headline", "")
-        url = data.get("url", "")
-        summary = data.get("summary", "")
-        symbols = data.get("symbols", [])
-        created_at = data.get("created_at") or datetime.now(timezone.utc)
+        parser = AlpacaNewsConnector(
+            api_key="",
+            api_secret="",
+            symbols=list(config.WATCHLIST_SYMBOLS or []),
+        )
+        item = parser._parse_article(data)
+        if item is None:
+            log.debug("News stream discarded article without usable text")
+            return
 
-        log.info("News stream: %s [%s]", headline[:60], symbols)
+        log.info("News stream: %s [%s]", item.title[:60], item.asset_tags)
+        redis_client = Redis.from_url(config.REDIS_URL)
+        discard_rows: list[dict] = []
+        stats = _process_alpaca_items(
+            [item],
+            Deduplicator(redis_client),
+            redis_client,
+            discard_rows=discard_rows,
+        )
+        _persist_ingestion_observability("alpaca_benzinga", stats, discard_rows)
 
-        # Persist to news_log for each associated ticker
-        article_id = str(data.get("id", "")) or url or headline[:64]
-        pg = PostgreSQLStore()
-        try:
-            for sym in symbols:
-                item = NewsItem(
-                    id=f"{article_id}:{sym}",
-                    title=headline,
-                    url=url or f"alpaca-stream:{article_id}",
-                    source="alpaca_stream",
-                    body=summary or headline,
-                    timestamp=created_at,
-                )
-                pg.log_news_item(item, ticker=sym)
-        finally:
-            pg.close()
-
-        # Trigger sentiment worker immediately (processes all recent unscored news).
-        run_sentiment_worker.delay()
-        log.debug("News stream triggered sentiment for %s", symbols)
+        if stats["queued"]:
+            # The stream process never loads FinBERT/Ollama: inference remains
+            # isolated on worker-inference, as in the periodic REST path.
+            app.send_task(
+                "src.workers.sentiment.run_sentiment_worker", queue="inference"
+            )
+            log.debug("News stream triggered sentiment for %s", item.asset_tags)
 
     except Exception as exc:
         log.warning("News stream handler error: %s", exc)
+    finally:
+        if redis_client is not None:
+            redis_client.close()
 
 
 @app.task(name="src.workers.news_stream.run_news_stream", bind=True,
@@ -103,7 +118,6 @@ def run_news_stream(self) -> dict:
 
 
 if __name__ == "__main__":
-    import asyncio
     import logging as _logging
 
     from src.config import config
