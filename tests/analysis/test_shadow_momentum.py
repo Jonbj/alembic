@@ -107,6 +107,60 @@ def test_momentum_nullo_o_negativo_produce_astensione():
     assert [row["intent_shadow"] for row in rows] == ["ABSTAIN", "ABSTAIN"]
 
 
+def test_manifest_usa_la_classificazione_dei_report_non_il_nome_nativo_dossier():
+    history = [
+        _dossier(f"2026-08-{day}", {"AAA": 0.01, "BBB": 0.01})
+        for day in ("10", "11", "12", "13", "14")
+    ]
+    event = _dossier(
+        "2026-08-17",
+        {"AAA": 0.04, "BBB": 0.04},
+        (
+            _candidate("AAA", "BELOW_GATE", 25.0),
+            _candidate("BBB", "BELOW_GATE", 30.0),
+        ),
+    )
+    manifest = [
+        {
+            "data": "2026-08-17",
+            "symbol": "AAA",
+            "causa": "THIN_NEUTRAL",
+            "source": "docs/ALPHA_MISS_REPORT_2026-08-17.md",
+        }
+    ]
+
+    rows = build_observations(
+        [*history, event],
+        "2026-08-17",
+        "2026-08-27",
+        sample_manifest=manifest,
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["causa"] == "THIN_NEUTRAL"
+    assert rows[0]["dossier_causa"] == "BELOW_GATE"
+    assert rows[0]["classification_source"].endswith("2026-08-17.md")
+
+
+def test_manifest_con_riga_assente_dal_dossier_fallisce_esplicitamente():
+    manifest = [
+        {
+            "data": "2026-08-17",
+            "symbol": "MISSING",
+            "causa": "NO_NEWS",
+            "source": "report.md",
+        }
+    ]
+
+    with pytest.raises(ValueError, match="manifest rows not found"):
+        build_observations(
+            [_dossier("2026-08-17", {}, ())],
+            "2026-08-17",
+            "2026-08-27",
+            sample_manifest=manifest,
+        )
+
+
 def test_sintesi_separa_opportunita_catturabile_da_pnl_e_dichiara_n():
     observations = [
         {

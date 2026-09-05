@@ -44,6 +44,7 @@ def build_observations(
     dossiers: Iterable[dict[str, Any]],
     start_date: str,
     end_date: str,
+    sample_manifest: Iterable[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Estrae il campione e calcola il segnale usando solo le sedute precedenti."""
     ordered = sorted(dossiers, key=lambda dossier: str(dossier.get("data") or ""))
@@ -51,7 +52,19 @@ def build_observations(
     if len(dates) != len(set(dates)):
         raise ValueError("duplicate dossier date")
 
+    manifest_by_key: dict[tuple[str, str], dict[str, Any]] | None = None
+    if sample_manifest is not None:
+        manifest_by_key = {}
+        for manifest_row in sample_manifest:
+            key = (str(manifest_row.get("data") or ""), str(manifest_row.get("symbol") or ""))
+            if not all(key) or manifest_row.get("causa") not in TARGET_CAUSES:
+                raise ValueError(f"invalid sample manifest row: {manifest_row!r}")
+            if key in manifest_by_key:
+                raise ValueError(f"duplicate sample manifest row: {key!r}")
+            manifest_by_key[key] = manifest_row
+
     observations: list[dict[str, Any]] = []
+    seen_manifest_keys: set[tuple[str, str]] = set()
     for index, dossier in enumerate(ordered):
         event_date = dates[index]
         if not start_date <= event_date <= end_date:
@@ -60,11 +73,19 @@ def build_observations(
         history = ordered[max(0, index - LOOKBACK_SESSIONS):index]
         history_dates = [str(item.get("data") or "") for item in history]
         for candidate in dossier.get("candidati_miss") or []:
-            cause = candidate.get("causa")
-            if cause not in TARGET_CAUSES:
-                continue
-
             symbol = str(candidate.get("symbol") or "")
+            key = (event_date, symbol)
+            manifest_row = manifest_by_key.get(key) if manifest_by_key is not None else None
+            if manifest_by_key is not None:
+                if manifest_row is None:
+                    continue
+                cause = manifest_row["causa"]
+                seen_manifest_keys.add(key)
+            else:
+                cause = candidate.get("causa")
+                if cause not in TARGET_CAUSES:
+                    continue
+
             momentum = _momentum_5d(history, symbol)
             intent = (
                 "NOT_EVALUABLE"
@@ -88,6 +109,10 @@ def build_observations(
                     "data": event_date,
                     "symbol": symbol,
                     "causa": cause,
+                    "dossier_causa": candidate.get("causa"),
+                    "classification_source": (
+                        manifest_row.get("source") if manifest_row is not None else "dossier.causa"
+                    ),
                     "history_dates": history_dates,
                     "momentum_5d": momentum,
                     "intent_shadow": intent,
@@ -97,6 +122,9 @@ def build_observations(
                     "missingness": missingness,
                 }
             )
+    if manifest_by_key is not None and seen_manifest_keys != set(manifest_by_key):
+        missing = sorted(set(manifest_by_key) - seen_manifest_keys)
+        raise ValueError(f"manifest rows not found in dossiers: {missing!r}")
     return observations
 
 

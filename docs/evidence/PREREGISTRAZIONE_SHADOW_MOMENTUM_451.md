@@ -11,12 +11,22 @@ La misura e' descrittiva: tra i candidati alpha-miss gia' classificati
 stata associata a un semplice segnale di prezzo noto prima della seduta del
 mover?
 
-Il campione e' costituito da tutte le righe `candidati_miss` dei dossier
-versionati dal 2026-08-17 al 2026-08-27 inclusi (Week 34 e Week 35 disponibili
-nel repository) la cui `causa` e' esattamente `NO_NEWS` o `THIN_NEUTRAL`.
-Nessun ticker o giorno verra' selezionato in base al risultato. Le righe senza
-storia completa restano nel conteggio del campione ma sono dichiarate non
-valutabili dal segnale.
+Il campione e' costituito dalle 38 righe classificate `NO_NEWS` o
+`THIN_NEUTRAL` nei report di Week 34 (2026-08-17..20) e Week 35
+(2026-08-24..27), materializzate nel manifest
+`docs/evidence/SHADOW_MOMENTUM_451_SAMPLE.json`. Nessun ticker o giorno viene
+selezionato in base al risultato. Le righe senza storia completa restano nel
+conteggio del campione ma sono dichiarate non valutabili dal segnale.
+
+**Errata di estrazione registrata prima del run definitivo.** Il primo dry-run
+ha mostrato che il filtro letterale descritto nel commit iniziale `acec644` era
+impossibile: il dossier usa una tassonomia nativa diversa (`BELOW_GATE`,
+`OFF_TOPIC_NON_DECIDIBILE`, ecc.), mentre i report settimanali da cui nasce
+#451 pubblicano `THIN_NEUTRAL`; inoltre Week 34 si chiude il 20 agosto, non il
+21. Il manifest copia le classificazioni gia' pubblicate nei report e conserva
+anche la causa nativa del dossier nell'output. Questa correzione cambia soltanto
+l'estrazione della popolazione da 22 righe solo `NO_NEWS` alle 38 richieste
+dall'issue: lookback, regola del segnale, outcome e bootstrap restano invariati.
 
 ## Segnale fissato
 

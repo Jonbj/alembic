@@ -27,10 +27,26 @@ def test_cli_pubblica_specifica_provenienza_sintesi_e_righe(tmp_path, capsys):
         ],
     }
     (tmp_path / "2026-08-17.json").write_text(json.dumps(event))
+    manifest_dir = tmp_path / "manifest"
+    manifest_dir.mkdir()
+    manifest_path = manifest_dir / "sample.json"
+    manifest_path.write_text(
+        json.dumps(
+            [
+                {
+                    "data": "2026-08-17",
+                    "symbol": "AAA",
+                    "causa": "NO_NEWS",
+                    "source": "docs/ALPHA_MISS_REPORT_2026-08-17.md",
+                }
+            ]
+        )
+    )
 
     exit_code = analyze_shadow_momentum.main(
         [
             "--dossier-dir", str(tmp_path),
+            "--sample-manifest", str(manifest_path),
             "--start", "2026-08-17",
             "--end", "2026-08-17",
             "--bootstrap-resamples", "20",

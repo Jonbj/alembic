@@ -28,6 +28,7 @@ from src.analysis.shadow_momentum import (  # noqa: E402
 )
 
 DEFAULT_DOSSIER_DIR = Path("docs/evidence/dossier")
+DEFAULT_SAMPLE_MANIFEST = Path("docs/evidence/SHADOW_MOMENTUM_451_SAMPLE.json")
 DEFAULT_START = "2026-08-17"
 DEFAULT_END = "2026-08-27"
 PREREGISTRATION = "docs/evidence/PREREGISTRAZIONE_SHADOW_MOMENTUM_451.md"
@@ -36,6 +37,7 @@ PREREGISTRATION = "docs/evidence/PREREGISTRAZIONE_SHADOW_MOMENTUM_451.md"
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dossier-dir", type=Path, default=DEFAULT_DOSSIER_DIR)
+    parser.add_argument("--sample-manifest", type=Path, default=DEFAULT_SAMPLE_MANIFEST)
     parser.add_argument("--start", default=DEFAULT_START)
     parser.add_argument("--end", default=DEFAULT_END)
     parser.add_argument(
@@ -61,15 +63,32 @@ def _load_dossiers(directory: Path) -> tuple[list[dict[str, Any]], dict[str, str
     return dossiers, hashes
 
 
+def _load_sample_manifest(path: Path) -> tuple[list[dict[str, Any]], str]:
+    raw = path.read_bytes()
+    payload = json.loads(raw)
+    rows = payload.get("rows") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+        raise ValueError(f"sample manifest non valido: {path}")
+    return rows, hashlib.sha256(raw).hexdigest()
+
+
 def _build_output(
     directory: Path,
     dossiers: list[dict[str, Any]],
     hashes: dict[str, str],
+    sample_manifest_path: Path,
+    sample_manifest: list[dict[str, Any]],
+    sample_manifest_hash: str,
     start: str,
     end: str,
     n_bootstrap: int,
 ) -> dict[str, Any]:
-    observations = build_observations(dossiers, start, end)
+    observations = build_observations(
+        dossiers,
+        start,
+        end,
+        sample_manifest=sample_manifest,
+    )
     return {
         "analysis_version": ANALYSIS_VERSION,
         "specification": {
@@ -93,6 +112,9 @@ def _build_output(
             "dossier_count": len(dossiers),
             "dossier_dates": sorted(str(item["data"]) for item in dossiers),
             "sha256": hashes,
+            "sample_manifest": str(sample_manifest_path),
+            "sample_manifest_sha256": sample_manifest_hash,
+            "sample_manifest_rows": len(sample_manifest),
         },
         "summary": summarize_observations(observations, n_bootstrap=n_bootstrap),
         "observations": observations,
@@ -113,10 +135,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("--bootstrap-resamples deve essere positivo")
 
     dossiers, hashes = _load_dossiers(args.dossier_dir)
+    sample_manifest, sample_manifest_hash = _load_sample_manifest(args.sample_manifest)
     output = _build_output(
         args.dossier_dir,
         dossiers,
         hashes,
+        args.sample_manifest,
+        sample_manifest,
+        sample_manifest_hash,
         args.start,
         args.end,
         args.bootstrap_resamples,
