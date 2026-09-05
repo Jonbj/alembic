@@ -88,9 +88,9 @@ def aggrega_deriva(righe: Iterable[Mapping]) -> dict:
             continue
         verdetto = classifica_riga(directness, event_type, risk_flags)
         campione.append(verdetto)
-        if verdetto["directness_invalido"]:
+        if verdetto["directness_invalido"] and directness is not None:
             valori_directness_invalidi.add(directness)
-        if verdetto["event_type_invalido"]:
+        if verdetto["event_type_invalido"] and event_type is not None:
             valori_event_type_invalidi.add(event_type)
         valori_risk_flags_invalidi.update(verdetto["risk_flags_invalidi"])
 

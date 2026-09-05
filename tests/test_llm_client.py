@@ -173,7 +173,7 @@ class TestOllamaCloudClients:
         outputs guidance, not applied today. Without it, `parse_json_response`
         is the only thing standing between the model and garbage output."""
         from contextlib import asynccontextmanager
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import AsyncMock
         import src.llm.client as client_mod
         import src.config as cfg_mod
 
@@ -199,7 +199,6 @@ class TestOllamaCloudClients:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
 
-        from src.models.news import LLMSentimentOutput
         with patch("src.llm.client.aiohttp.ClientSession", return_value=mock_session):
             await OllamaGlmClient().complete("test", LLMSentimentOutput)
 
