@@ -4,7 +4,7 @@ import asyncio
 import html
 import re
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from xml.etree import ElementTree
 
 import aiohttp
@@ -122,9 +122,9 @@ class SECEdgarConnector(NewsConnector):
 
             raw_updated = entry.findtext(f"{_ATOM}updated", default="")
             try:
-                timestamp = datetime.fromisoformat(raw_updated.replace("Z", "+00:00"))
+                timestamp = datetime.fromisoformat(raw_updated)
             except (TypeError, ValueError):
-                timestamp = datetime.now(timezone.utc)
+                timestamp = datetime.now(UTC)
 
             try:
                 clean_title = sanitize_text(raw_title)

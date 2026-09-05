@@ -129,7 +129,7 @@ class SecCompanyTickers:
         raw_cik = str(cik).strip()
         if not raw_cik.isdigit():
             return []
-        return list(self._cik_to_tickers.get(raw_cik.zfill(10), []))
+        return sorted(self._cik_to_tickers.get(raw_cik.zfill(10), []))
 
     def confirms(self, ticker: str, name: str | None = None) -> bool:
         """True if SEC knows this ticker and (if a name is given) it maps to it."""

@@ -1,5 +1,5 @@
 """Read-only SEC EDGAR shadow report tests."""
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from scripts.shadow_sec_edgar import summarize_shadow
 from src.models.news import NewsItem
@@ -9,7 +9,7 @@ def _item(item_id: str, day: int, title: str, tickers: list[str]) -> NewsItem:
     return NewsItem(
         id=item_id,
         source="sec_edgar",
-        timestamp=datetime(2026, 9, day, 14, tzinfo=timezone.utc),
+        timestamp=datetime(2026, 9, day, 14, tzinfo=UTC),
         title=title,
         body="Filing summary",
         url=f"https://www.sec.gov/Archives/{item_id}",

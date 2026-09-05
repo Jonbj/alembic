@@ -1,21 +1,18 @@
 """Tests for SEC EDGAR ingestion worker."""
-import asyncio
-import json
-import pytest
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.models.news import NewsItem
-from datetime import datetime, timezone
 
 
-def _make_edgar_item(ticker: str, id_: str = None) -> NewsItem:
+def _make_edgar_item(ticker: str, id_: str | None = None) -> NewsItem:
     return NewsItem(
         id=id_ or f"edgar:{ticker}:8-K-2026-06-16",
         source="sec_edgar",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         title=f"{ticker} — 8-K",
         body="Quarterly earnings report",
-        url=f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001234",
+        url="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001234",
         language="en",
         asset_tags=[ticker],
     )
@@ -77,7 +74,7 @@ def test_sec_edgar_worker_skips_item_with_no_ticker():
     item_no_ticker = NewsItem(
         id="edgar:no-ticker",
         source="sec_edgar",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         title="Unknown Corp — 8-K",
         body="Filing body",
         url="https://www.sec.gov",

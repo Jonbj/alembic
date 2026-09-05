@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.connectors.sec_edgar import SECEdgarConnector
 
-
 # Entry captured from the official Latest Filings Atom feed on 2026-09-05.
 _LIVE_8K_ATOM = b"""<?xml version="1.0" encoding="ISO-8859-1" ?>
 <feed xmlns="http://www.w3.org/2005/Atom">

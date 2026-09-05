@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Measure the corrected SEC EDGAR connector without touching the live pipeline.
 
 The command only reads the public SEC Latest Filings feeds and company_tickers
@@ -17,7 +16,7 @@ import argparse
 import asyncio
 import json
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.config import config
 from src.connectors.sec_edgar import SECEdgarConnector
@@ -95,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
         set(config.WATCHLIST_SYMBOLS or []),
         audit_limit=args.audit_limit,
     )
-    report["sampled_at"] = datetime.now(timezone.utc).isoformat()
+    report["sampled_at"] = datetime.now(UTC).isoformat()
     report["sample_limit"] = args.max_results
     print(json.dumps(report, indent=2, sort_keys=True))
     return 0 if items else 1
