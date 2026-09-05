@@ -774,6 +774,13 @@ class OllamaCloudClient(LLMClient):
             "model": self.model_id,
             "messages": [{"role": "user", "content": prompt}],
             "stream": False,
+            # #452: constrain output to the schema's structure (Ollama structured
+            # outputs, ollama.com/blog/structured-outputs) and pin temperature to
+            # 0 — without these, parsing relies entirely on the prompt's textual
+            # "respond ONLY with valid JSON" instruction and parse_json_response's
+            # brace-boundary heuristic.
+            "format": response_schema.model_json_schema(),
+            "options": {"temperature": 0},
         }
         timeout = aiohttp.ClientTimeout(total=self._OLLAMA_TIMEOUT)
 

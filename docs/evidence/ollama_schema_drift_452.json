@@ -1,0 +1,107 @@
+{
+  "generato_il": "2026-09-05T10:00:27.588615+00:00",
+  "issue": "#452",
+  "finestra": {
+    "since": "2026-08-26"
+  },
+  "metodo": "confronto esatto (case-sensitive, nessuna normalizzazione) contro l'insieme di valori dichiarato nel prompt DK-CoT per directness, event_type e risk_flags; una riga senza nessuno dei tre campi arricchiti e' fuori campione, non conta ne' come deriva ne' come pulita.",
+  "nota_parse_fail": "llm_responses contiene solo le chiamate riuscite per costruzione (un fallimento totale di parsing/validazione non viene mai persistito, solo loggato in run_ensemble_query e non sopravvive al riavvio del container). Questa evidenza misura la deriva sull'enum tra le chiamate riuscite, non il tasso di parse-fail totale della coppia live.",
+  "sintesi": {
+    "n_campione": 1574,
+    "directness": {
+      "n_invalidi": 5,
+      "tasso": 0.0031766200762388818,
+      "valori_osservati": [
+        "competitor_readthrough|macro",
+        "indirect",
+        "product",
+        "supplier_readthrough",
+        "uncl​ear"
+      ]
+    },
+    "event_type": {
+      "n_invalidi": 10,
+      "tasso": 0.0063532401524777635,
+      "valori_osservati": [
+        "earnings|guidance",
+        "sector"
+      ]
+    },
+    "risk_flags": {
+      "n_righe_con_flag_invalido": 4,
+      "tasso": 0.0025412960609911056,
+      "valori_osservati": [
+        "ambiguo_entity",
+        "ambiguou_entity",
+        "amplechance_already_priced_in",
+        "whether already_priced_in"
+      ]
+    },
+    "riga_in_deriva": {
+      "n": 19,
+      "tasso": 0.01207115628970775
+    }
+  },
+  "per_modello": {
+    "glm-5.2:cloud": {
+      "n_campione": 784,
+      "directness": {
+        "n_invalidi": 0,
+        "tasso": 0.0,
+        "valori_osservati": []
+      },
+      "event_type": {
+        "n_invalidi": 1,
+        "tasso": 0.0012755102040816326,
+        "valori_osservati": [
+          "sector"
+        ]
+      },
+      "risk_flags": {
+        "n_righe_con_flag_invalido": 0,
+        "tasso": 0.0,
+        "valori_osservati": []
+      },
+      "riga_in_deriva": {
+        "n": 1,
+        "tasso": 0.0012755102040816326
+      }
+    },
+    "gpt-oss:20b-cloud": {
+      "n_campione": 790,
+      "directness": {
+        "n_invalidi": 5,
+        "tasso": 0.006329113924050633,
+        "valori_osservati": [
+          "competitor_readthrough|macro",
+          "indirect",
+          "product",
+          "supplier_readthrough",
+          "uncl​ear"
+        ]
+      },
+      "event_type": {
+        "n_invalidi": 9,
+        "tasso": 0.01139240506329114,
+        "valori_osservati": [
+          "earnings|guidance",
+          "sector"
+        ]
+      },
+      "risk_flags": {
+        "n_righe_con_flag_invalido": 4,
+        "tasso": 0.005063291139240506,
+        "valori_osservati": [
+          "ambiguo_entity",
+          "ambiguou_entity",
+          "amplechance_already_priced_in",
+          "whether already_priced_in"
+        ]
+      },
+      "riga_in_deriva": {
+        "n": 18,
+        "tasso": 0.02278481012658228
+      }
+    }
+  }
+}
