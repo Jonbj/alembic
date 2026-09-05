@@ -1,6 +1,8 @@
 """Tests for P2-D: AlpacaNewsStreamConnector and news_stream worker."""
 from __future__ import annotations
 
+import asyncio
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -95,6 +97,89 @@ def test_run_news_stream_starts_connector():
     mock_cls.assert_called_once()
     mock_connector.run.assert_called_once()
     assert result == {"status": "stream_ended"}
+
+
+def test_stream_event_uses_rest_ingestion_contract_and_triggers_inference():
+    from src.workers.news_stream import _on_news
+
+    article = {
+        "id": 123,
+        "headline": "Apple raises guidance",
+        "summary": "Demand remains strong.",
+        "content": "",
+        "url": "https://example.test/apple-guidance",
+        "created_at": "2026-09-04T14:03:00Z",
+        "symbols": ["AAPL"],
+    }
+
+    with patch("src.workers.news_stream.config") as mock_config, \
+         patch("src.workers.news_stream.Redis") as mock_redis_cls, \
+         patch("src.workers.news_stream.Deduplicator") as mock_dedup_cls, \
+         patch("src.workers.news_stream._persist_ingestion_observability") as mock_persist, \
+         patch("src.workers.news_stream.run_sentiment_worker") as mock_sentiment:
+        mock_config.REDIS_URL = "redis://redis:6379/0"
+        mock_config.WATCHLIST_SYMBOLS = ["AAPL"]
+        mock_redis = mock_redis_cls.from_url.return_value
+        mock_dedup = mock_dedup_cls.return_value
+        mock_dedup.is_duplicate_by_id.return_value = False
+        mock_dedup.is_duplicate_content_symbol.return_value = False
+
+        asyncio.run(_on_news(article))
+
+    payload = json.loads(mock_redis.rpush.call_args.args[1])
+    assert mock_redis.rpush.call_args.args[0] == "news:queue"
+    assert payload["id"] == "alpaca:123:AAPL"
+    assert payload["source"] == "alpaca_benzinga"
+    assert payload["asset_tags"] == ["AAPL"]
+    assert payload["extraction_method"] == "source_metadata"
+    assert payload["raw_ingested_at"] is not None
+    mock_persist.assert_called_once_with(
+        "alpaca_benzinga",
+        {
+            "fetched": 1,
+            "tickers_found": 1,
+            "discarded": 0,
+            "queued": 1,
+            "duplicates": 0,
+        },
+        [],
+    )
+    mock_sentiment.apply_async.assert_called_once_with(queue="inference")
+    mock_redis.close.assert_called_once()
+
+
+def test_duplicate_stream_event_is_measured_without_triggering_inference():
+    from src.workers.news_stream import _on_news
+
+    article = {
+        "id": 123,
+        "headline": "Apple raises guidance",
+        "summary": "Demand remains strong.",
+        "url": "https://example.test/apple-guidance",
+        "created_at": "2026-09-04T14:03:00Z",
+        "symbols": ["AAPL"],
+    }
+
+    with patch("src.workers.news_stream.config") as mock_config, \
+         patch("src.workers.news_stream.Redis") as mock_redis_cls, \
+         patch("src.workers.news_stream.Deduplicator") as mock_dedup_cls, \
+         patch("src.workers.news_stream._persist_ingestion_observability") as mock_persist, \
+         patch("src.workers.news_stream.run_sentiment_worker") as mock_sentiment:
+        mock_config.REDIS_URL = "redis://redis:6379/0"
+        mock_config.WATCHLIST_SYMBOLS = ["AAPL"]
+        mock_redis = mock_redis_cls.from_url.return_value
+        mock_dedup = mock_dedup_cls.return_value
+        mock_dedup.is_duplicate_by_id.return_value = True
+
+        asyncio.run(_on_news(article))
+
+    mock_redis.rpush.assert_not_called()
+    stats = mock_persist.call_args.args[1]
+    discards = mock_persist.call_args.args[2]
+    assert stats["duplicates"] == 1
+    assert discards[0]["discarded_reason"] == "duplicate_id"
+    mock_sentiment.apply_async.assert_not_called()
+    mock_redis.close.assert_called_once()
 
 
 # ── P2-A: Bracket order configuration ────────────────────────────────────────
