@@ -1,21 +1,18 @@
 """Tests for SEC EDGAR ingestion worker."""
-import asyncio
-import json
-import pytest
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.models.news import NewsItem
-from datetime import datetime, timezone
 
 
-def _make_edgar_item(ticker: str, id_: str = None) -> NewsItem:
+def _make_edgar_item(ticker: str, id_: str | None = None) -> NewsItem:
     return NewsItem(
         id=id_ or f"edgar:{ticker}:8-K-2026-06-16",
         source="sec_edgar",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         title=f"{ticker} — 8-K",
         body="Quarterly earnings report",
-        url=f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001234",
+        url="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001234",
         language="en",
         asset_tags=[ticker],
     )
@@ -77,7 +74,7 @@ def test_sec_edgar_worker_skips_item_with_no_ticker():
     item_no_ticker = NewsItem(
         id="edgar:no-ticker",
         source="sec_edgar",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         title="Unknown Corp — 8-K",
         body="Filing body",
         url="https://www.sec.gov",
@@ -94,6 +91,24 @@ def test_sec_edgar_worker_skips_item_with_no_ticker():
     assert mock_redis.rpush.call_count == 0
 
 
+def test_sec_edgar_worker_keeps_watchlisted_share_class_from_multi_ticker_cik():
+    """A CIK with multiple share classes must not be reduced to its first ticker."""
+    from src.workers.ingestion import _process_sec_edgar_items
+
+    item = _make_edgar_item("NWS")
+    item.asset_tags = ["NWS", "NWSA", "NWSLL"]
+    item.extraction_method = "source_metadata"
+    mock_redis = MagicMock()
+
+    result = _process_sec_edgar_items([item], {"NWSA"}, _dedup(), mock_redis)
+
+    assert result == {"fetched": 1, "queued": 1, "filtered": 0, "duplicates": 0}
+    queued = NewsItem.model_validate_json(mock_redis.rpush.call_args.args[1])
+    assert queued.id.endswith(":NWSA")
+    assert queued.asset_tags == ["NWSA"]
+    assert queued.extraction_method == "source_metadata"
+
+
 def test_sec_edgar_worker_entrypoint_disabled_by_default(monkeypatch):
     """The Celery entry-point is OFF by default (2026-07-02) and short-circuits
     without touching the connector — guards against running the broken CIK path
@@ -102,3 +117,25 @@ def test_sec_edgar_worker_entrypoint_disabled_by_default(monkeypatch):
     from src.workers.ingestion import run_sec_edgar_ingestion_worker
     result = run_sec_edgar_ingestion_worker()
     assert result == {"skipped": True, "reason": "sec_edgar_ingestion_disabled"}
+
+
+def test_sec_edgar_worker_uses_only_material_forms_when_shadow_enabled(monkeypatch):
+    """The gated path is ready for shadow, but still limits the source to 8-K/6-K."""
+    monkeypatch.setenv("SEC_EDGAR_INGESTION_ENABLED", "1")
+    from src.workers import ingestion
+
+    redis_client = MagicMock()
+    connector = MagicMock()
+    with (
+        patch.object(ingestion.Redis, "from_url", return_value=redis_client),
+        patch.object(ingestion, "SECEdgarConnector", return_value=connector) as connector_cls,
+        patch.object(ingestion, "_fetch_sec_edgar_items", new=AsyncMock(return_value=[])),
+        patch.object(ingestion, "_persist_ingestion_observability"),
+    ):
+        result = ingestion.run_sec_edgar_ingestion_worker()
+
+    assert result == {"fetched": 0, "queued": 0, "filtered": 0, "duplicates": 0}
+    connector_cls.assert_called_once_with(
+        form_types=["8-K", "6-K"],
+        user_agent=ingestion.config.SEC_USER_AGENT,
+    )

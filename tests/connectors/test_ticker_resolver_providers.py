@@ -50,6 +50,11 @@ class TestSecCompanyTickers:
     _DATA = {
         "0": {"cik_str": 320193, "ticker": "AAPL", "title": "Apple Inc."},
         "1": {"cik_str": 789019, "ticker": "MSFT", "title": "Microsoft Corp"},
+        # Real company_tickers.json shape for News Corp: one CIK can have
+        # multiple listed share classes.
+        "2": {"cik_str": 1564708, "ticker": "NWS", "title": "NEWS CORP"},
+        "3": {"cik_str": 1564708, "ticker": "NWSA", "title": "NEWS CORP"},
+        "4": {"cik_str": 1564708, "ticker": "NWSLL", "title": "NEWS CORP"},
     }
 
     def test_name_and_confirm(self):
@@ -73,6 +78,11 @@ class TestSecCompanyTickers:
             sec.confirms("AAPL")
             sec.ticker_for_name("Microsoft Corp")
         assert mg.call_count == 1
+
+    def test_returns_all_tickers_for_zero_padded_cik(self):
+        with patch(f"{_MOD}.get", return_value=_resp(self._DATA)):
+            sec = SecCompanyTickers("ua")
+            assert sec.tickers_for_cik("0001564708") == ["NWS", "NWSA", "NWSLL"]
 
 
 class TestGatherEvidence:
