@@ -742,6 +742,101 @@ def _persist_rebalance_state(
         log.warning("#185: could not persist the rebalance clock (%s) — next cycle rebalances", exc)
 
 
+def _build_s1_rebalance_snapshot_rows(
+    result,
+    ts: datetime,
+    instance,
+    portfolio,
+    market,
+    allocation_pct: float,
+) -> list[dict]:
+    """Build the durable S1 decision panel for a real rebalance only (#489)."""
+    decided = getattr(result, "target_weights_per_strategy", None) or {}
+    if "S1" not in decided or instance is None:
+        return []
+
+    target_weights = decided["S1"] or {}
+    signal_snapshot = getattr(instance, "last_signal_snapshot", None) or {}
+    prices = getattr(market, "prices", None) or {}
+    positions = {
+        pos.symbol: pos
+        for pos in portfolio.all_positions()
+        if getattr(pos, "symbol", None) and float(getattr(pos, "quantity", 0.0) or 0.0) > 0
+    }
+
+    position_values: dict[str, float | None] = {}
+    for symbol, pos in positions.items():
+        price = prices.get(symbol)
+        position_values[symbol] = (
+            float(pos.quantity) * float(price)
+            if price is not None and float(price) > 0
+            else None
+        )
+    nav = float(getattr(portfolio, "cash", 0.0) or 0.0) + sum(
+        value for value in position_values.values() if value is not None
+    )
+
+    symbols = sorted(set(signal_snapshot) | set(target_weights) | set(positions))
+    rows: list[dict] = []
+    for symbol in symbols:
+        in_target = symbol in target_weights
+        weight = float(target_weights.get(symbol, 0.0) or 0.0)
+        rows.append(
+            {
+                "strategy_id": "S1",
+                "rebalance_ts": ts,
+                "symbol": symbol,
+                "signal_z": (
+                    float(signal_snapshot[symbol])
+                    if signal_snapshot.get(symbol) is not None
+                    else None
+                ),
+                "weight": weight,
+                "in_target": in_target,
+                "held": symbol in positions,
+                "position_market_value": position_values.get(symbol, 0.0),
+                "target_notional": nav * float(allocation_pct) * weight,
+            }
+        )
+    return rows
+
+
+def _persist_s1_rebalance_snapshot(
+    result,
+    ts: datetime,
+    instance,
+    portfolio,
+    market,
+    allocation_pct: float,
+) -> None:
+    """Persist an S1 snapshot without making instrumentation a trading gate."""
+    store = None
+    try:
+        rows = _build_s1_rebalance_snapshot_rows(
+            result, ts, instance, portfolio, market, allocation_pct
+        )
+        if not rows:
+            return
+
+        from src.store.pg_store import PostgreSQLStore
+
+        store = PostgreSQLStore()
+        store.insert_strategy_rebalance_snapshot(rows)
+        log.info(
+            "#489: persisted S1 rebalance snapshot at %s (%d symbols)",
+            ts.isoformat(),
+            len(rows),
+        )
+    except Exception as exc:
+        log.warning("#489: could not persist S1 rebalance snapshot (%s)", exc)
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception as exc:
+                log.warning("#489: could not close snapshot store (%s)", exc)
+
+
 def _build_vol_targeter():
     """Construct the PortfolioVolTargeter from config/trading.yaml `vol_target` (F6).
 
@@ -2602,6 +2697,18 @@ def _run_cycle_inner() -> dict:
         ts,
         config.REDIS_URL,
         sizing_metrics_by_strategy=_sizing_metrics_by_strategy,
+    )
+    _s1_allocation = next(
+        (entry.allocation_pct for entry in active if entry.strategy_id == "S1"),
+        0.0,
+    )
+    _persist_s1_rebalance_snapshot(
+        result,
+        ts,
+        strategy_instances.get("S1"),
+        portfolio,
+        market,
+        _s1_allocation,
     )
 
     log.info(

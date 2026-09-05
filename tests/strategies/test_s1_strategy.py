@@ -154,6 +154,17 @@ class TestComputeTargetWeights:
         result = strategy.compute_target_weights(prices)
         assert "B" not in result
 
+    def test_exposes_the_full_signal_panel_used_for_the_target(
+        self, strategy: TimeSeriesMomentum, prices: pd.DataFrame
+    ) -> None:
+        target = strategy.compute_target_weights(prices)
+
+        assert set(strategy.last_signal_snapshot) == {"A", "B"}
+        assert strategy.last_signal_snapshot["A"] > 0
+        assert strategy.last_signal_snapshot["B"] < 0
+        assert "A" in target
+        assert "B" not in target
+
     def test_all_weights_are_positive_floats(
         self, strategy: TimeSeriesMomentum, prices: pd.DataFrame
     ) -> None:

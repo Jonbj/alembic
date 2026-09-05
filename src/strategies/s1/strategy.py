@@ -76,6 +76,10 @@ class TimeSeriesMomentum:
         else:
             self._signal_wide = pd.DataFrame()
             self._weight_wide = pd.DataFrame()
+        # Popolato dalla stessa lookup usata da compute_target_weights. Il path
+        # live lo persiste insieme al target mensile (#489), evitando di
+        # ricostruire a posteriori quale z-score la strategia vide davvero.
+        self.last_signal_snapshot: dict[str, float] = {}
         self._last_rebalance: Optional[datetime] = None
         self._last_sizing_metrics: dict[str, int | float | None] | None = None
 
@@ -92,6 +96,7 @@ class TimeSeriesMomentum:
         Looks up the closest precomputed signal date <= prices_wide.index[-1].
         Returns empty dict if no valid signal is available.
         """
+        self.last_signal_snapshot = {}
         if self._signal_wide.empty or self._weight_wide.empty:
             return {}
 
@@ -133,6 +138,13 @@ class TimeSeriesMomentum:
         if self._universe is not None:
             as_of_date = as_of.date() if hasattr(as_of, "date") else as_of
             eligible = {a.symbol for a in self._universe.active_at(as_of_date)}
+
+        self.last_signal_snapshot = {
+            str(ticker): float(signals_row[ticker])
+            for ticker in signals_row.index
+            if pd.notna(signals_row[ticker])
+            and (eligible is None or ticker in eligible)
+        }
 
         weights = {
             ticker: float(weights_row[ticker])

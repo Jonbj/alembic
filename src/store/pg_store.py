@@ -163,6 +163,20 @@ class PostgreSQLStore:
         RETURNING id
     """
 
+    _INSERT_STRATEGY_REBALANCE_SNAPSHOT = """
+        INSERT INTO strategy_rebalance_snapshots (
+            strategy_id, rebalance_ts, symbol, signal_z, weight,
+            in_target, held, position_market_value, target_notional
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (strategy_id, rebalance_ts, symbol) DO UPDATE SET
+            signal_z = EXCLUDED.signal_z,
+            weight = EXCLUDED.weight,
+            in_target = EXCLUDED.in_target,
+            held = EXCLUDED.held,
+            position_market_value = EXCLUDED.position_market_value,
+            target_notional = EXCLUDED.target_notional
+    """
+
     def __init__(
         self,
         conn: psycopg2.extensions.connection | None = None,
@@ -282,6 +296,33 @@ class PostgreSQLStore:
                 signal_id: int = row[0]
             conn.commit()
             return signal_id
+        except Exception:
+            conn.rollback()
+            raise
+
+    def insert_strategy_rebalance_snapshot(self, rows: list[dict]) -> None:
+        """Persist one strategy rebalance snapshot as a single transaction."""
+        if not rows:
+            return
+        params = [
+            (
+                row["strategy_id"],
+                row["rebalance_ts"],
+                row["symbol"],
+                row.get("signal_z"),
+                row["weight"],
+                row["in_target"],
+                row["held"],
+                row.get("position_market_value"),
+                row["target_notional"],
+            )
+            for row in rows
+        ]
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.executemany(self._INSERT_STRATEGY_REBALANCE_SNAPSHOT, params)
+            conn.commit()
         except Exception:
             conn.rollback()
             raise
