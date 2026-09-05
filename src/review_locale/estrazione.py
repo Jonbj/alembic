@@ -9,6 +9,12 @@ verrebbe saltata, con il filtro il codice vero (~2.000 righe) ci sta comodo.
 
 I test sono esclusi dal diff dato al modello: il compito e' giudicare il codice
 contro la issue, e i test consumano contesto senza aggiungere ipotesi.
+
+`.yml`/`.yaml` sono codice a tutti gli effetti: su PR #526 il servizio
+worker-news-stream era definito in docker-compose.yml, ma il filtro lo
+escludeva, il modello non lo vedeva e ha riportato un falso positivo
+("manca la definizione del servizio... orfano") su un servizio che era
+li' nel diff, semplicemente mai mostrato.
 """
 
 from __future__ import annotations
@@ -16,7 +22,7 @@ from __future__ import annotations
 import re
 
 
-ESTENSIONI_CODICE = (".py", ".sh", ".sql")
+ESTENSIONI_CODICE = (".py", ".sh", ".sql", ".yml", ".yaml")
 
 # 35 KB: il run riuscito su PR #472 aveva un prompt da 42 KB comprensivo di
 # issue e schema, quindi il diff sotto i 35 KB tiene il caso normale in un

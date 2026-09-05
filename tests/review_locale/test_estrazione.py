@@ -50,6 +50,41 @@ def test_diff_di_soli_dati_non_produce_prompt():
     assert costruisci_prompt(diff, ISSUE) == []
 
 
+def test_yml_e_trattato_come_codice():
+    """PR #526: un servizio aggiunto in docker-compose.yml non va nascosto al modello.
+
+    Il filtro escludeva .yml, quindi il diff che definiva il servizio
+    worker-news-stream non arrivava mai al modello, che ha poi riportato un
+    falso positivo ("manca la definizione del servizio... orfano") su un
+    servizio che era li' nel diff, semplicemente mai mostrato.
+    """
+    diff = _hunk("docker-compose.yml", 10)
+
+    filtrato = filtra_diff(diff)
+
+    assert "docker-compose.yml" in filtrato
+    assert costruisci_prompt(diff, ISSUE) != []
+
+
+def test_yaml_e_trattato_come_codice():
+    diff = _hunk("config/pipeline.yaml", 10)
+
+    filtrato = filtra_diff(diff)
+
+    assert "config/pipeline.yaml" in filtrato
+    assert costruisci_prompt(diff, ISSUE) != []
+
+
+def test_i_file_di_dati_restano_fuori_anche_dopo_il_fix_yaml():
+    """Il fix per .yml/.yaml non deve allargare il filtro oltre quelle due estensioni."""
+    diff = _hunk("docs/evidence/dossier/2026-09-01.json", 100)
+
+    filtrato = filtra_diff(diff)
+
+    assert "docs/evidence/dossier/2026-09-01.json" not in filtrato
+    assert costruisci_prompt(diff, ISSUE) == []
+
+
 def test_diff_sotto_il_tetto_resta_un_prompt_unico():
     """Sotto il tetto si conserva la visione d'insieme.
 
