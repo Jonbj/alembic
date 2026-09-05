@@ -109,7 +109,7 @@ def test_dossier_espone_copertura_e_propaga_attribution_sul_candidato():
     ):
         out = dossier.costruisci_dossier(date(2026, 8, 12), ["AAPL"])
 
-    assert out["schema_version"] == "2.7"
+    assert out["schema_version"] == "2.8"
     assert out["copertura_articoli"]["effective_timely_coverage"]["quota"] == 1.0
     signal = out["candidati_miss"][0]["segnali"][0]
     assert signal["canonical_article_id"] == f"content:{'a' * 64}"

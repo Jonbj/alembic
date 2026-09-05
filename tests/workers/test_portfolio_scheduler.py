@@ -1915,6 +1915,63 @@ class TestSectorMapLoader:
 # ── B33: per-order trade-write isolation ──────────────────────────────────────
 
 
+def test_persist_trade_fills_marca_la_prima_sell_post_hold_minimum():
+    """#430: cambia solo il reason code, non il percorso di submission."""
+    from src.workers.portfolio_scheduler import _persist_trade_fills
+
+    pg = MagicMock()
+    pg.record_trade_exit.return_value = 430
+    entry_time = datetime(2026, 8, 20, 14, 7, tzinfo=timezone.utc)
+    exit_time = datetime(2026, 8, 20, 15, 52, tzinfo=timezone.utc)
+
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=pg), \
+         patch("src.workers.portfolio_scheduler._portfolio_postmortem"):
+        failures = _persist_trade_fills(
+            [{"symbol": "NOW", "side": "sell", "order_id": "ord-now",
+              "allocation_weight": 0.0}],
+            open_trades=[{"symbol": "NOW", "id": 430, "entry_time": entry_time}],
+            symbol_decisions={"NOW": {"decision_id": "dec-now"}},
+            written_buy_order_ids=set(),
+            stop_policy=None,
+            market=MagicMock(prices={"NOW": 100.0}),
+            alpaca_entry_prices={},
+            s4_signals={},
+            regime_mult=1.0,
+            tick_time=exit_time,
+            hold_minimum_minutes=90,
+        )
+
+    assert failures == 0
+    assert pg.record_trade_exit.call_args.kwargs["exit_reason"] == "hold_minimum_expiry"
+
+
+def test_persist_trade_fills_non_marca_stop_loss_anche_se_dura_105_minuti():
+    from src.workers.portfolio_scheduler import _persist_trade_fills
+
+    pg = MagicMock()
+    pg.record_trade_exit.return_value = 430
+    entry_time = datetime(2026, 8, 20, 14, 7, tzinfo=timezone.utc)
+
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=pg), \
+         patch("src.workers.portfolio_scheduler._portfolio_postmortem"):
+        _persist_trade_fills(
+            [{"symbol": "WMT", "side": "sell", "order_id": "ord-wmt",
+              "reason": "stop_loss", "allocation_weight": 0.0}],
+            open_trades=[{"symbol": "WMT", "id": 431, "entry_time": entry_time}],
+            symbol_decisions={"WMT": {"decision_id": "dec-wmt"}},
+            written_buy_order_ids=set(),
+            stop_policy=None,
+            market=MagicMock(prices={"WMT": 100.0}),
+            alpaca_entry_prices={},
+            s4_signals={},
+            regime_mult=1.0,
+            tick_time=datetime(2026, 8, 20, 15, 52, tzinfo=timezone.utc),
+            hold_minimum_minutes=90,
+        )
+
+    assert pg.record_trade_exit.call_args.kwargs["exit_reason"] == "stop_loss"
+
+
 def test_persist_trade_fills_isolates_per_order_sell_failure():
     """B33: a single failing SELL must NOT abort the remaining orders' DB writes.
 

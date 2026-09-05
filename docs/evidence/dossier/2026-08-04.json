@@ -33,6 +33,12 @@
       "first_price": "open della prima barra 5Min con timestamp >= stadio",
       "mfe_mae": "high/low successivi allo stadio fino al cutoff, long-side",
       "quote": "non clampate; valori <0 o >1 espongono reversal/overshoot"
+    },
+    "ore_tenuta_s4": {
+      "source": "trades.exit_time - trades.entry_time",
+      "bucket": "multiplo nominale piu' vicino, ampiezza 15 minuti",
+      "reason_code": "hold_minimum_expiry per portfolio_sell al primo ciclo nominale successivo al hold di 90 minuti",
+      "freeze": "misura read-only; nessuna logica di uscita modificata"
     }
   },
   "soglia_mover": 0.03,
@@ -895,7 +901,7 @@
       "exit_price": 25.46,
       "qty": 48.265631222,
       "pnl_net": 16.22201749864362,
-      "exit_reason": "portfolio_sell",
+      "exit_reason": "hold_minimum_expiry",
       "ore_tenuta": 1.7499991391666667,
       "drift_post_uscita": -2.4132815611000344
     },
@@ -31546,6 +31552,25 @@
         "gate": 0.3
       },
       "quota_righe_fanout": 1.0
+    },
+    "ore_tenuta_s4": {
+      "strategia": "S4",
+      "ampiezza_bucket_minuti": 15,
+      "n_chiusure": 2,
+      "buckets": [
+        {
+          "durata_minuti": 105,
+          "n": 1,
+          "pnl_net": 16.222017,
+          "drift_post_uscita": -2.413282
+        },
+        {
+          "durata_minuti": 1140,
+          "n": 1,
+          "pnl_net": -23.694196,
+          "drift_post_uscita": 12.170284
+        }
+      ]
     }
   }
 }

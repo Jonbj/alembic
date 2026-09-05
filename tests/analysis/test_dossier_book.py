@@ -5,6 +5,7 @@ import pytest
 from src.analysis.dossier.book import (
     aggregate_by_entry_hour,
     aggregate_contradiction_guard,
+    aggregate_holding_time_histogram,
     compute_entries,
     compute_exits,
     compute_s4_entry_intents,
@@ -297,6 +298,66 @@ def test_senza_prezzo_di_chiusura_drift_none():
         }
     ]
     assert compute_exits(trades, {})[0]["drift_post_uscita"] is None
+
+
+def test_cinque_uscite_105_minuti_note_sono_nello_stesso_bucket():
+    """#430: il cluster 18-20 agosto deve emergere senza rilettura manuale."""
+    chiusure = [
+        {"symbol": "HD", "strategia": "S4", "pnl_net": 2.686737764325484,
+         "ore_tenuta": 1.750004306111111, "drift_post_uscita": -12.76609506266995},
+        {"symbol": "NVDA", "strategia": "S4", "pnl_net": 3.115054123249346,
+         "ore_tenuta": 1.749993563611111, "drift_post_uscita": -2.846037787179888},
+        {"symbol": "HD", "strategia": "S4", "pnl_net": 3.9100031838896125,
+         "ore_tenuta": 1.7500237747222223, "drift_post_uscita": -0.5357575403998173},
+        {"symbol": "NVDA", "strategia": "S4", "pnl_net": -1.0328763304324957,
+         "ore_tenuta": 1.7499956125, "drift_post_uscita": -2.690712657622933},
+        {"symbol": "NOW", "strategia": "S4", "pnl_net": -19.598218800223712,
+         "ore_tenuta": 1.7500059608333334, "drift_post_uscita": 3.56978211},
+    ]
+
+    histogram = aggregate_holding_time_histogram(chiusure)
+
+    assert histogram["ampiezza_bucket_minuti"] == 15
+    assert histogram["n_chiusure"] == 5
+    assert histogram["buckets"] == [
+        {
+            "durata_minuti": 105,
+            "n": 5,
+            "pnl_net": pytest.approx(-10.9193000582),
+            "drift_post_uscita": pytest.approx(-15.2688209372),
+        }
+    ]
+
+
+def test_uscita_portfolio_al_primo_ciclo_post_hold_ha_reason_distinta():
+    trade = {
+        "symbol": "NOW",
+        "strategia": "S4",
+        "exit_price": 100.0,
+        "qty": 1.0,
+        "pnl_net": -19.60,
+        "exit_reason": "portfolio_sell",
+        "ore_tenuta": 1.7500059608333334,
+    }
+
+    (exit_,) = compute_exits([trade], {"NOW": 103.57})
+
+    assert exit_["exit_reason"] == "hold_minimum_expiry"
+
+
+@pytest.mark.parametrize("ore_tenuta", [1.5, 2.0])
+def test_portfolio_sell_fuori_dal_primo_ciclo_post_hold_non_cambia(ore_tenuta):
+    trade = {
+        "symbol": "AAA",
+        "strategia": "S4",
+        "exit_price": 100.0,
+        "qty": 1.0,
+        "pnl_net": 0.0,
+        "exit_reason": "portfolio_sell",
+        "ore_tenuta": ore_tenuta,
+    }
+
+    assert compute_exits([trade], {"AAA": 100.0})[0]["exit_reason"] == "portfolio_sell"
 
 
 def test_aggregazione_per_ora_conta_e_somma():

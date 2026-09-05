@@ -97,8 +97,15 @@ def test_la_posizione_detenuta_cieca_compare_nel_dossier():
 
 def test_schema_e_provenienza_dichiarano_la_nuova_misura():
     payload = _dossier()
-    assert payload["schema_version"] == "2.7"
+    assert payload["schema_version"] == "2.8"
     assert "copertura_uscita" in payload["provenienza_dati"]
+    assert "ore_tenuta_s4" in payload["provenienza_dati"]
+    assert payload["aggregati"]["ore_tenuta_s4"] == {
+        "strategia": "S4",
+        "ampiezza_bucket_minuti": 15,
+        "n_chiusure": 0,
+        "buckets": [],
+    }
 
 
 def test_calendario_non_disponibile_non_uccide_il_dossier():
