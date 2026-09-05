@@ -35,6 +35,7 @@ from src.portfolio.exit_classification import (
     STALE_PRESERVED,
     describe_disposition,
     mechanism_for_disposition,
+    reason_for_hold_minimum_expiry,
 )
 from src.portfolio.order_id import build_client_order_id, submit_order_with_coid_fallback
 from src.portfolio.whipsaw_damping import evaluate_whipsaw_damping
@@ -1923,6 +1924,7 @@ def _persist_trade_fills(
     regime_mult,
     tick_time,
     sym_strats: dict | None = None,
+    hold_minimum_minutes: int | None = None,
 ) -> int:
     """Persist trade entry/exit rows + back-fill Alpaca order_ids, one order at a time.
 
@@ -1950,6 +1952,9 @@ def _persist_trade_fills(
         # same symbol). open_trades was fetched at the top of the cycle
         # (exit_time IS NULL => positions still open at submit time).
         _open_trade_ids = {t["symbol"]: t["id"] for t in open_trades}
+        _open_trade_entry_times = {
+            t["symbol"]: t.get("entry_time") for t in open_trades
+        }
         for sub in submitted_orders:
             sym = sub["symbol"]
             dec = symbol_decisions.get(sym, {})
@@ -2002,11 +2007,32 @@ def _persist_trade_fills(
                     # full close (final tranche); stop-loss / reversal SELLs carry
                     # no allocation_weight and default to 0.0 => final (full close).
                     _is_final = float(sub.get("allocation_weight", 0.0) or 0.0) == 0.0
+                    _exit_reason = sub.get("reason", "portfolio_sell")
+                    _entry_time = _open_trade_entry_times.get(sym)
+                    try:
+                        _holding_seconds = (
+                            (tick_time - _entry_time).total_seconds()
+                            if _entry_time is not None else None
+                        )
+                    except (AttributeError, TypeError):
+                        # Una entry legacy malformata non deve mai impedire la
+                        # persistenza dell'uscita: perdiamo solo il marker #430.
+                        _holding_seconds = None
+                    _exit_reason = reason_for_hold_minimum_expiry(
+                        _exit_reason,
+                        _holding_seconds,
+                        hold_minimum_minutes=(
+                            hold_minimum_minutes
+                            if hold_minimum_minutes is not None
+                            else _get_hold_minimum_minutes()
+                        ),
+                        cycle_seconds=_CYCLE_SECONDS,
+                    )
                     _trade_id = _pg_trades.record_trade_exit(
                         symbol=sym,
                         exit_order_id=sub["order_id"],
                         exit_time=tick_time,
-                        exit_reason=sub.get("reason", "portfolio_sell"),
+                        exit_reason=_exit_reason,
                         trade_id=_open_trade_ids.get(sym),
                         is_final=_is_final,
                     )
@@ -3285,6 +3311,7 @@ def _run_cycle_inner() -> dict:
             regime_mult=_regime_mult,
             tick_time=ts,
             sym_strats=_sym_strats,
+            hold_minimum_minutes=_hold_min,
         )
 
     # Alert when an approved strategy consistently produces zero target weights.

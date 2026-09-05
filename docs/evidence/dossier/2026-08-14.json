@@ -33,6 +33,12 @@
       "first_price": "open della prima barra 5Min con timestamp >= stadio",
       "mfe_mae": "high/low successivi allo stadio fino al cutoff, long-side",
       "quote": "non clampate; valori <0 o >1 espongono reversal/overshoot"
+    },
+    "ore_tenuta_s4": {
+      "source": "trades.exit_time - trades.entry_time",
+      "bucket": "multiplo nominale piu' vicino, ampiezza 15 minuti",
+      "reason_code": "hold_minimum_expiry per portfolio_sell al primo ciclo nominale successivo al hold di 90 minuti",
+      "freeze": "misura read-only; nessuna logica di uscita modificata"
     }
   },
   "soglia_mover": 0.03,
@@ -24729,6 +24735,12 @@
         "gate": 0.3
       },
       "quota_righe_fanout": 0.75
+    },
+    "ore_tenuta_s4": {
+      "strategia": "S4",
+      "ampiezza_bucket_minuti": 15,
+      "n_chiusure": 0,
+      "buckets": []
     }
   }
 }

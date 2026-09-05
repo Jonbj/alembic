@@ -24,7 +24,7 @@ Alembic è un **sistema di trading algoritmico** che combina analisi del sentime
 
 **Come funziona in soldoni:**
 
-1. Ogni 15 minuti, un ensemble di LLM cloud (coppia attiva: Kimi K2.6 + GLM-5.2, selezionata dinamicamente dal pool) analizza le notizie finanziarie
+1. Ogni 15 minuti, un ensemble di LLM cloud (coppia attiva: **GLM-5.2 + GPT-OSS 20B** dal 2026-07-11, selezionata a runtime dalla chiave Redis `config:sentiment_llm_models`) analizza le notizie finanziarie
 2. Ogni articolo produce un **punteggio di sentiment** da -1.0 (molto bearish) a +1.0 (molto bullish)
 3. I punteggi vengono aggregati e filtrati in **segnali di trading**
 4. I segnali alimentano le strategie operative che decidono se comprare, vendere o restare fermi
@@ -374,10 +374,10 @@ Se il grafico è **monotonamente crescente** (da sinistra a destra), il modello 
 | Colonna | Significato |
 |---------|------------|
 | **Ticker** | Simbolo analizzato |
-| **Model** | Quale modello ha prodotto l'analisi (es. `ensemble:kimi-k2.6+glm-5.2`, o `finbert` per il fallback) |
+| **Model** | Quale modello ha prodotto l'analisi (es. `ensemble:glm-5.2:cloud+gpt-oss:20b-cloud`, o `finbert` per il fallback) |
 | **Polarity** | Sentiment del modello: ▲ positivo / ▼ negativo / — neutro |
 | **Confidence** | Livello di certezza del modello |
-| **Divergence σ** | Deviazione standard tra i modelli — alto (>0.3) = disaccordo |
+| **Divergence σ** | Deviazione standard tra i modelli — sopra `ENSEMBLE_DIVERGENCE_STD` (**0.40**) scatta il fallback FinBERT |
 | **Fallback** | "FB" se il FinBERT è stato attivato perché l'ensemble era in disaccordo |
 | **Reasoning** | Breve spiegazione del perché il modello ha dato quel punteggio |
 
@@ -522,11 +522,13 @@ Una strategia può avere buon IC ma pessimo Sharpe (se i costi di trading mangia
 Nella pagina **Backtest → IC by Model**, ogni riga mostra:
 
 ```
-Modello         N      IC     Hit Rate   Avg Return
-kimi-k2.6       5000   0.082  54.2%       +0.12%
-deepseek-v4     4200   0.065  52.8%       +0.08%
-qwen3.5         4500   0.041  51.1%       +0.03%
-glm-5.1          3800  0.038  50.5%       +0.02%
+Modello            N      IC     Hit Rate   Avg Return
+glm-5.2:cloud      5000   0.082  54.2%       +0.12%
+gpt-oss:20b-cloud  4200   0.065  52.8%       +0.08%
+finbert            4500   0.041  51.1%       +0.03%
+
+(numeri illustrativi: i modelli sono quelli della coppia viva più il fallback locale;
+ i valori reali si leggono dalla pagina, non da questo esempio)
 ```
 
 - **N alto** = il modello copre molti articoli (buona copertura)
@@ -576,7 +578,7 @@ Se un modello ha IC negativo o N=0, non significa necessariamente che è rotto. 
 
 ### S4 — News-Driven Tactical
 
-**Cosa fa**: Strategia news/sentiment in modalità paper overlay. Usa segnali LLM pre-calcolati, feedback gate, filtri di freschezza e trend per decidere se proporre esposizione tattica su ticker della watchlist.
+**Cosa fa**: Strategia news/sentiment in modalità paper overlay. Usa segnali LLM pre-calcolati, due filtri di freschezza (età della **notizia** 2h per i nuovi ingressi, età del **segnale** 4h) e il feedback gate per proporre esposizione tattica sui ticker della watchlist. Non usa nessun filtro di trend: la EMA20 appartiene al path legacy, inattivo. Catena completa in `docs/strategies.md` §S4.
 
 **Stato**: `paper`, `promotion_blocked`, `live_authorized=false`. Non è autorizzata al live; le metriche e i counterfactual servono solo come evidenza per revisione futura.
 
@@ -635,7 +637,7 @@ Ogni strategia deve superare 5 gate per entrare nel portfolio live. Ecco cosa si
 ```
 Notizia finanziaria
     ↓
-Ensemble di LLM cloud (coppia attiva: Kimi K2.6 + GLM-5.2)
+Ensemble di LLM cloud (coppia attiva: GLM-5.2 + GPT-OSS 20B)
     ↓ Ogni modello analizza l'articolo e produce:
     • polarity (-1 a +1)
     • confidence (0 a 1)
@@ -644,13 +646,15 @@ Ensemble di LLM cloud (coppia attiva: Kimi K2.6 + GLM-5.2)
 Aggregazione pesata (i pesi sono nella pagina LLM → Pesi)
     ↓ Score composito = Σ(weight_i × polarity_i)
     ↓ Confidence = media pesata delle confidenze
-    ↓ Se i modelli sono in forte disaccordo (σ > 0.3):
+    ↓ Se i modelli sono in forte disaccordo (σ ≥ ENSEMBLE_DIVERGENCE_STD = 0.40):
       → FinBERT fallback viene attivato
     ↓
 Score finale = polarity aggregata × confidence
     ↓
-Se |score| > soglia di ingresso (default 0.05 per backtest, 0.3 per live)
-  → Segnale BUY (score > 0) o SELL (score < 0)
+Se |score| ≥ soglia di ingresso (live: feedback:entry_threshold:S4, baseline 0.30)
+  → candidato BUY se score > 0. S4 e' long-only: uno score negativo non apre
+    uno short, al massimo forza l'uscita da una posizione gia' aperta
+    (sentiment_reversal, soglia -0.35)
 ```
 
 ### Cosa vuol dire "Fallback"

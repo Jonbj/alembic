@@ -52,6 +52,18 @@ quel segnale, registrato nel punto in cui lo fa
 | `unknown` | il ciclo non ha registrato nessuna disposizione, **oppure** il segnale è arrivato al motore preservato da FIX-D e il peso è comunque 0 |
 | `s1_weight_drop`, `s2_weight_drop`, … | uscita di una posizione aperta da una strategia non-S4 (#72) — non passa dal classificatore S4 |
 
+## Uscite che NON passano da questo classificatore
+
+`exit_mechanism` spiega solo le uscite **per peso di portafoglio a 0**. Tre uscite arrivano da
+altri percorsi e non hanno (né devono avere) un'etichetta qui — si leggono da
+`trades.exit_reason`:
+
+| `trades.exit_reason` | chi la scrive | nota |
+|---|---|---|
+| `sentiment_reversal` | `_sentiment_reversal_sells` → `_submit_reversal_force_sells` | contro-segnale **ensemble** ≤ −0.35 e più fresco di 60 min. Cicla su **tutte** le posizioni del broker senza filtrare per sleeve: liquida anche posizioni S1 (#182). Il P&L va alla sleeve proprietaria, non a S4. Dal 2026-09-03 queste uscite hanno un controfattuale (#450) |
+| `stop_loss` | `_submit_stop_loss_exit_order` | **nessuna riga dal 2026-07-14**: `risk.stop_loss: 0.0` disattiva il controllo. Resta solo la telemetria shadow (`stop_shadow_log`) e l'allarme a −15% (#161) |
+| `portfolio_sell` | ribilanciamento ordinario | è il caso in cui `exit_mechanism` è popolato, con il vocabolario qui sopra |
+
 `unknown` non è un fallimento: è la risposta corretta quando il meccanismo non è stato
 osservato. Le uscite su segnale preservato da FIX-D ricadono qui perché il motivo per cui
 quei pesi vengono azzerati **non è ancora stabilito** — indagine separata, issue #186.
