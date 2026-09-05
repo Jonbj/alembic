@@ -18,6 +18,7 @@ from src.backtest.engine.types import (
     RebalanceFrequency,
 )
 from src.strategies.s1.signal import generate_signals
+from src.strategies.s1.sizing import compute_sizing_metrics
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +81,14 @@ class TimeSeriesMomentum:
         # ricostruire a posteriori quale z-score la strategia vide davvero.
         self.last_signal_snapshot: dict[str, float] = {}
         self._last_rebalance: Optional[datetime] = None
+        self._last_sizing_metrics: dict[str, int | float | None] | None = None
+
+    @property
+    def last_sizing_metrics(self) -> dict[str, int | float | None] | None:
+        """Diagnostics for the most recent target decision (#490)."""
+        if self._last_sizing_metrics is None:
+            return None
+        return dict(self._last_sizing_metrics)
 
     def compute_target_weights(self, prices_wide: pd.DataFrame) -> dict[str, float]:
         """Return {ticker: weight} for tickers with signal > threshold at latest date.
@@ -147,6 +156,7 @@ class TimeSeriesMomentum:
                 and (eligible is None or ticker in eligible)
             )
         }
+        raw_target_weights = dict(weights)
         # Sleeve contract (config/strategies.yaml): sleeve-local weights must sum
         # to ≤ 1.0. Per-name inverse-vol weights are only capped individually
         # (max_weight), so with many qualifying names the sum can far exceed 1.
@@ -155,6 +165,19 @@ class TimeSeriesMomentum:
         total = sum(weights.values())
         if total > 1.0:
             weights = {t: w / total for t, w in weights.items()}
+
+        # #490: observation only. These diagnostics describe the target already
+        # decided above and must never be able to suppress a trading cycle.
+        try:
+            self._last_sizing_metrics = compute_sizing_metrics(
+                target_weights=weights,
+                signals={ticker: float(signals_row[ticker]) for ticker in weights},
+                raw_weights=raw_target_weights,
+                max_weight=self._config.max_weight,
+            )
+        except Exception as exc:  # noqa: BLE001 - diagnostics must remain fail-open
+            self._last_sizing_metrics = None
+            log.warning("#490: S1 sizing metrics unavailable (%s)", exc)
         return weights
 
     def health_check(self) -> bool:

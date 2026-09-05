@@ -1,0 +1,36 @@
+{
+  "n_uscite_totali": 24,
+  "realized_medio_uscite": 1.07268801141029,
+  "regole": {
+    "ultimo_prod": {
+      "n_uscite": 24,
+      "n_uscite_salve": 0,
+      "realized_uscite_salve": null
+    },
+    "ultimo": {
+      "n_uscite": 24,
+      "n_uscite_salve": 1,
+      "realized_uscite_salve": 12.128597117363766
+    },
+    "massimo": {
+      "n_uscite": 24,
+      "n_uscite_salve": 18,
+      "realized_uscite_salve": -2.0635689763866507
+    },
+    "media_conf": {
+      "n_uscite": 24,
+      "n_uscite_salve": 6,
+      "realized_uscite_salve": 4.28778644762892
+    },
+    "media_decay": {
+      "n_uscite": 24,
+      "n_uscite_salve": 2,
+      "realized_uscite_salve": 3.298370474107548
+    }
+  },
+  "finestra": {
+    "since": "2026-06-15",
+    "soglia_gate": 0.3
+  },
+  "metodo": "una chiusura per evento (trades JOIN execution_decisions su decision_id con exit_mechanism='below_entry_gate'); segnali del simbolo con generated_at <= decision_at nello stesso giorno UTC; stesse regole e stessa soglia 0.30 della misura ingressi. Una uscita e' 'salva' se la candidata >= soglia (la candidata avrebbe tenuto aperto, costo non preso). Baseline (ultimo_prod) per costruzione n_salve=0."
+}

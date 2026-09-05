@@ -67,6 +67,10 @@ from src.analysis.dossier.miss_cause import (
     cause_del_giorno,
     classify_miss_candidates,
 )
+from src.analysis.dossier.no_news_backstop import (
+    BACKSTOP_VERSION,
+    build_no_news_backstop,
+)
 from src.analysis.dossier.opportunity import ESTIMATOR_VERSION, compute_opportunity
 from src.analysis.dossier.timeline import build_timeline
 from src.costs.calculator import TradeCostCalculator
@@ -1743,6 +1747,20 @@ def costruisci_dossier(
         halt_events=_halt_events(context_articles),
     )
 
+    # --- backstop NO_NEWS (#409) -----------------------------------------
+    # Il controllo non sceglie una soglia e non produce segnali. Conserva la
+    # popolazione non-mover che serve da denominatore e marca il volume EOD
+    # come post-hoc, cosi' #451 non puo' scambiarlo per evidenza point-in-time.
+    no_news_backstop = build_no_news_backstop(
+        universe=simboli,
+        returns=mercato["rendimenti"],
+        news_counts=news,
+        sector_by_ticker=sector_by_ticker,
+        daily_bars=barre,
+        corporate_events=corporate_calendar,
+        mover_threshold=SOGLIA_MOVER,
+    )
+
     # --- book: ingressi e chiusure ----------------------------------------
     ingressi_grezzi = [
         {"symbol": r[0], "strategia": r[1], "ora_utc": r[2],
@@ -2052,6 +2070,20 @@ def costruisci_dossier(
                 ),
                 "remote_context_loaded": fetch_remote_context,
             },
+            "no_news_backstop": {
+                "version": BACKSTOP_VERSION,
+                "population": "intera watchlist a zero righe news_log nella seduta",
+                "calendar": (
+                    "marker osservazionale CALENDAR; non genera sentiment_signals "
+                    "ne' execution_decisions"
+                ),
+                "volume": (
+                    "volume daily / ADV delle 20 sedute precedenti - 1; POST_HOC_EOD, "
+                    "non valido per valutare un segnale point-in-time"
+                ),
+                "sector_map": "config/trading.yaml sectors",
+                "freeze": "misura read-only; nessun parametro live toccato",
+            },
         },
         "soglia_mover": SOGLIA_MOVER,
         "mercato": mercato,
@@ -2070,6 +2102,7 @@ def costruisci_dossier(
         "copertura_articoli": copertura_articoli,
         "funnel_v2": funnel_v2,
         "event_market_context": event_market_context,
+        "no_news_backstop": no_news_backstop,
         "aggregati": {
             "per_ora_ingresso": aggregate_by_entry_hour(chiusi_storici),
             "miss_cumulati": _miss_cumulati(),

@@ -221,6 +221,19 @@ Osserva se i mover del giorno si raggruppano per settore/tema (es. rotazione da 
 un altro — confronta i migliori vs i peggiori). Non inventare un settore per ogni titolo se non
 è ovvio: dichiara "pattern non chiaro" se è così.
 
+FASE 4b — BACKSTOP NO_NEWS, SOLO MISURA
+Leggi `no_news_backstop.per_symbol` nel dossier. Per ogni mover NO_NEWS riporta
+`observed_catalysts`: il marker `CALENDAR` significa che il calendario societario aveva un
+evento osservato, NON che esiste un segnale sentiment o un ordine. Leggi poi
+`no_news_backstop.per_sector` e riporta per tutti i settori `ticker_with_news/ticker_universe`
+e `raw_news_coverage_rate`, inclusi gli zero su N. Questa e' copertura raw di `news_log`, distinta
+dalla copertura effective-timely di `copertura_articoli.per_settore`: non mescolare le due quote.
+
+Il volume del blocco e' marcato `POST_HOC_EOD` e non e' un segnale point-in-time: usa l'intera
+seduta. Puoi descrivere ERIC/RDDT e le mediane mover/non-mover, ma non dire che il valore
+era disponibile prima del movimento, non scegliere una soglia e non stimare un false-positive
+rate operativo. La valutazione ex-ante pre-registrata e' separata in #451.
+
 OUTPUT FINALE
 Salva un report Markdown in __REPORT_FILE__ usando il Write tool, con queste sezioni:
 
@@ -231,11 +244,13 @@ Salva un report Markdown in __REPORT_FILE__ usando il Write tool, con queste sez
 4. Titoli catturati: esito.
 5. Cecita' lato uscita: le posizioni detenute con `cieco_lato_uscita: true`, o "nessuna".
    Se il campo e' null su qualche riga, dillo: e' dato mancante, non assenza del fenomeno.
-6. Pattern osservato (o "non chiaro").
-7. Se emergono pattern ricorrenti rispetto a giorni precedenti (puoi guardare eventuali
+6. Backstop NO_NEWS: marker calendario, volume EOD con il caveat point-in-time e tabella completa
+   della copertura raw per settore.
+7. Pattern osservato (o "non chiaro").
+8. Se emergono pattern ricorrenti rispetto a giorni precedenti (puoi guardare eventuali
    docs/ALPHA_MISS_REPORT_*.md già esistenti per confronto, se presenti), segnalali — altrimenti
    non speculare oltre il singolo giorno.
-8. Non proporre fix di codice: se una causa (es. FILTERED) sembra un bug piuttosto che un limite
+9. Non proporre fix di codice: se una causa (es. FILTERED) sembra un bug piuttosto che un limite
    noto, dillo esplicitamente e basta — la decisione se aprire un'issue è dell'operatore.
 
 FASE FINALE — AGGIORNA I DUE LEDGER

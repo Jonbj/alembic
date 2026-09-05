@@ -103,6 +103,32 @@ def test_persist_writes_only_the_strategies_that_actually_rebalanced():
     assert payload["target_weights"] == {"AAPL": 0.012}
 
 
+def test_persist_adds_s1_sizing_metrics_to_the_rebalance_state():
+    from src.workers.portfolio_scheduler import _persist_rebalance_state
+
+    result = MagicMock()
+    result.target_weights_per_strategy = {"S1": {"AAPL": 0.012}}
+    metrics = {
+        "n_target": 46,
+        "n_eff": 44.7,
+        "cap_bound_share": 0.761,
+        "spearman_signal_weight": -0.621,
+    }
+
+    redis_inst = MagicMock()
+    ts = datetime(2026, 9, 1, 14, 7, tzinfo=timezone.utc)
+    with patch("redis.Redis.from_url", return_value=redis_inst):
+        _persist_rebalance_state(
+            result,
+            ts,
+            "redis://localhost",
+            sizing_metrics_by_strategy={"S1": metrics},
+        )
+
+    payload = json.loads(redis_inst.set.call_args[0][1])
+    assert payload["sizing_metrics"] == metrics
+
+
 def test_persist_ignores_strategies_outside_the_clock_scope():
     from src.workers.portfolio_scheduler import _persist_rebalance_state
 

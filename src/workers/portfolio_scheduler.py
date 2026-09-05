@@ -688,7 +688,13 @@ def _seed_rebalance_clock(strategy_instances: dict, state: dict[str, dict]) -> N
         log.info("#185: %s rebalance clock restored to %s", sid, last.isoformat())
 
 
-def _persist_rebalance_state(result, ts: datetime, redis_url: str) -> None:
+def _persist_rebalance_state(
+    result,
+    ts: datetime,
+    redis_url: str,
+    *,
+    sizing_metrics_by_strategy: dict[str, dict] | None = None,
+) -> None:
     """Store the clock and the target set for the strategies that just rebalanced.
 
     Strategies that held (`rebalance_skipped`) keep their previous state untouched:
@@ -707,10 +713,14 @@ def _persist_rebalance_state(result, ts: datetime, redis_url: str) -> None:
         _r = _R.from_url(redis_url, decode_responses=True)
         try:
             for sid, weights in decided.items():
-                payload = _json.dumps({
+                state = {
                     "last_rebalance": ts.isoformat(),
                     "target_weights": {k: float(v) for k, v in (weights or {}).items()},
-                })
+                }
+                sizing_metrics = (sizing_metrics_by_strategy or {}).get(sid)
+                if isinstance(sizing_metrics, dict):
+                    state["sizing_metrics"] = sizing_metrics
+                payload = _json.dumps(state)
                 _r.set(
                     _REBALANCE_STATE_KEY.format(strategy_id=sid),
                     payload,
@@ -720,6 +730,12 @@ def _persist_rebalance_state(result, ts: datetime, redis_url: str) -> None:
                     "#185: %s rebalanced at %s — %d target weight(s) frozen until the next window",
                     sid, ts.isoformat(), len(weights or {}),
                 )
+                if isinstance(sizing_metrics, dict):
+                    log.info(
+                        "#490: %s sizing metrics at rebalance: %s",
+                        sid,
+                        _json.dumps(sizing_metrics, sort_keys=True),
+                    )
         finally:
             _r.close()
     except Exception as exc:
@@ -2670,7 +2686,18 @@ def _run_cycle_inner() -> dict:
     _s4_virtual_sleeves = _s4_sleeve_contributions(result, registry)
 
     # #185: advance the clock only for the sleeves that actually re-decided weights.
-    _persist_rebalance_state(result, ts, config.REDIS_URL)
+    _sizing_metrics_by_strategy = {
+        sid: metrics
+        for sid, instance in strategy_instances.items()
+        if sid in result.target_weights_per_strategy
+        and isinstance((metrics := getattr(instance, "last_sizing_metrics", None)), dict)
+    }
+    _persist_rebalance_state(
+        result,
+        ts,
+        config.REDIS_URL,
+        sizing_metrics_by_strategy=_sizing_metrics_by_strategy,
+    )
     _s1_allocation = next(
         (entry.allocation_pct for entry in active if entry.strategy_id == "S1"),
         0.0,

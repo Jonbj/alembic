@@ -93,11 +93,14 @@ Il costruttore precomputa segnali e pesi su **tutta** la storia passata e fa piv
 
 ## 7. Divergenze spec↔docs già notate (per fasi successive)
 
+> **Aggiornamento 2026-09-04 (#490):** D1 e D2 sono state corrette nella
+> documentazione di strategia. Restano qui come traccia storica dell'audit.
+
 | Punto | `docs/strategies.md` | Sorgente | Divergenza |
 |---|---|---|---|
-| `target_vol` | "0.15" nella tabella param | `0.10` (`strategy.py:33`, `s1_strategy.yaml`) | doc dice 0.15, codice 0.10 |
+| `target_vol` | `0.10` nella tabella param | `0.10` (`strategy.py:33`, `s1_strategy.yaml`) | **risolta da #490** |
 | Pesi lookback | "1×, e×, e²×, e³×" | confermato (`signal.py:18-26`) | OK |
-| Sizing | "raw_weight ∝ signal × (target_vol/realised_vol)" | peso NON moltiplicato per signal (signal è solo gate) | **doc implica scaling per signal, codice no** — divergenza materiale |
+| Sizing | `min(target_vol/realised_vol_60d, max_weight)`; signal solo gate | peso NON moltiplicato per signal (signal è solo gate) | **risolta da #490** |
 
 Queste divergenze sono findings per `05_code_mapping`/`06_implementation_audit`; riportate qui per traccia.
 

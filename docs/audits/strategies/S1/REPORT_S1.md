@@ -44,7 +44,7 @@ Scommette sull'**anomalia del momentum** (Jegadeesh-Titman 1993 CS; Moskowitz-Oo
 ## 5. Mappatura codice e divergenze (vedi `05_code_mapping.md`)
 
 - Segnale: `signal.py:18-139` · Sizing: `sizing.py:8-40` · Selezione/norm: `strategy.py:87-153` · Rebalance: `strategy.py:177-268` · Live build: `portfolio_scheduler.py:3056-3068` · Stop: `execution.py:557,722-730`.
-- **Divergenze**: D1 docs target_vol 0.15 vs code 0.10; D2 sizing "∝signal" (docs) vs gate-only (code); D4 yaml non wired.
+- **Divergenze**: D1 (target_vol) e D2 (sizing "∝signal") corrette nella documentazione da #490; D4 yaml non wired resta aperta.
 
 ## 6. Audit implementazione (vedi `06_implementation_audit.md`)
 
