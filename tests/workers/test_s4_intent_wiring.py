@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -121,7 +121,160 @@ def test_builder_scrive_i_candidate_prima_della_valutazione(mocker):
     written = store.write_s4_intent_events.call_args.args[0]
     assert [event.event_type for event in written] == ["candidate"]
     assert written[0].signal_id == 1
+    # #401: il candidato porta il punteggio di ranking (qui == raw perché
+    # velocity e' mockato a 1.0) accanto al raw score.
+    assert written[0].snapshot["score"] == pytest.approx(0.8)
+    assert written[0].snapshot["ranking_score"] == pytest.approx(0.8)
+    assert "ranking_score" not in written[0].missingness
+    assert written[0].held_at_rank is False
     assert strategy._intent_ledger is not None
+
+
+def test_builder_cattura_held_at_rank_dallo_snapshot_posizioni_aperte(mocker):
+    signal = _signal("AMD", 1, 0.8)
+    store = MagicMock()
+    store.fetch_signals_for_cycle.return_value = [signal]
+    store.fetch_trades.return_value = [{"symbol": "AMD"}]
+    mocker.patch("src.store.pg_store.PostgreSQLStore", return_value=store)
+    mocker.patch(
+        "src.workers.portfolio_scheduler._load_risk_config",
+        return_value={"s4_fixed_slot_sizing_enabled": True},
+    )
+    mocker.patch(
+        "src.workers.portfolio_scheduler._get_feedback_threshold", return_value=0.0
+    )
+    mocker.patch(
+        "src.workers.portfolio_scheduler._compute_signal_velocity", return_value=1.0
+    )
+    mocker.patch("redis.Redis.from_url", return_value=MagicMock())
+    entry = MagicMock(strategy_id="S4")
+    bars = pd.DataFrame(
+        {"AMD": [100.0, 101.0]},
+        index=pd.date_range("2026-08-21", periods=2, freq="B"),
+    )
+
+    _build_strategy_instance(entry, bars, decision_at=_TS)
+
+    [candidate] = store.write_s4_intent_events.call_args.args[0]
+    assert candidate.held_at_rank is True
+
+
+def test_builder_candidate_ranking_score_riflette_velocity_multiplier(mocker):
+    """#401: con boost=1.2, ranking_score = raw * 1.2 = 0.96."""
+    signal = _signal("AMD", 1, 0.8)
+    store = MagicMock()
+    store.fetch_signals_for_cycle.return_value = [signal]
+    store.fetch_trades.return_value = []
+    mocker.patch("src.store.pg_store.PostgreSQLStore", return_value=store)
+    mocker.patch(
+        "src.workers.portfolio_scheduler._load_risk_config",
+        return_value={"s4_fixed_slot_sizing_enabled": True},
+    )
+    mocker.patch(
+        "src.workers.portfolio_scheduler._get_feedback_threshold", return_value=0.0
+    )
+    mocker.patch(
+        "src.workers.portfolio_scheduler._compute_signal_velocity", return_value=1.2
+    )
+    redis = MagicMock()
+    mocker.patch("redis.Redis.from_url", return_value=redis)
+    entry = MagicMock(strategy_id="S4")
+    bars = pd.DataFrame(
+        {"AMD": [100.0, 101.0]},
+        index=pd.date_range("2026-08-21", periods=2, freq="B"),
+    )
+
+    _build_strategy_instance(entry, bars, decision_at=_TS)
+
+    [candidate] = store.write_s4_intent_events.call_args.args[0]
+    assert candidate.snapshot["score"] == pytest.approx(0.8)  # raw intoccato
+    assert candidate.snapshot["ranking_score"] == pytest.approx(0.96)  # post-velocity
+
+
+def test_rank_score_atomici_dal_capture_al_disposition(mocker):
+    """#401: il punteggio di ranking nel candidate DEVE essere lo stesso che
+    il ranker vede. Se diverge, la selezione non e' ricostruibile.
+
+    Setup: due segnali con score raw distinti, velocity multiplier diversi.
+    Il ranking_score atteso nel candidate (raw * mult) deve combaciare con
+    l'effective_strength della RankedTicker corrispondente.
+    """
+    recent = _TS - timedelta(minutes=10)
+    sig_a = SentimentResult(
+        symbol="AMD", signal_id=10, score=0.40, confidence=0.9,
+        reasoning="r", model_id="m", generated_at=recent,
+    )
+    sig_b = SentimentResult(
+        symbol="NVDA", signal_id=11, score=0.50, confidence=0.9,
+        reasoning="r", model_id="m", generated_at=recent,
+    )
+    store = MagicMock()
+    store.fetch_signals_for_cycle.return_value = [sig_a, sig_b]
+    store.fetch_trades.return_value = []
+    mocker.patch("src.store.pg_store.PostgreSQLStore", return_value=store)
+    mocker.patch(
+        "src.workers.portfolio_scheduler._load_risk_config",
+        return_value={"s4_fixed_slot_sizing_enabled": True},
+    )
+    mocker.patch(
+        "src.workers.portfolio_scheduler._get_feedback_threshold", return_value=0.0
+    )
+    # Velocity diversi per simbolo: AMD=1.5, NVDA=1.0. Catturati prima del
+    # signals_df build, quindi il candidate snapshot li vede gia' moltiplicati.
+    mocker.patch(
+        "src.workers.portfolio_scheduler._compute_signal_velocity",
+        side_effect=lambda sym, *a, **kw: {"AMD": 1.5, "NVDA": 1.0}[sym],
+    )
+    redis = MagicMock()
+    mocker.patch("redis.Redis.from_url", return_value=redis)
+    entry = MagicMock(strategy_id="S4")
+    bars = pd.DataFrame(
+        {"AMD": [100.0], "NVDA": [200.0]},
+        index=pd.date_range("2026-08-21", periods=1, freq="B"),
+    )
+    # Il test fissa _TS nel 2026-08; il wall clock reale e' mesi dopo, quindi
+    # la freshness/stale check li filtra tutti. Forza il passthrough.
+    mocker.patch(
+        "src.workers.portfolio_scheduler._apply_entry_freshness_gate",
+        side_effect=lambda signals, *args, **kwargs: list(signals),
+    )
+    mocker.patch(
+        "src.workers.portfolio_scheduler._filter_stale_signals",
+        side_effect=lambda signals, *args, **kwargs: (list(signals), []),
+    )
+
+    strategy = _build_strategy_instance(entry, bars, decision_at=_TS)
+
+    # Candidate events persistiti: lo snapshot deve portare entrambi gli score.
+    [cand_a, cand_b] = store.write_s4_intent_events.call_args.args[0]
+    by_signal = {c.signal_id: c for c in (cand_a, cand_b)}
+    assert by_signal[10].snapshot["score"] == pytest.approx(0.40)
+    assert by_signal[10].snapshot["ranking_score"] == pytest.approx(0.60)  # 0.40 * 1.5
+    assert by_signal[11].snapshot["score"] == pytest.approx(0.50)
+    assert by_signal[11].snapshot["ranking_score"] == pytest.approx(0.50)  # 0.50 * 1.0
+
+    # Simula il ranker con i valori post-velocity (raw * mult) — e' quello che
+    # la strategy vede quando costruisce i SentimentResult da signals_df. Deve
+    # vincere AMD (0.60) su NVDA (0.50), anche se il raw score diceva il
+    # contrario. La firma del #401 era esattamente questa divergenza.
+    sig_a_post = sig_a.model_copy(update={"score": 0.60})
+    sig_b_post = sig_b.model_copy(update={"score": 0.50})
+    weights = strategy.compute_target_weights([sig_a_post, sig_b_post], as_of=_TS)
+    provenance = strategy.last_signal_provenance
+    # Default config: fixed_slot_sizing=True, n_top=5 -> ogni vincitore 1/5.
+    assert weights == {"AMD": pytest.approx(0.2), "NVDA": pytest.approx(0.2)}
+    assert provenance["AMD"]["score"] == pytest.approx(0.60)
+    assert provenance["NVDA"]["score"] == pytest.approx(0.50)
+
+    # Per ogni candidato persistito, il ranking_score nel snapshot e' lo
+    # stesso effective_strength che il ranker ha usato per assegnargli il
+    # rank: ora coincidono per costruzione.
+    for sig_id, candidate in by_signal.items():
+        ticker = candidate.symbol
+        ranking_score_seen_by_ranker = provenance[ticker]["score"]
+        assert candidate.snapshot["ranking_score"] == pytest.approx(
+            ranking_score_seen_by_ranker
+        )
 
 
 def test_finalizer_scrive_disposition_riconciliata_con_s1_e_pyramiding():

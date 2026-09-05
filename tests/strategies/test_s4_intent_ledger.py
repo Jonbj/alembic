@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from src.models.signals import SentimentResult
 from src.strategies.s4.config import S4Config
 from src.strategies.s4.intent_ledger import (
@@ -99,9 +101,30 @@ def test_candidate_conserva_tempi_versioni_concorrenti_e_missingness():
         "active_feedback_threshold": "evaluated_after_candidate_capture",
         "content_hash": "not_available_at_decision",
         "first_seen_at": "not_available_at_decision",
+        "held_at_rank": "open_positions_unavailable_at_capture",
         "published_at": "not_available_at_decision",
+        "ranking_score": "not_recorded_at_capture",
         "resolver": "not_available_at_decision",
     }
+
+
+def test_candidate_misura_posizione_aperta_ed_eta_al_decision_slot():
+    signal = _signal(generated_at=_DECISION_AT - timedelta(hours=5))
+
+    [event] = S4IntentLedger(_DECISION_AT, _versions()).capture(
+        [signal],
+        open_symbols={"AMD"},
+    )
+
+    assert event.held_at_rank is True
+    assert event.signal_age_at_slot == event.decision_slot - signal.generated_at
+
+
+def test_candidate_non_dichiara_non_detenuto_se_lo_snapshot_posizioni_manca():
+    [event] = S4IntentLedger(_DECISION_AT, _versions()).capture([_signal()])
+
+    assert event.held_at_rank is None
+    assert event.missingness["held_at_rank"] == "open_positions_unavailable_at_capture"
 
 
 def test_disposition_aggiunge_il_gate_effettivamente_osservato_senza_mutare_candidate():
@@ -154,3 +177,80 @@ def test_migrazione_impone_append_only_idempotenza_e_due_popolazioni():
     assert "CREATE VIEW s4_candidate_population" in migration
     assert "CREATE VIEW s4_tradable_intent_population" in migration
     assert "intent_id" in migration
+
+
+# --- #401: il rank nel ledger deve riflettere il punteggio di ranking, non il
+# raw `signal.score`. Il ranker moltiplica per il velocity multiplier prima di
+# ordinare — quel punteggio (effective_strength) deve arrivare al candidate in
+# modo atomico, non dopo un re-read.
+
+
+def test_candidate_puo_registrare_il_punteggio_di_ranking_atomico_al_raw():
+    ledger = S4IntentLedger(_DECISION_AT, _versions())
+    [event] = ledger.capture(
+        [_signal(score=0.40)],
+        ranking_scores={7001: 0.48},
+    )
+
+    assert event.snapshot["score"] == pytest.approx(0.40)
+    assert event.snapshot["ranking_score"] == pytest.approx(0.48)
+
+
+def test_candidate_senza_ranking_score_lo_marca_nel_missingness():
+    """Retro-compat: prima del fix il ledger non aveva `ranking_score`; i candidate
+    che non ne hanno uno devono dichiararlo esplicitamente nel missingness, non
+    restare silenti (altrimenti il dossier non sa di non saperlo)."""
+    ledger = S4IntentLedger(_DECISION_AT, _versions())
+    [event] = ledger.capture([_signal()])
+
+    assert "ranking_score" not in event.snapshot
+    assert event.missingness.get("ranking_score") == "not_recorded_at_capture"
+
+
+def test_dossier_invariante_rank_strettamente_decrescente_in_ranking_score():
+    """#401: per ogni decision_slot, la mappa (symbol -> (rank, ranking_score))
+    deve soddisfare rank_i < rank_j iff ranking_score_i > ranking_score_j
+    (confronto fra simboli co-ranghi ammesso per la tie rule)."""
+    ledger = S4IntentLedger(_DECISION_AT, _versions())
+    raw = [
+        _signal(signal_id=11, symbol="MRVL", score=0.3578),
+        _signal(signal_id=12, symbol="CSCO", score=0.3199),
+        _signal(signal_id=13, symbol="SOXX", score=0.3600),
+    ]
+    ledger.capture(
+        raw,
+        ranking_scores={11: 0.3578, 12: 0.3199, 13: 0.3600},
+    )
+    from src.strategies.s4.config import S4Config
+    from src.strategies.s4.ranking import CrossSectionalRanker
+
+    ranker = CrossSectionalRanker(S4Config(n_top=5, min_stocks=3))
+    result = ranker.rank(raw, as_of=_DECISION_AT)
+
+    for diagnostic in result.diagnostics:
+        if diagnostic.signal_id is None or diagnostic.rank is None:
+            continue
+        candidate = next(
+            e for e in ledger._states.values() if e.candidate.signal_id == diagnostic.signal_id
+        )
+        ranking_score = candidate.candidate.snapshot.get("ranking_score")
+        # L'invariante richiede che il punteggio persistito sia la chiave
+        # usata dal ranker per assegnare quel rank: devono coincidere.
+        assert ranking_score == pytest.approx(
+            next(
+                r.effective_strength for r in result.rankings
+                if r.signal_id == diagnostic.signal_id
+            )
+        )
+
+    by_symbol = {
+        d.ticker: (d.rank, next(
+            e.candidate.snapshot.get("ranking_score") for e in ledger._states.values()
+            if e.candidate.signal_id == d.signal_id
+        ))
+        for d in result.diagnostics if d.rank is not None and d.signal_id is not None
+    }
+    sorted_by_score = sorted(by_symbol.items(), key=lambda kv: kv[1][1], reverse=True)
+    assert [t for t, _ in sorted_by_score] == [t for t, _ in sorted(
+        by_symbol.items(), key=lambda kv: kv[1][0]
+    )]

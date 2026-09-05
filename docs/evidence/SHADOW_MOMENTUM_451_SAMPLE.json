@@ -1,0 +1,51 @@
+{
+  "schema_version": "shadow_momentum_451_sample_v1",
+  "description": "Le 38 righe NO_NEWS/THIN_NEUTRAL pubblicate nei report Week 34 e Week 35 citati da #451.",
+  "rows": [
+    {"data": "2026-08-17", "symbol": "RDDT", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-17.md"},
+    {"data": "2026-08-17", "symbol": "NOW", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-17.md"},
+    {"data": "2026-08-17", "symbol": "SPCX", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-17.md"},
+    {"data": "2026-08-17", "symbol": "NKE", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-17.md"},
+    {"data": "2026-08-17", "symbol": "ADBE", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-17.md"},
+    {"data": "2026-08-17", "symbol": "META", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-17.md"},
+    {"data": "2026-08-17", "symbol": "DIS", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-17.md"},
+
+    {"data": "2026-08-18", "symbol": "RDDT", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-18.md"},
+    {"data": "2026-08-18", "symbol": "AVGO", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-18.md"},
+    {"data": "2026-08-18", "symbol": "ADBE", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-18.md"},
+
+    {"data": "2026-08-19", "symbol": "NOW", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-19.md"},
+    {"data": "2026-08-19", "symbol": "CRM", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-19.md"},
+    {"data": "2026-08-19", "symbol": "F", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-19.md"},
+    {"data": "2026-08-19", "symbol": "ADBE", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-19.md"},
+    {"data": "2026-08-19", "symbol": "AZN", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-19.md"},
+    {"data": "2026-08-19", "symbol": "RDDT", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-19.md"},
+    {"data": "2026-08-19", "symbol": "PFE", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-19.md"},
+    {"data": "2026-08-19", "symbol": "AVGO", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-19.md"},
+
+    {"data": "2026-08-20", "symbol": "BP", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-20.md"},
+    {"data": "2026-08-20", "symbol": "BA", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-20.md"},
+    {"data": "2026-08-20", "symbol": "SPCX", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-20.md"},
+
+    {"data": "2026-08-24", "symbol": "MA", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-24.md"},
+    {"data": "2026-08-24", "symbol": "V", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-24.md"},
+    {"data": "2026-08-24", "symbol": "TSLA", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-24.md"},
+
+    {"data": "2026-08-25", "symbol": "RDDT", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-25.md"},
+    {"data": "2026-08-25", "symbol": "NVO", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-25.md"},
+    {"data": "2026-08-25", "symbol": "HOOD", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-25.md"},
+
+    {"data": "2026-08-26", "symbol": "DB", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-26.md"},
+    {"data": "2026-08-26", "symbol": "RDDT", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-26.md"},
+    {"data": "2026-08-26", "symbol": "ERIC", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-26.md"},
+    {"data": "2026-08-26", "symbol": "HOOD", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-26.md"},
+
+    {"data": "2026-08-27", "symbol": "PLTR", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-27.md"},
+    {"data": "2026-08-27", "symbol": "SAP", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-27.md"},
+    {"data": "2026-08-27", "symbol": "BIDU", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-27.md"},
+    {"data": "2026-08-27", "symbol": "IBM", "causa": "NO_NEWS", "source": "docs/ALPHA_MISS_REPORT_2026-08-27.md"},
+    {"data": "2026-08-27", "symbol": "ADBE", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-27.md"},
+    {"data": "2026-08-27", "symbol": "AVGO", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-27.md"},
+    {"data": "2026-08-27", "symbol": "INTC", "causa": "THIN_NEUTRAL", "source": "docs/ALPHA_MISS_REPORT_2026-08-27.md"}
+  ]
+}

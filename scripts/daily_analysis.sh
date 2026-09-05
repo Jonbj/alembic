@@ -123,7 +123,7 @@ MODALITÀ OPERATIVA
 * Non avviare worker che possano produrre nuovi segnali o ordini.
 * Non rieseguire pipeline live.
 * Puoi leggere codice, configurazioni, log, report, database, CSV, parquet, JSON.
-* Esegui direttamente i comandi read-only standard: ls, find, grep, cat, docker compose logs, query SELECT.
+* Esegui direttamente i comandi read-only standard: ls, find, grep, cat, query SELECT.
 
 RISORSE DISPONIBILI
 
@@ -136,9 +136,13 @@ API REST locale (Authorization: Bearer __ALEMBIC_API_KEY__):
     curl -s -H "Authorization: Bearer __ALEMBIC_API_KEY__" "$BASE/positions"
     curl -s -H "Authorization: Bearer __ALEMBIC_API_KEY__" "$BASE/orders?limit=100"
 
-Log container Docker (solo lettura):
-  docker compose logs worker --since 48h 2>&1 | grep -E "ERROR|WARNING|semaphore|fallback|FinBERT|Ollama" | tail -50
-  docker compose logs worker-inference --since 48h 2>&1 | grep -E "ERROR|WARNING|quantiz|FinBERT" | tail -30
+Log applicativi persistenti sull'host (sopravvivono ai redeploy):
+  logs/containers/worker-__DATE_TARGET__.log
+  logs/containers/worker-inference-__DATE_TARGET__.log
+  logs/containers/api-__DATE_TARGET__.log
+  logs/containers/beat-__DATE_TARGET__.log
+Usa questi file, non `docker compose logs`: i log Docker appartengono alla sola
+istanza corrente del container e dopo una ricreazione non coprono la data target.
 
 Database PostgreSQL (solo SELECT):
   docker exec alembic-postgres-1 psql -U trading -d trading -c "<query SELECT>"

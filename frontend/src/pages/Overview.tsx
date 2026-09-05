@@ -77,7 +77,10 @@ export default function Overview() {
   const { data: quality } = useQuery({ queryKey: ['overview-quality', 14], queryFn: () => fetchQualityMetrics(14), refetchInterval: 120000 })
   const { data: portfolio } = useQuery({ queryKey: ['overview-portfolio-status'], queryFn: fetchPortfolioStatus, staleTime: 60000 })
 
-  const gateThreshold = feedback?.entry_threshold ?? 0.30
+  // #474: gateThreshold counts sentiment signals against the entry gate, which is
+  // S4's — read strategies.S4 explicitly rather than a blended/global value.
+  const gateThreshold = feedback?.strategies?.S4?.entry_threshold ?? 0.30
+  const gateElevated = feedback?.strategies?.S4?.is_elevated ?? false
   const now = signalsUpdatedAt
   const freshSignals = signals.filter((s) => now - new Date(s.generated_at).getTime() <= SIGNAL_FRESH_HOURS * 3600_000)
   const staleSignals = signals.length - freshSignals.length
@@ -133,7 +136,7 @@ export default function Overview() {
         },
         {
           heading: "Operational State",
-          content: "Mostra se il sistema è READY/DEGRADED/BLOCKED, l'età dell'ultimo signal e dell'ultimo portfolio cycle, la soglia attiva del feedback gate, e lo stato di autorizzazione di S1/S4. La home non autorizza trading: guarda sempre i badge lifecycle.",
+          content: "Mostra se il sistema è READY/DEGRADED/BLOCKED, l'età dell'ultimo signal e dell'ultimo portfolio cycle, la soglia attiva del feedback gate, e lo stato di autorizzazione di S1/S4. La home non autorizza trading: guarda sempre i badge lifecycle.\n\n**Threshold**: è la soglia di **S4** (`feedback:entry_threshold:S4`), letta esplicitamente e non come valore globale — dal 2026-09-03 il ratchet scrive una chiave per strategia (#474), e S1 vale 0.0 perché non ha un gate d'ingresso discreto. Baseline 0.30, il feedback loop la alza fino a 0.60 dopo perdite consecutive e la fa decadere verso la baseline.",
         },
         {
           heading: "Signal Quality e Decisioni",
@@ -201,7 +204,7 @@ export default function Overview() {
         <div className="card">
           <h3 style={{ margin: '0 0 14px', fontSize: 14, fontWeight: 700 }}>Signal Gate</h3>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-            <MiniMetric label="Threshold" value={gateThreshold.toFixed(2)} sub={feedback?.adjustment_active ? 'feedback active' : 'baseline / current'} />
+            <MiniMetric label="Threshold" value={gateThreshold.toFixed(2)} sub={gateElevated ? 'feedback active (S4)' : 'baseline / current'} />
             <MiniMetric label="Gate pass" value={String(gatePass)} sub="fresh non-FB score ≥ threshold" />
             <MiniMetric label="Stale latest" value={String(staleSignals)} sub={`>${SIGNAL_FRESH_HOURS}h old`} />
             <MiniMetric label="Deployed" value={`$${deployedNotional.toFixed(0)}`} sub="open market value" />

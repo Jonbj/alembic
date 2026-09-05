@@ -167,6 +167,8 @@ class S4IntentEvent:
     model_generated_at: datetime
     decision_at: datetime
     rank: int | None
+    held_at_rank: bool | None
+    signal_age_at_slot: timedelta
     competing_candidates: tuple[str, ...]
     s1_state: dict[str, Any]
     anti_pyramiding: bool | None
@@ -201,9 +203,33 @@ class S4IntentLedger:
         self._states: dict[str, _IntentState] = {}
         self._disposition_component_updates: dict[str, dict[str, Any]] = {}
 
-    def capture(self, signals: Iterable[SentimentResult]) -> list[S4IntentEvent]:
+    def capture(
+        self,
+        signals: Iterable[SentimentResult],
+        ranking_scores: dict[int, float] | None = None,
+        open_symbols: set[str] | None = None,
+    ) -> list[S4IntentEvent]:
+        """Append-only candidate events for every observed signal (#294, #401).
+
+        Args:
+            signals: signals observed in this decision cycle, before any
+                downstream filter. ``signal.score`` is the raw sentiment score
+                emitted by the worker; it is the field the contradiction
+                guard (dossier) keys on and must stay stable.
+            ranking_scores: optional per-signal ranking score (the value the
+                ranker actually sees — typically ``raw_score × velocity_multiplier``).
+                When supplied, it is persisted alongside ``score`` so the ledger
+                row carries the exact key the ranker used to assign ``rank``
+                (the field the rank can be reconstructed from). Absent means
+                the caller did not compute it; this is declared in ``missingness``
+                so the dossier knows it cannot audit this row.
+            open_symbols: point-in-time snapshot of symbols with an open
+                position. ``None`` means the snapshot was unavailable; it must
+                not be interpreted as an empty book.
+        """
         signals = list(signals)
         competitors = tuple(sorted({signal.symbol for signal in signals}))
+        ranking_scores = ranking_scores or {}
         created: list[S4IntentEvent] = []
         for signal in signals:
             key = _signal_key(signal)
@@ -235,6 +261,28 @@ class S4IntentLedger:
                 signal.resolver_method is None and signal.extraction_method is None
             ):
                 missingness["resolver"] = "not_available_at_decision"
+            if open_symbols is None:
+                missingness["held_at_rank"] = "open_positions_unavailable_at_capture"
+
+            snapshot: dict[str, Any] = {
+                "symbol": signal.symbol,
+                "score": signal.score,
+                "confidence": signal.confidence,
+                "fallback_used": signal.fallback_used,
+                "ensemble_std": signal.ensemble_std,
+                "news_log_id": signal.news_log_id,
+                "content_hash": signal.content_hash,
+                "extraction_method": signal.extraction_method,
+            }
+            # #401: rank persistence must be reconstructable. Persist the
+            # ranking score atomically with the candidate, NOT by re-reading
+            # the signal store later. Keys on signal_id (when present) — that
+            # is the only stable handle that survives velocity multipliers,
+            # dedup, and any other in-flight mutation.
+            if signal.signal_id is not None and signal.signal_id in ranking_scores:
+                snapshot["ranking_score"] = float(ranking_scores[signal.signal_id])
+            else:
+                missingness["ranking_score"] = "not_recorded_at_capture"
 
             event = S4IntentEvent(
                 event_id=str(uuid5(_INTENT_NAMESPACE, f"{intent_id}|candidate")),
@@ -250,6 +298,12 @@ class S4IntentLedger:
                 model_generated_at=_utc(signal.generated_at),
                 decision_at=self.decision_at,
                 rank=None,
+                held_at_rank=(
+                    signal.symbol in open_symbols if open_symbols is not None else None
+                ),
+                signal_age_at_slot=(
+                    self.decision_slot - _utc(signal.generated_at)
+                ),
                 competing_candidates=competitors,
                 s1_state={
                     "status": "missing",
@@ -259,16 +313,7 @@ class S4IntentLedger:
                 reason_code="CANDIDATE_OBSERVED",
                 is_tradable=None,
                 versions=versions,
-                snapshot={
-                    "symbol": signal.symbol,
-                    "score": signal.score,
-                    "confidence": signal.confidence,
-                    "fallback_used": signal.fallback_used,
-                    "ensemble_std": signal.ensemble_std,
-                    "news_log_id": signal.news_log_id,
-                    "content_hash": signal.content_hash,
-                    "extraction_method": signal.extraction_method,
-                },
+                snapshot=snapshot,
                 missingness=dict(sorted(missingness.items())),
             )
             self._states[key] = _IntentState(candidate=event)

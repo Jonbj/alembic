@@ -234,41 +234,59 @@ export default function AutoImprove() {
           <p style={{ color: 'var(--text-muted)' }}>Unavailable</p>
         ) : (
           <>
-            <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', marginBottom: 16 }}>
-              <Stat
-                label="Entry Threshold"
-                value={fmt(feedback.entry_threshold, 2)}
-                sub={`baseline ${fmt(feedback.entry_threshold_baseline, 2)}`}
-                highlight={feedback.adjustment_active && feedback.entry_threshold > feedback.entry_threshold_baseline}
-              />
-              <Stat
-                label="Status"
-                value={
-                  <span style={{ fontSize: 16 }}>
-                    <StatusDot active={feedback.adjustment_active} />
-                    {feedback.adjustment_active ? 'Adjustment active' : 'At baseline'}
-                  </span>
-                }
-                sub={feedback.last_reason ?? ''}
-              />
-            </div>
+            {/* #474: each sleeve has its own threshold and state — a blended
+                global value was blind on every sleeve except the last one to
+                get a bare-key mirror. */}
+            {Object.entries(feedback.strategies).map(([strategy, s]) => (
+              <div key={strategy} style={{ marginBottom: 18, paddingBottom: 18, borderBottom: '1px solid var(--border)' }}>
+                <h4 style={{ margin: '0 0 10px', fontSize: 13, fontWeight: 700, color: 'var(--text-muted)' }}>
+                  {strategy}
+                </h4>
+                {strategy === 'S1' ? (
+                  <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
+                    No discrete entry gate by design — state-only tracking.
+                  </p>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', marginBottom: 16 }}>
+                      <Stat
+                        label="Entry Threshold"
+                        value={fmt(s.entry_threshold, 2)}
+                        sub={`baseline ${fmt(feedback.baseline, 2)}`}
+                        highlight={s.is_elevated}
+                      />
+                      <Stat
+                        label="Status"
+                        value={
+                          <span style={{ fontSize: 16 }}>
+                            <StatusDot active={s.is_elevated} />
+                            {s.is_elevated ? 'Adjustment active' : 'At baseline'}
+                          </span>
+                        }
+                        sub={s.last_reason ?? ''}
+                      />
+                    </div>
 
-            {feedback.adjustment_active && (
-              <div style={{
-                background: 'rgba(245,158,11,0.10)',
-                border: '1px solid rgba(245,158,11,0.3)',
-                borderRadius: 8, padding: '10px 14px', fontSize: 13,
-              }}>
-                <strong>Last trigger:</strong>{' '}
-                {feedback.consecutive_losses != null && `${feedback.consecutive_losses} consecutive losses`}
-                {feedback.rolling_net_pnl != null && ` · rolling P&L $${feedback.rolling_net_pnl.toFixed(2)}`}
-                {feedback.last_adjustment_ts && (
-                  <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>
-                    ({fmtDateTime(feedback.last_adjustment_ts)})
-                  </span>
+                    {s.is_elevated && (
+                      <div style={{
+                        background: 'rgba(245,158,11,0.10)',
+                        border: '1px solid rgba(245,158,11,0.3)',
+                        borderRadius: 8, padding: '10px 14px', fontSize: 13,
+                      }}>
+                        <strong>Last trigger:</strong>{' '}
+                        {s.consecutive_losses != null && `${s.consecutive_losses} consecutive losses`}
+                        {s.rolling_net_pnl != null && ` · rolling P&L $${s.rolling_net_pnl.toFixed(2)}`}
+                        {s.last_adjustment_ts && (
+                          <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>
+                            ({fmtDateTime(s.last_adjustment_ts)})
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
-            )}
+            ))}
 
             <p style={{ margin: '12px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
               Checked every 30 min during market hours. Triggers when the EWMA of trade

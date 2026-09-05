@@ -1,0 +1,2261 @@
+{
+  "issue": 492,
+  "generato_il": "2026-09-04T19:16:40.073235+00:00",
+  "finestra": {
+    "dal": "2026-07-01",
+    "al_incluso": "2026-09-04"
+  },
+  "metodo": {
+    "universo": "config/trading.yaml symbols.watchlist",
+    "pattern_verbi": [
+      "warns",
+      "sees",
+      "expects",
+      "forecasts",
+      "predicts",
+      "says",
+      "downgrades",
+      "upgrades",
+      "raises",
+      "cuts",
+      "initiates",
+      "reiterates",
+      "names",
+      "adds"
+    ],
+    "attribuzione_decisioni": "solo execution_decisions.signal_id diretto",
+    "attribuzione_trade": "BUY via decision_id/signal_id; SELL via exit_order_id",
+    "reversal_threshold": -0.35,
+    "entry_threshold": 0.3,
+    "entry_threshold_source": "redis:feedback:entry_threshold:S4",
+    "entry_threshold_temporalita": "snapshot al momento del run; Redis non conserva la serie storica del gate",
+    "fonte_prezzi": "Alpaca IEX daily adjustment=all (via worker)",
+    "proposta_non_applicata": "Nel prompt distinguere esplicitamente l'azienda fonte dell'affermazione dall'azienda oggetto: se l'emittente pubblica una view su mercato, investitori o un altro titolo, non trattarla come guidance sui propri fondamentali."
+  },
+  "riepilogo": {
+    "segnali_esaminati": 8143,
+    "candidati": 54,
+    "candidati_sopra_soglia": 17,
+    "controfattuali_1_seduta_disponibili": 54,
+    "candidati_con_decisione_buy_sell": 4,
+    "decisioni_buy_sell": 4,
+    "trade_collegati": 4,
+    "notional_mosso_usd": 5980.6507313496495,
+    "pnl_realizzato_usd": -39.75881633209693,
+    "classe_validata": {
+      "candidati": 38,
+      "candidati_sopra_soglia": 7,
+      "candidati_con_decisione_buy_sell": 2,
+      "decisioni_buy_sell": 2,
+      "trade_collegati": 2,
+      "notional_mosso_usd": 3030.7607313496496,
+      "pnl_realizzato_usd": -40.47812633166394
+    }
+  },
+  "validazione_manuale": {
+    "n_classificati": 54,
+    "classe": 38,
+    "non_classe": 16,
+    "precisione_euristica": 0.7037037037037037,
+    "campione": [
+      {
+        "signal_id": 1887,
+        "classe": true,
+        "nota": "view su rotazione AI, attribuzione in coda"
+      },
+      {
+        "signal_id": 1916,
+        "classe": true,
+        "nota": "Deutsche Bank valuta Qnity"
+      },
+      {
+        "signal_id": 2096,
+        "classe": true,
+        "nota": "responsabile macro parla di AI e lavoro"
+      },
+      {
+        "signal_id": 2121,
+        "classe": true,
+        "nota": "warning su downgrade di Travis Perkins"
+      },
+      {
+        "signal_id": 2284,
+        "classe": true,
+        "nota": "view sull'opportunita' nei private markets"
+      },
+      {
+        "signal_id": 2609,
+        "classe": false,
+        "nota": "CEO AMAT parla della domanda per AMAT"
+      },
+      {
+        "signal_id": 2660,
+        "classe": true,
+        "nota": "price target su Lam Research"
+      },
+      {
+        "signal_id": 2664,
+        "classe": true,
+        "nota": "price target su KLA"
+      },
+      {
+        "signal_id": 2712,
+        "classe": false,
+        "nota": "duplicato: CEO AMAT parla della propria domanda"
+      },
+      {
+        "signal_id": 2872,
+        "classe": true,
+        "nota": "analista Morgan Stanley valuta Watsco"
+      },
+      {
+        "signal_id": 3076,
+        "classe": true,
+        "nota": "Goldman raccomanda NIO"
+      },
+      {
+        "signal_id": 3476,
+        "classe": false,
+        "nota": "Ericsson e' oggetto del volume opzioni"
+      },
+      {
+        "signal_id": 3499,
+        "classe": true,
+        "nota": "price target su Alnylam"
+      },
+      {
+        "signal_id": 3566,
+        "classe": false,
+        "nota": "costi componenti impattano i risultati Ericsson"
+      },
+      {
+        "signal_id": 3591,
+        "classe": true,
+        "nota": "price target su AMD"
+      },
+      {
+        "signal_id": 3677,
+        "classe": true,
+        "nota": "Morgan Stanley raccomanda CAVA"
+      },
+      {
+        "signal_id": 3715,
+        "classe": true,
+        "nota": "Morgan Stanley valuta Nvidia"
+      },
+      {
+        "signal_id": 3822,
+        "classe": false,
+        "nota": "GE descrive il proprio vincolo di crescita"
+      },
+      {
+        "signal_id": 3927,
+        "classe": false,
+        "nota": "TSMC annuncia il proprio capex"
+      },
+      {
+        "signal_id": 4773,
+        "classe": false,
+        "nota": "Lilly comunica risultati del proprio farmaco"
+      },
+      {
+        "signal_id": 4782,
+        "classe": true,
+        "nota": "view Morgan Stanley sui tassi Fed"
+      },
+      {
+        "signal_id": 5250,
+        "classe": true,
+        "nota": "Deutsche Bank valuta il volo Starship"
+      },
+      {
+        "signal_id": 5922,
+        "classe": false,
+        "nota": "Novo comunica esito del proprio trial"
+      },
+      {
+        "signal_id": 6228,
+        "classe": true,
+        "nota": "view sulla spesa cloud aggregata"
+      },
+      {
+        "signal_id": 6290,
+        "classe": true,
+        "nota": "Palantir formula un warning sulle aziende clienti"
+      },
+      {
+        "signal_id": 6461,
+        "classe": false,
+        "nota": "Novo alza la propria guidance"
+      },
+      {
+        "signal_id": 6486,
+        "classe": false,
+        "nota": "Caterpillar alza il proprio forecast vendite"
+      },
+      {
+        "signal_id": 6569,
+        "classe": false,
+        "nota": "Disney quantifica il proprio rimborso"
+      },
+      {
+        "signal_id": 7093,
+        "classe": false,
+        "nota": "TSMC e' oggetto del salto delle proprie vendite"
+      },
+      {
+        "signal_id": 7247,
+        "classe": true,
+        "nota": "Morgan Stanley valuta SpaceX"
+      },
+      {
+        "signal_id": 7492,
+        "classe": true,
+        "nota": "CEO Novo parla dei costi sanitari USA"
+      },
+      {
+        "signal_id": 7702,
+        "classe": false,
+        "nota": "JD descrive il proprio profitto"
+      },
+      {
+        "signal_id": 7858,
+        "classe": true,
+        "nota": "analista Morgan Stanley valuta Klarna"
+      },
+      {
+        "signal_id": 7948,
+        "classe": true,
+        "nota": "Morgan Stanley valuta Reliance"
+      },
+      {
+        "signal_id": 8182,
+        "classe": true,
+        "nota": "analista Morgan Stanley valuta ONEOK"
+      },
+      {
+        "signal_id": 8484,
+        "classe": true,
+        "nota": "Morgan Stanley declassa Baidu"
+      },
+      {
+        "signal_id": 8540,
+        "classe": false,
+        "nota": "AMAT prevede la propria crescita"
+      },
+      {
+        "signal_id": 8790,
+        "classe": false,
+        "nota": "Alibaba annuncia la propria raccolta"
+      },
+      {
+        "signal_id": 8899,
+        "classe": true,
+        "nota": "raccomandazione su altro titolo, attribuzione in coda"
+      },
+      {
+        "signal_id": 9016,
+        "classe": true,
+        "nota": "Morgan Stanley valuta SpaceX"
+      },
+      {
+        "signal_id": 9053,
+        "classe": true,
+        "nota": "Morgan Stanley valuta SpaceX"
+      },
+      {
+        "signal_id": 9088,
+        "classe": true,
+        "nota": "Morgan Stanley valuta Williams-Sonoma"
+      },
+      {
+        "signal_id": 9099,
+        "classe": true,
+        "nota": "Goldman valuta Salesforce"
+      },
+      {
+        "signal_id": 9134,
+        "classe": false,
+        "nota": "AMAT descrive la propria crescita"
+      },
+      {
+        "signal_id": 9141,
+        "classe": true,
+        "nota": "Morgan Stanley alza target Salesforce"
+      },
+      {
+        "signal_id": 9401,
+        "classe": true,
+        "nota": "Deutsche Bank nomina titoli hardware AI"
+      },
+      {
+        "signal_id": 9412,
+        "classe": true,
+        "nota": "CEO Goldman formula una view macro sugli USA"
+      },
+      {
+        "signal_id": 9478,
+        "classe": true,
+        "nota": "Morgan Stanley promuove HOOD"
+      },
+      {
+        "signal_id": 9484,
+        "classe": true,
+        "nota": "Deutsche Bank nomina Lumentum e Coherent"
+      },
+      {
+        "signal_id": 9529,
+        "classe": true,
+        "nota": "Morgan Stanley valuta Meta"
+      },
+      {
+        "signal_id": 9538,
+        "classe": true,
+        "nota": "Deutsche Bank valuta SiriusXM"
+      },
+      {
+        "signal_id": 9593,
+        "classe": true,
+        "nota": "Goldman avverte gli investitori sui rendimenti di mercato"
+      },
+      {
+        "signal_id": 9660,
+        "classe": true,
+        "nota": "analista Morgan Stanley valuta MiniMed"
+      },
+      {
+        "signal_id": 9676,
+        "classe": true,
+        "nota": "Morgan Stanley formula una view sulle banche asiatiche"
+      }
+    ]
+  },
+  "segmenti_prompt": {
+    "pre_variante_a": {
+      "candidati": 45,
+      "candidati_sopra_soglia": 15,
+      "candidati_con_decisione_buy_sell": 3,
+      "decisioni_buy_sell": 3,
+      "trade_collegati": 3,
+      "notional_mosso_usd": 5334.11,
+      "pnl_realizzato_usd": -4.841529666458279,
+      "classe_validata": {
+        "candidati": 29,
+        "candidati_sopra_soglia": 5,
+        "candidati_con_decisione_buy_sell": 1,
+        "decisioni_buy_sell": 1,
+        "trade_collegati": 1,
+        "notional_mosso_usd": 2384.22,
+        "pnl_realizzato_usd": -5.560839666025289
+      }
+    },
+    "variante_a": {
+      "candidati": 9,
+      "candidati_sopra_soglia": 2,
+      "candidati_con_decisione_buy_sell": 1,
+      "decisioni_buy_sell": 1,
+      "trade_collegati": 1,
+      "notional_mosso_usd": 646.54073134965,
+      "pnl_realizzato_usd": -34.91728666563865,
+      "classe_validata": {
+        "candidati": 9,
+        "candidati_sopra_soglia": 2,
+        "candidati_con_decisione_buy_sell": 1,
+        "decisioni_buy_sell": 1,
+        "trade_collegati": 1,
+        "notional_mosso_usd": 646.54073134965,
+        "pnl_realizzato_usd": -34.91728666563865
+      }
+    }
+  },
+  "candidati": [
+    {
+      "signal_id": 1887,
+      "symbol": "MS",
+      "generated_at": "2026-07-06T15:19:20.83809+00:00",
+      "score": 0.0,
+      "confidence": 0.9,
+      "model_id": "ensemble:glm-5.2:cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "Morgan Stanley is the author of the research note predicting a sector pivot, which has no direct or material impact on MS's own revenue, cash flows, or competitive position.",
+      "news_log_id": 1887,
+      "title": "AI investors may pivot to hyperscalers from chipmakers, Morgan Stanley says",
+      "url": "https://economictimes.indiatimes.com/markets/us-stocks/news/ai-investors-may-pivot-to-hyperscalers-from-chipmakers-morgan-stanley-says/articleshow/132218137.cms",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-06T14:15:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "says",
+        "complemento": "AI investors may pivot to hyperscalers from chipmakers",
+        "forma": "attribuzione_in_coda"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-06",
+        "seduta_successiva": "2026-07-07",
+        "close_base": 220.86,
+        "close_successivo": 220.86,
+        "rendimento_1_seduta": 0.0
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 1916,
+      "symbol": "DB",
+      "generated_at": "2026-07-06T16:04:54.401306+00:00",
+      "score": 0.5606579909198361,
+      "confidence": 0.6814438590733897,
+      "model_id": "finbert",
+      "ensemble_std": 0.0,
+      "reasoning": "FinBERT fallback (ensemble divergence)",
+      "news_log_id": 1916,
+      "title": "Qnity to gain more momentum in earnings season, Deutsche Bank says",
+      "url": "https://www.cnbc.com/2026/07/06/qnity-to-gain-more-momentum-in-earnings-season-deutsche-bank-says.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-06T15:00:00+00:00",
+      "match_heuristico": {
+        "alias": "Deutsche Bank",
+        "verbo": "says",
+        "complemento": "Qnity to gain more momentum in earnings season",
+        "forma": "attribuzione_in_coda"
+      },
+      "soglia_operativa_superata": "long_entry",
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [
+        {
+          "id": 1302,
+          "signal_id": 1916,
+          "tick_time": "2026-07-06T16:07:00.649816+00:00",
+          "symbol": "DB",
+          "decision": "BUY",
+          "order_id": "5d5bc156-c937-4af1-9774-0ba63a98232c",
+          "signal_score": 0.5606579909198361,
+          "reason": "S4 news-driven: sentiment +0.561 (finbert), portfolio weight 5.0%. FinBERT fallback (ensemble divergence)"
+        }
+      ],
+      "trade_ids": [
+        239
+      ],
+      "pnl_realizzato_usd": -5.560839666025289,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-06",
+        "seduta_successiva": "2026-07-07",
+        "close_base": 37.05,
+        "close_successivo": 36.645,
+        "rendimento_1_seduta": -0.01093117408906863
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 2096,
+      "symbol": "DB",
+      "generated_at": "2026-07-07T17:33:24.577011+00:00",
+      "score": 0.008622712889799223,
+      "confidence": 0.3134231004422655,
+      "model_id": "finbert",
+      "ensemble_std": 0.0,
+      "reasoning": "FinBERT fallback (ensemble divergence)",
+      "news_log_id": 2096,
+      "title": "Global head of macro research at Germany's largest bank Deutsche Bank says: My view on AI and jobs is slightly skewed by what economic history tells us, as at every point ...",
+      "url": "https://timesofindia.indiatimes.com/technology/tech-news/global-head-of-macro-research-at-germanys-largest-bank-deutsche-bank-says-my-view-on-ai-and-jobs-is-slightly-skewed-by-what-economic-history-tells-us-as-at-every-point-/articleshow/132240984.cms",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-07T16:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Deutsche Bank",
+        "verbo": "says",
+        "complemento": "My view on AI and jobs is slightly skewed by what economic history tells us, as at every point ...",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-07",
+        "seduta_successiva": "2026-07-08",
+        "close_base": 36.645,
+        "close_successivo": 35.27,
+        "rendimento_1_seduta": -0.0375221721926593
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 2121,
+      "symbol": "DB",
+      "generated_at": "2026-07-07T18:16:14.813998+00:00",
+      "score": -0.01641160968061985,
+      "confidence": 0.07310975011739496,
+      "model_id": "finbert",
+      "ensemble_std": 0.0,
+      "reasoning": "FinBERT fallback (ensemble divergence)",
+      "news_log_id": 2121,
+      "title": "Deutsche Bank warns of further downgrades at Travis Perkins",
+      "url": "https://www.proactiveinvestors.co.uk/companies/news/1095039/deutsche-bank-warns-of-further-downgrades-at-travis-perkins-1095039.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-07T17:00:00+00:00",
+      "match_heuristico": {
+        "alias": "Deutsche Bank",
+        "verbo": "warns",
+        "complemento": "of further downgrades at Travis Perkins",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-07",
+        "seduta_successiva": "2026-07-08",
+        "close_base": 36.645,
+        "close_successivo": 35.27,
+        "rendimento_1_seduta": -0.0375221721926593
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 2284,
+      "symbol": "GS",
+      "generated_at": "2026-07-08T15:31:57.380525+00:00",
+      "score": 0.36,
+      "confidence": 0.6,
+      "model_id": "ensemble:glm-5.2:cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "Goldman Sachs identifying a $2 trillion opportunity in private markets is bullish for its asset management and alternative investment revenues, though the push into private markets is a known strategic theme so some of the benefit may already be reflected in expectations.",
+      "news_log_id": 2284,
+      "title": "Goldman Sachs Sees a $2 Trillion Opportunity in Private Markets",
+      "url": "https://finance.yahoo.com/markets/stocks/articles/goldman-sachs-sees-2-trillion-135354928.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-08T14:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Goldman Sachs",
+        "verbo": "Sees",
+        "complemento": "a $2 Trillion Opportunity in Private Markets",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": "long_entry",
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-08",
+        "seduta_successiva": "2026-07-09",
+        "close_base": 1023.73,
+        "close_successivo": 1050.92,
+        "rendimento_1_seduta": 0.026559737430768005
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 2609,
+      "symbol": "AMAT",
+      "generated_at": "2026-07-09T17:46:53.349171+00:00",
+      "score": 0.5249999999999999,
+      "confidence": 0.75,
+      "model_id": "ensemble:kimi-k2.6:cloud+glm-5.2:cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "The CEO's direct comments on strong 24-month revenue visibility driven by the AI investment cycle provide a highly material, bullish outlook for the company's near-term cash flows and competitive position.",
+      "news_log_id": 2609,
+      "title": "Applied Materials CEO Sees 'Tremendous Visibility' Into Demand",
+      "url": "https://www.benzinga.com/markets/tech/26/07/60364878/applied-materials-ceo-sees-tremendous-visibility-into-demand",
+      "source": "alpaca_benzinga",
+      "published_at": "2026-07-09T16:07:35+00:00",
+      "match_heuristico": {
+        "alias": "Applied Materials",
+        "verbo": "Sees",
+        "complemento": "'Tremendous Visibility' Into Demand",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": "long_entry",
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-09",
+        "seduta_successiva": "2026-07-10",
+        "close_base": 588.31,
+        "close_successivo": 601.67,
+        "rendimento_1_seduta": 0.022709115942275426
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 2660,
+      "symbol": "MS",
+      "generated_at": "2026-07-09T19:03:24.090996+00:00",
+      "score": 0.24457800281393324,
+      "confidence": 0.42939830419626757,
+      "model_id": "finbert",
+      "ensemble_std": 0.0,
+      "reasoning": "FinBERT fallback (ensemble divergence)",
+      "news_log_id": 2660,
+      "title": "Morgan Stanley Raises its Price Target on Lam Research (LRCX)",
+      "url": "https://www.insidermonkey.com/blog/morgan-stanley-raises-its-price-target-on-lam-research-lrcx-1798906/",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-09T17:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "Raises",
+        "complemento": "its Price Target on Lam Research (LRCX)",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-09",
+        "seduta_successiva": "2026-07-10",
+        "close_base": 220.88,
+        "close_successivo": 220.95,
+        "rendimento_1_seduta": 0.0003169141615355642
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 2664,
+      "symbol": "MS",
+      "generated_at": "2026-07-09T19:15:31.162207+00:00",
+      "score": 0.0,
+      "confidence": 0.9,
+      "model_id": "ensemble:glm-5.2:cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "Morgan Stanley's research arm raising a price target on KLA is a routine sell-side action with no material impact on MS's own revenue, cash flows, or competitive position; any banking fees tied to KLAC coverage are immaterial to MS's overall results.",
+      "news_log_id": 2664,
+      "title": "Morgan Stanley Raises its Price Target on KLA (KLAC)",
+      "url": "https://www.insidermonkey.com/blog/morgan-stanley-raises-its-price-target-on-kla-klac-1798910/",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-09T17:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "Raises",
+        "complemento": "its Price Target on KLA (KLAC)",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-09",
+        "seduta_successiva": "2026-07-10",
+        "close_base": 220.88,
+        "close_successivo": 220.95,
+        "rendimento_1_seduta": 0.0003169141615355642
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 2712,
+      "symbol": "AMAT",
+      "generated_at": "2026-07-09T20:31:30.84423+00:00",
+      "score": 0.003137821774801982,
+      "confidence": 0.535380536336588,
+      "model_id": "finbert",
+      "ensemble_std": 0.0,
+      "reasoning": "FinBERT fallback (ensemble divergence)",
+      "news_log_id": 2609,
+      "title": "Applied Materials CEO Sees 'Tremendous Visibility' Into Demand",
+      "url": "https://www.benzinga.com/markets/tech/26/07/60364878/applied-materials-ceo-sees-tremendous-visibility-into-demand",
+      "source": "alpaca_benzinga",
+      "published_at": "2026-07-09T16:07:35+00:00",
+      "match_heuristico": {
+        "alias": "Applied Materials",
+        "verbo": "Sees",
+        "complemento": "'Tremendous Visibility' Into Demand",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-09",
+        "seduta_successiva": "2026-07-10",
+        "close_base": 588.31,
+        "close_successivo": 601.67,
+        "rendimento_1_seduta": 0.022709115942275426
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 2872,
+      "symbol": "MS",
+      "generated_at": "2026-07-10T16:31:49.680897+00:00",
+      "score": 0.49568503884636844,
+      "confidence": 0.6319279612026865,
+      "model_id": "finbert",
+      "ensemble_std": 0.0,
+      "reasoning": "FinBERT fallback (ensemble divergence)",
+      "news_log_id": 2872,
+      "title": "Watsco (NYSE:WSO) Stock Price Expected to Rise, Morgan Stanley Analyst Says",
+      "url": "https://www.themarketsdaily.com/2026/07/10/watsco-nysewso-stock-price-expected-to-rise-morgan-stanley-analyst-says.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-10T15:45:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "Says",
+        "complemento": "Watsco (NYSE:WSO) Stock Price Expected to Rise",
+        "forma": "attribuzione_in_coda"
+      },
+      "soglia_operativa_superata": "long_entry",
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-10",
+        "seduta_successiva": "2026-07-13",
+        "close_base": 220.95,
+        "close_successivo": 219.91,
+        "rendimento_1_seduta": -0.004706947273138695
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 3076,
+      "symbol": "GS",
+      "generated_at": "2026-07-13T15:00:45.675554+00:00",
+      "score": 0.013188148864101872,
+      "confidence": 0.42924225961863205,
+      "model_id": "finbert",
+      "ensemble_std": 0.0,
+      "reasoning": "FinBERT fallback (ensemble divergence)",
+      "news_log_id": 3076,
+      "title": "NIO is poised to bounce back. Goldman Sachs says to buy the stock",
+      "url": "https://www.cnbc.com/2026/07/13/nio-is-poised-to-bounce-back-goldman-sachs-says-to-buy-the-stock.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-13T14:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Goldman Sachs",
+        "verbo": "says",
+        "complemento": "to buy the stock",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-13",
+        "seduta_successiva": "2026-07-14",
+        "close_base": 1041.09,
+        "close_successivo": 1136.3,
+        "rendimento_1_seduta": 0.09145222795339514
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 3476,
+      "symbol": "ERIC",
+      "generated_at": "2026-07-14T17:46:41.17846+00:00",
+      "score": 0.019679737073351702,
+      "confidence": 0.4051456921830924,
+      "model_id": "finbert",
+      "ensemble_std": 0.0,
+      "reasoning": "FinBERT fallback (ensemble divergence)",
+      "news_log_id": 3476,
+      "title": "Ericsson Sees Unusually High Options Volume (NASDAQ:ERIC)",
+      "url": "https://www.themarketsdaily.com/2026/07/14/ericsson-sees-unusually-high-options-volume-nasdaqeric.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-14T16:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Ericsson",
+        "verbo": "Sees",
+        "complemento": "Unusually High Options Volume (NASDAQ:ERIC)",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-14",
+        "seduta_successiva": "2026-07-15",
+        "close_base": 10.115,
+        "close_successivo": 10.06,
+        "rendimento_1_seduta": -0.005437469105289194
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 3499,
+      "symbol": "MS",
+      "generated_at": "2026-07-14T18:31:03.580892+00:00",
+      "score": 0.02378231695984852,
+      "confidence": 0.34686615416522504,
+      "model_id": "finbert",
+      "ensemble_std": 0.0,
+      "reasoning": "FinBERT fallback (ensemble divergence)",
+      "news_log_id": 3499,
+      "title": "Morgan Stanley Raises its Price Target on Alnylam (ALNY)",
+      "url": "https://finance.yahoo.com/markets/stocks/articles/morgan-stanley-raises-price-target-160956965.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-14T16:45:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "Raises",
+        "complemento": "its Price Target on Alnylam (ALNY)",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-14",
+        "seduta_successiva": "2026-07-15",
+        "close_base": 226.88,
+        "close_successivo": 227.23,
+        "rendimento_1_seduta": 0.0015426657263750698
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 3566,
+      "symbol": "ERIC",
+      "generated_at": "2026-07-14T20:45:18.862064+00:00",
+      "score": -0.5925,
+      "confidence": 0.8,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.1767766952966369,
+      "reasoning": "Bearish: ERIC directly missed Q2 revenue estimates and guided to rising AI component costs pressuring profits through 2027, implying weaker near-term cash flows and a structural margin headwind that is unlikely already fully priced in given the multi-year horizon.",
+      "news_log_id": 3566,
+      "title": "Ericsson Says AI Boom Is Driving up Component Costs, Will Hit Results in Coming Quarters",
+      "url": "https://www.benzinga.com/markets/earnings/26/07/60454547/ericsson-says-ai-boom-is-driving-up-component-costs-will-hit-results-in-coming-quarters",
+      "source": "alpaca_benzinga",
+      "published_at": "2026-07-14T18:50:12+00:00",
+      "match_heuristico": {
+        "alias": "Ericsson",
+        "verbo": "Says",
+        "complemento": "AI Boom Is Driving up Component Costs, Will Hit Results in Coming Quarters",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": "reversal",
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-14",
+        "seduta_successiva": "2026-07-15",
+        "close_base": 10.115,
+        "close_successivo": 10.06,
+        "rendimento_1_seduta": -0.005437469105289194
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 3591,
+      "symbol": "GS",
+      "generated_at": "2026-07-14T21:30:12.925674+00:00",
+      "score": 0.0825,
+      "confidence": 0.55,
+      "model_id": "ensemble:gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "Bullish: a higher AMD valuation can lift demand for Goldman Sachs’ equity research and related client services, but the direct effect on GS’s own revenue or cash flow is marginal.",
+      "news_log_id": 3591,
+      "title": "Goldman Sachs Raises its Price Target on Advanced Micro Devices, Inc. (AMD)",
+      "url": "https://www.insidermonkey.com/blog/goldman-sachs-raises-its-price-target-on-advanced-micro-devices-inc-amd-1801351/",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-14T19:45:00+00:00",
+      "match_heuristico": {
+        "alias": "Goldman Sachs",
+        "verbo": "Raises",
+        "complemento": "its Price Target on Advanced Micro Devices, Inc. (AMD)",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-14",
+        "seduta_successiva": "2026-07-15",
+        "close_base": 1136.3,
+        "close_successivo": 1146.34,
+        "rendimento_1_seduta": 0.008835694798908778
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 3677,
+      "symbol": "MS",
+      "generated_at": "2026-07-15T16:16:18.599069+00:00",
+      "score": 0.028749999999999998,
+      "confidence": 0.575,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "Morgan Stanley's equity research arm publishing a bullish call on CAVA is a routine, immaterial activity for MS that has negligible impact on the firm's revenue, cash flows, or competitive position.",
+      "news_log_id": 3677,
+      "title": "CAVA is 'not a cheap stock.' Investors should buy it anyway, Morgan Stanley says",
+      "url": "https://www.cnbc.com/2026/07/15/cava-is-not-a-cheap-stock-investors-should-buy-it-anyway-morgan-stanley-says.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-15T14:45:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "says",
+        "complemento": "CAVA is 'not a cheap stock.' Investors should buy it anyway",
+        "forma": "attribuzione_in_coda"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-15",
+        "seduta_successiva": "2026-07-16",
+        "close_base": 227.23,
+        "close_successivo": 217.1,
+        "rendimento_1_seduta": -0.04458038111164897
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 3715,
+      "symbol": "MS",
+      "generated_at": "2026-07-15T17:02:26.667625+00:00",
+      "score": 0.0,
+      "confidence": 0.9,
+      "model_id": "ensemble:glm-5.2:cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "Morgan Stanley reiterating a buy rating on Nvidia is a routine research publication that has no material impact on Morgan Stanley's own revenue, cash flows, or competitive position.",
+      "news_log_id": 3715,
+      "title": "Morgan Stanley Reiterates Nvidia (NVDA) As its Top Semiconductor Pick",
+      "url": "https://www.insidermonkey.com/blog/morgan-stanley-reiterates-nvidia-nvda-as-its-top-semiconductor-pick-1801922/",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-15T15:15:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "Reiterates",
+        "complemento": "Nvidia (NVDA) As its Top Semiconductor Pick",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-15",
+        "seduta_successiva": "2026-07-16",
+        "close_base": 227.23,
+        "close_successivo": 217.1,
+        "rendimento_1_seduta": -0.04458038111164897
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 3822,
+      "symbol": "GE",
+      "generated_at": "2026-07-16T14:01:32.242722+00:00",
+      "score": 0.5599999999999999,
+      "confidence": 0.8,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "GE Aerospace beats Q2 estimates and lifts full-year guidance, indicating stronger revenue and earnings performance that bolsters GE’s financial outlook and competitive position in the aerospace sector.",
+      "news_log_id": 3822,
+      "title": "GE Aerospace Says Supply, Not Demand, Is Now Its Biggest Growth Challenge",
+      "url": "https://www.benzinga.com/markets/earnings/26/07/60497028/ge-aerospace-says-supply-not-demand-is-now-its-biggest-growth-challenge",
+      "source": "alpaca_benzinga",
+      "published_at": "2026-07-16T13:51:49+00:00",
+      "match_heuristico": {
+        "alias": "GE Aerospace",
+        "verbo": "Says",
+        "complemento": "Supply, Not Demand, Is Now Its Biggest Growth Challenge",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": "long_entry",
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-16",
+        "seduta_successiva": "2026-07-17",
+        "close_base": 345.63,
+        "close_successivo": 348.77,
+        "rendimento_1_seduta": 0.009084859531869327
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 3927,
+      "symbol": "TSM",
+      "generated_at": "2026-07-16T17:30:54.877319+00:00",
+      "score": 0.09249999999999999,
+      "confidence": 0.6499999999999999,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.31819805153394637,
+      "reasoning": "The $100 B US capacity expansion should lift TSMC’s long‑term revenue and strengthen its competitive footing in a key market, though it will temporarily pressure cash flows.",
+      "news_log_id": 3927,
+      "title": "Taiwan computer chipmaker TSMC says it will spend another $100 billion on expanding manufacturing capacity in the US",
+      "url": "http://www.theitem.com/stories/taiwan-computer-chipmaker-tsmc-says-it-will-spend-another-100-billion-on-expanding-manufacturing,445094",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-16T15:45:00+00:00",
+      "match_heuristico": {
+        "alias": "TSMC",
+        "verbo": "says",
+        "complemento": "it will spend another $100 billion on expanding manufacturing capacity in the US",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-16",
+        "seduta_successiva": "2026-07-17",
+        "close_base": 409.97,
+        "close_successivo": 398.035,
+        "rendimento_1_seduta": -0.029111886235578255
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 4773,
+      "symbol": "LLY",
+      "generated_at": "2026-07-23T14:45:11.990482+00:00",
+      "score": 0.3375,
+      "confidence": 0.75,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.14142135623730956,
+      "reasoning": "Positive Phase 3 data for retatrutide strengthens LLY's obesity pipeline and competitive position against Novo Nordisk, though the 2027 regulatory submission timeline means revenue impact is several years out and largely longer-dated.",
+      "news_log_id": 4773,
+      "title": "Eli Lilly Says Retatrutide Shows Cardiovascular, Diabetic Benefits",
+      "url": "https://www.benzinga.com/news/health-care/26/07/60635863/eli-lilly-says-retatrutide-shows-cardiovascular-diabetic-benefits",
+      "source": "alpaca_benzinga",
+      "published_at": "2026-07-23T13:00:07+00:00",
+      "match_heuristico": {
+        "alias": "Eli Lilly",
+        "verbo": "Says",
+        "complemento": "Retatrutide Shows Cardiovascular, Diabetic Benefits",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": "long_entry",
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-23",
+        "seduta_successiva": "2026-07-24",
+        "close_base": 1183.85,
+        "close_successivo": 1194.43,
+        "rendimento_1_seduta": 0.008936943024876687
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 4782,
+      "symbol": "MS",
+      "generated_at": "2026-07-23T15:00:23.789241+00:00",
+      "score": 0.01875,
+      "confidence": 0.25,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.10606601717798213,
+      "reasoning": "Morgan Stanley's own research forecast of a stable Fed and easing inflation is only a modest indirect positive read-through for MS's fixed-income trading and wealth management revenues, but the article is about MS's published macro view rather than guidance about its own business.",
+      "news_log_id": 4782,
+      "title": "Morgan Stanley sees US Fed holding rates steady in 2026 as easing inflation boosts fixed-income outlook",
+      "url": "http://www.zimbabwestar.com/news/279204991/morgan-stanley-sees-us-fed-holding-rates-steady-in-2026-as-easing-inflation-boosts-fixed-income-outlook",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-23T14:00:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "sees",
+        "complemento": "US Fed holding rates steady in 2026 as easing inflation boosts fixed-income outlook",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-23",
+        "seduta_successiva": "2026-07-24",
+        "close_base": 213.97,
+        "close_successivo": 213.29,
+        "rendimento_1_seduta": -0.003178015609664908
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 5250,
+      "symbol": "DB",
+      "generated_at": "2026-07-27T18:19:11.132094+00:00",
+      "score": 0.0,
+      "confidence": 0.9,
+      "model_id": "single:glm-5.2:cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "[single-model:glm-5.2:cloud] The news concerns Deutsche Bank's commentary on SpaceX's Starship test flight, which has no direct impact on DB's revenue, cash flows, or competitive position as a bank; it is merely a research note and immaterial to DB's own fundamentals.",
+      "news_log_id": 5250,
+      "title": "Deutsche Bank Says Starship Flight 13 Made \"Solid Progress\" Despite Booster Setback",
+      "url": "https://www.zerohedge.com/technology/deutsche-bank-says-starship-flight-13-made-solid-progress-despite-booster-setback",
+      "source": "gdelt_gkg",
+      "published_at": "2026-07-27T16:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Deutsche Bank",
+        "verbo": "Says",
+        "complemento": "Starship Flight 13 Made \"Solid Progress\" Despite Booster Setback",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-27",
+        "seduta_successiva": "2026-07-28",
+        "close_base": 35.51,
+        "close_successivo": 35.365,
+        "rendimento_1_seduta": -0.004083356800900995
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 5922,
+      "symbol": "NVO",
+      "generated_at": "2026-07-31T14:46:23.832228+00:00",
+      "score": -0.16761184616637398,
+      "confidence": 0.6499999999999999,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.1414213562373095,
+      "reasoning": "Bear case: a Phase 3 failure for ziltivekimab removes a pipeline diversification asset and diversifies risk away from GLP-1s; bull case: the drug is non-core to the Wegovy/Ozempic thesis and the unchanged operating-profit outlook signals the Q3 impairment is financially immaterial.",
+      "news_log_id": 5922,
+      "title": "Novo Nordisk Says Anti-Inflammatory Drug Trial Fails to Cut Cardiovascular Risk in High Risk Patients",
+      "url": "https://www.benzinga.com/trading-ideas/movers/26/07/60836844/novo-nordisk-says-anti-inflammatory-drug-trial-fails-to-cut-cardiovascular-risk-in-high-risk-patients",
+      "source": "alpaca_benzinga",
+      "published_at": "2026-07-31T13:32:27+00:00",
+      "match_heuristico": {
+        "alias": "Novo Nordisk",
+        "verbo": "Says",
+        "complemento": "Anti-Inflammatory Drug Trial Fails to Cut Cardiovascular Risk in High Risk Patients",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-07-31",
+        "seduta_successiva": "2026-08-03",
+        "close_base": 46.66,
+        "close_successivo": 46.67,
+        "rendimento_1_seduta": 0.00021431633090451818
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 6228,
+      "symbol": "MS",
+      "generated_at": "2026-08-03T17:45:52.559959+00:00",
+      "score": 0.09257247277933234,
+      "confidence": 0.725,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.28284271247461906,
+      "reasoning": "This is a Morgan Stanley research forecast about cloud-sector spending; it is not a material event for MS as an issuer and has no direct impact on its own revenue, cash flows, or competitive position.",
+      "news_log_id": 6228,
+      "title": "Morgan Stanley Sees Cloud Spending Hitting $1.4 Trillion in 2027",
+      "url": "https://finance.yahoo.com/technology/articles/morgan-stanley-sees-cloud-spending-160442995.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-03T16:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "Sees",
+        "complemento": "Cloud Spending Hitting $1.4 Trillion in 2027",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-03",
+        "seduta_successiva": "2026-08-04",
+        "close_base": 211.25,
+        "close_successivo": 217.06,
+        "rendimento_1_seduta": 0.02750295857988161
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 6290,
+      "symbol": "PLTR",
+      "generated_at": "2026-08-04T14:00:31.352478+00:00",
+      "score": 0.23407790323870134,
+      "confidence": 0.6,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.10606601717798214,
+      "reasoning": "Bull: Palantir's core value proposition is secure, controlled enterprise AI deployment, so rising corporate concern about leaking know-how to third-party AI providers directly drives demand for AIP and Foundry; Bear: this concern is already central to Palantir's existing go-to-market narrative and may be largely priced in, with the 'warning' functioning more as marketing positioning than a fundamental catalyst.",
+      "news_log_id": 6290,
+      "title": "Palantir Says Companies Are Paying to Give Away Their 'Most Important Secrets'",
+      "url": "https://www.benzinga.com/trading-ideas/long-ideas/26/08/60906376/palantir-says-companies-giving-most-important-secrets-away",
+      "source": "alpaca_benzinga",
+      "published_at": "2026-08-04T13:16:22+00:00",
+      "match_heuristico": {
+        "alias": "Palantir",
+        "verbo": "Says",
+        "complemento": "Companies Are Paying to Give Away Their 'Most Important Secrets'",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-04",
+        "seduta_successiva": "2026-08-05",
+        "close_base": 162.61,
+        "close_successivo": 158.47,
+        "rendimento_1_seduta": -0.02545968882602556
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 6461,
+      "symbol": "NVO",
+      "generated_at": "2026-08-04T18:45:56.806077+00:00",
+      "score": 0.65567674343701,
+      "confidence": 0.8500000000000001,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.03535533905932741,
+      "reasoning": "Positive - Novo Nordisk lifts its 2026 adjusted sales and operating profit guidance, showing stronger future earnings potential.",
+      "news_log_id": 6461,
+      "title": "Novo Nordisk raises adjusted sales and adjusted operating profit outlook for 2026 | Company Announcement",
+      "url": "https://www.investegate.co.uk/announcement/gnw/novo-nordisk-a-s-class-b--0qiu/novo-nordisk-raises-adjusted-sales-and-adjust-/9704699",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-04T17:00:00+00:00",
+      "match_heuristico": {
+        "alias": "Novo Nordisk",
+        "verbo": "raises",
+        "complemento": "adjusted sales and adjusted operating profit outlook for 2026 | Company Announcement",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": "long_entry",
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [
+        {
+          "id": 6519,
+          "signal_id": 6461,
+          "tick_time": "2026-08-04T18:52:00.573506+00:00",
+          "symbol": "NVO",
+          "decision": "BUY",
+          "order_id": "2a7d88bf-cd3c-4adb-8302-7ec97c5bc80c",
+          "signal_score": 0.65567674343701,
+          "reason": "S4 news-driven: sentiment +0.656 (ensemble:glm-5.2:cloud+gpt-oss:20b-cloud), portfolio weight 2.0%. Positive - Novo Nordisk lifts its 2026 adjusted sales and operating profit guidance, showing stronger future earnings potential."
+        }
+      ],
+      "trade_ids": [
+        651
+      ],
+      "pnl_realizzato_usd": 37.520157204675236,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-04",
+        "seduta_successiva": "2026-08-05",
+        "close_base": 43.85,
+        "close_successivo": 44.1,
+        "rendimento_1_seduta": 0.005701254275940704
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 6486,
+      "symbol": "CAT",
+      "generated_at": "2026-08-04T19:45:37.067379+00:00",
+      "score": 0.6484437112912258,
+      "confidence": 0.8500000000000001,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.07071067811865482,
+      "reasoning": "Raising the 2026 sales growth forecast is a direct positive for Caterpillar's future revenue and cash flows, driven by secular AI buildout demand that strengthens its competitive position in power generation.",
+      "news_log_id": 6486,
+      "title": "Caterpillar raises 2026 sales growth forecast amid AI buildout demand",
+      "url": "https://finance.yahoo.com/markets/stocks/articles/caterpillar-raises-2026-sales-growth-172710194.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-04T18:00:00+00:00",
+      "match_heuristico": {
+        "alias": "Caterpillar",
+        "verbo": "raises",
+        "complemento": "2026 sales growth forecast amid AI buildout demand",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": "long_entry",
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-04",
+        "seduta_successiva": "2026-08-05",
+        "close_base": 877.09,
+        "close_successivo": 871.66,
+        "rendimento_1_seduta": -0.006190926814808151
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 6569,
+      "symbol": "DIS",
+      "generated_at": "2026-08-05T16:31:28.169222+00:00",
+      "score": 0.0,
+      "confidence": 0.25,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "The tariff refund is a small, one‑time cash inflow that Disney explicitly says is basically insignificant, so the impact on the company’s financials is negligible.",
+      "news_log_id": 6569,
+      "title": "Disney Says $100 Million Tariff Refund in Q3 is ‘Basically Nothing’",
+      "url": "https://www.benzinga.com/markets/earnings/26/08/60955720/disney-says-100-million-tariff-refund-in-q3-is-basically-nothing",
+      "source": "alpaca_benzinga",
+      "published_at": "2026-08-05T15:11:13+00:00",
+      "match_heuristico": {
+        "alias": "Disney",
+        "verbo": "Says",
+        "complemento": "$100 Million Tariff Refund in Q3 is ‘Basically Nothing'",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-05",
+        "seduta_successiva": "2026-08-06",
+        "close_base": 101.745,
+        "close_successivo": 104.67,
+        "rendimento_1_seduta": 0.02874834144183991
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 7093,
+      "symbol": "TSM",
+      "generated_at": "2026-08-10T17:01:27.334005+00:00",
+      "score": 0.6909437112912259,
+      "confidence": 0.8500000000000001,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.07071067811865474,
+      "reasoning": "A 45% jump in sales directly signals strong revenue and cash flow growth for TSMC, driven by booming AI demand, reinforcing its competitive position as the world's biggest chipmaker.",
+      "news_log_id": 7093,
+      "title": "World's Biggest Chipmaker TSMC Sees Sales Jump 45%. AI Demand Keeps Booming",
+      "url": "https://www.ibtimes.com/worlds-biggest-chipmaker-tsmc-sees-sales-jump-45-ai-demand-keeps-booming-3806235",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-10T16:00:00+00:00",
+      "match_heuristico": {
+        "alias": "TSMC",
+        "verbo": "Sees",
+        "complemento": "Sales Jump 45%. AI Demand Keeps Booming",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": "long_entry",
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-10",
+        "seduta_successiva": "2026-08-11",
+        "close_base": 418.59,
+        "close_successivo": 422.01,
+        "rendimento_1_seduta": 0.008170285960008572
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 7247,
+      "symbol": "MS",
+      "generated_at": "2026-08-11T15:46:08.467087+00:00",
+      "score": 0.0,
+      "confidence": 0.275,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "Morgan Stanley’s bullish note on SpaceX is a research‑grade enhancement that is unlikely to materially influence MS’s own revenue or cash flows, only a mild reputational touch.",
+      "news_log_id": 7247,
+      "title": "SpaceX shares can double, Morgan Stanley says",
+      "url": "https://www.cnbc.com/2026/08/11/spacex-shares-can-double-morgan-stanley-says-.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-11T15:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "says",
+        "complemento": "SpaceX shares can double",
+        "forma": "attribuzione_in_coda"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-11",
+        "seduta_successiva": "2026-08-12",
+        "close_base": 215.07,
+        "close_successivo": 217.7,
+        "rendimento_1_seduta": 0.012228576742455921
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 7492,
+      "symbol": "NVO",
+      "generated_at": "2026-08-12T19:15:42.430122+00:00",
+      "score": 0.1,
+      "confidence": 0.5,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "CEO’s claim that obesity drugs reduce US healthcare costs is modestly bullish for Novo, potentially improving pricing and volume, but the effect is indirect and not yet fully priced in.",
+      "news_log_id": 7492,
+      "title": "Novo Nordisk CEO says obesity drugs could lower US healthcare costs",
+      "url": "https://www.foxbusiness.com/media/novo-nordisk-ceo-sees-long-runway-weight-loss-drugs-obesity-grips-america",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-12T17:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Novo Nordisk",
+        "verbo": "says",
+        "complemento": "obesity drugs could lower US healthcare costs",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-12",
+        "seduta_successiva": "2026-08-13",
+        "close_base": 45.97,
+        "close_successivo": 46.31,
+        "rendimento_1_seduta": 0.007396127909506278
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 7702,
+      "symbol": "JD",
+      "generated_at": "2026-08-14T14:30:15.286829+00:00",
+      "score": 0.5965265122760623,
+      "confidence": 0.825,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.14142135623730953,
+      "reasoning": "Bull case: JD beat Q2 earnings and is prioritizing profitability, coupled with a Q3 growth outlook, which signals improving cash flows and competitive strength; bear case: the shift to profitability could eventually constrain top-line growth if market share is sacrificed.",
+      "news_log_id": 7702,
+      "title": "JD.com Says Profit Has Hit A ‘Definitive Turning Point’",
+      "url": "https://www.benzinga.com/trading-ideas/movers/26/08/61208516/jd-com-says-profit-has-hit-a-definitive-turning-point",
+      "source": "alpaca_benzinga",
+      "published_at": "2026-08-14T13:24:55+00:00",
+      "match_heuristico": {
+        "alias": "JD.com",
+        "verbo": "Says",
+        "complemento": "Profit Has Hit A ‘Definitive Turning Point'",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": "long_entry",
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [
+        {
+          "id": 10424,
+          "signal_id": 7702,
+          "tick_time": "2026-08-14T14:37:00.566676+00:00",
+          "symbol": "JD",
+          "decision": "BUY",
+          "order_id": "4d11f583-8b30-4e84-a964-c1a2a0eed610",
+          "signal_score": 0.7158318147312748,
+          "reason": "S4 news-driven: sentiment +0.716 (ensemble:glm-5.2:cloud+gpt-oss:20b-cloud), portfolio weight 2.0%. Bull case: JD beat Q2 earnings and is prioritizing profitability, coupled with a Q3 growth outlook, which signals improving cash flows and competitive strength; bear case: the shift to profitability c"
+        }
+      ],
+      "trade_ids": [
+        725
+      ],
+      "pnl_realizzato_usd": -36.80084720510823,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-14",
+        "seduta_successiva": "2026-08-17",
+        "close_base": 29.065,
+        "close_successivo": 28.51,
+        "rendimento_1_seduta": -0.019095131601582604
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 7858,
+      "symbol": "MS",
+      "generated_at": "2026-08-14T19:45:27.835638+00:00",
+      "score": 0.006008655915411266,
+      "confidence": 0.2,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.03535533905932738,
+      "reasoning": "Morgan Stanley is merely the brokerage issuing an analyst rating on Klarna; this single coverage call is immaterial to MS's revenue, cash flows, or competitive position.",
+      "news_log_id": 7858,
+      "title": "Klarna Group (NYSE:KLAR) Stock Price Expected to Rise, Morgan Stanley Analyst Says",
+      "url": "https://www.tickerreport.com/banking-finance/13543443/klarna-group-nyseklar-stock-price-expected-to-rise-morgan-stanley-analyst-says.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-14T18:45:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "Says",
+        "complemento": "Klarna Group (NYSE:KLAR) Stock Price Expected to Rise",
+        "forma": "attribuzione_in_coda"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-14",
+        "seduta_successiva": "2026-08-17",
+        "close_base": 217.335,
+        "close_successivo": 218.19,
+        "rendimento_1_seduta": 0.003934018910897841
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 7948,
+      "symbol": "MS",
+      "generated_at": "2026-08-17T16:30:30.7888+00:00",
+      "score": 0.0,
+      "confidence": 0.275,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "Morgan Stanley’s reiterated positive view on another company is a non‑material, indirect read‑through and unlikely to affect MS’s own equity performance.",
+      "news_log_id": 7948,
+      "title": "Reliance Industries share price: Morgan Stanley reiterates positive view after Rolls-Royce partnership plan",
+      "url": "https://economictimes.indiatimes.com/markets/stocks/news/reliance-industries-share-price-morgan-stanley-reiterates-positive-view-after-rolls-royce-partnership-plan/articleshow/133294926.cms",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-17T15:00:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "reiterates",
+        "complemento": "positive view after Rolls-Royce partnership plan",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-17",
+        "seduta_successiva": "2026-08-18",
+        "close_base": 218.19,
+        "close_successivo": 217.48,
+        "rendimento_1_seduta": -0.0032540446399926815
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 8182,
+      "symbol": "MS",
+      "generated_at": "2026-08-18T17:45:13.164833+00:00",
+      "score": 0.0,
+      "confidence": 0.225,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "The analyst’s view on ONEOK is unrelated to MS’s own performance, so any sentiment impact is uncertain.",
+      "news_log_id": 8182,
+      "title": "ONEOK (NYSE:OKE) Stock Price Expected to Rise, Morgan Stanley Analyst Says",
+      "url": "https://www.themarketsdaily.com/2026/08/18/oneok-nyseoke-stock-price-expected-to-rise-morgan-stanley-analyst-says.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-18T16:00:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "Says",
+        "complemento": "ONEOK (NYSE:OKE) Stock Price Expected to Rise",
+        "forma": "attribuzione_in_coda"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-18",
+        "seduta_successiva": "2026-08-19",
+        "close_base": 217.48,
+        "close_successivo": 214.245,
+        "rendimento_1_seduta": -0.014874931028140415
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 8484,
+      "symbol": "MS",
+      "generated_at": "2026-08-20T17:00:23.508327+00:00",
+      "score": 0.0,
+      "confidence": 0.25,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "The downgrade of Baidu signals weakness in the AI and advertising sector, but has little direct impact on MS's core banking operations or cash flows.",
+      "news_log_id": 8484,
+      "title": "Morgan Stanley Downgrades Baidu as Ad Revenue Falls for 8th Straight Quarter and ERNIE Lags",
+      "url": "https://www.techtimes.com/articles/325062/20260820/morgan-stanley-downgrades-baidu-ad-revenue-falls-8th-straight-quarter-ernie-lags.htm",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-20T15:45:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "Downgrades",
+        "complemento": "Baidu as Ad Revenue Falls for 8th Straight Quarter and ERNIE Lags",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-20",
+        "seduta_successiva": "2026-08-21",
+        "close_base": 207.36,
+        "close_successivo": 214.195,
+        "rendimento_1_seduta": 0.03296199845678993
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 8540,
+      "symbol": "AMAT",
+      "generated_at": "2026-08-20T19:45:31.5382+00:00",
+      "score": 0.529465330773907,
+      "confidence": 0.765,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.014142135623730885,
+      "reasoning": "Positive—AI‑driven demand is set to lift Applied Materials’ chip equipment sales, supporting higher revenue and cash flow.",
+      "news_log_id": 8540,
+      "title": "Applied Materials Sees Years Of AI-Fueled Growth Ahead",
+      "url": "https://www.benzinga.com/markets/large-cap/26/08/61339686/applied-materials-sees-years-of-ai-fueled-growth-ahead",
+      "source": "alpaca_benzinga",
+      "published_at": "2026-08-20T17:48:03+00:00",
+      "match_heuristico": {
+        "alias": "Applied Materials",
+        "verbo": "Sees",
+        "complemento": "Years Of AI-Fueled Growth Ahead",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": "long_entry",
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-20",
+        "seduta_successiva": "2026-08-21",
+        "close_base": 496.26,
+        "close_successivo": 492.12,
+        "rendimento_1_seduta": -0.008342401160681856
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 8790,
+      "symbol": "BABA",
+      "generated_at": "2026-08-24T16:45:44.943132+00:00",
+      "score": 0.14375,
+      "confidence": 0.575,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "Alibaba’s HK$80 billion capital raise delivers an immediate cash boost that can accelerate its AI initiatives and potentially enhance long‑term revenue, but the dilution and uncertain monetisation of AI projects mean the upside is moderate and contingent on execution.",
+      "news_log_id": 8790,
+      "title": "Alibaba Raises $80B HK to Boost Global AI Leadership",
+      "url": "https://wwd.com/sourcing-journal/industry-news/alibaba-announces-share-placement-to-raise-money-for-ai-1239147660/",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-24T16:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Alibaba",
+        "verbo": "Raises",
+        "complemento": "$80B HK to Boost Global AI Leadership",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-24",
+        "seduta_successiva": "2026-08-25",
+        "close_base": 118.44,
+        "close_successivo": 119.44,
+        "rendimento_1_seduta": 0.008443093549476588
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 8899,
+      "symbol": "MS",
+      "generated_at": "2026-08-25T16:30:52.521614+00:00",
+      "score": 0.68,
+      "confidence": 0.85,
+      "model_id": "single:gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "[single-model:gpt-oss:20b-cloud] Morgan Stanley is bullish, seeing substantial opportunities for MS in a specific AI sub‑segment.",
+      "news_log_id": 8899,
+      "title": "Buy this stock to play boom in one area of AI, Morgan Stanley says",
+      "url": "https://www.cnbc.com/2026/08/25/-buy-this-stock-to-play-boom-in-one-area-of-ai-morgan-stanley-says.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-25T16:15:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "says",
+        "complemento": "Buy this stock to play boom in one area of AI",
+        "forma": "attribuzione_in_coda"
+      },
+      "soglia_operativa_superata": "long_entry",
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-25",
+        "seduta_successiva": "2026-08-26",
+        "close_base": 216.84,
+        "close_successivo": 213.99,
+        "rendimento_1_seduta": -0.013143331488655208
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 9016,
+      "symbol": "MS",
+      "generated_at": "2026-08-26T17:15:04.108161+00:00",
+      "score": 0.342079555496845,
+      "confidence": 0.5209903954710948,
+      "model_id": "finbert",
+      "ensemble_std": 0.0,
+      "reasoning": "FinBERT fallback (Ollama timeout)",
+      "news_log_id": 9016,
+      "title": "SpaceX is 'attractively valued' after $100 billion Louisiana spaceport plan, Morgan Stanley says",
+      "url": "https://www.cnbc.com/2026/08/26/spacex-is-attractively-valued-after-100-billion-louisiana-spaceport-plan-morgan-stanley-says.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-26T17:00:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "says",
+        "complemento": "SpaceX is 'attractively valued' after $100 billion Louisiana spaceport plan",
+        "forma": "attribuzione_in_coda"
+      },
+      "soglia_operativa_superata": "long_entry",
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-26",
+        "seduta_successiva": "2026-08-27",
+        "close_base": 213.99,
+        "close_successivo": 214.88,
+        "rendimento_1_seduta": 0.004159072853871626
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 9053,
+      "symbol": "MS",
+      "generated_at": "2026-08-26T19:15:07.879685+00:00",
+      "score": 0.06221743745925823,
+      "confidence": 0.18446803901907294,
+      "model_id": "finbert",
+      "ensemble_std": 0.0,
+      "reasoning": "FinBERT fallback (Ollama timeout)",
+      "news_log_id": 9053,
+      "title": "SpaceX's Stock Is Whipsawing Around Its IPO Price. Morgan Stanley Says It's 'Attractively Valued.'",
+      "url": "https://www.ibtimes.com/spacexs-stock-whipsawing-around-its-ipo-price-morgan-stanley-says-its-attractively-valued-3806836",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-26T18:15:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "Says",
+        "complemento": "It's 'Attractively Valued.'",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-26",
+        "seduta_successiva": "2026-08-27",
+        "close_base": 213.99,
+        "close_successivo": 214.88,
+        "rendimento_1_seduta": 0.004159072853871626
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 9088,
+      "symbol": "MS",
+      "generated_at": "2026-08-27T15:01:05.566733+00:00",
+      "score": 0.0,
+      "confidence": 0.2,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "Morgan Stanley’s bullish forecast on Williams‑Sonoma is a research view on a retailer and does not materially influence Morgan Stanley’s revenue, cash flow or competitive position, so the effect on MS is likely negligible.",
+      "news_log_id": 9088,
+      "title": "Morgan Stanley Forecasts Strong Price Appreciation for Williams-Sonoma (NYSE:WSM) Stock",
+      "url": "https://www.themarketsdaily.com/2026/08/27/morgan-stanley-forecasts-strong-price-appreciation-for-williams-sonoma-nysewsm-stock.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-27T14:00:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "Forecasts",
+        "complemento": "Strong Price Appreciation for Williams-Sonoma (NYSE:WSM) Stock",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-27",
+        "seduta_successiva": "2026-08-28",
+        "close_base": 214.88,
+        "close_successivo": 214.755,
+        "rendimento_1_seduta": -0.0005817200297840719
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 9099,
+      "symbol": "GS",
+      "generated_at": "2026-08-27T15:30:41.969318+00:00",
+      "score": 0.0,
+      "confidence": 0.5,
+      "model_id": "single:gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "[single-model:gpt-oss:20b-cloud] An analyst comment about Salesforce’s AI strategy is unlikely to materially affect Goldman Sachs’s own revenue, cash flow or competitive position.",
+      "news_log_id": 9099,
+      "title": "Salesforce's AI pivot is starting to pay off, Goldman Sachs says",
+      "url": "https://www.cnbc.com/2026/08/27/salesforces-ai-pivot-is-starting-to-pay-off-goldman-sachs-says.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-27T14:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Goldman Sachs",
+        "verbo": "says",
+        "complemento": "Salesforce's AI pivot is starting to pay off",
+        "forma": "attribuzione_in_coda"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-27",
+        "seduta_successiva": "2026-08-28",
+        "close_base": 1035.33,
+        "close_successivo": 1028.35,
+        "rendimento_1_seduta": -0.006741811789477747
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 9134,
+      "symbol": "AMAT",
+      "generated_at": "2026-08-27T17:01:05.724466+00:00",
+      "score": 0.5214999999999841,
+      "confidence": 0.7,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.10606601717798214,
+      "reasoning": "Bull case: management explicitly calls out AI as driving the largest growth inflection in AMAT's history, implying sustained demand for advanced packaging, DRAM/HBM, and leading-edge logic equipment; bear case: such optimistic AI-driven outlooks are increasingly common across the semiconductor supply chain and may already be partially reflected in AMAT's elevated multiple.",
+      "news_log_id": 9134,
+      "title": "Applied Materials Sees AI Driving Its Biggest Semiconductor Growth Inflection Yet",
+      "url": "https://www.themarketsdaily.com/2026/08/27/applied-materials-sees-ai-driving-its-biggest-semiconductor-growth-inflection-yet.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-27T16:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Applied Materials",
+        "verbo": "Sees",
+        "complemento": "AI Driving Its Biggest Semiconductor Growth Inflection Yet",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": "long_entry",
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-27",
+        "seduta_successiva": "2026-08-28",
+        "close_base": 482.51,
+        "close_successivo": 461.5,
+        "rendimento_1_seduta": -0.043543139002300446
+      },
+      "classe_validata_manualmente": false
+    },
+    {
+      "signal_id": 9141,
+      "symbol": "MS",
+      "generated_at": "2026-08-27T17:15:14.869298+00:00",
+      "score": 0.0,
+      "confidence": 0.22499999999999998,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "The analyst rating upgrade pertains to Salesforce, not to Morgan Stanley, so there is no direct or material impact on MS.",
+      "news_log_id": 9141,
+      "title": "Morgan Stanley Raises Salesforce (NYSE:CRM) Price Target to $235.00",
+      "url": "https://www.themarketsdaily.com/2026/08/27/morgan-stanley-raises-salesforce-nysecrm-price-target-to-235-00.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-08-27T17:00:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "Raises",
+        "complemento": "Salesforce (NYSE:CRM) Price Target to $235.00",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "pre_variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-08-27",
+        "seduta_successiva": "2026-08-28",
+        "close_base": 214.88,
+        "close_successivo": 214.755,
+        "rendimento_1_seduta": -0.0005817200297840719
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 9401,
+      "symbol": "DB",
+      "generated_at": "2026-09-01T14:48:11.687295+00:00",
+      "score": 0.0,
+      "confidence": 0.85,
+      "model_id": "single:glm-5.2:cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "[single-model:glm-5.2:cloud] This is DB publishing sell-side research on AI hardware stocks like Lumentum; it has no material direct or indirect read-through to DB's own fundamentals or stock price.",
+      "news_log_id": 9401,
+      "title": "Deutsche Bank names its top AI hardware 'pick-and-shovel' stocks (LITE:NASDAQ)",
+      "url": "https://seekingalpha.com/news/4638638-deutsche-bank-names-its-top-ai-hardware-pick-and-shovel-stocks",
+      "source": "gdelt_gkg",
+      "published_at": "2026-09-01T14:15:00+00:00",
+      "match_heuristico": {
+        "alias": "Deutsche Bank",
+        "verbo": "names",
+        "complemento": "its top AI hardware 'pick-and-shovel' stocks (LITE:NASDAQ)",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-09-01",
+        "seduta_successiva": "2026-09-02",
+        "close_base": 39.59,
+        "close_successivo": 40.51,
+        "rendimento_1_seduta": 0.0232381914624904
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 9412,
+      "symbol": "GS",
+      "generated_at": "2026-09-01T15:45:30.864977+00:00",
+      "score": 0.0,
+      "confidence": 0.25,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "Neutral; the CEO’s general macro focus on growth vs spending does not directly impact GS’s earnings or capital structure, so any market reaction is limited and likely subsumed in broader macro sentiment.",
+      "news_log_id": 9412,
+      "title": "Goldman Sachs CEO Says America Has Two Choices: Grow Faster or Spend Less",
+      "url": "https://www.aol.com/articles/goldman-sachs-ceo-says-america-150422000.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-09-01T15:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Goldman Sachs",
+        "verbo": "Says",
+        "complemento": "America Has Two Choices: Grow Faster or Spend Less",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-09-01",
+        "seduta_successiva": "2026-09-02",
+        "close_base": 1001.76,
+        "close_successivo": 1004.59,
+        "rendimento_1_seduta": 0.0028250279508066356
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 9478,
+      "symbol": "MS",
+      "generated_at": "2026-09-01T19:34:37.529188+00:00",
+      "score": 0.078,
+      "confidence": 0.65,
+      "model_id": "single:gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "[single-model:gpt-oss:20b-cloud] Moderate positive sentiment for MS as an analyst upgrade of a high‑growth fintech suggests credibility of its research team, but the effect on MS equity is limited and indirect.",
+      "news_log_id": 9478,
+      "title": "Morgan Stanley Upgrades HOOD, Cites Prediction Market Boom for $150 Target",
+      "url": "https://www.benzinga.com/markets/prediction-markets/26/09/61557441/robinhood-morgan-stanley-prediction-markets",
+      "source": "alpaca_benzinga",
+      "published_at": "2026-09-01T17:43:13+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "Upgrades",
+        "complemento": "HOOD, Cites Prediction Market Boom for $150 Target",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-09-01",
+        "seduta_successiva": "2026-09-02",
+        "close_base": 211.14,
+        "close_successivo": 211.82,
+        "rendimento_1_seduta": 0.0032206119162641045
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 9484,
+      "symbol": "DB",
+      "generated_at": "2026-09-01T19:46:52.80509+00:00",
+      "score": 0.0041666666666704535,
+      "confidence": 0.2,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.03535533905932738,
+      "reasoning": "The headline merely signals DB’s bullish stance on two AI stocks; it offers only an indirect, sector‑wide read‑through that could nudge DB modestly higher, but the direct impact is minimal.",
+      "news_log_id": 9484,
+      "title": "Deutsche Bank Names Lumentum and Coherent Top AI Picks as Spending Surges",
+      "url": "https://finance.yahoo.com/technology/ai/articles/deutsche-bank-names-lumentum-coherent-180035804.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-09-01T18:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Deutsche Bank",
+        "verbo": "Names",
+        "complemento": "Lumentum and Coherent Top AI Picks as Spending Surges",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-09-01",
+        "seduta_successiva": "2026-09-02",
+        "close_base": 39.59,
+        "close_successivo": 40.51,
+        "rendimento_1_seduta": 0.0232381914624904
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 9529,
+      "symbol": "MS",
+      "generated_at": "2026-09-02T15:45:21.47052+00:00",
+      "score": 0.35750000000000004,
+      "confidence": 0.65,
+      "model_id": "single:gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "[single-model:gpt-oss:20b-cloud] The Meta settlement is expected to lift regulatory or competitive barriers that could enable newer AI products across the sector, boosting sentiment and marginally benefiting Microsoft’s AI/cloud business.",
+      "news_log_id": 9529,
+      "title": "Meta settlement could clear the way for new AI product launches, Morgan Stanley says",
+      "url": "https://www.cnbcafrica.com/2026/meta-settlement-could-clear-the-way-for-new-ai-product-launches-morgan-stanley-says",
+      "source": "gdelt_gkg",
+      "published_at": "2026-09-02T14:45:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "says",
+        "complemento": "Meta settlement could clear the way for new AI product launches",
+        "forma": "attribuzione_in_coda"
+      },
+      "soglia_operativa_superata": "long_entry",
+      "segmento_prompt": "variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-09-02",
+        "seduta_successiva": "2026-09-03",
+        "close_base": 211.82,
+        "close_successivo": 217.15,
+        "rendimento_1_seduta": 0.025162874138419555
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 9538,
+      "symbol": "DB",
+      "generated_at": "2026-09-02T16:01:36.410563+00:00",
+      "score": 0.020000000000000004,
+      "confidence": 0.4,
+      "model_id": "single:gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "[single-model:gpt-oss:20b-cloud] A bullish opinion from DB on SiriusXM may modestly lift DB's research reputation, but the effect on DB's own fundamentals is negligible and largely already priced.",
+      "news_log_id": 9538,
+      "title": "SiriusXM is being 'overlooked' by the Street, Deutsche Bank says",
+      "url": "https://www.cnbc.com/2026/09/02/siriusxm-is-being-overlooked-by-the-street-deutsche-bank-says.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-09-02T15:00:00+00:00",
+      "match_heuristico": {
+        "alias": "Deutsche Bank",
+        "verbo": "says",
+        "complemento": "SiriusXM is being 'overlooked' by the Street",
+        "forma": "attribuzione_in_coda"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-09-02",
+        "seduta_successiva": "2026-09-03",
+        "close_base": 40.51,
+        "close_successivo": 41.53,
+        "rendimento_1_seduta": 0.02517896815601084
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 9593,
+      "symbol": "GS",
+      "generated_at": "2026-09-02T19:01:03.138724+00:00",
+      "score": -0.4971428571428456,
+      "confidence": 0.725,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.03535533905932733,
+      "reasoning": "Goldman Sachs directly warning investors to expect lower returns over the next year is a clear negative guidance signal that directly hits GS's expected revenue, earnings power, and competitive positioning, likely pressuring the stock as the market re-rates forward expectations.",
+      "news_log_id": 9593,
+      "title": "Goldman Sachs warns investors to expect lower returns over the next year",
+      "url": "https://finance.yahoo.com/markets/article/goldman-sachs-warns-investors-to-expect-lower-returns-over-the-next-year-171050637.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-09-02T17:45:00+00:00",
+      "match_heuristico": {
+        "alias": "Goldman Sachs",
+        "verbo": "warns",
+        "complemento": "investors to expect lower returns over the next year",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": "reversal",
+      "segmento_prompt": "variante_a",
+      "decisioni": [
+        {
+          "id": 17695,
+          "signal_id": 9593,
+          "tick_time": "2026-09-02T19:07:00.615707+00:00",
+          "symbol": "GS",
+          "decision": "SELL",
+          "order_id": "9cebbbeb-ea8f-4478-a3c9-45d0b8919111",
+          "signal_score": -0.4971428571428456,
+          "reason": "sentiment_reversal: score -0.497 < threshold -0.35"
+        }
+      ],
+      "trade_ids": [
+        259
+      ],
+      "pnl_realizzato_usd": -34.91728666563865,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-09-02",
+        "seduta_successiva": "2026-09-03",
+        "close_base": 1004.59,
+        "close_successivo": 1037.36,
+        "rendimento_1_seduta": 0.03262027294717229
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 9660,
+      "symbol": "MS",
+      "generated_at": "2026-09-03T15:31:08.808292+00:00",
+      "score": 0.192,
+      "confidence": 0.6,
+      "model_id": "single:gpt-oss:20b-cloud",
+      "ensemble_std": 0.0,
+      "reasoning": "[single-model:gpt-oss:20b-cloud] Positive Morgan Stanley analyst comment indicates a bullish outlook for MiniMed Group, likely to lift the stock price.",
+      "news_log_id": 9660,
+      "title": "MiniMed Group (NASDAQ:MMED) Stock Price Expected to Rise, Morgan Stanley Analyst Says",
+      "url": "https://www.themarketsdaily.com/2026/09/03/minimed-group-nasdaqmmed-stock-price-expected-to-rise-morgan-stanley-analyst-says.html",
+      "source": "gdelt_gkg",
+      "published_at": "2026-09-03T15:00:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "Says",
+        "complemento": "MiniMed Group (NASDAQ:MMED) Stock Price Expected to Rise",
+        "forma": "attribuzione_in_coda"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-09-03",
+        "seduta_successiva": "2026-09-04",
+        "close_base": 217.15,
+        "close_successivo": 217.13,
+        "rendimento_1_seduta": -9.210223347921875e-05
+      },
+      "classe_validata_manualmente": true
+    },
+    {
+      "signal_id": 9676,
+      "symbol": "MS",
+      "generated_at": "2026-09-03T16:15:14.296275+00:00",
+      "score": 0.005892857142862389,
+      "confidence": 0.275,
+      "model_id": "ensemble:glm-5.2:cloud+gpt-oss:20b-cloud",
+      "ensemble_std": 0.03535533905932738,
+      "reasoning": "Positive sector sentiment from AI and aging population trends may slightly lift banking stocks, including Morgan Stanley, but fundamental impact is minimal.",
+      "news_log_id": 9676,
+      "title": "Morgan Stanley Says Asian Banks Including HSBC Holdings (NYSE: HSBC) Set To Gain From AI And Aging Population Trends",
+      "url": "https://www.foreignpolicyjournal.com/2026/09/03/morgan-stanley-says-asian-banks-including-hsbc-holdings-nyse-hsbc-set-to-gain-from-ai-and-aging-population-trends/",
+      "source": "gdelt_gkg",
+      "published_at": "2026-09-03T15:30:00+00:00",
+      "match_heuristico": {
+        "alias": "Morgan Stanley",
+        "verbo": "Says",
+        "complemento": "Asian Banks Including HSBC Holdings (NYSE: HSBC) Set To Gain From AI And Aging Population Trends",
+        "forma": "soggetto_diretto"
+      },
+      "soglia_operativa_superata": null,
+      "segmento_prompt": "variante_a",
+      "decisioni": [],
+      "trade_ids": [],
+      "pnl_realizzato_usd": 0,
+      "controfattuale_1_seduta": {
+        "seduta_base": "2026-09-03",
+        "seduta_successiva": "2026-09-04",
+        "close_base": 217.15,
+        "close_successivo": 217.13,
+        "rendimento_1_seduta": -9.210223347921875e-05
+      },
+      "classe_validata_manualmente": true
+    }
+  ]
+}

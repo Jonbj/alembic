@@ -68,7 +68,11 @@ export default function Signals() {
     queryFn: fetchFeedbackStatus,
     refetchInterval: 120000,
   })
-  const gateThreshold = feedback?.entry_threshold ?? 0.35
+  // #474: SKIP_THRESHOLD is S4's sentiment gate — read strategies.S4 explicitly.
+  // Fallback = loss_feedback.threshold_baseline (config/trading.yaml), lo stesso
+  // pavimento che usa _get_feedback_threshold quando la chiave Redis manca. Era 0.35,
+  // un valore congiunturale di agosto: il gate vivo di S4 è 0.30.
+  const gateThreshold = feedback?.strategies?.S4?.entry_threshold ?? 0.30
 
   const filtered = useMemo(() =>
     signals.filter((s: Signal) => {
@@ -132,7 +136,7 @@ export default function Signals() {
         },
         {
           heading: "Colonne — Signals",
-          content: "**Ticker**: il simbolo azionario (es. NVDA, AAPL).\n**Direction**: basata sullo score — BUY (score > 0.1), SELL (score < -0.1), HOLD (|score| ≤ 0.1).\n**Score**: valore da -1 a +1. |score| > 0.3 è significativo, > 0.6 è forte.\n**Confidence**: da 0 a 1. Indica quanto è certo il modello. Alta confidence = segnale affidabile.\n**Model**: identificatore del modello LLM che ha generato il segnale (es. ensemble:glm-5.2:cloud+gpt-oss:20b-cloud, oppure finbert per i fallback).\n**FB**: badge giallo = il modello fallback (FinBERT) è stato usato perché il modello primario ha fallito o divergeva troppo.\n\n_Selezione per ticker_: nella finestra di freschezza (4h) il ciclo usa il segnale **ensemble più recente**; un FB debole generato dopo un ensemble forte non lo sovrascrive (il fallback si usa solo se non c'è ensemble fresco).",
+          content: "**Ticker**: il simbolo azionario (es. NVDA, AAPL).\n**Direction**: basata sullo score — BUY (score > 0.1), SELL (score < -0.1), HOLD (|score| ≤ 0.1).\n**Score**: valore da -1 a +1. |score| > 0.3 è significativo, > 0.6 è forte.\n**Confidence**: da 0 a 1. Indica quanto è certo il modello. Alta confidence = segnale affidabile.\n**Model**: identificatore del modello LLM che ha generato il segnale (es. ensemble:glm-5.2:cloud+gpt-oss:20b-cloud, oppure finbert per i fallback).\n**FB**: badge giallo = il modello fallback (FinBERT) è stato usato perché il modello primario ha fallito o divergeva troppo.\n\n_Selezione per ticker_: nella finestra di freschezza (4h) il ciclo usa il segnale **ensemble più recente**; un FB debole generato dopo un ensemble forte non lo sovrascrive (il fallback si usa solo se non c'è ensemble fresco). Fra due segnali ensemble vince comunque **il più recente, non il più forte** — è il comportamento discusso in #169.\n\n_Attenzione allo score mostrato qui_: è lo score **grezzo** salvato in sentiment_signals. Il gate d'ordine confronta lo score **dopo** il moltiplicatore di signal velocity (×1.20 o ×0.80 quando la variazione sulle ultime 3 voci di history supera 0.30, #401): un segnale può quindi passare o essere scartato a un valore diverso da quello in tabella.",
         },
         {
           heading: "Decision Log — cosa è",
@@ -144,7 +148,7 @@ export default function Signals() {
         },
         {
           heading: "Colonne — Decision Log",
-          content: "**Tick Time**: timestamp del ciclo in cui è stata presa la decisione.\n**Symbol**: ticker azionario.\n**Weight**: peso percentuale assegnato nel portafoglio (es. 2.0% = 2% del NAV).\n**Decision**: esito — BUY (ordine inviato ad Alpaca); SKIP_EMA (prezzo corrente sotto la EMA20 — filtro trend-following); SKIP_CAP (raggiunto il numero massimo di ordini per ciclo); SKIP_POSITION (posizione già aperta su questo ticker); SKIP_THRESHOLD (segnale scartato perché sotto la soglia del feedback gate — vedi Reason per score e soglia: così i giorni senza trade non sono un log vuoto); SKIP_STALE (segnale forte ma più vecchio di max_age 4h → scaduto prima di poter tradare).\n**Order ID**: ID dell'ordine Alpaca se la decisione era BUY; vuoto altrimenti.\n**Reason**: testo esplicativo con score, modello usato, e reasoning LLM abbreviato.",
+          content: "**Tick Time**: timestamp del ciclo in cui è stata presa la decisione.\n**Symbol**: ticker azionario.\n**Weight**: peso percentuale assegnato nel portafoglio (es. 2.0% = 2% del NAV).\n**Decision**: esito. Sotto `engine=portfolio` esistono **sei** codici, questi e nessun altro:\n• **BUY** — ordine inviato ad Alpaca\n• **SELL** — uscita: ribilanciamento, contro-segnale (`sentiment_reversal`) o peso a zero. Il perché sta in `exit_mechanism`\n• **SKIP_THRESHOLD** — sotto la soglia del feedback gate `feedback:entry_threshold:S4` (vedi Reason per score e soglia: così i giorni senza trade non sono un log vuoto)\n• **SKIP_STALE** — segnale più vecchio di `max_signal_age_hours` (4h)\n• **SKIP_FALLBACK** — segnale prodotto da FinBERT in fallback, escluso dal ranking BUY (#108)\n• **SKIP_PYRAMIDING** — simbolo già a libro: il guard P0-05 blocca il secondo BUY, anche quando servirebbe solo a riportare la posizione a peso (#230/#491)\n\n`SKIP_EMA`, `SKIP_CAP` e `SKIP_POSITION` appartengono al path `legacy_sentiment` e **non sono mai stati emessi** dal path vivo: se li vedi citati altrove, è documentazione vecchia.\n\nIl ledger completo per intento (`s4_intent_events.reason_code`) ha più granularità — `CANDIDATE_OBSERVED`, `SKIP_ENTRY_FRESHNESS`, `SKIP_ENTRY_GATE`, `SKIP_IDEMPOTENCY`, `RANK_*`, `SUBMITTED` — e non è questa tabella.\n**Order ID**: ID dell'ordine Alpaca se la decisione era BUY; vuoto altrimenti.\n**Reason**: testo esplicativo con score, modello usato, e reasoning LLM abbreviato.",
         },
         {
           heading: "Filtri",

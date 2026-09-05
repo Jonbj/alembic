@@ -575,13 +575,14 @@ class PostgreSQLStore:
         INSERT INTO s4_intent_events (
             event_id, intent_id, causal_event_id, event_type, occurred_at,
             decision_slot, symbol, signal_id, published_at, first_seen_at,
-            model_generated_at, decision_at, rank, competing_candidates,
+            model_generated_at, decision_at, rank, held_at_rank,
+            signal_age_at_slot, competing_candidates,
             s1_state, anti_pyramiding, reason_code, is_tradable, versions,
             snapshot, missingness
         ) VALUES (
             %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s,
-            %s, %s, %s, %s::jsonb,
+            %s, %s, %s, %s, %s, %s::jsonb,
             %s::jsonb, %s, %s, %s, %s::jsonb,
             %s::jsonb, %s::jsonb
         )
@@ -606,6 +607,8 @@ class PostgreSQLStore:
             event.model_generated_at,
             event.decision_at,
             event.rank,
+            event.held_at_rank,
+            event.signal_age_at_slot,
             json.dumps(list(event.competing_candidates)),
             json.dumps(event.s1_state, sort_keys=True),
             event.anti_pyramiding,
@@ -1237,6 +1240,106 @@ class PostgreSQLStore:
                 break
         return collected
 
+    def fetch_force_exit_decisions_without_counterfactual(
+        self,
+        days_back: int | None = None,
+        limit: int = 500,
+        before: tuple | None = None,
+    ) -> list[dict]:
+        """Return one page of force-exit SELL rows with no counterfactual yet.
+
+        #450: ``decision='SELL'`` AND ``reason LIKE 'sentiment_reversal%'`` is
+        the population written by ``_sentiment_reversal_sells`` in
+        ``portfolio_scheduler.py`` (L4742-4796). It is the *only* universe of
+        force-exit SELLs the operator can answer for today: stop-loss SELLs
+        are routed through ``stop_policy`` and ``record_trade_exit`` with a
+        distinct ``exit_reason``, and ordinary portfolio rebalance SELLs
+        carry ``reason='portfolio_sell'`` — not in scope. LIKE on the reason
+        prefix is safe because the writer prefixes every row with
+        ``sentiment_reversal`` (the score and threshold suffix is parseable
+        but not used for routing).
+
+        ``days_back=None`` (the default) means NO time window, unlike the
+        SKIP fetcher's 7 days. The force-exit universe is small and
+        append-only (33 rows over two months of live record), but it
+        predates this fix, so a window would leave the historical rows NULL
+        forever — the acceptance criterion asks for all of them. Boundedness
+        comes from the migration-060 partial index: processed rows leave it
+        because ``counterfactual_computed_at`` is set, and terminal-reason
+        rows are frozen by the attempt budget (#337), so the steady-state
+        scan reads only the genuinely pending handful.
+
+        Args: otherwise identical contract to
+        ``fetch_skip_decisions_without_counterfactual`` so the two paths
+        share the keyset paged-iteration pattern (#337).
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                params: list = []
+                window_clause = ""
+                if days_back is not None:
+                    window_clause = "AND tick_time >= now() - (%s || ' days')::interval"
+                    params.append(str(days_back))
+                cursor_clause = ""
+                if before is not None:
+                    cursor_clause = "AND (tick_time, id) < (%s, %s)"
+                    params.extend([before[0], before[1]])
+                params.append(limit)
+                cur.execute(
+                    f"""SELECT id, tick_time, symbol, score, regime_mult, decision,
+                               COALESCE(counterfactual_attempts, 0) AS counterfactual_attempts
+                       FROM execution_decisions
+                       WHERE decision = 'SELL'
+                         AND reason LIKE 'sentiment_reversal%%'
+                         AND counterfactual_computed_at IS NULL
+                         {window_clause}
+                         {cursor_clause}
+                       ORDER BY tick_time DESC, id DESC
+                       LIMIT %s""",
+                    params,
+                )
+                cols = [d[0] for d in cur.description]
+                return [dict(zip(cols, row)) for row in cur.fetchall()]
+        except Exception:
+            conn.rollback()
+            raise
+
+    def fetch_all_force_exit_decisions_without_counterfactual(
+        self,
+        days_back: int | None = None,
+        page_size: int = 500,
+        max_rows: int = 20000,
+    ) -> list[dict]:
+        """Page through every pending force-exit SELL row.
+
+        #450: same keyset exhaustion pattern as
+        ``fetch_all_skip_decisions_without_counterfactual``. ``days_back``
+        defaults to None (no time window — see the single-page method) so one
+        run also backfills the pre-fix history. Rows the worker deliberately
+        leaves pending (PENDING_OVERNIGHT) are pruned by the
+        ``counterfactual_computed_at IS NULL`` predicate in the inner page
+        query, so they do not re-enter later pages of the same run.
+        """
+        collected: list[dict] = []
+        before: tuple | None = None
+        while len(collected) < max_rows:
+            requested = min(page_size, max_rows - len(collected))
+            page = self.fetch_force_exit_decisions_without_counterfactual(
+                days_back=days_back,
+                limit=requested,
+                before=before,
+            )
+            if not page:
+                break
+            page = page[:requested]
+            collected.extend(page)
+            last = page[-1]
+            before = (last["tick_time"], last["id"])
+            if len(page) < requested:
+                break
+        return collected
+
     def bulk_set_counterfactual(
         self,
         updates: list[tuple],
@@ -1381,6 +1484,72 @@ class PostgreSQLStore:
                     "pending": sum(row["pending"] for row in phase_c_rows),
                 },
             }
+        except Exception:
+            conn.rollback()
+            raise
+
+    # #450: pair each sentiment_reversal exit with both the realised P&L and
+    # the counterfactual return the worker computed, so the operator can
+    # read "is this rule net-positive?" from a single SELECT.
+    #
+    # The join is on t.exit_order_id = ed.order_id (NOT t.decision_id = ed.id)
+    # because the writer that submits the SELL order
+    # (_sentiment_reversal_sells, portfolio_scheduler L4742-4796) sets
+    # ed.order_id AFTER calling record_trade_exit — ed.id is not yet known to
+    # the trade writer, so the back-link is the order id.
+    _FORCE_EXIT_VS_COUNTERFACTUAL_SQL = """
+        SELECT
+            ed.symbol,
+            ed.tick_time,
+            ed.id        AS decision_id,
+            t.id         AS trade_id,
+            t.net_pnl    AS realized_net_pnl,
+            t.exit_price AS realized_exit_price,
+            t.entry_price,
+            t.exit_reason,
+            ed.counterfactual_return_1h,
+            ed.counterfactual_return_overnight,
+            ed.counterfactual_computed_at,
+            ed.counterfactual_skip_reason
+        FROM execution_decisions ed
+        JOIN trades t
+          ON t.exit_reason   = 'sentiment_reversal'
+         AND (t.exit_order_id = ed.order_id
+              OR ed.order_id = ANY(t.exit_order_ids))
+        WHERE ed.decision = 'SELL'
+          AND ed.reason LIKE 'sentiment_reversal%%'
+          AND ed.tick_time >= now() - (%s || ' days')::interval
+        ORDER BY ed.tick_time DESC
+    """
+
+    def fetch_force_exit_pnl_vs_counterfactual(self, days: int = 30) -> list[dict]:
+        """Return one row per sentiment_reversal exit, paired with its counterfactual.
+
+        #450: ``trades.exit_reason='sentiment_reversal'`` rows whose exit
+        order matches a ``SELL`` execution_decision with reason
+        ``sentiment_reversal`` — on ``exit_order_id`` or, for a position
+        already partially exited, on ``exit_order_ids`` (record_trade_exit
+        keeps the FIRST tranche's id in ``exit_order_id``, so a later
+        reversal SELL lands only in the array). The pair carries the
+        realised P&L, the exit price, the entry price, and the worker's two
+        counterfactual returns (1h or overnight depending on when the SELL
+        fired).
+
+        Sign convention reminder: for a SELL, the counterfactual_return_1h
+        stored in the row is the *negative* of the underlying price move
+        (so a future DROP shows as a positive "saved" return — same axis as
+        SKIP_*, where a positive return means "the gate skipped a winner").
+        Comparing the realised P&L directly to counterfactual_return_1h
+        therefore puts both metrics on a "savings" axis: positive on either
+        column is good for the decision.
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FORCE_EXIT_VS_COUNTERFACTUAL_SQL, (str(days),))
+                cols = [d[0] for d in cur.description]
+                rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+            return rows
         except Exception:
             conn.rollback()
             raise
@@ -2617,10 +2786,18 @@ class PostgreSQLStore:
         limit: int = 100,
         ticker: str | None = None,
         source: str | None = None,
+        news_id: int | None = None,
     ) -> list[dict]:
-        """Return recent news_log rows with downstream trace counts, newest first."""
+        """Return recent news_log rows with downstream trace counts, newest first.
+
+        `news_id` deep-links a single article (e.g. from a trace panel that
+        already knows the id) the same way `/api/signals?news_id=` does.
+        """
         filters = []
         params: list = []
+        if news_id is not None:
+            filters.append("nl.id = %s")
+            params.append(news_id)
         if ticker:
             filters.append("nl.ticker = %s")
             params.append(ticker)

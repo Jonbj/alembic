@@ -1,0 +1,13 @@
+[Unit]
+Description=Review notturna di una PR aperta sul worker locale
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/stefano/Documents/Projects/Alembic
+ExecStart=/home/stefano/Documents/Projects/Alembic/.venv/bin/python \
+  /home/stefano/Documents/Projects/Alembic/scripts/review_notturna_locale.py
+StandardOutput=append:/home/stefano/llm/notte/review_notturna.log
+StandardError=append:/home/stefano/llm/notte/review_notturna.log
+# Nessun TimeoutStartSec: il limite lo pongono i rilevatori, non l'orologio.
+TimeoutStartSec=infinity

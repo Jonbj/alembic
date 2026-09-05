@@ -69,7 +69,10 @@ export function SignalTraceLinks({
   const links: { key: string; to: string; text: string; show: boolean; available: boolean; detail: string }[] = [
     {
       key: 'news',
-      to: path('/news', { ticker }),
+      to: path('/news', {
+        ticker,
+        news_id: availability?.newsId ? String(availability.newsId) : undefined,
+      }),
       text: 'News',
       show: includeNews,
       available: !hasAvailability || availability?.newsId !== undefined,

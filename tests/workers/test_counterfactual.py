@@ -1,9 +1,11 @@
 """Tests for run_counterfactual_worker and helpers (Phase C)."""
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
+import psycopg2
 import pytest
 
 from src.workers.performance import (
@@ -657,3 +659,399 @@ class TestWorkerPersistsOutcome:
         for _id, ret, computed_at, reason, overnight, _a in updates.values():
             if computed_at is not None and ret is None:
                 assert reason is not None
+
+
+# ---------------------------------------------------------------------------
+# #450 — counterfactual on force-exit SELL decisions
+# ---------------------------------------------------------------------------
+
+
+class TestFetchForceExitDecisions:
+    """#450: extend the counterfactual pipeline to cover SELL from sentiment_reversal."""
+
+    def _make_store(self):
+        from src.store.pg_store import PostgreSQLStore
+        store = PostgreSQLStore.__new__(PostgreSQLStore)
+        store._conn = MagicMock()
+        store._get_connection = MagicMock(return_value=store._conn)
+        return store
+
+    def test_sql_filters_sell_with_sentiment_reversal_reason(self):
+        store = self._make_store()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = lambda s: s
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchall.return_value = []
+        mock_cursor.description = [
+            ("id",), ("tick_time",), ("symbol",), ("score",), ("regime_mult",),
+            ("decision",), ("counterfactual_attempts",)
+        ]
+        store._conn.cursor.return_value = mock_cursor
+
+        store.fetch_force_exit_decisions_without_counterfactual(days_back=7, limit=100)
+
+        called_sql = mock_cursor.execute.call_args[0][0]
+        # decision must be SELL (we own force-exit SELLs, not all SELLs)
+        assert "decision = 'SELL'" in called_sql
+        # reason is the human-readable "sentiment_reversal: score X.XXX < threshold Y.YY"
+        # so a LIKE on the prefix picks them up without depending on the score value
+        assert "sentiment_reversal" in called_sql
+        # the new partial index on (tick_time, id) must keep its WHERE shape
+        assert "counterfactual_computed_at IS NULL" in called_sql
+
+    def test_default_fetch_has_no_time_window(self):
+        """days_back=None (the default) drops the tick_time window entirely.
+
+        #450 acceptance criterion #1: the ~30 historical rows (oldest
+        2026-07-01) must get a counterfactual too, so the worker must not
+        clamp the force-exit universe to the last 7 days the way the SKIP
+        fetcher does. Boundedness comes from the migration-060 partial index
+        (processed rows leave it), not from a time window.
+        """
+        store = self._make_store()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = lambda s: s
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchall.return_value = []
+        mock_cursor.description = [
+            ("id",), ("tick_time",), ("symbol",), ("score",), ("regime_mult",),
+            ("decision",), ("counterfactual_attempts",)
+        ]
+        store._conn.cursor.return_value = mock_cursor
+
+        store.fetch_force_exit_decisions_without_counterfactual(limit=100)
+
+        sql, params = mock_cursor.execute.call_args[0]
+        assert "tick_time >= now()" not in sql
+        assert list(params) == [100]
+
+    def test_keyset_cursor_is_total_order(self):
+        store = self._make_store()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = lambda s: s
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchall.return_value = []
+        mock_cursor.description = [
+            ("id",), ("tick_time",), ("symbol",), ("score",), ("regime_mult",),
+            ("decision",), ("counterfactual_attempts",)
+        ]
+        store._conn.cursor.return_value = mock_cursor
+
+        ts = datetime(2026, 8, 20, 15, 22, tzinfo=timezone.utc)
+        store.fetch_force_exit_decisions_without_counterfactual(
+            days_back=7, limit=500, before=(ts, 42),
+        )
+
+        sql, params = mock_cursor.execute.call_args[0]
+        assert "ORDER BY tick_time DESC, id DESC" in sql
+        assert "(tick_time, id) < (%s, %s)" in sql
+        assert list(params) == ["7", ts, 42, 500]
+
+
+class TestFetchAllForceExitPagination:
+    """Same exhaustion contract as fetch_all_skip_decisions_without_counterfactual."""
+
+    def _store_with_pages(self, pages):
+        from src.store.pg_store import PostgreSQLStore
+        store = PostgreSQLStore.__new__(PostgreSQLStore)
+        calls = []
+
+        def fake_fetch(days_back=7, limit=500, before=None):
+            calls.append({"days_back": days_back, "limit": limit, "before": before})
+            return pages.pop(0) if pages else []
+
+        store.fetch_force_exit_decisions_without_counterfactual = fake_fetch
+        return store, calls
+
+    def test_default_days_back_is_unbounded(self):
+        """The paged wrapper forwards days_back=None: pagination must not
+        reintroduce a window the single-page query doesn't have."""
+        store, calls = self._store_with_pages([[]])
+
+        store.fetch_all_force_exit_decisions_without_counterfactual(page_size=10)
+
+        assert calls[0]["days_back"] is None
+
+    def test_pages_until_short_page(self):
+        base = datetime(2026, 8, 20, 20, 0, tzinfo=timezone.utc)
+        pages = [
+            [
+                {"id": i, "tick_time": base - timedelta(minutes=i), "symbol": "GOOGL",
+                 "score": 0.0, "regime_mult": 1.0, "decision": "SELL",
+                 "counterfactual_attempts": 0}
+                for i in range(1, 11)
+            ],
+            [],
+        ]
+        store, calls = self._store_with_pages(pages)
+
+        rows = store.fetch_all_force_exit_decisions_without_counterfactual(page_size=10)
+
+        assert len(rows) == 10
+        assert len(calls) == 2
+        assert calls[0]["before"] is None
+        assert calls[1]["before"] == (rows[9]["tick_time"], rows[9]["id"])
+
+
+class TestWorkerProcessesForceExitSells:
+    """#450: run_counterfactual_worker must also populate SELL rows from
+    sentiment_reversal — a future negative return after the SELL is a
+    CONFIRMATION of the decision (we already exited), so the value stored is
+    the negative of the realised return, letting a dashboard read "saved vs
+    paid" uniformly across SKIP and SELL decisions.
+    """
+
+    def test_worker_fetches_full_force_exit_history(self):
+        """#450 acceptance criterion #1: the worker must not clamp force-exit
+        SELLs to a 7-day window. With the clamp, only 4 of the 33 live rows
+        (oldest 2026-07-01) would ever get a counterfactual and the rest stay
+        NULL forever. The force-exit fetch must be unbounded; the SKIP fetch
+        keeps its 7-day window (its universe is ~550 rows/day, the cost bound
+        there is real)."""
+        mock_pg = MagicMock()
+        mock_pg.fetch_all_skip_decisions_without_counterfactual.return_value = []
+        mock_pg.fetch_all_force_exit_decisions_without_counterfactual.return_value = []
+
+        with (
+            patch("src.workers.performance.PostgreSQLStore", return_value=mock_pg),
+            patch("psycopg2.connect"),
+            patch("src.workers.performance.RedisStore"),
+            patch("src.workers.performance.config") as mock_cfg,
+        ):
+            mock_cfg.ALPACA_API_KEY = "key"
+            mock_cfg.ALPACA_SECRET_KEY = "secret"
+            mock_cfg.DATABASE_URL = "postgresql://test"
+            run_counterfactual_worker()
+
+        skip_kwargs = mock_pg.fetch_all_skip_decisions_without_counterfactual.call_args.kwargs
+        force_kwargs = (
+            mock_pg.fetch_all_force_exit_decisions_without_counterfactual.call_args.kwargs
+        )
+        assert skip_kwargs.get("days_back") == 7
+        assert force_kwargs.get("days_back") is None
+
+    def test_force_exit_sell_is_picked_up_and_return_is_inverted(self):
+        """A SELL at 100 with price 95 one hour later: the realised P&L is +5%,
+        the counterfactual "if held" is -5%, the decision SAVED 5%."""
+        tick = datetime(2026, 6, 10, 15, 0, tzinfo=timezone.utc)
+        d = {
+            "id": 99,
+            "symbol": "GOOGL",
+            "score": 0.0,
+            "regime_mult": 1.0,
+            "decision": "SELL",
+            "tick_time": tick,
+            "counterfactual_attempts": 0,
+        }
+        bars = _bars_df("GOOGL", [(tick, 100.0), (tick + timedelta(minutes=60), 95.0)])
+
+        # Force the paged fetchers to return ONLY this row
+        import pandas as pd
+
+        mock_pg = MagicMock()
+        mock_pg.fetch_all_skip_decisions_without_counterfactual.return_value = []
+        mock_pg.fetch_all_force_exit_decisions_without_counterfactual.return_value = [d]
+
+        def mock_get_stock_bars(req):
+            result = MagicMock()
+            result.df = bars
+            return result
+
+        mock_data_client = MagicMock()
+        mock_data_client.get_stock_bars.side_effect = mock_get_stock_bars
+
+        with (
+            patch("src.workers.performance.PostgreSQLStore", return_value=mock_pg),
+            patch("psycopg2.connect"),
+            patch("src.workers.performance.RedisStore"),
+            patch("src.workers.performance.retry_transient", side_effect=lambda fn: fn()),
+            patch("src.workers.performance.config") as mock_cfg,
+            patch("alpaca.data.historical.StockHistoricalDataClient", return_value=mock_data_client),
+        ):
+            mock_cfg.ALPACA_API_KEY = "key"
+            mock_cfg.ALPACA_SECRET_KEY = "secret"
+            mock_cfg.DATABASE_URL = "postgresql://test"
+            stats = run_counterfactual_worker()
+
+        assert stats["total_decisions"] == 1
+        assert stats["updated"] == 1
+        updates = mock_pg.bulk_set_counterfactual.call_args[0][0]
+        _id, ret, computed_at, reason, overnight, attempts = updates[0]
+        # Raw future return is -0.05; "saved" is +0.05
+        assert ret == pytest.approx(0.05)
+        assert computed_at is not None
+        assert reason is None
+        assert attempts == 1
+
+    def test_force_exit_sell_passes_through_overnight_semantics(self):
+        """Tail-of-session SELL: the +1h window falls past the close, so the
+        worker must still finalise the row with counterfactual_return_overnight
+        populated, sign-inverted for the SELL direction."""
+        tick = datetime(2026, 6, 10, 19, 52, tzinfo=timezone.utc)
+        d = {
+            "id": 100,
+            "symbol": "AMAT",
+            "score": 0.0,
+            "regime_mult": 1.0,
+            "decision": "SELL",
+            "tick_time": tick,
+            "counterfactual_attempts": 0,
+        }
+        bars = _bars_df("AMAT", [
+            (tick, 100.0),
+            (datetime(2026, 6, 10, 19, 59, tzinfo=timezone.utc), 100.5),
+            (datetime(2026, 6, 11, 13, 30, tzinfo=timezone.utc), 102.0),
+        ])
+
+        mock_pg = MagicMock()
+        mock_pg.fetch_all_skip_decisions_without_counterfactual.return_value = []
+        mock_pg.fetch_all_force_exit_decisions_without_counterfactual.return_value = [d]
+
+        def mock_get_stock_bars(req):
+            result = MagicMock()
+            result.df = bars
+            return result
+
+        mock_data_client = MagicMock()
+        mock_data_client.get_stock_bars.side_effect = mock_get_stock_bars
+
+        with (
+            patch("src.workers.performance.PostgreSQLStore", return_value=mock_pg),
+            patch("psycopg2.connect"),
+            patch("src.workers.performance.RedisStore"),
+            patch("src.workers.performance.retry_transient", side_effect=lambda fn: fn()),
+            patch("src.workers.performance.config") as mock_cfg,
+            patch("alpaca.data.historical.StockHistoricalDataClient", return_value=mock_data_client),
+        ):
+            mock_cfg.ALPACA_API_KEY = "key"
+            mock_cfg.ALPACA_SECRET_KEY = "secret"
+            mock_cfg.DATABASE_URL = "postgresql://test"
+            stats = run_counterfactual_worker()
+
+        assert stats["overnight_computed"] == 1
+        updates = mock_pg.bulk_set_counterfactual.call_args[0][0]
+        _id, ret, computed_at, reason, overnight, attempts = updates[0]
+        assert ret is None
+        # Future return is +0.02 (price went UP), the SELL LOST 0.02 against hold
+        assert overnight == pytest.approx(-0.02)
+        assert reason == _CF_HORIZON_AFTER_CLOSE
+
+
+class TestForceExitVsRealizedView:
+    """#450: a view that pairs each sentiment_reversal exit's realised P&L with
+    its counterfactual "if held" return, so the operator can answer "is the
+    rule net-positive?" empirically."""
+
+    def test_sql_joins_decision_to_trade(self):
+        from src.store.pg_store import PostgreSQLStore
+        store = PostgreSQLStore.__new__(PostgreSQLStore)
+        store._conn = MagicMock()
+        store._get_connection = MagicMock(return_value=store._conn)
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = lambda s: s
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_cursor.fetchall.return_value = []
+        mock_cursor.description = [
+            ("symbol",), ("tick_time",), ("decision_id",), ("trade_id",),
+            ("realized_net_pnl",), ("realized_exit_price",), ("entry_price",),
+            ("exit_reason",), ("counterfactual_return_1h",),
+            ("counterfactual_return_overnight",),
+        ]
+        store._conn.cursor.return_value = mock_cursor
+
+        store.fetch_force_exit_pnl_vs_counterfactual(days=30)
+
+        called_sql = mock_cursor.execute.call_args[0][0]
+        # Must join decision back to the trade so we know what the realised P&L
+        # actually was for THIS exit (not for some other historical close)
+        assert "FROM execution_decisions ed" in called_sql
+        assert "JOIN trades t" in called_sql
+        # record_trade_exit keeps the FIRST tranche's order in exit_order_id
+        # (COALESCE) and appends later tranches to exit_order_ids: a reversal
+        # SELL that closes a position already partially exited lands only in
+        # the array, so the join must reach it too
+        assert "ed.order_id = ANY(t.exit_order_ids)" in called_sql
+        # SELL from the sentiment_reversal path is the only universe we expose
+        assert "decision = 'SELL'" in called_sql
+        assert "sentiment_reversal" in called_sql
+        # the row must show BOTH the realised P&L and the counterfactual, so the
+        # operator can read the comparison from a single SELECT
+        assert "t.net_pnl" in called_sql
+        assert "realized_net_pnl" in called_sql
+        assert "ed.counterfactual_return_1h" in called_sql
+        assert "ed.counterfactual_return_overnight" in called_sql
+
+
+class TestForceExitLikeEscaping:
+    """Regression for #493.
+
+    ``reason LIKE 'sentiment_reversal%'`` has an unescaped literal ``%``.
+    psycopg2 interpolates ``%s`` parameters into the query client-side using
+    Python's printf-style ``%`` formatting *before* the query ever reaches
+    Postgres; a bare ``%`` that isn't part of a placeholder makes it
+    miscount how many positional params the query needs and raise
+    ``IndexError: list index out of range`` -- not a SQL error, a formatting
+    error. Every other test in this file uses ``cursor = MagicMock()``,
+    which records call args without ever performing that substitution, so
+    it cannot see this bug class. Only a real psycopg2 cursor can.
+
+    The assertion is narrow on purpose: these tests don't require
+    `execution_decisions`/`trades` to exist (CI provisions schema via
+    migrations; a bare `postgres` connection may not). Any error *other*
+    than IndexError (e.g. UndefinedTable) means the query reached the
+    server, which is all this regression cares about.
+    """
+
+    @staticmethod
+    def _connect():
+        for url in (
+            os.environ.get("DATABASE_URL", ""),
+            "postgresql://trading:trading@localhost:5432/postgres",
+        ):
+            if not url:
+                continue
+            try:
+                return psycopg2.connect(url, connect_timeout=3)
+            except psycopg2.OperationalError:
+                continue
+        pytest.skip("Postgres non raggiungibile")
+
+    def test_fetch_force_exit_decisions_does_not_raise_indexerror(self):
+        from src.store.pg_store import PostgreSQLStore
+
+        conn = self._connect()
+        try:
+            store = PostgreSQLStore(conn=conn)
+            try:
+                store.fetch_force_exit_decisions_without_counterfactual(
+                    days_back=None, limit=1
+                )
+            except IndexError:
+                pytest.fail(
+                    "unescaped '%' in \"LIKE 'sentiment_reversal%'\" breaks "
+                    "psycopg2's client-side parameter substitution"
+                )
+            except Exception:
+                pass  # a real DB/schema error is fine; only IndexError is the regression
+        finally:
+            conn.rollback()
+            conn.close()
+
+    def test_fetch_force_exit_pnl_vs_counterfactual_does_not_raise_indexerror(self):
+        from src.store.pg_store import PostgreSQLStore
+
+        conn = self._connect()
+        try:
+            store = PostgreSQLStore(conn=conn)
+            try:
+                store.fetch_force_exit_pnl_vs_counterfactual(days=30)
+            except IndexError:
+                pytest.fail(
+                    "unescaped '%' in \"LIKE 'sentiment_reversal%'\" breaks "
+                    "psycopg2's client-side parameter substitution"
+                )
+            except Exception:
+                pass  # a real DB/schema error is fine; only IndexError is the regression
+        finally:
+            conn.rollback()
+            conn.close()

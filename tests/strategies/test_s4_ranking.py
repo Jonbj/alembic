@@ -493,3 +493,72 @@ def test_fixed_slot_sizing_true_matches_historical_2pct_norm_at_default_config()
     allocation_pct = 0.10
     portfolio_weight = result.weights["T00"] * allocation_pct
     assert portfolio_weight == pytest.approx(0.02, rel=1e-9)
+
+
+# --- #401: l'invariante "rank e' funzione decrescente del punteggio" ---------
+# Il ranker deve sempre produrre rank monotonici rispetto al campo che usa per
+# ordinare. Questo test e' la guardia a livello di ranker: quando il ledger
+# (#294) osserva un'inversione, la causa non e' il ranker stesso ma la
+# divergenza fra il punteggio catturato nel candidate snapshot e quello visto
+# dal ranker. Il dossier (#401 sweep) copre la verifica a livello di ledger.
+
+
+def test_ranker_rank_monotone_decrescente_in_effective_strength():
+    """Per ogni signal nello stesso slot, il rank assegnato deve essere
+    strettamente decrescente in effective_strength (= score, vedi
+    ranking.py:4-8). Pareggi ammessi."""
+    signals = [
+        _sig("MRVL", score=0.3578, confidence=0.9),
+        _sig("CSCO", score=0.3199, confidence=0.9),
+        _sig("SOXX", score=0.3600, confidence=0.9),
+        _sig("DELL", score=0.5810, confidence=0.9),
+        _sig("AMAT", score=0.5210, confidence=0.9),
+    ]
+    ranker = CrossSectionalRanker(S4Config(n_top=5, min_stocks=5))
+    result = ranker.rank(signals)
+
+    # Per il ranker, score e effective_strength coincidono (ranking.py:227-230).
+    # Costruiamo una mappa signal_id -> (rank, score) dai diagnostics e
+    # verifichiamo che l'ordine per rank sia coerente con l'ordine per score.
+    by_ticker: dict[str, tuple[int, float]] = {}
+    for r in result.rankings:
+        by_ticker[r.ticker] = (r.rank, r.effective_strength)
+    by_rank = sorted(by_ticker.items(), key=lambda kv: kv[1][0])
+    by_score = sorted(by_ticker.items(), key=lambda kv: kv[1][1], reverse=True)
+    assert [t for t, _ in by_rank] == [t for t, _ in by_score]
+
+
+def test_ranker_diagnostics_rank_coerente_con_ranking():
+    """#401: ogni diagnostic emesso dal ranker deve avere rank strettamente
+    crescente e consistente con l'ordinamento per effective_strength. Una
+    inversione qui e' una firma del bug #401 sul lato ranker (non sul lato
+    ledger)."""
+    signals = _make_signals(7)
+    ranker = CrossSectionalRanker(S4Config(n_top=5, min_stocks=5))
+    result = ranker.rank(signals)
+
+    ranks = [d.rank for d in result.diagnostics if d.rank is not None]
+    assert ranks == sorted(ranks), (
+        f"ranker diagnostics rank not monotone: {ranks} — #401 violation"
+    )
+
+    # Per ogni coppia (i, j) di diagnostics emessi, se rank_i < rank_j allora
+    # il signal di i deve avere effective_strength >= signal di j.
+    by_signal: dict[int, int] = {
+        d.signal_id: d.rank
+        for d in result.diagnostics
+        if d.signal_id is not None and d.rank is not None
+    }
+    strengths = {
+        r.signal_id: r.effective_strength
+        for r in result.rankings
+    }
+    for s_i, r_i in by_signal.items():
+        for s_j, r_j in by_signal.items():
+            if r_i < r_j:
+                assert strengths[s_i] >= strengths[s_j], (
+                    f"ranker: signal {s_i} (rank {r_i}, strength "
+                    f"{strengths[s_i]}) precedes signal {s_j} "
+                    f"(rank {r_j}, strength {strengths[s_j]}) — "
+                    f"viola l'invariante #401"
+                )

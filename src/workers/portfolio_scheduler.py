@@ -35,6 +35,7 @@ from src.portfolio.exit_classification import (
     STALE_PRESERVED,
     describe_disposition,
     mechanism_for_disposition,
+    reason_for_hold_minimum_expiry,
 )
 from src.portfolio.order_id import build_client_order_id, submit_order_with_coid_fallback
 from src.portfolio.whipsaw_damping import evaluate_whipsaw_damping
@@ -1923,6 +1924,7 @@ def _persist_trade_fills(
     regime_mult,
     tick_time,
     sym_strats: dict | None = None,
+    hold_minimum_minutes: int | None = None,
 ) -> int:
     """Persist trade entry/exit rows + back-fill Alpaca order_ids, one order at a time.
 
@@ -1950,6 +1952,9 @@ def _persist_trade_fills(
         # same symbol). open_trades was fetched at the top of the cycle
         # (exit_time IS NULL => positions still open at submit time).
         _open_trade_ids = {t["symbol"]: t["id"] for t in open_trades}
+        _open_trade_entry_times = {
+            t["symbol"]: t.get("entry_time") for t in open_trades
+        }
         for sub in submitted_orders:
             sym = sub["symbol"]
             dec = symbol_decisions.get(sym, {})
@@ -2002,11 +2007,32 @@ def _persist_trade_fills(
                     # full close (final tranche); stop-loss / reversal SELLs carry
                     # no allocation_weight and default to 0.0 => final (full close).
                     _is_final = float(sub.get("allocation_weight", 0.0) or 0.0) == 0.0
+                    _exit_reason = sub.get("reason", "portfolio_sell")
+                    _entry_time = _open_trade_entry_times.get(sym)
+                    try:
+                        _holding_seconds = (
+                            (tick_time - _entry_time).total_seconds()
+                            if _entry_time is not None else None
+                        )
+                    except (AttributeError, TypeError):
+                        # Una entry legacy malformata non deve mai impedire la
+                        # persistenza dell'uscita: perdiamo solo il marker #430.
+                        _holding_seconds = None
+                    _exit_reason = reason_for_hold_minimum_expiry(
+                        _exit_reason,
+                        _holding_seconds,
+                        hold_minimum_minutes=(
+                            hold_minimum_minutes
+                            if hold_minimum_minutes is not None
+                            else _get_hold_minimum_minutes()
+                        ),
+                        cycle_seconds=_CYCLE_SECONDS,
+                    )
                     _trade_id = _pg_trades.record_trade_exit(
                         symbol=sym,
                         exit_order_id=sub["order_id"],
                         exit_time=tick_time,
-                        exit_reason=sub.get("reason", "portfolio_sell"),
+                        exit_reason=_exit_reason,
                         trade_id=_open_trade_ids.get(sym),
                         is_final=_is_final,
                     )
@@ -2532,6 +2558,15 @@ def _run_cycle_inner() -> dict:
         strategy_returns=_strategy_returns,
         last_target_weights=_last_target_weights or None,
     )
+    # #491: the orchestrator sizes target weights against this NAV. Keep it so
+    # SKIP_PYRAMIDING can report the full target and subtract the actual broker
+    # position, instead of assuming the order quantity alone has that meaning.
+    _cycle_nav = orchestrator._compute_nav(portfolio, market)
+    _broker_position_values = {
+        ap.symbol: max(0.0, float(ap.qty) * float(latest_prices[ap.symbol]))
+        for ap in alpaca_positions
+        if ap.symbol in latest_prices
+    }
     _s4_strategy_instance = strategy_instances.get("S4")
     _s4_intent_ledger = getattr(_s4_strategy_instance, "_intent_ledger", None)
     _s4_observed_provenance = _s4_intent_provenance(
@@ -2865,13 +2900,14 @@ def _run_cycle_inner() -> dict:
                     "signal_id": _signal_ids.get(order.symbol),
                     "signal_score": _s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
                     "allocation_weight": order.allocation_weight,
-                    # #315: quantita'/prezzo/NAV del ciclo per calcolare il delta $
-                    # di NAV effettivamente bloccato — allocation_weight resta solo
-                    # come peso *target* dello slot (fixed_slot_sizing = 1/n_top),
-                    # non il capitale davvero non allocato.
+                    # #491: target pieno e valore broker corrente rendono esplicito
+                    # il gap; quantity/price restano solo per compatibilita' col
+                    # fallback difensivo di _record_pyramiding_blocks.
                     "quantity": order.quantity,
                     "price": latest_prices.get(order.symbol),
                     "nav": equity,
+                    "target_notional": float(order.allocation_weight) * _cycle_nav,
+                    "current_value": _broker_position_values.get(order.symbol, 0.0),
                     "open_since": _open_trade_entry_dates.get(order.symbol),
                 })
                 if "S4" in strats:
@@ -3285,6 +3321,7 @@ def _run_cycle_inner() -> dict:
             regime_mult=_regime_mult,
             tick_time=ts,
             sym_strats=_sym_strats,
+            hold_minimum_minutes=_hold_min,
         )
 
     # Alert when an approved strategy consistently produces zero target weights.
@@ -3516,10 +3553,19 @@ def _record_gate_drops(dropped_df, threshold: float) -> None:
         pg = PostgreSQLStore()
         for _, row in dropped_df.iterrows():
             sig_score = float(row["score"])
+            # #406: the gate drop carries a known signal_id — propagate it so the
+            # Decision Log row joins back to the signal that caused it. NaN is
+            # the pandas sentinel for a missing int column; int(NaN) raises,
+            # which is exactly the None-mapping we want.
+            raw_sid = row.get("signal_id")
+            try:
+                sid: int | None = int(raw_sid) if raw_sid is not None else None
+            except (TypeError, ValueError):
+                sid = None
             pg.write_execution_decision(
                 tick_time=now,
                 symbol=str(row["symbol"]),
-                signal_id=None,
+                signal_id=sid,
                 score=0.0,  # no allocation weight — it never reached ranking
                 regime_mult=regime_mult,
                 ema_pass=False,
@@ -3572,7 +3618,7 @@ def _record_stale_drops(stale_signals, max_age_hours: int, min_score: float) -> 
             pg.write_execution_decision(
                 tick_time=now,
                 symbol=sig.symbol,
-                signal_id=None,
+                signal_id=getattr(sig, "signal_id", None),
                 score=0.0,
                 regime_mult=regime_mult,
                 ema_pass=False,
@@ -3657,12 +3703,10 @@ def _record_pyramiding_blocks(pg, bloccati, gia_registrati: set[str], regime_mul
     il difetto precedente: le righe apparivano come replay di segnali stale e inquinavano
     il Decision Log. Qui la riga dichiara quello che e' successo davvero.
 
-    `score` porta il delta di NAV effettivamente bloccato — `quantity * price / nav`,
-    non il peso *target* dello slot (#315). Con `fixed_slot_sizing=True` (default)
-    `allocation_weight` e' sempre 1/n_top (0.20): un numero fisso che non dipende da
-    quanto capitale il blocco lascia davvero non impiegato, quindi non e' sommabile
-    in una stima $ leggibile a query — vedi #230. `allocation_weight` resta nel testo
-    del `reason` per confronto, ma non e' piu' il campo usato per l'aggregazione.
+    `score` porta il gap positivo `(target_notional - current_value) / nav`, non il
+    notional target intero (#491). Una posizione stub da $6 verso un target da $629
+    registra quindi $623 di NAV non allocato; una posizione gia' a target registra
+    zero. `allocation_weight` e target pieno restano nel `reason` per confronto.
 
     Restituisce le chiavi effettivamente scritte, perche' sia il chiamante a marcarle —
     la funzione resta testabile senza Redis. Non solleva mai: la visibilita' e' preziosa,
@@ -3680,15 +3724,22 @@ def _record_pyramiding_blocks(pg, bloccati, gia_registrati: set[str], regime_mul
                 continue
             _score = b.get("signal_score")
             _since = b.get("open_since")
-            _qty = b.get("quantity") or 0.0
-            _price = b.get("price") or 0.0
+            # Compatibilita' difensiva per chiamanti vecchi/test: prima di #491 il
+            # solo notional disponibile era quantity * price ed era trattato come
+            # intero gap. Il path live passa sempre i due valori espliciti.
+            _target = b.get("target_notional")
+            if _target is None:
+                _target = (b.get("quantity") or 0.0) * (b.get("price") or 0.0)
+            _current = b.get("current_value") or 0.0
             _nav = b.get("nav") or 0.0
-            _delta = (float(_qty) * float(_price) / float(_nav)) if _nav else 0.0
+            _gap = max(0.0, float(_target) - float(_current))
+            _delta = (_gap / float(_nav)) if _nav else 0.0
             _reason = (
                 f"P0-05 anti-pyramiding: gia' a libro"
                 f"{f' dal {_since}' if _since else ''}"
                 f"{f', sentiment {float(_score):+.3f}' if _score is not None else ''}"
-                f", peso non allocato {float(b.get('allocation_weight') or 0.0) * 100:.1f}%"
+                f", peso target {float(b.get('allocation_weight') or 0.0) * 100:.1f}%"
+                f", target ${float(_target):.2f}, posizione ${float(_current):.2f}"
             )
             pg.write_execution_decision(
                 tick_time=now,
@@ -3803,7 +3854,7 @@ def _record_fallback_drops(fallback_signals, non_fallback_signals=()) -> None:
             pg.write_execution_decision(
                 tick_time=now,
                 symbol=sig.symbol,
-                signal_id=None,
+                signal_id=getattr(sig, "signal_id", None),
                 score=0.0,  # no allocation weight — excluded before ranking
                 regime_mult=regime_mult,
                 ema_pass=False,
@@ -3908,15 +3959,42 @@ def _build_strategy_instance(
                 symbols=s4_symbols,
                 news_age_hours=None,
             )
-            if intent_ledger is not None and signals:
-                candidate_events = intent_ledger.capture(signals)
-                _write_s4_intent_events_fail_open(
-                    store, candidate_events, phase="candidate"
-                )
+            # #401: compute velocity multipliers BEFORE the candidate capture so
+            # the ledger can persist the score the ranker will actually use as
+            # `ranking_score`. The multipliers depend only on the symbol and
+            # Redis history (no filter chain involved), so it is safe to
+            # evaluate them at this point. If Redis is down we degrade to
+            # multipliers = {sym: 1.0} — same fail-open the ranker already
+            # uses a few lines below.
+            _ranking_multipliers: dict[str, float] = {}
+            if signals:
+                try:
+                    from redis import Redis as _RedisSV
+                    from src.config import config as _cfg_sv
+                    _r_sv = _RedisSV.from_url(_cfg_sv.REDIS_URL, decode_responses=True)
+                    try:
+                        _ranking_multipliers = {
+                            sig.symbol: _compute_signal_velocity(
+                                sig.symbol, _r_sv,
+                                threshold=_cfg_sv.SIGNAL_VELOCITY_THRESHOLD,
+                                boost=_cfg_sv.SIGNAL_VELOCITY_BOOST,
+                            )
+                            for sig in signals
+                        }
+                    finally:
+                        _r_sv.close()
+                except Exception as exc:
+                    log.warning(
+                        "Signal velocity multipliers unavailable at capture: %s — "
+                        "candidates will record ranking_score == raw score",
+                        exc,
+                    )
+                    _ranking_multipliers = {}
             try:
                 _open_syms = {
                     t["symbol"] for t in store.fetch_trades(status="open", limit=1000)
                 }
+                _open_syms_at_rank = _open_syms
             except Exception as _os_exc:
                 log.warning(
                     "#150: open-trade query failed (%s) — entry-freshness gate "
@@ -3924,6 +4002,21 @@ def _build_strategy_instance(
                     _os_exc,
                 )
                 _open_syms = set()
+                _open_syms_at_rank = None
+            if intent_ledger is not None and signals:
+                ranking_scores = {
+                    sig.signal_id: float(sig.score) * _ranking_multipliers.get(sig.symbol, 1.0)
+                    for sig in signals
+                    if sig.signal_id is not None
+                }
+                candidate_events = intent_ledger.capture(
+                    signals,
+                    ranking_scores=ranking_scores,
+                    open_symbols=_open_syms_at_rank,
+                )
+                _write_s4_intent_events_fail_open(
+                    store, candidate_events, phase="candidate"
+                )
             if signals:
                 _before_freshness = len(signals)
                 _before_freshness_signals = list(signals)
@@ -4076,21 +4169,15 @@ def _build_strategy_instance(
                 )
 
             # Apply velocity multipliers (best-effort; failures fall back to raw scores).
-            try:
-                from redis import Redis as _RedisSV
-                from src.config import config as _cfg_sv
-                _r_sv = _RedisSV.from_url(_cfg_sv.REDIS_URL, decode_responses=True)
-                try:
-                    multipliers = {
-                        sym: _compute_signal_velocity(
-                            sym, _r_sv,
-                            threshold=_cfg_sv.SIGNAL_VELOCITY_THRESHOLD,
-                            boost=_cfg_sv.SIGNAL_VELOCITY_BOOST,
-                        )
-                        for sym in signals_df["symbol"].unique()
-                    }
-                finally:
-                    _r_sv.close()
+            # #401: reuse the multipliers already computed before the candidate
+            # capture (they are symbol-only, no filter chain involved) instead of
+            # re-querying Redis. If the earlier computation failed, fall back to
+            # raw scores — the warning was already emitted at capture time.
+            multipliers = {
+                sym: mult for sym, mult in _ranking_multipliers.items()
+                if sym in set(signals_df["symbol"].unique())
+            }
+            if multipliers:
                 signals_df = signals_df.copy()
                 signals_df["score"] = signals_df.apply(
                     lambda row: row["score"] * multipliers.get(row["symbol"], 1.0),
@@ -4099,8 +4186,6 @@ def _build_strategy_instance(
                 n_boosted = sum(1 for m in multipliers.values() if m != 1.0)
                 if n_boosted:
                     log.info("Signal velocity: %d/%d symbols adjusted", n_boosted, len(multipliers))
-            except Exception as exc:
-                log.warning("Signal velocity application failed: %s — using raw scores", exc)
 
             # Drop signals below the active feedback threshold (absolute value check
             # so bearish signals are also gated, consistent with BUY-only logic).

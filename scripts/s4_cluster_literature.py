@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 import uuid
+from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,7 @@ PROTOCOL_VERSION = 4
 ALLOWED_STANCES = {"SUPPORTS", "CONTRADICTS", "QUALIFIES", "METHOD_ONLY"}
 ALLOWED_HYPOTHESES = {f"H{i:02d}" for i in range(1, 23)}
 ALLOWED_REVIEW_VERDICTS = {"SUPPORTED", "OVERSTATED", "AMBIGUOUS", "NOT_APPLICABLE"}
-NODE2_BATCH_SIZE = 3
+NODE2_BATCH_SIZE = 1
 JSONL_LOCK = threading.Lock()
 ChunkId = int | str
 
@@ -91,7 +92,9 @@ def fetch_text(row: dict[str, str], cache: Path) -> tuple[str, str]:
     return text, digest
 
 
-def chunks(text: str, size: int = 9000, overlap: int = 500):
+def chunks(
+    text: str, size: int = 9000, overlap: int = 500
+) -> Iterator[tuple[int, str]]:
     """Yield stable overlapping source chunks with integer identifiers."""
     start = 0
     idx = 0
@@ -280,17 +283,52 @@ def chat(
 
 
 def parse_json(text: str) -> dict:
-    """Parse a single JSON object, tolerating only surrounding Markdown fences."""
+    """Parse one object, appending only missing closing containers once."""
     text = text.strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.S)
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, re.S)
-        if not match:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as original_error:
+        repaired = append_missing_json_closers(text)
+        if repaired == text:
             raise
-        return json.loads(match.group(0))
+        try:
+            parsed = json.loads(repaired)
+        except json.JSONDecodeError:
+            raise original_error
+    if not isinstance(parsed, dict):
+        raise ValueError("model response is not a JSON object")
+    return parsed
+
+
+def append_missing_json_closers(text: str) -> str:
+    """Append only structurally required `]`/`}` suffixes to truncated JSON."""
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            stack.append("}")
+        elif char == "[":
+            stack.append("]")
+        elif char in "}]":
+            if not stack or stack.pop() != char:
+                return text
+    stripped = text.rstrip()
+    if in_string or not stack or not stripped or stripped[-1] in ",:":
+        return text
+    return stripped + "".join(reversed(stack))
 
 
 def chat_json(
@@ -301,20 +339,9 @@ def chat_json(
     max_tokens: int,
     response_format: dict[str, Any],
 ) -> dict:
-    """Regenerate invalid JSON once under a strict schema, then parse it."""
-    raw = chat(url, model, system, user, max_tokens)
-    try:
-        return parse_json(raw)
-    except json.JSONDecodeError:
-        regenerated = chat(
-            url,
-            model,
-            system,
-            user,
-            max_tokens,
-            response_format,
-        )
-        return parse_json(regenerated)
+    """Request strict schema-constrained JSON and parse it without model repair."""
+    raw = chat(url, model, system, user, max_tokens, response_format)
+    return parse_json(raw)
 
 
 def append_jsonl(path: Path, item: dict) -> None:
@@ -346,9 +373,12 @@ def invalidated_campaigns(path: Path) -> set[str]:
 
 
 def completed_keys(
-    path: Path, excluded_campaigns: set[str] | None = None
+    path: Path,
+    source_id: str,
+    source_sha256: str,
+    excluded_campaigns: set[str] | None = None,
 ) -> set[tuple[str, str]]:
-    """Return completed source/chunk identities excluding invalidated campaigns."""
+    """Return completed chunks for the current immutable representation."""
     excluded_campaigns = excluded_campaigns or set()
     if not path.exists():
         return set()
@@ -358,6 +388,8 @@ def completed_keys(
             item = json.loads(line)
             if (
                 item.get("protocol_version") == PROTOCOL_VERSION
+                and item.get("source_id") == source_id
+                and item.get("source_sha256") == source_sha256
                 and item.get("retry_campaign") not in excluded_campaigns
             ):
                 keys.add((str(item["source_id"]), str(item["chunk_id"])))
@@ -367,37 +399,130 @@ def completed_keys(
 
 
 def recovered_chunk_keys(
-    path: Path, excluded_campaigns: set[str] | None = None
+    ledger_path: Path,
+    node1_path: Path,
+    source_id: str,
+    parent_chunks: dict[str, str],
+    source_sha256: str,
+    excluded_campaigns: set[str] | None = None,
 ) -> set[tuple[str, str]]:
-    """Return parent chunks fully covered by append-only split-child records."""
+    """Return parents whose proof matches source text and persisted leaf cards."""
     excluded_campaigns = excluded_campaigns or set()
-    recovered: set[tuple[str, str]] = set()
-    if not path.exists():
-        return recovered
-    for line in path.read_text().splitlines():
+    if not ledger_path.exists() or not node1_path.exists():
+        return set()
+
+    events: list[dict[str, Any]] = []
+    for line in ledger_path.read_text().splitlines():
         try:
             item = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if item.get("protocol_version") != PROTOCOL_VERSION:
+        if (
+            item.get("protocol_version") == PROTOCOL_VERSION
+            and item.get("event") == "CHUNK_RECOVERED"
+            and item.get("source_id") == source_id
+            and item.get("source_sha256") == source_sha256
+            and item.get("retry_campaign") not in excluded_campaigns
+        ):
+            events.append(item)
+
+    cards: list[dict[str, Any]] = []
+    for line in node1_path.read_text().splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
             continue
-        if item.get("event") != "CHUNK_RECOVERED":
-            continue
-        if item.get("retry_campaign") in excluded_campaigns:
-            continue
-        source_id = item.get("source_id")
-        chunk_id = item.get("chunk_id")
-        if source_id is not None and chunk_id is not None:
-            recovered.add((str(source_id), str(chunk_id)))
+        if (
+            item.get("protocol_version") == PROTOCOL_VERSION
+            and item.get("source_id") == source_id
+            and item.get("source_sha256") == source_sha256
+            and item.get("retry_campaign") not in excluded_campaigns
+        ):
+            cards.append(item)
+
+    def has_leaf_card(child_id: str, child_sha256: str) -> bool:
+        return any(
+            str(card.get("chunk_id")) == child_id
+            and card.get("chunk_sha256") == child_sha256
+            for card in cards
+        )
+
+    sha256_pattern = re.compile(r"^[0-9a-f]{64}$")
+
+    def verify_event(
+        event: dict[str, Any], parent_text: str, ancestry: set[tuple[str, str, str]]
+    ) -> bool:
+        parent_id = str(event.get("chunk_id"))
+        run_id = str(event.get("run_id"))
+        campaign = str(event.get("retry_campaign"))
+        identity = (parent_id, run_id, campaign)
+        if identity in ancestry:
+            return False
+        parent_sha256 = hash_text(parent_text)
+        if (
+            event.get("coverage_verified") is not True
+            or event.get("source_sha256") != source_sha256
+            or event.get("parent_sha256") != parent_sha256
+            or event.get("coverage_sha256") != parent_sha256
+            or event.get("parent_chars") != len(parent_text)
+        ):
+            return False
+        children = event.get("children")
+        if not isinstance(children, list) or len(children) != 2:
+            return False
+        expected_start = 0
+        next_ancestry = ancestry | {identity}
+        for index, child in enumerate(children):
+            if not isinstance(child, dict):
+                return False
+            child_id = child.get("chunk_id")
+            child_sha256 = child.get("sha256")
+            start = child.get("start")
+            end = child.get("end")
+            if (
+                child_id != f"{parent_id}.{index}"
+                or type(start) is not int
+                or type(end) is not int
+                or start != expected_start
+                or end <= start
+                or end > len(parent_text)
+                or not isinstance(child_sha256, str)
+                or not sha256_pattern.fullmatch(child_sha256)
+            ):
+                return False
+            child_text = parent_text[start:end]
+            if hash_text(child_text) != child_sha256:
+                return False
+            if not has_leaf_card(child_id, child_sha256):
+                nested = [
+                    candidate
+                    for candidate in events
+                    if str(candidate.get("chunk_id")) == child_id
+                ]
+                if not any(
+                    verify_event(candidate, child_text, next_ancestry)
+                    for candidate in nested
+                ):
+                    return False
+            expected_start = end
+        return expected_start == len(parent_text)
+
+    recovered: set[tuple[str, str]] = set()
+    for event in events:
+        chunk_id = str(event.get("chunk_id"))
+        parent_text = parent_chunks.get(chunk_id)
+        if parent_text is not None and verify_event(event, parent_text, set()):
+            recovered.add((source_id, chunk_id))
     return recovered
 
 
 def prior_claims(
     path: Path,
     source_id: str,
+    source_sha256: str,
     excluded_campaigns: set[str] | None = None,
 ) -> list[dict]:
-    """Return prior valid claims for a source outside invalidated campaigns."""
+    """Return prior claims for the current immutable source representation."""
     excluded_campaigns = excluded_campaigns or set()
     if not path.exists():
         return []
@@ -409,6 +534,7 @@ def prior_claims(
             continue
         if (
             item.get("source_id") == source_id
+            and item.get("source_sha256") == source_sha256
             and item.get("protocol_version") == PROTOCOL_VERSION
             and item.get("retry_campaign") not in excluded_campaigns
         ):
@@ -417,9 +543,12 @@ def prior_claims(
 
 
 def reviewed_claim_ids(
-    path: Path, excluded_campaigns: set[str] | None = None
+    path: Path,
+    source_id: str,
+    source_sha256: str,
+    excluded_campaigns: set[str] | None = None,
 ) -> set[str]:
-    """Return claim ids already reviewed under the current protocol.
+    """Return claim ids reviewed for the current source representation.
 
     Resume must be idempotent at claim level: a source may have gained claims from
     chunks that failed during an earlier pass, so batch ids alone are not stable.
@@ -435,6 +564,10 @@ def reviewed_claim_ids(
             continue
         if item.get("protocol_version") != PROTOCOL_VERSION:
             continue
+        if item.get("source_id") != source_id:
+            continue
+        if item.get("source_sha256") != source_sha256:
+            continue
         if item.get("retry_campaign") in excluded_campaigns:
             continue
         for review in item.get("reviews", []):
@@ -447,10 +580,8 @@ def reviewed_claim_ids(
 def next_review_batch_id(
     path: Path,
     source_id: str,
-    excluded_campaigns: set[str] | None = None,
 ) -> int:
     """Choose a monotonic per-source batch id for append-only review output."""
-    excluded_campaigns = excluded_campaigns or set()
     if not path.exists():
         return 0
     batch_ids = []
@@ -462,8 +593,6 @@ def next_review_batch_id(
         if item.get("protocol_version") != PROTOCOL_VERSION:
             continue
         if item.get("source_id") != source_id:
-            continue
-        if item.get("retry_campaign") in excluded_campaigns:
             continue
         try:
             batch_ids.append(int(item["batch_id"]))
@@ -521,16 +650,45 @@ def validate_card(
     text: str,
 ) -> tuple[list[dict], list[dict]]:
     """Partition candidate claims into evidence-valid and rejected records."""
+    if card.get("source_id") != row["source_id"] or str(
+        card.get("chunk_id", "")
+    ) != str(chunk_id):
+        raise ValueError("node1 source or chunk identity mismatch")
+    claims = card.get("claims")
+    if not isinstance(claims, list):
+        raise ValueError("node1 claims is not a list")
+    followups = card.get("unverified_followups")
+    if not isinstance(followups, list) or any(
+        not isinstance(followup, str) for followup in followups
+    ):
+        raise ValueError("node1 unverified_followups is not a string list")
     valid, rejected = [], []
     lines = text.splitlines()
-    for claim in card.get("claims", []):
+    seen_claim_ids: set[str] = set()
+    expected_id = re.compile(
+        rf"^{re.escape(row['source_id'])}-C{re.escape(str(chunk_id))}-[0-9]{{2}}$"
+    )
+    for claim in claims:
         reasons = []
+        if not isinstance(claim, dict):
+            rejected.append({"claim": claim, "reasons": ["INVALID_CLAIM_OBJECT"]})
+            continue
+        claim_id = claim.get("claim_id")
+        if not isinstance(claim_id, str) or not expected_id.fullmatch(claim_id):
+            reasons.append("INVALID_CLAIM_ID")
+        elif claim_id in seen_claim_ids:
+            reasons.append("DUPLICATE_CLAIM_ID")
+        else:
+            seen_claim_ids.add(claim_id)
+        for field in ("claim", "limitations", "transferability"):
+            if not isinstance(claim.get(field), str):
+                reasons.append(f"INVALID_{field.upper()}")
         evidence_lines = claim.get("evidence_lines")
         start = end = -1
         if (
             not isinstance(evidence_lines, list)
             or len(evidence_lines) != 2
-            or not all(isinstance(n, int) for n in evidence_lines)
+            or not all(type(n) is int for n in evidence_lines)
         ):
             reasons.append("INVALID_LINE_REFERENCE")
         else:
@@ -542,10 +700,6 @@ def validate_card(
         hypotheses = claim.get("hypotheses", [])
         if not hypotheses or any(h not in ALLOWED_HYPOTHESES for h in hypotheses):
             reasons.append("INVALID_HYPOTHESIS")
-        if card.get("source_id") != row["source_id"] or str(
-            card.get("chunk_id", "")
-        ) != str(chunk_id):
-            reasons.append("IDENTITY_MISMATCH")
         if reasons:
             rejected.append({"claim": claim, "reasons": reasons})
             continue
@@ -617,9 +771,9 @@ def attempt_counts(
     event: str,
     unit_field: str,
     retry_campaign: str | None = None,
-) -> dict[tuple[str, str], int]:
-    """Highest attempt per source/unit in one protocol retry campaign."""
-    counts: dict[tuple[str, str], int] = {}
+) -> dict[tuple[str, str, str], int]:
+    """Highest attempt per source digest/unit in one retry campaign."""
+    counts: dict[tuple[str, str, str], int] = {}
     if not path.exists():
         return counts
     for line in path.read_text().splitlines():
@@ -635,26 +789,53 @@ def attempt_counts(
         if item.get("retry_campaign") != retry_campaign:
             continue
         source_id = item.get("source_id")
+        source_sha256 = item.get("source_sha256")
         unit_id = item.get(unit_field)
         try:
             attempt = int(item.get("attempt", 0))
         except (TypeError, ValueError):
             continue
-        if source_id is None or unit_id is None:
+        if source_id is None or source_sha256 is None or unit_id is None:
             continue
-        key = (str(source_id), str(unit_id))
+        key = (str(source_id), str(source_sha256), str(unit_id))
         counts[key] = max(counts.get(key, 0), attempt)
     return counts
 
 
+def split_candidate_keys(
+    path: Path, retry_campaign: str | None = None
+) -> set[tuple[str, str, str]]:
+    """Return exhausted node-1 units whose persisted failure permits splitting."""
+    candidates: set[tuple[str, str, str]] = set()
+    if not path.exists():
+        return candidates
+    for line in path.read_text().splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (
+            item.get("protocol_version") != PROTOCOL_VERSION
+            or item.get("event") != "NODE1_ATTEMPT_FAILED"
+            or item.get("retry_campaign") != retry_campaign
+            or item.get("split_eligible") is not True
+        ):
+            continue
+        source_id = item.get("source_id")
+        source_sha256 = item.get("source_sha256")
+        chunk_id = item.get("chunk_id")
+        if source_id is not None and source_sha256 is not None and chunk_id is not None:
+            candidates.add((str(source_id), str(source_sha256), str(chunk_id)))
+    return candidates
+
+
 def terminal_sources(
     path: Path,
-    retry_sources: set[str] | None = None,
-    retry_campaign: str | None = None,
+    source_id: str,
+    source_sha256: str,
     excluded_campaigns: set[str] | None = None,
 ) -> set[str]:
-    """Sources that should not be visited in this protocol campaign."""
-    retry_sources = retry_sources or set()
+    """Return a finalized source only when its current digest was finalized."""
     excluded_campaigns = excluded_campaigns or set()
     sources: set[str] = set()
     if not path.exists():
@@ -668,13 +849,13 @@ def terminal_sources(
             continue
         if item.get("retry_campaign") in excluded_campaigns:
             continue
-        source_id = item.get("source_id")
         event = item.get("event")
         completed = event in {"SOURCE_PASS_COMPLETE", "SOURCE_NO_RELEVANT_CLAIMS"}
-        unavailable_outside_retry = event == "SOURCE_UNAVAILABLE" and not (
-            retry_campaign is not None and source_id in retry_sources
-        )
-        if (completed or unavailable_outside_retry) and isinstance(source_id, str):
+        if (
+            completed
+            and item.get("source_id") == source_id
+            and item.get("source_sha256") == source_sha256
+        ):
             sources.add(source_id)
     return sources
 
@@ -687,6 +868,21 @@ def validate_review(review: dict, source_id: str, claims: list[dict]) -> None:
     rows = review.get("reviews")
     if not isinstance(rows, list):
         raise ValueError("node2 reviews is not a list")
+    required_fields = {
+        "claim_id": str,
+        "verdict": str,
+        "reason_codes": list,
+        "reason": str,
+        "minimal_correction": str,
+    }
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("node2 review row is not an object")
+        for field, expected_type in required_fields.items():
+            if not isinstance(row.get(field), expected_type):
+                raise ValueError(f"node2 invalid or missing {field}")
+        if any(not isinstance(code, str) for code in row["reason_codes"]):
+            raise ValueError("node2 reason_codes is not a string list")
     actual_ids = [row.get("claim_id") for row in rows if isinstance(row, dict)]
     if len(actual_ids) != len(set(actual_ids)):
         raise ValueError("node2 returned duplicate claim ids")
@@ -740,7 +936,6 @@ def main() -> int:
     hypothesis_path = args.manifest.parent / "HYPOTHESES.md"
     hypothesis_registry = hypothesis_path.read_text(encoding="utf-8")
     run_id = str(uuid.uuid4())
-    retry_sources = set(args.source or [])
 
     def record_event(item: dict) -> None:
         """Append a ledger event with this run's retry provenance."""
@@ -773,6 +968,10 @@ def main() -> int:
         )
         return 0
 
+    excluded_campaigns = invalidated_campaigns(ledger_path)
+    if args.retry_campaign in excluded_campaigns:
+        parser.error(f"retry campaign was invalidated: {args.retry_campaign}")
+
     record_event(
         {
             "event": "RUN_START",
@@ -784,24 +983,15 @@ def main() -> int:
             "ts": time.time(),
         },
     )
-    excluded_campaigns = invalidated_campaigns(ledger_path)
-    done = completed_keys(node1_path, excluded_campaigns) | recovered_chunk_keys(
-        ledger_path, excluded_campaigns
-    )
-    reviewed = reviewed_claim_ids(node2_path, excluded_campaigns)
+    done: set[tuple[str, str]] = set()
+    reviewed: set[str] = set()
     node1_failures = attempt_counts(
         ledger_path, "NODE1_ATTEMPT_FAILED", "chunk_id", args.retry_campaign
     )
     node2_failures = attempt_counts(
         ledger_path, "NODE2_REVIEW_FAILED", "batch_key", args.retry_campaign
     )
-    terminal = terminal_sources(
-        ledger_path,
-        retry_sources,
-        args.retry_campaign,
-        excluded_campaigns,
-    )
-
+    node1_split_candidates = split_candidate_keys(ledger_path, args.retry_campaign)
     with args.manifest.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle, delimiter="\t"))
     if args.source:
@@ -814,11 +1004,12 @@ def main() -> int:
 
     def run_review_batch(
         source_id: str,
+        source_sha256: str,
         batch: list[dict],
         batch_id: int,
         batch_key: str,
     ) -> str | None:
-        failure_key = (source_id, batch_key)
+        failure_key = (source_id, source_sha256, batch_key)
         attempts_used = node2_failures.get(failure_key, 0)
         for attempt in range(attempts_used + 1, 3):
             try:
@@ -827,6 +1018,7 @@ def main() -> int:
                 review.update(
                     {
                         "model": MODEL2,
+                        "source_sha256": source_sha256,
                         "batch_id": batch_id,
                         "batch_key": batch_key,
                         "attempt": attempt,
@@ -852,6 +1044,7 @@ def main() -> int:
                         "protocol_version": PROTOCOL_VERSION,
                         "run_id": run_id,
                         "source_id": source_id,
+                        "source_sha256": source_sha256,
                         "batch_id": batch_id,
                         "batch_key": batch_key,
                         "attempt": attempt,
@@ -862,8 +1055,6 @@ def main() -> int:
         return batch_key
 
     for row in rows:
-        if row["source_id"] in terminal:
-            continue
         try:
             text, digest = fetch_text(row, args.cache_dir)
             record_event(
@@ -890,12 +1081,49 @@ def main() -> int:
             )
             continue
 
-        source_claims = prior_claims(node1_path, row["source_id"], excluded_campaigns)
+        terminal = terminal_sources(
+            ledger_path,
+            row["source_id"],
+            digest,
+            excluded_campaigns,
+        )
+        if row["source_id"] in terminal:
+            continue
+        done.update(
+            completed_keys(
+                node1_path,
+                row["source_id"],
+                digest,
+                excluded_campaigns,
+            )
+        )
+        reviewed.update(
+            reviewed_claim_ids(
+                node2_path,
+                row["source_id"],
+                digest,
+                excluded_campaigns,
+            )
+        )
+        source_claims = prior_claims(
+            node1_path,
+            row["source_id"],
+            digest,
+            excluded_campaigns,
+        )
         source_chunks = list(chunks(text))
+        recovered = recovered_chunk_keys(
+            ledger_path,
+            node1_path,
+            row["source_id"],
+            {str(chunk_id): chunk_text for chunk_id, chunk_text in source_chunks},
+            digest,
+            excluded_campaigns,
+        )
         pending_chunks = [
             (chunk_id, chunk_text)
             for chunk_id, chunk_text in source_chunks
-            if (row["source_id"], str(chunk_id)) not in done
+            if (row["source_id"], str(chunk_id)) not in done | recovered
         ]
         with reviewed_lock:
             pending_reviews = [
@@ -904,13 +1132,81 @@ def main() -> int:
                 if claim.get("claim_id") not in reviewed
             ]
 
+        def process_split(
+            chunk_id: ChunkId,
+            chunk_text: str,
+            split: tuple[str, str],
+        ) -> list[ChunkId]:
+            """Persist a complete, hash-proven split and recursively run its children."""
+            done_key = (row["source_id"], str(chunk_id))
+            child_ids = [f"{chunk_id}.0", f"{chunk_id}.1"]
+            parent_sha256 = hash_text(chunk_text)
+            children = []
+            offset = 0
+            for child_id, child_text in zip(child_ids, split, strict=True):
+                end = offset + len(child_text)
+                children.append(
+                    {
+                        "chunk_id": child_id,
+                        "start": offset,
+                        "end": end,
+                        "sha256": hash_text(child_text),
+                    }
+                )
+                offset = end
+            coverage_text = "".join(split)
+            coverage_sha256 = hash_text(coverage_text)
+            coverage_verified = coverage_text == chunk_text
+            if not coverage_verified or coverage_sha256 != parent_sha256:
+                raise AssertionError("split children do not cover their parent")
+            record_event(
+                {
+                    "event": "CHUNK_SPLIT",
+                    "protocol_version": PROTOCOL_VERSION,
+                    "run_id": run_id,
+                    "source_id": row["source_id"],
+                    "source_sha256": digest,
+                    "chunk_id": chunk_id,
+                    "parent_sha256": parent_sha256,
+                    "parent_chars": len(chunk_text),
+                    "children": children,
+                    "ts": time.time(),
+                }
+            )
+            child_failures: list[ChunkId] = []
+            for child_id, child_text in zip(child_ids, split, strict=True):
+                child_failures.extend(process_chunk(child_id, child_text))
+            if not child_failures:
+                done.add(done_key)
+                record_event(
+                    {
+                        "event": "CHUNK_RECOVERED",
+                        "protocol_version": PROTOCOL_VERSION,
+                        "run_id": run_id,
+                        "source_id": row["source_id"],
+                        "source_sha256": digest,
+                        "chunk_id": chunk_id,
+                        "parent_sha256": parent_sha256,
+                        "parent_chars": len(chunk_text),
+                        "children": children,
+                        "coverage_sha256": coverage_sha256,
+                        "coverage_verified": coverage_verified,
+                        "ts": time.time(),
+                    }
+                )
+            return child_failures
+
         def process_chunk(chunk_id: ChunkId, chunk_text: str) -> list[ChunkId]:
-            """Persist one chunk, recursively splitting only on context overflow."""
+            """Persist one chunk, splitting on overflow or exhausted invalid output."""
             done_key = (row["source_id"], str(chunk_id))
             if done_key in done:
                 return []
-            failure_key = (row["source_id"], str(chunk_id))
+            failure_key = (row["source_id"], digest, str(chunk_id))
             attempts_used = node1_failures.get(failure_key, 0)
+            if failure_key in node1_split_candidates:
+                resume_split = split_for_context(chunk_text)
+                if resume_split is not None:
+                    return process_split(chunk_id, chunk_text, resume_split)
             for attempt in range(attempts_used + 1, 3):
                 try:
                     card = chat_json(
@@ -955,78 +1251,27 @@ def main() -> int:
                     return []
                 except Exception as exc:
                     node1_failures[failure_key] = attempt
+                    should_split = is_context_overflow(exc) or (
+                        attempt == 2
+                        and isinstance(exc, (json.JSONDecodeError, ValueError))
+                    )
                     record_event(
                         {
                             "event": "NODE1_ATTEMPT_FAILED",
                             "protocol_version": PROTOCOL_VERSION,
                             "run_id": run_id,
                             "source_id": row["source_id"],
+                            "source_sha256": digest,
                             "chunk_id": chunk_id,
                             "attempt": attempt,
                             "error": repr(exc),
+                            "split_eligible": should_split,
                             "ts": time.time(),
                         }
                     )
-                    split = (
-                        split_for_context(chunk_text)
-                        if is_context_overflow(exc)
-                        else None
-                    )
+                    split = split_for_context(chunk_text) if should_split else None
                     if split is not None:
-                        child_ids = [f"{chunk_id}.0", f"{chunk_id}.1"]
-                        parent_sha256 = hash_text(chunk_text)
-                        children = []
-                        offset = 0
-                        for child_id, child_text in zip(child_ids, split, strict=True):
-                            end = offset + len(child_text)
-                            children.append(
-                                {
-                                    "chunk_id": child_id,
-                                    "start": offset,
-                                    "end": end,
-                                    "sha256": hash_text(child_text),
-                                }
-                            )
-                            offset = end
-                        coverage_text = "".join(split)
-                        coverage_sha256 = hash_text(coverage_text)
-                        coverage_verified = coverage_text == chunk_text
-                        if not coverage_verified or coverage_sha256 != parent_sha256:
-                            raise AssertionError(
-                                "split children do not cover their parent"
-                            )
-                        record_event(
-                            {
-                                "event": "CHUNK_SPLIT",
-                                "protocol_version": PROTOCOL_VERSION,
-                                "run_id": run_id,
-                                "source_id": row["source_id"],
-                                "chunk_id": chunk_id,
-                                "parent_sha256": parent_sha256,
-                                "children": children,
-                                "ts": time.time(),
-                            }
-                        )
-                        child_failures: list[ChunkId] = []
-                        for child_id, child_text in zip(child_ids, split, strict=True):
-                            child_failures.extend(process_chunk(child_id, child_text))
-                        if not child_failures:
-                            done.add(done_key)
-                            record_event(
-                                {
-                                    "event": "CHUNK_RECOVERED",
-                                    "protocol_version": PROTOCOL_VERSION,
-                                    "run_id": run_id,
-                                    "source_id": row["source_id"],
-                                    "chunk_id": chunk_id,
-                                    "parent_sha256": parent_sha256,
-                                    "children": children,
-                                    "coverage_sha256": coverage_sha256,
-                                    "coverage_verified": coverage_verified,
-                                    "ts": time.time(),
-                                }
-                            )
-                        return child_failures
+                        return process_split(chunk_id, chunk_text, split)
             record_event(
                 {
                     "event": "CHUNK_FAILED",
@@ -1051,9 +1296,7 @@ def main() -> int:
             ]
         review_futures: list[tuple[str, Future[str | None]]] = []
         if pending_reviews:
-            first_batch_id = next_review_batch_id(
-                node2_path, row["source_id"], excluded_campaigns
-            )
+            first_batch_id = next_review_batch_id(node2_path, row["source_id"])
             for batch_offset, start in enumerate(
                 range(0, len(pending_reviews), NODE2_BATCH_SIZE)
             ):
@@ -1063,6 +1306,7 @@ def main() -> int:
                 future = review_executor.submit(
                     run_review_batch,
                     row["source_id"],
+                    digest,
                     batch,
                     batch_id,
                     batch_key,
@@ -1072,6 +1316,7 @@ def main() -> int:
         source_results.append(
             {
                 "source_id": row["source_id"],
+                "source_sha256": digest,
                 "source_claims": source_claims,
                 "failed_chunks": failed_chunks,
                 "review_futures": review_futures,
@@ -1105,6 +1350,7 @@ def main() -> int:
                 "protocol_version": PROTOCOL_VERSION,
                 "run_id": run_id,
                 "source_id": source_result["source_id"],
+                "source_sha256": source_result["source_sha256"],
                 "valid_claims": len(source_claims),
                 "failed_chunks": failed_chunks,
                 "failed_review_batches": failed_review_batches,

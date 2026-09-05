@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+from bisect import bisect_right
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
@@ -39,6 +40,17 @@ def _fetch_spy_closes(
 ) -> dict[str, float] | None:
     """Compatibility seam around the shared cached loader."""
     return fetch_spy_closes(from_date, to_date, redis)
+
+
+def _history_session_date(stamped_at: datetime, sessions: list[date]) -> date | None:
+    """Map an Alpaca daily-history stamp to its authoritative market session."""
+    candidate = stamped_at.date()
+    if not any(
+        (stamped_at.hour, stamped_at.minute, stamped_at.second, stamped_at.microsecond)
+    ):
+        candidate -= timedelta(days=1)
+    index = bisect_right(sessions, candidate) - 1
+    return sessions[index] if index >= 0 else None
 
 
 _WEIGHT_MIN = 0.10
@@ -360,7 +372,7 @@ def get_pnl(
     period: str = "6M",
 ) -> dict:
     """Return portfolio P&L history from Alpaca (daily + monthly aggregate)."""
-    from alpaca.trading.requests import GetPortfolioHistoryRequest
+    from alpaca.trading.requests import GetCalendarRequest, GetPortfolioHistoryRequest
 
     history = client.get_portfolio_history(
         GetPortfolioHistoryRequest(period=period, timeframe="1D")
@@ -373,12 +385,35 @@ def get_pnl(
     profit_loss = history.profit_loss or []
     equities = history.equity or []
 
-    for ts, pl, eq in zip(timestamps, profit_loss, equities):
-        if ts is None:
+    rows = [
+        (datetime.fromtimestamp(ts, tz=timezone.utc), pl, eq)
+        for ts, pl, eq in zip(timestamps, profit_loss, equities)
+        if ts is not None
+    ]
+    if not rows:
+        return {"daily": [], "monthly": []}
+
+    stamped_dates = [stamped_at.date() for stamped_at, _, _ in rows]
+    calendar = client.get_calendar(
+        GetCalendarRequest(
+            start=min(stamped_dates) - timedelta(days=14),
+            end=max(stamped_dates),
+        )
+    )
+    sessions = sorted(
+        {
+            session_date
+            for row in calendar
+            if isinstance((session_date := getattr(row, "date", None)), date)
+        }
+    )
+
+    for stamped_at, pl, eq in rows:
+        session_date = _history_session_date(stamped_at, sessions)
+        if session_date is None:
             continue
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-        date_str = dt.strftime("%Y-%m-%d")
-        month_str = dt.strftime("%Y-%m")
+        date_str = session_date.isoformat()
+        month_str = session_date.strftime("%Y-%m")
         daily.append({"date": date_str, "equity": eq, "profit_loss": pl or 0.0})
         monthly[month_str] += pl or 0.0
 

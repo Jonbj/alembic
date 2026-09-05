@@ -300,23 +300,39 @@ def get_counterfactual_status(
 def get_feedback_status(
     redis: Annotated[object, Depends(get_redis_store)],
 ) -> dict:
-    """Current loss-feedback adjustments active in Redis (Phase B).
+    """Current loss-feedback adjustments active in Redis (Phase B), per sleeve.
 
-    Returns the live threshold override. If no adjustment is active, returns
-    the baseline default. The companion `feedback:regime_scale:S*` lever that
-    used to be reported here was retired with F8 (#134).
+    #474: the ratchet (`run_loss_feedback_check`) writes threshold and state
+    per-strategy (`feedback:entry_threshold:<S>`, `feedback:state:<S>`) — there
+    is no longer a single global feedback state. This endpoint mirrors that:
+    one entry per sleeve in `FEEDBACK_STRATEGIES`, not a compressed global
+    value. The companion `feedback:regime_scale:S*` lever that used to be
+    reported here was retired with F8 (#134).
+
+    `S1.entry_threshold == 0.0` is not a disarmed gate: S1 has no discrete
+    entry threshold by design (`portfolio_scheduler._get_feedback_threshold`),
+    so its `is_elevated` is always False against the shared baseline.
     """
     from src.workers.execution import ENTRY_THRESHOLD
-    threshold = redis.get_feedback_entry_threshold()
-    state = redis.get_feedback_state() or {}
+    from src.workers.performance import FEEDBACK_STRATEGIES
+
+    baseline = ENTRY_THRESHOLD
+    strategies: dict[str, dict] = {}
+    for strategy in FEEDBACK_STRATEGIES:
+        threshold = redis.get_feedback_entry_threshold(strategy=strategy)
+        state = redis.get_feedback_state(strategy=strategy) or {}
+        current = threshold if threshold is not None else baseline
+        strategies[strategy] = {
+            "entry_threshold": current,
+            "is_elevated": current > baseline + 0.001,
+            "last_adjustment_ts": state.get("last_adjustment_ts"),
+            "last_reason": state.get("reason"),
+            "consecutive_losses": state.get("consecutive_losses"),
+            "rolling_net_pnl": state.get("rolling_net_pnl"),
+        }
     return {
-        "entry_threshold": threshold if threshold is not None else ENTRY_THRESHOLD,
-        "entry_threshold_baseline": ENTRY_THRESHOLD,
-        "adjustment_active": threshold is not None,
-        "last_adjustment_ts": state.get("last_adjustment_ts"),
-        "last_reason": state.get("reason"),
-        "consecutive_losses": state.get("consecutive_losses"),
-        "rolling_net_pnl": state.get("rolling_net_pnl"),
+        "baseline": baseline,
+        "strategies": strategies,
     }
 
 

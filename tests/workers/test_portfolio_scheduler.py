@@ -1915,6 +1915,63 @@ class TestSectorMapLoader:
 # ── B33: per-order trade-write isolation ──────────────────────────────────────
 
 
+def test_persist_trade_fills_marca_la_prima_sell_post_hold_minimum():
+    """#430: cambia solo il reason code, non il percorso di submission."""
+    from src.workers.portfolio_scheduler import _persist_trade_fills
+
+    pg = MagicMock()
+    pg.record_trade_exit.return_value = 430
+    entry_time = datetime(2026, 8, 20, 14, 7, tzinfo=timezone.utc)
+    exit_time = datetime(2026, 8, 20, 15, 52, tzinfo=timezone.utc)
+
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=pg), \
+         patch("src.workers.portfolio_scheduler._portfolio_postmortem"):
+        failures = _persist_trade_fills(
+            [{"symbol": "NOW", "side": "sell", "order_id": "ord-now",
+              "allocation_weight": 0.0}],
+            open_trades=[{"symbol": "NOW", "id": 430, "entry_time": entry_time}],
+            symbol_decisions={"NOW": {"decision_id": "dec-now"}},
+            written_buy_order_ids=set(),
+            stop_policy=None,
+            market=MagicMock(prices={"NOW": 100.0}),
+            alpaca_entry_prices={},
+            s4_signals={},
+            regime_mult=1.0,
+            tick_time=exit_time,
+            hold_minimum_minutes=90,
+        )
+
+    assert failures == 0
+    assert pg.record_trade_exit.call_args.kwargs["exit_reason"] == "hold_minimum_expiry"
+
+
+def test_persist_trade_fills_non_marca_stop_loss_anche_se_dura_105_minuti():
+    from src.workers.portfolio_scheduler import _persist_trade_fills
+
+    pg = MagicMock()
+    pg.record_trade_exit.return_value = 430
+    entry_time = datetime(2026, 8, 20, 14, 7, tzinfo=timezone.utc)
+
+    with patch("src.store.pg_store.PostgreSQLStore", return_value=pg), \
+         patch("src.workers.portfolio_scheduler._portfolio_postmortem"):
+        _persist_trade_fills(
+            [{"symbol": "WMT", "side": "sell", "order_id": "ord-wmt",
+              "reason": "stop_loss", "allocation_weight": 0.0}],
+            open_trades=[{"symbol": "WMT", "id": 431, "entry_time": entry_time}],
+            symbol_decisions={"WMT": {"decision_id": "dec-wmt"}},
+            written_buy_order_ids=set(),
+            stop_policy=None,
+            market=MagicMock(prices={"WMT": 100.0}),
+            alpaca_entry_prices={},
+            s4_signals={},
+            regime_mult=1.0,
+            tick_time=datetime(2026, 8, 20, 15, 52, tzinfo=timezone.utc),
+            hold_minimum_minutes=90,
+        )
+
+    assert pg.record_trade_exit.call_args.kwargs["exit_reason"] == "stop_loss"
+
+
 def test_persist_trade_fills_isolates_per_order_sell_failure():
     """B33: a single failing SELL must NOT abort the remaining orders' DB writes.
 
@@ -2665,6 +2722,35 @@ def test_reversal_force_sell_cancels_protective_stop_then_submits():
     assert _dec_kwargs["symbol"] == "SOXX"
     assert _dec_kwargs["order_id"] == "ord-9"
     assert "sentiment_reversal" in _dec_kwargs["reason"]
+
+
+def test_reversal_force_sell_propagates_signal_id_to_decision_row():
+    """#406 regression: every SELL was 0/3 on 2026-08-27 — the reversal signal_id
+    read from Redis must reach execution_decisions.signal_id, otherwise exit
+    attribution stays impossible. The path was already instrumented in #67 but
+    no test pinned the contract end-to-end."""
+    from src.workers.portfolio_scheduler import _submit_reversal_force_sells
+
+    trading_client = MagicMock()
+    trading_client.get_orders.return_value = []
+    trading_client.submit_order.return_value.id = "ord-rev-1"
+
+    with patch("src.store.pg_store.PostgreSQLStore") as _pgs:
+        _submit_reversal_force_sells(
+            reversal_sell_symbols={"SOXX": {"score": -0.42, "signal_id": 3861}},
+            final_orders=[],
+            stop_loss_sells={},
+            alpaca_positions=[_make_alpaca_position("SOXX", 1.13)],
+            trading_client=trading_client,
+            submitted_orders=[],
+            ts=datetime(2026, 7, 16, 18, 22, tzinfo=timezone.utc),
+            regime_mult=0.7,
+            operating_mode="active",
+        )
+
+    dec_kwargs = _pgs.return_value.write_execution_decision.call_args.kwargs
+    assert dec_kwargs["signal_id"] == 3861
+    assert dec_kwargs["decision"] == "SELL"
 
 
 def test_reversal_force_sell_uses_signal_id_for_client_order_id():

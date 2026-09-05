@@ -1,7 +1,11 @@
 """Tests for performance PnL endpoint."""
 
+from datetime import date, datetime, timezone
 from unittest.mock import MagicMock, patch
+
+from alpaca.trading.models import Calendar
 from fastapi.testclient import TestClient
+
 from src.api.main import app
 from src.api.deps import get_alpaca_trading_client, get_pg_store, get_redis_store
 
@@ -45,6 +49,61 @@ def test_get_pnl_with_custom_period():
     app.dependency_overrides.clear()
 
     mock_client.get_portfolio_history.assert_called_once()
+
+
+def test_get_pnl_maps_history_stamps_to_market_sessions():
+    """Alpaca's next-day stamps must not leak into daily or monthly labels."""
+    mock_history = MagicMock()
+    mock_history.timestamp = [
+        int(datetime(2026, 8, day, tzinfo=timezone.utc).timestamp())
+        for day in (22, 26, 27, 28)
+    ] + [int(datetime(2026, 9, 1, tzinfo=timezone.utc).timestamp())]
+    mock_history.equity = [109861.38, 109959.77, 109965.05, 110041.95, 110061.95]
+    mock_history.profit_loss = [10.0, 98.39, 5.28, 76.90, 20.0]
+
+    mock_client = MagicMock()
+    mock_client.get_portfolio_history.return_value = mock_history
+    mock_client.get_calendar.return_value = [
+        Calendar(date=f"2026-08-{day:02d}", open="09:30", close="16:00")
+        for day in (21, 25, 26, 27, 31)
+    ]
+    app.dependency_overrides[get_alpaca_trading_client] = lambda: mock_client
+
+    tc = TestClient(app)
+    resp = tc.get("/api/performance/pnl")
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert resp.json()["daily"] == [
+        {"date": "2026-08-21", "equity": 109861.38, "profit_loss": 10.0},
+        {"date": "2026-08-25", "equity": 109959.77, "profit_loss": 98.39},
+        {"date": "2026-08-26", "equity": 109965.05, "profit_loss": 5.28},
+        {"date": "2026-08-27", "equity": 110041.95, "profit_loss": 76.90},
+        {"date": "2026-08-31", "equity": 110061.95, "profit_loss": 20.0},
+    ]
+    assert resp.json()["monthly"] == [{"month": "2026-08", "pnl": 210.57}]
+    mock_client.get_calendar.assert_called_once()
+
+
+def test_get_pnl_drops_rows_without_a_prior_market_session():
+    mock_history = MagicMock()
+    mock_history.timestamp = [
+        int(datetime(2026, 8, 22, tzinfo=timezone.utc).timestamp())
+    ]
+    mock_history.equity = [109861.38]
+    mock_history.profit_loss = [10.0]
+
+    mock_client = MagicMock()
+    mock_client.get_portfolio_history.return_value = mock_history
+    mock_client.get_calendar.return_value = []
+    app.dependency_overrides[get_alpaca_trading_client] = lambda: mock_client
+
+    tc = TestClient(app)
+    resp = tc.get("/api/performance/pnl")
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert resp.json() == {"daily": [], "monthly": []}
 
 
 # ── /api/performance/daily — NAV mark-to-market enrichment ────────────────────
@@ -165,9 +224,6 @@ def test_daily_pnl_benchmark_null_when_spy_unavailable():
 
 # ── SPY fetch end-date cap (bug 2026-07-22: IEX rejects querying the current
 #    day's SIP data, so the default range ending "today" returned no benchmark) ─
-from datetime import date
-
-
 def test_spy_fetch_end_capped_to_yesterday_when_to_is_today():
     from src.api.routes.performance import _spy_fetch_end_date
     assert _spy_fetch_end_date("2026-07-22", date(2026, 7, 22)) == date(2026, 7, 21)
