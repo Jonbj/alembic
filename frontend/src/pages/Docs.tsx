@@ -394,18 +394,25 @@ high_vol ×0.2   sleeve=0.4% → ordine ~$4`}</div>
           </thead>
           <tbody>
             {[
-              ['ENTRY_THRESHOLD (S4)', '0.30', 'Score minimo LLM per BUY. Alzato dal feedback loop in caso di perdite.'],
-              ['Stop-loss S4', '5% (tier A/B: 2%)', 'Chiude se prezzo scende a entry × (1 − stop_loss_pct).'],
+              ['feedback:entry_threshold:S4', '0.30', 'LA soglia d\'ordine di S4 (|score| ≥ soglia). Chiave PER-STRATEGIA dal 2026-09-03 (#474): una perdita di S1 non alza più la soglia di S4. Alzata dal feedback loop fino a 0.60, TTL 96h; se manca si ripiega su loss_feedback.threshold_baseline (0.30).'],
+              ['min_score / min_confidence (S4Config)', '0.10 / 0.30', 'PREFILTRI del ranker, NON la soglia d\'ordine. Confonderli è il bug #163 che lasciò il gate disarmato per un giorno e mezzo.'],
+              ['n_top / fixed_slot_sizing', '5 / True', 'Massimo 5 nomi per ciclo, peso fisso 1/5 ciascuno: con 2 sopravvissuti i 3 slot liberi restano NON investiti (#81).'],
+              ['Stop-loss protettivo', 'DISATTIVATO (0.0)', 'Dal 2026-07-15 risk.stop_loss: 0.0 — nessuno stop, su nessuna sleeve. Restano la telemetria shadow (stop_shadow_log) e l\'allarme Telegram a −15% (unprotected_position_alert_pct, #161). La tabella qui indicava "5% (tier A/B: 2%)": non è mai stato vero dopo il 2026-07-15.'],
               ['Max posizione per asset', '10% NAV', 'Nessun ticker può superare il 10% del portafoglio.'],
               ['Max esposizione totale', '95% NAV', 'Il 5% rimane liquido come buffer.'],
               ['Max esposizione settoriale', '25% NAV', 'Evita concentrazione su singolo settore.'],
               ['Drawdown cap portafoglio', '10%', 'Se portafoglio scende del 10% dal picco → kill-switch automatico.'],
               ['Regime multiplier min', '×0.2 (high_vol)', 'In alta volatilità le posizioni S4 si riducono dell\'80%.'],
               ['Vol target portafoglio', '10% annualizzato', 'Il vol overlay scala le qty per puntare a questo livello.'],
-              ['Max signal age S4', '30 min', 'Segnali più vecchi di 30 min vengono ignorati.'],
+              ['max_signal_age_hours (S4)', '4h', 'Età massima del SEGNALE (generated_at). FIX-D ri-ammette gli stale positivi sui simboli già a libro senza contro-segnale.'],
+              ['MAX_NEWS_AGE_HOURS', '2h', 'Età massima della NOTIZIA (published_at) per un nuovo ingresso. Non si applica ai simboli già a libro (#150).'],
+              ['signals_lookback_hours', '96h', 'Finestra di lettura dei segnali dal DB — copre il ponte festivo Ven→Mar.'],
+              ['SIGNAL_VELOCITY_THRESHOLD / _BOOST', '0.30 / 0.20', 'Se |score[0] − score[−1]| sulle ultime 3 voci di history supera 0.30, lo score è moltiplicato per 1.20 o 0.80. Applicato PRIMA del gate (#401).'],
               ['Allocazione S1', '50% NAV', 'Unica strategia con gate completi superati.'],
               ['Allocazione S4', '10% NAV', 'Cappato al 10% fino a gate dedicati passati.'],
-              ['SENTIMENT_REVERSAL_EXIT_THRESHOLD', '−0.35', 'Score sotto cui una posizione aperta viene chiusa forzatamente al ciclo successivo.'],
+              ['SENTIMENT_REVERSAL_EXIT_THRESHOLD', '−0.35', 'Score sotto cui una posizione aperta viene chiusa forzatamente. Solo contro-segnali ENSEMBLE (i fallback FinBERT non forzano l\'uscita), non più vecchi di 60 min, consume-on-fire e cooldown di rientro 2h. Si applica a TUTTE le posizioni del broker, anche quelle di S1 (#182).'],
+              ['execution.hold_minimum_minutes', '90 min', 'Una posizione appena aperta non può essere venduta da un ribilanciamento prima di 90 minuti.'],
+              ['SENTIMENT_PROMPT_VARIANT', 'a', 'Variante A del prompt DK-CoT, viva dal 2026-09-01 in deroga al freeze #171: include il titolo e chiede l\'impatto di prezzo. Cambia la distribuzione degli score — segmentare prima/dopo il 2026-09-01 in ogni analisi di S4.'],
               ['Delta dead zone (ribilanciamento)', '2% del target qty', 'Evita micro-ordini da variazioni di prezzo inferiori al 2%.'],
               ['Ciclo portfolio', 'ogni 15 min (xx:07)', 'Offset +7 min rispetto al sentiment worker per leggere segnali freschi.'],
             ].map(([param, def_, desc]) => (
@@ -491,7 +498,7 @@ high_vol ×0.2   sleeve=0.4% → ordine ~$4`}</div>
         </p>
         <h3 style={h3}>Phase C — Counterfactual Analysis (pagina Auto-Improve)</h3>
         <p style={p}>
-          Per i candidati scartati da gate/filtri (<code>SKIP_THRESHOLD</code>, <code>SKIP_EMA</code>, <code>SKIP_CAP</code>), calcola il rendimento a 1h che avrebbero generato. <code>SKIP_STALE</code>, <code>SKIP_FALLBACK</code> e <code>SKIP_POSITION</code> sono esclusi perché non sono opportunità operative da sbloccare.
+          Per i candidati scartati da gate/filtri (<code>SKIP_THRESHOLD</code>, <code>SKIP_PYRAMIDING</code>, più i legacy <code>SKIP_EMA</code> e <code>SKIP_CAP</code> che sotto <code>engine=portfolio</code> non vengono mai emessi), calcola il rendimento a 1h che avrebbero generato. <code>SKIP_STALE</code> e <code>SKIP_FALLBACK</code> sono esclusi perché non sono opportunità operative da sbloccare. Dal 2026-09-03 il controfattuale copre anche le <strong>uscite forzate</strong> <code>sentiment_reversal</code> (#450): quanto avrebbe reso la posizione se il contro-segnale non l'avesse chiusa.
         </p>
       </div>
 
@@ -515,7 +522,7 @@ high_vol ×0.2   sleeve=0.4% → ordine ~$4`}</div>
                 ['rss-ingestion', 'ogni 30 min, sempre', 'Reuters + CNBC RSS → news_log'],
                 ['sec-edgar-ingestion', 'ogni ora, mercato aperto', 'Filing 8-K → news_log'],
                 ['risk-monitor', 'ogni 30 min, mercato aperto', 'Drawdown check + alert Telegram'],
-                ['counterfactual-worker', '22:45 UTC, Lun-Ven', 'Calcola ritorni 1h per SKIP_THRESHOLD/SKIP_EMA/SKIP_CAP (Phase C)'],
+                ['counterfactual-worker', '22:45 UTC, Lun-Ven', 'Ritorni 1h per SKIP_THRESHOLD/SKIP_PYRAMIDING e per le uscite forzate sentiment_reversal (Phase C, #450)'],
               ].map(([task, freq, desc]) => (
                 <tr key={task as string} style={tableRow}>
                   <td style={{ ...td, fontFamily: 'monospace', fontSize: 11 }}>{task}</td>

@@ -158,7 +158,12 @@ ensemble signal exists in the window.
 `MAX_NEWS_AGE_HOURS` (default 2h) are excluded from S4 entry, even if the signal itself
 is recent. NULL `published_at` (legacy rows) passes. The bound is applied **only** at
 the S4 entry fetch; sell-protection and audit lookups deliberately see older signals
-(`fetch_signals_for_cycle(news_age_hours=None)` default).
+(`fetch_signals_for_cycle(news_age_hours=None)` default). **#150:** the gate is applied
+in `_apply_entry_freshness_gate` and **skips symbols that already have an open position** —
+a held name whose only signal has an old `published_at` reaches FIX-D instead of being
+dropped and force-sold as `[no_signal]` (NOW, 2026-07-27). Rejected rows are logged as
+`SKIP_ENTRY_FRESHNESS` in `s4_intent_events` and classify a weight-0 exit as
+`entry_freshness_filtered`.
 
 ### 2.3 Regime Detection
 
@@ -209,7 +214,7 @@ Strategies produce sleeve-local weights: fractions of their own sleeve, not the 
 | **S1** | Multi-Lookback Relative Momentum | 50% | `supervised_paper` (demoted P0-01) | Multi-lookback (1M/3M/6M/12M) vol-normalised returns, cross-sectional z-score across universe; inverse-vol sizing. **Live not authorized.** |
 | **S2** | Volatility Risk Premium | 0% | **Disabled** (research) | Proxy: overnight gap on low-VRP days. OOS Sharpe −0.55; all gates failed. Needs options infrastructure for v2 |
 | **S3** | Cross-Sectional Residual Momentum | 0% | Research | Cross-sectional rank of residual 1-12M returns; PIT sizing wired (P1-07); gate 3/5 failed |
-| **S4** | News-Driven Tactical | 10% | `promotion_blocked` (P0-13) | LLM ensemble sentiment → BUY gate: score > 0.3 AND price > EMA20; capped at 10% until dedicated gate report |
+| **S4** | News-Driven Tactical | 10% | `promotion_blocked` (P0-13) | LLM ensemble sentiment → catena: freschezza news 2h → scarto dei fallback FinBERT → staleness 4h (con FIX-D) → moltiplicatore di velocity → **gate d'ordine `feedback:entry_threshold:S4`** (0.30) → ranker top-5 a peso fisso 1/5. **Nessun filtro EMA20**: `score > 0.3 AND price > EMA20` è il gate del path `legacy_sentiment`, inattivo con `engine=portfolio`. Capped at 10% until dedicated gate report. Catena completa: `docs/strategies.md` §S4 |
 
 > **S7 (PEAD) — REMOVED 2026-07-15.** Strategy dir, workers, routes, beat tasks
 > (`pead-ingestion`, `earnings-pead`), config and tests deleted. The declared edge
@@ -502,6 +507,8 @@ SentimentWorker (batch 12 items/cycle, semaphore=2 concurrent)
     ├── skip news older than MAX_NEWS_AGE_HOURS (2h) — FIX-03
     ├── resolver (shadow log + conservative enforcement: NO_TRADE_NOT_TRADABLE dropped)
     ├── sanitize_text()
+    ├── prompt DK-CoT — Variante A viva (SENTIMENT_PROMPT_VARIANT=a, #399/#408): include il
+    │   titolo e chiede l'impatto di PREZZO, non solo i fondamentali
     ├── LLM Ensemble (2 × Ollama cloud, coppia da config:sentiment_llm_models — oggi GLM-5.2 + GPT-OSS 20B, asyncio.gather)
     │   ├── divergence check (std ≥ 0.40 → FinBERT via run_in_executor; raw outputs → llm_responses eligible=false)
     │   └── budget check (daily cap → FinBERT via run_in_executor)
@@ -529,8 +536,18 @@ PortfolioOrchestrator (every 15 min at :07/:22/:37/:52, active only when executi
     ├── StrategyRegistry → active entries from config/strategies.yaml
     │   currently: S1 (alloc=0.50) + S4 (alloc=0.10); S2 disabled
     ├── S1.compute_target_weights(prices) → sleeve-local weights
-    ├── S4.compute_target_weights(signals, as_of=ts) → sleeve-local weights
+    ├── S4: fetch (96h) → entry-freshness 2h (salta i simboli gia' a libro, #150)
+    │      → scarto fallback FinBERT (#108) → staleness 4h + FIX-D
+    │      → velocity ×(1±0.20) se |velocity| > 0.30 (#401, PRIMA del gate)
+    │      → gate d'ordine |score| >= feedback:entry_threshold:S4 (chiave per-strategia)
+    │      → ranker: dedup sull'ULTIMO segnale per simbolo (#169), prefiltri
+    │        min_score 0.10 / min_confidence 0.30, long-only, top-5, peso fisso 1/5
+    │      → sleeve-local weights
     ├── merge: merged[sym] += sleeve_weight × alloc_pct  (weighted sum, NOT average)
+    ├── guardie: P0-05 anti-pyramiding (nessun secondo BUY su un simbolo gia' a libro,
+    │      nemmeno per riportarlo a peso), idempotenza signal_id/giorno, hold-minimum 90 min
+    ├── sentiment_reversal: contro-segnale ensemble <= -0.35 e piu' fresco di 60 min
+    │      forza la chiusura di QUALSIASI posizione del broker, anche di S1 (#182)
     ├── delta orders: target_qty - current_qty
     ├── ConstraintEnforcer (5 passes)
     ├── PortfolioVolTargeter (instantiated but inactive — strategy_returns not wired)

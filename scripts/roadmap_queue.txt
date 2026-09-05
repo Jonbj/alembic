@@ -83,6 +83,15 @@
 
 # === 4. L'EVIDENZA NON E' RICOSTRUIBILE A POSTERIORI ===
 # Non perdono soldi oggi, ma rendono non decidibile la lettura del 28/09.
+#
+# --- S1: ribilanciamento, uscita e sizing non misurabili (inserite 2026-09-04) ---
+# Tre issue freeze-ok sull'S1: il ribilanciamento mensile e' rotto (40/44 ordini
+# scartati), l'uscita tarda fino a 10 sedute, e il sizing ignora il segnale.
+# Lo scope di ciascuna e' strumentazione pura (snapshot, script di misura,
+# metriche, fix docs) — niente taratura, niente money path.
+491  il ribilanciamento mensile S1 scarta 40 ordini su 44: P0-05 non riporta le posizioni a peso (NOK $6 contro target $629) — scripts/measure_s1_weight_gap.py + correggere la metrica #315 (delta, non notional pieno)
+489  latenza d'uscita S1: fra segnale negativo e uscita effettiva passano fino a 10 sedute, il 70% della perdita matura in quella finestra (TXN -$53 su -$76) — persistere lo snapshot di ribilanciamento + scripts/measure_s1_exit_latency.py
+490  il sizing S1 ignora il segnale e satura il cap: 35 pesi target su 46 identici, spearman(z, peso) = -0,62 — correggere docs/strategies.md:54 + metriche n_eff/cap_bound_share/spearman
 401  il `rank` persistito nel ledger degli intent S4 non e' funzione dello `score` nello stesso record: le decisioni di selezione non si ricostruiscono
 429  metrica dello slot bruciato: quanti slot top-N vanno a nomi gia' a libro o a segnali stantii, e quanti candidati sopra gate vengono tagliati a zero ordini (meta' strumentale di #400) — `blocked_by #401`, sta qui sotto apposta: la metrica e' funzione del `rank` persistito
 406  execution_decisions.signal_id e' NULL sul 97% delle righe, incluse tutte le SELL: le uscite non si possono agganciare al segnale che le ha causate
@@ -95,6 +104,7 @@
 432  alert quando la quota di news scartate come stale supera una soglia, separando "gia' stale al fetch" da "invecchiata in coda" (punto 3 di #149, mai fatto) — le due cause hanno rimedi opposti
 433  caratterizzare la latenza pubblicazione->ingestione per sorgente: perche' il 73% dei drop stale del 28/08 nasce gia' fuori finestra (misura sola, cadenza non toccata)
 430  dossier: istogramma `ore_tenuta` + reason code `hold_minimum_expiry`, con backfill dal 03/08 (meta' strumentale di #334) — il backfill E' l'evidenza shadow su cui #83 e' bloccata
+492  sentiment: l'emittente come autore della previsione, non come oggetto — «Goldman Sachs warns investors to expect lower returns» → score -0,497 e liquidazione di una posizione da 54 giorni (-$34,92). scripts/measure_issuer_as_author.py + validazione manuale su 20 candidati (inserita 2026-09-04)
 408  la news di secondo ordine e' sistematicamente sotto-scorata: segno giusto, magnitudine un ordine sotto il gate (ADBE +0,060 su +5,73%, NOW +0,143 su +10,04%) — 8 dei 22 miss di Week 35 sono THIN_NEUTRAL
 409  NO_NEWS e' la causa dominante dei miss di Week 35 (9/22) mentre il sistema osserva gia' catalizzatori che non usa: NVO aveva una corporate action OBSERVED, ERIC una volume surprise +1,25
 466  FinBERT distillation: fine-tune FinBERT sui punteggi soft dell ensemble LLM cloud (polarity come target continuo) per chiudere il gap price-reaction — shadow dietro flag, flip post-28/09
