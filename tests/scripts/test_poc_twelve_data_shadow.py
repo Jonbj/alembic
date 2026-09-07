@@ -73,6 +73,7 @@ async def test_run_skips_already_seen_external_ids(script_module, fake_conn):
     """Se external_id e' gia' nel DB, lo script NON lo riscrive."""
     cur = fake_conn.cursor()
     cur.fetchall.return_value = [("X",)]  # un external_id gia' presente
+    cur.fetchone.return_value = (0,)  # budget di oggi: 0 richieste
 
     # Connettore mock che produce UN item con id=td:X
     item = MagicMock()
@@ -84,7 +85,8 @@ async def test_run_skips_already_seen_external_ids(script_module, fake_conn):
     item.asset_tags = ["AAPL"]
 
     connector = MagicMock()
-    connector.fetch = MagicMock(return_value=_aiter([item]))
+    connector.fetch_symbol = MagicMock(return_value=_aiter([item]))
+    connector.last_response = {"press_releases": []}
 
     with patch.object(script_module, "_conn", return_value=fake_conn), \
          patch.object(script_module, "TwelveDataPressReleasesConnector", return_value=connector):
@@ -103,9 +105,10 @@ async def test_run_skips_already_seen_external_ids(script_module, fake_conn):
 
 
 @pytest.mark.asyncio
-async def test_run_writes_new_record(script_module, fake_conn):
+async def test_run_writes_new_record_with_raw_response(script_module, fake_conn):
     cur = fake_conn.cursor()
     cur.fetchall.return_value = []  # nessun external_id gia' presente
+    cur.fetchone.return_value = (0,)  # budget di oggi: 0 richieste
 
     import datetime as dt
     item = MagicMock()
@@ -117,7 +120,14 @@ async def test_run_writes_new_record(script_module, fake_conn):
     item.asset_tags = ["AAPL"]
 
     connector = MagicMock()
-    connector.fetch = MagicMock(return_value=_aiter([item]))
+    connector.fetch_symbol = MagicMock(return_value=_aiter([item]))
+    connector.last_response = {
+        "status": "ok",
+        "press_releases": [
+            {"id": "NEWID", "datetime": "2026-09-01T13:00:00Z",
+             "title": "AAPL fresh news", "body": "<p>fresh body</p>"}
+        ],
+    }
 
     with patch.object(script_module, "_conn", return_value=fake_conn), \
          patch.object(script_module, "TwelveDataPressReleasesConnector", return_value=connector):
@@ -141,6 +151,166 @@ async def test_run_writes_new_record(script_module, fake_conn):
     # params[3]=title, [4]=body_chars, [5]=url, [6]=published_at,
     # [7]=latency_seconds, [8]=ticker_valid, [9]=raw_response
     assert params[8] is True
+    # raw_response: la risposta GREZZA del fornitore, non un dict vuoto
+    raw = json.loads(params[9])
+    assert raw["id"] == "NEWID"
+    assert raw["body"] == "<p>fresh body</p>"
+
+
+# --- edge case 8: budget giornaliero esplicito, fermato da noi ---
+@pytest.mark.asyncio
+async def test_run_stops_when_daily_budget_exhausted(script_module, fake_conn):
+    """Il contatore giornaliero deve fermare lo script: se il budget e' gia'
+    stato consumato, nessuna nuova chiamata API parte."""
+    cur = fake_conn.cursor()
+    cur.fetchone.return_value = (script_module._DAILY_REQUEST_BUDGET,)  # budget raggiunto
+
+    connector = MagicMock()
+    connector.fetch_symbol = MagicMock()
+
+    with patch.object(script_module, "_conn", return_value=fake_conn), \
+         patch.object(script_module, "TwelveDataPressReleasesConnector", return_value=connector):
+        with patch.dict("os.environ", {"TWELVE_DATA_API_KEY": "k"}):
+            stats = await script_module._run(["AAPL", "MSFT"])
+
+    assert stats["requested"] == 0
+    assert stats["written"] == 0
+    connector.fetch_symbol.assert_not_called()
+    # il budget e' stato CONSULTATO (ledger), non ignorato
+    ledger_reads = [
+        c for c in cur.execute.call_args_list
+        if c.args and "news_poc_request_budget" in str(c.args[0])
+    ]
+    assert len(ledger_reads) >= 1
+
+
+@pytest.mark.asyncio
+async def test_run_records_each_request_in_the_budget_ledger(script_module, fake_conn):
+    """Ogni chiamata API consuma un credito del ledger giornaliero."""
+    cur = fake_conn.cursor()
+    cur.fetchall.return_value = []
+    cur.fetchone.return_value = (0,)
+
+    import datetime as dt
+    item = MagicMock()
+    item.id = "td:A"
+    item.title = "t"
+    item.body = "b"
+    item.url = ""
+    item.timestamp = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
+    item.asset_tags = ["AAPL"]
+
+    connector = MagicMock()
+    connector.fetch_symbol = MagicMock(return_value=_aiter([item]))
+    connector.last_response = {"press_releases": []}
+
+    with patch.object(script_module, "_conn", return_value=fake_conn), \
+         patch.object(script_module, "TwelveDataPressReleasesConnector", return_value=connector):
+        with patch.dict("os.environ", {"TWELVE_DATA_API_KEY": "k"}):
+            stats = await script_module._run(["AAPL", "MSFT"])
+
+    ledger_calls = [
+        c for c in cur.execute.call_args_list
+        if c.args and "INSERT INTO news_poc_request_budget" in str(c.args[0])
+    ]
+    # una scrittura nel ledger per simbolo chiamato (2 simboli, budget non raggiunto)
+    assert len(ledger_calls) == 2
+    assert stats["requested"] == 2
+
+
+@pytest.mark.asyncio
+async def test_run_stops_mid_coorte_when_budget_runs_out(script_module, fake_conn):
+    """Il budget fermia lo script a meta' coorte: i simboli restanti non vengono
+    chiamati oltre il piano."""
+    cur = fake_conn.cursor()
+    cur.fetchall.return_value = []
+    cur.fetchone.side_effect = [(0,), (1,), (1,)]  # dopo la prima richiesta il cap e' raggiunto
+
+    connector = MagicMock()
+    connector.fetch_symbol = MagicMock(return_value=_aiter([]))
+    connector.last_response = {"press_releases": []}
+
+    with patch.object(script_module, "_conn", return_value=fake_conn), \
+         patch.object(script_module, "TwelveDataPressReleasesConnector", return_value=connector), \
+         patch.object(script_module, "_DAILY_REQUEST_BUDGET", 1):
+        with patch.dict("os.environ", {"TWELVE_DATA_API_KEY": "k"}):
+            stats = await script_module._run(["AAPL", "MSFT", "GOOGL"])
+
+    assert stats["requested"] == 1
+    assert connector.fetch_symbol.call_count == 1
+
+
+# --- edge case 1: rate limit — backoff, il simbolo non blocca gli altri ---
+@pytest.mark.asyncio
+async def test_run_rate_limited_symbol_does_not_block_the_others(script_module, fake_conn):
+    """Un simbolo rate-limited viene saltato (backoff) e riprovato a fine giro;
+    gli altri simboli della coorte vengono comunque processati."""
+    from src.connectors.twelve_data_press_releases import TwelveDataRateLimitError
+
+    cur = fake_conn.cursor()
+    cur.fetchall.return_value = []
+    cur.fetchone.return_value = (0,)
+
+    import datetime as dt
+    item = MagicMock()
+    item.id = "td:MSFT1"
+    item.title = "MSFT news"
+    item.body = "body"
+    item.url = ""
+    item.timestamp = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
+    item.asset_tags = ["MSFT"]
+
+    connector = MagicMock()
+    # AAPL sballa il rate limit, MSFT risponde regolarmente; al retry di fine
+    # giro AAPL risponde vuoto (niente di nuovo dal fornitore)
+    connector.fetch_symbol = MagicMock(side_effect=[
+        TwelveDataRateLimitError("429 — credit/min exhausted"),
+        _aiter([item]),
+        _aiter([]),
+    ])
+    connector.last_response = {"press_releases": []}
+
+    sleep_mock = AsyncMock()
+    with patch.object(script_module, "_conn", return_value=fake_conn), \
+         patch.object(script_module, "TwelveDataPressReleasesConnector", return_value=connector), \
+         patch.object(script_module, "_RATE_LIMIT_BACKOFF_S", 0), \
+         patch.object(script_module.asyncio, "sleep", sleep_mock):
+        with patch.dict("os.environ", {"TWELVE_DATA_API_KEY": "k"}):
+            stats = await script_module._run(["AAPL", "MSFT"])
+
+    assert stats["written"] == 1
+    assert stats["rate_limited"] == 1
+    # il backoff e' avvenuto prima di riprovare il simbolo rinviato
+    sleep_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_run_gives_up_after_max_rate_limit_retries(script_module, fake_conn):
+    """Dopo _MAX_RATE_LIMIT_RETRIES giri di backoff il simbolo e' abbandonato:
+    lo script termina, non loopa all'infinito sul rate limit."""
+    from src.connectors.twelve_data_press_releases import TwelveDataRateLimitError
+
+    cur = fake_conn.cursor()
+    cur.fetchall.return_value = []
+    cur.fetchone.return_value = (0,)
+
+    connector = MagicMock()
+    connector.fetch_symbol = MagicMock(
+        side_effect=TwelveDataRateLimitError("429 — credit/min exhausted")
+    )
+
+    sleep_mock = AsyncMock()
+    with patch.object(script_module, "_conn", return_value=fake_conn), \
+         patch.object(script_module, "TwelveDataPressReleasesConnector", return_value=connector), \
+         patch.object(script_module, "_RATE_LIMIT_BACKOFF_S", 0), \
+         patch.object(script_module.asyncio, "sleep", sleep_mock):
+        with patch.dict("os.environ", {"TWELVE_DATA_API_KEY": "k"}):
+            stats = await script_module._run(["AAPL"])
+
+    # il primo tentativo piu' _MAX_RATE_LIMIT_RETRIES giri di backoff, poi stop
+    assert stats["rate_limited"] == 1 + script_module._MAX_RATE_LIMIT_RETRIES
+    assert stats["written"] == 0
+    assert sleep_mock.await_count == script_module._MAX_RATE_LIMIT_RETRIES
 
 
 def test_isolation_from_live_path(script_module):

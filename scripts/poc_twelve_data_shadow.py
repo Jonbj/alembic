@@ -45,7 +45,15 @@ _DEFAULT_SYMBOLS = [
 ]
 
 # Cap giornaliero sotto gli 800 crediti del piano Basic (margine di sicurezza).
+# Fermare lo script a questo conteggio e' compito nostro (edge case 8): il rate
+# limit del provider potrebbe degradare in modi non documentati.
 _DAILY_REQUEST_BUDGET = 700
+
+# 8 crediti/min nel piano Basic: dopo un 429 attendiamo il minuto e riproviamo
+# i simboli rinviati. Oltre _MAX_RATE_LIMIT_RETRIES giri rinunciamo: la PoC
+# misura, non deve mai inseguire il provider all'infinito.
+_RATE_LIMIT_BACKOFF_S = 60.0
+_MAX_RATE_LIMIT_RETRIES = 2
 
 _POC_SOURCE = "twelvedata_press_releases"
 
@@ -68,6 +76,33 @@ def _existing_external_ids(cur, symbols: Iterable[str]) -> set[str]:
     return {row[0] for row in cur.fetchall()}
 
 
+def _requests_today(cur) -> int:
+    """Crediti gia' consumati oggi da questa fonte (cumulativo sulle run)."""
+    cur.execute(
+        """
+        SELECT requests FROM news_poc_request_budget
+        WHERE poc_source = %s AND day = CURRENT_DATE
+        """,
+        (_POC_SOURCE,),
+    )
+    row = cur.fetchone()
+    return row[0] if row else 0
+
+
+def _record_request(cur) -> None:
+    """Conta la richiesta che stiamo per fare nel ledger giornaliero."""
+    cur.execute(
+        """
+        INSERT INTO news_poc_request_budget (poc_source, day, requests)
+        VALUES (%s, CURRENT_DATE, 1)
+        ON CONFLICT (poc_source, day)
+        DO UPDATE SET requests = news_poc_request_budget.requests + 1,
+                      updated_at = now()
+        """,
+        (_POC_SOURCE,),
+    )
+
+
 def _ticker_valid(title: str, body: str, symbol: str) -> bool:
     """Il simbolo richiesto compare in title o body (case-insensitive, ASCII).
 
@@ -82,6 +117,40 @@ def _ticker_valid(title: str, body: str, symbol: str) -> bool:
     return bool(pattern.search(text))
 
 
+def _put_row(conn, symbol: str, item, raw: dict, stats: dict) -> None:
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO news_poc_samples (
+                    poc_source, symbol, external_id, title, body_chars,
+                    url, published_at, latency_seconds, ticker_valid, raw_response
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (poc_source, external_id) WHERE external_id IS NOT NULL
+                DO NOTHING
+                """,
+                (
+                    _POC_SOURCE,
+                    symbol,
+                    item.id.split(":", 1)[-1],  # td:<id> -> <id>
+                    item.title,
+                    len(item.body),
+                    item.url,
+                    item.timestamp,
+                    (dt.datetime.now(dt.timezone.utc) - item.timestamp).total_seconds(),
+                    _ticker_valid(item.title, item.body, symbol),
+                    json.dumps(raw),
+                ),
+            )
+            conn.commit()
+            stats["written"] += 1
+    except Exception as exc:  # pragma: no cover - difensivo
+        logger.warning("INSERT failed for %s/%s: %s", symbol, item.id, exc)
+        conn.rollback()
+        stats["errors"] += 1
+
+
 async def _run(symbols: list[str]) -> dict:
     api_key = os.environ.get("TWELVE_DATA_API_KEY", "")
     if not api_key:
@@ -89,69 +158,85 @@ async def _run(symbols: list[str]) -> dict:
 
     conn = _conn()
     conn.autocommit = False
-    stats = {"requested": 0, "fetched": 0, "written": 0, "duplicates": 0, "errors": 0}
+    stats = {
+        "requested": 0, "fetched": 0, "written": 0,
+        "duplicates": 0, "rate_limited": 0, "errors": 0,
+    }
 
     try:
         with conn.cursor() as cur:
             already_seen = _existing_external_ids(cur, symbols)
 
-        conn_holder = {"c": conn}
-
-        def _put_row(symbol: str, item, raw: dict) -> None:
-            try:
-                with conn_holder["c"].cursor() as cur:
-                    cur.execute(
-                        """
-                        INSERT INTO news_poc_samples (
-                            poc_source, symbol, external_id, title, body_chars,
-                            url, published_at, latency_seconds, ticker_valid, raw_response
-                        )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (poc_source, external_id) WHERE external_id IS NOT NULL
-                        DO NOTHING
-                        """,
-                        (
-                            _POC_SOURCE,
-                            symbol,
-                            item.id.split(":", 1)[-1],  # td:<id> -> <id>
-                            item.title,
-                            len(item.body),
-                            item.url,
-                            item.timestamp,
-                            (dt.datetime.now(dt.timezone.utc) - item.timestamp).total_seconds(),
-                            _ticker_valid(item.title, item.body, symbol),
-                            json.dumps(raw),
-                        ),
-                    )
-                    conn_holder["c"].commit()
-            except Exception as exc:  # pragma: no cover - difensivo
-                logger.warning("INSERT failed for %s/%s: %s", symbol, item.id, exc)
-                conn_holder["c"].rollback()
-                stats["errors"] += 1
-
         connector = TwelveDataPressReleasesConnector(api_key=api_key, symbols=symbols)
 
-        try:
-            async for item in connector.fetch():
+        # I simboli sono guidati uno per volta: il budget va fermato tra una
+        # richiesta e l'altra e un 429 su un simbolo non deve bloccare gli
+        # altri (edge case 1). I rate-limited vengono rinviati a fine giro,
+        # dopo un backoff dell'intera finestra di crediti.
+        pending = list(symbols)
+        deferred: list[str] = []
+        retries = 0
+        while True:
+            if not pending:
+                if not deferred:
+                    break
+                if retries >= _MAX_RATE_LIMIT_RETRIES:
+                    logger.warning(
+                        "Rinunciato dopo %d giri di backoff su %d simboli: %s",
+                        retries, len(deferred), deferred,
+                    )
+                    break
+                retries += 1
+                pending, deferred = deferred, []
+                logger.info("Backoff %ss prima di riprovare", _RATE_LIMIT_BACKOFF_S)
+                await asyncio.sleep(_RATE_LIMIT_BACKOFF_S)
+
+            symbol = pending.pop(0)
+
+            with conn.cursor() as cur:
+                consumed = _requests_today(cur)
+                if consumed >= _DAILY_REQUEST_BUDGET:
+                    logger.warning(
+                        "Budget giornaliero %d/%d raggiunto — stop, %d simboli saltati: %s",
+                        consumed, _DAILY_REQUEST_BUDGET, len(pending) + 1, [symbol] + pending,
+                    )
+                    break
+                _record_request(cur)
+                conn.commit()
+            stats["requested"] += 1
+
+            try:
+                # drain prima di scrivere: last_response e' completo solo a fine
+                # simbolo, e il raw va associato item-per-item
+                items = [item async for item in connector.fetch_symbol(symbol)]
+            except TwelveDataRateLimitError as exc:
+                stats["rate_limited"] += 1
+                logger.info("Rate limit su %s — rinviato a fine giro: %s", symbol, exc)
+                deferred.append(symbol)
+                continue
+            except TwelveDataAuthError as exc:
+                # fatale: ogni simbolo fallirebbe allo stesso modo
+                logger.error("Auth error — abort: %s", exc)
+                stats["errors"] += 1
+                break
+            except TwelveDataInvalidSymbolError as exc:
+                logger.warning("Invalid symbol: %s", exc)
+                stats["errors"] += 1
+                continue
+
+            raw_by_id = {
+                r.get("id"): r
+                for r in (connector.last_response or {}).get("press_releases") or []
+                if isinstance(r, dict)
+            }
+            for item in items:
                 stats["fetched"] += 1
                 ext_id = item.id.split(":", 1)[-1]
                 if ext_id in already_seen:
                     stats["duplicates"] += 1
                     continue
                 already_seen.add(ext_id)
-                # l'ext_id grezzo non e' sopravvissuto qui: lo recuperiamo dal raw
-                # tenuto per la scrittura. Per semplicita' riusiamo item.id.
-                _put_row(item.asset_tags[0] if item.asset_tags else symbols[0], item, {})
-                stats["written"] += 1
-        except TwelveDataRateLimitError as exc:
-            logger.warning("Rate limit dopo %d richieste: %s", stats["requested"], exc)
-            stats["errors"] += 1
-        except TwelveDataAuthError as exc:
-            logger.error("Auth error: %s", exc)
-            stats["errors"] += 1
-        except TwelveDataInvalidSymbolError as exc:
-            logger.warning("Invalid symbol: %s", exc)
-            stats["errors"] += 1
+                _put_row(conn, symbol, item, raw_by_id.get(ext_id, {}), stats)
 
     finally:
         conn.close()
