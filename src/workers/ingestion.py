@@ -761,51 +761,66 @@ def _process_sec_edgar_items(
     redis_client,
     discard_rows: list[dict] | None = None,
 ) -> dict:
-    """Filter by watchlist, deduplicate, and push EDGAR NewsItems to news:queue."""
+    """Expand watchlisted SEC share classes, deduplicate, and enqueue them."""
     stats = {"fetched": 0, "queued": 0, "filtered": 0, "duplicates": 0}
     for item in items:
         stats["fetched"] += 1
-        ticker = item.asset_tags[0] if item.asset_tags else None
-        if not ticker or ticker not in watchlist:
+        tickers = list(dict.fromkeys(canonicalizza_ticker(t) for t in item.asset_tags))
+        selected = [ticker for ticker in tickers if ticker in watchlist]
+        if not selected:
             stats["filtered"] += 1
             if discard_rows is not None:
                 discard_rows.append(build_news_discard_row(
                     item,
-                    reason="not_tradable" if ticker else "no_ticker",
+                    reason="not_tradable" if tickers else "no_ticker",
                     stage="ingestion",
-                    symbol=ticker,
+                    symbol=tickers[0] if tickers else None,
                 ))
             continue
-        duplicate_reason = _duplicate_reason(item, deduplicator)
-        if duplicate_reason is not None:
-            stats["duplicates"] += 1
-            if discard_rows is not None:
-                discard_rows.append(build_news_discard_row(
-                    item, reason=duplicate_reason, stage="ingestion"
-                ))
-            continue
-        item.raw_ingested_at = datetime.now(timezone.utc)
-        redis_client.rpush("news:queue", item.model_dump_json())
-        stats["queued"] += 1
+
+        for ticker in selected:
+            per_ticker = NewsItem(
+                id=f"{item.id}:{ticker}",
+                source=item.source,
+                timestamp=item.timestamp,
+                title=item.title,
+                body=item.body,
+                url=item.url,
+                language=item.language,
+                asset_tags=[ticker],
+                extraction_method=item.extraction_method,
+            )
+            duplicate_reason = _duplicate_reason(per_ticker, deduplicator)
+            if duplicate_reason is not None:
+                stats["duplicates"] += 1
+                if discard_rows is not None:
+                    discard_rows.append(build_news_discard_row(
+                        per_ticker, reason=duplicate_reason, stage="ingestion"
+                    ))
+                continue
+            per_ticker.raw_ingested_at = datetime.now(timezone.utc)
+            redis_client.rpush("news:queue", per_ticker.model_dump_json())
+            stats["queued"] += 1
     return stats
 
 
 @app.task(name="src.workers.ingestion.run_sec_edgar_ingestion_worker")
 def run_sec_edgar_ingestion_worker() -> dict:
-    """Celery entry-point: fetch SEC 8-K/10-Q/10-K filings, push to news:queue.
+    """Celery entry-point: fetch SEC 8-K/6-K filings, push to news:queue.
 
-    DISABLED (2026-07-02): OFF by default. Never produced a signal — the connector read
-    a non-existent `ticker_symbol` field (EDGAR filings use CIK / display_names), so every
-    item got empty asset_tags and was dropped downstream. Re-enable with
-    SEC_EDGAR_INGESTION_ENABLED=1 ONLY after fixing the
-    CIK→ticker attribution (e.g. via SecCompanyTickers) and enriching the body (8-K item).
+    OFF by default: the corrected CIK mapping and Latest Filings feed must first be
+    evaluated in shadow for watchlist coverage, tagging precision, and daily volume.
+    SEC_EDGAR_INGESTION_ENABLED=1 is an operator-only production decision.
     """
     if os.environ.get("SEC_EDGAR_INGESTION_ENABLED", "0") == "0":
         return {"skipped": True, "reason": "sec_edgar_ingestion_disabled"}
 
     redis_client = Redis.from_url(config.REDIS_URL)
     try:
-        connector = SECEdgarConnector(form_types=["8-K", "10-Q", "10-K"])
+        connector = SECEdgarConnector(
+            form_types=["8-K", "6-K"],
+            user_agent=config.SEC_USER_AGENT,
+        )
         watchlist = set(config.WATCHLIST_SYMBOLS or [])
         deduplicator = Deduplicator(redis_client)
 

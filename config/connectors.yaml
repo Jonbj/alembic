@@ -22,5 +22,5 @@ gdelt:
 
 # SEC EDGAR Connector Configuration
 sec_edgar:
-  form_types: ["8-K", "10-Q", "10-K"]
+  form_types: ["8-K", "6-K"]
   poll_interval_seconds: 300
