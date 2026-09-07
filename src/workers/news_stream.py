@@ -19,21 +19,34 @@ from redis import Redis
 from src.config import config
 from src.connectors.alpaca_news import AlpacaNewsConnector
 from src.connectors.deduplicator import Deduplicator
+from src.models.news import NewsItem
 from src.workers.celery_app import app
 
 log = logging.getLogger(__name__)
 
 
-def _process_alpaca_items(*args, **kwargs):
+def _process_alpaca_items(
+    items: list[NewsItem],
+    deduplicator: Deduplicator,
+    redis_client: Redis,
+    discard_rows: list[dict] | None = None,
+) -> dict:
+    """Thin re-export of the REST path's own item processor (lazy-imported to
+    avoid a module-level import cycle with `src.workers.ingestion`), so the
+    WebSocket path shares one dedup/telemetry contract instead of a parallel one."""
     from src.workers.ingestion import _process_alpaca_items as process
 
-    return process(*args, **kwargs)
+    return process(items, deduplicator, redis_client, discard_rows=discard_rows)
 
 
-def _persist_ingestion_observability(*args, **kwargs) -> None:
+def _persist_ingestion_observability(
+    source: str, stats: dict, discard_rows: list[dict]
+) -> None:
+    """Thin re-export of the REST path's own observability persister — same
+    reason as `_process_alpaca_items` above."""
     from src.workers.ingestion import _persist_ingestion_observability as persist
 
-    persist(*args, **kwargs)
+    persist(source, stats, discard_rows)
 
 
 async def _on_news(article) -> None:
@@ -120,23 +133,20 @@ def run_news_stream(self) -> dict:
 if __name__ == "__main__":
     import logging as _logging
 
-    from src.config import config
     from src.connectors.alpaca_news_stream import AlpacaNewsStreamConnector
 
     _logging.basicConfig(level=logging.INFO)
 
-    async def _print_article(article) -> None:
-        if hasattr(article, "model_dump"):
-            data = article.model_dump()
-        else:
-            data = dict(article)
-        print(f"[STREAM] {data.get('created_at')} {data.get('symbols')} — {data.get('headline', '')[:80]}")
-
+    # #455: this is the entrypoint docker-compose actually runs
+    # (`python -m src.workers.news_stream`). It must wire the real ingestion
+    # callback (_on_news) — a print-only stub here would leave the deployed
+    # process streaming and logging while persisting nothing and triggering
+    # no sentiment inference, silently defeating the whole point of the PR.
     connector = AlpacaNewsStreamConnector(
         api_key=config.ALPACA_API_KEY,
         secret_key=config.ALPACA_SECRET_KEY,
         symbols=list(config.WATCHLIST_SYMBOLS or ["*"]),
-        on_news_callback=_print_article,
+        on_news_callback=_on_news,
     )
-    print("Starting news stream (Ctrl+C to stop)…")
+    log.info("Starting Alpaca news stream (Ctrl+C to stop)")
     connector.run()

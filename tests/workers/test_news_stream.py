@@ -77,6 +77,35 @@ def test_run_news_stream_skips_without_credentials():
     assert result == {"skipped": True, "reason": "no_credentials"}
 
 
+def test_main_entrypoint_wires_real_ingestion_callback_not_a_stub():
+    """#455 regression: docker-compose runs `python -m src.workers.news_stream`,
+    which executes the __main__ block directly (not the run_news_stream celery
+    task). If that block binds a print-only stub instead of _on_news, the
+    deployed process streams and logs while persisting nothing and never
+    triggering sentiment inference -- silently defeating the whole PR, and
+    invisible to every other test here because they all exercise _on_news or
+    run_news_stream directly, never __main__ itself."""
+    import runpy
+
+    with patch("src.connectors.alpaca_news_stream.AlpacaNewsStreamConnector") as mock_cls, \
+         patch("src.config.config") as mock_cfg:
+        mock_cfg.ALPACA_API_KEY = "key"
+        mock_cfg.ALPACA_SECRET_KEY = "secret"
+        mock_cfg.WATCHLIST_SYMBOLS = ["AAPL"]
+        mock_connector = MagicMock()
+        mock_cls.return_value = mock_connector
+
+        runpy.run_module("src.workers.news_stream", run_name="__main__")
+
+    mock_cls.assert_called_once()
+    # runpy re-executes the module under a fresh "__main__" namespace, so the
+    # callback object here is not `is` the one this test file imports -- compare
+    # by name instead. A stub like `_print_article` would fail this by name.
+    callback = mock_cls.call_args.kwargs["on_news_callback"]
+    assert callback.__name__ == "_on_news"
+    mock_connector.run.assert_called_once()
+
+
 def test_run_news_stream_starts_connector():
     from src.workers.news_stream import run_news_stream
 
