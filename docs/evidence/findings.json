@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 67,
+  "prossimo_id": 68,
   "findings": [
     {
       "id": "F-001",
@@ -164,9 +164,15 @@
           "costo_usd": 149.42,
           "nota": "50/96 simboli (52,1%) zero righe news_log il 09-03, valore piu' alto della finestra osservata dal 07-31 (precedente massimo 60 l'08-31). I due miss NO_NEWS puri sono entrambi rialzisti e non detenuti: SAP +3,50% e ARM +3,29%, zero righe, zero segnali per entrambi. Costo = lordo close-to-close x 2.200$, SAP 77,01 + ARM 72,41 = 149,42$, per confrontabilita' con la serie; l'accessibile misurato dal dossier e' -3,25$ (SAP, negativo: al primo ciclo eleggibile avrebbe perso) e +132,54$ (ARM, il singolo candidato con piu' denaro potenzialmente sul tavolo dell'intera giornata). Faccia lato uscita: ASML a 10 sedute consecutive senza una riga (fonti_osservate_finestra vuoto su tutta la finestra a 10 sedute, la serie di silenzio e' piu' lunga del denominatore), a -6,93% dall'ingresso.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-03.md §1, §3, §5, §Segnalazioni"
+        },
+        {
+          "data": "2026-09-04",
+          "costo_usd": 562.24,
+          "nota": "54/96 simboli (56,3%) zero righe news_log il 09-04, secondo valore piu' alto della finestra osservata dal 07-31 (record 60 l'08-31). 6 miss NO_NEWS (include l'equivalenza TSLA di F-067, che ha 7 righe ma zero confermate ISSUER_SPECIFIC): TSLA, NFLX, BIDU, ARM, INFY, ORCL. Costo = lordo close-to-close x 2.200 $ per confrontabilita' con la serie: TSLA 130,26 + NFLX 117,62 + BIDU 89,54 + ARM 86,15 + INFY 70,97 + ORCL 67,70 = 562,24 $. Accessibile misurato dal dossier sui soli rialzisti non detenuti: BIDU +37,07 $, ARM -17,77 $ (negativo: il timing simulato al primo ciclo eleggibile avrebbe perso), ORCL +14,12 $. Faccia lato uscita: UNH cieca da 2 sedute consecutive, ritorno_da_ingresso -7,13%, nozionale 632,50 $ a rischio.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-04.md §1, §3, §5, §Segnalazioni"
         }
       ],
-      "costo_cumulato_usd": 3948.44,
+      "costo_cumulato_usd": 4510.68,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 3
@@ -904,9 +910,15 @@
           "costo_usd": 26.39,
           "nota": "Il gate 0,30 scarta segnali col segno corretto su quattro mover oggi: NOW (+0,121, scarto 0,179), SPCX (+0,18, scarto 0,12), ORCL (+0,10, scarto 0,20) e TSLA (score ensemble non-fallback 0,277, scarto 0,023 - il piu' stretto della serie dopo lo 0,019 di TSLA l'08-31, quarta occorrenza in quattro sedute dello schema 'segnale piu' informativo entro 0,04 dal gate': 0,019/0,029/0,040/0,023). Ma solo NOW ha accessible_opportunity_usd positiva (26,39$, dal dossier): SPCX (-32,90$), ORCL (-23,28$) e TSLA (-35,29$) avrebbero perso denaro anche disarmando il gate, perche' il movimento era gia' scontato al primo ciclo eleggibile. Costo registrato 26,39$ (solo NOW, unico caso con opportunita' reale). TSLA ha un secondo profilo distinto su F-056/F-060 (segnale sopra gate ma mai valutato dal ciclo): non sommare, sono facce alternative dello stesso ticker sullo stesso giorno.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-03.md §3, §7, §Segnalazioni"
+        },
+        {
+          "data": "2026-09-04",
+          "costo_usd": 358.35,
+          "nota": "3 nuovi mover con segnale sotto gate 0,30 ma segno corretto: ADBE -6,73% (fan-out -0,156, nessun canale own), MU +6,10% (own ISSUER_SPECIFIC +0,258, 0,042 sotto il gate, il margine piu' stretto della serie insieme a TSLA 08-31/NOW 09-01), TMUS -3,46% (fan-out -0,21, nessun canale own). Causa dossier: BELOW_GATE su tutti e tre. Costo stimato con size S4 tipica 2.200 $: 148,13 (ADBE) + 134,16 (MU) + 76,06 (TMUS) = 358,35 $.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-04.md §3, §8, §Segnalazioni"
         }
       ],
-      "costo_cumulato_usd": 1836.86,
+      "costo_cumulato_usd": 2195.21,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -3803,6 +3815,25 @@
       ],
       "costo_cumulato_usd": 10.54,
       "occorrenze_non_stimate": 0,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-067",
+      "titolo": "Headline inequivocabilmente ticker-specifiche non vengono mai promosse a relevance=ISSUER_SPECIFIC/subject_ticker confermato: caso TSLA 09-04, 7 articoli tutti TAG_UNCONFIRMED/fan-out",
+      "tipo": "difetto",
+      "confidenza": "congetturale",
+      "primo_avvistamento": "2026-09-04",
+      "occorrenze": [
+        {
+          "data": "2026-09-04",
+          "costo_usd": null,
+          "nota": "TSLA -5,92%, 7 articoli in news_log il giorno con il volume di copertura piu' alto fra i 9 miss candidati, ma zero con relevance=ISSUER_SPECIFIC o subject_ticker=TSLA: tutti e 7 marcati TAG_UNCONFIRMED/fan-out, incluse headline inequivocabili ('Tesla's Cybercab Storm Was More of a Drizzle', 'Musk Says Autonomy Is Flight's Next Step', 'Tesla Stock Down 29% from All-Time Highs...Sell the News' score -0,44). max_score_fanout -0,299 (segno corretto) ma mai promosso a canale own, quindi nessun segnale 'proprio' generabile ne' sopra ne' sotto gate. Il classificatore causale legacy del dossier non ha una casella per questo caso e lo marca NON_CLASSIFICATO. Nuovo id giustificato: non e' un riconteggio di F-020 (org_lookup attribuisce a un ticker SBAGLIATO per ambiguita' del nome societario; qui il ticker e' quello giusto e resta comunque non confermato) ne' di F-057 (resolver shadow su news_resolved_entities, pipeline diversa, shadow-only, non gating nulla dal vivo; qui il campo e' relevance/subject_ticker su sentiment_signals, che alimenta davvero il gate d'ingresso). Costo null: il dollaro equivalente (130,26 $, lordo close-to-close x 2.200 $) e' gia' contato nella somma di occorrenza di F-001 il 09-04, per non duplicare; l'affermazione qui e' strutturale sulla tassonomia/pipeline di rilevanza, non sul dato mancante.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-04.md §3, §8, §Segnalazioni"
+        }
+      ],
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
     }
