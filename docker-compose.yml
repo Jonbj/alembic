@@ -99,6 +99,27 @@ services:
         max-size: "50m"
         max-file: "5"
 
+  worker-news-stream:
+    build: .
+    # Long-lived Alpaca WebSocket connection. Inference is dispatched to the
+    # dedicated inference queue; this process only parses and enqueues news.
+    command: python scripts/run_with_durable_logs.py --service worker-news-stream -- python -m src.workers.news_stream
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://trading:trading@postgres:5432/trading
+      REDIS_URL: redis://redis:6379/0
+    volumes:
+      - ${ALEMBIC_DURABLE_LOG_DIR:-./logs/containers}:/var/log/alembic
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
   beat:
     build: .
     command: python scripts/run_with_durable_logs.py --service beat -- celery -A src.workers.celery_app beat --loglevel=info

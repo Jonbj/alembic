@@ -30,7 +30,7 @@ LOCK_FILE="$LOG_DIR/.deploy_reconcile.lock"
 LOG_FILE="$LOG_DIR/deploy_reconcile_$(date +%Y-%m-%d).log"
 
 # Servizi che contengono il codice Python. Il frontend ha la sua immagine.
-SERVIZI_BACKEND=(worker worker-inference api beat)
+SERVIZI_BACKEND=(worker worker-inference worker-news-stream api beat)
 
 # Il nome del progetto compose DEVE essere esplicito. Di default lo deduce dal
 # nome della directory: costruendo dal worktree diventerebbe "deploy" e docker
@@ -89,7 +89,7 @@ servizi_da_ricostruire() {
     while read -r f; do
         [[ -z "$f" ]] && continue
         case "$f" in
-            src/*|config/*|scripts/*|pyproject.toml|uv.lock|Dockerfile) backend=1 ;;
+            src/*|config/*|scripts/*|docker-compose.yml|pyproject.toml|uv.lock|Dockerfile) backend=1 ;;
             frontend/*) frontend=1 ;;
         esac
     done <<< "$cambiati"

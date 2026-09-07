@@ -13,6 +13,7 @@ Day-to-day operational reference for running, monitoring, and troubleshooting th
 | `api` | 8001→8000 | FastAPI application |
 | `worker` | — | Celery worker (queue `celery`, concurrency=4 — task generici) |
 | `worker-inference` | — | Celery worker (queue `inference`, concurrency=1 — FinBERT/Ollama) |
+| `worker-news-stream` | — | Alpaca WebSocket news → dedup → `news:queue` |
 | `beat` | — | Celery beat (task scheduler) |
 | `frontend` | 3000→80 | React dashboard (Nginx) |
 | `backtest` | — | One-shot backtest runner (profile: backtest) |
@@ -24,11 +25,12 @@ Day-to-day operational reference for running, monitoring, and troubleshooting th
 docker compose up -d
 
 # Rebuild and restart (after code changes)
-docker compose build api worker worker-inference beat frontend
-docker compose up -d api worker worker-inference beat frontend
+docker compose build api worker worker-inference worker-news-stream beat frontend
+docker compose up -d api worker worker-inference worker-news-stream beat frontend
 
 # View logs (follow)
 docker compose logs -f worker
+docker compose logs -f worker-news-stream
 docker compose logs -f beat
 docker compose logs -f api
 
@@ -45,7 +47,7 @@ docker compose --profile backtest run --rm backtest \
 
 ### Log applicativi persistenti
 
-`api`, `worker`, `worker-inference` e `beat` duplicano stdout/stderr in
+`api`, `worker`, `worker-inference`, `worker-news-stream` e `beat` duplicano stdout/stderr in
 `logs/containers/<servizio>-YYYY-MM-DD.log`, con giorno UTC e retention di 60
 giorni. `docker compose logs` resta utile per seguire l'istanza corrente, ma i
 file host sono la fonte forense: sopravvivono alla ricreazione dei container e
@@ -121,6 +123,33 @@ Beat schedules are defined in `src/workers/celery_app.py`. All times are UTC.
 | `counterfactual-worker` | 22:45 daily | Phase C: compute 1h counterfactual returns for SKIP_THRESHOLD/SKIP_EMA/SKIP_CAP rows |
 | `reconcile-fills-evening` | 21:30 Mon-Fri | Reconcile fill prices after NYSE close |
 | `mobile-alert-evaluation` | every minute | Evaluate mobile incidents and drain the leased FCM outbox; schedule-lag rules suppress themselves off-hours |
+
+### Alpaca WebSocket news stream
+
+`worker-news-stream` mantiene una connessione WebSocket Alpaca sempre attiva. Ogni
+evento usa lo stesso parser, le stesse chiavi di deduplica e lo stesso contatore
+`alpaca_benzinga` del polling REST; solo gli articoli accodati lanciano subito il
+sentiment worker sulla coda `inference`. `raw_ingested_at` continua quindi a
+misurare il primo ingresso nella pipeline e i duplicati restano visibili in
+`news_queue_drops`.
+
+Durante la transizione il polling `run-alpaca-ingestion` resta attivo ogni 15
+minuti. Il WebSocket arriva per primo e il polling funge da rete di sicurezza; la
+deduplica condivisa impedisce una seconda inferenza. Disattivare il polling è una
+decisione successiva al confronto delle misure, non parte del deploy iniziale.
+
+```bash
+# Il servizio deve risultare Up e il log deve mostrare l'avvio della connessione.
+docker compose ps worker-news-stream
+docker compose logs worker-news-stream --since 10m | grep "Starting Alpaca news stream"
+
+# Confronta finestre pre/post deploy: il report mostra p50/p95 per fonte e
+# duplicate_id/stale. Sostituire i tre timestamp con confine e finestre UTC uguali.
+docker compose exec worker python scripts/characterize_news_ingestion_latency.py \
+  --since 2026-09-01T00:00:00+00:00 --until 2026-09-05T00:00:00+00:00
+docker compose exec worker python scripts/characterize_news_ingestion_latency.py \
+  --since 2026-09-05T00:00:00+00:00 --until 2026-09-09T00:00:00+00:00
+```
 
 ### Manual Task Triggering
 
