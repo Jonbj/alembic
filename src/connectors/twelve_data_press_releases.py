@@ -74,6 +74,9 @@ class TwelveDataPressReleasesConnector(NewsConnector):
         # outputsize e' interpretato dal fornitore come per_page; teniamolo conservativo.
         self._outputsize = max(1, min(outputsize, 50))
         self._timeout_s = timeout_s
+        # Ultima risposta grezza servita dal fornitore (per simbolo): lo script
+        # PoC la persiste come raw_response in news_poc_samples per il debug.
+        self.last_response: dict | None = None
 
     def _params_for(self, symbol: str) -> dict[str, str]:
         return {
@@ -86,7 +89,7 @@ class TwelveDataPressReleasesConnector(NewsConnector):
     async def fetch(self) -> AsyncIterator[NewsItem]:
         for symbol in self._symbols:
             try:
-                async for item in self._fetch_one(symbol):
+                async for item in self.fetch_symbol(symbol):
                     yield item
             except (TwelveDataRateLimitError, TwelveDataAuthError):
                 # propaghiamo: lo script PoC (scripts/poc_twelve_data_shadow.py)
@@ -100,7 +103,13 @@ class TwelveDataPressReleasesConnector(NewsConnector):
                 logger.warning("Twelve Data invalid symbol %s — skipping", symbol)
                 continue
 
-    async def _fetch_one(self, symbol: str) -> AsyncIterator[NewsItem]:
+    async def fetch_symbol(self, symbol: str) -> AsyncIterator[NewsItem]:
+        """Fetch di un singolo simbolo — una richiesta = un credito.
+
+        Separato da fetch() perche' lo script PoC guida i simboli uno per
+        volta: il budget giornaliero va fermato tra un simbolo e l'altro e
+        un rate limit su uno non deve bloccare gli altri.
+        """
         timeout = aiohttp.ClientTimeout(total=self._timeout_s)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(_TWELVE_PR_URL, params=self._params_for(symbol)) as resp:
@@ -121,12 +130,24 @@ class TwelveDataPressReleasesConnector(NewsConnector):
                     logger.warning("Twelve Data non-JSON response for %s: %s", symbol, exc)
                     return
 
-        # Status nel body (Twelve Data usa HTTP 200 + status='error' per i 404 logici).
+        self.last_response = data if isinstance(data, dict) else None
+
+        # Status nel body (Twelve Data usa HTTP 200 + status='error' per gli
+        # errori logici: 404 simbolo invalido, 429 crediti esauriti, 401/403
+        # chiave — i codici vanno ispezionati, non fidarsi dello status HTTP).
         if not isinstance(data, dict) or data.get("status") != "ok":
             code = data.get("code") if isinstance(data, dict) else None
             if code == 404:
                 raise TwelveDataInvalidSymbolError(
                     f"Twelve Data: invalid symbol {symbol} (code=404)"
+                )
+            if code == 429:
+                raise TwelveDataRateLimitError(
+                    f"Twelve Data 429 nel body — crediti esauriti ({symbol})"
+                )
+            if code in (401, 403):
+                raise TwelveDataAuthError(
+                    f"Twelve Data {code} nel body — check TWELVE_DATA_API_KEY"
                 )
             logger.warning("Twelve Data non-ok status for %s: %s", symbol, data)
             return

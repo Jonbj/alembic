@@ -70,6 +70,59 @@ _FIXTURE_AAPL = {
 }
 
 
+def _mock_session_for(payloads: list) -> AsyncMock:
+    """Sessione aiohttp mockata che serve `payloads` in sequenza (uno per simbolo)."""
+    call = {"i": 0}
+
+    def get_next(url, params=None, **kw):
+        idx = min(call["i"], len(payloads) - 1)
+        call["i"] += 1
+        mock_resp = AsyncMock()
+        if isinstance(payloads[idx], Exception):
+            mock_resp.status = payloads[idx].status_code if hasattr(payloads[idx], "status_code") else 200
+        else:
+            mock_resp.status = 200
+            mock_resp.json = AsyncMock(return_value=payloads[idx])
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+        return mock_resp
+
+    mock_session = AsyncMock()
+    mock_session.get = MagicMock(side_effect=get_next)
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+    return mock_session
+
+
+@pytest.mark.asyncio
+async def test_fetch_symbol_exposes_raw_response_for_the_script():
+    """Lo script PoC persiste `raw_response` in news_poc_samples: il connettore
+    deve esporre la risposta grezza dell'ultimo simbolo fetchato."""
+    conn = TwelveDataPressReleasesConnector(api_key="key", symbols=["AAPL"])
+
+    with patch("src.connectors.twelve_data_press_releases.aiohttp.ClientSession",
+               return_value=_mock_session_for([_FIXTURE_AAPL])):
+        items = [item async for item in conn.fetch_symbol("AAPL")]
+
+    assert len(items) == 2
+    # last_response e' la risposta completa, non ricostruita
+    assert conn.last_response == _FIXTURE_AAPL
+
+
+@pytest.mark.asyncio
+async def test_body_code_429_maps_to_rate_limit_error():
+    """Il fornitore puo' servire errori logici con HTTP 200: il code 429 nel body
+    va mappato su TwelveDataRateLimitError, non ingoiato come warning."""
+    payload = {"code": 429, "status": "error", "message": "9 credits used, current limit 8"}
+    conn = TwelveDataPressReleasesConnector(api_key="key", symbols=["AAPL"])
+
+    with patch("src.connectors.twelve_data_press_releases.aiohttp.ClientSession",
+               return_value=_mock_session_for([payload])):
+        with pytest.raises(TwelveDataRateLimitError):
+            async for _ in conn.fetch_symbol("AAPL"):
+                pass
+
+
 @pytest.mark.asyncio
 async def test_fetch_yields_news_items_with_html_stripped_body():
     """Connector produce NewsItem; body ha l'HTML rimosso (altrimenti misura boilerplate)."""
