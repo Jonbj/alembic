@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 67,
+  "prossimo_id": 69,
   "findings": [
     {
       "id": "F-001",
@@ -164,9 +164,15 @@
           "costo_usd": 149.42,
           "nota": "50/96 simboli (52,1%) zero righe news_log il 09-03, valore piu' alto della finestra osservata dal 07-31 (precedente massimo 60 l'08-31). I due miss NO_NEWS puri sono entrambi rialzisti e non detenuti: SAP +3,50% e ARM +3,29%, zero righe, zero segnali per entrambi. Costo = lordo close-to-close x 2.200$, SAP 77,01 + ARM 72,41 = 149,42$, per confrontabilita' con la serie; l'accessibile misurato dal dossier e' -3,25$ (SAP, negativo: al primo ciclo eleggibile avrebbe perso) e +132,54$ (ARM, il singolo candidato con piu' denaro potenzialmente sul tavolo dell'intera giornata). Faccia lato uscita: ASML a 10 sedute consecutive senza una riga (fonti_osservate_finestra vuoto su tutta la finestra a 10 sedute, la serie di silenzio e' piu' lunga del denominatore), a -6,93% dall'ingresso.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-03.md §1, §3, §5, §Segnalazioni"
+        },
+        {
+          "data": "2026-09-04",
+          "costo_usd": 562.24,
+          "nota": "54/96 simboli (56,3%) zero righe news_log il 09-04, secondo valore piu' alto della finestra osservata dal 07-31 (record 60 l'08-31). 6 miss NO_NEWS (include l'equivalenza TSLA di F-067, che ha 7 righe ma zero confermate ISSUER_SPECIFIC): TSLA, NFLX, BIDU, ARM, INFY, ORCL. Costo = lordo close-to-close x 2.200 $ per confrontabilita' con la serie: TSLA 130,26 + NFLX 117,62 + BIDU 89,54 + ARM 86,15 + INFY 70,97 + ORCL 67,70 = 562,24 $. Accessibile misurato dal dossier sui soli rialzisti non detenuti: BIDU +37,07 $, ARM -17,77 $ (negativo: il timing simulato al primo ciclo eleggibile avrebbe perso), ORCL +14,12 $. Faccia lato uscita: UNH cieca da 2 sedute consecutive, ritorno_da_ingresso -7,13%, nozionale 632,50 $ a rischio.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-04.md §1, §3, §5, §Segnalazioni"
         }
       ],
-      "costo_cumulato_usd": 3948.44,
+      "costo_cumulato_usd": 4510.68,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 3
@@ -534,12 +540,18 @@
           "costo_usd": null,
           "nota": "Nuova sorgente rispetto alle occorrenze precedenti (sempre legate al loss-feedback S1): 04:00:00 UTC, log worker, subito dopo 'Starting weekly weight computation (observational)...' segue 'TelegramNotifier: Failed to send alert: Client error 400 Bad Request'. Stesso sintomo (400 Bad Request su api.telegram.org/sendMessage) ma trigger diverso: non un evento di loss-feedback ma un task di calcolo pesi settimanale osservazionale. Amplia il quadro: la consegna Telegram fallisce su piu' di un tipo di messaggio, non solo sul trigger di soglia S1. Costo null: nessuna perdita diretta, rischio che un evento operativo non venga notato in tempo reale.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-17.md §3 (timeline 04:00)"
+        },
+        {
+          "data": "2026-09-04",
+          "costo_usd": null,
+          "nota": "3ª occorrenza, ma oggi il tasso di fallimento e' del 100% (3/3 tentativi), non un campione parziale come in occorrenze precedenti. Trigger: alert #161 posizioni non proteggibili (10/44 qty<1), 14:37:07-08 UTC, tutti e 3 i tentativi di sendMessage rispondono 400 Bad Request. Costo null: nessun trade impattato, e' un difetto di canale di alert.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-04.md §10 [DAY-003]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 3
+      "occorrenze_non_stimate": 4
     },
     {
       "id": "F-006",
@@ -710,12 +722,18 @@
           "costo_usd": null,
           "nota": "21a occorrenza. ingestion_stats_daily(2026-09-03,'alpaca_benzinga'): fetched=527, duplicates=2143 (4,07x fetched), updated_at 19:45:00. Stesso pattern di contatore non azzerato per sessione gia' documentato nelle occorrenze precedenti. Non influenza segnali/ordini (derivano da news_log, 126 righe persistite per la fonte, coerenti con queued=278 meno 123 not_tradable meno 27 stale). Costo null: contatore di telemetria, non impatta il trading.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-03.md §10 [DAY-003]"
+        },
+        {
+          "data": "2026-09-04",
+          "costo_usd": null,
+          "nota": "21ª occorrenza. alpaca_benzinga: fetched=601, duplicates=2155 (3,6x il fetched). Stesso pattern di accumulo cross-run non azzerato per sessione. Costo null: non tocca segnali/ordini (derivano da news_log).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-04.md §4 [DAY-004]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 20
+      "occorrenze_non_stimate": 21
     },
     {
       "id": "F-008",
@@ -904,9 +922,15 @@
           "costo_usd": 26.39,
           "nota": "Il gate 0,30 scarta segnali col segno corretto su quattro mover oggi: NOW (+0,121, scarto 0,179), SPCX (+0,18, scarto 0,12), ORCL (+0,10, scarto 0,20) e TSLA (score ensemble non-fallback 0,277, scarto 0,023 - il piu' stretto della serie dopo lo 0,019 di TSLA l'08-31, quarta occorrenza in quattro sedute dello schema 'segnale piu' informativo entro 0,04 dal gate': 0,019/0,029/0,040/0,023). Ma solo NOW ha accessible_opportunity_usd positiva (26,39$, dal dossier): SPCX (-32,90$), ORCL (-23,28$) e TSLA (-35,29$) avrebbero perso denaro anche disarmando il gate, perche' il movimento era gia' scontato al primo ciclo eleggibile. Costo registrato 26,39$ (solo NOW, unico caso con opportunita' reale). TSLA ha un secondo profilo distinto su F-056/F-060 (segnale sopra gate ma mai valutato dal ciclo): non sommare, sono facce alternative dello stesso ticker sullo stesso giorno.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-03.md §3, §7, §Segnalazioni"
+        },
+        {
+          "data": "2026-09-04",
+          "costo_usd": 358.35,
+          "nota": "3 nuovi mover con segnale sotto gate 0,30 ma segno corretto: ADBE -6,73% (fan-out -0,156, nessun canale own), MU +6,10% (own ISSUER_SPECIFIC +0,258, 0,042 sotto il gate, il margine piu' stretto della serie insieme a TSLA 08-31/NOW 09-01), TMUS -3,46% (fan-out -0,21, nessun canale own). Causa dossier: BELOW_GATE su tutti e tre. Costo stimato con size S4 tipica 2.200 $: 148,13 (ADBE) + 134,16 (MU) + 76,06 (TMUS) = 358,35 $.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-04.md §3, §8, §Segnalazioni"
         }
       ],
-      "costo_cumulato_usd": 1836.86,
+      "costo_cumulato_usd": 2195.21,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -1013,10 +1037,16 @@
           "costo_usd": null,
           "nota": "16a occorrenza, con il caso in cui il segnale prodotto dal retry a floor 0 ha DECISO UN ORDINE. Segnale 9614 NVDA delle 19:45:19: score +0,0280, confidence 0,20, model_id 'ensemble:glm-5.2:cloud+gpt-oss:20b-cloud', fallback_used=false, ensemble_std 0,141; le due righe llm_responses collegate sono glm 0,20@0,20 eligible=FALSE e gpt-oss 0,00@0,20 eligible=FALSE. Entrambi i modelli sotto il floor min_confidence=0,30, quindi l'aggregazione e' avvenuta col retry a floor 0 di #90, e la colonna eligible non registra l'eleggibilita' reale ma il fatto che il floor sia stato azzerato. 12 segnali della giornata su 90 non-fallback hanno la stessa firma (tutte le risposte eligible=false ma fallback_used=false). Sette minuti dopo, alle 19:52, quel segnale ha chiuso la posizione NVDA per below_entry_gate. Doppio effetto: (a) llm_responses.eligible non e' usabile per attribuire un segnale ai modelli che l'hanno prodotto; (b) un segnale su cui ENTRAMBI i modelli dichiarano confidence 0,20 entra nel percorso d'uscita con la stessa dignita' di uno a 0,80, perche' il lato uscita non applica alcun floor. Costo null: i 0,19 $ di drift_post_uscita sono gia' addebitati a F-008 dal report alpha della stessa giornata.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-02.md §10 DAY-007"
+        },
+        {
+          "data": "2026-09-04",
+          "costo_usd": null,
+          "nota": "6a occorrenza. 4 righe SKIP_FALLBACK nella giornata (WDC x2, TMUS, LLY), incluso WDC alle 16:52 con score +0,280 sopra gate ma escluso dal ranking BUY per single-model fallback (#108). WDC era anche mover della giornata (+5,86%). Costo non stimato in questa sessione (nessun ricalcolo manuale del controfattuale).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-04.md §10 [DAY-007]"
         }
       ],
       "costo_cumulato_usd": 54.48,
-      "occorrenze_non_stimate": 9,
+      "occorrenze_non_stimate": 10,
       "stato": "aperto",
       "issue": null
     },
@@ -1660,10 +1690,16 @@
           "costo_usd": null,
           "nota": "17a occorrenza. Sulle 7 righe trades della giornata con cost_usd popolato, slippage_est e' identico a cost_usd al centesimo su tutte (es. AVGO 975: 0,7679/0,7679; MSFT 976: 0,2793/0,2793; MU 552: 0,1776/0,1776). Nessun confronto prezzo-atteso/prezzo-fill nel sistema. Non un problema economico oggi: latenza submitted->filled sub-secondo su tutti gli ordini (verificato via /orders, es. QQQ 19:22:04.622->19:22:04.637, 15ms).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-03.md §10 [DAY-006]"
+        },
+        {
+          "data": "2026-09-04",
+          "costo_usd": null,
+          "nota": "18a occorrenza. trades id 980 (PLTR) e 422 (IWM): cost_usd e slippage_est identici alla fonte su entrambe le righe della giornata. Nessun confronto prezzo-atteso/prezzo-fill esiste realmente. Costo null: nessun impatto oggi (2 fill coerenti al centesimo con l'ordine broker), difetto strutturale della metrica.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-04.md §10 [DAY-006]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 17,
+      "occorrenze_non_stimate": 18,
       "stato": "aperto",
       "issue": null
     },
@@ -1759,10 +1795,16 @@
           "costo_usd": null,
           "nota": "Ricorrenza con volume misurato: 17.279 richieste GET api.telegram.org/bot<TOKEN>/getUpdates loggate a livello INFO da httpx in worker-inference nella sola giornata del 2026-08-04 (una ogni ~5 secondi), ciascuna con il bot token in chiaro nell'URL. Osservazione aggiuntiva: queste chiamate occupano l'unico ForkPoolWorker di un container a concurrency 1 dedicato all'isolamento dell'inferenza FinBERT/Ollama, e costituiscono il 33% delle righe di log di quel container.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-04.md section 16"
+        },
+        {
+          "data": "2026-09-04",
+          "costo_usd": null,
+          "nota": "Ricorrenza. Bot token Telegram (bot8611445937:AAH3...) esposto in chiaro nei log worker a livello INFO sui 3 tentativi di sendMessage falliti delle 14:37 UTC (vedi F-005 stessa occorrenza odierna). Costo null.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-04.md §10 [DAY-003]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -2081,10 +2123,16 @@
           "costo_usd": null,
           "nota": "4a occorrenza. Stop protettivi verificati via API /orders (limit=500, risale al 2026-07-16, sufficiente per ogni posizione tranne le 8 aperte il 07-10 - per queste ultime la copertura e' comunque confermata dove presente: BAC 96,1%, MS 98,3%, PBR 98,5%, UBS 99,5%). 10 simboli con qty<1 azione restano interamente scoperti (AMAT, AMD, ASML, CAT, DELL, LLY, MRVL, NOK, SPY, WDC), stesso insieme quasi identico alle occorrenze precedenti (08-25/09-02). Nozionale interamente scoperto ~3.663$ su book ~35.112$ (10,4%); includendo la copertura parziale delle posizioni con stop su qty intera < qty reale (es. QQQ, ingresso del 09-03, coperta solo al 51,4% - stop qty=1 vs posizione 1,944), lo scoperto totale sale a 8.024$ (22,9%). NOTA METODOLOGICA: prima stima con /orders?limit=100 aveva restituito 73,5% scoperto (35/45 posizioni) - risultato SCARTATO dopo aver verificato che il limite di paginazione tagliava fuori gli stop piu' vecchi (es. AAPL, stop 'sell 2' aperto dal 2026-07-22, fuori dalla finestra dei 100 ordini piu' recenti al momento della query). Snapshot del 2026-09-04 pomeriggio (post-redeploy), non un prelievo esatto delle 20:00 UTC del 09-03; per i simboli non tradati oggi qty e stato dello stop non sono cambiati dal 09-03, quindi il numero e' una proxy ragionevole ma non un valore esatto di fine seduta.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-03.md §10 [DAY-008]"
+        },
+        {
+          "data": "2026-09-04",
+          "costo_usd": null,
+          "nota": "5a occorrenza. Stesso identico insieme di 10 simboli (AMAT, AMD, ASML, CAT, DELL, LLY, MRVL, NOK, SPY, WDC) con qty<1 e zero ordini stop attivi, su un book di 43 posizioni (33 coperte). Nessuna nuova posizione frazionaria aperta oggi (zero BUY). Costo null: esposizione a rischio non protetta, nessun trigger di stop mancato osservato oggi.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-04.md §10 [DAY-005]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 4,
+      "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
     },
@@ -2752,10 +2800,16 @@
           "costo_usd": 1.34,
           "nota": "7a occorrenza, con la deroga #182(a) ancora non deployata a 9 giorni dalla concessione (2026-08-25). execution_decisions id 18535, 19:52:00 UTC: 'sentiment_reversal: score -0.357 < threshold -0.35' chiude trades id 552, MU, stop_strategy='S1', apertura 2026-07-28 (37 giorni di detenzione), realizzato +50,64$ interamente accreditato a S1 pur essendo una decisione S4 (_sentiment_reversal_sells, portfolio_scheduler.py:4844, nessun filtro di strategia). Costo attribuito sul controfattuale corto: drift_post_uscita = +1,34$ (dossier 2026-09-03, chiusure[].symbol='MU') - tenendo la posizione al prezzo di chiusura si sarebbe guadagnato 1,34$ in piu', quindi il costo della chiusura anticipata e' piccolo; la misattribuzione dell'intero realizzato (50,64$) alla sleeve sbagliata resta il problema principale, non costificabile oltre il controfattuale corto per coerenza con le occorrenze precedenti (08-31, 09-01, 09-02).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-03.md §10 [DAY-004]"
+        },
+        {
+          "data": "2026-09-04",
+          "costo_usd": null,
+          "nota": "8a occorrenza. _sentiment_reversal_sells chiude IWM (S1, apertura 2026-07-24, 42 giorni di detenzione) su un segnale sentiment_reversal di stile S4 (score -0,383 < soglia -0,35), execution_decisions id 19048, trades id 422, +$12,19 realizzato attribuito a S1 ma di origine S4. Deroga #182(a) concessa il 2026-08-25, ancora non deployata a 10 giorni di distanza (nessun commit di fix in git log --all). Costo diretto della chiusura anticipata non quantificato in questa sessione (drift_post_uscita non letto per questa riga); il costo persistente e' la misattribuzione dell'intero realizzato (+$12,19) alla sleeve sbagliata, che continua a contaminare il confronto S1 vs SPY della domanda di uscita 2 della carta.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-04.md §10 [DAY-002]"
         }
       ],
       "costo_cumulato_usd": 14.41,
-      "occorrenze_non_stimate": 4,
+      "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
     },
@@ -3090,12 +3144,18 @@
           "costo_usd": null,
           "nota": "10a occorrenza, verificata di nuovo il 2026-09-04 contro l'istanza live: curl -H 'Authorization: Bearer <token>' su /api/decisions -> 403 'Invalid or expired JWT token'; lo stesso token con 'X-API-Key: <token>' su /api/positions -> 200 OK con payload completo (45 posizioni, market_value totale coerente con risk_reports.total_exposure). Stessa causa isolata l'08-18 in src/api/auth.py. Costo null: bug di tooling forense, non del sistema di trading.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-03.md §10 [DAY-002]"
+        },
+        {
+          "data": "2026-09-04",
+          "costo_usd": null,
+          "nota": "11a occorrenza. curl -H Authorization: Bearer <token> su /decisions -> 403 Invalid or expired JWT token; stesso token con X-API-Key -> 200 OK. Causa isolata (require_api_key prova sempre il ramo JWT se Authorization e' presente). Costo null: impatto solo sul protocollo forense, zero rischio sistema.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-04.md §10 [DAY-008]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 10
+      "occorrenze_non_stimate": 11
     },
     {
       "id": "F-042",
@@ -3780,10 +3840,16 @@
           "costo_usd": null,
           "nota": "PRIMO AVVISTAMENTO. Un ciclo sentiment su 24 non e' partito: lo slot delle 17:30 UTC del 2026-09-02 non ha riga in ensemble_cycle_health (23 righe: 14:00..17:15 e 17:45..19:45), zero righe news_log fra 17:15 e 17:45, zero sentiment_signals. Che l'assenza significhi 'task non eseguito' e non 'eseguito a vuoto' e' dimostrato dal ciclo delle 15:30, che ha girato senza articoli e ha comunque scritto la sua riga (aggregate=0, durata 5,8 s). Il monitor ha visto il ritardo dopo 23,6 minuti (mobile_events 17:39:00.972471Z, details {\"age_seconds\": 1419}) ma la causa e' irrecuperabile per F-027. Effetto: 30 minuti consecutivi senza scoring in piena sessione. Nessun contatore di cicli attesi-vs-eseguiti esiste: il buco si trova solo incrociando tre tabelle. ID NUOVO GIUSTIFICATO: nessuno dei 64 finding esistenti riguarda un ciclo schedulato che non parte -- F-017 e' il regime detector che fallisce ma viene registrato come riuscito (task diverso, e li' il task GIRA), F-021 sono le finestre beat in UTC fissa (li' il ciclo non e' schedulato affatto, qui e' schedulato e non parte). Recidivita' non valutabile: ensemble_cycle_health esiste solo dal 2026-09-02 (#427/#463 deployata il 09-01).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-02.md §10 DAY-002"
+        },
+        {
+          "data": "2026-09-04",
+          "costo_usd": null,
+          "nota": "2a occorrenza, ma con una sfumatura che affina il finding invece di ripeterlo identico. Il ciclo sentiment delle 17:45 UTC e' assente da ensemble_cycle_health (23/24 righe attese), ma il log worker-inference mostra il task ricevuto e completato con successo in 0,46s: {'processed': 0, 'reason': 'no_items_in_queue'} -- coerente con un buco genuino in news_log fra le 17:15 e le 18:00 (nessun articolo pubblicato). A differenza del ciclo delle 15:30 del 09-02 (che scriveva comunque aggregate=0 a coda vuota), qui il ramo di uscita anticipata per coda vuota non scrive alcuna riga di telemetria. Effetto pratico: la stessa assenza di riga in ensemble_cycle_health puo' derivare sia da un ciclo che non e' partito (il caso originale del 09-02) sia da un ciclo perfettamente sano senza nulla da processare -- il metodo di rilevazione per assenza-di-riga usato per aprire questo finding non e' da solo sufficiente a distinguerli, serve incrociare i log Celery quando disponibili (non sempre lo sono, F-027). Costo null: e' una nota metodologica sullo strumento di misura, non un nuovo guasto osservato oggi.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-04.md §11"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 1,
+      "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
     },
@@ -3803,6 +3869,44 @@
       ],
       "costo_cumulato_usd": 10.54,
       "occorrenze_non_stimate": 0,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-067",
+      "titolo": "Headline inequivocabilmente ticker-specifiche non vengono mai promosse a relevance=ISSUER_SPECIFIC/subject_ticker confermato: caso TSLA 09-04, 7 articoli tutti TAG_UNCONFIRMED/fan-out",
+      "tipo": "difetto",
+      "confidenza": "congetturale",
+      "primo_avvistamento": "2026-09-04",
+      "occorrenze": [
+        {
+          "data": "2026-09-04",
+          "costo_usd": null,
+          "nota": "TSLA -5,92%, 7 articoli in news_log il giorno con il volume di copertura piu' alto fra i 9 miss candidati, ma zero con relevance=ISSUER_SPECIFIC o subject_ticker=TSLA: tutti e 7 marcati TAG_UNCONFIRMED/fan-out, incluse headline inequivocabili ('Tesla's Cybercab Storm Was More of a Drizzle', 'Musk Says Autonomy Is Flight's Next Step', 'Tesla Stock Down 29% from All-Time Highs...Sell the News' score -0,44). max_score_fanout -0,299 (segno corretto) ma mai promosso a canale own, quindi nessun segnale 'proprio' generabile ne' sopra ne' sotto gate. Il classificatore causale legacy del dossier non ha una casella per questo caso e lo marca NON_CLASSIFICATO. Nuovo id giustificato: non e' un riconteggio di F-020 (org_lookup attribuisce a un ticker SBAGLIATO per ambiguita' del nome societario; qui il ticker e' quello giusto e resta comunque non confermato) ne' di F-057 (resolver shadow su news_resolved_entities, pipeline diversa, shadow-only, non gating nulla dal vivo; qui il campo e' relevance/subject_ticker su sentiment_signals, che alimenta davvero il gate d'ingresso). Costo null: il dollaro equivalente (130,26 $, lordo close-to-close x 2.200 $) e' gia' contato nella somma di occorrenza di F-001 il 09-04, per non duplicare; l'affermazione qui e' strutturale sulla tassonomia/pipeline di rilevanza, non sul dato mancante.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-04.md §3, §8, §Segnalazioni"
+        }
+      ],
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-068",
+      "titolo": "s4_intent_events: INSERT fallito su tutti i cicli della giornata per colonna mancante (migrazione 060 mai applicata al DB live)",
+      "tipo": "difetto",
+      "confidenza": "misurata",
+      "primo_avvistamento": "2026-09-04",
+      "occorrenze": [
+        {
+          "data": "2026-09-04",
+          "costo_usd": null,
+          "nota": "PRIMO AVVISTAMENTO. Il commit 2c70e0f ('feat: persisti gli slot S4 bruciati', #429, merged 2026-09-02T14:10Z) ha aggiunto la migrazione 060_s4_burned_slot_metrics.sql (colonne held_at_rank, signal_age_at_slot su s4_intent_events) e il codice che le scrive in un unico INSERT a riga singola (src/store/pg_store.py:619-652). Il deploy di produzione delle 2026-09-03T22:20:01Z (41f09512->38cd921f, 33 commit) ha portato il codice in produzione, ma nessun passo del pipeline di deploy applica le migrazioni (grep -i migrat su logs/deploy_reconcile_2026-09-0{2,3,4}.log: zero righe): la migrazione 060 non e' mai stata eseguita sul DB live (verificato: SELECT column_name FROM information_schema.columns WHERE table_name='s4_intent_events' AND column_name IN ('held_at_rank','signal_age_at_slot') -> 0 righe, anche al 2026-09-07). Da quel deploy in poi ogni INSERT candidate/disposition fallisce per intero: 0 righe su 24/24 cicli il 2026-09-04 (contro 3.188 il 2026-09-03, ultimo giorno pulito). Log: '[2026-09-04 14:07:06,430: WARNING/ForkPoolWorker-4] #294: failed to write S4 candidate intent events: column \"held_at_rank\" of relation \"s4_intent_events\" does not exist', 48 occorrenze nella giornata (24 candidate + 24 disposition). Le tabelle a valle s4_lifecycle_events (6 righe il 09-04) e s4_exit_policy_events (13 righe) sono popolate da un percorso di scrittura indipendente e non ne risentono: il contratto di trial P0/P1/P2 (#293) non e' cieco sull'esito delle posizioni, ma ogni diagnostica di ranking/candidatura S4 (rank persistito F-052, missingness/beta F-064, earnings-day F-063, popolazione candidati F-051) e' irrecuperabile per l'intera giornata. Difetto silenzioso su ogni canale: solo un WARNING di log, nessuna riga mobile_events, nessun alert nel risk report. Nessun giorno di borsa e' seguito prima della scrittura di questo finding (09-05/09-06 weekend, 09-07 Labor Day) per confermare se il difetto persiste al prossimo giorno operativo (2026-09-08); la colonna manca ancora al momento della scrittura. ID NUOVO GIUSTIFICATO: nessuno dei 67 finding esistenti riguarda un fallimento totale di INSERT su s4_intent_events per schema drift -- F-044/F-045 sono fallimenti di query di lettura nel dossier (join ambiguo, confronto booleano sbagliato), F-052 e' un'incoerenza fra rank e score gia' scritti (qui non si scrive nulla), F-061 e' una riemissione duplicata (qui e' un'assenza totale). Costo null: e' un difetto di correttezza dello strumento di misura del ranking S4, non ha bloccato o alterato una singola decisione/ordine/fill reale. Passa il test di esenzione della carta: senza la correzione, ogni giornata da qui al prossimo giorno di borsa produce zero righe sul ledger di ranking S4.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-04.md §1, §3, §10 [DAY-001], §16"
+        }
+      ],
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
     }
