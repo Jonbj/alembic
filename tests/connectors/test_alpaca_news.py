@@ -1,11 +1,12 @@
 """Tests for AlpacaNewsConnector."""
-import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.connectors.alpaca_news import AlpacaNewsConnector, AlpacaNewsAuthError
-from src.models.news import NewsItem
+import pytest
 
+from src.connectors.alpaca_news import AlpacaNewsAuthError, AlpacaNewsConnector
+from src.models.news import NewsItem
+from src.text.sanitizer import sanitize_text
 
 # --- skeleton ---
 
@@ -17,6 +18,68 @@ def test_connector_instantiates():
 def test_raises_auth_error_class_exists():
     with pytest.raises(AlpacaNewsAuthError):
         raise AlpacaNewsAuthError("bad creds")
+
+
+def test_build_params_requests_full_content():
+    conn = AlpacaNewsConnector(api_key="key", api_secret="secret", symbols=["AAPL"])
+
+    assert conn._build_params()["include_content"] == "true"
+
+
+def test_parse_article_prefers_html_stripped_content():
+    conn = AlpacaNewsConnector(api_key="key", api_secret="secret", symbols=["AAPL"])
+    article = {
+        "id": 1,
+        "headline": "Apple raises guidance",
+        "summary": "Short teaser.",
+        "content": "<p>Apple raised guidance.</p><p>Revenue accelerated.</p>",
+        "url": "https://example.com/apple-guidance",
+        "created_at": "2026-09-01T10:00:00Z",
+        "symbols": ["AAPL"],
+    }
+
+    item = conn._parse_article(article)
+
+    assert item is not None
+    assert item.body == "Apple raised guidance. Revenue accelerated."
+
+
+def test_parse_article_falls_back_to_summary_when_content_is_empty():
+    conn = AlpacaNewsConnector(api_key="key", api_secret="secret", symbols=["AAPL"])
+    article = {
+        "id": 2,
+        "headline": "Apple raises guidance",
+        "summary": "Summary remains available.",
+        "content": "   ",
+        "url": "https://example.com/apple-summary",
+        "created_at": "2026-09-01T10:00:00Z",
+        "symbols": ["AAPL"],
+    }
+
+    item = conn._parse_article(article)
+
+    assert item is not None
+    assert item.body == "Summary remains available."
+
+
+def test_long_content_supplies_full_downstream_body_limit():
+    conn = AlpacaNewsConnector(api_key="key", api_secret="secret", symbols=["AAPL"])
+    article = {
+        "id": 3,
+        "headline": "Apple reports results",
+        "summary": "Short teaser.",
+        "content": f"<p>{'A' * 400}</p><p>{'B' * 400}</p>",
+        "url": "https://example.com/apple-results",
+        "created_at": "2026-09-01T10:00:00Z",
+        "symbols": ["AAPL"],
+    }
+
+    item = conn._parse_article(article)
+
+    assert item is not None
+    scored_body = sanitize_text(item.body)[:600]
+    assert len(scored_body) == 600
+    assert "<p>" not in scored_body
 
 
 # --- fetch_historical ---
@@ -43,7 +106,7 @@ _FAKE_RESPONSE = {
 
 @pytest.mark.asyncio
 async def test_fetch_historical_yields_news_items():
-    """Connector yields NewsItem with body=summary (Benzinga articles)."""
+    """Connector yields NewsItem with the full Benzinga article body."""
     mock_resp = AsyncMock()
     mock_resp.status = 200
     mock_resp.raise_for_status = MagicMock()
