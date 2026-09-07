@@ -33,3 +33,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_news_poc_samples_source_extid
 
 COMMENT ON TABLE news_poc_samples IS
     'Campioni PoC shadow di fonti news esterne (#458). Mai letta dal path live.';
+
+-- Ledger dei crediti consumati per giorno e fonte: il budget giornaliero
+-- (edge case 8 della issue) va fermato da noi, contando le richieste davvero
+-- fatte — non affidandosi al rate limit del provider, che potrebbe degradare
+-- in modi non documentati. Cumulativo sulle run della stessa giornata.
+CREATE TABLE IF NOT EXISTS news_poc_request_budget (
+    poc_source  TEXT NOT NULL,
+    day         DATE NOT NULL,
+    requests    INT NOT NULL DEFAULT 0,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (poc_source, day)
+);
+
+COMMENT ON TABLE news_poc_request_budget IS
+    'Contatore richieste/giorno per le PoC fonti news (#458) — enforcement del budget, mai letto dal path live.';

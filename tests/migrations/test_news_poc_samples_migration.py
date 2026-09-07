@@ -35,3 +35,17 @@ def test_migration_crea_tabella_idempotente() -> None:
 
     # Indice di lookup per cohorte PoC.
     assert "idx_news_poc_samples_source_symbol" in sql
+
+
+def test_migration_crea_ledger_budget_giornaliero() -> None:
+    """Edge case 8: il budget va fermato da noi, non dal rate limit del provider —
+    serve un ledger persistente delle richieste consumate per giorno."""
+    sql = MIGRATION.read_text()
+
+    assert "CREATE TABLE IF NOT EXISTS news_poc_request_budget" in sql
+    for column in ("poc_source", "day", "requests", "updated_at"):
+        assert column in sql, f"manca colonna {column}"
+    # una riga per (poc_source, giorno): il contatore e' cumulativo sulle run
+    assert "PRIMARY KEY (poc_source, day)" in sql
+    # idempotente come il resto della migration (coesistenza con PoC parallele)
+    assert "CREATE INDEX IF NOT EXISTS" in sql or sql.count("IF NOT EXISTS") >= 2
