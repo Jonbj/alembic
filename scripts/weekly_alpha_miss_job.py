@@ -19,7 +19,17 @@ SUCCESSFUL_GIT_STATUSES = {"pushed", "nothing_to_commit"}
 TARGET_RE = re.compile(r"\(target: (\d{4}-\d{2}-\d{2})\)")
 GIT_STATUS_RE = re.compile(r"^GIT_STATUS=(\S+)\s*$", re.MULTILINE)
 FINDING_RE = re.compile(r"\[(F-\d{3})\]")
-DISPOSITION_DECISIONS = {"create_issue", "comment_issue", "covered", "no_action", "defer"}
+PROVENANCE_RE = re.compile(
+    r"<!--\s*weekly-alpha-miss-provenance:\s*(\{.*?\})\s*-->",
+    re.DOTALL,
+)
+DISPOSITION_DECISIONS = {
+    "create_issue",
+    "comment_issue",
+    "covered",
+    "no_action",
+    "defer",
+}
 PUBLICATION_ACTIONS = {"create_issue", "comment_issue"}
 AUTOMATION_FORBIDDEN_LABELS = {
     "freeze-ok",
@@ -33,7 +43,12 @@ AUTOMATION_FORBIDDEN_LABELS = {
     "tier4",
     "tier5",
 }
-AUTOMATED_ISSUE_LABELS = {"alpha-miss", "weekly-findings", "wayfinder:task", "needs-triage"}
+AUTOMATED_ISSUE_LABELS = {
+    "alpha-miss",
+    "weekly-findings",
+    "wayfinder:task",
+    "needs-triage",
+}
 
 
 class PreflightError(RuntimeError):
@@ -72,7 +87,9 @@ def _calendar_from_alpaca(as_of: date) -> list[date]:
         paper=True,
     )
     rows = client.get_calendar(
-        GetCalendarRequest(start=as_of - timedelta(days=21), end=as_of - timedelta(days=1))
+        GetCalendarRequest(
+            start=as_of - timedelta(days=21), end=as_of - timedelta(days=1)
+        )
     )
     return sorted(row.date for row in rows)
 
@@ -83,6 +100,10 @@ def _latest_complete_week(calendar: Sequence[date], as_of: date) -> list[date]:
         raise PreflightError("il calendario non contiene sessioni concluse")
     latest = completed[-1]
     iso_year, iso_week, _ = latest.isocalendar()
+    if as_of.isocalendar()[:2] == (iso_year, iso_week):
+        raise PreflightError(
+            "settimana target non ancora conclusa; attendere la settimana ISO successiva"
+        )
     sessions = [
         session
         for session in completed
@@ -164,7 +185,23 @@ def _preflight(args: argparse.Namespace) -> int:
         if args.calendar_file
         else _calendar_from_alpaca(args.as_of)
     )
-    manifest = build_preflight_manifest(project_root, args.logs_dir, calendar, args.as_of)
+    manifest = build_preflight_manifest(
+        project_root, args.logs_dir, calendar, args.as_of
+    )
+    # Snapshot e prompt sono input dell'analisi tanto quanto report e dossier:
+    # congelarli qui permette di attribuire ogni conclusione alla versione letta.
+    json.loads(args.issues_snapshot.read_text(encoding="utf-8"))
+    manifest.update(
+        {
+            "job_version": 1,
+            "git_commit": args.git_commit,
+            "model": args.model,
+            "prompt": str(args.prompt.resolve()),
+            "prompt_sha256": _sha256(args.prompt),
+            "issues_snapshot": str(args.issues_snapshot.resolve()),
+            "issues_snapshot_sha256": _sha256(args.issues_snapshot),
+        }
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
@@ -174,11 +211,132 @@ def _preflight(args: argparse.Namespace) -> int:
     return 0
 
 
+def _week(args: argparse.Namespace) -> int:
+    calendar = (
+        _calendar_from_file(args.calendar_file)
+        if args.calendar_file
+        else _calendar_from_alpaca(args.as_of)
+    )
+    sessions = _latest_complete_week(calendar, args.as_of)
+    iso_year, iso_week, _ = sessions[-1].isocalendar()
+    print(f"{iso_year}-W{iso_week:02d}")
+    return 0
+
+
 def _load_json(path: Path) -> dict[str, object]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValidationError(f"{path} deve contenere un oggetto JSON")
     return payload
+
+
+def _validate_report_provenance(manifest: dict[str, object], report_text: str) -> None:
+    """Verify the machine-readable provenance copied from a production manifest."""
+    if manifest.get("job_version") is None:
+        # Compatibility for reports generated before the versioned weekly job.
+        return
+    match = PROVENANCE_RE.search(report_text)
+    if not match:
+        raise ValidationError("blocco di provenienza mancante nel report")
+    try:
+        provenance = json.loads(match.group(1))
+    except json.JSONDecodeError as exc:
+        raise ValidationError("blocco di provenienza JSON non valido") from exc
+    if not isinstance(provenance, dict):
+        raise ValidationError("blocco di provenienza non strutturato")
+
+    sessions = manifest.get("sessions")
+    if not isinstance(sessions, list) or not all(
+        isinstance(row, dict) for row in sessions
+    ):
+        raise ValidationError("sessioni non valide nel manifest")
+    expected = {
+        "job_version": manifest.get("job_version"),
+        "week": manifest.get("week"),
+        "git_commit": manifest.get("git_commit"),
+        "model": manifest.get("model"),
+        "prompt_sha256": manifest.get("prompt_sha256"),
+        "sessions": [row.get("session") for row in sessions],
+    }
+    mismatches = [
+        key for key, value in expected.items() if provenance.get(key) != value
+    ]
+    if mismatches:
+        raise ValidationError(
+            "provenienza del report non coincide col manifest: "
+            + ", ".join(sorted(mismatches))
+        )
+
+
+def _manifest_path(
+    project_root: Path,
+    raw_path: object,
+    *,
+    field: str,
+    allow_external: bool = False,
+) -> Path:
+    if not isinstance(raw_path, str):
+        raise ValidationError(f"{field} mancante nel manifest")
+    path = Path(raw_path)
+    resolved = path.resolve() if path.is_absolute() else (project_root / path).resolve()
+    if not allow_external and not resolved.is_relative_to(project_root):
+        raise ValidationError(f"{field} fuori dal progetto: {resolved}")
+    return resolved
+
+
+def _validate_manifest_inputs(project_root: Path, manifest: dict[str, object]) -> None:
+    """Re-hash every frozen input after the model session and before publication."""
+    sessions = manifest.get("sessions")
+    if not isinstance(sessions, list) or not all(
+        isinstance(row, dict) for row in sessions
+    ):
+        raise ValidationError("sessioni non valide nel manifest")
+
+    checks: list[tuple[str, Path, object]] = []
+    for row in sessions:
+        session = row.get("session", "UNKNOWN")
+        for path_key, hash_key, allow_external in (
+            ("report", "report_sha256", False),
+            ("dossier", "dossier_sha256", False),
+            ("log", "log_sha256", True),
+        ):
+            checks.append(
+                (
+                    f"{session}:{hash_key}",
+                    _manifest_path(
+                        project_root,
+                        row.get(path_key),
+                        field=f"{session}:{path_key}",
+                        allow_external=allow_external,
+                    ),
+                    row.get(hash_key),
+                )
+            )
+    for path_key, hash_key in (
+        ("prompt", "prompt_sha256"),
+        ("issues_snapshot", "issues_snapshot_sha256"),
+    ):
+        checks.append(
+            (
+                hash_key,
+                _manifest_path(project_root, manifest.get(path_key), field=path_key),
+                manifest.get(hash_key),
+            )
+        )
+
+    mismatches: list[str] = []
+    for label, path, expected in checks:
+        if (
+            not isinstance(expected, str)
+            or not path.is_file()
+            or _sha256(path) != expected
+        ):
+            mismatches.append(label)
+    if mismatches:
+        raise ValidationError(
+            "input modificati o non verificabili dopo il preflight: "
+            + ", ".join(sorted(mismatches))
+        )
 
 
 def _validate(args: argparse.Namespace) -> int:
@@ -192,6 +350,9 @@ def _validate(args: argparse.Namespace) -> int:
         raise ValidationError("schema_version non supportata")
     if manifest.get("week") != plan.get("week"):
         raise ValidationError("week del manifest e del piano non coincidono")
+    if manifest.get("job_version") is not None:
+        _validate_manifest_inputs(project_root, manifest)
+    _validate_report_provenance(manifest, report_text)
 
     source_findings: set[str] = set()
     for row in manifest.get("sessions", []):
@@ -200,7 +361,9 @@ def _validate(args: argparse.Namespace) -> int:
         source_path = (project_root / row["report"]).resolve()
         if not source_path.is_relative_to(project_root):
             raise ValidationError(f"report fuori dal progetto: {source_path}")
-        source_findings.update(FINDING_RE.findall(source_path.read_text(encoding="utf-8")))
+        source_findings.update(
+            FINDING_RE.findall(source_path.read_text(encoding="utf-8"))
+        )
 
     dispositions = plan.get("dispositions")
     if not isinstance(dispositions, list):
@@ -252,7 +415,9 @@ def _validate(args: argparse.Namespace) -> int:
         publication_id = publication.get("publication_id")
         action = publication.get("action")
         source_ids = publication.get("source_findings")
-        if not isinstance(publication_id, str) or not re.fullmatch(r"W-\d{3}", publication_id):
+        if not isinstance(publication_id, str) or not re.fullmatch(
+            r"W-\d{3}", publication_id
+        ):
             raise ValidationError("publication_id non valido")
         if publication_id in publications_by_id:
             raise ValidationError(f"publication_id duplicato: {publication_id}")
@@ -260,23 +425,39 @@ def _validate(args: argparse.Namespace) -> int:
             raise ValidationError(f"action non valida per {publication_id}: {action}")
         if not isinstance(source_ids, list) or not source_ids:
             raise ValidationError(f"source_findings mancante per {publication_id}")
-        if not all(isinstance(value, str) and value in source_findings for value in source_ids):
+        if not all(
+            isinstance(value, str) and value in source_findings for value in source_ids
+        ):
             raise ValidationError(f"source_findings non valido per {publication_id}")
-        if not isinstance(publication.get("body"), str) or not publication["body"].strip():
+        if (
+            not isinstance(publication.get("body"), str)
+            or not publication["body"].strip()
+        ):
             raise ValidationError(f"body mancante per {publication_id}")
         if action == "create_issue":
             labels = publication.get("labels")
-            if not isinstance(publication.get("title"), str) or not publication["title"].strip():
+            if (
+                not isinstance(publication.get("title"), str)
+                or not publication["title"].strip()
+            ):
                 raise ValidationError(f"title mancante per {publication_id}")
-            if not isinstance(labels, list) or not all(isinstance(label, str) for label in labels):
+            if not isinstance(labels, list) or not all(
+                isinstance(label, str) for label in labels
+            ):
                 raise ValidationError(f"labels non valide per {publication_id}")
-            forbidden = set(labels) & AUTOMATION_FORBIDDEN_LABELS
+            normalized_labels = {label.casefold() for label in labels}
+            forbidden = {
+                label
+                for label in labels
+                if label.casefold() in AUTOMATION_FORBIDDEN_LABELS
+                or label.casefold().startswith("tier")
+            }
             if forbidden:
                 raise ValidationError(
                     f"label riservate all'operatore per {publication_id}: "
                     + ", ".join(sorted(forbidden))
                 )
-            missing_labels = AUTOMATED_ISSUE_LABELS - set(labels)
+            missing_labels = AUTOMATED_ISSUE_LABELS - normalized_labels
             if missing_labels:
                 raise ValidationError(
                     f"label obbligatorie mancanti per {publication_id}: "
@@ -290,13 +471,33 @@ def _validate(args: argparse.Namespace) -> int:
         decision = disposition["decision"]
         publication_id = disposition.get("publication_id")
         if decision in PUBLICATION_ACTIONS:
-            if not isinstance(publication_id, str) or publication_id not in publications_by_id:
-                raise ValidationError(f"publication_id mancante o ignoto per {finding_id}")
+            if (
+                not isinstance(publication_id, str)
+                or publication_id not in publications_by_id
+            ):
+                raise ValidationError(
+                    f"publication_id mancante o ignoto per {finding_id}"
+                )
             publication = publications_by_id[publication_id]
-            if publication["action"] != decision or finding_id not in publication["source_findings"]:
+            if (
+                publication["action"] != decision
+                or finding_id not in publication["source_findings"]
+            ):
                 raise ValidationError(f"publication incoerente per {finding_id}")
         elif publication_id is not None:
             raise ValidationError(f"publication_id inatteso per {finding_id}")
+
+    for publication_id, publication in publications_by_id.items():
+        for finding_id in publication["source_findings"]:
+            disposition = dispositions_by_id[finding_id]
+            if (
+                disposition["decision"] != publication["action"]
+                or disposition.get("publication_id") != publication_id
+            ):
+                raise ValidationError(
+                    f"pubblicazione {publication_id} non collegata alla disposizione "
+                    f"di {finding_id}"
+                )
 
     token = {
         "schema_version": 1,
@@ -354,7 +555,9 @@ def _publish(args: argparse.Namespace) -> int:
             existing = json.loads(existing_raw or "[]")
             exact = [row for row in existing if marker in (row.get("body") or "")]
             if exact:
-                print(f"PUBLICATION_SKIPPED {publication_id} issue={exact[0]['number']}")
+                issue_number = exact[0]["number"]
+                _ensure_map_child(args.repo, args.map_issue, issue_number)
+                print(f"PUBLICATION_SKIPPED {publication_id} issue={issue_number}")
                 skipped += 1
                 continue
             body = f"Part of #{args.map_issue}.\n\n{marker}\n\n{publication['body']}"
@@ -374,16 +577,10 @@ def _publish(args: argparse.Namespace) -> int:
             try:
                 issue_number = int(issue_url.rstrip("/").rsplit("/", 1)[-1])
             except (IndexError, ValueError) as exc:
-                raise PublicationError(f"output inatteso da gh issue create: {issue_url}") from exc
-            issue_data = json.loads(_gh("api", f"repos/{args.repo}/issues/{issue_number}"))
-            _gh(
-                "api",
-                "--method",
-                "POST",
-                f"repos/{args.repo}/issues/{args.map_issue}/sub_issues",
-                "-F",
-                f"sub_issue_id={issue_data['id']}",
-            )
+                raise PublicationError(
+                    f"output inatteso da gh issue create: {issue_url}"
+                ) from exc
+            _ensure_map_child(args.repo, args.map_issue, issue_number)
             print(f"PUBLICATION_CREATED {publication_id} issue={issue_number}")
             created += 1
         else:
@@ -426,19 +623,106 @@ def _gh(*arguments: str) -> str:
         check=False,
     )
     if result.returncode != 0:
-        detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+        detail = (
+            result.stderr.strip()
+            or result.stdout.strip()
+            or f"exit {result.returncode}"
+        )
         raise PublicationError(f"gh {' '.join(arguments[:2])}: {detail}")
     return result.stdout
+
+
+def _ensure_map_child(repo: str, map_issue: int, issue_number: int) -> None:
+    """Attach a publication to the roadmap, including after a partial retry."""
+    child_numbers = _gh(
+        "api",
+        "--paginate",
+        f"repos/{repo}/issues/{map_issue}/sub_issues",
+        "--jq",
+        ".[].number",
+    )
+    if str(issue_number) in child_numbers.splitlines():
+        return
+    issue_data = json.loads(_gh("api", f"repos/{repo}/issues/{issue_number}"))
+    _gh(
+        "api",
+        "--method",
+        "POST",
+        f"repos/{repo}/issues/{map_issue}/sub_issues",
+        "-F",
+        f"sub_issue_id={issue_data['id']}",
+    )
+
+
+def _record_pilot(args: argparse.Namespace) -> int:
+    issue_raw = _gh(
+        "issue",
+        "view",
+        str(args.issue),
+        "--repo",
+        args.repo,
+        "--json",
+        "comments",
+    )
+    comments = json.loads(issue_raw).get("comments", [])
+    bodies = [row.get("body") or "" for row in comments]
+    marker = f"<!-- weekly-alpha-miss-pilot:{args.week} -->"
+    weeks = {
+        match
+        for body in bodies
+        for match in re.findall(r"weekly-alpha-miss-pilot:(\d{4}-W\d{2})", body)
+    }
+    if marker not in "\n".join(bodies):
+        _gh(
+            "issue",
+            "comment",
+            str(args.issue),
+            "--repo",
+            args.repo,
+            "--body",
+            (
+                f"{marker}\n\n"
+                f"Campione appaiato `{args.week}` prodotto.\n\n"
+                f"- PR: {args.pr_url}\n"
+                f"- Baseline: `{args.baseline_path}`\n"
+                f"- Value-first: `{args.challenger_path}`"
+            ),
+        )
+        weeks.add(args.week)
+    if len(weeks) >= 2:
+        _gh(
+            "issue",
+            "edit",
+            str(args.issue),
+            "--repo",
+            args.repo,
+            "--remove-label",
+            "waiting",
+            "--add-label",
+            "ready-for-agent",
+        )
+        print(f"PILOT_READY samples={len(weeks)} issue={args.issue}")
+    else:
+        print(f"PILOT_WAITING samples={len(weeks)} issue={args.issue}")
+    return 0
 
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
+    week = subparsers.add_parser("week")
+    week.add_argument("--calendar-file", type=Path)
+    week.add_argument("--as-of", type=date.fromisoformat, default=date.today())
+    week.set_defaults(handler=_week)
     preflight = subparsers.add_parser("preflight")
     preflight.add_argument("--project-root", type=Path, required=True)
     preflight.add_argument("--logs-dir", type=Path, required=True)
     preflight.add_argument("--calendar-file", type=Path)
     preflight.add_argument("--as-of", type=date.fromisoformat, default=date.today())
+    preflight.add_argument("--prompt", type=Path, required=True)
+    preflight.add_argument("--issues-snapshot", type=Path, required=True)
+    preflight.add_argument("--git-commit", required=True)
+    preflight.add_argument("--model", required=True)
     preflight.add_argument("--output", type=Path, required=True)
     preflight.set_defaults(handler=_preflight)
     validate = subparsers.add_parser("validate")
@@ -457,6 +741,14 @@ def _parser() -> argparse.ArgumentParser:
     publish.add_argument("--map-issue", type=int, default=21)
     publish.add_argument("--dry-run", action="store_true")
     publish.set_defaults(handler=_publish)
+    record_pilot = subparsers.add_parser("record-pilot")
+    record_pilot.add_argument("--repo", required=True)
+    record_pilot.add_argument("--issue", type=int, default=515)
+    record_pilot.add_argument("--week", required=True)
+    record_pilot.add_argument("--pr-url", required=True)
+    record_pilot.add_argument("--baseline-path", required=True)
+    record_pilot.add_argument("--challenger-path", required=True)
+    record_pilot.set_defaults(handler=_record_pilot)
     return parser
 
 
