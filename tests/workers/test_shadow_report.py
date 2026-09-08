@@ -2,7 +2,28 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from src.workers.performance import run_shadow_comparison_report
+
+
+@pytest.fixture(autouse=True)
+def _isola_report_shadow(tmp_path, monkeypatch):
+    """Nessun test di questo modulo scrive in `docs/evidence/`.
+
+    `run_shadow_comparison_report` scrive un vero
+    `STAGE2_MODEL_COMPARISON_<data>.md` in `docs/evidence/`, accanto agli
+    artefatti su cui si giudicano le strategie. Due test qui sotto arrivavano a
+    quella scrittura senza isolare la destinazione, quindi OGNI giro di suite
+    lasciava nel repo un file di evidenza generato da un test — indistinguibile,
+    per chi lo trova dopo, da uno prodotto dal job vero.
+
+    La fixture e' autouse di proposito: patchare la costante test per test e'
+    esattamente cio' che era gia' stato dimenticato due volte.
+    """
+    monkeypatch.setattr(
+        "src.workers.performance._SHADOW_REPORT_DIR", tmp_path / "evidence"
+    )
 
 
 def _run(started_at: str | None):
