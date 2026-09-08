@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import subprocess
 import time
 from datetime import datetime
@@ -31,7 +32,15 @@ log = logging.getLogger("review_notturna")
 
 LEDGER = Path("/home/stefano/llm/notte/ledger.jsonl")
 DIAGNOSI = Path("/home/stefano/llm/notte")
-UNIT = "llama-server.service"
+# Due profili della stessa build/modello, mai attivi insieme (stessa porta):
+# UNIT_GIORNO lascia margine GPU/CPU per uso interattivo della macchina,
+# UNIT_NOTTE sfrutta tutta la risorsa disponibile perche' nessuno la sta
+# usando. La scelta e' pilotata dalla unit systemd del timer notturno
+# (REVIEW_LOCALE_NOTTE=1 in review-notturna-locale.service), non dall'ora
+# corrente: un'invocazione manuale --pr di giorno o di notte resta sul
+# profilo conservativo.
+UNIT_GIORNO = "llama-server.service"
+UNIT_NOTTE = "llama-server-notte.service"
 BASE_URL = "http://127.0.0.1:8080"
 MODELLO = "qwen3.8-27b-local"
 MAX_TOKENS = 32_768
@@ -64,8 +73,17 @@ Questo commento non esprime nessun verdetto sul merge.
 # --- confini esterni ------------------------------------------------------
 
 
+def unit_da_avviare() -> str:
+    """Profilo da avviare: notte solo se lo dichiara l'ambiente del timer."""
+    return UNIT_NOTTE if os.environ.get("REVIEW_LOCALE_NOTTE") == "1" else UNIT_GIORNO
+
+
 def avvia_server() -> None:
-    subprocess.run(["systemctl", "--user", "start", UNIT], check=True)
+    unit = unit_da_avviare()
+    altra = UNIT_NOTTE if unit == UNIT_GIORNO else UNIT_GIORNO
+    # Le due unit condividono la porta 8080: non possono girare insieme.
+    subprocess.run(["systemctl", "--user", "stop", altra], check=False)
+    subprocess.run(["systemctl", "--user", "start", unit], check=True)
     for _ in range(60):
         try:
             if httpx.get(f"{BASE_URL}/health", timeout=5).json().get("status") == "ok":
@@ -77,7 +95,8 @@ def avvia_server() -> None:
 
 
 def ferma_server() -> None:
-    subprocess.run(["systemctl", "--user", "stop", UNIT], check=False)
+    subprocess.run(["systemctl", "--user", "stop", UNIT_GIORNO], check=False)
+    subprocess.run(["systemctl", "--user", "stop", UNIT_NOTTE], check=False)
 
 
 def _gh(*args: str) -> str:

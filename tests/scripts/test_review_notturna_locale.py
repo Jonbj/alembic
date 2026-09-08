@@ -186,3 +186,54 @@ def test_interroga_modello_propaga_errore_http(monkeypatch):
 
     with pytest.raises(httpx.HTTPStatusError):
         orch.interroga_modello("prompt qualunque")
+
+
+def test_unit_da_avviare_giorno_di_default(monkeypatch):
+    monkeypatch.delenv("REVIEW_LOCALE_NOTTE", raising=False)
+    assert orch.unit_da_avviare() == orch.UNIT_GIORNO
+
+
+def test_unit_da_avviare_notte_con_flag_ambiente(monkeypatch):
+    monkeypatch.setenv("REVIEW_LOCALE_NOTTE", "1")
+    assert orch.unit_da_avviare() == orch.UNIT_NOTTE
+
+
+def test_unit_da_avviare_ignora_valori_diversi_da_uno(monkeypatch):
+    monkeypatch.setenv("REVIEW_LOCALE_NOTTE", "0")
+    assert orch.unit_da_avviare() == orch.UNIT_GIORNO
+
+
+def test_avvia_server_ferma_l_altro_profilo_prima_di_avviare(monkeypatch):
+    comandi: list[list[str]] = []
+
+    def _run_finto(cmd, **kwargs):
+        comandi.append(cmd)
+
+        class _Esito:
+            returncode = 0
+
+        return _Esito()
+
+    monkeypatch.setenv("REVIEW_LOCALE_NOTTE", "1")
+    monkeypatch.setattr(orch.subprocess, "run", _run_finto)
+    monkeypatch.setattr(
+        orch.httpx, "get",
+        lambda *a, **k: type("R", (), {"json": lambda self: {"status": "ok"}})(),
+    )
+
+    orch.avvia_server()
+
+    assert comandi[0] == ["systemctl", "--user", "stop", orch.UNIT_GIORNO]
+    assert comandi[1] == ["systemctl", "--user", "start", orch.UNIT_NOTTE]
+
+
+def test_ferma_server_ferma_entrambi_i_profili(monkeypatch):
+    comandi: list[list[str]] = []
+    monkeypatch.setattr(orch.subprocess, "run", lambda cmd, **k: comandi.append(cmd))
+
+    orch.ferma_server()
+
+    assert comandi == [
+        ["systemctl", "--user", "stop", orch.UNIT_GIORNO],
+        ["systemctl", "--user", "stop", orch.UNIT_NOTTE],
+    ]
