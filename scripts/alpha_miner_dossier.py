@@ -2089,6 +2089,11 @@ def costruisci_dossier(
                     "(earnings_calendar_fetch_failed) o non interrogata; "
                     "OBSERVED altrimenti (#507 / F-063)"
                 ),
+                "simboli_flaggati": (
+                    "simboli watchlist con evento earnings datato la seduta; "
+                    "None quando la seduta e' UNKNOWN — non misurato, non zero "
+                    "(#507 step 5: la recall del residuo si conta a livello seduta)"
+                ),
                 "streak": (
                     "sedute consecutive, il giorno compreso, con status UNKNOWN; "
                     "None se il calendario di borsa non risponde (#324 fail-open). "
@@ -2240,7 +2245,8 @@ def _blocco_calendario_earnings(
     condizione a livello schema, con lo streak, cosi' il cron puo' allertare.
     Misura read-only: non entra in nessuna decisione di trading.
     """
-    cieca_oggi = _earnings_symbols_from_calendar(corporate_calendar) is None
+    simboli_flaggati = _earnings_symbols_from_calendar(corporate_calendar)
+    cieca_oggi = simboli_flaggati is None
     if corporate_calendar is None:
         missingness = ["earnings_calendar_not_fetched"]
         sources: list[str] = []
@@ -2257,6 +2263,12 @@ def _blocco_calendario_earnings(
         missingness, sources = [], []
     return {
         "status": "UNKNOWN" if cieca_oggi else "OBSERVED",
+        # #507 step 5: la recall del residuo si conta sulle coppie
+        # (simbolo, seduta) della ground truth, quindi l'insieme dei True
+        # dev'essere persistito a livello seduta — sugli intenti si vede solo
+        # i simboli che avevano un intento quel giorno. None quando cieco:
+        # non misurato, non zero (stesso contratto None/non-False di #335).
+        "simboli_flaggati": None if cieca_oggi else sorted(simboli_flaggati),
         "missingness": missingness,
         "sources_succeeded": sources,
         "streak_sedute_consecutive_unknown": _streak_calendario_earnings_sconosciuto(

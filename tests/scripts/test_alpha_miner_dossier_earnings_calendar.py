@@ -202,6 +202,49 @@ def test_blocco_calendario_earnings_osservato_con_fonte_fmp(tmp_path: Path):
     assert blocco["streak_sedute_consecutive_unknown"] == 0
 
 
+# --- simboli marcati, per la misura del residuo (#507 step 5) ----------------
+
+
+def test_blocco_persiste_i_simboli_flaggati_osservati(tmp_path: Path):
+    # step 5: la recall si conta sulle coppie (simbolo, seduta), quindi
+    # l'insieme dei True dev'essere osservabile a livello seduta, non solo
+    # sugli intenti (che coprono solo i simboli con un intento quel giorno)
+    cal = {
+        "events": [
+            {"symbol": "NVDA", "event_type": "earnings"},
+            {"symbol": "MSFT", "event_type": "dividend"},
+        ],
+        "sources_succeeded": ["FMP earnings-calendar"],
+        "complete": True,
+        "missingness": [],
+    }
+    blocco = dossier._blocco_calendario_earnings(
+        cal, sedute=["2026-08-26"], dossier_dir=tmp_path
+    )
+    assert blocco["simboli_flaggati"] == ["NVDA"]
+
+
+def test_blocco_simboli_flaggati_lista_vuota_se_osservato_senza_eventi(tmp_path: Path):
+    # fonte risponde, nessun earnings watchlist: e' False onesto, non UNKNOWN
+    blocco = dossier._blocco_calendario_earnings(
+        {"events": [], "sources_succeeded": ["FMP earnings-calendar"], "missingness": []},
+        sedute=["2026-09-02"],
+        dossier_dir=tmp_path,
+    )
+    assert blocco["simboli_flaggati"] == []
+
+
+def test_blocco_simboli_flaggati_none_se_unknown(tmp_path: Path):
+    blocco = dossier._blocco_calendario_earnings(
+        {"events": [], "missingness": ["earnings_calendar_no_credentials"]},
+        sedute=["2026-09-02"],
+        dossier_dir=tmp_path,
+    )
+    # None, non []: una seduta cieca non azzera i simboli marcati, li rende
+    # non misurati (stesso contratto None/non-False di #335)
+    assert blocco["simboli_flaggati"] is None
+
+
 def test_blocco_calendario_earnings_senza_fetch_remoto(tmp_path: Path):
     blocco = dossier._blocco_calendario_earnings(
         None, sedute=["2026-08-19"], dossier_dir=tmp_path
