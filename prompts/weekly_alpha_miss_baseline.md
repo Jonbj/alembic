@@ -53,11 +53,12 @@ Subito dopo il titolo inserisci inoltre un commento HTML su una sola riga,
 copiando i valori esatti dal manifest (senza abbreviare l'hash):
 
 ```text
-<!-- weekly-alpha-miss-provenance: {"job_version":1,"week":"2026-W36","git_commit":"...","model":"...","prompt_sha256":"...","sessions":["2026-08-31","2026-09-01"]} -->
+<!-- weekly-alpha-miss-provenance: {"job_version":1,"week":"2026-W36","git_commit":"...","model":"...","prompt_sha256":"...","artifacts":[{"session":"2026-08-31","report":"docs/ALPHA_MISS_REPORT_2026-08-31.md","report_sha256":"...","dossier":"docs/evidence/dossier/2026-08-31.json","dossier_sha256":"...","log":"/percorso/log","log_sha256":"..."}]} -->
 ```
 
-Il validatore confronta ogni campo e ogni sessione con il manifest: una
-provenienza assente o approssimata impedisce la pubblicazione.
+Inserisci in `artifacts` una voce completa per ogni sessione del manifest. Il
+validatore confronta ogni campo, path e hash: una provenienza assente,
+approssimata o incompleta impedisce la pubblicazione.
 
 Ogni affermazione materiale deve indicare file/sessione e valore osservato. Il
 report non deve dichiarare di coprire sessioni assenti dal manifest.

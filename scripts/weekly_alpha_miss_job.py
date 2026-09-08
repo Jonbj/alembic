@@ -7,12 +7,17 @@ import argparse
 from datetime import date, timedelta
 import hashlib
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
 import sys
-from typing import Sequence
+from typing import Any, Sequence, cast
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.config import config  # noqa: E402
 
 
 SUCCESSFUL_GIT_STATUSES = {"pushed", "nothing_to_commit"}
@@ -82,8 +87,8 @@ def _calendar_from_alpaca(as_of: date) -> list[date]:
     from alpaca.trading.requests import GetCalendarRequest
 
     client = TradingClient(
-        os.environ["ALPACA_API_KEY"],
-        os.environ["ALPACA_SECRET_KEY"],
+        config.ALPACA_API_KEY,
+        config.ALPACA_SECRET_KEY,
         paper=True,
     )
     rows = client.get_calendar(
@@ -91,19 +96,22 @@ def _calendar_from_alpaca(as_of: date) -> list[date]:
             start=as_of - timedelta(days=21), end=as_of - timedelta(days=1)
         )
     )
-    return sorted(row.date for row in rows)
+    return sorted(cast(Any, row).date for row in rows)
 
 
 def _latest_complete_week(calendar: Sequence[date], as_of: date) -> list[date]:
-    completed = [session for session in calendar if session < as_of]
+    as_of_week = as_of.isocalendar()[:2]
+    completed = [
+        session
+        for session in calendar
+        if session < as_of and session.isocalendar()[:2] != as_of_week
+    ]
     if not completed:
-        raise PreflightError("il calendario non contiene sessioni concluse")
-    latest = completed[-1]
-    iso_year, iso_week, _ = latest.isocalendar()
-    if as_of.isocalendar()[:2] == (iso_year, iso_week):
         raise PreflightError(
             "settimana target non ancora conclusa; attendere la settimana ISO successiva"
         )
+    latest = completed[-1]
+    iso_year, iso_week, _ = latest.isocalendar()
     sessions = [
         session
         for session in completed
@@ -132,6 +140,7 @@ def build_preflight_manifest(
     calendar: Sequence[date],
     as_of: date,
 ) -> dict[str, object]:
+    """Build a hash-pinned manifest for the latest completed market week."""
     sessions = _latest_complete_week(calendar, as_of)
     iso_year, iso_week, _ = sessions[-1].isocalendar()
     rows: list[dict[str, object]] = []
@@ -207,7 +216,8 @@ def _preflight(args: argparse.Namespace) -> int:
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    print(f"PREFLIGHT_OK week={manifest['week']} sessions={len(manifest['sessions'])}")
+    session_rows = cast(list[object], manifest["sessions"])
+    print(f"PREFLIGHT_OK week={manifest['week']} sessions={len(session_rows)}")
     return 0
 
 
@@ -256,7 +266,21 @@ def _validate_report_provenance(manifest: dict[str, object], report_text: str) -
         "git_commit": manifest.get("git_commit"),
         "model": manifest.get("model"),
         "prompt_sha256": manifest.get("prompt_sha256"),
-        "sessions": [row.get("session") for row in sessions],
+        "artifacts": [
+            {
+                key: row.get(key)
+                for key in (
+                    "session",
+                    "report",
+                    "report_sha256",
+                    "dossier",
+                    "dossier_sha256",
+                    "log",
+                    "log_sha256",
+                )
+            }
+            for row in sessions
+        ],
     }
     mismatches = [
         key for key, value in expected.items() if provenance.get(key) != value
@@ -355,7 +379,10 @@ def _validate(args: argparse.Namespace) -> int:
     _validate_report_provenance(manifest, report_text)
 
     source_findings: set[str] = set()
-    for row in manifest.get("sessions", []):
+    session_rows = manifest.get("sessions")
+    if not isinstance(session_rows, list):
+        raise ValidationError("sessions deve essere una lista")
+    for row in session_rows:
         if not isinstance(row, dict) or not isinstance(row.get("report"), str):
             raise ValidationError("sessione del manifest priva di report")
         source_path = (project_root / row["report"]).resolve()
@@ -479,16 +506,18 @@ def _validate(args: argparse.Namespace) -> int:
                     f"publication_id mancante o ignoto per {finding_id}"
                 )
             publication = publications_by_id[publication_id]
+            publication_sources = cast(list[str], publication["source_findings"])
             if (
                 publication["action"] != decision
-                or finding_id not in publication["source_findings"]
+                or finding_id not in publication_sources
             ):
                 raise ValidationError(f"publication incoerente per {finding_id}")
         elif publication_id is not None:
             raise ValidationError(f"publication_id inatteso per {finding_id}")
 
     for publication_id, publication in publications_by_id.items():
-        for finding_id in publication["source_findings"]:
+        publication_sources = cast(list[str], publication["source_findings"])
+        for finding_id in publication_sources:
             disposition = dispositions_by_id[finding_id]
             if (
                 disposition["decision"] != publication["action"]
@@ -526,7 +555,12 @@ def _publish(args: argparse.Namespace) -> int:
         )
 
     plan = _load_json(args.plan)
-    publications = plan.get("publications", [])
+    publications_raw = plan.get("publications")
+    if not isinstance(publications_raw, list) or not all(
+        isinstance(row, dict) for row in publications_raw
+    ):
+        raise PublicationError("piano validato privo di publications")
+    publications = cast(list[dict[str, Any]], publications_raw)
     if args.dry_run:
         print(f"PUBLICATION_DRY_RUN repo={args.repo} items={len(publications)}")
         return 0
@@ -753,6 +787,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run one deterministic weekly-alpha-miss CLI command."""
     args = _parser().parse_args(argv)
     try:
         return args.handler(args)

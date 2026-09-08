@@ -228,8 +228,8 @@ completi pubblica; le successive riconoscono la PR della settimana e riprendono
 in modo idempotente un'eventuale pubblicazione rimasta a metà:
 
 ```cron
-# Orari host Europe/Rome; lascia terminare il daily alpha-miss delle 10:00.
-30 11,13,15 * * 1 /home/stefano/Documents/Projects/Alembic/scripts/weekly_alpha_miss_analysis.sh --pilot
+# Orari host Europe/Rome; ritenta la stessa settimana conclusa fino al venerdì.
+30 11,13,15 * * 1-5 /home/stefano/Documents/Projects/Alembic/scripts/weekly_alpha_miss_analysis.sh --pilot
 ```
 
 Procedura di attivazione:
@@ -238,8 +238,8 @@ Procedura di attivazione:
    contenga lo script;
 2. disattivare il precedente scheduled task cloud del sabato (`c1814a643c32`),
    per evitare due publisher concorrenti;
-3. installare le tre righe logiche sopra nel crontab host (è una sola entry con
-   tre ore) e verificare con `crontab -l`;
+3. installare le quindici invocazioni logiche sopra nel crontab host (è una sola
+   entry con tre ore per cinque giorni) e verificare con `crontab -l`;
 4. per la prima settimana eseguire prima
    `scripts/weekly_alpha_miss_analysis.sh --pilot --dry-run-publication`, poi il
    comando normale; il dry-run non registra il campione su #515. Controllare

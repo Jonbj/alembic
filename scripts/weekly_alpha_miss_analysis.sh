@@ -73,6 +73,16 @@ WEEK=$("$JOB" week --as-of "$AS_OF" "${CALENDAR_ARGS[@]}") \
     || die "impossibile determinare la settimana dal calendario Alpaca"
 WT="$PROJECT_DIR/.worktrees/weekly-alpha-miss-${WEEK}"
 WT_BRANCH="weekly-alpha-miss/${WEEK}"
+YEAR="${WEEK%%-*}"
+WEEK_NUMBER="${WEEK##*-W}"
+ARTIFACT_DIR="$WT/docs/evidence/weekly-alpha-miss/${WEEK}"
+ISSUES_SNAPSHOT="$ARTIFACT_DIR/issues-snapshot.json"
+MANIFEST_FILE="$ARTIFACT_DIR/manifest.json"
+PLAN_FILE="$ARTIFACT_DIR/publication-plan.json"
+REPORT_FILE="$WT/docs/WEEKLY_FINDINGS_${YEAR}-${WEEK_NUMBER}.md"
+TOKEN_FILE="$LOG_DIR/weekly_alpha_miss_${WEEK}.token"
+BASELINE_TEMPLATE="$WT/prompts/weekly_alpha_miss_baseline.md"
+WT_JOB="$WT/scripts/weekly_alpha_miss_job.py"
 
 git -C "$PROJECT_DIR" fetch --quiet "$REMOTE" \
     "+${BASE_BRANCH}:refs/remotes/${REMOTE}/${BASE_BRANCH}" \
@@ -96,6 +106,7 @@ if [[ -n "$(git -C "$WT" status --porcelain)" ]]; then
     die "worktree ${WT} contiene un tentativo incompleto; conservarlo e ispezionarlo"
 fi
 RESUME_PR_URL=""
+RESUME_UNPUBLISHED_COMMIT=0
 existing_pr=$(gh pr list --repo "$REPO" --state all --head "$WT_BRANCH" \
     --json url,state,mergedAt \
     --jq '.[0] | [.url,.state,(.mergedAt // "")] | @tsv') \
@@ -112,38 +123,58 @@ else
             "refs/remotes/${REMOTE}/${BASE_BRANCH}...HEAD"
     ) || die "confronto del branch settimanale fallito"
     if (( ahead > 0 )); then
-        die "worktree ${WT} contiene ${ahead} commit non pubblicati; conservarlo e ispezionarlo"
-    fi
-    if (( behind > 0 )); then
+        (( ahead == 1 )) \
+            || die "worktree ${WT} contiene ${ahead} commit non pubblicati; serve ispezione"
+        expected_subject="evidence(alpha-miss): weekly findings ${WEEK}"
+        actual_subject=$(git -C "$WT" log -1 --format=%s)
+        [[ "$actual_subject" == "$expected_subject" ]] \
+            || die "commit non pubblicato inatteso in ${WT}: ${actual_subject}"
+        while IFS= read -r changed_path; do
+            case "$changed_path" in
+                "${ISSUES_SNAPSHOT#"$WT/"}"|"${MANIFEST_FILE#"$WT/"}"|\
+                "${PLAN_FILE#"$WT/"}"|"${REPORT_FILE#"$WT/"}"|\
+                "${ARTIFACT_DIR#"$WT/"}/value-first.md") ;;
+                *) die "commit settimanale contiene un path inatteso: ${changed_path}" ;;
+            esac
+        done < <(
+            git -C "$WT" diff --name-only \
+                "refs/remotes/${REMOTE}/${BASE_BRANCH}...HEAD"
+        )
+        RESUME_UNPUBLISHED_COMMIT=1
+        echo "RESUMING_UNPUBLISHED_COMMIT week=${WEEK}"
+    elif (( behind > 0 )); then
         git -C "$WT" merge --quiet --ff-only "refs/remotes/${REMOTE}/${BASE_BRANCH}" \
             || die "fast-forward del worktree fallito"
     fi
 fi
 
-YEAR="${WEEK%%-*}"
-WEEK_NUMBER="${WEEK##*-W}"
-ARTIFACT_DIR="$WT/docs/evidence/weekly-alpha-miss/${WEEK}"
-ISSUES_SNAPSHOT="$ARTIFACT_DIR/issues-snapshot.json"
-MANIFEST_FILE="$ARTIFACT_DIR/manifest.json"
-PLAN_FILE="$ARTIFACT_DIR/publication-plan.json"
-REPORT_FILE="$WT/docs/WEEKLY_FINDINGS_${YEAR}-${WEEK_NUMBER}.md"
-TOKEN_FILE="$LOG_DIR/weekly_alpha_miss_${WEEK}.token"
-BASELINE_TEMPLATE="$WT/prompts/weekly_alpha_miss_baseline.md"
-WT_JOB="$WT/scripts/weekly_alpha_miss_job.py"
-
 PUBLISH_ARGS=()
 (( DRY_RUN_PUBLICATION )) && PUBLISH_ARGS+=(--dry-run)
 
-if [[ -n "$RESUME_PR_URL" ]]; then
+create_weekly_pr() {
+    gh pr create --repo "$REPO" --base "$BASE_BRANCH" --head "$WT_BRANCH" \
+        --title "Weekly alpha-miss ${WEEK}" \
+        --body "Riepilogo settimanale completo e artefatti di provenienza.
+
+Part of #514."
+}
+
+if [[ -n "$RESUME_PR_URL" ]] || (( RESUME_UNPUBLISHED_COMMIT )); then
     [[ -s "$MANIFEST_FILE" && -s "$PLAN_FILE" && -s "$REPORT_FILE" ]] \
-        || die "PR esistente senza tutti gli artefatti validabili"
+        || die "tentativo persistito senza tutti gli artefatti validabili"
     "$WT_JOB" validate \
         --project-root "$WT" \
         --manifest "$MANIFEST_FILE" \
         --plan "$PLAN_FILE" \
         --report "$REPORT_FILE" \
         --token "$TOKEN_FILE" \
-        || die "gli artefatti della PR esistente non superano più la validazione"
+        || die "gli artefatti persistiti non superano più la validazione"
+    if (( RESUME_UNPUBLISHED_COMMIT )); then
+        git -C "$WT" push -u "$REMOTE" "$WT_BRANCH" \
+            || die "ripresa del push ${WT_BRANCH} fallita"
+        RESUME_PR_URL=$(create_weekly_pr) \
+            || die "ripresa apertura PR fallita; nessuna issue finding pubblicata"
+    fi
     "$WT_JOB" publish \
         --manifest "$MANIFEST_FILE" \
         --plan "$PLAN_FILE" \
@@ -177,7 +208,8 @@ gh issue list --repo "$REPO" --state all --limit 1000 \
     --json number,title,body,state,labels,comments > "$PREFLIGHT_SNAPSHOT" \
     || die "snapshot GitHub fallito"
 
-"$WT_JOB" preflight \
+set +e
+PREFLIGHT_OUTPUT=$("$WT_JOB" preflight \
     --project-root "$WT" \
     --logs-dir "$PROJECT_DIR/logs" \
     --as-of "$AS_OF" \
@@ -186,8 +218,12 @@ gh issue list --repo "$REPO" --state all --limit 1000 \
     --issues-snapshot "$PREFLIGHT_SNAPSHOT" \
     --git-commit "$(git -C "$WT" rev-parse HEAD)" \
     --model "$MODEL" \
-    --output "$PREFLIGHT_MANIFEST" \
-    || die "preflight incompleto: nessun report settimanale pubblicato"
+    --output "$PREFLIGHT_MANIFEST" 2>&1)
+PREFLIGHT_STATUS=$?
+set -e
+printf '%s\n' "$PREFLIGHT_OUTPUT"
+(( PREFLIGHT_STATUS == 0 )) \
+    || die "preflight incompleto: ${PREFLIGHT_OUTPUT}"
 
 mkdir -p "$ARTIFACT_DIR"
 cp "$PREFLIGHT_SNAPSHOT" "$ISSUES_SNAPSHOT"
@@ -281,9 +317,7 @@ git -C "$WT" commit -m "evidence(alpha-miss): weekly findings ${WEEK}" \
 git -C "$WT" push -u "$REMOTE" "$WT_BRANCH" \
     || die "push del branch ${WT_BRANCH} fallito"
 
-PR_URL=$(gh pr create --repo "$REPO" --base "$BASE_BRANCH" --head "$WT_BRANCH" \
-    --title "Weekly alpha-miss ${WEEK}" \
-    --body "Riepilogo settimanale completo e artefatti di provenienza.\n\nPart of #514.") \
+PR_URL=$(create_weekly_pr) \
     || die "apertura PR fallita; nessuna issue finding pubblicata"
 
 "$WT_JOB" publish \

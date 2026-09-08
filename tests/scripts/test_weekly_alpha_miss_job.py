@@ -137,7 +137,36 @@ def _valid_plan() -> dict[str, object]:
     }
 
 
-def test_preflight_materializza_tutte_le_sessioni_della_settimana(tmp_path: Path):
+def _provenance(manifest: dict[str, object]) -> dict[str, object]:
+    sessions = manifest["sessions"]
+    assert isinstance(sessions, list)
+    return {
+        "job_version": manifest["job_version"],
+        "week": manifest["week"],
+        "git_commit": manifest["git_commit"],
+        "model": manifest["model"],
+        "prompt_sha256": manifest["prompt_sha256"],
+        "artifacts": [
+            {
+                key: row[key]
+                for key in (
+                    "session",
+                    "report",
+                    "report_sha256",
+                    "dossier",
+                    "dossier_sha256",
+                    "log",
+                    "log_sha256",
+                )
+            }
+            for row in sessions
+        ],
+    }
+
+
+def test_preflight_materializza_tutte_le_sessioni_della_settimana(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "project"
     sessions = [
         "2026-08-31",
@@ -166,7 +195,9 @@ def test_preflight_materializza_tutte_le_sessioni_della_settimana(tmp_path: Path
     assert all(row["log_status"] == "pushed" for row in manifest["sessions"])
 
 
-def test_preflight_accetta_una_settimana_abbreviata_dal_calendario(tmp_path: Path):
+def test_preflight_accetta_una_settimana_abbreviata_dal_calendario(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "project"
     sessions = ["2026-06-29", "2026-06-30", "2026-07-01", "2026-07-02"]
     for session in sessions:
@@ -180,7 +211,9 @@ def test_preflight_accetta_una_settimana_abbreviata_dal_calendario(tmp_path: Pat
     assert [row["session"] for row in manifest["sessions"]] == sessions
 
 
-def test_preflight_mancante_fallisce_e_non_lascia_un_manifest_stale(tmp_path: Path):
+def test_preflight_mancante_fallisce_e_non_lascia_un_manifest_stale(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "project"
     sessions = ["2026-08-31", "2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"]
     for session in sessions:
@@ -195,7 +228,9 @@ def test_preflight_mancante_fallisce_e_non_lascia_un_manifest_stale(tmp_path: Pa
     assert not (project / "manifest.json").exists()
 
 
-def test_preflight_non_pubblica_la_settimana_iso_ancora_in_corso(tmp_path: Path):
+def test_preflight_non_pubblica_la_settimana_iso_ancora_in_corso(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "project"
     sessions = ["2026-08-31", "2026-09-01", "2026-09-02", "2026-09-03"]
     for session in sessions:
@@ -208,7 +243,35 @@ def test_preflight_non_pubblica_la_settimana_iso_ancora_in_corso(tmp_path: Path)
     assert not (project / "manifest.json").exists()
 
 
-def test_validate_rifiuta_un_finding_sorgente_senza_disposizione(tmp_path: Path):
+def test_preflight_continua_a_ritentare_la_settimana_precedente_il_martedi(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    target_sessions = [
+        "2026-08-31",
+        "2026-09-01",
+        "2026-09-02",
+        "2026-09-03",
+        "2026-09-04",
+    ]
+    for session in target_sessions:
+        _write_session(project, session)
+
+    result = _run_preflight(
+        project,
+        [*target_sessions, "2026-09-07"],
+        as_of="2026-09-08",
+    )
+
+    assert result.returncode == 0, result.stderr
+    manifest = json.loads((project / "manifest.json").read_text())
+    assert manifest["week"] == "2026-W36"
+    assert [row["session"] for row in manifest["sessions"]] == target_sessions
+
+
+def test_validate_rifiuta_un_finding_sorgente_senza_disposizione(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "project"
     (project / "docs").mkdir(parents=True)
     source = project / "docs" / "ALPHA_MISS_REPORT_2026-09-01.md"
@@ -242,7 +305,7 @@ def test_validate_rifiuta_un_finding_sorgente_senza_disposizione(tmp_path: Path)
     assert not (project / "publication.token").exists()
 
 
-def test_validate_vieta_al_job_di_auto_autorizzare_il_loop(tmp_path: Path):
+def test_validate_vieta_al_job_di_auto_autorizzare_il_loop(tmp_path: Path) -> None:
     project = tmp_path / "project"
     (project / "docs").mkdir(parents=True)
     source = project / "docs" / "ALPHA_MISS_REPORT_2026-09-01.md"
@@ -294,7 +357,7 @@ def test_validate_vieta_al_job_di_auto_autorizzare_il_loop(tmp_path: Path):
 
 def test_validate_rifiuta_una_pubblicazione_non_collegata_alla_disposizione(
     tmp_path: Path,
-):
+) -> None:
     project = tmp_path / "project"
     (project / "docs").mkdir(parents=True)
     source = project / "docs" / "ALPHA_MISS_REPORT_2026-09-01.md"
@@ -325,20 +388,14 @@ def test_validate_rifiuta_una_pubblicazione_non_collegata_alla_disposizione(
 
 def test_validate_richiede_provenienza_esatta_nel_report_prodotto_dal_job(
     tmp_path: Path,
-):
+) -> None:
     project = tmp_path / "project"
     _write_session(project, "2026-09-01")
     preflight = _run_preflight(project, ["2026-09-01"])
     assert preflight.returncode == 0, preflight.stderr
     manifest = json.loads((project / "manifest.json").read_text())
-    provenance = {
-        "job_version": 1,
-        "week": "2026-W36",
-        "git_commit": "abc123",
-        "model": "opus",
-        "prompt_sha256": "b" * 64,
-        "sessions": ["2026-09-01"],
-    }
+    provenance = _provenance(manifest)
+    provenance["prompt_sha256"] = "b" * 64
     report = (
         "# Weekly\n[F-001]\n"
         f"<!-- weekly-alpha-miss-provenance: {json.dumps(provenance)} -->\n"
@@ -354,7 +411,28 @@ def test_validate_richiede_provenienza_esatta_nel_report_prodotto_dal_job(
     assert not (project / "publication.token").exists()
 
 
-def test_validate_rifiuta_una_fonte_modificata_dopo_il_preflight(tmp_path: Path):
+def test_validate_accetta_provenienza_e_fonti_intatte(tmp_path: Path) -> None:
+    project = tmp_path / "project"
+    _write_session(project, "2026-09-01")
+    preflight = _run_preflight(project, ["2026-09-01"])
+    assert preflight.returncode == 0, preflight.stderr
+    manifest = json.loads((project / "manifest.json").read_text())
+    report = (
+        "# Weekly\n[F-001]\n"
+        f"<!-- weekly-alpha-miss-provenance: {json.dumps(_provenance(manifest))} -->\n"
+    )
+
+    result = _run_validate(
+        project, manifest=manifest, plan=_valid_plan(), report=report
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (project / "publication.token").is_file()
+
+
+def test_validate_rifiuta_una_fonte_modificata_dopo_il_preflight(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "project"
     sessions = [
         "2026-08-31",
@@ -368,14 +446,7 @@ def test_validate_rifiuta_una_fonte_modificata_dopo_il_preflight(tmp_path: Path)
     preflight = _run_preflight(project, sessions)
     assert preflight.returncode == 0, preflight.stderr
     manifest = json.loads((project / "manifest.json").read_text())
-    provenance = {
-        "job_version": manifest["job_version"],
-        "week": manifest["week"],
-        "git_commit": manifest["git_commit"],
-        "model": manifest["model"],
-        "prompt_sha256": manifest["prompt_sha256"],
-        "sessions": sessions,
-    }
+    provenance = _provenance(manifest)
     (project / "docs" / "evidence" / "dossier" / "2026-09-04.json").write_text(
         '{"tampered": true}\n'
     )
@@ -393,7 +464,9 @@ def test_validate_rifiuta_una_fonte_modificata_dopo_il_preflight(tmp_path: Path)
     assert not (project / "publication.token").exists()
 
 
-def test_publish_rifiuta_un_piano_modificato_dopo_la_validazione(tmp_path: Path):
+def test_publish_rifiuta_un_piano_modificato_dopo_la_validazione(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "project"
     (project / "docs").mkdir(parents=True)
     source = project / "docs" / "ALPHA_MISS_REPORT_2026-09-01.md"
@@ -451,7 +524,9 @@ def test_publish_rifiuta_un_piano_modificato_dopo_la_validazione(tmp_path: Path)
     assert not capture.exists()
 
 
-def test_publish_crea_issue_idempotente_e_la_collega_come_child(tmp_path: Path):
+def test_publish_crea_issue_idempotente_e_la_collega_come_child(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "project"
     (project / "docs").mkdir(parents=True)
     source = project / "docs" / "ALPHA_MISS_REPORT_2026-09-01.md"
@@ -522,7 +597,9 @@ def test_publish_crea_issue_idempotente_e_la_collega_come_child(tmp_path: Path):
     assert "issues/21/sub_issues" in calls
 
 
-def test_publish_retry_collega_alla_roadmap_una_issue_gia_creata(tmp_path: Path):
+def test_publish_retry_collega_alla_roadmap_una_issue_gia_creata(
+    tmp_path: Path,
+) -> None:
     project = tmp_path / "project"
     (project / "docs").mkdir(parents=True)
     source = project / "docs" / "ALPHA_MISS_REPORT_2026-09-01.md"
@@ -589,7 +666,7 @@ def test_publish_retry_collega_alla_roadmap_una_issue_gia_creata(tmp_path: Path)
     assert "issues/21/sub_issues" in calls
 
 
-def test_orchestrator_impone_draft_validate_pr_prima_di_publish():
+def test_orchestrator_impone_draft_validate_pr_prima_di_publish() -> None:
     source = ORCHESTRATOR.read_text()
 
     assert "--restricted" in source
@@ -598,17 +675,23 @@ def test_orchestrator_impone_draft_validate_pr_prima_di_publish():
     assert "Write($REPORT_FILE),Write($PLAN_FILE)" in source
     assert "Write($CHALLENGER_FILE)" in source
     assert "__BASELINE_FILE__" in source
-    assert source.index('"$WT_JOB" validate') < source.index("gh pr create")
-    assert source.index("gh pr create") < source.rindex('"$WT_JOB" publish')
+    first_validation = source.index('"$WT_JOB" validate')
+    assert first_validation < source.index("RESUME_PR_URL=$(create_weekly_pr)")
+    final_validation = source.rindex('"$WT_JOB" validate')
+    final_pr = source.rindex("PR_URL=$(create_weekly_pr)")
+    assert final_validation < final_pr < source.rindex('"$WT_JOB" publish')
     assert "reset --quiet --hard" not in source
     assert source.index("PREFLIGHT_SNAPSHOT=") < source.index(
         'mkdir -p "$ARTIFACT_DIR"'
     )
     assert "RESUME_PR_URL" in source
     assert "RESUMING_PUBLICATION" in source
+    assert "RESUMING_UNPUBLISHED_COMMIT" in source
+    assert "PREFLIGHT_OUTPUT" in source
+    assert "1-5" in (ROOT / "docs" / "operations.md").read_text()
 
 
-def test_secondo_campione_risveglia_la_issue_pilot(tmp_path: Path):
+def test_secondo_campione_risveglia_la_issue_pilot(tmp_path: Path) -> None:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     capture = tmp_path / "gh.log"
