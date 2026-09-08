@@ -14,6 +14,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 import scripts.measure_earnings_calendar_coverage as mec
 
 
@@ -133,6 +135,22 @@ def test_recall_gt1_sopra_la_soglia_è_adeguata(tmp_path):
     assert evidenza["gt1"]["recall"] == 0.6
 
 
+def test_gt1_rifiuta_coppie_seduta_simbolo_duplicate(tmp_path):
+    sedute = _sedute(20)
+    payloads = {s: _dossier_osservato(s, ["DELL", "ORCL"]) for s in sedute}
+    gt1 = [
+        {"seduta": sedute[0], "simbolo": "DELL", "citazione": "prima citazione"},
+        {"seduta": sedute[0], "simbolo": "DELL", "citazione": "duplicato marcato"},
+        {"seduta": sedute[1], "simbolo": "ORCL", "citazione": "r"},
+        {"seduta": sedute[2], "simbolo": "ADBE", "citazione": "r"},
+        {"seduta": sedute[3], "simbolo": "CRM", "citazione": "r"},
+        {"seduta": sedute[4], "simbolo": "MSFT", "citazione": "r"},
+    ]
+
+    with pytest.raises(SystemExit, match="coppia duplicata.*2026-09-08.*DELL"):
+        _run(tmp_path, payloads, gt1)
+
+
 def test_finestra_incompleta_è_insufficient_n(tmp_path):
     sedute = _sedute(15)
     payloads = {s: _dossier_osservato(s) for s in sedute}
@@ -216,6 +234,27 @@ def test_gt2_letta_da_fmp_e_filtrata_sulla_watchlist(tmp_path):
     assert evidenza["gt2"]["recall"] == 0.5
     # il lag di ingestione va riportato: ultima data vista nei record letti
     assert evidenza["gt2"]["ultimo_record_disponibile"] == sedute[1]
+
+
+def test_gt2_distingue_fetch_non_misurato_da_risposta_vuota(tmp_path):
+    sedute = _sedute(20)
+    payloads = {s: _dossier_osservato(s, ["ORCL"]) for s in sedute}
+    gt1 = [
+        {"seduta": sedute[0], "simbolo": "ORCL", "citazione": "r"},
+        {"seduta": sedute[1], "simbolo": "ADBE", "citazione": "r"},
+        {"seduta": sedute[2], "simbolo": "CRM", "citazione": "r"},
+        {"seduta": sedute[3], "simbolo": "MSFT", "citazione": "r"},
+        {"seduta": sedute[4], "simbolo": "NVDA", "citazione": "r"},
+    ]
+    righe_fmp = {
+        sedute[0]: None,  # payload malformato: verità non misurata
+        sedute[1]: [],    # risposta genuinamente vuota: zero eventi
+    }
+
+    evidenza, _ = _run(tmp_path, payloads, gt1, righe_fmp=righe_fmp)
+
+    assert evidenza["gt2"]["verita_per_seduta"][sedute[0]] is None
+    assert evidenza["gt2"]["verita_per_seduta"][sedute[1]] == []
 
 
 def test_fallback_intenti_quando_manca_il_campo_simboli_flaggati(tmp_path):

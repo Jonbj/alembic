@@ -107,12 +107,20 @@ def _leggi_gt1(percorso: Path) -> list[dict]:
     eventi = json.loads(percorso.read_text())
     if not isinstance(eventi, list):
         raise SystemExit(f"GT-1 malformata in {percorso}: attesa una lista di eventi")
+    coppie_viste: set[tuple[str, str]] = set()
     for evento in eventi:
         if not {"seduta", "simbolo", "citazione"} <= set(evento):
             raise SystemExit(
                 f"GT-1 malformata in {percorso}: ogni evento vuole "
                 f"seduta, simbolo e citazione — ricevuto {sorted(evento)}"
             )
+        coppia = (str(evento["seduta"]), str(evento["simbolo"]).upper())
+        if coppia in coppie_viste:
+            raise SystemExit(
+                f"GT-1 malformata in {percorso}: coppia duplicata "
+                f"(seduta={coppia[0]}, simbolo={coppia[1]})"
+            )
+        coppie_viste.add(coppia)
     return eventi
 
 
@@ -269,7 +277,10 @@ def main() -> int:
             n_gt2_flaggati += marcabile
             tabella_gt2.append({"seduta": seduta, "simbolo": simbolo, "flaggato": marcabile})
     esito["gt2"] = {
-        "verita_per_seduta": {s: sorted(v) if v else [] for s, v in verita_fmp.items()},
+        "verita_per_seduta": {
+            seduta: sorted(simboli) if simboli is not None else None
+            for seduta, simboli in verita_fmp.items()
+        },
         "n_eventi": len(tabella_gt2),
         "n_flaggati": n_gt2_flaggati,
         "recall": (n_gt2_flaggati / len(tabella_gt2)) if tabella_gt2 else None,
