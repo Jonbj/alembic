@@ -85,8 +85,18 @@ cd "$PROJECT_DIR"
 # working tree e' condivisa e un `git checkout` altrui riporta il ledger alla versione
 # del branch di turno. Il forense lo AGGIORNA, quindi partire da una copia riportata
 # indietro significa ripartire da un prossimo_id gia' consumato su main. E' un'unione,
-# non una sostituzione, ed e' fail-open: al massimo si lavora sulla copia vecchia.
-"$PROJECT_DIR/scripts/refresh_evidence_ledger.sh" docs/evidence/findings.json || true
+# non una sostituzione — ma un ledger ROTTO non e' una copia vecchia (#510): il
+# riallineamento ora esce non-zero e il cron abortisce con alert, invece di
+# aggiornare un file che non si puo' nemmeno leggere.
+set +e
+"$PROJECT_DIR/scripts/refresh_evidence_ledger.sh" docs/evidence/findings.json
+REFRESH_STATUS=$?
+set -e
+if (( REFRESH_STATUS != 0 )); then
+    echo "FAILED: riallineamento del ledger terminato con codice ${REFRESH_STATUS} — run annullato"
+    tg_send "🚨 Analisi forense ${DATE_TARGET} annullata: il ledger di evidenza su disco non e' riallineabile a main (codice ${REFRESH_STATUS}) — serve un intervento manuale, vedi <code>${LOG_FILE}</code>." "" || true
+    exit "$REFRESH_STATUS"
+fi
 
 # The heredoc uses single-quoted delimiter so no shell expansion occurs inside.
 # Placeholders __ALEMBIC_API_KEY__, __DATE_TARGET__, __REPORT_FILE__ are replaced

@@ -30,6 +30,12 @@ def _run_with_failing_claude(tmp_path: Path, script_name: str) -> tuple[subproce
     bin_dir.mkdir()
     (project / "docs" / "evidence" / "dossier").mkdir(parents=True)
     shutil.copy2(ROOT / "scripts" / script_name, scripts_dir / script_name)
+    # Il cron chiama il riallineamento del ledger (#510) senza piu' ingoiarne
+    # l'esito: lo script fratello va portato nella tree di test, come nel repo.
+    shutil.copy2(
+        ROOT / "scripts" / "refresh_evidence_ledger.sh",
+        scripts_dir / "refresh_evidence_ledger.sh",
+    )
 
     _write_executable(
         bin_dir / "claude",

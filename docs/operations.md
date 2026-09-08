@@ -249,8 +249,9 @@ La stessa directory condivisa rende i ledger su disco vecchi al primo `git check
 dossier (mediane a 20 giorni) e lo scoreboard economico (giorni osservati) li leggono da lì. Perciò il
 cron chiama `scripts/refresh_evidence_ledger.sh` **prima** di generare il dossier: riallinea
 `findings.json` e `market_daily.jsonl` a `origin/main` per **unione** — quello che è su disco e non
-ancora su `main` resta — ed è fail-open, se non riesce lo dice e l'analisi prosegue sulla copia
-vecchia. In fase di commit i due ledger sono fusi sopra `main` allo stesso modo
+ancora su `main` resta. Se il ledger non è leggibile o non si può fondere, il riallineamento è
+fail-closed: il cron invia un alert e si interrompe prima dell'analisi. In fase di commit i due ledger
+sono fusi sopra `main` allo stesso modo
 (`merge_evidence_findings.py` per occorrenza, `merge_evidence_jsonl.py` per giorno): lì invece è
 fail-closed, un conflitto annulla il commit invece di scegliere una versione.
 

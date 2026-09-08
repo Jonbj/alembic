@@ -148,8 +148,11 @@ sync_worktree() {
 # Copia i file dalla tree principale nella worktree e li mette in staging.
 # I due ledger append-only non vengono mai sovrascritti ma fusi sopra main: il
 # cron puo' partire da uno snapshot vecchio, e cio' che e' gia' pubblicato non
-# deve sparire. Restituisce 1 per qualunque regressione append-only, 2 per un
-# errore operativo.
+# deve sparire. Tutto cio' che finisce in staging viene anche validato (#510):
+# finora il ramo `else` copiava verbatim, quindi un dossier con marcatori di
+# stash pop non risolti sarebbe arrivato su main byte per byte. Restituisce 1
+# per qualunque regressione append-only o file rifiutato dalla validazione,
+# 2 per un errore operativo.
 stage_paths() {
     local rel src dest deleted
     local staged=0
@@ -158,6 +161,12 @@ stage_paths() {
         if [[ ! -f "$src" ]]; then
             log "salto $rel: non esiste su disco"
             continue
+        fi
+        # Marcatori di merge/stash pop non risolti: il file e' in conflitto,
+        # non e' evidenza. Vale per ogni classe di file, .md e .json inclusi.
+        if grep -Eq '^(<<<<<<< |=======$|>>>>>>> )' "$src"; then
+            log "RIFIUTO: $rel contiene marcatori di conflitto non risolti."
+            return 1
         fi
         dest="$WORKTREE/$rel"
         mkdir -p "$(dirname "$dest")"
@@ -171,6 +180,15 @@ stage_paths() {
                 log "RIFIUTO: impossibile fondere $rel senza perdere evidenza."
                 return 1
             fi
+        elif [[ "$rel" == *.json ]]; then
+            # I due ledger sopra si rifiutano da soli (il merger parsifica); i
+            # dossier e gli scoreboard passano di qui e prima d'ora nessuno li
+            # controllava prima di committarli.
+            if ! python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$src"; then
+                log "RIFIUTO: $rel non e' JSON valido."
+                return 1
+            fi
+            cp "$src" "$dest" || return 2
         else
             cp "$src" "$dest" || return 2
         fi
@@ -215,7 +233,7 @@ for attempt in 1 2; do
     stage_status=$?
     if (( stage_status == 1 )); then
         write_pending
-        finish not_committed "commit annullato: ledger append-only in regressione o conflitto"
+        finish not_committed "commit annullato: ledger in regressione, conflitto o file rifiutato dalla validazione"
     elif (( stage_status == 2 )); then
         write_pending
         finish not_committed "errore nello staging dei file"
