@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 69,
+  "prossimo_id": 71,
   "findings": [
     {
       "id": "F-001",
@@ -406,12 +406,18 @@
           "costo_usd": null,
           "nota": "19a occorrenza, con la misura piu' grande finora del fattore d'errore. La vista portfolio_daily_state calcola `sum(net_pnl)/NULLIF(sum(entry_notional),0)` sui soli trade CHIUSI del giorno: il 2026-09-01 da' daily_return = -0,02896 (-2,90%) su net_pnl -136,75 e 6 trade, cioe' un denominatore di 4.720 $. Il NAV reale e' passato da 109.830,84 a 109.705,65 = -0,114%. Fattore di sovrastima 25,4x. E' la serie da cui si deriva il drawdown per sleeve: qualunque soglia calibrata su questi numeri scatta a un livello sbagliato, e l'assurdita' cresce quanto meno si e' tradato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-01.md §8 §10 [DAY-014]"
+        },
+        {
+          "data": "2026-09-07",
+          "costo_usd": null,
+          "nota": "[DAY-006] risk_reports.combined_drawdown vale 0.012429 identico alla sesta cifra su tutti e 7 i report dal 09-01 al 09-07 (id 81-87) mentre il NAV oscilla di ~400$; nello stesso periodo portfolio_monitor_snapshots.current_drawdown vale 0.005760. Non e' rumore: e' un valore che non viene ricalcolato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-07.md sez. 10 [DAY-006]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": "#349",
-      "occorrenze_non_stimate": 19
+      "occorrenze_non_stimate": 20
     },
     {
       "id": "F-004",
@@ -509,12 +515,18 @@
           "costo_usd": null,
           "nota": "15a occorrenza, con l'evidenza testuale completa sopravvissuta al redeploy. Log worker 2026-09-02 21:00:00,032-060Z: 'DECAY CRITICAL [S1]: IC dropped 187% from 0.035 to -0.031' / '[S2]: 173% from 0.042 to -0.031' / '[S4]: 209% from 0.028 to -0.031' e 'Hit rate dropped 27.1pp from 54.0% to 26.9%' / '29.1pp from 56.0% to 26.9%' / '25.1pp from 52.0% to 26.9%'. Il valore ATTUALE e' identico sulle tre sleeve (-0,031 di IC, 26,9% di hit rate): a variare e' solo la baseline. E' una sola metrica di pipeline confrontata con tre riferimenti, e uno dei tre e' S2, che non compare fra le strategies_run della giornata (['S1','S4'] su tutti e 24 i cicli) e non e' mai stata tradata. Con S1 e S4 che oggi hanno realizzato segno opposto, un decay identico su entrambe non puo' essere informativo. Costo null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-02.md §10 DAY-015"
+        },
+        {
+          "data": "2026-09-07",
+          "costo_usd": null,
+          "nota": "[DAY-005] Decay monitor delle 21:00Z su giornata senza seduta: 6 CRITICAL con valore 'corrente' identico per S1/S2/S4 (IC -0,049, hit rate 28,9%) contro tre baseline diverse. Dato nuovo: nella stessa giornata run_daily_report delle 03:00Z pubblica 'Overall IC: 0.2328, ICIR: 13.730' — due serie di IC incompatibili prodotte a 18h di distanza dallo stesso sistema, mai riconciliate; un ICIR di 13,7 non e' plausibile per un segnale azionario.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-07.md sez. 10 [DAY-005]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 15
+      "occorrenze_non_stimate": 16
     },
     {
       "id": "F-005",
@@ -546,12 +558,18 @@
           "costo_usd": null,
           "nota": "3ª occorrenza, ma oggi il tasso di fallimento e' del 100% (3/3 tentativi), non un campione parziale come in occorrenze precedenti. Trigger: alert #161 posizioni non proteggibili (10/44 qty<1), 14:37:07-08 UTC, tutti e 3 i tentativi di sendMessage rispondono 400 Bad Request. Costo null: nessun trade impattato, e' un difetto di canale di alert.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-04.md §10 [DAY-003]"
+        },
+        {
+          "data": "2026-09-07",
+          "costo_usd": null,
+          "nota": "[DAY-011] 2026-09-07 04:00:00Z: l'alert Telegram del *suggerimento* pesi fallisce con 400 Bad Request; 5 secondi dopo, 04:00:05Z, l'alert di *auto-apply avvenuto* dalla stessa istanza verso la stessa chat passa con 200 OK. Il contrasto indica formattazione del messaggio, non credenziali. Effetto: l'operatore riceve il fatto compiuto e mai la proposta — in periodo di freeze e' l'inverso di quel che serve.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-07.md sez. 10 [DAY-011]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 4
+      "occorrenze_non_stimate": 5
     },
     {
       "id": "F-006",
@@ -1739,10 +1757,16 @@
           "costo_usd": null,
           "nota": "5a occorrenza, con la frequenza rimisurata dopo il redeploy. 'docker compose logs worker | grep -c \"SPY benchmark fetch failed\"' -> 84 righe distribuite su 14 minuti distinti, cioe' 6 tentativi al minuto, ogni minuto, indefinitamente. Messaggio: {\"message\":\"subscription does not permit querying recent SIP data\"}, cioe' un fallimento PERMANENTE (limite di sottoscrizione) trattato come transitorio: nessun circuito aperto, nessun allarme, livello WARNING. Doppio effetto: il confronto col benchmark non e' disponibile nel percorso live (lo scoreboard economico lo calcola per altra via, con dati daily), e le 84 righe/quarto d'ora sono rumore in un log che per F-027 ha vita breve. Costo null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-02.md §10 DAY-022"
+        },
+        {
+          "data": "2026-09-07",
+          "costo_usd": null,
+          "nota": "[DAY-010] 84 fallimenti 'subscription does not permit querying recent SIP data' il 2026-09-07, cioe' in una giornata in cui non esiste alcuna barra SPY da scaricare: il chiamante non consulta il calendario prima del retry.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-07.md sez. 10 [DAY-010]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 5,
+      "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": null
     },
@@ -1801,10 +1825,16 @@
           "costo_usd": null,
           "nota": "Ricorrenza. Bot token Telegram (bot8611445937:AAH3...) esposto in chiaro nei log worker a livello INFO sui 3 tentativi di sendMessage falliti delle 14:37 UTC (vedi F-005 stessa occorrenza odierna). Costo null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-04.md §10 [DAY-003]"
+        },
+        {
+          "data": "2026-09-07",
+          "costo_usd": null,
+          "nota": "[DAY-009] Il bot token compare in chiaro 17.278 volte nei log persistenti della sola giornata 2026-09-07 (17.275 in worker-inference, 3 in worker), a cadenza di 5 secondi via httpx INFO. Aggravante rispetto alle occorrenze precedenti: i log ora sopravvivono al redeploy su host (logs/containers/) dopo F-027, quindi il segreto e' durevole e versionabile per errore.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-07.md sez. 10 [DAY-009]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -3150,12 +3180,18 @@
           "costo_usd": null,
           "nota": "11a occorrenza. curl -H Authorization: Bearer <token> su /decisions -> 403 Invalid or expired JWT token; stesso token con X-API-Key -> 200 OK. Causa isolata (require_api_key prova sempre il ramo JWT se Authorization e' presente). Costo null: impatto solo sul protocollo forense, zero rischio sistema.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-04.md §10 [DAY-008]"
+        },
+        {
+          "data": "2026-09-07",
+          "costo_usd": null,
+          "nota": "[DAY-004] 403 su GET /api/decisions nell'unica richiesta non-200 delle 9.057 del giorno; al 2026-09-08 tutti e 5 gli endpoint del protocollo rispondono 'Invalid or expired JWT token'. La verifica prescritta via API non e' stata eseguibile: l'analisi e' stata surrogata da PostgreSQL/Redis/log persistenti.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-07.md sez. 10 [DAY-004]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 11
+      "occorrenze_non_stimate": 12
     },
     {
       "id": "F-042",
@@ -3441,10 +3477,16 @@
           "costo_usd": null,
           "nota": "6a occorrenza. risk_reports del 2026-09-02 22:30:01.139124Z: per_strategy_metrics = '{}', alerts = '[]', nav 109850,57, total_exposure 0,302182, herfindahl 0,027591, combined_drawdown 0,012429. Ne' S1 ne' S4 hanno un drawdown proprio, quindi nessun kill-switch per-sleeve puo' essere valutato e il rischio e' sorvegliato solo a livello di libro -- una sleeve puo' andare in drawdown profondo mentre l'altra la compensa senza che nulla lo segnali. Aggravante di contesto: proprio oggi le due sleeve hanno realizzato segno opposto (S1 -29,38 $, S4 +19,79 $). Il dato per ricostruirlo c'e': lo opening_snapshot del dossier attribuisce 48 posizioni su 48 (42 S1, 6 S4), zero CONTAMINAZIONE. Costo null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-02.md §10 DAY-014"
+        },
+        {
+          "data": "2026-09-07",
+          "costo_usd": null,
+          "nota": "[DAY-006] risk_reports id=87 (2026-09-07 22:30:01Z): per_strategy_metrics = {} e alerts = []. Settima giornata consecutiva senza alcun drawdown per sleeve sorvegliato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-07.md sez. 10 [DAY-006]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 6,
+      "occorrenze_non_stimate": 7,
       "stato": "aperto",
       "issue": null
     },
@@ -3665,10 +3707,16 @@
           "costo_usd": null,
           "nota": "2a occorrenza, sullo stesso job e con lo stesso meccanismo del primo avvistamento del 2026-08-31. Il job held-news-loss-alert (#324, cron 22:50) ha aperto correttamente due incidenti WARNING -- 'Copertura news assente su ASML' alle 22:50:00.707247Z e 'Copertura news assente su WDC' alle 22:50:00.716237Z -- ed entrambi risultano status='recovered' con resolved_at 22:50:01.060889Z e 22:50:01.046311Z e clear_observation_count=1: vita utile 0,354 s e 0,330 s. Il valutatore mobile generico (cron */1) non riconosce quei fingerprint come propri, non trova la condizione nel proprio insieme di regole e li dichiara rientrati. Effetto: la deroga registrata in OBSERVATION_CHARTER.md il 2026-08-31 per l'alert #324 e' di fatto inefficace, gli incidenti che apre non arrivano mai a un operatore. E il caso di oggi e' proprio quello che la deroga voleva coprire: ASML e' alla NONA seduta consecutiva senza una riga news_log mentre e' a -4,89% dall'ingresso. Costo null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-02.md §10 DAY-017"
+        },
+        {
+          "data": "2026-09-07",
+          "costo_usd": null,
+          "nota": "[DAY-007] L'alert EOD della deroga #324 apre 'Copertura news assente su UNH' alle 22:50:00.748971Z (UNH -7,13% dall'ingresso, 2 sedute senza righe) e il valutatore mobile generico lo marca 'recovered' alle 22:50:01.13893Z, 390 ms dopo. Stesso esito su UNH il 09-04, su ASML e WDC il 09-03, su ASML il 09-02: il canale operatore-nel-ciclo aperto dalla deroga non consegna.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-07.md sez. 10 [DAY-007]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -3752,10 +3800,16 @@
           "costo_usd": null,
           "nota": "2a occorrenza, su due tabelle invece che una. (a) s4_exit_policy_events: due righe P0_RUNTIME_REPLAY per lo stesso intent_id bed2e4d0-2b81-58fc-9c33-ebc9daeb616f (HOOD), stesso observed_at 2026-09-01T16:37:05.518878Z, stesso fill_price 104,73, stesso net_pnl -23,791116468878734, ma event_id diversi (1de58677-8868-5176-bf8e-f1fb27ce19ae scritta alle 14:12:03 e f214304a-3d54-5ab0-b551-af1582238d72 alle 15:12:04) perche' differisce l'entry_lifecycle_event_id a monte. (b) s4_lifecycle_events: 9 righe ENTRY_RECONCILIATION per 4 eventi di ingresso distinti -- HOOD riemessa alle 14:12 e 15:12 con payload identico (requested_notional 1419.36), NVDA alle 18:12 (3 righe) e 19:57. La causa e' che l'identita' dell'evento derivato include quella dell'osservazione a monte, che non e' idempotente: ogni ciclo riconcilia da capo e genera un nuovo entry_lifecycle_event_id. Qualunque conteggio sul ledger delle uscite S4 sovrastima, ed e' il ledger su cui poggia il trial S4. Costo null: difetto sull'evidenza, non sul denaro.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-02.md §10 DAY-018"
+        },
+        {
+          "data": "2026-09-07",
+          "costo_usd": null,
+          "nota": "[DAY-008] 33 cicli di reconcile-fills-intraday il 2026-09-07 dichiarano ciascuno 11-13 s4_lifecycle_events + 4-5 P0 + 7 P1 (~780 eventi sulla giornata) mentre le righe effettivamente persistite sono 1 in s4_lifecycle_events e 2 in s4_exit_policy_events. _reconcile_s4_lifecycles restituisce len(events) costruiti, non le righe inserite. Nota positiva: l'idempotenza su event_id UUID5 regge (33 retry -> 3 righe).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-07.md sez. 10 [DAY-008]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -3777,10 +3831,16 @@
           "costo_usd": null,
           "nota": "2a occorrenza. I 6 alert CRITICAL del decay monitor delle 2026-09-02 21:00:00Z non hanno alcuna riga corrispondente in mobile_events (la giornata ne contiene 7 in tutto, nessuno di categoria decay) ne' alcun invio Telegram: sono solo log.critical. Aggravante nuova, dall'incrocio con F-027: i sei alert sono sopravvissuti alla mia lettura SOLO perche' emessi alle 21:00, cioe' DOPO il redeploy delle 20:20; se il riconciliatore fosse passato alle 21:20 anziche' alle 20:20 non ne resterebbe alcuna traccia. La severita' piu' alta del sistema e' l'unica priva di canale, su un supporto che dura poche ore. Costo null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-02.md §10 DAY-016"
+        },
+        {
+          "data": "2026-09-07",
+          "costo_usd": null,
+          "nota": "[DAY-005] I 6 alert CRITICAL del decay monitor del 2026-09-07 21:00Z non hanno prodotto alcuna riga in mobile_events (kind='alert_incident' -> 0 righe sulla data). Solo log.critical, come da finding.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-07.md sez. 10 [DAY-005]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -3903,6 +3963,50 @@
           "costo_usd": null,
           "nota": "PRIMO AVVISTAMENTO. Il commit 2c70e0f ('feat: persisti gli slot S4 bruciati', #429, merged 2026-09-02T14:10Z) ha aggiunto la migrazione 060_s4_burned_slot_metrics.sql (colonne held_at_rank, signal_age_at_slot su s4_intent_events) e il codice che le scrive in un unico INSERT a riga singola (src/store/pg_store.py:619-652). Il deploy di produzione delle 2026-09-03T22:20:01Z (41f09512->38cd921f, 33 commit) ha portato il codice in produzione, ma nessun passo del pipeline di deploy applica le migrazioni (grep -i migrat su logs/deploy_reconcile_2026-09-0{2,3,4}.log: zero righe): la migrazione 060 non e' mai stata eseguita sul DB live (verificato: SELECT column_name FROM information_schema.columns WHERE table_name='s4_intent_events' AND column_name IN ('held_at_rank','signal_age_at_slot') -> 0 righe, anche al 2026-09-07). Da quel deploy in poi ogni INSERT candidate/disposition fallisce per intero: 0 righe su 24/24 cicli il 2026-09-04 (contro 3.188 il 2026-09-03, ultimo giorno pulito). Log: '[2026-09-04 14:07:06,430: WARNING/ForkPoolWorker-4] #294: failed to write S4 candidate intent events: column \"held_at_rank\" of relation \"s4_intent_events\" does not exist', 48 occorrenze nella giornata (24 candidate + 24 disposition). Le tabelle a valle s4_lifecycle_events (6 righe il 09-04) e s4_exit_policy_events (13 righe) sono popolate da un percorso di scrittura indipendente e non ne risentono: il contratto di trial P0/P1/P2 (#293) non e' cieco sull'esito delle posizioni, ma ogni diagnostica di ranking/candidatura S4 (rank persistito F-052, missingness/beta F-064, earnings-day F-063, popolazione candidati F-051) e' irrecuperabile per l'intera giornata. Difetto silenzioso su ogni canale: solo un WARNING di log, nessuna riga mobile_events, nessun alert nel risk report. Nessun giorno di borsa e' seguito prima della scrittura di questo finding (09-05/09-06 weekend, 09-07 Labor Day) per confermare se il difetto persiste al prossimo giorno operativo (2026-09-08); la colonna manca ancora al momento della scrittura. ID NUOVO GIUSTIFICATO: nessuno dei 67 finding esistenti riguarda un fallimento totale di INSERT su s4_intent_events per schema drift -- F-044/F-045 sono fallimenti di query di lettura nel dossier (join ambiguo, confronto booleano sbagliato), F-052 e' un'incoerenza fra rank e score gia' scritti (qui non si scrive nulla), F-061 e' una riemissione duplicata (qui e' un'assenza totale). Costo null: e' un difetto di correttezza dello strumento di misura del ranking S4, non ha bloccato o alterato una singola decisione/ordine/fill reale. Passa il test di esenzione della carta: senza la correzione, ogni giornata da qui al prossimo giorno di borsa produce zero righe sul ledger di ranking S4.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-04.md §1, §3, §10 [DAY-001], §16"
+        },
+        {
+          "data": "2026-09-07",
+          "costo_usd": null,
+          "nota": "[DAY-003] Al 2026-09-07 la migrazione 060 era ancora non applicata e con lei le 060->065 (sei pendenti), regolarizzate solo il 2026-09-08 10:36:00Z. Radice trovata: scripts/deploy_reconcile.sh non contiene alcun riferimento a psql/migrations e alle 14:20:04Z del 09-07 ha ricostruito il backend con 27 commit (e5512c9d -> 38c94399) contro lo schema vecchio. Nessun danno il 09-07 solo perche' la borsa era chiusa (Labor Day): zero cicli, zero INSERT tentati.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-07.md sez. 10 [DAY-003]"
+        }
+      ],
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 2,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-069",
+      "titolo": "Il worker di streaming news ingerisce fuori orario in una coda il cui unico consumatore e' gated da market_closed: la cattura si accumula e scade senza mai essere scorata",
+      "tipo": "difetto",
+      "confidenza": "misurata",
+      "primo_avvistamento": "2026-09-07",
+      "occorrenze": [
+        {
+          "data": "2026-09-07",
+          "costo_usd": null,
+          "nota": "[DAY-001] Il deploy delle 14:20Z del 2026-09-07 (27 commit) ha attivato worker-news-stream. src/workers/news_stream.py:55-95 (_handle_article) non ha alcuna guardia di calendario: accoda e dispatcha run_sentiment_worker in qualunque momento; il consumatore e' invece gated (src/workers/sentiment.py:1121) e la finestra beat e' 14:00-21:00 UTC. Il 09-07 alle 23:00:18Z il primo articolo (GOOGL) e' stato accodato e il sentiment dispatchato ha risposto market_closed 2s dopo: articolo mai entrato in news_log. Misura al 2026-09-08 13:15Z: news:queue = 232 elementi, p50 eta' 2,85h, max 94,4h, 130 (56%) gia' oltre MAX_NEWS_AGE_HOURS=2; 203 dei 232 catturati dallo stream fra le 02:00 e le 13:00Z del 09-08, di cui 93 certamente oltre soglia prima dell'apertura del consumatore. In piu' _persist_ingestion_observability scrive sulla stessa riga source='alpaca_benzinga' del polling REST, rendendo le due vie indistinguibili in ingestion_stats_daily (base di F-007/F-019). Costo null: e' difetto strutturale/di osservabilita' — rispetto al baseline precedente quelle notizie non venivano nemmeno catturate, quindi nessun trade e' stato perso in piu'; conta la ricorrenza.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-07.md sez. 10 [DAY-001]"
+        }
+      ],
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-070",
+      "titolo": "Le finestre e i budget di retry dei job derivati sono misurati in tempo di parete e non in sedute: ponti e festivi restringono la popolazione ed esauriscono i tentativi senza che il mercato possa produrre dati",
+      "tipo": "difetto",
+      "confidenza": "misurata",
+      "primo_avvistamento": "2026-09-07",
+      "occorrenze": [
+        {
+          "data": "2026-09-07",
+          "costo_usd": null,
+          "nota": "[DAY-002] Nuovo id giustificato: e' un meccanismo distinto da F-024 (che riguarda max_signal_age della strategia S4, non i job derivati) e da F-061 (che riguarda la ri-emissione, non la definizione della finestra); la correzione e' in punti di codice diversi. Due manifestazioni misurate sulla stessa giornata. (a) src/store/pg_store.py:900-903, fetch_s4_submitted_intents usa 'occurred_at > now() - 7 days'::interval: il 2026-09-07, a mercato chiuso e con zero attivita', la popolazione di replay del ledger S4 e' scesa 13 -> 12 (17:27Z) -> 11 (19:42Z) solo perche' l'orologio avanzava; un ponte di 3 giorni consuma il 43% della finestra senza che una seduta sia passata. (b) Il budget di retry del worker controfattuale e' stato speso il 09-05 (pending_retry: 4) e il 09-06 (attempts_exhausted: 4), giorni in cui per costruzione nessuna barra nuova puo' esistere: le 4 decisioni del 2026-09-04 19:22-19:52Z (SHEL id 19111/19139/19167, MMM id 19088, tutte SKIP_THRESHOLD, counterfactual_skip_reason=NO_BARS_AFTER_HORIZON) restano definitivamente senza controfattuale; stesso pattern gia' il 2026-08-28 (4 SHEL, id 16100/16124/16145/16164). Costo null: le 4 decisioni sono SKIP_THRESHOLD, nessun ordine emesso, quindi nessun P&L attribuibile; il costo e' sull'evidenza, che perde righe per ragioni di calendario e in modo non casuale (colpisce l'ultima ora di ogni seduta, dove l'orizzonte +1h cade oltre le 20:00Z).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-07.md sez. 10 [DAY-002]"
         }
       ],
       "costo_cumulato_usd": 0,
