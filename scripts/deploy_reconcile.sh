@@ -53,7 +53,7 @@ cd "$PROJECT_DIR"
 if [[ -f "$PROJECT_DIR/.env" ]]; then
     set -a
     # shellcheck disable=SC1091
-    source <(grep -E '^(TELEGRAM_(BOT_TOKEN|CHAT_ID)|ALPACA_(API_KEY|SECRET_KEY))=' "$PROJECT_DIR/.env" | sed 's/#.*//')
+    source <(grep -E '^(TELEGRAM_(BOT_TOKEN|CHAT_ID)|ALPACA_(API_KEY|SECRET_KEY)|DATABASE_URL)=' "$PROJECT_DIR/.env" | sed 's/#.*//')
     set +a
 fi
 
@@ -89,7 +89,7 @@ servizi_da_ricostruire() {
     while read -r f; do
         [[ -z "$f" ]] && continue
         case "$f" in
-            src/*|config/*|scripts/*|docker-compose.yml|pyproject.toml|uv.lock|Dockerfile) backend=1 ;;
+            src/*|config/*|scripts/*|migrations/*|docker-compose.yml|pyproject.toml|uv.lock|Dockerfile) backend=1 ;;
             frontend/*) frontend=1 ;;
         esac
     done <<< "$cambiati"
@@ -192,6 +192,13 @@ ln -sf "$PROJECT_DIR/.env" "$WT/.env"
 if [[ "$DA_FARE" == *backend* ]]; then
     (cd "$WT" && timeout 1800 docker compose -p "$COMPOSE_PROJ" build "${SERVIZI_BACKEND[@]}") >>"$LOG_FILE" 2>&1 \
         || fallisci "build dei servizi backend"
+    # Il codice nuovo non deve mai partire contro uno schema vecchio. Il primo
+    # giro adotta esplicitamente il DB storico fino alla 059 (sentinella
+    # verificata dal runner), recupera 060+ e poi usa ledger/checksum per tutti
+    # i deploy successivi. Se fallisce, i container correnti restano attivi.
+    uv run --project "$PROJECT_DIR" --no-sync python "$WT/scripts/apply_migrations.py" \
+        --bootstrap-existing-through 59 >>"$LOG_FILE" 2>&1 \
+        || fallisci "applicazione delle migrazioni database"
     (cd "$WT" && timeout 600 docker compose -p "$COMPOSE_PROJ" up -d "${SERVIZI_BACKEND[@]}") >>"$LOG_FILE" 2>&1 \
         || fallisci "avvio dei servizi backend"
 fi
