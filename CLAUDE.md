@@ -56,6 +56,16 @@ un-measured. The rails are live: `news_labels` table, blind Labeling UI (`/label
 (`/quality`). `news_log.extraction_method` records the extraction path (QT-03). See
 ARCHITECTURE §3.2.
 
+### Evidence and Measurement (read before producing any number)
+
+Files under `docs/evidence/` are what strategy decisions are judged on. Before running a measurement:
+
+- **Tuning freeze**: `docs/evidence/OBSERVATION_CHARTER.md` freezes every threshold, weight, flag and strategy parameter until **2026-09-28**. Only correctness defects are exempt; exemptions and breaks in the observed series are registered there, never left implicit.
+- **Pre-register**: fix sample, rule and outcome *before* seeing the result (`docs/evidence/PREREGISTRAZIONE_*.md`). Picking the best variant out of a grid after the fact is not a result — it needs a declared correction for multiplicity, or it is not reportable.
+- **Declare the null and the power**: `config/s4_kill_criterion.yaml` holds the pre-registered criterion. `INSUFFICIENT_N` outranks PASS/FAIL by construction, |t| ≥ 3 is the bar, and `ic_rilevabile_a_t3` states what the sample can actually detect — "not detectable" is never "absent".
+- **The measurement must call the production rule, not reimplement it** (#169, #467): reuse the tested helper (e.g. `scelta_produzione()` in `scripts/measure_169_dedup_rules.py`) instead of rewriting the ranker's ordering in the analysis script.
+- **Changing how you measure is a discontinuity**: annotate it inside the artifact and in the charter. Never silently revise a published series.
+
 ### Sentiment Scoring Formula
 Convert LLM output to a numeric signal:
 

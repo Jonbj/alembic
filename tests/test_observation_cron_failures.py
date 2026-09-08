@@ -181,3 +181,126 @@ def test_the_session_is_no_longer_asked_to_commit(script_name: str):
 
     assert "git commit -m" not in source
     assert "git push origin main" not in source
+
+
+# --- #507 / F-063: streak del calendario earnings UNKNOWN ------------------
+#
+# Quattro sedute di `giorno_di_earnings` UNKNOWN sono passate con GIT_STATUS
+# pushed, exit 0 e nessuna allerta: la condizione era scritta nel dossier e
+# letta da nessuno. Ora il dossier porta lo streak nel blocco
+# `calendario_earnings` e il cron lo allerta da >= 2 sedute consecutive.
+
+ALERT_STREAK_MARKER = "calendario earnings UNKNOWN"
+
+
+def _run_with_dossier_streak(tmp_path: Path, streak: int) -> tuple[subprocess.CompletedProcess[str], str, str]:
+    """Cron alpha-miss con un dossier che dichiara `streak` sedute cieche.
+
+    Lo stub `uv` scrive il dossier del 2026-08-06 con il blocco
+    calendario_earnings; il resto della run e' quello di
+    `_run_with_failing_claude` (sessione Claude che fallisce a 23), cosi' si
+    verifica anche che l'allerta NON interrompa la seduta.
+    """
+    project = tmp_path / "project"
+    scripts_dir = project / "scripts"
+    bin_dir = tmp_path / "bin"
+    scripts_dir.mkdir(parents=True)
+    bin_dir.mkdir()
+    (project / "docs" / "evidence" / "dossier").mkdir(parents=True)
+    shutil.copy2(ROOT / "scripts" / "daily_alpha_miss_analysis.sh", scripts_dir / "daily_alpha_miss_analysis.sh")
+    shutil.copy2(
+        ROOT / "scripts" / "refresh_evidence_ledger.sh",
+        scripts_dir / "refresh_evidence_ledger.sh",
+    )
+
+    _write_executable(
+        bin_dir / "claude",
+        "#!/usr/bin/env bash\n"
+        "printf 'output iniziale\\nCODA-ERRORE-CLAUDE\\n'\n"
+        "exit 23\n",
+    )
+    _write_executable(
+        bin_dir / "curl",
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$*\" >> \"$TELEGRAM_CAPTURE\"\n",
+    )
+    # Lo stub risponde alle tre chiamate `uv` del cron: il lookup del calendario
+    # (`run python3 -`, nessun argomento), la generazione del dossier (terzo
+    # argomento = alpha_miner_dossier.py) e la lettura dello streak (quarto
+    # argomento = il file dossier). Lo streak arriva via env, come il capture
+    # Telegram arriva allo stub curl.
+    _write_executable(
+        bin_dir / "uv",
+        "#!/usr/bin/env bash\n"
+        "if [[ \"$3\" == *alpha_miner_dossier.py* ]]; then\n"
+        "    printf '%s' \"{\\\"calendario_earnings\\\":{\\\"status\\\":\\\"UNKNOWN\\\",\\\"streak_sedute_consecutive_unknown\\\":${streak}}}\""
+        " > \"$(dirname \"$(dirname \"$3\")\")/docs/evidence/dossier/$4.json\"\n"
+        "elif [[ \"$4\" == *.json ]]; then\n"
+        "    printf '%s\\n' \"$STREAK_DOSSIER\"\n"
+        "else\n"
+        "    printf '2026-08-06\\n'\n"
+        "fi\n",
+    )
+
+    telegram_capture = tmp_path / "telegram.log"
+    env = os.environ.copy()
+    env.update(
+        {
+            "ALEMBIC_API_KEY": "test-admin-key",
+            "ALPACA_API_KEY": "test-alpaca-key",
+            "ALPACA_SECRET_KEY": "test-alpaca-secret",
+            "HOME": str(tmp_path / "home"),
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "TELEGRAM_BOT_TOKEN": "test-token",
+            "TELEGRAM_CHAT_ID": "test-chat",
+            "TELEGRAM_CAPTURE": str(telegram_capture),
+            "STREAK_DOSSIER": str(streak),
+        }
+    )
+    result = subprocess.run(
+        ["bash", str(scripts_dir / "daily_alpha_miss_analysis.sh")],
+        cwd=project,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+
+    logs = list((project / "logs").glob("*.log"))
+    assert len(logs) == 1
+    return result, logs[0].read_text(), telegram_capture.read_text()
+
+
+def test_streak_calendario_earnings_unknown_allerta_senza_interrompere(tmp_path: Path):
+    result, log, telegram = _run_with_dossier_streak(tmp_path, streak=3)
+
+    # l'allerta non blocca la seduta: la sessione Claude parte comunque e il
+    # suo fallimento resta l'unico motivo di exit non-zero
+    assert result.returncode == 23
+    assert ALERT_STREAK_MARKER in log
+    assert "3 sedute consecutive" in log
+    assert ALERT_STREAK_MARKER in telegram
+    assert "#507" in telegram
+
+
+def test_streak_calendario_earnings_breve_non_allerta(tmp_path: Path):
+    result, log, telegram = _run_with_dossier_streak(tmp_path, streak=1)
+
+    assert result.returncode == 23
+    assert ALERT_STREAK_MARKER not in log
+    assert ALERT_STREAK_MARKER not in telegram
+
+
+# F-063 radice (1): la chiave FMP non e' mai stata wired nel grep selettivo del
+# .env, quindi il dossier da cron non vedeva credenziali che pure esistevano.
+# Il grep resta selettivo — non `source .env` integrale — perche' l'ambiente
+# esportato arriva anche alla sessione Claude del prompt.
+def test_env_selettivo_esporta_fmp_api_key():
+    source = (ROOT / "scripts" / "daily_alpha_miss_analysis.sh").read_text()
+
+    grep_line = next(
+        line for line in source.splitlines()
+        if "source <(grep" in line and "ALPACA" in line
+    )
+    assert "FMP_API_KEY" in grep_line

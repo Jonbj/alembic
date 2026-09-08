@@ -148,6 +148,23 @@ invece che mediate sull'intera finestra:
   differenza di #185, #236 e #191, ciò che si spezza è la serie della *misura*, non quella del
   fenomeno. Le decisioni di pyramiding prese prima e dopo il 19/08 restano confrontabili fra loro.
 
+- **#467 / IC di S4 misurato con la regola del ranker (2026-09-08)** — `compute_s4_ic.py` riduceva
+  a un'osservazione per simbolo-giorno tenendo l'**ultimo segnale per solo orario**; il ranker
+  (`_FETCH_SIGNALS_FOR_CYCLE`) usa `fallback_used ASC, generated_at DESC`, cioè un fallback FinBERT
+  arrivato dopo un ensemble **non** lo sovrascrive. `docs/evidence/s4_ic.json` pubblicava quindi
+  l'IC di una regola che il sistema non applica. **Il comportamento live non cambia** — è
+  strumentazione, come #293 e #230: ciò che si spezza è la serie della *misura*, non quella del
+  fenomeno. Misurato a parità di dati sul campione del 08/09 (3228 simbolo-giorni): 411 punteggi
+  divergenti (12,7%), 428 casi di fallback che sovrascriveva un ensemble, 75 divergenze al gate
+  0,30. L'effetto grosso è sul sottoinsieme **`ensemble`**, che la riduzione ingenua contaminava
+  con righe di fallback: IC 1g da −0,0087 (t −0,29) a −0,0339 (t −1,32), IC 5g da +0,0017 a
+  −0,0352. Cambia anche il bucket `alta_convinzione_0.30`, quello che si sarebbe citato per dire
+  «sopra il gate S4 ha segnale»: IC 1g da **+0,0560 (t 0,99) a +0,0075 (t 0,14)**, cioè il numero
+  incoraggiante era un artefatto della riduzione sbagliata. Nessun esito del kill criterion cambia
+  (`INSUFFICIENT_N` prima e dopo, n=59 su 213 richiesti). **I valori di `s4_ic.json` precedenti al
+  08/09 non sono confrontabili con quelli successivi**; il file porta l'annotazione nel campo
+  `discontinuita`.
+
 Questa sezione esiste perché fra sette settimane nessuno se ne ricorderebbe.
 
 ## Soglie: cosa guadagna diritto a lavoro alla scadenza

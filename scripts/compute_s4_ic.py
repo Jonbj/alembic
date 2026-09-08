@@ -13,9 +13,19 @@ METODO — la scelta che decide la validita' del numero.
 Ci sono piu' segnali per lo stesso simbolo nello stesso giorno, e condividono lo
 stesso forward return: trattarli come indipendenti gonfia la significativita' di
 circa un ordine di grandezza. Quindi si riduce a UNA osservazione per
-simbolo-giorno, tenendo l'ULTIMO segnale del giorno — che e' esattamente quello
-che il ranker usa in produzione — e si calcola lo Spearman cross-sectional giorno
-per giorno, mediando poi sui giorni.
+simbolo-giorno scelta con la REGOLA DEL RANKER (`fallback_used ASC,
+generated_at DESC`: prima il non-fallback, e solo a parita' di stato il piu'
+recente), riusando `scelta_produzione()` della #169 invece di riscriverla — e si
+calcola lo Spearman cross-sectional giorno per giorno, mediando poi sui giorni.
+
+DISCONTINUITA' (#467). Fino al 2026-09-08 la riduzione teneva l'ultimo segnale
+per SOLO orario, che non e' cio' che il ranker fa: un fallback FinBERT arrivato
+dopo un ensemble lo sovrascriveva. Misurato a parita' di dati sul campione del
+2026-09-08 (3228 simbolo-giorni): 411 punteggi diversi (12,7%), 428 casi di
+fallback che sovrascriveva un ensemble, 75 divergenze al gate 0.30. L'effetto piu'
+grande e' sul sottoinsieme `ensemble`, che la riduzione ingenua contaminava:
+IC 1g da -0.0087 (t -0.29) a -0.0339 (t -1.32). Le serie prima e dopo quella data
+non sono confrontabili.
 
 Uso:
     uv run python scripts/compute_s4_ic.py
@@ -27,11 +37,16 @@ import math
 import os
 import statistics
 import subprocess
+import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
 from scipy.stats import spearmanr
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from scripts.measure_169_dedup_rules import scelta_produzione  # noqa: E402
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 OUT = PROJECT_DIR / "docs" / "evidence" / "s4_ic.json"
@@ -45,14 +60,66 @@ NOTIFY_FILE = PROJECT_DIR / "docs" / "evidence" / "s4_ic_notification.json"
 MIN_SIMBOLI_GIORNO = 5  # sotto, la correlazione cross-sectional e' rumore puro
 
 QUERY = """SELECT date_trunc('day', generated_at)::date, symbol, score, fallback_used,
-       forward_return, forward_return_3d, forward_return_5d
+       extract(epoch from generated_at), forward_return, forward_return_3d,
+       forward_return_5d
 FROM sentiment_signals
 WHERE forward_return IS NOT NULL
 ORDER BY generated_at;"""
 
 
+def parse_righe(stdout: str) -> list[dict]:
+    """Righe grezze di psql -> dict, SENZA ridurre nulla.
+
+    L'orario arriva come epoch (`extract(epoch from ...)`) e non come testo: il
+    formato con cui psql stampa un timestamp dipende dalle impostazioni della
+    sessione, un float no.
+
+    Una riga senza forward return a 1 giorno non e' un'osservazione e viene
+    scartata qui, prima della riduzione: se la si scartasse dopo, potrebbe
+    vincere la selezione del ranker ed eliminare il simbolo-giorno.
+    """
+    righe: list[dict] = []
+    for riga in stdout.strip().split("\n"):
+        if not riga.strip():
+            continue
+        p = riga.split("|")
+        if p[5] == "":
+            continue
+        righe.append({
+            "giorno": p[0],
+            "symbol": p[1],
+            "score": float(p[2]),
+            "fallback": p[3] == "t",
+            "generated_at": datetime.fromtimestamp(float(p[4]), tz=timezone.utc),
+            1: float(p[5]),
+            3: float(p[6]) if p[6] else None,
+            5: float(p[7]) if p[7] else None,
+        })
+    return righe
+
+
+def riduci_a_simbolo_giorno(righe: list[dict]) -> dict[tuple[str, str], dict]:
+    """Una osservazione per (giorno, simbolo): quella che sceglie il ranker.
+
+    #467: la riduzione precedente teneva l'ultimo segnale per SOLO orario, che
+    non e' la regola di produzione. `scelta_produzione()` e' gia' testata in PR
+    #460 contro `_FETCH_SIGNALS_FOR_CYCLE` — la si RIUSA invece di riscrivere
+    l'ordinamento, cosi' questa misura e quella della #169 restano confrontabili
+    perche' applicano la stessa regola vera, non perche' condividono la stessa
+    approssimazione.
+
+    Restituisce la riga INTERA del segnale scelto: quindi anche il forward
+    return e' quello del segnale che il ranker avrebbe usato (punto 2 della
+    #467), non quello dell'ultimo arrivato.
+    """
+    gruppi: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for r in righe:
+        gruppi[(r["giorno"], r["symbol"])].append(r)
+    return {chiave: scelta_produzione(gruppo) for chiave, gruppo in gruppi.items()}
+
+
 def _leggi_segnali() -> dict:
-    """Una osservazione per (giorno, simbolo): l'ultimo segnale, come il ranker."""
+    """Legge i segnali dal DB e li riduce con la regola del ranker."""
     res = subprocess.run(
         ["docker", "exec", "alembic-postgres-1", "psql", "-U", "trading", "-d",
          "trading", "-t", "-A", "-F", "|", "-c", QUERY],
@@ -61,21 +128,7 @@ def _leggi_segnali() -> dict:
     if res.returncode != 0:
         raise SystemExit(f"Query fallita: {res.stderr.strip()[:200]}")
 
-    ultimo: dict[tuple[str, str], dict] = {}
-    for riga in res.stdout.strip().split("\n"):
-        if not riga.strip():
-            continue
-        p = riga.split("|")
-        if p[4] == "":
-            continue
-        ultimo[(p[0], p[1])] = {
-            "score": float(p[2]),
-            "fallback": p[3] == "t",
-            1: float(p[4]),
-            3: float(p[5]) if p[5] else None,
-            5: float(p[6]) if p[6] else None,
-        }
-    return ultimo
+    return riduci_a_simbolo_giorno(parse_righe(res.stdout))
 
 
 def _serie_ic(per_giorno: dict, filtro, orizzonte: int) -> list[tuple[str, float, int]]:
@@ -291,7 +344,7 @@ def _gestisci_notifica(esito: dict) -> bool:
 
     # Componi il messaggio: solo i campi del criterio, niente prosa.
     righe = [
-        f"S4 IC — kill criterion raggiunto",
+        "S4 IC — kill criterion raggiunto",
         f"esito: {stato}",
         f"n_corrente: {esito.get('n_corrente')}",
         f"n_richiesto: {esito.get('n_richiesto')}",
@@ -335,8 +388,18 @@ def main() -> int:
     risultato: dict = {
         "generato_il": datetime.now(timezone.utc).isoformat(),
         "metodo": (
-            "una osservazione per simbolo-giorno (ultimo segnale, come il ranker); "
-            "Spearman cross-sectional giornaliero; t calcolato sui giorni"
+            "una osservazione per simbolo-giorno scelta con la regola del ranker "
+            "(fallback_used ASC, generated_at DESC); Spearman cross-sectional "
+            "giornaliero; t calcolato sui giorni"
+        ),
+        "discontinuita": (
+            "Dal 2026-09-08 (#467) la riduzione a simbolo-giorno applica la regola "
+            "del ranker (fallback_used ASC, generated_at DESC); prima teneva "
+            "l'ultimo segnale per solo orario, che il sistema non usa. Le serie "
+            "prima e dopo questa data NON sono confrontabili: a parita' di dati le "
+            "due riduzioni divergono su 411/3228 simbolo-giorni (12,7%), 75 al gate "
+            "0.30, e il sottoinsieme 'ensemble' era il piu' contaminato "
+            "(IC 1g -0.0087 -> -0.0339)."
         ),
         "osservazioni_simbolo_giorno": len(ultimo),
         "giorni_totali": len(per_giorno),
