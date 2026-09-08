@@ -15,9 +15,12 @@
 #
 # Il riallineamento e' un'UNIONE, mai una sostituzione: cio' che e' su disco e
 # non ancora su main resta (e' il lavoro che il commit deve ancora pubblicare).
-# Ed e' fail-open: se non riesce, si limita a dirlo ed esce 0 — un'analisi su un
-# ledger vecchio vale piu' di nessuna analisi, e il commit a valle e' comunque
-# fail-closed.
+# Ed e' fail-closed sul ledger rotto (#510): un file illeggibile o non fondibile
+# non e' un ritardo, e' una base di evidenza corrotta — il 2026-09-02 ha fatto
+# uscire questo script con 0 su un findings.json pieno di marcatori di stash
+# pop, e il cron e' comunque arrivato a GIT_STATUS=pushed. Ora esce non-zero e
+# il chiamante abortisce: nessuna analisi vale piu' di una costruita su un
+# ledger che non si puo' nemmeno leggere.
 
 set -uo pipefail
 
@@ -77,7 +80,8 @@ for rel in "$@"; do
             log "$rel riallineato a ${REMOTE}/${BRANCH} (unione)"
         fi
     else
-        log "ATTENZIONE: $rel non fondibile con ${REMOTE}/${BRANCH} — lascio la copia su disco."
+        log "RIFIUTO: $rel non fondibile con ${REMOTE}/${BRANCH} — base di evidenza rotta, la copia su disco resta intatta."
+        exit 1
     fi
 done
 

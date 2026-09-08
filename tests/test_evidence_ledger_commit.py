@@ -841,31 +841,49 @@ def test_refresh_never_discards_local_work_not_yet_on_main(repo):
     assert days == ["2026-08-25", "2026-08-24", "2026-08-26"]
 
 
-def test_refresh_leaves_the_local_ledger_alone_when_it_cannot_merge(repo):
-    """Fail-open: un conflitto non deve far saltare l'analisi del giorno."""
-    project = repo["project"]
-    _publish_on_main(repo, "F-002", "2026-08-24")
-    # stesso id, titolo diverso: il riallineamento non puo' decidere
-    conflicting = json.dumps(
-        {
-            "schema_version": 1,
-            "prossimo_id": 3,
-            "findings": [
-                {
-                    "id": "F-002",
-                    "titolo": "Titolo incompatibile",
-                    "occorrenze": [],
-                    "costo_cumulato_usd": 0.0,
-                    "occorrenze_non_stimate": 0,
-                }
-            ],
-        },
-        indent=2,
-    ) + "\n"
-    _write(project / LEDGER, conflicting)
+# --- rifiuto rumoroso della base di evidenza rotta (#510) -------------------
+# Il 2026-09-02 un findings.json con marcatori di stash pop non risolti ha
+# fatto uscire il riallineamento con 0, e il cron e' comunque arrivato a
+# GIT_STATUS=pushed. Un ledger non fondibile e' una base di evidenza rotta:
+# ogni anello della catena deve rifiutare, non avvisare.
 
-    result = subprocess.run(
-        ["bash", str(project / "scripts" / REFRESHER.name), LEDGER],
+DOSSIER = "docs/evidence/dossier/2026-08-26.json"
+
+STASH_CONFLICT = (
+    "<<<<<<< Updated upstream\n"
+    '{"ingressi": []}\n'
+    "=======\n"
+    '{"ingressi": [}\n'
+    ">>>>>>> Stashed changes\n"
+)
+
+
+def _conflicting_local_ledger() -> str:
+    """F-002 esiste su main con un altro titolo: la fusione non puo' decidere."""
+    return (
+        json.dumps(
+            {
+                "schema_version": 1,
+                "prossimo_id": 3,
+                "findings": [
+                    {
+                        "id": "F-002",
+                        "titolo": "Titolo incompatibile",
+                        "occorrenze": [],
+                        "costo_cumulato_usd": 0.0,
+                        "occorrenze_non_stimate": 0,
+                    }
+                ],
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+
+def _run_refresher(project: Path, *rels: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", str(project / "scripts" / REFRESHER.name), *rels],
         cwd=project,
         text=True,
         capture_output=True,
@@ -873,6 +891,165 @@ def test_refresh_leaves_the_local_ledger_alone_when_it_cannot_merge(repo):
         check=False,
     )
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "ATTENZIONE" in result.stdout
+
+def test_refresh_fails_loudly_when_the_ledger_cannot_be_merged(repo):
+    """Un ledger non fondibile abortisce il riallineamento, non lo degrada."""
+    project = repo["project"]
+    _publish_on_main(repo, "F-002", "2026-08-24")
+    conflicting = _conflicting_local_ledger()
+    _write(project / LEDGER, conflicting)
+
+    result = _run_refresher(project, LEDGER)
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "RIFIUTO" in result.stdout + result.stderr
+    # il rifiuto non distrugge nulla: la copia su disco resta quella di partenza
     assert (project / LEDGER).read_text() == conflicting
+
+
+def test_refresh_fails_loudly_on_an_unparsable_ledger(repo):
+    """Il caso del 2026-09-02: marcatori di conflitto dentro findings.json."""
+    project = repo["project"]
+    _write(project / LEDGER, STASH_CONFLICT)
+
+    result = _run_refresher(project, LEDGER)
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert "RIFIUTO" in result.stdout + result.stderr
+    assert (project / LEDGER).read_text() == STASH_CONFLICT
+
+
+def test_staging_refuses_a_dossier_with_conflict_markers(repo):
+    """Un dossier con marcatori di stash pop non risolti non deve finire su main."""
+    project, tmp = repo["project"], repo["tmp"]
+    _dirty_the_ledger(project)
+    _write(project / DOSSIER, STASH_CONFLICT)
+
+    result = _run_helper(repo, LEDGER, JSONL, DOSSIER)
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert _status_line(result.stdout) == "GIT_STATUS=not_committed"
+    assert "RIFIUTO" in result.stdout
+    assert DOSSIER in result.stdout
+    # il rifiuto ferma il commit dell'intero giro, non solo del file rotto
+    with pytest.raises(subprocess.CalledProcessError):
+        _remote_file(repo["remote"], DOSSIER)
+    assert "F-001" not in _remote_file(repo["remote"], LEDGER)
+    # il path resta fra i pendenti: si riprova al giro dopo, una volta ripulito
+    assert DOSSIER in (tmp / "pending.txt").read_text()
+
+
+def test_staging_refuses_an_unparsable_dossier_json(repo):
+    """Anche senza marcatori: un dossier troncato non e' JSON valido."""
+    project = repo["project"]
+    _dirty_the_ledger(project)
+    _write(project / DOSSIER, '{"ingressi": [')
+
+    result = _run_helper(repo, DOSSIER)
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert _status_line(result.stdout) == "GIT_STATUS=not_committed"
+    assert "RIFIUTO" in result.stdout
+    with pytest.raises(subprocess.CalledProcessError):
+        _remote_file(repo["remote"], DOSSIER)
+
+
+def test_staging_refuses_a_report_with_conflict_markers(repo):
+    """Il grep dei marcatori vale per tutti i file in staging, .md incluso."""
+    project = repo["project"]
+    _dirty_the_ledger(project)
+    _write(
+        project / REPORT,
+        "# Alpha miss 2026-08-26\n"
+        "<<<<<<< Updated upstream\n"
+        "vecchio testo\n"
+        "=======\n"
+        "nuovo testo\n"
+        ">>>>>>> Stashed changes\n",
+    )
+
+    result = _run_helper(repo, REPORT)
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert _status_line(result.stdout) == "GIT_STATUS=not_committed"
+    assert "RIFIUTO" in result.stdout
+    with pytest.raises(subprocess.CalledProcessError):
+        _remote_file(repo["remote"], REPORT)
+
+
+def test_cron_aborts_when_the_ledger_cannot_be_realigned(repo):
+    """Il rifiuto del riallineamento abortisce il cron alpha-miss con alert."""
+    project, tmp = repo["project"], repo["tmp"]
+    _publish_on_main(repo, "F-002", "2026-08-24")
+    _write(project / LEDGER, _conflicting_local_ledger())
+
+    result, log, telegram = _run_cron(repo)
+
+    assert result.returncode != 0, log[-2000:]
+    assert "RIFIUTO" in log
+    # la sessione non e' mai partita su una base di evidenza rotta
+    assert not (tmp / "ledger_visto_dalla_sessione.json").exists()
+    assert "GIT_STATUS=" not in log.strip().splitlines()[-1]
+    assert "annullata" in telegram
+    assert "🚨" in telegram
+    with pytest.raises(subprocess.CalledProcessError):
+        _remote_file(repo["remote"], REPORT)
+
+
+def test_forensic_cron_aborts_when_the_ledger_cannot_be_realigned(repo):
+    """Il gemello daily_analysis.sh ha lo stesso `|| true` da chiudere."""
+    project = repo["project"]
+    _publish_on_main(repo, "F-002", "2026-08-24")
+    _write(project / LEDGER, _conflicting_local_ledger())
+
+    result, log, telegram = _run_forensic_cron(repo)
+
+    assert result.returncode != 0, log[-2000:]
+    assert "RIFIUTO" in log
+    assert "annullata" in telegram
+    assert "🚨" in telegram
+    assert "GIT_STATUS=" not in log.strip().splitlines()[-1]
+
+
+def test_merge_refuses_one_id_with_two_distinct_titles(tmp_path):
+    """Punto 3 della issue: F-039 non puo' designare due finding diversi.
+
+    L'asserzione esiste gia' da #386 (titolo divergente fra main e sorgente =
+    fusione rifiutata): il test la blocca come regressione del caso reale del
+    2026-08-13 (biforcazione F-039/F-060).
+    """
+    def ledger(titolo: str) -> str:
+        return json.dumps(
+            {
+                "schema_version": 1,
+                "prossimo_id": 40,
+                "findings": [
+                    {
+                        "id": "F-039",
+                        "titolo": titolo,
+                        "occorrenze": [],
+                        "costo_cumulato_usd": 0.0,
+                        "occorrenze_non_stimate": 0,
+                    }
+                ],
+            }
+        )
+
+    remote_file = tmp_path / "remote.json"
+    source_file = tmp_path / "source.json"
+    _write(remote_file, ledger("Finding lato main"))
+    _write(source_file, ledger("Finding lato stash"))
+
+    result = subprocess.run(
+        ["python3", str(MERGER), str(remote_file), str(source_file), str(remote_file)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "il titolo differisce" in result.stderr
+    assert (
+        json.loads(remote_file.read_text())["findings"][0]["titolo"]
+        == "Finding lato main"
+    )

@@ -373,10 +373,20 @@ PROMPT
 # market_daily.jsonl alla versione del branch di turno. Il dossier ne ricava le
 # mediane a 20 giorni e lo scoreboard i giorni osservati, quindi una copia
 # monca falsa le misure prima ancora che la sessione parta. E' un'unione, non
-# una sostituzione, e non fallisce mai: al massimo si lavora sulla copia
-# vecchia, come oggi.
+# una sostituzione. Ma un ledger ROTTO (illegibile o non fondibile) non e' una
+# copia monca (#510): il 2026-09-02 ha rifiutato il merge ed e' comunque
+# arrivato a GIT_STATUS=pushed. Ora il rifiuto abortisce il cron: nessun
+# report vale piu' di uno costruito su evidenza che non si puo' leggere.
+set +e
 "$PROJECT_DIR/scripts/refresh_evidence_ledger.sh" \
-    docs/evidence/findings.json docs/evidence/market_daily.jsonl || true
+    docs/evidence/findings.json docs/evidence/market_daily.jsonl
+REFRESH_STATUS=$?
+set -e
+if (( REFRESH_STATUS != 0 )); then
+    echo "FAILED: riallineamento del ledger terminato con codice ${REFRESH_STATUS} — run annullato"
+    tg_send "🚨 Analisi alpha-miss ${DATE_TARGET} annullata: il ledger di evidenza su disco non e' riallineabile a main (codice ${REFRESH_STATUS}) — serve un intervento manuale, vedi <code>${LOG_FILE}</code>." "" || true
+    exit "$REFRESH_STATUS"
+fi
 
 DOSSIER_FILE="$PROJECT_DIR/docs/evidence/dossier/${DATE_TARGET}.json"
 if uv run python "$PROJECT_DIR/scripts/alpha_miner_dossier.py" "$DATE_TARGET" >> "$LOG_FILE" 2>&1; then
