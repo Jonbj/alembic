@@ -96,7 +96,12 @@ def test_dossier_24_collega_benchmark_calendario_regime_e_microstruttura():
     nbbo_cycles = nbbo_loader.call_args.args[0]
     assert nbbo_cycles["NVDA"]["at"] == datetime(2026, 8, 12, 14, 22, tzinfo=UTC)
     assert nbbo_cycles["NVDA"]["source"] == dossier.ELIGIBLE_SOURCE_SEGNALE
-    assert out["schema_version"] == "2.8"
+    assert out["schema_version"] == "2.9"
+    # #507: la salute della fonte earnings sale a livello schema, non solo
+    # nella missingness per-simbolo che nessuno leggeva
+    assert out["calendario_earnings"]["status"] == "OBSERVED"
+    assert out["calendario_earnings"]["streak_sedute_consecutive_unknown"] == 0
+    assert "calendario_earnings" in out["provenienza_dati"]
     assert out["provenienza_dati"]["event_market_context"]["version"] == (
         "event_market_context_v1"
     )
@@ -221,7 +226,9 @@ def test_calendario_senza_credenziali_dichiara_fonti_mancanti():
         "sources_succeeded": [],
         "complete": False,
         "missingness": [
-            "earnings_calendar_unavailable",
+            # #507: credenziali assenti e' un difetto di configurazione, distinto
+            # dal fallimento della chiamata (earnings_calendar_fetch_failed)
+            "earnings_calendar_no_credentials",
             "corporate_actions_calendar_unavailable",
         ],
     }
