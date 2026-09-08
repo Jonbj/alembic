@@ -1,7 +1,7 @@
 {
   "schema_version": "2.8",
   "data": "2026-09-04",
-  "generato_il": "2026-09-07T08:00:19.921819+00:00",
+  "generato_il": "2026-09-08T08:00:27.982585+00:00",
   "fonte_prezzi": "Alpaca SIP, adjustment=all",
   "provenienza_dati": {
     "daily": {
@@ -188,10 +188,10 @@
       "ROKU": -0.01718147937590797,
       "RDDT": -0.00980832104622087,
       "HOOD": -0.020926876202694067,
-      "WDC": 0.05863170052313338,
+      "WDC": 0.058627641981741085,
       "SPCX": -0.011954053693068123
     },
-    "dispersione_sigma": 0.024183443366999076,
+    "dispersione_sigma": 0.02418333722914846,
     "mover_3pct": 18,
     "up": 11,
     "down": 7,
@@ -1888,8 +1888,8 @@
       "qty_initial": 0.3346971640000005,
       "qty_open": 0.0,
       "qty_close": 0.0,
-      "open_price": 452.22,
-      "close_price": 467.46,
+      "open_price": 452.07,
+      "close_price": 467.31,
       "opening_notional_usd": 0.0,
       "exited_intraday": false,
       "exit_price": null,
@@ -11219,12 +11219,12 @@
         "qty": 0.3346971640000005,
         "entry_price": 549.24,
         "exit_price": null,
-        "mark_close": 467.46,
-        "mark_valutazione": 467.46,
+        "mark_close": 467.31,
+        "mark_valutazione": 467.31,
         "mark_valutazione_fonte": "daily_close",
-        "notional_usd": 156.45753628344022,
-        "ritorno_da_ingresso": -0.14889665719903877,
-        "ritorno_seduta": 0.05863170052313338,
+        "notional_usd": 156.40733170884022,
+        "ritorno_da_ingresso": -0.149169761852742,
+        "ritorno_seduta": 0.058627641981741085,
         "perdita_marcata": true,
         "righe_news_log_giorno": 2,
         "articoli_unici_giorno": 2,
@@ -12336,8 +12336,8 @@
         "qty_initial": 0.3346971640000005,
         "qty_open": 0.0,
         "qty_close": 0.0,
-        "open_price": 452.22,
-        "close_price": 467.46,
+        "open_price": 452.07,
+        "close_price": 467.31,
         "opening_notional_usd": 0.0,
         "exited_intraday": false,
         "exit_price": null,
@@ -27155,10 +27155,10 @@
         "scored_to_filled": null
       },
       "movimento": {
-        "gap_return": 0.024118486310211296,
-        "intraday_return": 0.03370041130423229,
-        "mfe_from_open": 0.035325505285038306,
-        "mae_from_open": -0.02226792269249489
+        "gap_return": 0.024103481865754395,
+        "intraday_return": 0.033711593337315104,
+        "mfe_from_open": 0.035326387506359636,
+        "mae_from_open": -0.02225319087751898
       },
       "sessioni": {
         "premarket": {
@@ -27166,93 +27166,93 @@
           "bars": 59,
           "first_bar_at": "2026-09-04T08:00:00+00:00",
           "last_bar_at": "2026-09-04T13:25:00+00:00",
-          "open": 447.05,
-          "close": 450.78,
-          "return": 0.008343585728665559
+          "open": 446.91,
+          "close": 450.64,
+          "return": 0.0083461994585039
         },
         "regular": {
           "available": true,
           "bars": 78,
           "first_bar_at": "2026-09-04T13:30:00+00:00",
           "last_bar_at": "2026-09-04T19:55:00+00:00",
-          "open": 450.78,
-          "close": 467.3,
-          "return": 0.03664758862416262
+          "open": 450.64,
+          "close": 467.15,
+          "return": 0.0366367832416119
         },
         "afterhours": {
           "available": true,
           "bars": 39,
           "first_bar_at": "2026-09-04T20:00:00+00:00",
           "last_bar_at": "2026-09-04T23:55:00+00:00",
-          "open": 467.46,
-          "close": 467.16,
-          "return": -0.0006417661404183317
+          "open": 467.31,
+          "close": 467.01,
+          "return": -0.0006419721384092192
         }
       },
       "stages": {
         "published_at": {
           "timestamp": "2026-09-04T16:25:16+00:00",
           "bar_timestamp": "2026-09-04T16:30:00+00:00",
-          "price": 464.63,
+          "price": 464.48,
           "price_source": "alpaca_sip_5min.open",
           "actual_price": null,
           "actual_price_source": null,
-          "quota_movimento_totale": 0.8906913866357673,
-          "quota_movimento_intraday": 0.8143044619422577,
-          "mfe": 0.007145470589501324,
-          "mae": -0.01115231474506595,
+          "quota_movimento_totale": 0.8906491499227208,
+          "quota_movimento_intraday": 0.8143044619422584,
+          "mfe": 0.007147778160523588,
+          "mae": -0.011152256286600104,
           "missing_reason": null
         },
         "first_seen_at": {
           "timestamp": "2026-09-04T16:30:01.148220+00:00",
           "bar_timestamp": "2026-09-04T16:35:00+00:00",
-          "price": 466.2897,
+          "price": 466.14,
           "price_source": "alpaca_sip_5min.open",
           "actual_price": null,
           "actual_price_source": null,
-          "quota_movimento_totale": 0.9547972190034764,
-          "quota_movimento_intraday": 0.9232086614173227,
-          "mfe": 0.003560661966155454,
-          "mae": -0.014671994684849254,
+          "quota_movimento_totale": 0.9547913446676964,
+          "quota_movimento_intraday": 0.9232283464566919,
+          "mfe": 0.0035611618826962843,
+          "mae": -0.014673703179302278,
           "missing_reason": null
         },
         "ingested_at": {
           "timestamp": "2026-09-04T16:45:19.361172+00:00",
           "bar_timestamp": "2026-09-04T16:50:00+00:00",
-          "price": 464.51,
+          "price": 464.36,
           "price_source": "alpaca_sip_5min.open",
           "actual_price": null,
           "actual_price_source": null,
-          "quota_movimento_totale": 0.8860563924295098,
-          "quota_movimento_intraday": 0.8064304461942259,
-          "mfe": 0.007405653269036083,
-          "mae": -0.010896859055779196,
+          "quota_movimento_totale": 0.8860123647604332,
+          "quota_movimento_intraday": 0.8064304461942265,
+          "mfe": 0.007408045481953618,
+          "mae": -0.010896718063571398,
           "missing_reason": null
         },
         "scored_at": {
           "timestamp": "2026-09-04T16:45:19.351555+00:00",
           "bar_timestamp": "2026-09-04T16:50:00+00:00",
-          "price": 464.51,
+          "price": 464.36,
           "price_source": "alpaca_sip_5min.open",
           "actual_price": null,
           "actual_price_source": null,
-          "quota_movimento_totale": 0.8860563924295098,
-          "quota_movimento_intraday": 0.8064304461942259,
-          "mfe": 0.007405653269036083,
-          "mae": -0.010896859055779196,
+          "quota_movimento_totale": 0.8860123647604332,
+          "quota_movimento_intraday": 0.8064304461942265,
+          "mfe": 0.007408045481953618,
+          "mae": -0.010896718063571398,
           "missing_reason": null
         },
         "eligible_cycle_at": {
           "timestamp": "2026-09-04T16:52:08.626062+00:00",
           "bar_timestamp": "2026-09-04T16:55:00+00:00",
-          "price": 465.48,
+          "price": 465.33,
           "price_source": "alpaca_sip_5min.open",
           "actual_price": null,
           "actual_price_source": null,
-          "quota_movimento_totale": 0.923522595596757,
-          "quota_movimento_intraday": 0.8700787401574824,
-          "mfe": 0.005306350433960549,
-          "mae": -0.012958021826931287,
+          "quota_movimento_totale": 0.9234930448222558,
+          "quota_movimento_intraday": 0.8700787401574792,
+          "mfe": 0.005308060945995452,
+          "mae": -0.012958545548320544,
           "missing_reason": null
         },
         "order_submitted_at": {
@@ -27305,10 +27305,10 @@
         "scored_to_filled": null
       },
       "movimento": {
-        "gap_return": 0.024118486310211296,
-        "intraday_return": 0.03370041130423229,
-        "mfe_from_open": 0.035325505285038306,
-        "mae_from_open": -0.02226792269249489
+        "gap_return": 0.024103481865754395,
+        "intraday_return": 0.033711593337315104,
+        "mfe_from_open": 0.035326387506359636,
+        "mae_from_open": -0.02225319087751898
       },
       "sessioni": {
         "premarket": {
@@ -27316,93 +27316,93 @@
           "bars": 59,
           "first_bar_at": "2026-09-04T08:00:00+00:00",
           "last_bar_at": "2026-09-04T13:25:00+00:00",
-          "open": 447.05,
-          "close": 450.78,
-          "return": 0.008343585728665559
+          "open": 446.91,
+          "close": 450.64,
+          "return": 0.0083461994585039
         },
         "regular": {
           "available": true,
           "bars": 78,
           "first_bar_at": "2026-09-04T13:30:00+00:00",
           "last_bar_at": "2026-09-04T19:55:00+00:00",
-          "open": 450.78,
-          "close": 467.3,
-          "return": 0.03664758862416262
+          "open": 450.64,
+          "close": 467.15,
+          "return": 0.0366367832416119
         },
         "afterhours": {
           "available": true,
           "bars": 39,
           "first_bar_at": "2026-09-04T20:00:00+00:00",
           "last_bar_at": "2026-09-04T23:55:00+00:00",
-          "open": 467.46,
-          "close": 467.16,
-          "return": -0.0006417661404183317
+          "open": 467.31,
+          "close": 467.01,
+          "return": -0.0006419721384092192
         }
       },
       "stages": {
         "published_at": {
           "timestamp": "2026-09-04T17:32:31+00:00",
           "bar_timestamp": "2026-09-04T17:35:00+00:00",
-          "price": 461.7747,
+          "price": 461.63,
           "price_source": "alpaca_sip_5min.open",
           "actual_price": null,
           "actual_price_source": null,
-          "quota_movimento_totale": 0.780405561993048,
-          "quota_movimento_intraday": 0.6269488188976376,
-          "mfe": 0.013372971711096415,
-          "mae": -0.00503795465624246,
+          "quota_movimento_totale": 0.7805255023183922,
+          "quota_movimento_intraday": 0.627296587926509,
+          "mfe": 0.013365682472976204,
+          "mae": -0.005047332279097927,
           "missing_reason": null
         },
         "first_seen_at": {
           "timestamp": "2026-09-04T17:45:01.053175+00:00",
           "bar_timestamp": "2026-09-04T17:50:00+00:00",
-          "price": 460.17,
+          "price": 460.02,
           "price_source": "alpaca_sip_5min.open",
           "actual_price": null,
           "actual_price_source": null,
-          "quota_movimento_totale": 0.7184241019698738,
-          "quota_movimento_intraday": 0.5216535433070875,
-          "mfe": 0.016906795314775014,
-          "mae": -0.0015683334419888117,
+          "quota_movimento_totale": 0.7183153013910347,
+          "quota_movimento_intraday": 0.5216535433070856,
+          "mfe": 0.01691230816051492,
+          "mae": -0.0015651493413328943,
           "missing_reason": null
         },
         "ingested_at": {
           "timestamp": "2026-09-04T19:15:14.388143+00:00",
           "bar_timestamp": "2026-09-04T19:20:00+00:00",
-          "price": 461.53,
+          "price": 461.38,
           "price_source": "alpaca_sip_5min.open",
           "actual_price": null,
           "actual_price_source": null,
-          "quota_movimento_totale": 0.7709540363074542,
-          "quota_movimento_intraday": 0.6108923884514419,
-          "mfe": 0.013910255021342133,
-          "mae": -0.000346673022338706,
+          "quota_movimento_totale": 0.7708655332302934,
+          "quota_movimento_intraday": 0.6108923884514433,
+          "mfe": 0.013914777406909717,
+          "mae": -0.0003467857297670962,
           "missing_reason": null
         },
         "scored_at": {
           "timestamp": "2026-09-04T19:15:14.379488+00:00",
           "bar_timestamp": "2026-09-04T19:20:00+00:00",
-          "price": 461.53,
+          "price": 461.38,
           "price_source": "alpaca_sip_5min.open",
           "actual_price": null,
           "actual_price_source": null,
-          "quota_movimento_totale": 0.7709540363074542,
-          "quota_movimento_intraday": 0.6108923884514419,
-          "mfe": 0.013910255021342133,
-          "mae": -0.000346673022338706,
+          "quota_movimento_totale": 0.7708655332302934,
+          "quota_movimento_intraday": 0.6108923884514433,
+          "mfe": 0.013914777406909717,
+          "mae": -0.0003467857297670962,
           "missing_reason": null
         },
         "eligible_cycle_at": {
           "timestamp": "2026-09-04T19:22:08.264610+00:00",
           "bar_timestamp": "2026-09-04T19:25:00+00:00",
-          "price": 462.89,
+          "price": 462.74,
           "price_source": "alpaca_sip_5min.open",
           "actual_price": null,
           "actual_price_source": null,
-          "quota_movimento_totale": 0.8234839706450369,
-          "quota_movimento_intraday": 0.7001312335958,
-          "mfe": 0.010931322776469576,
-          "mae": -0.0001620255352243749,
+          "quota_movimento_totale": 0.823415765069552,
+          "quota_movimento_intraday": 0.7001312335958012,
+          "mfe": 0.010934866231577134,
+          "mae": -0.00015127285300597926,
           "missing_reason": null
         },
         "order_submitted_at": {
@@ -32473,7 +32473,7 @@
       },
       {
         "symbol": "WDC",
-        "rendimento": 0.05863170052313338,
+        "rendimento": 0.058627641981741085,
         "held": true,
         "actionability": "PASSIVE_EXPOSURE",
         "pipeline": null,
@@ -35393,17 +35393,17 @@
       }
     ],
     "miss_cumulati": {
-      "NO_NEWS": 59,
-      "THIN_NEUTRAL": 62,
+      "NO_NEWS": 65,
+      "THIN_NEUTRAL": 65,
       "WRONG_SIGN": 9,
       "FILTERED": 12,
       "OUT_OF_STRATEGY_SCOPE": 5
     },
     "mediane_mobili_20g": {
-      "entry_percentile": 0.6202748102567849,
-      "drift_post_uscita": 0.9445311837600358,
-      "n_ingressi": 58,
-      "n_chiusure": 63
+      "entry_percentile": 0.6292679595738839,
+      "drift_post_uscita": 0.1614316742966517,
+      "n_ingressi": 52,
+      "n_chiusure": 58
     },
     "ore_tenuta_s4": {
       "strategia": "S4",
