@@ -38,8 +38,13 @@ exec >>"$LOG_FILE" 2>&1
 cd "$PROJECT_DIR"
 if [[ -f "$PROJECT_DIR/.env" ]]; then
     set -a
+    # Selettivo di proposito, non `source .env` integrale: le variabili esportate
+    # qui restano nell'ambiente dell'intero cron, sessione Claude inclusa, e il
+    # prompt non deve ricevere segreti che non le servono (li legge lei dal .env).
+    # FMP_API_KEY serve al dossier (#507 / F-063: senza, il calendario earnings
+    # e' UNKNOWN su ogni intento e il difetto sembra un problema di provider).
     # shellcheck disable=SC1091
-    source <(grep -E '^ALPACA_(API_KEY|SECRET_KEY)=' "$PROJECT_DIR/.env" | sed 's/#.*//')
+    source <(grep -E '^(ALPACA_(API_KEY|SECRET_KEY)|FMP_API_KEY)=' "$PROJECT_DIR/.env" | sed 's/#.*//')
     set +a
 fi
 set +e
@@ -399,6 +404,29 @@ else
     # che nel log — come gia' fanno la sessione Claude e la riconciliazione.
     tg_send "⚠️ Generazione dossier ${DATE_TARGET} fallita — la sessione procede senza dossier. Controlla <code>${LOG_FILE}</code>." "" || true
     DOSSIER_FILE="(non disponibile)"
+fi
+
+# #507 / F-063: la cecita' del calendario earnings era scritta nel dossier e
+# letta da nessuno — quattro sedute con giorno_di_earnings UNKNOWN su ogni
+# intento, exit 0 e nessuna allerta. Il dossier ora porta lo streak nel blocco
+# `calendario_earnings`; da 2 sedute consecutive si allerta come il resto del
+# cron, senza bloccare la seduta (un dossier cieco vale piu' di nessun dossier).
+if [[ -f "$DOSSIER_FILE" ]]; then
+    set +e
+    STREAK_CALENDARIO_EARNINGS=$(uv run python3 - "$DOSSIER_FILE" <<'PYEOF'
+import json, sys
+try:
+    blocco = (json.load(open(sys.argv[1])) or {}).get("calendario_earnings") or {}
+    print(int(blocco.get("streak_sedute_consecutive_unknown") or 0))
+except Exception:
+    print(0)
+PYEOF
+    )
+    set -e
+    if (( STREAK_CALENDARIO_EARNINGS >= 2 )); then
+        echo "ATTENZIONE: calendario earnings UNKNOWN da ${STREAK_CALENDARIO_EARNINGS} sedute consecutive — giorno_di_earnings cieco su ogni intento S4 (#507 / F-063)"
+        tg_send "🚨 Dossier ${DATE_TARGET}: calendario earnings UNKNOWN da ${STREAK_CALENDARIO_EARNINGS} sedute consecutive — giorno_di_earnings e' cieco su ogni intento S4. Verifica FMP_API_KEY nel .env e <code>${LOG_FILE}</code> (#507 / F-063)." "" || true
+    fi
 fi
 
 _CLAUDE_PROMPT="${_PROMPT_TEMPLATE//__DATE_TARGET__/$DATE_TARGET}"

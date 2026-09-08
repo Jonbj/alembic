@@ -197,10 +197,10 @@ def test_earnings_symbols_da_dizionario_con_events():
 
 
 def test_earnings_symbols_none_se_fonte_earnings_fallita():
-    """missingness segnala earnings_calendar_unavailable -> UNKNOWN, non vuoto."""
+    """missingness earnings_calendar_* -> UNKNOWN, non vuoto (#335, marker #507)."""
     cal = {
         "events": [{"symbol": "MSFT", "event_type": "dividend"}],
-        "missingness": ["earnings_calendar_unavailable"],
+        "missingness": ["earnings_calendar_fetch_failed"],
         "complete": False,
     }
     assert dossier._earnings_symbols_from_calendar(cal) is None

@@ -86,7 +86,7 @@ FINESTRA_MEDIANE = 20  # giorni, per le mediane mobili
 # senza far crescere la query oltre un indice su (ticker, fetched_at).
 FINESTRA_SEDUTE_COPERTURA = 10
 INIZIO_OSSERVAZIONE = date(2026, 8, 3)
-DOSSIER_SCHEMA_VERSION = "2.8"
+DOSSIER_SCHEMA_VERSION = "2.9"
 NEW_YORK = ZoneInfo("America/New_York")
 
 
@@ -750,9 +750,12 @@ def _corporate_calendar(giorno: date, simboli: list[str]) -> dict:
                 missingness.append("earnings_calendar_invalid_response")
         except Exception as exc:
             log.warning("Calendario earnings FMP non disponibile per %s: %s", giorno, exc)
-            missingness.append("earnings_calendar_unavailable")
+            # #507 (F-063): un difetto di configurazione e' distinto da un disservizio
+            # del provider. Il marker conflato `earnings_calendar_unavailable` ha fatto
+            # leggere quattro sedute di chiave mancante come un problema di FMP.
+            missingness.append("earnings_calendar_fetch_failed")
     else:
-        missingness.append("earnings_calendar_unavailable")
+        missingness.append("earnings_calendar_no_credentials")
 
     alpaca_key = os.environ.get("ALPACA_API_KEY", "")
     alpaca_secret = os.environ.get("ALPACA_SECRET_KEY", "")
@@ -1901,6 +1904,15 @@ def costruisci_dossier(
         barre=barre,
     )
 
+    # --- salute della fonte earnings (#507 / F-063) ------------------------
+    # La condizione esisteva gia' nel dossier (missingness, giorno_di_earnings
+    # UNKNOWN) ma nessuno la leggeva: quattro sedute cieche senza allerta. Il
+    # blocco la porta a livello schema con lo streak, sulle stesse sedute del
+    # #324 per non interrogare il calendario di borsa due volte.
+    calendario_earnings = _blocco_calendario_earnings(
+        corporate_calendar, sedute_copertura
+    )
+
     # --- aggregazioni ------------------------------------------------------
     # stop_strategy GREZZA, senza COALESCE su S1/S4: la coorte legacy (F-002,
     # stop_strategy NULL) deve restare riconoscibile nel bucket orario, non
@@ -2070,6 +2082,21 @@ def costruisci_dossier(
                 ),
                 "remote_context_loaded": fetch_remote_context,
             },
+            "calendario_earnings": {
+                "status": (
+                    "UNKNOWN quando la fonte earnings era assente "
+                    "(earnings_calendar_no_credentials), fallita "
+                    "(earnings_calendar_fetch_failed) o non interrogata; "
+                    "OBSERVED altrimenti (#507 / F-063)"
+                ),
+                "streak": (
+                    "sedute consecutive, il giorno compreso, con status UNKNOWN; "
+                    "None se il calendario di borsa non risponde (#324 fail-open). "
+                    "Nei dossier pre-#507 la cecita' e' inferita da "
+                    "giorno_di_earnings=None sugli intenti (#335)"
+                ),
+                "freeze": "misura read-only; l'allerta del cron non blocca la seduta",
+            },
             "no_news_backstop": {
                 "version": BACKSTOP_VERSION,
                 "population": "intera watchlist a zero righe news_log nella seduta",
@@ -2103,6 +2130,7 @@ def costruisci_dossier(
         "funnel_v2": funnel_v2,
         "event_market_context": event_market_context,
         "no_news_backstop": no_news_backstop,
+        "calendario_earnings": calendario_earnings,
         "aggregati": {
             "per_ora_ingresso": aggregate_by_entry_hour(chiusi_storici),
             "miss_cumulati": _miss_cumulati(),
@@ -2146,6 +2174,95 @@ def _earnings_symbols_from_calendar(corporate_calendar: dict | list | None) -> s
         str(ev.get("symbol") or "").upper()
         for ev in eventi
         if str(ev.get("event_type") or "").casefold() == "earnings"
+    }
+
+
+def _calendario_earnings_cieco(payload: dict) -> bool | None:
+    """Il dossier di una seduta era cieco sul calendario earnings?
+
+    Nei dossier scritti dal #507 in poi si legge il blocco `calendario_earnings`;
+    nei precedenti la cecita' si inferisce dagli intenti: `giorno_di_earnings`
+    e' None su tutti quando la fonte earnings era assente o fallita, perche' il
+    None/non-False per difetto e' esattamente il contratto #335. Senza blocco ne'
+    intenti non si puo' dire nulla (None), e lo streak non lo rivendica.
+    """
+    blocco = payload.get("calendario_earnings")
+    if isinstance(blocco, dict) and blocco.get("status"):
+        return str(blocco["status"]).upper() == "UNKNOWN"
+    intenti = payload.get("intenti_ingresso_s4") or []
+    if intenti:
+        return any(riga.get("giorno_di_earnings") is None for riga in intenti)
+    return None
+
+
+def _streak_calendario_earnings_sconosciuto(
+    cieca_oggi: bool,
+    sedute: Sequence[str],
+    dossier_dir: Path | None = None,
+) -> int | None:
+    """Sedute consecutive, oggi compreso, con calendario earnings UNKNOWN.
+
+    `sedute` sono le sedute di borsa che finiscono nel giorno (la stessa lista
+    del #324, cosi' i weekend non contano come sedute mute); vuota significa
+    calendario di borsa non risposto, e lo streak resta None, non 0. Un dossier
+    mancante o illeggibile interrompe lo streak: la consecutivita' non verificata
+    non e' consecutivita'. Serve all'allerta #507, non a nessuna decisione.
+    """
+    if not cieca_oggi:
+        return 0
+    if not sedute:
+        return None
+    dir_dossier = dossier_dir if dossier_dir is not None else OUT_DIR
+    streak = 1
+    for seduta in reversed(list(sedute)[:-1]):  # l'ultima e' il giorno stesso
+        percorso = dir_dossier / f"{seduta}.json"
+        if not percorso.exists():
+            break
+        try:
+            payload = json.loads(percorso.read_text())
+        except (OSError, ValueError):
+            break
+        if _calendario_earnings_cieco(payload) is not True:
+            break
+        streak += 1
+    return streak
+
+
+def _blocco_calendario_earnings(
+    corporate_calendar: dict | list | None,
+    sedute: Sequence[str],
+    dossier_dir: Path | None = None,
+) -> dict:
+    """Salute della sola fonte earnings del calendario corporate, per seduta.
+
+    F-063/#507: quattro sedute di `giorno_di_earnings` UNKNOWN sono state
+    scritte nel dossier senza che nessuno le leggesse. Il blocco porta la
+    condizione a livello schema, con lo streak, cosi' il cron puo' allertare.
+    Misura read-only: non entra in nessuna decisione di trading.
+    """
+    cieca_oggi = _earnings_symbols_from_calendar(corporate_calendar) is None
+    if corporate_calendar is None:
+        missingness = ["earnings_calendar_not_fetched"]
+        sources: list[str] = []
+    elif isinstance(corporate_calendar, dict):
+        missingness = [
+            str(m) for m in corporate_calendar.get("missingness") or []
+            if "earnings_calendar" in str(m)
+        ]
+        sources = [
+            str(s) for s in corporate_calendar.get("sources_succeeded") or []
+            if "earnings" in str(s).casefold()
+        ]
+    else:  # lista nuda di eventi (forma dei test): assente != fallita
+        missingness, sources = [], []
+    return {
+        "status": "UNKNOWN" if cieca_oggi else "OBSERVED",
+        "missingness": missingness,
+        "sources_succeeded": sources,
+        "streak_sedute_consecutive_unknown": _streak_calendario_earnings_sconosciuto(
+            cieca_oggi, sedute, dossier_dir
+        ),
+        "freeze": "strumento di misura read-only (#507); nessuna taratura toccata",
     }
 
 
