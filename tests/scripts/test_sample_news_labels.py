@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import psycopg2
+import psycopg2.extras
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent.parent
@@ -21,6 +22,7 @@ BASE_MIGRATIONS = [
     (REPO / "migrations" / "006_add_news_log.sql").read_text(),
     (REPO / "migrations" / "027_news_log_published_at.sql").read_text(),
     (REPO / "migrations" / "029_news_labels.sql").read_text(),
+    (REPO / "migrations" / "030_news_log_extraction_method.sql").read_text(),
     (REPO / "migrations" / "046_news_labels_2annotator.sql").read_text(),
 ]
 TEST_DB = "alembic_test_qx01_sampler"
@@ -106,7 +108,7 @@ def test_targets_sum_to_400_with_spec_split():
 def test_sampler_seeds_400_pending_rows_with_news_log_id(db_url):
     _seed(db_url)
     with patch.dict(os.environ, {"DATABASE_URL": db_url}):
-        sampler.main()
+        sampler.main([])
 
     conn = psycopg2.connect(db_url)
     with conn.cursor() as cur:
@@ -137,9 +139,180 @@ def test_sampler_seeds_400_pending_rows_with_news_log_id(db_url):
 def test_sampler_is_idempotent_on_news_log_id(db_url):
     # Il secondo run non inserisce nulla (gia' presente una riga per news_log_id).
     with patch.dict(os.environ, {"DATABASE_URL": db_url}):
-        sampler.main()
+        sampler.main([])
     conn = psycopg2.connect(db_url)
     with conn.cursor() as cur:
         cur.execute("SELECT COUNT(*) FROM news_labels WHERE status='pending'")
         assert cur.fetchone()[0] == 400
     conn.close()
+
+
+# --- #461: finestra temporale + stratificazione per extraction_method -----------
+
+def _seed_qt03_articles(url: str) -> None:
+    """Articoli post-QT-03 (extraction_method valorizzato) per i test di finestra.
+
+    200 alpaca_benzinga/source_metadata + 250 gdelt_gkg/org_lookup +
+    5 marketaux/source_metadata pubblicati 2026-07-02 (dentro la finestra),
+    piu' 20 alpaca_benzinga a metodo NULL pubblicati 2026-06-15 (fuori finestra):
+    la popolazione reale post-QT-03 ha marketaux=5 (target storico 70 irrealizzabile).
+    """
+    conn = psycopg2.connect(url)
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        for source, method, n in (("alpaca_benzinga", "source_metadata", 200),
+                                  ("gdelt_gkg", "org_lookup", 250),
+                                  ("marketaux", "source_metadata", 5)):
+            for i in range(n):
+                cur.execute(
+                    """INSERT INTO news_log (title, url, source, ticker, body_snippet,
+                                              raw_sentiment, extraction_method,
+                                              fetched_at, published_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s,
+                               '2026-07-02 12:00:00+00', '2026-07-02 10:00:00+00')""",
+                    (f"qt03 {source} {i}", f"https://qt03/{source}/{i}", source, "AAPL",
+                     f"body {i}", 0.01 if i % 5 == 0 else 0.5, method),
+                )
+        for i in range(20):   # pre-QT-03: fuori finestra, extraction_method NULL
+            cur.execute(
+                """INSERT INTO news_log (title, url, source, ticker, body_snippet,
+                                          raw_sentiment, fetched_at, published_at)
+                   VALUES (%s, %s, 'alpaca_benzinga', 'AAPL', %s, 0.5,
+                           '2026-06-15 12:00:00+00', '2026-06-15 10:00:00+00')""",
+                (f"pre-qt03 {i}", f"https://qt03/pre/{i}", f"body {i}"),
+            )
+    conn.close()
+
+
+def test_post_qt03_targets_are_explicit_per_extraction_method():
+    # Target della finestra post-QT-03: espliciti per (source, extraction_method),
+    # totale 400, marketaux ricalibrato sull'intera popolazione disponibile (5).
+    targets = sampler._TARGETS_POST_QT03
+    assert set(targets) == {
+        ("alpaca_benzinga", "source_metadata"),
+        ("gdelt_gkg", "org_lookup"),
+        ("marketaux", "source_metadata"),
+    }
+    assert sum(targets.values()) == 400
+    assert targets[("marketaux", "source_metadata")] == 5
+
+
+def test_da_window_stratifies_by_extraction_method(db_url):
+    _seed_qt03_articles(db_url)
+    with patch.dict(os.environ, {"DATABASE_URL": db_url}):
+        sampler.main(["--da", "2026-07-01"])
+
+    conn = psycopg2.connect(db_url)
+    with conn.cursor() as cur:
+        # Composizione per (source, extraction_method) delle sole righe della
+        # finestra (url qt03/): deve coincidere coi target dichiarati, non ci
+        # sono riempimenti silenziosi fra rami.
+        cur.execute(
+            """SELECT lbl.source, nl.extraction_method, COUNT(*)
+                 FROM news_labels lbl JOIN news_log nl ON nl.id = lbl.news_log_id
+                WHERE lbl.status = 'pending' AND lbl.url LIKE 'https://qt03/%'
+                  AND nl.published_at < '2026-06-15'
+                GROUP BY 1, 2"""
+        )
+        assert cur.fetchall() == []   # niente articoli fuori finestra
+
+        cur.execute(
+            """SELECT lbl.source, nl.extraction_method, COUNT(*)
+                 FROM news_labels lbl JOIN news_log nl ON nl.id = lbl.news_log_id
+                WHERE lbl.status = 'pending' AND lbl.url LIKE 'https://qt03/%'
+                GROUP BY 1, 2 ORDER BY 1, 2"""
+        )
+        by_stratum = {(r[0], r[1]): r[2] for r in cur.fetchall()}
+        assert by_stratum == dict(sampler._TARGETS_POST_QT03)
+    conn.close()
+
+
+def test_windowed_output_states_collinearity_limit(db_url, capsys):
+    # Il limite method<->source e' una premessa della misura #405: deve stare
+    # nell'output, non essere scoperto a valle. Run idempotente (gia' inseito).
+    with patch.dict(os.environ, {"DATABASE_URL": db_url}):
+        sampler.main(["--da", "2026-07-01"])
+    out = capsys.readouterr().out
+    assert "collinear" in out
+
+
+def test_windowed_output_declares_untargeted_strata(db_url, capsys):
+    # La composizione comprende anche fonti senza target: cnbc/regex va dichiarato
+    # escluso, non puo' sparire solo perche' cnbc non compare nei target QX-01.
+    conn = psycopg2.connect(db_url)
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO news_log (title, url, source, ticker, body_snippet,
+                                      raw_sentiment, extraction_method,
+                                      fetched_at, published_at)
+               SELECT 'qt03 cnbc', 'https://qt03/cnbc/review-regression', 'cnbc',
+                      'AAPL', 'body', 0.5, 'regex',
+                      '2026-07-02 12:00:00+00', '2026-07-02 10:00:00+00'
+                WHERE NOT EXISTS (
+                      SELECT 1 FROM news_log
+                       WHERE url = 'https://qt03/cnbc/review-regression')"""
+        )
+    conn.close()
+
+    with patch.dict(os.environ, {"DATABASE_URL": db_url}), \
+         patch.object(sampler, "_TARGETS_POST_QT03", {}):
+        sampler.main(["--da", "2026-07-01"])
+    out = capsys.readouterr().out
+    assert "cnbc/regex: 1 available — excluded (no target for this stratum)" in out
+
+
+def test_branch_under_target_is_loud_and_not_backfilled(db_url, capsys):
+    # Target marketaux storico (70) irrealizzabile: 5 disponibili. Il ramo resta
+    # sotto target, viene detto esplicitamente, exit code 1, e l'altro ramo NON
+    # assorbe la differenza (gdelt resta al suo target).
+    patched = dict(sampler._TARGETS_POST_QT03)
+    patched[("marketaux", "source_metadata")] = 70
+    with patch.dict(os.environ, {"DATABASE_URL": db_url}), \
+         patch.object(sampler, "_TARGETS_POST_QT03", patched):
+        with pytest.raises(SystemExit) as exc:
+            sampler.main(["--da", "2026-07-01"])
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "marketaux/source_metadata" in out
+    assert "UNDER TARGET" in out
+
+    conn = psycopg2.connect(db_url)
+    with conn.cursor() as cur:
+        cur.execute(
+            """SELECT COUNT(*) FROM news_labels lbl
+                 JOIN news_log nl ON nl.id = lbl.news_log_id
+                WHERE lbl.status = 'pending' AND lbl.url LIKE 'https://qt03/%'
+                  AND nl.source = 'gdelt_gkg'"""
+        )
+        assert cur.fetchone()[0] == sampler._TARGETS_POST_QT03[("gdelt_gkg", "org_lookup")]
+    conn.close()
+
+
+def test_fetch_articles_respects_window_bounds(db_url):
+    # --da e' inclusivo, --a copre l'intera giornata indicata (bound = giorno+1).
+    conn = psycopg2.connect(db_url)
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        for i, pub in ((0, "2026-06-15 10:00:00+00"),   # prima di --da
+                       (1, "2026-07-02 10:00:00+00"),   # dentro
+                       (2, "2026-07-05 10:00:00+00")):  # dopo --a
+            cur.execute(
+                """INSERT INTO news_log (title, url, source, ticker, body_snippet,
+                                          raw_sentiment, extraction_method,
+                                          fetched_at, published_at)
+                   VALUES (%s, %s, 'gdelt_gkg', 'AAPL', 'b', 0.5, 'org_lookup',
+                           %s, %s)""",
+                (f"win {i}", f"https://qt03win/{i}", pub, pub),
+            )
+    conn.close()
+
+    import datetime
+    conn = psycopg2.connect(db_url)
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        rows = sampler._fetch_articles(cur, "gdelt_gkg",
+                                       da=datetime.date(2026, 7, 1),
+                                       a=datetime.date(2026, 7, 2))
+    conn.close()
+    assert sorted(r["url"] for r in rows if r["url"].startswith("https://qt03win/")) == \
+        ["https://qt03win/1"]
