@@ -20,6 +20,15 @@ signed_at: "2026-08-22"
 issue: 293
 changelog:
   - "1.0.0 (#293): creazione, parametri congelati prima di n=0."
+  - >-
+    2026-09-09 (#298, non materiale, version invariata): power.N_cluster.value fissato a 5816, proposto da
+    scripts/check_s4_trial_milestones.sh alla milestone N_CLUSTER_PROPONIBILE
+    (sigma_delta blinded stimato su 7 cluster/20 osservazioni, alpha 5%
+    unilaterale, potenza 90%, per la formula gia' pre-registrata in §8.4 del
+    contratto). Non materiale: completa un placeholder previsto dal protocollo
+    pre-registrato, non lo modifica. Decisione dell'operatore, non di un job —
+    vedi docs/evidence/CONTRATTO_TRIAL_EXIT_S4_2026-08-22.md § Registro delle
+    modifiche.
 
 contract:
   document: "docs/evidence/CONTRATTO_TRIAL_EXIT_S4_2026-08-22.md"
@@ -167,7 +176,11 @@ power:
   power: 0.90
   inflation_for: ["dipendenza", "missingness"]
   N_cluster:
-    value: null
+    value: 5816
+    fixed_at: "2026-09-09"
+    proposed_by: "scripts/check_s4_trial_milestones.sh — milestone N_CLUSTER_PROPONIBILE"
+    sigma_delta_bps_at_fixing: 651.4555791853214
+    clusters_observed_at_fixing: 7
     derived_from: "sigma_delta blinded + alpha 5% unilaterale + potenza 90%"
     blinded_reestimation:
       allowed: 1

@@ -217,9 +217,11 @@ def test_il_report_pubblica_il_verdetto_del_valutatore(monkeypatch, capsys):
     evaluation = payload["evaluation"]
     assert evaluation["observations"] == payload["paired"]["comparable"]
     assert evaluation["cluster_unit"] == "d0_session"
-    # `N_cluster` e' ancora null nel contratto: nessun verdetto e' dovuto
+    # `N_cluster` e' fissato a 5816 dal 2026-09-09 (#298): con 3 sedute
+    # osservate qui il verdetto non e' comunque dovuto, ma non per assenza di
+    # traguardo -- per campione sotto il traguardo.
     assert evaluation["decision_due"] is False
-    assert "N_cluster_not_derived" in evaluation["steps"][0]["notes"]
+    assert "below_n_cluster" in evaluation["steps"][0]["notes"]
     assert evaluation["promoted_policy_id"] is None
 
 

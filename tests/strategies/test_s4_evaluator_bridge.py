@@ -180,8 +180,10 @@ def test_le_impostazioni_arrivano_dal_contratto_congelato():
     assert settings.mde_time_bps == 25.0
     assert settings.alpha == 0.05
     assert settings.power == 0.90
-    # `N_cluster` e `MDE_counter` sono ancora da fissare: il contratto lo dice
-    assert settings.n_cluster is None
+    # `N_cluster` fissato a 5816 il 2026-09-09 (#298, milestone
+    # N_CLUSTER_PROPONIBILE). `MDE_counter` resta da fissare: segue P2,
+    # ancora omitted.
+    assert settings.n_cluster == 5816
     assert settings.mde_counter_bps is None
     assert settings.scheme.alpha == 0.05
 
