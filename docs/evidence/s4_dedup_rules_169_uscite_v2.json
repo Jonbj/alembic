@@ -1,0 +1,47 @@
+{
+  "n_uscite_totali": 22,
+  "realized_medio_uscite": 2.275765078042178,
+  "regole": {
+    "ultimo_prod": {
+      "n_uscite": 22,
+      "n_uscite_salve": 0,
+      "realized_uscite_salve": null
+    },
+    "ultimo": {
+      "n_uscite": 22,
+      "n_uscite_salve": 1,
+      "realized_uscite_salve": 12.128597117363766
+    },
+    "massimo": {
+      "n_uscite": 22,
+      "n_uscite_salve": 16,
+      "realized_uscite_salve": -0.8013701332424221
+    },
+    "media_conf": {
+      "n_uscite": 22,
+      "n_uscite_salve": 5,
+      "realized_uscite_salve": 5.3986757339424765
+    },
+    "media_decay": {
+      "n_uscite": 22,
+      "n_uscite_salve": 2,
+      "realized_uscite_salve": 3.298370474107548
+    },
+    "issuer_first": {
+      "n_uscite": 22,
+      "n_uscite_salve": 3,
+      "realized_uscite_salve": 5.1256079607726415
+    },
+    "issuer_or_fallback_clean": {
+      "n_uscite": 22,
+      "n_uscite_salve": 2,
+      "realized_uscite_salve": 1.6241133824770795
+    }
+  },
+  "finestra": {
+    "since": "2026-06-15",
+    "until": "2026-08-29",
+    "soglia_gate": 0.3
+  },
+  "metodo": "una chiusura per evento (trades JOIN execution_decisions su decision_id con exit_mechanism='below_entry_gate'); segnali del simbolo con generated_at <= decision_at nello stesso giorno UTC; stesse regole e stessa soglia 0.30 della misura ingressi. Una uscita e' 'salva' se la candidata >= soglia (la candidata avrebbe tenuto aperto, costo non preso). Baseline (ultimo_prod) per costruzione n_salve=0. v2: le due regole issuer-first valgono anche qui, con la stessa attribution degli ingressi — la regola d'uscita non puo' essere diversa da quella d'ingresso."
+}
