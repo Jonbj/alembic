@@ -130,7 +130,6 @@
 511  il gap di copertura news e' per-ticker e permanente, non un buco rotante: 16 simboli su 96 (16,7%) hanno zero articoli su tutte le 8 sessioni osservate — RDDT +9,31% e ARM +3,29% sono costati $193 di opportunita' accessibile (F-001, affinato)
 458  PoC shadow Twelve Data press_releases (10-20 simboli, 5 sedute): nessuna scrittura sul path live, tabella dedicata `news_poc_samples` — misura copertura/latenza/qualita' prima di decidere l'integrazione
 459  PoC shadow Tiingo News API: vincolo di licenza sul piano gratuito vieta di persistere il payload, solo aggregati per (simbolo, giorno) non ricostruibili — stessa misura di #458, schema dati piu' stretto
-514  weekly alpha-miss: versionare nel repository prompt/orchestrazione/formato/controlli del job, e sostituire l'orario fisso con un trigger di completezza — testa della nuova catena #515-#521 (il resto e' `waiting`/decisione PO, vedi fuori coda)
 287  alpha-miss: rendere coerente il contratto prompt/output — dossier unica fonte numerica, fallback DATA_INCOMPLETE esplicito, ledger deterministico — blocked_by #281 (funnel v2), chiusa il 03/09
 
 # === 6. IL RESTO ===
@@ -176,7 +175,7 @@
 #        evidenza ancora in raccolta o freeze fino al 28/09). #22, #24, #288
 #        decise e chiuse lo stesso giorno (vedi sopra).
 #   #515-#521 — nuova catena "weekly alpha-miss v2" (inserita 2026-09-05): #514
-#        (in coda sopra) e' l'unica meta' `ready-for-agent`. #515 e' `waiting`
+#        e' stata presa in carico nella PR #536. #515 e' `waiting`
 #        (pilot di due settimane in corso); #517 e #520 sono decisioni PO;
 #        #516/#518/#521 sono `blocked_by` rispettivamente #515/#517/#520 e non
 #        rientrano finche' quelle non si sbloccano.

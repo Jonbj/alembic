@@ -195,6 +195,60 @@ the absence of a mobile incident as proof that the host is healthy.
 
 ## Script Operativi
 
+### Riepilogo weekly alpha-miss (lunedì, dopo il job giornaliero)
+
+```bash
+scripts/weekly_alpha_miss_analysis.sh --pilot
+```
+
+Il riepilogo non usa un intervallo lunedì-venerdì costruito a mano: interroga il
+calendario Alpaca, individua l'ultima settimana ISO conclusa e pretende report,
+dossier e log giornaliero riuscito per ogni seduta attesa. Di conseguenza il
+venerdì entra nel report solo dopo che il job giornaliero del lunedì lo ha
+prodotto. Un input mancante interrompe il giro prima del draft e prima di ogni
+scrittura GitHub.
+
+Ogni run parte da `origin/main` in
+`.worktrees/weekly-alpha-miss-YYYY-Www`, conserva report, manifest, snapshot
+issue e piano di pubblicazione in una PR e solo dopo il gate deterministico crea
+o commenta issue. Le issue nuove ricevono soltanto `alpha-miss`,
+`weekly-findings`, `wayfinder:task` e `needs-triage`, quindi vengono collegate
+come child native di #21. Il job non assegna mai `freeze-ok`, tier,
+`ready-for-agent`, `ready-for-human` o `waiting`: queste label restano una
+decisione di triage.
+
+Durante il pilot, `--pilot` salva anche il report value-first read-only e registra
+il campione su #515. Al secondo campione appaiato il contatore rimuove `waiting`
+e applica `ready-for-agent`; non chiude la issue e non valuta da solo la qualità
+del candidato. `--dry-run-publication` esegue tutti i gate e apre la PR, ma non
+crea né commenta issue operative.
+
+Il retry è affidato a più invocazioni del lunedì. La prima che trova gli input
+completi pubblica; le successive riconoscono la PR della settimana e riprendono
+in modo idempotente un'eventuale pubblicazione rimasta a metà:
+
+```cron
+# Orari host Europe/Rome; ritenta la stessa settimana conclusa fino al venerdì.
+30 11,13,15 * * 1-5 /home/stefano/Documents/Projects/Alembic/scripts/weekly_alpha_miss_analysis.sh --pilot
+```
+
+Procedura di attivazione:
+
+1. fare merge della PR che introduce il job e verificare che il checkout host
+   contenga lo script;
+2. disattivare il precedente scheduled task cloud del sabato (`c1814a643c32`),
+   per evitare due publisher concorrenti;
+3. installare le quindici invocazioni logiche sopra nel crontab host (è una sola
+   entry con tre ore per cinque giorni) e verificare con `crontab -l`;
+4. per la prima settimana eseguire prima
+   `scripts/weekly_alpha_miss_analysis.sh --pilot --dry-run-publication`, poi il
+   comando normale; il dry-run non registra il campione su #515. Controllare
+   `logs/weekly_alpha_miss_YYYY-MM-DD.log`, la PR e il commento campione su #515.
+
+Non attivare il cron host finché il task cloud è ancora abilitato. In caso di
+fallimento il worktree viene conservato per ispezione; il job non esegue reset
+distruttivi su un tentativo incompleto.
+
 ### Analisi giornaliera (cron 14:30 CEST, lun-ven)
 
 ```bash
