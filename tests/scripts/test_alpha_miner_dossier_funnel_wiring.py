@@ -206,6 +206,80 @@ def test_dossier_pubblica_il_blocco_funnel_v2_affiancato_al_legacy():
     assert "funnel_v2" in payload["provenienza_dati"]
 
 
+def test_dossier_riconcilia_la_causa_legacy_con_il_verdetto_funnel():
+    """#509 full flow: un candidato sopra il gate (legacy NON_CLASSIFICATO)
+    la cui causa e' pienamente nota nel funnel_v2 dello stesso dossier non
+    resta nel bucket dell'ignoranza. La causa viene promossa con il verdetto
+    v2, il valore storico resta in causa_legacy, e la serie pre-registrata
+    (`aggregati.cause_del_giorno`) resta invariata (#288 Opzione 1)."""
+    from datetime import datetime, timezone
+
+    def fake_psql(query: str):
+        if "risk_blocks_281" in query:
+            return []
+        if "FROM s4_candidate_population" in query:
+            return [["intent-wmt", "7001", "WMT",
+                     "2026-08-20T16:36:00+00:00", "2026-08-20T16:37:00+00:00",
+                     "0.45", "RANK_SELECTED", "true", "42", ""]]
+        if "article_coverage_279" in query:
+            return [["1", "7001", "WMT", "WMT beats earnings expectations",
+                     "", "https://example.com/wmt", "gdelt_gkg",
+                     "2026-08-20T14:10:00+00:00", "2026-08-20T14:12:00+00:00",
+                     "", "org_lookup", "0.45", "", "", ""]]
+        if "FROM sentiment_signals ss LEFT JOIN news_log nl" in query:
+            return [["WMT", "16:36", "0.45", "f", "", "", "", "7001"]]
+        if "SELECT ticker, count(*) FROM news_log" in query:
+            return [["WMT", "1"]]
+        if "SELECT DISTINCT symbol FROM trades" in query:
+            # WMT NON e' in portafoglio: e' un candidato miss vero, sopra il
+            # gate (0.45), il cui ingresso pero' e' stato eseguito (CAUGHT).
+            return []
+        return []
+
+    cutoff = datetime(2026, 8, 20, 23, 59, tzinfo=timezone.utc)
+    with (
+        patch.object(dossier, "_psql", side_effect=fake_psql),
+        patch.object(dossier, "_barre", return_value={
+            "WMT": {"open": 116.0, "high": 118.5, "low": 115.0,
+                    "close": 117.95, "close_prec": 112.0},
+            "SPY": {"open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0,
+                    "close_prec": 100.0},
+        }),
+        patch.object(dossier, "_soglia_gate_s4", return_value=0.30),
+        patch.object(dossier, "_timeline_eventi", return_value=[
+            {"signal_id": 7001, "symbol": "WMT", "news_log_id": 1,
+             "score": 0.45, "fallback": False,
+             "published_at": None, "first_seen_at": None, "ingested_at": None,
+             "scored_at": None, "eligible_cycle_at": None,
+             "order_id": "o1", "trade_id": 42},
+        ]),
+        patch.object(dossier, "_dettagli_ordini", return_value={
+            "o1": {"submitted_at": "2026-08-20T16:52:12+00:00",
+                   "filled_at": "2026-08-20T16:52:13+00:00",
+                   "filled_avg_price": 117.10, "filled_qty": 18.0,
+                   "lookup_error": None},
+        }),
+        patch.object(dossier, "_barre_intraday", return_value=({}, cutoff)),
+        patch.object(dossier, "_opening_positions", return_value=[]),
+        patch.object(dossier, "_sedute_di_borsa", return_value=[]),
+    ):
+        payload = dossier.costruisci_dossier(date(2026, 8, 20), ["WMT"])
+
+    wmt = next(c for c in payload["candidati_miss"] if c["symbol"] == "WMT")
+    # promozione #509: il verdetto funnel vince sul sentinel legacy
+    assert wmt["causa"] == "CAUGHT"
+    assert wmt["causa_legacy"] == "NON_CLASSIFICATO"
+    # l'annotazione nella riga funnel resta il valore pre-promozione
+    riga = next(r for r in payload["funnel_v2"]["righe"] if r["symbol"] == "WMT")
+    assert riga["pipeline"] == "CAUGHT"
+    assert riga["legacy_causa"] == "NON_CLASSIFICATO"
+    # serie pre-registrata invariata (#288 Opzione 1): il conteggio aggregato
+    # continua a vedere il verdetto #208
+    assert payload["aggregati"]["cause_del_giorno"]["conteggi"] == {
+        "NON_CLASSIFICATO": 1
+    }
+
+
 def test_funnel_sceglie_il_tentativo_fillato_se_un_simbolo_ha_piu_ordini():
     eventi = [
         {"symbol": "ORCL", "order_id": "o1", "order_submitted_at": "t1",
