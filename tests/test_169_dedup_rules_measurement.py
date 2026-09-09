@@ -32,13 +32,21 @@ import math
 from datetime import date, datetime, timezone
 
 from scripts.measure_169_dedup_rules import (
+    ATTRIBUTION_ISSUER,
     BASELINE,
     MEZZA_VITA_ORE,
     RULES,
+    RULES_169,
+    RULES_ISSUER,
     SOGLIA_GATE,
     analizza_uscite_sotto_soglia,
+    applica_attribution,
+    confronto_con_460,
+    copertura_issuer,
     costruisci_eventi_uscita,
     dedup_score,
+    scelta_issuer_first,
+    scelta_issuer_or_fallback_clean,
     scelta_produzione,
     media_fwd,
     misura,
@@ -59,8 +67,15 @@ UTC = timezone.utc
 def _sig(
     giorno: date, symbol: str, hour: float, score: float,
     conf: float = 0.8, fallback: bool = False, fwd_1d: float | None = None,
+    issuer: bool = False,
 ) -> dict:
-    """Un segnale come li produce `leggi_segnali` (giorno, orario, score, fwd)."""
+    """Un segnale come li produce `leggi_segnali` (giorno, orario, score, fwd).
+
+    `issuer` e' il campo v2: True quando l'attribution del dossier per quel
+    `signal_id` e' ISSUER_SPECIFIC. Il default False e' quello di produzione —
+    un segnale senza riga `news_log` (fallback FinBERT) non ha attribution e
+    non e' issuer-specific.
+    """
     h = int(hour)
     m = round((hour - h) * 60)
     return {
@@ -73,6 +88,7 @@ def _sig(
         "fwd_1d": fwd_1d,
         "fwd_3d": None,
         "fwd_5d": None,
+        "issuer_specific": issuer,
     }
 
 
@@ -83,7 +99,19 @@ D = date(2026, 8, 27)
 
 
 def test_le_regole_candidate_sono_esattamente_quelle_della_issue():
-    assert set(RULES) == {"ultimo_prod", "ultimo", "massimo", "media_conf", "media_decay"}
+    # Le 5 del corpo della issue restano quelle, alla lettera: la v2 e'
+    # additiva, e questo test e' il vincolo che glielo impone.
+    assert set(RULES_169) == {
+        "ultimo_prod", "ultimo", "massimo", "media_conf", "media_decay"
+    }
+
+
+def test_le_regole_v2_sono_additive_e_non_riscrivono_quelle_della_issue():
+    assert set(RULES_ISSUER) == {"issuer_first", "issuer_or_fallback_clean"}
+    assert not set(RULES_169) & set(RULES_ISSUER)
+    # L'ordine conta: le righe della tabella e le chiavi del JSON restano
+    # nell'ordine di #460, con le nuove in coda.
+    assert RULES == RULES_169 + RULES_ISSUER
 
 
 def test_la_baseline_e_la_regola_del_ranker_di_produzione():
@@ -243,14 +271,17 @@ def test_riduci_registra_range_e_min_per_la_varianza():
 
 def _oss(giorno: date, symbol: str, score: float, fwd: float,
          regole_extra: dict | None = None) -> dict:
-    scores = {"ultimo_prod": score, "ultimo": score, "massimo": score,
-              "media_conf": score, "media_decay": score}
+    # Ogni regola conosciuta parte dallo stesso score: cosi' un'osservazione
+    # sintetica resta valida quando la lista delle regole si allunga (v2), e
+    # `regole_extra` continua a isolare la sola regola sotto test.
+    scores = dict.fromkeys(RULES, score)
     scores.update(regole_extra or {})
     return {
         "giorno": giorno.isoformat(), "symbol": symbol, "n": 1,
         "scores": scores, "min_score": score, "max_score": score,
         "ensemble_prod": True,  # un solo segnale: non fallback
         "ensemble_ultimo": True,
+        "n_issuer": 0, "issuer_prod": False,
         "fwd_1d": fwd, "fwd_3d": None, "fwd_5d": None,
     }
 
@@ -742,3 +773,368 @@ def test_riepilogo_uscite_leggibile_riporta_salve_per_regola():
     # massimo salva A (0.40 >= 0.30): la riga di massimo contiene "1" fra salve e fwd
     righe_m = [r for r in testo.splitlines() if r.startswith("massimo")]
     assert "1" in righe_m[0]
+
+# ── v2 (2026-09-09): le regole issuer-first ──────────────────────────────────
+#
+# Il buco che queste regole chiudono: la misura #460 ha confrontato solo
+# funzioni degli score (ultimo/massimo/medie) — ha misurato il dedup
+# intra-ticker, mai la QUALITA' DEL CONTENUTO dentro il dedup. Le ricorrenze
+# documentate a mano (MU 30/07, HOOD 01/09, INTC 27/08 e 08/09) sono tutte
+# dello stesso tipo: un fan-out macro piu' recente sostituisce, come stato del
+# ticker, una notizia issuer-specific forte.
+
+
+def test_issuer_first_senza_issuer_specific_e_la_baseline():
+    """Zero issuer-specific nel giorno: la regola non ha informazione, non agisce.
+
+    E' il vincolo che rende l'estensione additiva: dove l'attribution non dice
+    niente le regole v2 non possono spostare il numero, e ogni scarto dalla
+    baseline resta attribuibile all'attribution.
+    """
+    gruppo = [
+        _sig(D, "MU", 15.0, 0.565, fallback=True),
+        _sig(D, "MU", 16.0, 0.037),
+    ]
+    assert dedup_score(gruppo, "issuer_first") == dedup_score(gruppo, BASELINE)
+    assert scelta_issuer_first(gruppo) is scelta_produzione(gruppo)
+
+
+def test_issuer_first_con_un_solo_issuer_specific_lo_sceglie_anche_se_vecchio():
+    """MU 30/07 alla lettera: il picco issuer-specific batte il fan-out recente.
+
+    Sotto il ranker vero vince il +0.037 delle 16:01 (ensemble piu' recente);
+    sotto `issuer_first` vince il +0.565 delle 15:00, che e' la notizia
+    sull'emittente.
+    """
+    picco = _sig(D, "MU", 15.0, 0.565, issuer=True)
+    fanout = _sig(D, "MU", 16.0, 0.037)
+    gruppo = [picco, fanout]
+    assert dedup_score(gruppo, BASELINE) == 0.037
+    assert dedup_score(gruppo, "issuer_first") == 0.565
+    assert scelta_issuer_first(gruppo) is picco
+
+
+def test_issuer_first_con_piu_issuer_specific_prende_il_piu_recente():
+    """Dentro la classe issuer-specific la sola chiave e' la freschezza.
+
+    Due notizie sull'emittente nello stesso giorno: la piu' recente e' lo
+    stato del ticker, esattamente come fa il ranker dentro la sua classe.
+    """
+    gruppo = [
+        _sig(D, "INTC", 9.0, 0.228, issuer=True),
+        _sig(D, "INTC", 14.0, 0.410, issuer=True),   # piu' recente
+        _sig(D, "INTC", 17.0, 0.000),                # fan-out, ignorato
+    ]
+    assert dedup_score(gruppo, "issuer_first") == 0.410
+
+
+def test_issuer_first_ignora_la_preferenza_ensemble_dentro_la_classe_issuer():
+    """La differenza voluta con `issuer_or_fallback_clean`.
+
+    `issuer_first` guarda solo la freschezza dentro la classe issuer-specific:
+    un issuer-specific fallback ma piu' recente vince. E' cio' che isola quanto
+    pesa il secondo criterio, misurato dall'altra regola.
+    """
+    gruppo = [
+        _sig(D, "AAPL", 10.0, 0.50, issuer=True),                 # ensemble
+        _sig(D, "AAPL", 11.0, 0.20, issuer=True, fallback=True),  # piu' recente
+    ]
+    assert dedup_score(gruppo, "issuer_first") == 0.20
+    assert dedup_score(gruppo, "issuer_or_fallback_clean") == 0.50
+
+
+def test_issuer_or_fallback_clean_su_giorno_di_solo_fanout_e_la_baseline():
+    """Fan-out puro: nessun issuer-specific, la regola degrada sulla baseline.
+
+    Il ranker preferisce l'ensemble al fallback piu' recente; senza
+    issuer-specific la regola v2 deve fare esattamente lo stesso.
+    """
+    gruppo = [
+        _sig(D, "SPY", 10.0, 0.31),                 # ensemble
+        _sig(D, "SPY", 15.0, -0.44, fallback=True),  # fallback piu' recente
+    ]
+    assert dedup_score(gruppo, "issuer_or_fallback_clean") == 0.31
+    assert dedup_score(gruppo, "issuer_or_fallback_clean") == dedup_score(gruppo, BASELINE)
+
+
+def test_issuer_or_fallback_clean_ordina_issuer_poi_non_fallback_poi_resto():
+    """Le tre classi in ordine, ciascuna col suo tie-break di freschezza."""
+    issuer_fallback = _sig(D, "HOOD", 9.0, 0.48, issuer=True, fallback=True)
+    ensemble_recente = _sig(D, "HOOD", 12.0, 0.02)
+    fallback_recentissimo = _sig(D, "HOOD", 18.0, -0.30, fallback=True)
+    gruppo = [issuer_fallback, ensemble_recente, fallback_recentissimo]
+    # l'issuer-specific vince anche se e' fallback e il piu' vecchio
+    assert scelta_issuer_or_fallback_clean(gruppo) is issuer_fallback
+    # senza issuer-specific vincerebbe il non-fallback, non il piu' recente
+    senza_issuer = [ensemble_recente, fallback_recentissimo]
+    assert scelta_issuer_or_fallback_clean(senza_issuer) is ensemble_recente
+
+
+def test_le_regole_v2_su_un_solo_segnale_sono_quel_segnale():
+    for issuer in (True, False):
+        gruppo = [_sig(D, "X", 10.0, 0.42, issuer=issuer)]
+        assert dedup_score(gruppo, "issuer_first") == 0.42
+        assert dedup_score(gruppo, "issuer_or_fallback_clean") == 0.42
+
+
+def test_le_regole_v2_sono_deterministiche_sullordine_di_ingresso():
+    """Stesso gruppo, ordine di lista diverso: stesso punteggio.
+
+    `raggruppa_per_simbolo_giorno` ordina per `generated_at`, ma la regola non
+    deve dipendere da quell'ordinamento per essere corretta.
+    """
+    segnali = [
+        _sig(D, "NOW", 9.0, 0.14, issuer=True),
+        _sig(D, "NOW", 13.0, 0.31, issuer=True),
+        _sig(D, "NOW", 16.0, -0.20),
+        _sig(D, "NOW", 11.0, 0.05, fallback=True),
+    ]
+    for regola in RULES_ISSUER:
+        atteso = dedup_score(segnali, regola)
+        assert dedup_score(list(reversed(segnali)), regola) == atteso
+        assert dedup_score([segnali[2], segnali[0], segnali[3], segnali[1]], regola) == atteso
+
+
+def test_le_regole_v2_non_mutano_le_regole_della_issue():
+    """Nessuna riga di #460 cambia perche' esistono le regole v2.
+
+    Il controllo e' su un gruppo che le regole v2 spostano davvero (c'e' un
+    issuer-specific non piu' recente): le 5 regole originali devono restituire
+    gli stessi numeri che restituivano prima.
+    """
+    gruppo = [
+        _sig(D, "MU", 15.0, 0.565, conf=0.9, issuer=True),
+        _sig(D, "MU", 16.0, 0.037, conf=0.5),
+    ]
+    assert dedup_score(gruppo, "ultimo_prod") == 0.037
+    assert dedup_score(gruppo, "ultimo") == 0.037
+    assert dedup_score(gruppo, "massimo") == 0.565
+    assert dedup_score(gruppo, "media_conf") == (
+        (0.565 * 0.9 + 0.037 * 0.5) / 1.4
+    )
+    # media_decay resta la stessa funzione degli score/orari: la si ricalcola
+    # a mano, senza il flag issuer, e i due valori devono coincidere.
+    senza_flag = [{k: v for k, v in s.items() if k != "issuer_specific"} for s in gruppo]
+    assert dedup_score(senza_flag, "media_decay") == dedup_score(gruppo, "media_decay")
+
+
+def test_dedup_score_senza_campo_issuer_non_esplode_e_vale_la_baseline():
+    """Righe senza attribution (fallback FinBERT, dati storici): default sicuro.
+
+    Il dossier lascia `UNKNOWN` un segnale senza riga `news_log`: qui il
+    corrispettivo e' l'assenza del campo, che non deve promuovere niente.
+    """
+    gruppo = [
+        {k: v for k, v in _sig(D, "Z", 10.0, 0.50).items() if k != "issuer_specific"},
+        {k: v for k, v in _sig(D, "Z", 11.0, 0.10).items() if k != "issuer_specific"},
+    ]
+    assert dedup_score(gruppo, "issuer_first") == dedup_score(gruppo, BASELINE)
+    assert dedup_score(gruppo, "issuer_or_fallback_clean") == dedup_score(gruppo, BASELINE)
+
+
+# ── v2: attribution e copertura ──────────────────────────────────────────────
+
+
+def test_applica_attribution_marca_solo_issuer_specific():
+    segnali = [
+        dict(_sig(D, "A", 10.0, 0.4), signal_id=1),
+        dict(_sig(D, "A", 11.0, 0.1), signal_id=2),
+        dict(_sig(D, "A", 12.0, 0.2), signal_id=3),
+    ]
+    copertura = applica_attribution(
+        segnali, {1: ATTRIBUTION_ISSUER, 2: "FANOUT"}
+    )
+    assert [s["issuer_specific"] for s in segnali] == [True, False, False]
+    # il signal_id 3 non e' nella mappa: nessuna attribution, nessuna promozione
+    assert copertura["segnali_con_attribution"] == 2
+    assert copertura["segnali_totali"] == 3
+    assert copertura["conteggi"]["SENZA_ATTRIBUTION"] == 1
+    assert copertura["conteggi"][ATTRIBUTION_ISSUER] == 1
+
+
+def test_applica_attribution_su_lista_vuota_non_divide_per_zero():
+    copertura = applica_attribution([], {})
+    assert copertura["quota_con_attribution"] is None
+    assert copertura["segnali_totali"] == 0
+
+
+def test_riduci_registra_quanti_issuer_specific_ha_il_simbolo_giorno():
+    segnali = [
+        _sig(D, "MU", 15.0, 0.565, issuer=True, fwd_1d=0.18),
+        _sig(D, "MU", 16.0, 0.037, fwd_1d=0.18),
+        _sig(D, "SPY", 10.0, 0.10, fwd_1d=0.01),
+    ]
+    oss = {o["symbol"]: o for o in riduci_a_simbolo_giorno(segnali)}
+    assert oss["MU"]["n_issuer"] == 1
+    # il ranker sceglie il fan-out delle 16:00: NON stava gia' su un issuer
+    assert oss["MU"]["issuer_prod"] is False
+    assert oss["SPY"]["n_issuer"] == 0
+    assert oss["MU"]["scores"]["issuer_first"] == 0.565
+    assert oss["MU"]["scores"]["ultimo_prod"] == 0.037
+
+
+def test_copertura_issuer_separa_il_margine_di_manovra():
+    """Dove il ranker sceglieva GIA' un issuer-specific la regola v2 non corregge.
+
+    Senza questa separazione un IC identico alla baseline non si sa leggere:
+    regola inefficace o regola senza occasioni?
+    """
+    osservazioni = [
+        {"n_issuer": 0, "issuer_prod": False},
+        {"n_issuer": 2, "issuer_prod": True},   # gia' issuer: niente da correggere
+        {"n_issuer": 1, "issuer_prod": False},  # margine di manovra
+        {"n_issuer": 3, "issuer_prod": False},  # margine di manovra
+    ]
+    c = copertura_issuer(osservazioni)
+    assert c["simbolo_giorni"] == 4
+    assert c["con_almeno_un_issuer"] == 3
+    assert c["baseline_gia_issuer"] == 1
+    assert c["margine_di_manovra"] == 2
+    assert c["quota_con_issuer"] == 0.75
+
+
+def test_copertura_issuer_su_campione_vuoto_non_divide_per_zero():
+    assert copertura_issuer([])["quota_con_issuer"] is None
+
+
+def test_statistiche_gate_conta_i_flip_delle_regole_v2_contro_la_baseline():
+    """Il caso INTC: l'issuer-specific passa il gate dove il fan-out lo skippa."""
+    osservazioni = riduci_a_simbolo_giorno([
+        _sig(D, "INTC", 9.0, 0.42, issuer=True, fwd_1d=0.03),
+        _sig(D, "INTC", 17.0, 0.00, fwd_1d=0.03),
+    ])
+    st = statistiche_gate(osservazioni)
+    assert st[BASELINE]["n_sopra_soglia"] == 0
+    assert st["issuer_first"]["n_sopra_soglia"] == 1
+    assert st["issuer_first"]["n_flip_persi"] == 1
+    assert st["issuer_first"]["n_flip_evitati"] == 0
+    assert st["issuer_first"]["media_fwd_1d_flip_persi"] == 0.03
+
+
+def test_misura_espone_le_regole_v2_nelle_stesse_strutture_di_460():
+    """Chiavi additive: stessa struttura, due righe in piu'."""
+    osservazioni = riduci_a_simbolo_giorno([
+        _sig(D, s, 10.0, v, issuer=(i % 2 == 0), fwd_1d=v / 10)
+        for i, (s, v) in enumerate(
+            [("A", 0.5), ("B", 0.4), ("C", 0.3), ("D", 0.2), ("E", 0.1), ("F", -0.2)]
+        )
+    ])
+    risultato = misura(osservazioni, "2026-06-15", "2026-08-29", {"segnali_totali": 6})
+    for nome in ("tutti", "ensemble"):
+        assert set(risultato["ic_sintesi"][nome].keys()) == set(RULES)
+        assert set(risultato["serie_giornaliera_1g"][nome].keys()) == set(RULES)
+        for regola in RULES_ISSUER:
+            assert regola in risultato["gate_0.30"][nome]
+    assert risultato["finestra"]["until"] == "2026-08-29"
+    assert risultato["attribution"] == {"segnali_totali": 6}
+    assert risultato["copertura_issuer"]["simbolo_giorni"] == 6
+    # il riepilogo stampa le due righe nuove senza esplodere
+    testo = riepilogo_leggibile(risultato)
+    assert "issuer_first" in testo
+    assert "issuer_or_fallback_clean" in testo
+    assert "margine di manovra" in testo
+
+
+def test_analizza_uscite_regola_issuer_salva_la_posizione_hood():
+    """HOOD 01/09: l'upgrade Morgan Stanley e' issuer-specific, il meme coin no.
+
+    Sotto le regole v2 la posizione non sarebbe uscita per `below_entry_gate`
+    (+0,4815 >= 0,30): e' il flip salvato lato uscita, e vale solo perche' la
+    regola d'uscita e' la stessa dell'ingresso.
+    """
+    decision_at = datetime(2026, 9, 1, 12, 37, tzinfo=UTC)
+    g = date(2026, 9, 1)
+    eventi = [
+        _evento_uscita(decision_at, "HOOD", [
+            _sig(g, "HOOD", 10.78, 0.4815, issuer=True),  # upgrade MS
+            _sig(g, "HOOD", 11.02, 0.0228),               # fan-out meme coin
+        ], realized=-23.06),
+    ]
+    risultato = analizza_uscite_sotto_soglia(eventi)
+    assert risultato["regole"][BASELINE]["n_uscite_salve"] == 0
+    for regola in RULES_ISSUER:
+        assert risultato["regole"][regola]["n_uscite_salve"] == 1
+        assert risultato["regole"][regola]["realized_uscite_salve"] == -23.06
+
+
+# ── v2: riconciliazione con l'artefatto congelato di #460 ────────────────────
+
+
+def _artefatto(**override) -> dict:
+    """Un artefatto minimale nella forma di `misura`, con le 5 regole di #460."""
+    base = {
+        "ic_sintesi": {
+            sub: {
+                r: {h: {"giorni": 55, "ic_medio": -0.02} for h in ("1g", "3g", "5g")}
+                for r in RULES
+            }
+            for sub in ("tutti", "ensemble")
+        },
+        "gate_0.30": {
+            sub: dict(
+                {r: {"n_sopra_soglia": 10, "media_fwd_1d_sopra_soglia": -0.001}
+                 for r in RULES},
+                n_campione=3047, media_fwd_1d_campione=-0.0009,
+            )
+            for sub in ("tutti", "ensemble")
+        },
+        "serie_giornaliera_1g": {
+            sub: {r: [{"giorno": "2026-06-15", "ic": 0.1, "n_simboli": 20}]
+                  for r in RULES}
+            for sub in ("tutti", "ensemble")
+        },
+    }
+    for chiave, valore in override.items():
+        base[chiave] = valore
+    return base
+
+
+def test_confronto_460_senza_artefatto_di_riferimento_lo_dice():
+    esito = confronto_con_460(_artefatto(), None)
+    assert esito["disponibile"] is False
+
+
+def test_confronto_460_su_run_identica_non_trova_scarti():
+    esito = confronto_con_460(_artefatto(), _artefatto())
+    assert esito["n_scarti"] == 0
+    assert esito["scarti"] == []
+
+
+def test_confronto_460_ignora_le_regole_v2_assenti_dal_riferimento():
+    """Il riferimento #460 non ha le regole v2: la loro assenza non e' uno scarto.
+
+    E' il senso di "additivo": il confronto guarda solo le 5 righe che
+    esistevano prima.
+    """
+    v1 = _artefatto()
+    for sub in ("tutti", "ensemble"):
+        for regola in RULES_ISSUER:
+            del v1["ic_sintesi"][sub][regola]
+            del v1["gate_0.30"][sub][regola]
+            del v1["serie_giornaliera_1g"][sub][regola]
+    esito = confronto_con_460(_artefatto(), v1)
+    assert esito["n_scarti"] == 0
+
+
+def test_confronto_460_registra_lo_scarto_su_una_regola_originale():
+    """Se una regola di #460 si muove, la run lo dice — non lo nasconde."""
+    v2 = _artefatto()
+    v2["ic_sintesi"]["tutti"]["massimo"]["1g"]["ic_medio"] = -0.03
+    esito = confronto_con_460(v2, _artefatto())
+    assert esito["n_scarti"] == 1
+    assert esito["scarti"][0]["campo"] == "ic_sintesi.tutti.massimo.1g.ic_medio"
+    assert esito["n_scarti_orizzonte_1g_e_gate"] == 1
+
+
+def test_confronto_460_separa_gli_scarti_di_orizzonte_3g_5g():
+    """Il worker forward-return riempie 3g/5g anche dopo la pubblicazione.
+
+    Quello scarto e' un fatto sui DATI, non sulle regole: va registrato e
+    distinto da uno scarto su 1g o sul gate, che invece invaliderebbe
+    l'additivita'.
+    """
+    v2 = _artefatto()
+    v2["ic_sintesi"]["tutti"]["ultimo_prod"]["5g"]["giorni"] = 51
+    esito = confronto_con_460(v2, _artefatto())
+    assert esito["n_scarti"] == 1
+    assert esito["n_scarti_orizzonte_1g_e_gate"] == 0
