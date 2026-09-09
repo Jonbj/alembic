@@ -255,6 +255,15 @@ sono fusi sopra `main` allo stesso modo
 (`merge_evidence_findings.py` per occorrenza, `merge_evidence_jsonl.py` per giorno): lì invece è
 fail-closed, un conflitto annulla il commit invece di scegliere una versione.
 
+Lo stesso `git checkout` altrui espone anche il **codice** con cui il dossier viene generato (#507,
+recidiva di F-063: il fix del calendario earnings è rimasto mergiato su main mentre la directory
+condivisa era ferma su un branch precedente, e il cron ha rigenerato per giorni dossier col codice
+pre-fix, in silenzio). Perciò, sempre prima del dossier, il cron verifica che il codice di misura —
+`scripts/alpha_miner_dossier.py` e `src/analysis/dossier/` — sia identico a `origin/main` e senza
+modifiche locali non committate: se diverge, o se il fetch di `origin/main` non riesce, il run si
+annulla con alert invece di misurare con il codice del branch di turno. Il perimetro è volutamente
+stretto a quei percorsi: il resto della directory può divergere, perché il cron non lo esegue.
+
 L'esito è esplicito: l'**ultima riga del log** è `GIT_STATUS=pushed|committed_not_pushed|not_committed|nothing_to_commit`,
 lo stesso valore arriva su Telegram, e i path non ancora finiti su `main` restano in
 `logs/.evidence_cron_pending` per essere ritentati al giro dopo. Per contare i fallimenti di una
