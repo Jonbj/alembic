@@ -85,7 +85,20 @@ def test_una_finestra_senza_coppie_misurabili_non_e_un_fallimento(
 
 
 def test_una_finestra_riconciliata_propone_n_cluster(monkeypatch, capsys):
-    """Con abbastanza osservazioni la milestone scatta: il percorso felice resta."""
+    """Con abbastanza osservazioni la milestone scatta: il percorso felice resta.
+
+    N_cluster e' stato fissato nel contratto live il 2026-09-09 (#298): questo
+    test simula lo stato precedente (nessun traguardo ancora derivato) via
+    monkeypatch, cosi' resta valido indipendentemente da cosa dice oggi il
+    contratto reale."""
+    import dataclasses
+
+    settings_senza_n_cluster = dataclasses.replace(
+        check_script.load_evaluation_settings(), n_cluster=None
+    )
+    monkeypatch.setattr(
+        check_script, "load_evaluation_settings", lambda: settings_senza_n_cluster
+    )
     codice, payload = _invoke(
         monkeypatch,
         capsys,

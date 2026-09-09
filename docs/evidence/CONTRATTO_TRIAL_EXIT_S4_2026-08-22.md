@@ -127,6 +127,7 @@ commit. Il registro è append-only.
 | data | modifica | materiale? | motivo | commit |
 |---|---|---|---|---|
 | 2026-08-22 | **Creazione del contratto.** Congelati i 20 parametri di §1 e la definizione di modifica materiale di §3. Aggiunta la nota Q7 (§2) con l'obbligo di pubblicazione pre-`n=0`. | — (precede `n=0`) | #293: registrare una decisione unica e verificabile prima di `n=0`. | questo commit |
+| 2026-09-09 | **Fissato `power.N_cluster.value = 5816`** in `config/s4_exit_trial.yaml` (era `null`). Proposto da `scripts/check_s4_trial_milestones.sh` alla milestone `N_CLUSTER_PROPONIBILE` (`sigma_delta_bps` blinded ≈ 651,46, stimato su 7 cluster/20 osservazioni sul segmento pre-fix), derivato con la formula già pre-registrata in §8.4 (α 5% unilaterale, potenza 90%). Al ritmo osservato (7 cluster in 15 giorni), 5816 cluster richiederebbero ordine di decenni: conseguenza accettata esplicitamente dall'operatore, non un errore da correggere. | **Non materiale** — completa un placeholder previsto dal protocollo pre-registrato (§8.4, riga 15), non ne modifica la formula né le soglie economiche. | #298: la milestone è dovuta, il contratto congelato non la fissa da solo. | questo commit |
 
 ---
 
