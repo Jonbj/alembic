@@ -393,6 +393,44 @@ if (( REFRESH_STATUS != 0 )); then
     exit "$REFRESH_STATUS"
 fi
 
+# #507 (recidiva 2026-09-09): il fix del calendario earnings e' rimasto mergiato
+# su main per giorni senza mai raggiungere questo cron. La tree condivisa da cui
+# i cron girano era parcheggiata su un branch fermo a prima del merge di #533 e
+# il dossier e' stato rigenerato col codice pre-fix — marker unico, calendario
+# cieco, nessuna allerta: la stessa F-063. deploy_reconcile riallinea i
+# container ma NON questa tree (dentro puo' esserci il WIP di un'altra
+# sessione), quindi nessun meccanismo porta il codice mergiato ai cron. La
+# misura deve chiamare la regola di produzione (#169/#467): qui il cron si
+# rifiuta di generare il dossier se il codice di misura — lo script e i moduli
+# puri in src/analysis/dossier — non e' quello di main, committato e mergiato,
+# e abortisce come il ledger rotto (#510). Il perimetro e' volutamente stretto:
+# il resto della tree (S1, workers, altro src) puo' anche divergere, perche'
+# questo cron non lo esegue. Il fetch e' proprio, non ereditato da quello del
+# refresh sopra: quello e' fail-open ("uso il riferimento locale"), e un
+# riferimento locale vecchio darebbe un allineamento falso.
+set +e
+git fetch --quiet origin main
+FETCH_STATUS=$?
+set -e
+if (( FETCH_STATUS != 0 )); then
+    echo "FAILED: fetch di origin/main non riuscito (codice ${FETCH_STATUS}) — non posso verificare che il codice di misura del dossier sia quello di main, run annullato"
+    tg_send "🚨 Analisi alpha-miss ${DATE_TARGET} annullata: fetch di origin/main non riuscito, quindi non posso garantire che il dossier sia generato col codice di produzione. Vedi <code>${LOG_FILE}</code> (#507)." "" || true
+    exit "$FETCH_STATUS"
+fi
+PERCORSI_MISURA=(scripts/alpha_miner_dossier.py src/analysis/dossier)
+set +e
+DIFF_MISURA=$(git diff --name-only HEAD origin/main -- "${PERCORSI_MISURA[@]}")
+DIRTY_MISURA=$(git status --porcelain --untracked-files=no -- "${PERCORSI_MISURA[@]}")
+COMMIT_DIETRO=$(git rev-list --count HEAD..origin/main)
+set -e
+if [[ -n "${DIFF_MISURA:-}" || -n "${DIRTY_MISURA:-}" ]]; then
+    echo "FAILED: codice di misura del dossier non allineato a main (${COMMIT_DIETRO:-?} commit indietro) — il cron non genera il dossier con codice non mergiato"
+    echo "Differenze rispetto a main: ${DIFF_MISURA:-nessuna}"
+    echo "Modifiche locali non committate: ${DIRTY_MISURA:-nessuna}"
+    tg_send "🚨 Analisi alpha-miss ${DATE_TARGET} annullata: il codice di misura del dossier (scripts/alpha_miner_dossier.py, src/analysis/dossier/) non e' allineato a main — la tree condivisa e' ferma su un branch non mergiato o ha modifiche non committate. Porta la tree su main e rilancia. Vedi <code>${LOG_FILE}</code> (#507, recidiva di F-063)." "" || true
+    exit 1
+fi
+
 DOSSIER_FILE="$PROJECT_DIR/docs/evidence/dossier/${DATE_TARGET}.json"
 if uv run python "$PROJECT_DIR/scripts/alpha_miner_dossier.py" "$DATE_TARGET" >> "$LOG_FILE" 2>&1; then
     echo "Dossier generato: $DOSSIER_FILE"

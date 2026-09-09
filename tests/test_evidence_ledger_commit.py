@@ -795,6 +795,24 @@ def _publish_on_main(repo: dict, finding_id: str, day: str) -> None:
     _git(side, "push", "origin", "main")
 
 
+def _avanza_main_sul_codice_di_misura(repo: dict, contenuto: str) -> None:
+    """Pubblica su main una modifica al codice di misura del dossier.
+
+    Ricrea la condizione della recidiva #507: il fix vive mergiato su main
+    mentre la tree condivisa da cui gira il cron e' rimasta indietro.
+    """
+    side = repo["tmp"] / "side-misura"
+    subprocess.run(
+        ["git", "clone", str(repo["remote"]), str(side)], check=True, capture_output=True
+    )
+    _git(side, "config", "user.email", "altro@alembic.test")
+    _git(side, "config", "user.name", "Altro Agente")
+    _write(side / "scripts" / "alpha_miner_dossier.py", contenuto)
+    _git(side, "add", "-A")
+    _git(side, "commit", "-m", "misura: codice del dossier aggiornato")
+    _git(side, "push", "origin", "main")
+
+
 def test_cron_realigns_the_ledger_to_main_before_the_session_reads_it(repo):
     """La tree condivisa e' indietro: dossier e sessione devono vedere main."""
     _publish_on_main(repo, "F-002", "2026-08-24")
@@ -994,6 +1012,77 @@ def test_cron_aborts_when_the_ledger_cannot_be_realigned(repo):
     assert "🚨" in telegram
     with pytest.raises(subprocess.CalledProcessError):
         _remote_file(repo["remote"], REPORT)
+
+
+# --- #507 (recidiva 2026-09-09): il codice di misura del dossier -------------
+#
+# Il fix del calendario earnings e' rimasto mergiato su main per giorni senza
+# raggiungere il cron: la tree condivisa era parcheggiata su un branch fermo a
+# prima del merge e il dossier e' stato rigenerato col codice pre-fix, in
+# silenzio. Ora il cron rifiuta il dossier quando il codice di misura non e'
+# quello di main.
+
+MARKER_CODICE_MISURA = "codice di misura"
+
+
+def test_cron_aborts_when_the_dossier_code_lags_main(repo):
+    """Il fix e' su main ma la tree del cron no: nessun dossier, solo alert."""
+    _avanza_main_sul_codice_di_misura(repo, "# fix del calendario earnings\n")
+
+    result, log, telegram = _run_cron(repo)
+
+    assert result.returncode != 0, log[-2000:]
+    assert MARKER_CODICE_MISURA in log
+    assert "alpha_miner_dossier.py" in log
+    # il dossier non viene generato con codice non mergiato, e la sessione
+    # non parte su una misura che non e' quella di produzione
+    assert not (repo["project"] / DOSSIER).exists()
+    assert "GIT_STATUS=" not in log.strip().splitlines()[-1]
+    assert "annullata" in telegram
+    assert "🚨" in telegram
+    assert "#507" in telegram
+
+
+def test_cron_aborts_when_the_dossier_code_has_uncommitted_changes(repo):
+    """Modifiche locali non committate al codice di misura: stesso rifiuto."""
+    project = repo["project"]
+    _avanza_main_sul_codice_di_misura(repo, "# codice allineato\n")
+    # il branch parcheggiato porta lo STESSO contenuto (HEAD == main sul
+    # percorso di misura), poi una sessione lo lascia sporco a meta' lavoro
+    _write(project / "scripts" / "alpha_miner_dossier.py", "# codice allineato\n")
+    _git(project, "add", "scripts/alpha_miner_dossier.py")
+    _git(project, "commit", "-m", "misura: stesso contenuto di main")
+    _write(project / "scripts" / "alpha_miner_dossier.py", "# lavoro a meta'\n")
+
+    result, log, telegram = _run_cron(repo)
+
+    assert result.returncode != 0, log[-2000:]
+    assert MARKER_CODICE_MISURA in log
+    assert "non committate" in log
+    assert not (project / DOSSIER).exists()
+    assert "annullata" in telegram
+
+
+def test_cron_proceeds_when_main_moves_outside_the_measurement_code(repo):
+    """La guardia e' chirurgica: main che avanza sul ledger non blocca il cron."""
+    _publish_on_main(repo, "F-009", "2026-08-24")
+
+    result, log, telegram = _run_cron(repo)
+
+    assert result.returncode == 0, log[-2000:]
+    assert log.strip().splitlines()[-1] == "GIT_STATUS=pushed"
+
+
+def test_cron_aborts_when_main_alignment_cannot_be_verified(repo):
+    """Senza fetch non c'e' verifica possibile: niente misura al buio."""
+    _git(repo["project"], "remote", "set-url", "origin", str(repo["tmp"] / "remote-inesistente.git"))
+
+    result, log, telegram = _run_cron(repo)
+
+    assert result.returncode != 0, log[-2000:]
+    assert "fetch" in log
+    assert "annullata" in telegram
+    assert "🚨" in telegram
 
 
 def test_forensic_cron_aborts_when_the_ledger_cannot_be_realigned(repo):
