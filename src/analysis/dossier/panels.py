@@ -41,15 +41,14 @@ PANELS_SCHEMA_VERSION = "1.1"
 LEDGER_SCHEMA_VERSION = "1.0"
 
 # Cause che NON sono miss e non generano occorrenza di costo (#509 step 3).
-# I NON_CLASSIFICATO non sono piu' silenziosi: chi restava senza verdetto
-# (dossier pre-#281) e chi e' stato promosso a un verdetto funnel reale
-# (FALLBACK_REJECT, RANKED_OUT, RISK_BLOCK, ORDER_FAIL, NON_ACTIONABLE)
-# generano occorrenza — un segnale sopra il gate non assorbito ha un costo
-# visibile al gross della convenzione #278, come qualunque BELOW_GATE.
+# I NON_CLASSIFICATO non sono piu' silenziosi quando opportunity_v2 conferma
+# un'opportunita' economica; i dossier pre-#281 con trade_state=no_trade restano
+# invece esclusi, perche' provano gia' un ribasso non catturabile dal book long-only.
 # Restano escluse solo le cause che NON sono un miss d'ingresso:
 # IN_PORTAFOGLIO  — posizione gia' aperta;
 # EXIT_RISK / PASSIVE_EXPOSURE — detenuto: esposizione passiva, misurata in
 #                    copertura_uscita, non un miss (#281 asse actionability);
+# NON_ACTIONABLE  — ribasso non detenuto in book long-only: accessible = 0;
 # CAUGHT / BAD_FILL — ingresso eseguito: il costo vive nelle occorrenze trade
 #                    (BAD_FILL non ha niente catturabile per costruzione);
 # OUT_OF_SCOPE     — fuori dall'universo commerciabile.
@@ -57,6 +56,7 @@ NON_OCCORRENZA = frozenset({
     "IN_PORTAFOGLIO",
     "EXIT_RISK",
     "PASSIVE_EXPOSURE",
+    "NON_ACTIONABLE",
     "CAUGHT",
     "BAD_FILL",
     "OUT_OF_SCOPE",
@@ -383,6 +383,18 @@ def build_occurrence_ledger(dossier: dict, *, dossier_hash: str = "") -> list[di
         causa = candidato.get("causa")
         if causa in NON_OCCORRENZA:
             continue
+        opportunity = candidato.get("opportunity_v2") or {}
+        # I dossier precedenti a funnel_v2 non possono promuovere la causa a
+        # NON_ACTIONABLE. Lo stimatore v2 porta pero' il verdetto economico
+        # equivalente: no_trade distingue il ribasso long-only non catturabile
+        # da un trade simulato che per caso ha accessible=0 (#280).
+        if (
+            causa == "NON_CLASSIFICATO"
+            and opportunity.get("trade_state") == "no_trade"
+            and opportunity.get("accessible_opportunity_usd") == 0.0
+            and opportunity.get("net_opportunity_usd") == 0.0
+        ):
+            continue
         ticker = candidato["symbol"]
         tl_events = timeline.get(ticker, [])
         signal_ids = sorted(
@@ -391,7 +403,7 @@ def build_occurrence_ledger(dossier: dict, *, dossier_hash: str = "") -> list[di
         news_log_ids = sorted(
             {e["news_log_id"] for e in tl_events if e.get("news_log_id") is not None}
         )
-        opp = _opp_view(candidato.get("opportunity_v2") or {})
+        opp = _opp_view(opportunity)
         gross = opp["gross_usd"]
         accessible = opp["accessible_usd"]
         missed_usd = gross if gross is not None else None

@@ -15,7 +15,6 @@ from __future__ import annotations
 
 from src.analysis.dossier import panels
 
-
 # ---------------------------------------------------------------------------
 # Fixture minimali: un dossier 2.1 (con copertura_articoli + attribution sui
 # segnali) e uno 2.0 (senza). Il builder deve digerire entrambi: i dossier
@@ -469,18 +468,39 @@ def test_occurrence_ledger_i_verdetti_funnel_promossi_generano_occorrenza():
         assert occ["segment"] == verdetto
 
 
-def test_occurrence_ledger_non_actionable_resta_una_occorrenza_al_gross():
-    """Un ribasso non detenuto sopra il gate (PLTR 2026-09-02, promosso a
-    NON_ACTIONABLE dalla riconciliazione) segue la stessa convenzione dei
-    ribassi BELOW_GATE: occorrenza con missed_usd = gross. Il gross e' un upper
-    bound dichiarato (#278), non un costo realistico."""
+def test_occurrence_ledger_non_actionable_non_genera_occorrenza():
+    """NON_ACTIONABLE e' fuori dal ledger: per contratto funnel il book
+    long-only non poteva catturare il ribasso, quindi non e' un miss economico."""
     d = _dossier_2_1()
     d["candidati_miss"][0]["causa"] = "NON_ACTIONABLE"
     d["candidati_miss"][0]["causa_legacy"] = "NON_CLASSIFICATO"
     ledger = panels.build_occurrence_ledger(d, dossier_hash="h")
-    occ = next(o for o in ledger if o["causal_event_id"] == "miss:2026-08-12:AAPL")
-    assert occ["segment"] == "NON_ACTIONABLE"
-    assert occ["missed_usd"] == 100.0
+    assert not any(
+        o["causal_event_id"] == "miss:2026-08-12:AAPL" for o in ledger
+    )
+
+
+def test_occurrence_ledger_non_classificato_long_only_no_trade_non_genera_occorrenza():
+    """PLTR 2026-09-02 precede funnel_v2 e resta NON_CLASSIFICATO, ma la sua
+    opportunity_v2 prova gia' che il ribasso non era catturabile: non si deve
+    trasformare il gross teorico in missed_usd."""
+    d = _dossier_2_1()
+    candidato = d["candidati_miss"][0]
+    candidato["causa"] = "NON_CLASSIFICATO"
+    candidato["opportunity_v2"] |= {
+        "accessible_opportunity_usd": 0.0,
+        "net_opportunity_usd": 0.0,
+        "trade_state": "no_trade",
+        "entry": {
+            "missing_reason": "long_only_no_short_downside_not_held",
+        },
+    }
+
+    ledger = panels.build_occurrence_ledger(d, dossier_hash="h")
+
+    assert not any(
+        o["causal_event_id"] == "miss:2026-08-12:AAPL" for o in ledger
+    )
 
 
 def test_occurrence_ledger_salta_i_non_miss_del_funnel():
