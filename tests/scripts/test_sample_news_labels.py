@@ -236,6 +236,32 @@ def test_windowed_output_states_collinearity_limit(db_url, capsys):
     assert "collinear" in out
 
 
+def test_windowed_output_declares_untargeted_strata(db_url, capsys):
+    # La composizione comprende anche fonti senza target: cnbc/regex va dichiarato
+    # escluso, non puo' sparire solo perche' cnbc non compare nei target QX-01.
+    conn = psycopg2.connect(db_url)
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO news_log (title, url, source, ticker, body_snippet,
+                                      raw_sentiment, extraction_method,
+                                      fetched_at, published_at)
+               SELECT 'qt03 cnbc', 'https://qt03/cnbc/review-regression', 'cnbc',
+                      'AAPL', 'body', 0.5, 'regex',
+                      '2026-07-02 12:00:00+00', '2026-07-02 10:00:00+00'
+                WHERE NOT EXISTS (
+                      SELECT 1 FROM news_log
+                       WHERE url = 'https://qt03/cnbc/review-regression')"""
+        )
+    conn.close()
+
+    with patch.dict(os.environ, {"DATABASE_URL": db_url}), \
+         patch.object(sampler, "_TARGETS_POST_QT03", {}):
+        sampler.main(["--da", "2026-07-01"])
+    out = capsys.readouterr().out
+    assert "cnbc/regex: 1 available — excluded (no target for this stratum)" in out
+
+
 def test_branch_under_target_is_loud_and_not_backfilled(db_url, capsys):
     # Target marketaux storico (70) irrealizzabile: 5 disponibili. Il ramo resta
     # sotto target, viene detto esplicitamente, exit code 1, e l'altro ramo NON

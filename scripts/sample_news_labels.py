@@ -117,6 +117,27 @@ def _fetch_articles(cur, source: str,
     return [dict(r) for r in cur.fetchall()]
 
 
+def _fetch_sources(cur, da: datetime.date | None,
+                   a: datetime.date | None) -> list[str]:
+    """Tutte le fonti presenti nella finestra, incluse quelle senza target."""
+    where = ["url <> ''"]
+    params: list = []
+    if da is not None:
+        where.append("published_at >= %s")
+        params.append(da)
+    if a is not None:
+        where.append("published_at < %s")
+        params.append(a + datetime.timedelta(days=1))
+    cur.execute(
+        f"""SELECT DISTINCT source
+              FROM news_log
+             WHERE {' AND '.join(where)}
+             ORDER BY source""",
+        params,
+    )
+    return [row["source"] for row in cur.fetchall()]
+
+
 def _pick(articles: list[dict], n: int, rng: random.Random) -> list[dict]:
     """Pick n articles, oversampling near-zero sentiment, deterministically."""
     near = [a for a in articles if a["abs_sent"] < _NEAR_ZERO_THRESHOLD]
@@ -200,7 +221,7 @@ def _sample_window(cur, rng: random.Random,
 
     # Articoli per strato (source, extraction_method): metodo NULL = pre-QT-03.
     available: dict[tuple[str, str | None], list[dict]] = {}
-    for source in sorted({s for s, _ in _TARGETS_POST_QT03}):
+    for source in _fetch_sources(cur, da, a):
         for art in _fetch_articles(cur, source, da, a):
             available.setdefault((source, art["extraction_method"]), []).append(art)
     for key in sorted(set(available) - set(_TARGETS_POST_QT03), key=repr):
