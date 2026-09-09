@@ -13,6 +13,12 @@ riga gia' persistita, i tre campi che #244 aggiunge:
 e li scrive accanto ai campi esistenti, ricalcolando poi `causa`,
 `quota_righe_fanout` e il blocco `aggregati.cause_del_giorno`.
 
+#509: dopo la riclassificazione legacy, riapplica anche la riconciliazione col
+`funnel_v2` persistito nel dossier (`riconcilia_cause_con_funnel`): il
+verdetto promosso in `causa` con `causa_legacy` accanto, deterministico sul
+dato gia' scritto. Nei dossier pre-#281 (senza blocco funnel) la causa resta
+il sentinel legacy: nessun verdetto retroattivo.
+
 Perche' un backfill dedicato invece di `alpha_miner_dossier.py --backfill-da`:
 rigenerare i dossier li ricalcola TUTTI da capo, inclusi i blocchi che
 dipendono da prezzi e da Redis (`soglia_gate_usata`, `opportunity_v2`), il cui
@@ -38,6 +44,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.analysis.dossier.funnel import riconcilia_cause_con_funnel  # noqa: E402
 from src.analysis.dossier.miss_cause import (  # noqa: E402
     DEFAULT_SOGLIA_GATE,
     cause_del_giorno,
@@ -119,6 +126,15 @@ def backfill_file(path: Path, dry_run: bool) -> dict:
     for originale, nuovo in zip(candidati, riclassificati):
         originale["causa"] = nuovo["causa"]
         originale["quota_righe_fanout"] = nuovo["quota_righe_fanout"]
+        # La riconciliazione #509 va ri-derivata dal funnel persistito, non
+        # creduta sul file: un causa_legacy stale conterebbe nella serie
+        # legacy anche se il verdetto non fosse piu' promuovibile.
+        originale.pop("causa_legacy", None)
+
+    # Riconciliazione #509: il verdetto funnel_v2 e' gia' nel dossier, la
+    # promozione e' deterministica sul dato scritto (nessuna query). Nei
+    # dossier pre-#281 il blocco manca e la causa resta il sentinel legacy.
+    riconcilia_cause_con_funnel(candidati, dossier.get("funnel_v2"))
 
     if "aggregati" in dossier and isinstance(dossier["aggregati"], dict):
         if "cause_del_giorno" in dossier["aggregati"]:

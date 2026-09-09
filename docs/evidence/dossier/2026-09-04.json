@@ -516,7 +516,7 @@
         }
       ],
       "in_portafoglio": false,
-      "causa": "NON_CLASSIFICATO",
+      "causa": "NON_ACTIONABLE",
       "quota_righe_fanout": 0.5714285714285714,
       "max_score_own": null,
       "max_score_fanout": -0.2989189189188587,
@@ -568,7 +568,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "causa_legacy": "NON_CLASSIFICATO"
     },
     {
       "symbol": "NFLX",

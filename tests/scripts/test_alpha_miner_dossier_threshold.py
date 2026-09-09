@@ -97,11 +97,15 @@ def test_con_soglia_redis_a_045_candidato_con_score_035_e_below_gate():
 
 
 def test_senza_chiave_redis_usa_il_baseline_030():
-    """Senza `feedback:entry_threshold:S4`, score 0.35 -> NON_CLASSIFICATO.
+    """Senza `feedback:entry_threshold:S4`, score 0.35 resta sopra il gate
+    baseline: il sentinel NON_CLASSIFICATO e' la safety net.
 
-    Conferma che il fallback al baseline e' la safety net: meglio classificare
-    come NON_CLASSIFICATO (e segnalare il problema) che dichiarare un BELOW_GATE
-    sulla soglia sbagliata.
+    Conferma che il fallback al baseline e' la safety net: meglio il sentinel
+    (e segnalare il problema) che dichiarare un BELOW_GATE sulla soglia
+    sbagliata. Dal #509 il sentinel vive in `causa_legacy`: la `causa` porta
+    il verdetto funnel del candidato (qui NO_RELEVANT_NEWS: la coverage #279
+    non ha articoli tempestivi per AAPL), ma e' il legacy che dice se la
+    soglia usata era quella giusta.
     """
     canned = _cand_data()
     with _patch_io(canned), \
@@ -112,7 +116,8 @@ def test_senza_chiave_redis_usa_il_baseline_030():
         out = dossier.costruisci_dossier(date(2026, 8, 5), ["AAPL"])
 
     candidati = out["candidati_miss"]
-    assert candidati[0]["causa"] == "NON_CLASSIFICATO"
+    assert candidati[0]["causa_legacy"] == "NON_CLASSIFICATO"
+    assert candidati[0]["causa"] == "NO_RELEVANT_NEWS"
 
 
 def test_redis_irraggiungibile_usa_il_baseline_030():
@@ -124,4 +129,6 @@ def test_redis_irraggiungibile_usa_il_baseline_030():
         out = dossier.costruisci_dossier(date(2026, 8, 5), ["AAPL"])
 
     candidati = out["candidati_miss"]
-    assert candidati[0]["causa"] == "NON_CLASSIFICATO"
+    # stesso contratto del test sopra: sentinel in causa_legacy (#509)
+    assert candidati[0]["causa_legacy"] == "NON_CLASSIFICATO"
+    assert candidati[0]["causa"] == "NO_RELEVANT_NEWS"

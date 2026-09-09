@@ -60,7 +60,7 @@ from src.analysis.dossier.event_context import (
     SECTOR_ETF_BY_SECTOR,
     build_event_market_context,
 )
-from src.analysis.dossier.funnel import build_funnel
+from src.analysis.dossier.funnel import build_funnel, riconcilia_cause_con_funnel
 from src.analysis.dossier.market import compute_market, compute_miss_candidates
 from src.analysis.dossier.miss_cause import (
     DEFAULT_SOGLIA_GATE,
@@ -1713,6 +1713,13 @@ def costruisci_dossier(
         soglia_gate=soglia_gate,
         cost_calc=opportunity_cost_calc,
     )
+    # --- riconciliazione causa legacy <-> funnel v2 (#509) ----------------
+    # Il bucket NON_CLASSIFICATO della serie legacy nascondeva cause pienamente
+    # note nel funnel dello stesso dossier (TSLA 09-03: FALLBACK_REJECT). Il
+    # verdetto v2 promuove la causa di quei candidati, il valore storico resta
+    # in `causa_legacy` e la serie pre-registrata non cambia: `count_by_cause`
+    # conta la legacy (#288 Opzione 1).
+    riconcilia_cause_con_funnel(candidati_classificati, funnel_v2)
 
     # --- contesto evento/mercato/microstruttura (#285) -------------------
     # Le chiamate remote sono attive nel CLI, ma disaccoppiate dal costruttore
@@ -2024,6 +2031,25 @@ def costruisci_dossier(
                     "i net non misurabili sono contati separatamente come unknown"
                 ),
                 "freeze": "nessun conteggio legacy sostituito; nessun dato storico riscritto",
+            },
+            "candidati_miss": {
+                "causa": (
+                    "verdetto #208, o il verdetto funnel_v2 promosso per i "
+                    "candidati che la serie legacy lasciava in NON_CLASSIFICATO "
+                    "(#509): lo stadio pipeline se il mover era "
+                    "ENTRY_OPPORTUNITY, l'asse actionability altrimenti "
+                    "(NON_ACTIONABLE, OUT_OF_SCOPE, ...)"
+                ),
+                "causa_legacy": (
+                    "valore della serie #208 prima della riconciliazione #509, "
+                    "sempre NON_CLASSIFICATO quando presente; e' cio' che "
+                    "aggregati.cause_del_giorno continua a contare, cosi' la "
+                    "serie pre-registrata resta invariata (#288 Opzione 1)"
+                ),
+                "assenza_verdetto": (
+                    "senza riga funnel (dossier pre-#281) la causa resta "
+                    "NON_CLASSIFICATO: nessun verdetto retroattivo"
+                ),
             },
             "copertura_uscita": {
                 "posizioni": "trade vivi all'open RTH (stesse righe di snapshot_apertura)",
