@@ -175,7 +175,7 @@
 #        evidenza ancora in raccolta o freeze fino al 28/09). #22, #24, #288
 #        decise e chiuse lo stesso giorno (vedi sopra).
 #   #515-#521 — nuova catena "weekly alpha-miss v2" (inserita 2026-09-05): #514
-#        (in coda sopra) e' l'unica meta' `ready-for-agent`. #515 e' `waiting`
+#        e' stata presa in carico nella PR #536. #515 e' `waiting`
 #        (pilot di due settimane in corso); #517 e #520 sono decisioni PO;
 #        #516/#518/#521 sono `blocked_by` rispettivamente #515/#517/#520 e non
 #        rientrano finche' quelle non si sbloccano.

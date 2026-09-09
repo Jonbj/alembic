@@ -579,12 +579,12 @@ def _publish(args: argparse.Namespace) -> int:
                 args.repo,
                 "--state",
                 "all",
-                "--search",
-                f'"{marker}" in:body',
+                "--label",
+                "weekly-findings",
                 "--json",
                 "number,body",
                 "--limit",
-                "100",
+                "1000",
             )
             existing = json.loads(existing_raw or "[]")
             exact = [row for row in existing if marker in (row.get("body") or "")]
@@ -696,9 +696,13 @@ def _record_pilot(args: argparse.Namespace) -> int:
         "--repo",
         args.repo,
         "--json",
-        "comments",
+        "comments,labels",
     )
-    comments = json.loads(issue_raw).get("comments", [])
+    issue_data = json.loads(issue_raw)
+    comments = issue_data.get("comments", [])
+    labels = {
+        row.get("name") for row in issue_data.get("labels", []) if isinstance(row, dict)
+    }
     bodies = [row.get("body") or "" for row in comments]
     marker = f"<!-- weekly-alpha-miss-pilot:{args.week} -->"
     weeks = {
@@ -724,17 +728,13 @@ def _record_pilot(args: argparse.Namespace) -> int:
         )
         weeks.add(args.week)
     if len(weeks) >= 2:
-        _gh(
-            "issue",
-            "edit",
-            str(args.issue),
-            "--repo",
-            args.repo,
-            "--remove-label",
-            "waiting",
-            "--add-label",
-            "ready-for-agent",
-        )
+        command = ["issue", "edit", str(args.issue), "--repo", args.repo]
+        if "waiting" in labels:
+            command.extend(("--remove-label", "waiting"))
+        if "ready-for-agent" not in labels:
+            command.extend(("--add-label", "ready-for-agent"))
+        if len(command) > 5:
+            _gh(*command)
         print(f"PILOT_READY samples={len(weeks)} issue={args.issue}")
     else:
         print(f"PILOT_WAITING samples={len(weeks)} issue={args.issue}")

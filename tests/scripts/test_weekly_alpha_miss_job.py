@@ -590,6 +590,8 @@ def test_publish_crea_issue_idempotente_e_la_collega_come_child(
     assert result.returncode == 0, result.stderr
     calls = capture.read_text()
     assert "issue list" in calls
+    assert "--label weekly-findings" in calls
+    assert "--search" not in calls
     assert "issue create" in calls
     assert "weekly-alpha-miss:2026-W36:W-001" in calls
     assert "needs-triage" in calls
@@ -700,7 +702,8 @@ def test_secondo_campione_risveglia_la_issue_pilot(tmp_path: Path) -> None:
         "#!/usr/bin/env bash\n"
         'printf \'%s\\n\' "$*" >> "$GH_CAPTURE"\n'
         "if [[ \"$1 $2\" == 'issue view' ]]; then "
-        'printf \'{"comments":[{"body":"<!-- weekly-alpha-miss-pilot:2026-W36 -->"}]}\\n\'; '
+        'printf \'{"comments":[{"body":"<!-- weekly-alpha-miss-pilot:2026-W36 -->"}],'
+        '"labels":[{"name":"waiting"}]}\\n\'; '
         "exit 0; fi\n"
         "if [[ \"$1 $2\" == 'issue comment' || \"$1 $2\" == 'issue edit' ]]; then exit 0; fi\n"
         "exit 9\n"
@@ -740,3 +743,54 @@ def test_secondo_campione_risveglia_la_issue_pilot(tmp_path: Path) -> None:
     assert "issue edit 515" in calls
     assert "--remove-label waiting" in calls
     assert "--add-label ready-for-agent" in calls
+
+
+def test_pilot_gia_risvegliato_non_ripete_la_transizione_label(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    capture = tmp_path / "gh.log"
+    fake_gh = bin_dir / "gh"
+    fake_gh.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf \'%s\\n\' "$*" >> "$GH_CAPTURE"\n'
+        "if [[ \"$1 $2\" == 'issue view' ]]; then "
+        'printf \'{"comments":['
+        '{"body":"<!-- weekly-alpha-miss-pilot:2026-W36 -->"},'
+        '{"body":"<!-- weekly-alpha-miss-pilot:2026-W37 -->"}],'
+        '"labels":[{"name":"ready-for-agent"}]}\\n\'; '
+        "exit 0; fi\n"
+        "exit 9\n"
+    )
+    fake_gh.chmod(0o755)
+    env = os.environ.copy()
+    env.update({"PATH": f"{bin_dir}:{env['PATH']}", "GH_CAPTURE": str(capture)})
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "record-pilot",
+            "--repo",
+            "Jonbj/alembic",
+            "--issue",
+            "515",
+            "--week",
+            "2026-W37",
+            "--pr-url",
+            "https://github.com/Jonbj/alembic/pull/901",
+            "--baseline-path",
+            "docs/WEEKLY_FINDINGS_2026-37.md",
+            "--challenger-path",
+            "docs/evidence/weekly-alpha-miss/2026-W37/value-first.md",
+        ],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    calls = capture.read_text()
+    assert "issue comment" not in calls
+    assert "issue edit" not in calls
+    assert "PILOT_READY" in result.stdout
