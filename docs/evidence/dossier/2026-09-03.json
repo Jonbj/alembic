@@ -616,7 +616,7 @@
         }
       ],
       "in_portafoglio": false,
-      "causa": "NON_CLASSIFICATO",
+      "causa": "FALLBACK_REJECT",
       "quota_righe_fanout": 0.42857142857142855,
       "max_score_own": 0.2772196261682408,
       "max_score_fanout": 0.22103773584911424,
@@ -669,7 +669,8 @@
           "serie": "affiancata — la v2 non riscrive le occurrence legacy",
           "letta_dalla_sintesi_28_09": false
         }
-      }
+      },
+      "causa_legacy": "NON_CLASSIFICATO"
     },
     {
       "symbol": "SAP",
