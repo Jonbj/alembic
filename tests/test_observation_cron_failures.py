@@ -22,6 +22,35 @@ def _write_executable(path: Path, body: str) -> None:
     path.chmod(0o755)
 
 
+def _rendi_repo(project: Path) -> None:
+    """La tree di test e' un repo git, come quella da cui gira il cron vero.
+
+    Senza questo, la guardia sul codice di misura (#507: il dossier si genera
+    solo con codice allineato a main) abortisce perche' non puo' verificare
+    l'allineamento — giustamente: in produzione la tree e' sempre un repo.
+    L'origin punta a se stessa, cosi' HEAD coincide con origin/main.
+    """
+    subprocess.run(["git", "init", "-q", "-b", "main", str(project)], check=True)
+    subprocess.run(
+        ["git", "-C", str(project), "config", "user.email", "cron@alembic.test"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(project), "config", "user.name", "Cron Alembic"],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(project), "add", "-A"], check=True)
+    subprocess.run(
+        ["git", "-C", str(project), "commit", "-q", "-m", "base"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(project), "remote", "add", "origin", str(project)],
+        check=True,
+    )
+
+
 def _run_with_failing_claude(tmp_path: Path, script_name: str) -> tuple[subprocess.CompletedProcess[str], str, str]:
     project = tmp_path / "project"
     scripts_dir = project / "scripts"
@@ -36,6 +65,7 @@ def _run_with_failing_claude(tmp_path: Path, script_name: str) -> tuple[subproce
         ROOT / "scripts" / "refresh_evidence_ledger.sh",
         scripts_dir / "refresh_evidence_ledger.sh",
     )
+    _rendi_repo(project)
 
     _write_executable(
         bin_dir / "claude",
@@ -212,6 +242,7 @@ def _run_with_dossier_streak(tmp_path: Path, streak: int) -> tuple[subprocess.Co
         ROOT / "scripts" / "refresh_evidence_ledger.sh",
         scripts_dir / "refresh_evidence_ledger.sh",
     )
+    _rendi_repo(project)
 
     _write_executable(
         bin_dir / "claude",
