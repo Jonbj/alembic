@@ -436,12 +436,67 @@ def test_occurrence_ledger_evita_doppio_conteggio_stesso_ticker_day():
     assert len({o["causal_event_id"] for o in ledger}) == len(ledger)
 
 
-def test_occurrence_ledger_salta_non_classificato_e_in_portafoglio():
+def test_occurrence_ledger_salta_in_portafoglio():
+    d = _dossier_2_1()
+    d["candidati_miss"][0]["causa"] = "IN_PORTAFOGLIO"
+    ledger = panels.build_occurrence_ledger(d, dossier_hash="h")
+    # una posizione gia' aperta non e' un miss d'ingresso: nessuna occorrenza
+    assert not any(o["causal_event_id"] == "miss:2026-08-12:AAPL" for o in ledger)
+
+
+def test_occurrence_ledger_non_classificato_genera_occorrenza():
+    """#509 step 3: un candidato sopra il gate assorbito senza verdetto (dossier
+    pre-#281, come PLTR il 2026-09-02) non e' piu' un non-miss silenzioso:
+    l'assenza di costo era INVISIBILE, non zero. Genera occorrenza al gross
+    della convenzione #278, come qualunque ribasso BELOW_GATE."""
     d = _dossier_2_1()
     d["candidati_miss"][0]["causa"] = "NON_CLASSIFICATO"
     ledger = panels.build_occurrence_ledger(d, dossier_hash="h")
-    # NON_CLASSIFICATO non e' un miss: o il filtro upstream e' rotto, o non era un miss
-    assert not any(o["causal_event_id"] == "miss:2026-08-12:AAPL" for o in ledger)
+    occ = next(o for o in ledger if o["causal_event_id"] == "miss:2026-08-12:AAPL")
+    assert occ["segment"] == "NON_CLASSIFICATO"
+    assert occ["missed_usd"] == 100.0
+
+
+def test_occurrence_ledger_i_verdetti_funnel_promossi_generano_occorrenza():
+    """I NON_CLASSIFICATO riconciliati con funnel_v2 (#509) sono miss con una
+    causa nota: raggiungono il ledger con il loro segmente risolto."""
+    for verdetto in ("FALLBACK_REJECT", "RANKED_OUT", "RISK_BLOCK", "ORDER_FAIL"):
+        d = _dossier_2_1()
+        d["candidati_miss"][0]["causa"] = verdetto
+        d["candidati_miss"][0]["causa_legacy"] = "NON_CLASSIFICATO"
+        ledger = panels.build_occurrence_ledger(d, dossier_hash="h")
+        occ = next(o for o in ledger if o["causal_event_id"] == "miss:2026-08-12:AAPL")
+        assert occ["segment"] == verdetto
+
+
+def test_occurrence_ledger_non_actionable_resta_una_occorrenza_al_gross():
+    """Un ribasso non detenuto sopra il gate (PLTR 2026-09-02, promosso a
+    NON_ACTIONABLE dalla riconciliazione) segue la stessa convenzione dei
+    ribassi BELOW_GATE: occorrenza con missed_usd = gross. Il gross e' un upper
+    bound dichiarato (#278), non un costo realistico."""
+    d = _dossier_2_1()
+    d["candidati_miss"][0]["causa"] = "NON_ACTIONABLE"
+    d["candidati_miss"][0]["causa_legacy"] = "NON_CLASSIFICATO"
+    ledger = panels.build_occurrence_ledger(d, dossier_hash="h")
+    occ = next(o for o in ledger if o["causal_event_id"] == "miss:2026-08-12:AAPL")
+    assert occ["segment"] == "NON_ACTIONABLE"
+    assert occ["missed_usd"] == 100.0
+
+
+def test_occurrence_ledger_salta_i_non_miss_del_funnel():
+    """I verdetti funnel che NON sono un miss d'ingresso non costano: CAUGHT e'
+    un ingresso eseguito (il costo vive nelle occorrenze trade), EXIT_RISK e
+    PASSIVE_EXPOSURE sono esposizione passiva (misurata in copertura_uscita),
+    OUT_OF_SCOPE e' fuori dall'universo commerciabile, BAD_FILL non ha niente
+    catturabile per costruzione (exit EOD_close)."""
+    for causa in ("IN_PORTAFOGLIO", "CAUGHT", "BAD_FILL", "EXIT_RISK",
+                  "PASSIVE_EXPOSURE", "OUT_OF_SCOPE"):
+        d = _dossier_2_1()
+        d["candidati_miss"][0]["causa"] = causa
+        ledger = panels.build_occurrence_ledger(d, dossier_hash="h")
+        assert not any(
+            o["causal_event_id"] == "miss:2026-08-12:AAPL" for o in ledger
+        ), f"{causa} non deve generare occorrenza di miss"
 
 
 # ---------------------------------------------------------------------------

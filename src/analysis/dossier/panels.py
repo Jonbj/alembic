@@ -40,12 +40,27 @@ from src.analysis.dossier.timeline import compute_latency_seconds
 PANELS_SCHEMA_VERSION = "1.1"
 LEDGER_SCHEMA_VERSION = "1.0"
 
-# Cause che NON sono miss e non generano occorrenza di costo: NON_CLASSIFICATO
-# significa che il candidato era sopra il gate (non era un miss, o il filtro
-# upstream e' rotto); IN_PORTAFOGLIO significa posizione gia' aperta. Entrambe
-# restano nel pannello ticker-day (visibilita') ma non nel ledger delle
-# occorrenze.
-NON_OCCORRENZA = frozenset({"NON_CLASSIFICATO", "IN_PORTAFOGLIO"})
+# Cause che NON sono miss e non generano occorrenza di costo (#509 step 3).
+# I NON_CLASSIFICATO non sono piu' silenziosi: chi restava senza verdetto
+# (dossier pre-#281) e chi e' stato promosso a un verdetto funnel reale
+# (FALLBACK_REJECT, RANKED_OUT, RISK_BLOCK, ORDER_FAIL, NON_ACTIONABLE)
+# generano occorrenza — un segnale sopra il gate non assorbito ha un costo
+# visibile al gross della convenzione #278, come qualunque BELOW_GATE.
+# Restano escluse solo le cause che NON sono un miss d'ingresso:
+# IN_PORTAFOGLIO  — posizione gia' aperta;
+# EXIT_RISK / PASSIVE_EXPOSURE — detenuto: esposizione passiva, misurata in
+#                    copertura_uscita, non un miss (#281 asse actionability);
+# CAUGHT / BAD_FILL — ingresso eseguito: il costo vive nelle occorrenze trade
+#                    (BAD_FILL non ha niente catturabile per costruzione);
+# OUT_OF_SCOPE     — fuori dall'universo commerciabile.
+NON_OCCORRENZA = frozenset({
+    "IN_PORTAFOGLIO",
+    "EXIT_RISK",
+    "PASSIVE_EXPOSURE",
+    "CAUGHT",
+    "BAD_FILL",
+    "OUT_OF_SCOPE",
+})
 
 # Precedenza di attribution per scegliere quella dominante di un ticker-day:
 # una prova issuer-specific prevale su fanout/unknown.
