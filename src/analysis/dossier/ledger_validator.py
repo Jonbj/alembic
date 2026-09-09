@@ -257,8 +257,10 @@ def validate_panels(
         )
 
     # completeness: ogni giornata con dossier e movers deve produrre occorrenze
-    # (una giornata con candidati ma zero occorrenze = tutti NON_CLASSIFICATO, e'
-    # un'anomalia del filtro upstream, non una giornata vuota legittima). Una
+    # (una giornata con candidati ma zero occorrenze e' un'anomalia del filtro
+    # upstream, non una giornata vuota legittima. Dal #509 nemmeno i
+    # NON_CLASSIFICATO senza verdetto funnel sono piu' silenziosi: restare a
+    # zero occorrenze con movers non ha piu' spiegazioni legittime). Una
     # giornata piatta senza movers non si segnala: zero occorrenze e' corretto.
     # Se i movers non sono noti (dossier_movers assente), si resta conservativi.
     occ_days = {occ.get("data") for occ in occurrences}
@@ -272,7 +274,7 @@ def validate_panels(
             _fail(
                 res,
                 f"completeness: giornata {day} con movers ma senza occorrenze "
-                f"(tutti NON_CLASSIFICATO? filtro upstream da verificare)",
+                f"(filtro upstream da verificare)",
             )
 
     # ogni mover dichiarato deve apparire nel pannello ticker-day: il pannello
