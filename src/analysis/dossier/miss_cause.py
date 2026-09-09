@@ -252,11 +252,23 @@ def classify_miss_candidates(
 def count_by_cause(candidati: list[ClassifiedCandidate]) -> dict[str, int]:
     """Conteggio per causa, nell'ordine canonico della tassonomia.
 
+    Conta la SERIE LEGACY: se la riconciliazione #509 ha promosso un verdetto
+    funnel_v2 nella causa (salvando il valore storico in `causa_legacy`), il
+    conteggio continua a vedere il valore #208. E' il vincolo dell'Opzione 1
+    decisa in #288 (PO, 2026-09-05): la serie pre-registrata che alimenta
+    `cause_del_giorno` -> market_daily.jsonl resta confrontabile giorno per
+    giorno; la risoluzione per-candidato vive nel campo `causa` e nel ledger
+    delle occorrenze, non qui.
+
     NON_CLASSIFICATO viene incluso se presente (per sorveglianza: se il filtro
     upstream smette di funzionare, il conteggio lo rivela), ma NON entra nella
     gerarchia della dominante.
     """
-    counter: Counter[str] = Counter(c["causa"] for c in candidati if "causa" in c)
+    counter: Counter[str] = Counter(
+        (c["causa_legacy"] if "causa_legacy" in c else c["causa"])
+        for c in candidati
+        if "causa" in c
+    )
     # Forza l'ordine canonico + eventuali NON_CLASSIFICATO in coda.
     ordinato: dict[str, int] = {}
     for causa in CAUSE_ORDER:

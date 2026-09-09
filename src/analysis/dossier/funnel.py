@@ -73,6 +73,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.analysis.dossier.miss_cause import NON_CLASSIFICATO
+
 FUNNEL_VERSION = "1.0"
 
 # Asse actionability: cosa il motore puo' fare sul mover.
@@ -455,3 +457,57 @@ def build_funnel(movers: list[dict], soglia_gate: float) -> dict:
         "mapping_legacy_v2": MAPPING_LEGACY_V2,
         "righe": righe,
     }
+
+
+def riconcilia_cause_con_funnel(
+    candidati_classificati: list[dict], funnel_v2: dict | None
+) -> list[dict]:
+    """Promuove il verdetto funnel_v2 nel campo legacy `causa` (#509).
+
+    Il classificatore #208 definisce NON_CLASSIFICATO per esclusione: segnale
+    sopra il gate, "o non era un miss, o il dossier non filtra bene". Il funnel
+    v2 nello stesso dossier sa gia' quale dei due: questa funzione fa consumare
+    al campo legacy quel verdetto, per esattamente i candidati che la serie
+    legacy aveva lasciato nel bucket dell'ignoranza.
+
+    Regola di promozione, per simbolo:
+    - riga con `pipeline` (ENTRY_OPPORTUNITY fermato a uno stadio noto): la
+      causa diventa quello stadio (FALLBACK_REJECT, RANKED_OUT, ...). E' un
+      miss d'ingresso con causa diagnosticabile.
+    - riga senza `pipeline`: la causa diventa l'asse `actionability`
+      (NON_ACTIONABLE, OUT_OF_SCOPE, ...). La pipeline d'ingresso non si
+      valuta, ma "non era un miss, e il motivo e' questo" e' comunque una
+      risposta nota, non NON_CLASSIFICATO.
+    - nessuna riga (dossier pre-#281, come PLTR il 2026-09-02): la causa resta
+      NON_CLASSIFICATO. Non esiste un verdetto da promuovere e inventarlo
+      vorrebbe dire riscrivere l'osservato (#288 Opzione 1).
+
+    Il valore storico resta leggibile accanto: `causa_legacy` vale il verdetto
+    della serie #208, e `count_by_cause` e' quello che conta — la serie
+    pre-registrata (`cause_del_giorno` -> market_daily.jsonl -> criterio di
+    uscita n.1) resta invariata. Le altre categorie NON si toccano: sono il
+    vocabolario registrato della carta.
+
+    Mut `candidati_classificati` in place e lo restituisce, cosi' l'ordine del
+    dossier e i blocchi gia' innestati (opportunity_v2, attribution) restano
+    al loro posto. Idempotente: il candidato promosso non e' piu'
+    NON_CLASSIFICATO, quindi un secondo passaggio non fa nulla.
+    """
+    if not funnel_v2:
+        return candidati_classificati
+    righe = {
+        str(riga.get("symbol")): riga
+        for riga in funnel_v2.get("righe") or []
+    }
+    for candidato in candidati_classificati:
+        if candidato.get("causa") != NON_CLASSIFICATO:
+            continue
+        riga = righe.get(str(candidato.get("symbol")))
+        if riga is None:
+            continue
+        verdetto = riga.get("pipeline") or riga.get("actionability")
+        if not verdetto:
+            continue
+        candidato["causa_legacy"] = NON_CLASSIFICATO
+        candidato["causa"] = verdetto
+    return candidati_classificati
