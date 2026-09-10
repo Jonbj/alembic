@@ -95,3 +95,5 @@ def test_migrazione_collega_intent_e_metriche_pit_senza_cambiare_ordini():
     assert "session_range_percentile" in migration
     assert "shadow_late_entry" in migration
     assert "CREATE UNIQUE INDEX" in migration
+    assert "decision IN ('SKIP_THRESHOLD', 'SKIP_EMA', 'SKIP_CAP', " in migration
+    assert "'SHADOW_LATE_ENTRY'" in migration
