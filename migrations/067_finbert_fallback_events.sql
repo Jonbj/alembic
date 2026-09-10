@@ -50,6 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_finbert_fallback_events_signal_id
 
 COMMENT ON TABLE finbert_fallback_events IS
     'Per-event runtime evidence of full FinBERT fallbacks (#544): the exact '
-    'string FinBERT classified (title+body, 512-char cap) and its outcome. '
+    'capped title/body composition FinBERT classified and its outcome; the '
+    'component counters cover only chars actually present in that input. '
     'Pure observability — not read by execution, sizing, or any money-path '
     'code. Rows before the deploy date are absent (= not measured), not zero.';
