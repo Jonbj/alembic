@@ -75,4 +75,3 @@ def test_summarize_aggregates_signed_seller_drift() -> None:
         "median_delay_minutes": 15.0,
         "total_drift_usd": pytest.approx(3.0),
     }
-

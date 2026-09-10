@@ -18,4 +18,3 @@ def test_migration_aggiunge_decisione_e_transizioni_a_peso_zero() -> None:
     assert "zero_weight_symbols" in sql
     assert "DEFAULT '[]'::jsonb" in sql
     assert "DEFAULT '{}'::jsonb" in sql
-
