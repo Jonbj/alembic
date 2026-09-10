@@ -4092,6 +4092,7 @@ def _build_strategy_instance(
                 hours=s4_config.signals_lookback_hours,
                 symbols=s4_symbols,
                 news_age_hours=None,
+                ensemble_priority_hours=s4_config.max_signal_age_hours,
             )
             # #401: compute velocity multipliers BEFORE the candidate capture so
             # the ledger can persist the score the ranker will actually use as
