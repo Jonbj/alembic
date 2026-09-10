@@ -49,4 +49,3 @@ def test_finestra_rilegge_dossier_e_pnl_realizzato_per_trade_id(tmp_path):
     assert "977,980" in psql.call_args.args[0]
     oltre = next(bucket for bucket in out["bucket"] if bucket["fascia"] == ">=1.0")
     assert oltre["somma_pnl_realizzato"] == -4.92
-

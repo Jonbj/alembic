@@ -69,4 +69,3 @@ def test_distribuzione_separa_oltre_uno_degeneri_e_pnl_mancante():
     )
     assert degenere["n"] == 2
     assert degenere["somma_pnl_realizzato"] == pytest.approx(-3.0)
-

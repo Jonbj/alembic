@@ -54,4 +54,3 @@ def test_guardia_ombra_dichiara_il_range_degenere_senza_inventare_un_false():
     assert observation["missingness"] == {
         "session_range_percentile": "session_range_not_positive"
     }
-
