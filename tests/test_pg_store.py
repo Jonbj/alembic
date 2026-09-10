@@ -87,8 +87,12 @@ class TestPostgreSQLStoreInterface:
         assert "DISTINCT ON (ss.symbol)" in query
         assert "INTERVAL '%s'" not in query
         assert "(%s || ' hours')::interval" in query or "%s || ' hours'" in query
-        # Prefer ensemble over FinBERT fallback within the window, then most recent.
-        assert "ORDER BY ss.symbol, ss.fallback_used ASC, ss.generated_at DESC" in query
+        # Prefer a FRESH ensemble over a fallback (time-bounded priority, #F-056),
+        # then most recent. The old unconditional form (fallback_used ASC) is gone.
+        assert "ORDER BY" in query
+        assert "ss.fallback_used = FALSE" in query
+        assert "ss.generated_at >= NOW() - (%s || ' hours')::interval) DESC" in query
+        assert query.rstrip().endswith("ss.generated_at DESC")
         assert "ANY(%s)" in query
 
     def test_fetch_signals_for_cycle_signature(self):

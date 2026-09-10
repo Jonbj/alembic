@@ -81,7 +81,9 @@ def test_fetch_signals_for_cycle_include_provenance_senza_cambiare_ordinamento()
     assert "raw_ingested_at" in query
     assert "content_hash" in query
     assert "resolver_decision" in query
-    assert "ORDER BY ss.symbol, ss.fallback_used ASC, ss.generated_at DESC" in query
+    # F-056: priorità ensemble time-bounded, ma la provenance non cambia
+    # l'ordinamento — stesso criterio del test sopra, nella forma attuale.
+    assert query.rstrip().endswith("ss.generated_at DESC")
 
 
 def test_fetch_signals_for_cycle_mappa_la_provenance_point_in_time():
