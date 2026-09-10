@@ -35,4 +35,6 @@ python3 -c 'import json; from pathlib import Path; import scripts.alpha_miner_do
 ```
 
 Il comando legge i dossier e interroga Postgres in sola lettura per aggiornare
-`trades.net_pnl`; non riscrive alcun dossier ne' i ledger di osservazione.
+`trades.net_pnl`; non riscrive alcun dossier ne' i ledger di osservazione. I
+numeri sopra sono lo snapshot al 2026-09-10: una riesecuzione successiva puo'
+aggiungere esiti dei trade che a quella data erano ancora aperti.
