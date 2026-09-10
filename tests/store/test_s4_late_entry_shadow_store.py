@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
+
+import pytest
 
 from src.models.signals import SentimentResult
 from src.store.pg_store import PostgreSQLStore
 from src.strategies.s4.config import S4Config
 from src.strategies.s4.intent_ledger import S4IntentLedger, build_component_versions
 
-_TS = datetime(2026, 9, 10, 16, 7, tzinfo=timezone.utc)
+_TS = datetime(2026, 9, 10, 16, 7, tzinfo=UTC)
 
 
 def _versions():
@@ -72,6 +74,16 @@ def test_scrive_una_osservazione_per_ogni_intento_anche_se_il_market_context_man
     conn.commit.assert_called_once()
 
 
+def test_rollback_se_la_persistenza_osservazionale_fallisce():
+    store, conn, cursor = _store_and_cursor()
+    cursor.executemany.side_effect = RuntimeError("db down")
+
+    with pytest.raises(RuntimeError, match="db down"):
+        store.write_s4_late_entry_observations(_events(), regime_mult=0.7)
+
+    conn.rollback.assert_called_once()
+
+
 def test_migrazione_collega_intent_e_metriche_pit_senza_cambiare_ordini():
     migration = (
         Path(__file__).resolve().parents[2]
@@ -83,4 +95,3 @@ def test_migrazione_collega_intent_e_metriche_pit_senza_cambiare_ordini():
     assert "session_range_percentile" in migration
     assert "shadow_late_entry" in migration
     assert "CREATE UNIQUE INDEX" in migration
-

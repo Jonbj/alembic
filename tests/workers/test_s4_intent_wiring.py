@@ -17,11 +17,12 @@ from src.strategies.s4.strategy import NewsDrivenTactical
 from src.workers.portfolio_scheduler import (
     _build_strategy_instance,
     _finalize_s4_intent_ledger,
-    _s4_sleeve_contributions,
     _s4_intent_provenance,
+    _s4_sleeve_contributions,
     _snapshot_late_entry_context,
     _submit_portfolio_orders,
     _write_s4_intent_events_fail_open,
+    _write_s4_late_entry_observations_fail_open,
 )
 
 _TS = datetime(2026, 8, 24, 14, 7, tzinfo=timezone.utc)
@@ -110,6 +111,15 @@ def test_writer_intenti_fail_open_non_interrompe_il_path_live():
     store.write_s4_intent_events.side_effect = RuntimeError("db down")
 
     assert _write_s4_intent_events_fail_open(store, [MagicMock()], phase="candidate") is False
+
+
+def test_writer_late_entry_fail_open_non_interrompe_il_path_live():
+    store = MagicMock()
+    store.write_s4_late_entry_observations.side_effect = RuntimeError("db down")
+
+    assert _write_s4_late_entry_observations_fail_open(
+        store, [MagicMock()], regime_mult=0.7
+    ) is False
 
 
 def test_builder_scrive_i_candidate_prima_della_valutazione(mocker):

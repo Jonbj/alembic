@@ -668,6 +668,74 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    _INSERT_S4_LATE_ENTRY_OBSERVATION = """
+        INSERT INTO execution_decisions (
+            tick_time, symbol, signal_id, score, signal_score, regime_mult,
+            ema_pass, decision, reason, s4_intent_id, decision_price,
+            decision_price_source, session_open, session_high_so_far,
+            session_low_so_far, session_return_from_open,
+            session_range_percentile, shadow_late_entry,
+            entry_context_missingness
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s,
+            %s, %s, %s,
+            %s, %s,
+            %s, %s,
+            %s::jsonb
+        )
+        ON CONFLICT (s4_intent_id) WHERE s4_intent_id IS NOT NULL DO NOTHING
+    """
+
+    def write_s4_late_entry_observations(
+        self,
+        events: list[S4IntentEvent],
+        *,
+        regime_mult: float,
+    ) -> None:
+        """Persiste una riga #512 idempotente per ogni disposition S4."""
+        if not events:
+            return
+        params = []
+        for event in events:
+            context = event.snapshot.get("late_entry") or {}
+            fired = context.get("shadow_late_entry") is True
+            decision = "SHADOW_LATE_ENTRY" if fired else "OBSERVE_LATE_ENTRY"
+            reason = context.get("shadow_reason")
+            if reason is None:
+                state = context.get("shadow_late_entry")
+                reason = f"shadow_late_entry={state!r}; misura osservazionale #512"
+            params.append((
+                event.decision_at,
+                event.symbol,
+                event.signal_id,
+                0.0,
+                event.snapshot.get("score"),
+                regime_mult,
+                True,
+                decision,
+                reason,
+                event.intent_id,
+                context.get("decision_price"),
+                context.get("price_source"),
+                context.get("session_open"),
+                context.get("session_high_so_far"),
+                context.get("session_low_so_far"),
+                context.get("session_return_from_open"),
+                context.get("session_range_percentile"),
+                context.get("shadow_late_entry"),
+                json.dumps(context.get("missingness") or {}, sort_keys=True),
+            ))
+
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.executemany(self._INSERT_S4_LATE_ENTRY_OBSERVATION, params)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
     _INSERT_S4_LIFECYCLE_EVENT = """
         INSERT INTO s4_lifecycle_events (
             event_id, intent_id, event_type, observed_at, symbol, order_id,

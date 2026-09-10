@@ -289,6 +289,52 @@ def _s4_sleeve_contributions(result, registry) -> dict[str, dict[str, float]]:
         return {}
 
 
+def _snapshot_float(container, field: str) -> float | None:
+    value = getattr(container, field, None) if container is not None else None
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _snapshot_late_entry_context(snapshot) -> dict[str, float | str | None]:
+    """Estrae solo dati osservabili al ciclo dallo StockSnapshot Alpaca (#512)."""
+    latest_trade = getattr(snapshot, "latest_trade", None)
+    minute_bar = getattr(snapshot, "minute_bar", None)
+    price = _snapshot_float(latest_trade, "price")
+    price_source: str | None = None
+    if price is not None:
+        price_source = "alpaca_snapshot.latest_trade"
+    else:
+        price = _snapshot_float(minute_bar, "close")
+        if price is not None:
+            price_source = "alpaca_snapshot.minute_bar.close"
+
+    daily_bar = getattr(snapshot, "daily_bar", None)
+    return {
+        "decision_price": price,
+        "price_source": price_source,
+        "session_open": _snapshot_float(daily_bar, "open"),
+        "session_high": _snapshot_float(daily_bar, "high"),
+        "session_low": _snapshot_float(daily_bar, "low"),
+    }
+
+
+def _write_s4_late_entry_observations_fail_open(
+    store, events, *, regime_mult: float
+) -> bool:
+    """La telemetria #512 non puo' interrompere un ciclo di trading."""
+    try:
+        store.write_s4_late_entry_observations(events, regime_mult=regime_mult)
+        return True
+    except Exception as exc:
+        log.warning("#512: persistenza late-entry shadow fallita: %s", exc)
+        return False
+
+
 def _finalize_s4_intent_ledger(
     ledger,
     *,
@@ -298,12 +344,14 @@ def _finalize_s4_intent_ledger(
     open_db_symbols: set[str] | None,
     open_trade_origin: dict[str, str],
     order_dispositions: dict[str, tuple[str, dict]],
+    regime_mult: float = 1.0,
 ) -> bool:
     """Append final outcomes after every live guard, reconciled by intent_id."""
     if ledger is None:
         return True
 
     for symbol, signal_ids in ledger.signal_ids_by_symbol.items():
+        s1_state: dict[str, Any]
         if open_db_symbols is None:
             s1_state = {
                 "status": "missing",
@@ -340,7 +388,11 @@ def _finalize_s4_intent_ledger(
         )
 
     events = ledger.disposition_events(default_reason="UNCLASSIFIED_PRE_RANK_GUARD")
-    return _write_s4_intent_events_fail_open(store, events, phase="disposition")
+    intents_ok = _write_s4_intent_events_fail_open(store, events, phase="disposition")
+    observations_ok = _write_s4_late_entry_observations_fail_open(
+        store, events, regime_mult=regime_mult
+    )
+    return intents_ok and observations_ok
 
 
 def _emit_order_disposition(callback, symbol: str, reason: str, **details) -> None:
@@ -2486,19 +2538,18 @@ def _run_cycle_inner() -> dict:
 
     # P1-A: Refresh prices from Snapshot API (latest_trade price, then minute_bar close).
     # This replaces yesterday's close with the current intraday price for order sizing.
+    _s4_entry_market_contexts: dict[str, dict[str, float | str | None]] = {}
     try:
         from alpaca.data.requests import StockSnapshotRequest
         snap_req = StockSnapshotRequest(symbol_or_symbols=symbols, feed=DataFeed.IEX)
         snapshots = retry_transient(lambda: data_client.get_stock_snapshot(snap_req))
         refreshed = 0
         for sym, snap in snapshots.items():
-            price = None
-            if snap.latest_trade and snap.latest_trade.price:
-                price = float(snap.latest_trade.price)
-            elif snap.minute_bar and snap.minute_bar.close:
-                price = float(snap.minute_bar.close)
-            if price and price > 0:
-                latest_prices[sym] = price
+            entry_context = _snapshot_late_entry_context(snap)
+            _s4_entry_market_contexts[sym] = entry_context
+            price = entry_context["decision_price"]
+            if isinstance(price, (int, float)) and price > 0:
+                latest_prices[sym] = float(price)
                 refreshed += 1
         log.debug("P1-A Snapshot: refreshed %d/%d prices from Alpaca real-time", refreshed, len(symbols))
     except Exception as _snap_exc:
@@ -2510,6 +2561,20 @@ def _run_cycle_inner() -> dict:
         volumes={sym: 1_000_000.0 for sym in latest_prices},
         adv_20d={sym: 1_000_000.0 for sym in latest_prices},
     )
+
+    # #512: il ledger esiste gia' prima dello snapshot, ma la disposition viene
+    # scritta solo a fine ciclo. Congeliamo qui il contesto PIT per ogni intent.
+    # Se Alpaca non ha risposto, il dict vuoto produce missingness esplicita e
+    # non modifica in alcun modo ranking, sizing o invio ordini.
+    _s4_context_ledger = getattr(strategy_instances.get("S4"), "_intent_ledger", None)
+    if _s4_context_ledger is not None:
+        try:
+            _s4_context_ledger.attach_late_entry_context(_s4_entry_market_contexts)
+        except Exception as _late_entry_exc:
+            log.warning(
+                "#512: contesto late-entry non calcolabile: %s — ciclo invariato",
+                _late_entry_exc,
+            )
 
     # B1 — Portfolio drawdown cap: update peak equity in Redis, halt if drawdown breached.
     try:
@@ -3277,6 +3342,7 @@ def _run_cycle_inner() -> dict:
                 open_db_symbols=open_db_symbols,
                 open_trade_origin=_open_trade_origin,
                 order_dispositions=_order_dispositions,
+                regime_mult=_regime_mult,
             )
         except Exception as _intent_exc:
             log.warning("#294: failed to finalize S4 intent ledger: %s", _intent_exc)
