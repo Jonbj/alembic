@@ -5139,6 +5139,7 @@ def _compute_signal_velocity(
 # the insert — which a log line (wiped by the next container restart, #407)
 # or a ledger row on the same Postgres cannot guarantee.
 _PORTFOLIO_CYCLES_PERSIST_FAILURES_KEY = "portfolio:cycles:persist_failures"
+_PERSIST_FAILURE_REDIS_TIMEOUT_SECONDS = 1.0
 
 
 def _classify_persist_error(exc: Exception) -> str:
@@ -5175,7 +5176,12 @@ def _record_cycle_persist_failure(
         import redis as _redis
         from src.config import config
 
-        _r_fail = _redis.Redis.from_url(config.REDIS_URL, decode_responses=True)
+        _r_fail = _redis.Redis.from_url(
+            config.REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=_PERSIST_FAILURE_REDIS_TIMEOUT_SECONDS,
+            socket_timeout=_PERSIST_FAILURE_REDIS_TIMEOUT_SECONDS,
+        )
         try:
             _r_fail.incr(_PORTFOLIO_CYCLES_PERSIST_FAILURES_KEY)
         finally:
