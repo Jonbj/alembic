@@ -791,6 +791,287 @@ class TestRunInference:
         # run_inference must NOT touch any store (verified by absence of store mocks)
 
 
+class TestFinbertFallbackEventEvidence:
+    """#544: a full FinBERT fallback must carry its own runtime evidence — the
+    exact string classified (title prepended, per the #399 companion fix) and
+    its outcome — on the SentimentResult, so the worker can persist it to
+    finbert_fallback_events. Docker logs die with the container on every
+    deploy_reconcile rebuild; without a persisted per-event record, the #453
+    runtime confirmation ("did the fallback actually receive title+body?")
+    depends on containers staying up and is not reconstructible afterwards.
+    """
+
+    def _finbert_mock(self, polarity: float = 0.3, confidence: float = 0.7):
+        mock_finbert = MagicMock(spec=FinBERTClient)
+        mock_finbert.analyze.return_value = MagicMock(
+            polarity=polarity, confidence=confidence
+        )
+        return mock_finbert
+
+    @pytest.mark.asyncio
+    async def test_timeout_fallback_carries_runtime_evidence(self):
+        """All-models-timeout path: the result must report the exact string
+        FinBERT classified, its polarity, and the title/body split."""
+        mock_finbert = self._finbert_mock(polarity=-0.4, confidence=0.55)
+        item = make_news_item("MSFT", 3)
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock, return_value=[]):
+            inference_result = await run_inference(
+                item=item, clients=[],
+                aggregator=MagicMock(spec=EnsembleAggregator),
+                finbert=mock_finbert,
+                budget_tracker=AsyncMock(spec=LLMBudgetTracker),
+            )
+
+        result, _raw = inference_result
+        # The evidence must be the exact runtime string, not a recomposition.
+        assert result.finbert_input == mock_finbert.analyze.call_args[0][0]
+        assert item.title in result.finbert_input
+        assert item.body[:40] in result.finbert_input
+        assert result.finbert_polarity == -0.4
+        assert result.finbert_title_chars == len(item.title)
+        assert result.finbert_body_chars == len(item.body)
+
+    @pytest.mark.asyncio
+    async def test_divergence_fallback_carries_runtime_evidence(self):
+        """Divergence path: same evidence contract as the timeout path."""
+        mock_finbert = self._finbert_mock(polarity=0.2, confidence=0.9)
+        item = make_news_item("SPY", 7)
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock, return_value=[MagicMock()]):
+            inference_result = await run_inference(
+                item=item, clients=[],
+                aggregator=MagicMock(spec=EnsembleAggregator,
+                                     **{"aggregate.return_value": None}),
+                finbert=mock_finbert,
+                budget_tracker=AsyncMock(spec=LLMBudgetTracker),
+            )
+
+        result, _raw = inference_result
+        assert result.finbert_input == mock_finbert.analyze.call_args[0][0]
+        assert item.title in result.finbert_input
+        assert result.finbert_polarity == 0.2
+
+    @pytest.mark.asyncio
+    async def test_budget_exhausted_fallback_carries_runtime_evidence(self):
+        """Budget-exhausted path (third FinBERT call site): same contract."""
+        mock_finbert = self._finbert_mock(polarity=-0.1, confidence=0.6)
+        item = make_news_item("GOOG", 5)
+
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock(
+            side_effect=LLMBudgetExhaustedError("exhausted")
+        )
+
+        inference_result = await run_inference(
+            item=item, clients=[],
+            aggregator=MagicMock(spec=EnsembleAggregator),
+            finbert=mock_finbert,
+            budget_tracker=mock_budget,
+        )
+
+        result, _raw = inference_result
+        assert result.finbert_input == mock_finbert.analyze.call_args[0][0]
+        assert item.title in result.finbert_input
+        assert result.finbert_polarity == -0.1
+
+    @pytest.mark.asyncio
+    async def test_fallback_evidence_is_truncated_like_the_runtime_call(self):
+        """FinBERT classifies finbert_text[:512]: the persisted evidence must
+        be that same 512-char cut, or the record would claim FinBERT saw text
+        it never received."""
+        long_item = make_news_item("AAPL", 9)
+        long_item.body = "word " * 400  # ~2000 chars, well past the 512 cut
+        mock_finbert = self._finbert_mock()
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock, return_value=[]):
+            inference_result = await run_inference(
+                item=long_item, clients=[],
+                aggregator=MagicMock(spec=EnsembleAggregator),
+                finbert=mock_finbert,
+                budget_tracker=AsyncMock(spec=LLMBudgetTracker),
+            )
+
+        result, _raw = inference_result
+        assert len(result.finbert_input) == 512
+        assert result.finbert_input == mock_finbert.analyze.call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_ensemble_success_carries_no_fallback_evidence(self):
+        """Non-fallback results must leave the evidence fields empty, so the
+        worker's persistence gate can key on them."""
+        mock_outputs = [
+            make_model_output(0.6, 0.85, "glm52"),
+            make_model_output(0.55, 0.80, "gptoss"),
+        ]
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+        mock_aggregator.aggregate.return_value = MagicMock(
+            polarity=0.6, confidence=0.82, reasoning="Strong beat",
+            model_ids=["glm52", "gptoss"],
+        )
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock, return_value=mock_outputs):
+            inference_result = await run_inference(
+                item=make_news_item("AAPL", 1), clients=[],
+                aggregator=mock_aggregator,
+                finbert=MagicMock(spec=FinBERTClient),
+                budget_tracker=AsyncMock(spec=LLMBudgetTracker),
+            )
+
+        result, _raw = inference_result
+        assert result.finbert_input is None
+        assert result.finbert_polarity is None
+        assert result.finbert_title_chars is None
+        assert result.finbert_body_chars is None
+
+
+class TestFinbertFallbackEventPersistence:
+    """#544 wiring: process_news_item must persist the fallback evidence to
+    finbert_fallback_events via pg_store, keyed by the signal it produced.
+    Pure observability — a failure here must never break the live signal path.
+    """
+
+    @pytest.mark.asyncio
+    async def test_full_fallback_persists_event_with_signal_id(self):
+        """On a full FinBERT fallback the pg_store call must receive the id of
+        the signal just written and the result carrying the runtime evidence."""
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock(
+            side_effect=LLMBudgetExhaustedError("exhausted")
+        )
+        mock_finbert = MagicMock(spec=FinBERTClient)
+        mock_finbert.analyze.return_value = MagicMock(polarity=0.3, confidence=0.7)
+        mock_redis = MagicMock(spec=RedisStore)
+        mock_redis.increment_fallback_counter.return_value = 1
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        mock_pg.write_signal.return_value = 4242
+
+        await process_news_item(
+            item=make_news_item("AAPL", 2),
+            clients=[],
+            aggregator=MagicMock(spec=EnsembleAggregator),
+            finbert=mock_finbert,
+            budget_tracker=mock_budget,
+            redis_store=mock_redis,
+            pg_store=mock_pg,
+        )
+
+        mock_pg.log_finbert_fallback_event.assert_called_once()
+        kwargs = mock_pg.log_finbert_fallback_event.call_args.kwargs
+        assert kwargs["signal_id"] == 4242
+        persisted = kwargs["result"]
+        assert persisted.model_id == "finbert"
+        assert persisted.finbert_input is not None
+        assert "Apple Q2 earnings beat" in persisted.finbert_input
+
+    @pytest.mark.asyncio
+    async def test_ensemble_success_does_not_persist_event(self):
+        """No FinBERT call, no finbert_fallback_events row."""
+        mock_outputs = [
+            make_model_output(0.6, 0.85, "glm52"),
+            make_model_output(0.55, 0.80, "gptoss"),
+        ]
+        mock_aggregator = MagicMock(spec=EnsembleAggregator)
+        mock_aggregator.aggregate.return_value = MagicMock(
+            polarity=0.6, confidence=0.82, reasoning="Strong beat",
+            model_ids=["glm52", "gptoss"],
+        )
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock, return_value=mock_outputs):
+            await process_news_item(
+                item=make_news_item("AAPL", 3),
+                clients=[],
+                aggregator=mock_aggregator,
+                finbert=MagicMock(spec=FinBERTClient),
+                budget_tracker=AsyncMock(spec=LLMBudgetTracker),
+                redis_store=MagicMock(spec=RedisStore),
+                pg_store=mock_pg,
+            )
+
+        mock_pg.log_finbert_fallback_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_event_persistence_failure_never_breaks_the_signal(self):
+        """The evidence write is measurement, not money path: an exception
+        must be swallowed (logged) with the signal already persisted."""
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock(
+            side_effect=LLMBudgetExhaustedError("exhausted")
+        )
+        mock_finbert = MagicMock(spec=FinBERTClient)
+        mock_finbert.analyze.return_value = MagicMock(polarity=0.3, confidence=0.7)
+        mock_redis = MagicMock(spec=RedisStore)
+        mock_redis.increment_fallback_counter.return_value = 1
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        mock_pg.write_signal.return_value = 99
+        mock_pg.log_finbert_fallback_event.side_effect = RuntimeError("db down")
+
+        result = await process_news_item(
+            item=make_news_item("AAPL", 4),
+            clients=[],
+            aggregator=MagicMock(spec=EnsembleAggregator),
+            finbert=mock_finbert,
+            budget_tracker=mock_budget,
+            redis_store=mock_redis,
+            pg_store=mock_pg,
+        )
+
+        # The signal still comes back: evidence loss must not lose the signal.
+        assert result is not None
+        assert result.model_id == "finbert"
+        mock_pg.write_signal.assert_called_once()
+
+    def test_log_finbert_fallback_event_insert_params(self):
+        """The pg_store method must insert the full evidence tuple: signal_id,
+        symbol, reason, title/body chars, the runtime string, polarity,
+        confidence."""
+        pg = MagicMock()
+        pg._get_connection.return_value = MagicMock()
+
+        ev = SentimentResult(
+            symbol="MSFT", score=0.21, confidence=0.7,
+            reasoning="FinBERT fallback (Ollama timeout)",
+            model_id="finbert", fallback_used=True,
+            finbert_input="Title. Body", finbert_polarity=0.3,
+            finbert_title_chars=6, finbert_body_chars=5,
+        )
+
+        PostgreSQLStore.log_finbert_fallback_event(pg, signal_id=77, result=ev)
+
+        cur = pg._get_connection.return_value.cursor.return_value.__enter__.return_value
+        assert cur.execute.called
+        params = cur.execute.call_args.args[1]
+        # (signal_id, symbol, reason, title_chars, body_chars, finbert_input,
+        #  polarity, confidence)
+        assert params[0] == 77
+        assert params[1] == "MSFT"
+        assert params[2] == "FinBERT fallback (Ollama timeout)"
+        assert params[3] == 6
+        assert params[4] == 5
+        assert params[5] == "Title. Body"
+        assert params[6] == 0.3
+        assert params[7] == 0.7
+
+    def test_log_finbert_fallback_event_noop_without_evidence(self):
+        """Results without runtime evidence (ensemble, single-model, legacy
+        rows) must not produce an INSERT."""
+        pg = MagicMock()
+        pg._get_connection.return_value = MagicMock()
+
+        plain = make_sentiment_result(fallback_used=False)
+
+        PostgreSQLStore.log_finbert_fallback_event(pg, signal_id=1, result=plain)
+
+        cur = pg._get_connection.return_value.cursor.return_value.__enter__.return_value
+        assert not cur.execute.called
+
+
 class TestProcessNewsBatch:
     """Tests for process_news_batch function."""
 
