@@ -969,6 +969,23 @@ def test_persist_cycle_result_failure_counted_in_redis_and_ledger():
     ledger_conn.commit.assert_called_once()
 
 
+def test_persist_cycle_result_failure_redis_has_finite_timeouts():
+    """A black-holed Redis cannot block the ledger and CRITICAL alert (#469)."""
+    from src.workers.portfolio_scheduler import _persist_cycle_result
+
+    mock_conn = _failing_conn(psycopg2.OperationalError("DB down"))
+    redis_inst = MagicMock()
+
+    with patch("psycopg2.connect", side_effect=Exception("pg unreachable")), \
+         patch("redis.Redis.from_url", return_value=redis_inst) as mock_from_url:
+        result = _persist_cycle_result(_gap_window_cycle_data(), conn=mock_conn)
+
+    assert result is False
+    redis_options = mock_from_url.call_args.kwargs
+    assert redis_options["socket_connect_timeout"] > 0
+    assert redis_options["socket_timeout"] > 0
+
+
 def test_persist_cycle_result_failure_never_raises_when_all_sinks_down():
     """Redis and Postgres both unreachable: the cycle still completes (#469)."""
     from src.workers.portfolio_scheduler import _persist_cycle_result
