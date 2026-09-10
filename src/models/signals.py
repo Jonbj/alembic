@@ -36,8 +36,10 @@ class SentimentResult(BaseModel):
     # #544: runtime evidence of a full FinBERT fallback, so the confirmation
     # "did the fallback actually receive title+body?" (#453) no longer depends
     # on container logs, which die with the container on every deploy rebuild.
-    # None everywhere except the three FinBERT call sites in run_inference —
-    # the worker persists these to finbert_fallback_events (pure observability).
+    # None everywhere except the three FinBERT call sites in run_inference.
+    # The component counters describe only chars present in the capped runtime
+    # input (separator excluded), not the uncapped source strings. The worker
+    # persists these to finbert_fallback_events (pure observability).
     finbert_input: str | None = None
     finbert_polarity: float | None = None
     finbert_title_chars: int | None = None

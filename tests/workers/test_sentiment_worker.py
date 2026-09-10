@@ -898,6 +898,8 @@ class TestFinbertFallbackEventEvidence:
         result, _raw = inference_result
         assert len(result.finbert_input) == 512
         assert result.finbert_input == mock_finbert.analyze.call_args[0][0]
+        assert result.finbert_title_chars == len(long_item.title)
+        assert result.finbert_body_chars == 512 - len(long_item.title) - len(". ")
 
     @pytest.mark.asyncio
     async def test_fallback_evidence_counts_only_body_chars_seen_by_finbert(self):

@@ -7,8 +7,9 @@
 --     the #453 measurement could not produce: its runtime confirmation ("did
 --     the fallback actually receive title+body?") had to be deferred because
 --     the string existed nowhere except container logs.
---   - title_chars/body_chars: the split of the composed input, so "title
---     included" is checkable without re-deriving the join format.
+--   - title_chars/body_chars: the chars from each component actually present
+--     in the capped input (separator excluded), so "title/body included" is
+--     checkable without re-deriving the join and truncation rules.
 --   - polarity/confidence: the outcome of the FinBERT classification.
 --
 -- Persistence rationale (#544): `docker logs` dies with the container, and

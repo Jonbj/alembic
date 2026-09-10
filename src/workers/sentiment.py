@@ -366,6 +366,25 @@ def _is_full_fallback(result) -> bool:
     return bool(result.fallback_used) and not result.model_id.startswith("single:")
 
 
+_FINBERT_INPUT_MAX_CHARS = 512
+_FINBERT_TITLE_BODY_SEPARATOR = ". "
+
+
+def _compose_finbert_input(
+    clean_title: str, clean_body: str
+) -> tuple[str, int, int]:
+    """Build the capped classifier input and count only component chars seen."""
+    if not clean_title:
+        finbert_input = clean_body[:_FINBERT_INPUT_MAX_CHARS]
+        return finbert_input, 0, len(finbert_input)
+
+    title_with_separator = f"{clean_title}{_FINBERT_TITLE_BODY_SEPARATOR}"
+    finbert_input = f"{title_with_separator}{clean_body}"[:_FINBERT_INPUT_MAX_CHARS]
+    title_chars = min(len(clean_title), len(finbert_input))
+    body_chars = max(0, len(finbert_input) - len(title_with_separator))
+    return finbert_input, title_chars, body_chars
+
+
 async def run_inference(
     item: NewsItem,
     clients: list[LLMClient],
@@ -405,7 +424,9 @@ async def run_inference(
     # #399 companion: FinBERT is a classifier, not an instruction-following LLM — it
     # never sees _DK_COT_PROMPT, so the headline must reach it a different way (it's
     # exactly the path the system relies on most, when the ensemble is unavailable).
-    finbert_text = f"{clean_title}. {clean_body}" if clean_title else clean_body
+    finbert_input, finbert_title_chars, finbert_body_chars = _compose_finbert_input(
+        clean_title, clean_body
+    )
     clean_symbol = sanitize_ticker(raw_symbol) if raw_symbol else "UNKNOWN"
     if clean_symbol == "UNKNOWN":
         log.debug("Skipping news item with unresolvable ticker (raw=%r)", raw_symbol)
@@ -450,7 +471,7 @@ async def run_inference(
                 log.info(f"Ensemble diverged for {clean_symbol}, using FinBERT fallback")
             loop = asyncio.get_running_loop()
             fb_result = await loop.run_in_executor(
-                None, finbert.analyze, finbert_text[:512]
+                None, finbert.analyze, finbert_input
             )
             # #544: carry the exact string FinBERT classified (with its
             # title/body split and outcome) on the result, so the worker can
@@ -467,10 +488,10 @@ async def run_inference(
                 model_id="finbert",
                 fallback_used=True,
                 published_at=item.timestamp,
-                finbert_input=finbert_text[:512],
+                finbert_input=finbert_input,
                 finbert_polarity=fb_result.polarity,
-                finbert_title_chars=len(clean_title),
-                finbert_body_chars=len(clean_body),
+                finbert_title_chars=finbert_title_chars,
+                finbert_body_chars=finbert_body_chars,
             ), list(raw_outputs or [])
 
         score = aggregated.polarity * aggregated.confidence
@@ -504,7 +525,7 @@ async def run_inference(
     except LLMBudgetExhaustedError:
         log.info(f"Budget exhausted for {clean_symbol}, using FinBERT fallback")
         loop = asyncio.get_running_loop()
-        fb_result = await loop.run_in_executor(None, finbert.analyze, finbert_text[:512])
+        fb_result = await loop.run_in_executor(None, finbert.analyze, finbert_input)
         return SentimentResult(
             symbol=clean_symbol,
             score=fb_result.polarity * fb_result.confidence,
@@ -513,10 +534,10 @@ async def run_inference(
             model_id="finbert",
             fallback_used=True,
             published_at=item.timestamp,
-            finbert_input=finbert_text[:512],
+            finbert_input=finbert_input,
             finbert_polarity=fb_result.polarity,
-            finbert_title_chars=len(clean_title),
-            finbert_body_chars=len(clean_body),
+            finbert_title_chars=finbert_title_chars,
+            finbert_body_chars=finbert_body_chars,
         ), []
 
     except Exception as e:
