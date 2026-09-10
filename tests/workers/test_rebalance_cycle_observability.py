@@ -23,7 +23,7 @@ def test_osservazione_cattura_i_pesi_s1_passati_a_zero() -> None:
     )
 
     assert rebalanced == ["S1", "S4"]
-    assert zeroed == {"S1": ["GE", "MMM"]}
+    assert zeroed == {"S1": ["GE", "MMM"], "S4": None}
 
 
 def test_osservazione_non_inventa_transizioni_senza_target_precedente() -> None:
@@ -34,7 +34,20 @@ def test_osservazione_non_inventa_transizioni_senza_target_precedente() -> None:
     rebalanced, zeroed = _observe_rebalance_transitions(result, {})
 
     assert rebalanced == ["S1"]
-    assert zeroed == {}
+    assert zeroed == {"S1": None}
+
+
+def test_osservazione_degrada_a_unknown_su_stato_precedente_corrotto() -> None:
+    from src.workers.portfolio_scheduler import _observe_rebalance_transitions
+
+    result = SimpleNamespace(target_weights_per_strategy={"S1": {"AAPL": 1.0}})
+
+    rebalanced, zeroed = _observe_rebalance_transitions(
+        result, {"S1": {"AAPL": "peso-non-numerico"}}
+    )
+
+    assert rebalanced == ["S1"]
+    assert zeroed == {"S1": None}
 
 
 def test_persist_cycle_result_scrive_i_campi_di_ribilanciamento() -> None:

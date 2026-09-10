@@ -688,6 +688,46 @@ def _seed_rebalance_clock(strategy_instances: dict, state: dict[str, dict]) -> N
         log.info("#185: %s rebalance clock restored to %s", sid, last.isoformat())
 
 
+def _observe_rebalance_transitions(
+    result,
+    last_target_weights: dict[str, dict[str, float]] | None,
+) -> tuple[list[str], dict[str, list[str] | None]]:
+    """Describe target decisions before downstream order filters mutate them.
+
+    ``exit_persistence_cycles`` deliberately removes a first-cycle SELL from
+    ``final_orders``.  Looking only at that list therefore hid the S1 target
+    transition that caused the order (#468).  Compare each newly decided target
+    with the target restored from Redis.  A ``null`` value distinguishes an
+    unavailable/corrupt previous snapshot from a known empty transition list.
+    """
+    decided = getattr(result, "target_weights_per_strategy", None) or {}
+    previous = last_target_weights or {}
+    rebalanced = sorted(decided)
+    zeroed: dict[str, list[str] | None] = {}
+    for strategy_id, current_weights in decided.items():
+        if strategy_id not in previous:
+            zeroed[strategy_id] = None
+            continue
+        current = current_weights or {}
+        try:
+            dropped = sorted(
+                symbol
+                for symbol, old_weight in (previous[strategy_id] or {}).items()
+                if float(old_weight or 0.0) > 0
+                and float(current.get(symbol, 0.0) or 0.0) <= 0
+            )
+        except (TypeError, ValueError) as exc:
+            log.warning(
+                "#468: target transition unavailable for %s (%s)",
+                strategy_id,
+                exc,
+            )
+            zeroed[strategy_id] = None
+        else:
+            zeroed[strategy_id] = dropped
+    return rebalanced, zeroed
+
+
 def _persist_rebalance_state(
     result,
     ts: datetime,
@@ -2669,6 +2709,12 @@ def _run_cycle_inner() -> dict:
         strategy_returns=_strategy_returns,
         last_target_weights=_last_target_weights or None,
     )
+    # #468: capture the target decision now.  Downstream hold/hysteresis filters
+    # rebuild CycleResult and intentionally remove first-cycle SELLs, which is
+    # exactly the transition the portfolio_cycles row needs to preserve.
+    _rebalanced_strategies, _zero_weight_symbols = _observe_rebalance_transitions(
+        result, _last_target_weights
+    )
     # #491: the orchestrator sizes target weights against this NAV. Keep it so
     # SKIP_PYRAMIDING can report the full target and subtract the actual broker
     # position, instead of assuming the order quantity alone has that meaning.
@@ -3476,6 +3522,8 @@ def _run_cycle_inner() -> dict:
         "orders_count": len(result.final_orders),
         "constraints_fired": [str(c) for c in result.constraints_fired],
         "final_orders": [str(o) for o in result.final_orders],
+        "rebalanced_strategies": _rebalanced_strategies,
+        "zero_weight_symbols": _zero_weight_symbols,
     })
 
     return {
@@ -5147,14 +5195,17 @@ def _persist_cycle_result(cycle_data: dict, conn=None) -> None:
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO portfolio_cycles
-                   (timestamp, strategies_run, orders_count, constraints_fired, final_orders)
-                   VALUES (%s, %s, %s, %s, %s)""",
+                   (timestamp, strategies_run, orders_count, constraints_fired, final_orders,
+                    rebalanced_strategies, zero_weight_symbols)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                 (
                     cycle_data["timestamp"],
                     _json.dumps(cycle_data["strategies_run"]),
                     cycle_data["orders_count"],
                     _json.dumps(cycle_data.get("constraints_fired", [])),
                     _json.dumps(cycle_data.get("final_orders", [])),
+                    _json.dumps(cycle_data.get("rebalanced_strategies", [])),
+                    _json.dumps(cycle_data.get("zero_weight_symbols", {})),
                 ),
             )
         conn.commit()
