@@ -900,6 +900,29 @@ class TestFinbertFallbackEventEvidence:
         assert result.finbert_input == mock_finbert.analyze.call_args[0][0]
 
     @pytest.mark.asyncio
+    async def test_fallback_evidence_counts_only_body_chars_seen_by_finbert(self):
+        """The component counters describe the capped runtime input, not the
+        uncapped source: a 510-char title plus separator leaves no body room."""
+        item = make_news_item("AAPL", 10)
+        item.title = "T" * 510
+        item.body = "body is present in the source but absent from the input"
+        mock_finbert = self._finbert_mock()
+
+        with patch("src.workers.sentiment.run_ensemble_query",
+                   new_callable=AsyncMock, return_value=[]):
+            inference_result = await run_inference(
+                item=item, clients=[],
+                aggregator=MagicMock(spec=EnsembleAggregator),
+                finbert=mock_finbert,
+                budget_tracker=AsyncMock(spec=LLMBudgetTracker),
+            )
+
+        result, _raw = inference_result
+        assert result.finbert_input == f"{item.title}. "
+        assert result.finbert_title_chars == 510
+        assert result.finbert_body_chars == 0
+
+    @pytest.mark.asyncio
     async def test_ensemble_success_carries_no_fallback_evidence(self):
         """Non-fallback results must leave the evidence fields empty, so the
         worker's persistence gate can key on them."""
