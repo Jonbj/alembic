@@ -1300,7 +1300,8 @@ class PostgreSQLStore:
                     f"""SELECT id, tick_time, symbol, score, regime_mult, decision,
                                COALESCE(counterfactual_attempts, 0) AS counterfactual_attempts
                        FROM execution_decisions
-                       WHERE decision IN ('SKIP_THRESHOLD', 'SKIP_EMA', 'SKIP_CAP', 'SKIP_PYRAMIDING')
+                       WHERE decision IN ('SKIP_THRESHOLD', 'SKIP_EMA', 'SKIP_CAP',
+                                          'SKIP_PYRAMIDING', 'SHADOW_LATE_ENTRY')
                          AND counterfactual_computed_at IS NULL
                          AND tick_time >= now() - (%s || ' days')::interval
                          {cursor_clause}

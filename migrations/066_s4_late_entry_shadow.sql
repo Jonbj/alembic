@@ -23,3 +23,13 @@ CREATE INDEX IF NOT EXISTS idx_execution_decisions_s4_late_entry_shadow
     ON execution_decisions (tick_time DESC, shadow_late_entry)
     WHERE s4_intent_id IS NOT NULL;
 
+-- Lo stesso worker notturno che prezza gli SKIP calcola il rendimento a +1h
+-- delle sole osservazioni che avrebbero soppresso l'ingresso. Le righe CLEAR
+-- non entrano nel controfattuale e non consumano chiamate Alpaca.
+DROP INDEX IF EXISTS idx_execution_decisions_counterfactual;
+
+CREATE INDEX idx_execution_decisions_counterfactual
+    ON execution_decisions (tick_time DESC, id DESC)
+    WHERE counterfactual_computed_at IS NULL
+      AND decision IN ('SKIP_THRESHOLD', 'SKIP_EMA', 'SKIP_CAP', 'SKIP_PYRAMIDING',
+                       'SHADOW_LATE_ENTRY');
