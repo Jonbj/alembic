@@ -44,8 +44,8 @@ def _fake_psql(query):
             ],
         ]
     if "FROM trades WHERE entry_time >=" in query:
-        # symbol, strategia, ora, entry_price, qty, signal_score
-        return [["WMT", "S4", "16:37", "103.79", "17.95", "0.318"]]
+        # symbol, strategia, ora, entry_price, qty, trade_id
+        return [["WMT", "S4", "16:37", "103.79", "17.95", "42"]]
     if "FROM trades WHERE exit_time >=" in query:
         # symbol, strategia, exit_price, qty, net_pnl, exit_reason, ore_tenuta
         return [["WMT", "S4", "103.98", "17.95", "2.38", "sentiment_reversal", "1.0"]]
