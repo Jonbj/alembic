@@ -3227,10 +3227,23 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
-    # Per symbol, prefer the most recent ENSEMBLE signal over a FinBERT fallback within
-    # the freshness window (fallback_used ASC first): a low-conviction FinBERT fallback
-    # generated after a strong ensemble signal must NOT overwrite it (the ensemble is the
-    # more reliable read of current sentiment). Among same-status signals, most recent wins.
+    # Per symbol, prefer the most recent ENSEMBLE signal over a FinBERT/single-model
+    # fallback, but ONLY within `ensemble_priority_hours` of NOW (#F-056): a low-
+    # conviction fallback generated shortly after a strong ensemble signal must NOT
+    # overwrite it (the ensemble is the more reliable read of *current* sentiment —
+    # see 10c7836, the AMKR case: +0.638 ensemble at 15:16 vs +0.009 fallback at
+    # 15:48). But once the ensemble signal itself goes stale (older than
+    # ensemble_priority_hours), it must stop shadowing a fresher fallback signal —
+    # unconditional priority over the full lookback window (up to 96h,
+    # S4Config.signals_lookback_hours) let a 3-day-old, sub-gate ensemble read
+    # permanently block a same-day, above-gate fallback signal from ever being
+    # evaluated (NFLX/PLTR, 2026-08-13, zero rows in execution_decisions for a
+    # symbol with an actionable signal — see F-056).
+    # Default (ensemble_priority_hours == hours, i.e. the caller passes None and we
+    # fall back to `hours`): the bucket below is TRUE for every non-fallback row that
+    # already passed the WHERE clause's generated_at window, which reproduces the
+    # unconditional pre-fix behavior exactly. Only a caller that explicitly narrows
+    # ensemble_priority_hours below `hours` gets the new time-bounded protection.
     _FETCH_SIGNALS_FOR_CYCLE = """
         SELECT DISTINCT ON (ss.symbol)
             ss.id, ss.symbol, ss.score, ss.confidence,
@@ -3255,12 +3268,17 @@ class PostgreSQLStore:
           AND (ss.published_at IS NULL
                OR ss.published_at >= NOW() - (%s || ' hours')::interval)
           AND ss.symbol = ANY(%s)
-        ORDER BY ss.symbol, ss.fallback_used ASC, ss.generated_at DESC
+        ORDER BY
+            ss.symbol,
+            (ss.fallback_used = FALSE
+             AND ss.generated_at >= NOW() - (%s || ' hours')::interval) DESC,
+            ss.generated_at DESC
     """
 
     def fetch_signals_for_cycle(
         self, hours: int = 4, symbols: list[str] | None = None,
         news_age_hours: float | None = None,
+        ensemble_priority_hours: float | None = None,
     ) -> list[SentimentResult]:
         """Fetch one signal per symbol from the last N hours.
 
@@ -3269,9 +3287,17 @@ class PostgreSQLStore:
         that off-watchlist tickers don't consume ranking slots in S4 and then
         get silently dropped when no market price is available.
 
-        Within the window, the **most recent ensemble** signal is preferred over a
-        FinBERT fallback (so a weak fallback does not overwrite a strong recent
-        ensemble read); among same-status signals the most recent wins.
+        Within `ensemble_priority_hours` of NOW, the most recent ENSEMBLE signal
+        is preferred over a fallback (so a weak fallback does not overwrite a
+        strong recent ensemble read). Beyond that horizon an ensemble signal no
+        longer gets automatic priority: selection falls back to pure recency, so a
+        fresher fallback signal is no longer shadowed by a stale ensemble one
+        (F-056, 2026-08-13 — see `src/store/pg_store.py` `_FETCH_SIGNALS_FOR_CYCLE`
+        comment for the full incident). Default None makes this identical to
+        `hours`, i.e. the ensemble-priority bucket spans the entire lookback
+        window and reproduces the original (pre-F-056-fix) unconditional
+        behavior — existing callers are unaffected unless they explicitly pass a
+        smaller value.
 
         published_at gate (FIX-03): when `news_age_hours` is set, signals whose
         news is older are excluded; NULL published_at (legacy rows) passes — the
@@ -3289,9 +3315,13 @@ class PostgreSQLStore:
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 _news_h = news_age_hours if news_age_hours is not None else 24 * 365
+                _priority_h = (
+                    ensemble_priority_hours if ensemble_priority_hours is not None
+                    else hours
+                )
                 cur.execute(
                     self._FETCH_SIGNALS_FOR_CYCLE,
-                    (str(hours), str(_news_h), watchlist),
+                    (str(hours), str(_news_h), watchlist, str(_priority_h)),
                 )
                 rows = cur.fetchall()
         except Exception:
