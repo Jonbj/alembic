@@ -953,7 +953,7 @@ def test_persist_cycle_result_failure_counted_in_redis_and_ledger():
 
     redis_inst = MagicMock()
 
-    with patch("psycopg2.connect", return_value=ledger_conn) as mock_connect, \
+    with patch("psycopg2.connect", return_value=ledger_conn), \
          patch("redis.Redis.from_url", return_value=redis_inst):
         _persist_cycle_result(_gap_window_cycle_data(), conn=mock_conn)
 
