@@ -154,6 +154,16 @@ Log applicativi persistenti sull'host (sopravvivono ai redeploy):
 Usa questi file, non `docker compose logs`: i log Docker appartengono alla sola
 istanza corrente del container e dopo una ricreazione non coprono la data target.
 
+Evidenza runtime dei fallback FinBERT (#544): la stringa esatta classificata
+da FinBERT (titolo+corpo, con esito) e' persistita in `finbert_fallback_events`
+dal 2026-09-10 — non nei log. Per confermare che un fallback ha ricevuto il
+titolo (la conferma residua di #453), interroga quella tabella, non i log:
+  SELECT symbol, reason, title_chars, body_chars, polarity, confidence,
+         left(finbert_input, 80) AS input_head
+  FROM finbert_fallback_events WHERE created_at::date = '__DATE_TARGET__';
+title_chars > 0 e input_head che inizia col titolo della notizia sono la
+conferma. Righe assenti prima del deploy = non misurato, non "nessun fallback".
+
 Database PostgreSQL (solo SELECT):
   docker exec alembic-postgres-1 psql -U trading -d trading -c "<query SELECT>"
 
