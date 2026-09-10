@@ -452,6 +452,10 @@ async def run_inference(
             fb_result = await loop.run_in_executor(
                 None, finbert.analyze, finbert_text[:512]
             )
+            # #544: carry the exact string FinBERT classified (with its
+            # title/body split and outcome) on the result, so the worker can
+            # persist it to finbert_fallback_events — the runtime confirmation
+            # of the title+body fix must not live only in container logs.
             # Preserve the divergent raw outputs (empty on timeout): the caller
             # persists them to llm_responses with eligible=False so the
             # disagreement is auditable instead of silently discarded.
@@ -463,6 +467,10 @@ async def run_inference(
                 model_id="finbert",
                 fallback_used=True,
                 published_at=item.timestamp,
+                finbert_input=finbert_text[:512],
+                finbert_polarity=fb_result.polarity,
+                finbert_title_chars=len(clean_title),
+                finbert_body_chars=len(clean_body),
             ), list(raw_outputs or [])
 
         score = aggregated.polarity * aggregated.confidence
@@ -505,6 +513,10 @@ async def run_inference(
             model_id="finbert",
             fallback_used=True,
             published_at=item.timestamp,
+            finbert_input=finbert_text[:512],
+            finbert_polarity=fb_result.polarity,
+            finbert_title_chars=len(clean_title),
+            finbert_body_chars=len(clean_body),
         ), []
 
     except Exception as e:
@@ -769,6 +781,22 @@ async def process_news_item(
                 outputs=raw_outputs,
                 force_ineligible=result.fallback_used,
             )
+        # #544: persist the runtime evidence of a full FinBERT fallback (the
+        # exact string classified, with its title/body split and outcome) to
+        # finbert_fallback_events. Docker logs die with the container on every
+        # deploy rebuild, and this is the only record that answers the #453
+        # runtime question ("did the fallback actually receive title+body?")
+        # without the containers having stayed up. Measurement, not money path:
+        # a failure here must never take the just-written signal down with it.
+        if result.finbert_input is not None:
+            try:
+                pg_store.log_finbert_fallback_event(
+                    signal_id=signal_id, result=result
+                )
+            except Exception as _fb_ev_exc:
+                log.warning(
+                    "log_finbert_fallback_event failed: %s", _fb_ev_exc
+                )
         # Stage-2 shadow scoring: strictly AFTER every live write above (either mode
         # below). See this function's docstring for why there are two modes.
         if shadow_tasks is not None:

@@ -341,6 +341,48 @@ class PostgreSQLStore:
         ) VALUES (%s, %s, %s, %s, %s, %s, %s)
     """
 
+    _INSERT_FINBERT_FALLBACK_EVENT = """
+        INSERT INTO finbert_fallback_events (
+            signal_id, symbol, reason,
+            title_chars, body_chars, finbert_input,
+            polarity, confidence
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    """
+
+    def log_finbert_fallback_event(
+        self, signal_id: int | None, result: SentimentResult
+    ) -> None:
+        """Persist the runtime evidence of one full FinBERT fallback (#544).
+
+        Pure observability: not read by execution, sizing, or any money-path
+        code. `result` must carry the #544 evidence fields (set only on the
+        FinBERT call sites of run_inference); anything else (ensemble,
+        single-model, synthetic) is a no-op so the caller can pass every
+        result unconditionally.
+        """
+        if result.finbert_input is None:
+            return
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    self._INSERT_FINBERT_FALLBACK_EVENT,
+                    (
+                        signal_id,
+                        result.symbol,
+                        result.reasoning,
+                        result.finbert_title_chars,
+                        result.finbert_body_chars,
+                        result.finbert_input,
+                        result.finbert_polarity,
+                        result.confidence,
+                    ),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
     def record_ensemble_cycle_health(
         self,
         cycle_started_at: datetime,

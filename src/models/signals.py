@@ -33,3 +33,12 @@ class SentimentResult(BaseModel):
     extraction_method: str | None = None
     resolver_decision: str | None = None
     resolver_method: str | None = None
+    # #544: runtime evidence of a full FinBERT fallback, so the confirmation
+    # "did the fallback actually receive title+body?" (#453) no longer depends
+    # on container logs, which die with the container on every deploy rebuild.
+    # None everywhere except the three FinBERT call sites in run_inference —
+    # the worker persists these to finbert_fallback_events (pure observability).
+    finbert_input: str | None = None
+    finbert_polarity: float | None = None
+    finbert_title_chars: int | None = None
+    finbert_body_chars: int | None = None
