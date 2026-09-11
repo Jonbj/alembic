@@ -34,6 +34,7 @@ def _policy_rows() -> list[dict]:
             "reason_code": "P0_TARGET_ZERO_EXPIRED",
             "trigger_at": P0_EXIT,
             "filled_at": P0_EXIT,
+            "fill_price": 98.0,
             "net_pnl": 10.0,
         },
         {
@@ -42,12 +43,13 @@ def _policy_rows() -> list[dict]:
             "reason_code": "P1_TIME_DUE",
             "trigger_at": P1_EXIT,
             "filled_at": P1_EXIT,
+            "fill_price": 104.0,
             "net_pnl": 35.0,
         },
     ]
 
 
-def test_query_legge_i_costi_di_ingresso_condivisi(monkeypatch):
+def test_query_legge_costi_e_prezzi_di_uscita(monkeypatch):
     connection = MagicMock()
     cursor = MagicMock()
     connection.__enter__.return_value = connection
@@ -61,6 +63,7 @@ def test_query_legge_i_costi_di_ingresso_condivisi(monkeypatch):
 
     sql = cursor.execute.call_args.args[0]
     assert "entry_cost_usd" in sql
+    assert "fill_price" in sql
     assert "cost_model_version" in sql
 
 
@@ -508,8 +511,6 @@ def test_il_verdetto_deriva_la_qualita_dall_uscita_dal_path_di_prezzo(
     """Le metriche §8.3 di qualita' nascono dai fill e dalle barre: il report
     le porta al valutatore, che non le puo' inventare da solo."""
     rows = _policy_rows()
-    rows[0]["fill_price"] = 98.0
-    rows[1]["fill_price"] = 104.0
     entry_at = datetime(2026, 8, 25, 15, 50, tzinfo=UTC)
     bars = [
         (entry_at + timedelta(minutes=minute), 99.5 + minute * 0.05, 99.5 + minute * 0.05)

@@ -97,7 +97,7 @@ def _fetch_policy_rows(start: date, end: date) -> list[dict]:
                 intent_id::text AS intent_id, policy_id, symbol, d0,
                 initial_notional, entry_cost_usd, exit_cost_usd,
                 cost_model_version,
-                status, reason_code, trigger_at, filled_at,
+                status, reason_code, trigger_at, filled_at, fill_price,
                 virtual_exit_quantity, net_pnl, comparable, details
             FROM s4_exit_policy_current
             WHERE policy_id IN ('P0', 'P1')
