@@ -93,6 +93,10 @@ def test_cli_stampa_report_e_dettaglio_sostituto(monkeypatch, capsys):
         },
     )
     monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -171,6 +175,10 @@ def test_una_finestra_senza_coppie_comparabili_non_e_un_successo(monkeypatch, ca
     monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
     monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
     monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -208,6 +216,10 @@ def test_il_report_pubblica_il_verdetto_del_valutatore(monkeypatch, capsys):
     monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
     monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
     monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -239,6 +251,10 @@ def test_il_dettaglio_replacement_usa_la_stessa_coorte_d0_del_riepilogo(
     monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
     monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
     monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -286,6 +302,10 @@ def test_una_finestra_di_sole_attese_dichiara_gli_slot_non_ancora_misurati(
     monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
     monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
     monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -391,6 +411,10 @@ def test_lo_stesso_sostituto_non_viene_accreditato_a_due_slot(monkeypatch, capsy
         },
     )
     monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -433,6 +457,10 @@ def test_il_verdetto_legge_la_stessa_coorte_d0_del_riepilogo(monkeypatch, capsys
     monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
     monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
     monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -514,6 +542,10 @@ def test_il_verdetto_deriva_la_qualita_dall_uscita_dal_path_di_prezzo(
         "_fetch_session_dates",
         lambda start, end: [date(2026, 8, d) for d in (25, 26, 27)],
     )
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
 
     report_script.main(["--start", "2026-08-25", "--end", "2026-08-27"])
 
@@ -527,4 +559,76 @@ def test_il_verdetto_deriva_la_qualita_dall_uscita_dal_path_di_prezzo(
     # Il MFE tocca 110, l'uscita P1 e' a 104: giveback in bps dell'ingresso
     assert qualita["mean_giveback_from_mfe_bps"] == pytest.approx(
         (110.0 - 104.0) / 99.0 * 10_000.0
+    )
+
+
+def test_il_report_registra_il_ledger_delle_varianti_viste(monkeypatch, capsys):
+    """Criterio 5 di #299: il ledger append-only deve registrare ogni variante
+    valutata sulla finestra, perche' alla decision analysis la molteplicita'
+    esplorata dev'essere ricostruibile."""
+    registrate = []
+    monkeypatch.setattr(report_script, "_fetch_policy_rows", lambda start, end: _policy_rows())
+    monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
+    monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
+    monkeypatch.setattr(
+        report_script,
+        "_record_trial_ledger",
+        lambda entries, start, end: registrate.append((entries, start, end)),
+    )
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_session_dates",
+        lambda start, end: [date(2026, 8, d) for d in (25, 26, 27)],
+    )
+
+    report_script.main(["--start", "2026-08-25", "--end", "2026-08-27"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert registrate == [
+        (
+            payload["evaluation"]["ledger"],
+            date(2026, 8, 25),
+            date(2026, 8, 27),
+        )
+    ]
+    assert registrate[0][0] == [
+        {
+            "variant": "delta1_P1_vs_P0",
+            "role": "confirmatory",
+            "notes": ["not_equivalence", "below_n_cluster"],
+        }
+    ]
+
+
+def test_la_scrittura_del_ledger_e_append_only_e_idempotente():
+    """Rigettare la stessa variante sulla stessa finestra non deve duplicare:
+    l'id e' un fingerprint di (finestra, variante, ruolo), e ON CONFLICT lo
+    fa decadere in silenzio. Il trigger append-only sta nella migrazione."""
+    connection = MagicMock()
+    cursor = MagicMock()
+    connection.__enter__.return_value = connection
+    connection.cursor.return_value.__enter__.return_value = cursor
+    original_connect = report_script.psycopg2.connect
+    report_script.psycopg2.connect = lambda *args, **kwargs: connection
+    try:
+        report_script._record_trial_ledger(
+            [{"variant": "delta1_P1_vs_P0", "role": "confirmatory"}],
+            date(2026, 8, 25),
+            date(2026, 8, 27),
+        )
+    finally:
+        report_script.psycopg2.connect = original_connect
+
+    sql = cursor.execute.call_args.args[0]
+    assert "ON CONFLICT (ledger_id) DO NOTHING" in sql
+    assert "s4_trial_ledger" in sql
+    # Il fingerprint e' stabile: la stessa finestra e variante danno lo stesso id
+    call_args = cursor.execute.call_args.args[1]
+    assert call_args[0] == str(
+        report_script.trial_ledger_id("delta1_P1_vs_P0", date(2026, 8, 25), date(2026, 8, 27))
     )

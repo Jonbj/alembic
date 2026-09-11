@@ -33,7 +33,9 @@ from src.strategies.s4.exit_quality import PairedExitQuality
 from src.strategies.s4.paired_evaluator import (
     OUTCOME_NOT_TESTED,
     BootstrapScheme,
+    EvaluationResult,
     PairedObservation,
+    TrialLedger,
     economic_metrics,
     evaluate_hierarchy,
     exit_quality,
@@ -174,6 +176,21 @@ def _metrics_block(
     }
 
 
+def _ledger_entries(result: EvaluationResult) -> list[dict[str, object]]:
+    """Le varianti viste da questa valutazione, registrate nel ledger.
+
+    Il `TrialLedger` del modulo e' la stessa regola che rifiuta una diagnostica
+    rinominata confirmatory: e' lui a validarle, qui non si ricostruisce.
+    """
+    ledger = TrialLedger()
+    for step in result.steps:
+        ledger.record(step.label, role="confirmatory")
+    return [
+        {"variant": entry.name, "role": entry.role, "notes": list(step.notes)}
+        for entry, step in zip(ledger.entries, result.steps)
+    ]
+
+
 def _blocked_result(
     policy_id: str, note: str, clusters: int, observations: int, n_cluster: int | None
 ) -> dict[str, object]:
@@ -195,6 +212,9 @@ def _blocked_result(
                 "interval": None,
             }
         ],
+        # Nessuna osservazione, nessuna variante vista: un ledger con righe
+        # dichiarerebbe una molteplicita' che il trial non ha esplorato.
+        "ledger": [],
         "metrics": _metrics_block(()),
     }
 
@@ -250,6 +270,7 @@ def run_evaluation(
         "n_cluster": result.n_cluster,
         "decision_due": result.decision_due,
         "promoted_policy_id": result.promoted_policy_id,
+        "ledger": _ledger_entries(result),
         "metrics": _metrics_block(observations),
         "steps": [
             {

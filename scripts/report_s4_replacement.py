@@ -8,6 +8,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import date, datetime, timedelta
+from uuid import UUID, uuid5
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -31,6 +32,50 @@ from src.strategies.s4.evaluator_bridge import (
     run_evaluation,
 )
 from src.strategies.s4.p0_baseline import VersionedTradeCostModel
+
+# Il trial ledger (#299, criterio 5): ogni variante valutata su una finestra
+# resta registrata, cosi' alla decision analysis la molteplicita' esplorata e'
+# ricostruibile invece che affidata alla memoria di chi ha guardato.
+_TRIAL_LEDGER_NAMESPACE = UUID("7c3d1e94-8b2f-5a41-9d6c-2e5f8a01b4d7")
+
+
+def trial_ledger_id(variant: str, start: date, end: date) -> str:
+    """Fingerprint di (finestra, variante): rieseguire il report non duplica.
+
+    Il tracciamento e' per variante-vista-su-finestra, non per esecuzione: una
+    riesecuzione con gli stessi input non aggiunge molteplicita' esplorata.
+    """
+    return str(uuid5(_TRIAL_LEDGER_NAMESPACE, f"{variant}|{start}|{end}"))
+
+
+def _record_trial_ledger(
+    entries: Sequence[dict], start: date, end: date
+) -> None:
+    """Append-only: nessuna riga esistente viene aggiornata o cancellata."""
+    if not entries:
+        return
+    with psycopg2.connect(config.DATABASE_URL) as conn:
+        with conn.cursor() as cursor:
+            for entry in entries:
+                cursor.execute(
+                    """
+                    INSERT INTO s4_trial_ledger
+                        (ledger_id, window_start, window_end, variant,
+                         role, notes)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (ledger_id) DO NOTHING
+                    """,
+                    (
+                        trial_ledger_id(entry["variant"], start, end),
+                        start,
+                        end,
+                        entry["variant"],
+                        entry["role"],
+                        list(entry.get("notes") or []),
+                    ),
+                )
+        conn.commit()
+
 
 # Codici d'uscita. Il report stampa un JSON valido in tutti e tre i casi:
 # distinguerli e' l'unico modo perche' un chiamante sappia se la finestra e'
@@ -400,6 +445,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         mde_counter_bps=settings.mde_counter_bps,
         exit_quality=_cohort_exit_quality(cohort, rows),
     )
+    # Il criterio 5 chiede che il ledger sopravviva alla singola esecuzione:
+    # il report gira da cron ogni 6 sedute (check_s4_trial_milestones), quindi
+    # la persistenza e' qui, nel punto in cui la variante e' stata vista.
+    _record_trial_ledger(payload["evaluation"]["ledger"], args.start, args.end)
     print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
 
     # Il criterio e' `comparable`, non `total`: riconciliare zero con zero

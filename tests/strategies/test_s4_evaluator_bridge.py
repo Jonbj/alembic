@@ -381,3 +381,43 @@ def test_il_verdetto_pubblica_la_qualita_dell_uscita_della_coorte():
     assert result["metrics"]["economic"]["overnight_share"] == pytest.approx(
         4.0 / 80.0
     )
+
+
+# ── Il trial ledger registra le varianti viste (criterio 5) ────────────────
+
+
+def test_il_verdetto_registra_le_varianti_viste_nel_ledger():
+    """Ogni gradino valutato e' una variante vista: senza registro, la
+    molteplicita' esplorata si perde e una diagnostica puo' tornare come
+    confirmatory su un campione che non e' piu' out-of-sample."""
+    result = run_evaluation(
+        (_pair(i) for i in range(6)),
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=4,
+    )
+
+    assert result["ledger"] == [
+        {
+            "variant": "delta1_P1_vs_P0",
+            "role": "confirmatory",
+            # 6 cluster su 4 richiesti: il gradino e' valutato (non
+            # `below_n_cluster`), solo non promosso — e il ledger lo dice
+            "notes": ["not_equivalence"],
+        }
+    ]
+
+
+def test_un_verdetto_bloccato_non_ha_visto_nessuna_variante():
+    """Senza osservazioni non c'e' niente da registrare: un ledger con righe
+    inventate dichiarerebbe una molteplicita' che il trial non ha esplorato."""
+    result = run_evaluation(
+        (),
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=4,
+    )
+
+    assert result["ledger"] == []
