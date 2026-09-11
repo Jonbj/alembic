@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import psycopg2
 from psycopg2 import pool
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import Json, RealDictCursor
 
 from src.config import config
 from src.costs.calculator import TradeCostCalculator
@@ -429,6 +429,56 @@ class PostgreSQLStore:
              parse_error, latency_ms, failure_reason)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
+
+    # Consumo shadow off-session (#432, Opzione C, migrazione 068). Unica
+    # scrittura che il worker `sentiment_shadow` esegue: il suo perimetro
+    # (nessuna riga in sentiment_signals/news_log/Redis) e' asserito da
+    # tests/workers/test_sentiment_shadow.py, non da revisione a vista.
+    #
+    # ON CONFLICT DO NOTHING: l'unita' di analisi pre-registrata e' il
+    # simbolo-giorno, quindi un doppione gonfierebbe il campione in silenzio.
+    # Il set Redis `shadow:processed:<notte>` e' la de-duplica primaria; questo
+    # vincolo e' quello durevole, perche' quel set ha TTL 36h.
+    _INSERT_OFFSESSION_SHADOW = """
+        INSERT INTO sentiment_signals_offsession_shadow
+            (item_id, symbol, score, model, fallback_used, published_at,
+             scored_at, raw_item)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (item_id, symbol) DO NOTHING
+    """
+
+    def write_offsession_shadow_signal(
+        self,
+        item_id: str,
+        symbol: str,
+        score: float,
+        model: str,
+        fallback_used: bool,
+        published_at,
+        scored_at,
+        raw_item: dict | None = None,
+    ) -> None:
+        """Persist one off-session shadow score. Never read by the live path."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    self._INSERT_OFFSESSION_SHADOW,
+                    (
+                        item_id,
+                        symbol,
+                        score,
+                        model,
+                        bool(fallback_used),
+                        published_at,
+                        scored_at,
+                        Json(raw_item) if raw_item is not None else None,
+                    ),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
     def log_news_item(
         self,
