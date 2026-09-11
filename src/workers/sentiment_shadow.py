@@ -11,7 +11,7 @@ nella pre-registrazione perche' non venga riletto come una scoperta.
 ## Perimetro (deroga in carta, 2026-09-10)
 
 Scrive **una sola tabella**: `sentiment_signals_offsession_shadow` (migrazione
-068). Zero scritture su `sentiment_signals`, `news_log` e zero scritture via
+069). Zero scritture su `sentiment_signals`, `news_log` e zero scritture via
 `RedisStore` — niente cache dei segnali, niente contatori di fallback, niente
 storia dei segnali. Il perimetro non e' affidato alla revisione a vista: e'
 asserito da `tests/workers/test_sentiment_shadow.py`, che fallisce a ogni

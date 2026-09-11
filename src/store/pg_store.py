@@ -430,7 +430,7 @@ class PostgreSQLStore:
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
 
-    # Consumo shadow off-session (#432, Opzione C, migrazione 068). Unica
+    # Consumo shadow off-session (#432, Opzione C, migrazione 069). Unica
     # scrittura che il worker `sentiment_shadow` esegue: il suo perimetro
     # (nessuna riga in sentiment_signals/news_log/Redis) e' asserito da
     # tests/workers/test_sentiment_shadow.py, non da revisione a vista.

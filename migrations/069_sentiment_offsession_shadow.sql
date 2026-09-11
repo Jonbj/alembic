@@ -1,4 +1,4 @@
--- Migration 068: consumo shadow off-session della coda news (Opzione C, #432).
+-- Migration 069: consumo shadow off-session della coda news (Opzione C, #432).
 --
 -- Unica destinazione di scrittura del worker `src/workers/sentiment_shadow.py`.
 -- Il perimetro e' dichiarato nella carta di osservazione (deroga 2026-09-10) e

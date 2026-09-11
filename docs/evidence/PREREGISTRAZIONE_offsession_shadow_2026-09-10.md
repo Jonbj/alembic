@@ -133,7 +133,13 @@ esplicita.
 ## 6. Perimetro delle scritture (deroga registrata in carta)
 
 La modalità shadow scrive su **una sola tabella**: `sentiment_signals_offsession_shadow`
-(migrazione `068_sentiment_offsession_shadow.sql`).
+(migrazione `069_sentiment_offsession_shadow.sql`).
+
+> **Errata 2026-09-11.** La migrazione era numerata `068` al momento della
+> registrazione; il numero era già stato preso da un'altra PR aperta in
+> parallelo (#561) e `scripts/apply_migrations.py` rifiuta l'intero lotto su
+> versioni duplicate. Rinumerata `069`. Cambia il nome del file e nient'altro:
+> campione, regola, criterio e perimetro restano quelli registrati il 10/09.
 
 **Zero** scritture su `sentiment_signals`, `news_log`, e **zero** scritture su Redis
 (`redis_store`). La coda non viene mai consumata: `LRANGE`, mai `LMOVE`, mai
