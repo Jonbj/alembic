@@ -39,6 +39,8 @@ def _pair(
     delta_usd: float | None = 10.0,
     comparable: bool = True,
     reasons: tuple[str, ...] = (),
+    baseline_exit_cost_usd: float | None = None,
+    challenger_exit_cost_usd: float | None = None,
 ) -> PairedDelta:
     notional = 1000.0
     return PairedDelta(
@@ -60,6 +62,8 @@ def _pair(
         challenger_capital_days=2000.0,
         comparable=comparable,
         exclusion_reasons=reasons,
+        baseline_exit_cost_usd=baseline_exit_cost_usd,
+        challenger_exit_cost_usd=challenger_exit_cost_usd,
     )
 
 
@@ -101,6 +105,22 @@ def test_il_delta_e_i_capitale_giorni_arrivano_intatti():
     assert observation.initial_notional == pytest.approx(1000.0)
     # Capitale-giorni della challenger: e' la sua occupazione a essere misurata
     assert observation.capital_days == pytest.approx(2000.0)
+
+
+def test_il_costo_di_uscita_arriva_alla_coppia_come_delta():
+    """I costi d'ingresso sono condivisi per contratto: il delta dei costi e'
+    tutto nella gamba d'uscita, che il ponte espone invece di tenerla scontata
+    dentro `net_pnl`."""
+    pairs = (
+        _pair(0, baseline_exit_cost_usd=2.0, challenger_exit_cost_usd=3.5),
+        _pair(1),
+    )
+
+    observations = observations_from_pairs(pairs, policy_id="P1")
+
+    assert observations[0].exit_cost_delta_usd == pytest.approx(1.5)
+    # Un costo mancante resta un ignoto, non uno zero
+    assert observations[1].exit_cost_delta_usd is None
 
 
 # ── Il cluster e' l'event-day, con il suo limite dichiarato ────────────────
@@ -224,3 +244,70 @@ def test_il_risultato_e_serializzabile_in_json():
     )
 
     assert json.loads(json.dumps(result, default=str))["clusters_observed"] == 6
+
+
+# ── Le metriche §8.3 accompagnano il verdetto sulla stessa coorte ──────────
+
+
+def test_il_verdetto_riporta_le_metriche_sulla_stessa_coorte():
+    """Il verdetto decide su `observations`; le metriche descrivono le stesse.
+
+    Una coorte diversa fra intervallo e metriche pubblicherebbe due campioni
+    con lo stesso nome.
+    """
+    pairs = tuple(_pair(i, delta_usd=25.0 * (-1) ** i) for i in range(6))
+
+    result = run_evaluation(
+        pairs,
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=4,
+    )
+
+    economic = result["metrics"]["economic"]
+    risk = result["metrics"]["risk"]
+    assert economic["trades"] == result["observations"]
+    assert economic["denominator"] == "initial_notional"
+    assert economic["mean_delta_bps"] == pytest.approx(0.0)
+    assert risk["worst_trade_bps"] == pytest.approx(-250.0)
+    assert "downside_deviation_bps" in risk
+    assert "expected_shortfall_bps" in risk
+    assert "max_drawdown_bps" in risk
+
+
+def test_il_verdetto_riporta_il_costo_del_delta_con_la_sua_copertura():
+    pairs = (
+        _pair(0, baseline_exit_cost_usd=2.0, challenger_exit_cost_usd=3.0),
+        _pair(1, baseline_exit_cost_usd=1.0, challenger_exit_cost_usd=1.0),
+        _pair(2),
+    )
+
+    result = run_evaluation(
+        pairs,
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=2,
+    )
+
+    economic = result["metrics"]["economic"]
+    # La terza coppia non ha costi: la somma non la azzera, la dichiara parziale
+    assert economic["cost_delta_usd"] == pytest.approx(1.0)
+    assert economic["cost_trades"] == 2
+
+
+def test_un_verdetto_bloccato_riporta_metriche_vuote_non_inventate():
+    """Finestra senza coppie: le metriche esistono e dicono zero, senza
+    valori fittizi che sembrerebbero una misura."""
+    result = run_evaluation(
+        (),
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=4,
+    )
+
+    assert result["metrics"]["economic"]["trades"] == 0
+    assert result["metrics"]["risk"] == {}
+    assert result["metrics"]["exit_quality"] == {}

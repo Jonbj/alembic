@@ -428,3 +428,33 @@ def test_i_capitale_giorni_e_la_quota_overnight_restano_riportati_a_parte():
     assert metriche["capital_days"] == pytest.approx(3000.0)
     assert metriche["return_on_occupied_capital_bps"] is not None
     assert metriche["overnight_share"] == pytest.approx(0.1)
+
+
+def test_le_metriche_riportano_il_costo_con_la_copertura_dichiarata():
+    """Il delta e' gia' netto: senza il costo esposto resta invisibile.
+
+    Un'osservazione senza costo non entra nella somma e nemmeno la azzera:
+    `cost_trades` dice quanti contribuiscono, cosi' una copertura parziale non
+    si legge come un costo totale.
+    """
+    campione = (
+        _obs(0, 10.0, delta_usd=10.0, exit_cost_delta_usd=1.0),
+        _obs(1, 20.0, delta_usd=20.0, exit_cost_delta_usd=-0.5),
+        _obs(2, 30.0, delta_usd=30.0),
+    )
+
+    metriche = economic_metrics(campione)
+
+    assert metriche["cost_delta_usd"] == pytest.approx(0.5)
+    assert metriche["cost_delta_bps"] == pytest.approx(2.5)
+    assert metriche["cost_trades"] == 2
+
+
+def test_senza_costi_le_metriche_non_inventano_uno_zero():
+    campione = _sample([10.0, 20.0])
+
+    metriche = economic_metrics(campione)
+
+    assert metriche["cost_delta_usd"] is None
+    assert metriche["cost_delta_bps"] is None
+    assert metriche["cost_trades"] == 0

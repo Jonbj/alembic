@@ -33,7 +33,10 @@ from src.strategies.s4.paired_evaluator import (
     OUTCOME_NOT_TESTED,
     BootstrapScheme,
     PairedObservation,
+    economic_metrics,
     evaluate_hierarchy,
+    exit_quality,
+    risk_metrics,
 )
 
 CLUSTER_UNIT = "d0_session"
@@ -129,9 +132,30 @@ def observations_from_pairs(
                 delta_usd=pair.delta_usd,
                 initial_notional=pair.initial_notional or 0.0,
                 capital_days=pair.challenger_capital_days,
+                exit_cost_delta_usd=(
+                    None
+                    if pair.baseline_exit_cost_usd is None
+                    or pair.challenger_exit_cost_usd is None
+                    else pair.challenger_exit_cost_usd - pair.baseline_exit_cost_usd
+                ),
             )
         )
     return tuple(observations)
+
+
+def _metrics_block(
+    observations: Sequence[PairedObservation],
+) -> dict[str, object]:
+    """Le metriche §8.3 accompagnano il verdetto sulla stessa coorte.
+
+    Il blocco esiste anche a campione vuoto: un consumatore non deve indovinare
+    quando una chiave e' assente, e `trades: 0` dice "non misurato", non misura.
+    """
+    return {
+        "economic": economic_metrics(observations),
+        "risk": risk_metrics(observations),
+        "exit_quality": exit_quality(observations),
+    }
 
 
 def _blocked_result(
@@ -155,6 +179,7 @@ def _blocked_result(
                 "interval": None,
             }
         ],
+        "metrics": _metrics_block(()),
     }
 
 
@@ -206,6 +231,7 @@ def run_evaluation(
         "n_cluster": result.n_cluster,
         "decision_due": result.decision_due,
         "promoted_policy_id": result.promoted_policy_id,
+        "metrics": _metrics_block(observations),
         "steps": [
             {
                 "label": step.label,

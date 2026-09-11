@@ -194,6 +194,7 @@ class PolicyOutcome:
     net_pnl: float | None
     comparable: bool
     entry_cost_usd: float | None = None
+    exit_cost_usd: float | None = None
     cost_model_version: str | None = None
 
 
@@ -220,6 +221,11 @@ def outcome_from_p0_event(event: P0ReplayEvent) -> PolicyOutcome:
             None
             if event.entry_cost_usd is None
             else float(event.entry_cost_usd)
+        ),
+        exit_cost_usd=(
+            None
+            if event.exit_cost_usd is None
+            else float(event.exit_cost_usd)
         ),
         cost_model_version=event.cost_model_version,
     )
@@ -267,6 +273,8 @@ class PairedDelta:
     challenger_capital_days: float | None
     comparable: bool
     exclusion_reasons: tuple[str, ...]
+    baseline_exit_cost_usd: float | None = None
+    challenger_exit_cost_usd: float | None = None
 
 
 @dataclass(frozen=True)
@@ -473,6 +481,11 @@ def build_paired_comparison(
                 ),
                 comparable=comparable,
                 exclusion_reasons=tuple(reasons),
+                # I costi d'ingresso sono condivisi per contratto: il costo del
+                # delta vive tutto nella gamba d'uscita, che resta esposta e
+                # non scontata dentro `net_pnl`.
+                baseline_exit_cost_usd=base.exit_cost_usd,
+                challenger_exit_cost_usd=challenger.exit_cost_usd,
             )
         )
 

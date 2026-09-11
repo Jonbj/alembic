@@ -1380,3 +1380,19 @@ def test_una_finestra_senza_coppie_senza_data_dichiara_zero():
     )
 
     assert report["undated"] == {"pairs": 0, "slots": 0, "without_slot": 0}
+
+
+def test_il_costo_di_uscita_delle_due_gambe_arriva_alla_coppia():
+    """Il costo d'ingresso e' condiviso per contratto; quello d'uscita no.
+
+    Senza il costo d'uscita esposto per gamba, il costo del delta resterebbe
+    invisibile dietro un `net_pnl` gia' scontato.
+    """
+    baseline = [_outcome("P0", exit_cost_usd=2.0)]
+    challenger = [_outcome("P1", exit_cost_usd=3.5)]
+
+    comparison = _paired(baseline, challenger)
+
+    pair = comparison.pairs[0]
+    assert pair.baseline_exit_cost_usd == pytest.approx(2.0)
+    assert pair.challenger_exit_cost_usd == pytest.approx(3.5)
