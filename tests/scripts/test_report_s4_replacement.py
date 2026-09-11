@@ -92,6 +92,7 @@ def test_cli_stampa_report_e_dettaglio_sostituto(monkeypatch, capsys):
             "NVDA": [(P0_EXIT, 100.0), (P1_EXIT, 104.0)]
         },
     )
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -169,6 +170,7 @@ def test_una_finestra_senza_coppie_comparabili_non_e_un_successo(monkeypatch, ca
     )
     monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
     monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -205,6 +207,7 @@ def test_il_report_pubblica_il_verdetto_del_valutatore(monkeypatch, capsys):
     )
     monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
     monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -235,6 +238,7 @@ def test_il_dettaglio_replacement_usa_la_stessa_coorte_d0_del_riepilogo(
     monkeypatch.setattr(report_script, "_fetch_policy_rows", lambda start, end: rows)
     monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
     monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -281,6 +285,7 @@ def test_una_finestra_di_sole_attese_dichiara_gli_slot_non_ancora_misurati(
     )
     monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
     monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -385,6 +390,7 @@ def test_lo_stesso_sostituto_non_viene_accreditato_a_due_slot(monkeypatch, capsy
             ]
         },
     )
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -426,6 +432,7 @@ def test_il_verdetto_legge_la_stessa_coorte_d0_del_riepilogo(monkeypatch, capsys
     monkeypatch.setattr(report_script, "_fetch_policy_rows", lambda start, end: rows)
     monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
     monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -465,3 +472,59 @@ def test_una_coppia_senza_d0_e_nominata_invece_di_sparire(monkeypatch, capsys):
     assert payload["undated"]["pairs"] == 1
     # Senza coppie misurabili la finestra non e' un successo.
     assert exit_code == 2
+
+
+def test_il_verdetto_deriva_la_qualita_dall_uscita_dal_path_di_prezzo(
+    monkeypatch, capsys
+):
+    """Le metriche §8.3 di qualita' nascono dai fill e dalle barre: il report
+    le porta al valutatore, che non le puo' inventare da solo."""
+    rows = _policy_rows()
+    rows[0]["fill_price"] = 98.0
+    rows[1]["fill_price"] = 104.0
+    entry_at = datetime(2026, 8, 25, 15, 50, tzinfo=UTC)
+    bars = [
+        (entry_at + timedelta(minutes=minute), 99.5 + minute * 0.05, 99.5 + minute * 0.05)
+        for minute in range(1, 11)
+    ] + [
+        (datetime(2026, 8, 26, 13, 31, tzinfo=UTC), 102.0, 102.0),
+        (datetime(2026, 8, 26, 13, 32, tzinfo=UTC), 110.0, 103.0),
+        (datetime(2026, 8, 26, 13, 33, tzinfo=UTC), 104.0, 104.0),
+    ]
+    monkeypatch.setattr(report_script, "_fetch_policy_rows", lambda start, end: rows)
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_entry_rows",
+        lambda intent_ids: [
+            {
+                "intent_id": "intent-1",
+                "filled_at": entry_at,
+                "fill_price": 99.0,
+                "s4_virtual_quantity": 10.0,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        report_script, "_fetch_quality_bars", lambda symbols, start, end: {"AMD": bars}
+    )
+    monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
+    monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_session_dates",
+        lambda start, end: [date(2026, 8, d) for d in (25, 26, 27)],
+    )
+
+    report_script.main(["--start", "2026-08-25", "--end", "2026-08-27"])
+
+    metrics = json.loads(capsys.readouterr().out)["evaluation"]["metrics"]
+    qualita = metrics["exit_quality"]
+    # P0 vende a 98, all'uscita P1 (104) starebbe meglio: uscita falsa,
+    # recuperata perche' sopra l'ingresso a 99
+    assert qualita["false_exit_rate"] == pytest.approx(1.0)
+    assert qualita["recovery_within_horizon_rate"] == pytest.approx(1.0)
+    assert metrics["economic"]["overnight_share"] == pytest.approx(20.0 / 25.0)
+    # Il MFE tocca 110, l'uscita P1 e' a 104: giveback in bps dell'ingresso
+    assert qualita["mean_giveback_from_mfe_bps"] == pytest.approx(
+        (110.0 - 104.0) / 99.0 * 10_000.0
+    )

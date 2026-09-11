@@ -311,3 +311,73 @@ def test_un_verdetto_bloccato_riporta_metriche_vuote_non_inventate():
     assert result["metrics"]["economic"]["trades"] == 0
     assert result["metrics"]["risk"] == {}
     assert result["metrics"]["exit_quality"] == {}
+
+
+# ── La qualita' dell'uscita entra nell'osservazione quando esiste ──────────
+
+
+def _quality(intent: str, **overrides):
+    from src.strategies.s4.exit_quality import PairedExitQuality
+
+    values = {
+        "overnight_pnl_usd": 4.0,
+        "false_exit": True,
+        "recovered_within_horizon": True,
+        "giveback_from_mfe_bps": 30.0,
+    }
+    values.update(overrides)
+    return intent, PairedExitQuality(**values)
+
+
+def test_la_qualita_dell_uscita_arriva_alla_coppia_che_la_ha():
+    """La qualita' nasce dal path di prezzo di un intento: entra solo nella
+    coppia con lo stesso nome, mai come sfondo della coorte."""
+    pairs = (_pair(0), _pair(1))
+
+    observations = observations_from_pairs(
+        pairs, policy_id="P1", exit_quality=dict([_quality("intent-0")])
+    )
+
+    prima, seconda = observations
+    assert prima.overnight_pnl_usd == pytest.approx(4.0)
+    assert prima.false_exit is True
+    assert prima.recovered_within_horizon is True
+    assert prima.giveback_from_mfe_bps == pytest.approx(30.0)
+    # L'intento senza path resta ignoto su tutte le quattro: non azzera le
+    # medie di qualita', ne' le allarga con un favore inventato
+    assert seconda.overnight_pnl_usd is None
+    assert seconda.false_exit is None
+    assert seconda.recovered_within_horizon is None
+    assert seconda.giveback_from_mfe_bps is None
+
+
+def test_il_verdetto_pubblica_la_qualita_dell_uscita_della_coorte():
+    pairs = (_pair(0), _pair(1, delta_usd=30.0), _pair(2, delta_usd=40.0))
+    quality = dict(
+        [
+            _quality("intent-0"),
+            _quality(
+                "intent-1",
+                overnight_pnl_usd=0.0,
+                false_exit=True,
+                recovered_within_horizon=False,
+            ),
+            _quality("intent-2", overnight_pnl_usd=0.0, false_exit=False),
+        ]
+    )
+
+    result = run_evaluation(
+        pairs,
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=3,
+        exit_quality=quality,
+    )
+
+    qualita = result["metrics"]["exit_quality"]
+    assert qualita["false_exit_rate"] == pytest.approx(2 / 3)
+    assert qualita["recovery_within_horizon_rate"] == pytest.approx(0.5)
+    assert result["metrics"]["economic"]["overnight_share"] == pytest.approx(
+        4.0 / 80.0
+    )

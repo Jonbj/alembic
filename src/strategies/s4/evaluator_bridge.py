@@ -22,13 +22,14 @@ Due regole reggono tutto il resto:
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import yaml
 
 from src.strategies.s4.counterfactual import PairedDelta
+from src.strategies.s4.exit_quality import PairedExitQuality
 from src.strategies.s4.paired_evaluator import (
     OUTCOME_NOT_TESTED,
     BootstrapScheme,
@@ -110,7 +111,10 @@ def load_evaluation_settings(path: Path | None = None) -> EvaluationSettings:
 
 
 def observations_from_pairs(
-    pairs: Iterable[PairedDelta], *, policy_id: str
+    pairs: Iterable[PairedDelta],
+    *,
+    policy_id: str,
+    exit_quality: Mapping[str, PairedExitQuality] | None = None,
 ) -> tuple[PairedObservation, ...]:
     """Seleziona le coppie misurabili della policy e le assegna a un cluster."""
     observations: list[PairedObservation] = []
@@ -122,6 +126,7 @@ def observations_from_pairs(
             # non e' assegnabile a un cluster: resta fuori invece di entrare
             # con un valore inventato.
             continue
+        quality = (exit_quality or {}).get(pair.intent_id)
         observations.append(
             PairedObservation(
                 intent_id=pair.intent_id,
@@ -137,6 +142,17 @@ def observations_from_pairs(
                     if pair.baseline_exit_cost_usd is None
                     or pair.challenger_exit_cost_usd is None
                     else pair.challenger_exit_cost_usd - pair.baseline_exit_cost_usd
+                ),
+                # La qualita' nasce dal path di prezzo dell'intento: senza
+                # path resta `None` su ogni campo, fuori dalle medie — un
+                # ignoto contato come favore abbasserebbe il false-exit rate.
+                overnight_pnl_usd=None if quality is None else quality.overnight_pnl_usd,
+                false_exit=None if quality is None else quality.false_exit,
+                recovered_within_horizon=(
+                    None if quality is None else quality.recovered_within_horizon
+                ),
+                giveback_from_mfe_bps=(
+                    None if quality is None else quality.giveback_from_mfe_bps
                 ),
             )
         )
@@ -192,6 +208,7 @@ def run_evaluation(
     n_cluster: int | None,
     counter_pairs: Sequence[PairedDelta] | None = None,
     mde_counter_bps: float | None = None,
+    exit_quality: Mapping[str, PairedExitQuality] | None = None,
 ) -> dict[str, object]:
     """Esegue la gerarchia sui delta appaiati e restituisce un blocco JSON.
 
@@ -199,7 +216,9 @@ def run_evaluation(
     non esiste nemmeno una decisione da prendere: lo dice esplicitamente invece
     di scegliere un default, che sarebbe una regola di stopping inventata qui.
     """
-    observations = observations_from_pairs(pairs, policy_id=policy_id)
+    observations = observations_from_pairs(
+        pairs, policy_id=policy_id, exit_quality=exit_quality
+    )
     clusters = len({obs.event_day for obs in observations})
 
     if not observations:

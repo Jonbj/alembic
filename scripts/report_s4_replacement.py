@@ -87,6 +87,120 @@ def _fetch_intent_rows(until: datetime) -> list[dict]:
         return [dict(row) for row in cursor.fetchall()]
 
 
+def _fetch_entry_rows(intent_ids: Sequence[str]) -> list[dict]:
+    """Il fill d'ingresso condiviso: punto d'ancora del path di prezzo."""
+    if not intent_ids:
+        return []
+    with (
+        psycopg2.connect(config.DATABASE_URL) as conn,
+        conn.cursor(cursor_factory=RealDictCursor) as cursor,
+    ):
+        cursor.execute(
+            """
+            SELECT intent_id::text AS intent_id, filled_at, fill_price,
+                   s4_virtual_quantity
+            FROM s4_lifecycle_current
+            WHERE intent_id IN %s
+            """,
+            (tuple(intent_ids),),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def _fetch_quality_bars(
+    symbols: Sequence[str], start: datetime, end: datetime
+) -> dict[str, list[tuple[datetime, float, float]]]:
+    """Barre al minuto con high e close: il path su cui nasce la qualita'."""
+    from alpaca.data.enums import Adjustment
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+
+    if not symbols or end <= start:
+        return {}
+    if not config.ALPACA_API_KEY or not config.ALPACA_SECRET_KEY:
+        raise SystemExit("ALPACA_API_KEY / ALPACA_SECRET_KEY mancanti")
+    client = StockHistoricalDataClient(
+        config.ALPACA_API_KEY, config.ALPACA_SECRET_KEY
+    )
+    request = StockBarsRequest(
+        symbol_or_symbols=sorted(set(symbols)),
+        timeframe=TimeFrame.Minute,
+        start=start,
+        end=end + timedelta(minutes=1),
+        adjustment=Adjustment.ALL,
+    )
+    payload = client.get_stock_bars(request)
+    data = getattr(payload, "data", {}) if payload is not None else {}
+    return {
+        symbol: [
+            (bar.timestamp, float(bar.high), float(bar.close))
+            for bar in data.get(symbol, ())
+            if getattr(bar, "timestamp", None) is not None
+            and getattr(bar, "high", None) is not None
+            and getattr(bar, "close", None) is not None
+        ]
+        for symbol in sorted(set(symbols))
+    }
+
+
+def _cohort_exit_quality(cohort, rows: list[dict]) -> dict[str, object]:
+    """Deriva la qualita' dell'uscita per le coppie del verdetto, dal path.
+
+    Ogni metrica che manca resta `None` e resta fuori dalle medie: fill senza
+    barre, barre senza fill o intenti ancora aperti non sono un favore, sono
+    un ignoto — e il valutatore li dichiara tali.
+    """
+    from src.strategies.s4.exit_quality import (
+        PairedExitPath,
+        exit_quality_from_path,
+    )
+
+    exits = {(row["intent_id"], row["policy_id"]): row for row in rows}
+    entry_rows = _fetch_entry_rows([pair.intent_id for pair in cohort])
+    entries = {row["intent_id"]: row for row in entry_rows}
+
+    paths: list[PairedExitPath] = []
+    for pair in cohort:
+        entry = entries.get(pair.intent_id)
+        baseline = exits.get((pair.intent_id, pair.baseline_policy_id))
+        challenger = exits.get((pair.intent_id, pair.policy_id))
+        if entry is None:
+            continue
+        paths.append(
+            PairedExitPath(
+                intent_id=pair.intent_id,
+                entry_at=entry.get("filled_at"),
+                entry_price=entry.get("fill_price"),
+                quantity=float(entry.get("s4_virtual_quantity") or 0.0),
+                baseline_exit_at=(baseline or {}).get("filled_at"),
+                baseline_exit_price=(baseline or {}).get("fill_price"),
+                challenger_exit_at=(challenger or {}).get("filled_at"),
+                challenger_exit_price=(challenger or {}).get("fill_price"),
+            )
+        )
+
+    finestre = [
+        (path.entry_at, path.challenger_exit_at)
+        for path in paths
+        if path.entry_at is not None and path.challenger_exit_at is not None
+    ]
+    if not finestre:
+        return {}
+    simboli = {pair.intent_id: pair.symbol for pair in cohort}
+    bars = _fetch_quality_bars(
+        sorted(set(simboli.values())),
+        min(inizio for inizio, _ in finestre),
+        max(fine for _, fine in finestre),
+    )
+    return {
+        path.intent_id: exit_quality_from_path(
+            path, bars.get(simboli[path.intent_id], ())
+        )
+        for path in paths
+    }
+
+
 def _fetch_session_dates(start: date, end: date) -> list[date]:
     from alpaca.trading.client import TradingClient
     from alpaca.trading.requests import GetCalendarRequest
@@ -284,6 +398,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         scheme=settings.scheme,
         n_cluster=settings.n_cluster,
         mde_counter_bps=settings.mde_counter_bps,
+        exit_quality=_cohort_exit_quality(cohort, rows),
     )
     print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
 
