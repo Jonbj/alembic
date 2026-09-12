@@ -1,0 +1,114 @@
+{
+  "schema_version": "1.0",
+  "issue": 468,
+  "generated_at": "2026-09-10T17:13:26.988472+00:00",
+  "since": "2026-08-07T14:07:00+00:00",
+  "source": {
+    "events": "PostgreSQL portfolio_cycles + execution_decisions + trades",
+    "prices": "Alpaca StockBars IEX, Adjustment.ALL, TimeFrame.Minute",
+    "production_rule": "src.workers.portfolio_scheduler._get_exit_persistence_cycles() = 2"
+  },
+  "method": "Per ogni SELL eseguito con exit_mechanism=s1_weight_drop, il ciclo di decisione storico e' il portfolio_cycle immediatamente precedente, ammesso solo a distanza 10-20 minuti: e' il primo candidato soppresso dalla regola di produzione exit_persistence_cycles=2. I prezzi sono i close delle ultime barre minute complete prima dei due timestamp. Drift positivo significa che il rinvio ha favorito il venditore.",
+  "summary": {
+    "symbols_total": 5,
+    "symbols_measured": 5,
+    "symbols_missing_price": 0,
+    "median_delay_minutes": 14.997682,
+    "total_drift_usd": -1.49358
+  },
+  "rebalances": [
+    {
+      "decision_time": "2026-08-07T14:07:00.630195+00:00",
+      "symbols_total": 1,
+      "symbols_measured": 1,
+      "symbols_missing_price": 0,
+      "median_delay_minutes": 14.999977,
+      "total_drift_usd": -0.602104
+    },
+    {
+      "decision_time": "2026-09-01T14:07:00.764017+00:00",
+      "symbols_total": 4,
+      "symbols_measured": 4,
+      "symbols_missing_price": 0,
+      "median_delay_minutes": 14.997682,
+      "total_drift_usd": -0.891476
+    }
+  ],
+  "exits": [
+    {
+      "symbol": "BRK.B",
+      "order_id": "3e871951-b37f-487e-b826-913a5deb843e",
+      "quantity": 1.308921,
+      "decision_cycle_id": 838,
+      "decision_time": "2026-08-07T14:07:00.630195+00:00",
+      "exit_cycle_id": 839,
+      "exit_time": "2026-08-07T14:22:00.628814+00:00",
+      "delay_minutes": 14.999977,
+      "decision_price": 521.0,
+      "exit_price": 520.54,
+      "drift_pct": -0.000883,
+      "drift_usd": -0.602104,
+      "status": "measured"
+    },
+    {
+      "symbol": "ARM",
+      "order_id": "e5ab61a4-65e3-48e4-a7fb-ed7c79eb6802",
+      "quantity": 1.408883,
+      "decision_cycle_id": 1246,
+      "decision_time": "2026-09-01T14:07:00.764017+00:00",
+      "exit_cycle_id": 1247,
+      "exit_time": "2026-09-01T14:22:00.624924+00:00",
+      "delay_minutes": 14.997682,
+      "decision_price": 232.02,
+      "exit_price": 231.99,
+      "drift_pct": -0.000129,
+      "drift_usd": -0.042266,
+      "status": "measured"
+    },
+    {
+      "symbol": "GE",
+      "order_id": "89d63a58-8fd4-4293-b22b-ffc80562f16c",
+      "quantity": 2.305034,
+      "decision_cycle_id": 1246,
+      "decision_time": "2026-09-01T14:07:00.764017+00:00",
+      "exit_cycle_id": 1247,
+      "exit_time": "2026-09-01T14:22:00.624924+00:00",
+      "delay_minutes": 14.997682,
+      "decision_price": 333.5,
+      "exit_price": 333.81,
+      "drift_pct": 0.00093,
+      "drift_usd": 0.71456,
+      "status": "measured"
+    },
+    {
+      "symbol": "MMM",
+      "order_id": "8b306f56-3f04-4017-9b9f-7fdfaec032ea",
+      "quantity": 3.798124,
+      "decision_cycle_id": 1246,
+      "decision_time": "2026-09-01T14:07:00.764017+00:00",
+      "exit_cycle_id": 1247,
+      "exit_time": "2026-09-01T14:22:00.624924+00:00",
+      "delay_minutes": 14.997682,
+      "decision_price": 170.8,
+      "exit_price": 170.7,
+      "drift_pct": -0.000585,
+      "drift_usd": -0.379812,
+      "status": "measured"
+    },
+    {
+      "symbol": "TXN",
+      "order_id": "11d47835-af89-4ae2-a123-ecdf16a640e3",
+      "quantity": 2.690813,
+      "decision_cycle_id": 1246,
+      "decision_time": "2026-09-01T14:07:00.764017+00:00",
+      "exit_cycle_id": 1247,
+      "exit_time": "2026-09-01T14:22:00.624924+00:00",
+      "delay_minutes": 14.997682,
+      "decision_price": 252.68,
+      "exit_price": 252.24,
+      "drift_pct": -0.001741,
+      "drift_usd": -1.183958,
+      "status": "measured"
+    }
+  ]
+}

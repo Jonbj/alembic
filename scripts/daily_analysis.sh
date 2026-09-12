@@ -137,14 +137,14 @@ MODALITÀ OPERATIVA
 
 RISORSE DISPONIBILI
 
-API REST locale (Authorization: Bearer __ALEMBIC_API_KEY__):
+API REST locale (X-API-Key: __ALEMBIC_API_KEY__):
   BASE="http://localhost:8001/api"
   Chiama queste API con curl filtrando al giorno __DATE_TARGET__:
-    curl -s -H "Authorization: Bearer __ALEMBIC_API_KEY__" "$BASE/decisions?limit=200"
-    curl -s -H "Authorization: Bearer __ALEMBIC_API_KEY__" "$BASE/trades?limit=200"
-    curl -s -H "Authorization: Bearer __ALEMBIC_API_KEY__" "$BASE/signals?limit=100"
-    curl -s -H "Authorization: Bearer __ALEMBIC_API_KEY__" "$BASE/positions"
-    curl -s -H "Authorization: Bearer __ALEMBIC_API_KEY__" "$BASE/orders?limit=100"
+    curl -s -H "X-API-Key: __ALEMBIC_API_KEY__" "$BASE/decisions?limit=200"
+    curl -s -H "X-API-Key: __ALEMBIC_API_KEY__" "$BASE/trades?limit=200"
+    curl -s -H "X-API-Key: __ALEMBIC_API_KEY__" "$BASE/signals?limit=100"
+    curl -s -H "X-API-Key: __ALEMBIC_API_KEY__" "$BASE/positions"
+    curl -s -H "X-API-Key: __ALEMBIC_API_KEY__" "$BASE/orders?limit=100"
 
 Log applicativi persistenti sull'host (sopravvivono ai redeploy):
   logs/containers/worker-__DATE_TARGET__.log

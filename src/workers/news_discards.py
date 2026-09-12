@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 from src.connectors.deduplicator import compute_dedup_hash
+from src.workers.market_clock import is_regular_session_time
 
 
 DISCARD_REASONS = frozenset(
@@ -49,6 +50,13 @@ def build_news_discard_row(
         content_hash = None
 
     item_id = str(getattr(item, "id", "") or "")
+    # #432: la seduta va decisa QUI, al momento dell'accodamento, e persistita.
+    # Ri-derivarla dopo in SQL significherebbe ricopiare la crontab `14-21` in
+    # una seconda regola (vietato da #169/#467) e sbagliare per meta' anno sul
+    # DST. Serve a distinguere la coorte accodata a mercato chiuso — fisiologia,
+    # nessun consumatore gira — da un outage del consumatore a mercato aperto,
+    # che ha il fix opposto e finiva nella stessa casella.
+    enqueued_at = getattr(item, "raw_ingested_at", None) or now
     return {
         "item_id": item_id,
         "article_id": article_id_of(item_id),
@@ -62,4 +70,5 @@ def build_news_discard_row(
         "content_hash": content_hash,
         "discarded_reason": reason,
         "discard_stage": stage,
+        "enqueued_off_session": not is_regular_session_time(enqueued_at),
     }
