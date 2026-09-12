@@ -740,6 +740,46 @@ def _seed_rebalance_clock(strategy_instances: dict, state: dict[str, dict]) -> N
         log.info("#185: %s rebalance clock restored to %s", sid, last.isoformat())
 
 
+def _observe_rebalance_transitions(
+    result,
+    last_target_weights: dict[str, dict[str, float]] | None,
+) -> tuple[list[str], dict[str, list[str] | None]]:
+    """Describe target decisions before downstream order filters mutate them.
+
+    ``exit_persistence_cycles`` deliberately removes a first-cycle SELL from
+    ``final_orders``.  Looking only at that list therefore hid the S1 target
+    transition that caused the order (#468).  Compare each newly decided target
+    with the target restored from Redis.  A ``null`` value distinguishes an
+    unavailable/corrupt previous snapshot from a known empty transition list.
+    """
+    decided = getattr(result, "target_weights_per_strategy", None) or {}
+    previous = last_target_weights or {}
+    rebalanced = sorted(decided)
+    zeroed: dict[str, list[str] | None] = {}
+    for strategy_id, current_weights in decided.items():
+        if strategy_id not in previous:
+            zeroed[strategy_id] = None
+            continue
+        current = current_weights or {}
+        try:
+            dropped = sorted(
+                symbol
+                for symbol, old_weight in (previous[strategy_id] or {}).items()
+                if float(old_weight or 0.0) > 0
+                and float(current.get(symbol, 0.0) or 0.0) <= 0
+            )
+        except (TypeError, ValueError) as exc:
+            log.warning(
+                "#468: target transition unavailable for %s (%s)",
+                strategy_id,
+                exc,
+            )
+            zeroed[strategy_id] = None
+        else:
+            zeroed[strategy_id] = dropped
+    return rebalanced, zeroed
+
+
 def _persist_rebalance_state(
     result,
     ts: datetime,
@@ -2734,6 +2774,12 @@ def _run_cycle_inner() -> dict:
         strategy_returns=_strategy_returns,
         last_target_weights=_last_target_weights or None,
     )
+    # #468: capture the target decision now.  Downstream hold/hysteresis filters
+    # rebuild CycleResult and intentionally remove first-cycle SELLs, which is
+    # exactly the transition the portfolio_cycles row needs to preserve.
+    _rebalanced_strategies, _zero_weight_symbols = _observe_rebalance_transitions(
+        result, _last_target_weights
+    )
     # #491: the orchestrator sizes target weights against this NAV. Keep it so
     # SKIP_PYRAMIDING can report the full target and subtract the actual broker
     # position, instead of assuming the order quantity alone has that meaning.
@@ -3536,13 +3582,18 @@ def _run_cycle_inner() -> dict:
     except Exception as _zw_exc:
         log.warning("Strategy zero-weight alert failed: %s", _zw_exc)
 
-    _persist_cycle_result({
+    _cycle_persisted = _persist_cycle_result({
         "timestamp": end,
         "strategies_run": result.strategies_run,
         "orders_count": len(result.final_orders),
         "constraints_fired": [str(c) for c in result.constraints_fired],
         "final_orders": [str(o) for o in result.final_orders],
+        "rebalanced_strategies": _rebalanced_strategies,
+        "zero_weight_symbols": _zero_weight_symbols,
     })
+    # #469: orders live at the broker with no portfolio_cycles row is blind
+    # trading — the worst combination, and silent until now.
+    _alert_cycle_persist_failure(_cycle_persisted, len(submitted_orders), notifier)
 
     return {
         "strategies_run": result.strategies_run,
@@ -5197,8 +5248,109 @@ def _compute_signal_velocity(
         return 1.0
 
 
-def _persist_cycle_result(cycle_data: dict, conn=None) -> None:
-    """Persist cycle stats to portfolio_cycles. DB errors are swallowed."""
+# #469: total count of failed portfolio_cycles inserts. Redis is a dependency
+# separate from Postgres, so the counter survives the very outage that killed
+# the insert — which a log line (wiped by the next container restart, #407)
+# or a ledger row on the same Postgres cannot guarantee.
+_PORTFOLIO_CYCLES_PERSIST_FAILURES_KEY = "portfolio:cycles:persist_failures"
+_PERSIST_FAILURE_REDIS_TIMEOUT_SECONDS = 1.0
+
+
+def _classify_persist_error(exc: Exception) -> str:
+    """Bucket a _persist_cycle_result failure by cause (#469).
+
+    A dead connection, a JSON serialization error and a constraint violation
+    are different guasti with different remedies; `except Exception` erased the
+    distinction, which is why the 2026-09-01 sequence gap stayed unexplained
+    once the logs were gone.
+    """
+    import psycopg2
+
+    if isinstance(exc, (psycopg2.OperationalError, psycopg2.InterfaceError)):
+        return "connection"
+    if isinstance(exc, psycopg2.IntegrityError):
+        return "integrity"
+    if isinstance(exc, (TypeError, ValueError)):
+        # json.dumps runs inside the persist try-block; these are its failures.
+        return "json_serialization"
+    return "other"
+
+
+def _record_cycle_persist_failure(
+    cycle_data: dict, error_class: str, error_message: str
+) -> None:
+    """Best-effort durable record of a failed portfolio_cycles insert (#469).
+
+    Two independent sinks, each fail-safe on its own: a Redis INCR counter and
+    an append-only ledger row (portfolio_cycle_persist_failures) carrying the
+    cycle payload, so a blind cycle is reconstructible without the logs. Never
+    raises — this already sits on the failure path.
+    """
+    try:
+        import redis as _redis
+        from src.config import config
+
+        _r_fail = _redis.Redis.from_url(
+            config.REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=_PERSIST_FAILURE_REDIS_TIMEOUT_SECONDS,
+            socket_timeout=_PERSIST_FAILURE_REDIS_TIMEOUT_SECONDS,
+        )
+        try:
+            _r_fail.incr(_PORTFOLIO_CYCLES_PERSIST_FAILURES_KEY)
+        finally:
+            _r_fail.close()
+    except Exception as redis_exc:
+        log.warning("Could not count persist failure in Redis: %s", redis_exc)
+
+    # The payload may be exactly what failed to serialize — default=str keeps
+    # the ledger row even then; NULL payload beats losing the whole record.
+    try:
+        payload = _json.dumps(cycle_data, default=str)
+    except Exception:
+        payload = None
+
+    _ledger_conn = None
+    try:
+        import psycopg2
+        from src.config import config
+
+        _ledger_conn = psycopg2.connect(
+            config.DATABASE_URL.replace("+asyncpg", ""), connect_timeout=5
+        )
+        with _ledger_conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO portfolio_cycle_persist_failures
+                   (cycle_timestamp, orders_count, error_class, error_message, payload)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (
+                    cycle_data.get("timestamp"),
+                    cycle_data.get("orders_count"),
+                    error_class,
+                    error_message,
+                    payload,
+                ),
+            )
+        _ledger_conn.commit()
+    except Exception as ledger_exc:
+        log.warning("Could not record persist failure in ledger: %s", ledger_exc)
+    finally:
+        if _ledger_conn is not None:
+            try:
+                _ledger_conn.close()
+            except Exception:
+                pass
+
+
+def _persist_cycle_result(cycle_data: dict, conn=None) -> bool:
+    """Persist cycle stats to portfolio_cycles.
+
+    DB errors are still swallowed (the cycle already submitted its orders),
+    but no longer lost: the failure is counted in Redis and appended to the
+    portfolio_cycle_persist_failures ledger with its error class (#469).
+    Returns True when the row committed, False otherwise — the caller alerts
+    when orders were submitted and the audit trail is missing.
+    """
     import psycopg2
 
     _local_conn = None
@@ -5213,19 +5365,50 @@ def _persist_cycle_result(cycle_data: dict, conn=None) -> None:
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO portfolio_cycles
-                   (timestamp, strategies_run, orders_count, constraints_fired, final_orders)
-                   VALUES (%s, %s, %s, %s, %s)""",
+                   (timestamp, strategies_run, orders_count, constraints_fired, final_orders,
+                    rebalanced_strategies, zero_weight_symbols)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                 (
                     cycle_data["timestamp"],
                     _json.dumps(cycle_data["strategies_run"]),
                     cycle_data["orders_count"],
                     _json.dumps(cycle_data.get("constraints_fired", [])),
                     _json.dumps(cycle_data.get("final_orders", [])),
+                    _json.dumps(cycle_data.get("rebalanced_strategies", [])),
+                    _json.dumps(cycle_data.get("zero_weight_symbols", {})),
                 ),
             )
         conn.commit()
+        return True
     except Exception as exc:
-        log.warning("Failed to persist cycle result: %s", exc)
+        error_class = _classify_persist_error(exc)
+        log.warning(
+            "Failed to persist cycle result (class=%s, orders_count=%s): %s",
+            error_class, cycle_data.get("orders_count"), exc,
+        )
+        _record_cycle_persist_failure(cycle_data, error_class, str(exc))
+        return False
     finally:
         if should_close and _local_conn is not None:
             _local_conn.close()
+
+
+def _alert_cycle_persist_failure(
+    persisted: bool, submitted_count: int, notifier
+) -> None:
+    """#469 — alert when a cycle executed orders but left no audit row.
+
+    Orders already at the broker with no portfolio_cycles row is blind trading:
+    no forensic can reconstruct what the engine decided. The count is the
+    submitted orders, not orders_count (#437: that one counts target orders).
+    """
+    if persisted or submitted_count <= 0 or notifier is None:
+        return
+    _fire_alert(
+        notifier,
+        f"portfolio_cycles audit gap: cycle submitted {submitted_count} order(s) "
+        "but its portfolio_cycles row was NOT persisted. "
+        "Orders are live with no audit trail — check worker logs and "
+        "portfolio_cycle_persist_failures.",
+        AlertLevel.CRITICAL,
+    )

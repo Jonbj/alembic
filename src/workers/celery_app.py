@@ -37,11 +37,13 @@ app = Celery(
         "src.workers.portfolio_scheduler",
         "src.workers.decay_monitor_task",
         "src.workers.sentiment",
+        "src.workers.sentiment_shadow",
         "src.workers.telegram_poller",
         "src.workers.mobile_alert_task",
         "src.workers.mobile_monitor_task",
         "src.workers.held_news_loss_alert",
         "src.workers.stale_drop_alert",
+        "src.workers.news_queue_census",
     ],
 )
 
@@ -207,11 +209,48 @@ app.conf.beat_schedule = {
         "task": "src.workers.held_news_loss_alert.run_held_news_loss_alert",
         "schedule": crontab(hour=22, minute=50, day_of_week="1-5"),
     },
+    # #432 Opzione C: consumo shadow off-session della coda news — il
+    # controfattuale che deve rispondere, prima del 28/09, a "la coorte notturna
+    # vale qualcosa?". Scrive solo sentiment_signals_offsession_shadow; il
+    # perimetro e' asserito da tests/workers/test_sentiment_shadow.py.
+    #
+    # Le due fasce sono scritte esplicitamente e NON come un intervallo che
+    # scavalca la mezzanotte ("22-13" in crontab non significa quello che
+    # sembra: crontab non ha intervalli circolari e quella forma o e' un errore
+    # o si espande a nulla).
+    #
+    # Il primo turno e' alle 22:15Z, non alle 21:15Z: "sentiment-worker" qui
+    # sopra ha hour="14-21", quindi la sua ultima accensione e' alle 21:45Z e
+    # un beat shadow alle 21:15Z contenderebbe worker-inference (concurrency=1)
+    # con il path live. La coorte notturna parte comunque dalle 21:00Z: e' il
+    # set di de-duplica (shadow:processed:<notte>, ancorato alle 21Z) a tenerne
+    # conto, non l'ora del primo turno.
+    #
+    # L'ultimo turno e' alle 12:15Z, non alle 13:15Z: la scadenza dura del
+    # worker E' 13:15Z (SHADOW_DEADLINE_UTC), quindi un beat a quell'ora
+    # nascerebbe gia' scaduto e uscirebbe senza fare nulla.
+    "sentiment-shadow-offsession": {
+        "task": "src.workers.sentiment_shadow.run_sentiment_shadow_worker",
+        "schedule": crontab(minute=15, hour="22-23,0-12"),
+        "options": {"queue": "inference"},
+    },
     # #432: persist the daily stale-drop share and alert on >25%, split by
     # already stale at fetch vs aged while queued. Measurement only.
     "stale-drop-alert": {
         "task": "src.workers.stale_drop_alert.run_stale_drop_alert",
         "schedule": crontab(hour=22, minute=55, day_of_week="1-5"),
+    },
+    # Censimento della coda news (opzione A di
+    # docs/research/news_ingest_consumo_disaccoppiamento_2026-09-10.md, serve #544)
+    # ogni 5 minuti, SENZA finestra oraria e
+    # senza is_market_open() — la notte è esattamente la parte interessante, perché
+    # è quando il WebSocket accumula una coorte che nessuno consuma. Sola lettura
+    # (LLEN + LRANGE campionato, mai LMOVE): non consuma la coda e non cambia il
+    # destino di alcuna news. Coda generica 'celery': è un task leggero e non deve
+    # contendere worker-inference (concurrency=1) con il path live.
+    "news-queue-census": {
+        "task": "src.workers.news_queue_census.run_news_queue_census",
+        "schedule": crontab(minute="*/5"),
     },
     # Nightly retention sweep at 03:30 UTC
     "run-retention-sweep": {

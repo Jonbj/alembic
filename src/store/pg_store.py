@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import psycopg2
 from psycopg2 import pool
-from psycopg2.extras import RealDictCursor
+from psycopg2.extras import Json, RealDictCursor
 
 from src.config import config
 from src.costs.calculator import TradeCostCalculator
@@ -429,6 +429,56 @@ class PostgreSQLStore:
              parse_error, latency_ms, failure_reason)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """
+
+    # Consumo shadow off-session (#432, Opzione C, migrazione 069). Unica
+    # scrittura che il worker `sentiment_shadow` esegue: il suo perimetro
+    # (nessuna riga in sentiment_signals/news_log/Redis) e' asserito da
+    # tests/workers/test_sentiment_shadow.py, non da revisione a vista.
+    #
+    # ON CONFLICT DO NOTHING: l'unita' di analisi pre-registrata e' il
+    # simbolo-giorno, quindi un doppione gonfierebbe il campione in silenzio.
+    # Il set Redis `shadow:processed:<notte>` e' la de-duplica primaria; questo
+    # vincolo e' quello durevole, perche' quel set ha TTL 36h.
+    _INSERT_OFFSESSION_SHADOW = """
+        INSERT INTO sentiment_signals_offsession_shadow
+            (item_id, symbol, score, model, fallback_used, published_at,
+             scored_at, raw_item)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (item_id, symbol) DO NOTHING
+    """
+
+    def write_offsession_shadow_signal(
+        self,
+        item_id: str,
+        symbol: str,
+        score: float,
+        model: str,
+        fallback_used: bool,
+        published_at,
+        scored_at,
+        raw_item: dict | None = None,
+    ) -> None:
+        """Persist one off-session shadow score. Never read by the live path."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    self._INSERT_OFFSESSION_SHADOW,
+                    (
+                        item_id,
+                        symbol,
+                        score,
+                        model,
+                        bool(fallback_used),
+                        published_at,
+                        scored_at,
+                        Json(raw_item) if raw_item is not None else None,
+                    ),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
     def log_news_item(
         self,
@@ -3970,7 +4020,8 @@ class PostgreSQLStore:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT timestamp, strategies_run, orders_count, constraints_fired, final_orders "
+                    "SELECT timestamp, strategies_run, orders_count, constraints_fired, final_orders, "
+                    "rebalanced_strategies, zero_weight_symbols "
                     "FROM portfolio_cycles ORDER BY timestamp DESC LIMIT 1"
                 )
                 row = cur.fetchone()
@@ -3982,6 +4033,8 @@ class PostgreSQLStore:
                     "orders_count": row[2] or 0,
                     "constraints_fired": row[3] if isinstance(row[3], list) else [],
                     "final_orders": row[4] if isinstance(row[4], list) else [],
+                    "rebalanced_strategies": row[5] if isinstance(row[5], list) else [],
+                    "zero_weight_symbols": row[6] if isinstance(row[6], dict) else {},
                 }
         except Exception:
             conn.rollback()
@@ -3993,7 +4046,8 @@ class PostgreSQLStore:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT timestamp, strategies_run, orders_count, constraints_fired, final_orders "
+                    "SELECT timestamp, strategies_run, orders_count, constraints_fired, final_orders, "
+                    "rebalanced_strategies, zero_weight_symbols "
                     "FROM portfolio_cycles ORDER BY timestamp DESC LIMIT %s",
                     (limit,)
                 )
@@ -4006,6 +4060,8 @@ class PostgreSQLStore:
                         "orders_count": row[2] or 0,
                         "constraints_fired": row[3] if isinstance(row[3], list) else [],
                         "final_orders": row[4] if isinstance(row[4], list) else [],
+                        "rebalanced_strategies": row[5] if isinstance(row[5], list) else [],
+                        "zero_weight_symbols": row[6] if isinstance(row[6], dict) else {},
                     })
                 return result
         except Exception:

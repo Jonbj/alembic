@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, call, patch
 
 import pandas as pd
+import psycopg2
 import pytest
 
 from src.backtest.engine.types import OrderSide, OrderType
@@ -869,6 +870,193 @@ def test_persist_cycle_result_does_not_raise_on_db_error():
     _persist_cycle_result(cycle_data, conn=mock_conn)
 
 
+# ── _persist_cycle_result failure instrumentation (#469) ──────────────────────
+
+
+def _gap_window_cycle_data(orders_count: int = 2) -> dict:
+    """Cycle payload shaped like the 2026-09-01 11:45 ET blind cycle."""
+    return {
+        "timestamp": datetime(2026, 9, 1, 15, 45, tzinfo=timezone.utc),
+        "strategies_run": ["S1", "S4"],
+        "orders_count": orders_count,
+        "constraints_fired": ["max_positions"],
+        "final_orders": ["BUY SPY"],
+    }
+
+
+def _failing_conn(exc: Exception) -> MagicMock:
+    """A connection whose INSERT always raises `exc`."""
+    mock_cur = MagicMock()
+    mock_cur.execute.side_effect = exc
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cur)
+    mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    return mock_conn
+
+
+def test_persist_cycle_result_returns_true_on_success():
+    """A committed insert reports success to the caller (#469)."""
+    from src.workers.portfolio_scheduler import _persist_cycle_result
+
+    mock_cur = MagicMock()
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value.__enter__ = MagicMock(return_value=mock_cur)
+    mock_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+    assert _persist_cycle_result(_gap_window_cycle_data(), conn=mock_conn) is True
+
+
+def test_persist_cycle_result_returns_false_on_db_error():
+    """A failed insert reports failure so the caller can alert (#469)."""
+    from src.workers.portfolio_scheduler import _persist_cycle_result
+
+    mock_conn = _failing_conn(Exception("DB down"))
+    assert _persist_cycle_result(_gap_window_cycle_data(), conn=mock_conn) is False
+
+
+@pytest.mark.parametrize(
+    "exc, expected_class",
+    [
+        (psycopg2.OperationalError("connection reset by peer"), "connection"),
+        (psycopg2.InterfaceError("connection already closed"), "connection"),
+        (psycopg2.IntegrityError("duplicate key value violates unique constraint"), "integrity"),
+        (TypeError("Object of type set is not JSON serializable"), "json_serialization"),
+        (RuntimeError("boom"), "other"),
+    ],
+)
+def test_classify_persist_error_buckets_the_cause(exc, expected_class):
+    """Connection, JSON and constraint failures are different guaits with
+    different remedies — `except Exception` erased the distinction (#469)."""
+    from src.workers.portfolio_scheduler import _classify_persist_error
+
+    assert _classify_persist_error(exc) == expected_class
+
+
+def test_persist_cycle_result_failure_counted_in_redis_and_ledger():
+    """A failed insert is recorded persistently, not only in a log line (#469).
+
+    Redis INCR (survives a Postgres outage) + one append-only ledger row on a
+    fresh connection, carrying the error class and the cycle payload so the
+    blind cycle is reconstructible.
+    """
+    from src.workers.portfolio_scheduler import (
+        _PORTFOLIO_CYCLES_PERSIST_FAILURES_KEY,
+        _persist_cycle_result,
+    )
+
+    mock_conn = _failing_conn(psycopg2.OperationalError("server closed the connection"))
+
+    ledger_conn = MagicMock()
+    ledger_cur = MagicMock()
+    ledger_conn.cursor.return_value.__enter__ = MagicMock(return_value=ledger_cur)
+    ledger_conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+    redis_inst = MagicMock()
+
+    with patch("psycopg2.connect", return_value=ledger_conn), \
+         patch("redis.Redis.from_url", return_value=redis_inst):
+        _persist_cycle_result(_gap_window_cycle_data(), conn=mock_conn)
+
+    redis_inst.incr.assert_called_once_with(_PORTFOLIO_CYCLES_PERSIST_FAILURES_KEY)
+
+    sql, params = ledger_cur.execute.call_args[0]
+    assert "portfolio_cycle_persist_failures" in sql
+    assert params[0] == datetime(2026, 9, 1, 15, 45, tzinfo=timezone.utc)
+    assert params[1] == 2                      # orders_count
+    assert params[2] == "connection"           # error_class
+    assert "server closed the connection" in params[3]
+    assert "BUY SPY" in params[4]              # payload keeps the lost audit trail
+    ledger_conn.commit.assert_called_once()
+
+
+def test_persist_cycle_result_failure_redis_has_finite_timeouts():
+    """A black-holed Redis cannot block the ledger and CRITICAL alert (#469)."""
+    from src.workers.portfolio_scheduler import _persist_cycle_result
+
+    mock_conn = _failing_conn(psycopg2.OperationalError("DB down"))
+    redis_inst = MagicMock()
+
+    with patch("psycopg2.connect", side_effect=Exception("pg unreachable")), \
+         patch("redis.Redis.from_url", return_value=redis_inst) as mock_from_url:
+        result = _persist_cycle_result(_gap_window_cycle_data(), conn=mock_conn)
+
+    assert result is False
+    redis_options = mock_from_url.call_args.kwargs
+    assert redis_options["socket_connect_timeout"] > 0
+    assert redis_options["socket_timeout"] > 0
+
+
+def test_persist_cycle_result_failure_never_raises_when_all_sinks_down():
+    """Redis and Postgres both unreachable: the cycle still completes (#469)."""
+    from src.workers.portfolio_scheduler import _persist_cycle_result
+
+    mock_conn = _failing_conn(psycopg2.OperationalError("DB down"))
+
+    with patch("psycopg2.connect", side_effect=Exception("pg unreachable")), \
+         patch("redis.Redis.from_url", side_effect=Exception("redis unreachable")):
+        result = _persist_cycle_result(_gap_window_cycle_data(), conn=mock_conn)
+
+    assert result is False
+
+
+def test_persist_cycle_result_failure_log_names_the_error_class(caplog):
+    """The warning names the error class — the 2026-09-01 gap stayed
+    unexplained because the swallowed message carried no cause (#469)."""
+    import logging as _logging
+
+    from src.workers.portfolio_scheduler import _persist_cycle_result
+
+    mock_conn = _failing_conn(psycopg2.OperationalError("server closed the connection"))
+
+    with patch("psycopg2.connect", side_effect=Exception("pg unreachable")), \
+         patch("redis.Redis.from_url", side_effect=Exception("redis unreachable")), \
+         caplog.at_level(_logging.WARNING, logger="src.workers.portfolio_scheduler"):
+        _persist_cycle_result(_gap_window_cycle_data(), conn=mock_conn)
+
+    assert any(
+        "class=connection" in r.message and r.levelno == _logging.WARNING
+        for r in caplog.records
+    )
+
+
+# ── alert: cycle submitted orders but its audit row is missing (#469) ─────────
+
+
+def test_alert_cycle_persist_failure_fires_when_orders_were_submitted():
+    """Orders executed + no portfolio_cycles row = blind trading: CRITICAL."""
+    from src.notifications.base import AlertLevel
+    from src.workers.portfolio_scheduler import _alert_cycle_persist_failure
+
+    notifier = MagicMock()
+    with patch("src.workers.portfolio_scheduler._fire_alert") as mock_fire:
+        _alert_cycle_persist_failure(False, 3, notifier)
+
+    mock_fire.assert_called_once()
+    args = mock_fire.call_args[0]
+    assert args[0] is notifier
+    assert "3" in args[1]
+    assert args[2] == AlertLevel.CRITICAL
+
+
+def test_alert_cycle_persist_failure_silent_without_submitted_orders():
+    """A cycle with no orders that fails to persist is degraded, not blind."""
+    from src.workers.portfolio_scheduler import _alert_cycle_persist_failure
+
+    with patch("src.workers.portfolio_scheduler._fire_alert") as mock_fire:
+        _alert_cycle_persist_failure(False, 0, MagicMock())
+
+    mock_fire.assert_not_called()
+
+
+def test_alert_cycle_persist_failure_silent_when_row_persisted():
+    from src.workers.portfolio_scheduler import _alert_cycle_persist_failure
+
+    with patch("src.workers.portfolio_scheduler._fire_alert") as mock_fire:
+        _alert_cycle_persist_failure(True, 3, MagicMock())
+
+    mock_fire.assert_not_called()
+
+
 # ── end-to-end: S4 signals → multi-symbol orders ──────────────────────────────
 
 
@@ -991,6 +1179,88 @@ def test_portfolio_cycle_s4_signals_produce_multi_symbol_orders():
 
 
 # ── P0-A: emergency cancel on kill-switch ────────────────────────────────────
+
+
+def test_cycle_alerts_when_orders_submitted_and_persist_failed():
+    """#469 end-to-end: a cycle that submits orders but fails to persist its
+    portfolio_cycles row fires a CRITICAL alert — blind trading, not silence."""
+    from src.notifications.base import AlertLevel
+    from src.workers.portfolio_scheduler import _run_cycle_inner
+
+    S4_SYMBOLS = ["NVDA", "MSFT", "AAPL", "AMZN", "GOOGL"]
+    ALL_SYMBOLS = ["SPY"] + S4_SYMBOLS
+    N_BARS = 260
+
+    dates = pd.date_range("2024-07-01", periods=N_BARS, freq="B", tz="UTC")
+    bars_data = {
+        sym: [100.0 + j * 20 + i * 0.1 for i in range(N_BARS)]
+        for j, sym in enumerate(ALL_SYMBOLS)
+    }
+    bars_df_local = pd.DataFrame(bars_data, index=dates)
+    rows = []
+    for ts_bar in dates:
+        for sym in ALL_SYMBOLS:
+            rows.append({
+                "timestamp": ts_bar,
+                "symbol": sym,
+                "close": bars_df_local.loc[ts_bar, sym],
+            })
+    raw_alpaca_df = pd.DataFrame(rows).set_index(["symbol", "timestamp"])
+
+    signal_time = datetime(2026, 6, 3, 20, 0, tzinfo=timezone.utc)
+    mock_db_signals = [
+        SentimentResult(
+            symbol=sym,
+            score=0.75,
+            confidence=0.85,
+            reasoning=f"{sym} strong positive sentiment",
+            model_id="ensemble",
+            generated_at=signal_time,
+        )
+        for sym in S4_SYMBOLS
+    ]
+
+    mock_store = MagicMock()
+    mock_store.fetch_signals_for_cycle.return_value = mock_db_signals
+
+    def capture_submit(orders, trading_client, market, _submit_fn=None, **kwargs):
+        return [
+            {"symbol": o.symbol, "side": o.side.value.lower(), "order_id": f"test-{o.symbol}"}
+            for o in orders
+        ]
+
+    with patch("src.config.config") as mock_cfg, \
+         patch("alpaca.data.historical.StockHistoricalDataClient") as mock_dc, \
+         patch("alpaca.trading.client.TradingClient") as mock_tc, \
+         patch("src.store.pg_store.PostgreSQLStore", return_value=mock_store), \
+         patch("src.workers.portfolio_scheduler._persist_cycle_result",
+               return_value=False), \
+         patch("src.workers.portfolio_scheduler._submit_portfolio_orders",
+               side_effect=capture_submit), \
+         patch("redis.Redis") as mock_redis_cls, \
+         patch("src.workers.portfolio_scheduler._fire_alert") as mock_fire:
+
+        mock_cfg.ALPACA_API_KEY = "test-key"
+        mock_cfg.ALPACA_SECRET_KEY = "test-secret"
+        mock_cfg.ALPACA_BASE_URL = "https://paper-api.alpaca.markets"
+        mock_cfg.WATCHLIST_SYMBOLS = ALL_SYMBOLS
+        mock_cfg.REDIS_URL = "redis://localhost:6379"
+        mock_cfg.DATABASE_URL = "postgresql://test:test@localhost/test"
+
+        mock_dc.return_value.get_stock_bars.return_value.df = raw_alpaca_df
+        mock_tc.return_value.get_account.return_value.cash = "100000"
+        mock_tc.return_value.get_all_positions.return_value = []
+        mock_redis_cls.from_url.return_value.get.return_value = None
+
+        result = _run_cycle_inner()
+
+    assert result["submitted"] > 0, (
+        f"Test premise: the cycle must submit orders, got result={result}"
+    )
+    mock_fire.assert_called_once()
+    args = mock_fire.call_args[0]
+    assert "portfolio_cycles audit gap" in args[1]
+    assert args[2] == AlertLevel.CRITICAL
 
 
 def test_emergency_cancel_called_when_killswitch_active():
