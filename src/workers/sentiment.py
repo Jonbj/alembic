@@ -163,6 +163,9 @@ def build_parse_failure_drop_row(payload: bytes | str) -> dict:
         "content_hash": digest,
         "discarded_reason": "parse_fail",
         "discard_stage": "sentiment",
+        # Payload illeggibile: senza momento di accodamento la seduta non e'
+        # ricostruibile. NULL, non False — un dato assente non e' un in-seduta.
+        "enqueued_off_session": None,
     }
 
 

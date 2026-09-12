@@ -2109,8 +2109,8 @@ class PostgreSQLStore:
                     INSERT INTO news_queue_drops
                         (item_id, article_id, symbol, source, published_at,
                          age_hours, title, url, raw_ingested_at, content_hash,
-                         discarded_reason, discard_stage)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         discarded_reason, discard_stage, enqueued_off_session)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     [
                         (
@@ -2119,6 +2119,10 @@ class PostgreSQLStore:
                             r.get("age_hours"), r.get("title"), r.get("url"),
                             r.get("raw_ingested_at"), r.get("content_hash"),
                             r["discarded_reason"], r["discard_stage"],
+                            # #432: NULL se il chiamante non lo conosce. Il
+                            # collettore legge NULL come in-seduta (fail-closed
+                            # verso l'allerta), non come coorte notturna.
+                            r.get("enqueued_off_session"),
                         )
                         for r in rows
                     ],
