@@ -75,6 +75,14 @@ if [[ -n "${ROADMAP_FORCE_ENGINE:-}" ]]; then
 fi
 MOTORE_STATE="$LOG_DIR/roadmap_agent_engine.txt"
 
+# Il modello di codex: vuoto significa "quello di ~/.codex/config.toml", cosi'
+# una sessione interattiva e il cron restano indipendenti. I run forzati su codex
+# lo impostano dal crontab (CODEX_MODEL=gpt-5.6-terra dal 2026-09-12), che e'
+# l'unico punto dove la scelta del modello e' visibile insieme all'orario.
+CODEX_MODEL="${CODEX_MODEL:-}"
+_codex_model_args=()
+[[ -n "$CODEX_MODEL" ]] && _codex_model_args=(-m "$CODEX_MODEL")
+
 # Rate limit: un motore esaurito non e' un motore rotto. Viene messo in panchina
 # per un po' e rientra da solo alla scadenza — nessun intervento manuale, che
 # altrimenti diventerebbe il vero collo di bottiglia del loop.
@@ -414,6 +422,7 @@ esegui_agente() {
             # workspace-write: l'accesso di rete e' abilitato solo perche' `gh`
             # deve poter aprire la PR, non per dare mano libera.
             (cd "$wt" && timeout "$TIMEOUT_SESSIONE" codex exec \
+                "${_codex_model_args[@]}" \
                 -s workspace-write \
                 -c sandbox_workspace_write.network_access=true \
                 "$prompt" </dev/null 2>&1)
@@ -452,6 +461,7 @@ esegui_revisore() {
     case "$motore" in
         codex)
             (cd "$wt" && timeout "$TIMEOUT_REVIEW" codex exec \
+                "${_codex_model_args[@]}" \
                 -s read-only -c sandbox_workspace_write.network_access=true \
                 "$prompt" </dev/null 2>&1)
             ;;

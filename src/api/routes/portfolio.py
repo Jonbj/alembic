@@ -91,6 +91,8 @@ async def portfolio_status(pg=Depends(get_pg_store)):
             last_cycle = {
                 "timestamp": row.get("timestamp"),
                 "strategies_run": row.get("strategies_run", []),
+                "rebalanced_strategies": row.get("rebalanced_strategies", []),
+                "zero_weight_symbols": row.get("zero_weight_symbols", {}),
                 "orders_count": row.get("orders_count", 0),
                 "constraints_fired": row.get("constraints_fired", []),
             }
@@ -113,6 +115,8 @@ async def portfolio_cycle_history(limit: int = 30, pg=Depends(get_pg_store)):
             {
                 "timestamp": r.get("timestamp"),
                 "strategies_run": r.get("strategies_run", []),
+                "rebalanced_strategies": r.get("rebalanced_strategies", []),
+                "zero_weight_symbols": r.get("zero_weight_symbols", {}),
                 "orders_count": r.get("orders_count", 0),
                 "constraints_fired": r.get("constraints_fired", []),
                 "final_orders": r.get("final_orders", []),
