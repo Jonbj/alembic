@@ -20,6 +20,7 @@ def _dry_run(
     tmp_path: Path,
     impronta_salvata: str,
     versione_salvata: str = "2026-09-12T12:00:00Z",
+    noop_count: int = 2,
 ) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -59,7 +60,8 @@ exit 1
     queue.write_text("10 prima\n11 seconda\n")
     noop_state = tmp_path / "noop.tsv"
     noop_state.write_text(
-        f"10\t2\t{impronta_salvata}\t{versione_salvata}\t2026-09-12T12:00:01Z\n"
+        f"10\t{noop_count}\t{impronta_salvata}\t{versione_salvata}"
+        "\t2026-09-12T12:00:01Z\n"
     )
 
     env = os.environ.copy()
@@ -108,6 +110,7 @@ def test_updated_at_successivo_riammette_la_issue_anche_con_impronta_uguale(
         tmp_path,
         impronta_salvata="immutata",
         versione_salvata="2026-09-12T11:59:00Z",
+        noop_count=1,
     )
 
     assert result.returncode == 0, result.stderr

@@ -365,17 +365,23 @@ noop_fuori_rotazione() {
     [[ -n "$record" ]] || return 1
     IFS=$'\t' read -r _issue conteggio impronta_salvata versione_salvata _ultimo <<< "$record"
     [[ "$conteggio" =~ ^[0-9]+$ ]] || { azzera_noop "$n"; return 1; }
-    (( conteggio >= MAX_NOOP_CONSECUTIVI )) || return 1
 
     # Un errore transitorio di GitHub non e' una prova di sblocco: conserva la
-    # sospensione e riprova l'impronta al prossimo giro.
+    # sospensione gia' attiva e riprova l'impronta al prossimo giro. Dopo un
+    # solo no-op, invece, la issue resta normalmente selezionabile.
     if ! impronta_attuale=$(impronta_issue "$n"); then
-        log "  #$n — impronta non leggibile: conservo la sospensione per no-op."
-        return 0
+        if (( conteggio >= MAX_NOOP_CONSECUTIVI )); then
+            log "  #$n — impronta non leggibile: conservo la sospensione per no-op."
+            return 0
+        fi
+        return 1
     fi
     if ! versione_attuale=$(versione_issue "$n"); then
-        log "  #$n — updatedAt non leggibile: conservo la sospensione per no-op."
-        return 0
+        if (( conteggio >= MAX_NOOP_CONSECUTIVI )); then
+            log "  #$n — updatedAt non leggibile: conservo la sospensione per no-op."
+            return 0
+        fi
+        return 1
     fi
     if [[ "$impronta_attuale" != "$impronta_salvata" \
         || "$versione_attuale" != "$versione_salvata" ]]; then
@@ -383,6 +389,7 @@ noop_fuori_rotazione() {
         log "  #$n — issue cambiata dopo l'ultimo no-op: rientra in rotazione."
         return 1
     fi
+    (( conteggio >= MAX_NOOP_CONSECUTIVI )) || return 1
     log "  #$n — $conteggio no-op consecutivi, fuori rotazione: serve retriage."
     return 0
 }
