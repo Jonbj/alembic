@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from src.strategies.s4.counterfactual import PairedDelta
 from src.strategies.s4.evaluator_bridge import (
+    _ledger_entries,
     load_evaluation_settings,
     observations_from_pairs,
     run_evaluation,
@@ -407,6 +409,66 @@ def test_il_verdetto_registra_le_varianti_viste_nel_ledger():
             "notes": ["not_equivalence"],
         }
     ]
+
+
+def test_le_diagnostiche_guardate_entrano_nel_ledger_come_diagnostiche():
+    """Criterio 5: il ledger registra TUTTE le varianti viste, non le sole
+    confirmatory.
+
+    D+1, D+3, term structure e sottoperiodi restano diagnostici per contratto,
+    ma guardarli e' comunque molteplicita' esplorata: se il registro tace,
+    domani una di quelle puo' tornare come confirmatory su un campione che non
+    e' piu' out-of-sample — esattamente cio' che il ledger esiste per impedire.
+    """
+    result = run_evaluation(
+        (_pair(i) for i in range(6)),
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=4,
+        diagnostics_seen=("D+1", "term structure"),
+    )
+
+    assert result["ledger"] == [
+        {
+            "variant": "delta1_P1_vs_P0",
+            "role": "confirmatory",
+            "notes": ["not_equivalence"],
+        },
+        {"variant": "D+1", "role": "diagnostic", "notes": []},
+        {"variant": "term structure", "role": "diagnostic", "notes": []},
+    ]
+
+
+def test_una_diagnostica_vista_resta_registrata_anche_a_verdetto_bloccato():
+    """Il gradino confirmatory non e' partito, ma lo sguardo c'e' stato: la
+    molteplicita' non si annulla perche' la scala si e' fermata prima."""
+    result = run_evaluation(
+        (),
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=4,
+        diagnostics_seen=("sottoperiodi",),
+    )
+
+    assert result["ledger"] == [
+        {"variant": "sottoperiodi", "role": "diagnostic", "notes": []}
+    ]
+
+
+def test_il_ruolo_di_un_gradino_lo_decide_il_contratto_non_il_chiamante():
+    """Un gradino etichettato come una diagnostica di contratto viene
+    registrato diagnostico.
+
+    Prima il bridge forzava `role="confirmatory"` su ogni gradino: con
+    un'etichetta di `_DIAGNOSTIC_ONLY` il ledger sollevava e portava giu' la
+    valutazione, invece di registrare la variante per quello che e'.
+    """
+    step = SimpleNamespace(label="D+3", notes=())
+    ledger = _ledger_entries(SimpleNamespace(steps=(step,)), diagnostics_seen=())
+
+    assert ledger == [{"variant": "D+3", "role": "diagnostic", "notes": []}]
 
 
 def test_un_verdetto_bloccato_non_ha_visto_nessuna_variante():

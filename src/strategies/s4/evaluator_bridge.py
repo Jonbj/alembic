@@ -31,6 +31,7 @@ import yaml
 from src.strategies.s4.counterfactual import PairedDelta
 from src.strategies.s4.exit_quality import PairedExitQuality
 from src.strategies.s4.paired_evaluator import (
+    _DIAGNOSTIC_ONLY,
     OUTCOME_NOT_TESTED,
     BootstrapScheme,
     EvaluationResult,
@@ -176,23 +177,49 @@ def _metrics_block(
     }
 
 
-def _ledger_entries(result: EvaluationResult) -> list[dict[str, object]]:
+def _ledger_entries(
+    result: EvaluationResult,
+    diagnostics_seen: Sequence[str] = (),
+) -> list[dict[str, object]]:
     """Le varianti viste da questa valutazione, registrate nel ledger.
 
-    Il `TrialLedger` del modulo e' la stessa regola che rifiuta una diagnostica
-    rinominata confirmatory: e' lui a validarle, qui non si ricostruisce.
+    "Tutte le varianti viste" (criterio 5 di #299) non sono i soli gradini
+    confirmatory: D+1, D+3, term structure e sottoperiodi restano diagnostici
+    per contratto, ma guardarli e' comunque molteplicita' esplorata. Se il
+    registro tacesse, domani una di quelle potrebbe tornare come confirmatory
+    su un campione che non e' piu' out-of-sample — cio' che il ledger esiste
+    per impedire. Chi le guarda le dichiara in `diagnostics_seen`.
+
+    Il ruolo di un gradino lo decide il contratto, non il chiamante: prima
+    veniva forzato `confirmatory` su ogni gradino, e un'etichetta di
+    `_DIAGNOSTIC_ONLY` faceva sollevare il ledger portando giu' la valutazione
+    invece di registrare la variante per quello che e'.
+
+    Il `TrialLedger` del modulo resta la regola che rifiuta una diagnostica
+    rinominata confirmatory: e' lui a validare, qui non si ricostruisce.
     """
     ledger = TrialLedger()
+    notes: list[list[str]] = []
     for step in result.steps:
-        ledger.record(step.label, role="confirmatory")
+        role = "diagnostic" if step.label in _DIAGNOSTIC_ONLY else "confirmatory"
+        ledger.record(step.label, role=role)
+        notes.append(list(step.notes))
+    for name in diagnostics_seen:
+        ledger.record(name, role="diagnostic")
+        notes.append([])
     return [
-        {"variant": entry.name, "role": entry.role, "notes": list(step.notes)}
-        for entry, step in zip(ledger.entries, result.steps)
+        {"variant": entry.name, "role": entry.role, "notes": entry_notes}
+        for entry, entry_notes in zip(ledger.entries, notes)
     ]
 
 
 def _blocked_result(
-    policy_id: str, note: str, clusters: int, observations: int, n_cluster: int | None
+    policy_id: str,
+    note: str,
+    clusters: int,
+    observations: int,
+    n_cluster: int | None,
+    diagnostics_seen: Sequence[str] = (),
 ) -> dict[str, object]:
     return {
         "cluster_unit": CLUSTER_UNIT,
@@ -212,9 +239,14 @@ def _blocked_result(
                 "interval": None,
             }
         ],
-        # Nessuna osservazione, nessuna variante vista: un ledger con righe
-        # dichiarerebbe una molteplicita' che il trial non ha esplorato.
-        "ledger": [],
+        # Nessun gradino valutato: inventare righe confirmatory dichiarerebbe
+        # una molteplicita' che il trial non ha esplorato. Le diagnostiche
+        # gia' guardate pero' restano viste — la scala si e' fermata prima,
+        # lo sguardo c'e' stato.
+        "ledger": [
+            {"variant": name, "role": "diagnostic", "notes": []}
+            for name in diagnostics_seen
+        ],
         "metrics": _metrics_block(()),
     }
 
@@ -229,6 +261,7 @@ def run_evaluation(
     counter_pairs: Sequence[PairedDelta] | None = None,
     mde_counter_bps: float | None = None,
     exit_quality: Mapping[str, PairedExitQuality] | None = None,
+    diagnostics_seen: Sequence[str] = (),
 ) -> dict[str, object]:
     """Esegue la gerarchia sui delta appaiati e restituisce un blocco JSON.
 
@@ -242,10 +275,17 @@ def run_evaluation(
     clusters = len({obs.event_day for obs in observations})
 
     if not observations:
-        return _blocked_result(policy_id, "no_comparable_pairs", 0, 0, n_cluster)
+        return _blocked_result(
+            policy_id, "no_comparable_pairs", 0, 0, n_cluster, diagnostics_seen
+        )
     if n_cluster is None:
         return _blocked_result(
-            policy_id, "N_cluster_not_derived", clusters, len(observations), None
+            policy_id,
+            "N_cluster_not_derived",
+            clusters,
+            len(observations),
+            None,
+            diagnostics_seen,
         )
 
     counter_observations = (
@@ -270,7 +310,7 @@ def run_evaluation(
         "n_cluster": result.n_cluster,
         "decision_due": result.decision_due,
         "promoted_policy_id": result.promoted_policy_id,
-        "ledger": _ledger_entries(result),
+        "ledger": _ledger_entries(result, diagnostics_seen),
         "metrics": _metrics_block(observations),
         "steps": [
             {

@@ -340,6 +340,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--start", required=True, type=date.fromisoformat)
     parser.add_argument("--end", required=True, type=date.fromisoformat)
+    # Criterio 5: il ledger registra tutte le varianti viste, non i soli
+    # gradini confirmatory. Una diagnostica guardata fuori da questo script
+    # (D+1, D+3, term structure, sottoperiodi) resta molteplicita' esplorata:
+    # chi la guarda la dichiara qui, e il ledger append-only la conserva.
+    parser.add_argument(
+        "--diagnostica-vista",
+        action="append",
+        default=[],
+        dest="diagnostiche_viste",
+        metavar="NOME",
+        help=(
+            "variante diagnostica guardata in questa finestra "
+            "(ripetibile); entra nel trial ledger con role=diagnostic"
+        ),
+    )
     args = parser.parse_args(argv)
     if args.end < args.start:
         parser.error("--end precede --start")
@@ -444,6 +459,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         n_cluster=settings.n_cluster,
         mde_counter_bps=settings.mde_counter_bps,
         exit_quality=_cohort_exit_quality(cohort, rows),
+        diagnostics_seen=tuple(args.diagnostiche_viste),
     )
     # Il criterio 5 chiede che il ledger sopravviva alla singola esecuzione:
     # il report gira da cron ogni 6 sedute (check_s4_trial_milestones), quindi

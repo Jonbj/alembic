@@ -326,6 +326,57 @@ def test_una_finestra_di_sole_attese_dichiara_gli_slot_non_ancora_misurati(
     assert payload["slots"]["without_slot"] == payload["paired"]["total"]
 
 
+def test_una_diagnostica_dichiarata_finisce_nel_ledger_persistito(
+    monkeypatch, capsys
+):
+    """Criterio 5: chi guarda una diagnostica la dichiara, e il ledger la
+    conserva oltre la singola esecuzione.
+
+    Senza il passaggio dalla CLI al valutatore, il registro persistito
+    conterrebbe i soli gradini confirmatory e direbbe che il trial ha
+    esplorato meno di quanto ha guardato.
+    """
+    monkeypatch.setattr(
+        report_script, "_fetch_policy_rows", lambda start, end: _holding_rows()
+    )
+    monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
+    monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_session_dates",
+        lambda start, end: [date(2026, 8, d) for d in (25, 26, 27)],
+    )
+    persistite: list = []
+    monkeypatch.setattr(
+        report_script,
+        "_record_trial_ledger",
+        lambda entries, start, end: persistite.extend(entries),
+    )
+
+    report_script.main(
+        [
+            "--start",
+            "2026-08-25",
+            "--end",
+            "2026-08-27",
+            "--diagnostica-vista",
+            "D+1",
+            "--diagnostica-vista",
+            "term structure",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    viste = [
+        (riga["variant"], riga["role"])
+        for riga in payload["evaluation"]["ledger"]
+    ]
+    assert ("D+1", "diagnostic") in viste
+    assert ("term structure", "diagnostic") in viste
+    assert persistite == payload["evaluation"]["ledger"]
+
+
 def _overlapping_rows() -> list[dict]:
     """Due intenti liberati dalla stessa policy mentre il primo slot e' aperto."""
     common = {
