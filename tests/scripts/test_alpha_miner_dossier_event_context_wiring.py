@@ -96,7 +96,7 @@ def test_dossier_24_collega_benchmark_calendario_regime_e_microstruttura():
     nbbo_cycles = nbbo_loader.call_args.args[0]
     assert nbbo_cycles["NVDA"]["at"] == datetime(2026, 8, 12, 14, 22, tzinfo=UTC)
     assert nbbo_cycles["NVDA"]["source"] == dossier.ELIGIBLE_SOURCE_SEGNALE
-    assert out["schema_version"] == "3.0"
+    assert out["schema_version"] == "3.1"
     # #507: la salute della fonte earnings sale a livello schema, non solo
     # nella missingness per-simbolo che nessuno leggeva
     assert out["calendario_earnings"]["status"] == "OBSERVED"

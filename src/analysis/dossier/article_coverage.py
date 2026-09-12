@@ -8,8 +8,11 @@ riproducibile e separa misura da comportamento live.
 
 ``effective_timely`` significa, per definizione versionabile e verificabile:
 articolo ``ISSUER_SPECIFIC`` pubblicato prima della chiusura della seduta target
-(``ANTICIPATORY`` o ``CONCURRENT``). Un dato insufficiente resta ``UNKNOWN``;
-non viene promosso a copertura effettiva per colmare un buco informativo.
+(``ANTICIPATORY`` o ``CONCURRENT``), esclusi i template ``CONTENT_EMPTY``.
+Il confronto ``including_content_empty`` conserva in parallelo la definizione
+precedente, cosi' la discontinuita' della misura resta quantificabile. Un dato
+insufficiente resta ``UNKNOWN``; non viene promosso a copertura effettiva per
+colmare un buco informativo.
 
 #405: le righe ``source_metadata`` il cui tag del provider non trova riscontro
 nel testo persistito sono marcate ``TAG_UNCONFIRMED``. Non e' un verdetto di
@@ -43,6 +46,25 @@ TIMELY = frozenset({"ANTICIPATORY", "CONCURRENT"})
 _HEX_64 = re.compile(r"^[0-9a-fA-F]{64}$")
 _TRACKING_QUERY_PREFIXES = ("utm_",)
 _TRACKING_QUERY_KEYS = {"fbclid", "gclid"}
+_CONTENT_EMPTY_TITLE_PATTERNS = (
+    (
+        "EVERGREEN_RETURN_TEMPLATE",
+        re.compile(
+            r"^(?:if you invested \$[\d,.]+ in|"
+            r"(?:here(?:'|’)s how much )?\$[\d,.]+ invested in)"
+            r".*\b\d+\s+years?\s+ago\b",
+            re.IGNORECASE,
+        ),
+    ),
+    ("WHALE_ACTIVITY_TEMPLATE", re.compile(r"\bwhale activity\b", re.IGNORECASE)),
+    (
+        "RATINGS_LISTICLE_TEMPLATE",
+        re.compile(
+            r"\bhere (?:are|is) (?:the )?top \d+ (?:upgrades|downgrades)\b",
+            re.IGNORECASE,
+        ),
+    ),
+)
 
 
 def _normalise_text(value: object) -> str:
@@ -148,6 +170,19 @@ def _contains_term(text: str, term: str) -> bool:
     return re.search(pattern, text, re.IGNORECASE) is not None
 
 
+def content_empty_title_reason(title: object) -> str | None:
+    """Riconosce i soli template content-mill pre-registrati dalla #508.
+
+    La funzione e' pubblica perche' il sampler QX-01 deve campionare lo stesso
+    identico detector usato dalla misura, senza ricopiarne le regex.
+    """
+    normalised = _normalise_text(title)
+    for reason, pattern in _CONTENT_EMPTY_TITLE_PATTERNS:
+        if pattern.search(normalised):
+            return reason
+    return None
+
+
 def _classify_relevance(row: dict, fanout_degree: int) -> tuple[str, str | None]:
     ticker = str(row.get("ticker") or "").strip().upper()
     gt_relevance = str(row.get("ground_truth_relevance") or "").strip().casefold()
@@ -244,6 +279,21 @@ def _known_relevance(values: Iterable[str]) -> str:
     return "UNKNOWN"
 
 
+def _content_empty_reason(
+    rows: Iterable[dict], relevance: str, timing: str
+) -> str | None:
+    """Applica il sotto-tag solo dopo aver stabilito ISSUER_SPECIFIC."""
+    if relevance != "ISSUER_SPECIFIC":
+        return None
+    for row in rows:
+        reason = content_empty_title_reason(row.get("title"))
+        if reason is not None:
+            return reason
+    if timing == "RETROSPECTIVE":
+        return "RETROSPECTIVE_TIMING"
+    return None
+
+
 def build_article_coverage(
     rows: list[dict],
     *,
@@ -286,13 +336,22 @@ def build_article_coverage(
         ]
         timing = classify_timing(min(published), session_open, session_close) if published else "UNKNOWN"
         ticker = key[1]
+        content_empty_reason = _content_empty_reason(mapping_rows, relevance, timing)
+        effective_including_content_empty = (
+            relevance == "ISSUER_SPECIFIC" and timing in TIMELY
+        )
         mappings[key] = {
             "canonical_article_id": key[0],
             "ticker": ticker,
             "relevance": relevance,
             "subject_ticker": ticker if relevance == "ISSUER_SPECIFIC" else None,
             "timing": timing,
-            "effective_timely": relevance == "ISSUER_SPECIFIC" and timing in TIMELY,
+            "content_tag": "CONTENT_EMPTY" if content_empty_reason else None,
+            "content_empty_reason": content_empty_reason,
+            "effective_timely_including_content_empty": effective_including_content_empty,
+            "effective_timely": (
+                effective_including_content_empty and content_empty_reason is None
+            ),
         }
 
     primary_by_canonical = {
@@ -323,6 +382,8 @@ def build_article_coverage(
             "subject_ticker": mapping["subject_ticker"],
             "relevance": mapping["relevance"],
             "timing": row["timing"],
+            "content_tag": mapping["content_tag"],
+            "content_empty_reason": mapping["content_empty_reason"],
             "attribution": attribution,
             "score": row.get("score"),
         })
@@ -347,13 +408,28 @@ def build_article_coverage(
         effective_count = sum(
             bool(mapping["effective_timely"]) for mapping in ticker_mappings
         )
+        effective_including_content_empty_count = sum(
+            bool(mapping["effective_timely_including_content_empty"])
+            for mapping in ticker_mappings
+        )
         per_ticker[ticker] = {
             "settore": sector_by_ticker.get(ticker, "UNKNOWN"),
             "articoli_unici": len(ticker_mappings),
             "rilevanza": {category: counts.get(category, 0) for category in RELEVANCE_CATEGORIES},
             "effective_timely_articles": effective_count,
+            "effective_timely_articles_including_content_empty": (
+                effective_including_content_empty_count
+            ),
             "quota_effective_timely": (
                 effective_count / len(ticker_mappings) if ticker_mappings else None
+            ),
+            "quota_effective_timely_including_content_empty": (
+                effective_including_content_empty_count / len(ticker_mappings)
+                if ticker_mappings else None
+            ),
+            "content_empty_articles": sum(
+                mapping["content_tag"] == "CONTENT_EMPTY"
+                for mapping in ticker_mappings
             ),
             "max_score_own": _strongest(own_scores),
             "max_score_fanout": _strongest(fanout_scores),
@@ -364,33 +440,65 @@ def build_article_coverage(
     for sector in sectors:
         members = {ticker for ticker in universe if sector_by_ticker.get(ticker, "UNKNOWN") == sector}
         covered = {ticker for ticker in members if per_ticker[ticker]["effective_timely_articles"] > 0}
+        covered_including_content_empty = {
+            ticker for ticker in members
+            if per_ticker[ticker]["effective_timely_articles_including_content_empty"] > 0
+        }
         sector_canonical = {
             key[0] for key, mapping in mappings.items()
             if key[1] in members and mapping["effective_timely"]
+        }
+        sector_canonical_including_content_empty = {
+            key[0] for key, mapping in mappings.items()
+            if key[1] in members and mapping["effective_timely_including_content_empty"]
         }
         per_sector[sector] = {
             "ticker_universo": len(members),
             "ticker_coperti": len(covered),
             "quota": len(covered) / len(members) if members else None,
             "articoli_effective_timely": len(sector_canonical),
+            "ticker_coperti_including_content_empty": len(
+                covered_including_content_empty
+            ),
+            "quota_including_content_empty": (
+                len(covered_including_content_empty) / len(members)
+                if members else None
+            ),
+            "articoli_effective_timely_including_content_empty": len(
+                sector_canonical_including_content_empty
+            ),
         }
 
     effective_canonical = {
         key[0] for key, mapping in mappings.items() if mapping["effective_timely"]
     }
+    effective_canonical_including_content_empty = {
+        key[0] for key, mapping in mappings.items()
+        if mapping["effective_timely_including_content_empty"]
+    }
     per_source_counts: Counter[str] = Counter()
     per_source_effective: Counter[str] = Counter()
+    per_source_effective_including_content_empty: Counter[str] = Counter()
     for canonical_id, primary in primary_by_canonical.items():
         source = str(primary.get("source") or "UNKNOWN")
         per_source_counts[source] += 1
         if canonical_id in effective_canonical:
             per_source_effective[source] += 1
+        if canonical_id in effective_canonical_including_content_empty:
+            per_source_effective_including_content_empty[source] += 1
     per_source = {
         source: {
             "articoli_unici": per_source_counts[source],
             "articoli_effective_timely": per_source_effective[source],
             "quota_effective_timely": (
                 per_source_effective[source] / per_source_counts[source]
+            ),
+            "articoli_effective_timely_including_content_empty": (
+                per_source_effective_including_content_empty[source]
+            ),
+            "quota_effective_timely_including_content_empty": (
+                per_source_effective_including_content_empty[source]
+                / per_source_counts[source]
             ),
         }
         for source in sorted(per_source_counts)
@@ -424,6 +532,12 @@ def build_article_coverage(
         per_ticker.get(ticker, {}).get("effective_timely_articles", 0) > 0
         for ticker in universe
     )
+    covered_tickers_including_content_empty = sum(
+        per_ticker.get(ticker, {}).get(
+            "effective_timely_articles_including_content_empty", 0
+        ) > 0
+        for ticker in universe
+    )
 
     articles = []
     for canonical_id, canonical_rows in sorted(by_canonical.items()):
@@ -451,6 +565,14 @@ def build_article_coverage(
                 mapping["ticker"]: mapping["relevance"] for mapping in article_mappings
                 if mapping["ticker"]
             },
+            "content_tag_by_ticker": {
+                mapping["ticker"]: mapping["content_tag"]
+                for mapping in article_mappings if mapping["ticker"]
+            },
+            "content_empty_reason_by_ticker": {
+                mapping["ticker"]: mapping["content_empty_reason"]
+                for mapping in article_mappings if mapping["ticker"]
+            },
             "timing": (
                 classify_timing(min(published), session_open, session_close)
                 if published
@@ -460,8 +582,9 @@ def build_article_coverage(
 
     return {
         "definizione_effective_timely": (
-            "ISSUER_SPECIFIC e timing ANTICIPATORY|CONCURRENT; deduplica per "
-            "canonical_article_id"
+            "ISSUER_SPECIFIC, timing ANTICIPATORY|CONCURRENT e non CONTENT_EMPTY; "
+            "deduplica per canonical_article_id. Il confronto "
+            "including_content_empty conserva la definizione pre-#508"
         ),
         "totali": {
             "righe_news_log": len(unique_news_ids),
@@ -472,12 +595,27 @@ def build_article_coverage(
                 category: relevance_counts.get(category, 0)
                 for category in RELEVANCE_CATEGORIES
             },
+            "mapping_content_empty": sum(
+                mapping["content_tag"] == "CONTENT_EMPTY"
+                for mapping in mappings.values()
+            ),
             "articoli_effective_timely": len(effective_canonical),
+            "articoli_effective_timely_including_content_empty": len(
+                effective_canonical_including_content_empty
+            ),
         },
         "effective_timely_coverage": {
             "ticker_coperti": covered_tickers,
             "ticker_universo": len(universe),
             "quota": covered_tickers / len(universe) if universe else None,
+        },
+        "effective_timely_coverage_including_content_empty": {
+            "ticker_coperti": covered_tickers_including_content_empty,
+            "ticker_universo": len(universe),
+            "quota": (
+                covered_tickers_including_content_empty / len(universe)
+                if universe else None
+            ),
         },
         "per_ticker": per_ticker,
         "per_settore": per_sector,
