@@ -29,3 +29,30 @@ def test_log_news_item_passes_trace_values():
     params = cursor.execute.call_args[0][1]
     assert ts in params                              # raw_ingested_at
     assert any(isinstance(p, str) and len(p) == 64 for p in params)  # sha256 hash
+
+
+def test_log_news_item_persists_full_body_alongside_snippet():
+    store = PostgreSQLStore.__new__(PostgreSQLStore)
+    cursor = MagicMock()
+    cursor.fetchone.return_value = (1,)
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__ = MagicMock(return_value=cursor)
+    conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+
+    body = "a" * 501
+    item = NewsItem(
+        id="u:AAPL",
+        title="T",
+        body=body,
+        source="alpaca",
+        asset_tags=["AAPL"],
+        extraction_method="source_metadata",
+    )
+    with patch.object(PostgreSQLStore, "_get_connection", return_value=conn):
+        store.log_news_item(item=item, ticker="AAPL")
+
+    sql, params = cursor.execute.call_args[0]
+    assert "body_full" in sql
+    assert body[:500] in params
+    assert body in params
+    assert "source_metadata" in params
