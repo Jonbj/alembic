@@ -121,11 +121,25 @@ In ordine; vince la prima condizione che matcha.
 | # | Condizione | Azione |
 |---|---|---|
 | 1 | fingerprint silenziato (baseline o `silenziati.txt`) | niente |
-| 2 | servizio critico (`execution`, `portfolio_scheduler`, `sentiment`, `beat`, `news-stream`), fingerprint nuovo | apri subito |
-| 3 | fingerprint nuovo altrove | apri a **3 occorrenze in 24h**, o se sopravvive a 2 giri consecutivi |
+| 2 | fingerprint nuovo su **superficie critica** (def. sotto) | apri subito |
+| 3 | fingerprint nuovo altrove | apri a **3 occorrenze in 24h**, o se ricompare in **due giorni distinti** |
 | 4 | issue già aperta per il fingerprint | commenta **solo** se il conteggio raddoppia o se riappare dopo 7 giorni di silenzio |
 | 5 | fingerprint di issue **chiusa** che riappare | issue nuova, titolo marcato `regressione`, che cita la chiusa |
 | 6 | più di **3 aperture in 24h** | tappo: una sola issue digest + Telegram |
+
+**Superficie critica** = il modulo dell'ultimo frame del repo appartiene a
+`src/workers/execution.py`, `src/workers/portfolio_scheduler.py`, `src/workers/sentiment.py`,
+`src/workers/news_stream.py` o `src/portfolio/`; oppure, quando non c'è alcun frame del repo
+(crash del processo, OOM, errore di avvio), il servizio è `beat` o `worker-inference`. La
+distinzione conta: i *servizi* sono `api`/`worker`/`worker-inference`/`worker-news-stream`/`beat`,
+mentre `execution` e `portfolio_scheduler` sono *moduli* che girano dentro `worker`. Definire la
+criticità sul modulo — con il servizio come ripiego — evita sia di marcare critico tutto ciò che
+passa da `worker`, sia di perdere un crash che non ha frame nostri.
+
+La riga 3 usa "due giorni distinti" e non "due giri consecutivi": due giri distano 30 minuti, quindi
+un errore visto una volta per giro scatterebbe a 2 occorrenze, scavalcando la soglia di 3 che la
+riga stessa dichiara. La condizione serve a catturare l'errore *raro ma persistente* (una volta al
+giorno per due giorni), non ad abbassare la soglia di nascosto.
 
 La riga 4 esiste perché senza di essa un errore ricorrente produrrebbe un commento ogni 15 minuti.
 La riga 6 è la difesa contro il caso reale del 2026-08-26: un guasto a monte che genera molti
@@ -170,7 +184,7 @@ decine di issue in un colpo e affogherebbe il segnale.
 
 1. **Primo giro in sola lettura su tutto lo storico.** Censisce i fingerprint esistenti con
    conteggi, prima e ultima occorrenza, servizio. Produce
-   `docs/evidence/error_watch_baseline_2026-09-12.md`. **Non apre nulla.**
+   `docs/evidence/error_watch_baseline_<data-del-run>.md`. **Non apre nulla.**
 2. **L'operatore legge la classifica** e decide: quali fingerprint sono rumore noto (→ `silenziati.txt`
    con motivazione) e quali meritano una issue subito (aperte a mano, poi collegate nel ledger).
 3. **Da lì in poi il gate si accende** solo sui fingerprint nuovi o su quelli non silenziati.
@@ -232,5 +246,5 @@ guasto parziale è degradante, non bloccante, e lascia il lavoro da fare al giro
 | `scripts/run_watched.sh` | wrapper crontab che registra gli exit code dei job |
 | `config/error_watch.yaml` | servizi critici, soglie, tappo, modello e budget LLM |
 | `tests/scripts/test_error_watch.py` | unit + end-to-end dry-run |
-| `docs/evidence/error_watch_baseline_2026-09-12.md` | censimento del bootstrap |
+| `docs/evidence/error_watch_baseline_<data-del-run>.md` | censimento del bootstrap |
 | voce in crontab | `*/15 * * * *` |
