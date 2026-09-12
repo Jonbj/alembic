@@ -119,6 +119,15 @@ def _get_pool() -> pool.ThreadedConnectionPool:
     return _db_pool
 
 
+# #512: righe osservazionali scritte dentro `execution_decisions` per riusare
+# il worker controfattuale. Non corrispondono a nessuna decisione eseguita
+# (nessun ordine, nessuno skip di un gate): ogni lettore che intende "cosa ha
+# deciso il sistema" le deve escludere, altrimenti una serie pubblicata cambia
+# definizione senza che nessuno lo dichiari.
+LATE_ENTRY_OBSERVATION_DECISIONS = ("OBSERVE_LATE_ENTRY", "SHADOW_LATE_ENTRY")
+_NOT_AN_OBSERVATION = "decision NOT IN ('OBSERVE_LATE_ENTRY', 'SHADOW_LATE_ENTRY')"
+
+
 class PostgreSQLStore:
     """PostgreSQL storage for sentiment signals and performance data.
 
@@ -1256,7 +1265,10 @@ class PostgreSQLStore:
         if decision_id is not None:
             filters.append("ed.id = %s")
             params.append(decision_id)
-        where = ("WHERE " + " AND ".join(filters)) if filters else ""
+        # #512: le righe osservazionali non sono decisioni; senza questo
+        # filtro un ciclo S4 con venti candidati le mette in cima alla lista.
+        filters.append(f"ed.{_NOT_AN_OBSERVATION}")
+        where = "WHERE " + " AND ".join(filters)
         params.append(limit)
         conn = self._get_connection()
         try:
@@ -1296,6 +1308,7 @@ class PostgreSQLStore:
                                signal_id, id, tick_time, decision
                         FROM execution_decisions
                         WHERE signal_id IN ({placeholders})
+                          AND {_NOT_AN_OBSERVATION}
                         ORDER BY signal_id, tick_time DESC""",
                     signal_ids,
                 )

@@ -514,7 +514,8 @@ def _execution_decisions_signal_id_rows(giorno: date) -> list[dict]:
     rows = _psql(
         f"SELECT ed.decision, ed.signal_id::text "
         f"FROM execution_decisions ed "
-        f"WHERE ed.tick_time >= '{g}' AND ed.tick_time < '{g}'::date + 1"
+        f"WHERE ed.tick_time >= '{g}' AND ed.tick_time < '{g}'::date + 1 "
+        f"AND ed.{_NON_E_UNA_OSSERVAZIONE}"
     )
     return [
         {
@@ -651,6 +652,15 @@ def _context_articles(rows: list[dict], coverage: dict) -> list[dict]:
     ]
 
 
+# #512 scrive in `execution_decisions` righe che non sono decisioni eseguite
+# (nessun ordine, nessuno skip di un gate): servono al worker controfattuale.
+# Il dossier e' una serie pubblicata, quindi ogni query che non filtra per
+# `decision` le deve escludere qui, o la serie cambia definizione in silenzio.
+_NON_E_UNA_OSSERVAZIONE = (
+    "decision NOT IN ('OBSERVE_LATE_ENTRY', 'SHADOW_LATE_ENTRY')"
+)
+
+
 def _regime_observations(giorno: date) -> list[dict]:
     """Moltiplicatori realmente osservati nei cicli del giorno, sola lettura."""
     g = giorno.isoformat()
@@ -663,7 +673,8 @@ def _regime_observations(giorno: date) -> list[dict]:
         for row in _psql(
             f"SELECT tick_time::text, regime_mult::text FROM execution_decisions "
             f"WHERE tick_time >= '{g}' AND tick_time < '{g}'::date + 1 "
-            f"AND regime_mult IS NOT NULL ORDER BY tick_time, id;"
+            f"AND regime_mult IS NOT NULL AND {_NON_E_UNA_OSSERVAZIONE} "
+            f"ORDER BY tick_time, id;"
         )
     ]
 
@@ -910,12 +921,14 @@ def _timeline_eventi(giorno: date) -> list[dict]:
         f"  SELECT id, tick_time, order_id FROM execution_decisions "
         f"  WHERE signal_id = ss.id AND tick_time >= ss.generated_at "
         f"    AND tick_time < '{g}'::date + 1 "
+        f"    AND {_NON_E_UNA_OSSERVAZIONE} "
         f"  ORDER BY tick_time LIMIT 1"
         f") ed ON true "
         f"LEFT JOIN LATERAL ("
         f"  SELECT id, order_id FROM execution_decisions "
         f"  WHERE signal_id = ss.id AND tick_time >= ss.generated_at "
         f"    AND tick_time < '{g}'::date + 1 AND order_id IS NOT NULL "
+        f"    AND {_NON_E_UNA_OSSERVAZIONE} "
         f"  ORDER BY tick_time LIMIT 1"
         f") od ON true "
         f"LEFT JOIN LATERAL ("
