@@ -369,6 +369,25 @@ def _is_full_fallback(result) -> bool:
     return bool(result.fallback_used) and not result.model_id.startswith("single:")
 
 
+_FINBERT_INPUT_MAX_CHARS = 512
+_FINBERT_TITLE_BODY_SEPARATOR = ". "
+
+
+def _compose_finbert_input(
+    clean_title: str, clean_body: str
+) -> tuple[str, int, int]:
+    """Build the capped classifier input and count only component chars seen."""
+    if not clean_title:
+        finbert_input = clean_body[:_FINBERT_INPUT_MAX_CHARS]
+        return finbert_input, 0, len(finbert_input)
+
+    title_with_separator = f"{clean_title}{_FINBERT_TITLE_BODY_SEPARATOR}"
+    finbert_input = f"{title_with_separator}{clean_body}"[:_FINBERT_INPUT_MAX_CHARS]
+    title_chars = min(len(clean_title), len(finbert_input))
+    body_chars = max(0, len(finbert_input) - len(title_with_separator))
+    return finbert_input, title_chars, body_chars
+
+
 async def run_inference(
     item: NewsItem,
     clients: list[LLMClient],
@@ -408,7 +427,9 @@ async def run_inference(
     # #399 companion: FinBERT is a classifier, not an instruction-following LLM — it
     # never sees _DK_COT_PROMPT, so the headline must reach it a different way (it's
     # exactly the path the system relies on most, when the ensemble is unavailable).
-    finbert_text = f"{clean_title}. {clean_body}" if clean_title else clean_body
+    finbert_input, finbert_title_chars, finbert_body_chars = _compose_finbert_input(
+        clean_title, clean_body
+    )
     clean_symbol = sanitize_ticker(raw_symbol) if raw_symbol else "UNKNOWN"
     if clean_symbol == "UNKNOWN":
         log.debug("Skipping news item with unresolvable ticker (raw=%r)", raw_symbol)
@@ -453,8 +474,12 @@ async def run_inference(
                 log.info(f"Ensemble diverged for {clean_symbol}, using FinBERT fallback")
             loop = asyncio.get_running_loop()
             fb_result = await loop.run_in_executor(
-                None, finbert.analyze, finbert_text[:512]
+                None, finbert.analyze, finbert_input
             )
+            # #544: carry the exact string FinBERT classified (with its
+            # title/body split and outcome) on the result, so the worker can
+            # persist it to finbert_fallback_events — the runtime confirmation
+            # of the title+body fix must not live only in container logs.
             # Preserve the divergent raw outputs (empty on timeout): the caller
             # persists them to llm_responses with eligible=False so the
             # disagreement is auditable instead of silently discarded.
@@ -466,6 +491,10 @@ async def run_inference(
                 model_id="finbert",
                 fallback_used=True,
                 published_at=item.timestamp,
+                finbert_input=finbert_input,
+                finbert_polarity=fb_result.polarity,
+                finbert_title_chars=finbert_title_chars,
+                finbert_body_chars=finbert_body_chars,
             ), list(raw_outputs or [])
 
         score = aggregated.polarity * aggregated.confidence
@@ -499,7 +528,7 @@ async def run_inference(
     except LLMBudgetExhaustedError:
         log.info(f"Budget exhausted for {clean_symbol}, using FinBERT fallback")
         loop = asyncio.get_running_loop()
-        fb_result = await loop.run_in_executor(None, finbert.analyze, finbert_text[:512])
+        fb_result = await loop.run_in_executor(None, finbert.analyze, finbert_input)
         return SentimentResult(
             symbol=clean_symbol,
             score=fb_result.polarity * fb_result.confidence,
@@ -508,6 +537,10 @@ async def run_inference(
             model_id="finbert",
             fallback_used=True,
             published_at=item.timestamp,
+            finbert_input=finbert_input,
+            finbert_polarity=fb_result.polarity,
+            finbert_title_chars=finbert_title_chars,
+            finbert_body_chars=finbert_body_chars,
         ), []
 
     except Exception as e:
@@ -739,6 +772,30 @@ class LiveSignalSink:
             redis_store.reset_fallback_counter()
             pg_store.record_fallback_reset(_FALLBACK_COUNTER_NAME)
         signal_id = pg_store.write_signal(result)
+        # #544: persist the runtime evidence of a full FinBERT fallback (the
+        # exact string classified, with its title/body split and outcome) to
+        # finbert_fallback_events. Docker logs die with the container on every
+        # deploy rebuild, and this is the only record that answers the #453
+        # runtime question ("did the fallback actually receive title+body?")
+        # without the containers having stayed up. Measurement, not money path:
+        # a failure here must never take the just-written signal down with it.
+        #
+        # Sta subito dopo `write_signal` e non in fondo al blocco per una
+        # ragione precisa: ogni scrittura che segue (Redis, news_log, le
+        # risposte LLM) puo' sollevare e saltare al gestore esterno. Con
+        # l'evento in coda, un errore di rete verso Redis lasciava un segnale
+        # fallback senza la sua evidenza runtime — esattamente l'ambiguita'
+        # che #544 esiste per eliminare. Prima di `write_signal` non puo'
+        # stare: la riga e' chiavata sul signal_id che quella scrittura crea.
+        if result.finbert_input is not None:
+            try:
+                pg_store.log_finbert_fallback_event(
+                    signal_id=signal_id, result=result
+                )
+            except Exception as _fb_ev_exc:
+                log.warning(
+                    "log_finbert_fallback_event failed: %s", _fb_ev_exc
+                )
         redis_store.write_sentiment(result, signal_id=signal_id)
         try:
             redis_store.append_signal_history(result.symbol, result.score)
