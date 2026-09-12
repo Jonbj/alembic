@@ -1508,3 +1508,59 @@ class TestSchedulerStoreLeakB7:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestLateEntryObservationsDoNotLeakIntoDecisionReaders:
+    """#512 scrive le sue righe dentro `execution_decisions`, condivisa.
+
+    La tabella e' letta da consumatori che non filtrano per `decision`: una
+    riga osservazionale che vi entra non e' un dato in piu', e' una serie
+    pubblicata che cambia definizione in silenzio. `OBSERVE_LATE_ENTRY` e
+    `SHADOW_LATE_ENTRY` non corrispondono a nessuna decisione eseguita —
+    nessun ordine, nessuno skip di un gate — e vanno esclusi ovunque il
+    lettore intenda "cosa ha deciso il sistema".
+    """
+
+    def _store_with_cursor(self):
+        mock_conn = MagicMock()
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+        mock_cur.description = []
+        mock_cur.fetchall.return_value = []
+        from src.store.pg_store import PostgreSQLStore
+
+        return PostgreSQLStore(conn=mock_conn), mock_cur
+
+    def _sql(self, mock_cur):
+        sqls = [str(c[0][0]) for c in mock_cur.execute.call_args_list]
+        sql = next((s for s in sqls if "execution_decisions" in s), None)
+        assert sql is not None, "attesa una SELECT su execution_decisions"
+        return sql
+
+    def test_fetch_decisions_esclude_le_osservazioni(self):
+        """Il pannello decisioni mostra cosa ha deciso il sistema.
+
+        Senza il filtro, un ciclo S4 con venti candidati spinge venti righe
+        osservazionali in cima alla lista ordinata per tick_time e la
+        finestra dell'operatore non contiene piu' nessuna decisione vera.
+        """
+        store, cur = self._store_with_cursor()
+        store.fetch_decisions(limit=15)
+        sql = self._sql(cur)
+
+        assert "OBSERVE_LATE_ENTRY" in sql and "SHADOW_LATE_ENTRY" in sql
+        assert "NOT IN" in sql.upper()
+
+    def test_fetch_signal_decision_status_esclude_le_osservazioni(self):
+        """`used_in_decision` dice che il segnale ha mosso qualcosa.
+
+        Ogni segnale classificato da S4 riceve una riga osservazionale: senza
+        filtro, la copertura "segnale usato in una decisione" diventa il 100%
+        per costruzione e smette di misurare alcunche'.
+        """
+        store, cur = self._store_with_cursor()
+        store.fetch_signal_decision_status([1, 2, 3])
+        sql = self._sql(cur)
+
+        assert "OBSERVE_LATE_ENTRY" in sql and "SHADOW_LATE_ENTRY" in sql
+        assert "NOT IN" in sql.upper()

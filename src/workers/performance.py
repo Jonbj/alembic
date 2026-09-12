@@ -2602,7 +2602,7 @@ def _counterfactual_outcome(
 
 @app.task(name="src.workers.performance.run_counterfactual_worker")
 def run_counterfactual_worker() -> dict:
-    """Compute 1-hour counterfactual returns for trade-filter skip decisions.
+    """Compute 1-hour counterfactual returns for skips and shadow entry guards.
 
     For each skipped decision, answers: "if we had entered at tick_time,
     what would the 1-hour return have been?"
@@ -2610,6 +2610,7 @@ def run_counterfactual_worker() -> dict:
     Includes SKIP_THRESHOLD because the live portfolio path now enforces the
     feedback gate there. Excludes freshness/fallback skips: stale or fallback-only
     signals are data-quality/reliability issues, not filters to relax for alpha.
+    #512 includes only SHADOW_LATE_ENTRY firings, never the clear observations.
 
     Scheduled daily at 22:45 UTC (after market close and forward-return worker).
     Processes every decision from the last 7 days with no counterfactual yet —

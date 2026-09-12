@@ -73,6 +73,7 @@ class PairedObservation:
     false_exit: bool | None = None
     recovered_within_horizon: bool | None = None
     giveback_from_mfe_bps: float | None = None
+    exit_cost_delta_usd: float | None = None
 
 
 @dataclass(frozen=True)
@@ -445,6 +446,21 @@ def economic_metrics(
     ]
     gross_usd = sum(abs(value) for value in usd)
     total_capital_days = sum(capital_days) if capital_days else None
+    # Il costo d'uscita e' l'unica componente di costo del delta: gli ingressi
+    # sono condivisi per contratto. Una coppia senza costo resta fuori dalla
+    # somma e non la azzera — `cost_trades` dichiara la copertura, cosi' una
+    # somma parziale non si legge mai come un costo totale.
+    cost_deltas = [
+        (obs.exit_cost_delta_usd, obs.initial_notional)
+        for obs in observations
+        if obs.exit_cost_delta_usd is not None
+    ]
+    cost_usd = [value for value, _ in cost_deltas]
+    cost_bps = [
+        value / notional * 10_000.0
+        for value, notional in cost_deltas
+        if notional
+    ]
     return {
         "denominator": "initial_notional",
         "trades": len(observations),
@@ -461,6 +477,9 @@ def economic_metrics(
         "overnight_share": (
             None if not overnight or gross_usd == 0 else sum(overnight) / gross_usd
         ),
+        "cost_delta_usd": sum(cost_usd) if cost_usd else None,
+        "cost_delta_bps": fmean(cost_bps) if cost_bps else None,
+        "cost_trades": len(cost_usd),
     }
 
 

@@ -74,7 +74,8 @@ def test_dossier_espone_schema_provenienza_e_timeline_end_to_end():
     ):
         payload = dossier.costruisci_dossier(date(2026, 8, 12), ["AAA"])
 
-    assert payload["schema_version"] == "2.9"
+    assert payload["schema_version"] == "3.0"
+    assert "late_entry_joint_distribution" in payload["aggregati"]
     assert payload["provenienza_dati"]["timeline"]["first_seen_at"] == (
         "news_log.raw_ingested_at"
     )
@@ -184,3 +185,28 @@ def test_errore_lookup_ordine_resta_missingness_esplicita():
 
     assert out["order-404"]["filled_at"] is None
     assert out["order-404"]["lookup_error"] == "RuntimeError: not found"
+
+
+def test_le_osservazioni_512_non_entrano_nelle_query_del_dossier():
+    """Il dossier e' una serie pubblicata: le righe osservazionali #512 vivono
+    nella stessa tabella delle decisioni, ma non sono decisioni.
+
+    Tre punti, tre discontinuita' silenziose se il filtro manca:
+    - la catena articolo -> segnale -> **prima** decisione collegata: la riga
+      osservazionale nasce alla disposition del ciclo, quindi precede il BUY e
+      diventerebbe lei la "prima decisione", cambiando la latenza pubblicata;
+    - la copertura signal_id (#406): ogni candidato S4 aggiunge una riga e il
+      rapporto pubblicato si sposta per costruzione;
+    - le osservazioni di regime_mult: righe in piu' nella stessa serie.
+    """
+    with patch.object(dossier, "_psql", return_value=[]) as psql:
+        dossier._timeline_eventi(date(2026, 8, 12))
+    assert "OBSERVE_LATE_ENTRY" in psql.call_args.args[0]
+
+    with patch.object(dossier, "_psql", return_value=[]) as psql:
+        dossier._execution_decisions_signal_id_rows(date(2026, 8, 12))
+    assert "OBSERVE_LATE_ENTRY" in psql.call_args.args[0]
+
+    with patch.object(dossier, "_psql", return_value=[]) as psql:
+        dossier._regime_observations(date(2026, 8, 12))
+    assert "OBSERVE_LATE_ENTRY" in psql.call_args.args[0]

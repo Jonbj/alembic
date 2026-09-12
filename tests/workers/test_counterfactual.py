@@ -216,6 +216,7 @@ class TestPgStoreCounterfactual:
         assert "SKIP_THRESHOLD" in called_sql
         assert "SKIP_EMA" in called_sql
         assert "SKIP_CAP" in called_sql
+        assert "SHADOW_LATE_ENTRY" in called_sql
         # #315: senza questa riga SKIP_PYRAMIDING non riceve mai un
         # counterfactual_return_1h — i blocchi anti-pyramiding restano
         # illeggibili per la revisione di #230.

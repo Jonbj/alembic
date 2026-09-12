@@ -132,3 +132,14 @@ def test_i_cron_indicano_i_log_persistenti_come_fonte():
 
     forensic = (ROOT / "scripts" / "daily_analysis.sh").read_text()
     assert "docker compose logs worker --since 48h" not in forensic
+
+
+def test_il_cron_forense_cita_finbert_fallback_events_come_fonte_runtime():
+    """#544: la misura #453 ha concluso che i log della finestra erano persi
+    perche' guardava `docker logs` — mentre la conferma runtime del fallback
+    FinBERT (titolo+corpo) e' answerabile solo da finbert_fallback_events, che
+    persiste la stringa classificata oltre il ciclo di vita dei container. Il
+    prompt del cron forense deve saperlo, o la prossima misura rifara' lo
+    stesso errore."""
+    forensic = (ROOT / "scripts" / "daily_analysis.sh").read_text()
+    assert "finbert_fallback_events" in forensic

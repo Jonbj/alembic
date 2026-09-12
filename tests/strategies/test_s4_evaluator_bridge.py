@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from src.strategies.s4.counterfactual import PairedDelta
 from src.strategies.s4.evaluator_bridge import (
+    _ledger_entries,
     load_evaluation_settings,
     observations_from_pairs,
     run_evaluation,
@@ -39,6 +41,8 @@ def _pair(
     delta_usd: float | None = 10.0,
     comparable: bool = True,
     reasons: tuple[str, ...] = (),
+    baseline_exit_cost_usd: float | None = None,
+    challenger_exit_cost_usd: float | None = None,
 ) -> PairedDelta:
     notional = 1000.0
     return PairedDelta(
@@ -60,6 +64,8 @@ def _pair(
         challenger_capital_days=2000.0,
         comparable=comparable,
         exclusion_reasons=reasons,
+        baseline_exit_cost_usd=baseline_exit_cost_usd,
+        challenger_exit_cost_usd=challenger_exit_cost_usd,
     )
 
 
@@ -101,6 +107,22 @@ def test_il_delta_e_i_capitale_giorni_arrivano_intatti():
     assert observation.initial_notional == pytest.approx(1000.0)
     # Capitale-giorni della challenger: e' la sua occupazione a essere misurata
     assert observation.capital_days == pytest.approx(2000.0)
+
+
+def test_il_costo_di_uscita_arriva_alla_coppia_come_delta():
+    """I costi d'ingresso sono condivisi per contratto: il delta dei costi e'
+    tutto nella gamba d'uscita, che il ponte espone invece di tenerla scontata
+    dentro `net_pnl`."""
+    pairs = (
+        _pair(0, baseline_exit_cost_usd=2.0, challenger_exit_cost_usd=3.5),
+        _pair(1),
+    )
+
+    observations = observations_from_pairs(pairs, policy_id="P1")
+
+    assert observations[0].exit_cost_delta_usd == pytest.approx(1.5)
+    # Un costo mancante resta un ignoto, non uno zero
+    assert observations[1].exit_cost_delta_usd is None
 
 
 # ── Il cluster e' l'event-day, con il suo limite dichiarato ────────────────
@@ -224,3 +246,240 @@ def test_il_risultato_e_serializzabile_in_json():
     )
 
     assert json.loads(json.dumps(result, default=str))["clusters_observed"] == 6
+
+
+# ── Le metriche §8.3 accompagnano il verdetto sulla stessa coorte ──────────
+
+
+def test_il_verdetto_riporta_le_metriche_sulla_stessa_coorte():
+    """Il verdetto decide su `observations`; le metriche descrivono le stesse.
+
+    Una coorte diversa fra intervallo e metriche pubblicherebbe due campioni
+    con lo stesso nome.
+    """
+    pairs = tuple(_pair(i, delta_usd=25.0 * (-1) ** i) for i in range(6))
+
+    result = run_evaluation(
+        pairs,
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=4,
+    )
+
+    economic = result["metrics"]["economic"]
+    risk = result["metrics"]["risk"]
+    assert economic["trades"] == result["observations"]
+    assert economic["denominator"] == "initial_notional"
+    assert economic["mean_delta_bps"] == pytest.approx(0.0)
+    assert risk["worst_trade_bps"] == pytest.approx(-250.0)
+    assert "downside_deviation_bps" in risk
+    assert "expected_shortfall_bps" in risk
+    assert "max_drawdown_bps" in risk
+
+
+def test_il_verdetto_riporta_il_costo_del_delta_con_la_sua_copertura():
+    pairs = (
+        _pair(0, baseline_exit_cost_usd=2.0, challenger_exit_cost_usd=3.0),
+        _pair(1, baseline_exit_cost_usd=1.0, challenger_exit_cost_usd=1.0),
+        _pair(2),
+    )
+
+    result = run_evaluation(
+        pairs,
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=2,
+    )
+
+    economic = result["metrics"]["economic"]
+    # La terza coppia non ha costi: la somma non la azzera, la dichiara parziale
+    assert economic["cost_delta_usd"] == pytest.approx(1.0)
+    assert economic["cost_trades"] == 2
+
+
+def test_un_verdetto_bloccato_riporta_metriche_vuote_non_inventate():
+    """Finestra senza coppie: le metriche esistono e dicono zero, senza
+    valori fittizi che sembrerebbero una misura."""
+    result = run_evaluation(
+        (),
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=4,
+    )
+
+    assert result["metrics"]["economic"]["trades"] == 0
+    assert result["metrics"]["risk"] == {}
+    assert result["metrics"]["exit_quality"] == {}
+
+
+# ── La qualita' dell'uscita entra nell'osservazione quando esiste ──────────
+
+
+def _quality(intent: str, **overrides):
+    from src.strategies.s4.exit_quality import PairedExitQuality
+
+    values = {
+        "overnight_pnl_usd": 4.0,
+        "false_exit": True,
+        "recovered_within_horizon": True,
+        "giveback_from_mfe_bps": 30.0,
+    }
+    values.update(overrides)
+    return intent, PairedExitQuality(**values)
+
+
+def test_la_qualita_dell_uscita_arriva_alla_coppia_che_la_ha():
+    """La qualita' nasce dal path di prezzo di un intento: entra solo nella
+    coppia con lo stesso nome, mai come sfondo della coorte."""
+    pairs = (_pair(0), _pair(1))
+
+    observations = observations_from_pairs(
+        pairs, policy_id="P1", exit_quality=dict([_quality("intent-0")])
+    )
+
+    prima, seconda = observations
+    assert prima.overnight_pnl_usd == pytest.approx(4.0)
+    assert prima.false_exit is True
+    assert prima.recovered_within_horizon is True
+    assert prima.giveback_from_mfe_bps == pytest.approx(30.0)
+    # L'intento senza path resta ignoto su tutte le quattro: non azzera le
+    # medie di qualita', ne' le allarga con un favore inventato
+    assert seconda.overnight_pnl_usd is None
+    assert seconda.false_exit is None
+    assert seconda.recovered_within_horizon is None
+    assert seconda.giveback_from_mfe_bps is None
+
+
+def test_il_verdetto_pubblica_la_qualita_dell_uscita_della_coorte():
+    pairs = (_pair(0), _pair(1, delta_usd=30.0), _pair(2, delta_usd=40.0))
+    quality = dict(
+        [
+            _quality("intent-0"),
+            _quality(
+                "intent-1",
+                overnight_pnl_usd=0.0,
+                false_exit=True,
+                recovered_within_horizon=False,
+            ),
+            _quality("intent-2", overnight_pnl_usd=0.0, false_exit=False),
+        ]
+    )
+
+    result = run_evaluation(
+        pairs,
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=3,
+        exit_quality=quality,
+    )
+
+    qualita = result["metrics"]["exit_quality"]
+    assert qualita["false_exit_rate"] == pytest.approx(2 / 3)
+    assert qualita["recovery_within_horizon_rate"] == pytest.approx(0.5)
+    assert result["metrics"]["economic"]["overnight_share"] == pytest.approx(
+        4.0 / 80.0
+    )
+
+
+# ── Il trial ledger registra le varianti viste (criterio 5) ────────────────
+
+
+def test_il_verdetto_registra_le_varianti_viste_nel_ledger():
+    """Ogni gradino valutato e' una variante vista: senza registro, la
+    molteplicita' esplorata si perde e una diagnostica puo' tornare come
+    confirmatory su un campione che non e' piu' out-of-sample."""
+    result = run_evaluation(
+        (_pair(i) for i in range(6)),
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=4,
+    )
+
+    assert result["ledger"] == [
+        {
+            "variant": "delta1_P1_vs_P0",
+            "role": "confirmatory",
+            # 6 cluster su 4 richiesti: il gradino e' valutato (non
+            # `below_n_cluster`), solo non promosso — e il ledger lo dice
+            "notes": ["not_equivalence"],
+        }
+    ]
+
+
+def test_le_diagnostiche_guardate_entrano_nel_ledger_come_diagnostiche():
+    """Criterio 5: il ledger registra TUTTE le varianti viste, non le sole
+    confirmatory.
+
+    D+1, D+3, term structure e sottoperiodi restano diagnostici per contratto,
+    ma guardarli e' comunque molteplicita' esplorata: se il registro tace,
+    domani una di quelle puo' tornare come confirmatory su un campione che non
+    e' piu' out-of-sample — esattamente cio' che il ledger esiste per impedire.
+    """
+    result = run_evaluation(
+        (_pair(i) for i in range(6)),
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=4,
+        diagnostics_seen=("D+1", "term structure"),
+    )
+
+    assert result["ledger"] == [
+        {
+            "variant": "delta1_P1_vs_P0",
+            "role": "confirmatory",
+            "notes": ["not_equivalence"],
+        },
+        {"variant": "D+1", "role": "diagnostic", "notes": []},
+        {"variant": "term structure", "role": "diagnostic", "notes": []},
+    ]
+
+
+def test_una_diagnostica_vista_resta_registrata_anche_a_verdetto_bloccato():
+    """Il gradino confirmatory non e' partito, ma lo sguardo c'e' stato: la
+    molteplicita' non si annulla perche' la scala si e' fermata prima."""
+    result = run_evaluation(
+        (),
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=4,
+        diagnostics_seen=("sottoperiodi",),
+    )
+
+    assert result["ledger"] == [
+        {"variant": "sottoperiodi", "role": "diagnostic", "notes": []}
+    ]
+
+
+def test_il_ruolo_di_un_gradino_lo_decide_il_contratto_non_il_chiamante():
+    """Un gradino etichettato come una diagnostica di contratto viene
+    registrato diagnostico.
+
+    Prima il bridge forzava `role="confirmatory"` su ogni gradino: con
+    un'etichetta di `_DIAGNOSTIC_ONLY` il ledger sollevava e portava giu' la
+    valutazione, invece di registrare la variante per quello che e'.
+    """
+    step = SimpleNamespace(label="D+3", notes=())
+    ledger = _ledger_entries(SimpleNamespace(steps=(step,)), diagnostics_seen=())
+
+    assert ledger == [{"variant": "D+3", "role": "diagnostic", "notes": []}]
+
+
+def test_un_verdetto_bloccato_non_ha_visto_nessuna_variante():
+    """Senza osservazioni non c'e' niente da registrare: un ledger con righe
+    inventate dichiarerebbe una molteplicita' che il trial non ha esplorato."""
+    result = run_evaluation(
+        (),
+        policy_id="P1",
+        mde_time_bps=25.0,
+        scheme=SCHEME,
+        n_cluster=4,
+    )
+
+    assert result["ledger"] == []

@@ -188,6 +188,7 @@ class _IntentState:
     s1_state: dict[str, Any] | None = None
     anti_pyramiding: bool | None = None
     disposition_details: dict[str, Any] | None = None
+    late_entry_context: dict[str, Any] | None = None
 
 
 class S4IntentLedger:
@@ -360,6 +361,24 @@ class S4IntentLedger:
         if state is not None:
             state.s1_state = s1_state
 
+    def attach_late_entry_context(
+        self, market_context_by_symbol: dict[str, dict[str, Any]]
+    ) -> None:
+        """Congela la misura #512 nello snapshot di ogni disposition osservata."""
+        from src.strategies.s4.late_entry_shadow import observe_late_entry
+
+        for state in self._states.values():
+            candidate = state.candidate
+            market = market_context_by_symbol.get(candidate.symbol, {})
+            state.late_entry_context = observe_late_entry(
+                signal_score=candidate.snapshot.get("score"),
+                decision_price=market.get("decision_price"),
+                session_open=market.get("session_open"),
+                session_high=market.get("session_high"),
+                session_low=market.get("session_low"),
+                price_source=market.get("price_source"),
+            )
+
     def update_component_for_disposition(
         self, component: str, **values: Any
     ) -> None:
@@ -377,6 +396,8 @@ class S4IntentLedger:
                 s1_state = {"status": "missing", "reason": "not_observed_at_disposition"}
                 missingness["s1_state"] = "not_observed_at_disposition"
             snapshot = dict(candidate.snapshot)
+            if state.late_entry_context is not None:
+                snapshot["late_entry"] = state.late_entry_context
             if state.disposition_details:
                 snapshot["disposition"] = state.disposition_details
             versions = {name: dict(value) for name, value in candidate.versions.items()}

@@ -8,6 +8,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import date, datetime, timedelta
+from uuid import UUID, uuid5
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -32,6 +33,50 @@ from src.strategies.s4.evaluator_bridge import (
 )
 from src.strategies.s4.p0_baseline import VersionedTradeCostModel
 
+# Il trial ledger (#299, criterio 5): ogni variante valutata su una finestra
+# resta registrata, cosi' alla decision analysis la molteplicita' esplorata e'
+# ricostruibile invece che affidata alla memoria di chi ha guardato.
+_TRIAL_LEDGER_NAMESPACE = UUID("7c3d1e94-8b2f-5a41-9d6c-2e5f8a01b4d7")
+
+
+def trial_ledger_id(variant: str, start: date, end: date) -> str:
+    """Fingerprint di (finestra, variante): rieseguire il report non duplica.
+
+    Il tracciamento e' per variante-vista-su-finestra, non per esecuzione: una
+    riesecuzione con gli stessi input non aggiunge molteplicita' esplorata.
+    """
+    return str(uuid5(_TRIAL_LEDGER_NAMESPACE, f"{variant}|{start}|{end}"))
+
+
+def _record_trial_ledger(
+    entries: Sequence[dict], start: date, end: date
+) -> None:
+    """Append-only: nessuna riga esistente viene aggiornata o cancellata."""
+    if not entries:
+        return
+    with psycopg2.connect(config.DATABASE_URL) as conn:
+        with conn.cursor() as cursor:
+            for entry in entries:
+                cursor.execute(
+                    """
+                    INSERT INTO s4_trial_ledger
+                        (ledger_id, window_start, window_end, variant,
+                         role, notes)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (ledger_id) DO NOTHING
+                    """,
+                    (
+                        trial_ledger_id(entry["variant"], start, end),
+                        start,
+                        end,
+                        entry["variant"],
+                        entry["role"],
+                        list(entry.get("notes") or []),
+                    ),
+                )
+        conn.commit()
+
+
 # Codici d'uscita. Il report stampa un JSON valido in tutti e tre i casi:
 # distinguerli e' l'unico modo perche' un chiamante sappia se la finestra e'
 # misurabile senza rileggere il payload — e perche' non confonda "non ancora
@@ -50,8 +95,9 @@ def _fetch_policy_rows(start: date, end: date) -> list[dict]:
             """
             SELECT
                 intent_id::text AS intent_id, policy_id, symbol, d0,
-                initial_notional, entry_cost_usd, cost_model_version,
-                status, reason_code, trigger_at, filled_at,
+                initial_notional, entry_cost_usd, exit_cost_usd,
+                cost_model_version,
+                status, reason_code, trigger_at, filled_at, fill_price,
                 virtual_exit_quantity, net_pnl, comparable, details
             FROM s4_exit_policy_current
             WHERE policy_id IN ('P0', 'P1')
@@ -84,6 +130,120 @@ def _fetch_intent_rows(until: datetime) -> list[dict]:
             (until, until),
         )
         return [dict(row) for row in cursor.fetchall()]
+
+
+def _fetch_entry_rows(intent_ids: Sequence[str]) -> list[dict]:
+    """Il fill d'ingresso condiviso: punto d'ancora del path di prezzo."""
+    if not intent_ids:
+        return []
+    with (
+        psycopg2.connect(config.DATABASE_URL) as conn,
+        conn.cursor(cursor_factory=RealDictCursor) as cursor,
+    ):
+        cursor.execute(
+            """
+            SELECT intent_id::text AS intent_id, filled_at, fill_price,
+                   s4_virtual_quantity
+            FROM s4_lifecycle_current
+            WHERE intent_id IN %s
+            """,
+            (tuple(intent_ids),),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def _fetch_quality_bars(
+    symbols: Sequence[str], start: datetime, end: datetime
+) -> dict[str, list[tuple[datetime, float, float]]]:
+    """Barre al minuto con high e close: il path su cui nasce la qualita'."""
+    from alpaca.data.enums import Adjustment
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+
+    if not symbols or end <= start:
+        return {}
+    if not config.ALPACA_API_KEY or not config.ALPACA_SECRET_KEY:
+        raise SystemExit("ALPACA_API_KEY / ALPACA_SECRET_KEY mancanti")
+    client = StockHistoricalDataClient(
+        config.ALPACA_API_KEY, config.ALPACA_SECRET_KEY
+    )
+    request = StockBarsRequest(
+        symbol_or_symbols=sorted(set(symbols)),
+        timeframe=TimeFrame.Minute,
+        start=start,
+        end=end + timedelta(minutes=1),
+        adjustment=Adjustment.ALL,
+    )
+    payload = client.get_stock_bars(request)
+    data = getattr(payload, "data", {}) if payload is not None else {}
+    return {
+        symbol: [
+            (bar.timestamp, float(bar.high), float(bar.close))
+            for bar in data.get(symbol, ())
+            if getattr(bar, "timestamp", None) is not None
+            and getattr(bar, "high", None) is not None
+            and getattr(bar, "close", None) is not None
+        ]
+        for symbol in sorted(set(symbols))
+    }
+
+
+def _cohort_exit_quality(cohort, rows: list[dict]) -> dict[str, object]:
+    """Deriva la qualita' dell'uscita per le coppie del verdetto, dal path.
+
+    Ogni metrica che manca resta `None` e resta fuori dalle medie: fill senza
+    barre, barre senza fill o intenti ancora aperti non sono un favore, sono
+    un ignoto — e il valutatore li dichiara tali.
+    """
+    from src.strategies.s4.exit_quality import (
+        PairedExitPath,
+        exit_quality_from_path,
+    )
+
+    exits = {(row["intent_id"], row["policy_id"]): row for row in rows}
+    entry_rows = _fetch_entry_rows([pair.intent_id for pair in cohort])
+    entries = {row["intent_id"]: row for row in entry_rows}
+
+    paths: list[PairedExitPath] = []
+    for pair in cohort:
+        entry = entries.get(pair.intent_id)
+        baseline = exits.get((pair.intent_id, pair.baseline_policy_id))
+        challenger = exits.get((pair.intent_id, pair.policy_id))
+        if entry is None:
+            continue
+        paths.append(
+            PairedExitPath(
+                intent_id=pair.intent_id,
+                entry_at=entry.get("filled_at"),
+                entry_price=entry.get("fill_price"),
+                quantity=float(entry.get("s4_virtual_quantity") or 0.0),
+                baseline_exit_at=(baseline or {}).get("filled_at"),
+                baseline_exit_price=(baseline or {}).get("fill_price"),
+                challenger_exit_at=(challenger or {}).get("filled_at"),
+                challenger_exit_price=(challenger or {}).get("fill_price"),
+            )
+        )
+
+    finestre = [
+        (path.entry_at, path.challenger_exit_at)
+        for path in paths
+        if path.entry_at is not None and path.challenger_exit_at is not None
+    ]
+    if not finestre:
+        return {}
+    simboli = {pair.intent_id: pair.symbol for pair in cohort}
+    bars = _fetch_quality_bars(
+        sorted(set(simboli.values())),
+        min(inizio for inizio, _ in finestre),
+        max(fine for _, fine in finestre),
+    )
+    return {
+        path.intent_id: exit_quality_from_path(
+            path, bars.get(simboli[path.intent_id], ())
+        )
+        for path in paths
+    }
 
 
 def _fetch_session_dates(start: date, end: date) -> list[date]:
@@ -180,6 +340,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--start", required=True, type=date.fromisoformat)
     parser.add_argument("--end", required=True, type=date.fromisoformat)
+    # Criterio 5: il ledger registra tutte le varianti viste, non i soli
+    # gradini confirmatory. Una diagnostica guardata fuori da questo script
+    # (D+1, D+3, term structure, sottoperiodi) resta molteplicita' esplorata:
+    # chi la guarda la dichiara qui, e il ledger append-only la conserva.
+    parser.add_argument(
+        "--diagnostica-vista",
+        action="append",
+        default=[],
+        dest="diagnostiche_viste",
+        metavar="NOME",
+        help=(
+            "variante diagnostica guardata in questa finestra "
+            "(ripetibile); entra nel trial ledger con role=diagnostic"
+        ),
+    )
     args = parser.parse_args(argv)
     if args.end < args.start:
         parser.error("--end precede --start")
@@ -283,7 +458,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         scheme=settings.scheme,
         n_cluster=settings.n_cluster,
         mde_counter_bps=settings.mde_counter_bps,
+        exit_quality=_cohort_exit_quality(cohort, rows),
+        diagnostics_seen=tuple(args.diagnostiche_viste),
     )
+    # Il criterio 5 chiede che il ledger sopravviva alla singola esecuzione:
+    # il report gira da cron ogni 6 sedute (check_s4_trial_milestones), quindi
+    # la persistenza e' qui, nel punto in cui la variante e' stata vista.
+    _record_trial_ledger(payload["evaluation"]["ledger"], args.start, args.end)
     print(json.dumps(payload, indent=2, sort_keys=True, default=_json_default))
 
     # Il criterio e' `comparable`, non `total`: riconciliare zero con zero

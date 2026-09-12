@@ -34,6 +34,7 @@ def _policy_rows() -> list[dict]:
             "reason_code": "P0_TARGET_ZERO_EXPIRED",
             "trigger_at": P0_EXIT,
             "filled_at": P0_EXIT,
+            "fill_price": 98.0,
             "net_pnl": 10.0,
         },
         {
@@ -42,12 +43,13 @@ def _policy_rows() -> list[dict]:
             "reason_code": "P1_TIME_DUE",
             "trigger_at": P1_EXIT,
             "filled_at": P1_EXIT,
+            "fill_price": 104.0,
             "net_pnl": 35.0,
         },
     ]
 
 
-def test_query_legge_i_costi_di_ingresso_condivisi(monkeypatch):
+def test_query_legge_costi_e_prezzi_di_uscita(monkeypatch):
     connection = MagicMock()
     cursor = MagicMock()
     connection.__enter__.return_value = connection
@@ -61,6 +63,7 @@ def test_query_legge_i_costi_di_ingresso_condivisi(monkeypatch):
 
     sql = cursor.execute.call_args.args[0]
     assert "entry_cost_usd" in sql
+    assert "fill_price" in sql
     assert "cost_model_version" in sql
 
 
@@ -91,6 +94,11 @@ def test_cli_stampa_report_e_dettaglio_sostituto(monkeypatch, capsys):
         lambda symbols, start, end: {
             "NVDA": [(P0_EXIT, 100.0), (P1_EXIT, 104.0)]
         },
+    )
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
     )
     monkeypatch.setattr(
         report_script,
@@ -169,6 +177,11 @@ def test_una_finestra_senza_coppie_comparabili_non_e_un_successo(monkeypatch, ca
     )
     monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
     monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -205,6 +218,11 @@ def test_il_report_pubblica_il_verdetto_del_valutatore(monkeypatch, capsys):
     )
     monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
     monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -235,6 +253,11 @@ def test_il_dettaglio_replacement_usa_la_stessa_coorte_d0_del_riepilogo(
     monkeypatch.setattr(report_script, "_fetch_policy_rows", lambda start, end: rows)
     monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
     monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -281,6 +304,11 @@ def test_una_finestra_di_sole_attese_dichiara_gli_slot_non_ancora_misurati(
     )
     monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
     monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -296,6 +324,57 @@ def test_una_finestra_di_sole_attese_dichiara_gli_slot_non_ancora_misurati(
         "SLOT_CHALLENGER_STILL_OPEN": 1
     }
     assert payload["slots"]["without_slot"] == payload["paired"]["total"]
+
+
+def test_una_diagnostica_dichiarata_finisce_nel_ledger_persistito(
+    monkeypatch, capsys
+):
+    """Criterio 5: chi guarda una diagnostica la dichiara, e il ledger la
+    conserva oltre la singola esecuzione.
+
+    Senza il passaggio dalla CLI al valutatore, il registro persistito
+    conterrebbe i soli gradini confirmatory e direbbe che il trial ha
+    esplorato meno di quanto ha guardato.
+    """
+    monkeypatch.setattr(
+        report_script, "_fetch_policy_rows", lambda start, end: _holding_rows()
+    )
+    monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
+    monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_session_dates",
+        lambda start, end: [date(2026, 8, d) for d in (25, 26, 27)],
+    )
+    persistite: list = []
+    monkeypatch.setattr(
+        report_script,
+        "_record_trial_ledger",
+        lambda entries, start, end: persistite.extend(entries),
+    )
+
+    report_script.main(
+        [
+            "--start",
+            "2026-08-25",
+            "--end",
+            "2026-08-27",
+            "--diagnostica-vista",
+            "D+1",
+            "--diagnostica-vista",
+            "term structure",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    viste = [
+        (riga["variant"], riga["role"])
+        for riga in payload["evaluation"]["ledger"]
+    ]
+    assert ("D+1", "diagnostic") in viste
+    assert ("term structure", "diagnostic") in viste
+    assert persistite == payload["evaluation"]["ledger"]
 
 
 def _overlapping_rows() -> list[dict]:
@@ -385,6 +464,11 @@ def test_lo_stesso_sostituto_non_viene_accreditato_a_due_slot(monkeypatch, capsy
             ]
         },
     )
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -426,6 +510,11 @@ def test_il_verdetto_legge_la_stessa_coorte_d0_del_riepilogo(monkeypatch, capsys
     monkeypatch.setattr(report_script, "_fetch_policy_rows", lambda start, end: rows)
     monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
     monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
     monkeypatch.setattr(
         report_script,
         "_fetch_session_dates",
@@ -465,3 +554,133 @@ def test_una_coppia_senza_d0_e_nominata_invece_di_sparire(monkeypatch, capsys):
     assert payload["undated"]["pairs"] == 1
     # Senza coppie misurabili la finestra non e' un successo.
     assert exit_code == 2
+
+
+def test_il_verdetto_deriva_la_qualita_dall_uscita_dal_path_di_prezzo(
+    monkeypatch, capsys
+):
+    """Le metriche §8.3 di qualita' nascono dai fill e dalle barre: il report
+    le porta al valutatore, che non le puo' inventare da solo."""
+    rows = _policy_rows()
+    entry_at = datetime(2026, 8, 25, 15, 50, tzinfo=UTC)
+    bars = [
+        (entry_at + timedelta(minutes=minute), 99.5 + minute * 0.05, 99.5 + minute * 0.05)
+        for minute in range(1, 11)
+    ] + [
+        (datetime(2026, 8, 26, 13, 31, tzinfo=UTC), 102.0, 102.0),
+        (datetime(2026, 8, 26, 13, 32, tzinfo=UTC), 110.0, 103.0),
+        (datetime(2026, 8, 26, 13, 33, tzinfo=UTC), 104.0, 104.0),
+    ]
+    monkeypatch.setattr(report_script, "_fetch_policy_rows", lambda start, end: rows)
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_entry_rows",
+        lambda intent_ids: [
+            {
+                "intent_id": "intent-1",
+                "filled_at": entry_at,
+                "fill_price": 99.0,
+                "s4_virtual_quantity": 10.0,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        report_script, "_fetch_quality_bars", lambda symbols, start, end: {"AMD": bars}
+    )
+    monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
+    monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_session_dates",
+        lambda start, end: [date(2026, 8, d) for d in (25, 26, 27)],
+    )
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
+
+    report_script.main(["--start", "2026-08-25", "--end", "2026-08-27"])
+
+    metrics = json.loads(capsys.readouterr().out)["evaluation"]["metrics"]
+    qualita = metrics["exit_quality"]
+    # P0 vende a 98, all'uscita P1 (104) starebbe meglio: uscita falsa,
+    # recuperata perche' sopra l'ingresso a 99
+    assert qualita["false_exit_rate"] == pytest.approx(1.0)
+    assert qualita["recovery_within_horizon_rate"] == pytest.approx(1.0)
+    assert metrics["economic"]["overnight_share"] == pytest.approx(20.0 / 25.0)
+    # Il MFE tocca 110, l'uscita P1 e' a 104: giveback in bps dell'ingresso
+    assert qualita["mean_giveback_from_mfe_bps"] == pytest.approx(
+        (110.0 - 104.0) / 99.0 * 10_000.0
+    )
+
+
+def test_il_report_registra_il_ledger_delle_varianti_viste(monkeypatch, capsys):
+    """Criterio 5 di #299: il ledger append-only deve registrare ogni variante
+    valutata sulla finestra, perche' alla decision analysis la molteplicita'
+    esplorata dev'essere ricostruibile."""
+    registrate = []
+    monkeypatch.setattr(report_script, "_fetch_policy_rows", lambda start, end: _policy_rows())
+    monkeypatch.setattr(report_script, "_fetch_intent_rows", lambda until: [])
+    monkeypatch.setattr(report_script, "_fetch_candidate_bars", lambda *a, **k: {})
+    monkeypatch.setattr(report_script, "_fetch_entry_rows", lambda intent_ids: [])
+    # La scrittura del ledger ha il suo test dedicato: qui non serve un DB
+    monkeypatch.setattr(
+        report_script, "_record_trial_ledger", lambda entries, start, end: None
+    )
+    monkeypatch.setattr(
+        report_script,
+        "_record_trial_ledger",
+        lambda entries, start, end: registrate.append((entries, start, end)),
+    )
+    monkeypatch.setattr(
+        report_script,
+        "_fetch_session_dates",
+        lambda start, end: [date(2026, 8, d) for d in (25, 26, 27)],
+    )
+
+    report_script.main(["--start", "2026-08-25", "--end", "2026-08-27"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert registrate == [
+        (
+            payload["evaluation"]["ledger"],
+            date(2026, 8, 25),
+            date(2026, 8, 27),
+        )
+    ]
+    assert registrate[0][0] == [
+        {
+            "variant": "delta1_P1_vs_P0",
+            "role": "confirmatory",
+            "notes": ["not_equivalence", "below_n_cluster"],
+        }
+    ]
+
+
+def test_la_scrittura_del_ledger_e_append_only_e_idempotente():
+    """Rigettare la stessa variante sulla stessa finestra non deve duplicare:
+    l'id e' un fingerprint di (finestra, variante, ruolo), e ON CONFLICT lo
+    fa decadere in silenzio. Il trigger append-only sta nella migrazione."""
+    connection = MagicMock()
+    cursor = MagicMock()
+    connection.__enter__.return_value = connection
+    connection.cursor.return_value.__enter__.return_value = cursor
+    original_connect = report_script.psycopg2.connect
+    report_script.psycopg2.connect = lambda *args, **kwargs: connection
+    try:
+        report_script._record_trial_ledger(
+            [{"variant": "delta1_P1_vs_P0", "role": "confirmatory"}],
+            date(2026, 8, 25),
+            date(2026, 8, 27),
+        )
+    finally:
+        report_script.psycopg2.connect = original_connect
+
+    sql = cursor.execute.call_args.args[0]
+    assert "ON CONFLICT (ledger_id) DO NOTHING" in sql
+    assert "s4_trial_ledger" in sql
+    # Il fingerprint e' stabile: la stessa finestra e variante danno lo stesso id
+    call_args = cursor.execute.call_args.args[1]
+    assert call_args[0] == str(
+        report_script.trial_ledger_id("delta1_P1_vs_P0", date(2026, 8, 25), date(2026, 8, 27))
+    )
