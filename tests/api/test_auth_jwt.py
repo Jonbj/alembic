@@ -1,5 +1,6 @@
 """Tests for JWT authentication — login endpoint and dual-auth middleware."""
 import os
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -95,6 +96,27 @@ def test_protected_endpoint_accepts_api_key(client):
 
 
 @pytest.mark.require_auth
+def test_protected_endpoint_accepts_api_key_as_bearer(client):
+    resp = client.get(
+        "/api/signals",
+        headers={"Authorization": f"Bearer {config.ADMIN_API_KEY}"},
+    )
+    assert resp.status_code != 403
+
+
+@pytest.mark.require_auth
+def test_valid_api_key_falls_back_after_invalid_bearer(client):
+    resp = client.get(
+        "/api/signals",
+        headers={
+            "Authorization": "Bearer this.is.not.a.valid.jwt",
+            "X-API-Key": config.ADMIN_API_KEY,
+        },
+    )
+    assert resp.status_code != 403
+
+
+@pytest.mark.require_auth
 def test_protected_endpoint_rejects_no_credentials(client):
     resp = client.get("/api/signals")
     assert resp.status_code == 403
@@ -123,3 +145,10 @@ def test_protected_endpoint_rejects_expired_looking_token(client):
         headers={"Authorization": f"Bearer {bad_token}"},
     )
     assert resp.status_code == 403
+
+
+def test_forensic_prompt_transports_static_key_in_x_api_key_header():
+    script = Path("scripts/daily_analysis.sh").read_text()
+
+    assert 'X-API-Key: __ALEMBIC_API_KEY__' in script
+    assert 'Authorization: Bearer __ALEMBIC_API_KEY__' not in script

@@ -31,14 +31,23 @@ async def require_api_key(
             from src.api.jwt_utils import decode_access_token
             return decode_access_token(token)
         except JWTError:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid or expired JWT token",
-            )
+            pass
+
+        # Older programmatic clients transported the static key as a Bearer
+        # credential. Keep that path working while the callers migrate to
+        # X-API-Key.
+        if config.ADMIN_API_KEY and secrets.compare_digest(token, config.ADMIN_API_KEY):
+            return token
 
     # --- Fall back to X-API-Key ---
     if x_api_key and config.ADMIN_API_KEY and secrets.compare_digest(x_api_key, config.ADMIN_API_KEY):
         return x_api_key
+
+    if authorization and authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid or expired JWT token",
+        )
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,

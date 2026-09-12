@@ -698,44 +698,35 @@ async def _shadow_query_candidates(
         log.debug("shadow path swallowed: %s", exc)
 
 
-async def process_news_item(
-    item: NewsItem,
-    clients: list[LLMClient],
-    aggregator: EnsembleAggregator,
-    finbert: FinBERTClient,
-    budget_tracker: LLMBudgetTracker,
-    redis_store: RedisStore,
-    pg_store: PostgreSQLStore,
-    weights: dict[str, float] | None = None,
-    shadow_tasks: list | None = None,
-) -> SentimentResult | None:
-    """Process a single news item: infer, update fallback counters, write to stores.
+class LiveSignalSink:
+    """Il sink di produzione: le scritture che il path live ha sempre fatto.
 
-    shadow_tasks controls how Stage-2 shadow scoring (_shadow_query_candidates) is
-    dispatched, and exists to decouple shadow latency from process_news_batch's
-    per-item semaphore (Critical finding, stage2-shadow-2026-07-12 review — see
-    _SHADOW_BOUNDED_WAIT_S for the full arithmetic this fixes):
+    Esiste perche' il consumo shadow off-session (#432, Opzione C) deve poter
+    chiamare la STESSA `process_news_item` del path live cambiando una sola cosa
+    — dove finisce il risultato — invece di reimplementarne la pipeline. Un flag
+    globale non andava bene: un flag lo si dimentica acceso o spento e si
+    pubblicano segnali per errore. Il sink e' un parametro esplicito, quindi il
+    perimetro di scrittura di un chiamante e' visibile nella sua chiamata ed e'
+    asseribile da un test (`tests/workers/test_sentiment_shadow.py`).
 
-      - shadow_tasks is a list (batch mode, set by process_news_batch): the shadow
-        coroutine is wrapped in asyncio.create_task() and appended to shadow_tasks
-        WITHOUT being awaited here. process_news_batch collects these across all
-        items and gives them one bounded wait after every live item has already
-        returned, so this function's own semaphore-held critical section never
-        includes shadow latency.
-      - shadow_tasks is None (the default): falls back to the original, safe
-        behavior of awaiting the shadow call inline (with the same swallow-all
-        try/except as before) before returning. This is for any direct/test caller
-        that invokes process_news_item outside process_news_batch's bounded-wait
-        contract — such a caller has no mechanism to later collect a detached Task,
-        so awaiting inline is the only correct behavior for it.
+    Il corpo di `persist` e' il blocco che stava dentro `process_news_item`,
+    invariato: contatori di fallback, `sentiment_signals`, Redis, `news_log`,
+    risposte per-modello e dispatch dello shadow Stage-2.
     """
-    inference_result = await run_inference(
-        item, clients, aggregator, finbert, budget_tracker, weights=weights
-    )
-    if inference_result is None:
-        return None
-    result, raw_outputs = inference_result
-    try:
+
+    def __init__(self, redis_store: RedisStore, pg_store: PostgreSQLStore) -> None:
+        self.redis_store = redis_store
+        self.pg_store = pg_store
+
+    async def persist(
+        self,
+        item: NewsItem,
+        result: SentimentResult,
+        raw_outputs: list[ModelOutput],
+        shadow_tasks: list | None = None,
+    ) -> None:
+        redis_store = self.redis_store
+        pg_store = self.pg_store
         ticker = result.symbol
         # #128/#111: the sizing circuit breaker fires only on a FULL ensemble
         # outage (FinBERT), not on a single-model read. Single-model reads are
@@ -803,6 +794,63 @@ async def process_news_item(
                 )
             except Exception as _sh_exc:
                 log.debug("shadow hook swallowed: %s", _sh_exc)
+
+
+async def process_news_item(
+    item: NewsItem,
+    clients: list[LLMClient],
+    aggregator: EnsembleAggregator,
+    finbert: FinBERTClient,
+    budget_tracker: LLMBudgetTracker,
+    redis_store: RedisStore,
+    pg_store: PostgreSQLStore,
+    weights: dict[str, float] | None = None,
+    shadow_tasks: list | None = None,
+    sink: "LiveSignalSink | None" = None,
+) -> SentimentResult | None:
+    """Process a single news item: infer, update fallback counters, write to stores.
+
+    shadow_tasks controls how Stage-2 shadow scoring (_shadow_query_candidates) is
+    dispatched, and exists to decouple shadow latency from process_news_batch's
+    per-item semaphore (Critical finding, stage2-shadow-2026-07-12 review — see
+    _SHADOW_BOUNDED_WAIT_S for the full arithmetic this fixes):
+
+      - shadow_tasks is a list (batch mode, set by process_news_batch): the shadow
+        coroutine is wrapped in asyncio.create_task() and appended to shadow_tasks
+        WITHOUT being awaited here. process_news_batch collects these across all
+        items and gives them one bounded wait after every live item has already
+        returned, so this function's own semaphore-held critical section never
+        includes shadow latency.
+      - shadow_tasks is None (the default): falls back to the original, safe
+        behavior of awaiting the shadow call inline (with the same swallow-all
+        try/except as before) before returning. This is for any direct/test caller
+        that invokes process_news_item outside process_news_batch's bounded-wait
+        contract — such a caller has no mechanism to later collect a detached Task,
+        so awaiting inline is the only correct behavior for it.
+
+    sink decides WHERE the result is written and is the only lever a caller has
+    over that. Default (None) = LiveSignalSink(redis_store, pg_store), i.e. the
+    production writes. The off-session shadow worker passes its own sink, whose
+    perimeter is a single table — see src/workers/sentiment_shadow.py. When a sink
+    is passed, this function touches neither redis_store nor pg_store directly:
+    every store write in this path goes through the sink, so "which stores does
+    this caller write to" is answerable by reading its sink and nothing else.
+    """
+    inference_result = await run_inference(
+        item, clients, aggregator, finbert, budget_tracker, weights=weights
+    )
+    if inference_result is None:
+        return None
+    result, raw_outputs = inference_result
+    if sink is None:
+        sink = LiveSignalSink(redis_store, pg_store)
+    try:
+        await sink.persist(
+            item=item,
+            result=result,
+            raw_outputs=raw_outputs,
+            shadow_tasks=shadow_tasks,
+        )
     except Exception as e:
         log.error(f"Failed to write signal for {result.symbol}: {e}")
     return result
@@ -817,6 +865,7 @@ async def process_news_batch(
     redis_store: RedisStore,
     pg_store: PostgreSQLStore,
     weights: dict[str, float] | None = None,
+    sink: LiveSignalSink | None = None,
 ) -> list[SentimentResult]:
     """
     Process a batch of news items through the sentiment pipeline.
@@ -830,6 +879,8 @@ async def process_news_batch(
         redis_store: Redis store for signal caching
         pg_store: PostgreSQL store for audit
         weights: Per-model weights from Redis (LOO ICIR rebalancing). None = confidence-only.
+        sink: Explicit write destination, forwarded verbatim to process_news_item.
+            None = the production stores. See LiveSignalSink.
 
     Returns:
         List of SentimentResult objects
@@ -857,6 +908,7 @@ async def process_news_batch(
                 pg_store=pg_store,
                 weights=weights,
                 shadow_tasks=shadow_tasks,
+                sink=sink,
             )
 
     gathered = await asyncio.gather(*[_bounded(item) for item in news_items])
@@ -1067,21 +1119,25 @@ def _maybe_notify_sustained_degradation(
         log.warning("Failed to send sustained-degradation Telegram alert: %s", _alert_exc)
 
 
-@app.task(name="src.workers.sentiment.run_sentiment_worker", acks_late=True)
-def run_sentiment_worker() -> dict:
-    """
-    Celery entry-point for SentimentWorker.
+def build_inference_context(
+    redis_store: RedisStore,
+    pg_conn,
+) -> tuple[list[LLMClient], EnsembleAggregator, FinBERTClient, LLMBudgetTracker, dict[str, float] | None]:
+    """Costruisce l'ensemble di inferenza cosi' com'e' in produzione.
 
-    Pulls news items from Redis queue, runs sentiment pipeline,
-    and writes results to Redis cache and PostgreSQL audit.
+    Estratta da `run_sentiment_worker` senza modifiche di comportamento perche' il
+    consumo shadow off-session (#432, Opzione C) misuri la STESSA coppia di modelli,
+    gli stessi timeout e gli stessi pesi LOO-ICIR del path live. Se il turno
+    notturno ricostruisse l'ensemble per conto suo, il primo swap della coppia
+    (registro in `src/llm/model_registry.py`) o il primo ribilanciamento dei pesi
+    lo farebbe divergere in silenzio, e il controfattuale misurerebbe un sistema
+    che non esiste — la stessa classe di difetto di #169/#467.
 
-    Returns:
-        Dict with processing statistics
+    Restituisce (clients, aggregator, finbert, budget_tracker, weights). Il
+    chiamante possiede `budget_tracker` e deve chiuderlo.
     """
     import json
-
-    import psycopg2
-    from redis import Redis
+    import os
 
     from src.llm.model_registry import (
         build_sentiment_clients,
@@ -1089,43 +1145,6 @@ def run_sentiment_worker() -> dict:
         normalize_model_selection,
         normalize_weights_for_active_models,
     )
-
-    # Initialize connections
-    redis_client = Redis.from_url(config.REDIS_URL)
-    pg_conn = psycopg2.connect(config.DATABASE_URL)
-    # #427: wire the inert breaker to the Telegram callback. Historical state:
-    # _on_fallback_threshold_reached() at src/store/redis_store.py received no
-    # `on_fallback_alert=` and the 2026-08-26 forensic found the breaker inert
-    # on all three branches. The callback is constructed lazily because
-    # asyncio.run() is not yet in scope at this synchronous Celery entry point;
-    # we capture the notifier and dispatch the async send via a fresh loop on
-    # each call so a Telegram outage cannot poison the breaker.
-    _telegram_notifier = None
-
-    def _on_fallback_alert_sync(count: int) -> None:
-        nonlocal _telegram_notifier
-        try:
-            from src.notifications.telegram import TelegramNotifier
-            if _telegram_notifier is None:
-                _telegram_notifier = TelegramNotifier()
-            asyncio.run(_telegram_notifier.send_fallback_alert(count))
-        except Exception as _alert_exc:
-            log.warning(
-                "Fallback breaker alert callback failed for count=%s: %s",
-                count, _alert_exc,
-            )
-
-    redis_store = RedisStore(
-        redis_client,
-        on_fallback_alert=_on_fallback_alert_sync,
-    )
-    pg_store = PostgreSQLStore(conn=pg_conn)
-
-    if not is_market_open():
-        log.info("Market closed — skipping sentiment worker")
-        redis_client.close()
-        pg_conn.close()
-        return {"skipped": True, "reason": "market_closed"}
 
     # Initialize components — model selection read from Redis (set by UI toggle),
     # falling back to SENTIMENT_LLM_MODELS env var, then "all".
@@ -1191,6 +1210,71 @@ def run_sentiment_worker() -> dict:
                     "Ignoring suggested weights for inactive sentiment models: %s",
                     dropped_weights,
                 )
+
+
+    return clients, aggregator, finbert, budget_tracker, model_weights
+
+
+@app.task(name="src.workers.sentiment.run_sentiment_worker", acks_late=True)
+def run_sentiment_worker() -> dict:
+    """
+    Celery entry-point for SentimentWorker.
+
+    Pulls news items from Redis queue, runs sentiment pipeline,
+    and writes results to Redis cache and PostgreSQL audit.
+
+    Returns:
+        Dict with processing statistics
+    """
+    import json
+
+    import psycopg2
+    from redis import Redis
+
+    # Initialize connections
+    redis_client = Redis.from_url(config.REDIS_URL)
+    pg_conn = psycopg2.connect(config.DATABASE_URL)
+    # #427: wire the inert breaker to the Telegram callback. Historical state:
+    # _on_fallback_threshold_reached() at src/store/redis_store.py received no
+    # `on_fallback_alert=` and the 2026-08-26 forensic found the breaker inert
+    # on all three branches. The callback is constructed lazily because
+    # asyncio.run() is not yet in scope at this synchronous Celery entry point;
+    # we capture the notifier and dispatch the async send via a fresh loop on
+    # each call so a Telegram outage cannot poison the breaker.
+    _telegram_notifier = None
+
+    def _on_fallback_alert_sync(count: int) -> None:
+        nonlocal _telegram_notifier
+        try:
+            from src.notifications.telegram import TelegramNotifier
+            if _telegram_notifier is None:
+                _telegram_notifier = TelegramNotifier()
+            asyncio.run(_telegram_notifier.send_fallback_alert(count))
+        except Exception as _alert_exc:
+            log.warning(
+                "Fallback breaker alert callback failed for count=%s: %s",
+                count, _alert_exc,
+            )
+
+    redis_store = RedisStore(
+        redis_client,
+        on_fallback_alert=_on_fallback_alert_sync,
+    )
+    pg_store = PostgreSQLStore(conn=pg_conn)
+
+    if not is_market_open():
+        log.info("Market closed — skipping sentiment worker")
+        redis_client.close()
+        pg_conn.close()
+        return {"skipped": True, "reason": "market_closed"}
+
+    (
+        clients,
+        aggregator,
+        finbert,
+        budget_tracker,
+        model_weights,
+    ) = build_inference_context(redis_store, pg_conn)
 
     try:
         # Semaphore auto-recovery: reset leaked slots before any inference starts.
