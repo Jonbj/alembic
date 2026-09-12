@@ -1858,7 +1858,7 @@
       "costo_cumulato_usd": 0,
       "occorrenze_non_stimate": 6,
       "stato": "aperto",
-      "issue": null
+      "issue": "#444"
     },
     {
       "id": "F-017",
@@ -4272,7 +4272,7 @@
       "costo_cumulato_usd": 0,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
-      "issue": null
+      "issue": "#551"
     },
     {
       "id": "F-073",
@@ -4291,7 +4291,7 @@
       "costo_cumulato_usd": 0,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
-      "issue": null
+      "issue": "#550"
     }
   ],
   "_nota_migrazione": "2026-08-04: le occorrenze scritte prima di questa data avevano costo_usd 0.0 perche' il prompt non chiedeva di stimarlo. Convertite a null: zero significa 'e' costato zero', null significa 'non stimato'. Deroga al solo-append registrata nella carta di osservazione."
