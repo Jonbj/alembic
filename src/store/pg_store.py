@@ -3901,7 +3901,8 @@ class PostgreSQLStore:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT timestamp, strategies_run, orders_count, constraints_fired, final_orders "
+                    "SELECT timestamp, strategies_run, orders_count, constraints_fired, final_orders, "
+                    "rebalanced_strategies, zero_weight_symbols "
                     "FROM portfolio_cycles ORDER BY timestamp DESC LIMIT 1"
                 )
                 row = cur.fetchone()
@@ -3913,6 +3914,8 @@ class PostgreSQLStore:
                     "orders_count": row[2] or 0,
                     "constraints_fired": row[3] if isinstance(row[3], list) else [],
                     "final_orders": row[4] if isinstance(row[4], list) else [],
+                    "rebalanced_strategies": row[5] if isinstance(row[5], list) else [],
+                    "zero_weight_symbols": row[6] if isinstance(row[6], dict) else {},
                 }
         except Exception:
             conn.rollback()
@@ -3924,7 +3927,8 @@ class PostgreSQLStore:
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "SELECT timestamp, strategies_run, orders_count, constraints_fired, final_orders "
+                    "SELECT timestamp, strategies_run, orders_count, constraints_fired, final_orders, "
+                    "rebalanced_strategies, zero_weight_symbols "
                     "FROM portfolio_cycles ORDER BY timestamp DESC LIMIT %s",
                     (limit,)
                 )
@@ -3937,6 +3941,8 @@ class PostgreSQLStore:
                         "orders_count": row[2] or 0,
                         "constraints_fired": row[3] if isinstance(row[3], list) else [],
                         "final_orders": row[4] if isinstance(row[4], list) else [],
+                        "rebalanced_strategies": row[5] if isinstance(row[5], list) else [],
+                        "zero_weight_symbols": row[6] if isinstance(row[6], dict) else {},
                     })
                 return result
         except Exception:
