@@ -615,7 +615,7 @@ Nessuna anomalia qui riportata propone una taratura: il periodo di sola osservaz
 * Evidenza:
   * file/log/tabella: API locale `http://localhost:8001/api`
   * timestamp: 2026-09-03, durante questa analisi
-  * snippet/query: `curl -s -H "Authorization: Bearer eJvMeuHhJS27FPugKIu4qKGgV7roIdLfcv7h20MwuQg" "$BASE/orders?limit=200"` → `{"detail":"Invalid or expired JWT token"}`. Identico su `/decisions`, `/trades`, `/signals`, `/positions`
+  * snippet/query: `curl -s -H "Authorization: Bearer __ALEMBIC_API_KEY__" "$BASE/orders?limit=200"` → `{"detail":"Invalid or expired JWT token"}`. Identico su `/decisions`, `/trades`, `/signals`, `/positions`
 * Descrizione: 9ª occorrenza. I cinque endpoint prescritti dal protocollo forense sono inutilizzabili. L'analisi ha dovuto passare interamente per query SQL dirette e per l'SDK Alpaca.
 * Impatto: il protocollo forense prescrive una via d'accesso che non funziona da nove sedute. Chi lo eseguisse alla lettera, senza fallback SQL, produrrebbe un report vuoto e lo dichiarerebbe "non verificabile".
 * Severità: Medium

@@ -43,7 +43,7 @@ Il progetto ha un'architettura ragionevole che rispetta il vincolo fondamentale 
 - `docs/ARCHITECTURE.md:618` dice ancora "P2-05 Pending Safety Items (NOT_IMPLEMENTED — blocks Kimi P2 Acceptance Audit)".
 - `src/api/routes/strategies.py` hardcoded S1 con `status: "validated"`, `oos_sharpe: 0.5128`, `annual_return: 0.07`, `max_drawdown: 0.15`. `config/strategies.yaml:14-25` invece dice `mode: supervised_paper`, `promotion_blocked: true` e la stessa API non aggiorna questi valori.
 - `docs/P2_STATUS_2026-06-21.md:55` dice S2 = `paper`; `config/strategies.yaml:26-30` e migration `025_strategy_lifecycle.sql:30` lo segnano `disabled`/`research` con 0% allocation.
-- `AGENT.md:38` mostra una X-API-Key esplicita (`eJvMeuHhJS27FPugKIu4qKGgV7roIdLfcv7h20MwuQg`) che potrebbe essere reale.
+- `AGENT.md:38` mostra una X-API-Key esplicita (`__ALEMBIC_API_KEY__`) che potrebbe essere reale.
 - `CONTRIBUTING.md:43` dice "All 1700+ tests must pass" — il conteggio attuale è 2386.
 
 **Impatto concreto:** Un operatore che legge README o chiama `/api/strategies` può credere che S1 sia validato e pronto per paper/live, mentre in realtà è demoted, promotion-blocked e supervisionato. In un sistema di trading questo è un rischio di autorizzazione grave.
@@ -790,7 +790,7 @@ Se il sistema era in `backtest`, `dry_run` o `semi_auto` prima dell'attivazione 
 | 2 | `docs/ARCHITECTURE.md:618`: P2-05 NOT_IMPLEMENTED, blocks audit | Codice implementato e test passano | Incoerente |
 | 3 | `src/api/routes/strategies.py:59`: S1 `validated`, Sharpe 0.51, return 7%, DD 15% | `config/strategies.yaml:17`: S1 `supervised_paper`, `promotion_blocked: true` | Incoerente |
 | 4 | `docs/P2_STATUS_2026-06-21.md:56`: S2 `paper` | `config/strategies.yaml:29`: S2 `research`, `enabled: false` | Incoerente |
-| 5 | `AGENT.md:38`: API key `eJvMeuHhJS27FPugKIu4qKGgV7roIdLfcv7h20MwuQg` | `.env.example:6`: usa una key diversa da 32 char | Potenziale leak/stale doc |
+| 5 | `AGENT.md:38`: API key `__ALEMBIC_API_KEY__` | `.env.example:6`: usa una key diversa da 32 char | Potenziale leak/stale doc |
 | 6 | `AGENT.md:26`: modalità `full_auto`/`semi_auto` descritte come live | `src/strategies/promotion.py:27`: `GLOBAL_LIVE_PROMOTION_ENABLED=False`; live non autorizzato | Incoerente con autorizzazione |
 | 7 | `CONTRIBUTING.md:43`: "1700+ tests" | 2386 tests passano | Stale |
 | 8 | `src/config.py:131`: "never derive mode from ALPACA_BASE_URL" | `src/api/deps.py:51`: `paper=config.ALPACA_BASE_URL.startswith("https://paper")` | Contraddizione diretta |

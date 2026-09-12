@@ -156,7 +156,7 @@ Questo rende `T-TEST-GREEN` un **P0 bloccante** per qualsiasi altro fix o deploy
   ```bash
   ANALYSIS_OUTPUT=$(claude --dangerously-skip-permissions -p "$(cat <<'PROMPT'
   ...
-  API_KEY="eJvMeuHhJS27FPugKIu4qKGgV7roIdLfcv7h20MwuQg"
+  API_KEY="__ALEMBIC_API_KEY__"
   ```
 - **Analisi tecnica:** Credenziale hardcoded in file git-tracked e schedulato su cron. Esposizione totale del repo.
 - **Impatto:** capitale reale / operational reliability.
