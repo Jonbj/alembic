@@ -1052,6 +1052,42 @@ class TestFinbertFallbackEventPersistence:
         assert result.model_id == "finbert"
         mock_pg.write_signal.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_redis_failure_after_the_signal_still_leaves_the_evidence(self):
+        """Il difetto che #544 deve eliminare e' proprio questo: fallback
+        avvenuto, segnale gia' in PostgreSQL, input non ricostruibile.
+
+        Se `write_sentiment` esplode (rete verso Redis) l'eccezione salta al
+        gestore esterno: con la persistenza dell'evento piu' in basso nel
+        blocco, la riga di `finbert_fallback_events` non veniva mai scritta e
+        restava un segnale fallback senza la sua evidenza runtime.
+        """
+        mock_budget = AsyncMock(spec=LLMBudgetTracker)
+        mock_budget.check_budget = AsyncMock(
+            side_effect=LLMBudgetExhaustedError("exhausted")
+        )
+        mock_finbert = MagicMock(spec=FinBERTClient)
+        mock_finbert.analyze.return_value = MagicMock(polarity=0.3, confidence=0.7)
+        mock_redis = MagicMock(spec=RedisStore)
+        mock_redis.increment_fallback_counter.return_value = 1
+        mock_redis.write_sentiment.side_effect = RuntimeError("redis unreachable")
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        mock_pg.write_signal.return_value = 7007
+
+        await process_news_item(
+            item=make_news_item("AAPL", 5),
+            clients=[],
+            aggregator=MagicMock(spec=EnsembleAggregator),
+            finbert=mock_finbert,
+            budget_tracker=mock_budget,
+            redis_store=mock_redis,
+            pg_store=mock_pg,
+        )
+
+        mock_pg.write_signal.assert_called_once()
+        mock_pg.log_finbert_fallback_event.assert_called_once()
+        assert mock_pg.log_finbert_fallback_event.call_args.kwargs["signal_id"] == 7007
+
     def test_log_finbert_fallback_event_insert_params(self):
         """The pg_store method must insert the full evidence tuple: signal_id,
         symbol, reason, title/body chars, the runtime string, polarity,

@@ -778,6 +778,30 @@ async def process_news_item(
             redis_store.reset_fallback_counter()
             pg_store.record_fallback_reset(_FALLBACK_COUNTER_NAME)
         signal_id = pg_store.write_signal(result)
+        # #544: persist the runtime evidence of a full FinBERT fallback (the
+        # exact string classified, with its title/body split and outcome) to
+        # finbert_fallback_events. Docker logs die with the container on every
+        # deploy rebuild, and this is the only record that answers the #453
+        # runtime question ("did the fallback actually receive title+body?")
+        # without the containers having stayed up. Measurement, not money path:
+        # a failure here must never take the just-written signal down with it.
+        #
+        # Sta subito dopo `write_signal` e non in fondo al blocco per una
+        # ragione precisa: ogni scrittura che segue (Redis, news_log, le
+        # risposte LLM) puo' sollevare e saltare al gestore esterno. Con
+        # l'evento in coda, un errore di rete verso Redis lasciava un segnale
+        # fallback senza la sua evidenza runtime — esattamente l'ambiguita'
+        # che #544 esiste per eliminare. Prima di `write_signal` non puo'
+        # stare: la riga e' chiavata sul signal_id che quella scrittura crea.
+        if result.finbert_input is not None:
+            try:
+                pg_store.log_finbert_fallback_event(
+                    signal_id=signal_id, result=result
+                )
+            except Exception as _fb_ev_exc:
+                log.warning(
+                    "log_finbert_fallback_event failed: %s", _fb_ev_exc
+                )
         redis_store.write_sentiment(result, signal_id=signal_id)
         try:
             redis_store.append_signal_history(result.symbol, result.score)
@@ -802,22 +826,6 @@ async def process_news_item(
                 outputs=raw_outputs,
                 force_ineligible=result.fallback_used,
             )
-        # #544: persist the runtime evidence of a full FinBERT fallback (the
-        # exact string classified, with its title/body split and outcome) to
-        # finbert_fallback_events. Docker logs die with the container on every
-        # deploy rebuild, and this is the only record that answers the #453
-        # runtime question ("did the fallback actually receive title+body?")
-        # without the containers having stayed up. Measurement, not money path:
-        # a failure here must never take the just-written signal down with it.
-        if result.finbert_input is not None:
-            try:
-                pg_store.log_finbert_fallback_event(
-                    signal_id=signal_id, result=result
-                )
-            except Exception as _fb_ev_exc:
-                log.warning(
-                    "log_finbert_fallback_event failed: %s", _fb_ev_exc
-                )
         # Stage-2 shadow scoring: strictly AFTER every live write above (either mode
         # below). See this function's docstring for why there are two modes.
         if shadow_tasks is not None:
