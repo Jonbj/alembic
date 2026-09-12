@@ -43,6 +43,7 @@ app = Celery(
         "src.workers.mobile_monitor_task",
         "src.workers.held_news_loss_alert",
         "src.workers.stale_drop_alert",
+        "src.workers.news_queue_census",
     ],
 )
 
@@ -238,6 +239,18 @@ app.conf.beat_schedule = {
     "stale-drop-alert": {
         "task": "src.workers.stale_drop_alert.run_stale_drop_alert",
         "schedule": crontab(hour=22, minute=55, day_of_week="1-5"),
+    },
+    # Censimento della coda news (opzione A di
+    # docs/research/news_ingest_consumo_disaccoppiamento_2026-09-10.md, serve #544)
+    # ogni 5 minuti, SENZA finestra oraria e
+    # senza is_market_open() — la notte è esattamente la parte interessante, perché
+    # è quando il WebSocket accumula una coorte che nessuno consuma. Sola lettura
+    # (LLEN + LRANGE campionato, mai LMOVE): non consuma la coda e non cambia il
+    # destino di alcuna news. Coda generica 'celery': è un task leggero e non deve
+    # contendere worker-inference (concurrency=1) con il path live.
+    "news-queue-census": {
+        "task": "src.workers.news_queue_census.run_news_queue_census",
+        "schedule": crontab(minute="*/5"),
     },
     # Nightly retention sweep at 03:30 UTC
     "run-retention-sweep": {
