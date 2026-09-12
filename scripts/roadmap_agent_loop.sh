@@ -23,6 +23,9 @@
 #
 # Log      : logs/roadmap_agent_YYYY-MM-DD.log
 # Stato    : logs/roadmap_agent_state.tsv   (issue <TAB> tentativi FALLITI)
+# No-op    : logs/roadmap_agent_noop_state.tsv
+#            (issue <TAB> no-op consecutivi <TAB> impronta <TAB> updatedAt
+#             <TAB> ultimo no-op)
 # Risultati: logs/roadmap_results.jsonl (una riga JSON per evento significativo,
 #            append-only — vedi log_evento piu' sotto)
 #
@@ -33,6 +36,8 @@
 #   result: "noop"             no-op dichiarato: la sessione ha commentato la
 #                              issue spiegando perche' non e' lavorabile e non
 #                              ha aperto PR. Esito legittimo, tentativo stornato
+#   result: "noop_suspended"   secondo no-op consecutivo: tentativo stornato e
+#                              issue sospesa localmente fino a una modifica
 #   result: "failed"           giro a vuoto: nessuna PR e nessun no-op dichiarato
 #                              (crash, timeout, sessione persa). Tentativo addebitato
 #   result: "all_rate_limited" nessun motore disponibile, giro rimandato
@@ -49,12 +54,14 @@ export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 QUEUE_FILE="${ROADMAP_QUEUE_FILE:-$SCRIPT_DIR/roadmap_queue.txt}"
-LOG_DIR="$PROJECT_DIR/logs"
+LOG_DIR="${ROADMAP_LOG_DIR:-$PROJECT_DIR/logs}"
 STATE_FILE="$LOG_DIR/roadmap_agent_state.tsv"
+NOOP_STATE_FILE="${ROADMAP_NOOP_STATE_FILE:-$LOG_DIR/roadmap_agent_noop_state.tsv}"
 LOCK_FILE="$LOG_DIR/.roadmap_agent.lock"
 LOG_FILE="$LOG_DIR/roadmap_agent_$(date +%Y-%m-%d).log"
 
 MAX_TENTATIVI=2          # dopo due fallimenti l'issue esce dalla rotazione
+MAX_NOOP_CONSECUTIVI=2   # dopo due no-op uguali serve un retriage, non un altro agente
 TIMEOUT_SESSIONE=5400    # 90 minuti: oltre, la sessione e' bloccata, non lenta
 
 # --- chi lavora le issue --------------------------------------------------------
@@ -205,6 +212,8 @@ fi
 
 mkdir -p "$LOG_DIR"
 touch "$STATE_FILE"
+mkdir -p "$(dirname "$NOOP_STATE_FILE")"
+touch "$NOOP_STATE_FILE"
 
 log() { echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') $*" | tee -a "$LOG_FILE"; }
 
@@ -306,6 +315,83 @@ storna_tentativo() {
     local n="$1"
     grep -v -P "^${n}\t" "$STATE_FILE" > "${STATE_FILE}.tmp" 2>/dev/null || true
     mv "${STATE_FILE}.tmp" "$STATE_FILE"
+}
+
+# Il commento lasciato dall'agente aggiorna `updatedAt`: per questo la versione
+# viene letta e salvata solo DOPO aver riconosciuto il no-op. L'impronta separata
+# rende espliciti corpo, label e commit che referenziano la issue; un'attivita'
+# successiva sul tracker viene rilevata dalla versione salvata.
+impronta_issue() {
+    local n="$1" contenuto riferimenti
+    contenuto=$(gh issue view "$n" --json body,labels \
+        -q '[.body, (.labels | map(.name) | sort)] | @json' 2>/dev/null) || return 1
+    riferimenti=$(gh api --paginate "repos/{owner}/{repo}/issues/${n}/timeline?per_page=100" \
+        --jq '.[] | select(.event == "referenced" and .commit_id != null) | .commit_id' \
+        2>/dev/null | sort -u) || return 1
+    printf '%s\n--commit--\n%s\n' "$contenuto" "$riferimenti" | sha256sum | awk '{print $1}'
+}
+
+versione_issue() {
+    gh issue view "$1" --json updatedAt -q .updatedAt 2>/dev/null
+}
+
+azzera_noop() {
+    local n="$1"
+    grep -v -P "^${n}\t" "$NOOP_STATE_FILE" > "${NOOP_STATE_FILE}.tmp" 2>/dev/null || true
+    mv "${NOOP_STATE_FILE}.tmp" "$NOOP_STATE_FILE"
+}
+
+registra_noop() {
+    local n="$1" impronta="$2" versione="$3" record prec=0 impronta_precedente=""
+    record=$(awk -F'\t' -v issue="$n" '$1==issue {print; exit}' "$NOOP_STATE_FILE")
+    if [[ -n "$record" ]]; then
+        IFS=$'\t' read -r _issue prec impronta_precedente _versione _ultimo <<< "$record"
+        [[ "$impronta_precedente" == "$impronta" ]] || prec=0
+    fi
+    grep -v -P "^${n}\t" "$NOOP_STATE_FILE" > "${NOOP_STATE_FILE}.tmp" 2>/dev/null || true
+    printf '%s\t%s\t%s\t%s\t%s\n' \
+        "$n" "$((prec + 1))" "$impronta" "$versione" \
+        "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "${NOOP_STATE_FILE}.tmp"
+    mv "${NOOP_STATE_FILE}.tmp" "$NOOP_STATE_FILE"
+    echo "$((prec + 1))"
+}
+
+# Successo = la issue e' sospesa. Se l'impronta e' cambiata, elimina lo stato:
+# un vero sblocco deve bastare a rimetterla in coda senza intervento manuale.
+noop_fuori_rotazione() {
+    local n="$1" record conteggio impronta_salvata versione_salvata
+    local impronta_attuale versione_attuale
+    record=$(awk -F'\t' -v issue="$n" '$1==issue {print; exit}' "$NOOP_STATE_FILE")
+    [[ -n "$record" ]] || return 1
+    IFS=$'\t' read -r _issue conteggio impronta_salvata versione_salvata _ultimo <<< "$record"
+    [[ "$conteggio" =~ ^[0-9]+$ ]] || { azzera_noop "$n"; return 1; }
+
+    # Un errore transitorio di GitHub non e' una prova di sblocco: conserva la
+    # sospensione gia' attiva e riprova l'impronta al prossimo giro. Dopo un
+    # solo no-op, invece, la issue resta normalmente selezionabile.
+    if ! impronta_attuale=$(impronta_issue "$n"); then
+        if (( conteggio >= MAX_NOOP_CONSECUTIVI )); then
+            log "  #$n — impronta non leggibile: conservo la sospensione per no-op."
+            return 0
+        fi
+        return 1
+    fi
+    if ! versione_attuale=$(versione_issue "$n"); then
+        if (( conteggio >= MAX_NOOP_CONSECUTIVI )); then
+            log "  #$n — updatedAt non leggibile: conservo la sospensione per no-op."
+            return 0
+        fi
+        return 1
+    fi
+    if [[ "$impronta_attuale" != "$impronta_salvata" \
+        || "$versione_attuale" != "$versione_salvata" ]]; then
+        azzera_noop "$n"
+        log "  #$n — issue cambiata dopo l'ultimo no-op: rientra in rotazione."
+        return 1
+    fi
+    (( conteggio >= MAX_NOOP_CONSECUTIVI )) || return 1
+    log "  #$n — $conteggio no-op consecutivi, fuori rotazione: serve retriage."
+    return 0
 }
 
 # Un no-op DICHIARATO e' un esito, non un fallimento: la sessione ha letto il
@@ -784,6 +870,9 @@ while read -r numero _resto; do
     if [[ "$stato_labels" != OPEN* ]]; then
         log "  #$numero — gia' chiusa, salto."; continue
     fi
+    if noop_fuori_rotazione "$numero"; then
+        continue
+    fi
     if [[ "$stato_labels" != *freeze-ok* ]]; then
         # In coda ma senza permesso: e' il secondo lucchetto che tiene.
         log "  #$numero — in coda ma SENZA label freeze-ok: salto e segnalo."; continue
@@ -1004,6 +1093,7 @@ if [[ -n "$PR_URL" ]]; then
     log "#$ISSUE — PR aperta da $MOTORE: $PR_URL"
     # Tentativo riuscito: lo tolgo dal conteggio dei fallimenti.
     storna_tentativo "$ISSUE"
+    azzera_noop "$ISSUE"
     log_evento "work" "result=pr_opened" "engine=$MOTORE" "issue=#$ISSUE" "pr=#$PR_NUM" "duration_s=#$_DURATA"
     rivedi_e_mergia "$PR_NUM" "$ISSUE" "$BRANCH_PR" "$WT" "$MOTORE" "$TITOLO" "$PR_URL"
 else
@@ -1019,16 +1109,33 @@ else
 
     CODA=$(echo "$OUTPUT" | tail -c 1200)
     if (( NOOP )); then
-        log "#$ISSUE — no-op DICHIARATO da $MOTORE (issue commentata, nessuna PR): tentativo NON addebitato."
         storna_tentativo "$ISSUE"
-        tg_send "🟡 <b>Roadmap — no-op dichiarato</b>
+        _impronta=$(impronta_issue "$ISSUE" 2>/dev/null || echo "non-verificabile")
+        _versione=$(versione_issue "$ISSUE" 2>/dev/null || echo "non-verificabile")
+        _n_noop=$(registra_noop "$ISSUE" "$_impronta" "$_versione")
+        if (( _n_noop >= MAX_NOOP_CONSECUTIVI )); then
+            log "#$ISSUE — $_n_noop no-op consecutivi: fuori rotazione fino a una modifica sostanziale; tentativo NON addebitato."
+            tg_send "⛔ <b>Roadmap — issue fuori rotazione per no-op ripetuti</b>
 Issue #${ISSUE}: ${TITOLO}
-Motore: ${MOTORE} — la issue non e' lavorabile com'e' scritta, motivo nel commento sulla issue.
-Nessun tentativo addebitato: serve l'operatore, non un altro giro.
+Motore: ${MOTORE} — ${_n_noop} no-op consecutivi sulla stessa versione della issue.
+Nessun tentativo fallito addebitato. Azione richiesta: retriage dell'operatore; una modifica a corpo, label o commit referenziato la rimettera' automaticamente in coda.
 
 <pre>$(echo "$CODA" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')</pre>"
-        log_evento "work" "result=noop" "engine=$MOTORE" "issue=#$ISSUE" "esito=#$ESITO" "duration_s=#$_DURATA"
+            log_evento "work" "result=noop_suspended" "engine=$MOTORE" "issue=#$ISSUE" "noop_count=#$_n_noop" "esito=#$ESITO" "duration_s=#$_DURATA"
+        else
+            log "#$ISSUE — no-op DICHIARATO da $MOTORE (issue commentata, nessuna PR): tentativo NON addebitato."
+            tg_send "🟡 <b>Roadmap — no-op dichiarato</b>
+Issue #${ISSUE}: ${TITOLO}
+Motore: ${MOTORE} — la issue non e' lavorabile com'e' scritta, motivo nel commento sulla issue.
+Nessun tentativo addebitato: un altro no-op uguale richiedera' il retriage dell'operatore.
+
+<pre>$(echo "$CODA" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')</pre>"
+            log_evento "work" "result=noop" "engine=$MOTORE" "issue=#$ISSUE" "noop_count=#$_n_noop" "esito=#$ESITO" "duration_s=#$_DURATA"
+        fi
     else
+        # Un crash o timeout interrompe la consecutivita': il prossimo no-op
+        # sara' di nuovo il primo, mentre il fallimento resta addebitato.
+        azzera_noop "$ISSUE"
         log "#$ISSUE — nessuna PR aperta."
         tg_send "⚠️ <b>Roadmap — nessuna PR</b>
 Issue #${ISSUE}: ${TITOLO}
