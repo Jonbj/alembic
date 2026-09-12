@@ -17,10 +17,12 @@ from src.strategies.s4.strategy import NewsDrivenTactical
 from src.workers.portfolio_scheduler import (
     _build_strategy_instance,
     _finalize_s4_intent_ledger,
-    _s4_sleeve_contributions,
     _s4_intent_provenance,
+    _s4_sleeve_contributions,
+    _snapshot_late_entry_context,
     _submit_portfolio_orders,
     _write_s4_intent_events_fail_open,
+    _write_s4_late_entry_observations_fail_open,
 )
 
 _TS = datetime(2026, 8, 24, 14, 7, tzinfo=timezone.utc)
@@ -62,6 +64,25 @@ def _buy(symbol: str, qty: float):
     )
 
 
+def test_snapshot_late_entry_context_usa_solo_prezzo_e_barra_correnti():
+    snapshot = MagicMock()
+    snapshot.latest_trade.price = 108.0
+    snapshot.minute_bar.close = 107.5
+    snapshot.daily_bar.open = 100.0
+    snapshot.daily_bar.high = 110.0
+    snapshot.daily_bar.low = 99.0
+
+    context = _snapshot_late_entry_context(snapshot)
+
+    assert context == {
+        "decision_price": 108.0,
+        "price_source": "alpaca_snapshot.latest_trade",
+        "session_open": 100.0,
+        "session_high": 110.0,
+        "session_low": 99.0,
+    }
+
+
 def test_strategy_trasferisce_i_diagnostics_del_ranker_al_ledger():
     ledger = S4IntentLedger(_TS, _versions())
     signals = [_signal("AMD", 1, 0.8), _signal("NVDA", 2, 0.7)]
@@ -90,6 +111,15 @@ def test_writer_intenti_fail_open_non_interrompe_il_path_live():
     store.write_s4_intent_events.side_effect = RuntimeError("db down")
 
     assert _write_s4_intent_events_fail_open(store, [MagicMock()], phase="candidate") is False
+
+
+def test_writer_late_entry_fail_open_non_interrompe_il_path_live():
+    store = MagicMock()
+    store.write_s4_late_entry_observations.side_effect = RuntimeError("db down")
+
+    assert _write_s4_late_entry_observations_fail_open(
+        store, [MagicMock()], regime_mult=0.7
+    ) is False
 
 
 def test_builder_scrive_i_candidate_prima_della_valutazione(mocker):
@@ -316,6 +346,7 @@ def test_finalizer_scrive_disposition_riconciliata_con_s1_e_pyramiding():
     # La popolazione post-gate resta distinta dalla disposizione operativa:
     # anti-pyramiding censura un intento che aveva superato gate e ranking.
     assert event.is_tradable is True
+    store.write_s4_late_entry_observations.assert_called_once()
 
 
 def test_provenance_intenti_sopravvive_alla_ricostruzione_del_risultato():

@@ -237,8 +237,13 @@ def get_activity_log(
         # Recent trade decisions
         try:
             cur.execute(
+                # #512: le righe osservazionali stanno nella stessa tabella
+                # ma non sono decisioni. Un ciclo S4 con venti candidati ne
+                # scrive venti: senza filtro riempiono da sole il feed.
                 """SELECT tick_time, symbol, decision, reason
                    FROM execution_decisions
+                   WHERE decision NOT IN ('OBSERVE_LATE_ENTRY',
+                                          'SHADOW_LATE_ENTRY')
                    ORDER BY tick_time DESC LIMIT 15"""
             )
             for row in cur.fetchall():

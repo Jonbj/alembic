@@ -9,7 +9,7 @@ import math
 import statistics
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Mapping, Sequence, TypedDict
+from typing import Any, Mapping, NotRequired, Sequence, TypedDict
 
 from src.portfolio.exit_classification import reason_for_hold_minimum_expiry
 
@@ -37,6 +37,7 @@ class EntryTrade(TypedDict):
     ora_utc: str
     entry_price: float
     qty: float
+    trade_id: NotRequired[int]
 
 
 class DailyBar(TypedDict, total=False):
@@ -213,6 +214,8 @@ def compute_entries(
             "denominatore_degenere": True,
             "quota_nel_gap": None,
         }
+        if trade.get("trade_id") is not None:
+            row["trade_id"] = int(trade["trade_id"])
         if bar is not None:
             rng = bar["high"] - bar["low"]
             if rng > 0:

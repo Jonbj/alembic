@@ -29,13 +29,18 @@ import re
 import statistics
 import subprocess
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import yaml
 
+from src.analysis.dossier.article_coverage import (
+    build_article_coverage,
+    canonical_article_id,
+)
 from src.analysis.dossier.book import (
     SOGLIA_GUARDIA_CONTRADDIZIONE,
     aggregate_by_entry_hour,
@@ -45,22 +50,24 @@ from src.analysis.dossier.book import (
     compute_exits,
     compute_s4_entry_intents,
 )
-from src.analysis.dossier.decision_signal_id_coverage import (
-    build_signal_id_coverage as build_signal_id_coverage_panel,
-)
 from src.analysis.dossier.decision_quality import (
     build_decision_quality_panel,
     build_opening_snapshot,
 )
-from src.analysis.dossier.article_coverage import build_article_coverage
-from src.analysis.dossier.article_coverage import canonical_article_id
-from src.analysis.dossier.exit_coverage import build_exit_coverage
+from src.analysis.dossier.decision_signal_id_coverage import (
+    build_signal_id_coverage as build_signal_id_coverage_panel,
+)
 from src.analysis.dossier.event_context import (
     CONTEXT_VERSION,
     SECTOR_ETF_BY_SECTOR,
     build_event_market_context,
 )
+from src.analysis.dossier.exit_coverage import build_exit_coverage
 from src.analysis.dossier.funnel import build_funnel, riconcilia_cause_con_funnel
+from src.analysis.dossier.late_entry import (
+    aggregate_late_entry_distribution,
+    late_entry_rows_from_dossiers,
+)
 from src.analysis.dossier.market import compute_market, compute_miss_candidates
 from src.analysis.dossier.miss_cause import (
     DEFAULT_SOGLIA_GATE,
@@ -86,7 +93,7 @@ FINESTRA_MEDIANE = 20  # giorni, per le mediane mobili
 # senza far crescere la query oltre un indice su (ticker, fetched_at).
 FINESTRA_SEDUTE_COPERTURA = 10
 INIZIO_OSSERVAZIONE = date(2026, 8, 3)
-DOSSIER_SCHEMA_VERSION = "2.9"
+DOSSIER_SCHEMA_VERSION = "3.0"
 NEW_YORK = ZoneInfo("America/New_York")
 
 
@@ -507,7 +514,8 @@ def _execution_decisions_signal_id_rows(giorno: date) -> list[dict]:
     rows = _psql(
         f"SELECT ed.decision, ed.signal_id::text "
         f"FROM execution_decisions ed "
-        f"WHERE ed.tick_time >= '{g}' AND ed.tick_time < '{g}'::date + 1"
+        f"WHERE ed.tick_time >= '{g}' AND ed.tick_time < '{g}'::date + 1 "
+        f"AND ed.{_NON_E_UNA_OSSERVAZIONE}"
     )
     return [
         {
@@ -644,6 +652,15 @@ def _context_articles(rows: list[dict], coverage: dict) -> list[dict]:
     ]
 
 
+# #512 scrive in `execution_decisions` righe che non sono decisioni eseguite
+# (nessun ordine, nessuno skip di un gate): servono al worker controfattuale.
+# Il dossier e' una serie pubblicata, quindi ogni query che non filtra per
+# `decision` le deve escludere qui, o la serie cambia definizione in silenzio.
+_NON_E_UNA_OSSERVAZIONE = (
+    "decision NOT IN ('OBSERVE_LATE_ENTRY', 'SHADOW_LATE_ENTRY')"
+)
+
+
 def _regime_observations(giorno: date) -> list[dict]:
     """Moltiplicatori realmente osservati nei cicli del giorno, sola lettura."""
     g = giorno.isoformat()
@@ -656,7 +673,8 @@ def _regime_observations(giorno: date) -> list[dict]:
         for row in _psql(
             f"SELECT tick_time::text, regime_mult::text FROM execution_decisions "
             f"WHERE tick_time >= '{g}' AND tick_time < '{g}'::date + 1 "
-            f"AND regime_mult IS NOT NULL ORDER BY tick_time, id;"
+            f"AND regime_mult IS NOT NULL AND {_NON_E_UNA_OSSERVAZIONE} "
+            f"ORDER BY tick_time, id;"
         )
     ]
 
@@ -903,12 +921,14 @@ def _timeline_eventi(giorno: date) -> list[dict]:
         f"  SELECT id, tick_time, order_id FROM execution_decisions "
         f"  WHERE signal_id = ss.id AND tick_time >= ss.generated_at "
         f"    AND tick_time < '{g}'::date + 1 "
+        f"    AND {_NON_E_UNA_OSSERVAZIONE} "
         f"  ORDER BY tick_time LIMIT 1"
         f") ed ON true "
         f"LEFT JOIN LATERAL ("
         f"  SELECT id, order_id FROM execution_decisions "
         f"  WHERE signal_id = ss.id AND tick_time >= ss.generated_at "
         f"    AND tick_time < '{g}'::date + 1 AND order_id IS NOT NULL "
+        f"    AND {_NON_E_UNA_OSSERVAZIONE} "
         f"  ORDER BY tick_time LIMIT 1"
         f") od ON true "
         f"LEFT JOIN LATERAL ("
@@ -1774,10 +1794,10 @@ def costruisci_dossier(
     # --- book: ingressi e chiusure ----------------------------------------
     ingressi_grezzi = [
         {"symbol": r[0], "strategia": r[1], "ora_utc": r[2],
-         "entry_price": float(r[3]), "qty": float(r[4])}
+         "entry_price": float(r[3]), "qty": float(r[4]), "trade_id": int(r[5])}
         for r in _psql(
             f"SELECT symbol, COALESCE(stop_strategy, CASE WHEN signal_id IS NOT NULL "
-            f"THEN 'S4' ELSE 'S1' END), to_char(entry_time,'HH24:MI'), entry_price, qty "
+            f"THEN 'S4' ELSE 'S1' END), to_char(entry_time,'HH24:MI'), entry_price, qty, id "
             f"FROM trades WHERE entry_time >= '{g}' AND entry_time < '{g}'::date + 1 "
             f"AND entry_price IS NOT NULL AND qty IS NOT NULL ORDER BY entry_time;")]
 
@@ -1831,6 +1851,9 @@ def costruisci_dossier(
     guardia_giorno["soglia"] = soglia_guardia
     guardia_finestra = _guardia_contraddizione_finestra(
         intenti_ingresso_s4, giorno
+    )
+    distribuzione_late_entry = _distribuzione_late_entry_finestra(
+        ingressi, intenti_ingresso_s4, giorno
     )
 
     # #401: post-hoc check sul ledger #294. Per ogni decision_slot della seduta,
@@ -2004,6 +2027,12 @@ def costruisci_dossier(
                     "stringa esplicativa quando la guardia ombra (#335) fa firing "
                     "(score e ritorno); None negli altri casi"
                 ),
+                "late_entry_joint_distribution": (
+                    "bucket fissi della quota_movimento_precedente_al_segnale x "
+                    "trades.net_pnl, collegato solo tramite trade_id; i dossier "
+                    "pre-ledger senza identita' restano nel denominatore con P&L "
+                    "mancante (#512)"
+                ),
             },
             "funnel_v2": {
                 "version": "vista parallela alla serie legacy (freeze #171)",
@@ -2173,6 +2202,7 @@ def costruisci_dossier(
                 "giorno": guardia_giorno,
                 "finestra_osservazione": guardia_finestra,
             },
+            "late_entry_joint_distribution": distribuzione_late_entry,
             "invariante_rank_ranking_score": {
                 "n_righe_esaminate": len(invariante_ranks),
                 "n_violazioni": len(invariante_violazioni),
@@ -2394,6 +2424,58 @@ def _guardia_contraddizione_finestra(
         "n_giorni_coperti": len(giorni_coperti),
         "copertura": "da schema 2.5 in avanti; dossier pre-ledger esclusi",
         "pnl_refresh": "trades.net_pnl riletto per trade_id alla generazione",
+    })
+    return aggregato
+
+
+def _distribuzione_late_entry_finestra(
+    ingressi_giorno: Sequence[Mapping[str, Any]],
+    intenti_giorno: Sequence[Mapping[str, Any]],
+    giorno: date,
+) -> dict:
+    """Distribuzione descrittiva #512 dal 14/08, senza riscrivere i dossier."""
+    inizio = date(2026, 8, 14).isoformat()
+    oggi_iso = giorno.isoformat()
+    dossiers: list[dict] = [{
+        "data": oggi_iso,
+        "ingressi": list(ingressi_giorno),
+        "intenti_ingresso_s4": list(intenti_giorno),
+    }]
+    giorni_coperti = {oggi_iso}
+    for path in sorted(OUT_DIR.glob("*.json")):
+        if path.stem == oggi_iso or path.stem < inizio or path.stem > oggi_iso:
+            continue
+        try:
+            payload = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        dossiers.append(payload)
+        giorni_coperti.add(path.stem)
+
+    rows = late_entry_rows_from_dossiers(dossiers)
+    trade_ids = sorted({
+        int(row["trade_id"]) for row in rows if row.get("trade_id") is not None
+    })
+    pnl_by_trade_id: dict[int, float | None] = {}
+    if trade_ids:
+        id_sql = ",".join(str(trade_id) for trade_id in trade_ids)
+        for db_row in _psql(
+            f"SELECT id::text, COALESCE(net_pnl::text,'') FROM trades "
+            f"WHERE id IN ({id_sql}) ORDER BY id;"
+        ):
+            pnl_by_trade_id[int(db_row[0])] = (
+                float(db_row[1]) if db_row[1] else None
+            )
+
+    aggregato = aggregate_late_entry_distribution(
+        rows, pnl_by_trade_id=pnl_by_trade_id
+    )
+    aggregato.update({
+        "dal": inizio,
+        "al": oggi_iso,
+        "n_giorni_coperti": len(giorni_coperti),
+        "pnl_source": "trades.net_pnl riletto per trade_id alla generazione",
+        "freeze": "misura read-only; nessuna soglia o decisione live modificata",
     })
     return aggregato
 
