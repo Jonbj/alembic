@@ -22,18 +22,25 @@ Due regole reggono tutto il resto:
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import yaml
 
 from src.strategies.s4.counterfactual import PairedDelta
+from src.strategies.s4.exit_quality import PairedExitQuality
 from src.strategies.s4.paired_evaluator import (
+    _DIAGNOSTIC_ONLY,
     OUTCOME_NOT_TESTED,
     BootstrapScheme,
+    EvaluationResult,
     PairedObservation,
+    TrialLedger,
+    economic_metrics,
     evaluate_hierarchy,
+    exit_quality,
+    risk_metrics,
 )
 
 CLUSTER_UNIT = "d0_session"
@@ -107,7 +114,10 @@ def load_evaluation_settings(path: Path | None = None) -> EvaluationSettings:
 
 
 def observations_from_pairs(
-    pairs: Iterable[PairedDelta], *, policy_id: str
+    pairs: Iterable[PairedDelta],
+    *,
+    policy_id: str,
+    exit_quality: Mapping[str, PairedExitQuality] | None = None,
 ) -> tuple[PairedObservation, ...]:
     """Seleziona le coppie misurabili della policy e le assegna a un cluster."""
     observations: list[PairedObservation] = []
@@ -119,6 +129,7 @@ def observations_from_pairs(
             # non e' assegnabile a un cluster: resta fuori invece di entrare
             # con un valore inventato.
             continue
+        quality = (exit_quality or {}).get(pair.intent_id)
         observations.append(
             PairedObservation(
                 intent_id=pair.intent_id,
@@ -129,13 +140,86 @@ def observations_from_pairs(
                 delta_usd=pair.delta_usd,
                 initial_notional=pair.initial_notional or 0.0,
                 capital_days=pair.challenger_capital_days,
+                exit_cost_delta_usd=(
+                    None
+                    if pair.baseline_exit_cost_usd is None
+                    or pair.challenger_exit_cost_usd is None
+                    else pair.challenger_exit_cost_usd - pair.baseline_exit_cost_usd
+                ),
+                # La qualita' nasce dal path di prezzo dell'intento: senza
+                # path resta `None` su ogni campo, fuori dalle medie — un
+                # ignoto contato come favore abbasserebbe il false-exit rate.
+                overnight_pnl_usd=None if quality is None else quality.overnight_pnl_usd,
+                false_exit=None if quality is None else quality.false_exit,
+                recovered_within_horizon=(
+                    None if quality is None else quality.recovered_within_horizon
+                ),
+                giveback_from_mfe_bps=(
+                    None if quality is None else quality.giveback_from_mfe_bps
+                ),
             )
         )
     return tuple(observations)
 
 
+def _metrics_block(
+    observations: Sequence[PairedObservation],
+) -> dict[str, object]:
+    """Le metriche §8.3 accompagnano il verdetto sulla stessa coorte.
+
+    Il blocco esiste anche a campione vuoto: un consumatore non deve indovinare
+    quando una chiave e' assente, e `trades: 0` dice "non misurato", non misura.
+    """
+    return {
+        "economic": economic_metrics(observations),
+        "risk": risk_metrics(observations),
+        "exit_quality": exit_quality(observations),
+    }
+
+
+def _ledger_entries(
+    result: EvaluationResult,
+    diagnostics_seen: Sequence[str] = (),
+) -> list[dict[str, object]]:
+    """Le varianti viste da questa valutazione, registrate nel ledger.
+
+    "Tutte le varianti viste" (criterio 5 di #299) non sono i soli gradini
+    confirmatory: D+1, D+3, term structure e sottoperiodi restano diagnostici
+    per contratto, ma guardarli e' comunque molteplicita' esplorata. Se il
+    registro tacesse, domani una di quelle potrebbe tornare come confirmatory
+    su un campione che non e' piu' out-of-sample — cio' che il ledger esiste
+    per impedire. Chi le guarda le dichiara in `diagnostics_seen`.
+
+    Il ruolo di un gradino lo decide il contratto, non il chiamante: prima
+    veniva forzato `confirmatory` su ogni gradino, e un'etichetta di
+    `_DIAGNOSTIC_ONLY` faceva sollevare il ledger portando giu' la valutazione
+    invece di registrare la variante per quello che e'.
+
+    Il `TrialLedger` del modulo resta la regola che rifiuta una diagnostica
+    rinominata confirmatory: e' lui a validare, qui non si ricostruisce.
+    """
+    ledger = TrialLedger()
+    notes: list[list[str]] = []
+    for step in result.steps:
+        role = "diagnostic" if step.label in _DIAGNOSTIC_ONLY else "confirmatory"
+        ledger.record(step.label, role=role)
+        notes.append(list(step.notes))
+    for name in diagnostics_seen:
+        ledger.record(name, role="diagnostic")
+        notes.append([])
+    return [
+        {"variant": entry.name, "role": entry.role, "notes": entry_notes}
+        for entry, entry_notes in zip(ledger.entries, notes)
+    ]
+
+
 def _blocked_result(
-    policy_id: str, note: str, clusters: int, observations: int, n_cluster: int | None
+    policy_id: str,
+    note: str,
+    clusters: int,
+    observations: int,
+    n_cluster: int | None,
+    diagnostics_seen: Sequence[str] = (),
 ) -> dict[str, object]:
     return {
         "cluster_unit": CLUSTER_UNIT,
@@ -155,6 +239,15 @@ def _blocked_result(
                 "interval": None,
             }
         ],
+        # Nessun gradino valutato: inventare righe confirmatory dichiarerebbe
+        # una molteplicita' che il trial non ha esplorato. Le diagnostiche
+        # gia' guardate pero' restano viste — la scala si e' fermata prima,
+        # lo sguardo c'e' stato.
+        "ledger": [
+            {"variant": name, "role": "diagnostic", "notes": []}
+            for name in diagnostics_seen
+        ],
+        "metrics": _metrics_block(()),
     }
 
 
@@ -167,6 +260,8 @@ def run_evaluation(
     n_cluster: int | None,
     counter_pairs: Sequence[PairedDelta] | None = None,
     mde_counter_bps: float | None = None,
+    exit_quality: Mapping[str, PairedExitQuality] | None = None,
+    diagnostics_seen: Sequence[str] = (),
 ) -> dict[str, object]:
     """Esegue la gerarchia sui delta appaiati e restituisce un blocco JSON.
 
@@ -174,14 +269,23 @@ def run_evaluation(
     non esiste nemmeno una decisione da prendere: lo dice esplicitamente invece
     di scegliere un default, che sarebbe una regola di stopping inventata qui.
     """
-    observations = observations_from_pairs(pairs, policy_id=policy_id)
+    observations = observations_from_pairs(
+        pairs, policy_id=policy_id, exit_quality=exit_quality
+    )
     clusters = len({obs.event_day for obs in observations})
 
     if not observations:
-        return _blocked_result(policy_id, "no_comparable_pairs", 0, 0, n_cluster)
+        return _blocked_result(
+            policy_id, "no_comparable_pairs", 0, 0, n_cluster, diagnostics_seen
+        )
     if n_cluster is None:
         return _blocked_result(
-            policy_id, "N_cluster_not_derived", clusters, len(observations), None
+            policy_id,
+            "N_cluster_not_derived",
+            clusters,
+            len(observations),
+            None,
+            diagnostics_seen,
         )
 
     counter_observations = (
@@ -206,6 +310,8 @@ def run_evaluation(
         "n_cluster": result.n_cluster,
         "decision_due": result.decision_due,
         "promoted_policy_id": result.promoted_policy_id,
+        "ledger": _ledger_entries(result, diagnostics_seen),
+        "metrics": _metrics_block(observations),
         "steps": [
             {
                 "label": step.label,
