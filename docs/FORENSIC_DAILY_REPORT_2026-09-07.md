@@ -374,7 +374,7 @@ usata per produrre numeri in questo report.
   * snippet/query:
     ```
     "403 GET /api/decisions?limit=5"
-    $ curl -H "Authorization: Bearer eJvM..." .../api/positions
+    $ curl -H "Authorization: Bearer __ALEMBIC_API_KEY__" .../api/positions
     {"detail":"Invalid or expired JWT token"}     # idem su decisions, trades, signals, orders
     ```
 * **Descrizione:** il canale di verifica prescritto dal protocollo forense è inagibile da settimane.
