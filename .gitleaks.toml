@@ -29,6 +29,11 @@ title = "Alembic gitleaks configuration"
     "test-api-key-for-ci-only",
     "test-jwt-secret-key-for-ci-only",
     '''\$2b\$12\$i6qSOhZRTLWbWoSTukGsw''',
+    # Segnaposto sostituito a runtime in scripts/daily_analysis.sh: il valore
+    # vero non e' mai committato, ma `curl -H "X-API-Key: __ALEMBIC_API_KEY__"`
+    # accende la regola curl-auth-header del ruleset di default, che prima di
+    # questa PR non vedeva la riga perche' il trasporto era un altro.
+    "__ALEMBIC_API_KEY__",
   ]
   paths = [
     ".github/workflows/ci.yml",
