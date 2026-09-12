@@ -37,7 +37,7 @@ def test_migration_persiste_quota_cause_e_parametri_di_misura() -> None:
 MIGRATION_067 = (
     Path(__file__).resolve().parents[2]
     / "migrations"
-    / "067_stale_drop_off_session.sql"
+    / "073_stale_drop_off_session.sql"
 )
 
 
