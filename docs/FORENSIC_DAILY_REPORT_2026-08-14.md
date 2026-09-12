@@ -370,7 +370,7 @@ Avvertenza `exit_mechanism` (#184): non applicabile oggi — nessuna chiusura, n
 
 ## 12. Dati mancanti o non accessibili
 
-- **API REST locale**: token fornito (`Bearer eJvMeuHhJS27FPugKIu4qKGgV7roIdLfcv7h20MwuQg`) rifiutato
+- **API REST locale**: token fornito (`Bearer __ALEMBIC_API_KEY__`) rifiutato
   con `{"detail":"Invalid or expired JWT token"}` su `GET /api/decisions`. Non ho potuto usare gli
   endpoint applicativi come fonte primaria; ho sostituito con query SQL dirette (più autorevoli, ma
   bypassano qualunque logica di formattazione/filtro applicativa — se l'API applica un filtro non

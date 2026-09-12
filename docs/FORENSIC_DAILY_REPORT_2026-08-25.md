@@ -595,10 +595,10 @@ Vedi `docs/exit_mechanism_labels.md`.
 * **Area:** Ops
 * **Ledger:** **F-041** (4ª occorrenza)
 * **Evidenza:**
-  * comando: `curl -H "Authorization: Bearer eJvMeu…" http://localhost:8001/api/positions`
+  * comando: `curl -H "Authorization: Bearer __ALEMBIC_API_KEY__…" http://localhost:8001/api/positions`
   * risposta: `{"detail":"Invalid or expired JWT token"}` su decisions, trades, signals, positions, orders
   * file: `src/api/auth.py:1` — *"Authentication middleware: accepts JWT Bearer token **OR** X-API-Key header"*; `:12` `APIKeyHeader(name="X-API-Key")`
-  * verifica: `curl -H "X-API-Key: eJvMeu…"` → **200 OK**, payload completo
+  * verifica: `curl -H "X-API-Key: __ALEMBIC_API_KEY__…"` → **200 OK**, payload completo
 * **Descrizione:** la chiave fornita nel prompt del cron è una API key statica, non un JWT. Passata
   come `Authorization: Bearer` viene instradata sul ramo JWT del middleware e rifiutata. Il ramo
   `X-API-Key` la accetta senza problemi. La chiave **non è scaduta**: è l'header del prompt a essere

@@ -328,7 +328,7 @@
 
 | Item | State | Evidence | Verdict |
 |------|-------|----------|---------|
-| API key hardcoded / env default | `VERIFIED_BUG` / **P0** | `scripts/daily_analysis.sh:47,51` embeds literal API key `eJvMeuHhJS27FPugKIu4qKGgV7roIdLfcv7h20MwuQg` and uses `--dangerously-skip-permissions` | Credential leak in committed script. |
+| API key hardcoded / env default | `VERIFIED_BUG` / **P0** | `scripts/daily_analysis.sh:47,51` embeds literal API key `__ALEMBIC_API_KEY__` and uses `--dangerously-skip-permissions` | Credential leak in committed script. |
 | JWT fallback / weak auth | `VERIFIED_GAP` | `src/api/jwt_utils.py:12-16` `_secret()` returns `config.JWT_SECRET_KEY or _EPHEMERAL_KEY` | Missing secret causes non-persistent ephemeral key. |
 | Docker non-root / resource limits | `VERIFIED_GAP` | `docker-compose.yml:8,36-37,109-113` no `USER`, no `mem_limit`/`cpus`, Redis `appendonly` absent | Container security baseline missing. |
 | Grafana insecure defaults | `VERIFIED_RISK` | `docker-compose.yml:109-113` anonymous auth enabled, embedding allowed, admin password `alembic123` | Monitoring stack exposed with weak credentials. |
@@ -533,7 +533,7 @@ Their findings largely confirm the matrix above and provide exact file:line anch
 | PEAD false-confidence UI | `CONFIRMED` | `frontend/src/pages/SystemLog.tsx:73-81`; `frontend/src/api/system.ts:18-32`. | LLM self-reported confidence surfaced as calibrated threshold. |
 | Config UI has no backend validation | `CONFIRMED` | `frontend/src/pages/Config.tsx:92,102`; `src/api/routes/config_routes.py:29-44` only deep-merges YAML. | Invalid ranges can be persisted. |
 | Kill-switch admin lacks 2FA/cooldown | `CONFIRMED` / **P0** | `src/api/routes/admin.py:119-140` protected only by `require_api_key`. | Single compromised key can halt/enable trading. |
-| API key hardcoded in script | `CONFIRMED` / **P0** | `scripts/daily_analysis.sh:47,51` embeds `API_KEY="eJvMeuHhJS27FPugKIu4qKGgV7roIdLfcv7h20MwuQg"` and uses `--dangerously-skip-permissions`. | Credential leak in committed script. |
+| API key hardcoded in script | `CONFIRMED` / **P0** | `scripts/daily_analysis.sh:47,51` embeds `API_KEY="__ALEMBIC_API_KEY__"` and uses `--dangerously-skip-permissions`. | Credential leak in committed script. |
 | JWT fallback ephemeral key | `CONFIRMED` | `src/api/jwt_utils.py:12-16`: `_secret()` returns `config.JWT_SECRET_KEY or _EPHEMERAL_KEY`. | Missing secret causes session invalidation/re-auth issues. |
 | Docker defaults insecure | `CONFIRMED` | `docker-compose.yml:8,36-37,109-113`: literal postgres password, weak JWT secret, Grafana anonymous + embedded + admin password `alembic123`. No `USER`, no `mem_limit`/`cpus`, Redis `appendonly` absent. | Production deployment unsafe as-is. |
 | CI minimal | `CONFIRMED` | `.github/workflows/ci.yml:46-63`: install, ruff, pytest only. | No security/secret/build provenance checks. |

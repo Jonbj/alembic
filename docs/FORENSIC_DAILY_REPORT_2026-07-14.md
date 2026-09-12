@@ -261,7 +261,7 @@ Vedi tabella §6 per dettaglio ordine/ticker/rationale. Nessun reject osservato 
 * Tipo: Non verificabile (gap di accesso)
 * Area: Ops / Data
 * Evidenza:
-  * `curl -H "Authorization: Bearer eJvMeu..." $BASE/decisions` → `{"detail":"Invalid or expired JWT token"}` (stessa risposta su tutti e 5 gli endpoint richiesti)
+  * `curl -H "Authorization: Bearer __ALEMBIC_API_KEY__" $BASE/decisions` → `{"detail":"Invalid or expired JWT token"}` (stessa risposta su tutti e 5 gli endpoint richiesti)
   * `src/api/auth.py:36` — messaggio di errore esatto, conferma che l'endpoint richiede un JWT valido, non una chiave statica
 * Descrizione: il token fornito nelle istruzioni del task non è un JWT valido (o è scaduto) per l'istanza API in esecuzione. Tutti i dati richiesti dalle 5 API sono stati comunque ricostruiti con successo via query dirette a Postgres (fonte più autoritativa comunque, essendo le API un layer sopra le stesse tabelle).
 * Impatto: nessuno sui risultati di questo report (dati equivalenti recuperati via DB); impatto solo su eventuali automazioni future che dipendano dalle API REST con questo token.

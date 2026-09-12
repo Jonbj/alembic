@@ -193,7 +193,7 @@ Formato per discrepanza: **[ID] Titolo · Tipo · Area · Evidenza · Descrizion
 
 **[F-07] API key hardcoded in script tracciato**
 - Tipo: Security · Area: Ops/Scripts
-- Evidenza: `scripts/daily_analysis.sh:51` `API_KEY="eJvMeuHhJS27FPugKIu4qKGgV7roIdLfcv7h20MwuQg"`.
+- Evidenza: `scripts/daily_analysis.sh:51` `API_KEY="__ALEMBIC_API_KEY__"`.
 - Descrizione: credenziale in chiaro nel repo; lo script gira in cron col sistema (`claude --dangerously-skip-permissions`).
 - Impatto: chiunque col repo ha accesso API; rotazione obbligatoria.
 - Severità: Critical · Confidenza: High

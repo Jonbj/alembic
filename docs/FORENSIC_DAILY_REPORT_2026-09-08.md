@@ -779,7 +779,7 @@ default.
   * timestamp: sessione di analisi 2026-09-09
   * snippet/query:
     ```
-    curl -H "Authorization: Bearer eJvMeu…" http://localhost:8001/api/positions
+    curl -H "Authorization: Bearer __ALEMBIC_API_KEY__…" http://localhost:8001/api/positions
     → {"detail":"Invalid or expired JWT token"}
     ```
     8 risposte 403 nel log (`/api/positions` ×2, `/api/orders` ×2, `/api/trades`, `/api/signals`,

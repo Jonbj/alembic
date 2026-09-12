@@ -422,7 +422,7 @@ Gli assi non sono additivi (`counterfactual_axes_are_additive: false`): non somm
 * Evidenza:
   * file/log/tabella: API `http://localhost:8001/api/{decisions,trades,signals,positions,orders}`
   * timestamp: 2026-09-02, esecuzione di questa sessione
-  * snippet: `curl -H "Authorization: Bearer eJvMeuHhJS27..." → {"detail":"Invalid or expired JWT token"}` su 5 endpoint su 5
+  * snippet: `curl -H "Authorization: Bearer __ALEMBIC_API_KEY__" → {"detail":"Invalid or expired JWT token"}` su 5 endpoint su 5
 * Descrizione: le cinque chiamate REST che il protocollo forense prescrive come fonte primaria restituiscono tutte 401. L'intera analisi è stata rifatta interrogando Postgres a mano.
 * Impatto: il canale d'ispezione documentato è inutilizzabile. Un audit meno paziente concluderebbe «non verificabile» sull'intera giornata.
 * Severità: Medium
