@@ -41,6 +41,7 @@ from src.analysis.dossier.article_coverage import (
     build_article_coverage,
     canonical_article_id,
 )
+from src.analysis.dossier.blind_set import build_blind_set
 from src.analysis.dossier.book import (
     SOGLIA_GUARDIA_CONTRADDIZIONE,
     aggregate_by_entry_hour,
@@ -1616,6 +1617,13 @@ def costruisci_dossier(
         session_open=session_open,
         session_close=session_close,
     )
+    sedute_copertura = _sedute_di_borsa(giorno, FINESTRA_SEDUTE_COPERTURA)
+    copertura_articoli["blind_set"] = _blind_set_copertura_articoli(
+        copertura_articoli,
+        giorno=giorno,
+        simboli=simboli,
+        sedute=sedute_copertura,
+    )
     attribution_by_signal = {
         row["signal_id"]: row for row in copertura_articoli["segnali"]
     }
@@ -1917,7 +1925,6 @@ def costruisci_dossier(
     # I candidati miss escludono per costruzione i simboli in portafoglio, quindi una
     # posizione detenuta a zero righe news_log non era contata da nessuna parte. Qui
     # la stessa assenza viene misurata sul libro, non sui soli mover non detenuti.
-    sedute_copertura = _sedute_di_borsa(giorno, FINESTRA_SEDUTE_COPERTURA)
     righe_news_finestra, fonti_news_finestra = _righe_news_per_seduta(
         [posizione["symbol"] for posizione in posizioni_apertura], sedute_copertura
     )
@@ -2104,6 +2111,21 @@ def costruisci_dossier(
                 ),
                 "freeze": "misura read-only; nessuna soglia di strategia toccata",
             },
+            "blind_set_copertura_articoli": {
+                "source": (
+                    "copertura_articoli.per_ticker del dossier corrente e dei dossier "
+                    "gia' pubblicati nelle ultime sedute di borsa"
+                ),
+                "raw": "articoli_unici canonicali per ticker",
+                "effective_timely": (
+                    "articoli ISSUER_SPECIFIC con timing ANTICIPATORY o CONCURRENT"
+                ),
+                "missingness": (
+                    "un dossier mancante o incompleto tronca lo streak e non vale "
+                    "come copertura"
+                ),
+                "freeze": "misura read-only; l'allerta del cron non blocca la seduta",
+            },
             "decision_quality": {
                 "snapshot_apertura": "trades vivi all'open RTH + barre Alpaca SIP",
                 "guard_counterfactual": (
@@ -2211,6 +2233,44 @@ def costruisci_dossier(
             },
         },
     }
+
+
+def _blind_set_copertura_articoli(
+    copertura_odierna: Mapping[str, Any],
+    *,
+    giorno: date,
+    simboli: Sequence[str],
+    sedute: Sequence[str],
+    dossier_dir: Path | None = None,
+) -> dict:
+    """Collega lo streak #511 ai dossier gia' pubblicati, senza riscriverli.
+
+    I dossier sono la sorgente di verita' per ``effective_timely``: ricalcolare
+    la classificazione dalle righe storiche applicherebbe il codice di oggi a
+    una misura gia' osservata e cambierebbe la serie in silenzio. Un file
+    mancante viene passato come tale al modulo puro, che tronca lo streak.
+    """
+    directory = dossier_dir if dossier_dir is not None else OUT_DIR
+    storici: dict[str, Mapping[str, Any]] = {}
+    for seduta in sedute:
+        if seduta == giorno.isoformat():
+            continue
+        percorso = directory / f"{seduta}.json"
+        if not percorso.exists():
+            continue
+        try:
+            payload = json.loads(percorso.read_text())
+        except (OSError, ValueError):
+            continue
+        coverage = payload.get("copertura_articoli")
+        if isinstance(coverage, Mapping):
+            storici[seduta] = coverage
+    return build_blind_set(
+        copertura_odierna,
+        universe=simboli,
+        sedute=sedute,
+        dossier_storici=storici,
+    )
 
 
 def _earnings_symbols_from_calendar(corporate_calendar: dict | list | None) -> set[str] | None:
