@@ -328,3 +328,46 @@ async def test_fetch_swallows_malformed_json_without_crashing():
         items = [item async for item in conn.fetch()]
 
     assert items == []
+
+
+@pytest.mark.asyncio
+async def test_fetch_timeout_skips_symbol_and_continues_others(caplog):
+    """Un timeout su un simbolo non deve interrompere il resto della coorte."""
+    ok_payload = {
+        "status": "ok",
+        "pagination": {"current_page": 1, "per_page": 1},
+        "press_releases": [
+            {
+                "id": "MSFT1",
+                "datetime": "2026-09-13T12:00:00Z",
+                "title": "MSFT press release",
+                "body": "<p>MSFT body</p>",
+                "style": "",
+                "language": ["en"],
+            }
+        ],
+    }
+    ok_resp = AsyncMock()
+    ok_resp.status = 200
+    ok_resp.json = AsyncMock(return_value=ok_payload)
+    ok_resp.__aenter__ = AsyncMock(return_value=ok_resp)
+    ok_resp.__aexit__ = AsyncMock(return_value=False)
+
+    mock_session = AsyncMock()
+    mock_session.get = MagicMock(side_effect=[asyncio.TimeoutError(), ok_resp])
+    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session.__aexit__ = AsyncMock(return_value=False)
+
+    conn = TwelveDataPressReleasesConnector(
+        api_key="key", symbols=["AAPL", "MSFT"], timeout_s=10.0
+    )
+
+    with patch(
+        "src.connectors.twelve_data_press_releases.aiohttp.ClientSession",
+        return_value=mock_session,
+    ):
+        items = await _drain(conn)
+
+    assert [item.asset_tags for item in items] == [["MSFT"]]
+    assert mock_session.get.call_count == 2
+    assert "timeout" in caplog.text.lower()
