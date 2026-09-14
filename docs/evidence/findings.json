@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 74,
+  "prossimo_id": 76,
   "findings": [
     {
       "id": "F-001",
@@ -176,9 +176,15 @@
           "costo_usd": 199.44,
           "nota": "37/96 simboli (38,5%) a zero righe news_log: il valore MIGLIORE della finestra recente (48 il 09-01, 45 il 09-02, 50 il 09-03, 54 il 09-04), ma la copertura effective-timely resta 46/96 (47,9%). Due settori strutturalmente scoperti: materials 0/2 grezzo e 0/2 effective-timely (RIO, VALE), consumer 2/11 grezzo e 1/11 effective-timely. I due miss NO_NEWS puri sono INFY -4,87% e SONY -4,19%, lordo close-to-close x 2.200 $ = 199,44 $ (107,18 + 92,26); entrambi ribassisti, quindi accessibile 0 su libro long-only. Quattro dei 37 scoperti erano mover, due dei quali detenuti (CRM, PBR): per PBR +3,53% l'esposizione e' stata subita senza alcuna informazione, per CRM la mancanza coincide con la cecita' lato uscita (UNH cieca da 3 sedute, PFE da 2, nozionale cieco 2.725,04 $).",
           "fonte": "ALPHA_MISS_REPORT_2026-09-08.md §5, §6, §8"
+        },
+        {
+          "data": "2026-09-11",
+          "costo_usd": 171.13,
+          "nota": "39/96 simboli (40,6%) a zero righe news_log — secondo valore migliore della finestra dopo i 37 del 09-08 — ma la copertura effective-timely resta 38/96 (39,6%), sotto il 47,9% del 09-08: il conteggio grezzo migliora, la copertura utilizzabile no. energy a 0/6 effective-timely (5o settore a zero della serie). Due sole fonti: alpaca_benzinga 93 articoli unici, gdelt_gkg 8, HHI di fonte 0,818. Concentrazione per ticker: ADBE 14 + ORCL 13 = 27 dei 101 articoli, top-5 share 47,3%. Entrambi i miss NO_NEWS della giornata ricadono qui e TXN e' al 5o giorno consecutivo a zero articoli nel blind-set. Costo = stimatore legacy del dossier sui due NO_NEWS: IBM 87,15 + TXN 83,98. Con lo stimatore v2 (opportunita' netta accessibile) sarebbero 14,26 + 14,19 = 28,45 $: la serie legacy e' mantenuta per continuita'.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-11.md §3, §6d, §9"
         }
       ],
-      "costo_cumulato_usd": 4710.12,
+      "costo_cumulato_usd": 4881.25,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 3
@@ -988,10 +994,16 @@
           "costo_usd": null,
           "nota": "Contesto della giornata: il gate 0,300 ha scartato 644 su 775 segnali freschi (83,1%) sui 24 cicli, e il conteggio dei drop nel log coincide esattamente con le 644 righe SKIP_THRESHOLD in execution_decisions (strumentazione affidabile). Solo 20 segnali su 214 (9,3%) raggiungono +0,30. Registrato per continuita' della serie; nessun mover con segno corretto identificato come scartato dal gate oltre a quelli gia' nei candidati miss (cause_del_giorno: BELOW_GATE 5 su 9 candidati, dominante).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-08.md §6"
+        },
+        {
+          "data": "2026-09-11",
+          "costo_usd": null,
+          "nota": "L'unico mover con segnale di segno corretto sotto il gate e' NOK: segnale 10517 delle 14:03, score +0,2013, su un +4,80%. SKIP_ENTRY_GATE e' il secondo motivo di scarto della giornata (576 su 1.733 intenti, 33,2%), dietro SKIP_ENTRY_FRESHNESS (711). Costo NON stimato di proposito: NOK era gia' detenuto, quindi anche superando il gate l'ordine sarebbe finito in P0-05 come DELL e MRVL. Il gate non e' il vincolo che lega in questa giornata; attribuirgli un costo sarebbe doppio conteggio con F-031.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-11.md §9"
         }
       ],
       "costo_cumulato_usd": 2458.37,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -1417,6 +1429,12 @@
           "costo_usd": null,
           "nota": "[DAY-016] Un articolo content-mill ('How To Trade SPY, QQQ, AAPL, MSFT, NVDA, GOOGL, META, And TSLA', news_log 9906-9913) genera 8 segnali tutti a 0,000 - ed e' fra i 12 ri-scorati da F-072, quindi ha consumato 16 chiamate. Stesso schema su NOW: score +0,260 da 'Robinhood To Rally Around 23%? Here Are 10 Top Analyst Forecasts For Tuesday' con NOW a -4,99% in giornata; e su ADBE, score 0,000 da 'Oracle Could Swing By $47.8 Billion After Earnings' con ADBE a -3,47%. I 12 candidati miss hanno quota_righe_fanout 0,632: due terzi delle righe che li riguardano vengono da articoli non specifici. Il modello scora correttamente 0,000: e' spreco di budget e rumore nella serie, non errore di giudizio.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-08.md §4.7, [DAY-016]"
+        },
+        {
+          "data": "2026-09-11",
+          "costo_usd": 0.0,
+          "nota": "L'unico miss non-NO_NEWS della giornata ha come sola copertura un fan-out. ARM: 1 riga su 1, quota_righe_fanout 1,0, news_log 10624 '10 Information Technology Stocks Whale Activity In Today's Session' a 8 ticker, relevance TAG_UNCONFIRMED, score 0,000. Totali di giornata: mapping_fanout_extra 73 su 174 righe (42,0%) e TAG_UNCONFIRMED 98 su 174 (56,3%) — oltre meta' delle righe scorate senza rilevanza confermata sull'emittente. Costo 0,0 e non null: e' stimato e non positivo — lo stimatore v2 da' opportunita' netta accessibile -11,97 $ perche' al primo ciclo eleggibile (18:07, 266,09) il movimento era finito e il close e' 264,79. Caso raro di miss quantificabile che non costa nulla.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-11.md §3, §9"
         }
       ],
       "costo_cumulato_usd": 927.76,
@@ -1927,10 +1945,16 @@
           "costo_usd": null,
           "nota": "Lo stesso URL loggato a livello INFO da httpx espone il bot token in chiaro (bot8611445937:AAH3...), sia nei sei fallimenti Telegram del worker sia nel polling continuo di worker-inference.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-08.md §8"
+        },
+        {
+          "data": "2026-09-11",
+          "costo_usd": null,
+          "nota": "8 righe INFO di httpx nel log persistente logs/containers/worker-2026-09-11.log con l'URL completo https://api.telegram.org/bot8611445937:AAH3... — fra queste l'alert dell'abort per clock_unavailable delle 16:22:03. Il log e' persistente su disco nel repo, quindi il token e' esposto anche fuori dal container.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-11.md §9"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 5,
+      "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": null
     },
@@ -2006,10 +2030,16 @@
           "costo_usd": null,
           "nota": "Un segnale sopra gate nasce gia' scaduto e resta inutilizzabile per nove cicli. AZN, segnale 9833, score +0,423 generato alle 13:31 su 'AstraZeneca Announces Tozorakimab Demonstrates Reduction...': disposizione SKIP_ENTRY_FRESHNESS a ogni ciclo dalle 14:07 alle 16:07 (nove cicli consecutivi) perche' l'articolo a monte supera gia' MAX_NEWS_AGE_HOURS=2 quando il primo ciclo lo guarda. L'ingresso arriva solo alle 16:22 su un secondo articolo (segnale 9957, +0,566). Costo null e direzione FAVOREVOLE stavolta: AZN ha chiuso a -1,63% e l'ingresso posticipato ha subito un MTM di soli -0,81 $. Registrata per il meccanismo, non per il danno.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-08.md §8"
+        },
+        {
+          "data": "2026-09-11",
+          "costo_usd": null,
+          "nota": "SKIP_ENTRY_FRESHNESS e' il PRIMO motivo di scarto della seduta: 711 su 1.733 intenti (41,0%), davanti a SKIP_ENTRY_GATE 576, SKIP_FALLBACK 191, SKIP_STALE 145, SKIP_PYRAMIDING 48, SKIP_IDEMPOTENCY 42, RANK_OUTSIDE_TOP_N 14. SUBMITTED: 6 su 1.733 (0,35%). Latenze pubblicazione->ingestione osservate sui mover: NOK 13:24->14:03 (39 min), DELL 16:53->17:15 (22 min), ARM 17:35->17:52 (17 min), TMUS 11:46->13:32 (106 min).",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-11.md §9"
         }
       ],
       "costo_cumulato_usd": 2.37,
-      "occorrenze_non_stimate": 10,
+      "occorrenze_non_stimate": 11,
       "stato": "aperto",
       "issue": null
     },
@@ -2803,10 +2833,16 @@
           "costo_usd": null,
           "nota": "[DAY-018] Mediana 0,849 di quota_movimento_precedente_al_segnale sui 7 ingressi: NVO 0,669 - QCOM 0,618 - HOOD 0,115 - SPCX 0,849 - AZN 0,977 - NVDA 0,966 - SPCX-bis 1,038 (movimento interamente concluso). Su 4 ingressi su 7 oltre l'84% del movimento era gia' avvenuto. MA il costo NON e' attribuibile a questo fattore oggi: i tre ingressi piu' tardivi (AZN, NVDA, SPCX-bis) sommano a -3,99 $ di MTM EOD mentre i due piu' tempestivi (NVO 0,669 e QCOM 0,618) sommano a -41,56 $. In questa seduta la tempestivita' non predice l'esito.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-08.md §8.3, [DAY-018]"
+        },
+        {
+          "data": "2026-09-11",
+          "costo_usd": null,
+          "nota": "Caso limite della serie: l'unico segnale DELL sopra il gate (id 10596, +0,390, ensemble non-fallback, generato 17:15) nasce da news_log 10596 pubblicata 16:53 e intitolata 'S&P 500 Snaps 4-Day Decline as Oil Cools, Dell Jumps 11%: Stock Market...' — il titolo riporta il ritorno gia' realizzato: la notizia E' il movimento. Stesso schema su MRVL (segnale 10647 +0,3159 alle 19:02 da 'Marvell Stock Is Up 180% This Year') e su NOK (segnale 10517 +0,2013 alle 14:03 da \"What's Going On With Nokia Stock Friday?\"). Sui 6 ingressi mediana quota_movimento_precedente_al_segnale 0,640 con 3 su 6 >= 1,0 (NOW 1,606, PLTR 1,425, ORCL 0,844). Costo NON stimato di proposito: il ritardo su DELL/MRVL e' gia' attribuito a F-031 e contarlo due volte gonfierebbe la serie.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-11.md §9"
         }
       ],
       "costo_cumulato_usd": 123.12,
-      "occorrenze_non_stimate": 5,
+      "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": null
     },
@@ -2894,9 +2930,15 @@
           "costo_usd": 12.89,
           "nota": "Anti-pyramiding blocca peso su DELL e SNOW, con segno del controfattuale opposto fra i due - prima occorrenza della serie con segno misto sullo stesso giorno. DELL: SKIP_PYRAMIDING alle 19:52, sentiment +0,478, controfattuale 1h +12,89$ (nozionale inteso 1.997,53$, guard_decisions dossier) - denaro lasciato sul tavolo, coerente col pattern del 09-02. SNOW: due blocchi (16:37, 16:52) con controfattuale 1h NEGATIVO (-14,99$ e -17,99$, nozionale inteso ~2.000$ ciascuno): SNOW stava gia' perdendo terreno intraday dopo un gap d'apertura enorme (passivo open->close -35,90$ pur chiudendo +16,55% sul giorno precedente), quindi qui il guard ha evitato una perdita, non causato un miss - il meccanismo non guarda il segno del controfattuale, ha funzionato nella direzione giusta per puro effetto del timing di mercato. Costo registrato 12,89$ (solo DELL; i controfattuali negativi di SNOW non sono un costo).",
           "fonte": "ALPHA_MISS_REPORT_2026-09-03.md §4, §7, §8.3, §Segnalazioni"
+        },
+        {
+          "data": "2026-09-11",
+          "costo_usd": 41.47,
+          "nota": "Due mover su sette bloccati in rabbocco. DELL: SKIP_PYRAMIDING alle 17:22:03, signal_id 10596 score +0,390, intended_notional 2.195,68 $, mentre il libro teneva 481,50 $ (0,9295 azioni S1 = 22% di uno slot) sul mover a +11,98% della seduta. MRVL: SKIP_PYRAMIDING alle 15:22:04, intended_notional 2.193,80 $, libro a 130,20 $ a DB e 0,00 $ PIT, mover a +4,03%. Controfattuale corto: DELL 558,43 (open barra 5m 17:25) -> close 567,29 = +1,587% x 2.195,68 = +34,85 $; MRVL 235,39 (open barra 5m 15:20) -> close 236,10 = +0,302% x 2.193,80 = +6,62 $. Seconda occorrenza su DELL dopo il 2026-09-03 (+12,89 $). AGGIORNAMENTO AL FINDING: il titolo dice 'non lascia alcuna traccia in execution_decisions' — oggi le 7 righe SKIP_PYRAMIDING (CVX, MRVL, AMAT, AMD, DELL, ORCL, BAC) sono persistite con intended_notional_usd valorizzato. La tracciabilita' e' risolta, il comportamento del guard no.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-11.md §9"
         }
       ],
-      "costo_cumulato_usd": 313.22,
+      "costo_cumulato_usd": 354.69,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -3571,10 +3613,16 @@
           "costo_usd": null,
           "nota": "3a occorrenza, sul lato ATTRIBUZIONE dei fill invece che sul decremento. NOK e' l'unica delle 48 posizioni dello opening_snapshot con missingness ['exit_fill_qty_exceeds_trade_qty'] (src/analysis/dossier/decision_quality.py:152-154). Storico broker NOK: BUY 34,510008 il 07-10 -> SELL 34,510008 il 07-13 (trade 268) -> BUY 41,563993 il 07-14 (trade 314) -> SELL STOP 41 il 07-16. Il guard scatta perche' la somma dei fill di vendita attribuiti al trade 314 (75,51) eccede la sua qty_initial (41,56): la camminata sui fill d'uscita raccoglie anche i fill di un trade precedente CHIUSO sullo stesso simbolo. Il dossier prosegue lo stesso, con qty_open clampata a 0. Oggi trascurabile in denaro (NOK vale 5,48 $ di market value) ma il meccanismo e' generale: qualsiasi simbolo con piu' trade sequenziali puo' avere qty_open, passive_pnl_usd ed exit_active_effect_usd sbagliati nel dossier. IL DB LIVE E' CORRETTO: trades.quantity_remaining di NOK vale 0,563993, identico al broker -- il difetto e' nello strumento di misura, non nella contabilita' operativa. Il fix e' un filtro filled_at >= entry_time oltre a quello per order_id. Costo null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-02.md §10 DAY-024"
+        },
+        {
+          "data": "2026-09-11",
+          "costo_usd": null,
+          "nota": "Divergenza fra quantita' a DB e quantita' PIT al broker su due posizioni del giorno: MRVL e NOK compaiono in copertura_uscita con qty 0,5515 e 0,5640 (nozionale 130,20 $ e 6,30 $) ma in snapshot_apertura con qty_open 0,0 e opening_notional_usd 0,0. Le due misure hanno definizioni diverse (DB vs PIT broker) e la divergenza e' esattamente la forma del finding. Popolazione confermata dal log delle 16:07: '#161: 10/45 held positions are unprotectable (qty < 1): AMAT, AMD, ASML, CAT, DELL, LLY, MRVL, NOK, SPY, WDC'. P&L passivo di MRVL e NOK nella seduta: 0,00 $ su +4,03% e +4,80%.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-11.md §9"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -4292,6 +4340,44 @@
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": "#550"
+    },
+    {
+      "id": "F-074",
+      "titolo": "Un outage dell'endpoint /v2/clock di Alpaca cancella cicli portfolio interi e il task Celery risulta comunque 'succeeded'",
+      "tipo": "difetto",
+      "confidenza": "misurata",
+      "primo_avvistamento": "2026-09-11",
+      "occorrenze": [
+        {
+          "data": "2026-09-11",
+          "costo_usd": null,
+          "nota": "portfolio_cycles ha 21 righe contro 24 slot schedulati; il beat ha inviato tutti e 24 i task. I tre mancanti sono 16:22:00, 16:37:00 e 16:52:00: nel log del worker ciascuno chiude con 'Could not fetch market clock: {\"message\":\"Internal Server Error\"} - aborting cycle (fail-closed)' e con \"run_portfolio_cycle[...] succeeded in 3,6s: {'error': 'clock_unavailable'}\". L'outage lato Alpaca copre 16:16:03->17:03:03 (99 righe 'market clock' fra worker e task mobile). 45 minuti consecutivi di sessione senza alcuna decisione di portafoglio; unico gap > 16 min della giornata (16:07 -> 17:07, 60 min). Il fail-closed e' corretto e un alert Telegram e' partito: il difetto e' che lo stato finale del task e' 'succeeded', quindi un monitor che guardi l'esito Celery vede 24/24 verdi. ID NUOVO e non agganciato a F-017 (regime detection) ne' a F-065 (ciclo sentiment che non parte e non lascia traccia): sottosistema diverso, causa = dipendenza esterna al broker, e qui una traccia e un alert ESISTONO — mente solo il codice d'uscita del task. Se a fine periodo si decide che i tre sono la stessa affermazione ('un fallimento che azzera una funzione critica e' registrato come succeeded'), si fondono. Costo non stimato: nessun ordine risultava pendente nella finestra e il ciclo delle 17:07 ha ripreso regolarmente.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-11.md §9"
+        }
+      ],
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-075",
+      "titolo": "held_at_open_rate conta come catturati mover detenuti con nozionale residuo sotto il 6% di uno slot: 'catturati' non e' pesato per esposizione",
+      "tipo": "osservazione",
+      "confidenza": "misurata",
+      "primo_avvistamento": "2026-09-11",
+      "occorrenze": [
+        {
+          "data": "2026-09-11",
+          "costo_usd": null,
+          "nota": "Il funnel classifica 4 dei 7 mover come PASSIVE_EXPOSURE (quindi non miss, held_at_open_rate 4/7 = 57,1%) indipendentemente da quanto libro ci fosse sopra. Nei fatti, contro uno slot S4 da 2.200 $: CSCO 1.865,90 $ (85%), DELL 481,50 $ (22%), MRVL 130,20 $ a DB e 0 PIT (5,9%), NOK 6,30 $ a DB e 0 PIT (0,3%). Il P&L passivo lo conferma: CSCO +55,52 $, DELL +45,75 $, MRVL 0,00 $, NOK 0,00 $ — su un +4,80% e un +4,03% il libro ha guadagnato zero mentre la metrica li conta come catturati. Ricade anche sul campo 'catturati' di market_daily.jsonl, che vale 4 oggi. ID NUOVO e non agganciato a F-014 (telemetria di portfolio_cycles) ne' a F-022 (stop protettivi sulla parte intera): l'affermazione riguarda la METRICA DI MISS che questo ledger pubblica ogni giorno e ne cambia la lettura retroattiva. Osservazione strutturale, nessun costo giornaliero stimabile: conta la ricorrenza.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-11.md §4a, §9"
+        }
+      ],
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
     }
   ],
   "_nota_migrazione": "2026-08-04: le occorrenze scritte prima di questa data avevano costo_usd 0.0 perche' il prompt non chiedeva di stimarlo. Convertite a null: zero significa 'e' costato zero', null significa 'non stimato'. Deroga al solo-append registrata nella carta di osservazione."
