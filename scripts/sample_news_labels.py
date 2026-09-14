@@ -11,9 +11,9 @@ Two modes:
   ``(source, extraction_method)`` with explicit targets (_TARGETS_POST_QT03),
   designed for the post-QT-03 population (`--da 2026-06-30`). A branch that
   stays under target is reported loudly (exit code 1), never silently filled
-  from another branch. Within the existing near-zero quota, known
-  ``CONTENT_EMPTY`` title templates are selected first (#508), so they reach
-  QX-01 without changing the sample size or its declared near-zero fraction.
+  from another branch. The draw inside the near-zero quota stays uniform: the
+  count of ``CONTENT_EMPTY`` titles that land in it is reported per branch for
+  visibility, never forced (see ``_pick``).
 
 Collinearity caveat (premise of the #405 measurement, not a downstream
 discovery): in the post-QT-03 population ``extraction_method`` is nearly
@@ -142,29 +142,24 @@ def _fetch_sources(cur, da: datetime.date | None,
     return [row["source"] for row in cur.fetchall()]
 
 
-def _pick(
-    articles: list[dict],
-    n: int,
-    rng: random.Random,
-    *,
-    content_empty_stratum: bool = False,
-) -> list[dict]:
+def _pick(articles: list[dict], n: int, rng: random.Random) -> list[dict]:
     """Pick n articles, oversampling near-zero sentiment, deterministically.
 
-    Nei run post-QT-03 la quota near-zero gia' pre-registrata viene riempita
-    prima con i template CONTENT_EMPTY della #508. Cosi' il golden set li vede
-    senza introdurre un nuovo target o cambiare la numerosita' del campione.
+    Il sorteggio dentro lo strato near-zero resta **uniforme**. Dare la
+    precedenza ai template CONTENT_EMPTY della #508 (come faceva la prima
+    versione della misura) non li "favoriva": sul ramo alpaca_benzinga i
+    candidati erano 223 contro 72 slot, quindi occupavano lo strato per intero
+    — 18% del golden set contro l'1,6% atteso da un'estrazione casuale. Il
+    golden set calibra la confidence e sblocca l'enforcement del resolver:
+    ``false_positive_ticker_rate`` misurato su un campione costruito cosi'
+    descrive il campione, non la popolazione, e non e' recuperabile a
+    posteriori perche' la probabilita' di inclusione non viene registrata.
+    Per contare i content-mill non servono etichette umane: il detector e'
+    deterministico e li conta su tutta la popolazione.
     """
     near = [a for a in articles if a["abs_sent"] < _NEAR_ZERO_THRESHOLD]
     rest = [a for a in articles if a["abs_sent"] >= _NEAR_ZERO_THRESHOLD]
-    if content_empty_stratum:
-        content_empty = [a for a in near if content_empty_title_reason(a.get("title"))]
-        other_near = [a for a in near if not content_empty_title_reason(a.get("title"))]
-        rng.shuffle(content_empty)
-        rng.shuffle(other_near)
-        near = content_empty + other_near
-    else:
-        rng.shuffle(near)
+    rng.shuffle(near)
     rng.shuffle(rest)
     n_near = min(len(near), int(round(n * _NEAR_ZERO_FRACTION)))
     picked = near[:n_near] + rest[: n - n_near]
@@ -254,14 +249,22 @@ def _sample_window(cur, rng: random.Random,
     shortfalls = []
     for (source, method), target in _TARGETS_POST_QT03.items():
         arts = available.get((source, method), [])
-        picked = _pick(arts, target, rng, content_empty_stratum=True)
+        picked = _pick(arts, target, rng)
         inserted += _insert_labels(cur, source, picked)
         line = f"{source}/{method}: {len(arts)} available → picked {len(picked)} / target {target}"
         content_empty_picked = sum(
             content_empty_title_reason(article.get("title")) is not None
             for article in picked
         )
-        line += f" (CONTENT_EMPTY stratum: {content_empty_picked})"
+        content_empty_available = sum(
+            content_empty_title_reason(article.get("title")) is not None
+            for article in arts
+        )
+        # Osservato, non imposto: serve a leggere il campione, non a costruirlo.
+        line += (
+            f" (CONTENT_EMPTY drawn: {content_empty_picked}"
+            f" of {content_empty_available} available)"
+        )
         if len(picked) < target:
             line += "  — UNDER TARGET: not filled from other branches"
             shortfalls.append(f"{source}/{method}: picked {len(picked)} of {target}")
