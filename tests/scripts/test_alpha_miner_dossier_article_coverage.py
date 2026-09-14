@@ -46,6 +46,73 @@ def test_query_copertura_unisce_news_e_segnali_e_legge_solo_label_adjudicate():
     }]
 
 
+def test_dossier_espone_fonti_osservate_per_ticker_sul_dossier_giornaliero():
+    """#511 passo 2 — il dossier pubblica per ogni ticker l'elenco delle fonti
+    che hanno reso almeno un mapping, con il conteggio effective-timely di
+    quella fonte. Una fonte presente con effective=0 dice al cron e al
+    prompt del report giornaliero che il provider copre il ticker ma in modo
+    non utile: la diagnosi e' "fonte presente ma irrilevante", distinta da
+    "fonte assente". La verifica resta read-only: solo shape del payload."""
+    daily = {
+        "ASML": {
+            "open": 100.0, "high": 109.0, "low": 99.0, "close": 107.0,
+            "close_prec": 100.0,
+        },
+        "IBM": {
+            "open": 100.0, "high": 109.0, "low": 99.0, "close": 107.0,
+            "close_prec": 100.0,
+        },
+    }
+    coverage_rows = [
+        # ASML: solo alpaca_benzinga, macro fan-out (effective=0).
+        {
+            "news_log_id": 10, "signal_id": 101, "ticker": "ASML",
+            "title": "Fed keeps rates unchanged",
+            "body_snippet": "Fed keeps rates unchanged",
+            "url": "https://wire.example/fed",
+            "source": "alpaca_benzinga",
+            "published_at": datetime(2026, 8, 12, 12, 0, tzinfo=UTC),
+            "first_seen_at": datetime(2026, 8, 12, 12, 1, tzinfo=UTC),
+            "content_hash": "a" * 64,
+            "extraction_method": "source_metadata",
+            "score": 0.0,
+            "ground_truth_relevance": "macro",
+            "ground_truth_tickers": [],
+            "issuer_terms": [],
+        },
+        # IBM: zero righe dal DB (nessun mapping).
+    ]
+
+    def fake_psql(query):
+        if "FROM sentiment_signals ss LEFT JOIN news_log" in query:
+            return [["ASML", "12:01", "0.0", "f", "source_metadata",
+                     "Fed keeps rates unchanged", "1", "101"]]
+        if "SELECT ticker, count(*) FROM news_log" in query:
+            return [["ASML", "1"]]
+        return []
+
+    cutoff = datetime(2026, 8, 13, 0, 0, tzinfo=UTC)
+    with (
+        patch.object(dossier, "_psql", side_effect=fake_psql),
+        patch.object(dossier, "_barre", return_value=daily),
+        patch.object(dossier, "_article_coverage_rows", return_value=coverage_rows),
+        patch.object(dossier, "_soglia_gate_s4", return_value=0.30),
+        patch.object(dossier, "_timeline_eventi", return_value=[]),
+        patch.object(dossier, "_barre_intraday", return_value=({}, cutoff)),
+        patch.object(dossier, "_dettagli_ordini", return_value={}),
+        patch.object(dossier, "_sector_by_ticker",
+                     return_value={"ASML": "semis", "IBM": "tech"}),
+        patch("redis.Redis", MagicMock()),
+    ):
+        out = dossier.costruisci_dossier(date(2026, 8, 12), ["ASML", "IBM"])
+
+    fonti = out["copertura_articoli"]["per_ticker"]
+    assert fonti["ASML"]["fonti_osservate"] == {
+        "alpaca_benzinga": {"articoli_unici": 1, "articoli_effective_timely": 0},
+    }
+    assert fonti["IBM"]["fonti_osservate"] == {}
+
+
 def test_query_copertura_supporta_lo_schema_label_legacy_senza_adjudicated():
     """Il DB live puo' precedere migration 046: schema 029 ha una sola label/URL."""
     columns = {"gt_relevance", "gt_tickers", "url", "status", "label_date", "label_id"}

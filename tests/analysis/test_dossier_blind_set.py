@@ -82,6 +82,38 @@ def test_streak_non_attraversa_un_dossier_mancante_e_allerta_a_cinque_sedute():
     assert missing["per_ticker"]["ASML"]["zero_articoli_streak_troncato_da"] == "dossier_mancante"
 
 
+def test_render_allerta_includele_fonti_per_ticker_se_il_dossier_le_espa():
+    """#511 passo 2: l'alert cron deve dire *quali* fonti hanno reso righe sul
+    ticker in allerta, non solo "lo streak e' N". Una fonte presente con
+    effective=0 distingue "il provider non copre" da "il provider copre ma
+    irrilevante" — dato utile per scegliere se accendere #454/#455/#458/#459.
+    Il rendering resta read-only e non legge l'ambiente: solo payload."""
+    from src.analysis.dossier.blind_set import render_blind_set_alert
+
+    blind_set = {
+        "ticker_allerta_zero_articoli": ["ASML", "IBM"],
+        "per_ticker": {
+            "ASML": {"sedute_consecutive_zero_articoli": 6},
+            "IBM": {"sedute_consecutive_zero_articoli": 5},
+        },
+    }
+    per_ticker = {
+        "ASML": {"fonti_osservate": {"alpaca_benzinga": {"articoli_unici": 1, "articoli_effective_timely": 0}}},
+        "IBM": {"fonti_osservate": {}},
+    }
+    out = render_blind_set_alert(blind_set, per_ticker)
+    assert "ASML (6 sedute; alpaca_benzinga(1, eff=0))" in out
+    assert "IBM (5 sedute; nessuna fonte ha reso righe)" in out
+
+
+def test_render_allerta_vuoto_se_niente_in_allerta():
+    from src.analysis.dossier.blind_set import render_blind_set_alert
+
+    assert render_blind_set_alert({"ticker_allerta_zero_articoli": []}) == ""
+    assert render_blind_set_alert({}) == ""
+    assert render_blind_set_alert(None) == ""
+
+
 def test_calendario_assente_non_inventa_uno_streak():
     out = build_blind_set(
         _coverage(ASML=_ticker(0, 0)),

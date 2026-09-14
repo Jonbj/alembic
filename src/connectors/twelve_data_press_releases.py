@@ -58,21 +58,25 @@ class TwelveDataPressReleasesConnector(NewsConnector):
 
     Un simbolo per chiamata (multi-symbol NON supportato dal fornitore —
     verificato 2026-09-07: `symbol=AAPL,MSFT` ritorna il solo primo).
-    Filtraggio temporale via `start_date`/`end_date` (formato YYYY-MM-DD),
-    paginazione via `outputsize`/`page`.
+    Il polling non applica un filtro temporale: la PoC deduplica il feed lato
+    nostro. La paginazione usa `outputsize`/`page`. Il piano della chiave PoC accetta
+    al massimo otto record per pagina: valori superiori restituiscono
+    `status='error', code=400` nel body pur con HTTP 200 (verifica live
+    2026-09-14).
     """
 
     def __init__(
         self,
         api_key: str,
         symbols: list[str] | None = None,
-        outputsize: int = 50,
+        outputsize: int = 8,
         timeout_s: float = 10.0,
     ):
         self._api_key = api_key
         self._symbols = symbols or []
-        # outputsize e' interpretato dal fornitore come per_page; teniamolo conservativo.
-        self._outputsize = max(1, min(outputsize, 50))
+        # outputsize e' interpretato dal fornitore come per_page. Il limite
+        # reale della chiave PoC e' 8; 20 e 50 generano code=400 nel JSON.
+        self._outputsize = max(1, min(outputsize, 8))
         self._timeout_s = timeout_s
         # Ultima risposta grezza servita dal fornitore (per simbolo): lo script
         # PoC la persiste come raw_response in news_poc_samples per il debug.
