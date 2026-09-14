@@ -392,6 +392,54 @@ def test_provenienze_diverse_da_source_metadata_non_marcano_il_tag():
     }
 
 
+def test_per_ticker_attribuisce_le_fonti_per_ticker_anche_se_effective_zero():
+    """#511 — un ticker puo' essere cieco effective-timely ma avere righe da un
+    provider. La copertura del giorno non distingue "il provider non copre" da
+    "il provider copre ma irrilevante". Il dossier espone per ogni ticker le
+    fonti che hanno reso almeno un mapping, con il conteggio effective-timely
+    di quel provider. Una fonte che non compare non e' coperta; una fonte con
+    conteggio zero effective non fa coverage utile ma la sua riga esiste."""
+    rows = [
+        # alpaca_benzinga copre ASML con un mapping irrilevante (macro fan-out):
+        # la riga esiste, effective_timely=0. La fonte DEVE comparire, con zero.
+        _row(81, "ASML", "Fed keeps rates unchanged", content_hash="c" * 64,
+             source="alpaca_benzinga", signal_id=801, score=0.10),
+        # gdelt_gkg copre ASML con un mapping ISSUER_SPECIFIC tempestivo.
+        _row(82, "ASML", "ASML raises 2026 capex guidance",
+             content_hash="d" * 64, source="gdelt_gkg",
+             published_at=OPEN.replace(hour=14), first_seen_at=OPEN.replace(hour=14, minute=5),
+             signal_id=802, score=0.30, issuer_terms=["ASML", "ASML Holding"]),
+    ]
+    out = build_article_coverage(
+        rows,
+        universe=["ASML"],
+        sector_by_ticker={"ASML": "semis"},
+        session_open=OPEN,
+        session_close=CLOSE,
+    )
+
+    fonti = out["per_ticker"]["ASML"]["fonti_osservate"]
+    assert fonti["alpaca_benzinga"]["articoli_unici"] == 1
+    assert fonti["alpaca_benzinga"]["articoli_effective_timely"] == 0
+    assert fonti["gdelt_gkg"]["articoli_unici"] == 1
+    assert fonti["gdelt_gkg"]["articoli_effective_timely"] == 1
+
+
+def test_per_ticker_fonti_vuote_quando_il_provider_non_resa_righe():
+    """#511 — il caso ``ASML fonti_osservate_finestra: []`` (10 sedute vuote)
+    si manifesta a livello di singolo ticker come un dizionario vuoto. Va
+    serializzato come tale, non come None e non come un fallback sul totale."""
+    out = build_article_coverage(
+        [],
+        universe=["ASML"],
+        sector_by_ticker={"ASML": "semis"},
+        session_open=OPEN,
+        session_close=CLOSE,
+    )
+
+    assert out["per_ticker"]["ASML"]["fonti_osservate"] == {}
+
+
 def test_content_mill_e_retrospettivi_sono_misurati_senza_cambiare_lo_scoring():
     """#508 — il sotto-tag separa copertura da stato operativo.
 
