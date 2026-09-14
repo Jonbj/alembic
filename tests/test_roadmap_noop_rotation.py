@@ -21,6 +21,7 @@ def _dry_run(
     impronta_salvata: str,
     versione_salvata: str = "2026-09-12T12:00:00Z",
     noop_count: int = 2,
+    updated_at_illeggibile: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -42,6 +43,7 @@ if [[ "$1 $2" == "issue view" ]]; then
     elif [[ "$*" == *"--json body,labels"* ]]; then
         printf '{"body":"invariato","labels":[{"name":"freeze-ok"}]}\\n'
     elif [[ "$*" == *"--json updatedAt"* ]]; then
+        [[ -n "${UPDATED_AT_KO:-}" ]] && exit 1
         printf '2026-09-12T12:00:00Z\\n'
     elif [[ "$*" == *"--json title"* ]]; then
         printf 'Issue %s\\n' "$3"
@@ -75,6 +77,8 @@ exit 1
             "ROADMAP_NOOP_STATE_FILE": str(noop_state),
         }
     )
+    if updated_at_illeggibile:
+        env["UPDATED_AT_KO"] = "1"
     return subprocess.run(
         ["bash", str(SCRIPT), "--dry-run"],
         capture_output=True,
@@ -206,3 +210,105 @@ exit 1
     assert "no-op dichiarato" in notifica
     assert "fuori rotazione per no-op ripetuti" in notifica
     assert "retriage dell'operatore" in notifica
+
+
+def test_impronta_cambiata_riammette_la_issue_anche_se_updated_at_non_si_legge(
+    tmp_path: Path,
+) -> None:
+    """#569: la prova del cambiamento e' gia' in mano, non la si butta via.
+
+    Con l'impronta diversa da quella salvata la issue e' cambiata; un disservizio
+    su `updatedAt` non puo' tenerla fuori rotazione finche' l'API non si riprende.
+    """
+    result = _dry_run(
+        tmp_path,
+        impronta_salvata="precedente",
+        updated_at_illeggibile=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "#10 — issue cambiata dopo l'ultimo no-op: rientra in rotazione" in result.stdout
+    assert "Issue selezionata: #10" in result.stdout
+    assert (tmp_path / "noop.tsv").read_text() == ""
+
+
+def test_due_noop_con_impronta_illeggibile_non_sospendono_la_issue(tmp_path: Path) -> None:
+    """#569: la sospensione dichiara "stessa versione", quindi va verificata.
+
+    Se l'impronta non e' leggibile, due letture fallite di fila darebbero la
+    stessa stringa: contarle come no-op sulla stessa versione della issue
+    sarebbe una sospensione motivata da una prova mai raccolta.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _scrivi_eseguibile(bin_dir / "codex", "printf 'Analisi conclusa.\\nNESSUNA PR\\n'\n")
+    _scrivi_eseguibile(
+        bin_dir / "git",
+        """\
+if [[ "$1 $2" == "worktree add" ]]; then
+    mkdir -p "$5"
+elif [[ "$1 $2" == "worktree remove" ]]; then
+    rm -rf "$4"
+fi
+exit 0
+""",
+    )
+    _scrivi_eseguibile(
+        bin_dir / "gh",
+        """\
+if [[ "$1 $2" == "pr list" ]]; then
+    exit 0
+fi
+if [[ "$1 $2" == "issue view" ]]; then
+    if [[ "$*" == *"--json state,labels"* ]]; then
+        printf 'OPEN freeze-ok\\n'
+    elif [[ "$*" == *"--json body,labels"* ]]; then
+        exit 1
+    elif [[ "$*" == *"--json comments"* ]]; then
+        printf '2099-01-01T00:00:00Z\\n'
+    elif [[ "$*" == *"--json updatedAt"* ]]; then
+        printf '2099-01-01T00:00:00Z\\n'
+    elif [[ "$*" == *"--json title"* ]]; then
+        printf 'Issue %s\\n' "$3"
+    fi
+    exit 0
+fi
+if [[ "$1" == "api" ]]; then
+    exit 0
+fi
+exit 1
+""",
+    )
+
+    queue = tmp_path / "queue.txt"
+    queue.write_text("10 prima\n")
+    log_dir = tmp_path / "logs"
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(tmp_path),
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "ROADMAP_FORCE_ENGINE": "codex",
+            "ROADMAP_QUEUE_FILE": str(queue),
+            "ROADMAP_LOG_DIR": str(log_dir),
+        }
+    )
+
+    for _ in range(2):
+        result = subprocess.run(
+            ["bash", str(SCRIPT)],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(ROOT),
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+
+    eventi = [
+        json.loads(line)
+        for line in (log_dir / "roadmap_results.jsonl").read_text().splitlines()
+    ]
+    assert [evento["result"] for evento in eventi] == ["noop", "noop"]
+    assert (log_dir / "roadmap_agent_noop_state.tsv").read_text().split("\t")[:2] == ["10", "1"]

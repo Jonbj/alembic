@@ -344,7 +344,12 @@ azzera_noop() {
 registra_noop() {
     local n="$1" impronta="$2" versione="$3" record prec=0 impronta_precedente=""
     record=$(awk -F'\t' -v issue="$n" '$1==issue {print; exit}' "$NOOP_STATE_FILE")
-    if [[ -n "$record" ]]; then
+    # La sospensione dichiara "due no-op sulla stessa versione della issue": se
+    # l'impronta o la versione non sono state lette, quella frase non e' stata
+    # verificata da nessuno e il conteggio riparte da capo (#569).
+    if [[ -z "$impronta" || -z "$versione" ]]; then
+        prec=0
+    elif [[ -n "$record" ]]; then
         IFS=$'\t' read -r _issue prec impronta_precedente _versione _ultimo <<< "$record"
         [[ "$impronta_precedente" == "$impronta" ]] || prec=0
     fi
@@ -376,6 +381,14 @@ noop_fuori_rotazione() {
         fi
         return 1
     fi
+    # L'impronta e' gia' in mano: se dice che la issue e' cambiata, la prova c'e'
+    # e non serve attendere updatedAt. Altrimenti una modifica reale resterebbe
+    # fuori rotazione per tutta la durata di un disservizio di GitHub (#569).
+    if [[ "$impronta_attuale" != "$impronta_salvata" ]]; then
+        azzera_noop "$n"
+        log "  #$n — issue cambiata dopo l'ultimo no-op: rientra in rotazione."
+        return 1
+    fi
     if ! versione_attuale=$(versione_issue "$n"); then
         if (( conteggio >= MAX_NOOP_CONSECUTIVI )); then
             log "  #$n — updatedAt non leggibile: conservo la sospensione per no-op."
@@ -383,8 +396,7 @@ noop_fuori_rotazione() {
         fi
         return 1
     fi
-    if [[ "$impronta_attuale" != "$impronta_salvata" \
-        || "$versione_attuale" != "$versione_salvata" ]]; then
+    if [[ "$versione_attuale" != "$versione_salvata" ]]; then
         azzera_noop "$n"
         log "  #$n — issue cambiata dopo l'ultimo no-op: rientra in rotazione."
         return 1
@@ -1110,8 +1122,11 @@ else
     CODA=$(echo "$OUTPUT" | tail -c 1200)
     if (( NOOP )); then
         storna_tentativo "$ISSUE"
-        _impronta=$(impronta_issue "$ISSUE" 2>/dev/null || echo "non-verificabile")
-        _versione=$(versione_issue "$ISSUE" 2>/dev/null || echo "non-verificabile")
+        # Niente segnaposto: due letture fallite di fila darebbero la stessa
+        # stringa, e il confronto in registra_noop la scambierebbe per la prova
+        # che la issue e' immutata. La stringa vuota dice "non verificato".
+        _impronta=$(impronta_issue "$ISSUE" 2>/dev/null) || _impronta=""
+        _versione=$(versione_issue "$ISSUE" 2>/dev/null) || _versione=""
         _n_noop=$(registra_noop "$ISSUE" "$_impronta" "$_versione")
         if (( _n_noop >= MAX_NOOP_CONSECUTIVI )); then
             log "#$ISSUE — $_n_noop no-op consecutivi: fuori rotazione fino a una modifica sostanziale; tentativo NON addebitato."
