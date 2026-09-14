@@ -465,6 +465,32 @@ PYEOF
         echo "ATTENZIONE: calendario earnings UNKNOWN da ${STREAK_CALENDARIO_EARNINGS} sedute consecutive — giorno_di_earnings cieco su ogni intento S4 (#507 / F-063)"
         tg_send "🚨 Dossier ${DATE_TARGET}: calendario earnings UNKNOWN da ${STREAK_CALENDARIO_EARNINGS} sedute consecutive — giorno_di_earnings e' cieco su ogni intento S4. Verifica FMP_API_KEY nel .env e <code>${LOG_FILE}</code> (#507 / F-063)." "" || true
     fi
+
+    # #511 / F-001: il conteggio aggregato zero-news nascondeva i ticker ciechi
+    # per piu' sedute. Il dossier dichiara ora lo streak raw per ticker; il cron
+    # lo porta all'operatore senza cambiare fonti, segnali o ordini. La soglia
+    # appartiene alla misura pre-registrata nella issue, non alla strategia.
+    BLIND_SET_ALERTS=$(python3 - "$DOSSIER_FILE" <<'PYEOF'
+import json
+import sys
+
+try:
+    coverage = (json.load(open(sys.argv[1])) or {}).get("copertura_articoli") or {}
+    blind_set = coverage.get("blind_set") or {}
+    rows = blind_set.get("per_ticker") or {}
+    tickers = blind_set.get("ticker_allerta_zero_articoli") or []
+    print(", ".join(
+        f"{ticker} ({rows.get(ticker, {}).get('sedute_consecutive_zero_articoli')} sedute)"
+        for ticker in tickers
+    ))
+except Exception:
+    pass
+PYEOF
+    )
+    if [[ -n "${BLIND_SET_ALERTS:-}" ]]; then
+        echo "ATTENZIONE: ticker senza articoli da almeno cinque sedute: ${BLIND_SET_ALERTS} (#511 / F-001)"
+        tg_send "🚨 Dossier ${DATE_TARGET}: ticker senza articoli da almeno cinque sedute — ${BLIND_SET_ALERTS}. Misura read-only: verifica resa provider e <code>${LOG_FILE}</code> (#511 / F-001)." "" || true
+    fi
 fi
 
 _CLAUDE_PROMPT="${_PROMPT_TEMPLATE//__DATE_TARGET__/$DATE_TARGET}"
