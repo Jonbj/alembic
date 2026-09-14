@@ -93,7 +93,7 @@ FINESTRA_MEDIANE = 20  # giorni, per le mediane mobili
 # senza far crescere la query oltre un indice su (ticker, fetched_at).
 FINESTRA_SEDUTE_COPERTURA = 10
 INIZIO_OSSERVAZIONE = date(2026, 8, 3)
-DOSSIER_SCHEMA_VERSION = "3.0"
+DOSSIER_SCHEMA_VERSION = "3.1"
 NEW_YORK = ZoneInfo("America/New_York")
 
 
@@ -1999,8 +1999,9 @@ def costruisci_dossier(
                 "mfe_mae": "high/low successivi allo stadio fino al cutoff, long-side",
                 "quote": "non clampate; valori <0 o >1 espongono reversal/overshoot",
                 "effective_timely_coverage": (
-                    "articolo canonicale ISSUER_SPECIFIC pubblicato entro il close RTH; "
-                    "UNKNOWN non entra nel numeratore"
+                    "articolo canonicale ISSUER_SPECIFIC pubblicato entro il close RTH, "
+                    "esclusi i template CONTENT_EMPTY; UNKNOWN non entra nel numeratore. "
+                    "Il campo including_content_empty conserva la definizione pre-#508"
                 ),
                 "ritorno_sessione_al_segnale": (
                     "(prezzo_al_segnale - close_prec) / close_prec per ogni "

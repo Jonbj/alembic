@@ -9,6 +9,7 @@ Skip se Postgres non e' raggiungibile.
 from __future__ import annotations
 
 import os
+import random
 import urllib.parse
 from pathlib import Path
 from unittest.mock import patch
@@ -195,6 +196,37 @@ def test_post_qt03_targets_are_explicit_per_extraction_method():
     }
     assert sum(targets.values()) == 400
     assert targets[("marketaux", "source_metadata")] == 5
+
+
+def test_window_sampler_riserva_lo_strato_near_zero_ai_content_mill():
+    """#508 — i template noti entrano nel golden set prima del near-zero casuale.
+
+    Si riusa la quota near-zero gia' dichiarata dal sampler: nessun nuovo target
+    o parametro di campionamento viene introdotto durante il freeze.
+    """
+    articles = [
+        {
+            "news_log_id": 1,
+            "title": "If You Invested $100 In Goldman Sachs 15 Years Ago",
+            "abs_sent": 0.002,
+        },
+        {
+            "news_log_id": 2,
+            "title": "6 Financials Stocks Whale Activity In Today's Session",
+            "abs_sent": 0.0,
+        },
+        {"news_log_id": 3, "title": "Generic neutral one", "abs_sent": 0.01},
+        {"news_log_id": 4, "title": "Generic neutral two", "abs_sent": 0.01},
+        {"news_log_id": 5, "title": "Material earnings beat", "abs_sent": 0.5},
+    ]
+
+    picked = sampler._pick(
+        articles, 5, random.Random(42), content_empty_stratum=True
+    )
+
+    # round(5 * 0.40) = 2: entrambi gli slot near-zero dedicati sono occupati
+    # dai due casi CONTENT_EMPTY, non lasciati al sorteggio fra tutti i neutri.
+    assert {row["news_log_id"] for row in picked[:2]} == {1, 2}
 
 
 def test_da_window_stratifies_by_extraction_method(db_url):

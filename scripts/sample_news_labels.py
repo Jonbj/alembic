@@ -11,7 +11,9 @@ Two modes:
   ``(source, extraction_method)`` with explicit targets (_TARGETS_POST_QT03),
   designed for the post-QT-03 population (`--da 2026-06-30`). A branch that
   stays under target is reported loudly (exit code 1), never silently filled
-  from another branch.
+  from another branch. Within the existing near-zero quota, known
+  ``CONTENT_EMPTY`` title templates are selected first (#508), so they reach
+  QX-01 without changing the sample size or its declared near-zero fraction.
 
 Collinearity caveat (premise of the #405 measurement, not a downstream
 discovery): in the post-QT-03 population ``extraction_method`` is nearly
@@ -40,6 +42,8 @@ import sys
 
 import psycopg2
 import psycopg2.extras
+
+from src.analysis.dossier.article_coverage import content_empty_title_reason
 
 _SEED = 42
 # Per-source targets (sum 400 — spec §5.9 Fase 1). gdelt has headline-only bodies
@@ -138,11 +142,29 @@ def _fetch_sources(cur, da: datetime.date | None,
     return [row["source"] for row in cur.fetchall()]
 
 
-def _pick(articles: list[dict], n: int, rng: random.Random) -> list[dict]:
-    """Pick n articles, oversampling near-zero sentiment, deterministically."""
+def _pick(
+    articles: list[dict],
+    n: int,
+    rng: random.Random,
+    *,
+    content_empty_stratum: bool = False,
+) -> list[dict]:
+    """Pick n articles, oversampling near-zero sentiment, deterministically.
+
+    Nei run post-QT-03 la quota near-zero gia' pre-registrata viene riempita
+    prima con i template CONTENT_EMPTY della #508. Cosi' il golden set li vede
+    senza introdurre un nuovo target o cambiare la numerosita' del campione.
+    """
     near = [a for a in articles if a["abs_sent"] < _NEAR_ZERO_THRESHOLD]
     rest = [a for a in articles if a["abs_sent"] >= _NEAR_ZERO_THRESHOLD]
-    rng.shuffle(near)
+    if content_empty_stratum:
+        content_empty = [a for a in near if content_empty_title_reason(a.get("title"))]
+        other_near = [a for a in near if not content_empty_title_reason(a.get("title"))]
+        rng.shuffle(content_empty)
+        rng.shuffle(other_near)
+        near = content_empty + other_near
+    else:
+        rng.shuffle(near)
     rng.shuffle(rest)
     n_near = min(len(near), int(round(n * _NEAR_ZERO_FRACTION)))
     picked = near[:n_near] + rest[: n - n_near]
@@ -232,9 +254,14 @@ def _sample_window(cur, rng: random.Random,
     shortfalls = []
     for (source, method), target in _TARGETS_POST_QT03.items():
         arts = available.get((source, method), [])
-        picked = _pick(arts, target, rng)
+        picked = _pick(arts, target, rng, content_empty_stratum=True)
         inserted += _insert_labels(cur, source, picked)
         line = f"{source}/{method}: {len(arts)} available → picked {len(picked)} / target {target}"
+        content_empty_picked = sum(
+            content_empty_title_reason(article.get("title")) is not None
+            for article in picked
+        )
+        line += f" (CONTENT_EMPTY stratum: {content_empty_picked})"
         if len(picked) < target:
             line += "  — UNDER TARGET: not filled from other branches"
             shortfalls.append(f"{source}/{method}: picked {len(picked)} of {target}")
