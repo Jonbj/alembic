@@ -8,6 +8,7 @@ Skip se Postgres non e' raggiungibile.
 
 from __future__ import annotations
 
+import inspect
 import os
 import random
 import urllib.parse
@@ -198,35 +199,55 @@ def test_post_qt03_targets_are_explicit_per_extraction_method():
     assert targets[("marketaux", "source_metadata")] == 5
 
 
-def test_window_sampler_riserva_lo_strato_near_zero_ai_content_mill():
-    """#508 — i template noti entrano nel golden set prima del near-zero casuale.
+def test_lo_strato_near_zero_non_viene_saturato_dai_content_mill():
+    """#508 — la quota near-zero resta un sorteggio uniforme.
 
-    Si riusa la quota near-zero gia' dichiarata dal sampler: nessun nuovo target
-    o parametro di campionamento viene introdotto durante il freeze.
+    La prima versione della misura metteva i template CONTENT_EMPTY in testa
+    allo strato near-zero. Con piu' candidati che slot — sul ramo
+    alpaca_benzinga 223 contro 72 — quella precedenza non li favoriva: li
+    rendeva l'intero strato. Qui i candidati sono 6 per 2 slot: se la
+    precedenza tornasse, entrambi gli slot sarebbero content-mill.
     """
-    articles = [
+    content_mill = [
         {
-            "news_log_id": 1,
-            "title": "If You Invested $100 In Goldman Sachs 15 Years Ago",
+            "news_log_id": i,
+            "title": f"If You Invested $100 In Company {i} 15 Years Ago",
             "abs_sent": 0.002,
-        },
-        {
-            "news_log_id": 2,
-            "title": "6 Financials Stocks Whale Activity In Today's Session",
-            "abs_sent": 0.0,
-        },
-        {"news_log_id": 3, "title": "Generic neutral one", "abs_sent": 0.01},
-        {"news_log_id": 4, "title": "Generic neutral two", "abs_sent": 0.01},
-        {"news_log_id": 5, "title": "Material earnings beat", "abs_sent": 0.5},
+        }
+        for i in range(1, 7)
     ]
+    generici = [
+        {"news_log_id": 100 + i, "title": f"Generic neutral {i}", "abs_sent": 0.01}
+        for i in range(1, 7)
+    ]
+    # Tre articoli non-near-zero: bastano a riempire 5 - 2 slot, cosi' la quota
+    # near-zero e' esattamente 2 e non viene gonfiata dal top-up di coda.
+    materiali = [
+        {"news_log_id": 900 + i, "title": f"Material earnings beat {i}", "abs_sent": 0.5}
+        for i in range(1, 4)
+    ]
+    articles = content_mill + generici + materiali
 
-    picked = sampler._pick(
-        articles, 5, random.Random(42), content_empty_stratum=True
-    )
+    # round(5 * 0.40) = 2 slot near-zero, con 6 content-mill in gara fra 12 neutri.
+    quote = []
+    for seed in range(40):
+        picked = sampler._pick(articles, 5, random.Random(seed))
+        near = [row for row in picked if row["abs_sent"] < sampler._NEAR_ZERO_THRESHOLD]
+        assert len(near) == 2
+        quote.append(
+            sum(row["news_log_id"] <= 6 for row in near) / 2
+        )
 
-    # round(5 * 0.40) = 2: entrambi gli slot near-zero dedicati sono occupati
-    # dai due casi CONTENT_EMPTY, non lasciati al sorteggio fra tutti i neutri.
-    assert {row["news_log_id"] for row in picked[:2]} == {1, 2}
+    # Con precedenza forzata ogni seed darebbe 1.0. Sotto sorteggio uniforme la
+    # quota media insegue quella della popolazione near-zero (6/12 = 0,5).
+    assert max(quote) == 1.0 and min(quote) == 0.0
+    media = sum(quote) / len(quote)
+    assert 0.3 < media < 0.7, media
+
+
+def test_pick_non_accetta_piu_uno_strato_content_empty():
+    """La firma non deve poter tornare a forzare la composizione dello strato."""
+    assert "content_empty_stratum" not in inspect.signature(sampler._pick).parameters
 
 
 def test_da_window_stratifies_by_extraction_method(db_url):
