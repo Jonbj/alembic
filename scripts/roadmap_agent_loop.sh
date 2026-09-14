@@ -1076,6 +1076,11 @@ recupera_review_ferme() {
         rivedi_e_mergia "$_pr" "$_issue" "$_branch" "$_wt" "$_impl" "$_tit" "$_url"
         _EVENTO_EXTRA=(); _REVIEW_ETICHETTA=""
         git worktree remove --force "$_wt" 2>/dev/null || true
+        # Le altre tre uscite chiudono fd 8; questa e' l'unica che non lo faceva.
+        # Oggi non cambia nulla — il chiamante esce subito dopo e il kernel
+        # rilascia comunque il lock — ma e' la strada che smette di essere
+        # innocua nel momento in cui il recupero non chiudera' piu' il giro.
+        exec 8>&-
         return 0
     done <<< "$_ordinate"
 
