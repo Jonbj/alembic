@@ -111,24 +111,32 @@ class TwelveDataPressReleasesConnector(NewsConnector):
         un rate limit su uno non deve bloccare gli altri.
         """
         timeout = aiohttp.ClientTimeout(total=self._timeout_s)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(_TWELVE_PR_URL, params=self._params_for(symbol)) as resp:
-                if resp.status == 401 or resp.status == 403:
-                    raise TwelveDataAuthError(
-                        f"Twelve Data returned {resp.status} — check TWELVE_DATA_API_KEY"
-                    )
-                if resp.status == 429:
-                    raise TwelveDataRateLimitError(
-                        f"Twelve Data 429 — credit/min exhausted ({symbol})"
-                    )
-                if resp.status >= 500:
-                    logger.warning("Twelve Data server error %d — skipping %s", resp.status, symbol)
-                    return
-                try:
-                    data = await resp.json()
-                except (ValueError, aiohttp.ContentTypeError) as exc:
-                    logger.warning("Twelve Data non-JSON response for %s: %s", symbol, exc)
-                    return
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(_TWELVE_PR_URL, params=self._params_for(symbol)) as resp:
+                    if resp.status == 401 or resp.status == 403:
+                        raise TwelveDataAuthError(
+                            f"Twelve Data returned {resp.status} — check TWELVE_DATA_API_KEY"
+                        )
+                    if resp.status == 429:
+                        raise TwelveDataRateLimitError(
+                            f"Twelve Data 429 — credit/min exhausted ({symbol})"
+                        )
+                    if resp.status >= 500:
+                        logger.warning(
+                            "Twelve Data server error %d — skipping %s",
+                            resp.status,
+                            symbol,
+                        )
+                        return
+                    try:
+                        data = await resp.json()
+                    except (ValueError, aiohttp.ContentTypeError) as exc:
+                        logger.warning("Twelve Data non-JSON response for %s: %s", symbol, exc)
+                        return
+        except (TimeoutError, aiohttp.ClientError) as exc:
+            logger.warning("Twelve Data network timeout/error for %s: %s", symbol, exc)
+            return
 
         self.last_response = data if isinstance(data, dict) else None
 

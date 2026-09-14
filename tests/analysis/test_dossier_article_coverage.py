@@ -11,6 +11,7 @@ from src.analysis.dossier.article_coverage import (
     build_article_coverage,
     canonical_article_id,
     classify_timing,
+    content_empty_title_reason,
 )
 
 
@@ -76,6 +77,22 @@ def test_timing_ha_tre_bucket_espliciti_e_unknown():
     assert classify_timing(None, OPEN, CLOSE) == "UNKNOWN"
 
 
+def test_detector_content_empty_copre_solo_i_template_pre_registrati():
+    assert content_empty_title_reason(
+        "Here's How Much $1000 Invested In Meta Platforms 10 Years Ago "
+        "Would Be Worth Today"
+    ) == "EVERGREEN_RETURN_TEMPLATE"
+    assert content_empty_title_reason(
+        "6 Financials Stocks Whale Activity In Today's Session"
+    ) == "WHALE_ACTIVITY_TEMPLATE"
+    assert content_empty_title_reason(
+        "This OGE Energy Analyst Turns Bullish; Here Are Top 4 Upgrades For Wednesday"
+    ) == "RATINGS_LISTICLE_TEMPLATE"
+    assert content_empty_title_reason(
+        "Apple raises guidance after stronger iPhone demand"
+    ) is None
+
+
 def test_copertura_deduplica_articoli_separa_relevance_e_attribuisce_ogni_segnale():
     rows = [
         # Una syndication issuer-specific su AAPL: due righe e due segnali, ma
@@ -136,7 +153,9 @@ def test_copertura_deduplica_articoli_separa_relevance_e_attribuisce_ogni_segnal
             "TAG_UNCONFIRMED": 0,
             "UNKNOWN": 0,
         },
+        "mapping_content_empty": 0,
         "articoli_effective_timely": 2,
+        "articoli_effective_timely_including_content_empty": 2,
     }
     assert out["effective_timely_coverage"] == {
         "ticker_coperti": 2,
@@ -370,4 +389,90 @@ def test_provenienze_diverse_da_source_metadata_non_marcano_il_tag():
         "IRRELEVANT_FANOUT": 0,
         "TAG_UNCONFIRMED": 0,
         "UNKNOWN": 2,
+    }
+
+
+def test_content_mill_e_retrospettivi_sono_misurati_senza_cambiare_lo_scoring():
+    """#508 — il sotto-tag separa copertura da stato operativo.
+
+    I due template osservati su GS/ORCL non sono copertura utile, mentre il
+    segnale resta issuer-specific e continua a concorrere a max_score_own:
+    escluderlo dallo scoring durante il freeze sarebbe un cambio di comportamento.
+    """
+    rows = [
+        _row(
+            61,
+            "GS",
+            "If You Invested $100 In Goldman Sachs Group Stock 15 Years Ago, "
+            "You Would Have This Much Today",
+            signal_id=701,
+            score=0.002,
+            issuer_terms=["Goldman Sachs", "GS"],
+        ),
+        _row(
+            62,
+            "ORCL",
+            "$100 Invested In Oracle 20 Years Ago Would Be Worth This Much Today",
+            signal_id=702,
+            score=0.0,
+            issuer_terms=["Oracle", "ORCL"],
+        ),
+        _row(
+            63,
+            "AAPL",
+            "Apple raises guidance after stronger iPhone demand",
+            signal_id=703,
+            score=0.41,
+            issuer_terms=["Apple", "AAPL"],
+        ),
+        _row(
+            64,
+            "MSFT",
+            "Microsoft announces a new cloud region",
+            published_at=CLOSE.replace(hour=21),
+            signal_id=704,
+            score=0.22,
+            issuer_terms=["Microsoft", "MSFT"],
+        ),
+    ]
+
+    out = build_article_coverage(
+        rows,
+        universe=["GS", "ORCL", "AAPL", "MSFT"],
+        sector_by_ticker={
+            "GS": "financials",
+            "ORCL": "tech",
+            "AAPL": "tech",
+            "MSFT": "tech",
+        },
+        session_open=OPEN,
+        session_close=CLOSE,
+    )
+
+    signals = {row["ticker"]: row for row in out["segnali"]}
+    assert signals["GS"]["relevance"] == "ISSUER_SPECIFIC"
+    assert signals["GS"]["attribution"] == "ISSUER_SPECIFIC"
+    assert signals["GS"]["content_tag"] == "CONTENT_EMPTY"
+    assert signals["GS"]["content_empty_reason"] == "EVERGREEN_RETURN_TEMPLATE"
+    assert signals["ORCL"]["content_tag"] == "CONTENT_EMPTY"
+    assert signals["MSFT"]["content_empty_reason"] == "RETROSPECTIVE_TIMING"
+    assert signals["AAPL"]["content_tag"] is None
+
+    # Freeze #171: il sotto-tag corregge la misura, non lo stato operativo.
+    assert out["per_ticker"]["GS"]["max_score_own"] == 0.002
+    assert out["per_ticker"]["ORCL"]["max_score_own"] == 0.0
+
+    assert out["totali"]["mapping_rilevanza"]["ISSUER_SPECIFIC"] == 4
+    assert out["totali"]["mapping_content_empty"] == 3
+    assert out["totali"]["articoli_effective_timely"] == 1
+    assert out["totali"]["articoli_effective_timely_including_content_empty"] == 3
+    assert out["effective_timely_coverage"] == {
+        "ticker_coperti": 1,
+        "ticker_universo": 4,
+        "quota": 0.25,
+    }
+    assert out["effective_timely_coverage_including_content_empty"] == {
+        "ticker_coperti": 3,
+        "ticker_universo": 4,
+        "quota": 0.75,
     }
