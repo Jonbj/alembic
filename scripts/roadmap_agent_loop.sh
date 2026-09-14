@@ -42,7 +42,12 @@
 #                              (crash, timeout, sessione persa). Tentativo addebitato
 #   result: "all_rate_limited" nessun motore disponibile, giro rimandato
 # Le altre azioni: `queue` (result: empty), `engine_select`, `review`
-# (result: merged | merge_rejected | not_merged).
+# (result: merged | merge_rejected | not_merged). Una review portata avanti fuori
+# dal giro che ha aperto la PR si riconosce da un campo in piu':
+#   recovery: 1    review ferma ripresa dal giro successivo (vedi
+#                  recupera_review_ferme)
+#   tiebreaker: 1  terzo giudizio concesso alla issue in uscita dalla rotazione
+# Un riassunto leggibile di tutto questo: `--digest [giorni]`.
 
 set -euo pipefail
 
@@ -221,8 +226,9 @@ log() { echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') $*" | tee -a "$LOG_FILE"; }
 # Una riga JSON per evento significativo (0-1 per giro): risponde a domande tipo
 # "quante PR ha mergiato codex questo mese" senza ssh+grep+incrocio manuale con
 # GitHub. Append-only e mai riletto da questo script — e' un log di eventi, non
-# uno stato che il loop deve mantenere coerente. Si carica in pandas/sqlite
-# quando serve analizzarlo.
+# uno stato che il loop deve mantenere COERENTE: lo rileggono solo il digest e la
+# scelta di quale review ferma recuperare, e nessuno dei due lo riscrive ne' si
+# rompe se manca. Si carica in pandas/sqlite quando serve analizzarlo.
 RESULTS_FILE="$LOG_DIR/roadmap_results.jsonl"
 
 # Scrive un evento. Argomenti come "chiave=valore"; un valore che inizia con '#'
@@ -248,16 +254,9 @@ log_evento() {
     jq -nc "${jq_args[@]}" "{${jq_filter}}" >> "$RESULTS_FILE" 2>/dev/null || true
 }
 
-# Un solo giro alla volta. Senza questo, due run sovrapposti lavorerebbero la
-# stessa issue in due worktree diversi e produrrebbero due PR concorrenti.
-exec 9>"$LOCK_FILE"
-if ! flock -n 9; then
-    log "Un altro giro e' gia' in corso — esco."
-    exit 0
-fi
-
-cd "$PROJECT_DIR"
-
+# Telegram e' definito PRIMA del lock: `--digest` e' una lettura e deve poter
+# girare anche mentre un giro e' in corso (un giro dura fino a 90 minuti, e un
+# riassunto che si rifiuta di uscire per quel motivo non lo guarderebbe nessuno).
 if [[ -f "$PROJECT_DIR/.env" ]]; then
     set -a
     # shellcheck disable=SC1091
@@ -272,10 +271,134 @@ tg_send() {
         -d chat_id="${TELEGRAM_CHAT_ID}" -d parse_mode="HTML" -d text="$text" >/dev/null || true
 }
 
+# --- digest degli esiti ---------------------------------------------------------
+# `--digest [giorni]` (default 7): riassume $RESULTS_FILE. Quanto lavoro e' entrato
+# nel funnel, quanto ne e' uscito mergiato, e — la parte che serve davvero — DOVE
+# si e' fermato il resto. Non e' in crontab: lo chiama l'operatore.
+#
+# Insieme al recupero delle review ferme e' l'unico lettore di
+# roadmap_results.jsonl dentro questo script. Il file resta append-only: qui si
+# legge e basta, nessuno dei due lo riscrive.
+_DIGEST_JQ='
+def perc($n; $d): if $d == 0 then "n/d" else ((1000 * $n / $d | round) / 10 | tostring) + "%" end;
+def minuti($s): (($s / 60) | round | tostring) + "m";
+
+map(select(.ts >= $da))                                              as $e
+| ($e | map(select(.action == "work")))                              as $w
+| ($e | map(select(.action == "review")))                            as $r
+| (def n($x): $w | map(select(.result == $x)) | length;
+   { aperte: n("pr_opened"), noop: n("noop"), sospese: n("noop_suspended"),
+     falliti: n("failed"), rate: n("all_rate_limited") })            as $c
+| ($r | map(select(.result == "merged")) | length)                   as $merged
+| ($r | map(select(.result == "merge_rejected")) | length)           as $rifiutati
+| (def v($x): $r | map(select(.verdetto == $x)) | length;
+   { app: v("APPROVA"), resp: v("RESPINGI"), non: v("NON_ESEGUITA") }) as $vd
+| ($r | map(select((.recovery // 0) == 1)) | length)                 as $rec
+| ($r | map(select((.tiebreaker // 0) == 1)) | length)               as $tb
+| ($e | map(select(.action == "queue" and .result == "empty")) | length) as $vuoti
+| ($r | map(select(.verdetto == "RESPINGI")) | group_by(.issue)
+     | map({issue: .[0].issue, n: length}) | sort_by([-.n, .issue]) | .[0:5]) as $top_resp
+| ($r | group_by(.pr)
+     | map(select(all(.[]; .verdetto == "NON_ESEGUITA")))
+     | map({pr: .[0].pr, issue: .[0].issue, n: length, ultima: (map(.ts) | max)})
+     | sort_by([-.n, .pr]) | .[0:5])                                 as $top_ferme
+| ($w | map(select(.duration_s != null)) | group_by(.result)
+     | map({r: .[0].result, n: length, media: ((map(.duration_s) | add) / length)})
+     | sort_by(-.n))                                                 as $durate
+| [ "# Digest roadmap — ultimi \($giorni) giorni",
+    "",
+    "Finestra: \($da) → \($ora) · eventi letti: \($e | length)",
+    "",
+    "## Giri di lavoro",
+    "- PR aperte: \($c.aperte)",
+    "- no-op: \($c.noop) (di cui sospensioni: \($c.sospese))",
+    "- falliti: \($c.falliti)",
+    "- rimandati per rate limit: \($c.rate)",
+    "- coda vuota: \($vuoti)",
+    "",
+    "## Conversione",
+    "- PR aperte \($c.aperte) → mergiate \($merged) = \(perc($merged; $c.aperte))",
+    "- merge rifiutati da GitHub: \($rifiutati)",
+    "",
+    "## Review",
+    "- tentate: \($r | length) → APPROVA \($vd.app) · RESPINGI \($vd.resp) · NON_ESEGUITA \($vd.non)",
+    "- di cui recuperi: \($rec) · tie-breaker: \($tb)",
+    "",
+    "## Top 5 issue per respinte" ]
+  + (if ($top_resp | length) == 0 then ["- nessuna"]
+     else ($top_resp | map("- #\(.issue) — \(.n) respinte")) end)
+  + [ "",
+      "## Top 5 PR ferme senza verdetto" ]
+  + (if ($top_ferme | length) == 0 then ["- nessuna"]
+     else ($top_ferme | map("- PR #\(.pr) (issue #\(.issue)) — \(.n) review non eseguite, ultima \(.ultima)")) end)
+  + [ "",
+      "## Durata media dei giri di lavoro" ]
+  + (if ($durate | length) == 0 then ["- nessun dato"]
+     else ($durate | map("- \(.r): \(minuti(.media)) (n=\(.n))")) end)
+| .[]
+'
+
+digest_roadmap() {
+    local giorni="${1:-7}" da ora corpo file
+    if [[ ! "$giorni" =~ ^[0-9]+$ ]] || (( giorni < 1 )); then
+        echo "uso: --digest [giorni]   (default 7)" >&2; return 2
+    fi
+    if [[ ! -s "$RESULTS_FILE" ]]; then
+        echo "Nessun evento in $RESULTS_FILE: niente da riassumere." >&2; return 1
+    fi
+    da=$(date -u -d "-${giorni} days" '+%Y-%m-%dT%H:%M:%SZ')
+    ora=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    file="$LOG_DIR/roadmap_digest_$(date -u '+%Y-%m-%d').md"
+
+    # `-s` legge tutto il file come un array: il digest e' un aggregato, non un
+    # filtro riga per riga. Le righe malformate non devono far sparire il digest.
+    if ! corpo=$(jq -rs --arg da "$da" --arg ora "$ora" --arg giorni "$giorni" "$_DIGEST_JQ" "$RESULTS_FILE" 2>/dev/null); then
+        echo "Digest non calcolabile: $RESULTS_FILE non e' leggibile da jq." >&2; return 1
+    fi
+
+    printf '%s\n' "$corpo" > "$file"
+    printf '%s\n' "$corpo"
+    echo
+    echo "(record scritto in ${file#"$PROJECT_DIR/"})"
+
+    # Telegram taglia a 4096 caratteri: si manda la parte alta, che e' quella con
+    # i totali. Il file su disco resta la copia integrale.
+    tg_send "📊 <b>Roadmap — digest ${giorni}g</b>
+<pre>$(printf '%s\n' "$corpo" | head -c 3500 | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')</pre>"
+}
+
+if [[ "${1:-}" == "--digest" ]]; then
+    # `|| exit $?` e non il solo `exit $?`: con set -e un digest che si rifiuta
+    # (file assente, jq che non legge) uscirebbe prima di quella riga, e l'uso
+    # sbagliato dell'argomento tornerebbe 1 invece di 2.
+    digest_roadmap "${2:-7}" || exit $?
+    exit 0
+fi
+
+# Un solo giro alla volta. Senza questo, due run sovrapposti lavorerebbero la
+# stessa issue in due worktree diversi e produrrebbero due PR concorrenti.
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+    log "Un altro giro e' gia' in corso — esco."
+    exit 0
+fi
+
+cd "$PROJECT_DIR"
+
 RESPINTE_FILE="$LOG_DIR/roadmap_agent_respinte.tsv"
 MAX_RESPINTE=2           # oltre, il problema non e' l'esecuzione ma la specifica
 RIPRESA=0
 touch "$RESPINTE_FILE"
+
+# Le due review che NON nascono dal giro che apre la PR — il recupero di una
+# review ferma e il tie-breaker — passano dalla stessa `rivedi_e_mergia` dei giri
+# normali. Non ne esiste una seconda copia: sarebbe il punto dove i due cancelli
+# si perdono senza che nessuno se ne accorga. Quello che cambia lo dicono queste
+# tre variabili, lette da rivedi_e_mergia e sempre riazzerate dal chiamante.
+_EVENTO_EXTRA=()          # campi in piu' su log_evento: recovery=#1 / tiebreaker=#1
+REVISORE_FORZATO=""       # tie-breaker: il recensore e' imposto, non e' di turno
+TIEBREAK_IN_CORSO=0       # una respinta di tie-breaker non e' una respinta in piu'
+_REVIEW_ETICHETTA=""      # titolo del messaggio Telegram di apertura review
 
 respinte_di() { awk -F'\t' -v n="$1" '$1==n {print $2}' "$RESPINTE_FILE" | tail -1; }
 
@@ -619,20 +742,33 @@ conta_regressioni() {  # $1 = run della PR. Esito: numero di test rotti NUOVI.
 # NON si fa — meglio nessuna review che un modello che si rilegge da solo.
 scegli_recensore() {
     local implementatore="$1" c
+    # Il tie-breaker chiede UN motore preciso: quello che non ha ancora giudicato
+    # la issue. Resta soggetto al cancello — se coincide con l'implementatore non
+    # vale — e non ha ripiego: ricadere sulla rotazione rimetterebbe in cattedra
+    # proprio uno dei due recensori che avevano gia' respinto.
+    if [[ -n "$REVISORE_FORZATO" ]]; then
+        if [[ "$REVISORE_FORZATO" != "$implementatore" ]] \
+            && motore_installato "$REVISORE_FORZATO" \
+            && ! motore_in_panchina "$REVISORE_FORZATO"; then
+            echo "$REVISORE_FORZATO"; return 0
+        fi
+        return 1
+    fi
     for c in "${MOTORI_DISPONIBILI[@]}"; do
         [[ "$c" != "$implementatore" ]] && { echo "$c"; return 0; }
     done
     return 1
 }
 
-# Review + cancelli, isolati in una funzione perche' servono in due punti: dentro
-# il giro, e in --rivedi per recuperare una PR rimasta senza verdetto. Senza il
-# secondo, una PR bloccata blocca la sua issue per sempre: il giro la salta
-# proprio perche' ha gia' una PR aperta.
+# Review + cancelli, isolati in una funzione perche' servono in quattro punti:
+# dentro il giro che apre la PR, in --rivedi (recupero manuale), nel recupero
+# automatico delle review ferme e nel tie-breaker. Senza gli ultimi due, una PR
+# bloccata blocca la sua issue per sempre: il giro la salta proprio perche' ha
+# gia' una PR aperta.
 rivedi_e_mergia() {
     local _PR="$1" _ISSUE="$2" _BRANCH="$3" _WT="$4" _IMPL="$5" _TIT="$6" _URL="$7"
-    local REGRESSIONI VERDETTO REVISORE RID REV_OUT REV_PROMPT _REV_TEMPLATE _REV_FILE
-    tg_send "🔍 <b>Roadmap — PR aperta, review in corso</b>
+    local REGRESSIONI VERDETTO REVISORE RID REV_OUT REV_PROMPT _REV_TEMPLATE _REV_FILE _coda_tb
+    tg_send "🔍 <b>Roadmap — ${_REVIEW_ETICHETTA:-PR aperta, review in corso}</b>
 Issue #${_ISSUE}: ${_TIT}
 Implementata da: ${_IMPL}
 ${_URL}"
@@ -763,7 +899,8 @@ ${_URL}
 
 <i>Riconciliazione del deploy avviata: rimandata da sola se il mercato e&#39; aperto.</i>"
             log_evento "review" "result=merged" "engine=$REVISORE" "impl=$_IMPL" \
-                "issue=#$_ISSUE" "pr=#$_PR" "regressions=#$REGRESSIONI" "verdetto=$VERDETTO"
+                "issue=#$_ISSUE" "pr=#$_PR" "regressions=#$REGRESSIONI" "verdetto=$VERDETTO" \
+                ${_EVENTO_EXTRA[@]+"${_EVENTO_EXTRA[@]}"}
             # Il riconciliatore decide da solo se e quando: se il mercato e' aperto
             # rimanda, e il cron ripassa. Qui serve solo a non aspettare il cron
             # quando la finestra e' gia' libera.
@@ -774,15 +911,24 @@ ${_URL}
             tg_send "⚠️ <b>Roadmap</b> — #${_PR} approvata ma il merge e&#39; stato rifiutato da GitHub. Serve una mano.
 ${_URL}"
             log_evento "review" "result=merge_rejected" "engine=${REVISORE:-none}" "impl=$_IMPL" \
-                "issue=#$_ISSUE" "pr=#$_PR" "regressions=#$REGRESSIONI" "verdetto=$VERDETTO"
+                "issue=#$_ISSUE" "pr=#$_PR" "regressions=#$REGRESSIONI" "verdetto=$VERDETTO" \
+                ${_EVENTO_EXTRA[@]+"${_EVENTO_EXTRA[@]}"}
         fi
     else
-        [[ "$VERDETTO" == "RESPINGI" ]] && registra_respinta "$_ISSUE"
+        # Il tie-breaker e' la review DELLA seconda respinta, non una terza: se
+        # contasse, il contatore direbbe 3 e non vorrebbe piu' dire "due modelli
+        # indipendenti hanno bocciato" — che e' l'unica cosa che quel numero deve
+        # dire, perche' e' il numero su cui la issue esce dalla rotazione.
+        if [[ "$VERDETTO" == "RESPINGI" ]] && (( TIEBREAK_IN_CORSO == 0 )); then
+            registra_respinta "$_ISSUE"
+        fi
         _n=$(respinte_di "$_ISSUE"); _n=${_n:-0}
         log "#$_ISSUE — NON mergiata (verdetto=$VERDETTO, regressioni=$REGRESSIONI, respinte=$_n)."
+        _coda_tb=""
+        (( TIEBREAK_IN_CORSO )) && _coda_tb=", e confermata dal tie-breaker di ${REVISORE}"
         if [[ "$VERDETTO" == "RESPINGI" ]] && (( _n >= MAX_RESPINTE )); then
             tg_send "🛑 <b>Roadmap — #${_ISSUE} esce dalla rotazione</b>
-Respinta ${_n} volte da modelli diversi. Quando due modelli distinti non ci riescono il problema non e&#39; l&#39;esecuzione ma la specifica: serve una tua decisione, non un altro giro.
+Respinta ${_n} volte da modelli diversi${_coda_tb}. Quando modelli distinti non ci riescono il problema non e&#39; l&#39;esecuzione ma la specifica: serve una tua decisione, non un altro giro.
 ${_URL}"
         fi
         tg_send "🟡 <b>Roadmap — PR da guardare</b>
@@ -791,8 +937,262 @@ Implementata da ${_IMPL}${REVISORE:+, rivista da $REVISORE}
 Verdetto: <b>${VERDETTO}</b> · test rotti in piu&#39; rispetto a main: <b>${REGRESSIONI}</b>
 ${_URL}"
         log_evento "review" "result=not_merged" "engine=${REVISORE:-none}" "impl=$_IMPL" \
-            "issue=#$_ISSUE" "pr=#$_PR" "regressions=#$REGRESSIONI" "verdetto=$VERDETTO" "respinte=#$_n"
+            "issue=#$_ISSUE" "pr=#$_PR" "regressions=#$REGRESSIONI" "verdetto=$VERDETTO" "respinte=#$_n" \
+            ${_EVENTO_EXTRA[@]+"${_EVENTO_EXTRA[@]}"}
     fi
+}
+
+# --- recupero delle review ferme -------------------------------------------------
+# Il difetto di flusso dominante del loop, misurato sui 336 eventi del
+# 2026-08-20→09-14: 67 review su 157 non sono mai partite. Quasi tutte per lo
+# stesso motivo — nel giro che apre la PR `attendi_ci` scade dopo CI_ATTESA_MAX,
+# il verdetto resta NON_ESEGUITA, e dal giro dopo la selezione salta quella issue
+# PROPRIO perche' ha una PR aperta in attesa di verdetto. Nessuno ripassa: la PR
+# resta ferma per sempre, e l'unico modo di sbloccarla era che un operatore
+# ricordasse di lanciare `--rivedi`. Sono 119 PR aperte contro 14 mergiate.
+#
+# Il recupero non aggiunge un secondo cammino al merge: rientra da
+# `rivedi_e_mergia`, con gli stessi due cancelli (nessuna regressione rispetto a
+# main, recensore diverso dall'implementatore). L'unica cosa che cambia e' QUANDO
+# ci si rientra.
+RECOVERY_LOCK="$LOG_DIR/roadmap_recovery.lock"
+
+# Il verdetto registrato su una PR NON si cerca nel testo libero dei commenti: la
+# trascrizione pubblicata contiene l'eco del prompt di review, che a sua volta
+# contiene entrambe le righe canoniche. E' lo stesso difetto chiuso in
+# `estrai_verdetto` con `tail -1`, e qui costerebbe il contrario di li': una PR
+# ferma scambiata per gia' giudicata, quindi mai recuperata. Vale solo
+# l'intestazione che scrive questo script, `Verdetto letto: **X**`.
+verdetto_registrato_pr() {
+    local _pr="$1" _corpi
+    _corpi=$(gh pr view "$_pr" --json comments -q '.comments[].body' 2>/dev/null || echo "")
+    printf '%s\n' "$_corpi" \
+        | { grep -oE '^Verdetto letto: \*\*(APPROVA|RESPINGI)\*\*' || true; } \
+        | tail -1 | { grep -oE 'APPROVA|RESPINGI' || true; }
+}
+
+# La CI della testa del branch e' gia' conclusa? Stessa domanda che fa `attendi_ci`,
+# senza l'attesa: qui serve a decidere se spendere il giro, non a giudicare.
+ci_gia_conclusa() {
+    local _rid
+    _rid=$(_run_completato "$1" "$2")
+    [[ -n "$_rid" && "$_rid" != "null" ]]
+}
+
+# Quante volte si e' gia' provato a recuperare ciascuna PR. Serve a scorrere: con
+# un ordinamento fisso, una PR che fallisce sempre (recensore in rate limit, CI
+# che non si conclude mai) si riprenderebbe la testa della lista a ogni giro e
+# nessun'altra verrebbe mai guardata. Il conteggio si legge dal log degli eventi,
+# che e' gia' il registro di cio' che e' successo: nessuno stato nuovo da tenere
+# allineato.
+_recuperi_per_pr() {
+    jq -r 'select(.action == "review" and (.recovery // 0) == 1) | .pr' "$RESULTS_FILE" 2>/dev/null \
+        | sort | uniq -c | awk '{print $2"\t"$1}' || true
+}
+
+# Esito 0 = il giro e' stato speso qui (una review recuperata); 1 = niente da fare.
+recupera_review_ferme() {
+    local _righe _ordinate _recuperi _in_attesa=0 _senza_verdetto=0 _senza_recensore=0
+    local _pr _branch _sha _tit _url _issue _impl _wt
+
+    # Il lock globale del giro (fd 9) gia' impedisce due giri sovrapposti, ma non
+    # copre `--rivedi` lanciato a mano... che pero' passa dallo stesso fd 9. Questo
+    # secondo lock e' per il caso in cui quella garanzia venga allentata: due
+    # review sulla stessa PR nello stesso momento pubblicherebbero due verdetti
+    # discordi sullo stesso commit, e il merge seguirebbe quello che arriva ultimo.
+    exec 8>"$RECOVERY_LOCK"
+    if ! flock -n 8; then
+        log "Recupero review: un altro recupero e' gia' in corso — salto."
+        exec 8>&-
+        return 1
+    fi
+
+    # Solo le PR del loop (`agent/issue-N`): il recupero non deve giudicare il
+    # lavoro di un umano. Le bozze e le PR con una review GitHub vera sono gia'
+    # in mano a qualcuno.
+    _righe=$(gh pr list --state open --limit 200 \
+        --json number,headRefName,headRefOid,title,url,isDraft,reviewDecision 2>/dev/null \
+        | jq -r '.[]
+                 | select((.isDraft // false) | not)
+                 | select((.reviewDecision // "") | . == "" or . == "REVIEW_REQUIRED")
+                 | select(.headRefName | test("^agent/issue-[0-9]+"))
+                 | [.number, .headRefName, .headRefOid, .title, .url] | @tsv' 2>/dev/null || true)
+    if [[ -z "$_righe" ]]; then
+        exec 8>&-
+        return 1
+    fi
+
+    _recuperi=$(_recuperi_per_pr)
+    _ordinate=$(awk -F'\t' -v OFS='\t' '
+        NR == FNR { c[$1] = $2; next }
+        { print (($1 in c) ? c[$1] : 0), $0 }
+    ' <(printf '%s\n' "$_recuperi") <(printf '%s\n' "$_righe") | sort -k1,1n -k2,2n)
+
+    while IFS=$'\t' read -r _n_rec _pr _branch _sha _tit _url; do
+        [[ -n "${_pr:-}" ]] || continue
+        _issue=$(issue_del_branch "$_branch")
+        [[ -n "$_issue" ]] || continue
+        [[ -z "$(verdetto_registrato_pr "$_pr")" ]] || continue
+        _senza_verdetto=$(( _senza_verdetto + 1 ))
+
+        # CI non conclusa: la PR non e' ferma, sta ancora girando. Si lascia stare
+        # in silenzio — niente Telegram, niente evento — perche' un'attesa normale
+        # non e' una notizia, e ripetuta a ogni giro sarebbe solo rumore.
+        if ! ci_gia_conclusa "$_branch" "$_sha"; then
+            _in_attesa=$(( _in_attesa + 1 ))
+            continue
+        fi
+
+        # L'implementatore va escluso dalla review. Se non e' ricavabile dal log si
+        # assume il motore di turno: e' l'ipotesi prudente — al massimo cambia
+        # recensore, mai lo fa coincidere con chi ha scritto la PR.
+        _impl=$( { grep -hoE "PR aperta da [a-z0-9]+: .*/${_pr}$" "$LOG_DIR"/roadmap_agent_*.log 2>/dev/null || true; } \
+                 | tail -1 | awk '{print $4}' | tr -d ':')
+        _impl="${_impl:-$MOTORE}"
+
+        # Senza un motore diverso dall'implementatore la review non si fa: e' il
+        # cancello 2, e vale qui come nel giro normale. Verificarlo PRIMA di
+        # spendere il giro non e' un'ottimizzazione — i run forzati su un solo
+        # motore (cron 9/14/19/23) sono proprio quelli che lasciano le PR senza
+        # verdetto, e il recupero ci ricadrebbe sopra bruciando ogni volta il giro
+        # per riscrivere lo stesso NON_ESEGUITA.
+        if ! scegli_recensore "$_impl" >/dev/null; then
+            _senza_recensore=$(( _senza_recensore + 1 ))
+            continue
+        fi
+
+        _wt="$PROJECT_DIR/.worktrees/rivedi-$_pr"
+        git worktree remove --force "$_wt" 2>/dev/null || true
+        if ! git fetch -q origin "$_branch" 2>/dev/null \
+            || ! git worktree add -q --detach "$_wt" "origin/$_branch" 2>/dev/null; then
+            log "Recupero review: branch $_branch non ottenibile — PR #$_pr saltata."
+            git worktree remove --force "$_wt" 2>/dev/null || true
+            continue
+        fi
+
+        log "Recupero review: PR #$_pr (issue #$_issue, branch $_branch, implementata da $_impl, tentativi precedenti: $_n_rec)"
+        _EVENTO_EXTRA=("recovery=#1")
+        _REVIEW_ETICHETTA="review ferma, recupero in corso"
+        rivedi_e_mergia "$_pr" "$_issue" "$_branch" "$_wt" "$_impl" "$_tit" "$_url"
+        _EVENTO_EXTRA=(); _REVIEW_ETICHETTA=""
+        git worktree remove --force "$_wt" 2>/dev/null || true
+        return 0
+    done <<< "$_ordinate"
+
+    # Una riga sola per giro: il recupero che non trova nulla da fare non deve
+    # sommergere il log del giro vero.
+    if (( _senza_verdetto > 0 )); then
+        log "Recupero review: $_senza_verdetto PR senza verdetto ($_in_attesa con CI ancora in corso, $_senza_recensore senza un recensore diverso dall'implementatore) — nessun recupero in questo giro."
+    fi
+    exec 8>&-
+    return 1
+}
+
+# --- tie-breaker sulle respinte --------------------------------------------------
+# Alla seconda respinta la issue esce dalla rotazione: se due modelli diversi
+# bocciano lo stesso lavoro il problema e' la specifica, non l'esecuzione. La
+# regola regge finche' i due giudizi sono davvero indipendenti, e nei fatti non
+# sempre lo sono: codex ha respinto 34 volte su 44 review, quindi "due modelli
+# distinti" spesso significa "codex, piu' uno". #298 e' uscita di rotazione con sei
+# respinte. Prima di passare la issue all'operatore si concede UNA review a un
+# terzo motore che non l'ha ne' scritta ne' gia' giudicata.
+#
+# Chi ha respinto e chi ha implementato si ricostruiscono dal log degli eventi: e'
+# gia' il registro di quei fatti e non serve un file di stato nuovo da tenere
+# allineato (e da sbagliare).
+_revisori_che_hanno_respinto() {
+    { jq -r --argjson i "$1" \
+        'select(.action == "review" and .issue == $i and .verdetto == "RESPINGI") | .engine // empty' \
+        "$RESULTS_FILE" 2>/dev/null || true; } | sort -u
+}
+
+_implementatore_di() {
+    { jq -r --argjson i "$1" \
+        'select(.action == "review" and .issue == $i) | .impl // empty' \
+        "$RESULTS_FILE" 2>/dev/null || true; } | tail -1
+}
+
+# Un solo GIUDIZIO di tie-breaker per issue: un terzo giro di review sarebbe
+# esattamente la ripetizione che MAX_RESPINTE esiste per evitare.
+#
+# "Giudizio", non "tentativo": un tie-breaker finito in NON_ESEGUITA — recensore
+# morto a meta', quota esaurita durante la sessione — non ha giudicato niente, e
+# bruciare su di esso l'unica occasione della issue sarebbe come non averla mai
+# concessa. Si riprova, ma non all'infinito: due tentativi a vuoto bastano a
+# dire che non e' il verdetto a mancare, ed evitano che una issue fuori rotazione
+# si mangi un giro dopo l'altro.
+_tiebreaker_gia_fatto() {
+    local _giudizi _tentativi
+    _giudizi=$( { jq -r --argjson i "$1" \
+        'select(.action == "review" and .issue == $i and (.tiebreaker // 0) == 1
+                and (.verdetto == "APPROVA" or .verdetto == "RESPINGI")) | .ts' \
+        "$RESULTS_FILE" 2>/dev/null || true; } | grep -c . || true)
+    _tentativi=$( { jq -r --argjson i "$1" \
+        'select(.action == "review" and .issue == $i and (.tiebreaker // 0) == 1) | .ts' \
+        "$RESULTS_FILE" 2>/dev/null || true; } | grep -c . || true)
+    (( _giudizi > 0 || _tentativi >= 2 ))
+}
+
+# Il primo motore disponibile che non abbia gia' giudicato la issue e non l'abbia
+# scritta. Se non c'e', non si ripiega su nessuno: un tie-breaker affidato a uno
+# dei due che avevano gia' respinto non e' un tie-breaker.
+motore_tiebreaker() {
+    local _issue="$1" _impl="${2:-}" _esclusi _c
+    _esclusi=$( { _revisori_che_hanno_respinto "$_issue"
+                  _implementatore_di "$_issue"
+                  [[ -n "$_impl" ]] && printf '%s\n' "$_impl"; } | sort -u)
+    for _c in "${MOTORI_DISPONIBILI[@]}"; do
+        if printf '%s\n' "$_esclusi" | grep -qx "$_c"; then continue; fi
+        echo "$_c"; return 0
+    done
+    return 1
+}
+
+# Esito 0 = il giro e' stato speso nel tie-breaker; 1 = non dovuto o impossibile.
+esegui_tiebreaker() {
+    local _issue="${1:-}" _mot _pr _branch _tit _url _impl _wt
+    [[ -n "$_issue" ]] || return 1
+    if _tiebreaker_gia_fatto "$_issue"; then
+        log "  #$_issue — tie-breaker gia' speso: resta all'operatore."
+        return 1
+    fi
+    # L'implementatore si risolve PRIMA di scegliere: quando il log non lo dice si
+    # assume il motore di turno, e il tie-breaker non puo' finire proprio a lui —
+    # sarebbe una review non eseguita (scegli_recensore la rifiuterebbe) con
+    # l'unica occasione della issue gia' spesa.
+    _impl=$(_implementatore_di "$_issue"); _impl="${_impl:-$MOTORE}"
+    if ! _mot=$(motore_tiebreaker "$_issue" "$_impl"); then
+        log "  #$_issue — nessun terzo motore diverso da implementatore e recensori: niente tie-breaker."
+        return 1
+    fi
+    _pr=$(trova_pr_del_giro "$_issue")
+    if [[ -z "$_pr" ]]; then
+        log "  #$_issue — nessuna PR aperta da sottoporre al tie-breaker."
+        return 1
+    fi
+    _branch=$(gh pr view "$_pr" --json headRefName -q .headRefName 2>/dev/null || echo "")
+    _tit=$(gh pr view "$_pr" --json title -q .title 2>/dev/null || echo "")
+    _url=$(gh pr view "$_pr" --json url -q .url 2>/dev/null || echo "")
+    [[ -n "$_branch" ]] || { log "  #$_issue — branch della PR #$_pr non leggibile: tie-breaker rimandato."; return 1; }
+
+    _wt="$PROJECT_DIR/.worktrees/rivedi-$_pr"
+    git worktree remove --force "$_wt" 2>/dev/null || true
+    if ! git fetch -q origin "$_branch" 2>/dev/null \
+        || ! git worktree add -q --detach "$_wt" "origin/$_branch" 2>/dev/null; then
+        log "  #$_issue — branch $_branch non ottenibile: tie-breaker rimandato."
+        git worktree remove --force "$_wt" 2>/dev/null || true
+        return 1
+    fi
+
+    log "Tie-breaker: issue #$_issue, PR #$_pr affidata a $_mot (implementata da $_impl, gia' respinta da [$(_revisori_che_hanno_respinto "$_issue" | tr '\n' ' ')])"
+    REVISORE_FORZATO="$_mot"
+    TIEBREAK_IN_CORSO=1
+    _EVENTO_EXTRA=("tiebreaker=#1")
+    _REVIEW_ETICHETTA="tie-breaker sulla seconda respinta"
+    rivedi_e_mergia "$_pr" "$_issue" "$_branch" "$_wt" "$_impl" "$_tit" "$_url"
+    REVISORE_FORZATO=""; TIEBREAK_IN_CORSO=0; _EVENTO_EXTRA=(); _REVIEW_ETICHETTA=""
+    git worktree remove --force "$_wt" 2>/dev/null || true
+    return 0
 }
 
 # --- comandi operatore ----------------------------------------------------------
@@ -809,7 +1209,11 @@ if [[ "${1:-}" == "--rivedi" ]]; then
     # L'implementatore va escluso dalla review: se non e' ricavabile dal log, si
     # assume il motore di turno, che e' l'ipotesi prudente (al massimo cambia
     # recensore, mai lo fa coincidere con chi ha scritto).
-    _impl=$(grep -hoE "PR aperta da [a-z0-9]+: .*/${_pr}$" "$LOG_DIR"/roadmap_agent_*.log 2>/dev/null \
+    # Il `|| true` non e' cosmetico: con `set -o pipefail` un grep senza match fa
+    # fallire l'assegnazione, e `set -e` ucciderebbe il comando proprio quando
+    # l'implementatore non e' ricavabile — cioe' nel caso che la riga sotto
+    # esiste apposta per gestire.
+    _impl=$( { grep -hoE "PR aperta da [a-z0-9]+: .*/${_pr}$" "$LOG_DIR"/roadmap_agent_*.log 2>/dev/null || true; } \
             | tail -1 | awk '{print $4}' | tr -d ':')
     _impl="${_impl:-$MOTORE}"
     _wt="$PROJECT_DIR/.worktrees/rivedi-$_pr"
@@ -871,6 +1275,7 @@ git fetch --quiet origin main
 # --- selezione della issue: primo elemento della coda che sia lavorabile --------
 PR_APERTE=$(gh pr list --state open --json headRefName -q '.[].headRefName' 2>/dev/null || echo "")
 ISSUE=""
+TIEBREAK_CANDIDATA=""
 while read -r numero _resto; do
     [[ -z "$numero" || "$numero" == \#* ]] && continue
 
@@ -900,8 +1305,14 @@ while read -r numero _resto; do
         fi
         if (( _r >= MAX_RESPINTE )); then
             # Se due modelli diversi non ci riescono, il problema non e'
-            # l'esecuzione: e' la specifica, e non la risolve un terzo giro.
-            log "  #$numero — $_r review respinte, esce dalla rotazione: serve l'operatore."; continue
+            # l'esecuzione: e' la specifica, e non la risolve un terzo giro di
+            # LAVORO. Un terzo GIUDIZIO, una volta sola, si': vedi il tie-breaker.
+            # Qui si annota soltanto la candidata — la prima della coda, cioe' la
+            # piu' prioritaria — senza spendere chiamate a GitHub dentro il ciclo
+            # di selezione.
+            log "  #$numero — $_r review respinte, esce dalla rotazione: serve l'operatore."
+            [[ -n "$TIEBREAK_CANDIDATA" ]] || TIEBREAK_CANDIDATA="$numero"
+            continue
         fi
         RIPRESA=1
         log "  #$numero — PR respinta ($_r volte): la riprendo sullo stesso branch."
@@ -913,15 +1324,42 @@ while read -r numero _resto; do
     ISSUE="$numero"; break
 done < "$QUEUE_FILE"
 
+TITOLO=""
+if [[ -n "$ISSUE" ]]; then
+    TITOLO=$(gh issue view "$ISSUE" --json title -q .title)
+    log "Issue selezionata: #$ISSUE — $TITOLO"
+fi
+
+# --- cosa si fa con il giro ------------------------------------------------------
+# Un giro vale una sessione di un motore, e una review ne costa quanto un lavoro.
+# L'ordine dice cosa conta di piu' quando non si puo' fare tutto:
+#   1. recuperare una review ferma — e' l'unico modo perche' una PR gia' scritta
+#      arrivi a un verdetto: senza, resta aperta per sempre;
+#   2. il tie-breaker sulla issue in uscita dalla rotazione — ultima occasione
+#      prima che diventi carico dell'operatore;
+#   3. il lavoro sulla issue selezionata.
+# Nessuno dei due primi due addebita un tentativo alla issue: non sono giri di
+# lavoro, e la regola vale gia' oggi per le review.
+#
+# --dry-run resta fuori da tutto questo: promette di non consumare sessioni ne'
+# toccare lo stato, e la selezione della issue deve restare identica.
+if [[ "${1:-}" != "--dry-run" ]]; then
+    if recupera_review_ferme; then
+        log "=== Giro concluso (recupero di una review ferma) ==="
+        exit 0
+    fi
+    if [[ -n "$TIEBREAK_CANDIDATA" ]] && esegui_tiebreaker "$TIEBREAK_CANDIDATA"; then
+        log "=== Giro concluso (tie-breaker su #$TIEBREAK_CANDIDATA) ==="
+        exit 0
+    fi
+fi
+
 if [[ -z "$ISSUE" ]]; then
     log "Nessuna issue lavorabile in coda. Niente da fare."
     tg_send "🧭 <b>Roadmap</b> — coda vuota o tutta in attesa di review. Nessun giro eseguito."
     log_evento "queue" "result=empty" "engine=$MOTORE"
     exit 0
 fi
-
-TITOLO=$(gh issue view "$ISSUE" --json title -q .title)
-log "Issue selezionata: #$ISSUE — $TITOLO"
 
 # --dry-run: verifica la selezione senza consumare una sessione ne' toccare lo
 # stato. Serve dopo ogni modifica alla coda o alle label.

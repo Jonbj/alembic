@@ -84,6 +84,8 @@ scripts/roadmap_agent_loop.sh --dry-run       # which issue is next, no session 
 scripts/roadmap_agent_loop.sh --motori        # engine status, incl. who is rate-limited
 scripts/roadmap_agent_loop.sh --prova glm52   # smoke-test one engine (60s)
 scripts/roadmap_agent_loop.sh --sblocca glm52 # early return from the bench (rarely needed)
+scripts/roadmap_agent_loop.sh --rivedi 584    # force the missing review on one PR, by hand
+scripts/roadmap_agent_loop.sh --digest 7      # outcomes of the last N days (Telegram + logs/)
 gh issue list --label freeze-ok --state open
 cat logs/roadmap_agent_state.tsv              # issue <TAB> failed attempts (2 = out of rotation)
 ```
@@ -103,12 +105,35 @@ cat logs/roadmap_agent_state.tsv              # issue <TAB> failed attempts (2 =
 Both gates green → the loop merges. Anything else — reject, CI that never finished, no second
 engine available — leaves the PR open with a Telegram.
 
+**Stuck reviews are retried automatically (2026-09-14).** A `NON_ESEGUITA` verdict used to be
+terminal in the same way a rejection once was: the review never started (CI still running when
+`CI_ATTESA_MAX` expired, reviewer rate-limited, session killed), and from the next run on the
+selection skipped that issue *precisely because* it had an open PR awaiting a verdict. Over
+2026-08-20→09-14 that was 67 of 157 reviews, and 119 open PRs against 14 merged. Each run now
+starts by picking up **one** such PR — open, on an `agent/issue-N` branch, no
+`Verdetto letto: **APPROVA|RESPINGI**` header on any comment — and re-entering the *same*
+`rivedi_e_mergia`, with both gates intact. If the head commit's CI has not finished yet the PR is
+left alone silently (it is running, not stuck). The recovery consumes the run's engine session, so
+it happens *instead of* working an issue, and it is never charged as a failed attempt. PRs are tried
+fewest-recoveries-first, so one permanently failing PR cannot monopolise the queue. Events carry
+`recovery: 1`.
+
+**Tie-breaker before leaving the rotation (2026-09-14).** `MAX_RESPINTE` assumes the two rejections
+come from independent judges; in practice codex rejected 34 of the 44 reviews it ran, so "two
+different models" often meant "codex, plus one" — and #298 left the rotation after six. At the
+second rejection the loop now grants **one** review to a third engine that has neither written nor
+already judged that issue (both reconstructed from `logs/roadmap_results.jsonl`, not from new
+state). `APPROVA` → normal flow, merge still subject to both gates; `RESPINGI` → out of the rotation
+as before. One tie-breaker *verdict* per issue, ever, and it is not counted as a third rejection —
+a tie-breaker that died mid-review (`NON_ESEGUITA`) judged nothing and is retried once, no more.
+Events carry `tiebreaker: 1`.
+
 **After a rejection.** A rejected PR used to freeze its issue forever: the loop skips issues that
 already have an open PR, so nothing ever picked it back up. Now a `VERDETTO: RESPINGI` makes the
 issue workable again — the loop checks out **the same branch**, with the rejecting review pasted into
 the prompt, and fixes rather than restarts. After `MAX_RESPINTE` (2) rejections the issue leaves the
-rotation with a Telegram: when two different models fail on the same spec, the problem is the spec,
-and a third round won't find it. The counter lives in `logs/roadmap_agent_respinte.tsv` and is reset
+rotation with a Telegram — after the tie-breaker above has had its one shot: when different models
+fail on the same spec, the problem is the spec, and a third round of *work* won't find it. The counter lives in `logs/roadmap_agent_respinte.tsv` and is reset
 only when the *specification itself* changes — that is what the cap means, not a loophole.
 
 **Deploy.** A merge is not a deploy: `src/`, `config/` and `scripts/` are `COPY`ed into the image,
