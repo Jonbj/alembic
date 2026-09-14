@@ -1,5 +1,7 @@
 """Tests for PostgreSQL store - news_log and llm_responses write methods."""
 
+import re
+
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
@@ -98,8 +100,14 @@ class TestLogNewsItem:
 
         mock_cursor = pg_store._conn.cursor.return_value
         call_args = mock_cursor.execute.call_args[0]
-        params = call_args[1]
-        assert params[5] == 0.65  # raw_sentiment
+        sql, params = call_args[0], call_args[1]
+        # La posizione si legge dalla lista di colonne della INSERT: aggiungerne
+        # una non deve far passare l'asserzione su un valore vicino (#570).
+        colonne = [
+            c.strip()
+            for c in re.search(r"INSERT INTO news_log \(([^)]*)\)", sql).group(1).split(",")
+        ]
+        assert params[colonne.index("raw_sentiment")] == 0.65
 
     def test_log_news_item_rollback_on_error(self, pg_store, sample_news_item):
         """log_news_item rolls back on exception."""
