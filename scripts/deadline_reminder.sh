@@ -34,9 +34,9 @@ tg_send() {
         return 0
     fi
     curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-        -d chat_id="${TELEGRAM_CHAT_ID}" \
-        -d parse_mode="HTML" \
-        -d text="$text" \
+        --data-urlencode chat_id="${TELEGRAM_CHAT_ID}" \
+        --data-urlencode parse_mode="HTML" \
+        --data-urlencode text="$text" \
         > /dev/null || true
 }
 

@@ -87,11 +87,11 @@ tg_send() {
     fi
     local curl_args=(
         -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
-        -d chat_id="${TELEGRAM_CHAT_ID}"
-        -d text="$text"
+        --data-urlencode chat_id="${TELEGRAM_CHAT_ID}"
+        --data-urlencode text="$text"
     )
     if [[ -n "$parse_mode" ]]; then
-        curl_args+=(-d parse_mode="$parse_mode")
+        curl_args+=(--data-urlencode parse_mode="$parse_mode")
     fi
     curl "${curl_args[@]}" > /dev/null
 }

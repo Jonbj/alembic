@@ -191,7 +191,8 @@ def _tg_send(testo: str) -> bool:
         subprocess.run(
             ["curl", "-s", "-X", "POST",
              f"https://api.telegram.org/bot{token}/sendMessage",
-             "-d", f"chat_id={chat}", "-d", f"text={testo}"],
+             "--data-urlencode", f"chat_id={chat}",
+             "--data-urlencode", f"text={testo}"],
             check=False, capture_output=True, timeout=10,
         )
         return True
