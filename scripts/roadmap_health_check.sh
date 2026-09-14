@@ -35,7 +35,7 @@ fi
 tg_send() {
     [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]] && return 0
     curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-        -d chat_id="${TELEGRAM_CHAT_ID}" -d parse_mode="HTML" -d text="$1" >/dev/null || true
+        --data-urlencode chat_id="${TELEGRAM_CHAT_ID}" --data-urlencode parse_mode="HTML" --data-urlencode text="$1" >/dev/null || true
 }
 
 PROBLEMI=(); NOTE=()

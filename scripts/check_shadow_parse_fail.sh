@@ -107,7 +107,7 @@ fi
 if [[ -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${TELEGRAM_CHAT_ID:-}" ]]; then
     curl -sS -o /dev/null -X POST \
         "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-        -d "chat_id=${TELEGRAM_CHAT_ID}" -d "text=${MSG}" \
+        --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" --data-urlencode "text=${MSG}" \
         && echo "Notifica inviata." || echo "Notifica fallita (non blocca)."
 else
     echo "Credenziali Telegram assenti — solo log."

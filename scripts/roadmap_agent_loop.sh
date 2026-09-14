@@ -264,11 +264,27 @@ if [[ -f "$PROJECT_DIR/.env" ]]; then
     set +a
 fi
 
+# `--data-urlencode`, non `-d`: curl NON codifica i valori di `-d`, quindi ogni `&`
+# nel testo spezza il form e tronca `text` in quel punto. Il guaio e' che il `sed`
+# che rende sicuro l'HTML *produce* `&` — `&amp;`, `&lt;`, `&gt;` — quindi bastava
+# un `<`, un `>` o una `&` nella coda dell'output dell'agente perche' il `<pre>`
+# arrivasse a Telegram senza tag di chiusura e l'intero messaggio venisse
+# rifiutato con `400 can't parse entities`. Silenziosamente: la risposta finiva in
+# /dev/null. Per questo le notifiche di no-op non sono mai arrivate.
 tg_send() {
-    local text="$1"
+    local text="$1" _resp
     [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]] && return 0
-    curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-        -d chat_id="${TELEGRAM_CHAT_ID}" -d parse_mode="HTML" -d text="$text" >/dev/null || true
+    _resp=$(curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+        --data-urlencode chat_id="${TELEGRAM_CHAT_ID}" \
+        --data-urlencode parse_mode="HTML" \
+        --data-urlencode text="$text" 2>/dev/null) || true
+    # Un'allerta che non parte e' peggio di nessuna allerta: chi la aspettava
+    # legge il silenzio come "niente da segnalare". Almeno il log deve saperlo.
+    case "$_resp" in
+        *'"ok":true'*) : ;;
+        "")  log "  [tg_send] nessuna risposta da Telegram — notifica forse non consegnata." ;;
+        *)   log "  [tg_send] Telegram ha rifiutato la notifica: $(printf '%s' "$_resp" | head -c 200)" ;;
+    esac
 }
 
 # --- digest degli esiti ---------------------------------------------------------
