@@ -30,6 +30,18 @@ def test_connector_instantiates():
     assert conn is not None
 
 
+def test_request_page_size_is_capped_at_the_live_provider_limit():
+    """Passo 0 (2026-09-14): outputsize > 8 restituisce code=400.
+
+    Il provider puo' accettare il parametro ma rifiutare silenziosamente la
+    richiesta nel body JSON; il connettore deve quindi non costruire mai una
+    richiesta che la PoC non puo' consumare.
+    """
+    conn = TwelveDataPressReleasesConnector(api_key="key", outputsize=50)
+
+    assert conn._params_for("AAPL")["outputsize"] == "8"
+
+
 def test_auth_error_is_defined():
     with pytest.raises(TwelveDataAuthError):
         raise TwelveDataAuthError("bad creds")
