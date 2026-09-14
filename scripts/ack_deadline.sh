@@ -29,9 +29,9 @@ echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') acked id=${id}" >> "$ACK_DIR/${id}.log"
 
 if [[ -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${TELEGRAM_CHAT_ID:-}" ]]; then
     curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-        -d chat_id="${TELEGRAM_CHAT_ID}" \
-        -d parse_mode="HTML" \
-        -d text="✅ <b>Deadline ${id} acked</b> — reminder fermati." \
+        --data-urlencode chat_id="${TELEGRAM_CHAT_ID}" \
+        --data-urlencode parse_mode="HTML" \
+        --data-urlencode text="✅ <b>Deadline ${id} acked</b> — reminder fermati." \
         > /dev/null || true
 fi
 
