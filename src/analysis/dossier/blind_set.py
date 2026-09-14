@@ -146,3 +146,41 @@ def build_blind_set(
         ),
         "freeze": "strumento di misura read-only (#511); nessuna taratura toccata",
     }
+
+
+def render_blind_set_alert(
+    blind_set_payload: Mapping[str, Any],
+    copertura_per_ticker: Mapping[str, Mapping[str, Any]] | None = None,
+) -> str:
+    """Stringa di alert pronta per il cron #511 / F-001.
+
+    Ogni ticker in allerta viene reso con lo streak e, se presente in
+    ``copertura_per_ticker``, anche con il dettaglio per-fonte che il dossier
+    pubblica (``fonti_osservate``). Una fonte presente con effective=0
+    distingue "fonte assente" da "fonte presente ma irrilevante" ed e' il
+    dato che serve all'operatore per scegliere se accendere un connettore
+    non-deployato. Il rendering non normalizza ne' filtra: l'input e' gia'
+    selezionato da ``ticker_allerta_zero_articoli``; qui si compone solo testo
+    per la pipeline Telegram/shell, senza dipendere da I/O o env.
+    """
+    if not isinstance(blind_set_payload, Mapping):
+        return ""
+    per_ticker = blind_set_payload.get("per_ticker") or {}
+    tickers = list(blind_set_payload.get("ticker_allerta_zero_articoli") or [])
+    if not tickers:
+        return ""
+    copertura_per_ticker = copertura_per_ticker or {}
+    parts: list[str] = []
+    for ticker in tickers:
+        streak = per_ticker.get(ticker, {}).get("sedute_consecutive_zero_articoli")
+        fonti = copertura_per_ticker.get(ticker, {}).get("fonti_osservate") or {}
+        if fonti:
+            fonti_str = "; ".join(
+                f"{fonte}({info.get('articoli_unici', 0)}, "
+                f"eff={info.get('articoli_effective_timely', 0)})"
+                for fonte, info in sorted(fonti.items())
+            )
+        else:
+            fonti_str = "nessuna fonte ha reso righe"
+        parts.append(f"{ticker} ({streak} sedute; {fonti_str})")
+    return " | ".join(parts)

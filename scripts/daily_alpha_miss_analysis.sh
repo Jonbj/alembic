@@ -239,6 +239,18 @@ seduta. Puoi descrivere ERIC/RDDT e le mediane mover/non-mover, ma non dire che 
 era disponibile prima del movimento, non scegliere una soglia e non stimare un false-positive
 rate operativo. La valutazione ex-ante pre-registrata e' separata in #451.
 
+FASE 4c — ATTRIBUZIONE FONTI PER TICKER (#511 passo 2)
+Per ogni ticker in `copertura_articoli.per_ticker` con `articoli_unici == 0` oppure
+`fonti_osservate` vuoto, riporta la riga cosi' come sta nel dossier: ticker,
+`articoli_unici_giorno`, `effective_timely_articles_giorno` (entrambi da
+`blind_set.per_ticker`), e `fonti_osservate` (da `copertura_articoli.per_ticker`,
+forma `{fonte: {articoli_unici, articoli_effective_timely}}`). Quando
+`fonti_osservate` non e' vuoto ma effective-timely e' zero, scrivi: "la fonte X
+ha reso N righe, ma nessuna effective-timely" — quel testo distingue "fonte
+assente" da "fonte presente ma non utile" ed e' il dato che serve per
+prioritizzare i connettori non-deployati. Non fare raccomandazioni operative:
+la decisione su quali connettori accendere e' dell'operatore (#454/#455/#458/#459).
+
 OUTPUT FINALE
 Salva un report Markdown in __REPORT_FILE__ usando il Write tool, con queste sezioni:
 
@@ -475,14 +487,12 @@ import json
 import sys
 
 try:
-    coverage = (json.load(open(sys.argv[1])) or {}).get("copertura_articoli") or {}
+    payload = json.load(open(sys.argv[1])) or {}
+    coverage = payload.get("copertura_articoli") or {}
     blind_set = coverage.get("blind_set") or {}
-    rows = blind_set.get("per_ticker") or {}
-    tickers = blind_set.get("ticker_allerta_zero_articoli") or []
-    print(", ".join(
-        f"{ticker} ({rows.get(ticker, {}).get('sedute_consecutive_zero_articoli')} sedute)"
-        for ticker in tickers
-    ))
+    per_ticker_coverage = coverage.get("per_ticker") or {}
+    from src.analysis.dossier.blind_set import render_blind_set_alert
+    print(render_blind_set_alert(blind_set, per_ticker_coverage))
 except Exception:
     pass
 PYEOF

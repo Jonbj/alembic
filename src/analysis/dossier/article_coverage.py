@@ -241,6 +241,37 @@ def _strongest(scores: Iterable[float]) -> float | None:
     return max(values, key=lambda value: (abs(value), value))
 
 
+def _fonti_per_ticker(
+    ticker_mappings: list[dict],
+    primary_by_canonical: dict[str, dict],
+) -> dict:
+    """Per ticker: conteggio articoli unici per fonte, distinti per effective.
+
+    #511: la copertura del giorno puo' essere zero effective-timely senza che
+    il provider sia assente — Alpaca o GDELT possono restituire mapping
+    irrilevanti (SECTOR_MACRO, IRRELEVANT_FANOUT, FALSE_ENTITY_MATCH) che non
+    producono copertura utile. Distinguere "fonte assente" da "fonte presente
+    ma effective=0" e' il dato che serve per prioritizzare i connettori
+    non-deployati (#454/#455/#458/#459): se ASML ha solo Alpaca con effective=0
+    la diagnosi e' "Alpaca non copre ASML in modo issuer-specific" e va
+    colmata con un provider diverso, non con una soglia di ranking.
+    """
+    counts: dict[str, dict[str, int]] = {}
+    for mapping in ticker_mappings:
+        primary = primary_by_canonical.get(mapping["canonical_article_id"])
+        if primary is None:
+            source = "UNKNOWN"
+        else:
+            source = str(primary.get("source") or "UNKNOWN")
+        bucket = counts.setdefault(
+            source, {"articoli_unici": 0, "articoli_effective_timely": 0}
+        )
+        bucket["articoli_unici"] += 1
+        if mapping["effective_timely"]:
+            bucket["articoli_effective_timely"] += 1
+    return {source: counts[source] for source in sorted(counts)}
+
+
 def _concentration(counts: dict[str, int]) -> dict:
     positive = {key: value for key, value in sorted(counts.items()) if value > 0}
     total = sum(positive.values())
@@ -433,6 +464,7 @@ def build_article_coverage(
             ),
             "max_score_own": _strongest(own_scores),
             "max_score_fanout": _strongest(fanout_scores),
+            "fonti_osservate": _fonti_per_ticker(ticker_mappings, primary_by_canonical),
         }
 
     sectors = sorted(set(sector_by_ticker.get(ticker, "UNKNOWN") for ticker in universe))
