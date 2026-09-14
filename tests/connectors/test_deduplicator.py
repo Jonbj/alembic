@@ -31,6 +31,12 @@ def test_hash_deterministic():
     assert h1 == h2
 
 
+def test_hash_known_item_remains_limited_to_the_first_500_body_characters():
+    item = make_item("Fed raises rates", "a" * 500 + "body received after the legacy boundary")
+
+    assert compute_dedup_hash(item) == "f0686aa307d038afa0772dd503e1dcac292dbc4d7ea35476910aefe9521ff836"
+
+
 def test_hash_differs_on_content():
     """Test that hash differs when body content differs."""
     a = make_item("Fed raises rates", "body A")
