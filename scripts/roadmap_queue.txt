@@ -128,7 +128,10 @@
 456  SEC EDGAR legge un campo `ticker_symbol` inesistente nell'API: zero segnali da sempre per un bug banale, il ticker e' in `display_names` — fonte gratuita deterministica ad alto segnale (8-K/6-K) mai davvero provata (deroga concessa 2026-09-01)
 508  articoli content-mill passano `ISSUER_SPECIFIC` con l'entita' giusta e zero catalizzatore reale: «If You Invested $100 In Goldman Sachs...» scorato 0,002 in un giorno a +3,34%, gonfia ogni metrica di copertura effettiva (F-066)
 511  il gap di copertura news e' per-ticker e permanente, non un buco rotante: 16 simboli su 96 (16,7%) hanno zero articoli su tutte le 8 sessioni osservate — RDDT +9,31% e ARM +3,29% sono costati $193 di opportunita' accessibile (F-001, affinato)
-458  PoC shadow Twelve Data press_releases (10-20 simboli, 5 sedute): nessuna scrittura sul path live, tabella dedicata `news_poc_samples` — misura copertura/latenza/qualita' prima di decidere l'integrazione
+# 458 CHIUSA il 2026-09-15 (verdetto nel report della PoC): Twelve Data
+#     press_releases fallisce il gate di freschezza per costruzione —
+#     eta' mediana 132 giorni al fetch, zero righe sotto le 2h di
+#     MAX_NEWS_AGE_HOURS. La domanda di copertura resta aperta in #587.
 459  PoC shadow Tiingo News API: vincolo di licenza sul piano gratuito vieta di persistere il payload, solo aggregati per (simbolo, giorno) non ricostruibili — stessa misura di #458, schema dati piu' stretto
 287  alpha-miss: rendere coerente il contratto prompt/output — dossier unica fonte numerica, fallback DATA_INCOMPLETE esplicito, ledger deterministico — blocked_by #281 (funnel v2), chiusa il 03/09
 
