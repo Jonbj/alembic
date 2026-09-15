@@ -12,9 +12,13 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+from src.analysis.dossier.candidates import CANDIDATES_SCHEMA_VERSION
+from src.analysis.dossier.prompt_contract import PROMPT_VERSION
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -487,10 +491,96 @@ def test_missing_worktree_is_recreated(repo):
 CRON = ROOT / "scripts" / "daily_alpha_miss_analysis.sh"
 ECON = "docs/evidence/economic_pnl.json"
 
+# Il dossier fittizio deve soddisfare il contratto prompt/dossier (#287):
+# schema 3.1 e data, perche' ora il cron lo verifica prima della sessione e il
+# materializzatore fa il cross-check con i candidati.
+DOSSIER_SESSIONE = {
+    "schema_version": "3.1",
+    "data": "2026-08-26",
+    "mercato": {"mover_3pct": 1, "up": 1, "down": 0, "dispersione_sigma": 0.4},
+}
+
+# I candidati che la sessione fittizia emette col nuovo contratto (#287): un
+# finding nuovo, completo dei campi di audit, e la riga di mercato del giorno.
+# Il materializzatore VERO (delegato al python vero dal finto uv) li valida e
+# materializza: F-NUOVO diventa F-001 perche' la base ha prossimo_id 1.
+CANDIDATI_SESSIONE = json.dumps(
+    {
+        "schema_version": CANDIDATES_SCHEMA_VERSION,
+        "prompt_version": PROMPT_VERSION,
+        "data": "2026-08-26",
+        "market_daily": {
+            "data": "2026-08-26",
+            "spy": 0.0,
+            "qqq": 0.0,
+            "dispersione_sigma": 0.4,
+            "mover_3pct": 1,
+            "up": 1,
+            "down": 0,
+            "watchlist_zero_news": 0,
+            "tema": "non chiaro",
+            "miss": {
+                "NO_NEWS": 1,
+                "THIN_NEUTRAL": 0,
+                "WRONG_SIGN": 0,
+                "FILTERED": 0,
+                "OUT_OF_STRATEGY_SCOPE": 0,
+            },
+            "catturati": 0,
+            "book": {
+                "equity": 100000.0,
+                "realizzato": 0.0,
+                "mtm": None,
+                "s1_realizzato": 0.0,
+                "s4_realizzato": 0.0,
+            },
+        },
+        "findings": [
+            {
+                "finding_id": "F-NUOVO",
+                "titolo": "Finding di test",
+                "tipo": "alpha_miss",
+                "confidenza": "congetturale",
+                "costo_usd": 1.0,
+                "formula_costo": "1.0 — stima del test",
+                "nota": "test",
+                "fonte": "REPORT_TEST.md",
+                "esposizione": "test",
+                "evidenza_contraria": "test",
+                "non_occorrenza": "test",
+                "next_evidence": "test",
+                "meccanismo": "test",
+                "alternative_scartate": ["test"],
+                "giustificazione_nuovo": "finding fittizio del test",
+            }
+        ],
+    }
+)
+
+# I moduli puri del contratto e il materializzatore girano col python VERO
+# dentro il progetto fittizio: il finto uv delega, cosi' il test esercita la
+# validazione e la scrittura vera del ledger, non una sua imitazione.
+MODULI_PURI = (
+    "src/__init__.py",
+    "src/analysis/__init__.py",
+    "src/analysis/dossier/__init__.py",
+    "src/analysis/dossier/prompt_contract.py",
+    "src/analysis/dossier/candidates.py",
+    "src/analysis/dossier/digest.py",
+)
+
 
 def _run_cron(repo: dict, extra_path: Path | None = None) -> tuple[subprocess.CompletedProcess[str], str, str]:
     project, tmp = repo["project"], repo["tmp"]
     shutil.copy2(CRON, project / "scripts" / CRON.name)
+    shutil.copy2(
+        ROOT / "scripts" / "materialize_alpha_miss_ledger.py",
+        project / "scripts" / "materialize_alpha_miss_ledger.py",
+    )
+    for modulo in MODULI_PURI:
+        destinazione = project / modulo
+        destinazione.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / modulo, destinazione)
     (project / "docs" / "evidence" / "dossier").mkdir(parents=True, exist_ok=True)
     bin_dir = tmp / "bin-cron"
 
@@ -499,12 +589,27 @@ def _run_cron(repo: dict, extra_path: Path | None = None) -> tuple[subprocess.Co
         "#!/usr/bin/env bash\n"
         "if [[ \"$*\" == 'run python3 -' ]]; then\n"
         "    printf '2026-08-26\\n'\n"
+        "    exit 0\n"
         "fi\n"
         'if [[ "$*" == *alpha_miner_dossier.py* ]]; then\n'
-        "    printf '{\"dossier\": \"2026-08-26\"}\\n' > docs/evidence/dossier/2026-08-26.json\n"
+        "    printf '%s\\n' '" + json.dumps(DOSSIER_SESSIONE) + "' > docs/evidence/dossier/2026-08-26.json\n"
+        "    exit 0\n"
         "fi\n"
         'if [[ "$*" == *economic_pnl_scoreboard.py* ]]; then\n'
-        "    printf '{\"aggiornato\": \"2026-08-26\"}\\n' > docs/evidence/economic_pnl.json\n"
+        "    printf '%s\\n' '{\"aggiornato\": \"2026-08-26\"}' > docs/evidence/economic_pnl.json\n"
+        "    exit 0\n"
+        "fi\n"
+        "# tutto il resto (check del contratto, materializzatore, digest)\n"
+        "# gira col python vero sui moduli copiati nel progetto fittizio;\n"
+        "# uno script assente (es. la riconciliazione, fuori scopo qui)\n"
+        "# mantiene il pass vacuo di prima\n"
+        "if [[ \"$1\" == run ]]; then shift; fi\n"
+        "if [[ \"$1\" == python || \"$1\" == python3 ]]; then\n"
+        "    shift\n"
+        "    if [[ \"$1\" == - || -f \"$1\" ]]; then\n"
+        "        export PYTHONPATH=\"$PWD\"\n"
+        "        exec " + sys.executable + " \"$@\"\n"
+        "    fi\n"
         "fi\n"
         "exit 0\n",
     )
@@ -514,8 +619,10 @@ def _run_cron(repo: dict, extra_path: Path | None = None) -> tuple[subprocess.Co
         "printf 'Executive summary fittizio\\n'\n"
         'cp docs/evidence/findings.json "$LEDGER_SNAPSHOT"\n'
         'cp docs/evidence/market_daily.jsonl "$JSONL_SNAPSHOT"\n'
-        "printf '%s\\n' '{\"schema_version\":1,\"prossimo_id\":2,\"findings\":[{\"id\":\"F-001\",\"titolo\":\"Finding di test\",\"occorrenze\":[{\"data\":\"2026-08-26\",\"costo_usd\":1.0,\"nota\":\"test\",\"fonte\":\"REPORT_TEST.md\"}],\"costo_cumulato_usd\":1.0,\"occorrenze_non_stimate\":0}]}' > docs/evidence/findings.json\n"
-        "printf '%s\\n' '{\"data\": \"2026-08-26\"}' >> docs/evidence/market_daily.jsonl\n"
+        # nuovo contratto (#287): la sessione NON tocca i ledger, emette i
+        # candidati che il materializzatore valida e applica
+        "mkdir -p docs/evidence/candidates\n"
+        "printf '%s\\n' '" + CANDIDATI_SESSIONE + "' > docs/evidence/candidates/2026-08-26.json\n"
         f"printf '# Alpha miss 2026-08-26\\n' > {REPORT}\n",
     )
     _write_executable(
@@ -560,18 +667,29 @@ def test_cron_commits_the_ledger_from_a_feature_branch(repo):
     result, log, telegram = _run_cron(repo)
 
     assert result.returncode == 0, log[-2000:]
-    assert log.strip().splitlines()[-1] == "GIT_STATUS=pushed"
+    # il codice di uscita unisce i due esiti: commit E materializzazione
+    assert log.strip().splitlines()[-2:] == ["GIT_STATUS=pushed", "LEDGER_STATUS=materializzato"]
     assert _remote_file(repo["remote"], REPORT) == "# Alpha miss 2026-08-26\n"
+    # F-001 non lo scrive piu' la sessione: lo materializza il validatore
+    # dai candidati (F-NUOVO + base con prossimo_id 1)
     assert "F-001" in _remote_file(repo["remote"], LEDGER)
+    assert "2026-08-26" in _remote_file(repo["remote"], JSONL)
     assert "2026-08-26" in _remote_file(repo["remote"], ECON)
     assert "2026-08-26" in _remote_file(repo["remote"], "docs/evidence/dossier/2026-08-26.json")
+    # l'audit trail dei candidati viaggia su main col resto dell'evidenza
+    assert "F-NUOVO" in _remote_file(
+        repo["remote"], "docs/evidence/candidates/2026-08-26.json"
+    )
     assert "GIT_STATUS=pushed" in telegram
 
 
 def test_cron_alerts_when_the_ledger_does_not_reach_main(repo):
-    _, log, telegram = _run_cron(repo, extra_path=_failing_push_bin(repo["tmp"]))
+    result, log, telegram = _run_cron(repo, extra_path=_failing_push_bin(repo["tmp"]))
 
-    assert log.strip().splitlines()[-1] == "GIT_STATUS=committed_not_pushed"
+    # la riga del ledger e' comunque materializzata: e' il commit a mancare
+    assert result.returncode != 0, log[-2000:]
+    assert log.strip().splitlines()[-1] == "LEDGER_STATUS=materializzato"
+    assert "GIT_STATUS=committed_not_pushed" in log
     assert "committed_not_pushed" in telegram
     assert "⚠️" in telegram or "🚨" in telegram
 
@@ -1070,7 +1188,7 @@ def test_cron_proceeds_when_main_moves_outside_the_measurement_code(repo):
     result, log, telegram = _run_cron(repo)
 
     assert result.returncode == 0, log[-2000:]
-    assert log.strip().splitlines()[-1] == "GIT_STATUS=pushed"
+    assert log.strip().splitlines()[-2:] == ["GIT_STATUS=pushed", "LEDGER_STATUS=materializzato"]
 
 
 def test_cron_aborts_when_main_alignment_cannot_be_verified(repo):

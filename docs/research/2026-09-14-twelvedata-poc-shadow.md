@@ -1,11 +1,11 @@
-# PoC shadow Twelve Data press_releases — Passo 0 + 1 seduta
+# PoC shadow Twelve Data press_releases — Passo 0 + sedute di misura
 
 Issue: #458
 Autore: agent/issue-458 (worktree)
-Data: 2026-09-14
-Esito: 76 campioni scritti in `news_poc_samples` su 12 simboli in 1 seduta;
-nessuna scrittura su path live (connettore, script e tabella shadow isolati
-testati con `tests/scripts/test_poc_twelve_data_isolation.py`).
+Data: 2026-09-14 (seduta 1), 2026-09-15 (seduta 2)
+Esito: 77 campioni scritti in `news_poc_samples` su 12 simboli in 2 sedute
+(76 + 1 nuovo); nessuna scrittura su path live (connettore, script e tabella
+shadow isolati testati con `tests/scripts/test_poc_twelve_data_isolation.py`).
 
 ## Passo 0 — verifica schema e semantica con chiave reale
 
@@ -103,15 +103,47 @@ analizzano l'AST dei due file (`src/connectors/twelve_data_press_releases.py`,
 Sanity check eseguito: aggiungendo `from src.store.redis_store import foo` allo
 script, `test_no_live_path_imports` fallisce come previsto.
 
+## Risultati seduta 2 (2026-09-15)
+
+Stesso protocollo della seduta 1: stessa coorte (`_DEFAULT_SYMBOLS`, 12 simboli),
+`outputsize=8`, paginazione=1, nessuna modifica a script, cap o coorte (il
+protocollo e' gia' avviato durante la finestra di osservazione #171 — cambiarlo ora
+renderebbe le 5 sedute non confrontabili).
+
+```
+richieste consumate: 16 (12 simboli + 4 rate-limited recuperati dopo backoff 60s)
+budget giornaliero: 16/700
+fetched: 78 record    scritti: 1 (nuovo)    duplicati: 77    errori: 0
+```
+
+- **Nuovo record**: NFLX `20260615SF82986` — "Netflix to Announce Second Quarter
+  2026 Financial Results", `published_at` 2026-06-15, `body_chars` 1310,
+  `ticker_valid` = true.
+- **Dedup fra sedute (edge case 7, ora osservato in condizioni reali)**: i 77
+  record gia' visti il 2026-09-14 sono stati scartati da `ON CONFLICT
+  (poc_source, external_id)`/check pre-insert — 0 riscritture, come da test Seam 2.
+  Senza dedup la copertura della seduta sarebbe stata sovrastimata di 77x.
+- **Rate limit**: come nella seduta 1, 4 simboli su 12 (GS, MS, XOM, CVX) hanno
+  ricevuto 429 nel primo giro e sono stati recuperati dopo il backoff di 60s
+  (comportamento stabile e riproducibile).
+- **Latenza del nuovo record**: `fetched_at` (2026-09-15 05:01Z) −
+  `published_at` (2026-06-15 16:00Z) ≈ 91 giorni — coerente col pattern della
+  seduta 1 (p50 giorni, p95 mesi): la fonte serve comunicati con la data di
+  pubblicazione originale, spesso vecchi di settimane/mesi.
+
+Con due sedute osservate il quadro non cambia: la fonte serve in gran parte
+comunicati gia' storici; il contributo giornaliero nuovo e' molto piccolo
+(seduta 1: 76 scritti su 76 fetched, prima raccolta; seduta 2: 1 scritto su
+78 fetched).
+
 ## Cosa manca per chiudere l'issue
 
-L'issue prevede **5 sedute** di misura, non 1. Il run di oggi e' una seduta
-completa di PoC; le altre 4 vanno lanciate via cron manuale o invocazione
-diretta (NON nel beat di produzione, vincolo nel corpo della issue) nei
-prossimi giorni. Le metriche finali (p50/p95 di latenza "vera" se possibile,
-copertura per simbolo su 5 giorni, costo crediti reale, duplicazione vs
-Alpaca/SEC EDGAR) vanno aggiunte a questo documento o come commento su
-#458.
+L'issue prevede **5 sedute** di misura: 2 raccolte (2026-09-14, 2026-09-15),
+**ne restano 3** da lanciare via cron manuale o invocazione diretta (NON nel
+beat di produzione, vincolo nel corpo della issue) nei prossimi giorni. Le
+metriche finali (p50/p95 di latenza "vera" se possibile, copertura per simbolo
+su 5 giorni, costo crediti reale, duplicazione vs Alpaca/SEC EDGAR) vanno
+aggiunte a questo documento o come commento su #458.
 
 ## Decisione consigliata (per l'operatore)
 
