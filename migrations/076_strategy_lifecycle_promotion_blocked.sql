@@ -17,6 +17,17 @@
 -- promozioni sono bloccate di fatto (errore 500), e un fix di correttezza non
 -- deve aprire nessun gate. Sbloccare una strategia resta una decisione
 -- dell'operatore, fuori dal freeze #171.
+--
+-- Freeze #171, evidenza al 2026-09-15 (review PR #598): la migrazione non
+-- cambia nessun esito raggiungibile del gate. Sul DB live promoted_at e' NULL
+-- su tutte le righe e strategy_lifecycle_audit non contiene azioni
+-- 'requested'/'approved' (solo il blocco manuale di S7 del 2026-07-03): il
+-- gate non ha mai concesso una promozione, perche' ogni chiamata moriva
+-- dentro la SELECT. Dopo la 076 ogni chiamata e' rifiutata dal check #5
+-- (422 invece di 500): stessa decisione, causa visibile. La colonna e' letta
+-- solo da _fetch_lifecycle_row — nessun percorso di trading, nessuna serie
+-- osservata. La variante «backfill dallo YAML» aprirebbe S2 e S7: sarebbe
+-- quella, non questa, la modifica di comportamento in freeze.
 
 ALTER TABLE strategy_lifecycle
     ADD COLUMN IF NOT EXISTS promotion_blocked BOOLEAN NOT NULL DEFAULT TRUE;

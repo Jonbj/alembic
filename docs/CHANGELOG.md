@@ -24,7 +24,10 @@ fonte canonica, YAML seme di bootstrap — lo stesso principio di `mode`):
   blocchi dichiarati nello YAML (S1, S4) e lascia bloccate anche S2 e S7, che il flag
   non lo dichiarano. Nessun gate si apre con questo fix; sbloccare resta una decisione
   dell'operatore (in tabella **e** in YAML, come prescrive il messaggio d'errore), fuori
-  dal freeze #171.
+  dal freeze #171. Che nessun gate si apra non e' un'assicurazione ma un fatto
+  misurato: `promoted_at` e' NULL su tutte le righe del live e l'audit non contiene
+  azioni `requested`/`approved` — solo il blocco manuale di S7 del 2026-07-03, che il
+  backfill TRUE-per-tutte rispetta (la variante «backfill dallo YAML» lo contraddirebbe).
 - **Difetto secondo, scoperto dal test contro schema reale** — le connessioni di
   `PostgreSQLStore` restituiscono cursore di default (tuple), ma tutto il gate indicizza
   le righe per chiave: aggiunta la colonna, le tre POST sarebbero comunque cadute con

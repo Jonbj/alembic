@@ -63,6 +63,25 @@ def test_la_select_del_gate_gira_contro_lo_schema_delle_migrazioni(gate_db):
     assert row["promotion_blocked"] is True
 
 
+def test_il_backfill_non_sblocca_nessuna_strategia(gate_db):
+    # Review PR #598: il TRUE-per-tutte non e' un ritocco del flag ma la
+    # materializzazione dello stato di fatto. La variante letterale «backfill
+    # dallo YAML» lascerebbe S2 e S7 a FALSE, riaprendo percorsi sequenziali
+    # di promozione che la rottura tiene chiusi dal giorno del seed — per S7
+    # contro il blocco esplicito registrato in audit il 2026-07-03. Il freeze
+    # #171 esige la variante che non apre nulla; questo test la pinna.
+    with gate_db.cursor() as cur:
+        cur.execute(
+            "SELECT strategy_id FROM strategy_lifecycle WHERE NOT promotion_blocked"
+        )
+        sbloccate = [r[0] for r in cur.fetchall()]
+
+    assert sbloccate == [], (
+        "dopo la catena delle migrazioni nessuna strategia deve risultare "
+        f"promuovibile: sbloccate={sbloccate}"
+    )
+
+
 def test_riga_nuova_nasce_bloccata_fail_closed(gate_db):
     from src.strategies.promotion import _fetch_lifecycle_row
 
