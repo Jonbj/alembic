@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from src.connectors.deduplicator import compute_dedup_hash
 from src.workers.market_clock import is_regular_session_time
+from src.workers.news_transport import leggi_trasporto
 
 
 DISCARD_REASONS = frozenset(
@@ -71,4 +72,11 @@ def build_news_discard_row(
         "discarded_reason": reason,
         "discard_stage": stage,
         "enqueued_off_session": not is_regular_session_time(enqueued_at),
+        # #541: quale consegna ha prodotto QUESTO scarto. Non e' una proprieta'
+        # dell'articolo ma dell'avvistamento: lo stesso articolo puo' avere una
+        # riga `ws` (primo avvistamento, accodato) e N righe `rest`
+        # (`duplicate_id` ai poll successivi). E' la coppia che rende
+        # attribuibile il gradino del 10/09, oggi inferito dalla sola latenza.
+        # NULL per i connettori senza variante WebSocket: «non strumentato».
+        "transport": leggi_trasporto(item),
     }

@@ -459,8 +459,8 @@ class PostgreSQLStore:
             raise
 
     _INSERT_NEWS_LOG = """
-        INSERT INTO news_log (title, url, source, ticker, body_snippet, body_full, raw_sentiment, published_at, extraction_method, raw_ingested_at, content_hash)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        INSERT INTO news_log (title, url, source, ticker, body_snippet, body_full, raw_sentiment, published_at, extraction_method, raw_ingested_at, content_hash, transport)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (url, ticker) DO NOTHING
         RETURNING id
     """
@@ -560,6 +560,7 @@ class PostgreSQLStore:
             raw_sentiment = item.marketaux_sentiment if isinstance(item, MarketAuxNewsItem) else None
 
         from src.connectors.deduplicator import compute_dedup_hash
+        from src.workers.news_transport import leggi_trasporto
         try:
             content_hash = compute_dedup_hash(item)
         except Exception:
@@ -582,6 +583,11 @@ class PostgreSQLStore:
                         getattr(item, "extraction_method", "") or None,
                         item.raw_ingested_at,
                         content_hash,
+                        # #541: quale consegna ha visto per primo questo
+                        # articolo. Solo il primo avvistamento supera il dedup
+                        # e arriva fin qui, quindi la colonna su news_log e'
+                        # per costruzione la provenienza del primo avvistamento.
+                        leggi_trasporto(item),
                     ),
                 )
                 row = cur.fetchone()
@@ -2234,8 +2240,9 @@ class PostgreSQLStore:
                     INSERT INTO news_queue_drops
                         (item_id, article_id, symbol, source, published_at,
                          age_hours, title, url, raw_ingested_at, content_hash,
-                         discarded_reason, discard_stage, enqueued_off_session)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         discarded_reason, discard_stage, transport,
+                         enqueued_off_session)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     [
                         (
@@ -2244,6 +2251,10 @@ class PostgreSQLStore:
                             r.get("age_hours"), r.get("title"), r.get("url"),
                             r.get("raw_ingested_at"), r.get("content_hash"),
                             r["discarded_reason"], r["discard_stage"],
+                            # #541: NULL quando il chiamante non e' strumentato
+                            # (connettori senza variante WebSocket) — «non lo
+                            # so», che e' diverso da «arrivato dal REST».
+                            r.get("transport"),
                             # #432: NULL se il chiamante non lo conosce. Il
                             # collettore legge NULL come in-seduta (fail-closed
                             # verso l'allerta), non come coorte notturna.
@@ -2268,6 +2279,41 @@ class PostgreSQLStore:
             for row in rows
         ]
         self.record_news_discards(normalized)
+
+    _INSERT_NEWS_STREAM_SUBSCRIPTION = """
+        INSERT INTO news_stream_subscriptions (transport, symbols, symbol_count)
+        VALUES (%s, %s, %s)
+    """
+
+    def record_news_stream_subscription(
+        self, symbols: list[str], transport: str = "ws"
+    ) -> None:
+        """Snapshot dei simboli a cui il flusso si e' sottoscritto (#541).
+
+        Serve alla condizione «solo i simboli effettivamente sottoscritti» del
+        tasso di WS-missed: senza, un articolo su un titolo fuori watchlist
+        recuperato dal REST sembrerebbe un articolo perso dal WebSocket. La
+        watchlist e' baked nell'immagine e non lascia traccia storica, quindi
+        la condizione va persistita quando e' vera, non ricostruita dopo.
+
+        Fail-safe: e' telemetria all'avvio di un processo long-lived, non un
+        gate. Una lista vuota non scrive nulla — uno snapshot vuoto direbbe
+        «sottoscritto a zero simboli», che e' falso.
+        """
+        if not symbols:
+            return
+        try:
+            conn = self._get_connection()
+            with conn.cursor() as cur:
+                cur.execute(
+                    self._INSERT_NEWS_STREAM_SUBSCRIPTION,
+                    (transport, list(symbols), len(symbols)),
+                )
+            conn.commit()
+        except Exception as exc:
+            log.warning(
+                "record_news_stream_subscription failed (fail-safe): %s", exc
+            )
 
     def insert_stop_shadow(self, rows: list[dict]) -> None:
         """Persist per-cycle shadow log rows (high volume, batched)."""
