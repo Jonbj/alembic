@@ -263,6 +263,62 @@ class TestStrategiesAPIPromotion:
             "Add this endpoint to src/api/routes/strategies.py."
         )
 
+    @pytest.mark.parametrize("path,body,mocked_fn", [
+        ("/api/strategies/S1/promote",
+         {"target_mode": "paper", "gate_report_id": "r1", "requested_by": "test"},
+         "request_promotion"),
+        ("/api/strategies/S1/approve",
+         {"approved_by": "test"},
+         "approve_promotion"),
+        ("/api/strategies/S1/demote",
+         {"new_mode": "paper", "reason": "test", "demoted_by": "test"},
+         "demote_strategy"),
+    ])
+    def test_500_non_gate_logga_la_causa_ma_non_la_ribatte_al_client(
+        self, caplog, path, body, mocked_fn
+    ):
+        """Un errore non-gate (es. SELECT su colonna inesistente) fa 500 con la
+        causa completa nel log del server, non nel body della risposta (#470).
+
+        Prima del fix il detail era str(exc): l'operatore vedeva lo stesso
+        "Internal Server Error" indistinguibile sia per un gate che rifiuta
+        sia per una query rotta, e il log non aveva il traceback.
+        """
+        import logging
+
+        from fastapi.testclient import TestClient
+        from src.api.main import app
+
+        _fake_store = MagicMock()
+        _fake_store.__exit__ = MagicMock(return_value=False)
+        schema_error = RuntimeError('column "promotion_blocked" does not exist')
+
+        with patch(f"src.api.routes.strategies.{mocked_fn}") as mock_fn, \
+             patch("src.api.routes.strategies._get_db_conn") as mock_db:
+            mock_db.return_value = (_fake_store, MagicMock())
+            mock_fn.side_effect = schema_error
+
+            with caplog.at_level(logging.ERROR, logger="src.api.routes.strategies"):
+                tc = TestClient(app)
+                resp = tc.post(path, json=body, headers=_AUTH)
+
+        assert resp.status_code == 500, (
+            f"{path} deve rispondere 500 su errore non-gate, non {resp.status_code}: "
+            "la query rotta non va spacciata per un rifiuto del gate (422)."
+        )
+        assert "promotion_blocked" not in resp.text, (
+            f"{path} non deve ribattere al client la causa grezza ({schema_error}): "
+            "il dettaglio sta nel log del server, non nel body."
+        )
+        logged = [
+            r for r in caplog.records
+            if r.name == "src.api.routes.strategies"
+            and r.exc_info and "promotion_blocked" in str(r.exc_info[1])
+        ]
+        assert logged, (
+            f"{path}: la causa dell'errore (con traceback) deve stare nel log."
+        )
+
     def test_promote_returns_422_on_blocked(self):
         """promote endpoint returns 422 when PromotionBlockedError is raised."""
         from fastapi.testclient import TestClient

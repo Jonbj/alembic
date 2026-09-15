@@ -93,8 +93,13 @@ def promote_strategy_endpoint(strategy_id: str, body: PromoteRequest) -> dict:
     except PromotionBlockedError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        log.error("Unexpected error in promote_strategy_endpoint: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        # 500 = infrastruttura rotta (query, schema, DB), non un rifiuto del
+        # gate (quello e' 422). La causa completa va nel log, non al client. #470
+        log.exception("Unexpected error in promote_strategy_endpoint for %s", sid)
+        raise HTTPException(
+            status_code=500,
+            detail="Promotion gate internal error — see server log for the cause",
+        ) from exc
     finally:
         try:
             store.__exit__(None, None, None)
@@ -123,8 +128,13 @@ def approve_strategy_endpoint(strategy_id: str, body: ApproveRequest) -> dict:
     except PromotionBlockedError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        log.error("Unexpected error in approve_strategy_endpoint: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        # 500 = infrastruttura rotta (query, schema, DB), non un rifiuto del
+        # gate (quello e' 422). La causa completa va nel log, non al client. #470
+        log.exception("Unexpected error in approve_strategy_endpoint for %s", sid)
+        raise HTTPException(
+            status_code=500,
+            detail="Promotion gate internal error — see server log for the cause",
+        ) from exc
     finally:
         try:
             store.__exit__(None, None, None)
@@ -155,8 +165,13 @@ def demote_strategy_endpoint(strategy_id: str, body: DemoteRequest) -> dict:
     except PromotionBlockedError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        log.error("Unexpected error in demote_strategy_endpoint: %s", exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        # 500 = infrastruttura rotta (query, schema, DB), non un rifiuto del
+        # gate (quello e' 422). La causa completa va nel log, non al client. #470
+        log.exception("Unexpected error in demote_strategy_endpoint for %s", sid)
+        raise HTTPException(
+            status_code=500,
+            detail="Promotion gate internal error — see server log for the cause",
+        ) from exc
     finally:
         try:
             store.__exit__(None, None, None)
