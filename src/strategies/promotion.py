@@ -19,6 +19,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+from psycopg2.extras import RealDictCursor
+
 log = logging.getLogger(__name__)
 
 # Fail-closed gate: any path that cannot confirm this is True must block live
@@ -265,7 +267,9 @@ def is_strategy_operationally_approved(strategy_id: str, db_conn) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _fetch_lifecycle_row(strategy_id: str, db_conn):
-    with db_conn.cursor() as cur:
+    # RealDictCursor: le connessioni di PostgreSQLStore restituiscono tuple,
+    # ma ogni consumatore indicizza la riga per chiave (row["mode"]). #470
+    with db_conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
             """
             SELECT strategy_id, mode, target_mode, gate_report_id,
