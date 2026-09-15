@@ -60,6 +60,46 @@ Il **ritiro di F8** deciso lo stesso giorno (#134) non compare qui: `apply_regim
 significa che la leva era già spenta, quindi è rimozione di codice inerte e non tocca il
 comportamento osservato.
 
+### Esiti dei criteri di accettazione dichiarati
+
+Una deroga che dichiara un criterio prima dell'esecuzione contrae un debito: il criterio ha un
+esito, e l'esito è un fatto che va scritto qui — anche, e soprattutto, quando è «non soddisfatto».
+Lasciarlo implicito equivale a non averlo mai dichiarato.
+
+- **#432 Opzione B (deroga del 2026-09-10) — criterio di accettazione NON soddisfatto. Nessun
+  revert; decisione: nessuna azione.** Registrato il **2026-09-15** sulla base dell'analisi
+  `docs/research/stale_cohort_fetch_latency_2026-09-15.md` §1.2 (misura #432/#560, branch
+  `research/stale-fetch-latency`, commit `915ffde`).
+
+  Il criterio dichiarato prima dell'esecuzione era: *«l'outage Ollama del 2026-09-09 15-16Z deve
+  restare in breach sul gruppo `in_session`; se non allerta più, la correzione è sbagliata e va
+  revertata»*. Sui dati veri **quella finestra non esiste nel ledger**: il 09/09 gli scarti stale si
+  distribuiscono su due sole ore di `dropped_at` — le 13:xx (**177 righe, tutte off-session**, wait
+  8,03h) e le 14:xx (**18 righe**, in-seduta, wait 0,41h). Alle 15-16Z: **zero righe**. Il «breach
+  09/09» attribuito a un outage del consumatore era la campana che smaltiva l'arretrato notturno,
+  letta dallo strumento con denominatore cross-day.
+
+  **Il criterio è fallito perché la sua premessa era l'artefatto che la correzione ha rimosso.** Il
+  revert ripristinerebbe esattamente il difetto che la deroga esisteva per correggere: la sua
+  condizione di fallimento era formulata *dentro* la vecchia metrica, e non poteva sopravviverle.
+  Non è un motivo per tenere la correzione «nonostante» il criterio — è il motivo per cui il
+  criterio, così com'era scritto, non era falsificante. Sotto lo strumento corretto il 09/09 vale
+  `went_stale_in_queue = 0` e **3,4% in-seduta, sotto soglia**.
+
+  Va tenuto presente alla sintesi del giorno 40: **la causa dominante non si è spostata.** A
+  strumento costante `went_stale_in_queue` è ~0 da sempre; quello che è cambiato davvero è un
+  gradino su `already_stale_at_fetch` (16 → 18 → **263** → 292 → 305) fra il 09 e il 10/09, e la sua
+  attribuzione WS/REST è rimasta **non dimostrabile** finché la provenienza del trasporto non è
+  persistita (#541). L'ipotesi corrente — il primo avvistamento passato dal REST al WS, che sposta
+  la scadenza della TTL di dedup *dentro* la finestra di poll 14-21Z — resta dichiarata come
+  ipotesi, non come esito.
+
+  **Lezione da applicare alle prossime pre-registrazioni:** un criterio di accettazione che si
+  esprime in termini della grandezza che la correzione sta ridefinendo non è falsificante. Va
+  formulato su un'osservazione indipendente dallo strumento sotto correzione — qui, per esempio,
+  sull'esistenza delle righe di scarto nella finestra oraria dell'outage, che è un fatto del ledger
+  e non della metrica.
+
 ### Discontinuità nella serie osservata
 
 Due deroghe introducono una discontinuità, e vanno trattate separatamente alla sintesi del giorno 40
@@ -276,6 +316,73 @@ Uscire dalla banda è la gamba che *non* si avvera. Al 2026-08-24 entrambe le ga
 (S4 −$505,34, fuori banda; `no_news_dominant` 5/15 = 33%): sul criterio scritto S4 non è
 falsificata. Confondere le due cose — leggere il breach come un kill trigger — è l'errore che questa
 sezione esiste per impedire, ed è l'errore da cui è nata #329.
+
+## Interventi pre-registrati per la scadenza del 2026-09-28
+
+Interventi decisi **adesso**, con la verifica attesa scritta **prima** di eseguirli, ma il cui
+deploy è rinviato a fine finestra perché non passano il test d'esenzione. Sono qui e non in un
+backlog perché pre-registrarli è ciò che impedisce di riformulare il criterio dopo aver visto il
+risultato.
+
+### TTL del deduplicatore: 4h → allineata a `MAX_NEWS_AGE_HOURS`
+
+Pre-registrato il **2026-09-15**. Fonte: `docs/research/stale_cohort_fetch_latency_2026-09-15.md`
+§2 e §5 (R3). Issue di riferimento: #432 · #541 · #48.
+
+**Il difetto.** `_DEDUP_TTL_SECONDS = 4 * 3600` (`src/connectors/deduplicator.py:22`) è **il doppio**
+di `MAX_NEWS_AGE_HOURS = 2`. La conseguenza è meccanica, non statistica: un articolo visto per primo
+dal WebSocket a latenza ~0 scrive una chiave `SET NX ex=14400`; `SET NX` non rinfresca la TTL, quindi
+la chiave scade a T+4h esatte; il primo poll REST successivo ripassa il dedup e riaccoda l'articolo;
+il gate di freschezza allo stage `sentiment` lo uccide perché è vecchio **il doppio della soglia per
+costruzione**. La coorte `already_stale_at_fetch` è quindi l'**eco del deduplicatore**, non un
+ritardo di ingest: la latenza in-seduta sta in **[4,04h; 4,25h]** — una banda larga un intervallo di
+poll, cioè una costante, non una distribuzione — e il bucket 4h vale il **79%** degli scarti
+in-seduta. `avg_fetch_latency_hours`, etichettata come latenza di ingest, misura una TTL di
+configurazione.
+
+**Costo in alpha: zero, provato.** Il **100%** degli articoli distinti dietro gli scarti in-seduta
+(65/65 l'11/09, 69/69 il 14/09) era già stato visto fresco entro 15 minuti dalla pubblicazione. Lo
+scarto è la *seconda* consegna, non la prima. Il 14/09, zero righe su 206 in `news_log` superano i 5
+minuti di latenza di fetch. Nessun segnale è andato perso.
+
+**Perché non prima del 28/09.** La TTL del dedup governa **quali news entrano nella serie
+osservata**: cambiarla a metà finestra è una discontinuità sul denominatore di copertura
+(#508/#511), lo stesso motivo per cui la deroga dell'Opzione C ha vietato scritture su `news_log`. E
+l'esenzione «difetto di correttezza» **non è automatica**: il sistema si comporta come configurato,
+e la prova che il costo in alpha è zero toglie proprio l'urgenza che giustificherebbe l'anticipo.
+Costa ~300 righe di ledger e ~7.500 chiamate di espansione/dedup al giorno per zero resa — spreco e
+rumore sull'evidenza, non perdita.
+
+**Verifica attesa, dichiarata prima dell'esecuzione.** Sulle prime 5 sedute intere dopo il deploy,
+confrontate con le 5 sedute intere precedenti:
+
+1. **Gli scarti in-seduta scendono sotto la soglia 0,25** sulla quota accodata entro seduta
+   (`(stale_drops − went_stale_off_session) / queued`), da un regime osservato di 30-38%.
+2. **La copertura resta identica**: `news_log` per seduta e articoli distinti coperti per seduta
+   invariati entro il rumore, e il p90 della latenza di fetch su `news_log` resta ~0,00h. Gli
+   articoli non riconsegnati sono per costruzione quelli **già visti freschi**, quindi togliere l'eco
+   non deve togliere un solo articolo alla serie di copertura.
+3. **Il rapporto righe/articolo negli scarti in-seduta crolla insieme al conteggio**: se scendessero
+   le righe ma non gli articoli distinti, la causa non sarebbe l'eco del dedup e l'intervento
+   andrebbe rivisto.
+
+**Condizione di falsificazione.** Se (2) fallisce — cioè se la copertura per seduta scende, o
+compaiono righe `news_log` con latenza di fetch oltre i 5 minuti dove prima erano zero — significa
+che una quota di articoli entrava **solo** grazie alla riconsegna a T+4h, e l'intervento va
+revertato. Formulata di proposito su una serie **indipendente** dallo strumento che sto cambiando
+(`news_log`, non `stale_drop_metrics_daily`): è la lezione registrata sopra a proposito del criterio
+di #432 Opzione B.
+
+**Discontinuità da dichiarare al deploy.** La serie `stale_drop_metrics_daily` va **segmentata
+before/after**, mai mediata attraverso la data: il conteggio degli scarti cambia per costruzione, non
+per un cambio di regime della pipeline. Stesso trattamento della serie di copertura news.
+
+**Perimetro dell'intervento.** La sola costante `_DEDUP_TTL_SECONDS`, più la correzione dei docstring
+di `deduplicator.py` (righe 11, 51-52, 69 dicono ancora «2-hour TTL» da prima del cambio del
+2026-06-27, `731530b`: chi legge il modulo oggi legge il contrario della costante). **Non si tocca
+`MAX_NEWS_AGE_HOURS`** (=2, stessa costante del gate d'ingresso S4), **non si tocca la soglia 0,25**,
+non si toccano beat schedule, pesi, cooldown o money path. L'allineamento va nella direzione della
+soglia esistente, non ne introduce una nuova.
 
 ## Stato
 
