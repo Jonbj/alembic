@@ -134,3 +134,110 @@ e non e' coperta da questa issue.
 - `tests/connectors/test_twelve_data_press_releases.py` — gia' su main via PR #577.
 - `tests/scripts/test_poc_twelve_data_isolation.py` — **nuovo in questa PR**
   (Seam 3 dell'issue, mancante da PR #577).
+
+---
+
+# Verdetto finale — 2026-09-15
+
+**La PoC si chiude a 2 sedute sulle 5 previste, perche' la misura decisiva e' gia'
+arrivata e le sedute restanti non possono cambiarla.** Deciso dall'operatore.
+
+## La misura che decide
+
+Su tutte le 77 righe raccolte (2 sedute, 12 simboli), misurando l'eta' del comunicato
+al momento del fetch:
+
+| | |
+|---|---|
+| eta' mediana al fetch | **132 giorni** |
+| eta' media al fetch | 176 giorni |
+| comunicato piu' vecchio | 2025-01-16 |
+| comunicato piu' recente in assoluto | 2026-09-02 (12 giorni prima del fetch) |
+| righe piu' fresche di 24 ore | **0** |
+| righe piu' fresche di 2 ore | **0** |
+
+Il filtro di freschezza del path live e' `MAX_NEWS_AGE_HOURS = 2` (`src/config.py:316`).
+**Nessuno dei 77 record lo passerebbe.** Non "pochi": zero.
+
+Il dato per simbolo toglie ogni dubbio che sia un effetto di coorte — questa e' l'eta'
+del comunicato **piu' fresco** di ciascun simbolo:
+
+| simbolo | righe | piu' recente | eta' del piu' fresco (gg) |
+|---|---|---|---|
+| JPM | 8 | 2026-09-02 | 12 |
+| META | 8 | 2026-08-26 | 19 |
+| MSFT | 8 | 2026-08-25 | 20 |
+| BAC | 8 | 2026-08-18 | 27 |
+| GS | 8 | 2026-07-31 | 45 |
+| AMZN | 8 | 2026-06-15 | 91 |
+| NFLX | 9 | 2026-06-15 | 92 |
+| AAPL | 8 | 2026-05-28 | 109 |
+| GOOGL | 5 | 2026-02-27 | 199 |
+| MS | 4 | 2025-10-14 | 335 |
+| CVX | 3 | 2025-07-18 | 423 |
+
+Nessun simbolo, in nessuna delle due sedute, ha prodotto qualcosa di piu' fresco di 12
+giorni.
+
+## Perche' le 3 sedute mancanti non avrebbero cambiato nulla
+
+Il disegno a 5 sedute presupponeva **un flusso**; questa fonte e' **uno stock**.
+L'endpoint restituisce sempre gli stessi top-8 per simbolo, quindi il dedup su
+`external_id` fa il suo lavoro e il campione non cresce:
+
+| seduta | richieste consumate | righe nuove |
+|---|---|---|
+| 1 (2026-09-14) | 36 | 76 |
+| 2 (2026-09-15) | 16 | **1** |
+
+La seconda seduta ha speso 16 crediti per aggiungere un comunicato Netflix del 15 giugno.
+Le sedute 3, 4 e 5 avrebbero aggiunto qualche riga con lo stesso profilo, al costo di un
+giro completo del loop ciascuna (il loop ripescava #458 a ogni giro): il costo piu' alto
+per l'informazione piu' bassa in coda.
+
+## Nota sulla metrica di latenza dichiarata sopra
+
+La sezione "Latenza" di questo documento tratta `fetched_at - published_at` come una
+misura da leggere con cautela, perche' il fornitore espone la data di pubblicazione
+originale e non quella di ingestione. **La cautela era giusta ma il problema e' un
+altro, e piu' grande**: qualunque definizione si scelga, questa fonte non consegna nulla
+in prossimita' della pubblicazione. Non e' una metrica mal definita, e' una fonte che
+non fa quel mestiere.
+
+## Il `ticker_valid` del 90,8% e' generoso, e misurato sulla cosa sbagliata
+
+I 7 fallimenti sono comunicati "commentary" che elencano dieci titoli — esattamente il
+caso in cui si genera un ticker sbagliato, che e' il worst-case dichiarato da QT-01. Per
+una fonte che dovrebbe puntare a `false_positive_ticker_rate -> 0`, un 9% non e' un
+punto di partenza accettabile: e' il difetto principale, non un residuo.
+
+## Esito
+
+**Twelve Data `press_releases` non e' integrabile nel path live di Alembic.** Fallisce il
+gate di freschezza **per costruzione**, non per taratura: non esiste un valore di
+`MAX_NEWS_AGE_HOURS` ragionevole che la ammetta senza ammettere anche notizie di mesi.
+
+Non e' un difetto del connettore, che funziona e ha retto tutti gli edge case del Passo 0.
+E' la fonte a essere un archivio di comunicati di terze parti, non un feed.
+
+## Cosa resta in piedi, e perche'
+
+- **Le tabelle shadow** (`news_poc_samples`, `news_poc_request_budget`) e i 77 campioni
+  restano: sono isolate dal path live, non costano nulla, e sono l'evidenza di questa
+  decisione. Servirebbero di nuovo alla prossima PoC su un'altra fonte.
+- **Il connettore, lo script e i test** restano su main. La guardia di isolamento AST
+  (`tests/scripts/test_poc_twelve_data_isolation.py`) continua a impedire che un refactor
+  futuro ricolleghi la PoC al path live.
+- **`TWELVE_DATA_API_KEY` resta in `.env`**: Twelve Data espone altri endpoint, e la
+  chiave non costa nulla.
+- **La deroga al freeze** concessa il 2026-09-01 copriva la PoC e si chiude qui.
+  L'integrazione live era gia' dichiarata "decisione separata": non si pone piu'.
+
+## Il confronto che resta aperto
+
+La domanda a cui questa PoC cercava di rispondere — la copertura news e' troppo sottile,
+serve una fonte in piu' — resta aperta, ed e' documentata in **#587**: SEC EDGAR e'
+gratuita, event-driven e **fresca per costruzione** (un filing e' timestampato al
+deposito), ma e' spenta dietro un flag in attesa di una valutazione shadow mai fatta.
+E' la fonte che questa PoC sperava che Twelve Data fosse.
+
