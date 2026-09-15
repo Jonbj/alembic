@@ -1,112 +1,112 @@
 {
-  "generato_il": "2026-09-08T08:22:31.322161+00:00",
+  "generato_il": "2026-09-15T08:10:02.175710+00:00",
   "metodo": "una osservazione per simbolo-giorno scelta con la regola del ranker (fallback_used ASC, generated_at DESC); Spearman cross-sectional giornaliero; t calcolato sui giorni",
   "discontinuita": "Dal 2026-09-08 (#467) la riduzione a simbolo-giorno applica la regola del ranker (fallback_used ASC, generated_at DESC); prima teneva l'ultimo segnale per solo orario, che il sistema non usa. Le serie prima e dopo questa data NON sono confrontabili: a parita' di dati le due riduzioni divergono su 411/3228 simbolo-giorni (12,7%), 75 al gate 0.30, e il sottoinsieme 'ensemble' era il piu' contaminato (IC 1g -0.0087 -> -0.0339).",
-  "osservazioni_simbolo_giorno": 3228,
-  "giorni_totali": 59,
+  "osservazioni_simbolo_giorno": 3500,
+  "giorni_totali": 64,
   "sintesi": {
     "tutti": {
       "1g": {
-        "giorni": 59,
-        "ic_medio": -0.03198435009858643,
-        "dev_std": 0.1404385886146691,
-        "t_stat": -1.7493514936423726,
+        "giorni": 64,
+        "ic_medio": -0.03557139478347371,
+        "dev_std": 0.1363254652325812,
+        "t_stat": -2.0874394800875278,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.054850640734283106
+        "ic_rilevabile_a_t3": 0.051122049462217954
       },
       "3g": {
-        "giorni": 57,
-        "ic_medio": -0.029376947212968327,
-        "dev_std": 0.14777785656825657,
-        "t_stat": -1.5008411464484674,
+        "giorni": 62,
+        "ic_medio": -0.03196717011693094,
+        "dev_std": 0.14502025055169598,
+        "t_stat": -1.7356869006433087,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.058720965804711846
+        "ic_rilevabile_a_t3": 0.05525277071299451
       },
       "5g": {
-        "giorni": 55,
-        "ic_medio": -0.043438428118714255,
-        "dev_std": 0.1429165983929866,
-        "t_stat": -2.2540979040796376,
+        "giorni": 60,
+        "ic_medio": -0.036638344884674004,
+        "dev_std": 0.141069068981738,
+        "t_stat": -2.011776225578063,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.05781261058815958
+        "ic_rilevabile_a_t3": 0.05463581548312565
       }
     },
     "ensemble": {
       "1g": {
-        "giorni": 59,
-        "ic_medio": -0.03389282362068053,
-        "dev_std": 0.19690748511880593,
-        "t_stat": -1.32212199998479,
+        "giorni": 64,
+        "ic_medio": -0.03758545896817698,
+        "dev_std": 0.19010118790958386,
+        "t_stat": -1.5817032763016048,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.07690551315477037
+        "ic_rilevabile_a_t3": 0.07128794546609395
       },
       "3g": {
-        "giorni": 57,
-        "ic_medio": -0.03056799966841287,
-        "dev_std": 0.1873576915460494,
-        "t_stat": -1.2317793553578538,
+        "giorni": 62,
+        "ic_medio": -0.03577807411266316,
+        "dev_std": 0.18377744901009047,
+        "t_stat": -1.5329238641495122,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.07444839743932627
+        "ic_rilevabile_a_t3": 0.07001927809215756
       },
       "5g": {
-        "giorni": 55,
-        "ic_medio": -0.035215370405381724,
-        "dev_std": 0.1649648108321087,
-        "t_stat": -1.583150827170666,
+        "giorni": 60,
+        "ic_medio": -0.034263730773676115,
+        "dev_std": 0.16149665095785892,
+        "t_stat": -1.64341313430716,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.06673155166456947
+        "ic_rilevabile_a_t3": 0.06254738396280597
       }
     },
     "fallback": {
       "1g": {
-        "giorni": 52,
-        "ic_medio": -0.07657703028945557,
-        "dev_std": 0.3612445719140696,
-        "t_stat": -1.528617621953187,
+        "giorni": 56,
+        "ic_medio": -0.07701710635721555,
+        "dev_std": 0.3538300314630121,
+        "t_stat": -1.628870357430664,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.150286826194525
+        "ic_rilevabile_a_t3": 0.14184758045207524
       },
       "3g": {
-        "giorni": 51,
-        "ic_medio": -0.06254648932060912,
-        "dev_std": 0.31113176002917625,
-        "t_stat": -1.435633819247072,
+        "giorni": 55,
+        "ic_medio": -0.0472809876961563,
+        "dev_std": 0.32486212647241797,
+        "t_stat": -1.0793661705911235,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.13070148212323124
+        "ic_rilevabile_a_t3": 0.13141320059233233
       },
       "5g": {
-        "giorni": 50,
-        "ic_medio": -0.11110333993894735,
-        "dev_std": 0.3512946378687493,
-        "t_stat": -2.236354234153046,
+        "giorni": 53,
+        "ic_medio": -0.07642746587636653,
+        "dev_std": 0.3790570115776374,
+        "t_stat": -1.4678539985936259,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.1490416923788791
+        "ic_rilevabile_a_t3": 0.15620245463702703
       }
     },
     "alta_convinzione_0.30": {
       "1g": {
-        "giorni": 42,
-        "ic_medio": 0.007538045603600982,
-        "dev_std": 0.359164567149704,
-        "t_stat": 0.13601597539923582,
+        "giorni": 46,
+        "ic_medio": 0.019770762134964877,
+        "dev_std": 0.3600943154691632,
+        "t_stat": 0.3723797545720852,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.16626088769665212
+        "ic_rilevabile_a_t3": 0.1592790308190962
       },
       "3g": {
-        "giorni": 41,
-        "ic_medio": 0.00908951531798126,
-        "dev_std": 0.3194003291541977,
-        "t_stat": 0.18222052554925505,
+        "giorni": 44,
+        "ic_medio": 0.003924321091755265,
+        "dev_std": 0.3356137241270494,
+        "t_stat": 0.0775623860560777,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.14964585285741022
+        "ic_rilevabile_a_t3": 0.15178701783044593
       },
       "5g": {
-        "giorni": 40,
-        "ic_medio": 0.015522767505553748,
-        "dev_std": 0.3455330102544068,
-        "t_stat": 0.28412510208884867,
+        "giorni": 42,
+        "ic_medio": 0.017164540481479758,
+        "dev_std": 0.35142891372180396,
+        "t_stat": 0.3165332496114802,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.16390069787673633
+        "ic_rilevabile_a_t3": 0.16267997598243997
       }
     }
   },
@@ -405,15 +405,40 @@
       "giorno": "2026-09-03",
       "ic": -0.2883763054336872,
       "n_simboli": 46
+    },
+    {
+      "giorno": "2026-09-04",
+      "ic": -0.10375695559412405,
+      "n_simboli": 42
+    },
+    {
+      "giorno": "2026-09-08",
+      "ic": -0.09363901452477202,
+      "n_simboli": 59
+    },
+    {
+      "giorno": "2026-09-09",
+      "ic": -0.08231639723017743,
+      "n_simboli": 58
+    },
+    {
+      "giorno": "2026-09-10",
+      "ic": 0.03224833838398805,
+      "n_simboli": 56
+    },
+    {
+      "giorno": "2026-09-11",
+      "ic": -0.14202858136063265,
+      "n_simboli": 57
     }
   ],
   "criterio": {
     "criterio_registrato": true,
     "esito": "INSUFFICIENT_N",
     "soglia": null,
-    "n_corrente": 59,
+    "n_corrente": 64,
     "n_richiesto": 213,
-    "ic_medio": -0.03198435009858643,
-    "t_stat": -1.7493514936423726
+    "ic_medio": -0.03557139478347371,
+    "t_stat": -2.0874394800875278
   }
 }
