@@ -36,6 +36,17 @@
 # mossa che la pre-registrazione esiste per impedire.
 min_giorni: 213
 
+# Prima seduta che concorre al conteggio del criterio (#601). `min_giorni`
+# dichiara sedute PULITE: il fix #467 (riduzione a simbolo-giorno con la regola
+# del ranker) è del 2026-09-08 e le serie prima e dopo quella data NON sono
+# confrontabili — lo dichiara il campo `discontinuita` di s4_ic.json. Le sedute
+# precedenti restano pubblicate (`giorni_totali`, `sintesi`) ma non contano
+# verso `n_corrente`. Il prossimo fix di riduzione sposta SOLO questa data,
+# in un punto solo.
+# OBBLIGATORIA: senza questa chiave il criterio non è valutabile e l'esito è
+# NO_CRITERION — mai un conteggio silenzioso sulla serie intera.
+serie_valida_dal: "2026-09-08"
+
 # Soglia di significatività (R2). Newey-West/HAC, non errori standard ingenui:
 # i forward return si sovrappongono.
 significativo_a_t: 3.0
