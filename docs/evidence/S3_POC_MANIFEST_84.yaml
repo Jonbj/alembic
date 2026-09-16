@@ -1,0 +1,158 @@
+# Manifest congelato del POC di allineamento al design S3 (issue #84).
+#
+# Questo file e' la pre-registrazione macchina-leggibile: ipotesi, soglie,
+# split, costi e regole di esito sono fissati QUI prima del run definitivo.
+# Lo sha256 di questo file viene registrato in
+# docs/evidence/PREREGISTRAZIONE_S3_POC_84.md e citato in ogni artefatto.
+# Cambiare un valore dopo il run definitivo e' una discontinuita': va
+# registrata come errata nella preregistrazione, mai applicata in silenzio.
+#
+# Regola di stop dati (gate, 2026-07-21): nessun run decision-grade senza un
+# dataset PIT qualificato (docs/RESEARCH_S3_PIT_DATA_FEASIBILITY_2026-07-21.md).
+
+schema_version: "1"
+poc_id: "s3-design-alignment-84"
+issue: 84
+
+splits:
+  dev_sample_end: "2022-12-31"       # sviluppo/walk-forward/selezione A/B fin qui
+  holdout_start: "2023-01-01"        # sigillato: apribile UNA volta con sign-off
+  holdout_end: "2025-12-31"
+  data_excluded_after: "2025-12-31"  # il 2026 parziale non entra nella metrica primaria
+
+universe:
+  min_history_sessions: 252          # almeno 252 sedute di storia PIT
+  min_price_usd: 5.0
+  min_market_cap_usd: 2000000000.0   # cap PIT a ogni ribilancio
+  min_adv_usd: 10000000.0            # dollar volume medio sulle 60 sedute trailing
+  adv_window_sessions: 60
+  us_primary_exchanges: ["NYSE", "NASDAQ", "AMEX"]  # primary listing USA, no OTC
+  allowed_share_types: ["common"]    # niente ETF/ADR/preferred/fondi
+  min_breadth: 200                   # sotto: rebalance primario non decision-grade
+
+signal:
+  market_symbol: "SPY"
+  lookback_sessions: 252             # 12-1: log(P_{t-21} / P_{t-252})
+  skip_sessions: 21
+  beta_window_sessions: 252          # beta rolling OLS vs mercato, stessa finestra
+  use_log_returns: true
+
+portfolio:
+  n_deciles: 10
+  long_decile: 10                    # top decile long-only, il bottom non si shorta
+  vol_window_sessions: 60            # inverse-vol sizing su vol trailing 60
+  max_weight: 0.10                   # cap 10% con ridistribuzione iterativa
+  rebalance_frequency: "monthly"     # segnale al close finale del mese
+  execution: "next_session_open"     # esecuzione all'open della seduta successiva
+  execution_fallback: "next_session_close"  # se l'open non e' affidabile
+  open_reliability_field: "open_reliable"
+  initial_capital_usd: 1000000.0     # scala irrilevante: i costi sono in bps
+
+costs:
+  # Congelati dai valori di produzione (config/cost_model.yaml v0.2.0):
+  # spread = tier_d conservativo (il default per simboli non mappati),
+  # impatto = SquareRootImpactModel di produzione, commissioni nulle.
+  spread_bps: 20.0
+  impact_k: 10.0
+  commission_per_share: 0.0
+  sec_fee_per_share_sale: 0.0000229
+  finra_taf_per_share_sale: 0.000145
+  stress_multiplier: 2.0             # scenario di costo 2x obbligatorio
+
+walkforward:
+  in_sample_months: 60
+  oos_months: 12
+  step_months: 12                    # OOS non sovrapposti; stato fresco per finestra
+
+regimes:
+  trend_ma_sessions: 200             # bull/bear: mercato sopra/sotto SMA 200
+  vol_window_sessions: 60            # high/low vol: vol realizzata 60 sedute
+  vol_split: "median"
+  definitions: ["bull", "bear", "high_vol", "low_vol"]  # >= 3 richiesti dal gate
+
+stress:
+  # Periodi storici predefiniti: src.backtest.gates.historical_stress
+  # (2008_gfc, 2020_covid, 2022_rates). In piu', i periodi di momentum
+  # crash/rebound riportati separatamente (user story 16).
+  momentum_crash_periods:
+    2009_rebound: ["2009-03-01", "2009-08-31"]
+    2020_rebound: ["2020-04-01", "2020-09-30"]
+
+gates:
+  # Snapshot dei GateConfig correnti: NESSUNA rilassazione S3-specifica.
+  # n_trials e' l'eccezione: non e' una soglia ma il conteggio onesto dei
+  # trial esplorati (registry sotto), che il DSR richiede.
+  n_trials: 6
+  min_sharpe: 0.5
+  max_pvalue: 0.05
+  min_dsr: 0.5
+  min_oos_sharpe: 0.30
+  min_positive_fraction: 0.5
+  max_cv: 0.5
+  min_all_positive: false
+  min_regime_sharpe: 0.0
+  min_passing_regimes: 3
+  min_cumulative_return: -0.10
+  max_drawdown_allowed: -0.30
+  periods: 252
+
+trial_registry:
+  # Numero vero di configurazioni esplorate sulla famiglia S3 prima/durante
+  # il POC. Alimenta il DSR (gate 1). Le perturbazioni di robustezza del POC
+  # non sono trial di selezione: griglia fissa a priori, non selezionata.
+  n_trials_for_dsr: 6
+  entries:
+    - id: "hist-s3-base"
+      description: "report S3 storico 2026-07: residuale 12-0 long-short su universo survivor"
+      exploratory: true
+    - id: "hist-s3-perturb-126-126"
+      description: "perturbazione lookback/beta 126/126 del report storico"
+      exploratory: true
+    - id: "hist-s3-perturb-378-252"
+      description: "perturbazione lookback/beta 378/252 del report storico"
+      exploratory: true
+    - id: "hist-s3-perturb-252-504"
+      description: "perturbazione lookback/beta 252/504 del report storico"
+      exploratory: true
+    - id: "poc-84-A"
+      description: "variante A: momentum 12-1 log corretto per beta SPY (design originale)"
+    - id: "poc-84-B"
+      description: "variante B: momentum 12-1 log totale, senza correzione beta (comparatore)"
+  non_trials:
+    - "allocazioni diagnostiche 5%/15% nel test combinato (fissate, non cercate)"
+    - "griglia di robustezza del POC (fissata a priori, mai selezionata sui risultati)"
+    - "scenario di costo 2x (controllo, non variante)"
+
+selection_rules:
+  # B e' il default piu' semplice. A viene preferito solo se aggiunge valore
+  # materiale; B e' comparatore, non veto.
+  sharpe_margin: 0.10                # A preferito se Sharpe_net(A) - Sharpe_net(B) >= 0.10
+  risk_improvement_min: 0.15         # ...o ES/MaxDD migliorano >= 15%
+  sharpe_tolerance: 0.05             # ...senza peggiorare lo Sharpe oltre 0.05
+  bootstrap_min_prob: 0.80           # probabilita' bootstrap del segno atteso
+  material_cost_deterioration: 0.10  # aumento relativo del costo medio per ribilancio
+
+combined_rules:
+  # S1 invariato; il test primario sostituisce 10 punti di cassa con S3.
+  primary_allocation: 0.10
+  diagnostic_allocations: [0.05, 0.15]  # solo diagnostica, non un'altra ricerca
+  cash_return: 0.0                   # rendimento della cassa sostituita (semplificazione congelata)
+  sharpe_gain_min: 0.05              # o migliora lo Sharpe di >= 0.05 ...
+  dd_es_worsening_max: 0.05          # ...senza peggiorare MaxDD/ES oltre 5%
+  dd_es_improvement_min: 0.10        # ...o migliora MaxDD/ES di >= 10%
+  sharpe_reduction_max: 0.03         # ...senza ridurre lo Sharpe oltre 0.03
+  bootstrap_min_prob: 0.80
+  bootstrap_draws: 10000
+  bootstrap_seed: 8422026
+
+ambiguity:
+  # Un esito in queste bande e' NO-GO temporaneo, non un aggiustamento.
+  bootstrap_prob_band: [0.70, 0.80]
+  margin_band: 0.02                  # margine a meno di 0.02 da una soglia
+
+holdout:
+  signoff_required: true
+  signoff_path: "docs/evidence/S3_POC_HOLDOUT_SIGNOFF_84.md"
+
+dataset:
+  qualification_required: true       # niente run reali senza gate dati riaperto in GO
