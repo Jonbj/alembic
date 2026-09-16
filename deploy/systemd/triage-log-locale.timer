@@ -1,0 +1,13 @@
+[Unit]
+Description=Triage notturno dei log, ogni giorno alle 02:15
+
+[Timer]
+# 02:15 sta dopo la rotazione dei log dei container (01:59) e prima del primo
+# giro del loop roadmap. Se un giorno si riaccende `review-notturna-locale.timer`
+# (01:07, puo' durare ore) i due job si contendono la porta 8080: vanno
+# sfasati o tenuti mutuamente esclusivi.
+OnCalendar=*-*-* 02:15:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target
