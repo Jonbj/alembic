@@ -51,9 +51,10 @@
 
 set -euo pipefail
 
-# cron parte con un PATH minimo (/usr/bin:/bin). Senza /usr/local/bin `ollama`
-# non si trova, e glm53/minimax risulterebbero "non installati": il loop girerebbe
-# sul solo codex senza che nulla lo segnali.
+# cron parte con un PATH minimo (/usr/bin:/bin). Senza ~/.local/bin e
+# /usr/local/bin, `claude` (glm53) e `ollama` (minimax) non si trovano, e
+# risulterebbero "non installati": il loop girerebbe sul solo codex senza che
+# nulla lo segnali.
 export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -78,8 +79,9 @@ TIMEOUT_SESSIONE=5400    # 90 minuti: oltre, la sessione e' bloccata, non lenta
 #      ripete venti volte lo stesso punto cieco, e nessuno lo vede.
 # La rotazione avanza a ogni giro, indipendentemente dall'esito.
 #
-# glm53 e minimax girano dentro Claude Code ma con un modello diverso sotto
-# (`ollama launch claude --model ...`): stesso utensile, testa diversa.
+# glm53 e minimax girano dentro Claude Code ma con un modello diverso sotto:
+# stesso utensile, testa diversa. glm53 lo prende da z.ai (subscription dedicata,
+# vedi ZAI_ENV_FILE), minimax da Ollama Cloud.
 MOTORI=(codex glm53 minimax)
 # Se l'operatore forza un motore via env var, quello e' l'unico che gira.
 if [[ -n "${ROADMAP_FORCE_ENGINE:-}" ]]; then
@@ -94,6 +96,53 @@ MOTORE_STATE="$LOG_DIR/roadmap_agent_engine.txt"
 CODEX_MODEL="${CODEX_MODEL:-}"
 _codex_model_args=()
 [[ -n "$CODEX_MODEL" ]] && _codex_model_args=(-m "$CODEX_MODEL")
+
+# --- GLM via z.ai -----------------------------------------------------------------
+# Dal 2026-09-15 glm53 prende GLM-5.3 dalla subscription z.ai, non piu' da
+# Ollama Cloud: la chiave Ollama e' la stessa del worker di sentiment del
+# trading, e il loop rischiava di prosciugarla (ensemble caduto sul fallback
+# FinBERT il 2026-08-26). Stesso modello, stesso Claude Code: cambia solo da
+# dove arriva, e con quale quota.
+# La chiave NON sta in .env del progetto (una chiave e' gia' finita nella storia
+# di git a giugno) ma in un file fuori dal repo, permessi 600, scritto a mano
+# dall'operatore. L'indirizzo non e' un segreto e vive qui.
+ZAI_ENV_FILE="${ZAI_ENV_FILE:-$HOME/.config/alembic/zai.env}"
+ZAI_BASE_URL="${ZAI_BASE_URL:-https://api.z.ai/api/anthropic}"
+ZAI_MODEL="${ZAI_MODEL:-glm-5.3}"
+# Effort di reasoning per claude (low, medium, high, xhigh, max): high e' il
+# livello imposto dal 2026-09-15 su richiesta dell'operatore.
+ZAI_EFFORT="${ZAI_EFFORT:-high}"
+
+# Claude Code fa da se' alcune chiamate di servizio (il titolo della sessione, la
+# compattazione del contesto): con ANTHROPIC_BASE_URL impostato finiscono anche
+# quelle su z.ai. Senza questa mappatura girerebbero sul modello grosso —
+# verificato il 2026-09-15, il titolo della sessione era generato da glm-5.3.
+# Sul piano Lite e' spreco puro: i moltiplicatori di Flash sono 2,3/8 contro
+# 6,9/24, un terzo scarso. Il lavoro vero resta su ZAI_MODEL, che e' passato
+# esplicitamente con --model e non da questa variabile.
+ZAI_MODEL_FLASH="${ZAI_MODEL_FLASH:-glm-5.3-flash}"
+
+# Timeout della SINGOLA richiesta al modello, non della sessione: quello e'
+# TIMEOUT_SESSIONE, 90 minuti, e resta l'unico limite sulla durata del giro. 50
+# minuti per una risposta sono larghissimi; il valore e' quello consigliato da
+# z.ai, che con un effort alto puo' far ragionare a lungo prima di rispondere.
+# Un timeout scattato qui somiglia nel log a un modello che si ferma da solo,
+# ed e' il motivo per cui non si lascia al default.
+ZAI_TIMEOUT_MS="${ZAI_TIMEOUT_MS:-3000000}"
+
+# Rumore atteso nell'output di ogni sessione glm53, verificato il 2026-09-15:
+#   - "claude.ai connectors are disabled ... auth source is set" e' la nostra
+#     ANTHROPIC_AUTH_TOKEN, non un errore;
+#   - "[claude-code:unrecognized_model]" e' il catalogo del client che non
+#     conosce i modelli z.ai e assume una finestra di 200k token. Conservativo:
+#     si comprime il contesto prima del necessario, non si sfora.
+# Nessuna delle due contiene le firme di _RATE_LIMIT_RE, quindi non mandano il
+# motore in panchina per sbaglio — controllato, ed e' il motivo per cui e' scritto.
+
+# Il token per claude (ANTHROPIC_AUTH_TOKEN), letto senza importare il file
+# nell'ambiente dello script: la chiave esiste solo dentro il comando che
+# lancia glm53, e muore li'.
+zai_chiave() { sed -n 's/^ZAI_API_KEY=//p' "$ZAI_ENV_FILE" 2>/dev/null | head -1; }
 
 # Rate limit: un motore esaurito non e' un motore rotto. Viene messo in panchina
 # per un po' e rientra da solo alla scadenza — nessun intervento manuale, che
@@ -604,7 +653,11 @@ metti_in_panchina() {
 motore_installato() {
     case "$1" in
         codex|gemini|opencode) command -v "$1" >/dev/null 2>&1 ;;
-        glm53|minimax)        command -v ollama >/dev/null 2>&1 ;;
+        # glm53: senza claude o senza chiave il motore va escluso subito, non
+        # provato e fallito. Un giro speso su una sessione che non parte non
+        # lavora e non dichiara no-op: verrebbe addebitato alla issue.
+        glm53)   command -v claude >/dev/null 2>&1 && [[ -n "$(zai_chiave)" ]] ;;
+        minimax) command -v ollama >/dev/null 2>&1 ;;
         *)                    return 1 ;;
     esac
 }
@@ -664,18 +717,27 @@ esegui_agente() {
                 -c sandbox_workspace_write.network_access=true \
                 "$prompt" </dev/null 2>&1)
             ;;
-        glm53|minimax)
-            # Claude Code con un modello diverso sotto. Gli argomenti dopo
-            # l'integrazione sono passati a claude cosi' come sono.
-            local _mod
-            [[ "$motore" == glm53 ]] && _mod="glm-5.3:cloud" || _mod="minimax-m3:cloud"
+        glm53)
+            # Le variabili stanno davanti al comando e muoiono con lui: in
+            # ~/.claude/settings.json varrebbero per OGNI sessione interattiva,
+            # che si ritroverebbe a parlare con GLM credendo di parlare con
+            # Claude, senza nessun avviso.
+            # Epoche dell'etichetta glm53: GLM-5.2 via Ollama Cloud fino al
+            # 2026-09-01, GLM-5.3 via Ollama Cloud fino al 2026-09-14, GLM-5.3
+            # via z.ai dal 2026-09-15. Nelle statistiche dei motori l'etichetta
+            # e' la stessa: sono le date a separare cose diverse.
+            ( export ANTHROPIC_BASE_URL="$ZAI_BASE_URL" ANTHROPIC_AUTH_TOKEN="$(zai_chiave)"
+              export ANTHROPIC_DEFAULT_HAIKU_MODEL="$ZAI_MODEL_FLASH" API_TIMEOUT_MS="$ZAI_TIMEOUT_MS"
+              cd "$wt" && timeout "$TIMEOUT_SESSIONE" env -u ANTHROPIC_API_KEY \
+                  claude --model "$ZAI_MODEL" --effort "$ZAI_EFFORT" \
+                  -p "$prompt" --allowedTools "Bash,Read,Write,Edit,Glob,Grep" </dev/null 2>&1 )
+            ;;
+        minimax)
             # Il `--` non e' opzionale: senza, `ollama launch` intercetta gli
             # argomenti di claude e muore con "unknown flag". Verificato il
             # 2026-08-07, insieme al fatto che il modello che risponde e' davvero
-            # quello richiesto e non un ripiego su Claude. Il modello di glm53 e'
-            # passato da glm-5.2:cloud a glm-5.3:cloud il 2026-09-01: fino a quel
-            # giorno l'etichetta glm53 designava lavoro svolto da GLM-5.2.
-            (cd "$wt" && timeout "$TIMEOUT_SESSIONE" ollama launch claude --model "$_mod" -- \
+            # quello richiesto e non un ripiego su Claude.
+            (cd "$wt" && timeout "$TIMEOUT_SESSIONE" ollama launch claude --model "minimax-m3:cloud" -- \
                 -p "$prompt" --allowedTools "Bash,Read,Write,Edit,Glob,Grep" </dev/null 2>&1)
             ;;
         gemini)
@@ -702,10 +764,15 @@ esegui_revisore() {
                 -s read-only -c sandbox_workspace_write.network_access=true \
                 "$prompt" </dev/null 2>&1)
             ;;
-        glm53|minimax)
-            local _mod
-            [[ "$motore" == glm53 ]] && _mod="glm-5.3:cloud" || _mod="minimax-m3:cloud"
-            (cd "$wt" && timeout "$TIMEOUT_REVIEW" ollama launch claude --model "$_mod" -- \
+        glm53)
+            ( export ANTHROPIC_BASE_URL="$ZAI_BASE_URL" ANTHROPIC_AUTH_TOKEN="$(zai_chiave)"
+              export ANTHROPIC_DEFAULT_HAIKU_MODEL="$ZAI_MODEL_FLASH" API_TIMEOUT_MS="$ZAI_TIMEOUT_MS"
+              cd "$wt" && timeout "$TIMEOUT_REVIEW" env -u ANTHROPIC_API_KEY \
+                  claude --model "$ZAI_MODEL" --effort "$ZAI_EFFORT" \
+                  -p "$prompt" --allowedTools "Bash,Read,Glob,Grep" </dev/null 2>&1 )
+            ;;
+        minimax)
+            (cd "$wt" && timeout "$TIMEOUT_REVIEW" ollama launch claude --model "minimax-m3:cloud" -- \
                 -p "$prompt" --allowedTools "Bash,Read,Glob,Grep" </dev/null 2>&1)
             ;;
         *)  echo "Recensore non riconosciuto: $motore"; return 2 ;;
@@ -1271,8 +1338,8 @@ fi
 
 if [[ "${1:-}" == "--prova" ]]; then
     # Verifica che il motore risponda e che gli argomenti arrivino davvero fino a
-    # lui. Serve soprattutto per glm53/minimax, dove il prompt passa attraverso
-    # `ollama launch` prima di raggiungere claude.
+    # lui. Serve soprattutto per glm53 (chiave e indirizzo z.ai giusti) e minimax,
+    # dove il prompt passa attraverso `ollama launch` prima di raggiungere claude.
     _m="${2:?uso: --prova <motore>}"
     motore_installato "$_m" || { echo "Motore $_m non installato."; exit 1; }
     _tmp=$(mktemp -d); echo "Provo $_m (60s)..."
