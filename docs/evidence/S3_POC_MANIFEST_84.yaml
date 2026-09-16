@@ -96,6 +96,13 @@ gates:
   max_drawdown_allowed: -0.30
   periods: 252
 
+robustness:
+  # Griglia di robustezza del gate 3, fissata a priori e dichiarata non-trial
+  # nel registry: si consuma, non si seleziona. Il centro della griglia e'
+  # la taratura di produzione (skip 21, vol 60).
+  skip_sessions_grid: [15, 21, 30]
+  vol_window_grid: [40, 60, 80]
+
 trial_registry:
   # Numero vero di configurazioni esplorate sulla famiglia S3 prima/durante
   # il POC. Alimenta il DSR (gate 1). Le perturbazioni di robustezza del POC

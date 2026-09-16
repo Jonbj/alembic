@@ -89,6 +89,12 @@ class RegimesCfg:
 
 
 @dataclass(frozen=True)
+class RobustnessCfg:
+    skip_sessions_grid: tuple[int, ...]
+    vol_window_grid: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class StressCfg:
     momentum_crash_periods: dict[str, tuple[date, date]]
 
@@ -173,6 +179,7 @@ class S3PocManifest:
     regimes: RegimesCfg
     stress: StressCfg
     gates: GatesCfg
+    robustness: RobustnessCfg
     trial_registry: TrialRegistryCfg
     selection_rules: SelectionRulesCfg
     combined_rules: CombinedRulesCfg
@@ -188,6 +195,10 @@ class S3PocManifest:
             for name, (a, b) in self.stress.momentum_crash_periods.items()
         }
         d["ambiguity"]["bootstrap_prob_band"] = list(self.ambiguity.bootstrap_prob_band)
+        d["robustness"] = {
+            "skip_sessions_grid": list(self.robustness.skip_sessions_grid),
+            "vol_window_grid": list(self.robustness.vol_window_grid),
+        }
         return d
 
 
@@ -223,6 +234,12 @@ def _build(section_name: str, cls: type, raw: dict[str, Any]) -> Any:
         elif annotation == "float":
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise ManifestError(f"{section_name}.{name} deve essere numerico")
+        elif annotation.startswith("tuple["):
+            if not isinstance(value, list) or not all(
+                isinstance(v, int) and not isinstance(v, bool) for v in value
+            ):
+                raise ManifestError(f"{section_name}.{name} deve essere una lista di interi")
+            value = tuple(value)
         kwargs[name] = value
     return cls(**kwargs)
 
@@ -236,14 +253,34 @@ def _as_date(section: str, name: str, value: Any) -> date:
 
 _TOP_LEVEL = (
     "schema_version", "poc_id", "issue", "splits", "universe", "signal", "portfolio",
-    "costs", "walkforward", "regimes", "stress", "gates", "trial_registry",
+    "costs", "walkforward", "regimes", "stress", "gates", "robustness", "trial_registry",
     "selection_rules", "combined_rules", "ambiguity", "holdout", "dataset",
 )
 
 
 def load_manifest(path: Path | str) -> S3PocManifest:
     path = Path(path)
-    raw = yaml.safe_load(path.read_text())
+    content = path.read_bytes()
+    raw = yaml.safe_load(content)
+    return _manifest_from_raw(raw, path, content)
+
+
+def manifest_with_overrides(manifest: S3PocManifest, overrides: dict[str, Any]) -> S3PocManifest:
+    """Deriva un manifest perturbato per i run diagnostici (griglia di
+    robustezza): stesso schema, stessa validazione, stesso sha256 del file
+    congelato di partenza. La perturbazione e' dichiarata dal chiamante, il
+    manifest di produzione resta l'unico fonte di taratura."""
+    raw = manifest.to_dict()
+    raw.pop("sha256", None)  # ricostruiti dal file congelato, non dalla serializzazione
+    raw.pop("source_path", None)
+    for section, values in overrides.items():
+        if section not in raw or not isinstance(raw[section], dict) or not isinstance(values, dict):
+            raise ManifestError(f"override di sezione sconosciuta o non mappa: {section!r}")
+        raw[section] = {**raw[section], **values}
+    return _manifest_from_raw(raw, Path(manifest.source_path), Path(manifest.source_path).read_bytes())
+
+
+def _manifest_from_raw(raw: Any, path: Path, content: bytes) -> S3PocManifest:
     if not isinstance(raw, dict):
         raise ManifestError(f"manifest {path} non e' una mappa YAML")
 
@@ -282,7 +319,7 @@ def load_manifest(path: Path | str) -> S3PocManifest:
         schema_version=str(raw["schema_version"]),
         poc_id=str(raw["poc_id"]),
         issue=int(raw["issue"]),
-        sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+        sha256=hashlib.sha256(content).hexdigest(),
         source_path=str(path),
         splits=_build("splits", SplitsCfg, raw["splits"]),
         universe=_build("universe", UniverseCfg, raw["universe"]),
@@ -293,6 +330,7 @@ def load_manifest(path: Path | str) -> S3PocManifest:
         regimes=_build("regimes", RegimesCfg, raw["regimes"]),
         stress=StressCfg(momentum_crash_periods=crash_periods),
         gates=_build("gates", GatesCfg, raw["gates"]),
+        robustness=_build("robustness", RobustnessCfg, raw["robustness"]),
         trial_registry=registry,
         selection_rules=_build("selection_rules", SelectionRulesCfg, raw["selection_rules"]),
         combined_rules=_build("combined_rules", CombinedRulesCfg, raw["combined_rules"]),

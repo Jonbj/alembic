@@ -163,3 +163,48 @@ class TestSerializzabilita:
         m = load_manifest(PRODUCTION_MANIFEST)
         anatomy = m.to_dict()
         assert json.loads(json.dumps(anatomy))["splits"]["dev_sample_end"] == "2022-12-31"
+
+
+class TestRobustnessGrid:
+    """La griglia di robustezza e' fissata a priori nel manifest (non-trial
+    dichiarato): il gate 3 la consuma senza cercarla sui risultati."""
+
+    def test_griglia_congelata(self) -> None:
+        m = load_manifest(PRODUCTION_MANIFEST)
+        assert m.robustness.skip_sessions_grid == (15, 21, 30)
+        assert m.robustness.vol_window_grid == (40, 60, 80)
+
+    def test_griglia_non_tupla_di_interi_rifiutata(self, tmp_path: Path) -> None:
+        p = write_override(tmp_path, {"robustness": {"skip_sessions_grid": [15, "tanti"]}})
+        with pytest.raises(ManifestError, match="skip_sessions_grid"):
+            load_manifest(p)
+
+
+class TestOverridePerGriglia:
+    """manifest_with_overrides: derivato tipizzato per i run diagnostici,
+    sempre validato dallo stesso schema del manifest congelato."""
+
+    def test_override_nested(self) -> None:
+        from src.analysis.s3_poc.manifest import manifest_with_overrides
+
+        m = load_manifest(PRODUCTION_MANIFEST)
+        perturbato = manifest_with_overrides(m, {"signal": {"skip_sessions": 15}})
+        assert perturbato.signal.skip_sessions == 15
+        assert perturbato.signal.lookback_sessions == m.signal.lookback_sessions
+        assert perturbato.universe == m.universe
+
+    def test_override_chiave_sconosciuta_rifiutata(self) -> None:
+        from src.analysis.s3_poc.manifest import manifest_with_overrides
+
+        m = load_manifest(PRODUCTION_MANIFEST)
+        with pytest.raises(ManifestError, match="skip_sessions_extra"):
+            manifest_with_overrides(m, {"signal": {"skip_sessions_extra": 1}})
+
+    def test_lo_sha256_resta_quello_del_file_congelato(self) -> None:
+        """L'identita' del manifest derivato e' il file congelato di partenza:
+        l'override e' una perturbazione dichiarata, non una nuova taratura."""
+        from src.analysis.s3_poc.manifest import manifest_with_overrides
+
+        m = load_manifest(PRODUCTION_MANIFEST)
+        perturbato = manifest_with_overrides(m, {"portfolio": {"vol_window_sessions": 40}})
+        assert perturbato.sha256 == m.sha256
