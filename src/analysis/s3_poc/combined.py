@@ -14,10 +14,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from src.analysis.s3_poc.manifest import S3PocManifest
+from src.analysis.s3_poc.decision import bootstrap_sharpe_probability
 from src.backtest.metrics.performance import sharpe_ratio
 from src.backtest.metrics.risk import expected_shortfall, max_drawdown
 
@@ -34,6 +34,8 @@ class CombinedReport:
     overlap: dict[str, Any]
     bootstrap_draws: int
     bootstrap_seed: int
+    decision_outcome: str
+    decision: dict[str, Any] | None
     reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -44,44 +46,48 @@ class CombinedReport:
             "overlap": self.overlap,
             "bootstrap_draws": self.bootstrap_draws,
             "bootstrap_seed": self.bootstrap_seed,
+            "decision_outcome": self.decision_outcome,
+            "decision": self.decision,
             "reason": self.reason,
         }
 
 
-def _bootstrap_prob(
-    combined: pd.Series,
-    baseline: pd.Series,
-    draws: int,
-    seed: int,
-    chunk: int = 1000,
-) -> float:
-    """P(Sharpe(r_comb) > Sharpe(r_S1)) sotto bootstrap iid paired.
+def _risk_worsening(candidate: float, baseline: float) -> float:
+    """Aumento relativo della severita' della perdita (positivo = peggio)."""
+    severity = abs(baseline)
+    if severity == 0.0:
+        return 0.0 if candidate == 0.0 else float("inf")
+    return (abs(candidate) - severity) / severity
 
-    Lo Sharpe di ogni estrazione usa la stessa formula dell'helper di
-    produzione (media/std ddof=1 x sqrt(252), 0 sui campioni degeneri),
-    calcolata in numpy perche' 10000 estrazioni x 3 allocazioni non
-    stanno nel ciclo python.
-    """
-    rng = np.random.default_rng(seed)
-    values = combined.to_numpy()
-    base = baseline.to_numpy()
-    n = len(values)
 
-    def _sharpe_righe(mat: np.ndarray) -> np.ndarray:
-        mu = mat.mean(axis=1)
-        sd = mat.std(axis=1, ddof=1)
-        safe = np.divide(mu, sd, out=np.zeros_like(mu), where=sd >= 1e-14)
-        return safe * np.sqrt(_TRADING_DAYS)
+def _decision_for_primary(primary: dict[str, Any], manifest: S3PocManifest) -> tuple[str, dict[str, Any]]:
+    """Applica le due braccia economiche della #84, esclusivamente al 10%."""
+    rules = manifest.combined_rules
+    sharpe_arm = (
+        primary["sharpe_delta"] >= rules.sharpe_gain_min
+        and primary["max_drawdown_worsening"] <= rules.dd_es_worsening_max
+        and primary["expected_shortfall_worsening"] <= rules.dd_es_worsening_max
+    )
+    risk_arm = (
+        primary["max_drawdown_improvement"] >= rules.dd_es_improvement_min
+        or primary["expected_shortfall_improvement"] >= rules.dd_es_improvement_min
+    ) and primary["sharpe_delta"] >= -rules.sharpe_reduction_max
+    bootstrap = primary["bootstrap_prob"] >= rules.bootstrap_min_prob
+    criteria = {"sharpe_arm": sharpe_arm, "risk_arm": risk_arm, "bootstrap": bootstrap}
+    decision = {**primary, "criteria": criteria}
+    if (sharpe_arm or risk_arm) and bootstrap:
+        return "PASS", decision
 
-    wins = 0
-    estratti = 0
-    while estratti < draws:
-        quanti = min(chunk, draws - estratti)
-        pick = rng.integers(0, n, size=(quanti, n))
-        delta = _sharpe_righe(values[pick]) - _sharpe_righe(base[pick])
-        wins += int((delta > 0).sum())
-        estratti += quanti
-    return wins / draws
+    lower_prob, _ = manifest.ambiguity.bootstrap_prob_band
+    near = (
+        lower_prob <= primary["bootstrap_prob"] < rules.bootstrap_min_prob
+        or abs(primary["sharpe_delta"] - rules.sharpe_gain_min) <= manifest.ambiguity.margin_band
+        or abs(primary["max_drawdown_improvement"] - rules.dd_es_improvement_min)
+        <= manifest.ambiguity.margin_band
+        or abs(primary["expected_shortfall_improvement"] - rules.dd_es_improvement_min)
+        <= manifest.ambiguity.margin_band
+    )
+    return ("TEMPORARY_NO_GO" if near else "NO_GO"), decision
 
 
 def evaluate_combined(
@@ -99,6 +105,8 @@ def evaluate_combined(
             overlap={"n_obs": 0},
             bootstrap_draws=rules.bootstrap_draws,
             bootstrap_seed=rules.bootstrap_seed,
+            decision_outcome="NOT_EVALUABLE",
+            decision=None,
             reason=reason,
         )
 
@@ -130,19 +138,29 @@ def evaluate_combined(
     for w in pesi:
         combinata = r1 + w * (r3 - cash_daily)
         sharpe_w = sharpe_ratio(combinata, periods=_TRADING_DAYS)
+        dd = max_drawdown(combinata)
+        es = expected_shortfall(combinata)
+        dd_worsening = _risk_worsening(dd, dd_s1)
+        es_worsening = _risk_worsening(es, es_s1)
         allocations.append({
             "allocation": w,
             "diagnostic_only": w != rules.primary_allocation,
             "sharpe": sharpe_w,
             "sharpe_delta": sharpe_w - sharpe_s1,
-            "max_drawdown": max_drawdown(combinata),
-            "dd_delta": max_drawdown(combinata) - dd_s1,
-            "expected_shortfall": expected_shortfall(combinata),
-            "es_delta": expected_shortfall(combinata) - es_s1,
-            "bootstrap_prob": _bootstrap_prob(
+            "max_drawdown": dd,
+            "dd_delta": dd - dd_s1,
+            "max_drawdown_worsening": dd_worsening,
+            "max_drawdown_improvement": -dd_worsening,
+            "expected_shortfall": es,
+            "es_delta": es - es_s1,
+            "expected_shortfall_worsening": es_worsening,
+            "expected_shortfall_improvement": -es_worsening,
+            "bootstrap_prob": bootstrap_sharpe_probability(
                 combinata, r1, rules.bootstrap_draws, rules.bootstrap_seed
             ),
         })
+
+    outcome, decision = _decision_for_primary(allocations[0], manifest)
 
     return CombinedReport(
         evaluability=True,
@@ -151,4 +169,6 @@ def evaluate_combined(
         overlap=overlap,
         bootstrap_draws=rules.bootstrap_draws,
         bootstrap_seed=rules.bootstrap_seed,
+        decision_outcome=outcome,
+        decision=decision,
     )

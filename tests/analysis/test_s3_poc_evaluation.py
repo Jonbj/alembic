@@ -140,6 +140,7 @@ class TestValutazione:
         # i costi totali alimentano la regola di deterioramento della selezione
         assert ev.attribution["total_cost_usd"] > 0
         assert ev.attribution["annualized_cost_bps"] > 0
+        assert ev.attribution["average_cost_per_rebalance_bps"] > 0
         # la serie dei rendimenti resta disponibile per il paired bootstrap A/B
         assert len(ev.returns) == ev.coverage["n_sessions"]
         # coverage e grado decisionale

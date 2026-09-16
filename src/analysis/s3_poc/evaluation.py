@@ -214,6 +214,11 @@ def _attribution(
     total_notional = sum(r.traded_notional_usd for r in sleeve.rebalances)
     mean_nav = float(sleeve.nav.mean())
     total_cost_usd = float(sum(r.cost_usd for r in sleeve.rebalances))
+    costs_per_rebalance_bps = [
+        r.cost_usd / float(sleeve.nav.loc[r.execution_date]) * 1e4
+        for r in sleeve.rebalances
+        if r.execution_date in sleeve.nav.index and sleeve.nav.loc[r.execution_date] > 0
+    ]
     # costi annualizzati in basis point sul NAV medio di manica
     annualized_cost_bps = (
         (total_cost_usd / mean_nav / anni * 1e4) if anni > 0 and mean_nav > 0 else 0.0
@@ -226,6 +231,9 @@ def _attribution(
         "avg_cash_weight": 1.0 - (float(np.mean(gross)) if gross else 0.0),
         "total_cost_usd": total_cost_usd,
         "annualized_cost_bps": annualized_cost_bps,
+        "average_cost_per_rebalance_bps": (
+            float(np.mean(costs_per_rebalance_bps)) if costs_per_rebalance_bps else 0.0
+        ),
     }
 
 
