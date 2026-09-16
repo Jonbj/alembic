@@ -46,6 +46,7 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 
+from src.notifications.base import esegui_sincrono
 from src.config import config
 from src.llm.budget import LLMBudgetExhaustedError, LLMBudgetTracker
 from src.llm.client import LLMClient
@@ -1272,6 +1273,45 @@ def build_inference_context(
     return clients, aggregator, finbert, budget_tracker, model_weights
 
 
+def crea_callback_fallback(costruisci_notifier=None):
+    """Callback sincrono del breaker di fallback (#427), che stavolta parte davvero.
+
+    Storia: `_on_fallback_threshold_reached()` in src/store/redis_store.py non
+    riceveva `on_fallback_alert=` e la forense del 2026-08-26 trovo' il breaker
+    inerte su tre rami. Cablato il callback, restava un secondo guasto piu'
+    silenzioso: il breaker scatta **dentro** la pipeline, che gira gia' dentro
+    `asyncio.run()`, quindi un secondo `asyncio.run()` sollevava RuntimeError, la
+    coroutine non veniva mai attesa e l'except la declassava a warning. Il
+    2026-09-14: 22 timeout dell'ensemble, zero avvisi.
+
+    `esegui_sincrono` regge entrambi i contesti; il notifier resta costruito
+    pigramente perche' l'assenza di credenziali non deve rompere l'import.
+    """
+
+    def _costruisci():
+        from src.notifications.telegram import TelegramNotifier
+
+        return TelegramNotifier()
+
+    costruisci = costruisci_notifier or _costruisci
+    stato: dict = {}
+
+    def _on_fallback_alert_sync(count: int) -> None:
+        try:
+            if "notifier" not in stato:
+                stato["notifier"] = costruisci()
+            esegui_sincrono(stato["notifier"].send_fallback_alert(count))
+        except Exception as _alert_exc:
+            # Un alert perso e' un guasto, non un dettaglio: l'intero senso del
+            # breaker e' che qualcuno venga avvisato.
+            log.error(
+                "Fallback breaker alert callback failed for count=%s: %s",
+                count, _alert_exc,
+            )
+
+    return _on_fallback_alert_sync
+
+
 @app.task(name="src.workers.sentiment.run_sentiment_worker", acks_late=True)
 def run_sentiment_worker() -> dict:
     """
@@ -1291,31 +1331,9 @@ def run_sentiment_worker() -> dict:
     # Initialize connections
     redis_client = Redis.from_url(config.REDIS_URL)
     pg_conn = psycopg2.connect(config.DATABASE_URL)
-    # #427: wire the inert breaker to the Telegram callback. Historical state:
-    # _on_fallback_threshold_reached() at src/store/redis_store.py received no
-    # `on_fallback_alert=` and the 2026-08-26 forensic found the breaker inert
-    # on all three branches. The callback is constructed lazily because
-    # asyncio.run() is not yet in scope at this synchronous Celery entry point;
-    # we capture the notifier and dispatch the async send via a fresh loop on
-    # each call so a Telegram outage cannot poison the breaker.
-    _telegram_notifier = None
-
-    def _on_fallback_alert_sync(count: int) -> None:
-        nonlocal _telegram_notifier
-        try:
-            from src.notifications.telegram import TelegramNotifier
-            if _telegram_notifier is None:
-                _telegram_notifier = TelegramNotifier()
-            asyncio.run(_telegram_notifier.send_fallback_alert(count))
-        except Exception as _alert_exc:
-            log.warning(
-                "Fallback breaker alert callback failed for count=%s: %s",
-                count, _alert_exc,
-            )
-
     redis_store = RedisStore(
         redis_client,
-        on_fallback_alert=_on_fallback_alert_sync,
+        on_fallback_alert=crea_callback_fallback(),
     )
     pg_store = PostgreSQLStore(conn=pg_conn)
 
