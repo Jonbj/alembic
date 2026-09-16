@@ -547,7 +547,8 @@ PortfolioOrchestrator (every 15 min at :07/:22/:37/:52, active only when executi
     ├── guardie: P0-05 anti-pyramiding (nessun secondo BUY su un simbolo gia' a libro,
     │      nemmeno per riportarlo a peso), idempotenza signal_id/giorno, hold-minimum 90 min
     ├── sentiment_reversal: contro-segnale ensemble <= -0.35 e piu' fresco di 60 min
-    │      forza la chiusura di QUALSIASI posizione del broker, anche di S1 (#182)
+    │      chiude SOLO posizioni di S4 (guard #182: tutte le righe trades aperte
+    │      stop_strategy=S4; S1/legacy/non attribuite restano, fail-closed)
     ├── delta orders: target_qty - current_qty
     ├── ConstraintEnforcer (5 passes)
     ├── PortfolioVolTargeter (instantiated but inactive — strategy_returns not wired)
