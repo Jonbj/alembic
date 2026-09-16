@@ -196,14 +196,22 @@ per sleeve.
 | meccanismo | condizione | dove |
 |---|---|---|
 | peso target a 0 | il simbolo non è più nel target del ciclo. L'etichetta (`below_entry_gate`, `expired`, `whipsaw`, `no_signal`, `fallback_filtered`, `entry_freshness_filtered`, `unknown`) è la **disposizione osservata** del segnale, non una deduzione dall'età — vedi `docs/exit_mechanism_labels.md` | `src/portfolio/exit_classification.py` |
-| `sentiment_reversal` | un segnale **ensemble** (mai un fallback FinBERT) con `score ≤ SENTIMENT_REVERSAL_EXIT_THRESHOLD` (**−0.35**) e non più vecchio di `SENTIMENT_REVERSAL_MAX_AGE_MINUTES` (60 min) forza la chiusura. Consume-on-fire (#67: lo stesso segnale non spara due volte) e cooldown di re-ingresso di 2h (#68) | `_sentiment_reversal_sells` |
+| `sentiment_reversal` | un segnale **ensemble** (mai un fallback FinBERT) con `score ≤ SENTIMENT_REVERSAL_EXIT_THRESHOLD` (**−0.35**) e non più vecchio di `SENTIMENT_REVERSAL_MAX_AGE_MINUTES` (60 min) forza la chiusura — **solo se S4 possiede la posizione** (guard #182, vedi sotto). Consume-on-fire (#67: lo stesso segnale non spara due volte) e cooldown di re-ingresso di 2h (#68) | `_sentiment_reversal_sells` + `_apply_reversal_ownership_guard` |
 | stop-loss | **disattivato** dal 2026-07-15: `risk.stop_loss: 0.0` in `config/trading.yaml` fa uscire `_stop_loss_breached_symbols` con `{}`. Resta la telemetria shadow (`stop_shadow_log`, `stop_shadow_enabled: true`) e l'allarme Telegram a `unprotected_position_alert_pct` (−15%, #161). Coerentemente `stop_decisions` non ha righe dal 2026-07-14 | `config/trading.yaml:172-206` |
 
-> **`sentiment_reversal` non è un'uscita di S4 soltanto.** `_sentiment_reversal_sells` cicla su
-> **tutte** le posizioni del broker, senza filtrare per sleeve: un contro-segnale news può
-> liquidare una posizione aperta da S1 e tenuta da settimane. È il tema di **#182** (nessuna
-> gerarchia d'uscita fra core e overlay); il P&L realizzato viene accreditato alla sleeve
-> proprietaria della posizione, non a S4.
+> **Gerarchia d'uscita (#182, decisione del 2026-08-22 — opzione a; deroga al freeze concessa
+> il 2026-08-25).** `sentiment_reversal` chiude solo posizioni che **S4 possiede**: tutte le
+> righe `trades` aperte del simbolo devono avere `stop_strategy = 'S4'` — il force-sell liquida
+> l'intera quantità a broker, quindi basta una riga non-S4 (anche una sola, in un libro misto
+> S1+S4) per vietarlo. Posizioni di S1, legacy o senza righe aperte **non si chiude**; se la
+> lettura delle righe aperte fallisce non si chiude nulla: in dubbio non si chiude
+> (fail-closed), la stessa direzione di errore dell'asimmetria di danno che giustifica la
+> regola. Ogni veto lascia una riga `SKIP_REVERSAL_OWNER` in `execution_decisions`, una per
+> segnale (idempotente su Redis, schema #231). Sulle posizioni proprie di S4 la leva resta
+> intatta; il lato ingressi del veto (S4 può bloccare un BUY) non cambia, e `stop_loss`,
+> `portfolio_sell` e il clock 105' (#334) restano fuori dal guard. Misura d'origine
+> (2026-08-11, in #182): 22 uscite `sentiment_reversal` su 22 liquidarono core o legacy
+> (−$350,90, il 58% delle perdite realizzate della finestra); zero toccarono posizioni di S4.
 
 ### Scoring Formula
 
