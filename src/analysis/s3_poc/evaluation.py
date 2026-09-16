@@ -9,7 +9,7 @@ settore, turnover, esposizione lorda e cassa media.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -43,6 +43,8 @@ class VariantEvaluation:
     cost_multiplier: float
     decision_grade: bool
     unresolved_delistings: tuple[dict, ...]
+    # serie dei rendimenti esposta per il bootstrap paired del combinato
+    returns: pd.Series = field(default_factory=pd.Series)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -211,12 +213,19 @@ def _attribution(
     anni = len(returns) / _TRADING_DAYS
     total_notional = sum(r.traded_notional_usd for r in sleeve.rebalances)
     mean_nav = float(sleeve.nav.mean())
+    total_cost_usd = float(sum(r.cost_usd for r in sleeve.rebalances))
+    # costi annualizzati in basis point sul NAV medio di manica
+    annualized_cost_bps = (
+        (total_cost_usd / mean_nav / anni * 1e4) if anni > 0 and mean_nav > 0 else 0.0
+    )
     return {
         "beta_vs_market": beta,
         "sector_hhi_avg": float(np.mean(hhis)) if hhis else 0.0,
         "annualized_turnover": (total_notional / mean_nav / anni) if anni > 0 else 0.0,
         "avg_gross_exposure": float(np.mean(gross)) if gross else 0.0,
         "avg_cash_weight": 1.0 - (float(np.mean(gross)) if gross else 0.0),
+        "total_cost_usd": total_cost_usd,
+        "annualized_cost_bps": annualized_cost_bps,
     }
 
 
@@ -295,4 +304,5 @@ def evaluate_variant(
         cost_multiplier=cost_multiplier,
         decision_grade=all(w.decision_grade for w in (full, *wf)),
         unresolved_delistings=unresolved,
+        returns=full.returns,
     )

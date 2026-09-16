@@ -137,6 +137,11 @@ class TestValutazione:
         assert 0.0 <= ev.attribution["avg_gross_exposure"] <= 1.0
         assert 0.0 <= ev.attribution["avg_cash_weight"] <= 1.0
         assert 0.0 < ev.attribution["sector_hhi_avg"] <= 1.0
+        # i costi totali alimentano la regola di deterioramento della selezione
+        assert ev.attribution["total_cost_usd"] > 0
+        assert ev.attribution["annualized_cost_bps"] > 0
+        # la serie dei rendimenti resta disponibile per il paired bootstrap A/B
+        assert len(ev.returns) == ev.coverage["n_sessions"]
         # coverage e grado decisionale
         assert ev.coverage["n_sessions"] > 0
         assert ev.decision_grade is True
