@@ -559,7 +559,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-021"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 18
@@ -620,7 +620,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-003"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 8
@@ -669,7 +669,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-005"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 6
@@ -820,7 +820,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-011"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 23
@@ -1890,7 +1890,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-024"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 20,
       "stato": "aperto",
       "issue": null
@@ -1945,7 +1945,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-016"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 7,
       "stato": "aperto",
       "issue": "#444"
@@ -2031,7 +2031,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-004"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 7,
       "stato": "aperto",
       "issue": null
@@ -3741,7 +3741,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-001"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
@@ -4056,7 +4056,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-023"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": null
@@ -4093,7 +4093,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-026"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
@@ -4235,7 +4235,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-014"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
@@ -4442,7 +4442,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-015"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
@@ -4467,7 +4467,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-025"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": "#551"
@@ -4511,7 +4511,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-022"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
@@ -4549,7 +4549,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-007"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -4568,7 +4568,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-027"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
