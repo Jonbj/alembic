@@ -44,6 +44,13 @@ class NewsItem(BaseModel):
     # Distinct from `timestamp` (publication time): the gap between the two is the
     # per-source ingestion latency, persisted to news_log.raw_ingested_at.
     raw_ingested_at: datetime | None = None
+    # #541: which delivery observed this item — ws | rest ("" = path not instrumented).
+    # Distinct from `source` (who published it): Alpaca/Benzinga reaches us through
+    # both the WebSocket and the 15-min REST poller, and #455 unified them under one
+    # dedup/telemetry contract, which erased the distinction once persisted. Travels
+    # inside the Redis queue payload so the sentiment worker's stale-drop rows can
+    # still say where the article came from. See src/workers/news_transport.py.
+    transport: str = ""
 
 
 class GKGNewsItem(NewsItem):

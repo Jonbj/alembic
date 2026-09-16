@@ -21,6 +21,7 @@ from src.connectors.alpaca_news import AlpacaNewsConnector
 from src.connectors.deduplicator import Deduplicator
 from src.models.news import NewsItem
 from src.workers.celery_app import app
+from src.workers.news_transport import TRANSPORT_WS
 
 log = logging.getLogger(__name__)
 
@@ -30,13 +31,45 @@ def _process_alpaca_items(
     deduplicator: Deduplicator,
     redis_client: Redis,
     discard_rows: list[dict] | None = None,
+    *,
+    transport: str | None = None,
 ) -> dict:
     """Thin re-export of the REST path's own item processor (lazy-imported to
     avoid a module-level import cycle with `src.workers.ingestion`), so the
     WebSocket path shares one dedup/telemetry contract instead of a parallel one."""
     from src.workers.ingestion import _process_alpaca_items as process
 
-    return process(items, deduplicator, redis_client, discard_rows=discard_rows)
+    return process(
+        items, deduplicator, redis_client,
+        discard_rows=discard_rows, transport=transport,
+    )
+
+
+def registra_sottoscrizione(symbols: list[str]) -> None:
+    """Persiste i simboli a cui questo processo si e' appena sottoscritto (#541).
+
+    Il tasso di WS-missed si calcola **solo** sui simboli effettivamente
+    sottoscritti: un articolo su un titolo fuori watchlist che arriva dal REST
+    non e' un articolo perso dal WebSocket, e contarlo come tale produrrebbe un
+    tasso gonfio proprio nella direzione che porterebbe a spegnere il polling.
+
+    Oggi quella condizione non e' verificabile a posteriori: la watchlist e'
+    baked nell'immagine e non lascia traccia di quale fosse attiva quando
+    l'articolo e' stato pubblicato. Lo snapshot la rende un dato.
+
+    Fail-safe per costruzione: e' telemetria all'avvio di un processo
+    long-lived, e la news vale piu' della sua misura. Se Postgres non risponde,
+    lo stream parte lo stesso e la finestra resta senza snapshot — che la vista
+    legge come «non sottoscritto», cioe' nessun miss dichiarato, non un miss
+    inventato.
+    """
+    try:
+        from src.store.pg_store import PostgreSQLStore
+
+        with PostgreSQLStore() as pg_store:
+            pg_store.record_news_stream_subscription(symbols)
+    except Exception as exc:
+        log.warning("Could not persist news stream subscription: %s", exc)
 
 
 def _persist_ingestion_observability(
@@ -79,6 +112,9 @@ async def _on_news(article) -> None:
             Deduplicator(redis_client),
             redis_client,
             discard_rows=discard_rows,
+            # #541: `source` restera' `alpaca_benzinga` come nel path REST —
+            # e' questo campo a dire che l'avvistamento e' arrivato dal socket.
+            transport=TRANSPORT_WS,
         )
         _persist_ingestion_observability("alpaca_benzinga", stats, discard_rows)
 
@@ -114,6 +150,7 @@ def run_news_stream(self) -> dict:
 
     symbols = list(config.WATCHLIST_SYMBOLS or ["*"])
     log.info("Starting Alpaca news WebSocket stream for %d symbols", len(symbols))
+    registra_sottoscrizione(symbols)
 
     connector = AlpacaNewsStreamConnector(
         api_key=config.ALPACA_API_KEY,
@@ -142,10 +179,12 @@ if __name__ == "__main__":
     # callback (_on_news) — a print-only stub here would leave the deployed
     # process streaming and logging while persisting nothing and triggering
     # no sentiment inference, silently defeating the whole point of the PR.
+    _symbols = list(config.WATCHLIST_SYMBOLS or ["*"])
+    registra_sottoscrizione(_symbols)
     connector = AlpacaNewsStreamConnector(
         api_key=config.ALPACA_API_KEY,
         secret_key=config.ALPACA_SECRET_KEY,
-        symbols=list(config.WATCHLIST_SYMBOLS or ["*"]),
+        symbols=_symbols,
         on_news_callback=_on_news,
     )
     log.info("Starting Alpaca news stream (Ctrl+C to stop)")

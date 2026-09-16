@@ -210,8 +210,14 @@ def test_duplicate_stream_event_is_measured_without_triggering_inference():
         mock_config.WATCHLIST_SYMBOLS = ["AAPL"]
         mock_redis = mock_redis_cls.from_url.return_value
 
-        def duplicate(_items, _dedup, _redis, *, discard_rows):
-            discard_rows.append({"discarded_reason": "duplicate_id"})
+        def duplicate(_items, _dedup, _redis, *, discard_rows, transport):
+            # #541: il doppione conserva il trasporto che lo ha osservato —
+            # e' la riga che permette di attribuire un articolo al socket o al
+            # poller, oggi indistinguibili una volta persistiti.
+            assert transport == "ws"
+            discard_rows.append(
+                {"discarded_reason": "duplicate_id", "transport": transport}
+            )
             return {
                 "fetched": 1,
                 "tickers_found": 1,
@@ -229,6 +235,7 @@ def test_duplicate_stream_event_is_measured_without_triggering_inference():
     discards = mock_persist.call_args.args[2]
     assert stats["duplicates"] == 1
     assert discards[0]["discarded_reason"] == "duplicate_id"
+    assert discards[0]["transport"] == "ws"
     mock_send_task.assert_not_called()
     mock_redis.close.assert_called_once()
 

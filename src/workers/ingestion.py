@@ -69,6 +69,7 @@ from src.models.news import GKGNewsItem, MarketAuxNewsItem, NewsItem
 from src.workers.celery_app import app
 from src.workers.market_clock import is_market_open
 from src.workers.news_discards import build_news_discard_row
+from src.workers.news_transport import TRANSPORT_REST, marca_trasporto
 
 log = logging.getLogger(__name__)
 
@@ -431,11 +432,23 @@ def _process_alpaca_items(
     deduplicator: Deduplicator,
     redis_client: Redis,
     discard_rows: list[dict] | None = None,
+    *,
+    transport: str | None = None,
 ) -> dict:
     """Expand per-ticker, deduplicate, and push Alpaca NewsItems to news:queue.
 
     Alpaca articles already contain US ticker symbols in asset_tags (from
     Benzinga metadata). No TickerExtractor needed.
+
+    `transport` (#541) is the delivery that is observing these items — `rest`
+    when called from the 15-min poller below, `ws` when called from
+    `src/workers/news_stream.py`. Both paths share this one function on purpose
+    (#455: a single dedup/telemetry contract), which is exactly why the caller
+    has to say who it is: `source` is `alpaca_benzinga` either way. It is
+    stamped on the per-ticker item *before* the dedup check, so the queued item
+    carries the first sighting's transport and every later `duplicate_id` row
+    carries the transport of the sighting that produced it. Default `None`
+    leaves the field NULL — no caller is labelled by a default it never chose.
     """
     stats = {"fetched": 0, "tickers_found": 0, "discarded": 0, "queued": 0, "duplicates": 0}
 
@@ -465,6 +478,8 @@ def _process_alpaca_items(
                 asset_tags=[ticker],
                 extraction_method=item.extraction_method,  # QT-03: carry provenance
             )
+            if transport is not None:
+                marca_trasporto(per_ticker, transport)  # #541: chi sta osservando
 
             duplicate_reason = _duplicate_reason(per_ticker, deduplicator)
             if duplicate_reason is not None:
@@ -520,7 +535,8 @@ def run_alpaca_ingestion_worker() -> dict:
         items = asyncio.run(_fetch_alpaca_items(connector))
         discard_rows: list[dict] = []
         stats = _process_alpaca_items(
-            items, deduplicator, redis_client, discard_rows=discard_rows
+            items, deduplicator, redis_client, discard_rows=discard_rows,
+            transport=TRANSPORT_REST,
         )
 
         log.info("Alpaca ingestion stats: %s", stats)
