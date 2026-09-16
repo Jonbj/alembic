@@ -1,0 +1,754 @@
+{
+  "popolazione": {
+    "segnali_fuori_orario": 380,
+    "osservazioni_simbolo_seduta": 282,
+    "simboli": 68,
+    "sedute": 49,
+    "da": "2026-07-03T12:49:54+00:00",
+    "a": "2026-09-15T13:29:12.546000+00:00",
+    "taglio_embargo": "2026-09-13T08:21:37.466088+00:00",
+    "senza_seduta_di_reazione": 0,
+    "oltre_taglio_embargo": 50,
+    "con_barre": 282,
+    "senza_barre": 0,
+    "senza_giornaliere": 0
+  },
+  "liquidita": {
+    "04:00-07:00": {
+      "volume_mediano": 201064.5,
+      "trade_mediani": 6601.0,
+      "controvalore_mediano_usd": 66381119.65489647,
+      "controvalore_p10_usd": 2239630.7639566003,
+      "quota_senza_scambi": 0.0035460992907801418,
+      "n": 282
+    },
+    "07:00-08:00": {
+      "volume_mediano": 129739.0,
+      "trade_mediani": 2837.0,
+      "controvalore_mediano_usd": 41173348.08463299,
+      "controvalore_p10_usd": 1710452.8903784999,
+      "quota_senza_scambi": 0.0070921985815602835,
+      "n": 282
+    },
+    "08:00-09:00": {
+      "volume_mediano": 198916.0,
+      "trade_mediani": 4139.5,
+      "controvalore_mediano_usd": 60615598.9879785,
+      "controvalore_p10_usd": 2806771.8034186,
+      "quota_senza_scambi": 0.0,
+      "n": 282
+    },
+    "09:00-09:30": {
+      "volume_mediano": 171597.0,
+      "trade_mediani": 3302.5,
+      "controvalore_mediano_usd": 50207954.7624765,
+      "controvalore_p10_usd": 2470411.1389639,
+      "quota_senza_scambi": 0.0070921985815602835,
+      "n": 282
+    }
+  },
+  "residuo": {
+    "tutti": {
+      "close_prec": {
+        "n_giornate": 49,
+        "n_eventi": 282,
+        "media_bp": 62.42203320694157,
+        "t": 2.5350382510967204,
+        "ds_giornaliera_bp": 172.36593264798026,
+        "effetto_rilevabile_a_t3_bp": 73.87111399199155,
+        "giornate_positive": 29
+      },
+      "07:00": {
+        "n_giornate": 49,
+        "n_eventi": 281,
+        "media_bp": 10.137199693297916,
+        "t": 0.6384648875106892,
+        "ds_giornaliera_bp": 111.14220882177703,
+        "effetto_rilevabile_a_t3_bp": 47.63237520933302,
+        "giornate_positive": 26
+      },
+      "08:00": {
+        "n_giornate": 49,
+        "n_eventi": 282,
+        "media_bp": 9.066884265272252,
+        "t": 0.5249374181074467,
+        "ds_giornaliera_bp": 120.90620265883732,
+        "effetto_rilevabile_a_t3_bp": 51.81694399664457,
+        "giornate_positive": 28
+      },
+      "09:00": {
+        "n_giornate": 49,
+        "n_eventi": 282,
+        "media_bp": -7.062482966721109,
+        "t": -1.2878315812594165,
+        "ds_giornaliera_bp": 38.388079222829106,
+        "effetto_rilevabile_a_t3_bp": 16.452033952641045,
+        "giornate_positive": 20
+      },
+      "09:29": {
+        "n_giornate": 49,
+        "n_eventi": 282,
+        "media_bp": -0.6321608036589964,
+        "t": -0.7251781758107094,
+        "ds_giornaliera_bp": 6.102121896685497,
+        "effetto_rilevabile_a_t3_bp": 2.615195098579499,
+        "giornate_positive": 21
+      },
+      "open": {
+        "n_giornate": 49,
+        "n_eventi": 282,
+        "media_bp": 0.0,
+        "t": null,
+        "ds_giornaliera_bp": 0.0,
+        "effetto_rilevabile_a_t3_bp": 0.0,
+        "giornate_positive": 0
+      }
+    },
+    "pubblicati": {
+      "close_prec": {
+        "n_giornate": 49,
+        "n_eventi": 282,
+        "media_bp": 62.42203320694157,
+        "t": 2.5350382510967204,
+        "ds_giornaliera_bp": 172.36593264798026,
+        "effetto_rilevabile_a_t3_bp": 73.87111399199155,
+        "giornate_positive": 29
+      },
+      "07:00": {
+        "n_giornate": 6,
+        "n_eventi": 14,
+        "media_bp": 16.777649398087448,
+        "t": 0.7790157114851434,
+        "ds_giornaliera_bp": 52.754622920607574,
+        "effetto_rilevabile_a_t3_bp": 64.6109538642113,
+        "giornate_positive": 3
+      },
+      "08:00": {
+        "n_giornate": 10,
+        "n_eventi": 28,
+        "media_bp": 7.18201629118061,
+        "t": 0.48398377974397866,
+        "ds_giornaliera_bp": 46.926220718760284,
+        "effetto_rilevabile_a_t3_bp": 44.51812183651985,
+        "giornate_positive": 6
+      },
+      "09:00": {
+        "n_giornate": 28,
+        "n_eventi": 93,
+        "media_bp": -4.310066293079895,
+        "t": -0.6120491770545724,
+        "ds_giornaliera_bp": 37.2628996923712,
+        "effetto_rilevabile_a_t3_bp": 21.12607836753416,
+        "giornate_positive": 13
+      },
+      "09:29": {
+        "n_giornate": 49,
+        "n_eventi": 277,
+        "media_bp": -0.590285430144989,
+        "t": -0.670887684389345,
+        "ds_giornaliera_bp": 6.159001137091893,
+        "effetto_rilevabile_a_t3_bp": 2.6395719158965254,
+        "giornate_positive": 21
+      },
+      "open": {
+        "n_giornate": 49,
+        "n_eventi": 282,
+        "media_bp": 0.0,
+        "t": null,
+        "ds_giornaliera_bp": 0.0,
+        "effetto_rilevabile_a_t3_bp": 0.0,
+        "giornate_positive": 0
+      }
+    },
+    "scorati": {
+      "close_prec": {
+        "n_giornate": 49,
+        "n_eventi": 282,
+        "media_bp": 62.42203320694157,
+        "t": 2.5350382510967204,
+        "ds_giornaliera_bp": 172.36593264798026,
+        "effetto_rilevabile_a_t3_bp": 73.87111399199155,
+        "giornate_positive": 29
+      },
+      "07:00": {
+        "n_giornate": 6,
+        "n_eventi": 14,
+        "media_bp": 16.777649398087448,
+        "t": 0.7790157114851434,
+        "ds_giornaliera_bp": 52.754622920607574,
+        "effetto_rilevabile_a_t3_bp": 64.6109538642113,
+        "giornate_positive": 3
+      },
+      "08:00": {
+        "n_giornate": 6,
+        "n_eventi": 14,
+        "media_bp": -3.8048751308776363,
+        "t": -0.16326342141198852,
+        "ds_giornaliera_bp": 57.085674948198765,
+        "effetto_rilevabile_a_t3_bp": 69.91538762273376,
+        "giornate_positive": 3
+      },
+      "09:00": {
+        "n_giornate": 6,
+        "n_eventi": 14,
+        "media_bp": -0.8633088180254261,
+        "t": -0.04107661027744021,
+        "ds_giornaliera_bp": 51.48102728839219,
+        "effetto_rilevabile_a_t3_bp": 63.051124145428794,
+        "giornate_positive": 3
+      },
+      "09:29": {
+        "n_giornate": 6,
+        "n_eventi": 14,
+        "media_bp": -5.248731740962316,
+        "t": -1.7502377592953184,
+        "ds_giornaliera_bp": 7.345696031197534,
+        "effetto_rilevabile_a_t3_bp": 8.99660354101073,
+        "giornate_positive": 1
+      },
+      "open": {
+        "n_giornate": 49,
+        "n_eventi": 282,
+        "media_bp": 0.0,
+        "t": null,
+        "ds_giornaliera_bp": 0.0,
+        "effetto_rilevabile_a_t3_bp": 0.0,
+        "giornate_positive": 0
+      }
+    }
+  },
+  "azionabilita": {
+    "07:00": {
+      "tutti": 282,
+      "pubblicati": 14,
+      "scorati": 14
+    },
+    "08:00": {
+      "tutti": 282,
+      "pubblicati": 28,
+      "scorati": 14
+    },
+    "09:00": {
+      "tutti": 282,
+      "pubblicati": 93,
+      "scorati": 14
+    },
+    "09:29": {
+      "tutti": 282,
+      "pubblicati": 277,
+      "scorati": 14
+    }
+  },
+  "quota_gap_consumata_diagnostico": {
+    "07:00": {
+      "mediana": 0.6896471800154569,
+      "p25": 0.4400483011325802,
+      "p75": 0.9872999763655845,
+      "n": 250
+    },
+    "08:00": {
+      "mediana": 0.8037882763350949,
+      "p25": 0.5422445139740381,
+      "p75": 1.0257059117353196,
+      "n": 250
+    },
+    "09:00": {
+      "mediana": 0.9297264513511578,
+      "p25": 0.7099401456860043,
+      "p75": 1.1617587404266285,
+      "n": 250
+    },
+    "09:29": {
+      "mediana": 1.004189810661319,
+      "p25": 0.9776273189330108,
+      "p75": 1.029579384945465,
+      "n": 250
+    }
+  },
+  "spread": {
+    "06:55-07:00": {
+      "spread_rel_mediano_bp": 10.340088685936385,
+      "spread_rel_p75_bp": 19.43229604815193,
+      "spread_rel_p90_bp": 31.26929860096414,
+      "tocco_mediano_usd": 21162.3,
+      "tocco_p10_usd": 10926.175,
+      "n": 268
+    },
+    "07:55-08:00": {
+      "spread_rel_mediano_bp": 8.30041348356176,
+      "spread_rel_p75_bp": 15.126057066204508,
+      "spread_rel_p90_bp": 25.842282266929978,
+      "tocco_mediano_usd": 20579.000000000004,
+      "tocco_p10_usd": 10660.5,
+      "n": 275
+    },
+    "08:55-09:00": {
+      "spread_rel_mediano_bp": 7.075471698113476,
+      "spread_rel_p75_bp": 14.52912427121506,
+      "spread_rel_p90_bp": 24.173163697536957,
+      "tocco_mediano_usd": 20714.5,
+      "tocco_p10_usd": 10398.099999999999,
+      "n": 275
+    },
+    "09:25-09:30": {
+      "spread_rel_mediano_bp": 11.18107115755564,
+      "spread_rel_p75_bp": 20.638526766260757,
+      "spread_rel_p90_bp": 45.01832371062843,
+      "tocco_mediano_usd": 20208.8,
+      "tocco_p10_usd": 10145.0,
+      "n": 282
+    },
+    "09:30-09:31": {
+      "spread_rel_mediano_bp": 6.969482212016661,
+      "spread_rel_p75_bp": 12.997584444013041,
+      "spread_rel_p90_bp": 27.089796827260184,
+      "tocco_mediano_usd": 20467.4,
+      "tocco_p10_usd": 10567.299999999997,
+      "n": 282
+    }
+  },
+  "verdetto": {
+    "esito": "INSUFFICIENT_N",
+    "variante": "scorati",
+    "soglia_netto_bp": 18.666666666666668,
+    "lordo_riferimento_bp": 56.0,
+    "size": {
+      "mediana_usd": 1242.78,
+      "p75_usd": 1437.025,
+      "p90_usd": 1837.7759999999998,
+      "max_usd": 6234.14,
+      "n_trade": 167
+    },
+    "per_ora": [
+      {
+        "ora": "07:00",
+        "residuo_lordo_bp": 16.777649398087448,
+        "t": 0.7790157114851434,
+        "effetto_rilevabile_a_t3_bp": 64.6109538642113,
+        "costo_ingresso_bp": 5.170044342968192,
+        "costo_uscita_bp": 3.4847411060083306,
+        "costo_all_in_bp": 8.654785448976522,
+        "netto_bp": 8.122863949110926,
+        "giornate_necessarie": 3802.3114077071314,
+        "tocco_mediano_usd": 21162.3,
+        "size_oltre_il_tocco": false,
+        "quota_senza_scambi": 0.0035460992907801418,
+        "azionabili": {
+          "tutti": 282,
+          "pubblicati": 14,
+          "scorati": 14
+        }
+      },
+      {
+        "ora": "08:00",
+        "residuo_lordo_bp": -3.8048751308776363,
+        "t": -0.16326342141198852,
+        "effetto_rilevabile_a_t3_bp": 69.91538762273376,
+        "costo_ingresso_bp": 4.15020674178088,
+        "costo_uscita_bp": 3.4847411060083306,
+        "costo_all_in_bp": 7.634947847789211,
+        "netto_bp": -11.439822978666847,
+        "giornate_necessarie": null,
+        "tocco_mediano_usd": 20579.000000000004,
+        "size_oltre_il_tocco": false,
+        "quota_senza_scambi": 0.0070921985815602835,
+        "azionabili": {
+          "tutti": 282,
+          "pubblicati": 28,
+          "scorati": 14
+        }
+      },
+      {
+        "ora": "09:00",
+        "residuo_lordo_bp": -0.8633088180254261,
+        "t": -0.04107661027744021,
+        "effetto_rilevabile_a_t3_bp": 63.051124145428794,
+        "costo_ingresso_bp": 3.537735849056738,
+        "costo_uscita_bp": 3.4847411060083306,
+        "costo_all_in_bp": 7.022476955065068,
+        "netto_bp": -7.885785773090494,
+        "giornate_necessarie": null,
+        "tocco_mediano_usd": 20714.5,
+        "size_oltre_il_tocco": false,
+        "quota_senza_scambi": 0.0,
+        "azionabili": {
+          "tutti": 282,
+          "pubblicati": 93,
+          "scorati": 14
+        }
+      },
+      {
+        "ora": "09:29",
+        "residuo_lordo_bp": -5.248731740962316,
+        "t": -1.7502377592953184,
+        "effetto_rilevabile_a_t3_bp": 8.99660354101073,
+        "costo_ingresso_bp": 5.59053557877782,
+        "costo_uscita_bp": 3.4847411060083306,
+        "costo_all_in_bp": 9.07527668478615,
+        "netto_bp": -14.324008425748467,
+        "giornate_necessarie": null,
+        "tocco_mediano_usd": 20208.8,
+        "size_oltre_il_tocco": false,
+        "quota_senza_scambi": 0.0070921985815602835,
+        "azionabili": {
+          "tutti": 282,
+          "pubblicati": 277,
+          "scorati": 14
+        }
+      }
+    ],
+    "migliore": {
+      "ora": "07:00",
+      "residuo_lordo_bp": 16.777649398087448,
+      "t": 0.7790157114851434,
+      "effetto_rilevabile_a_t3_bp": 64.6109538642113,
+      "costo_ingresso_bp": 5.170044342968192,
+      "costo_uscita_bp": 3.4847411060083306,
+      "costo_all_in_bp": 8.654785448976522,
+      "netto_bp": 8.122863949110926,
+      "giornate_necessarie": 3802.3114077071314,
+      "tocco_mediano_usd": 21162.3,
+      "size_oltre_il_tocco": false,
+      "quota_senza_scambi": 0.0035460992907801418,
+      "azionabili": {
+        "tutti": 282,
+        "pubblicati": 14,
+        "scorati": 14
+      }
+    }
+  },
+  "verdetto_varianti": {
+    "tutti": {
+      "esito": "INSUFFICIENT_N",
+      "variante": "tutti",
+      "soglia_netto_bp": 18.666666666666668,
+      "lordo_riferimento_bp": 56.0,
+      "size": {
+        "mediana_usd": 1242.78,
+        "p75_usd": 1437.025,
+        "p90_usd": 1837.7759999999998,
+        "max_usd": 6234.14,
+        "n_trade": 167
+      },
+      "per_ora": [
+        {
+          "ora": "07:00",
+          "residuo_lordo_bp": 10.137199693297916,
+          "t": 0.6384648875106892,
+          "effetto_rilevabile_a_t3_bp": 47.63237520933302,
+          "costo_ingresso_bp": 5.170044342968192,
+          "costo_uscita_bp": 3.4847411060083306,
+          "costo_all_in_bp": 8.654785448976522,
+          "netto_bp": 1.4824142443213937,
+          "giornate_necessarie": 114163.39678874983,
+          "tocco_mediano_usd": 21162.3,
+          "size_oltre_il_tocco": false,
+          "quota_senza_scambi": 0.0035460992907801418,
+          "azionabili": {
+            "tutti": 282,
+            "pubblicati": 14,
+            "scorati": 14
+          }
+        },
+        {
+          "ora": "08:00",
+          "residuo_lordo_bp": 9.066884265272252,
+          "t": 0.5249374181074467,
+          "effetto_rilevabile_a_t3_bp": 51.81694399664457,
+          "costo_ingresso_bp": 4.15020674178088,
+          "costo_uscita_bp": 3.4847411060083306,
+          "costo_all_in_bp": 7.634947847789211,
+          "netto_bp": 1.4319364174830413,
+          "giornate_necessarie": 122354.11281127081,
+          "tocco_mediano_usd": 20579.000000000004,
+          "size_oltre_il_tocco": false,
+          "quota_senza_scambi": 0.0070921985815602835,
+          "azionabili": {
+            "tutti": 282,
+            "pubblicati": 28,
+            "scorati": 14
+          }
+        },
+        {
+          "ora": "09:00",
+          "residuo_lordo_bp": -7.062482966721109,
+          "t": -1.2878315812594165,
+          "effetto_rilevabile_a_t3_bp": 16.452033952641045,
+          "costo_ingresso_bp": 3.537735849056738,
+          "costo_uscita_bp": 3.4847411060083306,
+          "costo_all_in_bp": 7.022476955065068,
+          "netto_bp": -14.084959921786176,
+          "giornate_necessarie": null,
+          "tocco_mediano_usd": 20714.5,
+          "size_oltre_il_tocco": false,
+          "quota_senza_scambi": 0.0,
+          "azionabili": {
+            "tutti": 282,
+            "pubblicati": 93,
+            "scorati": 14
+          }
+        },
+        {
+          "ora": "09:29",
+          "residuo_lordo_bp": -0.6321608036589964,
+          "t": -0.7251781758107094,
+          "effetto_rilevabile_a_t3_bp": 2.615195098579499,
+          "costo_ingresso_bp": 5.59053557877782,
+          "costo_uscita_bp": 3.4847411060083306,
+          "costo_all_in_bp": 9.07527668478615,
+          "netto_bp": -9.707437488445146,
+          "giornate_necessarie": null,
+          "tocco_mediano_usd": 20208.8,
+          "size_oltre_il_tocco": false,
+          "quota_senza_scambi": 0.0070921985815602835,
+          "azionabili": {
+            "tutti": 282,
+            "pubblicati": 277,
+            "scorati": 14
+          }
+        }
+      ],
+      "migliore": {
+        "ora": "07:00",
+        "residuo_lordo_bp": 10.137199693297916,
+        "t": 0.6384648875106892,
+        "effetto_rilevabile_a_t3_bp": 47.63237520933302,
+        "costo_ingresso_bp": 5.170044342968192,
+        "costo_uscita_bp": 3.4847411060083306,
+        "costo_all_in_bp": 8.654785448976522,
+        "netto_bp": 1.4824142443213937,
+        "giornate_necessarie": 114163.39678874983,
+        "tocco_mediano_usd": 21162.3,
+        "size_oltre_il_tocco": false,
+        "quota_senza_scambi": 0.0035460992907801418,
+        "azionabili": {
+          "tutti": 282,
+          "pubblicati": 14,
+          "scorati": 14
+        }
+      }
+    },
+    "pubblicati": {
+      "esito": "INSUFFICIENT_N",
+      "variante": "pubblicati",
+      "soglia_netto_bp": 18.666666666666668,
+      "lordo_riferimento_bp": 56.0,
+      "size": {
+        "mediana_usd": 1242.78,
+        "p75_usd": 1437.025,
+        "p90_usd": 1837.7759999999998,
+        "max_usd": 6234.14,
+        "n_trade": 167
+      },
+      "per_ora": [
+        {
+          "ora": "07:00",
+          "residuo_lordo_bp": 16.777649398087448,
+          "t": 0.7790157114851434,
+          "effetto_rilevabile_a_t3_bp": 64.6109538642113,
+          "costo_ingresso_bp": 5.170044342968192,
+          "costo_uscita_bp": 3.4847411060083306,
+          "costo_all_in_bp": 8.654785448976522,
+          "netto_bp": 8.122863949110926,
+          "giornate_necessarie": 3802.3114077071314,
+          "tocco_mediano_usd": 21162.3,
+          "size_oltre_il_tocco": false,
+          "quota_senza_scambi": 0.0035460992907801418,
+          "azionabili": {
+            "tutti": 282,
+            "pubblicati": 14,
+            "scorati": 14
+          }
+        },
+        {
+          "ora": "08:00",
+          "residuo_lordo_bp": 7.18201629118061,
+          "t": 0.48398377974397866,
+          "effetto_rilevabile_a_t3_bp": 44.51812183651985,
+          "costo_ingresso_bp": 4.15020674178088,
+          "costo_uscita_bp": 3.4847411060083306,
+          "costo_all_in_bp": 7.634947847789211,
+          "netto_bp": -0.4529315566086005,
+          "giornate_necessarie": null,
+          "tocco_mediano_usd": 20579.000000000004,
+          "size_oltre_il_tocco": false,
+          "quota_senza_scambi": 0.0070921985815602835,
+          "azionabili": {
+            "tutti": 282,
+            "pubblicati": 28,
+            "scorati": 14
+          }
+        },
+        {
+          "ora": "09:00",
+          "residuo_lordo_bp": -4.310066293079895,
+          "t": -0.6120491770545724,
+          "effetto_rilevabile_a_t3_bp": 21.12607836753416,
+          "costo_ingresso_bp": 3.537735849056738,
+          "costo_uscita_bp": 3.4847411060083306,
+          "costo_all_in_bp": 7.022476955065068,
+          "netto_bp": -11.332543248144963,
+          "giornate_necessarie": null,
+          "tocco_mediano_usd": 20714.5,
+          "size_oltre_il_tocco": false,
+          "quota_senza_scambi": 0.0,
+          "azionabili": {
+            "tutti": 282,
+            "pubblicati": 93,
+            "scorati": 14
+          }
+        },
+        {
+          "ora": "09:29",
+          "residuo_lordo_bp": -0.590285430144989,
+          "t": -0.670887684389345,
+          "effetto_rilevabile_a_t3_bp": 2.6395719158965254,
+          "costo_ingresso_bp": 5.59053557877782,
+          "costo_uscita_bp": 3.4847411060083306,
+          "costo_all_in_bp": 9.07527668478615,
+          "netto_bp": -9.66556211493114,
+          "giornate_necessarie": null,
+          "tocco_mediano_usd": 20208.8,
+          "size_oltre_il_tocco": false,
+          "quota_senza_scambi": 0.0070921985815602835,
+          "azionabili": {
+            "tutti": 282,
+            "pubblicati": 277,
+            "scorati": 14
+          }
+        }
+      ],
+      "migliore": {
+        "ora": "07:00",
+        "residuo_lordo_bp": 16.777649398087448,
+        "t": 0.7790157114851434,
+        "effetto_rilevabile_a_t3_bp": 64.6109538642113,
+        "costo_ingresso_bp": 5.170044342968192,
+        "costo_uscita_bp": 3.4847411060083306,
+        "costo_all_in_bp": 8.654785448976522,
+        "netto_bp": 8.122863949110926,
+        "giornate_necessarie": 3802.3114077071314,
+        "tocco_mediano_usd": 21162.3,
+        "size_oltre_il_tocco": false,
+        "quota_senza_scambi": 0.0035460992907801418,
+        "azionabili": {
+          "tutti": 282,
+          "pubblicati": 14,
+          "scorati": 14
+        }
+      }
+    },
+    "scorati": {
+      "esito": "INSUFFICIENT_N",
+      "variante": "scorati",
+      "soglia_netto_bp": 18.666666666666668,
+      "lordo_riferimento_bp": 56.0,
+      "size": {
+        "mediana_usd": 1242.78,
+        "p75_usd": 1437.025,
+        "p90_usd": 1837.7759999999998,
+        "max_usd": 6234.14,
+        "n_trade": 167
+      },
+      "per_ora": [
+        {
+          "ora": "07:00",
+          "residuo_lordo_bp": 16.777649398087448,
+          "t": 0.7790157114851434,
+          "effetto_rilevabile_a_t3_bp": 64.6109538642113,
+          "costo_ingresso_bp": 5.170044342968192,
+          "costo_uscita_bp": 3.4847411060083306,
+          "costo_all_in_bp": 8.654785448976522,
+          "netto_bp": 8.122863949110926,
+          "giornate_necessarie": 3802.3114077071314,
+          "tocco_mediano_usd": 21162.3,
+          "size_oltre_il_tocco": false,
+          "quota_senza_scambi": 0.0035460992907801418,
+          "azionabili": {
+            "tutti": 282,
+            "pubblicati": 14,
+            "scorati": 14
+          }
+        },
+        {
+          "ora": "08:00",
+          "residuo_lordo_bp": -3.8048751308776363,
+          "t": -0.16326342141198852,
+          "effetto_rilevabile_a_t3_bp": 69.91538762273376,
+          "costo_ingresso_bp": 4.15020674178088,
+          "costo_uscita_bp": 3.4847411060083306,
+          "costo_all_in_bp": 7.634947847789211,
+          "netto_bp": -11.439822978666847,
+          "giornate_necessarie": null,
+          "tocco_mediano_usd": 20579.000000000004,
+          "size_oltre_il_tocco": false,
+          "quota_senza_scambi": 0.0070921985815602835,
+          "azionabili": {
+            "tutti": 282,
+            "pubblicati": 28,
+            "scorati": 14
+          }
+        },
+        {
+          "ora": "09:00",
+          "residuo_lordo_bp": -0.8633088180254261,
+          "t": -0.04107661027744021,
+          "effetto_rilevabile_a_t3_bp": 63.051124145428794,
+          "costo_ingresso_bp": 3.537735849056738,
+          "costo_uscita_bp": 3.4847411060083306,
+          "costo_all_in_bp": 7.022476955065068,
+          "netto_bp": -7.885785773090494,
+          "giornate_necessarie": null,
+          "tocco_mediano_usd": 20714.5,
+          "size_oltre_il_tocco": false,
+          "quota_senza_scambi": 0.0,
+          "azionabili": {
+            "tutti": 282,
+            "pubblicati": 93,
+            "scorati": 14
+          }
+        },
+        {
+          "ora": "09:29",
+          "residuo_lordo_bp": -5.248731740962316,
+          "t": -1.7502377592953184,
+          "effetto_rilevabile_a_t3_bp": 8.99660354101073,
+          "costo_ingresso_bp": 5.59053557877782,
+          "costo_uscita_bp": 3.4847411060083306,
+          "costo_all_in_bp": 9.07527668478615,
+          "netto_bp": -14.324008425748467,
+          "giornate_necessarie": null,
+          "tocco_mediano_usd": 20208.8,
+          "size_oltre_il_tocco": false,
+          "quota_senza_scambi": 0.0070921985815602835,
+          "azionabili": {
+            "tutti": 282,
+            "pubblicati": 277,
+            "scorati": 14
+          }
+        }
+      ],
+      "migliore": {
+        "ora": "07:00",
+        "residuo_lordo_bp": 16.777649398087448,
+        "t": 0.7790157114851434,
+        "effetto_rilevabile_a_t3_bp": 64.6109538642113,
+        "costo_ingresso_bp": 5.170044342968192,
+        "costo_uscita_bp": 3.4847411060083306,
+        "costo_all_in_bp": 8.654785448976522,
+        "netto_bp": 8.122863949110926,
+        "giornate_necessarie": 3802.3114077071314,
+        "tocco_mediano_usd": 21162.3,
+        "size_oltre_il_tocco": false,
+        "quota_senza_scambi": 0.0035460992907801418,
+        "azionabili": {
+          "tutti": 282,
+          "pubblicati": 14,
+          "scorati": 14
+        }
+      }
+    }
+  },
+  "generato_il": "2026-09-16T08:25:22.964306+00:00",
+  "prereg": "docs/evidence/PREREGISTRAZIONE_ESEGUIBILITA_PREMARKET_2026-09-16.md"
+}
