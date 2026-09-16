@@ -17,8 +17,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.workers.portfolio_scheduler import (
     _filter_reversal_sells_by_ownership,
     _record_reversal_vetoes,
