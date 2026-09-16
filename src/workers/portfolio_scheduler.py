@@ -3528,6 +3528,17 @@ def _run_cycle_inner() -> dict:
                 log.warning("Failed to submit stop-loss exit for %s: %s", sym, _sl_sub_exc)
 
     # Submit forced sells for sentiment reversal (symbols not already being sold).
+    # #182 (deroga 2026-08-25): sentiment_reversal chiude solo posizioni che S4
+    # ha aperto. Il guard sta qui perche' l'attribuzione P0-05 (_open_trades) e
+    # il regime_mult sono gia' in scope, e i candidati reversal non hanno altri
+    # consumatori prima della submission. open_trades=None quando il fetch P0-05
+    # e' fallito: senza attribuzione non si chiude nulla (fail-closed).
+    reversal_sell_symbols = _apply_reversal_ownership_guard(
+        reversal_sell_symbols,
+        open_trades=_open_trades if open_db_symbols is not None else None,
+        regime_mult=_regime_mult,
+        redis_url=config.REDIS_URL,
+    )
     _submit_reversal_force_sells(
         reversal_sell_symbols=reversal_sell_symbols,
         final_orders=result.final_orders,
@@ -3941,6 +3952,207 @@ def _mark_pyramiding_blocks_logged(keys: list[str], redis_url: str) -> None:
             r.close()
     except Exception as exc:
         log.warning("Failed to mark pyramiding blocks as logged: %s", exc)
+
+
+# ── #182: precedenza sulle uscite — il reversal chiude solo posizioni di S4 ──
+# Decisione 2026-08-22 (opzione a), deroga al freeze 2026-08-25: S4 puo' vietare
+# un ingresso, non forzare un'uscita. Il force-sell da sentiment_reversal liquida
+# tutta la quantita' a broker, quindi basta UNA riga aperta non-S4 sul simbolo per
+# vietarlo. In dubbio non si chiude (fail-closed), la stessa direzione di errore
+# dell'asimmetria di danno che giustifica la regola.
+
+# Idempotency store per i veti di precedenza. Stesso schema di _PYRAMID_LOGGED_KEY:
+# il TTL supera abbondantemente l'age-gate del reversal (60 min), cosi' un segnale
+# non esce dall'insieme mentre potrebbe ancora essere ri-scansionato.
+_REVERSAL_VETO_LOGGED_KEY = "portfolio:logged_reversal_vetoes"
+_REVERSAL_VETO_LOGGED_TTL_SECONDS = 10 * 24 * 3600  # 10 giorni
+
+
+def _filter_reversal_sells_by_ownership(
+    reversal_sell_symbols: dict,
+    open_trades: list[dict] | None,
+) -> tuple[dict, list[dict]]:
+    """Suddivide i candidati reversal in (chiudibili, vetati) secondo #182.
+
+    Un simbolo e' chiudibile solo se ha almeno una riga trades aperta e TUTTE le
+    righe aperte del simbolo hanno stop_strategy == "S4". open_trades=None (fetch
+    del DB fallita) veta tutto: senza attribuzione non si puo' confermare che S4
+    possiede la posizione. La misura del 2026-08-11: 22 reversal su 22 liquidarono
+    core o legacy (−$350,90), zero toccarono posizioni di S4.
+
+    Ogni veto porta {symbol, owner, score, signal_id, identity} per la riga
+    SKIP_REVERSAL_OWNER: dal database «fermato dal guard» e «mai generato» devono
+    restare distinguibili (stessa ragione di #231).
+    """
+    if open_trades is None:
+        return {}, [
+            {
+                "symbol": sym,
+                "owner": "non_leggibile",
+                "score": meta.get("score"),
+                "signal_id": meta.get("signal_id"),
+                "identity": meta.get("identity"),
+            }
+            for sym, meta in reversal_sell_symbols.items()
+        ]
+
+    per_symbol: dict[str, list[dict]] = {}
+    for t in open_trades:
+        per_symbol.setdefault(t.get("symbol"), []).append(t)
+
+    allowed: dict = {}
+    vetoed: list[dict] = []
+    for sym, meta in reversal_sell_symbols.items():
+        trades = per_symbol.get(sym, [])
+        strats = {str(t.get("stop_strategy") or "").strip() for t in trades}
+        if trades and strats == {"S4"}:
+            allowed[sym] = meta
+            continue
+        if not trades:
+            owner = "non_attribuita"
+        elif "" in strats:
+            owner = "legacy"
+        else:
+            owner = "+".join(sorted(strats))
+        vetoed.append({
+            "symbol": sym,
+            "owner": owner,
+            "score": meta.get("score"),
+            "signal_id": meta.get("signal_id"),
+            "identity": meta.get("identity"),
+        })
+    return allowed, vetoed
+
+
+def _reversal_veto_key(symbol: str, identity) -> str:
+    """Identita' di un veto, per scriverne una riga sola.
+
+    La chiave e' il SEGNALE (identity = signal_id o generated_at), non il ciclo:
+    un segnale sotto soglia resta fresco fino all'age-gate e viene ri-valutato a
+    ogni ciclo, e una riga per ciclo ricreerebbe la pollution che #231 aveva
+    eliminato per SKIP_PYRAMIDING.
+    """
+    return f"{symbol}|{identity}"
+
+
+def _get_logged_reversal_veto_keys(redis_url: str) -> set[str] | None:
+    """Veti gia' registrati, o None se Redis non risponde.
+
+    Fallisce APERTO come il gemello per SKIP_PYRAMIDING: una riga duplicata e'
+    una seccatura, perdere la visibilita' su un'uscita fermata e' il difetto
+    che questo insieme esiste per chiudere.
+    """
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            return set(r.smembers(_REVERSAL_VETO_LOGGED_KEY))
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Could not read logged-reversal-veto set from Redis: %s", exc)
+        return None
+
+
+def _mark_reversal_vetoes_logged(keys: list[str], redis_url: str) -> None:
+    """Aggiunge le chiavi all'insieme di idempotenza e rinfresca il TTL. Fail-silent."""
+    if not keys:
+        return
+    try:
+        import redis as _redis
+        r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        try:
+            r.sadd(_REVERSAL_VETO_LOGGED_KEY, *keys)
+            r.expire(_REVERSAL_VETO_LOGGED_KEY, _REVERSAL_VETO_LOGGED_TTL_SECONDS)
+        finally:
+            r.close()
+    except Exception as exc:
+        log.warning("Failed to mark reversal vetoes as logged: %s", exc)
+
+
+def _record_reversal_vetoes(pg, vetoes, gia_registrati: set[str], regime_mult: float) -> list[str]:
+    """Scrive una riga SKIP_REVERSAL_OWNER per ogni reversal fermato dal guard #182.
+
+    La decisione NON e' un SELL, di proposito: l'ordine non e' stato inviato, e
+    una riga SELL per un'uscita mai eseguita mentirebbe sul libro. Restituisce le
+    chiavi effettivamente scritte, perche' sia il chiamante a marcarle — la
+    funzione resta testabile senza Redis. Non solleva mai.
+    """
+    scritte: list[str] = []
+    try:
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc)
+        for v in vetoes or []:
+            chiave = _reversal_veto_key(v["symbol"], v.get("identity"))
+            if chiave in gia_registrati:
+                continue
+            _score = v.get("score")
+            pg.write_execution_decision(
+                tick_time=now,
+                symbol=v["symbol"],
+                signal_id=v.get("signal_id"),
+                score=0.0,
+                signal_score=_score,
+                regime_mult=regime_mult,
+                ema_pass=True,
+                decision="SKIP_REVERSAL_OWNER",
+                reason=(
+                    f"#182 precedenza uscite: sentiment_reversal non chiude "
+                    f"posizione {v.get('owner')}"
+                    f"{f', sentiment {float(_score):+.3f}' if _score is not None else ''}"
+                ),
+            )
+            scritte.append(chiave)
+    except Exception as exc:
+        log.warning("Failed to log reversal vetoes: %s", exc)
+    return scritte
+
+
+def _apply_reversal_ownership_guard(
+    reversal_sell_symbols: dict,
+    open_trades: list[dict] | None,
+    regime_mult: float,
+    redis_url: str,
+) -> dict:
+    """Applica il guard #182 ai candidati reversal e ne lascia traccia.
+
+    Filtra per proprieta', logga ogni veto, scrive una riga SKIP_REVERSAL_OWNER
+    per segnale (idempotente su Redis) e restituisce i soli candidati ammessi.
+    Ogni parte accessoria e' best-effort; il filtro no: se questo blocco intero
+    solleva, non si vende proprio niente — il guard e' fail-closed, mai un
+    pass-through d'emergenza.
+    """
+    try:
+        allowed, vetoed = _filter_reversal_sells_by_ownership(
+            reversal_sell_symbols, open_trades
+        )
+        for v in vetoed:
+            log.info(
+                "Sentiment reversal SKIPPED for %s: position owned by %s, not S4 (#182 exit precedence)",
+                v["symbol"], v["owner"],
+            )
+        if vetoed:
+            gia_registrati = _get_logged_reversal_veto_keys(redis_url)
+            if gia_registrati is None:
+                gia_registrati = set()  # fail open: meglio una riga doppia che nessuna
+            try:
+                from src.store.pg_store import PostgreSQLStore as _PGVeto
+                pg = _PGVeto()
+                try:
+                    nuove = _record_reversal_vetoes(pg, vetoed, gia_registrati, regime_mult)
+                finally:
+                    pg.close()
+                _mark_reversal_vetoes_logged(nuove, redis_url)
+            except Exception as exc:
+                log.warning("Could not record reversal vetoes: %s", exc)
+        return allowed
+    except Exception as exc:
+        log.warning(
+            "Reversal ownership guard failed — no reversal sell this cycle (fail-closed): %s",
+            exc,
+        )
+        return {}
 
 
 def _record_pyramiding_blocks(pg, bloccati, gia_registrati: set[str], regime_mult: float) -> list[str]:
