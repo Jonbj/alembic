@@ -79,6 +79,31 @@ class PitDataset:
     def with_provenance(self, provenance: Provenance) -> "PitDataset":
         return replace(self, provenance=provenance)
 
+    def truncate_at(self, as_of: pd.Timestamp) -> "PitDataset":
+        """Copia del dataset come appariva a `as_of`: nessuna riga futura.
+
+        Le righe daily e il mercato si troncano a <= as_of; i delisting
+        successivi ad as_of sono sconosciuti e cadono; gli intervalli
+        dell'anagrafica si tagliano ad as_of. Serve ai test di leakage.
+        """
+        as_of = pd.Timestamp(as_of)
+        master = self.security_master.copy()
+        master["valid_to"] = pd.to_datetime(master["valid_to"]).clip(upper=as_of)
+        delistings = self.delistings[
+            pd.to_datetime(self.delistings["delisting_date"]) <= as_of
+        ]
+        return replace(
+            self,
+            close=self.close.loc[self.close.index <= as_of],
+            open=self.open.loc[self.open.index <= as_of],
+            volume=self.volume.loc[self.volume.index <= as_of],
+            market_cap=self.market_cap.loc[self.market_cap.index <= as_of],
+            open_reliable=self.open_reliable.loc[self.open_reliable.index <= as_of],
+            market=self.market.loc[self.market.index <= as_of],
+            security_master=master,
+            delistings=delistings,
+        )
+
     def to_long(self) -> pd.DataFrame:
         close = self.close.stack().rename("close")
         frames = {
