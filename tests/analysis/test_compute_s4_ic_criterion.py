@@ -70,6 +70,7 @@ def test_leggi_criterio_legge_i_campi_minimi(tmp_path, monkeypatch):
     path = tmp_path / "s4_kill_criterion.yaml"
     path.write_text(
         "min_giorni: 73\n"
+        "serie_valida_dal: 2026-09-08\n"
         "significativo_a_t: 3.0\n"
         "max_ic_rilevabile_a_t: 0.05\n"
     )
@@ -77,6 +78,7 @@ def test_leggi_criterio_legge_i_campi_minimi(tmp_path, monkeypatch):
     criterio = cs._leggi_criterio()
     assert criterio == {
         "min_giorni": 73,
+        "serie_valida_dal": "2026-09-08",
         "significativo_a_t": 3.0,
         "max_ic_rilevabile_a_t": 0.05,
     }
@@ -86,6 +88,34 @@ def test_leggi_criterio_segnala_file_senza_min_giorni(tmp_path, monkeypatch):
     """File presente ma senza il campo richiesto: consideralo assente."""
     path = tmp_path / "s4_kill_criterion.yaml"
     path.write_text("significativo_a_t: 3.0\n")
+    cs = _importa(monkeypatch, criterion_file=path)
+    assert cs._leggi_criterio() is None
+
+
+def test_leggi_criterio_segnala_file_senza_serie_valida_dal(tmp_path, monkeypatch):
+    """#601: senza la data di taglio il conteggio non ha definizione.
+
+    Non si cade indietro al conteggio sulla serie intera: il criterio non e'
+    valutabile e la cosa dev'essere visibile (NO_CRITERION).
+    """
+    path = tmp_path / "s4_kill_criterion.yaml"
+    path.write_text("min_giorni: 73\nsignificativo_a_t: 3.0\n")
+    cs = _importa(monkeypatch, criterion_file=path)
+    assert cs._leggi_criterio() is None
+
+
+def test_leggi_criterio_rifiuta_serie_valida_dal_malformata(tmp_path, monkeypatch):
+    """Una data malformata non vale come data: NO_CRITERION, non un default.
+
+    Il campo e' obbligatorio come `min_giorni`, quindi un valore illeggibile
+    deve fermare la valutazione esattamente come il campo assente. Cadere
+    indietro a una data implicita rimetterebbe in gioco i sessanta giorni
+    contaminati che #601 esiste per escludere.
+    """
+    path = tmp_path / "s4_kill_criterion.yaml"
+    path.write_text(
+        'min_giorni: 73\nserie_valida_dal: "non-una-data"\nsignificativo_a_t: 3.0\n'
+    )
     cs = _importa(monkeypatch, criterion_file=path)
     assert cs._leggi_criterio() is None
 
@@ -125,7 +155,8 @@ def test_esito_no_criterion_se_file_assente(tmp_path, monkeypatch, sintesi_minim
 def test_esito_insufficient_n_sotto_min_giorni(tmp_path, monkeypatch, sintesi_minima):
     path = tmp_path / "s4_kill_criterion.yaml"
     path.write_text(
-        "min_giorni: 73\nsignificativo_a_t: 3.0\nmax_ic_rilevabile_a_t: 0.05\n"
+        "min_giorni: 73\nserie_valida_dal: 2026-09-08\n"
+        "significativo_a_t: 3.0\nmax_ic_rilevabile_a_t: 0.05\n"
     )
     cs = _importa(monkeypatch, criterion_file=path)
     esito = cs._esito(sintesi_minima)
@@ -138,7 +169,8 @@ def test_esito_insufficient_n_sotto_min_giorni(tmp_path, monkeypatch, sintesi_mi
 def test_esito_fail_quando_ic_sopra_min_giorni_e_significativo_negativo(tmp_path, monkeypatch):
     path = tmp_path / "s4_kill_criterion.yaml"
     path.write_text(
-        "min_giorni: 30\nsignificativo_a_t: 3.0\nmax_ic_rilevabile_a_t: 0.05\n"
+        "min_giorni: 30\nserie_valida_dal: 2026-09-08\n"
+        "significativo_a_t: 3.0\nmax_ic_rilevabile_a_t: 0.05\n"
     )
     cs = _importa(monkeypatch, criterion_file=path)
     sintesi = {
@@ -158,7 +190,8 @@ def test_esito_fail_quando_ic_sopra_min_giorni_e_significativo_negativo(tmp_path
 def test_esito_pass_quando_ic_sopra_min_giorni_e_significativo_positivo(tmp_path, monkeypatch):
     path = tmp_path / "s4_kill_criterion.yaml"
     path.write_text(
-        "min_giorni: 30\nsignificativo_a_t: 3.0\nmax_ic_rilevabile_a_t: 0.05\n"
+        "min_giorni: 30\nserie_valida_dal: 2026-09-08\n"
+        "significativo_a_t: 3.0\nmax_ic_rilevabile_a_t: 0.05\n"
     )
     cs = _importa(monkeypatch, criterion_file=path)
     sintesi = {
@@ -177,7 +210,8 @@ def test_esito_insufficient_n_se_significativo_ma_sotto_min_giorni(tmp_path, mon
     """Soglia 73, n=40, IC forte: lo stato resta INSUFFICIENT_N, non PASS/FAIL."""
     path = tmp_path / "s4_kill_criterion.yaml"
     path.write_text(
-        "min_giorni: 73\nsignificativo_a_t: 3.0\nmax_ic_rilevabile_a_t: 0.05\n"
+        "min_giorni: 73\nserie_valida_dal: 2026-09-08\n"
+        "significativo_a_t: 3.0\nmax_ic_rilevabile_a_t: 0.05\n"
     )
     cs = _importa(monkeypatch, criterion_file=path)
     sintesi = {
@@ -201,7 +235,8 @@ def test_esito_insufficient_n_se_t_sotto_soglia_signif(tmp_path, monkeypatch):
     """n >= soglia ma |t| < soglia_signif: NON PASS per default."""
     path = tmp_path / "s4_kill_criterion.yaml"
     path.write_text(
-        "min_giorni: 30\nsignificativo_a_t: 3.0\nmax_ic_rilevabile_a_t: 0.05\n"
+        "min_giorni: 30\nserie_valida_dal: 2026-09-08\n"
+        "significativo_a_t: 3.0\nmax_ic_rilevabile_a_t: 0.05\n"
     )
     cs = _importa(monkeypatch, criterion_file=path)
     sintesi = {

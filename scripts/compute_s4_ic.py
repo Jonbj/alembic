@@ -27,6 +27,13 @@ grande e' sul sottoinsieme `ensemble`, che la riduzione ingenua contaminava:
 IC 1g da -0.0087 (t -0.29) a -0.0339 (t -1.32). Le serie prima e dopo quella data
 non sono confrontabili.
 
+CRITERIO (#601). `min_giorni` dichiara sedute pulite: `n_corrente` conta SOLO le
+sedute dalla data registrata in `serie_valida_dal` nel criterio YAML (il fix
+#467), non l'intera serie. La serie intera resta pubblicata (`giorni_totali`,
+`sintesi`) ma non concorre al conteggio che autorizza una decisione. La data di
+taglio vive nel criterio, non nel codice: il prossimo fix di riduzione la sposta
+in un punto solo.
+
 Uso:
     uv run python scripts/compute_s4_ic.py
 """
@@ -39,7 +46,7 @@ import statistics
 import subprocess
 import sys
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from scipy.stats import spearmanr
@@ -206,6 +213,12 @@ def _leggi_criterio() -> dict | None:
 
     Ritorna None se il file manca o non ha i campi minimi: in quel caso l'esito
     sara' NO_CRITERION e l'osservazione prosegue senza decisione.
+
+    `serie_valida_dal` (#601) e' obbligatoria come `min_giorni`: dichiara la
+    prima seduta pulita che concorre al conteggio. Senza quella data il
+    conteggio non ha definizione, e il criterio non e' valutabile — meglio un
+    NO_CRITERION visibile che un conteggio silenzioso sulla serie intera
+    (sessanta giorni contaminati che correrebbero verso la soglia).
     """
     if not CRITERION_FILE.exists():
         return None
@@ -220,16 +233,30 @@ def _leggi_criterio() -> dict | None:
     min_giorni = raw.get("min_giorni")
     if not isinstance(min_giorni, int) or min_giorni <= 0:
         return None
+    dal = raw.get("serie_valida_dal")
+    # yaml.safe_load interpreta le date ISO non quotate come date; quelle
+    # quotate restano stringhe. Entrambe sono accettabili: conta la data, non
+    # la sintassi.
+    if isinstance(dal, datetime):
+        dal = dal.date()
+    if isinstance(dal, str):
+        try:
+            dal = date.fromisoformat(dal)
+        except ValueError:
+            return None
+    if not isinstance(dal, date):
+        return None
     significativo_a_t = float(raw.get("significativo_a_t", 3.0))
     max_ic = raw.get("max_ic_rilevabile_a_t")
     return {
         "min_giorni": min_giorni,
+        "serie_valida_dal": dal.isoformat(),
         "significativo_a_t": significativo_a_t,
         "max_ic_rilevabile_a_t": float(max_ic) if max_ic is not None else None,
     }
 
 
-def _esito(sintesi: dict) -> dict:
+def _esito(sintesi: dict, serie_1g: list[tuple[str, float, int]] | None = None) -> dict:
     """Calcola l'esito rispetto al kill criterion (#180).
 
     Quattro stati, in ordine di priorita':
@@ -242,15 +269,41 @@ def _esito(sintesi: dict) -> dict:
     decisione con campione insufficiente NON e' una decisione. Questa e' la
     asimmetria che la issue definisce ("se il criterio non e' ancora registrato
     l'esito e' NO_CRITERION e la cosa si vede").
+
+    #601: `min_giorni` dichiara SEDUTE PULITE. Quando la serie giornaliera e'
+    disponibile, il blocco valutato e' la sintesi della sola coda da
+    `serie_valida_dal` (nel criterio YAML): statistiche e conteggio si
+    riferiscono alle stesse osservazioni. La serie intera resta pubblicata a
+    parte (`n_giorni_totali`, `giorni_totali` in cima all'artefatto), ma non
+    concorre alla decisione. Il disallineamento di popolazione/orizzonte resta
+    quello dichiarato nel riquadro del criterio YAML: qui si corregge SOLO il
+    conteggio.
     """
     criterio = _leggi_criterio()
-    blocco = sintesi.get("tutti", {}).get("1g", {})
+    blocco_totale = sintesi.get("tutti", {}).get("1g", {})
+    n_giorni_totali = blocco_totale.get("giorni")
+    # Campi pubblicati accanto all'esito, cosi' la serie non cambia definizione
+    # in silenzio: chi legge vede entrambe le grandezze (pattern #508).
+    comune = {
+        "serie_valida_dal": criterio["serie_valida_dal"] if criterio else None,
+        "n_giorni_totali": n_giorni_totali,
+    }
+
+    if criterio is not None and serie_1g is not None:
+        dal = criterio["serie_valida_dal"]
+        # I giorni sono stringhe ISO "YYYY-MM-DD": l'ordine lessicografico e'
+        # quello cronologico, il confronto e' esatto senza parserli.
+        blocco = _sintesi([riga for riga in serie_1g if riga[0] >= dal])
+    else:
+        blocco = blocco_totale
+
     n_corrente = blocco.get("giorni")
     ic_medio = blocco.get("ic_medio")
     t_stat = blocco.get("t_stat")
 
     if criterio is None:
         return {
+            **comune,
             "criterio_registrato": False,
             "esito": "NO_CRITERION",
             "soglia": None,
@@ -265,6 +318,7 @@ def _esito(sintesi: dict) -> dict:
 
     if n_corrente is None or n_corrente < n_richiesto:
         return {
+            **comune,
             "criterio_registrato": True,
             "esito": "INSUFFICIENT_N",
             "soglia": None,
@@ -279,6 +333,7 @@ def _esito(sintesi: dict) -> dict:
         # n >= soglia ma il t non e' calcolabile (dev_std = 0 o n < 3): caso
         # degenere, trattato come non-decisionale.
         return {
+            **comune,
             "criterio_registrato": True,
             "esito": "INSUFFICIENT_N",
             "soglia": None,
@@ -297,6 +352,7 @@ def _esito(sintesi: dict) -> dict:
         # il segnale non e' ancora significativo — l'esito onesto e'
         # "non-decisionale", non "PASS per default".
         return {
+            **comune,
             "criterio_registrato": True,
             "esito": "INSUFFICIENT_N",
             "soglia": soglia_signif,
@@ -307,6 +363,7 @@ def _esito(sintesi: dict) -> dict:
         }
 
     return {
+        **comune,
         "criterio_registrato": True,
         "esito": esito,
         "soglia": soglia_signif,
@@ -347,7 +404,8 @@ def _gestisci_notifica(esito: dict) -> bool:
     righe = [
         "S4 IC — kill criterion raggiunto",
         f"esito: {stato}",
-        f"n_corrente: {esito.get('n_corrente')}",
+        f"n_corrente: {esito.get('n_corrente')} (sedute valide dal "
+        f"{esito.get('serie_valida_dal')}, su {esito.get('n_giorni_totali')} giorni totali)",
         f"n_richiesto: {esito.get('n_richiesto')}",
         f"ic_medio: {esito.get('ic_medio')}",
         f"t_stat: {esito.get('t_stat')}",
@@ -413,14 +471,19 @@ def main() -> int:
             f"{o}g": _sintesi(_serie_ic(per_giorno, filtro, o)) for o in (1, 3, 5)
         }
 
+    # La serie valutata dal criterio: servira' due volte (sintesi pubblica e
+    # coda post-`serie_valida_dal` dentro `_esito`), la si calcola una volta.
+    serie_tutti_1g = _serie_ic(per_giorno, lambda r: True, 1)
+
     risultato["serie_giornaliera_1g"] = [
         {"giorno": g, "ic": ic, "n_simboli": n}
-        for g, ic, n in _serie_ic(per_giorno, lambda r: True, 1)
+        for g, ic, n in serie_tutti_1g
     ]
 
     # Confronto col kill criterion (#180): scritto DENTRO l'artefatto cosi' il
-    # confronto non e' mai "a memoria" di chi guarda il file.
-    risultato["criterio"] = _esito(risultato["sintesi"])
+    # confronto non e' mai "a memoria" di chi guarda il file. La serie va con
+    # l'esito perche' il conteggio (#601) legge solo la coda pulita.
+    risultato["criterio"] = _esito(risultato["sintesi"], serie_tutti_1g)
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     tmp = OUT.with_suffix(".json.tmp")
@@ -453,8 +516,9 @@ def main() -> int:
     # umana del file non richieda di aprire JSON.
     cr = risultato["criterio"]
     print(f"\nKill criterion: {cr['esito']}  "
-          f"(n={cr['n_corrente']}, n_richiesto={cr['n_richiesto']}, "
-          f"soglia={cr['soglia']})")
+          f"(n_corrente={cr['n_corrente']} sedute valide dal "
+          f"{cr['serie_valida_dal']}, su n_giorni_totali={cr['n_giorni_totali']}, "
+          f"n_richiesto={cr['n_richiesto']}, soglia={cr['soglia']})")
     return 0
 
 

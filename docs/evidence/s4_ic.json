@@ -1,70 +1,70 @@
 {
-  "generato_il": "2026-09-15T08:10:02.175710+00:00",
+  "generato_il": "2026-09-16T07:01:55.606554+00:00",
   "metodo": "una osservazione per simbolo-giorno scelta con la regola del ranker (fallback_used ASC, generated_at DESC); Spearman cross-sectional giornaliero; t calcolato sui giorni",
   "discontinuita": "Dal 2026-09-08 (#467) la riduzione a simbolo-giorno applica la regola del ranker (fallback_used ASC, generated_at DESC); prima teneva l'ultimo segnale per solo orario, che il sistema non usa. Le serie prima e dopo questa data NON sono confrontabili: a parita' di dati le due riduzioni divergono su 411/3228 simbolo-giorni (12,7%), 75 al gate 0.30, e il sottoinsieme 'ensemble' era il piu' contaminato (IC 1g -0.0087 -> -0.0339).",
-  "osservazioni_simbolo_giorno": 3500,
-  "giorni_totali": 64,
+  "osservazioni_simbolo_giorno": 3558,
+  "giorni_totali": 65,
   "sintesi": {
     "tutti": {
       "1g": {
-        "giorni": 64,
-        "ic_medio": -0.03557139478347371,
-        "dev_std": 0.1363254652325812,
-        "t_stat": -2.0874394800875278,
+        "giorni": 65,
+        "ic_medio": -0.03526442470538286,
+        "dev_std": 0.13527886967075461,
+        "t_stat": -2.101665116009819,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.051122049462217954
+        "ic_rilevabile_a_t3": 0.05033783608542051
       },
       "3g": {
-        "giorni": 62,
-        "ic_medio": -0.03196717011693094,
-        "dev_std": 0.14502025055169598,
-        "t_stat": -1.7356869006433087,
+        "giorni": 63,
+        "ic_medio": -0.029442736052692393,
+        "dev_std": 0.14523480912862965,
+        "t_stat": -1.609080315802552,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.05525277071299451
+        "ic_rilevabile_a_t3": 0.05489359809489821
       },
       "5g": {
-        "giorni": 60,
-        "ic_medio": -0.036638344884674004,
-        "dev_std": 0.141069068981738,
-        "t_stat": -2.011776225578063,
+        "giorni": 61,
+        "ic_medio": -0.035836776261837705,
+        "dev_std": 0.14002857125363916,
+        "t_stat": -1.9988361494996194,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.05463581548312565
+        "ic_rilevabile_a_t3": 0.0537864640943315
       }
     },
     "ensemble": {
       "1g": {
-        "giorni": 64,
-        "ic_medio": -0.03758545896817698,
-        "dev_std": 0.19010118790958386,
-        "t_stat": -1.5817032763016048,
+        "giorni": 65,
+        "ic_medio": -0.039378746784212555,
+        "dev_std": 0.1891635019205917,
+        "t_stat": -1.6783449405191218,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.07128794546609395
+        "ic_rilevabile_a_t3": 0.07038853426405745
       },
       "3g": {
-        "giorni": 62,
-        "ic_medio": -0.03577807411266316,
-        "dev_std": 0.18377744901009047,
-        "t_stat": -1.5329238641495122,
+        "giorni": 63,
+        "ic_medio": -0.03367382624626379,
+        "dev_std": 0.18305289268331446,
+        "t_stat": -1.4601119157468725,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.07001927809215756
+        "ic_rilevabile_a_t3": 0.06918749011586357
       },
       "5g": {
-        "giorni": 60,
-        "ic_medio": -0.034263730773676115,
-        "dev_std": 0.16149665095785892,
-        "t_stat": -1.64341313430716,
+        "giorni": 61,
+        "ic_medio": -0.033313567393901115,
+        "dev_std": 0.16031704079761858,
+        "t_stat": -1.6229546007524334,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.06254738396280597
+        "ic_rilevabile_a_t3": 0.06157948111140563
       }
     },
     "fallback": {
       "1g": {
-        "giorni": 56,
-        "ic_medio": -0.07701710635721555,
-        "dev_std": 0.3538300314630121,
-        "t_stat": -1.628870357430664,
+        "giorni": 57,
+        "ic_medio": -0.06313460073190098,
+        "dev_std": 0.3659854091105063,
+        "t_stat": -1.3023901248447136,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.14184758045207524
+        "ic_rilevabile_a_t3": 0.14542785497416597
       },
       "3g": {
         "giorni": 55,
@@ -75,38 +75,38 @@
         "ic_rilevabile_a_t3": 0.13141320059233233
       },
       "5g": {
-        "giorni": 53,
-        "ic_medio": -0.07642746587636653,
-        "dev_std": 0.3790570115776374,
-        "t_stat": -1.4678539985936259,
+        "giorni": 54,
+        "ic_medio": -0.08797510539717456,
+        "dev_std": 0.3849337421994593,
+        "t_stat": -1.6794639804191538,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.15620245463702703
+        "ic_rilevabile_a_t3": 0.1571485421947866
       }
     },
     "alta_convinzione_0.30": {
       "1g": {
-        "giorni": 46,
-        "ic_medio": 0.019770762134964877,
-        "dev_std": 0.3600943154691632,
-        "t_stat": 0.3723797545720852,
+        "giorni": 47,
+        "ic_medio": 0.02086986446036076,
+        "dev_std": 0.35623843912704367,
+        "t_stat": 0.40163151019868953,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.1592790308190962
+        "ic_rilevabile_a_t3": 0.15588815068346837
       },
       "3g": {
-        "giorni": 44,
-        "ic_medio": 0.003924321091755265,
-        "dev_std": 0.3356137241270494,
-        "t_stat": 0.0775623860560777,
+        "giorni": 45,
+        "ic_medio": -0.0033057431864742188,
+        "dev_std": 0.33530429770819176,
+        "t_stat": -0.06613574473965826,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.15178701783044593
+        "ic_rilevabile_a_t3": 0.14995264056466875
       },
       "5g": {
-        "giorni": 42,
-        "ic_medio": 0.017164540481479758,
-        "dev_std": 0.35142891372180396,
-        "t_stat": 0.3165332496114802,
+        "giorni": 43,
+        "ic_medio": 0.030718853493538367,
+        "dev_std": 0.3584155202317721,
+        "t_stat": 0.5620208443837946,
         "significativo_a_3": false,
-        "ic_rilevabile_a_t3": 0.16267997598243997
+        "ic_rilevabile_a_t3": 0.16397356326108598
       }
     }
   },
@@ -430,15 +430,22 @@
       "giorno": "2026-09-11",
       "ic": -0.14202858136063265,
       "n_simboli": 57
+    },
+    {
+      "giorno": "2026-09-14",
+      "ic": -0.015618339707568273,
+      "n_simboli": 58
     }
   ],
   "criterio": {
+    "serie_valida_dal": "2026-09-08",
+    "n_giorni_totali": 65,
     "criterio_registrato": true,
     "esito": "INSUFFICIENT_N",
     "soglia": null,
-    "n_corrente": 64,
+    "n_corrente": 5,
     "n_richiesto": 213,
-    "ic_medio": -0.03557139478347371,
-    "t_stat": -2.0874394800875278
+    "ic_medio": -0.06027079888783247,
+    "t_stat": -1.9638635229955879
   }
 }
