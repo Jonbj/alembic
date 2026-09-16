@@ -188,9 +188,15 @@
           "costo_usd": null,
           "nota": "[DAY-017] 38 simboli di watchlist su 96 senza una sola news; copertura effective-timely 46/96 = 47,9%. 4 dei 38 simboli senza news erano mover oltre il 3%: invisibili per costruzione, non per soglia. Due sole fonti reali, con GDELT che scarta il 99% (2894/2922 discarded_no_ticker).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-017"
+        },
+        {
+          "data": "2026-09-15",
+          "costo_usd": 93.42,
+          "nota": "31/96 simboli watchlist (32,3%) a zero righe news_log oggi, minimo dell'intera finestra osservata dal 31/07 (precedente minimo 37 il 09-08). Un solo miss NO_NEWS azionabile tra i 7 mover: QCOM +4,25%, unica riga news TAG_UNCONFIRMED/fanout da un articolo macro non specifico ('10-Year Yield Tops 5%, Oil Storms Past $105: Stock Market Today'), funnel_v2.pipeline=NO_RELEVANT_NEWS. Lato uscita PEGGIORATO nonostante la copertura grezza migliore: 3 posizioni cieche (PFE -3,97% da 3 sedute, SBUX -8,36% da 4 sedute, UNH -12,09% da 2 sedute), nozionale cieco 2.033,70$, contro le 2 cieche del 09-11 (ASML+SBUX, 1.291,08$). Copertura raw sulla watchlist e copertura utile sulle posizioni gia' aperte si muovono in direzioni opposte oggi.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-15.md §3, §5, §6, §8"
         }
       ],
-      "costo_cumulato_usd": 4881.25,
+      "costo_cumulato_usd": 4974.67,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 4
