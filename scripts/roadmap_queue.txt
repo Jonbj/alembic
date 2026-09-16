@@ -67,11 +67,11 @@
 
 # === 1. L'IMPIANTO DI MISURA E' FERMO O MENTE (tier0/tier1) ===
 # Finche' questi non chiudono, ogni analisi a valle lavora su dati assenti o falsi.
-510  la pipeline forense committa JSON non validato e continua dopo aver rifiutato un ledger illeggibile: 12 occorrenze forensi perse per 20 giorni (F-026)
-507  `giorno_di_earnings` e' UNKNOWN sul 100% degli intent S4 per 4 sessioni consecutive: il calendario FMP non arriva mai al dossier dal cron (F-063)
-509  il classificatore legacy di miss-cause dice `NON_CLASSIFICATO` per casi che `funnel_v2` nello stesso dossier ha gia' risolto (PLTR 09-02, TSLA 09-03, F-060)
-461  il sampler del golden set QX-01 non ha finestra temporale, l'intero campione e' pre-QT-03: sblocca la misura error-rate per `extraction_method` che #405 aspetta
-34   riverificare il tasso di `parse_fail` dello shadow Stage-2 con il pool del semaforo sano e budget a 90s: la misura precedente (100% fail) era falsata dal pool a 0/3 di #368, ora chiuso
+# In testa dal 2026-09-12: finche' questa non chiude, la coda stessa non e' affidabile
+# (una issue non lavorabile la blocca in testa a tempo indeterminato, vedi #300).
+
+# 507 SPOSTATA IN FONDO il 2026-09-09 (decisione operatore): finestra di misura in corso,
+#      run conclusivo ~2026-10-19. Vedi il blocco in fondo al file, sezione 6.
 
 # === 2. IL SEGNALE FINISCE SUL TICKER SBAGLIATO ===
 # Classe di errore peggiore per costruzione: un ordine su un titolo che non c'entra.
@@ -101,39 +101,57 @@
 # (#427/#428/#429). Resta senza scorporo solo:
 #   #399 — nessuna meta' separabile: l'intero scope e' cio' che il modello legge.
 #          Shadow dietro flag + misura sul golden set QX-01 (#30), flip dopo il 28/09.
-431  fetch_signals_for_cycle: un ensemble stantio blocca per sempre un fallback fresco e sopra gate, fino a 96h (NFLX/PLTR 2026-08-13)
 400  ranking S4: segnali vecchi di due sessioni su nomi gia' a libro occupano tutti e 5 gli slot top-N e tagliano l'unico candidato fresco sopra gate (NOW +10,04%, 6 cicli, 0 ordini) — resta solo il cambio di popolazione del ranking, da risolvere insieme a #230 [MANCA freeze-ok]
 399  il prompt di sentiment non include mai il titolo dell'articolo: «Why Is Robinhood Stock Surging» scorato -0,0098 in un giorno a +8,17%, e lo score sbagliato e' sopravvissuto alla sessione dopo [MANCA freeze-ok]
 404  il beat di portfolio-cycle e' inchiodato a ore UTC fisse: i primi 37 minuti di ogni sessione non sono mai negoziati (tutto il +10% intraday di NOW, $134) [MANCA freeze-ok — e la premessa DST e' stata corretta: `clock.is_open` filtra i cicli fuori sessione, sotto EST la griglia calza meglio, non peggio]
 403  l'ensemble Ollama degrada a modello singolo per finestre di un'ora senza alcun alert: 70% di fallback nell'ora 18:00 UTC, ADBE scorato +0,060 in un giorno a +5,73% ($126) — resta solo il re-scoring alla ripresa [MANCA freeze-ok]
-512  S4 compra dopo che il movimento di sessione e' gia' oltre il 100% completo (NVDA 1,0676 il 09-02, PLTR 1,055 il 09-03): il dossier lo misura ogni notte, nessun controllo pre-trade lo legge (F-030, segue #327)
 
 # === 4. L'EVIDENZA NON E' RICOSTRUIBILE A POSTERIORI ===
 # Non perdono soldi oggi, ma rendono non decidibile la lettura del 28/09.
 #
 # --- coppia dalla forense della sessione 2026-09-01 (inserite 2026-09-05) ---
-469  unico buco di sequenza mai osservato in `portfolio_cycles` (32 cicli, 2026-09-01): errori DB ingoiati in silenzio, l'unica traccia e' il buco
-468  il ribilanciamento mensile S1 si spezza su due cicli consecutivi: 45 BUY alle 10:07, i 4 SELL `s1_weight_drop` solo alle 10:22 — stessa sessione forense di #469
+
+# --- dalla misura #453 + forense 2026-09-08 (inserita 2026-09-08) ---
+# La conferma runtime FinBERT richiesta dalla chiusura di #453 e' rimandata
+# "alla prossima seduta, se i container restano up": senza log persistenti la
+# condizione non e' presidiata e le finestre di outage (08-26, 09-08 15-16Z)
+# restano non ricostrubili. Strumentazione, freeze-ok.
+
+# --- dalla stessa famiglia di #544 (i percorsi di ricostruzione dell'evidenza
+# sono rotti uno per uno, vedi F-041/F-027): fix auth.py, solo tooling forense,
+# zero impatto sul money path — il cliente del bearer token e' il protocollo
+# forense, i worker usano Postgres/Redis direttamente. freeze-ok deliberata.
 
 # --- S4 exit trial, risvegliate il 2026-09-05 (blocked_by chiusi, waiting stale) ---
-299  S4 exit trial: costruire il valutatore statistico appaiato — blocked_by #296+#297 (baseline P0 + challenger P1), entrambe chiuse
-300  S4 exit trial: eseguire P2 con contro-segnale qualificato — blocked_by #297 (P1 D+2 time-only), chiusa il 27/08
+# 300 CHIUSA not-planned il 2026-09-12 (decisione operatore) dopo 6 no-op dichiarati in
+#      19 ore che bruciavano ogni slot del loop (causa: lo storno del tentativo, ora #569).
+#      Chiusa non per il freeze ma perche' chiedeva di ESEGUIRE delta2_P2_vs_P1, secondo in
+#      una gerarchia chiusa dietro un gate a N_cluster 5816 con 7 cluster osservati — e 5816
+#      e' un limite inferiore (inflation_justified: false). Residuo estratto in #571
+#      (sorgente point-in-time thesis linkage/novelty/pertinenza), blocked_by #570 + #30.
 
 # === 5. COPERTURA E QUALITA' DEL SEGNALE (miglioramenti, non bug) ===
 409  NO_NEWS e' la causa dominante dei miss di Week 35 (9/22) mentre il sistema osserva gia' catalizzatori che non usa: NVO aveva una corporate action OBSERVED, ERIC una volume surprise +1,25
-452  `OllamaCloudClient` non invia `format` (schema JSON) ne' `temperature=0` all'API pur essendo raccomandati: candidato root-cause della deriva sugli enum osservata (`supplier_readthrough` inesistente, separatori di lista ricopiati) — ortogonale al testo del prompt, riduce anche il rischio di parse failure di un'eventuale Variante B [PR #522 aperta]
-453  misurare l'effetto reale della Variante A (#399/#408) sulla distribuzione degli score S4 — segue la chiusura di #408
-454  Alpaca/Benzinga chiede il riassunto (~160 char) quando lo stesso endpoint, stesse chiavi, offre il testo completo (3.930-15.757 char) con `include_content=true` mai passato — costo zero, due righe, sull'88% del volume utile del sistema (deroga concessa 2026-09-01)
-455  il worker WebSocket Alpaca esiste testato ma nessun processo consuma la coda `news_stream`: p50 lag ~1,2h invece di <1s, 16.254 scarti `duplicate_id` + 2.640 `stale` su 30gg di puro spreco da re-fetch (deroga concessa 2026-09-01)
-456  SEC EDGAR legge un campo `ticker_symbol` inesistente nell'API: zero segnali da sempre per un bug banale, il ticker e' in `display_names` — fonte gratuita deterministica ad alto segnale (8-K/6-K) mai davvero provata (deroga concessa 2026-09-01)
-508  articoli content-mill passano `ISSUER_SPECIFIC` con l'entita' giusta e zero catalizzatore reale: «If You Invested $100 In Goldman Sachs...» scorato 0,002 in un giorno a +3,34%, gonfia ogni metrica di copertura effettiva (F-066)
-511  il gap di copertura news e' per-ticker e permanente, non un buco rotante: 16 simboli su 96 (16,7%) hanno zero articoli su tutte le 8 sessioni osservate — RDDT +9,31% e ARM +3,29% sono costati $193 di opportunita' accessibile (F-001, affinato)
+# --- prerequisito di dati per #508 e per la pertinenza off-topic (inserito 2026-09-12,
+#     estratto dalla chiusura di #300): solo persistenza, nessuna regola di scoring ---
+
 # 458 CHIUSA il 2026-09-15 (verdetto nel report della PoC): Twelve Data
 #     press_releases fallisce il gate di freschezza per costruzione —
 #     eta' mediana 132 giorni al fetch, zero righe sotto le 2h di
 #     MAX_NEWS_AGE_HOURS. La domanda di copertura resta aperta in #587.
-459  PoC shadow Tiingo News API: vincolo di licenza sul piano gratuito vieta di persistere il payload, solo aggregati per (simbolo, giorno) non ricostruibili — stessa misura di #458, schema dati piu' stretto
 287  alpha-miss: rendere coerente il contratto prompt/output — dossier unica fonte numerica, fallback DATA_INCOMPLETE esplicito, ledger deterministico — blocked_by #281 (funnel v2), chiusa il 03/09
+
+# --- SPOSTATA IN FONDO il 2026-09-09 (decisione operatore) ---
+# Il perimetro implementabile di #507 e' esaurito (PR #533/#534/#538 mergiate);
+# la chiusura richiede la finestra di misura pre-registrata (20 sedute,
+# 2026-09-08 -> ~2026-10-05) e il run conclusivo ~2026-10-19 (14gg di lag FMP).
+# Finché è in cima, il loop la ripesca a ogni giro e dichiara no-op onesti,
+# bloccando tutto ciò che sta dietro. Torna in cima (prima di #509) quando:
+#   - la finestra e' completa E il run conclusivo ha prodotto l'esito, oppure
+#   - emerge un difetto implementabile nuovo sulla catena calendar/dossier.
+# Istruzione per l'agente in loop: NON selezionare #507 finché questa nota è
+# qui; non e' un no-op, e' una sospensione deliberata dell'operatore.
+507  `giorno_di_earnings` e' UNKNOWN sul 100% degli intent S4 per 4 sessioni consecutive: il calendario FMP non arriva mai al dossier dal cron (F-063) [SOSPESA 09-09, vedi nota sopra — torna in cima quando la finestra e' completa]
 
 # === 6. IL RESTO ===
 470  il promotion gate non gira: `_fetch_lifecycle_row` seleziona `promotion_blocked`, colonna che su `strategy_lifecycle` non esiste — promote e approve rispondono 500

@@ -1,0 +1,18 @@
+[Unit]
+Description=Triage dei log di container sul modello locale
+# Dopo la rotazione dei log dei container (01:59): a quell'ora il file del
+# giorno precedente e' completo e non cresce piu' sotto i piedi del distillatore.
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/stefano/Documents/Projects/Alembic
+# Il giorno e' quello appena chiuso, non quello in corso. `-m` non e' un
+# dettaglio: lanciato come file lo script non risolve `scripts.s4_cluster_literature`.
+# Le credenziali Telegram vivono in .env e `src/config.py` legge solo os.environ:
+# si esportano qui, come gia' fanno deadline_reminder.sh e daily_analysis.sh.
+ExecStart=/bin/bash -lc 'cd /home/stefano/Documents/Projects/Alembic && set -a && source <(grep -E "^TELEGRAM_(BOT_TOKEN|CHAT_ID)=" .env | sed "s/#.*//") && set +a && .venv/bin/python -m scripts.triage_log_locale --giorno "$(date -d yesterday +%%F)" --gestisci-server --notifica'
+# Il modello occupa ~28 GB: se la macchina serve ad altro, il job cede il passo.
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=4h

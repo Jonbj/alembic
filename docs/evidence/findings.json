@@ -188,9 +188,15 @@
           "costo_usd": null,
           "nota": "[DAY-017] 38 simboli di watchlist su 96 senza una sola news; copertura effective-timely 46/96 = 47,9%. 4 dei 38 simboli senza news erano mover oltre il 3%: invisibili per costruzione, non per soglia. Due sole fonti reali, con GDELT che scarta il 99% (2894/2922 discarded_no_ticker).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-017"
+        },
+        {
+          "data": "2026-09-15",
+          "costo_usd": 93.42,
+          "nota": "31/96 simboli watchlist (32,3%) a zero righe news_log oggi, minimo dell'intera finestra osservata dal 31/07 (precedente minimo 37 il 09-08). Un solo miss NO_NEWS azionabile tra i 7 mover: QCOM +4,25%, unica riga news TAG_UNCONFIRMED/fanout da un articolo macro non specifico ('10-Year Yield Tops 5%, Oil Storms Past $105: Stock Market Today'), funnel_v2.pipeline=NO_RELEVANT_NEWS. Lato uscita PEGGIORATO nonostante la copertura grezza migliore: 3 posizioni cieche (PFE -3,97% da 3 sedute, SBUX -8,36% da 4 sedute, UNH -12,09% da 2 sedute), nozionale cieco 2.033,70$, contro le 2 cieche del 09-11 (ASML+SBUX, 1.291,08$). Copertura raw sulla watchlist e copertura utile sulle posizioni gia' aperte si muovono in direzioni opposte oggi.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-15.md §3, §5, §6, §8"
         }
       ],
-      "costo_cumulato_usd": 4881.25,
+      "costo_cumulato_usd": 4974.67,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 4
@@ -553,7 +559,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-021"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 18
@@ -614,7 +620,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-003"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 8
@@ -663,7 +669,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-005"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 6
@@ -814,7 +820,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-011"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 23
@@ -1884,7 +1890,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-024"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 20,
       "stato": "aperto",
       "issue": null
@@ -1939,7 +1945,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-016"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 7,
       "stato": "aperto",
       "issue": "#444"
@@ -2025,7 +2031,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-004"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 7,
       "stato": "aperto",
       "issue": null
@@ -3735,7 +3741,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-001"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
@@ -4050,7 +4056,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-023"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": null
@@ -4087,7 +4093,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-026"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
@@ -4229,7 +4235,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-014"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
@@ -4436,7 +4442,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-015"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
@@ -4461,7 +4467,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-025"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": "#551"
@@ -4505,7 +4511,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-022"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
@@ -4543,7 +4549,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-007"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -4562,7 +4568,7 @@
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-027"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
