@@ -1252,17 +1252,25 @@ Restano le tre POST del promotion gate (P2-02), che non contengono snapshot: scr
 | `/api/strategies/{strategy_id}/approve` | POST | `approved_by` | Approva una promozione pendente. 422 se non ce n'e' una |
 | `/api/strategies/{strategy_id}/demote` | POST | `new_mode`, `reason`, `demoted_by` | Retrocessione (sempre permessa, e' l'azione da circuit breaker) |
 
-> **Difetto noto, non introdotto dalla rimozione:** `promotion.py::_fetch_lifecycle_row`
-> seleziona `promotion_blocked` da `strategy_lifecycle`, ma **quella colonna non esiste sul DB
-> live** (verificato il 2026-09-02). `promote` e `approve` falliscono quindi con HTTP 500. E'
-> fail-closed — nessuna promozione puo' avvenire per errore — ma il gate non e' mai stato
-> esercitato contro il DB reale. `demote` non tocca quel campo e funziona.
+> **Difetto corretto (#470, 2026-09-15):** `promotion.py::_fetch_lifecycle_row` seleziona
+> `promotion_blocked` da `strategy_lifecycle`, ma quella colonna non esisteva: la migrazione
+> `076_strategy_lifecycle_promotion_blocked.sql` la crea `BOOLEAN NOT NULL DEFAULT TRUE`
+> (backfill: ogni riga esistente nasce bloccata — fail-closed; sbloccare resta una decisione
+> dell'operatore, da prendere in tabella **e** in `config/strategies.yaml`). Due conseguenze
+> del fix: anche `demote` era rotta (passa dalla stessa `SELECT`, contrariamente a quanto
+> documentato qui in precedenza), e le righe tornate dal cursore di default sono tuple, non
+> dict — `_fetch_lifecycle_row` ora usa `RealDictCursor`. La semantica degli errori e'
+> volontariamente netta: **422 = il gate rifiuta** (motivo nel `detail`), **500 =
+> infrastruttura rotta** (cause completa con traceback nel log del server, `detail` generico
+> che non ribatte l'eccezione al client).
 
 ### Dov'e' finito lo stato di autorizzazione
 
 In **`GET /portfolio/status`**, che lo legge da fonti vive: `mode` e `approved` da
 `strategy_lifecycle`, `allocation_pct`, `enabled` e `promotion_blocked` da
-`config/strategies.yaml`. `live_authorized` e' derivato fail-closed
+`config/strategies.yaml` (il seme; dal 2026-09-15 la verita' del flag ai fini del
+gate e' la colonna omonima in tabella, migrazione 076 — vedi il difetto corretto
+qui sopra). `live_authorized` e' derivato fail-closed
 (`mode == "live" AND GLOBAL_LIVE_PROMOTION_ENABLED`): un `mode` sconosciuto — DB
 irraggiungibile, riga mancante — non e' `live`, quindi la risposta e' `false`.
 
@@ -1406,6 +1414,7 @@ returns HTTP 200 by design — the status code only says the endpoint ran; read 
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 7.1.1 | 2026-09-15 | **Promotion gate riparato (#470):** migrazione 076 aggiunge `strategy_lifecycle.promotion_blocked` (NOT NULL DEFAULT TRUE, backfill bloccato). Le tre POST del gate ora girano contro il DB reale (era 500 su `promote`/`approve` — e anche su `demote`, che passa dalla stessa SELECT). Il 500 da errore non-gate non ribatta piu' la causa al client (`detail` generico, traceback nel log); 422 resta il rifiuto del gate. |
 | 7.1.0 | 2026-09-02 | **Rotte di lettura `/api/strategies` rimosse** (servivano snapshot hardcoded contraddetti dai dati reali) insieme alla pagina Strategies del frontend. Restano le tre POST del promotion gate. Lo stato di autorizzazione passa a `GET /portfolio/status`, che guadagna `promotion_blocked` e `live_authorized`. |
 | 7.0.0 | 2026-09-02 | **Allineamento al runtime.** Rimosse le rotte PEAD (S7 ritirata il 2026-07-15). Corretto il prefisso backtest (`/api/backtest/{run_id}/...`) e sostituito l'inesistente `/report` con `summary`/`model_ic`/`symbol_ic`/`pnl_curve`/`bucket_analysis`. Riscritta la sezione Portfolio: le rotte reali sono `GET /portfolio/status` e `GET /portfolio/cycle-history`, **senza** prefisso `/api`; `/api/portfolio/{cycles,risk,decay}` non sono mai esistite e `risk_reports`/`decay_reports` non hanno superficie HTTP. `/api/performance/positions` → `/api/positions`. `/api/signals/history` marcata come inesistente. Aggiunte: `GET /api/quality/ensemble_health` (#427), sezioni **Auth**, **Strategies**, **Validation**. Tutti gli esempi di modello aggiornati alla coppia live `glm52,gptoss`. Verificato contro `openapi.json` di `alembic-api-1`. Corretta anche una fence di codice spuria dopo la tabella dei campi trade di `/api/performance/daily`: mandava in blocco di codice l'esempio `curl` e tutto il testo che seguiva. |
 | 6.1.1 | 2026-06-26 | GET /api/performance/daily: trade-level detail now includes Costi column (gross_pnl − net_pnl per trade) in frontend drill-down |

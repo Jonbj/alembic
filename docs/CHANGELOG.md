@@ -4,6 +4,49 @@ Registro delle modifiche rilevanti al sistema (decisioni architetturali, nuove s
 
 ---
 
+## 2026-09-15
+
+### Promotion gate riparato: la colonna che non c'era (#470)
+
+`_fetch_lifecycle_row` seleziona `promotion_blocked` da `strategy_lifecycle` da quando
+il gate esiste, ma la migrazione 025 non ha mai creato quella colonna. Sul DB live ogni
+chiamata alle tre POST del gate rispondeva 500 (`UndefinedColumn`) — e questo includeva
+anche `demote`, contrariamente a quanto affermato nella issue e documentato in API.md:
+`demote_strategy` passa dalla stessa SELECT. Fail-closed per rottura, non per stato: in
+sette settimane di paper trading nessuna promozione e' avvenuta per errore, ma il gate
+non aveva mai girato contro il DB reale.
+
+La verita' del flag vive nella tabella, per coerenza con la 025 (`strategy_lifecycle`
+fonte canonica, YAML seme di bootstrap — lo stesso principio di `mode`):
+
+- **Migrazione 076** — `promotion_blocked BOOLEAN NOT NULL DEFAULT TRUE` su
+  `strategy_lifecycle`. Il backfill porta ogni riga esistente a bloccata: copre i due
+  blocchi dichiarati nello YAML (S1, S4) e lascia bloccate anche S2 e S7, che il flag
+  non lo dichiarano. Nessun gate si apre con questo fix; sbloccare resta una decisione
+  dell'operatore (in tabella **e** in YAML, come prescrive il messaggio d'errore), fuori
+  dal freeze #171. Che nessun gate si apra non e' un'assicurazione ma un fatto
+  misurato: `promoted_at` e' NULL su tutte le righe del live e l'audit non contiene
+  azioni `requested`/`approved` — solo il blocco manuale di S7 del 2026-07-03, che il
+  backfill TRUE-per-tutte rispetta (la variante «backfill dallo YAML» lo contraddirebbe).
+- **Difetto secondo, scoperto dal test contro schema reale** — le connessioni di
+  `PostgreSQLStore` restituiscono cursore di default (tuple), ma tutto il gate indicizza
+  le righe per chiave: aggiunta la colonna, le tre POST sarebbero comunque cadute con
+  `TypeError`. `_fetch_lifecycle_row` ora usa `RealDictCursor`, l'idioma gia' in uso in
+  `pg_store`.
+- **Errore onesto al client** — 422 resta «il gate ti rifiuta» (motivo nel `detail`);
+  il 500 da errore non-gate ora logga causa e traceback (`log.exception`) e risponde con
+  un `detail` generico invece di ribattere `str(exc)`.
+
+**Test che avrebbe visto il difetto:** `tests/migrations/test_strategy_lifecycle_promotion_blocked_migration.py`
+applica la catena completa delle migrazioni a uno schema usa-e-getta e ci gira contro
+SELECT, request/approve con audit e demote — niente piu' soli mock sul percorso del gate.
+
+Nessun cambiamento al percorso di esecuzione: `_filter_approved_strategies` usa una sua
+SELECT su `approved` e non passa da `_fetch_lifecycle_row`.
+
+---
+
+
 ## 2026-09-02 (seguito)
 
 ### Rimossi i riferimenti residui alla pagina Strategies, e corrette le soglie dei gate

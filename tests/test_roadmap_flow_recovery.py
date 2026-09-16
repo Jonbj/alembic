@@ -135,6 +135,15 @@ def _ambiente(tmp_path: Path, **extra: str) -> dict[str, str]:
     _eseguibile(bin_dir / "git", GIT_FINTO)
     _eseguibile(bin_dir / "codex", MOTORE_FINTO)
     _eseguibile(bin_dir / "ollama", MOTORE_FINTO)
+    # glm53 non passa piu' da `ollama`: dal 2026-09-15 chiama `claude` puntato su
+    # z.ai, e senza chiave sarebbe fuori rotazione. Senza questi due la suite
+    # girerebbe su due motori invece di tre, e i test sul terzo motore
+    # (tie-breaker, recensore diverso dall'implementatore) passerebbero per il
+    # motivo sbagliato.
+    _eseguibile(bin_dir / "claude", MOTORE_FINTO)
+    chiavi = tmp_path / ".config" / "alembic"
+    chiavi.mkdir(parents=True, exist_ok=True)
+    (chiavi / "zai.env").write_text("ZAI_API_KEY=chiave-finta\n")
     _eseguibile(bin_dir / "curl", 'printf "%s\\n" "$*" >> "$TG_CAPTURE"\n')
 
     log_dir = tmp_path / "logs"
