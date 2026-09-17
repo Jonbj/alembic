@@ -103,3 +103,13 @@ docs/evidence/logs_*/
 /stefano-nb1.pub
 /stefano-nb2
 /stefano-nb2.pub
+
+# Dati grezzi delle sessioni di ricerca: snapshot del DB, arricchimenti e
+# cache dei sorgenti scaricati. Sono input rigenerabili, non evidenza: cio'
+# che vale (manifest, ledger dei probe, analisi, verdetti) e' tracciato
+# accanto a loro. Fuori da git perche' pesano ~135 MB in totale.
+docs/research/s4-entry-audit-*/snapshots/
+docs/research/s4-entry-audit-*/enrichment/
+docs/research/s4-web-validation-*/source-cache/
+docs/research/*-uscite-source-cache/
+docs/research/s4-web-validation-*/node-output/.orchestrator.lock

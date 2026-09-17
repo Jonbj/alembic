@@ -1,0 +1,27 @@
+source_id	class	format	url	title
+ACA001	academic	pdf	https://www.federalreserve.gov/econresdata/feds/2016/files/2016048pap.pdf	News versus Sentiment: Predicting Stock Returns from News Stories
+ACA002	academic	pdf	https://www.nber.org/system/files/working_papers/w18725/w18725.pdf	Which News Moves Stock Prices? A Textual Analysis
+ACA003	academic	pdf	https://conference.nber.org/confer/2007/bff07/tetlock.pdf	All the News That's Fit to Reprint
+ACA004	academic	pdf	https://users.nber.org/~confer/2001/bfs01/chan.pdf	Stock Price Reaction to News and No-News
+ACA005	academic	html	https://www.sciencedirect.com/science/article/pii/S0304405X21001306	Pervasive Underreaction: Evidence from High-Frequency Data
+ACA006	academic	html	https://onlinelibrary.wiley.com/doi/10.1111/j.1540-6261.2010.01625.x	When Is a Liability Not a Liability?
+ACA007	academic	pdf	https://arxiv.org/pdf/2304.07619	Can ChatGPT Forecast Stock Price Movements?
+ACA008	academic	pdf	https://arxiv.org/pdf/2309.17322	Assessing Look-Ahead Bias in GPT Sentiment Backtests
+ACA009	academic	pdf	https://papers.ssrn.com/sol3/Delivery.cfm/SSRN_ID4766886_code6457834.pdf?abstractid=4766886	Sentiment Trading with Large Language Models
+MET001	method	pdf	https://osuva.uwasa.fi/bitstream/handle/10024/9814/mat9.pdf?sequence=2	Event Study Testing with Cross-sectional Correlation
+MET002	method	pdf	https://bashtage.github.io/kevinsheppard.com/files/teaching/mfe/advanced-econometrics/White.pdf	A Reality Check for Data Snooping
+MET003	method	html	https://doi.org/10.1111/j.1468-0262.2005.00615.x	Stepwise Multiple Testing as Formalized Data Snooping
+MET004	method	pdf	https://www.nber.org/system/files/working_papers/w20592/w20592.pdf	And the Cross-Section of Expected Returns
+MET005	method	html	https://doi.org/10.1111/j.1540-6261.1997.tb03818.x	The Delisting Bias in CRSP Data
+MET006	method	html	https://doi.org/10.1111/0022-1082.00101	Improved Methods for Tests of Long-Run Abnormal Stock Returns
+IND001	industry	html	https://www.sec.gov/Archives/edgar/data/1053092/000095010322007546/dp172221_424b2-ravenpack.htm	Credit Suisse RavenPack AIS Index methodology and risk factors
+IND002	industry	html	https://www.ravenpack.com/research/global-variations-news-impact-equities	Exploring Global Variations in News Impact on Equities
+IND003	industry	html	https://www.ravenpack.com/research/news-patterns-implementation/	Intraday News Patterns: Implementation of Sentiment Strategies
+IND004	industry	html	https://www.ravenpack.com/research/event-trading-using-market-response/	Event Trading Using Market Response
+IND005	industry	html	https://developers.lseg.com/en/product/news/news_analytics	LSEG News Analytics official overview
+IND006	industry	html	https://www.marketpsych.com/ma4/intro	LSEG MarketPsych Analytics methodology overview
+IND007	industry	pdf	https://www.spglobal.com/marketintelligence/en/documents/nlp-iii-final-013020-10a.pdf	S&P Global Quantamental NLP III
+IND008	industry	pdf	https://www.lseg.com/content/dam/data-analytics/en_us/documents/fact-sheets/lseg-machine-readable-news.pdf	LSEG Machine Readable News fact sheet
+NEW001	academic	html	https://www.sciencedirect.com/science/article/abs/pii/S0165176525006408	The Persistence of News Sentiment
+NEW002	industry	html	https://www.ravenpack.com/research/equity-sector-rotation-with-sentiment-based-earnings-growth	Equity Sector Rotation with Sentiment-Based Earnings Growth
+

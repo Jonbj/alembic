@@ -1,4 +1,13 @@
 source_id	class	format	url	title
 ACA006	academic	pdf	https://www.uts.edu.au/globalassets/sites/default/files/adg_cons2015_loughran-mcdonald-je-2011.pdf	When Is a Liability Not a Liability?
+ACA009	academic	pdf	https://researchonline.lse.ac.uk/id/eprint/122592/1/1_s2.0_S1544612324002575_main.pdf	Sentiment Trading with Large Language Models
+ACA010	academic	pdf	https://discovery.ucl.ac.uk/id/eprint/10190583/1/Germano_Sentiment%20trading%20with%20large%20language%20models_AAM.pdf	Sentiment Trading with Large Language Models — accepted author manuscript
+ACA011	academic	pdf	https://ipl.econ.duke.edu/seminars/system/files/seminars/2516.pdf	News Momentum — draft 6 August 2019
+ACA012	academic	pdf	https://www.aeaweb.org/conference/2017/preliminary/paper/G46EGhsb	The Momentum of News — draft December 2016
+ACA013	academic	pdf	https://arxiv.org/pdf/1307.5336v2	Good Debt or Bad Debt — arXiv v2
+ACA014	academic	pdf	https://www.mit.edu/~jcstein/badnews.pdf	Bad News Travels Slowly — author draft, January 1999
+MET003	method	pdf	https://www.econ.uzh.ch/dam/jcr%3Affffffff-935a-b0d6-ffff-ffffa286d4d1/etca.pdf	Stepwise Multiple Testing as Formalized Data Snooping
 MET005	method	pdf	https://www.tylergshumway.org/Shumway-DelistingBiasCRSP-1997.pdf	The Delisting Bias in CRSP Data
+MET006	method	pdf	https://www.bradmbarber.com/s/JF_Improved.pdf	Improved Methods for Tests of Long-Run Abnormal Stock Returns
+MET007	method	pdf	https://people.duke.edu/~charvey/Research/Published_Papers/SSRN-id3275654.pdf	A Backtesting Protocol in the Era of Machine Learning — author manuscript, version 29 October 2018
 IND001	industry	html	https://www.sec.gov/Archives/edgar/data/1053092/000095010322007546/0000950103-22-007546.txt	Credit Suisse RavenPack AIS Index methodology and risk factors

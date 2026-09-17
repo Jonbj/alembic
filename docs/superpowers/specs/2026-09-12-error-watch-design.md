@@ -113,6 +113,15 @@ Tre scelte che contano:
 3. **Messaggio normalizzato prima dell'hash**: numeri, UUID, timestamp, path assoluti, indirizzi
    esadecimali e simboli ticker → segnaposto. `KeyError: 'NVDA'` e `KeyError: 'TXN'` sono lo stesso
    difetto e devono collassare su una riga sola.
+4. **Gli exit code sono l'eccezione alla regola 3**: `exit status 1` (fallimento generico),
+   `137` (OOM-kill) e `124` (timeout) sono difetti categoricamente diversi, e la regola generica
+   sui numeri li fonderebbe. Un OOM resterebbe invisibile dietro l'issue di un fallimento banale
+   già triagato, quindi il codice sopravvive alla normalizzazione.
+5. **In un'eccezione concatenata vince l'ultimo anello**: quando il log mostra
+   `During handling of the above exception…` o `…was the direct cause of…`, il fingerprint usa
+   tipo, frame e messaggio dell'eccezione **finale**, quella che il chiamante ha effettivamente
+   visto. La regola va fissata qui e non lasciata al parser: se oscillasse fra anello interno ed
+   esterno, lo stesso difetto avrebbe due chiavi a seconda di come è stato loggato.
 
 ## Gate
 

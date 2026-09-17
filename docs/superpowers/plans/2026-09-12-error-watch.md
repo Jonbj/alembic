@@ -89,6 +89,34 @@ def test_config_normalizza_i_moduli_critici_senza_slash_iniziale(tmp_path: Path)
     )
     cfg = carica_config(percorso)
     assert cfg.moduli_critici == ("src/workers/execution.py", "src/portfolio/")
+
+
+def test_config_rifiuta_booleano_quotato(tmp_path: Path):
+    percorso = tmp_path / "bad.yaml"
+    percorso.write_text('llm:\n  abilitato: "false"\n')
+    with pytest.raises(ValueError, match="abilitato"):
+        carica_config(percorso)
+
+
+def test_config_booleano_false(tmp_path: Path):
+    percorso = tmp_path / "ok.yaml"
+    percorso.write_text("llm:\n  abilitato: false\n")
+    cfg = carica_config(percorso)
+    assert cfg.llm_abilitato is False
+
+
+def test_config_carichi_default_su_yaml_vuoto(tmp_path: Path):
+    percorso = tmp_path / "empty.yaml"
+    percorso.write_text("")
+    cfg = carica_config(percorso)
+    assert cfg.stato_dir == Path("logs/error_watch")
+    assert cfg.servizi_dir == Path("logs/containers")
+    assert cfg.cron_log_dir == Path("logs")
+    assert cfg.servizi_critici_senza_frame == ()
+    assert cfg.heartbeat_eta_massima_minuti == 90
+    assert cfg.llm_abilitato is True
+    assert cfg.llm_timeout_secondi == 90
+    assert cfg.repo is None
 ```
 
 - [ ] **Step 2: Esegui il test e verifica che fallisca**
@@ -107,6 +135,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -174,7 +203,7 @@ class BozzaIssue:
     titolo: str
     corpo: str
     labels: tuple[str, ...]
-    redatta_da: str  # "llm" oppure "template"
+    redatta_da: Literal["llm", "template"]
 ```
 
 - [ ] **Step 4: Scrivi il caricatore di configurazione**
@@ -218,6 +247,22 @@ def _positivo(valore: int, nome: str) -> int:
     return valore
 
 
+def _booleano(valore: object, nome: str) -> bool:
+    """Rifiuta `abilitato: "false"` quotato.
+
+    PyYAML restituisce la stringa `"false"`, e `bool("false")` in Python e'
+    `True`: il redattore LLM resterebbe accesso mentre l'operatore lo crede
+    spento. Un interruttore che non interrompe e' la classe di difetto che
+    questo progetto paga piu' cara.
+    """
+    if not isinstance(valore, bool):
+        raise ValueError(
+            f"{nome} deve essere un booleano YAML (true/false senza apici), "
+            f"ricevuto {valore!r}"
+        )
+    return valore
+
+
 def _normalizza_modulo(voce: str) -> str:
     return voce.strip().lstrip("/")
 
@@ -252,7 +297,7 @@ def carica_config(percorso: Path = PERCORSO_DEFAULT) -> Config:
         heartbeat_eta_massima_minuti=_positivo(
             heartbeat.get("eta_massima_minuti", 90), "eta_massima_minuti"
         ),
-        llm_abilitato=bool(llm.get("abilitato", True)),
+        llm_abilitato=_booleano(llm.get("abilitato", True), "abilitato"),
         llm_timeout_secondi=_positivo(llm.get("timeout_secondi", 90), "timeout_secondi"),
         labels=tuple(issue.get("labels", ["observability", "freeze-ok", "needs-triage"])),
         repo=issue.get("repo"),
@@ -324,7 +369,7 @@ touch src/error_watch/__init__.py tests/error_watch/__init__.py
 - [ ] **Step 7: Esegui i test e verifica che passino**
 
 Run: `.venv/bin/python -m pytest tests/error_watch/test_config.py -v`
-Expected: PASS, 3 test
+Expected: PASS, 6 test
 
 - [ ] **Step 8: Commit**
 
@@ -387,6 +432,21 @@ def test_messaggi_realmente_diversi_restano_diversi():
 
 def test_spazi_ridondanti_normalizzati():
     assert normalizza_messaggio("  a   b  ") == "a b"
+
+
+def test_exit_code_non_collassa_con_gli_altri_numeri():
+    """137 (OOM-kill) e 1 (fallimento generico) sono difetti diversi."""
+    oom = normalizza_messaggio("Command 'x' returned non-zero exit status 137.")
+    generico = normalizza_messaggio("Command 'x' returned non-zero exit status 1.")
+    assert oom != generico
+    assert "CODICE_137" in oom
+
+
+def test_path_diversi_collassano_ed_e_accettato():
+    """Collasso dichiarato: l'attribuzione per file:funzione limita il danno."""
+    a = normalizza_messaggio("config file /etc/app/settings.yaml not found")
+    b = normalizza_messaggio("config file /etc/app/other.yaml not found")
+    assert a == b == "config file <path> not found"
 ```
 
 - [ ] **Step 2: Esegui il test e verifica che fallisca**
@@ -441,10 +501,28 @@ _SOSTITUZIONI: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?<![\w/])/(?:[\w.-]+/)+[\w.-]+"), "<path>"),
     # Un token maiuscolo fra apici e' quasi sempre un ticker o una chiave di
     # dizionario: entrambi sono il valore, non il difetto. Effetto collaterale
-    # accettato: KeyError: 'CLOSE' e KeyError: 'OPEN' collassano insieme. Per
-    # questo il corpo della issue riporta sempre i valori grezzi visti.
+    # accettato, e non limitato ai ticker: collassano insieme anche i valori
+    # enum, quindi `'BUY' is not a valid Side` e la variante `'SELL'` danno la
+    # stessa chiave. Un difetto che riguarda un solo ramo dell'enum non si
+    # distingue da uno generico. Per questo il corpo della issue riporta
+    # sempre i valori grezzi osservati.
     (re.compile(r"'([A-Z][A-Z0-9._]{0,9})'"), "'<simbolo>'"),
-    (re.compile(r"\b\d+(?:\.\d+)?\b"), "<n>"),
+    # Un exit code non e' un numero qualunque: 1 (fallimento generico), 137
+    # (OOM-kill) e 124 (timeout) sono difetti categoricamente diversi, e
+    # `CalledProcessError` li scrive nel messaggio ("returned non-zero exit
+    # status 137."). Se li collassasse la regola generica qui sotto, un OOM
+    # resterebbe invisibile dietro l'issue di un fallimento banale gia'
+    # triagato. Il segnaposto usa un underscore di proposito: `CODICE_137` non
+    # viene poi toccato da `\b\d+`, perche' fra "_" e "1" non c'e' confine.
+    (
+        re.compile(r"(?i)\b(exit(?:\s+(?:status|code))?)\s+(\d{1,3})\b"),
+        r"\1 CODICE_\2",
+    ),
+    # `[a-z]*` non e' ornamentale: senza, "90s" non viene sostituito affatto,
+    # perche' `\b` fra "0" e "s" non esiste (sono entrambi caratteri di parola)
+    # e "timeout dopo 90s" / "timeout dopo 12s" resterebbero due difetti
+    # distinti. Effetto voluto: "90s" e "90ms" collassano insieme.
+    (re.compile(r"\b\d+(?:\.\d+)?[a-z]*\b"), "<n>"),
 )
 
 
@@ -459,7 +537,7 @@ def normalizza_messaggio(messaggio: str) -> str:
 - [ ] **Step 4: Esegui i test e verifica che passino**
 
 Run: `.venv/bin/python -m pytest tests/error_watch/test_fingerprint.py -v`
-Expected: PASS, 8 test
+Expected: PASS, 10 test
 
 - [ ] **Step 5: Commit**
 
@@ -480,7 +558,11 @@ git commit -m "feat(error-watch): normalizzazione del messaggio d'eccezione"
 
 ```python
 # tests/error_watch/test_fingerprint.py — in coda
-from src.error_watch.fingerprint import frame_di_attribuzione, modulo_relativo
+from src.error_watch.fingerprint import (
+    e_frame_del_repo,
+    frame_di_attribuzione,
+    modulo_relativo,
+)
 from src.error_watch.modelli import Frame
 
 FRAME_LIB = Frame("/app/.venv/lib/python3.11/site-packages/asyncpg/pool.py", "acquire", 12)
@@ -523,6 +605,26 @@ def test_modulo_relativo_di_libreria_non_contiene_la_versione_di_python():
         "/app/.venv/lib/python3.11/site-packages/alpaca/data/live/websocket.py"
     )
     assert relativo == "alpaca/data/live/websocket.py"
+
+
+def test_e_frame_del_repo_copre_ogni_ramo():
+    """Fissa il confine repo/dipendenza, rami comprese le esclusioni.
+
+    L'ultimo caso e' un'assunzione, non una verifica: una dipendenza
+    installata in editable mode con layout `src/` verrebbe classificata come
+    nostra. Oggi non ce ne sono; se qualcuno ne aggiunge una, questo test
+    diventa il posto dove accorgersene.
+    """
+    assert e_frame_del_repo("/app/src/workers/execution.py")
+    assert e_frame_del_repo("/app/scripts/alpha_miner_dossier.py")
+    assert e_frame_del_repo("scripts/error_watch.py")
+    assert not e_frame_del_repo(
+        "/app/.venv/lib/python3.11/site-packages/asyncpg/pool.py"
+    )
+    assert not e_frame_del_repo("/usr/lib/python3.11/json/decoder.py")
+    assert not e_frame_del_repo("/usr/lib/python3/dist-packages/yaml/__init__.py")
+    assert not e_frame_del_repo("<frozen importlib._bootstrap>")
+    assert not e_frame_del_repo("<string>")
 ```
 
 - [ ] **Step 2: Esegui e verifica il fallimento**
@@ -591,7 +693,7 @@ def frame_di_attribuzione(frames: tuple[Frame, ...]) -> Frame | None:
 - [ ] **Step 4: Esegui e verifica che passino**
 
 Run: `.venv/bin/python -m pytest tests/error_watch/test_fingerprint.py -v`
-Expected: PASS, 14 test
+Expected: PASS, 17 test
 
 - [ ] **Step 5: Commit**
 
@@ -612,7 +714,7 @@ git commit -m "feat(error-watch): frame di attribuzione e percorso modulo stabil
 
 ```python
 # tests/error_watch/test_fingerprint.py — in coda
-from src.error_watch.fingerprint import calcola
+from src.error_watch.fingerprint import SENZA_FRAME, attribuzione, calcola
 
 
 def _fp(**override):
@@ -673,6 +775,19 @@ def test_fingerprint_e_corto_e_esadecimale():
     valore = _fp()
     assert len(valore) == 12
     assert all(carattere in "0123456789abcdef" for carattere in valore)
+
+
+def test_attribuzione_senza_frame_e_la_sentinella():
+    """`gate.py` confronta questa stringa: fissarla e' parte del contratto."""
+    assert attribuzione(()) == SENZA_FRAME == "<nessun-frame>"
+
+
+def test_calcola_senza_frame_non_solleva_ed_e_stabile():
+    """Crash di avvio e OOM non hanno frame nostri, e vanno deduplicati."""
+    primo = _fp(frames=())
+    secondo = _fp(frames=(), messaggio="'TXN'")
+    assert len(primo) == 12
+    assert primo == secondo
 ```
 
 - [ ] **Step 2: Esegui e verifica il fallimento**
@@ -718,7 +833,7 @@ def calcola(
 - [ ] **Step 4: Esegui e verifica che passino**
 
 Run: `.venv/bin/python -m pytest tests/error_watch/test_fingerprint.py -v`
-Expected: PASS, 22 test
+Expected: PASS, 27 test
 
 - [ ] **Step 5: Commit**
 
@@ -736,6 +851,11 @@ git commit -m "feat(error-watch): calcolo del fingerprint stabile al refactor"
 - Test: `tests/error_watch/test_collector.py`
 
 - [ ] **Step 1: Crea la fixture da log reale**
+
+> `.gitignore` esclude `*.log` (riga 45), quindi la fixture va aggiunta con
+> `git add -f tests/error_watch/fixtures/news_stream_reale.log`. Senza il `-f`
+> resta untracked: i test passano in locale e si rompono in CI, dove il file
+> non esiste.
 
 Questo blocco è copiato verbatim da `logs/containers/worker-news-stream-2026-09-12.log` (righe 5–17 al 2026-09-12): è un traceback **senza alcun frame nostro**, che è esattamente il caso che il ripiego dell'attribuzione deve reggere.
 
@@ -905,6 +1025,28 @@ _RE_FRAME = re.compile(
 )
 _RE_ECCEZIONE = re.compile(r"^(?P<tipo>[A-Za-z_][\w.]*)(?:: (?P<messaggio>.*))?$")
 
+def _la_catena_prosegue(righe: list[str], da_indice: int) -> bool:
+    """True se, dopo una riga che sembra chiudere l'eccezione, la catena continua.
+
+    Salta le righe vuote; la prima riga non vuota decide: se e' un marcatore
+    di concatenazione o un nuovo `Traceback (most recent call last):`,
+    l'eccezione appena letta e' un anello intermedio, non la chiusura.
+    Se il chunk finisce prima di trovare una riga non vuota, la catena non
+    prosegue (nulla lo dimostra) e l'eccezione va considerata chiusa: un
+    chunk che finisce esattamente sulla riga dell'eccezione non e' un
+    troncamento, e' un evento completo.
+
+    Serve un lookahead e non basta reagire alla seconda riga `Traceback`,
+    perche' quando quella arriva l'evento intermedio e' gia' stato emesso.
+    """
+    for riga in righe[da_indice:]:
+        nuda = _spoglia_prefisso(riga).strip()
+        if not nuda:
+            continue
+        return nuda in _CONCATENAZIONI or nuda == INIZIO_TRACEBACK
+    return False
+
+
 
 def _ts_da_riga(riga: str) -> datetime | None:
     match = _RE_PREFISSO_CELERY.match(riga)
@@ -954,6 +1096,8 @@ def estrai_eventi(
             else:
                 # Eccezione concatenata: la catena e' un solo difetto e vince
                 # l'ultimo anello, quello che il chiamante ha davvero visto.
+                # Qui si azzerano i frame dell'anello precedente; a NON emettere
+                # l'anello intermedio ci pensa il lookahead piu' sotto.
                 frames = []
                 testo.append(riga.rstrip())
             continue
@@ -982,6 +1126,10 @@ def estrai_eventi(
 
         eccezione = _RE_ECCEZIONE.match(nuda.strip())
         if eccezione is not None and frames:
+            if _la_catena_prosegue(righe, indice + 1):
+                # Anello intermedio: non chiudere ora, aspetta l'anello
+                # successivo, che sovrascrivera' frame, tipo e messaggio.
+                continue
             eventi.append(
                 EventoGrezzo(
                     servizio=servizio,
@@ -1303,6 +1451,23 @@ def test_riga_corrotta_scartata_senza_perdere_il_resto(tmp_path: Path):
     assert riletto.righe_scartate == 1
 
 
+def test_messaggi_visti_ha_un_tetto(tmp_path: Path):
+    """Senza tetto l'insieme crescerebbe per sempre: il ledger si rilegge tutto."""
+    ledger = _ledger(tmp_path)
+    for indice in range(40):
+        ledger.registra_occorrenza(
+            fingerprint="abc123",
+            servizio="worker",
+            tipo_eccezione="KeyError",
+            attribuzione="src/workers/execution.py:run",
+            messaggio=f"'TICK{indice}'",
+            ts=ORA,
+        )
+    stato = ledger.stato("abc123")
+    assert stato.conteggio == 40  # le occorrenze si contano tutte
+    assert len(stato.messaggi_visti) == 20  # i valori distinti no
+
+
 def test_aperture_nella_finestra(tmp_path: Path):
     ledger = _ledger(tmp_path)
     for indice, numero in enumerate((601, 602)):
@@ -1347,6 +1512,13 @@ from pathlib import Path
 from src.error_watch.modelli import Stato
 
 _MAX_OCCORRENZE_RICORDATE = 200
+# Anche i messaggi hanno un tetto, e per la stessa ragione delle occorrenze: lo
+# stato si ricostruisce rileggendo l'intero ledger a ogni giro, per sempre. Un
+# fingerprint che normalizza su molti valori diversi (lo stesso KeyError su
+# centinaia di ticker in mesi di esercizio) farebbe crescere l'insieme senza
+# limite, in memoria e nel tempo di replay. Venti valori bastano: il corpo
+# della issue ne mostra dieci.
+_MAX_MESSAGGI_RICORDATI = 20
 
 
 class Ledger:
@@ -1392,7 +1564,10 @@ class Ledger:
             stato.occorrenze.append(ts)
             del stato.occorrenze[:-_MAX_OCCORRENZE_RICORDATE]
             stato.giorni_distinti.add(ts.date().isoformat())
-            if record.get("messaggio"):
+            if (
+                record.get("messaggio")
+                and len(stato.messaggi_visti) < _MAX_MESSAGGI_RICORDATI
+            ):
                 stato.messaggi_visti.add(record["messaggio"])
         elif tipo == "issue_aperta":
             stato = self._stati[fingerprint]
@@ -1491,7 +1666,7 @@ class Ledger:
 - [ ] **Step 4: Esegui e verifica che passino**
 
 Run: `.venv/bin/python -m pytest tests/error_watch/test_ledger.py -v`
-Expected: PASS, 8 test
+Expected: PASS, 9 test
 
 - [ ] **Step 5: Commit**
 
@@ -2921,7 +3096,7 @@ Expected: PASS, 11 test
 - [ ] **Step 5: Esegui l'intera suite del modulo**
 
 Run: `.venv/bin/python -m pytest tests/error_watch tests/scripts/test_error_watch_cli.py -v`
-Expected: PASS, 113 test
+Expected: tutti verdi, nessun fallimento (non fissare il totale: cresce a ogni task)
 
 - [ ] **Step 6: Commit**
 
@@ -3636,7 +3811,7 @@ git commit -m "docs(error-watch): operazioni, silenziamenti e spegnimento"
 - [ ] **Step 1: Suite completa del modulo**
 
 Run: `.venv/bin/python -m pytest tests/error_watch tests/scripts/test_error_watch_cli.py tests/scripts/test_run_watched.py -v`
-Expected: PASS, 120 test
+Expected: tutti verdi, nessun fallimento
 
 - [ ] **Step 2: Suite completa del repo (nessuna regressione)**
 

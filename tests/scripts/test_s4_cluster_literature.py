@@ -79,6 +79,26 @@ def _ledger_events(output_dir: Path) -> list[dict[str, object]]:
     ]
 
 
+def test_append_jsonl_refuses_an_external_file_replacement(tmp_path: Path) -> None:
+    """La guardia rifiuta una sostituzione fuori banda del file append-only.
+
+    Quale dei due controlli scatti dipende dal filesystem: se dopo l'unlink
+    l'inode viene riusato per il file nuovo, dev/ino coincidono e a rilevare
+    la sostituzione e' la dimensione. E' successo davvero fra locale e CI, e
+    il ramo che scatta non e' il contratto: il contratto e' che la riga non
+    venga appesa a un file che non e' piu' quello di prima.
+    """
+    path = tmp_path / "events.jsonl"
+    coordinator.append_jsonl(path, {"event": "FIRST"})
+    path.unlink()
+    path.write_text('{"event":"REPLACED"}\n')
+
+    with pytest.raises(RuntimeError, match="identity changed|size changed externally"):
+        coordinator.append_jsonl(path, {"event": "SECOND"})
+
+    assert "SECOND" not in path.read_text()
+
+
 def test_retry_campaign_reopens_an_unavailable_source_without_rewriting_history(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -671,6 +691,16 @@ def test_validators_reject_missing_required_semantic_fields() -> None:
         )
 
 
+def test_node1_schema_bounds_evidence_lines_to_the_current_chunk() -> None:
+    response_format = coordinator.node1_response_format("SRC001", "1.0.1.1", 7)
+
+    evidence_line_schema = response_format["json_schema"]["schema"]["properties"][
+        "claims"
+    ]["items"]["properties"]["evidence_lines"]["items"]
+
+    assert evidence_line_schema == {"type": "integer", "minimum": 1, "maximum": 7}
+
+
 def test_review_batch_ids_remain_monotonic_across_invalidated_campaigns(
     tmp_path: Path,
 ) -> None:
@@ -886,3 +916,73 @@ def test_retry_campaign_gives_an_exhausted_node2_batch_a_fresh_budget(
     assert reviews[0]["attempt"] == 1
     assert reviews[0]["retry_campaign"] == "node2-recovery"
     assert _ledger_events(output_dir)[-2]["event"] == "SOURCE_PASS_COMPLETE"
+
+
+def test_cli_refuses_completion_if_persisted_cards_disappear_before_terminal(
+    tmp_path: Path, monkeypatch
+) -> None:
+    manifest, output_dir, cache_dir = _write_fixture(tmp_path)
+    claim = {
+        "claim_id": "SRC001-C0-01",
+        "hypotheses": ["H01"],
+        "stance": "SUPPORTS",
+        "claim": "Fixture claim.",
+        "evidence_lines": [1, 1],
+        "limitations": "Fixture only.",
+        "transferability": "Fixture only.",
+    }
+
+    def fake_post(url: str, *, json: dict[str, object], timeout: int) -> _ChatResponse:
+        del json, timeout
+        if url == coordinator.NODE1:
+            return _ChatResponse(
+                {
+                    "source_id": "SRC001",
+                    "chunk_id": 0,
+                    "claims": [claim],
+                    "unverified_followups": [],
+                }
+            )
+        (output_dir / "node1_cards.jsonl").unlink()
+        return _ChatResponse(
+            {
+                "source_id": "SRC001",
+                "reviews": [
+                    {
+                        "claim_id": "SRC001-C0-01",
+                        "verdict": "SUPPORTED",
+                        "reason_codes": [],
+                        "reason": "The quote supports the fixture claim.",
+                        "minimal_correction": "",
+                    }
+                ],
+            }
+        )
+
+    monkeypatch.setattr(coordinator.requests, "post", fake_post)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "s4_cluster_literature.py",
+            "--manifest",
+            str(manifest),
+            "--output-dir",
+            str(output_dir),
+            "--cache-dir",
+            str(cache_dir),
+            "--source",
+            "SRC001",
+            "--retry-campaign",
+            "truncated-card-audit",
+        ],
+    )
+
+    assert coordinator.main() == 0
+
+    terminal = _ledger_events(output_dir)[-2]
+    assert terminal["event"] == "SOURCE_INCOMPLETE"
+    assert terminal["artifact_integrity_errors"] == [
+        "PERSISTED_CHUNK_COVERAGE_MISMATCH",
+        "PERSISTED_CLAIM_SET_MISMATCH",
+    ]

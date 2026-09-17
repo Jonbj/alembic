@@ -38,4 +38,12 @@ title = "Alembic gitleaks configuration"
   paths = [
     ".github/workflows/ci.yml",
     "tests/",
+    # Ledger macchina-generato della validazione web S4: ogni riga porta il
+    # `source_sha256` del documento recensito e l'UUID del run. Sono 64
+    # caratteri esadecimali e UUID v4, cioe' esattamente la forma che la
+    # regola generic-api-key del ruleset di default cerca: 14 falsi positivi
+    # verificati uno per uno sul SARIF della run 35189680569, tutti su
+    # `source_sha256`. Sono checksum di provenienza, non credenziali, e
+    # servono a rendere riproducibile il dossier: vanno tracciati.
+    "docs/research/s4-web-validation-2026-08-28/node-output/",
   ]

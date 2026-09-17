@@ -12,6 +12,7 @@ import csv
 import fcntl
 import hashlib
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -37,6 +38,7 @@ ALLOWED_HYPOTHESES = {f"H{i:02d}" for i in range(1, 23)}
 ALLOWED_REVIEW_VERDICTS = {"SUPPORTED", "OVERSTATED", "AMBIGUOUS", "NOT_APPLICABLE"}
 NODE2_BATCH_SIZE = 1
 JSONL_LOCK = threading.Lock()
+JSONL_STATE: dict[Path, tuple[int, int, int]] = {}
 ChunkId = int | str
 
 
@@ -150,7 +152,9 @@ def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def node1_response_format(source_id: str, chunk_id: ChunkId) -> dict[str, Any]:
+def node1_response_format(
+    source_id: str, chunk_id: ChunkId, max_evidence_line: int
+) -> dict[str, Any]:
     """Build the strict JSON schema for one node-1 evidence card."""
     claim_schema = {
         "type": "object",
@@ -174,7 +178,11 @@ def node1_response_format(source_id: str, chunk_id: ChunkId) -> dict[str, Any]:
             "claim": {"type": "string"},
             "evidence_lines": {
                 "type": "array",
-                "items": {"type": "integer"},
+                "items": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": max_evidence_line,
+                },
                 "minItems": 2,
                 "maxItems": 2,
             },
@@ -344,12 +352,43 @@ def chat_json(
     return parse_json(raw)
 
 
-def append_jsonl(path: Path, item: dict) -> None:
-    """Append one JSON object atomically with respect to coordinator threads."""
-    path.parent.mkdir(parents=True, exist_ok=True)
+def watch_jsonl(path: Path) -> None:
+    """Capture one output identity so external replacement becomes detectable."""
+    key = path.resolve()
     with JSONL_LOCK:
+        if not path.exists():
+            JSONL_STATE.pop(key, None)
+            return
+        stat = path.stat()
+        JSONL_STATE[key] = (stat.st_dev, stat.st_ino, stat.st_size)
+
+
+def append_jsonl(path: Path, item: dict) -> None:
+    """Durably append one row, refusing out-of-band output mutations."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key = path.resolve()
+    with JSONL_LOCK:
+        expected = JSONL_STATE.get(key)
+        if expected is not None:
+            try:
+                current_stat = path.stat()
+            except FileNotFoundError as exc:
+                raise RuntimeError(f"append-only JSONL disappeared: {path}") from exc
+            current = (
+                current_stat.st_dev,
+                current_stat.st_ino,
+                current_stat.st_size,
+            )
+            if current[:2] != expected[:2]:
+                raise RuntimeError(f"append-only JSONL identity changed: {path}")
+            if current[2] != expected[2]:
+                raise RuntimeError(f"append-only JSONL size changed externally: {path}")
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(item, ensure_ascii=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        stat = path.stat()
+        JSONL_STATE[key] = (stat.st_dev, stat.st_ino, stat.st_size)
 
 
 def invalidated_campaigns(path: Path) -> set[str]:
@@ -553,10 +592,27 @@ def reviewed_claim_ids(
     Resume must be idempotent at claim level: a source may have gained claims from
     chunks that failed during an earlier pass, so batch ids alone are not stable.
     """
+    return set(
+        reviewed_claim_id_list(
+            path,
+            source_id,
+            source_sha256,
+            excluded_campaigns,
+        )
+    )
+
+
+def reviewed_claim_id_list(
+    path: Path,
+    source_id: str,
+    source_sha256: str,
+    excluded_campaigns: set[str] | None = None,
+) -> list[str]:
+    """Return persisted review claim IDs without hiding duplicate rows."""
     excluded_campaigns = excluded_campaigns or set()
     if not path.exists():
-        return set()
-    claim_ids: set[str] = set()
+        return []
+    claim_ids: list[str] = []
     for line in path.read_text().splitlines():
         try:
             item = json.loads(line)
@@ -573,8 +629,79 @@ def reviewed_claim_ids(
         for review in item.get("reviews", []):
             claim_id = review.get("claim_id")
             if isinstance(claim_id, str) and claim_id:
-                claim_ids.add(claim_id)
+                claim_ids.append(claim_id)
     return claim_ids
+
+
+def source_artifact_integrity(
+    node1_path: Path,
+    node2_path: Path,
+    ledger_path: Path,
+    source_id: str,
+    source_sha256: str,
+    source_chunks: dict[str, str],
+    expected_claims: list[dict],
+    excluded_campaigns: set[str] | None = None,
+) -> tuple[list[str], dict[str, int]]:
+    """Compare in-memory work with the append-only artifacts before finalizing."""
+    excluded_campaigns = excluded_campaigns or set()
+    persisted_claims = prior_claims(
+        node1_path,
+        source_id,
+        source_sha256,
+        excluded_campaigns,
+    )
+    expected_claim_ids = [
+        str(claim.get("claim_id"))
+        for claim in expected_claims
+        if isinstance(claim.get("claim_id"), str)
+    ]
+    persisted_claim_ids = [
+        str(claim.get("claim_id"))
+        for claim in persisted_claims
+        if isinstance(claim.get("claim_id"), str)
+    ]
+    persisted_review_ids = reviewed_claim_id_list(
+        node2_path,
+        source_id,
+        source_sha256,
+        excluded_campaigns,
+    )
+    persisted_chunks = completed_keys(
+        node1_path,
+        source_id,
+        source_sha256,
+        excluded_campaigns,
+    ) | recovered_chunk_keys(
+        ledger_path,
+        node1_path,
+        source_id,
+        source_chunks,
+        source_sha256,
+        excluded_campaigns,
+    )
+    expected_chunk_keys = {(source_id, chunk_id) for chunk_id in source_chunks}
+
+    errors: list[str] = []
+    if not expected_chunk_keys.issubset(persisted_chunks):
+        errors.append("PERSISTED_CHUNK_COVERAGE_MISMATCH")
+    if len(expected_claim_ids) != len(set(expected_claim_ids)):
+        errors.append("DUPLICATE_EXPECTED_CLAIM_IDS")
+    if len(persisted_claim_ids) != len(set(persisted_claim_ids)):
+        errors.append("DUPLICATE_PERSISTED_CLAIM_IDS")
+    if set(persisted_claim_ids) != set(expected_claim_ids):
+        errors.append("PERSISTED_CLAIM_SET_MISMATCH")
+    if len(persisted_review_ids) != len(set(persisted_review_ids)):
+        errors.append("DUPLICATE_PERSISTED_REVIEW_IDS")
+    if set(persisted_review_ids) != set(expected_claim_ids):
+        errors.append("PERSISTED_REVIEW_SET_MISMATCH")
+    return errors, {
+        "expected_chunks": len(expected_chunk_keys),
+        "persisted_chunks": len(expected_chunk_keys & persisted_chunks),
+        "expected_claims": len(expected_claim_ids),
+        "persisted_claims": len(persisted_claim_ids),
+        "persisted_reviews": len(persisted_review_ids),
+    }
 
 
 def next_review_batch_id(
@@ -615,6 +742,7 @@ def node1_prompt(
     numbered = "\n".join(
         f"L{line_no:04d}: {line}" for line_no, line in enumerate(text.splitlines(), 1)
     )
+    max_evidence_line = len(text.splitlines())
     return f"""SOURCE_ID: {row["source_id"]}
 CHUNK_ID: {json.dumps(chunk_id)}
 SOURCE_CLASS: {row["class"]}
@@ -636,6 +764,7 @@ Rules:
 - If a fact is outside this chunk, omit it.
 - evidence_lines must contain exactly [start_line, end_line], use 1 to 6 consecutive lines, and
   those lines must directly support the claim. Never cite a range merely because it is nearby.
+- Both evidence_lines values must be between 1 and {max_evidence_line}, inclusive.
 
 NUMBERED_SOURCE_TEXT:
 <<<
@@ -954,6 +1083,8 @@ def main() -> int:
     lock_handle.truncate()
     lock_handle.write(f"run_id={run_id}\n")
     lock_handle.flush()
+    for output_path in (node1_path, node2_path, ledger_path):
+        watch_jsonl(output_path)
 
     if args.invalidate_campaign:
         record_event(
@@ -1215,7 +1346,9 @@ def main() -> int:
                         NODE1_SYSTEM,
                         node1_prompt(row, chunk_id, chunk_text, hypothesis_registry),
                         1200,
-                        node1_response_format(row["source_id"], chunk_id),
+                        node1_response_format(
+                            row["source_id"], chunk_id, len(chunk_text.splitlines())
+                        ),
                     )
                     valid, rejected = validate_card(card, row, chunk_id, chunk_text)
                     if card.get("claims") and not valid:
@@ -1317,6 +1450,9 @@ def main() -> int:
             {
                 "source_id": row["source_id"],
                 "source_sha256": digest,
+                "source_chunks": {
+                    str(chunk_id): chunk_text for chunk_id, chunk_text in source_chunks
+                },
                 "source_claims": source_claims,
                 "failed_chunks": failed_chunks,
                 "review_futures": review_futures,
@@ -1338,7 +1474,22 @@ def main() -> int:
                 for claim in source_claims
                 if claim.get("claim_id") not in reviewed
             )
-        if failed_chunks or failed_review_batches or unreviewed_claim_ids:
+        artifact_integrity_errors, artifact_counts = source_artifact_integrity(
+            node1_path,
+            node2_path,
+            ledger_path,
+            source_result["source_id"],
+            source_result["source_sha256"],
+            source_result["source_chunks"],
+            source_claims,
+            excluded_campaigns,
+        )
+        if (
+            failed_chunks
+            or failed_review_batches
+            or unreviewed_claim_ids
+            or artifact_integrity_errors
+        ):
             event = "SOURCE_INCOMPLETE"
         elif source_claims:
             event = "SOURCE_PASS_COMPLETE"
@@ -1355,6 +1506,8 @@ def main() -> int:
                 "failed_chunks": failed_chunks,
                 "failed_review_batches": failed_review_batches,
                 "unreviewed_claim_ids": unreviewed_claim_ids,
+                "artifact_integrity_errors": artifact_integrity_errors,
+                "artifact_counts": artifact_counts,
                 "ts": time.time(),
             },
         )
