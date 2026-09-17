@@ -25,9 +25,12 @@ simulare, **quella è la risposta**, non un fallimento.
 - **News:** endpoint storico Alpaca (Benzinga), `include_content=true`, paginato con
   `next_page_token`. Si riusa la paginazione di `src/connectors/alpaca_news.py`
   (regola #169/#467: si importa, non si ricopia).
-- **Finestra:** `2024-01-01` → `2025-12-31`. **Il 2026 resta fuori**: è la finestra live
-  su cui abbiamo già formato un'opinione, e rientrare dentro significherebbe misurare
-  due volte lo stesso campione.
+- **Finestra della popolazione:** articoli **creati** (`created_at`) fra `2024-01-01` e
+  `2025-12-31`. **Il 2026 resta fuori**: è la finestra live su cui abbiamo già formato
+  un'opinione, e rientrare dentro significherebbe misurare due volte lo stesso campione.
+- **Finestra della paginazione:** `2024-01-01` → **data di scaricamento**, perché
+  l'API filtra su `updated_at` (§1.2). È un sovrainsieme, dato che
+  `updated_at >= created_at` sempre. Il manifest registra entrambe.
 - **Universo:** i 96 simboli di `config/trading.yaml` → `symbols.watchlist`.
 - **Prezzi:** Alpaca, `feed=SIP`, `adjustment=ALL`. Una sola fonte (§7).
 - **Persistenza:** tabelle o file **propri**. Zero scritture su `news_log`,
@@ -46,7 +49,26 @@ proseguire.
 silenzio. Un test asserisce che una pagina fallita interrompe la raccolta e non produce
 artefatto.
 
-### 1.2 Lo scaricatore
+### 1.2 La finestra dell'API non è la finestra della popolazione
+
+Misurato il **2026-09-17** contro l'API vera, prima di qualunque misura:
+**`start`/`end` filtrano su `updated_at`, non su `created_at`.**
+
+Su una sola settimana (2024-03-01→08), **14 articoli su 880** erano stati *creati* anni
+prima e solo ritoccati dentro la finestra. E non a caso: «3 Outdoor Stocks To Watch For
+Summer 2020», «NFT Craze A Reminder Of Tulip Mania?», «Did Billionaire Elon Musk Sell All
+His Mansions». Sono evergreen e listicle, cioè **esattamente la classe che H-A e H-B
+devono misurare**: la contaminazione carica un gruppo solo, non tutti, e avrebbe reso
+H-A più facile da far passare.
+
+Difetto speculare, misurato: un articolo creato a fine 2025 ma aggiornato nel 2026 non
+comparirebbe mai in una finestra ferma al 2025-12-31 (5 articoli nel solo 2026-01).
+
+Perciò: si pagina su `updated_at` fino alla data di scaricamento, e la popolazione si
+ritaglia su `created_at`. L'archivio su disco resta grezzo; il ritaglio è a valle,
+importabile e testato (`dentro_popolazione`).
+
+### 1.3 Lo scaricatore
 
 Idempotente e ripartibile: rieseguirlo non duplica righe e riprendere dopo
 un'interruzione non richiede di riscaricare ciò che è già a terra. L'identità
@@ -244,4 +266,4 @@ motivo e impatto sugli artefatti già prodotti.
 
 | Data | Cosa è cambiato | Motivo | Artefatti invalidati |
 |------|-----------------|--------|----------------------|
-| —    | —               | —      | —                    |
+| 2026-09-17 | §1 distingue finestra di **popolazione** (`created_at`) da finestra di **paginazione** (`updated_at`, fino alla data di scaricamento); aggiunta §1.3 | Sonda contro l'API vera: `start`/`end` filtrano su `updated_at`. La versione precedente diceva solo «finestra 2024-2025», che su questa API significa una popolazione diversa da quella intesa | **Nessuno**: la sonda precede il primo scaricamento e nessuna misura era stata prodotta |

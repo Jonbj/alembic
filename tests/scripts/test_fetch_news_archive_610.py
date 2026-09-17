@@ -64,6 +64,7 @@ def _finestra_breve(monkeypatch):
     """Riduce la finestra congelata a tre mesi: i test esercitano le regole."""
     monkeypatch.setattr(scaricatore, "INIZIO", "2024-01-01")
     monkeypatch.setattr(scaricatore, "FINE", "2024-03-31")
+    monkeypatch.setattr(scaricatore, "fine_fetch", lambda: "2024-03-31")
 
 
 class TestFinestre:
@@ -230,3 +231,70 @@ def test_la_finestra_congelata_e_quella_preregistrata() -> None:
     formato un'opinione, e rientrarci significherebbe misurarla due volte."""
     assert scaricatore.INIZIO == "2024-01-01"
     assert scaricatore.FINE == "2025-12-31"
+
+
+class TestFinestraApiControPopolazione:
+    """`start`/`end` dell'API filtrano su `updated_at`, non su `created_at`.
+
+    Misurato contro l'API vera il 2026-09-17: su 2024-03-01..08, 14 articoli su
+    880 erano stati creati anni prima e solo ritoccati dentro la finestra — e
+    tutti evergreen/listicle, cioe' la classe che H-A e H-B misurano. Senza il
+    ritaglio su `created_at` la contaminazione caricherebbe un gruppo solo.
+    """
+
+    def test_un_evergreen_ritoccato_resta_fuori_popolazione(self) -> None:
+        evergreen = dict(
+            _articolo(1),
+            created_at="2020-06-01T17:50:12Z",
+            updated_at="2024-03-05T04:47:14Z",
+        )
+        assert scaricatore.dentro_popolazione(evergreen) is False
+
+    def test_un_articolo_del_periodo_e_dentro(self) -> None:
+        assert scaricatore.dentro_popolazione(_articolo(1)) is True
+
+    def test_il_2026_resta_fuori(self) -> None:
+        assert scaricatore.dentro_popolazione(dict(_articolo(1), created_at="2026-01-02T12:00:00Z")) is False
+
+    def test_senza_created_at_resta_fuori(self) -> None:
+        senza = {k: v for k, v in _articolo(1).items() if k != "created_at"}
+        assert scaricatore.dentro_popolazione(senza) is False
+
+    @pytest.mark.asyncio
+    async def test_si_pagina_oltre_la_fine_della_popolazione(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """La coda va recuperata: un articolo creato a fine 2025 e aggiornato nel
+        2026 non comparirebbe mai in una finestra ferma al 2025-12-31."""
+        monkeypatch.setattr(scaricatore, "INIZIO", "2025-11-01")
+        monkeypatch.setattr(scaricatore, "FINE", "2025-12-31")
+
+        monkeypatch.setattr(scaricatore, "fine_fetch", lambda: "2026-02-15")
+        finto = _ConnettoreFinto({})
+        monkeypatch.setattr(scaricatore, "AlpacaNewsConnector", lambda **_: finto)
+
+        await scaricatore.esegui(tmp_path, _config(tmp_path), forza=False)
+
+        # si pagina fino al mese di scaricamento, non alla fine della popolazione
+        assert finto.finestre_viste[0] == "2025-11"
+        assert finto.finestre_viste[-1] == "2026-02"
+
+    @pytest.mark.asyncio
+    async def test_il_manifest_separa_archivio_e_popolazione(
+        self, tmp_path, monkeypatch, _finestra_breve
+    ) -> None:
+        dentro = _articolo(1)
+        fuori = dict(_articolo(2), created_at="2020-06-01T17:50:12Z", updated_at="2024-01-05T00:00:00Z")
+        finto = _ConnettoreFinto({"2024-01": [dentro, fuori]})
+        monkeypatch.setattr(scaricatore, "AlpacaNewsConnector", lambda **_: finto)
+
+        await scaricatore.esegui(tmp_path, _config(tmp_path), forza=False)
+
+        manifest = json.loads((tmp_path / "manifest.json").read_text())
+        assert manifest["mesi"]["2024-01"]["articoli"] == 2
+        assert manifest["mesi"]["2024-01"]["nella_popolazione"] == 1
+        assert manifest["fetch"]["filtro_api"] == "updated_at"
+        assert manifest["popolazione"]["filtro"] == "created_at"
+        # l'archivio su disco resta grezzo: il ritaglio e' a valle, non qui
+        righe = (tmp_path / "news_2024-01.jsonl").read_text().strip().splitlines()
+        assert len(righe) == 2

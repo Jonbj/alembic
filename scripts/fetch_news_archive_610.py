@@ -23,6 +23,26 @@ produzione importati, mai ricopiati (regola #169/#467). Tenere l'archivio grezzo
 e' cio' che rende misurabile la differenza fra le due, che la #610 dichiara
 essere essa stessa un risultato.
 
+## La finestra dell'API non e' la finestra della popolazione
+
+Misurato il 2026-09-17 contro l'API vera: **`start`/`end` filtrano su
+`updated_at`, non su `created_at`**. Su una sola settimana (2024-03-01..08),
+14 articoli su 880 erano stati *creati* anni prima e solo ritoccati dentro la
+finestra — e non a caso: «3 Outdoor Stocks To Watch For Summer 2020», «NFT Craze
+A Reminder Of Tulip Mania?», «Did Billionaire Elon Musk Sell All His Mansions».
+Sono evergreen e listicle, cioe' **esattamente la classe che H-A e H-B devono
+misurare**: la contaminazione carica un gruppo solo, non tutti.
+
+C'e' anche il difetto speculare: un articolo creato a fine 2025 ma aggiornato
+nel 2026 non comparirebbe mai in una finestra che si ferma al 2025-12-31
+(misurato: 5 articoli nel solo 2026-01).
+
+Per questo si pagina su `updated_at` da `INIZIO` **fino alla data di
+scaricamento** — che e' un sovrainsieme, perche' `updated_at >= created_at`
+sempre — e la popolazione si ritaglia a valle su `created_at`. L'archivio resta
+grezzo; il manifest registra entrambi i conteggi e la data di fine fetch, che
+e' cio' che rende il file riproducibile a posteriori.
+
 ## Idempotente e ripartibile
 
 L'unita' di lavoro e' il mese. Un mese gia' registrato nel manifest non viene
@@ -68,8 +88,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.connectors.alpaca_news import AlpacaNewsConnector  # noqa: E402
 
 # --- parametri congelati dalla pre-registrazione, non rivedibili qui ---
+# Popolazione: articoli CREATI in questa finestra. Il 2026 resta fuori, e' la
+# finestra live su cui abbiamo gia' formato un'opinione.
 INIZIO = "2024-01-01"
-FINE = "2025-12-31"  # il 2026 resta fuori: e' la finestra live gia' osservata
+FINE = "2025-12-31"
 MANIFEST = "manifest.json"
 
 
@@ -84,6 +106,27 @@ def watchlist(config_path: Path) -> list[str]:
     if not simboli:
         raise ValueError(f"watchlist vuota in {config_path}")
     return simboli
+
+
+def dentro_popolazione(articolo: dict) -> bool:
+    """L'articolo e' stato CREATO dentro la finestra pre-registrata?
+
+    Il filtro dell'API e' su `updated_at`: senza questo, l'archivio contiene
+    evergreen creati anni prima e solo ritoccati, che caricano proprio la classe
+    listicle che H-A e H-B misurano.
+    """
+    creato = str(articolo.get("created_at") or "")[:10]
+    return bool(creato) and INIZIO <= creato <= FINE
+
+
+def fine_fetch() -> str:
+    """Fine della paginazione: oggi.
+
+    Seam esplicito perche' i test la fissino senza sostituire `datetime`, e
+    perche' il manifest la registri: l'archivio dipende da quando lo si e'
+    scaricato, e tacerlo lo renderebbe non riproducibile.
+    """
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
 def mesi(inizio: str, fine: str) -> list[tuple[str, datetime, datetime]]:
@@ -166,7 +209,14 @@ async def esegui(destinazione: Path, config_path: Path, forza: bool) -> int:
         api_key=chiave, api_secret=segreto, symbols=simboli, page_size=50
     )
 
-    for etichetta, da, a in mesi(INIZIO, FINE):
+    # Si pagina su updated_at fino a oggi: e' un sovrainsieme della popolazione,
+    # perche' updated_at >= created_at sempre. Ritagliare qui al 2025-12-31
+    # perderebbe gli articoli creati a fine 2025 e aggiornati dopo.
+    ultimo_fetch = fine_fetch()
+    manifest["fetch"] = {"inizio": INIZIO, "fine": ultimo_fetch, "filtro_api": "updated_at"}
+    manifest["popolazione"] = {"inizio": INIZIO, "fine": FINE, "filtro": "created_at"}
+
+    for etichetta, da, a in mesi(INIZIO, ultimo_fetch):
         if etichetta in manifest["mesi"] and not forza:
             print(f"{etichetta}: gia' a terra ({manifest['mesi'][etichetta]['articoli']} articoli)")
             continue
@@ -191,19 +241,26 @@ async def esegui(destinazione: Path, config_path: Path, forza: bool) -> int:
                 handle.write(json.dumps(articolo, ensure_ascii=False, sort_keys=True) + "\n")
         parziale.replace(file_mese)
 
+        nella_popolazione = sum(1 for x in articoli if dentro_popolazione(x))
         manifest["mesi"][etichetta] = {
             "articoli": len(articoli),
+            "nella_popolazione": nella_popolazione,
             "file": file_mese.name,
             "sha256": sha256_file(file_mese),
             "scaricato_il": datetime.now(timezone.utc).isoformat(),
         }
         scrivi_manifest(destinazione, manifest)
-        print(f"{etichetta}: {len(articoli)} articoli")
+        print(f"{etichetta}: {len(articoli)} articoli ({nella_popolazione} in popolazione)")
 
     totale = sum(m["articoli"] for m in manifest["mesi"].values())
+    popolazione = sum(m.get("nella_popolazione", 0) for m in manifest["mesi"].values())
     manifest["totale_articoli"] = totale
+    manifest["totale_nella_popolazione"] = popolazione
     scrivi_manifest(destinazione, manifest)
-    print(f"\nArchivio completo: {totale} articoli in {len(manifest['mesi'])} mesi")
+    print(
+        f"\nArchivio completo: {totale} articoli in {len(manifest['mesi'])} mesi; "
+        f"{popolazione} creati dentro la finestra {INIZIO}..{FINE}"
+    )
     return 0
 
 
