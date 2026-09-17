@@ -6,10 +6,13 @@ Regole congelate nel manifest, qui eseguite:
   successiva; i fill same-bar sono vietati per costruzione (il piano entra
   in ``pending`` alla seduta del segnale e viene consumato solo alla
   seduta dopo);
+- la regola vale su entrambi i lati: anche le posizioni che escono dal
+  decile si liquidano all'open della seduta di esecuzione, non al close;
 - fallback sul close della stessa seduta di esecuzione quando l'open non
   e' affidabile (flag ``open_reliable``) o e' mancante; se anche il close
   manca il singolo nome si salta (esclusione locale, il mese non si
-  cancella);
+  cancella) e una posizione in essere resta aperta invece di essere
+  venduta a un close stantio;
 - costi letti SOLO dal manifest congelato: half-spread + impact
   square-root (riuso del modello di produzione) + commissioni per azione
   + fee SEC/FINRA sulle vendite, scalati dal moltiplicatore di scenario;
@@ -30,8 +33,7 @@ risultati.
 """
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import pandas as pd
 
@@ -47,7 +49,13 @@ _DUST_SHARES = 1e-9  # sotto questa frazione di azione il trade e' rumore float
 
 @dataclass(frozen=True)
 class RebalanceRecord:
-    """Un ribilancio eseguito: segnale, esecuzione, pesi, fill e costi."""
+    """Un ribilancio eseguito: segnale, esecuzione, pesi, fill e costi.
+
+    ``fill_prices`` copre ogni nome negoziato alla seduta di esecuzione,
+    acquisti e liquidazioni, perche' la regola di esecuzione congelata e'
+    la stessa sui due lati. ``skipped_execution`` elenca i nomi senza un
+    prezzo di esecuzione utilizzabile: non sono stati negoziati affatto.
+    """
 
     signal_date: pd.Timestamp
     execution_date: pd.Timestamp
@@ -184,7 +192,13 @@ def run_sleeve(
             signal_date = _signal_of(d, exec_of)
             fills: dict[str, float] = {}
             skipped: list[str] = []
-            for sec in plan.weights:
+            # La regola congelata vale su entrambi i lati del ribilancio:
+            # anche una posizione che esce dal decile si liquida all'open
+            # della seduta di esecuzione. Il prezzo va quindi risolto per
+            # l'unione fra i nomi del piano e quelli gia' detenuti; senza
+            # un prezzo di esecuzione utilizzabile il nome si salta e
+            # resta in posizione (mai una vendita a un close stantio).
+            for sec in sorted(set(plan.weights) | set(shares)):
                 op = ds.open.loc[d, sec] if sec in ds.open.columns else float("nan")
                 cl = ds.close.loc[d, sec] if sec in ds.close.columns else float("nan")
                 reliable = (
@@ -212,11 +226,7 @@ def run_sleeve(
                         new_shares[sec] = current
                     continue
                 target = nav_exec * plan.weights.get(sec, 0.0)
-                price = fills.get(sec, close_ffill.loc[d, sec])
-                if not math.isfinite(price) or price <= 0:
-                    if current > 0:
-                        new_shares[sec] = current
-                    continue
+                price = fills[sec]  # per costruzione > 0: gli altri sono in skipped
                 wanted = target / price
                 delta = wanted - current
                 if abs(delta) > _DUST_SHARES:

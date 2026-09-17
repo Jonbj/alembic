@@ -7,7 +7,7 @@ il prerequisito dei test di leakage (futuro che non contamina il passato).
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date
 
 import numpy as np

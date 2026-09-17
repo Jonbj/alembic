@@ -388,3 +388,142 @@ class TestWalkForward:
         windows = walk_forward_windows(m, pd.Timestamp("2014-01-01"), pd.Timestamp("2021-12-31"))
         assert windows[0][0] == pd.Timestamp("2016-01-01")
         assert len(windows) == 6
+
+
+def rotation_dataset(
+    jump_index: int = 380,
+    open_ratio: float = 0.9,
+    start: date = date(2018, 1, 1),
+    end: date = date(2021, 12, 31),
+):
+    """Dataset craftato in cui il decile alto ruota davvero.
+
+    Undici security identici piu' ``AAROT``, che raddoppia una volta sola
+    alla seduta ``jump_index``. Finche' il salto sta dentro la finestra
+    12-1 AAROT e' il primo per momentum ed entra; quando il salto esce
+    dalla finestra torna in parita' e, essendo il primo in ordine
+    alfabetico, esce dal decile. Ogni open e' ``open_ratio`` volte il
+    close della stessa seduta: un fill all'open e uno al close sono quindi
+    distinguibili al centesimo, su entrambi i lati.
+    """
+    from src.analysis.s3_poc.dataset import PitDataset, Provenance
+
+    sessions = pd.bdate_range(start, end)
+    n = len(sessions)
+    base = pattern_prices(n)
+    ids = [f"S{i:02d}" for i in range(11)] + ["AAROT"]
+    close = pd.DataFrame({sec: base.copy() for sec in ids}, index=sessions)
+    close["AAROT"] = base * np.where(np.arange(n) >= jump_index, 2.0, 1.0)
+    prov = Provenance(
+        vendor="hand", release="1", obtained_at=date(2026, 9, 16),
+        files_sha256={}, synthetic=True, qualified=False, qualification_artifact=None,
+    )
+    return PitDataset(
+        provenance=prov,
+        close=close,
+        open=close * open_ratio,
+        volume=pd.DataFrame(1e6, index=sessions, columns=ids),
+        market_cap=pd.DataFrame(1e10, index=sessions, columns=ids),
+        open_reliable=pd.DataFrame(True, index=sessions, columns=ids),
+        security_master=pd.DataFrame([
+            {"security_id": sec, "valid_from": sessions[0], "valid_to": sessions[-1],
+             "share_type": "common", "primary_exchange": "NYSE", "sector": "X"}
+            for sec in ids
+        ]),
+        delistings=pd.DataFrame(
+            columns=["security_id", "delisting_date", "delisting_return", "missing_status"]
+        ),
+        market=pd.Series(pattern_prices(n, 0.001), index=sessions),
+    )
+
+
+def primo_ribilancio_con_uscita(res) -> tuple[int, str]:
+    """Indice del primo ribilancio che chiude una posizione, e il nome uscito."""
+    for i in range(1, len(res.rebalances)):
+        uscite = set(res.rebalances[i - 1].weights) - set(res.rebalances[i].weights)
+        if uscite:
+            return i, sorted(uscite)[0]
+    raise AssertionError("il dataset non produce nessuna uscita dal decile")
+
+
+class TestEsecuzioneLatoUscita:
+    """Le uscite seguono la stessa regola congelata degli ingressi.
+
+    Il manifest congela ``execution: next_session_open`` col close solo
+    come fallback. Vendere al close della seduta in cui si compra all'open
+    sarebbe una deviazione sistematica dalla regola pre-registrata, su ogni
+    rotazione mensile: alimenta i gate standalone e il test combinato,
+    cioe' la metrica decisionale.
+    """
+
+    def test_uscita_riempita_all_open_come_gli_ingressi(self, manifest) -> None:
+        from src.analysis.s3_poc.engine import run_sleeve
+
+        ds = rotation_dataset()
+        res = run_sleeve(ds, manifest, variant="B",
+                         start=pd.Timestamp("2019-06-01"), end=pd.Timestamp("2020-06-30"))
+        i, uscito = primo_ribilancio_con_uscita(res)
+        r = res.rebalances[i]
+        d = r.execution_date
+        assert uscito not in r.weights  # e' davvero una vendita a zero
+        assert uscito in r.fill_prices
+        assert r.fill_prices[uscito] == pytest.approx(ds.open.loc[d, uscito], rel=1e-12)
+        assert r.fill_prices[uscito] != pytest.approx(ds.close.loc[d, uscito], rel=1e-6)
+
+    def test_uscita_nel_notionale_al_prezzo_di_open(self, manifest) -> None:
+        """Il notionale del ribilancio conta la vendita al prezzo di fill:
+        le quantita' uscite valorizzate all'open, non al close."""
+        from src.analysis.s3_poc.engine import run_sleeve
+
+        ds = rotation_dataset()
+        res = run_sleeve(ds, manifest, variant="B",
+                         start=pd.Timestamp("2019-06-01"), end=pd.Timestamp("2020-06-30"))
+        i, uscito = primo_ribilancio_con_uscita(res)
+        prec, r = res.rebalances[i - 1], res.rebalances[i]
+        # quantita' detenuta all'uscita: il ribilancio precedente e' il primo
+        # (nulla detenuto prima), quindi le azioni sono ricostruibili esatte
+        assert i == 1
+        nav0 = manifest.portfolio.initial_capital_usd
+        qty = nav0 * prec.weights[uscito] / prec.fill_prices[uscito]
+        venduto_open = qty * ds.open.loc[r.execution_date, uscito]
+        venduto_close = qty * ds.close.loc[r.execution_date, uscito]
+        # il notionale totale contiene la gamba di vendita all'open
+        assert r.traded_notional_usd >= venduto_open
+        assert r.traded_notional_usd < venduto_open + venduto_close
+
+    def test_uscita_con_open_inaffidabile_usa_il_close(self, manifest) -> None:
+        """Stesso fallback degli ingressi: open non affidabile -> close
+        della stessa seduta di esecuzione, mai un close stantio."""
+        from src.analysis.s3_poc.engine import run_sleeve
+
+        ds = rotation_dataset()
+        sonda = run_sleeve(ds, manifest, variant="B",
+                           start=pd.Timestamp("2019-06-01"), end=pd.Timestamp("2020-06-30"))
+        i, uscito = primo_ribilancio_con_uscita(sonda)
+        d = sonda.rebalances[i].execution_date
+        ds.open_reliable.loc[d, uscito] = False
+        res = run_sleeve(ds, manifest, variant="B",
+                         start=pd.Timestamp("2019-06-01"), end=pd.Timestamp("2020-06-30"))
+        r = res.rebalances[i]
+        assert r.fill_prices[uscito] == pytest.approx(ds.close.loc[d, uscito], rel=1e-12)
+
+    def test_uscita_senza_prezzo_utilizzabile_resta_in_posizione(self, manifest) -> None:
+        """Nessun prezzo di esecuzione -> il nome non si vende a un close
+        stantio: resta in posizione e il ribilancio lo dichiara skippato."""
+        from src.analysis.s3_poc.engine import run_sleeve
+
+        ds = rotation_dataset()
+        sonda = run_sleeve(ds, manifest, variant="B",
+                           start=pd.Timestamp("2019-06-01"), end=pd.Timestamp("2020-06-30"))
+        i, uscito = primo_ribilancio_con_uscita(sonda)
+        d = sonda.rebalances[i].execution_date
+        ds.open.loc[d, uscito] = np.nan
+        ds.close.loc[d, uscito] = np.nan
+        res = run_sleeve(ds, manifest, variant="B",
+                         start=pd.Timestamp("2019-06-01"), end=pd.Timestamp("2020-06-30"))
+        r = res.rebalances[i]
+        assert uscito in r.skipped_execution
+        assert uscito not in r.fill_prices
+        # e il mese dopo la posizione e' ancora li' da liquidare
+        assert uscito not in res.rebalances[i + 1].weights
+        assert uscito in res.rebalances[i + 1].fill_prices
