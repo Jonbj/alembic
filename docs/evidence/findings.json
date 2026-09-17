@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "prossimo_id": 83,
+  "prossimo_id": 87,
   "findings": [
     {
       "id": "F-001",
@@ -569,12 +569,18 @@
           "costo_usd": null,
           "nota": "[DAY-009] Dei 10 CRITICAL delle 21:00, 4 sono su S2, che non compare in strategies_run di nessuno dei 24 cicli (tutti ['S1','S4']) e non ha mai tradato. Le tre strategie ricevono lo STESSO IC globale (-0,063) e lo STESSO hit rate (33,2%) confrontati con tre baseline diverse (IC 0,035/0,042/0,028, hit rate 54,0%/56,0%/52,0%, Sharpe 0,95/1,10/0,80). Invariato rispetto al 09-14.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-009]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-020] 11 righe DECAY CRITICAL alle 21:00:00 (S1 x4, S2 x4, S4 x3) con IC osservato -0,051, hit rate 35,4%, Sharpe 0,28 e drawdown 13,4% IDENTICI per le tre strategie, confrontati contro tre baseline diverse (Sharpe atteso 0,95 / 1,10 / 0,80). S2 non ha mai tradato. Sono metriche pipeline-globali spacciate per per-strategia. Con DAY-008 (nessun canale) l'effetto netto e' zero segnale operativo. Osservabilita' pura.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-020]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 19
+      "occorrenze_non_stimate": 20
     },
     {
       "id": "F-005",
@@ -636,12 +642,18 @@
           "costo_usd": null,
           "nota": "[DAY-001] 4 invii Telegram su 5 respinti con 400 Bad Request (14:07:06,448 - 14:07:06,613 - 14:52:05,792 - 16:30:00,222); l'unico 200 OK e' l'alert stale-drop delle 22:55. CAUSA INDIVIDUATA per i tre invii #161: src/portfolio/unprotected_positions.py:137 genera il testo 'sub-1-share position (qty < 1) - a broker stop is impossible here (#161)' e src/notifications/telegram.py:79 invia con parse_mode='HTML' di default: la sequenza '< 1)' e' letta come apertura di tag e Telegram rifiuta. Perse le allerte su AMAT -29,7%, WDC -24,3%, NOK -15,4%. Il quarto invio (ratchet loss-feedback S4 congelato, EWMA R -0,86, 4 perdite consecutive, P&L -240,57) usa sintassi Markdown (*bold*, \\_) sotto parse_mode HTML: stessa famiglia, confidenza media. Canale mobile morto in parallelo: monitor_devices=0, mobile_notification_deliveries=0.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-001]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-009] 5 POST verso api.telegram.org/sendMessage nel log worker: 4 x '400 Bad Request', 1 x '200 OK'. L'unico consegnato e' lo stale_drop_alert delle 22:55. Perduti: '#161: 10/40 posizioni non proteggibili (qty<1)' alle 14:07:10 (x2, con AMAT a -28,7% e WDC a -22,7%), il ratchet S4 congelato alle 18:30 (EWMA R -0,80, 5 perdite consecutive, P&L -228,55 $) e il '#161' delle 19:22:14 (WDC -24,3%, NOK -15,1%). Il 400 viene scartato con un WARNING ('TelegramNotifier: Failed to send alert') e response.text non e' loggato, quindi il campo offensivo resta ignoto. La correzione di encoding di PR #591 riguardava il percorso shell (curl), non questo percorso Python. Osservabilita' pura.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-009]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 9
+      "occorrenze_non_stimate": 10
     },
     {
       "id": "F-006",
@@ -842,12 +854,18 @@
           "costo_usd": null,
           "nota": "[DAY-012] ingestion_stats_daily 2026-09-15/alpaca_benzinga: fetched 1532, queued 804, duplicates 6151 (4,0x fetched), discarded_stale 407, parse_fail 0. GDELT coerente nello stesso giorno (1978 fetched / 0 duplicates). Nuova evidenza sull'unita' di misura: i log per singolo run mostrano {'fetched': 50, 'tickers_found': 197, 'queued': 5, 'duplicates': 201}, cioe' i duplicati sono contati per coppia (articolo, ticker) mentre fetched conta gli articoli - le due colonne non sono nella stessa unita', ed e' per questo che solo Benzinga (l'unica fonte con fan-out multi-ticker) esplode.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-012]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-019] ingestion_stats_daily 2026-09-16/alpaca_benzinga: fetched 1563, queued 792, duplicates 6521 (4,2x fetched), discarded_stale 389, parse_fail 0. news_queue_drops conferma 6.521 righe duplicate_id allo stadio ingestion, di cui 410 accodate fuori sessione. GDELT coerente nella stessa giornata (fetched 2304, queued 12, duplicates 2, discarded_no_ticker 2290). Il contatore duplicati e' additivo cross-run e cross-consegna - lo stream WS consegna ~1,87 volte lo stesso articolo (#48) - mentre fetched conta il REST: due denominatori non confrontabili nella stessa riga. La colonna transport esiste gia' in news_queue_drops. Osservabilita' pura, nessun effetto sui segnali.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-019]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 24
+      "occorrenze_non_stimate": 25
     },
     {
       "id": "F-008",
@@ -921,9 +939,15 @@
           "costo_usd": 0.19,
           "nota": "Un pezzo macro che DICHIARA di non parlare di singoli titoli chiude la posizione NVDA. Segnale delle 19:45, +0,028 conf 0,20, da news_log 9614 'Next Phase Of AI-Elon Musk's 1 Billion Robots', il cui corpo contiene letteralmente 'This article is about the big picture, not an individual stock'; mappato su NVDA, relevance TAG_UNCONFIRMED. Alle 19:52 SELL below_entry_gate, trade 966, su un titolo che chiude +3,21%. Costo = drift_post_uscita 0,19 $ (dossier). NOTA ANTI-DOPPIO-CONTEGGIO: la liquidazione HOOD della stessa giornata appartiene allo stesso pattern ma il suo costo (5,75 $) e' addebitato a F-020, che ne descrive il meccanismo a monte (tag del provider su un ticker che l'articolo non menziona).",
           "fonte": "ALPHA_MISS_REPORT_2026-09-02.md §8.1 e §4"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": -1.93,
+          "nota": "[DAY-004] news_log 11177-11180: un solo articolo ('Intel Analyst Raises Price Target On Terafab, AI-Driven Turnaround') mappato dal provider su NVDA, INTC, SPCX e TSLA. La riga SPCX (11179, 15:53:03Z) produce il segnale 11178 a +0,055 che, essendo il piu' recente sul simbolo (F-023), diventa il segnale vivo e alle 17:37 porta il peso target a 0: decisione 28552 '[below_entry_gate] ... score=+0.055: weight 0.0%, position closed', trade 1010 chiuso a -12,67 $. SPCX era entrata alle 15:52 su un segnale +0,390 di un articolo davvero su SpaceX. Su 10 righe SPCX della giornata 7 parlano di Tesla, xAI, Intel o macro. COSTO NEGATIVO (un risparmio): drift_post_uscita SPCX -1,93 $ (dossier chiusure) - l'uscita indotta dall'articolo sbagliato ha evitato 1,93 $ di perdita ulteriore. Il segno del giorno e' a favore del difetto; il meccanismo resta quello che in occorrenze precedenti e' costato denaro.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-004]"
         }
       ],
-      "costo_cumulato_usd": 65.99,
+      "costo_cumulato_usd": 64.06,
       "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
@@ -1187,10 +1211,16 @@
           "costo_usd": null,
           "nota": "[DAY-007] 50 segnali etichettati 'ensemble:' hanno ENTRAMBI i contributori marcati eligible=false: sono i segnali salvati dal retry #90 a floor 0, che hanno contribuito davvero. Per modello: 89/210 eligible (42,4%) sia per glm-5.2 sia per gpt-oss. NOVITA' DEL GIORNO, interazione con il ribilanciamento dei pesi: ensemble:weights:current vale {glm-5.2: 0,70, gpt-oss: 0,30} mentre delle 72 letture a modello singolo 63 sono single:gpt-oss e solo 9 single:glm-5.2. Il modello che porta il 70% del peso LOO-ICIR e' quello che cade sotto il floor di confidenza 7 volte su 8 (confidence media glm 0,3965 contro gpt-oss 0,4860): peso configurato e peso effettivo divergono in modo sistematico e con segno prevedibile. Qualunque analisi LOO-ICIR che legga 'eligible' sottopesa proprio il modello a cui il ribilanciamento ha dato piu' peso. Costo null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-007]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-006] 72/215 righe (33,5%) etichettate 'single:' e quindi fallback_used=true: single:gpt-oss 60, single:glm-5.2 12. In 69 casi su 72 ENTRAMBI i modelli avevano risposto e il secondo e' stato espulso dal filtro min_confidence=0,40 (query di controllo: single:gpt-oss x glm-5.2 -> 60 risposte, 60 con conf<0,40; single:glm-5.2 x gpt-oss -> 9 su 9). Il retry a floor 0 di #90 scatta solo quando NESSUN modello e' eleggibile, mai quando ne resta esattamente uno. Errori di trasporto reali: 6 su ~430 invocazioni (1,4%), tutti gpt-oss timeout 90s. Caso concreto: SPCX -0,420 alle 16:48, unico contro-segnale forte sulla posizione aperta, scartato perche' lettura single. NON STIMABILE: le 18 righe SKIP_FALLBACK sono fuori dall'indice del worker controfattuale (F-079), quindi il costo dell'esclusione non e' calcolabile per costruzione.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-006]"
         }
       ],
       "costo_cumulato_usd": 54.48,
-      "occorrenze_non_stimate": 12,
+      "occorrenze_non_stimate": 13,
       "stato": "aperto",
       "issue": null
     },
@@ -1344,10 +1374,16 @@
           "costo_usd": null,
           "nota": "[DAY-027] Le 2 righe SELL del giorno (execution_decisions 25389 NFLX e 26113 PLTR) hanno signal_id NULL, mentre le 2 BUY ce l'hanno e tutte le 2.482 righe di SKIP/OBSERVE pure. Il segnale che ha deciso l'uscita e' citato solo nel testo libero di reason ('generated 2026-09-15 15:55 UTC, score=-0.171'): ho dovuto risalire a 10994 e 11044 per timestamp. La catena e' integra sul lato ingresso e spezzata sul lato uscita, che e' il lato dove il 97% della perdita si forma.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-027]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-014] Tutte e 5 le SELL del giorno (execution_decisions 27989 META, 28215 ORCL, 28552 SPCX, 28798 BA, 29161 AXP) hanno signal_id NULL, mentre tutte e 7 le BUY ce l'hanno. Dossier decision_signal_id_coverage: total_rows 787, with_signal_id 779 (98,98%), SELL 0/5 fill_rate 0.0 expected 'must_be_full', SKIP_PYRAMIDING 8/11; regressions=['SELL','SKIP_PYRAMIDING']. Il reason testuale cita il segnale ('generated 2026-09-16 15:53 UTC, score=+0.055') ma la chiave esterna no: per attribuire la SELL SPCX all'articolo su Intel e' servito parsing di stringa. Anche signal_score e' NULL sulle 5 SELL. Osservabilita', ma di correttezza: e' il lato dove oggi si concentrano le anomalie (DAY-004, DAY-005) ed e' l'unico non analizzabile automaticamente.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-014]"
         }
       ],
       "costo_cumulato_usd": 0.0,
-      "occorrenze_non_stimate": 22,
+      "occorrenze_non_stimate": 23,
       "stato": "aperto",
       "issue": null
     },
@@ -1531,9 +1567,15 @@
           "costo_usd": null,
           "nota": "[DAY-015] 107 URL distinti producono 211 righe scorate: 34 URL mappati su 2-8 ticker generano 107 righe, cioe' il 50,7% del pool. Distribuzione ticker per URL: 1->104, 2->18, 3->6, 4->5, 5->1, 6->2, 8->2. llm_responses.risk_flags della giornata: ambiguous_entity 158, low_source_quality 148, already_priced_in 117, rumor 14 - registrati e mai usati come gate (QX-01). event_type='macro' su 133 righe di 420, di cui 70 con directness='macro'. Nessuno dei 2 ordini del giorno nasce da una riga fan-out (BA e PLTR vengono da articoli issuer-specific): costo null oggi, ma il pool da cui il ranker sceglie e' per meta' di questa qualita'.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-015]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": 9.85,
+          "nota": "[DAY-012] 133/215 righe scorate (61,9%) nascono da URL mappati su piu' di un ticker; 123 articoli unici producono 215 righe, mapping_fanout_extra=92 (dossier copertura_articoli). TAG_UNCONFIRMED 132/215 (61,4%), ISSUER_SPECIFIC 82, SECTOR_MACRO e IRRELEVANT_FANOUT 0. COSTO ATTRIBUITO 9,85 $: il BUY QQQ delle 17:07 (trade 1011, 2,0745 azioni @ 709,47) nasce dal segnale 11218 generato da un market-summary macro mappato su 8 ticker (DELL, INTC, IWM, QQQ, XLE, XLF, XLK, XLV) - nessun contenuto specifico su QQQ - e chiude la seduta a mtm_eod -9,85 $ (dossier ingressi). Posizione ancora aperta: e' un MTM di fine giornata, non un realizzato. La seconda occorrenza del giorno (uscita SPCX su articolo Intel) e' contata su F-008 per non duplicare.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-012]"
         }
       ],
-      "costo_cumulato_usd": 927.76,
+      "costo_cumulato_usd": 937.61,
       "occorrenze_non_stimate": 20,
       "stato": "aperto",
       "issue": null
@@ -1682,9 +1724,15 @@
           "costo_usd": -18.43,
           "nota": "[DAY-019] PLTR comprata alle 16:07:00 su segnale 10998 (+0,343, conf 0,70, generato 16:01) e chiusa alle 17:52:00 su segnale 11044 (score +0,000 ESATTO, conf 0,20, generato 17:36) con reason '[below_entry_gate] ... weight 0.0%, position closed'. 1h45 di holding, trade 1004, netto +15,41 $ (lordo +16,21, costi 0,80). trades.exit_reason = 'hold_minimum_expiry': la chiusura e' avvenuta al PRIMO ciclo eleggibile dopo lo scadere del hold minimum (6.300 s esatti = floor(5400/900)+1 cicli), quindi il hold minimum ha soltanto ritardato una liquidazione gia' decisa dall'assenza di banda fra gate d'ingresso 0,30 e gate d'uscita 0. COSTO NEGATIVO (un risparmio): uscita a 174,80 contro chiusura di seduta 172,605 su 8,398565 azioni = -18,43 $ evitati. Come il 09-14, il difetto e' strutturale e il segno del giorno e' a suo favore.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-019]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": -24.34,
+          "nota": "[DAY-005] Tutte e 4 le uscite intraday avvengono con sentiment vivo POSITIVO: META dec 27989 (+0,266), ORCL 28215 (+0,280), SPCX 28552 (+0,055), AXP 29161 (+0,078), tutte 'weight 0.0%, position closed'. Gate d'ingresso 0,30, soglia d'uscita 0: nessuna banda. Tre su quattro hanno trades.exit_reason='hold_minimum_expiry' con ore_tenuta 1,7500 ESATTE (META, ORCL, SPCX) - escono al primo ciclo dopo i 90 minuti di hold minimo. Costi di frizione realizzati sulla giornata 4,26 $ su 41,08 $ di gross. COSTO NEGATIVO (un risparmio) -24,34 $: somma dei drift_post_uscita di META (-6,22), ORCL (-4,91) e AXP (-13,21) dal dossier; SPCX e' attribuita a F-008 per non contare due volte. Come il 09-14 e il 09-15 il difetto e' strutturale e il segno del giorno gli e' favorevole.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-005]"
         }
       ],
-      "costo_cumulato_usd": 111.41,
+      "costo_cumulato_usd": 87.07,
       "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": null
@@ -1809,10 +1857,16 @@
           "costo_usd": null,
           "nota": "[DAY-023] SUM(portfolio_cycles.orders_count) = 81 sui 24 cicli del giorno contro 4 ordini realmente inviati al broker (piu' 3 stop protettivi). Il valore per ciclo cresce monotonamente da 3 (14:07) a 5 (18:22-19:52) indipendentemente dalle submission, perche' conta gli ordini target del combiner. Il log ripete 'orders_before=4 orders_after=4 constraints=0 final=4' al ciclo 16:07 anche se 3 dei 4 vengono poi bloccati o sono SELL.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-023]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-022] SUM(portfolio_cycles.orders_count) = 113 sui 23 cicli del 09-16 contro 19 ordini realmente inviati al broker (12 S4 - 7 BUY e 5 SELL - piu' 7 ordini di stop protettivo, di cui 3 'new' e 4 'canceled'). Ogni ciclo riporta 3-6 ordini anche quando nessun ordine viene inviato: il campo conta gli ordini TARGET del combiner, non quelli trasmessi. Sovrastima dell'attivita' di circa 6x per qualunque dashboard che legga il campo. Osservabilita' pura.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-022]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 19,
+      "occorrenze_non_stimate": 20,
       "stato": "aperto",
       "issue": null
     },
@@ -1948,10 +2002,16 @@
           "costo_usd": null,
           "nota": "[DAY-024] trades.slippage_est identico al centesimo di bit a cost_usd su entrambi i trade chiusi: NFLX 0.7964487432408385 = 0.7964487432408385, PLTR 0.7998895735070681 = 0.7998895735070681. La qualita' di esecuzione e' stata calcolata a mano in questa sessione dai bar 15 min Alpaca/IEX: BA fill 210,30 contro barra 16:00 210,71 (-19 bp, favorevole), PLTR 172,87 contro 173,365 (-29 bp, favorevole), NFLX 77,88 contro 77,63 (+32 bp, favorevole). Tutte e tre le esecuzioni sono state buone, ma il sistema non lo registra.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-024]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-017] trades.slippage_est identico bit a bit a cost_usd su tutti e 4 i trade chiusi con il campo valorizzato: AXP 0.8100080672236479, ORCL 0.811101370561296, META 0.29465354393322657, SPCX 1.5466413505737169. Su MRVL, INTC e QQQ (ancora aperti) e' NULL. Il campo riporta il costo modellato dal TradeCostCalculator, non la differenza fra prezzo atteso ed eseguito - e il prezzo atteso non esiste: decision_price e decision_price_source sono NULL su tutte e 12 le decisioni ordinanti del giorno. Osservabilita': la qualita' d'esecuzione non e' misurata, quindi non e' nemmeno falsificabile.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-017]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 21,
+      "occorrenze_non_stimate": 22,
       "stato": "aperto",
       "issue": null
     },
@@ -2009,10 +2069,16 @@
           "costo_usd": null,
           "nota": "[DAY-011] 84 occorrenze di 'SPY benchmark fetch failed: subscription does not permit querying recent SIP data' in giornata, a WARNING, senza alcun alert. Verificato in questa sessione che il feed IEX risponde correttamente per SPY sulle stesse date (760,755 il 09-14, 757,42 il 09-15): il fallimento e' una scelta di feed, non un'indisponibilita' del dato. Il confronto book-vs-benchmark di questo report e' stato fatto a mano.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-011]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-018] 85 occorrenze di 'SPY benchmark fetch failed' nel log worker del 09-16: 84 con {'message':'subscription does not permit querying recent SIP data'} e 1 NameResolutionError(data.alpaca.markets), tutte a WARNING, nessun alert. Limite di sottoscrizione permanente degradato in silenzio. Il dossier non e' affetto (usa Alpaca daily con beta_1_arithmetic_v1), ma ogni confronto vs benchmark calcolato in-process gira su un benchmark assente. Osservabilita' pura.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-018]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 8,
+      "occorrenze_non_stimate": 9,
       "stato": "aperto",
       "issue": "#444"
     },
@@ -2192,10 +2258,16 @@
           "costo_usd": null,
           "nota": "[DAY-013] stale_drop_metrics_daily 2026-09-15/alpaca_benzinga: 381 stale drop su 804 queued = 47,4%, di cui 244 gia' stale AL FETCH e 137 scaduti fuori sessione, 0 in coda. avg_fetch_latency_hours 3,03, avg_queue_wait_hours 1,93, alert_threshold 0,25 superata di quasi il doppio, alert_required=true. A differenza del 09-14 l'alert E' STATO CONSEGNATO (22:55:00, HTTP 200): unico Telegram riuscito della giornata. Nota di contrasto: la latenza published->fetched sulle righe effettivamente persistite in news_log e' ottima (mediana 0,5 min, media 14,7 min su 202 righe) - la coda lunga e' interamente negli articoli che non arrivano mai allo scoring.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-013]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-013] stale_drop_metrics_daily 2026-09-16/alpaca_benzinga: 352 stale drop su 792 queued = 44,44%, sopra la soglia d'allerta 0,25 (alert_required=t), di cui 223 GIA' STALE AL FETCH e 129 scaduti fuori sessione - zero imputabili all'attesa in coda. avg_fetch_latency_hours 3,15 contro una finestra di entry-freshness di 2,0 h; avg_queue_wait_hours 1,75. GDELT nello stesso giorno: 12 queued, 0 drop. Nota positiva: questo e' l'UNICO alert consegnato della giornata (200 OK alle 22:55). NON STIMATO qui: il costo alpha della latenza e' gia' registrato su F-030 per il 09-16 e contarlo anche qui lo duplicherebbe.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-013]"
         }
       ],
       "costo_cumulato_usd": 2.37,
-      "occorrenze_non_stimate": 13,
+      "occorrenze_non_stimate": 14,
       "stato": "aperto",
       "issue": null
     },
@@ -2428,10 +2500,16 @@
           "costo_usd": null,
           "nota": "[DAY-010] Primo ciclo portfolio alle 14:07:00,717 contro apertura RTH 13:30 (EDT): persi i cicli delle 13:37 e 13:52, 24 cicli su 26 attesi. Il sistema rileva il ritardo (mobile_events CRITICAL 'Ciclo di portafoglio in ritardo' aperto 13:30:01,016) e lo auto-risolve alle 14:08:00,991 senza intervento e senza consegna. In parallelo un WARNING 'Segnali sentiment in ritardo' aperto 13:30:01 e chiuso 13:34. Il primo segnale del giorno e' delle 13:33:20, quindi lo scoring era gia' attivo quando il ciclo di portafoglio ancora non partiva: la perdita e' solo del ramo decisionale. Costo non stimabile: nessun segnale sopra gate esisteva prima delle 14:07 (il primo e' PLTR +0,409 alle 13:42, ma era gia' nel pool al ciclo 14:07).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-010]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-010] crontab portfolio-cycle: minute='7,22,37,52', hour='14-21' (celery_app.py:265) contro apertura RTH 13:30 UTC (EDT). Primo ciclo della seduta alle 14:07:00: persi gli slot 13:37 e 13:52. In coda alla seduta la griglia resta accesa fino alle 21:52, 2 ore dopo la chiusura: su 200 invocazioni di run_sentiment_worker, 80 (40%) hanno restituito {'skipped': True, 'reason': 'market_closed'}. Il sistema se ne accorge: mobile_events delle 22:50 'Griglia portfolio-cycle fuori seduta' (warning, non consegnato - DAY-008). Caso concreto: il segnale MRVL +0,325 e' pronto alle 13:45:37 e attende 22 minuti il primo ciclo utile; l'ingresso avviene a 230,99. NON STIMATO: il prezzo MRVL alle 13:52 non e' ricostruibile senza rifetchare barre intraday (fuori dal perimetro read-only locale). Limite superiore noto: dossier ingressi MRVL vs_apertura = +18,99 $, cioe' quanto avrebbe reso l'ingresso all'apertura, di cui i due cicli persi sono una frazione.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-010]"
         }
       ],
       "costo_cumulato_usd": 134.05,
-      "occorrenze_non_stimate": 20,
+      "occorrenze_non_stimate": 21,
       "stato": "aperto",
       "issue": null
     },
@@ -2495,6 +2573,12 @@
           "costo_usd": null,
           "nota": "[DAY-017] #161 segnala 10/41 posizioni non proteggibili (qty < 1) in TUTTI i 24 cicli: AMAT, AMD, ASML, CAT, DELL, LLY, NOK, SPY, UNH, WDC. AMAT scoperta a -29,7% e WDC a -24,3% per l'intera seduta, oltre d_hard, senza alcun ordine di stop. NUOVA EVIDENZA sulla finestra di scopertura al nuovo ingresso: BA comprata alle 16:07:06 per 6,903757 azioni riceve uno stop protettivo da 4 azioni alle 16:07:06,776 (ordine a2cd9d3a, poi cancellato) e solo al ciclo successivo, 16:22:05,373, uno stop corretto da 6 (ordine 34164d04, tuttora 'new'). 15 minuti al 58% di copertura, sistematici a ogni nuovo ingresso. PLTR identico: stop da 8 su 8,398565 creato alle 16:22:05,521. Costo null: nessuno stop e' scattato oggi.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-017]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": 0.0,
+          "nota": "[DAY-016] Stop protettivi piazzati con quantita' arrotondata per difetto all'unita' e al ciclo SUCCESSIVO all'ingresso: MRVL sell 6 alle 14:22 su 6,374258625 possedute (94,1%), INTC sell 14 alle 15:07 su 14,523677979 (96,4%), QQQ sell 2 alle 17:22 su 2,074492226 (96,4%) - 15 minuti di scopertura totale dopo ogni ingresso. In piu' '#161: 10/40 held positions are unprotectable (qty < 1)' in ogni ciclo: AMAT (qty 0,8571) scoperta a -28,7%, WDC (qty 0,3347) a -22,7% e poi -24,3%, NOK -15,1%. COSTO ZERO AFFERMATO: stop_decisions per il 09-16 ha 0 righe, nessuno stop e' stato toccato, quindi la copertura incompleta non e' costata nulla in questa seduta.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-016]"
         }
       ],
       "costo_cumulato_usd": 35.9,
@@ -3152,9 +3236,15 @@
           "costo_usd": 5.48,
           "nota": "[DAY-018] Guard P0-05 sparato 57 volte in giornata (MRK 17, XLE 10, XOM 7, NFLX 7, CVX 7, SHEL 6, SPY 2, LLY 1) su 8 segnali distinti sopra il gate 0,30, tutti su simboli gia' a libro da S1/legacy (LLY dal 2026-07-15, XOM dal 07-13, SPY dal 07-10, XLE dal 08-31). Solo 9 righe SKIP_PYRAMIDING persistite, e MRK non ne ha nessuna - il buco e' registrato a parte come F-080. CONTROFATTUALE, entrata alla barra 15 min del blocco e uscita alla chiusura, size 2% NAV (2.185 $ su 109.258 $) per segnale: NFLX +8,59 (77,63->77,935), MRK +6,02 (143,35->143,745), CVX +7,25 (216,99->217,71), XOM +1,81 (169,13->169,27), SHEL +0,44 (98,89->98,91), SPY +0,01 (757,655->757,66), XLE -6,45 (66,075->65,88), LLY -12,20 (1143,09->1136,71). Totale LORDO +5,48 $, che e' il valore registrato qui. ONESTA' SUL SEGNO: al netto di ~28 $ di costi di round-trip stimati (16 bp x 8 x 2.185) il guard ha fatto RISPARMIARE circa 22 $ alla seduta. Il difetto resta strutturale, ma oggi non ha avuto un costo.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-018]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": -83.84,
+          "nota": "[DAY-015] Guard P0-05 anti-pyramiding sparato 11 volte (execution_decisions SKIP_PYRAMIDING; s4_intent_events reason_code SKIP_PYRAMIDING 90 osservazioni): MRK, INTC x4, AMD, AXP, JPM x2, XOM, SHEL. 5 blocchi su posizioni S1 aperte a luglio, 4 su INTC comprato quella mattina da S4 stesso - il cui segnale e' poi salito a +0,640, il piu' forte del giorno, senza poter essere rincarato. 3 righe su 11 senza signal_id. COSTO NEGATIVO (un risparmio) -83,84 $: somma esatta di counterfactual_return_1h x intended_notional_usd sulle 11 righe (dossier guard_decisions, 0 righe senza dati); i peggiori contributi evitati sono INTC 29039 (-14,68 bp su 2.182 $), XOM (-13,92 bp) e JPM 28675 (-9,86 bp). Il controfattuale e' calcolato dal run_counterfactual_worker, non da questa sessione.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-015]"
         }
       ],
-      "costo_cumulato_usd": 404.17,
+      "costo_cumulato_usd": 320.33,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -3521,10 +3611,16 @@
           "costo_usd": null,
           "nota": "[DAY-019] Quattro segnali oltre il gate in valore assoluto col segno ribassista: NFLX -0,420, IWM -0,303, XLV -0,300, F -0,299 (1,4% dei 214 segnali). Nessuno dei quattro simboli e' a libro, quindi il segnale non puo' nemmeno chiudere una posizione. Il gate scarta i ribassisti con score.abs() >= threshold: la loro esistenza e' registrata ma operativamente inerte. Nessun costo diretto oggi.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-08.md §6, [DAY-019]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-024] Quattro segnali oltre il gate 0,30 col segno ribassista su mover reali della seduta: HOOD -0,325 (seduta -5,46%), GS -0,386 (-3,96%), IWM -0,327, QQQ -0,346. Nessuno dei quattro simboli e' detenuto da S4 e il libro e' long-only, quindi il segnale corretto non e' azionabile per costruzione: funnel_v2.esclusi_pipeline.non_actionable_long_only = 6, opportunity_v2 calcola accessible = 0. NON STIMABILE come costo del difetto: il movimento non era accessibile per perimetro, non per un guasto della pipeline. Va contato perche' e' la componente strutturale della miss rate che nessuna correzione di pipeline puo' ridurre - 6 dei 16 mover del giorno.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-024]"
         }
       ],
       "costo_cumulato_usd": 57.69,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": null
     },
@@ -4063,10 +4159,16 @@
           "costo_usd": null,
           "nota": "[DAY-006] 13 segnali con ensemble_std persistito a 0,000 ESATTO mentre le due polarity grezze distano >= 0,30. I peggiori: SPY glm +0,15 vs gpt-oss -0,50 (spread 0,65), DIS +0,30 vs -0,30 (0,60), INTC +0,15 vs -0,40 (0,55), NVDA -0,15 vs -0,70 (0,55), AVGO +0,20 vs +0,70 (0,50, score finale +0,560 - il piu' alto del giorno). Tutti e 13 sono etichettati single:<model>, cioe' un solo modello ha superato min_confidence e lo Step 2 di ensemble.py dichiara 'no divergence possible'. Conseguenza misurata: il guard di divergenza (soglia 0,40) NON e' scattato nemmeno una volta in tutta la seduta (0 segnali con ensemble_std >= 0,40) proprio perche' i casi di massimo disaccordo escono dal calcolo. 16 segnali hanno i due modelli di segno opposto. Nessuno dei 13 ha generato un ordine (tutti SKIP_FALLBACK o sotto rank): costo null, difetto di registrazione.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-006]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-007] 27/141 segnali 'ensemble:' persistiti con ensemble_std = 0,000 ESATTO, fra cui il top score della giornata (INTC +0,640 conf 0,80 alle 15:52:52) e SPCX +0,390 alle 15:48:23. La divergenza e' misurata DOPO il filtro di eleggibilita', quindi quando sopravvive un solo contributore lo std e' 0 per costruzione - proprio nei casi di massimo disaccordo. Anche le 2 righe FinBERT, che nascono da divergenza reale (glm -0,60 vs gpt +0,05; glm -0,70 vs gpt -0,10), sono persistite con ensemble_std=0. Osservabilita' pura: nessun costo attribuibile.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-007]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 4,
+      "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
     },
@@ -4168,10 +4270,16 @@
           "costo_usd": null,
           "nota": "[DAY-023] Nessuna riga del 2026-09-14 porta un extraction_method prodotto dal resolver deterministico: source_metadata 206, org_lookup 23. La maggioranza relativa delle mappature resta TAG_UNCONFIRMED (120 contro 105 ISSUER_SPECIFIC) e 4 righe sono FALSE_ENTITY_MATCH. false_positive_ticker_rate non e' ne' misurato ne' vincolato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-023"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-023] dossier copertura_articoli.mapping_rilevanza del 09-16: {'ISSUER_SPECIFIC': 82, 'SECTOR_MACRO': 0, 'FALSE_ENTITY_MATCH': 1, 'IRRELEVANT_FANOUT': 0, 'TAG_UNCONFIRMED': 132, 'UNKNOWN': 0}. Il 61,4% delle righe non ottiene alcun verdetto di rilevanza e nessuna riga viene mai classificata SECTOR_MACRO o IRRELEVANT_FANOUT: il resolver deterministico non emette RESOLVED. Fra le TAG_UNCONFIRMED ci sono headline inequivocabilmente ticker-specifiche ('Circle CEO Says CLARITY Talks Are 90% There' e 'Ninth Circuit Reverses Denial Of Injunction Against Kalshi, Robinhood', entrambe taggate HOOD). Senza verdetto la rilevanza non puo' essere usata come gate, che e' il piano QX-01. Gia' tracciato e gated sul golden set: nessuna azione in freeze.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-023]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 6,
+      "occorrenze_non_stimate": 7,
       "stato": "aperto",
       "issue": null
     },
@@ -4371,10 +4479,16 @@
           "costo_usd": null,
           "nota": "[DAY-008] 10 alert CRITICAL del decay monitor alle 21:00:00 (S1 3, S2 4, S4 3), emessi con log.critical e nient'altro; il task risulta succeeded. Nessun canale: monitor_devices=0, mobile_notification_deliveries=0 dal 09-15, Telegram in errore 400 su 4 invii su 5 (F-005). Invariato rispetto al 09-14.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-008]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-008] mobile_events del 09-16: 5 critical + 6 warning; mobile_notification_deliveries: 0; monitor_devices: 0. In piu' 11 righe CRITICAL 'DECAY CRITICAL' (S1 x4, S2 x4, S4 x3) alle 21:00:00 emesse con solo log.critical, che non passano nemmeno da mobile_events. Contenuto non consegnato: 4 posizioni cieche lato uscita (ASML, PFE, SBUX, WDC) da held_news_loss_alert e 3 'Degradazione market_clock' CRITICAL. Osservabilita' pura: nessun costo attribuibile, ma e' il moltiplicatore di ogni altro difetto della giornata.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-008]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 6,
+      "occorrenze_non_stimate": 7,
       "stato": "aperto",
       "issue": null
     },
@@ -4653,9 +4767,15 @@
           "costo_usd": null,
           "nota": "[DAY-022] Alle 20:33:04Z risoluzione DNS fallita verso paper-api.alpaca.markets ('Mobile snapshot: Alpaca broker read failed... NameResolutionError'); incidente mobile pipeline:broker_stale CRITICAL aperto e recovered in 59 s; il task Celery risulta comunque succeeded. Stesso schema DNS alle 19:37 e 19:54 su OpenFIGI (HACK, GM). Fuori orario di mercato: nessun ciclo portfolio perso oggi.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-14.md §9 DAY-022"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": 0.0,
+          "nota": "[DAY-003] Alle 19:37:04Z il ciclo portfolio aborta su NameResolutionError verso data.alpaca.markets ('Failed to fetch price bars ... using empty DataFrame' -> 'No price data available - aborting portfolio cycle') e il task Celery registra 'run_portfolio_cycle succeeded in 4.77s: {\\'error\\': \\'no_price_data\\'}'. portfolio_cycles ha 23 righe fra 14:07 e 19:52: manca lo slot 19:37. Stesso pattern del 09-14 su host diverso (allora /v2/clock, oggi data.alpaca.markets); 11 NameResolutionError complessive nel log worker (19:37, 19:42, 20:00, 20:06). Nessun retry. COSTO ZERO AFFERMATO, non non-stimato: i due cicli adiacenti che hanno girato (19:22 e 19:52) non hanno inviato alcun ordine e l'ultimo ordine della seduta e' delle 18:52, quindi nella finestra saltata non c'era alcun ordine da perdere. Il difetto resta strutturale: il fallimento e' invisibile al monitoraggio Celery.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-003]"
         }
       ],
-      "costo_cumulato_usd": 0,
+      "costo_cumulato_usd": 0.0,
       "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
@@ -4697,10 +4817,16 @@
           "costo_usd": null,
           "nota": "[DAY-016] 147/211 corpi (69,7%) e 50/211 titoli (23,7%) contengono entita' HTML non decodificate (&[a-zA-Z]+; o &#[0-9]+;). Tag HTML residui: 0, quindi il sanitizer rimuove i tag ma non fa html.unescape. Peggiora rispetto alla misura precedente (61,6%). Nessun effetto dimostrato sul segnale; per il ramo FinBERT consumerebbe il budget di 512 caratteri, ma FinBERT non e' stato invocato oggi. Costo null.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-016]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-011] 158/215 righe scorate (73,5%) contengono entita' HTML non decodificate in titolo o corpo (news_log, regex '&[a-zA-Z#0-9]+;'). In peggioramento rispetto al 09-15 (69,7% corpi / 23,7% titoli). Esempi finiti nel prompt DK-CoT: 'What&#39;s Going On With Marvell Technology Stock Wednesday?', 'S&amp;P 500 Gains, Crude Falls Ahead Of Fed&#39;s Expected First Hike', 'Wednesday&rsquo;s premarket session'. src/text/sanitizer.py normalizza NFKC e rimuove tag e zero-width ma non chiama mai html.unescape. Aggravante misurata oggi: FinBERT taglia a 512 caratteri e su uno dei 2 fallback il titolo ne ha consumati 435 lasciando 50 caratteri di corpo (finbert_fallback_events). Osservabilita'/correttezza dell'input di misura; nessun costo attribuibile a un singolo trade.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-011]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 2,
+      "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
     },
@@ -4735,10 +4861,16 @@
           "costo_usd": null,
           "nota": "[DAY-002] Prima osservazione. src/workers/sentiment.py:1491 calcola fallback_count = sum(r.fallback_used) e lo restituisce a :1541 come 'finbert_fallbacks'; ma r.fallback_used e' True anche per le letture single:<model> (_label_from_model_count, :346-356). Il 2026-09-15 gli esiti dei task sommano 72 'finbert_fallbacks' mentre FinBERT non e' MAI stato invocato: finbert_fallback_events per il giorno = 0 righe, sentiment_signals con model_id='finbert' = 0, ensemble_cycle_health SUM(n_finbert)=0 e SUM(n_single)=72. Anche 'ensemble_success' e' sbagliato di conseguenza (len(results) - fallback_count sottrae i single). La tabella ensemble_cycle_health (#427) e' invece corretta, e il commento a :1502-1506 dichiara tre bucket disgiunti 'che rispecchiano il dict di ritorno' quando il dict non ha il bucket single-model. Chi legge la telemetria Celery invece del DB stima un fallback rate FinBERT del 34,1% contro lo 0,0% reale. Costo null: correttezza dell'evidenza, nessun effetto sulle decisioni. Passa il test di esenzione della OBSERVATION_CHARTER.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-002]"
+        },
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-021] L'esito aggregato del task sentiment sui 120 cicli eseguiti dichiara {'processed': 215, 'ensemble_success': 141, 'finbert_fallbacks': 74, 'skipped_stale': 389, 'skipped_not_tradable': 207}. I fallback FinBERT REALI sono 2: sentiment_signals con model_id='finbert' = 2, finbert_fallback_events del 09-16 = 2 (entrambi su SPY, entrambi per divergenza vera). Il contatore somma le 72 letture a modello singolo (DAY-006) ai 2 fallback veri e dichiara un tasso del 34,4% contro lo 0,93% effettivo: sovrastima di 36x. Seconda occorrenza consecutiva dopo il 09-15. Osservabilita' pura, ma indirizza la diagnosi sul difetto sbagliato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-021]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 1,
+      "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
     },
@@ -4815,6 +4947,82 @@
       ],
       "costo_cumulato_usd": 10.78,
       "occorrenze_non_stimate": 0,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-083",
+      "titolo": "Il riconciliatore lifecycle S4 persiste un guasto di trasporto come osservazione di business: 21 BROKER_POSITION_MISSING scritte mentre il broker era irraggiungibile",
+      "tipo": "difetto",
+      "confidenza": "misurata",
+      "primo_avvistamento": "2026-09-16",
+      "occorrenze": [
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-001] Alle 19:42:04Z run_reconcile_fills_intraday riceve un NameResolutionError(paper-api.alpaca.markets) sulle posizioni broker e lo logga correttamente come tale ('#295: broker positions unavailable during lifecycle reconcile'). Poi scrive comunque 21 righe s4_lifecycle_events con reason_code='BROKER_POSITION_MISSING', broker_quantity NULL e reconstructible=false, piu' 23 eventi P0 e 21 P1 derivati (esito task: {'updated': 0, 's4_lifecycle_events': 21, 's4_p0_events': 23, 's4_p1_events': 21}). Il codice distingue 'non lo so' da 'non c'e'' nel log ma non nel ledger. Le 21 righe sono il 55% dei 38 eventi lifecycle della giornata (BROKER_FILLED 17, tutte con broker_quantity valorizzata). Le stesse posizioni erano regolarmente a libro: la riconciliazione EOD delle 21:35 chiude con 41 fully_held, 1 partially_wound_down e 0 anomalie. NON STIMABILE in dollari: nessun ordine e nessun P&L dipende da queste righe. Il danno e' sul ledger append-only del trial S4, che per costruzione non si riscrive, e su ogni misura futura che conti le posizioni mancanti al broker.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-001]"
+        }
+      ],
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-084",
+      "titolo": "/api/trades espone una riga per ordine broker invece del ledger dei trade: net_pnl sempre nullo e BUY etichettati come uscite",
+      "tipo": "difetto",
+      "confidenza": "attribuita",
+      "primo_avvistamento": "2026-09-16",
+      "occorrenze": [
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-002] GET /api/trades?limit=200 restituisce 12 righe per il 09-16, TUTTE con net_pnl=null, mentre la tabella trades ha 7 ingressi e 5 chiusure per -45,34 $ realizzati. L'id restituito e' un order id (es. 215ed2af-... per AXP), i SELL hanno entry_time/entry_price/entry_order_id nulli, i BUY compaiono con exit_reason='portfolio_buy', e entry_notional diverge dal DB (API 1.461,88 $ su AXP = qty x prezzo di USCITA, contro 1.471,86 $ = qty x prezzo d'ingresso). Chiunque auditi dal REST - UI, mobile, un revisore umano, una sessione forense che non interroghi il DB - vede una giornata a P&L zero e non puo' ricostruire nessuna chiusura. Stessa classe di F-053 (endpoint che contraddice il ledger) su un endpoint diverso. NON STIMABILE: e' un difetto di sola presentazione, non tocca ordini ne' P&L.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-002]"
+        }
+      ],
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 1,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-085",
+      "titolo": "Redis MISCONF da disco pieno abbatte l'intero stack Celery per 11 minuti senza produrre alcun alert",
+      "tipo": "difetto",
+      "confidenza": "misurata",
+      "primo_avvistamento": "2026-09-16",
+      "occorrenze": [
+        {
+          "data": "2026-09-16",
+          "costo_usd": 0.0,
+          "nota": "[DAY-025] Dalle 07:14:07Z alle 07:25:43Z il disco dell'host si riempie, Redis rifiuta le scritture ('MISCONF Redis is configured to save RDB snapshots, but it's currently unable to persist to disk') ed entrambi i worker Celery si disconnettono: CRITICAL/MainProcess 'Unrecoverable error' alle 07:14:08, poi 29 tentativi di riconnessione fino al 'Connected to redis://redis:6379/0 ; ready.' delle 07:25:43. 31 righe MISCONF nel log worker e altre 31 nel log worker-inference (62 totali), piu' 1 OperationalError Postgres nella stessa finestra. Nessun mobile_events, nessun alert, nessun ticket automatico: l'unica traccia sono i log. COSTO ZERO AFFERMATO: news_log non ha alcuna riga prima delle 13:32:20Z del 09-16 (min fetched_at della giornata), quindi nella finestra dell'outage non c'era ingest da perdere, e il trading apre alle 13:30. Se lo stesso evento fosse caduto in seduta avrebbe azzerato ingest, scoring e cicli portfolio senza che nessuno se ne accorgesse in tempo reale. Triage separato: #618, chiusa not-planned, chi ha riempito il disco non e' ricostruibile.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-025]"
+        }
+      ],
+      "costo_cumulato_usd": 0.0,
+      "occorrenze_non_stimate": 0,
+      "stato": "aperto",
+      "issue": null
+    },
+    {
+      "id": "F-086",
+      "titolo": "Le chiamate all'ensemble Ollama non lasciano alcuna traccia di trasporto: uptime, tasso di errore e latenza sono inferiti dai soli successi persistiti",
+      "tipo": "difetto",
+      "confidenza": "misurata",
+      "primo_avvistamento": "2026-09-16",
+      "occorrenze": [
+        {
+          "data": "2026-09-16",
+          "costo_usd": null,
+          "nota": "[DAY-026] OLLAMA_BASE_URL punta a https://ollama.com (src/config.py:182) ma il client Ollama non passa dal logger httpx: nel log worker-inference del 09-16 gli unici host POST-ati sono api.openfigi.com (242 chiamate, il resolver ticker) e api.telegram.org (1). Le uniche righe che nominano Ollama sono le 6 WARNING 'ensemble model failed: model=gpt-oss:20b-cloud kind=error error=Ollama timeout (90s)'. L'attivita' dell'ensemble e' ricostruibile solo dalle righe llm_responses persistite - cioe' dai SUCCESSI - che per costruzione non possono misurare ne' i fallimenti silenziosi ne' la latenza (la colonna latency_ms non esiste). PRIMA OCCORRENZA CON DANNO GIA' PRODOTTO: la revisione 1 di questo stesso report ha attribuito a Ollama i 242 POST verso OpenFIGI e ne ha derivato '243 chiamate, 6 fallimenti, 2,5%'; il valore corretto e' 6 su ~430 invocazioni (215 glm-5.2:cloud + 215 gpt-oss:20b-cloud, di cui 212 gpt-oss persistite e 3 segnali rimasti a una sola risposta) = 1,4%. La conclusione operativa (Ollama su, 0 minuti di outage, righe llm_responses in ogni ora fra le 13 e le 19 UTC) non cambia, ma poggiava su evidenza sbagliata. NON STIMABILE in dollari: difetto di sola osservabilita'. Rilevante perche' e' l'affermazione che F-049 (breaker del fallback morto) rende critica.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-026]"
+        }
+      ],
+      "costo_cumulato_usd": 0,
+      "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
     }
