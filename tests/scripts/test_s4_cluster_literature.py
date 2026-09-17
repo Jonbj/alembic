@@ -80,13 +80,23 @@ def _ledger_events(output_dir: Path) -> list[dict[str, object]]:
 
 
 def test_append_jsonl_refuses_an_external_file_replacement(tmp_path: Path) -> None:
+    """La guardia rifiuta una sostituzione fuori banda del file append-only.
+
+    Quale dei due controlli scatti dipende dal filesystem: se dopo l'unlink
+    l'inode viene riusato per il file nuovo, dev/ino coincidono e a rilevare
+    la sostituzione e' la dimensione. E' successo davvero fra locale e CI, e
+    il ramo che scatta non e' il contratto: il contratto e' che la riga non
+    venga appesa a un file che non e' piu' quello di prima.
+    """
     path = tmp_path / "events.jsonl"
     coordinator.append_jsonl(path, {"event": "FIRST"})
     path.unlink()
     path.write_text('{"event":"REPLACED"}\n')
 
-    with pytest.raises(RuntimeError, match="identity changed"):
+    with pytest.raises(RuntimeError, match="identity changed|size changed externally"):
         coordinator.append_jsonl(path, {"event": "SECOND"})
+
+    assert "SECOND" not in path.read_text()
 
 
 def test_retry_campaign_reopens_an_unavailable_source_without_rewriting_history(
