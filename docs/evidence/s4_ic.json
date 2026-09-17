@@ -1,5 +1,5 @@
 {
-  "generato_il": "2026-09-16T07:01:55.606554+00:00",
+  "generato_il": "2026-09-16T08:10:02.596445+00:00",
   "metodo": "una osservazione per simbolo-giorno scelta con la regola del ranker (fallback_used ASC, generated_at DESC); Spearman cross-sectional giornaliero; t calcolato sui giorni",
   "discontinuita": "Dal 2026-09-08 (#467) la riduzione a simbolo-giorno applica la regola del ranker (fallback_used ASC, generated_at DESC); prima teneva l'ultimo segnale per solo orario, che il sistema non usa. Le serie prima e dopo questa data NON sono confrontabili: a parita' di dati le due riduzioni divergono su 411/3228 simbolo-giorni (12,7%), 75 al gate 0.30, e il sottoinsieme 'ensemble' era il piu' contaminato (IC 1g -0.0087 -> -0.0339).",
   "osservazioni_simbolo_giorno": 3558,
@@ -438,14 +438,12 @@
     }
   ],
   "criterio": {
-    "serie_valida_dal": "2026-09-08",
-    "n_giorni_totali": 65,
     "criterio_registrato": true,
     "esito": "INSUFFICIENT_N",
     "soglia": null,
-    "n_corrente": 5,
+    "n_corrente": 65,
     "n_richiesto": 213,
-    "ic_medio": -0.06027079888783247,
-    "t_stat": -1.9638635229955879
+    "ic_medio": -0.03526442470538286,
+    "t_stat": -2.101665116009819
   }
 }

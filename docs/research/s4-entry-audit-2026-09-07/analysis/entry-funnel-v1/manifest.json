@@ -1,0 +1,14 @@
+{
+  "generated_at": "2026-09-08T10:13:30.701487+02:00",
+  "inputs": {
+    "enrichment_dir": "docs/research/s4-entry-audit-2026-09-07/enrichment/alpha-miss-2026-08-03_2026-09-04-v1",
+    "snapshot_dir": "docs/research/s4-entry-audit-2026-09-07/snapshots/full-signals-2026-08-03_2026-09-05"
+  },
+  "metrics": {
+    "path": "metrics.json",
+    "sha256": "440bc84231532e38e89e2c1c92590ded0797fa635c2f7a69700453062cc7514b"
+  },
+  "mode": "READ_ONLY_DESCRIPTIVE_ANALYSIS",
+  "policy_output": "DESCRIPTIVE_ONLY",
+  "schema_version": 1
+}
