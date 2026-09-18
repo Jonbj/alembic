@@ -170,13 +170,27 @@
 # un agente qui puo' solo dichiarare no-op. E' la trappola gia' vista con #405
 # (4 selezioni, 2 no-op, giro incastrato), #300 (6 no-op in 19 ore) e #507.
 #
-# Istruzione per l'agente in loop: NON selezionare #84 finche' questa nota e'
-# qui. Non e' un no-op, e' una sospensione deliberata dell'operatore.
+# CANCELLO MECCANICO, aggiunto il 2026-09-17 dopo che la sola nota NON ha fermato
+# niente: la label `freeze-ok` e' stata TOLTA. Non e' una dimenticanza, e'
+# deliberata, esattamente come per 400/399/404/403 qui sopra. Il loop la salta e
+# lo segnala, senza consumare il giro.
+#
+# Perche' la sola nota non bastava, misurato: la issue e' stata selezionata e
+# espulsa per 2 no-op alle 15:01Z del 2026-09-17. Il contatore dei no-op usa
+# sha256(corpo + label + commit che referenziano la issue), e il commit di merge
+# che GitHub genera per una PR il cui branch nomina la issue CREA quel
+# riferimento: l'impronta cambia, il contatore riparte da zero e la issue torna
+# selezionabile. Riscrivere il messaggio del commit sul branch non evita il
+# problema, perche' e' il merge commit a referenziarla. L'espulsione per no-op
+# non e' quindi uno stop stabile: lo e' solo la label.
+#
+# Istruzione per l'agente in loop: NON selezionare la issue 84 finche' questa
+# nota e' qui. Non e' un no-op, e' una sospensione deliberata dell'operatore.
 #
 # Torna lavorabile quando: le due risposte vendor scritte sono allegate alla
 # issue E almeno una chiude tutte le condizioni hard. Se nessuna le chiude,
 # l'esito e' NO-GO infrastrutturale e la issue si chiude, non si rimette in coda.
-84   S3 design-alignment POC: A/B pre-registrato su universo PIT (tier2) [SOSPESA 09-17, vedi nota sopra — aspetta le risposte vendor, non codice]
+84   S3 design-alignment POC: A/B pre-registrato su universo PIT (tier2) [MANCA freeze-ok — SOSPESA 09-17, vedi nota sopra: aspetta le risposte vendor, non codice]
 
 # ============================================================================
 # Fuori coda di proposito, decisione dell'operatore (non dell'agente):
