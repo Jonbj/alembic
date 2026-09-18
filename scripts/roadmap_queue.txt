@@ -139,7 +139,6 @@
 #     press_releases fallisce il gate di freschezza per costruzione —
 #     eta' mediana 132 giorni al fetch, zero righe sotto le 2h di
 #     MAX_NEWS_AGE_HOURS. La domanda di copertura resta aperta in #587.
-287  alpha-miss: rendere coerente il contratto prompt/output — dossier unica fonte numerica, fallback DATA_INCOMPLETE esplicito, ledger deterministico — blocked_by #281 (funnel v2), chiusa il 03/09
 
 # --- SPOSTATA IN FONDO il 2026-09-09 (decisione operatore) ---
 # Il perimetro implementabile di #507 e' esaurito (PR #533/#534/#538 mergiate);
@@ -154,8 +153,6 @@
 507  `giorno_di_earnings` e' UNKNOWN sul 100% degli intent S4 per 4 sessioni consecutive: il calendario FMP non arriva mai al dossier dal cron (F-063) [SOSPESA 09-09, vedi nota sopra — torna in cima quando la finestra e' completa]
 
 # === 6. IL RESTO ===
-470  il promotion gate non gira: `_fetch_lifecycle_row` seleziona `promotion_blocked`, colonna che su `strategy_lifecycle` non esiste — promote e approve rispondono 500
-165  S1: esiste una coorte che nessuna regola d'uscita raggiunge — eta' media del libro 14,5→41,8 gg in 32 giorni, coorte 07-14 ancora tutta aperta a 48 gg, mentre le chiusure continuano a 1,6-5,2 gg di durata media. Solo diagnosi, nessun fix
 182  nessuna gerarchia di uscita fra S1 e S4: un overlay al 10% puo' liquidare posizioni del core (tier3, decisione di design — il sizing e' scorporato in #338)
 # --- SOSPESA IL 2026-09-17 (decisione operatore) ---
 # Il perimetro di codice di #84 e' ESAURITO: il POC offline e' completo e
@@ -234,3 +231,27 @@
 #        coda pensa scripts/check_s4_trial_milestones.sh quando scatta
 #        ANALISI_DECISIONALE.
 # ============================================================================
+
+# ============================================================================
+# ISSUE NUOVE IN CODA (2026-09-18, operatore): prese da GitHub con label
+# wayfinder:task + ready-for-agent + freeze-ok, nessuna PR aperta, non fuori rotazione.
+# Ordine: prima i bug di correttezza/strumentazione (coerente con l'ordine della carta),
+# poi le misure, poi il resto. #610 esclusa per ora: PR #620 aperta (1 respinta, tie-breaker pendente).
+# 
+551  bug: il ciclo sentiment non e' idempotente — dopo SoftTimeLimitExceeded la coda resta sporca
+550  bug: il punteggio persistito nella Decision Log non e' quello valutato al gate
+564  bug: i run dei market holiday ri-analizzano la sessione precedente — serve idempotenza
+565  bug: rieseguire la pipeline evidence riscrive le serie congelate — protezione necessaria
+563  bug: i crons daily evidence perdono una sessione in modo permanente quando la sessione Claude Code muore
+566  bug: ticker_lookup salva solo nomi legali con suffisso — la rilevanza ne esce falsata
+567  bug: funnel_v2 non ha KPI sul lato uscita — 8 EXIT_RISK mai tracciati (09-10)
+596  obs: il gate di uscita consuma punteggi fan-out di articoli «altro-ticker»
+619  bug: triage log — la maschera dei numeri lascia il decimale in '18.6pp' e spezza i numeri
+541  Il tasso di articoli persi dal WebSocket non e misurabile: WS e REST non conciliati
+606  MISURA: test confermativo pre-registrato — il sentiment sulle news fuori orario (off-session shadow in produzione, confronto diretto con in-session)
+614  Ricerca: disegno del controfattuale sulle uscite — cinque domande che chiudono il disegno
+603  Worker inference: abilitare GPU e rendere FinBERT riproducibile
+539  S4 input research: completare corpus H01-H22 e consolidare il cluster
+516  Weekly alpha-miss: valutare il pilot e proporre il contratto v2
+518  Weekly alpha-miss reviewer: benchmark read-only sul caso W34
+521  Weekly alpha-miss: implementare il ruolo del reviewer approvato
