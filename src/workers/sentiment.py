@@ -44,6 +44,7 @@ import hashlib
 import logging
 import os
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
 from src.notifications.base import esegui_sincrono
@@ -894,6 +895,7 @@ async def process_news_item(
     weights: dict[str, float] | None = None,
     shadow_tasks: list | None = None,
     sink: "LiveSignalSink | None" = None,
+    on_persisted: Callable[[NewsItem], None] | None = None,
 ) -> SentimentResult | None:
     """Process a single news item: infer, update fallback counters, write to stores.
 
@@ -922,6 +924,14 @@ async def process_news_item(
     is passed, this function touches neither redis_store nor pg_store directly:
     every store write in this path goes through the sink, so "which stores does
     this caller write to" is answerable by reading its sink and nothing else.
+
+    on_persisted (#551/F-072) fires right AFTER the persist attempt (success or
+    caught failure) and only when inference produced a result. The live worker
+    uses it to LREM the item out of news:processing immediately, so a
+    SoftTimeLimitExceeded mid-batch cannot leave an already-persisted item to
+    be re-queued and re-scored by the next run's crash recovery. A callback
+    error is swallowed: the signal is already durable and the defensive dedup
+    in LiveSignalSink covers the leftover.
     """
     inference_result = await run_inference(
         item, clients, aggregator, finbert, budget_tracker, weights=weights
@@ -940,6 +950,14 @@ async def process_news_item(
         )
     except Exception as e:
         log.error(f"Failed to write signal for {result.symbol}: {e}")
+    if on_persisted is not None:
+        # Sempre dopo il tentativo di persist, anche se ha raisato: se
+        # write_signal era gia' riuscito e il fallimento e' venuto dopo, la
+        # riga esiste e re-incodare l'item produrrebbe il duplicato #551.
+        try:
+            on_persisted(item)
+        except Exception as e:
+            log.warning(f"on_persisted callback failed for {item.id}: {e}")
     return result
 
 
@@ -953,6 +971,7 @@ async def process_news_batch(
     pg_store: PostgreSQLStore,
     weights: dict[str, float] | None = None,
     sink: LiveSignalSink | None = None,
+    on_persisted: Callable[[NewsItem], None] | None = None,
 ) -> list[SentimentResult]:
     """
     Process a batch of news items through the sentiment pipeline.
@@ -968,6 +987,7 @@ async def process_news_batch(
         weights: Per-model weights from Redis (LOO ICIR rebalancing). None = confidence-only.
         sink: Explicit write destination, forwarded verbatim to process_news_item.
             None = the production stores. See LiveSignalSink.
+        on_persisted: Forwarded verbatim to each process_news_item call (#551).
 
     Returns:
         List of SentimentResult objects
@@ -996,6 +1016,7 @@ async def process_news_batch(
                 weights=weights,
                 shadow_tasks=shadow_tasks,
                 sink=sink,
+                on_persisted=on_persisted,
             )
 
     gathered = await asyncio.gather(*[_bounded(item) for item in news_items])
@@ -1406,6 +1427,11 @@ def run_sentiment_worker() -> dict:
         failed_raw: list[bytes] = []
         skipped_stale = 0
         discard_rows: list[dict] = []
+        # #551/F-072: raw bytes per item.id, per la LREM per-item. Se lo stesso
+        # id compare due volte in coda, vince l'ultimo raw: la copia che resta
+        # in news:processing passa dalla crash-recovery e si ferma sulla dedup
+        # difensiva del sink.
+        raw_by_item_id: dict[str, bytes] = {}
         _now = datetime.now(timezone.utc)
         # #427: per-cycle ensemble-health row anchor. Captured before the
         # LMOVE loop so a slow drain from news:queue cannot compress the
@@ -1437,6 +1463,7 @@ def run_sentiment_worker() -> dict:
                 failed_raw.append(item_json)
                 discard_rows.append(build_parse_failure_drop_row(item_json))
                 continue
+            raw_by_item_id[item.id] = item_json
             if _is_stale_news(item, _now):
                 skipped_stale += 1
                 discard_rows.append(build_stale_drop_row(item, _now))
@@ -1502,6 +1529,24 @@ def run_sentiment_worker() -> dict:
 
         _persist_sentiment_discards(pg_store, discard_rows)
 
+        # #551/F-072: ogni item esce da news:processing con una LREM subito
+        # dopo la scrittura del SUO segnale (callback on_persisted), non con
+        # la delete() di fine batch: un SoftTimeLimitExceeded a meta' batch
+        # lascerebbe in coda articoli gia' persistiti, che la crash-recovery
+        # del run successivo ri-scorerebbe con esiti diversi.
+        def _lrem_persisted(news_item: NewsItem) -> None:
+            raw = raw_by_item_id.get(news_item.id)
+            if raw is None:
+                return
+            try:
+                redis_client.lrem("news:processing", 1, raw)
+            except Exception as exc:
+                log.warning(
+                    "LREM from news:processing failed for %s "
+                    "(item stays for crash recovery, dedup is the backstop): %s",
+                    news_item.id, exc,
+                )
+
         # Process batch
         results = asyncio.run(
             process_news_batch(
@@ -1513,6 +1558,7 @@ def run_sentiment_worker() -> dict:
                 redis_store=redis_store,
                 pg_store=pg_store,
                 weights=model_weights,
+                on_persisted=_lrem_persisted,
             )
         )
 
@@ -1560,7 +1606,11 @@ def run_sentiment_worker() -> dict:
                 ollama_timeout_count=ollama_timeout_count,
             )
 
-        # All items processed successfully — clear from processing queue
+        # Sweep finale: gli item processati sono gia' usciti con la LREM
+        # per-item (#551); qui restano solo gli scarti senza segnale (stale,
+        # neutral, NOT_TRADABLE) e gli inferiti senza risultato. Una delete()
+        # va bene perche' worker-inference gira a concurrency=1: nessun altro
+        # run puo' avere item in news:processing in questo istante.
         if raw_items:
             redis_client.delete("news:processing")
 

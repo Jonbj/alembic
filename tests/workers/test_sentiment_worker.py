@@ -2121,6 +2121,224 @@ class TestDuplicateSignalGuard:
         mock_pg.write_signal.assert_called_once()
 
 
+class TestOnPersistedCallback:
+    """#551/F-072: the worker must remove each item from news:processing as
+    soon as ITS signal is written (LREM per item), not with one delete() at
+    the end of the batch — a SoftTimeLimitExceeded mid-batch would otherwise
+    leave already-persisted items to be re-queued and re-scored.
+    """
+
+    @staticmethod
+    def _item_and_mocks():
+        item = NewsItem(
+            id="http://u.com:AAPL",
+            title="T", url="http://u.com", source="gdelt",
+            body="b", asset_tags=["AAPL"],
+            timestamp=datetime.now(timezone.utc),
+        )
+        result = SentimentResult(
+            symbol="AAPL", score=0.6, confidence=0.9,
+            reasoning="r", model_id="ensemble:glm",
+        )
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        mock_pg.find_signal_id_for_news.return_value = None
+        mock_pg.write_signal.return_value = 7
+        mock_pg.log_news_item.return_value = 42
+        return item, result, mock_pg
+
+    @pytest.mark.asyncio
+    async def test_callback_fires_after_persist(self):
+        item, result, mock_pg = self._item_and_mocks()
+        recorded: list[str] = []
+
+        with patch(
+            "src.workers.sentiment.run_inference",
+            new=AsyncMock(return_value=(result, [])),
+        ):
+            await process_news_item(
+                item=item, clients=[], aggregator=MagicMock(),
+                finbert=MagicMock(), budget_tracker=MagicMock(),
+                redis_store=MagicMock(), pg_store=mock_pg,
+                on_persisted=lambda news: recorded.append(news.id),
+            )
+
+        assert recorded == ["http://u.com:AAPL"]
+
+    @pytest.mark.asyncio
+    async def test_callback_skipped_when_no_result(self):
+        """Inference returned None → nothing was persisted → nothing to LREM."""
+        item, _result, mock_pg = self._item_and_mocks()
+        recorded: list[str] = []
+
+        with patch(
+            "src.workers.sentiment.run_inference",
+            new=AsyncMock(return_value=None),
+        ):
+            await process_news_item(
+                item=item, clients=[], aggregator=MagicMock(),
+                finbert=MagicMock(), budget_tracker=MagicMock(),
+                redis_store=MagicMock(), pg_store=mock_pg,
+                on_persisted=lambda news: recorded.append(news.id),
+            )
+
+        assert recorded == []
+
+
+class _FakeRedisLists:
+    """Redis minimale con stato per i test del worker: solo le operazioni
+    che run_sentiment_worker fa davvero sulle code news (LMOVE/LRANGE/
+    RPUSH/LREM/DELETE e la pipeline del recovery)."""
+
+    def __init__(self, queues: dict[str, list[bytes]] | None = None) -> None:
+        self.lists: dict[str, list[bytes]] = {
+            "news:queue": [], "news:processing": [], "news:dead-letter": [],
+        }
+        if queues:
+            self.lists.update(queues)
+
+    def lmove(self, src: str, dst: str, first: str, second: str):
+        if not self.lists[src]:
+            return None
+        item = self.lists[src].pop(0)  # LEFT
+        self.lists[dst].append(item)   # RIGHT
+        return item
+
+    def lrange(self, key: str, start: int, end: int):
+        return list(self.lists.get(key, []))
+
+    def rpush(self, key: str, *values: bytes) -> None:
+        self.lists.setdefault(key, []).extend(values)
+
+    def lrem(self, key: str, count: int, value: bytes) -> None:
+        queue = self.lists.setdefault(key, [])
+        if value in queue:
+            queue.remove(value)
+
+    def delete(self, *keys: str) -> None:
+        for key in keys:
+            self.lists.pop(key, None)
+            self.lists[key] = []
+
+    def llen(self, key: str) -> int:
+        return len(self.lists.get(key, []))
+
+    def exists(self, key: str) -> bool:
+        return False
+
+    def set(self, key: str, value: str, nx: bool = False, ex: int | None = None):
+        return True
+
+    def close(self) -> None:
+        pass
+
+    def pipeline(self):
+        parent = self
+
+        class _Pipe:
+            def rpush(self, key, *values):
+                self._ops.append(("rpush", key, values))
+
+            def lrem(self, key, count, value):
+                self._ops.append(("lrem", key, count, value))
+
+            def delete(self, *keys):
+                self._ops.append(("delete", keys))
+
+            def execute(self):
+                for op in self._ops:
+                    if op[0] == "rpush":
+                        parent.rpush(op[1], *op[2])
+                    elif op[0] == "lrem":
+                        parent.lrem(op[1], op[2], op[3])
+                    else:
+                        parent.delete(*op[1])
+                return []
+
+            _ops: list = []
+
+        return _Pipe()
+
+
+class TestSoftTimeLimitRecovery:
+    """DoD #551: SoftTimeLimitExceeded a meta' batch → il run successivo non
+    ri-scora l'articolo gia' persistito."""
+
+    @staticmethod
+    def _make_raw(n: int) -> bytes:
+        import json
+        return json.dumps({
+            "id": f"http://u.com/article-{n}",
+            "title": f"Story {n}",
+            "body": "Apple reported strong quarterly results.",
+            "url": f"http://u.com/article-{n}",
+            "source": "gdelt",
+            "asset_tags": ["AAPL"],
+        }).encode()
+
+    def _run_worker(self, fake_redis, batch_impl):
+        """run_sentiment_worker con tutti i collaboratori mockati e la
+        process_news_batch sostituita da batch_impl (una async def)."""
+        from src.workers.sentiment import run_sentiment_worker
+
+        with patch("src.workers.sentiment.is_market_open", return_value=True), \
+             patch("redis.Redis") as mock_redis_cls, \
+             patch("src.workers.sentiment.RedisStore", return_value=MagicMock()), \
+             patch("psycopg2.connect", return_value=MagicMock()), \
+             patch("src.workers.sentiment.PostgreSQLStore", return_value=MagicMock()), \
+             patch("src.workers.sentiment.LLMBudgetTracker", return_value=MagicMock()), \
+             patch("src.workers.sentiment.build_inference_context",
+                   return_value=(MagicMock(), MagicMock(), MagicMock(),
+                                 MagicMock(), None)), \
+             patch("src.workers.sentiment.process_news_batch", new=batch_impl):
+            mock_redis_cls.from_url.return_value = fake_redis
+            run_sentiment_worker()
+
+    def test_mid_batch_kill_leaves_only_unscored_items(self):
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        raw1, raw2 = self._make_raw(1), self._make_raw(2)
+        fake = _FakeRedisLists({"news:queue": [raw1, raw2]})
+
+        async def killed_batch(**kwargs):
+            # Il primo articolo e' stato persistito (e LREM-ato dal callback);
+            # il soft time limit uccide il task prima del secondo.
+            kwargs["on_persisted"](kwargs["news_items"][0])
+            raise SoftTimeLimitExceeded()
+
+        with pytest.raises(SoftTimeLimitExceeded):
+            self._run_worker(fake, killed_batch)
+
+        # Il primo item e' gia' fuori da news:processing: la crash-recovery
+        # del run successivo NON deve ri-accodarlo.
+        assert fake.lists["news:processing"] == [raw2]
+
+    def test_next_run_requeues_only_unscored_items(self):
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        raw1, raw2 = self._make_raw(1), self._make_raw(2)
+        fake = _FakeRedisLists({"news:queue": [raw1, raw2]})
+
+        async def killed_batch(**kwargs):
+            kwargs["on_persisted"](kwargs["news_items"][0])
+            raise SoftTimeLimitExceeded()
+
+        with pytest.raises(SoftTimeLimitExceeded):
+            self._run_worker(fake, killed_batch)
+
+        seen_ids: list[str] = []
+
+        async def second_run_batch(**kwargs):
+            seen_ids.extend(item.id for item in kwargs["news_items"])
+            return []
+
+        self._run_worker(fake, second_run_batch)
+
+        assert seen_ids == ["http://u.com/article-2"]
+        # La sweeper finale ha svuotato processing (item2 consumato, nessun
+        # persistito lasciato indietro).
+        assert fake.lists["news:processing"] == []
+
+
 def test_run_sentiment_worker_skips_when_market_closed():
     """WS-4: sentiment worker exits early when US market is closed."""
     from src.workers.sentiment import run_sentiment_worker
