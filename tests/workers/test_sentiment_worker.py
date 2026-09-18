@@ -2183,6 +2183,42 @@ class TestOnPersistedCallback:
 
         assert recorded == []
 
+    @pytest.mark.asyncio
+    async def test_callback_skipped_when_persist_raises(self):
+        """#551 review: if LiveSignalSink.persist raises before writing the
+        signal, the item MUST stay in news:processing so the next run's crash
+        recovery can retry it. Firing the LREM here would silently drop the
+        signal — defensive dedup only catches re-runs of items that DID
+        already get written.
+        """
+        item, result, mock_pg = self._item_and_mocks()
+        recorded: list[str] = []
+
+        # Build a sink that fails BEFORE write_signal commits anything to the
+        # DB — the same shape as the reviewer's failure scenario.
+        fake_sink = MagicMock()
+        fake_sink.persist = AsyncMock(
+            side_effect=RuntimeError("simulated DB failure before write_signal"),
+        )
+
+        with patch(
+            "src.workers.sentiment.run_inference",
+            new=AsyncMock(return_value=(result, [])),
+        ):
+            await process_news_item(
+                item=item, clients=[], aggregator=MagicMock(),
+                finbert=MagicMock(), budget_tracker=MagicMock(),
+                redis_store=MagicMock(), pg_store=mock_pg,
+                sink=fake_sink,
+                on_persisted=lambda news: recorded.append(news.id),
+            )
+
+        # write_signal was never reached: the failed persist means no row in
+        # sentiment_signals. The LREM would have erased the only chance of
+        # recovery, so on_persisted must NOT fire here.
+        assert recorded == []
+        mock_pg.write_signal.assert_not_called()
+
 
 class _FakeRedisLists:
     """Redis minimale con stato per i test del worker: solo le operazioni

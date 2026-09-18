@@ -930,13 +930,18 @@ async def process_news_item(
     every store write in this path goes through the sink, so "which stores does
     this caller write to" is answerable by reading its sink and nothing else.
 
-    on_persisted (#551/F-072) fires right AFTER the persist attempt (success or
-    caught failure) and only when inference produced a result. The live worker
-    uses it to LREM the item out of news:processing immediately, so a
+    on_persisted (#551/F-072) fires ONLY when persist() returned without
+    raising, and only when inference produced a result. The live worker uses
+    it to LREM the item out of news:processing immediately, so a
     SoftTimeLimitExceeded mid-batch cannot leave an already-persisted item to
-    be re-queued and re-scored by the next run's crash recovery. A callback
-    error is swallowed: the signal is already durable and the defensive dedup
-    in LiveSignalSink covers the leftover.
+    be re-queued and re-scored by the next run's crash recovery. If persist()
+    itself raises before any signal row was written, the item is intentionally
+    LEFT in news:processing: the next run's crash recovery will re-score it,
+    and the defensive dedup in LiveSignalSink would have caught a duplicate
+    anyway — so there is no scenario where firing on_persisted after a failed
+    persist helps, only one where it silently drops the signal (#551 codex
+    review, 2026-09-18). A callback error after a successful persist is
+    swallowed: the signal is already durable and the dedup covers the leftover.
     """
     inference_result = await run_inference(
         item, clients, aggregator, finbert, budget_tracker, weights=weights
@@ -946,6 +951,16 @@ async def process_news_item(
     result, raw_outputs = inference_result
     if sink is None:
         sink = LiveSignalSink(redis_store, pg_store)
+    # #551 review (codex, 2026-09-18): on_persisted (LREM from news:processing)
+    # fires ONLY when persist() succeeded. If it raises, no signal row exists
+    # in sentiment_signals; the dedup cache for the next run would also pass
+    # (no row to find), so the LREM would silently drop the article and the
+    # signal would be lost. Keeping the item in news:processing is the safe
+    # move: crash recovery re-scores it, and if THAT run succeeds, the LREM
+    # fires on its own persist path. The previous "always fire on_persisted
+    # after a caught failure" comment conflated two cases (write_signal
+    # committed, later step failed → must LREM; write_signal itself failed →
+    # must NOT LREM); they're now distinguished by the try/else split below.
     try:
         await sink.persist(
             item=item,
@@ -955,14 +970,12 @@ async def process_news_item(
         )
     except Exception as e:
         log.error(f"Failed to write signal for {result.symbol}: {e}")
-    if on_persisted is not None:
-        # Sempre dopo il tentativo di persist, anche se ha raisato: se
-        # write_signal era gia' riuscito e il fallimento e' venuto dopo, la
-        # riga esiste e re-incodare l'item produrrebbe il duplicato #551.
-        try:
-            on_persisted(item)
-        except Exception as e:
-            log.warning(f"on_persisted callback failed for {item.id}: {e}")
+    else:
+        if on_persisted is not None:
+            try:
+                on_persisted(item)
+            except Exception as e:
+                log.warning(f"on_persisted callback failed for {item.id}: {e}")
     return result
 
 
