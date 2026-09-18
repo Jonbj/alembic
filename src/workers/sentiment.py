@@ -762,6 +762,35 @@ class LiveSignalSink:
         redis_store = self.redis_store
         pg_store = self.pg_store
         ticker = result.symbol
+        # #551/F-072: idempotenza del ciclo sentiment. Se un segnale e' gia'
+        # legato a questo articolo ((url, ticker), stessa chiave del conflict
+        # path di log_news_item), il re-run post-crash-recovery non deve
+        # riscriverlo: ogni IC, copertura articoli e conteggio di segnali
+        # conterebbe due volte lo stesso articolo, con valori diversi. La
+        # chiave e' il solo news_log_id e non (news_log_id, model_id) perche'
+        # i 12 duplicati reali del 2026-09-08 cambiano provider tra i due giri
+        # (GOOGL finbert -> single:gpt-oss): una dedup sulla coppia li
+        # lascerebbe passare proprio i casi che deve fermare. Fail-open su
+        # errore di lookup: la LREM per-item resta la difesa primaria e un
+        # segnale fresco non va perso per un colpo di tosse del DB.
+        if item.url:
+            try:
+                existing_signal_id = pg_store.find_signal_id_for_news(
+                    url=item.url, ticker=ticker
+                )
+            except Exception as exc:
+                log.warning(
+                    "Dedup lookup failed for %s/%s (fail-open): %s",
+                    ticker, item.url, exc,
+                )
+            else:
+                if existing_signal_id is not None:
+                    log.warning(
+                        "Duplicate signal skipped for %s (article already has "
+                        "signal %s) — re-scored after crash recovery? (#551/F-072)",
+                        ticker, existing_signal_id,
+                    )
+                    return
         # #128/#111: the sizing circuit breaker fires only on a FULL ensemble
         # outage (FinBERT), not on a single-model read. Single-model reads are
         # still gated for trading trust (fallback_used=True) but must not trip
