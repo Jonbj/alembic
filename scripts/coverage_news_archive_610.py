@@ -25,7 +25,18 @@ La riduzione a popolazione ricostruita usa **codice di produzione importato**, m
 ricopiato (regola #169/#467):
 
 - `compute_dedup_hash` di `src/connectors/deduplicator.py` — la classe
-  `Deduplicator` ha bisogno di Redis, ma la *chiave* e' pura ed e' la regola;
+  `Deduplicator` ha bisogno di Redis, ma la *chiave* e' pura ed e' la regola.
+  **La chiave completa di dedup e' `(hash, ticker_primario)`**, dove
+  `ticker_primario = asset_tags[0]`: e' la composizione che
+  `is_duplicate_content_symbol` usa (`src/connectors/deduplicator.py:120`).
+  Usare solo l'hash collassa il fan-out multi-ticker (EN-03), che in
+  produzione e' una funzione voluta della pipeline.
+- `AlpacaNewsConnector._parse_article` per la normalizzazione del body
+  (strip tag HTML `<[^>]+>`, collasso spazi `\\s+`, fallback su summary).
+  Senza questo, l'hash verrebbe calcolato sul `content` HTML grezzo
+  dell'archivio, non sul testo che la pipeline live effettivamente
+  processa: la dedup sarebbe *sbagliata in entrambe le direzioni* —
+  troppo pochi duplicati fra HTML e plain, troppi fra formati HTML diversi.
 - `_is_stale_news` di `src/workers/sentiment.py`, con `now = updated_at`: e' il
   momento in cui Alpaca ha servito (o ri-servito) l'articolo, cioe' quando la
   pipeline lo avrebbe ricevuto. Con questa scelta il filtro riproduce lo scarto
@@ -35,6 +46,24 @@ ricopiato (regola #169/#467):
 
 `now = updated_at` e' una ricostruzione dichiarata, non un dato: l'archivio non
 registra la latenza di consegna reale. Va letta come tale.
+
+## Discontinuita' di misura (2026-09-18)
+
+La prima versione di questo script applicava `compute_dedup_hash` sul `body`
+HTML grezzo e usava il solo hash come chiave di dedup. La review di PR #620
+(2026-09-17, glm53) ha rilevato che questa regola divergeva da quella di
+produzione su entrambi i fronti, con due difetti non dichiarati e di segno
+opposto sul `duplicato_produzione` e sul substrato `ricostruita`.
+
+La versione corrente (commit di questa PR) chiama la regola vera, non una
+reimplementazione: stessa normalizzazione del body, stessa chiave composita.
+I conteggi di `duplicato_produzione` e `ricostruita` nell'artefatto gia'
+pubblicato (`docs/evidence/copertura_news_610.json`) **ereditano la vecchia
+regola**: la loro rigenerazione e' una discontinuita' da registrare in
+`docs/evidence/OBSERVATION_CHARTER.md` e nella pre-registrazione prima di
+qualunque misura di Fase 1 che usi questi conteggi come substrato. Nessun
+esito e' ancora stato prodotto, quindi la finestra non e' ancora stata
+inquieta.
 
 Uso:
     .venv/bin/python scripts/coverage_news_archive_610.py \\
@@ -61,6 +90,7 @@ from scripts.fetch_news_archive_610 import (  # noqa: E402
     watchlist,
 )
 from src.analysis.dossier.article_coverage import content_empty_title_reason  # noqa: E402
+from src.connectors.alpaca_news import AlpacaNewsConnector  # noqa: E402
 from src.connectors.deduplicator import compute_dedup_hash  # noqa: E402
 from src.models.news import NewsItem  # noqa: E402
 from src.workers.sentiment import _is_stale_news  # noqa: E402
@@ -90,18 +120,24 @@ def senza_corpo(articolo: dict) -> bool:
     ).strip()
 
 
-def _come_news_item(articolo: dict) -> NewsItem:
-    """L'articolo grezzo nella forma che il codice di produzione accetta."""
-    corpo = (articolo.get("content") or "").strip() or (articolo.get("summary") or "").strip()
-    return NewsItem(
-        id=str(articolo.get("id")),
-        title=str(articolo.get("headline") or ""),
-        body=corpo,
-        timestamp=datetime.fromisoformat(str(articolo["created_at"]).replace("Z", "+00:00")),
-        source="alpaca_benzinga",
-        asset_tags=list(articolo.get("symbols") or []),
-        url=str(articolo.get("url") or ""),
-    )
+def _come_news_item(articolo: dict, connettore: AlpacaNewsConnector) -> NewsItem:
+    """L'articolo grezzo nella forma che il codice di produzione accetta.
+
+    La normalizzazione del body (strip tag HTML, collasso spazi, fallback su
+    summary) e' delegata a `AlpacaNewsConnector._parse_article` per non
+    reimplementare la regola: stessi regex, stesso ordine, stessa condizione
+    di fallback. Senza questo, il `body` che entra in `compute_dedup_hash`
+    diverge da quello che la pipeline live effettivamente processa.
+    """
+    item = connettore._parse_article(articolo)
+    if item is None:
+        # Senza_corpo non arriva qui (filtrato a monte): se succede, lascia
+        # emergere il difetto invece di mascherarlo.
+        raise RuntimeError(
+            f"_parse_article ha restituito None per articolo {articolo.get('id')}: "
+            "controllo senza_corpo non allineato al connettore."
+        )
+    return item
 
 
 def _fuori_orario(creato: datetime) -> bool:
@@ -114,10 +150,16 @@ def _fuori_orario(creato: datetime) -> bool:
 
 
 def copertura(archivio: Path, universo: list[str]) -> dict[str, Any]:
+    # Il connettore qui serve solo come istanza di `AlpacaNewsConnector` per
+    # esporre `_parse_article`: nessuna chiamata di rete. Le credenziali non
+    # sono necessarie per il solo path di normalizzazione del body.
+    connettore = AlpacaNewsConnector(api_key="", api_secret="")
     conteggi = Counter()
     per_mese: dict[str, Counter] = defaultdict(Counter)
     simboli = Counter()
-    hash_visti: set[str] = set()
+    # Chiave di dedup di produzione = (hash, ticker primario): stesso testo
+    # su ticker primario diverso NON collassa (multi-ticker fan-out EN-03).
+    chiavi_viste: set[tuple[str, str]] = set()
     hash_duplicati = 0
 
     for articolo in articoli(archivio):
@@ -149,7 +191,7 @@ def copertura(archivio: Path, universo: list[str]) -> dict[str, Any]:
             per_mese[mese]["senza_corpo"] += 1
             continue  # la pipeline non lo vede affatto: fuori dalla ricostruita
 
-        item = _come_news_item(articolo)
+        item = _come_news_item(articolo, connettore)
         aggiornato = str(articolo.get("updated_at") or articolo["created_at"])
         arrivo = datetime.fromisoformat(aggiornato.replace("Z", "+00:00"))
         if _is_stale_news(item, now=arrivo):
@@ -157,13 +199,25 @@ def copertura(archivio: Path, universo: list[str]) -> dict[str, Any]:
             per_mese[mese]["stantio_all_arrivo"] += 1
             continue
 
-        chiave = compute_dedup_hash(item)
-        if chiave in hash_visti:
+        # La chiave di dedup di produzione richiede un ticker primario
+        # (`src/connectors/deduplicator.py:120`):
+        # `is_duplicate_content_symbol` rifiuta articoli senza `asset_tags`.
+        # Articoli multi-ticker senza ticker primario scelto non sono
+        # deduplicabili per contenuto in produzione: lo script li conta
+        # come "non deduplicati" e li tiene in `ricostruita` UNA volta
+        # per articolo (la pipeline non li scarta comunque).
+        if not item.asset_tags:
+            conteggi["ricostruita"] += 1
+            per_mese[mese]["ricostruita"] += 1
+            continue
+
+        chiave = (compute_dedup_hash(item), item.asset_tags[0])
+        if chiave in chiavi_viste:
             hash_duplicati += 1
             conteggi["duplicato_produzione"] += 1
             per_mese[mese]["duplicato_produzione"] += 1
             continue
-        hash_visti.add(chiave)
+        chiavi_viste.add(chiave)
 
         conteggi["ricostruita"] += 1
         per_mese[mese]["ricostruita"] += 1

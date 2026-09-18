@@ -1,4 +1,5 @@
 {
+  "discontinuita_di_misura": "I conteggi duplicato_produzione e ricostruita in questo artefatto sono stati generati con una versione precedente dello script che (a) passava a compute_dedup_hash il content HTML grezzo invece del body normalizzato da _parse_article, e (b) usava il solo hash come chiave di dedup invece della chiave composita (hash, asset_tags[0]) di produzione. Fix nello script (2026-09-18): vedi registro delle rotture del sigillo in docs/evidence/PREREGISTRAZIONE_BACKTEST_NEWS_2024_2025.md. Da rigenerare prima di qualunque misura di Fase 1 che usi questi conteggi come substrato. Nessun esito pubblicato finora, quindi la finestra non e' ancora inquieta.",
   "finestra_popolazione": {
     "filtro": "created_at",
     "fine": "2025-12-31",

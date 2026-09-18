@@ -105,6 +105,55 @@ class TestLeQuattroPopolazioni:
         assert out["popolazioni"]["duplicato_produzione"] == 1
         assert out["popolazioni"]["ricostruita"] == 1
 
+    def test_corpo_html_viene_ripulito_dal_parse_article(self, tmp_path) -> None:
+        """`_parse_article` strip i tag HTML e collassa gli spazi: se lo script
+        riapplicasse il body grezzo, `compute_dedup_hash` produrrebbe un hash
+        diverso da quello che la pipeline calcolerebbe sul testo reale. La
+        regola di dedup di produzione va chiamata, non ricopiata (#169/#467)."""
+        # Stesso articolo concettuale, forme diverse (HTML vs HTML compattato):
+        # in produzione deduplicano, qui devono fare lo stesso.
+        con_spazi = _articolo(
+            1, content="<p>Apple</p>\n<p>reports</p>\n<p>Q4</p>"
+        )
+        compattato = _articolo(
+            2, content="<p>Apple reports Q4</p>"
+        )
+        out = copertura.copertura(
+            _archivio(tmp_path, [con_spazi, compattato]), ["AAPL"]
+        )
+        assert out["popolazioni"]["popolazione"] == 2
+        assert out["popolazioni"]["duplicato_produzione"] == 1
+        assert out["popolazioni"]["ricostruita"] == 1
+
+    def test_fan_out_multi_ticker_non_collassa(self, tmp_path) -> None:
+        """Stesso testo ma ticker primario diverso: in produzione la chiave
+        `dedup:content:{hash}:{asset_tags[0]}` tiene separati i due item
+        (EN-03 — il fan-out multi-ticker e' una funzione voluta della
+        pipeline). Lo script NON li deve unificare in un solo duplicato."""
+        stesso_testo_aapl = _articolo(1, symbols=["AAPL"])
+        stesso_testo_msft = _articolo(2, symbols=["MSFT"])
+        # Stesso titolo e stesso body, ticker primario diverso: devono essere
+        # due item distinti in produzione, quindi due ricostruiti qui.
+        out = copertura.copertura(
+            _archivio(tmp_path, [stesso_testo_aapl, stesso_testo_msft]),
+            ["AAPL", "MSFT"],
+        )
+        assert out["popolazioni"]["popolazione"] == 2
+        assert out["popolazioni"]["duplicato_produzione"] == 0
+        assert out["popolazioni"]["ricostruita"] == 2
+
+    def test_articolo_senza_ticker_non_deduplicato_per_contenuto(self, tmp_path) -> None:
+        """`is_duplicate_content_symbol` rifiuta gli item senza `asset_tags`:
+        la pipeline non li scarta per contenuto. Lo script deve riflettere
+        questa asimmetria, non collassarli in un duplicato spurio."""
+        orfano = _articolo(1, symbols=[])
+        gemello = _articolo(2, symbols=[])
+        out = copertura.copertura(_archivio(tmp_path, [orfano, gemello]), ["AAPL"])
+        assert out["popolazioni"]["popolazione"] == 2
+        # nessuna chiave di dedup generabile: passano entrambi
+        assert out["popolazioni"]["duplicato_produzione"] == 0
+        assert out["popolazioni"]["ricostruita"] == 2
+
     def test_lo_stantio_all_arrivo_viene_scartato(self, tmp_path) -> None:
         """Creato molto prima di quando e' stato servito: in produzione
         `_is_stale_news` lo scarta, e qui deve fare lo stesso."""
