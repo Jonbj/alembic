@@ -6,6 +6,9 @@ signals written to both Redis (TTL 4 h) and PostgreSQL for audit.
 Pipeline per batch (up to 10 items pulled atomically via LMOVE):
   1. Crash recovery — re-queue any items stranded in news:processing from a
      previous crash (LMOVE is atomic; items are never lost, only delayed).
+     Since #551/F-072 an item leaves news:processing with a per-item LREM
+     right after ITS signal is written, so what lands back in news:queue
+     after a SoftTimeLimitExceeded is only what was never persisted.
   2. Pre-filter — skip near-neutral MarketAux articles
      (|marketaux_sentiment| < 0.20) to save 60-80% of token spend.
   3. LLM ensemble — query Kimi K2.6, GLM-5.2 in
@@ -20,7 +23,9 @@ Pipeline per batch (up to 10 items pulled atomically via LMOVE):
      ENSEMBLE_DIVERGENCE_STD, default 0.40), an all-model timeout, or budget
      exhaustion fall back to FinBERT (local, zero cost).
   5. Store writes — signal → PostgreSQL (audit) and Redis (live cache);
-     per-model LLM responses logged for LOO weight recalculation.
+     per-model LLM responses logged for LOO weight recalculation. The live
+     sink skips the write entirely when the article (url, ticker) already has
+     a signal (#551/F-072 dedup).
   6. Shadow scoring (Stage-2, armed via set_shadow_comparison_start) — the SAME
      item is optionally re-scored with candidate models not in the live pair,
      purely for offline comparison (llm_shadow_responses table). Dispatched as
