@@ -662,6 +662,36 @@ class PostgreSQLStore:
         UPDATE sentiment_signals SET news_log_id = %s WHERE id = %s
     """
 
+    # #551/F-072: (url, ticker) e' la stessa chiave del conflict path di
+    # log_news_item (stesso troncamento a 1000 char), quindi identifica la
+    # riga news_log a cui il segnale verrebbe legato.
+    _FIND_SIGNAL_BY_NEWS = """
+        SELECT ss.id
+        FROM sentiment_signals ss
+        JOIN news_log nl ON nl.id = ss.news_log_id
+        WHERE nl.url = %s AND nl.ticker = %s
+        LIMIT 1
+    """
+
+    def find_signal_id_for_news(self, url: str, ticker: str) -> int | None:
+        """Id del primo segnale gia' legato all'articolo (url, ticker), o None.
+
+        Dedup difensiva del ciclo sentiment (#551/F-072): dopo un
+        SoftTimeLimitExceeded la crash-recovery re-incoda gli item rimasti in
+        news:processing, e un articolo gia' persistito va riscorato due volte.
+        Sola lettura — non crea la riga news_log se manca (quello e' compito di
+        log_news_item).
+        """
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FIND_SIGNAL_BY_NEWS, (url[:1000], ticker))
+                row = cur.fetchone()
+            return int(row[0]) if row else None
+        except Exception:
+            conn.rollback()
+            raise
+
     def link_signal_to_news(self, signal_id: int, news_log_id: int) -> None:
         """Set news_log_id on an already-written sentiment_signals row."""
         conn = self._get_connection()
