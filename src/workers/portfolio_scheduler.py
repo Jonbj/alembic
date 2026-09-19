@@ -3776,14 +3776,56 @@ def _gate_is_active(threshold: float | None, min_score: float) -> bool:
     return threshold is not None and threshold >= min_score
 
 
+def _s4_decision_score_fields(sig: dict | None) -> dict:
+    """#550 (F-073): score fields for an S4 Decision Log row.
+
+    `signal_score` is always the RAW score (what sentiment_signals stores and
+    IC analytics correlates); `velocity_multiplier` declares the boost the
+    entry gate compared. `sig` is the ranker's provenance entry (score =
+    deciding score, raw_score/velocity_multiplier the decomposition) or the
+    by-id re-fetch metadata (raw score only → NULL multiplier, "not
+    instrumented" — never an implicit 1.0).
+    """
+    sig = sig or {}
+    raw = sig.get("raw_score")
+    if raw is None:
+        raw = sig.get("score")
+    multiplier = sig.get("velocity_multiplier")
+    return {
+        "signal_score": float(raw) if raw is not None else None,
+        "velocity_multiplier": float(multiplier) if multiplier is not None else None,
+    }
+
+
+def _s4_sentiment_reason_clause(raw_score: float | None, velocity_multiplier: float | None) -> str:
+    """Reason clause declaring the gate-score decomposition (#550).
+
+    Appended to the sentiment sentence of S4 decision rows when a velocity
+    boost was applied: «× velocity 1.20 → gate 0.329». Empty without a boost —
+    the mass of unboosted rows keeps its reason unchanged.
+    """
+    from src.strategies.s4.entry_gate import deciding_entry_score
+
+    if raw_score is None or velocity_multiplier is None or velocity_multiplier == 1.0:
+        return ""
+    deciding = deciding_entry_score(raw_score, velocity_multiplier)
+    return f" × velocity {velocity_multiplier:.2f} → gate {deciding:.3f}"
+
+
 def _record_gate_drops(dropped_df, threshold: float) -> None:
     """Write SKIP_THRESHOLD rows to execution_decisions for signals the S4 feedback
     gate dropped (score below threshold), so the Decision Log explains no-trade cycles
     instead of being silently empty. Fail-safe — never breaks the cycle.
+
+    #550: `dropped_df` carries the decomposition written by
+    _apply_signal_velocity. The row stores the RAW score and the multiplier;
+    the reason compares the DECIDING score with the threshold — comparing the
+    raw score would state a filter that did not run.
     """
     try:
         from datetime import datetime, timezone
 
+        import pandas as pd
         from src.config import config
         from src.store.pg_store import PostgreSQLStore
 
@@ -3791,7 +3833,11 @@ def _record_gate_drops(dropped_df, threshold: float) -> None:
         now = datetime.now(timezone.utc)
         pg = PostgreSQLStore()
         for _, row in dropped_df.iterrows():
-            sig_score = float(row["score"])
+            sig_score = float(row["score"])  # deciding score (post-velocity)
+            raw = row.get("raw_score")
+            raw_score = float(raw) if raw is not None and pd.notna(raw) else sig_score
+            mult = row.get("velocity_multiplier")
+            mult = float(mult) if mult is not None and pd.notna(mult) else None
             # #406: the gate drop carries a known signal_id — propagate it so the
             # Decision Log row joins back to the signal that caused it. NaN is
             # the pandas sentinel for a missing int column; int(NaN) raises,
@@ -3801,6 +3847,15 @@ def _record_gate_drops(dropped_df, threshold: float) -> None:
                 sid: int | None = int(raw_sid) if raw_sid is not None else None
             except (TypeError, ValueError):
                 sid = None
+            decomposition = (
+                f" (raw {raw_score:.3f} × velocity {mult:.2f})"
+                if mult is not None and mult != 1.0
+                else ""
+            )
+            reason = (
+                f"score {abs(sig_score):.3f}{decomposition}"
+                f" < feedback threshold {threshold:.3f}"
+            )
             pg.write_execution_decision(
                 tick_time=now,
                 symbol=str(row["symbol"]),
@@ -3809,8 +3864,9 @@ def _record_gate_drops(dropped_df, threshold: float) -> None:
                 regime_mult=regime_mult,
                 ema_pass=False,
                 decision="SKIP_THRESHOLD",
-                reason=f"score {abs(sig_score):.3f} < feedback threshold {threshold:.3f}",
-                signal_score=sig_score,
+                reason=reason,
+                signal_score=raw_score,
+                velocity_multiplier=mult,
             )
     except Exception as exc:
         log.warning("Failed to log gate-dropped signals: %s", exc)
