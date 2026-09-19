@@ -22,6 +22,8 @@ export PATH="$HOME/.local/bin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/_evidence_cron_recovery.sh"
 LOG_DIR="$PROJECT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
@@ -51,7 +53,7 @@ if [[ -f "$PROJECT_DIR/.env" ]]; then
     set +a
 fi
 set +e
-DATE_TARGET=$(uv run python3 - <<'PYEOF'
+CALENDAR_DATES=$(uv run python3 - <<'PYEOF'
 import os
 from datetime import date, timedelta
 from alpaca.trading.client import TradingClient
@@ -59,17 +61,27 @@ from alpaca.trading.requests import GetCalendarRequest
 
 tc = TradingClient(os.environ["ALPACA_API_KEY"], os.environ["ALPACA_SECRET_KEY"], paper=True)
 today = date.today()
-cal = tc.get_calendar(GetCalendarRequest(start=today - timedelta(days=14), end=today - timedelta(days=1)))
-if cal:
-    print(cal[-1].date.strftime("%Y-%m-%d"))
+cal = tc.get_calendar(GetCalendarRequest(start=today - timedelta(days=21), end=today - timedelta(days=1)))
+for day in cal:
+    print(day.date.strftime("%Y-%m-%d"))
 PYEOF
 )
 CALENDAR_STATUS=$?
 set -e
-if (( CALENDAR_STATUS != 0 )) || [[ -z "${DATE_TARGET:-}" ]]; then
+if (( CALENDAR_STATUS != 0 )) || [[ -z "${CALENDAR_DATES:-}" ]]; then
     echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Could not determine last trading day via Alpaca calendar (codice ${CALENDAR_STATUS}, market closed run window or API error) — skipping this run."
     exit 0
 fi
+
+# #563 / F-074: una seduta che ha gia' il dossier ma non la riga ledger non va
+# persa quando il cron del giorno successivo avanza il calendario. Si recupera
+# la piu' vecchia delle ultime 21 sedute non materializzate; il dossier storico
+# e' preservato piu' sotto, quindi il backfill non ricalcola prezzi retroattivi.
+PUBLISHED_DATES=$(sed -nE 's/.*"data"[[:space:]]*:[[:space:]]*"([0-9-]+)".*/\1/p' \
+    "$PROJECT_DIR/docs/evidence/market_daily.jsonl" 2>/dev/null || true)
+DATE_TARGET=$(oldest_missing_session "$CALENDAR_DATES" "$PUBLISHED_DATES") || {
+    DATE_TARGET=$(printf '%s\n' "$CALENDAR_DATES" | tail -1)
+}
 
 # #564 / F-075: dopo un holiday weekday (Labor Day 2026-09-07, Memorial Day,
 # Juneteenth, July 4 sui venerdi', ...) Alpaca restituisce la stessa data
@@ -117,8 +129,7 @@ if [[ -f "$PROJECT_DIR/.env" ]]; then
 fi
 
 tg_send() {
-    local text="$1"
-    local parse_mode="${2-HTML}"
+    local text="$1" parse_mode="${2-HTML}" response curl_status
     if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]]; then
         echo "[tg_send] Telegram credentials not set — skipping" >&2
         return
@@ -131,7 +142,18 @@ tg_send() {
     if [[ -n "$parse_mode" ]]; then
         curl_args+=(--data-urlencode parse_mode="$parse_mode")
     fi
-    curl "${curl_args[@]}" > /dev/null
+    set +e
+    response=$(curl "${curl_args[@]}" -w '\nHTTP_STATUS:%{http_code}')
+    curl_status=$?
+    set -e
+    if (( curl_status != 0 )); then
+        echo "[tg_send] curl terminata con codice ${curl_status} — notifica non verificabile" >&2
+    elif [[ "$response" == *'"ok":true'* ]]; then
+        echo "[tg_send] Telegram accettata (${response##*$'\n'})"
+    else
+        echo "[tg_send] Telegram rifiutata o risposta inattesa: ${response:0:300}" >&2
+    fi
+    return 0
 }
 
 echo "=== Alembic Alpha-Miss Analysis ${DATE} (target: ${DATE_TARGET}) ==="
@@ -482,7 +504,9 @@ if [[ -n "${DIFF_MISURA:-}" || -n "${DIRTY_MISURA:-}" ]]; then
 fi
 
 DOSSIER_FILE="$PROJECT_DIR/docs/evidence/dossier/${DATE_TARGET}.json"
-if uv run python "$PROJECT_DIR/scripts/alpha_miner_dossier.py" "$DATE_TARGET" >> "$LOG_FILE" 2>&1; then
+if [[ -f "$DOSSIER_FILE" ]]; then
+    echo "Dossier gia' presente: $DOSSIER_FILE — preservato per il recupero della seduta (#563)."
+elif uv run python "$PROJECT_DIR/scripts/alpha_miner_dossier.py" "$DATE_TARGET" >> "$LOG_FILE" 2>&1; then
     echo "Dossier generato: $DOSSIER_FILE"
 else
     echo "ATTENZIONE: generazione dossier fallita — la sessione procede senza."
@@ -578,10 +602,9 @@ _CLAUDE_PROMPT="${_CLAUDE_PROMPT//__DOSSIER_FILE__/$DOSSIER_FILE}"
 _CLAUDE_PROMPT="${_CLAUDE_PROMPT//__REPORT_FILE__/$REPORT_FILE}"
 _CLAUDE_PROMPT="${_CLAUDE_PROMPT//__CANDIDATES_FILE__/$CANDIDATES_FILE}"
 
-set +e
-ANALYSIS_OUTPUT=$(claude --allowedTools "Bash,Read,Write,Edit" -p "$_CLAUDE_PROMPT" 2>&1)
-ANALYSIS_STATUS=$?
-set -e
+run_claude_with_quota_retry "$_CLAUDE_PROMPT" "Bash,Read,Write,Edit"
+ANALYSIS_OUTPUT="$CLAUDE_SESSION_OUTPUT"
+ANALYSIS_STATUS=$CLAUDE_SESSION_STATUS
 
 printf '%s\n' "$ANALYSIS_OUTPUT"
 if (( ANALYSIS_STATUS != 0 )); then

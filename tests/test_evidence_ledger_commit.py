@@ -492,6 +492,7 @@ def test_missing_worktree_is_recreated(repo):
 # --- cablaggio del cron alpha-miss (#336) ----------------------------------
 
 CRON = ROOT / "scripts" / "daily_alpha_miss_analysis.sh"
+RECOVERY_HELPER = ROOT / "scripts" / "_evidence_cron_recovery.sh"
 ECON = "docs/evidence/economic_pnl.json"
 
 # Il dossier fittizio deve soddisfare il contratto prompt/dossier (#287):
@@ -576,6 +577,7 @@ MODULI_PURI = (
 def _run_cron(repo: dict, extra_path: Path | None = None) -> tuple[subprocess.CompletedProcess[str], str, str]:
     project, tmp = repo["project"], repo["tmp"]
     shutil.copy2(CRON, project / "scripts" / CRON.name)
+    shutil.copy2(RECOVERY_HELPER, project / "scripts" / RECOVERY_HELPER.name)
     shutil.copy2(IDEMPOTENCY_GUARD, project / "scripts" / IDEMPOTENCY_GUARD.name)
     shutil.copy2(
         ROOT / "scripts" / "materialize_alpha_miss_ledger.py",
@@ -749,6 +751,7 @@ def _run_forensic_cron(
 ) -> tuple[subprocess.CompletedProcess[str], str, str]:
     project, tmp = repo["project"], repo["tmp"]
     shutil.copy2(FORENSIC_CRON, project / "scripts" / FORENSIC_CRON.name)
+    shutil.copy2(RECOVERY_HELPER, project / "scripts" / RECOVERY_HELPER.name)
     shutil.copy2(IDEMPOTENCY_GUARD, project / "scripts" / IDEMPOTENCY_GUARD.name)
     bin_dir = tmp / "bin-forensic"
 

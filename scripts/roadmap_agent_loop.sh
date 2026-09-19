@@ -59,6 +59,8 @@ export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/_evidence_cron_recovery.sh"
 QUEUE_FILE="${ROADMAP_QUEUE_FILE:-$SCRIPT_DIR/roadmap_queue.txt}"
 LOG_DIR="${ROADMAP_LOG_DIR:-$PROJECT_DIR/logs}"
 STATE_FILE="$LOG_DIR/roadmap_agent_state.tsv"
@@ -150,7 +152,7 @@ zai_chiave() { sed -n 's/^ZAI_API_KEY=//p' "$ZAI_ENV_FILE" 2>/dev/null | head -1
 RATE_LIMIT_COOLDOWN=$(( 3 * 3600 ))
 # Le firme sono volutamente larghe: un falso positivo costa una panchina di 3h,
 # un falso negativo brucia il giro e conta un fallimento a carico della issue.
-_RATE_LIMIT_RE='rate.?limit|429|quota exceeded|too many requests|usage limit|resource_exhausted|overloaded'
+_RATE_LIMIT_RE="$_CLAUDE_RATE_LIMIT_RE"
 
 # Quante righe finali contano come ESITO della sessione. Il resto dell'output non e'
 # un giudizio: e' la trascrizione di cio' che il recensore ha letto — prompt
