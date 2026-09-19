@@ -378,6 +378,10 @@ def _finalize_s4_intent_ledger(
             "ranked_signal": {
                 "model_id": provenance.get("model_id"),
                 "score": provenance.get("score"),
+                # #550 (F-073): la disposition S4 spiega da sola il punteggio
+                # che ha passato il gate, come la riga del Decision Log.
+                "raw_score": provenance.get("raw_score"),
+                "velocity_multiplier": provenance.get("velocity_multiplier"),
             },
         }
         ledger.set_disposition(
@@ -4579,8 +4583,15 @@ def _build_strategy_instance(
                 _open_syms = set()
                 _open_syms_at_rank = None
             if intent_ledger is not None and signals:
+                # #550: stessa formula del gate (deciding_entry_score) — il
+                # ranking_score del ledger e la colonna che il filtro confronta
+                # non possono divergere per costruzione (#169/#467).
+                from src.strategies.s4.entry_gate import deciding_entry_score as _deciding
+
                 ranking_scores = {
-                    sig.signal_id: float(sig.score) * _ranking_multipliers.get(sig.symbol, 1.0)
+                    sig.signal_id: _deciding(
+                        float(sig.score), _ranking_multipliers.get(sig.symbol)
+                    )
                     for sig in signals
                     if sig.signal_id is not None
                 }
