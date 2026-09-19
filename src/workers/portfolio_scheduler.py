@@ -3050,6 +3050,10 @@ def _run_cycle_inner() -> dict:
                 "score": prov["score"],
                 "reasoning": prov["reasoning"],
                 "model_id": prov["model_id"],
+                # #550 (F-073): la scomposizione del decidente, perche' la
+                # riga BUY dichiari il punteggio che il gate ha confrontato.
+                "raw_score": prov.get("raw_score"),
+                "velocity_multiplier": prov.get("velocity_multiplier"),
             }
             for sym, prov in _s4_provenance.items()
         }
@@ -3120,7 +3124,13 @@ def _run_cycle_inner() -> dict:
                 _pyramiding_blocked.append({
                     "symbol": order.symbol,
                     "signal_id": _signal_ids.get(order.symbol),
-                    "signal_score": _s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
+                    # #550: anche il blocco dichiara la scomposizione del
+                    # decidente — ha passato il gate come un BUY.
+                    **(
+                        _s4_decision_score_fields(_s4_signals.get(order.symbol))
+                        if "S4" in strats
+                        else {"signal_score": None, "velocity_multiplier": None}
+                    ),
                     "allocation_weight": order.allocation_weight,
                     # #491: target pieno e valore broker corrente rendono esplicito
                     # il gap; quantity/price restano solo per compatibilita' col
@@ -3143,16 +3153,29 @@ def _run_cycle_inner() -> dict:
                 continue
             wt_pct = f"{order.allocation_weight * 100:.1f}%"
             exit_mechanism: str | None = None
+            # #550 (F-073): i campi score della riga vengono dalla stessa
+            # scomposizione per reason, Decision Log e trade write — signal_score
+            # e' il GREZZO, velocity_multiplier spiega cosa ha visto il gate.
+            _s4_fields = (
+                _s4_decision_score_fields(_s4_signals.get(order.symbol))
+                if "S4" in strats
+                else {"signal_score": None, "velocity_multiplier": None}
+            )
             if "S4" in strats:
                 sig = _s4_signals.get(order.symbol, {})
-                sig_score = sig.get("score", 0.0)
+                sig_score = (
+                    _s4_fields["signal_score"]
+                    if _s4_fields["signal_score"] is not None
+                    else sig.get("score", 0.0)
+                )
                 sig_model = sig.get("model_id", "unknown")
                 sig_reasoning = (sig.get("reasoning") or "")[:200]
                 other = [s for s in strats if s != "S4"]
                 prefix = f"S4+{'+'.join(other)}" if other else "S4"
                 reason = (
-                    f"{prefix} news-driven: sentiment {sig_score:+.3f} ({sig_model}), "
-                    f"portfolio weight {wt_pct}. {sig_reasoning}"
+                    f"{prefix} news-driven: sentiment {sig_score:+.3f}"
+                    f"{_s4_sentiment_reason_clause(_s4_fields['signal_score'], _s4_fields['velocity_multiplier'])}"
+                    f" ({sig_model}), portfolio weight {wt_pct}. {sig_reasoning}"
                 ).strip()
             elif "S1" in strats and "S2" not in strats:
                 reason = f"S1 momentum: time-series momentum signal, portfolio weight {wt_pct}."
@@ -3229,7 +3252,8 @@ def _run_cycle_inner() -> dict:
                 symbol=order.symbol,
                 signal_id=_signal_ids.get(order.symbol),
                 score=order.allocation_weight,
-                signal_score=_s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
+                signal_score=_s4_fields["signal_score"],
+                velocity_multiplier=_s4_fields["velocity_multiplier"],
                 regime_mult=_regime_mult,
                 ema_pass=True,
                 decision=order.side.value,
@@ -3240,8 +3264,11 @@ def _run_cycle_inner() -> dict:
                 "decision_id": decision_id,
                 "score": order.allocation_weight,
                 "signal_id": _signal_ids.get(order.symbol),
-                # LLM sentiment score — distinct from allocation_weight stored in score.
-                "signal_score": _s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
+                # LLM sentiment score (RAW, #550) — distinct from the
+                # allocation_weight stored in score. trades.signal_score gets
+                # the same raw value the decision row declares.
+                "signal_score": _s4_fields["signal_score"],
+                "velocity_multiplier": _s4_fields["velocity_multiplier"],
             }
             # B27-FIX: collect S4 signals to mark as fired AFTER Alpaca confirmation.
             # Previously fired here (before submission), causing signals to be consumed
@@ -4219,6 +4246,7 @@ def _record_pyramiding_blocks(pg, bloccati, gia_registrati: set[str], regime_mul
             if chiave in gia_registrati:
                 continue
             _score = b.get("signal_score")
+            _mult = b.get("velocity_multiplier")
             _since = b.get("open_since")
             # Compatibilita' difensiva per chiamanti vecchi/test: prima di #491 il
             # solo notional disponibile era quantity * price ed era trattato come
@@ -4243,6 +4271,7 @@ def _record_pyramiding_blocks(pg, bloccati, gia_registrati: set[str], regime_mul
                 signal_id=b.get("signal_id"),
                 score=_delta,
                 signal_score=_score,
+                velocity_multiplier=_mult,
                 regime_mult=regime_mult,
                 ema_pass=True,
                 decision="SKIP_PYRAMIDING",
