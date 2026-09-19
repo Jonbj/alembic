@@ -722,7 +722,7 @@ if [[ -f "$DOSSIER_FILE" ]]; then
 fi
 set +e
 GIT_OUTPUT=$("$PROJECT_DIR/scripts/commit_evidence_ledger.sh" \
-    --message "evidence: ledger ${DATE_TARGET}" "${COMMIT_PATHS[@]}" 2>&1)
+    --message "evidence: ledger ${DATE_TARGET} (run ${DATE})" "${COMMIT_PATHS[@]}" 2>&1)
 set -e
 printf '%s\n' "$GIT_OUTPUT"
 GIT_STATUS=$(printf '%s\n' "$GIT_OUTPUT" | sed -n 's/^GIT_STATUS=//p' | tail -1)
