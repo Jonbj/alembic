@@ -2,7 +2,7 @@
 
 DoD della issue: un test simula un boost che sposta un segnale attraverso il
 gate e verifica che la riga persistita lo dichiari. SKIP_THRESHOLD e BUY
-estraaggono i campi dagli stessi helper, nutriti dalla provenienza del ranker
+estraggono i campi dagli stessi helper, nutriti dalla provenienza del ranker
 (score = decidente, raw_score/velocity_multiplier = scomposizione) o dal
 re-fetch by-id (solo grezzo, moltiplicatore NULL).
 """
