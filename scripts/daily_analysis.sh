@@ -558,7 +558,7 @@ tg_send "📄 Report salvato: <code>${REPORT_FILE}</code>"
 COMMIT_PATHS=(docs/evidence/findings.json "$REPORT_FILE")
 set +e
 GIT_OUTPUT=$("$PROJECT_DIR/scripts/commit_evidence_ledger.sh" \
-    --message "evidence: forensic ${DATE_TARGET}" "${COMMIT_PATHS[@]}" 2>&1)
+    --message "evidence: forensic ${DATE_TARGET} (run ${DATE})" "${COMMIT_PATHS[@]}" 2>&1)
 set -e
 printf '%s\n' "$GIT_OUTPUT"
 GIT_STATUS=$(printf '%s\n' "$GIT_OUTPUT" | sed -n 's/^GIT_STATUS=//p' | tail -1)
