@@ -15,6 +15,9 @@ SCRIPTS = (
     "daily_alpha_miss_analysis.sh",
     "daily_analysis.sh",
 )
+# Il cron chiama la guard di idempotenza (#564) subito dopo DATE_TARGET: senza
+# questo fratello nella tree di test il cron muore a 127 prima ancora del log.
+IDEMPOTENCY_GUARD = ROOT / "scripts" / "_alpha_miss_idempotency_guard.sh"
 
 
 def _write_executable(path: Path, body: str) -> None:
@@ -65,6 +68,7 @@ def _run_with_failing_claude(tmp_path: Path, script_name: str) -> tuple[subproce
         ROOT / "scripts" / "refresh_evidence_ledger.sh",
         scripts_dir / "refresh_evidence_ledger.sh",
     )
+    shutil.copy2(IDEMPOTENCY_GUARD, scripts_dir / IDEMPOTENCY_GUARD.name)
     _rendi_repo(project)
 
     _write_executable(
@@ -131,6 +135,7 @@ def test_forensic_error_before_header_is_persisted(tmp_path: Path):
     scripts_dir = project / "scripts"
     scripts_dir.mkdir(parents=True)
     shutil.copy2(ROOT / "scripts" / "daily_analysis.sh", scripts_dir / "daily_analysis.sh")
+    shutil.copy2(IDEMPOTENCY_GUARD, scripts_dir / IDEMPOTENCY_GUARD.name)
 
     env = os.environ.copy()
     env.pop("ALEMBIC_API_KEY", None)
@@ -242,6 +247,7 @@ def _run_with_dossier_streak(tmp_path: Path, streak: int) -> tuple[subprocess.Co
         ROOT / "scripts" / "refresh_evidence_ledger.sh",
         scripts_dir / "refresh_evidence_ledger.sh",
     )
+    shutil.copy2(IDEMPOTENCY_GUARD, scripts_dir / IDEMPOTENCY_GUARD.name)
     _rendi_repo(project)
 
     _write_executable(
