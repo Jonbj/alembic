@@ -2838,14 +2838,9 @@ def _run_cycle_inner() -> dict:
     # separately below, so the rebalance must not also buy/sell them this cycle.
     if stop_loss_sells:
         _sl_symbols = set(stop_loss_sells.keys())
-        result = type(result)(
-            strategies_run=result.strategies_run,
-            orders_per_strategy=result.orders_per_strategy,
-            orders_before_constraints=result.orders_before_constraints,
-            orders_after_constraints=result.orders_after_constraints,
-            constraints_fired=result.constraints_fired,
+        result = _cycle_result_with_orders(
+            result,
             final_orders=[o for o in result.final_orders if o.symbol not in _sl_symbols],
-            symbol_strategies=result.symbol_strategies,
         )
 
     # Hold minimum: don't sell positions entered in the last HOLD_MINIMUM_MINUTES.
@@ -2862,17 +2857,12 @@ def _run_cycle_inner() -> dict:
         if _recently_bought:
             _before_hold = len(result.final_orders)
             from src.backtest.engine.types import OrderSide as _OSHold
-            result = type(result)(
-                strategies_run=result.strategies_run,
-                orders_per_strategy=result.orders_per_strategy,
-                orders_before_constraints=result.orders_before_constraints,
-                orders_after_constraints=result.orders_after_constraints,
-                constraints_fired=result.constraints_fired,
+            result = _cycle_result_with_orders(
+                result,
                 final_orders=[
                     o for o in result.final_orders
                     if not (o.side == _OSHold.SELL and o.symbol in _recently_bought)
                 ],
-                symbol_strategies=result.symbol_strategies,
             )
             _skipped = _before_hold - len(result.final_orders)
             if _skipped:
@@ -2955,17 +2945,12 @@ def _run_cycle_inner() -> dict:
             finally:
                 _pg_prot.close()
             if _protected:
-                result = type(result)(
-                    strategies_run=result.strategies_run,
-                    orders_per_strategy=result.orders_per_strategy,
-                    orders_before_constraints=result.orders_before_constraints,
-                    orders_after_constraints=result.orders_after_constraints,
-                    constraints_fired=result.constraints_fired,
+                result = _cycle_result_with_orders(
+                    result,
                     final_orders=[
                         o for o in result.final_orders
                         if not (o.side == _OSProtect.SELL and o.symbol in _protected)
                     ],
-                    symbol_strategies=result.symbol_strategies,
                 )
                 log.info(
                     "Anti-stale-ranker-sell: protected %d position(s) from rebalance SELL "
@@ -2983,15 +2968,7 @@ def _run_cycle_inner() -> dict:
         _before_hyst = len(result.final_orders)
         _hyst_orders = _apply_exit_hysteresis(result.final_orders, config.REDIS_URL, _persist)
         if len(_hyst_orders) != _before_hyst:
-            result = type(result)(
-                strategies_run=result.strategies_run,
-                orders_per_strategy=result.orders_per_strategy,
-                orders_before_constraints=result.orders_before_constraints,
-                orders_after_constraints=result.orders_after_constraints,
-                constraints_fired=result.constraints_fired,
-                final_orders=_hyst_orders,
-                symbol_strategies=result.symbol_strategies,
-            )
+            result = _cycle_result_with_orders(result, final_orders=_hyst_orders)
     except Exception as _hyst_exc:
         log.warning("Exit hysteresis failed: %s — proceeding without it", _hyst_exc)
 
@@ -4349,6 +4326,27 @@ def _record_dispositions(
         return
     for sym in symbols:
         dispositions[sym] = disposition
+
+
+def _cycle_result_with_orders(result, final_orders):
+    """Rebuild a CycleResult with replaced orders, carrying EVERY pinned field.
+
+    #550 (F-073): the downstream filters (FIX-C stop-loss, hold minimum,
+    anti-stale-ranker, exit hysteresis) rebuild the result to drop orders.
+    `symbol_signal_provenance` has default_factory=dict — a rebuild that
+    forgets it silently reverts the decision log to the raw-score re-fetch,
+    and the BUY row stops matching the score the gate actually compared.
+    """
+    return type(result)(
+        strategies_run=result.strategies_run,
+        orders_per_strategy=result.orders_per_strategy,
+        orders_before_constraints=result.orders_before_constraints,
+        orders_after_constraints=result.orders_after_constraints,
+        constraints_fired=result.constraints_fired,
+        final_orders=final_orders,
+        symbol_strategies=result.symbol_strategies,
+        symbol_signal_provenance=result.symbol_signal_provenance,
+    )
 
 
 def _apply_signal_velocity(signals_df, multipliers: dict[str, float]):
