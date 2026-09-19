@@ -22,7 +22,8 @@
 #       --date-target "$DATE_TARGET" \
 #       --ledger "/nonexistent" \
 #       --report "$REPORT_FILE" \
-#       --commit-pattern "evidence: forensic ${DATE_TARGET}"
+#       --commit-pattern "evidence: forensic ${DATE_TARGET}" \
+#       --project-dir "$PROJECT_DIR"
 
 set -euo pipefail
 
@@ -30,6 +31,7 @@ DATE_TARGET=""
 LEDGER_FILE=""
 REPORT_FILE=""
 COMMIT_PATTERN=""
+PROJECT_DIR_ARG=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -47,6 +49,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --commit-pattern)
             COMMIT_PATTERN="${2:-}"
+            shift 2
+            ;;
+        --project-dir)
+            PROJECT_DIR_ARG="${2:-}"
             shift 2
             ;;
         *)
@@ -78,10 +84,21 @@ fi
 # (potrebbe essere uno stash non pubblicato), e il commit da solo non basta
 # (potrebbe essere stato revertato). Insieme sono la prova che la seduta e'
 # stata osservabilmente pubblicata.
-if [[ -n "$REPORT_FILE" && -n "$COMMIT_PATTERN" ]]; then
+#
+# Il commit va cercato su origin/main, non su HEAD: lo fa
+# commit_evidence_ledger.sh (#411) da una worktree dedicata appuntata su
+# main, mentre la tree condivisa da cui gira il cron e' abitualmente
+# parcheggiata sul branch di lavoro di un altro agente — su HEAD il commit
+# forense spesso non c'e' (la guard girerebbe a vuoto), e quando c'e' non e'
+# prova di pubblicazione. Il `-C` serve perche' il cron gira dalla cwd della
+# crontab, non dal repo (il `cd "$PROJECT_DIR"` arriva piu' in la'). Senza
+# --project-dir il check git non e' interrogabile in modo affidabile: si
+# tratta come non disponibile e si procede, perche' un run duplicato costa
+# una sessione mentre un cron bloccato costa la seduta.
+if [[ -n "$REPORT_FILE" && -n "$COMMIT_PATTERN" && -n "$PROJECT_DIR_ARG" ]]; then
     if [[ -f "$REPORT_FILE" ]]; then
-        if git log --oneline --grep="${COMMIT_PATTERN}" 2>/dev/null | grep -q .; then
-            echo "SKIP (guard): ${DATE_TARGET} gia' committata come '${COMMIT_PATTERN}' e report forense presente — run duplicato, nessuna sessione Claude necessaria."
+        if git -C "$PROJECT_DIR_ARG" log --oneline origin/main --grep="${COMMIT_PATTERN}" 2>/dev/null | grep -q .; then
+            echo "SKIP (guard): ${DATE_TARGET} gia' committata come '${COMMIT_PATTERN}' su origin/main e report forense presente — run duplicato, nessuna sessione Claude necessaria."
             exit 0
         fi
     fi

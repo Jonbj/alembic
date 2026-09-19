@@ -40,7 +40,9 @@ REPORT_FILE="$PROJECT_DIR/docs/FORENSIC_DAILY_REPORT_${DATE_TARGET}.md"
 # Senza guard, lo script rigenera FORENSIC_DAILY_REPORT_${DATE_TARGET}.md e
 # ri-committa il ledger con messaggio identico. Il forense non scrive su
 # market_daily.jsonl (e' il prodotto dell'alpha-miss), quindi la sua chiave
-# sono il report e il commit `evidence: forensic ${DATE_TARGET}` su main.
+# sono il report e il commit `evidence: forensic ${DATE_TARGET}` su
+# origin/main — su HEAD non si puo' cercare: questa tree e' spesso sul branch
+# di un altro agente, mentre il commit lo fa la worktree evidence-cron (#411).
 # Entrambi devono essere presenti: il file da solo non basta (potrebbe
 # essere in uno stash), e il commit da solo non basta (potrebbe essere stato
 # revertato). Insieme sono la prova che la seduta e' pubblicata.
@@ -49,7 +51,8 @@ bash "$PROJECT_DIR/scripts/_alpha_miss_idempotency_guard.sh" \
     --date-target "$DATE_TARGET" \
     --ledger "/nonexistent/market_daily.jsonl" \
     --report "$REPORT_FILE" \
-    --commit-pattern "evidence: forensic ${DATE_TARGET}"
+    --commit-pattern "evidence: forensic ${DATE_TARGET}" \
+    --project-dir "$PROJECT_DIR"
 GUARD_STATUS=$?
 set -e
 case "$GUARD_STATUS" in

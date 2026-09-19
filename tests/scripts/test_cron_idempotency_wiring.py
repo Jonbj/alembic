@@ -84,6 +84,7 @@ def test_cron_forense_invoke_la_guard_con_report_e_commit_pattern() -> None:
     assert "_alpha_miss_idempotency_guard.sh" in source
     assert "--report" in source
     assert "--commit-pattern" in source
+    assert "--project-dir" in source
     assert "FORENSIC_DAILY_REPORT_${DATE_TARGET}.md" in source
     assert 'evidence: forensic ${DATE_TARGET}' in source
 
