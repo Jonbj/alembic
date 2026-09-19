@@ -342,6 +342,9 @@ def test_finalizer_scrive_disposition_riconciliata_con_s1_e_pyramiding():
     assert event.snapshot["disposition"]["ranked_signal"] == {
         "model_id": None,
         "score": None,
+        # #550: la disposition dichiara anche la scomposizione del decidente
+        "raw_score": None,
+        "velocity_multiplier": None,
     }
     # La popolazione post-gate resta distinta dalla disposizione operativa:
     # anti-pyramiding censura un intento che aveva superato gate e ranking.

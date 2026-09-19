@@ -378,6 +378,10 @@ def _finalize_s4_intent_ledger(
             "ranked_signal": {
                 "model_id": provenance.get("model_id"),
                 "score": provenance.get("score"),
+                # #550 (F-073): la disposition S4 spiega da sola il punteggio
+                # che ha passato il gate, come la riga del Decision Log.
+                "raw_score": provenance.get("raw_score"),
+                "velocity_multiplier": provenance.get("velocity_multiplier"),
             },
         }
         ledger.set_disposition(
@@ -2838,14 +2842,9 @@ def _run_cycle_inner() -> dict:
     # separately below, so the rebalance must not also buy/sell them this cycle.
     if stop_loss_sells:
         _sl_symbols = set(stop_loss_sells.keys())
-        result = type(result)(
-            strategies_run=result.strategies_run,
-            orders_per_strategy=result.orders_per_strategy,
-            orders_before_constraints=result.orders_before_constraints,
-            orders_after_constraints=result.orders_after_constraints,
-            constraints_fired=result.constraints_fired,
+        result = _cycle_result_with_orders(
+            result,
             final_orders=[o for o in result.final_orders if o.symbol not in _sl_symbols],
-            symbol_strategies=result.symbol_strategies,
         )
 
     # Hold minimum: don't sell positions entered in the last HOLD_MINIMUM_MINUTES.
@@ -2862,17 +2861,12 @@ def _run_cycle_inner() -> dict:
         if _recently_bought:
             _before_hold = len(result.final_orders)
             from src.backtest.engine.types import OrderSide as _OSHold
-            result = type(result)(
-                strategies_run=result.strategies_run,
-                orders_per_strategy=result.orders_per_strategy,
-                orders_before_constraints=result.orders_before_constraints,
-                orders_after_constraints=result.orders_after_constraints,
-                constraints_fired=result.constraints_fired,
+            result = _cycle_result_with_orders(
+                result,
                 final_orders=[
                     o for o in result.final_orders
                     if not (o.side == _OSHold.SELL and o.symbol in _recently_bought)
                 ],
-                symbol_strategies=result.symbol_strategies,
             )
             _skipped = _before_hold - len(result.final_orders)
             if _skipped:
@@ -2955,17 +2949,12 @@ def _run_cycle_inner() -> dict:
             finally:
                 _pg_prot.close()
             if _protected:
-                result = type(result)(
-                    strategies_run=result.strategies_run,
-                    orders_per_strategy=result.orders_per_strategy,
-                    orders_before_constraints=result.orders_before_constraints,
-                    orders_after_constraints=result.orders_after_constraints,
-                    constraints_fired=result.constraints_fired,
+                result = _cycle_result_with_orders(
+                    result,
                     final_orders=[
                         o for o in result.final_orders
                         if not (o.side == _OSProtect.SELL and o.symbol in _protected)
                     ],
-                    symbol_strategies=result.symbol_strategies,
                 )
                 log.info(
                     "Anti-stale-ranker-sell: protected %d position(s) from rebalance SELL "
@@ -2983,15 +2972,7 @@ def _run_cycle_inner() -> dict:
         _before_hyst = len(result.final_orders)
         _hyst_orders = _apply_exit_hysteresis(result.final_orders, config.REDIS_URL, _persist)
         if len(_hyst_orders) != _before_hyst:
-            result = type(result)(
-                strategies_run=result.strategies_run,
-                orders_per_strategy=result.orders_per_strategy,
-                orders_before_constraints=result.orders_before_constraints,
-                orders_after_constraints=result.orders_after_constraints,
-                constraints_fired=result.constraints_fired,
-                final_orders=_hyst_orders,
-                symbol_strategies=result.symbol_strategies,
-            )
+            result = _cycle_result_with_orders(result, final_orders=_hyst_orders)
     except Exception as _hyst_exc:
         log.warning("Exit hysteresis failed: %s — proceeding without it", _hyst_exc)
 
@@ -3073,6 +3054,10 @@ def _run_cycle_inner() -> dict:
                 "score": prov["score"],
                 "reasoning": prov["reasoning"],
                 "model_id": prov["model_id"],
+                # #550 (F-073): la scomposizione del decidente, perche' la
+                # riga BUY dichiari il punteggio che il gate ha confrontato.
+                "raw_score": prov.get("raw_score"),
+                "velocity_multiplier": prov.get("velocity_multiplier"),
             }
             for sym, prov in _s4_provenance.items()
         }
@@ -3143,7 +3128,13 @@ def _run_cycle_inner() -> dict:
                 _pyramiding_blocked.append({
                     "symbol": order.symbol,
                     "signal_id": _signal_ids.get(order.symbol),
-                    "signal_score": _s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
+                    # #550: anche il blocco dichiara la scomposizione del
+                    # decidente — ha passato il gate come un BUY.
+                    **(
+                        _s4_decision_score_fields(_s4_signals.get(order.symbol))
+                        if "S4" in strats
+                        else {"signal_score": None, "velocity_multiplier": None}
+                    ),
                     "allocation_weight": order.allocation_weight,
                     # #491: target pieno e valore broker corrente rendono esplicito
                     # il gap; quantity/price restano solo per compatibilita' col
@@ -3166,16 +3157,29 @@ def _run_cycle_inner() -> dict:
                 continue
             wt_pct = f"{order.allocation_weight * 100:.1f}%"
             exit_mechanism: str | None = None
+            # #550 (F-073): i campi score della riga vengono dalla stessa
+            # scomposizione per reason, Decision Log e trade write — signal_score
+            # e' il GREZZO, velocity_multiplier spiega cosa ha visto il gate.
+            _s4_fields = (
+                _s4_decision_score_fields(_s4_signals.get(order.symbol))
+                if "S4" in strats
+                else {"signal_score": None, "velocity_multiplier": None}
+            )
             if "S4" in strats:
                 sig = _s4_signals.get(order.symbol, {})
-                sig_score = sig.get("score", 0.0)
+                sig_score = (
+                    _s4_fields["signal_score"]
+                    if _s4_fields["signal_score"] is not None
+                    else sig.get("score", 0.0)
+                )
                 sig_model = sig.get("model_id", "unknown")
                 sig_reasoning = (sig.get("reasoning") or "")[:200]
                 other = [s for s in strats if s != "S4"]
                 prefix = f"S4+{'+'.join(other)}" if other else "S4"
                 reason = (
-                    f"{prefix} news-driven: sentiment {sig_score:+.3f} ({sig_model}), "
-                    f"portfolio weight {wt_pct}. {sig_reasoning}"
+                    f"{prefix} news-driven: sentiment {sig_score:+.3f}"
+                    f"{_s4_sentiment_reason_clause(_s4_fields['signal_score'], _s4_fields['velocity_multiplier'])}"
+                    f" ({sig_model}), portfolio weight {wt_pct}. {sig_reasoning}"
                 ).strip()
             elif "S1" in strats and "S2" not in strats:
                 reason = f"S1 momentum: time-series momentum signal, portfolio weight {wt_pct}."
@@ -3252,7 +3256,8 @@ def _run_cycle_inner() -> dict:
                 symbol=order.symbol,
                 signal_id=_signal_ids.get(order.symbol),
                 score=order.allocation_weight,
-                signal_score=_s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
+                signal_score=_s4_fields["signal_score"],
+                velocity_multiplier=_s4_fields["velocity_multiplier"],
                 regime_mult=_regime_mult,
                 ema_pass=True,
                 decision=order.side.value,
@@ -3263,8 +3268,11 @@ def _run_cycle_inner() -> dict:
                 "decision_id": decision_id,
                 "score": order.allocation_weight,
                 "signal_id": _signal_ids.get(order.symbol),
-                # LLM sentiment score — distinct from allocation_weight stored in score.
-                "signal_score": _s4_signals.get(order.symbol, {}).get("score") if "S4" in strats else None,
+                # LLM sentiment score (RAW, #550) — distinct from the
+                # allocation_weight stored in score. trades.signal_score gets
+                # the same raw value the decision row declares.
+                "signal_score": _s4_fields["signal_score"],
+                "velocity_multiplier": _s4_fields["velocity_multiplier"],
             }
             # B27-FIX: collect S4 signals to mark as fired AFTER Alpaca confirmation.
             # Previously fired here (before submission), causing signals to be consumed
@@ -3799,14 +3807,56 @@ def _gate_is_active(threshold: float | None, min_score: float) -> bool:
     return threshold is not None and threshold >= min_score
 
 
+def _s4_decision_score_fields(sig: dict | None) -> dict:
+    """#550 (F-073): score fields for an S4 Decision Log row.
+
+    `signal_score` is always the RAW score (what sentiment_signals stores and
+    IC analytics correlates); `velocity_multiplier` declares the boost the
+    entry gate compared. `sig` is the ranker's provenance entry (score =
+    deciding score, raw_score/velocity_multiplier the decomposition) or the
+    by-id re-fetch metadata (raw score only → NULL multiplier, "not
+    instrumented" — never an implicit 1.0).
+    """
+    sig = sig or {}
+    raw = sig.get("raw_score")
+    if raw is None:
+        raw = sig.get("score")
+    multiplier = sig.get("velocity_multiplier")
+    return {
+        "signal_score": float(raw) if raw is not None else None,
+        "velocity_multiplier": float(multiplier) if multiplier is not None else None,
+    }
+
+
+def _s4_sentiment_reason_clause(raw_score: float | None, velocity_multiplier: float | None) -> str:
+    """Reason clause declaring the gate-score decomposition (#550).
+
+    Appended to the sentiment sentence of S4 decision rows when a velocity
+    boost was applied: «× velocity 1.20 → gate 0.329». Empty without a boost —
+    the mass of unboosted rows keeps its reason unchanged.
+    """
+    from src.strategies.s4.entry_gate import deciding_entry_score
+
+    if raw_score is None or velocity_multiplier is None or velocity_multiplier == 1.0:
+        return ""
+    deciding = deciding_entry_score(raw_score, velocity_multiplier)
+    return f" × velocity {velocity_multiplier:.2f} → gate {deciding:.3f}"
+
+
 def _record_gate_drops(dropped_df, threshold: float) -> None:
     """Write SKIP_THRESHOLD rows to execution_decisions for signals the S4 feedback
     gate dropped (score below threshold), so the Decision Log explains no-trade cycles
     instead of being silently empty. Fail-safe — never breaks the cycle.
+
+    #550: `dropped_df` carries the decomposition written by
+    _apply_signal_velocity. The row stores the RAW score and the multiplier;
+    the reason compares the DECIDING score with the threshold — comparing the
+    raw score would state a filter that did not run.
     """
     try:
         from datetime import datetime, timezone
 
+        import pandas as pd
         from src.config import config
         from src.store.pg_store import PostgreSQLStore
 
@@ -3814,7 +3864,11 @@ def _record_gate_drops(dropped_df, threshold: float) -> None:
         now = datetime.now(timezone.utc)
         pg = PostgreSQLStore()
         for _, row in dropped_df.iterrows():
-            sig_score = float(row["score"])
+            sig_score = float(row["score"])  # deciding score (post-velocity)
+            raw = row.get("raw_score")
+            raw_score = float(raw) if raw is not None and pd.notna(raw) else sig_score
+            mult = row.get("velocity_multiplier")
+            mult = float(mult) if mult is not None and pd.notna(mult) else None
             # #406: the gate drop carries a known signal_id — propagate it so the
             # Decision Log row joins back to the signal that caused it. NaN is
             # the pandas sentinel for a missing int column; int(NaN) raises,
@@ -3824,6 +3878,15 @@ def _record_gate_drops(dropped_df, threshold: float) -> None:
                 sid: int | None = int(raw_sid) if raw_sid is not None else None
             except (TypeError, ValueError):
                 sid = None
+            decomposition = (
+                f" (raw {raw_score:.3f} × velocity {mult:.2f})"
+                if mult is not None and mult != 1.0
+                else ""
+            )
+            reason = (
+                f"score {abs(sig_score):.3f}{decomposition}"
+                f" < feedback threshold {threshold:.3f}"
+            )
             pg.write_execution_decision(
                 tick_time=now,
                 symbol=str(row["symbol"]),
@@ -3832,8 +3895,9 @@ def _record_gate_drops(dropped_df, threshold: float) -> None:
                 regime_mult=regime_mult,
                 ema_pass=False,
                 decision="SKIP_THRESHOLD",
-                reason=f"score {abs(sig_score):.3f} < feedback threshold {threshold:.3f}",
-                signal_score=sig_score,
+                reason=reason,
+                signal_score=raw_score,
+                velocity_multiplier=mult,
             )
     except Exception as exc:
         log.warning("Failed to log gate-dropped signals: %s", exc)
@@ -4186,6 +4250,7 @@ def _record_pyramiding_blocks(pg, bloccati, gia_registrati: set[str], regime_mul
             if chiave in gia_registrati:
                 continue
             _score = b.get("signal_score")
+            _mult = b.get("velocity_multiplier")
             _since = b.get("open_since")
             # Compatibilita' difensiva per chiamanti vecchi/test: prima di #491 il
             # solo notional disponibile era quantity * price ed era trattato come
@@ -4210,6 +4275,7 @@ def _record_pyramiding_blocks(pg, bloccati, gia_registrati: set[str], regime_mul
                 signal_id=b.get("signal_id"),
                 score=_delta,
                 signal_score=_score,
+                velocity_multiplier=_mult,
                 regime_mult=regime_mult,
                 ema_pass=True,
                 decision="SKIP_PYRAMIDING",
@@ -4351,6 +4417,55 @@ def _record_dispositions(
         dispositions[sym] = disposition
 
 
+def _cycle_result_with_orders(result, final_orders):
+    """Rebuild a CycleResult with replaced orders, carrying EVERY pinned field.
+
+    #550 (F-073): the downstream filters (FIX-C stop-loss, hold minimum,
+    anti-stale-ranker, exit hysteresis) rebuild the result to drop orders.
+    `symbol_signal_provenance` has default_factory=dict — a rebuild that
+    forgets it silently reverts the decision log to the raw-score re-fetch,
+    and the BUY row stops matching the score the gate actually compared.
+    """
+    return type(result)(
+        strategies_run=result.strategies_run,
+        orders_per_strategy=result.orders_per_strategy,
+        orders_before_constraints=result.orders_before_constraints,
+        orders_after_constraints=result.orders_after_constraints,
+        constraints_fired=result.constraints_fired,
+        final_orders=final_orders,
+        symbol_strategies=result.symbol_strategies,
+        symbol_signal_provenance=result.symbol_signal_provenance,
+    )
+
+
+def _apply_signal_velocity(signals_df, multipliers: dict[str, float]):
+    """#550 (F-073): applica i moltiplicatori velocity e lascia la traccia.
+
+    La colonna `score` diventa il punteggio DECIDENTE (quello che il gate e il
+    ranker confrontano), calcolato dall'unica implementazione della formula
+    (`deciding_entry_score`). Accanto restano `raw_score` (il grezzo persistito
+    in sentiment_signals) e `velocity_multiplier`, cosi' ogni riga che scende
+    a valle — provenienza del ranker, Decision Log — spiega da sola come e'
+    costruito il punteggio che ha deciso.
+
+    Funzione pura estratta dal corpo del ciclo per poter verificare la
+    propagazione senza montare uno scheduler (stesso seams di
+    `_signals_to_dataframe`).
+    """
+    from src.strategies.s4.entry_gate import deciding_entry_score
+
+    out = signals_df.copy()
+    out["raw_score"] = out["score"]
+    out["velocity_multiplier"] = [
+        float(multipliers.get(sym, 1.0)) for sym in out["symbol"]
+    ]
+    out["score"] = [
+        deciding_entry_score(raw, mult)
+        for raw, mult in zip(out["raw_score"], out["velocity_multiplier"])
+    ]
+    return out
+
+
 def _build_strategy_instance(
     entry,
     bars_df,
@@ -4468,8 +4583,15 @@ def _build_strategy_instance(
                 _open_syms = set()
                 _open_syms_at_rank = None
             if intent_ledger is not None and signals:
+                # #550: stessa formula del gate (deciding_entry_score) — il
+                # ranking_score del ledger e la colonna che il filtro confronta
+                # non possono divergere per costruzione (#169/#467).
+                from src.strategies.s4.entry_gate import deciding_entry_score as _deciding
+
                 ranking_scores = {
-                    sig.signal_id: float(sig.score) * _ranking_multipliers.get(sig.symbol, 1.0)
+                    sig.signal_id: _deciding(
+                        float(sig.score), _ranking_multipliers.get(sig.symbol)
+                    )
                     for sig in signals
                     if sig.signal_id is not None
                 }
@@ -4637,16 +4759,15 @@ def _build_strategy_instance(
             # capture (they are symbol-only, no filter chain involved) instead of
             # re-querying Redis. If the earlier computation failed, fall back to
             # raw scores — the warning was already emitted at capture time.
+            # #550: through _apply_signal_velocity so the deciding score and its
+            # decomposition (raw_score, velocity_multiplier) come from the same
+            # place the Decision Log will read them from.
             multipliers = {
                 sym: mult for sym, mult in _ranking_multipliers.items()
                 if sym in set(signals_df["symbol"].unique())
             }
             if multipliers:
-                signals_df = signals_df.copy()
-                signals_df["score"] = signals_df.apply(
-                    lambda row: row["score"] * multipliers.get(row["symbol"], 1.0),
-                    axis=1,
-                )
+                signals_df = _apply_signal_velocity(signals_df, multipliers)
                 n_boosted = sum(1 for m in multipliers.values() if m != 1.0)
                 if n_boosted:
                     log.info("Signal velocity: %d/%d symbols adjusted", n_boosted, len(multipliers))

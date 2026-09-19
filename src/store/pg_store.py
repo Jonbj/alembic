@@ -705,8 +705,8 @@ class PostgreSQLStore:
 
     _INSERT_DECISION = """
         INSERT INTO execution_decisions
-            (tick_time, symbol, signal_id, score, signal_score, regime_mult, ema_pass, decision, order_id, reason, exit_mechanism)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (tick_time, symbol, signal_id, score, signal_score, velocity_multiplier, regime_mult, ema_pass, decision, order_id, reason, exit_mechanism)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
     """
 
@@ -723,6 +723,7 @@ class PostgreSQLStore:
         reason: str | None = None,
         signal_score: float | None = None,
         exit_mechanism: str | None = None,
+        velocity_multiplier: float | None = None,
     ) -> int:
         """Insert one execution decision row. Returns the new id.
 
@@ -730,18 +731,25 @@ class PostgreSQLStore:
             score:          Portfolio allocation weight (e.g. 0.02 = 2% target weight).
             signal_score:   Actual LLM sentiment score that drove the decision (e.g. +0.707).
                             Stored separately from score so IC analytics can correlate
-                            signal quality with subsequent returns.
+                            signal quality with subsequent returns. #550: always the
+                            RAW score, as persisted in sentiment_signals — never the
+                            velocity-boosted value the gate compared.
             exit_mechanism: #60 — structured tag for weight-0 S4 SELL exits
                             ("no_signal" | "expired" | "whipsaw"). None for all
                             other decision types (BUY, stop_loss, sentiment_reversal, ...),
                             which already carry a clear, self-descriptive reason string.
+            velocity_multiplier: #550 (F-073) — signal-velocity multiplier the S4
+                            entry gate applied in this cycle. The score actually
+                            evaluated is signal_score × velocity_multiplier
+                            (src/strategies/s4/entry_gate.py). None = not
+                            instrumented (pre-077 rows, or velocity unavailable).
         """
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(
                     self._INSERT_DECISION,
-                    (tick_time, symbol, signal_id, score, signal_score, regime_mult, ema_pass, decision, order_id, reason, exit_mechanism),
+                    (tick_time, symbol, signal_id, score, signal_score, velocity_multiplier, regime_mult, ema_pass, decision, order_id, reason, exit_mechanism),
                 )
                 row = cur.fetchone()
             conn.commit()
