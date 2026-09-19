@@ -4351,6 +4351,34 @@ def _record_dispositions(
         dispositions[sym] = disposition
 
 
+def _apply_signal_velocity(signals_df, multipliers: dict[str, float]):
+    """#550 (F-073): applica i moltiplicatori velocity e lascia la traccia.
+
+    La colonna `score` diventa il punteggio DECIDENTE (quello che il gate e il
+    ranker confrontano), calcolato dall'unica implementazione della formula
+    (`deciding_entry_score`). Accanto restano `raw_score` (il grezzo persistito
+    in sentiment_signals) e `velocity_multiplier`, cosi' ogni riga che scende
+    a valle — provenienza del ranker, Decision Log — spiega da sola come e'
+    costruito il punteggio che ha deciso.
+
+    Funzione pura estratta dal corpo del ciclo per poter verificare la
+    propagazione senza montare uno scheduler (stesso seams di
+    `_signals_to_dataframe`).
+    """
+    from src.strategies.s4.entry_gate import deciding_entry_score
+
+    out = signals_df.copy()
+    out["raw_score"] = out["score"]
+    out["velocity_multiplier"] = [
+        float(multipliers.get(sym, 1.0)) for sym in out["symbol"]
+    ]
+    out["score"] = [
+        deciding_entry_score(raw, mult)
+        for raw, mult in zip(out["raw_score"], out["velocity_multiplier"])
+    ]
+    return out
+
+
 def _build_strategy_instance(
     entry,
     bars_df,
@@ -4637,16 +4665,15 @@ def _build_strategy_instance(
             # capture (they are symbol-only, no filter chain involved) instead of
             # re-querying Redis. If the earlier computation failed, fall back to
             # raw scores — the warning was already emitted at capture time.
+            # #550: through _apply_signal_velocity so the deciding score and its
+            # decomposition (raw_score, velocity_multiplier) come from the same
+            # place the Decision Log will read them from.
             multipliers = {
                 sym: mult for sym, mult in _ranking_multipliers.items()
                 if sym in set(signals_df["symbol"].unique())
             }
             if multipliers:
-                signals_df = signals_df.copy()
-                signals_df["score"] = signals_df.apply(
-                    lambda row: row["score"] * multipliers.get(row["symbol"], 1.0),
-                    axis=1,
-                )
+                signals_df = _apply_signal_velocity(signals_df, multipliers)
                 n_boosted = sum(1 for m in multipliers.values() if m != 1.0)
                 if n_boosted:
                     log.info("Signal velocity: %d/%d symbols adjusted", n_boosted, len(multipliers))

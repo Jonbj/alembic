@@ -122,6 +122,8 @@ def test_ranking_result_provenance_keyed_by_ticker():
     result = ranker.rank(sigs)
     assert result.provenance["MSFT"] == {
         "signal_id": 3770, "score": 0.165, "reasoning": "bull", "model_id": "m1",
+        # #550: scomposizione del decidente, assente su segnali non boostati
+        "raw_score": None, "velocity_multiplier": 1.0,
     }
     assert result.provenance["AAPL"]["signal_id"] == 42
 
@@ -562,3 +564,46 @@ def test_ranker_diagnostics_rank_coerente_con_ranking():
                     f"(rank {r_j}, strength {strengths[s_j]}) — "
                     f"viola l'invariante #401"
                 )
+
+
+# ---------------------------------------------------------------------------
+# #550 (F-073): la provenienza porta la scomposizione del punteggio decidente
+# ---------------------------------------------------------------------------
+
+
+def test_provenienza_porta_grezzo_e_moltiplicatore_del_decidente():
+    """Il gate confronta grezzo x velocity, ma la riga BUY si spieghi da sola:
+    la provenienza del ranker deve riportare BOTH raw_score e
+    velocity_multiplier accanto allo score (decidente) che ha ordinato il
+    bucket. Senza questi due campi il Decision Log non puo' ricostruire perche'
+    un segnale a 0.266 e' entrato e uno a 0.288 no."""
+    signals = [
+        _sig(
+            "BA",
+            score=0.3285,  # decidente: quello che il ranker vede e ordina
+            confidence=0.9,
+            raw_score=0.27375,
+            velocity_multiplier=1.2,
+        ),
+        _sig("VZ", score=0.31, confidence=0.9),
+    ]
+    result = CrossSectionalRanker(S4Config(n_top=5)).rank(signals)
+
+    prov = result.provenance["BA"]
+    assert prov["score"] == pytest.approx(0.3285)
+    assert prov["raw_score"] == pytest.approx(0.27375)
+    assert prov["velocity_multiplier"] == pytest.approx(1.2)
+
+
+def test_provenienza_senza_moltiplicatore_degrada_a_grezzo_non_strumentato():
+    """Un segnale che non ha passato il blocco velocity (calcolo non
+    disponibile) non ha scomposizione: raw_score resta None e il moltiplicatore
+    unitario — chi legge sa che non c'e' niente da spiegare, non che il campo
+    e' andato perso."""
+    signals = [_sig("VZ", score=0.31, confidence=0.9)]
+    result = CrossSectionalRanker(S4Config(n_top=5)).rank(signals)
+
+    prov = result.provenance["VZ"]
+    assert prov["score"] == pytest.approx(0.31)
+    assert prov["raw_score"] is None
+    assert prov["velocity_multiplier"] == pytest.approx(1.0)

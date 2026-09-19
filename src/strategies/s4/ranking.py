@@ -30,6 +30,12 @@ class RankedTicker:
     signal_id: int | None = None
     reasoning: str = ""
     model_id: str = ""
+    # #550 (F-073): scomposizione dello score che il gate d'ingresso ha
+    # valutato. score e' il decidente (grezzo x velocity); raw_score e
+    # velocity_multiplier fanno si' che la riga persistita si spieghi da
+    # sola. raw_score None = nessuna scomposizione nota.
+    raw_score: float | None = None
+    velocity_multiplier: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -66,6 +72,9 @@ class RankingResult:
         drove this ticker's weight" — callers must use this instead of
         re-querying the signal store for the latest signal, which can return
         a different (newer) signal than the one actually ranked.
+        #550 (F-073): carries the gate-score decomposition too — `score` is
+        the deciding score (raw × velocity), `raw_score` and
+        `velocity_multiplier` explain how it was built.
         """
         return {
             r.ticker: {
@@ -73,6 +82,8 @@ class RankingResult:
                 "score": r.score,
                 "reasoning": r.reasoning,
                 "model_id": r.model_id,
+                "raw_score": r.raw_score,
+                "velocity_multiplier": r.velocity_multiplier,
             }
             for r in self.rankings
         }
@@ -167,6 +178,8 @@ class CrossSectionalRanker:
                 signal_id=sig.signal_id,
                 reasoning=sig.reasoning,
                 model_id=sig.model_id,
+                raw_score=sig.raw_score,
+                velocity_multiplier=sig.velocity_multiplier,
             )
             for rank, (sig, strength) in enumerate(selected)
         )
