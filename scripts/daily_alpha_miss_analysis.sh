@@ -71,6 +71,35 @@ if (( CALENDAR_STATUS != 0 )) || [[ -z "${DATE_TARGET:-}" ]]; then
     exit 0
 fi
 
+# #564 / F-075: dopo un holiday weekday (Labor Day 2026-09-07, Memorial Day,
+# Juneteenth, July 4 sui venerdi', ...) Alpaca restituisce la stessa data
+# dell'ultimo run, e senza guard lo script lancerebbe una sessione Claude
+# Code intera, rigenererebbe il dossier e ri-committerebbe il ledger con lo
+# stesso messaggio del giorno prima (commits e5512c9 e 88bfb05 su 2026-09-04).
+# La chiave piu' economica e' il ledger stesso: market_daily.jsonl porta gia'
+# una riga per la data target quando il run precedente l'ha materializzata,
+# quindi non c'e' nulla da rifare. Exit 0 perche' e' un no-op corretto, non
+# un fallimento — non deve paginare.
+set +e
+bash "$PROJECT_DIR/scripts/_alpha_miss_idempotency_guard.sh" \
+    --date-target "$DATE_TARGET" \
+    --ledger "$PROJECT_DIR/docs/evidence/market_daily.jsonl"
+GUARD_STATUS=$?
+set -e
+case "$GUARD_STATUS" in
+    0)
+        echo "Cron terminato: idempotency guard ha riconosciuto ${DATE_TARGET} come gia' processato."
+        exit 0
+        ;;
+    1)
+        # Procedi
+        ;;
+    *)
+        echo "FAILED: idempotency guard terminata con codice ${GUARD_STATUS} — run annullato"
+        exit "$GUARD_STATUS"
+        ;;
+esac
+
 REPORT_FILE="$PROJECT_DIR/docs/ALPHA_MISS_REPORT_${DATE_TARGET}.md"
 # #287: i candidati del ledger vivono in una directory dedicata, accanto ai
 # dossier: sono l'audit trail di cio' che la sessione ha proposto e il
