@@ -75,6 +75,29 @@ def test_il_reset_epoch_della_session_limit_del_2026_09_14_e_nel_futuro() -> Non
     )
 
 
+def test_il_reset_orario_gia_trascorso_viene_spostato_a_domani() -> None:
+    """#563: un reset espresso come solo orario vale per domani se oggi e' passato."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        mock_date = Path(tmp) / "date"
+        mock_date.write_text(
+            "#!/usr/bin/env bash\n"
+            "if [[ \"$1\" == '-d' && \"$2\" == '12:20pm'* ]]; then echo 100; "
+            "elif [[ \"$1\" == '-d' && \"$2\" == 'tomorrow 12:20pm'* ]]; then echo 86500; "
+            "elif [[ \"$1\" == '+%s' ]]; then echo 200; "
+            "else exit 99; fi"
+        )
+        mock_date.chmod(0o755)
+        result = _source(
+            f"PATH={shlex.quote(tmp)}:$PATH; "
+            "_claude_reset_epoch \"You've hit your session limit · resets 12:20pm (Europe/Rome)\""
+        )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "86500"
+
+
 def test_la_data_da_recuperare_e_la_piu_vecchia_assente() -> None:
     result = _source(
         "oldest_missing_session '2026-09-09 2026-09-10 2026-09-11' '2026-09-10 2026-09-11'"
