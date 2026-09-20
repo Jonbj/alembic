@@ -1,0 +1,90 @@
+ticker,company_name,current_aliases,proposed_alias,bucket,reason
+AAPL,Apple Inc,Apple Computer|Apple Incorporated,apple,collision,stem 'apple' collides with common English token
+ABBV,AbbVie Inc,,abbvie,safe,
+ADBE,Adobe Inc,Adobe Systems,adobe,safe,
+AMAT,Applied Materials Inc,Applied Materials,,noop,already_present
+AMD,Advanced Micro Devices Inc,Advanced Micro Devices|AMD Inc,,noop,already_present
+AMZN,Amazon.com Inc,Amazon Inc|Amazon.com,,noop,already_present
+ARM,Arm Holdings plc,ARM Holdings|Arm Limited|ARM,,noop,already_present
+ASML,ASML Holding NV,ASML|ASML Holding,,noop,already_present
+AVGO,Broadcom Inc,Broadcom Corporation,broadcom,safe,
+AXP,American Express Company,American Express,,noop,already_present
+AZN,AstraZeneca plc,AstraZeneca|AZ|AstraZeneca PLC,,noop,already_present
+BA,Boeing Co,The Boeing Company|Boeing Company,boeing,short,ticker 'BA' has <= 2 chars
+BABA,Alibaba Group Holding Limited,Alibaba|Alibaba Group|Taobao|Tmall|Alipay,,noop,already_present
+BAC,Bank of America Corporation,Bank of America Corp,bank of america,safe,
+BIDU,Baidu Inc,Baidu|Baidu Inc|Baidu AI Cloud,,noop,already_present
+BP,BP plc,BP|British Petroleum|BP p.l.c.,,noop,already_present
+BRK.B,Berkshire Hathaway Inc,Berkshire Hathaway,,noop,already_present
+C,Citigroup Inc,Citibank|Citi,citigroup,short,ticker 'C' has <= 2 chars
+CAT,Caterpillar Inc,Caterpillar,,noop,already_present
+CMCSA,Comcast Corporation,Comcast Corp,comcast,safe,
+COST,Costco Wholesale Corporation,Costco Wholesale Corp,costco wholesale,safe,
+CRM,Salesforce Inc,Salesforce.com Inc,salesforce,safe,
+CSCO,Cisco Systems Inc,Cisco Systems,,noop,already_present
+CVX,Chevron Corporation,Chevron Corp,chevron,safe,
+DB,Deutsche Bank AG,Deutsche Bank|Deutsche Bank AG,,noop,already_present
+DIS,Walt Disney Co,The Walt Disney Company|Disney,walt disney,safe,
+ERIC,Telefonaktiebolaget LM Ericsson,Ericsson|LM Ericsson|Ericsson AB,,noop,no_suffix_detected
+F,Ford Motor Company,Ford Motor Co,ford motor,short,ticker 'F' has <= 2 chars
+GE,General Electric Co,GE Aerospace,general electric,short,ticker 'GE' has <= 2 chars
+GM,General Motors Company,General Motors Corp,general motors,short,ticker 'GM' has <= 2 chars
+GOOGL,Alphabet Inc,Google LLC|Google Inc,alphabet,safe,
+GS,Goldman Sachs Group Inc,Goldman Sachs,,noop,already_present
+HD,Home Depot Inc,The Home Depot,home depot,short,ticker 'HD' has <= 2 chars
+IBM,International Business Machines Corporation,IBM Corporation|IBM Corp,international business machines,safe,
+INFY,Infosys Limited,Infosys|Infosys Ltd|Infosys BPM,,noop,already_present
+INTC,Intel Corporation,Intel Corp,intel,safe,
+IWM,iShares Russell 2000 ETF,,,noop,no_suffix_detected
+JD,JD.com Inc,JD.com|JD|Jingdong|JD Logistics,,noop,already_present
+JNJ,Johnson & Johnson,,,noop,no_suffix_detected
+JPM,JPMorgan Chase & Co,JPMorgan Chase,,noop,already_present
+LLY,Eli Lilly and Company,Eli Lilly|Lilly,,noop,already_present
+MA,Mastercard Inc,Mastercard International,mastercard,short,ticker 'MA' has <= 2 chars
+MCD,McDonald's Corporation,McDonald's Corp,mcdonald's,safe,
+META,Meta Platforms Inc,Facebook Inc|Meta Platforms,,noop,already_present
+MMM,3M Co,3M Company|Minnesota Mining and Manufacturing,3m,short,stem '3m' shorter than 3 chars
+MRK,Merck & Co Inc,Merck & Co,merck,safe,
+MS,Morgan Stanley,,,noop,no_suffix_detected
+MSFT,Microsoft Corporation,Microsoft Corp,microsoft,safe,
+MU,Micron Technology Inc,Micron Technology|Micron,,noop,already_present
+NFLX,Netflix Inc,,netflix,safe,
+NKE,Nike Inc,Nike,,noop,already_present
+NOK,Nokia Corporation,Nokia|Nokia Corp|Nokia Networks,,noop,already_present
+NOW,ServiceNow Inc,ServiceNow,,noop,already_present
+NVDA,NVIDIA Corporation,NVIDIA Corp,nvidia,safe,
+NVO,Novo Nordisk AS,Novo Nordisk|Novo Nordisk A/S|Ozempic,,noop,no_suffix_detected
+ORCL,Oracle Corporation,Oracle Corp,oracle,safe,
+PANW,Palo Alto Networks Inc,Palo Alto Networks,palo alto,safe,
+PBR,Petroleo Brasileiro SA,Petrobras|Petróleo Brasileiro|Petróleo Brasileiro S.A.,petroleo brasileiro,safe,
+PFE,Pfizer Inc,,pfizer,safe,
+PG,Procter & Gamble Co,Procter & Gamble,,noop,already_present
+PLTR,Palantir Technologies Inc,Palantir Technologies|Palantir,,noop,already_present
+QCOM,Qualcomm Inc,QUALCOMM Inc,qualcomm,safe,
+QQQ,Invesco QQQ Trust,Invesco QQQ|PowerShares QQQ,,noop,no_suffix_detected
+RIO,Rio Tinto plc,Rio Tinto|Rio Tinto Group|Rio Tinto plc,,noop,already_present
+SAP,SAP SE,SAP|SAP AG|SAP America,,noop,already_present
+SBUX,Starbucks Corporation,Starbucks Corp,starbucks,safe,
+SHEL,Shell plc,Shell|Royal Dutch Shell|Shell Energy,,noop,already_present
+SNOW,Snowflake Inc,Snowflake,,noop,already_present
+SONY,Sony Group Corporation,Sony|Sony Group|Sony Corporation|Sony Corp|PlayStation,,noop,already_present
+SOXX,iShares Semiconductor ETF,SOXX,,noop,no_suffix_detected
+SPY,SPDR S&P 500 ETF Trust,SPDR S&P 500 ETF,,noop,no_suffix_detected
+T,AT&T Inc,AT&T Corporation,at&t,short,ticker 'T' has <= 2 chars
+TM,Toyota Motor Corporation,Toyota|Toyota Motor|Toyota Motor Corp,,noop,already_present
+TMUS,T-Mobile US Inc,T-Mobile US,,noop,already_present
+TSLA,Tesla Inc,Tesla Motors,tesla,safe,
+TSM,Taiwan Semiconductor Manufacturing,TSMC|Taiwan Semiconductor Manufacturing Company|Taiwan Semiconductor,,noop,no_suffix_detected
+TXN,Texas Instruments Inc,Texas Instruments,,noop,already_present
+UBS,UBS Group AG,UBS|UBS AG|UBS Group,,noop,already_present
+UNH,UnitedHealth Group Inc,UnitedHealth Group,unitedhealth,safe,
+V,Visa Inc,Visa International,visa,short,ticker 'V' has <= 2 chars
+VALE,Vale SA,Vale|Vale S.A.|Vale SA,,noop,already_present
+VZ,Verizon Communications Inc,Verizon Communications,verizon,short,ticker 'VZ' has <= 2 chars
+WFC,Wells Fargo & Company,Wells Fargo Bank,wells fargo,safe,
+WMT,Walmart Inc,Wal-Mart Stores,walmart,safe,
+XLE,Energy Select Sector SPDR Fund,,,noop,no_suffix_detected
+XLF,Financial Select Sector SPDR Fund,,,noop,no_suffix_detected
+XLK,Technology Select Sector SPDR Fund,,,noop,no_suffix_detected
+XLV,Health Care Select Sector SPDR Fund,,,noop,no_suffix_detected
+XOM,Exxon Mobil Corporation,ExxonMobil|Exxon Mobil Corp,exxon mobil,safe,

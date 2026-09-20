@@ -1,0 +1,28 @@
+-- Migration 078: backfill bare-stem alias su ticker_lookup (#566 / F-077).
+--
+-- Il dossier relevance classifier usa un matcher word-boundary sugli
+-- issuer_terms costruiti da ticker_lookup: un articolo intitolato "Oracle
+-- set to report…" non veniva classificato ISSUER_SPECIFIC perche' la
+-- tabella conserva solo nomi legali suffissi ("Oracle Corporation",
+-- "Oracle Corp"). Stesso difetto su AAPL "Apple Announces…", CMCSA
+-- "Comcast CFO Says…", F "Ford…". La funzione pura `derive_bare_stem`
+-- (src/analysis/dossier/article_coverage.py) aggiunge il bare stem in
+-- modo deterministico; la funzione `propose_stem_backfill` produce una
+-- proposta di review bucket-per-bucket (safe / short / collision / noop).
+--
+-- Questa migration NON viene applicata automaticamente. Il file e' un
+-- segnaposto: l'operatore applica la migration DOPO aver revisionato il CSV
+-- generato da `scripts/propose_ticker_lookup_stem_backfill.py` (path
+-- `docs/evidence/proposals/ticker_lookup_stem_backfill.csv`).
+--
+-- Congelata sotto freeze #171: la issue #566 e' freeze-ok (correttezza
+-- della misura), ma il backfill e' un'azione sul DB live e quindi resta
+-- fuori dal perimetro di un agente — la review umana e' il vincolo.
+--
+-- Quando l'operatore approva i candidati safe, applica questa migration
+-- sbloccando il blocco seguente. Le righe "short" e "collision" vanno
+-- gestite con migration dedicate (una per ciascuna, dopo review caso per caso).
+
+-- SELECT ticker, company_name, array_append(aliases, '<stem>')
+-- FROM ticker_lookup
+-- WHERE ticker IN ('ORCL', ...);
