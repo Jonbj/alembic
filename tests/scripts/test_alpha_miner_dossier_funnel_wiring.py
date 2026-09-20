@@ -17,6 +17,8 @@ from datetime import date
 
 from unittest.mock import patch
 
+import pytest
+
 import scripts.alpha_miner_dossier as dossier
 
 
@@ -308,3 +310,177 @@ def test_funnel_sceglie_il_tentativo_fillato_se_un_simbolo_ha_piu_ordini():
         soglia_gate=0.30,
     )
     assert funnel["righe"][0]["pipeline"] == "CAUGHT"
+
+
+# --- #567: il caller di _funnel_v2 deve cablare la pipeline d'uscita.
+# Senza il wiring, ogni EXIT_RISK collassa a NO_EXIT_SIGNAL perche' il modulo
+# puro non riceve `chiusura`, `exit_segnali` o la data di dossier. I test qui
+# chiamano `_funnel_v2` esattamente come fa l'orchestratore (con i tre campi
+# nuovi: chiusure_by_symbol, exit_segnali_by_symbol, giorno_iso) e verificano
+# che la pipeline d'uscita produca stadi diversi da NO_EXIT_SIGNAL.
+
+
+def test_funnel_v2_cabla_chiusure_per_simbolo_a_exit_risk():
+    """HOOD e' EXIT_RISK (detenuto, ribasso) ed e' stato chiuso: la riga deve
+    classificarsi EXITED, non restare NO_EXIT_SIGNAL. Il caller deve passare la
+    chiusura caricata dal ledger `trades`."""
+    rendimenti = {"HOOD": -0.04}
+    chiusura_hood = {
+        "symbol": "HOOD", "strategia": "S4",
+        "exit_price": 28.40, "qty": 50.0, "pnl_net": -12.50,
+        "exit_reason": "sentiment_reversal", "ore_tenuta": 1.0,
+    }
+    funnel = dossier._funnel_v2(
+        rendimenti=rendimenti,
+        held_at_open={"HOOD"},
+        universo=["HOOD"],
+        copertura={"per_ticker": {}},
+        segnali={},
+        intenti=[],
+        eventi=[],
+        guard=[],
+        barre={"HOOD": _barra("HOOD", 28.13)},
+        candidati_classificati=[],
+        soglia_gate=0.30,
+        chiusure_by_symbol={"HOOD": chiusura_hood},
+        exit_segnali_by_symbol={},
+        giorno_iso="2026-09-10",
+    )
+    riga = funnel["righe"][0]
+    assert riga["actionability"] == "EXIT_RISK"
+    # wiring essenziale: chiusura passata -> stadio EXITED, non NO_EXIT_SIGNAL
+    assert riga["pipeline_uscita"] == "EXITED"
+    assert riga["evidence_uscita"]["exit_reason"] == "sentiment_reversal"
+
+
+def test_funnel_v2_cabla_exit_segnali_per_simbolo_a_exit_risk():
+    """HOOD e' EXIT_RISK senza chiusura ma con segnali d'uscita nella seduta
+    (uno fresco sopra-soglia). Il caller passa i segnali: la riga NON collassa
+    a NO_EXIT_SIGNAL. Con `soglia_exit=None` (freeze #171 — l'operatore non
+    l'ha dichiarata) il modulo classifica BELOW_THRESHOLD con `soglia_exit`
+    annotata a None: questo e' lo stadio "segnale qualificante, soglia non
+    dichiarata" ed e' contato nei KPI come qualificante, distinto da
+    NO_EXIT_SIGNAL."""
+    rendimenti = {"HOOD": -0.04}
+    funnel = dossier._funnel_v2(
+        rendimenti=rendimenti,
+        held_at_open={"HOOD"},
+        universo=["HOOD"],
+        copertura={"per_ticker": {}},
+        segnali={},
+        intenti=[],
+        eventi=[],
+        guard=[],
+        barre={"HOOD": _barra("HOOD", 28.13)},
+        candidati_classificati=[],
+        soglia_gate=0.30,
+        chiusure_by_symbol={},
+        exit_segnali_by_symbol={
+            "HOOD": [{"signal_id": 10245, "ora": "15:10",
+                      "score": -0.20, "generated_day": "2026-09-10"}],
+        },
+        giorno_iso="2026-09-10",
+    )
+    riga = funnel["righe"][0]
+    assert riga["actionability"] == "EXIT_RISK"
+    # niente NO_EXIT_SIGNAL: il segnale e' passato, lo stadio cambia
+    assert riga["pipeline_uscita"] != "NO_EXIT_SIGNAL"
+    assert riga["pipeline_uscita"] in (
+        "EXIT_BELOW_THRESHOLD", "EXIT_BLOCKED",
+    )
+
+
+def test_funnel_v2_cabla_giorno_iso_per_stale_exit_signal():
+    """Segnali d'uscita della seduta precedente (generated_day < giorno_iso)
+    sono STALE, non freschi. Senza `giorno_iso` il modulo non puo' decidere.
+    Il caller deve passare il giorno di dossier (stringa YYYY-MM-DD)."""
+    rendimenti = {"HOOD": -0.04}
+    funnel = dossier._funnel_v2(
+        rendimenti=rendimenti,
+        held_at_open={"HOOD"},
+        universo=["HOOD"],
+        copertura={"per_ticker": {}},
+        segnali={},
+        intenti=[],
+        eventi=[],
+        guard=[],
+        barre={"HOOD": _barra("HOOD", 28.13)},
+        candidati_classificati=[],
+        soglia_gate=0.30,
+        chiusure_by_symbol={},
+        exit_segnali_by_symbol={
+            "HOOD": [{"signal_id": 99999, "ora": "19:59",
+                      "score": -0.20, "generated_day": "2026-09-09"}],
+        },
+        giorno_iso="2026-09-10",
+    )
+    riga = funnel["righe"][0]
+    # segnale della seduta precedente -> STALE_EXIT_SIGNAL
+    assert riga["pipeline_uscita"] == "STALE_EXIT_SIGNAL"
+    assert riga["evidence_uscita"]["signal_id"] == 99999
+
+
+def test_funnel_v2_senza_wiring_tutti_a_no_exit_signal():
+    """Sentinella del difetto: senza wiring (i tre parametri nuovi mancanti),
+    la pipeline d'uscita collassa a NO_EXIT_SIGNAL per OGNI EXIT_RISK. Quando
+    il wiring e' attivo, il numero di NO_EXIT_SIGNAL e' <= quello del caso non
+    cablato. Il test fallisce finche' il caller non riceve i dati del dossier.
+    """
+    rendimenti = {"HOOD": -0.04}
+    senza_wiring = dossier._funnel_v2(
+        rendimenti=rendimenti,
+        held_at_open={"HOOD"},
+        universo=["HOOD"],
+        copertura={"per_ticker": {}},
+        segnali={},
+        intenti=[],
+        eventi=[],
+        guard=[],
+        barre={"HOOD": _barra("HOOD", 28.13)},
+        candidati_classificati=[],
+        soglia_gate=0.30,
+        # nessun chiusure_by_symbol / exit_segnali_by_symbol / giorno_iso
+    )
+    riga_senza = senza_wiring["righe"][0]
+    assert riga_senza["pipeline_uscita"] == "NO_EXIT_SIGNAL"
+    # E i KPI d'uscita, su un solo EXIT_RISK non cablato, non producono
+    # attivazione: exit_signal_recall denom = 1 (EXIT_RISK), num = 0 (perche'
+    # NO_EXIT_SIGNAL non e' qualificante) -> 0.0.
+    kpi_exit = senza_wiring["kpi"]["exit_signal_recall"]
+    assert kpi_exit["valore"] == 0.0
+    assert kpi_exit["denominatore"] == 1
+
+
+def test_chiusure_per_simbolo_dedup_by_symbol():
+    """`_chiusure_per_simbolo` de-duplica per simbolo tenendo la riga piu'
+    recente (ultima in exit_time). Il funnel riceve cosi' UNA chiusura
+    canonica per simbolo: se le tranche multiple dello stesso trade sono
+    presenti, la piu' tardiva e' il verdetto finale della giornata."""
+    righe = [
+        ["HOOD", "S4", 28.50, 25.0, -10.00, "sentiment_reversal", 0.5,
+         "15:30"],
+        # chiusura successiva (parziale aggiuntivo o totale): vince sul record
+        ["HOOD", "S4", 28.20, 25.0, -12.50, "stop_loss", 0.8, "15:55"],
+        ["MU", "S4", 95.10, 50.0, -22.00, "sentiment_reversal", 1.2,
+         "14:10"],
+    ]
+
+    def fake_psql(query: str):
+        return list(righe)
+
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(dossier, "_psql", fake_psql)
+    try:
+        per_simbolo = dossier._chiusure_per_simbolo(date(2026, 9, 10))
+    finally:
+        monkey.undo()
+
+    assert set(per_simbolo) == {"HOOD", "MU"}
+    # l'ultima riga di HOOD in exit_time (15:55) vince
+    h = per_simbolo["HOOD"]
+    assert h["exit_reason"] == "stop_loss"
+    assert h["exit_time_hhmm"] == "15:55"
+    assert h["pnl_net"] == -12.50
+    assert h["exit_price"] == 28.20
+    # MU: una sola riga, passa com'e'
+    assert per_simbolo["MU"]["exit_reason"] == "sentiment_reversal"
