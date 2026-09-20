@@ -1181,6 +1181,48 @@ def _risk_decisions(giorno: date) -> list[dict]:
     ]
 
 
+def _chiusure_per_simbolo(giorno: date) -> dict[str, dict]:
+    """Una chiusura canonica per simbolo nella seduta, per l'asse
+    pipeline_uscita del funnel (#567).
+
+    Il loader grezzo di `compute_exits` produce la lista completa per il book:
+    una stessa posizione puo' uscire in piu' tranche nella stessa seduta
+    (parziali + EOD). Per il funnel basta sapere se e' avvenuto almeno un
+    exit intraday — il campo `mover["chiusura"]` del modulo puro e' un flag
+    "any chiusura". Scegliamo la riga piu' recente (ultima in exit_time, ASC)
+    come rappresentativa: il record piu' tardo e' il verdetto finale della
+    giornata (chiusura totale o ultimo parziale che ha portato a 0).
+
+    Limite noto (non bloccante): la soglia `soglia_exit` non e' dichiarata
+    perche' il freeze #171 vieta di tararla. EXIT_BELOW_THRESHOLD riceve
+    `soglia_exit: None` nel campo evidence, distinto da EXIT_BLOCKED. Il
+    modulo puro non collassa l'EXIT_RISK senza chiusura se c'e' un segnale
+    qualificante fresco — vedi `classify_exit_pipeline`.
+    """
+    righe = _psql(
+        f"SELECT symbol, COALESCE(stop_strategy, CASE WHEN signal_id IS NOT NULL "
+        f"THEN 'S4' ELSE 'S1' END), exit_price, qty, net_pnl, exit_reason, "
+        f"EXTRACT(epoch FROM (exit_time-entry_time))/3600, "
+        f"to_char(exit_time,'HH24:MI') "
+        f"FROM trades WHERE exit_time >= '{giorno}' AND exit_time < '{giorno}'::date + 1 "
+        f"AND exit_price IS NOT NULL AND qty IS NOT NULL AND net_pnl IS NOT NULL "
+        f"ORDER BY exit_time;"
+    )
+    per_simbolo: dict[str, dict] = {}
+    for r in righe:
+        per_simbolo[r[0]] = {
+            "symbol": r[0],
+            "strategia": r[1],
+            "exit_price": float(r[2]),
+            "qty": float(r[3]),
+            "pnl_net": float(r[4]),
+            "exit_reason": r[5] or "",
+            "ore_tenuta": float(r[6]),
+            "exit_time_hhmm": r[7],
+        }
+    return per_simbolo
+
+
 def _funnel_v2(
     *,
     rendimenti: dict[str, float],
@@ -1195,6 +1237,10 @@ def _funnel_v2(
     candidati_classificati: list[dict],
     soglia_gate: float,
     cost_calc: TradeCostCalculator | None = None,
+    chiusure_by_symbol: dict[str, dict] | None = None,
+    exit_segnali_by_symbol: dict[str, list[dict]] | None = None,
+    giorno_iso: str | None = None,
+    floor_kpi: float | None = None,
 ) -> dict:
     """Vista funnel v2 parallela (#281): assembla i mover della seduta dai
     dati che il dossier ha gia' caricato e delega ogni decisione al modulo
@@ -1205,16 +1251,16 @@ def _funnel_v2(
     tutta la giornata e la somma dei conteggi fa i mover del giorno.
 
     #567 (lato uscita): il modulo puro `src/analysis/dossier/funnel.py`
-    ora pubblica `conteggi_pipeline_uscita`, separa `held_falling` da
-    `held_rising`, e aggiunge i KPI `exit_signal_recall` /
-    `exit_conversion_rate`. Il wiring dei `chiusura` per-simbolo e dei
-    segnali pre-apertura RTH e' un follow-up di pari scope che vive in
-    una PR separata (la firma di `_funnel_v2` si allarga con
-    `chiusure_by_symbol`, `exit_segnali_by_symbol`, `giorno_iso`,
-    `floor_kpi`). Senza quel passaggio i dossier escono con `held_falling`
-    distinto da `held_rising` e la pipeline d'uscita conta tutti gli
-    EXIT_RISK come NO_EXIT_SIGNAL finche' il caller non passa i campi —
-    il modulo e' pronto e deterministico, attende solo il dato.
+    pubblica `conteggi_pipeline_uscita` (NO_EXIT_SIGNAL/STALE_EXIT_SIGNAL/
+    EXIT_BELOW_THRESHOLD/EXIT_WRONG_SIGN/EXIT_BLOCKED/EXITED) e i KPI
+    `exit_signal_recall` / `exit_conversion_rate`. Per attivarli il caller
+    passa le chiusure intraday per simbolo (dal ledger `trades`),
+    gli `exit_segnali_by_symbol` (dai sentiment_signals del dossier) e
+    `giorno_iso` della seduta: senza questi campi ogni EXIT_RISK collassa
+    a NO_EXIT_SIGNAL (freeze #171 — i parametri di taratura restano fuori).
+    `floor_kpi` e' la n-floor dichiarata dall'operatore (config/s4_kill_...):
+    `None` significa "nessun opinione durante il freeze" e il flag
+    `sufficienza` resta `unset`.
     """
     universo_set = set(universo)
     per_ticker = copertura.get("per_ticker") or {}
@@ -1292,6 +1338,11 @@ def _funnel_v2(
     # Ordinati per |rendimento| decrescente: stessa convenzione dei candidati
     # miss legacy (compute_miss_candidates), i mover piu' ampi per primi.
     movers.sort(key=lambda coppia: abs(coppia[1]), reverse=True)
+    # #567: il caller passa le chiusure intraday e i segnali d'uscita del
+    # dossier. Senza, il modulo puro non puo' distinguere EXITED da
+    # NO_EXIT_SIGNAL — i test di wiring fermano esattamente questo default.
+    chiusure_lookup = chiusure_by_symbol or {}
+    segnali_uscita_lookup = exit_segnali_by_symbol or {}
     movers_input = [
         {
             "symbol": sym,
@@ -1306,10 +1357,18 @@ def _funnel_v2(
             "close": (barre.get(sym) or {}).get("close"),
             "legacy_causa": causa_by_symbol.get(sym),
             "opportunity_v2": opportunity_by_symbol.get(sym),
+            "chiusura": chiusure_lookup.get(sym),
+            "exit_segnali": segnali_uscita_lookup.get(sym) or [],
+            "_data": giorno_iso,
         }
         for sym, rendimento in movers
     ]
-    return build_funnel(movers_input, soglia_gate=soglia_gate)
+    return build_funnel(
+        movers_input,
+        soglia_gate=soglia_gate,
+        soglia_exit=None,  # freeze #171: la soglia d'uscita la dichiara l'operatore
+        floor_kpi=floor_kpi,
+    )
 
 
 def _e_giorno_di_borsa(giorno: date) -> bool:
@@ -1739,6 +1798,11 @@ def costruisci_dossier(
     # pannello decision_quality, senza cambiare i conteggi legacy.
     posizioni_apertura = _opening_positions(giorno)
     held_at_open = {posizione["symbol"] for posizione in posizioni_apertura}
+    # #567: cablaggio della pipeline d'uscita. Carichiamo la chiusura per
+    # simbolo (SQL limitato alla g) e i segnali del dossier (gia' in `segnali`)
+    # cosi' `_funnel_v2` puo' classificare EXITED / EXIT_BLOCKED invece di
+    # collassare tutto a NO_EXIT_SIGNAL.
+    chiusure_per_simbolo = _chiusure_per_simbolo(giorno)
     funnel_v2 = _funnel_v2(
         rendimenti=mercato["rendimenti"],
         held_at_open=held_at_open,
@@ -1752,6 +1816,10 @@ def costruisci_dossier(
         candidati_classificati=candidati_classificati,
         soglia_gate=soglia_gate,
         cost_calc=opportunity_cost_calc,
+        chiusure_by_symbol=chiusure_per_simbolo,
+        exit_segnali_by_symbol={symbol: list(lista)
+                                 for symbol, lista in segnali.items()},
+        giorno_iso=g,
     )
     # --- riconciliazione causa legacy <-> funnel v2 (#509) ----------------
     # Il bucket NON_CLASSIFICATO della serie legacy nascondeva cause pienamente
