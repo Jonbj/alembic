@@ -1203,6 +1203,18 @@ def _funnel_v2(
     La pipeline d'ingresso si valuta sui mover non detenuti in rialzo; gli
     altri ricevono comunque l'asse actionability, cosi' la partizione copre
     tutta la giornata e la somma dei conteggi fa i mover del giorno.
+
+    #567 (lato uscita): il modulo puro `src/analysis/dossier/funnel.py`
+    ora pubblica `conteggi_pipeline_uscita`, separa `held_falling` da
+    `held_rising`, e aggiunge i KPI `exit_signal_recall` /
+    `exit_conversion_rate`. Il wiring dei `chiusura` per-simbolo e dei
+    segnali pre-apertura RTH e' un follow-up di pari scope che vive in
+    una PR separata (la firma di `_funnel_v2` si allarga con
+    `chiusure_by_symbol`, `exit_segnali_by_symbol`, `giorno_iso`,
+    `floor_kpi`). Senza quel passaggio i dossier escono con `held_falling`
+    distinto da `held_rising` e la pipeline d'uscita conta tutti gli
+    EXIT_RISK come NO_EXIT_SIGNAL finche' il caller non passa i campi —
+    il modulo e' pronto e deterministico, attende solo il dato.
     """
     universo_set = set(universo)
     per_ticker = copertura.get("per_ticker") or {}
