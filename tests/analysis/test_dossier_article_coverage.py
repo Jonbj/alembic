@@ -641,19 +641,27 @@ def test_propose_stem_backfill_classifica_le_righe_in_quattro_bucketti():
 
 
 def test_alias_con_bare_stem_riconosce_il_nome_comune_nel_titolo():
-    """#566 — il test pinning del fix: con lo stem aggiunto agli alias,
-    «Oracle set to report…» viene classificato ISSUER_SPECIFIC e non
-    piu' FALSE_ENTITY_MATCH. Senza stem (stato pre-fix), la stessa riga
-    cade in FALSE_ENTITY_MATCH sul path org_lookup — il test fissava
-    proprio quel comportamento come 'the alias table is the cause, not
-    the matcher'."""
+    """#566 — test pinning del fix: prova il COLLEGAMENTO tra la funzione
+    di backfill ``expand_aliases_with_stem`` e il classifier.
+
+    Lo stato pre-fix usa gli alias come sono in produzione (solo nomi
+    legali suffissi); lo stato post-fix deriva gli stessi alias dalla
+    funzione ``expand_aliases_with_stem`` applicata a quegli alias di
+    partenza, cosi' la riga del test cambia se e solo se la funzione
+    cambia. Rimuovere o rompere ``expand_aliases_with_stem`` (o rimuovere
+    il suo import) fa fallire il test per la ragione giusta.
+    """
     titolo = "Oracle set to report as Street weighs capex risk against cloud growth"
-    # Stato pre-fix: gli alias non contengono lo stem
+    company_name = "Oracle Corporation"
+    base_aliases = ["Oracle Corp"]
+    # Stato pre-fix: gli alias non contengono lo stem (stato di produzione
+    # attuale). Costruiamo manualmente issuer_terms per descrivere il caso.
+    pre_terms = [*base_aliases, company_name, "ORCL"]
     pre = _row(
         901, "ORCL", titolo, content_hash="x" * 64,
         source="gdelt_gkg", extraction_method="org_lookup",
         signal_id=901, score=-0.04,
-        issuer_terms=["Oracle Corporation", "Oracle Corp", "ORCL"],
+        issuer_terms=pre_terms,
     )
     out_pre = build_article_coverage(
         [pre], universe=["ORCL"], sector_by_ticker={"ORCL": "tech"},
@@ -662,12 +670,24 @@ def test_alias_con_bare_stem_riconosce_il_nome_comune_nel_titolo():
     assert out_pre["totali"]["mapping_rilevanza"]["FALSE_ENTITY_MATCH"] == 1
     assert out_pre["per_ticker"]["ORCL"]["max_score_own"] is None
 
-    # Stato post-fix: lo stem "Oracle" e' negli alias — ISSUER_SPECIFIC
+    # Stato post-fix: lo stem "oracle" viene aggiunto agli alias dalla
+    # funzione stessa di backfill. Il test si appoggia esclusivamente a
+    # ``expand_aliases_with_stem``: se la funzione sparisse o smettesse di
+    # produrre lo stem "oracle", il post-fix crollerebbe in FALSE_ENTITY_MATCH
+    # e il test fallirebbe. Il test quindi VINCOLA sia la funzione sia il
+    # suo effetto sul classifier.
+    post_aliases = expand_aliases_with_stem(company_name, base_aliases)
+    post_aliases_lower = {a.casefold() for a in post_aliases}
+    assert "oracle" in post_aliases_lower, (
+        "expand_aliases_with_stem deve aggiungere 'oracle' (stem di "
+        "'Oracle Corporation') agli alias per far passare il test pinning"
+    )
+    post_terms = [*post_aliases, "ORCL"]
     post = _row(
         902, "ORCL", titolo, content_hash="y" * 64,
         source="gdelt_gkg", extraction_method="org_lookup",
         signal_id=902, score=-0.04,
-        issuer_terms=["Oracle Corporation", "Oracle Corp", "Oracle", "ORCL"],
+        issuer_terms=post_terms,
     )
     out_post = build_article_coverage(
         [post], universe=["ORCL"], sector_by_ticker={"ORCL": "tech"},

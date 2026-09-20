@@ -47,6 +47,14 @@ def test_cli_scrive_un_csv_con_i_sei_campi_per_riga(cli_module, tmp_path: Path) 
     assert rc == 0
     assert out.exists()
 
+    # #566: line endings LF, non CRLF. Il default di csv.DictWriter su
+    # molte piattaforme e' "\r\n", che i linter segnalano come trailing
+    # whitespace e che rompe il diff del CSV. Il file e' un artefatto di
+    # review: deve poter diff-are pulito.
+    raw = out.read_bytes()
+    assert b"\r\n" not in raw, "CSV deve usare LF, non CRLF"
+    assert raw.endswith(b"\n"), "CSV deve terminare con newline"
+
     with out.open() as f:
         reader = csv.DictReader(f)
         rows = list(reader)

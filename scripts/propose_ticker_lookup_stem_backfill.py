@@ -94,8 +94,11 @@ def _write_csv(proposal: list[dict], out_path: Path) -> None:
         "ticker", "company_name", "current_aliases",
         "proposed_alias", "bucket", "reason",
     ]
+    # newline="" + lineterminator="\n": il default di csv su Windows e'
+    # "\r\n", che appare come trailing whitespace ai linter e rompe il
+    # diff. Forziamo LF per coerenza col resto del repo.
     with out_path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         for row in proposal:
             writer.writerow({
