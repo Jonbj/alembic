@@ -61,7 +61,9 @@ def test_mover_detenuto_in_rialzo_passive_exposure_non_miss():
     assert row["actionability"] == "PASSIVE_EXPOSURE"
     # La pipeline d'ingresso non si valuta su chi e' gia' a libro.
     assert row["pipeline"] is None
-    assert row["pipeline_escluso_motivo"] == "held"
+    # #567 punto 1: PASSIVE_EXPOSURE escluso dal funnel d'ingresso con la
+    # stringa distinta 'held_rising' (la stringa 'held' e' sparita).
+    assert row["pipeline_escluso_motivo"] == "held_rising"
 
 
 def test_mover_detenuto_in_ribasso_exit_risk():
@@ -475,3 +477,300 @@ def test_serie_legacy_affiancata_mai_sovrascritta():
     assert funnel["soglia_gate"] == 0.42
     assert funnel["funnel_version"]
     assert "parallela" in funnel["nota_freeze"]
+
+
+# --- #567 lato uscita: EXIT_RISK non e' piu' un'esclusione silenziosa ------
+
+
+def _held_falling(rend=-0.045, **over):
+    """Mover detenuto in ribasso: e' EXIT_RISK finche' non aggiungiamo un
+    classificatore di pipeline d'uscita. Restituisce un mover con segnale,
+    exit_segnali (lista di score dei cicli d'uscita), e opzionalmente la
+    chiusura registrata (None = posizione rimasta aperta tutta la seduta).
+    """
+    base = {
+        "symbol": "DELL",
+        "return": rend,
+        "held": True,
+        "in_universo": True,
+        "articoli": None,
+        "segnali": [],
+        "intenti": [],
+        "guard": [],
+        "ordine": None,
+        "close": None,
+        "legacy_causa": None,
+        # Campi specifici del lato uscita (#567). Default: nessun segnale,
+        # nessuna chiusura -> NO_EXIT_SIGNAL / non-exited.
+        "exit_segnali": [],
+        "chiusura": None,
+        "session_open_hhmm": "14:30",
+    }
+    base.update(over)
+    return base
+
+
+def test_held_rising_e_held_falling_esclusi_con_motivo_diverso():
+    """#567 punto 1: EXIT_RISK e PASSIVE_EXPOSURE non sono piu' la stessa
+    stringa 'held'. Una seduta con entrambi deve poterli contare separati."""
+    movers = [
+        _held_falling(symbol="DELL", rend=-0.045),
+        _mover(symbol="AAPL", held=True, rend=0.05),
+    ]
+    funnel = build_funnel(movers, soglia_gate=0.30)
+    esclusi = funnel["esclusi_pipeline"]
+    assert esclusi.get("held_falling") == 1
+    assert esclusi.get("held_rising") == 1
+    assert "held" not in esclusi  # la stringa generica sparisce
+
+
+def test_classify_exit_pipeline_no_exit_signal():
+    """EXIT_RISK senza segnali di sortita per la seduta: NO_EXIT_SIGNAL.
+    Stesso pattern del lato d'ingresso per mover senza notizia."""
+    mover = _held_falling()
+    row = build_funnel([mover], soglia_gate=0.30)["righe"][0]
+    assert row["actionability"] == "EXIT_RISK"
+    assert row["pipeline_uscita"] == "NO_EXIT_SIGNAL"
+    # Il mover resta escluso dal funnel d'ingresso, ma distinto da
+    # PASSIVE_EXPOSURE (era 'held', ora 'held_falling'): la stringa
+    # comune 'held' e' sparita (#567 punto 1).
+    assert row["pipeline_escluso_motivo"] == "held_falling"
+
+
+def test_classify_exit_pipeline_stale_exit_signal():
+    """Tutti i segnali d'uscita precedono l'apertura RTH della seduta
+    (DELL 09-10: signal_id 10245 generato 2026-09-09 19:59Z, 14 cicli a
+    score 0.000): classificati STALE_EXIT_SIGNAL, non come se fossero una
+    scelta attiva del motore (#567 punto 2)."""
+    mover = _held_falling(
+        rend=-0.053,
+        exit_segnali=[
+            {"ora": "19:59", "score": 0.131, "signal_id": 10245,
+             "generated_day": "2026-09-09"},
+        ],
+        session_open_hhmm="14:30",
+        _data="2026-09-10",
+    )
+    row = build_funnel([mover], soglia_gate=0.30)["righe"][0]
+    assert row["pipeline_uscita"] == "STALE_EXIT_SIGNAL"
+    assert row["evidence_uscita"]["signal_id"] == 10245
+    assert row["evidence_uscita"]["generated_day"] == "2026-09-09"
+
+
+def test_classify_exit_pipeline_below_threshold():
+    """Segnale attuale presente, segno giusto (negativo per un ribasso), ma
+    |score| sotto la soglia d'uscita — classificato EXIT_BELOW_THRESHOLD,
+    senza prescrivere una soglia (ricevuta come argomento dal chiamante, come
+    `soglia_gate` dal lato d'ingresso)."""
+    mover = _held_falling(
+        rend=-0.033,
+        exit_segnali=[{"ora": "15:10", "score": -0.081,
+                       "signal_id": 10251, "generated_day": "2026-09-10"}],
+    )
+    row = build_funnel([mover], soglia_gate=0.30, soglia_exit=0.10)["righe"][0]
+    assert row["pipeline_uscita"] == "EXIT_BELOW_THRESHOLD"
+    assert row["evidence_uscita"]["score_firmato"] == -0.081
+    assert row["evidence_uscita"]["soglia_exit"] == 0.10
+
+
+def test_classify_exit_pipeline_wrong_sign():
+    """Segnale presente, segno positivo mentre il mover e' in ribasso:
+    segno sbagliato, non filtrabile con |score|. Stesso criterio 3 del
+    lato d'ingresso: dal campo firmato."""
+    mover = _held_falling(
+        rend=-0.034,
+        exit_segnali=[{"ora": "15:25", "score": 0.109,
+                       "signal_id": 10265, "generated_day": "2026-09-10"}],
+    )
+    row = build_funnel([mover], soglia_gate=0.30, soglia_exit=0.10)["righe"][0]
+    assert row["pipeline_uscita"] == "EXIT_WRONG_SIGN"
+    assert row["evidence_uscita"]["score_firmato"] == 0.109
+
+
+def test_classify_exit_pipeline_exited():
+    """Posizione chiusa intraday: la pipeline e' arrivata a SELL, e' EXITED.
+    L'exit_reason vive nella riga di chiusura registrata dal dossier."""
+    mover = _held_falling(
+        rend=-0.055,
+        exit_segnali=[{"ora": "15:45", "score": -0.10,
+                       "signal_id": 10270, "generated_day": "2026-09-10"}],
+        chiusura={"exit_reason": "sentiment_reversal", "pnl_net": -88.63},
+    )
+    row = build_funnel([mover], soglia_gate=0.30, soglia_exit=0.10)["righe"][0]
+    assert row["pipeline_uscita"] == "EXITED"
+    assert row["evidence_uscita"]["exit_reason"] == "sentiment_reversal"
+
+
+def test_classify_exit_pipeline_exit_blocked():
+    """Segnale d'uscita qualificante (segn corretto, sopra la soglia) ma il
+    guard ha bloccato la chiusura: EXIT_BLOCKED. La riga del guard porta il
+    verdetto."""
+    mover = _held_falling(
+        rend=-0.044,
+        exit_segnali=[{"ora": "15:50", "score": -0.20,
+                       "signal_id": 10266, "generated_day": "2026-09-10"}],
+        guard=[{"decision": "SKIP_THRESHOLD", "signal_id": 10266}],
+    )
+    row = build_funnel([mover], soglia_gate=0.30, soglia_exit=0.10)["righe"][0]
+    assert row["pipeline_uscita"] == "EXIT_BLOCKED"
+    assert row["evidence_uscita"]["guard"] == ["SKIP_THRESHOLD"]
+
+
+def test_conteggi_pipeline_uscita_pubblica_stadi_osservati():
+    """#567 punto 2: i conteggi della pipeline d'uscita vivono in un blocco
+    separato, parallelo a `conteggi_pipeline`, e solo gli stadi osservati."""
+    movers = [
+        # STALE: signal_id 10245 generato 2026-09-09, dossier 09-10.
+        _held_falling(symbol="DELL", rend=-0.053, _data="2026-09-10",
+                      exit_segnali=[{"ora": "20:00", "score": -0.036,
+                                     "signal_id": 10245,
+                                     "generated_day": "2026-09-09"}]),
+        # BELOW_THRESHOLD: -0.036 sull'oggi, sotto 0.10.
+        _held_falling(symbol="MU", rend=-0.049, _data="2026-09-10",
+                      exit_segnali=[{"ora": "15:00", "score": -0.036,
+                                     "signal_id": 10249,
+                                     "generated_day": "2026-09-10"}]),
+        # EXITED: signal_id 10270 + chiusura registrata.
+        _held_falling(symbol="INTC", rend=-0.055, _data="2026-09-10",
+                      exit_segnali=[{"ora": "15:45", "score": -0.20,
+                                     "signal_id": 10270,
+                                     "generated_day": "2026-09-10"}],
+                      chiusura={"exit_reason": "sentiment_reversal",
+                                "pnl_net": -88.63}),
+        # NO_EXIT_SIGNAL: zero segnali.
+        _held_falling(symbol="AMAT", rend=-0.031, _data="2026-09-10"),
+    ]
+    funnel = build_funnel(movers, soglia_gate=0.30, soglia_exit=0.10)
+    conteggi = funnel["conteggi_pipeline_uscita"]
+    assert conteggi.get("NO_EXIT_SIGNAL") == 1
+    assert conteggi.get("STALE_EXIT_SIGNAL") == 1
+    assert conteggi.get("EXIT_BELOW_THRESHOLD") == 1
+    assert conteggi.get("EXITED") == 1
+    assert "EXIT_WRONG_SIGN" not in conteggi  # non osservato
+    assert "EXIT_BLOCKED" not in conteggi
+
+
+def test_exit_signal_recall_e_conversion_rate():
+    """#567 punto 3: due KPI d'uscita simmetrici a quelli d'ingresso.
+    exit_signal_recall = (EXIT_RISK con segnale d'uscita qualificante) /
+    (tutti gli EXIT_RISK). exit_conversion_rate = (EXITED) / (EXIT_RISK con
+    segnale d'uscita qualificante).
+    Sulle 8 sedute di 09-10 (7 senza SELL, 1 con), col default
+    exit_signal_recall = 5/8 (i 3 freschi sopra soglia, NO_EXIT_SIGNAL solo AMAT).
+    """
+    movers = [
+        # 1 EXITED (segnale sopra soglia + chiusura)
+        _held_falling(symbol="INTC", rend=-0.055, _data="2026-09-10",
+                      exit_segnali=[{"ora": "15:45", "score": -0.20,
+                                     "signal_id": 10270,
+                                     "generated_day": "2026-09-10"}],
+                      chiusura={"exit_reason": "sentiment_reversal",
+                                "pnl_net": -88.63}),
+        # 4 EXIT_BELOW_THRESHOLD (segnale attuale, segno giusto, |s| < soglia)
+        _held_falling(symbol="DELL", rend=-0.053, _data="2026-09-10",
+                      exit_segnali=[{"ora": "15:00", "score": -0.036,
+                                     "signal_id": 10245,
+                                     "generated_day": "2026-09-10"}]),
+        _held_falling(symbol="MU", rend=-0.049, _data="2026-09-10",
+                      exit_segnali=[{"ora": "14:00", "score": -0.036,
+                                     "signal_id": 10249,
+                                     "generated_day": "2026-09-10"}]),
+        _held_falling(symbol="WDC", rend=-0.044, _data="2026-09-10",
+                      exit_segnali=[{"ora": "15:00", "score": -0.067,
+                                     "signal_id": 10266,
+                                     "generated_day": "2026-09-10"}]),
+        _held_falling(symbol="AMD", rend=-0.033, _data="2026-09-10",
+                      exit_segnali=[{"ora": "15:00", "score": -0.081,
+                                     "signal_id": 10251,
+                                     "generated_day": "2026-09-10"}]),
+        # 2 EXIT_WRONG_SIGN
+        _held_falling(symbol="RIO", rend=-0.042, _data="2026-09-10",
+                      exit_segnali=[{"ora": "14:00", "score": 0.072,
+                                     "signal_id": 10103,
+                                     "generated_day": "2026-09-10"}]),
+        _held_falling(symbol="MRVL", rend=-0.034, _data="2026-09-10",
+                      exit_segnali=[{"ora": "15:00", "score": 0.109,
+                                     "signal_id": 10265,
+                                     "generated_day": "2026-09-10"}]),
+        # 1 NO_EXIT_SIGNAL
+        _held_falling(symbol="AMAT", rend=-0.031, _data="2026-09-10"),
+    ]
+    funnel = build_funnel(movers, soglia_gate=0.30, soglia_exit=0.10)
+    recall = funnel["kpi"]["exit_signal_recall"]
+    # Numeratore: EXITED + EXIT_BELOW_THRESHOLD + EXIT_BLOCKED = 1 + 4 + 0 = 5
+    # Denominatore: tutti gli EXIT_RISK = 8
+    assert recall["numeratore"] == 5
+    assert recall["denominatore"] == 8
+    assert recall["valore"] == 5 / 8
+    # exit_conversion_rate = EXITED / con segnale sopra soglia in segno
+    # (EXITED + EXIT_BELOW_THRESHOLD + EXIT_BLOCKED = 5): 1/5.
+    conv = funnel["kpi"]["exit_conversion_rate"]
+    assert conv["numeratore"] == 1
+    assert conv["denominatore"] == 5
+    assert conv["valore"] == 1 / 5
+
+
+def test_kpi_esce_con_sufficienza_unset_se_floor_non_dichiarato():
+    """#567 punto 4: ogni KPI esce con `sufficienza`. Senza floor dichiarato
+    (freeze #171, la soglia la decide l'operatore nel charter) il flag
+    dice 'unset' — niente opinioni inventate."""
+    funnel = build_funnel([_mover()], soglia_gate=0.30)
+    for nome in ("held_at_open_rate", "active_signal_recall",
+                 "execution_conversion_rate", "profitable_capture_rate"):
+        assert funnel["kpi"][nome]["sufficienza"] == "unset"
+
+
+def test_kpi_esce_con_sufficienza_insufficient_n_se_floor_non_raggiunto():
+    """#567 punto 4: con floor dichiarato, i KPI sotto n marcano
+    INSUFFICIENT_N, distinto da un rapporto pubblicato."""
+    # 7 mover, di cui 2 ENTRY_OPPORTUNITY con cattura profittevole:
+    # profitable_capture_rate = 1/5, sotto la floor 10 -> INSUFFICIENT_N.
+    movers = _kpi_fixture()
+    funnel = build_funnel(movers, soglia_gate=0.30, floor_kpi=10)
+    capture = funnel["kpi"]["profitable_capture_rate"]
+    assert capture["denominatore"] == 5
+    assert capture["valore"] == 0.2
+    assert capture["sufficienza"] == "insufficient_n"
+    # held_at_open_rate invece ha denom 7 < 10: anch'esso INSUFFICIENT_N.
+    held_rate = funnel["kpi"]["held_at_open_rate"]
+    assert held_rate["denominatore"] == 7
+    assert held_rate["sufficienza"] == "insufficient_n"
+    # Esiste la soglia dichiarata in cima al blocco KPI.
+    assert funnel["kpi_floor"] == 10
+
+
+def test_kpi_esce_con_sufficienza_ok_se_floor_raggiunto():
+    """Floor rispettato dal denominatore: il KPI esce 'ok', non insufficiente.
+    """
+    # 11 mover ENTRY_OPPORTUNITY profittevoli: denominatore 11 >= floor 10.
+    movers = [
+        _mover(symbol=f"S{i}", rend=0.05,
+               ordine={
+                   "order_id": "x", "submitted_at": "2026-08-12T15:07:00+00:00",
+                   "filled_at": "2026-08-12T15:07:02+00:00",
+                   "fill_price": 100.0, "eod_net_pnl": 5.0,
+                   "lookup_error": None,
+               },
+               intenti=[{"final_reason_code": "RANK_SELECTED",
+                         "is_tradable": True, "trade_id": i,
+                         "pnl_realizzato": 5.0}])
+        for i in range(11)
+    ]
+    funnel = build_funnel(movers, soglia_gate=0.30, floor_kpi=10)
+    capture = funnel["kpi"]["profitable_capture_rate"]
+    assert capture["denominatore"] == 11
+    assert capture["sufficienza"] == "ok"
+
+
+def test_pipeline_uscita_pubblicata_con_nota_freeze_e_version():
+    """#567 parallelo a quanto fece #281: bump `funnel_version`, nota freeze
+    che spiega la vista parallela, e mapping che documenta lo scope entry-only
+    della serie `conteggi_pipeline`."""
+    funnel = build_funnel([_held_falling()], soglia_gate=0.30)
+    # Stesso funnel_version della v1 (vista parallela non lo buzza);
+    # la nota_freeze si limita ad aggiungere il lato d'uscita.
+    assert "parallela" in funnel["nota_freeze"]
+    # Conteggi_pipeline d'ingresso restano solo entry, conteggi_pipeline_uscita
+    # aggiunge exit.
+    assert "EXIT_RISK" in (funnel.get("conteggi_pipeline_uscita") or {}) or \
+        "NO_EXIT_SIGNAL" in (funnel.get("conteggi_pipeline_uscita") or {})
