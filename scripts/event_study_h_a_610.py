@@ -386,22 +386,21 @@ def scrivi_artefatto(path: Path, payload: dict) -> None:
         handle.write("\n")
 
 
-def merged_per_day_means(ratios: list[VolatilityRatio]) -> list[tuple[int, float]]:
-    """Per giorno: media dei rapporti degli articoli di quel giorno.
+def per_article_day_clusters(ratios: list[VolatilityRatio]) -> list[tuple[int, float]]:
+    """Assegna il cluster (giorno) a ogni rapporto, senza pre-mediare.
 
-    Il cluster e' il giorno. Se in un giorno ci sono piu' articoli sullo
-    stesso ticker, sono gia' stati collassati dal cooldown upstream; se ci
-    sono piu' ticker, ognuno contribuisce con la propria media per quel
-    giorno — il giorno resta un cluster unico.
+    Il cluster e' il giorno, ma `clustered_mean` ha bisogno delle
+    osservazioni **per articolo** per stimare la varianza within-cluster:
+    se un giorno viene ridotto a una sola media prima di arrivarci, quel
+    cluster e' sempre un singleton (1 valore) e il SE cluster-robust non e'
+    mai definito, qualunque sia il volume di articoli nell'archivio. Ogni
+    ticker diverso nello stesso giorno resta un'osservazione separata dello
+    stesso cluster: il fan-out multi-ticker e' varianza within-day, non un
+    secondo cluster.
     """
-    per_day: dict[str, list[float]] = defaultdict(list)
-    for r in ratios:
-        if r.ratio is not None:
-            per_day[r.giorno].append(r.ratio)
-    out: list[tuple[int, float]] = []
-    for i, (_, values) in enumerate(sorted(per_day.items())):
-        out.append((i, float(np.mean(values))))
-    return out
+    giorni = sorted({r.giorno for r in ratios if r.ratio is not None})
+    indice = {giorno: i for i, giorno in enumerate(giorni)}
+    return [(indice[r.giorno], r.ratio) for r in ratios if r.ratio is not None]
 
 
 # ---------- Verdetto ----------
@@ -488,7 +487,7 @@ def _esegui_anno(
         ("non_content_empty", lambda r: not r.content_empty),
     ):
         ratios_g = [r for r in ratios if filtro(r) and r.ratio is not None]
-        obs = merged_per_day_means(ratios_g)
+        obs = per_article_day_clusters(ratios_g)
         cm = clustered_mean(obs)
         eff = effetto_rilevabile_a_t3(cm.n_cluster_validi, cm.n_obs)
         out[gruppo] = {

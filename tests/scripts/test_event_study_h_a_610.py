@@ -30,6 +30,7 @@ from scripts.event_study_h_a_610 import (
     ClusteredMean,
     PopolazionePerAnno,
     VolatilityRatio,
+    _esegui_anno,
     articoli_per_anno,
     calcola_rapporto,
     classifica,
@@ -37,8 +38,8 @@ from scripts.event_study_h_a_610 import (
     effetto_rilevabile_a_t3,
     fetch_minute_bars,
     leggi_archivio,
-    merged_per_day_means,
     parse_timestamp,
+    per_article_day_clusters,
     scrivi_artefatto,
     within_cooldown,
 )
@@ -187,6 +188,42 @@ def test_within_cooldown_ticker_diverso_non_collassa():
     assert within_cooldown(ts, ts, cooldown_minuti=5, ticker_a="AAPL", ticker_b="MSFT") is False
 
 
+# ---------- Cluster giornaliero per articolo ----------
+
+
+def test_per_article_day_clusters_non_pre_media():
+    """Ogni articolo resta un'osservazione separata dentro il cluster-giorno.
+
+    Se un giorno pre-mediasse i rapporti prima di clusterizzare, ogni
+    cluster sarebbe sempre un singleton (1 valore) e `clustered_mean` non
+    potrebbe mai stimare un SE. Con 2 articoli nello stesso giorno il
+    cluster ha 2 osservazioni distinte, non una media.
+    """
+    ratios = [
+        VolatilityRatio("a1", "AAPL", datetime(2024, 3, 5, 14, 30, tzinfo=timezone.utc),
+                         False, 1.2, "2024-03-05"),
+        VolatilityRatio("a2", "MSFT", datetime(2024, 3, 5, 15, 0, tzinfo=timezone.utc),
+                         False, 1.6, "2024-03-05"),
+        VolatilityRatio("a3", "TSLA", datetime(2024, 3, 6, 14, 30, tzinfo=timezone.utc),
+                         False, 0.9, "2024-03-06"),
+    ]
+    obs = per_article_day_clusters(ratios)
+    assert sorted(obs) == [(0, 1.2), (0, 1.6), (1, 0.9)]
+    # Il cluster del 2024-03-05 (indice 0, primo giorno in ordine) ha 2
+    # osservazioni distinte: clustered_mean lo conta come cluster valido.
+    cluster_05 = [v for c, v in obs if c == 0]
+    assert len(cluster_05) == 2
+
+
+def test_per_article_day_clusters_scarta_ratio_none():
+    """Un rapporto None (barre insufficienti) non entra nel cluster."""
+    ratios = [
+        VolatilityRatio("a1", "AAPL", datetime(2024, 3, 5, 14, 30, tzinfo=timezone.utc),
+                         False, None, "2024-03-05"),
+    ]
+    assert per_article_day_clusters(ratios) == []
+
+
 # ---------- Clustered mean ----------
 
 
@@ -303,6 +340,49 @@ def test_leggi_archivio_righe_malformate_saltate(tmp_path: Path):
     )
     out = leggi_archivio(tmp_path)
     assert len(out) == 2
+
+
+# ---------- Percorso composto (_esegui_anno) ----------
+
+
+def test_esegui_anno_con_piu_articoli_al_giorno_non_e_sempre_insufficient_n():
+    """Il percorso reale deve poter superare INSUFFICIENT_N con dati sufficienti.
+
+    Regressione del difetto trovato in review su PR #641: se `_esegui_anno`
+    pre-mediasse i rapporti per giorno prima di clusterizzare, ogni cluster
+    sarebbe un singleton e il verdetto sarebbe SEMPRE `INSUFFICIENT_N`,
+    indipendentemente dal volume di articoli. Con 2 articoli non-template
+    per giorno su 3 giorni distinti, il gruppo non_content_empty deve
+    raggiungere almeno 2 cluster validi.
+    """
+    giorni = [5, 6, 7]
+    ticker_per_giorno = [("AAPL", "MSFT"), ("TSLA", "NVDA"), ("META", "AMZN")]
+    articoli = []
+    for giorno, (t1, t2) in zip(giorni, ticker_per_giorno):
+        for ticker, minuto in ((t1, 30), (t2, 0)):
+            ora = 14 if minuto == 30 else 15
+            ts_iso = f"2024-03-{giorno:02d}T{ora:02d}:{minuto:02d}:00Z"
+            articoli.append({
+                "id": f"{ticker}-{giorno}",
+                "created_at": ts_iso,
+                "symbols": [ticker],
+                # Non-template: finisce nel gruppo non_content_empty.
+                "headline": f"{ticker} Reports Q1 Earnings, Beats Estimates",
+            })
+
+    def loader(symbol: str, start: datetime, end: datetime) -> pd.Series:
+        ts = start + pd.Timedelta(minutes=30)
+        # Ampiezza dell'evento diversa per giorno: senza varianza between-day
+        # la statistica cluster-robust degenera a t=inf (SE=0), che il
+        # verdetto tratta come INSUFFICIENT_N — qui si vuole invece che il
+        # test possa raggiungere PASS/FAIL con dati sufficienti.
+        return _bars_piccolo_picco(ts, baseline=1.0, evento=2.0 + ts.day * 0.7)
+
+    risultato = _esegui_anno("2024", articoli, loader, escludi_selezionati=False)
+    gruppo = risultato["gruppo_non_content_empty"]
+    assert gruppo["n_cluster_validi"] >= 2
+    assert math.isfinite(gruppo["t"])
+    assert gruppo["verdetto"] in {"PASS", "FAIL"}
 
 
 # ---------- Minute bars fetch (seam) ----------
