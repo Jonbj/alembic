@@ -1573,6 +1573,12 @@
           "costo_usd": 9.85,
           "nota": "[DAY-012] 133/215 righe scorate (61,9%) nascono da URL mappati su piu' di un ticker; 123 articoli unici producono 215 righe, mapping_fanout_extra=92 (dossier copertura_articoli). TAG_UNCONFIRMED 132/215 (61,4%), ISSUER_SPECIFIC 82, SECTOR_MACRO e IRRELEVANT_FANOUT 0. COSTO ATTRIBUITO 9,85 $: il BUY QQQ delle 17:07 (trade 1011, 2,0745 azioni @ 709,47) nasce dal segnale 11218 generato da un market-summary macro mappato su 8 ticker (DELL, INTC, IWM, QQQ, XLE, XLF, XLK, XLV) - nessun contenuto specifico su QQQ - e chiude la seduta a mtm_eod -9,85 $ (dossier ingressi). Posizione ancora aperta: e' un MTM di fine giornata, non un realizzato. La seconda occorrenza del giorno (uscita SPCX su articolo Intel) e' contata su F-008 per non duplicare.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-012]"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": 0.0,
+          "nota": "L'articolo macro 'Nasdaq 100 Rallies as Oil Slides, Yields Retreat: Stock Market Today' (published 17:22 UTC, alpaca_benzinga, relevance TAG_UNCONFIRMED, attribution FANOUT) genera alle 17:30-17:35 il segnale +0,22 su ORCL (prezzo +5,19%, segno corretto), +0,12 su TMUS (prezzo -5,57%, segno opposto) e +0,20 su RDDT (prezzo -3,03%, segno opposto). Per TMUS e RDDT e' l'UNICO segnale della giornata (news_count=1 per entrambi). Per ORCL e' il max_score_fanout=0,22 contro un max_score_own=0,021: il punteggio che piu' si avvicina al gate non parla di Oracle, mentre l'unico articolo ISSUER_SPECIFIC su Oracle ('Oracle Stock Trends Higher: What's Going On Today?', 18:20) scora 0,021 ed e' retrospettivo. Contesto della seduta: 215 righe scorate da 123 articoli unici, mapping_fanout_extra=92, TAG_UNCONFIRMED 132/215 = 61,4%, quota_righe_fanout sui candidati miss = 0,818.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-17.md §8"
         }
       ],
       "costo_cumulato_usd": 937.61,
@@ -3127,9 +3133,15 @@
           "costo_usd": 28.84,
           "nota": "Tutti e tre i mover ENTRY_OPPORTUNITY della seduta sono stati intercettati e tutti e tre hanno chiuso in perdita: active_signal_recall 3/3=1.00, execution_conversion_rate 3/3=1.00, profitable_capture_rate 0/3=0.00, avoidable_miss_count=0. Il punto nuovo e' che NON e' la nostra latenza: la mediana published_to_scored della giornata e' 0,6 minuti su 215 righe (SPCX 11,8 s, INTC 8,5 s), il valore migliore della serie, e SPCX ha fatto segnale->fill in 224,5 secondi finendo comunque a entry_percentile 0,910 (mediana mobile 20g 0,616). I titoli degli articoli sono il movimento stesso: 'SpaceX Stock Surges: What's Going On?' (score +0,390 alle 15:48), 'Intel Stock Moves Higher: What's Going On Today?' (+0,378 alle 14:37), 'What's Going On With Marvell Technology Stock Wednesday?' (+0,325 alle 13:45, pezzo pre-market che descrive il +2% gia' fatto). MRVL ha quota_movimento_precedente_al_segnale 1,43: al segnale il titolo aveva gia' superato il movimento poi chiuso a fine giornata.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-16.md §8"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": 80.74,
+          "nota": "Nella giornata dei semis l'unico semis comprato e' entrato a movimento gia' interamente consumato. Ingresso S4 su MU alle 15:52 @ 978,848 con quota_movimento_precedente_al_segnale = 1,0588 (denominatore_degenere=false, quindi la quota e' leggibile) ed entry_percentile = 0,775. Il titolo chiude a 977,50: funnel_v2.righe[MU].pipeline = BAD_FILL, evidence.eod_net_pnl = -2,76 $, net_profitable = false, mtm_eod = -1,97 $. MU fa +5,50% sulla seduta e il book ne cattura -0,14%. Stesso profilo dell'occorrenza PANW del 2026-09-14 (quota 1,0168). Gli altri ingressi non degeneri: SPCX 0,386, BA 0,575, NVO 0,933 — due dei quattro sopra 0,9. Anche su ARM (+8,57%, non catturato) l'unica riga ISSUER_SPECIFIC e' un roundup delle 15:58 che constata il rialzo invece di anticiparlo.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-17.md §8"
         }
       ],
-      "costo_cumulato_usd": 282.61,
+      "costo_cumulato_usd": 363.35,
       "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": null
@@ -3242,9 +3254,15 @@
           "costo_usd": -83.84,
           "nota": "[DAY-015] Guard P0-05 anti-pyramiding sparato 11 volte (execution_decisions SKIP_PYRAMIDING; s4_intent_events reason_code SKIP_PYRAMIDING 90 osservazioni): MRK, INTC x4, AMD, AXP, JPM x2, XOM, SHEL. 5 blocchi su posizioni S1 aperte a luglio, 4 su INTC comprato quella mattina da S4 stesso - il cui segnale e' poi salito a +0,640, il piu' forte del giorno, senza poter essere rincarato. 3 righe su 11 senza signal_id. COSTO NEGATIVO (un risparmio) -83,84 $: somma esatta di counterfactual_return_1h x intended_notional_usd sulle 11 righe (dossier guard_decisions, 0 righe senza dati); i peggiori contributi evitati sono INTC 29039 (-14,68 bp su 2.182 $), XOM (-13,92 bp) e JPM 28675 (-9,86 bp). Il controfattuale e' calcolato dal run_counterfactual_worker, non da questa sessione.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-015]"
+        },
+        {
+          "data": "2026-09-17",
+          "costo_usd": 3.2,
+          "nota": "Il guard anti-pyramiding e' il destino dominante degli intenti eseguibili della giornata: 75 dei 102 intenti S4 con is_tradable=true finiscono SKIP_PYRAMIDING, contro 22 SKIP_IDEMPOTENCY e 5 SUBMITTED. Incrociando i simboli bloccati con copertura_uscita.posizioni, 43 dei 75 blocchi sono su titoli detenuti da S1 (SHEL 14, XLK 10, XOM 9, MS 6, AAPL 3, LLY 1), 11 su titoli detenuti da S4 (QQQ 10, MRVL 1) e 21 su posizioni che S4 ha aperto oggi stesso (BA 9, META 8, SPCX 4) — questi ultimi sono il guard che funziona come progettato. Un mover diretto colpito: MRVL +4,81%, intento bloccato alle 14:07 sul ciclo d'apertura. Seconda meta' del finding, la tracciabilita': execution_decisions registra 15 righe SKIP_PYRAMIDING contro 75 intenti (tasso di traccia 20%, era 11 su 90 = 12% il 09-16), e decision_signal_id_coverage.regressions elenca SKIP_PYRAMIDING (13/15 con signal_id contro must_be_full). Plausibile interazione con F-080 (chiave di deduplica senza il giorno), non verificata qui.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-17.md §8"
         }
       ],
-      "costo_cumulato_usd": 320.33,
+      "costo_cumulato_usd": 323.53,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null

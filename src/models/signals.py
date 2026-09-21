@@ -44,3 +44,13 @@ class SentimentResult(BaseModel):
     finbert_polarity: float | None = None
     finbert_title_chars: int | None = None
     finbert_body_chars: int | None = None
+    # #550 (F-073): scomposizione dello score che il gate d'ingresso S4 valuta.
+    # Il ciclo moltiplica lo score grezzo per il moltiplicatore di
+    # signal-velocity PRIMA del confronto con la soglia: `score` resta il
+    # decidente (cio' che il ranker ordina), `raw_score` e
+    # `velocity_multiplier` permettono alla riga persistita di spiegarsi da
+    # sola. Settati solo dal ciclo di portfolio quando il blocco velocity gira:
+    # raw_score None = nessuna scomposizione nota (segnale non boostato o
+    # proveniente dal worker, che non conosce la velocity).
+    raw_score: float | None = None
+    velocity_multiplier: float = Field(default=1.0)

@@ -44,6 +44,7 @@ app = Celery(
         "src.workers.held_news_loss_alert",
         "src.workers.stale_drop_alert",
         "src.workers.news_queue_census",
+        "src.workers.duplicate_signal_alert",
     ],
 )
 
@@ -239,6 +240,14 @@ app.conf.beat_schedule = {
     "stale-drop-alert": {
         "task": "src.workers.stale_drop_alert.run_stale_drop_alert",
         "schedule": crontab(hour=22, minute=55, day_of_week="1-5"),
+    },
+    # #551/F-072: daily count of duplicated news_log_id in sentiment_signals
+    # (threshold 0). Sola lettura + Telegram; separa i 12 duplicati F-072 del
+    # 2026-09-08 (decisione operatore pendente) dalle ricadute nuove. Alle
+    # 23:05Z, in coda alla scala EOD (forward-return 22:00 → stale-drop 22:55).
+    "duplicate-signals-alert": {
+        "task": "src.workers.duplicate_signal_alert.run_duplicate_signals_alert",
+        "schedule": crontab(hour=23, minute=5),
     },
     # Censimento della coda news (opzione A di
     # docs/research/news_ingest_consumo_disaccoppiamento_2026-09-10.md, serve #544)

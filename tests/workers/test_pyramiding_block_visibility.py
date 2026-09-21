@@ -161,6 +161,23 @@ class TestScritturaDellaRiga:
         )
         assert pg.write_execution_decision.call_args.kwargs["score"] == 0.0
 
+    def test_il_blocco_dichiara_il_moltiplicatore_velocity(self) -> None:
+        """#550 (F-073): un BUY fermato dal guard e' comunque un segnale che ha
+        PASSATO il gate — spesso proprio grazie al boost. La riga deve portare
+        grezzo e moltiplicatore come la riga BUY, altrimenti dal DB un blocco a
+        0.266 e uno SKIP_THRESHOLD a 0.288 restano contraddittori."""
+        pg = self._pg()
+        bloccati = [
+            {"symbol": "BA", "signal_id": 11429, "signal_score": 0.27375,
+             "velocity_multiplier": 1.2,
+             "allocation_weight": 0.02, "open_since": "2026-09-15"},
+        ]
+        _record_pyramiding_blocks(pg, bloccati, gia_registrati=set(), regime_mult=1.0)
+
+        kw = pg.write_execution_decision.call_args.kwargs
+        assert kw["signal_score"] == 0.27375
+        assert kw["velocity_multiplier"] == 1.2
+
 
 class TestIdempotenza:
     def test_non_riscrive_un_blocco_gia_registrato(self) -> None:

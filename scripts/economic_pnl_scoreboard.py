@@ -194,12 +194,79 @@ def costruisci(as_of: date) -> dict:
     }
 
 
-def scrivi(payload: dict) -> Path:
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = OUT_PATH.with_suffix(".json.tmp")
+def scrivi(payload: dict, *, out_path: Path | None = None,
+           giorni_committed: list[str] | None = None) -> Path:
+    """Scrive il payload del P&L economico.
+
+    #565 / F-076: la serie ``pnl_economico.giornaliero`` e' pre-registrata
+    (``OBSERVATION_CHARTER.md`` §Discontinuita'): un giorno gia' pubblicato
+    non puo' cambiare valore se non con una discontinuita' dichiarata.
+    Prima di sovrascrivere il file, ``scrivi`` confronta il payload in
+    arrivo contro il file committed: per ogni giorno passato presente in
+    entrambi, qualunque differenza di valore abortisce con SystemExit
+    non-zero e lascia il file committed intatto. Un fallimento rumoroso
+    e' recuperabile, una riscrittura silenziosa no.
+
+    Parametri opzionali (in produzione sono auto-determinati):
+    - ``out_path``: path di destinazione (default ``OUT_PATH``).
+    - ``giorni_committed``: lista di date ISO gia' pubblicate; se omessa,
+      viene letta dalle chiavi del committed esistente. La lista e'
+      accettata esplicita per i test.
+    """
+    target = out_path if out_path is not None else OUT_PATH
+    if target.exists():
+        try:
+            committed_payload = json.loads(target.read_text())
+        except json.JSONDecodeError as exc:
+            raise SystemExit(
+                f"economic_pnl.json committed non parsabile: {exc}. "
+                "Risoluzione manuale richiesta (#565)."
+            ) from exc
+        committed_giornaliero = (
+            (committed_payload.get("pnl_economico") or {}).get("giornaliero") or {}
+        )
+        if giorni_committed is None:
+            giorni_committed = sorted(committed_giornaliero.keys())
+        nuovo_giornaliero = (
+            (payload.get("pnl_economico") or {}).get("giornaliero") or {}
+        )
+        regressioni = []
+        for giorno in giorni_committed:
+            if giorno not in nuovo_giornaliero:
+                regressioni.append((giorno, committed_giornaliero[giorno], None,
+                                   "rimosso"))
+                continue
+            nuovo_val = nuovo_giornaliero[giorno]
+            vecchio_val = committed_giornaliero[giorno]
+            if isinstance(nuovo_val, dict) and isinstance(vecchio_val, dict):
+                if nuovo_val != vecchio_val:
+                    regressioni.append((giorno, vecchio_val, nuovo_val,
+                                       "valore_modificato"))
+            else:
+                try:
+                    if float(nuovo_val) != float(vecchio_val):
+                        regressioni.append((giorno, vecchio_val, nuovo_val,
+                                           "valore_modificato"))
+                except (TypeError, ValueError):
+                    if nuovo_val != vecchio_val:
+                        regressioni.append((giorno, vecchio_val, nuovo_val,
+                                           "valore_modificato"))
+        if regressioni:
+            for giorno, vecchio, nuovo, tipo in regressioni:
+                print(
+                    f"REGRESSIONE: {giorno} {tipo}: {vecchio!r} -> {nuovo!r}",
+                    file=__import__("sys").stderr,
+                )
+            raise SystemExit(
+                f"economic_pnl.json: {len(regressioni)} regressioni su "
+                f"{len(giorni_committed)} giorni gia' pubblicati. "
+                "Il file committed NON e' stato sovrascritto (#565 / F-076)."
+            )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(_jsonable(payload), indent=2, ensure_ascii=False))
-    tmp.replace(OUT_PATH)  # atomica
-    return OUT_PATH
+    tmp.replace(target)  # atomica
+    return target
 
 
 def _riepilogo(payload: dict) -> str:

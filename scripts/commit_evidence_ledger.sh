@@ -188,6 +188,20 @@ stage_paths() {
                 log "RIFIUTO: $rel non e' JSON valido."
                 return 1
             fi
+            # #565 / F-076: i dossier di una seduta chiusa sono immutabili. Se
+            # il file committato su ${REMOTE}/${BRANCH} (gia' presente nella
+            # worktree dopo sync_worktree) e il file che stiamo per committare
+            # differiscono per contenuto, il rewrite e' esattamente il difetto
+            # del commit 88bfb05 sul dossier 2026-09-04: rifiutiamo qui invece
+            # di propagarlo con un `cp` silenzioso. I `.regen-<ts>.json` non
+            # hanno una controparte committed e passano (la dest non esiste).
+            if [[ "$rel" == docs/evidence/dossier/*.json ]] \
+                && [[ -f "$dest" ]] \
+                && ! diff -q "$dest" "$src" > /dev/null 2>&1; then
+                log "RIFIUTO: $rel differisce dalla versione committata su ${REMOTE}/${BRANCH}."
+                log "I dossier di una seduta chiusa sono immutabili: rieseguire richiede --force-regenerate e produce un file accanto."
+                return 1
+            fi
             cp "$src" "$dest" || return 2
         else
             cp "$src" "$dest" || return 2

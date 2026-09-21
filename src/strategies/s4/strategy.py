@@ -227,6 +227,15 @@ class NewsDrivenTactical:
         for _, row in df.iterrows():
             raw_signal_id = row.get("signal_id") if "signal_id" in row.index else None
             signal_id = int(raw_signal_id) if pd.notna(raw_signal_id) else None
+            # #550: la scomposizione del decidente viaggia con la riga quando
+            # il ciclo ha applicato i moltiplicatori velocity (colonne
+            # scritte da _apply_signal_velocity); assente altrimenti.
+            raw_score = row.get("raw_score") if "raw_score" in row.index else None
+            velocity_multiplier = (
+                row["velocity_multiplier"]
+                if "velocity_multiplier" in row.index
+                else 1.0
+            )
             results.append(
                 SentimentResult(
                     symbol=str(row["symbol"]),
@@ -238,6 +247,8 @@ class NewsDrivenTactical:
                     fallback_used=bool(row.get("fallback_used", False)),
                     generated_at=row["generated_at"] if "generated_at" in row.index else ts,
                     signal_id=signal_id,
+                    raw_score=float(raw_score) if pd.notna(raw_score) else None,
+                    velocity_multiplier=float(velocity_multiplier),
                 )
             )
         return results

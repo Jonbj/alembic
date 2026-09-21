@@ -129,6 +129,8 @@ class TestProcessNewsItem:
         # Mock stores
         mock_redis = MagicMock(spec=RedisStore)
         mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
 
         # Mock FinBERT (should not be called)
         mock_finbert = MagicMock(spec=FinBERTClient)
@@ -183,6 +185,8 @@ class TestProcessNewsItem:
         # Mock stores
         mock_redis = MagicMock(spec=RedisStore)
         mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
 
         # Mock aggregator (should not be called)
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
@@ -239,6 +243,8 @@ class TestProcessNewsItem:
         # Mock stores
         mock_redis = MagicMock(spec=RedisStore)
         mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
 
         news_item = make_news_item("AAPL", 0)
 
@@ -288,6 +294,8 @@ class TestProcessNewsItem:
         # Mock stores
         mock_redis = MagicMock(spec=RedisStore)
         mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
 
         news_item = make_news_item("AAPL", 0)
 
@@ -331,6 +339,8 @@ class TestFallbackCounterPersistence:
         mock_redis = MagicMock(spec=RedisStore)
         mock_redis.increment_fallback_counter.return_value = 3
         mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
 
         news_item = make_news_item("AAPL", 0)
@@ -369,6 +379,8 @@ class TestFallbackCounterPersistence:
         mock_redis = MagicMock(spec=RedisStore)
         mock_redis.increment_fallback_counter.return_value = 1
         mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
 
         news_item = make_news_item("AAPL", 0)
 
@@ -410,6 +422,8 @@ class TestFallbackCounterPersistence:
         mock_finbert = MagicMock(spec=FinBERTClient)
         mock_redis = MagicMock(spec=RedisStore)
         mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
 
         news_item = make_news_item("AAPL", 0)
 
@@ -1005,6 +1019,8 @@ class TestFinbertFallbackEventPersistence:
         mock_redis = MagicMock(spec=RedisStore)
         mock_redis.increment_fallback_counter.return_value = 1
         mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
         mock_pg.write_signal.return_value = 4242
 
         await process_news_item(
@@ -1038,6 +1054,8 @@ class TestFinbertFallbackEventPersistence:
             model_ids=["glm52", "gptoss"],
         )
         mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
 
         with patch("src.workers.sentiment.run_ensemble_query",
                    new_callable=AsyncMock, return_value=mock_outputs):
@@ -1066,6 +1084,8 @@ class TestFinbertFallbackEventPersistence:
         mock_redis = MagicMock(spec=RedisStore)
         mock_redis.increment_fallback_counter.return_value = 1
         mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
         mock_pg.write_signal.return_value = 99
         mock_pg.log_finbert_fallback_event.side_effect = RuntimeError("db down")
 
@@ -1104,6 +1124,8 @@ class TestFinbertFallbackEventPersistence:
         mock_redis.increment_fallback_counter.return_value = 1
         mock_redis.write_sentiment.side_effect = RuntimeError("redis unreachable")
         mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
         mock_pg.write_signal.return_value = 7007
 
         await process_news_item(
@@ -1191,6 +1213,8 @@ class TestProcessNewsBatch:
         mock_redis = MagicMock(spec=RedisStore)
         mock_redis.increment_fallback_counter.return_value = 1
         mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
 
         # Create batch of news items
         news_items = [make_news_item("AAPL", i) for i in range(3)]
@@ -1259,6 +1283,8 @@ class TestProcessNewsBatch:
 
         mock_redis = MagicMock(spec=RedisStore)
         mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
 
         news_items = [make_news_item("AAPL", i) for i in range(3)]
 
@@ -1832,6 +1858,8 @@ class TestProcessNewsBatchShadowDecoupling:
         mock_outputs, mock_aggregator, mock_budget, mock_finbert = self._make_live_mocks()
         mock_redis = MagicMock(spec=RedisStore)
         mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
         news_items = [make_news_item("AAPL", i) for i in range(4)]
 
         async def slow_shadow(**kwargs):
@@ -1874,6 +1902,8 @@ class TestProcessNewsBatchShadowDecoupling:
         mock_outputs, mock_aggregator, mock_budget, mock_finbert = self._make_live_mocks()
         mock_redis = MagicMock(spec=RedisStore)
         mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
         news_items = [make_news_item("AAPL", 0)]
 
         async def fast_shadow(*, clean_body, clean_symbol, news_log_id, pg_store, redis_store, clean_title=""):
@@ -1929,6 +1959,7 @@ class TestProcessNewsItemCorrelation:
         mock_pg = MagicMock()
         mock_pg.write_signal.return_value = 7       # signal_id = 7
         mock_pg.log_news_item.return_value = 42     # news_log_id = 42
+        mock_pg.find_signal_id_for_news.return_value = None  # #551: not a duplicate
 
         mock_redis = MagicMock()
         mock_clients = []
@@ -1985,6 +2016,7 @@ class TestProcessNewsItemCorrelation:
         mock_pg = MagicMock()
         mock_pg.write_signal.return_value = 7
         mock_pg.log_news_item.return_value = None   # conflict → no id
+        mock_pg.find_signal_id_for_news.return_value = None  # #551: not a duplicate
 
         mock_redis = MagicMock()
 
@@ -1999,6 +2031,380 @@ class TestProcessNewsItemCorrelation:
             )
 
         mock_pg.link_signal_to_news.assert_not_called()
+
+
+class TestDuplicateSignalGuard:
+    """#551/F-072: an article already scored must not be scored again.
+
+    After SoftTimeLimitExceeded the crash-recovery re-queues items still in
+    news:processing; when one of them was already persisted, the re-run must
+    not write a second sentiment_signals row for the same news_log_id.
+    """
+
+    @staticmethod
+    def _make_item(url: str = "http://u.com") -> NewsItem:
+        return NewsItem(
+            id=f"{url}:AAPL",
+            title="T",
+            url=url,
+            source="gdelt",
+            body="b",
+            asset_tags=["AAPL"],
+            timestamp=datetime(2026, 9, 8, tzinfo=timezone.utc),
+        )
+
+    @staticmethod
+    def _make_result() -> SentimentResult:
+        return SentimentResult(
+            symbol="AAPL", score=0.6, confidence=0.9,
+            reasoning="r", model_id="ensemble:glm",
+        )
+
+    @pytest.mark.asyncio
+    async def test_existing_signal_blocks_rewrite(self):
+        """A signal already linked to (url, ticker) short-circuits every write."""
+        from src.workers.sentiment import LiveSignalSink
+
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
+        mock_pg.find_signal_id_for_news.return_value = 7  # already scored
+        mock_redis = MagicMock(spec=RedisStore)
+
+        await LiveSignalSink(mock_redis, mock_pg).persist(
+            item=self._make_item(),
+            result=self._make_result(),
+            raw_outputs=[],
+        )
+
+        mock_pg.find_signal_id_for_news.assert_called_once_with(
+            url="http://u.com", ticker="AAPL"
+        )
+        mock_pg.write_signal.assert_not_called()
+        mock_redis.write_sentiment.assert_not_called()
+        mock_pg.link_signal_to_news.assert_not_called()
+        mock_pg.log_llm_responses.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_existing_signal_writes_normally(self):
+        from src.workers.sentiment import LiveSignalSink
+
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
+        mock_pg.find_signal_id_for_news.return_value = None
+        mock_pg.write_signal.return_value = 7
+        mock_pg.log_news_item.return_value = 42
+        mock_redis = MagicMock(spec=RedisStore)
+
+        await LiveSignalSink(mock_redis, mock_pg).persist(
+            item=self._make_item(),
+            result=self._make_result(),
+            raw_outputs=[],
+        )
+
+        mock_pg.find_signal_id_for_news.assert_called_once()
+        mock_pg.write_signal.assert_called_once()
+        mock_redis.write_sentiment.assert_called_once()
+        mock_pg.link_signal_to_news.assert_called_once_with(signal_id=7, news_log_id=42)
+
+    @pytest.mark.asyncio
+    async def test_empty_url_skips_the_lookup(self):
+        """No url → no identity → no dedup: an un-keyed article must not be
+        falsely matched against the first news_log row with url=''."""
+        from src.workers.sentiment import LiveSignalSink
+
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
+        mock_pg.write_signal.return_value = 7
+        mock_pg.log_news_item.return_value = None
+        mock_redis = MagicMock(spec=RedisStore)
+
+        await LiveSignalSink(mock_redis, mock_pg).persist(
+            item=self._make_item(url=""),
+            result=self._make_result(),
+            raw_outputs=[],
+        )
+
+        mock_pg.find_signal_id_for_news.assert_not_called()
+        mock_pg.write_signal.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_lookup_failure_is_fail_open(self):
+        """The dedup is the defensive layer; a DB hiccup must not drop a fresh
+        signal (the per-item LREM remains the primary defense)."""
+        from src.workers.sentiment import LiveSignalSink
+
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        # #551: no pre-existing signal for the article → dedup guard is inert.
+        mock_pg.find_signal_id_for_news.return_value = None
+        mock_pg.find_signal_id_for_news.side_effect = RuntimeError("db down")
+        mock_pg.write_signal.return_value = 7
+        mock_pg.log_news_item.return_value = 42
+        mock_redis = MagicMock(spec=RedisStore)
+
+        await LiveSignalSink(mock_redis, mock_pg).persist(
+            item=self._make_item(),
+            result=self._make_result(),
+            raw_outputs=[],
+        )
+
+        mock_pg.write_signal.assert_called_once()
+
+
+class TestOnPersistedCallback:
+    """#551/F-072: the worker must remove each item from news:processing as
+    soon as ITS signal is written (LREM per item), not with one delete() at
+    the end of the batch — a SoftTimeLimitExceeded mid-batch would otherwise
+    leave already-persisted items to be re-queued and re-scored.
+    """
+
+    @staticmethod
+    def _item_and_mocks():
+        item = NewsItem(
+            id="http://u.com:AAPL",
+            title="T", url="http://u.com", source="gdelt",
+            body="b", asset_tags=["AAPL"],
+            timestamp=datetime.now(timezone.utc),
+        )
+        result = SentimentResult(
+            symbol="AAPL", score=0.6, confidence=0.9,
+            reasoning="r", model_id="ensemble:glm",
+        )
+        mock_pg = MagicMock(spec=PostgreSQLStore)
+        mock_pg.find_signal_id_for_news.return_value = None
+        mock_pg.write_signal.return_value = 7
+        mock_pg.log_news_item.return_value = 42
+        return item, result, mock_pg
+
+    @pytest.mark.asyncio
+    async def test_callback_fires_after_persist(self):
+        item, result, mock_pg = self._item_and_mocks()
+        recorded: list[str] = []
+
+        with patch(
+            "src.workers.sentiment.run_inference",
+            new=AsyncMock(return_value=(result, [])),
+        ):
+            await process_news_item(
+                item=item, clients=[], aggregator=MagicMock(),
+                finbert=MagicMock(), budget_tracker=MagicMock(),
+                redis_store=MagicMock(), pg_store=mock_pg,
+                on_persisted=lambda news: recorded.append(news.id),
+            )
+
+        assert recorded == ["http://u.com:AAPL"]
+
+    @pytest.mark.asyncio
+    async def test_callback_skipped_when_no_result(self):
+        """Inference returned None → nothing was persisted → nothing to LREM."""
+        item, _result, mock_pg = self._item_and_mocks()
+        recorded: list[str] = []
+
+        with patch(
+            "src.workers.sentiment.run_inference",
+            new=AsyncMock(return_value=None),
+        ):
+            await process_news_item(
+                item=item, clients=[], aggregator=MagicMock(),
+                finbert=MagicMock(), budget_tracker=MagicMock(),
+                redis_store=MagicMock(), pg_store=mock_pg,
+                on_persisted=lambda news: recorded.append(news.id),
+            )
+
+        assert recorded == []
+
+    @pytest.mark.asyncio
+    async def test_callback_skipped_when_persist_raises(self):
+        """#551 review: if LiveSignalSink.persist raises before writing the
+        signal, the item MUST stay in news:processing so the next run's crash
+        recovery can retry it. Firing the LREM here would silently drop the
+        signal — defensive dedup only catches re-runs of items that DID
+        already get written.
+        """
+        item, result, mock_pg = self._item_and_mocks()
+        recorded: list[str] = []
+
+        # Build a sink that fails BEFORE write_signal commits anything to the
+        # DB — the same shape as the reviewer's failure scenario.
+        fake_sink = MagicMock()
+        fake_sink.persist = AsyncMock(
+            side_effect=RuntimeError("simulated DB failure before write_signal"),
+        )
+
+        with patch(
+            "src.workers.sentiment.run_inference",
+            new=AsyncMock(return_value=(result, [])),
+        ):
+            await process_news_item(
+                item=item, clients=[], aggregator=MagicMock(),
+                finbert=MagicMock(), budget_tracker=MagicMock(),
+                redis_store=MagicMock(), pg_store=mock_pg,
+                sink=fake_sink,
+                on_persisted=lambda news: recorded.append(news.id),
+            )
+
+        # write_signal was never reached: the failed persist means no row in
+        # sentiment_signals. The LREM would have erased the only chance of
+        # recovery, so on_persisted must NOT fire here.
+        assert recorded == []
+        mock_pg.write_signal.assert_not_called()
+
+
+class _FakeRedisLists:
+    """Redis minimale con stato per i test del worker: solo le operazioni
+    che run_sentiment_worker fa davvero sulle code news (LMOVE/LRANGE/
+    RPUSH/LREM/DELETE e la pipeline del recovery)."""
+
+    def __init__(self, queues: dict[str, list[bytes]] | None = None) -> None:
+        self.lists: dict[str, list[bytes]] = {
+            "news:queue": [], "news:processing": [], "news:dead-letter": [],
+        }
+        if queues:
+            self.lists.update(queues)
+
+    def lmove(self, src: str, dst: str, first: str, second: str):
+        if not self.lists[src]:
+            return None
+        item = self.lists[src].pop(0)  # LEFT
+        self.lists[dst].append(item)   # RIGHT
+        return item
+
+    def lrange(self, key: str, start: int, end: int):
+        return list(self.lists.get(key, []))
+
+    def rpush(self, key: str, *values: bytes) -> None:
+        self.lists.setdefault(key, []).extend(values)
+
+    def lrem(self, key: str, count: int, value: bytes) -> None:
+        queue = self.lists.setdefault(key, [])
+        if value in queue:
+            queue.remove(value)
+
+    def delete(self, *keys: str) -> None:
+        for key in keys:
+            self.lists.pop(key, None)
+            self.lists[key] = []
+
+    def llen(self, key: str) -> int:
+        return len(self.lists.get(key, []))
+
+    def exists(self, key: str) -> bool:
+        return False
+
+    def set(self, key: str, value: str, nx: bool = False, ex: int | None = None):
+        return True
+
+    def close(self) -> None:
+        pass
+
+    def pipeline(self):
+        parent = self
+
+        class _Pipe:
+            def rpush(self, key, *values):
+                self._ops.append(("rpush", key, values))
+
+            def lrem(self, key, count, value):
+                self._ops.append(("lrem", key, count, value))
+
+            def delete(self, *keys):
+                self._ops.append(("delete", keys))
+
+            def execute(self):
+                for op in self._ops:
+                    if op[0] == "rpush":
+                        parent.rpush(op[1], *op[2])
+                    elif op[0] == "lrem":
+                        parent.lrem(op[1], op[2], op[3])
+                    else:
+                        parent.delete(*op[1])
+                return []
+
+            _ops: list = []
+
+        return _Pipe()
+
+
+class TestSoftTimeLimitRecovery:
+    """DoD #551: SoftTimeLimitExceeded a meta' batch → il run successivo non
+    ri-scora l'articolo gia' persistito."""
+
+    @staticmethod
+    def _make_raw(n: int) -> bytes:
+        import json
+        return json.dumps({
+            "id": f"http://u.com/article-{n}",
+            "title": f"Story {n}",
+            "body": "Apple reported strong quarterly results.",
+            "url": f"http://u.com/article-{n}",
+            "source": "gdelt",
+            "asset_tags": ["AAPL"],
+        }).encode()
+
+    def _run_worker(self, fake_redis, batch_impl):
+        """run_sentiment_worker con tutti i collaboratori mockati e la
+        process_news_batch sostituita da batch_impl (una async def)."""
+        from src.workers.sentiment import run_sentiment_worker
+
+        with patch("src.workers.sentiment.is_market_open", return_value=True), \
+             patch("redis.Redis") as mock_redis_cls, \
+             patch("src.workers.sentiment.RedisStore", return_value=MagicMock()), \
+             patch("psycopg2.connect", return_value=MagicMock()), \
+             patch("src.workers.sentiment.PostgreSQLStore", return_value=MagicMock()), \
+             patch("src.workers.sentiment.LLMBudgetTracker", return_value=MagicMock()), \
+             patch("src.workers.sentiment.build_inference_context",
+                   return_value=(MagicMock(), MagicMock(), MagicMock(),
+                                 MagicMock(), None)), \
+             patch("src.workers.sentiment.process_news_batch", new=batch_impl):
+            mock_redis_cls.from_url.return_value = fake_redis
+            run_sentiment_worker()
+
+    def test_mid_batch_kill_leaves_only_unscored_items(self):
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        raw1, raw2 = self._make_raw(1), self._make_raw(2)
+        fake = _FakeRedisLists({"news:queue": [raw1, raw2]})
+
+        async def killed_batch(**kwargs):
+            # Il primo articolo e' stato persistito (e LREM-ato dal callback);
+            # il soft time limit uccide il task prima del secondo.
+            kwargs["on_persisted"](kwargs["news_items"][0])
+            raise SoftTimeLimitExceeded()
+
+        with pytest.raises(SoftTimeLimitExceeded):
+            self._run_worker(fake, killed_batch)
+
+        # Il primo item e' gia' fuori da news:processing: la crash-recovery
+        # del run successivo NON deve ri-accodarlo.
+        assert fake.lists["news:processing"] == [raw2]
+
+    def test_next_run_requeues_only_unscored_items(self):
+        from celery.exceptions import SoftTimeLimitExceeded
+
+        raw1, raw2 = self._make_raw(1), self._make_raw(2)
+        fake = _FakeRedisLists({"news:queue": [raw1, raw2]})
+
+        async def killed_batch(**kwargs):
+            kwargs["on_persisted"](kwargs["news_items"][0])
+            raise SoftTimeLimitExceeded()
+
+        with pytest.raises(SoftTimeLimitExceeded):
+            self._run_worker(fake, killed_batch)
+
+        seen_ids: list[str] = []
+
+        async def second_run_batch(**kwargs):
+            seen_ids.extend(item.id for item in kwargs["news_items"])
+            return []
+
+        self._run_worker(fake, second_run_batch)
+
+        assert seen_ids == ["http://u.com/article-2"]
+        # La sweeper finale ha svuotato processing (item2 consumato, nessun
+        # persistito lasciato indietro).
+        assert fake.lists["news:processing"] == []
 
 
 def test_run_sentiment_worker_skips_when_market_closed():

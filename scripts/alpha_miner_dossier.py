@@ -2585,9 +2585,43 @@ def _mediane_mobili(ingressi: list[dict], chiusure: list[dict]) -> dict:
     }
 
 
-def scrivi(dossier: dict) -> Path:
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out = OUT_DIR / f"{dossier['data']}.json"
+def scrivi(dossier: dict, *, dossier_dir: Path | None = None,
+           force_regenerate: bool = False) -> Path:
+    """Scrive il dossier per ``dossier['data']``.
+
+    #565 / F-076: la sovrascrittura silenziosa di un dossier gia' committato
+    viola la carta di osservazione (le serie pubblicate sono immutabili
+    dall'esterno del protocollo, vedi `OBSERVATION_CHARTER.md` §Discontinuita').
+    Di default ``scrivi`` rifiuta di sovrascrivere un file gia' esistente
+    per la stessa data: la riesecuzione del dossier per una seduta chiusa
+    abortisce ad alta voce. Il bypass esplicito richiede
+    ``force_regenerate=True``: il nuovo file viene scritto accanto come
+    ``<data>.regen-<ts>.json``, l'originale committato resta intatto, e
+    l'identita' del rewrite e' visibile sia su disco sia in ``git log``
+    (commit message distinti, vedi il wrapper cron).
+
+    Perimetro del flag: solo la posizione e il nome del file prodotto.
+    La semantica del dossier, lo schema e i moduli puri sono gli stessi.
+    """
+    target_dir = dossier_dir if dossier_dir is not None else OUT_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+    out = target_dir / f"{dossier['data']}.json"
+    if out.exists() and not force_regenerate:
+        log.error(
+            "RIFIUTO: il dossier %s esiste gia' su disco — non viene sovrascritto. "
+            "Rieseguire lo stesso giorno richiede --force-regenerate; il nuovo "
+            "file verra' scritto accanto come %s.regen-<ts>.json e l'originale "
+            "resta intatto (#565 / F-076).",
+            out.name, dossier["data"],
+        )
+        raise SystemExit(2)
+    if force_regenerate and out.exists():
+        ts = datetime.now().strftime("%Y%m%dT%H%M%S")
+        out = target_dir / f"{dossier['data']}.regen-{ts}.json"
+        log.warning(
+            "FORCE-REGENERATE attivo: nuovo dossier scritto in %s, "
+            "l'originale committato NON e' stato toccato.", out.name,
+        )
     tmp = out.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(dossier, indent=2, ensure_ascii=False))
     tmp.replace(out)  # atomica: mai un file mezzo scritto
@@ -2599,6 +2633,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("data", nargs="?", help="giorno da analizzare (YYYY-MM-DD)")
     ap.add_argument("--backfill-da", help="ricalcola da questa data a ieri")
+    ap.add_argument(
+        "--force-regenerate",
+        action="store_true",
+        help=(
+            "riscrivi il dossier di una data gia' committata scrivendo accanto "
+            "come <data>.regen-<ts>.json (l'originale resta intatto). "
+            "Usare solo quando l'aggiornamento e' dichiarato: vedi #565 / F-076."
+        ),
+    )
     args = ap.parse_args(argv)
 
     simboli = _watchlist()
@@ -2640,7 +2683,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             log.error("%s FALLITO (non e' un giorno non di borsa): %s", g, exc)
             falliti += 1
             continue
-        p = scrivi(d)
+        p = scrivi(d, force_regenerate=args.force_regenerate)
         scritti += 1
         m = d["mercato"]
         log.info("%s -> %s | mover %d (up %d, down %d) | zero-news %d | ingressi %d | chiusure %d",

@@ -28,6 +28,9 @@ MERGER = ROOT / "scripts" / "merge_evidence_findings.py"
 JSONL_MERGER = ROOT / "scripts" / "merge_evidence_jsonl.py"
 REFRESHER = ROOT / "scripts" / "refresh_evidence_ledger.sh"
 SCRIPTS = (HELPER, MERGER, JSONL_MERGER, REFRESHER)
+# La guard di idempotenza (#564) gira nel cron subito dopo DATE_TARGET: senza
+# questo fratello nella tree di test il cron muore a 127 prima del telegram.log.
+IDEMPOTENCY_GUARD = ROOT / "scripts" / "_alpha_miss_idempotency_guard.sh"
 REPORT = "docs/ALPHA_MISS_REPORT_2026-08-26.md"
 LEDGER = "docs/evidence/findings.json"
 JSONL = "docs/evidence/market_daily.jsonl"
@@ -489,6 +492,7 @@ def test_missing_worktree_is_recreated(repo):
 # --- cablaggio del cron alpha-miss (#336) ----------------------------------
 
 CRON = ROOT / "scripts" / "daily_alpha_miss_analysis.sh"
+RECOVERY_HELPER = ROOT / "scripts" / "_evidence_cron_recovery.sh"
 ECON = "docs/evidence/economic_pnl.json"
 
 # Il dossier fittizio deve soddisfare il contratto prompt/dossier (#287):
@@ -573,6 +577,8 @@ MODULI_PURI = (
 def _run_cron(repo: dict, extra_path: Path | None = None) -> tuple[subprocess.CompletedProcess[str], str, str]:
     project, tmp = repo["project"], repo["tmp"]
     shutil.copy2(CRON, project / "scripts" / CRON.name)
+    shutil.copy2(RECOVERY_HELPER, project / "scripts" / RECOVERY_HELPER.name)
+    shutil.copy2(IDEMPOTENCY_GUARD, project / "scripts" / IDEMPOTENCY_GUARD.name)
     shutil.copy2(
         ROOT / "scripts" / "materialize_alpha_miss_ledger.py",
         project / "scripts" / "materialize_alpha_miss_ledger.py",
@@ -745,6 +751,8 @@ def _run_forensic_cron(
 ) -> tuple[subprocess.CompletedProcess[str], str, str]:
     project, tmp = repo["project"], repo["tmp"]
     shutil.copy2(FORENSIC_CRON, project / "scripts" / FORENSIC_CRON.name)
+    shutil.copy2(RECOVERY_HELPER, project / "scripts" / RECOVERY_HELPER.name)
+    shutil.copy2(IDEMPOTENCY_GUARD, project / "scripts" / IDEMPOTENCY_GUARD.name)
     bin_dir = tmp / "bin-forensic"
 
     session_body = (

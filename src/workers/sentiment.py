@@ -6,6 +6,9 @@ signals written to both Redis (TTL 4 h) and PostgreSQL for audit.
 Pipeline per batch (up to 10 items pulled atomically via LMOVE):
   1. Crash recovery — re-queue any items stranded in news:processing from a
      previous crash (LMOVE is atomic; items are never lost, only delayed).
+     Since #551/F-072 an item leaves news:processing with a per-item LREM
+     right after ITS signal is written, so what lands back in news:queue
+     after a SoftTimeLimitExceeded is only what was never persisted.
   2. Pre-filter — skip near-neutral MarketAux articles
      (|marketaux_sentiment| < 0.20) to save 60-80% of token spend.
   3. LLM ensemble — query Kimi K2.6, GLM-5.2 in
@@ -20,7 +23,9 @@ Pipeline per batch (up to 10 items pulled atomically via LMOVE):
      ENSEMBLE_DIVERGENCE_STD, default 0.40), an all-model timeout, or budget
      exhaustion fall back to FinBERT (local, zero cost).
   5. Store writes — signal → PostgreSQL (audit) and Redis (live cache);
-     per-model LLM responses logged for LOO weight recalculation.
+     per-model LLM responses logged for LOO weight recalculation. The live
+     sink skips the write entirely when the article (url, ticker) already has
+     a signal (#551/F-072 dedup).
   6. Shadow scoring (Stage-2, armed via set_shadow_comparison_start) — the SAME
      item is optionally re-scored with candidate models not in the live pair,
      purely for offline comparison (llm_shadow_responses table). Dispatched as
@@ -44,6 +49,7 @@ import hashlib
 import logging
 import os
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
 from src.notifications.base import esegui_sincrono
@@ -776,6 +782,35 @@ class LiveSignalSink:
         redis_store = self.redis_store
         pg_store = self.pg_store
         ticker = result.symbol
+        # #551/F-072: idempotenza del ciclo sentiment. Se un segnale e' gia'
+        # legato a questo articolo ((url, ticker), stessa chiave del conflict
+        # path di log_news_item), il re-run post-crash-recovery non deve
+        # riscriverlo: ogni IC, copertura articoli e conteggio di segnali
+        # conterebbe due volte lo stesso articolo, con valori diversi. La
+        # chiave e' il solo news_log_id e non (news_log_id, model_id) perche'
+        # i 12 duplicati reali del 2026-09-08 cambiano provider tra i due giri
+        # (GOOGL finbert -> single:gpt-oss): una dedup sulla coppia li
+        # lascerebbe passare proprio i casi che deve fermare. Fail-open su
+        # errore di lookup: la LREM per-item resta la difesa primaria e un
+        # segnale fresco non va perso per un colpo di tosse del DB.
+        if item.url:
+            try:
+                existing_signal_id = pg_store.find_signal_id_for_news(
+                    url=item.url, ticker=ticker
+                )
+            except Exception as exc:
+                log.warning(
+                    "Dedup lookup failed for %s/%s (fail-open): %s",
+                    ticker, item.url, exc,
+                )
+            else:
+                if existing_signal_id is not None:
+                    log.warning(
+                        "Duplicate signal skipped for %s (article already has "
+                        "signal %s) — re-scored after crash recovery? (#551/F-072)",
+                        ticker, existing_signal_id,
+                    )
+                    return
         # #128/#111: the sizing circuit breaker fires only on a FULL ensemble
         # outage (FinBERT), not on a single-model read. Single-model reads are
         # still gated for trading trust (fallback_used=True) but must not trip
@@ -879,6 +914,7 @@ async def process_news_item(
     weights: dict[str, float] | None = None,
     shadow_tasks: list | None = None,
     sink: "LiveSignalSink | None" = None,
+    on_persisted: Callable[[NewsItem], None] | None = None,
 ) -> SentimentResult | None:
     """Process a single news item: infer, update fallback counters, write to stores.
 
@@ -907,6 +943,19 @@ async def process_news_item(
     is passed, this function touches neither redis_store nor pg_store directly:
     every store write in this path goes through the sink, so "which stores does
     this caller write to" is answerable by reading its sink and nothing else.
+
+    on_persisted (#551/F-072) fires ONLY when persist() returned without
+    raising, and only when inference produced a result. The live worker uses
+    it to LREM the item out of news:processing immediately, so a
+    SoftTimeLimitExceeded mid-batch cannot leave an already-persisted item to
+    be re-queued and re-scored by the next run's crash recovery. If persist()
+    itself raises before any signal row was written, the item is intentionally
+    LEFT in news:processing: the next run's crash recovery will re-score it,
+    and the defensive dedup in LiveSignalSink would have caught a duplicate
+    anyway — so there is no scenario where firing on_persisted after a failed
+    persist helps, only one where it silently drops the signal (#551 codex
+    review, 2026-09-18). A callback error after a successful persist is
+    swallowed: the signal is already durable and the dedup covers the leftover.
     """
     inference_result = await run_inference(
         item, clients, aggregator, finbert, budget_tracker, weights=weights
@@ -916,6 +965,16 @@ async def process_news_item(
     result, raw_outputs = inference_result
     if sink is None:
         sink = LiveSignalSink(redis_store, pg_store)
+    # #551 review (codex, 2026-09-18): on_persisted (LREM from news:processing)
+    # fires ONLY when persist() succeeded. If it raises, no signal row exists
+    # in sentiment_signals; the dedup cache for the next run would also pass
+    # (no row to find), so the LREM would silently drop the article and the
+    # signal would be lost. Keeping the item in news:processing is the safe
+    # move: crash recovery re-scores it, and if THAT run succeeds, the LREM
+    # fires on its own persist path. The previous "always fire on_persisted
+    # after a caught failure" comment conflated two cases (write_signal
+    # committed, later step failed → must LREM; write_signal itself failed →
+    # must NOT LREM); they're now distinguished by the try/else split below.
     try:
         await sink.persist(
             item=item,
@@ -925,6 +984,12 @@ async def process_news_item(
         )
     except Exception as e:
         log.error(f"Failed to write signal for {result.symbol}: {e}")
+    else:
+        if on_persisted is not None:
+            try:
+                on_persisted(item)
+            except Exception as e:
+                log.warning(f"on_persisted callback failed for {item.id}: {e}")
     return result
 
 
@@ -938,6 +1003,7 @@ async def process_news_batch(
     pg_store: PostgreSQLStore,
     weights: dict[str, float] | None = None,
     sink: LiveSignalSink | None = None,
+    on_persisted: Callable[[NewsItem], None] | None = None,
 ) -> list[SentimentResult]:
     """
     Process a batch of news items through the sentiment pipeline.
@@ -953,6 +1019,7 @@ async def process_news_batch(
         weights: Per-model weights from Redis (LOO ICIR rebalancing). None = confidence-only.
         sink: Explicit write destination, forwarded verbatim to process_news_item.
             None = the production stores. See LiveSignalSink.
+        on_persisted: Forwarded verbatim to each process_news_item call (#551).
 
     Returns:
         List of SentimentResult objects
@@ -981,6 +1048,7 @@ async def process_news_batch(
                 weights=weights,
                 shadow_tasks=shadow_tasks,
                 sink=sink,
+                on_persisted=on_persisted,
             )
 
     gathered = await asyncio.gather(*[_bounded(item) for item in news_items])
@@ -1391,6 +1459,11 @@ def run_sentiment_worker() -> dict:
         failed_raw: list[bytes] = []
         skipped_stale = 0
         discard_rows: list[dict] = []
+        # #551/F-072: raw bytes per item.id, per la LREM per-item. Se lo stesso
+        # id compare due volte in coda, vince l'ultimo raw: la copia che resta
+        # in news:processing passa dalla crash-recovery e si ferma sulla dedup
+        # difensiva del sink.
+        raw_by_item_id: dict[str, bytes] = {}
         _now = datetime.now(timezone.utc)
         # #427: per-cycle ensemble-health row anchor. Captured before the
         # LMOVE loop so a slow drain from news:queue cannot compress the
@@ -1422,6 +1495,7 @@ def run_sentiment_worker() -> dict:
                 failed_raw.append(item_json)
                 discard_rows.append(build_parse_failure_drop_row(item_json))
                 continue
+            raw_by_item_id[item.id] = item_json
             if _is_stale_news(item, _now):
                 skipped_stale += 1
                 discard_rows.append(build_stale_drop_row(item, _now))
@@ -1487,6 +1561,24 @@ def run_sentiment_worker() -> dict:
 
         _persist_sentiment_discards(pg_store, discard_rows)
 
+        # #551/F-072: ogni item esce da news:processing con una LREM subito
+        # dopo la scrittura del SUO segnale (callback on_persisted), non con
+        # la delete() di fine batch: un SoftTimeLimitExceeded a meta' batch
+        # lascerebbe in coda articoli gia' persistiti, che la crash-recovery
+        # del run successivo ri-scorerebbe con esiti diversi.
+        def _lrem_persisted(news_item: NewsItem) -> None:
+            raw = raw_by_item_id.get(news_item.id)
+            if raw is None:
+                return
+            try:
+                redis_client.lrem("news:processing", 1, raw)
+            except Exception as exc:
+                log.warning(
+                    "LREM from news:processing failed for %s "
+                    "(item stays for crash recovery, dedup is the backstop): %s",
+                    news_item.id, exc,
+                )
+
         # Process batch
         results = asyncio.run(
             process_news_batch(
@@ -1498,6 +1590,7 @@ def run_sentiment_worker() -> dict:
                 redis_store=redis_store,
                 pg_store=pg_store,
                 weights=model_weights,
+                on_persisted=_lrem_persisted,
             )
         )
 
@@ -1545,7 +1638,11 @@ def run_sentiment_worker() -> dict:
                 ollama_timeout_count=ollama_timeout_count,
             )
 
-        # All items processed successfully — clear from processing queue
+        # Sweep finale: gli item processati sono gia' usciti con la LREM
+        # per-item (#551); qui restano solo gli scarti senza segnale (stale,
+        # neutral, NOT_TRADABLE) e gli inferiti senza risultato. Una delete()
+        # va bene perche' worker-inference gira a concurrency=1: nessun altro
+        # run puo' avere item in news:processing in questo istante.
         if raw_items:
             redis_client.delete("news:processing")
 

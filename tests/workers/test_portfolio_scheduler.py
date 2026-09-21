@@ -307,6 +307,10 @@ def test_build_strategy_instance_s4_preserves_signal_id_through_velocity():
         "score": pytest.approx(0.504),
         "reasoning": "bull case",
         "model_id": "ensemble:test",
+        # #550 (F-073): la provenienza porta anche la scomposizione del
+        # decidente — senza, la riga BUY non si spiegherebbe dal DB.
+        "raw_score": pytest.approx(0.42),
+        "velocity_multiplier": pytest.approx(1.2),
     }
 
 

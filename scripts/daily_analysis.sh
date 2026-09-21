@@ -16,6 +16,8 @@ export PATH="$HOME/.local/bin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/_evidence_cron_recovery.sh"
 LOG_DIR="$PROJECT_DIR/logs"
 mkdir -p "$LOG_DIR"
 
@@ -33,7 +35,54 @@ DATE_TARGET=$(date -d "yesterday" +%Y-%m-%d)
 if [[ $(date -d "yesterday" +%u) -ge 6 ]]; then
     DATE_TARGET=$(date -d "last friday" +%Y-%m-%d)
 fi
+
+# #563 / F-074: l'alpha-miss pubblica una riga per seduta; il forense la usa
+# soltanto come calendario osservabile per recuperare il report piu' vecchio
+# assente. Limite a 21 sedute: un archivio storico incompleto non deve rubare
+# indefinitamente spazio alla finestra corrente.
+FORENSIC_SESSIONS=$(sed -nE 's/.*"data"[[:space:]]*:[[:space:]]*"([0-9-]+)".*/\1/p' \
+    "$PROJECT_DIR/docs/evidence/market_daily.jsonl" 2>/dev/null | tail -21 || true)
+FORENSIC_REPORTS=$(find "$PROJECT_DIR/docs" -maxdepth 1 -type f \
+    -name 'FORENSIC_DAILY_REPORT_????-??-??.md' -printf '%f\n' 2>/dev/null \
+    | sed -nE 's/FORENSIC_DAILY_REPORT_([0-9-]+)\.md/\1/p' || true)
+if RECOVERY_TARGET=$(oldest_missing_session "$FORENSIC_SESSIONS" "$FORENSIC_REPORTS"); then
+    DATE_TARGET="$RECOVERY_TARGET"
+fi
 REPORT_FILE="$PROJECT_DIR/docs/FORENSIC_DAILY_REPORT_${DATE_TARGET}.md"
+
+# #564 / F-075: il forense ha la stessa fragilita' dell'alpha-miss — dopo un
+# long-weekend `date -d "last friday"` risolve la stessa data del run precedente.
+# Senza guard, lo script rigenera FORENSIC_DAILY_REPORT_${DATE_TARGET}.md e
+# ri-committa il ledger con messaggio identico. Il forense non scrive su
+# market_daily.jsonl (e' il prodotto dell'alpha-miss), quindi la sua chiave
+# sono il report e il commit `evidence: forensic ${DATE_TARGET}` su
+# origin/main — su HEAD non si puo' cercare: questa tree e' spesso sul branch
+# di un altro agente, mentre il commit lo fa la worktree evidence-cron (#411).
+# Entrambi devono essere presenti: il file da solo non basta (potrebbe
+# essere in uno stash), e il commit da solo non basta (potrebbe essere stato
+# revertato). Insieme sono la prova che la seduta e' pubblicata.
+set +e
+bash "$PROJECT_DIR/scripts/_alpha_miss_idempotency_guard.sh" \
+    --date-target "$DATE_TARGET" \
+    --ledger "/nonexistent/market_daily.jsonl" \
+    --report "$REPORT_FILE" \
+    --commit-pattern "evidence: forensic ${DATE_TARGET}" \
+    --project-dir "$PROJECT_DIR"
+GUARD_STATUS=$?
+set -e
+case "$GUARD_STATUS" in
+    0)
+        echo "Cron terminato: idempotency guard ha riconosciuto ${DATE_TARGET} come gia' processato."
+        exit 0
+        ;;
+    1)
+        # Procedi
+        ;;
+    *)
+        echo "FAILED: idempotency guard terminata con codice ${GUARD_STATUS} — run annullato"
+        exit "$GUARD_STATUS"
+        ;;
+esac
 
 # Load Telegram credentials from .env
 if [[ -f "$PROJECT_DIR/.env" ]]; then
@@ -54,8 +103,7 @@ if [[ -z "${ALEMBIC_API_KEY:-}" ]]; then
 fi
 
 tg_send() {
-    local text="$1"
-    local parse_mode="${2-HTML}"
+    local text="$1" parse_mode="${2-HTML}" response curl_status
     if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]]; then
         echo "[tg_send] Telegram credentials not set — skipping" >&2
         return
@@ -68,7 +116,18 @@ tg_send() {
     if [[ -n "$parse_mode" ]]; then
         curl_args+=(--data-urlencode parse_mode="$parse_mode")
     fi
-    curl "${curl_args[@]}" > /dev/null
+    set +e
+    response=$(curl "${curl_args[@]}" -w '\nHTTP_STATUS:%{http_code}')
+    curl_status=$?
+    set -e
+    if (( curl_status != 0 )); then
+        echo "[tg_send] curl terminata con codice ${curl_status} — notifica non verificabile" >&2
+    elif [[ "$response" == *'"ok":true'* ]]; then
+        echo "[tg_send] Telegram accettata (${response##*$'\n'})"
+    else
+        echo "[tg_send] Telegram rifiutata o risposta inattesa: ${response:0:300}" >&2
+    fi
+    return 0
 }
 
 echo "=== Alembic Daily Analysis ${DATE} (target: ${DATE_TARGET}) ==="
@@ -470,10 +529,9 @@ _CLAUDE_PROMPT="${_PROMPT_TEMPLATE//__ALEMBIC_API_KEY__/$ALEMBIC_API_KEY}"
 _CLAUDE_PROMPT="${_CLAUDE_PROMPT//__DATE_TARGET__/$DATE_TARGET}"
 _CLAUDE_PROMPT="${_CLAUDE_PROMPT//__REPORT_FILE__/$REPORT_FILE}"
 
-set +e
-ANALYSIS_OUTPUT=$(claude --allowedTools "Bash,Read,Write,Edit" -p "$_CLAUDE_PROMPT" 2>&1)
-ANALYSIS_STATUS=$?
-set -e
+run_claude_with_quota_retry "$_CLAUDE_PROMPT" "Bash,Read,Write,Edit"
+ANALYSIS_OUTPUT="$CLAUDE_SESSION_OUTPUT"
+ANALYSIS_STATUS=$CLAUDE_SESSION_STATUS
 
 printf '%s\n' "$ANALYSIS_OUTPUT"
 if (( ANALYSIS_STATUS != 0 )); then
@@ -524,7 +582,7 @@ tg_send "📄 Report salvato: <code>${REPORT_FILE}</code>"
 COMMIT_PATHS=(docs/evidence/findings.json "$REPORT_FILE")
 set +e
 GIT_OUTPUT=$("$PROJECT_DIR/scripts/commit_evidence_ledger.sh" \
-    --message "evidence: forensic ${DATE_TARGET}" "${COMMIT_PATHS[@]}" 2>&1)
+    --message "evidence: forensic ${DATE_TARGET} (run ${DATE})" "${COMMIT_PATHS[@]}" 2>&1)
 set -e
 printf '%s\n' "$GIT_OUTPUT"
 GIT_STATUS=$(printf '%s\n' "$GIT_OUTPUT" | sed -n 's/^GIT_STATUS=//p' | tail -1)
