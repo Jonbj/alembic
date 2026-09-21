@@ -451,14 +451,10 @@ def main() -> int:
             "(fallback_used ASC, generated_at DESC); Spearman cross-sectional "
             "giornaliero; t calcolato sui giorni"
         ),
-        # Al deploy dei fix F-076 (sanitizer: entita' HTML decodificate prima del
-        # prompt) e F-054 (ensemble_std misurato su tutte le risposte) questa stringa
-        # deve guadagnare la seconda e la terza rottura: entrambe sono gia' registrate
-        # in docs/evidence/OBSERVATION_CHARTER.md con data 2026-09-21 e deploy da
-        # confermare. La prima cambia la distribuzione degli score che alimentano
-        # questo IC; la seconda cambia cosa misura ensemble_std. Aggiungerle qui il
-        # giorno del deploy, con la data reale: una serie pubblicata non si rivede in
-        # silenzio.
+        # Tre rotture, non una. La seconda e la terza sono state deployate il
+        # 2026-09-21T08:20Z (edfd73e0, in produzione con 16c1ed95) e sono registrate
+        # per intero in docs/evidence/OBSERVATION_CHARTER.md: qui ne resta la nota
+        # minima perche' chi legge l'artefatto non debba andarla a cercare.
         "discontinuita": (
             "Dal 2026-09-08 (#467) la riduzione a simbolo-giorno applica la regola "
             "del ranker (fallback_used ASC, generated_at DESC); prima teneva "
@@ -466,7 +462,16 @@ def main() -> int:
             "prima e dopo questa data NON sono confrontabili: a parita' di dati le "
             "due riduzioni divergono su 411/3228 simbolo-giorni (12,7%), 75 al gate "
             "0.30, e il sottoinsieme 'ensemble' era il piu' contaminato "
-            "(IC 1g -0.0087 -> -0.0339)."
+            "(IC 1g -0.0087 -> -0.0339). "
+            "Dal 2026-09-21 (deploy 08:20Z, edfd73e0) due ulteriori rotture, "
+            "entrambe registrate nella carta di osservazione: (a) F-076, il testo "
+            "passato al modello e' ora HTML-decodificato, quindi la DISTRIBUZIONE "
+            "degli score che alimentano questo IC cambia a parita' di flusso news "
+            "(stessa famiglia di #399 del 2026-09-01); (b) F-054, ensemble_std "
+            "misura la divergenza su TUTTE le risposte e non sui soli contributori "
+            "eleggibili, quindi le righe a 0.000 esatto crollano per costruzione. "
+            "Le serie prima e dopo il 2026-09-21 non sono confrontabili e non vanno "
+            "mediate attraverso quella data."
         ),
         "osservazioni_simbolo_giorno": len(ultimo),
         "giorni_totali": len(per_giorno),
