@@ -24,6 +24,15 @@ from src.store.pg_store import PostgreSQLStore  # noqa: E402
 WINDOW_START = datetime(2026, 8, 1, tzinfo=timezone.utc)
 WINDOW_END = datetime(2026, 9, 21, 23, 59, 59, tzinfo=timezone.utc)
 
+# Population filter — pre-registered in
+# docs/evidence/PREREGISTRAZIONE_596_EXIT_FANOUT_PROVENANCE_2026-09-21.md §
+# "Campione (fissato prima della misura)". Una SELL entra in popolazione se e
+# solo se:
+#   exit_mechanism = 'below_entry_gate' (weight-0 S4 in `_run_cycle_inner`),
+#   OPPURE exit_mechanism IS NULL AND reason LIKE 'sentiment_reversal:%'
+#   (le reversal non scrivono exit_mechanism: il segnale vive in reason).
+# Uscite target_hit, stop_loss, *_weight_drop sono FUORI popolazione per la
+# issue #596.
 QUERY = """
 SELECT
     ed.id              AS decision_id,
@@ -49,6 +58,10 @@ WHERE ed.decision = 'SELL'
   AND ed.signal_id IS NOT NULL
   AND s.news_log_id IS NOT NULL
   AND COALESCE(n.url, '') <> ''
+  AND (
+        ed.exit_mechanism = 'below_entry_gate'
+        OR (ed.exit_mechanism IS NULL AND ed.reason LIKE 'sentiment_reversal:%%')
+  )
 ORDER BY ed.tick_time
 """
 
@@ -57,6 +70,29 @@ OUT_PATH = REPO / "docs" / "evidence" / "EXIT_FANOUT_PROVENANCE_596_2026-09-21.j
 
 def _is_reversal(reason: str | None) -> bool:
     return bool(reason) and "sentiment_reversal" in (reason or "")
+
+
+def filter_population(rows: list[dict]) -> list[dict]:
+    """Filtra le righe alla popolazione pre-registrata (#596).
+
+    Stessa clausola del QUERY, applicabile post-fetch (utile ai test che non
+    aprono il DB live). Ogni riga deve avere almeno `exit_mechanism`, `reason`
+    e `decision` per essere classificabile.
+
+    Esclusioni esplicite: ``target_hit``, ``stop_loss``, ``<strategy>_weight_drop``
+    e qualsiasi altra exit non in popolazione.
+    """
+    kept: list[dict] = []
+    for row in rows:
+        if row.get("decision") != "SELL":
+            continue
+        mech = row.get("exit_mechanism")
+        reason = row.get("reason") or ""
+        if mech == "below_entry_gate":
+            kept.append(row)
+        elif mech is None and reason.startswith("sentiment_reversal:"):
+            kept.append(row)
+    return kept
 
 
 def main() -> int:
@@ -71,6 +107,11 @@ def main() -> int:
                 rows.append({k: v for k, v in zip(cols, r)})
     finally:
         store.close()
+
+    # Defense-in-depth: la WHEREClause del QUERY gia' applica il filtro
+    # pre-registrato, ma rieseguire il check in Python garantisce che la
+    # popolazione resti ancorata al criterio anche se il QUERY cambia.
+    rows = filter_population(rows)
 
     by_category: Counter[str] = Counter()
     by_mechanism: Counter[str] = Counter()
