@@ -61,6 +61,10 @@ from src.llm.finbert import FinBERTClient
 from src.models.news import LLMSentimentOutput, MarketAuxNewsItem, NewsItem
 from src.models.signals import SentimentResult
 from src.text.sanitizer import sanitize_text, sanitize_ticker
+from src.workers.article_signal_coverage import (
+    build_signal_coverage,
+    load_actionable_sessions,
+)
 
 # Articles with |marketaux_sentiment| below this threshold are near-neutral.
 # Skipping LLM inference on them saves 60-80% of token spend.
@@ -853,6 +857,19 @@ class LiveSignalSink:
             log.debug("Could not append signal history for %s: %s", result.symbol, _vh_exc)
         news_log_id = pg_store.log_news_item(
             item=item, ticker=ticker, computed_sentiment=result.score
+        )
+        coverage = build_signal_coverage(
+            item=item,
+            result=result,
+            issuer_terms=pg_store.fetch_issuer_terms(ticker),
+            sessions=load_actionable_sessions(item.timestamp),
+        )
+        # #637: la riga osservazionale precede il link al ledger esistente.
+        # Se questa scrittura fallisce, il crash-recovery non vede ancora il
+        # legame (url,ticker), riprova il batch e non lascia uno score orfano
+        # della sua classificazione.
+        pg_store.write_article_signal_coverage(
+            signal_id=signal_id, news_log_id=news_log_id, coverage=coverage
         )
         if news_log_id is not None:
             pg_store.link_signal_to_news(signal_id=signal_id, news_log_id=news_log_id)
