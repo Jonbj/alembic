@@ -250,8 +250,18 @@
 # ISSUE NUOVE IN CODA (2026-09-18, operatore): prese da GitHub con label
 # wayfinder:task + ready-for-agent + freeze-ok, nessuna PR aperta, non fuori rotazione.
 # Ordine: prima i bug di correttezza/strumentazione (coerente con l'ordine della carta),
-# poi le misure, poi il resto. #610 esclusa per ora: PR #620 aperta (1 respinta, tie-breaker pendente).
-# 
+# poi le misure, poi il resto.
+#
+# --- #610 rientrata in coda il 2026-09-21 (operatore). Era esclusa dal 2026-09-18
+#     per PR #620 aperta con 1 respinta (tie-breaker pendente): il difetto della
+#     review (dedup che reimplementava la regola di produzione invece di chiamarla,
+#     #169/#467) era gia' corretto sul branch da cd56046 (2026-09-18) ma senza un
+#     secondo giro di CI/review perche' la issue era fuori coda — la PR e' rimasta
+#     "review presente ma senza verdetto leggibile" fino alla verifica manuale
+#     dell'operatore. PR #620 verificata (37/37 test, CI verde) e mergiata
+#     2026-09-21. Resta il resto della Fase 1 (scaricare l'archivio 2024-2025 ed
+#     eseguire H-A..H-F) e la Fase 2, entrambe descritte nel corpo della issue.
+610  MISURA: backtest news 2024-2025, resto della Fase 1 (scaricatore gia' in main, restano copertura su archivio vero + ipotesi H-A..H-F) e Fase 2 se la popolazione lo giustifica
 551  bug: il ciclo sentiment non e' idempotente — dopo SoftTimeLimitExceeded la coda resta sporca
 550  bug: il punteggio persistito nella Decision Log non e' quello valutato al gate
 564  bug: i run dei market holiday ri-analizzano la sessione precedente — serve idempotenza
