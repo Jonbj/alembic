@@ -53,7 +53,7 @@ NKE,Nike Inc,Nike,,noop,already_present
 NOK,Nokia Corporation,Nokia|Nokia Corp|Nokia Networks,,noop,already_present
 NOW,ServiceNow Inc,ServiceNow,,noop,already_present
 NVDA,NVIDIA Corporation,NVIDIA Corp,nvidia,safe,
-NVO,Novo Nordisk AS,Novo Nordisk|Novo Nordisk A/S|Ozempic,,noop,no_suffix_detected
+NVO,Novo Nordisk AS,Novo Nordisk|Novo Nordisk A/S|Ozempic,,noop,already_present
 ORCL,Oracle Corporation,Oracle Corp,oracle,safe,
 PANW,Palo Alto Networks Inc,Palo Alto Networks,palo alto,safe,
 PBR,Petroleo Brasileiro SA,Petrobras|Petróleo Brasileiro|Petróleo Brasileiro S.A.,petroleo brasileiro,safe,

@@ -568,6 +568,16 @@ def test_derive_bare_stem_rifioca_i_nomi_ambigui_o_privi_di_suffisso():
     assert derive_bare_stem("SAP SE") == "sap"
     assert derive_bare_stem("Deutsche Bank AG") == "deutsche bank"
     assert derive_bare_stem("AstraZeneca plc") == "astrazeneca"
+    # Review codex su PR #635 (2026-09-20): la lista normalizza solo case e
+    # spazi (`_normalise_text`), non i punti — "N.V." e "S.A." dotati vanno
+    # elencati per esteso, "NV"/"SA" senza punti non li matchano. "AB" e "AS"
+    # (o "A/S") sono i suffissi nordici del caso reale in ticker_lookup: NVO
+    # "Novo Nordisk AS" restava `noop/no_suffix_detected` prima di questo fix.
+    assert derive_bare_stem("Acme N.V.") == "acme"
+    assert derive_bare_stem("Acme S.A.") == "acme"
+    assert derive_bare_stem("Ericsson AB") == "ericsson"
+    assert derive_bare_stem("Novo Nordisk AS") == "novo nordisk"
+    assert derive_bare_stem("Novo Nordisk A/S") == "novo nordisk"
     # Nome senza suffisso corporate riconoscibile: nessuno stem da derivare
     # (la funzione restituisce None, non il nome intatto: e' un segnale che
     # il backfill non aggiunge nulla).
