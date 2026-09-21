@@ -2985,6 +2985,9 @@ def _run_cycle_inner() -> dict:
     # Also capture decision_ids for later trade DB writes.
     _symbol_decisions: dict[str, dict] = {}  # {symbol: {decision_id, score, signal_id}}
     _pending_s4_fires: dict[str, int] = {}   # B27-FIX: {symbol: signal_id} to mark after Alpaca confirm
+    # #596: provenance of the score that triggered each `below_entry_gate` SELL,
+    # populated on-demand (one DB hit per exit, fail-soft).
+    _below_entry_gate_provenance_kwargs: dict[str, dict] = {}
     _s4_signals: dict[str, dict] = {}
     _sym_strats = result.symbol_strategies
     _s4_provenance: dict[str, dict] = result.symbol_signal_provenance or {}
@@ -3251,6 +3254,53 @@ def _run_cycle_inner() -> dict:
                                 )
                 else:
                     reason = f"Portfolio rebalance: weight {wt_pct}."
+            # #596: when an S4 weight-0 SELL exits via below_entry_gate, fetch the
+            # provenance of the score that triggered it. Fail-soft: a DB blip must
+            # never block an order that the strategy already decided to submit.
+            if (
+                exit_mechanism == "below_entry_gate"
+                and order.symbol not in _below_entry_gate_provenance_kwargs
+            ):
+                _prov_sig_id = _signal_ids.get(order.symbol)
+                if _prov_sig_id:
+                    try:
+                        _prov_row = _pg.fetch_decision_provenance([_prov_sig_id]).get(_prov_sig_id, {})
+                        _news_log_id = _prov_row.get("news_log_id")
+                        _n_ticker = _prov_row.get("n_ticker_articolo")
+                        _title = _prov_row.get("title") or ""
+                        _body_snippet = _prov_row.get("url") or ""
+                        _ext_method = _prov_row.get("extraction_method") or ""
+                        try:
+                            from src.analysis.dossier.article_coverage import (
+                                classify_attribution as _classify_attr2,
+                            )
+                            _attribution = _classify_attr2(
+                                ticker=order.symbol,
+                                title=_title,
+                                body_snippet=_body_snippet,
+                                extraction_method=_ext_method,
+                                n_ticker_articolo=_n_ticker,
+                            )
+                        except Exception as _attr_exc2:
+                            log.debug("below_entry_gate attribution classify failed: %s", _attr_exc2)
+                            _attribution = None
+                        _below_entry_gate_provenance_kwargs[order.symbol] = {
+                            "news_log_id": _news_log_id,
+                            "n_ticker_articolo": _n_ticker,
+                            "attribution": _attribution,
+                            "article_title": _title or None,
+                            "article_url": _prov_row.get("url"),
+                        }
+                    except Exception as _prov_exc:
+                        log.debug("below_entry_gate provenance lookup failed: %s", _prov_exc)
+                        # Record empty dict so we don't re-try every cycle.
+                        _below_entry_gate_provenance_kwargs[order.symbol] = {
+                            "news_log_id": None,
+                            "n_ticker_articolo": None,
+                            "attribution": None,
+                            "article_title": None,
+                            "article_url": None,
+                        }
             decision_id = _pg.write_execution_decision(
                 tick_time=ts,
                 symbol=order.symbol,
@@ -3263,6 +3313,7 @@ def _run_cycle_inner() -> dict:
                 decision=order.side.value,
                 reason=reason,
                 exit_mechanism=exit_mechanism,
+                **_below_entry_gate_provenance_kwargs.get(order.symbol, {}),
             )
             _symbol_decisions[order.symbol] = {
                 "decision_id": decision_id,
@@ -5368,6 +5419,23 @@ def _submit_reversal_force_sells(
         o.symbol for o in final_orders if o.side.value.lower() == "sell"
     }
     to_force_sell = set(reversal_sell_symbols) - already_selling - set(stop_loss_sells.keys())
+    # #596: pre-compute provenance for every reversal signal in one batch lookup.
+    # Fail-soft: any DB error (or a sandbox without the helper) must never block
+    # the forced-sell — exit paths take precedence over instrumentation.
+    _reversal_provenance: dict = {}
+    try:
+        from src.store.pg_store import PostgreSQLStore as _PGSProv
+        _signal_ids_prov = [
+            v.get("signal_id") for v in reversal_sell_symbols.values() if v.get("signal_id")
+        ]
+        if _signal_ids_prov:
+            _pg_prov = _PGSProv()
+            try:
+                _reversal_provenance = _pg_prov.fetch_decision_provenance(_signal_ids_prov)
+            finally:
+                _pg_prov.close()
+    except Exception as _prov_exc:
+        log.debug("reversal provenance lookup skipped: %s", _prov_exc)
     for sym in to_force_sell:
         try:
             from alpaca.trading.enums import OrderSide, TimeInForce
@@ -5449,10 +5517,47 @@ def _submit_reversal_force_sells(
                     _pg_rev = _PGS()
                     _rev_sig = reversal_sell_symbols[sym]
                     _threshold = config.SENTIMENT_REVERSAL_EXIT_THRESHOLD
+                    _rev_signal_id = _rev_sig.get("signal_id")
+                    # #596: provenance of the score that triggered the exit.
+                    _prov_kwargs: dict = {
+                        "news_log_id": None,
+                        "n_ticker_articolo": None,
+                        "attribution": None,
+                        "article_title": None,
+                        "article_url": None,
+                    }
+                    if _rev_signal_id and _rev_signal_id in _reversal_provenance:
+                        _prov_row = _reversal_provenance[_rev_signal_id]
+                        _news_log_id = _prov_row.get("news_log_id")
+                        _n_ticker = _prov_row.get("n_ticker_articolo")
+                        _title = _prov_row.get("title") or ""
+                        _body_snippet = _prov_row.get("url") or ""
+                        _ext_method = _prov_row.get("extraction_method") or ""
+                        try:
+                            from src.analysis.dossier.article_coverage import (
+                                classify_attribution as _classify_attr,
+                            )
+                            _attribution = _classify_attr(
+                                ticker=sym,
+                                title=_title,
+                                body_snippet=_body_snippet,
+                                extraction_method=_ext_method,
+                                n_ticker_articolo=_n_ticker,
+                            )
+                        except Exception as _attr_exc:
+                            log.debug("reversal attribution classify failed: %s", _attr_exc)
+                            _attribution = None
+                        _prov_kwargs = {
+                            "news_log_id": _news_log_id,
+                            "n_ticker_articolo": _n_ticker,
+                            "attribution": _attribution,
+                            "article_title": _title or None,
+                            "article_url": _prov_row.get("url"),
+                        }
                     _pg_rev.write_execution_decision(
                         tick_time=ts,
                         symbol=sym,
-                        signal_id=_rev_sig.get("signal_id"),
+                        signal_id=_rev_signal_id,
                         score=0.0,
                         signal_score=_rev_sig["score"],
                         regime_mult=regime_mult,
@@ -5460,6 +5565,7 @@ def _submit_reversal_force_sells(
                         decision="SELL",
                         order_id=_rev_order_id,
                         reason=f"sentiment_reversal: score {_rev_sig['score']:.3f} < threshold {_threshold:.2f}",
+                        **_prov_kwargs,
                     )
                     _pg_rev.close()
                 except Exception as _dec_exc:

@@ -183,6 +183,37 @@ def content_empty_title_reason(title: object) -> str | None:
     return None
 
 
+def classify_attribution(
+    ticker: str,
+    title: str,
+    body_snippet: str,
+    extraction_method: str,
+    issuer_terms: list[str] | None = None,
+    n_ticker_articolo: int | None = None,
+    *,
+    ground_truth_relevance: str | None = None,
+    ground_truth_tickers: list[str] | None = None,
+) -> str:
+    """Public wrapper around ``_classify_relevance`` for exit-path callers (#596).
+
+    Returns the category string from ``RELEVANCE_CATEGORIES`` (one of
+    ISSUER_SPECIFIC, SECTOR_MACRO, FALSE_ENTITY_MATCH, IRRELEVANT_FANOUT,
+    TAG_UNCONFIRMED, UNKNOWN). The matching ticker (when relevant) is dropped
+    — exit paths only need the category, not the issuer name.
+    """
+    row = {
+        "ticker": ticker,
+        "title": title,
+        "body_snippet": body_snippet,
+        "extraction_method": extraction_method,
+        "issuer_terms": list(issuer_terms or []),
+        "ground_truth_relevance": ground_truth_relevance,
+        "ground_truth_tickers": list(ground_truth_tickers or []),
+    }
+    category, _matched = _classify_relevance(row, int(n_ticker_articolo or 1))
+    return category
+
+
 def _classify_relevance(row: dict, fanout_degree: int) -> tuple[str, str | None]:
     ticker = str(row.get("ticker") or "").strip().upper()
     gt_relevance = str(row.get("ground_truth_relevance") or "").strip().casefold()

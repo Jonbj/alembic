@@ -705,8 +705,9 @@ class PostgreSQLStore:
 
     _INSERT_DECISION = """
         INSERT INTO execution_decisions
-            (tick_time, symbol, signal_id, score, signal_score, velocity_multiplier, regime_mult, ema_pass, decision, order_id, reason, exit_mechanism)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (tick_time, symbol, signal_id, score, signal_score, velocity_multiplier, regime_mult, ema_pass, decision, order_id, reason, exit_mechanism,
+             news_log_id, n_ticker_articolo, attribution, article_title, article_url)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
     """
 
@@ -724,6 +725,11 @@ class PostgreSQLStore:
         signal_score: float | None = None,
         exit_mechanism: str | None = None,
         velocity_multiplier: float | None = None,
+        news_log_id: int | None = None,
+        n_ticker_articolo: int | None = None,
+        attribution: str | None = None,
+        article_title: str | None = None,
+        article_url: str | None = None,
     ) -> int:
         """Insert one execution decision row. Returns the new id.
 
@@ -743,13 +749,18 @@ class PostgreSQLStore:
                             evaluated is signal_score × velocity_multiplier
                             (src/strategies/s4/entry_gate.py). None = not
                             instrumented (pre-077 rows, or velocity unavailable).
+            news_log_id, n_ticker_articolo, attribution, article_title, article_url:
+                            #596 — provenance of the score that triggered an exit
+                            (sentiment_reversal, below_entry_gate). NULL when not
+                            an exit, or when provenance lookup failed.
         """
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(
                     self._INSERT_DECISION,
-                    (tick_time, symbol, signal_id, score, signal_score, velocity_multiplier, regime_mult, ema_pass, decision, order_id, reason, exit_mechanism),
+                    (tick_time, symbol, signal_id, score, signal_score, velocity_multiplier, regime_mult, ema_pass, decision, order_id, reason, exit_mechanism,
+                     news_log_id, n_ticker_articolo, attribution, article_title, article_url),
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -757,6 +768,55 @@ class PostgreSQLStore:
         except Exception:
             conn.rollback()
             raise
+
+    _FETCH_PROVENANCE_FOR_SIGNALS = """
+        SELECT
+            s.id AS signal_id,
+            s.symbol AS signal_symbol,
+            s.news_log_id,
+            n.title,
+            n.url,
+            n.extraction_method,
+            CASE
+                WHEN COALESCE(n.url, '') = '' THEN NULL
+                ELSE (SELECT count(*) FROM news_log n2 WHERE n2.url = n.url)
+            END AS n_ticker_articolo
+        FROM sentiment_signals s
+        LEFT JOIN news_log n ON n.id = s.news_log_id
+        WHERE s.id = ANY(%s)
+    """
+
+    def fetch_decision_provenance(self, signal_ids: list[int]) -> dict[int, dict]:
+        """Return {signal_id: provenance_row} for exit provenance (#596).
+
+        Each row contains news_log_id, title, url, extraction_method, and
+        n_ticker_articolo (number of distinct tickers sharing the same URL —
+        the fan-out degree that lets a measurement flag articles whose
+        relevance to the decision symbol is weak).
+
+        Fails soft: on any error, returns an empty dict. Exit paths must
+        never raise from this lookup.
+        """
+        if not signal_ids:
+            return {}
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_PROVENANCE_FOR_SIGNALS, (list(signal_ids),))
+                rows = cur.fetchall()
+                cols = [d[0] for d in cur.description]
+            return {
+                int(r["signal_id"]): {
+                    k: r[k] for k in cols if k != "signal_id"
+                }
+                for r in rows
+            }
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return {}
 
     _INSERT_S4_INTENT_EVENT = """
         INSERT INTO s4_intent_events (

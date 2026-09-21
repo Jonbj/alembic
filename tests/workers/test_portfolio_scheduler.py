@@ -3022,10 +3022,141 @@ def test_reversal_force_sell_propagates_signal_id_to_decision_row():
             operating_mode="active",
         )
 
+def test_reversal_force_sell_propagates_provenance_to_decision_row():
+    """#596: la execution_decision SENTIMENT_REVERSAL deve portare
+    ``news_log_id``, ``n_ticker_articolo``, ``attribution``, ``article_title``
+    e ``article_url`` del segnale che ha guidato l'uscita. Senza queste colonne
+    la diagnosi del 2026-09-14 (MU −49,53 $ su −0.405 da un titolo WDC, fan-out
+    non validato) richiede sempre due hop di join e non lascia traccia
+    persistente. La lookup di provenance e' fatta una volta per ciclo sui
+    signal_id delle uscite, riusata da ogni ``write_execution_decision``.
+    """
+    from src.workers.portfolio_scheduler import _submit_reversal_force_sells
+
+    trading_client = MagicMock()
+    trading_client.get_orders.return_value = []
+    trading_client.submit_order.return_value.id = "ord-rev-prov"
+
+    fake_provenance = {
+        3861: {
+            "signal_id": 3861,
+            "signal_symbol": "MU",
+            "news_log_id": 9001,
+            "title": "Why Is Western Digital Stock Falling Monday?",
+            "url": "https://news.example.com/wdc-falling-20260914",
+            "extraction_method": "alpaca_benzinga",
+            "n_ticker_articolo": 13,
+        }
+    }
+
+    with patch("src.store.pg_store.PostgreSQLStore") as _pgs:
+        # La provenance lookup avviene sulla stessa istanza di PGS restituita
+        # dal context manager del ``with`` statement; il ``__enter__`` ritorna
+        # la stessa mock instance, e fetch_decision_provenance e' chiamato su
+        # di essa.
+        _pgs.return_value.__enter__.return_value = _pgs.return_value
+        _pgs.return_value.fetch_decision_provenance.return_value = fake_provenance
+
+        _submit_reversal_force_sells(
+            reversal_sell_symbols={"MU": {"score": -0.405, "signal_id": 3861}},
+            final_orders=[],
+            stop_loss_sells={},
+            alpaca_positions=[_make_alpaca_position("MU", 1.13)],
+            trading_client=trading_client,
+            submitted_orders=[],
+            ts=datetime(2026, 9, 14, 13, 49, tzinfo=timezone.utc),
+            regime_mult=0.7,
+            operating_mode="active",
+        )
+
     dec_kwargs = _pgs.return_value.write_execution_decision.call_args.kwargs
     assert dec_kwargs["signal_id"] == 3861
     assert dec_kwargs["decision"] == "SELL"
+    # Provenance propagata: news_log_id e' la FK denormalizzata, n_ticker_articolo
+    # identifica il fan-out (13 ticker sullo stesso URL), attribution ricalca
+    # la categoria di rilevanza rispetto al ticker della decisione (MU).
+    assert dec_kwargs["news_log_id"] == 9001
+    assert dec_kwargs["n_ticker_articolo"] == 13
+    # FANOUT perche' la news_log non ha ticker MU nel titolo (e' un articolo
+    # WDC), e extraction_method non e' source_metadata/org_lookup.
+    assert dec_kwargs["attribution"] in (
+        "FANOUT", "TAG_UNCONFIRMED", "SECTOR_MACRO", "FALSE_ENTITY_MATCH", "UNKNOWN",
+    )
+    assert dec_kwargs["article_title"] == "Why Is Western Digital Stock Falling Monday?"
+    assert dec_kwargs["article_url"] == "https://news.example.com/wdc-falling-20260914"
 
+
+def test_reversal_force_sell_decision_row_without_provenance_when_lookup_empty():
+    """#596 fail-soft: se fetch_decision_provenance ritorna {} (signal
+    cancellato, news_log NULL, errore transitorio), la execution_decision
+    viene scritta lo stesso — i campi di provenance sono None, NULL =
+    'non strumentato', mai un valore inventato. La riga resta utile per il
+    resto del ledger (signal_id + score + reason + exit_mechanism).
+    """
+    from src.workers.portfolio_scheduler import _submit_reversal_force_sells
+
+    trading_client = MagicMock()
+    trading_client.get_orders.return_value = []
+    trading_client.submit_order.return_value.id = "ord-rev-empty"
+
+    with patch("src.store.pg_store.PostgreSQLStore") as _pgs:
+        _pgs.return_value.__enter__.return_value = _pgs.return_value
+        _pgs.return_value.fetch_decision_provenance.return_value = {}
+
+        _submit_reversal_force_sells(
+            reversal_sell_symbols={"MU": {"score": -0.405, "signal_id": 3861}},
+            final_orders=[],
+            stop_loss_sells={},
+            alpaca_positions=[_make_alpaca_position("MU", 1.13)],
+            trading_client=trading_client,
+            submitted_orders=[],
+            ts=datetime(2026, 9, 14, 13, 49, tzinfo=timezone.utc),
+            regime_mult=0.7,
+            operating_mode="active",
+        )
+
+    dec_kwargs = _pgs.return_value.write_execution_decision.call_args.kwargs
+    # La riga e' scritta lo stesso, senza bloccare la reversal.
+    assert dec_kwargs["decision"] == "SELL"
+    assert dec_kwargs["signal_id"] == 3861
+    # Tutti i campi di provenance sono None (= 'non strumentato', NULL-safe).
+    assert dec_kwargs["news_log_id"] is None
+    assert dec_kwargs["n_ticker_articolo"] is None
+    assert dec_kwargs["attribution"] is None
+    assert dec_kwargs["article_title"] is None
+    assert dec_kwargs["article_url"] is None
+
+
+def test_reversal_force_sell_decision_row_without_signal_id():
+    """#596: signal_id None (vecchi payload Redis, retrocompat) — niente
+    lookup di provenance, tutti i campi None come riga pre-strumentazione.
+    """
+    from src.workers.portfolio_scheduler import _submit_reversal_force_sells
+
+    trading_client = MagicMock()
+    trading_client.get_orders.return_value = []
+    trading_client.submit_order.return_value.id = "ord-rev-noid"
+
+    with patch("src.store.pg_store.PostgreSQLStore") as _pgs:
+        _submit_reversal_force_sells(
+            reversal_sell_symbols={"MU": {"score": -0.405, "signal_id": None}},
+            final_orders=[],
+            stop_loss_sells={},
+            alpaca_positions=[_make_alpaca_position("MU", 1.13)],
+            trading_client=trading_client,
+            submitted_orders=[],
+            ts=datetime(2026, 9, 14, 13, 49, tzinfo=timezone.utc),
+            regime_mult=0.7,
+            operating_mode="active",
+        )
+
+    # fetch_decision_provenance NON e' chiamata con una lista vuota (la lista
+    # vuota e' cortocircuitata da fetch_decision_provenance stessa).
+    _pgs.return_value.__enter__.return_value.fetch_decision_provenance.assert_not_called()
+    dec_kwargs = _pgs.return_value.write_execution_decision.call_args.kwargs
+    assert dec_kwargs["signal_id"] is None
+    assert dec_kwargs["news_log_id"] is None
+    assert dec_kwargs["attribution"] is None
 
 def test_reversal_force_sell_uses_signal_id_for_client_order_id():
     from src.workers.portfolio_scheduler import _submit_reversal_force_sells
