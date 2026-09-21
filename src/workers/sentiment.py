@@ -515,6 +515,20 @@ async def run_inference(
         _model_id, _fallback_used, _reasoning = _label_from_model_count(
             list(aggregated.model_ids), aggregated.reasoning
         )
+        # F-054: surface the disagreement the eligibility filter used to hide. A zero
+        # eligible-std next to a positive all-responses std means the dissenting model
+        # fell below min_confidence — the typical shape of disagreement, and exactly the
+        # case that used to be persisted as 0.000 "perfect agreement". Log only, no gate
+        # (arming one is TARATURA, frozen until 2026-09-28 and gated on QX-01 labels).
+        if aggregated.ensemble_std > 0.0 and aggregated.ensemble_std_eligible == 0.0:
+            log.info(
+                "F-054 masked divergence %s: ensemble_std=%.4f over all responses, "
+                "0.0000 over the %d eligible contributor(s) %s",
+                clean_symbol,
+                aggregated.ensemble_std,
+                len(aggregated.model_ids),
+                aggregated.model_ids,
+            )
         return SentimentResult(
             symbol=clean_symbol,
             score=max(-1.0, min(1.0, score)),
