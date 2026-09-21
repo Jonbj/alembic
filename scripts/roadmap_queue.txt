@@ -130,6 +130,20 @@
 #      e' un limite inferiore (inflation_justified: false). Residuo estratto in #571
 #      (sorgente point-in-time thesis linkage/novelty/pertinenza), blocked_by #570 + #30.
 
+# --- inserita 2026-09-21 (operatore). Posizionata qui, cioe' SOPRA il blocco del
+#     2026-09-18, per una ragione di calendario e non di gravita': serve alla
+#     decisione del 28/09 (#607) e ogni giorno di attesa e' una seduta di dati in
+#     meno. Se parte questa settimana, alla scadenza della finestra ci sono ~5
+#     sedute di distribuzione timing/rilevanza/content_empty; se parte dopo la
+#     decisione, si comincia a raccogliere il 29/09 e per settimane non c'e' nulla
+#     su cui decidere. Criterio della sezione 4 applicato alla lettera: non perde
+#     soldi oggi, rende non decidibile la lettura del 28/09.
+#     Vale in ENTRAMBI i rami della decisione: se S4 cambia fonte, questi campi
+#     sono il metro per giudicare la fonte nuova; se resta, sono il prerequisito
+#     di qualunque regola di ammissibilita'. Perimetro: SOLO persistenza, nessun
+#     gate — una riga RETROSPECTIVE continua a diventare un segnale come oggi.
+637  la classificazione di copertura degli articoli non esiste nel path del segnale: ANTICIPATORY/CONCURRENT/RETROSPECTIVE, CONTENT_EMPTY, own-vs-fanout sono calcolati solo nel dossier ex post (verificato: gli unici consumatori sono panels.py, event_context.py e uno script di audit) — serve alla decisione #607 del 28/09
+
 # === 5. COPERTURA E QUALITA' DEL SEGNALE (miglioramenti, non bug) ===
 409  NO_NEWS e' la causa dominante dei miss di Week 35 (9/22) mentre il sistema osserva gia' catalizzatori che non usa: NVO aveva una corporate action OBSERVED, ERIC una volume surprise +1,25
 # --- prerequisito di dati per #508 e per la pertinenza off-topic (inserito 2026-09-12,
