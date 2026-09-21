@@ -10,19 +10,23 @@
 -- modo deterministico; la funzione `propose_stem_backfill` produce una
 -- proposta di review bucket-per-bucket (safe / short / collision / noop).
 --
--- Questa migration NON viene applicata automaticamente. Il file e' un
--- segnaposto: l'operatore applica la migration DOPO aver revisionato il CSV
--- generato da `scripts/propose_ticker_lookup_stem_backfill.py` (path
--- `docs/evidence/proposals/ticker_lookup_stem_backfill.csv`).
+-- `scripts/apply_migrations.py` esegue ogni file non ancora in ledger, senza
+-- eccezioni per placeholder: un file di soli commenti manda a psycopg2 una
+-- query vuota e fa fallire la CI (`psycopg2.ProgrammingError: can't execute
+-- an empty query`). Questo file resta quindi un vero no-op SQL, non un file
+-- vuoto: il backfill effettivo (`UPDATE ticker_lookup ... WHERE ticker = ...`
+-- riga per riga, solo sui ticker del bucket "safe" del CSV) NON e' qui.
 --
 -- Congelata sotto freeze #171: la issue #566 e' freeze-ok (correttezza
 -- della misura), ma il backfill e' un'azione sul DB live e quindi resta
 -- fuori dal perimetro di un agente — la review umana e' il vincolo.
 --
--- Quando l'operatore approva i candidati safe, applica questa migration
--- sbloccando il blocco seguente. Le righe "short" e "collision" vanno
--- gestite con migration dedicate (una per ciascuna, dopo review caso per caso).
+-- Quando l'operatore approva i candidati "safe" del CSV
+-- (`docs/evidence/proposals/ticker_lookup_stem_backfill.csv`), il backfill
+-- va scritto in una migration successiva (079+): il ledger valida il
+-- checksum dei file gia' applicati, quindi questa migration, una volta in
+-- ledger, non va piu' modificata. Le righe "short" e "collision" restano
+-- fuori da qualunque backfill automatico: richiedono conferma umana caso
+-- per caso (CLAUDE.md § Ticker Resolution — l'ambiguita' non si indovina).
 
--- SELECT ticker, company_name, array_append(aliases, '<stem>')
--- FROM ticker_lookup
--- WHERE ticker IN ('ORCL', ...);
+SELECT 1;  -- segnaposto: nessuna modifica ai dati in questa migration.
