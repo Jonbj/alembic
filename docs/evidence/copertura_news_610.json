@@ -1,0 +1,368 @@
+{
+  "discontinuita_di_misura": "I conteggi duplicato_produzione e ricostruita in questo artefatto sono stati generati con una versione precedente dello script che (a) passava a compute_dedup_hash il content HTML grezzo invece del body normalizzato da _parse_article, e (b) usava il solo hash come chiave di dedup invece della chiave composita (hash, asset_tags[0]) di produzione. Fix nello script (2026-09-18): vedi registro delle rotture del sigillo in docs/evidence/PREREGISTRAZIONE_BACKTEST_NEWS_2024_2025.md. Da rigenerare prima di qualunque misura di Fase 1 che usi questi conteggi come substrato. Nessun esito pubblicato finora, quindi la finestra non e' ancora inquieta.",
+  "finestra_popolazione": {
+    "filtro": "created_at",
+    "fine": "2025-12-31",
+    "inizio": "2024-01-01"
+  },
+  "generato_il": "2026-09-17T08:44:35.517626+00:00",
+  "nota_ricostruzione": "La popolazione ricostruita usa codice di produzione importato: compute_dedup_hash e _is_stale_news con now=updated_at. now=updated_at e' una ricostruzione dichiarata, non un dato: l'archivio non registra la latenza di consegna reale.",
+  "per_mese": {
+    "2024-01": {
+      "duplicato_produzione": 38,
+      "fuori_orario": 2031,
+      "multi_ticker": 1792,
+      "popolazione": 4154,
+      "ricostruita": 2407,
+      "senza_corpo": 1644,
+      "stantio_all_arrivo": 65,
+      "template_content_empty": 107
+    },
+    "2024-02": {
+      "duplicato_produzione": 61,
+      "fuori_orario": 1713,
+      "multi_ticker": 1479,
+      "popolazione": 3387,
+      "ricostruita": 2010,
+      "senza_corpo": 1275,
+      "stantio_all_arrivo": 41,
+      "template_content_empty": 94
+    },
+    "2024-03": {
+      "duplicato_produzione": 71,
+      "fuori_orario": 1694,
+      "multi_ticker": 1540,
+      "popolazione": 3593,
+      "ricostruita": 2100,
+      "senza_corpo": 1383,
+      "stantio_all_arrivo": 39,
+      "template_content_empty": 84
+    },
+    "2024-04": {
+      "duplicato_produzione": 74,
+      "fuori_orario": 2095,
+      "multi_ticker": 1843,
+      "popolazione": 4491,
+      "ricostruita": 2269,
+      "senza_corpo": 2093,
+      "stantio_all_arrivo": 55,
+      "template_content_empty": 78
+    },
+    "2024-05": {
+      "duplicato_produzione": 78,
+      "fuori_orario": 1858,
+      "multi_ticker": 1900,
+      "popolazione": 4232,
+      "ricostruita": 2293,
+      "senza_corpo": 1817,
+      "stantio_all_arrivo": 44,
+      "template_content_empty": 95
+    },
+    "2024-06": {
+      "duplicato_produzione": 74,
+      "fuori_orario": 1580,
+      "multi_ticker": 1646,
+      "popolazione": 3648,
+      "ricostruita": 1964,
+      "senza_corpo": 1577,
+      "stantio_all_arrivo": 33,
+      "template_content_empty": 92
+    },
+    "2024-07": {
+      "duplicato_produzione": 84,
+      "fuori_orario": 1898,
+      "multi_ticker": 1929,
+      "popolazione": 4401,
+      "ricostruita": 2468,
+      "senza_corpo": 1815,
+      "stantio_all_arrivo": 34,
+      "template_content_empty": 107
+    },
+    "2024-08": {
+      "duplicato_produzione": 78,
+      "fuori_orario": 1680,
+      "multi_ticker": 1629,
+      "popolazione": 3636,
+      "ricostruita": 2043,
+      "senza_corpo": 1475,
+      "stantio_all_arrivo": 40,
+      "template_content_empty": 107
+    },
+    "2024-09": {
+      "duplicato_produzione": 100,
+      "fuori_orario": 1514,
+      "multi_ticker": 1734,
+      "popolazione": 3789,
+      "ricostruita": 1909,
+      "senza_corpo": 1736,
+      "stantio_all_arrivo": 44,
+      "template_content_empty": 99
+    },
+    "2024-10": {
+      "duplicato_produzione": 92,
+      "fuori_orario": 1973,
+      "multi_ticker": 1980,
+      "popolazione": 4632,
+      "ricostruita": 2344,
+      "senza_corpo": 2152,
+      "stantio_all_arrivo": 44,
+      "template_content_empty": 108
+    },
+    "2024-11": {
+      "duplicato_produzione": 78,
+      "fuori_orario": 1492,
+      "multi_ticker": 1523,
+      "popolazione": 3346,
+      "ricostruita": 1833,
+      "senza_corpo": 1406,
+      "stantio_all_arrivo": 29,
+      "template_content_empty": 60
+    },
+    "2024-12": {
+      "duplicato_produzione": 105,
+      "fuori_orario": 1484,
+      "multi_ticker": 1407,
+      "popolazione": 3152,
+      "ricostruita": 1815,
+      "senza_corpo": 1215,
+      "stantio_all_arrivo": 17,
+      "template_content_empty": 79
+    },
+    "2025-01": {
+      "duplicato_produzione": 108,
+      "fuori_orario": 1779,
+      "multi_ticker": 1573,
+      "popolazione": 3738,
+      "ricostruita": 2136,
+      "senza_corpo": 1462,
+      "stantio_all_arrivo": 32,
+      "template_content_empty": 113
+    },
+    "2025-02": {
+      "duplicato_produzione": 109,
+      "fuori_orario": 1565,
+      "multi_ticker": 1442,
+      "popolazione": 3344,
+      "ricostruita": 1761,
+      "senza_corpo": 1451,
+      "stantio_all_arrivo": 23,
+      "template_content_empty": 87
+    },
+    "2025-03": {
+      "duplicato_produzione": 131,
+      "fuori_orario": 1487,
+      "multi_ticker": 1568,
+      "popolazione": 3317,
+      "ricostruita": 1870,
+      "senza_corpo": 1273,
+      "stantio_all_arrivo": 43,
+      "template_content_empty": 87
+    },
+    "2025-04": {
+      "duplicato_produzione": 121,
+      "fuori_orario": 1944,
+      "multi_ticker": 1863,
+      "popolazione": 4145,
+      "ricostruita": 2286,
+      "senza_corpo": 1704,
+      "stantio_all_arrivo": 34,
+      "template_content_empty": 98
+    },
+    "2025-05": {
+      "duplicato_produzione": 120,
+      "fuori_orario": 1877,
+      "multi_ticker": 1743,
+      "popolazione": 3846,
+      "ricostruita": 2142,
+      "senza_corpo": 1567,
+      "stantio_all_arrivo": 17,
+      "template_content_empty": 105
+    },
+    "2025-06": {
+      "duplicato_produzione": 127,
+      "fuori_orario": 1560,
+      "multi_ticker": 1748,
+      "popolazione": 3664,
+      "ricostruita": 1886,
+      "senza_corpo": 1629,
+      "stantio_all_arrivo": 22,
+      "template_content_empty": 100
+    },
+    "2025-07": {
+      "duplicato_produzione": 143,
+      "fuori_orario": 2138,
+      "multi_ticker": 1946,
+      "popolazione": 4372,
+      "ricostruita": 2194,
+      "senza_corpo": 2015,
+      "stantio_all_arrivo": 20,
+      "template_content_empty": 119
+    },
+    "2025-08": {
+      "duplicato_produzione": 136,
+      "fuori_orario": 1800,
+      "multi_ticker": 1731,
+      "popolazione": 3544,
+      "ricostruita": 1907,
+      "senza_corpo": 1482,
+      "stantio_all_arrivo": 19,
+      "template_content_empty": 99
+    },
+    "2025-09": {
+      "duplicato_produzione": 132,
+      "fuori_orario": 1999,
+      "multi_ticker": 1915,
+      "popolazione": 4036,
+      "ricostruita": 1939,
+      "senza_corpo": 1936,
+      "stantio_all_arrivo": 29,
+      "template_content_empty": 105
+    },
+    "2025-10": {
+      "duplicato_produzione": 75,
+      "fuori_orario": 2263,
+      "multi_ticker": 2160,
+      "popolazione": 4856,
+      "ricostruita": 2251,
+      "senza_corpo": 2498,
+      "stantio_all_arrivo": 32,
+      "template_content_empty": 116
+    },
+    "2025-11": {
+      "duplicato_produzione": 80,
+      "fuori_orario": 1858,
+      "multi_ticker": 1756,
+      "popolazione": 3723,
+      "ricostruita": 1885,
+      "senza_corpo": 1732,
+      "stantio_all_arrivo": 26,
+      "template_content_empty": 85
+    },
+    "2025-12": {
+      "duplicato_produzione": 82,
+      "fuori_orario": 1895,
+      "multi_ticker": 1761,
+      "popolazione": 3660,
+      "ricostruita": 1976,
+      "senza_corpo": 1573,
+      "stantio_all_arrivo": 29,
+      "template_content_empty": 107
+    }
+  },
+  "popolazioni": {
+    "archivio": 127000,
+    "duplicato_produzione": 2297,
+    "fuori_finestra_created_at": 34294,
+    "popolazione": 92706,
+    "ricostruita": 49688,
+    "senza_corpo": 39910,
+    "stantio_all_arrivo": 811
+  },
+  "preregistrazione": "docs/evidence/PREREGISTRAZIONE_BACKTEST_NEWS_2024_2025.md",
+  "quote_sulla_popolazione": {
+    "fuori_orario": 0.465741,
+    "multi_ticker": 0.448817,
+    "senza_corpo": 0.430501,
+    "template_content_empty": 0.025144
+  },
+  "simboli": {
+    "nota_tag": "tag_distinti_totali conta ogni ticker taggato da Benzinga, compresi quelli fuori watchlist: non e' copertura dell'universo.",
+    "primi_20_dell_universo": [
+      [
+        "SPY",
+        17284
+      ],
+      [
+        "TSLA",
+        9540
+      ],
+      [
+        "NVDA",
+        9368
+      ],
+      [
+        "AAPL",
+        7191
+      ],
+      [
+        "MSFT",
+        6241
+      ],
+      [
+        "AMZN",
+        5966
+      ],
+      [
+        "GOOGL",
+        5701
+      ],
+      [
+        "META",
+        5256
+      ],
+      [
+        "QQQ",
+        3299
+      ],
+      [
+        "AMD",
+        2842
+      ],
+      [
+        "BA",
+        2480
+      ],
+      [
+        "INTC",
+        2289
+      ],
+      [
+        "PLTR",
+        2274
+      ],
+      [
+        "TSM",
+        1899
+      ],
+      [
+        "ORCL",
+        1817
+      ],
+      [
+        "BABA",
+        1794
+      ],
+      [
+        "NFLX",
+        1789
+      ],
+      [
+        "AVGO",
+        1750
+      ],
+      [
+        "LLY",
+        1626
+      ],
+      [
+        "DIS",
+        1613
+      ]
+    ],
+    "selezionati_sull_esito": {
+      "HOOD": 1417,
+      "RDDT": 694,
+      "ROKU": 504,
+      "SPCX": 0,
+      "WDC": 440
+    },
+    "tag_distinti_totali": 8038,
+    "universo_assente": [
+      "BRK.B",
+      "SPCX"
+    ],
+    "universo_coperto": 94,
+    "universo_richiesto": 96,
+    "universo_sotto_50_articoli": []
+  }
+}
