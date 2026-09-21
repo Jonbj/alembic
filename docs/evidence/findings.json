@@ -2512,10 +2512,18 @@
           "costo_usd": null,
           "nota": "[DAY-010] crontab portfolio-cycle: minute='7,22,37,52', hour='14-21' (celery_app.py:265) contro apertura RTH 13:30 UTC (EDT). Primo ciclo della seduta alle 14:07:00: persi gli slot 13:37 e 13:52. In coda alla seduta la griglia resta accesa fino alle 21:52, 2 ore dopo la chiusura: su 200 invocazioni di run_sentiment_worker, 80 (40%) hanno restituito {'skipped': True, 'reason': 'market_closed'}. Il sistema se ne accorge: mobile_events delle 22:50 'Griglia portfolio-cycle fuori seduta' (warning, non consegnato - DAY-008). Caso concreto: il segnale MRVL +0,325 e' pronto alle 13:45:37 e attende 22 minuti il primo ciclo utile; l'ingresso avviene a 230,99. NON STIMATO: il prezzo MRVL alle 13:52 non e' ricostruibile senza rifetchare barre intraday (fuori dal perimetro read-only locale). Limite superiore noto: dossier ingressi MRVL vs_apertura = +18,99 $, cioe' quanto avrebbe reso l'ingresso all'apertura, di cui i due cicli persi sono una frazione.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-010]"
+        },
+        {
+          "data": "2026-08-21",
+          "costo_usd": null,
+          "nota": [
+            "Ricorrenza — buco di apertura confermato dal proprio monitor di salute della pipeline, non solo dedotto dal crontab. portfolio_monitor_snapshots mostra degradations=[{'component':'signal','reason':'Expected signal activity is stale'},{'component':'portfolio_cycle','reason':'Expected portfolio_cycle activity is stale'}] su OGNI snapshot dalle 13:30:00 (apertura RTH) fino alle 13:55:00; il componente 'signal' si libera alle 14:01 (primo articolo news_log alle 14:00:37), il componente 'portfolio_cycle' resta in warning fino alle 14:05, un minuto prima del primo ciclo reale (14:07:00). Cron attivo quel giorno (celery_app.py, git rev a4cb0ec7): sentiment_worker crontab(minute='*/15', hour='14-21', day_of_week='1-5') — parte alle 14:00, cioe' 30 min dopo apertura 13:30 UTC, non 37; portfolio-cycle (offset :07/:22/:37/:52) parte alle 14:07, 37 min dopo apertura. Costo null: nel finestrone 13:30-14:00 non risultano articoli ne' in news_log ne' in news_queue_drops (tabella vuota tutto il giorno, probabile perche' la sua migrazione e' successiva a questa data — vedi discontinuita' #432 in OBSERVATION_CHARTER), quindi non e' verificabile se qualcosa di scorabile sia arrivato e sia stato perso in quei 30 minuti, solo che la pipeline stessa si e' auto-segnalata come ferma. Lato coda '8 cicli dopo la chiusura' NON verificato per questo giorno specifico: portfolio_cycles ed execution_decisions cessano entrambi alle 19:52 UTC, non proseguono fino a 21:45/21:52 come in altre occorrenze di questo finding — assenza di log container per la data (retention da 2026-09-04) impedisce di stabilire se i cicli post-19:52 siano girati a vuoto senza scrivere riga, o non siano girati affatto."
+          ],
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-21.md §3, §10 [DAY-011]"
         }
       ],
       "costo_cumulato_usd": 134.05,
-      "occorrenze_non_stimate": 21,
+      "occorrenze_non_stimate": 22,
       "stato": "aperto",
       "issue": null
     },
@@ -3139,10 +3147,18 @@
           "costo_usd": 80.74,
           "nota": "Nella giornata dei semis l'unico semis comprato e' entrato a movimento gia' interamente consumato. Ingresso S4 su MU alle 15:52 @ 978,848 con quota_movimento_precedente_al_segnale = 1,0588 (denominatore_degenere=false, quindi la quota e' leggibile) ed entry_percentile = 0,775. Il titolo chiude a 977,50: funnel_v2.righe[MU].pipeline = BAD_FILL, evidence.eod_net_pnl = -2,76 $, net_profitable = false, mtm_eod = -1,97 $. MU fa +5,50% sulla seduta e il book ne cattura -0,14%. Stesso profilo dell'occorrenza PANW del 2026-09-14 (quota 1,0168). Gli altri ingressi non degeneri: SPCX 0,386, BA 0,575, NVO 0,933 — due dei quattro sopra 0,9. Anche su ARM (+8,57%, non catturato) l'unica riga ISSUER_SPECIFIC e' un roundup delle 15:58 che constata il rialzo invece di anticiparlo.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-17.md §8"
+        },
+        {
+          "data": "2026-08-21",
+          "costo_usd": null,
+          "nota": [
+            "Ricorrenza sull'unico ingresso della giornata. dossier 2026-08-21 ingressi[0] (HOOD, S4, BUY 17:07:00 @107.815395): quota_movimento_precedente_al_segnale=0,9552 (denominatore_degenere=false, quota leggibile) — il 95,5% del movimento del titolo era gia' avvenuto prima che il segnale scorasse. HOOD e' stato il miglior mover della giornata (+13,70% da mercato.rendimenti), ma il book ne cattura solo mtm_eod=5,45$ su un notional di 1.869,37$ (0,29% del notional, vs +13,7% del titolo) perche' il primo segnale utilizzabile (0,447, ore 17:07) arriva quando la sessione e' gia' all'82,7esimo percentile (entry_percentile=0,827) del proprio range giornaliero: il segnale debole delle 15:52/16:07 (score 0,075) era sotto gate, quindi l'ingresso e' avvenuto solo quando la notizia dedicata ('Why Is Robinhood Stock Surging Friday?') ha superato la soglia, non quando il titolo ha iniziato a muoversi. Costo non stimato: la posizione resta aperta a fine giornata (nessuna chiusura da cui derivare un P&L realizzato) e la dossier non calcola opportunity_v2 per i nomi effettivamente tradati (solo per candidati_miss), quindi manca un controfattuale 'entrata a inizio sessione' con la stessa metodologia usata altrove nel ledger — stimarlo a mano richiederebbe il prezzo di apertura sessione e non e' stato fatto per non introdurre una formula diversa da quella gia' validata nella dossier."
+          ],
+          "fonte": "FORENSIC_DAILY_REPORT_2026-08-21.md §Timeline, §10 [DAY-012]"
         }
       ],
       "costo_cumulato_usd": 363.35,
-      "occorrenze_non_stimate": 6,
+      "occorrenze_non_stimate": 7,
       "stato": "aperto",
       "issue": null
     },
