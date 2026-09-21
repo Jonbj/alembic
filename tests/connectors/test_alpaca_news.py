@@ -301,3 +301,103 @@ async def test_paginates_with_next_page_token():
 
     assert len(items) == 2
     assert call_count == 2
+
+
+# --- fetch_historical_raw (#610) ---
+
+_FAKE_RESPONSE_WITH_EMPTY_BODY = {
+    "news": [
+        {
+            "id": 1,
+            "headline": "Apple reports record Q4 earnings",
+            "summary": "Apple Inc. reported record fourth-quarter earnings.",
+            "content": "<p>Full body.</p>",
+            "url": "https://example.com/a",
+            "created_at": "2025-11-05T20:30:00Z",
+            "symbols": ["AAPL"],
+        },
+        {
+            # Nessun corpo: fetch_historical lo scarta, l'archivio deve vederlo.
+            "id": 2,
+            "headline": "If You Invested $1000 In Apple 10 Years Ago",
+            "summary": "",
+            "content": "",
+            "url": "https://example.com/b",
+            "created_at": "2025-11-05T21:00:00Z",
+            "symbols": ["AAPL", "MSFT"],
+        },
+    ],
+    "next_page_token": None,
+}
+
+
+def _mock_session_returning(*payloads: dict):
+    """Sessione aiohttp finta che restituisce i payload in ordine, uno per pagina."""
+    responses = []
+    for payload in payloads:
+        resp = AsyncMock()
+        resp.status = 200
+        resp.raise_for_status = MagicMock()
+        resp.json = AsyncMock(return_value=payload)
+        resp.__aenter__ = AsyncMock(return_value=resp)
+        resp.__aexit__ = AsyncMock(return_value=False)
+        responses.append(resp)
+
+    session = AsyncMock()
+    session.get = MagicMock(side_effect=responses)
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=False)
+    return session
+
+
+@pytest.mark.asyncio
+async def test_fetch_historical_raw_keeps_articles_that_the_parsed_path_drops():
+    """L'archivio conserva gli articoli senza corpo; il path live li scarta.
+
+    E' la distinzione che regge H-A della #610: un articolo senza summary ne'
+    content non e' un template CONTENT_EMPTY (quelli il testo ce l'hanno), ed
+    e' invisibile alla pipeline. Misurarli insieme confonderebbe due gruppi.
+    """
+    conn = AlpacaNewsConnector(api_key="key", api_secret="secret", symbols=["AAPL"])
+    start = datetime(2025, 11, 1, tzinfo=timezone.utc)
+    end = datetime(2025, 11, 30, tzinfo=timezone.utc)
+
+    with patch(
+        "src.connectors.alpaca_news.aiohttp.ClientSession",
+        return_value=_mock_session_returning(_FAKE_RESPONSE_WITH_EMPTY_BODY),
+    ):
+        raw = [a async for a in conn.fetch_historical_raw(start, end)]
+
+    with patch(
+        "src.connectors.alpaca_news.aiohttp.ClientSession",
+        return_value=_mock_session_returning(_FAKE_RESPONSE_WITH_EMPTY_BODY),
+    ):
+        parsed = [i async for i in conn.fetch_historical(start, end)]
+
+    assert [a["id"] for a in raw] == [1, 2]
+    assert len(parsed) == 1
+    # i campi che la misura usa sopravvivono intatti
+    assert raw[1]["symbols"] == ["AAPL", "MSFT"]
+    assert raw[1]["created_at"] == "2025-11-05T21:00:00Z"
+    assert raw[1]["headline"].startswith("If You Invested")
+
+
+@pytest.mark.asyncio
+async def test_fetch_historical_raw_follows_the_page_token() -> None:
+    first = dict(_FAKE_RESPONSE_WITH_EMPTY_BODY, next_page_token="pag2")
+    second = {"news": [dict(_FAKE_RESPONSE["news"][0], id=3)], "next_page_token": None}
+
+    conn = AlpacaNewsConnector(api_key="key", api_secret="secret", symbols=["AAPL"])
+    with patch(
+        "src.connectors.alpaca_news.aiohttp.ClientSession",
+        return_value=_mock_session_returning(first, second),
+    ):
+        raw = [
+            a
+            async for a in conn.fetch_historical_raw(
+                datetime(2025, 11, 1, tzinfo=timezone.utc),
+                datetime(2025, 11, 30, tzinfo=timezone.utc),
+            )
+        ]
+
+    assert [a["id"] for a in raw] == [1, 2, 3]
