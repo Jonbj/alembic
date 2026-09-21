@@ -451,6 +451,14 @@ def main() -> int:
             "(fallback_used ASC, generated_at DESC); Spearman cross-sectional "
             "giornaliero; t calcolato sui giorni"
         ),
+        # Al deploy dei fix F-076 (sanitizer: entita' HTML decodificate prima del
+        # prompt) e F-054 (ensemble_std misurato su tutte le risposte) questa stringa
+        # deve guadagnare la seconda e la terza rottura: entrambe sono gia' registrate
+        # in docs/evidence/OBSERVATION_CHARTER.md con data 2026-09-21 e deploy da
+        # confermare. La prima cambia la distribuzione degli score che alimentano
+        # questo IC; la seconda cambia cosa misura ensemble_std. Aggiungerle qui il
+        # giorno del deploy, con la data reale: una serie pubblicata non si rivede in
+        # silenzio.
         "discontinuita": (
             "Dal 2026-09-08 (#467) la riduzione a simbolo-giorno applica la regola "
             "del ranker (fallback_used ASC, generated_at DESC); prima teneva "
