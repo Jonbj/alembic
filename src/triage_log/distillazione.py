@@ -49,8 +49,9 @@ _MASCHERE = (
     # word char) e il motore maschera solo la parte intera, lasciando ".6pp" che
     # spezza i template in varianti. Il lookaround richiede che a sinistra non ci
     # sia una cifra o un '.' (cosi' "v1.2.3" resta intoccato) e che a destra non
-    # ci sia una cifra (cosi' "18.6pp" mangia anche il decimale).
-    (re.compile(r"(?<![\w.])\d+(?:\.\d+)?(?!\d)"), "<N>"),
+    # ci sia una cifra (cosi' "18.6pp" mangia anche il decimale). Il prefisso
+    # esadecimale resta escluso, come con i precedenti confini di parola.
+    (re.compile(r"(?<![\w.])(?!0[xX])\d+(?:\.\d+)?(?!\d)"), "<N>"),
 )
 
 # Il numero del worker nel pool e' una coordinata di esecuzione, non un fatto:

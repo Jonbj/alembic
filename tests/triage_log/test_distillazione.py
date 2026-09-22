@@ -174,6 +174,13 @@ def test_numero_decimale_isolato_continua_a_essere_mascherato():
     assert "0.051" not in normalizza_riga("[2026-09-16 04:11:09,111: INFO/W] drift=-0.051")
 
 
+def test_letterale_esadecimale_resta_intatto():
+    # Il fix per i suffissi alfabetici non deve cambiare i letterali esadecimali,
+    # che la precedente maschera con confini di parola lasciava invariati.
+    riga = "[2026-09-16 04:11:09,111: INFO/W] received status 0x1F"
+    assert normalizza_riga(riga).endswith("received status 0x1F")
+
+
 def test_stesso_allarme_con_decimale_collassa_in_un_unico_template():
     # Lo stesso allarme su due righe, con decimali diversi, deve produrre lo
     # stesso template: e' la condizione che annota_ricorrenza vuole verificare.
