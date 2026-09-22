@@ -256,7 +256,7 @@ async def test_llm_models_resyncs_stale_ensemble_weights(mock_redis_store):
     assert resp.json()["llm_models"] == "glm52,gptoss"
     mock_redis_store.set_ensemble_weights.assert_called_once()
     applied = mock_redis_store.set_ensemble_weights.call_args.args[0]
-    assert set(applied.keys()) == {"glm-5.2:cloud", "gpt-oss:20b-cloud"}
+    assert set(applied.keys()) == {"glm-5.3:cloud", "gpt-oss:20b-cloud"}
     assert all(w == pytest.approx(0.5) for w in applied.values())
     app.dependency_overrides.pop(get_redis_store, None)
 
@@ -266,7 +266,7 @@ async def test_llm_models_keeps_weights_when_pair_unchanged(mock_redis_store):
     """Test POST /api/admin/llm-models does not touch weights when the stored
     weights already match the requested pair."""
     mock_redis_store.get_current_weights_stored.return_value = {
-        "weights": {"glm-5.2:cloud": 0.5, "gpt-oss:20b-cloud": 0.5},
+        "weights": {"glm-5.3:cloud": 0.5, "gpt-oss:20b-cloud": 0.5},
     }
     app.dependency_overrides[get_redis_store] = lambda: mock_redis_store
     async with AsyncClient(

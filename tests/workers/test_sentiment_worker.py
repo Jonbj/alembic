@@ -1625,7 +1625,7 @@ class TestEnsembleWeightReading:
                 # Active default pair is "all" -> kimi + glm52, so suggestion
                 # weights must match active models.
                 "kimi-k2.6:cloud": 0.40,
-                "glm-5.2:cloud": 0.60,
+                "glm-5.3:cloud": 0.60,
             },
             "purified_icir": {},
             "freeze_reason": "VIX data unavailable (fail-safe)",
@@ -1682,7 +1682,7 @@ class TestEnsembleWeightReading:
         from unittest.mock import patch, MagicMock
         from src.workers.sentiment import run_sentiment_worker
 
-        applied = {"kimi-k2.6:cloud": 0.35, "glm-5.2:cloud": 0.65}
+        applied = {"kimi-k2.6:cloud": 0.35, "glm-5.3:cloud": 0.65}
         raw_applied = json.dumps({"weights": applied, "source": "auto_apply"}).encode()
 
         # Provide a valid news item in the queue
