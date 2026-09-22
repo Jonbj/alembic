@@ -43,6 +43,71 @@ RELEVANCE_CATEGORIES = (
 TIMING_CATEGORIES = ("ANTICIPATORY", "CONCURRENT", "RETROSPECTIVE", "UNKNOWN")
 TIMELY = frozenset({"ANTICIPATORY", "CONCURRENT"})
 
+# #566 — Suffissi corporate riconosciuti per derivare il bare stem
+# (es. "Oracle Corporation" -> "Oracle"). La lista e' congelata: aggiungere
+# un suffisso e' una scelta di copertura, non un default. Casi ambigui
+# (nomi corti, collisioni lessicali) sono esclusi e richiedono review umana.
+#
+# L'ordine conta: la funzione applica la sostituzione greedy ricorsiva per
+# ogni suffisso; l'ordine delle tuple non influenza il risultato perche'
+# ciascun suffisso si applica una sola volta al nome gia' strippato.
+_BARE_STEM_SUFFIXES: tuple[str, ...] = (
+    # Suffissi lunghi che inglobano quelli corti (es. "Holdings NV" -> "")
+    "Corporation",
+    "Incorporated",
+    "International",
+    "Holdings",
+    "Holding",
+    "Company",
+    "Limited",
+    "Group",
+    "Bancorp",
+    "Financial",
+    "Industries",
+    "Resources",
+    "Technologies",
+    "Solutions",
+    "Networks",
+    "Pharmaceuticals",
+    "Therapeutics",
+    "Laboratories",
+    "Communications",
+    "Enterprises",
+    "Services",
+    "Capital",
+    "Partners",
+    "Management",
+    # Connettivi tipici dei nomi corporate ("Eli Lilly and Company")
+    "and",
+    "and Company",
+    "&",
+    # Suffissi brevi, applicati per ultimi
+    "AG",
+    "SE",
+    "SA",
+    "S.A.",
+    "AB",
+    "AS",
+    "A/S",
+    "PLC",
+    "plc",
+    "NV",
+    "N.V.",
+    "Corp",
+    "Inc",
+    "Co",
+)
+# Token finali di suffisso, separati da spazio, gestiti come singola parola.
+# Usato per casi tipo "AstraZeneca plc", "SAP SE", "Arm Holdings plc".
+_BARE_STEM_TRAILING_TOKENS: tuple[str, ...] = (
+    "plc",
+    "PLC",
+    "NV",
+    "AG",
+    "SE",
+    "SA",
+)
+
 _HEX_64 = re.compile(r"^[0-9a-fA-F]{64}$")
 _TRACKING_QUERY_PREFIXES = ("utm_",)
 _TRACKING_QUERY_KEYS = {"fbclid", "gclid"}
@@ -168,6 +233,204 @@ def _contains_term(text: str, term: str) -> bool:
         return False
     pattern = rf"(?<![\w]){re.escape(normalised)}(?![\w])"
     return re.search(pattern, text, re.IGNORECASE) is not None
+
+
+# #566 — Stem/alias derivation per il buco di copertura della tabella
+# ``ticker_lookup``. Il matcher word-boundary richiede che il nome usato dal
+# giornalista ("Apple", "Oracle") sia presente negli alias; i CSV originali
+# hanno solo nomi legali ("Apple Inc", "Oracle Corporation"). Aggiungere il
+# bare stem in automatico e' deterministico ma va filtrato da una lista di
+# collisioni lessicali e da una soglia di lunghezza — la funzione pura
+# ``derive_bare_stem`` restituisce sempre lo stem dove possibile; la funzione
+# ``propose_stem_backfill`` aggiunge i bucket (safe/short/collision/noop) per
+# la revisione umana, separando la correzione automatica da quella manuale.
+
+# Token lessicali che collidono con l'inglese comune o sono troppo generici
+# per essere usati come match word-boundary in un titolo finanziario. La lista
+# e' il vincolo del ticker-resolution design (CLAUDE.md § Ticker Resolution):
+# "ambiguita' risolta deterministicamente, mai indovinando". Anche una collisione
+# totale abbassa l'evidenza del match sotto il rumore del lessico.
+_STEM_COLLISIONS: frozenset[str] = frozenset({
+    "A", "I", "Is", "It", "Be", "We", "He", "On", "To", "Go", "So",
+    "And", "The", "For", "One", "All", "Any", "Now", "New", "Old",
+    "Best", "More", "Most", "Less", "Last", "Next", "First",
+    "Home", "Work", "Bank", "Capital", "Group", "Holdings", "Limited",
+    "Real", "True", "Open", "Full", "Big", "Top",
+    "Apple",  # frutto + azienda
+    "Amazon",  # fiume + azienda
+    "Shell",  # conchiglia + azienda
+    "Cisco",  # nome proprio spagnolo
+    "Palo",  # palo (legno) + Palo Alto
+})
+
+
+def derive_bare_stem(company_name: object) -> str | None:
+    """Strip dei suffissi corporate noti da un nome legale.
+
+    Restituisce lo stem se la rimozione ha ridotto la stringa ed e' rimasto
+    almeno un token significativo; ``None`` altrimenti. La funzione e'
+    case-preserving sul resto (il match avviene case-insensitive sul testo
+    normalizzato, vedi ``_contains_term``) e non altera l'ordine dei token
+    superstiti.
+
+    La lista di suffissi e' congelata perche' aggiungerne uno cambia il
+    contratto: un suffisso troppo generico (es. "Bank") produce collisioni
+    lessicali che riaprono il buco dei falsi positivi che #405 chiude.
+    """
+    text = _normalise_text(company_name)
+    if not text:
+        return None
+    candidate = text
+    # Strip ricorsivo: ogni suffisso, finche' qualcosa si stacca. Ciascun
+    # suffisso si applica una sola volta perche' il testo post-strip non
+    # contiene piu' quel suffisso (almeno in coda).
+    changed = True
+    while changed:
+        changed = False
+        for suffix in _BARE_STEM_SUFFIXES:
+            token = _normalise_text(suffix)
+            if not token:
+                continue
+            if candidate.endswith(" " + token) or candidate == token:
+                stripped = candidate[: -len(token)].rstrip(" ,.&")
+                if stripped and stripped != candidate:
+                    candidate = stripped
+                    changed = True
+                    break
+    candidate = candidate.strip(" ,.&")
+    if not candidate or candidate == text:
+        return None
+    return candidate
+
+
+def expand_aliases_with_stem(
+    company_name: object, aliases: Iterable[object]
+) -> list[str]:
+    """Aggiunge il bare stem agli alias se assente, senza duplicati.
+
+    La funzione e' deterministica e idempotente: eseguita due volte produce
+    lo stesso output. Non altera l'ordine degli alias esistenti (lo stem
+    viene accodato). Se lo stem coincide con il ``company_name`` o con un
+    alias gia' presente, non viene aggiunto: il check usa la forma
+    case-fold di entrambi i lati, perche' gli alias di produzione mescolano
+    "Apple Computer" e "apple computer" senza convenzione.
+    """
+    base = [str(alias).strip() for alias in aliases if str(alias or "").strip()]
+    stem = derive_bare_stem(company_name)
+    if not stem:
+        return base
+    seen = {_normalise_text(company_name)}
+    seen.update(_normalise_text(alias) for alias in base)
+    if _normalise_text(stem) in seen:
+        return base
+    return [*base, stem]
+
+
+# #566 — Backfill proposal: bucket per la review umana.
+#
+# La proposta separa quattro bucket:
+#   - ``safe``:    stem applicabile in automatico. Criteri: stem non vuoto,
+#                  non collidente col lessico, ticker >= 3 caratteri.
+#                  Candidati all'applicazione automatica.
+#   - ``short``:   ticker da 1-2 caratteri (es. "F", "T", "V", "GE"). Lo
+#                  stem di per se' puo' essere lungo, ma il ticker corto
+#                  segnala che la riga ha bisogno di conferma umana: uno
+#                  stem word-boundary "Ford Motor" su F potrebbe matchare
+#                  articoli su qualsiasi Ford. La issue lo cita esplicitamente.
+#   - ``collision``: lo stem collide con un token lessicale comune.
+#                  Da NON aggiungere in automatico (riapre il buco dei
+#                  falsi positivi che #405 chiude). Da valutare caso per
+#                  caso se il dominio e' abbastanza specifico.
+#   - ``noop``:    stem identico a un alias o al company_name, niente da fare.
+_STEM_SHORT_THRESHOLD = 3
+_SHORT_TICKER_THRESHOLD = 2
+
+
+def propose_stem_backfill(
+    rows: Iterable[dict],
+    *,
+    short_threshold: int = _STEM_SHORT_THRESHOLD,
+    short_ticker_threshold: int = _SHORT_TICKER_THRESHOLD,
+    collisions: Iterable[str] = _STEM_COLLISIONS,
+) -> list[dict]:
+    """Restituisce una proposta di backfill, una entry per riga input.
+
+    Ogni entry ha: ``ticker``, ``company_name``, ``current_aliases``,
+    ``proposed_alias``, ``bucket`` e ``reason``. La proposta e' il dato
+    di review: l'operatore decide bucket-per-bucket cosa applicare.
+    La funzione non scrive nulla e non richiede il DB.
+    """
+    collision_set = frozenset(_normalise_text(c) for c in collisions)
+    out: list[dict] = []
+    for row in rows:
+        ticker = str(row.get("ticker") or "").strip().upper()
+        company = str(row.get("company_name") or "")
+        aliases_raw = row.get("aliases") or []
+        if isinstance(aliases_raw, str):
+            aliases = [aliases_raw]
+        else:
+            aliases = list(aliases_raw)
+        stem = derive_bare_stem(company)
+        if stem is None:
+            out.append({
+                "ticker": ticker,
+                "company_name": company,
+                "current_aliases": aliases,
+                "proposed_alias": None,
+                "bucket": "noop",
+                "reason": "no_suffix_detected",
+            })
+            continue
+        # Identico al company_name o gia' presente: niente da fare
+        stem_norm = _normalise_text(stem)
+        company_norm = _normalise_text(company)
+        aliases_norm = {_normalise_text(a) for a in aliases if str(a or "").strip()}
+        if stem_norm == company_norm or stem_norm in aliases_norm:
+            out.append({
+                "ticker": ticker,
+                "company_name": company,
+                "current_aliases": aliases,
+                "proposed_alias": None,
+                "bucket": "noop",
+                "reason": "already_present",
+            })
+            continue
+        if stem_norm in collision_set:
+            out.append({
+                "ticker": ticker,
+                "company_name": company,
+                "current_aliases": aliases,
+                "proposed_alias": stem,
+                "bucket": "collision",
+                "reason": f"stem '{stem}' collides with common English token",
+            })
+            continue
+        if (
+            len(ticker) <= short_ticker_threshold
+            or len(stem_norm) < short_threshold
+        ):
+            out.append({
+                "ticker": ticker,
+                "company_name": company,
+                "current_aliases": aliases,
+                "proposed_alias": stem,
+                "bucket": "short",
+                "reason": (
+                    f"ticker '{ticker}' has <= {short_ticker_threshold} chars"
+                    if len(ticker) <= short_ticker_threshold
+                    else f"stem '{stem}' shorter than {short_threshold} chars"
+                ),
+            })
+            continue
+        out.append({
+            "ticker": ticker,
+            "company_name": company,
+            "current_aliases": aliases,
+            "proposed_alias": stem,
+            "bucket": "safe",
+            "reason": "",
+        })
+    return out
 
 
 def content_empty_title_reason(title: object) -> str | None:
