@@ -11,7 +11,7 @@ Pipeline per batch (up to 10 items pulled atomically via LMOVE):
      after a SoftTimeLimitExceeded is only what was never persisted.
   2. Pre-filter — skip near-neutral MarketAux articles
      (|marketaux_sentiment| < 0.20) to save 60-80% of token spend.
-  3. LLM ensemble — query Kimi K2.6, GLM-5.2 in
+  3. LLM ensemble — query Kimi K2.6, GLM-5.3 in
      parallel using DK-CoT prompting; aggregate with LOO ICIR weights if
      available, else confidence-weighted mean.
   4. Divergence fallback — if no model reaches ENSEMBLE_MIN_CONFIDENCE (0.4)

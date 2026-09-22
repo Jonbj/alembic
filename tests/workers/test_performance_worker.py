@@ -447,13 +447,13 @@ class TestRunWeeklyWeights:
         # filters per_model_rows to the currently active model selection.
         mock_fetch_cls.return_value = (
             [("kimi-k2.6:cloud", 0.3, 0.02)] * 300 +
-            [("glm-5.2:cloud", 0.2, 0.01)] * 300
+            [("glm-5.3:cloud", 0.2, 0.01)] * 300
         )
 
         # Mock compute_purified_icir to return valid ICIR values
         mock_purified_cls.return_value = {
             "kimi-k2.6:cloud": 1.2,
-            "glm-5.2:cloud": 0.8,
+            "glm-5.3:cloud": 0.8,
         }
 
         # Mock Redis with proper get_ensemble_weights method and _r attribute
@@ -502,12 +502,12 @@ class TestRunWeeklyWeights:
         """
         mock_fetch_cls.return_value = (
             [("kimi-k2.6:cloud", 0.3, 0.02)] * 300 +
-            [("glm-5.2:cloud", 0.25, 0.015)] * 300 +
+            [("glm-5.3:cloud", 0.25, 0.015)] * 300 +
             [("gpt-oss:20b-cloud", 0.2, 0.01)] * 300
         )
 
         mock_purified_cls.return_value = {
-            "glm-5.2:cloud": 1.1,
+            "glm-5.3:cloud": 1.1,
             "gpt-oss:20b-cloud": 0.9,
         }
 
@@ -525,8 +525,8 @@ class TestRunWeeklyWeights:
 
         assert mock_purified_cls.called
         call_kwargs = mock_purified_cls.call_args.kwargs
-        assert set(call_kwargs["model_signals"].keys()) == {"glm-5.2:cloud", "gpt-oss:20b-cloud"}
-        assert set(call_kwargs["model_returns"].keys()) == {"glm-5.2:cloud", "gpt-oss:20b-cloud"}
+        assert set(call_kwargs["model_signals"].keys()) == {"glm-5.3:cloud", "gpt-oss:20b-cloud"}
+        assert set(call_kwargs["model_returns"].keys()) == {"glm-5.3:cloud", "gpt-oss:20b-cloud"}
         assert "kimi-k2.6:cloud" not in call_kwargs["current_weights"]
 
     @patch("src.workers.performance._fetch_all_per_model_signals_for_loo")
@@ -766,16 +766,16 @@ class TestCheckAndApplyWeights:
         # test reaches the apply path.
         "suggested_weights": {
             "kimi-k2.6:cloud": 0.45,
-            "glm-5.2:cloud": 0.55,
+            "glm-5.3:cloud": 0.55,
         },
         "purified_icir": {
             "kimi-k2.6:cloud": 0.31,
-            "glm-5.2:cloud": 0.24,
+            "glm-5.3:cloud": 0.24,
         },
         "freeze_reason": "",
         "computed_at": "2026-05-04T08:00:00+00:00",
     }
-    CURRENT = {"weights": {"kimi-k2.6:cloud": 0.45, "glm-5.2:cloud": 0.55}, "source": "suggestion"}
+    CURRENT = {"weights": {"kimi-k2.6:cloud": 0.45, "glm-5.3:cloud": 0.55}, "source": "suggestion"}
 
     def _make_redis(self, suggestion=None, current=None, vix_cached=None):
         mock = MagicMock()
