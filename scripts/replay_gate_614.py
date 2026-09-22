@@ -172,11 +172,11 @@ def _scarica_barre(simboli: list[str], inizio: date, fine: date) -> Any:
 
 def _scarica_dividendi(tc: Any, simboli: list[str], inizio: date, fine: date) -> list[dict[str, Any]]:
     """Annunci di dividendo sui titoli toccati dalla finestra (diagnostica)."""
-    from alpaca.trading.enums import CorporateAnnouncementType
+    from alpaca.trading.enums import CorporateActionType
     from alpaca.trading.requests import GetCorporateAnnouncementsRequest
 
     richiesta = GetCorporateAnnouncementsRequest(
-        ca_types=[CorporateAnnouncementType.DIVIDEND],
+        ca_types=[CorporateActionType.DIVIDEND],
         since=datetime(inizio.year, inizio.month, inizio.day, tzinfo=timezone.utc),
         until=datetime(fine.year, fine.month, fine.day, tzinfo=timezone.utc),
     )
@@ -236,7 +236,7 @@ def main() -> int:
     )
 
     simboli = sorted(
-        set(qty_inizio) | set(posizioni_correnti) | {f.symbol for f in fills_dopo_ancoraggio}
+        set(qty_inizio) | set(posizioni_correnti) | {f.symbol for f in fills}
     )
     barre = _scarica_barre(simboli, inizio=ancoraggio, fine=fine)
     closes = closes_da_barre(barre)
