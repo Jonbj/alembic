@@ -134,3 +134,55 @@ def test_un_errore_nuovo_resta_davanti_a_tutto():
     nuovo_banale = Voce("t-n", "INFO", 50, "riga nuova banale", "05:00:00", "06:00:00", 0)
     scelte = seleziona([nuovo_banale, grave_nuovo], storici={}, tetto_caratteri=10_000)
     assert scelte[0] is grave_nuovo
+
+
+# Issue #619: il numero incollato a una parola (es. "18.6pp") non veniva consumato
+# interamente dal pattern \b\d+(?:\.\d+)?\b: il \b finale non puo' cadere fra
+# una cifra e una lettera (entrambe caratteri di parola), quindi solo la parte
+# intera veniva mascherata e il decimale residuo spezzava i template in varianti.
+def test_il_decimale_incollato_a_una_lettera_viene_mascherato_interamente():
+    riga = (
+        "[2026-09-16 04:11:09,111: ERROR/S1] "
+        "DECAY CRITICAL [S1]: Hit rate dropped 18.6pp from 54.0% to 35.4%"
+    )
+    template = normalizza_riga(riga)
+    assert ".6pp" not in template, template
+    assert "<N>pp" in template, template
+
+
+def test_il_decimale_incollato_a_unita_di_misura_viene_mascherato_interamente():
+    riga = (
+        "[2026-09-16 04:11:09,111: WARNING/W] "
+        "elapsed 12.5ms before timeout"
+    )
+    template = normalizza_riga(riga)
+    assert ".5ms" not in template, template
+    assert "<N>ms" in template, template
+
+
+def test_il_decimale_incollato_a_unita_sec_viene_mascherato_interamente():
+    riga = "[2026-09-16 04:11:09,111: INFO/W] completed in 3.25sec"
+    template = normalizza_riga(riga)
+    assert ".25sec" not in template, template
+    assert "<N>sec" in template, template
+
+
+def test_numero_decimale_isolato_continua_a_essere_mascherato():
+    # 0.035 e -0.051 sono gia' corretti con la vecchia regex, ma vanno
+    # preservati dal fix: la regressione silenziosa e' il rischio principale.
+    assert "0.035" not in normalizza_riga("[2026-09-16 04:11:09,111: INFO/W] rate=0.035")
+    assert "0.051" not in normalizza_riga("[2026-09-16 04:11:09,111: INFO/W] drift=-0.051")
+
+
+def test_stesso_allarme_con_decimale_collassa_in_un_unico_template():
+    # Lo stesso allarme su due righe, con decimali diversi, deve produrre lo
+    # stesso template: e' la condizione che annota_ricorrenza vuole verificare.
+    a = (
+        "[2026-09-16 04:11:09,111: ERROR/S1] "
+        "DECAY CRITICAL [S1]: Hit rate dropped 18.6pp from 54.0% to 35.4%"
+    )
+    b = (
+        "[2026-09-17 04:11:09,111: ERROR/S1] "
+        "DECAY CRITICAL [S1]: Hit rate dropped 22.8pp from 52.0% to 29.2%"
+    )
+    assert normalizza_riga(a) == normalizza_riga(b)

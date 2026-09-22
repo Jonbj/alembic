@@ -44,7 +44,13 @@ _MASCHERE = (
     (re.compile(r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?"), "<TS>"),
     (re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}:\d+\b"), "<IP>"),
     (re.compile(r"\b\d+(?:\.\d+)?s\b"), "<DURATA>"),
-    (re.compile(r"\b\d+(?:\.\d+)?\b"), "<N>"),
+    # Issue #619: \b fallisce su numeri incollati a lettere (es. "18.6pp"):
+    # il confine di parola non puo' cadere fra una cifra e una lettera (entrambe
+    # word char) e il motore maschera solo la parte intera, lasciando ".6pp" che
+    # spezza i template in varianti. Il lookaround richiede che a sinistra non ci
+    # sia una cifra o un '.' (cosi' "v1.2.3" resta intoccato) e che a destra non
+    # ci sia una cifra (cosi' "18.6pp" mangia anche il decimale).
+    (re.compile(r"(?<![\w.])\d+(?:\.\d+)?(?!\d)"), "<N>"),
 )
 
 # Il numero del worker nel pool e' una coordinata di esecuzione, non un fatto:
