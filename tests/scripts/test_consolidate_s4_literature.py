@@ -78,6 +78,32 @@ def test_consolidation_covers_every_supported_card_with_required_fields() -> Non
     assert len(seen) == len(set(seen)), "duplicate claim_ids in consolidation"
 
 
+def test_published_artifacts_match_deterministic_regeneration() -> None:
+    """The checked-in JSONL and matrix must be the current node-output render."""
+    root = _workspace()
+    node_output = root / "node-output"
+    ledger = consolidation.read_jsonl(node_output / "run_ledger.jsonl")
+    invalidated = consolidation.invalidated_campaigns(ledger)
+    claims = consolidation.build_claims(
+        consolidation.read_jsonl(node_output / "node1_cards.jsonl"),
+        consolidation.read_jsonl(node_output / "node2_reviews.jsonl"),
+        invalidated,
+    )
+    expected_jsonl = "".join(
+        json.dumps(claim, ensure_ascii=False, sort_keys=True) + "\n"
+        for claim in claims
+    )
+
+    assert (node_output / "consolidated_claims.jsonl").read_text(
+        encoding="utf-8"
+    ) == expected_jsonl
+    assert (root.parent / "2026-08-28-s4-deep-web-validation.md").read_text(
+        encoding="utf-8"
+    ) == consolidation.report(
+        consolidation.hypothesis_ids(root / "HYPOTHESES.md"), claims, invalidated
+    )
+
+
 def test_consolidation_excludes_unavailable_sources() -> None:
     """ACA005, ACA009 and NEW001 are flagged SOURCE_UNAVAILABLE in the ledger
     and have no node1 cards; they must therefore not appear in the consolidated
