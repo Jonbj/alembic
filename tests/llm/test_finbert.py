@@ -216,6 +216,8 @@ class TestFinBERTClient:
         with (
             patch("transformers.pipeline", return_value=mock_pipe),
             patch("torch.quantization.quantize_dynamic") as mock_quantize,
+            # Pin the CPU contract: the real probe on a CUDA host would skip quantization.
+            patch("torch.cuda.is_available", return_value=False),
         ):
             client = FinBERTClient()
             client._get_pipeline()
@@ -233,12 +235,31 @@ class TestFinBERTClient:
         with (
             patch("transformers.pipeline", return_value=mock_pipe),
             patch("torch.quantization.quantize_dynamic") as mock_quantize,
+            # Pin the CPU contract: the real probe on a CUDA host would skip quantization.
+            patch("torch.cuda.is_available", return_value=False),
         ):
             client = FinBERTClient()
             client._get_pipeline()
             client._get_pipeline()  # second call — must reuse cached pipeline
 
         mock_quantize.assert_called_once()
+
+    def test_no_quantization_on_cuda(self):
+        """On CUDA the pipeline targets device 0 and skips CPU-only int8 quantization."""
+        mock_pipe = MagicMock()
+        mock_pipe.model = MagicMock()
+
+        with (
+            patch("transformers.pipeline", return_value=mock_pipe) as mock_factory,
+            patch("torch.quantization.quantize_dynamic") as mock_quantize,
+            patch("torch.cuda.is_available", return_value=True),
+            patch("torch.cuda.device_count", return_value=1),
+        ):
+            client = FinBERTClient()
+            client._get_pipeline()
+
+        mock_quantize.assert_not_called()
+        assert mock_factory.call_args.kwargs.get("device") == 0
 
     def test_result_type(self):
         """Result should be FinBERTResult dataclass."""
