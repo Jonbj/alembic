@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from src.analysis.dossier.article_coverage import (
     build_article_coverage,
     canonical_article_id,
+    classify_attribution,
+    classify_relevance,
     classify_timing,
     content_empty_title_reason,
     derive_bare_stem,
@@ -78,6 +80,22 @@ def test_timing_ha_tre_bucket_espliciti_e_unknown():
     assert classify_timing(CLOSE, OPEN, CLOSE) == "CONCURRENT"
     assert classify_timing(CLOSE.replace(hour=21), OPEN, CLOSE) == "RETROSPECTIVE"
     assert classify_timing(None, OPEN, CLOSE) == "UNKNOWN"
+
+
+def test_signal_path_reuses_full_input_relevance_classifier():
+    """#637: il path di scoring deve importare il classifier del dossier."""
+    row = {
+        "ticker": "ORCL",
+        "title": "Oracle raises cloud guidance",
+        "body_snippet": "Full issuer context is available while scoring.",
+        "issuer_terms": ["Oracle Corporation", "Oracle"],
+        "extraction_method": "source_metadata",
+    }
+
+    relevance, attribution = classify_relevance(row, fanout_degree=3)
+
+    assert (relevance, attribution) == ("ISSUER_SPECIFIC", "ORCL")
+    assert classify_attribution(relevance, fanout_degree=3) == "ISSUER_SPECIFIC"
 
 
 def test_detector_content_empty_copre_solo_i_template_pre_registrati():

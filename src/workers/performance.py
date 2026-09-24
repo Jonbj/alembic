@@ -1171,7 +1171,7 @@ def run_daily_report():
         if raw_weights:
             current_weights = json.loads(raw_weights).get("weights", {})
         else:
-            current_weights = {"kimi-k2.6:cloud": 0.50, "glm-5.2:cloud": 0.50}
+            current_weights = {"kimi-k2.6:cloud": 0.50, "glm-5.3:cloud": 0.50}
 
         # Build report
         report = build_performance_report(pg, current_weights, period_days=30)

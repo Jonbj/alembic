@@ -1,0 +1,395 @@
+{
+  "issue": 614,
+  "fase": "cancello-di-riproducibilita",
+  "pre_registrazione": "docs/evidence/PREREGISTRAZIONE_DISEGNO_CONTROFATTUALE_USCITE_2026-09-16.md#4",
+  "finestra": {
+    "sedute": [
+      "2026-08-03",
+      "2026-09-21"
+    ],
+    "ancoraggio": "2026-07-31"
+  },
+  "tolleranza_pct": 2.0,
+  "conteggi": {
+    "fill_applicati": 252,
+    "fill_buy": 122,
+    "fill_sell": 130,
+    "fill_dopo_campana": 0,
+    "posizioni_iniziali": 50,
+    "posizioni_finali": 45
+  },
+  "equity": {
+    "broker_inizio": 109530.66,
+    "broker_fine": 110025.01,
+    "replay_fine": 110028.2276374092,
+    "cash_inizio": 74695.70203231141,
+    "cash_fine": 72895.89155735177,
+    "valore_posizioni_mio_mark": 37132.33608005744
+  },
+  "gate": {
+    "delta": 3.2176374092086917,
+    "delta_pct": 0.002924460001602083,
+    "superato": true
+  },
+  "spiegazione": {
+    "residuo_marcazione_broker": -3.2176374092159676,
+    "residuo_marcazione_pct_equity": -0.002924460001608696,
+    "dividendi_annunciati_su_simboli_finestra": [],
+    "nota_dividendi": "il paper Alpaca non accredita i dividendi in cash: se la finestra contiene ex-date su titoli detenuti, quel delta resta qui visibile"
+  },
+  "serie_replay": [
+    {
+      "giorno": "2026-08-03",
+      "equity": 109698.02432460911,
+      "cash": 76975.78291157185,
+      "valore_posizioni": 32722.241413037264
+    },
+    {
+      "giorno": "2026-08-04",
+      "equity": 110366.28606405717,
+      "cash": 73661.24103910747,
+      "valore_posizioni": 36705.04502494971
+    },
+    {
+      "giorno": "2026-08-05",
+      "equity": 110239.44916842558,
+      "cash": 77187.69875196322,
+      "valore_posizioni": 33051.75041646235
+    },
+    {
+      "giorno": "2026-08-06",
+      "equity": 110049.80004479364,
+      "cash": 78392.71098400072,
+      "valore_posizioni": 31657.089060792918
+    },
+    {
+      "giorno": "2026-08-07",
+      "equity": 110182.17693938903,
+      "cash": 78380.38042325189,
+      "valore_posizioni": 31801.79651613714
+    },
+    {
+      "giorno": "2026-08-10",
+      "equity": 110346.1613520213,
+      "cash": 77269.19507157101,
+      "valore_posizioni": 33076.96628045029
+    },
+    {
+      "giorno": "2026-08-11",
+      "equity": 110299.46528275311,
+      "cash": 77248.98868780739,
+      "valore_posizioni": 33050.47659494572
+    },
+    {
+      "giorno": "2026-08-12",
+      "equity": 110460.85080350438,
+      "cash": 75968.67889812139,
+      "valore_posizioni": 34492.17190538299
+    },
+    {
+      "giorno": "2026-08-13",
+      "equity": 110464.72121341916,
+      "cash": 77921.74492169984,
+      "valore_posizioni": 32542.97629171933
+    },
+    {
+      "giorno": "2026-08-14",
+      "equity": 110439.70707050955,
+      "cash": 74310.4649217461,
+      "valore_posizioni": 36129.24214876346
+    },
+    {
+      "giorno": "2026-08-17",
+      "equity": 110474.83464474505,
+      "cash": 77859.92148738554,
+      "valore_posizioni": 32614.913157359508
+    },
+    {
+      "giorno": "2026-08-18",
+      "equity": 110180.40050545469,
+      "cash": 76590.8994956844,
+      "valore_posizioni": 33589.50100977029
+    },
+    {
+      "giorno": "2026-08-19",
+      "equity": 110093.2089317726,
+      "cash": 74227.9427194601,
+      "valore_posizioni": 35865.266212312505
+    },
+    {
+      "giorno": "2026-08-20",
+      "equity": 109844.87200963957,
+      "cash": 75204.16663456277,
+      "valore_posizioni": 34640.705375076795
+    },
+    {
+      "giorno": "2026-08-21",
+      "equity": 110131.82301236852,
+      "cash": 73337.9485831754,
+      "valore_posizioni": 36793.87442919312
+    },
+    {
+      "giorno": "2026-08-24",
+      "equity": 109863.07558873935,
+      "cash": 78866.51522085528,
+      "valore_posizioni": 30996.56036788407
+    },
+    {
+      "giorno": "2026-08-25",
+      "equity": 109961.50993782766,
+      "cash": 73931.15816390913,
+      "valore_posizioni": 36030.35177391853
+    },
+    {
+      "giorno": "2026-08-26",
+      "equity": 109966.89166854248,
+      "cash": 77780.42050191938,
+      "valore_posizioni": 32186.4711666231
+    },
+    {
+      "giorno": "2026-08-27",
+      "equity": 110043.89575196459,
+      "cash": 75064.53517932573,
+      "valore_posizioni": 34979.36057263886
+    },
+    {
+      "giorno": "2026-08-28",
+      "equity": 109804.60193573723,
+      "cash": 75850.16346263024,
+      "valore_posizioni": 33954.43847310699
+    },
+    {
+      "giorno": "2026-08-31",
+      "equity": 109832.97878286731,
+      "cash": 75095.39480296857,
+      "valore_posizioni": 34737.58397989874
+    },
+    {
+      "giorno": "2026-09-01",
+      "equity": 109703.6323104426,
+      "cash": 72437.89128881942,
+      "valore_posizioni": 37265.74102162318
+    },
+    {
+      "giorno": "2026-09-02",
+      "equity": 109858.4805831211,
+      "cash": 76657.92217502362,
+      "valore_posizioni": 33200.55840809748
+    },
+    {
+      "giorno": "2026-09-03",
+      "equity": 110083.30175591251,
+      "cash": 74891.07603785268,
+      "valore_posizioni": 35192.22571805984
+    },
+    {
+      "giorno": "2026-09-04",
+      "equity": 109976.33097669412,
+      "cash": 77001.95269332809,
+      "valore_posizioni": 32974.37828336604
+    },
+    {
+      "giorno": "2026-09-08",
+      "equity": 109912.9020270335,
+      "cash": 73917.12831144032,
+      "valore_posizioni": 35995.77371559318
+    },
+    {
+      "giorno": "2026-09-09",
+      "equity": 109769.80789146389,
+      "cash": 72393.09619952846,
+      "valore_posizioni": 37376.71169193543
+    },
+    {
+      "giorno": "2026-09-10",
+      "equity": 109483.22533363361,
+      "cash": 77188.42785621247,
+      "valore_posizioni": 32294.797477421147
+    },
+    {
+      "giorno": "2026-09-11",
+      "equity": 109745.48230875998,
+      "cash": 73279.15155410153,
+      "valore_posizioni": 36466.330754658455
+    },
+    {
+      "giorno": "2026-09-14",
+      "equity": 109248.35933173682,
+      "cash": 78179.50274439546,
+      "valore_posizioni": 31068.85658734136
+    },
+    {
+      "giorno": "2026-09-15",
+      "equity": 109260.65507721243,
+      "cash": 78141.82456405417,
+      "valore_posizioni": 31118.83051315826
+    },
+    {
+      "giorno": "2026-09-16",
+      "equity": 108910.98516806612,
+      "cash": 75136.350378398,
+      "valore_posizioni": 33774.634789668125
+    },
+    {
+      "giorno": "2026-09-17",
+      "equity": 109461.70803005778,
+      "cash": 70858.25902927821,
+      "valore_posizioni": 38603.44900077957
+    },
+    {
+      "giorno": "2026-09-18",
+      "equity": 109436.39667023387,
+      "cash": 73707.70180047321,
+      "valore_posizioni": 35728.69486976066
+    },
+    {
+      "giorno": "2026-09-21",
+      "equity": 110028.2276374092,
+      "cash": 72895.89155735177,
+      "valore_posizioni": 37132.33608005743
+    }
+  ],
+  "serie_broker": [
+    {
+      "giorno": "2026-08-03",
+      "equity": 109704.03
+    },
+    {
+      "giorno": "2026-08-04",
+      "equity": 110366.23
+    },
+    {
+      "giorno": "2026-08-05",
+      "equity": 110239.1
+    },
+    {
+      "giorno": "2026-08-06",
+      "equity": 110049.29
+    },
+    {
+      "giorno": "2026-08-07",
+      "equity": 110181.63
+    },
+    {
+      "giorno": "2026-08-10",
+      "equity": 110345.51
+    },
+    {
+      "giorno": "2026-08-11",
+      "equity": 110298.73
+    },
+    {
+      "giorno": "2026-08-12",
+      "equity": 110460.04
+    },
+    {
+      "giorno": "2026-08-13",
+      "equity": 110463.81
+    },
+    {
+      "giorno": "2026-08-14",
+      "equity": 110438.78
+    },
+    {
+      "giorno": "2026-08-17",
+      "equity": 110473.8
+    },
+    {
+      "giorno": "2026-08-18",
+      "equity": 110179.29
+    },
+    {
+      "giorno": "2026-08-19",
+      "equity": 110092.01
+    },
+    {
+      "giorno": "2026-08-20",
+      "equity": 109843.78
+    },
+    {
+      "giorno": "2026-08-21",
+      "equity": 110130.38
+    },
+    {
+      "giorno": "2026-08-24",
+      "equity": 109861.38
+    },
+    {
+      "giorno": "2026-08-25",
+      "equity": 109959.77
+    },
+    {
+      "giorno": "2026-08-26",
+      "equity": 109965.05
+    },
+    {
+      "giorno": "2026-08-27",
+      "equity": 110041.95
+    },
+    {
+      "giorno": "2026-08-28",
+      "equity": 109802.54
+    },
+    {
+      "giorno": "2026-08-31",
+      "equity": 109830.84
+    },
+    {
+      "giorno": "2026-09-01",
+      "equity": 109701.38
+    },
+    {
+      "giorno": "2026-09-02",
+      "equity": 109856.09
+    },
+    {
+      "giorno": "2026-09-03",
+      "equity": 110080.72
+    },
+    {
+      "giorno": "2026-09-04",
+      "equity": 109973.67
+    },
+    {
+      "giorno": "2026-09-08",
+      "equity": 109910.06
+    },
+    {
+      "giorno": "2026-09-09",
+      "equity": 109766.92
+    },
+    {
+      "giorno": "2026-09-10",
+      "equity": 109480.15
+    },
+    {
+      "giorno": "2026-09-11",
+      "equity": 109742.28
+    },
+    {
+      "giorno": "2026-09-14",
+      "equity": 109245.16
+    },
+    {
+      "giorno": "2026-09-15",
+      "equity": 109257.45
+    },
+    {
+      "giorno": "2026-09-16",
+      "equity": 108907.77
+    },
+    {
+      "giorno": "2026-09-17",
+      "equity": 109458.5
+    },
+    {
+      "giorno": "2026-09-18",
+      "equity": 109433.17
+    },
+    {
+      "giorno": "2026-09-21",
+      "equity": 110025.01
+    }
+  ],
+  "generato_il": "2026-09-24T07:04:21.710003+00:00"
+}
