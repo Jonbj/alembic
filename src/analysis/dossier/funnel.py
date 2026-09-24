@@ -67,6 +67,23 @@ e' deterministica: stessi input, stesso output. I KPI pubblicati mantengono i
 nomi della specifica consolidata: `held_at_open_rate`, `active_signal_recall`,
 `execution_conversion_rate`, `profitable_capture_rate` e
 `avoidable_miss_count` (con missingness separata).
+
+Lato uscita (#567): per i mover EXIT_RISK la vecchia serie li contava ma
+li droppava in `esclusi_pipeline.held` (con PASSIVE_EXPOSURE nello stesso
+bucket, indistinguibili). Il funnel v2 ora distingue `held_falling` da
+`held_rising` e aggiunge un asse `pipeline_uscita` con sei stadi paralleli
+a quelli d'ingresso:
+    NO_EXIT_SIGNAL        EXIT_RISK senza segnali di sortita nella seduta
+    STALE_EXIT_SIGNAL     segnali presenti ma tutti pre-apertura RTH
+    EXIT_BELOW_THRESHOLD  segnale attuale, segno giusto, |s| < soglia_exit
+    EXIT_WRONG_SIGN       segnale presente, segno sbagliato per la direzione
+    EXIT_BLOCKED          segnale qualificante, guard ha bloccato la SELL
+    EXITED                posizione effettivamente chiusa (riga `chiusure`)
+
+Anche qui la soglia (`soglia_exit`) e' un argomento: il freeze #171 vieta
+di tararla qui. Stesso criterio 3 (segno dal campo firmato), stesso mapping
+dichiarato. Vista parallela alla v1: la serie pre-registrata
+(`conteggi_pipeline` d'ingresso, KPI d'ingresso, legacy causa) resta intatta.
 """
 
 from __future__ import annotations
@@ -101,6 +118,19 @@ PIPELINE_STAGES = (
     "ORDER_FAIL",
     "BAD_FILL",
     "CAUGHT",
+)
+
+# Asse pipeline_uscita (#567): stadio della catena d'uscita sui mover
+# detenuti in ribasso, parallelo e simmetrico al PIPELINE_STAGES d'ingresso.
+# Stessi criteri (3: segno firmato, 4: mapping dichiarato), stesso vincolo:
+# la soglia d'uscita e' un argomento — il charter decide la floor, non qui.
+EXIT_PIPELINE_STAGES = (
+    "NO_EXIT_SIGNAL",         # EXIT_RISK senza segnali di sortita nella seduta
+    "STALE_EXIT_SIGNAL",      # segnali presenti ma tutti pre-apertura RTH
+    "EXIT_BELOW_THRESHOLD",   # segnale attuale, segno giusto, |s| < soglia_exit
+    "EXIT_WRONG_SIGN",        # segnale presente, segno sbagliato per la direzione
+    "EXIT_BLOCKED",           # segnale d'uscita qualificante, guard ha bloccato
+    "EXITED",                 # posizione chiusa intraday (riga in `chiusure`)
 )
 
 # Categorie #279 che provano un errore di entita': l'articolo esiste ma il
@@ -310,48 +340,200 @@ def _net_profitable(mover: dict) -> bool | None:
     return float(pnl) > 0
 
 
-def _rapporto(numeratore: int, denominatore: int, definizione: str) -> dict:
+def _rapporto(
+    numeratore: int,
+    denominatore: int,
+    definizione: str,
+    floor: float | None = None,
+) -> dict:
     """Rapporto con denominatore esplicito. None se il denominatore e' 0:
-    nessun rapporto inventato su una giornata senza casi."""
+    nessun rapporto inventato su una giornata senza casi.
+
+    `floor` (#567): se il chiamante dichiara una floor di n (la carta
+    S4_kill_criterion.yaml prevede INSUFFICIENT_N outrankante PASS/FAIL),
+    la risposta include `sufficienza`: 'ok' se denom >= floor, 'insufficient_n'
+    altrimenti. Senza floor dichiarata il flag e' 'unset': niente opinioni
+    inventate durante il freeze (#171), la soglia la decide l'operatore.
+    Il rapporto viene comunque pubblicato: `sufficienza` segnala, non cancella.
+    """
+    valore = numeratore / denominatore if denominatore else None
+    if floor is None:
+        sufficienza = "unset"
+    elif denominatore >= floor:
+        sufficienza = "ok"
+    else:
+        sufficienza = "insufficient_n"
     return {
         "numeratore": numeratore,
         "denominatore": denominatore,
-        "valore": numeratore / denominatore if denominatore else None,
+        "valore": valore,
         "definizione": definizione,
+        "sufficienza": sufficienza,
     }
 
 
-def build_funnel(movers: list[dict], soglia_gate: float) -> dict:
+# --- Lato uscita (#567) ------------------------------------------------------
+#
+# Stessi criteri dell'asse d'ingresso:
+# 3 — segno dal campo firmato dello score, mai ricostruito da abs o reason;
+# 4 — mapping dichiarato (vedi blocco `mapping_exit_legacy` nel dossier, se
+#     richiesto da una issue futura; qui non e' necessario perche' il lato
+#     uscita non rimpiazza alcuna serie pre-registrata).
+
+
+def classify_exit_pipeline(
+    mover: dict, soglia_exit: float | None, data: str | None = None
+) -> tuple[str | None, dict]:
+    """Stadio della pipeline d'uscita per un mover EXIT_RISK.
+
+    Restituisce (stadio, evidence) come `classify_pipeline` d'ingresso.
+    `soglia_exit` e' l'argomento di soglia — quando None, gli stadi che
+    dipendono da essa (BELOW_THRESHOLD) ricadono su EXIT_BLOCKED.
+    `data` (YYYY-MM-DD) e' il giorno di seduta a cui il dossier si riferisce:
+    serve per separare STALE (segnale di una seduta precedente) da freschi.
+    Per i mover non-EXIT_RISK lo stadio e' None (la pipeline d'uscita non
+    si valuta su PASSIVE_EXPOSURE / NON_ACTIONABLE / OUT_OF_SCOPE).
+    """
+    actionability = classify_actionability(mover)
+    if actionability != "EXIT_RISK":
+        return None, {}
+
+    # --- esito: posizione effettivamente chiusa -------------------------------
+    chiusura = mover.get("chiusura")
+    if chiusura:
+        return "EXITED", {
+            "exit_reason": chiusura.get("exit_reason"),
+            "pnl_net": chiusura.get("pnl_net"),
+        }
+
+    # --- segnali di sortita del mover ----------------------------------------
+    # Convenzione: la lista porta `ora` (HH:MM) e `score` firmato (criterio 3),
+    # come per il lato d'ingresso. Il campo opzionale `generated_day`
+    # (YYYY-MM-DD) distingue "segnale nato nella seduta di dossier" da
+    # "segnale nato in una seduta precedente".
+    segnali_uscita = list(mover.get("exit_segnali") or [])
+    if not segnali_uscita:
+        return "NO_EXIT_SIGNAL", {"n_segnali_uscita": 0}
+
+    # --- STALE: nessun segnale appartiene alla seduta di dossier -----------
+    # Criterio: `generated_day` < `data` (segnale di una seduta precedente).
+    # Non filtriamo i segnali *della stessa seduta* generati prima del RTH
+    # open: un segnale emesso alle 14:00 e' ancora fresco per la seduta
+    # corrente — STALE e' una proprieta' del giorno, non dell'ora. Questa
+    # scelta corrisponde a #567: DELL 09-10 porta `signal_id 10245`
+    # generato il 2026-09-09 19:59Z — `generated_day` e' l'unico dato che
+    # basta a classificare STALE_EXIT_SIGNAL.
+    freschi: list[dict] = []
+    for s in segnali_uscita:
+        gd = s.get("generated_day")
+        if data and gd and str(gd) < str(data):
+            continue  # nato in una seduta precedente → stale
+        freschi.append(s)
+    if not freschi:
+        # Prendiamo l'evidenza dal segnale piu' recente, cosi' il lettore
+        # vede *quale* segnale stava guidando l'uscita mancata.
+        ultimo = segnali_uscita[-1]
+        return "STALE_EXIT_SIGNAL", {
+            "signal_id": ultimo.get("signal_id"),
+            "ora": ultimo.get("ora"),
+            "generated_day": ultimo.get("generated_day"),
+            "score_firmato": ultimo.get("score"),
+            "session_open_hhmm": mover.get("session_open_hhmm") or None,
+            "data": data,
+        }
+
+    # --- segno FIRMATO (criterio 3) -----------------------------------------
+    # Uscita long-only: un'uscita qualificante richiede score negativo. Il
+    # massimo FIRMATO tra i segnali freschi: un +0.05 non 'e' qualificante,
+    # e' WRONG_SIGN.
+    massimo_firmato = max(float(s.get("score") or 0.0) for s in freschi)
+    if massimo_firmato >= 0:
+        return "EXIT_WRONG_SIGN", {"score_firmato": massimo_firmato}
+
+    # --- BELOW_THRESHOLD: |score| < soglia_exit (soglia inclusiva) ---------
+    if soglia_exit is None or abs(massimo_firmato) < soglia_exit:
+        return "EXIT_BELOW_THRESHOLD", {
+            "score_firmato": massimo_firmato,
+            "soglia_exit": soglia_exit,
+        }
+
+    # --- guard: segnale qualificante, ma bloccato ---------------------------
+    guard = [str(g.get("decision")) for g in (mover.get("guard") or [])
+             if g.get("decision")]
+    if guard:
+        return "EXIT_BLOCKED", {"guard": guard, "score_firmato": massimo_firmato}
+
+    # Segnale d'uscita qualificante e nessun blocco: la posizione avrebbe
+    # dovuto chiudersi ma non c'e' `chiusura`. Per costruzione questo caso
+    # non dovrebbe accadere — la catena di scheduling pubblica `chiusure`
+    # quando l'ordine viene fillato. Lo annotiamo come EXITED = False.
+    return "EXIT_BLOCKED", {
+        "guard": [],
+        "score_firmato": massimo_firmato,
+        "note": "segnale_qualificante_ma_chiusura_assente",
+    }
+
+
+def build_funnel(
+    movers: list[dict],
+    soglia_gate: float,
+    soglia_exit: float | None = None,
+    floor_kpi: float | None = None,
+) -> dict:
     """Costruisce il blocco `funnel_v2` del dossier. Puro e deterministico.
 
-    Ogni mover riceve ENTRAMBI gli assi. La pipeline valuta solo chi ha una
-    decisione d'ingresso da spiegare (ENTRY_OPPORTUNITY): i mover detenuti, i
-    ribassi non detenuti e i fuori-universo sono esclusi con motivo esplicito,
-    cosi' la partizione resta completa e leggibile.
+    Ogni mover riceve ENTRAMBI gli assi. La pipeline d'ingresso valuta solo
+    chi ha una decisione d'ingresso da spiegare (ENTRY_OPPORTUNITY); la
+    pipeline d'uscita (#567) valuta solo chi ha una decisione d'uscita da
+    spiegare (EXIT_RISK): la partizione e' completa e simmetrica.
+
+    Args:
+        soglia_gate: soglia di gate d'ingresso, pre-registrata (freeze #171).
+        soglia_exit: soglia di attivazione dell'uscita. `None` significa che
+            l'operatore non l'ha dichiarata: gli stadi dipendenti ricadono
+            su quelli indipendenti da soglia (WRONG_SIGN/BLOCKED).
+        floor_kpi:   n-floor per i KPI pubblicati (#567). `None` = no
+            opinion (`sufficienza = 'unset'`); un intero o float marca
+            'ok' se denom >= floor altrimenti 'insufficient_n'.
     """
     righe: list[dict] = []
     conteggi_actionability: dict[str, int] = {s: 0 for s in ACTIONABILITY_STAGES}
     conteggi_pipeline: dict[str, int] = {s: 0 for s in PIPELINE_STAGES}
+    conteggi_pipeline_uscita: dict[str, int] = {s: 0 for s in EXIT_PIPELINE_STAGES}
     esclusi: dict[str, int] = {}
 
     for mover in movers:
         actionability = classify_actionability(mover)
         conteggi_actionability[actionability] += 1
         pipeline: str | None = None
+        pipeline_uscita: str | None = None
         motivo: str | None = None
         evidence: dict = {}
+        evidence_uscita: dict = {}
         if actionability == "ENTRY_OPPORTUNITY":
             pipeline, evidence = classify_pipeline(mover, soglia_gate)
             assert pipeline is not None
             conteggi_pipeline[pipeline] += 1
         else:
+            # Motivo d'esclusione dal funnel d'ingresso: i mover non-entry sono
+            # comunque classificati in actionability. #567 chiede di separare
+            # il "detenuto in ribasso" (EXIT_RISK) dal "detenuto in rialzo"
+            # (PASSIVE_EXPOSURE): la stringa unica 'held' veniva gonfiata da
+            # PASSIVE_EXPOSURE ed e' sintomo dello stesso punto cieco.
             motivo = {
                 "OUT_OF_SCOPE": "fuori_universo",
-                "EXIT_RISK": "held",
-                "PASSIVE_EXPOSURE": "held",
+                "EXIT_RISK": "held_falling",
+                "PASSIVE_EXPOSURE": "held_rising",
                 "NON_ACTIONABLE": "non_actionable_long_only",
             }[actionability]
             esclusi[motivo] = esclusi.get(motivo, 0) + 1
+            # Lato uscita (#567): classificato solo per EXIT_RISK.
+            if actionability == "EXIT_RISK":
+                pipeline_uscita, evidence_uscita = classify_exit_pipeline(
+                    mover, soglia_exit, data=mover.get("_data")
+                )
+                assert pipeline_uscita is not None
+                conteggi_pipeline_uscita[pipeline_uscita] += 1
         opportunity = mover.get("opportunity_v2") or {}
         righe.append({
             "symbol": mover.get("symbol"),
@@ -359,8 +541,10 @@ def build_funnel(movers: list[dict], soglia_gate: float) -> dict:
             "held": _as_bool(mover.get("held")),
             "actionability": actionability,
             "pipeline": pipeline,
+            "pipeline_uscita": pipeline_uscita,
             "pipeline_escluso_motivo": motivo,
             "evidence": evidence,
+            "evidence_uscita": evidence_uscita,
             "legacy_causa": mover.get("legacy_causa"),
             "net_profitable": (
                 _net_profitable(mover)
@@ -416,26 +600,60 @@ def build_funnel(movers: list[dict], soglia_gate: float) -> dict:
             + conteggi_actionability["PASSIVE_EXPOSURE"],
             len(righe),
             "mover gia' detenuti all'apertura / tutti i mover della seduta",
+            floor=floor_kpi,
         ),
         "active_signal_recall": _rapporto(
             len(con_segnale_qualificante), len(notizia_agibile),
             "mover ENTRY_OPPORTUNITY con notizia tempestiva che hanno prodotto "
             "un punteggio qualificante (segno giusto, sopra il gate, non "
             "fallback) / tutti i mover ENTRY_OPPORTUNITY con notizia tempestiva",
+            floor=floor_kpi,
         ),
         "execution_conversion_rate": _rapporto(
             len(eseguiti), len(arrivati_all_ordine),
             "mover arrivati allo stadio dell'ordine che sono stati eseguiti "
             "(fill, anche cattivo) / tutti i mover arrivati all'ordine",
+            floor=floor_kpi,
         ),
         "profitable_capture_rate": _rapporto(
             len(catturati_profittevoli), len(entry_rows),
             "ingressi catturati con mark fill->close EOD positivo dopo i costi "
             "/ tutti i mover ENTRY_OPPORTUNITY della seduta (end-to-end)",
+            floor=floor_kpi,
         ),
         "avoidable_miss_count": len(miss_evitabili),
         "avoidable_miss_unknown_count": len(miss_evitabilita_ignota),
     }
+
+    # --- Lato uscita (#567) --------------------------------------------------
+    exit_rows = [r for r in righe if r["actionability"] == "EXIT_RISK"]
+    # Uscita "qualificante" = segnale d'uscita presente, segno giusto,
+    # sopra soglia — senza un guard che blocchi. E' la stessa domanda
+    # dell'ingresso "con_segnale_qualificante" ma speculare.
+    exit_con_segnale_qualificante = [
+        r for r in exit_rows
+        if r["pipeline_uscita"] in (
+            "EXIT_BELOW_THRESHOLD", "EXIT_BLOCKED", "EXITED",
+        )
+    ]
+    exit_eseguiti = [r for r in exit_rows if r["pipeline_uscita"] == "EXITED"]
+
+    kpi.update({
+        "exit_signal_recall": _rapporto(
+            len(exit_con_segnale_qualificante), len(exit_rows),
+            "mover EXIT_RISK con segnale d'uscita qualificante (segn "
+            "corretto, |score| >= soglia_exit) / tutti i mover EXIT_RISK "
+            "(simmetrico a active_signal_recall, #567)",
+            floor=floor_kpi,
+        ),
+        "exit_conversion_rate": _rapporto(
+            len(exit_eseguiti), len(exit_con_segnale_qualificante),
+            "mover EXIT_RISK con SELL fillata / EXIT_RISK con segnale "
+            "d'uscita qualificante (simmetrico a execution_conversion_rate, "
+            "#567)",
+            floor=floor_kpi,
+        ),
+    })
 
     # Pubblica solo gli stadi osservati, nell'ordine canonico.
     return {
@@ -444,7 +662,12 @@ def build_funnel(movers: list[dict], soglia_gate: float) -> dict:
         "nota_freeze": (
             "vista v2 parallela: i conteggi legacy (miss_cause #208) e la "
             "metrica NO_NEWS pre-registrata restano intatti (freeze #171); "
-            "nessun dato storico riscritto"
+            "nessun dato storico riscritto. #567: il lato uscita (EXIT_RISK) "
+            "aggiunge `conteggi_pipeline_uscita`, `pipeline_uscita` per riga "
+            "e gli stadi NO_EXIT_SIGNAL/STALE_EXIT_SIGNAL/EXIT_BELOW_THRESHOLD/"
+            "EXIT_WRONG_SIGN/EXIT_BLOCKED/EXITED; la stringa unica 'held' "
+            "in `esclusi_pipeline` e' sostituita da 'held_falling' e "
+            "'held_rising' (PASSIVE_EXPOSURE)"
         ),
         "conteggi_actionability": {
             s: n for s, n in conteggi_actionability.items() if n
@@ -452,8 +675,12 @@ def build_funnel(movers: list[dict], soglia_gate: float) -> dict:
         "conteggi_pipeline": {
             s: n for s, n in conteggi_pipeline.items() if n
         },
+        "conteggi_pipeline_uscita": {
+            s: n for s, n in conteggi_pipeline_uscita.items() if n
+        },
         "esclusi_pipeline": esclusi,
         "kpi": kpi,
+        "kpi_floor": floor_kpi,
         "mapping_legacy_v2": MAPPING_LEGACY_V2,
         "righe": righe,
     }
