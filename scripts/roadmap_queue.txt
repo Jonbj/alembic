@@ -145,7 +145,7 @@
 637  la classificazione di copertura degli articoli non esiste nel path del segnale: ANTICIPATORY/CONCURRENT/RETROSPECTIVE, CONTENT_EMPTY, own-vs-fanout sono calcolati solo nel dossier ex post (verificato: gli unici consumatori sono panels.py, event_context.py e uno script di audit) — serve alla decisione #607 del 28/09
 
 # === 5. COPERTURA E QUALITA' DEL SEGNALE (miglioramenti, non bug) ===
-409  NO_NEWS e' la causa dominante dei miss di Week 35 (9/22) mentre il sistema osserva gia' catalizzatori che non usa: NVO aveva una corporate action OBSERVED, ERIC una volume surprise +1,25
+409  NO_NEWS e' la causa dominante dei miss di Week 35 (9/22) mentre il sistema osserva gia' catalizzatori che non usa: NVO aveva una corporate action OBSERVED, ERIC una volume surprise +1,25  [SOSPESA 09-24, vedi nota sopra — decisione operatore post 28/09 su catalyst=CALENDAR e volume backstop; la parte misurabile e' chiusa da PR #500]
 # --- prerequisito di dati per #508 e per la pertinenza off-topic (inserito 2026-09-12,
 #     estratto dalla chiusura di #300): solo persistenza, nessuna regola di scoring ---
 
