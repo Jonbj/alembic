@@ -138,8 +138,20 @@ def _client_dati():
     )
 
 
+def fine_finestra_barre(ultima_seduta: date, taglio: datetime) -> datetime:
+    """Estremo superiore del fetch: mai oltre il taglio d'embargo (prereg §3).
+
+    Due giorni dopo l'ultima seduta bastano a includerne la barra (timestamp
+    00:00 ET); il taglio li accorcia quando l'ultima seduta gli e' a ridosso.
+    """
+    return min(
+        datetime.combine(ultima_seduta + timedelta(days=2), time.min, tzinfo=timezone.utc),
+        taglio,
+    )
+
+
 def scarica_barre_giornaliere(
-    client, simboli: list[str], inizio: date, fine: date
+    client, simboli: list[str], inizio: date, fine: date | datetime
 ) -> dict[str, dict[date, dict[str, float]]]:
     """Barre SIP aggiustate; qualsiasi risposta fallita interrompe la misura."""
     from alpaca.data.enums import DataFeed
@@ -152,7 +164,8 @@ def scarica_barre_giornaliere(
                 symbol_or_symbols=sorted(set(simboli)),
                 timeframe=TimeFrame.Day,
                 start=datetime.combine(inizio, time.min, tzinfo=timezone.utc),
-                end=datetime.combine(fine, time.min, tzinfo=timezone.utc),
+                end=fine if isinstance(fine, datetime)
+                else datetime.combine(fine, time.min, tzinfo=timezone.utc),
                 feed=DataFeed.SIP,
                 adjustment="all",
             )
@@ -244,7 +257,7 @@ def misura(conn, ora: datetime | None = None, verbose: bool = True) -> dict[str,
     barre = scarica_barre_giornaliere(
         _client_dati(),
         sorted({o["symbol"] for o in osservazioni} | {BENCHMARK}),
-        min(per_data) - timedelta(days=10), max(per_data) + timedelta(days=2),
+        min(per_data) - timedelta(days=10), fine_finestra_barre(max(per_data), taglio),
     )
     gap: dict[date, list[float]] = defaultdict(list)
     intraday: dict[date, list[float]] = defaultdict(list)

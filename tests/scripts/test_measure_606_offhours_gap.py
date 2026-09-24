@@ -132,3 +132,21 @@ def test_verdetto_pass_fail_solo_con_campione_e_potenza_sufficienti():
 def test_taglio_embargo_e_tre_giorni_prima_di_ora():
     ora = datetime(2026, 7, 12, 15, tzinfo=timezone.utc)
     assert m.taglio_embargo(ora) == datetime(2026, 7, 9, 15, tzinfo=timezone.utc)
+
+
+def test_la_finestra_delle_barre_non_supera_il_taglio_d_embargo():
+    """Prereg §3: barre troncate a now − 3 giorni, anche l'estremo del fetch."""
+    taglio = datetime(2026, 9, 21, 12, tzinfo=timezone.utc)
+    fine = m.fine_finestra_barre(date(2026, 9, 20), taglio)
+
+    assert fine == taglio
+    # la barra giornaliera dell'ultima seduta (00:00 ET = 04:00 UTC) resta inclusa
+    assert datetime(2026, 9, 20, 4, tzinfo=timezone.utc) < fine
+
+
+def test_la_finestra_lontana_dal_taglio_resta_a_due_giorni_dall_ultima_seduta():
+    taglio = datetime(2026, 9, 21, 12, tzinfo=timezone.utc)
+
+    assert m.fine_finestra_barre(date(2026, 9, 1), taglio) == datetime(
+        2026, 9, 3, tzinfo=timezone.utc
+    )
