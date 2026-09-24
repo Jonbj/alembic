@@ -27,6 +27,7 @@ def _ordine(
         "filled_qty": qty,
         "filled_avg_price": price,
         "filled_at": filled_at,
+        "asset_class": "us_equity",
     }
 
 
@@ -113,3 +114,26 @@ class TestSedute:
     def test_seduta_precedente_salta_il_weekend(self) -> None:
         giorni = [date(2026, 7, 30), date(2026, 7, 31), date(2026, 8, 3)]
         assert seduta_precedente(date(2026, 8, 3), giorni) == date(2026, 7, 31)
+
+
+def test_lo_scarico_ordini_copre_la_vita_massima_di_un_gtc():
+    """Codex su PR #645: un GTC sottomesso prima dell'ancoraggio e riempito nella
+    finestra non deve sfuggire. Alpaca cancella i GTC dopo 90 giorni."""
+    from datetime import datetime, timedelta, timezone
+
+    import scripts.replay_gate_614 as gate
+
+    ancoraggio = datetime(2026, 7, 31, 20, tzinfo=timezone.utc)
+    stop_gtc_sottomesso = ancoraggio - timedelta(days=89)
+
+    assert gate.inizio_scarico_ordini(ancoraggio) <= stop_gtc_sottomesso
+
+
+def test_un_ordine_opzioni_multigamba_non_e_un_fill_azionario():
+    """Il padre mleg ha symbol/side vuoti: prima faceva esplodere OrderSide('')."""
+    mleg = {
+        "symbol": "", "side": "", "order_class": "mleg", "asset_class": "",
+        "status": "filled", "filled_qty": "1", "filled_avg_price": "8.65",
+        "filled_at": "2026-05-04T13:30:06Z",
+    }
+    assert fills_da_ordini([mleg]) == []

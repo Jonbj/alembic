@@ -53,6 +53,11 @@ def fills_da_ordini(ordini: list[dict[str, Any]]) -> list[BrokerFill]:
     un fill parziale ha mosso il cash comunque."""
     fills: list[BrokerFill] = []
     for o in ordini:
+        # Il replay e' sul libro azionario. Un ordine opzioni multi-gamba (mleg)
+        # ha symbol/side vuoti sul padre e le gambe su contratti us_option: non
+        # e' un fill azionario e non ha un close SIP da marcare.
+        if o.get("asset_class") != "us_equity":
+            continue
         qty = float(o.get("filled_qty") or 0)
         prezzo = o.get("filled_avg_price")
         if qty <= 0 or prezzo is None:
@@ -110,6 +115,18 @@ def _client_trading() -> Any:
     return TradingClient(
         os.environ["ALPACA_API_KEY"], os.environ["ALPACA_SECRET_KEY"], raw_data=True
     )
+
+
+# Alpaca cancella un ordine GTC dopo 90 giorni. ``after`` filtra su submitted_at,
+# quindi un GTC sottomesso prima dell'ancoraggio (es. uno stop protettivo,
+# src/workers/execution.py) e riempito nella finestra sfugge se il margine e' piu'
+# corto della sua vita massima. 100 giorni la coprono con margine.
+MARGINE_GTC_GIORNI = 100
+
+
+def inizio_scarico_ordini(chiusura_ancoraggio: datetime) -> datetime:
+    """Primo ``submitted_at`` da scaricare: nessun ordine ancora vivo resta fuori."""
+    return chiusura_ancoraggio - timedelta(days=MARGINE_GTC_GIORNI)
 
 
 def _scarica_ordini(tc: Any, dopo: datetime, fino: datetime) -> list[dict[str, Any]]:
@@ -220,10 +237,8 @@ def main() -> int:
 
     # fill: da dopo la campana dell'ancoraggio fino alla fine finestra (per il replay)
     # e fino a ORA (per ricostruire le quantita' iniziali dalle posizioni correnti).
-    # Margine di una settimana su ``after`` (filtra su submitted_at): un ordine
-    # sottomesso prima dell'ancoraggio ma riempito dopo non deve sfuggire.
     ordini = _scarica_ordini(
-        tc, dopo=session_closes[ancoraggio] - timedelta(days=7), fino=datetime.now(timezone.utc)
+        tc, dopo=inizio_scarico_ordini(session_closes[ancoraggio]), fino=datetime.now(timezone.utc)
     )
     fills = fills_da_ordini(ordini)
     fills_finestra = [f for f in fills if session_closes[ancoraggio] < f.timestamp <= session_closes[fine]]
