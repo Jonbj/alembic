@@ -31,7 +31,12 @@ _claude_reset_epoch() {
     [[ -n "$reset" ]] || return 1
     epoch=$(TZ=Europe/Rome date -d "$reset" +%s 2>/dev/null) || return 1
     now=$(date +%s)
-    (( epoch > now )) || return 1
+    if (( epoch <= now )); then
+        # Claude omette la data per i reset intragiornalieri. Dopo quell'ora,
+        # il prossimo reset e' domani, non un errore terminale della seduta.
+        [[ "$reset" =~ ^[[:space:]]*[0-9]{1,2}(:[0-9]{2})?[[:space:]]*([aApP][mM])?[[:space:]]*$ ]] || return 1
+        epoch=$(TZ=Europe/Rome date -d "tomorrow $reset" +%s 2>/dev/null) || return 1
+    fi
     printf '%s\n' "$epoch"
 }
 

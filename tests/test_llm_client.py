@@ -9,7 +9,7 @@ import pytest
 from src.llm.client import (
     GlmClient, OpusClient, Qwen35Client,
     OllamaKimiClient, OllamaGlmClient, OllamaQwen35Client, OllamaDeepseekClient,
-    OllamaGLM52Client, OllamaCloudClient,
+    OllamaGLM53Client, OllamaCloudClient,
 )
 from src.llm.ensemble import EnsembleAggregator, ModelOutput, run_ensemble_query
 from src.models.news import LLMSentimentOutput
@@ -68,17 +68,17 @@ class TestGlmClient:
     """Test GlmClient model_id and allowlist membership."""
 
     def test_glm_client_model_id(self):
-        """GlmClient uses glm-5.1:cloud model identifier."""
+        """GlmClient uses glm-5.3:cloud model identifier."""
         client = GlmClient()
-        assert client.model_id == "glm-5.1:cloud"
+        assert client.model_id == "glm-5.3:cloud"
 
     def test_glm_client_model_id_in_allowlist(self):
-        """glm-5.1:cloud is in ALLOWED_MODEL_IDS (security allowlist)."""
+        """glm-5.3:cloud is in ALLOWED_MODEL_IDS (security allowlist)."""
         from src.llm.client import ALLOWED_MODEL_IDS
-        assert "glm-5.1:cloud" in ALLOWED_MODEL_IDS
+        assert "glm-5.3:cloud" in ALLOWED_MODEL_IDS
 
     def test_glm_client_validate_does_not_raise(self):
-        """_validate_model_id passes for glm-5.1:cloud."""
+        """_validate_model_id passes for glm-5.3:cloud."""
         client = GlmClient()
         client._validate_model_id(client.model_id)  # must not raise
 
@@ -87,20 +87,20 @@ class TestOllamaCloudClients:
     """Test Ollama HTTP clients: model IDs, allowlist, and HTTP call logic."""
 
     def test_ollama_glm_model_id(self):
-        assert OllamaGlmClient().model_id == "glm-5.1:cloud"
+        assert OllamaGlmClient().model_id == "glm-5.3:cloud"
 
-    def test_ollama_glm52_model_id(self):
-        assert OllamaGLM52Client().model_id == "glm-5.2:cloud"
+    def test_ollama_glm53_model_id(self):
+        assert OllamaGLM53Client().model_id == "glm-5.3:cloud"
 
-    def test_ollama_glm52_model_id_in_allowlist(self):
+    def test_ollama_glm53_model_id_in_allowlist(self):
         from src.llm.client import ALLOWED_MODEL_IDS
-        assert "glm-5.2:cloud" in ALLOWED_MODEL_IDS
+        assert "glm-5.3:cloud" in ALLOWED_MODEL_IDS
 
-    def test_ollama_glm52_is_ollama_cloud_subclass(self):
+    def test_ollama_glm53_is_ollama_cloud_subclass(self):
         # Use the module-level OllamaCloudClient import (not a fresh inner import):
         # another test (test_ollama_timeout) importlib.reload()s src.llm.client, which
         # would otherwise give a different class object here and break issubclass.
-        assert issubclass(OllamaGLM52Client, OllamaCloudClient)
+        assert issubclass(OllamaGLM53Client, OllamaCloudClient)
 
     def test_ollama_qwen35_model_id(self):
         assert OllamaQwen35Client().model_id == "qwen3.5:cloud"
@@ -110,7 +110,7 @@ class TestOllamaCloudClients:
 
     def test_ollama_model_ids_in_allowlist(self):
         from src.llm.client import ALLOWED_MODEL_IDS
-        for client_cls in (OllamaKimiClient, OllamaGlmClient, OllamaQwen35Client, OllamaDeepseekClient, OllamaGLM52Client):
+        for client_cls in (OllamaKimiClient, OllamaGlmClient, OllamaQwen35Client, OllamaDeepseekClient, OllamaGLM53Client):
             assert client_cls().model_id in ALLOWED_MODEL_IDS
 
     @pytest.mark.asyncio
