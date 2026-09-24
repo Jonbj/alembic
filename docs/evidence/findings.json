@@ -4635,7 +4635,7 @@
       "titolo": "Asimmetria di rigore fra ingresso e uscita: min_confidence=0,30 e' richiesto per comprare ma nessuna soglia protegge l'uscita, quindi un segnale a confidenza 0,15 puo' liquidare una posizione",
       "tipo": "difetto",
       "confidenza": "misurata",
-      "primo_avvistamento": "2026-08-31",
+      "primo_avvistamento": "2026-08-28",
       "occorrenze": [
         {
           "data": "2026-08-31",
@@ -4752,7 +4752,7 @@
       "titolo": "Gli alert CRITICAL del decay monitor non hanno alcun canale: solo log.critical, mobile_events vuota da sempre e zero dispositivi registrati",
       "tipo": "difetto",
       "confidenza": "misurata",
-      "primo_avvistamento": "2026-09-01",
+      "primo_avvistamento": "2026-08-28",
       "occorrenze": [
         {
           "data": "2026-09-01",
@@ -4863,7 +4863,7 @@
       "titolo": "Un ciclo sentiment schedulato su 24 non parte e non lascia alcuna traccia: l'assenza si deduce solo incrociando tre tabelle",
       "tipo": "difetto",
       "confidenza": "misurata",
-      "primo_avvistamento": "2026-09-02",
+      "primo_avvistamento": "2026-08-28",
       "occorrenze": [
         {
           "data": "2026-09-02",
@@ -4894,7 +4894,7 @@
       "titolo": "Un articolo 'content-mill' con ticker correttamente taggato ma zero contenuto informativo passa ISSUER_SPECIFIC e diluisce il segnale a rumore",
       "tipo": "osservazione",
       "confidenza": "congetturale",
-      "primo_avvistamento": "2026-09-03",
+      "primo_avvistamento": "2026-08-28",
       "occorrenze": [
         {
           "data": "2026-09-03",
@@ -5075,7 +5075,7 @@
       "titolo": "Il punteggio persistito in execution_decisions.signal_score e' quello grezzo, non quello moltiplicato dalla signal-velocity che il gate valuta davvero",
       "tipo": "difetto",
       "confidenza": "misurata",
-      "primo_avvistamento": "2026-09-08",
+      "primo_avvistamento": "2026-08-28",
       "occorrenze": [
         {
           "data": "2026-09-08",
@@ -5150,7 +5150,7 @@
       "titolo": "sanitize_text non decodifica le entita' HTML: il 61,6% delle righe scorate arriva al modello con &amp; / &#39; dentro",
       "tipo": "difetto",
       "confidenza": "misurata",
-      "primo_avvistamento": "2026-09-14",
+      "primo_avvistamento": "2026-08-28",
       "occorrenze": [
         {
           "data": "2026-09-14",
@@ -5206,7 +5206,7 @@
       "titolo": "Il worker sentiment dichiara come 'finbert_fallbacks' anche le letture a modello singolo: l'esito del task riporta un outage FinBERT che non e' avvenuto",
       "tipo": "difetto",
       "confidenza": "misurata",
-      "primo_avvistamento": "2026-09-15",
+      "primo_avvistamento": "2026-08-28",
       "occorrenze": [
         {
           "data": "2026-09-15",
@@ -5338,7 +5338,7 @@
       "titolo": "/api/trades espone una riga per ordine broker invece del ledger dei trade: net_pnl sempre nullo e BUY etichettati come uscite",
       "tipo": "difetto",
       "confidenza": "attribuita",
-      "primo_avvistamento": "2026-09-16",
+      "primo_avvistamento": "2026-08-28",
       "occorrenze": [
         {
           "data": "2026-09-16",
