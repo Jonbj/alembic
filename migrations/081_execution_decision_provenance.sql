@@ -1,4 +1,6 @@
--- 078_execution_decision_provenance.sql
+-- 081_execution_decision_provenance.sql
+-- (scritta come 078; rinumerata prima di essere applicata: 078/079/080 erano gia'
+-- occupate su main)
 -- #596: la provenienza del punteggio consumato da una decisione di uscita
 -- (``sentiment_reversal`` e ``below_entry_gate``, in particolare) NON e' oggi
 -- ricostruibile. ``execution_decisions.signal_id`` e' FK verso
@@ -46,7 +48,7 @@ COMMENT ON COLUMN execution_decisions.news_log_id IS
     '(#596). Distinta da signal_id: signal_id FK verso sentiment_signals (puo'' '
     'essere NULL per cancellazioni ON DELETE SET NULL); news_log_id resta anche '
     'quando sentiment_signals viene cancellata. NULL = non strumentato o riga '
-    'anteriore alla migrazione 078.';
+    'anteriore alla migrazione 081.';
 
 -- fan-out degree dell'articolo: quanti ticker distinti condividono lo stesso
 -- URL (stesso pattern di ``build_signal_diagnostics._default_db_enricher``).
@@ -63,32 +65,30 @@ COMMENT ON COLUMN execution_decisions.n_ticker_articolo IS
     'Conteggio di ticker distinti con lo stesso URL su news_log (1 = single-'
     'issuer, > 1 = fan-out). NULL = news_log assente/URL vuota/pre-migrazione.';
 
--- attribution: categoria di rilevanza dell'articolo rispetto al ticker della
--- decisione. I valori sono quelli di ``article_coverage.RELEVANCE_CATEGORIES``
--- (ISSUER_SPECIFIC, FANOUT, TAG_UNCONFIRMED, SECTOR_MACRO, IRRELEVANT_FANOUT,
--- FALSE_ENTITY_MATCH, UNKNOWN). Dominio chiuso: niente free-text, per poter
--- aggregare senza NLP.
+-- relevance: categoria di pertinenza dell'articolo rispetto al ticker della
+-- decisione, calcolata con article_coverage.relevance_for_article (la stessa
+-- regola del dossier e di article_signal_coverage, #637). Dominio chiuso =
+-- article_coverage.RELEVANCE_CATEGORIES. Si chiama ``relevance`` e non
+-- ``attribution`` perche' in article_signal_coverage ``attribution`` e' un'altra
+-- grandezza (ISSUER_SPECIFIC/FANOUT/UNKNOWN).
 ALTER TABLE execution_decisions
-    ADD COLUMN IF NOT EXISTS attribution TEXT;
+    ADD COLUMN IF NOT EXISTS relevance TEXT;
 
 ALTER TABLE execution_decisions
-    ADD CONSTRAINT ck_execution_decisions_attribution_domain
-        CHECK (attribution IS NULL OR attribution IN (
+    ADD CONSTRAINT ck_execution_decisions_relevance_domain
+        CHECK (relevance IS NULL OR relevance IN (
             'ISSUER_SPECIFIC',
-            'FANOUT',
-            'TAG_UNCONFIRMED',
             'SECTOR_MACRO',
-            'IRRELEVANT_FANOUT',
             'FALSE_ENTITY_MATCH',
+            'IRRELEVANT_FANOUT',
+            'TAG_UNCONFIRMED',
             'UNKNOWN'
         ));
 
-COMMENT ON COLUMN execution_decisions.attribution IS
-    'Categoria di rilevanza dell''articolo rispetto al ticker della decisione '
-    '(#596). Stesso dominio di article_coverage.RELEVANCE_CATEGORIES. '
-    'Calcolata al momento della scrittura via classify_attribution() con '
-    'ticker=symbol della decisione ed extraction_method della news_log. '
-    'NULL = news_log assente/pre-migrazione.';
+COMMENT ON COLUMN execution_decisions.relevance IS
+    'Pertinenza dell''articolo rispetto al ticker della decisione (#596), '
+    'da article_coverage.relevance_for_article su titolo + body_snippet + alias '
+    'di ticker_lookup. NULL = non strumentato/pre-migrazione.';
 
 -- Titolo e URL denormalizzati: articolo "altro-ticker" che ha fatto uscire la
 -- posizione (MU su titolo WDC, #596). Senza denormalizzazione la diagnosi
@@ -108,11 +108,10 @@ COMMENT ON COLUMN execution_decisions.article_url IS
     'URL canonicalizzato della news_log che ha guidato la decisione (#596). '
     'NULL = news_log assente/URL vuota/pre-migrazione.';
 
--- Indice di copertura per la misura #596: uscite guidate da fan-out
--- (``attribution IN ('FANOUT', 'TAG_UNCONFIRMED')``) o single-issuer.
-CREATE INDEX IF NOT EXISTS idx_execution_decisions_attribution
-    ON execution_decisions (attribution, tick_time DESC)
-    WHERE attribution IS NOT NULL;
+-- Indice di copertura per la misura #596.
+CREATE INDEX IF NOT EXISTS idx_execution_decisions_relevance
+    ON execution_decisions (relevance, tick_time DESC)
+    WHERE relevance IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_execution_decisions_n_ticker_articolo
     ON execution_decisions (n_ticker_articolo, tick_time DESC)

@@ -18,7 +18,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 
-from src.analysis.dossier.article_coverage import classify_attribution  # noqa: E402
+from src.analysis.dossier.article_coverage import relevance_for_article  # noqa: E402
 from src.store.pg_store import PostgreSQLStore  # noqa: E402
 
 WINDOW_START = datetime(2026, 8, 1, tzinfo=timezone.utc)
@@ -45,11 +45,20 @@ SELECT
     n.id               AS news_log_id,
     n.title,
     n.url,
+    n.body_snippet,
     n.extraction_method,
     CASE
         WHEN COALESCE(n.url, '') = '' THEN NULL
         ELSE (SELECT count(*) FROM news_log n2 WHERE n2.url = n.url)
-    END                AS n_ticker_articolo
+    END                AS n_ticker_articolo,
+    (
+        SELECT array_agg(term) FROM (
+            SELECT tl.company_name AS term FROM ticker_lookup tl
+             WHERE tl.ticker = ed.symbol AND tl.company_name IS NOT NULL
+            UNION
+            SELECT unnest(tl.aliases) FROM ticker_lookup tl WHERE tl.ticker = ed.symbol
+        ) terms WHERE term IS NOT NULL AND term <> ''
+    )                  AS issuer_terms
 FROM execution_decisions ed
 LEFT JOIN sentiment_signals s ON s.id = ed.signal_id
 LEFT JOIN news_log n           ON n.id = s.news_log_id
@@ -122,16 +131,18 @@ def main() -> int:
         ticker = row["decision_symbol"]
         title = row["title"] or ""
         url = row["url"] or ""
-        body_snippet = url
         extraction_method = row["extraction_method"] or ""
         fanout = row["n_ticker_articolo"]
 
-        category = classify_attribution(
-            ticker=ticker,
+        # Stessa regola del path di uscita (#169/#467): testo = titolo + corpo
+        # persistito, alias dell'emittente da ticker_lookup.
+        category = relevance_for_article(
+            symbol=ticker,
             title=title,
-            body_snippet=body_snippet,
+            body_snippet=row.get("body_snippet"),
             extraction_method=extraction_method,
-            n_ticker_articolo=fanout,
+            issuer_terms=row.get("issuer_terms"),
+            fanout_degree=fanout,
         )
         by_category[category] += 1
         is_reversal = _is_reversal(row["reason"])

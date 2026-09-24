@@ -808,7 +808,7 @@ class PostgreSQLStore:
     _INSERT_DECISION = """
         INSERT INTO execution_decisions
             (tick_time, symbol, signal_id, score, signal_score, velocity_multiplier, regime_mult, ema_pass, decision, order_id, reason, exit_mechanism,
-             news_log_id, n_ticker_articolo, attribution, article_title, article_url)
+             news_log_id, n_ticker_articolo, relevance, article_title, article_url)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
     """
@@ -829,7 +829,7 @@ class PostgreSQLStore:
         velocity_multiplier: float | None = None,
         news_log_id: int | None = None,
         n_ticker_articolo: int | None = None,
-        attribution: str | None = None,
+        relevance: str | None = None,
         article_title: str | None = None,
         article_url: str | None = None,
     ) -> int:
@@ -851,7 +851,7 @@ class PostgreSQLStore:
                             evaluated is signal_score × velocity_multiplier
                             (src/strategies/s4/entry_gate.py). None = not
                             instrumented (pre-077 rows, or velocity unavailable).
-            news_log_id, n_ticker_articolo, attribution, article_title, article_url:
+            news_log_id, n_ticker_articolo, relevance, article_title, article_url:
                             #596 — provenance of the score that triggered an exit
                             (sentiment_reversal, below_entry_gate). NULL when not
                             an exit, or when provenance lookup failed.
@@ -862,7 +862,7 @@ class PostgreSQLStore:
                 cur.execute(
                     self._INSERT_DECISION,
                     (tick_time, symbol, signal_id, score, signal_score, velocity_multiplier, regime_mult, ema_pass, decision, order_id, reason, exit_mechanism,
-                     news_log_id, n_ticker_articolo, attribution, article_title, article_url),
+                     news_log_id, n_ticker_articolo, relevance, article_title, article_url),
                 )
                 row = cur.fetchone()
             conn.commit()
@@ -878,11 +878,21 @@ class PostgreSQLStore:
             s.news_log_id,
             n.title,
             n.url,
+            n.body_snippet,
             n.extraction_method,
             CASE
                 WHEN COALESCE(n.url, '') = '' THEN NULL
                 ELSE (SELECT count(*) FROM news_log n2 WHERE n2.url = n.url)
-            END AS n_ticker_articolo
+            END AS n_ticker_articolo,
+            (
+                SELECT array_agg(term) FROM (
+                    SELECT tl.company_name AS term FROM ticker_lookup tl
+                     WHERE tl.ticker = s.symbol AND tl.company_name IS NOT NULL
+                    UNION
+                    SELECT unnest(tl.aliases) FROM ticker_lookup tl
+                     WHERE tl.ticker = s.symbol
+                ) terms WHERE term IS NOT NULL AND term <> ''
+            ) AS issuer_terms
         FROM sentiment_signals s
         LEFT JOIN news_log n ON n.id = s.news_log_id
         WHERE s.id = ANY(%s)
@@ -891,8 +901,9 @@ class PostgreSQLStore:
     def fetch_decision_provenance(self, signal_ids: list[int]) -> dict[int, dict]:
         """Return {signal_id: provenance_row} for exit provenance (#596).
 
-        Each row contains news_log_id, title, url, extraction_method, and
-        n_ticker_articolo (number of distinct tickers sharing the same URL —
+        Each row contains news_log_id, title, url, body_snippet,
+        extraction_method, issuer_terms (company name + aliases from
+        ticker_lookup, for the relevance classifier) and n_ticker_articolo (number of distinct tickers sharing the same URL —
         the fan-out degree that lets a measurement flag articles whose
         relevance to the decision symbol is weak).
 
@@ -903,17 +914,18 @@ class PostgreSQLStore:
             return {}
         conn = self._get_connection()
         try:
-            with conn.cursor() as cur:
+            # RealDictCursor: con il cursore di default le righe sono tuple e
+            # ``r["signal_id"]`` solleva, e il fail-soft qui sotto trasformerebbe
+            # ogni lookup in {} senza che nessuno se ne accorga.
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(self._FETCH_PROVENANCE_FOR_SIGNALS, (list(signal_ids),))
                 rows = cur.fetchall()
-                cols = [d[0] for d in cur.description]
             return {
-                int(r["signal_id"]): {
-                    k: r[k] for k in cols if k != "signal_id"
-                }
+                int(r["signal_id"]): {k: v for k, v in r.items() if k != "signal_id"}
                 for r in rows
             }
-        except Exception:
+        except Exception as exc:
+            log.warning("#596: provenance lookup fallita per %s: %s", signal_ids, exc)
             try:
                 conn.rollback()
             except Exception:

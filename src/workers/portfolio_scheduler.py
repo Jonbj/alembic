@@ -3262,45 +3262,12 @@ def _run_cycle_inner() -> dict:
                 and order.symbol not in _below_entry_gate_provenance_kwargs
             ):
                 _prov_sig_id = _signal_ids.get(order.symbol)
-                if _prov_sig_id:
-                    try:
-                        _prov_row = _pg.fetch_decision_provenance([_prov_sig_id]).get(_prov_sig_id, {})
-                        _news_log_id = _prov_row.get("news_log_id")
-                        _n_ticker = _prov_row.get("n_ticker_articolo")
-                        _title = _prov_row.get("title") or ""
-                        _body_snippet = _prov_row.get("url") or ""
-                        _ext_method = _prov_row.get("extraction_method") or ""
-                        try:
-                            from src.analysis.dossier.article_coverage import (
-                                classify_attribution as _classify_attr2,
-                            )
-                            _attribution = _classify_attr2(
-                                ticker=order.symbol,
-                                title=_title,
-                                body_snippet=_body_snippet,
-                                extraction_method=_ext_method,
-                                n_ticker_articolo=_n_ticker,
-                            )
-                        except Exception as _attr_exc2:
-                            log.debug("below_entry_gate attribution classify failed: %s", _attr_exc2)
-                            _attribution = None
-                        _below_entry_gate_provenance_kwargs[order.symbol] = {
-                            "news_log_id": _news_log_id,
-                            "n_ticker_articolo": _n_ticker,
-                            "attribution": _attribution,
-                            "article_title": _title or None,
-                            "article_url": _prov_row.get("url"),
-                        }
-                    except Exception as _prov_exc:
-                        log.debug("below_entry_gate provenance lookup failed: %s", _prov_exc)
-                        # Record empty dict so we don't re-try every cycle.
-                        _below_entry_gate_provenance_kwargs[order.symbol] = {
-                            "news_log_id": None,
-                            "n_ticker_articolo": None,
-                            "attribution": None,
-                            "article_title": None,
-                            "article_url": None,
-                        }
+                _prov_rows = (
+                    _pg.fetch_decision_provenance([_prov_sig_id]) if _prov_sig_id else {}
+                )
+                _below_entry_gate_provenance_kwargs[order.symbol] = _exit_provenance_kwargs(
+                    order.symbol, _prov_rows.get(_prov_sig_id)
+                )
             decision_id = _pg.write_execution_decision(
                 tick_time=ts,
                 symbol=order.symbol,
@@ -5387,6 +5354,48 @@ def _submit_portfolio_orders(
     return submitted
 
 
+_EMPTY_EXIT_PROVENANCE = {
+    "news_log_id": None,
+    "n_ticker_articolo": None,
+    "relevance": None,
+    "article_title": None,
+    "article_url": None,
+}
+
+
+def _exit_provenance_kwargs(symbol: str, prov_row: dict | None) -> dict:
+    """Colonne #596 di execution_decisions per un'uscita, mai un'eccezione.
+
+    ``prov_row`` viene da ``PostgreSQLStore.fetch_decision_provenance``. La
+    pertinenza e' calcolata con la regola condivisa col dossier
+    (``relevance_for_article``) su titolo + body_snippet + alias dell'emittente;
+    un guasto lascia la colonna NULL, ma l'uscita non si blocca mai.
+    """
+    if not prov_row:
+        return dict(_EMPTY_EXIT_PROVENANCE)
+    try:
+        from src.analysis.dossier.article_coverage import relevance_for_article
+
+        relevance = relevance_for_article(
+            symbol=symbol,
+            title=prov_row.get("title"),
+            body_snippet=prov_row.get("body_snippet"),
+            extraction_method=prov_row.get("extraction_method"),
+            issuer_terms=prov_row.get("issuer_terms"),
+            fanout_degree=prov_row.get("n_ticker_articolo"),
+        )
+    except Exception as exc:
+        log.warning("#596: relevance non calcolata per %s: %s", symbol, exc)
+        relevance = None
+    return {
+        "news_log_id": prov_row.get("news_log_id"),
+        "n_ticker_articolo": prov_row.get("n_ticker_articolo"),
+        "relevance": relevance,
+        "article_title": prov_row.get("title") or None,
+        "article_url": prov_row.get("url"),
+    }
+
+
 def _submit_reversal_force_sells(
     reversal_sell_symbols: dict,
     final_orders,
@@ -5519,41 +5528,9 @@ def _submit_reversal_force_sells(
                     _threshold = config.SENTIMENT_REVERSAL_EXIT_THRESHOLD
                     _rev_signal_id = _rev_sig.get("signal_id")
                     # #596: provenance of the score that triggered the exit.
-                    _prov_kwargs: dict = {
-                        "news_log_id": None,
-                        "n_ticker_articolo": None,
-                        "attribution": None,
-                        "article_title": None,
-                        "article_url": None,
-                    }
-                    if _rev_signal_id and _rev_signal_id in _reversal_provenance:
-                        _prov_row = _reversal_provenance[_rev_signal_id]
-                        _news_log_id = _prov_row.get("news_log_id")
-                        _n_ticker = _prov_row.get("n_ticker_articolo")
-                        _title = _prov_row.get("title") or ""
-                        _body_snippet = _prov_row.get("url") or ""
-                        _ext_method = _prov_row.get("extraction_method") or ""
-                        try:
-                            from src.analysis.dossier.article_coverage import (
-                                classify_attribution as _classify_attr,
-                            )
-                            _attribution = _classify_attr(
-                                ticker=sym,
-                                title=_title,
-                                body_snippet=_body_snippet,
-                                extraction_method=_ext_method,
-                                n_ticker_articolo=_n_ticker,
-                            )
-                        except Exception as _attr_exc:
-                            log.debug("reversal attribution classify failed: %s", _attr_exc)
-                            _attribution = None
-                        _prov_kwargs = {
-                            "news_log_id": _news_log_id,
-                            "n_ticker_articolo": _n_ticker,
-                            "attribution": _attribution,
-                            "article_title": _title or None,
-                            "article_url": _prov_row.get("url"),
-                        }
+                    _prov_kwargs = _exit_provenance_kwargs(
+                        sym, _reversal_provenance.get(_rev_signal_id) if _rev_signal_id else None
+                    )
                     _pg_rev.write_execution_decision(
                         tick_time=ts,
                         symbol=sym,

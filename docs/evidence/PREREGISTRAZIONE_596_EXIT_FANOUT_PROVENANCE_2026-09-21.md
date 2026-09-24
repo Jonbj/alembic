@@ -82,10 +82,19 @@ chiave Redis di stato: e' read-only.
 
 - L'enforcement (ignorare l'exit quando `attribution` e' rumoroso) richiede un
   cambiamento di comportamento ed e' **fuori freeze** fino al 2026-09-28.
-- La migrazione 078 e' additive (colonne nullable), quindi e' safe da
+- La migrazione 081 (scritta come 078, rinumerata prima dell'applicazione) e' additiva (colonne nullable), quindi e' safe da
   applicare anche durante il freeze (non cambia righe esistenti).
 
 ## Multiplicity
 
 Una sola misura, una sola variabile di esito, una sola popolazione. Niente
 grid search.
+
+## Emendamento 2026-09-24, prima di qualunque esecuzione della misura
+
+Scritto in review della PR #639. Nessun artefatto `EXIT_FANOUT_PROVENANCE_596_*.json` era stato prodotto: l'esito non è stato visto.
+
+1. **Strumento.** `classify_attribution()` non esiste più con quella firma (su main, dalla #637, è un'altra funzione). La classificazione usa ora `relevance_for_article()` di `src/analysis/dossier/article_coverage.py`, un wrapper sottile di `classify_relevance()`, la stessa regola del dossier e di `article_signal_coverage`. La chiamano sia il path di uscita sia lo script (#169/#467).
+2. **Testo e alias.** La prima versione passava `news_log.url` come `body_snippet` e nessun alias dell'emittente. Adesso il testo è titolo + `news_log.body_snippet` e gli alias vengono da `ticker_lookup` (ragione sociale + `aliases`). Senza alias, un articolo su "Micron" risultava `TAG_UNCONFIRMED` o `FALSE_ENTITY_MATCH` per MU, gonfiando proprio il tasso "rumoroso" su cui si decide OUT-A.
+3. **Colonna e migrazione.** Su `execution_decisions` la colonna si chiama `relevance`, con il dominio `RELEVANCE_CATEGORIES`. La migrazione è la **081**: 078/079/080 erano già occupate su main.
+4. **Limite noto, da decidere prima di eseguire.** `classify_relevance` misura la **menzione** dell'emittente nel testo, non il fatto che ne sia il **soggetto**. Il caso che motiva la issue, "Why Is Western Digital Stock Falling Monday?" per MU (segnale 10669), esce `ISSUER_SPECIFIC`: il corpo cita "Micron Technology Inc. (NASDAQ: MU)" fra i titoli scesi insieme a WDC. Con questa regola la misura tende a contare come pulite le uscite su articoli "altro-ticker" che nominano il titolo di passaggio, quindi il suo errore spinge verso OUT-B. Cambiare la regola sposterebbe anche il dossier e la serie #637: è una decisione dell'operatore, non di questa PR.
