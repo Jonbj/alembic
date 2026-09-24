@@ -1,4 +1,4 @@
--- Migration 079: classificazione articolo al momento dello scoring (#637).
+-- Migration 080: classificazione articolo al momento dello scoring (#637).
 --
 -- Serie nuova, additiva e solo osservazionale. Non modifica news_log ne'
 -- sentiment_signals, per non cambiare i denominatori delle serie #508/#511;

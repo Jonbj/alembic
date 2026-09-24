@@ -858,19 +858,26 @@ class LiveSignalSink:
         news_log_id = pg_store.log_news_item(
             item=item, ticker=ticker, computed_sentiment=result.score
         )
-        coverage = build_signal_coverage(
-            item=item,
-            result=result,
-            issuer_terms=pg_store.fetch_issuer_terms(ticker),
-            sessions=load_actionable_sessions(item.timestamp),
-        )
-        # #637: la riga osservazionale precede il link al ledger esistente.
-        # Se questa scrittura fallisce, il crash-recovery non vede ancora il
-        # legame (url,ticker), riprova il batch e non lascia uno score orfano
-        # della sua classificazione.
-        pg_store.write_article_signal_coverage(
-            signal_id=signal_id, news_log_id=news_log_id, coverage=coverage
-        )
+        # #637: serie osservazionale, fail-open. Un suo guasto (tabella non
+        # ancora migrata, eccezione nel classifier, calendario) non deve mai
+        # far ritentare il batch: il segnale e' gia' scritto, e un retry
+        # produrrebbe duplicati (#551). La riga mancante resta visibile come
+        # buco della serie, non come segnale perso.
+        try:
+            coverage = build_signal_coverage(
+                item=item,
+                result=result,
+                issuer_terms=pg_store.fetch_issuer_terms(ticker),
+                sessions=load_actionable_sessions(item.timestamp),
+            )
+            pg_store.write_article_signal_coverage(
+                signal_id=signal_id, news_log_id=news_log_id, coverage=coverage
+            )
+        except Exception as _cov_exc:
+            log.warning(
+                "#637: article_signal_coverage non scritta per signal %s/%s: %s",
+                ticker, signal_id, _cov_exc,
+            )
         if news_log_id is not None:
             pg_store.link_signal_to_news(signal_id=signal_id, news_log_id=news_log_id)
         else:

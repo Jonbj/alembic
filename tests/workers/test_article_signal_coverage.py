@@ -1,6 +1,6 @@
 """#637 — classificazione additiva al momento dello scoring."""
 
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 
 from src.models.news import NewsItem
 from src.models.signals import SentimentResult
@@ -107,3 +107,70 @@ async def test_live_sink_records_coverage_without_changing_signal_destination(mo
 
     pg.write_article_signal_coverage.assert_called_once()
     redis.write_sentiment.assert_called_once_with(result, signal_id=17)
+
+
+async def test_un_guasto_della_serie_osservazionale_non_ferma_il_segnale(monkeypatch):
+    """#637 e' osservazionale: se la scrittura fallisce (tabella non migrata,
+    classifier che solleva) il sink completa comunque link e Redis, senza
+    rilanciare — un retry del batch duplicherebbe i segnali (#551)."""
+    from unittest.mock import MagicMock
+
+    pg = MagicMock()
+    pg.find_signal_id_for_news.return_value = None
+    pg.write_signal.return_value = 17
+    pg.log_news_item.return_value = 9
+    pg.write_article_signal_coverage.side_effect = RuntimeError(
+        'relation "article_signal_coverage" does not exist'
+    )
+    monkeypatch.setattr(pg, "fetch_issuer_terms", lambda _symbol: [])
+    monkeypatch.setattr(
+        "src.workers.sentiment.load_actionable_sessions", lambda _published: []
+    )
+    redis = MagicMock()
+    item = NewsItem(
+        id="orcl-2", title="Oracle raises guidance", body="Oracle guidance",
+        asset_tags=["ORCL"], url="https://example.test/orcl-2",
+    )
+    result = SentimentResult(
+        symbol="ORCL", score=0.42, confidence=0.8, reasoning="", model_id="test"
+    )
+
+    await LiveSignalSink(redis, pg).persist(item, result, [], shadow_tasks=[])
+
+    redis.write_sentiment.assert_called_once_with(result, signal_id=17)
+    pg.link_signal_to_news.assert_called_once_with(signal_id=17, news_log_id=9)
+
+
+def test_il_calendario_si_chiede_una_volta_per_giorno(monkeypatch):
+    from types import SimpleNamespace
+
+    import src.workers.article_signal_coverage as mod
+
+    chiamate = []
+
+    class _Riga:
+        def __init__(self, giorno):
+            self.date = giorno
+            self.open = time(9, 30)
+            self.close = time(16, 0)
+
+    class _Client:
+        def __init__(self, *_a, **_k):
+            pass
+
+        def get_calendar(self, request):
+            chiamate.append(request.start)
+            return [_Riga(request.start)]
+
+    monkeypatch.setattr("alpaca.trading.client.TradingClient", _Client)
+    monkeypatch.setattr(
+        "src.config.config",
+        SimpleNamespace(ALPACA_API_KEY="k", ALPACA_SECRET_KEY="s", ALPACA_PAPER_MODE=True),
+    )
+    monkeypatch.setattr(mod, "_CALENDAR_CACHE", {})
+
+    t1 = datetime(2026, 9, 22, 14, 0, tzinfo=timezone.utc)
+    mod.load_actionable_sessions(t1)
+    mod.load_actionable_sessions(t1 + timedelta(hours=1))
+
+    assert len(chiamate) == 1

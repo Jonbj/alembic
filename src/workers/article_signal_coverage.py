@@ -26,6 +26,8 @@ from src.models.signals import SentimentResult
 
 log = logging.getLogger(__name__)
 _NEW_YORK = ZoneInfo("America/New_York")
+_CALENDAR_CACHE: dict[date, list["MarketSession"]] = {}
+_CALENDAR_CACHE_MAX = 64
 
 
 @dataclass(frozen=True)
@@ -61,16 +63,23 @@ def load_actionable_sessions(published_at: datetime) -> list[MarketSession]:
     if not config.ALPACA_API_KEY or not config.ALPACA_SECRET_KEY:
         return []
     moment = published_at if published_at.tzinfo else published_at.replace(tzinfo=timezone.utc)
+    start = moment.astimezone(_NEW_YORK).date()
+    # Il sink chiama per ogni segnale, nel worker di inferenza a concorrenza 1:
+    # una richiesta HTTP per segnale e' latenza e rate limit per nulla, il
+    # calendario di un giorno non cambia. Si mette in cache solo il successo.
+    cached = _CALENDAR_CACHE.get(start)
+    if cached is not None:
+        return cached
     try:
         client = TradingClient(
             config.ALPACA_API_KEY, config.ALPACA_SECRET_KEY,
             paper=config.ALPACA_PAPER_MODE,
         )
         rows = client.get_calendar(GetCalendarRequest(
-            start=moment.astimezone(_NEW_YORK).date(),
+            start=start,
             end=(moment + timedelta(days=8)).astimezone(_NEW_YORK).date(),
         ))
-        return [
+        sessions = [
             MarketSession(
                 date=row.date,
                 open_at=_session_boundary(row.open, row.date),
@@ -81,6 +90,10 @@ def load_actionable_sessions(published_at: datetime) -> list[MarketSession]:
     except Exception as exc:
         log.warning("#637: calendario Alpaca non disponibile: %s", exc)
         return []
+    if len(_CALENDAR_CACHE) >= _CALENDAR_CACHE_MAX:
+        _CALENDAR_CACHE.clear()
+    _CALENDAR_CACHE[start] = sessions
+    return sessions
 
 
 def _actionable_session(
