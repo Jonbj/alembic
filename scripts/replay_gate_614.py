@@ -25,7 +25,7 @@ import argparse
 import json
 import os
 import sys
-from collections import Counter
+from collections.abc import Mapping
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -48,9 +48,19 @@ from src.backtest.engine.types import OrderSide
 # ---------------------------------------------------------------------------
 
 
-def fills_da_ordini(ordini: list[dict[str, Any]]) -> list[BrokerFill]:
+def fills_da_ordini(
+    ordini: list[dict[str, Any]],
+    motivi: Mapping[str, str] | None = None,
+) -> list[BrokerFill]:
     """Ordini broker -> fill. Contano anche i parzialmente riempiti poi annullati:
-    un fill parziale ha mosso il cash comunque."""
+    un fill parziale ha mosso il cash comunque.
+
+    Con ``motivi`` (id ordine -> exit_reason, dal DB diagnostico) ogni fill
+    porta la sua etichetta: serve al controfattuale #614 per sapere quali
+    vendite erano ``portfolio_sell``. Senza, il comportamento e' invariato.
+    """
+    from src.backtest.engine.exit_counterfactual import FillConMotivo
+
     fills: list[BrokerFill] = []
     for o in ordini:
         # Il replay e' sul libro azionario. Un ordine opzioni multi-gamba (mleg)
@@ -62,13 +72,15 @@ def fills_da_ordini(ordini: list[dict[str, Any]]) -> list[BrokerFill]:
         prezzo = o.get("filled_avg_price")
         if qty <= 0 or prezzo is None:
             continue
+        motivo = motivi.get(o["id"]) if motivi else None
         fills.append(
-            BrokerFill(
+            FillConMotivo(
                 timestamp=datetime.fromisoformat(o["filled_at"].replace("Z", "+00:00")),
                 symbol=o["symbol"],
                 side=OrderSide(o["side"].upper()),
                 quantity=qty,
                 fill_price=float(prezzo),
+                exit_reason=motivo,
             )
         )
     return sorted(fills, key=lambda f: f.timestamp)
