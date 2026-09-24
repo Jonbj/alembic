@@ -9,12 +9,12 @@ La coppia ensemble NON è hardcoded: è selezionata dalla chiave Redis
 `in_all=False`, quindi la selezione `"all"` resta il set live a 2 modelli e
 registrare un candidato non allarga silenziosamente l'ensemble.
 
-## Modelli attivi in produzione (2026-07-11)
+## Modelli attivi in produzione (2026-09-22)
 
 | Modello | Provider | Uso | Note |
 |---------|----------|-----|------|
 | FinBERT | HuggingFace (locale) | Fallback su divergenza/timeout/budget | int8 quantized, ~50% RAM vs baseline |
-| GLM-5.2 | Ollama (cloud) | Sentiment ensemble | Flagship Zhipu AI; Stage 1: accuracy 0.47, 2.8s |
+| GLM-5.3 | Ollama (cloud) | Sentiment ensemble | Stesso base model di GLM-5.2, gain solo post-training (coding/agentic); nessun nuovo A/B Stage 1 su questo dominio — vedi deroga 2026-09-22 in `docs/evidence/OBSERVATION_CHARTER.md` |
 | GPT-OSS 20B | Ollama (cloud) | Sentiment ensemble | Open-weight, unico vendor non cinese; Stage 1: accuracy 0.41, 0 parse-fail, 8.7s |
 
 ## Modelli rimossi / sostituiti
@@ -25,6 +25,7 @@ registrare un candidato non allarga silenziosamente l'ensemble.
 | GLM-5.1 | 2026-06-16 | IC inferiore a Kimi K2.6 in A/B test |
 | Qwen3.5 | 2026-06-29 | Ticker extraction troppo aggressiva (es. MU da notizia macro Iran/US); sostituito da GLM-5.2 |
 | Kimi K2.6 | 2026-07-11 | Disaccordo direzionale sistematico con GLM-5.2 (fallback 75-80%); Stage 1: peggior accuracy (0.29) e 29s di latenza; sostituito da GPT-OSS 20B |
+| GLM-5.2 | 2026-09-22 | Swap di versione (non A/B): sostituito da GLM-5.3, stesso base model di Zhipu AI/Z.ai — vedi deroga nel charter di osservazione |
 
 ## Formula segnale
 

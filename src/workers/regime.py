@@ -105,7 +105,7 @@ def _make_llm_client(model_id: str) -> OllamaKimiClient | OllamaQwen35Client | O
         "kimi-k2.6:cloud": OllamaKimiClient,
         "qwen3.5:cloud": OllamaQwen35Client,
         "deepseek-v4-pro:cloud": OllamaDeepseekClient,
-        "glm-5.1:cloud": OllamaGlmClient,
+        "glm-5.3:cloud": OllamaGlmClient,
     }
     cls = registry.get(model_id)
     if cls is None:

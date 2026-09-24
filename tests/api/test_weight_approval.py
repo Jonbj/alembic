@@ -22,11 +22,11 @@ SAMPLE_SUGGESTION = {
     # registry and were silently normalized to kimi+glm52 defaults.
     "suggested_weights": {
         "kimi-k2.6:cloud": 0.45,
-        "glm-5.2:cloud": 0.55,
+        "glm-5.3:cloud": 0.55,
     },
     "purified_icir": {
         "kimi-k2.6:cloud": 0.31,
-        "glm-5.2:cloud": 0.24,
+        "glm-5.3:cloud": 0.24,
     },
     "freeze_reason": "",
     "computed_at": "2026-05-04T08:00:00+00:00",
@@ -122,7 +122,7 @@ async def test_approve_override_bypasses_freeze():
     pg = make_pg_mock()
     app.dependency_overrides[get_redis_store] = lambda: redis
     app.dependency_overrides[get_pg_store] = lambda: pg
-    override = {"kimi-k2.6:cloud": 0.50, "glm-5.2:cloud": 0.50}
+    override = {"kimi-k2.6:cloud": 0.50, "glm-5.3:cloud": 0.50}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post(
             "/api/weights/approve",
@@ -140,7 +140,7 @@ async def test_approve_override_invalid_sum():
     """POST /approve with weights summing to ≠ 1.0 → 422."""
     redis = make_redis_mock()
     app.dependency_overrides[get_redis_store] = lambda: redis
-    bad = {"kimi-k2.6:cloud": 0.60, "glm-5.2:cloud": 0.50}  # sum=1.1
+    bad = {"kimi-k2.6:cloud": 0.60, "glm-5.3:cloud": 0.50}  # sum=1.1
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post(
             "/api/weights/approve",
@@ -157,7 +157,7 @@ async def test_approve_override_cap_exceeded():
     """POST /approve with weight > 0.70 → 422."""
     redis = make_redis_mock()
     app.dependency_overrides[get_redis_store] = lambda: redis
-    bad = {"kimi-k2.6:cloud": 0.80, "glm-5.2:cloud": 0.20}
+    bad = {"kimi-k2.6:cloud": 0.80, "glm-5.3:cloud": 0.20}
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         resp = await c.post(
             "/api/weights/approve",
