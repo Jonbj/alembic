@@ -31,7 +31,7 @@ non ricostruisce il filtro (regola #169: la misura non duplica la produzione).
 
 `docs/evidence/h_a_2024.json` e `docs/evidence/h_a_2025.json`, piu' le versioni
 "senza i 5 selezionati sull'esito". Ogni file dichiara n, giornate, media per
-gruppo, t clusterizzato, effetto minimo rilevabile a |t|=3, verdetto.
+gruppo, t sulle medie giornaliere, effetto minimo rilevabile a |t|=3, verdetto.
 
 Uso:
     .venv/bin/python scripts/event_study_h_a_610.py \\
@@ -49,6 +49,7 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -74,9 +75,9 @@ MINUTI_BASELINE = 24
 # collassano in uno (il mercato reagisce a "una notizia" non a "una raffica").
 COOLDOWN_MINUTI = 5
 
-# Soglia di non-rilevabilita': n_cluster_validi < 2 rende il SE cluster-robust
-# non definito (regola INSUFFICIENT_N della casa).
-MIN_CLUSTER_VALID = 2
+# Con meno di 2 giornate l'errore standard fra giornate non e' definito
+# (regola INSUFFICIENT_N della casa).
+MIN_GIORNI = 2
 
 # Barra |t| per verdetto PASS/FAIL.
 SOGLIA_T = 3.0
@@ -85,6 +86,8 @@ SOGLIA_T = 3.0
 # Il "rapporto atteso = 1 per i template" e' l'ipotesi nulla: se la loro
 # volatilita' post e' indistinguibile dal fondo, NON separano.
 RAPPORTO_H0 = 1.0
+
+ET = ZoneInfo("America/New_York")
 
 
 # ---------- Tipi ----------
@@ -96,7 +99,7 @@ class VolatilityRatio:
 
     `ratio = vol_evento / vol_baseline`. None quando non calcolabile (finestre
     mancanti, barre insufficienti). Articoli con ratio=None sono esclusi dal
-    test clusterizzato: la mancanza di barre minute SIP non e' un'evidenza, e'
+    test: la mancanza di barre minute SIP non e' un'evidenza, e'
     un buco di copertura.
     """
 
@@ -105,24 +108,28 @@ class VolatilityRatio:
     timestamp: datetime
     content_empty: bool
     ratio: float | None
-    giorno: str  # YYYY-MM-DD in America/New_York — unit cluster
+    giorno: str  # YYYY-MM-DD in America/New_York — unita. di inferenza
 
 
 @dataclass
-class ClusteredMean:
-    """Media clusterizzata (cluster = giorno in America/New_York).
+class StatisticaGiornaliera:
+    """Media delle medie giornaliere del rapporto, con t fra giornate.
 
-    SE cluster-robust: ignora i singleton (cluster da 1 sola osservazione)
-    perche' non danno informazione sulla variabilita' between-cluster. Con
-    meno di 2 cluster validi il SE non e' definito e `t` viene lasciato a
-    `inf`/`nan` — segnale per il verdetto di INSUFFICIENT_N.
+    Prereg §4: l'unita' di inferenza e' la giornata (America/New_York). Ogni
+    giornata pesa uno, qualunque sia il numero di articoli; una giornata con un
+    solo articolo e' comunque una giornata. ``effetto_rilevabile_a_t3`` e'
+    3 × SE stimato dai dati, non una formula ipotetica.
     """
 
     media: float
     t: float
+    se: float
     n_obs: int
-    n_cluster: int
-    n_cluster_validi: int
+    n_giorni: int
+
+    @property
+    def effetto_rilevabile_a_t3(self) -> float:
+        return SOGLIA_T * self.se if math.isfinite(self.se) else math.inf
 
 
 @dataclass
@@ -174,17 +181,20 @@ def classifica(titolo: str) -> tuple[bool, str | None]:
 def _volatilita_finestra(close: pd.Series, finestra_inizio: datetime, n_minuti: int) -> float | None:
     """Std dei log-return nella finestra [inizio, inizio+n_minuti).
 
-    Restituisce None se la finestra ha meno di 2 barre (std non definita su
-    un punto).
+    Restituisce None se la finestra ha meno di 3 barre (servono almeno due
+    log-return per una std campionaria).
     """
     fine = finestra_inizio + pd.Timedelta(minutes=n_minuti)
     barre = close[(close.index >= finestra_inizio) & (close.index < fine)]
     if len(barre) < 2:
         return None
     log_ret = np.log(barre / barre.shift(1)).dropna()
-    if log_ret.empty:
+    # Con un solo log-return std(ddof=1) e' NaN: prima passava il filtro
+    # ``ratio is not None`` e avvelenava media e SE.
+    if len(log_ret) < 2:
         return None
-    return float(log_ret.std(ddof=1))
+    vol = float(log_ret.std(ddof=1))
+    return vol if math.isfinite(vol) else None
 
 
 def calcola_rapporto(
@@ -237,100 +247,51 @@ def within_cooldown(
     return delta < cooldown_minuti
 
 
-# ---------- Statistica clusterizzata ----------
+# ---------- Statistica per giornata ----------
 
 
-def clustered_mean(observations: list[tuple[int, float]]) -> ClusteredMean:
-    """Media clusterizzata con SE cluster-robust (singleton esclusi).
+def media_delle_medie_giornaliere(osservazioni: list[tuple[str, float]]) -> StatisticaGiornaliera:
+    """Media delle medie giornaliere e t contro RAPPORTO_H0 sull'SE fra giornate.
 
-    Un cluster con un solo elemento non dice nulla sulla variabilita'
-    between-cluster: lo escludo dal SE (non dalla media). Con meno di 2
-    cluster validi il SE non e' definito e segnalo `t=inf` per il verdetto
-    INSUFFICIENT_N.
+    ``osservazioni`` = (giorno, rapporto). Sostituisce la versione
+    "cluster-robust" della prima PR, che mediava per articolo ed escludeva i
+    giorni singleton dal solo SE: un giorno estremo spostava la media senza
+    pesare sull'errore, e t esplodeva (PASS spurio).
     """
-    if not observations:
-        return ClusteredMean(media=math.nan, t=math.inf, n_obs=0, n_cluster=0, n_cluster_validi=0)
-
-    obs_per_cluster: dict[int, list[float]] = defaultdict(list)
-    for cluster_id, value in observations:
-        obs_per_cluster[cluster_id].append(float(value))
-
-    n_obs = sum(len(v) for v in obs_per_cluster.values())
-    n_cluster = len(obs_per_cluster)
-    media = sum(sum(v) for v in obs_per_cluster.values()) / n_obs
-
-    validi = {c: vs for c, vs in obs_per_cluster.items() if len(vs) >= 2}
-    n_validi = len(validi)
-    if n_validi < MIN_CLUSTER_VALID:
-        # SE cluster-robust non definito: ritorno t=inf come segnale che il
-        # verdetto sara' INSUFFICIENT_N (la priorita' in casa).
-        return ClusteredMean(
-            media=media,
-            t=math.inf,
-            n_obs=n_obs,
-            n_cluster=n_cluster,
-            n_cluster_validi=n_validi,
-        )
-
-    # Stima naive di M_n := sqrt( (n_c / (n_c - 1)) * sum_c (mean_c - mean)^2 )
-    # E' il moltiplicatore del SE cluster-robust nella sua forma classica.
-    # Per semplicita' e trasparenza del numero pubblicato, qui lo calcolo
-    # come: Varianza between-cluster dei mean_c, scalata per n_c/(n_c - 1).
-    cluster_means = [np.mean(vs) for vs in validi.values()]
-    cluster_sizes = [len(vs) for vs in validi.values()]
-    n_c = n_validi
-    grand_mean = float(np.mean(cluster_means))
-    M = math.sqrt(
-        (n_c / (n_c - 1)) * sum((m - grand_mean) ** 2 for m in cluster_means) / n_c
-    )
-    # SE = M / sqrt(n_c) (forma classica, vedi Cameron & Miller 2015).
-    se = M / math.sqrt(n_c)
-    if se == 0.0 or not math.isfinite(se):
-        t = math.inf if media != RAPPORTO_H0 else 0.0
-    else:
-        t = (media - RAPPORTO_H0) / se
-
-    return ClusteredMean(
-        media=float(media),
-        t=float(t),
-        n_obs=n_obs,
-        n_cluster=n_cluster,
-        n_cluster_validi=n_validi,
-    )
+    per_giorno: dict[str, list[float]] = defaultdict(list)
+    for giorno, valore in osservazioni_valide(osservazioni):
+        per_giorno[giorno].append(valore)
+    medie = [float(np.mean(v)) for v in per_giorno.values()]
+    n_obs = sum(len(v) for v in per_giorno.values())
+    n = len(medie)
+    if n < MIN_GIORNI:
+        media = medie[0] if medie else math.nan
+        return StatisticaGiornaliera(media=media, t=math.nan, se=math.inf, n_obs=n_obs, n_giorni=n)
+    media = float(np.mean(medie))
+    se = float(np.std(medie, ddof=1)) / math.sqrt(n)
+    t = (media - RAPPORTO_H0) / se if se > 0 else math.nan
+    return StatisticaGiornaliera(media=media, t=t, se=se, n_obs=n_obs, n_giorni=n)
 
 
-def effetto_rilevabile_a_t3(n_cluster: int, n_obs: int, t_target: float = SOGLIA_T) -> float:
-    """Minima differenza dal H0 (RAPPORTO_H0=1) rilevabile a |t|=t_target.
-
-    Con n_cluster cluster e n_obs totali, SE = M / sqrt(n_cluster). Se M e'
-    la deviazione between-cluster osservata in passato (qui la simulo con
-    la regola classica M ~= std(cluster_means) ~= 1/sqrt(n_obs)), allora
-    l'effetto minimo = t_target * SE.
-
-    Senza uno studio pilota della varianza between-cluster, la formula
-    approssima con uno scenario "between simile a within" (ICC=0.5), che
-    e' conservativa per la casa (un ICC piu' alto renderebbe l'effetto
-    minimo piu' grande, non piu' piccolo).
-    """
-    if n_cluster < MIN_CLUSTER_VALID:
-        return math.inf
-    # SE_ipotico = sqrt(1 / (n_obs * n_cluster))  (forma ICC=0.5)
-    se = math.sqrt(1.0 / max(n_obs, 1) + 1.0 / max(n_cluster, 1))
-    return float(t_target * se)
+def osservazioni_valide(osservazioni: list[tuple[str, float]]) -> list[tuple[str, float]]:
+    """Scarta None e non finiti: un buco di copertura non e' un'osservazione."""
+    return [
+        (giorno, float(v)) for giorno, v in osservazioni
+        if v is not None and math.isfinite(float(v))
+    ]
 
 
 # ---------- Lettura archivio ----------
 
 
-def leggi_archivio(directory: Path) -> list[dict]:
+def leggi_archivio(directory: Path) -> tuple[list[dict], int]:
     """Legge tutti i `news_YYYY-MM.jsonl` in ordine di mese.
 
-    Righe vuote o non-JSON sono saltate silenziosamente (un archivio con
-    una riga corrotta non e' perso, ma la riga non partecipa alla
-    misura). Lo script principale logga il conteggio cosi' un operatore
-    puo' accorgersene.
+    Righe vuote saltate; righe non-JSON saltate ma CONTATE: il conteggio torna
+    al chiamante e finisce nell'artefatto, cosi' un buco nell'archivio si vede.
     """
     out: list[dict] = []
+    righe_malformate = 0
     for path in sorted(Path(directory).glob("news_*.jsonl")):
         with path.open(encoding="utf-8") as handle:
             for raw in handle:
@@ -340,8 +301,11 @@ def leggi_archivio(directory: Path) -> list[dict]:
                 try:
                     out.append(json.loads(raw))
                 except json.JSONDecodeError:
-                    continue
-    return out
+                    righe_malformate += 1
+    if righe_malformate:
+        print(f"ATTENZIONE: {righe_malformate} righe non JSON saltate in {directory}",
+              file=sys.stderr)
+    return out, righe_malformate
 
 
 def articoli_per_anno(archivio: list[dict]) -> PopolazionePerAnno:
@@ -384,23 +348,6 @@ def scrivi_artefatto(path: Path, payload: dict) -> None:
     with path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2, ensure_ascii=False, sort_keys=False)
         handle.write("\n")
-
-
-def per_article_day_clusters(ratios: list[VolatilityRatio]) -> list[tuple[int, float]]:
-    """Assegna il cluster (giorno) a ogni rapporto, senza pre-mediare.
-
-    Il cluster e' il giorno, ma `clustered_mean` ha bisogno delle
-    osservazioni **per articolo** per stimare la varianza within-cluster:
-    se un giorno viene ridotto a una sola media prima di arrivarci, quel
-    cluster e' sempre un singleton (1 valore) e il SE cluster-robust non e'
-    mai definito, qualunque sia il volume di articoli nell'archivio. Ogni
-    ticker diverso nello stesso giorno resta un'osservazione separata dello
-    stesso cluster: il fan-out multi-ticker e' varianza within-day, non un
-    secondo cluster.
-    """
-    giorni = sorted({r.giorno for r in ratios if r.ratio is not None})
-    indice = {giorno: i for i, giorno in enumerate(giorni)}
-    return [(indice[r.giorno], r.ratio) for r in ratios if r.ratio is not None]
 
 
 # ---------- Verdetto ----------
@@ -449,7 +396,9 @@ def _esegui_anno(
         if escludi_selezionati and ticker in SELEZIONATI_SULL_ESITO:
             continue
         ts = parse_timestamp(str(articolo["created_at"]))
-        giorno = ts.astimezone(timezone.utc).strftime("%Y-%m-%d")  # operativo: UTC
+        # Giornata di mercato: America/New_York (le news dopo le 20:00 ET
+        # cadrebbero nel giorno UTC successivo).
+        giorno = ts.astimezone(ET).strftime("%Y-%m-%d")
         chiave = (ticker, giorno, ts)
         # Cooldown: collassa articoli dello stesso ticker entro 5 min.
         skip = False
@@ -486,26 +435,26 @@ def _esegui_anno(
         ("content_empty", lambda r: r.content_empty),
         ("non_content_empty", lambda r: not r.content_empty),
     ):
-        ratios_g = [r for r in ratios if filtro(r) and r.ratio is not None]
-        obs = per_article_day_clusters(ratios_g)
-        cm = clustered_mean(obs)
-        eff = effetto_rilevabile_a_t3(cm.n_cluster_validi, cm.n_obs)
+        stat = media_delle_medie_giornaliere(
+            [(r.giorno, r.ratio) for r in ratios if filtro(r)]
+        )
         out[gruppo] = {
-            "n": cm.n_obs,
-            "n_giorni": cm.n_cluster,
-            "n_cluster_validi": cm.n_cluster_validi,
-            "media": cm.media,
-            "t": cm.t,
-            "effetto_rilevabile_a_t3": eff,
-            "verdetto": _verdetto(cm.media, cm.t, eff),
+            "n": stat.n_obs,
+            "n_giorni": stat.n_giorni,
+            "media": stat.media,
+            "t": stat.t,
+            "effetto_rilevabile_a_t3": stat.effetto_rilevabile_a_t3,
+            "verdetto": _verdetto(stat.media, stat.t, stat.effetto_rilevabile_a_t3),
         }
 
     return {
         "anno": anno,
         "selezionati_esclusi": escludi_selezionati,
         "conteggi_pipeline": counts,
-        "n_rapporti_calcolati": sum(1 for r in ratios if r.ratio is not None),
-        "n_rapporti_mancanti": sum(1 for r in ratios if r.ratio is None),
+        "n_rapporti_calcolati": len(osservazioni_valide([(r.giorno, r.ratio) for r in ratios])),
+        "n_rapporti_mancanti": len(ratios) - len(
+            osservazioni_valide([(r.giorno, r.ratio) for r in ratios])
+        ),
         "gruppo_content_empty": out.get("content_empty", {}),
         "gruppo_non_content_empty": out.get("non_content_empty", {}),
     }
@@ -520,7 +469,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--anno", choices=["2024", "2025", "both"], default="both")
     args = parser.parse_args(argv)
 
-    archivio = leggi_archivio(args.archivio)
+    archivio, righe_malformate = leggi_archivio(args.archivio)
     if not archivio:
         print(f"Nessun articolo trovato in {args.archivio}", file=sys.stderr)
         return 2
@@ -542,6 +491,7 @@ def main(argv: list[str] | None = None) -> int:
         for escludi in (False, True):
             suffisso = "_no_selezionati" if escludi else ""
             risultato = _esegui_anno(anno, articoli_anno, loader_vuoto, escludi_selezionati=escludi)
+            risultato["righe_archivio_malformate"] = righe_malformate
             out_path = args.out / f"h_a_{anno}{suffisso}.json"
             scrivi_artefatto(out_path, risultato)
             print(f"Scritto {out_path} ({risultato['n_rapporti_calcolati']} rapporti)")

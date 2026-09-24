@@ -27,19 +27,16 @@ import pytest
 from scripts.event_study_h_a_610 import (
     MINUTI_BASELINE,
     MINUTI_EVENTO,
-    ClusteredMean,
     PopolazionePerAnno,
     VolatilityRatio,
     _esegui_anno,
     articoli_per_anno,
     calcola_rapporto,
     classifica,
-    clustered_mean,
-    effetto_rilevabile_a_t3,
+    media_delle_medie_giornaliere,
     fetch_minute_bars,
     leggi_archivio,
     parse_timestamp,
-    per_article_day_clusters,
     scrivi_artefatto,
     within_cooldown,
 )
@@ -188,104 +185,65 @@ def test_within_cooldown_ticker_diverso_non_collassa():
     assert within_cooldown(ts, ts, cooldown_minuti=5, ticker_a="AAPL", ticker_b="MSFT") is False
 
 
-# ---------- Cluster giornaliero per articolo ----------
+# ---------- Statistica per giornata (prereg §4) ----------
 
 
-def test_per_article_day_clusters_non_pre_media():
-    """Ogni articolo resta un'osservazione separata dentro il cluster-giorno.
+def test_ogni_giornata_pesa_uno_singleton_compresi():
+    """La media e' delle medie giornaliere e un giorno con un articolo conta.
 
-    Se un giorno pre-mediasse i rapporti prima di clusterizzare, ogni
-    cluster sarebbe sempre un singleton (1 valore) e `clustered_mean` non
-    potrebbe mai stimare un SE. Con 2 articoli nello stesso giorno il
-    cluster ha 2 osservazioni distinte, non una media.
+    Regressione della review di PR #641: la versione cluster-robust mediava
+    per articolo ed escludeva i giorni singleton dal solo SE. 39 giorni a ~1
+    e un singleton a 5 davano t ~ 7e14, cioe' un PASS spurio.
     """
-    ratios = [
-        VolatilityRatio("a1", "AAPL", datetime(2024, 3, 5, 14, 30, tzinfo=timezone.utc),
-                         False, 1.2, "2024-03-05"),
-        VolatilityRatio("a2", "MSFT", datetime(2024, 3, 5, 15, 0, tzinfo=timezone.utc),
-                         False, 1.6, "2024-03-05"),
-        VolatilityRatio("a3", "TSLA", datetime(2024, 3, 6, 14, 30, tzinfo=timezone.utc),
-                         False, 0.9, "2024-03-06"),
+    obs = [("2024-03-01", 5.0)] + [
+        (f"2024-04-{d:02d}", 1.0 + 0.01 * (j % 2)) for d in range(1, 29) for j in range(2)
     ]
-    obs = per_article_day_clusters(ratios)
-    assert sorted(obs) == [(0, 1.2), (0, 1.6), (1, 0.9)]
-    # Il cluster del 2024-03-05 (indice 0, primo giorno in ordine) ha 2
-    # osservazioni distinte: clustered_mean lo conta come cluster valido.
-    cluster_05 = [v for c, v in obs if c == 0]
-    assert len(cluster_05) == 2
+    stat = media_delle_medie_giornaliere(obs)
+
+    assert stat.n_giorni == 29
+    assert stat.n_obs == 57
+    medie = [5.0] + [1.005] * 28
+    assert stat.media == pytest.approx(sum(medie) / 29)
+    assert abs(stat.t) < 3  # il giorno estremo pesa anche sull'errore
 
 
-def test_per_article_day_clusters_scarta_ratio_none():
-    """Un rapporto None (barre insufficienti) non entra nel cluster."""
-    ratios = [
-        VolatilityRatio("a1", "AAPL", datetime(2024, 3, 5, 14, 30, tzinfo=timezone.utc),
-                         False, None, "2024-03-05"),
-    ]
-    assert per_article_day_clusters(ratios) == []
+def test_l_effetto_rilevabile_e_tre_volte_l_se_osservato():
+    poco_rumore = [(f"2024-03-{d:02d}", 1.0 + 0.01 * (d % 2)) for d in range(1, 21)]
+    tanto_rumore = [(f"2024-03-{d:02d}", 1.0 + 0.5 * (d % 2)) for d in range(1, 21)]
+
+    a = media_delle_medie_giornaliere(poco_rumore)
+    b = media_delle_medie_giornaliere(tanto_rumore)
+
+    assert a.effetto_rilevabile_a_t3 == pytest.approx(3 * a.se)
+    assert b.effetto_rilevabile_a_t3 > 10 * a.effetto_rilevabile_a_t3
 
 
-# ---------- Clustered mean ----------
+def test_meno_di_due_giornate_non_ha_errore_standard():
+    stat = media_delle_medie_giornaliere([("2024-03-05", 1.2), ("2024-03-05", 1.4)])
+
+    assert stat.n_giorni == 1
+    assert math.isnan(stat.t)
+    assert math.isinf(stat.effetto_rilevabile_a_t3)
 
 
-def test_clustered_mean_ignorando_grappoli_singleton():
-    """Un cluster da 1 non contribuisce al SE cluster-robust.
+def test_nan_e_none_non_entrano_nella_media():
+    stat = media_delle_medie_giornaliere(
+        [("2024-03-05", float("nan")), ("2024-03-05", None), ("2024-03-06", 1.1), ("2024-03-07", 1.3)]
+    )
 
-    La statistica cluster-robust richiede almeno 2 cluster per essere
-    definita. Lo script NON scarta i singleton dal calcolo della media
-    (sono osservazioni), ma li esclude dal SE — un singleton non dice
-    nulla sulla variabilita' between-cluster.
-    """
-    # 3 cluster: due da 3 e uno da 1. Il SE si calcola sui 2 cluster "validi".
-    obs = [(1, 1.5), (1, 1.4), (1, 1.6), (2, 2.5), (2, 2.4), (2, 2.6), (3, 0.0)]
-    risultato = clustered_mean(obs)
-    assert isinstance(risultato, ClusteredMean)
-    # Media pesata per osservazione: 6/7≈0.857 + 1/7*0 = 0.857... + niente
-    media_attesa = (1.5 + 1.4 + 1.6 + 2.5 + 2.4 + 2.6 + 0.0) / 7
-    assert risultato.media == pytest.approx(media_attesa)
-    # Il singleton non rende il SE infinito
-    assert math.isfinite(risultato.t)
-    # n_cluster validi = 2
-    assert risultato.n_cluster_validi == 2
+    assert stat.n_obs == 2
+    assert stat.media == pytest.approx(1.2)
 
 
-def test_clustered_mean_resto_zero():
-    """Tutti i cluster sono singleton: SE non definito, t = inf, n_cluster_validi = 0.
+def test_due_sole_barre_non_danno_un_rapporto_nan():
+    """Un solo log-return: std(ddof=1) = NaN, che prima passava il filtro."""
+    ts = datetime(2024, 3, 5, 15, 0, tzinfo=timezone.utc)
+    idx = [ts - pd.Timedelta(minutes=30) + pd.Timedelta(minutes=i) for i in range(24)]
+    idx += [ts, ts + pd.Timedelta(minutes=1)]
+    close = pd.Series([100 + 0.01 * (i % 3) for i in range(24)] + [100.5, 100.2],
+                      index=pd.DatetimeIndex(idx))
 
-    Questo e' il caso che diventa INSUFFICIENT_N anche se n articoli e'
-    alto: una sola osservazione per giorno non consente di separare la
-    variabilita' between-day dalla within-day.
-    """
-    obs = [(1, 1.0), (2, 1.1), (3, 0.9)]
-    risultato = clustered_mean(obs)
-    assert risultato.n_cluster_validi == 0
-    assert math.isnan(risultato.t) or math.isinf(risultato.t)
-
-
-# ---------- effetto_rilevabile_a_t3 ----------
-
-
-def test_effetto_rilevabile_a_t3_calibra_su_n_cluster():
-    """Con n_cluster=2 l'effetto minimo rilevabile e' enorme.
-
-    Vero: sqrt(n) * sqrt(1-rho^2)/(1+rho^2) — non vado a implementare la
-    formula ICC qui. Lo script la prende dal modulo statistico standard e
-    questo test asserisce solo che la funzione esiste e ritorna un numero
-    finite positivo.
-    """
-    eff = effetto_rilevabile_a_t3(n_cluster=2, n_obs=20, t_target=3.0)
-    assert eff > 0
-    assert math.isfinite(eff)
-
-
-def test_effetto_rilevabile_a_t3_piu_cluster_minore_effetto():
-    """Crescere n_cluster riduce (non aumenta) l'effetto minimo rilevabile.
-
-    Con rho=0 (within = between), l'effetto minimo a t=3 e' ~3/sqrt(n).
-    Verifico solo la monotonia — la formula esatta dipende dall'ICC assunto.
-    """
-    eff_2 = effetto_rilevabile_a_t3(n_cluster=2, n_obs=20)
-    eff_50 = effetto_rilevabile_a_t3(n_cluster=50, n_obs=500)
-    assert eff_50 < eff_2
+    assert calcola_rapporto(ts, close) is None
 
 
 # ---------- Articoli per anno ----------
@@ -318,7 +276,7 @@ def test_leggi_archivio_da_due_mesi(tmp_path: Path):
     b.write_text(
         json.dumps({"id": "2", "created_at": "2024-04-01T10:00:00Z", "headline": "y", "symbols": ["MSFT"]}) + "\n"
     )
-    out = leggi_archivio(tmp_path)
+    out, malformate = leggi_archivio(tmp_path)
     assert len(out) == 2
     assert out[0]["id"] == "1"
     assert out[1]["id"] == "2"
@@ -338,8 +296,9 @@ def test_leggi_archivio_righe_malformate_saltate(tmp_path: Path):
         + "\n"
         + json.dumps({"id": "2", "created_at": "2024-03-06T10:00:00Z", "headline": "y", "symbols": ["MSFT"]}) + "\n"
     )
-    out = leggi_archivio(tmp_path)
+    out, malformate = leggi_archivio(tmp_path)
     assert len(out) == 2
+    assert malformate == 1  # contate, non piu' perse in silenzio
 
 
 # ---------- Percorso composto (_esegui_anno) ----------
@@ -380,7 +339,7 @@ def test_esegui_anno_con_piu_articoli_al_giorno_non_e_sempre_insufficient_n():
 
     risultato = _esegui_anno("2024", articoli, loader, escludi_selezionati=False)
     gruppo = risultato["gruppo_non_content_empty"]
-    assert gruppo["n_cluster_validi"] >= 2
+    assert gruppo["n_giorni"] == 3
     assert math.isfinite(gruppo["t"])
     assert gruppo["verdetto"] in {"PASS", "FAIL"}
 
