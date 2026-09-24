@@ -502,6 +502,34 @@ def classify_relevance(row: dict, fanout_degree: int) -> tuple[str, str | None]:
     return "UNKNOWN", None
 
 
+def relevance_for_article(
+    *,
+    symbol: str,
+    title: str | None,
+    body_snippet: str | None,
+    extraction_method: str | None,
+    issuer_terms: list[str] | None,
+    fanout_degree: int | None,
+) -> str:
+    """Categoria di pertinenza di un articolo rispetto a ``symbol`` (#596).
+
+    Unico punto usato sia dal path di uscita (portfolio_scheduler) sia dalla
+    misura retrospettiva (scripts/measure_596_...): la misura chiama la regola
+    di produzione, non la riscrive (#169/#467). Il testo e' titolo + corpo
+    persistito, e gli alias dell'emittente vengono da ``ticker_lookup``: senza
+    di loro un articolo su "Micron" non verrebbe riconosciuto come MU.
+    """
+    row = {
+        "ticker": symbol,
+        "title": title or "",
+        "body_snippet": body_snippet or "",
+        "extraction_method": extraction_method or "",
+        "issuer_terms": list(issuer_terms or []),
+    }
+    relevance, _ = classify_relevance(row, int(fanout_degree or 1))
+    return relevance
+
+
 def classify_attribution(relevance: str, fanout_degree: int) -> str:
     """Attribuzione osservazionale di uno score, condivisa con il dossier."""
     if relevance == "ISSUER_SPECIFIC":
