@@ -34,6 +34,42 @@ LOG_FILE="$LOG_DIR/alpha_miss_analysis_${DATE}.log"
 # header.  The host crontab does not provide a redirect of its own.
 exec >>"$LOG_FILE" 2>&1
 
+# Load Telegram credentials from .env
+if [[ -f "$PROJECT_DIR/.env" ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source <(grep -E '^TELEGRAM_(BOT_TOKEN|CHAT_ID)=' "$PROJECT_DIR/.env" | sed 's/#.*//')
+    set +a
+fi
+
+tg_send() {
+    local text="$1" parse_mode="${2-HTML}" response curl_status
+    if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]]; then
+        echo "[tg_send] Telegram credentials not set — skipping" >&2
+        return
+    fi
+    local curl_args=(
+        -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
+        --data-urlencode chat_id="${TELEGRAM_CHAT_ID}"
+        --data-urlencode text="$text"
+    )
+    if [[ -n "$parse_mode" ]]; then
+        curl_args+=(--data-urlencode parse_mode="$parse_mode")
+    fi
+    set +e
+    response=$(curl "${curl_args[@]}" -w '\nHTTP_STATUS:%{http_code}')
+    curl_status=$?
+    set -e
+    if (( curl_status != 0 )); then
+        echo "[tg_send] curl terminata con codice ${curl_status} — notifica non verificabile" >&2
+    elif [[ "$response" == *'"ok":true'* ]]; then
+        echo "[tg_send] Telegram accettata (${response##*$'\n'})"
+    else
+        echo "[tg_send] Telegram rifiutata o risposta inattesa: ${response:0:300}" >&2
+    fi
+    return 0
+}
+
 # Target the most recent actual TRADING day per Alpaca's market calendar — not
 # "yesterday" adjusted only for weekends (that still misfires on US market
 # holidays, e.g. a Friday cron would target a Thursday July 4th with zero bars
@@ -73,15 +109,68 @@ if (( CALENDAR_STATUS != 0 )) || [[ -z "${CALENDAR_DATES:-}" ]]; then
     exit 0
 fi
 
+# Contratto prompt/dossier (#287): l'unica implementazione della regola di
+# produzione. Stampa l'esito e riesce solo se il dossier e' consumabile dal
+# prompt corrente. La usa la selezione del recupero qui sotto e il check
+# pre-sessione piu' in la' — il ranker non si reimplementa (#169/#467).
+_verifica_contratto_dossier() {
+    uv run python3 - "$1" <<'PYEOF'
+import json, sys
+from src.analysis.dossier.prompt_contract import verifica_compatibilita_schema
+try:
+    esito = verifica_compatibilita_schema(json.load(open(sys.argv[1])))
+except Exception as exc:
+    print(f"dossier non leggibile: {exc}")
+    sys.exit(1)
+if esito["ok"]:
+    print(f"compatibile: prompt {esito['prompt_version']}, dossier {esito['schema_version']}")
+else:
+    print("; ".join(esito["errors"]))
+    sys.exit(1)
+PYEOF
+}
+
+# Una seduta il cui dossier congelato non passa il contratto #287 e'
+# irrecuperabile da questo cron: il dossier di una seduta chiusa non si
+# rigenera (#632 — caricherebbe prezzi retro-aggiustati) e consumarlo lo
+# stesso produrrebbe numeri senza fonte. Contratto del predicato per
+# oldest_recoverable_session: esce 0 quando la seduta NON e' recuperabile.
+_seduta_con_dossier_irrecuperabile() {
+    local dossier="$PROJECT_DIR/docs/evidence/dossier/${1}.json"
+    [[ -f "$dossier" ]] || return 1
+    _verifica_contratto_dossier "$dossier" >/dev/null 2>&1 || return 0
+    return 1
+}
+
 # #563 / F-074: una seduta che ha gia' il dossier ma non la riga ledger non va
 # persa quando il cron del giorno successivo avanza il calendario. Si recupera
 # la piu' vecchia delle ultime 21 sedute non materializzate; il dossier storico
 # e' preservato piu' sotto, quindi il backfill non ricalcola prezzi retroattivi.
+# Le sedute irrecuperabili (dossier schema pre-3.1 come 09-09/09-10) si saltano
+# — senza lo skip il recupero e' un loop terminale: il 2026-09-24 due run hanno
+# selezionato 09-09 e sono morti sul contratto schema, bloccando anche 09-14 e
+# tutte le sedute successive.
 PUBLISHED_DATES=$(sed -nE 's/.*"data"[[:space:]]*:[[:space:]]*"([0-9-]+)".*/\1/p' \
     "$PROJECT_DIR/docs/evidence/market_daily.jsonl" 2>/dev/null || true)
-DATE_TARGET=$(oldest_missing_session "$CALENDAR_DATES" "$PUBLISHED_DATES") || {
+DATE_TARGET=""
+if oldest_recoverable_session "$CALENDAR_DATES" "$PUBLISHED_DATES" \
+        _seduta_con_dossier_irrecuperabile >/dev/null; then
+    DATE_TARGET="$CHOSEN_SESSION"
+elif [[ -z "${SKIPPED_SESSIONS:-}" ]]; then
+    # Nessuna lacuna nella finestra: ultima seduta del calendario, la guard
+    # qui sotto chiude il no-op (giorno dopo un holiday weekday).
     DATE_TARGET=$(printf '%s\n' "$CALENDAR_DATES" | tail -1)
-}
+fi
+
+if [[ -n "${SKIPPED_SESSIONS:-}" ]]; then
+    echo "ATTENZIONE (#563): sedute con dossier congelato non consumabile dal prompt corrente, irrecuperabili da questo cron: ${SKIPPED_SESSIONS}— rigenerare il dossier di una seduta chiusa e' vietato (#632). Decisione operatore: prompt legacy o annotazione charter della lacuna."
+    tg_send "⚠️ Alpha-miss #563: ${SKIPPED_SESSIONS}non recuperabili col prompt corrente (dossier congelato schema pre-3.1). Serve una decisione operatore: prompt legacy o annotazione charter della lacuna. Il cron prosegue con le sedute recuperabili." "" || true
+fi
+if [[ -z "$DATE_TARGET" ]]; then
+    echo "FAILED: ogni lacuna della finestra ha un dossier congelato irrecuperabile — nessuna seduta processabile senza una decisione dell'operatore (#563)."
+    tg_send "🚨 Alpha-miss #563: nessuna seduta recuperabile nella finestra (${SKIPPED_SESSIONS})— run annullato, serve l'operatore." "" || true
+    exit 1
+fi
 
 # #564 / F-075: dopo un holiday weekday (Labor Day 2026-09-07, Memorial Day,
 # Juneteenth, July 4 sui venerdi', ...) Alpaca restituisce la stessa data
@@ -119,42 +208,6 @@ REPORT_FILE="$PROJECT_DIR/docs/ALPHA_MISS_REPORT_${DATE_TARGET}.md"
 CANDIDATES_DIR="$PROJECT_DIR/docs/evidence/candidates"
 CANDIDATES_FILE="$CANDIDATES_DIR/${DATE_TARGET}.json"
 mkdir -p "$CANDIDATES_DIR"
-
-# Load Telegram credentials from .env
-if [[ -f "$PROJECT_DIR/.env" ]]; then
-    set -a
-    # shellcheck disable=SC1091
-    source <(grep -E '^TELEGRAM_(BOT_TOKEN|CHAT_ID)=' "$PROJECT_DIR/.env" | sed 's/#.*//')
-    set +a
-fi
-
-tg_send() {
-    local text="$1" parse_mode="${2-HTML}" response curl_status
-    if [[ -z "${TELEGRAM_BOT_TOKEN:-}" || -z "${TELEGRAM_CHAT_ID:-}" ]]; then
-        echo "[tg_send] Telegram credentials not set — skipping" >&2
-        return
-    fi
-    local curl_args=(
-        -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
-        --data-urlencode chat_id="${TELEGRAM_CHAT_ID}"
-        --data-urlencode text="$text"
-    )
-    if [[ -n "$parse_mode" ]]; then
-        curl_args+=(--data-urlencode parse_mode="$parse_mode")
-    fi
-    set +e
-    response=$(curl "${curl_args[@]}" -w '\nHTTP_STATUS:%{http_code}')
-    curl_status=$?
-    set -e
-    if (( curl_status != 0 )); then
-        echo "[tg_send] curl terminata con codice ${curl_status} — notifica non verificabile" >&2
-    elif [[ "$response" == *'"ok":true'* ]]; then
-        echo "[tg_send] Telegram accettata (${response##*$'\n'})"
-    else
-        echo "[tg_send] Telegram rifiutata o risposta inattesa: ${response:0:300}" >&2
-    fi
-    return 0
-}
 
 echo "=== Alembic Alpha-Miss Analysis ${DATE} (target: ${DATE_TARGET}) ==="
 echo "Started: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -523,23 +576,11 @@ fi
 # consuma "facendo del proprio meglio": le istruzioni farebbero riferimento a
 # blocchi che non esistono piu' (o esistono con un altro significato) e il
 # report produrrebbe numeri senza fonte. Fail-closed come il codice di misura.
+# Con la selezione che salta le sedute irrecuperabili, qui arriva solo un
+# dossier compatibile o appena generato — il ramo di errore resta per difesa.
 if [[ -f "$DOSSIER_FILE" ]]; then
     set +e
-    SCHEMA_COMPATIBILE=$(uv run python3 - "$DOSSIER_FILE" <<'PYEOF'
-import json, sys
-from src.analysis.dossier.prompt_contract import verifica_compatibilita_schema
-try:
-    esito = verifica_compatibilita_schema(json.load(open(sys.argv[1])))
-except Exception as exc:
-    print(f"dossier non leggibile: {exc}")
-    sys.exit(1)
-if esito["ok"]:
-    print(f"compatibile: prompt {esito['prompt_version']}, dossier {esito['schema_version']}")
-else:
-    print("; ".join(esito["errors"]))
-    sys.exit(1)
-PYEOF
-    )
+    SCHEMA_COMPATIBILE=$(_verifica_contratto_dossier "$DOSSIER_FILE")
     SCHEMA_STATUS=$?
     set -e
     if (( SCHEMA_STATUS != 0 )); then
