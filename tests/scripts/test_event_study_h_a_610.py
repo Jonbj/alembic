@@ -27,8 +27,6 @@ import pytest
 from scripts.event_study_h_a_610 import (
     MINUTI_BASELINE,
     MINUTI_EVENTO,
-    PopolazionePerAnno,
-    VolatilityRatio,
     _esegui_anno,
     articoli_per_anno,
     calcola_rapporto,

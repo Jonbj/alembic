@@ -51,7 +51,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
-from typing import Callable, Iterable
+from typing import Callable
 
 import numpy as np
 import pandas as pd
