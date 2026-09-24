@@ -46,6 +46,12 @@ MOTIVO_RITARDATO = "portfolio_sell"
 # oltre, è displacement, non rumore.
 TOLLERANZA_BUDGET = 1.0
 
+# Le quantità dei fill broker differiscono dal detenuto per ~1e-15 (float):
+# quella non è una troncatura, è polvere. Sotto questa soglia la vendita è
+# piena e non produce eventi di displacement (sui dati reali: 6 falsi eventi
+# su 130 vendite, tutti dell'ordine di 1e-15 azioni).
+EPS_QTY = 1e-6
+
 
 @dataclass(frozen=True)
 class FillConMotivo(BrokerFill):
@@ -188,7 +194,7 @@ def replay_ramo(
             else:  # SELL reale di altro motivo (o senza etichetta)
                 pos = portafoglio.position_of(f.symbol)
                 detenuta = pos.quantity if pos is not None else 0.0
-                if detenuta <= 1e-9:
+                if detenuta <= EPS_QTY:
                     sell_troncate.append(
                         EventoDisplacement(
                             giorno=giorno,
@@ -198,8 +204,21 @@ def replay_ramo(
                             dettaglio="posizione assente nel ramo",
                         )
                     )
-                elif f.quantity <= detenuta:
-                    portafoglio.apply_fill(engine_fill)
+                elif f.quantity <= detenuta + EPS_QTY:
+                    # polvere di virgola mobile a parte, vende tutto il detenuto
+                    if f.quantity <= detenuta:
+                        portafoglio.apply_fill(engine_fill)
+                    else:
+                        portafoglio.apply_fill(
+                            BrokerFill(
+                                timestamp=f.timestamp,
+                                symbol=f.symbol,
+                                side=f.side,
+                                quantity=detenuta,
+                                fill_price=f.fill_price,
+                                commission=f.commission,
+                            ).to_engine_fill()
+                        )
                 else:
                     ridotto = BrokerFill(
                         timestamp=f.timestamp,

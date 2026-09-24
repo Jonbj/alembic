@@ -175,6 +175,28 @@ def diagnostica_etichette(fills: Sequence[FillConMotivo]) -> dict[str, Any]:
     }
 
 
+def confronta_controllo(
+    esito_controllo: EsitoRamo, serie_gate: Sequence[Any]
+) -> dict[str, Any]:
+    """Il ramo di controllo deve essere il replay del cancello puro.
+
+    Se il drift del cancello rendesse un buy non sostenibile (oltre la
+    tolleranza), il controllo scarterebbe fill reali e divergerebbe dal gate:
+    qualsiasi delta H_N - C sarebbe allora contaminato. Questa verifica rende
+    visibile la divergenza prima di eseguire i rami.
+    """
+    max_scarto = max(
+        abs(r.equity - g.equity) for r, g in zip(esito_controllo.serie, serie_gate)
+    )
+    coincide = len(esito_controllo.serie) == len(serie_gate) and max_scarto <= 0.01
+    return {
+        "buy_saltati": len(esito_controllo.buy_saltati),
+        "sell_troncate": len(esito_controllo.sell_troncate),
+        "serie_coincide_col_gate": coincide,
+        "massimo_scarto_equity": max_scarto,
+    }
+
+
 def dati_per_inferenza(
     equity_ramo: Mapping[date, float],
     equity_controllo: Mapping[date, float],
@@ -388,14 +410,36 @@ def main() -> int:
         f"portfolio_sell: {etichette['per_motivo'].get('portfolio_sell', 0)}"
     )
 
+    modello = RealisticCostModel(config_path=Path("config/cost_model.yaml"))
+    kwargs = dict(
+        start_qty=qty_inizio,
+        start_cash=cash_inizio,
+        start_closes=closes[ancoraggio],
+        closes_by_day={g: closes.get(g, {}) for g in sedute_finestra},
+        session_closes={g: session_closes[g] for g in sedute_finestra},
+    )
+
+    def prezza(simbolo: str, quantita: float, close: float, campana: datetime) -> BrokerFill:
+        return vendita_ipotetica(modello, simbolo, quantita, close, campana)
+
     if args.solo_controllo:
-        # diagnostica: cancello + join etichette, nessun ramo, nessun numero nuovo
+        # diagnostica: cancello + join etichette + ramo di controllo pulito.
+        # Nessun ramo H_N: nessun numero controfattuale viene prodotto.
+        esito_controllo, _ = replay_ramo(
+            fills=fills_etichettati, orizzonte=0, prezza_vendita=prezza, **kwargs
+        )
+        vs_gate = confronta_controllo(esito_controllo, serie_gate)
+        print(
+            f"Controllo (orizzonte 0): buy saltati {vs_gate['buy_saltati']}, "
+            f"sell troncate {vs_gate['sell_troncate']}, "
+            f"max scarto equity vs gate {vs_gate['massimo_scarto_equity']:.4f}"
+        )
         artefatto_solo = {
             "issue": 614,
             "fase": "solo-controllo",
             "nota": (
-                "Diagnostica della pipeline: cancello riverificato e copertura del join "
-                "ordini->trades. Nessun ramo H_N e' stato eseguito."
+                "Diagnostica della pipeline: cancello riverificato, copertura del join "
+                "ordini->trades e ramo di controllo pulito. Nessun ramo H_N e' stato eseguito."
             ),
             "finestra": {
                 "sedute": [inizio.isoformat(), fine.isoformat()],
@@ -411,6 +455,7 @@ def main() -> int:
             },
             "etichette": etichette,
             "motivi_nel_db": len(motivi),
+            "controllo_vs_gate": vs_gate,
             "generato_il": datetime.now(timezone.utc).isoformat(),
         }
         uscita = Path(args.output)
@@ -418,19 +463,13 @@ def main() -> int:
         with open(uscita, "w") as f:
             json.dump(artefatto_solo, f, indent=2, ensure_ascii=False)
         print(f"Artefatto: {uscita}")
+        if not vs_gate["serie_coincide_col_gate"] or vs_gate["buy_saltati"]:
+            print(
+                "ATTENZIONE: il ramo di controllo diverge dal cancello; "
+                "i delta dei rami H_N ne sarebbero contaminati."
+            )
+            return 4
         return 0
-
-    modello = RealisticCostModel(config_path=Path("config/cost_model.yaml"))
-    kwargs = dict(
-        start_qty=qty_inizio,
-        start_cash=cash_inizio,
-        start_closes=closes[ancoraggio],
-        closes_by_day={g: closes.get(g, {}) for g in sedute_finestra},
-        session_closes={g: session_closes[g] for g in sedute_finestra},
-    )
-
-    def prezza(simbolo: str, quantita: float, close: float, campana: datetime) -> BrokerFill:
-        return vendita_ipotetica(modello, simbolo, quantita, close, campana)
 
     # 4. controllo (orizzonte 0) e rami H_N
     esito_controllo, _ = replay_ramo(

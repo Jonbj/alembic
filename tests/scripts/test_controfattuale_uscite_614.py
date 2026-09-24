@@ -158,3 +158,40 @@ class TestDiagnosticaEtichette:
         assert d["vendite_etichettate"] == 2
         assert d["vendite_senza_etichetta"] == 1
         assert d["per_motivo"] == {"portfolio_sell": 1, "hold_minimum_expiry": 1}
+
+
+class TestConfrontaControllo:
+    def test_controllo_pulito_coi_serie_uguali(self) -> None:
+        from scripts.controfattuale_uscite_614 import confronta_controllo
+        from src.backtest.engine.exit_counterfactual import EsitoRamo
+        from src.backtest.engine.exit_replay import GiornoReplay
+
+        giorni = [date(2026, 8, 3), date(2026, 8, 4)]
+        serie = tuple(GiornoReplay(g, 100.0 + i, 50.0, 50.0 + i) for i, g in enumerate(giorni))
+        esito = EsitoRamo(
+            orizzonte=0, serie=serie, vendite_ritardate=(), fill_ipotetici=(),
+            estensioni_censurate=0, buy_saltati=(), sell_troncate=(),
+            equity_finale=101.0, capitale_medio_impiegato=0.5, cash_drag_medio=0.5,
+        )
+        d = confronta_controllo(esito, serie)
+        assert d["buy_saltati"] == 0
+        assert d["sell_troncate"] == 0
+        assert d["serie_coincide_col_gate"] is True
+        assert d["massimo_scarto_equity"] == 0.0
+
+    def test_serie_divergente_viene_segnalata(self) -> None:
+        from scripts.controfattuale_uscite_614 import confronta_controllo
+        from src.backtest.engine.exit_counterfactual import EsitoRamo
+        from src.backtest.engine.exit_replay import GiornoReplay
+
+        giorni = [date(2026, 8, 3)]
+        serie_ramo = (GiornoReplay(giorni[0], 100.0, 50.0, 50.0),)
+        serie_gate = (GiornoReplay(giorni[0], 98.0, 48.0, 50.0),)
+        esito = EsitoRamo(
+            orizzonte=0, serie=serie_ramo, vendite_ritardate=(), fill_ipotetici=(),
+            estensioni_censurate=0, buy_saltati=(), sell_troncate=(),
+            equity_finale=100.0, capitale_medio_impiegato=0.5, cash_drag_medio=0.5,
+        )
+        d = confronta_controllo(esito, serie_gate)
+        assert d["serie_coincide_col_gate"] is False
+        assert d["massimo_scarto_equity"] == pytest.approx(2.0)

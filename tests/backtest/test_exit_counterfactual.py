@@ -203,3 +203,32 @@ class TestMetriche:
 
     def test_tolleranza_budget_dichiarata(self) -> None:
         assert TOLLERANZA_BUDGET == 1.0
+
+
+class TestPolvereDiVirgolaMobile:
+    def test_sell_con_differenza_di_1e15_non_e_truncation(self) -> None:
+        """Sui dati reali il fill broker porta quantita' che differiscono dal
+        detenuto per ~1e-15: la vendita e' piena, non va loggata come troncata
+        (6 falsi eventi nel controllo, tutti polvere)."""
+        fills = [
+            FillConMotivo(
+                timestamp=datetime(D1.year, D1.month, D1.day, 14, tzinfo=timezone.utc),
+                symbol="X", side=OrderSide.BUY, quantity=16.669511,
+                fill_price=100.0,
+            ),
+            FillConMotivo(
+                timestamp=datetime(D1.year, D1.month, D1.day, 16, tzinfo=timezone.utc),
+                symbol="X", side=OrderSide.SELL,
+                quantity=16.669511 + 3.55e-15,
+                fill_price=101.0, exit_reason="sentiment_reversal",
+            ),
+        ]
+        esito, pf = replay_ramo(
+            start_qty={}, start_cash=2000.0, start_closes={"X": 100.0},
+            fills=fills, closes_by_day=CLOSES, session_closes=SEDUTE,
+            orizzonte=2, prezza_vendita=_prezza,
+        )
+        assert esito.sell_troncate == ()
+        assert pf.position_of("X") is None
+        # vendita piena accreditata: 16.669511 * 101
+        assert esito.serie[0].cash == pytest.approx(2000.0 - 1666.9511 + 16.669511 * 101.0)
