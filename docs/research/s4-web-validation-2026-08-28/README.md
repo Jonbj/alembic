@@ -45,9 +45,13 @@ supportati da un estratto verificabile.
 
 ## Runner persistente
 
-Il protocollo v4 gira come unità transiente utente
-`alembic-s4-literature-v4.service`, con `Restart=on-failure` e ledger append-only. L'unità termina
+Il protocollo v4 gira come unità persistente utente
+`alembic-s4-literature-v4.service`, definita in
+`ops/systemd/alembic-s4-literature-v4.service`, con `Restart=on-failure` e ledger append-only. L'unità termina
 quando il manifest è completo; non modifica S4, database o issue.
+La cache del manifest originale vive in `source-cache/full-pass/`, separata dalle copie
+di recupero e persistente fra i riavvii. L'unità è abilitata al boot del manager utente;
+un conflitto sul lock (exit 2) non genera un ciclo di riavvii.
 
 Controlli read-only:
 

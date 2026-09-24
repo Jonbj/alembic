@@ -28,8 +28,8 @@ class TestTelegramPoller:
         """
         computed_at = "2026-05-05T10:00:00Z"
         return {
-            "suggested_weights": {"kimi-k2.6:cloud": 0.45, "glm-5.2:cloud": 0.55},
-            "current_weights": {"kimi-k2.6:cloud": 0.34, "glm-5.2:cloud": 0.66},
+            "suggested_weights": {"kimi-k2.6:cloud": 0.45, "glm-5.3:cloud": 0.55},
+            "current_weights": {"kimi-k2.6:cloud": 0.34, "glm-5.3:cloud": 0.66},
             "computed_at": computed_at,
             "freeze_reason": "VIX too high",
         }
@@ -90,8 +90,8 @@ class TestTelegramPoller:
         pg.log_weight_update.assert_called_once()
         call_args = pg.log_weight_update.call_args
         assert call_args[1]["source"] == "telegram"
-        assert call_args[1]["applied_weights"] == {"kimi-k2.6:cloud": 0.45, "glm-5.2:cloud": 0.55}
-        assert call_args[1]["suggested_weights"] == {"kimi-k2.6:cloud": 0.45, "glm-5.2:cloud": 0.55}
+        assert call_args[1]["applied_weights"] == {"kimi-k2.6:cloud": 0.45, "glm-5.3:cloud": 0.55}
+        assert call_args[1]["suggested_weights"] == {"kimi-k2.6:cloud": 0.45, "glm-5.3:cloud": 0.55}
 
     def test_callback_approve_drops_inactive_model(self):
         """Approve callback with a stale model in the suggestion → dropped + renormalized.
@@ -103,8 +103,8 @@ class TestTelegramPoller:
         """
         computed_at = "2026-05-05T11:00:00Z"
         suggestion = {
-            "suggested_weights": {"qwen3.5:cloud": 0.20, "glm-5.2:cloud": 0.80},
-            "current_weights": {"qwen3.5:cloud": 0.20, "glm-5.2:cloud": 0.80},
+            "suggested_weights": {"qwen3.5:cloud": 0.20, "glm-5.3:cloud": 0.80},
+            "current_weights": {"qwen3.5:cloud": 0.20, "glm-5.3:cloud": 0.80},
             "computed_at": computed_at,
             "freeze_reason": "",
         }
@@ -133,15 +133,15 @@ class TestTelegramPoller:
         self._run_poller([update], redis, pg, notifier)
 
         # qwen3.5 is not in the active pair (glm52+gptoss) — dropped, and
-        # the sole remaining active model (glm-5.2:cloud) absorbs 100%.
+        # the sole remaining active model (glm-5.3:cloud) absorbs 100%.
         redis.set_ensemble_weights.assert_called_once()
         applied_to_redis = redis.set_ensemble_weights.call_args[0][0]
-        assert applied_to_redis == {"glm-5.2:cloud": 1.0}
+        assert applied_to_redis == {"glm-5.3:cloud": 1.0}
 
         call_args = pg.log_weight_update.call_args
-        assert call_args[1]["applied_weights"] == {"glm-5.2:cloud": 1.0}
+        assert call_args[1]["applied_weights"] == {"glm-5.3:cloud": 1.0}
         # suggested_weights in the audit log preserves the original (pre-filter) suggestion
-        assert call_args[1]["suggested_weights"] == {"qwen3.5:cloud": 0.20, "glm-5.2:cloud": 0.80}
+        assert call_args[1]["suggested_weights"] == {"qwen3.5:cloud": 0.20, "glm-5.3:cloud": 0.80}
 
     def test_callback_reject_valid(self, suggestion, token):
         """Valid reject callback → suggestion deleted, log with empty weights.

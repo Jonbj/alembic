@@ -1,0 +1,32 @@
+-- Migration 078: backfill bare-stem alias su ticker_lookup (#566 / F-077).
+--
+-- Il dossier relevance classifier usa un matcher word-boundary sugli
+-- issuer_terms costruiti da ticker_lookup: un articolo intitolato "Oracle
+-- set to report…" non veniva classificato ISSUER_SPECIFIC perche' la
+-- tabella conserva solo nomi legali suffissi ("Oracle Corporation",
+-- "Oracle Corp"). Stesso difetto su AAPL "Apple Announces…", CMCSA
+-- "Comcast CFO Says…", F "Ford…". La funzione pura `derive_bare_stem`
+-- (src/analysis/dossier/article_coverage.py) aggiunge il bare stem in
+-- modo deterministico; la funzione `propose_stem_backfill` produce una
+-- proposta di review bucket-per-bucket (safe / short / collision / noop).
+--
+-- `scripts/apply_migrations.py` esegue ogni file non ancora in ledger, senza
+-- eccezioni per placeholder: un file di soli commenti manda a psycopg2 una
+-- query vuota e fa fallire la CI (`psycopg2.ProgrammingError: can't execute
+-- an empty query`). Questo file resta quindi un vero no-op SQL, non un file
+-- vuoto: il backfill effettivo (`UPDATE ticker_lookup ... WHERE ticker = ...`
+-- riga per riga, solo sui ticker del bucket "safe" del CSV) NON e' qui.
+--
+-- Congelata sotto freeze #171: la issue #566 e' freeze-ok (correttezza
+-- della misura), ma il backfill e' un'azione sul DB live e quindi resta
+-- fuori dal perimetro di un agente — la review umana e' il vincolo.
+--
+-- Quando l'operatore approva i candidati "safe" del CSV
+-- (`docs/evidence/proposals/ticker_lookup_stem_backfill.csv`), il backfill
+-- va scritto in una migration successiva (079+): il ledger valida il
+-- checksum dei file gia' applicati, quindi questa migration, una volta in
+-- ledger, non va piu' modificata. Le righe "short" e "collision" restano
+-- fuori da qualunque backfill automatico: richiedono conferma umana caso
+-- per caso (CLAUDE.md § Ticker Resolution — l'ambiguita' non si indovina).
+
+SELECT 1;  -- segnaposto: nessuna modifica ai dati in questa migration.
