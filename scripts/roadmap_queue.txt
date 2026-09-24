@@ -168,29 +168,6 @@
 
 # === 6. IL RESTO ===
 182  nessuna gerarchia di uscita fra S1 e S4: un overlay al 10% puo' liquidare posizioni del core (tier3, decisione di design — il sizing e' scorporato in #338)
-# --- SOSPESA IL 2026-09-17 (decisione operatore) ---
-# Il perimetro di codice di #84 e' ESAURITO: il POC offline e' completo e
-# mergiato (PR #616, 116 test), il manifest con le soglie e' sigillato e la
-# pre-registrazione e' scritta. Cio' che manca non e' lavoro d'agente.
-#
-# Blocca il gate dati PIT, che e' un NO-GO infrastrutturale provvisorio: nessun
-# fornitore verificabile chiude tutte le condizioni hard entro i 1.000 EUR
-# (docs/RESEARCH_S3_PIT_DATA_FEASIBILITY_2026-07-21.md). Il pacchetto di
-# richiesta preventivi a CRSP e Sharadar e' pronto dal 2026-07-22
-# (docs/S3_PIT_VENDOR_OUTREACH_2026-07-22.md) ma non e' mai stato inviato:
-# serve l'identita' legale reale del mittente, che un agente non puo' inventare.
-#
-# Senza dataset qualificato il runner rifiuta di girare per costruzione, quindi
-# un agente qui puo' solo dichiarare no-op. E' la trappola gia' vista con #405
-# (4 selezioni, 2 no-op, giro incastrato), #300 (6 no-op in 19 ore) e #507.
-#
-# Istruzione per l'agente in loop: NON selezionare #84 finche' questa nota e'
-# qui. Non e' un no-op, e' una sospensione deliberata dell'operatore.
-#
-# Torna lavorabile quando: le due risposte vendor scritte sono allegate alla
-# issue E almeno una chiude tutte le condizioni hard. Se nessuna le chiude,
-# l'esito e' NO-GO infrastrutturale e la issue si chiude, non si rimette in coda.
-84   S3 design-alignment POC: A/B pre-registrato su universo PIT (tier2) [SOSPESA 09-17, vedi nota sopra — aspetta le risposte vendor, non codice]
 
 # ============================================================================
 # Fuori coda di proposito, decisione dell'operatore (non dell'agente):
