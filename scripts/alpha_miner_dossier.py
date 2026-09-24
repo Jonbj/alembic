@@ -1181,46 +1181,60 @@ def _risk_decisions(giorno: date) -> list[dict]:
     ]
 
 
-def _chiusure_per_simbolo(giorno: date) -> dict[str, dict]:
+def _chiusure_per_simbolo(chiusure_grezze: list[dict]) -> dict[str, dict]:
     """Una chiusura canonica per simbolo nella seduta, per l'asse
     pipeline_uscita del funnel (#567).
 
-    Il loader grezzo di `compute_exits` produce la lista completa per il book:
-    una stessa posizione puo' uscire in piu' tranche nella stessa seduta
-    (parziali + EOD). Per il funnel basta sapere se e' avvenuto almeno un
-    exit intraday — il campo `mover["chiusura"]` del modulo puro e' un flag
-    "any chiusura". Scegliamo la riga piu' recente (ultima in exit_time, ASC)
-    come rappresentativa: il record piu' tardo e' il verdetto finale della
-    giornata (chiusura totale o ultimo parziale che ha portato a 0).
-
-    Limite noto (non bloccante): la soglia `soglia_exit` non e' dichiarata
-    perche' il freeze #171 vieta di tararla. EXIT_BELOW_THRESHOLD riceve
-    `soglia_exit: None` nel campo evidence, distinto da EXIT_BLOCKED. Il
-    modulo puro non collassa l'EXIT_RISK senza chiusura se c'e' un segnale
-    qualificante fresco — vedi `classify_exit_pipeline`.
+    Riusa le righe di ``trades`` gia' caricate per ``compute_exits`` (stessa
+    WHERE, ordinate per exit_time ASC): nessuna query in piu'. Una posizione
+    puo' uscire in piu' tranche nella stessa seduta; per il funnel conta il
+    verdetto finale, quindi vince l'ultima riga del simbolo.
     """
-    righe = _psql(
-        f"SELECT symbol, COALESCE(stop_strategy, CASE WHEN signal_id IS NOT NULL "
-        f"THEN 'S4' ELSE 'S1' END), exit_price, qty, net_pnl, exit_reason, "
-        f"EXTRACT(epoch FROM (exit_time-entry_time))/3600, "
-        f"to_char(exit_time,'HH24:MI') "
-        f"FROM trades WHERE exit_time >= '{giorno}' AND exit_time < '{giorno}'::date + 1 "
-        f"AND exit_price IS NOT NULL AND qty IS NOT NULL AND net_pnl IS NOT NULL "
-        f"ORDER BY exit_time;"
-    )
     per_simbolo: dict[str, dict] = {}
-    for r in righe:
-        per_simbolo[r[0]] = {
-            "symbol": r[0],
-            "strategia": r[1],
-            "exit_price": float(r[2]),
-            "qty": float(r[3]),
-            "pnl_net": float(r[4]),
-            "exit_reason": r[5] or "",
-            "ore_tenuta": float(r[6]),
-            "exit_time_hhmm": r[7],
-        }
+    for riga in chiusure_grezze:
+        per_simbolo[riga["symbol"]] = dict(riga)
     return per_simbolo
+
+
+# Quanto indietro cercare l'ultimo segnale ancora "in vigore" per un titolo in
+# portafoglio (#567, STALE_EXIT_SIGNAL). Non e' una soglia di strategia: delimita
+# solo la ricerca del segnale precedente la seduta. Sette giorni di calendario
+# coprono un weekend lungo con festivita'.
+GIORNI_SEGNALE_PRECEDENTE = 7
+
+
+def _segnali_uscita(giorno: date, segnali_seduta: dict[str, list[dict]],
+                    simboli: set[str]) -> dict[str, list[dict]]:
+    """Segnali che il funnel valuta sulla pipeline d'uscita (#567).
+
+    Per ogni simbolo: l'ultimo segnale generato PRIMA della seduta (se esiste,
+    entro ``GIORNI_SEGNALE_PRECEDENTE``), seguito dai segnali della seduta.
+    Ognuno porta ``generated_day``: e' cio' che permette a
+    ``classify_exit_pipeline`` di riconoscere STALE_EXIT_SIGNAL, cioe' un
+    EXIT_RISK guidato solo da un segnale di una seduta precedente (DELL 09-10,
+    signal 10245 del 09-09). Senza il segnale precedente quello stadio era
+    irraggiungibile dal dossier reale.
+    """
+    g = giorno.isoformat()
+    out: dict[str, list[dict]] = {}
+    if simboli:
+        elenco = ",".join(f"'{s}'" for s in sorted(simboli))
+        for r in _psql(
+            f"SELECT DISTINCT ON (symbol) symbol, to_char(generated_at,'HH24:MI'), "
+            f"score, id::text, to_char(generated_at,'YYYY-MM-DD') "
+            f"FROM sentiment_signals WHERE symbol IN ({elenco}) "
+            f"AND generated_at < '{g}' "
+            f"AND generated_at >= '{g}'::date - {GIORNI_SEGNALE_PRECEDENTE} "
+            f"ORDER BY symbol, generated_at DESC;"):
+            out[r[0]] = [{
+                "ora": r[1], "score": float(r[2]), "signal_id": int(r[3]),
+                "generated_day": r[4],
+            }]
+    for simbolo, lista in segnali_seduta.items():
+        out.setdefault(simbolo, []).extend(
+            {**segnale, "generated_day": g} for segnale in lista
+        )
+    return out
 
 
 def _funnel_v2(
@@ -1798,11 +1812,22 @@ def costruisci_dossier(
     # pannello decision_quality, senza cambiare i conteggi legacy.
     posizioni_apertura = _opening_positions(giorno)
     held_at_open = {posizione["symbol"] for posizione in posizioni_apertura}
-    # #567: cablaggio della pipeline d'uscita. Carichiamo la chiusura per
-    # simbolo (SQL limitato alla g) e i segnali del dossier (gia' in `segnali`)
-    # cosi' `_funnel_v2` puo' classificare EXITED / EXIT_BLOCKED invece di
-    # collassare tutto a NO_EXIT_SIGNAL.
-    chiusure_per_simbolo = _chiusure_per_simbolo(giorno)
+    # #567: cablaggio della pipeline d'uscita. Le chiusure della seduta (le
+    # stesse righe di `compute_exits`) e i segnali d'uscita, compreso l'ultimo
+    # segnale precedente la seduta per i titoli tenuti all'open: cosi'
+    # `_funnel_v2` distingue EXITED / STALE_EXIT_SIGNAL / EXIT_BLOCKED invece
+    # di collassare tutto a NO_EXIT_SIGNAL.
+    chiusure_grezze = [
+        {"symbol": r[0], "strategia": r[1], "exit_price": float(r[2]), "qty": float(r[3]),
+         "pnl_net": float(r[4]), "exit_reason": r[5] or "", "ore_tenuta": float(r[6])}
+        for r in _psql(
+            f"SELECT symbol, COALESCE(stop_strategy, CASE WHEN signal_id IS NOT NULL "
+            f"THEN 'S4' ELSE 'S1' END), exit_price, qty, net_pnl, exit_reason, "
+            f"EXTRACT(epoch FROM (exit_time-entry_time))/3600 "
+            f"FROM trades WHERE exit_time >= '{g}' AND exit_time < '{g}'::date + 1 "
+            f"AND exit_price IS NOT NULL AND qty IS NOT NULL AND net_pnl IS NOT NULL "
+            f"ORDER BY exit_time;")]
+    chiusure_per_simbolo = _chiusure_per_simbolo(chiusure_grezze)
     funnel_v2 = _funnel_v2(
         rendimenti=mercato["rendimenti"],
         held_at_open=held_at_open,
@@ -1817,8 +1842,7 @@ def costruisci_dossier(
         soglia_gate=soglia_gate,
         cost_calc=opportunity_cost_calc,
         chiusure_by_symbol=chiusure_per_simbolo,
-        exit_segnali_by_symbol={symbol: list(lista)
-                                 for symbol, lista in segnali.items()},
+        exit_segnali_by_symbol=_segnali_uscita(giorno, dict(segnali), held_at_open),
         giorno_iso=g,
     )
     # --- riconciliazione causa legacy <-> funnel v2 (#509) ----------------
@@ -1889,16 +1913,6 @@ def costruisci_dossier(
             f"FROM trades WHERE entry_time >= '{g}' AND entry_time < '{g}'::date + 1 "
             f"AND entry_price IS NOT NULL AND qty IS NOT NULL ORDER BY entry_time;")]
 
-    chiusure_grezze = [
-        {"symbol": r[0], "strategia": r[1], "exit_price": float(r[2]), "qty": float(r[3]),
-         "pnl_net": float(r[4]), "exit_reason": r[5] or "", "ore_tenuta": float(r[6])}
-        for r in _psql(
-            f"SELECT symbol, COALESCE(stop_strategy, CASE WHEN signal_id IS NOT NULL "
-            f"THEN 'S4' ELSE 'S1' END), exit_price, qty, net_pnl, exit_reason, "
-            f"EXTRACT(epoch FROM (exit_time-entry_time))/3600 "
-            f"FROM trades WHERE exit_time >= '{g}' AND exit_time < '{g}'::date + 1 "
-            f"AND exit_price IS NOT NULL AND qty IS NOT NULL AND net_pnl IS NOT NULL "
-            f"ORDER BY exit_time;")]
 
     # close_prec entra nelle barre del book perche' `quota_nel_gap` misura il
     # salto di apertura contro la chiusura precedente (#246 Q4).

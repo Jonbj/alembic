@@ -17,7 +17,6 @@ from datetime import date
 
 from unittest.mock import patch
 
-import pytest
 
 import scripts.alpha_miner_dossier as dossier
 
@@ -452,35 +451,84 @@ def test_funnel_v2_senza_wiring_tutti_a_no_exit_signal():
 
 
 def test_chiusure_per_simbolo_dedup_by_symbol():
-    """`_chiusure_per_simbolo` de-duplica per simbolo tenendo la riga piu'
-    recente (ultima in exit_time). Il funnel riceve cosi' UNA chiusura
-    canonica per simbolo: se le tranche multiple dello stesso trade sono
-    presenti, la piu' tardiva e' il verdetto finale della giornata."""
+    """`_chiusure_per_simbolo` riusa le righe di `compute_exits` (nessuna query
+    in piu') e tiene per ogni simbolo l'ultima in exit_time: se lo stesso trade
+    esce in piu' tranche, il funnel vede il verdetto finale della giornata."""
     righe = [
-        ["HOOD", "S4", 28.50, 25.0, -10.00, "sentiment_reversal", 0.5,
-         "15:30"],
-        # chiusura successiva (parziale aggiuntivo o totale): vince sul record
-        ["HOOD", "S4", 28.20, 25.0, -12.50, "stop_loss", 0.8, "15:55"],
-        ["MU", "S4", 95.10, 50.0, -22.00, "sentiment_reversal", 1.2,
-         "14:10"],
+        {"symbol": "HOOD", "strategia": "S4", "exit_price": 28.50, "qty": 25.0,
+         "pnl_net": -10.00, "exit_reason": "sentiment_reversal", "ore_tenuta": 0.5},
+        {"symbol": "HOOD", "strategia": "S4", "exit_price": 28.20, "qty": 25.0,
+         "pnl_net": -12.50, "exit_reason": "stop_loss", "ore_tenuta": 0.8},
+        {"symbol": "MU", "strategia": "S4", "exit_price": 95.10, "qty": 50.0,
+         "pnl_net": -22.00, "exit_reason": "sentiment_reversal", "ore_tenuta": 1.2},
     ]
 
-    def fake_psql(query: str):
-        return list(righe)
-
-    monkey = pytest.MonkeyPatch()
-    monkey.setattr(dossier, "_psql", fake_psql)
-    try:
-        per_simbolo = dossier._chiusure_per_simbolo(date(2026, 9, 10))
-    finally:
-        monkey.undo()
+    per_simbolo = dossier._chiusure_per_simbolo(righe)
 
     assert set(per_simbolo) == {"HOOD", "MU"}
-    # l'ultima riga di HOOD in exit_time (15:55) vince
     h = per_simbolo["HOOD"]
     assert h["exit_reason"] == "stop_loss"
-    assert h["exit_time_hhmm"] == "15:55"
     assert h["pnl_net"] == -12.50
     assert h["exit_price"] == 28.20
-    # MU: una sola riga, passa com'e'
     assert per_simbolo["MU"]["exit_reason"] == "sentiment_reversal"
+
+
+def test_il_segnale_del_giorno_prima_arriva_al_funnel_e_rende_lo_stale(monkeypatch):
+    """RESPINGI di codex su PR #636: il loader reale non portava mai il segnale
+    di una seduta precedente, quindi STALE_EXIT_SIGNAL era irraggiungibile. Qui
+    il segnale passa dal loader vero (`_segnali_uscita`), non da un map
+    iniettato a mano (DELL 09-10, signal 10245 generato il 09-09 19:59Z)."""
+    query_viste = []
+
+    def fake_psql(query: str):
+        query_viste.append(query)
+        return [["DELL", "19:59", "-0.20", "10245", "2026-09-09"]]
+
+    monkeypatch.setattr(dossier, "_psql", fake_psql)
+    exit_segnali = dossier._segnali_uscita(date(2026, 9, 10), {}, {"DELL"})
+
+    assert "generated_at < '2026-09-10'" in query_viste[0]
+    assert exit_segnali["DELL"][0]["generated_day"] == "2026-09-09"
+
+    funnel = dossier._funnel_v2(
+        rendimenti={"DELL": -0.05},
+        held_at_open={"DELL"},
+        universo=["DELL"],
+        copertura={"per_ticker": {}},
+        segnali={},
+        intenti=[],
+        eventi=[],
+        guard=[],
+        barre={"DELL": _barra("DELL", 120.0)},
+        candidati_classificati=[],
+        soglia_gate=0.30,
+        chiusure_by_symbol={},
+        exit_segnali_by_symbol=exit_segnali,
+        giorno_iso="2026-09-10",
+    )
+    riga = funnel["righe"][0]
+    assert riga["pipeline_uscita"] == "STALE_EXIT_SIGNAL"
+    assert riga["evidence_uscita"]["signal_id"] == 10245
+
+
+def test_un_segnale_della_seduta_rende_fresca_la_pipeline(monkeypatch):
+    """Segnale precedente + segnale della seduta: non e' STALE."""
+    monkeypatch.setattr(
+        dossier, "_psql", lambda _q: [["DELL", "19:59", "-0.20", "10245", "2026-09-09"]]
+    )
+    exit_segnali = dossier._segnali_uscita(
+        date(2026, 9, 10), {"DELL": [{"ora": "15:10", "score": -0.4, "signal_id": 10300}]},
+        {"DELL"},
+    )
+
+    assert [s["generated_day"] for s in exit_segnali["DELL"]] == ["2026-09-09", "2026-09-10"]
+
+
+def test_senza_titoli_tenuti_nessuna_query_sui_segnali_precedenti(monkeypatch):
+    def esplodi(_q):
+        raise AssertionError("query inattesa")
+
+    monkeypatch.setattr(dossier, "_psql", esplodi)
+    out = dossier._segnali_uscita(date(2026, 9, 10), {"MU": [{"ora": "15:00", "score": 0.3}]}, set())
+
+    assert out == {"MU": [{"ora": "15:00", "score": 0.3, "generated_day": "2026-09-10"}]}
