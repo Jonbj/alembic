@@ -496,6 +496,10 @@ Il campo "fonte" punta al report e alla sezione, es. "FORENSIC_DAILY_REPORT___DA
 DUE REGOLE VINCOLANTI:
 1. SOLO APPEND. Non modificare né cancellare occorrenze già presenti, né cambiare titolo o id di
    un finding esistente.
+   Unica eccezione: "primo_avvistamento" e' la data della PRIMA occorrenza, non il giorno in cui
+   il finding e' stato scoperto. Se stai analizzando un giorno passato e l'occorrenza che
+   aggiungi ha "data" precedente al "primo_avvistamento" del finding, porta "primo_avvistamento"
+   a quella data (il validatore del ledger rifiuta occorrenze anteriori al primo avvistamento).
 2. NEL DUBBIO, AGGANCIA. Creare un id nuovo va giustificato nella nota. Un'evidenza spezzata in
    più id ha ricorrenza 1 ciascuno e sparisce sotto tutte le soglie.
 
