@@ -167,7 +167,6 @@
 507  `giorno_di_earnings` e' UNKNOWN sul 100% degli intent S4 per 4 sessioni consecutive: il calendario FMP non arriva mai al dossier dal cron (F-063) [SOSPESA 09-09, vedi nota sopra — torna in cima quando la finestra e' completa]
 
 # === 6. IL RESTO ===
-182  nessuna gerarchia di uscita fra S1 e S4: un overlay al 10% puo' liquidare posizioni del core (tier3, decisione di design — il sizing e' scorporato in #338)
 
 # ============================================================================
 # Fuori coda di proposito, decisione dell'operatore (non dell'agente):
@@ -239,12 +238,7 @@
 #     2026-09-21. Resta il resto della Fase 1 (scaricare l'archivio 2024-2025 ed
 #     eseguire H-A..H-F) e la Fase 2, entrambe descritte nel corpo della issue.
 610  MISURA: backtest news 2024-2025, resto della Fase 1 (scaricatore gia' in main, restano copertura su archivio vero + ipotesi H-A..H-F) e Fase 2 se la popolazione lo giustifica
-551  bug: il ciclo sentiment non e' idempotente — dopo SoftTimeLimitExceeded la coda resta sporca
-550  bug: il punteggio persistito nella Decision Log non e' quello valutato al gate
-564  bug: i run dei market holiday ri-analizzano la sessione precedente — serve idempotenza
-565  bug: rieseguire la pipeline evidence riscrive le serie congelate — protezione necessaria
 563  bug: i crons daily evidence perdono una sessione in modo permanente quando la sessione Claude Code muore
-566  bug: ticker_lookup salva solo nomi legali con suffisso — la rilevanza ne esce falsata
 567  bug: funnel_v2 non ha KPI sul lato uscita — 8 EXIT_RISK mai tracciati (09-10)
 596  obs: il gate di uscita consuma punteggi fan-out di articoli «altro-ticker»
 619  bug: triage log — la maschera dei numeri lascia il decimale in '18.6pp' e spezza i numeri
@@ -252,7 +246,6 @@
 606  MISURA: test confermativo pre-registrato — il sentiment sulle news fuori orario (off-session shadow in produzione, confronto diretto con in-session)
 614  Ricerca: disegno del controfattuale sulle uscite — cinque domande che chiudono il disegno
 603  Worker inference: abilitare GPU e rendere FinBERT riproducibile
-539  S4 input research: completare corpus H01-H22 e consolidare il cluster
 516  Weekly alpha-miss: valutare il pilot e proporre il contratto v2
 518  Weekly alpha-miss reviewer: benchmark read-only sul caso W34
 521  Weekly alpha-miss: implementare il ruolo del reviewer approvato
