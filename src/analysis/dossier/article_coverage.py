@@ -446,7 +446,14 @@ def content_empty_title_reason(title: object) -> str | None:
     return None
 
 
-def _classify_relevance(row: dict, fanout_degree: int) -> tuple[str, str | None]:
+def classify_relevance(row: dict, fanout_degree: int) -> tuple[str, str | None]:
+    """Classifica la pertinenza di una mappatura articolo→ticker.
+
+    Il worker di sentiment la riusa sul testo integrale disponibile allo
+    scoring (#637); il dossier la applica allo snippet storico. Chi chiama
+    dichiara quindi separatamente il proprio ``input_scope`` invece di
+    duplicare una regola che divergerebbe nel tempo.
+    """
     ticker = str(row.get("ticker") or "").strip().upper()
     gt_relevance = str(row.get("ground_truth_relevance") or "").strip().casefold()
     gt_tickers = {
@@ -493,6 +500,15 @@ def _classify_relevance(row: dict, fanout_degree: int) -> tuple[str, str | None]
     # gdelt_doc (query per nome societario) e provenienze assenti: un salto
     # inferenziale, resta UNKNOWN.
     return "UNKNOWN", None
+
+
+def classify_attribution(relevance: str, fanout_degree: int) -> str:
+    """Attribuzione osservazionale di uno score, condivisa con il dossier."""
+    if relevance == "ISSUER_SPECIFIC":
+        return "ISSUER_SPECIFIC"
+    if fanout_degree >= 2:
+        return "FANOUT"
+    return "UNKNOWN"
 
 
 def _strongest(scores: Iterable[float]) -> float | None:
@@ -609,7 +625,7 @@ def build_article_coverage(
     for canonical_rows in by_canonical.values():
         tickers = {row["ticker"] for row in canonical_rows if row["ticker"]}
         for row in canonical_rows:
-            relevance, subject = _classify_relevance(row, len(tickers))
+            relevance, subject = classify_relevance(row, len(tickers))
             row["relevance"] = relevance
             row["subject_ticker"] = subject
             row["timing"] = classify_timing(
@@ -661,12 +677,9 @@ def build_article_coverage(
             continue
         seen_signal_ids.add(signal_id)
         mapping = mappings[(row["canonical_article_id"], row["ticker"])]
-        if mapping["relevance"] == "ISSUER_SPECIFIC":
-            attribution = "ISSUER_SPECIFIC"
-        elif row["fanout_degree"] >= 2:
-            attribution = "FANOUT"
-        else:
-            attribution = "UNKNOWN"
+        attribution = classify_attribution(
+            mapping["relevance"], row["fanout_degree"]
+        )
         signals.append({
             "signal_id": signal_id,
             "news_log_id": row.get("news_log_id"),
