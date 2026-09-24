@@ -1138,9 +1138,15 @@
           "costo_usd": 6.13,
           "nota": "META +6,55%: max score 0,2338 (signal 10049, ISSUER_SPECIFIC, 'Meta Trending After Unveiling Muse') sotto soglia_gate 0,30, segno corretto; 15 SKIP_ENTRY_GATE e 9 SKIP_ENTRY_FRESHNESS negli intenti S4. Ma gap_return +5,73% contro intraday +0,78%: il gate oggi costa 6 $ accessibili, non 144 lordi.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-09.md §8"
+        },
+        {
+          "data": "2026-09-14",
+          "costo_usd": 68.57,
+          "nota": "5 mover ENTRY_OPPORTUNITY con notizia tempestiva (active_signal_recall 2/5): ADBE +5,30% con score_firmato +0,236 ('DA Davidson Maintains Buy on Adobe, Raises Price Target to $290') e PLTR +3,64% con +0,174 sotto soglia_gate 0,30, segno corretto. Anche PANW (+13,09%) ha avuto i primi due punteggi a +0,130 (13:23Z) e +0,184 (13:50Z) sotto gate su articoli gia' nel tema del giorno; il +0,405 che e' passato e' arrivato alle 16:32Z a 12,7% di movimento fatto. Il costo netto e' un terzo del lordo (68,57 vs 196,6 $): parte del costo del gate e' gia' assorbita dal ritardo della notizia.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-14.md §8"
         }
       ],
-      "costo_cumulato_usd": 2464.5,
+      "costo_cumulato_usd": 2533.07,
       "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
@@ -3361,7 +3367,7 @@
           "fonte": "ALPHA_MISS_REPORT_2026-09-09.md §8"
         }
       ],
-      "costo_cumulato_usd": 369.00000000000006,
+      "costo_cumulato_usd": 369.0,
       "occorrenze_non_stimate": 8,
       "stato": "aperto",
       "issue": null
