@@ -607,6 +607,108 @@ class PostgreSQLStore:
             conn.rollback()
             raise
 
+    _FETCH_ISSUER_TERMS = """
+        SELECT company_name, aliases
+        FROM ticker_lookup
+        WHERE ticker = %s
+    """
+
+    def fetch_issuer_terms(self, symbol: str) -> list[str]:
+        """Alias disponibili al classifier condiviso dossier/worker (#637)."""
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(self._FETCH_ISSUER_TERMS, (symbol,))
+                rows = cur.fetchall()
+            terms: list[str] = []
+            for company_name, aliases in rows:
+                if company_name:
+                    terms.append(str(company_name))
+                terms.extend(str(value) for value in (aliases or []) if value)
+            return terms
+        except Exception:
+            conn.rollback()
+            raise
+
+    _LOCK_ARTICLE_SIGNAL_COVERAGE = """
+        SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))
+    """
+
+    _ARTICLE_CLUSTER_EXISTS = """
+        SELECT EXISTS(
+            SELECT 1 FROM article_signal_coverage
+            WHERE symbol = %s
+              AND session_anchor = %s
+              AND canonical_article_id = %s
+              AND signal_id <> %s
+        )
+    """
+
+    _UPSERT_ARTICLE_SIGNAL_COVERAGE = """
+        INSERT INTO article_signal_coverage (
+            signal_id, news_log_id, symbol, canonical_article_id,
+            timing_category, session_anchor, relevance, attribution,
+            subject_ticker, content_empty_reason, fanout_degree, score_own, score_fanout,
+            novelty_proxy, input_scope
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        ) ON CONFLICT (signal_id) DO UPDATE SET
+            news_log_id = EXCLUDED.news_log_id,
+            timing_category = EXCLUDED.timing_category,
+            session_anchor = EXCLUDED.session_anchor,
+            relevance = EXCLUDED.relevance,
+            attribution = EXCLUDED.attribution,
+            subject_ticker = EXCLUDED.subject_ticker,
+            content_empty_reason = EXCLUDED.content_empty_reason,
+            fanout_degree = EXCLUDED.fanout_degree,
+            score_own = EXCLUDED.score_own,
+            score_fanout = EXCLUDED.score_fanout,
+            novelty_proxy = EXCLUDED.novelty_proxy,
+            input_scope = EXCLUDED.input_scope,
+            classified_at = now()
+    """
+
+    def write_article_signal_coverage(
+        self, *, signal_id: int, news_log_id: int | None, coverage: dict
+    ) -> None:
+        """Scrive la serie #637 senza toccare i due ledger esistenti.
+
+        Il lock per simbolo/seduta rende ``novelty_proxy`` stabile anche quando
+        due item dello stesso batch terminano nello stesso istante.
+        """
+        conn = self._get_connection()
+        anchor = coverage.get("session_anchor")
+        novelty = coverage.get("novelty_proxy")
+        try:
+            with conn.cursor() as cur:
+                if anchor is not None:
+                    lock_key = f"{coverage['symbol']}:{anchor.isoformat()}"
+                    cur.execute(self._LOCK_ARTICLE_SIGNAL_COVERAGE, (lock_key,))
+                    cur.execute(
+                        self._ARTICLE_CLUSTER_EXISTS,
+                        (
+                            coverage["symbol"], anchor,
+                            coverage["canonical_article_id"], signal_id,
+                        ),
+                    )
+                    novelty = not bool(cur.fetchone()[0])
+                cur.execute(
+                    self._UPSERT_ARTICLE_SIGNAL_COVERAGE,
+                    (
+                        signal_id, news_log_id, coverage["symbol"],
+                        coverage["canonical_article_id"], coverage["timing_category"],
+                        anchor, coverage["relevance"], coverage["attribution"],
+                        coverage.get("subject_ticker"), coverage.get("content_empty_reason"),
+                        coverage["fanout_degree"],
+                        coverage.get("score_own"), coverage.get("score_fanout"),
+                        novelty, coverage["input_scope"],
+                    ),
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
     # EN-06: canonical funnel counters ← worker stats-dict synonyms.
     # "discarded" (GKG worker) and "filtered" (RSS/EDGAR workers) are the REAL keys
     # found in src/workers/ingestion.py for no-ticker-match discards (there is no

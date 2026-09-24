@@ -80,15 +80,18 @@ class AlpacaNewsConnector(NewsConnector):
             if item is not None:
                 yield item
 
-    async def fetch_historical(
+    async def fetch_historical_raw(
         self,
         start: datetime,
         end: datetime,
-    ) -> AsyncIterator[NewsItem]:
-        """Paginate through articles for the configured symbols over a date range.
+    ) -> AsyncIterator[dict]:
+        """Paginate a date range yielding articles exactly as Alpaca serves them.
 
-        Uses cursor-based pagination (next_page_token). Stops when
-        next_page_token is None (last page reached).
+        This is the archive view: nothing is dropped and nothing is reshaped.
+        ``fetch_historical`` is the live view layered on top — it parses each
+        article and drops the ones with no body at all. The two populations
+        differ, and #610 measures that difference rather than assuming it away,
+        so the pagination lives here once and both views share it.
 
         Args:
             start: Start of range (UTC).
@@ -113,13 +116,31 @@ class AlpacaNewsConnector(NewsConnector):
                     data = await resp.json()
 
             for article in data.get("news", []):
-                item = self._parse_article(article)
-                if item is not None:
-                    yield item
+                yield article
 
             page_token = data.get("next_page_token")
             if not page_token:
                 break
+
+    async def fetch_historical(
+        self,
+        start: datetime,
+        end: datetime,
+    ) -> AsyncIterator[NewsItem]:
+        """Paginate through articles for the configured symbols over a date range.
+
+        Yields parsed items only: an article whose summary and content are both
+        empty has no body to analyse and is skipped. Use ``fetch_historical_raw``
+        when the unfiltered archive is what you need.
+
+        Args:
+            start: Start of range (UTC).
+            end: End of range (UTC).
+        """
+        async for article in self.fetch_historical_raw(start, end):
+            item = self._parse_article(article)
+            if item is not None:
+                yield item
 
     def _build_params(
         self,

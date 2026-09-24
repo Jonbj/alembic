@@ -10,8 +10,13 @@ from datetime import datetime, timezone
 from src.analysis.dossier.article_coverage import (
     build_article_coverage,
     canonical_article_id,
+    classify_attribution,
+    classify_relevance,
     classify_timing,
     content_empty_title_reason,
+    derive_bare_stem,
+    expand_aliases_with_stem,
+    propose_stem_backfill,
 )
 
 
@@ -75,6 +80,22 @@ def test_timing_ha_tre_bucket_espliciti_e_unknown():
     assert classify_timing(CLOSE, OPEN, CLOSE) == "CONCURRENT"
     assert classify_timing(CLOSE.replace(hour=21), OPEN, CLOSE) == "RETROSPECTIVE"
     assert classify_timing(None, OPEN, CLOSE) == "UNKNOWN"
+
+
+def test_signal_path_reuses_full_input_relevance_classifier():
+    """#637: il path di scoring deve importare il classifier del dossier."""
+    row = {
+        "ticker": "ORCL",
+        "title": "Oracle raises cloud guidance",
+        "body_snippet": "Full issuer context is available while scoring.",
+        "issuer_terms": ["Oracle Corporation", "Oracle"],
+        "extraction_method": "source_metadata",
+    }
+
+    relevance, attribution = classify_relevance(row, fanout_degree=3)
+
+    assert (relevance, attribution) == ("ISSUER_SPECIFIC", "ORCL")
+    assert classify_attribution(relevance, fanout_degree=3) == "ISSUER_SPECIFIC"
 
 
 def test_detector_content_empty_copre_solo_i_template_pre_registrati():
@@ -524,3 +545,182 @@ def test_content_mill_e_retrospettivi_sono_misurati_senza_cambiare_lo_scoring():
         "ticker_universo": 4,
         "quota": 0.75,
     }
+
+
+# ── #566 — bare-stem derivation & issuer_terms expansion ──────────────────
+#
+# L'articolo "Oracle set to report…" veniva classificato FALSE_ENTITY_MATCH
+# perche' ``ticker_lookup`` conserva solo nomi legali suffissi
+# ("Oracle Corporation", "Oracle Corp") e il matcher word-boundary non li
+# riconosce. Stesso buco su AAPL "Apple Announces…", CMCSA "Comcast CFO Says…",
+# F "Ford…". Il fix non rilassa il matcher: aggiunge il bare stem agli alias
+# in modo deterministico, con una lista di suffissi nota e verificabile, e
+# richiede una review umana caso-per-caso prima di scrivere nel DB live.
+
+
+def test_derive_bare_stem_riconosce_i_suffissi_corporate_noti():
+    """La lista di suffissi e' congelata e leggibile: aggiungere un suffisso
+    e' una scelta di copertura, non un default. I suffissi sono elencati in
+    ordine di greedy match."""
+    assert derive_bare_stem("Oracle Corporation") == "oracle"
+    assert derive_bare_stem("Oracle Corp") == "oracle"
+    assert derive_bare_stem("Apple Inc") == "apple"
+    assert derive_bare_stem("Comcast Corporation") == "comcast"
+    assert derive_bare_stem("Ford Motor Company") == "ford motor"
+    assert derive_bare_stem("Ford Motor Co") == "ford motor"
+    assert derive_bare_stem("Berkshire Hathaway Inc") == "berkshire hathaway"
+    assert derive_bare_stem("3M Co") == "3m"
+    assert derive_bare_stem("NVIDIA Corporation") == "nvidia"
+    # Connettivo "and" finale: "Eli Lilly and Company" -> "Eli Lilly"
+    assert derive_bare_stem("Eli Lilly and Company") == "eli lilly"
+    # "&" connettivo: "Merck & Co" -> "Merck"
+    assert derive_bare_stem("Merck & Co") == "merck"
+
+
+def test_derive_bare_stem_rifioca_i_nomi_ambigui_o_privi_di_suffisso():
+    """Il matcher non indovina: lo stem di "General Electric Co" e' "General
+    Electric", ma senza un check di collisione lessicale non va aggiunto in
+    automatico. ``propose_stem_backfill`` segnala collisioni; qui la funzione
+    pura restituisce lo stem e l'oracolo di review decide."""
+    # Suffisso "AG" / "SE" / "N.V." / "PLC" coperti dalla lista
+    assert derive_bare_stem("SAP SE") == "sap"
+    assert derive_bare_stem("Deutsche Bank AG") == "deutsche bank"
+    assert derive_bare_stem("AstraZeneca plc") == "astrazeneca"
+    # Review codex su PR #635 (2026-09-20): la lista normalizza solo case e
+    # spazi (`_normalise_text`), non i punti — "N.V." e "S.A." dotati vanno
+    # elencati per esteso, "NV"/"SA" senza punti non li matchano. "AB" e "AS"
+    # (o "A/S") sono i suffissi nordici del caso reale in ticker_lookup: NVO
+    # "Novo Nordisk AS" restava `noop/no_suffix_detected` prima di questo fix.
+    assert derive_bare_stem("Acme N.V.") == "acme"
+    assert derive_bare_stem("Acme S.A.") == "acme"
+    assert derive_bare_stem("Ericsson AB") == "ericsson"
+    assert derive_bare_stem("Novo Nordisk AS") == "novo nordisk"
+    assert derive_bare_stem("Novo Nordisk A/S") == "novo nordisk"
+    # Nome senza suffisso corporate riconoscibile: nessuno stem da derivare
+    # (la funzione restituisce None, non il nome intatto: e' un segnale che
+    # il backfill non aggiunge nulla).
+    assert derive_bare_stem("Morgan Stanley") is None
+    # Stringa vuota o solo suffisso: nessuno stem da aggiungere
+    assert derive_bare_stem("") is None
+    assert derive_bare_stem("   ") is None
+
+
+def test_expand_aliases_aggiunge_lo_stem_solo_se_nuovo_e_non_vuoto():
+    """Il backfill e' idempotente e non duplica: stem gia' presente o identico
+    al company_name non viene aggiunto. Il case e' casefolded perche' la
+    normalizzazione e' condivisa con il resto del modulo."""
+    expanded = expand_aliases_with_stem(
+        "Oracle Corporation", ["Oracle Corp"]
+    )
+    assert expanded == ["Oracle Corp", "oracle"]
+
+    # Stem uguale al company_name gia' presente: niente duplicato
+    expanded = expand_aliases_with_stem("Oracle Corporation", ["Oracle"])
+    assert expanded == ["Oracle"]
+
+    # Stem assente e uguale a un alias esistente: niente duplicato
+    expanded = expand_aliases_with_stem("Oracle Corporation", ["Oracle Corp", "Oracle"])
+    assert expanded == ["Oracle Corp", "Oracle"]
+
+    # Stem nullo (nome senza suffisso riconoscibile): invariata
+    expanded = expand_aliases_with_stem("Morgan Stanley", [])
+    assert expanded == []
+
+
+def test_propose_stem_backfill_classifica_le_righe_in_quattro_bucketti():
+    """L'output e' la proposta di review: short / generic / collision / safe.
+    Solo "safe" e' pronto per l'applicazione automatica; gli altri vanno
+    revisionati a mano."""
+    rows = [
+        # Safe: stem >= 3 caratteri, non collidente, ticker lungo
+        {"ticker": "ORCL", "company_name": "Oracle Corporation", "aliases": ["Oracle Corp"]},
+        # Collision: "apple" e' anche un frutto. La issue lo elenca
+        # esplicitamente come da NON aggiungere (riapre i falsi positivi
+        # di #405). Lo segnaliamo, l'operatore decide a mano.
+        {"ticker": "AAPL", "company_name": "Apple Inc", "aliases": ["Apple Computer"]},
+        # Short: ticker da 1-2 caratteri (F) — lo stem di per se' sarebbe
+        # applicabile, ma il ticker corto segnala che serve una review.
+        {"ticker": "F", "company_name": "Ford Motor Company", "aliases": ["Ford Motor Co"]},
+        # Noop: "Morgan Stanley" non ha suffisso corporate riconoscibile,
+        # niente da strippare.
+        {"ticker": "MS", "company_name": "Morgan Stanley", "aliases": []},
+        # Noop: stem identico a un alias esistente (Microsoft == Microsoft).
+        {"ticker": "MSFT", "company_name": "Microsoft Corporation", "aliases": ["Microsoft"]},
+        # "And" e' connettivo: "Eli Lilly and Company" -> "Eli Lilly" dopo
+        # strip di "Company", ma il connettivo "And" non va lasciato nello
+        # stem perche' collide col connettivo inglese.
+        {"ticker": "LLY", "company_name": "Eli Lilly and Company", "aliases": ["Eli Lilly", "Lilly"]},
+    ]
+    proposal = propose_stem_backfill(rows)
+    by_ticker = {row["ticker"]: row for row in proposal}
+    assert by_ticker["ORCL"]["bucket"] == "safe"
+    assert by_ticker["ORCL"]["proposed_alias"] == "oracle"
+    assert by_ticker["AAPL"]["bucket"] == "collision"
+    assert by_ticker["AAPL"]["proposed_alias"] == "apple"
+    assert by_ticker["F"]["bucket"] == "short"
+    assert by_ticker["F"]["proposed_alias"] == "ford motor"
+    assert by_ticker["MS"]["bucket"] == "noop"
+    assert by_ticker["MS"]["proposed_alias"] is None
+    assert by_ticker["MSFT"]["bucket"] == "noop"
+    assert by_ticker["MSFT"]["proposed_alias"] is None
+    # LLY: "Eli Lilly" e' gia' negli alias, niente da aggiungere (noop)
+    assert by_ticker["LLY"]["bucket"] == "noop"
+    assert by_ticker["LLY"]["proposed_alias"] is None
+
+
+def test_alias_con_bare_stem_riconosce_il_nome_comune_nel_titolo():
+    """#566 — test pinning del fix: prova il COLLEGAMENTO tra la funzione
+    di backfill ``expand_aliases_with_stem`` e il classifier.
+
+    Lo stato pre-fix usa gli alias come sono in produzione (solo nomi
+    legali suffissi); lo stato post-fix deriva gli stessi alias dalla
+    funzione ``expand_aliases_with_stem`` applicata a quegli alias di
+    partenza, cosi' la riga del test cambia se e solo se la funzione
+    cambia. Rimuovere o rompere ``expand_aliases_with_stem`` (o rimuovere
+    il suo import) fa fallire il test per la ragione giusta.
+    """
+    titolo = "Oracle set to report as Street weighs capex risk against cloud growth"
+    company_name = "Oracle Corporation"
+    base_aliases = ["Oracle Corp"]
+    # Stato pre-fix: gli alias non contengono lo stem (stato di produzione
+    # attuale). Costruiamo manualmente issuer_terms per descrivere il caso.
+    pre_terms = [*base_aliases, company_name, "ORCL"]
+    pre = _row(
+        901, "ORCL", titolo, content_hash="x" * 64,
+        source="gdelt_gkg", extraction_method="org_lookup",
+        signal_id=901, score=-0.04,
+        issuer_terms=pre_terms,
+    )
+    out_pre = build_article_coverage(
+        [pre], universe=["ORCL"], sector_by_ticker={"ORCL": "tech"},
+        session_open=OPEN, session_close=CLOSE,
+    )
+    assert out_pre["totali"]["mapping_rilevanza"]["FALSE_ENTITY_MATCH"] == 1
+    assert out_pre["per_ticker"]["ORCL"]["max_score_own"] is None
+
+    # Stato post-fix: lo stem "oracle" viene aggiunto agli alias dalla
+    # funzione stessa di backfill. Il test si appoggia esclusivamente a
+    # ``expand_aliases_with_stem``: se la funzione sparisse o smettesse di
+    # produrre lo stem "oracle", il post-fix crollerebbe in FALSE_ENTITY_MATCH
+    # e il test fallirebbe. Il test quindi VINCOLA sia la funzione sia il
+    # suo effetto sul classifier.
+    post_aliases = expand_aliases_with_stem(company_name, base_aliases)
+    post_aliases_lower = {a.casefold() for a in post_aliases}
+    assert "oracle" in post_aliases_lower, (
+        "expand_aliases_with_stem deve aggiungere 'oracle' (stem di "
+        "'Oracle Corporation') agli alias per far passare il test pinning"
+    )
+    post_terms = [*post_aliases, "ORCL"]
+    post = _row(
+        902, "ORCL", titolo, content_hash="y" * 64,
+        source="gdelt_gkg", extraction_method="org_lookup",
+        signal_id=902, score=-0.04,
+        issuer_terms=post_terms,
+    )
+    out_post = build_article_coverage(
+        [post], universe=["ORCL"], sector_by_ticker={"ORCL": "tech"},
+        session_open=OPEN, session_close=CLOSE,
+    )
+    assert out_post["totali"]["mapping_rilevanza"]["ISSUER_SPECIFIC"] == 1
+    assert out_post["totali"]["mapping_rilevanza"]["FALSE_ENTITY_MATCH"] == 0
+    assert out_post["per_ticker"]["ORCL"]["max_score_own"] == -0.04

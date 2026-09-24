@@ -48,11 +48,24 @@ def compute_dedup_hash(item: NewsItem) -> str:
 class Deduplicator:
     """Redis-based deduplicator using SET NX with TTL.
 
-    Uses a Redis hash with 2-hour TTL to track seen news items.
-    The TTL is intentionally short (2h) because:
-      - Financial news is time-sensitive; re-processing an article from 3 hours
+    Uses a Redis hash with a 4-hour TTL (`_DEDUP_TTL_SECONDS`) to track seen items.
+    The TTL is intentionally short because:
+      - Financial news is time-sensitive; re-processing an article from hours
         ago would be stale anyway.
       - Keeps Redis memory footprint bounded.
+
+    The docstrings here said "2 hours" from the 2026-06-27 change (`731530b`) until
+    2026-09-21: whoever read the module read the opposite of the constant. The value
+    itself is still 4h, i.e. TWICE `MAX_NEWS_AGE_HOURS` (=2). That mismatch makes a
+    WebSocket-first article reappear at T+4h exactly — `SET NX` never refreshes the
+    TTL — and the freshness gate then kills it for being stale by construction, which
+    is what the `already_stale_at_fetch` cohort actually measures. Alpha cost is zero
+    (every affected article had already been seen fresh within 15 minutes; the drop is
+    the SECOND delivery), so the alignment 4h -> `MAX_NEWS_AGE_HOURS` is NOT exempt
+    from the tuning freeze: it is pre-registered for 2026-09-28 in
+    `docs/evidence/OBSERVATION_CHARTER.md` (perimeter, expected verification and
+    falsification condition are stated there), because the TTL governs which news
+    enters the observed coverage series (#508/#511). Do not change the constant early.
     """
 
     def __init__(self, redis: Redis):
@@ -66,8 +79,9 @@ class Deduplicator:
     def is_duplicate(self, item: NewsItem) -> bool:
         """Check if item is a duplicate by content hash.
 
-        Uses SET NX (set if not exists) with 2h TTL. Returns True if
-        the item was already seen (SET NX failed), False if first occurrence.
+        Uses SET NX (set if not exists) with the module TTL (4h; see the class
+        docstring for why it is not yet aligned to MAX_NEWS_AGE_HOURS). Returns True
+        if the item was already seen (SET NX failed), False if first occurrence.
 
         Args:
             item: NewsItem to check

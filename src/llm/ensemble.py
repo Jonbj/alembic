@@ -130,10 +130,21 @@ class AggregatedResult(BaseModel):
                             Computed as mean of eligible model confidences
         reasoning (str): Reasoning from the highest-confidence model
         model_ids (list[str]): List of model IDs that contributed to the consensus
-        ensemble_std (float): Standard deviation of polarities among eligible models
-                              Used as divergence metric (threshold: 0.30)
+        ensemble_std (float): Standard deviation of polarities across ALL model
+                              responses, eligible or not (F-054). This is the
+                              observability metric: a dissenting model that fell below
+                              min_confidence used to be dropped before the std was
+                              computed, so the persisted value read 0.000 exactly in the
+                              cases of maximum disagreement.
+        ensemble_std_eligible (float): The same statistic over the eligible contributors
+                              only. This is what the divergence guard decides on, kept
+                              as a separate field so the guard's behaviour is unchanged
+                              while the persisted measure becomes honest.
 
     Interpretation:
+        - ensemble_std reads the disagreement; 0.0 means either genuine agreement or a
+          single response. It is NOT an entry gate (F-037): arming one is TARATURA,
+          frozen until 2026-09-28 and gated on the QX-01 label set.
         - ensemble_std < 0.10: Strong agreement (high confidence in consensus)
         - ensemble_std 0.10-0.30: Moderate agreement (acceptable variance)
         - ensemble_std >= divergence_threshold: High divergence (trigger FinBERT fallback; live threshold 0.40)
@@ -156,6 +167,8 @@ class AggregatedResult(BaseModel):
     reasoning: str
     model_ids: list[str]
     ensemble_std: float
+    # Default keeps pre-F-054 constructions (tests, replay fixtures) valid.
+    ensemble_std_eligible: float = 0.0
 
 
 class EnsembleAggregator:
@@ -248,12 +261,17 @@ class EnsembleAggregator:
             - If only one model is eligible: use it (no divergence possible)
 
         Step 3: Divergence Calculation
-            Compute standard deviation of polarities among eligible models.
-            This measures how much the models disagree.
+            Compute the standard deviation of polarities TWICE (F-054):
+              - over ALL responses -> `ensemble_std`, the reported measure;
+              - over the eligible contributors only -> `ensemble_std_eligible`,
+                the value the guard in Step 4 decides on.
+            Measuring only the survivors reported 0.000 exactly when one model
+            dissented below min_confidence, i.e. in the typical shape of disagreement.
 
         Step 4: Divergence Check
-            If std >= divergence_threshold AND multiple models: return None
-            This catches cases where models fundamentally disagree.
+            If std_eligible >= divergence_threshold AND multiple eligible models:
+            return None. Unchanged on purpose: the honest number is observability,
+            making it the guard's input would change what we buy (TARATURA).
 
         Step 5: Weighted Aggregation
             - Polarity: confidence-weighted average
@@ -295,6 +313,10 @@ class EnsembleAggregator:
         if not eligible:
             return None
 
+        # F-054: the reported divergence spans every response received, so a
+        # dissenter filtered out by eligibility can no longer masquerade as agreement.
+        std_all = float(np.std([o.polarity for o in outputs], ddof=1)) if len(outputs) > 1 else 0.0
+        # The guard keeps deciding on the eligible-only statistic (see Step 4).
         std = float(np.std([o.polarity for o in eligible], ddof=1)) if len(eligible) > 1 else 0.0
 
         if len(eligible) > 1 and std >= self.divergence_threshold:
@@ -330,7 +352,8 @@ class EnsembleAggregator:
             confidence=confidence,
             reasoning=best.reasoning,
             model_ids=[o.model_id for o in eligible],
-            ensemble_std=std,
+            ensemble_std=std_all,
+            ensemble_std_eligible=std,
         )
 
 

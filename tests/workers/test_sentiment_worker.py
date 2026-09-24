@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.llm.budget import LLMBudgetExhaustedError, LLMBudgetTracker
-from src.llm.ensemble import EnsembleAggregator, ModelOutput
+from src.llm.ensemble import AggregatedResult, EnsembleAggregator, ModelOutput
 from src.llm.finbert import FinBERTClient
 from src.models.news import LLMSentimentOutput, MarketAuxNewsItem, NewsItem
 from src.models.signals import SentimentResult
@@ -49,6 +49,38 @@ def make_model_output(
     )
 
 
+def make_aggregated(
+    polarity: float,
+    confidence: float,
+    reasoning: str,
+    model_ids: list[str],
+    ensemble_std: float = 0.05,
+    ensemble_std_eligible: float | None = None,
+    symbol: str = "AAPL",
+) -> AggregatedResult:
+    """Build a REAL AggregatedResult instead of a loose MagicMock.
+
+    A bare `MagicMock(polarity=..., confidence=...)` accepts any attribute the
+    production code later reads and hands back a Mock, so a new field on the model
+    (F-054 added `ensemble_std_eligible`) surfaced as `'>' not supported between
+    instances of 'MagicMock' and 'float'` inside an `except` block — eight tests
+    failing on an error message that named neither the field nor the contract.
+    Constructing the real pydantic model makes the next added field a construction
+    error here, which is where it belongs.
+    """
+    return AggregatedResult(
+        symbol=symbol,
+        polarity=polarity,
+        confidence=confidence,
+        reasoning=reasoning,
+        model_ids=model_ids,
+        ensemble_std=ensemble_std,
+        ensemble_std_eligible=(
+            ensemble_std if ensemble_std_eligible is None else ensemble_std_eligible
+        ),
+    )
+
+
 def make_sentiment_result(
     symbol: str = "AAPL",
     polarity: float = 0.6,
@@ -82,7 +114,7 @@ class TestProcessNewsItem:
 
         # Mock aggregator
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
-        mock_aggregator.aggregate.return_value = MagicMock(
+        mock_aggregator.aggregate.return_value = make_aggregated(
             polarity=0.6,
             confidence=0.81,
             reasoning="Strong beat",
@@ -334,7 +366,7 @@ class TestFallbackCounterPersistence:
         (increment only on a real FinBERT full fallback), not increment it."""
         mock_outputs = [make_model_output(0.6, 0.8, "opus")]
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
-        mock_aggregator.aggregate.return_value = MagicMock(
+        mock_aggregator.aggregate.return_value = make_aggregated(
             polarity=0.6,
             confidence=0.8,
             reasoning="Strong beat",
@@ -378,7 +410,7 @@ class TestFallbackCounterPersistence:
             make_model_output(0.55, 0.75, "glm-5.2:cloud"),
         ]
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
-        mock_aggregator.aggregate.return_value = MagicMock(
+        mock_aggregator.aggregate.return_value = make_aggregated(
             polarity=0.6,
             confidence=0.8,
             reasoning="Strong beat",
@@ -424,7 +456,7 @@ class TestRunInference:
             reasoning="Bullish on earnings", model_id="opus",
         )
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
-        mock_aggregator.aggregate.return_value = MagicMock(
+        mock_aggregator.aggregate.return_value = make_aggregated(
             polarity=0.8,
             confidence=0.9,
             reasoning="Bullish on earnings",
@@ -476,7 +508,7 @@ class TestRunInference:
             ),
         ]
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
-        mock_aggregator.aggregate.return_value = MagicMock(
+        mock_aggregator.aggregate.return_value = make_aggregated(
             polarity=0.8,
             confidence=0.9,
             reasoning="Bullish on earnings",
@@ -518,7 +550,7 @@ class TestRunInference:
         ensemble prompt (today it never does — the template has no slot for it)."""
         monkeypatch.setenv("SENTIMENT_PROMPT_VARIANT", "a")
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
-        mock_aggregator.aggregate.return_value = MagicMock(
+        mock_aggregator.aggregate.return_value = make_aggregated(
             polarity=0.5, confidence=0.7, reasoning="ok",
             model_ids=["glm-5.2:cloud"], ensemble_std=0.0,
         )
@@ -546,7 +578,7 @@ class TestRunInference:
         stays byte-identical to the legacy _DK_COT_PROMPT — no title, no drift."""
         monkeypatch.delenv("SENTIMENT_PROMPT_VARIANT", raising=False)
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
-        mock_aggregator.aggregate.return_value = MagicMock(
+        mock_aggregator.aggregate.return_value = make_aggregated(
             polarity=0.5, confidence=0.7, reasoning="ok",
             model_ids=["glm-5.2:cloud"], ensemble_std=0.0,
         )
@@ -575,7 +607,7 @@ class TestRunInference:
         """Empty NewsItem.title must not render as a blank 'Headline:' line."""
         monkeypatch.setenv("SENTIMENT_PROMPT_VARIANT", "a")
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
-        mock_aggregator.aggregate.return_value = MagicMock(
+        mock_aggregator.aggregate.return_value = make_aggregated(
             polarity=0.5, confidence=0.7, reasoning="ok",
             model_ids=["glm-5.2:cloud"], ensemble_std=0.0,
         )
@@ -782,7 +814,7 @@ class TestRunInference:
     async def test_run_inference_no_store_writes(self):
         """run_inference never writes to Redis or PostgreSQL."""
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
-        mock_aggregator.aggregate.return_value = MagicMock(
+        mock_aggregator.aggregate.return_value = make_aggregated(
             polarity=0.5, confidence=0.8, reasoning="ok",
             model_ids=["opus"], ensemble_std=0.0,
         )
@@ -947,7 +979,7 @@ class TestFinbertFallbackEventEvidence:
             make_model_output(0.55, 0.80, "gptoss"),
         ]
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
-        mock_aggregator.aggregate.return_value = MagicMock(
+        mock_aggregator.aggregate.return_value = make_aggregated(
             polarity=0.6, confidence=0.82, reasoning="Strong beat",
             model_ids=["glm52", "gptoss"],
         )
@@ -1017,7 +1049,7 @@ class TestFinbertFallbackEventPersistence:
             make_model_output(0.55, 0.80, "gptoss"),
         ]
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
-        mock_aggregator.aggregate.return_value = MagicMock(
+        mock_aggregator.aggregate.return_value = make_aggregated(
             polarity=0.6, confidence=0.82, reasoning="Strong beat",
             model_ids=["glm52", "gptoss"],
         )
@@ -1165,7 +1197,7 @@ class TestProcessNewsBatch:
         mock_outputs = [make_model_output(0.6, 0.8, "opus")]
 
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
-        mock_aggregator.aggregate.return_value = MagicMock(
+        mock_aggregator.aggregate.return_value = make_aggregated(
             polarity=0.6,
             confidence=0.8,
             reasoning="Strong beat",
@@ -1237,7 +1269,7 @@ class TestProcessNewsBatch:
         ]
 
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
-        mock_aggregator.aggregate.return_value = MagicMock(
+        mock_aggregator.aggregate.return_value = make_aggregated(
             polarity=0.6,
             confidence=0.8,
             reasoning="Strong beat",
@@ -1593,7 +1625,7 @@ class TestEnsembleWeightReading:
                 # Active default pair is "all" -> kimi + glm52, so suggestion
                 # weights must match active models.
                 "kimi-k2.6:cloud": 0.40,
-                "glm-5.2:cloud": 0.60,
+                "glm-5.3:cloud": 0.60,
             },
             "purified_icir": {},
             "freeze_reason": "VIX data unavailable (fail-safe)",
@@ -1650,7 +1682,7 @@ class TestEnsembleWeightReading:
         from unittest.mock import patch, MagicMock
         from src.workers.sentiment import run_sentiment_worker
 
-        applied = {"kimi-k2.6:cloud": 0.35, "glm-5.2:cloud": 0.65}
+        applied = {"kimi-k2.6:cloud": 0.35, "glm-5.3:cloud": 0.65}
         raw_applied = json.dumps({"weights": applied, "source": "auto_apply"}).encode()
 
         # Provide a valid news item in the queue
@@ -1808,7 +1840,7 @@ class TestProcessNewsBatchShadowDecoupling:
     def _make_live_mocks():
         mock_outputs = [make_model_output(0.6, 0.8, "opus")]
         mock_aggregator = MagicMock(spec=EnsembleAggregator)
-        mock_aggregator.aggregate.return_value = MagicMock(
+        mock_aggregator.aggregate.return_value = make_aggregated(
             polarity=0.6, confidence=0.8, reasoning="Strong beat", model_ids=["opus"],
         )
         mock_budget = AsyncMock(spec=LLMBudgetTracker)

@@ -60,14 +60,16 @@ T = TypeVar("T", bound=BaseModel)
 #
 # Categories:
 # - Claude aliases (general purpose): opus, sonnet, haiku
-# - General purpose cloud: qwen3.5:cloud (Ollama), deepseek-v4-pro:cloud, glm-5.1:cloud, kimi-k2.6:cloud
+# - General purpose cloud: qwen3.5:cloud (Ollama), deepseek-v4-pro:cloud, glm-5.3:cloud, kimi-k2.6:cloud
 # - Coding specialized: qwen3-coder-next:cloud, devstral-small-2:24b-cloud, etc.
 ALLOWED_MODEL_IDS = frozenset({
     # Claude aliases (general purpose)
     "opus", "sonnet", "haiku",
     # General purpose cloud
     "qwen3.5:cloud", "deepseek-v4-pro:cloud",
-    "glm-5.1:cloud", "glm-5.2:cloud", "kimi-k2.6:cloud", "gemma4:31b-cloud",
+    # 2026-09-22: glm-5.1/glm-5.2 sostituiti da glm-5.3:cloud (stesso base
+    # model, gain solo post-training) in tutto il percorso live.
+    "glm-5.3:cloud", "kimi-k2.6:cloud", "gemma4:31b-cloud",
     "gpt-oss:20b-cloud",
     # Coding specialized
     "qwen3-coder-next:cloud", "devstral-small-2:24b-cloud",
@@ -575,21 +577,21 @@ class DeepseekClient(LLMClient):
 
 
 class GlmClient(LLMClient):
-    """GLM-5.1 client for financial sentiment with chain-of-thought reasoning.
+    """GLM-5.3 client for financial sentiment with chain-of-thought reasoning.
 
-    GLM-5.1 (Zhipu AI) is a thinking model that excels at:
+    GLM (Zhipu AI) is a thinking model that excels at:
     - Step-by-step reasoning (maps well to DK-CoT prompts)
     - Financial domain knowledge (Zhipu AI focuses heavily on finance)
     - Nuanced sentiment detection
 
-    Accessed via claude CLI with --model glm-5.1:cloud (Ollama cloud).
+    Accessed via claude CLI with --model glm-5.3:cloud (Ollama cloud).
     """
 
-    model_id = "glm-5.1:cloud"
-    model_name = "GLM 5.1"
+    model_id = "glm-5.3:cloud"
+    model_name = "GLM 5.3"
 
     async def complete(self, prompt: str, response_schema: type[T]) -> T:
-        """Call GLM-5.1 and parse response."""
+        """Call GLM and parse response."""
         loop = asyncio.get_running_loop()
 
         for attempt in range(self.max_retries + 1):
@@ -748,7 +750,7 @@ class OllamaCloudClient(LLMClient):
 
     model_id: str = ""
     model_name: str = ""
-    # Ollama cloud models (Kimi K2.6, GLM-5.2 — active sentiment pair) are large thinking models.
+    # Ollama cloud models (Kimi K2.6, GLM-5.3 — active sentiment pair) are large thinking models.
     # DK-CoT prompts generate 500-1000 tokens of internal reasoning; 90s gives
     # enough headroom without blocking the batch for too long.
     _OLLAMA_TIMEOUT = 90
@@ -823,16 +825,20 @@ class OllamaKimiClient(OllamaCloudClient):
 
 
 class OllamaGlmClient(OllamaCloudClient):
-    """GLM-5.1 via Ollama cloud HTTP API."""
-    model_id = "glm-5.1:cloud"
-    model_name = "GLM 5.1 (Ollama)"
+    """GLM-5.3 via Ollama cloud HTTP API (regime pair slot)."""
+    model_id = "glm-5.3:cloud"
+    model_name = "GLM 5.3 (Ollama)"
     _OLLAMA_TIMEOUT = config.OLLAMA_GLM_TIMEOUT_SECONDS
 
 
-class OllamaGLM52Client(OllamaCloudClient):
-    """GLM-5.2 via Ollama cloud HTTP API — flagship long-horizon reasoning model."""
-    model_id = "glm-5.2:cloud"
-    model_name = "GLM 5.2 (Ollama)"
+class OllamaGLM53Client(OllamaCloudClient):
+    """GLM-5.3 via Ollama cloud HTTP API — flagship long-horizon reasoning model.
+
+    2026-09-22: sostituisce OllamaGLM52Client. Stesso base model di GLM-5.2,
+    i guadagni sono solo di post-training (coding/agentic long-horizon).
+    """
+    model_id = "glm-5.3:cloud"
+    model_name = "GLM 5.3 (Ollama)"
     _OLLAMA_TIMEOUT = config.OLLAMA_GLM52_TIMEOUT_SECONDS
 
 

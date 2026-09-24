@@ -25,7 +25,10 @@ class SentimentModel:
 
 _MODELS: tuple[SentimentModel, ...] = (
     SentimentModel("kimi", "kimi-k2.6:cloud", "Kimi K2.6"),
-    SentimentModel("glm52", "glm-5.2:cloud", "GLM-5.2", economy_default=True),
+    # 2026-09-22: glm52 punta a GLM-5.3 (stesso base model di 5.2, gain solo
+    # post-training). La key "glm52" resta invariata di proposito: e' l'identificativo
+    # stabile dello slot economy nella selezione Redis/UI, non la versione del modello.
+    SentimentModel("glm52", "glm-5.3:cloud", "GLM-5.3", economy_default=True),
     # Stage 1 comparison pool (2026-07-10): registered so the live pair can be
     # swapped via config:sentiment_llm_models without a code change.
     SentimentModel("qwen35", "qwen3.5:cloud", "Qwen3.5", in_all=False),
@@ -34,6 +37,10 @@ _MODELS: tuple[SentimentModel, ...] = (
 
 _ALIASES = {
     "glm": "glm52",
+    "glm-5.3": "glm52",
+    "glm-5.3:cloud": "glm52",
+    # Alias retro-compatibili: selezioni Redis/UI persistite prima dello swap
+    # del 2026-09-22 devono continuare a risolvere allo stesso slot.
     "glm-5.2": "glm52",
     "glm-5.2:cloud": "glm52",
     "kimi-k2.6": "kimi",
@@ -172,7 +179,7 @@ def sentiment_model_payload(selection: str | None = None) -> dict:
 def build_sentiment_clients(keys: list[str]):
     """Instantiate sentiment clients for the selected model keys."""
     from src.llm.client import (
-        OllamaGLM52Client,
+        OllamaGLM53Client,
         OllamaGptOssClient,
         OllamaKimiClient,
         OllamaQwen35Client,
@@ -180,7 +187,7 @@ def build_sentiment_clients(keys: list[str]):
 
     registry = {
         "kimi": OllamaKimiClient,
-        "glm52": OllamaGLM52Client,
+        "glm52": OllamaGLM53Client,
         "qwen35": OllamaQwen35Client,
         "gptoss": OllamaGptOssClient,
     }

@@ -362,3 +362,63 @@ class TestEnsembleAggregator:
         assert result is not None
         # Both models get equal effective weight → polarity = (0.6+0.4)/2 = 0.50
         assert abs(result.polarity - 0.50) < 0.01
+
+
+class TestF054DivergenceMeasuredOnAllOutputs:
+    """F-054: `ensemble_std` was 0.000 exactly when the two models disagreed most.
+
+    Mechanism: eligibility filtering ran BEFORE the divergence calculation, so when the
+    dissenting model fell below `min_confidence` — the TYPICAL shape of disagreement —
+    only one contributor survived and the std was 0.0 "because no divergence is
+    possible". Measured 2026-09-16: 27/141 `ensemble:` rows persisted 0.000 including
+    the day's top score (INTC +0.640); 2026-09-15: 13 rows with raw polarity spreads
+    >= 0.30, and the divergence guard never fired once in the whole session.
+
+    This fixes the MEASURE only. The guard's decision input stays the eligible-only
+    std, so no order-path behaviour changes (arming a gate on the honest number is
+    TARATURA, frozen until 2026-09-28 and gated on the QX-01 label set).
+    """
+
+    def test_dissenting_low_confidence_model_is_not_reported_as_agreement(self):
+        # TSLA id 9371 (2026-08-31): glm -0.20@0.30 vs oss +0.35@0.65 — opposite signs,
+        # spread 0.55, persisted as ensemble_std 0.0000 = "perfect agreement".
+        agg = EnsembleAggregator()
+        r = agg.aggregate([_mo(-0.20, 0.30, "glm"), _mo(0.35, 0.65, "oss")])
+        assert r is not None
+        assert r.ensemble_std > 0.0, "divergence must be measured over ALL responses"
+        assert r.ensemble_std == pytest.approx(0.389, abs=0.001)  # |0.55|/sqrt(2)
+
+    def test_eligible_only_std_still_available_for_the_guard(self):
+        agg = EnsembleAggregator()
+        r = agg.aggregate([_mo(-0.20, 0.30, "glm"), _mo(0.35, 0.65, "oss")])
+        assert r.ensemble_std_eligible == 0.0  # one contributor survived the filter
+        assert r.model_ids == ["oss"]          # unchanged: aggregation is eligible-only
+
+    def test_guard_decision_unchanged_by_the_fix(self):
+        """An honest std above the threshold must NOT start rejecting the signal.
+
+        Spread 1.4 → std_all ≈ 0.99, far above divergence_threshold 0.30, but the
+        dissenter is ineligible, so the ensemble still aggregates exactly as before.
+        """
+        agg = EnsembleAggregator(divergence_threshold=0.30)
+        r = agg.aggregate([_mo(-0.70, 0.10, "glm"), _mo(0.70, 0.80, "oss")])
+        assert r is not None, "the fix must not turn an accepted signal into a fallback"
+        assert r.ensemble_std > agg.divergence_threshold
+        assert r.polarity == pytest.approx(0.70)
+
+    def test_both_eligible_keeps_the_two_numbers_identical(self):
+        agg = EnsembleAggregator()
+        r = agg.aggregate([_mo(0.6, 0.8, "m1"), _mo(0.2, 0.6, "m2")])
+        assert r.ensemble_std == pytest.approx(r.ensemble_std_eligible)
+        assert r.ensemble_std == pytest.approx(0.283, abs=0.001)
+
+    def test_divergent_eligible_pair_still_rejected(self):
+        """The existing guard keeps firing where it already fired."""
+        agg = EnsembleAggregator(divergence_threshold=0.30)
+        assert agg.aggregate([_mo(0.6, 0.8, "m1"), _mo(-0.2, 0.6, "m2")]) is None
+
+    def test_single_response_is_zero_not_a_hidden_disagreement(self):
+        agg = EnsembleAggregator()
+        r = agg.aggregate([_mo(0.6, 0.8, "m1")])
+        assert r.ensemble_std == 0.0
+        assert r.ensemble_std_eligible == 0.0

@@ -130,8 +130,22 @@
 #      e' un limite inferiore (inflation_justified: false). Residuo estratto in #571
 #      (sorgente point-in-time thesis linkage/novelty/pertinenza), blocked_by #570 + #30.
 
+# --- inserita 2026-09-21 (operatore). Posizionata qui, cioe' SOPRA il blocco del
+#     2026-09-18, per una ragione di calendario e non di gravita': serve alla
+#     decisione del 28/09 (#607) e ogni giorno di attesa e' una seduta di dati in
+#     meno. Se parte questa settimana, alla scadenza della finestra ci sono ~5
+#     sedute di distribuzione timing/rilevanza/content_empty; se parte dopo la
+#     decisione, si comincia a raccogliere il 29/09 e per settimane non c'e' nulla
+#     su cui decidere. Criterio della sezione 4 applicato alla lettera: non perde
+#     soldi oggi, rende non decidibile la lettura del 28/09.
+#     Vale in ENTRAMBI i rami della decisione: se S4 cambia fonte, questi campi
+#     sono il metro per giudicare la fonte nuova; se resta, sono il prerequisito
+#     di qualunque regola di ammissibilita'. Perimetro: SOLO persistenza, nessun
+#     gate — una riga RETROSPECTIVE continua a diventare un segnale come oggi.
+637  la classificazione di copertura degli articoli non esiste nel path del segnale: ANTICIPATORY/CONCURRENT/RETROSPECTIVE, CONTENT_EMPTY, own-vs-fanout sono calcolati solo nel dossier ex post (verificato: gli unici consumatori sono panels.py, event_context.py e uno script di audit) — serve alla decisione #607 del 28/09
+
 # === 5. COPERTURA E QUALITA' DEL SEGNALE (miglioramenti, non bug) ===
-409  NO_NEWS e' la causa dominante dei miss di Week 35 (9/22) mentre il sistema osserva gia' catalizzatori che non usa: NVO aveva una corporate action OBSERVED, ERIC una volume surprise +1,25
+409  NO_NEWS e' la causa dominante dei miss di Week 35 (9/22) mentre il sistema osserva gia' catalizzatori che non usa: NVO aveva una corporate action OBSERVED, ERIC una volume surprise +1,25  [SOSPESA 09-24, vedi nota sopra — decisione operatore post 28/09 su catalyst=CALENDAR e volume backstop; la parte misurabile e' chiusa da PR #500]
 # --- prerequisito di dati per #508 e per la pertinenza off-topic (inserito 2026-09-12,
 #     estratto dalla chiusura di #300): solo persistenza, nessuna regola di scoring ---
 
@@ -153,30 +167,6 @@
 507  `giorno_di_earnings` e' UNKNOWN sul 100% degli intent S4 per 4 sessioni consecutive: il calendario FMP non arriva mai al dossier dal cron (F-063) [SOSPESA 09-09, vedi nota sopra — torna in cima quando la finestra e' completa]
 
 # === 6. IL RESTO ===
-182  nessuna gerarchia di uscita fra S1 e S4: un overlay al 10% puo' liquidare posizioni del core (tier3, decisione di design — il sizing e' scorporato in #338)
-# --- SOSPESA IL 2026-09-17 (decisione operatore) ---
-# Il perimetro di codice di #84 e' ESAURITO: il POC offline e' completo e
-# mergiato (PR #616, 116 test), il manifest con le soglie e' sigillato e la
-# pre-registrazione e' scritta. Cio' che manca non e' lavoro d'agente.
-#
-# Blocca il gate dati PIT, che e' un NO-GO infrastrutturale provvisorio: nessun
-# fornitore verificabile chiude tutte le condizioni hard entro i 1.000 EUR
-# (docs/RESEARCH_S3_PIT_DATA_FEASIBILITY_2026-07-21.md). Il pacchetto di
-# richiesta preventivi a CRSP e Sharadar e' pronto dal 2026-07-22
-# (docs/S3_PIT_VENDOR_OUTREACH_2026-07-22.md) ma non e' mai stato inviato:
-# serve l'identita' legale reale del mittente, che un agente non puo' inventare.
-#
-# Senza dataset qualificato il runner rifiuta di girare per costruzione, quindi
-# un agente qui puo' solo dichiarare no-op. E' la trappola gia' vista con #405
-# (4 selezioni, 2 no-op, giro incastrato), #300 (6 no-op in 19 ore) e #507.
-#
-# Istruzione per l'agente in loop: NON selezionare #84 finche' questa nota e'
-# qui. Non e' un no-op, e' una sospensione deliberata dell'operatore.
-#
-# Torna lavorabile quando: le due risposte vendor scritte sono allegate alla
-# issue E almeno una chiude tutte le condizioni hard. Se nessuna le chiude,
-# l'esito e' NO-GO infrastrutturale e la issue si chiude, non si rimette in coda.
-84   S3 design-alignment POC: A/B pre-registrato su universo PIT (tier2) [SOSPESA 09-17, vedi nota sopra — aspetta le risposte vendor, non codice]
 
 # ============================================================================
 # Fuori coda di proposito, decisione dell'operatore (non dell'agente):
@@ -236,14 +226,19 @@
 # ISSUE NUOVE IN CODA (2026-09-18, operatore): prese da GitHub con label
 # wayfinder:task + ready-for-agent + freeze-ok, nessuna PR aperta, non fuori rotazione.
 # Ordine: prima i bug di correttezza/strumentazione (coerente con l'ordine della carta),
-# poi le misure, poi il resto. #610 esclusa per ora: PR #620 aperta (1 respinta, tie-breaker pendente).
-# 
-551  bug: il ciclo sentiment non e' idempotente — dopo SoftTimeLimitExceeded la coda resta sporca
-550  bug: il punteggio persistito nella Decision Log non e' quello valutato al gate
-564  bug: i run dei market holiday ri-analizzano la sessione precedente — serve idempotenza
-565  bug: rieseguire la pipeline evidence riscrive le serie congelate — protezione necessaria
+# poi le misure, poi il resto.
+#
+# --- #610 rientrata in coda il 2026-09-21 (operatore). Era esclusa dal 2026-09-18
+#     per PR #620 aperta con 1 respinta (tie-breaker pendente): il difetto della
+#     review (dedup che reimplementava la regola di produzione invece di chiamarla,
+#     #169/#467) era gia' corretto sul branch da cd56046 (2026-09-18) ma senza un
+#     secondo giro di CI/review perche' la issue era fuori coda — la PR e' rimasta
+#     "review presente ma senza verdetto leggibile" fino alla verifica manuale
+#     dell'operatore. PR #620 verificata (37/37 test, CI verde) e mergiata
+#     2026-09-21. Resta il resto della Fase 1 (scaricare l'archivio 2024-2025 ed
+#     eseguire H-A..H-F) e la Fase 2, entrambe descritte nel corpo della issue.
+610  MISURA: backtest news 2024-2025, resto della Fase 1 (scaricatore gia' in main, restano copertura su archivio vero + ipotesi H-A..H-F) e Fase 2 se la popolazione lo giustifica
 563  bug: i crons daily evidence perdono una sessione in modo permanente quando la sessione Claude Code muore
-566  bug: ticker_lookup salva solo nomi legali con suffisso — la rilevanza ne esce falsata
 567  bug: funnel_v2 non ha KPI sul lato uscita — 8 EXIT_RISK mai tracciati (09-10)
 596  obs: il gate di uscita consuma punteggi fan-out di articoli «altro-ticker»
 619  bug: triage log — la maschera dei numeri lascia il decimale in '18.6pp' e spezza i numeri
@@ -251,7 +246,6 @@
 606  MISURA: test confermativo pre-registrato — il sentiment sulle news fuori orario (off-session shadow in produzione, confronto diretto con in-session)
 614  Ricerca: disegno del controfattuale sulle uscite — cinque domande che chiudono il disegno
 603  Worker inference: abilitare GPU e rendere FinBERT riproducibile
-539  S4 input research: completare corpus H01-H22 e consolidare il cluster
 516  Weekly alpha-miss: valutare il pilot e proporre il contratto v2
 518  Weekly alpha-miss reviewer: benchmark read-only sul caso W34
 521  Weekly alpha-miss: implementare il ruolo del reviewer approvato

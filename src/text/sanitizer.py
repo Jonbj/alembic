@@ -1,7 +1,13 @@
 """Text sanitization for LLM input."""
 
+import html
 import re
 import unicodedata
+
+# HTML tags, matched conservatively: a tag opens with `<` immediately followed by a
+# letter (or `</`), so a comparison like "revenue < 5%" is never eaten. A greedy
+# `<[^>]+>` would swallow "< 5% and margin >" in one bite.
+_HTML_TAG_RE = re.compile(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^<>]*)?/?>")
 
 
 def sanitize_text(text: str) -> str:
@@ -9,6 +15,7 @@ def sanitize_text(text: str) -> str:
     Sanitize text before feeding to LLM.
 
     Mitigations:
+    - HTML entity decoding (F-076: `&amp;` / `&#39;` reached the model verbatim)
     - Unicode homoglyph normalization (visually identical chars that corrupt NER)
     - Hidden text removal (zero-width chars, control chars)
     - BiDi override character removal (prevent RTL attacks)
@@ -23,6 +30,21 @@ def sanitize_text(text: str) -> str:
     """
     if not text:
         return ""
+
+    # F-076: decode HTML entities BEFORE anything else. The Alpaca connector strips
+    # tags with a regex (`alpaca_news.py::_parse_article`) and leaves entities behind,
+    # so up to 73.5% of scored rows reached the DK-CoT prompt carrying `&amp;`,
+    # `&#39;` or `&rsquo;` (measured 2026-09-16, FORENSIC_DAILY_REPORT). That degrades
+    # NER exactly on issuer names containing `&` and on possessives, and on the FinBERT
+    # branch it burns the 512-character budget (5 chars per apostrophe).
+    #
+    # A SINGLE pass, deliberately: iterating would keep decoding text that legitimately
+    # contains an entity-looking literal ("A &amp;amp; B" means "A &amp; B", not "A & B").
+    text = html.unescape(text)
+
+    # Decoding can resurrect markup: `&lt;b&gt;` becomes a live `<b>` that the upstream
+    # tag strip never saw. Remove tags after unescaping, not before.
+    text = _HTML_TAG_RE.sub(" ", text)
 
     # Normalize Unicode to NFKC (compatibility decomposition + canonical composition)
     # This converts homoglyphs to their canonical forms
