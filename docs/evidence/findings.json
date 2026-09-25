@@ -212,9 +212,15 @@
           "costo_usd": null,
           "nota": "[DAY-024] no_news_backstop: 36 simboli a zero news, 2 mover (CMCSA -3,46%, DELL +4,46%).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-024"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": 82.29,
+          "nota": "[DAY-023] 38/96 simboli a zero righe news_log; 11 in ticker_allerta_zero_articoli. IBM +3,38% (mover) NO_NEWS, 7 sedute consecutive a zero articoli, nessuna riga societaria nemmeno in coda. Costo congetturale = candidati_miss[IBM].opportunity_v2.net_opportunity_usd 82,29 (dossier, slot 2.200 $ al netto dei costi); non contato altrove nel ledger per il 09-09.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-023]"
         }
       ],
-      "costo_cumulato_usd": 5068.1,
+      "costo_cumulato_usd": 5150.39,
       "stato": "aperto",
       "issue": null,
       "occorrenze_non_stimate": 6
@@ -605,12 +611,18 @@
           "costo_usd": null,
           "nota": "[DAY-017] 21:00 DECAY CRITICAL con lo stesso IC -0,054 su S1, S2 e S4; drawdown 13,4% identico su S1 e S2.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-017"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-019] 21:00:00 DECAY CRITICAL con IC corrente -0,054 e hit rate 29,6% identici per S1, S2, S4 contro baseline 0,035/0,042/0,028 e 54/56/52%; Sharpe -0,38 identico.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-019]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 22
+      "occorrenze_non_stimate": 23
     },
     {
       "id": "F-005",
@@ -690,12 +702,18 @@
           "costo_usd": null,
           "nota": "[DAY-020] Telegram 400 Bad Request alle 14:00:00 (loss-feedback S4) e 14:22:06 x2 (AMAT/WDC scoperte).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-020"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-009] Unico alert Telegram della giornata respinto: 14:07:08,696 'TelegramNotifier: Failed to send alert: Client error 400 Bad Request' sull'alert #161 AMAT unprotected a -21,0%.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-009]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 12
+      "occorrenze_non_stimate": 13
     },
     {
       "id": "F-006",
@@ -920,12 +938,18 @@
           "costo_usd": null,
           "nota": "[DAY-023] ingestion_stats_daily 2026-09-17 alpaca_benzinga: duplicates 7.291 vs fetched 1.559.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-023"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-012] ingestion_stats_daily alpaca_benzinga: fetched 976, queued 526, duplicates 4.359 (4,5x il fetched), discarded_stale 195. Log 14:15: fetched 33, tickers_found 135, duplicates 135.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-012]"
         }
       ],
       "costo_cumulato_usd": 0,
       "stato": "aperto",
       "issue": null,
-      "occorrenze_non_stimate": 28
+      "occorrenze_non_stimate": 29
     },
     {
       "id": "F-008",
@@ -1717,10 +1741,16 @@
           "costo_usd": null,
           "nota": "[DAY-006] 123 articoli -> 215 righe; 34 multi-ticker -> 126 righe (58,6%), max 13. Costo gia' nell'occorrenza ALPHA_MISS del 17/09.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-006"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-024] TAG_UNCONFIRMED 115/199 righe (57,8%); 30 content_hash su piu' ticker (191 righe Benzinga -> 117 articoli). SPCX 10109 +0,420 da 'Elon Musk Spooked Howmet. GE Just Validated the Bull Case' (2 ticker). Nessun ordine del giorno nato da fan-out.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-024]"
         }
       ],
       "costo_cumulato_usd": 937.61,
-      "occorrenze_non_stimate": 23,
+      "occorrenze_non_stimate": 24,
       "stato": "aperto",
       "issue": null
     },
@@ -2043,10 +2073,16 @@
           "costo_usd": null,
           "nota": "[DAY-011] portfolio_cycles 1538-1561: orders_count 2-6 per ciclo contro 0-1 ordini inviati.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-011"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-017] sum(portfolio_cycles.orders_count) = 120 sui 24 cicli (5 per ciclo 'orders_before=5 orders_after=5') contro 3 ordini di mercato realmente inviati (MU, SPCX, DIS) piu' 2 stop.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-017]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 23,
+      "occorrenze_non_stimate": 24,
       "stato": "aperto",
       "issue": null
     },
@@ -2206,10 +2242,16 @@
           "costo_usd": null,
           "nota": "[DAY-012] decision_price NULL su tutte e 7 le decisioni d'ordine (30092/30323/30435/30551/30897/31249/32317), presente solo in s4_intent_events.snapshot.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-012"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-015] slippage_est = cost_usd su trades 988 (1,51), 989 (0,78), 990 (0,80). Slippage reale dal lifecycle: MU 1035,406 vs first_executable 1034,99 = +0,59 $ su 1,407 sh; DIS 104,4935 vs 104,48 = +0,19 $.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-015]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 25,
+      "occorrenze_non_stimate": 26,
       "stato": "aperto",
       "issue": null
     },
@@ -2285,10 +2327,16 @@
           "costo_usd": null,
           "nota": "[DAY-022] 'SPY benchmark fetch failed: subscription does not permit querying recent SIP data' x84 senza alert.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-022"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-021] 84 'SPY benchmark fetch failed: subscription does not permit querying recent SIP data' fra 00:00:01 e 00:13:03 (task mobile monitor/alert), nessun alert.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-021]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 11,
+      "occorrenze_non_stimate": 12,
       "stato": "aperto",
       "issue": "#444"
     },
@@ -2322,10 +2370,16 @@
           "costo_usd": null,
           "nota": "[DAY-025] detect_regime 07:00:04 FRED VIXCLS 500 -> task 'succeeded in 5.1s: None'; il giro delle 13:30 riesce (SIDEWAYS, 0,7).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-022] 07:00:05,022 'Failed to fetch macro data for regime detection: Server error 500' (FRED VIXCLS) -> 07:00:05,255 detect_regime succeeded in 5,25s: None. regime_mult resta 0,7 su tutti i cicli.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-022]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 4,
+      "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
     },
@@ -2389,10 +2443,16 @@
           "costo_usd": null,
           "nota": "[DAY-021] 17.270 righe con URL bot Telegram in worker-inference-2026-09-17.log, 7 in worker; URL FRED con api_key alle 07:00:05.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-021"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-010] 14:07:08,696 riga httpx INFO 'HTTP Request: POST https://api.telegram.org/bot<token>/sendMessage' con il token integro nel log persistente worker-2026-09-09.log.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-010]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 9,
+      "occorrenze_non_stimate": 10,
       "stato": "aperto",
       "issue": null
     },
@@ -2498,9 +2558,15 @@
           "costo_usd": null,
           "nota": "[DAY-013] Regressione di latenza: per-item del worker sentiment mediana 10,5 s (09-17), 9,6 (09-18), 62,0 (09-21), 58,8 (09-22); 15 task > 300 s, max 690 s. Pubblicazione->segnale Benzinga mediana 0,5 min (09-15/16) -> 8,3 min, p90 93,4; raw_ingested_at->riga mediana 27 s -> 419 s. Precede lo swap GLM (gia' presente il 21/09). 27 timeout Ollama; senza traccia di trasporto (F-086) causa non diagnosticabile.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": -73.92,
+          "nota": "[DAY-002] QCOM 10052 +0,706 (articolo 11:48:27, scorato 13:41:49) e HOOD 10053 +0,325 (11:50:22 -> 13:43:07) arrivano al primo ciclo 14:07 con l'articolo oltre news_age_hours=2.0: SKIP_ENTRY_FRESHNESS. Congetturale su 2.200 $, prezzi Alpaca 1 min: QCOM 178,58 (14:07) -> close 176,40 = -26,86; HOOD 117,80 -> 115,28 = -47,06. Costo negativo: oggi il filtro ha evitato una perdita, il movimento era nel gap.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-002]"
         }
       ],
-      "costo_cumulato_usd": 2.37,
+      "costo_cumulato_usd": -71.55,
       "occorrenze_non_stimate": 15,
       "stato": "aperto",
       "issue": null
@@ -2766,10 +2832,16 @@
           "costo_usd": -1.99,
           "nota": "[DAY-007] Primo ciclo 14:07 (portfolio_cycle_late CRITICAL 13:30-14:08); CRM +0,423 ensemble delle 13:34 sovrascritto 14:03 da 0,000 senza mai vedere un ciclo. Congetturale 2.200 $: ingresso 13:37 @243,25, chiusura 243,03 => -1,99 (il buco ha evitato una piccola perdita).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-007"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-011] EDT, apertura 13:30 UTC: primo portfolio_cycle 14:07:01, primo fetch REST Alpaca 14:00:01 (24 cicli fino alle 19:52, cadenza 15 min esatta). Nessun costo attribuibile: QCOM (DAY-002) sarebbe scaduto comunque entro le 13:48.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-011]"
         }
       ],
       "costo_cumulato_usd": 106.23,
-      "occorrenze_non_stimate": 23,
+      "occorrenze_non_stimate": 24,
       "stato": "aperto",
       "issue": null
     },
@@ -2857,10 +2929,16 @@
           "costo_usd": null,
           "nota": "[DAY-010] Stop MU qty 1 su 1,4634 (68,3%); AMAT -29,6% e WDC -22,9% senza stop (sub_one_share) x24. Nessuno stop scattato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-010"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-008] #161: 10/45 posizioni non proteggibili (AMAT, AMD, ASML, CAT, DELL, LLY, MRVL, NOK, SPY, WDC); AMAT a -21,0% alle 14:07 e -21,1% alle 19:52, 24 cicli. Stop DIS (13 sh su 13,84) creato alle 19:07:23, un ciclo dopo il BUY delle 18:52:09; MU invece protetto nello stesso ciclo (14:52:06).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-008]"
         }
       ],
       "costo_cumulato_usd": 35.9,
-      "occorrenze_non_stimate": 11,
+      "occorrenze_non_stimate": 12,
       "stato": "aperto",
       "issue": null
     },
@@ -3612,9 +3690,15 @@
           "costo_usd": 37.89,
           "nota": "110 intenti S4 tradabili: 96 SKIP_PYRAMIDING (87,3%), 13 SKIP_IDEMPOTENCY, 1 SUBMITTED. Blocchi: SHEL 24, PBR 24, NVO 21, MS 8, MRK 8, LLY 8, AMAT 3; 75/96 su simboli detenuti da S1. AMAT +6,51% (secondo mover) bloccato 19:22/19:37/19:52 su signal 11781 (0,274 grezzo, eseguibile via velocity). guard_decisions registra 7 SKIP_PYRAMIDING contro 96 intenti.",
           "fonte": "ALPHA_MISS_REPORT_2026-09-18.md §8"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": -93.1,
+          "nota": "[DAY-003] 114 SKIP_PYRAMIDING tradabili, 40 su 6 titoli S1: CVX 19 (primo 14:22), MRK 12 (16:52), MRVL 4 (14:07), DELL 3 (15:52), XOM 1 (14:07), AMD 1 (16:22, +0,816). Solo 13/114 in execution_decisions. Controfattuale corto 2.200 $ primo slot -> close: CVX +2,68, MRK -2,40, MRVL -57,79, DELL -38,55, XOM +7,66, AMD -4,70 = -93,10 (il guard ha evitato una perdita).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-003]"
         }
       ],
-      "costo_cumulato_usd": 360.02,
+      "costo_cumulato_usd": 266.92,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
@@ -3864,10 +3948,16 @@
           "costo_usd": 22.94,
           "nota": "[DAY-006] Il segnale 9201 (NVDA, 14:00:41) ha ensemble_std=0,3182, il massimo delle 55 righe ensemble della giornata (media 0,069): glm polarity=0,65/conf=0,75, gptoss polarity=0,20/conf=0,60, ed ENTRAMBI hanno alzato il flag risk_flags={rumor} (offerta da 13 mld per Hugging Face). Soglia di divergenza 0,40: con due modelli scatta solo se |p1-p2| >= 0,566; qui 0,45, sotto soglia. Ordine 92386920 alle 14:07:00, 1.981,54 $, chiuso alle 15:52:00 per net -22,94 $ (trade 902). Controfattuale corto: con un gate sulla varianza d'ensemble l'ingresso non sarebbe avvenuto e la perdita realizzata sarebbe zero. Costo attribuito = net_pnl del trade 902 = 22,94 $. NVDA ha chiuso la giornata a -4,57%.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-28.md"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-006] 7 segnali ensemble con sigma > 0,20 (16 > 0,15): JNJ 0,283, ADBE 0,283, ROKU 0,247, SPY 10097 -0,327 sopra gate con sigma 0,247, GOOGL/AAPL/SPY 0,212. Nessun trattamento; nessun ordine ne' e' nato.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-006]"
         }
       ],
       "costo_cumulato_usd": 22.94,
-      "occorrenze_non_stimate": 7,
+      "occorrenze_non_stimate": 8,
       "stato": "aperto",
       "issue": null
     },
@@ -3999,10 +4089,16 @@
           "costo_usd": null,
           "nota": "[DAY-024] Quattro segnali oltre il gate 0,30 col segno ribassista su mover reali della seduta: HOOD -0,325 (seduta -5,46%), GS -0,386 (-3,96%), IWM -0,327, QQQ -0,346. Nessuno dei quattro simboli e' detenuto da S4 e il libro e' long-only, quindi il segnale corretto non e' azionabile per costruzione: funnel_v2.esclusi_pipeline.non_actionable_long_only = 6, opportunity_v2 calcola accessible = 0. NON STIMABILE come costo del difetto: il movimento non era accessibile per perimetro, non per un guasto della pipeline. Va contato perche' e' la componente strutturale della miss rate che nessuna correzione di pipeline puo' ridurre - 6 dei 16 mover del giorno.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-024]"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-007] Sopra gate col segno ribassista e senza percorso: CMCSA 10118 -0,386 ISSUER_SPECIFIC (CFO broadband) su -6,61%, NKE -0,355, SPY -0,327, QQQ -0,314 (RANK_LONG_ONLY 19 intenti). Unico uso del lato ribassista: uscita SPCX -0,435 (corretta). Costo non stimabile nel book long-only.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-007]"
         }
       ],
       "costo_cumulato_usd": 57.69,
-      "occorrenze_non_stimate": 4,
+      "occorrenze_non_stimate": 5,
       "stato": "aperto",
       "issue": null
     },
@@ -4355,10 +4451,16 @@
           "costo_usd": null,
           "nota": "[DAY-026] run_reconcile_positions 21:35:02: partially_wound_down_coheld 1 con 'anomalies: 0'; simbolo non nel log (verosimilmente UNH, non verificato).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-026"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-004] Trade 989 MU: s4_lifecycle_events filled_quantity 1,407003629 (notional 1456,82) ma trades.qty oggi 0,407003629 (riscritta il 09-14, quantity_remaining 1, entry_notional 1456,83 incoerente con qty*price 421,4). Il dossier 2026-09-09 generato il 09-24 eredita la qty mutata: ingressi[MU].mtm_eod -3,11 invece di -10,74 reali (1,407 x (1027,77-1035,406)). La leg da -126,85 e' gia' contata nell'occorrenza 09-14: costo null.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-004]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 8,
+      "occorrenze_non_stimate": 9,
       "stato": "aperto",
       "issue": null
     },
@@ -4601,10 +4703,16 @@
           "costo_usd": null,
           "nota": "[DAY-010] NFLX 12219 (19:29): gpt-oss -0,6/0,6 contro glm-5.3 +0,2/0,25 su 'Netflix Stock High on the List for Former Hedge Fund Manager'; glm sotto floor, segnale single -0,36. Dopo il fix di misura ensemble_std=0,566 (visibile), ma la guardia decide sugli eleggibili. 14 segnali a segni opposti nella giornata, 17 con spread >= 0,30. Nessun trade (long-only).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-005] AZN 10064 single:gpt-oss +0,420: glm-5.2 -0,10x0,30 (sotto min_confidence) contro gpt-oss +0,60x0,70, ensemble_std 0,000; altri 3 single-model a segni opposti su 59. Fix edfd73e0 (2026-09-21) non ancora in produzione. Nessun ordine (fallback escluso dal BUY, AZN gia' detenuto).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-005]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 7,
+      "occorrenze_non_stimate": 8,
       "stato": "aperto",
       "issue": null
     },
@@ -4718,10 +4826,16 @@
           "costo_usd": null,
           "nota": "[DAY-009] news_resolved_entities per il 2026-08-28: 179 righe, ZERO verdetti RESOLVED. 98 NO_TRADE_NOT_TRADABLE (confidenza media 0,427) e 81 NO_TRADE_LOW_RESOLUTION_CONFIDENCE (0,528), contro soglia 0,80. resolved_ticker NULL su 179/179. Le 81 righe low-confidence hanno tradable=true: il sistema sa che il simbolo e' negoziabile ma non se lo conferma. La copertura ticker della giornata e' garantita dal source_metadata di Benzinga, non dal resolver.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-08-28.md"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-026] news_log.extraction_method: source_metadata 191, org_lookup 8, resolver 0.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-026]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 8,
+      "occorrenze_non_stimate": 9,
       "stato": "aperto",
       "issue": null
     },
@@ -4890,10 +5004,16 @@
           "costo_usd": null,
           "nota": "[DAY-021] 2 eventi P0_RUNTIME_REPLAY riemessi su 9 del giorno, entrambi replay di chiusure di giorni PRECEDENTI: HOOD (intent b55b94eb, trigger 2026-09-14 18:22:00) scritto alle 14:12:05 e di nuovo alle 14:27:05; PLTR (intent 0060a654, trigger 2026-09-11 18:22:00) alle 16:12:05 e di nuovo alle 17:57:05. event_id diversi, stesso intent_id, stesso fill_price, stesso net_pnl. Totale righe del giorno: 32 (9 P0_RUNTIME_REPLAY, 12 P1_HOLDING, 7 P1_TIME_DUE, 4 P0_OPEN_SNAPSHOT). Il riconciliatore intraday ricalcola gli eventi derivati a ogni ciclo (il log riporta s4_lifecycle_events 17-19 e s4_p0_events 4-5 a ogni giro) e la deduplica non tiene su tutti i rami. Doppio conteggio sul giorno: -3,90 $ (HOOD) e +0,69 $ (PLTR). Importo irrilevante, metodo no: il trial S4 si decide su questo ledger.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-15.md §10 [DAY-021]"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-016] 9 ENTRY_RECONCILIATION per 2 ingressi del giorno: 7 riemissioni di ingressi del 09-08 (AZN, HOOD, NVO, QCOM alle 14:12; SPCX 922327c4, gia' chiuso il 09-08, alle 14:12 e di nuovo alle 15:27; SPCX 9cdf18d3 alle 15:27).",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-016]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 5,
+      "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": null
     },
@@ -4963,10 +5083,16 @@
           "costo_usd": null,
           "nota": "[DAY-018] 11 DECAY CRITICAL solo nel log: nessuna riga mobile_events, nessun Telegram.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-018"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-020] I 10 DECAY CRITICAL delle 21:00:00,022-033 esistono solo come log.critical nel worker; nessun canale.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-020]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 10,
+      "occorrenze_non_stimate": 11,
       "stato": "aperto",
       "issue": null
     },
@@ -5156,10 +5282,16 @@
           "costo_usd": null,
           "nota": "[DAY-025] Drenaggio coda notturna WS all'apertura: 211 stale, 82 not_tradable, 727 duplicate_id fuori seduta; 106 dispatch market_closed.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-025"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-001] 177 righe (58 articoli) scartate stale alle 13:37, tutte enqueued_off_session, eta' media 8,92h (run 13:45:41 'skipped_stale': 177). Fra queste il pezzo Muse su META (04:02) e le due notizie UNH (08:12, 08:22). Costo null: l'esposizione UNH (19,18) e' gia' nell'occorrenza ALPHA_MISS dello stesso giorno, non la ricontiamo.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-001]"
         }
       ],
       "costo_cumulato_usd": 19.18,
-      "occorrenze_non_stimate": 5,
+      "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": null
     },
@@ -5262,10 +5394,16 @@
           "costo_usd": null,
           "nota": "[DAY-002] BUY BA execution_decisions 30551 signal_score 0,274 < gate 0,30, velocity_multiplier NULL; intento ranking_score 0,3285. Stesso schema META/MU/NVO. BUY conforme alla regola: costo non attribuibile.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-002"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-018] execution_decisions.signal_score a provenienza mista nella stessa giornata: BUY 19957 MU 0,390 = 0,325 x 1,2 e 20460 DIS 0,421 = 0,351 x 1,2 (moltiplicati), SKIP_THRESHOLD HOOD 0,255 = grezzo; velocity_multiplier NULL su tutte le 736 righe.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-018]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 3,
+      "occorrenze_non_stimate": 4,
       "stato": "aperto",
       "issue": "#550"
     },
@@ -5355,10 +5493,16 @@
           "costo_usd": null,
           "nota": "[DAY-015] 70/215 righe con entita' HTML nel body (64 WS, 6 REST), fix edfd73e0 non deployato. Attribuita al codice pre-fix: 0 righe finbert_fallback_events per verificare il testo inviato.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-015"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-025] 57/199 righe news_log (28,6%) con entita' HTML non decodificate nel titolo o nel corpo (es. 'Mad Money Lightning Round ,&#8221;' su AZN 10064, 'Merck &amp; Co' su MRK 10123). Fix edfd73e0 successivo alla data.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-025]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 5,
+      "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": null
     },
@@ -5417,10 +5561,16 @@
           "costo_usd": null,
           "nota": "[DAY-004] run_sentiment_worker dichiara finbert_fallbacks 86, finbert_fallback_events 0 righe (misurato): sono 67 single gpt-oss + 19 single glm. Motivo SELL META 32317 li chiama 'FinBERT fallback'.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-004"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-013] Somma dei 'finbert_fallbacks' dichiarati dai run_sentiment_worker = 64; sentiment_signals model_id='finbert' = 5 (coppie di timeout 14:35, 16:44, 16:46, 17:30, 17:32); gli altri 59 sono single-model da filtro di eleggibilita'.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-013]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 5,
+      "occorrenze_non_stimate": 6,
       "stato": "aperto",
       "issue": null
     },
@@ -5587,10 +5737,16 @@
           "costo_usd": null,
           "nota": "[DAY-026] OLLAMA_BASE_URL punta a https://ollama.com (src/config.py:182) ma il client Ollama non passa dal logger httpx: nel log worker-inference del 09-16 gli unici host POST-ati sono api.openfigi.com (242 chiamate, il resolver ticker) e api.telegram.org (1). Le uniche righe che nominano Ollama sono le 6 WARNING 'ensemble model failed: model=gpt-oss:20b-cloud kind=error error=Ollama timeout (90s)'. L'attivita' dell'ensemble e' ricostruibile solo dalle righe llm_responses persistite - cioe' dai SUCCESSI - che per costruzione non possono misurare ne' i fallimenti silenziosi ne' la latenza (la colonna latency_ms non esiste). PRIMA OCCORRENZA CON DANNO GIA' PRODOTTO: la revisione 1 di questo stesso report ha attribuito a Ollama i 242 POST verso OpenFIGI e ne ha derivato '243 chiamate, 6 fallimenti, 2,5%'; il valore corretto e' 6 su ~430 invocazioni (215 glm-5.2:cloud + 215 gpt-oss:20b-cloud, di cui 212 gpt-oss persistite e 3 segnali rimasti a una sola risposta) = 1,4%. La conclusione operativa (Ollama su, 0 minuti di outage, righe llm_responses in ogni ora fra le 13 e le 19 UTC) non cambia, ma poggiava su evidenza sbagliata. NON STIMABILE in dollari: difetto di sola osservabilita'. Rilevante perche' e' l'affermazione che F-049 (breaker del fallback morto) rende critica.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-16.md §10 [DAY-026]"
+        },
+        {
+          "data": "2026-09-09",
+          "costo_usd": null,
+          "nota": "[DAY-014] Nessuna latenza persistita (llm_responses senza colonna di latenza); unica traccia 17 righe 'Ollama timeout' (9 gpt-oss, 8 glm) fra 13:39 e 19:15. Uptime dedotto per assenza: 0 h di downtime. Occorrenza anteriore al primo avvistamento: primo_avvistamento portato al 2026-09-09.",
+          "fonte": "FORENSIC_DAILY_REPORT_2026-09-09.md §10 [DAY-014]"
         }
       ],
       "costo_cumulato_usd": 0,
-      "occorrenze_non_stimate": 1,
+      "occorrenze_non_stimate": 2,
       "stato": "aperto",
       "issue": null
     },
