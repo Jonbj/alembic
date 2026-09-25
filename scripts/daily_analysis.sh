@@ -584,6 +584,11 @@ tg_send "📄 Report salvato: <code>${REPORT_FILE}</code>"
 # riga del log, perche' finora un mancato commit era visibile solo rileggendo il
 # log a mano.
 COMMIT_PATHS=(docs/evidence/findings.json "$REPORT_FILE")
+# La regola su primo_avvistamento nel prompt non e' bastata (F-089, rianalisi
+# del 2026-09-17): lo si riallinea qui in modo deterministico, prima del commit.
+python3 "$PROJECT_DIR/scripts/normalizza_primo_avvistamento.py" \
+    "$PROJECT_DIR/docs/evidence/findings.json" \
+    || echo "ATTENZIONE: normalizzazione di primo_avvistamento non riuscita"
 set +e
 GIT_OUTPUT=$("$PROJECT_DIR/scripts/commit_evidence_ledger.sh" \
     --message "evidence: forensic ${DATE_TARGET} (run ${DATE})" "${COMMIT_PATHS[@]}" 2>&1)
