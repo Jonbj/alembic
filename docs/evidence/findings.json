@@ -5619,7 +5619,7 @@
       "titolo": "Le posizioni S4 contenute nei pesi target congelati di S1 non possono uscire per regola S4: il combiner somma il peso S1 held e la SELL non parte (7 posizioni su 11, dal 20/08 63 uscite fuori dal target S1 contro 2 dentro, entrambe via sentiment_reversal)",
       "tipo": "difetto",
       "confidenza": "attribuita",
-      "primo_avvistamento": "2026-09-22",
+      "primo_avvistamento": "2026-09-17",
       "occorrenze": [
         {
           "data": "2026-09-22",
