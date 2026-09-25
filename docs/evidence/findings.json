@@ -1017,9 +1017,15 @@
           "costo_usd": 3.72,
           "nota": "[DAY-005] ARM (trade 1021, aperta 09-21 su +0,58 preservato da FIX-D) chiusa 17:22 @330,36 (below_entry_gate) dal segnale 12137 -0,011 generato da un editoriale macro Arora Report ('Commodity ETF Delivers Double Nvidia's YTD Returns; Muse Ignites CPU Fever', content_hash 92f8a370...) fan-out su 14 ticker (tutti fra -0,031 e +0,004). Realizzato +19,14; tenendo fino alla chiusura 333,20 altri 1,3104 x 2,84 = 3,72 (attribuito).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-22.md §10"
+        },
+        {
+          "data": "2026-09-18",
+          "costo_usd": 5.94,
+          "nota": "AVGO comprato 15:52 @356,05 su signal 11644 +0,368 ISSUER_SPECIFIC; alle 19:16 l'articolo '$3.2T Chip Boom: Which Semiconductor ETFs Get The Biggest Slice?' genera segnali FANOUT su 7 ticker (AVGO +0,115); SELL 19:37 below_entry_gate @355,50, pnl -3,03, drift_post_uscita +5,94.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-18.md §8"
         }
       ],
-      "costo_cumulato_usd": 67.78,
+      "costo_cumulato_usd": 73.72,
       "occorrenze_non_stimate": 3,
       "stato": "aperto",
       "issue": null
@@ -2960,9 +2966,15 @@
           "costo_usd": 6.59,
           "nota": "[DAY-008] NVDA +0,496 (11347, 14:00:53) sovrascritto dopo 76 s da +0,013 (11351); ciclo 14:07 SKIP_THRESHOLD. Congetturale 2.200 $: 14:07 @218,715 -> chiusura 219,37 = +6,59 non catturati.",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-008"
+        },
+        {
+          "data": "2026-09-18",
+          "costo_usd": 72.99,
+          "nota": "HOOD +9,12% (mover piu' forte della watchlist): signal 11568 +0,338 ISSUER_SPECIFIC (13:51, SEC tokenized stocks) sovrascritto dopo 8 min da signal 11578 +0,073 TAG_UNCONFIRMED/UNKNOWN (13:59, CFTC prediction markets); nessuno dei 24 intenti HOOD porta 11568, primo ciclo 14:07 SKIP_ENTRY_GATE; funnel_v2 pipeline RANKED_OUT.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-18.md §8"
         }
       ],
-      "costo_cumulato_usd": 38.18,
+      "costo_cumulato_usd": 111.17,
       "occorrenze_non_stimate": 8,
       "stato": "aperto",
       "issue": null
@@ -3594,9 +3606,15 @@
           "costo_usd": 29.68,
           "nota": "[DAY-009] P0-05 blocca XOM +0,42 e AAPL +0,42 (a libro da S1); 75 SKIP_PYRAMIDING in s4_intent_events contro 15 in execution_decisions. Congetturale 2.200 $: XOM 161,81->163,26 +19,71; AAPL 335,569->337,09 +9,97. MRVL escluso (gia' nell'occorrenza ALPHA_MISS).",
           "fonte": "FORENSIC_DAILY_REPORT_2026-09-17.md §10 DAY-009"
+        },
+        {
+          "data": "2026-09-18",
+          "costo_usd": 37.89,
+          "nota": "110 intenti S4 tradabili: 96 SKIP_PYRAMIDING (87,3%), 13 SKIP_IDEMPOTENCY, 1 SUBMITTED. Blocchi: SHEL 24, PBR 24, NVO 21, MS 8, MRK 8, LLY 8, AMAT 3; 75/96 su simboli detenuti da S1. AMAT +6,51% (secondo mover) bloccato 19:22/19:37/19:52 su signal 11781 (0,274 grezzo, eseguibile via velocity). guard_decisions registra 7 SKIP_PYRAMIDING contro 96 intenti.",
+          "fonte": "ALPHA_MISS_REPORT_2026-09-18.md §8"
         }
       ],
-      "costo_cumulato_usd": 322.13,
+      "costo_cumulato_usd": 360.02,
       "occorrenze_non_stimate": 1,
       "stato": "aperto",
       "issue": null
