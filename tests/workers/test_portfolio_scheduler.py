@@ -3022,10 +3022,142 @@ def test_reversal_force_sell_propagates_signal_id_to_decision_row():
             operating_mode="active",
         )
 
+def test_reversal_force_sell_propagates_provenance_to_decision_row():
+    """#596: la execution_decision SENTIMENT_REVERSAL deve portare
+    ``news_log_id``, ``n_ticker_articolo``, ``relevance``, ``article_title``
+    e ``article_url`` del segnale che ha guidato l'uscita. Senza queste colonne
+    la diagnosi del 2026-09-14 (MU −49,53 $ su −0.405 da un titolo WDC, fan-out
+    non validato) richiede sempre due hop di join e non lascia traccia
+    persistente. La lookup di provenance e' fatta una volta per ciclo sui
+    signal_id delle uscite, riusata da ogni ``write_execution_decision``.
+    """
+    from src.workers.portfolio_scheduler import _submit_reversal_force_sells
+
+    trading_client = MagicMock()
+    trading_client.get_orders.return_value = []
+    trading_client.submit_order.return_value.id = "ord-rev-prov"
+
+    fake_provenance = {
+        3861: {
+            "signal_id": 3861,
+            "signal_symbol": "MU",
+            "news_log_id": 9001,
+            "title": "Why Is Western Digital Stock Falling Monday?",
+            "url": "https://news.example.com/wdc-falling-20260914",
+            "body_snippet": "Western Digital Corp. (NASDAQ: WDC) stock fell about 6%.",
+            "extraction_method": "source_metadata",
+            "issuer_terms": ["Micron Technology", "Micron"],
+            "n_ticker_articolo": 13,
+        }
+    }
+
+    with patch("src.store.pg_store.PostgreSQLStore") as _pgs:
+        # La provenance lookup avviene sulla stessa istanza di PGS restituita
+        # dal context manager del ``with`` statement; il ``__enter__`` ritorna
+        # la stessa mock instance, e fetch_decision_provenance e' chiamato su
+        # di essa.
+        _pgs.return_value.__enter__.return_value = _pgs.return_value
+        _pgs.return_value.fetch_decision_provenance.return_value = fake_provenance
+
+        _submit_reversal_force_sells(
+            reversal_sell_symbols={"MU": {"score": -0.405, "signal_id": 3861}},
+            final_orders=[],
+            stop_loss_sells={},
+            alpaca_positions=[_make_alpaca_position("MU", 1.13)],
+            trading_client=trading_client,
+            submitted_orders=[],
+            ts=datetime(2026, 9, 14, 13, 49, tzinfo=timezone.utc),
+            regime_mult=0.7,
+            operating_mode="active",
+        )
+
     dec_kwargs = _pgs.return_value.write_execution_decision.call_args.kwargs
     assert dec_kwargs["signal_id"] == 3861
     assert dec_kwargs["decision"] == "SELL"
+    # Provenance propagata: news_log_id e' la FK denormalizzata, n_ticker_articolo
+    # identifica il fan-out (13 ticker sullo stesso URL), relevance ricalca
+    # la categoria di rilevanza rispetto al ticker della decisione (MU).
+    assert dec_kwargs["news_log_id"] == 9001
+    assert dec_kwargs["n_ticker_articolo"] == 13
+    # Ne' "MU" ne' "Micron" compaiono in titolo o corpo, e il tag viene dal
+    # provider (source_metadata): la regola condivisa col dossier dice
+    # TAG_UNCONFIRMED.
+    assert dec_kwargs["relevance"] == "TAG_UNCONFIRMED"
+    assert dec_kwargs["article_title"] == "Why Is Western Digital Stock Falling Monday?"
+    assert dec_kwargs["article_url"] == "https://news.example.com/wdc-falling-20260914"
 
+
+def test_reversal_force_sell_decision_row_without_provenance_when_lookup_empty():
+    """#596 fail-soft: se fetch_decision_provenance ritorna {} (signal
+    cancellato, news_log NULL, errore transitorio), la execution_decision
+    viene scritta lo stesso — i campi di provenance sono None, NULL =
+    'non strumentato', mai un valore inventato. La riga resta utile per il
+    resto del ledger (signal_id + score + reason + exit_mechanism).
+    """
+    from src.workers.portfolio_scheduler import _submit_reversal_force_sells
+
+    trading_client = MagicMock()
+    trading_client.get_orders.return_value = []
+    trading_client.submit_order.return_value.id = "ord-rev-empty"
+
+    with patch("src.store.pg_store.PostgreSQLStore") as _pgs:
+        _pgs.return_value.__enter__.return_value = _pgs.return_value
+        _pgs.return_value.fetch_decision_provenance.return_value = {}
+
+        _submit_reversal_force_sells(
+            reversal_sell_symbols={"MU": {"score": -0.405, "signal_id": 3861}},
+            final_orders=[],
+            stop_loss_sells={},
+            alpaca_positions=[_make_alpaca_position("MU", 1.13)],
+            trading_client=trading_client,
+            submitted_orders=[],
+            ts=datetime(2026, 9, 14, 13, 49, tzinfo=timezone.utc),
+            regime_mult=0.7,
+            operating_mode="active",
+        )
+
+    dec_kwargs = _pgs.return_value.write_execution_decision.call_args.kwargs
+    # La riga e' scritta lo stesso, senza bloccare la reversal.
+    assert dec_kwargs["decision"] == "SELL"
+    assert dec_kwargs["signal_id"] == 3861
+    # Tutti i campi di provenance sono None (= 'non strumentato', NULL-safe).
+    assert dec_kwargs["news_log_id"] is None
+    assert dec_kwargs["n_ticker_articolo"] is None
+    assert dec_kwargs["relevance"] is None
+    assert dec_kwargs["article_title"] is None
+    assert dec_kwargs["article_url"] is None
+
+
+def test_reversal_force_sell_decision_row_without_signal_id():
+    """#596: signal_id None (vecchi payload Redis, retrocompat) — niente
+    lookup di provenance, tutti i campi None come riga pre-strumentazione.
+    """
+    from src.workers.portfolio_scheduler import _submit_reversal_force_sells
+
+    trading_client = MagicMock()
+    trading_client.get_orders.return_value = []
+    trading_client.submit_order.return_value.id = "ord-rev-noid"
+
+    with patch("src.store.pg_store.PostgreSQLStore") as _pgs:
+        _submit_reversal_force_sells(
+            reversal_sell_symbols={"MU": {"score": -0.405, "signal_id": None}},
+            final_orders=[],
+            stop_loss_sells={},
+            alpaca_positions=[_make_alpaca_position("MU", 1.13)],
+            trading_client=trading_client,
+            submitted_orders=[],
+            ts=datetime(2026, 9, 14, 13, 49, tzinfo=timezone.utc),
+            regime_mult=0.7,
+            operating_mode="active",
+        )
+
+    # fetch_decision_provenance NON e' chiamata con una lista vuota (la lista
+    # vuota e' cortocircuitata da fetch_decision_provenance stessa).
+    _pgs.return_value.__enter__.return_value.fetch_decision_provenance.assert_not_called()
+    dec_kwargs = _pgs.return_value.write_execution_decision.call_args.kwargs
+    assert dec_kwargs["signal_id"] is None
+    assert dec_kwargs["news_log_id"] is None
+    assert dec_kwargs["relevance"] is None
 
 def test_reversal_force_sell_uses_signal_id_for_client_order_id():
     from src.workers.portfolio_scheduler import _submit_reversal_force_sells
@@ -3387,3 +3519,33 @@ def test_s4_signal_metadata_skips_symbol_with_no_matching_row():
     from src.workers.portfolio_scheduler import _s4_signal_metadata_by_id
     out = _s4_signal_metadata_by_id({"X": 99}, [{"signal_id": 1, "symbol": "Y", "score": 0.1, "reasoning": "", "model_id": "m"}])
     assert out == {}
+
+
+def test_exit_provenance_riconosce_l_emittente_dagli_alias():
+    """#596: senza gli alias di ticker_lookup un articolo su "Micron" non e'
+    riconosciuto come MU. E' il difetto della prima versione della PR, che
+    passava l'URL al posto del corpo e nessun alias."""
+    from src.workers.portfolio_scheduler import _exit_provenance_kwargs
+
+    riga = {
+        "news_log_id": 1, "n_ticker_articolo": 1,
+        "title": "Micron Technology Is Ramping Up Production of High-Bandwidth Memory",
+        "url": "https://news.example.com/micron-hbm",
+        "body_snippet": "The memory maker is expanding HBM output.",
+        "extraction_method": "source_metadata",
+        "issuer_terms": ["Micron Technology", "Micron"],
+    }
+
+    assert _exit_provenance_kwargs("MU", riga)["relevance"] == "ISSUER_SPECIFIC"
+    assert _exit_provenance_kwargs("MU", {**riga, "issuer_terms": None})["relevance"] == (
+        "TAG_UNCONFIRMED"
+    )
+
+
+def test_exit_provenance_senza_riga_non_inventa_nulla():
+    from src.workers.portfolio_scheduler import _exit_provenance_kwargs
+
+    assert _exit_provenance_kwargs("MU", None) == {
+        "news_log_id": None, "n_ticker_articolo": None, "relevance": None,
+        "article_title": None, "article_url": None,
+    }

@@ -318,3 +318,32 @@ def validate_ledger(
     res["warnings"] = f["warnings"] + p["warnings"]
     res["ok"] = not res["errors"]
     return res
+
+
+def normalizza_primo_avvistamento(findings: dict) -> list[dict]:
+    """Porta ``primo_avvistamento`` alla prima occorrenza, in place.
+
+    ``primo_avvistamento`` e' la data della prima occorrenza (lo schema del
+    prompt forense lo imposta al giorno analizzato). Quando un cron rianalizza
+    una seduta passata e aggancia un'occorrenza piu' vecchia a un finding gia'
+    esistente, la sessione tende a lasciare il campo com'era e
+    ``validate_findings`` rifiuta il ledger (main rossa il 2026-09-22 e il
+    2026-09-24 nonostante la regola nel prompt). Qui la correzione e'
+    deterministica. Restituisce le modifiche fatte, per il log del cron.
+    """
+    modifiche: list[dict] = []
+    for finding in findings.get("findings") or []:
+        primo = _parse_date(finding.get("primo_avvistamento"))
+        date_occ = [
+            d for d in (_parse_date(o.get("data")) for o in finding.get("occorrenze") or [])
+            if d is not None
+        ]
+        if primo is None or not date_occ:
+            continue
+        prima = min(date_occ)
+        if prima < primo:
+            modifiche.append(
+                {"id": finding.get("id"), "da": primo.isoformat(), "a": prima.isoformat()}
+            )
+            finding["primo_avvistamento"] = prima.isoformat()
+    return modifiche

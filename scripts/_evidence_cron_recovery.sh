@@ -24,6 +24,36 @@ oldest_missing_session() {
     return 1
 }
 
+# Come oldest_missing_session, ma salta le sedute che il predicato $3 dichiara
+# irrecuperabili: il predicato riceve la data e riesce (exit 0) quando questa
+# seduta NON e' recuperabile dal cron. La scelta e le saltate tornano nelle
+# globali CHOSEN_SESSION e SKIPPED_SESSIONS (separata da spazi) — non solo su
+# stdout — perche' il chiamante di produzione cattura con $(...) e la
+# sostituzione gira in subshell, dove le variabili non sopravvivono. Un buco
+# nella serie osservata deve restare visibile all'operatore, non silenzioso.
+# Serve al recupero #563: il 2026-09-24 due run hanno selezionato 2026-09-09,
+# ne hanno preservato il dossier (schema 2.9) e sono morti sul contratto
+# schema #287 — per sempre, perche' ogni run successivo riselezionava la
+# stessa data bloccando anche le sedute piu' recenti.
+oldest_recoverable_session() {
+    local sessions="$1" published="$2" is_unrecoverable="$3" session
+    SKIPPED_SESSIONS=""
+    CHOSEN_SESSION=""
+    for session in $sessions; do
+        if printf '%s\n' "$published" | grep -qxF "$session"; then
+            continue
+        fi
+        if "$is_unrecoverable" "$session"; then
+            SKIPPED_SESSIONS+="${session} "
+            continue
+        fi
+        CHOSEN_SESSION="$session"
+        printf '%s\n' "$session"
+        return 0
+    done
+    return 1
+}
+
 _claude_reset_epoch() {
     local output="$1" reset epoch now
     reset=$(printf '%s\n' "$output" | sed -nE \
@@ -31,7 +61,12 @@ _claude_reset_epoch() {
     [[ -n "$reset" ]] || return 1
     epoch=$(TZ=Europe/Rome date -d "$reset" +%s 2>/dev/null) || return 1
     now=$(date +%s)
-    (( epoch > now )) || return 1
+    if (( epoch <= now )); then
+        # Claude omette la data per i reset intragiornalieri. Dopo quell'ora,
+        # il prossimo reset e' domani, non un errore terminale della seduta.
+        [[ "$reset" =~ ^[[:space:]]*[0-9]{1,2}(:[0-9]{2})?[[:space:]]*([aApP][mM])?[[:space:]]*$ ]] || return 1
+        epoch=$(TZ=Europe/Rome date -d "tomorrow $reset" +%s 2>/dev/null) || return 1
+    fi
     printf '%s\n' "$epoch"
 }
 

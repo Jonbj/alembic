@@ -496,6 +496,10 @@ Il campo "fonte" punta al report e alla sezione, es. "FORENSIC_DAILY_REPORT___DA
 DUE REGOLE VINCOLANTI:
 1. SOLO APPEND. Non modificare né cancellare occorrenze già presenti, né cambiare titolo o id di
    un finding esistente.
+   Unica eccezione: "primo_avvistamento" e' la data della PRIMA occorrenza, non il giorno in cui
+   il finding e' stato scoperto. Se stai analizzando un giorno passato e l'occorrenza che
+   aggiungi ha "data" precedente al "primo_avvistamento" del finding, porta "primo_avvistamento"
+   a quella data (il validatore del ledger rifiuta occorrenze anteriori al primo avvistamento).
 2. NEL DUBBIO, AGGANCIA. Creare un id nuovo va giustificato nella nota. Un'evidenza spezzata in
    più id ha ricorrenza 1 ciascuno e sparisce sotto tutte le soglie.
 
@@ -580,6 +584,11 @@ tg_send "📄 Report salvato: <code>${REPORT_FILE}</code>"
 # riga del log, perche' finora un mancato commit era visibile solo rileggendo il
 # log a mano.
 COMMIT_PATHS=(docs/evidence/findings.json "$REPORT_FILE")
+# La regola su primo_avvistamento nel prompt non e' bastata (F-089, rianalisi
+# del 2026-09-17): lo si riallinea qui in modo deterministico, prima del commit.
+python3 "$PROJECT_DIR/scripts/normalizza_primo_avvistamento.py" \
+    "$PROJECT_DIR/docs/evidence/findings.json" \
+    || echo "ATTENZIONE: normalizzazione di primo_avvistamento non riuscita"
 set +e
 GIT_OUTPUT=$("$PROJECT_DIR/scripts/commit_evidence_ledger.sh" \
     --message "evidence: forensic ${DATE_TARGET} (run ${DATE})" "${COMMIT_PATHS[@]}" 2>&1)
