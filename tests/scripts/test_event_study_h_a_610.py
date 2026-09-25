@@ -402,3 +402,88 @@ def test_scrivi_artefatto_senza_selezionati_sull_esito(tmp_path: Path):
     scrivi_artefatto(out_path, {"anno": "2024", "selezionati_esclusi": True})
     scritto = json.loads(out_path.read_text())
     assert scritto["selezionati_esclusi"] is True
+
+# ---------- Loader Alpaca fail-closed (prereg §1.1) ----------
+
+
+class _Barra:
+    def __init__(self, ts, close):
+        self.timestamp = ts
+        self.close = close
+
+
+class _ClientFinto:
+    def __init__(self, errore=None):
+        self.richieste = []
+        self.errore = errore
+
+    def get_stock_bars(self, req):
+        self.richieste.append((req.symbol_or_symbols, req.start))
+        if self.errore:
+            raise self.errore
+        # alpaca-py normalizza start a UTC naive (e lo invia come UTC)
+        inizio = pd.Timestamp(req.start).tz_localize("UTC")
+        barre = [_Barra(inizio + pd.Timedelta(minutes=m), 100.0 + m * 0.01) for m in range(0, 24 * 60, 1)]
+
+        class _R:
+            data = {req.symbol_or_symbols: barre}
+        return _R()
+
+
+_ORA = datetime(2026, 9, 24, tzinfo=timezone.utc)
+
+
+def test_il_loader_scarica_una_volta_per_simbolo_e_giorno():
+    from scripts.event_study_h_a_610 import CaricatoreBarreAlpaca
+
+    client = _ClientFinto()
+    loader = CaricatoreBarreAlpaca(client, ora=_ORA)
+    t = datetime(2024, 3, 5, 15, 0, tzinfo=timezone.utc)
+
+    a = loader("AAPL", t - pd.Timedelta(minutes=30), t + pd.Timedelta(minutes=6))
+    loader("AAPL", t + pd.Timedelta(hours=2), t + pd.Timedelta(hours=2, minutes=36))
+
+    assert len(client.richieste) == 1
+    assert len(a) == 36
+    assert a.index.min() >= t - pd.Timedelta(minutes=30)
+    assert a.index.max() < t + pd.Timedelta(minutes=6)
+
+
+def test_un_fetch_fallito_ferma_la_misura():
+    from scripts.event_study_h_a_610 import CaricatoreBarreAlpaca, MisuraAbortita
+
+    loader = CaricatoreBarreAlpaca(
+        _ClientFinto(errore=RuntimeError("subscription does not permit querying recent SIP data")),
+        ora=_ORA,
+    )
+    t = datetime(2024, 3, 5, 15, 0, tzinfo=timezone.utc)
+    with pytest.raises(MisuraAbortita, match="AAPL"):
+        loader("AAPL", t, t + pd.Timedelta(minutes=6))
+
+
+def test_una_finestra_oltre_l_embargo_ferma_la_misura_senza_chiedere():
+    from scripts.event_study_h_a_610 import CaricatoreBarreAlpaca, MisuraAbortita
+
+    client = _ClientFinto()
+    loader = CaricatoreBarreAlpaca(client, ora=_ORA)
+    t = _ORA - pd.Timedelta(days=1)
+    with pytest.raises(MisuraAbortita, match="embargo"):
+        loader("AAPL", t, t + pd.Timedelta(minutes=6))
+    assert client.richieste == []
+
+
+def test_una_finestra_a_cavallo_di_mezzanotte_new_york_unisce_i_due_giorni(tmp_path):
+    from scripts.event_study_h_a_610 import CaricatoreBarreAlpaca
+
+    client = _ClientFinto()
+    loader = CaricatoreBarreAlpaca(client, cache_dir=tmp_path, ora=_ORA)
+    # 00:10 ET del 6 marzo = 05:10 UTC: il fondo parte il 5 marzo ET.
+    t = datetime(2024, 3, 6, 5, 10, tzinfo=timezone.utc)
+    serie = loader("AAPL", t - pd.Timedelta(minutes=30), t + pd.Timedelta(minutes=6))
+
+    assert len(client.richieste) == 2
+    assert len(serie) == 36
+    # la cache su disco evita di riscaricare in un nuovo run
+    secondo = CaricatoreBarreAlpaca(_ClientFinto(errore=AssertionError("non deve chiedere")),
+                                    cache_dir=tmp_path, ora=_ORA)
+    assert len(secondo("AAPL", t - pd.Timedelta(minutes=30), t + pd.Timedelta(minutes=6))) == 36

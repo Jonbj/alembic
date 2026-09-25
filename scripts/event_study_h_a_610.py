@@ -339,6 +339,99 @@ def fetch_minute_bars(
     return loader(symbol, start, end)
 
 
+class MisuraAbortita(RuntimeError):
+    """Fetch fallito o finestra nell'embargo: la misura si ferma, non si riduce."""
+
+
+# Prereg §1.1: Alpaca rifiuta l'intera richiesta SIP se tocca il dato recente, e
+# nel pilota questo ha tolto proprio i simboli piu' liquidi. Qui l'archivio e'
+# 2024-2025, ma il vincolo resta scritto: nessuna finestra oltre now - 3 giorni.
+GIORNI_EMBARGO = 3
+
+
+class CaricatoreBarreAlpaca:
+    """Loader di barre al minuto SIP per ``fetch_minute_bars``, fail-closed.
+
+    Scarica una volta per (simbolo, giorno New York) l'intera giornata, estesa
+    compresa, e la tiene in memoria e, se richiesto, su disco: gli articoli
+    dello stesso titolo nello stesso giorno non rifanno la richiesta. Qualunque
+    errore del fetch solleva ``MisuraAbortita``: un simbolo che cade in silenzio
+    seleziona il campione a posteriori (prereg §1.1). Un giorno senza barre e'
+    invece un dato (niente scambi), non un errore: il rapporto resta None e
+    finisce fra i mancanti dell'artefatto.
+    """
+
+    def __init__(self, client, cache_dir: Path | None = None, ora: datetime | None = None):
+        self._client = client
+        self._cache_dir = Path(cache_dir) if cache_dir else None
+        self._memoria: dict[tuple[str, str], pd.Series] = {}
+        self._taglio = (ora or datetime.now(timezone.utc)) - pd.Timedelta(days=GIORNI_EMBARGO)
+        self.richieste = 0
+
+    def __call__(self, symbol: str, start: datetime, end: datetime) -> pd.Series:
+        if end > self._taglio:
+            raise MisuraAbortita(
+                f"finestra {symbol} {end.isoformat()} oltre il taglio d'embargo "
+                f"{self._taglio.isoformat()}"
+            )
+        giorni = sorted({start.astimezone(ET).date(), end.astimezone(ET).date()})
+        pezzi = [self._giornata(symbol, g.isoformat()) for g in giorni]
+        serie = pd.concat([p for p in pezzi if not p.empty]) if any(
+            not p.empty for p in pezzi
+        ) else pd.Series(dtype=float)
+        if serie.empty:
+            return serie
+        serie = serie[~serie.index.duplicated()].sort_index()
+        return serie[(serie.index >= start) & (serie.index < end)]
+
+    def _giornata(self, symbol: str, giorno: str) -> pd.Series:
+        chiave = (symbol, giorno)
+        if chiave in self._memoria:
+            return self._memoria[chiave]
+        percorso = self._cache_dir / symbol / f"{giorno}.csv" if self._cache_dir else None
+        if percorso is not None and percorso.exists():
+            tabella = pd.read_csv(percorso)
+            serie = pd.Series(
+                tabella["close"].to_numpy(dtype=float),
+                index=pd.to_datetime(tabella["timestamp"], utc=True),
+            )
+        else:
+            serie = self._scarica(symbol, giorno)
+            if percorso is not None:
+                percorso.parent.mkdir(parents=True, exist_ok=True)
+                pd.DataFrame({"timestamp": serie.index.astype(str), "close": serie.to_numpy()}).to_csv(
+                    percorso, index=False
+                )
+        self._memoria[chiave] = serie
+        return serie
+
+    def _scarica(self, symbol: str, giorno: str) -> pd.Series:
+        from alpaca.data.enums import Adjustment, DataFeed
+        from alpaca.data.requests import StockBarsRequest
+        from alpaca.data.timeframe import TimeFrame
+
+        inizio = pd.Timestamp(giorno, tz=ET)
+        self.richieste += 1
+        try:
+            risposta = self._client.get_stock_bars(StockBarsRequest(
+                symbol_or_symbols=symbol,
+                timeframe=TimeFrame.Minute,
+                start=inizio.to_pydatetime(),
+                end=(inizio + pd.Timedelta(days=1)).to_pydatetime(),
+                feed=DataFeed.SIP,
+                adjustment=Adjustment.RAW,
+            ))
+        except Exception as exc:
+            raise MisuraAbortita(f"barre al minuto {symbol} {giorno}: {exc}") from exc
+        barre = (getattr(risposta, "data", None) or {}).get(symbol) or []
+        if not barre:
+            return pd.Series(dtype=float)
+        return pd.Series(
+            [float(b.close) for b in barre],
+            index=pd.DatetimeIndex([pd.Timestamp(b.timestamp).tz_convert("UTC") for b in barre]),
+        )
+
+
 # ---------- Artefatto ----------
 
 
@@ -467,6 +560,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", required=True, type=Path,
                         help="Directory di destinazione degli artefatti JSON")
     parser.add_argument("--anno", choices=["2024", "2025", "both"], default="both")
+    parser.add_argument("--cache-barre", type=Path, default=None,
+                        help="Directory di cache delle barre al minuto (una CSV per simbolo-giorno)")
+    parser.add_argument("--senza-barre", action="store_true",
+                        help="Prova a secco: nessun fetch, tutti i rapporti None e INSUFFICIENT_N")
     args = parser.parse_args(argv)
 
     archivio, righe_malformate = leggi_archivio(args.archivio)
@@ -475,12 +572,18 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     per_anno = articoli_per_anno(archivio)
 
-    # Loader di default: niente fetch (seam richiede iniezione esplicita per
-    # la produzione). Lo script CLI puro pubblica l'esito della pipeline
-    # di classificazione ma non il rapporto di volatilita', che richiede
-    # barre minute.
-    def loader_vuoto(symbol: str, start: datetime, end: datetime) -> pd.Series:
-        return pd.Series(dtype=float)
+    if args.senza_barre:
+        def loader(symbol: str, start: datetime, end: datetime) -> pd.Series:
+            return pd.Series(dtype=float)
+    else:
+        import os
+
+        from alpaca.data.historical import StockHistoricalDataClient
+
+        loader = CaricatoreBarreAlpaca(
+            StockHistoricalDataClient(os.environ["ALPACA_API_KEY"], os.environ["ALPACA_SECRET_KEY"]),
+            cache_dir=args.cache_barre,
+        )
 
     anni = ["2024", "2025"] if args.anno == "both" else [args.anno]
     for anno in anni:
@@ -490,7 +593,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         for escludi in (False, True):
             suffisso = "_no_selezionati" if escludi else ""
-            risultato = _esegui_anno(anno, articoli_anno, loader_vuoto, escludi_selezionati=escludi)
+            risultato = _esegui_anno(anno, articoli_anno, loader, escludi_selezionati=escludi)
             risultato["righe_archivio_malformate"] = righe_malformate
             out_path = args.out / f"h_a_{anno}{suffisso}.json"
             scrivi_artefatto(out_path, risultato)
