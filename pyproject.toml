@@ -22,7 +22,7 @@ dependencies = [
     "feedparser>=6.0",
     "bleach>=6.1",
     "transformers>=4.40",
-    "torch>=2.2",
+    "torch==2.6.0",
     "numpy>=1.26",
     "scipy>=1.13",
     "yfinance>=0.2.38",

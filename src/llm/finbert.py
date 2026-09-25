@@ -12,8 +12,10 @@ Weights are stored as int8; activations stay fp32. Result: ~50% RAM reduction
 3-class classification — acceptable for a fallback role.
 """
 
+import json
 import logging
 import math
+import sys
 import threading
 from dataclasses import dataclass
 from datetime import date
@@ -25,6 +27,34 @@ if TYPE_CHECKING:
     from src.models.news import NewsItem
 
 logger = logging.getLogger(__name__)
+
+FINBERT_MODEL = "ProsusAI/finbert"
+FINBERT_REVISION = "4556d13015211d73dccd3fdd39d39232506f3e43"
+
+
+def finbert_runtime_provenance(*, torch_module=None, transformers_version: str | None = None) -> dict[str, object]:
+    """Return the immutable model and runtime identity used by FinBERT."""
+    if torch_module is None:
+        import torch as torch_module
+    if transformers_version is None:
+        import transformers
+
+        transformers_version = transformers.__version__
+
+    cuda_available = torch_module.cuda.is_available()
+    cuda_devices = torch_module.cuda.device_count() if cuda_available else 0
+    return {
+        "model": FINBERT_MODEL,
+        "revision": FINBERT_REVISION,
+        "torch": torch_module.__version__,
+        "transformers": transformers_version,
+        "device": "cuda:0" if cuda_available else "cpu",
+        "cuda_devices": cuda_devices,
+    }
+
+
+def _log_runtime_provenance(provenance: dict[str, object]) -> None:
+    logger.info("FinBERT runtime provenance: %s", json.dumps(provenance, sort_keys=True))
 
 
 @dataclass
@@ -73,7 +103,7 @@ class FinBERTClient:
     After loading, dynamic int8 quantization is applied to Linear layers.
     """
 
-    _MODEL_NAME = "ProsusAI/finbert"
+    _MODEL_NAME = FINBERT_MODEL
     _MAX_TOKENS = 512  # FinBERT context window in tokens
 
     def __init__(self) -> None:
@@ -97,21 +127,29 @@ class FinBERTClient:
                     import torch.nn as nn
                     from transformers import pipeline
 
+                    provenance = finbert_runtime_provenance(torch_module=torch)
+                    device = 0 if provenance["device"] == "cuda:0" else -1
                     self._pipe = pipeline(
                         "text-classification",
                         model=self._MODEL_NAME,
+                        tokenizer=self._MODEL_NAME,
+                        revision=FINBERT_REVISION,
                         top_k=None,  # return all class scores (replaces deprecated return_all_scores=True)
-                        device="cpu",  # explicit string avoids meta-device fallback in newer transformers
+                        device=device,
                     )
-                    # Dynamic int8 quantization: weights → int8, activations stay fp32.
-                    # Applied inplace to avoid a second copy in RAM during transition.
-                    torch.quantization.quantize_dynamic(
-                        self._pipe.model,
-                        {nn.Linear},
-                        dtype=torch.qint8,
-                        inplace=True,
-                    )
-                    logger.info("FinBERT loaded with int8 dynamic quantization")
+                    if device == -1:
+                        # Dynamic int8 quantization is CPU-only. It keeps the fallback
+                        # usable when no NVIDIA runtime is present.
+                        torch.quantization.quantize_dynamic(
+                            self._pipe.model,
+                            {nn.Linear},
+                            dtype=torch.qint8,
+                            inplace=True,
+                        )
+                        logger.info("FinBERT loaded on CPU with int8 dynamic quantization")
+                    else:
+                        logger.info("FinBERT loaded on CUDA without CPU quantization")
+                    _log_runtime_provenance(provenance)
         return self._pipe
 
     def analyze(self, text: str) -> FinBERTResult:
@@ -179,3 +217,16 @@ class FinBERTClient:
                     (article.timestamp.date(), result.polarity * result.confidence)
                 )
         return results
+
+
+def main() -> int:
+    """Print FinBERT runtime evidence; optionally require CUDA for container health."""
+    provenance = finbert_runtime_provenance()
+    print(json.dumps(provenance, sort_keys=True))
+    if "--require-cuda" in sys.argv and provenance["cuda_devices"] == 0:
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

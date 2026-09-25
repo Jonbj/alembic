@@ -1,16 +1,36 @@
 """Tests for FinBERT fallback with entropic confidence mapping."""
 
+from pathlib import Path
+
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
-from src.llm.finbert import FinBERTClient, FinBERTResult, entropic_confidence
+from src.llm.finbert import (
+    FINBERT_REVISION,
+    FinBERTClient,
+    FinBERTResult,
+    entropic_confidence,
+    finbert_runtime_provenance,
+)
 from src.models.news import NewsItem
 
 
 def _make_article(title: str, ts: datetime | None = None) -> NewsItem:
     ts = ts or datetime.now(timezone.utc)
     return NewsItem(id="test", source="gdelt", timestamp=ts, title=title, body=title)
+
+
+def test_worker_inference_declares_nvidia_gpu_and_cuda_healthcheck():
+    compose = Path("docker-compose.yml").read_text()
+
+    worker_inference = compose.split("  worker-inference:", 1)[1].split(
+        "  worker-news-stream:", 1
+    )[0]
+    assert "driver: nvidia" in worker_inference
+    assert "capabilities: [gpu]" in worker_inference
+    assert "python -m src.llm.finbert && exec" in worker_inference
+    assert "python -m src.llm.finbert --require-cuda" in worker_inference
 
 
 class TestEntropicConfidence:
@@ -58,6 +78,36 @@ class TestEntropicConfidence:
 
 class TestFinBERTClient:
     """Tests for the FinBERTClient class."""
+
+    def test_uses_immutable_model_revision(self):
+        assert FINBERT_REVISION == "4556d13015211d73dccd3fdd39d39232506f3e43"
+
+    def test_runtime_provenance_is_cpu_safe_without_cuda(self):
+        class FakeCuda:
+            @staticmethod
+            def is_available():
+                return False
+
+            @staticmethod
+            def device_count():
+                return 0
+
+        class FakeTorch:
+            __version__ = "2.6.0+cu124"
+            cuda = FakeCuda()
+
+        provenance = finbert_runtime_provenance(
+            torch_module=FakeTorch(), transformers_version="4.48.3"
+        )
+
+        assert provenance == {
+            "model": "ProsusAI/finbert",
+            "revision": FINBERT_REVISION,
+            "torch": "2.6.0+cu124",
+            "transformers": "4.48.3",
+            "device": "cpu",
+            "cuda_devices": 0,
+        }
 
     def _make_mock_pipeline(self, scores):
         """Helper to create a mock pipeline that returns the given scores."""
@@ -166,6 +216,8 @@ class TestFinBERTClient:
         with (
             patch("transformers.pipeline", return_value=mock_pipe),
             patch("torch.quantization.quantize_dynamic") as mock_quantize,
+            # Pin the CPU contract: the real probe on a CUDA host would skip quantization.
+            patch("torch.cuda.is_available", return_value=False),
         ):
             client = FinBERTClient()
             client._get_pipeline()
@@ -183,12 +235,31 @@ class TestFinBERTClient:
         with (
             patch("transformers.pipeline", return_value=mock_pipe),
             patch("torch.quantization.quantize_dynamic") as mock_quantize,
+            # Pin the CPU contract: the real probe on a CUDA host would skip quantization.
+            patch("torch.cuda.is_available", return_value=False),
         ):
             client = FinBERTClient()
             client._get_pipeline()
             client._get_pipeline()  # second call — must reuse cached pipeline
 
         mock_quantize.assert_called_once()
+
+    def test_no_quantization_on_cuda(self):
+        """On CUDA the pipeline targets device 0 and skips CPU-only int8 quantization."""
+        mock_pipe = MagicMock()
+        mock_pipe.model = MagicMock()
+
+        with (
+            patch("transformers.pipeline", return_value=mock_pipe) as mock_factory,
+            patch("torch.quantization.quantize_dynamic") as mock_quantize,
+            patch("torch.cuda.is_available", return_value=True),
+            patch("torch.cuda.device_count", return_value=1),
+        ):
+            client = FinBERTClient()
+            client._get_pipeline()
+
+        mock_quantize.assert_not_called()
+        assert mock_factory.call_args.kwargs.get("device") == 0
 
     def test_result_type(self):
         """Result should be FinBERTResult dataclass."""
